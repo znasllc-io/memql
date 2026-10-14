@@ -52,6 +52,7 @@ kind: Kustomization
 namespace: memql
 
 resources:
+  - storage-health-rbac.yaml
   - namespace.yaml
   # Shared Postgres connection-pool bounds (MAX_OPEN_CONNS / MAX_IDLE_CONNS)
   # consumed via envFrom: configMapRef on every DB-connecting node, so the

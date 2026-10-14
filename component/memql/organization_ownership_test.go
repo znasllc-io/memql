@@ -2,6 +2,7 @@ package memql
 
 import (
 	"context"
+	"errors"
 	"strings"
 	"testing"
 
@@ -114,5 +115,58 @@ func TestOrganizationTargetBindingDoesNotChangeUserAuthoredMutationContracts(t *
 	fn := &Function{Name: "mySiteLifecycle", FunctionKind: "mutation", BoundConcept: "v1:platform:site", RequiresCapability: CapabilityRequirement{Verb: "execute", Resource: "app:deployables/publish"}}
 	if concept, argument := organizationCapabilityTarget(fn); concept != "" || argument != "" {
 		t.Fatal("custom DSL mutation acquired a product-specific argument contract")
+	}
+}
+
+// organizationApp is the app resource a member needs in an organization to read
+// a concept, and the Email app answers for every campaigns concept (journeys,
+// layouts and the rest follow the namespace, not a list), so a new concept in
+// that namespace is reachable through app:email with no change here. A concept
+// outside both namespaces names no app, and that is "" -- the gate then asks
+// nothing app-shaped of it.
+func TestOrganizationAppNamesTheAppAConceptsNamespaceBelongsTo(t *testing.T) {
+	for _, tc := range []struct{ concept, want string }{
+		{"v1:campaigns:journey", "app:email"},
+		{"v1:campaigns:campaign", "app:email"},
+		{"v1:campaigns:emailLayout", "app:email"},
+		{"v1:campaigns:", "app:email"},
+		{"v1:platform:site", "app:deployables"},
+		{"v1:platform:package", "app:deployables"},
+		{"v1:identity:user", ""},
+		{"v1:cluster:node", ""},
+		{"", ""},
+		// The namespace is the whole word between the colons, and the version is part of it.
+		{"v1:campaignsx:thing", ""},
+		{"v1:platformer:thing", ""},
+		{"v2:campaigns:journey", ""},
+		{"campaigns:journey", ""},
+		{"app:email", ""},
+	} {
+		if got := organizationApp(tc.concept); got != tc.want {
+			t.Errorf("organizationApp(%q) = %q, want %q", tc.concept, got, tc.want)
+		}
+	}
+}
+
+// A write to a row that exists in an organization the caller may not change is
+// refused with an exported value, so that a caller can say it in words of its own
+// (a template id another organization holds) without matching the text, and its
+// words are what they always were for anyone who reads them.
+func TestAWriteToARowInAnotherOrganizationIsTheExportedRefusal(t *testing.T) {
+	engine := &MemQLEngine{}
+	ctx := accountCtx(t, "member", accountScopeWith("acme"))
+	prior := map[string]any{"accountId": "beta"}
+
+	err := engine.validateOrganizationTransfer(ctx, "v1:campaigns:template", "t1", prior, map[string]any{"accountId": "acme"})
+	if !errors.Is(err, ErrOrganizationRowForbidden) {
+		t.Fatalf("a member of acme writing over beta's row: %v, want ErrOrganizationRowForbidden", err)
+	}
+	const words = "organization_forbidden: you cannot change data in the existing organization"
+	if err.Error() != words {
+		t.Errorf("the refusal says %q, want %q", err.Error(), words)
+	}
+	// A concept that is not organization-owned is not judged by it.
+	if err := engine.validateOrganizationTransfer(ctx, "v1:common:agent", "a1", prior, map[string]any{"accountId": "acme"}); err != nil {
+		t.Errorf("a concept no organization owns was refused: %v", err)
 	}
 }

@@ -1019,6 +1019,17 @@ func TrackingPaths() []string {
 	return append(pathsWithBase("/t/o/"), pathsWithBase("/t/c/")...)
 }
 
+// EmailLinkPaths declares the owner-approved HTTP exceptions recorded on
+// 2026-10-11 in the email-layouts-automations design, section 4.4. The caller is
+// a recipient's browser following an email link and cannot speak gRPC. GET
+// renders; POST acts, because mail scanners prefetch GETs. These are exact
+// paths: the sealed capability is in the query. The literals must agree with
+// campaigns.ConfirmPath, PreferencesPath and ViewPath.
+func EmailLinkPaths() []string {
+	paths := append(pathsWithBase("/email/confirm"), pathsWithBase("/email/preferences")...)
+	return append(paths, pathsWithBase("/email/view")...)
+}
+
 // SitesBundlePaths returns the path prefix the atomic bundle-publish
 // endpoint mounts under (POST /sites/{id}/bundles, memql#3713), served by
 // SiteBundleHandler on the bff.
@@ -1257,3 +1268,7 @@ func corsMiddleware(allowedOrigins []string, next http.Handler, router http.Hand
 		next.ServeHTTP(w, r)
 	})
 }
+
+// AzureEmailFeedbackPaths is the approved provider HTTP exception (#6037).
+// The handler authenticates Event Grid and correlates its original send receipt.
+func AzureEmailFeedbackPaths() []string { return pathsWithBase("/email/events/azure") }

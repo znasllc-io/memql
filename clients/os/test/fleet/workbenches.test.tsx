@@ -151,6 +151,26 @@ describe("the workbenches section", () => {
     expect(screen.queryByText("starting")).toBeNull();
   });
 
+  it.each([
+    ["the earlier version read first", ["starting", "healthy"]],
+    ["the later version read first", ["healthy", "starting"]],
+  ])("keeps the later version as an instant, not as a string: %s", async (_order, readOrder) => {
+    // The engine trims the fraction's trailing zeros, so as a string `.3251Z`
+    // is greater than `.325101Z` -- and it is the earlier instant.
+    const versions: Record<string, { health: string; createdAt: string }> = {
+      starting: { health: "starting", createdAt: "2026-08-02T00:00:00.3251Z" },
+      healthy: { health: "healthy", createdAt: "2026-08-02T00:00:00.325101Z" },
+    };
+    mount(
+      fakeConnection({
+        myWorkspaces: [],
+        clusterNodes: readOrder.map((key) => ({ id: "workbench-0", nodeType: "workbench", ...versions[key] })),
+      }),
+    );
+    await screen.findByText("healthy");
+    expect(screen.queryByText("starting")).toBeNull();
+  });
+
   it("subscribes to BOTH feeds -- neither is polled", async () => {
     const connection = fakeConnection({ myWorkspaces: [LIVE_A], clusterNodes: [] });
     mount(connection);

@@ -43,6 +43,22 @@ Greetings, supplied information and general-knowledge answers remain "quick".
 
 `requiresFile` is REQUIRED and must be a JSON boolean on every answer, including trivial goals. Set it true when the requested deliverable must be saved as a file (for example a Markdown file in the Library, a PDF, a spreadsheet, or a downloadable document). Set it false when replying with the content itself fully satisfies the goal. Judge the requested outcome, not mentions of files used as sources. A true answer makes final delivery verify that this run actually saved a ready file; a prose confirmation alone cannot satisfy it.
 
+This flag describes a final Library/downloadable artifact, not every action
+that touches a file. Editing a repository, running a command, changing a remote
+record or publishing a change is execution through tools: declare the relevant
+section effects and set requiresFile false unless a separate saved artifact was
+also requested. For mixed requests, keep both the tool effects AND requiresFile
+true; a report does not replace the requested actions. Do not invent a report
+filename or document deliverable just because the work includes source files.
+
+A URL, path or record identifier is a reference to evidence, not its contents.
+When the request depends on unread material, first plan a bounded tool read of
+that material and applicable instructions. Later sections consume the observed
+requirements and receipts by their named outputs. Keep implementation choices
+conditional on those observations: do not guess the issue, diagnosis, API,
+file layout or required fix before it has been read. Preserve explicit limits
+on the computer, tools, models and delegation in the section instructions.
+
 `requiresResearch` decides whether a file needs an evidence-gathering step BEFORE creation. Set it true only when required source facts must be retrieved, checked or researched beyond the supplied request/context. Set it false for self-contained creation or formatting of supplied content, even when workload is lookup, research or project. A PDF, default style, source ZIP, rendering or packaging does not itself require research: the native Materializer supplies those. This decision is separate from estimated duration and file format. Return a JSON boolean on every answer.
 
 When `requiresFile` is true, `fileName` and `fileFormat` are REQUIRED. Preserve the requested filename and format when specified; otherwise choose a concise descriptive name and the appropriate supported format for the requested deliverable. The only supported formats are markdown, html, txt, csv, json, docx, and pdf. Do not silently substitute a supported format when the user explicitly requests an unsupported one: return that requested format so compilation can refuse it. Omit both fields when `requiresFile` is false. File delivery calls the native Materializer directly with these validated choices; it does not need an agent turn to select a file tool.
@@ -186,6 +202,7 @@ Two shapes qualify:
   - "a profile of each of these 6 vendors" -> sectionable: true; one section per vendor.
 - ORDERED sections -- a few clear steps where a later section reads what an earlier one produced. The later section names that output in its `inputs`, spelled exactly as the earlier section spelled it in its `outputs`.
   - "summarise last month's invoices and draft an email to finance with the totals" -> sectionable: true; section 1 "summarise the month's invoices" has outputs ["invoiceSummary"]; section 2 "draft the email to finance" has inputs ["invoiceSummary"].
+  - Read an external request, make the requested change, then verify and publish it: the read returns observed requirements and applicable instructions; the change consumes them and declares its effects; verification and publication consume the original requirements and applicable instructions alongside the change receipts. Do not preselect the implementation while classifying. Add a final saved report only when the person asks for one.
 
 Every section entry carries:
 - `label`: a short name for the section.
@@ -199,6 +216,30 @@ Every section entry carries:
 - `postcondition`: how the END of the section is checked -- "the report file exists in the Library", "a v1:todos:todo with that title exists". REQUIRED whenever `effects` is not empty; `""` for a section with no effects, whose outputs are its end.
 
 THE BOUNDARY RULE: every section must end at a point that can be checked. A section that changes something says how its end is checked (a `postcondition`), and a section that changes nothing names what it produces (at least one `output`). A decomposition with a section that would stop in the middle of a change -- `effects` without a `postcondition` -- is refused, and the goal is then planned as a whole instead, which costs more.
+
+For a read or prerequisite section, define an observable handoff: supported
+requirements, applicable constraints, source references and explicit gaps needed
+by the next section. "Understood" is not a checkable output. Bound the section
+to those requirements, not a survey of every linked source. Preserve required
+instruction coverage and identify any missing passage; later implementation or
+verification belongs to its own section. A drafting section still returns its
+complete requested content, never just a summary or a progress note.
+
+Earlier outputs reach a section only through named inputs; an earlier step's
+presence in the plan does not supply its contents. Name the original requirements and applicable
+instructions as inputs to every section that must obey or check them, alongside
+the relevant result receipts. Do not replace these criteria with a previous
+section's claim that its work is done.
+
+Assign every requested acceptance criterion to a section. When criteria await
+a bounded prerequisite read, make later sections responsible for its applicable
+requirements instead of guessing them. State how each
+section checks its applicable criteria and hands off unmet criteria and later
+obligations with their source references. Keep later obligations separate from
+the current section's completion condition. When verification is required,
+creating required verification and running existing checks are different obligations;
+assign both when the request requires both. A passing check or a publication
+receipt alone does not establish that every requested criterion was satisfied.
 
 Set `sectionable: false` (the default) when:
 - the work cannot be divided into independently checkable outputs, even with explicit dependencies,

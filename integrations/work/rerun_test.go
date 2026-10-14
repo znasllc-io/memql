@@ -70,6 +70,7 @@ func TestARerunWritesTheRequestOnTheRunForTheAgent(t *testing.T) {
 	run := actRunRow(runStatusCancelled)
 	run["cancelRequested"] = true
 	run["errorCode"] = "run_cancelled"
+	run["humanResumeId"] = "previously-approved-permission"
 	eng.reply("workRunForOwner", run)
 
 	nodes, err := i.handleRerunStep(callerContext(actOwner), map[string]any{
@@ -106,6 +107,9 @@ func TestARerunWritesTheRequestOnTheRunForTheAgent(t *testing.T) {
 	}
 	if args["heartbeatAt"] != rfc(testNow) {
 		t.Errorf("heartbeatAt = %v, want the act's own time so the abandoned sweep measures silence from the re-run", args["heartbeatAt"])
+	}
+	if args["humanResumeId"] != "" {
+		t.Fatalf("new rerun retained the old answer claim: %v", args["humanResumeId"])
 	}
 	if got := args["staleSteps"]; !reflect.DeepEqual(got, []any{"draft", "publish"}) {
 		t.Errorf("staleSteps = %v, want the step and every step after it", got)

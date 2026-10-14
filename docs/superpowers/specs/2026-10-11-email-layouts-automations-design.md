@@ -104,14 +104,14 @@ A webview page, "New email":
 
 Action bar: state ("Choose a layout", "Ready to write", "Writing your email", "Couldn't write the email") and acts: **Start from the layout** (text act; blank email, no model) and **Write it** (primary; present once there is a description). Both create through the SDK `materialize` helper (`outputKind: "email_template"`, `layoutId`, `accountIds`, a `requestId` per click). While the Materializer works the page shows the skeleton of the chosen layout; Cancel stops it. The result opens in the email editor.
 
-`memql-file://<domain>/new/email?account=<id>&returnTo=email` opens this page from the OS (the three resource validators learn the `new` kind: `documents.ts`, `editors/browser/src/handoff.mjs`, `clients/os/src/items/editorPreference.ts`).
+`memql-file://<domain>/new-email/<bareAccountId>/New%20email` opens this page from the OS: a `new-email` resource kind with the organization as its id, so it fits the existing three-segment, query-free resource grammar that all three validators enforce (`documents.ts`, `editors/browser/src/handoff.mjs`, `clients/os/src/items/editorPreference.ts`). The editor resolves the email's organization before its first preview (from the template it was published as, its composition, or a single membership; otherwise it asks once on the page), so Publish never prompts.
 
 ### 2.2 The email editor (`*.email.json` custom editor)
 
 - **Design** (default): the rendered email at a desktop width with a Desktop/Mobile width toggle, beside an inspector. The inspector holds the email's subject and preheader, the outline of blocks (select, move up or down, add after, remove), and the selected block's fields (words, link, button label, picture: choose from Library, upload, or remove; colours from the theme). Clicking a block in the preview selects it. Theme colours and fonts sit in a "Theme" disclosure. Sample merge values sit in a "Preview with" disclosure and persist with the page state.
 - **Source**: the JSON in a text editor (the same buffer).
 - **Custom mode** documents open with the rendered HTML and the Source editor (no outline).
-- **Action bar**: state in words ("Draft", "Published to <organization>", "Unsaved changes", "Changes since publishing") and acts: **Save as layout** (text), **Publish** (primary). Publish asks for the organization only when the file has never been published, then calls `campaignSaveTemplate` with `action: publish`. The editor never opens a second tab.
+- **Action bar**: state in words ("Draft", "Published to <organization>", "Unsaved changes", "Changes since publishing") and acts: **Save as layout** (text), **Publish** (primary). Publish calls `campaignSaveTemplate` with `action: publish` for the organization the editor already resolved. The editor never opens a second tab.
 - Images go in through the existing upload path (`Documents.createFile`, allowed by sub-project 1's guard as an upload of bytes the person has).
 
 ## 3. The Email app

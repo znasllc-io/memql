@@ -156,29 +156,29 @@ afterEach(() => {
 
 describe("the launcher recovers when the effective set lands after the identity", () => {
   it("discovers an organization-authorized app and removes it when that permission is revoked", async () => {
-    const denied = [{ verb: "read", resource: "app:campaigns", effect: "deny" as const, source: "group" as const }];
+    const denied = [{ verb: "read", resource: "app:email", effect: "deny" as const, source: "group" as const }];
     const fake = fakeConnection([
       () => ({ ...effectiveRow("viewer"), entries: denied, organizationEntries: [
-        { accountId: "acme", verb: "read", resource: "app:campaigns", effect: "allow" },
+        { accountId: "acme", verb: "read", resource: "app:email", effect: "allow" },
         { accountId: "acme", verb: "read", resource: "data", effect: "allow" },
-        { accountId: "beta", verb: "read", resource: "app:campaigns", effect: "deny" },
+        { accountId: "beta", verb: "read", resource: "app:email", effect: "deny" },
       ] }),
       () => ({ ...effectiveRow("viewer"), entries: denied, organizationEntries: [
-        { accountId: "beta", verb: "read", resource: "app:campaigns", effect: "deny" },
+        { accountId: "beta", verb: "read", resource: "app:email", effect: "deny" },
       ] }),
     ]);
     h.connection = fake.connection;
     mountShell();
     await screen.findByRole("button", { name: "Launcher" });
-    expect(await launcherApps()).not.toContain("Campaigns");
+    expect(await launcherApps()).not.toContain("Email");
     await act(async () => fake.open());
     await waitFor(() => expect(fake.effectiveCalls()).toBe(1));
-    expect(await launcherApps()).toContain("Campaigns");
+    expect(await launcherApps()).toContain("Email");
     fake.rearm();
     fireEvent.focus(window);
     await act(async () => fake.open());
     await waitFor(() => expect(fake.effectiveCalls()).toBe(2));
-    expect(await launcherApps()).not.toContain("Campaigns");
+    expect(await launcherApps()).not.toContain("Email");
   });
 
   it("shows the gated app once the set loads, with no query typed", async () => {

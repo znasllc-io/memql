@@ -448,11 +448,11 @@ it('the Fleet window search focuses machine search without a duplicate app trigg
 });
 
 
-describe("installation Email app availability", () => {
-  it("removes the test inbox while keeping Campaigns available", async () => {
-    renderShell({ config: { ...CONFIG, emailAppEnabled: false } });
+describe("one Email app", () => {
+  it("lists Email in the launcher for every installation, and no Campaigns app", () => {
+    renderShell({ config: CONFIG });
     fireEvent.click(screen.getByRole("button", { name: "Launcher" }));
-    expect(screen.queryByRole("button", { name: appTileName("Email") })).toBeNull();
-    expect(screen.getByRole("button", { name: appTileName("Campaigns") })).toBeTruthy();
+    expect(screen.getByRole("button", { name: appTileName("Email") })).toBeTruthy();
+    expect(screen.queryByRole("button", { name: appTileName("Campaigns") })).toBeNull();
   });
 });

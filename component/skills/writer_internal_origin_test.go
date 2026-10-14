@@ -71,7 +71,7 @@ func TestEveryWriteStampsInternalOrigin(t *testing.T) {
 		t.Fatalf("Commit: %v", err)
 	}
 
-	// SetScripts, Propose's createSkillEdge, Commit's createSkillEdge and its
+	// SetScripts, Propose's proposeSkillEdge, Commit's proposeSkillEdge and its
 	// commitSkillEdge.
 	if len(engine.calls) != 4 {
 		t.Fatalf("calls = %d (%v), want 4 -- a write added to Writer and not driven here is the hole this test exists to close",
@@ -95,7 +95,7 @@ func TestTheWritesAreTheThreeServerOnlyConstructs(t *testing.T) {
 	}})
 
 	joined := strings.Join(engine.calls, "\n")
-	for _, want := range []string{"setSkillScripts(", "createSkillEdge(", "commitSkillEdge("} {
+	for _, want := range []string{"setSkillScripts(", "proposeSkillEdge(", "commitSkillEdge("} {
 		if !strings.Contains(joined, want) {
 			t.Fatalf("no call to %s; calls were:\n%s", want, joined)
 		}

@@ -15,6 +15,14 @@ import (
 // Only a typed information request becomes an Ask question. Failure recovery
 // and permission approvals keep their own action contracts.
 func askFeedbackProjection(row map[string]any) (*AskQuestion, *AskTurn) {
+	if row["decision"] == "answered" {
+		answer, _ := row["answer"].(map[string]any)
+		feedback, _ := answer["feedback"].(string)
+		if at, valid := askTimestamp(row["decidedAt"]); valid && strings.TrimSpace(feedback) != "" {
+			id := BareShortId(fmt.Sprint(row["id"]))
+			return nil, &AskTurn{ID: "guidance-" + id, ApprovalID: id, Prompt: "Guidance sent:\n" + feedback, State: "done", StartedAt: at, EndedAt: &at, AnswerOnly: true, Activity: []WorkEvent{}}
+		}
+	}
 	subject, _ := row["subject"].(map[string]any)
 	kind, _ := subject["kind"].(string)
 	if row["kind"] != "feedback" || (kind != "text" && kind != "choice" && kind != "multi") {
@@ -81,7 +89,11 @@ func (e *MemQLEngine) askWorkConversationBuiltin(ctx context.Context, args map[s
 	if err != nil || len(runs) != 1 {
 		return nil, fmt.Errorf("work is unavailable")
 	}
-	run := runs[0]
+	run, err := e.askOriginatingRun(ctx, runs[0])
+	if err != nil {
+		return nil, err
+	}
+	runID = stringArg(run, "id")
 	input, _ := run["input"].(map[string]any)
 	conversation, _ := input["conversation"].(map[string]any)
 	if id, _ := conversation["id"].(string); id != "" {
@@ -139,4 +151,30 @@ func (e *MemQLEngine) askWorkConversationBuiltin(ctx context.Context, args map[s
 	}
 	raw, err = json.Marshal(map[string]any{"id": BareShortId(id), "title": title})
 	return []memorynodes.MemoryNode{{ID: id, Payload: raw}}, err
+}
+
+// Delegated sessions retain parentRunId but need not copy their parent's input.
+// Every hop is a fresh owner-scoped read; malformed or unavailable ancestry
+// refuses rather than creating an unrelated conversation or crossing owners.
+func (e *MemQLEngine) askOriginatingRun(ctx context.Context, run map[string]any) (map[string]any, error) {
+	ctx = ContextWithFreshRead(ctx)
+	seen := map[string]bool{}
+	for depth := 0; depth < 32; depth++ {
+		id := BareShortId(stringArg(run, "id"))
+		if id == "" || seen[id] {
+			return nil, fmt.Errorf("work conversation ancestry is unavailable")
+		}
+		seen[id] = true
+		input, _ := run["input"].(map[string]any)
+		conversation, _ := input["conversation"].(map[string]any)
+		if stringArg(conversation, "id") != "" || stringArg(run, "parentRunId") == "" {
+			return run, nil
+		}
+		rows, err := e.workRows(ctx, "workRunForOwner", stringArg(run, "parentRunId"))
+		if err != nil || len(rows) != 1 {
+			return nil, fmt.Errorf("work conversation ancestry is unavailable")
+		}
+		run = rows[0]
+	}
+	return nil, fmt.Errorf("work conversation ancestry exceeds its limit")
 }

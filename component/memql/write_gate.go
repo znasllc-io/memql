@@ -346,8 +346,19 @@ func gateWaitError(err error, waits ...context.Context) error {
 	}
 	var ended error
 	for _, ctx := range waits {
-		if ctx != nil && ctx.Err() != nil {
+		if ctx == nil {
+			continue
+		}
+		if ctx.Err() != nil {
 			ended = ctx.Err()
+			break
+		}
+		// pgdriver applies this deadline to the socket too. Its timer can
+		// report an i/o timeout before the context timer publishes Err().
+		// The wait has still ended; a future deadline does not turn an
+		// unrelated network timeout into a busy gate.
+		if deadline, ok := ctx.Deadline(); ok && !time.Now().Before(deadline) {
+			ended = context.DeadlineExceeded
 			break
 		}
 	}

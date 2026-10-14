@@ -124,7 +124,7 @@ func (a *App) wireWorkRunDispatcher() {
 func (d *workRunDispatcher) Dispatch(ctx context.Context, req workspine.DispatchRequest) {
 	log := d.app.Logger
 
-	journal, err := automations.LoadRunJournal(ctx, d.app.engine, req.RunId)
+	journal, err := automations.LoadRunJournal(memql.ContextWithFreshRead(ctx), d.app.engine, req.RunId)
 	if err != nil {
 		if errors.Is(err, automations.ErrRunNotFound) {
 			// Deleted between the event and here. Nothing to do.
@@ -186,6 +186,10 @@ func (d *workRunDispatcher) Dispatch(ctx context.Context, req workspine.Dispatch
 
 	auto := template.automation
 	executor := d.exec
+	if journal.TriggeredBy == "approval-discussion" {
+		executor = automations.NewExecutor(automations.ExecutorOptions{Logger: log, Engine: d.app.engine, EventBus: d.app.eventBus, StepRegistry: d.app.stepRegistry, TerminalFailures: true})
+		defer executor.Close()
+	}
 	if template.registry != nil {
 		ctx = memql.ContextWithAuthoredExecution(ctx, journal.OwnerUserId, template.registry)
 		ctx = context.WithValue(ctx, workTemplateStackKey{}, []string{auto.Name})

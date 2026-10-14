@@ -80,16 +80,27 @@ func provingScenario(t *testing.T, id string) scenario.Scenario {
 	return scenario.Scenario{}
 }
 
+func TestProvingHarnessDB(t *testing.T) {
+	e, db := provingHarnessEngine(t)
+	if e == nil {
+		return
+	}
+	// The refusal precedes any lifecycle registration. Each case constructs its
+	// own lifecycle and pool; only the loaded DSL and SQL handle are shared.
+	t.Run("TestTheProvingHarnessRefusesToOpenWithoutAGatePool", func(t *testing.T) {
+		testTheProvingHarnessRefusesToOpenWithoutAGatePool(t, e, db)
+	})
+	t.Run("TestTheProvingHarnessRunsALifecycleThatTakesADecisionGate", func(t *testing.T) {
+		testTheProvingHarnessRunsALifecycleThatTakesADecisionGate(t, e, db)
+	})
+}
+
 // TestTheProvingHarnessRunsALifecycleThatTakesADecisionGate: a person disliking
 // a step and having it run again takes the goal's decision gate (rerunStep,
 // "goal-lifecycle-"); a person approving a promotion takes the approval's
 // (decideApproval). Both lifecycles run to a verdict through the harness, the
 // way CI's proving lane runs them.
-func TestTheProvingHarnessRunsALifecycleThatTakesADecisionGate(t *testing.T) {
-	e, db := provingHarnessEngine(t)
-	if e == nil {
-		return
-	}
+func testTheProvingHarnessRunsALifecycleThatTakesADecisionGate(t *testing.T, e *memql.MemQLEngine, db *bun.DB) {
 	// The pool cmd/memql-bench opens beside its engine, as a node's database does.
 	gates, err := database.NewGatePool(dbtest.DSN(), 0)
 	if err != nil {
@@ -122,11 +133,7 @@ func TestTheProvingHarnessRunsALifecycleThatTakesADecisionGate(t *testing.T) {
 // pool says so when a lifecycle opens -- before it writes the ladder's values --
 // naming the wiring it lacks, instead of failing at the lifecycle's first
 // decision with "shared write coordination is unavailable".
-func TestTheProvingHarnessRefusesToOpenWithoutAGatePool(t *testing.T) {
-	e, db := provingHarnessEngine(t)
-	if e == nil {
-		return
-	}
+func testTheProvingHarnessRefusesToOpenWithoutAGatePool(t *testing.T, e *memql.MemQLEngine, db *bun.DB) {
 	quiet := slog.New(slog.NewTextHandler(io.Discard, nil))
 	_, err := proving.NewEngineLifecycle(e, db, nil, quiet).Open(context.Background(), "proving-no-gates", work.LadderPolicy{})
 	if err == nil || !strings.Contains(err.Error(), "NewEngineLifecycle") || !strings.Contains(err.Error(), "database.NewGatePool") {

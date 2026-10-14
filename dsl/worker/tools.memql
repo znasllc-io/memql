@@ -1,6 +1,10 @@
 /// Read this person's eligible workers across all cluster replicas.
 /// computerUseOnline means desktop control with a display is available;
 /// headlessOnline means host tools are available. Neither grants permission.
+/// machines lists names, exact requireLabels selectors and scoped-permission
+/// support, platform and the worker account's homeDirectory when reported.
+/// Missing homeDirectory means unknown; ask for the path or update Cockpit.
+/// Ask the person to choose when the intended target is unclear.
 @handler(type="function", name="agentworkerStatus")
 @requiresAgentRole("assistant", "specialist")
 tool workerStatus {
@@ -9,10 +13,24 @@ tool workerStatus {
 }
 
 /// Ask for time-limited computer access for the current goal. Explain the
-/// purpose and machine labels. Approval is shown in Nexus; no action runs first.
+/// purpose and the chosen machine's requireLabels from workerStatus. If several
+/// machines match, ask which to use with requestUserFeedback first. A selection
+/// is not permission. Approval is shown in Nexus; no action runs first.
 @handler(type="function", name="agentworkerRequestScope")
 @requiresAgentRole("assistant", "specialist")
 tool requestComputerUseScope {
+ operation object @description("Supply this for a headless read or exact command. Copy paths from the selected machine's homeDirectory or the person; do not guess. Never replace a refused operation with broader access.") {
+  tool enum("workerHost")!
+  action enum("fs_read", "fs_list", "fs_stat", "exec")!
+  args object! {
+   path string @description("Required for reads: exact absolute path. For home listing copy workerStatus.machines[].homeDirectory.")
+   cmd string @description("Required for exec: exact command to approve and run.")
+   cwd string @description("Required for exec: explicit absolute working directory other than /. Do not use ~ or environment variables.")
+   timeoutSec integer @description("Optional command timeout, 1-600 seconds.")
+   maxBytes integer @description("Optional file read limit, 1-5242880 bytes.")
+  }
+  directory string @description("Required for reads: absolute directory containing args.path. For fs_list use the same directory as args.path.")
+ }
  intent string!
  requestedScope enum("observe", "full")!
  summary string!
@@ -28,16 +46,16 @@ tool requestComputerUseScope {
 @requiresAgentRole("assistant", "specialist")
 tool workerHost {
  action enum("exec", "fs_read", "fs_write", "fs_list", "fs_stat", "http_fetch")!
- args object
- requireLabels object
+ args object @description("fs_list/fs_read/fs_stat require an absolute path. exec takes cmd (the exact command), cwd (absolute working directory), and optional timeoutSec; use the same args as the approved operation.")
+ requireLabels object @description("Copy the selected machine's requireLabels from workerStatus. Keep the same target for approval and execution; do not omit it for work on a specific computer.")
  ownerUserId string! @autoInjected
  agentId string! @autoInjected
  runId string! @autoInjected
 }
 
 /// Interact with an enrolled computer's desktop after scoped approval.
-/// Final fallback for web research that headless tools cannot complete: control
-/// its browser, search and follow observed links. Probe workerStatus first;
+/// An alternative for authorized tasks that require a graphical interface when
+/// named capabilities or headless tools cannot complete them. Probe workerStatus first;
 /// use requireLabels={display: "true"}. Reuse existing valid approval.
 @handler(type="function", name="agentworkerDispatchComputer")
 @requiresAgentRole("assistant", "specialist")

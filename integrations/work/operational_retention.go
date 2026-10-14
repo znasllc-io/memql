@@ -58,9 +58,8 @@ const (
 
 	// retentionRunBudget is how long a pass spends on candidates before it stops
 	// with work left, shared out among the policies (retentionShare). The pass
-	// is a cron-leader job and holds nothing between nights: the next one starts
-	// again at the oldest version stored. See OPERATIONAL RETENTION WALKS DAY
-	// WINDOWS, on operationalRetention.
+	// checkpoints completed pages in work_retention_progress. A different
+	// leader resumes there; a completed scan resets for eventual rechecks.
 	retentionRunBudget = 4 * time.Minute
 )
 
@@ -126,12 +125,8 @@ var operationalPolicies = []operationalPolicy{
 	{runConcept, EnvSystemRunRetentionDays, DefaultSystemRunRetentionDays, `n.payload->>'ownerUserId' = '' AND COALESCE(n.payload->>'goalId','') = '' AND n.payload->>'triggeredBy' = 'schedule' AND n.payload->>'status' IN ('succeeded','failed','cancelled','abandoned')`},
 	{runConcept, EnvPipelinesRunRetentionDays, DefaultPipelinesRunRetentionDays, `n.payload->>'triggeredBy' LIKE '` + pipelines.WorkTriggerPrefix + `%' AND n.payload->>'status' IN ('succeeded','failed','cancelled')`},
 	{pipelinesRunConcept, EnvPipelinesRunRetentionDays, DefaultPipelinesRunRetentionDays, `n.payload->>'status' = 'completed'`},
-	// After the work-run policy, always: the "no run remains" term is added in
-	// retentionCandidateRead and checked again in retirementDelete. That term is
-	// the one cost the day window does not bound -- it compares every run version
-	// with the goal, 0.34 s a read warm and 1.26 s cold at 600,000 run versions --
-	// and is ACCEPTED for this release; the partial expression index on the run's
-	// goalId that would bound it is deferred to release 2 (see operationalRetention).
+	// After the work-run policy: no run may remain. The partial expression
+	// index on normalized goalId serves both this read and the delete guard.
 	{goalConcept, EnvPipelinesRunRetentionDays, DefaultPipelinesRunRetentionDays, `n.payload->>'requestedVia' = 'pipeline' AND n.payload->>'origin' = 'system'`},
 }
 
@@ -159,8 +154,7 @@ type OperationalRetentionResult struct {
 	Oversized        []string `json:"oversized,omitempty"`
 	// BudgetExhausted says this policy ran out of its share of retentionRunBudget
 	// (retentionShare) with versions stored in day windows it had not read, so
-	// candidates may remain. They are not lost: the next pass starts again at the
-	// oldest version stored. A policy that read every window up to its cutoff, or
+	// candidates may remain. The next pass resumes its persisted checkpoint. A policy that read every window up to its cutoff, or
 	// had nothing stored before it, leaves it unset however much of its share it
 	// used.
 	BudgetExhausted bool `json:"budgetExhausted,omitempty"`
@@ -223,17 +217,15 @@ const workChildConceptsSQL = `('v1:work:step','v1:work:approval','v1:work:modelC
 // middle of. When it has gone the policy reports BudgetExhausted only if something
 // is left to read -- a full page just came back, or a version is stored from the
 // next window on -- so one that spent its share on its last window is not reported
-// behind. Nothing is stored between nights: the next pass starts again at the
-// oldest version stored.
+// behind. Completed pages are checkpointed between nights. A complete scan resets
+// its checkpoint so eligibility changes behind it are eventually revisited.
 //
-// ACCEPTED RESIDUAL COST. The rows a walk starts from and passes over that no
-// policy retires are still walked every night: each window that holds them is read,
-// finds no candidate, and is stepped past. Measured at 5,000 runs a day, that is
-// 21 ms a window (0.8 s for the 40 dense days of the history below), so roughly 10
-// to 30 s per year of installation age, per policy, on top of the work itself. The
-// skip-ahead removes only the windows with nothing stored in them. A persisted
-// low-water mark, or an index on (concept, "createdAt"), would remove the rest;
-// both are deferred to release 2.
+// RELEASE 2: work_retention_progress checkpoints every completed page/window
+// using a generation fence. A new leader resumes beyond protected history;
+// a complete traversal resets so changed eligibility and backdated rows are
+// eventually revisited. The (concept, createdAt, id) index bounds time probes,
+// and the partial normalized-goalId index bounds the goal dependency check.
+// The measurements below describe release 1, before these additions.
 //
 // MEASURED, on a seeded history in the CI database image (PostgreSQL 16.14,
 // TimescaleDB 2.29.0): "MemoryNodes" as a hypertable in 7-day chunks with the
@@ -280,19 +272,13 @@ const workChildConceptsSQL = `('v1:work:step','v1:work:approval','v1:work:modelC
 //     cutoff once (69 ms at most for 600,000 run versions), and a bounded one
 //     reads the entries after the window it jumps from, once for each empty
 //     stretch;
-//   - the goal policy's "no run of it remains", in its candidate read and in the
-//     delete's guard (goalRefSQL), compares every run version's goalId with the
-//     goal's, and no index serves it. MEASURED BOUND: 0.34 s a read warm and 1.26 s
-//     the first time on cold buffers, for 600,000 run versions, whatever the
-//     window; 14 to 15 s for the policy as a whole, 1,828 goals. ACCEPTED for this
-//     release. The policy runs last, so a failure there costs nothing that went
-//     before it, and the partial expression index on the run's goalId that would
-//     bound it is deferred to release 2;
-//   - the journal sweep's expired-rows read (expiredJournalRowsSQL in sweep.go)
-//     is not part of this walk: it takes the latest version of every id of one
-//     concept, 0.41 s for 400,000 model-call versions, and grows with them.
-//     RetentionSweep no longer lets it stop this pass when it fails. Windowing it
-//     is deferred to release 2.
+//   - the goal policy's "no run of it remains" must see runs outside the
+//     candidate day. Its normalized goalId probes now use the partial
+//     memory_nodes_retention_goal_idx expression index (memql#6059).
+//
+// The journal sweep has its own bounded day walk in sweep.go. Both walks use
+// memory_nodes_retention_time_idx to skip empty stretches without scanning
+// each concept's complete history.
 //
 // staged-data: MUST-NOT-GATE -- retention is physical retirement, including
 // staged historical versions. Every fetched row still passes AdmitSourceRow.
@@ -315,6 +301,7 @@ func (i *Integration) operationalRetention(ctx context.Context, dry bool) ([]Ope
 	var policyErrs []error
 	for k, p := range operationalPolicies {
 		days := windows[p.env]
+		p.days = days
 		cutoff := i.clock().UTC().AddDate(0, 0, -days)
 		// Each policy is given what is left of the pass's time over the policies
 		// still to run (retentionShare), measured from when its turn comes. Time an
@@ -332,7 +319,7 @@ func (i *Integration) operationalRetention(ctx context.Context, dry bool) ([]Ope
 			continue
 		}
 		if spent {
-			i.log().Info("work: a retention policy spent its share of the pass's time budget with day windows unread; the next pass starts again at the oldest version stored",
+			i.log().Info("work: a retention policy spent its share of the pass's time budget with day windows unread; the next pass resumes its persisted progress",
 				"component", "work.retention", "concept", p.concept, "env", p.env, "share", share.String(), "budget", retentionRunBudget.String(),
 				"candidates", result.Candidates, "deleted", result.DeletedVersions)
 		}
@@ -369,9 +356,24 @@ func (i *Integration) operationalRetention(ctx context.Context, dry bool) ([]Ope
 // staged-data: MUST-NOT-GATE -- see operationalRetention; the reads below are
 // retentionCandidateRead's, and every row they return passes AdmitSourceRow.
 func (i *Integration) retirePolicy(ctx context.Context, p operationalPolicy, cutoff time.Time, dry bool, started time.Time, share time.Duration, result *OperationalRetentionResult, tally *retirementTally) (bool, error) {
-	oldest, found, err := i.oldestRetentionVersion(ctx, p.concept, time.Time{}, cutoff)
-	if err != nil || !found {
+	var progress *retentionProgress
+	var from time.Time
+	if !dry {
+		var err error
+		progress, err = i.loadRetentionProgress(ctx, p)
+		if err != nil {
+			return false, err
+		}
+		if progress.at.Valid && progress.at.Time.Before(cutoff) {
+			from = progress.at.Time
+		}
+	}
+	oldest, found, err := i.oldestRetentionVersion(ctx, p.concept, from, cutoff)
+	if err != nil {
 		return false, err
+	}
+	if !found {
+		return false, i.saveRetentionProgress(ctx, progress, time.Time{}, "")
 	}
 	// Strictly greater: a policy that has used exactly its share goes on. A share
 	// of nothing reads nothing.
@@ -385,6 +387,9 @@ func (i *Integration) retirePolicy(ctx context.Context, p operationalPolicy, cut
 		}
 		next := lo.Add(retentionCandidateWindow)
 		var after *pageEnd
+		if progress != nil && progress.id != "" && !from.Before(lo) && from.Before(hi) {
+			after = &pageEnd{at: from, id: progress.id}
+		}
 		for {
 			// Checked before every read rather than every window: a window of
 			// thousands of candidates is dozens of pages, and the policy must not
@@ -412,11 +417,14 @@ func (i *Integration) retirePolicy(ctx context.Context, p operationalPolicy, cut
 				}
 				if !stored {
 					if !hi.Before(cutoff) {
-						return false, nil
+						return false, i.saveRetentionProgress(ctx, progress, time.Time{}, "")
 					}
 					ahead, more, err := i.oldestRetentionVersion(ctx, p.concept, hi, cutoff)
-					if err != nil || !more {
+					if err != nil {
 						return false, err
+					}
+					if !more {
+						return false, i.saveRetentionProgress(ctx, progress, time.Time{}, "")
 					}
 					next = ahead.UTC().Truncate(retentionCandidateWindow)
 				}
@@ -424,11 +432,17 @@ func (i *Integration) retirePolicy(ctx context.Context, p operationalPolicy, cut
 			if page.scanned < retentionCandidateLimit {
 				break
 			}
+			if err := i.saveRetentionProgress(ctx, progress, page.at, page.id); err != nil {
+				return false, err
+			}
 			after = &page
+		}
+		if err := i.saveRetentionProgress(ctx, progress, next, ""); err != nil {
+			return false, err
 		}
 		lo = next
 	}
-	return false, nil
+	return false, i.saveRetentionProgress(ctx, progress, time.Time{}, "")
 }
 
 // oldestRetentionVersion is the createdAt of the concept's oldest version stored
@@ -531,10 +545,8 @@ func retentionCandidateRead(p operationalPolicy, cutoff, lo, hi time.Time, after
 		// still kept must not crowd out the ones that could go. The delete
 		// asks again (retireVerified), for a run opened since this read.
 		//
-		// This is the one probe here with no index to go to, so a read costs the
-		// run table, not the window: 0.34 s warm, 1.26 s cold, at 600,000 run
-		// versions. Accepted for this release; the partial expression index on
-		// the run's goalId is deferred to release 2.
+		// memory_nodes_retention_goal_idx uses this exact normalization, so
+		// canonical and historical bare references share an indexed probe.
 		probes += `NOT EXISTS (SELECT 1 FROM "MemoryNodes" r WHERE r.concept='v1:work:run' AND ` + goalRefSQL(`r.payload->>'goalId'`) + `=` + goalRefSQL(`n.id`) + `) AND `
 	}
 	query := `SELECT n.id,n."createdAt",n.payload FROM (` + inner + `) n WHERE ` + probes +
@@ -697,6 +709,23 @@ func (i *Integration) loadRetirementVersions(ctx context.Context, db *bun.DB, co
 			return nil, err
 		}
 	}
+	// Archives carry complete schemas, independent of this installation's
+	// catalog. Charge the expanded bytes to the same archive budget.
+	for start := 0; start < len(nodes); start += 100 {
+		batch := nodes[start:min(start+100, len(nodes))]
+		for _, n := range batch {
+			size -= len(n.Schema)
+		}
+		if err := memorynodes.HydrateSchemas(ctx, db, batch); err != nil {
+			return nil, err
+		}
+		for _, n := range batch {
+			size += len(n.Schema)
+		}
+		if size > retirementMaxBytes {
+			return nil, errRetirementOverBudget
+		}
+	}
 	return nodes, nil
 }
 
@@ -790,8 +819,7 @@ func retirementDelete(concept string, withChildren bool, parentIDs []string, raw
 		// goal by writing the goal first -- a newer version, which the
 		// statement's own newer-version check refuses -- and then the run,
 		// refused here; a run written on its own is refused here too. Like the
-		// candidate read's, this compares every run version (accepted for this
-		// release; the goalId index is deferred to release 2).
+		// candidate read's, this probes the normalized goalId expression index.
 		guard += ` AND NOT EXISTS (SELECT 1 FROM "MemoryNodes" r WHERE r.concept='v1:work:run' AND ` + goalRefSQL(`r.payload->>'goalId'`) + ` IN (SELECT ` + goalRefSQL(`k.id`) + ` FROM keys k))`
 	}
 	return retirementStatement{

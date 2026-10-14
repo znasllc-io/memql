@@ -1,8 +1,9 @@
-import { useEffect, useMemo, useState } from "react";
-import type { Row } from "@znasllc-io/memql-sdk-core/client";
+import { useEffect, useMemo, useState, useSyncExternalStore } from "react";
+import type { LiveSnapshot, Row } from "@znasllc-io/memql-sdk-core/client";
 
 import {
   Caption,
+  Button,
   ChoiceStack,
   Check,
   Chip,
@@ -16,6 +17,7 @@ import {
   Notice,
   Panel,
   Refine,
+  RecordList,
   RecordRow as KitRow,
   listCount,
   Subhead,
@@ -27,6 +29,8 @@ import {
 } from "../../kit";
 import { ActionBar, type Act } from "../../kit/ActionBar";
 import type { DecideApprovalState } from "./actions";
+import { computerPermission, permissionRememberLabel } from "./computerPermissions";
+import { ComputerPermissionsPage } from "./ComputerPermissionsPage";
 import {
   appWord,
   procedureTitle,
@@ -40,6 +44,7 @@ import { BindingCounts } from "./ProcedurePage";
 import {
   approvalFingerprint,
   approvalFromRow,
+  approvalIsPending,
   approvalSubjectLine,
   idTail,
   runTitle,
@@ -92,6 +97,7 @@ export interface ApprovalsSectionProps {
   onSelectApproval: (approvalId: string) => void;
   onOpenRun: (runId: string) => void;
   onAnswerInAsk?: (runId: string) => void;
+  onDiscussInAsk?: (approvalId: string) => void;
   /**
    * The learned procedures, so a promotion can name the procedure it would
    * move -- and its parameters by the goal inputs that bind them. Empty until
@@ -99,6 +105,19 @@ export interface ApprovalsSectionProps {
    */
   procedures?: readonly ProcedureRow[];
   onOpenProcedure?: (constructId: string) => void;
+}
+
+const EMPTY_APPROVALS: LiveSnapshot<Row> = { rows: [], state: "disconnected", error: "", version: 0 };
+
+// Mirrors work.IsFailureQuestion: these offered values identify a recovery
+// decision even when an older approval carries the planReview kind.
+export function isFailureQuestion(approval: ApprovalRow): boolean {
+  return approval.options.some(option => option.value === "retry")
+    && approval.options.some(option => option.value === "abandon");
+}
+
+function approvalLabel(approval: ApprovalRow): string {
+  return isFailureQuestion(approval) ? "Work stopped" : approvalKindWord(approval.kind);
 }
 
 export function ApprovalsSection({
@@ -109,6 +128,7 @@ export function ApprovalsSection({
   onSelectApproval,
   onOpenRun,
   onAnswerInAsk,
+  onDiscussInAsk,
   procedures = [],
   onOpenProcedure,
 }: ApprovalsSectionProps) {
@@ -116,7 +136,13 @@ export function ApprovalsSection({
   const [choice, setChoice] = useState("");
   const [choices, setChoices] = useState<string[]>([]);
   const [freeText, setFreeText] = useState("");
+  const [rememberPermission, setRememberPermission] = useState(false);
+  const [showPermissions, setShowPermissions] = useState(false);
   const now = useNow(15_000);
+  const snapshot = useSyncExternalStore(
+    useMemo(() => approvals ? approvals.subscribe.bind(approvals) : () => () => {}, [approvals]),
+    () => approvals?.snapshot ?? EMPTY_APPROVALS,
+  );
 
   const viewKey = `approvals:${search.trim().toLowerCase()}`;
   const view = useLiveView<Row, ApprovalRow>(approvals, viewKey, (rows) => {
@@ -124,10 +150,11 @@ export function ApprovalsSection({
     const projected = rows
       .map(approvalFromRow)
       .filter((approval) => approval.id !== "")
+      .filter(approvalIsPending)
       .filter((approval) =>
         needle === ""
           ? true
-          : [approval.kind, approval.question, approval.evidenceReason, approval.stepKey]
+          : [approval.kind, approvalLabel(approval), approvalSubjectLine(approval), approval.evidenceReason, approval.stepKey]
               .join(" ")
               .toLowerCase()
               .includes(needle),
@@ -142,32 +169,72 @@ export function ApprovalsSection({
     return projected;
   });
 
-  const rows = view?.snapshot.rows ?? [];
-  const selected = rows.find((a) => idTail(a.id) === idTail(selectedApprovalId)) ?? null;
+  // A deep link still opens when the list's retained search excludes it.
+  // Subscribe here too: the list unmounts while its detail is open.
+  const selected = snapshot.rows.map(approvalFromRow).find((a) => idTail(a.id) === idTail(selectedApprovalId)) ?? null;
   const lapsed = selected !== null && selected.expiresAt !== "" && Date.parse(selected.expiresAt) <= now.getTime();
-  const canDecide = selected !== null && selected.decision === "" && !lapsed;
   const runsById = useMemo(() => {
     const byId = new Map<string, RunRow>();
     for (const run of runs) byId.set(idTail(run.id), run);
     return byId;
   }, [runs]);
+  const savedBudgetResume = decide.budgetResumes[idTail(selectedApprovalId)];
+  const savedRun = savedBudgetResume ? runsById.get(idTail(savedBudgetResume.runId)) : undefined;
+  // A release on another replica, cancellation or a different gate makes a
+  // locally held retry obsolete as soon as its run summary arrives.
+  const budgetResume = savedBudgetResume && (!savedRun || runWaitsForApproval(savedRun, savedBudgetResume.approvalId)) ? savedBudgetResume : undefined;
+  const canDecide = selected !== null && selected.decision === "" && !lapsed && !savedBudgetResume;
+
+  // A decided approval leaves the pending feed, but a run whose release failed
+  // still names it. Recover its exact receipt after reopening the app, too.
+  const recoveryIds = snapshot.state === "live" ? [...new Set([
+    ...runs.filter(run => run.status === "waiting" && !run.cancelRequested && run.waitingOnKind === "approval")
+      .map(run => run.waitingOnSubject)
+      .filter(id => id && !snapshot.rows.some(row => {
+        const approval = approvalFromRow(row);
+        return idTail(approval.id) === idTail(id) && approvalIsPending(approval);
+      })),
+    ...(selectedApprovalId && (!selected || (selected.kind === "budget" && selected.decision === "approved")) ? [selectedApprovalId] : []),
+  ])].sort().join("\n") : "";
+  useEffect(() => {
+    if (!recoveryIds) return;
+    const controller = new AbortController();
+    // History can span many pages. Bound recovery to one owner-read chain at
+    // a time instead of opening a request for every retained waiting run.
+    void (async () => {
+      for (const id of recoveryIds.split("\n")) {
+        if (controller.signal.aborted) break;
+        await decide.readBudgetResume(id, controller.signal);
+      }
+    })();
+    return () => controller.abort();
+  }, [recoveryIds, decide.readBudgetResume, decide.deciding]);
 
   // A different approval is a different question. Clearing the draft answer on
   // selection is what stops an option picked for one question being sent as
   // the answer to another -- which the artifact hash would not catch, because
   // both artifacts are intact.
   useEffect(() => {
+    // The feed removing a decided row is not a different question. Keep a
+    // draft and any resume error while its response is still in flight.
+    if (selectedApprovalId !== "" && selected === null) return;
     setChoice("");
     setChoices([]);
     setFreeText("");
+    setRememberPermission(false);
+    setShowPermissions(false);
     decide.reset();
-    // Deliberately keyed on the SELECTION alone.
-  }, [selectedApprovalId]);
+    // A changed artifact also needs a fresh choice, including remembered access.
+  }, [selectedApprovalId, selected?.artifactHash]);
 
   const isFeedback = selected?.kind === "feedback";
-  const budget = budgetControl(selected);
+  const failure = selected !== null && isFailureQuestion(selected);
+  const permission = !failure && selected?.kind === "scopeElevation" ? computerPermission(selected.subject) : null;
+  const invalidPermission = !failure && selected?.kind === "scopeElevation" && selected.subject?.computerPermission !== undefined && permission === null;
+  const permissionMode = rememberPermission && permission?.allowedModes.includes("always") ? "always" : "once";
+  const budget = failure ? null : budgetControl(selected);
   const budgetAnswer = budgetApprovalAnswer(selected, freeText);
-  const answerInAsk = isFeedback && ["text", "choice", "multi"].includes(String(selected?.subject?.kind)) && onAnswerInAsk;
+  const answerInAsk = !failure && isFeedback && ["text", "choice", "multi"].includes(String(selected?.subject?.kind)) && onAnswerInAsk;
   const hasOptions = (selected?.options.length ?? 0) > 0;
   const answerReady = budget !== null ? budgetAnswer !== undefined : isFeedback
     ? hasOptions
@@ -175,10 +242,30 @@ export function ApprovalsSection({
       : freeText.trim() !== ""
     : true;
 
+  // Expiry removes the permission decision, not the person's route back to
+  // the work it parked. Ask revalidates guidance against the owned checkpoint.
+  const selectedRun = selected ? runsById.get(idTail(selected.runId)) : undefined;
+  const canDiscussExpiredScope = selected !== null && selected.decision === "" && lapsed
+    && selected.kind === "scopeElevation" && !failure && selectedRun !== undefined
+    && runWaitsForApproval(selectedRun, selected.id);
+
   const acts: Act[] = [];
-  if (selected !== null && canDecide) {
-    if (answerInAsk) {
-      acts.push({ label: "Answer in Ask", tone: "primary", onAct: () => answerInAsk(selected.runId) });
+  if (budgetResume) {
+    acts.push({ label: "Resume work", tone: "primary", busy: decide.deciding === idTail(budgetResume.approvalId),
+      onAct: () => { void decide.decide(budgetResume.approvalId, "approved", { newLimit: budgetResume.newLimit }, undefined, true); } });
+  } else if (selected !== null && canDecide) {
+    if (onDiscussInAsk) acts.push({ label: "Discuss in Ask", text: true, onAct: () => onDiscussInAsk(selected.id) });
+    if (failure) {
+      for (const value of ["abandon", "retry"]) {
+        acts.push({
+          label: value === "retry" ? selected.options.find(option => option.value === value)!.label : "Abandon",
+          tone: value === "retry" ? "primary" : undefined,
+          busy: decide.deciding === idTail(selected.id),
+          onAct: () => { void decide.decide(selected.id, "answered", { value }); },
+        });
+      }
+    } else if (answerInAsk) {
+      if (!onDiscussInAsk) acts.push({ label: "Answer in Ask", tone: "primary", onAct: () => answerInAsk(selected.runId) });
     } else if (isFeedback) {
       if (answerReady) {
         acts.push({
@@ -196,68 +283,73 @@ export function ApprovalsSection({
       // feed, so its page and its row follow the answer without a re-read.
       const documentReview = selected.subject?.reviewType === "library-document"
         ? { requestId: String(selected.subject.requestId), proposalHash: selected.artifactHash } : undefined;
-      const decideIt = (decision: "approved" | "rejected") => void decide.decide(selected.id, decision, decision === "approved" ? budgetAnswer : undefined, documentReview);
+      const nativeBudget = selected.kind === "budget" && selected.subject?.resumeKind === "checkpoint" && typeof selected.subject.continuationId === "string" && selected.subject.continuationId !== "";
+      const decideIt = (decision: "approved" | "rejected") => void decide.decide(selected.id, decision, decision === "approved" ? permission ? { permissionMode } : budgetAnswer : undefined, documentReview, nativeBudget);
       acts.push({
         label: labels.reject,
         busy: decide.deciding === idTail(selected.id),
         ariaLabel: `${labels.reject === "Reject" ? "Reject this" : labels.reject}: ${approvalRejectMeaning(selected.kind)}`,
         onAct: () => decideIt("rejected"),
       });
-      if (answerReady) acts.push({
-        label: budget !== null ? "Raise limit" : labels.approve,
+      if (answerReady && !invalidPermission) acts.push({
+        label: permission ? permissionMode === "always" ? "Always allow" : "Allow once" : budget !== null ? "Raise limit" : labels.approve,
         tone: "primary",
         busy: decide.deciding === idTail(selected.id),
         onAct: () => decideIt("approved"),
       });
     }
+  } else if (canDiscussExpiredScope && selected && onDiscussInAsk) {
+    acts.push({ label: "Discuss in Ask", text: true, onAct: () => onDiscussInAsk(selected.id) });
   }
+
+  const showingDetail = selectedApprovalId !== "";
+  const back = () => onSelectApproval("");
+  const resumable = Object.values(decide.budgetResumes).filter(receipt => {
+    const run = runsById.get(idTail(receipt.runId));
+    if (run && !runWaitsForApproval(run, receipt.approvalId)) return false;
+    const title = run ? runTitle(run) : "Approved limit";
+    return search.trim() === "" || title.toLowerCase().includes(search.trim().toLowerCase());
+  });
+
+  if (showPermissions) return <ComputerPermissionsPage approvalVersion={snapshot.version} onBack={() => setShowPermissions(false)} />;
 
   return (
     <div className="os-nexus-approvals">
-      <Head
-        title="Approvals"
-        meta={listCount(view?.snapshot)}
-      >
-        <Refine
-          search={search}
-          onSearch={setSearch}
-          placeholder="Kind, question or reason"
-          label="Search your approvals"
-        />
-      </Head>
+      {showingDetail ? <Head
+        title={selected ? approvalLabel(selected) : "Approval"}
+        back={{ label: "Approvals", onSelect: back }}
+        breadcrumbs={[{ label: "Approvals", onSelect: back }, { label: selected ? approvalLabel(selected) : "Approval" }]}
+      /> : <Head title="Approvals" meta={listCount(view?.snapshot, (view?.snapshot.rows.length ?? 0) + resumable.length)}>
+        <Button tone="quiet" onClick={() => setShowPermissions(true)}>Saved permissions</Button>
+        <Refine search={search} onSearch={setSearch} placeholder="Kind, question or reason" label="Search your approvals" />
+      </Head>}
 
-
-      <div className="os-nexus-split">
-        <div className="os-nexus-column">
+      <div className="os-nexus-approval-content">
+        {!showingDetail ? <>
+          {resumable.length > 0 ? <RecordList label="Work ready to resume">
+            {resumable.map(receipt => <KitRow key={receipt.approvalId}
+              name={runsById.has(idTail(receipt.runId)) ? runTitle(runsById.get(idTail(receipt.runId))!) : "Approved limit"}
+              secondary="Limit approved; work has not resumed."
+              onOpen={() => onSelectApproval(receipt.approvalId)} />)}
+          </RecordList> : null}
           <LiveList<ApprovalRow>
-            source={view}
-            label="Approvals waiting for you"
-            rowId={(approval) => approval.id}
-            fingerprint={approvalFingerprint}
-            emptyText={
-              search.trim() === ""
-                ? "Nothing needs your input."
-                : "No approval matches that."
-            }
-            renderRow={(approval) => (
-              <ApprovalLine
-                approval={approval}
-                run={runsById.get(idTail(approval.runId)) ?? null}
-                now={now}
-                selected={idTail(approval.id) === idTail(selectedApprovalId)}
-                onOpen={() => onSelectApproval(approval.id)}
-              />
-            )}
-          />
-        </div>
-
-        {/* THE ASIDE IS ABSENT WHEN THERE IS NOTHING IN IT (rule 9). An
-            empty panel saying "pick one" reserved half the window to say what
-            a clickable row already says, and pushed the queue -- the thing
-            this section is for -- into a column. */}
-        {selected === null ? null : (
-          <div className="os-nexus-column os-nexus-aside">
-            {answerInAsk ? <p className="os-nexus-approval-ask">{selected.question}</p> : <ApprovalDetail
+          source={view}
+          label="Approvals waiting for you"
+          rowId={(approval) => approval.id}
+          fingerprint={approvalFingerprint}
+          emptyText={resumable.length > 0 ? "No other approvals are waiting." : search.trim() === "" ? "Nothing needs your input." : "No approval matches that."}
+          renderRow={(approval) => <ApprovalLine
+            approval={approval}
+            run={runsById.get(idTail(approval.runId)) ?? null}
+            now={now}
+            onOpen={() => onSelectApproval(approval.id)}
+          />}
+        /></> : <>
+          {snapshot.error ? <Notice tone="error" sentence="Could not refresh this approval." detail={snapshot.error} />
+            : snapshot.state === "disconnected" || snapshot.state === "degraded" ? <Notice tone="warn" sentence="Not connected to live approvals." next="This is the last known state." /> : null}
+          {selected === null ? <Notice tone="info" sentence={budgetResume ? "The limit was approved. Resume this work when you are ready." : snapshot.state === "seeding" ? "Loading this approval." : snapshot.state === "live" && !snapshot.error ? "This approval is no longer waiting." : "This approval is unavailable."} next="Back returns to your approvals." />
+            : answerInAsk ? <p className="os-nexus-approval-ask">{selected.question}</p>
+            : <ApprovalDetail
               approval={selected}
               canDecide={canDecide}
               run={runsById.get(idTail(selected.runId)) ?? null}
@@ -270,40 +362,39 @@ export function ApprovalsSection({
               onOpenRun={onOpenRun}
               procedures={procedures}
               onOpenProcedure={onOpenProcedure}
+              rememberPermission={rememberPermission}
+              onRememberPermission={setRememberPermission}
             />}
-          </div>
-        )}
+        </>}
       </div>
 
-      {selected === null ? null : (
+      {budgetResume ? <ActionBar state="Approved" detail="Resume using the limit already approved." tone="paused" acts={acts}>
+        {budgetResume.error ? <span className="os-nexus-act-error os-mono" role="alert">{budgetResume.error}</span> : null}
+      </ActionBar> : selected === null ? decide.error ? <Notice tone="error" sentence="This request could not be completed." detail={decide.error} /> : null : (
         <ActionBar
           state={selected.decision === "" && lapsed ? "Lapsed" : decisionWord(selected.decision)}
-          // A BAR WITH A STATE AND NO ACTS HAS TO SAY WHY. Send is absent
-          // until an answer exists, which is right -- an act that cannot
-          // succeed should not be offered -- but an empty bar with no
-          // account of itself reads as something nobody built.
-          detail={
-            selected.decision !== "" ? approvalDecidedNext(selected.kind, selected.decision) : lapsed ? "This request has expired." : budget !== null && !answerReady ? "Enter a new total limit above the recorded usage." : answerInAsk ? undefined : isFeedback && !answerReady
-              ? hasOptions
-                ? "pick an answer above to send it"
-                : "write an answer above to send it"
-              : selected.kind === PROCEDURE_PROMOTION
-                ? // SAID ONCE: a promotion's question already says what it does.
-                  undefined
-                : approvalKindMeaning(selected.kind)
-          }
+          detail={selected.decision !== "" ? approvalDecidedNext(selected.kind, selected.decision)
+            : lapsed ? "This request has expired."
+            : failure ? "Retry resumes saved work. Abandon stops this run."
+            : invalidPermission ? "This permission request cannot be read."
+            : permission ? permissionMode === "always" ? "Saves this permission until you revoke it." : "Allows one use of the requested operation."
+            : selected.kind === "scopeElevation" ? "Allows access for this work until the request expires."
+            : budget !== null && !answerReady ? "Enter a new total limit above the recorded usage."
+            : answerInAsk ? undefined
+            : isFeedback && !answerReady ? hasOptions ? "Pick an answer above to send it." : "Write an answer above to send it."
+            : selected.kind === PROCEDURE_PROMOTION ? undefined : approvalKindMeaning(selected.kind)}
           tone={canDecide ? "paused" : "none"}
           acts={acts}
         >
-          {decide.error === "" ? null : (
-            <span className="os-nexus-act-error os-mono" role="alert">
-              {decide.error}
-            </span>
-          )}
+          {decide.error === "" ? null : <span className="os-nexus-act-error os-mono" role="alert">{decide.error}</span>}
         </ActionBar>
       )}
     </div>
   );
+}
+
+function runWaitsForApproval(run: RunRow, approvalId: string): boolean {
+  return run.status === "waiting" && !run.cancelRequested && run.waitingOnKind === "approval" && idTail(run.waitingOnSubject) === idTail(approvalId);
 }
 
 /**
@@ -362,13 +453,11 @@ function ApprovalLine({
   approval,
   run,
   now,
-  selected,
   onOpen,
 }: {
   approval: ApprovalRow;
   run: RunRow | null;
   now: Date;
-  selected: boolean;
   onOpen: () => void;
 }) {
   const waited = approval.requestedAt || approval.createdAt;
@@ -377,11 +466,10 @@ function ApprovalLine({
     <KitRow
       name={<span className="os-nexus-approval-subject">{approvalSubjectLine(approval)}</span>}
       onOpen={onOpen}
-      open={selected}
       current={approval.decision === "" && !lapsed}
       dim={approval.decision !== "" || lapsed}
-      state={approvalKindWord(approval.kind)}
-      stateTitle={approvalKindMeaning(approval.kind)}
+      state={approvalLabel(approval)}
+      stateTitle={isFailureQuestion(approval) ? "Review the failure and decide whether to retry." : approvalKindMeaning(approval.kind)}
       secondary={approvalContext(approval, run)}
       stateExtra={
         <>
@@ -408,6 +496,8 @@ function ApprovalDetail({
   onOpenRun,
   procedures,
   onOpenProcedure,
+  rememberPermission,
+  onRememberPermission,
 }: {
   approval: ApprovalRow;
   canDecide: boolean;
@@ -421,9 +511,13 @@ function ApprovalDetail({
   onOpenRun: (runId: string) => void;
   procedures: readonly ProcedureRow[];
   onOpenProcedure?: (constructId: string) => void;
+  rememberPermission: boolean;
+  onRememberPermission: (remember: boolean) => void;
 }) {
-  const isFeedback = approval.kind === "feedback";
-  const budget = budgetControl(approval);
+  const failure = isFailureQuestion(approval);
+  const permission = !failure && approval.kind === "scopeElevation" ? computerPermission(approval.subject) : null;
+  const isFeedback = !failure && approval.kind === "feedback";
+  const budget = failure ? null : budgetControl(approval);
   const shutDoors = doorsFromSubject(approval);
   const promotion = promotionSubject(approval);
   // The procedure a promotion names, once the catalog holds it -- which is
@@ -440,11 +534,11 @@ function ApprovalDetail({
   // technically present. A promotion's subject is the same case: it has a
   // panel of its own, so none of it is dumped here.
   const subjectEntries =
-    promotion !== null || isFeedback || approval.kind === "scopeElevation"
+    promotion !== null || isFeedback || failure || approval.kind === "scopeElevation"
       ? []
       : Object.entries(approval.subject ?? {}).filter(
           ([key]) => (shutDoors === null || (key !== "doors" && key !== "code"))
-            && (approval.kind !== "budget" || (key !== "resumeKind" && key !== "resumeReason")),
+            && (approval.kind !== "budget" || (key !== "resumeKind" && key !== "resumeReason" && key !== "continuationId")),
         );
 
   return (
@@ -452,7 +546,8 @@ function ApprovalDetail({
       <Panel label="What is being asked">
         <p className="os-nexus-approval-ask">{approvalSubjectLine(approval)}</p>
         {/* SAID ONCE: a promotion's question already says what promoting does. */}
-        {approval.kind === PROCEDURE_PROMOTION || isFeedback ? null : <Caption>{approvalKindMeaning(approval.kind)}</Caption>}
+        {approval.kind === PROCEDURE_PROMOTION || isFeedback || failure || approval.kind === "scopeElevation" ? null : <Caption>{approvalKindMeaning(approval.kind)}</Caption>}
+        {failure && typeof approval.subject?.errorMessage === "string" ? <p className="os-nexus-approval-failure">{approval.subject.errorMessage}</p> : null}
 
         {budget === null || !canDecide ? null : <>
           <Field label={budget.label}>
@@ -494,7 +589,19 @@ function ApprovalDetail({
         ) : null}
       </Panel>
 
-      {approval.kind === "scopeElevation" ? <Panel label="Computer access"><Facts>
+      {!failure && approval.kind === "scopeElevation" && permission ? <Panel label="Computer access">
+        <div className="os-nexus-permission-scope"><Facts>
+          <Fact label="Computer" value={permission.machineLabel} />
+          <Fact label="Access" value={permission.kind === "directory_read" ? "Read files, list folders and inspect file details" : "Run this exact command"} />
+          {permission.kind === "directory_read" ? <Fact label="Directory" value={<CopyValue value={permission.directory!} label="directory" />} /> : <>
+            <Fact label="Command" value={<CopyValue value={permission.command!} label="command" />} />
+            <Fact label="Working directory" value={<CopyValue value={permission.cwd!} label="working directory" />} />
+            <Fact label="Time limit" value={`${permission.timeoutSeconds} seconds`} />
+          </>}
+        </Facts></div>
+        <Caption>{permission.kind === "directory_read" ? "Includes files and folders inside this directory. Does not allow writing files or running commands." : "Applies only to this command, working directory and time limit on this computer."}</Caption>
+        {canDecide && permission.allowedModes.includes("always") ? <div className="os-nexus-permission-remember"><Check checked={rememberPermission} onChange={onRememberPermission}>{permissionRememberLabel(permission)}</Check><Caption>Saved permissions can be revoked from Approvals.</Caption></div> : null}
+      </Panel> : !failure && approval.kind === "scopeElevation" && approval.subject?.computerPermission !== undefined ? <Notice tone="warn" sentence="This permission request cannot be read." next="You can reject it and ask for a new request." /> : !failure && approval.kind === "scopeElevation" ? <Panel label="Computer access"><Facts>
         <Fact label="Access" value={approval.subject?.scope === "observe" ? "Read and observe" : "Read, write and control"} />
         <Fact label="Machines" value={String(approval.subject?.target || "Your enrolled computers matching the request")} />
         <Fact label="Expires" value={formatMoment(approval.expiresAt)} />
@@ -617,7 +724,7 @@ function ApprovalDetail({
             comparing two approvals of the same command needs the value. A
             promotion carries it in its own panel, beside the version it pins,
             so it is said there once. */}
-        {promotion !== null || isFeedback || approval.kind === "scopeElevation" ? null : (
+        {promotion !== null || isFeedback || failure || approval.kind === "scopeElevation" ? null : (
           <>
             <Subhead>The exact thing you are deciding</Subhead>
             <CopyValue value={approval.artifactHash} label="artifact hash" />
@@ -689,6 +796,7 @@ function approvalContext(approval: ApprovalRow, run: RunRow | null): string {
  * falls back to the words every other kind uses.
  */
 function decisionLabels(approval: ApprovalRow): { approve: string; reject: string } {
+  if (approval.kind === "scopeElevation") return { approve: "Allow for this work", reject: "Reject" };
   if (approval.subject?.reviewType === "library-document") return { approve: "Apply all changes", reject: "Decline all" };
   if (approval.kind !== PROCEDURE_PROMOTION) return { approve: "Approve", reject: "Reject" };
   const offered = (value: string) => approval.options.find((o) => o.value === value)?.label.trim() ?? "";

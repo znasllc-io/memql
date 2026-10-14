@@ -51,6 +51,9 @@ func (e *parsingEngine) Execute(_ context.Context, q string) (any, error) {
 	e.mu.Lock()
 	defer e.mu.Unlock()
 	e.queries = append(e.queries, q)
+	if strings.Contains(q, "Count") || strings.Contains(q, "RosterSize") {
+		return rowsEnvelope([]map[string]any{{"count": 0}}), nil
+	}
 	return map[string]any{"output": []any{}}, nil
 }
 
@@ -108,6 +111,7 @@ func TestEveryRenderedCallParses(t *testing.T) {
 				CampaignID: awkward, RecipientID: awkward, Email: awkward,
 				Status: "failed", SkipReason: awkward, LastError: awkward,
 				SentAt: now, Attempts: 2, NextAttemptAt: now,
+				RequestID: awkward, TemplateID: awkward, SenderIdentityID: awkward,
 			})
 		}},
 		{"updateCampaignProgress", func() error {
@@ -177,10 +181,10 @@ func TestEveryRenderedCallParses(t *testing.T) {
 			return err
 		}},
 		{"addRecipient (no fields)", func() error {
-			return store.AddRecipient(ctx, awkward, awkward, awkward, awkward, "import", awkward, nil)
+			return store.AddRecipient(ctx, awkward, awkward, awkward, awkward, "import", awkward, "subscribed", nil)
 		}},
 		{"addRecipient (awkward field keys)", func() error {
-			return store.AddRecipient(ctx, awkward, awkward, awkward, awkward, "import", awkward, map[string]string{
+			return store.AddRecipient(ctx, awkward, awkward, awkward, awkward, "import", awkward, "subscribed", map[string]string{
 				// The header shapes a real spreadsheet produces. A bare key
 				// here is a parse error, which is memql#4265's whole shape.
 				"Company Name": awkward,
@@ -254,6 +258,16 @@ func TestEveryRenderedCallParses(t *testing.T) {
 				Status: "sent", SentAt: now, Attempts: 1, EmailRuleID: awkward,
 			})
 		}},
+
+		// organization email layouts: both reads, and the list both ways (the
+		// status argument renders only when archived layouts are not wanted).
+		{"emailLayoutById", func() error { _, _, err := store.EmailLayoutByID(ctx, awkward); return err }},
+		{"emailLayoutsForAccount (active)", func() error { _, err := store.EmailLayoutsForAccount(ctx, awkward, false); return err }},
+		{"emailLayoutsForAccount (archived too)", func() error { _, err := store.EmailLayoutsForAccount(ctx, awkward, true); return err }},
+
+		// the template an organization published from one Library file; both
+		// ids are the caller's, so both are awkward.
+		{"templateForSource", func() error { _, _, err := store.TemplateForSource(ctx, awkward, awkward); return err }},
 	}
 
 	before := 0

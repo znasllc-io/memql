@@ -224,15 +224,32 @@ describe("groupChunksByDocument", () => {
   it("groups by documentId and puts the corpus LAST", () => {
     const chunks = [
       chunkRow({ id: "c-1", documentId: "doc-a" }),
-      chunkRow({ id: "c-2", documentId: "" }),
+      chunkRow({ id: "c-2", documentId: "", source: "llmSeeded" }),
       chunkRow({ id: "c-3", documentId: "doc-b" }),
       chunkRow({ id: "c-4", documentId: "doc-a" }),
     ].map(chunkFromRow);
 
     const groups = groupChunksByDocument(chunks);
-    expect(groups.map((g) => g.id)).toEqual(["doc-a", "doc-b", ""]);
+    expect(groups.map((g) => g.label)).toEqual(["doc-a", "doc-b", "Seeded corpus"]);
     expect(groups[0]?.chunks.map((c) => c.id)).toEqual(["c-1", "c-4"]);
     expect(groups[2]?.label).toBe("Seeded corpus");
+  });
+
+  it("does not infer seeded provenance from a missing document back-reference", () => {
+    const chunks = [
+      chunkRow({ id: "upload", source: "fileUpload", sourceRef: "artifact:sample-file" }),
+      chunkRow({ id: "chat", source: "augment", sourceRef: "chat:sample-message" }),
+      chunkRow({ id: "trainer", source: "trainerAgent", sourceRef: "https://example.org/reference" }),
+      chunkRow({ id: "seed", source: "llmSeeded", sourceRef: "catalog:sample" }),
+      chunkRow({ id: "future", source: "futureSource", sourceRef: "external:opaque-reference" }),
+      chunkRow({ id: "missing", source: "", sourceRef: "" }),
+    ].map(chunkFromRow);
+    const groups = groupChunksByDocument(chunks);
+    expect(groups.map((group) => group.label)).toEqual([
+      "Uploaded files", "Chat additions", "Trainer Agent", "Seeded corpus", "futureSource", "Source unrecorded",
+    ]);
+    expect(groups.flatMap((group) => group.chunks)).toEqual(chunks);
+    expect(new Set(groups.map((group) => group.id)).size).toBe(chunks.length);
   });
 
   it("keeps the input's order for the document groups", () => {
@@ -243,7 +260,7 @@ describe("groupChunksByDocument", () => {
       chunkRow({ id: "c-1", documentId: "doc-z" }),
       chunkRow({ id: "c-2", documentId: "doc-a" }),
     ].map(chunkFromRow);
-    expect(groupChunksByDocument(chunks).map((g) => g.id)).toEqual(["doc-z", "doc-a"]);
+    expect(groupChunksByDocument(chunks).map((g) => g.label)).toEqual(["doc-z", "doc-a"]);
   });
 
   it("produces no corpus group when every chunk has a document", () => {

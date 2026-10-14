@@ -501,6 +501,9 @@ func approvedComputerScope(rows []map[string]any, req Request, now time.Time) st
 			continue
 		}
 		subject, _ := row["subject"].(map[string]any)
+		if _, typed := subject["computerPermission"]; typed {
+			continue // A narrow receipt is never a broad run scope.
+		}
 		if work.ArtifactHash(subject) != scopeString(row["artifactHash"]) || memqlengine.BareShortId(scopeString(subject["agentId"])) != memqlengine.BareShortId(req.AgentId) {
 			continue
 		}

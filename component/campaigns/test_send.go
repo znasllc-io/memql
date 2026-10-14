@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/znasllc-io/memql/component/compose/emaildoc"
 	memorynodes "github.com/znasllc-io/memql/component/database/memory-nodes"
 	"github.com/znasllc-io/memql/component/memql"
 )
@@ -72,6 +73,10 @@ const testSendSubjectPrefix = "[Test] "
 // is what tells an operator the greeting is personalized at all.
 const testSendDisplayName = "Test Recipient"
 
+// errDraftTooLargeToSend is the sentence the editor showed for the email when it
+// was saved (emaildoc.IssueEmailTooLarge).
+var errDraftTooLargeToSend = errors.New(emaildoc.TooLargeMessage)
+
 func (w *Worker) handleTestSend(ctx context.Context, args map[string]any, _ int) ([]memorynodes.MemoryNode, error) {
 	campaignID := memql.BareShortId(strings.TrimSpace(argString(args, "campaignId")))
 	if campaignID == "" {
@@ -120,6 +125,14 @@ func (w *Worker) handleTestSend(ctx context.Context, args map[string]any, _ int)
 	// is what stops half-written copy reaching an audience; a test send to
 	// one address is how the copy gets finished, so requiring `ready` here
 	// would forbid the one use the feature exists for.
+	//
+	// A draft too large to send is the one draft refused, and for what it
+	// lacks: it keeps its document and no HTML, and renderMessage writes an
+	// HTML part only when there is HTML, so the message would go out as plain
+	// text and look like a test of the email.
+	if tmpl.lacksItsHTML() {
+		return nil, errDraftTooLargeToSend
+	}
 
 	identity, refusal := w.resolveSendIdentity(ctx, campaign)
 	if refusal.refused() {
@@ -135,10 +148,12 @@ func (w *Worker) handleTestSend(ctx context.Context, args map[string]any, _ int)
 		w.logger.Debug("campaigns.testSend: could not resolve the account name", "campaign", campaign.ID, "error", err)
 	}
 
-	msg, err := renderMessage(campaign, tmpl, recipient, unsubscribeURL(w.cfg.UnsubscribeBaseURL, inertUnsubscribeToken), RenderOptions{
+	msg, err := renderMessage(campaign, tmpl, recipient, RenderOptions{
 		ReplyTo:       replyToFor(campaign, identity),
 		AccountName:   accountName,
+		SenderName:    identity.SendAs.FromName,
 		SubjectPrefix: testSendSubjectPrefix,
+		Links:         inertLinks(w.cfg),
 		// Tracking is left ZERO. There is no delivery row to attribute a hit
 		// to, so a pixel here would record against an id nobody holds -- and
 		// the operator's own open would land in the campaign's numbers.
@@ -199,14 +214,15 @@ func (w *Worker) syntheticRecipient(ctx context.Context, campaign Campaign, to s
 	return recipient
 }
 
-// inertUnsubscribeToken is what the test message's footer and List-Unsubscribe
-// header carry.
+// inertUnsubscribeToken is what the test message's footer, List-Unsubscribe
+// header and four link tags carry (inertLinks).
 //
 // OBVIOUSLY INERT, and signed by nothing. A test send must still render the
 // unsubscribe surface -- it is most of what an operator is checking -- but a
 // REAL token would name a real recipient and a real campaign, and clicking it
 // out of curiosity would opt somebody out of a campaign that has not been
-// sent yet. The endpoint refuses this string like any other unverifiable
-// token and shows the "link not valid" page, which is the honest outcome for
-// a link in a message that was never really addressed to anyone.
+// sent yet, or subscribe or open the message of a person who never asked. The
+// endpoints refuse this string like any other unverifiable token and show the
+// "link not valid" page, which is the honest outcome for a link in a message
+// that was never really addressed to anyone.
 const inertUnsubscribeToken = "test-send-token-not-valid"

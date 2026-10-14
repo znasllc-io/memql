@@ -22,6 +22,9 @@ func workExecutionContext(ctx context.Context, j, source *automations.RunJournal
 	// every model call the run's steps make on this replica honours it.
 	run := common.RunContext{RunId: j.RunId, GoalId: j.GoalId, OwnerUserId: j.OwnerUserId, Mode: j.Mode, ReplayPolicy: j.ReplayPolicy, ForkAtStepKey: j.ForkAtStepKey, Routing: j.Routing}
 	run.Spine = j.Spine
+	if j.Rerun != nil {
+		run.RerunRequestId = j.Rerun.RequestId
+	}
 	if run.Mode == "" {
 		run.Mode = common.RunModeLive
 	}
@@ -105,7 +108,10 @@ func workResumeRefusal(exec *automations.AutomationExecution, err error) string 
 // run one request at once. The sweep's recovery is the exception: it read the
 // row itself rather than an event, and holds the run's own claim.
 func workRerunServable(req workspine.DispatchRequest, j *automations.RunJournal) bool {
-	if !req.Recovery && strings.TrimSpace(req.HumanResumeId) != strings.TrimSpace(j.HumanResumeId) {
+	// An answer lease still belongs to that exact answer, unlike the ordinary
+	// run-key recovery lease. A newer answer or rerun has its own claimant.
+	ordinaryRecovery := req.Recovery && !req.HumanResumeRecovery
+	if !ordinaryRecovery && strings.TrimSpace(req.HumanResumeId) != strings.TrimSpace(j.HumanResumeId) {
 		return false
 	}
 	if j.Rerun == nil {
@@ -113,7 +119,7 @@ func workRerunServable(req workspine.DispatchRequest, j *automations.RunJournal)
 		// that request closed, or a newer one replaced it and has its own.
 		return strings.TrimSpace(req.RerunRequestId) == ""
 	}
-	return req.Recovery || strings.TrimSpace(req.RerunRequestId) == j.Rerun.RequestId
+	return ordinaryRecovery || strings.TrimSpace(req.RerunRequestId) == j.Rerun.RequestId
 }
 
 // workRerunResumption decides how a run carrying a re-run request resumes

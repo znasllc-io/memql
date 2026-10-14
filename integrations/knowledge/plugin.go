@@ -32,7 +32,11 @@ func init() {
 			return nil, fmt.Errorf("knowledge plug-in: no ConceptDataIsStaged in plugin context")
 		}
 
+		if pctx.GateDB == nil {
+			return nil, fmt.Errorf("knowledge plug-in: no GateDB in plugin context")
+		}
 		integ := New(pctx.Logger)
+		integ.SetGateDB(pctx.GateDB)
 		integ.SetEngine(pctx.Engine)
 		integ.SetStagedConceptPredicate(pctx.ConceptDataIsStaged)
 		integ.SetDBGetter(func() *sql.DB {

@@ -35,6 +35,34 @@ multi-home.
 Per-user routing means there is no shared pool — agents only ever
 see workers owned by the user whose session they're acting in.
 
+### Choosing a computer in Ask
+
+Ask uses the fleet's shared registration records, including machines connected
+to another agent replica. Its status tool lists each machine's display name,
+exact machine selector, headless and desktop availability, and support for
+scoped computer permissions. Serving model inference does not grant file or
+command access, and does not identify the computer hosting the browser.
+
+When a request says "this machine" without an established target, Ask asks
+which computer to use. A request can select several computers; each operation
+then targets one selected machine. The choices remain in the work's recorded
+context for continuation. Choosing a computer is separate from approving an
+operation on it. Approval preparation refuses an ambiguous target before
+filtering for newer Cockpit versions, so it cannot silently substitute an
+updated machine for the intended one.
+
+Use direct capabilities and headless commands or filesystem operations first,
+then desktop control where those routes cannot complete the task. A home
+directory listing uses a directory-read approval and `fs_list` on that
+computer, with an explicit absolute path. The cluster workbench has its own
+filesystem. If the target or path is unknown, Ask requests that information;
+it cannot infer a home path from a person's display name.
+
+Saved permissions are matched to the selected machine as well as the action.
+Two computers with the same path or command require their own approvals.
+The stream holder still verifies enrollment, current permission, local
+consent and policy before execution.
+
 ---
 
 ## 2. Install

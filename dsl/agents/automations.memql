@@ -34,8 +34,22 @@
 // ways, once per matching event and once per run, which presents as a template
 // that works.
 
-/// Run one agent turn for a goal that named an agent and a prompt. Backs the `agent(name, prompt)`
-/// DSL builtin, which opens a goal naming this template instead of minting a Plan.
+/// Selection thresholds and prompt allocation are deployment policy. The native
+/// operation pins the first selection to this step version on every replica.
+@template
+automation agentWorkSkillContext {
+ args { text string }
+ return builtin agentSelectWorkSkills(text: args.text, limit: 3, minimumScore: 1, maxBytes: 8000)
+}
+
+/// Pure recovery decisions run inside the existing execution scope and do not
+/// create another run, statement journal, model call or independent permission.
+@template
+automation agentWorkProgressRecovery {
+ args { facts object! }
+ return logic agentProgressRecovery(limit: args.facts.limit, used: args.facts.used, discoveryRounds: args.facts.discoveryRounds, repeatedRounds: args.facts.repeatedRounds, reviewActive: args.facts.reviewActive, stalledAfterReview: args.facts.stalledAfterReview, reviewedLimit: args.facts.reviewedLimit)
+}
+
 @template
 automation invokeAgent {
   args {
@@ -132,4 +146,26 @@ automation agentRecoveryConsent {
   return consent.content
  }
  return args.receipt.content
+}
+
+/// Select relevant reviewed uploads for this task without changing the agent's skills or tools.
+/// Mandatory tool manuals keep their separate retrieval allocation.
+@template
+automation agentWorkTrainingContext {
+ facts := builtin agentWorkTrainingFacts()
+ if facts == nil { return [] }
+ builtin agentIndexWorkTraining()
+ return builtin agentReadWorkTraining(
+  text: facts.section + "\nOverall goal: " + facts.goal,
+  limit: 3,
+  minimumSimilarity: 0.60,
+  maxTokens: 1200
+ )
+}
+
+/// Preserve part of the existing allowance for reconsideration, clarification
+/// and verification. This reserves calls; it never grants additional calls.
+@template
+automation agentWorkContextRecovery {
+  return 3
 }

@@ -11,6 +11,8 @@ import type { UploadProvider } from "../../items/upload";
 import { useChunkDecisions } from "./actions";
 import { CHUNK_CONCEPT, FILE_CONCEPT, RUN_CONCEPT, type ChunkDecision } from "./concepts";
 import { DomainsSection } from "./DomainsSection";
+import { SkillsSection } from "./SkillsSection";
+import { EvaluationsSection } from "./EvaluationsSection";
 import { ReviewSection } from "./ReviewSection";
 import {
   fileBelongsHere,
@@ -101,6 +103,7 @@ export function TrainingApp({
   const [settings, setSettings] = useState<TrainingSettings>(() => settingsStore.load());
 
   const authSource = useAuthSource();
+  const canEnterDomain = useSession().access?.role === "owner";
 
   // THE LIBRARY'S OWN PROVIDER, not a second one. Every upload in the OS
   // rides `EdgeUploadProvider` (the desk's drops, the Files browse,
@@ -294,6 +297,8 @@ export function TrainingApp({
   if (sectionId === "domains") {
     return <DomainsSection feed={domains} onNavigate={navigate} />;
   }
+  if (sectionId === "skills") return <SkillsSection />;
+  if (sectionId === "evaluations") return <EvaluationsSection />;
   return (
     <UploadSection
       uploads={uploads}
@@ -302,6 +307,8 @@ export function TrainingApp({
       runsByFileId={runsByFileId}
       domains={domains}
       train={train}
+      canEnterDomain={canEnterDomain}
+      onReview={() => navigate("review")}
       onReseed={reseed}
       onAsk={askContext}
     />

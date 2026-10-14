@@ -434,11 +434,40 @@ func testPipelineStreamDBRetainedBytesSurviveEditableFileChanges(t *testing.T, n
 	}
 }
 
-// The cases use unique owners and fresh stores, with two independent real
-// engines/connections owned by this parent. Reusing only their immutable DSL
-// loading preserves replica behavior without paying a full boot per case.
-func TestPipelineStreamDB(t *testing.T) {
+// These Library-backed families use identical compiled DSL. Own its two real
+// replicas under one parent, while every case keeps fresh stores, uploaders,
+// owners and receipts. SQL-only scope and integration-mutating tests keep
+// their own fixtures; no provider or engine wiring changes between these cases.
+func TestPipelineLibraryDB(t *testing.T) {
 	replicas := pipelineDBTestReplicas(t)
+	if replicas.engines[0] == replicas.engines[1] || replicas.databases[0] == replicas.databases[1] {
+		t.Fatal("pipeline Library fixture must retain two independent replicas")
+	}
+	t.Run("TestPipelineStreamDB", func(t *testing.T) { testPipelineStreamDB(t, replicas) })
+	t.Run("TestPipelineLifecycleDB", func(t *testing.T) { testPipelineLifecycleDB(t, replicas) })
+	t.Run("TestPipelineReceiptDBReadIsScopedOrderedAndIndependentOfLibrary", func(t *testing.T) {
+		testPipelineReceiptDBReadIsScopedOrderedAndIndependentOfLibrary(t, replicas.caseFactory())
+	})
+	t.Run("TestPipelineScopeDBFenceBeforeFirstUploadSurvivesReplacement", func(t *testing.T) {
+		testPipelineScopeDBFenceBeforeFirstUploadSurvivesReplacement(t, replicas.caseFactory())
+	})
+	t.Run("TestPipelineScopeDBDiscoversLostUploadAndRetiresWithoutReceipt", func(t *testing.T) {
+		testPipelineScopeDBDiscoversLostUploadAndRetiresWithoutReceipt(t, replicas.caseFactory())
+	})
+	t.Run("TestAPipelineFileIsARowTheRealLibraryReadsBack", func(t *testing.T) {
+		testAPipelineFileIsARowTheRealLibraryReadsBack(t, replicas.engines[0])
+	})
+	t.Run("TestLibraryImageAssetReconcilesStoredBytesAndProvenance", func(t *testing.T) {
+		testLibraryImageAssetReconcilesStoredBytesAndProvenance(t, replicas.engines[0], replicas.engines[1])
+	})
+	// Version storage installs the native Library integration on each replica.
+	// Run it last so the preceding storage-only cases keep their original wiring.
+	t.Run("TestLibraryRevisionFilesUseRealVersionStoreAcrossReplicas", func(t *testing.T) {
+		testLibraryRevisionFilesUseRealVersionStoreAcrossReplicas(t, replicas)
+	})
+}
+
+func testPipelineStreamDB(t *testing.T, replicas pipelineDBReplicas) {
 	t.Run("TestPipelineStreamDBLostLibraryWriteRecoversOnAnotherEngine", func(t *testing.T) {
 		testPipelineStreamDBLostLibraryWriteRecoversOnAnotherEngine(t, replicas.caseFactory())
 	})

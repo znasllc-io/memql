@@ -184,7 +184,7 @@ func (f *digestFixture) TestAddRecipientStampsTheMailboxDigest(t *testing.T) {
 	d := f.newDigestTenant(t, "digest-stamp")
 	recipient := d.suffix + "-rec"
 
-	if err := d.store.AddRecipient(d.owner, recipient, d.audience, " Foo@Example.TEST ", "", "manual", d.org, nil); err != nil {
+	if err := d.store.AddRecipient(d.owner, recipient, d.audience, " Foo@Example.TEST ", "", "manual", d.org, "subscribed", nil); err != nil {
 		t.Fatal(err)
 	}
 	want := EmailDigest("foo@example.test")
@@ -411,6 +411,7 @@ func newGatedWorker(t *testing.T, eng *memql.MemQLEngine, db *bun.DB, sender *re
 	worker := newTestWorker(t, deliveryDBEngine{eng}, sender)
 	wired := NewWorker(deliveryDBEngine{eng}, nil, nil, quietLogger(), gatePoolFor(t))
 	worker.newsletterGate, worker.templateGate, worker.singleSendGate = wired.newsletterGate, wired.templateGate, wired.singleSendGate
+	worker.progressGate, worker.providerLedgerGate = wired.progressGate, wired.providerLedgerGate
 	return worker
 }
 

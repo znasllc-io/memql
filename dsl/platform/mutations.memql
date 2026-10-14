@@ -327,12 +327,13 @@ mutation outboundRequest stageServerOutboundRequest {
     medium       string!
     target       string!
     subject      string
+    htmlBody     string
     body         string!
     dedupeKey    string
     requestedBy  string
   }
   insert {
-    accept { medium, target, subject, body, dedupeKey, requestedBy }
+    accept { medium, target, subject, body, htmlBody, dedupeKey, requestedBy }
     stamp {
       id: args.requestId
       status: "pending"

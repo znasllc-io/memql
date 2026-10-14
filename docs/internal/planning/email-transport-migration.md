@@ -359,12 +359,12 @@ or rollback must not resend an accepted queue through the other provider.
 
 ### Feedback and suppression
 
-ACS delivery reports are exposed through Event Grid. Implement an authenticated
-and validated ingestion path with replay deduplication, or an approved pull
-destination. The existing generic inbound HMAC contract is not automatically
-compatible with Event Grid validation/authentication. Never accept an
-unauthenticated payload's organization or recipient as authority.
-([ACS Email events](https://learn.microsoft.com/en-us/azure/event-grid/communication-services-email-events))
+The ACS bridge now provisions a resource-scoped Event Grid subscription and
+accepts authenticated, receipt-correlated reports at `/email/events/azure`.
+Shared gates deduplicate reports across replicas, permanent failures feed
+suppression and consent, and late acceptance triggers durable terminal counter
+repair. See the shipped [Azure send receipts contract](../../public/operate/campaign-sending.md#azure-send-receipts).
+The Postfix feedback work below remains a separate migration stage.
 
 For Postfix, collect queue/delivery events and structured DSNs into the same
 MemQL ledger. Correlate with a trusted attempt and signed/opaque bounce token;
@@ -576,7 +576,7 @@ or another application. Review and extend the existing seams:
 | Delivery integration | `integrations/email/`, `app/adapters.go` | Add ACS adapter and explicit organization-scoped resolution; preserve existing Graph/SMTP consumers and refuse cross-client fallback. |
 | Campaign send and identity | `component/campaigns/` | Carry organization and attempt references, represent uncertain/accepted outcomes, verify the chosen sender, reconcile provider feedback. |
 | Ownership | `component/memql/organization_ownership.go`, OS organization helpers | Explicit organization on creation, consistent server checks, safe handling of existing rows and derived children. |
-| UI | `clients/os/src/apps/campaigns/` | Guided connection and verification plus shared Deployables/Fleet layout patterns. |
+| UI | `clients/os/src/apps/email/` | Guided connection and verification plus shared Deployables/Fleet layout patterns. |
 | Email rules | `component/emailrules/` | Resolve current author authority correctly across nodes; fix the staff-authored organization rule defect tracked in #5679. |
 | Inbound | `component/inbound/` | Authenticated provider feedback now; durable SMTP/MIME handoff and receiving-domain authorization in the Postfix phase. |
 | Secrets/configuration | Existing secret encryption and persisted configuration | Store restricted connection material, share flow/key state across nodes, support rotation/revocation without manual environment edits. |

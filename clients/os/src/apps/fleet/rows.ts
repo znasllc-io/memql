@@ -1,4 +1,4 @@
-import { bareShortId, rowArray, rowNumber, rowObject, rowString, type Row } from "@znasllc-io/memql-sdk-core/client";
+import { bareShortId, rowArray, rowNumber, rowObject, rowString, versionOrder, type Row } from "@znasllc-io/memql-sdk-core/client";
 
 import { absent, figureFrom, figureOf, figureValue, type Figure } from "../../kit/measure";
 import { flatten } from "../../kit/rows";
@@ -834,27 +834,6 @@ export function nodeFromRow(raw: Row): WorkbenchNodeRow {
 export const WORKBENCH_NODE_TYPE = "workbench";
 
 /**
- * Collapse the append-only node stream to one row per id.
- *
- * v1:cluster:node is append-only -- every liveness transition writes a new
- * row under the same id -- and `clusterNodes` declares no `asOf latest`, so
- * it returns the WHOLE history. Its own DSL comment says the CLI collapses in
- * Go; this is that same collapse, and without it a single replica renders
- * once per heartbeat it has ever sent.
- *
- * Ties (equal createdAt, or none at all) keep the LAST one seen, which is the
- * later row in the query's own order.
- */
-export function latestPerId(nodes: readonly WorkbenchNodeRow[]): WorkbenchNodeRow[] {
-  const byId = new Map<string, WorkbenchNodeRow>();
-  for (const node of nodes) {
-    const held = byId.get(node.id);
-    if (held === undefined || node.createdAt >= held.createdAt) byId.set(node.id, node);
-  }
-  return [...byId.values()].sort((a, b) => a.id.localeCompare(b.id));
-}
-
-/**
  * Group workspaces by the replica whose disk holds them, newest first within
  * each group.
  *
@@ -873,13 +852,24 @@ export function workspacesByNode(
     else byNode.set(one.nodeId, [one]);
   }
   return [...byNode.entries()]
-    .map(([nodeId, rows]) => ({
-      nodeId,
-      workspaces: [...rows].sort((a, b) =>
-        a.createdAt === b.createdAt ? (a.id < b.id ? 1 : -1) : a.createdAt < b.createdAt ? 1 : -1,
-      ),
-    }))
+    .map(([nodeId, rows]) => ({ nodeId, workspaces: [...rows].sort(newestFirst) }))
     .sort((a, b) => a.nodeId.localeCompare(b.nodeId));
+}
+
+/**
+ * Newest first, by the INSTANT a workspace was made (the SDK's `versionOrder`):
+ * the engine trims the fraction's trailing zeros, so as text `.3251Z` is greater
+ * than `.325101Z` and is the earlier time. The same instant breaks its tie by
+ * id. A workspace whose time cannot be read goes after every one whose can, and
+ * two of those stay in the order they were read in (the sort is stable): nothing
+ * says one is newer than the other.
+ */
+function newestFirst(a: WorkspaceRow, b: WorkspaceRow): number {
+  const order = versionOrder(b.createdAt, a.createdAt);
+  if (order !== null) return order !== 0 ? order : a.id === b.id ? 0 : a.id < b.id ? 1 : -1;
+  const aTimed = versionOrder(a.createdAt, a.createdAt) !== null;
+  const bTimed = versionOrder(b.createdAt, b.createdAt) !== null;
+  return aTimed === bTimed ? 0 : aTimed ? -1 : 1;
 }
 
 // ---------------------------------------------------------------------------

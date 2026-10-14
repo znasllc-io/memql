@@ -1,0 +1,39 @@
+{
+  "schemaVersion": 1,
+  "repetitions": 1,
+  "scenarioIds": [
+    "investigate-reproduce",
+    "regression-before-fix",
+    "implement-and-check",
+    "refactor-preserve-behavior",
+    "upstream-boundary",
+    "integrate-main",
+    "resolve-conflict",
+    "review-feedback",
+    "open-pull-request",
+    "authorized-merge-cleanup",
+    "tool-unavailable",
+    "failed-test-recovery",
+    "checkpoint-restoration",
+    "missing-context"
+  ],
+  "maxModelCalls": 80,
+  "wallClockMinutes": 30,
+  "paidProviderBudgetUsd": 0,
+  "githubRepositories": [],
+  "schedule": {
+    "enabled": false,
+    "cadence": "monthly",
+    "timezone": "America/Phoenix"
+  },
+  "status": "awaiting-shared-test-release-and-routing-snapshot",
+  "setups": [
+    {
+      "name": "Local baseline",
+      "reasoningModel": "fleet:qwen3.8:27b",
+      "paidProvidersAllowed": false,
+      "routingSnapshot": "capture-before-run",
+      "otherRoles": "record-configured-and-actual-models"
+    }
+  ]
+}

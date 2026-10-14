@@ -339,6 +339,14 @@ export function rowArray(row: Row | null, key: string): unknown[] | null {
   return Array.isArray(v) ? v : null;
 }
 
+// CountAnswer is what a `count` query answered: `count` rows matched, or --
+// when `atLeast` is true -- the engine stopped at its window and at least
+// that many did (memql#6033). Read by Result.count().
+export interface CountAnswer {
+  count: number;
+  atLeast: boolean;
+}
+
 // Result wraps a typed engine response. Generated query / mutation /
 // logic methods return Result. Consumers iterate via .rows() rather
 // than reaching into the raw envelope. Mirrors sdk/go's Result.
@@ -378,6 +386,22 @@ export class Result {
   single(): Row | null {
     const rs = this.rows();
     return rs.length > 0 ? (rs[0] ?? null) : null;
+  }
+
+  // count reads the aggregate a `count` query answers (memql#6033): how many
+  // rows matched, and whether the engine stopped at its window. The engine
+  // reads a count up to its window (5,000 by default, and configurable) and
+  // one row past it, so a larger set answers the window with `atLeast` true --
+  // "this many or more". Read the signal rather than comparing the figure with
+  // a window a client cannot know. Null when the result is not a count.
+  count(): CountAnswer | null {
+    const row = this.single();
+    if (row === null) return null;
+    const raw = row["count"];
+    // A string is parsed: the wire carries large integers as strings.
+    const n = typeof raw === "number" ? raw : typeof raw === "string" && raw.trim() !== "" ? Number(raw) : Number.NaN;
+    if (!Number.isFinite(n)) return null;
+    return { count: n, atLeast: row["atLeast"] === true };
   }
 
   // rawNodes returns the bundle's nodes with their full nested shape
@@ -457,6 +481,39 @@ function compareInstant(a: string | undefined, b: string | undefined): number {
   if (pa === null || pb === null) return pa === null ? (pb === null ? 0 : 1) : -1;
   if (pa.seconds !== pb.seconds) return pa.seconds < pb.seconds ? -1 : 1;
   return pa.fraction < pb.fraction ? -1 : pa.fraction > pb.fraction ? 1 : 0;
+}
+
+/**
+ * Which of two VERSION TIMES is later.
+ *
+ * A version time is the `createdAt` an engine row, a graph event and a read of
+ * it carry: the time of that version of the row (the store is append-only, and
+ * the latest version of a row is the one with the greatest `createdAt`). Use
+ * this to keep the newer of two copies of a row; it is the ordering a
+ * `LiveCollection` applies by default (memql#6033).
+ *
+ * The times are compared AS INSTANTS, at every fractional digit the wire
+ * carries -- never as strings. The engine writes RFC 3339 with the trailing
+ * zeros of the fraction trimmed, so `….3251Z` names an EARLIER instant than
+ * `….325101Z` while being the larger string; a zone offset is folded into the
+ * instant, and `….5Z` and `….500000Z` are the same time.
+ *
+ * Returns a negative number when `a` is earlier than `b`, a positive number
+ * when it is later, and 0 when they are the same instant. Returns `null` when
+ * EITHER side is not a time to order by -- absent, not a string, or not a
+ * parseable RFC 3339 time -- and then claims no order at all: what to do about
+ * a copy that cannot be placed is the caller's decision (a `LiveCollection` lets
+ * the arrival win, as it did before it had versions to compare).
+ */
+export function versionOrder(a: unknown, b: unknown): number | null {
+  if (!isVersionTime(a) || !isVersionTime(b)) return null;
+  return compareInstant(a, b);
+}
+
+// isVersionTime: a time versionOrder can order by. Internal: not exported
+// through the package barrel.
+export function isVersionTime(value: unknown): value is string {
+  return typeof value === "string" && instantParts(value) !== null;
 }
 
 function instantParts(stamp: string | undefined): { seconds: number; fraction: string } | null {

@@ -16,7 +16,11 @@ func askConversationMessages(turns []AskTurn) []map[string]any {
 		}
 		history = append(history, map[string]any{"role": "user", "content": turn.Prompt})
 		if turn.Answer != "" {
-			history = append(history, map[string]any{"role": "assistant", "content": turn.Answer})
+			answer := turn.Answer
+			if turn.ApprovalID != "" {
+				answer = "[Read-only approval discussion; this is advice, not a human decision or an executed action.]\n" + answer
+			}
+			history = append(history, map[string]any{"role": "assistant", "content": answer})
 		}
 		if turn.VoiceInterrupted {
 			history = append(history, map[string]any{"role": "user", "content": "[Audio delivery of the preceding reply was interrupted. The generated text may not have been heard in full.]"})

@@ -47,6 +47,7 @@ func (s *EngineStore) WorkersForOwner(ctx context.Context, ownerUserId string) (
 		sharing := workerservice.SharingFromRow(row["sharing"])
 		out = append(out, Candidate{
 			RegistrationId: id,
+			MachineId:      rowStringMap(row, "labels")["machineId"],
 			Name:           rowString(row, "name"),
 			DisplayName:    rowString(row, "displayName"),
 			// Stamp the scoped owner so PlanUserModelWithShared recovery and
@@ -69,6 +70,7 @@ func (s *EngineStore) WorkersForOwner(ctx context.Context, ownerUserId string) (
 			RepositoryScopes: workerservice.RepositoryScopesFromMap(row["capabilityDescriptor"]),
 			ActionContracts:  workerservice.ActionContractsFromMap(row["capabilityDescriptor"]),
 			NativePlatform:   workerservice.NativePlatformFromMap(row["capabilityDescriptor"]),
+			HomeDirectory:    workerservice.HomeDirectoryFromMap(row["capabilityDescriptor"]),
 			Apps:             rowApps(row, "apps"),
 			AppDescriptors:   rowAppDescriptors(row, "appDescriptors"),
 			Hardware:         workerservice.InventoryFromRow(row["hardware"]),
@@ -107,6 +109,7 @@ func (s *EngineStore) SharedInferenceWorkers(ctx context.Context) ([]Candidate, 
 		sharing := workerservice.SharingFromRow(row["sharing"])
 		out = append(out, Candidate{
 			RegistrationId:   id,
+			MachineId:        rowStringMap(row, "labels")["machineId"],
 			Name:             rowString(row, "name"),
 			DisplayName:      rowString(row, "displayName"),
 			Capabilities:     rowStringList(row, "capabilities"),
@@ -118,6 +121,7 @@ func (s *EngineStore) SharedInferenceWorkers(ctx context.Context) ([]Candidate, 
 			RepositoryScopes: workerservice.RepositoryScopesFromMap(row["capabilityDescriptor"]),
 			ActionContracts:  workerservice.ActionContractsFromMap(row["capabilityDescriptor"]),
 			NativePlatform:   workerservice.NativePlatformFromMap(row["capabilityDescriptor"]),
+			HomeDirectory:    workerservice.HomeDirectoryFromMap(row["capabilityDescriptor"]),
 			Apps:             rowApps(row, "apps"),
 			AppDescriptors:   rowAppDescriptors(row, "appDescriptors"),
 			Hardware:         workerservice.InventoryFromRow(row["hardware"]),

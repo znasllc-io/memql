@@ -17,3 +17,25 @@ logic agentRecoveryNeedsConsent {
  args { errorCode string! }
  return args.errorCode == "denied_no_per_task_approval" || args.errorCode == "denied_by_scope"
 }
+
+/// Reconsider before spending the last calls, or after repeated discovery/evidence.
+/// A review uses the next ordinary model call. Only continued stalling asks the
+/// person; approaching a cap alone does not interrupt productive work.
+logic agentProgressRecovery {
+ args {
+  limit int!
+  used int!
+  discoveryRounds int!
+  repeatedRounds int!
+  reviewActive bool!
+  stalledAfterReview int!
+  reviewedLimit int!
+ }
+ stalled := args.discoveryRounds >= 3 || args.repeatedRounds >= 3
+ nearLimit := args.limit >= 6 && (args.used >= args.limit * 0.75 || args.limit - args.used <= 3)
+ mustAsk := args.reviewActive && (args.stalledAfterReview >= 2 || (args.stalledAfterReview > 0 && args.limit > 0 && args.limit - args.used <= 1))
+ if args.limit > 0 && args.used >= args.limit { return "continue" }
+ if mustAsk { return "ask" }
+ if nearLimit && args.reviewedLimit != args.limit { return "review_budget" }
+ return !args.reviewActive && stalled ? "review_stalled" : "continue"
+}

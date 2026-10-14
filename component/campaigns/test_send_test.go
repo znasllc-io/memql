@@ -3,6 +3,7 @@ package campaigns
 import (
 	"strings"
 	"testing"
+	"time"
 )
 
 // test_send_test.go -- the one-address preview (memql#4822, design D11).
@@ -136,6 +137,81 @@ func TestTestSendCarriesAnInertUnsubscribeToken(t *testing.T) {
 	}
 }
 
+// TestTestSendLinksAreInert: all four links render, so the operator sees what
+// the recipient will, and none of them does anything. A real one would name a
+// real recipient and opt somebody out, subscribe somebody or open their
+// message on a curious click.
+func TestTestSendLinksAreInert(t *testing.T) {
+	engine := testSendFixture()
+	engine.template["textBody"] = "U {{unsubscribeUrl}} P {{preferencesUrl}} V {{viewUrl}} C {{confirmUrl}}"
+	engine.template["htmlBody"] = `<p><a href="{{preferencesUrl}}">Manage</a> <a href="{{confirmUrl}}">Confirm</a></p>`
+	w, sender := testSendWorker(t, engine)
+
+	nodes, err := w.handleTestSend(importCtx(), map[string]any{
+		"campaignId": testCampaign, "to": "operator@example.test",
+	}, 0)
+	if err != nil {
+		t.Fatalf("testSend: %v", err)
+	}
+	msg := sender.sent[0]
+
+	for tag, path := range map[string]string{
+		"U": UnsubscribePath, "P": PreferencesPath, "V": ViewPath, "C": ConfirmPath,
+	} {
+		want := tag + " https://example.test" + path + "?token=" + inertUnsubscribeToken
+		if !strings.Contains(msg.TextBody, want) {
+			t.Errorf("the text part is missing %q.\ngot: %s", want, msg.TextBody)
+		}
+	}
+	if hrefs := anchorHrefs(t, msg.HTMLBody); countOf(hrefs, "https://example.test"+PreferencesPath+"?token="+inertUnsubscribeToken) != 1 ||
+		countOf(hrefs, "https://example.test"+ConfirmPath+"?token="+inertUnsubscribeToken) != 1 {
+		t.Errorf("the HTML part's links are not the inert ones: %v", hrefs)
+	}
+	if got := msg.Headers[headerListUnsubscribe]; got != "<https://example.test"+UnsubscribePath+"?token="+inertUnsubscribeToken+">" {
+		t.Errorf("List-Unsubscribe = %q", got)
+	}
+	keys := w.cfg.UnsubscribeKeys()
+	for _, kind := range linkKinds {
+		if _, err := ParseLinkToken(keys, kind, inertUnsubscribeToken, time.Now()); err == nil {
+			t.Errorf("the inert token verifies as a %s token", kind)
+		}
+	}
+	if tags, _ := decodeResult(t, nodes)["unresolvedTags"].([]any); len(tags) != 0 {
+		t.Errorf("a link tag was reported as unresolved: %v", tags)
+	}
+}
+
+// TestTestSendRefusesATemplateWhoseFooterCannotBePlaced: the test send is where
+// the author learns that a template's HTML ends inside a comment or a tag, is a
+// frameset, leaves an Outlook section open or has a spot a client would not
+// show, before a campaign built on it finds out. It says the same sentence
+// the campaign would, and sends nothing.
+func TestTestSendRefusesATemplateWhoseFooterCannotBePlaced(t *testing.T) {
+	for name, tc := range map[string]struct{ html, want string }{
+		"a comment that never ends":          {"<p>Hi</p><!--", wantEndsOpen},
+		"a tag that is cut off":              {"<p>Hi<a title=x", wantEndsOpen},
+		"a style that never ends":            {"<p>Hi</p><style>p{", wantEndsOpen},
+		"a frameset":                         {"<frameset><frame src=x></frameset>", wantFrames},
+		"an Outlook section left open":       {"<html><body><p>Hi</p><![if !mso]><p>x</p></body></html>", wantOutlookOpen},
+		"a comment only a tree builder sees": {"<html><body><p>Hi</p><noscript><!--</noscript></body></html>", wantEndsOpen},
+		"a template that is never closed":    {"<html><body><p>Hi</p><template>", wantEndsOpen},
+	} {
+		engine := testSendFixture()
+		engine.template["htmlBody"] = tc.html
+		w, sender := testSendWorker(t, engine)
+
+		_, err := w.handleTestSend(importCtx(), map[string]any{
+			"campaignId": testCampaign, "to": "operator@example.test",
+		}, 0)
+		if err == nil || err.Error() != "campaigns.testSend: "+tc.want {
+			t.Errorf("%s: err = %v, want the sentence %q", name, err, tc.want)
+		}
+		if sender.count() != 0 {
+			t.Errorf("%s: a message went out", name)
+		}
+	}
+}
+
 // TestTestSendWorksOnAnAlreadySentCampaign is the sendableStatus exemption.
 // The commonest moment to want a test send is while duplicating last month's
 // campaign or diagnosing a complaint about one that already went out.
@@ -243,5 +319,67 @@ func TestTestSendConsumesTheRateBucket(t *testing.T) {
 	}
 	if sender.count() != 1 {
 		t.Errorf("sent %d messages, want 1", sender.count())
+	}
+}
+
+// A draft too large to send keeps its document and no HTML (the editor renders
+// it on demand). A test send builds its message from the stored parts, and
+// renderMessage writes an HTML part only when there is HTML, so without a
+// refusal the test of such a draft would go out as plain text and look like a
+// test of the email. It is refused with the sentence the editor already showed
+// for it.
+func TestTestSendRefusesADraftTooLargeToSend(t *testing.T) {
+	layoutDocument := map[string]any{
+		"subject": "Hello", "layout": "builtin:letter",
+		"blocks": []any{map[string]any{"id": "intro", "type": "text", "text": "Hi"}},
+	}
+	for name, row := range map[string]map[string]any{
+		"a layout email":                      {"document": layoutDocument, "layoutId": "builtin:letter"},
+		"a layout email begun from no layout": {"document": map[string]any{"subject": "Hello", "blocks": []any{map[string]any{"id": "intro", "type": "text", "text": "Hi"}}}},
+		"custom HTML":                         {"document": map[string]any{"subject": "Hello", "textBody": "Hi", "htmlBody": "<p>Hi</p>"}},
+		"a layout named and no document":      {"layoutId": "org:acme-letter"},
+	} {
+		t.Run(name, func(t *testing.T) {
+			engine := testSendFixture()
+			engine.template["htmlBody"] = ""
+			for key, value := range row {
+				engine.template[key] = value
+			}
+			w, sender := testSendWorker(t, engine)
+
+			_, err := w.handleTestSend(importCtx(), map[string]any{"campaignId": testCampaign, "to": "operator@example.test"}, 0)
+			if err == nil || err.Error() != tooLargeToSend {
+				t.Fatalf("error = %v, want %q", err, tooLargeToSend)
+			}
+			if sender.count() != 0 {
+				t.Errorf("%d messages went out for a draft with no HTML to send", sender.count())
+			}
+		})
+	}
+}
+
+// An email with no HTML part by design is not too large, and still goes out as
+// the plain text it is: one saved before documents existed, and a text email
+// written as a document (custom mode with an empty htmlBody).
+func TestTestSendStillSendsAPlainTextEmail(t *testing.T) {
+	for name, row := range map[string]map[string]any{
+		"saved before documents":     {},
+		"a text email as a document": {"document": map[string]any{"subject": "Hello", "textBody": "Hi", "htmlBody": ""}},
+	} {
+		t.Run(name, func(t *testing.T) {
+			engine := testSendFixture()
+			engine.template["htmlBody"] = ""
+			for key, value := range row {
+				engine.template[key] = value
+			}
+			w, sender := testSendWorker(t, engine)
+
+			if _, err := w.handleTestSend(importCtx(), map[string]any{"campaignId": testCampaign, "to": "operator@example.test"}, 0); err != nil {
+				t.Fatalf("a plain text email was refused: %v", err)
+			}
+			if sender.count() != 1 || sender.sent[0].HTMLBody != "" || sender.sent[0].TextBody == "" {
+				t.Errorf("sent %d messages; want one plain text message, got %+v", sender.count(), sender.sent)
+			}
+		})
 	}
 }

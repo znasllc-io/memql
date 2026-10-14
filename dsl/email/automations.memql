@@ -1,0 +1,15 @@
+// The installer grants one cluster identity access to its dedicated email
+// group. Native startup supplies only this scope. Provider and row operations
+// stay bounded; this template owns ordering and when sender creation runs.
+@template
+automation emailInstallationWorkflow {
+  cluster := builtin emailInstallationConnect()
+  if cluster.stopped { return }
+  builtin emailInstallationAccount()
+  plan := builtin emailInstallationPrepare()
+  if plan.stopped { return }
+  resources := builtin emailInstallationProvision()
+  if resources.status == "verified" {
+    builtin emailInstallationSender()
+  }
+}

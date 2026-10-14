@@ -63,6 +63,7 @@ const PACKAGE_NAME = /^[a-z][a-z0-9]*: /;
  */
 export function refusalSentence(error: unknown, construct?: string): string {
   let text = (error instanceof Error ? error.message : String(error)).trim();
+  if (construct && text === `${construct}:`) return "";
   const named = construct ? `${construct}: ` : "";
   if (named && text.startsWith(named)) {
     text = text.slice(named.length);

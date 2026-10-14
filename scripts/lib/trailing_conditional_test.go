@@ -4,7 +4,6 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
-	"strings"
 	"testing"
 )
 
@@ -47,7 +46,6 @@ import (
 // false is 0.
 
 var trailingConditional = regexp.MustCompile(`^\[\[.*\]\][ \t]*&&[ \t]*\S`)
-var bashFuncHeader = regexp.MustCompile(`^function[ \t]+([A-Za-z_][A-Za-z0-9_]*)[ \t]*\(\)[ \t]*\{`)
 
 func TestNoCapabilityFunctionEndsOnAConditional(t *testing.T) {
 	scripts := capabilityScripts(t)
@@ -63,42 +61,22 @@ func TestNoCapabilityFunctionEndsOnAConditional(t *testing.T) {
 		}
 		rel := filepath.Base(path)
 
-		lines := strings.Split(string(body), "\n")
-		var fn string
-		depth := 0
-		lastCode := ""
-		lastCodeLine := 0
-
-		for i, raw := range lines {
-			trimmed := strings.TrimSpace(raw)
-
-			if depth == 0 {
-				if m := bashFuncHeader.FindStringSubmatch(trimmed); m != nil {
-					fn, depth, lastCode, lastCodeLine = m[1], 1, "", 0
-				}
+		for _, fn := range bashFunctions(string(body)) {
+			checked++
+			if len(fn.code) == 0 {
 				continue
 			}
-
-			depth += strings.Count(raw, "{") - strings.Count(raw, "}")
-			if depth <= 0 {
-				checked++
-				if trailingConditional.MatchString(lastCode) {
-					t.Errorf("%s:%d: function %s() ends on a conditional AND-list:\n"+
-						"    %s\n"+
-						"When the test is false the list returns 1, so the FUNCTION returns 1, and "+
-						"under `set -e` the caller aborts on the call. In a capability script that "+
-						"means cap_ok is never reached and the envelope reports "+
-						"\"aborted without an explicit result\" on a run that succeeded.\n"+
-						"Repair: end the function with an unconditional `return 0`, or write the "+
-						"last conditional as an `if` block.",
-						rel, lastCodeLine, fn, lastCode)
-				}
-				fn = ""
-				continue
-			}
-
-			if trimmed != "" && !strings.HasPrefix(trimmed, "#") {
-				lastCode, lastCodeLine = trimmed, i+1
+			last := fn.code[len(fn.code)-1]
+			if trailingConditional.MatchString(last.text) {
+				t.Errorf("%s:%d: function %s() ends on a conditional AND-list:\n"+
+					"    %s\n"+
+					"When the test is false the list returns 1, so the FUNCTION returns 1, and "+
+					"under `set -e` the caller aborts on the call. In a capability script that "+
+					"means cap_ok is never reached and the envelope reports "+
+					"\"aborted without an explicit result\" on a run that succeeded.\n"+
+					"Repair: end the function with an unconditional `return 0`, or write the "+
+					"last conditional as an `if` block.",
+					rel, last.number, fn.name, last.text)
 			}
 		}
 	}
@@ -110,5 +88,5 @@ func TestNoCapabilityFunctionEndsOnAConditional(t *testing.T) {
 			"either the house style changed or this scan stopped matching, and either way " +
 			"this gate is watching nothing")
 	}
-	t.Logf("checked %d function(s) across %d capability script(s)", checked, len(scripts))
+	t.Logf("checked %d multiline function(s) across %d capability script(s)", checked, len(scripts))
 }

@@ -31,6 +31,7 @@ import (
 	"time"
 
 	"github.com/uptrace/bun"
+	"github.com/znasllc-io/memql/component/automations/workflowhost"
 
 	memorynodes "github.com/znasllc-io/memql/component/database/memory-nodes"
 	"github.com/znasllc-io/memql/component/memql"
@@ -59,7 +60,9 @@ type Integration struct {
 	// order given, with ONE acquisition: one transaction on one connection of
 	// the gate pool (memql.AcquireWriteGates). A flow that needs several names
 	// them together rather than taking one inside another (memql#6022).
-	decisionGate           func(context.Context, ...string) (func(), error)
+	decisionGate func(context.Context, ...string) (func(), error)
+	// Optional test seam for verified decision holds; production uses GateDB.
+	computerDecisionGate   func(context.Context, string) (func(), func(context.Context) error, error)
 	reviewValidators       map[string]func(context.Context, map[string]any) error
 	reviewAnswerValidators map[string]func(context.Context, map[string]any, map[string]any) error
 	logger                 *slog.Logger
@@ -307,18 +310,26 @@ func (i *Integration) IntegrationName() string { return integrationName }
 // set against dsl/work/builtins.memql, because a capability the DSL names and
 // the registry lacks is a BOOT failure on every node type.
 func (i *Integration) Capabilities() []memql.IntegrationCapability {
-	return []memql.IntegrationCapability{
+	return append(workflowhost.ScopedCapabilities(evaluationPorts()), []memql.IntegrationCapability{
+		{Name: "skillCatalog", Description: "Inspect skill content and its verified installed-baseline provenance.", Handler: i.handleSkillCatalog},
+		{Name: "selectSkills", Description: "Bind exact reviewed skill versions to the current owned work step.", Handler: i.handleSelectSkills},
+		{Name: "recordGoalEvaluation", Description: "Publish owned external-harness evidence after verifying goal and model receipts.", Handler: i.handleRecordGoalEvaluation},
+		{Name: "approvalDiscussionState", Description: "Read human-guidance eligibility for one owned approval.", Handler: i.handleApprovalDiscussionState},
+		{Name: "openApprovalDiscussion", Description: "Record a human discussion message and open its bounded read-only child run.", Handler: i.handleOpenApprovalDiscussion},
 		{
 			Name:        "createGoal",
 			Description: "Accept a goal and start work on it: opens a v1:work:goal owned by the caller and its first v1:work:run in `compiling`, then dispatches compile (locally or via the run graph event to a planner). Refuses with no compile surface when neither a local compiler nor event forward is available. Returns {goalId, runId, compileDispatched}.",
 			Handler:     i.handleCreateGoal,
 			ArgsSchema: map[string]string{
-				"spine":        "string -- installed Spine template; frozen at admission",
-				"statement":    "string (required) -- the goal in the person's own words",
-				"input":        "object -- the typed input object the chosen template's args declare",
-				"accountIds":   "[]string -- account tags; a record of who the work is for, never a visibility scope",
-				"ceilings":     "object -- {tokenBudget, costCeiling, wallClockMs, maxRetries, maxModelCalls, maxEvents}; a zero is 'unset', never 'nothing allowed'",
-				"requestedVia": "string -- api | ask | nexus | responsibility | library | materializer; empty when unknown",
+				"spine":           "string -- installed Spine template; frozen at admission",
+				"statement":       "string (required) -- the goal in the person's own words",
+				"input":           "object -- the typed input object the chosen template's args declare",
+				"accountIds":      "[]string -- account tags; a record of who the work is for, never a visibility scope",
+				"ceilings":        "object -- {tokenBudget, costCeiling, wallClockMs, maxRetries, maxModelCalls, maxEvents}; a zero is 'unset', never 'nothing allowed'",
+				"requestedVia":    "string -- api | ask | nexus | responsibility | library | materializer; empty when unknown",
+				"source":          "string -- human-chosen source or route; child goals inherit their parent's choice",
+				"level":           "string -- fast | strong | reasoning",
+				"noPaidProviders": "bool -- inherited hard ceiling across every model modality",
 			},
 		},
 		{
@@ -408,6 +419,12 @@ func (i *Integration) Capabilities() []memql.IntegrationCapability {
 			},
 		},
 		{
+			Name:        "revokeComputerPermission",
+			Description: "Revoke one saved computer permission owned by the signed-in person.",
+			Handler:     i.handleRevokeComputerPermission,
+			ArgsSchema:  map[string]string{"permissionId": "string (required) -- the approval receipt"},
+		},
+		{
 			Name:        "decideApproval",
 			Description: "Decide one of the caller's pending approvals and resume the run parked on it. Refused when the artifact changed since it was approved. Returns {approvalId, runId, decision, runResumed}.",
 			Handler:     i.handleDecideApproval,
@@ -452,7 +469,7 @@ func (i *Integration) Capabilities() []memql.IntegrationCapability {
 				"dryRun": "boolean -- report what would be archived and deleted without doing either",
 			},
 		},
-	}
+	}...)
 }
 
 // ---------------------------------------------------------------------------

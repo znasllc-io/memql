@@ -310,8 +310,18 @@ export function Wizard({
         </section>
       </div>
 
-      {/* A new step holds presses even when its actions have the same labels. */}
-      <ActionBar state={status.word} detail={status.detail} tone={status.tone} meta={status.meta} live acts={acts} scope={open}>
+      {/* The open step is what the bar is about: moving to another one is a
+          change of the bar, so the double-click on Next that opened a step
+          does not answer it. */}
+      <ActionBar
+        state={status.word}
+        detail={status.detail}
+        tone={status.tone}
+        meta={status.meta}
+        live
+        acts={acts}
+        scope={open}
+      >
         {confirm}
       </ActionBar>
     </div>

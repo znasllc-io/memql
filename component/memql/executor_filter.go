@@ -510,7 +510,7 @@ func (e *MemQLEngine) executeCombinedFilterQuery(ctx context.Context, expr Expre
 		// version that does, and the post-filter below drops the id either way;
 		// only the position of an already-discarded candidate differs.
 		latest := db.NewSelect().
-			Model((*memorynodes.MemoryNode)(nil)).
+			Model((*memorynodes.MemoryNode)(nil)).ModelTableExpr(memorynodes.ObservedRowsSQL + " AS mn").
 			DistinctOn("id").
 			OrderExpr(`id ASC, "createdAt" DESC`)
 
@@ -531,7 +531,7 @@ func (e *MemQLEngine) executeCombinedFilterQuery(ctx context.Context, expr Expre
 			// into a scan of every historical payload after statistics change.
 			current := db.NewSelect().Model((*memorynodes.MemoryNode)(nil)).
 				ModelTableExpr("(?) AS latest_keys", keys).
-				Join(`JOIN LATERAL (SELECT * FROM "MemoryNodes" WHERE id=latest_keys.id AND "createdAt"=latest_keys."createdAt" LIMIT 1) AS mn ON true`)
+				Join(`JOIN LATERAL (SELECT * FROM ` + memorynodes.ObservedRowsSQL + ` AS observed WHERE id=latest_keys.id AND "createdAt"=latest_keys."createdAt" LIMIT 1) AS mn ON true`)
 			q = db.NewSelect().Model(rows).ModelTableExpr("(?) AS mn", current)
 			if filter.sql != "" {
 				q = q.Where(filter.sql, filter.args...)
@@ -632,6 +632,7 @@ func (e *MemQLEngine) executeCombinedFilterQuery(ctx context.Context, expr Expre
 		}
 
 		if len(result) >= fetchTarget || len(nodes) < window || window >= maxWindow {
+			noteCountWindow(ctx, len(nodes), window)
 			break
 		}
 		next := window * 4
@@ -3010,7 +3011,7 @@ func (e *MemQLEngine) executeFilterQuery(ctx context.Context, cmp *ComparisonExp
 	// callers ask for a bounded, enumerated id set -- so with the LIMIT now
 	// bounding ids, one scan returns every id that exists.
 	latest := db.NewSelect().
-		Model((*memorynodes.MemoryNode)(nil)).
+		Model((*memorynodes.MemoryNode)(nil)).ModelTableExpr(memorynodes.ObservedRowsSQL + " AS mn").
 		DistinctOn("id").
 		OrderExpr(`id ASC, "createdAt" DESC`)
 
@@ -3046,6 +3047,8 @@ func (e *MemQLEngine) executeFilterQuery(ctx context.Context, cmp *ComparisonExp
 	if err := query.Scan(ctx); err != nil {
 		return nil, err
 	}
+
+	noteCountWindow(ctx, len(nodes), fetchTarget)
 
 	// The same post-filter the combined path runs, through the same helper:
 	// resolve each scanned candidate to its TRUE latest version and keep the

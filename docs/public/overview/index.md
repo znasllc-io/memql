@@ -51,6 +51,7 @@ the guide for the job:
 
 [Full index](../../../GLOSSARY.md) · [Tech stack](tech-stack.md) ·
 [Architecture](../concepts/architecture.md) · [Measured results](proving-scorecard.md) ·
+[Proof of work](proof-of-work.md) ·
 [Status and direction](roadmap.md) ·
 [Supervised Visual Composition](../operate/supervised-visual-composition.md).
 

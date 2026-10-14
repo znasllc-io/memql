@@ -36,19 +36,39 @@
 // alone never does: the OS follows on its own live feed and calls
 // handOffDescription itself.
 //
-// A DATA SOURCE KEEPS THE COMPOSER. The revision workflow reads Markdown and
-// images; it cannot read the graph. So a Markdown request with a concept_row or
-// query source is NOT described: the server keeps the composer for it (which
-// reads the records and writes the file), isDescribedMarkdown says false, and
-// materialize hands nothing on. Only Library files travel with a description.
+// ANYTHING THE LIBRARY CANNOT ATTACH KEEPS THE COMPOSER. The revision workflow
+// reads what the Library attaches to a review comment -- a Markdown file up to
+// 32 KiB, or a PNG, JPEG, GIF or WebP picture up to 8 MiB -- and nothing else: not
+// the graph, and not a spreadsheet, a JSON, text or web page file, an archive, a
+// PDF, a Markdown file past 32 KiB, a file in the Bin or one nobody can read. A
+// request to write a document from any of those has something of its own to
+// compose from, so the server keeps the composer for it (which reads every picked
+// thing and writes the file), isDescribedMarkdown says false, and materialize
+// hands nothing on. Only a request whose picked files are all ones the Library
+// attaches is described, so a picked file is used and never dropped.
 //
-// REFERENCES THE LIBRARY CANNOT ATTACH ARE REPORTED, NOT FATAL. The Library
-// takes only Markdown (up to 32 KiB) and images as review attachments, and
-// refuses a comment that carries anything else. So the hand-off attaches the
-// library_file sources the Library accepts, opens the revision with them, and
-// returns every other reference (a PDF, a file it cannot find, one past the
-// Library's limits) by label in `unattached`, for the caller to name. The label
-// is all an entry carries: it does not say why that reference was left off.
+// THE SERVER DECIDES FROM THE FILES' ROWS, AND SO DOES THIS MODULE. The rule needs
+// each picked file's name, its size and whether it is archived; the server reads
+// them from its own file rows before it reads any content. isDescribedMarkdown
+// applies the same rule to the same facts (libraryFileFacts of a file row) through
+// the hand-off's own attachmentKind, so the person's client hands on exactly the
+// files the server filed blank. A caller that holds the rows passes them as a
+// lookup. readDescribedMarkdown reads the ones it is not told (one libraryFileById
+// per picked file), and materialize does that before it starts. The server's copy
+// is describedMarkdown in integrations/compose, and the Library's drift guard holds
+// both copies to its constants. The two read the rows a moment apart: only a file
+// replaced in that moment could be judged differently, which costs at most a draft
+// nobody needed or one press of Describe document.
+//
+// REFERENCES THE LIBRARY STILL LEAVES OFF ARE REPORTED, NOT FATAL. Every file of a
+// described request is one the Library attaches by itself, so what can still go
+// without being attached is what its totals rule out (eight files, 16 MiB, or
+// 64 KiB of Markdown) or what only its bytes can show (Markdown that is not UTF-8,
+// a picture that does not decode). The hand-off attaches the library_file sources
+// the Library accepts, opens the revision with them, and returns every other
+// reference (one past a total, a file it can no longer find) by label in
+// `unattached`, for the caller to name. The label is all an entry carries: it does
+// not say why that reference was left off.
 //
 // ===========================================================================
 // A REFUSAL REACHES A PERSON AS ONE SENTENCE
@@ -105,7 +125,13 @@ import { rowNumber, rowString, type Row } from "./types.js";
 export type MaterializeExecute = (name: string, call: string) => Promise<Record<string, unknown>[]>;
 export type MaterializeFormat = "markdown" | "html" | "txt" | "csv" | "json" | "docx" | "pdf";
 export interface MaterializeSource { kind: "concept_row" | "library_file" | "query"; ref: string; label: string; content?: boolean; includeImages?: boolean }
-export interface MaterializeRequest { name: string; format: MaterializeFormat; requestId: string; statement?: string; sources?: MaterializeSource[]; templateId?: string; folderId?: string; outputKind?: "email_template"; accountIds?: string[]; recipeId?: string; deployableKind?: string }
+/**
+ * What a person asked for. `layoutId` is the layout an email template is
+ * written into (`outputKind: "email_template"`), as the email layout picker
+ * (the emailLayouts builtin) lists it: an opaque id this module passes on
+ * untouched. Left out, the cluster writes the email into its Article layout.
+ */
+export interface MaterializeRequest { name: string; format: MaterializeFormat; requestId: string; statement?: string; sources?: MaterializeSource[]; templateId?: string; folderId?: string; outputKind?: "email_template"; layoutId?: string; accountIds?: string[]; recipeId?: string; deployableKind?: string }
 /**
  * What the helpers need from their caller. `signal` stops the follow and
  * cancels the composition; `onStatus` hears every poll's status; `intervalMs`
@@ -173,38 +199,100 @@ const first = (rows: Row[]): Row | null => rows[0] ?? null;
 const has = (value: string | undefined): boolean => (value ?? "").trim() !== "";
 
 /**
- * Whether the server will file this request EMPTY and keep its statement, for
- * the person's client to hand to the Library's revision workflow. Mirrors
- * `describedMarkdown()` in integrations/compose/materialize.go: Markdown, with
- * a statement, and nothing of its own to compose from -- no template, recipe or
- * special output, and no source that is not a Library file (the revision
- * workflow cannot read a query or a row, so a request with one keeps the
- * composer). A draft or section keys also rule it out; startMaterialize never
- * sends either. The two move together.
+ * What decides whether the Library can attach a picked file: its file row's name,
+ * its size (null when the row says none) and whether it is archived.
  */
-export function isDescribedMarkdown(request: Pick<MaterializeRequest, "format" | "statement" | "templateId" | "recipeId" | "outputKind" | "deployableKind" | "sources">): boolean {
+export interface LibraryFileFacts { name: string; size: number | null; archived: boolean }
+/**
+ * The facts of the file a library_file source names, by its ref as given: null
+ * when its row cannot be read, undefined when the caller does not know.
+ */
+export type LibraryFileLookup = (fileId: string) => LibraryFileFacts | null | undefined;
+
+/**
+ * A file row (libraryFileById, libraryFilesForOwner) as facts: size is a finite
+ * number or null; null for no row.
+ */
+export function libraryFileFacts(row: Record<string, unknown> | null | undefined): LibraryFileFacts | null {
+  if (!row) return null;
+  const size = row["size"];
+  return { name: rowString(row, "name"), size: typeof size === "number" && Number.isFinite(size) ? size : null, archived: row["archived"] === true };
+}
+
+// The shape of a request the server can file EMPTY and keep its statement for: Markdown, with a
+// statement, nothing of its own to compose from (no template, recipe or special output; a draft or
+// section keys rule it out as well, and startMaterialize never sends either) and no source that is
+// not a Library file, whatever those files are. Whether they are ones the Library attaches is the
+// rest of the rule (isDescribedMarkdown), and it needs their rows.
+function describable(request: Pick<MaterializeRequest, "format" | "statement" | "templateId" | "recipeId" | "outputKind" | "deployableKind" | "sources">): boolean {
   return request.format === "markdown" && has(request.statement) &&
     !has(request.templateId) && !has(request.recipeId) && !has(request.outputKind) && !has(request.deployableKind) &&
     (request.sources ?? []).every(source => source.kind === "library_file");
 }
 
 /**
+ * Whether the server will file this request EMPTY and keep its statement, for the
+ * person's client to hand to the Library's revision workflow. Mirrors
+ * `describedMarkdown(resolved)` in integrations/compose/materialize.go (the shape test)
+ * and `attachableSource` in integrations/compose/described.go (the per-file rule): every
+ * source a library_file whose facts are known, not archived, and taken by
+ * attachmentKind (the hand-off's own rule for what the Library attaches). `files`
+ * answers for each source by its ref as given; a file it does not know, or says
+ * cannot be read, is not one the Library attaches. A request that names no file is
+ * described by its shape alone. The two move together.
+ */
+export function isDescribedMarkdown(request: Pick<MaterializeRequest, "format" | "statement" | "templateId" | "recipeId" | "outputKind" | "deployableKind" | "sources">, files: LibraryFileLookup): boolean {
+  return describable(request) && (request.sources ?? []).every(source => {
+    const file = files(source.ref);
+    return !!file && !file.archived && attachmentKind(file.name, file.size) !== "";
+  });
+}
+
+/**
+ * isDescribedMarkdown with the facts read: one libraryFileById per distinct picked
+ * file `known` does not answer for; nothing at all for a request whose shape cannot
+ * be described. A refused read is thrown as the cluster's sentence (inPlainWords).
+ * A file with no row is one that cannot be read, so it is not described: the
+ * composer is the one to say so if it matters.
+ */
+export async function readDescribedMarkdown(execute: MaterializeExecute, request: Pick<MaterializeRequest, "format" | "statement" | "templateId" | "recipeId" | "outputKind" | "deployableKind" | "sources">, known?: LibraryFileLookup): Promise<boolean> {
+  const sources = request.sources ?? [];
+  if (!describable(request) || sources.some(source => !has(source.ref))) return false;
+  const run = inPlainWords(execute);
+  // One entry per distinct file, by the ref read; the first of its spellings is the one `known` is asked about.
+  const refs = new Map<string, string>();
+  for (const source of sources) if (!refs.has(source.ref.trim())) refs.set(source.ref.trim(), source.ref);
+  const facts = new Map<string, LibraryFileFacts | null | undefined>();
+  await Promise.all([...refs].map(async ([fileId, given]) => {
+    const told = known?.(given);
+    facts.set(fileId, told !== undefined ? told : libraryFileFacts(first(await run("libraryFileById", buildLibraryFileById({ fileId })))));
+  }));
+  return isDescribedMarkdown(request, ref => facts.get(ref.trim()));
+}
+
+/**
  * Opens the composition and returns its id. Sends only the fields
  * MaterializeRequest declares, and omits the ones left empty, so what the
- * server sees is what isDescribedMarkdown judged. A refusal is thrown as the
- * cluster's own sentence and nothing else (see the header).
+ * server sees is what the decision of its path was made on. A refusal is thrown
+ * as the cluster's own sentence and nothing else (see the header).
+ *
+ * It reads nothing: it cannot know whether the picked files make the request a
+ * described one, so it refuses an id the hand-off could not carry for every
+ * request whose SHAPE could be described. (materialize and the OS read the
+ * files' rows first, with readDescribedMarkdown.)
  */
 export async function startMaterialize(execute: MaterializeExecute, request: MaterializeRequest): Promise<string> {
   if (!has(request.requestId)) throw new Error("A request id is required, so that a repeated request makes one file.");
   // The server trims it, and the hand-off must ask under the id the file was made under.
   const requestId = request.requestId.trim();
-  if (isDescribedMarkdown(request) && !HAND_OFF_ID.test(requestId)) throw new Error(HAND_OFF_ID_RULE);
+  if (describable(request) && !HAND_OFF_ID.test(requestId)) throw new Error(HAND_OFF_ID_RULE);
   const args: ComposeMaterializeArgs = { name: request.name, format: request.format, requestId };
   if (has(request.statement)) args.statement = request.statement;
   if (request.sources?.length) args.sources = request.sources.map(source => ({ ...source }));
   if (has(request.templateId)) args.templateId = request.templateId;
   if (has(request.folderId)) args.folderId = request.folderId;
   if (has(request.outputKind)) args.outputKind = request.outputKind;
+  if (has(request.layoutId)) args.layoutId = request.layoutId;
   if (request.accountIds?.length) args.accountIds = [...request.accountIds];
   if (has(request.recipeId)) args.recipeId = request.recipeId;
   if (has(request.deployableKind)) args.deployableKind = request.deployableKind;
@@ -375,8 +463,12 @@ function extension(name: string): string {
 
 // What the Library will take a file of this name and size for, or "" when it
 // will take it for nothing. A size the row does not give is not held against it.
+// The extension is lower-cased as Go's strings.ToLower does it, which differs from
+// toLowerCase for one letter: the Turkish capital dotted I (U+0130, what a Turkish
+// locale capitalises the "i" of "gif" to) is "i" to Go and "i" with a combining dot
+// to JavaScript, and the Library takes a file named ".G\u0130F" for a GIF.
 function attachmentKind(name: string, size: number | null): "markdown" | "image" | "" {
-  const ext = extension(name).toLowerCase();
+  const ext = extension(name).replace(/\u0130/g, "i").toLowerCase();
   const fits = (limit: number) => size === null || (size > 0 && size <= limit);
   if (ext === ".md") return fits(MAX_MARKDOWN_BYTES) ? "markdown" : "";
   if (IMAGE_EXTENSIONS.has(ext === ".jpg" ? ".jpeg" : ext)) return fits(MAX_IMAGE_BYTES) ? "image" : "";
@@ -394,15 +486,14 @@ async function lookUp(execute: MaterializeExecute, source: MaterializeSource): P
   ]);
   const artifact = first(artifactRows);
   const file = first(fileRows);
+  const facts = libraryFileFacts(file);
   const artifactId = rowString(artifact, "id");
-  if (!artifactId || !file || artifact?.["archived"] === true || file["archived"] === true) return null;
-  const stored = file["size"];
-  const size = typeof stored === "number" && Number.isFinite(stored) ? stored : null;
-  const kind = attachmentKind(rowString(file, "name"), size);
+  if (!artifactId || !facts || artifact?.["archived"] === true || facts.archived) return null;
+  const kind = attachmentKind(facts.name, facts.size);
   if (!kind) return null;
   // As Documents.read does: a file with no version number is on its first.
   const version = rowNumber(file, "versionNumber") > 0 ? rowNumber(file, "versionNumber") : FIRST_VERSION;
-  return { attachment: { artifactId, version, revision: `file:${version}` }, markdown: kind === "markdown", bytes: size ?? 0 };
+  return { attachment: { artifactId, version, revision: `file:${version}` }, markdown: kind === "markdown", bytes: facts.size ?? 0 };
 }
 
 const labelOf = (source: MaterializeSource): string => (source.label ?? "").trim() || (source.ref ?? "").trim() || UNNAMED;
@@ -524,23 +615,31 @@ export async function handOffDescription(execute: MaterializeExecute, request: H
 }
 
 /**
- * Creates a file: starts the composition, follows it to its Files entry, and,
- * for a described Markdown request, hands the description to the Library's
- * revision workflow, returning its `revisionId` or `revisionFailure` on the
- * result, with the references it could not attach in `unattached`. Resolves once
- * the FILE exists even when the hand-off failed, or was stopped. A stop never
- * deletes a file that was already made: when the file is already in Files at the
- * moment of the stop, it is returned, with the hand-off skipped and (for a
- * described request) `revisionFailure` "Stopped before the description was sent."
- * A stop before the file exists, or before its Files entry does, throws
- * MaterializeCancelled. See the header for the request id rules.
+ * Creates a file: reads the picked files' rows to decide whether the request is a
+ * described one (readDescribedMarkdown), starts the composition, follows it to its
+ * Files entry, and, for a described Markdown request, hands the description to the
+ * Library's revision workflow, returning its `revisionId` or `revisionFailure` on
+ * the result, with the references it could not attach in `unattached`. A request
+ * with a picked file the Library cannot attach is not described: the composer
+ * writes it, reading every file, and nothing is handed on. A refused read is thrown
+ * as the cluster's sentence, before anything is started. Resolves once the FILE
+ * exists even when the hand-off failed, or was stopped. A stop never deletes a file
+ * that was already made: when the file is already in Files at the moment of the
+ * stop, it is returned, with the hand-off skipped and (for a described request)
+ * `revisionFailure` "Stopped before the description was sent." A stop before the
+ * file exists, or before its Files entry does, throws MaterializeCancelled, and
+ * so does one during the read, which starts nothing. See the header for the
+ * request id rules.
  *
  * The hand-off itself is not interruptible: once it has begun it finishes.
  */
 export async function materialize(ports: MaterializePorts, request: MaterializeRequest): Promise<MaterializeResult> {
   if (ports.signal?.aborted) throw new MaterializeCancelled(STOPPED);
+  // The path is decided first, as the server decides it, on the rows of the files picked.
+  const described = await readDescribedMarkdown(ports.execute, request);
+  if (ports.signal?.aborted) throw new MaterializeCancelled(STOPPED);
   const result = await followComposition(ports, await startMaterialize(ports.execute, request));
-  if (!isDescribedMarkdown(request)) return result;
+  if (!described) return result;
   // The description is the one step here that spends model calls. A stop that
   // arrived while the file was being found ends it, but not the file.
   if (ports.signal?.aborted) return { ...result, revisionFailure: STOPPED_BEFORE_HAND_OFF };

@@ -1094,9 +1094,8 @@ query authCode expiredConsumedAuthCodes {
 //
 // Returns magic-link request rows whose expiresAt is before the
 // supplied `now` cutoff. Used by the magicLinkExpirySweep cron to
-// retire stale rows. Returns rows regardless of consumedAt -- the
-// cron decides what to do with them (a consumed-then-expired row
-// is identical to an expired row from the consume handler's POV).
+// retire stale rows. Already-consumed rows are excluded: stamping them again
+// would append a new version every hour and overwrite their consumption time.
 //
 // The cutoff is the `asOf` argument rather than the clock read inline,
 // as in expiredActiveDelegations; the magicLinkExpirySweep logic
@@ -1115,7 +1114,7 @@ query magicLinkRequest expiredMagicLinkRequests {
   args {
     asOf  string!
   }
-  filter  row => row.expiresAt < args.asOf
+  filter  row => row.expiresAt < args.asOf && (row.consumedAt == nil || row.consumedAt == "")
   shape   magicLinkRequestFull
 }
 
@@ -1786,15 +1785,17 @@ query user currentUser {
 // =================================
 //
 // Returns the cardinality of the active-user set as a self-describing
-// {count: N} aggregate, computed server-side via the `count` query
+// {count, atLeast} aggregate, computed server-side via the `count` query
 // directive. Mirrors activeUsers' filter without the optional
 // role / groupId filters; the admin dashboard only needs the count.
 //
 // Returns:
-//   {count: N} -- N is the number of active v1:identity:user rows.
+//   {count: N, atLeast: B} -- N is the number of active v1:identity:user
+//   rows, or the engine's window when B is true and more matched.
 //
 
-/// Count of active v1:identity:user rows. Returns a {count: N} aggregate.
+/// Count of active v1:identity:user rows. Returns a {count, atLeast} aggregate: past the engine's
+/// window, `count` is the window and `atLeast` is true (memql#6033).
 query user userCount {
   filter  row => isActiveRecord(row)
   count

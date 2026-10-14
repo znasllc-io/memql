@@ -1,4 +1,5 @@
 import { RecordListSkeleton } from "../../kit/RecordListSkeleton";
+import { InPlaceAsk } from "../../kit/pressHold";
 import { useState } from "react";
 import { KeyRound } from "lucide-react";
 import type { AccountTokenMintResult } from "@znasllc-io/memql-sdk-core/identity";
@@ -346,7 +347,7 @@ function CredentialRow({
           four credentials listed confirms the wrong one because nothing on the
           dialog said which. The app's archive confirm states the same rule. */}
       {confirming ? (
-        <div className="os-account-credential-confirm" role="group" aria-label={`Revoke ${name}`}>
+        <InPlaceAsk className="os-account-credential-confirm" role="group" aria-label={`Revoke ${name}`}>
           <p className="os-account-credential-confirm-line">
             Revoke <strong>{name}</strong>? It stops working immediately and cannot be restored.
             The row stays listed, marked revoked, as the record that it existed.
@@ -365,7 +366,7 @@ function CredentialRow({
               Keep it
             </Button>
           </div>
-        </div>
+        </InPlaceAsk>
       ) : null}
     </>
   );

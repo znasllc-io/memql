@@ -1,16 +1,22 @@
 import { useCallback, useRef, useState } from "react";
 import {
   fileNameProblem,
-  isDescribedMarkdown,
+  readDescribedMarkdown,
   refusalSentence,
   startMaterialize,
+  rowBool,
+  type LibraryFileLookup,
   type MaterializeExecute,
   type MaterializeRequest,
   type MaterializeSource,
 } from "@znasllc-io/memql-sdk-core/client";
 
-import type { ComposeSource } from "../../items/materialize";
-import { recipeKeeps, type CompositionRow, type SourceRow, type SelectorRow } from "./rows";
+import {
+  recipeKeeps,
+  type CompositionRow,
+  type SourceRow,
+  type SelectorRow,
+} from "./rows";
 
 import { useOsConnection } from "../../live/connection";
 import { FORMATS } from "./words";
@@ -60,25 +66,6 @@ const NOT_CONNECTED = "Not connected to the cluster, so nothing was written.";
 // materialize
 // ---------------------------------------------------------------------------
 
-export interface MaterializeFacts {
-  name: string;
-  statement: string;
-  format: string;
-  sources: ComposeSource[];
-  templateId: string;
-  /**
-   * The folder to file into, or "" for the Library root. It comes from another
-   * app's starting setup, since the composer has no folder control. It is sent as
-   * it is: the cluster refuses a folder the person cannot read or that is
-   * archived, and the refusal is shown beside the control as it was worded.
-   */
-  folderId: string;
-  accountIds: string[];
-  deployableKind: string;
-  /** "email_template" for an email template, or "" for an ordinary file. */
-  outputKind: string;
-}
-
 /**
  * A Markdown file asked for by describing it, whose description the Library
  * has not been given yet.
@@ -102,7 +89,10 @@ export interface MaterializeState extends WriteState {
   compositionId: string;
   /** Described Markdown files this window has started, for descriptionHandOff.ts. */
   described: DescribedFile[];
-  materialize: (facts: MaterializeFacts) => Promise<string>;
+  start: (
+    request: Omit<MaterializeRequest, "requestId">,
+    files?: LibraryFileLookup,
+  ) => Promise<string>;
 }
 
 type Query = NonNullable<ReturnType<typeof useOsConnection>>["query"];
@@ -112,8 +102,11 @@ type Query = NonNullable<ReturnType<typeof useOsConnection>>["query"];
  * is signed in, answered with its rows. The helpers never import a transport;
  * this is the one place the OS gives them one.
  */
-export function executeOver(query: Pick<Query, "executeNamed">): MaterializeExecute {
-  return (name, call) => query.executeNamed(name, call).then((result) => result.rows());
+export function executeOver(
+  query: Pick<Query, "executeNamed">,
+): MaterializeExecute {
+  return (name, call) =>
+    query.executeNamed(name, call).then((result) => result.rows());
 }
 
 /**
@@ -155,83 +148,92 @@ export function useMaterialize(): MaterializeState {
   const [described, setDescribed] = useState<DescribedFile[]>([]);
   const ask = useRef<{ key: string; id: string } | null>(null);
   const inFlight = useRef<Promise<string> | null>(null);
+  const generation = useRef(0);
 
   const start = useCallback(
-    async (facts: MaterializeFacts): Promise<string> => {
+    async (
+      request: Omit<MaterializeRequest, "requestId">,
+      files?: LibraryFileLookup,
+    ): Promise<string> => {
       const query = connection?.query ?? null;
       if (query === null) {
         setError(NOT_CONNECTED);
         return "";
       }
-      const format = FORMATS.find((candidate) => candidate === facts.format);
-      if (format === undefined) {
+      const format = FORMATS.find((candidate) => candidate === request.format);
+      if (!format) {
         setError("Choose what kind of file to make.");
         return "";
       }
-      // The one rule a browser can answer, answered here rather than sent: the
-      // SDK's fileNameProblem, the rule and the words the editor's New Markdown
-      // uses. The composer says it beside the Name field as it is typed; this is
-      // the same check for any other caller of the hook. The cluster would
-      // refuse these names too, but a round trip to be told what this form
-      // already knows is a round trip somebody waits for.
-      const problem = fileNameProblem(facts.name, format);
-      if (problem !== undefined) {
+      const problem = fileNameProblem(request.name, format);
+      if (problem) {
         setError(problem);
         return "";
       }
-      const name = facts.name.trim();
-      if (facts.accountIds.length !== 1 || !facts.accountIds[0]?.trim()) {
-        setError("Choose an organization for this file.");
+      if (
+        request.outputKind === "email_template" &&
+        (request.accountIds?.length !== 1 || !request.accountIds[0]?.trim())
+      ) {
+        setError("Choose an organization for this email template.");
         return "";
       }
+      const current = generation.current;
       setBusy(true);
       setError("");
       setCompositionId("");
       try {
-        const statement = facts.statement.trim();
-        const folderId = facts.folderId.trim();
-        // AN UNANSWERED OPTIONAL IS OMITTED, never sent empty: an optional
-        // field given "" is a value the engine writes, and "the caller said
-        // nothing" and "the caller said empty" are different statements.
-        const request: Omit<MaterializeRequest, "requestId"> = {
-          name,
-          format,
-          ...(statement ? { statement } : {}),
-          ...(facts.sources.length > 0 ? { sources: facts.sources } : {}),
-          ...(facts.templateId ? { templateId: facts.templateId } : {}),
-          ...(folderId ? { folderId } : {}),
-          ...(facts.outputKind === "email_template" ? { outputKind: "email_template" as const } : {}),
-          ...(facts.accountIds.length > 0 ? { accountIds: facts.accountIds } : {}),
-          ...(facts.deployableKind ? { deployableKind: facts.deployableKind } : {}),
-        };
         // THE KEY IS THE FACTS AS THEY WERE CLAIMED, the folder included, and nothing
         // above rewrites them: a retry of the same form is the same ask whether or
         // not the cluster accepted its folder the first time.
         const key = JSON.stringify(request);
         if (ask.current?.key !== key) ask.current = { key, id: newId() };
         const requestId = ask.current.id;
-        const id = await startMaterialize(executeOver(query), { ...request, requestId });
-        ask.current = null;
-        setCompositionId(id);
-        if (isDescribedMarkdown(request)) {
-          setDescribed((prev) => [...prev, { compositionId: id, statement: request.statement ?? "", sources: request.sources ?? [], requestId }]);
+        // WHETHER THE FILE IS DESCRIBED IS DECIDED HERE, FROM THE PICKED FILES' ROWS, as the cluster
+        // decides it: a description is handed to the Library only when every picked file is one it
+        // can attach, and any other file sends the request to the composer. It reads one row per
+        // picked file and nothing at all for a request that cannot be described. A refused read is
+        // the cluster's sentence and starts nothing, so the same ask can be pressed again.
+        const execute = executeOver(query);
+        const isDescribed = await readDescribedMarkdown(
+          execute,
+          request,
+          files,
+        );
+        const id = await startMaterialize(execute, { ...request, requestId });
+        if (generation.current === current) {
+          ask.current = null;
+          setCompositionId(id);
+        }
+        if (isDescribed) {
+          setDescribed((prev) => [
+            ...prev,
+            {
+              compositionId: id,
+              statement: request.statement ?? "",
+              sources: request.sources ?? [],
+              requestId,
+            },
+          ]);
         }
         return id;
       } catch (err) {
-        setError(describe(err));
+        if (generation.current === current) setError(describe(err));
         return "";
       } finally {
-        setBusy(false);
+        if (generation.current === current) setBusy(false);
       }
     },
     [connection],
   );
 
-  const materialize = useCallback(
-    (facts: MaterializeFacts): Promise<string> => {
+  const submit = useCallback(
+    (
+      request: Omit<MaterializeRequest, "requestId">,
+      files?: LibraryFileLookup,
+    ): Promise<string> => {
       if (inFlight.current !== null) return inFlight.current;
-      const run = start(facts).finally(() => {
-        inFlight.current = null;
+      const run = start(request, files).finally(() => {
+        if (inFlight.current === run) inFlight.current = null;
       });
       inFlight.current = run;
       return run;
@@ -244,8 +246,12 @@ export function useMaterialize(): MaterializeState {
     error,
     compositionId,
     described,
-    materialize,
+    start: submit,
     reset: () => {
+      generation.current++;
+      inFlight.current = null;
+      setBusy(false);
+      setCompositionId("");
       ask.current = null;
       setError("");
     },
@@ -257,7 +263,7 @@ export function useMaterialize(): MaterializeState {
 // ---------------------------------------------------------------------------
 
 export interface CompositionActsState extends WriteState {
-  stop: (compositionId: string) => Promise<void>;
+  stop: (compositionId: string) => Promise<"stopped" | "finished" | "refused">;
   archive: (compositionId: string) => Promise<void>;
   restore: (compositionId: string) => Promise<void>;
   saveRecipe: (facts: NewRecipeFacts) => Promise<string>;
@@ -268,6 +274,7 @@ export interface NewRecipeFacts {
   description: string;
   format: string;
   templateId: string;
+  layoutId?: string;
   folderId: string;
   sourceSelectors: SelectorRow[];
   accountIds: string[];
@@ -276,15 +283,27 @@ export interface NewRecipeFacts {
 
 /** Preserve reference files and their explicit content/image choices when an
  * email composition is saved as a recipe. Queries resolve again on each run. */
-export function recipeFacts(composition: CompositionRow, sources: SourceRow[]): NewRecipeFacts {
+export function recipeFacts(
+  composition: CompositionRow,
+  sources: SourceRow[],
+): NewRecipeFacts {
   return {
-    name: composition.name, description: composition.statement, format: composition.format,
-    templateId: composition.templateId, folderId: composition.folderId,
-    accountIds: composition.accountIds, outputKind: composition.outputKind,
-    sourceSelectors: sources.filter(recipeKeeps).map(source => ({
-      kind: source.kind === "query" ? "concept_query" : source.kind, selector: source.ref, label: source.label,
+    name: composition.name,
+    description: composition.statement,
+    format: composition.format,
+    templateId: composition.templateId,
+    folderId: composition.folderId,
+    ...(composition.layoutId ? { layoutId: composition.layoutId } : {}),
+    accountIds: composition.accountIds,
+    outputKind: composition.outputKind,
+    sourceSelectors: sources.filter(recipeKeeps).map((source) => ({
+      kind: source.kind === "query" ? "concept_query" : source.kind,
+      selector: source.ref,
+      label: source.label,
       ...(source.content !== undefined ? { content: source.content } : {}),
-      ...(source.includeImages !== undefined ? { includeImages: source.includeImages } : {}),
+      ...(source.includeImages !== undefined
+        ? { includeImages: source.includeImages }
+        : {}),
     })),
   };
 }
@@ -294,8 +313,14 @@ export function useCompositionActs(): CompositionActsState {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
 
+  const recipeAsk = useRef<{ key: string; id: string } | null>(null);
+  const recipePending = useRef<Promise<string> | null>(null);
+
   const run = useCallback(
-    async <T,>(fn: (query: NonNullable<typeof connection>["query"]) => Promise<T>, fallback: T): Promise<T> => {
+    async <T>(
+      fn: (query: NonNullable<typeof connection>["query"]) => Promise<T>,
+      fallback: T,
+    ): Promise<T> => {
       const query = connection?.query ?? null;
       if (query === null) {
         setError(NOT_CONNECTED);
@@ -319,11 +344,21 @@ export function useCompositionActs(): CompositionActsState {
     busy,
     error,
     reset: () => setError(""),
-    stop: async (compositionId) => {
-      await run(async (query) => {
-        await query.composeCancel({ compositionId });
-      }, undefined);
-    },
+    stop: async (compositionId) =>
+      run(async (query) => {
+        const result = await query.composeCancel({
+          compositionId,
+          reason: "Stopped by the person",
+        });
+        const row = result.rows()[0];
+        if (!row || typeof row.cancelled !== "boolean")
+          throw new Error(
+            "The cluster did not confirm whether the file was stopped.",
+          );
+        return rowBool(row, "cancelled")
+          ? ("stopped" as const)
+          : ("finished" as const);
+      }, "refused" as const),
     archive: async (compositionId) => {
       await run(async (query) => {
         await query.archiveComposition({ compositionId });
@@ -334,26 +369,45 @@ export function useCompositionActs(): CompositionActsState {
         await query.restoreComposition({ compositionId });
       }, undefined);
     },
-    saveRecipe: async (facts) =>
-      run(async (query) => {
+    saveRecipe: (facts) => {
+      if (recipePending.current) return recipePending.current;
+      const key = JSON.stringify(facts);
+      if (recipeAsk.current?.key !== key)
+        recipeAsk.current = { key, id: newId() };
+      const recipeId = recipeAsk.current.id;
+      const pending = run(async (query) => {
         // THE ID IS THE CLIENT'S because `createComposeRecipe` takes one:
         // an insert{} stamps `id: args.recipeId`, so a retried call
         // re-versions the same row instead of appending a duplicate to
         // somebody's recipe list.
-        const recipeId = newId();
         await query.createComposeRecipe({
           recipeId,
           name: facts.name.trim(),
           format: facts.format,
           accountIds: facts.accountIds,
           ...(facts.outputKind ? { outputKind: facts.outputKind } : {}),
-          ...(facts.description.trim() ? { description: facts.description.trim() } : {}),
+          ...(facts.description.trim()
+            ? { description: facts.description.trim() }
+            : {}),
           ...(facts.templateId ? { templateId: facts.templateId } : {}),
+          ...(facts.layoutId ? { layoutId: facts.layoutId } : {}),
           ...(facts.folderId ? { folderId: facts.folderId } : {}),
-          ...(facts.sourceSelectors.length > 0 ? { sourceSelectors: facts.sourceSelectors.map(source => ({ ...source })) } : {}),
+          ...(facts.sourceSelectors.length > 0
+            ? {
+                sourceSelectors: facts.sourceSelectors.map((source) => ({
+                  ...source,
+                })),
+              }
+            : {}),
         });
+        recipeAsk.current = null;
         return recipeId;
-      }, ""),
+      }, "").finally(() => {
+        recipePending.current = null;
+      });
+      recipePending.current = pending;
+      return pending;
+    },
   };
 }
 
@@ -380,15 +434,14 @@ export function useTemplateActs(): TemplateActsState {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
 
+  const ask = useRef<{ key: string; id: string } | null>(null);
+  const inFlight = useRef<Promise<string> | null>(null);
+
   const create = useCallback(
     async (facts: NewTemplateFacts): Promise<string> => {
       const query = connection?.query ?? null;
       if (query === null) {
         setError(NOT_CONNECTED);
-        return "";
-      }
-      if (facts.accountId.trim() === "") {
-        setError("Choose an organization for this template.");
         return "";
       }
       if (facts.name.trim() === "" || facts.fileId.trim() === "") {
@@ -398,15 +451,20 @@ export function useTemplateActs(): TemplateActsState {
       setBusy(true);
       setError("");
       try {
-        const templateId = newId();
+        const key = JSON.stringify(facts);
+        if (ask.current?.key !== key) ask.current = { key, id: newId() };
+        const templateId = ask.current.id;
         await query.createComposeTemplate({
           templateId,
           name: facts.name.trim(),
           fileId: facts.fileId.trim(),
-          accountIds: [facts.accountId],
+          ...(facts.accountId ? { accountIds: [facts.accountId] } : {}),
           format: facts.format,
-          ...(facts.description.trim() ? { description: facts.description.trim() } : {}),
+          ...(facts.description.trim()
+            ? { description: facts.description.trim() }
+            : {}),
         });
+        ask.current = null;
         return templateId;
       } catch (err) {
         setError(describe(err));
@@ -442,8 +500,18 @@ export function useTemplateActs(): TemplateActsState {
   return {
     busy,
     error,
-    reset: () => setError(""),
-    create,
+    reset: () => {
+      ask.current = null;
+      setError("");
+    },
+    create: (facts) => {
+      if (inFlight.current) return inFlight.current;
+      const pending = create(facts).finally(() => {
+        inFlight.current = null;
+      });
+      inFlight.current = pending;
+      return pending;
+    },
     archive: (templateId) => flip(templateId, false),
     restore: (templateId) => flip(templateId, true),
   };
@@ -463,9 +531,13 @@ export function useRecipeActs(): RecipeActsState {
   const connection = useOsConnection();
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
+  const pending = useRef<Promise<string> | null>(null);
 
   const call = useCallback(
-    async <T,>(fn: (query: NonNullable<typeof connection>["query"]) => Promise<T>, fallback: T): Promise<T> => {
+    async <T>(
+      fn: (query: NonNullable<typeof connection>["query"]) => Promise<T>,
+      fallback: T,
+    ): Promise<T> => {
       const query = connection?.query ?? null;
       if (query === null) {
         setError(NOT_CONNECTED);
@@ -489,15 +561,27 @@ export function useRecipeActs(): RecipeActsState {
     busy,
     error,
     reset: () => setError(""),
-    runRecipe: (recipeId, name) =>
-      call(async (query) => {
+    runRecipe: (recipeId, name) => {
+      if (pending.current) return pending.current;
+      pending.current = call(async (query) => {
         const result = await query.composeRunRecipe({
           recipeId,
           ...(name.trim() ? { name: name.trim() } : {}),
         });
         const reply = result.rows()[0] ?? null;
-        return typeof reply?.["compositionId"] === "string" ? (reply["compositionId"] as string) : "";
-      }, ""),
+        if (
+          typeof reply?.["compositionId"] !== "string" ||
+          !reply["compositionId"]
+        )
+          throw new Error(
+            "The cluster did not confirm which file it is making.",
+          );
+        return reply["compositionId"] as string;
+      }, "").finally(() => {
+        pending.current = null;
+      });
+      return pending.current;
+    },
     archive: async (recipeId) => {
       await call(async (query) => {
         await query.archiveComposeRecipe({ recipeId });
@@ -521,6 +605,7 @@ export function useRecipeActs(): RecipeActsState {
  */
 function newId(): string {
   const c = globalThis.crypto as Crypto | undefined;
-  if (c && typeof c.randomUUID === "function") return c.randomUUID().replaceAll("-", "").slice(0, 24);
+  if (c && typeof c.randomUUID === "function")
+    return c.randomUUID().replaceAll("-", "").slice(0, 24);
   return `c${Date.now().toString(36)}${Math.random().toString(36).slice(2, 10)}`;
 }

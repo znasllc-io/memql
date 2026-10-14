@@ -19,16 +19,17 @@ export function AskWait({ activity, startedAt, hasText, label: activeLabel }: { 
     latest.set(key, { event: { ...previous?.event, ...event }, startedAt: previous?.startedAt ?? event.at });
   }
   const steps = [...latest.values()];
-  let current = -1;
-  steps.forEach((step, index) => { if (step.event.phase === "running") current = index; });
-  const index = current >= 0 ? current : Math.max(0, steps.length - 1);
+  // Keep the latest observed step in focus. An earlier running receipt may be
+  // parallel work or an orphan from a prior attempt; neither proves a rewind.
+  const index = Math.max(0, steps.length - 1);
   const step = steps[index];
   const call = step?.event;
+  const timed = !call || call.phase === "running";
   const wait = expectedWait(now, new Date(step?.startedAt ?? startedAt).valueOf(), Math.max(1000, call?.expectedMs ?? 60000));
-  const label = activeLabel ?? (call?.kind === "action" && call.phase === "running" ? "Working in your workspace" : hasText ? "Replying" : wait.overdue ? "Still working" : "Thinking");
+  const label = activeLabel ?? (!timed ? "Working" : call?.kind === "action" ? "Working in your workspace" : hasText ? "Replying" : wait.overdue ? "Still working" : "Thinking");
   const timer = wait.overdue ? `+${wait.overrun}s` : `${wait.remaining}s`;
-  return <div className="os-ask-wait" aria-label={label} title={call ? `${call.estimateSource ?? "Estimate"} · ${call.model || call.provider || "Selected model"}` : "Waiting for the selected inference route"}>
-    <span className="os-ask-countdown" style={{ "--ask-remaining": wait.fraction } as CSSProperties} aria-hidden><span /></span>
-    <span>{label} · Step {index + 1} · {timer}</span>
+  return <div className="os-ask-wait" aria-label={label} title={!timed ? "Waiting for the next activity update" : call ? `${call.estimateSource ?? "Estimate"} · ${call.model || call.provider || "Selected model"}` : "Waiting for the selected inference route"}>
+    <span className="os-ask-countdown" style={{ "--ask-remaining": timed ? wait.fraction : 0 } as CSSProperties} aria-hidden><span /></span>
+    <span>{label} · Step {index + 1}{timed ? ` · ${timer}` : ""}</span>
   </div>;
 }

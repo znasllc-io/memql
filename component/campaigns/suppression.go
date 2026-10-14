@@ -27,6 +27,9 @@ func (s *Store) SuppressionForSend(ctx context.Context, accountID, digest string
 		return Suppression{}, false, err
 	}
 	r := rows[len(rows)-1]
+	if str(r, "liftedAt") != "" {
+		return Suppression{}, false, nil
+	}
 	return Suppression{Digest: digest, Reason: str(r, "reason"), SuppressedAt: parseTime(str(r, "suppressedAt"))}, true, nil
 }
 

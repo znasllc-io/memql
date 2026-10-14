@@ -161,6 +161,7 @@ func (i *Integration) handleRunAgentTurn(ctx context.Context, args map[string]an
 	requestId := id.NewShortId()
 	msg := &memqlv1.AgentGenerateTurnMsg{
 		RequestId: requestId,
+		Hints:     map[string]string{"work_section_prompt": prompt},
 		AgentId:   agentId,
 		ScopeId:   strings.TrimSpace(asString(args["scopeId"])),
 		History: []*memqlv1.AgentTurnMessage{
@@ -168,7 +169,7 @@ func (i *Integration) handleRunAgentTurn(ctx context.Context, args map[string]an
 		},
 	}
 	if templateID != "" {
-		msg.Hints = map[string]string{"work_prompt_template": templateID}
+		msg.Hints["work_prompt_template"] = templateID
 	}
 	if i.engine != nil {
 		history, err := workTurnHistory(ctx, i.engine, prompt)

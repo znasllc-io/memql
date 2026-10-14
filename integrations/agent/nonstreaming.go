@@ -2,6 +2,7 @@ package agent
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strings"
 	"sync"
@@ -100,7 +101,7 @@ func (r *Replier) handleBackground(ctx context.Context, msg *memqlv1.AgentGenera
 	turnStart := time.Now()
 	prep, err := r.prepareTurn(ctx, msg, turnStart)
 	if err != nil {
-		return nil, err
+		return nil, r.PauseWorkBeforeTurn(ctx, err, msg)
 	}
 
 	// Resume from a saved checkpoint (memql#907). When the planner re-admits
@@ -134,7 +135,7 @@ func (r *Replier) handleBackground(ctx context.Context, msg *memqlv1.AgentGenera
 
 	selection, err := r.router.ResolveFor(ctx, prep.routerReq)
 	if err != nil {
-		return nil, fmt.Errorf("router: resolve with-tools (background lane): %w", err)
+		return nil, r.pauseBeforeTools(ctx, fmt.Errorf("router: resolve with-tools (background lane): %w", err), msg, prep.messages)
 	}
 	provider, ok := selection.Client.(common.ToolCallingChatAIProvider)
 	if !ok {
@@ -312,6 +313,7 @@ func (r *Replier) runNonStreamingToolLoop(
 	// Background work is the lane that actually reaches the window, being the
 	// one that runs the long journaled steps of a goal.
 	contextHandoffs := 0
+	var guidance workGuidanceCursor
 	// paused is set when the loop stops at a checkpoint because the turn was
 	// preempted ("passed", memql#906). Surfaced on TurnResult.Paused.
 	paused := false
@@ -368,9 +370,19 @@ BackgroundLoop:
 			}, fmt.Errorf("agent: %s after %s", turnWallclockSentinel, elapsed.Round(time.Second))
 		}
 
+		guided, _, guidanceErr := r.receiveWorkGuidance(ctx, &guidance, messages, nil)
+		if guidanceErr != nil {
+			return nil, guidanceErr
+		}
+		messages = guided
+		messages, guidanceErr = r.recoverWorkProgress(ctx, messages, turnCtx, sink, &guidance)
+		if guidanceErr != nil {
+			return nil, guidanceErr
+		}
+
 		compacted, compactErr := r.compactWorkContext(ctx, messages, tools, memql.WorkContextTarget(messages, tools, 20000))
 		if compactErr != nil {
-			return nil, compactErr
+			return nil, r.pauseAtBudgetBoundary(ctx, compactErr, messages)
 		}
 		messages = compacted
 
@@ -386,9 +398,19 @@ BackgroundLoop:
 		)
 		attempt := 0
 		for {
+			// Compaction or a retry can take time; check again before reasoning.
+			guided, _, guidanceErr := r.receiveWorkGuidance(ctx, &guidance, messages, nil)
+			if guidanceErr != nil {
+				return nil, guidanceErr
+			}
+			messages = guided
+			messages, guidanceErr = r.recoverWorkProgress(ctx, messages, turnCtx, sink, &guidance)
+			if guidanceErr != nil {
+				return nil, guidanceErr
+			}
 			budgetCtx, stopBudget, budgetErr := r.workCallContext(ctx)
 			if budgetErr != nil {
-				return nil, budgetErr
+				return nil, r.pauseAtBudgetBoundary(ctx, budgetErr, messages)
 			}
 			callCtx, cancel := context.WithTimeout(budgetCtx, reqTimeout)
 			stepResult, stepErr = provider.CallChatWithTools(callCtx, messages, tools)
@@ -396,14 +418,25 @@ BackgroundLoop:
 			cancel()
 			stopBudget()
 			if budgetFailure != nil {
-				return nil, budgetFailure
+				return nil, r.pauseAtBudgetBoundary(ctx, budgetFailure, messages)
 			}
 			if stepErr == nil {
 				break
 			}
+			var ceiling *memql.RunCeilingError
+			if errors.As(stepErr, &ceiling) {
+				return nil, r.pauseAtBudgetBoundary(ctx, stepErr, messages)
+			}
 			// Parent cancellation is terminal -- propagate, don't retry.
 			if ctx.Err() != nil {
 				return nil, ctx.Err()
+			}
+			if handled, recoveryErr := r.recoverModelCeiling(ctx, stepErr, messages, attempt, stepResult == nil); handled {
+				if recoveryErr != nil {
+					return nil, recoveryErr
+				}
+				attempt++
+				continue
 			}
 			if next, ok := r.handOffContext(ctx, stepErr, messages, &contextHandoffs, iter, requestId); ok {
 				messages = next
@@ -429,6 +462,20 @@ BackgroundLoop:
 			r.logger.Warn("agent background: call error -- ending turn",
 				"iter", iter, "attempt", attempt, "error", stepErr)
 			break BackgroundLoop
+		}
+
+		if err := r.acknowledgeWorkGuidance(ctx, &guidance); err != nil {
+			return nil, err
+		}
+		// Do not dispatch a stale proposal, including a terminal response, if a
+		// human corrected the work while that model call was in flight.
+		guided, redirected, guidanceErr := r.receiveWorkGuidance(ctx, &guidance, messages, nil)
+		if guidanceErr != nil {
+			return nil, guidanceErr
+		}
+		messages = guided
+		if redirected {
+			continue BackgroundLoop
 		}
 
 		turnText := ""
@@ -525,10 +572,19 @@ BackgroundLoop:
 		allToolCalls = append(allToolCalls, turnCalls...)
 
 		hadSuccess := false
-		for _, tc := range turnCalls {
+		for callIndex, tc := range turnCalls {
+			guided, redirected, guidanceErr := r.receiveWorkGuidance(ctx, &guidance, messages, turnCalls[callIndex:])
+			if guidanceErr != nil {
+				return nil, guidanceErr
+			}
+			messages = guided
+			if redirected {
+				terminalEnvelope = nil
+				continue BackgroundLoop
+			}
 			// Calls after a human question have not started yet.
 			if err := r.prepareWorkTool(ctx); err != nil {
-				return nil, err
+				return nil, r.pauseAtBudgetBoundary(ctx, err, messages)
 			}
 			sink.ToolCall(tc.ID, tc.Name, tc.Arguments)
 			args := parseToolArgs(tc.Arguments)
@@ -581,6 +637,7 @@ BackgroundLoop:
 				}
 			}
 			var content string
+			var failureAbort error
 			if execErr != nil {
 				se := memql.ClassifyToolError(execErr)
 				r.logger.Warn("agent background: tool execution failed",
@@ -588,18 +645,13 @@ BackgroundLoop:
 					"retryable", se.Retryable, "userFixable", se.UserFixable,
 					"error", execErr)
 				content = se.JSON()
-				sink.ToolResult(tc.ID, "", execErr.Error())
+				sink.ToolResult(tc.ID, result, execErr.Error())
 				// Repeated-identical-failure breaker (memql#1128): abort the
 				// turn rather than spin to maxIterations on a stuck call.
 				if trip, count := failBreaker.observeFailure(tc.Name, tc.Arguments, execErr); trip {
 					r.logger.Warn("agent background: aborting turn -- repeated identical tool failure",
 						"tool", tc.Name, "count", count, "requestId", requestId)
-					return &TurnResult{
-						FinalText:  strings.TrimSpace(fullText.String()),
-						TextChunks: textChunks,
-						ToolCalls:  allToolCalls,
-						Iterations: iterations,
-					}, repeatFailureAbortError(tc.Name, count)
+					failureAbort = repeatFailureAbortError(tc.Name, count)
 				}
 			} else {
 				content = result
@@ -630,7 +682,15 @@ BackgroundLoop:
 				Content:    content,
 			})
 			if err := r.saveWorkProgress(ctx, messages); err != nil {
+				if failureAbort != nil {
+					return nil, fmt.Errorf("%w: saving final failed tool result: %v", memql.ErrWorkCheckpointRequired, err)
+				}
 				return nil, err
+			}
+			// The last failure can carry partial effects. Save its actual result
+			// and mark later calls unexecuted before the breaker ends the turn.
+			if failureAbort != nil {
+				return &TurnResult{FinalText: strings.TrimSpace(fullText.String()), TextChunks: textChunks, ToolCalls: allToolCalls, Iterations: iterations}, failureAbort
 			}
 		}
 

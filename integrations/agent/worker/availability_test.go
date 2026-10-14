@@ -14,6 +14,8 @@ import (
 func TestWorkerAvailabilityUsesSharedFleetWithoutALocalStream(t *testing.T) {
 	desktop := machine("remote-desktop", func(c *Candidate) {
 		c.ConnectedNodeId = "other-agent-replica"
+		c.HomeDirectory = "/home/Actual Person"
+		c.NativePlatform = "linux/amd64"
 		c.Capabilities = []string{workerservice.CapabilityHeadless, workerservice.CapabilityComputerUse}
 		c.Labels = map[string]string{"display": "true"}
 	})
@@ -48,6 +50,9 @@ func TestWorkerAvailabilityUsesSharedFleetWithoutALocalStream(t *testing.T) {
 			}
 			if got.Status != tc.status || got.HeadlessOnline != tc.headless || got.ComputerUseOnline != tc.computer || got.Online != (tc.headless || tc.computer) {
 				t.Fatalf("unexpected availability: %+v", got)
+			}
+			if tc.name == "remote desktop" && (len(got.Machines) != 1 || got.Machines[0].HomeDirectory != "/home/Actual Person" || got.Machines[0].NativePlatform != "linux/amd64") {
+				t.Fatalf("remote machine metadata lost: %+v", got.Machines)
 			}
 			if len(fleet.touched) != 0 {
 				t.Fatal("status reserved a machine or changed routing")

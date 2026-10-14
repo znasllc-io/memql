@@ -21,6 +21,15 @@ seed skill go-backend-engineering {
   liveSourceIds: []
   tier:          "A"
   predefined:    true
+  active: true
+  status: "active"
+  version: 2
+  instructions {
+    selectionTerms: ["go", "golang", "goroutine", "channel", "service", "backend"]
+    summary: "Implement Go changes against their real persistence, concurrency and protocol boundaries."
+    body: "Read the repository instructions and module layout before choosing build and test commands. Reuse existing package boundaries and error conventions. Carry cancellation and identity explicitly across asynchronous and remote work. Propagate failures with their causes; do not silently turn an unavailable dependency into a successful empty answer. Exercise the behavior through the public boundary and include race or replica-hop checks where concurrency matters. A skipped database case is not evidence that persistence works. Preserve unrelated edits, review the combined tree and report which checks actually ran."
+    references: ["docs/public/build/integration-boundary.md", "docs/public/concepts/architecture.md"]
+  }
 }
 
 @description("Authoring MemQL DSL constructs (concepts, queries, mutations, seeds, shapes, specs, policies, tools, prompts, builtins). Knows the struct-form authoring shape, the load-time validation chain, and the trait-based filter conventions documented in docs/public/language/authoring-rules.md. Phase 2 ships a dedicated memql-dsl-authoring knowledge domain; this skill currently bundles the generic engineering domains and is upgraded when the dedicated domain lands.")

@@ -36,10 +36,13 @@ automation ingestCampaignFeedback {
 automation campaignDrainWorkflow {
  builtin campaignPromoteSeries()
  builtin campaignDrainWelcomes()
+ builtin campaignRetryDeferredSends()
+ builtin campaignDrainJourneys()
  builtin campaignPromoteSchedules()
  builtin campaignApplyWarmup()
  jobs := builtin campaignDrainableJobs()
  for id in jobs { builtin campaignDrainJob(id: id) }
+ builtin campaignRepairProviderCounters()
  builtin campaignFlushReputation()
 }
 
@@ -100,4 +103,54 @@ automation campaignWarmupWorstDomain {
   }
  }
  return {domain: "", reason: ""}
+}
+
+/// Choose the next step from fresh authorized enrollment facts. Native ports
+/// retain the enrollment lock, current consent and durable send receipt.
+@template
+automation campaignJourneyStepWorkflow {
+ args {
+  kind string!
+  finished bool!
+  exitReason string!
+  subscription string!
+  waiting bool!
+ }
+ if args.exitReason != "" {
+  builtin campaignJourneyExit(reason: args.exitReason)
+ } else if args.finished {
+  builtin campaignJourneyComplete()
+ } else if args.kind == "wait" {
+  builtin campaignJourneyWait()
+ } else if args.kind == "confirm" && args.subscription == "subscribed" {
+  builtin campaignJourneyAdvance()
+ } else if args.waiting || (args.kind == "send" && args.subscription == "pending") {
+  builtin campaignJourneyExit(reason: "not confirmed")
+ } else {
+  outcome := builtin campaignJourneySend()
+  if outcome.skipped {
+   builtin campaignJourneyExit(reason: "suppressed")
+  } else if outcome.advance {
+   if args.kind == "confirm" { builtin campaignJourneyAwaitConfirmation() } else { builtin campaignJourneyAdvance() }
+  }
+ }
+}
+
+/// Compose an email automation proposal for review; the engine validates and writes nothing.
+@template
+automation campaignJourneyProposalWorkflow {
+ args {
+ sentence string!
+ }
+ catalog := builtin campaignJourneyCatalog()
+ builtin campaignGenerateJourneyProposal(prompt: "composeEmailJourney", data: { sentence: args.sentence, catalog: catalog.encoded })
+}
+
+/// Retirement precedes active work; one failed automation does not stop another.
+@template
+automation campaignJourneyDrainWorkflow {
+ retiring := builtin campaignJourneysToRetire()
+ for id in retiring { builtin campaignRetireJourney(id: id) on error continue }
+ active := builtin campaignActiveJourneys()
+ for id in active { builtin campaignRunJourney(id: id) on error continue }
 }

@@ -1,0 +1,30 @@
+# Read only the existing monitor and its database identity. No list or writes.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: storage-health-reader
+rules:
+  - apiGroups: [""]
+    resources: [events]
+    resourceNames: [database-health]
+    verbs: [get]
+  - apiGroups: [postgresql.cnpg.io]
+    resources: [clusters]
+    resourceNames: [memql-db]
+    verbs: [get]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: storage-health-reader
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: storage-health-reader
+subjects:
+  - kind: ServiceAccount
+    name: memql-engine
+  - kind: ServiceAccount
+    name: memql-deploy
+  - kind: ServiceAccount
+    name: memql-engine-workbench

@@ -49,36 +49,11 @@ const ingressClass = "nginx"
 // manifest_test.go holds the copies equal: an outage must show the same page
 // on the platform's hosts and on every customer's.
 //
-// WHICH INGRESSES CARRY IT: every one whose proxy speaks plain HTTP to its
-// backend, bar mcp-front-door (below), which is all but three. ingress-nginx
-// builds the custom default
-// backend as a copy of the Ingress's own upstream and KEEPS the location's
-// backend protocol; only its built-in default backend is forced back to plain
-// http (buildProxyPass, v1.15.1). `memql error-pages` is a plain HTTP/1.1
-// server, so a backend protocol of either kind rules an Ingress out, each on
-// its own account:
-//
-//	GRPC   grpc_pass would hand the error pages h2c, and the proxy would answer
-//	       502 (a gRPC client could not render a page in any case).
-//	       api-front-door-grpc.
-//	HTTPS  the proxy would open a TLS connection to the error pages, which speak
-//	       no TLS: the handshake fails and it answers 502. This is not the gRPC
-//	       case under another name, and would hold if api-front-door-grpc did not
-//	       exist. identity serves TLS in-cluster, so identity-front-door sets
-//	       backend-protocol HTTPS (with proxy-ssl-verify off), and it is the
-//	       sign-in host.
-//
-// Either 502 is worse than the bare 503 it would replace, so those two keep
-// ingress-nginx's own 503 during an outage until the error pages can answer TLS
-// (a listener and a Service of their own, which is later work).
-//
-// mcp-front-door speaks plain HTTP and is left out by choice. mcp is disabled
-// by default -- cloud-entry renders it at 0 replicas -- so its host would answer
-// "MemQL is being updated, back in a few minutes" with Retry-After 120 for good
-// on every entry installation, which is false, and MCP is a machine surface
-// whose clients read the status, not a page. It keeps ingress-nginx's answer.
-// TestEveryFrontDoorIngressHasErrorPagesBackend pins the rule by protocol and
-// the three names, so a later edit cannot silently add the annotation to any.
+// HTTP backends use error-pages; HTTPS identity backends use error-pages-tls.
+// ingress-nginx preserves the location protocol when swapping backends. The TLS
+// listener has an in-memory certificate; identity already disables upstream
+// verification. GRPC remains excluded because a gRPC client cannot read a page.
+// mcp-front-door remains excluded because it can be intentionally disabled.
 //
 // ENTERING OR LEAVING THE FALLBACK COSTS A FULL NGINX RELOAD: ingress-nginx's
 // Location.Equal compares the location's Backend, which the swap changes, so a
@@ -97,6 +72,7 @@ const ingressClass = "nginx"
 const (
 	defaultBackendAnnotation = "nginx.ingress.kubernetes.io/default-backend"
 	errorPagesService        = "error-pages"
+	errorPagesTLSService     = "error-pages-tls"
 )
 
 // errorPagesBackend is the annotation line a plain-HTTP Ingress carries, at the
@@ -180,14 +156,9 @@ func header(overlay, domain string) string {
 		"# mcp-front-door, carries " + defaultBackendAnnotation + ": " + errorPagesService + ",\n" +
 		"# so that when the Service it routes to has no ready endpoints ingress-nginx answers with the\n" +
 		"# maintenance page (`memql error-pages`, deploy/k8s/components/error-pages) instead of its own\n" +
-		"# bare 503, which is what every host on the cluster answered on 2026-10-11. Two Ingresses do\n" +
-		"# NOT, each on its own backend protocol: api-front-door-grpc (GRPC: the proxy would speak h2c\n" +
-		"# to the error pages) and identity-front-door (HTTPS: the proxy would open a TLS connection to\n" +
-		"# the error pages, which speak none). ingress-nginx keeps an Ingress's backend protocol when\n" +
-		"# it swaps in the default backend, and the error pages are a plain HTTP/1.1 server, so behind\n" +
-		"# either the proxy would answer 502 rather than the page. mcp-front-door does not either, by\n" +
-		"# choice: mcp is disabled by default (0 replicas on the entry shape), so its page would say\n" +
-		"# \"being updated\" for good, and MCP is a machine surface. Nothing here sets\n" +
+		"# bare 503. Identity uses error-pages-tls because its backend protocol is HTTPS.\n" +
+		"# api-front-door-grpc remains excluded: a gRPC client cannot read a page.\n" +
+		"# mcp-front-door remains excluded because it can be intentionally disabled. Nothing sets\n" +
 		"# custom-http-errors, which would replace the application's own error responses.\n" +
 		"# cmd/frontdoorhosts/manifest.go has the reasoning and\n" +
 		"# deploy/k8s/overlays/frontdoor_error_pages_test.go holds the rule.\n" +
@@ -389,8 +360,7 @@ func identityIngress(domain string) string {
 		"  annotations:\n" +
 		"    nginx.ingress.kubernetes.io/backend-protocol: \"HTTPS\"\n" +
 		"    nginx.ingress.kubernetes.io/proxy-ssl-verify: \"off\"\n" +
-		"    # NO default-backend HERE (see the top of this file): the proxy speaks HTTPS to its backend and\n" +
-		"    # would do the same to the error pages, which are plain HTTP. It would answer 502, not the page.\n" +
+		"    " + defaultBackendAnnotation + ": " + errorPagesTLSService + "\n" +
 		"spec:\n" +
 		"  ingressClassName: " + ingressClass + "\n" +
 		tlsBlock(host) +

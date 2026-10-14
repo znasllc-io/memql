@@ -34,6 +34,8 @@ func (e *MemQLEngine) executeMutation(ctx context.Context, mutation MutationNode
 // its callers -- specifically the data executeUpdate needs to publish the
 // graph.node.updated transition event without re-reading the row.
 type writeMeta struct {
+	// unchanged means an idempotent delivery returned its existing row.
+	unchanged bool
 	// priorExisted is true when a row already existed at the target id,
 	// i.e. the write was an update (read-merge) rather than a create.
 	priorExisted bool
@@ -142,6 +144,24 @@ type writeMeta struct {
 	priorSourceScope string
 }
 
+// eventVersionTime is a graph write event's `createdAt`: the time of the
+// version the event announces, exactly as the row keeps it (memql#6033).
+//
+// A row's versions are told apart by createdAt -- the store is append-only and
+// the latest version is the one with the greatest -- so a client folding
+// events onto rows it read compares this against the createdAt a read
+// returned. The bus delivers each event in its own goroutine, so events do not
+// arrive in the order they were written, and a read can be answered after an
+// event it is newer than: the comparison is how an older version is kept from
+// rolling a newer one back. It holds only if both name the same instant, so
+// this is the column's value, not the clock's: the column keeps microseconds
+// and the write's clock may carry nanoseconds the insert truncated away. It
+// used to be formatted to the second, which cannot order two versions written
+// in the same second, and .updated did not carry it at all.
+func eventVersionTime(t time.Time) string {
+	return t.UTC().Truncate(time.Microsecond).Format(time.RFC3339Nano)
+}
+
 // executeUpdate runs the update() form: read the latest existing row by
 // id, splat the partial payload on top, validate the merged result
 // against the concept schema, persist the merged row, and additionally
@@ -173,7 +193,7 @@ func (e *MemQLEngine) executeUpdate(ctx context.Context, mutation MutationNode) 
 	}
 
 	result, meta, err := e.executeWrite(ctx, mutation, true)
-	if err != nil {
+	if err != nil || meta.unchanged {
 		return result, err
 	}
 
@@ -226,6 +246,13 @@ func (e *MemQLEngine) executeUpdate(ctx context.Context, mutation MutationNode) 
 		// .updated subscribers detect a real state transition vs a no-op rewrite.
 		if meta.priorStatus != "" {
 			eventPayload["oldStatus"] = meta.priorStatus
+		}
+		// The version this write landed, by its own time -- the same field and
+		// the same instant as the .created event of this write carries
+		// (memql#6033). Without it a client could not tell this event from an
+		// older one that arrived after it.
+		if updatedNode.GetCreatedAt() != nil {
+			eventPayload["createdAt"] = eventVersionTime(updatedNode.GetCreatedAt().AsTime())
 		}
 		// G4 (memql#2366): stamp the acting identity on the envelope (and
 		// mirror it into the payload for parity with the .created shape).
@@ -789,8 +816,14 @@ func (e *MemQLEngine) executeWrite(ctx context.Context, mutation MutationNode, r
 	if conceptMeta.Name == "v1:campaigns:template" && !auth.OriginFromContext(ctx).IsInternal() {
 		return nil, meta, fmt.Errorf("template writes require campaignSaveTemplate and a saved revision")
 	}
+	if conceptMeta.Name == "v1:campaigns:emailLayout" && !auth.OriginFromContext(ctx).IsInternal() {
+		return nil, meta, fmt.Errorf("layout writes require campaignSaveLayout and a saved revision")
+	}
 	if (conceptMeta.Name == "v1:email:connectionState" || conceptMeta.Name == "v1:email:sendOperation") && !auth.OriginFromContext(ctx).IsInternal() {
 		return nil, meta, fmt.Errorf("email connection state requires internal origin from the authorized connection capability")
+	}
+	if (conceptMeta.Name == "v1:campaigns:journey" || conceptMeta.Name == "v1:campaigns:journeyEnrollment") && !auth.OriginFromContext(ctx).IsInternal() {
+		return nil, meta, fmt.Errorf("automation writes require campaignSaveJourney, campaignSetJourneyState or the automation drain")
 	}
 	if (conceptMeta.Name == "v1:campaigns:newsletterBinding" || conceptMeta.Name == "v1:campaigns:newsletterSignup") && !auth.OriginFromContext(ctx).IsInternal() {
 		return nil, meta, fmt.Errorf("newsletter writes require their configuration, signup or progress capability")
@@ -882,7 +915,14 @@ func (e *MemQLEngine) executeWrite(ctx context.Context, mutation MutationNode, r
 	var organizationPrior map[string]any
 
 	id := strings.TrimSpace(mutation.ID)
-	if len(rowVersionFences(ctx)) > 0 && id != "" {
+	// Knowledge publication and review must serialize with canonical-seed
+	// reconciliation, including ordinary client review writes. Otherwise a
+	// late repair could overwrite a rejection read on another replica.
+	// Observation and business writers share the same version fence. A pulse
+	// must never replace fields merged before another replica changed them.
+	// Identity's narrow admin edits must also serialize with existing profile
+	// writers, so a concurrent legacy update cannot silently lose either edit.
+	if (len(rowVersionFences(ctx)) > 0 || conceptMeta.Name == "v1:knowledge:documentChunk" || conceptMeta.Name == "v1:identity:user" || memorynodes.HasLiveness(conceptMeta.Name) || conceptMeta.Name == inboundRequestConcept) && id != "" {
 		var err error
 		ctx, err = e.fenceWriteTarget(ctx, conceptMeta.Name, id)
 		if err != nil {
@@ -1577,6 +1617,17 @@ func (e *MemQLEngine) executeWrite(ctx context.Context, mutation MutationNode, r
 		}
 	}
 
+	// The names a campaign's mail shows are capped (memql#6033): the view link
+	// carries them and a link token has a size limit. The sentence the person
+	// reads lives here because a mutation cannot state its own refusal, and on
+	// the merged row so a name saved before the cap is told about too. See
+	// campaign_name_guard.go.
+	if conceptMeta.Name == conceptCampaignsCampaign || conceptMeta.Name == conceptCampaignsSenderIdentity {
+		if err := validateCampaignNameLengths(conceptMeta.Name, payload); err != nil {
+			return nil, meta, err
+		}
+	}
+
 	// v1:platform:package tracks ONE source ONCE (2026-09-05 design, D8):
 	// a second active package for the same repository at the same ref would
 	// deploy the same apps and the same MemQL from two records. A cross-row
@@ -1645,14 +1696,30 @@ func (e *MemQLEngine) executeWrite(ctx context.Context, mutation MutationNode, r
 	// coordination connection cannot permit a stale writer to commit.
 	// Other writes retain the single-statement path below.
 	var result memorynodes.Node
+	observationOnly := false
 	if targets := outboxTargetsFor(conceptMeta.Name); len(targets) > 0 || len(rowVersionFences(ctx)) > 0 {
 		retire := outboxPayloadRetires(payload)
 		txErr := e.runInWriteTx(ctx, func(txStore memorynodes.Store) error {
-			created, createErr := conceptMeta.Create(ctx, txStore, createParams)
+			txStore.(*bunStore).onInsert = func(concept string, appended bool) {
+				if concept == conceptMeta.Name && memorynodes.HasLiveness(concept) {
+					observationOnly = !appended
+				}
+			}
+			writeStore := txStore
+			var dedupe *unchangedOperationalStore
+			if skipUnchangedOperationalWrite(conceptMeta.Name) {
+				dedupe = &unchangedOperationalStore{Store: txStore}
+				writeStore = dedupe
+			}
+			created, createErr := conceptMeta.Create(ctx, writeStore, createParams)
 			if createErr != nil {
 				return createErr
 			}
 			result = created
+			if dedupe != nil && dedupe.unchanged {
+				meta.unchanged = true
+				return nil
+			}
 			return e.appendOutboxEntries(ctx, txStore, conceptMeta.Name, created.ID, created.CreatedAt, targets, retire)
 		})
 		if txErr != nil {
@@ -1709,6 +1776,10 @@ func (e *MemQLEngine) executeWrite(ctx context.Context, mutation MutationNode, r
 		return nil, meta, err
 	}
 
+	if meta.unchanged {
+		return newExecuteResult(&memqlv1.GraphBundle{Nodes: []*memqlv1.MemoryNode{apiNode}, RootIds: []string{apiNode.Id}}), meta, nil
+	}
+
 	// Observation embedding write-path (#585): when a
 	// v1:work:observation lands, embed its `content` into
 	// node_vectors keyed by the observation id (vector_field='content',
@@ -1745,12 +1816,11 @@ func (e *MemQLEngine) executeWrite(ctx context.Context, mutation MutationNode, r
 		// Flatten node payload fields into event for easier filter access
 		// This allows filters to use "participantType==\"human\"" instead of "payload.participantType==\"human\""
 		eventPayload := map[string]any{
-			"id":        result.ID,
-			"nodeId":    result.ID, // Alias for backward compatibility
-			"concept":   conceptMeta.Name,
-			"actor":     actor,
-			"nodeType":  result.Type,
-			"createdAt": result.CreatedAt.Format(time.RFC3339),
+			"id":       result.ID,
+			"nodeId":   result.ID, // Alias for backward compatibility
+			"concept":  conceptMeta.Name,
+			"actor":    actor,
+			"nodeType": result.Type,
 		}
 		// Unmarshal and flatten node payload fields for direct filter access
 		var payloadMap map[string]any
@@ -1761,6 +1831,9 @@ func (e *MemQLEngine) executeWrite(ctx context.Context, mutation MutationNode, r
 		}
 		// Keep full payload for reference (nested access still works)
 		eventPayload["payload"] = payloadMap
+		// The version's own time (see eventVersionTime). After the flatten,
+		// like firstVersion below, so no payload field can stand in for it.
+		eventPayload["createdAt"] = eventVersionTime(result.CreatedAt)
 		// firstVersion: did THIS write materialise the row's first version?
 		// Every write publishes graph.node.created (append-only), so the
 		// topic cannot say "a row was created" -- this can, and costs nothing:
@@ -1836,7 +1909,11 @@ func (e *MemQLEngine) executeWrite(ctx context.Context, mutation MutationNode, r
 	// Tell a caller watching for writes that one committed (a directly
 	// called logic opens its journal run at its first write, epic
 	// memql#5370). The single write path is the single report.
-	common.NotifyWrite(ctx, conceptMeta.Name, apiNode.Id)
+	// A timestamp-only observation still refreshes live readers, but it is
+	// not a business write and must not open a held schedule's work journal.
+	if !observationOnly {
+		common.NotifyWrite(ctx, conceptMeta.Name, apiNode.Id)
+	}
 
 	return newExecuteResult(bundle), meta, nil
 }
@@ -2080,7 +2157,7 @@ func (e *MemQLEngine) loadLatestNodes(ctx context.Context, ids []string, timesta
 	// Collapse covering-index keys first. Selecting every historical payload
 	// here would undo the read-path optimization as soon as candidates are
 	// rechecked against their true latest version.
-	keys := db.NewSelect().Model((*memorynodes.MemoryNode)(nil)).
+	keys := db.NewSelect().Model((*memorynodes.MemoryNode)(nil)).ModelTableExpr(memorynodes.ObservedRowsSQL+" AS mn").
 		Column("id", "createdAt").DistinctOn("id").
 		OrderExpr(`id ASC, "createdAt" DESC`).Where("id IN (?)", bun.In(unique))
 	if timestamp != nil {
@@ -2089,7 +2166,7 @@ func (e *MemQLEngine) loadLatestNodes(ctx context.Context, ids []string, timesta
 	var latest []memorynodes.MemoryNode
 	query := db.NewSelect().Model(&latest).
 		ModelTableExpr("(?) AS latest_keys", keys).
-		Join(`JOIN LATERAL (SELECT * FROM "MemoryNodes" WHERE id=latest_keys.id AND "createdAt"=latest_keys."createdAt" LIMIT 1) AS mn ON true`)
+		Join(`JOIN LATERAL (SELECT * FROM ` + memorynodes.ObservedRowsSQL + ` AS observed WHERE id=latest_keys.id AND "createdAt"=latest_keys."createdAt" LIMIT 1) AS mn ON true`)
 
 	if err := query.Scan(ctx); err != nil {
 		return nil, err

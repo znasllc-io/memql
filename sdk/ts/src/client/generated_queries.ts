@@ -1207,7 +1207,7 @@ QueryClient.prototype.audienceRosterForSend = function (this: QueryClient, args:
   return this.executeNamed("audienceRosterForSend", buildAudienceRosterForSend(args), opts);
 };
 
-/** ENGINE (owner-scoped): how many recipients an audience holds, as a {count: N} aggregate (memql#3460). Computed server-side, so it is the one question about a large audience that needs no window at all -- which is exactly why the preflight and the frozen `recipientCount` use it rather than measuring the length of a bounded read. Measuring a page and calling it a total is how the 5000 ceiling came to be load-bearing in the first place. Owned. */
+/** ENGINE (owner-scoped): how many recipients an audience holds, as a {count, atLeast} aggregate (memql#3460). Computed server-side rather than by measuring the length of a bounded read, which is why the preflight and the frozen `recipientCount` use it: measuring a page and calling it a total is how the 5000 ceiling came to be load-bearing in the first place. The count still reads up to the engine's window: past it, `count` is the window and `atLeast` is true (memql#6033). Owned. */
 // Bound concept: v1:campaigns:recipient (machine-readable: BoundConcepts["audienceRosterSize"] in generated_concepts.ts).
 export interface AudienceRosterSizeArgs {
   audienceId: string;
@@ -1227,6 +1227,28 @@ declare module "./query.js" {
 
 QueryClient.prototype.audienceRosterSize = function (this: QueryClient, args: AudienceRosterSizeArgs = {} as AudienceRosterSizeArgs, opts?: QueryCallOptions): Promise<Result> {
   return this.executeNamed("audienceRosterSize", buildAudienceRosterSize(args), opts);
+};
+
+/** How many people in one audience can be mailed now, as a {count, atLeast} aggregate. Pending and unsubscribed members are on the list but are not counted. The Email app's audience rows, the campaign wizard and the send confirmation name this number. Past the engine's window, `count` is the window and `atLeast` is true, which the Email app says as "5,000 or more" (memql#6033). */
+// Bound concept: v1:campaigns:recipient (machine-readable: BoundConcepts["audienceSubscriberCount"] in generated_concepts.ts).
+export interface AudienceSubscriberCountArgs {
+  audienceId: string;
+}
+
+export function buildAudienceSubscriberCount(args: AudienceSubscriberCountArgs): string {
+  const parts: string[] = [];
+  parts.push("audienceId: " + renderMemQLValue(args.audienceId));
+  return "query audienceSubscriberCount(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    audienceSubscriberCount(args: AudienceSubscriberCountArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.audienceSubscriberCount = function (this: QueryClient, args: AudienceSubscriberCountArgs = {} as AudienceSubscriberCountArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("audienceSubscriberCount", buildAudienceSubscriberCount(args), opts);
 };
 
 /** The caller's audiences, newest first. Backs the audience list and the campaign editor's audience picker. Owned. */
@@ -1888,6 +1910,30 @@ declare module "./query.js" {
 
 QueryClient.prototype.campaignEngagementRefs = function (this: QueryClient, args: CampaignEngagementRefsArgs = {} as CampaignEngagementRefsArgs, opts?: QueryCallOptions): Promise<Result> {
   return this.executeNamed("campaignEngagementRefs", buildCampaignEngagementRefs(args), opts);
+};
+
+/** Counts confirmed outcomes, not a subtraction from messages accepted by the transport. */
+// Bound concept: v1:campaigns:delivery (machine-readable: BoundConcepts["campaignProviderDeliveryCount"] in generated_concepts.ts).
+export interface CampaignProviderDeliveryCountArgs {
+  campaignId: string;
+  providerStatus: string;
+}
+
+export function buildCampaignProviderDeliveryCount(args: CampaignProviderDeliveryCountArgs): string {
+  const parts: string[] = [];
+  parts.push("campaignId: " + renderMemQLValue(args.campaignId));
+  parts.push("providerStatus: " + renderMemQLValue(args.providerStatus));
+  return "query campaignProviderDeliveryCount(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    campaignProviderDeliveryCount(args: CampaignProviderDeliveryCountArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.campaignProviderDeliveryCount = function (this: QueryClient, args: CampaignProviderDeliveryCountArgs = {} as CampaignProviderDeliveryCountArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("campaignProviderDeliveryCount", buildCampaignProviderDeliveryCount(args), opts);
 };
 
 /** Current repeating instruction for this blueprint; organization authorization applies. */
@@ -3370,6 +3416,52 @@ QueryClient.prototype.dueResponsibilities = function (this: QueryClient, args: D
   return this.executeNamed("dueResponsibilities", buildDueResponsibilities(args), opts);
 };
 
+/** One email layout by id, for the organization's members. Backs the revision check campaignSaveLayout makes and the editors that open a saved layout. The id is not a capability: the concept's account tier answers a layout outside the caller's organizations as not found. */
+// Bound concept: v1:campaigns:emailLayout (machine-readable: BoundConcepts["emailLayoutById"] in generated_concepts.ts).
+export interface EmailLayoutByIdArgs {
+  layoutId: string;
+}
+
+export function buildEmailLayoutById(args: EmailLayoutByIdArgs): string {
+  const parts: string[] = [];
+  parts.push("layoutId: " + renderMemQLValue(args.layoutId));
+  return "query emailLayoutById(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    emailLayoutById(args: EmailLayoutByIdArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.emailLayoutById = function (this: QueryClient, args: EmailLayoutByIdArgs = {} as EmailLayoutByIdArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("emailLayoutById", buildEmailLayoutById(args), opts);
+};
+
+/** An organization's email layouts, newest first. Backs the layout picker (through the emailLayouts builtin) and the Email app's Templates section. status narrows to active or archived layouts; omit it to see both. */
+// Bound concept: v1:campaigns:emailLayout (machine-readable: BoundConcepts["emailLayoutsForAccount"] in generated_concepts.ts).
+export interface EmailLayoutsForAccountArgs {
+  accountId: string;
+  status?: string;
+}
+
+export function buildEmailLayoutsForAccount(args: EmailLayoutsForAccountArgs): string {
+  const parts: string[] = [];
+  parts.push("accountId: " + renderMemQLValue(args.accountId));
+  if (args.status !== undefined) parts.push("status: " + renderMemQLValue(args.status));
+  return "query emailLayoutsForAccount(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    emailLayoutsForAccount(args: EmailLayoutsForAccountArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.emailLayoutsForAccount = function (this: QueryClient, args: EmailLayoutsForAccountArgs = {} as EmailLayoutsForAccountArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("emailLayoutsForAccount", buildEmailLayoutsForAccount(args), opts);
+};
+
 /** One event-email rule by id. */
 // Bound concept: v1:campaigns:emailRule (machine-readable: BoundConcepts["emailRuleById"] in generated_concepts.ts).
 export interface EmailRuleByIdArgs {
@@ -4143,6 +4235,76 @@ declare module "./query.js" {
 
 QueryClient.prototype.invocationsForWorkerAsOperator = function (this: QueryClient, args: InvocationsForWorkerAsOperatorArgs = {} as InvocationsForWorkerAsOperatorArgs, opts?: QueryCallOptions): Promise<Result> {
   return this.executeNamed("invocationsForWorkerAsOperator", buildInvocationsForWorkerAsOperator(args), opts);
+};
+
+/** Organization-authorized email automation read. */
+// Bound concept: v1:campaigns:journey (machine-readable: BoundConcepts["journeyById"] in generated_concepts.ts).
+export interface JourneyByIdArgs {
+  journeyId: string;
+}
+
+export function buildJourneyById(args: JourneyByIdArgs): string {
+  const parts: string[] = [];
+  parts.push("journeyId: " + renderMemQLValue(args.journeyId));
+  return "query journeyById(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    journeyById(args: JourneyByIdArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.journeyById = function (this: QueryClient, args: JourneyByIdArgs = {} as JourneyByIdArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("journeyById", buildJourneyById(args), opts);
+};
+
+/** Organization-authorized email automation read. */
+// Bound concept: v1:campaigns:journeyEnrollment (machine-readable: BoundConcepts["journeyEnrollmentCounts"] in generated_concepts.ts).
+export interface JourneyEnrollmentCountsArgs {
+  journeyId: string;
+  status?: string;
+  stepId?: string;
+}
+
+export function buildJourneyEnrollmentCounts(args: JourneyEnrollmentCountsArgs): string {
+  const parts: string[] = [];
+  parts.push("journeyId: " + renderMemQLValue(args.journeyId));
+  if (args.status !== undefined) parts.push("status: " + renderMemQLValue(args.status));
+  if (args.stepId !== undefined) parts.push("stepId: " + renderMemQLValue(args.stepId));
+  return "query journeyEnrollmentCounts(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    journeyEnrollmentCounts(args: JourneyEnrollmentCountsArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.journeyEnrollmentCounts = function (this: QueryClient, args: JourneyEnrollmentCountsArgs = {} as JourneyEnrollmentCountsArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("journeyEnrollmentCounts", buildJourneyEnrollmentCounts(args), opts);
+};
+
+/** Organization-authorized email automation read. */
+// Bound concept: v1:campaigns:journey (machine-readable: BoundConcepts["journeys"] in generated_concepts.ts).
+export interface JourneysArgs {
+  status?: string;
+}
+
+export function buildJourneys(args: JourneysArgs): string {
+  const parts: string[] = [];
+  if (args.status !== undefined) parts.push("status: " + renderMemQLValue(args.status));
+  return "query journeys(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    journeys(args: JourneysArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.journeys = function (this: QueryClient, args: JourneysArgs = {} as JourneysArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("journeys", buildJourneys(args), opts);
 };
 
 /** Every knowledge domain this cluster holds.
@@ -7724,7 +7886,8 @@ QueryClient.prototype.sendableRecipientsForAudience = function (this: QueryClien
   return this.executeNamed("sendableRecipientsForAudience", buildSendableRecipientsForAudience(args), opts);
 };
 
-/** Every sending identity the caller may use, newest first. Backs the identity picker on the campaign editor and the Senders section of the OS app. Composite tier, so a cluster owner sees every operator's -- which is what makes "who is this cluster mailing as" answerable at all. */
+/** Every sending identity the caller may use, newest first. Backs the identity picker on the campaign editor and the Senders list in the OS app's Settings. Composite tier, so a cluster owner sees every operator's -- which is what makes "who is this cluster mailing as" answerable at all.
+SORTED BY WHEN IT WAS ADDED, NOT BY ADDRESS, because the sort is also the page cursor. A payload field is not keyset-eligible, so a list ordered by `address` could not continue past its first page: a caller walking it past 200 identities got the first 200 and a list that ended without saying so. */
 // Bound concept: v1:campaigns:senderIdentity (machine-readable: BoundConcepts["senderIdentities"] in generated_concepts.ts).
 export interface SenderIdentitiesArgs {
   status?: string;
@@ -7746,7 +7909,7 @@ QueryClient.prototype.senderIdentities = function (this: QueryClient, args: Send
   return this.executeNamed("senderIdentities", buildSenderIdentities(args), opts);
 };
 
-/** The sending identities filed under one account. The tie is a RECORD, not a scope: this is the same read `senderIdentities` makes, narrowed by the tie field, and the tier conjunct is carried verbatim rather than dropped -- copying `sitesForAccount`'s form exactly (accounts D1). */
+/** The sending identities filed under one account, newest first. The tie is a RECORD, not a scope: this is the same read `senderIdentities` makes, narrowed by the tie field, and the tier conjunct is carried verbatim rather than dropped -- copying `sitesForAccount`'s form exactly (accounts D1). */
 // Bound concept: v1:campaigns:senderIdentity (machine-readable: BoundConcepts["senderIdentitiesForAccount"] in generated_concepts.ts).
 export interface SenderIdentitiesForAccountArgs {
   accountId: string;
@@ -11359,6 +11522,26 @@ QueryClient.prototype.skillNeedsRefresh = function (this: QueryClient, args: Ski
   return this.executeNamed("skillNeedsRefresh", buildSkillNeedsRefresh(args), opts);
 };
 
+/** Training can inspect retired skills to explain historical selections. This is the shared capability catalog; private lessons remain in the Library. */
+// Bound concept: v1:skills:skill (machine-readable: BoundConcepts["skillsForTraining"] in generated_concepts.ts).
+export interface SkillsForTrainingArgs {
+}
+
+export function buildSkillsForTraining(args: SkillsForTrainingArgs): string {
+  void args;
+  return "query skillsForTraining()";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    skillsForTraining(args?: SkillsForTrainingArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.skillsForTraining = function (this: QueryClient, args: SkillsForTrainingArgs = {} as SkillsForTrainingArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("skillsForTraining", buildSkillsForTraining(args), opts);
+};
+
 /** Every mirrored line item that names one product -- what soldByProduct groups. Unwindowed by construction: the date is the order's, so the tool intersects this with ordersInWindow rather than filtering here. */
 // Bound concept: v1:shopify:orderLineItem (machine-readable: BoundConcepts["soldByProduct"] in generated_concepts.ts).
 export interface SoldByProductArgs {
@@ -11758,6 +11941,30 @@ QueryClient.prototype.systemActiveAuthoringBundles = function (this: QueryClient
   return this.executeNamed("systemActiveAuthoringBundles", buildSystemActiveAuthoringBundles(args), opts);
 };
 
+/** The stored message revision named by an authenticated view-in-browser token. */
+// Bound concept: v1:campaigns:template (machine-readable: BoundConcepts["templateAtRevision"] in generated_concepts.ts).
+export interface TemplateAtRevisionArgs {
+  templateId: string;
+  revision: string;
+}
+
+export function buildTemplateAtRevision(args: TemplateAtRevisionArgs): string {
+  const parts: string[] = [];
+  parts.push("templateId: " + renderMemQLValue(args.templateId));
+  parts.push("revision: " + renderMemQLValue(args.revision));
+  return "query templateAtRevision(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    templateAtRevision(args: TemplateAtRevisionArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.templateAtRevision = function (this: QueryClient, args: TemplateAtRevisionArgs = {} as TemplateAtRevisionArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("templateAtRevision", buildTemplateAtRevision(args), opts);
+};
+
 /** One template by id, gated to its owner. Backs the template editor and the campaign editor's preview. Owned. */
 // Bound concept: v1:campaigns:template (machine-readable: BoundConcepts["templateById"] in generated_concepts.ts).
 export interface TemplateByIdArgs {
@@ -11780,7 +11987,31 @@ QueryClient.prototype.templateById = function (this: QueryClient, args: Template
   return this.executeNamed("templateById", buildTemplateById(args), opts);
 };
 
-/** The caller's templates, newest first. Backs the template list and the campaign editor's template picker. Owned. */
+/** The template an organization published from one Library file, for campaignSaveTemplate and the editors that open a file: publishing a file again updates this template, so there is one per organization and file. It answers the template's id and its revision (createdAt) and nothing of its content, which templateById reads. Newest first and one row, so a stray duplicate can never make a save ambiguous. The concept's account tier answers a template outside the caller's organizations as not found, so the file id is not a way into somebody else's templates. Owned. */
+// Bound concept: v1:campaigns:template (machine-readable: BoundConcepts["templateForSource"] in generated_concepts.ts).
+export interface TemplateForSourceArgs {
+  accountId: string;
+  sourceArtifactId: string;
+}
+
+export function buildTemplateForSource(args: TemplateForSourceArgs): string {
+  const parts: string[] = [];
+  parts.push("accountId: " + renderMemQLValue(args.accountId));
+  parts.push("sourceArtifactId: " + renderMemQLValue(args.sourceArtifactId));
+  return "query templateForSource(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    templateForSource(args: TemplateForSourceArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.templateForSource = function (this: QueryClient, args: TemplateForSourceArgs = {} as TemplateForSourceArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("templateForSource", buildTemplateForSource(args), opts);
+};
+
+/** The caller's templates, newest first, as summaries: no body and no document. Backs the template list and the campaign editor's template picker; a template's content is read with templateById. Owned. */
 // Bound concept: v1:campaigns:template (machine-readable: BoundConcepts["templates"] in generated_concepts.ts).
 export interface TemplatesArgs {
   status?: string;
@@ -11962,7 +12193,7 @@ QueryClient.prototype.userById = function (this: QueryClient, args: UserByIdArgs
   return this.executeNamed("userById", buildUserById(args), opts);
 };
 
-/** Count of active v1:identity:user rows. Returns a {count: N} aggregate. */
+/** Count of active v1:identity:user rows. Returns a {count, atLeast} aggregate: past the engine's window, `count` is the window and `atLeast` is true (memql#6033). */
 // Bound concept: v1:identity:user (machine-readable: BoundConcepts["userCount"] in generated_concepts.ts).
 export interface UserCountArgs {
 }
@@ -12264,6 +12495,48 @@ QueryClient.prototype.workCompletedStepsForOwnerRuns = function (this: QueryClie
   return this.executeNamed("workCompletedStepsForOwnerRuns", buildWorkCompletedStepsForOwnerRuns(args), opts);
 };
 
+/** This owner's approved typed computer permissions. Native dispatch additionally checks the receipt hash, agent, machine, mode and revocation before each use. */
+// Bound concept: v1:work:approval (machine-readable: BoundConcepts["workComputerPermissions"] in generated_concepts.ts).
+export interface WorkComputerPermissionsArgs {
+}
+
+export function buildWorkComputerPermissions(args: WorkComputerPermissionsArgs): string {
+  void args;
+  return "query workComputerPermissions()";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    workComputerPermissions(args?: WorkComputerPermissionsArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.workComputerPermissions = function (this: QueryClient, args: WorkComputerPermissionsArgs = {} as WorkComputerPermissionsArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("workComputerPermissions", buildWorkComputerPermissions(args), opts);
+};
+
+/** Includes unused one-time receipts; only the native authority decides admission. */
+// Bound concept: v1:work:approval (machine-readable: BoundConcepts["workComputerPermissionsForAgent"] in generated_concepts.ts).
+export interface WorkComputerPermissionsForAgentArgs {
+  agentId: string;
+}
+
+export function buildWorkComputerPermissionsForAgent(args: WorkComputerPermissionsForAgentArgs): string {
+  const parts: string[] = [];
+  parts.push("agentId: " + renderMemQLValue(args.agentId));
+  return "query workComputerPermissionsForAgent(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    workComputerPermissionsForAgent(args: WorkComputerPermissionsForAgentArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.workComputerPermissionsForAgent = function (this: QueryClient, args: WorkComputerPermissionsForAgentArgs = {} as WorkComputerPermissionsForAgentArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("workComputerPermissionsForAgent", buildWorkComputerPermissionsForAgent(args), opts);
+};
+
 /** Read only this run's own computer-use decisions, including previous grants. */
 // Bound concept: v1:work:approval (machine-readable: BoundConcepts["workComputerScopesForOwnerRun"] in generated_concepts.ts).
 export interface WorkComputerScopesForOwnerRunArgs {
@@ -12438,6 +12711,26 @@ declare module "./query.js" {
 
 QueryClient.prototype.workDraftsForOwnerRun = function (this: QueryClient, args: WorkDraftsForOwnerRunArgs = {} as WorkDraftsForOwnerRunArgs, opts?: QueryCallOptions): Promise<Result> {
   return this.executeNamed("workDraftsForOwnerRun", buildWorkDraftsForOwnerRun(args), opts);
+};
+
+/** Durable goal-evaluation results, scoped by the same owner tier as their work. A missing result is not a successful measurement. */
+// Bound concept: v1:work:observation (machine-readable: BoundConcepts["workGoalEvaluationsForOwner"] in generated_concepts.ts).
+export interface WorkGoalEvaluationsForOwnerArgs {
+}
+
+export function buildWorkGoalEvaluationsForOwner(args: WorkGoalEvaluationsForOwnerArgs): string {
+  void args;
+  return "query workGoalEvaluationsForOwner()";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    workGoalEvaluationsForOwner(args?: WorkGoalEvaluationsForOwnerArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.workGoalEvaluationsForOwner = function (this: QueryClient, args: WorkGoalEvaluationsForOwnerArgs = {} as WorkGoalEvaluationsForOwnerArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("workGoalEvaluationsForOwner", buildWorkGoalEvaluationsForOwner(args), opts);
 };
 
 /** One of the caller's goals by id. */
@@ -12804,6 +13097,46 @@ declare module "./query.js" {
 
 QueryClient.prototype.workSignedRunsForOwner = function (this: QueryClient, args: WorkSignedRunsForOwnerArgs = {} as WorkSignedRunsForOwnerArgs, opts?: QueryCallOptions): Promise<Result> {
   return this.executeNamed("workSignedRunsForOwner", buildWorkSignedRunsForOwner(args), opts);
+};
+
+/** The immutable selection for one exact step version in owned work. */
+// Bound concept: v1:work:observation (machine-readable: BoundConcepts["workSkillSelectionForOwnerRun"] in generated_concepts.ts).
+export interface WorkSkillSelectionForOwnerRunArgs {
+}
+
+export function buildWorkSkillSelectionForOwnerRun(args: WorkSkillSelectionForOwnerRunArgs): string {
+  void args;
+  return "query workSkillSelectionForOwnerRun()";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    workSkillSelectionForOwnerRun(args?: WorkSkillSelectionForOwnerRunArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.workSkillSelectionForOwnerRun = function (this: QueryClient, args: WorkSkillSelectionForOwnerRunArgs = {} as WorkSkillSelectionForOwnerRunArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("workSkillSelectionForOwnerRun", buildWorkSkillSelectionForOwnerRun(args), opts);
+};
+
+/** Skill selection history visible only to the owner of the work. */
+// Bound concept: v1:work:observation (machine-readable: BoundConcepts["workSkillSelectionsForOwner"] in generated_concepts.ts).
+export interface WorkSkillSelectionsForOwnerArgs {
+}
+
+export function buildWorkSkillSelectionsForOwner(args: WorkSkillSelectionsForOwnerArgs): string {
+  void args;
+  return "query workSkillSelectionsForOwner()";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    workSkillSelectionsForOwner(args?: WorkSkillSelectionsForOwnerArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.workSkillSelectionsForOwner = function (this: QueryClient, args: WorkSkillSelectionsForOwnerArgs = {} as WorkSkillSelectionsForOwnerArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("workSkillSelectionsForOwner", buildWorkSkillSelectionsForOwner(args), opts);
 };
 
 /** One caller-owned execution receipt. A named key avoids reading an entire run when verifying a release artifact or one required check. */

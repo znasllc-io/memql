@@ -39,11 +39,15 @@ type RouteChoice struct {
 	// the server from the caller's identity and never taken from an argument.
 	// It is what makes a pinned app door the OWNER'S pin at the app gate.
 	By string
+	// NoPaidProviders is a hard ceiling across every modality, including
+	// embeddings. It survives row serialization and cannot be relaxed by a
+	// step override, a fallback or a child goal.
+	NoPaidProviders bool
 }
 
 // IsZero reports whether the choice changes nothing: Auto source, Auto level.
 func (c RouteChoice) IsZero() bool {
-	return strings.TrimSpace(c.Source) == "" && strings.TrimSpace(c.Level) == ""
+	return strings.TrimSpace(c.Source) == "" && strings.TrimSpace(c.Level) == "" && !c.NoPaidProviders
 }
 
 // Map is the row form written to v1:work:goal.routing and v1:work:run.routing.
@@ -54,6 +58,9 @@ func (c RouteChoice) Map() map[string]any {
 		return nil
 	}
 	out := map[string]any{}
+	if c.NoPaidProviders {
+		out["noPaidProviders"] = true
+	}
 	if v := strings.TrimSpace(c.Source); v != "" {
 		out["source"] = v
 	}
@@ -79,7 +86,7 @@ func RouteChoiceFrom(v any) RouteChoice {
 		s, _ := m[key].(string)
 		return strings.TrimSpace(s)
 	}
-	c := RouteChoice{Source: text("source"), Level: text("level"), By: text("by")}
+	c := RouteChoice{Source: text("source"), Level: text("level"), By: text("by"), NoPaidProviders: m["noPaidProviders"] == true}
 	if c.IsZero() {
 		return RouteChoice{}
 	}

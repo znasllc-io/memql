@@ -1,3 +1,4 @@
+import { StorageHealthProvider, StorageWarning } from "../cluster/storage/StorageHealth";
 import { AskNavigator } from "../ask/AskNavigator";
 import { SharedExternalConnectionsProvider } from "../modules/connections/useExternalConnections";
 import { SharedCredentialsProvider } from "../modules/connections/useSourceCredentials";
@@ -137,6 +138,7 @@ export function Shell({
             surfaces that ask (epic memql#5118). Above the desk, because the
             gate below renders instead of it and the presence effect inside it
             has to run when the setup widget is absent. */}
+        <StorageHealthProvider>
         <SetupFactsScope>
         <MachinesProvider>
           <ShellTransports source={source} ports={ports}>
@@ -186,6 +188,7 @@ export function Shell({
           </ShellTransports>
         </MachinesProvider>
         </SetupFactsScope>
+        </StorageHealthProvider>
         </SessionScope>
       </OsConnectionProvider>
     </AuthSourceProvider>
@@ -256,14 +259,10 @@ function ShellRoster({
   layout: ChromeLayout;
   children: ReactNode;
 }) {
-  const { access, config, ladderLoaded, accessEpoch } = useSession();
-  const registry = useMemo(() => ({
-    ...OS_REGISTRY,
-    apps: OS_REGISTRY.apps.filter(app => app.id !== "email" || config.emailAppEnabled !== false),
-  }), [config.emailAppEnabled]);
+  const { access, ladderLoaded, accessEpoch } = useSession();
   return (
     <OsProvider
-      registry={registry}
+      registry={OS_REGISTRY}
       actorRole={access?.role ?? ""}
       // The effective set's epoch (epic memql#5289): the roster gates on the
       // capability set now, and it lands after the role and changes on
@@ -386,9 +385,10 @@ function DesktopChrome({
   // and the marketplace's whole gesture is watching this desktop restyle.
   const [themesOpen, setThemesOpen] = useState(false);
 
+  const [storageWarningHeight, setStorageWarningHeight] = useState(0);
   const placement = useMemo<PlacementTokens>(
-    () => ({ margin: 28, gutter: 16, dockReserve: 118, maxSoloWidth: 1280 }),
-    [],
+    () => ({ margin: 28, gutter: 16, dockReserve: 118 + storageWarningHeight, maxSoloWidth: 1280 }),
+    [storageWarningHeight],
   );
 
   // Desk keyboard bindings (spec A): scoped off editable targets and off
@@ -445,6 +445,7 @@ function DesktopChrome({
           setThemesOpen(true);
         }}
       />
+      <StorageWarning onHeightChange={setStorageWarningHeight} />
       <ThemeStore open={themesOpen} onClose={() => setThemesOpen(false)} />
       <AskNavigator />
       <AskSheet dockReserve={placement.dockReserve} />

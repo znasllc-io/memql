@@ -32,6 +32,8 @@ QueryClient.prototype.acknowledgeAttention = function (this: QueryClient, args: 
 /** Add one address to an audience. Owned. source defaults to 'manual' via ?? rather than via the concept's @default, which is never applied on insert. Stamps the address's digest (emailDigest) so the membership can be found by it (recipientInAudienceByDigest). */
 // Bound concept: v1:campaigns:recipient (machine-readable: BoundConcepts["addRecipient"] in generated_concepts.ts).
 export interface AddRecipientArgs {
+  // Enum: subscribed | pending
+  subscriptionStatus?: string;
   recipientId: string;
   audienceId: string;
   email: string;
@@ -43,6 +45,7 @@ export interface AddRecipientArgs {
 
 export function buildAddRecipient(args: AddRecipientArgs): string {
   const parts: string[] = [];
+  if (args.subscriptionStatus !== undefined) parts.push("subscriptionStatus: " + renderMemQLValue(args.subscriptionStatus));
   parts.push("recipientId: " + renderMemQLValue(args.recipientId));
   parts.push("audienceId: " + renderMemQLValue(args.audienceId));
   parts.push("email: " + renderMemQLValue(args.email));
@@ -1284,6 +1287,8 @@ QueryClient.prototype.createAskConversation = function (this: QueryClient, args:
 /** Create an audience owned by the caller. Owned: ownerUserId is stamped from actor.userId, so a caller can only ever create their own audiences. */
 // Bound concept: v1:campaigns:audience (machine-readable: BoundConcepts["createAudience"] in generated_concepts.ts).
 export interface CreateAudienceArgs {
+  // Enum: none | required
+  confirmation?: string;
   audienceId: string;
   name: string;
   description?: string;
@@ -1292,6 +1297,7 @@ export interface CreateAudienceArgs {
 
 export function buildCreateAudience(args: CreateAudienceArgs): string {
   const parts: string[] = [];
+  if (args.confirmation !== undefined) parts.push("confirmation: " + renderMemQLValue(args.confirmation));
   parts.push("audienceId: " + renderMemQLValue(args.audienceId));
   parts.push("name: " + renderMemQLValue(args.name));
   if (args.description !== undefined) parts.push("description: " + renderMemQLValue(args.description));
@@ -1750,6 +1756,7 @@ export interface CreateComposeRecipeArgs {
   templateId?: string;
   format: string;
   outputKind?: string;
+  layoutId?: string;
   folderId?: string;
   accountIds?: string[];
 }
@@ -1763,6 +1770,7 @@ export function buildCreateComposeRecipe(args: CreateComposeRecipeArgs): string 
   if (args.templateId !== undefined) parts.push("templateId: " + renderMemQLValue(args.templateId));
   parts.push("format: " + renderMemQLValue(args.format));
   if (args.outputKind !== undefined) parts.push("outputKind: " + renderMemQLValue(args.outputKind));
+  if (args.layoutId !== undefined) parts.push("layoutId: " + renderMemQLValue(args.layoutId));
   if (args.folderId !== undefined) parts.push("folderId: " + renderMemQLValue(args.folderId));
   if (args.accountIds !== undefined) parts.push("accountIds: " + renderMemQLValue(args.accountIds));
   return "mutation createComposeRecipe(" + parts.join(", ") + ")";
@@ -3070,65 +3078,6 @@ QueryClient.prototype.createSite = function (this: QueryClient, args: CreateSite
   return this.executeNamed("createSite", buildCreateSite(args), opts);
 };
 
-/** Materialize a v1:skills:skill catalog row from a `seed skill ...` declaration under dsl/agents/skills/*.memql. Matches the SeedMaterializer's `mutationCreate<Concept>` naming convention -- the materializer stamps the seed body's id into `skillId` and forwards every other seed body field as a same-named arg, so this mutation's arg surface mirrors the on-disk seed body 1:1. Sibling to `mintSkill`: same row shape, but the seed path is for the predefined catalog (predefined defaults true) and carries no originatingPlanId / mintedByAgentId provenance triad. Was missing pre-#344, which made every skill seed in the bundled catalog fail to materialize with `function "createSkill" not found`. The materializer convention itself lives in component/memql/seed_materializer.go. */
-// Bound concept: v1:skills:skill (machine-readable: BoundConcepts["createSkill"] in generated_concepts.ts).
-export interface CreateSkillArgs {
-  skillId?: string;
-  slug: string;
-  name: string;
-  description?: string;
-  category?: string;
-  tags?: unknown[];
-  domainIds?: unknown[];
-  toolSlugs?: unknown[];
-  /** Inert since memql#5432 retired the live-knowledge mechanism; stored and never resolved. */
-  liveSourceIds?: unknown[];
-  tier: string;
-  predefined?: boolean;
-  active?: boolean;
-  instructions?: Record<string, unknown>;
-  scripts?: unknown[];
-  resources?: unknown[];
-  constructRefs?: unknown[];
-  effects?: Record<string, unknown>;
-  version?: number;
-  status?: string;
-}
-
-export function buildCreateSkill(args: CreateSkillArgs): string {
-  const parts: string[] = [];
-  if (args.skillId !== undefined) parts.push("skillId: " + renderMemQLValue(args.skillId));
-  parts.push("slug: " + renderMemQLValue(args.slug));
-  parts.push("name: " + renderMemQLValue(args.name));
-  if (args.description !== undefined) parts.push("description: " + renderMemQLValue(args.description));
-  if (args.category !== undefined) parts.push("category: " + renderMemQLValue(args.category));
-  if (args.tags !== undefined) parts.push("tags: " + renderMemQLValue(args.tags));
-  if (args.domainIds !== undefined) parts.push("domainIds: " + renderMemQLValue(args.domainIds));
-  if (args.toolSlugs !== undefined) parts.push("toolSlugs: " + renderMemQLValue(args.toolSlugs));
-  if (args.liveSourceIds !== undefined) parts.push("liveSourceIds: " + renderMemQLValue(args.liveSourceIds));
-  parts.push("tier: " + renderMemQLValue(args.tier));
-  if (args.predefined !== undefined) parts.push("predefined: " + renderMemQLValue(args.predefined));
-  if (args.active !== undefined) parts.push("active: " + renderMemQLValue(args.active));
-  if (args.instructions !== undefined) parts.push("instructions: " + renderMemQLValue(args.instructions));
-  if (args.scripts !== undefined) parts.push("scripts: " + renderMemQLValue(args.scripts));
-  if (args.resources !== undefined) parts.push("resources: " + renderMemQLValue(args.resources));
-  if (args.constructRefs !== undefined) parts.push("constructRefs: " + renderMemQLValue(args.constructRefs));
-  if (args.effects !== undefined) parts.push("effects: " + renderMemQLValue(args.effects));
-  if (args.version !== undefined) parts.push("version: " + renderMemQLValue(args.version));
-  if (args.status !== undefined) parts.push("status: " + renderMemQLValue(args.status));
-  return "mutation createSkill(" + parts.join(", ") + ")";
-}
-
-declare module "./query.js" {
-  interface QueryClient {
-    createSkill(args: CreateSkillArgs, opts?: QueryCallOptions): Promise<Result>;
-  }
-}
-
-QueryClient.prototype.createSkill = function (this: QueryClient, args: CreateSkillArgs = {} as CreateSkillArgs, opts?: QueryCallOptions): Promise<Result> {
-  return this.executeNamed("createSkill", buildCreateSkill(args), opts);
-};
-
 /** Append a v1:agents:skillChangeEvent row recording a skill attach / reconfigure on an agent. Phase 2 (#158) cut: every Planner Agent extendSpecialist / createSpecialist flow that lands a skill on an agent issues one of these per skill. Phase 3 also writes them from the cockpit Skills admin view when a human attaches a skill manually. Empty actorAgentId + actorUserId is allowed for system-driven attaches (the migration tool writes events with actorUserId='system:migration:phase2'). The caller is responsible for providing skillChangeEventId -- mint via the standard NewShortId / MustFromMap helpers caller-side. */
 // Bound concept: v1:agents:skillChangeEvent (machine-readable: BoundConcepts["createSkillChangeEvent"] in generated_concepts.ts).
 export interface CreateSkillChangeEventArgs {
@@ -4189,7 +4138,7 @@ QueryClient.prototype.markStoreRedacted = function (this: QueryClient, args: Mar
   return this.executeNamed("markStoreRedacted", buildMarkStoreRedacted(args), opts);
 };
 
-/** Mint a new v1:skills:skill catalog row from a Planner Agent mintSkill action (Phase 3 / memql#159). The caller is the planner integration; it has already run the authority gate (action='mintSkill' on the planner's agentAuthorization + tier in skillTierAllowlist) and the catalog-search heuristic (no existing skill covers >60% of the requested bundle) before invoking this. predefined is hard-stamped false -- the runtime mint surface is for user-/planner-created rows only; the predefined catalog stays in dsl/agents/skills/*.memql. originatingPlanId + mintedByAgentId carry the Phase 3 provenance triad. Server-side enforcement: the tier-validation rule from Phase 1 still applies (skill.tier >= max(domain tier)) -- a mint that violates it rejects with the same error path as the load-time check. */
+/** Mint a new v1:skills:skill catalog row from a Planner Agent mintSkill action (Phase 3 / memql#159). The caller is the planner integration; it has already run the authority gate (action='mintSkill' on the planner's agentAuthorization + tier in skillTierAllowlist) and the catalog-search heuristic (no existing skill covers >60% of the requested bundle) before invoking this. predefined is hard-stamped false -- the runtime mint surface is for user-/planner-created rows only; the predefined catalog stays in dsl/skills/seeds/*.memql. originatingGoalId + mintedByRunId carry the work provenance. Server-side enforcement: the tier-validation rule from Phase 1 still applies (skill.tier >= max(domain tier)) -- a mint that violates it rejects with the same error path as the load-time check. */
 // Bound concept: v1:skills:skill (machine-readable: BoundConcepts["mintSkill"] in generated_concepts.ts).
 export interface MintSkillArgs {
   skillId?: string;
@@ -5586,6 +5535,28 @@ QueryClient.prototype.restoreArtifact = function (this: QueryClient, args: Resto
   return this.executeNamed("restoreArtifact", buildRestoreArtifact(args), opts);
 };
 
+/** Restore an archived audience: it returns to the campaign and automation pickers. Authorized organization peers may restore it; the engine preserves its original owner and records the current writer on the new version. */
+// Bound concept: v1:campaigns:audience (machine-readable: BoundConcepts["restoreAudience"] in generated_concepts.ts).
+export interface RestoreAudienceArgs {
+  audienceId: string;
+}
+
+export function buildRestoreAudience(args: RestoreAudienceArgs): string {
+  const parts: string[] = [];
+  parts.push("audienceId: " + renderMemQLValue(args.audienceId));
+  return "mutation restoreAudience(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    restoreAudience(args: RestoreAudienceArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.restoreAudience = function (this: QueryClient, args: RestoreAudienceArgs = {} as RestoreAudienceArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("restoreAudience", buildRestoreAudience(args), opts);
+};
+
 /** Restore an archived recipe. Owned. */
 // Bound concept: v1:compose:recipe (machine-readable: BoundConcepts["restoreComposeRecipe"] in generated_concepts.ts).
 export interface RestoreComposeRecipeArgs {
@@ -6209,6 +6180,31 @@ declare module "./query.js" {
 
 QueryClient.prototype.setArtifactAccounts = function (this: QueryClient, args: SetArtifactAccountsArgs = {} as SetArtifactAccountsArgs, opts?: QueryCallOptions): Promise<Result> {
   return this.executeNamed("setArtifactAccounts", buildSetArtifactAccounts(args), opts);
+};
+
+/** Choose whether new newsletter members must confirm their address. */
+// Bound concept: v1:campaigns:audience (machine-readable: BoundConcepts["setAudienceConfirmation"] in generated_concepts.ts).
+export interface SetAudienceConfirmationArgs {
+  audienceId: string;
+  // Enum: none | required
+  confirmation: string;
+}
+
+export function buildSetAudienceConfirmation(args: SetAudienceConfirmationArgs): string {
+  const parts: string[] = [];
+  parts.push("audienceId: " + renderMemQLValue(args.audienceId));
+  parts.push("confirmation: " + renderMemQLValue(args.confirmation));
+  return "mutation setAudienceConfirmation(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    setAudienceConfirmation(args: SetAudienceConfirmationArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.setAudienceConfirmation = function (this: QueryClient, args: SetAudienceConfirmationArgs = {} as SetAudienceConfirmationArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("setAudienceConfirmation", buildSetAudienceConfirmation(args), opts);
 };
 
 /** Flip the cluster-wide GLOBAL KILL SWITCH for planner-authored automations (epic memql#954, issue #961). Partial-update of the singleton cluster-settings row (id='cluster'): sets authoredAutomationsEnabled true (resume) or false (halt). false halts EVERY authored automation across the whole cluster -- the governance hard stop -- independent of any bundle status or per-user kill switch. Operator-only in practice (the admin settings surface calls it); the authored scheduler reads the flag through clusterSettingsCurrent on its global gate. */
@@ -7602,6 +7598,7 @@ export interface UpdateComposeRecipeArgs {
   templateId?: string;
   format?: string;
   outputKind?: string;
+  layoutId?: string;
   folderId?: string;
   accountIds?: string[];
 }
@@ -7615,6 +7612,7 @@ export function buildUpdateComposeRecipe(args: UpdateComposeRecipeArgs): string 
   if (args.templateId !== undefined) parts.push("templateId: " + renderMemQLValue(args.templateId));
   if (args.format !== undefined) parts.push("format: " + renderMemQLValue(args.format));
   if (args.outputKind !== undefined) parts.push("outputKind: " + renderMemQLValue(args.outputKind));
+  if (args.layoutId !== undefined) parts.push("layoutId: " + renderMemQLValue(args.layoutId));
   if (args.folderId !== undefined) parts.push("folderId: " + renderMemQLValue(args.folderId));
   if (args.accountIds !== undefined) parts.push("accountIds: " + renderMemQLValue(args.accountIds));
   return "mutation updateComposeRecipe(" + parts.join(", ") + ")";
@@ -8159,6 +8157,7 @@ QueryClient.prototype.updateRoutingPolicy = function (this: QueryClient, args: U
 /** ENGINE: stamp a send job's progress or lifecycle transition. Called by the drain worker after each batch and on every terminal outcome. clusterOwner tier. */
 // Bound concept: v1:campaigns:sendJob (machine-readable: BoundConcepts["updateSendJob"] in generated_concepts.ts).
 export interface UpdateSendJobArgs {
+  versionTime?: string;
   sendJobId: string;
   status?: string;
   recipientCount?: number;
@@ -8175,6 +8174,7 @@ export interface UpdateSendJobArgs {
 
 export function buildUpdateSendJob(args: UpdateSendJobArgs): string {
   const parts: string[] = [];
+  if (args.versionTime !== undefined) parts.push("versionTime: " + renderMemQLValue(args.versionTime));
   parts.push("sendJobId: " + renderMemQLValue(args.sendJobId));
   if (args.status !== undefined) parts.push("status: " + renderMemQLValue(args.status));
   if (args.recipientCount !== undefined) parts.push("recipientCount: " + renderMemQLValue(args.recipientCount));

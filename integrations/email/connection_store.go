@@ -83,11 +83,11 @@ func (s *connectionStore) change(ctx context.Context, key string, target any, ch
 	if err != nil {
 		return fmt.Errorf("email connection coordination is unavailable: %w", err)
 	}
-	release, err := memql.AcquireWriteGate(ctx, db, "email-connection:"+emailStateID(key))
+	hold, err := memql.AcquireGateHold(context.WithoutCancel(ctx), db, 0, "email-connection:"+emailStateID(key))
 	if err != nil {
 		return fmt.Errorf("email connection coordination is unavailable: %w", err)
 	}
-	defer release()
+	defer hold.Release()
 	found, prior, err := s.read(ctx, key, target)
 	if err != nil {
 		return err
@@ -107,7 +107,22 @@ func (s *connectionStore) change(ctx context.Context, key string, target any, ch
 	if s.now != nil {
 		now = s.now()
 	}
-	_, err = s.engine.Execute(emailStateContext(ctx), renderConfigCall("storeEmailConnectionState", map[string]string{"id": emailStateID(key), "encryptedValue": sealed, "versionTime": memql.VersionTimeAfter(prior, now).Format(time.RFC3339Nano)}))
+	values := map[string]string{"id": emailStateID(key), "encryptedValue": sealed, "versionTime": memql.VersionTimeAfter(prior, now).Format(time.RFC3339Nano)}
+	values["purpose"] = "internal"
+	if connection, ok := target.(*azureConnection); ok {
+		values["purpose"], values["accountId"] = "azure-organization-"+connection.Status, connection.AccountID
+		values["nextAttemptAt"] = now.UTC().Format(time.RFC3339Nano)
+	}
+	if feedback, ok := target.(*azureFeedbackConnection); ok {
+		values["purpose"], values["accountId"] = "azure-feedback-"+feedback.Status, feedback.AccountID
+		values["nextAttemptAt"] = feedback.NextAttemptAt.UTC().Format(time.RFC3339Nano)
+	}
+	if err = hold.Verify(ctx); err != nil {
+		return err
+	}
+	write, cancel := context.WithTimeout(context.WithoutCancel(ctx), 10*time.Second)
+	defer cancel()
+	_, err = s.engine.Execute(emailStateContext(write), renderConfigCall("storeEmailConnectionState", values))
 	if err != nil {
 		return fmt.Errorf("could not persist email connection state")
 	}

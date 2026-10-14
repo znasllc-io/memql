@@ -46,6 +46,7 @@ func TestNoSHA256InIntegrations(t *testing.T) {
 	// -- specifically to remove the unguarded coupling a duplicated hash
 	// expression created, so the entry is gone rather than kept.)
 	allow := map[string]string{
+		"knowledge/seeddata/manifest.go":         "verifies standard SHA-256 of checked-in source and provenance bytes independently against manifest.sha256; row identities remain on core/id, whose composition is not the manifest byte checksum",
 		"library/revision_images_db_test.go":     "independently computes the immutable image's standard SHA-256 file receipt to test byte pins across replicas; core/id is not the storage checksum",
 		"library/review_applied.go":              "verifies an existing immutable storage receipt against app/library_revision_files.go's raw SHA-256 operation path; core/id uses a different composition and cannot identify already-written blobs",
 		"library/review_applied_test.go":         "independently constructs the existing immutable blob receipt protocol for operation and byte-integrity verification",
@@ -73,8 +74,9 @@ func TestNoSHA256InIntegrations(t *testing.T) {
 		"pipelinesteps/pod_file_live_test.go":       "verifies the exact file bytes carried by a real Kubernetes exec stream against a standard SHA-256 fixture",
 		"azureblob/verified_stream_test.go":         "independently computes standard SHA-256 artifact fixtures for the streaming storage protocol",
 		"azureblob/verified_stream_azurite_test.go": "checks real stored artifact bytes against standard SHA-256 digests, including an OCI archive",
-		"email/acs.go":      "Azure Communication Services requires SHA-256 content digests and HMAC-SHA256 request authentication; these are wire signatures, not row IDs",
-		"email/acs_test.go": "Independently verifies ACS's required SHA-256 content hash and HMAC wire signature against the outgoing request",
+		"email/acs.go":            "Azure Communication Services requires SHA-256 content digests and HMAC-SHA256 request authentication; these are wire signatures, not row IDs",
+		"email/acs_test.go":       "Independently verifies ACS's required SHA-256 content hash and HMAC wire signature against the outgoing request",
+		"email/azure_feedback.go": "correlates sealed ACS mailbox receipts with the persisted campaigns emailDigest protocol (standard SHA-256 of the normalized address); core/id's chained fingerprint cannot match existing consent and suppression digests",
 		// Retention archives are recoverable outside MemQL. Their filenames are
 		// standard SHA-256 checksums of the gzip bytes, verified with sha256sum
 		// before restoring evidence; core/id's chained fingerprint differs.

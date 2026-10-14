@@ -85,10 +85,19 @@ var promptLevels = map[string]string{
 	// invoked it again -- which is the same band as agentReply, not the
 	// reasoning band, because it chooses among options rather than authoring.
 	"plannerAgent": "strong",
+	// Bounded human-reviewed email journey planning uses catalog IDs and native validation.
+	"composeEmailJourney": "strong",
 	// workAgentReply: executes one owned work step with tools and reports its
 	// result. The agent chooses actions and writes a user-facing reply; it does
 	// not emit executable DSL, so the agent reply band is sufficient.
 	"workAgentReply": "strong",
+	// Rendered checkpoint guidance joins the next ordinary reasoning turn;
+	// it creates no critic call or independent routing choice. Its own bounded
+	// evidence summary stays fast; the work turn keeps its existing level.
+	"workProgressRecovery": "fast",
+	// A native fallback renders one short question from measured stall evidence,
+	// without another model call, planning pass or execution authority.
+	"workProgressQuestion": "fast",
 	// Proposes bounded Markdown edits a person reviews as an actual diff.
 	// Native validation checks source identity and exact approval before writing;
 	// the prose judgment band is sufficient and no executable DSL is emitted.
@@ -119,6 +128,12 @@ var promptLevels = map[string]string{
 	// limits through repeated checkpoints. The fast band copied stale metadata
 	// in the long research trace; recallability alone did not prevent that loop.
 	"workContextCheckpoint": "strong",
+	// Explains one pending request from bounded saved evidence, without tools
+	// or execution authority; this short discussion stays in the fast band.
+	"askApprovalReply": "fast",
+	// An explicitly requested independent opinion weighs alternatives for the
+	// person to review. It cannot approve or run those alternatives.
+	"askApprovalSecondOpinion": "strong",
 	// deriveProcedureHole: proposes how ONE argument of a learned procedure is
 	// derived from an earlier step's result (epic memql#5402, D6's single
 	// bounded call). Reasoning rather than fast, and the reason is the shape

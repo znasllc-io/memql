@@ -98,8 +98,10 @@ func (a *App) semanticCacheDBGetter() func() *sql.DB {
 // packs observe live state even if they stash the context.
 func (a *App) pluginContext() memql.PluginContext {
 	return memql.PluginContext{
-		Logger: a.Logger,
-		Engine: a.engine,
+		Logger:            a.Logger,
+		Concepts:          a.engine.Concepts(),
+		InvalidateConcept: a.engine.InvalidateCacheForConcept,
+		Engine:            a.engine,
 		BunDB: func() *bun.DB {
 			if a.db == nil {
 				return nil

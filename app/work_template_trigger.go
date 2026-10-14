@@ -21,15 +21,26 @@ func (t *workTemplateTrigger) TriggerAutomation(ctx context.Context, name string
 	return t.TriggerAutomationWithArgs(ctx, name, nil)
 }
 func (t *workTemplateTrigger) TriggerAutomationWithArgs(ctx context.Context, name string, args map[string]any) (*automations.AutomationExecution, error) {
-	stack, _ := ctx.Value(workTemplateStackKey{}).([]string)
-	if len(stack) >= 16 {
-		return nil, fmt.Errorf("work template invocation nesting exceeds 16")
+	ctx, err := t.EnterAutomationInvocation(ctx, name)
+	if err != nil {
+		return nil, err
 	}
-	for _, caller := range stack {
-		if caller == name {
-			return nil, fmt.Errorf("recursive work template invocation: %s", name)
-		}
+	auto, err := t.ResolveAutomation(ctx, name)
+	if err != nil {
+		return nil, err
 	}
+	executor := t.executor()
+	defer executor.Close()
+	result, err := executor.ExecuteWithClientEvent(ctx, auto, "work.subtemplate", &events.Event{Payload: args})
+	if err == nil && result.Status != "completed" {
+		err = fmt.Errorf("work subtemplate %s ended %s: %s", name, result.Status, result.Error)
+	}
+	return result, err
+}
+
+// ResolveAutomation uses the same pinned draft members and installed fallback
+// for an initial invocation and a saved child continuation.
+func (t *workTemplateTrigger) ResolveAutomation(ctx context.Context, name string) (*automations.Automation, error) {
 	auto := t.template.members[name]
 	if auto == nil {
 		var err error
@@ -41,13 +52,19 @@ func (t *workTemplateTrigger) TriggerAutomationWithArgs(ctx context.Context, nam
 	if err := automationRunRefusal(auto); err != nil {
 		return nil, err
 	}
-	next := append(append([]string(nil), stack...), name)
-	ctx = context.WithValue(ctx, workTemplateStackKey{}, next)
-	executor := t.executor()
-	defer executor.Close()
-	result, err := executor.ExecuteWithClientEvent(ctx, auto, "work.subtemplate", &events.Event{Payload: args})
-	if err == nil && result.Status != "completed" {
-		err = fmt.Errorf("work subtemplate %s ended %s: %s", name, result.Status, result.Error)
+	return auto, nil
+}
+
+func (t *workTemplateTrigger) EnterAutomationInvocation(ctx context.Context, name string) (context.Context, error) {
+	stack, _ := ctx.Value(workTemplateStackKey{}).([]string)
+	if len(stack) >= 16 {
+		return nil, fmt.Errorf("work template invocation nesting exceeds 16")
 	}
-	return result, err
+	for _, caller := range stack {
+		if caller == name {
+			return nil, fmt.Errorf("recursive work template invocation: %s", name)
+		}
+	}
+	next := append(append([]string(nil), stack...), name)
+	return context.WithValue(ctx, workTemplateStackKey{}, next), nil
 }

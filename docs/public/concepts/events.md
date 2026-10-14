@@ -74,12 +74,20 @@ first-class fields -- a client matches on those, never by parsing the
   "eventKind": "node_created",
   "actor": "user@example.com",
   "nodeType": "object",
-  "createdAt": "2026-03-24T10:30:00Z"
+  "createdAt": "2026-03-24T10:30:00.418372Z"
 }
 ```
 (Ids in the payload are **bare** on the client wire per the bare-ids
 contract; `concept` / `topic` / `eventKind` are concept-carrier keys and
 stay verbatim. See [Node Identifier Conventions](identifiers.md).)
+
+`createdAt` is the time of the VERSION the event announces, exactly as the row
+keeps it: RFC 3339, to the microsecond, the same instant a read of that version
+returns as its `createdAt`. The store is append-only -- every write lands a new
+version -- so this is what tells two copies of a row apart, and a
+`node_updated` event carries it as well as a `node_created` one (see
+[ordering by the version](#how-to-consume-events-without-diverging-from-the-store-memql4536-4540)
+below).
 
 ### Query Events
 
@@ -329,7 +337,7 @@ payload carrying only the row's identity:
   "id": "abc123",
   "concept": "v1:agents:agent",
   "eventKind": "node_created",
-  "createdAt": "2026-03-24T10:30:00Z"
+  "createdAt": "2026-03-24T10:30:00.418372Z"
 }
 ```
 
@@ -401,6 +409,32 @@ concept; a read is usually scoped by more. The two disagree the moment a
 caller can see rows the list deliberately excludes -- a cluster owner's
 subscription carries every machine while their "my machines" read carries
 theirs -- and folding those in makes rows appear that a refresh then removes.
+
+**Keep what arrives while a read runs, and replay it onto the answer**
+(memql#6033). A seed REPLACES the rows on screen with its answer, and every
+page of that answer was read before whatever arrives during it: installing the
+answer over the events that arrived meanwhile rolls an update back, misses an
+insert that sorts onto a page already read, and brings a deleted row back.
+Keep the arrivals from before the first page is asked for until the answer is
+installed -- the last word per row is enough -- and replay them onto the answer
+by the same rules as any fold. Arrivals still fold onto the rows on screen as
+they come.
+
+**Order by the version, not by arrival** (memql#6033). Events are not delivered
+in the order they were written -- the bus hands each event to its subscribers
+on its own goroutine -- and a read can answer after an event it is newer than.
+Every node event carries the row's version time, `createdAt` (above). A read
+carries it only where it was asked for: a shaped read that projects
+`row.createdAt` does, and so does a read of one row by its id, which returns the
+stored node; a shape that leaves it out answers rows with no version time to
+compare, and a consumer then has only the order things arrived in. Project
+`row.createdAt` in the shape of any list that is folded with events. Keep the
+NEWER copy of a row whichever arrives last, and refuse one older than the copy
+held. Compare the instants at every fractional digit, not the strings: RFC 3339
+trims trailing zeros, so `.3251Z` is the earlier instant and the larger string
+beside `.325101Z`. And once a row is out of the list -- a removal that carried a
+time, or a newer copy outside the read's scope -- keep the version that took it
+out, so a late OLDER copy does not bring the deleted or out-of-scope row back.
 
 **The non-goals, and why.** There is no polling heartbeat anywhere: the
 socket, gap detection and re-seed ARE the safety net. There is no durable
@@ -588,7 +622,8 @@ enum EventKind {
         "eventKind": "node_created",
         "nodeId": "v1:notes:note:9c2f64f1-...",
         "concept": "v1:notes:note",
-        "actor": "user@example.com"
+        "actor": "user@example.com",
+        "createdAt": "2025-12-02T10:30:00.418372Z"
       }
     }
   }

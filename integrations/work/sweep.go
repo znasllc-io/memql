@@ -479,7 +479,7 @@ func lastHeartbeat(run map[string]any) (time.Time, bool) {
 //
 // Two shapes share the abandoned status and must NOT share a sentence:
 //
-//   - A run that was executing and whose node went silent -- "lost the node".
+//   - A run whose execution heartbeat stopped; node liveness is unknown.
 //   - A run that never left `compiling` / still carries the work.compile
 //     sentinel -- compile never ran. Saying the node was lost sends the reader
 //     at infrastructure for a goal the bff accepted with no compile surface.
@@ -494,7 +494,7 @@ func abandonedMessage(run map[string]any, last time.Time) string {
 		where = fmt.Sprintf(" (%s)", node)
 	}
 	return fmt.Sprintf(
-		"this cluster lost the node that was running this%s; it was last heard from at %s. Completed steps are in the journal, so a resume serves them rather than running them again.",
+		"This run stopped reporting progress%s. Its last update was at %s. Completed steps are saved; resume will check them before continuing.",
 		where, last.UTC().Format(time.RFC3339))
 }
 
@@ -568,12 +568,8 @@ func (i *Integration) RetentionSweep(ctx context.Context, dryRun bool) (Retentio
 	if err := requireClusterOwner(ctx); err != nil {
 		return RetentionResult{}, err
 	}
-	// THE TWO HALVES DO NOT DEPEND ON EACH OTHER, so one failing does not skip the
-	// other. The journal half's expired-rows read takes the latest version of every
-	// id of one concept and is not windowed (0.41 s per 400,000 model-call
-	// versions, and growing with them): a timeout there used to return before the
-	// operational half ran, and zero the whole night for every policy in it.
-	// Windowing that read is deferred to release 2.
+	// The halves have independent bounded reads and independent failure handling.
+	// A journal archive failure must not prevent operational retirement.
 	//
 	// Running the operational half after a journal failure is safe. A run whose
 	// model calls or observations are still stored is kept by the operational
@@ -783,45 +779,54 @@ JOIN LATERAL (
 ORDER BY n."createdAt", n.id
 `
 
-// expiredJournalRowsSQL is the retention read. The boundary is applied to the
-// LATEST version's createdAt, so a row rewritten inside the window is kept.
-//
-// NOT WINDOWED, AND KNOWN TO BE. It takes the latest version of every id of the
-// concept (DISTINCT ON over all its versions), so it costs the concept's history
-// and not a day's: 0.41 s for 400,000 model-call versions, and linear in them. It
-// is not what stopped retention on 2026-10-10 and -11, which was the operational
-// half; and RetentionSweep no longer lets this half's failure stop that one.
-// Windowing it, as the operational policies are, is deferred to release 2.
-//
-// staged-data: MUST-NOT-GATE -- a staged journal row SKIPPED HERE SURVIVES ITS
-// RETENTION WINDOW FOREVER, and unlike a skipped run there is nothing left to
-// find it: no later pass looks at a row this one did not return, so the table
-// grows past the window an operator configured and past whatever the
-// deployment promised about how long a model request is kept. It is the
-// argument integrations/shopify's PurgeStore makes about shop/redact, with a
-// retention window in place of a legal deadline. Row-level authorization still
-// applies, per row as fetched.
-const expiredJournalRowsSQL = `
-WITH latest AS (
-    SELECT DISTINCT ON (id) id, "createdAt"
-    FROM "MemoryNodes"
-    WHERE concept = ?
-    ORDER BY id, "createdAt" DESC
-), expired AS MATERIALIZED (
-    SELECT id, "createdAt" FROM latest
-    WHERE "createdAt" < ?
-    ORDER BY "createdAt" ASC
-    LIMIT ?
-)
-SELECT n.id, n."createdAt", n.payload
-FROM expired e JOIN "MemoryNodes" n
-    ON n.id = e.id AND n."createdAt" = e."createdAt"
-WHERE ` + retentionInactiveParentSQL + `
-ORDER BY n."createdAt" ASC
-`
-
+// expiredJournalRows walks bounded UTC-day pages of latest journal versions.
+// Every page uses the same inactive-parent and newer-version guards as the
+// operational sweep. A refused/live first page cannot hide later eligible rows.
+// staged-data: MUST-NOT-GATE -- retention includes staged rows; admission still
+// runs on every fetched row through selectAdmittedPage.
 func (i *Integration) expiredJournalRows(ctx context.Context, concept string, boundary time.Time) ([]map[string]any, error) {
-	return i.selectAdmitted(ctx, concept, expiredJournalRowsSQL, concept, boundary.UTC(), sweepMaxRows)
+	oldest, found, err := i.oldestRetentionVersion(ctx, concept, time.Time{}, boundary)
+	if err != nil || !found {
+		return nil, err
+	}
+	started := i.clock()
+	var rows []map[string]any
+	p := operationalPolicy{concept: concept, predicate: "TRUE"}
+	for lo := oldest.UTC().Truncate(retentionCandidateWindow); lo.Before(boundary); {
+		hi := lo.Add(retentionCandidateWindow)
+		if hi.After(boundary) {
+			hi = boundary
+		}
+		var after *pageEnd
+		for {
+			if i.clock().Sub(started) >= retentionRunBudget/2 || len(rows) >= sweepMaxRows {
+				return rows, nil
+			}
+			query, params := retentionCandidateRead(p, boundary, lo, hi, after)
+			pageRows, page, err := i.selectAdmittedPage(ctx, concept, query, params...)
+			if err != nil {
+				return nil, err
+			}
+			rows = append(rows, pageRows...)
+			if page.scanned < retentionCandidateLimit {
+				break
+			}
+			after = &page
+		}
+		if !hi.Before(boundary) {
+			break
+		}
+		// Skip gaps in the stored history rather than issuing a query per empty day.
+		ahead, more, err := i.oldestRetentionVersion(ctx, concept, hi, boundary)
+		if err != nil {
+			return nil, err
+		}
+		if !more {
+			break
+		}
+		lo = ahead.UTC().Truncate(retentionCandidateWindow)
+	}
+	return rows, nil
 }
 
 // selectAdmitted runs one hand-rolled read and applies the row-authz gate to

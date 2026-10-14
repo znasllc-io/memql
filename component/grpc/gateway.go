@@ -11,6 +11,7 @@ import (
 	"time"
 
 	memqlv1 "github.com/znasllc-io/memql/component/grpc/gen"
+	"github.com/znasllc-io/memql/core/grpclimits"
 	"github.com/znasllc-io/memql/core/id"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
@@ -55,6 +56,13 @@ func NewGateway(opts GatewayOptions) (*Gateway, error) {
 	if len(dialOpts) == 0 {
 		dialOpts = []grpc.DialOption{grpc.WithTransportCredentials(insecure.NewCredentials())}
 	}
+	// The gateway receives what the server may send, not gRPC's 4 MiB default: an
+	// answer over the default is a read error on the stream, and the caller got a
+	// 500 with the library's words instead of the answer. It comes FIRST so that
+	// dial options of the caller's own, which come after it, still win.
+	dialOpts = append([]grpc.DialOption{
+		grpc.WithDefaultCallOptions(grpc.MaxCallRecvMsgSize(grpclimits.MaxMessageBytes)),
+	}, dialOpts...)
 
 	endpoint := normalizeEndpoint(opts.Endpoint)
 	conn, err := grpc.NewClient(endpoint, dialOpts...)

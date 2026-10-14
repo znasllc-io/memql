@@ -385,7 +385,12 @@ func TestAnEmailRuleArmedOnOneReplicaFiresOnAnother(t *testing.T) {
 		t.Fatal("node A retired the rule but kept it scheduled")
 	}
 	disarmTopic := events.TopicAuthoringDisarmForBundle(second.BundleID)
-	if !armingEventually(15*time.Second, func() bool { return !b.scheduler.IsActive(armedOwner, name) }) {
+	// Disarming removes the scheduler entry before retiring the registry entry.
+	// Wait for the complete transition, not the valid state between those writes.
+	if !armingEventually(15*time.Second, func() bool {
+		_, registered := b.registry.Lookup(armedOwner, "automation", name)
+		return !b.scheduler.IsActive(armedOwner, name) && !registered
+	}) {
 		t.Fatalf("CROSS-NODE FAILURE: node B kept the rule armed after node A retired it "+
 			"(authoring.disarm broadcasts that crossed the link: %d)", link.count(disarmTopic))
 	}

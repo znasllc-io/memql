@@ -1,5 +1,5 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
-import { FolderPlus, Upload } from "lucide-react";
+import { FilePlus, FolderPlus, Upload } from "lucide-react";
 import {
   newShortId,
   rowNumber,
@@ -18,12 +18,14 @@ import { downloadArtifact } from "./actions/download";
 import { editorFilename, isZipArtifact } from "../../items/editorPreference";
 import { useOsConnection } from "../../live/connection";
 import { entriesOf, hasDirectory, walkEntries } from "../../items/folderDrop";
+import { FolderSelect, folderOptions } from "../../items/FolderSelect";
 import { planArchive, runArchiveWalk, subtreeHoldsArtifact } from "./actions/archive";
 
-import { MATERIALIZER_APP_ID, MATERIALIZER_COMPOSE_SECTION } from "../../items/materialize";
+import { composeIntent, MATERIALIZER_APP_ID, MATERIALIZER_COMPOSE_SECTION, MATERIALIZER_MADE_SECTION } from "../../items/materialize";
 import { kindGlyph } from "./glyphs";
 import { LocalTabs } from "../../kit/LocalTabs";
 import { AddButton } from "../../kit/AddButton";
+import { InPlaceAsk } from "../../kit/pressHold";
 import { FileFolders } from "./FileFolders";
 import {
   Button,
@@ -449,7 +451,7 @@ export function BrowseSection({
               id: "materializer",
               label: "Open in Materializer",
               onSelect: () =>
-                actions.openApp(MATERIALIZER_APP_ID, MATERIALIZER_COMPOSE_SECTION, {
+                actions.openApp(MATERIALIZER_APP_ID, MATERIALIZER_MADE_SECTION, {
                   compositionId: composition.id,
                 }),
             },
@@ -680,12 +682,45 @@ export function BrowseSection({
       }}
       onDrop={onDrop}
     >
-      {/* THE HEAD IS THE WHOLE TOP (DESIGN.md rules 1-3): the scope's name
-          and count, the quiet sort, one Refine affordance, the Upload
-          primary. The nine-control strip this replaces is the reason rule 2
-          exists. */}
       <div hidden={selected !== null}>
       <Head title={headTitle} breadcrumbs={headTrail} navigation={selected === null} back={filter.folderId ? {label: PLACE_TITLE[filter.place], onSelect: () => patch({folderId: tree.byId.get(filter.folderId!)?.folder.parentFolderId ?? ""})} : undefined} meta={listCount(list?.snapshot, listedCount)}>
+        {/* ONE WAY TO ADD SOMETHING (DESIGN.md rule 1: at most one primary
+            action). Uploading a file and making a folder are the same
+            question -- "put something here" -- and they were answered in two
+            places: a primary button up here and a rail ACTION wedged between
+            the Library tree and the Desktop place, where it read as a folder
+            you could open. The rail action is gone; the answers live on this
+            button, and each lands in the folder currently being looked at. */}
+        <AddMenu
+          disabled={connection === null}
+          destinationName={destinationFolderId === "" ? "Library" : folderNameOf(destinationFolderId)}
+          onUpload={() => pickRef.current?.click()}
+          onNewMarkdown={canOpen(registry, MATERIALIZER_APP_ID) ? () => actions.openApp(
+            MATERIALIZER_APP_ID, MATERIALIZER_COMPOSE_SECTION, composeIntent({
+              format: "markdown",
+              ...(destinationFolderId ? { folderId: destinationFolderId } : {}),
+              returnTo: { appId: "files", sectionId: "browse" },
+            }),
+          ) : undefined}
+          onNewFolder={() => void newFolderIn(destinationFolderId)}
+        />
+      </Head>
+      <input
+        ref={pickRef}
+        type="file"
+        multiple
+        hidden
+        aria-label="Pick files to upload"
+        onChange={(event) => {
+          const files = Array.from(event.target.files ?? []);
+          event.target.value = "";
+          if (files.length > 0) uploadFiles(files, destinationFolderId);
+        }}
+      />
+
+      <LocalTabs label="File locations" value={filter.place} onChange={place => { onSelect(""); patch({place, folderId:"", search:""}); }}
+        options={[["library","Library"],["desktop","Desktop"],["materializer","Materializer"],["bin","Bin"]]}
+        actions={<>
         <SortControl
           ascending={filter.sortAscending}
           onToggle={() => patch({ sortAscending: !filter.sortAscending })}
@@ -769,35 +804,7 @@ export function BrowseSection({
             </Select>
           )}
         </Refine>
-        {/* ONE WAY TO ADD SOMETHING (DESIGN.md rule 1: at most one primary
-            action). Uploading a file and making a folder are the same
-            question -- "put something here" -- and they were answered in two
-            places: a primary button up here and a rail ACTION wedged between
-            the Library tree and the Desktop place, where it read as a folder
-            you could open. The rail action is gone; both answers live on this
-            button, and both land in the folder currently being looked at. */}
-        <AddMenu
-          disabled={connection === null}
-          destinationName={destinationFolderId === "" ? "Library" : folderNameOf(destinationFolderId)}
-          onUpload={() => pickRef.current?.click()}
-          onNewFolder={() => void newFolderIn(destinationFolderId)}
-        />
-      </Head>
-      <input
-        ref={pickRef}
-        type="file"
-        multiple
-        hidden
-        aria-label="Pick files to upload"
-        onChange={(event) => {
-          const files = Array.from(event.target.files ?? []);
-          event.target.value = "";
-          if (files.length > 0) uploadFiles(files, destinationFolderId);
-        }}
-      />
-
-      <LocalTabs label="File locations" value={filter.place} onChange={place => { onSelect(""); patch({place, folderId:"", search:""}); }}
-        options={[["library","Library"],["desktop","Desktop"],["materializer","Materializer"],["bin","Bin"]]} />
+        </>} />
       {railNote ? <Caption>{railNote}</Caption> : null}
       <div className="os-files-body">
         <FileFolders folders={visibleFolders} counts={counts} loading={foldersState === "seeding"}
@@ -833,33 +840,38 @@ export function BrowseSection({
               const name = folderNameOf(pendingArchive);
               const keeping = subtreeHoldsArtifact(tree, content, pendingArchive);
               const emptied = plan.deleteFolderIds.length;
+              // THE WHOLE NOTICE IS THE ASK, question and all: another folder
+              // chosen while this one is open changes the question under the
+              // same buttons (see InPlaceAsk).
               return (
-                <Notice
-                  tone="warn"
-                  sentence={
-                    keeping
-                      ? `Archive "${name}" and its ${plan.itemCount} items?`
-                      : `Delete "${name}"?`
-                  }
-                  next={
-                    keeping
-                      ? `Everything inside archives too, children first, and lives under Archive where Restore puts it back.${
-                          emptied > 0
-                            ? ` The ${emptied} empty ${emptied === 1 ? "folder" : "folders"} inside are deleted instead -- there is nothing in them to put back.`
-                            : ""
-                        }`
-                      : `It holds no files at any depth${
-                          emptied > 1 ? `, and nor do the ${emptied - 1} folders inside it` : ""
-                        }. There is nothing to put back, so it is removed from every surface rather than kept in the Bin.`
-                  }
-                >
-                  <div className="os-files-confirm">
-                    <Button tone="danger" onClick={() => void runFolderArchive(pendingArchive)}>
-                      {keeping ? "Archive" : "Delete"}
-                    </Button>
-                    <Button onClick={() => setPendingArchive("")}>Cancel</Button>
-                  </div>
-                </Notice>
+                <InPlaceAsk>
+                  <Notice
+                    tone="warn"
+                    sentence={
+                      keeping
+                        ? `Archive "${name}" and its ${plan.itemCount} items?`
+                        : `Delete "${name}"?`
+                    }
+                    next={
+                      keeping
+                        ? `Everything inside archives too, children first, and lives under Archive where Restore puts it back.${
+                            emptied > 0
+                              ? ` The ${emptied} empty ${emptied === 1 ? "folder" : "folders"} inside are deleted instead -- there is nothing in them to put back.`
+                              : ""
+                          }`
+                        : `It holds no files at any depth${
+                            emptied > 1 ? `, and nor do the ${emptied - 1} folders inside it` : ""
+                          }. There is nothing to put back, so it is removed from every surface rather than kept in the Bin.`
+                    }
+                  >
+                    <div className="os-files-confirm">
+                      <Button tone="danger" onClick={() => void runFolderArchive(pendingArchive)}>
+                        {keeping ? "Archive" : "Delete"}
+                      </Button>
+                      <Button onClick={() => setPendingArchive("")}>Cancel</Button>
+                    </div>
+                  </Notice>
+                </InPlaceAsk>
               );
             })()
           ) : null}
@@ -967,18 +979,23 @@ export function BrowseSection({
         />
       ) : null}
       {rowArchive !== null ? (
-        <Notice
-          tone="warn"
-          sentence={`Move "${artifactName(rowArchive)}" to the Bin?`}
-          next="Nothing is deleted -- it keeps its bytes, its history and everywhere it came from, and the Bin can put it back."
-        >
-          <div className="os-files-confirm">
-            <Button tone="danger" onClick={() => void archiveOneRow(rowArchive)}>
-              Move to Bin
-            </Button>
-            <Button onClick={() => setRowArchive(null)}>Cancel</Button>
-          </div>
-        </Notice>
+        // THE WHOLE NOTICE IS THE ASK, question and all: another file chosen
+        // while this one is open changes the question under the same buttons
+        // (see InPlaceAsk).
+        <InPlaceAsk>
+          <Notice
+            tone="warn"
+            sentence={`Move "${artifactName(rowArchive)}" to the Bin?`}
+            next="Nothing is deleted -- it keeps its bytes, its history and everywhere it came from, and the Bin can put it back."
+          >
+            <div className="os-files-confirm">
+              <Button tone="danger" onClick={() => void archiveOneRow(rowArchive)}>
+                Move to Bin
+              </Button>
+              <Button onClick={() => setRowArchive(null)}>Cancel</Button>
+            </div>
+          </Notice>
+        </InPlaceAsk>
       ) : null}
       {rowNote !== null ? (
         <Notice
@@ -999,19 +1016,14 @@ export function BrowseSection({
         <Notice tone="warn" sentence={`Move "${artifactName(rowMove)}" to another folder`}>
           <div className="os-files-confirm">
             <span className="os-files-move-pick">
-            <Select
-              id={`files-move-${rowMove.id}`}
-              label="Move to folder"
-              value={rowMove.folderId}
-              onChange={(folderId) => void moveRowTo(rowMove, folderId)}
-            >
-              <option value="">Library (top level)</option>
-              {flatFolderOptions(tree).map((option) => (
-                <option key={option.id} value={option.id}>
-                  {option.label}
-                </option>
-              ))}
-            </Select>
+              {/* The rail's own tree, as the picker's rows: every folder the tree placed is a live one. */}
+              <FolderSelect
+                id={`files-move-${rowMove.id}`}
+                label="Move to folder"
+                value={rowMove.folderId}
+                onChange={(folderId) => void moveRowTo(rowMove, folderId)}
+                options={folderOptions([...tree.byId.values()].map((node) => node.folder))}
+              />
             </span>
             <Button onClick={() => setRowMove(null)}>Cancel</Button>
           </div>
@@ -1098,11 +1110,13 @@ function AddMenu({
   disabled,
   destinationName,
   onUpload,
+  onNewMarkdown,
   onNewFolder,
 }: {
   disabled: boolean;
   destinationName: string;
   onUpload: () => void;
+  onNewMarkdown?: () => void;
   onNewFolder: () => void;
 }) {
   const [open, setOpen] = useState(false);
@@ -1126,7 +1140,7 @@ function AddMenu({
 
   return (
     <div className="os-files-add" ref={wrap}>
-      <AddButton label="Add files or folder" aria-expanded={open} onClick={() => setOpen(!open)} />
+      <AddButton label="Add to this folder" aria-expanded={open} onClick={() => setOpen(!open)} />
       {open ? (
         <div
           className="os-menu os-files-add-menu"
@@ -1148,6 +1162,11 @@ function AddMenu({
           >
             <Upload size={13} aria-hidden /> Upload files
           </button>
+          {onNewMarkdown ? (
+            <button type="button" role="menuitem" className="os-menu-item" onClick={() => choose(onNewMarkdown)}>
+              <FilePlus size={13} aria-hidden /> New Markdown file
+            </button>
+          ) : null}
           <button
             type="button"
             role="menuitem"
@@ -1161,17 +1180,6 @@ function AddMenu({
       ) : null}
     </div>
   );
-}
-
-/** The tree flattened for the move picker, depth as indentation. */
-function flatFolderOptions(tree: FolderTree): Array<{ id: string; label: string }> {
-  const out: Array<{ id: string; label: string }> = [];
-  const walk = (node: TreeNode, depth: number) => {
-    out.push({ id: node.folder.id, label: `${"  ".repeat(depth)}${node.folder.name}` });
-    for (const child of node.children) walk(child, depth + 1);
-  };
-  for (const root of tree.roots) walk(root, 0);
-  return out;
 }
 
 function UploadPlaceholder({ task }: { task: UploadTask }) {

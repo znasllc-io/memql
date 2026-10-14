@@ -23,7 +23,6 @@ import (
 
 	"google.golang.org/protobuf/types/known/timestamppb"
 
-	"github.com/znasllc-io/memql/component/auth"
 	langparser "github.com/znasllc-io/memql/component/language/parser"
 	"github.com/znasllc-io/memql/component/memql"
 	"github.com/znasllc-io/memql/core/num"
@@ -461,21 +460,9 @@ func (s *Store) TemplateByID(ctx context.Context, templateID string) (map[string
 	return rows[0], true, nil
 }
 
-// StageOutbound is the OPERATIONAL lane's one write: the transactional outbox,
-// where the egress allowlist applies, no unsubscribe footer is attached and the
-// marketing suppression list is neither consulted nor written. Telling an owner
-// that a new admin was added is not marketing, and an unsubscribe from a
-// newsletter must not be able to silence it.
-func (s *Store) StageOutbound(ctx context.Context, requestID, target, subject, body, dedupeKey, requestedBy string) error {
-	return s.exec(auth.ContextWithInternalOrigin(ctx), call("mutation", "stageOutboundRequest",
-		arg{"requestId", requestID},
-		arg{"medium", "email"},
-		arg{"target", target},
-		arg{"subject", subject},
-		arg{"body", body},
-		arg{"dedupeKey", dedupeKey},
-		arg{"requestedBy", requestedBy},
-	))
+// StageOperationalEmail renders the active rule's published template and stages it in the server outbox.
+func (s *Store) StageOperationalEmail(ctx context.Context, requestID, templateID, to, displayName, dedupeKey, ruleID string) error {
+	return s.exec(ctx, call("builtin", "campaignStageOperationalEmail", arg{"requestId", requestID}, arg{"templateId", memql.BareShortId(templateID)}, arg{"to", to}, arg{"displayName", displayName}, arg{"dedupeKey", dedupeKey}, arg{"emailRuleId", memql.BareShortId(ruleID)}))
 }
 
 // SendToRecipient is the MARKETING lane's one call: suppression checked at the
@@ -520,13 +507,14 @@ func (s *Store) SendToRecipient(ctx context.Context, templateID, recipientID, se
 // organization, so an address enrolled without it is a recipient the very next
 // step would refuse. A rule that names no organization (one that predates
 // organizations) leaves it off the call, and addRecipient stamps "".
-func (s *Store) AddRecipient(ctx context.Context, recipientID, audienceID, email, displayName, accountID string) error {
+func (s *Store) AddRecipient(ctx context.Context, recipientID, audienceID, email, displayName, accountID, status string) error {
 	args := []arg{
 		{"recipientId", recipientID},
 		{"audienceId", memql.BareShortId(audienceID)},
 		{"email", email},
 		{"displayName", displayName},
 		{"source", "signup"},
+		{"subscriptionStatus", status},
 	}
 	if accountID != "" {
 		args = append(args, arg{"accountId", accountID})
@@ -636,4 +624,44 @@ func (s *Store) SenderIdentityByID(ctx context.Context, identityID string) (map[
 		return nil, false, err
 	}
 	return rows[0], true, nil
+}
+
+// EachSendableRecipient follows the engine cursor and refuses a repeated cursor.
+func (s *Store) EachSendableRecipient(ctx context.Context, audienceID string, visit func(map[string]any) bool) error {
+	cursor := ""
+	seen := map[string]bool{}
+	for {
+		pageCtx := memql.ContextWithCursor(memql.ContextWithFreshRead(ctx), cursor)
+		res, err := s.engine.Execute(pageCtx, call("query", "sendableRecipientsForAudience", arg{"audienceId", memql.BareShortId(audienceID)}))
+		if err != nil {
+			return err
+		}
+		for _, row := range memql.MaterializeRows(res) {
+			if !visit(row) {
+				return nil
+			}
+		}
+		cursor, err = memql.ResultPageCursor(res)
+		if err != nil {
+			return err
+		}
+		if cursor == "" {
+			return nil
+		}
+		if seen[cursor] {
+			return fmt.Errorf("recipient pagination repeated a cursor")
+		}
+		seen[cursor] = true
+	}
+}
+
+func (s *Store) AudienceConfirmation(ctx context.Context, id string) (string, error) {
+	rows, err := s.rows(ctx, call("query", "audienceById", arg{"audienceId", memql.BareShortId(id)}))
+	if err != nil {
+		return "", err
+	}
+	if len(rows) == 0 {
+		return "", fmt.Errorf("the audience is not readable")
+	}
+	return str(rows[0], "confirmation"), nil
 }

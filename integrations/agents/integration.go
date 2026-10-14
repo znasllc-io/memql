@@ -194,7 +194,7 @@ func (i *Integration) Capabilities() []memql.IntegrationCapability {
 
 func factoryAndRecoveryOperations() map[string]workflowhost.Operation {
 	ops := (&factoryScope{}).operations()
-	for _, name := range []string{"agentRecoveryContext", "spineRetryHost", "spineObserveComputer", "spineRequestScope"} {
+	for _, name := range []string{"agentSelectWorkSkills", "agentWorkTrainingFacts", "agentReadWorkTraining", "agentIndexWorkTraining", "agentRecoveryContext", "spineRetryHost", "spineObserveComputer", "spineRequestScope"} {
 		ops[name] = nil
 	}
 	return ops
@@ -529,7 +529,7 @@ func (i *Integration) handleRequestUserFeedback(ctx context.Context, args map[st
 		}
 		for _, row := range memql.MaterializeRows(result) {
 			if row["decision"] == "answered" {
-				payload, marshalErr := json.Marshal(map[string]any{"status": "answered", "approvalId": approvalId, "answer": row["answer"]})
+				payload, marshalErr := json.Marshal(map[string]any{"status": "answered", "approvalId": approvalId, "answer": row["answer"], "decidedAt": row["decidedAt"]})
 				return []memorynodes.MemoryNode{{ID: approvalId, Payload: payload}}, marshalErr
 			}
 		}

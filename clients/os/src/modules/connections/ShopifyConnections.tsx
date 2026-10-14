@@ -45,7 +45,7 @@ export function ShopifyConnections({ header, appId, result }: { header: ReactNod
   return <section className="os-settings os-settings-wide">
     {header}
     <section className="os-field-group">
-      <div className="os-head"><Subhead>Shopify Stores</Subhead><div className="os-head-actions"><AddButton label="Add Shopify store" onClick={() => setAdding(true)} /></div></div>
+      <Subhead actions={<AddButton label="Add Shopify store" onClick={() => setAdding(true)} />}>Shopify Stores</Subhead>
       {result && !["connected", "reconnected"].includes(result) ? <Notice tone="warn" sentence={shopifyMessage(result)} /> : null}
       {loading && stores.length === 0 ? <RecordListSkeleton label="Reading Shopify stores" /> : <RecordList as="ul" label="Shopify stores">{stores.map(store => <RecordRow key={store.id} icon={<Store size={18} aria-hidden />} name={store.label} state="Connected" tone="accent" onOpen={() => select(store.id)} label={`Manage Shopify store ${store.label}`} />)}</RecordList>}
       {feed.snapshot.state === "live" && !stores.length ? <EmptyState icon={Store} title="No Shopify stores connected">Use the plus button to connect a store.</EmptyState> : null}

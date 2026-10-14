@@ -37,6 +37,19 @@ func (s stubBlobs) Download(_ context.Context, _ string, key string) ([]byte, er
 	return body, nil
 }
 
+// DownloadWithLimit is Download for a reader with a ceiling: an object over it
+// is an error, as the real storage's is.
+func (s stubBlobs) DownloadWithLimit(ctx context.Context, container, key string, maxBytes int64) ([]byte, error) {
+	body, err := s.Download(ctx, container, key)
+	if err != nil {
+		return nil, err
+	}
+	if int64(len(body)) > maxBytes {
+		return nil, fmt.Errorf("object %q exceeds the download limit of %d bytes", key, maxBytes)
+	}
+	return body, nil
+}
+
 const testArtifact = "art-1"
 
 func importWorker(t *testing.T, engine *fakeEngine, csv string) *Worker {
@@ -74,6 +87,11 @@ type askedBlobs struct{ asked *[]string }
 func (a askedBlobs) Download(_ context.Context, _ string, key string) ([]byte, error) {
 	*a.asked = append(*a.asked, key)
 	return []byte("email\nsomeone@example.test\n"), nil
+}
+
+// DownloadWithLimit records the key as Download does.
+func (a askedBlobs) DownloadWithLimit(ctx context.Context, container, key string, _ int64) ([]byte, error) {
+	return a.Download(ctx, container, key)
 }
 
 // TestImportRefusesAFileWhoseKeyIsNotItsOwners: the caller owns the row, and

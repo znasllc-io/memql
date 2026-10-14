@@ -705,6 +705,7 @@
       "file": "campaigns/concepts.memql",
       "fields": [
         "accountId",
+        "confirmation",
         "description",
         "name",
         "ownerUserId",
@@ -715,6 +716,10 @@
         "ownerUserId"
       ],
       "enums": {
+        "confirmation": [
+          "none",
+          "required"
+        ],
         "status": [
           "active",
           "archived"
@@ -834,9 +839,11 @@
           "withdraw"
         ],
         "source": [
+          "double_opt_in",
           "import",
           "one_click",
           "operator",
+          "preferences",
           "provider",
           "rfc8058",
           "signup"
@@ -856,10 +863,16 @@
         "nextAttemptAt",
         "outboundRequestId",
         "ownerUserId",
+        "providerAt",
+        "providerCountersPending",
+        "providerStatus",
         "recipientId",
+        "requestId",
+        "senderIdentityId",
         "sentAt",
         "skipReason",
-        "status"
+        "status",
+        "templateId"
       ],
       "required": [
         "email",
@@ -868,11 +881,46 @@
         "status"
       ],
       "enums": {
+        "providerStatus": [
+          "bounced",
+          "delivered",
+          "expanded",
+          "failed",
+          "filtered-spam",
+          "quarantined",
+          "suppressed"
+        ],
         "status": [
           "failed",
           "pending",
           "sent",
           "skipped"
+        ]
+      }
+    },
+    {
+      "concept": "v1:campaigns:emailLayout",
+      "file": "campaigns/concepts.memql",
+      "fields": [
+        "accountId",
+        "description",
+        "document",
+        "name",
+        "ownerUserId",
+        "sourceArtifactId",
+        "status"
+      ],
+      "required": [
+        "accountId",
+        "document",
+        "name",
+        "ownerUserId",
+        "status"
+      ],
+      "enums": {
+        "status": [
+          "active",
+          "archived"
         ]
       }
     },
@@ -953,6 +1001,79 @@
       }
     },
     {
+      "concept": "v1:campaigns:journey",
+      "file": "campaigns/concepts.memql",
+      "fields": [
+        "accountId",
+        "activatedAt",
+        "description",
+        "lastError",
+        "name",
+        "ownerUserId",
+        "retiredAt",
+        "status",
+        "steps",
+        "trigger"
+      ],
+      "required": [
+        "accountId",
+        "name",
+        "ownerUserId",
+        "status",
+        "steps",
+        "trigger"
+      ],
+      "enums": {
+        "status": [
+          "active",
+          "archived",
+          "draft",
+          "paused"
+        ]
+      }
+    },
+    {
+      "concept": "v1:campaigns:journeyEnrollment",
+      "file": "campaigns/concepts.memql",
+      "fields": [
+        "accountId",
+        "attempts",
+        "completedAt",
+        "emailDigest",
+        "enrolledAt",
+        "exitReason",
+        "journeyId",
+        "lastError",
+        "nextAt",
+        "ownerUserId",
+        "recipientId",
+        "status",
+        "stepId",
+        "stepIndex",
+        "triggeredAt"
+      ],
+      "required": [
+        "accountId",
+        "emailDigest",
+        "enrolledAt",
+        "journeyId",
+        "ownerUserId",
+        "recipientId",
+        "status",
+        "stepIndex",
+        "triggeredAt"
+      ],
+      "enums": {
+        "status": [
+          "active",
+          "completed",
+          "exited",
+          "failed",
+          "waiting"
+        ]
+      }
+    },
+    {
       "concept": "v1:campaigns:newsletterBinding",
       "file": "campaigns/concepts.memql",
       "fields": [
@@ -972,10 +1093,8 @@
         "consentText",
         "enabled",
         "ownerUserId",
-        "senderIdentityId",
         "siteId",
-        "storeId",
-        "templateId"
+        "storeId"
       ]
     },
     {
@@ -1013,17 +1132,15 @@
         "ownerUserId",
         "recipientId",
         "requestedAt",
-        "senderIdentityId",
         "siteId",
         "status",
         "storeId",
-        "submissionId",
-        "templateId",
-        "templateSnapshot"
+        "submissionId"
       ],
       "enums": {
         "status": [
           "blocked",
+          "none",
           "pending",
           "sent",
           "suppressed",
@@ -1037,10 +1154,12 @@
       "fields": [
         "accountId",
         "audienceId",
+        "confirmedAt",
         "displayName",
         "email",
         "emailDigest",
         "fields",
+        "joinedAt",
         "ownerUserId",
         "source",
         "subscriptionStatus",
@@ -1060,6 +1179,7 @@
         "subscriptionStatus": [
           "bounced",
           "complained",
+          "pending",
           "subscribed",
           "unsubscribed"
         ]
@@ -1182,6 +1302,7 @@
         "accountId",
         "domain",
         "emailDigest",
+        "liftedAt",
         "note",
         "reason",
         "sourceCampaignId",
@@ -1205,9 +1326,13 @@
       "file": "campaigns/concepts.memql",
       "fields": [
         "accountId",
+        "document",
         "htmlBody",
+        "layoutId",
         "name",
         "ownerUserId",
+        "preheader",
+        "sourceArtifactId",
         "status",
         "subject",
         "textBody"
@@ -1766,6 +1891,7 @@
         "folderId",
         "format",
         "goalId",
+        "layoutId",
         "modelsUsed",
         "name",
         "outputFileId",
@@ -1838,6 +1964,7 @@
         "folderId",
         "format",
         "lastRunAt",
+        "layoutId",
         "name",
         "outputKind",
         "ownerUserId",
@@ -1989,7 +2116,10 @@
       "concept": "v1:email:connectionState",
       "file": "email/concepts.memql",
       "fields": [
-        "encryptedValue"
+        "accountId",
+        "encryptedValue",
+        "nextAttemptAt",
+        "purpose"
       ],
       "required": [
         "encryptedValue"
@@ -2002,6 +2132,7 @@
         "accountId",
         "encryptedValue",
         "nextPollAt",
+        "providerMessageId",
         "status"
       ],
       "required": [
@@ -4491,6 +4622,7 @@
         "attempts",
         "body",
         "dedupeKey",
+        "htmlBody",
         "lastError",
         "medium",
         "nextAttemptAt",
@@ -8379,6 +8511,8 @@
         "kind",
         "options",
         "ownerUserId",
+        "permissionRevokedAt",
+        "permissionUsedAt",
         "question",
         "requestedAt",
         "runId",
@@ -8503,7 +8637,8 @@
         "served": [
           "journal",
           "live",
-          "local"
+          "local",
+          "subscription"
         ]
       }
     },

@@ -17,8 +17,9 @@
 # rather than the inequality. Losing it would have removed the one thing
 # standing between a replica-count bump and the storm it caused in #1817.
 #
-# What changed with the cutover: `max_connections` is ours to set (200 local,
-# 400 staging/prod, in deploy/k8s/components/cnpg-db), the reserved slots are
+# What changed with the cutover: `max_connections` is ours to set (200 for the
+# entry preset, 400 for the local overlay and the mid and top presets, in
+# deploy/k8s/components/cnpg-db), the reserved slots are
 # Postgres's own superuser reservation rather than Tiger's ops overhead, and
 # the DSN no longer has a `tiger` CLI fallback -- there is no Tiger service to
 # ask.
@@ -66,8 +67,8 @@ REPO_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
 # CONFIGURATION (env-overridable; staging defaults from the live #1817 capture)
 #=============================================================================
 
-# The SMALLEST max_connections we run anywhere (the local/entry preset), so
-# the default is conservative: staging and production set 400, and --live
+# The SMALLEST max_connections we run anywhere (the entry preset), so the
+# default is conservative: local, staging and production set 400, and --live
 # reads the real value off the instance anyway.
 DEFAULT_MAX_CONNECTIONS="${MAX_CONNECTIONS:-200}"   # deploy/k8s/components/cnpg-db
 # superuser_reserved_connections (3 by default) + CNPG's own instance-manager

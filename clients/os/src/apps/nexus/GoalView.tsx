@@ -232,8 +232,11 @@ export function GoalView({
   // page about one of its runs -- the shape the Deployables recomposition
   // removed. It is absent once the goal is closed, not disabled.
   const closable = goal.status !== "closed";
-  const confirmed = confirm.trim() === goal.statement.trim();
-  if (closable) {
+  // The statement may have paragraphs, but this confirmation is one line.
+  // Match its words without relaxing case, punctuation or their order.
+  const goalWords = goal.statement.trim().replace(/\s+/g, " ");
+  const confirmed = goalWords !== "" && confirm.trim().replace(/\s+/g, " ") === goalWords;
+  if (closable && (confirmed || cancel.busy)) {
     acts.push({
       label: "Close this goal",
       tone: "danger",

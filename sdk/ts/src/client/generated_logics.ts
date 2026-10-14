@@ -47,6 +47,39 @@ QueryClient.prototype.accountDeletionSweep = function (this: QueryClient, args: 
   return this.executeNamed("accountDeletionSweep", buildAccountDeletionSweep(args), opts);
 };
 
+/** Reconsider before spending the last calls, or after repeated discovery/evidence. A review uses the next ordinary model call. Only continued stalling asks the person; approaching a cap alone does not interrupt productive work. */
+export interface AgentProgressRecoveryArgs {
+  limit: number;
+  used: number;
+  discoveryRounds: number;
+  repeatedRounds: number;
+  reviewActive: boolean;
+  stalledAfterReview: number;
+  reviewedLimit: number;
+}
+
+export function buildAgentProgressRecovery(args: AgentProgressRecoveryArgs): string {
+  const parts: string[] = [];
+  parts.push("limit: " + renderMemQLValue(args.limit));
+  parts.push("used: " + renderMemQLValue(args.used));
+  parts.push("discoveryRounds: " + renderMemQLValue(args.discoveryRounds));
+  parts.push("repeatedRounds: " + renderMemQLValue(args.repeatedRounds));
+  parts.push("reviewActive: " + renderMemQLValue(args.reviewActive));
+  parts.push("stalledAfterReview: " + renderMemQLValue(args.stalledAfterReview));
+  parts.push("reviewedLimit: " + renderMemQLValue(args.reviewedLimit));
+  return "logic agentProgressRecovery(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    agentProgressRecovery(args: AgentProgressRecoveryArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.agentProgressRecovery = function (this: QueryClient, args: AgentProgressRecoveryArgs = {} as AgentProgressRecoveryArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("agentProgressRecovery", buildAgentProgressRecovery(args), opts);
+};
+
 /** Human wording for the bounded recovery consent card. */
 export interface AgentRecoveryExplanationArgs {
 }
@@ -294,6 +327,41 @@ declare module "./query.js" {
 
 QueryClient.prototype.deploymentRollbackAllowed = function (this: QueryClient, args: DeploymentRollbackAllowedArgs = {} as DeploymentRollbackAllowedArgs, opts?: QueryCallOptions): Promise<Result> {
   return this.executeNamed("deploymentRollbackAllowed", buildDeploymentRollbackAllowed(args), opts);
+};
+
+/** Choose installation email resources from the physical cluster's public facts. Preserve installed choices on repeat runs. The full issuer fingerprint fences resource-group authority across simultaneous or recreated installations. */
+export interface EmailInstallationChoicesArgs {
+  facts: Record<string, unknown>;
+  emailResourceGroup?: string;
+  emailIdentityName?: string;
+  emailService?: string;
+  communicationService?: string;
+  emailLocation?: string;
+  emailDataLocation?: string;
+  emailReplyTo?: string;
+}
+
+export function buildEmailInstallationChoices(args: EmailInstallationChoicesArgs): string {
+  const parts: string[] = [];
+  parts.push("facts: " + renderMemQLValue(args.facts));
+  if (args.emailResourceGroup !== undefined) parts.push("emailResourceGroup: " + renderMemQLValue(args.emailResourceGroup));
+  if (args.emailIdentityName !== undefined) parts.push("emailIdentityName: " + renderMemQLValue(args.emailIdentityName));
+  if (args.emailService !== undefined) parts.push("emailService: " + renderMemQLValue(args.emailService));
+  if (args.communicationService !== undefined) parts.push("communicationService: " + renderMemQLValue(args.communicationService));
+  if (args.emailLocation !== undefined) parts.push("emailLocation: " + renderMemQLValue(args.emailLocation));
+  if (args.emailDataLocation !== undefined) parts.push("emailDataLocation: " + renderMemQLValue(args.emailDataLocation));
+  if (args.emailReplyTo !== undefined) parts.push("emailReplyTo: " + renderMemQLValue(args.emailReplyTo));
+  return "logic emailInstallationChoices(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    emailInstallationChoices(args: EmailInstallationChoicesArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.emailInstallationChoices = function (this: QueryClient, args: EmailInstallationChoicesArgs = {} as EmailInstallationChoicesArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("emailInstallationChoices", buildEmailInstallationChoices(args), opts);
 };
 
 /** Canonical ENGINE node-type list the deploy bundle builds + places: identity, bff, agent, planner, workbench, mcp, edge. No product-carrier nodes (carrier/product layer, shipped by their own repos). */

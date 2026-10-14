@@ -19,7 +19,7 @@ import type { OsAppSection } from "../../system/registry";
  * The sections this app declares, in manifest order.
  *
  * OVERVIEW IS FIRST (epic memql#5414) and is therefore the section a window
- * opens on, as it is in Fleet and Campaigns: the summary destination DESIGN.md
+ * opens on, as it is in Fleet and Email: the summary destination DESIGN.md
  * names, answering what is open, what is moving, what is waiting on you, and
  * how much of what the system learned is reusable. It needs no module: every
  * figure on it is a read the other sections already make, and an overview

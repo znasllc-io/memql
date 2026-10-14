@@ -18,9 +18,6 @@
 //   - driver.go / lockfile.go / semver.go (cutversion.go) / overlay.go --
 //     mechanical deploy primitives (provider selection, release lockfile,
 //     version arithmetic, overlay pinning) the actions/builtins resolve to.
-//   - capability_result.go (ParseCapabilityResult) -- the #2221 capability-script
-//     envelope parser the action executor uses to read a script's one JSON
-//     result off stdout.
 //   - role_gate.go / status.go -- the Go auth gates + status reads the deploy
 //     RPCs and the deploy pack share.
 //   - repair.go -- the Repair verb (memql#4209): an owner-only, observed

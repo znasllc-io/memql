@@ -166,7 +166,7 @@ func (a *CognitionEngineAdapter) ToolCallee(tool string) (kind, callee string, o
 	if a == nil || a.Engine == nil {
 		return "", "", false
 	}
-	return a.Engine.ToolCallee(tool)
+	return a.Engine.ToolCallee(memql.HarnessToolBinding(tool))
 }
 
 func (a *CognitionEngineAdapter) RenderPrompt(templateId string, data map[string]any) (string, error) {
@@ -193,14 +193,18 @@ func (a *CognitionEngineAdapter) ToolDefinitionsForNames(names []string) []commo
 	if a == nil || a.Engine == nil {
 		return nil
 	}
-	return a.Engine.ToolDefinitionsForNames(names)
+	bound := make([]string, len(names))
+	for n, name := range names {
+		bound[n] = memql.HarnessToolBinding(name)
+	}
+	return a.Engine.ToolDefinitionsForNames(bound)
 }
 
 func (a *CognitionEngineAdapter) ExecuteToolByName(ctx context.Context, name string, args map[string]any) (string, error) {
 	if a == nil || a.Engine == nil {
 		return "", fmt.Errorf("memql engine not configured")
 	}
-	raw, err := a.Engine.ExecuteToolByName(ctx, name, args)
+	raw, err := a.Engine.ExecuteToolByName(ctx, memql.HarnessToolBinding(name), args)
 	if err != nil {
 		return "", err
 	}
@@ -405,6 +409,10 @@ func (a *CognitionEngineAdapter) CompactWorkContext(ctx context.Context, message
 	return a.Engine.CompactWorkContext(ctx, messages, tools, target)
 }
 
+func (a *CognitionEngineAdapter) PauseWorkForBudget(ctx context.Context, ceiling *memql.RunCeilingError, messages []common.ChatMessage) error {
+	return a.Engine.PauseWorkForBudget(ctx, ceiling, messages)
+}
+
 func (a *CognitionEngineAdapter) PrepareWorkTool(ctx context.Context) error {
 	return a.Engine.PrepareWorkTool(ctx)
 }
@@ -419,4 +427,20 @@ func (a *CognitionEngineAdapter) SaveWorkContinuation(ctx context.Context, messa
 }
 func (a *CognitionEngineAdapter) RestoreWorkContinuation(ctx context.Context, messages []common.ChatMessage) ([]common.ChatMessage, error) {
 	return a.Engine.RestoreWorkContinuation(ctx, messages)
+}
+
+// InvokeAIStructured keeps model routing and strict output validation at the engine seam.
+func (a *CampaignsEngineAdapter) InvokeAIStructured(ctx context.Context, templateID string, data map[string]any, schemaName string, schema json.RawMessage, strict bool) (string, error) {
+	return a.Engine.InvokeAIStructured(ctx, templateID, data, schemaName, schema, strict)
+}
+
+func (a *CognitionEngineAdapter) ReadWorkGuidance(ctx context.Context) ([]memql.WorkGuidance, error) {
+	return a.Engine.ReadWorkGuidance(ctx)
+}
+func (a *CognitionEngineAdapter) AcknowledgeWorkGuidance(ctx context.Context, ids []string) error {
+	return a.Engine.AcknowledgeWorkGuidance(ctx, ids)
+}
+
+func (a *CognitionEngineAdapter) RecoverWorkModelCall(ctx context.Context, failure string, attempt, maxRetries int, messages []common.ChatMessage) (bool, error) {
+	return a.Engine.RecoverWorkModelCall(ctx, failure, attempt, maxRetries, messages)
 }

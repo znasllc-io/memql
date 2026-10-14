@@ -595,3 +595,47 @@ query observation workDraftsForOwnerRun {
  paginate 1
  shape workObservationFull
 }
+
+/// The immutable selection for one exact step version in owned work.
+@actor
+@unbounded("one immutable skill-selection receipt in one owned run")
+query observation workSkillSelectionForOwnerRun {
+ args { runId string! observationId string! }
+ filter row => row.ownerUserId == actor.userId && row.runId == args.runId && row.id == args.observationId && row.?data.skillSelection.schemaVersion == 1
+ shape workObservationFull
+}
+
+/// Skill selection history visible only to the owner of the work.
+@actor
+query observation workSkillSelectionsForOwner {
+ filter row => row.ownerUserId == actor.userId && row.?data.skillSelection.schemaVersion == 1
+ sort "row.createdAt", "desc"
+ shape workObservationFull
+}
+
+/// Durable goal-evaluation results, scoped by the same owner tier as their work.
+/// A missing result is not a successful measurement.
+@actor
+query observation workGoalEvaluationsForOwner {
+ filter row => row.ownerUserId == actor.userId && row.?data.goalEvaluation.schemaVersion == 1
+ sort "row.createdAt", "desc"
+ shape workObservationFull
+}
+
+/// This owner's approved typed computer permissions. Native dispatch additionally
+/// checks the receipt hash, agent, machine, mode and revocation before each use.
+@actor
+@unbounded("computer permissions bounded by the authenticated owner")
+query approval workComputerPermissions {
+ filter row => row.ownerUserId == actor.userId && row.kind == "scopeElevation" && row.decision == "approved" && row.?subject.computerPermission.version == 1 && row.?answer.permissionMode == "always" && (row.?permissionRevokedAt == nil || row.?permissionRevokedAt == "")
+ shape workApprovalFull
+}
+
+/// Includes unused one-time receipts; only the native authority decides admission.
+@actor
+@unbounded("computer decisions bounded by one authenticated owner and agent")
+query approval workComputerPermissionsForAgent {
+ args { agentId string! }
+ filter row => row.ownerUserId == actor.userId && row.kind == "scopeElevation" && row.decision == "approved" && row.?subject.agentId == args.agentId && row.?subject.computerPermission.version == 1
+ shape workApprovalFull
+}

@@ -35,6 +35,73 @@ func ArtifactProbeBuild(args ArtifactProbeArgs) string {
 	return b.String()
 }
 
+// AskApprovalDiscussion -- Discuss an owned request in its original conversation. Opening this view neither calls a model nor approves, retries or resumes the blocked work.
+type AskApprovalDiscussionArgs struct {
+	ApprovalId string
+}
+
+// AskApprovalDiscussion calls the engine builtin askApprovalDiscussion.
+func (qc *QueryClient) AskApprovalDiscussion(ctx context.Context, args AskApprovalDiscussionArgs) (*Result, error) {
+	call := AskApprovalDiscussionBuild(args)
+	return qc.executeNamed(ctx, "askApprovalDiscussion", call)
+}
+
+func AskApprovalDiscussionBuild(args AskApprovalDiscussionArgs) string {
+	var b strings.Builder
+	b.WriteString("builtin askApprovalDiscussion(")
+	b.WriteString("approvalId: ")
+	b.WriteString(quoteMemQL(args.ApprovalId))
+	b.WriteString(")")
+	return b.String()
+}
+
+// AskApprovalMessage -- Record a human message and return its read-only child analysis immediately. advisor selects an independent second opinion only on an explicit request.
+type AskApprovalMessageArgs struct {
+	ApprovalId     string
+	ConversationId string
+	RequestId      string
+	Prompt         string
+	Advisor        bool
+	AdvisorSet     bool // set true to send advisor; required because zero-value bool is ambiguous
+}
+
+// AskApprovalMessage calls the engine builtin askApprovalMessage.
+func (qc *QueryClient) AskApprovalMessage(ctx context.Context, args AskApprovalMessageArgs) (*Result, error) {
+	call := AskApprovalMessageBuild(args)
+	return qc.executeNamed(ctx, "askApprovalMessage", call)
+}
+
+func AskApprovalMessageBuild(args AskApprovalMessageArgs) string {
+	var b strings.Builder
+	b.WriteString("builtin askApprovalMessage(")
+	b.WriteString("approvalId: ")
+	b.WriteString(quoteMemQL(args.ApprovalId))
+	if b.Len() > 27 {
+		b.WriteString(", ")
+	}
+	b.WriteString("conversationId: ")
+	b.WriteString(quoteMemQL(args.ConversationId))
+	if b.Len() > 27 {
+		b.WriteString(", ")
+	}
+	b.WriteString("requestId: ")
+	b.WriteString(quoteMemQL(args.RequestId))
+	if b.Len() > 27 {
+		b.WriteString(", ")
+	}
+	b.WriteString("prompt: ")
+	b.WriteString(quoteMemQL(args.Prompt))
+	if args.AdvisorSet {
+		if b.Len() > 27 {
+			b.WriteString(", ")
+		}
+		b.WriteString("advisor: ")
+		b.WriteString(fmt.Sprintf("%v", args.Advisor))
+	}
+	b.WriteString(")")
+	return b.String()
+}
+
 // AskConversationSnapshot -- Read this person's conversation with current progress and completed results projected from its durable work runs. Reconnects never execute work again.
 type AskConversationSnapshotArgs struct {
 	ConversationId string
@@ -51,6 +118,50 @@ func AskConversationSnapshotBuild(args AskConversationSnapshotArgs) string {
 	b.WriteString("builtin askConversationSnapshot(")
 	b.WriteString("conversationId: ")
 	b.WriteString(quoteMemQL(args.ConversationId))
+	b.WriteString(")")
+	return b.String()
+}
+
+// AskGuideWork -- Record guidance for owned running work in its existing conversation. This starts no goal and grants no permission; the existing agent receives the message at its next safe reasoning boundary. Retries reuse requestId.
+type AskGuideWorkArgs struct {
+	TargetEpoch    string
+	RunId          string
+	ConversationId string
+	RequestId      string
+	Prompt         string
+}
+
+// AskGuideWork calls the engine builtin askGuideWork.
+func (qc *QueryClient) AskGuideWork(ctx context.Context, args AskGuideWorkArgs) (*Result, error) {
+	call := AskGuideWorkBuild(args)
+	return qc.executeNamed(ctx, "askGuideWork", call)
+}
+
+func AskGuideWorkBuild(args AskGuideWorkArgs) string {
+	var b strings.Builder
+	b.WriteString("builtin askGuideWork(")
+	b.WriteString("targetEpoch: ")
+	b.WriteString(quoteMemQL(args.TargetEpoch))
+	if b.Len() > 21 {
+		b.WriteString(", ")
+	}
+	b.WriteString("runId: ")
+	b.WriteString(quoteMemQL(args.RunId))
+	if b.Len() > 21 {
+		b.WriteString(", ")
+	}
+	b.WriteString("conversationId: ")
+	b.WriteString(quoteMemQL(args.ConversationId))
+	if b.Len() > 21 {
+		b.WriteString(", ")
+	}
+	b.WriteString("requestId: ")
+	b.WriteString(quoteMemQL(args.RequestId))
+	if b.Len() > 21 {
+		b.WriteString(", ")
+	}
+	b.WriteString("prompt: ")
+	b.WriteString(quoteMemQL(args.Prompt))
 	b.WriteString(")")
 	return b.String()
 }
@@ -248,16 +359,20 @@ func CampaignConfigureNewsletterBuild(args CampaignConfigureNewsletterArgs) stri
 	}
 	b.WriteString("audienceId: ")
 	b.WriteString(quoteMemQL(args.AudienceId))
-	if b.Len() > 36 {
-		b.WriteString(", ")
+	if args.TemplateId != "" {
+		if b.Len() > 36 {
+			b.WriteString(", ")
+		}
+		b.WriteString("templateId: ")
+		b.WriteString(quoteMemQL(args.TemplateId))
 	}
-	b.WriteString("templateId: ")
-	b.WriteString(quoteMemQL(args.TemplateId))
-	if b.Len() > 36 {
-		b.WriteString(", ")
+	if args.SenderIdentityId != "" {
+		if b.Len() > 36 {
+			b.WriteString(", ")
+		}
+		b.WriteString("senderIdentityId: ")
+		b.WriteString(quoteMemQL(args.SenderIdentityId))
 	}
-	b.WriteString("senderIdentityId: ")
-	b.WriteString(quoteMemQL(args.SenderIdentityId))
 	if b.Len() > 36 {
 		b.WriteString(", ")
 	}
@@ -366,6 +481,32 @@ func CampaignConfigureTestAudienceBuild(args CampaignConfigureTestAudienceArgs) 
 		b.WriteString("expectedRevision: ")
 		b.WriteString(quoteMemQL(args.ExpectedRevision))
 	}
+	b.WriteString(")")
+	return b.String()
+}
+
+// CampaignDescribeJourney -- Draft an email automation from one sentence using this organization's resources. Returns a proposal and what it needs, saves nothing. Save it with campaignSaveJourney.
+type CampaignDescribeJourneyArgs struct {
+	AccountId string
+	Sentence  string
+}
+
+// CampaignDescribeJourney calls the engine builtin campaignDescribeJourney.
+func (qc *QueryClient) CampaignDescribeJourney(ctx context.Context, args CampaignDescribeJourneyArgs) (*Result, error) {
+	call := CampaignDescribeJourneyBuild(args)
+	return qc.executeNamed(ctx, "campaignDescribeJourney", call)
+}
+
+func CampaignDescribeJourneyBuild(args CampaignDescribeJourneyArgs) string {
+	var b strings.Builder
+	b.WriteString("builtin campaignDescribeJourney(")
+	b.WriteString("accountId: ")
+	b.WriteString(quoteMemQL(args.AccountId))
+	if b.Len() > 32 {
+		b.WriteString(", ")
+	}
+	b.WriteString("sentence: ")
+	b.WriteString(quoteMemQL(args.Sentence))
 	b.WriteString(")")
 	return b.String()
 }
@@ -497,19 +638,165 @@ func CampaignRetryNewsletterWelcomeBuild(args CampaignRetryNewsletterWelcomeArgs
 	return b.String()
 }
 
-// CampaignSaveTemplate -- Save an organization email template with an exact revision precondition. Empty expectedRevision creates a draft under a new caller-generated ID; editing always returns it to draft. Publishing or archiving requires the saved content and revision to match exactly. This never sends mail.
+// CampaignSaveJourney -- Save an email automation with an exact revision. Omit expectedRevision to create one under a new caller-generated id. Editable while draft or paused. Never sends mail; returns the revision and what still blocks turning it on.
+type CampaignSaveJourneyArgs struct {
+	// Stable caller-generated id; reuse it after an uncertain create.
+	JourneyId string
+	// Owning organization; immutable after creation.
+	AccountId   string
+	Name        string
+	Description string
+	// {kind: joined | confirmed, audienceId}
+	Trigger map[string]any
+	// Ordered steps: {id, kind: send | confirm | wait, templateId?, senderIdentityId?, days?, hours?, timeoutDays?}
+	Steps []map[string]any
+	// Exact revision from journeyById; omit when creating.
+	ExpectedRevision string
+}
+
+// CampaignSaveJourney calls the engine builtin campaignSaveJourney.
+func (qc *QueryClient) CampaignSaveJourney(ctx context.Context, args CampaignSaveJourneyArgs) (*Result, error) {
+	call := CampaignSaveJourneyBuild(args)
+	return qc.executeNamed(ctx, "campaignSaveJourney", call)
+}
+
+func CampaignSaveJourneyBuild(args CampaignSaveJourneyArgs) string {
+	var b strings.Builder
+	b.WriteString("builtin campaignSaveJourney(")
+	b.WriteString("journeyId: ")
+	b.WriteString(quoteMemQL(args.JourneyId))
+	if b.Len() > 28 {
+		b.WriteString(", ")
+	}
+	b.WriteString("accountId: ")
+	b.WriteString(quoteMemQL(args.AccountId))
+	if b.Len() > 28 {
+		b.WriteString(", ")
+	}
+	b.WriteString("name: ")
+	b.WriteString(quoteMemQL(args.Name))
+	if args.Description != "" {
+		if b.Len() > 28 {
+			b.WriteString(", ")
+		}
+		b.WriteString("description: ")
+		b.WriteString(quoteMemQL(args.Description))
+	}
+	if b.Len() > 28 {
+		b.WriteString(", ")
+	}
+	b.WriteString("trigger: ")
+	b.WriteString(renderMemQLValue(args.Trigger))
+	if b.Len() > 28 {
+		b.WriteString(", ")
+	}
+	b.WriteString("steps: ")
+	b.WriteString(renderMemQLValue(args.Steps))
+	if args.ExpectedRevision != "" {
+		if b.Len() > 28 {
+			b.WriteString(", ")
+		}
+		b.WriteString("expectedRevision: ")
+		b.WriteString(quoteMemQL(args.ExpectedRevision))
+	}
+	b.WriteString(")")
+	return b.String()
+}
+
+// CampaignSaveLayout -- Save an organization email layout with an exact revision precondition, or archive or restore it. Saving validates a layout-mode email document; custom HTML cannot be a layout. Empty expectedRevision creates the layout under the caller-generated layoutId. Archive and restore need only the exact revision.
+type CampaignSaveLayoutArgs struct {
+	// Stable caller-generated layout id; reuse it on an uncertain creation response.
+	LayoutId string
+	// Owning organization; immutable after creation.
+	AccountId string
+	// Required when saving.
+	Name        string
+	Description string
+	// The layout-mode email document. Required when saving.
+	Document map[string]any
+	// The Library file the layout comes from.
+	SourceArtifactId string
+	// Exact createdAt from emailLayoutById; empty only when creating.
+	ExpectedRevision string
+	// save (default), archive or restore.
+	Action string
+}
+
+// CampaignSaveLayout calls the engine builtin campaignSaveLayout.
+func (qc *QueryClient) CampaignSaveLayout(ctx context.Context, args CampaignSaveLayoutArgs) (*Result, error) {
+	call := CampaignSaveLayoutBuild(args)
+	return qc.executeNamed(ctx, "campaignSaveLayout", call)
+}
+
+func CampaignSaveLayoutBuild(args CampaignSaveLayoutArgs) string {
+	var b strings.Builder
+	b.WriteString("builtin campaignSaveLayout(")
+	b.WriteString("layoutId: ")
+	b.WriteString(quoteMemQL(args.LayoutId))
+	if b.Len() > 27 {
+		b.WriteString(", ")
+	}
+	b.WriteString("accountId: ")
+	b.WriteString(quoteMemQL(args.AccountId))
+	if args.Name != "" {
+		if b.Len() > 27 {
+			b.WriteString(", ")
+		}
+		b.WriteString("name: ")
+		b.WriteString(quoteMemQL(args.Name))
+	}
+	if args.Description != "" {
+		if b.Len() > 27 {
+			b.WriteString(", ")
+		}
+		b.WriteString("description: ")
+		b.WriteString(quoteMemQL(args.Description))
+	}
+	if args.Document != nil {
+		if b.Len() > 27 {
+			b.WriteString(", ")
+		}
+		b.WriteString("document: ")
+		b.WriteString(renderMemQLValue(args.Document))
+	}
+	if args.SourceArtifactId != "" {
+		if b.Len() > 27 {
+			b.WriteString(", ")
+		}
+		b.WriteString("sourceArtifactId: ")
+		b.WriteString(quoteMemQL(args.SourceArtifactId))
+	}
+	if b.Len() > 27 {
+		b.WriteString(", ")
+	}
+	b.WriteString("expectedRevision: ")
+	b.WriteString(quoteMemQL(args.ExpectedRevision))
+	if args.Action != "" {
+		if b.Len() > 27 {
+			b.WriteString(", ")
+		}
+		b.WriteString("action: ")
+		b.WriteString(quoteMemQL(args.Action))
+	}
+	b.WriteString(")")
+	return b.String()
+}
+
+// CampaignSaveTemplate -- Save an organization email template with an exact revision precondition. content is the email document (a *.email.json file): a layout document made of blocks, or custom HTML with its plain-text body. The server renders it and stores the subject, the text and HTML parts and the document, and answers {templateId, revision, status, saved, issues}. issues are what keeps the email from being sent as it is: a missing picture or link, a picture the caller cannot read, a missing unsubscribe link, an email that is too large. Saving works with issues and returns the template to draft. Publishing requires the exact saved revision and the exact saved content, and is refused while any issue remains. Archive and restore require only the exact revision; the content in the call is ignored, and restore returns a template to draft. Empty expectedRevision creates a draft. With sourceArtifactId (the Library file the email is written in) there is one template per organization and file: the template already published from that file is updated whatever templateId says, and the first save creates it, so templateId may be left empty. This never sends mail.
 type CampaignSaveTemplateArgs struct {
-	// Stable caller-generated template ID; reuse on an uncertain creation response.
+	// Stable caller-generated template ID; reuse on an uncertain creation response. May be empty only when sourceArtifactId is given.
 	TemplateId string
 	// Owning organization; immutable after creation.
 	AccountId string
 	// Template name.
 	Name string
-	// The reviewed email file: subject, textBody, htmlBody.
+	// The email document: a layout document {subject, preheader, layout, theme, blocks} or custom HTML {subject, preheader, textBody, htmlBody}. Ignored when archiving or restoring.
 	Content map[string]any
-	// Exact createdAt from templateById; empty only when creating.
+	// The Library file the email is written in. Keeps one template per organization and file; see above.
+	SourceArtifactId string
+	// Exact createdAt from templateById or templateForSource; empty only when creating.
 	ExpectedRevision string
-	// save (default), publish, or archive. Publishing is an explicit human action.
+	// save (default), publish, archive or restore. Publishing is an explicit human action.
 	Action string
 }
 
@@ -522,8 +809,10 @@ func (qc *QueryClient) CampaignSaveTemplate(ctx context.Context, args CampaignSa
 func CampaignSaveTemplateBuild(args CampaignSaveTemplateArgs) string {
 	var b strings.Builder
 	b.WriteString("builtin campaignSaveTemplate(")
-	b.WriteString("templateId: ")
-	b.WriteString(quoteMemQL(args.TemplateId))
+	if args.TemplateId != "" {
+		b.WriteString("templateId: ")
+		b.WriteString(quoteMemQL(args.TemplateId))
+	}
 	if b.Len() > 29 {
 		b.WriteString(", ")
 	}
@@ -539,6 +828,13 @@ func CampaignSaveTemplateBuild(args CampaignSaveTemplateArgs) string {
 	}
 	b.WriteString("content: ")
 	b.WriteString(renderMemQLValue(args.Content))
+	if args.SourceArtifactId != "" {
+		if b.Len() > 29 {
+			b.WriteString(", ")
+		}
+		b.WriteString("sourceArtifactId: ")
+		b.WriteString(quoteMemQL(args.SourceArtifactId))
+	}
 	if b.Len() > 29 {
 		b.WriteString(", ")
 	}
@@ -621,6 +917,39 @@ func CampaignSendingReadinessBuild(args CampaignSendingReadinessArgs) string {
 	return b.String()
 }
 
+// CampaignSetJourneyState -- Turn an email automation on, pause it, or archive it. Turning on checks templates, senders and the audience first; archiving is permanent and exits everyone still in it.
+type CampaignSetJourneyStateArgs struct {
+	JourneyId string
+	// Enum: activate | pause | archive
+	Action           string
+	ExpectedRevision string
+}
+
+// CampaignSetJourneyState calls the engine builtin campaignSetJourneyState.
+func (qc *QueryClient) CampaignSetJourneyState(ctx context.Context, args CampaignSetJourneyStateArgs) (*Result, error) {
+	call := CampaignSetJourneyStateBuild(args)
+	return qc.executeNamed(ctx, "campaignSetJourneyState", call)
+}
+
+func CampaignSetJourneyStateBuild(args CampaignSetJourneyStateArgs) string {
+	var b strings.Builder
+	b.WriteString("builtin campaignSetJourneyState(")
+	b.WriteString("journeyId: ")
+	b.WriteString(quoteMemQL(args.JourneyId))
+	if b.Len() > 32 {
+		b.WriteString(", ")
+	}
+	b.WriteString("action: ")
+	b.WriteString(quoteMemQL(args.Action))
+	if b.Len() > 32 {
+		b.WriteString(", ")
+	}
+	b.WriteString("expectedRevision: ")
+	b.WriteString(quoteMemQL(args.ExpectedRevision))
+	b.WriteString(")")
+	return b.String()
+}
+
 // CampaignStartSend -- Preflight and start a campaign send. Refuses -- rather than partially sending -- when no email sender is registered on the node, when one-click unsubscribe is not configured (MEMQL_CAMPAIGNS_UNSUBSCRIBE_SECRET / _BASE_URL), when the template is not marked ready, or when the audience is empty or at the MEMQL_CAMPAIGNS_MAX_AUDIENCE ceiling. Requires a readable campaign and update permission on data in its organization. Returns the recipient count the send will work through.
 type CampaignStartSendArgs struct {
 	// The campaign to send. The caller needs update permission in its organization.
@@ -696,7 +1025,7 @@ func CampaignTestAudienceSendBuild(args CampaignTestAudienceSendArgs) string {
 	return b.String()
 }
 
-// CampaignTestSend -- Send one test copy of a campaign to a named address (memql#4822). Renders the campaign's template against a synthetic recipient -- display name 'Test Recipient', the address you name, and the `fields` of the audience's first real recipient when one exists, so {{fields.*}} show the shape they will actually have. The subject is prefixed '[Test] ', the message goes through the campaign's resolved sending identity, and the unsubscribe footer carries an obviously-inert token. It writes NO delivery row and touches NO counter, so a test send can never make a campaign look partly sent; it does consume the ordinary send-rate token bucket, because a test is a real message to a real mailbox. Returns the list of merge tags it could not resolve -- the check that catches a typo'd {{fields.compnay}} before the whole audience gets it. `to` is REQUIRED and never defaults to the caller's own address: a builtin that mails somewhere you did not name is one you have to remember the default of.
+// CampaignTestSend -- Send one test copy of a campaign to a named address (memql#4822). Renders the campaign's template against a synthetic recipient -- display name 'Test Recipient', the address you name, and the `fields` of the audience's first real recipient when one exists, so {{fields.*}} show the shape they will actually have. The subject is prefixed '[Test] ', the message goes through the campaign's resolved sending identity, and the unsubscribe footer and the four link tags ({{unsubscribeUrl}}, {{preferencesUrl}}, {{viewUrl}}, {{confirmUrl}}) carry an obviously-inert token, so every link renders and none of them does anything. It writes NO delivery row and touches NO counter, so a test send can never make a campaign look partly sent; it does consume the ordinary send-rate token bucket, because a test is a real message to a real mailbox. Returns the list of merge tags it could not resolve -- the check that catches a typo'd {{fields.compnay}} before the whole audience gets it. `to` is REQUIRED and never defaults to the caller's own address: a builtin that mails somewhere you did not name is one you have to remember the default of.
 type CampaignTestSendArgs struct {
 	// The campaign to render. The caller must be able to read it.
 	CampaignId string
@@ -752,6 +1081,21 @@ func CancelGoalBuild(args CancelGoalArgs) string {
 	}
 	b.WriteString(")")
 	return b.String()
+}
+
+// ClusterStorageStatus -- Read the current installation's database storage report. Cluster owner only. The monitor owns its alert thresholds; consumers must show the report age.
+type ClusterStorageStatusArgs struct {
+}
+
+// ClusterStorageStatus calls the engine builtin clusterStorageStatus.
+func (qc *QueryClient) ClusterStorageStatus(ctx context.Context, args ClusterStorageStatusArgs) (*Result, error) {
+	call := ClusterStorageStatusBuild(args)
+	return qc.executeNamed(ctx, "clusterStorageStatus", call)
+}
+
+func ClusterStorageStatusBuild(args ClusterStorageStatusArgs) string {
+	_ = args
+	return "builtin clusterStorageStatus()"
 }
 
 // CommerceCompany -- One B2B account: its orders in a window, how many still have payment terms outstanding, and its MemQL-owned credit limit. The two halves come from different systems, and the question a rep asks -- can this account order -- needs both.
@@ -981,19 +1325,21 @@ func ComposeCancelBuild(args ComposeCancelArgs) string {
 type ComposeMaterializeArgs struct {
 	// What to call it, and the filename stem of the output. A name with a slash is refused (folderId chooses where it is filed), and one trailing extension that already names the format is dropped, because the extension is added when the file is filed: Plan.md is filed as Plan.md, never Plan.md.md.
 	Name string
-	// What you asked for, in your own words. Becomes the goal's statement, so it is what Nexus shows and what the catalog keys on. A Markdown file asked for with only a statement (no draft, sectionKeys, templateId, recipeId, outputKind or deployableKind, and no source that is not a Library file) is created EMPTY outside a work run, and the statement stays on its composition: the caller hands it to the Library's revision workflow, as the person (the SDK's handOffDescription), which writes the document. That workflow reads Markdown and images and cannot read the graph, so a concept_row or query source keeps the composer, which reads it. Inside a work run the composer still writes the file from the statement.
+	// What you asked for, in your own words. Becomes the goal's statement, so it is what Nexus shows and what the catalog keys on. A Markdown file asked for with a statement and nothing of its own to compose from (no draft, sectionKeys, templateId, recipeId, outputKind or deployableKind), whose sources, if any, are all Library files the Library can attach to a review comment (a .md file up to 32 KiB, or a PNG, JPEG, GIF or WebP picture up to 8 MiB), is created EMPTY outside a work run, and the statement stays on its composition: the caller hands it, with those files, to the Library's revision workflow, as the person (the SDK's handOffDescription), which writes the document. Any other source (a record, a query, or a Library file the Library cannot attach) keeps the composer, which reads it. Inside a work run the composer still writes the file from the statement.
 	Statement string
 	// markdown, html, txt, csv, json, docx or pdf. Audio and video are named in the brief and deliberately unoffered -- audio wants a compose-then-speak pipeline with a cost ceiling of its own, video a generation provider this cluster has none of.
 	Format string
-	// email_template produces a validated .email.json with subject, editable HTML, and plain-text alternative; requires format json. Empty creates an ordinary document. The result is a draft, never published or sent automatically.
+	// email_template writes a .email.json email document into a layout (layoutId); requires format json and one accountIds entry. With no statement, draft or sources it files the layout itself without a model call. The result is a draft, never published or sent.
 	OutputKind string
+	// builtin:confirmation, builtin:letter, builtin:article or builtin:spotlight, or an organization layout's id from emailLayouts. Email templates only; empty means builtin:article.
+	LayoutId string
 	// What to compose from: a list of {kind, ref, label, content?} where kind is concept_row | library_file | query. Set content=true only for a library_file to capture its bytes as reference input, including bounded inspection of supported ZIP members. A `query` source is a SELECTION and is resolved at run time under your own actor, which is what makes it re-runnable; the other two name one row each.
 	Sources []map[string]any
-	// A draft to start from, when the person has already written one. Empty means the compose step writes it from the sources. Supplying one seeds the configured composer. With no composer available, the supplied draft can be rendered directly.
+	// A draft to start from, when the person has already written one. Empty means the compose step writes it from the sources. Supplying one seeds the configured composer. With no composer available, the supplied draft can be rendered directly -- except an email template's: an email is only ever its layout, written by the composer, so on a node with no composer its draft is refused.
 	Draft string
 	// Ordered completed text step keys in the CURRENT work run. Renders their saved replies verbatim, separated by blank lines, without another model call. Exclude research-only notes; include every final chapter in delivery order. Preserves recorded model/source provenance. Requires a prose format and no draft, outputKind or deployableKind. Missing, unfinished, duplicate or non-text sections are refused.
 	SectionKeys []string
-	// v1:compose:template to render through. Resolved under your own actor, so a template you cannot read is refused rather than rendered through.
+	// v1:compose:template to render through. Resolved under your own actor, so a template you cannot read is refused rather than rendered through. An archived template, or one that makes another format than the request's (a template that names no format fits any), is refused before anything is written.
 	TemplateId string
 	// v1:library:folder to file the output into. Empty means the Library root. A folder you cannot read, or one in the Bin, is refused before anything is written.
 	FolderId string
@@ -1038,6 +1384,13 @@ func ComposeMaterializeBuild(args ComposeMaterializeArgs) string {
 		}
 		b.WriteString("outputKind: ")
 		b.WriteString(quoteMemQL(args.OutputKind))
+	}
+	if args.LayoutId != "" {
+		if b.Len() > 27 {
+			b.WriteString(", ")
+		}
+		b.WriteString("layoutId: ")
+		b.WriteString(quoteMemQL(args.LayoutId))
 	}
 	if args.Sources != nil {
 		if b.Len() > 27 {
@@ -1166,6 +1519,14 @@ func ComposeRunRecipeBuild(args ComposeRunRecipeArgs) string {
 
 // CreateGoal -- Accept a goal and start work on it. Opens a v1:work:goal owned by the caller and its first v1:work:run in `compiling`, then dispatches compile: catalog exact match, then near-match with a gap list, then the cheap triage. Returns {goalId, runId}. A goal that fully matches the catalog reaches no model at all.
 type CreateGoalArgs struct {
+	// Human-selected execution ceiling: no federation provider may serve any call of this goal, including embeddings, step overrides and fallback. Child goals inherit it and cannot relax it.
+	NoPaidProviders    bool
+	NoPaidProvidersSet bool // set true to send noPaidProviders; required because zero-value bool is ambiguous
+	// The human caller's routing choice, using the same source grammar as Ask. A pinned fleet source never falls back to a paid provider. Child/model calls cannot replace their inherited choice.
+	Source string
+	// Optional human-selected intelligence level for this goal's steps; compiler calls retain their own levels.
+	// Enum: fast | strong | reasoning
+	Level string
 	// Installed Spine template name. Defaults to defaultWorkSpine. Its templates, pure logic, scoped actions and selected phase recipes are frozen onto this run before compilation.
 	Spine string
 	// The goal in the person's own words.
@@ -1189,7 +1550,28 @@ func (qc *QueryClient) CreateGoal(ctx context.Context, args CreateGoalArgs) (*Re
 func CreateGoalBuild(args CreateGoalArgs) string {
 	var b strings.Builder
 	b.WriteString("builtin createGoal(")
+	if args.NoPaidProvidersSet {
+		b.WriteString("noPaidProviders: ")
+		b.WriteString(fmt.Sprintf("%v", args.NoPaidProviders))
+	}
+	if args.Source != "" {
+		if b.Len() > 19 {
+			b.WriteString(", ")
+		}
+		b.WriteString("source: ")
+		b.WriteString(quoteMemQL(args.Source))
+	}
+	if args.Level != "" {
+		if b.Len() > 19 {
+			b.WriteString(", ")
+		}
+		b.WriteString("level: ")
+		b.WriteString(quoteMemQL(args.Level))
+	}
 	if args.Spine != "" {
+		if b.Len() > 19 {
+			b.WriteString(", ")
+		}
 		b.WriteString("spine: ")
 		b.WriteString(quoteMemQL(args.Spine))
 	}
@@ -1621,6 +2003,72 @@ func (qc *QueryClient) EmailInbox(ctx context.Context, args EmailInboxArgs) (*Re
 func EmailInboxBuild(args EmailInboxArgs) string {
 	_ = args
 	return "builtin emailInbox()"
+}
+
+// EmailLayouts -- The email layouts an organization can start from: the four built-in layouts, then its own active layouts (all of them with includeArchived). Rows are {id, kind, name, description, document, status} plus layoutId, revision and sourceArtifactId for organization layouts. Documents are included up to an 8 MiB answer budget; later rows carry documentOmitted: true instead of document. Read emailLayoutById with the row layoutId when its document is needed. The id is opaque: pass it to composeMaterialize as layoutId.
+type EmailLayoutsArgs struct {
+	AccountId          string
+	IncludeArchived    bool
+	IncludeArchivedSet bool // set true to send includeArchived; required because zero-value bool is ambiguous
+}
+
+// EmailLayouts calls the engine builtin emailLayouts.
+func (qc *QueryClient) EmailLayouts(ctx context.Context, args EmailLayoutsArgs) (*Result, error) {
+	call := EmailLayoutsBuild(args)
+	return qc.executeNamed(ctx, "emailLayouts", call)
+}
+
+func EmailLayoutsBuild(args EmailLayoutsArgs) string {
+	var b strings.Builder
+	b.WriteString("builtin emailLayouts(")
+	b.WriteString("accountId: ")
+	b.WriteString(quoteMemQL(args.AccountId))
+	if args.IncludeArchivedSet {
+		if b.Len() > 21 {
+			b.WriteString(", ")
+		}
+		b.WriteString("includeArchived: ")
+		b.WriteString(fmt.Sprintf("%v", args.IncludeArchived))
+	}
+	b.WriteString(")")
+	return b.String()
+}
+
+// EmailRender -- Render an email document for preview: pictures you can read are embedded, sample merge values are applied, and {subject, html, text, issues} comes back. Never saves or sends anything.
+type EmailRenderArgs struct {
+	// The *.email.json document, in layout or custom mode.
+	Document map[string]any
+	// The organization the email is for. You need read access to its data.
+	AccountId string
+	// Sample values: displayName, email, accountName, campaignName, and fields (an object of column values).
+	Sample map[string]any
+}
+
+// EmailRender calls the engine builtin emailRender.
+func (qc *QueryClient) EmailRender(ctx context.Context, args EmailRenderArgs) (*Result, error) {
+	call := EmailRenderBuild(args)
+	return qc.executeNamed(ctx, "emailRender", call)
+}
+
+func EmailRenderBuild(args EmailRenderArgs) string {
+	var b strings.Builder
+	b.WriteString("builtin emailRender(")
+	b.WriteString("document: ")
+	b.WriteString(renderMemQLValue(args.Document))
+	if b.Len() > 20 {
+		b.WriteString(", ")
+	}
+	b.WriteString("accountId: ")
+	b.WriteString(quoteMemQL(args.AccountId))
+	if args.Sample != nil {
+		if b.Len() > 20 {
+			b.WriteString(", ")
+		}
+		b.WriteString("sample: ")
+		b.WriteString(renderMemQLValue(args.Sample))
+	}
+	b.WriteString(")")
+	return b.String()
 }
 
 // FleetModelProbe -- Ask one of YOUR OWN fleet machines to measure a model it already has, and return at once with the id of the record to watch. The suite is pinned by this engine and echoed back by the machine, so figures can never be filed under a suite that was not run. Owner-only, and the machine must be yours, unrevoked and connected right now -- the same refusals a pull makes, reused deliberately, because offline is offline whichever act is asking. Progress lands per case on the v1:worker:modelProbe row this returns the id of; the figures land on a v1:platform:modelMeasurement row keyed by machine, model and suite version. Every figure is a measured statistic OR a named reason there is none: a machine nobody has probed and a model that failed every case are different answers, and a page that renders both as zero would lead to opposite actions.
@@ -2314,6 +2762,26 @@ func IntegrationStatusBuild(args IntegrationStatusArgs) string {
 		b.WriteString("probe: ")
 		b.WriteString(fmt.Sprintf("%v", args.Probe))
 	}
+	b.WriteString(")")
+	return b.String()
+}
+
+// KnowledgeInstallCapabilityCorpora -- Install only selected registered capability manuals. Explicit cluster-owner operation; no domain catalog creation or generated content. Returns per-domain ready, preserved, embedded and olderPublished counts.
+type KnowledgeInstallCapabilityCorporaArgs struct {
+	DomainIds []string
+}
+
+// KnowledgeInstallCapabilityCorpora calls the engine builtin knowledgeInstallCapabilityCorpora.
+func (qc *QueryClient) KnowledgeInstallCapabilityCorpora(ctx context.Context, args KnowledgeInstallCapabilityCorporaArgs) (*Result, error) {
+	call := KnowledgeInstallCapabilityCorporaBuild(args)
+	return qc.executeNamed(ctx, "knowledgeInstallCapabilityCorpora", call)
+}
+
+func KnowledgeInstallCapabilityCorporaBuild(args KnowledgeInstallCapabilityCorporaArgs) string {
+	var b strings.Builder
+	b.WriteString("builtin knowledgeInstallCapabilityCorpora(")
+	b.WriteString("domainIds: ")
+	b.WriteString(renderMemQLValue(args.DomainIds))
 	b.WriteString(")")
 	return b.String()
 }
@@ -4874,6 +5342,27 @@ func RestoreDocumentVersionBuild(args RestoreDocumentVersionArgs) string {
 	return b.String()
 }
 
+// RevokeComputerPermission -- Revoke one of this person's saved computer permissions. In-flight actions may finish; no later dispatch may claim the receipt.
+type RevokeComputerPermissionArgs struct {
+	// The approval receipt that granted the saved permission.
+	PermissionId string
+}
+
+// RevokeComputerPermission calls the engine builtin revokeComputerPermission.
+func (qc *QueryClient) RevokeComputerPermission(ctx context.Context, args RevokeComputerPermissionArgs) (*Result, error) {
+	call := RevokeComputerPermissionBuild(args)
+	return qc.executeNamed(ctx, "revokeComputerPermission", call)
+}
+
+func RevokeComputerPermissionBuild(args RevokeComputerPermissionArgs) string {
+	var b strings.Builder
+	b.WriteString("builtin revokeComputerPermission(")
+	b.WriteString("permissionId: ")
+	b.WriteString(quoteMemQL(args.PermissionId))
+	b.WriteString(")")
+	return b.String()
+}
+
 // RoleCreate -- Create a custom role with its grants, in one internal-origin write. Guards, in order: the caller holds `create` on `role`; the slug matches ^[a-z][a-z0-9-]{1,39}$ and is claimed by no role and no alias (role_slug_taken); the rank is strictly below the caller's (role_rank_not_below_caller) and equal to no existing rung (role_rank_taken); every grant is a pair the caller themselves holds (role_grant_not_held, naming the pair); accountId, if given, scopes the role to that account (D10) and only members of it may then hold the role. Writes the role row (predefined false, active true) and one active capability row per grant. Returns {ok, slug, code}.
 type RoleCreateArgs struct {
 	// Stable kebab-case identifier, ^[a-z][a-z0-9-]{1,39}$. Never renamed; a rename is a new role. Refused when any role's slug OR alias already claims it, deactivated roles included -- a retired role stays as history and keeps its name.
@@ -6390,6 +6879,47 @@ func StorefrontProbeBuild(args StorefrontProbeArgs) string {
 	}
 	b.WriteString(")")
 	return b.String()
+}
+
+// WorkRecordGoalEvaluation -- Record an external evaluator's artifact verdicts for the human caller's finished run. MemQL verifies ownership and call receipts, not local files. Model calls cannot publish their own evaluation. Repeated identities are idempotent only for identical evidence; changed claims are refused.
+type WorkRecordGoalEvaluationArgs struct {
+	Scenario map[string]any
+	Result   map[string]any
+}
+
+// WorkRecordGoalEvaluation calls the engine builtin workRecordGoalEvaluation.
+func (qc *QueryClient) WorkRecordGoalEvaluation(ctx context.Context, args WorkRecordGoalEvaluationArgs) (*Result, error) {
+	call := WorkRecordGoalEvaluationBuild(args)
+	return qc.executeNamed(ctx, "workRecordGoalEvaluation", call)
+}
+
+func WorkRecordGoalEvaluationBuild(args WorkRecordGoalEvaluationArgs) string {
+	var b strings.Builder
+	b.WriteString("builtin workRecordGoalEvaluation(")
+	b.WriteString("scenario: ")
+	b.WriteString(renderMemQLValue(args.Scenario))
+	if b.Len() > 33 {
+		b.WriteString(", ")
+	}
+	b.WriteString("result: ")
+	b.WriteString(renderMemQLValue(args.Result))
+	b.WriteString(")")
+	return b.String()
+}
+
+// WorkSkillCatalog -- Inspect the catalog and verify baseline content against installed seeds.
+type WorkSkillCatalogArgs struct {
+}
+
+// WorkSkillCatalog calls the engine builtin workSkillCatalog.
+func (qc *QueryClient) WorkSkillCatalog(ctx context.Context, args WorkSkillCatalogArgs) (*Result, error) {
+	call := WorkSkillCatalogBuild(args)
+	return qc.executeNamed(ctx, "workSkillCatalog", call)
+}
+
+func WorkSkillCatalogBuild(args WorkSkillCatalogArgs) string {
+	_ = args
+	return "builtin workSkillCatalog()"
 }
 
 // WorkStepVersions -- Every VERSION of every step of one of the caller's runs -- the step timeline's read (design D18). The standard reads collapse an append-only row to its newest version; this answers each version once, folded to its newest row-version, with the run's head marked (current). Returns one entry per version, keyed <stepId>@v<version>.

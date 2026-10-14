@@ -81,6 +81,8 @@ var grammarSurfaceCorpus = []struct {
 	accept bool
 	src    string
 }{
+	{"tool structured object", true, `@handler(type="function", name="probe") tool probe { operation object { tool enum("workerHost")! args object! { path string! } } }`},
+	{"tool non object properties", false, `tool probe { bad string { child string } }`},
 	{"scheduled node placement", true, `@trigger(schedule="0 * * * * *", node="planner", lease="planner-maintenance")
 automation placed { return true }`},
 	{"node placement without schedule", false, `@trigger(event="system.startup",node="planner")
@@ -97,6 +99,8 @@ automation adjust { row.status = row.label }`},
 	{"before write excludes event", false, `@trigger(before="write", event="probe", concept="v1:probe:ticket")
 automation adjust { row.status = row.label }`},
 
+	{"concept retention", true, `@retention(ttl="30d", keepLatest=true, archive="required")
+concept probe { a string }`},
 	{"concept decl", true, `concept probe {
   a string
 }`},

@@ -109,12 +109,14 @@ outside the digest gate.
 | Instances | 1 | 3, one per zone |
 | Resources | 100m / 512Mi | 4 vCPU / 16 GiB |
 | Storage (data + WAL) | 10 + 2 GiB | 256 + 64 GiB |
-| `max_connections` | 200 | 400 |
+| `max_connections` | 400 | 400 |
 | Backups | Azurite, 7d | Azure Blob, 30d |
 | HA / PDB | off | on |
 
 Local composes the component but **no preset**: the presets describe what a
-customer buys, and a developer laptop is not a tier.
+customer buys, and a developer laptop is not a tier. It sets its own values over
+the component, `max_connections` among them: 400, so that two replicas of every
+node (`make scale N=2`) fit. The component's own 200 is the entry preset's.
 
 `max_connections` is ours to set now. Tiger Cloud's per-tier ceiling (~59 usable
 slots) is what the [connection-budget standard](db-connection-budget.md) was

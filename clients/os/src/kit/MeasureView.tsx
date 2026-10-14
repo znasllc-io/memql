@@ -43,6 +43,9 @@ export function Measure({
     <span className="os-figure">
       {text}
       {suffix ? <span className="os-figure-unit">{suffix}</span> : null}
+      {/* A FLOOR SAYS SO, beside the number as quietly as its unit and never
+          left off: the read stopped at a window and found more. */}
+      {figure.atLeast ? <span className="os-figure-floor"> or more</span> : null}
     </span>
   );
 }

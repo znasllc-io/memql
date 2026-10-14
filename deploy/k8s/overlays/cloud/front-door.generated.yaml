@@ -48,14 +48,9 @@
 # mcp-front-door, carries nginx.ingress.kubernetes.io/default-backend: error-pages,
 # so that when the Service it routes to has no ready endpoints ingress-nginx answers with the
 # maintenance page (`memql error-pages`, deploy/k8s/components/error-pages) instead of its own
-# bare 503, which is what every host on the cluster answered on 2026-10-11. Two Ingresses do
-# NOT, each on its own backend protocol: api-front-door-grpc (GRPC: the proxy would speak h2c
-# to the error pages) and identity-front-door (HTTPS: the proxy would open a TLS connection to
-# the error pages, which speak none). ingress-nginx keeps an Ingress's backend protocol when
-# it swaps in the default backend, and the error pages are a plain HTTP/1.1 server, so behind
-# either the proxy would answer 502 rather than the page. mcp-front-door does not either, by
-# choice: mcp is disabled by default (0 replicas on the entry shape), so its page would say
-# "being updated" for good, and MCP is a machine surface. Nothing here sets
+# bare 503. Identity uses error-pages-tls because its backend protocol is HTTPS.
+# api-front-door-grpc remains excluded: a gRPC client cannot read a page.
+# mcp-front-door remains excluded because it can be intentionally disabled. Nothing sets
 # custom-http-errors, which would replace the application's own error responses.
 # cmd/frontdoorhosts/manifest.go has the reasoning and
 # deploy/k8s/overlays/frontdoor_error_pages_test.go holds the rule.
@@ -182,6 +177,20 @@ spec:
                 name: bff-http
                 port:
                   number: 8085
+          - path: /email/events/azure
+            pathType: Prefix
+            backend:
+              service:
+                name: bff-http
+                port:
+                  number: 8085
+          - path: /email/preferences
+            pathType: Prefix
+            backend:
+              service:
+                name: bff-http
+                port:
+                  number: 8085
           - path: /auth/callback
             pathType: Prefix
             backend:
@@ -190,6 +199,13 @@ spec:
                 port:
                   number: 8085
           - path: /auth/exchange
+            pathType: Prefix
+            backend:
+              service:
+                name: bff-http
+                port:
+                  number: 8085
+          - path: /email/confirm
             pathType: Prefix
             backend:
               service:
@@ -232,6 +248,13 @@ spec:
                 port:
                   number: 8085
           - path: /auth/login
+            pathType: Prefix
+            backend:
+              service:
+                name: bff-http
+                port:
+                  number: 8085
+          - path: /email/view
             pathType: Prefix
             backend:
               service:
@@ -390,8 +413,7 @@ metadata:
   annotations:
     nginx.ingress.kubernetes.io/backend-protocol: "HTTPS"
     nginx.ingress.kubernetes.io/proxy-ssl-verify: "off"
-    # NO default-backend HERE (see the top of this file): the proxy speaks HTTPS to its backend and
-    # would do the same to the error pages, which are plain HTTP. It would answer 502, not the page.
+    nginx.ingress.kubernetes.io/default-backend: error-pages-tls
 spec:
   ingressClassName: nginx
   tls:

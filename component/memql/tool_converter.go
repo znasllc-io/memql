@@ -78,6 +78,24 @@ func toolDeclToTool(decl *ast.ToolDecl, origin string) ([]*Tool, error) {
 				decl.Name, f.Name, f.Type)
 		}
 
+		if f.Fields != nil {
+			if f.Type != "object" {
+				return nil, fmt.Errorf("tool %q field %q: only objects have nested properties", decl.Name, f.Name)
+			}
+			for _, child := range f.Fields {
+				if child.AutoInjected {
+					return nil, fmt.Errorf("tool %q: nested fields cannot be autoInjected", decl.Name)
+				}
+			}
+			nested, err := toolDeclToTool(&ast.ToolDecl{Name: decl.Name + "." + f.Name, Fields: f.Fields}, origin)
+			if err != nil {
+				return nil, err
+			}
+			if err := json.Unmarshal(nested[0].InputSchema, &prop); err != nil {
+				return nil, err
+			}
+		}
+
 		if f.Description != "" {
 			prop["description"] = f.Description
 		}

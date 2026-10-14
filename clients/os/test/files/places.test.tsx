@@ -152,13 +152,18 @@ describe("restore out of the Bin place", () => {
 });
 
 describe("the Head line (DESIGN.md rules 1-3)", () => {
-  it("carries the place name, the count, the quiet sort and the Refine affordance -- no standing filter strip", async () => {
+  it("keeps creation in the heading and browsing controls beside the location tabs", async () => {
     h.connection = fakeConnection({
       artifacts: [artifactRow({ id: "a-1", title: "one.bin" })],
     });
     await renderFiles();
     expect(screen.getByRole("heading", { name: "Library" })).toBeTruthy();
-    expect(screen.getByRole("combobox", { name: "Sort order" })).toBeTruthy();
+    const sort = screen.getByRole("button", { name: "Sort order: Newest first" });
+    const tabRow = screen.getByRole("navigation", { name: "File locations" }).parentElement!;
+    expect(tabRow.contains(sort)).toBe(true);
+    expect(tabRow.contains(screen.getByRole("button", { name: "Refine files" }))).toBe(true);
+    await click(sort);
+    expect(screen.getByRole("button", { name: "Sort order: Oldest first" })).toBe(sort);
     expect(screen.getByRole("button", { name: "Refine files" })).toBeTruthy();
     // The facet controls do not stand in the surface (rule 2).
     expect(screen.queryByLabelText("Source")).toBeNull();

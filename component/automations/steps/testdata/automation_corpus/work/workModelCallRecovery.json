@@ -1,0 +1,51 @@
+{
+  "automation": "work/automations.memql workModelCallRecovery",
+  "runs": {
+    "invocation | 0 rows": {
+      "input": {
+        "event": {
+          "kind": "unspecified",
+          "payload": {
+            "maxRetries": 3,
+            "retriesSpent": 3
+          },
+          "topic": "automation.invocation.workModelCallRecovery"
+        },
+        "rows": 0
+      },
+      "outcome": {
+        "calls": null,
+        "result": {
+          "output": {
+            "act": "ask",
+            "question": "The model did not finish within its call time limit. Completed work is saved. Retry from that progress, or abandon this work?"
+          },
+          "status": "completed"
+        }
+      }
+    },
+    "invocation | 2 rows": {
+      "input": {
+        "event": {
+          "kind": "unspecified",
+          "payload": {
+            "maxRetries": 3,
+            "retriesSpent": 3
+          },
+          "topic": "automation.invocation.workModelCallRecovery"
+        },
+        "rows": 2
+      },
+      "outcome": {
+        "calls": null,
+        "result": {
+          "output": {
+            "act": "ask",
+            "question": "The model did not finish within its call time limit. Completed work is saved. Retry from that progress, or abandon this work?"
+          },
+          "status": "completed"
+        }
+      }
+    }
+  }
+}

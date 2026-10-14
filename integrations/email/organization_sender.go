@@ -69,6 +69,7 @@ func (a *azureSetup) sender(ctx context.Context, account string) (Sender, error)
 	if len(rows) != 1 || rows[0]["status"] != "active" {
 		return nil, permanentSendRefusal("the sending organization is inactive")
 	}
+	connection.Config.ResourceID = connection.Plan.communicationPath()
 	sender, err := NewACSSender(connection.Config)
 	if err != nil {
 		return nil, permanentSendRefusal("this organization's Azure email connection is invalid; connect again")

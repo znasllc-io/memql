@@ -18,8 +18,8 @@
 // The decision is made on the request's Host and nothing else.
 //
 //   - The platform's own hosts (api, identity, mcp, os and vscode under the
-//     domain) get the MemQL page: the mark, the name set in the brand's
-//     wordmark face, and a plain statement that the platform is being updated.
+//     domain) get the configured installation name. An absent name gets the
+//     neutral page; only an explicit MemQL name selects the MemQL mark and face.
 //   - Every other host gets a neutral page with no MemQL mark, name, link,
 //     colour or face. A customer's visitor has never heard of the platform
 //     underneath their shopfront, and "MemQL is being updated" on someone
@@ -114,7 +114,7 @@ const (
 	// at all. It gets the neutral page. It is the zero value, so a Kind nobody
 	// set never brands anything.
 	KindSite Kind = iota
-	// KindPlatform is one of the platform's own hosts: it gets the MemQL page.
+	// KindPlatform is one of the installation's own hosts.
 	KindPlatform
 )
 
@@ -326,8 +326,11 @@ func contentSecurityPolicy(page []byte, withFace bool) (string, error) {
 
 // Handler serves every path, for every method, with status 503 and
 // Retry-After: 120, /healthz included. The platform's hosts (see ClassifyHost)
-// get the MemQL page, every other host, the bare domain among them, the neutral
+// get the configured installation page, every other host, the bare domain among them, the neutral
 // one, and JSON in place of either for an API client.
+//
+// A blank brandName is neutral; only the explicit name MemQL selects its mark.
+// Other names are escaped text in the neutral layout. No settings read is needed.
 //
 // It builds what it needs once: the pages, and the set of the platform's hosts
 // under domain. A request costs a lookup and a write.
@@ -336,23 +339,34 @@ func contentSecurityPolicy(page []byte, withFace bool) (string, error) {
 // this package and not a condition of the world: the same bytes fail on every
 // start, the tests render both pages, and failing before the listener opens
 // keeps a rollout from replacing working pods with broken ones.
-func Handler(domain string) http.Handler {
-	mark, err := loadMark()
-	if err != nil {
-		panic("errorpages: " + err.Error())
-	}
-	wordmark, err := loadWordmark()
-	if err != nil {
-		panic("errorpages: " + err.Error())
-	}
-	platform, err := render("maintenance.html.tmpl", platformCopy, mark, wordmark)
-	if err != nil {
-		panic("errorpages: " + err.Error())
-	}
+func Handler(domain, brandName string) http.Handler {
 	site, err := render("unavailable.html.tmpl", siteCopy, "", "")
 	if err != nil {
 		panic("errorpages: " + err.Error())
 	}
+	platform := site
+	brandName = strings.TrimSpace(brandName)
+	if brandName == "MemQL" {
+		mark, err := loadMark()
+		if err != nil {
+			panic("errorpages: " + err.Error())
+		}
+		wordmark, err := loadWordmark()
+		if err != nil {
+			panic("errorpages: " + err.Error())
+		}
+		platform, err = render("maintenance.html.tmpl", platformCopy, mark, wordmark)
+		if err != nil {
+			panic("errorpages: " + err.Error())
+		}
+	} else if brandName != "" {
+		copy := copyText{Title: brandName + " is temporarily unavailable", Heading: brandName + " is temporarily unavailable.", Detail: siteCopy.Detail}
+		platform, err = render("unavailable.html.tmpl", copy, "", "")
+		if err != nil {
+			panic("errorpages: " + err.Error())
+		}
+	}
+
 	domain = normalizeHost(domain)
 	h := &handler{
 		platformHosts: platformHosts(domain),
@@ -365,7 +379,7 @@ func Handler(domain string) http.Handler {
 }
 
 type handler struct {
-	// platformHosts is the set of hosts that get the MemQL page.
+	// platformHosts is the set of hosts that may carry the installation name.
 	platformHosts map[string]struct{}
 	// apiHost is api.<domain>, where every caller is a program; empty with no
 	// domain, so nothing is taken for it.

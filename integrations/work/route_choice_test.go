@@ -38,6 +38,29 @@ func TestCreateGoalWritesTheRequestsRouteChoiceOnTheGoalAndItsRun(t *testing.T) 
 	}
 }
 
+func TestHumanAPISourcePinsBothRowsAndChildCannotReplaceIt(t *testing.T) {
+	i, eng := newTestIntegration(t)
+	args := map[string]any{"statement": "evaluate fixture", "noPaidProviders": true, "source": "fleet:qwen3.8:27b", "level": "reasoning", "requestedVia": "api"}
+	if _, err := i.handleCreateGoal(callerContext("u-alice"), args, 0); err != nil {
+		t.Fatal(err)
+	}
+	for _, name := range []string{"createWorkGoal", "createWorkRun"} {
+		want := map[string]any{"source": "fleet:qwen3.8:27b", "level": "reasoning", "by": "u-alice", "noPaidProviders": true}
+		if got := eng.callTo(t, name).Args(t)["routing"]; !reflect.DeepEqual(got, want) {
+			t.Fatalf("%s: %v", name, got)
+		}
+	}
+	i, eng = newTestIntegration(t)
+	ctx := common.ContextWithRun(callerContext("u-alice"), common.RunContext{RunId: "run-parent", GoalId: "goal-parent", OwnerUserId: "u-alice", StepKey: "reason", Routing: common.RouteChoice{Source: "fleet:qwen3.8:27b", By: "u-alice"}})
+	args["source"] = "federation:strongest"
+	if _, err := i.handleCreateGoal(ctx, args, 0); err == nil {
+		t.Fatal("child changed inherited source")
+	}
+	if got := eng.summary(); got != "(none)" {
+		t.Fatalf("wrote before refusal: %s", got)
+	}
+}
+
 func TestCreateGoalWithNoChoiceOfItsOwnersWritesNoRouting(t *testing.T) {
 	for name, ctx := range map[string]context.Context{
 		"no choice": callerContext("u-alice"),

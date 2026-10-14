@@ -1,4 +1,4 @@
-import type { AskActivity, AskConversationStore } from "./conversationSession";
+import type { ApprovalDiscussion, AskActivity, AskConversationStore, AskTurn } from "./conversationSession";
 import type { AskRouting } from "./askRoute";
 // Shared contract for the cluster transport and injected test transports.
 
@@ -24,7 +24,15 @@ export interface AskOptions {
   routing?: AskRouting;
 }
 
+export interface WorkGuidanceRequest { targetEpoch: string; runId: string; conversationId: string; requestId: string; prompt: string }
+export interface WorkGuidanceReceipt { runId: string; conversationId: string; requestId: string; turn: AskTurn; status: "queued" | "applied" | "not-received" }
+export interface ApprovalGuidanceReceipt { runResumed: boolean; resumeError?: string; guidanceSaved?: boolean; savedGuidance?: string }
+
 export interface AskTransport {
+  guideWork?: (request: WorkGuidanceRequest) => Promise<WorkGuidanceReceipt>;
+  discussApproval?: (approvalId: string) => Promise<ApprovalDiscussion>;
+  approvalMessage?: (request: { approvalId: string; conversationId: string; requestId: string; prompt: string; advisor?: boolean }) => Promise<{ conversationId: string; turnId: string; runId: string; status: string }>;
+  approvalGuidance?: (approvalId: string, feedback: string) => Promise<ApprovalGuidanceReceipt>;
   openWork?: (runId: string) => Promise<import("./conversationSession").ConversationSummary>;
   answerQuestion?: (approvalId: string, answer: Record<string, unknown>) => Promise<void>;
  cancelGoal?: (goalId: string) => Promise<void>;

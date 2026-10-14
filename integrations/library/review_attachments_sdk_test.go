@@ -5,8 +5,10 @@ import (
 	"context"
 	"encoding/base64"
 	"go/ast"
+	"go/constant"
 	"go/parser"
 	"go/token"
+	"go/types"
 	"image"
 	"image/gif"
 	"image/jpeg"
@@ -34,8 +36,28 @@ import (
 // refusal reworded without "attach" turns the retry off and a person's
 // description is lost to a stray attachment. These tests hold the copies to the
 // source.
+//
+// There is a third copy, and the server's decision rests on it. Which described
+// Markdown requests take the Library's revision workflow is decided on this same
+// per-file rule (describedMarkdown in integrations/compose), and compose may not
+// import this package, so it declares the limits and the picture formats again in
+// described.go. TestComposeMirrorsTheReviewAttachmentRules holds those to the
+// constants here, and a limit that drifts is a request sent to the revision
+// workflow with a file it refuses, or sent to the composer with one it would have
+// taken.
+//
+// The person's client makes that same decision from the same rows. The SDK's
+// isDescribedMarkdown applies the rule through attachmentKind, the function the
+// limits above feed, rather than a list of its own, so the SDK holds one copy of
+// the rule and not two; TestSDKDecidesTheDescribedPathWithTheHandOffsRule holds
+// it to that. A client that decided otherwise would hand on a description the
+// server had composed (a second draft over the first), or leave a file filed
+// empty with its description unsent.
 
 const sdkMaterializeSource = "../../sdk/ts/src/client/materialize.ts"
+
+// The server's copy of the rule.
+const composeDescribedSource = "../compose/described.go"
 
 // The rules as the SDK states them.
 type sdkMirror struct {
@@ -56,6 +78,9 @@ var (
 	sdkHandOffID   = regexp.MustCompile(`(?m)^const HAND_OFF_ID = /([^/\n]+)/;`)
 	sdkBounds      = regexp.MustCompile(`\{(\d+),(\d+)\}\$$`)
 	sdkSuffix      = regexp.MustCompile("\\$\\{requestId\\}([^`$]*)`")
+	// A `//` comment to the end of its line, or a `/* */` block. A string literal that holds a `//`
+	// is cut short too, which can only make a guard that reads code fail, never pass.
+	sdkComment = regexp.MustCompile(`(?s)/\*.*?\*/|//[^\n]*`)
 )
 
 // readSDKMirror reads the SDK's copy of the rules. Go's test cache does not notice
@@ -151,6 +176,115 @@ func TestSDKMirrorsTheReviewAttachmentRules(t *testing.T) {
 	sort.Strings(gotImages)
 	if !slices.Equal(gotImages, wantImages) {
 		t.Errorf("the SDK hand-off takes images with the extensions %v and the Library takes %v (reviewImageFormats, with .jpg read as .jpeg)", gotImages, wantImages)
+	}
+}
+
+// compose's copy of the per-file rule (integrations/compose/described.go) states the two
+// byte limits and the picture formats as top-level declarations, so this test can read them
+// off the source without importing a package that may not be imported from there. The limits
+// are constant expressions and are evaluated, so `32 << 10` and `32768` are the same limit; the
+// formats are a list of string literals, compared as a set.
+//
+// It reads compose's source, which Go's test cache does not notice changing: run it with -count=1 after editing that file.
+func TestComposeMirrorsTheReviewAttachmentRules(t *testing.T) {
+	fset := token.NewFileSet()
+	file, err := parser.ParseFile(fset, composeDescribedSource, nil, 0)
+	if err != nil {
+		t.Fatalf("compose's copy of the Library's attachment rules is not at %s (%v): if it moved, update composeDescribedSource -- this test is what keeps that copy honest", composeDescribedSource, err)
+	}
+	declared := func(name string) ast.Expr {
+		for _, decl := range file.Decls {
+			gen, ok := decl.(*ast.GenDecl)
+			if !ok || (gen.Tok != token.CONST && gen.Tok != token.VAR) {
+				continue
+			}
+			for _, spec := range gen.Specs {
+				if value, ok := spec.(*ast.ValueSpec); ok && len(value.Values) == 1 && len(value.Names) == 1 && value.Names[0].Name == name {
+					return value.Values[0]
+				}
+			}
+		}
+		return nil
+	}
+
+	for name, limit := range map[string]int{
+		"libraryAttachMarkdownBytes": reviewMarkdownBytes,
+		"libraryAttachImageBytes":    reviewImageBytes,
+	} {
+		expr := declared(name)
+		if expr == nil {
+			t.Errorf("%s is gone from %s, or is no longer a top-level declaration with one value: it is compose's copy of a limit the Library enforces (%d), which decides whether a described request is sent to the revision workflow. Update this test with it", name, composeDescribedSource, limit)
+			continue
+		}
+		text := types.ExprString(expr)
+		evaluated, err := types.Eval(token.NewFileSet(), nil, token.NoPos, text)
+		if err != nil || evaluated.Value == nil {
+			t.Errorf("%s = %s in %s, which this test cannot evaluate as a constant (%v): state it as a constant expression, such as 32 << 10", name, text, composeDescribedSource, err)
+			continue
+		}
+		got, exact := constant.Int64Val(constant.ToInt(evaluated.Value))
+		if !exact {
+			t.Errorf("%s = %s in %s is not a whole number of bytes", name, text, composeDescribedSource)
+			continue
+		}
+		if got != int64(limit) {
+			t.Errorf("compose has %s = %s = %d and the Library enforces %d: they must be the same, or a described request is sent to the revision workflow with a file it refuses, or kept from it with a file it would take", name, text, got, limit)
+		}
+	}
+
+	formats := declared("libraryAttachImageFormats")
+	list, ok := formats.(*ast.CompositeLit)
+	if !ok {
+		t.Fatalf("libraryAttachImageFormats is gone from %s, or is no longer a list of string literals: it is compose's copy of reviewImageFormats. Update this test with it", composeDescribedSource)
+	}
+	got := []string{}
+	for _, element := range list.Elts {
+		literal, ok := element.(*ast.BasicLit)
+		if !ok || literal.Kind != token.STRING {
+			t.Fatalf("libraryAttachImageFormats in %s holds something other than a string literal; this test reads only literals", composeDescribedSource)
+		}
+		format, err := strconv.Unquote(literal.Value)
+		if err != nil {
+			t.Fatal(err)
+		}
+		got = append(got, format)
+	}
+	want := slices.Clone(reviewImageFormats)
+	sort.Strings(got)
+	sort.Strings(want)
+	if !slices.Equal(got, want) {
+		t.Errorf("compose takes the picture formats %v and the Library takes %v (reviewImageFormats; \".jpg\" is read as \".jpeg\" by both): they must be the same", got, want)
+	}
+}
+
+// The SDK decides whether a request is a described one with the hand-off's own rule: the body
+// of isDescribedMarkdown calls attachmentKind (the function MAX_MARKDOWN_BYTES, MAX_IMAGE_BYTES
+// and IMAGE_EXTENSIONS feed, which TestSDKMirrorsTheReviewAttachmentRules holds to the
+// Library's), and readDescribedMarkdown is exported for a client that must read the rows first.
+// A second list of types and sizes in the predicate would be a copy nothing holds.
+//
+// It reads the SDK's source, which Go's test cache does not notice changing: run it with -count=1 after editing that file.
+func TestSDKDecidesTheDescribedPathWithTheHandOffsRule(t *testing.T) {
+	raw, err := os.ReadFile(sdkMaterializeSource)
+	if err != nil {
+		t.Fatalf("the SDK hand-off is not at %s (%v): if it moved, update sdkMaterializeSource -- this test is what keeps its decision of the described path honest", sdkMaterializeSource, err)
+	}
+	lines := strings.Split(string(raw), "\n")
+	start := slices.IndexFunc(lines, func(line string) bool { return strings.HasPrefix(line, "export function isDescribedMarkdown(") })
+	if start < 0 {
+		t.Fatal("isDescribedMarkdown is gone from the SDK hand-off, or no longer begins a line with `export function isDescribedMarkdown(`; update this test with it")
+	}
+	end := slices.Index(lines[start:], "}")
+	if end < 0 {
+		t.Fatal("isDescribedMarkdown has no closing brace on a line of its own in the SDK hand-off; update this test with it")
+	}
+	// The code alone: a comment that names attachmentKind( is not a call to it.
+	body := sdkComment.ReplaceAllString(strings.Join(lines[start:start+end+1], "\n"), "")
+	if !strings.Contains(body, "attachmentKind(") {
+		t.Errorf("isDescribedMarkdown no longer calls attachmentKind in its own body (a comment is not a call). The SDK must decide the described path with the same rule the hand-off applies to a reference (the function the limits mirrored above feed), or its answer can differ from the server's and from what the hand-off will attach. Its code, comments removed:\n%s", body)
+	}
+	if !regexp.MustCompile(`(?m)^export (async )?function readDescribedMarkdown\(`).Match(raw) {
+		t.Error("readDescribedMarkdown is not exported from the SDK hand-off: a client that does not know the picked files' rows has no way to decide the path before it starts")
 	}
 }
 

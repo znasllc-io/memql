@@ -205,10 +205,8 @@ func ensureSchemaWith(ctx context.Context, fallbackDSN string, lockWait time.Dur
 	}
 	defer func() { _ = conn.Close() }()
 
-	// BLOCKING lock: a sibling process that reaches here while another is
-	// migrating waits rather than proceeding on an incomplete schema.
-	if _, err := conn.ExecContext(ctx, "SELECT pg_advisory_lock($1)", schemaLockKey); err != nil {
-		return true, fmt.Errorf("dbtest: pg_advisory_lock: %w", err)
+	if err := acquireSchemaLock(ctx, conn); err != nil {
+		return true, err
 	}
 	defer func() {
 		uctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
@@ -235,6 +233,31 @@ func ensureSchemaWith(ctx context.Context, fallbackDSN string, lockWait time.Dur
 		return true, rerr
 	}
 	return true, nil
+}
+
+// Keep waiting on the pinned session without spending pgdriver's socket read
+// timeout on a blocking query. A fresh migration can legitimately outlast that
+// timeout. Each try is immediate; the caller's context bounds the overall wait.
+func acquireSchemaLock(ctx context.Context, conn *sql.Conn) error {
+	tick := time.NewTicker(lockRetryFirst)
+	defer tick.Stop()
+	for {
+		if err := ctx.Err(); err != nil {
+			return fmt.Errorf("dbtest: wait for schema lock: %w", err)
+		}
+		var acquired bool
+		if err := conn.QueryRowContext(ctx, "SELECT pg_try_advisory_lock($1)", schemaLockKey).Scan(&acquired); err != nil {
+			return fmt.Errorf("dbtest: pg_try_advisory_lock: %w", err)
+		}
+		if acquired {
+			return nil
+		}
+		select {
+		case <-ctx.Done():
+			return fmt.Errorf("dbtest: wait for schema lock: %w", ctx.Err())
+		case <-tick.C:
+		}
+	}
 }
 
 // migrateWaitingOutForeignLock runs migrateOnce until it is not refused by

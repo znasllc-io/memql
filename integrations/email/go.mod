@@ -11,6 +11,7 @@ require (
 	github.com/uptrace/bun/dialect/pgdialect v1.3.0
 	github.com/uptrace/bun/driver/pgdriver v1.3.0
 	github.com/znasllc-io/memql/component/auth v0.0.0
+	github.com/znasllc-io/memql/component/automations v0.0.0
 	github.com/znasllc-io/memql/component/database v0.0.0
 	github.com/znasllc-io/memql/component/language v0.0.0
 	github.com/znasllc-io/memql/component/memql v0.0.0
@@ -23,7 +24,9 @@ require (
 	github.com/go-pdf/fpdf v0.9.0 // indirect
 	github.com/gorilla/css v1.0.1 // indirect
 	github.com/microcosm-cc/bluemonday v1.0.27 // indirect
+	github.com/robfig/cron/v3 v3.0.1 // indirect
 	github.com/yuin/goldmark v1.8.6 // indirect
+	github.com/znasllc-io/memql/component/work v0.0.0 // indirect
 )
 
 require (
@@ -135,3 +138,9 @@ replace github.com/znasllc-io/memql/component/frontdoor => ../../component/front
 replace github.com/znasllc-io/memql/component/metrics => ../../component/metrics
 
 replace github.com/znasllc-io/memql/component/compose => ../../component/compose
+
+replace github.com/znasllc-io/memql/component/automations => ../../component/automations
+
+replace github.com/znasllc-io/memql/component/work => ../../component/work
+
+replace github.com/znasllc-io/memql/component/healing => ../../component/healing

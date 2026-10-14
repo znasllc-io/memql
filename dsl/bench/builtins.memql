@@ -1,0 +1,12 @@
+/// These operations require the evaluator's call-local scope. Direct calls
+/// cannot acquire a fixture, start a goal, or publish an evaluation receipt.
+@executor("integration.work.goalEvaluationPrepare")
+builtin goalEvaluationPrepare {}
+@executor("integration.work.goalEvaluationSubmit")
+builtin goalEvaluationSubmit {}
+@executor("integration.work.goalEvaluationObserve")
+builtin goalEvaluationObserve {}
+@executor("integration.work.goalEvaluationVerify")
+builtin goalEvaluationVerify {}
+@executor("integration.work.goalEvaluationRecord")
+builtin goalEvaluationRecord {}

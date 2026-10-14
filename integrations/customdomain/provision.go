@@ -9,6 +9,7 @@ import (
 
 	"github.com/znasllc-io/memql/component/automations/steps"
 	"github.com/znasllc-io/memql/component/deploycontrol"
+	"github.com/znasllc-io/memql/core/capabilityresult"
 )
 
 // provision.go -- the two objects a bound custom domain needs, and the two
@@ -45,7 +46,7 @@ import (
 //	                               same transport and the same reasoning.
 //	elsewhere -> scriptProvisioner the allowlisted capability script, through
 //	                               steps.RunCapabilityScript and
-//	                               deploycontrol.ParseCapabilityResult.
+//	                               capabilityresult.ParseCapabilityResult.
 //
 // Both write the SAME two objects with the same names and the same field
 // manager, so a domain bound by one and re-reconciled by the other converges
@@ -154,7 +155,8 @@ const (
 	// are held equal to these by those packages' tests.
 	ErrorPagesBackendAnnotation = "nginx.ingress.kubernetes.io/default-backend"
 	// ErrorPagesServiceName is the Service that annotation names.
-	ErrorPagesServiceName = "error-pages"
+	ErrorPagesServiceName    = "error-pages"
+	ErrorPagesTLSServiceName = "error-pages-tls"
 
 	// backendProtocolAnnotation is how an Ingress says what its proxy speaks to
 	// its backends; absent means plain HTTP.
@@ -179,31 +181,23 @@ const (
 // while that Service has no ready endpoint of its own, which a Service with no
 // Deployment behind it never has.
 //
-// THE PROTOCOL. Only a plain-HTTP backend qualifies, and every other protocol
-// rules an Ingress out on its own account. ingress-nginx builds the custom
-// default backend as a copy of the Ingress's own upstream and keeps the
-// location's backend protocol (buildProxyPass reads it from the Ingress; only
-// ingress-nginx's built-in default backend is forced back to plain http, in
-// v1.15.1). `memql error-pages` is a plain HTTP/1.1 server, so:
-//
-//	GRPC   the proxy speaks h2c to it (grpc_pass) and answers 502.
-//	HTTPS  the proxy opens a TLS connection to it, the handshake fails, and it
-//	       answers 502. Not the gRPC case under another name: an account door's
-//	       id. host is HTTPS because identity serves TLS in-cluster, it is the
-//	       sign-in host, and it would be ruled out if no gRPC Ingress existed.
-//
-// AUTO_HTTP (the client's own scheme) and FCGI fail the same way. A 502 is worse
-// than the bare 503 it replaces. The rule reads the protocol off the
-// annotations themselves rather than from a list of the callers that happen to
-// set one, so a backend added tomorrow is classified by what it speaks.
+// HTTP backends use the HTTP Service; HTTPS uses the TLS Service only when
+// upstream verification is already disabled, as it is for identity. Its
+// ephemeral certificate has no external trust dependency. Other protocols
+// cannot use either page listener.
 //
 // It never sets `custom-http-errors`, which would make ingress-nginx replace
 // the application's own 4xx and 5xx responses with the maintenance page.
 func withErrorPagesBackend(annotations map[string]any) {
-	if protocol, _ := annotations[backendProtocolAnnotation].(string); protocol != "" && !strings.EqualFold(protocol, "HTTP") {
-		return
+	protocol, _ := annotations[backendProtocolAnnotation].(string)
+	switch strings.ToUpper(protocol) {
+	case "", "HTTP":
+		annotations[ErrorPagesBackendAnnotation] = ErrorPagesServiceName
+	case "HTTPS":
+		if annotations["nginx.ingress.kubernetes.io/proxy-ssl-verify"] == "off" {
+			annotations[ErrorPagesBackendAnnotation] = ErrorPagesTLSServiceName
+		}
 	}
-	annotations[ErrorPagesBackendAnnotation] = ErrorPagesServiceName
 }
 
 // ---------------------------------------------------------------------------
@@ -518,7 +512,7 @@ func (p *scriptProvisioner) dispatch(ctx context.Context, id string, params map[
 // resolves through.
 type allowlistedScripts struct{}
 
-func (allowlistedScripts) Run(ctx context.Context, id string, params map[string]any) (deploycontrol.CapabilityResult, error) {
+func (allowlistedScripts) Run(ctx context.Context, id string, params map[string]any) (capabilityresult.CapabilityResult, error) {
 	return steps.RunCapabilityScript(ctx, id, params)
 }
 
@@ -530,7 +524,7 @@ func (allowlistedScripts) Run(ctx context.Context, id string, params map[string]
 // never-issue-before-verified proof a unit test rather than a cluster-e2e lane
 // that CI skips on every runner.
 type ScriptRunner interface {
-	Run(ctx context.Context, id string, params map[string]any) (deploycontrol.CapabilityResult, error)
+	Run(ctx context.Context, id string, params map[string]any) (capabilityresult.CapabilityResult, error)
 }
 
 // The two capability-script ids, registered in

@@ -1,6 +1,7 @@
 package compose
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -8,9 +9,11 @@ import (
 	"maps"
 	"strings"
 	"testing"
+	"unicode/utf8"
 
 	"github.com/znasllc-io/memql/component/auth"
 	pure "github.com/znasllc-io/memql/component/compose"
+	"github.com/znasllc-io/memql/component/compose/emaildoc"
 	"github.com/znasllc-io/memql/component/memql"
 	"github.com/znasllc-io/memql/core/common"
 	work "github.com/znasllc-io/memql/integrations/work"
@@ -25,6 +28,7 @@ type materializeEngine struct {
 	files          map[string]map[string]any
 	folders        map[string]map[string]any // the Library folders the caller can READ, by id; any other id answers no row
 	folderReads    []bool                    // for each libraryFolderById, whether it asked for a fresh read
+	templateReads  []bool                    // for each composeTemplateById, whether it asked for a fresh read
 	calls          []string
 	source         map[string]any
 	account        map[string]any
@@ -41,10 +45,18 @@ type materializeEngine struct {
 	// records, for each compositionById, whether it asked for a fresh read.
 	cachedCompositions map[string]map[string]any
 	compositionReads   []bool
+
+	// layouts are the organization email layouts the caller can READ, by bare
+	// id (emailLayoutById); artifacts are the caller's own Library artifacts,
+	// by the file id they index (libraryArtifactForFile). Any other id answers
+	// no row.
+	layouts   map[string]map[string]any
+	artifacts map[string]map[string]any
 }
 
 func newMaterializeEngine(t *testing.T) *materializeEngine {
-	return &materializeEngine{t: t, compositions: map[string]map[string]any{}, inputs: map[string]map[string]any{}, files: map[string]map[string]any{}, folders: map[string]map[string]any{}}
+	return &materializeEngine{t: t, compositions: map[string]map[string]any{}, inputs: map[string]map[string]any{}, files: map[string]map[string]any{}, folders: map[string]map[string]any{},
+		layouts: map[string]map[string]any{}, artifacts: map[string]map[string]any{}}
 }
 func (e *materializeEngine) Execute(ctx context.Context, query string) (*memql.ExecuteResult, error) {
 	name, args := materializeCall(e.t, query)
@@ -128,6 +140,10 @@ func (e *materializeEngine) Execute(ctx context.Context, query string) (*memql.E
 	case "libraryFolderById":
 		e.folderReads = append(e.folderReads, memql.FreshReadFromContext(ctx))
 		row = e.folders[stringOf(args["folderId"])]
+	case "emailLayoutById":
+		row = e.layouts[stringOf(args["layoutId"])]
+	case "libraryArtifactForFile":
+		row = e.artifacts[stringOf(args["fileId"])]
 	case "sourceRows":
 		row = e.source
 	case "clientAccountById":
@@ -135,6 +151,7 @@ func (e *materializeEngine) Execute(ctx context.Context, query string) (*memql.E
 	case "composeRecipeById":
 		row = e.recipe
 	case "composeTemplateById":
+		e.templateReads = append(e.templateReads, memql.FreshReadFromContext(ctx))
 		row = e.template
 	case "cancelGoal":
 		return memql.NewResultWithOutput(map[string]any{"runsAsked": 1}), nil
@@ -895,6 +912,180 @@ func TestMaterializeRepeatedRequestDoesNotAskAboutTheFolderAgain(t *testing.T) {
 	}
 }
 
+// A TEMPLATE THE CALLER HOLDS IS NOT NECESSARILY ONE THAT CAN MAKE THE FILE.
+//
+// composeTemplateById answers any template its owner holds, and the render step used to apply
+// whatever it was given: an archived one (a binding somebody retired) and one that makes another
+// kind of file than the request asked for (a PDF template under a Markdown file) were applied
+// without a word. So the request is refused, before anything is written, when its template is
+// archived or makes another format. A template that names no format fits any, as it always did.
+
+const templateArchived = "That template is archived. Restore it or choose another."
+
+func templateArgs(format pure.Format) materializeArgs {
+	a := materializeDraft()
+	a.Format = format
+	a.TemplateId = "template-1"
+	return a
+}
+
+func TestMaterializeRefusesAnArchivedTemplateBeforeWritingAnything(t *testing.T) {
+	for where, ctx := range map[string]context.Context{"in a run": nestedMaterializeContext(), "standalone": materializeContext()} {
+		i, e, u := materializeFixture(t)
+		e.template = map[string]any{"id": "template-1", "name": "House style", "format": "markdown", "archived": true}
+		_, err := i.materialize(ctx, "u-alice", "", templateArgs(pure.FormatMarkdown))
+		// The sentence is the person's: the OS shows it as it is.
+		if err == nil || err.Error() != templateArchived {
+			t.Fatalf("%s: want the archived-template refusal verbatim, got %v", where, err)
+		}
+		if len(e.compositions) != 0 || len(e.inputs) != 0 || len(e.files) != 0 || u.calls != 0 {
+			t.Fatalf("%s: refusal wrote rows: %v %v %v uploads=%d", where, e.compositions, e.inputs, e.files, u.calls)
+		}
+		// Reads only: a step looks for the composition it may already have made, and the template is read.
+		for _, made := range e.calls {
+			if made != "composeTemplateById" && made != "compositionExecutionById" {
+				t.Fatalf("%s: the refusal went on to %s: %v", where, made, e.calls)
+			}
+		}
+	}
+}
+
+// The refusal names the KIND of file the person asked for (the words of the Materializer's kind choice), not
+// the format it is made in: a package is HTML pages and an email template is JSON, and neither is what they chose.
+func TestMaterializeRefusesATemplateThatMakesAnotherKindOfFile(t *testing.T) {
+	for name, tc := range map[string]struct {
+		template   string
+		request    pure.Format
+		deployable string
+		email      bool
+		want       string
+	}{
+		"a PDF template under a Markdown file":      {template: "pdf", request: pure.FormatMarkdown, want: "That template makes PDF files. Choose a template for Markdown."},
+		"a web page template under a PDF":           {template: "html", request: pure.FormatPDF, want: "That template makes Web page files. Choose a template for PDF."},
+		"a Word template under a spreadsheet":       {template: "docx", request: pure.FormatCSV, want: "That template makes Word document files. Choose a template for Spreadsheet (CSV)."},
+		"a text template under data":                {template: "txt", request: pure.FormatJSON, want: "That template makes Plain text files. Choose a template for Data (JSON)."},
+		"a Markdown template under a static site":   {template: "markdown", request: pure.FormatHTML, deployable: "static", want: "That template makes Markdown files. Choose a template for Static site package."},
+		"a PDF template under a single-page app":    {template: "pdf", request: pure.FormatHTML, deployable: "spa", want: "That template makes PDF files. Choose a template for Single-page app package."},
+		"a text template under a storefront":        {template: "txt", request: pure.FormatHTML, deployable: "shopify_storefront", want: "That template makes Plain text files. Choose a template for Shopify storefront package."},
+		"a Markdown template under an email":        {template: "markdown", request: pure.FormatJSON, email: true, want: "That template makes Markdown files. Choose a template for Email template."},
+		"a web page template under an email":        {template: "html", request: pure.FormatJSON, email: true, want: "That template makes Web page files. Choose a template for Email template."},
+		"a template of a format this app can't say": {template: "audio", request: pure.FormatMarkdown, want: "That template makes audio files. Choose a template for Markdown."},
+	} {
+		for where, ctx := range map[string]context.Context{"in a run": nestedMaterializeContext(), "standalone": materializeContext()} {
+			i, e, u := materializeFixture(t)
+			e.template = map[string]any{"id": "template-1", "name": "House style", "format": tc.template}
+			a := templateArgs(tc.request)
+			a.DeployableKind = tc.deployable
+			if tc.email {
+				e.account = map[string]any{"id": "client", "status": "active"}
+				a.OutputKind, a.AccountIds = "email_template", []string{"client"}
+			}
+			_, err := i.materialize(ctx, "u-alice", "", a)
+			if err == nil || err.Error() != tc.want {
+				t.Fatalf("%s %s: want %q, got %v", name, where, tc.want, err)
+			}
+			if len(e.compositions) != 0 || len(e.inputs) != 0 || len(e.files) != 0 || u.calls != 0 {
+				t.Fatalf("%s %s: refusal wrote rows: %v %v %v uploads=%d", name, where, e.compositions, e.inputs, e.files, u.calls)
+			}
+		}
+	}
+}
+
+func TestMaterializeAcceptsATemplateThatCanMakeTheFile(t *testing.T) {
+	for name, tc := range map[string]struct {
+		row        map[string]any
+		request    pure.Format
+		deployable string
+	}{
+		"a template of the same format":                   {row: map[string]any{"format": "markdown"}, request: pure.FormatMarkdown},
+		"a template that has no format at all":            {row: map[string]any{}, request: pure.FormatPDF},
+		"a template whose format is empty":                {row: map[string]any{"format": ""}, request: pure.FormatCSV},
+		"a template that is not archived":                 {row: map[string]any{"format": "markdown", "archived": false}, request: pure.FormatMarkdown},
+		"a web page template, for a package's HTML pages": {row: map[string]any{"format": "html"}, request: pure.FormatHTML, deployable: "static"},
+	} {
+		// Standalone with a goal opener: the request is accepted and nothing runs, which is where the template is checked.
+		i, e, _ := materializeFixture(t)
+		i.SetGoalOpener(&directMaterializeGoal{})
+		e.template = map[string]any{"id": "template-1", "name": "House style"}
+		for key, value := range tc.row {
+			e.template[key] = value
+		}
+		a := templateArgs(tc.request)
+		a.DeployableKind = tc.deployable
+		out, err := i.materialize(materializeContext(), "u-alice", "", a)
+		if err != nil {
+			t.Fatalf("%s: %v", name, err)
+		}
+		if row := e.compositions[stringOf(out["compositionId"])]; row == nil || row["templateId"] != "template-1" {
+			t.Fatalf("%s: the composition does not name the template: %v", name, row)
+		}
+	}
+}
+
+// The template is read when one is named and not otherwise, as the caller (the fixture refuses a read under
+// any other actor), and FRESH: a template archived a moment ago on another replica must not be applied
+// because this node's cache has not heard.
+func TestMaterializeReadsTheTemplateFreshAndOnlyWhenOneIsNamed(t *testing.T) {
+	i, e, _ := materializeFixture(t)
+	i.SetGoalOpener(&directMaterializeGoal{})
+	e.template = map[string]any{"id": "template-1", "name": "House style"}
+	if _, err := i.materialize(materializeContext(), "u-alice", "", templateArgs(pure.FormatMarkdown)); err != nil {
+		t.Fatal(err)
+	}
+	if len(e.templateReads) != 1 || !e.templateReads[0] {
+		t.Fatalf("the template must be read once, fresh: %v", e.templateReads)
+	}
+
+	none, ne, _ := materializeFixture(t)
+	none.SetGoalOpener(&directMaterializeGoal{})
+	if _, err := none.materialize(materializeContext(), "u-alice", "", materializeDraft()); err != nil {
+		t.Fatal(err)
+	}
+	if len(ne.templateReads) != 0 {
+		t.Fatalf("a request that names no template read one: %v", ne.templateReads)
+	}
+}
+
+// A repeat finds the composition its first call made. If the template has been archived since, that repeat
+// must still answer with the composition: the first call was accepted and a refusal now would only hide it.
+func TestMaterializeRepeatedRequestDoesNotAskAboutTheTemplateAgain(t *testing.T) {
+	i, e, _ := materializeFixture(t)
+	i.SetGoalOpener(&directMaterializeGoal{})
+	e.template = map[string]any{"id": "template-1", "name": "House style", "format": "markdown"}
+	a := templateArgs(pure.FormatMarkdown)
+	a.RequestId = "req-1"
+	first, err := i.materialize(materializeContext(), "u-alice", "", a)
+	if err != nil {
+		t.Fatal(err)
+	}
+	e.template["archived"] = true
+	again, err := i.materialize(materializeContext(), "u-alice", "", a)
+	if err != nil {
+		t.Fatalf("a repeat of an accepted request was refused: %v", err)
+	}
+	if again["compositionId"] != first["compositionId"] || len(e.compositions) != 1 || len(e.templateReads) != 1 {
+		t.Fatalf("the repeat did not return the first composition without a second template read: first=%v again=%v rows=%d reads=%v", first, again, len(e.compositions), e.templateReads)
+	}
+}
+
+// A template the caller cannot read is not this check's to refuse: the render step has always said so
+// ("that template is not readable by you"), and the composition it fails is the record of it.
+func TestMaterializeLeavesAnUnreadableTemplateToTheRenderStep(t *testing.T) {
+	i, e, _ := materializeFixture(t)
+	_, err := i.materialize(nestedMaterializeContext(), "u-alice", "", templateArgs(pure.FormatMarkdown))
+	if err == nil || !strings.Contains(err.Error(), "that template is not readable by you") {
+		t.Fatalf("an unreadable template: want the render step's refusal, got %v", err)
+	}
+	for _, row := range e.compositions {
+		if row["status"] != "failed" {
+			t.Fatalf("the composition was not failed by the render step: %v", row)
+		}
+	}
+	if len(e.compositions) != 1 {
+		t.Fatalf("want the failed composition as the record, got %d rows", len(e.compositions))
+	}
+}
+
 func TestParseMaterializeArgsStripsAMatchingExtensionAndRefusesPaths(t *testing.T) {
 	a, err := parseMaterializeArgs(map[string]any{"name": "Plan.md", "format": "markdown"})
 	if err != nil || a.Name != "Plan" {
@@ -967,6 +1158,21 @@ func TestMaterializeArgsWithoutARequestIdSerialiseAsBefore(t *testing.T) {
 	}
 	if strings.Contains(string(raw), "RequestId") {
 		t.Fatalf("an absent request id changed the saved request, and with it every in-run composition id: %s", raw)
+	}
+}
+
+// The same for the layout of an email: a request that names none (every
+// request that is not an email, and an email that takes the default) keys
+// exactly as it did before the field existed.
+func TestMaterializeArgsWithoutALayoutIdSerialiseAsBefore(t *testing.T) {
+	for _, a := range []materializeArgs{materializeDraft(), {Name: "Welcome", Format: pure.FormatJSON, OutputKind: "email_template", AccountIds: []string{"client"}}} {
+		raw, err := json.Marshal(a)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if strings.Contains(string(raw), "LayoutId") {
+			t.Fatalf("an absent layout id changed the saved request, and with it every in-run composition id: %s", raw)
+		}
 	}
 }
 
@@ -1266,6 +1472,51 @@ func TestOutputFileNameAddsTheExtensionOnce(t *testing.T) {
 	}
 }
 
+// A stem longer than 120 bytes is cut, and the cut is on a character. It used to be at byte 120 wherever
+// that fell, so a name whose 120th byte was in the middle of a character was filed with the start of that
+// character at its end: a file name that is not text, which a client shows with a replacement character.
+// The cut is now at the last character that ends at or below the limit.
+func TestSanitiseFileStemIsCutOnACharacterNotInsideOne(t *testing.T) {
+	const e, ri, face = "\u00e9", "\u65e5", "\U0001F600" // 2, 3 and 4 bytes
+	repeat := strings.Repeat
+	for name, tc := range map[string]struct{ typed, want string }{
+		"exactly the limit is kept whole":                {repeat("a", 120), repeat("a", 120)},
+		"one over the limit is cut":                      {repeat("a", 121), repeat("a", 120)},
+		"two-byte characters ending on the limit":        {repeat(e, 60), repeat(e, 60)},
+		"two-byte characters cut on the limit":           {repeat(e, 61), repeat(e, 60)},
+		"a two-byte character across the limit":          {"a" + repeat(e, 61), "a" + repeat(e, 59)},
+		"a three-byte character across the limit":        {"ab" + repeat(ri, 50), "ab" + repeat(ri, 39)},
+		"a three-byte character one byte earlier":        {"abcd" + repeat(ri, 50), "abcd" + repeat(ri, 38)},
+		"four-byte characters ending on the limit":       {repeat(face, 100), repeat(face, 30)},
+		"a four-byte character across the limit (1)":     {"a" + repeat(face, 40), "a" + repeat(face, 29)},
+		"a four-byte character across the limit (2)":     {"ab" + repeat(face, 40), "ab" + repeat(face, 29)},
+		"a four-byte character across the limit (3)":     {"abc" + repeat(face, 40), "abc" + repeat(face, 29)},
+		"the space the cut leaves at the end is trimmed": {repeat("a", 118) + " " + repeat(e, 5), repeat("a", 118)},
+		"bytes that are not text become U+FFFD whole":    {repeat("\xff", 100), repeat("\ufffd", 40)},
+	} {
+		got := sanitiseFileStem(tc.typed)
+		if got != tc.want {
+			t.Errorf("%s: sanitiseFileStem(%d bytes) = %q (%d bytes), want %q (%d bytes)", name, len(tc.typed), got, len(got), tc.want, len(tc.want))
+		}
+		if !utf8.ValidString(got) || len(got) > maxFileStemBytes {
+			t.Errorf("%s: the stem is %d bytes and valid = %v: it must be text of at most %d bytes", name, len(got), utf8.ValidString(got), maxFileStemBytes)
+		}
+	}
+
+	// Whatever character falls across the limit, and wherever in the last four bytes it starts, the stem
+	// is text, within the limit, and the longest such: it gives up only the bytes of the one character.
+	for _, character := range []string{e, ri, face} {
+		for lead := 0; lead < 8; lead++ {
+			typed := repeat("a", lead) + repeat(character, 80)
+			got := sanitiseFileStem(typed)
+			if !utf8.ValidString(got) || len(got) > maxFileStemBytes || len(got) <= maxFileStemBytes-len(character) {
+				t.Errorf("%d plain bytes then %q x 80: stem is %d bytes (valid = %v), want a whole number of characters within %d bytes and more than %d",
+					lead, character, len(got), utf8.ValidString(got), maxFileStemBytes, maxFileStemBytes-len(character))
+			}
+		}
+	}
+}
+
 // ---------------------------------------------------------------------------
 // Described Markdown: filed blank, and the person's client hands it on
 // (epic #6023, task #6025)
@@ -1394,32 +1645,165 @@ func TestDescribedMarkdownWithLibrarySourcesStillFilesBlank(t *testing.T) {
 	}
 }
 
-// Source capture is the composition's provenance, so a reference the person
-// opted in is captured at accept time exactly as before; the empty file just
-// does not need it, so the replica that executes the run reads nothing.
-func TestDescribedMarkdownKeepsCapturingOptedInReferences(t *testing.T) {
+// THE PATH IS DECIDED BEFORE ANY CONTENT IS READ. A described file is filed empty, so
+// nothing it names is read: not when the request is accepted (it used to be, for a
+// provenance the empty file never used, and a reference nobody could read refused a
+// request that needed none of them) and not on the replica that executes the run.
+func TestDescribedMarkdownReadsNoReferenceContent(t *testing.T) {
+	data := []byte("Launch notes: ship on the first Tuesday")
+	notes := func() map[string]any {
+		return map[string]any{"name": "launch-notes.md", "blobUrl": "library/u-alice/reference-file/launch-notes.md", "ownerUserId": "u-alice", "sha256": (pure.Result{Bytes: data}).SHA256(), "size": len(data)}
+	}
+	described := func() materializeArgs {
+		a := describedArgs()
+		a.Sources = []SourceRef{{Kind: KindLibraryFile, Ref: "reference-file", Label: "Launch notes", Content: true}}
+		return a
+	}
+
+	t.Run("a node with no way to read references accepts it", func(t *testing.T) {
+		i, e, u := materializeFixture(t)
+		e.files["reference-file"] = notes()
+		compositionId, input := acceptAsAPerson(t, i, described())
+		if err := adoptTheRun(anotherReplica(e, u, forbidComposer(t)), input); err != nil {
+			t.Fatal(err)
+		}
+		if row := e.compositions[compositionId]; row["status"] != "ready" || string(u.bytes) != "\n" {
+			t.Fatalf("the described request did not file blank: row=%v bytes=%q", row, u.bytes)
+		}
+	})
+
+	t.Run("a node that can read them reads nothing, at accept or on the replica that executes it", func(t *testing.T) {
+		i, e, u := materializeFixture(t)
+		reader := &referenceReader{data: data}
+		i.SetSourceDownloader(reader)
+		e.files["reference-file"] = notes()
+		compositionId, input := acceptAsAPerson(t, i, described())
+		if reader.calls != 0 {
+			t.Fatalf("a described request reads no reference, but the accepting node read one %d time(s)", reader.calls)
+		}
+		saved, _ := json.Marshal(e.inputs[compositionId]["request"])
+		if strings.Contains(string(saved), "ship on the first Tuesday") {
+			t.Fatalf("the saved input holds the text of a file nothing read: %s", saved)
+		}
+		var snapshot executionRequest
+		if err := json.Unmarshal(saved, &snapshot); err != nil || !snapshot.Described || len(snapshot.Resolved) != 1 || len(snapshot.Resolved[0].Files) != 0 {
+			t.Fatalf("the saved input is not a described request that read nothing: described=%v resolved=%+v (%v)", snapshot.Described, snapshot.Resolved, err)
+		}
+
+		if err := adoptTheRun(anotherReplica(e, u, forbidComposer(t)), input); err != nil {
+			t.Fatal(err)
+		}
+		if reader.calls != 0 || string(u.bytes) != "\n" || e.compositions[compositionId]["status"] != "ready" {
+			t.Fatalf("the empty file should need no reference read: reads=%d bytes=%q row=%v", reader.calls, u.bytes, e.compositions[compositionId])
+		}
+		// The file is still the composition's provenance: it is named in its sources.
+		recorded, _ := json.Marshal(e.compositions[compositionId]["sources"])
+		if !strings.Contains(string(recorded), `"ref":"reference-file"`) {
+			t.Fatalf("the picked file is not among the composition's sources: %s", recorded)
+		}
+	})
+}
+
+// A file the Library cannot attach to a review comment cannot go to the revision workflow,
+// so the request goes to the composer, which reads it -- every picked file is used, and
+// none is dropped. Only now is a reference's content read: once, when the request is
+// accepted, and the replica that executes the run composes from that snapshot.
+func TestDescribedMarkdownWithAFileTheLibraryCannotAttachIsWrittenByTheComposer(t *testing.T) {
+	for _, tc := range []struct {
+		name     string
+		text     string
+		size     int // what the file's row says; 0 says what the bytes are
+		archived bool
+	}{
+		{name: "numbers.csv", text: "region,total\nnorth,40\nsouth,60\n"},
+		{name: "data.json", text: `{"region": "north", "total": 40}`},
+		{name: "notes.txt", text: "Plain notes on the autumn launch"},
+		{name: "page.html", text: "<h1>Autumn launch</h1>"},
+		{name: "long-notes.md", text: "# Notes that are too long for a comment", size: 40960},
+		{name: "old-notes.md", text: "# Notes from the Bin", archived: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			i, e, u := materializeFixture(t)
+			data := []byte(tc.text)
+			reader := &referenceReader{data: data}
+			i.SetSourceDownloader(reader)
+			size := tc.size
+			if size == 0 {
+				size = len(data)
+			}
+			e.files["reference-file"] = map[string]any{"name": tc.name, "blobUrl": "library/u-alice/reference-file/" + tc.name, "ownerUserId": "u-alice", "sha256": (pure.Result{Bytes: data}).SHA256(), "size": size, "archived": tc.archived}
+			a := describedArgs()
+			a.Sources = []SourceRef{{Kind: KindLibraryFile, Ref: "reference-file", Label: tc.name, Content: true}}
+			compositionId, input := acceptAsAPerson(t, i, a)
+			if reader.calls != 1 {
+				t.Fatalf("the composer reads the file, once, when the request is accepted; it was read %d times", reader.calls)
+			}
+
+			var asked []ComposeRequest
+			worker := anotherReplica(e, u, materializeComposerFunc(func(_ context.Context, r ComposeRequest) (ComposeReply, error) {
+				asked = append(asked, r)
+				return ComposeReply{Draft: pure.Draft{Body: "Written from the file"}}, nil
+			}))
+			if err := adoptTheRun(worker, input); err != nil {
+				t.Fatal(err)
+			}
+			if len(asked) != 1 || asked[0].Statement != describedStatement || len(asked[0].Sources) != 1 || len(asked[0].Sources[0].Files) != 1 || asked[0].Sources[0].Files[0].Text != tc.text {
+				t.Fatalf("the composer was not asked to write from the statement and the file's text: %+v", asked)
+			}
+			if !strings.Contains(string(u.bytes), "Written from the file") || string(u.bytes) == "\n" {
+				t.Fatalf("a request with a file the Library cannot attach must carry the composed document, got %q", u.bytes)
+			}
+			if row := e.compositions[compositionId]; row["status"] != "ready" || row["statement"] != describedStatement {
+				t.Fatalf("the request did not complete with its statement: %v", row)
+			}
+			if reader.calls != 1 {
+				t.Fatalf("the replica that executed the run read the file again (%d reads in all)", reader.calls)
+			}
+		})
+	}
+}
+
+// A picked file that nobody can read refuses the start on the composed path, as an
+// unreadable reference always has -- and the refusal comes before anything is written.
+func TestAPickedFileNobodyCanReadRefusesTheStart(t *testing.T) {
+	i, e, _ := materializeFixture(t)
+	reader := &referenceReader{data: []byte("never read")}
+	i.SetSourceDownloader(reader)
+	i.SetGoalOpener(&directMaterializeGoal{})
+	a := describedArgs()
+	a.Sources = []SourceRef{{Kind: KindLibraryFile, Ref: "nobody-readable", Label: "Meeting notes", Content: true}}
+	_, err := i.materialize(materializeContext(), "u-alice", "", a)
+	if err == nil || !strings.Contains(err.Error(), `reference "Meeting notes" is not readable by you`) {
+		t.Fatalf("a file no row answers for must refuse the start, got %v", err)
+	}
+	if len(e.compositions) != 0 || len(e.inputs) != 0 || len(e.files) != 0 || reader.calls != 0 {
+		t.Fatalf("the refused start wrote something or read something: compositions=%d inputs=%d files=%d reads=%d", len(e.compositions), len(e.inputs), len(e.files), reader.calls)
+	}
+}
+
+// A work run keeps the composer for a described request, so the composer reads what the run
+// picked: the path is the composed one, and the composed path reads its contents.
+func TestDescribedMarkdownInsideARunReadsItsReferences(t *testing.T) {
 	i, e, u := materializeFixture(t)
 	data := []byte("Launch notes: ship on the first Tuesday")
 	reader := &referenceReader{data: data}
 	i.SetSourceDownloader(reader)
-	e.files["reference-file"] = map[string]any{"name": "launch-notes.md", "blobUrl": "library/u-alice/reference-file/launch-notes.md", "ownerUserId": "u-alice", "sha256": (pure.Result{Bytes: data}).SHA256()}
+	e.files["reference-file"] = map[string]any{"name": "launch-notes.md", "blobUrl": "library/u-alice/reference-file/launch-notes.md", "ownerUserId": "u-alice", "sha256": (pure.Result{Bytes: data}).SHA256(), "size": len(data)}
+	var asked []ComposeRequest
+	i.SetComposer(materializeComposerFunc(func(_ context.Context, r ComposeRequest) (ComposeReply, error) {
+		asked = append(asked, r)
+		return ComposeReply{Draft: pure.Draft{Body: "Written from the notes"}}, nil
+	}))
 	a := describedArgs()
 	a.Sources = []SourceRef{{Kind: KindLibraryFile, Ref: "reference-file", Label: "Launch notes", Content: true}}
-	compositionId, input := acceptAsAPerson(t, i, a)
-	if reader.calls != 1 {
-		t.Fatalf("an opted-in reference must still be read once at accept time, was read %d times", reader.calls)
-	}
-	captured, _ := json.Marshal(e.inputs[compositionId]["request"])
-	if !strings.Contains(string(captured), "ship on the first Tuesday") {
-		t.Fatalf("the reference was not captured in the owner-only input: %s", captured)
-	}
-
-	// The executing replica has no downloader and must not need one.
-	if err := adoptTheRun(anotherReplica(e, u, forbidComposer(t)), input); err != nil {
+	if _, err := i.materialize(nestedMaterializeContext(), "u-alice", "", a); err != nil {
 		t.Fatal(err)
 	}
-	if reader.calls != 1 || string(u.bytes) != "\n" || e.compositions[compositionId]["status"] != "ready" {
-		t.Fatalf("the empty file should need no reference read: reads=%d bytes=%q row=%v", reader.calls, u.bytes, e.compositions[compositionId])
+	if reader.calls != 1 || len(asked) != 1 || len(asked[0].Sources) != 1 || len(asked[0].Sources[0].Files) != 1 || asked[0].Sources[0].Files[0].Text != string(data) {
+		t.Fatalf("an in-run request is written by the composer from the file it read: reads=%d asked=%+v", reader.calls, asked)
+	}
+	if !strings.Contains(string(u.bytes), "Written from the notes") || string(u.bytes) == "\n" {
+		t.Fatalf("an in-run described request was filed blank: %q", u.bytes)
 	}
 }
 
@@ -1646,18 +2030,21 @@ func TestFiledSizeIsReadStrictly(t *testing.T) {
 }
 
 func TestDescribedMarkdownMeansAStatementAndNothingToComposeFrom(t *testing.T) {
-	if !describedArgs().describedMarkdown() {
+	notes, spec := pickedFile("meeting-notes.md", 2048), pickedFile("spec.md", 4096)
+	if !describedArgs().describedMarkdown(nil) {
 		t.Fatal("a Markdown name and statement alone are a described request")
 	}
 	// Where the document goes and the limits its run keeps are not what makes it a
-	// description. Nor are the files it is about: Library files are references the
-	// revision workflow can read, and they are passed on with the description. A
-	// whitespace-only draft is no draft.
+	// description. Nor are the files it is about: Markdown files and pictures the Library
+	// can attach are references the revision workflow can read, and they are passed on with
+	// the description. A whitespace-only draft is no draft.
 	around := describedArgs()
-	around.Sources = []SourceRef{{Kind: KindLibraryFile, Ref: "notes-file", Label: "Notes"}, {Kind: KindLibraryFile, Ref: "spec-file", Label: "Spec", Content: true}}
+	specRef := spec.Ref
+	specRef.Content = true
+	around.Sources = []SourceRef{notes.Ref, specRef}
 	around.FolderId, around.AccountIds, around.Ceilings, around.Draft, around.RequestId = "folder-1", []string{"account-1"}, map[string]any{"maxRetries": 1}, " \n ", "req-1"
-	if !around.describedMarkdown() {
-		t.Fatal("library files, a folder, account tags, ceilings, a request id and a whitespace-only draft do not stop a request being described")
+	if !around.describedMarkdown([]Resolved{notes, spec}) {
+		t.Fatal("Markdown files, a folder, account tags, ceilings, a request id and a whitespace-only draft do not stop a request being described")
 	}
 	for name, with := range map[string]func(*materializeArgs){
 		"no statement":   func(a *materializeArgs) { a.Statement = "" },
@@ -1673,27 +2060,36 @@ func TestDescribedMarkdownMeansAStatementAndNothingToComposeFrom(t *testing.T) {
 		"a recipe":       func(a *materializeArgs) { a.RecipeId = "recipe-1" },
 		"an output kind": func(a *materializeArgs) { a.OutputKind = "email_template" },
 		"a deployable":   func(a *materializeArgs) { a.DeployableKind = "spa" },
-		// The revision workflow reads Markdown and images. It cannot read the graph,
-		// so a request with records to write from has something of its own to
-		// compose from, and only the composer can read it.
-		"a query":       func(a *materializeArgs) { a.Sources = []SourceRef{{Kind: KindQuery, Ref: "sourceRows()"}} },
-		"a concept row": func(a *materializeArgs) { a.Sources = []SourceRef{{Kind: KindConceptRow, Ref: "invoice-1"}} },
 	} {
 		a := describedArgs()
 		with(&a)
-		if a.describedMarkdown() {
+		if a.describedMarkdown(nil) || a.describedMarkdown([]Resolved{notes}) {
 			t.Fatalf("a request with %s is not a described Markdown request", name)
 		}
 	}
-	// One data source among the files is enough to keep the composer: the files
-	// would go to the revision workflow and the records could not.
-	mixed := describedArgs()
-	mixed.Sources = []SourceRef{{Kind: KindLibraryFile, Ref: "notes-file"}, {Kind: KindQuery, Ref: "sourceRows()"}}
-	if mixed.describedMarkdown() {
-		t.Fatal("a request with a query among its files is not a described Markdown request")
+	// The revision workflow reads Markdown and images. It cannot read the graph, so a
+	// request with records to write from has something of its own to compose from, and
+	// only the composer can read it. One data source among the files is enough to keep the
+	// composer: the files would go to the revision workflow and the records could not.
+	query := Resolved{Ref: SourceRef{Kind: KindQuery, Ref: "sourceRows()"}, Rows: []map[string]any{{"id": "invoice-1"}}, Count: 1}
+	conceptRow := Resolved{Ref: SourceRef{Kind: KindConceptRow, Ref: "invoice-1"}, Rows: []map[string]any{{"id": "invoice-1"}}, Count: 1}
+	for name, resolved := range map[string][]Resolved{
+		"a query":                     {query},
+		"a concept row":               {conceptRow},
+		"a Markdown file and a query": {notes, query},
+		"a query and a Markdown file": {query, notes},
+	} {
+		a := describedArgs()
+		a.Sources = make([]SourceRef, 0, len(resolved))
+		for _, r := range resolved {
+			a.Sources = append(a.Sources, r.Ref)
+		}
+		if a.describedMarkdown(resolved) {
+			t.Fatalf("a request with %s is not a described Markdown request", name)
+		}
 	}
 	// A request is blank or described, never both: blank has no words at all.
-	if describedArgs().blank() || blankArgs(pure.FormatMarkdown).describedMarkdown() {
+	if describedArgs().blank() || blankArgs(pure.FormatMarkdown).describedMarkdown(nil) {
 		t.Fatal("blank and described requests overlap")
 	}
 }
@@ -1740,5 +2136,663 @@ func TestBlankAndDescribedFilesAreSummarisedAsCreatedBlank(t *testing.T) {
 		if f["summary"] != "Materialized from no sources." {
 			t.Fatalf("an ordinary file's summary = %q, want Materialized from no sources.", f["summary"])
 		}
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Emails written into layouts (epic #6022, task #6032)
+// ---------------------------------------------------------------------------
+//
+// An email template is a layout document. A blank email files the layout as it
+// is, with no model call; a described one asks the composer to fill only the
+// layout's content blocks, and the server merges what it wrote and refuses
+// anything aimed at the brand, a link tag or a picture nobody chose to include.
+
+const emailAccount = "client"
+
+// emailArgs is an email for the fixture's organization, with nothing to write
+// it from: a blank email.
+func emailArgs(layoutId string) materializeArgs {
+	return materializeArgs{Name: "Welcome", Format: pure.FormatJSON, OutputKind: "email_template", AccountIds: []string{emailAccount}, LayoutId: layoutId}
+}
+
+// emailFixture is materializeFixture with an organization the caller can file
+// an email for.
+func emailFixture(t *testing.T) (*Integration, *materializeEngine, *materializeUploader) {
+	i, e, u := materializeFixture(t)
+	e.account = map[string]any{"id": emailAccount, "status": "active"}
+	return i, e, u
+}
+
+// builtinLayout is a built-in layout and its canonical bytes.
+func builtinLayout(t *testing.T, id string) (emaildoc.Document, []byte) {
+	t.Helper()
+	doc, ok := emaildoc.Layout(id)
+	if !ok {
+		t.Fatalf("no built-in layout %s", id)
+	}
+	raw, err := doc.JSON()
+	if err != nil {
+		t.Fatal(err)
+	}
+	return doc, raw
+}
+
+// layoutRow is an organization layout as emailLayoutById answers it: the
+// document is an object, as it comes back out of the database.
+func layoutRow(t *testing.T, id, accountId, status string, doc emaildoc.Document) map[string]any {
+	t.Helper()
+	raw, err := doc.JSON()
+	if err != nil {
+		t.Fatal(err)
+	}
+	var document map[string]any
+	if err := json.Unmarshal(raw, &document); err != nil {
+		t.Fatal(err)
+	}
+	return map[string]any{"id": "v1:campaigns:emailLayout:" + id, "accountId": accountId, "name": "House layout", "status": status, "document": document}
+}
+
+// emailBlock finds a block anywhere in an email document.
+func emailBlock(t *testing.T, doc emaildoc.Document, id string) emaildoc.Block {
+	t.Helper()
+	var walk func([]emaildoc.Block) *emaildoc.Block
+	walk = func(blocks []emaildoc.Block) *emaildoc.Block {
+		for i := range blocks {
+			if blocks[i].ID == id {
+				return &blocks[i]
+			}
+			if found := walk(blocks[i].Blocks); found != nil {
+				return found
+			}
+			for _, column := range blocks[i].Columns {
+				if found := walk(column.Blocks); found != nil {
+					return found
+				}
+			}
+		}
+		return nil
+	}
+	found := walk(doc.Blocks)
+	if found == nil {
+		t.Fatalf("the email has no block %q", id)
+	}
+	return *found
+}
+
+func sameBlock(t *testing.T, a, b emaildoc.Block) bool {
+	t.Helper()
+	x, err := json.Marshal(a)
+	if err != nil {
+		t.Fatal(err)
+	}
+	y, err := json.Marshal(b)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return bytes.Equal(x, y)
+}
+
+// filedEmail parses what was uploaded as the email file.
+func filedEmail(t *testing.T, u *materializeUploader) emaildoc.Document {
+	t.Helper()
+	doc, err := emaildoc.Parse(u.bytes)
+	if err != nil {
+		t.Fatalf("the filed email is not a valid email document: %v\n%s", err, u.bytes)
+	}
+	return doc
+}
+
+// contentComposer answers with what a model would write into a layout.
+func contentComposer(asked *[]ComposeRequest, content emaildoc.Content) materializeComposerFunc {
+	return func(_ context.Context, r ComposeRequest) (ComposeReply, error) {
+		*asked = append(*asked, r)
+		c := content
+		return ComposeReply{EmailContent: &c, Models: []pure.ModelContribution{{Provider: "fleet:writer", Model: "writer", Calls: 1}}}, nil
+	}
+}
+
+func text(s string) *string { return &s }
+
+func TestBlankEmailFilesTheLayoutWithoutAModelCall(t *testing.T) {
+	i, e, u := emailFixture(t)
+	i.SetComposer(forbidComposer(t))
+	compositionId, input := acceptAsAPerson(t, i, emailArgs("builtin:letter"))
+	// Accepted on one replica, executed on another that only has the saved request.
+	if err := adoptTheRun(anotherReplica(e, u, forbidComposer(t)), input); err != nil {
+		t.Fatal(err)
+	}
+	row := e.compositions[compositionId]
+	if row["status"] != "ready" {
+		t.Fatalf("the blank email did not complete: %v", row)
+	}
+	file := e.files[stringOf(row["outputFileId"])]
+	if file["name"] != "Welcome.email.json" || file["mimeType"] != "application/json" {
+		t.Fatalf("filed %v as %v, want Welcome.email.json", file["name"], file["mimeType"])
+	}
+	doc := filedEmail(t, u)
+	if doc.Layout != "builtin:letter" {
+		t.Fatalf("the filed email names layout %q, want builtin:letter", doc.Layout)
+	}
+	if _, want := builtinLayout(t, "builtin:letter"); !bytes.Equal(u.bytes, want) {
+		t.Fatalf("a blank email must be the layout itself, byte for byte:\n%s", u.bytes)
+	}
+	// One file: a layout has no recipe worth rebuilding, so no source package.
+	if len(e.files) != 1 || stringOf(row["sourceFileId"]) != "" || u.calls != 1 {
+		t.Fatalf("a blank email is one file: files=%d sourceFileId=%v uploads=%d", len(e.files), row["sourceFileId"], u.calls)
+	}
+	if file["summary"] != "Created from an email layout." {
+		t.Fatalf("summary = %q", file["summary"])
+	}
+	if models, _ := row["modelsUsed"].([]any); len(models) != 0 {
+		t.Fatalf("a blank email reached a model: %v", row["modelsUsed"])
+	}
+}
+
+func TestBlankEmailFromAnOrganizationLayout(t *testing.T) {
+	i, e, u := emailFixture(t)
+	house, _ := builtinLayout(t, "builtin:spotlight")
+	house.Subject, house.Layout = "Our house layout", "builtin:spotlight"
+	// The row names the organization by its canonical id; the request by its
+	// bare one. They are the same organization.
+	e.layouts["house"] = layoutRow(t, "house", "v1:accounts:account:"+emailAccount, "active", house)
+	if _, err := i.materialize(nestedMaterializeContext(), "u-alice", "", emailArgs("org:house")); err != nil {
+		t.Fatal(err)
+	}
+	doc := filedEmail(t, u)
+	// The layout is the one the person chose, named as they chose it, whatever
+	// the saved document said it came from.
+	if doc.Layout != "org:house" || doc.Subject != "Our house layout" {
+		t.Fatalf("filed layout %q with subject %q, want org:house with the organization's own subject", doc.Layout, doc.Subject)
+	}
+	if !sameBlock(t, emailBlock(t, doc, "footer"), emailBlock(t, house, "footer")) {
+		t.Fatal("the organization's footer was not filed as it was saved")
+	}
+}
+
+func TestEmailWithoutALayoutUsesTheArticle(t *testing.T) {
+	blank, e, u := emailFixture(t)
+	if _, err := blank.materialize(nestedMaterializeContext(), "u-alice", "", emailArgs("")); err != nil {
+		t.Fatal(err)
+	}
+	if _, want := builtinLayout(t, "builtin:article"); !bytes.Equal(u.bytes, want) {
+		t.Fatalf("a blank email with no layout must be the Article:\n%s", u.bytes)
+	}
+	if len(e.files) != 1 {
+		t.Fatalf("files = %d", len(e.files))
+	}
+
+	described, _, du := emailFixture(t)
+	var asked []ComposeRequest
+	described.SetComposer(contentComposer(&asked, emaildoc.Content{Subject: "Autumn mornings", Blocks: []emaildoc.ContentItem{{ID: "intro", Text: text("Autumn mornings are darker.")}}}))
+	a := emailArgs("")
+	a.Statement = "Tips for darker autumn mornings"
+	if _, err := described.materialize(nestedMaterializeContext(), "u-alice", "", a); err != nil {
+		t.Fatal(err)
+	}
+	article, _ := builtinLayout(t, "builtin:article")
+	if len(asked) != 1 || asked[0].EmailLayout == nil || asked[0].EmailLayout.Layout != "builtin:article" || len(asked[0].EmailLayout.Blocks) != len(article.Blocks) {
+		t.Fatalf("the composer was not given the Article to fill: %+v", asked)
+	}
+	if doc := filedEmail(t, du); doc.Layout != "builtin:article" || emailBlock(t, doc, "intro").Text != "Autumn mornings are darker." {
+		t.Fatalf("the described email was not written into the Article: %+v", doc)
+	}
+}
+
+func TestLayoutRefusalsWriteNothing(t *testing.T) {
+	letter, _ := builtinLayout(t, "builtin:letter")
+	for _, c := range []struct{ name, layoutId, want string }{
+		{"an unknown built-in", "builtin:newsletter", "compose: choose one of the listed layouts"},
+		{"an organization layout the caller cannot read", "org:missing", "compose: that layout is not readable by you"},
+		{"an archived layout", "org:old", "compose: that layout is archived; restore it first"},
+		{"another organization's layout", "org:theirs", "compose: that layout belongs to another organization"},
+		{"an id without its kind", "letter", "compose: layoutId must be builtin:<name> or org:<id>"},
+		{"an organization layout with no id", "org:", "compose: layoutId must be builtin:<name> or org:<id>"},
+		{"an id with a space", "org:old layout", "compose: layoutId must be builtin:<name> or org:<id>"},
+		{"a kind it does not know", "template:welcome", "compose: layoutId must be builtin:<name> or org:<id>"},
+	} {
+		for where, ctx := range map[string]context.Context{"in a run": nestedMaterializeContext(), "standalone": materializeContext()} {
+			i, e, u := emailFixture(t)
+			i.SetGoalOpener(&directMaterializeGoal{})
+			i.SetComposer(forbidComposer(t))
+			e.layouts["old"] = layoutRow(t, "old", emailAccount, "archived", letter)
+			e.layouts["theirs"] = layoutRow(t, "theirs", "other-client", "active", letter)
+			for _, a := range []materializeArgs{emailArgs(c.layoutId), func() materializeArgs {
+				described := emailArgs(c.layoutId)
+				described.Statement = "A welcome for new subscribers"
+				return described
+			}()} {
+				_, err := i.materialize(ctx, "u-alice", "", a)
+				if err == nil || err.Error() != c.want {
+					t.Fatalf("%s %s: refusal = %v, want %q", c.name, where, err, c.want)
+				}
+			}
+			if len(e.compositions) != 0 || len(e.inputs) != 0 || len(e.files) != 0 || u.calls != 0 {
+				t.Fatalf("%s %s: the refusal wrote rows: %v %v %v uploads=%d", c.name, where, e.compositions, e.inputs, e.files, u.calls)
+			}
+		}
+	}
+
+	// A layout belongs to an email template and nothing else: refused where
+	// every entry point arrives (TestALayoutOutsideAnEmailIsRefusedEverywhere),
+	// and read here for an email.
+	a, err := parseMaterializeArgs(map[string]any{"name": "Welcome", "format": "json", "outputKind": "email_template", "layoutId": " builtin:letter "})
+	if err != nil || a.LayoutId != "builtin:letter" {
+		t.Fatalf("layoutId = %q (%v), want builtin:letter", a.LayoutId, err)
+	}
+	if a.layoutID() != "builtin:letter" || emailArgs("").layoutID() != "builtin:article" {
+		t.Fatalf("layoutID() = %q / %q", a.layoutID(), emailArgs("").layoutID())
+	}
+}
+
+func TestDescribedEmailMergesTheComposersContent(t *testing.T) {
+	i, e, u := emailFixture(t)
+	a := emailArgs("builtin:letter")
+	a.Statement = "Welcome our autumn subscribers"
+	compositionId, input := acceptAsAPerson(t, i, a)
+	var asked []ComposeRequest
+	worker := anotherReplica(e, u, contentComposer(&asked, emaildoc.Content{
+		Subject:   "Welcome to autumn",
+		Preheader: "What the season brings.",
+		Blocks:    []emaildoc.ContentItem{{ID: "headline", Text: text("Autumn is here")}, {ID: "cta", Label: text("Read the autumn guide"), Href: nil}},
+	}))
+	if err := adoptTheRun(worker, input); err != nil {
+		t.Fatal(err)
+	}
+	if len(asked) != 1 || asked[0].OutputKind != "email_template" || asked[0].Statement != a.Statement || asked[0].EmailLayout == nil || asked[0].EmailLayout.Layout != "builtin:letter" {
+		t.Fatalf("the composer was not asked to fill the letter: %+v", asked)
+	}
+	row := e.compositions[compositionId]
+	if row["status"] != "ready" {
+		t.Fatalf("the described email did not complete: %v", row)
+	}
+	doc := filedEmail(t, u)
+	letter, _ := builtinLayout(t, "builtin:letter")
+	if doc.Subject != "Welcome to autumn" || doc.Preheader != "What the season brings." || doc.Layout != "builtin:letter" {
+		t.Fatalf("filed subject %q, preheader %q, layout %q", doc.Subject, doc.Preheader, doc.Layout)
+	}
+	if got := emailBlock(t, doc, "headline").Text; got != "Autumn is here" {
+		t.Fatalf("headline = %q", got)
+	}
+	if got := emailBlock(t, doc, "cta"); got.Label != "Read the autumn guide" || got.Href != emailBlock(t, letter, "cta").Href {
+		t.Fatalf("cta = %+v", got)
+	}
+	for _, id := range []string{"footer", "logo", "signature", "promo", "social"} {
+		if !sameBlock(t, emailBlock(t, doc, id), emailBlock(t, letter, id)) {
+			t.Errorf("brand block %q changed", id)
+		}
+	}
+	// A composed email keeps its recipe beside it, as any composed file does.
+	if stringOf(row["sourceFileId"]) == "" || len(e.files) != 2 {
+		t.Fatalf("a composed email files its source package too: sourceFileId=%v files=%d", row["sourceFileId"], len(e.files))
+	}
+	if models, _ := row["modelsUsed"].([]any); len(models) != 1 {
+		t.Fatalf("the composer's model is not on the record: %v", row["modelsUsed"])
+	}
+}
+
+// Review Focus 4: model output aimed at a brand block or the confirm link, or
+// using a picture nobody selected for inclusion, is refused; the composition
+// fails and nothing is filed.
+func TestDescribedEmailRefusesBrandBlocksAndUnselectedPictures(t *testing.T) {
+	png := referencePNG(t)
+	referenceOnly := "memql-asset:" + (pure.Result{Bytes: png}).SHA256()
+	for _, c := range []struct {
+		name, layoutId, want string
+		content              emaildoc.Content
+	}{
+		{"a brand block", "builtin:letter", `the draft tried to change a brand block: "footer"`, emaildoc.Content{Subject: "Hi", Blocks: []emaildoc.ContentItem{
+			{ID: "headline", Text: text("Autumn is here")}, {ID: "footer", Text: text("Reply to win")}}}},
+		{"the confirm link", "builtin:confirmation", `the draft tried to replace the {{confirmUrl}} link on "confirm"`, emaildoc.Content{Subject: "Hi", Blocks: []emaildoc.ContentItem{
+			{ID: "confirm", Href: text("https://evil.test/confirm")}}}},
+		{"a reference-only picture", "builtin:article", "the draft used a picture that was not selected for inclusion", emaildoc.Content{Subject: "Hi", Blocks: []emaildoc.ContentItem{
+			{ID: "banner", Image: text(referenceOnly)}}}},
+		{"a picture from the web", "builtin:article", "the draft used a picture that was not selected for inclusion", emaildoc.Content{Subject: "Hi", Blocks: []emaildoc.ContentItem{
+			{ID: "banner", Image: text("https://cdn.example/a.png")}}}},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			i, e, u := emailFixture(t)
+			// The reference is read for the model to look at, and not for the email.
+			i.SetSourceDownloader(&referenceReader{data: png})
+			e.files["reference"] = map[string]any{"name": "example.png", "blobUrl": "library/u-alice/reference/example.png", "ownerUserId": "u-alice", "sha256": (pure.Result{Bytes: png}).SHA256()}
+			e.artifacts["reference"] = map[string]any{"id": "v1:library:artifact:a1"}
+			a := emailArgs(c.layoutId)
+			a.Statement = "A welcome in our usual style"
+			a.Sources = []SourceRef{{Kind: KindLibraryFile, Ref: "reference", Label: "Last year's welcome", Content: true}}
+			compositionId, input := acceptAsAPerson(t, i, a)
+			var asked []ComposeRequest
+			err := adoptTheRun(anotherReplica(e, u, contentComposer(&asked, c.content)), input)
+			if err == nil || !strings.Contains(err.Error(), terminalFailureCode) {
+				t.Fatalf("the composition must fail terminally, got %v", err)
+			}
+			row := e.compositions[compositionId]
+			if row["status"] != "failed" || stringOf(row["failureReason"]) != "compose: the email draft could not be used: "+c.want {
+				t.Fatalf("composition = %v / %q, want failed with %q", row["status"], row["failureReason"], c.want)
+			}
+			for _, call := range e.calls {
+				if call == "createLibraryFile" {
+					t.Fatalf("a refused draft was filed: %v", e.calls)
+				}
+			}
+			if u.calls != 0 || len(e.files) != 1 {
+				t.Fatalf("a refused draft was stored: uploads=%d files=%d", u.calls, len(e.files))
+			}
+		})
+	}
+}
+
+// A blank email is one with nothing to write it from. Anything to write it from
+// makes it a described one, and nothing but an email is a blank email.
+func TestBlankEmailMeansALayoutAndNothingToWriteItFrom(t *testing.T) {
+	if !emailArgs("builtin:letter").blankEmail() || !emailArgs("").blankEmail() {
+		t.Fatal("an email with a layout and nothing to write it from is a blank email")
+	}
+	around := emailArgs("org:house")
+	around.FolderId, around.Ceilings, around.RequestId, around.Draft = "folder-1", map[string]any{"maxRetries": 1}, "req-1", " \n "
+	if !around.blankEmail() {
+		t.Fatal("a folder, ceilings, a request id and a whitespace-only draft do not stop an email being blank")
+	}
+	for name, with := range map[string]func(*materializeArgs){
+		"a statement":    func(a *materializeArgs) { a.Statement = "A welcome" },
+		"a draft":        func(a *materializeArgs) { a.Draft = `{"subject":"Hi"}` },
+		"section keys":   func(a *materializeArgs) { a.SectionKeys = []string{"chapter-1"} },
+		"sources":        func(a *materializeArgs) { a.Sources = []SourceRef{{Kind: KindLibraryFile, Ref: "notes"}} },
+		"a template":     func(a *materializeArgs) { a.TemplateId = "template-1" },
+		"a recipe":       func(a *materializeArgs) { a.RecipeId = "recipe-1" },
+		"a deployable":   func(a *materializeArgs) { a.DeployableKind = "spa" },
+		"no output kind": func(a *materializeArgs) { a.OutputKind = "" },
+	} {
+		a := emailArgs("builtin:letter")
+		with(&a)
+		if a.blankEmail() {
+			t.Fatalf("an email with %s is not a blank email", name)
+		}
+	}
+	// An email is never blank() itself: the blank document of its format is not
+	// what a blank email files.
+	if emailArgs("builtin:letter").blank() {
+		t.Fatal("a blank email must not be filed as the empty JSON document")
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Fix round 1 (#6032): what an email may be filed as, when a layout is looked
+// at, recipes, and refusals that no retry changes
+// ---------------------------------------------------------------------------
+
+// houseLayout is an organization's own layout: the Spotlight with a subject of
+// its own.
+func houseLayout(t *testing.T) emaildoc.Document {
+	t.Helper()
+	house, _ := builtinLayout(t, "builtin:spotlight")
+	house.Subject = "Our house layout"
+	return house
+}
+
+// failedWith reads a composition that must have failed for good, with reason,
+// and checks that nothing was filed for it.
+func failedWith(t *testing.T, e *materializeEngine, u *materializeUploader, compositionId, reason string, err error) {
+	t.Helper()
+	if err == nil || !strings.Contains(err.Error(), terminalFailureCode) {
+		t.Fatalf("the composition must fail terminally, got %v", err)
+	}
+	row := e.compositions[compositionId]
+	if row["status"] != "failed" || stringOf(row["failureReason"]) != reason {
+		t.Fatalf("composition = %v / %q, want failed with %q", row["status"], row["failureReason"], reason)
+	}
+	for _, call := range e.calls {
+		if call == "createLibraryFile" {
+			t.Fatalf("a refused email was filed: %v", e.calls)
+		}
+	}
+	if u.calls != 0 {
+		t.Fatalf("a refused email was stored: %d uploads", u.calls)
+	}
+}
+
+// An email is only ever its layout: filed as it is, or with the composer's
+// content merged into it. A draft the caller supplies is no way past that: on
+// a node with no composer it used to be filed as written, with whatever
+// pictures, links and markup it held, in whatever layout it named.
+func TestEmailDraftWithoutAComposerIsRefused(t *testing.T) {
+	letter, _ := builtinLayout(t, "builtin:letter")
+	smuggled := letter
+	smuggled.Layout = "builtin:spotlight"
+	smuggled.Blocks = append([]emaildoc.Block(nil), letter.Blocks...)
+	for n := range smuggled.Blocks {
+		if smuggled.Blocks[n].ID == "logo" {
+			smuggled.Blocks[n].Src = "artifact:somebody-elses-artifact"
+		}
+	}
+	smuggledJSON, err := smuggled.JSON()
+	if err != nil {
+		t.Fatal(err)
+	}
+	for name, draft := range map[string]string{
+		"custom HTML with a remote picture and active content":      `{"subject":"Hi","textBody":"Hi","htmlBody":"<p onclick=\"x()\" style=\"background:url(https://tracker.test/b.gif)\">Hi</p><img src=\"https://tracker.test/p.gif\"><a href=\"javascript:alert(1)\">Go</a><script>x()</script>"}`,
+		"a layout naming another layout and someone else's picture": string(smuggledJSON),
+	} {
+		t.Run(name, func(t *testing.T) {
+			i, e, u := emailFixture(t)
+			a := emailArgs("builtin:letter")
+			a.Draft = draft
+			compositionId, input := acceptAsAPerson(t, i, a)
+			// The replica that executes the run has no composer.
+			err := adoptTheRun(anotherReplica(e, u, nil), input)
+			failedWith(t, e, u, compositionId, "An email is written into its layout. This node has no composer to write the draft you supplied into it.", err)
+		})
+	}
+}
+
+// With a composer, a supplied draft is what it always was: something to start
+// from. The composer is given it, and what is filed is the layout with the
+// composer's content, never the draft.
+func TestEmailDraftIsOnlyAStartingPointForTheComposer(t *testing.T) {
+	i, e, u := emailFixture(t)
+	a := emailArgs("builtin:letter")
+	a.Draft = `{"subject":"Hi","textBody":"Hi","htmlBody":"<img src=\"https://tracker.test/p.gif\">"}`
+	compositionId, input := acceptAsAPerson(t, i, a)
+	var asked []ComposeRequest
+	worker := anotherReplica(e, u, contentComposer(&asked, emaildoc.Content{Subject: "Welcome", Blocks: []emaildoc.ContentItem{{ID: "headline", Text: text("Welcome aboard")}}}))
+	if err := adoptTheRun(worker, input); err != nil {
+		t.Fatal(err)
+	}
+	if len(asked) != 1 || asked[0].Draft != a.Draft {
+		t.Fatalf("the composer was not given the draft to start from: %+v", asked)
+	}
+	if e.compositions[compositionId]["status"] != "ready" {
+		t.Fatalf("composition = %v", e.compositions[compositionId])
+	}
+	doc := filedEmail(t, u)
+	if doc.Layout != "builtin:letter" || emailBlock(t, doc, "headline").Text != "Welcome aboard" || strings.Contains(string(u.bytes), "tracker.test") {
+		t.Fatalf("the filed email is not the letter with the composer's words: %s", u.bytes)
+	}
+}
+
+// The organization and the layout are looked at after a repeat has had its
+// chance to find what the first call made, as the folder is: an email that was
+// accepted (or filed) is not refused later because its layout, or its
+// organization, was put away since.
+func TestEmailRepeatsFindTheirCompositionAfterTheLayoutIsArchived(t *testing.T) {
+	putAway := func(e *materializeEngine) {
+		e.layouts["house"]["status"] = "archived"
+		e.account["status"] = "archived"
+	}
+	t.Run("a repeat of the request id", func(t *testing.T) {
+		i, e, _ := emailFixture(t)
+		i.SetGoalOpener(&directMaterializeGoal{})
+		e.layouts["house"] = layoutRow(t, "house", emailAccount, "active", houseLayout(t))
+		a := emailArgs("org:house")
+		a.RequestId = "req-1"
+		first, err := i.materialize(materializeContext(), "u-alice", "", a)
+		if err != nil {
+			t.Fatal(err)
+		}
+		putAway(e)
+		again, err := i.materialize(materializeContext(), "u-alice", "", a)
+		if err != nil || again["compositionId"] != first["compositionId"] || len(e.compositions) != 1 {
+			t.Fatalf("the repeat did not find its composition: %v %v (rows %d)", again, err, len(e.compositions))
+		}
+	})
+	t.Run("a retry of a step that was interrupted", func(t *testing.T) {
+		e := newMaterializeEngine(t)
+		e.account = map[string]any{"id": emailAccount, "status": "active"}
+		e.layouts["house"] = layoutRow(t, "house", emailAccount, "active", houseLayout(t))
+		flaky := &failOnce{materializeEngine: e, construct: "createLibraryFile", message: "connection reset by peer"}
+		u := &materializeUploader{}
+		first := New(flaky, nil)
+		first.SetUploader(u, "files")
+		if _, err := first.materialize(nestedMaterializeContext(), "u-alice", "", emailArgs("org:house")); err == nil || strings.Contains(err.Error(), terminalFailureCode) {
+			t.Fatalf("the interruption must stay resumable, got %v", err)
+		}
+		putAway(e)
+		sibling := New(flaky, nil)
+		sibling.SetUploader(u, "files")
+		out, err := sibling.materialize(nestedMaterializeContext(), "u-alice", "", emailArgs("org:house"))
+		if err != nil {
+			t.Fatalf("the retry was refused: %v", err)
+		}
+		if row := e.compositions[stringOf(out["compositionId"])]; row["status"] != "ready" {
+			t.Fatalf("the retry did not finish: %v", row)
+		}
+		if doc := filedEmail(t, u); doc.Layout != "org:house" || doc.Subject != "Our house layout" {
+			t.Fatalf("the retry filed %q / %q, want the layout the request was accepted with", doc.Layout, doc.Subject)
+		}
+	})
+	t.Run("a replay of a completed run", func(t *testing.T) {
+		i, e, u := emailFixture(t)
+		e.layouts["house"] = layoutRow(t, "house", emailAccount, "active", houseLayout(t))
+		first, err := i.materialize(nestedMaterializeContext(), "u-alice", "", emailArgs("org:house"))
+		if err != nil {
+			t.Fatal(err)
+		}
+		putAway(e)
+		ctx := common.ContextWithRun(materializeContext(), common.RunContext{RunId: "replay", GoalId: "nexus", SourceRunId: "nexus", SourceGoalId: "v1:work:goal:nexus", StepKey: "file", Mode: common.RunModeReplay, OwnerUserId: "u-alice"})
+		again, err := i.materialize(ctx, "u-alice", "", emailArgs("org:house"))
+		if err != nil || again["outputFileId"] != first["outputFileId"] || u.calls != 1 {
+			t.Fatalf("the replay did not serve its completed file: %v %v (uploads %d)", again, err, u.calls)
+		}
+	})
+}
+
+// The composition records the layout its email was written into, so the record
+// says which one and a recipe saved from it can keep it.
+func TestTheCompositionRecordsItsLayout(t *testing.T) {
+	for _, c := range []struct {
+		args materializeArgs
+		want string
+	}{
+		{emailArgs("builtin:letter"), "builtin:letter"},
+		{emailArgs(""), "builtin:article"},
+		{materializeDraft(), ""},
+	} {
+		i, e, _ := emailFixture(t)
+		out, err := i.materialize(nestedMaterializeContext(), "u-alice", "", c.args)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if got := stringOf(e.compositions[stringOf(out["compositionId"])]["layoutId"]); got != c.want {
+			t.Fatalf("%+v recorded layout %q, want %q", c.args, got, c.want)
+		}
+	}
+}
+
+// A recipe keeps the layout its emails are written into, and a run of it is
+// refused as loudly as a request would be when that layout cannot be used.
+func TestRecipeRunWritesIntoItsLayout(t *testing.T) {
+	i, e, _ := emailFixture(t)
+	opener := &directMaterializeGoal{}
+	i.SetGoalOpener(opener)
+	e.recipe = map[string]any{"id": "welcome-recipe", "name": "Welcome", "format": "json", "outputKind": "email_template", "layoutId": "builtin:letter",
+		"description": "A welcome for new subscribers.", "accountIds": []any{emailAccount}}
+	if _, err := i.handleRunRecipe(materializeContext(), map[string]any{"recipeId": "welcome-recipe"}, 0); err != nil {
+		t.Fatal(err)
+	}
+	if opener.calls != 1 || len(e.inputs) != 1 {
+		t.Fatalf("the recipe did not start one composition: opens=%d inputs=%d", opener.calls, len(e.inputs))
+	}
+	for id, input := range e.inputs {
+		raw, err := json.Marshal(input["request"])
+		if err != nil {
+			t.Fatal(err)
+		}
+		var saved executionRequest
+		if err := json.Unmarshal(raw, &saved); err != nil {
+			t.Fatal(err)
+		}
+		layout, err := savedEmailLayout(saved)
+		if err != nil || saved.Args.LayoutId != "builtin:letter" || layout.Layout != "builtin:letter" {
+			t.Fatalf("the recipe run lost its layout: args %q, saved %q (%v)", saved.Args.LayoutId, layout.Layout, err)
+		}
+		if got := stringOf(e.compositions[id]["layoutId"]); got != "builtin:letter" {
+			t.Fatalf("the composition records layout %q", got)
+		}
+	}
+}
+
+func TestRecipeRunRefusesALayoutItCannotUse(t *testing.T) {
+	letter, _ := builtinLayout(t, "builtin:letter")
+	for name, c := range map[string]struct {
+		recipe map[string]any
+		want   string
+	}{
+		"an archived layout": {map[string]any{"outputKind": "email_template", "format": "json", "layoutId": "org:old"},
+			"compose: that layout is archived; restore it first"},
+		"another organization's layout": {map[string]any{"outputKind": "email_template", "format": "json", "layoutId": "org:theirs"},
+			"compose: that layout belongs to another organization"},
+		"a layout that does not exist": {map[string]any{"outputKind": "email_template", "format": "json", "layoutId": "org:gone"},
+			"compose: that layout is not readable by you"},
+		"a layout on a recipe that is not an email": {map[string]any{"format": "markdown", "layoutId": "builtin:letter"},
+			"compose: layoutId applies only to email templates"},
+	} {
+		t.Run(name, func(t *testing.T) {
+			i, e, _ := emailFixture(t)
+			opener := &directMaterializeGoal{}
+			i.SetGoalOpener(opener)
+			e.layouts["old"] = layoutRow(t, "old", emailAccount, "archived", letter)
+			e.layouts["theirs"] = layoutRow(t, "theirs", "other-client", "active", letter)
+			e.recipe = map[string]any{"id": "r1", "name": "Welcome", "description": "A welcome.", "accountIds": []any{emailAccount}}
+			maps.Copy(e.recipe, c.recipe)
+			if _, err := i.handleRunRecipe(materializeContext(), map[string]any{"recipeId": "r1"}, 0); err == nil || err.Error() != c.want {
+				t.Fatalf("refusal = %v, want %q", err, c.want)
+			}
+			if opener.calls != 0 || len(e.compositions) != 0 || len(e.inputs) != 0 {
+				t.Fatalf("a refused recipe run wrote rows: opens=%d %v %v", opener.calls, e.compositions, e.inputs)
+			}
+		})
+	}
+}
+
+// A layout belongs to an email template, and the check is made where every
+// entry point arrives: the capability and a recipe run alike.
+func TestALayoutOutsideAnEmailIsRefusedEverywhere(t *testing.T) {
+	i, e, _ := materializeFixture(t)
+	for _, args := range []map[string]any{
+		{"name": "Notes", "format": "markdown", "layoutId": "builtin:letter"},
+		{"name": "Data", "format": "json", "layoutId": "builtin:letter"},
+	} {
+		if _, err := i.handleMaterialize(nestedMaterializeContext(), args, 0); err == nil || err.Error() != "compose: layoutId applies only to email templates" {
+			t.Fatalf("layoutId on %v: refusal = %v", args, err)
+		}
+	}
+	if len(e.calls) != 0 {
+		t.Fatalf("the refusal reached the engine: %v", e.calls)
+	}
+}
+
+// What the composer wrote, and what Parse makes of it, is the same on every
+// attempt: a refusal is final. It is never read as a passing fault because the
+// words in it happen to look like one (a block id with "eof" or "429" in it).
+func TestARefusalIsNeverRetriedAsTransient(t *testing.T) {
+	for _, id := range []string{"geofence", "promo-429", "timeout-banner"} {
+		t.Run(id, func(t *testing.T) {
+			i, e, u := emailFixture(t)
+			a := emailArgs("builtin:letter")
+			a.Statement = "A welcome"
+			compositionId, input := acceptAsAPerson(t, i, a)
+			var asked []ComposeRequest
+			err := adoptTheRun(anotherReplica(e, u, contentComposer(&asked, emaildoc.Content{Subject: "Hi", Blocks: []emaildoc.ContentItem{{ID: id, Text: text("x")}}})), input)
+			failedWith(t, e, u, compositionId, `compose: the email draft could not be used: the draft wrote to a block this layout does not have: "`+id+`"`, err)
+		})
 	}
 }

@@ -62,6 +62,7 @@ func (a *App) wireWorkerForwarding(
 	appDoor, _ := a.appInference.(*agentworker.AppInference)
 	if nodeServer != nil {
 		handler := agentworker.NewForwardHandler(a.workerRegistry(), integ.Dispatcher().FleetStore(), a.Logger)
+		handler.SetComputerPermissions(a.lookupWorkIntegration())
 		if appDoor != nil {
 			handler.SetAppCallServer(appDoor)
 		}

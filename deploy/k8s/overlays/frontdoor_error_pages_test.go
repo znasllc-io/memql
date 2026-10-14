@@ -59,23 +59,9 @@ var errorPagesOverlays = []string{cloudOverlay, entryOverlay}
 // errorPagesExcluded are the front-door Ingresses that must NOT name the error
 // pages, and why.
 //
-// Two are ruled out by their backend protocol. ingress-nginx builds the custom
-// default backend as a copy of the location's own upstream and keeps the
-// location's protocol: only its built-in default backend is forced back to plain
-// http (template.go buildProxyPass, v1.15.1). `memql error-pages` is a plain
-// HTTP/1.1 server, so each protocol below rules an Ingress out ON ITS OWN
-// ACCOUNT (errorPagesUnfitReason says how): HTTPS is not the GRPC case under
-// another name, and would hold if the gRPC Ingress did not exist. Either way the
-// proxy answers 502, worse than the bare 503 it would replace. The exclusion is
-// pinned by NAME as well as by the protocol rule, so that flipping an Ingress's
-// protocol annotation and adding the default backend in the same edit cannot
-// satisfy the rule by changing the question.
-//
-// One is ruled out by what it serves, not by its protocol, which is plain HTTP:
-// mcp-front-door. Its protocol is empty below and its reason says why.
+// gRPC cannot consume a page. MCP may intentionally have no replicas.
 var errorPagesExcluded = []struct{ name, protocol, reason string }{
 	{name: "api-front-door-grpc", protocol: "GRPC"},
-	{name: "identity-front-door", protocol: "HTTPS"},
 	{name: "mcp-front-door", reason: "mcp is disabled by default -- cloud-entry renders it at 0 replicas -- so on every entry " +
 		"installation the page would answer \"MemQL is being updated, back in a few minutes\" with Retry-After 120 for " +
 		"good, which is false; and MCP is a machine surface, whose clients read the status, not a page"},
@@ -89,11 +75,11 @@ func excludedWhy(protocol, reason string) string {
 	return "backend protocol " + protocol + ": " + errorPagesUnfitReason(protocol)
 }
 
-// plainHTTPBackend reports whether an Ingress's proxy speaks plain HTTP to its
+// pageBackend reports whether an Ingress's proxy speaks plain HTTP to its
 // backends, which is the only thing the error pages can stand behind.
-func plainHTTPBackend(annotations map[string]string) bool {
+func pageBackend(annotations map[string]string) bool {
 	protocol := strings.ToUpper(strings.TrimSpace(annotations[backendProtocolAnnotation]))
-	return protocol == "" || protocol == "HTTP"
+	return protocol == "" || protocol == "HTTP" || (protocol == "HTTPS" && annotations["nginx.ingress.kubernetes.io/proxy-ssl-verify"] == "off")
 }
 
 // errorPagesUnfitReason says why an Ingress with this backend protocol cannot
@@ -103,9 +89,9 @@ func errorPagesUnfitReason(protocol string) string {
 	case "GRPC", "GRPCS":
 		return "grpc_pass would hand the error pages HTTP/2, and they speak HTTP/1.1"
 	case "HTTPS":
-		return "the proxy would open a TLS connection to the error pages, which speak no TLS, and the handshake would fail"
+		return "the ephemeral TLS certificate needs the existing identity setting proxy-ssl-verify off"
 	case "AUTO_HTTP":
-		return "the proxy would use the client's own scheme, so a TLS client gets a TLS connection to the error pages, which speak no TLS"
+		return "the client scheme cannot select between the HTTP and HTTPS Service ports"
 	case "FCGI":
 		return "fastcgi_pass is not HTTP"
 	}
@@ -124,8 +110,8 @@ func TestOnlyPlainHTTPBackendsFitTheErrorPages(t *testing.T) {
 		{set: false, fits: true},
 		{protocol: "HTTP", set: true, fits: true},
 		{protocol: "http", set: true, fits: true},
-		{protocol: "HTTPS", set: true, fits: false},
-		{protocol: "https", set: true, fits: false},
+		{protocol: "HTTPS", set: true, fits: true},
+		{protocol: "https", set: true, fits: true},
 		{protocol: "GRPC", set: true, fits: false},
 		{protocol: "GRPCS", set: true, fits: false},
 		{protocol: "AUTO_HTTP", set: true, fits: false},
@@ -134,8 +120,9 @@ func TestOnlyPlainHTTPBackendsFitTheErrorPages(t *testing.T) {
 		annotations := map[string]string{}
 		if tc.set {
 			annotations[backendProtocolAnnotation] = tc.protocol
+			annotations["nginx.ingress.kubernetes.io/proxy-ssl-verify"] = "off"
 		}
-		if got := plainHTTPBackend(annotations); got != tc.fits {
+		if got := pageBackend(annotations); got != tc.fits {
 			t.Errorf("backend protocol %q (set=%v): fits = %v, want %v", tc.protocol, tc.set, got, tc.fits)
 		}
 		if !tc.fits && strings.Contains(errorPagesUnfitReason(tc.protocol), "not plain HTTP") {
@@ -222,12 +209,16 @@ func assertErrorPagesBackends(t *testing.T, where string, ingresses []annotatedI
 			continue
 		}
 
-		if plainHTTPBackend(annotations) {
+		if pageBackend(annotations) {
 			plain++
-			if !has || got != errorPagesName {
+			want := errorPagesName
+			if strings.EqualFold(annotations[backendProtocolAnnotation], "HTTPS") {
+				want = "error-pages-tls"
+			}
+			if !has || got != want {
 				t.Errorf("%s: %s names no error pages (%s=%q, want %q). When its Service has no ready "+
 					"endpoints a visitor gets ingress-nginx's bare 503, which is what 2026-10-11 looked like.",
-					where, name, defaultBackendAnnotation, got, errorPagesName)
+					where, name, defaultBackendAnnotation, got, want)
 			}
 			continue
 		}
@@ -588,14 +579,14 @@ func assertErrorPagesRender(t *testing.T, overlay string) {
 	for _, p := range c.Ports {
 		ports[p.Name] = p.ContainerPort
 	}
-	if len(ports) != 2 || ports["http"] != 8080 || ports["health"] != 8081 {
-		t.Errorf("%s: error-pages ports are %v, want exactly http:8080 and health:8081", overlay, ports)
+	if len(ports) != 3 || ports["http"] != 8080 || ports["https"] != 8443 || ports["health"] != 8081 {
+		t.Errorf("%s: error-pages ports are %v, want http:8080, https:8443 and health:8081", overlay, ports)
 	}
 	env := map[string]string{}
 	for _, e := range c.Env {
 		env[e.Name] = e.Value
 	}
-	if env["MEMQL_ERROR_PAGES_ADDR"] != ":8080" || env["MEMQL_ERROR_PAGES_HEALTH_ADDR"] != ":8081" {
+	if env["MEMQL_ERROR_PAGES_TLS_ADDR"] != ":8443" || env["MEMQL_ERROR_PAGES_ADDR"] != ":8080" || env["MEMQL_ERROR_PAGES_HEALTH_ADDR"] != ":8081" {
 		t.Errorf("%s: the listener addresses are %q / %q, want :8080 / :8081 -- the same numbers as the container ports, "+
 			"stated here so the subcommand's defaults moving cannot silently move the probe off its port",
 			overlay, env["MEMQL_ERROR_PAGES_ADDR"], env["MEMQL_ERROR_PAGES_HEALTH_ADDR"])
@@ -750,5 +741,24 @@ func TestTheLocalOverlayRendersNoErrorPages(t *testing.T) {
 			"DEFAULT_STACK_TAG's published images, whose memql-edge predates the error-pages subcommand: the pods "+
 			"crash-loop and the install never goes ready. Compose the component in an nginx overlay; do not add "+
 			"it to base or to local.", strings.Join(found, ", "), defaultBackendAnnotation)
+	}
+}
+
+func TestHTTPSFallbackServiceTargetsOnlyThePublicTLSListener(t *testing.T) {
+	for _, overlay := range errorPagesOverlays {
+		rendered := render(t, overlay)
+		var svc errorPagesService
+		namedDocument(t, rendered, "Service", "error-pages-tls", &svc)
+		var dep errorPagesDeployment
+		namedDocument(t, rendered, "Deployment", "error-pages", &dep)
+		if len(svc.Spec.Ports) != 1 || svc.Spec.Ports[0].Port != 443 || svc.Spec.Ports[0].TargetPort != "https" {
+			t.Errorf("%s TLS Service ports: %v", overlay, svc.Spec.Ports)
+		}
+		if !selects(svc.Spec.Selector, dep.Spec.Template.Metadata.Labels) {
+			t.Errorf("%s TLS Service misses page pods", overlay)
+		}
+		if svc.Metadata.Namespace != dep.Metadata.Namespace {
+			t.Errorf("%s TLS Service is in wrong namespace", overlay)
+		}
 	}
 }

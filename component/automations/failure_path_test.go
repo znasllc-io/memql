@@ -292,6 +292,24 @@ func TestAFailureApprovalHashesTheSubjectItStores(t *testing.T) {
 	}
 }
 
+func TestCheckpointCapacityFailureDoesNotInventAnEnvironmentRepair(t *testing.T) {
+	c := &countingClassifier{symptom: work.SymptomEnvironment}
+	message := `function "runAgentTurn" execution failed: runAgentTurn: context checkpoint did not free space; originals were retained`
+	calls := closeWith(t, c, failedRun("v1:work:run:checkpoint", message, 1, 0))
+	if c.calls != 0 {
+		t.Fatalf("known context failure reached the model classifier %d times", c.calls)
+	}
+	_, approval := argsOf(t, lastCallNamed(t, calls, "createWorkApproval"))
+	subject, _ := approval["subject"].(map[string]any)
+	evidence, _ := approval["evidence"].(map[string]any)
+	if approval["kind"] != work.ApprovalKindFeedback || subject["symptom"] != string(work.SymptomHuman) || evidence["ruleId"] != work.RuleIdContextExhausted {
+		t.Fatalf("known context failure became a proposed environment repair: %+v", approval)
+	}
+	if subject["errorMessage"] != message || !work.IsFailureQuestion(approval["options"]) {
+		t.Fatalf("failure lost its exact error or explicit retry/abandon choice: %+v", approval)
+	}
+}
+
 // TestATransientFailureCostsZeroProviderCalls is the design's headline
 // property (work-spine record section E, epic memql#5127 D12): the
 // deterministic table runs FIRST, and a failure it recognises never reaches a
@@ -756,4 +774,26 @@ func lastCallNamed(t *testing.T, calls []string, name string) string {
 	}
 	t.Fatalf("no %s call in %v", name, calls)
 	return ""
+}
+
+func TestBoundedAnalysisFailureNeverClassifiesOrRequestsApproval(t *testing.T) {
+	for _, failure := range []error{errors.New("connection reset"), errors.New("provider offline"), &memql.RunCeilingError{}} {
+		t.Run(failure.Error(), func(t *testing.T) {
+			run := failedRun("analysis", failure.Error(), 1, 0)
+			run.Fail(failure)
+			recorder := &budgetAnsweringExecutor{run: goalRun("analysis", 0)}
+			classifier := &countingClassifier{symptom: work.SymptomPlan}
+			journal := newWorkJournal(recorder, nil)
+			journal.terminalFailures = true
+			journal.classifier = classifier
+			journal.closeRun(context.Background(), run, "")
+			if classifier.calls != 0 {
+				t.Fatal("analysis failure spent a classification call")
+			}
+			joined := strings.Join(recorder.calls, "\n")
+			if !strings.Contains(joined, `status: "failed"`) || strings.Contains(joined, "createWorkApproval") || strings.Contains(joined, `status: "waiting"`) {
+				t.Fatalf("analysis did not end terminally: %s", joined)
+			}
+		})
+	}
 }

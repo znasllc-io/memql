@@ -173,14 +173,14 @@ function ReplicaPanel({
 }) {
   return (
     <Panel label="Workbench replicas">
-      <div className="os-head">
-        <Subhead meta={listCount(source?.snapshot)}>Workbench replicas</Subhead>
-        <div className="os-head-actions">
-          {feedIsBehind(state.nodeState) ? (
-            <AutoRefresh onRefresh={state.reseedNodes} />
-          ) : null}
-        </div>
-      </div>
+      {/* `null`, not `undefined`, while the feed is not behind: the heading
+          keeps its row, so it does not change shape when the refresh comes. */}
+      <Subhead
+        meta={listCount(source?.snapshot)}
+        actions={feedIsBehind(state.nodeState) ? <AutoRefresh onRefresh={state.reseedNodes} /> : null}
+      >
+        Workbench replicas
+      </Subhead>
 
       {state.nodeError ? (
         <Notice

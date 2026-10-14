@@ -272,8 +272,9 @@ func (*DepthExpr) expressionNode() {}
 
 // CountExpr aggregates its target expression to a numeric row count
 // instead of materializing the matching rows. The query returns a
-// self-describing {count: N} envelope. Like the other directive
-// wrappers it must be the outermost node around a query expression.
+// self-describing {count: N, atLeast: B} envelope. Like the other
+// directive wrappers it must be the outermost node around a query
+// expression.
 type CountExpr struct {
 	Target ExpressionNode
 }
@@ -1970,6 +1971,7 @@ func (*ToolDecl) node() {}
 // @description(\"...\") @enum(\"a\", \"b\") @default(\"x\")
 // @autoInjected`.
 type ToolFieldDecl struct {
+	Fields       []ToolFieldDecl // Explicit object fields; nil means an open object.
 	Name         string
 	Type         string   // "string" / "integer" / "int" / "number" / "float" / "boolean" / "bool" / "object" / "array"
 	Required     bool     // @required flag

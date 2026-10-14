@@ -5,6 +5,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"strings"
 	"time"
@@ -120,6 +121,12 @@ func (e *StructuredToolError) JSON() string {
 func ClassifyToolError(err error) *StructuredToolError {
 	if err == nil {
 		return nil
+	}
+	// A reported tool outcome already carries its replay policy. In particular,
+	// an uncertain worker failure must not become retryable through text matching.
+	var reported *StructuredToolError
+	if errors.As(err, &reported) && reported != nil {
+		return reported
 	}
 	// If the engine already produced a StructuredError, map its code
 	// directly -- it's the most authoritative signal we have.

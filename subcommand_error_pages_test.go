@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"crypto/tls"
 	"io"
 	"net"
 	"net/http"
@@ -43,6 +44,10 @@ func TestErrorPagesRejectsAnArgumentItDoesNotTake(t *testing.T) {
 
 func TestErrorPagesAddressesDefaultToTheDeploymentPorts(t *testing.T) {
 	t.Setenv("MEMQL_ERROR_PAGES_ADDR", "")
+	t.Setenv("MEMQL_ERROR_PAGES_TLS_ADDR", "")
+	if got := errorPagesTLSAddr(); got != ":8443" {
+		t.Errorf("default TLS address = %q", got)
+	}
 	t.Setenv("MEMQL_ERROR_PAGES_HEALTH_ADDR", "")
 	if got := errorPagesAddr(); got != ":8080" {
 		t.Errorf("default public address = %q, want :8080", got)
@@ -180,7 +185,7 @@ func startErrorPages(t *testing.T, pages http.Handler, drain, shutdownTimeout ti
 		stop:   cancel,
 		done:   make(chan int, 1),
 	}
-	go func() { srv.done <- serveErrorPages(ctx, public, probe, pages, drain, shutdownTimeout) }()
+	go func() { srv.done <- serveErrorPages(ctx, []net.Listener{public}, probe, pages, drain, shutdownTimeout) }()
 	t.Cleanup(cancel)
 	return srv
 }
@@ -197,7 +202,7 @@ func (s *errorPagesServer) waitFor(t *testing.T, timeout time.Duration) int {
 }
 
 func TestErrorPagesServesWhileRunningAndStopsCleanly(t *testing.T) {
-	srv := startErrorPages(t, errorpages.Handler("memql.example"), 0, time.Second)
+	srv := startErrorPages(t, errorpages.Handler("memql.example", "MemQL"), 0, time.Second)
 
 	// The platform's host gets the branded page, as a 503 that says to retry.
 	resp, body := errorPagesGet(t, http.MethodGet, srv.public+"/anything/at/all", "os.memql.example", nil)
@@ -250,7 +255,7 @@ func TestErrorPagesServesWhileRunningAndStopsCleanly(t *testing.T) {
 // the host or the headers, and 200 ok only on the probe listener, which the
 // kubelet reaches at the pod's own address.
 func TestErrorPagesHealthzIsAnsweredOnlyOnTheProbeListener(t *testing.T) {
-	srv := startErrorPages(t, errorpages.Handler("memql.example"), 0, time.Second)
+	srv := startErrorPages(t, errorpages.Handler("memql.example", "MemQL"), 0, time.Second)
 
 	forwarded := http.Header{"X-Forwarded-For": {"203.0.113.9"}, "X-Real-IP": {"203.0.113.9"}, "X-Request-ID": {"abc"}}
 	for _, host := range []string{"", "10.42.1.7:8080", "api.memql.example", "os.memql.example", "www.customer.com"} {
@@ -359,7 +364,7 @@ func TestErrorPagesRefusesTwoListenersOnOnePort(t *testing.T) {
 	sharing := &portOverride{Listener: probe, addr: public.Addr()}
 	ctx, cancel := context.WithTimeout(context.Background(), 300*time.Millisecond)
 	defer cancel()
-	code := serveErrorPages(ctx, public, sharing, errorpages.Handler("memql.example"), 0, time.Second)
+	code := serveErrorPages(ctx, []net.Listener{public}, sharing, errorpages.Handler("memql.example", "MemQL"), 0, time.Second)
 	if code != 1 {
 		t.Fatalf("two listeners on one port exited %d, want 1", code)
 	}
@@ -381,7 +386,7 @@ func (p *portOverride) Addr() net.Addr { return p.addr }
 // listeners, and must not stop before it has elapsed.
 func TestErrorPagesKeepsServingDuringTheDrain(t *testing.T) {
 	const drain = time.Second
-	srv := startErrorPages(t, errorpages.Handler("memql.example"), drain, time.Second)
+	srv := startErrorPages(t, errorpages.Handler("memql.example", "MemQL"), drain, time.Second)
 
 	if resp, _ := errorPagesGet(t, http.MethodGet, srv.public+"/", "os.memql.example", nil); resp.StatusCode != http.StatusServiceUnavailable {
 		t.Fatalf("before the signal: %d, want 503", resp.StatusCode)
@@ -434,5 +439,92 @@ func TestErrorPagesExitsOneWhenARequestWillNotFinish(t *testing.T) {
 	srv.stop()
 	if code := srv.waitFor(t, 10*time.Second); code != 1 {
 		t.Errorf("a stop that left a request unfinished exited %d, want 1", code)
+	}
+}
+
+func TestErrorPagesTLSAndHTTPKeepPublicHealthUnavailable(t *testing.T) {
+	public, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	secure, err := listenErrorPagesTLS("127.0.0.1:0")
+	if err != nil {
+		public.Close()
+		t.Fatal(err)
+	}
+	probe, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		public.Close()
+		secure.Close()
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	done := make(chan int, 1)
+	go func() {
+		done <- serveErrorPages(ctx, []net.Listener{public, secure}, probe, errorpages.Handler("example.test", "Acme"), 0, time.Second)
+	}()
+	// Match identity's existing upstream proxy: encryption without CA verification.
+	transport := &http.Transport{TLSClientConfig: &tls.Config{InsecureSkipVerify: true}} // internal fallback certificate
+	defer transport.CloseIdleConnections()
+	client := &http.Client{Transport: transport, Timeout: time.Second}
+	for _, tc := range []struct {
+		url    string
+		status int
+	}{
+		{"http://" + public.Addr().String() + "/healthz", 503},
+		{"https://" + secure.Addr().String() + "/healthz", 503},
+		{"https://" + secure.Addr().String() + "/login", 503},
+		{"http://" + probe.Addr().String() + "/healthz", 200},
+	} {
+		req, _ := http.NewRequest(http.MethodGet, tc.url, nil)
+		req.Host = "identity.example.test"
+		response, err := client.Do(req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		body, _ := io.ReadAll(response.Body)
+		response.Body.Close()
+		if response.StatusCode != tc.status {
+			t.Errorf("%s: status=%d want %d", tc.url, response.StatusCode, tc.status)
+		}
+		if tc.status == 503 && (!strings.Contains(string(body), "Acme is temporarily unavailable.") || strings.Contains(string(body), "MemQL")) {
+			t.Errorf("wrong outage page: %s", body)
+		}
+	}
+	cancel()
+	select {
+	case code := <-done:
+		if code != 0 {
+			t.Errorf("shutdown=%d", code)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("listeners did not stop")
+	}
+	for _, ln := range []net.Listener{public, secure, probe} {
+		conn, err := net.DialTimeout("tcp", ln.Addr().String(), time.Second)
+		if err == nil {
+			conn.Close()
+			t.Errorf("listener %s survived shutdown", ln.Addr())
+		}
+	}
+}
+
+func TestErrorPagesTLSListenFailureClosesOtherListeners(t *testing.T) {
+	hermeticErrorPagesEnv(t)
+	public, probe := freeAddr(t), freeAddr(t)
+	t.Setenv("MEMQL_ERROR_PAGES_ADDR", public)
+	t.Setenv("MEMQL_ERROR_PAGES_HEALTH_ADDR", probe)
+	t.Setenv("MEMQL_ERROR_PAGES_TLS_ADDR", busyAddr(t))
+	if code := runErrorPagesSubcommand(nil); code != 1 {
+		t.Fatalf("TLS bind failure exited %d", code)
+	}
+	for _, address := range []string{public, probe} {
+		listener, err := net.Listen("tcp", address)
+		if err != nil {
+			t.Errorf("failed start leaked listener %s: %v", address, err)
+		} else {
+			listener.Close()
+		}
 	}
 }

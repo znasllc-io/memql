@@ -16,6 +16,151 @@ The earlier audit/safety jobs remain count observations; this central job is now
 the actual archive/delete path. Worker soft deletion remains a UI lifecycle step;
 physical retention measures from the latest version, including that tombstone.
 
+## Declared concept retention
+
+`@retention(ttl="30d", keepLatest=true, archive="required")` opts a graph
+concept into the shared version-retirement sweep. The required archive uses
+`MEMQL_AZURE_BLOB_CONTAINER`; `archive="none"` explicitly makes the selected
+history disposable. Unmarked concepts keep their current policies.
+
+The hourly platform automation invokes `integration.retention.sweep` under
+cluster-owner authority. Each page scans at most 100 versions, has a 20-second
+deadline and a 32 MiB archive budget, and compares downloaded bytes before an
+exact-key delete. Each deletion also compares the archived row's contents and
+rechecks keep-latest. A row changed since selection stays. Oversized individual
+versions stay and are counted; smaller rows continue. Public and secret row
+tables both use the policy, and physical deletions invalidate cached reads across
+the cluster. Row admission failures preserve the batch.
+
+`concept_retention_progress` stores the cursor and a generation-fenced, expiring
+claim. A replacement never needs the previous process's memory. A complete walk
+resets its cursor so previously protected or backdated rows get another pass;
+a policy change has its own cursor. Dry runs change neither rows nor progress.
+Archive objects under `retention/concepts/` contain gzip NDJSON with the source
+`table` and the complete stored row, including schema and provenance.
+
+The existing log sweep reads logLine's retention declaration and verifies each
+archive before dropping a day's chunks. It continues to use
+`MEMQL_LOGS_ARCHIVE_CONTAINER` (falling back to `MEMQL_AZURE_BLOB_CONTAINER`).
+
+## Current liveness observations
+
+Worker registration heartbeats, cluster-node health and mesh observations, and
+module-readiness reports have one current row per record in `memory_liveness`.
+Repeated observations replace that row instead of appending history. The normal
+engine read path merges this table with `MemoryNodes` before filtering, sorting,
+authorization and pagination. Its `createdAt` remains the observation version,
+so live feeds and reads from another replica order updates consistently.
+
+The first record and changes outside the closed observation-field list still
+append to `MemoryNodes`. A business change clears its preceding observation in
+the same transaction. Every engine write to these concepts carries a version
+fence: a concurrent change rejects the stale decision rather than overwriting
+it. Normal ownership checks, schema validation and cluster event publication
+remain in the mutation path. Retiring all base versions also removes the current
+observation. The earlier bounded status-history sweep continues to clear legacy
+versions and keeps the latest base record.
+
+Historical reads retain business versions and, when within the requested time,
+the current observation. Superseded heartbeat samples are deliberately absent;
+backups retain the durable business records, and fresh heartbeats rebuild current
+liveness after a restore. During an upgrade, `memory_liveness_readers` must show
+recent support from every non-stopped node before `memory_liveness_storage`
+enables the switch. Offline nodes still block it. Downgrading after activation
+requires a complete backup restore; an old binary cannot read the observation
+store.
+
+## Steady writers
+
+Custom-domain `lastCheckedAt` and mirror `lastReconcileAt` / `lastAttemptAt`
+use the same current-observation store. Rechecking a healthy domain or a mirror
+with no drift advances its freshness and scheduling watermark without another
+business version. Changes to status, failures, drift or configuration still append
+history. Identical repeated results do nothing. This extension has its own
+`memory_reconcile_observation_readers` handshake, so an older reader that knows
+only the first three liveness concepts cannot enable it prematurely.
+
+Observation-only writes still refresh live readers and invalidate caches across
+replicas, but do not release a held scheduled work journal. Unchanged inbound
+retries also suppress graph events: the comparison runs after validation,
+create-only fields and read-merge, under the row's transaction fence. A retry
+cannot reset a processed delivery's state or its original arrival metadata.
+
+Reputation flushes acknowledge successfully saved windows and skip unchanged
+ones; failed saves remain eligible for retry. The magic-link sweep excludes
+already consumed requests. Package polling writes only a changed upstream head
+or availability, and seed materialization compares against a fresh read rather
+than a replica's cached result. These guards keep normal idle polling from
+creating business history.
+
+## Shared row schemas
+
+`MemoryNodes` and `SecretMemoryNodes` store an immutable schema reference and
+its original `$id`. The schema body lives once in `memory_node_schemas`, keyed
+by its content fingerprint. Different historical definitions remain distinct;
+reads resolve the version a row actually used, including deletion schemas.
+Insert triggers also cover direct writers and backup restores. A missing
+reference is refused rather than returned as a partial schema.
+
+First activation requires the explicit startup setting
+`MEMQL_DATABASE_SCHEMA_REFERENCES_ACTIVATE=true` as well as every registered
+node that has not stopped recently advertising schema-reference support in
+`memory_schema_readers`. The setting defaults to false; held replicas still
+advertise support. An offline node still blocks: it may be serving reads.
+An orphan node must be verified gone before retiring it through the existing
+topology lifecycle. Retirement alone does not authorize activation.
+
+Use two separate GitOps rollouts:
+
+1. Upgrade all readers with the setting absent or false on every replica.
+   Keep it false through the rollback observation window. Verify all old serving
+   processes and streams have exited, including product BFFs; a persisted
+   stopped row can precede transport closure. Check serving readiness and a
+   full-schema backup. This phase keeps both old and new writes inline.
+2. Select a known-good reference-capable rollback image, then set true in the
+   desired startup configuration and roll the affected pods. ConfigMap-only
+   changes do not update existing process environment. One opted-in replica
+   is enough to permit the cluster-wide transition after the reader check;
+   false replicas do not veto it. Verify the durable flag and conversion
+   progress with the read-only query below.
+
+`memory_schema_storage.references_enabled` remains set once activated. Returning
+the startup setting to false neither expands stored references nor stops new
+normalization or remaining conversion. Do not roll an incompatible reader back
+into this cluster: rollback images must understand schema references. An older
+engine requires a tested full-schema restore with an explicit recovery window,
+not an uninterrupted image-only rollback. Other release changes remain subject
+to their own compatibility checks even while schema activation is held.
+
+Public graph reads, repository reads, backups and retention archives expand
+references to full schemas. Backups and archives therefore remain self-contained
+and keep their existing format. The catalog is not garbage-collected.
+
+Existing inline schemas are converted after startup, in batches of at most
+500 rows. A shared cursor row is locked in the same transaction as each batch;
+other replicas skip a held batch, and a replacement resumes committed progress.
+Each table is eligible at most once every five seconds, each batch has a
+five-second deadline, and failures back off for one minute. Payloads, provenance,
+IDs and version timestamps are unchanged. The conversion runs independently
+of node liveness and never holds startup for a history rewrite. Schema-only
+updates do not enqueue work-run recovery invalidations.
+
+Inspect conversion progress with:
+
+```sql
+SELECT references_enabled FROM memory_schema_storage;
+SELECT table_name, cursor_id, cursor_at, completed, next_at
+FROM memory_schema_compaction;
+```
+
+Conversion makes old row storage reusable; it does not promise to shrink the
+volume immediately. New writes stop copying schema bodies after the reader
+readiness gate enables normalization. Older and converted rows can coexist during
+conversion. Downgrading to an engine without schema-reference support requires
+a full-schema backup restore; the down migration refuses to discard the catalog.
+
+## Incident context
+
 The September 2026 incident audit found 103,324 runs across about 17 days:
 98,838 scheduled, 2,481 webhook-triggered, 1,667 startup, 323 shutdown, four manual
 and two system goal runs. Approximately 5,500–7,800 runs/day reflected the
@@ -129,17 +274,14 @@ true` in the result; the policies after it still run with their shares. The
 system-run policy is fifth of eight, so with nothing to do before it, it may
 spend a quarter of the four minutes, a minute.
 
-Nothing is stored between nights. The next pass starts again at the oldest
-version still stored, which is not always where the work is: a version no policy
-retires (a person's run, an old version of live work) anchors the start, and the
-windows from there to the work are read again every night and found to hold no
-candidate. A window with no version stored at all is jumped, so a version dated
-1970 costs a few reads and not tens of thousands; a window that holds versions
-no policy retires is read and passed, at about 21 ms at 5,000 runs a day, so
-roughly 10 to 30 s per year of installation age, per policy. A backlog is
-retired over as many nights as it takes, oldest first, and a persisted low-water
-mark or an index on `(concept, "createdAt")` that would end the re-walk is
-deferred to release 2.
+Completed pages and day windows are checkpointed in `work_retention_progress`,
+keyed by concept, policy and configured lifetime. A different cron leader resumes
+from that point. A generation fence refuses a stale replica's attempt to rewind
+it, and dry runs neither consume nor alter progress. A complete traversal resets
+the checkpoint: dependency-protected records, denied rows and backdated inserts
+must be reconsidered on a later cycle. The `(concept, createdAt, id)` index makes
+these day probes cheap even when years of protected history remain. Empty spans
+are skipped directly to the next stored version.
 
 Two statements were the ones that timed out. The batch's version load joined the
 parents' lookup to the children's with an OR, which the planner answers by
@@ -153,16 +295,13 @@ retired 21,832 runs in ten minutes and fifty seconds now retires all 43,019 in a
 little over a minute. The measurements and the plans are in the header comment of
 `operationalRetention` (`integrations/work/operational_retention.go`).
 
-Not bounded by a day: the goal policy's "no run of it remains" compares every run
-version with the goal and no index serves it (0.34 s a read at 600,000 run
-versions, 1.26 s with cold buffers). That is accepted for this release; it runs
-last, so a failure there costs nothing that went before it, and the partial
-expression index on the run's `goalId` that would bound it is deferred to
-release 2. The journal sweep's expired-rows read takes the latest version of
-every id of one concept (0.41 s for 400,000 model-call versions) and grows with
-the concept; windowing it is deferred to release 2. It no longer decides the
-night: `workRetentionSweep` runs the operational policies even when the journal
-half fails, and returns both errors.
+The goal policy's dependency check now uses a partial expression index on
+normalized `goalId`, matching both canonical and historical bare references.
+Index migrations use the verified per-chunk builder: interrupted builds and
+missing chunk coverage are repaired before success is reported. Journal detail
+reads use the same hundred-row day windows and latest-version/active-parent
+checks as operational retention. `workRetentionSweep` still runs both halves
+independently and returns both errors if they fail.
 
 ## Safeguards
 
@@ -186,6 +325,26 @@ half fails, and returns both errors.
   or child owned by a user preserves the parent. Longer detail policies win.
 - Index migrations build one Timescale chunk per transaction, serialize index
   builders, and verify coverage after interrupted-build repair.
+
+## Owner storage warning
+
+MemQL OS reads the existing `database-health` Kubernetes Event through the
+owner-only `clusterStorageStatus` builtin on its ordinary stream. The read
+verifies the Event's source and current CloudNativePG cluster UID, so a report
+from a replaced installation cannot describe the new one. The shared base grants
+only `get` on that named Event and cluster. There is no new monitor or stored
+health history in the engine.
+
+The OS uses the monitor's data/WAL capacity warning (over 80%). Owners see one
+notice above the dock, opening Cluster → Readiness for usage and measurement
+time. Data usage is the monitor's estimate from summed database sizes and
+configured capacity; WAL usage comes from the exporter. It is not a filesystem
+free-space measurement. The five-minute monitor is read once a minute while the
+OS is visible and connected. Reports older than fifteen minutes, future reports,
+missing measurements and read failures are unavailable, never zero. A previously
+seen warning remains until a fresh complete report clears it. Other roles neither
+request nor render the report, and the native capability independently enforces
+the owner gate.
 
 ## Verify a deployment
 

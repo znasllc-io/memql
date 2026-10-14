@@ -654,6 +654,10 @@ func (r *Router) walkChain(
 
 	for idx, rawEntry := range chain {
 		entryDoor := doorFor(rawEntry)
+		if req.NoPaidProviders && entryDoor == DoorFederation {
+			report.note(rawEntry, "paid providers are forbidden by this run's execution ceiling")
+			continue
+		}
 
 		// THE FEDERATION HOP ASKS THE GUARD FIRST, and only when a LOCAL
 		// door preceded it in the chain. That condition is the whole
@@ -693,6 +697,10 @@ func (r *Router) walkChain(
 			return nil, err
 		}
 		for ci, cand := range candidates {
+			if req.NoPaidProviders && cand.Door == DoorFederation {
+				report.note(cand.Name, "paid providers are forbidden by this run's execution ceiling")
+				continue
+			}
 			if banned[cand.Name] {
 				report.note(cand.Name, "excluded by the rule that chose this chain")
 				continue
@@ -928,6 +936,11 @@ func (r *Router) refusalWith(
 // (nil, zero, false) when the provider is unregistered, unavailable,
 // or doesn't implement the interface.
 func (r *Router) providerLookup(ctx context.Context, req ResolveRequest, name string, mod providerModality) (any, Resolved, bool) {
+	// Rechecked for call-time fallback and cloud consent, which may resolve a
+	// provider after the initial chain walk has completed.
+	if req.NoPaidProviders && doorFor(name) == DoorFederation {
+		return nil, Resolved{}, false
+	}
 	entry, ok := r.providers.EntryForUser(ctx, req.UserId, name)
 	if !ok || !entry.Available || entry.Client == nil {
 		return nil, Resolved{}, false

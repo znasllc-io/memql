@@ -73,6 +73,17 @@ func ArtifactHash(subject map[string]any) string {
 	return hex.EncodeToString(h.Sum(nil))
 }
 
+// HumanQuestionID binds a native question to one explicit execution request.
+// runID is bare. Omitting rerunRequestID preserves the original receipt bytes;
+// an explicit rerun must not reuse a prior execution's answer.
+func HumanQuestionID(runID, stepKey, kind, artifactHash, rerunRequestID string) string {
+	identity := map[string]any{"run": runID, "step": stepKey, "question": artifactHash, "kind": kind}
+	if rerunRequestID != "" {
+		identity["rerunRequestId"] = rerunRequestID
+	}
+	return "question-" + ArtifactHash(identity)[:32]
+}
+
 func writeCanonical(h interface{ Write([]byte) (int, error) }, m map[string]any) {
 	keys := make([]string, 0, len(m))
 	for k := range m {
@@ -329,4 +340,10 @@ func short(h string) string {
 		return h[:12]
 	}
 	return h
+}
+
+// IsModelCallCheckpoint identifies native pre-tool provider suspensions. The
+// checkpoint itself is validated again by the execution replica before use.
+func IsModelCallCheckpoint(subject map[string]any) bool {
+	return subject["providerFailure"] == "model_call_ceiling"
 }

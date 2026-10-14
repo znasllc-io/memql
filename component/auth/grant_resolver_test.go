@@ -369,7 +369,7 @@ func TestEffectiveCapabilitiesCarriesProvenance(t *testing.T) {
 			allow(VerbExecute, part),
 			{Verb: VerbCreate, Resource: "app:other", Effect: GrantAllow, Inactive: true},
 		}},
-		group: map[string][]Grant{"g1": {allow(VerbRead, "app:campaigns")}},
+		group: map[string][]Grant{"g1": {allow(VerbRead, "app:email")}},
 	}
 	installGrantFake(t, src)
 	subject := Subject{Role: "user", UserId: "u1", GroupIds: []string{"g1"}}
@@ -387,8 +387,8 @@ func TestEffectiveCapabilitiesCarriesProvenance(t *testing.T) {
 		t.Fatalf("execute part = %+v, want held from user", d)
 	}
 	// Only a group grant names it.
-	if d := got[VerbRead+" app:campaigns"]; !d.Held || d.Source != SourceGroup {
-		t.Fatalf("read app:campaigns = %+v, want held from group", d)
+	if d := got[VerbRead+" app:email"]; !d.Held || d.Source != SourceGroup {
+		t.Fatalf("read app:email = %+v, want held from group", d)
 	}
 	// An inactive grant neither decides nor widens the universe.
 	if _, present := got[VerbCreate+" app:other"]; present {

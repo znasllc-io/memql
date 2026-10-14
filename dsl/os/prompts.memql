@@ -1,0 +1,10 @@
+/// Explain a pending request using bounded saved evidence only.
+@level("fast")
+@templateFile("prompts/approvalReply.tmpl")
+prompt askApprovalReply { question string! evidence string! }
+
+/// Independently review a pending request without acquiring its authority.
+@level("strong")
+@templateFile("prompts/approvalSecondOpinion.tmpl")
+prompt askApprovalSecondOpinion { question string! evidence string! }
+

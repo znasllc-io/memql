@@ -17,11 +17,12 @@ import (
 // Request is the delivery-relevant projection of an outboundRequest row
 // handed to a Transport.
 type Request struct {
-	ID      string
-	Medium  string
-	Target  string
-	Subject string
-	Payload string
+	ID       string
+	Medium   string
+	Target   string
+	Subject  string
+	Payload  string
+	HTMLBody string
 	// TargetSecret is the v1:platform:globalSecret NAME whose value is the
 	// webhook URL (memql#5480). When it is set, the row's Target holds only
 	// the descriptor secret:<NAME>; the worker resolves the value and hands
@@ -90,6 +91,7 @@ func (t *EmailTransport) Deliver(ctx context.Context, req Request) error {
 		To:       req.Target,
 		Subject:  req.Subject,
 		TextBody: req.Payload,
+		HTMLBody: req.HTMLBody,
 	}, email.SendAs{})
 }
 

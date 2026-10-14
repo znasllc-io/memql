@@ -120,21 +120,26 @@ stop. The document opens in Review, where its empty page offers **Describe
 document**, which sends your description to the Library's revision workflow as a
 proposal you approve, and **Write in Source**. A name is a file name, not a path,
 and the cluster adds the `.md` extension itself, so `Plan` and `Plan.md` both make
-`Plan.md`. New Markdown and **Create Email from Examples** check a name as you type
+`Plan.md`. New Markdown and **New Email** check a name as you type
 it with the same rule as the OS composer, and say what is wrong: an empty name, a
 slash, a name over 150 characters, or nothing before the extension. Both make
 their files through the same SDK helper the OS uses, the one way a client creates
 a file. Uploading bytes you already have, such as **Markdown: Insert
 Image** and a review attachment, stays an upload.
 
-**Create Email from Examples** starts with an organization and reference images,
-files, or a ZIP of resources, followed by a short brief. MemQL Materializer
-captures the sources, uses its model router for visual understanding and
-composition, and records the work in Nexus. The output is an editable
-`*.email.json` containing a subject, HTML, and plain-text alternative. Source,
-preview, and split modes share the same buffer. Reference processing is explicit;
-opening a ZIP in Files still downloads it intact. Draft generation does not
-publish a template to Campaigns or send an email.
+**New Email** opens a page to choose an organization, one of four built-in
+layouts (Confirmation, Letter, Article or Spotlight), or a saved organization
+layout, and a name. Start from the layout or describe the email with references
+and pictures to use; MemQL writes the content blocks and keeps the brand blocks.
+Closing the page keeps writing running; reopening New Email for the organization
+resumes it. Design, Source and Split share the same buffer. Design shows desktop,
+mobile and plain-text previews, block editing, pictures, Theme and Preview with
+sample values. Design needs the cluster; Source works offline. Publish saves the
+file as a template in the Email app, and publishing the same file updates that
+template. Resolve displayed issues first. Save as layout reuses the design for
+future emails; local files use Save to MemQL first. References are limited to
+64 files and 16 MiB, included pictures to eight and 1 MiB total, and emails to
+2 MiB. Publishing does not send mail.
 
 The source package is in `editors/productivity`. Build the shared SDK and core
 extension, then run `npm ci`, `npm run compile`, and `npm run package` in that

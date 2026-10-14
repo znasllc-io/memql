@@ -1,5 +1,6 @@
 import { act, fireEvent, render, screen, within } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
+import { readTheBar } from "../readTheBar";
 import type { Row } from "@znasllc-io/memql-sdk-core/client";
 
 const h = vi.hoisted(() => ({ connection: null as unknown }));
@@ -12,7 +13,7 @@ vi.mock("../../src/live/connection", () => ({
 
 const { NexusApp } = await import("../../src/apps/nexus/NexusApp");
 const { LocalNexusSettingsStore } = await import("../../src/apps/nexus/settings");
-const { approvalRow, fakeConnection, goalRow, runRow, stepRow, withSession } = await import(
+const { approvalRow, fakeConnection, goalRow, rowsResult, runRow, stepRow, withSession } = await import(
   "./harness"
 );
 
@@ -377,13 +378,51 @@ describe("the acts legal from the run's state", () => {
     const conn = seeded();
     mount(conn);
     await openGoal();
-    fireEvent.click(screen.getByText("Close this goal"));
+    expect(screen.queryByText("Close this goal")).toBeNull();
     expect(conn.query.cancelGoal).not.toHaveBeenCalled();
     fireEvent.change(screen.getByLabelText(/^Type the goal's own words to close it/), {
       target: { value: "Reconcile last month's ledger against the bank export" },
     });
+    await readTheBar();
     fireEvent.click(screen.getByText("Close this goal"));
     expect(conn.query.cancelGoal).toHaveBeenCalled();
+  });
+
+  it("closes a multiline goal from its single-line words and preserves pending refusal and retry", async () => {
+    const statement = "Reconcile the ledger.\n\nReport\tall differences.";
+    const words = "Reconcile the ledger. Report all differences.";
+    const conn = fakeConnection({ goals: [goalRow({ id: "g1", statement })] });
+    let refuse!: (error: Error) => void;
+    conn.query.cancelGoal.mockImplementationOnce(() => new Promise((_, reject) => { refuse = reject; }));
+    mount(conn, { id: "multiline-close", payload: { goalId: "g1" } });
+    const input = await screen.findByLabelText(/^Type the goal's own words to close it/) as HTMLInputElement;
+    expect(input.type).toBe("text");
+    fireEvent.change(input, { target: { value: "  Reconcile  the ledger.  Report all differences.  " } });
+    await readTheBar();
+    fireEvent.click(screen.getByText("Close this goal"));
+    expect(conn.query.cancelGoal).toHaveBeenCalledExactlyOnceWith({ goalId: "g1", reason: "Closed from MemQL OS" });
+    const pending = screen.getByRole("button", { name: /^Close this goal and ask every run/ }) as HTMLButtonElement;
+    expect(pending.disabled).toBe(true);
+    expect(pending.getAttribute("aria-busy")).toBe("true");
+    fireEvent.click(pending);
+    expect(conn.query.cancelGoal).toHaveBeenCalledTimes(1);
+    await act(async () => refuse(new Error("The cluster refused this request.")));
+    expect(screen.getByText("The goal was not closed.")).toBeTruthy();
+    expect(screen.getByText("The cluster refused this request.")).toBeTruthy();
+    expect(input.value).toBe("  Reconcile  the ledger.  Report all differences.  ");
+    for (const mismatch of ["   ", "Reconcile the ledger.", words.toLowerCase(), words.replace("differences.", "differences")]) {
+      fireEvent.change(input, { target: { value: mismatch } });
+      expect(screen.queryByText("Close this goal")).toBeNull();
+    }
+    expect(conn.query.cancelGoal).toHaveBeenCalledTimes(1);
+    fireEvent.change(input, { target: { value: words } });
+    conn.query.cancelGoal.mockResolvedValueOnce(rowsResult([]));
+    await readTheBar();
+    fireEvent.click(screen.getByText("Close this goal"));
+    await act(async () => {});
+    expect(conn.query.cancelGoal).toHaveBeenCalledTimes(2);
+    expect(input.value).toBe("");
+    expect(screen.queryByText("Close this goal")).toBeNull();
   });
 });
 

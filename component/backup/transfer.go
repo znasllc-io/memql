@@ -276,6 +276,10 @@ func eachRow(ctx context.Context, db bun.IDB, table string, fn func(Row) error) 
 		if len(batch) == 0 {
 			return nil
 		}
+		// Backups are self-contained, including every historical schema version.
+		if err := memoryNodes.HydrateSchemas(ctx, db, batch); err != nil {
+			return err
+		}
 		for i := range batch {
 			if err := fn(rowFrom(table, batch[i])); err != nil {
 				return err

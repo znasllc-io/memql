@@ -1,6 +1,8 @@
 import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
+import { betweenTheClicks, readTheBar, useFakeDate } from "../readTheBar";
+
 const h = vi.hoisted(() => ({
   connection: null as unknown,
   mint: vi.fn(),
@@ -326,6 +328,7 @@ describe("revoking", () => {
     ).toBeTruthy();
     expect(confirmSpy).not.toHaveBeenCalled();
 
+    await readTheBar();
     await act(async () => {
       fireEvent.click(
         within(panel).getByRole("button", { name: "Revoke Nightly export job now" }),
@@ -351,6 +354,7 @@ describe("revoking", () => {
     const panel = await openCredentials(conn);
 
     fireEvent.click(await within(panel).findByRole("button", { name: "Revoke Nightly export job" }));
+    await readTheBar();
     await act(async () => {
       fireEvent.click(
         within(panel).getByRole("button", { name: "Revoke Nightly export job now" }),
@@ -359,6 +363,51 @@ describe("revoking", () => {
 
     expect(await screen.findByText("that credential is not yours to revoke")).toBeTruthy();
     expect(within(panel).getByRole("button", { name: "Revoke Nightly export job now" })).toBeTruthy();
+  });
+});
+
+// THE QUESTION STANDS WHERE THE CLICK THAT ASKED IT LANDED (memql#6033). It is
+// outside any bar, so the second click of a double-click on Revoke used to
+// answer it before it had been read.
+describe("a revoke the second click of a double-click does not answer", () => {
+  useFakeDate();
+
+  async function ask() {
+    const conn = connectionWith({
+      accountTokensForAccount: [accountTokenRow({ id: CREDENTIAL_ID, label: "Nightly export job" })],
+    });
+    const panel = await openCredentials(conn);
+    fireEvent.click(await within(panel).findByRole("button", { name: "Revoke Nightly export job" }));
+    await within(panel).findByRole("group", { name: "Revoke Nightly export job" });
+    return panel;
+  }
+
+  it("does not revoke until the question has been on screen for a moment", async () => {
+    const panel = await ask();
+    betweenTheClicks();
+    await act(async () => {
+      fireEvent.click(within(panel).getByRole("button", { name: "Revoke Nightly export job now" }));
+    });
+    expect(h.revoke).not.toHaveBeenCalled();
+    // Still asking: the press that came too soon neither answered nor withdrew it.
+    expect(within(panel).getByRole("group", { name: "Revoke Nightly export job" })).toBeTruthy();
+
+    await readTheBar();
+    await act(async () => {
+      fireEvent.click(within(panel).getByRole("button", { name: "Revoke Nightly export job now" }));
+    });
+    expect(h.revoke).toHaveBeenCalledTimes(1);
+  });
+
+  it("does not keep it on that click either", async () => {
+    const panel = await ask();
+    betweenTheClicks();
+    fireEvent.click(within(panel).getByRole("button", { name: "Keep it" }));
+    expect(within(panel).getByRole("group", { name: "Revoke Nightly export job" })).toBeTruthy();
+    await readTheBar();
+    fireEvent.click(within(panel).getByRole("button", { name: "Keep it" }));
+    expect(within(panel).queryByRole("group", { name: "Revoke Nightly export job" })).toBeNull();
+    expect(h.revoke).not.toHaveBeenCalled();
   });
 });
 

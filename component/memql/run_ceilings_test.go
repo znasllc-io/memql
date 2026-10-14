@@ -398,3 +398,40 @@ func TestTheCachePathIsUnchangedOutsideARun(t *testing.T) {
 		t.Fatalf("the guard was consulted outside a run: admits=%d charges=%+v", guard.admits, guard.charges)
 	}
 }
+
+func TestModelChargeAndJournalShareOneReceiptIdentity(t *testing.T) {
+	guard, journal := &fakeGuard{}, newCountingJournal()
+	seam := &modelSeam{journal: journal, ceilings: guard}
+	rc := aRun()
+	ctx := common.ContextWithRun(context.Background(), rc)
+	live := &counter{answer: "answer"}
+	for n := 0; n < 2; n++ {
+		if _, err := seam.serve(ctx, aRequest("same request"), "p", live.live); err != nil {
+			t.Fatal(err)
+		}
+	}
+	rows := journal.rows[rc.RunId]
+	if len(rows) != 2 || len(guard.charges) != 2 {
+		t.Fatal("missing charge or receipt")
+	}
+	for n := range rows {
+		if rows[n].ReceiptID == "" || rows[n].ReceiptID != guard.charges[n].ReceiptID {
+			t.Fatalf("charge and durable identity diverge: %+v %+v", rows[n], guard.charges[n])
+		}
+	}
+	if rows[0].ReceiptID == rows[1].ReceiptID {
+		t.Fatal("different answers reused a receipt ID")
+	}
+	// A replay is another answered request, not the source receipt again.
+	replay := rc
+	replay.RunId = "replay"
+	replay.SourceRunId = rc.RunId
+	replay.Mode = common.RunModeReplay
+	if _, err := seam.serve(common.ContextWithRun(context.Background(), replay), aRequest("same request"), "p", live.live); err != nil {
+		t.Fatal(err)
+	}
+	got := journal.rows[replay.RunId][0]
+	if got.ReceiptID == rows[0].ReceiptID || got.ReceiptID != guard.charges[2].ReceiptID {
+		t.Fatal("replay did not get its own shared receipt identity")
+	}
+}

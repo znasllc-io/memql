@@ -199,6 +199,17 @@ func footprintOf(effects []string) work.Footprint {
 	return f
 }
 
+// hasEffects describes the classifier's declared contract before refinement.
+// Even an unfamiliar effect must not be erased by a text-only planner.
+func (d sectionableDecision) hasEffects() bool {
+	for _, section := range d.Sections {
+		if footprintOf(section.Effects).IsSideEffect() {
+			return true
+		}
+	}
+	return false
+}
+
 // decideDecomposition applies the boundary rule and the catalog to triage's
 // decomposition, for a route that would use one. A refused decomposition
 // sends the goal to the author route with the reason on the outcome; an

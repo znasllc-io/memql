@@ -457,15 +457,36 @@ func (m *SeedMaterializer) seedRowIsCurrent(ctx context.Context, def *SeedDefini
 	// and EVERY sweep appends a fresh version of an unchanged row -- the exact
 	// regression this function exists to prevent, and silent, because a failed
 	// freshness check is indistinguishable from a row that really did change.
-	result, err := m.engine.Execute(systemActorContext(ctx), "concept=="+conceptId+" && row.id=="+dslStringLiteral(id))
-	if err != nil || result == nil || result.Bundle == nil || len(result.Bundle.Nodes) != 1 {
+	result, err := m.engine.Execute(ContextWithFreshRead(systemActorContext(ctx)), "concept=="+conceptId+" && row.id=="+dslStringLiteral(id))
+	if err != nil || result == nil || result.Bundle == nil {
 		return false
 	}
-	node := result.Bundle.Nodes[0]
+	// A graph result includes related rows too. Only the seed's own row is
+	// evidence of freshness; linked skills must neither hide nor replace it.
+	var node *memqlv1.MemoryNode
+	for _, candidate := range result.Bundle.Nodes {
+		if candidate.GetId() == id && candidate.GetConcept() == conceptId {
+			if node != nil {
+				return false
+			}
+			node = candidate
+		}
+	}
 	if node == nil || node.GetPayload() == nil {
 		return false
 	}
-	return seedArgsMatchPayload(args, node.GetPayload().AsMap(), def.UseConcept+"Id")
+	// Seeds use bare relationship ids; the stored payload carries canonical
+	// ids. Compare the same representation the write path produces, or every
+	// replica appends a version of an unchanged relationship on every boot.
+	expected := cloneAnyMap(args)
+	payload := node.GetPayload().AsMap()
+	if err := m.engine.canonicalizeRelationshipFields(ctx, conceptId, expected); err != nil {
+		return false
+	}
+	if err := m.engine.canonicalizeRelationshipFields(ctx, conceptId, payload); err != nil {
+		return false
+	}
+	return seedArgsMatchPayload(expected, payload, def.UseConcept+"Id")
 }
 
 // seedArgsMatchPayload compares every arg the create mutation would receive

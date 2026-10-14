@@ -7,14 +7,13 @@ import (
 	"testing"
 
 	"github.com/znasllc-io/memql/component/auth"
+	"github.com/znasllc-io/memql/component/memql"
 	"github.com/znasllc-io/memql/component/server"
 	"github.com/znasllc-io/memql/core/id"
 	"github.com/znasllc-io/memql/integrations/library"
 )
 
-func TestLibraryImageAssetReconcilesStoredBytesAndProvenance(t *testing.T) {
-	first, _ := workTemplateDBEngineAndDB(t)
-	second, _ := workTemplateDBEngineAndDB(t)
+func testLibraryImageAssetReconcilesStoredBytesAndProvenance(t *testing.T, first, second *memql.MemQLEngine) {
 	owner := id.NewShortId()
 	ctx := auth.ContextWithAccess(auth.ContextWithToken(context.Background(), &auth.TokenInfo{Subject: owner}), &auth.AccessContext{UserId: owner, Role: auth.RoleWriter})
 	uploader := &pipelineStreamFake{}

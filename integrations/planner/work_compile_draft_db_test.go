@@ -17,6 +17,7 @@ import (
 	"github.com/znasllc-io/memql/component/automations"
 	"github.com/znasllc-io/memql/component/automations/steps"
 	purecompose "github.com/znasllc-io/memql/component/compose"
+	"github.com/znasllc-io/memql/component/database"
 	"github.com/znasllc-io/memql/component/database/dbtest"
 	memorynodes "github.com/znasllc-io/memql/component/database/memory-nodes"
 	memqlv1 "github.com/znasllc-io/memql/component/grpc/gen"
@@ -148,7 +149,7 @@ func TestCompileDraftDB_SeparateReplicaReadsAndRunsValidatedDraft(t *testing.T) 
 	if err := db.PingContext(context.Background()); err != nil {
 		dbtest.Unreachable(t, "work draft compile", dbtest.DSN(), err)
 	}
-	for _, q := range []string{`CREATE TEMP TABLE "MemoryNodes" (LIKE public."MemoryNodes" INCLUDING ALL)`, `CREATE TEMP TABLE node_vectors (LIKE public.node_vectors INCLUDING ALL)`} {
+	for _, q := range []string{`CREATE TEMP TABLE "MemoryNodes" (LIKE public."MemoryNodes" INCLUDING ALL)`, `CREATE TEMP TABLE memory_liveness (LIKE public.memory_liveness INCLUDING ALL)`, `CREATE TEMP TABLE node_vectors (LIKE public.node_vectors INCLUDING ALL)`} {
 		if _, err := db.ExecContext(context.Background(), q); err != nil {
 			t.Fatal(err)
 		}
@@ -215,6 +216,15 @@ func TestCompileDraftDB_SeparateReplicaReadsAndRunsValidatedDraft(t *testing.T) 
 	if err = receiver.RegisterIntegration(composeIntegration); err != nil {
 		t.Fatal(err)
 	}
+	// The node's write-gate pool (memql#6022), as its database opens one: the work
+	// integration takes its decision gates there and refuses a plug-in built without
+	// it. forkRun takes none today; a test that builds the integration hands it the
+	// pool all the same, so the day it does the test fails for its own reason.
+	gates, gerr := database.NewGatePool(dbtest.DSN(), 0)
+	if gerr != nil {
+		t.Fatal(gerr)
+	}
+	t.Cleanup(func() { _ = gates.Close() })
 	t.Run("navigation adopts Ask variables on a separate receiver", func(t *testing.T) {
 		bridge := &draftDBCompiler{engine: plannerEngine, triage: map[string]any{"intent": "task", "complexity": "trivial", "requiresFile": false, "workload": "lookup", "acknowledgement": "I’ll open Deployables.", "navigation": map[string]any{"app": "deployables", "section": "deployables"}}}
 		req := CompileRequest{GoalId: "v1:work:goal:nav", RunId: "v1:work:run:" + id.NewShortId(), OwnerUserId: "v1:identity:user:draft-owner", Statement: "Open Deployables", Input: map[string]any{"conversation": []any{map[string]any{"role": "user", "content": "Open Deployables"}}}}
@@ -314,6 +324,7 @@ func TestCompileDraftDB_SeparateReplicaReadsAndRunsValidatedDraft(t *testing.T) 
 					runId, filename := req.RunId, "draft.md"
 					if fork {
 						workIntegration := workintegration.New(receiver, testLogger())
+						workIntegration.SetGateDB(func() *sql.DB { return gates })
 						for _, capability := range workIntegration.Capabilities() {
 							if capability.Name != "forkRun" {
 								continue

@@ -123,7 +123,8 @@ type workJournal struct {
 	// a node that can reach a model. Nil is a working state: a table miss then
 	// falls to ActAsk, which is what a failed run did before any of this was
 	// wired. See failure_path.go.
-	classifier SymptomClassifier
+	classifier       SymptomClassifier
+	terminalFailures bool
 
 	// hold, when set, keeps every write until release: a directly called
 	// logic's journal, whose run opens only if the logic writes, and a
@@ -379,6 +380,19 @@ func (j *workJournal) write(ctx context.Context, name string, args map[string]an
 		return failure
 	}
 	defer func() { j.required.fail(name, err) }()
+	if writes, ok := ctx.Value(cancellationWriteVerifierKey{}).(*cancellationWrites); ok {
+		defer func() {
+			if err != nil && writes.err == nil {
+				writes.err = err
+			}
+		}()
+		if writes.err != nil {
+			return writes.err
+		}
+		if err := writes.verify(ctx); err != nil {
+			return err
+		}
+	}
 	query, err := journalArgs(name, args)
 	if err != nil {
 		j.warn(name, err)
@@ -508,7 +522,7 @@ func (h *heldWrites) dropsPulses() bool {
 // which for a run that opened late is minutes earlier. Everything else is
 // written as it was held. release calls it with the hold's lock taken.
 func (h *heldWrites) beating(w heldWrite) map[string]any {
-	if !h.opensLive || w.name != "updateWorkRun" {
+	if !h.opensLive || (w.name != "updateWorkRun" && w.name != "createWorkRun") {
 		return w.args
 	}
 	if _, beats := w.args["heartbeatAt"]; !beats {
@@ -568,7 +582,14 @@ func (j *workJournal) openRun(ctx context.Context, automation *Automation, exec 
 	if j == nil || automation == nil || exec == nil {
 		return
 	}
-	j.call(ctx, "createWorkRun", j.openRunArgs(automation, exec, triggeringEvent, parent))
+	args := j.openRunArgs(automation, exec, triggeringEvent, parent)
+	if parentID, _ := ctx.Value(automationParentKey{}).(string); parentID != "" && parentID != exec.ID {
+		args["parentRunId"] = parentID
+	}
+	if j.hold != nil {
+		args["heartbeatAt"] = rfc3339(time.Now())
+	}
+	j.call(ctx, "createWorkRun", args)
 }
 
 // openRunArgs is the run row openRun writes; parent is openRun's.
@@ -734,6 +755,11 @@ func (j *workJournal) stepFinishedRowOnly(ctx context.Context, exec *AutomationE
 		"durationMs":        result.Duration.Milliseconds(),
 	}
 	if status == "waiting" {
+		if step.Type == StepTypeAutomation && result.Metadata != nil {
+			if child, _ := result.Metadata["executionId"].(string); child != "" {
+				args["childRunId"] = child
+			}
+		}
 		delete(args, "finishedAt")
 		delete(args, "resultFingerprint")
 	}
@@ -790,6 +816,7 @@ func (j *workJournal) reopenRun(ctx context.Context, exec *AutomationExecution) 
 	j.call(ctx, "updateWorkRun", map[string]any{
 		"runId":       exec.ID,
 		"status":      "running",
+		"nodeId":      j.nodeId,
 		"heartbeatAt": rfc3339(time.Now()),
 	})
 }
@@ -797,6 +824,10 @@ func (j *workJournal) reopenRun(ctx context.Context, exec *AutomationExecution) 
 // closeRun writes the terminal status. The executor's status vocabulary
 // (completed / failed / cancelled) maps onto the spec's.
 func (j *workJournal) closeRun(ctx context.Context, exec *AutomationExecution, chainHead string) {
+	if j != nil && j.terminalFailures {
+		j.closeRunRecord(ctx, exec, chainHead)
+		return
+	}
 	if j == nil || exec == nil {
 		return
 	}

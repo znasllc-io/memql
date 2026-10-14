@@ -9,6 +9,7 @@ package database
 var (
 	EnsureLatestRowIndex    = ensureLatestRowIndex
 	EnsureWorkRecoveryIndex = ensureWorkRecoveryIndex
+	EnsureRetentionIndexes  = ensureRetentionIndexes
 	InspectLatestRowIndex   = inspectLatestRowIndex
 	LatestRowIndexLockKey   = latestRowIndexLockKey
 )
@@ -23,4 +24,6 @@ const (
 var (
 	EnsureWorkJournalLookupIndex   = ensureWorkJournalLookupIndex
 	EnsureEmailDigestLookupIndexes = ensureEmailDigestLookupIndexes
+	EnsureEmailProviderLookupIndex = ensureEmailProviderLookupIndex
+	EnsureWorkRunOwnerLookupIndex  = ensureWorkRunOwnerLookupIndex
 )

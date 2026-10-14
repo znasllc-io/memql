@@ -519,7 +519,11 @@ func (r *Replier) prepareTurn(ctx context.Context, msg *memqlv1.AgentGenerateTur
 	if len(domains) > 0 {
 		routerReq.Touches = append([]string(nil), domains...)
 	}
-	if len(domains) > 0 {
+	// First-use indexing precedes required-manual retrieval so this turn can
+	// use newly indexed manuals, not only a later turn. Keep its failure for
+	// the existing paired-history budget suspension below.
+	trainingPassages, trainingErr := r.workTrainingContext(ctx, msg)
+	if trainingErr == nil && len(domains) > 0 {
 		if query := latestUserQuery(msg); query != "" {
 			ragStart := time.Now()
 			r.logger.Info("agentReply RAG: starting retrieval",
@@ -570,6 +574,12 @@ func (r *Replier) prepareTurn(ctx context.Context, msg *memqlv1.AgentGenerateTur
 				)
 			}
 		}
+	}
+
+	if skills, err := r.workSkillContext(ctx, latestUserQuery(msg)); err != nil {
+		return nil, fmt.Errorf("prepare versioned skill context: %w", err)
+	} else if len(skills) > 0 {
+		data["skills"] = skills
 	}
 
 	// Cross-space "have we met before?" signal. The agent reply prompt
@@ -623,6 +633,14 @@ func (r *Replier) prepareTurn(ctx context.Context, msg *memqlv1.AgentGenerateTur
 	// template skips the block.
 	data["etiquette"] = r.loadAssistantEtiquette(ctx)
 
+	appendWorkTraining(data, trainingPassages)
+	for _, passage := range trainingPassages {
+		if domain, _ := passage["domainId"].(string); domain != "" {
+			routerReq.Touches = ensureDomain(routerReq.Touches, domain)
+		}
+	}
+	retrievedChunks = append(retrievedChunks, chunksToRetrievedChunks(trainingPassages)...)
+
 	data["requiresHumanOutcome"] = isOwnedWorkExecution(ctx) && RoleAllowsTool(harnessRole, RespondToUserToolName)
 	renderStart := time.Now()
 	promptData := data
@@ -656,6 +674,10 @@ func (r *Replier) prepareTurn(ctx context.Context, msg *memqlv1.AgentGenerateTur
 			Name:       m.Name,
 			ToolCallId: m.ToolCallId,
 		})
+	}
+
+	if trainingErr != nil {
+		return nil, r.workTrainingFailure(ctx, trainingErr, messages)
 	}
 
 	toolDefsStart := time.Now()
@@ -784,12 +806,12 @@ func (r *Replier) handleStreaming(ctx context.Context, msg *memqlv1.AgentGenerat
 	turnStart := time.Now()
 	prep, err := r.prepareTurn(ctx, msg, turnStart)
 	if err != nil {
-		return nil, err
+		return nil, r.PauseWorkBeforeTurn(ctx, err, msg)
 	}
 
 	selection, err := r.router.ResolveFor(ctx, prep.routerReq)
 	if err != nil {
-		return nil, fmt.Errorf("router: resolve stream-with-tools: %w", err)
+		return nil, r.pauseBeforeTools(ctx, fmt.Errorf("router: resolve stream-with-tools: %w", err), msg, prep.messages)
 	}
 	provider, ok := selection.Client.(common.ChatStreamWithToolsProvider)
 	if !ok {
@@ -1676,16 +1698,9 @@ func latestUserQuery(msg *memqlv1.AgentGenerateTurnMsg) string {
 // domainId, chunkId} shape the template renders. All failures are
 // logged + swallowed so retrieval hiccups never block the turn.
 //
-// Defensive re-sort: similarTo's PreserveOrder=true is supposed to
-// keep cosine ranking intact end-to-end, but empirically the engine
-// resorts the bundle on its way back through Execute() (likely the
-// time-series default ordering kicks in). Without re-sorting, the
-// LLM reads the chunks in semi-random order with the most-relevant
-// passage buried at position 2 or 3 instead of position 0 -- a
-// real loss of signal at chat time. Sort by similarity desc here
-// and log a one-shot warn if the original order disagreed so a
-// future fix in the engine layer can be detected and the defense
-// removed.
+// Top-level builtin answers are node sets keyed by ID, so their materialized
+// order is by ID even when the handler declares PreserveOrder. Restore the
+// cosine ranking before rendering the selected passages.
 func (r *Replier) retrieveKnowledgeChunks(ctx context.Context, query string, domains []string) []map[string]any {
 	const wantK = 5
 	dsl, err := langparser.RenderCall("similarTo", map[string]any{
@@ -1726,82 +1741,40 @@ func (r *Replier) retrieveKnowledgeChunks(ctx context.Context, query string, dom
 	return chunks
 }
 
-// normaliseChunksFromAny inspects the similarTo return value and
-// extracts {text, sourceRef, similarity} entries. The handler
-// returns []MemoryNode which the engine wraps into a Bundle; we check
-// both the Bundle.Nodes path and the OutputPayload path via reflection
-// since the narrow MemQLEngine interface doesn't expose those types.
+// normaliseChunksFromAny reads the canonical engine result, including the
+// top-level builtin node set that CognitionEngineAdapter exposes under data.
+// Decoding only Bundle.Nodes silently discarded successful similarTo answers:
+// that builtin returns OutputPayload with no Bundle at all. Keep decoding below
+// the engine's row/publication gates; this reader neither fetches nor admits rows.
 func normaliseChunksFromAny(result any) []map[string]any {
-	if result == nil {
-		return nil
-	}
-	raw, err := json.Marshal(result)
-	if err != nil {
-		return nil
-	}
-	// The ExecuteResult JSON contains either Bundle.Nodes (for
-	// integration-returned MemoryNodes) or Output (for shape results).
-	var wrapper struct {
-		Bundle *struct {
-			Nodes []struct {
-				ID      string          `json:"id"`
-				Payload json.RawMessage `json:"payload"`
-			} `json:"nodes"`
-		} `json:"Bundle"`
-		Output any `json:"Output"`
-	}
-	if err := json.Unmarshal(raw, &wrapper); err == nil && wrapper.Bundle != nil && len(wrapper.Bundle.Nodes) > 0 {
-		out := make([]map[string]any, 0, len(wrapper.Bundle.Nodes))
-		for _, n := range wrapper.Bundle.Nodes {
-			var payload map[string]any
-			if err := json.Unmarshal(n.Payload, &payload); err != nil {
-				continue
-			}
-			text, _ := payload["text"].(string)
-			if strings.TrimSpace(text) == "" {
-				continue
-			}
-			sourceRef, _ := payload["sourceRef"].(string)
-			domainId, _ := payload["domainId"].(string)
-			sim, _ := payload["_similarity"].(float64)
-			out = append(out, map[string]any{
-				"text":       text,
-				"sourceRef":  sourceRef,
-				"domainId":   domainId,
-				"chunkId":    n.ID, // FULL canonical id; the partition prefix lets the citation lookup reconstruct the domain's canonical id without separately threading the request partition through.
-				"similarity": sim,
-			})
-		}
-		if len(out) > 0 {
-			return out
+	if envelope, ok := result.(map[string]any); ok {
+		if data, exists := envelope["data"]; exists {
+			result = data
 		}
 	}
-	// Fallback: Output might be a list of maps directly.
-	switch v := wrapper.Output.(type) {
-	case []any:
-		out := make([]map[string]any, 0, len(v))
-		for _, item := range v {
-			m, ok := item.(map[string]any)
-			if !ok {
-				continue
+	rows := memql.MaterializeRows(result)
+	var out []map[string]any
+	for _, row := range rows {
+		payload := row
+		if _, projected := row["text"]; !projected {
+			if nested, ok := row["payload"].(map[string]any); ok {
+				payload = nested
 			}
-			text, _ := m["text"].(string)
-			if strings.TrimSpace(text) == "" {
-				continue
-			}
-			sourceRef, _ := m["sourceRef"].(string)
-			domainId, _ := m["domainId"].(string)
-			sim, _ := m["_similarity"].(float64)
-			out = append(out, map[string]any{
-				"text":       text,
-				"sourceRef":  sourceRef,
-				"domainId":   domainId,
-				"similarity": sim,
-			})
 		}
-		return out
+		text, _ := payload["text"].(string)
+		if strings.TrimSpace(text) == "" {
+			continue
+		}
+		sourceRef, _ := payload["sourceRef"].(string)
+		domainId, _ := payload["domainId"].(string)
+		sim, _ := payload["_similarity"].(float64)
+		chunkID, _ := row["id"].(string)
+		out = append(out, map[string]any{
+			"text": text, "sourceRef": sourceRef, "domainId": domainId,
+			"chunkId": chunkID, "similarity": sim,
+		})
 	}
-	return nil
+	return out
 }
 
 func chunkTopSimilarity(chunks []map[string]any) float64 {

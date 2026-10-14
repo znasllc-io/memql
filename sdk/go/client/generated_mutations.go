@@ -46,13 +46,15 @@ func AcknowledgeAttentionBuild(args AcknowledgeAttentionArgs) string {
 //
 // Bound concept: v1:campaigns:recipient (machine-readable: BoundConcepts["addRecipient"] in generated_concepts.go).
 type AddRecipientArgs struct {
-	RecipientId string
-	AudienceId  string
-	Email       string
-	DisplayName string
-	Fields      map[string]any
-	Source      string
-	AccountId   string
+	// Enum: subscribed | pending
+	SubscriptionStatus string
+	RecipientId        string
+	AudienceId         string
+	Email              string
+	DisplayName        string
+	Fields             map[string]any
+	Source             string
+	AccountId          string
 }
 
 // AddRecipient calls the engine mutation addRecipient.
@@ -64,6 +66,13 @@ func (qc *QueryClient) AddRecipient(ctx context.Context, args AddRecipientArgs) 
 func AddRecipientBuild(args AddRecipientArgs) string {
 	var b strings.Builder
 	b.WriteString("mutation addRecipient(")
+	if args.SubscriptionStatus != "" {
+		b.WriteString("subscriptionStatus: ")
+		b.WriteString(quoteMemQL(args.SubscriptionStatus))
+	}
+	if b.Len() > 22 {
+		b.WriteString(", ")
+	}
 	b.WriteString("recipientId: ")
 	b.WriteString(quoteMemQL(args.RecipientId))
 	if b.Len() > 22 {
@@ -1964,10 +1973,12 @@ func CreateAskConversationBuild(args CreateAskConversationArgs) string {
 //
 // Bound concept: v1:campaigns:audience (machine-readable: BoundConcepts["createAudience"] in generated_concepts.go).
 type CreateAudienceArgs struct {
-	AudienceId  string
-	Name        string
-	Description string
-	AccountId   string
+	// Enum: none | required
+	Confirmation string
+	AudienceId   string
+	Name         string
+	Description  string
+	AccountId    string
 }
 
 // CreateAudience calls the engine mutation createAudience.
@@ -1979,6 +1990,13 @@ func (qc *QueryClient) CreateAudience(ctx context.Context, args CreateAudienceAr
 func CreateAudienceBuild(args CreateAudienceArgs) string {
 	var b strings.Builder
 	b.WriteString("mutation createAudience(")
+	if args.Confirmation != "" {
+		b.WriteString("confirmation: ")
+		b.WriteString(quoteMemQL(args.Confirmation))
+	}
+	if b.Len() > 24 {
+		b.WriteString(", ")
+	}
 	b.WriteString("audienceId: ")
 	b.WriteString(quoteMemQL(args.AudienceId))
 	if b.Len() > 24 {
@@ -2975,6 +2993,7 @@ type CreateComposeRecipeArgs struct {
 	TemplateId      string
 	Format          string
 	OutputKind      string
+	LayoutId        string
 	FolderId        string
 	AccountIds      []string
 }
@@ -3027,6 +3046,13 @@ func CreateComposeRecipeBuild(args CreateComposeRecipeArgs) string {
 		}
 		b.WriteString("outputKind: ")
 		b.WriteString(quoteMemQL(args.OutputKind))
+	}
+	if args.LayoutId != "" {
+		if b.Len() > 29 {
+			b.WriteString(", ")
+		}
+		b.WriteString("layoutId: ")
+		b.WriteString(quoteMemQL(args.LayoutId))
 	}
 	if args.FolderId != "" {
 		if b.Len() > 29 {
@@ -5671,171 +5697,6 @@ func CreateSiteBuild(args CreateSiteArgs) string {
 	return b.String()
 }
 
-// CreateSkill -- Materialize a v1:skills:skill catalog row from a `seed skill ...` declaration under dsl/agents/skills/*.memql. Matches the SeedMaterializer's `mutationCreate<Concept>` naming convention -- the materializer stamps the seed body's id into `skillId` and forwards every other seed body field as a same-named arg, so this mutation's arg surface mirrors the on-disk seed body 1:1. Sibling to `mintSkill`: same row shape, but the seed path is for the predefined catalog (predefined defaults true) and carries no originatingPlanId / mintedByAgentId provenance triad. Was missing pre-#344, which made every skill seed in the bundled catalog fail to materialize with `function "createSkill" not found`. The materializer convention itself lives in component/memql/seed_materializer.go.
-//
-// Bound concept: v1:skills:skill (machine-readable: BoundConcepts["createSkill"] in generated_concepts.go).
-type CreateSkillArgs struct {
-	SkillId     string
-	Slug        string
-	Name        string
-	Description string
-	Category    string
-	Tags        []any
-	DomainIds   []any
-	ToolSlugs   []any
-	// Inert since memql#5432 retired the live-knowledge mechanism; stored and never resolved.
-	LiveSourceIds []any
-	Tier          string
-	Predefined    bool
-	PredefinedSet bool // set true to send predefined; required because zero-value bool is ambiguous
-	Active        bool
-	ActiveSet     bool // set true to send active; required because zero-value bool is ambiguous
-	Instructions  map[string]any
-	Scripts       []any
-	Resources     []any
-	ConstructRefs []any
-	Effects       map[string]any
-	Version       int
-	Status        string
-}
-
-// CreateSkill calls the engine mutation createSkill.
-func (qc *QueryClient) CreateSkill(ctx context.Context, args CreateSkillArgs) (*Result, error) {
-	call := CreateSkillBuild(args)
-	return qc.executeNamed(ctx, "createSkill", call)
-}
-
-func CreateSkillBuild(args CreateSkillArgs) string {
-	var b strings.Builder
-	b.WriteString("mutation createSkill(")
-	if args.SkillId != "" {
-		b.WriteString("skillId: ")
-		b.WriteString(quoteMemQL(args.SkillId))
-	}
-	if b.Len() > 21 {
-		b.WriteString(", ")
-	}
-	b.WriteString("slug: ")
-	b.WriteString(quoteMemQL(args.Slug))
-	if b.Len() > 21 {
-		b.WriteString(", ")
-	}
-	b.WriteString("name: ")
-	b.WriteString(quoteMemQL(args.Name))
-	if args.Description != "" {
-		if b.Len() > 21 {
-			b.WriteString(", ")
-		}
-		b.WriteString("description: ")
-		b.WriteString(quoteMemQL(args.Description))
-	}
-	if args.Category != "" {
-		if b.Len() > 21 {
-			b.WriteString(", ")
-		}
-		b.WriteString("category: ")
-		b.WriteString(quoteMemQL(args.Category))
-	}
-	if args.Tags != nil {
-		if b.Len() > 21 {
-			b.WriteString(", ")
-		}
-		b.WriteString("tags: ")
-		b.WriteString(renderMemQLValue(args.Tags))
-	}
-	if args.DomainIds != nil {
-		if b.Len() > 21 {
-			b.WriteString(", ")
-		}
-		b.WriteString("domainIds: ")
-		b.WriteString(renderMemQLValue(args.DomainIds))
-	}
-	if args.ToolSlugs != nil {
-		if b.Len() > 21 {
-			b.WriteString(", ")
-		}
-		b.WriteString("toolSlugs: ")
-		b.WriteString(renderMemQLValue(args.ToolSlugs))
-	}
-	if args.LiveSourceIds != nil {
-		if b.Len() > 21 {
-			b.WriteString(", ")
-		}
-		b.WriteString("liveSourceIds: ")
-		b.WriteString(renderMemQLValue(args.LiveSourceIds))
-	}
-	if b.Len() > 21 {
-		b.WriteString(", ")
-	}
-	b.WriteString("tier: ")
-	b.WriteString(quoteMemQL(args.Tier))
-	if args.PredefinedSet {
-		if b.Len() > 21 {
-			b.WriteString(", ")
-		}
-		b.WriteString("predefined: ")
-		b.WriteString(fmt.Sprintf("%v", args.Predefined))
-	}
-	if args.ActiveSet {
-		if b.Len() > 21 {
-			b.WriteString(", ")
-		}
-		b.WriteString("active: ")
-		b.WriteString(fmt.Sprintf("%v", args.Active))
-	}
-	if args.Instructions != nil {
-		if b.Len() > 21 {
-			b.WriteString(", ")
-		}
-		b.WriteString("instructions: ")
-		b.WriteString(renderMemQLValue(args.Instructions))
-	}
-	if args.Scripts != nil {
-		if b.Len() > 21 {
-			b.WriteString(", ")
-		}
-		b.WriteString("scripts: ")
-		b.WriteString(renderMemQLValue(args.Scripts))
-	}
-	if args.Resources != nil {
-		if b.Len() > 21 {
-			b.WriteString(", ")
-		}
-		b.WriteString("resources: ")
-		b.WriteString(renderMemQLValue(args.Resources))
-	}
-	if args.ConstructRefs != nil {
-		if b.Len() > 21 {
-			b.WriteString(", ")
-		}
-		b.WriteString("constructRefs: ")
-		b.WriteString(renderMemQLValue(args.ConstructRefs))
-	}
-	if args.Effects != nil {
-		if b.Len() > 21 {
-			b.WriteString(", ")
-		}
-		b.WriteString("effects: ")
-		b.WriteString(renderMemQLValue(args.Effects))
-	}
-	if args.Version != 0 {
-		if b.Len() > 21 {
-			b.WriteString(", ")
-		}
-		b.WriteString("version: ")
-		b.WriteString(fmt.Sprintf("%v", args.Version))
-	}
-	if args.Status != "" {
-		if b.Len() > 21 {
-			b.WriteString(", ")
-		}
-		b.WriteString("status: ")
-		b.WriteString(quoteMemQL(args.Status))
-	}
-	b.WriteString(")")
-	return b.String()
-}
-
 // CreateSkillChangeEvent -- Append a v1:agents:skillChangeEvent row recording a skill attach / reconfigure on an agent. Phase 2 (#158) cut: every Planner Agent extendSpecialist / createSpecialist flow that lands a skill on an agent issues one of these per skill. Phase 3 also writes them from the cockpit Skills admin view when a human attaches a skill manually. Empty actorAgentId + actorUserId is allowed for system-driven attaches (the migration tool writes events with actorUserId='system:migration:phase2'). The caller is responsible for providing skillChangeEventId -- mint via the standard NewShortId / MustFromMap helpers caller-side.
 //
 // Bound concept: v1:agents:skillChangeEvent (machine-readable: BoundConcepts["createSkillChangeEvent"] in generated_concepts.go).
@@ -7722,7 +7583,7 @@ func MarkStoreRedactedBuild(args MarkStoreRedactedArgs) string {
 	return b.String()
 }
 
-// MintSkill -- Mint a new v1:skills:skill catalog row from a Planner Agent mintSkill action (Phase 3 / memql#159). The caller is the planner integration; it has already run the authority gate (action='mintSkill' on the planner's agentAuthorization + tier in skillTierAllowlist) and the catalog-search heuristic (no existing skill covers >60% of the requested bundle) before invoking this. predefined is hard-stamped false -- the runtime mint surface is for user-/planner-created rows only; the predefined catalog stays in dsl/agents/skills/*.memql. originatingPlanId + mintedByAgentId carry the Phase 3 provenance triad. Server-side enforcement: the tier-validation rule from Phase 1 still applies (skill.tier >= max(domain tier)) -- a mint that violates it rejects with the same error path as the load-time check.
+// MintSkill -- Mint a new v1:skills:skill catalog row from a Planner Agent mintSkill action (Phase 3 / memql#159). The caller is the planner integration; it has already run the authority gate (action='mintSkill' on the planner's agentAuthorization + tier in skillTierAllowlist) and the catalog-search heuristic (no existing skill covers >60% of the requested bundle) before invoking this. predefined is hard-stamped false -- the runtime mint surface is for user-/planner-created rows only; the predefined catalog stays in dsl/skills/seeds/*.memql. originatingGoalId + mintedByRunId carry the work provenance. Server-side enforcement: the tier-validation rule from Phase 1 still applies (skill.tier >= max(domain tier)) -- a mint that violates it rejects with the same error path as the load-time check.
 //
 // Bound concept: v1:skills:skill (machine-readable: BoundConcepts["mintSkill"] in generated_concepts.go).
 type MintSkillArgs struct {
@@ -10207,6 +10068,28 @@ func RestoreArtifactBuild(args RestoreArtifactArgs) string {
 	return b.String()
 }
 
+// RestoreAudience -- Restore an archived audience: it returns to the campaign and automation pickers. Authorized organization peers may restore it; the engine preserves its original owner and records the current writer on the new version.
+//
+// Bound concept: v1:campaigns:audience (machine-readable: BoundConcepts["restoreAudience"] in generated_concepts.go).
+type RestoreAudienceArgs struct {
+	AudienceId string
+}
+
+// RestoreAudience calls the engine mutation restoreAudience.
+func (qc *QueryClient) RestoreAudience(ctx context.Context, args RestoreAudienceArgs) (*Result, error) {
+	call := RestoreAudienceBuild(args)
+	return qc.executeNamed(ctx, "restoreAudience", call)
+}
+
+func RestoreAudienceBuild(args RestoreAudienceArgs) string {
+	var b strings.Builder
+	b.WriteString("mutation restoreAudience(")
+	b.WriteString("audienceId: ")
+	b.WriteString(quoteMemQL(args.AudienceId))
+	b.WriteString(")")
+	return b.String()
+}
+
 // RestoreComposeRecipe -- Restore an archived recipe. Owned.
 //
 // Bound concept: v1:compose:recipe (machine-readable: BoundConcepts["restoreComposeRecipe"] in generated_concepts.go).
@@ -10908,6 +10791,35 @@ func SetArtifactAccountsBuild(args SetArtifactAccountsArgs) string {
 		b.WriteString("accountIds: ")
 		b.WriteString(renderMemQLValue(args.AccountIds))
 	}
+	b.WriteString(")")
+	return b.String()
+}
+
+// SetAudienceConfirmation -- Choose whether new newsletter members must confirm their address.
+//
+// Bound concept: v1:campaigns:audience (machine-readable: BoundConcepts["setAudienceConfirmation"] in generated_concepts.go).
+type SetAudienceConfirmationArgs struct {
+	AudienceId string
+	// Enum: none | required
+	Confirmation string
+}
+
+// SetAudienceConfirmation calls the engine mutation setAudienceConfirmation.
+func (qc *QueryClient) SetAudienceConfirmation(ctx context.Context, args SetAudienceConfirmationArgs) (*Result, error) {
+	call := SetAudienceConfirmationBuild(args)
+	return qc.executeNamed(ctx, "setAudienceConfirmation", call)
+}
+
+func SetAudienceConfirmationBuild(args SetAudienceConfirmationArgs) string {
+	var b strings.Builder
+	b.WriteString("mutation setAudienceConfirmation(")
+	b.WriteString("audienceId: ")
+	b.WriteString(quoteMemQL(args.AudienceId))
+	if b.Len() > 33 {
+		b.WriteString(", ")
+	}
+	b.WriteString("confirmation: ")
+	b.WriteString(quoteMemQL(args.Confirmation))
 	b.WriteString(")")
 	return b.String()
 }
@@ -13084,6 +12996,7 @@ type UpdateComposeRecipeArgs struct {
 	TemplateId      string
 	Format          string
 	OutputKind      string
+	LayoutId        string
 	FolderId        string
 	AccountIds      []string
 }
@@ -13140,6 +13053,13 @@ func UpdateComposeRecipeBuild(args UpdateComposeRecipeArgs) string {
 		}
 		b.WriteString("outputKind: ")
 		b.WriteString(quoteMemQL(args.OutputKind))
+	}
+	if args.LayoutId != "" {
+		if b.Len() > 29 {
+			b.WriteString(", ")
+		}
+		b.WriteString("layoutId: ")
+		b.WriteString(quoteMemQL(args.LayoutId))
 	}
 	if args.FolderId != "" {
 		if b.Len() > 29 {
@@ -14119,6 +14039,7 @@ func UpdateRoutingPolicyBuild(args UpdateRoutingPolicyArgs) string {
 //
 // Bound concept: v1:campaigns:sendJob (machine-readable: BoundConcepts["updateSendJob"] in generated_concepts.go).
 type UpdateSendJobArgs struct {
+	VersionTime          string
 	SendJobId            string
 	Status               string
 	RecipientCount       int
@@ -14143,6 +14064,11 @@ func (qc *QueryClient) UpdateSendJob(ctx context.Context, args UpdateSendJobArgs
 func UpdateSendJobBuild(args UpdateSendJobArgs) string {
 	var b strings.Builder
 	b.WriteString("mutation updateSendJob(")
+	b.WriteString("versionTime: ")
+	b.WriteString(quoteMemQL(args.VersionTime))
+	if b.Len() > 23 {
+		b.WriteString(", ")
+	}
 	b.WriteString("sendJobId: ")
 	b.WriteString(quoteMemQL(args.SendJobId))
 	if args.Status != "" {

@@ -802,3 +802,16 @@ func formatDurationMs(d time.Duration) string {
 	ms := float64(d.Nanoseconds()) / float64(time.Millisecond)
 	return fmt.Sprintf("%.3fms", ms)
 }
+
+// ResolveAutomation returns only the deployed definition used for invocation.
+func (s *Scheduler) ResolveAutomation(_ context.Context, name string) (*Automation, error) {
+	a := s.LookupAutomation(name)
+	if a == nil {
+		return nil, fmt.Errorf("automation %q not found", name)
+	}
+	return a, nil
+}
+
+func (s *Scheduler) EnterAutomationInvocation(ctx context.Context, _ string) (context.Context, error) {
+	return ctx, nil
+}

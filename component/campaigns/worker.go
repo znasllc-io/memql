@@ -99,8 +99,10 @@ var newsletterGateWait time.Duration
 // The lock keys of the campaigns domain. Every replica must derive the same text
 // for the same thing, so each prefix is written once, here.
 const (
-	newsletterLockPrefix = "campaign-newsletter:"
-	singleSendLockPrefix = "campaign-single-send:"
+	newsletterLockPrefix     = "campaign-newsletter:"
+	singleSendLockPrefix     = "campaign-single-send:"
+	progressLockPrefix       = "campaign-progress:"
+	providerLedgerLockPrefix = "campaign-provider-ledger:"
 )
 
 // newsletterLock is the key of one of the newsletter's locks: "site" for a
@@ -109,6 +111,9 @@ func newsletterLock(kind, id string) string { return newsletterLockPrefix + kind
 
 // singleSendLock is the key of one single send's receipt.
 func singleSendLock(receiptID string) string { return singleSendLockPrefix + receiptID }
+
+func campaignProgressLock(campaignID string) string { return progressLockPrefix + bare(campaignID) }
+func providerLedgerLock(campaignID string) string   { return providerLedgerLockPrefix + bare(campaignID) }
 
 // gateBusyRetry is how long a job waits, when a send found a lock busy, before the
 // next batch tries again.
@@ -135,10 +140,15 @@ type ExecutionClaimer interface {
 
 // Worker drains v1:campaigns:sendJob rows.
 type Worker struct {
-	testGate       func(context.Context, string) (func(), error)
-	templateGate   func(context.Context, string) (func(), error)
-	singleSendGate func(context.Context, string) (func(), error)
-	seriesGate     func(context.Context, string) (func(), error)
+	testGate     func(context.Context, string) (func(), error)
+	templateGate func(context.Context, string) (func(), error)
+	layoutGate   func(context.Context, string) (func(), error)
+	// singleSendGate holds the receipt lock and verifies ownership before an attempt.
+	singleSendGate     func(context.Context, string) (gateHold, error)
+	journeyGate        func(context.Context, string) (gateHold, error)
+	progressGate       func(context.Context, string) (gateHold, error)
+	providerLedgerGate func(context.Context, string) (gateHold, error)
+	seriesGate         func(context.Context, string) (func(), error)
 	// newsletterGate takes the locks for the keys it is given -- full keys, from
 	// newsletterLock and singleSendLock -- in the order given, in ONE transaction on
 	// ONE connection of the gate pool (memql.AcquireGateHold). A flow that needs
@@ -251,14 +261,46 @@ func NewWorker(engine Engine, claimer ExecutionClaimer, resolveSender func() ema
 			}
 			return hold, nil
 		},
+		providerLedgerGate: func(ctx context.Context, key string) (gateHold, error) {
+			db, err := gates()
+			if err != nil {
+				return nil, err
+			}
+			return memql.AcquireGateHold(ctx, db, 0, providerLedgerLock(key))
+		},
+		progressGate: func(ctx context.Context, key string) (gateHold, error) {
+			db, err := gates()
+			if err != nil {
+				return nil, err
+			}
+			return memql.AcquireGateHold(ctx, db, 0, campaignProgressLock(key))
+		},
+		journeyGate: func(ctx context.Context, key string) (gateHold, error) {
+			db, err := gates()
+			if err != nil {
+				return nil, err
+			}
+			return memql.AcquireGateHold(ctx, db, newsletterGateWait, "campaign-journey:"+key)
+		},
 		seriesGate: func(ctx context.Context, key string) (func(), error) {
 			return gate(ctx, "campaign-series:"+key)
 		},
-		singleSendGate: func(ctx context.Context, key string) (func(), error) {
-			return gate(ctx, singleSendLock(key))
+		singleSendGate: func(ctx context.Context, key string) (gateHold, error) {
+			db, err := gates()
+			if err != nil {
+				return nil, err
+			}
+			hold, err := memql.AcquireGateHold(ctx, db, 0, singleSendLock(key))
+			if err != nil {
+				return nil, err
+			}
+			return hold, nil
 		},
 		templateGate: func(ctx context.Context, key string) (func(), error) {
 			return gate(ctx, "campaign-template:"+key)
+		},
+		layoutGate: func(ctx context.Context, key string) (func(), error) {
+			return gate(ctx, "campaign-layout:"+key)
 		},
 		store:      NewStore(engine),
 		claimer:    claimer,
@@ -742,23 +784,48 @@ func (w *Worker) processRecipient(
 		return false, nil
 	}
 
-	token, err := MintUnsubscribeToken(w.cfg.UnsubscribeSecret, UnsubscribePayload{OwnerUserID: job.CampaignOwnerUserID, RecipientID: r.ID, CampaignID: campaign.ID, AccountID: campaign.AccountID, EmailDigest: digest})
+	// The template is the frozen copy the job was queued with when it has one,
+	// so the view link names what was reviewed and sent and not what the
+	// template has become since. The sender it names is the one the footer shows
+	// (footerSender), which is the options' business and so comes first.
+	opts := w.renderOptions(ownerCtx, campaign, identity, r.ID)
+	links, err := w.messageLinks(linkRequest{
+		OwnerUserID: job.CampaignOwnerUserID, RecipientID: r.ID, CampaignID: campaign.ID, AccountID: campaign.AccountID,
+		EmailDigest: digest, TemplateID: tmpl.ID, TemplateRevision: tmpl.Revision,
+		CampaignName: campaign.Name, SenderName: footerSender(opts),
+	})
 	if err != nil {
-		w.failJob(systemCtx, *job, "cannot mint an unsubscribe token: "+err.Error())
+		w.failJob(systemCtx, *job, "cannot mint the links for the message: "+err.Error())
 		return true, err
 	}
-	msg, err := renderMessage(campaign, tmpl, r, unsubscribeURL(w.cfg.UnsubscribeBaseURL, token), w.renderOptions(ownerCtx, campaign, identity, r.ID))
+	opts.Links = links
+	msg, err := renderMessage(campaign, tmpl, r, opts)
 	if err != nil {
 		// Mirrors the mint failure above: a message we cannot render is a job
 		// that cannot proceed, not a recipient to skip silently.
-		w.failJob(systemCtx, *job, "cannot render the message: "+err.Error())
+		reason := "cannot render the message: " + err.Error()
+		var fault templateFault
+		if errors.As(err, &fault) {
+			// The template's author reads this on the campaign. It is already a
+			// sentence that says what to fix; a wrapper would only bury it.
+			reason = fault.Error()
+		}
+		w.failJob(systemCtx, *job, reason)
 		return true, err
 	}
 
 	msg.IntentID = "campaign:" + bare(campaign.ID) + ":recipient:" + bare(r.ID)
-	sendCtx, cancel := context.WithTimeout(ctx, w.cfg.SendTimeout)
-	err = w.deliver(sendCtx, msg, identity.SendAs)
-	cancel()
+	msg.DeliveryID = deliveryRowID(campaign.ID, r.ID)
+	reserved, release, reserveErr := w.reserveDelivery(ctx, msg, identity.SendAs, providerLedgerLock(campaign.ID))
+	if reserveErr != nil {
+		err = reserveErr
+	} else {
+		defer release() // Provider feedback waits until the delivery ledger is written.
+		ownerCtx = email.CopyDeliveryGates(ownerCtx, reserved)
+		sendCtx, cancel := context.WithTimeout(reserved, w.cfg.SendTimeout)
+		err = w.deliver(sendCtx, msg, identity.SendAs)
+		cancel()
+	}
 	// A lock that was busy is nothing attempted: the message was never judged and
 	// no attempt is spent on it. It is handled as the pause a provider asks for --
 	// the delivery stays retryable and the job waits a moment, so the rest of the
@@ -779,7 +846,7 @@ func (w *Worker) processRecipient(
 		// reputationWindow.sendingIdentity more than one possible value.
 		w.reputation.observeAs(now, identity.Label, r.Email, "accepted")
 		w.noteActiveIdentity(identity.Label)
-		if derr := w.store.RecordDelivery(ownerCtx, Delivery{
+		if derr := w.recordWorkerDelivery(ownerCtx, Delivery{
 			CampaignID: campaign.ID, RecipientID: r.ID, Email: r.Email,
 			Status: "sent", SentAt: now, Attempts: attempts,
 			AccountID: campaign.AccountID,
@@ -808,7 +875,7 @@ func (w *Worker) processRecipient(
 			w.logger.Warn("campaigns worker: could not record the throttle deadline", "error", uerr)
 		}
 		job.ThrottledUntil = until
-		_ = w.store.RecordDelivery(ownerCtx, Delivery{
+		_ = w.recordWorkerDelivery(ownerCtx, Delivery{
 			CampaignID: campaign.ID, RecipientID: r.ID, Email: r.Email,
 			Status: "pending", Attempts: item.attempts, LastError: err.Error(),
 			NextAttemptAt: until, AccountID: campaign.AccountID,
@@ -824,7 +891,7 @@ func (w *Worker) processRecipient(
 	}
 
 	next := now.Add(backoffFor(attempts))
-	if derr := w.store.RecordDelivery(ownerCtx, Delivery{
+	if derr := w.recordWorkerDelivery(ownerCtx, Delivery{
 		CampaignID: campaign.ID, RecipientID: r.ID, Email: r.Email,
 		Status: "pending", Attempts: attempts, LastError: err.Error(), NextAttemptAt: next,
 		AccountID: campaign.AccountID,
@@ -838,12 +905,12 @@ func (w *Worker) processRecipient(
 // delivering msg (email.Reserver), and returns the context to deliver with and the
 // function that gives it back. A transport with nothing to reserve, and a test's
 // send hook, reserve nothing.
-func (w *Worker) reserveDelivery(ctx context.Context, msg email.Message, as email.SendAs) (context.Context, func(), error) {
+func (w *Worker) reserveDelivery(ctx context.Context, msg email.Message, as email.SendAs, gateKeys ...string) (context.Context, func(), error) {
 	if w.sendHook != nil {
 		return ctx, func() {}, nil
 	}
 	if reserver, ok := w.resolveSender().(email.Reserver); ok {
-		return reserver.Reserve(ctx, msg, as)
+		return reserver.Reserve(ctx, msg, as, gateKeys...)
 	}
 	return ctx, func() {}, nil
 }
@@ -868,7 +935,9 @@ func (w *Worker) deliver(ctx context.Context, msg email.Message, as email.SendAs
 }
 
 // renderOptions assembles everything one rendered message needs beyond the
-// campaign / template / recipient triple.
+// campaign / template / recipient triple, except its links: they carry the name
+// the footer shows, which these options decide, so the caller makes them after
+// and sets them.
 //
 // It runs under the OWNER's context because the one read it makes -- the
 // account's display name for {{accountName}} -- is composite-tier and belongs
@@ -885,7 +954,9 @@ func (w *Worker) renderOptions(ownerCtx context.Context, campaign Campaign, iden
 	return RenderOptions{
 		ReplyTo:     replyToFor(campaign, identity),
 		AccountName: accountName,
-		Tracking:    w.cfg.trackingRenderFor(campaign, deliveryRowID(campaign.ID, recipientID)),
+		// The footer names the display name the message goes out under.
+		SenderName: identity.SendAs.FromName,
+		Tracking:   w.cfg.trackingRenderFor(campaign, deliveryRowID(campaign.ID, recipientID)),
 	}
 }
 
@@ -928,7 +999,7 @@ func (w *Worker) resolveSender() email.Sender {
 func (w *Worker) recordSkipped(ownerCtx context.Context, job *SendJob, campaign Campaign, r Recipient, reason string) {
 	job.SkippedCount++
 	w.skipTotal.Add(1)
-	if err := w.store.RecordDelivery(ownerCtx, Delivery{
+	if err := w.recordWorkerDelivery(ownerCtx, Delivery{
 		CampaignID: campaign.ID, RecipientID: r.ID, Email: r.Email,
 		Status: "skipped", SkipReason: reason, AccountID: campaign.AccountID,
 	}); err != nil {
@@ -939,7 +1010,7 @@ func (w *Worker) recordSkipped(ownerCtx context.Context, job *SendJob, campaign 
 func (w *Worker) recordFailed(ownerCtx context.Context, job *SendJob, campaign Campaign, r Recipient, attempts int, detail string) {
 	job.FailedCount++
 	w.failedTotal.Add(1)
-	if err := w.store.RecordDelivery(ownerCtx, Delivery{
+	if err := w.recordWorkerDelivery(ownerCtx, Delivery{
 		CampaignID: campaign.ID, RecipientID: r.ID, Email: r.Email,
 		Status: "failed", Attempts: attempts, LastError: detail, AccountID: campaign.AccountID,
 	}); err != nil {
@@ -983,13 +1054,24 @@ func (w *Worker) stampCampaignError(ownerCtx context.Context, campaignID, reason
 }
 
 func (w *Worker) stampProgress(systemCtx, ownerCtx context.Context, job SendJob) {
+	hold, current, freshCampaign, err := w.progressWrite(systemCtx, ownerCtx, job)
+	if err != nil {
+		w.logger.Warn("campaigns: progress coordination failed", "job", job.ID, "error", err)
+		return
+	}
+	if hold == nil {
+		return
+	}
+	defer hold.Release()
+	jobVersion := memql.VersionTimeAfter(current.CreatedAt, w.nowUTC())
+	campaignVersion := memql.VersionTimeAfter(freshCampaign.CreatedAt, w.nowUTC())
 	sent, skipped, failed := job.SentCount, job.SkippedCount, job.FailedCount
-	jobPatch := SendJobPatch{SentCount: &sent, SkippedCount: &skipped, FailedCount: &failed}
+	jobPatch := SendJobPatch{VersionTime: &jobVersion, SentCount: &sent, SkippedCount: &skipped, FailedCount: &failed}
 	// The SAME three counters on both rows since memql#4823. They were
 	// deliberately identical apart from `skipped`, which was on the job and
 	// not the campaign -- so the number an operator most needs was the one
 	// number their browser could not read.
-	campaignPatch := CampaignProgress{SentCount: &sent, SkippedCount: &skipped, FailedCount: &failed}
+	campaignPatch := CampaignProgress{VersionTime: &campaignVersion, SentCount: &sent, SkippedCount: &skipped, FailedCount: &failed}
 	// Only carried when it is known. The count is taken once, at send time,
 	// and a zero here would blank a figure the operator is watching rather
 	// than leave it alone.
@@ -998,26 +1080,39 @@ func (w *Worker) stampProgress(systemCtx, ownerCtx context.Context, job SendJob)
 		jobPatch.RecipientCount = &count
 		campaignPatch.RecipientCount = &count
 	}
-	if err := w.store.UpdateJob(systemCtx, job.ID, jobPatch); err != nil {
+	if err := commitCampaignProgress(systemCtx, hold, func(commit context.Context) error { return w.store.UpdateJob(commit, job.ID, jobPatch) }); err != nil {
 		w.logger.Warn("campaigns worker: could not stamp job progress", "error", err)
 	}
-	if err := w.store.UpdateCampaignProgress(ownerCtx, job.CampaignID, campaignPatch); err != nil {
+	if err := commitCampaignProgress(ownerCtx, hold, func(commit context.Context) error {
+		return w.store.UpdateCampaignProgress(commit, job.CampaignID, campaignPatch)
+	}); err != nil {
 		w.logger.Warn("campaigns worker: could not stamp campaign progress", "error", err)
 	}
 }
 
 func (w *Worker) completeJob(systemCtx, ownerCtx context.Context, job SendJob, campaign Campaign) {
+	hold, current, freshCampaign, err := w.progressWrite(systemCtx, ownerCtx, job)
+	if err != nil {
+		w.logger.Warn("campaigns: progress coordination failed", "job", job.ID, "error", err)
+		return
+	}
+	if hold == nil {
+		return
+	}
+	defer hold.Release()
+	jobVersion := memql.VersionTimeAfter(current.CreatedAt, w.nowUTC())
+	campaignVersion := memql.VersionTimeAfter(freshCampaign.CreatedAt, w.nowUTC())
 	now := w.nowUTC()
 	done := "completed"
 	cleared := ""
 	sent, skipped, failed := job.SentCount, job.SkippedCount, job.FailedCount
-	jobPatch := SendJobPatch{
+	jobPatch := SendJobPatch{VersionTime: &jobVersion,
 		Status: &done, CompletedAt: &now,
 		SentCount: &sent, SkippedCount: &skipped, FailedCount: &failed,
 		RosterCursor: &cleared,
 	}
 	sentStatus := "sent"
-	campaignPatch := CampaignProgress{
+	campaignPatch := CampaignProgress{VersionTime: &campaignVersion,
 		Status: &sentStatus, CompletedAt: &now,
 		SentCount: &sent, SkippedCount: &skipped, FailedCount: &failed,
 	}
@@ -1026,10 +1121,12 @@ func (w *Worker) completeJob(systemCtx, ownerCtx context.Context, job SendJob, c
 		jobPatch.RecipientCount = &count
 		campaignPatch.RecipientCount = &count
 	}
-	if err := w.store.UpdateJob(systemCtx, job.ID, jobPatch); err != nil {
+	if err := commitCampaignProgress(systemCtx, hold, func(commit context.Context) error { return w.store.UpdateJob(commit, job.ID, jobPatch) }); err != nil {
 		w.logger.Warn("campaigns worker: could not complete send job", "error", err)
 	}
-	if err := w.store.UpdateCampaignProgress(ownerCtx, job.CampaignID, campaignPatch); err != nil {
+	if err := commitCampaignProgress(ownerCtx, hold, func(commit context.Context) error {
+		return w.store.UpdateCampaignProgress(commit, job.CampaignID, campaignPatch)
+	}); err != nil {
 		w.logger.Warn("campaigns worker: could not complete campaign", "error", err)
 	}
 	w.logger.Info("campaigns worker: campaign complete",

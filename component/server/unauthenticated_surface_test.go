@@ -340,3 +340,24 @@ func TestSurfacePathFormsNeverYieldsRoot(t *testing.T) {
 			"declarations and the identity binary refuses to boot")
 	}
 }
+
+func TestEmailLinkPathsAreSelfAuthenticatedAndHandlerAuthorized(t *testing.T) {
+	for _, path := range append(EmailLinkPaths(), AzureEmailFeedbackPaths()...) {
+		for _, paths := range [][]string{SelfAuthenticatedPaths(), HandlerAuthorizedPaths()} {
+			found := false
+			for _, p := range paths {
+				if path == p {
+					found = true
+				}
+			}
+			if !found {
+				t.Errorf("email page %q is not declared in %v", path, paths)
+			}
+		}
+		for _, p := range PublicPaths() {
+			if path == p {
+				t.Errorf("email page %q is public instead of token-authorized", path)
+			}
+		}
+	}
+}

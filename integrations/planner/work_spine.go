@@ -258,7 +258,7 @@ func (s *spineScope) classify(ctx context.Context, _ map[string]any) (any, error
 		out.Reply = out.Workload == "quick"
 	}
 	s.guidance, s.decision = guidance, sectionable
-	return map[string]any{"complexity": string(complexity), "intent": sectionable.Intent, "sectionable": sectionable.Sectionable, "requiresFile": sectionable.RequiresFile != nil && *sectionable.RequiresFile, "conversational": conversational, "workload": out.Workload, "acknowledgement": out.Acknowledgement}, nil
+	return map[string]any{"complexity": string(complexity), "intent": sectionable.Intent, "sectionable": sectionable.Sectionable, "requiresFile": sectionable.RequiresFile != nil && *sectionable.RequiresFile, "hasEffects": sectionable.hasEffects(), "conversational": conversational, "workload": out.Workload, "acknowledgement": out.Acknowledgement}, nil
 }
 
 func (s *spineScope) acknowledge(ctx context.Context, _ map[string]any) (any, error) {

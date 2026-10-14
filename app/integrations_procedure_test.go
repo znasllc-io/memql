@@ -16,6 +16,25 @@ import (
 	procedure "github.com/znasllc-io/memql/integrations/procedure"
 )
 
+// These contracts use one compiled tool/function catalog. Admission and tool
+// classification do not mutate it. The wiring checks then register two distinct
+// integrations once, retaining their before-registration negative controls.
+func TestProcedureEngineContracts(t *testing.T) {
+	engine := procedureTestEngine(t)
+	t.Run("TestTheEngineToolRegistryClassifiesShippedTools", func(t *testing.T) {
+		testTheEngineToolRegistryClassifiesShippedTools(t, engine)
+	})
+	t.Run("TestAReplayedMCPToolIsDecidedAsItsRecordingWas", func(t *testing.T) {
+		testAReplayedMCPToolIsDecidedAsItsRecordingWas(t, engine)
+	})
+	t.Run("TestTheProcedureIntegrationShipsWithItsCompileGate", func(t *testing.T) {
+		testTheProcedureIntegrationShipsWithItsCompileGate(t, engine)
+	})
+	t.Run("TestTheWorkbenchDispatcherReachesTheRegisteredWorkbench", func(t *testing.T) {
+		testTheWorkbenchDispatcherReachesTheRegisteredWorkbench(t, engine)
+	})
+}
+
 // TestTheProcedureIntegrationShipsWithItsCompileGate is gaps G1 and G7 of epic
 // memql#5408, and both are the same shape: a feature that is complete, tested
 // and INERT in the shipped binary.
@@ -34,7 +53,7 @@ import (
 // A capability that refuses, or a procedure that is "not re-runnable", is a
 // well-formed answer -- which is why neither gap failed a single test until
 // the wiring itself was asserted.
-func TestTheProcedureIntegrationShipsWithItsCompileGate(t *testing.T) {
+func testTheProcedureIntegrationShipsWithItsCompileGate(t *testing.T, engine *memql.MemQLEngine) {
 	var reg *memql.PluginRegistration
 	for _, p := range memql.RegisteredPlugins() {
 		if p.Name == "procedure" {
@@ -46,16 +65,6 @@ func TestTheProcedureIntegrationShipsWithItsCompileGate(t *testing.T) {
 		t.Fatal("the procedure plug-in is not registered in the app binary: plugins_core.go must blank-import integrations/procedure (gap G1)")
 	}
 
-	engine, err := memql.New(nil)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if _, err := memql.LoadUnifiedConcepts(nil); err != nil {
-		t.Fatal(err)
-	}
-	if err := engine.Init(memorynodes.DefaultRegistry()); err != nil {
-		t.Fatal(err)
-	}
 	app := &App{engine: engine, Logger: slog.New(slog.NewTextHandler(io.Discard, nil))}
 
 	// Materialized the way materializePlugins does it: the registered
@@ -275,8 +284,7 @@ func TestTheLocalFallbackIsReadAsTheWorkbenchReadsIt(t *testing.T) {
 // The installed dispatcher reaches the REGISTERED workbench plug-in by name --
 // the only way a surface behind another integration can be reached without
 // importing it -- and a node without one refuses by name.
-func TestTheWorkbenchDispatcherReachesTheRegisteredWorkbench(t *testing.T) {
-	engine := procedureTestEngine(t)
+func testTheWorkbenchDispatcherReachesTheRegisteredWorkbench(t *testing.T, engine *memql.MemQLEngine) {
 	d := newProcedureWorkbenchDispatcher(engine)
 	if _, err := d.Dispatch(context.Background(), workbenchStep("exec", map[string]any{"command": "ls"})); err == nil ||
 		!strings.Contains(err.Error(), "no workbench dispatchHost") {

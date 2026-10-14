@@ -191,8 +191,6 @@ var capabilitySets = map[Role]map[verbResource]bool{
 var appReadFloors = map[string][]Role{
 	"app:accounts":              {RoleOwner, RoleDeveloper, RoleAdmin},
 	"app:accounts/logs":         {RoleOwner, RoleDeveloper, RoleAdmin},
-	"app:campaigns":             {RoleOwner, RoleDeveloper, RoleAdmin, RoleWriter, RoleReader},
-	"app:campaigns/logs":        {RoleOwner, RoleDeveloper, RoleAdmin},
 	"app:email":                 {RoleOwner, RoleDeveloper, RoleAdmin, RoleWriter, RoleReader},
 	"app:email/inbox":           {RoleOwner, RoleDeveloper},
 	"app:email/logs":            {RoleOwner, RoleDeveloper, RoleAdmin},

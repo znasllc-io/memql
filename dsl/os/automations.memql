@@ -1,0 +1,7 @@
+/// One admitted human message has one native read-only analysis and no other effects.
+@actor
+@template
+automation askApprovalAnalysis {
+ reply := builtin askRunApprovalMessage()
+ return reply
+}

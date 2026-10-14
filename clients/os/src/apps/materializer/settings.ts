@@ -8,27 +8,23 @@ import type { OsAppSection } from "../../system/registry";
 // does not know, so folding per-app preferences into it would mean
 // somebody loses their desks because an app learned a checkbox.
 
-/**
- * The sections this app declares, in manifest order.
- *
- * COMPOSE IS FIRST and is therefore the section a window opens on: this
- * app is for making a file, and everything else in it is either
- * something that was made or something that makes the next one
- * repeatable.
- *
- * Exported rather than written twice, for the reason its siblings are:
- * the manifest and the settings picker must offer the SAME set, and a
- * preference naming a section the manifest does not declare leaves the
- * window on Compose with the nav highlighting nothing.
- */
+/** Manifest order also supplies the names shown in preferences. */
 export const MATERIALIZER_SECTIONS: OsAppSection[] = [
-  { id: "composer", name: "Compose" },
   { id: "materialized", name: "Materialized" },
+  { id: "composer", name: "Make a file", parent: "materialized" },
   { id: "templates", name: "Templates" },
+  { id: "recipes", name: "Recipes" },
   // Admin-floored because every read on the log store is (spec L3). The
   // one section whose floor is not this app's to choose.
   { id: "logs", name: "Logs", requires: "app:materializer/logs" },
   { id: "settings", name: "Settings" },
+];
+
+export const MATERIALIZER_OPENING_SECTIONS = [
+  "materialized",
+  "composer",
+  "templates",
+  "recipes",
 ];
 
 export const MATERIALIZER_SECTION_IDS = MATERIALIZER_SECTIONS.map((s) => s.id);
@@ -37,7 +33,7 @@ export interface MaterializerSettings {
   version: 1;
   /** The section the app navigates to when its window opens. */
   defaultSection: string;
-  /** The format the Target column starts on. */
+  /** The format a new file starts on. */
   defaultFormat: string;
   /**
    * Whether archived compositions are listed (rule 4: a micro-preference
@@ -50,7 +46,7 @@ export interface MaterializerSettings {
    */
   showArchived: boolean;
   /**
-   * Whether the Sources column offers concepts that declare no
+   * Whether the ingredient tray offers concepts that declare no
    * `@composable`.
    *
    * OFF by default, and the default is the point: the mark exists so a
@@ -64,7 +60,7 @@ export interface MaterializerSettings {
 
 export const DEFAULT_MATERIALIZER_SETTINGS: MaterializerSettings = {
   version: 1,
-  defaultSection: "composer",
+  defaultSection: "materialized",
   defaultFormat: "markdown",
   showArchived: false,
   showUnmarkedConcepts: false,
@@ -145,13 +141,17 @@ export function sanitizeSettings(raw: unknown): MaterializerSettings {
   if (typeof raw !== "object" || raw === null) return out;
   const doc = raw as Record<string, unknown>;
 
-  const section = typeof doc["defaultSection"] === "string" ? doc["defaultSection"] : "";
-  if (MATERIALIZER_SECTION_IDS.includes(section)) out.defaultSection = section;
+  const section =
+    typeof doc["defaultSection"] === "string" ? doc["defaultSection"] : "";
+  if (MATERIALIZER_OPENING_SECTIONS.includes(section))
+    out.defaultSection = section;
 
-  const format = typeof doc["defaultFormat"] === "string" ? doc["defaultFormat"] : "";
+  const format =
+    typeof doc["defaultFormat"] === "string" ? doc["defaultFormat"] : "";
   if (FORMAT_IDS.includes(format)) out.defaultFormat = format;
 
-  if (typeof doc["showArchived"] === "boolean") out.showArchived = doc["showArchived"];
+  if (typeof doc["showArchived"] === "boolean")
+    out.showArchived = doc["showArchived"];
   if (typeof doc["showUnmarkedConcepts"] === "boolean") {
     out.showUnmarkedConcepts = doc["showUnmarkedConcepts"];
   }
@@ -160,16 +160,6 @@ export function sanitizeSettings(raw: unknown): MaterializerSettings {
 
 const FORMAT_IDS = ["markdown", "html", "txt", "csv", "json", "docx", "pdf"];
 
-/**
- * The readiness modules this app needs (design record
- * 2026-09-06-configuration-readiness, section 5.1).
- *
- * Composing runs a model and every materialized output is written to blob
- * storage, so neither is optional here.
- *
- * Exported so the manifest and the Set up group read ONE list: a second
- * literal is one that can disagree, and the disagreement is an app that gates
- * on a module its own Settings never offers to set up.
- */
-export const MATERIALIZER_REQUIRES: readonly ModuleId[] = ["ai", "storage"];
-export const MATERIALIZER_WANTS: readonly ModuleId[] = [];
+/** Storage is needed for every file; Inference is needed only for a composed file. */
+export const MATERIALIZER_REQUIRES: readonly ModuleId[] = ["storage"];
+export const MATERIALIZER_WANTS: readonly ModuleId[] = ["ai"];

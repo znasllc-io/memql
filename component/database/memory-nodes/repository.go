@@ -144,7 +144,7 @@ func (db *MemoryNodesDatabase) ListRecentMemoryNodes(ctx context.Context, create
 	}
 
 	var nodes []MemoryNode
-	query := bunDB.NewSelect().Model(&nodes).OrderExpr(`"createdAt" DESC`)
+	query := bunDB.NewSelect().Model(&nodes).ModelTableExpr(ObservedRowsSQL + " AS mn").OrderExpr(`"createdAt" DESC`)
 	if createdBy != "" {
 		query = query.Where(`"createdBy" = ?`, createdBy)
 	}
@@ -156,6 +156,9 @@ func (db *MemoryNodesDatabase) ListRecentMemoryNodes(ctx context.Context, create
 		return nil, err
 	}
 
+	if err := HydrateSchemas(ctx, bunDB, nodes); err != nil {
+		return nil, err
+	}
 	return nodes, nil
 }
 
@@ -174,7 +177,7 @@ func (db *MemoryNodesDatabase) LoadMemoryNode(ctx context.Context, id string) (*
 	}
 
 	var node MemoryNode
-	err := bunDB.NewSelect().Model(&node).
+	err := bunDB.NewSelect().Model(&node).ModelTableExpr(ObservedRowsSQL+" AS mn").
 		Where("id = ?", trimmedId).
 		OrderExpr(`"createdAt" DESC`).
 		Limit(1).
@@ -188,7 +191,11 @@ func (db *MemoryNodesDatabase) LoadMemoryNode(ctx context.Context, id string) (*
 		return nil, err
 	}
 
-	return &node, nil
+	rows := []MemoryNode{node}
+	if err := HydrateSchemas(ctx, bunDB, rows); err != nil {
+		return nil, err
+	}
+	return &rows[0], nil
 }
 
 // staged-data: MUST-NOT-GATE -- see ListRecentMemoryNodes above. This one is
@@ -203,7 +210,7 @@ func (db *MemoryNodesDatabase) FindMemoryNodes(ctx context.Context, params Query
 	}
 
 	var nodes []MemoryNode
-	query := bunDB.NewSelect().Model(&nodes)
+	query := bunDB.NewSelect().Model(&nodes).ModelTableExpr(ObservedRowsSQL + " AS mn")
 
 	if trimmed := sanitizeIdentifiers(params.IDs); len(trimmed) > 0 {
 		query = query.Where("id IN (?)", bun.In(trimmed))
@@ -232,6 +239,9 @@ func (db *MemoryNodesDatabase) FindMemoryNodes(ctx context.Context, params Query
 		return nil, err
 	}
 
+	if err := HydrateSchemas(ctx, bunDB, nodes); err != nil {
+		return nil, err
+	}
 	return nodes, nil
 }
 

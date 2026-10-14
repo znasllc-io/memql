@@ -437,3 +437,16 @@ builtin libraryRevisionPreparedImages {
  requestId string!
  sourceRunId string
 }
+
+/// Native scope facts for the current owned task; arguments cannot nominate another owner or run.
+@executor("integration.library.workTrainingContext")
+builtin libraryWorkTrainingContext {}
+
+/// Bounded, fresh reviewed passages proved against the current task owner's taught Library sources.
+@executor("integration.library.ownedTrainingLessons")
+builtin libraryOwnedTrainingLessons {
+ text string!
+ limit int!
+ minimumSimilarity number!
+ maxTokens int!
+}

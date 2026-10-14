@@ -2,6 +2,7 @@ package campaigns
 
 import (
 	"context"
+	"database/sql"
 	"encoding/hex"
 	"errors"
 	"html"
@@ -64,11 +65,12 @@ type UnsubscribeHandler struct {
 	logger *slog.Logger
 	system func(ctx context.Context) context.Context
 	now    func() time.Time
+	gate   emailChoiceGate
 }
 
 // NewUnsubscribeHandler builds the endpoint over the same store and
 // system identity the worker uses.
-func NewUnsubscribeHandler(engine Engine, cfg Config, logger *slog.Logger) *UnsubscribeHandler {
+func NewUnsubscribeHandler(engine Engine, cfg Config, logger *slog.Logger, database func() *sql.DB) *UnsubscribeHandler {
 	if logger == nil {
 		logger = slog.Default()
 	}
@@ -79,6 +81,7 @@ func NewUnsubscribeHandler(engine Engine, cfg Config, logger *slog.Logger) *Unsu
 		logger: logger.With("component", "campaigns.unsubscribe"),
 		system: w.systemActorContext,
 		now:    time.Now,
+		gate:   newEmailChoiceGate(database),
 	}
 }
 
@@ -138,7 +141,8 @@ func unsubscribeKeyIDOf(token string) string {
 	return parts[1]
 }
 
-func (h *UnsubscribeHandler) servePost(rw http.ResponseWriter, r *http.Request) {
+func (handler *UnsubscribeHandler) servePost(rw http.ResponseWriter, r *http.Request) {
+	h := *handler
 	// The token may arrive in the query (what the header URI carries) or
 	// in the form body (what the confirmation page's button posts). Both
 	// are read; the query wins, because that is the one the mail client
@@ -154,6 +158,33 @@ func (h *UnsubscribeHandler) servePost(rw http.ResponseWriter, r *http.Request) 
 		return
 	}
 
+	// The same recipient/mailbox locks as preferences prevent a concurrent
+	// resubscribe from lifting an opt-out that arrived after its consent read.
+	account, digest := payload.AccountID, payload.EmailDigest
+	if !payload.organizationBound || digest == "" {
+		recipient, _, err := h.store.RecipientByID(memql.ContextWithFreshRead(ownerActorContext(r.Context(), payload.OwnerUserID)), payload.RecipientID)
+		if err == nil {
+			if !payload.organizationBound {
+				account = recipient.AccountID
+			}
+			if digest == "" {
+				digest = EmailDigest(recipient.Email)
+			}
+		}
+	}
+	phase, cancel := context.WithTimeout(r.Context(), 30*time.Second)
+	defer cancel()
+	r = r.WithContext(phase)
+	hold, err := h.gate(context.WithoutCancel(phase), payload.RecipientID, account, digest)
+	if err != nil {
+		h.logger.Error("campaigns: unsubscribe coordination unavailable", "error", err)
+		rw.Header().Set("Retry-After", "30")
+		h.render(rw, 503, pageRetry, "")
+		return
+	}
+	defer hold.Release()
+	h.store = NewStore(emailPageGateEngine{Engine: h.store.engine, hold: hold})
+
 	if err := h.suppress(r.Context(), payload); err != nil {
 		h.logger.Error("campaigns: unsubscribe failed after a valid token", "campaign", payload.CampaignID, "error", err)
 		rw.Header().Set("Retry-After", "30")
@@ -166,8 +197,14 @@ func (h *UnsubscribeHandler) servePost(rw http.ResponseWriter, r *http.Request) 
 // suppress first persists the authoritative suppression. Recipient convergence
 // and the consent audit follow; neither may redirect a signed organization scope.
 func (h *UnsubscribeHandler) suppress(ctx context.Context, payload UnsubscribePayload) error {
+	return unsubscribeMailbox(ctx, h.store, h.system, h.now().UTC(), payload, "one_click")
+}
+
+// unsubscribeMailbox persists the signed mailbox suppression before converging
+// the membership. Preferences and RFC 8058 share the same authoritative path.
+func unsubscribeMailbox(ctx context.Context, store *Store, system func(context.Context) context.Context, now time.Time, payload UnsubscribePayload, source string) error {
 	ownerCtx := memql.ContextWithFreshRead(ownerActorContext(ctx, payload.OwnerUserID))
-	recipient, found, readErr := h.store.RecipientByID(ownerCtx, payload.RecipientID)
+	recipient, found, readErr := store.RecipientByID(ownerCtx, payload.RecipientID)
 	account, digest := payload.AccountID, payload.EmailDigest
 	if !payload.organizationBound {
 		account = recipient.AccountID
@@ -179,7 +216,7 @@ func (h *UnsubscribeHandler) suppress(ctx context.Context, payload UnsubscribePa
 		digest = EmailDigest(recipient.Email)
 	}
 	if digest == "" {
-		return h.store.SetRecipientSubscription(ownerCtx, payload.RecipientID, "unsubscribed", h.now().UTC())
+		return store.SetRecipientSubscription(ownerCtx, payload.RecipientID, "unsubscribed", now.UTC())
 	}
 	matchesRecipient := found && readErr == nil && sameOrganization(account, recipient.AccountID) && digest == EmailDigest(recipient.Email)
 	domain := ""
@@ -188,9 +225,9 @@ func (h *UnsubscribeHandler) suppress(ctx context.Context, payload UnsubscribePa
 	}
 	var err error
 	if account == "" {
-		err = h.store.RecordSuppression(h.system(ctx), digest, "unsubscribed", domain, payload.CampaignID, "")
+		err = store.RecordSuppression(system(ctx), digest, "unsubscribed", domain, payload.CampaignID, "")
 	} else {
-		err = h.store.RecordOrganizationSuppression(h.system(ctx), account, digest, "unsubscribed", domain, payload.CampaignID, "")
+		err = store.RecordOrganizationSuppression(system(ctx), account, digest, "unsubscribed", domain, payload.CampaignID, "")
 	}
 	if err != nil {
 		return err
@@ -200,14 +237,14 @@ func (h *UnsubscribeHandler) suppress(ctx context.Context, payload UnsubscribePa
 	if !matchesRecipient {
 		return nil
 	}
-	if err := h.store.RecordConsent(ownerCtx, ConsentWithdraw, ConsentRecord{
-		EventID: id.NewShortId(), EmailDigest: digest, Source: "one_click",
+	if err := store.RecordConsent(ownerCtx, ConsentWithdraw, ConsentRecord{
+		EventID: id.NewShortId(), EmailDigest: digest, Source: source,
 		RecipientID: payload.RecipientID, CampaignID: payload.CampaignID,
-		AccountID: account, OccurredAt: h.now().UTC(),
+		AccountID: account, OccurredAt: now.UTC(),
 	}); err != nil {
-		h.logger.Warn("campaigns: recorded an unsubscribe but could not append its consent event", "campaign", payload.CampaignID, "error", err)
+		slog.Default().Warn("campaigns: recorded an unsubscribe but could not append its consent event", "campaign", payload.CampaignID, "error", err)
 	}
-	return h.store.SetRecipientSubscription(ownerCtx, payload.RecipientID, "unsubscribed", h.now().UTC())
+	return store.SetRecipientSubscription(ownerCtx, payload.RecipientID, "unsubscribed", now.UTC())
 }
 
 // ownerActorContext is the package-level twin of the worker's method, so
@@ -229,16 +266,6 @@ const (
 // is rendered in a browser reached from a link in an email, often on a
 // network that will not load a stylesheet from anywhere else.
 func (h *UnsubscribeHandler) render(rw http.ResponseWriter, status int, page unsubscribePage, token string) {
-	rw.Header().Set("Content-Type", "text/html; charset=utf-8")
-	rw.Header().Set("Cache-Control", "no-store")
-	// A page reached from an email is a page an attacker would like to
-	// frame or to have a script injected into. It renders nothing but
-	// fixed text and one escaped token, and says so to the browser too.
-	rw.Header().Set("X-Content-Type-Options", "nosniff")
-	rw.Header().Set("Content-Security-Policy", "default-src 'none'; style-src 'unsafe-inline'; form-action 'self'; frame-ancestors 'none'")
-	rw.Header().Set("Referrer-Policy", "no-referrer")
-	rw.WriteHeader(status)
-
 	var body string
 	switch page {
 	case pageConfirm:
@@ -258,9 +285,29 @@ func (h *UnsubscribeHandler) render(rw http.ResponseWriter, status int, page uns
 		body = `<h1>This link is not valid</h1><p>The unsubscribe link could not be verified. ` +
 			`It may have been altered in transit. Replying to the message and asking to be removed will also work.</p>`
 	}
+	writeEmailPage(rw, status, "Unsubscribe", body)
+}
+
+func emailPageHeaders(rw http.ResponseWriter) {
+	rw.Header().Set("Content-Type", "text/html; charset=utf-8")
+	rw.Header().Set("Cache-Control", "no-store")
+	// A page reached from an email is a page an attacker would like to
+	// frame or to have a script injected into. It renders nothing but
+	// fixed text and one escaped token, and says so to the browser too.
+	rw.Header().Set("X-Content-Type-Options", "nosniff")
+	rw.Header().Set("Content-Security-Policy", "default-src 'none'; style-src 'unsafe-inline'; form-action 'self'; frame-ancestors 'none'")
+	rw.Header().Set("Referrer-Policy", "no-referrer")
+
+}
+
+// writeEmailPage keeps every recipient action page independent of scripts,
+// cookies and external assets, matching the original unsubscribe surface.
+func writeEmailPage(rw http.ResponseWriter, status int, title, body string) {
+	emailPageHeaders(rw)
+	rw.WriteHeader(status)
 	_, _ = rw.Write([]byte(`<!doctype html><html lang="en"><head><meta charset="utf-8">` +
-		`<meta name="viewport" content="width=device-width,initial-scale=1"><title>Unsubscribe</title>` +
-		`<style>body{font:16px/1.5 system-ui,sans-serif;margin:4rem auto;max-width:34rem;padding:0 1rem}` +
-		`button{font:inherit;padding:.6rem 1.1rem;cursor:pointer}</style></head><body>` +
+		`<meta name="viewport" content="width=device-width,initial-scale=1"><meta name="color-scheme" content="light dark"><title>` + html.EscapeString(title) + `</title>` +
+		`<style>body{font:16px/1.5 system-ui,sans-serif;margin:4rem auto;max-width:34rem;padding:0 1rem;overflow-wrap:anywhere}` +
+		`h1{font-size:1.6rem;line-height:1.25}button{font:inherit;padding:.6rem 1.1rem;cursor:pointer}button:focus-visible{outline:2px solid currentColor;outline-offset:3px}</style></head><body>` +
 		body + `</body></html>`))
 }

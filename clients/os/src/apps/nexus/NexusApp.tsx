@@ -49,7 +49,7 @@ import {
   useRuns,
 } from "./useNexus";
 import { useSession } from "../../chrome/access";
-import { useOpenAskWork } from "../../ask/AskProvider";
+import { useDiscussApproval, useOpenAskWork } from "../../ask/AskProvider";
 
 // WORK: what you asked the system to do, what it did about it, and the places
 // it had to stop and ask you.
@@ -108,6 +108,7 @@ export function NexusApp({
   const derive = useDeriveRun();
   const decide = useDecideApproval();
   const openAskWork = useOpenAskWork();
+  const discussApproval = useDiscussApproval();
 
   const [selectedGoalId, setSelectedGoalId] = useState("");
   const [openGoalId, setOpenGoalId] = useState("");
@@ -327,6 +328,7 @@ export function NexusApp({
         selectedApprovalId={selectedApprovalId}
         onSelectApproval={setSelectedApprovalId}
         onAnswerInAsk={openAskWork ?? undefined}
+        onDiscussInAsk={discussApproval ?? undefined}
         onOpenRun={openRun}
         procedures={feeds.procedureRows}
         onOpenProcedure={openProcedureById}
@@ -385,7 +387,6 @@ export function NexusApp({
         runs={runs.source}
         conversationId={conversationId}
         onClearConversation={() => setConversationId("")}
-        goalsById={goalsById}
         showFinished={settings.showFinishedRuns}
         onOpenRun={openRun}
       />

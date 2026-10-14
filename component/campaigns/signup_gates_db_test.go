@@ -469,7 +469,7 @@ func (f *digestFixture) TestAMailboxAddedAfterTheReadIsAdoptedNotAddedAgain(t *t
 	manual := n.suffix + "-manual"
 	actual := n.worker.store.engine
 	n.worker.store.engine = &addsMeanwhile{Engine: actual, add: func() {
-		if err := n.store.AddRecipient(n.owner, manual, n.audience, " Subscriber@Example.TEST ", "", "manual", n.org, nil); err != nil {
+		if err := n.store.AddRecipient(n.owner, manual, n.audience, " Subscriber@Example.TEST ", "", "manual", n.org, "subscribed", nil); err != nil {
 			t.Error(err)
 		}
 	}}
@@ -502,7 +502,7 @@ func (f *digestFixture) TestAMailboxThatOptedOutMeanwhileIsNotWelcomed(t *testin
 	manual := n.suffix + "-manual"
 	actual := n.worker.store.engine
 	n.worker.store.engine = &addsMeanwhile{Engine: actual, add: func() {
-		if err := n.store.AddRecipient(n.owner, manual, n.audience, " Subscriber@Example.TEST ", "", "manual", n.org, nil); err != nil {
+		if err := n.store.AddRecipient(n.owner, manual, n.audience, " Subscriber@Example.TEST ", "", "manual", n.org, "subscribed", nil); err != nil {
 			t.Error(err)
 			return
 		}

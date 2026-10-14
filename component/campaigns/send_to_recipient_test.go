@@ -5,6 +5,7 @@ import (
 	"errors"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/znasllc-io/memql/component/auth"
 )
@@ -80,6 +81,145 @@ func TestSendToRecipientMailsAndLedgersTheOutcome(t *testing.T) {
 	if !wroteContaining(engine, "mutation recordCampaignDelivery", `status: "sent"`) {
 		t.Errorf("no delivery row was written.\ncalls:\n%s",
 			strings.Join(callsWithPrefix(engine, "mutation recordCampaignDelivery"), "\n"))
+	}
+}
+
+// TestASingleSendFooterNeverNamesTheSubject: a single send has no campaign, so
+// its footer used to name the one thing the synthetic campaign was built from,
+// the template's subject ("you subscribed to Welcome to Acme!"). The footer
+// names who the person subscribed to: the sending identity's display name, and
+// failing that the organization, and failing that the list.
+func TestASingleSendFooterNeverNamesTheSubject(t *testing.T) {
+	for _, tc := range []struct {
+		name     string
+		identity bool
+		want     string
+	}{
+		{"with a sending identity", true, "you subscribed to Acme News."},
+		{"with the configured default sender", false, "you subscribed to this mailing list."},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			engine := recipientSendEngine()
+			engine.template["subject"] = "Welcome to Acme!"
+			engine.template["htmlBody"] = "<p>Hello {{displayName}}.</p>"
+			engine.senderIdentities = map[string]map[string]any{
+				"si-acme": senderIdentityRow("si-acme", "news@acme.test", "Acme News", "active"),
+			}
+			sender := &recordingSender{}
+			w := newTestWorker(t, engine, sender)
+
+			args := sendToRecipientArgs()
+			if tc.identity {
+				args["senderIdentityId"] = "si-acme"
+			}
+			if _, err := w.handleSendToRecipient(importCtx(), args, 0); err != nil {
+				t.Fatalf("sendToRecipient: %v", err)
+			}
+			msg := sender.sent[0]
+			if msg.Subject != "Welcome to Acme!" {
+				t.Fatalf("the subject = %q; the test is not checking what it thinks it is", msg.Subject)
+			}
+			for part, body := range map[string]string{"text": msg.TextBody, "html": msg.HTMLBody} {
+				if !strings.Contains(body, tc.want) {
+					t.Errorf("%s footer: want %q in %q", part, tc.want, body)
+				}
+				if strings.Contains(body, "Welcome to Acme!") {
+					t.Errorf("%s part names the subject: %q", part, body)
+				}
+			}
+		})
+	}
+}
+
+// TestASingleSendCarriesTheLinksButNoCampaign: the opt-out, preferences and
+// view links of a rule-driven send name the recipient and the organization, and
+// no campaign, because a rule is not a campaign.
+func TestASingleSendCarriesTheLinksButNoCampaign(t *testing.T) {
+	engine := recipientSendEngine()
+	engine.template["textBody"] = "Manage {{preferencesUrl}} View {{viewUrl}} Leave {{unsubscribeUrl}}"
+	sender := &recordingSender{}
+	w := newTestWorker(t, engine, sender)
+
+	if _, err := w.handleSendToRecipient(importCtx(), sendToRecipientArgs(), 0); err != nil {
+		t.Fatalf("sendToRecipient: %v", err)
+	}
+	body := sender.sent[0].TextBody
+	keys := w.cfg.UnsubscribeKeys()
+
+	preferences, err := ParseLinkToken(keys, LinkPreferences, linkTokenIn(t, body, "https://example.test"+PreferencesPath), time.Now())
+	if err != nil {
+		t.Fatalf("the preferences link does not verify: %v", err)
+	}
+	if preferences.RecipientID != "r-1" || preferences.EmailDigest != EmailDigest("person@example.test") || preferences.CampaignID != "" {
+		t.Errorf("preferences payload = %+v", preferences)
+	}
+	view, err := ParseLinkToken(keys, LinkView, linkTokenIn(t, body, "https://example.test"+ViewPath), time.Now())
+	if err != nil {
+		t.Fatalf("the view link does not verify: %v", err)
+	}
+	if view.TemplateID != testTemplate || view.TemplateRevision == "" || view.CampaignID != "" {
+		t.Errorf("view payload = %+v", view)
+	}
+	unsubscribe, err := ParseUnsubscribeToken(keys, linkTokenIn(t, body, "https://example.test"+UnsubscribePath))
+	if err != nil {
+		t.Fatalf("the unsubscribe link does not verify: %v", err)
+	}
+	if unsubscribe.CampaignID != "" {
+		t.Errorf("a rule send names a campaign in its opt-out: %+v", unsubscribe)
+	}
+}
+
+// TestASingleSendsViewLinkCarriesTheSenderTheFooterNamed: the same rule as a
+// campaign's. A rule-driven send has no sender of its own to name, and its
+// footer says so in words; the view page has to be given those words.
+func TestASingleSendsViewLinkCarriesTheSenderTheFooterNamed(t *testing.T) {
+	engine := recipientSendEngine()
+	engine.template["textBody"] = "View {{viewUrl}}"
+	sender := &recordingSender{}
+	w := newTestWorker(t, engine, sender)
+
+	if _, err := w.handleSendToRecipient(importCtx(), sendToRecipientArgs(), 0); err != nil {
+		t.Fatalf("sendToRecipient: %v", err)
+	}
+	body := sender.sent[0].TextBody
+	view, err := ParseLinkToken(w.cfg.UnsubscribeKeys(), LinkView, linkTokenIn(t, body, "https://example.test"+ViewPath), time.Now())
+	if err != nil {
+		t.Fatalf("the view link does not verify: %v", err)
+	}
+	const named = "this mailing list"
+	if view.SenderName != named {
+		t.Errorf("the view link carries the sender %q, want %q", view.SenderName, named)
+	}
+	if !strings.Contains(body, "you subscribed to "+named+".") {
+		t.Errorf("the footer does not say %q.\n%s", named, body)
+	}
+}
+
+// TestSendToRecipientRefusesATemplateWhoseFooterCannotBePlaced: a message whose
+// unsubscribe link cannot be placed, or would not be shown, is not sent, and
+// nothing is ledgered as an attempt: the refusal comes before the transport is
+// contacted.
+func TestSendToRecipientRefusesATemplateWhoseFooterCannotBePlaced(t *testing.T) {
+	for name, tc := range map[string]struct{ html, want string }{
+		"a comment that never ends":          {"<p>Hi</p><!--", wantEndsOpen},
+		"an Outlook section left open":       {"<html><body><p>Hi</p><![if !mso]><p>x</p></body></html>", wantOutlookOpen},
+		"a comment only a tree builder sees": {"<html><body><p>Hi</p><noscript><!--</noscript></body></html>", wantEndsOpen},
+	} {
+		engine := recipientSendEngine()
+		engine.template["htmlBody"] = tc.html
+		sender := &recordingSender{}
+		w := newTestWorker(t, engine, sender)
+
+		_, err := w.handleSendToRecipient(importCtx(), sendToRecipientArgs(), 0)
+		if err == nil || err.Error() != "campaigns.sendToRecipient: "+tc.want {
+			t.Errorf("%s: err = %v, want the sentence %q", name, err, tc.want)
+		}
+		if sender.count() != 0 {
+			t.Errorf("%s: a message went out", name)
+		}
+		if written := callsWithPrefix(engine, "mutation recordCampaignDelivery"); len(written) != 0 {
+			t.Errorf("%s: a refused message was ledgered: %v", name, written)
+		}
 	}
 }
 
@@ -357,5 +497,208 @@ func TestAnOrdinaryCampaignDeliveryCarriesNoRuleId(t *testing.T) {
 		if strings.Contains(q, "emailRuleId:") {
 			t.Errorf("an ordinary campaign delivery carries a rule id: %s", q)
 		}
+	}
+}
+
+// failingRead makes the reads that start with prefix fail, the way the request
+// pool's statement timeout fails a read that took too long.
+type failingRead struct {
+	*fakeEngine
+	prefix string
+}
+
+func (e *failingRead) Execute(ctx context.Context, q string) (any, error) {
+	if strings.HasPrefix(q, e.prefix) {
+		return nil, errors.New("canceling statement due to statement timeout")
+	}
+	return e.fakeEngine.Execute(ctx, q)
+}
+
+// TestASendThatCouldNotReadIsUndecided: a read the send needs fails. That says
+// nothing about the message -- nothing was attempted and the same send, made again,
+// may go out -- and the error is marked so, for the callers that turn an error into
+// a verdict (a welcome that is blocked is never retried). Its text is unchanged.
+func TestASendThatCouldNotReadIsUndecided(t *testing.T) {
+	for _, read := range []string{
+		"query templateById",
+		"query recipientById",
+		"query emailRuleById",
+		"query senderIdentityById",
+		"query suppressionByDigest",
+	} {
+		t.Run(strings.TrimPrefix(read, "query "), func(t *testing.T) {
+			engine := recipientSendEngine()
+			engine.senderIdentities = map[string]map[string]any{
+				"si-acme": senderIdentityRow("si-acme", "news@acme.test", "Acme News", "active"),
+			}
+			sender := &recordingSender{}
+			w := newTestWorker(t, &failingRead{fakeEngine: engine, prefix: read}, sender)
+			args := sendToRecipientArgs()
+			args["senderIdentityId"] = "si-acme"
+
+			_, err := w.handleSendToRecipient(importCtx(), args, 0)
+
+			if err == nil {
+				t.Fatalf("a send whose %s failed went out", read)
+			}
+			if !isUndecided(err) {
+				t.Errorf("a send whose %s failed is a verdict on the message: %v", read, err)
+			}
+			if !strings.HasPrefix(err.Error(), "campaigns.sendToRecipient:") {
+				t.Errorf("marking the failure changed its text: %q", err)
+			}
+			if sender.count() != 0 {
+				t.Error("a message went out")
+			}
+		})
+	}
+}
+
+// TestASendRefusedOnItsMeritsIsNotUndecided: the other half. A send refused for a
+// reason of its own -- the template is not readable or not published, the recipient
+// is not readable, the sender is disabled -- is a verdict, and is never marked.
+func TestASendRefusedOnItsMeritsIsNotUndecided(t *testing.T) {
+	cases := map[string]func(*fakeEngine, map[string]any){
+		"the template is not readable":  func(e *fakeEngine, _ map[string]any) { e.template = nil },
+		"the template is not published": func(e *fakeEngine, _ map[string]any) { e.template["status"] = "draft" },
+		"the recipient is not readable": func(e *fakeEngine, _ map[string]any) { e.roster = nil },
+		"the sender is not readable":    func(_ *fakeEngine, args map[string]any) { args["senderIdentityId"] = "si-unknown" },
+		"the sender is disabled": func(e *fakeEngine, args map[string]any) {
+			e.senderIdentities = map[string]map[string]any{"si-retired": senderIdentityRow("si-retired", "old@acme.test", "Acme", "disabled")}
+			args["senderIdentityId"] = "si-retired"
+		},
+		"the email rule is not readable": func(e *fakeEngine, _ map[string]any) { e.emailRules = nil },
+	}
+	for name, arrange := range cases {
+		t.Run(name, func(t *testing.T) {
+			engine := recipientSendEngine()
+			args := sendToRecipientArgs()
+			arrange(engine, args)
+			sender := &recordingSender{}
+			w := newTestWorker(t, engine, sender)
+
+			_, err := w.handleSendToRecipient(importCtx(), args, 0)
+
+			if err == nil {
+				t.Fatal("a send that should be refused went out")
+			}
+			if isUndecided(err) {
+				t.Errorf("a send refused on its merits is marked undecided: %v", err)
+			}
+			if sender.count() != 0 {
+				t.Error("a message went out")
+			}
+		})
+	}
+}
+
+// openGate is the hold of a worker with no database: there is no lock to lose.
+type openGate struct{}
+
+func (openGate) Release()                     {}
+func (openGate) Verify(context.Context) error { return nil }
+
+// withOpenGate gives a unit-test worker the single-send gate it needs to send under a
+// request identifier.
+func withOpenGate(w *Worker) *Worker {
+	w.singleSendGate = func(context.Context, string) (gateHold, error) { return openGate{}, nil }
+	return w
+}
+
+// TestEachSingleSendRequestHasItsOwnLedgerRow (memql#6022, F7): the ledger row of a
+// single send used to be keyed by (rule, recipient) -- or by the recipient alone when
+// no rule was behind it -- so a welcome, a journey step and a rule's send to one person
+// all wrote versions of ONE row, each replacing the last, and "which message did this
+// person get" had no answer. The row is keyed by the request that made the send.
+//
+// Two sends to one recipient under two request ids record two recordCampaignDelivery
+// calls carrying those ids, and the ids the engine derives from them (the DSL's own
+// expression, evaluated) differ -- and are the ones the Go mirror names.
+func TestEachSingleSendRequestHasItsOwnLedgerRow(t *testing.T) {
+	engine := recipientSendEngine()
+	engine.senderIdentities = map[string]map[string]any{
+		"si-acme": senderIdentityRow("si-acme", "news@acme.test", "Acme News", "active"),
+	}
+	sender := &recordingSender{}
+	w := withOpenGate(newTestWorker(t, engine, sender))
+	requests := []string{"newsletter-aaaaaaaa", "journey-bbbbbbbb-step1"}
+
+	for _, request := range requests {
+		args := sendToRecipientArgs()
+		delete(args, "emailRuleId")
+		args["senderIdentityId"] = "si-acme"
+		args["requestId"] = request
+		nodes, err := w.handleSendToRecipient(importCtx(), args, 0)
+		if err != nil {
+			t.Fatalf("sendToRecipient %s: %v", request, err)
+		}
+		if got := decodeResult(t, nodes); got["sent"] != true {
+			t.Fatalf("%s: result = %+v, want sent", request, got)
+		}
+	}
+
+	written := callsWithPrefix(engine, "mutation recordCampaignDelivery")
+	if len(written) != len(requests) {
+		t.Fatalf("%d delivery rows were written for %d sends.\ncalls:\n%s", len(written), len(requests), strings.Join(written, "\n"))
+	}
+	derive := deliveryIDFromTheMutation(t)
+	ids := map[string]string{}
+	for i, q := range written {
+		request := argOf(q, "requestId")
+		if request != requests[i] {
+			t.Errorf("delivery %d names request %q, want %q: %s", i, request, requests[i], q)
+		}
+		// What the engine stamps as the row's id, from exactly this call's arguments.
+		id := derive(map[string]any{
+			"requestId": request, "recipientId": argOf(q, "recipientId"),
+			"campaignId": argOf(q, "campaignId"), "emailRuleId": argOf(q, "emailRuleId"),
+		})
+		if want := singleDeliveryRowID(requests[i], "r-1"); id != want {
+			t.Errorf("request %q is on ledger row %s, want %s", requests[i], id, want)
+		}
+		if other, dup := ids[id]; dup {
+			t.Errorf("requests %q and %q are on one ledger row %s", other, requests[i], id)
+		}
+		ids[id] = requests[i]
+		if got := argOf(q, "templateId"); got != testTemplate {
+			t.Errorf("delivery %d names template %q, want %q", i, got, testTemplate)
+		}
+		if got := argOf(q, "senderIdentityId"); got != "si-acme" {
+			t.Errorf("delivery %d names sender %q, want si-acme", i, got)
+		}
+	}
+	if len(ids) != len(requests) {
+		t.Errorf("the %d sends are on %d ledger rows", len(requests), len(ids))
+	}
+}
+
+// TestASendWithNoRequestKeepsItsRuleKeyedRow: a send made with no request identifier
+// -- by hand, or by a caller that supplies none -- has no request to key its row by,
+// stamps none, and keeps the (rule, recipient) row it always had. It still records
+// the template it used.
+func TestASendWithNoRequestKeepsItsRuleKeyedRow(t *testing.T) {
+	engine := recipientSendEngine()
+	w := newTestWorker(t, engine, &recordingSender{})
+
+	if _, err := w.handleSendToRecipient(importCtx(), sendToRecipientArgs(), 0); err != nil {
+		t.Fatalf("sendToRecipient: %v", err)
+	}
+
+	written := callsWithPrefix(engine, "mutation recordCampaignDelivery")
+	if len(written) != 1 {
+		t.Fatalf("%d delivery rows were written, want 1", len(written))
+	}
+	if strings.Contains(written[0], "requestId:") {
+		t.Errorf("a send with no request stamped one: %s", written[0])
+	}
+	id := deliveryIDFromTheMutation(t)(map[string]any{"recipientId": argOf(written[0], "recipientId"), "emailRuleId": argOf(written[0], "emailRuleId")})
+	if want := deliveryRowID(testEmailRule, "r-1"); id != want {
+		t.Errorf("the row is %s, want the (rule, recipient) row %s", id, want)
+	}
+	if got := argOf(written[0], "templateId"); got != testTemplate {
+		t.Errorf("the delivery names template %q, want %q", got, testTemplate)
+	}
+	if strings.Contains(written[0], "senderIdentityId:") {
+		t.Errorf("a send that named no sender stamped one: %s", written[0])
 	}
 }

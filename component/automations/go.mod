@@ -18,7 +18,6 @@ require (
 	github.com/znasllc-io/memql/component/bus v0.0.0
 	github.com/znasllc-io/memql/component/bus/gen v0.0.0
 	github.com/znasllc-io/memql/component/database v0.0.0
-	github.com/znasllc-io/memql/component/deploycontrol v0.0.0
 	github.com/znasllc-io/memql/component/events v0.0.0
 	github.com/znasllc-io/memql/component/grpc/gen v0.0.0
 	github.com/znasllc-io/memql/component/healing v0.0.0
@@ -43,7 +42,6 @@ require (
 	github.com/coder/websocket v1.8.15 // indirect
 	github.com/dgraph-io/ristretto v0.2.0 // indirect
 	github.com/dustin/go-humanize v1.0.1 // indirect
-	github.com/golang-jwt/jwt/v5 v5.3.1 // indirect
 	github.com/google/uuid v1.6.0 // indirect
 	github.com/invopop/jsonschema v0.14.0 // indirect
 	github.com/jinzhu/inflection v1.0.0 // indirect
@@ -69,7 +67,6 @@ require (
 	github.com/znasllc-io/memql/component/config v0.0.0 // indirect
 	github.com/znasllc-io/memql/component/envregistry v0.0.0 // indirect
 	github.com/znasllc-io/memql/component/frontdoor v0.0.0 // indirect
-	github.com/znasllc-io/memql/component/identity v0.0.0 // indirect
 	github.com/znasllc-io/memql/component/language/annotations v0.0.0 // indirect
 	github.com/znasllc-io/memql/component/safety v0.0.0 // indirect
 	github.com/znasllc-io/memql/component/secret v0.0.0 // indirect

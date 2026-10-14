@@ -66,7 +66,8 @@ func mutationActor(ctx context.Context) (string, error) {
 // reuses this adapter instead of growing a second one that could drift
 // from it. See component/memql/outbox_append.go.
 type bunStore struct {
-	db bun.IDB
+	db       bun.IDB
+	onInsert func(concept string, appended bool)
 }
 
 // newBunStore wraps the engine's database handle.
@@ -120,10 +121,17 @@ func (s *bunStore) InsertMemoryNode(ctx context.Context, node *memorynodes.Memor
 	// createdAt timestamps in the common case; only the
 	// pathological "same row, same microsecond" case dedups, which
 	// is the right behavior anyway.
-	_, err := s.db.NewInsert().
+	res, err := s.db.NewInsert().
 		Model(node).
 		On("CONFLICT (id, \"createdAt\") DO NOTHING").
 		Exec(ctx)
+	if err == nil && s.onInsert != nil {
+		n, countErr := res.RowsAffected()
+		if countErr != nil {
+			return countErr
+		}
+		s.onInsert(node.Concept, n > 0)
+	}
 	return err
 }
 
@@ -146,7 +154,7 @@ func (s *bunStore) QueryMemoryNodes(ctx context.Context, params memorynodes.Quer
 	}
 
 	var nodes []memorynodes.MemoryNode
-	query := s.db.NewSelect().Model(&nodes)
+	query := s.db.NewSelect().Model(&nodes).ModelTableExpr(memorynodes.ObservedRowsSQL + " AS mn")
 
 	if len(params.IDs) > 0 {
 		query = query.Where("id IN (?)", bun.In(params.IDs))
@@ -175,6 +183,9 @@ func (s *bunStore) QueryMemoryNodes(ctx context.Context, params memorynodes.Quer
 		return nil, err
 	}
 
+	if err := memorynodes.HydrateSchemas(ctx, s.db, nodes); err != nil {
+		return nil, err
+	}
 	return nodes, nil
 }
 
@@ -290,7 +301,12 @@ func (e *MemQLEngine) evaluateExpressionSet(ctx context.Context, expr Expression
 	return e.filterStagedSet(ctx, filterRowAuthzSet(ctx, set)), nil
 }
 
-func (e *MemQLEngine) evaluateExpressionSetWithContext(ctx context.Context, expr ExpressionNode, timestamp *time.Time, target int, sorter *compiledSort, conceptContext string) (map[string]memorynodes.MemoryNode, error) {
+func (e *MemQLEngine) evaluateExpressionSetWithContext(ctx context.Context, expr ExpressionNode, timestamp *time.Time, target int, sorter *compiledSort, conceptContext string) (result map[string]memorynodes.MemoryNode, resultErr error) {
+	defer func() {
+		if resultErr == nil {
+			noteCountWindow(ctx, len(result), target)
+		}
+	}()
 	// RANK LOWERING (epic memql#4832, D2), and the POSITION is the design.
 	//
 	// A rank term is symbolic in the plan -- it names the rule, not the
@@ -1119,6 +1135,9 @@ func (e *MemQLEngine) buildGraphBundle(ctx context.Context, nodes []memorynodes.
 	if len(nodes) == 0 {
 		return builder.toBundle(), nil
 	}
+	if err := memorynodes.HydrateSchemas(ctx, e.database(), nodes); err != nil {
+		return nil, err
+	}
 
 	for _, node := range nodes {
 		builder.addRoot(node.ID)
@@ -1140,6 +1159,12 @@ func (e *MemQLEngine) expandGraph(ctx context.Context, node memorynodes.MemoryNo
 		visited[id] = struct{}{}
 	}
 
+	// Roots were hydrated in a batch; relationship reads may carry references.
+	schemaRows := []memorynodes.MemoryNode{node}
+	if err := memorynodes.HydrateSchemas(ctx, e.database(), schemaRows); err != nil {
+		return err
+	}
+	node = schemaRows[0]
 	apiNode, err := toAPIMemoryNode(&node)
 	if err != nil {
 		return err

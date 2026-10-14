@@ -1,5 +1,6 @@
 import { ContentSkeleton } from "../../kit/ContentSkeleton";
 import { RecordList, RecordRow } from "../../kit/RecordRow";
+import { InPlaceAsk } from "../../kit/pressHold";
 import { useEffect, useMemo, useState, useSyncExternalStore, type ReactNode } from "react";
 import type { Row } from "@znasllc-io/memql-sdk-core/client";
 import { FileText, GraduationCap, Rocket, Send, UserPlus, UserRound } from "lucide-react";
@@ -9,7 +10,7 @@ import { Button, Caption, Check, Fact, Facts, Input, Notice, Panel, Subhead,
 } from "../../kit";
 import { rowString } from "@znasllc-io/memql-sdk-core/client";
 import { flatten } from "../../kit/rows";
-import { useAccountCampaignsRollup } from "../campaigns/useCampaigns";
+import { useAccountCampaignsRollup } from "../email/useEmail";
 import type { ArchiveAccountState, UpdateAccountState } from "./actions";
 import { accountIsArchived, accountIsSelf, accountName, type AccountRow } from "./rows";
 import { useSession } from "../../chrome/access";
@@ -342,11 +343,11 @@ function Ledger({
   // and this one is two numbers over two reads -- distinct people, across the
   // groups that grant this client. It prints the same shared read time.
   const people = useAccountPeople(account.id);
-  // THE FIFTH BAND, AND ITS READ LIVES IN THE CAMPAIGNS APP. `tie.tsx` states
+  // THE FIFTH BAND, AND ITS READ LIVES IN THE EMAIL APP. `tie.tsx` states
   // the rule for the other direction -- a tie surface belongs to the domain
   // that owns the concept -- and this is the same rule read the other way
   // round: the ledger renders the band, and the read that fills it is the
-  // campaigns app's to own. It answers in this ledger's own `Rollup`
+  // Email app's to own. It answers in this ledger's own `Rollup`
   // vocabulary so five bands can settle independently and print one read time
   // between them.
   //
@@ -412,7 +413,7 @@ function Ledger({
           error: campaigns.error,
           readAt: campaigns.readAt,
         },
-        owner: "Campaigns",
+        owner: "Email",
         // It counts CAMPAIGNS and not sends: a band reading "4,182" would be
         // counting delivery rows, which is a number about one busy week rather
         // than about the client.
@@ -664,7 +665,7 @@ function ArchivePanel({
           <Button onClick={() => setAsking(true)}>Archive this client</Button>
         </>
       ) : (
-        <div className="os-account-confirm">
+        <InPlaceAsk className="os-account-confirm">
           <p className="os-account-confirm-line">
             Archive {accountName(account)}?
           </p>
@@ -700,7 +701,7 @@ function ArchivePanel({
               Cancel
             </Button>
           </div>
-        </div>
+        </InPlaceAsk>
       )}
     </Panel>
   );

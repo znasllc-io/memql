@@ -121,13 +121,19 @@ export function WindowFrame({
   const { settingsTone, reportSetupState } = useAppSetupMark(manifest.id, markToneFor(appGate));
   // The dot inside a button is DECORATIVE and the button says the state
   // itself: a labelled role="img" nested in a button appends to the button's
-  // accessible name, so "Settings" would announce as "Settings Campaigns is
+  // accessible name, so "Settings" would announce as "Settings Email is
   // not set up" -- the right information in a shape nothing can match on.
   const settingsStatePhrase = settingsTone === "needsSetup" ? "not set up" : "partly set up";
   // A module the SECTION alone asked for names the section in the headline
   // ("Workbenches is not set up yet"); an app-level one names the app.
-  const appRequires = manifest.requires ?? [];
-  const unmetIsSectionOnly = gate.unmet.some((id) => !appRequires.includes(id));
+  //
+  // THE APP'S MODULE LIST IS `needs`. `requires` is the app's capability
+  // RESOURCE ("app:email"), a string, and `string.includes` is a substring
+  // test: read as a module list it answered true for any module whose name is
+  // spelled inside the app's resource, so Email's own `email` module would have
+  // named the app for a gate only the Automations section asked for.
+  const appNeeds = manifest.needs ?? [];
+  const unmetIsSectionOnly = gate.unmet.some((id) => !appNeeds.includes(id));
   const Icon = manifest.icon;
   const Body = manifest.component;
   const contextTag = `app:${manifest.id}${current ? ` section:${current.id}` : ""}`;

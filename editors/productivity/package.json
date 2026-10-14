@@ -1,8 +1,8 @@
 {
   "name": "memql-productivity-tools",
   "displayName": "MemQL Productivity Tools",
-  "description": "Documents, campaign templates, PDFs and human-reviewed suggestions connected to MemQL.",
-  "version": "0.1.3",
+  "description": "Documents, emails, PDFs and human-reviewed suggestions connected to MemQL.",
+  "version": "0.2.0",
   "publisher": "znasllc",
   "license": "SEE LICENSE IN LICENSE",
   "repository": {
@@ -38,88 +38,72 @@
   "contributes": {
     "commands": [
       {
-        "command": "memql.productivity.newTemplate",
-        "title": "New Email Template",
-        "category": "MemQL Productivity"
-      },
-      {
-        "command": "memql.productivity.previewTemplate",
-        "title": "Preview Email Template",
-        "category": "MemQL Productivity"
-      },
-      {
         "command": "memql.productivity.openFile",
         "title": "Open File from MemQL",
-        "category": "MemQL Productivity"
+        "category": "MemQL"
       },
       {
         "command": "memql.productivity.compareLatest",
         "title": "Compare with Latest Revision",
-        "category": "MemQL Productivity"
+        "category": "MemQL"
       },
       {
         "command": "memql.productivity.useComparedRevision",
         "title": "Use Compared Revision as Save Base",
-        "category": "MemQL Productivity"
+        "category": "MemQL"
       },
       {
         "command": "memql.productivity.markdown.source",
         "title": "Markdown Source",
-        "category": "MemQL Productivity",
+        "category": "MemQL",
         "icon": "$(code)"
       },
       {
         "command": "memql.productivity.markdown.reading",
         "title": "Markdown Reading View",
-        "category": "MemQL Productivity",
+        "category": "MemQL",
         "icon": "$(preview)"
       },
       {
         "command": "memql.productivity.markdown.review",
-        "title": "Markdown: Review",
+        "title": "Markdown Review",
         "shortTitle": "Review",
+        "category": "MemQL",
         "icon": "$(comment-discussion)"
       },
       {
         "command": "memql.productivity.markdown.split",
         "title": "Markdown Split View",
-        "category": "MemQL Productivity",
+        "category": "MemQL",
+        "icon": "$(open-preview)"
+      },
+      {
+        "command": "memql.productivity.email.design",
+        "title": "Email Design",
+        "category": "MemQL",
+        "icon": "$(preview)"
+      },
+      {
+        "command": "memql.productivity.email.source",
+        "title": "Email Source",
+        "category": "MemQL",
+        "icon": "$(code)"
+      },
+      {
+        "command": "memql.productivity.email.split",
+        "title": "Email Split View",
+        "category": "MemQL",
         "icon": "$(open-preview)"
       },
       {
         "command": "memql.productivity.markdown.copy",
         "title": "Copy",
-        "category": "MemQL Productivity"
+        "category": "MemQL"
       },
       {
         "command": "memql.productivity.markdown.feedback",
         "title": "Feedback",
-        "category": "MemQL Productivity"
-      },
-      {
-        "command": "memql.productivity.template.source",
-        "title": "Email Template Source",
-        "category": "MemQL Productivity"
-      },
-      {
-        "command": "memql.productivity.template.preview",
-        "title": "Email Template Preview",
-        "category": "MemQL Productivity"
-      },
-      {
-        "command": "memql.productivity.template.split",
-        "title": "Email Template Split View",
-        "category": "MemQL Productivity"
-      },
-      {
-        "command": "memql.productivity.templateFromExamples",
-        "title": "Create Email from Examples",
-        "category": "MemQL Productivity"
-      },
-      {
-        "command": "memql.productivity.resumeEmailComposition",
-        "title": "Open Last Email Composition",
-        "category": "MemQL Productivity"
+        "category": "MemQL"
       },
       {
         "command": "memql.productivity.checkTools",
@@ -129,18 +113,23 @@
       {
         "command": "memql.productivity.markdown.note",
         "title": "Add note",
-        "category": "MemQL Productivity"
+        "category": "MemQL"
       },
       {
         "command": "memql.productivity.newMarkdown",
         "title": "New Markdown Document",
-        "category": "MemQL Productivity"
+        "category": "MemQL"
       },
       {
         "command": "memql.productivity.markdown.insertImage",
-        "title": "Markdown: Insert Image",
-        "category": "MemQL Productivity",
+        "title": "Insert Image into Markdown",
+        "category": "MemQL",
         "icon": "$(file-media)"
+      },
+      {
+        "command": "memql.productivity.newEmail",
+        "title": "New Email",
+        "category": "MemQL"
       }
     ],
     "customEditors": [
@@ -173,6 +162,16 @@
         "selector": [
           {
             "filenamePattern": "*.email.json"
+          }
+        ],
+        "priority": "default"
+      },
+      {
+        "viewType": "memql.productivity.newEmail",
+        "displayName": "New Email",
+        "selector": [
+          {
+            "filenamePattern": "memql-file:/new-email/*/*"
           }
         ],
         "priority": "default"
@@ -240,14 +239,19 @@
           "group": "2_markdown@4"
         },
         {
-          "command": "memql.productivity.template.preview",
-          "when": "resourceFilename =~ /\\.email\\.json$/",
-          "group": "navigation"
+          "command": "memql.productivity.email.design",
+          "when": "resourceFilename =~ /\\.email\\.json$/i",
+          "group": "navigation@1"
         },
         {
-          "command": "memql.productivity.template.split",
-          "when": "resourceFilename =~ /\\.email\\.json$/",
-          "group": "navigation"
+          "command": "memql.productivity.email.source",
+          "when": "resourceFilename =~ /\\.email\\.json$/i",
+          "group": "navigation@2"
+        },
+        {
+          "command": "memql.productivity.email.split",
+          "when": "resourceFilename =~ /\\.email\\.json$/i",
+          "group": "2_email@3"
         },
         {
           "command": "memql.productivity.markdown.insertImage",
@@ -282,6 +286,8 @@
     "compile": "tsc --noEmit && node esbuild.js",
     "vscode:prepublish": "npm run compile",
     "test": "node esbuild.test.js && node --test dist-test/*.test.js",
+    "gallery": "node gallery/build.mjs",
+    "gallery:shoot": "node ../vscode/gallery/shoot.mjs --dir=dist-gallery",
     "package": "npm run compile && npx --yes @vscode/vsce@latest package --no-dependencies"
   },
   "dependencies": {

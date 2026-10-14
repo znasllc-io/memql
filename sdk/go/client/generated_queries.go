@@ -1166,7 +1166,7 @@ func AudienceRosterForSendBuild(args AudienceRosterForSendArgs) string {
 	return b.String()
 }
 
-// AudienceRosterSize -- ENGINE (owner-scoped): how many recipients an audience holds, as a {count: N} aggregate (memql#3460). Computed server-side, so it is the one question about a large audience that needs no window at all -- which is exactly why the preflight and the frozen `recipientCount` use it rather than measuring the length of a bounded read. Measuring a page and calling it a total is how the 5000 ceiling came to be load-bearing in the first place. Owned.
+// AudienceRosterSize -- ENGINE (owner-scoped): how many recipients an audience holds, as a {count, atLeast} aggregate (memql#3460). Computed server-side rather than by measuring the length of a bounded read, which is why the preflight and the frozen `recipientCount` use it: measuring a page and calling it a total is how the 5000 ceiling came to be load-bearing in the first place. The count still reads up to the engine's window: past it, `count` is the window and `atLeast` is true (memql#6033). Owned.
 //
 // Bound concept: v1:campaigns:recipient (machine-readable: BoundConcepts["audienceRosterSize"] in generated_concepts.go).
 type AudienceRosterSizeArgs struct {
@@ -1182,6 +1182,28 @@ func (qc *QueryClient) AudienceRosterSize(ctx context.Context, args AudienceRost
 func AudienceRosterSizeBuild(args AudienceRosterSizeArgs) string {
 	var b strings.Builder
 	b.WriteString("query audienceRosterSize(")
+	b.WriteString("audienceId: ")
+	b.WriteString(quoteMemQL(args.AudienceId))
+	b.WriteString(")")
+	return b.String()
+}
+
+// AudienceSubscriberCount -- How many people in one audience can be mailed now, as a {count, atLeast} aggregate. Pending and unsubscribed members are on the list but are not counted. The Email app's audience rows, the campaign wizard and the send confirmation name this number. Past the engine's window, `count` is the window and `atLeast` is true, which the Email app says as "5,000 or more" (memql#6033).
+//
+// Bound concept: v1:campaigns:recipient (machine-readable: BoundConcepts["audienceSubscriberCount"] in generated_concepts.go).
+type AudienceSubscriberCountArgs struct {
+	AudienceId string
+}
+
+// AudienceSubscriberCount calls the engine query audienceSubscriberCount.
+func (qc *QueryClient) AudienceSubscriberCount(ctx context.Context, args AudienceSubscriberCountArgs) (*Result, error) {
+	call := AudienceSubscriberCountBuild(args)
+	return qc.executeNamed(ctx, "audienceSubscriberCount", call)
+}
+
+func AudienceSubscriberCountBuild(args AudienceSubscriberCountArgs) string {
+	var b strings.Builder
+	b.WriteString("query audienceSubscriberCount(")
 	b.WriteString("audienceId: ")
 	b.WriteString(quoteMemQL(args.AudienceId))
 	b.WriteString(")")
@@ -1859,6 +1881,34 @@ func CampaignEngagementRefsBuild(args CampaignEngagementRefsArgs) string {
 	}
 	b.WriteString("kind: ")
 	b.WriteString(quoteMemQL(args.Kind))
+	b.WriteString(")")
+	return b.String()
+}
+
+// CampaignProviderDeliveryCount -- Counts confirmed outcomes, not a subtraction from messages accepted by the transport.
+//
+// Bound concept: v1:campaigns:delivery (machine-readable: BoundConcepts["campaignProviderDeliveryCount"] in generated_concepts.go).
+type CampaignProviderDeliveryCountArgs struct {
+	CampaignId     string
+	ProviderStatus string
+}
+
+// CampaignProviderDeliveryCount calls the engine query campaignProviderDeliveryCount.
+func (qc *QueryClient) CampaignProviderDeliveryCount(ctx context.Context, args CampaignProviderDeliveryCountArgs) (*Result, error) {
+	call := CampaignProviderDeliveryCountBuild(args)
+	return qc.executeNamed(ctx, "campaignProviderDeliveryCount", call)
+}
+
+func CampaignProviderDeliveryCountBuild(args CampaignProviderDeliveryCountArgs) string {
+	var b strings.Builder
+	b.WriteString("query campaignProviderDeliveryCount(")
+	b.WriteString("campaignId: ")
+	b.WriteString(quoteMemQL(args.CampaignId))
+	if b.Len() > 36 {
+		b.WriteString(", ")
+	}
+	b.WriteString("providerStatus: ")
+	b.WriteString(quoteMemQL(args.ProviderStatus))
 	b.WriteString(")")
 	return b.String()
 }
@@ -3388,6 +3438,58 @@ func DueResponsibilitiesBuild(args DueResponsibilitiesArgs) string {
 	return b.String()
 }
 
+// EmailLayoutById -- One email layout by id, for the organization's members. Backs the revision check campaignSaveLayout makes and the editors that open a saved layout. The id is not a capability: the concept's account tier answers a layout outside the caller's organizations as not found.
+//
+// Bound concept: v1:campaigns:emailLayout (machine-readable: BoundConcepts["emailLayoutById"] in generated_concepts.go).
+type EmailLayoutByIdArgs struct {
+	LayoutId string
+}
+
+// EmailLayoutById calls the engine query emailLayoutById.
+func (qc *QueryClient) EmailLayoutById(ctx context.Context, args EmailLayoutByIdArgs) (*Result, error) {
+	call := EmailLayoutByIdBuild(args)
+	return qc.executeNamed(ctx, "emailLayoutById", call)
+}
+
+func EmailLayoutByIdBuild(args EmailLayoutByIdArgs) string {
+	var b strings.Builder
+	b.WriteString("query emailLayoutById(")
+	b.WriteString("layoutId: ")
+	b.WriteString(quoteMemQL(args.LayoutId))
+	b.WriteString(")")
+	return b.String()
+}
+
+// EmailLayoutsForAccount -- An organization's email layouts, newest first. Backs the layout picker (through the emailLayouts builtin) and the Email app's Templates section. status narrows to active or archived layouts; omit it to see both.
+//
+// Bound concept: v1:campaigns:emailLayout (machine-readable: BoundConcepts["emailLayoutsForAccount"] in generated_concepts.go).
+type EmailLayoutsForAccountArgs struct {
+	AccountId string
+	Status    string
+}
+
+// EmailLayoutsForAccount calls the engine query emailLayoutsForAccount.
+func (qc *QueryClient) EmailLayoutsForAccount(ctx context.Context, args EmailLayoutsForAccountArgs) (*Result, error) {
+	call := EmailLayoutsForAccountBuild(args)
+	return qc.executeNamed(ctx, "emailLayoutsForAccount", call)
+}
+
+func EmailLayoutsForAccountBuild(args EmailLayoutsForAccountArgs) string {
+	var b strings.Builder
+	b.WriteString("query emailLayoutsForAccount(")
+	b.WriteString("accountId: ")
+	b.WriteString(quoteMemQL(args.AccountId))
+	if args.Status != "" {
+		if b.Len() > 29 {
+			b.WriteString(", ")
+		}
+		b.WriteString("status: ")
+		b.WriteString(quoteMemQL(args.Status))
+	}
+	b.WriteString(")")
+	return b.String()
+}
+
 // EmailRuleById -- One event-email rule by id.
 //
 // Bound concept: v1:campaigns:emailRule (machine-readable: BoundConcepts["emailRuleById"] in generated_concepts.go).
@@ -4174,6 +4276,90 @@ func InvocationsForWorkerAsOperatorBuild(args InvocationsForWorkerAsOperatorArgs
 	b.WriteString("query invocationsForWorkerAsOperator(")
 	b.WriteString("workerId: ")
 	b.WriteString(quoteMemQL(args.WorkerId))
+	b.WriteString(")")
+	return b.String()
+}
+
+// JourneyById -- Organization-authorized email automation read.
+//
+// Bound concept: v1:campaigns:journey (machine-readable: BoundConcepts["journeyById"] in generated_concepts.go).
+type JourneyByIdArgs struct {
+	JourneyId string
+}
+
+// JourneyById calls the engine query journeyById.
+func (qc *QueryClient) JourneyById(ctx context.Context, args JourneyByIdArgs) (*Result, error) {
+	call := JourneyByIdBuild(args)
+	return qc.executeNamed(ctx, "journeyById", call)
+}
+
+func JourneyByIdBuild(args JourneyByIdArgs) string {
+	var b strings.Builder
+	b.WriteString("query journeyById(")
+	b.WriteString("journeyId: ")
+	b.WriteString(quoteMemQL(args.JourneyId))
+	b.WriteString(")")
+	return b.String()
+}
+
+// JourneyEnrollmentCounts -- Organization-authorized email automation read.
+//
+// Bound concept: v1:campaigns:journeyEnrollment (machine-readable: BoundConcepts["journeyEnrollmentCounts"] in generated_concepts.go).
+type JourneyEnrollmentCountsArgs struct {
+	JourneyId string
+	Status    string
+	StepId    string
+}
+
+// JourneyEnrollmentCounts calls the engine query journeyEnrollmentCounts.
+func (qc *QueryClient) JourneyEnrollmentCounts(ctx context.Context, args JourneyEnrollmentCountsArgs) (*Result, error) {
+	call := JourneyEnrollmentCountsBuild(args)
+	return qc.executeNamed(ctx, "journeyEnrollmentCounts", call)
+}
+
+func JourneyEnrollmentCountsBuild(args JourneyEnrollmentCountsArgs) string {
+	var b strings.Builder
+	b.WriteString("query journeyEnrollmentCounts(")
+	b.WriteString("journeyId: ")
+	b.WriteString(quoteMemQL(args.JourneyId))
+	if args.Status != "" {
+		if b.Len() > 30 {
+			b.WriteString(", ")
+		}
+		b.WriteString("status: ")
+		b.WriteString(quoteMemQL(args.Status))
+	}
+	if args.StepId != "" {
+		if b.Len() > 30 {
+			b.WriteString(", ")
+		}
+		b.WriteString("stepId: ")
+		b.WriteString(quoteMemQL(args.StepId))
+	}
+	b.WriteString(")")
+	return b.String()
+}
+
+// Journeys -- Organization-authorized email automation read.
+//
+// Bound concept: v1:campaigns:journey (machine-readable: BoundConcepts["journeys"] in generated_concepts.go).
+type JourneysArgs struct {
+	Status string
+}
+
+// Journeys calls the engine query journeys.
+func (qc *QueryClient) Journeys(ctx context.Context, args JourneysArgs) (*Result, error) {
+	call := JourneysBuild(args)
+	return qc.executeNamed(ctx, "journeys", call)
+}
+
+func JourneysBuild(args JourneysArgs) string {
+	var b strings.Builder
+	b.WriteString("query journeys(")
+	if args.Status != "" {
+		b.WriteString("status: ")
+		b.WriteString(quoteMemQL(args.Status))
+	}
 	b.WriteString(")")
 	return b.String()
 }
@@ -7850,7 +8036,8 @@ func SendableRecipientsForAudienceBuild(args SendableRecipientsForAudienceArgs) 
 	return b.String()
 }
 
-// SenderIdentities -- Every sending identity the caller may use, newest first. Backs the identity picker on the campaign editor and the Senders section of the OS app. Composite tier, so a cluster owner sees every operator's -- which is what makes "who is this cluster mailing as" answerable at all.
+// SenderIdentities -- Every sending identity the caller may use, newest first. Backs the identity picker on the campaign editor and the Senders list in the OS app's Settings. Composite tier, so a cluster owner sees every operator's -- which is what makes "who is this cluster mailing as" answerable at all.
+// SORTED BY WHEN IT WAS ADDED, NOT BY ADDRESS, because the sort is also the page cursor. A payload field is not keyset-eligible, so a list ordered by `address` could not continue past its first page: a caller walking it past 200 identities got the first 200 and a list that ended without saying so.
 //
 // Bound concept: v1:campaigns:senderIdentity (machine-readable: BoundConcepts["senderIdentities"] in generated_concepts.go).
 type SenderIdentitiesArgs struct {
@@ -7874,7 +8061,7 @@ func SenderIdentitiesBuild(args SenderIdentitiesArgs) string {
 	return b.String()
 }
 
-// SenderIdentitiesForAccount -- The sending identities filed under one account. The tie is a RECORD, not a scope: this is the same read `senderIdentities` makes, narrowed by the tie field, and the tier conjunct is carried verbatim rather than dropped -- copying `sitesForAccount`'s form exactly (accounts D1).
+// SenderIdentitiesForAccount -- The sending identities filed under one account, newest first. The tie is a RECORD, not a scope: this is the same read `senderIdentities` makes, narrowed by the tie field, and the tier conjunct is carried verbatim rather than dropped -- copying `sitesForAccount`'s form exactly (accounts D1).
 //
 // Bound concept: v1:campaigns:senderIdentity (machine-readable: BoundConcepts["senderIdentitiesForAccount"] in generated_concepts.go).
 type SenderIdentitiesForAccountArgs struct {
@@ -11995,6 +12182,23 @@ func SkillNeedsRefreshBuild(args SkillNeedsRefreshArgs) string {
 	return b.String()
 }
 
+// SkillsForTraining -- Training can inspect retired skills to explain historical selections. This is the shared capability catalog; private lessons remain in the Library.
+//
+// Bound concept: v1:skills:skill (machine-readable: BoundConcepts["skillsForTraining"] in generated_concepts.go).
+type SkillsForTrainingArgs struct {
+}
+
+// SkillsForTraining calls the engine query skillsForTraining.
+func (qc *QueryClient) SkillsForTraining(ctx context.Context, args SkillsForTrainingArgs) (*Result, error) {
+	call := SkillsForTrainingBuild(args)
+	return qc.executeNamed(ctx, "skillsForTraining", call)
+}
+
+func SkillsForTrainingBuild(args SkillsForTrainingArgs) string {
+	_ = args
+	return "query skillsForTraining()"
+}
+
 // SoldByProduct -- Every mirrored line item that names one product -- what soldByProduct groups. Unwindowed by construction: the date is the order's, so the tool intersects this with ordersInWindow rather than filtering here.
 //
 // Bound concept: v1:shopify:orderLineItem (machine-readable: BoundConcepts["soldByProduct"] in generated_concepts.go).
@@ -12409,6 +12613,34 @@ func SystemActiveAuthoringBundlesBuild(args SystemActiveAuthoringBundlesArgs) st
 	return "query systemActiveAuthoringBundles()"
 }
 
+// TemplateAtRevision -- The stored message revision named by an authenticated view-in-browser token.
+//
+// Bound concept: v1:campaigns:template (machine-readable: BoundConcepts["templateAtRevision"] in generated_concepts.go).
+type TemplateAtRevisionArgs struct {
+	TemplateId string
+	Revision   string
+}
+
+// TemplateAtRevision calls the engine query templateAtRevision.
+func (qc *QueryClient) TemplateAtRevision(ctx context.Context, args TemplateAtRevisionArgs) (*Result, error) {
+	call := TemplateAtRevisionBuild(args)
+	return qc.executeNamed(ctx, "templateAtRevision", call)
+}
+
+func TemplateAtRevisionBuild(args TemplateAtRevisionArgs) string {
+	var b strings.Builder
+	b.WriteString("query templateAtRevision(")
+	b.WriteString("templateId: ")
+	b.WriteString(quoteMemQL(args.TemplateId))
+	if b.Len() > 25 {
+		b.WriteString(", ")
+	}
+	b.WriteString("revision: ")
+	b.WriteString(quoteMemQL(args.Revision))
+	b.WriteString(")")
+	return b.String()
+}
+
 // TemplateById -- One template by id, gated to its owner. Backs the template editor and the campaign editor's preview. Owned.
 //
 // Bound concept: v1:campaigns:template (machine-readable: BoundConcepts["templateById"] in generated_concepts.go).
@@ -12431,7 +12663,35 @@ func TemplateByIdBuild(args TemplateByIdArgs) string {
 	return b.String()
 }
 
-// Templates -- The caller's templates, newest first. Backs the template list and the campaign editor's template picker. Owned.
+// TemplateForSource -- The template an organization published from one Library file, for campaignSaveTemplate and the editors that open a file: publishing a file again updates this template, so there is one per organization and file. It answers the template's id and its revision (createdAt) and nothing of its content, which templateById reads. Newest first and one row, so a stray duplicate can never make a save ambiguous. The concept's account tier answers a template outside the caller's organizations as not found, so the file id is not a way into somebody else's templates. Owned.
+//
+// Bound concept: v1:campaigns:template (machine-readable: BoundConcepts["templateForSource"] in generated_concepts.go).
+type TemplateForSourceArgs struct {
+	AccountId        string
+	SourceArtifactId string
+}
+
+// TemplateForSource calls the engine query templateForSource.
+func (qc *QueryClient) TemplateForSource(ctx context.Context, args TemplateForSourceArgs) (*Result, error) {
+	call := TemplateForSourceBuild(args)
+	return qc.executeNamed(ctx, "templateForSource", call)
+}
+
+func TemplateForSourceBuild(args TemplateForSourceArgs) string {
+	var b strings.Builder
+	b.WriteString("query templateForSource(")
+	b.WriteString("accountId: ")
+	b.WriteString(quoteMemQL(args.AccountId))
+	if b.Len() > 24 {
+		b.WriteString(", ")
+	}
+	b.WriteString("sourceArtifactId: ")
+	b.WriteString(quoteMemQL(args.SourceArtifactId))
+	b.WriteString(")")
+	return b.String()
+}
+
+// Templates -- The caller's templates, newest first, as summaries: no body and no document. Backs the template list and the campaign editor's template picker; a template's content is read with templateById. Owned.
 //
 // Bound concept: v1:campaigns:template (machine-readable: BoundConcepts["templates"] in generated_concepts.go).
 type TemplatesArgs struct {
@@ -12630,7 +12890,7 @@ func UserByIdBuild(args UserByIdArgs) string {
 	return b.String()
 }
 
-// UserCount -- Count of active v1:identity:user rows. Returns a {count: N} aggregate.
+// UserCount -- Count of active v1:identity:user rows. Returns a {count, atLeast} aggregate: past the engine's window, `count` is the window and `atLeast` is true (memql#6033).
 //
 // Bound concept: v1:identity:user (machine-readable: BoundConcepts["userCount"] in generated_concepts.go).
 type UserCountArgs struct {
@@ -12928,6 +13188,45 @@ func WorkCompletedStepsForOwnerRunsBuild(args WorkCompletedStepsForOwnerRunsArgs
 	return "query workCompletedStepsForOwnerRuns()"
 }
 
+// WorkComputerPermissions -- This owner's approved typed computer permissions. Native dispatch additionally checks the receipt hash, agent, machine, mode and revocation before each use.
+//
+// Bound concept: v1:work:approval (machine-readable: BoundConcepts["workComputerPermissions"] in generated_concepts.go).
+type WorkComputerPermissionsArgs struct {
+}
+
+// WorkComputerPermissions calls the engine query workComputerPermissions.
+func (qc *QueryClient) WorkComputerPermissions(ctx context.Context, args WorkComputerPermissionsArgs) (*Result, error) {
+	call := WorkComputerPermissionsBuild(args)
+	return qc.executeNamed(ctx, "workComputerPermissions", call)
+}
+
+func WorkComputerPermissionsBuild(args WorkComputerPermissionsArgs) string {
+	_ = args
+	return "query workComputerPermissions()"
+}
+
+// WorkComputerPermissionsForAgent -- Includes unused one-time receipts; only the native authority decides admission.
+//
+// Bound concept: v1:work:approval (machine-readable: BoundConcepts["workComputerPermissionsForAgent"] in generated_concepts.go).
+type WorkComputerPermissionsForAgentArgs struct {
+	AgentId string
+}
+
+// WorkComputerPermissionsForAgent calls the engine query workComputerPermissionsForAgent.
+func (qc *QueryClient) WorkComputerPermissionsForAgent(ctx context.Context, args WorkComputerPermissionsForAgentArgs) (*Result, error) {
+	call := WorkComputerPermissionsForAgentBuild(args)
+	return qc.executeNamed(ctx, "workComputerPermissionsForAgent", call)
+}
+
+func WorkComputerPermissionsForAgentBuild(args WorkComputerPermissionsForAgentArgs) string {
+	var b strings.Builder
+	b.WriteString("query workComputerPermissionsForAgent(")
+	b.WriteString("agentId: ")
+	b.WriteString(quoteMemQL(args.AgentId))
+	b.WriteString(")")
+	return b.String()
+}
+
 // WorkComputerScopesForOwnerRun -- Read only this run's own computer-use decisions, including previous grants.
 //
 // Bound concept: v1:work:approval (machine-readable: BoundConcepts["workComputerScopesForOwnerRun"] in generated_concepts.go).
@@ -13103,6 +13402,23 @@ func WorkDraftsForOwnerRunBuild(args WorkDraftsForOwnerRunArgs) string {
 	b.WriteString(quoteMemQL(args.RunId))
 	b.WriteString(")")
 	return b.String()
+}
+
+// WorkGoalEvaluationsForOwner -- Durable goal-evaluation results, scoped by the same owner tier as their work. A missing result is not a successful measurement.
+//
+// Bound concept: v1:work:observation (machine-readable: BoundConcepts["workGoalEvaluationsForOwner"] in generated_concepts.go).
+type WorkGoalEvaluationsForOwnerArgs struct {
+}
+
+// WorkGoalEvaluationsForOwner calls the engine query workGoalEvaluationsForOwner.
+func (qc *QueryClient) WorkGoalEvaluationsForOwner(ctx context.Context, args WorkGoalEvaluationsForOwnerArgs) (*Result, error) {
+	call := WorkGoalEvaluationsForOwnerBuild(args)
+	return qc.executeNamed(ctx, "workGoalEvaluationsForOwner", call)
+}
+
+func WorkGoalEvaluationsForOwnerBuild(args WorkGoalEvaluationsForOwnerArgs) string {
+	_ = args
+	return "query workGoalEvaluationsForOwner()"
 }
 
 // WorkGoalForOwner -- One of the caller's goals by id.
@@ -13451,6 +13767,40 @@ func (qc *QueryClient) WorkSignedRunsForOwner(ctx context.Context, args WorkSign
 func WorkSignedRunsForOwnerBuild(args WorkSignedRunsForOwnerArgs) string {
 	_ = args
 	return "query workSignedRunsForOwner()"
+}
+
+// WorkSkillSelectionForOwnerRun -- The immutable selection for one exact step version in owned work.
+//
+// Bound concept: v1:work:observation (machine-readable: BoundConcepts["workSkillSelectionForOwnerRun"] in generated_concepts.go).
+type WorkSkillSelectionForOwnerRunArgs struct {
+}
+
+// WorkSkillSelectionForOwnerRun calls the engine query workSkillSelectionForOwnerRun.
+func (qc *QueryClient) WorkSkillSelectionForOwnerRun(ctx context.Context, args WorkSkillSelectionForOwnerRunArgs) (*Result, error) {
+	call := WorkSkillSelectionForOwnerRunBuild(args)
+	return qc.executeNamed(ctx, "workSkillSelectionForOwnerRun", call)
+}
+
+func WorkSkillSelectionForOwnerRunBuild(args WorkSkillSelectionForOwnerRunArgs) string {
+	_ = args
+	return "query workSkillSelectionForOwnerRun()"
+}
+
+// WorkSkillSelectionsForOwner -- Skill selection history visible only to the owner of the work.
+//
+// Bound concept: v1:work:observation (machine-readable: BoundConcepts["workSkillSelectionsForOwner"] in generated_concepts.go).
+type WorkSkillSelectionsForOwnerArgs struct {
+}
+
+// WorkSkillSelectionsForOwner calls the engine query workSkillSelectionsForOwner.
+func (qc *QueryClient) WorkSkillSelectionsForOwner(ctx context.Context, args WorkSkillSelectionsForOwnerArgs) (*Result, error) {
+	call := WorkSkillSelectionsForOwnerBuild(args)
+	return qc.executeNamed(ctx, "workSkillSelectionsForOwner", call)
+}
+
+func WorkSkillSelectionsForOwnerBuild(args WorkSkillSelectionsForOwnerArgs) string {
+	_ = args
+	return "query workSkillSelectionsForOwner()"
 }
 
 // WorkStepForOwnerRun -- One caller-owned execution receipt. A named key avoids reading an entire run when verifying a release artifact or one required check.

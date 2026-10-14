@@ -258,6 +258,8 @@ shape approval workApprovalFull {
   decision
   answer
   expiresAt
+  permissionUsedAt
+  permissionRevokedAt
 }
 
 /// Every observation field except the embedding vector, which no client reads.
