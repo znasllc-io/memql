@@ -82,7 +82,7 @@ button.fleet-route-description:focus-visible { outline: 2px solid var(--os-accen
 .fleet-slot:hover .fleet-slot-remove,
 .fleet-slot:focus-within .fleet-slot-remove { opacity: 1; }
 .fleet-slot-remove:hover { background: var(--os-hover); color: var(--os-ink); }
-.fleet-slot-empty { align-items: center; justify-content: center; border-style: dashed; background: transparent; color: var(--os-muted); cursor: pointer; font: inherit; }
+.fleet-slot-empty { align-items: center; justify-content: center; border: 0; background: transparent; color: var(--os-muted); cursor: pointer; font: inherit; }
 .fleet-slot-empty:hover { color: var(--os-ink); background: var(--os-hover); }
 .fleet-slot-empty:focus-visible { outline: 2px solid var(--os-accent); outline-offset: 2px; }
 
