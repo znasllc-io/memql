@@ -110,6 +110,9 @@ func TestMaintenanceAutomationsAreArgued(t *testing.T) {
 		// before borrowing each source owner's credential/deploy authority.
 		// A reader actor silently sees no packages and reports checked=0.
 		"pollPackageUpstreams",
+		// Declared graph retention spans owners and its native handler has an
+		// owner floor, including dry runs. The default scheduled reader is refused.
+		"retireDeclaredConceptVersions",
 		"retireProcedures",
 		// routingEvidenceFold (epic memql#5146) is the one entry here whose
 		// read spans owners because the QUESTION does. It asks how a model
