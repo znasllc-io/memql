@@ -3,7 +3,9 @@ package tools
 import (
 	"encoding/json"
 	"fmt"
+	permission "github.com/znasllc-io/memql/core/computerpermission"
 	"os"
+	"path/filepath"
 	"runtime"
 	"sort"
 	"strings"
@@ -81,7 +83,8 @@ var buildAgnosticComputerActions = []string{computerWaitAction}
 // key this side misspells is never rejected, never logged, and simply
 // never read.
 type CapabilityDescriptor struct {
-	Architecture string `json:"architecture"`
+	Architecture  string `json:"architecture"`
+	HomeDirectory string `json:"homeDirectory,omitempty"`
 	// ActionContracts comes from the implementation, never operator labels.
 	// Version 2 requires explicit execution/platform and executes image digests.
 	ActionContracts      map[string]int      `json:"actionContracts,omitempty"`
@@ -100,7 +103,13 @@ type CapabilityDescriptor struct {
 // supportedComputerActions) come from capabilities_headless.go /
 // capabilities_computeruse.go.
 func ComputeCapabilities() CapabilityDescriptor {
-	return computeCapabilities(runtime.GOOS, os.Getenv)
+	desc := computeCapabilities(runtime.GOOS, os.Getenv)
+	// Scoped reads refuse symlink components. Advertise the physical home path
+	// used by this worker account, without granting access or listing its files.
+	if home, err := filepath.EvalSymlinks(homeDir()); err == nil && permission.CleanAbsolute(home) {
+		desc.HomeDirectory = home
+	}
+	return desc
 }
 
 // computeCapabilities is the env-injectable core of
@@ -225,6 +234,7 @@ func runComputerCapabilities() (*memqlv1.Success, *memqlv1.Failure) {
 	return successComputerJSON(map[string]any{
 		"actionContracts":      desc.ActionContracts,
 		"platform":             desc.Platform,
+		"homeDirectory":        desc.HomeDirectory,
 		"displayServer":        desc.DisplayServer,
 		"computerUseAvailable": desc.ComputerUseAvailable,
 		"actions":              desc.Actions,

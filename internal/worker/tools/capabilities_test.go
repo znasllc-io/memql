@@ -5,6 +5,8 @@ package tools
 import (
 	"context"
 	"encoding/json"
+	"os"
+	"path/filepath"
 	"runtime"
 	"testing"
 
@@ -221,5 +223,40 @@ func TestPipelineActionContractComesFromTheBuild(t *testing.T) {
 	}
 	if decoded.ActionContracts["workerHost.pipeline_step"] != 3 {
 		t.Fatal("registration lost the pipeline execution contract")
+	}
+}
+
+func TestCapabilitiesReportsThePhysicalHomeForScopedReads(t *testing.T) {
+	realHome := t.TempDir()
+	link := filepath.Join(t.TempDir(), "Home With Spaces")
+	if err := os.Symlink(realHome, link); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("HOME", link)
+	expected, err := filepath.EvalSymlinks(realHome)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := ComputeCapabilities().HomeDirectory; got != expected {
+		t.Fatalf("home = %q, want physical path %q", got, expected)
+	}
+	raw, err := CapabilityDescriptorJSON()
+	if err != nil {
+		t.Fatal(err)
+	}
+	var registered CapabilityDescriptor
+	if err := json.Unmarshal([]byte(raw), &registered); err != nil {
+		t.Fatal(err)
+	}
+	if registered.HomeDirectory != expected {
+		t.Fatal("registration lost the home directory")
+	}
+	t.Setenv("HOME", filepath.Join(realHome, "missing"))
+	if got := ComputeCapabilities().HomeDirectory; got != "" {
+		t.Fatalf("invented home: %q", got)
+	}
+	t.Setenv("HOME", "/")
+	if got := ComputeCapabilities().HomeDirectory; got != "" {
+		t.Fatalf("offered root as home: %q", got)
 	}
 }
