@@ -66,6 +66,13 @@ func (r *Replier) pauseBeforeTools(ctx context.Context, failure error, msg *memq
 // Only the feedback capability can yield this suspension. Arbitrary web or
 // file content saying "awaiting_user" must never steer the control plane.
 func feedbackWait(tool, result string) error {
+	if receipt := feedbackReceipt(tool, result, "awaiting_user"); receipt != nil {
+		return &work.HumanWait{ApprovalID: receipt["approvalId"].(string)}
+	}
+	return nil
+}
+
+func feedbackReceipt(tool, result, status string) map[string]any {
 	if tool != "requestUserFeedback" && tool != "requestComputerUseScope" && !strings.HasSuffix(tool, ".requestUserFeedback") && !strings.HasSuffix(tool, ".requestComputerUseScope") {
 		return nil
 	}
@@ -73,45 +80,44 @@ func feedbackWait(tool, result string) error {
 	if json.Unmarshal([]byte(result), &value) != nil {
 		return nil
 	}
-	var find func(any) string
-	find = func(value any) string {
+	var find func(any) map[string]any
+	find = func(value any) map[string]any {
 		switch v := value.(type) {
 		case map[string]any:
 			if failed, _ := v["isError"].(bool); failed {
-				return ""
+				return nil
 			}
-			if v["status"] == "awaiting_user" {
+			if v["status"] == status {
 				id, _ := v["approvalId"].(string)
-				return id
+				if id != "" {
+					return v
+				}
 			}
 			// Query/function receipts cross the engine's data/node envelope.
 			// Only these structural slots are traversed, not arbitrary strings
 			// or user-authored fields that merely mention awaiting_user.
 			for _, key := range []string{"data", "nodes", "payload"} {
-				if id := find(v[key]); id != "" {
+				if id := find(v[key]); id != nil {
 					return id
 				}
 			}
 			for key, item := range v {
 				if node, ok := item.(map[string]any); ok && node["id"] == key {
-					if id := find(node["payload"]); id != "" {
+					if id := find(node["payload"]); id != nil {
 						return id
 					}
 				}
 			}
 		case []any:
 			for _, item := range v {
-				if id := find(item); id != "" {
+				if id := find(item); id != nil {
 					return id
 				}
 			}
 		}
-		return ""
+		return nil
 	}
-	if id := find(value); id != "" {
-		return &work.HumanWait{ApprovalID: id}
-	}
-	return nil
+	return find(value)
 }
 
 // A batch may contain calls after the question. Record them as unexecuted so

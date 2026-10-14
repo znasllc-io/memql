@@ -65,6 +65,7 @@ import (
 	"github.com/znasllc-io/memql/component/identity"
 	"github.com/znasllc-io/memql/component/identity/pat"
 	langparser "github.com/znasllc-io/memql/component/language/parser"
+	memqlengine "github.com/znasllc-io/memql/component/memql"
 	"github.com/znasllc-io/memql/core/id"
 )
 
@@ -892,6 +893,7 @@ func validateSettings(in ClusterSettings, mode, role string) (reason, message st
 // through the ordinary gated query surface.
 type userRow struct {
 	ID              string
+	CreatedAt       time.Time
 	DisplayName     string
 	FirstName       string
 	LastName        string
@@ -922,7 +924,7 @@ type userRow struct {
 // anyone below owner/admin -- every caller of this method is downstream of
 // that check in the same function. Do not call it from a path that is not.
 func (s *Service) userById(ctx context.Context, userID string) (*userRow, error) {
-	res, err := s.Engine.Execute(auth.ContextWithInternalOrigin(ctx),
+	res, err := s.Engine.Execute(auth.ContextWithInternalOrigin(memqlengine.ContextWithFreshRead(ctx)),
 		fmt.Sprintf(`query userByIdSystem(userId: %s)`, quote(userID)))
 	if err != nil {
 		return nil, err
@@ -948,8 +950,13 @@ func (s *Service) userById(ctx context.Context, userID string) (*userRow, error)
 		}
 		return v.GetBoolValue()
 	}
+	var createdAt time.Time
+	if n.CreatedAt != nil {
+		createdAt = n.CreatedAt.AsTime()
+	}
 	return &userRow{
 		ID:           n.GetId(),
+		CreatedAt:    createdAt,
 		DisplayName:  str("displayName"),
 		FirstName:    str("firstName"),
 		LastName:     str("lastName"),
@@ -1011,7 +1018,12 @@ func (s *Service) writeUser(ctx context.Context, u *userRow) error {
 		return err
 	}
 	q := fmt.Sprintf(`mutation updateUser(userId: %s, payload: %s)`, quote(u.ID), string(encoded))
-	if _, err := s.Engine.Execute(auth.ContextWithInternalOrigin(ctx), q); err != nil {
+	// Preserve the version this service read before constructing its full
+	// payload. A fence first captured inside updateUser would be too late:
+	// another admin edit may already have committed while this payload was
+	// being prepared. Audit is emitted by the caller with its original context.
+	writeCtx := memqlengine.ContextWithRowVersionFence(ctx, "v1:identity:user", u.ID, u.CreatedAt)
+	if _, err := s.Engine.Execute(auth.ContextWithInternalOrigin(writeCtx), q); err != nil {
 		return fmt.Errorf("update user: %w", err)
 	}
 	return nil

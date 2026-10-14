@@ -13,6 +13,20 @@ prompt workAgentReply {
   turn object! @description("Prepared work turn: agent identity, execution directive, optional etiquette and retrieved context. The goal and conversation history travel separately as model messages.")
 }
 
+/// Bounded reconsideration inside the next ordinary reasoning call, not a critic loop.
+@level("fast")
+@templateFile("prompts/workProgressRecovery.tmpl")
+prompt workProgressRecovery {
+  facts object!
+}
+
+/// Native fallback when reconsideration still repeats the same stalled approach.
+@level("fast")
+@templateFile("prompts/workProgressQuestion.tmpl")
+prompt workProgressQuestion {
+  facts object!
+}
+
 /// System prompt for the user's Planner Agent -- the orchestrator persona that owns Plan
 /// decomposition, Task dispatch, retry decisions, and escalation to the user. Paired with Claude
 /// Sonnet (streamClaudeSonnet) -- the planner's workload is structured pattern-matching over the

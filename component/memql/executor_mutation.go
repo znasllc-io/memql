@@ -920,7 +920,9 @@ func (e *MemQLEngine) executeWrite(ctx context.Context, mutation MutationNode, r
 	// late repair could overwrite a rejection read on another replica.
 	// Observation and business writers share the same version fence. A pulse
 	// must never replace fields merged before another replica changed them.
-	if (len(rowVersionFences(ctx)) > 0 || conceptMeta.Name == "v1:knowledge:documentChunk" || memorynodes.HasLiveness(conceptMeta.Name) || conceptMeta.Name == inboundRequestConcept) && id != "" {
+	// Identity's narrow admin edits must also serialize with existing profile
+	// writers, so a concurrent legacy update cannot silently lose either edit.
+	if (len(rowVersionFences(ctx)) > 0 || conceptMeta.Name == "v1:knowledge:documentChunk" || conceptMeta.Name == "v1:identity:user" || memorynodes.HasLiveness(conceptMeta.Name) || conceptMeta.Name == inboundRequestConcept) && id != "" {
 		var err error
 		ctx, err = e.fenceWriteTarget(ctx, conceptMeta.Name, id)
 		if err != nil {

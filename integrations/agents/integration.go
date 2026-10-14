@@ -529,7 +529,7 @@ func (i *Integration) handleRequestUserFeedback(ctx context.Context, args map[st
 		}
 		for _, row := range memql.MaterializeRows(result) {
 			if row["decision"] == "answered" {
-				payload, marshalErr := json.Marshal(map[string]any{"status": "answered", "approvalId": approvalId, "answer": row["answer"]})
+				payload, marshalErr := json.Marshal(map[string]any{"status": "answered", "approvalId": approvalId, "answer": row["answer"], "decidedAt": row["decidedAt"]})
 				return []memorynodes.MemoryNode{{ID: approvalId, Payload: payload}}, marshalErr
 			}
 		}

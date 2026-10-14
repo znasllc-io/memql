@@ -114,6 +114,8 @@ func (e *MemQLEngine) askApprovalDiscussionBuiltin(ctx context.Context, args map
 		"canAskAdvisor":  pending, "canSendGuidance": canSend,
 	}
 	if len(stateRows) == 1 {
+		response["guidanceMode"] = stringArg(stateRows[0], "guidanceMode")
+		response["savedGuidance"] = stringArg(stateRows[0], "savedGuidance")
 		if guidance := stringArg(stateRows[0], "guidanceToResume"); guidance != "" {
 			response["guidanceToResume"] = guidance
 		}

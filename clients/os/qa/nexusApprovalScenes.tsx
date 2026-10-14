@@ -1,7 +1,7 @@
 import { useState, type ComponentType, type ReactNode } from "react";
 import { NexusApp } from "../src/apps/nexus/NexusApp";
 import { LocalNexusSettingsStore } from "../src/apps/nexus/settings";
-import { approvalRow, fakeConnection, runRow, withSession } from "../test/nexus/harness";
+import { approvalRow, builtinReply, fakeConnection, rowsResult, runRow, withSession } from "../test/nexus/harness";
 import { AskProvider } from "../src/ask/AskProvider";
 import { AskSheet } from "../src/ask/AskSheet";
 import type { AskTransport } from "../src/ask/askController";
@@ -44,7 +44,24 @@ export function nexusApprovalScenes(frame: Frame) {
     wrap: (element: JSX.Element, role: string) => withSession(<OsProvider registry={OS_REGISTRY} actorRole={role} grid={{ cols: 8, rows: 5 }}>{element}</OsProvider>, { role }),
     render: () => <NexusApprovalWindow frame={frame} approvalId={approvalId} advice={advice} />,
   });
+  const budgetResume = (detail: boolean) => ({
+    ...view(),
+    connect: () => {
+      const run = runRow({ id: "budget-run", workTitle: "Update the requested record", status: "waiting", waitingOn: { kind: "approval", subject: "budget-resume" } });
+      const approval = approvalRow({ id: "budget-resume", runId: "budget-run", kind: "budget", decision: "approved", subject: { resumeKind: "checkpoint", continuationId: "saved-work", ceiling: "modelCalls" }, answer: { newLimit: 20, feedback: "Use the completed lookup." } });
+      const connection = fakeConnection({ runs: [run] });
+      let attempts = 0;
+      Object.assign(connection.query, {
+        workApprovalForOwner: async () => rowsResult([approval]),
+        workRunForOwner: async () => rowsResult([run]),
+        decideApproval: async () => builtinReply("decideApproval", [{ approvalId: "budget-resume", runId: "budget-run", decision: "approved", runResumed: attempts++ > 0, ...(attempts === 1 ? { resumeError: "The connection was interrupted before this work could resume. Try again." } : {}) }]),
+      });
+      return connection;
+    },
+    render: () => <NexusApprovalWindow frame={frame} approvalId={detail ? "budget-resume" : undefined} />,
+  });
   return {
+    "nexus-budget-resume": budgetResume(true), "nexus-budget-resume-list": budgetResume(false),
     "nexus-approvals": view(), "nexus-approvals-empty": view(undefined, true),
     "nexus-approval-failure": view("failure"), "nexus-approval-directory": view("directory"),
     "nexus-approval-command": view("command"), "nexus-approval-message": view("message"),

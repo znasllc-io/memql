@@ -450,6 +450,24 @@ mutation approval createWorkApproval {
   }
 }
 
+/// Save human guidance on an undecided budget checkpoint. The native approval
+/// gate proves the owner and exact pending wait; this write grants no budget.
+@serverOnly
+mutation approval saveWorkApprovalGuidance {
+  args {
+    approvalId  string!
+    answer      object!
+    versionTime datetime!
+  }
+  update {
+    accept { answer }
+    stamp {
+      id: args.approvalId
+      createdAt: args.versionTime
+    }
+  }
+}
+
 /// Record a decision. @serverOnly in A1: decidedBy is the authority the row carries, and a mutation
 /// argument is whatever the caller typed, so a client-reachable version lets anyone write a
 /// colleague's name into an approval. Scoping to actor.userId asserts the row is the caller's,

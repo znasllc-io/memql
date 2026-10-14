@@ -99,6 +99,9 @@ type gatedOp struct {
 }
 
 var ownerAdminOperations = []gatedOp{
+	{"set_user_display_name", func(s *Service, ctx context.Context) Result {
+		return s.SetUserDisplayName(ctx, "v1:identity:user:target", "Target")
+	}},
 	{"update_user_profile", func(s *Service, ctx context.Context) Result {
 		return s.UpdateUserProfile(ctx, UserProfile{UserId: "v1:identity:user:target", DisplayName: "Target"})
 	}},

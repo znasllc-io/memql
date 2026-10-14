@@ -108,6 +108,11 @@ func (i *Integration) handleDecideApproval(ctx context.Context, args map[string]
 		}
 	}
 	if approval == nil {
+		if recovered, err := i.recoverBudgetDecision(ctx, approvalId, decision, argMap(args, "answer")); err != nil {
+			return nil, err
+		} else if recovered != nil {
+			return i.resultNode(recovered), nil
+		}
 		if recovered, err := i.recoverGuidanceDecision(ctx, approvalId, decision, argMap(args, "answer")); err != nil {
 			return nil, err
 		} else if recovered != nil {
@@ -145,6 +150,9 @@ func (i *Integration) handleDecideApproval(ctx context.Context, args map[string]
 	// refused before anything is read or written.
 	if kind == "scopeElevation" && decision == "answered" && guidance == "" {
 		return nil, fmt.Errorf("work: computer access requires approval or rejection")
+	}
+	if kind == work.ApprovalKindBudget && decision == "answered" && guidance == "" {
+		return nil, fmt.Errorf("work: a budget request needs approval, rejection, or explicit guidance saved for its checkpoint")
 	}
 	if kind == work.ApprovalKindProcedurePromotion && decision == "answered" {
 		return nil, fmt.Errorf("work: a procedure promotion is decided approved (the procedure moves from shadow to canary) or rejected (it stays in shadow); it takes no answer")
@@ -234,7 +242,14 @@ func (i *Integration) handleDecideApproval(ctx context.Context, args map[string]
 	// actor.
 	writeCtx := ownerActor(ctx, owner)
 
+	if kind == work.ApprovalKindBudget && guidance != "" {
+		return i.saveBudgetGuidance(writeCtx, approval, guidance, now)
+	}
 	if decision == "approved" && kind == work.ApprovalKindBudget {
+		answer, err = budgetAnswerWithSavedGuidance(approval, answer)
+		if err != nil {
+			return nil, err
+		}
 		if err := i.raiseApprovedBudget(writeCtx, approval, answer, now); err != nil {
 			return nil, err
 		}

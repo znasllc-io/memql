@@ -456,6 +456,10 @@ StreamLoop:
 			return nil, guidanceErr
 		}
 		messages = guided
+		messages, guidanceErr = r.recoverWorkProgress(ctx, messages, turnCtx, sink, &guidance)
+		if guidanceErr != nil {
+			return nil, guidanceErr
+		}
 
 		compacted, compactErr := r.compactWorkContext(ctx, messages, tools, memql.WorkContextTarget(messages, tools, 20000))
 		if compactErr != nil {
@@ -485,6 +489,10 @@ StreamLoop:
 				return nil, guidanceErr
 			}
 			messages = guided
+			messages, guidanceErr = r.recoverWorkProgress(ctx, messages, turnCtx, sink, &guidance)
+			if guidanceErr != nil {
+				return nil, guidanceErr
+			}
 			budgetCtx, stopBudget, budgetErr := r.workCallContext(ctx)
 			if budgetErr != nil {
 				return nil, r.pauseAtBudgetBoundary(ctx, budgetErr, messages)

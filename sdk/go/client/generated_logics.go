@@ -54,6 +54,62 @@ func AccountDeletionSweepBuild(args AccountDeletionSweepArgs) string {
 	return b.String()
 }
 
+// AgentProgressRecovery -- Reconsider before spending the last calls, or after repeated discovery/evidence. A review uses the next ordinary model call. Only continued stalling asks the person; approaching a cap alone does not interrupt productive work.
+type AgentProgressRecoveryArgs struct {
+	Limit              int
+	Used               int
+	DiscoveryRounds    int
+	RepeatedRounds     int
+	ReviewActive       bool
+	StalledAfterReview int
+	ReviewedLimit      int
+}
+
+// AgentProgressRecovery calls the engine logic agentProgressRecovery.
+func (qc *QueryClient) AgentProgressRecovery(ctx context.Context, args AgentProgressRecoveryArgs) (*Result, error) {
+	call := AgentProgressRecoveryBuild(args)
+	return qc.executeNamed(ctx, "agentProgressRecovery", call)
+}
+
+func AgentProgressRecoveryBuild(args AgentProgressRecoveryArgs) string {
+	var b strings.Builder
+	b.WriteString("logic agentProgressRecovery(")
+	b.WriteString("limit: ")
+	b.WriteString(fmt.Sprintf("%v", args.Limit))
+	if b.Len() > 28 {
+		b.WriteString(", ")
+	}
+	b.WriteString("used: ")
+	b.WriteString(fmt.Sprintf("%v", args.Used))
+	if b.Len() > 28 {
+		b.WriteString(", ")
+	}
+	b.WriteString("discoveryRounds: ")
+	b.WriteString(fmt.Sprintf("%v", args.DiscoveryRounds))
+	if b.Len() > 28 {
+		b.WriteString(", ")
+	}
+	b.WriteString("repeatedRounds: ")
+	b.WriteString(fmt.Sprintf("%v", args.RepeatedRounds))
+	if b.Len() > 28 {
+		b.WriteString(", ")
+	}
+	b.WriteString("reviewActive: ")
+	b.WriteString(fmt.Sprintf("%v", args.ReviewActive))
+	if b.Len() > 28 {
+		b.WriteString(", ")
+	}
+	b.WriteString("stalledAfterReview: ")
+	b.WriteString(fmt.Sprintf("%v", args.StalledAfterReview))
+	if b.Len() > 28 {
+		b.WriteString(", ")
+	}
+	b.WriteString("reviewedLimit: ")
+	b.WriteString(fmt.Sprintf("%v", args.ReviewedLimit))
+	b.WriteString(")")
+	return b.String()
+}
+
 // AgentRecoveryExplanation -- Human wording for the bounded recovery consent card.
 type AgentRecoveryExplanationArgs struct {
 }

@@ -126,6 +126,9 @@ func (r *installedBudgetTurn) RunTurn(ctx context.Context, msg *memqlv1.AgentGen
 func TestWorkDBModelAdmissionBudgetKeepsOneNestedCheckpoint(t *testing.T) {
 	testModelBudgetBoundaries(t, []string{"initial", "after-tool", "checkpoint-failure"})
 }
+func TestWorkDBBudgetGuidanceSurvivesRepeatedRaises(t *testing.T) {
+	testModelBudgetBoundaries(t, []string{"guidance"})
+}
 func TestWorkDBNativeBudgetContinuesTheExplicitRerun(t *testing.T) {
 	testModelBudgetBoundaries(t, []string{"legacy-rerun"})
 }
@@ -312,12 +315,32 @@ func testModelBudgetBoundaries(t *testing.T, boundaries []string) {
 				require.Equal(t, "waiting", child.Status)
 				require.Equal(t, wait.ApprovalID, memql.BareShortId(fmt.Sprint(child.WaitingOn["subject"])))
 				expectedReads := 0
-				if boundary == "after-tool" || rerun {
+				if boundary == "after-tool" || boundary == "guidance" || rerun {
 					expectedReads = 1
 				}
 				require.Equal(t, expectedReads, reads)
 				require.Equal(t, expectedReads, providers[0].calls, "refused model admission must never execute another provider")
+				const firstGuidance = "Use the completed evidence; retain the original request and avoid repeating that read."
+				const secondGuidance = "Keep the earlier correction and finish the remaining response now."
+				saveGuidance := func(text string) {
+					before := load(writer, runID)
+					act("decideApproval", map[string]any{"approvalId": wait.ApprovalID, "decision": "answered", "answer": map[string]any{"feedback": text}})
+					after := load(reader, runID)
+					require.Equal(t, "waiting", after.Status)
+					require.Equal(t, before.WaitingOn, after.WaitingOn)
+					require.Equal(t, before.HumanResumeId, after.HumanResumeId)
+					require.Equal(t, before.StepStates, after.StepStates)
+					require.Equal(t, before.Rerun, after.Rerun)
+					_, ready := (&workRunDispatcher{app: triggers[1].app}).PrepareDispatch(person, work.DispatchRequest{RunId: runID, HumanResumeId: wait.ApprovalID})
+					require.False(t, ready, "saved guidance is not a budget decision")
+				}
 				limit := 8
+				if boundary == "guidance" {
+					saveGuidance(firstGuidance)
+					limit = 2
+					providers[1].readFirst = true
+					require.Zero(t, providers[1].calls, "saving guidance cannot admit an extra call")
+				}
 				if rerun && !entry {
 					limit = 2
 					providers[1].readFirst = true
@@ -414,6 +437,26 @@ func testModelBudgetBoundaries(t *testing.T, boundaries []string) {
 					}
 				}
 				done, err := resume.ResumeFrom(resumeCtx, journal, triggers[1].template.members["parent"], options)
+				if boundary == "guidance" {
+					var again *workstate.HumanWait
+					require.ErrorAs(t, err, &again)
+					require.NotEqual(t, wait.ApprovalID, again.ApprovalID)
+					parked := load(writer, runID)
+					require.Equal(t, suspended.ChildRunId, parked.StepStates[parked.FailedStep].ChildRunId)
+					require.Equal(t, suspended.Version+1, parked.StepStates[parked.FailedStep].Version, "resumption advances the journal attempt while retaining the same child checkpoint")
+					require.Nil(t, parked.Rerun, "a budget decision must not reset execution lineage")
+					require.Equal(t, map[string]int{"completed-section": 1, "child-prefix": 1}, effects)
+					require.Equal(t, 2, reads)
+					require.Equal(t, 1, providers[1].calls)
+					wait = again
+					saveGuidance(secondGuidance)
+					require.Equal(t, 1, providers[1].calls)
+					act("decideApproval", map[string]any{"approvalId": again.ApprovalID, "decision": "approved", "answer": map[string]any{"newLimit": 3}})
+					fresh := load(reader, runID)
+					require.Equal(t, suspended.ChildRunId, fresh.StepStates[fresh.FailedStep].ChildRunId)
+					done, err = resume.ResumeFrom(resumeCtx, fresh, triggers[1].template.members["parent"], options)
+					expectedReads++
+				}
 				if rerun {
 					var again *workstate.HumanWait
 					require.ErrorAs(t, err, &again)
@@ -490,7 +533,7 @@ func testModelBudgetBoundaries(t *testing.T, boundaries []string) {
 				require.Equal(t, map[string]int{"completed-section": 1, "child-prefix": expectedPrefix, "child-tail": 1, "later-section": 1}, effects)
 				require.Equal(t, expectedReads, reads, "the completed read must not replay")
 				expectedCalls := 1
-				if rerun && !entry {
+				if (rerun && !entry) || boundary == "guidance" {
 					expectedCalls = 2
 				}
 				require.Equal(t, expectedCalls, providers[1].calls)
@@ -505,6 +548,19 @@ func testModelBudgetBoundaries(t *testing.T, boundaries []string) {
 				}
 				if boundary == "after-tool" {
 					require.Contains(t, string(raw), "read completed once")
+				}
+				if boundary == "guidance" {
+					require.Contains(t, string(raw), firstGuidance)
+					require.Contains(t, string(raw), "Complete the synthetic section")
+					last, marshalErr := json.Marshal(providers[1].requests[1])
+					require.NoError(t, marshalErr)
+					for _, retained := range []string{firstGuidance, secondGuidance, "Complete the synthetic section", "read completed once"} {
+						require.Contains(t, string(last), retained)
+					}
+					require.Equal(t, 3, providers[0].calls+providers[1].calls, "usage accumulates across both explicit raises")
+					var receipts int
+					require.NoError(t, db.NewRaw(`SELECT count(DISTINCT id) FROM "MemoryNodes" WHERE concept='v1:work:modelCall' AND payload->>'runId' IN (?,?)`, runID, "v1:work:run:"+runID).Scan(person, &receipts))
+					require.Equal(t, 3, receipts, "both replicas persist every charged answer across both raises")
 				}
 				var spend string
 				require.NoError(t, db.NewRaw(`SELECT payload->'spent' FROM "MemoryNodes" WHERE id=? ORDER BY "createdAt" DESC LIMIT 1`, "v1:work:run:"+runID).Scan(person, &spend))

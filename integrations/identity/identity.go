@@ -25,10 +25,9 @@ import (
 // see docs/public/operate/auth/per-row-authz-audit.md.
 type IdentityIntegration struct {
 	// engine and db are nil on a node whose plug-in factory had neither.
-	// Only ownership transfer (memql#4838) and GitHub Connect (memql#4913)
-	// need them; every delegation capability above is pure and keeps working
-	// without them, which is why the factory does not refuse when they are
-	// absent.
+	// User edits, ownership transfer and GitHub Connect need engine access;
+	// pure delegation capabilities keep working without it, which is why the
+	// factory does not refuse when it is absent.
 	engine memql.IntegrationEngineAccess
 	db     func() *bun.DB
 	// logger records what a TYPED REFUSAL would otherwise swallow. A
@@ -64,9 +63,8 @@ func NewIdentityIntegration() *IdentityIntegration {
 	return &IdentityIntegration{}
 }
 
-// NewIdentityIntegrationWithEngine creates one that can also transfer row
-// ownership -- the capability that needs to read every declared concept and
-// write back through the engine.
+// NewIdentityIntegrationWithEngine enables the capabilities that read and
+// write through the engine, including audited user edits and ownership transfer.
 func NewIdentityIntegrationWithEngine(engine memql.IntegrationEngineAccess, db func() *bun.DB, logger *slog.Logger) *IdentityIntegration {
 	return &IdentityIntegration{engine: engine, db: db, logger: logger}
 }
@@ -79,6 +77,15 @@ func (i *IdentityIntegration) IntegrationName() string {
 // Capabilities returns DSL-callable delegation operations.
 func (i *IdentityIntegration) Capabilities() []memql.IntegrationCapability {
 	return []memql.IntegrationCapability{
+		{
+			Name:        "setUserDisplayName",
+			Description: "Change an existing user's display name. Owner/admin only; audited. Preserves roles, sign-in policy, contact details and preferences.",
+			Handler:     i.handleSetUserDisplayName,
+			ArgsSchema: map[string]string{
+				"userId":      "string",
+				"displayName": "string",
+			},
+		},
 		{
 			Name:        "createDelegation",
 			Description: "Create a delegation grant from a user-owned identity to an AI agent with a role ceiling, optional scope list, and optional expiry.",
