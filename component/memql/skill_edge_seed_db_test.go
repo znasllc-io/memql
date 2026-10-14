@@ -19,6 +19,13 @@ func TestSkillEdgeSeedsMaterializeCommittedAndSurviveAnotherReplicaSweep(t *test
 	eng, db, ctx := sharedReadMergeEngine(t)
 	replica, _, _ := readMergeTestEngine(t)
 	const concept = "v1:skills:skillEdge"
+	// Populate the linked catalog too: real graph reads include these nodes,
+	// even though the seed freshness check asks for one edge by exact id.
+	for _, name := range []string{"software-development", "distributed-systems", "regression-testing", "go-backend-engineering"} {
+		def, ok := eng.Seeds().Get(name)
+		require.True(t, ok)
+		require.NoError(t, eng.SeedMaterializer().materializeGlobal(ctx, def))
+	}
 	for name, from := range map[string]string{
 		"distributed-systems-specialty": "distributed-systems",
 		"regression-testing-specialty":  "regression-testing",
@@ -36,6 +43,9 @@ func TestSkillEdgeSeedsMaterializeCommittedAndSurviveAnotherReplicaSweep(t *test
 			require.Equal(t, "committed", payload["status"])
 			require.Equal(t, "", payload["ownerUserId"])
 			require.Equal(t, "system", payload["proposedBy"])
+			graph, err := replica.Execute(ContextWithFreshRead(systemActorContext(ctx)), "concept=="+concept+" && row.id=="+dslStringLiteral(id))
+			require.NoError(t, err)
+			require.Greater(t, len(graph.Bundle.GetNodes()), 1, "exercise a graph with linked skills, not just an isolated edge")
 			versions := func() int {
 				var n int
 				require.NoError(t, db.NewRaw(`SELECT count(*) FROM "MemoryNodes" WHERE id = ?`, id).Scan(ctx, &n))

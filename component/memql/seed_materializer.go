@@ -458,10 +458,20 @@ func (m *SeedMaterializer) seedRowIsCurrent(ctx context.Context, def *SeedDefini
 	// regression this function exists to prevent, and silent, because a failed
 	// freshness check is indistinguishable from a row that really did change.
 	result, err := m.engine.Execute(ContextWithFreshRead(systemActorContext(ctx)), "concept=="+conceptId+" && row.id=="+dslStringLiteral(id))
-	if err != nil || result == nil || result.Bundle == nil || len(result.Bundle.Nodes) != 1 {
+	if err != nil || result == nil || result.Bundle == nil {
 		return false
 	}
-	node := result.Bundle.Nodes[0]
+	// A graph result includes related rows too. Only the seed's own row is
+	// evidence of freshness; linked skills must neither hide nor replace it.
+	var node *memqlv1.MemoryNode
+	for _, candidate := range result.Bundle.Nodes {
+		if candidate.GetId() == id && candidate.GetConcept() == conceptId {
+			if node != nil {
+				return false
+			}
+			node = candidate
+		}
+	}
 	if node == nil || node.GetPayload() == nil {
 		return false
 	}
