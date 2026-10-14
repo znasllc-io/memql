@@ -17,7 +17,7 @@ func (h *ForwardHandler) SetComputerPermissions(authority permission.Authority) 
 	h.permissions = authority
 }
 func permissionRequest(req Request) permission.Request {
-	return permission.Request{OwnerID: req.OwnerUserId, AgentID: req.AgentId, RunID: req.RunId, Tool: req.Tool, Action: req.Action, Args: req.Args}
+	return permission.Request{OwnerID: req.OwnerUserId, AgentID: req.AgentId, RunID: req.RunId, Tool: req.Tool, Action: req.Action, Args: req.Args, MachineID: req.RequireLabels["machineId"]}
 }
 func computerPermissionID(req Request) string {
 	if req.computerPermission != nil {
@@ -87,12 +87,15 @@ func (d *Dispatcher) prepareComputerPermission(ctx context.Context, owner, agent
 	}
 	// A matching receipt avoids parking the run again. Dispatch still rechecks
 	// the receipt, routing requirements and machine before consuming anything.
-	existing, err := d.permissions.Find(ctx, permission.Request{OwnerID: owner, AgentID: agent, RunID: run, Tool: tool, Action: action, Args: args})
+	existing, err := d.permissions.Find(ctx, permission.Request{OwnerID: owner, AgentID: agent, RunID: run, Tool: tool, Action: action, Args: args, MachineID: labels["machineId"]})
 	if err != nil {
 		return scope, nil, err
 	}
 	plan, err := d.router.Plan(ctx, owner, workerservice.CapabilityHeadless, labels, nil)
 	if err != nil {
+		return scope, nil, err
+	}
+	if err := requireSingleComputerTarget(plan); err != nil {
 		return scope, nil, err
 	}
 	plan.RequireActionContract(permission.Contract, permission.Version)

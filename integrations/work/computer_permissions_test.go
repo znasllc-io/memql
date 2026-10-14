@@ -68,3 +68,19 @@ func TestComputerPermissionDecisionRejectsInventedModes(t *testing.T) {
 		t.Fatal("legacy scope promoted to always")
 	}
 }
+
+func TestComputerPermissionLookupHonorsEachSelectedMachine(t *testing.T) {
+	row, req := computerPermissionFixture()
+	for _, mode := range []string{"once", "always"} {
+		row["answer"] = map[string]any{"permissionMode": mode}
+		row["expiresAt"] = time.Now().Add(time.Hour).Format(time.RFC3339Nano)
+		req.MachineID = "other-machine"
+		if permissionFromRow(row, req, time.Now()) != nil {
+			t.Fatal("permission for the same path on another computer masked the selected target")
+		}
+		req.MachineID = "machine"
+		if permissionFromRow(row, req, time.Now()) == nil {
+			t.Fatal("selected machine lost its valid permission")
+		}
+	}
+}

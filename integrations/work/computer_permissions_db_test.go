@@ -99,6 +99,36 @@ func TestComputerPermissionDBTwoReplicasConsumeOnceAndRevokeAlways(t *testing.T)
 	}
 }
 
+func TestComputerPermissionDBSelectedMachinesKeepSeparateReceipts(t *testing.T) {
+	a := openActsDB(t)
+	runID := a.openRun(t, nil)
+	peerDB := workHeadsPeer(t, a.db)
+	b := New(dispatchDBEngine(t, peerDB), testLogger(), func() *bun.DB { return peerDB })
+	person := actorCtx(a.owner)
+	_, req := computerPermissionFixture()
+	req.OwnerID, req.RunID = a.owner, runID
+	ids := map[string]string{}
+	for _, machine := range []string{"desktop", "laptop"} {
+		row, _ := computerPermissionFixture()
+		subject := rowMap(row, "subject")
+		scope := rowMap(subject, "computerPermission")
+		scope["machineId"], scope["registrationId"] = machine, machine+"-registration"
+		id := newRowId(approvalConcept)
+		ids[machine] = id
+		a.write(t, "createWorkApproval", map[string]any{"approvalId": id, "runId": runID, "kind": "scopeElevation", "subject": subject, "artifactHash": workstate.ArtifactHash(subject), "requestedAt": rfc(time.Now()), "expiresAt": rfc(time.Now().Add(time.Hour))})
+		a.write(t, "decideWorkApproval", map[string]any{"approvalId": id, "decision": "approved", "decidedBy": a.owner, "decidedAt": rfc(time.Now()), "answer": map[string]any{"permissionMode": "always"}})
+	}
+	// Identical operations on two selected computers must find their own
+	// receipt on another replica, regardless of database row ordering.
+	for machine, id := range ids {
+		req.MachineID = machine
+		grant, err := b.Find(person, req)
+		if err != nil || grant == nil || memql.BareShortId(grant.ID) != memql.BareShortId(id) {
+			t.Fatalf("selected %s: %+v %v", machine, grant, err)
+		}
+	}
+}
+
 // The engine may finish a bounded durable write after its caller disconnects.
 // Its receipt gate must survive that disconnect until the actual commit lands.
 type permissionCommitEngine struct {

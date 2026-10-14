@@ -1,6 +1,8 @@
 /// Read this person's eligible workers across all cluster replicas.
 /// computerUseOnline means desktop control with a display is available;
 /// headlessOnline means host tools are available. Neither grants permission.
+/// machines lists names, exact requireLabels selectors and scoped-permission
+/// support. Ask the person to choose when the intended target is unclear.
 @handler(type="function", name="agentworkerStatus")
 @requiresAgentRole("assistant", "specialist")
 tool workerStatus {
@@ -9,7 +11,9 @@ tool workerStatus {
 }
 
 /// Ask for time-limited computer access for the current goal. Explain the
-/// purpose and machine labels. Approval is shown in Nexus; no action runs first.
+/// purpose and the chosen machine's requireLabels from workerStatus. If several
+/// machines match, ask which to use with requestUserFeedback first. A selection
+/// is not permission. Approval is shown in Nexus; no action runs first.
 @handler(type="function", name="agentworkerRequestScope")
 @requiresAgentRole("assistant", "specialist")
 tool requestComputerUseScope {
@@ -29,8 +33,8 @@ tool requestComputerUseScope {
 @requiresAgentRole("assistant", "specialist")
 tool workerHost {
  action enum("exec", "fs_read", "fs_write", "fs_list", "fs_stat", "http_fetch")!
- args object
- requireLabels object
+ args object @description("fs_list/fs_read/fs_stat require an absolute path. exec takes cmd (the exact command), cwd (absolute working directory), and optional timeoutSec; use the same args as the approved operation.")
+ requireLabels object @description("Copy the selected machine's requireLabels from workerStatus. Keep the same target for approval and execution; do not omit it for work on a specific computer.")
  ownerUserId string! @autoInjected
  agentId string! @autoInjected
  runId string! @autoInjected
