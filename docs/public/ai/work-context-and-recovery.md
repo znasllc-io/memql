@@ -117,6 +117,13 @@ permission. Another replica rechecks the owner, question, execution lineage and
 saved exchange before continuing. A missing or changed checkpoint is refused,
 and a later failure request cannot borrow an earlier permission checkpoint.
 
+An untyped computer-access request can also receive a correction in its saved
+turn when the server recorded proof of the exact pending tool call at creation.
+The execution replica checks that call, its original arguments and checkpoint
+again before continuing. This proof grants no computer access. Older untyped
+requests without that proof retain their existing replanning behavior; the
+platform does not infer or backfill a continuation from their descriptions.
+
 Replanning an existing sealed program uses structured, exact source edits so
 that repairing a small part does not require the model to repeat a large
 program. The runtime rejects ambiguous or overlapping edits and changes to
