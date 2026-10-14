@@ -394,6 +394,8 @@ describe("writes", () => {
     mount(conn);
     fireEvent.click(await screen.findByRole("button", { name: "Add a client" }));
     fireEvent.change(screen.getByLabelText("Client name"), { target: { value: "Newcomer" } });
+    for (let i = 0; i < 3; i++) { await readTheBar(); fireEvent.click(screen.getByRole("button", { name: "Next" })); }
+    await readTheBar();
     fireEvent.click(screen.getByText("Add client"));
 
     await waitFor(() =>
@@ -412,6 +414,8 @@ describe("writes", () => {
     mount(conn);
     fireEvent.click(await screen.findByRole("button", { name: "Add a client" }));
     fireEvent.change(screen.getByLabelText("Client name"), { target: { value: "Newcomer" } });
+    for (let i = 0; i < 3; i++) { await readTheBar(); fireEvent.click(screen.getByRole("button", { name: "Next" })); }
+    await readTheBar();
     fireEvent.click(screen.getByText("Add client"));
 
     await waitFor(() => expect(conn.query.createClientAccount).toHaveBeenCalled());
@@ -428,8 +432,14 @@ describe("writes", () => {
     mount(conn);
     fireEvent.click(await screen.findByRole("button", { name: "Add a client" }));
     fireEvent.change(screen.getByLabelText("Client name"), { target: { value: "Newcomer" } });
+    for (let i = 0; i < 3; i++) { await readTheBar(); fireEvent.click(screen.getByRole("button", { name: "Next" })); }
+    await readTheBar();
     fireEvent.click(screen.getByText("Add client"));
 
     expect(await screen.findByText("a client named Newcomer already exists")).toBeTruthy();
+    const first = conn.query.createClientAccount.mock.calls[0]?.[0] as Record<string, unknown>;
+    await readTheBar(); fireEvent.click(screen.getByRole("button", { name: "Add client" }));
+    await waitFor(() => expect(conn.query.createClientAccount).toHaveBeenCalledTimes(2));
+    expect((conn.query.createClientAccount.mock.calls[1]?.[0] as Record<string, unknown>).accountId).toBe(first.accountId);
   });
 });

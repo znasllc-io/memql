@@ -288,6 +288,7 @@ describe("proposing a slot on the ladder", () => {
     await act(async () => {
       fireEvent.change(screen.getByLabelText("Name"), { target: { value: "Field engineer" } });
     });
+    if (!screen.queryByLabelText("Rank")) { await readTheBar(); await click(screen.getByRole("button", { name: "Next" })); }
     await act(async () => {
       fireEvent.change(screen.getByLabelText("Rank"), { target: { value: "320" } });
     });
@@ -310,11 +311,13 @@ describe("proposing a slot on the ladder", () => {
     await act(async () => {
       fireEvent.change(screen.getByLabelText("Name"), { target: { value: "Taken" } });
     });
+    if (!screen.queryByLabelText("Rank")) { await readTheBar(); await click(screen.getByRole("button", { name: "Next" })); }
     await act(async () => {
       fireEvent.change(screen.getByLabelText("Rank"), { target: { value: "200" } });
     });
     expect(await screen.findByText(/Rank 200 is taken/)).toBeTruthy();
 
+    if (!screen.queryByLabelText("Rank")) { await readTheBar(); await click(screen.getByRole("button", { name: "Next" })); }
     await act(async () => {
       fireEvent.change(screen.getByLabelText("Rank"), { target: { value: "400" } });
     });

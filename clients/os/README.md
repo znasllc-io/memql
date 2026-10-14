@@ -1152,6 +1152,25 @@ Backups use a plus action, a full-page form, a schedule, and a hidden-file switc
   hidden panes or overlaps a busy read. In-flight reads abort on file changes
   and unmount; the last successful history stays visible during recovery.
 
+## Account domain defaults
+
+Accounts → select an account → Domains assigns multiple domain names and a
+default domain and sender. `configureAccountDomains` validates these settings
+on the engine; the account's existing organization authorization applies.
+`apps/accounts/defaults.ts` is the shared source of creation suggestions for
+Deployables, Email, automations and signup forms. A deployable starts with
+`<slug>.<defaultDomain>`; an explicit manifest domain or typed value (including
+an empty value) wins. A single active sender matching the account's default
+domain is suggested unless the account names a different default sender.
+Missing or disabled explicit senders require another choice.
+
+These are defaults for **new work**, not a bulk edit of existing resources.
+Absent assigned domains use the existing profile domain; an explicitly empty
+list opts out. Domain assignment neither proves ownership nor enables user
+joining. Custom-domain DNS/TLS checks and email-provider readiness still run.
+The domains needed by Shopify connections and cluster transport are separate
+configuration and do not inherit these defaults.
+
 ## Accounts, the sixth app (memql#4800)
 
 `src/apps/accounts/` is the client registry: the companies this instance does

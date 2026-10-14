@@ -604,6 +604,31 @@ async function analyzed(
 }
 
 describe("the compose flow: where each app will live", () => {
+  it("inherits late account defaults, follows account and slug changes, and preserves explicit blanks", async () => {
+    const { connection } = await analyzed({ accounts: [{ id: "self", name: "Studio", status: "active" }, { id: "beta", name: "Beta", status: "active", domains: ["beta.test"], defaultDomain: "beta.test" }] });
+    await fill("The name storefront answers at", "shop");
+    const domain = () => screen.getByLabelText("A domain of the client's own for storefront") as HTMLInputElement;
+    expect(domain().value).toBe("");
+    await act(async () => connection.subscriptions.emit("v1:accounts:account", { id: "self", name: "Studio", status: "active", domains: ["studio.test"], defaultDomain: "studio.test" }));
+    await waitFor(() => expect(domain().value).toBe("shop.studio.test"));
+    await fill("The name storefront answers at", "docs");
+    expect(domain().value).toBe("docs.studio.test");
+    await choose("The account storefront is for", "Beta");
+    expect(domain().value).toBe("docs.beta.test");
+    await fill("A domain of the client's own for storefront", "");
+    await fill("The name storefront answers at", "shop");
+    expect(domain().value).toBe("");
+    await click(await forward("Deploy"));
+    expect(connection.callsNamed("packageDeploy")[1]).toContain('domains: []');
+  });
+
+  it("sends the inherited domain in the deployment placement", async () => {
+    const { connection } = await analyzed({ accounts: [{ id: "self", name: "Studio", status: "active", domains: ["studio.test"], defaultDomain: "studio.test" }] });
+    await fill("The name storefront answers at", "shop");
+    await click(await forward("Deploy"));
+    expect(connection.callsNamed("packageDeploy")[1]).toContain('domains: ["shop.studio.test"]');
+  });
+
   it("asks for a hostname only on a deployable's first deploy, and previews it", async () => {
     const { region } = await analyzed();
 

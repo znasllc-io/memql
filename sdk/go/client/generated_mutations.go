@@ -1040,6 +1040,48 @@ func CompleteTodoBuild(args CompleteTodoArgs) string {
 	return b.String()
 }
 
+// ConfigureAccountDomains -- Configure the domains and sender used as defaults for new work in this account. Assignment is configuration, not DNS proof or permission to send mail.
+//
+// Bound concept: v1:accounts:account (machine-readable: BoundConcepts["configureAccountDomains"] in generated_concepts.go).
+type ConfigureAccountDomainsArgs struct {
+	AccountId               string
+	Domains                 []string
+	DefaultDomain           string
+	DefaultSenderIdentityId string
+}
+
+// ConfigureAccountDomains calls the engine mutation configureAccountDomains.
+func (qc *QueryClient) ConfigureAccountDomains(ctx context.Context, args ConfigureAccountDomainsArgs) (*Result, error) {
+	call := ConfigureAccountDomainsBuild(args)
+	return qc.executeNamed(ctx, "configureAccountDomains", call)
+}
+
+func ConfigureAccountDomainsBuild(args ConfigureAccountDomainsArgs) string {
+	var b strings.Builder
+	b.WriteString("mutation configureAccountDomains(")
+	b.WriteString("accountId: ")
+	b.WriteString(quoteMemQL(args.AccountId))
+	if b.Len() > 33 {
+		b.WriteString(", ")
+	}
+	b.WriteString("domains: ")
+	b.WriteString(renderMemQLValue(args.Domains))
+	if b.Len() > 33 {
+		b.WriteString(", ")
+	}
+	b.WriteString("defaultDomain: ")
+	b.WriteString(quoteMemQL(args.DefaultDomain))
+	if args.DefaultSenderIdentityId != "" {
+		if b.Len() > 33 {
+			b.WriteString(", ")
+		}
+		b.WriteString("defaultSenderIdentityId: ")
+		b.WriteString(quoteMemQL(args.DefaultSenderIdentityId))
+	}
+	b.WriteString(")")
+	return b.String()
+}
+
 // ConfirmRecord -- Human confirm a data record, updating confirm count and validation state
 //
 // Bound concept: v1:data:record (machine-readable: BoundConcepts["confirmRecord"] in generated_concepts.go).

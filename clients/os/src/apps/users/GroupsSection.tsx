@@ -146,15 +146,12 @@ export function GroupsSection({
 
   if (view.kind === "new") {
     return (
-      <div className="os-app-stack">
-        <Head title="New group" back={{ label: "Groups", onSelect: () => setView({ kind: "list" }) }} />
-        <NewGroupForm
+      <NewGroupForm
           accounts={accounts}
           actions={actions}
           onCancel={() => setView({ kind: "list" })}
           onCreated={() => setView({ kind: "list" })}
         />
-      </div>
     );
   }
 

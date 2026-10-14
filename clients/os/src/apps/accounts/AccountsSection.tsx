@@ -1,9 +1,11 @@
+import { AddAccountWizard } from "./AddAccountWizard";
+import { DomainSetup } from "./DomainSetup";
 import { AddButton } from "../../kit/AddButton";
 import { useMemo, useState } from "react";
 import type { Row } from "@znasllc-io/memql-sdk-core/client";
 import { Building2, } from "lucide-react";
 
-import { Button, Caption, Chip, Head, Input, LiveList, Notice, Panel, RecordRow, listCount } from "../../kit";
+import { Button, Chip, Head, LiveList, Notice, RecordRow, listCount } from "../../kit";
 import { useLiveView } from "../../live/liveView";
 import { AccountDetail } from "./AccountDetail";
 import {
@@ -46,6 +48,7 @@ export function AccountsSection({
   const { source: collection, snapshot, reseed } = feed;
   const [openId, setOpenId] = useState("");
   const [adding, setAdding] = useState(false);
+  const [domains, setDomains] = useState(false);
 
   // PROJECT, then narrow, in one pass -- the collection holds RAW wire rows
   // (the fold upserts an event payload with no projection hook), so every
@@ -59,6 +62,10 @@ export function AccountsSection({
     () => source?.snapshot.rows.find((a) => a.id === openId) ?? null,
     [source, source?.snapshot, openId],
   );
+
+  if (adding) return <AddAccountWizard create={create} onBack={() => setAdding(false)} onDone={id => { setAdding(false); setOpenId(id); reseed(); }} />;
+  if (open && domains) return <DomainSetup account={open} onBack={() => setDomains(false)} onSaved={() => { setDomains(false); reseed(); }} />;
+  if (open) return <div className="os-app-stack"><Head title={accountName(open)} back={{ label: "Accounts", onSelect: () => setOpenId("") }} /><AccountDetail account={open} update={update} archive={archive} onArchived={() => setOpenId("")} onOpenGroup={onOpenGroup} onConfigureDomains={() => setDomains(true)} /></div>;
 
   return (
     <div className="os-app-stack">
@@ -75,17 +82,6 @@ export function AccountsSection({
           <Button onClick={reseed}>Try again</Button>
         </Notice>
       ) : null}
-
-      {adding ? (
-        <CreateAccountForm
-          create={create}
-          onDone={(id) => {
-            setAdding(false);
-            if (id !== "") setOpenId(id);
-          }}
-        />
-      ) : null}
-
 
       {/* Keyed on the filter so flipping it RE-BASELINES the arrival cues.
           Without it, revealing archived rows makes them flash "new" on the
@@ -118,16 +114,6 @@ export function AccountsSection({
         )}
       />
 
-      {open === null ? null : (
-        <AccountDetail
-          key={open.id}
-          account={open}
-          update={update}
-          archive={archive}
-          onArchived={() => setOpenId("")}
-          onOpenGroup={onOpenGroup}
-        />
-      )}
     </div>
   );
 }
@@ -173,109 +159,5 @@ function AccountLine({
         </Chip>
       ) : null}
     </RecordRow>
-  );
-}
-
-/**
- * Add a client.
- *
- * `name` is the only required field, matching the concept and matching the
- * first-run card: everything else is correctable from the profile, and a form
- * that insists on five fields is one people fill with placeholders.
- */
-function CreateAccountForm({
-  create,
-  onDone,
-}: {
-  create: CreateAccountState;
-  onDone: (createdId: string) => void;
-}) {
-  const [name, setName] = useState("");
-  const [domain, setDomain] = useState("");
-  const [contactName, setContactName] = useState("");
-  const [contactEmail, setContactEmail] = useState("");
-
-  async function submit() {
-    const id = await create.create({
-      name,
-      domain,
-      primaryContactName: contactName,
-      primaryContactEmail: contactEmail,
-      notes: "",
-    });
-    if (id !== "") onDone(id);
-  }
-
-  return (
-    <Panel label="Add a client">
-      <div className="os-account-form">
-        <div className="os-form-field">
-          <label className="os-form-field-label" htmlFor="os-account-new-name">
-            Name
-          </label>
-          <Input
-            id="os-account-new-name"
-            label="Client name"
-            value={name}
-            onChange={setName}
-            placeholder="Acme Consulting"
-            onEnter={submit}
-          />
-        </div>
-        <div className="os-form-field">
-          <label className="os-form-field-label" htmlFor="os-account-new-domain">
-            Domain
-          </label>
-          <Input
-            id="os-account-new-domain"
-            label="Client domain"
-            value={domain}
-            onChange={setDomain}
-            placeholder="acme.com"
-          />
-        </div>
-        <div className="os-form-field">
-          <label className="os-form-field-label" htmlFor="os-account-new-contact">
-            Primary contact
-          </label>
-          <Input
-            id="os-account-new-contact"
-            label="Primary contact name"
-            value={contactName}
-            onChange={setContactName}
-          />
-        </div>
-        <div className="os-form-field">
-          <label className="os-form-field-label" htmlFor="os-account-new-email">
-            Contact email
-          </label>
-          <Input
-            id="os-account-new-email"
-            label="Primary contact email"
-            value={contactEmail}
-            onChange={setContactEmail}
-          />
-        </div>
-      </div>
-
-      {create.error === "" ? null : (
-        <Notice
-          tone="error"
-          sentence="This client was not added."
-          next="Nothing was written; what is above is still as you typed it."
-          detail={create.error}
-        />
-      )}
-
-      <div className="os-account-form-actions">
-        <Button tone="primary" onClick={submit} disabled={create.busy || name.trim() === ""}>
-          {create.busy ? "Adding" : "Add client"}
-        </Button>
-        <Button onClick={() => onDone("")}>Cancel</Button>
-      </div>
-      <Caption>
-        Only the name is required. Everything else can be filled in later from the client's profile.
-      </Caption>
-    </Panel>
   );
 }

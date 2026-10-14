@@ -1,3 +1,4 @@
+import { accountDefaultSender } from "../../accounts/defaults";
 import { EMAIL_REFRESH_MS } from "../useEmail";
 import { useEffect, useRef, useState } from "react";
 import { refusalSentence, versionOrder } from "@znasllc-io/memql-sdk-core/client";
@@ -60,6 +61,6 @@ export function AutomationPage({ journey, feeds, onBack }: { journey: JourneyRow
     {failure && refusalSentence(failure) !== refusalSentence(journey.lastError) ? <Notice tone="warn" sentence={refusalSentence(failure)} /> : null}
     {confirms.error ? <Notice tone="warn" sentence={refusalSentence(confirms.error)}><Button onClick={() => { void confirms.reload(); }}>Try again</Button></Notice> : null}
     {counts.error ? <Notice tone="warn" sentence={refusalSentence(counts.error)} /> : null}
-    <Flow trigger={triggerSentence(journey.trigger, audience)} steps={draft.steps} accountId={journey.accountId} templates={templates} senders={senders} editable={journey.status === "draft" || journey.status === "paused"} issues={issues} counts={countWords} name={draft.name} description={draft.description} onName={name => { setDraft(d => ({ ...d, name })); setServerIssues([]); }} onDescription={description => { setDraft(d => ({ ...d, description })); setServerIssues([]); }} onChange={steps => { setDraft(d => ({ ...d, steps })); setServerIssues([]); }} />
+    <Flow defaultSender={accountDefaultSender(accounts.find(account => account.id === journey.accountId), senders)} trigger={triggerSentence(journey.trigger, audience)} steps={draft.steps} accountId={journey.accountId} templates={templates} senders={senders} editable={journey.status === "draft" || journey.status === "paused"} issues={issues} counts={countWords} name={draft.name} description={draft.description} onName={name => { setDraft(d => ({ ...d, name })); setServerIssues([]); }} onDescription={description => { setDraft(d => ({ ...d, description })); setServerIssues([]); }} onChange={steps => { setDraft(d => ({ ...d, steps })); setServerIssues([]); }} />
   </div><ActionBar state={journeyReading(journey, dirty, issues).word} detail={journeyReading(journey, dirty, issues).detail} tone={busy ? "busy" : journeyReading(journey, dirty, issues).tone} acts={busy ? [] : toKitActs(specs, id => { void run(id); })}>{question ? <span className="os-actbar-confirm">{question}</span> : null}</ActionBar></div>;
 }

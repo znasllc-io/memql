@@ -1,3 +1,4 @@
+import { readTheBar } from "../readTheBar";
 import { act, screen, waitFor, within } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 
@@ -92,9 +93,11 @@ describe("the groups list", () => {
     await act(async () => {
       fireEvent.change(screen.getByLabelText("Name"), { target: { value: "Reviewers" } });
     });
+    await readTheBar(); await click(screen.getByRole("button", { name: "Next" }));
     await click(screen.getByRole("combobox", { name: "Organization this group belongs to" }));
     await click(screen.getByRole("option", { name: "Acme" }));
-    await click(screen.getByRole("button", { name: "Create group" }));
+    await readTheBar(); await click(screen.getByRole("button", { name: "Next" }));
+    await readTheBar(); await click(screen.getByRole("button", { name: "Create group" }));
 
     await waitFor(() => expect(connection.query.groupCreate.mock.calls).toHaveLength(1));
     expect(connection.query.groupCreate.mock.calls[0]?.[0]).toMatchObject({ name: "Reviewers" });

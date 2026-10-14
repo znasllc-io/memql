@@ -1,3 +1,4 @@
+import { accountDefaultSender } from "../../accounts/defaults";
 import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { Send } from "lucide-react";
 import { newShortId } from "@znasllc-io/memql-sdk-core/client";
@@ -188,7 +189,9 @@ export function AddCampaignWizard({ feeds, recordFeeds, trackByDefault, onBack, 
     trackOpens: trackByDefault,
     trackClicks: trackByDefault,
   }));
-  const draft: CampaignDraft = { ...answers, accountId };
+  const allSenders = useProjected(feeds.senders.snapshot.rows, senderProjection);
+  const defaultSender = accountDefaultSender(accounts.find(account => account.id === accountId), allSenders);
+  const draft: CampaignDraft = { ...answers, accountId, senderIdentityId: answers.senderIdentityId ?? (defaultSender || null) };
   const [chosenStep, setChosenStep] = useState<CampaignStep | null>(null);
   const open: CampaignStep =
     chosenStep !== null && stepReachable(chosenStep, draft, chooseOrganization) ? chosenStep : firstOpen(draft, chooseOrganization);
@@ -197,7 +200,6 @@ export function AddCampaignWizard({ feeds, recordFeeds, trackByDefault, onBack, 
   // ---- what the organization has -------------------------------------------
   const allAudiences = useProjected(feeds.audiences.snapshot.rows, audienceProjection);
   const allTemplates = useProjected(feeds.templates.snapshot.rows, templateProjection);
-  const allSenders = useProjected(feeds.senders.snapshot.rows, senderProjection);
   const audiences = allAudiences.filter((a) => a.accountId === accountId && !audienceIsArchived(a));
   // Published first: a draft can be chosen, and Review says what it still needs.
   const templates = allTemplates
@@ -447,7 +449,7 @@ export function AddCampaignWizard({ feeds, recordFeeds, trackByDefault, onBack, 
   // ---- answering -----------------------------------------------------------
   function answer(step: CampaignStep, patch: Partial<Omit<CampaignDraft, "accountId">>) {
     const next = { ...draft, ...patch };
-    setAnswers((held) => ({ ...held, ...patch }));
+    setAnswers((held) => ({ ...held, senderIdentityId: held.senderIdentityId ?? draft.senderIdentityId, ...patch }));
     setChosenStep(stepAfter(step, next, chooseOrganization));
     setAsking("");
   }
@@ -464,7 +466,7 @@ export function AddCampaignWizard({ feeds, recordFeeds, trackByDefault, onBack, 
   }
 
   function setWhen(when: When) {
-    setAnswers((held) => ({ ...held, when }));
+    setAnswers((held) => ({ ...held, senderIdentityId: held.senderIdentityId ?? draft.senderIdentityId, when }));
     setAsking("");
   }
 

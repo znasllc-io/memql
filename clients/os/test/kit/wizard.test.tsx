@@ -1,3 +1,4 @@
+import { useState } from "react";
 import { cleanup, fireEvent, render, screen, within } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { readFileSync } from "node:fs";
@@ -291,5 +292,30 @@ describe("the cursor, when the arrangement settles", () => {
       </>,
     );
     expect(document.activeElement).toBe(screen.getByRole("button", { name: "elsewhere" }));
+  });
+});
+
+
+describe("navigation focus shared by every wizard", () => {
+  it("focuses the next question after a deliberate footer action", () => {
+    function Flow() {
+      const [step, setStep] = useState("name");
+      return <Wizard layout="split" icon={<svg />} title="Add" label="Adding" open={step} onOpen={setStep} status={{ word: "Ready" }} steps={[
+        { id: "name", name: "Name", state: step === "name" ? "open" : "done", body: <input aria-label="Name" /> },
+        { id: "domain", name: "Domain", state: step === "domain" ? "open" : "ahead", body: <input aria-label="Domain" /> },
+      ]} acts={[{ label: "Next", onAct: () => setStep("domain") }]} />;
+    }
+    render(<Flow />);
+    const next = screen.getByRole("button", { name: "Next" }); next.focus(); fireEvent.click(next);
+    expect(document.activeElement).toBe(screen.getByLabelText("Domain"));
+  });
+  it("does not focus a field when background progress opens a step", () => {
+    const draw = (open: string) => <><Wizard layout="split" icon={<svg />} title="Setup" label="Setting up" open={open} onOpen={() => {}} status={{ word: "Working" }} steps={[
+      { id: "wait", name: "Waiting", state: "done", body: <p>Waiting</p> },
+      { id: "domain", name: "Domain", state: "open", body: <input aria-label="Domain" /> },
+    ]} /><button>Elsewhere</button></>;
+    const view = render(draw("wait")); screen.getByRole("button", { name: "Elsewhere" }).focus();
+    view.rerender(draw("domain"));
+    expect(document.activeElement).toBe(screen.getByRole("button", { name: "Elsewhere" }));
   });
 });

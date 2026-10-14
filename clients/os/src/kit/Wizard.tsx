@@ -86,11 +86,11 @@ import { useWide } from "./useWide";
 // (`useWide`) rather than left to a container query.
 //
 // ===========================================================================
-// ADDING ONLY
+// ADDING AND GUIDED SETUP
 // ===========================================================================
-// A wizard creates. Once the thing exists it has a page of its own, and that
-// page is where it is read and changed -- by whoever is allowed to. Nothing
-// here edits.
+// Creation and multi-step setup share this frame. Ordinary record editing
+// belongs on the thing's detail page; a configuration with dependent choices,
+// such as domain defaults, opens its own guided flow from that page.
 
 export interface WizardStatus {
   /** The state, in the words a person uses: "Name the domain", "Waiting for DNS". */
@@ -180,6 +180,14 @@ export function Wizard({
   // the sentence that says what this is -- and a first step taller than the
   // window would otherwise be "brought into view" straight past all three.
   const opened = useRef(false);
+  const focusNextQuestion = useRef(false);
+  // Deliberate navigation brings the next question within keyboard reach.
+  // Background progress never steals the cursor from a field being edited.
+  useEffect(() => {
+    if (!focusNextQuestion.current) return;
+    focusNextQuestion.current = false;
+    column.current?.querySelector<HTMLElement>('.os-wizard-body input:not([type="hidden"]):not(:disabled), .os-wizard-body textarea:not(:disabled), .os-wizard-body button:not(:disabled), .os-wizard-body select:not(:disabled)')?.focus({ preventScroll: true });
+  }, [open]);
   useEffect(() => {
     if (!opened.current) {
       opened.current = true;
@@ -195,8 +203,8 @@ export function Wizard({
   // THE FIRST QUESTION TAKES THE CURSOR. Somebody pressed Add and the next
   // thing they do is type a name; making them click the one field on the page
   // first is a step the wizard added. Only a text field, and only ON THE WAY
-  // IN -- a step that opens because the flow moved on must not pull focus out
-  // from under whatever the person is doing.
+  // IN. Deliberate navigation is handled above; background progress must not
+  // pull focus out from under whatever the person is doing.
   //
   // "ON THE WAY IN" IS UNTIL THEY TOUCH IT, NOT "ON MOUNT". The arrangement is
   // measured after the first commit, and going side by side moves the open
@@ -242,7 +250,7 @@ export function Wizard({
       // names and a button, and the button would act on a form nobody
       // can see.
       onOpenStop={(id) => {
-        if (id !== "") onOpen(id);
+        if (id !== "") { focusNextQuestion.current = true; onOpen(id); }
       }}
     />
   );
@@ -319,7 +327,7 @@ export function Wizard({
         tone={status.tone}
         meta={status.meta}
         live
-        acts={acts}
+        acts={acts.map(act => ({ ...act, onAct: () => { focusNextQuestion.current = true; act.onAct(); } }))}
         scope={open}
       >
         {confirm}

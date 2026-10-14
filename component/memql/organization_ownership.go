@@ -122,6 +122,8 @@ func (e *MemQLEngine) validateOrganizationOwnership(ctx context.Context, concept
 // read both. Otherwise a campaign for Acme could mail another client's list.
 func organizationReferences(concept string) map[string]string {
 	switch concept {
+	case conceptAccountsAccount:
+		return map[string]string{"defaultSenderIdentityId": "v1:campaigns:senderIdentity"}
 	case "v1:campaigns:campaign", "v1:campaigns:emailRule":
 		return map[string]string{"audienceId": "v1:campaigns:audience", "templateId": "v1:campaigns:template", "senderIdentityId": "v1:campaigns:senderIdentity"}
 	case "v1:campaigns:testSettings":
@@ -338,7 +340,7 @@ func (e *MemQLEngine) validateOrganizationTransfer(ctx context.Context, concept,
 	if e.database() == nil {
 		return fmt.Errorf("organization_unavailable: dependent records cannot be checked")
 	}
-	for _, childConcept := range []string{"v1:campaigns:newsletterBinding", "v1:campaigns:newsletterSignup", "v1:campaigns:campaignSeries", "v1:campaigns:campaign", "v1:campaigns:emailRule", "v1:campaigns:recipient", "v1:campaigns:delivery", "v1:campaigns:engagementEvent", "v1:campaigns:consentEvent", "v1:platform:packageDeployment", "v1:identity:groupMembership"} {
+	for _, childConcept := range []string{conceptAccountsAccount, "v1:campaigns:newsletterBinding", "v1:campaigns:newsletterSignup", "v1:campaigns:campaignSeries", "v1:campaigns:campaign", "v1:campaigns:emailRule", "v1:campaigns:recipient", "v1:campaigns:delivery", "v1:campaigns:engagementEvent", "v1:campaigns:consentEvent", "v1:platform:packageDeployment", "v1:identity:groupMembership"} {
 		for field, parent := range organizationReferences(childConcept) {
 			if parent != concept {
 				continue
@@ -352,7 +354,11 @@ func (e *MemQLEngine) validateOrganizationTransfer(ctx context.Context, concept,
 				if BareShortId(stringFromAny(payload[field])) != BareShortId(id) {
 					continue
 				}
-				if BareShortId(stringFromAny(payload["accountId"])) != BareShortId(next) {
+				childAccount := stringFromAny(payload["accountId"])
+				if childConcept == conceptAccountsAccount {
+					childAccount = row.ID
+				}
+				if BareShortId(childAccount) != BareShortId(next) {
 					return fmt.Errorf("organization_transfer_refused: related records still belong to the existing organization")
 				}
 			}

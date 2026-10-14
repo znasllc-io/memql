@@ -1,3 +1,6 @@
+import { UsersApp } from "../src/apps/users/UsersApp";
+import { LocalUsersSettingsStore } from "../src/apps/users/settings";
+import { fakeConnection as usersConnection, withSession as usersSession, roleRow as usersRole, grantRow as usersGrant, groupRow as usersGroup } from "../test/users/harness";
 import { StorageScene } from "./storageScenes";
 import { emailScenes, EMAIL_CLICKS } from "./emailScenes";
 import { nexusApprovalScenes, NEXUS_APPROVAL_CLICKS } from "./nexusApprovalScenes";
@@ -694,6 +697,9 @@ const VIEWS: Record<
   }
 > = {
   ...MATERIALIZER_VIEWS,
+  "users-groups": usersWizardView("groups"),
+  "users-roles": usersWizardView("roles"),
+  "users-invite": usersWizardView("people"),
   "storage-phone": { render: () => <StorageScene state="warning" phone /> },
   "storage-warning": { render: () => <StorageScene state="warning" /> },
   "storage-healthy": { render: () => <StorageScene state="healthy" /> },
@@ -1984,4 +1990,23 @@ function FilesQa({section}: {section: string}) {
  const {actions} = useOs();
  useEffect(() => { actions.setThemePack(resolveThemePack(new URLSearchParams(window.location.search).get("theme") ?? "graphite").id); }, [actions]);
  return <div className="os-window-content" style={{ height: "100dvh" }}><FilesApp sectionId={section} navigate={()=>{}} askContext={()=>{}} store={new LocalFilesSettingsStore(null)} /></div>;
+}
+
+
+function usersWizardView(section: string) {
+  return {
+    role: "owner",
+    connect: () => usersConnection({
+      activeRoles: [usersRole({ slug: "owner", name: "Owner", rank: 400 }), usersRole({ slug: "developer", name: "Developer", rank: 300 }), usersRole({ slug: "admin", name: "Admin", rank: 200 }), usersRole({ slug: "user", name: "Member", rank: 100, aliases: ["writer"] })],
+      activeCapabilities: ["principal", "role", "group", "admission"].flatMap(resource => ["read", "create", "update", "delete"].map(verb => usersGrant("owner", verb, resource))),
+      clientAccountsAll: [accountRow({ id: "acme", name: "Acme", domain: "acme.com", domainStatus: "verified", joinOnDomain: true })],
+      groupsAll: [usersGroup({ id: "acme-group", name: "Acme", kind: "account", accountId: "acme" })],
+    }),
+    wrap: (el: JSX.Element, role: string) => withSession(usersSession(el, { role }), { role }),
+    render: () => <UsersWizardQa section={section} />,
+  };
+}
+function UsersWizardQa({ section }: { section: string }) {
+  const [store] = useState(() => new LocalUsersSettingsStore({ getItem: () => null, setItem: () => {} }));
+  return <WindowBody fallback="Users"><UsersApp sectionId={section} navigate={() => {}} askContext={() => {}} store={store} /></WindowBody>;
 }
