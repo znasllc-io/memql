@@ -15382,7 +15382,9 @@ button.os-cluster-mesh-peer:focus-visible {
 
 /* Real registry app switcher: open/focus keeps each app's existing window. */
 .os-window-bar .os-window-grip { flex: 0 0 auto; padding-inline: 8px; }
-.os-window-app-selector { color: var(--os-ink); background: transparent; border: 0; font: inherit; font-weight: 600; max-width: 150px; min-width: 64px; }
+.os-window-app-selector { display: inline-flex; flex: 0 1 auto; max-width: 150px; min-width: 64px; }
+.os-window-app-selector .os-select-wrap { flex: 1; min-width: 0; }
+.os-window-app-selector .os-select { min-width: 0; background: transparent; border: 0; font: inherit; font-weight: 600; }
 .os-window-drag-space { flex: 1; align-self: stretch; min-width: 8px; cursor: grab; }
 .fleet-app [hidden] { display: none !important; }
 

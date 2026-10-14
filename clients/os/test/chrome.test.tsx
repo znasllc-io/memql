@@ -10,6 +10,7 @@ import { saveEditorPreference } from "../src/items/editorPreference";
 import { artifactHandoffUrl, openInVsCode } from "../src/items/vscode";
 import { appTileName } from "./appTile";
 import { installSeededAccess } from "./seededAccess";
+import { chooseOption } from "./selectControl";
 
 // The shell behavior suite (spec K): rendered against the REAL registry,
 // an in-memory store per test, and the stub transports PR A ships.
@@ -385,9 +386,9 @@ it("switches through registry apps without remounting the prior window or losing
   const original = document.querySelector("[data-os-window='fleet']");
   fireEvent.click(screen.getByRole("button", { name: "Maximize Fleet on its own desktop" }));
   expect(document.querySelector("[data-os-window='fleet']")).toBe(original);
-  fireEvent.change(screen.getByRole("combobox", { name: "Switch app from Fleet" }), { target: { value: "files" } });
+  chooseOption(screen.getByRole("combobox", { name: "Switch app from Fleet" }), "Files");
   expect(original?.hasAttribute("hidden")).toBe(true);
-  fireEvent.change(screen.getByRole("combobox", { name: "Switch app from Files" }), { target: { value: "fleet" } });
+  chooseOption(screen.getByRole("combobox", { name: "Switch app from Files" }), "Fleet");
   expect(document.querySelector("[data-os-window='fleet']")).toBe(original);
   expect(original?.hasAttribute("hidden")).toBe(false);
   expect(original?.hasAttribute("data-fullscreen")).toBe(true);

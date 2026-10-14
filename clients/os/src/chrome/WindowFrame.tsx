@@ -8,7 +8,7 @@ import { X, Search, ListFilter, Maximize2, Minimize2, Minus, Settings2 } from "l
 
 import { useDrivingCue } from "../ask/useDrivingCue";
 import { useAsk } from "../ask/AskProvider";
-import { ProvenanceDot } from "../kit";
+import { ProvenanceDot, Select } from "../kit";
 import { SurfaceRefused } from "../kit/RankStates";
 import {
   canConfigure,
@@ -171,13 +171,22 @@ export function WindowFrame({
           <Icon size={14} aria-hidden />
 
         </button>
-        <select className="os-window-app-selector" aria-label={`Switch app from ${manifest.name}`} value={manifest.id} onChange={event => {
-          const existing = Object.values(state.shell.windows).find(window => window.appId === event.target.value);
-          if (existing) actions.focusWindow(existing.id);
-          else actions.openApp(event.target.value);
-        }}>
-          {appsFor(registry).map(app => <option key={app.id} value={app.id}>{app.name}</option>)}
-        </select>
+        <span className="os-window-app-selector">
+          {!hidden ? (
+            <Select
+              id={`app-switcher-${win.id}`}
+              label={`Switch app from ${manifest.name}`}
+              value={manifest.id}
+              onChange={appId => {
+                const existing = Object.values(state.shell.windows).find(window => window.appId === appId);
+                if (existing) actions.focusWindow(existing.id);
+                else actions.openApp(appId);
+              }}
+            >
+              {appsFor(registry).map(app => <option key={app.id} value={app.id}>{app.name}</option>)}
+            </Select>
+          ) : null}
+        </span>
         <div className="os-window-drag-space" {...listeners} {...attributes} aria-label={`Drag ${manifest.name}`} />
         <div className="os-window-controls">
           <div className="os-window-control-group">
