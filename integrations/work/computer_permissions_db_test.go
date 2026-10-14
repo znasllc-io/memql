@@ -8,19 +8,38 @@ import (
 	"testing"
 	"time"
 
-	"github.com/uptrace/bun"
 	"github.com/znasllc-io/memql/component/memql"
 	workstate "github.com/znasllc-io/memql/component/work"
 	permission "github.com/znasllc-io/memql/core/computerpermission"
 )
 
-func TestComputerPermissionDBTwoReplicasConsumeOnceAndRevokeAlways(t *testing.T) {
-	a := openActsDB(t)
+// Each case gets fresh authority state and owners over two independently booted
+// engines. Reuse only immutable DSL and replica-local caches, not an Integration
+// or a write-gate pool. This keeps every cross-replica scenario in the 180s lane.
+func TestComputerPermissionDB(t *testing.T) {
+	first, second := openActsDB(t), openActsDB(t)
+	cases := []struct {
+		name string
+		run  func(*testing.T, actsDB, actsDB)
+	}{
+		{"TwoReplicasConsumeOnceAndRevokeAlways", testComputerPermissionDBTwoReplicasConsumeOnceAndRevokeAlways},
+		{"SelectedMachinesKeepSeparateReceipts", testComputerPermissionDBSelectedMachinesKeepSeparateReceipts},
+		{"CancelledCallerRetainsClaimAndDecisionGate", testComputerPermissionDBCancelledCallerRetainsClaimAndDecisionGate},
+		{"ApprovalContinuesWithoutBlanketRerun", testComputerPermissionDBApprovalContinuesWithoutBlanketRerun},
+		{"DefaultTimeoutKeepsOneDurableClaim", testComputerPermissionDBDefaultTimeoutKeepsOneDurableClaim},
+		{"RequestAndRecovery", testComputerPermissionDBRecovery},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			a, b := computerPermissionCase(t, first, second)
+			tc.run(t, a, b)
+		})
+	}
+}
+
+func testComputerPermissionDBTwoReplicasConsumeOnceAndRevokeAlways(t *testing.T, a, peer actsDB) {
 	runID := a.openRun(t, nil)
-	peerDB := workHeadsPeer(t, a.db)
-	peerEngine := dispatchDBEngine(t, peerDB)
-	b := New(peerEngine, testLogger(), func() *bun.DB { return peerDB })
-	b.SetGateDB(testGates(t))
+	b := peer.i
 	person := actorCtx(a.owner)
 	row, req := computerPermissionFixture()
 	req.OwnerID = a.owner
@@ -98,16 +117,11 @@ func TestComputerPermissionDBTwoReplicasConsumeOnceAndRevokeAlways(t *testing.T)
 	if _, err := b.Claim(cancelled, always, req, "worker", "machine"); err == nil {
 		t.Fatal("cancelled request claimed")
 	}
-	t.Run("request and recovery", func(t *testing.T) {
-		testComputerPermissionDBRecovery(t, a, actsDB{i: b, eng: peerEngine, db: peerDB, owner: a.owner})
-	})
 }
 
-func TestComputerPermissionDBSelectedMachinesKeepSeparateReceipts(t *testing.T) {
-	a := openActsDB(t)
+func testComputerPermissionDBSelectedMachinesKeepSeparateReceipts(t *testing.T, a, peer actsDB) {
 	runID := a.openRun(t, nil)
-	peerDB := workHeadsPeer(t, a.db)
-	b := New(dispatchDBEngine(t, peerDB), testLogger(), func() *bun.DB { return peerDB })
+	b := peer.i
 	person := actorCtx(a.owner)
 	_, req := computerPermissionFixture()
 	req.OwnerID, req.RunID = a.owner, runID
@@ -154,10 +168,10 @@ func (e *permissionCommitEngine) Execute(ctx context.Context, q string) (*memql.
 	}
 	return e.Engine.Execute(ctx, q)
 }
-func TestComputerPermissionDBCancelledCallerRetainsClaimAndDecisionGate(t *testing.T) {
+func testComputerPermissionDBCancelledCallerRetainsClaimAndDecisionGate(t *testing.T, first, second actsDB) {
 	for _, mutation := range []string{"useWorkComputerPermission", "decideWorkApproval"} {
 		t.Run(mutation, func(t *testing.T) {
-			a := openActsDB(t)
+			a, peer := computerPermissionCase(t, first, second)
 			run := a.openRun(t, nil)
 			row, req := computerPermissionFixture()
 			req.OwnerID = a.owner
@@ -168,9 +182,7 @@ func TestComputerPermissionDBCancelledCallerRetainsClaimAndDecisionGate(t *testi
 			if mutation == "useWorkComputerPermission" {
 				a.write(t, "decideWorkApproval", map[string]any{"approvalId": id, "decision": "approved", "decidedBy": a.owner, "decidedAt": rfc(time.Now()), "answer": map[string]any{"permissionMode": "once"}})
 			}
-			peerDB := workHeadsPeer(t, a.db)
-			b := New(dispatchDBEngine(t, peerDB), testLogger())
-			b.SetGateDB(testGates(t))
+			b := peer.i
 			person := actorCtx(a.owner)
 			ctx, cancel := context.WithCancel(person)
 			defer cancel()
@@ -215,8 +227,7 @@ func TestComputerPermissionDBCancelledCallerRetainsClaimAndDecisionGate(t *testi
 
 // A typed permission approves one tool request. It is not the generic failed
 // step Retry action, whose rerun explicitly permits repeating side effects.
-func TestComputerPermissionDBApprovalContinuesWithoutBlanketRerun(t *testing.T) {
-	a := openActsDB(t)
+func testComputerPermissionDBApprovalContinuesWithoutBlanketRerun(t *testing.T, a, peer actsDB) {
 	runID := a.openRun(t, map[string]any{"head": map[string]any{"done": map[string]any{"runId": "", "version": 1}}})
 	a.writeVersion(t, runID, runID, "done", 0, 1, nil, "saved", nil)
 	a.writeVersion(t, runID, runID, "section", 1, 1, nil, "", map[string]any{"status": "waiting"})
@@ -225,10 +236,7 @@ func TestComputerPermissionDBApprovalContinuesWithoutBlanketRerun(t *testing.T) 
 	approval := newRowId(approvalConcept)
 	a.write(t, "createWorkApproval", map[string]any{"approvalId": approval, "runId": runID, "stepKey": "section", "kind": "scopeElevation", "subject": subject, "artifactHash": workstate.ArtifactHash(subject), "requestedAt": rfc(time.Now()), "expiresAt": rfc(time.Now().Add(time.Hour))})
 	a.write(t, "updateWorkRun", map[string]any{"runId": runID, "stepOrder": []string{"done", "section"}, "spent": map[string]any{"modelCalls": 3}, "status": "waiting", "waitingOn": map[string]any{"kind": "approval", "subject": approval, "since": rfc(time.Now().Add(-time.Second))}})
-	peerDB := workHeadsPeer(t, a.db)
-	b := New(dispatchDBEngine(t, peerDB), testLogger(), func() *bun.DB { return peerDB })
-	b.SetGateDB(testGates(t))
-	b.admitRow = memql.AdmitSourceRow
+	b := peer.i
 	if _, err := b.handleDecideApproval(actorCtx(a.owner), map[string]any{"approvalId": approval, "decision": "approved", "answer": map[string]any{"permissionMode": "once"}}, 0); err != nil {
 		t.Fatal(err)
 	}
@@ -245,14 +253,12 @@ func TestComputerPermissionDBApprovalContinuesWithoutBlanketRerun(t *testing.T) 
 	}
 }
 
-func TestComputerPermissionDBDefaultTimeoutKeepsOneDurableClaim(t *testing.T) {
+func testComputerPermissionDBDefaultTimeoutKeepsOneDurableClaim(t *testing.T, first, second actsDB) {
 	for _, explicitApproval := range []bool{false, true} {
 		t.Run(fmt.Sprintf("explicit-approval-%v", explicitApproval), func(t *testing.T) {
-			a := openActsDB(t)
+			a, peer := computerPermissionCase(t, first, second)
 			runID := a.openRun(t, nil)
-			peerDB := workHeadsPeer(t, a.db)
-			b := New(dispatchDBEngine(t, peerDB), testLogger(), func() *bun.DB { return peerDB })
-			b.SetGateDB(testGates(t))
+			b := peer.i
 			person := actorCtx(a.owner)
 			approved := map[string]any{"cmd": "pwd", "cwd": "/fixture/repository"}
 			requested := map[string]any{"cmd": "pwd", "cwd": "/fixture/repository"}
