@@ -52,35 +52,84 @@ func (p *cancelChildRegistry) Execute(ctx context.Context, step *automations.Ste
 
 type observedLifecycleGate struct {
 	*work.Integration
+}
+
+type childStopObservationKey struct{}
+
+type childStopObservation struct {
 	entered chan struct{}
 	once    sync.Once
 }
 
 func (p *observedLifecycleGate) HoldWorkRunLifecycle(ctx context.Context) (*memql.GateHold, error) {
-	p.once.Do(func() {
-		if p.entered != nil {
-			close(p.entered)
-		}
-	})
+	if observation, ok := ctx.Value(childStopObservationKey{}).(*childStopObservation); ok {
+		observation.once.Do(func() { close(observation.entered) })
+	}
 	return p.Integration.HoldWorkRunLifecycle(ctx)
+}
+
+type childStopFixture struct {
+	writer, reader *memql.MemQLEngine
+	db             *bun.DB
+	peer           *work.Integration
+}
+
+func newChildStopFixture(t *testing.T, withGate bool) *childStopFixture {
+	t.Helper()
+	writer, db := workTemplateDBEngineAndDB(t)
+	reader := workTemplateDBEngine(t)
+	var gates *sql.DB
+	if withGate {
+		var err error
+		gates, err = database.NewGatePool(dbtest.DSN(), 0)
+		if err != nil {
+			t.Fatal(err)
+		}
+		t.Cleanup(func() { _ = gates.Close() })
+	}
+	fixture := &childStopFixture{writer: writer, reader: reader, db: db}
+	for _, engine := range []*memql.MemQLEngine{writer, reader} {
+		integration := work.New(engine, engine.Logger, func() *bun.DB { return db })
+		if withGate {
+			integration.SetGateDB(func() *sql.DB { return gates })
+		}
+		if engine == writer {
+			if err := engine.RegisterIntegration(&observedLifecycleGate{Integration: integration}); err != nil {
+				t.Fatal(err)
+			}
+		} else {
+			fixture.peer = integration
+			if err := engine.RegisterIntegration(integration); err != nil {
+				t.Fatal(err)
+			}
+		}
+	}
+	return fixture
 }
 
 // The public decision lands on a peer with no executor state. Both the remote
 // string error and a cancelled caller must close the native child and its root,
 // without retrying effects or following the authored continue branch.
 func TestWorkDBParentStopFinalizesSynchronousChild(t *testing.T) {
+	// Share only the compiled engines and fixed integration wiring under this
+	// parent. The no-Stop controls retain a separate pair with no gate configured;
+	// each case still creates its own actor, runs, executor and context observation.
+	stopped := newChildStopFixture(t, true)
+	var ordinary *childStopFixture
 	for _, mode := range []string{"remote error", "cancelled context", "rerun parent", "new root generation", "new child generation", "independent child goal", "foreign child", "changed parent", "child rerun", "foreign ancestor", "changed ancestor", "no Stop provider", "no Stop deadline", "no Stop context cancelled"} {
-		t.Run(mode, func(t *testing.T) { exerciseChildStop(t, mode) })
+		fixture := stopped
+		if strings.HasPrefix(mode, "no Stop") {
+			if ordinary == nil {
+				ordinary = newChildStopFixture(t, false)
+			}
+			fixture = ordinary
+		}
+		t.Run(mode, func(t *testing.T) { exerciseChildStop(t, mode, fixture) })
 	}
 }
-func exerciseChildStop(t *testing.T, mode string) {
-	writer, db := workTemplateDBEngineAndDB(t)
-	reader := workTemplateDBEngine(t)
-	gates, err := database.NewGatePool(dbtest.DSN(), 0)
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer gates.Close()
+func exerciseChildStop(t *testing.T, mode string, fixture *childStopFixture) {
+	writer, reader, db, peer := fixture.writer, fixture.reader, fixture.db, fixture.peer
+	var err error
 	key := id.NewShortId()
 	owner, rootID, goalID := key+"owner", key+"root", key+"goal"
 	person := auth.ContextWithUserActor(context.Background(), owner)
@@ -89,23 +138,7 @@ func exerciseChildStop(t *testing.T, mode string) {
 	defer cancel()
 	noStop := strings.HasPrefix(mode, "no Stop")
 	waitingGate := make(chan struct{})
-	var peer *work.Integration
-	for _, engine := range []*memql.MemQLEngine{writer, reader} {
-		integration := work.New(engine, engine.Logger, func() *bun.DB { return db })
-		if !noStop {
-			integration.SetGateDB(func() *sql.DB { return gates })
-		}
-		if engine == writer {
-			if err := engine.RegisterIntegration(&observedLifecycleGate{Integration: integration, entered: waitingGate}); err != nil {
-				t.Fatal(err)
-			}
-		} else {
-			peer = integration
-			if err := engine.RegisterIntegration(integration); err != nil {
-				t.Fatal(err)
-			}
-		}
-	}
+	ctx = context.WithValue(ctx, childStopObservationKey{}, &childStopObservation{entered: waitingGate})
 	probe := &cancelChildRegistry{FunctionExecutor: &steps.FunctionExecutor{}, entered: make(chan string, 1), release: make(chan struct{}), effects: map[string]int{}, failure: errors.New("remote call: the person asked this work to stop")}
 	loader := automations.NewLoader(automations.LoaderOptions{Functions: writer.Functions()})
 	tpl := &workTemplate{members: map[string]*automations.Automation{}}
