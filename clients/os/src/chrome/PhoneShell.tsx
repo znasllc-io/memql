@@ -6,6 +6,7 @@ import { useAsk } from "../ask/AskProvider";
 import { ProvenanceDot } from "../kit";
 import { PageNavigationProvider } from "../kit/pageNavigation";
 import { TrailRow } from "../kit/TrailRow";
+import { PageContent } from "../kit/PageContent";
 import {
   canConfigure,
   gateFor,
@@ -92,7 +93,7 @@ export function PhoneShell({ onSignOut }: { onSignOut: () => void }) {
       </header>
       {!(current?.id === "cluster" && activeSection?.id === "readiness") ? <StorageWarning inline onReview={apps.some((app) => app.id === "cluster") ? () => { setStorageIntent({ id: "storage-warning", payload: { storageWarning: true } }); setCurrentAppId("cluster"); setSectionId("readiness"); } : undefined} /> : null}
       {current ? (
-        <main className="os-phone-app" ref={pageRoot}>
+        <PageContent as="main" className="os-phone-app" ref={pageRoot}>
           <PageNavigationProvider key={current.id} root={pageRoot} trail={[]}>
             {sections.length > 1 ? (
               <nav className="os-phone-sections" aria-label={`${current.name} sections`}>
@@ -143,7 +144,7 @@ export function PhoneShell({ onSignOut }: { onSignOut: () => void }) {
               </WindowErrorBoundary>
             )}
           </PageNavigationProvider>
-        </main>
+        </PageContent>
       ) : (
         <main className="os-phone-home">
           {apps.map((app) => {

@@ -34,11 +34,11 @@ export function FleetOverview({ onOpenMachine }: { onOpenMachine: (id: string) =
     { label: "Reported apps", figure: count(machines.reduce((sum, m) => sum + m.apps.length, 0)) },
   ]}>
     {behind || snapshot?.error ? <Notice tone="warn" sentence="Machine updates are interrupted." next="Showing the last reported connections. Reconnecting automatically." /> : null}
-    {!machines.length && !fresh && !snapshot?.error ? <ContentSkeleton kind="map" label="Loading fleet connections" /> : !machines.length ? <EmptyState icon={Monitor} title={fresh ? "No machines connected" : "Machines unavailable"}>{fresh ? "Add a machine from Machines to see its connection here." : "Reconnect to read this cluster’s machine inventory."}</EmptyState> : <FleetMap machines={machines} now={now} cluster={config.domain || "This cluster"} fresh={fresh} onOpenMachine={onOpenMachine} />}
     {fresh ? <OverviewBreakdown title="Machine availability" segments={[
       { label: "Online", count: online.length, tone: "good" },
       { label: "Offline", count: machines.length - online.length, tone: "quiet" },
     ]} /> : null}
+    {!machines.length && !fresh && !snapshot?.error ? <ContentSkeleton kind="map" label="Loading fleet connections" /> : !machines.length ? <EmptyState icon={Monitor} title={fresh ? "No machines connected" : "Machines unavailable"}>{fresh ? "Add a machine from Machines to see its connection here." : "Reconnect to read this cluster’s machine inventory."}</EmptyState> : <FleetMap machines={machines} now={now} cluster={config.domain || "This cluster"} fresh={fresh} onOpenMachine={onOpenMachine} />}
   </Overview>;
 }
 
@@ -47,10 +47,7 @@ function FleetMap({ machines, now, cluster, fresh, onOpenMachine }: { machines: 
   const height = Math.max(200, ordered.length * 100 + 40);
   const pan = usePanZoom({ width: 620, height, ready: true, wheelZoom: false, resetToFit: true });
   return <div className="os-deploy-map" data-behind={!fresh || undefined}>
-    <MapHeading title="Connection map">
-      <p>Machines visible to your account in this cluster. A solid line means an active connection with a recent heartbeat. A dashed line means the machine is registered but offline.</p>
-      <p>Activity is the latest reported count of calls on online machines. Other clusters are not included in this cluster’s inventory.</p>
-    </MapHeading>
+    <MapHeading title="Connection map" />
     <div className="os-map-frame" ref={pan.frameRef}>
       <svg className="os-deploy-map-canvas" role="application" aria-label="Fleet connection map" tabIndex={0} {...pan.handlers}>
         <g data-os-map-view transform={transformOf(pan.view)}>

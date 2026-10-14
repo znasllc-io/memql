@@ -1,7 +1,8 @@
 // Window placement is computed, never freehand (spec D2). Given the desk's
 // visible windows and the viewport, return a rect per window: solo windows
-// center at a generous clamp, two windows split the desk, fullscreen covers
-// the desk area above the dock. The chrome animates BETWEEN these rects
+// center at a generous clamp, two windows split the desk, maximized covers
+// the area above the dock, and fullscreen covers the entire viewport.
+// The chrome animates BETWEEN these rects
 // (FLIP); tests assert the rects.
 
 import type { OsWindow } from "./windows";
@@ -48,9 +49,8 @@ export function deskArea(viewport: Viewport, t: PlacementTokens = DEFAULT_PLACEM
 }
 
 /**
- * Rects for a desk's windows. Minimized windows get no rect. A fullscreen
- * window covers the desk area and sits above its sibling (z handled by the
- * chrome; the sibling keeps its split rect so leaving fullscreen restores).
+ * Rects for a desk's windows. Minimized windows get no rect. Expanded windows
+ * occupy a dedicated desk; only normal windows participate in the split.
  */
 export function placeWindows(
   windows: OsWindow[],
@@ -61,7 +61,7 @@ export function placeWindows(
   const visible = windows.filter((w) => w.mode !== "minimized");
   const rects: Record<WindowId, Rect> = {};
 
-  const split = visible.filter((w) => w.mode !== "fullscreen");
+  const split = visible.filter((w) => w.mode === "normal");
   const [first, second] = split;
   if (first && !second) {
     const w = Math.min(area.w, t.maxSoloWidth);
@@ -73,7 +73,8 @@ export function placeWindows(
   }
 
   for (const win of visible) {
-    if (win.mode === "fullscreen") rects[win.id] = { x: 0, y: 0, w: viewport.w, h: Math.max(0, viewport.h - t.dockReserve) };
+    if (win.mode === "maximized") rects[win.id] = { x: 0, y: 0, w: viewport.w, h: Math.max(0, viewport.h - t.dockReserve) };
+    if (win.mode === "fullscreen") rects[win.id] = { x: 0, y: 0, w: viewport.w, h: viewport.h };
   }
   return rects;
 }

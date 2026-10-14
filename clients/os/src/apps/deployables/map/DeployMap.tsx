@@ -54,7 +54,6 @@ export function DeployMap({
   onSelect: (node: MapNode) => void;
 }) {
   const model: MapLayout = useMemo(() => (sites.length === 0 ? EMPTY_LAYOUT : layout(sites, checks)), [sites, checks]);
-  const hasChecks = model.nodes.some((node) => node.kind === "checks");
 
   // A DEGRADED FEED MUST NOT READ AS A HEALTHY FLEET. A map is a picture of
   // now; when the subscription is behind, the picture is of some earlier now,
@@ -111,10 +110,7 @@ export function DeployMap({
 
   return (
     <div className="os-deploy-map" data-behind={behind || undefined}>
-      <MapHeading title="Deployment map">
-        <p>Choose a deployable to open its details. Shared sources highlight the deployables connected to them.</p>
-        {hasChecks ? <p>Checks reads the newest run on a source's default branch. Choose it to open that source.</p> : null}
-      </MapHeading>
+      <MapHeading title="Deployment map" />
       <div className="os-map-frame" ref={frameRef}>
         <svg
           className="os-deploy-map-canvas"

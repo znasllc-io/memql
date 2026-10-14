@@ -149,9 +149,10 @@ describe("overview selection", () => {
     expect(screen.queryByText(/Pick the one to open/)).toBeNull();
   });
 
-  it("offers map help beside its heading instead of standing instructions", async () => {
+  it("leaves map help to the shared page control", async () => {
     mount(fakeConnection({ sites: [SHOP] }));
-    await screen.findByRole("button", { name: "About Deployment map" });
+    await screen.findByRole("heading", { name: "Deployment map" });
+    expect(screen.queryByRole("button", { name: "About Deployment map" })).toBeNull();
     expect(document.querySelector(".os-deploy-map > .os-caption")).toBeNull();
   });
 });
@@ -609,9 +610,6 @@ describe("a source's checks on the map", () => {
     expect(node.querySelector(".os-deploy-node-label")?.textContent).toBe("Checks");
     expect(node.querySelector(".os-deploy-node-sub")?.textContent).toBe("Failed on main, at tests");
     expect(node.querySelector(".os-deploy-node-dot")?.getAttribute("data-status")).toBe("failed");
-    // The help says what it is for, inside the heading's information control
-    // rather than standing on the map.
-    expect(document.querySelector(".os-map-heading .os-info-dialog")?.textContent ?? "").toContain("Choose it to open that source");
   });
 
   it("runs a checks edge along its own row, then into the node: never diagonally through the artifact column", async () => {

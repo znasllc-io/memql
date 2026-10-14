@@ -28,9 +28,10 @@ and wallpaper values only (see `src/themes/`), so nothing here is themeable.
    Pause hidden/offline views, avoid overlapping requests, and cancel stale reads.
    Explicit probes and writes stay deliberate actions; never repeat them on a timer.
    Creation actions use the shared icon-only `AddButton` (plus), with an
-   accessible label, tooltip and visible border in light and dark. Keep that
-   border in the shared component’s style, including creation links; never
-   restyle it separately per app. Do not replace it with a text button such as
+   accessible label and tooltip. Keep it borderless in light and dark, with
+   theme-aware icon color, hover feedback and a visible keyboard focus ring.
+   Use the shared component’s style for creation links too; never add per-app
+   borders. Do not replace it with a text button such as
    "Connect GitHub account". A settings page is titled **Settings**; subjects
    such as **GitHub accounts** are sections beneath that title, with their Add
    control on the section heading (`kit` `Subhead` `actions`). Settings lists
@@ -113,6 +114,11 @@ and wallpaper values only (see `src/themes/`), so nothing here is themeable.
    maximised one. The measure belongs to the THING (a sentence at ~80ch, a
    field at ~34rem), never to the page: capping the page to keep a text box
    from stretching is how the margins got painted empty.
+   `kit/PageContent` owns the full-width page bounds and responsive horizontal
+   gutter for window contents and retained pages. Use it once around the app
+   or each retained page, rather than adding width fixes to each section.
+   Page roots must not add centered maximum widths; constrain individual prose,
+   fields or diagrams inside them when their content needs a readable measure.
 
 10. **In-surface state is never a checkbox.** "Show archived" as a standing
     checkbox is the legacy tell this language exists to remove: archived

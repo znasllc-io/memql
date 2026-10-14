@@ -1,7 +1,7 @@
 import { createRoot } from "react-dom/client";
 import { useState } from "react";
-import { X } from "lucide-react";
-import { Head, Panel, Subhead } from "../src/kit";
+import { Plus, X } from "lucide-react";
+import { Button, Head, Panel, Subhead } from "../src/kit";
 import { AddButton, AddLink } from "../src/kit/AddButton";
 import { IconButton } from "../src/kit/IconButton";
 import { EntryList } from "../src/kit/EntryList";
@@ -11,7 +11,7 @@ import "../src/styles/index.css";
 const params = new URLSearchParams(location.search);
 const mode = params.get("mode") === "light" ? "light" : "dark";
 document.documentElement.dataset.theme = mode;
-document.documentElement.dataset.osTheme = "graphite";
+document.documentElement.dataset.osTheme = params.get("theme") ?? "graphite";
 applyPackStyles([]);
 
 function Preview() {
@@ -22,6 +22,7 @@ function Preview() {
     <Panel><Subhead actions={<AddLink label="Create a repository" href="#repository" />}>Repositories</Subhead><p className="os-caption">A link that continues in another page.</p></Panel>
     <Panel><EntryList entries={entries} label="Email domains" addLabel="Add domain" placeholder="example.com" draft={draft} error="" onDraft={setDraft} onAdd={() => { if (draft.trim()) { setEntries([...entries, draft.trim()]); setDraft(""); } }} onRemove={value => setEntries(entries.filter(entry => entry !== value))} /></Panel>
     <Panel><Subhead>Compact actions</Subhead><div style={{ display: "flex", alignItems: "center", gap: 12 }}><AddButton label="New conversation" style={{ minWidth: 28, minHeight: 28 }} onClick={() => {}} /><AddButton label="Insert step 1" style={{ minWidth: 28, minHeight: 28 }} onClick={() => {}} /><IconButton label="Close"><X size={16} aria-hidden /></IconButton></div></Panel>
+    <Panel><Subhead>Form actions</Subhead><Button className="os-add-button" onClick={() => {}}><Plus size={12} aria-hidden /> Add a setting</Button></Panel>
   </main>;
 }
 createRoot(document.getElementById("root")!).render(<Preview />);
