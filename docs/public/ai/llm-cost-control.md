@@ -289,6 +289,29 @@ an active model call. It parks the saved run on a budget approval rather than
 retrying an expired allowance as a network timeout. Ordinary provider timeouts
 retain their separate recovery behavior.
 
+Owned agent turns reconsider before exhausting their allowance. The installed
+`agentProgressRecovery` policy requests a review at 75% of a model-call limit
+of at least six, or when three calls remain. It also requests a review after
+three capability-discovery rounds without a new task operation, or three
+occurrences of the same tool evidence in a bounded recent window. Rereading
+archived context does not erase a discovery loop; new research results count
+as progress, including alongside discovery in a parallel batch.
+
+The review uses the next ordinary reasoning call. It asks the model to use the
+evidence, consider an authorized alternative, finish a verified result, or ask
+a specific question. Two further stalled rounds cause a native feedback pause;
+one is enough if only one model call remains. Nearing the cap alone does not
+pause productive work. Context checkpoints retain a DSL-declared reserve of
+three calls by archiving exact sources without another model summary when
+necessary. The model-call guard still enforces the hard limit, including
+context summaries and resumed work.
+
+The recovery record is bounded and survives compaction and another replica.
+New accepted human guidance permits reconsideration; old answers replayed from
+history and a raised limit alone do not erase stalled progress. Guidance grants
+neither access nor additional model calls. These initial thresholds are policy
+choices to evaluate against observed tasks, not universal model guarantees.
+
 Nexus budget approvals accept a new **total** limit. The decision raises only
 that ceiling and preserves spent counters and completed steps. An explicit
 approval also supersedes the smaller workload estimate for that ceiling;
@@ -297,6 +320,21 @@ intersects them with the current declared limits, so an older approval cannot
 undo a later tighter limit. Waiting for human input does not consume active
 work time. Continuing a long goal uses durable checkpoints and renewed explicit
 allowances, never an unbounded model call or a reset of prior usage.
+
+A budget discussion in Ask is advisory until the person chooses **Save
+guidance**. For a saved native checkpoint, that action stores the human's
+correction on the pending request without deciding it, making another model
+call, changing limits or resetting usage. The person can revise the saved text
+while the request remains pending. A later explicit **Raise limit** decision
+carries that guidance into the exact suspended execution; earlier accepted
+guidance and completed tool results remain in its saved progress. Other budget
+gates without a native checkpoint keep their own review process.
+
+If the decision is saved but releasing the waiting run fails, Nexus offers
+**Resume work** for that approved checkpoint. Retrying uses the recorded total
+and saved guidance; it does not raise the limit again or repeat the decision.
+The latest checkpoint, owner and execution request must still match. A changed
+or cancelled execution is refused instead of being restarted from an old receipt.
 
 An agent tool loop saves its exact completed exchanges before publishing a budget
 question. Synchronous parent and child invocations then wait on that same question;

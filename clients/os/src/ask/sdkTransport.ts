@@ -96,7 +96,7 @@ export class SdkAskTransport implements AskTransport {
     const row = (await new QueryClient(dispatcher).decideApproval({ approvalId, decision: "answered", answer: { feedback } })).rows()[0];
     if (!row) throw new Error("The cluster did not confirm whether guidance was recorded. Reopen this approval to check its state.");
     const receipt = flatten(row);
-    return { runResumed: receipt.runResumed === true, ...(typeof receipt.resumeError === "string" ? { resumeError: receipt.resumeError } : {}) };
+    return { runResumed: receipt.runResumed === true, ...(typeof receipt.resumeError === "string" ? { resumeError: receipt.resumeError } : {}), ...(typeof receipt.guidanceSaved === "boolean" ? { guidanceSaved: receipt.guidanceSaved } : {}), ...(typeof receipt.savedGuidance === "string" ? { savedGuidance: receipt.savedGuidance } : {}) };
   };
 
   startVoice = (options: AskVoiceOptions, signal: AbortSignal) => {

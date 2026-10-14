@@ -47,6 +47,39 @@ QueryClient.prototype.accountDeletionSweep = function (this: QueryClient, args: 
   return this.executeNamed("accountDeletionSweep", buildAccountDeletionSweep(args), opts);
 };
 
+/** Reconsider before spending the last calls, or after repeated discovery/evidence. A review uses the next ordinary model call. Only continued stalling asks the person; approaching a cap alone does not interrupt productive work. */
+export interface AgentProgressRecoveryArgs {
+  limit: number;
+  used: number;
+  discoveryRounds: number;
+  repeatedRounds: number;
+  reviewActive: boolean;
+  stalledAfterReview: number;
+  reviewedLimit: number;
+}
+
+export function buildAgentProgressRecovery(args: AgentProgressRecoveryArgs): string {
+  const parts: string[] = [];
+  parts.push("limit: " + renderMemQLValue(args.limit));
+  parts.push("used: " + renderMemQLValue(args.used));
+  parts.push("discoveryRounds: " + renderMemQLValue(args.discoveryRounds));
+  parts.push("repeatedRounds: " + renderMemQLValue(args.repeatedRounds));
+  parts.push("reviewActive: " + renderMemQLValue(args.reviewActive));
+  parts.push("stalledAfterReview: " + renderMemQLValue(args.stalledAfterReview));
+  parts.push("reviewedLimit: " + renderMemQLValue(args.reviewedLimit));
+  return "logic agentProgressRecovery(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    agentProgressRecovery(args: AgentProgressRecoveryArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.agentProgressRecovery = function (this: QueryClient, args: AgentProgressRecoveryArgs = {} as AgentProgressRecoveryArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("agentProgressRecovery", buildAgentProgressRecovery(args), opts);
+};
+
 /** Human wording for the bounded recovery consent card. */
 export interface AgentRecoveryExplanationArgs {
 }

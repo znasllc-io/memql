@@ -457,6 +457,14 @@ func TestPipelineLibraryDB(t *testing.T) {
 	t.Run("TestAPipelineFileIsARowTheRealLibraryReadsBack", func(t *testing.T) {
 		testAPipelineFileIsARowTheRealLibraryReadsBack(t, replicas.engines[0])
 	})
+	t.Run("TestLibraryImageAssetReconcilesStoredBytesAndProvenance", func(t *testing.T) {
+		testLibraryImageAssetReconcilesStoredBytesAndProvenance(t, replicas.engines[0], replicas.engines[1])
+	})
+	// Version storage installs the native Library integration on each replica.
+	// Run it last so the preceding storage-only cases keep their original wiring.
+	t.Run("TestLibraryRevisionFilesUseRealVersionStoreAcrossReplicas", func(t *testing.T) {
+		testLibraryRevisionFilesUseRealVersionStoreAcrossReplicas(t, replicas)
+	})
 }
 
 func testPipelineStreamDB(t *testing.T, replicas pipelineDBReplicas) {

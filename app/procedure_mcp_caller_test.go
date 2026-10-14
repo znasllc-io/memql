@@ -46,8 +46,7 @@ func (c *capturingProcedureTools) execute(ctx context.Context, _ string, _ map[s
 	return `{"content":[{"type":"text","text":"[]"}],"isError":false}`, nil
 }
 
-func TestAReplayedMCPToolIsDecidedAsItsRecordingWas(t *testing.T) {
-	engine := procedureTestEngine(t)
+func testAReplayedMCPToolIsDecidedAsItsRecordingWas(t *testing.T, engine *memql.MemQLEngine) {
 	const owner = "v1:identity:user:owner"
 	cases := []struct {
 		tool     *memql.Tool

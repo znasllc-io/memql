@@ -14,7 +14,7 @@ import (
 	"github.com/znasllc-io/memql/integrations/library"
 )
 
-func TestLibraryRevisionFilesUseRealVersionStoreAcrossReplicas(t *testing.T) {
+func testLibraryRevisionFilesUseRealVersionStoreAcrossReplicas(t *testing.T, replicas pipelineDBReplicas) {
 	if available, err := dbtest.EnsureSchema(context.Background()); err != nil {
 		t.Fatal(err)
 	} else if !available {
@@ -25,11 +25,11 @@ func TestLibraryRevisionFilesUseRealVersionStoreAcrossReplicas(t *testing.T) {
 	ctx := auth.ContextWithAccess(auth.ContextWithToken(context.Background(), &auth.TokenInfo{Subject: owner}), &auth.AccessContext{UserId: owner, Role: auth.RoleWriter})
 	stores := make([]*server.EngineLibraryStore, 0, 2)
 	for n := 0; n < 2; n++ {
-		engine, db := workTemplateDBEngineAndDB(t)
-		if err := engine.RegisterIntegration(library.NewIntegration(engine, func() *sql.DB { return db.DB })); err != nil {
+		engine, db := replicas.engines[n], replicas.databases[n]
+		if err := engine.RegisterIntegration(library.NewIntegration(engine, func() *sql.DB { return db })); err != nil {
 			t.Fatal(err)
 		}
-		stores = append(stores, server.NewEngineLibraryStore(&AttachmentEngineAdapter{Engine: engine}, func() *sql.DB { return db.DB }))
+		stores = append(stores, server.NewEngineLibraryStore(&AttachmentEngineAdapter{Engine: engine}, func() *sql.DB { return db }))
 	}
 	file := owner + "-document"
 	// The upload route's layout, which CreateFile holds every key to.

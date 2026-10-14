@@ -348,3 +348,9 @@ with **Retry continuing** using the saved answer. The history scene shows
 **View request** on persisted guidance so recovery remains reachable after reload.
 These scenes use synthetic conversation and permission receipts; they never
 approve production work, run commands, or call a model.
+
+`/ask-guidance.html?budget=1` shows a resumable budget discussion. Use
+`state=saved`, `state=pending`, or `state=error` to review saved guidance,
+an in-flight save, and a retryable save with the original draft retained.
+Saving keeps the request pending; it never raises a limit or resumes work.
+Inspect both modes and a narrow viewport, including the saved-text disclosure.

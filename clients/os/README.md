@@ -1873,6 +1873,11 @@ three came with epic memql#5414 (versions, verdicts and the reuse ratio).
   waiting work can accept it. A recorded answer that did not resume offers
   **Retry continuing**, using the exact stored guidance, including after a
   reload via **View request** on the persisted guidance message. Retrying never substitutes a newer composer draft or grants access.
+  A resumable budget request instead offers **Save guidance**. It keeps the
+  request pending and shows the saved text; **Raise limit** later applies that
+  guidance while continuing the saved work. Saving again replaces the pending
+  guidance. An uncertain save offers **Retry saving** with its original text,
+  never **Retry continuing**. Discussion alone remains advisory.
 
 - **THE JOURNAL IS NOT LIVE AND SAYS SO; THE STEPS FEED BELONGS TO THE PAGE.**
   `v1:work:goal`, `run`, `step` and `approval` broadcast; `modelCall` and

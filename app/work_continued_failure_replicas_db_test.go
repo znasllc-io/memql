@@ -98,8 +98,7 @@ func insertWorkRow(t *testing.T, db *bun.DB, rowId, concept string, at time.Time
 // journal with no failure has nothing to resume -- did not hold, because a
 // continued failure IS a failed row: B resumed from `flaky`, running it, the
 // finished `two`, and `three` beside the replica still executing the run.
-func TestWorkDB_ASecondReplicaDoesNotRestartARunPastAContinuedFailure(t *testing.T) {
-	engine, db := workTemplateDBEngineAndDB(t)
+func testWorkDBASecondReplicaDoesNotRestartARunPastAContinuedFailure(t *testing.T, engine *memql.MemQLEngine, db *bun.DB) {
 	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
 	stamp := strings.ReplaceAll(id.NewShortId(), "-", "")
 	runId := "v1:work:run:continued-" + stamp

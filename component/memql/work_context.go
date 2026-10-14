@@ -148,8 +148,24 @@ func (e *MemQLEngine) CompactWorkContext(ctx context.Context, messages []common.
 		}
 		fingerprint := workCheckpointHash(raw, task)
 		var summary string
+		// A compaction may consider several chunks. Observe the cumulative
+		// budget before each summary, so earlier summaries cannot consume the
+		// calls the selected recovery policy leaves for the work itself.
+		archiveForRecovery := false
+		if len(raw) <= sourceLimit {
+			archiveForRecovery, err = e.workContextNeedsExactArchive(ctx)
+			if err != nil {
+				return nil, err
+			}
+		}
+		if archiveForRecovery {
+			// An uncertain retry may already have produced a semantic memory
+			// for these bytes. Exact archival has its own stable identity so
+			// its empty summary cannot erase that completed, reusable result.
+			fingerprint = workContextHash("recovery-archive-v1", raw)
+		}
 		// A single enormous exchange must not overflow the summarizer itself.
-		if len(raw) > sourceLimit {
+		if len(raw) > sourceLimit || archiveForRecovery {
 			summary = "Complete historical exchange archived; retrieve its exact evidence before relying on details.\n" + workContextPreview(string(raw))
 			err = e.saveWorkContextSource(ctx, fingerprint, string(raw), "")
 		} else {

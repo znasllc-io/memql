@@ -69,10 +69,39 @@ func templateMutation(t *testing.T, e *memql.MemQLEngine, ctx context.Context, n
 	}
 }
 
+// Native work contracts share only the compiled DSL and two independent engine
+// caches. Each subtest keeps its own owner, durable rows, executors and cleanup;
+// none installs a shared planner registry or reuses another case's checkpoint.
+func TestWorkNativeDB(t *testing.T) {
+	writer, db := workTemplateDBEngineAndDB(t)
+	reader := workTemplateDBEngine(t)
+	if writer == reader {
+		t.Fatal("native work fixture needs independent replica caches")
+	}
+	t.Run("TestWorkTemplateDBResolvesAndRunsOnAnotherEngine", func(t *testing.T) {
+		testWorkTemplateDBResolvesAndRunsOnAnotherEngine(t, writer, reader)
+	})
+	t.Run("TestCognitionEngineAdapterWritesAuthoringBundlesAndConstructs", func(t *testing.T) {
+		testCognitionEngineAdapterWritesAuthoringBundlesAndConstructs(t, writer, db)
+	})
+	t.Run("TestAgentRuntimeAdapterReceivesGuidanceFromAnotherReplica", func(t *testing.T) {
+		testAgentRuntimeAdapterReceivesGuidanceFromAnotherReplica(t, writer, reader)
+	})
+	t.Run("TestWorkDB_ASecondReplicaDoesNotRestartARunPastAContinuedFailure", func(t *testing.T) {
+		testWorkDBASecondReplicaDoesNotRestartARunPastAContinuedFailure(t, reader, db)
+	})
+	t.Run("TestWorkTemplateDBApprovedPermissionResumesExactNestedChild", func(t *testing.T) {
+		for _, mode := range []string{"normal", "changed dispatched arguments"} {
+			t.Run(mode, func(t *testing.T) {
+				exerciseNestedChildContinuation(t, mode, writer, reader, db)
+			})
+		}
+	})
+}
+
 // The reader owns no planner registry. Its only input is the run journal and
 // persisted source, and its ordinary Execute calls must see the whole closure.
-func TestWorkTemplateDBResolvesAndRunsOnAnotherEngine(t *testing.T) {
-	writer, reader := workTemplateDBEngine(t), workTemplateDBEngine(t)
+func testWorkTemplateDBResolvesAndRunsOnAnotherEngine(t *testing.T, writer, reader *memql.MemQLEngine) {
 	owner, bundle, construct, run := id.NewShortId(), id.NewShortId(), id.NewShortId(), id.NewShortId()
 	ctx := auth.ContextWithUserActor(context.Background(), owner)
 	name := "runTemplate" + strings.ReplaceAll(id.NewShortId(), "-", "")

@@ -42,6 +42,14 @@ automation agentWorkSkillContext {
  return builtin agentSelectWorkSkills(text: args.text, limit: 3, minimumScore: 1, maxBytes: 8000)
 }
 
+/// Pure recovery decisions run inside the existing execution scope and do not
+/// create another run, statement journal, model call or independent permission.
+@template
+automation agentWorkProgressRecovery {
+ args { facts object! }
+ return logic agentProgressRecovery(limit: args.facts.limit, used: args.facts.used, discoveryRounds: args.facts.discoveryRounds, repeatedRounds: args.facts.repeatedRounds, reviewActive: args.facts.reviewActive, stalledAfterReview: args.facts.stalledAfterReview, reviewedLimit: args.facts.reviewedLimit)
+}
+
 @template
 automation invokeAgent {
   args {
@@ -153,4 +161,11 @@ automation agentWorkTrainingContext {
   minimumSimilarity: 0.60,
   maxTokens: 1200
  )
+}
+
+/// Preserve part of the existing allowance for reconsideration, clarification
+/// and verification. This reserves calls; it never grants additional calls.
+@template
+automation agentWorkContextRecovery {
+  return 3
 }

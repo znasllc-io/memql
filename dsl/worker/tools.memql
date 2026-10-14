@@ -37,8 +37,8 @@ tool workerHost {
 }
 
 /// Interact with an enrolled computer's desktop after scoped approval.
-/// Final fallback for web research that headless tools cannot complete: control
-/// its browser, search and follow observed links. Probe workerStatus first;
+/// An alternative for authorized tasks that require a graphical interface when
+/// named capabilities or headless tools cannot complete them. Probe workerStatus first;
 /// use requireLabels={display: "true"}. Reuse existing valid approval.
 @handler(type="function", name="agentworkerDispatchComputer")
 @requiresAgentRole("assistant", "specialist")

@@ -33,6 +33,13 @@ it("replays only the exact guidance answer and treats resume false as an incompl
   expect(request.executeQuery.query).not.toContain("permissionMode");
 });
 
+it("preserves a budget guidance save receipt without interpreting it as a resume", async () => {
+  const receipt = { decision: "", runResumed: false, guidanceSaved: true, savedGuidance: "Use the verified record." };
+  const { transport, sendAndWait } = setup(receipt);
+  expect(await transport.approvalGuidance("budget", receipt.savedGuidance)).toEqual({ runResumed: false, guidanceSaved: true, savedGuidance: receipt.savedGuidance });
+  expect(sendAndWait).toHaveBeenCalledWith(expect.objectContaining({ executeQuery: expect.objectContaining({ query: 'builtin decideApproval(approvalId: "budget", decision: "answered", answer: {feedback: "Use the verified record."})' }) }), undefined);
+});
+
 it("records active-work guidance through the generated builtin with exact target and request identity", async () => {
   const request = { targetEpoch: "opaque-epoch", runId: "existing-run", conversationId: "original", requestId: "same-guidance", prompt: "Keep the review focused." };
   const receipt = { ...request, status: "queued", turn: { id: "human-turn", prompt: request.prompt, guidanceTargetRunId: request.runId, guidanceStatus: "queued", answerOnly: true, answer: "", state: "done", startedAt: "2026-10-13T10:00:00Z", activity: [] } };

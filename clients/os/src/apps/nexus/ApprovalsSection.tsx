@@ -17,6 +17,7 @@ import {
   Notice,
   Panel,
   Refine,
+  RecordList,
   RecordRow as KitRow,
   listCount,
   Subhead,
@@ -172,18 +173,51 @@ export function ApprovalsSection({
   // Subscribe here too: the list unmounts while its detail is open.
   const selected = snapshot.rows.map(approvalFromRow).find((a) => idTail(a.id) === idTail(selectedApprovalId)) ?? null;
   const lapsed = selected !== null && selected.expiresAt !== "" && Date.parse(selected.expiresAt) <= now.getTime();
-  const canDecide = selected !== null && selected.decision === "" && !lapsed;
   const runsById = useMemo(() => {
     const byId = new Map<string, RunRow>();
     for (const run of runs) byId.set(idTail(run.id), run);
     return byId;
   }, [runs]);
+  const savedBudgetResume = decide.budgetResumes[idTail(selectedApprovalId)];
+  const savedRun = savedBudgetResume ? runsById.get(idTail(savedBudgetResume.runId)) : undefined;
+  // A release on another replica, cancellation or a different gate makes a
+  // locally held retry obsolete as soon as its run summary arrives.
+  const budgetResume = savedBudgetResume && (!savedRun || runWaitsForApproval(savedRun, savedBudgetResume.approvalId)) ? savedBudgetResume : undefined;
+  const canDecide = selected !== null && selected.decision === "" && !lapsed && !savedBudgetResume;
+
+  // A decided approval leaves the pending feed, but a run whose release failed
+  // still names it. Recover its exact receipt after reopening the app, too.
+  const recoveryIds = snapshot.state === "live" ? [...new Set([
+    ...runs.filter(run => run.status === "waiting" && !run.cancelRequested && run.waitingOnKind === "approval")
+      .map(run => run.waitingOnSubject)
+      .filter(id => id && !snapshot.rows.some(row => {
+        const approval = approvalFromRow(row);
+        return idTail(approval.id) === idTail(id) && approvalIsPending(approval);
+      })),
+    ...(selectedApprovalId && (!selected || (selected.kind === "budget" && selected.decision === "approved")) ? [selectedApprovalId] : []),
+  ])].sort().join("\n") : "";
+  useEffect(() => {
+    if (!recoveryIds) return;
+    const controller = new AbortController();
+    // History can span many pages. Bound recovery to one owner-read chain at
+    // a time instead of opening a request for every retained waiting run.
+    void (async () => {
+      for (const id of recoveryIds.split("\n")) {
+        if (controller.signal.aborted) break;
+        await decide.readBudgetResume(id, controller.signal);
+      }
+    })();
+    return () => controller.abort();
+  }, [recoveryIds, decide.readBudgetResume, decide.deciding]);
 
   // A different approval is a different question. Clearing the draft answer on
   // selection is what stops an option picked for one question being sent as
   // the answer to another -- which the artifact hash would not catch, because
   // both artifacts are intact.
   useEffect(() => {
+    // The feed removing a decided row is not a different question. Keep a
+    // draft and any resume error while its response is still in flight.
+    if (selectedApprovalId !== "" && selected === null) return;
     setChoice("");
     setChoices([]);
     setFreeText("");
@@ -209,7 +243,10 @@ export function ApprovalsSection({
     : true;
 
   const acts: Act[] = [];
-  if (selected !== null && canDecide) {
+  if (budgetResume) {
+    acts.push({ label: "Resume work", tone: "primary", busy: decide.deciding === idTail(budgetResume.approvalId),
+      onAct: () => { void decide.decide(budgetResume.approvalId, "approved", { newLimit: budgetResume.newLimit }, undefined, true); } });
+  } else if (selected !== null && canDecide) {
     if (onDiscussInAsk) acts.push({ label: "Discuss in Ask", text: true, onAct: () => onDiscussInAsk(selected.id) });
     if (failure) {
       for (const value of ["abandon", "retry"]) {
@@ -239,7 +276,8 @@ export function ApprovalsSection({
       // feed, so its page and its row follow the answer without a re-read.
       const documentReview = selected.subject?.reviewType === "library-document"
         ? { requestId: String(selected.subject.requestId), proposalHash: selected.artifactHash } : undefined;
-      const decideIt = (decision: "approved" | "rejected") => void decide.decide(selected.id, decision, decision === "approved" ? permission ? { permissionMode } : budgetAnswer : undefined, documentReview);
+      const nativeBudget = selected.kind === "budget" && selected.subject?.resumeKind === "checkpoint" && typeof selected.subject.continuationId === "string" && selected.subject.continuationId !== "";
+      const decideIt = (decision: "approved" | "rejected") => void decide.decide(selected.id, decision, decision === "approved" ? permission ? { permissionMode } : budgetAnswer : undefined, documentReview, nativeBudget);
       acts.push({
         label: labels.reject,
         busy: decide.deciding === idTail(selected.id),
@@ -257,6 +295,12 @@ export function ApprovalsSection({
 
   const showingDetail = selectedApprovalId !== "";
   const back = () => onSelectApproval("");
+  const resumable = Object.values(decide.budgetResumes).filter(receipt => {
+    const run = runsById.get(idTail(receipt.runId));
+    if (run && !runWaitsForApproval(run, receipt.approvalId)) return false;
+    const title = run ? runTitle(run) : "Approved limit";
+    return search.trim() === "" || title.toLowerCase().includes(search.trim().toLowerCase());
+  });
 
   if (showPermissions) return <ComputerPermissionsPage approvalVersion={snapshot.version} onBack={() => setShowPermissions(false)} />;
 
@@ -266,28 +310,35 @@ export function ApprovalsSection({
         title={selected ? approvalLabel(selected) : "Approval"}
         back={{ label: "Approvals", onSelect: back }}
         breadcrumbs={[{ label: "Approvals", onSelect: back }, { label: selected ? approvalLabel(selected) : "Approval" }]}
-      /> : <Head title="Approvals" meta={listCount(view?.snapshot)}>
+      /> : <Head title="Approvals" meta={listCount(view?.snapshot, (view?.snapshot.rows.length ?? 0) + resumable.length)}>
         <Button tone="quiet" onClick={() => setShowPermissions(true)}>Saved permissions</Button>
         <Refine search={search} onSearch={setSearch} placeholder="Kind, question or reason" label="Search your approvals" />
       </Head>}
 
       <div className="os-nexus-approval-content">
-        {!showingDetail ? <LiveList<ApprovalRow>
+        {!showingDetail ? <>
+          {resumable.length > 0 ? <RecordList label="Work ready to resume">
+            {resumable.map(receipt => <KitRow key={receipt.approvalId}
+              name={runsById.has(idTail(receipt.runId)) ? runTitle(runsById.get(idTail(receipt.runId))!) : "Approved limit"}
+              secondary="Limit approved; work has not resumed."
+              onOpen={() => onSelectApproval(receipt.approvalId)} />)}
+          </RecordList> : null}
+          <LiveList<ApprovalRow>
           source={view}
           label="Approvals waiting for you"
           rowId={(approval) => approval.id}
           fingerprint={approvalFingerprint}
-          emptyText={search.trim() === "" ? "Nothing needs your input." : "No approval matches that."}
+          emptyText={resumable.length > 0 ? "No other approvals are waiting." : search.trim() === "" ? "Nothing needs your input." : "No approval matches that."}
           renderRow={(approval) => <ApprovalLine
             approval={approval}
             run={runsById.get(idTail(approval.runId)) ?? null}
             now={now}
             onOpen={() => onSelectApproval(approval.id)}
           />}
-        /> : <>
+        /></> : <>
           {snapshot.error ? <Notice tone="error" sentence="Could not refresh this approval." detail={snapshot.error} />
             : snapshot.state === "disconnected" || snapshot.state === "degraded" ? <Notice tone="warn" sentence="Not connected to live approvals." next="This is the last known state." /> : null}
-          {selected === null ? <Notice tone="info" sentence={snapshot.state === "seeding" ? "Loading this approval." : snapshot.state === "live" && !snapshot.error ? "This approval is no longer waiting." : "This approval is unavailable."} next="Back returns to your approvals." />
+          {selected === null ? <Notice tone="info" sentence={budgetResume ? "The limit was approved. Resume this work when you are ready." : snapshot.state === "seeding" ? "Loading this approval." : snapshot.state === "live" && !snapshot.error ? "This approval is no longer waiting." : "This approval is unavailable."} next="Back returns to your approvals." />
             : answerInAsk ? <p className="os-nexus-approval-ask">{selected.question}</p>
             : <ApprovalDetail
               approval={selected}
@@ -308,7 +359,9 @@ export function ApprovalsSection({
         </>}
       </div>
 
-      {selected === null ? null : (
+      {budgetResume ? <ActionBar state="Approved" detail="Resume using the limit already approved." tone="paused" acts={acts}>
+        {budgetResume.error ? <span className="os-nexus-act-error os-mono" role="alert">{budgetResume.error}</span> : null}
+      </ActionBar> : selected === null ? decide.error ? <Notice tone="error" sentence="This request could not be completed." detail={decide.error} /> : null : (
         <ActionBar
           state={selected.decision === "" && lapsed ? "Lapsed" : decisionWord(selected.decision)}
           detail={selected.decision !== "" ? approvalDecidedNext(selected.kind, selected.decision)
@@ -329,6 +382,10 @@ export function ApprovalsSection({
       )}
     </div>
   );
+}
+
+function runWaitsForApproval(run: RunRow, approvalId: string): boolean {
+  return run.status === "waiting" && !run.cancelRequested && run.waitingOnKind === "approval" && idTail(run.waitingOnSubject) === idTail(approvalId);
 }
 
 /**

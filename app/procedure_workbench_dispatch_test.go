@@ -747,8 +747,7 @@ func TestAQueryHandlersKindIsTheConstructItCalls(t *testing.T) {
 // The registry the engine holds answers kindOf from the tree that actually
 // ships, which is the negative control on the fake above: a real query tool
 // reads, a real mutation tool does not.
-func TestTheEngineToolRegistryClassifiesShippedTools(t *testing.T) {
-	engine := procedureTestEngine(t)
+func testTheEngineToolRegistryClassifiesShippedTools(t *testing.T, engine *memql.MemQLEngine) {
 	tools := engineProcedureTools{engine: engine}
 	if kind, ok := tools.kindOf("searchUsers"); !ok || kind != "query" {
 		t.Fatalf("searchUsers = %q, %v; want a registered query tool", kind, ok)

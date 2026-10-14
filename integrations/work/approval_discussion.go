@@ -25,7 +25,14 @@ func (i *Integration) handleApprovalDiscussionState(ctx context.Context, args ma
 	if approval == nil {
 		return nil, fmt.Errorf("request is unavailable")
 	}
-	return i.resultNode(map[string]any{"canSendGuidance": i.ApprovalGuidanceAvailable(ctx, approval), "guidanceToResume": i.RecoverableApprovalGuidance(ctx, approval)}), nil
+	mode, saved := "resume", ""
+	if rowString(approval, "kind") == "budget" {
+		mode = "deferred"
+		if rowString(approval, "decision") == "" {
+			saved = rowString(rowMap(approval, "answer"), "feedback")
+		}
+	}
+	return i.resultNode(map[string]any{"canSendGuidance": i.ApprovalGuidanceAvailable(ctx, approval), "guidanceToResume": i.RecoverableApprovalGuidance(ctx, approval), "guidanceMode": mode, "savedGuidance": saved}), nil
 }
 
 // Admission is a human action, separate from the read-only model capability.

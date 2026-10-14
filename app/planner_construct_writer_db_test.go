@@ -16,13 +16,13 @@ import (
 	"context"
 	"testing"
 
+	"github.com/uptrace/bun"
 	"github.com/znasllc-io/memql/component/auth"
 	"github.com/znasllc-io/memql/component/memql"
 	"github.com/znasllc-io/memql/core/id"
 )
 
-func TestCognitionEngineAdapterWritesAuthoringBundlesAndConstructs(t *testing.T) {
-	engine, db := workTemplateDBEngineAndDB(t)
+func testCognitionEngineAdapterWritesAuthoringBundlesAndConstructs(t *testing.T, engine *memql.MemQLEngine, db *bun.DB) {
 	adapter := &CognitionEngineAdapter{Engine: engine}
 	owner := id.NewShortId()
 	ctx := auth.ContextWithUserActor(context.Background(), owner)
