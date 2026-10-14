@@ -1814,6 +1814,8 @@ jobs:
       # package budget expired during otherwise-progressing loop scenarios.
       - name: mcp conformance suite (regression gate, seeded test DB)
         run: go test -count=1 -timeout=600s -v ./test/conformance/...
+      - name: Fleet approval across replicas (seeded test DB)
+        run: go test -count=1 -tags agent -timeout=300s -run 'TestComputerPermissionDBFullApprovalAndForwardedListing|TestWorkDBComputerScopeInputIsModelCorrectable' ./integrations/agent/worker/ ./app/
 
   # DB-seeded suite for the `*_db_test.go` packages (memql#2342). These
   # tests are NeedsDB: they self-skip when no Postgres is reachable, so they

@@ -3475,6 +3475,27 @@ QueryClient.prototype.recordFeedback = function (this: QueryClient, args: Record
   return this.executeNamed("recordFeedback", buildRecordFeedback(args), opts);
 };
 
+/** Refresh the caller's pending computer-access review without approving it. */
+export interface RefreshComputerPermissionArgs {
+  approvalId: string;
+}
+
+export function buildRefreshComputerPermission(args: RefreshComputerPermissionArgs): string {
+  const parts: string[] = [];
+  parts.push("approvalId: " + renderMemQLValue(args.approvalId));
+  return "builtin refreshComputerPermission(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    refreshComputerPermission(args: RefreshComputerPermissionArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.refreshComputerPermission = function (this: QueryClient, args: RefreshComputerPermissionArgs = {} as RefreshComputerPermissionArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("refreshComputerPermission", buildRefreshComputerPermission(args), opts);
+};
+
 /** Separately approve the exact reviewed candidate after fresh verification. */
 export interface ReleaseApproveCandidateArgs {
   candidateId: string;

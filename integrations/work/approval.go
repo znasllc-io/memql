@@ -108,6 +108,12 @@ func (i *Integration) handleDecideApproval(ctx context.Context, args map[string]
 		}
 	}
 	if approval == nil {
+		if recovered, err := i.recoverComputerDecision(ctx, approvalId, decision, argMap(args, "answer")); err != nil {
+			return nil, err
+		} else if recovered != nil {
+			return i.resultNode(recovered), nil
+		}
+
 		if recovered, err := i.recoverBudgetDecision(ctx, approvalId, decision, argMap(args, "answer")); err != nil {
 			return nil, err
 		} else if recovered != nil {
@@ -208,6 +214,11 @@ func (i *Integration) handleDecideApproval(ctx context.Context, args map[string]
 	}
 
 	now := i.clock().UTC()
+	if kind == "scopeElevation" && decision == "approved" && rowMap(approval, "subject")["computerPermission"] != nil {
+		if state, message := computerDecisionState(approval, answer, now); state != "" {
+			return i.resultNode(map[string]any{"approvalId": approvalId, "runId": runId, "permissionState": state, "message": message, "runResumed": false}), nil
+		}
+	}
 	if kind == "scopeElevation" && decision == "approved" {
 		until, valid := rowTime(approval, "expiresAt")
 		if !valid || !now.Before(until) {
