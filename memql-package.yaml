@@ -396,6 +396,7 @@ pipeline:
             export MEMQL_REQUIRE_DB=1
             export MEMQL_DIFFERENTIAL_REQUIRED=1
             go test -count=1 -timeout=600s -v ./test/conformance/...
+            go test -count=1 -tags agent -timeout=300s -run 'TestComputerPermissionDBFullApprovalAndForwardedListing|TestWorkDBComputerScopeInputIsModelCorrectable' ./integrations/agent/worker/ ./app/
         - name: proving
           placement: cluster
           services: [postgres]

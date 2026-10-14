@@ -521,10 +521,11 @@ export function useRecordFeedback(): RecordFeedbackState {
 
 export type Decision = "approved" | "rejected" | "answered";
 
-export interface BudgetResume {
+export interface ApprovalResume {
   approvalId: string;
   runId: string;
-  newLimit: number;
+  newLimit?: number;
+  permissionAnswer?: Record<string, unknown>;
   error: string;
 }
 
@@ -532,9 +533,11 @@ export interface DecideApprovalState extends WriteState {
   /** The approval currently being decided, so one row's buttons go busy and
    *  not every row's. An inbox is many independent decisions. */
   deciding: string;
-  /** An approved limit whose exact decision still needs to resume its work. */
-  budgetResumes: Readonly<Record<string, BudgetResume>>;
-  readBudgetResume: (approvalId: string, signal?: AbortSignal) => Promise<void>;
+  /** An approved decision whose exact receipt still needs to resume its work. */
+  approvalResumes: Readonly<Record<string, ApprovalResume>>;
+  permissionReviews: Readonly<Record<string, string>>;
+  refreshPermission: (approvalId: string) => Promise<void>;
+  readApprovalResume: (approvalId: string, signal?: AbortSignal) => Promise<void>;
   decide: (
     approvalId: string,
     decision: Decision,
@@ -562,34 +565,57 @@ export function useDecideApproval(): DecideApprovalState {
   const connection = useOsConnection();
   const [deciding, setDeciding] = useState("");
   const [error, setError] = useState("");
-  const [budgetResumes, setBudgetResumes] = useState<Record<string, BudgetResume>>({});
+  const [approvalResumes, setApprovalResumes] = useState<Record<string, ApprovalResume>>({});
   const inFlight = useRef(new Set<string>());
-  const resumedBudgets = useRef(new Set<string>());
+  const resumedApprovals = useRef(new Set<string>());
+  const [permissionReviews, setPermissionReviews] = useState<Record<string, string>>({});
 
   // A failed continuation must remain reachable after a reload. These existing
   // owner-scoped reads only restore an affordance; the decision gate rechecks
-  // the native checkpoint and exact saved limit when the person presses it.
-  const readBudgetResume = useCallback(async (approvalId: string, signal?: AbortSignal) => {
+  // the native checkpoint and exact saved choice when the person presses it.
+  const readApprovalResume = useCallback(async (approvalId: string, signal?: AbortSignal) => {
     const key = idTail(approvalId);
     const query = connection?.query;
-    if (!query || inFlight.current.has(key) || resumedBudgets.current.has(key)) return;
+    if (!query || inFlight.current.has(key) || resumedApprovals.current.has(key)) return;
     try {
       const approval = (await query.workApprovalForOwner({ approvalId }, { signal })).rows()[0];
       const subject = approval?.subject as Record<string, unknown> | undefined;
       const answer = approval?.answer as Record<string, unknown> | undefined;
-      if (!approval || idTail(String(approval.id ?? "")) !== key || approval.kind !== "budget" || approval.decision !== "approved" ||
-        subject?.resumeKind !== "checkpoint" || typeof subject.continuationId !== "string" || !subject.continuationId ||
-        typeof answer?.newLimit !== "number" || !Number.isFinite(answer.newLimit) || answer.newLimit <= 0 || typeof approval.runId !== "string") return;
+      const computer = approval?.kind === "scopeElevation" && subject?.computerPermission !== undefined
+        && (answer?.permissionMode === "once" || answer?.permissionMode === "always");
+      const budget = approval?.kind === "budget" && subject?.resumeKind === "checkpoint"
+        && typeof subject.continuationId === "string" && !!subject.continuationId
+        && typeof answer?.newLimit === "number" && Number.isFinite(answer.newLimit) && answer.newLimit > 0;
+      if (!approval || idTail(String(approval.id ?? "")) !== key || approval.decision !== "approved" ||
+        (!computer && !budget) || typeof approval.runId !== "string") return;
       const run = (await query.workRunForOwner({ runId: approval.runId }, { signal })).rows()[0];
       const waiting = run?.waitingOn as Record<string, unknown> | undefined;
-      if (signal?.aborted || inFlight.current.has(key) || resumedBudgets.current.has(key)) return;
+      if (signal?.aborted || inFlight.current.has(key) || resumedApprovals.current.has(key)) return;
       if (!run || run.status !== "waiting" || run.cancelRequested === true || waiting?.kind !== "approval" || idTail(String(waiting.subject ?? "")) !== key) return;
-      setBudgetResumes(held => held[key] ? held : { ...held, [key]: {
-        approvalId, runId: approval.runId as string, newLimit: answer.newLimit as number, error: "",
+      setApprovalResumes(held => held[key] ? held : { ...held, [key]: {
+        approvalId, runId: approval.runId as string, ...(computer ? { permissionAnswer: { permissionMode: answer!.permissionMode, permissionHash: approval.artifactHash } } : { newLimit: answer!.newLimit as number }), error: "",
       } });
     } catch (err: unknown) {
       if (!signal?.aborted) setError(`Could not check whether this work can resume. ${describe(err)}`);
     }
+  }, [connection]);
+
+  const refreshPermission = useCallback(async (approvalId: string) => {
+    const key = idTail(approvalId);
+    if (!connection?.query) { setError(NOT_CONNECTED); return; }
+    if (inFlight.current.has(key)) return;
+    inFlight.current.add(key); setDeciding(key); setError("");
+    try {
+      const receipt = (await connection.query.refreshComputerPermission({ approvalId })).rows()[0];
+      if (!receipt || idTail(String(receipt.approvalId ?? "")) !== key) throw new Error("The cluster has not confirmed this review. Try again.");
+      if (receipt.permissionState !== "review_ready") {
+        setPermissionReviews(held => ({ ...held, [key]: String(receipt?.permissionState ?? "changed") }));
+        setError(String(receipt?.message ?? "This request could not be refreshed.")); return;
+      }
+      setPermissionReviews(held => { const next = { ...held }; delete next[key]; return next; });
+      setApprovalResumes(held => { const next = { ...held }; delete next[key]; return next; });
+    } catch (err) { setError(describe(err)); }
+    finally { inFlight.current.delete(key); setDeciding(current => current === key ? "" : current); }
   }, [connection]);
 
   const decide = useCallback(
@@ -624,6 +650,24 @@ export function useDecideApproval(): DecideApprovalState {
           decision,
           ...(answer === undefined ? {} : { answer }),
         });
+        if (decision === "approved" && answer?.permissionMode) {
+          const receipt = result.rows()[0];
+          if (!receipt || idTail(String(receipt.approvalId ?? "")) !== key) throw new Error("The cluster has not confirmed this permission. Retry to check the saved decision.");
+          if (receipt.permissionState) {
+            setPermissionReviews(held => ({ ...held, [key]: String(receipt.permissionState) }));
+            setError(String(receipt.message ?? "Review this permission again.")); return false;
+          }
+          if (!receipt || receipt.decision !== "approved" || typeof receipt.runResumed !== "boolean") {
+            throw new Error("The cluster has not confirmed this permission. Retry to check the saved decision.");
+          }
+          if (!receipt.runResumed) {
+            const message = String(receipt.resumeError ?? "Access was approved, but work has not resumed.");
+            setApprovalResumes(held => ({ ...held, [key]: { approvalId, runId: String(receipt.runId ?? ""), permissionAnswer: answer, error: message } }));
+            setError(message); return false;
+          }
+          resumedApprovals.current.add(key);
+          setApprovalResumes(held => { const next = { ...held }; delete next[key]; return next; });
+        }
         if (newLimit !== null) {
           const receipt = result.rows()[0];
           if (!receipt || idTail(String(receipt.approvalId ?? "")) !== key || receipt.decision !== "approved" || typeof receipt.runResumed !== "boolean") {
@@ -632,12 +676,12 @@ export function useDecideApproval(): DecideApprovalState {
           if (!receipt.runResumed) {
             const message = typeof receipt.resumeError === "string" && receipt.resumeError.trim() !== ""
               ? receipt.resumeError : "The limit was approved, but work has not resumed.";
-            if (nativeBudget) setBudgetResumes(held => ({ ...held, [key]: { approvalId, runId: String(receipt.runId ?? ""), newLimit, error: message } }));
+            if (nativeBudget) setApprovalResumes(held => ({ ...held, [key]: { approvalId, runId: String(receipt.runId ?? ""), newLimit, error: message } }));
             setError(message);
             return false;
           }
-          resumedBudgets.current.add(key);
-          setBudgetResumes(held => {
+          resumedApprovals.current.add(key);
+          setApprovalResumes(held => {
             const next = { ...held };
             delete next[key];
             return next;
@@ -650,7 +694,7 @@ export function useDecideApproval(): DecideApprovalState {
       } catch (err: unknown) {
         const message = describe(err);
         setError(message);
-        setBudgetResumes(held => held[key] ? { ...held, [key]: { ...held[key], error: message } } : held);
+        setApprovalResumes(held => held[key] ? { ...held, [key]: { ...held[key], error: message } } : held);
         return false;
       } finally {
         inFlight.current.delete(key);
@@ -664,9 +708,11 @@ export function useDecideApproval(): DecideApprovalState {
     busy: deciding !== "",
     error,
     deciding,
-    budgetResumes,
-    readBudgetResume,
+    approvalResumes,
+    permissionReviews,
+    refreshPermission,
+    readApprovalResume,
     decide,
-    reset: () => setError(""),
+    reset: () => { setError(""); setPermissionReviews({}); },
   };
 }

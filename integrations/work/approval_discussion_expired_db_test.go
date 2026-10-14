@@ -53,8 +53,11 @@ func testExpiredScopeDiscussionResumesCheckpointWithoutGrant(t *testing.T, a, b 
 	// Expiry is still an authority boundary, and opening Ask must not admit an
 	// analysis child or let another person supply the answer.
 	for _, mode := range []string{"once", "always"} {
-		_, err := b.i.handleDecideApproval(person, map[string]any{"approvalId": approvalID, "decision": "approved", "answer": map[string]any{"permissionMode": mode}}, 0)
-		require.ErrorContains(t, err, "expired")
+		result, err := b.i.handleDecideApproval(person, map[string]any{"approvalId": approvalID, "decision": "approved", "answer": map[string]any{"permissionMode": mode}}, 0)
+		require.NoError(t, err)
+		require.Equal(t, "expired", decodeReply(t, result)["permissionState"])
+		require.Equal(t, original, readApproval())
+		require.Equal(t, "waiting", rowString(a.runRow(t, runID), "status"))
 	}
 	_, err := b.eng.Execute(person, "builtin "+call("askApprovalMessage", map[string]any{"approvalId": approvalID, "conversationId": opened["conversationId"], "requestId": "expired-advisor", "prompt": "Explain this request", "advisor": true}))
 	require.ErrorContains(t, err, "no longer pending")
