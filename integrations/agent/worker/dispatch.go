@@ -540,6 +540,11 @@ func (d *Dispatcher) attemptLocal(
 			ErrorMessage: "machine " + cand.Label() + " is no longer connected to this replica",
 		}, ForwardRefusedBeforeStart
 	}
+	// The connected stream must still belong to the caller whose inventory was
+	// planned. Sharing only admits model inference; it never admits host tools.
+	if !sameSubject(w.OwnerUserId, req.OwnerUserId) {
+		return Result{ErrorCode: "owner_mismatch", ErrorMessage: "the connected machine does not belong to this user"}, ForwardRefusedBeforeStart
+	}
 	// The machine's own consent, re-read here because this replica is the one
 	// dispatching (machineAllowsPipelines, RULING R20) -- the same check the
 	// forward's receiver makes when a sibling dispatches instead.

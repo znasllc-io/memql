@@ -3244,14 +3244,11 @@ button.os-row.os-record-row:focus-visible { outline: 2px solid var(--os-accent);
   margin-top: 3px;
 }
 
-/* Sharing. The two consents are a LIST because they are two of a kind and both
- * are always present: rendering only the missing one would leave a fully
- * shared machine showing nothing, and somebody who had just shared theirs with
- * no confirmation that anything happened. */
+/* Model sharing: audience, access boundary and local readiness on one plane. */
 .os-fleet-sharing {
   display: flex;
   flex-direction: column;
-  gap: 6px;
+  gap: 12px;
 }
 /* THE ONE LINE THE PANEL IS FOR: who can use this machine. Set a step above
  * the body and below the section's own title, so it reads as the answer to
@@ -3269,41 +3266,6 @@ button.os-row.os-record-row:focus-visible { outline: 2px solid var(--os-accent);
 }
 .os-fleet-sharing-state[data-in-force] {
   color: var(--os-ink);
-}
-.os-fleet-consents {
-  list-style: none;
-  margin: 0;
-  padding: 0;
-  display: grid;
-  gap: 4px;
-  max-width: 80ch;
-}
-.os-fleet-consent {
-  display: grid;
-  grid-template-columns: 8px minmax(0, 1fr);
-  align-items: baseline;
-  gap: 8px;
-  font-size: var(--os-text-xs);
-  color: var(--os-muted);
-}
-/* The mark is a SHAPE and not a colour alone: the two states have to be
- * distinguishable without hue, and a filled square beside a hollow one is
- * legible to anybody. */
-.os-fleet-consent-mark {
-  width: 7px;
-  height: 7px;
-  /* The HOLLOW mark's edge is the muted ink, not the hairline: at seven
-   * pixels a hairline border all but vanishes in dark mode, and a missing
-   * consent must not read as no mark at all. */
-  border: 1px solid var(--os-muted);
-  border-radius: 1px;
-}
-.os-fleet-consent[data-given] {
-  color: var(--os-ink);
-}
-.os-fleet-consent[data-given] .os-fleet-consent-mark {
-  background: var(--os-accent);
-  border-color: var(--os-accent);
 }
 .os-fleet-sharing-act {
   display: flex;

@@ -185,7 +185,7 @@ func (h *ForwardHandler) HandleForwardedRequest(
 			"this replica no longer holds a stream for that machine")
 		return
 	}
-	if w.OwnerUserId != "" && !sameSubject(w.OwnerUserId, owner) {
+	if !sameSubject(w.OwnerUserId, owner) {
 		// Belt and braces against a registry entry disagreeing with the row.
 		h.sendRefusal(send, requestId, "owner_mismatch",
 			"the connected machine is owned by a different user than the assertion names")

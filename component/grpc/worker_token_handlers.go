@@ -1,11 +1,13 @@
 package memql
 
 import (
+	"errors"
 	"strings"
 	"time"
 
 	"github.com/znasllc-io/memql/component/auth"
 	memqlv1 "github.com/znasllc-io/memql/component/grpc/gen"
+	"github.com/znasllc-io/memql/component/identity"
 	"github.com/znasllc-io/memql/component/identity/workertoken"
 )
 
@@ -18,8 +20,7 @@ import (
 //  1. Caller authenticates with their own JWT or PAT (the
 //     interceptor rejects worker tokens on this RPC).
 //  2. Server resolves the caller's userId from claims; uses that
-//     as both ownerUserId and registeredBy unless owner_user_id
-//     is set explicitly (admin path).
+//     as both ownerUserId and registeredBy after a fresh enrollment check.
 //  3. Mints token via workertoken.Mint, persists the identity
 //     row, returns plain_token in the reply.
 //  4. Frontend pastes plain_token into the cockpit-worker config
@@ -63,14 +64,14 @@ func (s *streamSession) handleCreateWorkerToken(envelope *memqlv1.MemqlClientMes
 		})
 	}
 
-	ownerUserId := strings.TrimSpace(msg.GetOwnerUserId())
-	if ownerUserId == "" {
-		ownerUserId = callerUserId
-	} else if ownerUserId != callerUserId && !isAdminRole(caller.Role) {
-		return send(&memqlv1.CreateWorkerTokenResult{
-			ErrorCode:    "permission_denied",
-			ErrorMessage: "only admins may mint worker tokens for other users",
-		})
+	identityStore := &identity.Store{Engine: s.service.engine, Logger: s.service.logger}
+	ownerUserId, err := identityStore.FleetEnrollmentOwner(s.stream.Context(), callerUserId, msg.GetOwnerUserId())
+	if err != nil {
+		code := "unavailable"
+		if errors.Is(err, identity.ErrFleetEnrollmentDenied) {
+			code = "permission_denied"
+		}
+		return send(&memqlv1.CreateWorkerTokenResult{ErrorCode: code, ErrorMessage: err.Error()})
 	}
 
 	name := strings.TrimSpace(msg.GetName())
