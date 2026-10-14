@@ -228,7 +228,7 @@ func verifyCapabilityTools(has func(string) bool) (map[string][]string, []string
 		anyPresent := false
 		var absent []string
 		for _, name := range bundle.tools {
-			if has(name) {
+			if has(HarnessToolBinding(name)) {
 				anyPresent = true
 			} else {
 				absent = append(absent, name)

@@ -465,7 +465,18 @@ func (m *SeedMaterializer) seedRowIsCurrent(ctx context.Context, def *SeedDefini
 	if node == nil || node.GetPayload() == nil {
 		return false
 	}
-	return seedArgsMatchPayload(args, node.GetPayload().AsMap(), def.UseConcept+"Id")
+	// Seeds use bare relationship ids; the stored payload carries canonical
+	// ids. Compare the same representation the write path produces, or every
+	// replica appends a version of an unchanged relationship on every boot.
+	expected := cloneAnyMap(args)
+	payload := node.GetPayload().AsMap()
+	if err := m.engine.canonicalizeRelationshipFields(ctx, conceptId, expected); err != nil {
+		return false
+	}
+	if err := m.engine.canonicalizeRelationshipFields(ctx, conceptId, payload); err != nil {
+		return false
+	}
+	return seedArgsMatchPayload(expected, payload, def.UseConcept+"Id")
 }
 
 // seedArgsMatchPayload compares every arg the create mutation would receive

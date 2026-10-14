@@ -1669,11 +1669,12 @@ func TestServerOnlyParsedSetMatchesTheTree(t *testing.T) {
 		// provenance, never a scope.
 		// Shared installed seed content has no actor.userId scope. A caller
 		// may propose a private candidate, but cannot impersonate a release.
-		{Path: "skills/mutations.memql", Name: "createSkill"}:     true,
-		{Path: "skills/mutations.memql", Name: "createSkillEdge"}: true,
-		{Path: "skills/mutations.memql", Name: "commitSkillEdge"}: true,
-		{Path: "skills/mutations.memql", Name: "setSkillScripts"}: true,
-		{Path: "skills/mutations.memql", Name: "reinforceSkill"}:  true,
+		{Path: "skills/mutations.memql", Name: "createSkill"}:      true,
+		{Path: "skills/mutations.memql", Name: "createSkillEdge"}:  true,
+		{Path: "skills/mutations.memql", Name: "proposeSkillEdge"}: true,
+		{Path: "skills/mutations.memql", Name: "commitSkillEdge"}:  true,
+		{Path: "skills/mutations.memql", Name: "setSkillScripts"}:  true,
+		{Path: "skills/mutations.memql", Name: "reinforceSkill"}:   true,
 
 		// design record 2026-09-06-configuration-readiness, section 4.4.
 		// recordModuleReadiness writes the engine's OWN OBSERVATION of one

@@ -10,7 +10,7 @@ func allCapabilityTools() map[string]bool {
 	defer capMu.RUnlock()
 	for _, bundle := range capabilitySlugs {
 		for _, n := range bundle.tools {
-			all[n] = true
+			all[HarnessToolBinding(n)] = true
 		}
 	}
 	return all
@@ -29,7 +29,7 @@ func TestVerifyCapabilityToolsRegistered_AllPresent_NoMissing(t *testing.T) {
 // and must be reported.
 func TestVerifyCapabilityToolsRegistered_PartialDrop_Reported(t *testing.T) {
 	set := allCapabilityTools()
-	delete(set, "workbenchHost")
+	delete(set, "workbench.workbenchHost")
 	missing := VerifyCapabilityToolsRegistered(func(s string) bool { return set[s] }, testGuardLogger())
 	found := false
 	for _, m := range missing {

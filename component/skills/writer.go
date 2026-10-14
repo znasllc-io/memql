@@ -14,7 +14,7 @@ import (
 // ===========================================================================
 // WHY THE WRITES LIVE HERE AND NOT AT THEIR CALL SITES
 // ===========================================================================
-// `setSkillScripts`, `createSkillEdge` and `commitSkillEdge` are all
+// `setSkillScripts`, `proposeSkillEdge` and `commitSkillEdge` are all
 // `@serverOnly`, and origin defaults to CLIENT -- so a caller that does not
 // stamp internal origin has each write refused with a WARN in a log and
 // nothing else. The stamp is allowlisted per PACKAGE
@@ -120,7 +120,7 @@ func (w *Writer) write(ctx context.Context, edges []EdgeWrite, commit bool) erro
 			"evidence":    evidence,
 			"proposedBy":  firstNonBlank(edge.ProposedBy, "system"),
 		}
-		createCall, err := langparser.RenderCall("createSkillEdge", createArgs)
+		createCall, err := langparser.RenderCall("proposeSkillEdge", createArgs)
 		if err != nil {
 			return err
 		}

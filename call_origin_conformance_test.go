@@ -190,7 +190,7 @@ func TestOnlyAllowlistedPackagesStampInternalOrigin(t *testing.T) {
 		// Training app's feed stayed permanently empty.
 		"component/workjournal": "the work spine's journal for server-started passes -- server-initiated; its goal, run and step writers are all @serverOnly and refused without it (memql#4970)",
 		// The capability graph's three @serverOnly writers -- setSkillScripts,
-		// createSkillEdge, commitSkillEdge (epic memql#4970, spec section C).
+		// proposeSkillEdge, commitSkillEdge (epic memql#4970, spec section C).
 		// SERVER-INITIATED: an edge is EVIDENCE the engine gathered from runs
 		// it executed, and a script list names the executables a skill may
 		// ship to somebody's machine, so neither is a thing a request should

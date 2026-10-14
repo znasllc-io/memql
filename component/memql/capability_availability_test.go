@@ -45,7 +45,7 @@ func TestFullyRegisteredNodeReportsNothingUnavailable(t *testing.T) {
 	}
 	present := map[string]bool{}
 	for _, n := range all {
-		present[n] = true
+		present[HarnessToolBinding(n)] = true
 	}
 	if got := UnavailableCapabilitySlugs(func(s string) bool { return present[s] }); len(got) != 0 {
 		t.Errorf("with every tool registered, no slug is unavailable; got %v", got)
@@ -60,7 +60,7 @@ func TestPartialAndAbsentAreDifferentOutcomes(t *testing.T) {
 	if len(names) < 2 {
 		t.Skipf("workbench-use expands to %d tool(s); the partial case needs at least 2", len(names))
 	}
-	onlyFirst := func(s string) bool { return s == names[0] }
+	onlyFirst := func(s string) bool { return s == HarnessToolBinding(names[0]) }
 
 	missing := VerifyCapabilityToolsRegistered(onlyFirst, testGuardLogger())
 	if len(missing) == 0 {
