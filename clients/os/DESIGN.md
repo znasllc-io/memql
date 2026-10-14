@@ -309,9 +309,14 @@ a real time series exists. Keep record lists and editors in their own sections.
 Four figures stand in one row, then two; five stand in one row while each label
 fits on one line, then three, then two.
 
-Maps use `MapHeading` for title alignment, `MapControls` for bottom-right zoom
-and reset actions, and `usePanZoom` with wheel zoom disabled and fitted reset
-enabled. Dragging pans; wheel scrolling belongs to the page. Keep routine map
+Maps and navigable diagrams use `MapCanvas` for their SVG viewport and
+`MapHeading` when a title is needed. `MapCanvas` owns top-right zoom and reset
+controls, initial fitting, resize behavior, drag/pinch, keyboard navigation
+and the distinction between dragging and selecting a node. Apps supply the
+drawing, its dimensions and its selection actions. Reset fits the current
+content. Wheel scrolling belongs to the page; there is no wheel-zoom option.
+Node-specific keyboard navigation takes precedence over canvas arrow keys;
+focusing an offscreen node brings it into view without changing zoom. Keep routine map
 instructions in the shared page-help control described above, without adding
 another information icon. Errors and stale-data notices remain visible.
 

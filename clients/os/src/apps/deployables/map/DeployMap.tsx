@@ -1,16 +1,14 @@
 import { ContentSkeleton } from "../../../kit/ContentSkeleton";
-import { useCallback, useMemo } from "react";
+import { useMemo } from "react";
 import type { LiveState } from "@znasllc-io/memql-sdk-core/client";
 
 import { MapHeading } from "../../../kit/MapHeading";
-import { MapControls } from "../../../kit/MapControls";
+import { MapCanvas } from "../../../kit/MapCanvas";
 
 import { Caption } from "../../../kit";
 import type { ArrivalKind, ArrivalTick } from "../../../live/arrival";
 import type { SiteRow } from "../rows";
 import { EMPTY_LAYOUT, layout, nodeCentre, type MapChecks, type MapLayout, type MapNode } from "./layout";
-import { transformOf } from "../../../kit/viewport";
-import { usePanZoom } from "../../../kit/usePanZoom";
 import "../pipelines/checks.css";
 
 // The deploy map: what serves where, as a shape.
@@ -69,35 +67,6 @@ export function DeployMap({
   const selected = selectedNodeId === "" ? null : (nodeById.get(selectedNodeId) ?? null);
   const selectedSites = selected?.siteIds ?? [];
 
-  // ---- pan and zoom -------------------------------------------------------
-  //
-  // The gesture is `kit/usePanZoom`, shared with the Nexus beacon map since
-  // epic memql#4785: pointer, touch, wheel and keyboard over one viewport,
-  // with the pointer-capture, pinch-baseline and drag-threshold rules that
-  // each took a bug to get right. Nothing about it is specific to this map.
-  const { view, frameRef, handlers, steering, zoomIn, zoomOut, reset } = usePanZoom({
-    width: model.width,
-    height: model.height,
-    ready: model.nodes.length > 0,
-    wheelZoom: false,
-    resetToFit: true,
-  });
-
-  /**
-   * Open a node -- unless the pointer was steering rather than choosing.
-   *
-   * The keyboard path does not come through here, so Enter on a node always
-   * opens it however far the map was last dragged.
-   */
-  const activate = useCallback(
-    (node: MapNode) => {
-      if (steering()) return;
-      onSelect(node);
-    },
-    [onSelect, steering],
-  );
-
-
   if (model.nodes.length === 0) {
     return (
       <div className="os-deploy-map" data-empty>
@@ -111,15 +80,7 @@ export function DeployMap({
   return (
     <div className="os-deploy-map" data-behind={behind || undefined}>
       <MapHeading title="Deployment map" />
-      <div className="os-map-frame" ref={frameRef}>
-        <svg
-          className="os-deploy-map-canvas"
-          role="application"
-          aria-label="Deploy map"
-          tabIndex={0}
-          {...handlers}
-        >
-          <g data-os-map-view transform={transformOf(view)}>
+      <MapCanvas label="Deploy map" width={model.width} height={model.height} ready behind={behind}>
             {model.groups.map((group) => (
               <g key={group.id} className="os-deploy-group">
                 <rect
@@ -169,14 +130,11 @@ export function DeployMap({
                 tick={node.kind === "checks" ? null : tickFor(node, ticks)}
                 selected={selectedNodeId === node.id}
                 inSelectedCluster={node.siteIds.some((id) => selectedSites.includes(id))}
-                onActivate={() => activate(node)}
+                onActivate={() => onSelect(node)}
                 onKeyActivate={() => onSelect(node)}
               />
             ))}
-          </g>
-        </svg>
-        <MapControls zoomIn={zoomIn} zoomOut={zoomOut} reset={reset} />
-      </div>
+      </MapCanvas>
       {behind ? <Caption>Live updates are interrupted. Showing the last reported map.</Caption> : null}
     </div>
   );

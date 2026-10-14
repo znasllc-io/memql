@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import type { KeyboardEvent, PointerEvent, RefObject, WheelEvent } from "react";
+import type { KeyboardEvent, PointerEvent, RefObject } from "react";
 
 import {
   IDENTITY,
@@ -11,7 +11,8 @@ import {
   type Viewport,
 } from "./viewport";
 
-// Steering a map: pointer, touch, wheel and keyboard, over one viewport.
+// Steering a map: pointer, touch and keyboard, over one viewport.
+// Wheel events belong to the page and are never handled here.
 //
 // IN `kit/` RATHER THAN IN AN APP, since epic memql#4785, for the reason
 // `viewport.ts` beside it is. The arithmetic was already shared; this is the
@@ -38,7 +39,6 @@ export interface PanZoomHandlers {
   onPointerMove: (e: PointerEvent<SVGSVGElement>) => void;
   onPointerUp: (e: PointerEvent<SVGSVGElement>) => void;
   onPointerCancel: (e: PointerEvent<SVGSVGElement>) => void;
-  onWheel: (e: WheelEvent<SVGSVGElement>) => void;
   onKeyDown: (e: KeyboardEvent<SVGSVGElement>) => void;
 }
 
@@ -61,6 +61,8 @@ export interface PanZoom {
   reset: () => void;
   zoomIn: () => void;
   zoomOut: () => void;
+  /** Bring a focused node into view without changing the chosen zoom. */
+  reveal: (bounds: DOMRect) => void;
 }
 
 export interface FitRequest {
@@ -70,16 +72,12 @@ export interface FitRequest {
   ready: boolean;
   /** How far the first fit may zoom IN. See `fitTo` on why this is per-map. */
   maxFit?: number;
-  /** Leave wheel events to the surrounding page when false. */
-  wheelZoom?: boolean;
-  /** Reset to the initial framing instead of the coordinate origin. */
-  resetToFit?: boolean;
 }
 
 export function usePanZoom(fit: FitRequest): PanZoom {
   const [view, setView] = useState<Viewport>(IDENTITY);
   const frameRef = useRef<HTMLDivElement | null>(null);
-  const { width, height, ready, maxFit = 1, wheelZoom = true, resetToFit = false } = fit;
+  const { width, height, ready, maxFit = 1 } = fit;
 
   // Pointer events cover mouse, pen and touch with one code path, which is what
   // makes "works with pointer and touch" a property of the implementation
@@ -103,6 +101,7 @@ export function usePanZoom(fit: FitRequest): PanZoom {
   }, []);
 
   const onPointerDown = useCallback((e: PointerEvent<SVGSVGElement>) => {
+    if (e.button !== 0) return;
     touched.current = true;
     // A PRIMARY pointer down starts a fresh gesture, so anything still in the
     // map is stale -- a pointerup that landed outside the element in a browser
@@ -159,24 +158,11 @@ export function usePanZoom(fit: FitRequest): PanZoom {
     if (pointers.current.size < 2) pinch.current = null;
   }, []);
 
-  const onWheel = useCallback(
-    (e: WheelEvent<SVGSVGElement>) => {
-      if (!wheelZoom) return;
-      touched.current = true;
-      // deltaY < 0 is a scroll UP, which is a zoom IN everywhere else in every
-      // map anybody has used.
-      const factor = e.deltaY < 0 ? KEY_ZOOM_STEP : 1 / KEY_ZOOM_STEP;
-      const at = localPoint(e.clientX, e.clientY);
-      setView((v) => zoomAt(v, factor, at.x, at.y));
-    },
-    [localPoint, wheelZoom],
-  );
-
   const reset = useCallback(() => {
     const box = frameRef.current?.getBoundingClientRect();
-    if (resetToFit) touched.current = false;
-    setView(resetToFit && box ? fitTo(width, height, box.width, box.height, maxFit) : IDENTITY);
-  }, [width, height, maxFit, resetToFit]);
+    touched.current = false;
+    setView(box ? fitTo(width, height, box.width, box.height, maxFit) : IDENTITY);
+  }, [width, height, maxFit]);
 
   const zoom = useCallback((factor: number) => {
     touched.current = true;
@@ -184,8 +170,22 @@ export function usePanZoom(fit: FitRequest): PanZoom {
     setView(v => zoomAt(v, factor, (box?.width ?? 0) / 2, (box?.height ?? 0) / 2));
   }, []);
 
-  const onKeyDown = useCallback((e: KeyboardEvent<SVGSVGElement>) => {
+  const reveal = useCallback((bounds: DOMRect) => {
+    const frame = frameRef.current?.getBoundingClientRect();
+    if (!frame || frame.width <= 0 || frame.height <= 0 || bounds.width <= 0 || bounds.height <= 0) return;
+    const inset = 12;
+    const shift = (start: number, end: number, low: number, high: number) =>
+      start < low || end - start > high - low ? low - start : end > high ? high - end : 0;
+    const dx = shift(bounds.left, bounds.right, frame.left + inset, frame.right - inset);
+    const dy = shift(bounds.top, bounds.bottom, frame.top + inset, frame.bottom - inset);
+    if (dx === 0 && dy === 0) return;
     touched.current = true;
+    setView(view => panBy(view, dx, dy));
+  }, []);
+
+  const onKeyDown = useCallback((e: KeyboardEvent<SVGSVGElement>) => {
+    // A drawing may use arrows to move between nodes. Do not pan as well.
+    if (e.defaultPrevented) return;
     // The keyboard steers the same viewport the pointer does. It is not a
     // fallback: a map you can only reach with a mouse is a map somebody cannot
     // read at all, and on both surfaces this is the app's signature picture.
@@ -224,6 +224,7 @@ export function usePanZoom(fit: FitRequest): PanZoom {
       default:
         return;
     }
+    if (e.key !== "0") touched.current = true;
     e.preventDefault();
   }, [reset]);
 
@@ -282,13 +283,13 @@ export function usePanZoom(fit: FitRequest): PanZoom {
       onPointerMove,
       onPointerUp: endPointer,
       onPointerCancel: endPointer,
-      onWheel,
       onKeyDown,
     },
     steering: () => travelled.current > DRAG_THRESHOLD_PX,
     reset,
     zoomIn: () => zoom(KEY_ZOOM_STEP),
     zoomOut: () => zoom(1 / KEY_ZOOM_STEP),
+    reveal,
   };
 }
 
