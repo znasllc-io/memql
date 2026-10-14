@@ -63,7 +63,7 @@ export interface WriteState {
 export interface CreateAccountState extends WriteState {
   /** The id of the last account created here, so the surface can say which. */
   createdId: string;
-  create: (facts: AccountFacts) => Promise<string>;
+  create: (facts: AccountFacts, accountId?: string) => Promise<string>;
 }
 
 export function useCreateAccount(): CreateAccountState {
@@ -73,7 +73,7 @@ export function useCreateAccount(): CreateAccountState {
   const [createdId, setCreatedId] = useState("");
 
   const create = useCallback(
-    async (facts: AccountFacts): Promise<string> => {
+    async (facts: AccountFacts, requestedId?: string): Promise<string> => {
       const query = connection?.query ?? null;
       if (query === null) {
         setError("Not connected to the cluster, so nothing was written.");
@@ -88,7 +88,7 @@ export function useCreateAccount(): CreateAccountState {
         setError("Give the client a name first.");
         return "";
       }
-      const accountId = newShortId();
+      const accountId = requestedId ?? newShortId();
       setBusy(true);
       setError("");
       setCreatedId("");
@@ -391,4 +391,20 @@ export function useAccountTokenActions(): AccountTokenActions {
   );
 
   return { busyKey, refusal, reset: () => setRefusal(null), mint, revoke };
+}
+
+export function useConfigureAccountDomains() {
+  const connection = useOsConnection();
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState("");
+  async function save(accountId: string, domains: string[], defaultDomain: string, defaultSenderIdentityId?: string): Promise<boolean> {
+    if (!connection) { setError("Connect to the cluster to save these defaults."); return false; }
+    setBusy(true); setError("");
+    try {
+      await connection.query.configureAccountDomains({ accountId, domains, defaultDomain, defaultSenderIdentityId });
+      return true;
+    } catch (err) { setError(describe(err)); return false; }
+    finally { setBusy(false); }
+  }
+  return { busy, error, save };
 }

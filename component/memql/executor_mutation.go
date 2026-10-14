@@ -1473,6 +1473,9 @@ func (e *MemQLEngine) executeWrite(ctx context.Context, mutation MutationNode, r
 		if err := e.validateSelfAccountNotArchived(ctx, mutation.ID, payload); err != nil {
 			return nil, meta, err
 		}
+		if err := e.validateAccountCreationDefaults(ctx, mutation.ID, payload); err != nil {
+			return nil, meta, err
+		}
 		// The domain walk's RESET, before the guards below and not after:
 		// changing a client's domain clears the verification, and the
 		// guards must judge the row as it will be stored rather than as the

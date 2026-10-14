@@ -1,3 +1,4 @@
+import { accountDefaultDomain } from "../../accounts/defaults";
 import { useEffect, useRef, useState } from "react";
 import { AtSign } from "lucide-react";
 import { newShortId } from "@znasllc-io/memql-sdk-core/client";
@@ -52,8 +53,11 @@ export function AddSenderWizard({ organizations, initialAccountId, writes, onBac
   const [senderIdentityId] = useState(newShortId);
   const [step, setStep] = useState<Step>("address");
   const [accountId, setAccountId] = useState(initialAccountId);
-  const [address, setAddress] = useState("");
-  const [fromName, setFromName] = useState("");
+  const [addressDraft, setAddress] = useState<string | null>(null);
+  const domain = accountDefaultDomain(organizations.find(account => account.id === accountId));
+  const address = addressDraft ?? (domain ? `news@${domain}` : "");
+  const [nameDraft, setFromName] = useState<string | null>(null);
+  const fromName = nameDraft ?? organizationName(organizations, accountId);
   const [replyTo, setReplyTo] = useState("");
   const adding = useRef(false);
 
@@ -100,7 +104,7 @@ export function AddSenderWizard({ organizations, initialAccountId, writes, onBac
             accounts={organizations}
             value={accountId}
             // A step that is one choice is answered by choosing.
-            onChange={(next) => { setAccountId(next); setStep("address"); }}
+            onChange={(next) => { setAccountId(next); setAddress(null); setFromName(null); setReplyTo(""); setStep("address"); }}
           />
         </Field>
       ),

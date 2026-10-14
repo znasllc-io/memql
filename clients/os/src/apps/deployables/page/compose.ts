@@ -73,6 +73,8 @@ export interface AddressDraft {
   accountId: string;
   /** The client's own domain, bound after the site exists. Cluster owners only. */
   ownDomain: string;
+  /** Draft provenance: an explicit blank opts out of account defaults. */
+  domainSource?: "account" | "explicit";
   /**
    * Leave this app out of this deploy (memql#4930). A skipped app needs no
    * address, which is the whole point: it is what makes "deploy only the

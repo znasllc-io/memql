@@ -1,3 +1,4 @@
+import { accountDeployableDomain } from "../../accounts/defaults";
 import { RecordListSkeleton } from "../../../kit/RecordListSkeleton";
 import { runIsCancellable } from "./acts";
 import { archivePackage, deactivateDeployable, cancelDeployment } from "../packages/calls";
@@ -194,7 +195,7 @@ export function ComposePage(props: ComposePageProps) {
   const [sourceNotice, setSourceNotice] = useState("");
   const [restoredSourceId, setRestoredSourceId] = useState("");
   const [draft, setDraft] = useState<ComposeDraft>(() => props.connectResult ? { ...EMPTY_DRAFT, choice: "repo" } : EMPTY_DRAFT);
-  const [addresses, setAddresses] = useState<Record<string, AddressDraft>>({});
+  const [addressDrafts, setAddresses] = useState<Record<string, AddressDraft>>({});
   // What this flow has CREATED. Held rather than derived, because it is the
   // one thing about the flow that is not a reading of a row this browser
   // already holds: the package and site feeds are the app root's, and the new
@@ -234,6 +235,7 @@ export function ComposePage(props: ComposePageProps) {
   const zipProbe = useArtifactProbe();
   const checks = useAddressChecks();
   const { accounts, state: accountState, error: accountError } = useAccountOptionsFeed();
+
   const defaultAccountId = useDefaultOrganization(accounts);
   const [pickedAccountId, setAccountId] = useState("");
   const [accountChosenManually, setAccountChosenManually] = useState(false);
@@ -276,6 +278,11 @@ export function ComposePage(props: ComposePageProps) {
     setJourneyChoice(null); probe.clear();
   }, [selectedConnectionId, selectedConnection, githubGrant?.status, fixedSource, parked, created.packageId, probe.clear]);
   const can = partsForOrganization(sourceAccountId, globalCan, source || parked || created.packageId || created.siteId ? "update" : "create");
+  const addresses = useMemo(() => Object.fromEntries(Object.entries(addressDrafts).map(([key, draft]) => {
+    if (draft.domainSource === "explicit" || draft.domainSource === undefined && draft.ownDomain !== "") return [key, draft];
+    const suggested = can.domains ? accountDeployableDomain(accounts.find(account => account.id === draft.accountId), draft.slug) : "";
+    return [key, { ...draft, domainSource: "account" as const, ownDomain: suggested === hostnameFor(draft.slug, clusterDomain) ? "" : suggested }];
+  })), [addressDrafts, accounts, can.domains, clusterDomain]);
 
   const newPackage = useNewPackage();
   const repositoryRegistration = useRegisterRepositorySource();
@@ -576,6 +583,7 @@ export function ComposePage(props: ComposePageProps) {
       clusterDomain,
     );
     if (siteId === "") return;
+    setAddresses(held => ({ ...held, "": { ...address, domainSource: "explicit" } }));
     setCreated((held) => ({ ...held, siteId }));
     for (const domain of domainNames(address.ownDomain)) await addDomain.add(siteId, domain);
     } finally { analyzePending.current = false; if (saveMounted.current) setAnalysisStartedAt(null); }

@@ -112,7 +112,7 @@ describe("every view of the Users app", () => {
 
     const fresh = mount("groups");
     await click(await screen.findByRole("button", { name: "New group" }));
-    await screen.findByRole("region", { name: "A new group" });
+    await screen.findByRole("region", { name: "New group" });
     expect(heads()).toBe(1);
     fresh.unmount();
   });

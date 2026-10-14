@@ -1,17 +1,18 @@
+import { Shield } from "lucide-react";
+import { Wizard } from "../../kit/Wizard";
+import { Fact, Facts } from "../../kit";
+import { accountNameFrom } from "../accounts/rows";
 import { useEffect, useMemo, useState } from "react";
 
 import {
   Field,
-  Head,
   Input,
-  Panel,
-  Rail,
   RankMark,
   Select,
   roleRungOf,
   type Stop,
 } from "../../kit";
-import { ActionBar, type Act } from "../../kit/ActionBar";
+import { type Act } from "../../kit/ActionBar";
 import { AccountPicker } from "../accounts/AccountPicker";
 import type { AccountRow } from "../accounts/rows";
 import type { UsersActions } from "./actions";
@@ -21,8 +22,8 @@ import { RefusalLine } from "./PersonPage";
 import type { RoleRow } from "./rows";
 import { ladderDescending, type RoleCatalog } from "./useRoles";
 
-// A NEW ROLE, as a rail (design record, D3): Name, Start from, Permissions,
-// Scope. The stops depend on each other -- what you start from prefills the
+// A NEW ROLE: Name, Start from, Permissions, Scope, Review.
+// The stops depend on each other -- what you start from prefills the
 // grid and proposes the rank, and the rank decides whether the role is staff.
 
 /** The slug a display name derives to: kebab-case, letters and digits only. */
@@ -80,6 +81,9 @@ export function NewRolePage({
   const callerRank = roleRungOf(viewerRole)?.rank ?? 0;
   const callerHolds = useMemo(() => heldPairs(catalog.grants, viewerRole), [catalog.grants, viewerRole]);
 
+  const [open, setOpen] = useState(0);
+  const [furthest, setFurthest] = useState(0);
+  function go(index: number) { setOpen(index); setFurthest(held => Math.max(held, index)); }
   const [name, setName] = useState("");
   const [slug, setSlug] = useState("");
   const [baseSlug, setBaseSlug] = useState("");
@@ -89,7 +93,7 @@ export function NewRolePage({
 
   // A RANK IS PROPOSED BEFORE ANYBODY CHOOSES A BASE. The rail opens with the
   // ladder already read, and a rank of 0 would draw the new rung below every
-  // existing one and make the Head's action refuse until somebody typed a
+  // existing one and withhold the forward action until somebody typed a
   // number -- a form that is answered and still will not go.
   useEffect(() => {
     if (rank !== 0 || ladder.length === 0) return;
@@ -155,9 +159,6 @@ export function NewRolePage({
     {
       id: "base",
       name: "Start from",
-      // `waiting` rather than `pending`, for InvitePage's reason: a compose
-      // rail renders every stop's body, and a dimmed one reads as a form
-      // somebody may not fill in.
       state: baseSlug === "" ? "waiting" : "done",
       sentence: "A role to copy, and where the new one sits beside it.",
       answer: base === null ? "" : `${base.name}, rank ${rank}`,
@@ -285,29 +286,14 @@ export function NewRolePage({
       ]
     : [];
 
-  return (
-    <div className="os-action-pane">
-      <div className="os-action-body os-app-stack">
-        <Head title="New role" back={{ label: "Roles", onSelect: onBack }} />
+  stops.push({ id: "review", name: "Review", state: "ahead", body: <Facts><Fact label="Role" value={name.trim()} /><Fact label="Rank" value={rank} /><Fact label="Scope" value={accountNameFrom(accounts, accountId) || "Cluster-wide"} /><Fact label="Permissions" value={grants.length} /></Facts> });
+  const busy = actions.busyKey === `role:new:${derived}`;
+  const ready = open === 0 ? name.trim() !== "" && derived !== "" : open === 1 ? rank > 0 && !rankTaken && !rankTooHigh : answered;
+  const footer: Act[] = busy ? [] : [{ label: "Cancel", text: true, onAct: onBack }];
+  if (open === 4) footer.push(...acts);
+  else if (ready && !busy) footer.push({ label: "Next", tone: "primary", onAct: () => go(open + 1) });
+  return <Wizard icon={<Shield size={20} aria-hidden />} title="New role" label="What this role is" back={{ label: "Roles", onSelect: onBack }} steps={stops.map((stop, index) => ({ ...stop, state: index === open ? "open" : index < open ? "done" : index <= furthest ? "waiting" : "ahead" }))} open={stops[open]!.id} onOpen={id => { const index = stops.findIndex(stop => stop.id === id); if (!busy && index >= 0 && index <= furthest) setOpen(index); }} status={{ word: busy ? "Creating role" : open === 4 ? "Ready to create" : stops[open]!.name, detail: open === 1 && !ready ? "Choose a free rank below your own." : undefined, tone: busy ? "busy" : "none" }} acts={footer} notices={<RefusalLine actions={actions} />} />;
 
-        <Panel label="The new role">
-          {/* NO `openStop`: the compose reading, where the rail IS the form.
-              See kit/Rail.tsx -- a rail with no open stop renders every body,
-              and collapsing the stop being typed into would take the field away
-              at the first keystroke. */}
-          <Rail stops={stops} label="What this role is" />
-          <RefusalLine actions={actions} />
-        </Panel>
-
-      </div>
-      <ActionBar
-        state={answered ? "Ready to create" : "Not answered yet"}
-        detail={answered ? undefined : "A name and a free rank below your own are what a role needs."}
-        tone={answered ? "live" : "none"}
-        acts={acts}
-      />
-    </div>
-  );
 }
 
 function emptyRole(): RoleRow {

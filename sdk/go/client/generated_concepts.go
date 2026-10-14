@@ -421,6 +421,7 @@ var BoundConcepts = map[string]string{
 	"compositions":                                     "v1:compose:composition",
 	"compositionsForRecipe":                            "v1:compose:composition",
 	"compositionsForRun":                               "v1:compose:composition",
+	"configureAccountDomains":                          "v1:accounts:account",
 	"confirmRecord":                                    "v1:data:record",
 	"consentEventsBySubscriber":                        "v1:campaigns:consentEvent",
 	"consentStatus":                                    "v1:campaigns:consentEvent",

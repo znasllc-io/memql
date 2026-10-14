@@ -1,3 +1,6 @@
+import { useAccountOptions } from "../../accounts/tie";
+import { accountDefaultSender } from "../../accounts/defaults";
+import { senderIdentityFromRow } from "../rows";
 import { EMAIL_REFRESH_MS } from "../useEmail";
 import { useRef, useState } from "react";
 import { Globe } from "lucide-react";
@@ -84,7 +87,9 @@ export function ConnectSignupFormWizard({ audience, feeds, signupForms, sites, o
   const [step, setStep] = useState("deployable");
   const [siteId, setSite] = useState("");
   const [templateId, setTemplate] = useState("");
-  const [senderIdentityId, setSender] = useState("");
+  const accounts = useAccountOptions();
+  const [senderDraft, setSender] = useState<string | null>(null);
+  const senderIdentityId = senderDraft ?? accountDefaultSender(accounts.find(account => account.id === audience.accountId), feeds.senders.snapshot.rows.map(senderIdentityFromRow));
   const [consentText, setConsent] = useState("Email me your newsletter.");
   const write = useConfigureNewsletter();
   const working = useRef(false);

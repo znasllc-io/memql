@@ -1,3 +1,5 @@
+import { useAccountOptions } from "../../../accounts/tie";
+import { accountDeployableDomain } from "../../../accounts/defaults";
 import { ContentSkeleton } from "../../../../kit/ContentSkeleton";
 import { useCallback, useEffect, useState, useSyncExternalStore, type ReactNode } from "react";
 import { Globe } from "lucide-react";
@@ -272,7 +274,9 @@ export function DomainWizard({ site, name, domainId = "", trail, back, onLeave }
   /** Back to the list this was opened from. */
   onLeave: () => void;
 }) {
-  const [hostname, setHostname] = useState("");
+  const accounts = useAccountOptions();
+  const [hostnameDraft, setHostname] = useState<string | null>(null);
+
   const { busy, error, outcome, add, reset } = useAddDomain();
   const removal = useRemoveDomain();
   const [confirming, setConfirming] = useState(false);
@@ -312,6 +316,8 @@ export function DomainWizard({ site, name, domainId = "", trail, back, onLeave }
         issuedAt: "", removedAt: "", createdAt: "",
       });
 
+  const suggested = accountDeployableDomain(accounts.find(account => account.id === site.accountId), site.hostname.split(".")[0] ?? "");
+  const hostname = hostnameDraft ?? (suggested === site.hostname || rows.some(row => row.hostname === suggested && !isRemovalPath(row.status)) ? "" : suggested);
   const typed = normalizeHostname(hostname);
   // THE ONE THING A BROWSER CAN ANSWER AT KEYSTROKE RATE. Everything that
   // decides -- the cluster's own domain, a collision with a site or another

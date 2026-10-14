@@ -823,6 +823,34 @@ QueryClient.prototype.completeTodo = function (this: QueryClient, args: Complete
   return this.executeNamed("completeTodo", buildCompleteTodo(args), opts);
 };
 
+/** Configure the domains and sender used as defaults for new work in this account. Assignment is configuration, not DNS proof or permission to send mail. */
+// Bound concept: v1:accounts:account (machine-readable: BoundConcepts["configureAccountDomains"] in generated_concepts.ts).
+export interface ConfigureAccountDomainsArgs {
+  accountId: string;
+  domains: string[];
+  defaultDomain: string;
+  defaultSenderIdentityId?: string;
+}
+
+export function buildConfigureAccountDomains(args: ConfigureAccountDomainsArgs): string {
+  const parts: string[] = [];
+  parts.push("accountId: " + renderMemQLValue(args.accountId));
+  parts.push("domains: " + renderMemQLValue(args.domains));
+  parts.push("defaultDomain: " + renderMemQLValue(args.defaultDomain));
+  if (args.defaultSenderIdentityId !== undefined) parts.push("defaultSenderIdentityId: " + renderMemQLValue(args.defaultSenderIdentityId));
+  return "mutation configureAccountDomains(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    configureAccountDomains(args: ConfigureAccountDomainsArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.configureAccountDomains = function (this: QueryClient, args: ConfigureAccountDomainsArgs = {} as ConfigureAccountDomainsArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("configureAccountDomains", buildConfigureAccountDomains(args), opts);
+};
+
 /** Human confirm a data record, updating confirm count and validation state */
 // Bound concept: v1:data:record (machine-readable: BoundConcepts["confirmRecord"] in generated_concepts.ts).
 export interface ConfirmRecordArgs {

@@ -170,6 +170,18 @@ const createdCampaign = (conn: Conn) => conn.query.createCampaign.mock.calls[0]!
 // ---------------------------------------------------------------------------
 
 describe("Add a campaign", () => {
+  it("uses the account's saved sender and still permits an explicit change", async () => {
+    const conn = seed({ accounts: [{ id: "self", name: "Studio", status: "active", domains: ["acme.com"], defaultDomain: "acme.com", defaultSenderIdentityId: "s1" }] });
+    mountWindow(conn); await openWizard();
+    await screen.findByRole("radio", { name: /^Newsletter/ });
+    choose(/^Newsletter/); choose(/^August copy/);
+    expect(openStep()).toBe("When");
+    expect(railLine("Sender").textContent).toContain("news@acme.com");
+    fireEvent.click(railLine("Sender"));
+    choose(/^This cluster's sender/);
+    expect(railLine("Sender").textContent).toContain("This cluster's sender");
+  });
+
   it("says an audience past the engine's window has at least that many subscribers, wherever it names the count", async () => {
     // 5,000 is where the engine's count stopped, not the audience's size.
     const conn = seed({ subscriberCounts: { a1: { atLeast: 5000 }, "a-test": 3 } });

@@ -305,6 +305,12 @@ describe("Email settings", () => {
 // ---------------------------------------------------------------------------
 
 describe("Sending domain", () => {
+  it("starts domain setup with the selected account's default", async () => {
+    mount(fakeConnection({ accounts: [{ id: "self", name: "Studio", status: "active", domains: ["studio.test"], defaultDomain: "studio.test" }] }));
+    fireEvent.click(await screen.findByRole("button", { name: "Add sending domain" }));
+    expect((await screen.findByLabelText("Email domain") as HTMLInputElement).value).toBe("studio.test");
+  });
+
   it("offers domain setup only to owners and developers", async () => {
     const owner = fakeConnection();
     mount(owner);
@@ -487,6 +493,16 @@ describe("Add a sender", () => {
   }
   const type = (label: string, value: string) => fireEvent.change(screen.getByLabelText(label), { target: { value } });
   const press = (name: string) => { readTheBarNow(); fireEvent.click(screen.getByRole("button", { name })); };
+
+  it("suggests the account address and name, and keeps an explicit address", async () => {
+    mount(fakeConnection({ accounts: [{ id: "self", name: "Studio", status: "active", domains: ["studio.test"], defaultDomain: "studio.test" }] }));
+    await openWizard();
+    expect((screen.getByLabelText("Address") as HTMLInputElement).value).toBe("news@studio.test");
+    type("Address", "hello@studio.test"); press("Next");
+    expect((screen.getByLabelText("Display name") as HTMLInputElement).value).toBe("Studio");
+    press("Next"); press("Skip");
+    expect(screen.getByText("Send as Studio <hello@studio.test>.")).toBeTruthy();
+  });
 
   it("adds a sender through the wizard", async () => {
     const conn = fakeConnection();

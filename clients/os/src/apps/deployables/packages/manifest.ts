@@ -8,7 +8,7 @@ export function domainNames(value: string): string[] {
 }
 
 export function addressFromManifest(app: ReportDeployable | undefined, accountId: string): AddressDraft {
-  return { slug: app?.deployment?.slug || generateNickname(), accountId, ownDomain: app?.deployment?.domains?.join(", ") || "" };
+  return { slug: app?.deployment?.slug || generateNickname(), accountId, ownDomain: app?.deployment?.domains?.join(", ") || "", ...(app?.deployment?.domains !== undefined ? { domainSource: "explicit" as const } : {}) };
 }
 
 /** Keep the complete analyzed manifest, including build/asset declarations.

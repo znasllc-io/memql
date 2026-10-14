@@ -497,6 +497,9 @@ surface in the shell that read as a single thought.
   who can set it up. "Not known" is not "no":
   when the question goes unanswered the old offer stands, and the refusal
   still lands in place.
+- **Deliberate navigation brings the next question into keyboard reach.** After
+  a footer action or a rail choice opens a step, the shared wizard focuses its
+  first input or choice. Background progress never takes focus from the user.
 - **The orb names the subject.** The gate wears the MemQL mark, because what is
   being set up there is the cluster. An add wears the thing being added: a
   globe, a machine, a rocket. Same circle, same theme tokens.
