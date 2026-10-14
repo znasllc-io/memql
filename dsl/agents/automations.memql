@@ -34,8 +34,14 @@
 // ways, once per matching event and once per run, which presents as a template
 // that works.
 
-/// Run one agent turn for a goal that named an agent and a prompt. Backs the `agent(name, prompt)`
-/// DSL builtin, which opens a goal naming this template instead of minting a Plan.
+/// Selection thresholds and prompt allocation are deployment policy. The native
+/// operation pins the first selection to this step version on every replica.
+@template
+automation agentWorkSkillContext {
+ args { text string }
+ return builtin agentSelectWorkSkills(text: args.text, limit: 3, minimumScore: 1, maxBytes: 8000)
+}
+
 @template
 automation invokeAgent {
   args {

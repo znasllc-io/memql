@@ -112,7 +112,13 @@ func run(argv []string, stdout, stderr io.Writer) int {
 		Id:      "bench.run",
 		Summary: "Run the MemQL proving corpus and publish what it measured",
 		Params: []capability.Param{
-			{Name: "do", Description: "run | gate | scorecard | record", Required: true},
+			{Name: "do", Description: "run | gate | scorecard | record | goal-plan | goal-run", Required: true},
+			{Name: "goal-catalog", Description: "versioned goal catalog (default test/proving/goals/catalog.json)"},
+			{Name: "matrix", Description: "manual goal matrix (default test/proving/goals/matrix.json)"},
+			{Name: "output", Description: "new directory for isolated fixtures and raw evaluation receipts"},
+			{Name: "endpoint", Description: "authenticated cluster TLS front door; token from MEMQL_EVALUATION_TOKEN"},
+			{Name: "ca-file", Description: "optional trusted PEM CA for the cluster"},
+			{Name: "engine-commit", Description: "full engine commit, checked against the connected server's build identity"},
 			{Name: "tier", Description: "ci (replayed, no provider) or live (real providers)"},
 			{Name: "corpus", Description: "directory of scenario JSON (default " + defaultCorpus + ")"},
 			{Name: "cassettes", Description: "directory of recorded responses (default " + defaultCassettes + ")"},
@@ -143,6 +149,8 @@ func run(argv []string, stdout, stderr io.Writer) int {
 	}
 
 	switch c.Param("do", "") {
+	case "goal-plan", "goal-run":
+		return doGoalEvaluation(c)
 	case "run":
 		return doRun(c)
 	case "gate":
@@ -152,7 +160,7 @@ func run(argv []string, stdout, stderr io.Writer) int {
 	case "record":
 		return doRecord(c)
 	default:
-		return c.Fail(capability.ExitBadParam, "--do=%q is not one of run, gate, scorecard, record", c.Param("do", ""))
+		return c.Fail(capability.ExitBadParam, "unknown --do=%q", c.Param("do", ""))
 	}
 }
 

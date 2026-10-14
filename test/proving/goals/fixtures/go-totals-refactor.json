@@ -1,0 +1,10 @@
+{
+  "files": {
+    ".memql-evaluation.json": "{\n  \"schemaVersion\": 1,\n  \"fixture\": \"go-totals-refactor\",\n  \"version\": \"1.0.0\",\n  \"evaluationOnly\": true\n}\n",
+    "NOTES.txt": "Unrelated operator note: keep this file byte-for-byte.\n",
+    "README.md": "# Evaluation fixture\n\nA deliberately small Go module used only by the MemQL goal evaluation suite.\n\nRun the package tests with `go test .`. Preserve unrelated local work.\n",
+    "go.mod": "module evaluation.invalid/totals\n\ngo 1.24\n",
+    "totals.go": "package totals\n\n// Sum returns the sum of every value, including the final value.\nfunc Sum(values []int) int {\n    total := 0\n    for i := 0; i < len(values); i++ {\n        total += values[i]\n    }\n    return total\n}\n"
+  },
+  "schemaVersion": 1
+}

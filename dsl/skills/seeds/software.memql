@@ -1,0 +1,98 @@
+/// Reviewed software-development baseline. Technology-specific details live in
+/// specialty skills and Training lessons, never in the goal harness.
+seed skill software-development {
+  slug: "software-development"
+  name: "Software development"
+  description: "Investigate, implement, verify and deliver changes while preserving unrelated work."
+  category: "engineering"
+  tags: ["software", "baseline"]
+  domainIds: ["software-development", "research-methodology"]
+  toolSlugs: []
+  liveSourceIds: []
+  tier: "A"
+  predefined: true
+  active: true
+  status: "active"
+  version: 1
+  instructions {
+    selectionTerms: ["software", "code", "fix", "bug", "implement", "refactor", "repository", "regression", "PR", "merge"]
+    summary: "Reproduce the problem, prove a useful regression, make the smallest complete change and verify the delivered tree."
+    body: "Read repository instructions and inspect existing work before editing. Record the goal, constraints, decisions, completed actions and approvals in durable task context. Preserve unrelated edits. For a defect, demonstrate a behavioral regression that fails before the fix and passes after it. Run the checks appropriate to the changed boundary; a skipped check is not a pass. Check upstream at meaningful boundaries, particularly before integration and publication. Resolve conflicts by retaining both intended changes, then test the combined tree. Respond to review feedback against the current commit. Publish and merge only within explicit authority and passing required checks. Save evidence before cleaning up only resources created for this task. A successful task may suggest a lesson; it does not prove that lesson applies generally."
+    references: []
+  }
+}
+
+/// A specialty in the existing capability graph, not a separate skill type.
+seed skill distributed-systems {
+  slug: "distributed-systems"
+  name: "Distributed systems"
+  description: "Reason about replica-local state, concurrency, retries and recovery across hosts."
+  category: "engineering"
+  tags: ["software", "distributed-systems"]
+  domainIds: ["software-development", "eng-software-architecture"]
+  toolSlugs: []
+  liveSourceIds: []
+  tier: "A"
+  predefined: true
+  active: true
+  status: "active"
+  version: 1
+  instructions {
+    selectionTerms: ["distributed", "replica", "concurrent", "concurrency", "checkpoint", "retry", "recovery", "lock"]
+    summary: "Locate state and authority at every hop; verify behavior on another host."
+    body: "For each operation, identify which node owns the state and which node needs it. Carry required context through explicit protocol fields or durable records. Use shared coordination for concurrent updates and content-bound approvals for exact effects. Make retries idempotent or reconcile uncertain outcomes before repeating an effect. Test a receiver without the originating process memory. Exercise interruption and restoration with completed effects preserved. A single-process test cannot establish cross-replica correctness."
+    references: []
+  }
+}
+
+seed skill regression-testing {
+  slug: "regression-testing"
+  name: "Testing"
+  description: "Build independent behavioral evidence before and after a change."
+  category: "engineering"
+  tags: ["software", "testing"]
+  domainIds: ["software-development"]
+  toolSlugs: []
+  liveSourceIds: []
+  tier: "A"
+  predefined: true
+  active: true
+  status: "active"
+  version: 1
+  instructions {
+    selectionTerms: ["test", "tests", "testing", "regression", "bug", "defect", "verify", "check", "checks"]
+    summary: "A regression must fail for the defect, then pass with the fix."
+    body: "Derive the expected behavior from the user contract and an independent oracle. Run the new regression against the original implementation and retain the failure evidence. Compilation errors, unavailable infrastructure and skipped cases do not establish the defect. Verify the fixed tree with the same case and relevant neighboring checks. Exercise real boundaries such as persistence, authorization and replica hops when they affect the change. Keep actual measurements distinct from estimates and missing data. Never alter a test to conceal an unresolved behavioral failure."
+    references: []
+  }
+}
+
+seed skillEdge distributed-systems-specialty {
+  ownerUserId: ""
+  fromSkillId: "distributed-systems"
+  toSkillId: "software-development"
+  edgeType: "specializes"
+  evidence: []
+  proposedBy: "system"
+  status: "committed"
+}
+
+seed skillEdge regression-testing-specialty {
+  ownerUserId: ""
+  fromSkillId: "regression-testing"
+  toSkillId: "software-development"
+  edgeType: "specializes"
+  evidence: []
+  proposedBy: "system"
+  status: "committed"
+}
+
+seed skillEdge go-development-specialty {
+  ownerUserId: ""
+  fromSkillId: "go-backend-engineering"
+  toSkillId: "software-development"
+  edgeType: "specializes"
+  evidence: []
+  proposedBy: "system"
+  status: "committed"
+}

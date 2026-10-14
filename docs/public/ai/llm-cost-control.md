@@ -391,6 +391,20 @@ went with memql#5000.
 
 ## Environment reference
 
+### Per-goal no-paid-provider ceiling
+
+A human API caller may set `createGoal.noPaidProviders` to true. This is a
+persisted execution ceiling on the goal and its runs, inherited by child work
+and restored on another replica. It covers every routed modality, including
+embeddings. The router refuses federation entries before selection and checks
+again during call-time fallback or cloud consent. A step's model override
+cannot remove it. Leaving the field absent preserves ordinary routing.
+
+The local goal evaluator requires this ceiling in addition to its exact fleet
+source pin. It also reads and records a fleet embedding binding before admission
+so asynchronous indexing has a local source. It does not treat a zero dollar
+ceiling as no-spend: the ordinary numeric ceiling uses zero to mean unset.
+
 ### Layer 0 — kill-switch
 | env | default | meaning |
 |---|---|---|

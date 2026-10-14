@@ -1519,6 +1519,14 @@ func ComposeRunRecipeBuild(args ComposeRunRecipeArgs) string {
 
 // CreateGoal -- Accept a goal and start work on it. Opens a v1:work:goal owned by the caller and its first v1:work:run in `compiling`, then dispatches compile: catalog exact match, then near-match with a gap list, then the cheap triage. Returns {goalId, runId}. A goal that fully matches the catalog reaches no model at all.
 type CreateGoalArgs struct {
+	// Human-selected execution ceiling: no federation provider may serve any call of this goal, including embeddings, step overrides and fallback. Child goals inherit it and cannot relax it.
+	NoPaidProviders    bool
+	NoPaidProvidersSet bool // set true to send noPaidProviders; required because zero-value bool is ambiguous
+	// The human caller's routing choice, using the same source grammar as Ask. A pinned fleet source never falls back to a paid provider. Child/model calls cannot replace their inherited choice.
+	Source string
+	// Optional human-selected intelligence level for this goal's steps; compiler calls retain their own levels.
+	// Enum: fast | strong | reasoning
+	Level string
 	// Installed Spine template name. Defaults to defaultWorkSpine. Its templates, pure logic, scoped actions and selected phase recipes are frozen onto this run before compilation.
 	Spine string
 	// The goal in the person's own words.
@@ -1542,7 +1550,28 @@ func (qc *QueryClient) CreateGoal(ctx context.Context, args CreateGoalArgs) (*Re
 func CreateGoalBuild(args CreateGoalArgs) string {
 	var b strings.Builder
 	b.WriteString("builtin createGoal(")
+	if args.NoPaidProvidersSet {
+		b.WriteString("noPaidProviders: ")
+		b.WriteString(fmt.Sprintf("%v", args.NoPaidProviders))
+	}
+	if args.Source != "" {
+		if b.Len() > 19 {
+			b.WriteString(", ")
+		}
+		b.WriteString("source: ")
+		b.WriteString(quoteMemQL(args.Source))
+	}
+	if args.Level != "" {
+		if b.Len() > 19 {
+			b.WriteString(", ")
+		}
+		b.WriteString("level: ")
+		b.WriteString(quoteMemQL(args.Level))
+	}
 	if args.Spine != "" {
+		if b.Len() > 19 {
+			b.WriteString(", ")
+		}
 		b.WriteString("spine: ")
 		b.WriteString(quoteMemQL(args.Spine))
 	}
@@ -6850,6 +6879,47 @@ func StorefrontProbeBuild(args StorefrontProbeArgs) string {
 	}
 	b.WriteString(")")
 	return b.String()
+}
+
+// WorkRecordGoalEvaluation -- Record an external evaluator's artifact verdicts for the human caller's finished run. MemQL verifies ownership and call receipts, not local files. Model calls cannot publish their own evaluation. Repeated identities are idempotent only for identical evidence; changed claims are refused.
+type WorkRecordGoalEvaluationArgs struct {
+	Scenario map[string]any
+	Result   map[string]any
+}
+
+// WorkRecordGoalEvaluation calls the engine builtin workRecordGoalEvaluation.
+func (qc *QueryClient) WorkRecordGoalEvaluation(ctx context.Context, args WorkRecordGoalEvaluationArgs) (*Result, error) {
+	call := WorkRecordGoalEvaluationBuild(args)
+	return qc.executeNamed(ctx, "workRecordGoalEvaluation", call)
+}
+
+func WorkRecordGoalEvaluationBuild(args WorkRecordGoalEvaluationArgs) string {
+	var b strings.Builder
+	b.WriteString("builtin workRecordGoalEvaluation(")
+	b.WriteString("scenario: ")
+	b.WriteString(renderMemQLValue(args.Scenario))
+	if b.Len() > 33 {
+		b.WriteString(", ")
+	}
+	b.WriteString("result: ")
+	b.WriteString(renderMemQLValue(args.Result))
+	b.WriteString(")")
+	return b.String()
+}
+
+// WorkSkillCatalog -- Inspect the catalog and verify baseline content against installed seeds.
+type WorkSkillCatalogArgs struct {
+}
+
+// WorkSkillCatalog calls the engine builtin workSkillCatalog.
+func (qc *QueryClient) WorkSkillCatalog(ctx context.Context, args WorkSkillCatalogArgs) (*Result, error) {
+	call := WorkSkillCatalogBuild(args)
+	return qc.executeNamed(ctx, "workSkillCatalog", call)
+}
+
+func WorkSkillCatalogBuild(args WorkSkillCatalogArgs) string {
+	_ = args
+	return "builtin workSkillCatalog()"
 }
 
 // WorkStepVersions -- Every VERSION of every step of one of the caller's runs -- the step timeline's read (design D18). The standard reads collapse an append-only row to its newest version; this answers each version once, folded to its newest row-version, with the run's head marked (current). Returns one entry per version, keyed <stepId>@v<version>.

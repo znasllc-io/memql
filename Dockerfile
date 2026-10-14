@@ -310,6 +310,10 @@ COPY sdk/ts ./sdk/ts
 COPY clients/os ./clients/os
 COPY scripts/os ./scripts/os
 
+# Training imports the versioned evaluation catalog and setup from the same
+# files used by the operator runner. Include them in the isolated SPA build.
+COPY test/proving/goals/catalog.json test/proving/goals/matrix.json ./test/proving/goals/
+
 # The VS Code landing page (editors/vscode/site, memql#5518) is the second
 # built-in platform site, served at vscode.<domain> from a seeded site row
 # exactly as the OS shell is. Its build is Node stdlib only -- no npm install

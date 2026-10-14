@@ -576,6 +576,12 @@ func (r *Replier) prepareTurn(ctx context.Context, msg *memqlv1.AgentGenerateTur
 		}
 	}
 
+	if skills, err := r.workSkillContext(ctx, latestUserQuery(msg)); err != nil {
+		return nil, fmt.Errorf("prepare versioned skill context: %w", err)
+	} else if len(skills) > 0 {
+		data["skills"] = skills
+	}
+
 	// Cross-space "have we met before?" signal. The agent reply prompt
 	// branches on agentIsKnownToUser at the very top -- a non-zero
 	// count means "skip the self-introduction; we're colleagues, not

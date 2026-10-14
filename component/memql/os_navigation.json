@@ -444,6 +444,14 @@
         "name": "Domains"
       },
       {
+        "id": "skills",
+        "name": "Skills"
+      },
+      {
+        "id": "evaluations",
+        "name": "Evaluations"
+      },
+      {
         "id": "logs",
         "name": "Logs",
         "requires": "app:training/logs"

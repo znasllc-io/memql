@@ -1,0 +1,15 @@
+.os-grid.os-training-setups th,
+.os-grid.os-training-setups td {
+  min-width: 160px;
+  max-width: 360px;
+  padding: 10px;
+  text-align: left;
+  vertical-align: top;
+  overflow-wrap: anywhere;
+}
+.os-training-setups tbody th {
+  white-space: normal;
+}
+.os-training-setups th:first-child {
+  min-width: 220px;
+}
