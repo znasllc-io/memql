@@ -15,7 +15,7 @@ const { NexusApp } = await import("../../src/apps/nexus/NexusApp");
 const { LocalNexusSettingsStore } = await import("../../src/apps/nexus/settings");
 const { answerPayload, budgetApprovalAnswer } = await import("../../src/apps/nexus/ApprovalsSection");
 const { approvalFromRow } = await import("../../src/apps/nexus/rows");
-const { approvalRow, fakeConnection, procedureRow, runRow, withSession } = await import("./harness");
+const { approvalRow, fakeConnection, procedureRow, runRow, rowsResult, withSession } = await import("./harness");
 
 type Conn = ReturnType<typeof fakeConnection>;
 
@@ -393,6 +393,45 @@ const scopedComputerRequest = (kind = "directory_read") => ({
 });
 
 describe("computer permission choices", () => {
+  it("offers a retry when the selected request's older run cannot be read", async () => {
+    const conn = fakeConnection({ approvals: [approvalRow({ id: "old-scope", runId: "older-run", kind: "scopeElevation", question: "Inspect older work", expiresAt: "2020-01-01T00:00:00Z", subject: { computerPermission: scopedComputerRequest() } })] });
+    conn.query.workRunSummaryForOwner.mockRejectedValueOnce(new Error("Disconnected"))
+      .mockResolvedValueOnce(rowsResult([runRow({ id: "older-run", status: "waiting", waitingOn: { kind: "approval", subject: "old-scope" } })]));
+    mount(conn);
+    fireEvent.click(await screen.findByText("Inspect older work"));
+    expect(await screen.findByRole("alert")).toHaveProperty("textContent", "Could not check this work. Try again.");
+    fireEvent.click(await screen.findByRole("button", { name: "Try again" }));
+    expect(await screen.findByRole("button", { name: "Review again" })).toBeTruthy();
+    expect(conn.query.decideApproval).not.toHaveBeenCalled();
+  });
+
+  it("loads the parked run when an old approval lies beyond the run history page", async () => {
+    const conn = fakeConnection({ approvals: [approvalRow({ id: "old-scope", runId: "older-run", kind: "scopeElevation", question: "Inspect older work", expiresAt: "2020-01-01T00:00:00Z", subject: { computerPermission: scopedComputerRequest() } })] });
+    conn.query.workRunSummaryForOwner.mockResolvedValueOnce(rowsResult([runRow({ id: "older-run", status: "waiting", waitingOn: { kind: "approval", subject: "old-scope" } })]));
+    mount(conn);
+    fireEvent.click(await screen.findByText("Inspect older work"));
+    expect(await screen.findByRole("button", { name: "Review again" })).toBeTruthy();
+    expect(conn.query.workRunSummaryForOwner).toHaveBeenCalledWith({ runId: "older-run" }, expect.anything());
+    await act(async () => conn.subscriptions.emit("v1:work:run", runRow({ id: "older-run", status: "cancelled", cancelRequested: true }), "NODE_UPDATED"));
+    await waitFor(() => expect(screen.queryByRole("button", { name: "Review again" })).toBeNull());
+  });
+
+  it("refreshes an expired permission for a fresh review without granting it", async () => {
+    const original = approvalRow({ id: "expired-scope", runId: "parked-run", kind: "scopeElevation", question: "Inspect the repository", expiresAt: "2020-01-01T00:00:00Z", subject: { computerPermission: scopedComputerRequest() } });
+    const conn = fakeConnection({ approvals: [original], runs: [runRow({ id: "parked-run", status: "waiting", waitingOn: { kind: "approval", subject: "expired-scope" } })] });
+    mount(conn);
+    fireEvent.click(await screen.findByText("Inspect the repository"));
+    await act(async () => { fireEvent.click(await screen.findByRole("button", { name: "Review again" })); });
+    await waitFor(() => expect(conn.query.refreshComputerPermission).toHaveBeenCalledWith({ approvalId: "expired-scope" }));
+    expect(conn.query.decideApproval).not.toHaveBeenCalled();
+    await act(async () => conn.subscriptions.emit(APPROVAL, { ...original, createdAt: "2026-09-01T09:05:00Z", expiresAt: "2099-01-01T00:00:00Z", artifactHash: "fresh-review" }, "NODE_UPDATED"));
+    expect(await screen.findByRole("button", { name: "Allow once" })).toBeTruthy();
+    expect((screen.getByRole("checkbox", { name: "Always allow reading this directory" }) as HTMLInputElement).checked).toBe(false);
+    await readTheBar();
+    fireEvent.click(screen.getByRole("button", { name: "Allow once" }));
+    await waitFor(() => expect(conn.query.decideApproval).toHaveBeenCalledWith({ approvalId: "expired-scope", decision: "approved", answer: { permissionMode: "once", permissionHash: "fresh-review" } }));
+  });
+
   it("opens an expired scope request in its conversation without granting access", async () => {
     const conn = fakeConnection({
       approvals: [approvalRow({ id: "expired-scope", runId: "parked-run", kind: "scopeElevation", question: "Inspect the repository", expiresAt: "2020-01-01T00:00:00Z", subject: { computerPermission: scopedComputerRequest() } })],
@@ -429,6 +468,7 @@ describe("computer permission choices", () => {
     mount(conn);
     fireEvent.click(await screen.findByText("Inspect the repository"));
     expect(screen.queryByRole("button", { name: "Discuss in Ask" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Review again" })).toBeNull();
     expect(screen.queryByRole("button", { name: "Allow once" })).toBeNull();
     expect(conn.query.decideApproval).not.toHaveBeenCalled();
   });
@@ -443,7 +483,7 @@ describe("computer permission choices", () => {
     if (kind === "exact_command") expect(screen.getByText("60 seconds")).toBeTruthy();
     expect((screen.getByRole("checkbox") as HTMLInputElement).checked).toBe(false);
     fireEvent.click(screen.getByRole("button", { name: "Allow once" }));
-    await waitFor(() => expect(conn.query.decideApproval).toHaveBeenCalledWith({ approvalId: "permission", decision: "approved", answer: { permissionMode: "once" } }));
+    await waitFor(() => expect(conn.query.decideApproval).toHaveBeenCalledWith({ approvalId: "permission", decision: "approved", answer: { permissionMode: "once", permissionHash: "sha256:abc123" } }));
   });
 
   it("sends an explicit remembered choice and never attaches it to rejection", async () => {
@@ -453,7 +493,7 @@ describe("computer permission choices", () => {
     fireEvent.click(screen.getByRole("checkbox", { name: "Always allow reading this directory" }));
     await readTheBar();
     fireEvent.click(screen.getByRole("button", { name: "Always allow" }));
-    await waitFor(() => expect(conn.query.decideApproval).toHaveBeenCalledWith({ approvalId: "permission", decision: "approved", answer: { permissionMode: "always" } }));
+    await waitFor(() => expect(conn.query.decideApproval).toHaveBeenCalledWith({ approvalId: "permission", decision: "approved", answer: { permissionMode: "always", permissionHash: "sha256:abc123" } }));
     fireEvent.click(screen.getByRole("button", { name: /^Reject this:/ }));
     await waitFor(() => expect(conn.query.decideApproval).toHaveBeenCalledWith({ approvalId: "permission", decision: "rejected" }));
   });

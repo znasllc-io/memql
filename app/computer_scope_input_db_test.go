@@ -87,17 +87,17 @@ func TestWorkDBComputerScopeInputIsModelCorrectable(t *testing.T) {
 		return map[string]any{"tool": "workerHost", "action": "exec", "args": args}
 	}
 	for _, tc := range []struct {
-		name, field string
-		operation   any
+		name, field, schemaDetail string
+		operation                 any
 	}{
-		{"read missing directory", "operation", read("fs_read", "", "/docs/file")},
-		{"list relative directory", "operation", read("fs_list", "docs", "/docs/file")},
-		{"stat outside directory", "operation", read("fs_stat", "/docs", "/elsewhere/file")},
-		{"read relative path", "operation", read("fs_read", "/docs", "file")},
-		{"command missing cwd", "operation.args", exec(map[string]any{"cmd": "pwd"})},
-		{"command hidden option", "operation.args", exec(map[string]any{"cmd": "pwd", "cwd": "/docs", "stdin": "data"})},
-		{"command timeout", "operation.args", exec(map[string]any{"cmd": "pwd", "cwd": "/docs", "timeoutSec": 601})},
-		{"unsupported operation", "operation", read("fs_write", "/docs", "/docs/file")},
+		{"read missing directory", "operation.directory", "", read("fs_read", "", "/docs/file")},
+		{"list relative directory", "operation.directory", "", read("fs_list", "docs", "/docs/file")},
+		{"stat outside directory", "operation.args.path", "", read("fs_stat", "/docs", "/elsewhere/file")},
+		{"read relative path", "operation.args.path", "", read("fs_read", "/docs", "file")},
+		{"command missing cwd", "operation.args", "", exec(map[string]any{"cmd": "pwd"})},
+		{"command hidden option", "", "stdin", exec(map[string]any{"cmd": "pwd", "cwd": "/docs", "stdin": "data"})},
+		{"command timeout", "operation.args", "", exec(map[string]any{"cmd": "pwd", "cwd": "/docs", "timeoutSec": 601})},
+		{"unsupported operation", "", "/operation/action", read("fs_write", "/docs", "/docs/file")},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			err := call(tc.operation)
@@ -106,7 +106,11 @@ func TestWorkDBComputerScopeInputIsModelCorrectable(t *testing.T) {
 			require.Equal(t, memql.ToolErrorValidation, classified.Type, "invalid tool input must not ask for a platform retry: %v", err)
 			require.False(t, classified.Retryable)
 			require.True(t, classified.UserFixable)
-			require.Equal(t, tc.field, classified.Details["field"])
+			if tc.schemaDetail != "" {
+				require.ErrorContains(t, err, tc.schemaDetail, "the input schema must explain the rejected value")
+			} else {
+				require.Equal(t, tc.field, classified.Details["field"])
+			}
 			require.Zero(t, authority.finds, "input refusal must precede receipt lookup")
 			require.Zero(t, approvalCalls, "input refusal must not ask for broader authority")
 		})

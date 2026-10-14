@@ -173,6 +173,39 @@ describe("an approved budget whose work did not resume", () => {
     expect(conn.query.decideApproval).toHaveBeenCalledTimes(1);
     await act(async () => { finish(receipt(false)); await first; });
     expect(await second).toBe(false);
-    expect(result.current.budgetResumes.budget?.newLimit).toBe(20);
+    expect(result.current.approvalResumes.budget?.newLimit).toBe(20);
+  });
+});
+
+describe("computer permission recovery", () => {
+  const permission = () => approvalRow({ id: "permission", runId: "run", kind: "scopeElevation", decision: "approved", artifactHash: "reviewed", subject: { computerPermission: { version: 1 } }, answer: { permissionMode: "always" } });
+  it("recovers saved directory permission after reopening without selecting a new mode", async () => {
+    const conn = fakeConnection();
+    Object.assign(conn.query, {
+      workApprovalForOwner: vi.fn(async () => rowsResult([permission()])),
+      workRunForOwner: vi.fn(async () => rowsResult([runRow({ id: "run", status: "waiting", waitingOn: { kind: "approval", subject: "permission" } })])),
+    });
+    h.connection = conn;
+    const { result } = renderHook(() => useDecideApproval());
+    await act(async () => { await result.current.readApprovalResume("permission"); });
+    expect(result.current.approvalResumes.permission?.permissionAnswer).toEqual({ permissionMode: "always", permissionHash: "reviewed" });
+    conn.query.decideApproval.mockResolvedValue(builtinReply("decideApproval", [{ approvalId: "permission", decision: "approved", runId: "run", runResumed: true }]));
+    await act(async () => { await result.current.decide("permission", "approved", result.current.approvalResumes.permission!.permissionAnswer); });
+    expect(result.current.approvalResumes.permission).toBeUndefined();
+  });
+  it("keeps a failed continuation available and distinguishes a review from approval", async () => {
+    const conn = fakeConnection(); h.connection = conn;
+    conn.query.decideApproval.mockResolvedValueOnce(builtinReply("decideApproval", [{ approvalId: "permission", permissionState: "review", message: "Review again", runResumed: false }]))
+      .mockResolvedValueOnce(builtinReply("decideApproval", [{ approvalId: "permission", decision: "approved", runId: "run", runResumed: false, resumeError: "Reconnect to continue" }]));
+    const { result } = renderHook(() => useDecideApproval());
+    await act(async () => { expect(await result.current.decide("permission", "approved", { permissionMode: "once" })).toBe(false); });
+    expect(result.current.permissionReviews.permission).toBe("review");
+    expect(result.current.approvalResumes.permission).toBeUndefined();
+    await act(async () => { await result.current.refreshPermission("permission"); });
+    expect(conn.query.decideApproval).toHaveBeenCalledTimes(1);
+    expect(result.current.permissionReviews.permission).toBeUndefined();
+    await act(async () => { expect(await result.current.decide("permission", "approved", { permissionMode: "once" })).toBe(false); });
+    expect(result.current.approvalResumes.permission?.permissionAnswer).toEqual({ permissionMode: "once" });
+    expect(result.current.error).toBe("Reconnect to continue");
   });
 });

@@ -256,7 +256,8 @@ export function fakeConnection(seed: FakeSeed = {}) {
       // loudly and prove less.
       forkRun: write(seed.deriveReply),
       replayRun: write(seed.deriveReply),
-      decideApproval: write(),
+      decideApproval: builtinWrite("decideApproval", args => ({ approvalId: args.approvalId, decision: args.decision, runId: "run", runResumed: true })),
+      refreshComputerPermission: builtinWrite("refreshComputerPermission", args => ({ approvalId: args.approvalId, permissionState: "review_ready" })),
       executeNamed: vi.fn(async (_name: string, filter: string) => {
         const match = /id==(\S+)/.exec(filter);
         const wanted = match?.[1] ?? "";

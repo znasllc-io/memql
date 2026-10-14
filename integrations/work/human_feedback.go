@@ -60,6 +60,11 @@ func (i *Integration) parkHumanDecisionWithBudget(ctx context.Context, owner, ru
 	if !ok || memql.BareShortId(rc.RunId) != memql.BareShortId(runID) || memql.BareShortId(rc.OwnerUserId) != memql.BareShortId(owner) {
 		return "", fmt.Errorf("human decision requires the current owned work run")
 	}
+	// Hash the storage representation, including machine-selection maps.
+	subject, err := workstate.NormalizeApprovalSubject(subject)
+	if err != nil {
+		return "", fmt.Errorf("approval cannot be saved: %w", err)
+	}
 	hash := workstate.ArtifactHash(subject)
 	first := workstate.HumanQuestionID(memql.BareShortId(runID), rc.StepKey, approvalKind, hash, rc.RerunRequestId)
 	if i.decisionGate == nil {
