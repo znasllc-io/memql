@@ -2,7 +2,7 @@ import { fireEvent, screen, within } from "@testing-library/react";
 import { beforeEach, describe, expect, it } from "vitest";
 
 import { resetIdsForTest } from "../../src/system/desks";
-import { ADMIN, READER, gotoSection, openFromLauncher, renderShell } from "./shellHarness";
+import { ADMIN, OWNER, READER, gotoSection, openFromLauncher, renderShell } from "./shellHarness";
 
 // The apps index (memql#4743), through the real shell.
 
@@ -35,6 +35,7 @@ describe("the apps index", () => {
     expect(list.classList.contains("os-record-list")).toBe(true);
     expect(screen.getByRole("heading", { name: "Apps" }).parentElement?.querySelector(".os-head-meta")?.textContent).toBe(String(within(list).getAllByRole("listitem").length));
     expect(within(list).getByText("Users")).toBeTruthy();
+    expect(within(list).queryByText("Fleet")).toBeNull();
     // Scoped to the entry: "Settings" is also the label on every app's own
     // settings button in this list.
     expect(entryFor(list, "Settings")).toBeTruthy();
@@ -44,11 +45,12 @@ describe("the apps index", () => {
     const list = openIndex({ access: READER });
     expect(within(list).queryByText("Users")).toBeNull();
     expect(within(list).queryByText("Training")).toBeNull();
+    expect(within(list).queryByText("Fleet")).toBeNull();
     expect(within(list).getByText("Files")).toBeTruthy();
   });
 
-  it("opens the target app's own window on its settings section", () => {
-    const list = openIndex({ access: ADMIN });
+  it.each(["owner", "developer"])("opens Fleet settings for a %s", (role) => {
+    const list = openIndex({ access: { ...OWNER, role } });
     fireEvent.click(within(entryFor(list, "Fleet")).getByRole("button", { name: "Settings" }));
 
     // The Fleet window is open AND showing its own settings section -- which
@@ -60,7 +62,7 @@ describe("the apps index", () => {
   });
 
   it("focuses the app's EXISTING window rather than opening a second one", () => {
-    renderShell({ access: ADMIN });
+    renderShell({ access: OWNER });
     openFromLauncher("Fleet");
     openFromLauncher("Settings");
     gotoSection("Settings", "Apps");
@@ -74,7 +76,7 @@ describe("the apps index", () => {
   });
 
   it("is a directory, not a host -- it never renders another app's settings UI", () => {
-    const list = openIndex({ access: ADMIN });
+    const list = openIndex({ access: OWNER });
     // The Fleet's own settings surface offers an "open Fleet on" picker.
     // Nothing of it may appear inside the index.
     expect(within(list).queryByRole("combobox")).toBeNull();

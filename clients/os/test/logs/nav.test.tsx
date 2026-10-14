@@ -2,11 +2,11 @@ import { fireEvent, screen, within } from "@testing-library/react";
 import { beforeEach, describe, expect, it } from "vitest";
 
 import { resetIdsForTest } from "../../src/system/desks";
-import { ADMIN, READER, gotoSection, openFromLauncher, renderShell } from "../settings/shellHarness";
+import { ADMIN, OWNER, READER, gotoSection, openFromLauncher, renderShell } from "../settings/shellHarness";
 
 // The Logs section and the Logs app through the REAL shell (epic memql#4895):
-// the nav offers the section to an admin and hides it from a reader, and the
-// launcher does the same with the app. `sectionsForRole` is pinned over the
+// Fleet and its logs belong to owners and developers; the standalone Logs
+// app also admits admins. `sectionsForRole` is pinned over the
 // registry elsewhere; this is the nav actually drawing the answer.
 
 beforeEach(() => {
@@ -22,31 +22,25 @@ function navNames(app: string): string[] {
 }
 
 describe("the Logs section in a window's nav", () => {
-  it("an admin's Fleet window offers Logs, right before Settings", () => {
-    renderShell({ access: ADMIN });
+  it.each(["owner", "developer"])("%s's Fleet window offers Logs", (role) => {
+    renderShell({ access: { ...OWNER, role } });
     openFromLauncher("Fleet");
     expect(screen.getByRole("button", { name: "Fleet logs" })).toBeTruthy();
-    // Apps joined between Workbenches and Logs (epic memql#5009); Logs is
-    // still the section immediately before Settings, which is what this
-    // pins.
     expect(navNames("Fleet")).toEqual([
       "Overview", "Machines", "Routing", "Model library", "Activity", "Workspaces",
     ]);
   });
 
-  it("a reader's Fleet window does not", () => {
-    renderShell({ access: READER });
-    openFromLauncher("Fleet");
-    expect(screen.queryByRole("button", { name: "Fleet logs" })).toBeNull();
-    // Apps is NOT admin-floored -- both concepts behind it declare the
-    // composite owner tier -- so a reader keeps it and loses only Logs.
-    expect(navNames("Fleet")).toEqual([
-      "Overview", "Machines", "Routing", "Model library", "Activity", "Workspaces",
-    ]);
+  it.each(["admin", "writer", "reader"])("Fleet is absent from a %s's launcher", (role) => {
+    renderShell({ access: { ...OWNER, role } });
+    fireEvent.click(screen.getByRole("button", { name: "Launcher" }));
+    const launcher = screen.getByRole("dialog", { name: "Launcher" });
+    expect(within(launcher).queryByRole("button", { name: /^Fleet$/ })).toBeNull();
+    expect(within(launcher).getByRole("button", { name: /^Files$/ })).toBeTruthy();
   });
 
   it("opening the section renders it, and it says the shell is not connected", () => {
-    renderShell({ access: ADMIN });
+    renderShell({ access: OWNER });
     openFromLauncher("Fleet");
     gotoSection("Fleet", "Logs");
     const window = document.querySelector("[data-os-window='fleet']") as HTMLElement;
