@@ -62,16 +62,16 @@ CREATE TRIGGER memory_node_liveness BEFORE INSERT ON "MemoryNodes"
  FOR EACH ROW EXECUTE FUNCTION memory_node_store_liveness();
 
 -- Retiring a node removes its current observation together with its history.
--- Statement transition tables deduplicate ids before probing remaining rows.
+-- A row trigger is compatible with TimescaleDB compression. Its WHEN clause
+-- keeps unrelated journal retention from probing the observation table.
 CREATE FUNCTION memory_node_prune_liveness() RETURNS trigger
 LANGUAGE plpgsql SET search_path FROM CURRENT AS $$
 BEGIN
- DELETE FROM memory_liveness l USING (
-   SELECT DISTINCT id FROM old_rows WHERE concept IN
-     ('v1:worker:registration','v1:cluster:node','v1:platform:moduleReadiness')
- ) gone WHERE l.id=gone.id AND NOT EXISTS (SELECT 1 FROM "MemoryNodes" n WHERE n.id=l.id);
+ DELETE FROM memory_liveness l WHERE l.id=OLD.id
+   AND NOT EXISTS (SELECT 1 FROM "MemoryNodes" n WHERE n.id=l.id);
  RETURN NULL;
 END
 $$;
 CREATE TRIGGER memory_node_prune_liveness AFTER DELETE ON "MemoryNodes"
- REFERENCING OLD TABLE AS old_rows FOR EACH STATEMENT EXECUTE FUNCTION memory_node_prune_liveness();
+ FOR EACH ROW WHEN (OLD.concept IN ('v1:worker:registration','v1:cluster:node','v1:platform:moduleReadiness'))
+ EXECUTE FUNCTION memory_node_prune_liveness();

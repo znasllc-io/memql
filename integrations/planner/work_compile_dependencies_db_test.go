@@ -26,7 +26,7 @@ func TestSealWorkDraftDBUsesOwnedCurrentCatalog(t *testing.T) {
 	if err := db.PingContext(ctx); err != nil {
 		dbtest.Unreachable(t, "work dependency snapshot", dbtest.DSN(), err)
 	}
-	for _, q := range []string{`CREATE TEMP TABLE "MemoryNodes" (LIKE public."MemoryNodes" INCLUDING ALL)`, `CREATE TEMP TABLE node_vectors (LIKE public.node_vectors INCLUDING ALL)`} {
+	for _, q := range []string{`CREATE TEMP TABLE "MemoryNodes" (LIKE public."MemoryNodes" INCLUDING ALL)`, `CREATE TEMP TABLE memory_liveness (LIKE public.memory_liveness INCLUDING ALL)`, `CREATE TEMP TABLE node_vectors (LIKE public.node_vectors INCLUDING ALL)`} {
 		if _, err := db.ExecContext(ctx, q); err != nil {
 			t.Fatal(err)
 		}
