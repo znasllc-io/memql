@@ -15,6 +15,18 @@
     },
     {
       "domainId": "computer-use",
+      "sourceRef": "computerUse:headlessFirst",
+      "catalog": "computerUse",
+      "sha256": "b07df7d59439d9156b678d14958a7bc481286e5422aa90c3161eab0bff283b85"
+    },
+    {
+      "domainId": "computer-use",
+      "sourceRef": "computerUse:machineSelection",
+      "catalog": "computerUse",
+      "sha256": "5b0cbed21e42727f5e000385aec8f7c97159e42e1241598cd37f82f831755e6e"
+    },
+    {
+      "domainId": "computer-use",
       "sourceRef": "computerUse:capabilityChoice",
       "catalog": "computerUse",
       "sha256": "b51fbbb71e942877a47d256813795802708b62069d52314aacf09cbbccee8593"
@@ -47,7 +59,7 @@
       "domainId": "computer-use",
       "sourceRef": "computerUse:perTaskApproval",
       "catalog": "computerUse",
-      "sha256": "e1d56a873190b6bebc49eaf5aecbf512d675dbd4f061cfc1310b00f805243d44"
+      "sha256": "3008c619b0602e965102156cd6eaef1e29091911255bff3c1b045ec491d685fb"
     },
     {
       "domainId": "computer-use",

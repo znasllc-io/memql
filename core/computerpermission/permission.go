@@ -40,6 +40,9 @@ type Scope struct {
 type Request struct {
 	OwnerID, AgentID, RunID, Tool, Action string
 	Args                                  map[string]any
+	// MachineID narrows receipt lookup when work selected a fleet target.
+	// It is not authority; Claim still verifies the actual stream enrollment.
+	MachineID string
 }
 
 type Grant struct {
@@ -149,6 +152,9 @@ func CommandInput(args map[string]any) (command, cwd string, seconds int, err er
 	return
 }
 func (s Scope) Matches(req Request, mode string) bool {
+	if req.MachineID != "" && req.MachineID != s.MachineID {
+		return false
+	}
 	if s.Validate() != nil || req.Tool != s.Tool || (mode != "once" && mode != "always") {
 		return false
 	}

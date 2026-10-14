@@ -59,6 +59,7 @@ func TestComputerPermissionConsumedOnlyByStreamHolderAcrossHop(t *testing.T) {
 	w.Labels = map[string]string{"machineId": "machine"}
 	w.CapabilityDescriptor = &workerservice.CapabilityDescriptor{ActionContracts: workerservice.ActionContracts{permission.Contract: permission.Version}}
 	req := h.request()
+	req.RequireLabels = map[string]string{"machineId": "machine"}
 	req.Args = map[string]any{"path": "/docs/report"}
 	hash, _ := permission.Hash(req.Tool, req.Action, req.Args)
 	grant := &permission.Grant{ID: "receipt", Scope: permission.Scope{Version: 1, Kind: "directory_read", RegistrationID: "laptop", MachineID: "machine", MachineLabel: "Laptop", Tool: req.Tool, Action: req.Action, Directory: "/docs", ArgsHash: hash, AllowedModes: []string{"once", "always"}}}
@@ -172,6 +173,10 @@ func TestRequestedComputerPermissionHasNoLegacyGrant(t *testing.T) {
 			now := fleetNow()
 			row := map[string]any{"ownerUserId": req.OwnerUserId, "runId": req.RunId, "decision": "approved", "expiresAt": now.Add(time.Hour).Format(time.RFC3339Nano), "subject": subject, "artifactHash": work.ArtifactHash(subject)}
 			if !tc.typed {
+				if got := approvedComputerScope([]map[string]any{row}, req, now); got != "" {
+					t.Fatal("a machine-bound approval admitted an untargeted call")
+				}
+				req.RequireLabels = map[string]string{"machineId": "machine"}
 				if got := legacy026ComputerScope(row, req, now); got != tc.requestedScope {
 					t.Fatalf("legacy request changed: got %q", got)
 				}

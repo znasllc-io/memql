@@ -166,7 +166,7 @@ func (a *CognitionEngineAdapter) ToolCallee(tool string) (kind, callee string, o
 	if a == nil || a.Engine == nil {
 		return "", "", false
 	}
-	return a.Engine.ToolCallee(tool)
+	return a.Engine.ToolCallee(agentToolBinding(tool))
 }
 
 func (a *CognitionEngineAdapter) RenderPrompt(templateId string, data map[string]any) (string, error) {
@@ -193,14 +193,18 @@ func (a *CognitionEngineAdapter) ToolDefinitionsForNames(names []string) []commo
 	if a == nil || a.Engine == nil {
 		return nil
 	}
-	return a.Engine.ToolDefinitionsForNames(names)
+	bound := make([]string, len(names))
+	for n, name := range names {
+		bound[n] = agentToolBinding(name)
+	}
+	return a.Engine.ToolDefinitionsForNames(bound)
 }
 
 func (a *CognitionEngineAdapter) ExecuteToolByName(ctx context.Context, name string, args map[string]any) (string, error) {
 	if a == nil || a.Engine == nil {
 		return "", fmt.Errorf("memql engine not configured")
 	}
-	raw, err := a.Engine.ExecuteToolByName(ctx, name, args)
+	raw, err := a.Engine.ExecuteToolByName(ctx, agentToolBinding(name), args)
 	if err != nil {
 		return "", err
 	}

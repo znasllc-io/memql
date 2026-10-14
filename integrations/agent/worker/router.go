@@ -335,12 +335,12 @@ func (r *Router) Plan(
 			// lastSeenAt without connectedNodeId is exactly the false-ready
 			// shape StreamHeld exists to refuse.
 			rejected[c.RegistrationId] = "offline"
-			if c.SupportsCapability(capability) && satisfiesLabels(c.Labels, merged) {
+			if c.SupportsCapability(capability) && satisfiesMachineRequirements(c, merged) {
 				offline = append(offline, c)
 			}
 		case !c.SupportsCapability(capability):
 			rejected[c.RegistrationId] = "missing capability " + capability
-		case !satisfiesLabels(c.Labels, merged):
+		case !satisfiesMachineRequirements(c, merged):
 			rejected[c.RegistrationId] = "labels do not satisfy " + formatLabels(merged)
 		default:
 			kept = append(kept, c)
@@ -501,6 +501,17 @@ func formatLabels(m map[string]string) string {
 // spelling of the same requirement would be a failure the user cannot see the
 // cause of.
 func LabelsFromArgs(v any) map[string]string {
+	// Internal approval subjects carry typed maps before their JSON round trip.
+	// Preserve the same selectors before and after persistence.
+	if typed, ok := v.(map[string]string); ok {
+		out := make(map[string]string, len(typed))
+		for key, value := range typed {
+			if key = strings.TrimSpace(key); key != "" {
+				out[key] = value
+			}
+		}
+		return out
+	}
 	raw, ok := v.(map[string]any)
 	if !ok || len(raw) == 0 {
 		return nil

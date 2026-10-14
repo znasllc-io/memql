@@ -7,23 +7,37 @@ import (
 	"fmt"
 
 	workerservice "github.com/znasllc-io/memql/component/worker"
+	permission "github.com/znasllc-io/memql/core/computerpermission"
 )
 
 // Availability is a read-only routing snapshot, not a grant or a reservation.
 // Dispatch still checks scope, approval, kill switches and the live stream.
 type Availability struct {
-	Status            string `json:"status"`
-	Detail            string `json:"detail"`
-	Online            bool   `json:"online"`
-	Configured        bool   `json:"configured"`
-	HeadlessOnline    bool   `json:"headlessOnline"`
-	ComputerUseOnline bool   `json:"computerUseOnline"`
+	Status            string                `json:"status"`
+	Detail            string                `json:"detail"`
+	Online            bool                  `json:"online"`
+	Configured        bool                  `json:"configured"`
+	HeadlessOnline    bool                  `json:"headlessOnline"`
+	ComputerUseOnline bool                  `json:"computerUseOnline"`
+	Machines          []MachineAvailability `json:"machines"`
+}
+
+// MachineAvailability names actual routing choices, including offline workers
+// and older workers that can serve inference but cannot honor typed approval.
+// The selector is the enrollment identity, never an operator-editable label.
+type MachineAvailability struct {
+	Name                        string            `json:"name"`
+	RequireLabels               map[string]string `json:"requireLabels,omitempty"`
+	HeadlessOnline              bool              `json:"headlessOnline"`
+	ComputerUseOnline           bool              `json:"computerUseOnline"`
+	ComputerPermissionSupported bool              `json:"computerPermissionSupported"`
 }
 
 // Availability uses the shared fleet and the owner's routing policy, including
 // workers held by other replicas. The local stream registry cannot answer it.
 func (r *Router) Availability(ctx context.Context, owner string) (Availability, error) {
-	out := Availability{Status: "unconfigured"}
+	out := Availability{Status: "unconfigured", Machines: []MachineAvailability{}}
+	indexes := map[string]int{}
 	for _, capability := range []string{workerservice.CapabilityHeadless, workerservice.CapabilityComputerUse} {
 		var require map[string]string
 		if capability == workerservice.CapabilityComputerUse {
@@ -42,6 +56,27 @@ func (r *Router) Availability(ctx context.Context, owner string) (Availability, 
 			}
 		}
 		out.Configured = out.Configured || configured > 0
+		for _, candidates := range [][]Candidate{plan.Candidates, plan.OfflineCandidates} {
+			for _, candidate := range candidates {
+				index, exists := indexes[candidate.RegistrationId]
+				if !exists {
+					index = len(out.Machines)
+					indexes[candidate.RegistrationId] = index
+					machine := MachineAvailability{Name: candidate.Label(), ComputerPermissionSupported: candidate.ActionContracts.Supports(permission.Contract, permission.Version)}
+					if candidate.MachineId != "" {
+						machine.RequireLabels = map[string]string{"machineId": candidate.MachineId}
+					}
+					out.Machines = append(out.Machines, machine)
+				}
+				if workerservice.StreamHeld(candidate.ConnectedNodeId, candidate.RevokedAt) {
+					if capability == workerservice.CapabilityHeadless {
+						out.Machines[index].HeadlessOnline = true
+					} else {
+						out.Machines[index].ComputerUseOnline = true
+					}
+				}
+			}
+		}
 		if len(plan.Candidates) == 0 {
 			continue
 		}
@@ -52,7 +87,7 @@ func (r *Router) Availability(ctx context.Context, owner string) (Availability, 
 			out.HeadlessOnline = true
 		}
 		// Prefer the desktop's name when both kinds of worker are present.
-		out.Detail = plan.Candidates[0].Name
+		out.Detail = plan.Candidates[0].Label()
 	}
 	if out.Online {
 		out.Status = "connected"

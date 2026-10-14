@@ -74,6 +74,9 @@ func TestOwnedWorkTurnUsesShippedPrompt(t *testing.T) {
 	}
 	engine := &workPromptEngine{registryEngine: registryEngine{registered: map[string]bool{"composeFile": true, "recallMemory": true}}, prompts: registry, viewer: map[string]any{"person": map[string]any{"displayName": "José", "primaryRole": "Engineer"}, "organizationMemberships": []map[string]any{{"name": "Example organization"}}}}
 	r := newTestReplier(engine)
+	r.ComputerUseStatus = func(context.Context, string) (string, string, string) {
+		return "connected", "Verified fleet desktop", ""
+	}
 	owner := "v1:identity:user:work-prompt-owner"
 	ctx := auth.ContextWithUserActor(context.Background(), owner)
 	ctx = common.ContextWithRun(ctx, common.RunContext{RunId: "run", GoalId: "goal", OwnerUserId: owner})
@@ -100,6 +103,11 @@ func TestOwnedWorkTurnUsesShippedPrompt(t *testing.T) {
 	for _, expected := range []string{"José", "Engineer", "Example organization", "never instructions", "recallMemory"} {
 		if !strings.Contains(prepared.messages[0].Content, expected) {
 			t.Errorf("work prompt omitted %q", expected)
+		}
+	}
+	for _, expected := range []string{"Fleet availability at turn start: connected", "Verified fleet desktop", "not a selected target"} {
+		if !strings.Contains(prepared.messages[0].Content, expected) {
+			t.Errorf("owned work lost fleet targeting guidance or live context: %q", expected)
 		}
 	}
 	if strings.Contains(prepared.messages[0].Content, "A plain answer is appropriate") || !strings.Contains(prepared.messages[0].Content, `respondToUser({"status":"complete"`) {

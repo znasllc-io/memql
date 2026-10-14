@@ -624,9 +624,8 @@ func (i *Integration) handleRequestScope(ctx context.Context, args map[string]an
 		return nil, fmt.Errorf("worker integration: agentId and ownerUserId required (auto-injection failed)")
 	}
 
-	// D6: the card names the requirements AND the current choice, because the
-	// user's Allow covers the task on any machine that matches -- so the card
-	// has to describe the set it is authorizing, not just today's pick.
+	// The card names a selected machine. Bind the scope before asking so a
+	// later connection or routing change cannot redirect the person's approval.
 	//
 	// The capability asked for here is HEADLESS rather than COMPUTERUSE, and
 	// deliberately: the card is about a SCOPE, not a single action, and both
@@ -639,6 +638,23 @@ func (i *Integration) handleRequestScope(ctx context.Context, args map[string]an
 	requireLabels := LabelsFromArgs(args["requireLabels"])
 	target := ""
 	if i.dispatcher != nil {
+		plan, err := i.dispatcher.Router().Plan(ctx, ownerUserId, workerservice.CapabilityHeadless, requireLabels, nil)
+		if err != nil {
+			return nil, err
+		}
+		if err := requireSingleComputerTarget(plan); err != nil {
+			return nil, err
+		}
+		// Keep a legacy desktop/session approval on the same selected machine
+		// even if another machine connects before the person answers it.
+		candidates := append(append([]Candidate(nil), plan.Candidates...), plan.OfflineCandidates...)
+		if len(candidates) == 0 || candidates[0].MachineId == "" {
+			return nil, computerPermissionInputError("requireLabels", "No eligible computer matches this selection. Check workerStatus and select an enrolled machine before requesting access.")
+		}
+		if requireLabels == nil {
+			requireLabels = map[string]string{}
+		}
+		requireLabels["machineId"] = candidates[0].MachineId
 		target = i.dispatcher.ConsentCardTarget(ctx, ownerUserId, workerservice.CapabilityHeadless, requireLabels, nil)
 	}
 	if target != "" && args["operation"] == nil {
@@ -700,7 +716,7 @@ func (i *Integration) handleRequestScope(ctx context.Context, args map[string]an
 			return nil, fmt.Errorf("computer access was declined")
 		}
 	}
-	payload, _ := json.Marshal(map[string]any{"status": status, "runId": rc.RunId, "approvalId": approvalID, "requestedScope": scope, "target": target})
+	payload, _ := json.Marshal(map[string]any{"status": status, "runId": rc.RunId, "approvalId": approvalID, "requestedScope": scope, "target": target, "requireLabels": requireLabels})
 
 	return []memorynodes.MemoryNode{{
 		ID:        fmt.Sprintf("scope-elevation:%d", time.Now().UnixNano()),
