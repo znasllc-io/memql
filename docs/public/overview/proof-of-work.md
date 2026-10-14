@@ -126,16 +126,19 @@ the same refusal-to-fallback rule. A separate persisted no-paid-provider ceiling
 also guards embeddings, step overrides and call-time fallback. Preflight
 requires an active fleet embedder for asynchronous indexing and records its
 binding separately; it never changes that binding. Zero is not passed as an engine cost ceiling,
-where it would mean unset. Model-call and time allowances remain bounded.
+where it would mean unset. Model-call and time allowances apply to each case. The default matrix runs
+five measured cases sequentially, with up to 80 calls and 30 minutes per case.
 Any request for additional authority is preserved as a blocker; cancellation
 must settle before the evaluator snapshots the checkout.
 
 Every case has a unique checkout and evidence directory. Independent tests run
 on a separate captured tree. Regression evidence requires a behavioral failure
 against the original implementation and a pass against the final tree; a build
-failure does not qualify. Tracked, dirty and untracked unrelated work is checked
+failure does not qualify. Reproductions must also pass against an isolated
+correct-behavior control, so an unconditional failing test does not qualify. Tracked, dirty and untracked unrelated work is checked
 for preservation. The runner retains raw submissions, goal/run identities,
-model and work receipts, oracle outputs and the result, including failures.
+model and work receipts from the root and its delegated child runs, captured
+final files, oracle outputs and the result, including failures.
 An uncertain submission is never retried automatically.
 
 Training receives the completed result through an owner-scoped publication

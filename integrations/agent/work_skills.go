@@ -6,7 +6,6 @@ import (
 	"fmt"
 
 	"github.com/znasllc-io/memql/component/automations/workflowhost"
-	"github.com/znasllc-io/memql/component/memql"
 	"github.com/znasllc-io/memql/core/common"
 )
 
@@ -27,7 +26,7 @@ func (r *Replier) workSkillContext(ctx context.Context, stepText string) ([]map[
 			if err != nil {
 				return nil, err
 			}
-			rows := memql.MaterializeRows(result)
+			rows := trainingResultRows(result)
 			if len(rows) != 1 {
 				return nil, fmt.Errorf("skill context receipt is unavailable")
 			}

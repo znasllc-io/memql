@@ -20,6 +20,8 @@ func TestWorkPromptConsumesExactSavedSkillContentAndFailsWithoutReceipt(t *testi
 		t.Fatal(err)
 	}
 	engine := &workPromptEngine{prompts: registry, skills: []map[string]any{{"receiptId": "saved-on-another-replica", "selection": map[string]any{"selected": []map[string]any{{"id": "software", "name": "Software", "version": 7, "digest": "exact-content-digest", "text": "Preserve unrelated edits from the original task."}, {"id": "testing", "name": "Testing", "version": 2, "digest": "test-digest", "text": "Demonstrate the behavioral regression before changing production code."}}}}}}
+	// The real cognition adapter wraps native output under data.
+	engine.skills = map[string]any{"data": engine.skills}
 	owner := "v1:identity:user:skill-context-owner"
 	ctx := common.ContextWithRun(auth.ContextWithUserActor(context.Background(), owner), common.RunContext{RunId: "run", GoalId: "goal", OwnerUserId: owner, StepKey: "implement", Mode: common.RunModeLive})
 	msg := &memqlv1.AgentGenerateTurnMsg{AgentId: "assistant", ActingAgent: &memqlv1.ActingAgentIdentity{Id: "assistant", Role: "assistant"}, History: []*memqlv1.AgentTurnMessage{{Role: "user", Content: "Fix the software defect"}}}
