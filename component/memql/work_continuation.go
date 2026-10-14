@@ -258,6 +258,11 @@ func (e *MemQLEngine) PrepareWorkContinuation(ctx context.Context, request Check
 	if checkpointID != continuationID(run, canonical) {
 		return nil, fmt.Errorf("the saved work checkpoint content changed")
 	}
+	if permissionGuidance && subject["computerPermission"] == nil {
+		if !scopeCheckpointMatches(run, subject, checkpointID, messages) {
+			return nil, fmt.Errorf("the computer scope decision does not name this pending call")
+		}
+	}
 	run.Continuation = &common.StepContinuation{StepKey: request.StepKey, ObservationID: checkpointID, ApprovalID: request.ApprovalID}
 	return common.ContextWithRun(ctx, run), nil
 }

@@ -127,7 +127,7 @@ func closePendingCalls(messages []common.ChatMessage) []common.ChatMessage {
 	for _, m := range messages {
 		for _, c := range m.ToolCalls {
 			if !answered[c.ID] {
-				out = append(out, common.ChatMessage{Role: "tool", Name: c.Name, ToolCallId: c.ID, Content: "Not executed before the saved checkpoint. Inspect recorded results and any human answer before continuing."})
+				out = append(out, common.ChatMessage{Role: "tool", Name: c.Name, ToolCallId: c.ID, Content: common.UnexecutedWorkToolResult})
 				answered[c.ID] = true
 			}
 		}

@@ -103,7 +103,7 @@ func (i *Integration) requireApprovalStep(ctx context.Context, run *actRun, key 
 }
 
 func guidanceRetry(approval map[string]any, text, decidedBy string) *failureRetry {
-	// A model failure or a typed permission question suspended a native turn.
+	// A model failure or a checkpoint-bound computer question suspended a native turn.
 	// Its exact checkpoint can take the correction without rewriting a workflow.
 	// The execution replica revalidates that checkpoint; feedback grants no scope.
 	if (rowString(approval, "kind") == "feedback" && workstate.IsModelCallCheckpoint(rowMap(approval, "subject"))) ||

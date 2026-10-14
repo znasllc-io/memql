@@ -672,6 +672,13 @@ func (i *Integration) handleRequestScope(ctx context.Context, args map[string]an
 		if existing != nil {
 			approvalID = existing.ID
 		}
+	} else {
+		// Only a saved, still-unexecuted native call can receive feedback
+		// without replanning. This witness conveys no computer permission.
+		subject, err = i.engine.BindWorkScopeCheckpoint(ctx, args, subject)
+		if err != nil {
+			return nil, err
+		}
 	}
 	if approvalID == "" {
 		approvalID, err = i.ScopeRequester(ctx, ownerUserId, rc.RunId, subject)
