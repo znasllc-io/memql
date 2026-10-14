@@ -95,7 +95,7 @@ func TestWorkDBModelCeilingKeepsExactNestedProgress(t *testing.T) {
 	auth.SetCapabilityCatalog(nil)
 	t.Cleanup(func() { auth.SetCapabilityCatalog(previous) })
 	for _, background := range []bool{false, true} {
-		for _, mode := range []string{"recover", "exhausted", "early-answer", "repeated", "checkpoint-failure", "cancelled", "closed-goal", "policy-ask", "guidance", "abandon"} {
+		for _, mode := range []string{"recover", "exhausted", "early-answer", "repeated", "entry-checkpoint-failure", "checkpoint-failure", "cancelled", "closed-goal", "policy-ask", "guidance", "abandon"} {
 			t.Run(fmt.Sprintf("background=%v/%s", background, mode), func(t *testing.T) {
 				var turns []*ceilingDBTurn
 				writer, db := workTemplateDBEngineAndDB(t)
@@ -187,16 +187,32 @@ return { act: "ask", question: "A stricter authored policy requires a person bef
 				write("createWorkGoal", map[string]any{"goalId": goalID, "statement": "Complete a synthetic section", "origin": "user", "ceilings": map[string]any{"maxModelCalls": 30, "maxRetries": 3, "wallClockMs": 10800000}})
 				write("createWorkRun", map[string]any{"runId": runID, "goalId": goalID, "automationName": "parent", "templateFingerprint": triggers[0].template.members["parent"].DefinitionFingerprint(id.New()), "mode": "live", "status": "running", "startedAt": time.Now().UTC().Format(time.RFC3339Nano)})
 				write("updateWorkRun", map[string]any{"runId": runID, "spent": map[string]any{"retries": 2, "events": 7}})
-				if mode == "checkpoint-failure" {
+				checkpointFailure := mode == "entry-checkpoint-failure" || mode == "checkpoint-failure"
+				if checkpointFailure {
 					name := "modelcheckpoint" + strings.ToLower(key)
-					_, err := db.ExecContext(person, `CREATE FUNCTION `+name+`() RETURNS trigger AS $$ BEGIN IF NEW.concept='v1:work:observation' AND NEW.payload->>'runId'='v1:work:run:`+runID+`' AND NEW.payload->'data'->>'continuation'='true' THEN RAISE EXCEPTION 'synthetic checkpoint write refusal'; END IF; RETURN NEW; END $$ LANGUAGE plpgsql`)
-					require.NoError(t, err)
-					_, err = db.ExecContext(person, `CREATE TRIGGER `+name+` BEFORE INSERT ON "MemoryNodes" FOR EACH ROW EXECUTE FUNCTION `+name+`()`)
-					require.NoError(t, err)
 					t.Cleanup(func() {
 						_, _ = db.ExecContext(context.Background(), `DROP TRIGGER IF EXISTS `+name+` ON "MemoryNodes"`)
 						_, _ = db.ExecContext(context.Background(), `DROP FUNCTION IF EXISTS `+name+`()`)
 					})
+					refuseCheckpoint := func() {
+						_, err := db.ExecContext(person, `CREATE FUNCTION `+name+`() RETURNS trigger AS $$ BEGIN IF NEW.concept='v1:work:observation' AND NEW.payload->>'runId'='v1:work:run:`+runID+`' AND NEW.payload->'data'->>'continuation'='true' THEN RAISE EXCEPTION 'synthetic checkpoint write refusal'; END IF; RETURN NEW; END $$ LANGUAGE plpgsql`)
+						require.NoError(t, err)
+						_, err = db.ExecContext(person, `CREATE TRIGGER `+name+` BEFORE INSERT ON "MemoryNodes" FOR EACH ROW EXECUTE FUNCTION `+name+`()`)
+						require.NoError(t, err)
+					}
+					if mode == "entry-checkpoint-failure" {
+						// The initial recovery marker is durable before any model call.
+						refuseCheckpoint()
+					} else {
+						// Preserve coverage of the later model-ceiling checkpoint too:
+						// prior evidence saves succeed, then the final retry fails.
+						providers[0].beforeFailure = func() {
+							if providers[0].calls == 1+providers[0].timeouts {
+								refuseCheckpoint()
+								providers[0].beforeFailure = nil
+							}
+						}
+					}
 				}
 				if mode == "cancelled" || mode == "closed-goal" {
 					providers[0].beforeFailure = func() {
@@ -232,10 +248,18 @@ return { act: "ask", question: "A stricter authored policy requires a person bef
 				ex := triggers[0].executor()
 				defer ex.Close()
 				done, err := ex.ExecuteAdopted(ctx, triggers[0].template.members["parent"], automations.RunAdoption{RunId: runID})
-				if mode == "checkpoint-failure" || mode == "cancelled" || mode == "closed-goal" {
+				if checkpointFailure || mode == "cancelled" || mode == "closed-goal" {
 					require.Error(t, err, "effects=%v calls=%d done=%+v", effects, providers[0].calls, done)
-					if mode == "checkpoint-failure" {
+					if checkpointFailure {
 						require.ErrorIs(t, err, automations.ErrJournalRequired)
+						require.ErrorContains(t, err, "synthetic checkpoint write refusal")
+						if mode == "entry-checkpoint-failure" {
+							require.Zero(t, providers[0].calls)
+							require.Zero(t, reads)
+						} else {
+							require.Equal(t, 3, providers[0].calls, "fault must reach model-ceiling recovery after its bounded retry")
+							require.Equal(t, 1, reads, "the completed discovery must not be replayed")
+						}
 					}
 					require.Equal(t, map[string]int{"completed-section": 1, "child-prefix": 1}, effects)
 					var questions int

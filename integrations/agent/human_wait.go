@@ -159,9 +159,14 @@ func (r *Replier) saveWorkProgress(ctx context.Context, messages []common.ChatMe
 		SaveWorkContinuation(context.Context, []common.ChatMessage) error
 	})
 	if !ok {
-		return fmt.Errorf("durable work continuation is unavailable")
+		return fmt.Errorf("%w: durable work continuation is unavailable", memql.ErrWorkCheckpointRequired)
 	}
-	return writer.SaveWorkContinuation(ctx, closePendingCalls(messages))
+	if err := writer.SaveWorkContinuation(ctx, closePendingCalls(messages)); err != nil {
+		// Every durable progress boundary is mandatory, including the initial
+		// recovery marker. Authored retry/continue cannot skip a lost receipt.
+		return fmt.Errorf("%w: saving work progress: %w", memql.ErrWorkCheckpointRequired, err)
+	}
+	return nil
 }
 func (r *Replier) restoreAfterQuestion(ctx context.Context, messages []common.ChatMessage) ([]common.ChatMessage, error) {
 	run, _ := common.RunFromContext(ctx)

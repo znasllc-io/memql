@@ -9,6 +9,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/uptrace/bun"
 	"github.com/znasllc-io/memql/component/auth"
 	"github.com/znasllc-io/memql/component/automations"
 	"github.com/znasllc-io/memql/component/automations/steps"
@@ -20,6 +21,7 @@ import (
 )
 
 type childPauseFixture struct {
+	name          string
 	engine        *memql.MemQLEngine
 	t             *testing.T
 	approval      string
@@ -28,7 +30,12 @@ type childPauseFixture struct {
 	afterContinue func(context.Context) error
 }
 
-func (p *childPauseFixture) IntegrationName() string { return "childPauseFixture" }
+func (p *childPauseFixture) IntegrationName() string {
+	if p.name != "" {
+		return p.name
+	}
+	return "childPauseFixture"
+}
 func (p *childPauseFixture) Capabilities() []memql.IntegrationCapability {
 	return []memql.IntegrationCapability{{Name: "effect", Handler: p.effect}, {Name: "pause", Handler: p.pause}}
 }
@@ -80,28 +87,20 @@ func (p *childPauseFixture) PrepareCheckpointResume(ctx context.Context, capabil
 // Three compiled automation bodies cross a real engine/replica boundary. Only
 // the leaf's persisted tool checkpoint may continue; all three effect prefixes
 // and the later, previously untouched automation keep their normal semantics.
-func TestWorkTemplateDBApprovedPermissionResumesExactNestedChild(t *testing.T) {
-	for _, mode := range []string{"normal", "changed dispatched arguments"} {
-		t.Run(mode, func(t *testing.T) { exerciseNestedChildContinuation(t, mode) })
-	}
-}
-
-func exerciseNestedChildContinuation(t *testing.T, mode string) {
-	writer, db := workTemplateDBEngineAndDB(t)
-	reader := workTemplateDBEngine(t)
+func exerciseNestedChildContinuation(t *testing.T, mode string, writer, reader *memql.MemQLEngine, db *bun.DB) {
 	key := strings.ReplaceAll(id.NewShortId(), "-", "")
 	runID, goalID, owner, approval := key+"run", key+"goal", key+"owner", key+"approval"
 	person := auth.ContextWithUserActor(context.Background(), owner)
 	ctx := common.ContextWithRun(person, common.RunContext{RunId: runID, GoalId: goalID, OwnerUserId: owner, Mode: common.RunModeLive})
 	effects := map[string]int{}
-	first := &childPauseFixture{engine: writer, t: t, approval: approval, effects: effects}
-	second := &childPauseFixture{engine: reader, t: t, approval: approval, effects: effects}
+	first := &childPauseFixture{name: "childPauseFixture" + key, engine: writer, t: t, approval: approval, effects: effects}
+	second := &childPauseFixture{name: first.name, engine: reader, t: t, approval: approval, effects: effects}
 	for _, p := range []*childPauseFixture{first, second} {
 		if err := p.engine.RegisterIntegration(p); err != nil {
 			t.Fatal(err)
 		}
 		for _, name := range []string{"effect", "pause"} {
-			if err := p.engine.Functions().Upsert(&memql.Function{Name: "fixture" + name, Type: memql.FunctionTypeBuiltin, Enabled: true, BuiltinArgs: &memql.BuiltinArgContract{Profile: memql.BuiltinArgProfileOptionalObject, Properties: map[string]string{"label": "string"}}, ArgsSchema: &memql.ArgsSchemaConfig{Fields: []*memql.FunctionArgsField{{Name: "label", Type: "string"}}}, FunctionKind: "builtin", Executor: "integration.childPauseFixture." + name}); err != nil {
+			if err := p.engine.Functions().Upsert(&memql.Function{Name: "fixture" + key + name, Type: memql.FunctionTypeBuiltin, Enabled: true, BuiltinArgs: &memql.BuiltinArgContract{Profile: memql.BuiltinArgProfileOptionalObject, Properties: map[string]string{"label": "string"}}, ArgsSchema: &memql.ArgsSchemaConfig{Fields: []*memql.FunctionArgsField{{Name: "label", Type: "string"}}}, FunctionKind: "builtin", Executor: "integration." + p.name + "." + name}); err != nil {
 				t.Fatal(err)
 			}
 		}
@@ -117,6 +116,9 @@ func exerciseNestedChildContinuation(t *testing.T, mode string) {
 		loader := automations.NewLoader(automations.LoaderOptions{Functions: engine.Functions()})
 		tpl := &workTemplate{members: map[string]*automations.Automation{}}
 		for _, source := range sources {
+			// Case-local capability names keep cached handlers from retaining a
+			// preceding subtest's effects, approval or testing.T.
+			source = strings.NewReplacer("fixtureeffect", "fixture"+key+"effect", "fixturepause", "fixture"+key+"pause").Replace(source)
 			auto, err := loader.CompileSource(strings.ReplaceAll(source, "; ", "\n"), "continuation-fixture.memql")
 			if err != nil {
 				t.Fatal(err)

@@ -3,12 +3,15 @@ package agent
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"slices"
 	"strings"
 	"time"
 
 	"github.com/znasllc-io/memql/component/automations/workflowhost"
+	"github.com/znasllc-io/memql/component/memql"
+	"github.com/znasllc-io/memql/component/work"
 	"github.com/znasllc-io/memql/core/common"
 	"github.com/znasllc-io/memql/core/id"
 )
@@ -190,11 +193,22 @@ func workProgressDecision(ctx context.Context, facts map[string]any) (string, er
 	return decision, nil
 }
 
-func (r *Replier) recoverWorkProgress(ctx context.Context, messages []common.ChatMessage, turn turnContext, sink DeltaSink, guidance *workGuidanceCursor) ([]common.ChatMessage, error) {
+func (r *Replier) recoverWorkProgress(ctx context.Context, messages []common.ChatMessage, turn turnContext, sink DeltaSink, guidance *workGuidanceCursor) (out []common.ChatMessage, failure error) {
 	engine, ok := r.engine.(workRecoveryEngine)
 	if !ok || !isOwnedWorkExecution(ctx) {
 		return messages, nil
 	}
+	// Recovery is an execution boundary. If its saved state, budget or authored
+	// policy cannot be read, an outer `on error continue` must not run later
+	// effects as though this owned turn succeeded. A durable human wait keeps
+	// its own suspension semantics.
+	readStopped := false
+	defer func() {
+		var wait *work.HumanWait
+		if failure != nil && !readStopped && !errors.As(failure, &wait) && !errors.Is(failure, memql.ErrWorkCheckpointRequired) {
+			failure = fmt.Errorf("%w: work progress recovery: %w", memql.ErrWorkCheckpointRequired, failure)
+		}
+	}()
 	state, marker, err := recoveryState(messages)
 	if err != nil {
 		return nil, err
@@ -216,13 +230,15 @@ func (r *Replier) recoverWorkProgress(ctx context.Context, messages []common.Cha
 	}
 	limit, used, err := engine.WorkModelCallBudget(ctx)
 	if err != nil {
-		return nil, fmt.Errorf("reading recovery budget: %w", err)
+		failure, readStopped = r.workRecoveryReadFailure(ctx, fmt.Errorf("reading recovery budget: %w", err), messages)
+		return nil, failure
 	}
 	facts := map[string]any{"limit": limit, "used": used, "discoveryRounds": state.DiscoveryRounds, "repeatedRounds": state.RepeatedRounds,
 		"reviewActive": state.ReviewActive, "stalledAfterReview": state.StalledAfterReview, "reviewedLimit": state.ReviewedLimit}
 	decision, err := workProgressDecision(ctx, facts)
 	if err != nil {
-		return nil, fmt.Errorf("deciding work recovery: %w", err)
+		failure, readStopped = r.workRecoveryReadFailure(ctx, fmt.Errorf("deciding work recovery: %w", err), messages)
+		return nil, failure
 	}
 	switch decision {
 	case "review_budget", "review_stalled":
@@ -244,7 +260,7 @@ func (r *Replier) recoverWorkProgress(ctx context.Context, messages []common.Cha
 	if err != nil {
 		return nil, err
 	}
-	out := append([]common.ChatMessage(nil), messages...)
+	out = append([]common.ChatMessage(nil), messages...)
 	if marker >= 0 {
 		out = append(out[:marker], out[marker+1:]...)
 	}
@@ -266,6 +282,40 @@ func (r *Replier) recoverWorkProgress(ctx context.Context, messages []common.Cha
 		}
 	}
 	return out, nil
+}
+
+// Only the read-only recovery preparation may resolve a cancelled context into
+// its native stop or budget suspension. Once a checkpoint write or question has
+// started, its failure remains authoritative; it must not publish another wait.
+func (r *Replier) workRecoveryReadFailure(ctx context.Context, failure error, messages []common.ChatMessage) (error, bool) {
+	var wait *work.HumanWait
+	if errors.As(failure, &wait) || errors.Is(failure, memql.ErrWorkCheckpointRequired) {
+		return failure, true
+	}
+	var stopped *memql.WorkCancelledError
+	if errors.As(failure, &stopped) {
+		return failure, true
+	}
+	var ceiling *memql.RunCeilingError
+	if errors.As(failure, &ceiling) {
+		return r.pauseAtBudgetBoundary(ctx, failure, messages), true
+	}
+	if !errors.Is(failure, context.Canceled) && !errors.Is(failure, context.DeadlineExceeded) {
+		return failure, false
+	}
+	cause := context.Cause(ctx)
+	if errors.As(cause, &stopped) {
+		return cause, true
+	}
+	// WorkCallFailure recognizes the native deadline and refreshes its ceiling
+	// with a receipt-only context. A provider timeout alone is not budget proof.
+	if budget := r.workCallFailure(ctx); errors.As(budget, &ceiling) {
+		return r.pauseAtBudgetBoundary(ctx, budget, messages), true
+	}
+	if cause != nil {
+		return cause, errors.Is(cause, context.Canceled) || errors.Is(cause, context.DeadlineExceeded)
+	}
+	return failure, false
 }
 
 func (r *Replier) askWorkRecovery(ctx context.Context, messages []common.ChatMessage, turn turnContext, sink DeltaSink, question string) ([]common.ChatMessage, error) {

@@ -320,9 +320,138 @@ func TestWorkProgressRecoveryFailuresNeverPublishAnUncheckpointedQuestion(t *tes
 				x := &progressRecoveryExecutor{}
 				p, _, err := progressRecoveryRun(t, streaming, e, x, progressDiscoverySteps(5), nil)
 				require.ErrorContains(t, err, wantError)
+				require.ErrorIs(t, err, memql.ErrWorkCheckpointRequired, "authored retry/continue must not skip a failed recovery boundary")
 				require.Equal(t, wantCalls, p.calls)
 				require.Zero(t, x.questions)
 			})
+		}
+	}
+}
+
+type progressRecoveryReadEngine struct {
+	*progressRecoveryEngine
+	read                           func(context.Context) (int, int, error)
+	budgetFailure, suspensionError error
+	pauseAttempts, parked          int
+}
+
+func (e *progressRecoveryReadEngine) WorkModelCallBudget(ctx context.Context) (int, int, error) {
+	return e.read(ctx)
+}
+
+func (e *progressRecoveryReadEngine) WorkCallFailure(ctx context.Context) error {
+	if ctx.Err() == nil {
+		return nil
+	}
+	return e.budgetFailure
+}
+
+func (e *progressRecoveryReadEngine) PauseWorkForBudget(_ context.Context, _ *memql.RunCeilingError, messages []common.ChatMessage) error {
+	e.pauseAttempts++
+	if e.suspensionError != nil {
+		return e.suspensionError
+	}
+	e.parked++
+	e.savedContinuation = append([]common.ChatMessage(nil), messages...)
+	return &work.HumanWait{ApprovalID: "native-recovery-budget"}
+}
+
+func TestWorkProgressRecoveryReadCancellationKeepsItsNativeMeaning(t *testing.T) {
+	for _, streaming := range []bool{false, true} {
+		for _, boundary := range []string{"budget-read", "policy"} {
+			for _, kind := range []string{"native-deadline", "owner-stop", "provider-deadline", "caller-cancel", "suspension-failure", "read-failure", "read-timeout", "cancel-observer-failure"} {
+				if boundary == "policy" && (kind == "read-failure" || kind == "read-timeout") {
+					continue
+				}
+				t.Run(fmt.Sprintf("stream=%v/%s/%s", streaming, boundary, kind), func(t *testing.T) {
+					ctx, turn := progressRecoveryContext()
+					ctx, cancel := context.WithCancelCause(ctx)
+					defer cancel(nil)
+					ceiling := &memql.RunCeilingError{RunId: "recovery-run", StepKey: "section", Breach: memql.RunCeilingBreach{Ceiling: "wallClock", Limit: "1000ms", Actual: "1001ms"}}
+					engine := &progressRecoveryReadEngine{progressRecoveryEngine: newProgressRecoveryEngine(t)}
+					cause := error(context.Canceled)
+					switch kind {
+					case "native-deadline", "suspension-failure", "read-failure":
+						cause = fmt.Errorf("native run deadline: %w", context.DeadlineExceeded)
+						engine.budgetFailure = ceiling
+					case "owner-stop":
+						cause = &memql.WorkCancelledError{By: "owner"}
+					case "provider-deadline":
+						cause = context.DeadlineExceeded
+					case "cancel-observer-failure":
+						cause = fmt.Errorf("cancellation observer storage read refused")
+					}
+					if kind == "suspension-failure" {
+						engine.suspensionError = fmt.Errorf("native checkpoint refused")
+					}
+					engine.read = func(context.Context) (int, int, error) {
+						if kind == "read-timeout" {
+							return 0, 0, context.DeadlineExceeded
+						}
+						cancel(cause)
+						if kind == "read-failure" {
+							return 0, 0, fmt.Errorf("storage read refused")
+						}
+						if boundary == "budget-read" {
+							return 0, 0, ctx.Err()
+						}
+						// The installed pure DSL interpreter observes this cancellation.
+						return 12, 1, nil
+					}
+					r := testReplier()
+					r.engine = engine
+					executor := &progressRecoveryExecutor{}
+					r.stamper = newToolRecorder(executor, r.logger)
+					provider := &outcomeProvider{}
+					messages := []common.ChatMessage{
+						{Role: "system", Content: "Current instructions"}, {Role: "user", Content: "Continue the existing work"},
+						{Role: "assistant", ToolCalls: progressRecoveryCall("completed", "readRecord", `{}`)},
+						{Role: "tool", Name: "readRecord", ToolCallId: "completed", Content: "Exact completed receipt"},
+					}
+					var err error
+					if streaming {
+						_, err = r.runStreamingToolLoop(ctx, provider, messages, nil, &captureSink{}, time.Now(), "recovery-read", turn)
+					} else {
+						_, err = r.runNonStreamingToolLoop(ctx, provider, nil, messages, nil, &captureSink{}, time.Now(), "recovery-read", turn)
+					}
+					require.Zero(t, provider.calls)
+					require.Zero(t, executor.questions)
+					require.Zero(t, executor.operations)
+					require.Zero(t, engine.saves, "read cancellation must precede marker persistence")
+					var wait *work.HumanWait
+					switch kind {
+					case "native-deadline":
+						require.ErrorAs(t, err, &wait)
+						require.Equal(t, "native-recovery-budget", wait.ApprovalID)
+						require.Equal(t, 1, engine.pauseAttempts)
+						require.Equal(t, 1, engine.parked)
+						require.Equal(t, messages, engine.savedContinuation)
+						require.NotErrorIs(t, err, memql.ErrWorkCheckpointRequired)
+					case "suspension-failure":
+						require.ErrorIs(t, err, memql.ErrWorkCheckpointRequired)
+						require.ErrorContains(t, err, "native checkpoint refused")
+						require.Equal(t, 1, engine.pauseAttempts)
+						require.Zero(t, engine.parked)
+						require.NotErrorAs(t, err, &wait)
+					case "read-failure", "read-timeout", "cancel-observer-failure":
+						require.ErrorIs(t, err, memql.ErrWorkCheckpointRequired)
+						if kind == "read-failure" {
+							require.ErrorContains(t, err, "storage read refused")
+						} else if kind == "cancel-observer-failure" {
+							require.ErrorIs(t, err, cause)
+						} else {
+							require.ErrorIs(t, err, context.DeadlineExceeded)
+						}
+						require.Zero(t, engine.pauseAttempts)
+						require.Zero(t, engine.parked)
+					default:
+						require.ErrorIs(t, err, cause)
+						require.NotErrorIs(t, err, memql.ErrWorkCheckpointRequired)
+						require.Zero(t, engine.pauseAttempts)
+						require.Zero(t, engine.parked)
+					}
+				})
+			}
 		}
 	}
 }

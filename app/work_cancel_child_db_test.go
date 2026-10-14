@@ -115,6 +115,9 @@ func TestWorkDBParentStopFinalizesSynchronousChild(t *testing.T) {
 	// parent. The no-Stop controls retain a separate pair with no gate configured;
 	// each case still creates its own actor, runs, executor and context observation.
 	stopped := newChildStopFixture(t, true)
+	t.Run("TestWorkDBCancellationLifecycleHoldOutlivesCleanupContext", func(t *testing.T) {
+		testWorkDBCancellationLifecycleHoldOutlivesCleanupContext(t, stopped.writer, stopped.db)
+	})
 	var ordinary *childStopFixture
 	for _, mode := range []string{"remote error", "cancelled context", "rerun parent", "new root generation", "new child generation", "independent child goal", "foreign child", "changed parent", "child rerun", "foreign ancestor", "changed ancestor", "no Stop provider", "no Stop deadline", "no Stop context cancelled"} {
 		fixture := stopped
@@ -344,8 +347,7 @@ func exerciseChildStop(t *testing.T, mode string, fixture *childStopFixture) {
 
 // A caller deadline cannot silently release the database fence while a
 // dispatched terminal write is still returning. The holder releases it.
-func TestWorkDBCancellationLifecycleHoldOutlivesCleanupContext(t *testing.T) {
-	engine, db := workTemplateDBEngineAndDB(t)
+func testWorkDBCancellationLifecycleHoldOutlivesCleanupContext(t *testing.T, engine *memql.MemQLEngine, db *bun.DB) {
 	gates, err := database.NewGatePool(dbtest.DSN(), 0)
 	if err != nil {
 		t.Fatal(err)

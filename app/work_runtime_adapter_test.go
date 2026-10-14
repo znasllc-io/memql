@@ -41,8 +41,7 @@ func TestAgentRuntimeAdapterPreservesTheEnginesOwnershipBarrier(t *testing.T) {
 
 // The executing replica has no originating Ask request or in-memory queue.
 // Exercise the production adapter, public DSL ingress and peer read together.
-func TestAgentRuntimeAdapterReceivesGuidanceFromAnotherReplica(t *testing.T) {
-	a, b := workTemplateDBEngine(t), workTemplateDBEngine(t)
+func testAgentRuntimeAdapterReceivesGuidanceFromAnotherReplica(t *testing.T, a, b *memql.MemQLEngine) {
 	old := auth.InstalledCapabilityCatalog()
 	auth.SetCapabilityCatalog(nil)
 	t.Cleanup(func() { auth.SetCapabilityCatalog(old) })
