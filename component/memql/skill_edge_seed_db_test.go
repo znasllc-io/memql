@@ -6,14 +6,8 @@ import (
 
 	"github.com/stretchr/testify/require"
 	"github.com/znasllc-io/memql/component/auth"
-	"github.com/znasllc-io/memql/component/skills"
+	"github.com/znasllc-io/memql/component/language/parser"
 )
-
-type skillEdgeTestExecutor struct{ engine *MemQLEngine }
-
-func (e skillEdgeTestExecutor) Execute(ctx context.Context, query string) (any, error) {
-	return e.engine.Execute(ctx, query)
-}
 
 func TestSkillEdgeSeedsMaterializeCommittedAndSurviveAnotherReplicaSweep(t *testing.T) {
 	eng, db, ctx := sharedReadMergeEngine(t)
@@ -59,21 +53,25 @@ func TestSkillEdgeSeedsMaterializeCommittedAndSurviveAnotherReplicaSweep(t *test
 	}
 }
 
-func TestSkillEdgeRuntimeWriterStillProposesThenCommits(t *testing.T) {
+func TestSkillEdgeRuntimeMutationsStillProposeThenCommit(t *testing.T) {
 	eng, db, ctx := sharedReadMergeEngine(t)
 	actor := "skill-edge-owner-" + uniqueSuffix("owner")
 	writeCtx := auth.ContextWithUserActor(ctx, actor)
-	writer := skills.NewWriter(skillEdgeTestExecutor{eng})
 	id := uniqueSuffix("runtime-edge")
-	edges := []skills.EdgeWrite{{EdgeID: id, From: "regression-testing", To: "software-development", Type: skills.EdgeSpecializes, ProposedBy: "user"}}
-	require.NoError(t, writer.Propose(writeCtx, edges))
+	call, err := parser.RenderCall("proposeSkillEdge", map[string]any{"edgeId": id, "fromSkillId": "regression-testing", "toSkillId": "software-development", "edgeType": "specializes", "proposedBy": "user"})
+	require.NoError(t, err)
+	_, err = eng.Execute(auth.ContextWithInternalOrigin(writeCtx), "mutation "+call)
+	require.NoError(t, err)
 	payload := latestPayload(t, ctx, db, "v1:skills:skillEdge", "v1:skills:skillEdge:"+id)
 	require.Equal(t, "proposed", payload["status"])
 	require.Equal(t, actor, payload["ownerUserId"])
-	require.NoError(t, writer.Commit(writeCtx, edges))
+	call, err = parser.RenderCall("commitSkillEdge", map[string]any{"edgeId": id})
+	require.NoError(t, err)
+	_, err = eng.Execute(auth.ContextWithInternalOrigin(writeCtx), "mutation "+call)
+	require.NoError(t, err)
 	payload = latestPayload(t, ctx, db, "v1:skills:skillEdge", "v1:skills:skillEdge:"+id)
 	require.Equal(t, "committed", payload["status"])
 	require.Equal(t, actor, payload["ownerUserId"])
-	_, err := eng.Execute(writeCtx, `createSkillEdge(skillEdgeId="client-forged", fromSkillId="a", toSkillId="b", edgeType="specializes", proposedBy="system", status="committed", ownerUserId="")`)
+	_, err = eng.Execute(writeCtx, `createSkillEdge(skillEdgeId="client-forged", fromSkillId="a", toSkillId="b", edgeType="specializes", proposedBy="system", status="committed", ownerUserId="")`)
 	require.Error(t, err, "catalog writes must remain server-only")
 }
