@@ -24,10 +24,9 @@ func fullComputerSubject() map[string]any {
 	return s
 }
 
-// Boot the two independent engines once. Every case gets fresh integration
-// instances, decision pools, owners and runs; no in-memory authority is shared.
-func TestComputerPermissionDBRecovery(t *testing.T) {
-	a, b := openActsDB(t), openActsDB(t)
+// Reuse the consumption suite's two independent engines. Every case gets fresh
+// integrations, decision pools, owners and runs; no authority is shared.
+func testComputerPermissionDBRecovery(t *testing.T, a, b actsDB) {
 	cases := []struct {
 		name string
 		run  func(*testing.T, actsDB, actsDB)

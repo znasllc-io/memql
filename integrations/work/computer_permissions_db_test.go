@@ -18,7 +18,8 @@ func TestComputerPermissionDBTwoReplicasConsumeOnceAndRevokeAlways(t *testing.T)
 	a := openActsDB(t)
 	runID := a.openRun(t, nil)
 	peerDB := workHeadsPeer(t, a.db)
-	b := New(dispatchDBEngine(t, peerDB), testLogger(), func() *bun.DB { return peerDB })
+	peerEngine := dispatchDBEngine(t, peerDB)
+	b := New(peerEngine, testLogger(), func() *bun.DB { return peerDB })
 	b.SetGateDB(testGates(t))
 	person := actorCtx(a.owner)
 	row, req := computerPermissionFixture()
@@ -97,6 +98,9 @@ func TestComputerPermissionDBTwoReplicasConsumeOnceAndRevokeAlways(t *testing.T)
 	if _, err := b.Claim(cancelled, always, req, "worker", "machine"); err == nil {
 		t.Fatal("cancelled request claimed")
 	}
+	t.Run("request and recovery", func(t *testing.T) {
+		testComputerPermissionDBRecovery(t, a, actsDB{i: b, eng: peerEngine, db: peerDB, owner: a.owner})
+	})
 }
 
 func TestComputerPermissionDBSelectedMachinesKeepSeparateReceipts(t *testing.T) {
