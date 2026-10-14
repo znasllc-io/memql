@@ -452,6 +452,11 @@ mutation approval createWorkApproval {
 
 /// Save human guidance on an undecided budget checkpoint. The native approval
 /// gate proves the owner and exact pending wait; this write grants no budget.
+/// An actor.userId filter proves ownership alone, not that this is still the
+/// same undecided native checkpoint or that its decision lease is held. Only
+/// decideApproval may reach this writer after validating those facts and the
+/// bounded feedback-only answer; a direct owned write could replace guidance
+/// after a budget decision and change the instruction that resumes the run.
 @serverOnly
 mutation approval saveWorkApprovalGuidance {
   args {

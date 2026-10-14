@@ -91,6 +91,13 @@ var promptLevels = map[string]string{
 	// result. The agent chooses actions and writes a user-facing reply; it does
 	// not emit executable DSL, so the agent reply band is sufficient.
 	"workAgentReply": "strong",
+	// Rendered checkpoint guidance joins the next ordinary reasoning turn;
+	// it creates no critic call or independent routing choice. Its own bounded
+	// evidence summary stays fast; the work turn keeps its existing level.
+	"workProgressRecovery": "fast",
+	// A native fallback renders one short question from measured stall evidence,
+	// without another model call, planning pass or execution authority.
+	"workProgressQuestion": "fast",
 	// Proposes bounded Markdown edits a person reviews as an actual diff.
 	// Native validation checks source identity and exact approval before writing;
 	// the prose judgment band is sufficient and no executable DSL is emitted.

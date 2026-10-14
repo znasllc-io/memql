@@ -2,7 +2,6 @@ package agent
 
 import (
 	"context"
-	"crypto/sha256"
 	"encoding/json"
 	"fmt"
 	"slices"
@@ -11,6 +10,7 @@ import (
 
 	"github.com/znasllc-io/memql/component/automations/workflowhost"
 	"github.com/znasllc-io/memql/core/common"
+	"github.com/znasllc-io/memql/core/id"
 )
 
 const workRecoveryMarker = "work_recovery_checkpoint"
@@ -37,7 +37,7 @@ type workRecoveryState struct {
 
 func recoveryDigest(value any) string {
 	raw, _ := json.Marshal(value)
-	return fmt.Sprintf("%x", sha256.Sum256(raw))
+	return string(id.NewUntracked().FromBytes(raw))
 }
 
 // Only server-shaped accepted guidance can rearm an attempt. Synthetic user

@@ -1,20 +1,52 @@
 package work
 
 import (
+	"fmt"
 	"sync"
 	"testing"
 	"time"
 
 	"github.com/stretchr/testify/require"
+	"github.com/uptrace/bun"
 	"github.com/znasllc-io/memql/component/auth"
 	"github.com/znasllc-io/memql/component/memql"
 )
 
+// Boot the installed DSL on two independent replicas once. Each scenario
+// retains separate integration state, write-gate pools and a unique owner;
+// only the immutable DSL and the replica-local query caches are reused.
+// This follows TestWorkVersionActs without turning the cross-replica seam
+// into two handles for a single engine.
+func TestBudgetGuidanceDBWorkflowAcrossReplicas(t *testing.T) {
+	replicas := [2]actsDB{openActsDB(t), openActsDB(t)}
+	cases := []struct {
+		name string
+		run  func(*testing.T, actsDB, actsDB)
+	}{
+		{"PersistsOnceAndOnlyExplicitApprovalResumes", testBudgetGuidanceDBPersistsOnceAndOnlyExplicitApprovalResumes},
+		{"RecoversApprovedCheckpointAfterRunReleaseFailure", testBudgetGuidanceDBRecoversApprovedCheckpointAfterRunReleaseFailure},
+		{"ModelCallBudgetSeesPeerRaisesAndReceiptsBeforeHardExhaustion", testModelCallBudgetDBSeesPeerRaisesAndReceiptsBeforeHardExhaustion},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			owner := fmt.Sprintf("dbtest-budget-guidance-%d", time.Now().UnixNano())
+			peers := replicas
+			for n := range peers {
+				peer := &peers[n]
+				peer.owner = owner
+				peer.i = New(peer.eng, testLogger())
+				peer.i.bunDB = func() *bun.DB { return peer.db }
+				peer.i.SetGateDB(testGates(t))
+				peer.i.admitRow = memql.AdmitSourceRow
+			}
+			tc.run(t, peers[0], peers[1])
+		})
+	}
+}
+
 // The owner gate, DSL mutation, collapsed reads and replica coordination are
 // real. Saving guidance must neither resolve the request nor release its run.
-func TestBudgetGuidanceDBPersistsOnceAndOnlyExplicitApprovalResumes(t *testing.T) {
-	a, b := openActsDB(t), openActsDB(t)
-	b.owner = a.owner
+func testBudgetGuidanceDBPersistsOnceAndOnlyExplicitApprovalResumes(t *testing.T, a, b actsDB) {
 	previous := auth.InstalledCapabilityCatalog()
 	auth.SetCapabilityCatalog(nil)
 	t.Cleanup(func() { auth.SetCapabilityCatalog(previous) })

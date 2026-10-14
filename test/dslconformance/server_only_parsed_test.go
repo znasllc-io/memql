@@ -1610,6 +1610,9 @@ func TestServerOnlyParsedSetMatchesTheTree(t *testing.T) {
 		{Path: "work/mutations.memql", Name: "createWorkObservation"}: true,
 		{Path: "work/mutations.memql", Name: "createWorkApproval"}:    true,
 		{Path: "work/mutations.memql", Name: "decideWorkApproval"}:    true,
+		// Ownership alone does not establish the pending native checkpoint or
+		// its held decision lease; decideApproval validates both before saving.
+		{Path: "work/mutations.memql", Name: "saveWorkApprovalGuidance"}: true,
 		// Native receipt gates establish owner, exact scope and current version.
 		// Callers cannot consume or revoke a receipt by invoking these writers.
 		{Path: "work/mutations.memql", Name: "useWorkComputerPermission"}:    true,

@@ -27,9 +27,7 @@ func (e *budgetResumeFailureEngine) Execute(ctx context.Context, query string) (
 	return e.Engine.Execute(ctx, query)
 }
 
-func TestBudgetGuidanceDBRecoversApprovedCheckpointAfterRunReleaseFailure(t *testing.T) {
-	a, b := openActsDB(t), openActsDB(t)
-	b.owner = a.owner
+func testBudgetGuidanceDBRecoversApprovedCheckpointAfterRunReleaseFailure(t *testing.T, a, b actsDB) {
 	previous := auth.InstalledCapabilityCatalog()
 	auth.SetCapabilityCatalog(nil)
 	t.Cleanup(func() { auth.SetCapabilityCatalog(previous) })

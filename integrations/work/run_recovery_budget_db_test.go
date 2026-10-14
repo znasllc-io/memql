@@ -8,9 +8,7 @@ import (
 	"github.com/znasllc-io/memql/core/common"
 )
 
-func TestModelCallBudgetDBSeesPeerRaisesAndReceiptsBeforeHardExhaustion(t *testing.T) {
-	a, b := openActsDB(t), openActsDB(t)
-	b.owner = a.owner
+func testModelCallBudgetDBSeesPeerRaisesAndReceiptsBeforeHardExhaustion(t *testing.T, a, b actsDB) {
 	ctx := actorCtx(a.owner)
 	runID := a.openRun(t, nil)
 	a.write(t, "updateWorkRun", map[string]any{"runId": runID, "classification": map[string]any{"workload": "lookup"}})

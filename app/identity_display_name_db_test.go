@@ -82,11 +82,34 @@ func displayNameStoredPayload(t *testing.T, db *bun.DB, target string) map[strin
 	return payload
 }
 
-func TestIdentityDisplayNameCapabilityDiscoveryWriteAndCrossEngineReadback(t *testing.T) {
+func TestIdentityDisplayName(t *testing.T) {
 	first, db := workTemplateDBEngineAndDB(t)
 	second := workTemplateDBEngine(t)
-	registerDisplayNameIdentity(t, first, first)
+	access := &displayNameInterleavingEngine{IntegrationEngineAccess: first}
+	registerDisplayNameIdentity(t, first, access)
 	registerDisplayNameIdentity(t, second, second)
+	// Each case owns fresh user ids and actors; the adapter constructs the
+	// admin service per invocation. Reuse the loaded DSL rather than booting
+	// eight engines, retaining two distinct replica caches. The parent keeps
+	// their pools alive until every subtest has cleaned its rows. The read hook
+	// is case-scoped, and the commit-window hook is installed last.
+	for _, tc := range []struct {
+		name string
+		run  func(*testing.T, *memql.MemQLEngine, *memql.MemQLEngine, *bun.DB)
+	}{
+		{"CapabilityDiscoveryWriteAndCrossEngineReadback", testIdentityDisplayNameCapabilityDiscoveryWriteAndCrossEngineReadback},
+		{"RefusesConcurrentReplicaChangeThenUsesFreshVersion", func(t *testing.T, first, second *memql.MemQLEngine, db *bun.DB) {
+			testIdentityDisplayNameRefusesConcurrentReplicaChangeThenUsesFreshVersion(t, first, second, db, access)
+		}},
+		{"SurvivesLegacyServiceReadBeforeRename", testIdentityDisplayNameSurvivesLegacyServiceReadBeforeRename},
+		{"SerializesLegacyWriterAcrossCommitWindow", testIdentityDisplayNameSerializesLegacyWriterAcrossCommitWindow},
+	} {
+		t.Run(tc.name, func(t *testing.T) { tc.run(t, first, second, db) })
+	}
+}
+
+func testIdentityDisplayNameCapabilityDiscoveryWriteAndCrossEngineReadback(t *testing.T, first, second *memql.MemQLEngine, db *bun.DB) {
+	t.Helper()
 	ctx, target := displayNameFixture(t, first, db)
 	before := displayNameStoredPayload(t, db, target)
 
@@ -194,11 +217,9 @@ func (e *displayNameInterleavingEngine) Execute(ctx context.Context, query strin
 	return result, err
 }
 
-func TestIdentityDisplayNameRefusesConcurrentReplicaChangeThenUsesFreshVersion(t *testing.T) {
-	first, db := workTemplateDBEngineAndDB(t)
-	second := workTemplateDBEngine(t)
-	access := &displayNameInterleavingEngine{IntegrationEngineAccess: first}
-	registerDisplayNameIdentity(t, first, access)
+func testIdentityDisplayNameRefusesConcurrentReplicaChangeThenUsesFreshVersion(t *testing.T, first, second *memql.MemQLEngine, db *bun.DB, access *displayNameInterleavingEngine) {
+	t.Helper()
+	t.Cleanup(func() { access.afterRead = nil })
 	ctx, target := displayNameFixture(t, second, db)
 	access.afterRead = func() {
 		templateMutation(t, second, auth.ContextWithInternalOrigin(ctx), "identity.updateUser", map[string]any{
@@ -222,10 +243,8 @@ func TestIdentityDisplayNameRefusesConcurrentReplicaChangeThenUsesFreshVersion(t
 	require.Equal(t, current, after)
 }
 
-func TestIdentityDisplayNameSurvivesLegacyServiceReadBeforeRename(t *testing.T) {
-	first, db := workTemplateDBEngineAndDB(t)
-	second := workTemplateDBEngine(t)
-	registerDisplayNameIdentity(t, second, second)
+func testIdentityDisplayNameSurvivesLegacyServiceReadBeforeRename(t *testing.T, first, second *memql.MemQLEngine, db *bun.DB) {
+	t.Helper()
 	ctx, target := displayNameFixture(t, first, db)
 	before := displayNameStoredPayload(t, db, target)
 	access := &displayNameInterleavingEngine{IntegrationEngineAccess: first}
@@ -289,10 +308,8 @@ func (h *displayNameCommitHold) BeforeQuery(ctx context.Context, event *bun.Quer
 
 func (*displayNameCommitHold) AfterQuery(context.Context, *bun.QueryEvent) {}
 
-func TestIdentityDisplayNameSerializesLegacyWriterAcrossCommitWindow(t *testing.T) {
-	first, db := workTemplateDBEngineAndDB(t)
-	second := workTemplateDBEngine(t)
-	registerDisplayNameIdentity(t, first, first)
+func testIdentityDisplayNameSerializesLegacyWriterAcrossCommitWindow(t *testing.T, first, second *memql.MemQLEngine, db *bun.DB) {
+	t.Helper()
 	ctx, target := displayNameFixture(t, first, db)
 	ctx, cancel := context.WithTimeout(ctx, 12*time.Second)
 	hold := &displayNameCommitHold{
