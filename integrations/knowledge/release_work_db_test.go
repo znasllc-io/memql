@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"errors"
+	"fmt"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -17,7 +18,7 @@ import (
 	"github.com/znasllc-io/memql/integrations/knowledge/seeddata"
 )
 
-func releaseWorkFixture(t *testing.T) (*seedFixture, context.Context, func(string, map[string]any)) {
+func releaseWorkReplicas(t *testing.T) *seedFixture {
 	t.Helper()
 	f, system := releaseFixture(t)
 	for _, pair := range []struct {
@@ -27,6 +28,51 @@ func releaseWorkFixture(t *testing.T) (*seedFixture, context.Context, func(strin
 		require.NoError(t, pair.e.RegisterIntegration(pair.i))
 	}
 	require.NoError(t, f.a.ReconcileReleaseSeeds(system, false))
+	return f
+}
+
+func releaseWorkFixture(t *testing.T, shared *seedFixture) (*seedFixture, context.Context, func(string, map[string]any)) {
+	t.Helper()
+	// Only the fixed replica pair and unchanged reviewed corpus are shared.
+	// Each sequential case owns its caller, work rows, vector namespace and hooks.
+	f := *shared
+	f.domain = fmt.Sprintf("%s-work-%d", shared.domain, time.Now().UnixNano())
+	f.provider = f.domain
+	f.ctx = auth.ContextWithUserActor(context.Background(), f.domain)
+	for _, i := range []*Integration{f.a, f.b} {
+		dbGetter, gateDB, embeddingProvider := i.dbGetter, i.gateDB, i.embeddingProvider
+		t.Cleanup(func() {
+			i.SetDBGetter(dbGetter)
+			i.SetGateDB(gateDB)
+			i.SetEmbeddingProvider(embeddingProvider)
+		})
+		i.SetDBGetter(func() *sql.DB { return f.db })
+		i.SetEmbeddingProvider(func(context.Context, string) (memql.EmbeddingAIProvider, error) { return seedTestProvider{}, nil })
+	}
+	old, had := memql.ActiveEmbedderBinding()
+	memql.SetActiveEmbedderBinding(memql.EmbedderBinding{ProviderRef: f.provider, Dimensions: 1024})
+	t.Cleanup(func() {
+		if had {
+			memql.SetActiveEmbedderBinding(old)
+		} else {
+			memql.ClearActiveEmbedderBinding()
+		}
+		_, err := f.db.ExecContext(context.Background(), `DELETE FROM "MemoryNodes" WHERE (concept='v1:work:run' AND id=$1) OR (concept='v1:work:goal' AND id=$2)`, id.BuildNodeId("v1:work:run", f.domain+"run"), id.BuildNodeId("v1:work:goal", f.domain+"goal"))
+		require.NoError(t, err)
+		_, err = f.db.ExecContext(context.Background(), `DELETE FROM embedding_cache WHERE provider=$1`, f.provider)
+		require.NoError(t, err)
+		table, err := memql.EmbeddingVectorTable(f.provider, 1024)
+		require.NoError(t, err)
+		_, err = f.db.ExecContext(context.Background(), `DROP TABLE IF EXISTS `+table)
+		require.NoError(t, err)
+	})
+	for _, seed := range seeddata.Release() {
+		row, err := f.b.seedChunkSnapshot(f.ctx, seed.ID)
+		require.NoError(t, err)
+		require.NotNil(t, row)
+		require.Equal(t, "validated", row.Payload["validationStatus"])
+		require.True(t, seed.Matches(row.Payload))
+	}
 	write := func(name string, args map[string]any) {
 		call, err := parser.RenderCall(name, args)
 		require.NoError(t, err)
@@ -36,20 +82,18 @@ func releaseWorkFixture(t *testing.T) (*seedFixture, context.Context, func(strin
 	write("createWorkGoal", map[string]any{"goalId": f.domain + "goal", "statement": "Verify reviewed knowledge availability", "origin": "user"})
 	write("createWorkRun", map[string]any{"runId": f.domain + "run", "goalId": f.domain + "goal", "automationName": "fixture", "templateFingerprint": "fixture", "mode": "live", "status": "running", "startedAt": time.Now().UTC().Format(time.RFC3339Nano)})
 	ctx := auth.ContextWithInternalOrigin(common.ContextWithRun(f.ctx, common.RunContext{RunId: f.domain + "run", GoalId: f.domain + "goal", OwnerUserId: f.domain, StepKey: "section", Mode: common.RunModeLive}))
-	old, had := memql.ActiveEmbedderBinding()
-	memql.SetActiveEmbedderBinding(memql.EmbedderBinding{ProviderRef: f.provider, Dimensions: 1024})
-	t.Cleanup(func() {
-		if had {
-			memql.SetActiveEmbedderBinding(old)
-		} else {
-			memql.ClearActiveEmbedderBinding()
-		}
-	})
-	return f, ctx, write
+	return &f, ctx, write
 }
 
-func TestOwnedReleaseIndexingFreshScopeAcrossReplicas(t *testing.T) {
-	f, ctx, write := releaseWorkFixture(t)
+func TestOwnedReleaseIndexing(t *testing.T) {
+	f := releaseWorkReplicas(t)
+	t.Run("FreshScopeAcrossReplicas", func(t *testing.T) { testOwnedReleaseIndexingFreshScopeAcrossReplicas(t, f) })
+	t.Run("KeepsCancellationAndStorageFailures", func(t *testing.T) { testOwnedReleaseIndexingKeepsCancellationAndStorageFailures(t, f) })
+	t.Run("ScheduledDefersWithoutInventingFleetAuthority", func(t *testing.T) { testScheduledReleaseIndexingDefersWithoutInventingFleetAuthority(t, f) })
+}
+
+func testOwnedReleaseIndexingFreshScopeAcrossReplicas(t *testing.T, shared *seedFixture) {
+	f, ctx, write := releaseWorkFixture(t, shared)
 	p := &releaseEmbedding{calls: map[string]int{}}
 	for _, i := range []*Integration{f.a, f.b} {
 		i.SetEmbeddingProvider(func(call context.Context, _ string) (memql.EmbeddingAIProvider, error) {
@@ -116,10 +160,10 @@ func (p *releaseInterruptEmbedding) EmbedBatch(ctx context.Context, ss []string)
 }
 func (*releaseInterruptEmbedding) Dimensions() int { return 1024 }
 
-func TestOwnedReleaseIndexingKeepsCancellationAndStorageFailures(t *testing.T) {
+func testOwnedReleaseIndexingKeepsCancellationAndStorageFailures(t *testing.T, shared *seedFixture) {
 	for _, mode := range []string{"cancel", "native-budget", "peer-cancel", "storage"} {
 		t.Run(mode, func(t *testing.T) {
-			f, ctx, write := releaseWorkFixture(t)
+			f, ctx, write := releaseWorkFixture(t, shared)
 			cancelled, cancel := context.WithCancelCause(ctx)
 			defer cancel(nil)
 			p := &releaseInterruptEmbedding{before: func(call context.Context) error {
@@ -158,8 +202,8 @@ func TestOwnedReleaseIndexingKeepsCancellationAndStorageFailures(t *testing.T) {
 	}
 }
 
-func TestScheduledReleaseIndexingDefersWithoutInventingFleetAuthority(t *testing.T) {
-	f, ctx, _ := releaseWorkFixture(t)
+func testScheduledReleaseIndexingDefersWithoutInventingFleetAuthority(t *testing.T, shared *seedFixture) {
+	f, ctx, _ := releaseWorkFixture(t, shared)
 	memql.SetActiveEmbedderBinding(memql.EmbedderBinding{ProviderRef: "fleet:private-embedder", Dimensions: 1024})
 	var calls atomic.Int32
 	f.a.SetEmbeddingProvider(func(context.Context, string) (memql.EmbeddingAIProvider, error) {
