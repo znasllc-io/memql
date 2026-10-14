@@ -15,7 +15,7 @@ const { NexusApp } = await import("../../src/apps/nexus/NexusApp");
 const { LocalNexusSettingsStore } = await import("../../src/apps/nexus/settings");
 const { answerPayload, budgetApprovalAnswer } = await import("../../src/apps/nexus/ApprovalsSection");
 const { approvalFromRow } = await import("../../src/apps/nexus/rows");
-const { approvalRow, fakeConnection, procedureRow, runRow, withSession } = await import("./harness");
+const { approvalRow, fakeConnection, procedureRow, runRow, rowsResult, withSession } = await import("./harness");
 
 type Conn = ReturnType<typeof fakeConnection>;
 
@@ -393,6 +393,29 @@ const scopedComputerRequest = (kind = "directory_read") => ({
 });
 
 describe("computer permission choices", () => {
+  it("offers a retry when the selected request's older run cannot be read", async () => {
+    const conn = fakeConnection({ approvals: [approvalRow({ id: "old-scope", runId: "older-run", kind: "scopeElevation", question: "Inspect older work", expiresAt: "2020-01-01T00:00:00Z", subject: { computerPermission: scopedComputerRequest() } })] });
+    conn.query.workRunSummaryForOwner.mockRejectedValueOnce(new Error("Disconnected"))
+      .mockResolvedValueOnce(rowsResult([runRow({ id: "older-run", status: "waiting", waitingOn: { kind: "approval", subject: "old-scope" } })]));
+    mount(conn);
+    fireEvent.click(await screen.findByText("Inspect older work"));
+    expect(await screen.findByRole("alert")).toHaveProperty("textContent", "Could not check this work. Try again.");
+    fireEvent.click(await screen.findByRole("button", { name: "Try again" }));
+    expect(await screen.findByRole("button", { name: "Review again" })).toBeTruthy();
+    expect(conn.query.decideApproval).not.toHaveBeenCalled();
+  });
+
+  it("loads the parked run when an old approval lies beyond the run history page", async () => {
+    const conn = fakeConnection({ approvals: [approvalRow({ id: "old-scope", runId: "older-run", kind: "scopeElevation", question: "Inspect older work", expiresAt: "2020-01-01T00:00:00Z", subject: { computerPermission: scopedComputerRequest() } })] });
+    conn.query.workRunSummaryForOwner.mockResolvedValueOnce(rowsResult([runRow({ id: "older-run", status: "waiting", waitingOn: { kind: "approval", subject: "old-scope" } })]));
+    mount(conn);
+    fireEvent.click(await screen.findByText("Inspect older work"));
+    expect(await screen.findByRole("button", { name: "Review again" })).toBeTruthy();
+    expect(conn.query.workRunSummaryForOwner).toHaveBeenCalledWith({ runId: "older-run" }, expect.anything());
+    await act(async () => conn.subscriptions.emit("v1:work:run", runRow({ id: "older-run", status: "cancelled", cancelRequested: true }), "NODE_UPDATED"));
+    await waitFor(() => expect(screen.queryByRole("button", { name: "Review again" })).toBeNull());
+  });
+
   it("refreshes an expired permission for a fresh review without granting it", async () => {
     const original = approvalRow({ id: "expired-scope", runId: "parked-run", kind: "scopeElevation", question: "Inspect the repository", expiresAt: "2020-01-01T00:00:00Z", subject: { computerPermission: scopedComputerRequest() } });
     const conn = fakeConnection({ approvals: [original], runs: [runRow({ id: "parked-run", status: "waiting", waitingOn: { kind: "approval", subject: "expired-scope" } })] });

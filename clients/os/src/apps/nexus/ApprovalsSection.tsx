@@ -27,6 +27,7 @@ import {
   useNow,
   type LiveListSource,
 } from "../../kit";
+import { useOsConnection } from "../../live/connection";
 import { ActionBar, type Act } from "../../kit/ActionBar";
 import type { DecideApprovalState } from "./actions";
 import { computerPermission, permissionRememberLabel } from "./computerPermissions";
@@ -48,6 +49,7 @@ import {
   approvalSubjectLine,
   idTail,
   runTitle,
+  runFromRow,
   type ApprovalRow,
   type RunRow,
 } from "./rows";
@@ -139,6 +141,10 @@ export function ApprovalsSection({
   const [rememberPermission, setRememberPermission] = useState(false);
   const [showPermissions, setShowPermissions] = useState(false);
   const now = useNow(15_000);
+  const connection = useOsConnection();
+  const [olderRun, setOlderRun] = useState<RunRow | null>(null);
+  const [olderRunError, setOlderRunError] = useState("");
+  const [runReadAttempt, setRunReadAttempt] = useState(0);
   const snapshot = useSyncExternalStore(
     useMemo(() => approvals ? approvals.subscribe.bind(approvals) : () => () => {}, [approvals]),
     () => approvals?.snapshot ?? EMPTY_APPROVALS,
@@ -178,6 +184,25 @@ export function ApprovalsSection({
     for (const run of runs) byId.set(idTail(run.id), run);
     return byId;
   }, [runs]);
+  // The run feed is paged, but pending approvals are not. Resolve only the
+  // selected request's missing run; live summaries still take precedence.
+  const selectedLiveRun = selected ? runsById.get(idTail(selected.runId)) : undefined;
+  const missingRunId = selected && !selectedLiveRun ? selected.runId : "";
+  useEffect(() => {
+    if (!missingRunId || !connection?.query) return;
+    const controller = new AbortController();
+    setOlderRunError("");
+    void connection.query.workRunSummaryForOwner({ runId: missingRunId }, { signal: controller.signal })
+      .then(result => {
+        if (controller.signal.aborted) return;
+        const row = result.rows()[0];
+        setOlderRun(row && idTail(String(row.id ?? "")) === idTail(missingRunId) ? runFromRow(row) : null);
+      }).catch(() => {
+        if (!controller.signal.aborted) { setOlderRun(null); setOlderRunError("Could not check this work. Try again."); }
+      });
+    return () => controller.abort();
+  }, [connection, missingRunId, selected?.artifactHash, decide.deciding, runReadAttempt]);
+  const selectedRun = selectedLiveRun ?? (selected && olderRun && idTail(olderRun.id) === idTail(selected.runId) ? olderRun : undefined);
   const savedApprovalResume = decide.approvalResumes[idTail(selectedApprovalId)];
   const savedRun = savedApprovalResume ? runsById.get(idTail(savedApprovalResume.runId)) : undefined;
   // A release on another replica, cancellation or a different gate makes a
@@ -245,13 +270,15 @@ export function ApprovalsSection({
 
   // Expiry removes the permission decision, not the person's route back to
   // the work it parked. Ask revalidates guidance against the owned checkpoint.
-  const selectedRun = selected ? runsById.get(idTail(selected.runId)) : undefined;
   const canDiscussExpiredScope = selected !== null && selected.decision === "" && lapsed
     && selected.kind === "scopeElevation" && !failure && selectedRun !== undefined
     && runWaitsForApproval(selectedRun, selected.id);
 
+  const runReadError = missingRunId && permission && (lapsed || permissionReview) ? olderRunError : "";
   const acts: Act[] = [];
-  if (approvalResume?.permissionAnswer && ["expired", "revoked"].includes(permissionReview ?? "")) {
+  if (runReadError) {
+    acts.push({ label: "Try again", tone: "primary", onAct: () => setRunReadAttempt(attempt => attempt + 1) });
+  } else if (approvalResume?.permissionAnswer && ["expired", "revoked"].includes(permissionReview ?? "")) {
     acts.push({ label: "Review again", tone: "primary", busy: decide.deciding === idTail(approvalResume.approvalId),
       onAct: () => { void decide.refreshPermission(approvalResume.approvalId); } });
   } else if (approvalResume) {
@@ -375,8 +402,8 @@ export function ApprovalsSection({
         </>}
       </div>
 
-      {approvalResume ? <ActionBar state="Approved" detail="Continue using the decision already recorded." tone="paused" acts={acts}>
-        {approvalResume.error ? <span className="os-nexus-act-error os-mono" role="alert">{approvalResume.error}</span> : null}
+      {approvalResume ? <ActionBar state={permissionReview ? "Review needed" : "Approved"} detail={permissionReview ? "Review access before continuing." : "Continue using the decision already recorded."} tone="paused" acts={acts}>
+        {decide.error || approvalResume.error ? <span className="os-nexus-act-error os-mono" role="alert">{decide.error || approvalResume.error}</span> : null}
       </ActionBar> : selected === null ? decide.error ? <Notice tone="error" sentence="This request could not be completed." detail={decide.error} /> : null : (
         <ActionBar
           state={selected.decision === "" && lapsed ? "Lapsed" : decisionWord(selected.decision)}
@@ -393,7 +420,7 @@ export function ApprovalsSection({
           tone={canDecide ? "paused" : "none"}
           acts={acts}
         >
-          {decide.error === "" ? null : <span className="os-nexus-act-error os-mono" role="alert">{decide.error}</span>}
+          {decide.error || runReadError ? <span className="os-nexus-act-error os-mono" role="alert">{decide.error || runReadError}</span> : null}
         </ActionBar>
       )}
     </div>
