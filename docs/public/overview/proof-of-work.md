@@ -141,6 +141,12 @@ model and work receipts from the root and its delegated child runs, captured
 final files, oracle outputs and the result, including failures.
 An uncertain submission is never retried automatically.
 
+Command evidence comes from the exact tool exchanges saved in native execution
+checkpoints, including the command, checkout, output and process exit status.
+A successful tool transport alone does not prove a passing command. Recovery
+requires a recorded behavioral test failure followed by a passing test in the
+same saved history; independent reruns cannot fill in missing execution evidence.
+
 Training receives the completed result through an owner-scoped publication
 operation. MemQL checks ownership and every reported model-call identity;
 artifact verdicts are attributed to the external harness, which inspected the

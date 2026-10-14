@@ -2,6 +2,7 @@ package proving
 
 import (
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"os"
@@ -18,6 +19,7 @@ type evaluationClient struct {
 	t                             *testing.T
 	fix                           bool
 	readError                     bool
+	omitRed                       bool
 	status                        string
 	created, cancelled, published int
 	args                          client.CreateGoalArgs
@@ -68,7 +70,19 @@ func (f *evaluationClient) WorkModelCallsForOwnerRun(context.Context, client.Wor
 }
 func (f *evaluationClient) WorkObservationsForOwnerRun(context.Context, client.WorkObservationsForOwnerRunArgs) (*client.Result, error) {
 	args, _ := json.Marshal(map[string]any{"action": "exec", "args": map[string]any{"cmd": "go test -count=1 ./...", "cwd": f.args.Input["workspace"]}})
-	return client.ResultFromRows([]client.Row{{"id": "check-eval", "kind": "tool_result", "data": map[string]any{"tool": "workerHost", "isError": false, "args": string(args)}}}), nil
+	var messages []map[string]any
+	add := func(id string, exit int, output string) {
+		content, _ := json.Marshal(map[string]any{"nodes": []any{map[string]any{"concept": "integration:worker:result", "payload": map[string]any{"ok": true, "output": map[string]any{"exitCode": exit, "stdout": output}}}}})
+		messages = append(messages, map[string]any{"Role": "assistant", "ToolCalls": []any{map[string]any{"ID": id, "Name": "workerHost", "Arguments": string(args)}}}, map[string]any{"Role": "tool", "Name": "workerHost", "ToolCallId": id, "Content": string(content)})
+	}
+	if !f.omitRed {
+		add("red", 1, "--- FAIL: TestSum (0.00s)\nFAIL evaluation.invalid/totals\n")
+	}
+	if f.fix {
+		add("green", 0, "ok evaluation.invalid/totals 0.001s\n")
+	}
+	raw, _ := json.Marshal(messages)
+	return client.ResultFromRows([]client.Row{{"id": "check-eval", "kind": "note", "data": map[string]any{"continuation": true, "messagesEncoding": "json-base64-v1", "messages": base64.StdEncoding.EncodeToString(raw)}}}), nil
 }
 func (f *evaluationClient) WorkStepsForOwnerRun(context.Context, client.WorkStepsForOwnerRunArgs) (*client.Result, error) {
 	return client.ResultFromRows(nil), nil
@@ -134,6 +148,26 @@ func TestGoalWorkflowPreservesObserverFailureAndStopsOwnedWork(t *testing.T) {
 	if len(paths) != 1 {
 		t.Fatal("lost cancellation diagnostic")
 	}
+}
+
+func TestGoalWorkflowCannotClaimRecoveryWithoutRecordedFailure(t *testing.T) {
+	f := &evaluationClient{t: t, fix: true, omitRed: true}
+	runner, catalog, matrix := testGoalRunner(t, f)
+	matrix.ScenarioIDs = []string{"failed-test-recovery"}
+	report, err := runner.Run(context.Background(), catalog, matrix)
+	if err != nil {
+		t.Fatal(err)
+	}
+	result := report.Attempts[0].Result
+	if result == nil || result.Outcome != "failed" {
+		t.Fatalf("independent red/green oracle fabricated observed recovery: %+v", report)
+	}
+	for _, assertion := range result.Assertions {
+		if assertion.CriterionID == "regression" && assertion.Verdict == "unverified" {
+			return
+		}
+	}
+	t.Fatal("missing unverified recovery evidence")
 }
 
 func TestGoalWorkflowDoesNotRunAnUnimplementedInjection(t *testing.T) {
