@@ -296,7 +296,10 @@ func (i *Integration) handleDecideApproval(ctx context.Context, args map[string]
 		retry = &failureRetry{stepKey: rowString(approval, "stepKey"), symptom: work.SymptomPlan,
 			reason: rowString(rowMap(approval, "subject"), "resumeReason")}
 	}
-	if !(kind == "feedback" && work.IsModelCallCheckpoint(rowMap(approval, "subject"))) && (work.IsFailureQuestion(approval["options"]) || (kind == "scopeElevation" && !typedPermission) || (kind == "feedback" && rowString(rowMap(approval, "subject"), "question") != "")) {
+	// An ordinary question pauses the current execution. Its answer must keep
+	// that lineage: the saved tool checkpoint is bound to it, including inside
+	// an explicit rerun. Answering it is not a failure retry.
+	if !(kind == "feedback" && work.IsModelCallCheckpoint(rowMap(approval, "subject"))) && (work.IsFailureQuestion(approval["options"]) || (kind == "scopeElevation" && !typedPermission)) {
 		retry = &failureRetry{stepKey: rowString(approval, "stepKey"), decidedBy: strings.TrimSpace(ac.UserId)}
 		if work.IsFailureQuestion(approval["options"]) {
 			retry.symptom = work.Symptom(rowString(rowMap(approval, "subject"), "symptom"))
