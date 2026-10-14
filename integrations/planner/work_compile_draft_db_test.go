@@ -149,7 +149,7 @@ func TestCompileDraftDB_SeparateReplicaReadsAndRunsValidatedDraft(t *testing.T) 
 	if err := db.PingContext(context.Background()); err != nil {
 		dbtest.Unreachable(t, "work draft compile", dbtest.DSN(), err)
 	}
-	for _, q := range []string{`CREATE TEMP TABLE "MemoryNodes" (LIKE public."MemoryNodes" INCLUDING ALL)`, `CREATE TEMP TABLE node_vectors (LIKE public.node_vectors INCLUDING ALL)`} {
+	for _, q := range []string{`CREATE TEMP TABLE "MemoryNodes" (LIKE public."MemoryNodes" INCLUDING ALL)`, `CREATE TEMP TABLE memory_liveness (LIKE public.memory_liveness INCLUDING ALL)`, `CREATE TEMP TABLE node_vectors (LIKE public.node_vectors INCLUDING ALL)`} {
 		if _, err := db.ExecContext(context.Background(), q); err != nil {
 			t.Fatal(err)
 		}
