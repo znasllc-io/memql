@@ -30,6 +30,7 @@ import (
 type ConsentGate interface {
 	Allows(tool, action string) consent.Decision
 	AllowsAt(tool, action string, cursor consent.CursorPoint) consent.Decision
+	AllowsDirectoryRead(action string) consent.Decision
 }
 
 // Dispatcher is the cockpit-side tool dispatcher. Implements
@@ -52,10 +53,9 @@ func NewHomeDispatcher(logger *slog.Logger, policy *Policy, consentGate ConsentG
 // NewDispatcher constructs a Dispatcher. The policy controls
 // allow/deny decisions for shell exec / fs / http tools.
 //
-// When consentGate is nil, the dispatcher behaves the pre-#64 way
-// (every dispatched call runs). When non-nil, every call passes
-// through the gate first; a denied decision short-circuits with a
-// `consent_required` failure carrying the gate's reason string.
+// Legacy unscoped calls retain their nil-gate behavior; scoped receipts
+// require a gate. Ordinary calls and exact commands need a control window.
+// Validated directory receipts use the independent local-stop gate.
 func NewDispatcher(logger *slog.Logger, policy *Policy, consentGate ConsentGate) *Dispatcher {
 	if logger == nil {
 		logger = slog.Default()
@@ -147,7 +147,14 @@ func (d *Dispatcher) DispatchStream(ctx context.Context, dispatch *memqlv1.ToolD
 		return nil, &memqlv1.Failure{ErrorCode: "bad_request", ErrorMessage: err.Error()}
 	}
 
-	// Consent gate (memql-cockpit#64). Every workerHost /
+	// A scoped receipt is a separate, explicit owner decision. Validate it
+	// before choosing its consent gate; directory reads do not expire with
+	// the broader computer-control window. Local revocation still wins.
+	if dispatch.GetComputerPermission() != nil {
+		return d.dispatchComputerPermission(ctx, dispatch, args)
+	}
+
+	// Consent gate (memql-cockpit#64). Every unscoped workerHost /
 	// workerComputer call passes through the per-host consent
 	// manager. Without an active operator-granted window the call
 	// short-circuits with `consent_required` carrying the gate's
@@ -190,9 +197,6 @@ func (d *Dispatcher) DispatchStream(ctx context.Context, dispatch *memqlv1.ToolD
 		}
 	}
 
-	if dispatch.GetComputerPermission() != nil {
-		return d.dispatchComputerPermission(ctx, dispatch, args)
-	}
 	switch tool {
 	case "workerHost":
 		success, failure = d.dispatchHost(ctx, action, args, dispatch.GetAgentId(), d.streamTo(callId, send))

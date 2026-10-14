@@ -1044,8 +1044,14 @@ earlier build is ADOPTED, not replaced.
 
 **PER CLUSTER: CONSENT, METRICS, STREAMS. PER MACHINE: THE MODEL CEILING.**
 `consent.Homes` holds one window per home and each home's dispatcher asks its
-own; `consent revoke` with no `--cluster` closes every window. Every
-per-stream metric carries `home`, and each home's series exist from startup.
+own; `consent revoke` with no `--cluster` closes every window. Each
+scoped directory read instead requires a freshly checked engine receipt and
+honors the local stop independently of window expiry. `consent revoke` also
+persists that stop per home under the policy directory's `consent/`; local
+`consent grant` resumes it. Both worker startup paths must use
+`consent.NewPersistentHomes`, never an in-memory registry. Corrupt state
+fails closed; a directory receipt cannot authorize writes or commands.
+Every per-stream metric carries `home`, and each home's series exist from startup.
 Two enabled homes on one cluster open ONE stream (`runnableHomes`: the later
 entry, which holds the newer token); the file stays valid so pair and unpair
 still work on it, and the installer matches clusters by host as Go does so it

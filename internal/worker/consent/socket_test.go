@@ -89,6 +89,41 @@ func TestSocket_RevokeViaIPC(t *testing.T) {
 	}
 }
 
+func TestSocket_RevokeReportsStorageFailureAndStillStopsEveryHome(t *testing.T) {
+	srv, a, client := setupTestServer(t)
+	state := t.TempDir()
+	a.loadDirectoryPause(state, a.Home())
+	b := srv.homes.For("home-b")
+	bad := filepath.Join(t.TempDir(), "not-a-directory")
+	if err := os.WriteFile(bad, []byte("blocked"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	b.loadDirectoryPause(bad, b.Home())
+	r, err := client.Revoke()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if r.OK || !strings.Contains(r.Error, "could not be saved") {
+		t.Fatalf("failed save acknowledged as durable: %+v", r)
+	}
+	for _, m := range []*Manager{a, b} {
+		if m.AllowsDirectoryRead("fs_list").Allowed {
+			t.Fatalf("failed revoke left %s open", m.Home())
+		}
+	}
+	if NewPersistentHomes(state).For("home-a").AllowsDirectoryRead("fs_list").Allowed {
+		t.Fatal("successful home stop was not retained after sibling failure")
+	}
+	client.Home = "home-a"
+	r, err = client.Grant(time.Minute, false, nil)
+	if err != nil || !r.OK || r.Status.DirectoryReadsPaused {
+		t.Fatalf("local resume failed: %+v %v", r, err)
+	}
+	if b.AllowsDirectoryRead("fs_list").Allowed {
+		t.Fatal("resume leaked into another cluster")
+	}
+}
+
 func TestSocket_GrantNegativeRejected(t *testing.T) {
 	_, _, client := setupTestServer(t)
 	_, err := client.Grant(-time.Second, false, nil)

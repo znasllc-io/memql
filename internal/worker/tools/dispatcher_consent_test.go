@@ -30,6 +30,10 @@ func (g *fakeGate) Allows(tool, action string) consent.Decision {
 	return g.decision
 }
 
+func (g *fakeGate) AllowsDirectoryRead(action string) consent.Decision {
+	return g.Allows("workerHost", action)
+}
+
 func (g *fakeGate) AllowsAt(tool, action string, cursor consent.CursorPoint) consent.Decision {
 	g.calls++
 	g.lastCursor = cursor

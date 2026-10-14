@@ -249,8 +249,15 @@ func (s *Server) handleGrant(c net.Conn, req Request) {
 // window: the kill switch must never make the person say which.
 func (s *Server) handleRevoke(c net.Conn, req Request) {
 	if strings.TrimSpace(req.Home) == "" {
+		var failures []error
 		for _, mgr := range s.homes.Managers() {
-			mgr.Revoke()
+			if err := mgr.Revoke(); err != nil {
+				failures = append(failures, fmt.Errorf("%s: %w", mgr.Home(), err))
+			}
+		}
+		if err := errors.Join(failures...); err != nil {
+			s.writeResp(c, Response{OK: false, Error: err.Error(), Homes: s.homes.Statuses()})
+			return
 		}
 		s.writeResp(c, Response{OK: true, Homes: s.homes.Statuses()})
 		return
@@ -260,7 +267,10 @@ func (s *Server) handleRevoke(c net.Conn, req Request) {
 		s.writePickErr(c, err)
 		return
 	}
-	mgr.Revoke()
+	if err := mgr.Revoke(); err != nil {
+		s.writeResp(c, Response{OK: false, Error: err.Error(), Home: home, Status: mgr.Snapshot()})
+		return
+	}
 	s.writeResp(c, s.stateOf(home, mgr))
 }
 

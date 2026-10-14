@@ -59,6 +59,51 @@ func realPermissionDirectory(t *testing.T) string {
 	return p
 }
 
+func TestDirectoryReceiptWorksWithoutWindowAndHonorsDurableLocalStop(t *testing.T) {
+	root := realPermissionDirectory(t)
+	file := filepath.Join(root, "approved.txt")
+	if err := os.WriteFile(file, []byte("approved content"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	state := t.TempDir()
+	gate := consent.NewPersistentHomes(state).For("cluster-a")
+	d := NewDispatcher(quietLogger(), DefaultPolicy(), gate)
+	for _, action := range []string{"fs_list", "fs_stat", "fs_read"} {
+		p := file
+		if action == "fs_list" {
+			p = root
+		}
+		dispatch := permissionDispatch(t, "directory_read", root, action, map[string]any{"path": p})
+		if ok, fail := d.Dispatch(context.Background(), dispatch); fail != nil || ok == nil {
+			t.Fatalf("approved %s needed unrelated window: %v", action, fail)
+		}
+		dispatch.ComputerPermission = nil
+		if _, fail := d.Dispatch(context.Background(), dispatch); fail == nil || fail.GetErrorCode() != "consent_required" {
+			t.Fatalf("unscoped %s bypassed consent: %v", action, fail)
+		}
+	}
+	for _, action := range []string{"exec", "fs_write", "http_fetch"} {
+		if _, fail := d.Dispatch(context.Background(), permissionDispatch(t, "directory_read", root, action, map[string]any{"path": file})); fail == nil {
+			t.Fatalf("directory receipt admitted %s", action)
+		}
+	}
+	dispatch := permissionDispatch(t, "directory_read", root, "fs_list", map[string]any{"path": root})
+	dispatch.ComputerPermission.ArgsHash = "tampered"
+	if _, fail := d.Dispatch(context.Background(), dispatch); fail == nil || fail.GetErrorCode() != "computer_permission_refused" {
+		t.Fatal("tampered receipt admitted without a window")
+	}
+	dispatch = permissionDispatch(t, "directory_read", root, "fs_list", map[string]any{"path": root})
+	if err := gate.Revoke(); err != nil {
+		t.Fatal(err)
+	}
+	for _, gate := range []*consent.Manager{gate, consent.NewPersistentHomes(state).For("cluster-a")} {
+		d = NewDispatcher(quietLogger(), DefaultPolicy(), gate)
+		if _, fail := d.Dispatch(context.Background(), dispatch); fail == nil || fail.GetErrorCode() != "consent_required" {
+			t.Fatal("local stop lost before or after restart")
+		}
+	}
+}
+
 func TestComputerPermissionMetadataStaysOnOpenedDirectoryAfterReplacement(t *testing.T) {
 	root := realPermissionDirectory(t)
 	directory, outside := filepath.Join(root, "approved"), filepath.Join(root, "outside")

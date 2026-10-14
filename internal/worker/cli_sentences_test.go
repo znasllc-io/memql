@@ -78,7 +78,8 @@ func TestRenderConsentStatus_OneCluster(t *testing.T) {
 	st := fixedStatus(now, true)
 	got := renderConsentStatus(consent.Response{OK: true, Home: "production", Status: st,
 		Homes: []consent.HomeStatus{{Home: "production", Status: st}}}, now)
-	want := "Consent for production: GRANTED\n" +
+	want := "Approved directory reads for production: available with a matching Nexus approval\n" +
+		"Consent for production: GRANTED\n" +
 		"  Expires at:   " + st.ExpiresAt.Format(time.RFC3339) + "\n" +
 		"  Remaining:    40m0s\n" +
 		"  Window:       1h0m0s\n" +
@@ -88,7 +89,7 @@ func TestRenderConsentStatus_OneCluster(t *testing.T) {
 	}
 
 	got = renderConsentStatus(consent.Response{OK: true, Homes: []consent.HomeStatus{{Home: "production"}}}, now)
-	want = "Consent for production: NOT GRANTED\nRun `memql worker consent grant --window=<duration>` to open a window.\n"
+	want = "Approved directory reads for production: available with a matching Nexus approval\nConsent for production: NOT GRANTED\nRun `memql worker consent grant --window=<duration>` to open a window.\n"
 	if got != want {
 		t.Fatalf("got:\n%s\nwant:\n%s", got, want)
 	}
@@ -106,6 +107,8 @@ func TestRenderConsentStatus_SeveralClusters(t *testing.T) {
 		"  local        not granted\n" +
 		"  production   GRANTED       " + st.ExpiresAt.Format("15:04:05") + "   40m         off\n" +
 		"\n" +
+		"Approved directory reads for local: available with a matching Nexus approval\n" +
+		"Approved directory reads for production: available with a matching Nexus approval\n" +
 		"Open a window:  memql worker consent grant --window=<duration> --cluster <cluster>\n" +
 		"Close them all: memql worker consent revoke\n"
 	if got != want {
@@ -120,6 +123,14 @@ func TestRenderConsentStatus_SeveralClusters(t *testing.T) {
 	if !strings.Contains(got, "Consent for local: NOT GRANTED") ||
 		!strings.Contains(got, "`memql worker consent grant --window=<duration> --cluster local`") {
 		t.Fatalf("got:\n%s", got)
+	}
+}
+
+func TestRenderConsentStatusShowsLocalDirectoryStop(t *testing.T) {
+	resp := consent.Response{OK: true, Home: "cluster-a", Status: consent.Status{DirectoryReadsPaused: true}}
+	got := renderConsentStatus(resp, time.Now())
+	if !strings.Contains(got, "Approved directory reads for cluster-a: paused on this machine") || strings.Contains(got, "available with") {
+		t.Fatalf("local stop hidden: %s", got)
 	}
 }
 
