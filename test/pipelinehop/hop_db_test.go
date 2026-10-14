@@ -298,7 +298,7 @@ func TestAGitHubDeliveryIsOpenedOnTheBffAndDrivenOnTheAgent(t *testing.T) {
 			t.Fatalf("after the first poll the pipeline's heads are %+v (%v); want the default branch's head alone", p, err)
 		}
 
-		// The same delivery, twice: GitHub redelivers. One row, two events.
+		// The same delivery, twice: GitHub redelivers. One version, one event.
 		head := c.commit(s, "change-21")
 		body := s.pullRequest(t, "opened", 21, head, s.name)
 		deliveryID := "dedup-" + c.run
@@ -306,19 +306,21 @@ func TestAGitHubDeliveryIsOpenedOnTheBffAndDrivenOnTheAgent(t *testing.T) {
 		if again := c.deliver(t, "pull_request", deliveryID, body); again != staged {
 			t.Fatalf("a redelivery staged row %s beside %s; staging is idempotent by the signed body", again, staged)
 		}
-		evs := c.stagedEvents(t, staged, 2)
-		// The first receipt's event first, as they were published.
-		sort.SliceStable(evs, func(i, j int) bool {
-			return evs[i].Payload["firstVersion"] == true && evs[j].Payload["firstVersion"] != true
-		})
-		if evs[0].Payload["firstVersion"] != true || evs[1].Payload["firstVersion"] != false {
-			t.Errorf("the two events' firstVersion = %v, %v; want the receipt, then the redelivery", evs[0].Payload["firstVersion"], evs[1].Payload["firstVersion"])
+		evs := c.stagedEvents(t, staged, 1)
+		if len(evs) != 1 || evs[0].Payload["firstVersion"] != true {
+			t.Fatalf("unchanged redelivery published extra graph events: %+v", evs)
 		}
-		receipt, redelivery := c.fire(t, evs[0]), c.fire(t, evs[1])
+		var versions int
+		if err := c.direct.QueryRowContext(fresh(), `SELECT count(*) FROM "MemoryNodes" WHERE concept=$1 AND id=$2`, inboundConcept, inboundConcept+":"+staged).Scan(&versions); err != nil || versions != 1 {
+			t.Fatalf("unchanged redelivery wrote %d receipt versions (%v); want one", versions, err)
+		}
+		// Staging suppresses unchanged deliveries. Independently replay the
+		// receipt event to retain the downstream run-key idempotency proof.
+		receipt, redelivery := c.fire(t, evs[0]), c.fire(t, evs[0])
 		key := pipelines.RunKey(s.name, head, pipelines.ModeAffected, pipelines.EventPullRequest)
 		run := c.onlyRun(t, key)
-		// Both reached the trigger: the receipt opened the run, and the
-		// redelivery was answered by it -- the run key, not the filter, is
+		// Both event deliveries reached the trigger: the receipt opened the run,
+		// and the replay was answered by it -- the run key, not the filter, is
 		// what kept it to one.
 		if opened := answered(t, receipt, "opened"); !slices.Equal(opened, []string{run.ID}) {
 			t.Errorf("the receipt's trigger opened %v; want %s", opened, run.ID)
@@ -361,9 +363,9 @@ func TestAGitHubDeliveryIsOpenedOnTheBffAndDrivenOnTheAgent(t *testing.T) {
 		if reqs := c.runner.forRepository(s.name); len(reqs) != len(testStepKeys) {
 			t.Errorf("the runner was handed %d step(s) for %s; want one run's %d", len(reqs), s.name, len(testStepKeys))
 		}
-		// Asked now, long after both receipts: one created event per receipt.
-		if n := len(c.stagedEvents(t, staged, 2)); n != 2 {
-			t.Errorf("A's bus carried %d created events for the staged delivery; want one per receipt", n)
+		// Asked again after completion: no delayed duplicate staging event.
+		if n := len(c.stagedEvents(t, staged, 1)); n != 1 {
+			t.Errorf("A's bus carried %d created events for the staged delivery; want one for the unchanged delivery", n)
 		}
 		t.Logf("one delivery received twice (staged %s, fired twice) and polled once: run %s, check run %d, %d run row(s), %d check run(s) created",
 			staged, run.ID, done.CheckRunID, c.runRows(t, key), len(creates))

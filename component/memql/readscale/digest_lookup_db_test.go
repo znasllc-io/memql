@@ -111,6 +111,7 @@ func TestDigestLookupReadsOnlyTheMatchingRows(t *testing.T) {
 		// INCLUDING ALL copies every index the migrations built on public,
 		// the digest lookup indexes among them.
 		`CREATE TABLE "MemoryNodes" (LIKE public."MemoryNodes" INCLUDING ALL)`,
+		`CREATE TABLE memory_liveness (LIKE public.memory_liveness INCLUDING ALL)`,
 		`SELECT public.create_hypertable('"MemoryNodes"','createdAt',chunk_time_interval=>interval '7 days')`,
 		fmt.Sprintf(`INSERT INTO "MemoryNodes" (id,concept,"createdAt","createdBy",schema,payload)
          SELECT 'v1:campaigns:recipient:r-'||n,'v1:campaigns:recipient',

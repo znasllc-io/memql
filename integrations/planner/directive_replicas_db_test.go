@@ -36,7 +36,7 @@ func TestStandingDirectiveAppendSurvivesReplicaChange(t *testing.T) {
 		pgdriver.WithConnParams(map[string]any{"search_path": schema}))), pgdialect.New())
 	db.SetMaxOpenConns(8) // Advisory-lock transactions and engine writes use different connections.
 	t.Cleanup(func() { _ = db.Close() })
-	for _, table := range []string{`"MemoryNodes"`, "node_vectors"} {
+	for _, table := range []string{`"MemoryNodes"`, "memory_liveness", "node_vectors"} {
 		if _, err := db.ExecContext(ctx, `CREATE TABLE `+table+` (LIKE public.`+table+` INCLUDING ALL)`); err != nil {
 			t.Fatal(err)
 		}

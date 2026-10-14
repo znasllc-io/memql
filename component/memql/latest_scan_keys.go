@@ -73,12 +73,15 @@ func (e *MemQLEngine) latestScanKeys(expr ExpressionNode, timestamp *time.Time) 
 		}
 		idFilters = append(idFilters, filter)
 	}
-	if keys := e.latestLookupKeys(concept, terms, idFilters, timestamp); keys != nil {
+	if keys := e.latestLookupKeys(concept, terms, idFilters, timestamp); keys != nil && !memorynodes.HasLiveness(concept) {
 		return keys
 	}
 	keys := e.database().NewSelect().Model((*memorynodes.MemoryNode)(nil)).
 		Column("id", "createdAt").DistinctOn("id").
 		Where("concept = ?", concept).OrderExpr(`id ASC, "createdAt" DESC`)
+	if memorynodes.HasLiveness(concept) {
+		keys = keys.ModelTableExpr(memorynodes.ObservedRowsSQL + " AS mn")
+	}
 	for _, filter := range idFilters {
 		keys = keys.Where(filter.sql, filter.args...)
 	}

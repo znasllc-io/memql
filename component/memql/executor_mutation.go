@@ -34,6 +34,8 @@ func (e *MemQLEngine) executeMutation(ctx context.Context, mutation MutationNode
 // its callers -- specifically the data executeUpdate needs to publish the
 // graph.node.updated transition event without re-reading the row.
 type writeMeta struct {
+	// unchanged means an idempotent delivery returned its existing row.
+	unchanged bool
 	// priorExisted is true when a row already existed at the target id,
 	// i.e. the write was an update (read-merge) rather than a create.
 	priorExisted bool
@@ -191,7 +193,7 @@ func (e *MemQLEngine) executeUpdate(ctx context.Context, mutation MutationNode) 
 	}
 
 	result, meta, err := e.executeWrite(ctx, mutation, true)
-	if err != nil {
+	if err != nil || meta.unchanged {
 		return result, err
 	}
 
@@ -916,7 +918,9 @@ func (e *MemQLEngine) executeWrite(ctx context.Context, mutation MutationNode, r
 	// Knowledge publication and review must serialize with canonical-seed
 	// reconciliation, including ordinary client review writes. Otherwise a
 	// late repair could overwrite a rejection read on another replica.
-	if (len(rowVersionFences(ctx)) > 0 || conceptMeta.Name == "v1:knowledge:documentChunk") && id != "" {
+	// Observation and business writers share the same version fence. A pulse
+	// must never replace fields merged before another replica changed them.
+	if (len(rowVersionFences(ctx)) > 0 || conceptMeta.Name == "v1:knowledge:documentChunk" || memorynodes.HasLiveness(conceptMeta.Name) || conceptMeta.Name == inboundRequestConcept) && id != "" {
 		var err error
 		ctx, err = e.fenceWriteTarget(ctx, conceptMeta.Name, id)
 		if err != nil {
@@ -1690,14 +1694,30 @@ func (e *MemQLEngine) executeWrite(ctx context.Context, mutation MutationNode, r
 	// coordination connection cannot permit a stale writer to commit.
 	// Other writes retain the single-statement path below.
 	var result memorynodes.Node
+	observationOnly := false
 	if targets := outboxTargetsFor(conceptMeta.Name); len(targets) > 0 || len(rowVersionFences(ctx)) > 0 {
 		retire := outboxPayloadRetires(payload)
 		txErr := e.runInWriteTx(ctx, func(txStore memorynodes.Store) error {
-			created, createErr := conceptMeta.Create(ctx, txStore, createParams)
+			txStore.(*bunStore).onInsert = func(concept string, appended bool) {
+				if concept == conceptMeta.Name && memorynodes.HasLiveness(concept) {
+					observationOnly = !appended
+				}
+			}
+			writeStore := txStore
+			var dedupe *unchangedOperationalStore
+			if skipUnchangedOperationalWrite(conceptMeta.Name) {
+				dedupe = &unchangedOperationalStore{Store: txStore}
+				writeStore = dedupe
+			}
+			created, createErr := conceptMeta.Create(ctx, writeStore, createParams)
 			if createErr != nil {
 				return createErr
 			}
 			result = created
+			if dedupe != nil && dedupe.unchanged {
+				meta.unchanged = true
+				return nil
+			}
 			return e.appendOutboxEntries(ctx, txStore, conceptMeta.Name, created.ID, created.CreatedAt, targets, retire)
 		})
 		if txErr != nil {
@@ -1752,6 +1772,10 @@ func (e *MemQLEngine) executeWrite(ctx context.Context, mutation MutationNode, r
 	apiNode, err := toAPIMemoryNode(&created)
 	if err != nil {
 		return nil, meta, err
+	}
+
+	if meta.unchanged {
+		return newExecuteResult(&memqlv1.GraphBundle{Nodes: []*memqlv1.MemoryNode{apiNode}, RootIds: []string{apiNode.Id}}), meta, nil
 	}
 
 	// Observation embedding write-path (#585): when a
@@ -1883,7 +1907,11 @@ func (e *MemQLEngine) executeWrite(ctx context.Context, mutation MutationNode, r
 	// Tell a caller watching for writes that one committed (a directly
 	// called logic opens its journal run at its first write, epic
 	// memql#5370). The single write path is the single report.
-	common.NotifyWrite(ctx, conceptMeta.Name, apiNode.Id)
+	// A timestamp-only observation still refreshes live readers, but it is
+	// not a business write and must not open a held schedule's work journal.
+	if !observationOnly {
+		common.NotifyWrite(ctx, conceptMeta.Name, apiNode.Id)
+	}
 
 	return newExecuteResult(bundle), meta, nil
 }
@@ -2127,7 +2155,7 @@ func (e *MemQLEngine) loadLatestNodes(ctx context.Context, ids []string, timesta
 	// Collapse covering-index keys first. Selecting every historical payload
 	// here would undo the read-path optimization as soon as candidates are
 	// rechecked against their true latest version.
-	keys := db.NewSelect().Model((*memorynodes.MemoryNode)(nil)).
+	keys := db.NewSelect().Model((*memorynodes.MemoryNode)(nil)).ModelTableExpr(memorynodes.ObservedRowsSQL+" AS mn").
 		Column("id", "createdAt").DistinctOn("id").
 		OrderExpr(`id ASC, "createdAt" DESC`).Where("id IN (?)", bun.In(unique))
 	if timestamp != nil {
@@ -2136,7 +2164,7 @@ func (e *MemQLEngine) loadLatestNodes(ctx context.Context, ids []string, timesta
 	var latest []memorynodes.MemoryNode
 	query := db.NewSelect().Model(&latest).
 		ModelTableExpr("(?) AS latest_keys", keys).
-		Join(`JOIN LATERAL (SELECT * FROM "MemoryNodes" WHERE id=latest_keys.id AND "createdAt"=latest_keys."createdAt" LIMIT 1) AS mn ON true`)
+		Join(`JOIN LATERAL (SELECT * FROM ` + memorynodes.ObservedRowsSQL + ` AS observed WHERE id=latest_keys.id AND "createdAt"=latest_keys."createdAt" LIMIT 1) AS mn ON true`)
 
 	if err := query.Scan(ctx); err != nil {
 		return nil, err
