@@ -1,3 +1,4 @@
+import { AccountDomainsPanel } from "./DomainSetup";
 import { ContentSkeleton } from "../../kit/ContentSkeleton";
 import { RecordList, RecordRow } from "../../kit/RecordRow";
 import { InPlaceAsk } from "../../kit/pressHold";
@@ -52,7 +53,9 @@ export function AccountDetail({
   archive,
   onArchived,
   onOpenGroup,
+  onConfigureDomains,
 }: {
+  onConfigureDomains?: () => void;
   account: AccountRow;
   update: UpdateAccountState;
   archive: ArchiveAccountState;
@@ -100,6 +103,7 @@ export function AccountDetail({
   return (
     <div className="os-account-detail">
       <ProfilePanel account={account} update={update} />
+      {onConfigureDomains ? <AccountDomainsPanel account={account} onConfigure={onConfigureDomains} /> : null}
       {/* THE DOMAIN RAIL sits beneath the profile because that is where its
           first stop's value is edited: the domain is a profile fact, and what
           it BUYS -- proof, joining, a reserved name -- is what the rail

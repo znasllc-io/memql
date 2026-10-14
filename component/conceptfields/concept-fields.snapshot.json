@@ -12,6 +12,8 @@
       "file": "accounts/concepts.memql",
       "fields": [
         "configuredAt",
+        "defaultDomain",
+        "defaultSenderIdentityId",
         "domain",
         "domainFailureDetail",
         "domainFailureReason",
@@ -19,6 +21,7 @@
         "domainStatus",
         "domainToken",
         "domainVerifiedAt",
+        "domains",
         "joinOnDomain",
         "memqlDomain",
         "memqlReservationReason",

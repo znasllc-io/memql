@@ -174,6 +174,22 @@ mutation account updateClientAccount {
   }
 }
 
+/// Configure the domains and sender used as defaults for new work in this account.
+/// Assignment is configuration, not DNS proof or permission to send mail.
+@requiresRank("admin")
+mutation account configureAccountDomains {
+  args {
+    accountId string!
+    domains []string!
+    defaultDomain string!
+    defaultSenderIdentityId string
+  }
+  update {
+    accept { domains, defaultDomain, defaultSenderIdentityId }
+    stamp { id: args.accountId }
+  }
+}
+
 /// File a client away.
 ///
 /// A STATUS FLIP, never a delete, and the ties are the reason. Four concepts

@@ -34,6 +34,9 @@ shape account clientAccountFull {
   ownerUserId
   name
   domain
+  domains
+  defaultDomain
+  defaultSenderIdentityId
   primaryContactName
   primaryContactEmail
   notes

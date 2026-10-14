@@ -1,3 +1,4 @@
+import { accountDefaultDomain } from "../../apps/accounts/defaults";
 import { useCallback, useEffect, useId, useState, type ReactNode } from "react";
 import { Mail } from "lucide-react";
 import { useSession } from "../../chrome/access";
@@ -83,6 +84,7 @@ export function OrganizationSendingDomain({ accountId, name, backLabel, onPane }
 }
 
 function ConfiguredSendingDomain({ accountId, name, backLabel, onPane }: { accountId: string; name: string; backLabel: string; onPane?: (taking: boolean) => void }) {
+  const accounts = useAccountOptions();
   const { call, error } = useAzureEmailCall(SELF_ACCOUNT_ID);
   const [cluster, setCluster] = useState<AzureEmailReply | null>(null);
   const [view, setView] = useState<ConnectionView>("list");
@@ -98,7 +100,7 @@ function ConfiguredSendingDomain({ accountId, name, backLabel, onPane }: { accou
     {error ? <Notice tone="error" sentence="Cluster email could not be read." detail={error}><Button onClick={readCluster}>Try again</Button></Notice>
       : <RecordListSkeleton label="Loading sending domain"/>}
   </section>;
-  return <OrganizationEmail accountId={accountId} name={name} view={view} setView={setView} backLabel={backLabel} cluster={cluster} clusterNotice/>;
+  return <OrganizationEmail accountDomain={accountDefaultDomain(accounts.find(account => account.id === accountId))} accountId={accountId} name={name} view={view} setView={setView} backLabel={backLabel} cluster={cluster} clusterNotice/>;
 }
 
 function EmailSettings({ manageCluster = true, header }: { manageCluster?: boolean; header?: ReactNode }) {
@@ -126,14 +128,14 @@ function EmailSettings({ manageCluster = true, header }: { manageCluster?: boole
       </Panel> : null}
       {cluster && !manageCluster && cluster.status !== "connected" ? <ClusterEmailNotice cluster={cluster}/> : null}
     </section></> : null}
-    {accountId ? <OrganizationEmail key={`${accountId}:${revision}`} accountId={accountId} name={name} view={view} setView={setView} picker={picker} backLabel={CONNECTIONS_BACK} cluster={cluster}/> :
+    {accountId ? <OrganizationEmail accountDomain={accountDefaultDomain(accounts.find(account => account.id === accountId))} key={`${accountId}:${revision}`} accountId={accountId} name={name} view={view} setView={setView} picker={picker} backLabel={CONNECTIONS_BACK} cluster={cluster}/> :
       <section className="os-app-stack"><Subhead>Sending domain</Subhead>{picker}</section>}
     {view === "list" && accountId ? <CampaignPackageConfig key={accountId} accountId={accountId} organizationName={name} onImported={() => { setRevision(value => value + 1); void call("clusterStatus").then(result => { if (result) setCluster(result); }); }}/> : null}
   </div>;
 }
 
-function OrganizationEmail({ accountId, name, view, setView, picker, backLabel, cluster, clusterNotice = false }: {
-  accountId: string; name: string; view: ConnectionView; setView: (value: ConnectionView) => void;
+function OrganizationEmail({ accountDomain, accountId, name, view, setView, picker, backLabel, cluster, clusterNotice = false }: {
+  accountDomain: string; accountId: string; name: string; view: ConnectionView; setView: (value: ConnectionView) => void;
   /** The organization choice, for a page that has no field of its own for it. */
   picker?: ReactNode; backLabel: string; cluster: AzureEmailReply | null;
   /** Draw the cluster's own state here, because the page that holds this does not. */
@@ -142,9 +144,13 @@ function OrganizationEmail({ accountId, name, view, setView, picker, backLabel, 
   const formID = useId();
   const { call, busy, error } = useAzureEmailCall(accountId);
   const [state, setState] = useState<AzureEmailReply | null>(null);
-  const [domain, setDomain] = useState("");
-  const [emailService, setEmailService] = useState("");
-  const [communicationService, setCommunicationService] = useState("");
+  const [domainDraft, setDomain] = useState<string | null>(null);
+  const domain = domainDraft ?? accountDomain;
+  const resourceBase = domain.toLowerCase().replace(/[^a-z0-9-]/g, "-").slice(0, 45);
+  const [emailServiceDraft, setEmailService] = useState<string | null>(null);
+  const [communicationServiceDraft, setCommunicationService] = useState<string | null>(null);
+  const emailService = emailServiceDraft ?? (resourceBase ? `${resourceBase}-email` : "");
+  const communicationService = communicationServiceDraft ?? (resourceBase ? `${resourceBase}-delivery` : "");
   const [username, setUsername] = useState("news");
   const [displayName, setDisplayName] = useState(name);
   const [replyTo, setReplyTo] = useState("");

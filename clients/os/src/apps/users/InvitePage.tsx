@@ -1,3 +1,5 @@
+import { UserPlus } from "lucide-react";
+import { Wizard } from "../../kit/Wizard";
 import { useEffect, useMemo, useState } from "react";
 import type { UserInvitationResult } from "@znasllc-io/memql-sdk-core/identityadmin";
 
@@ -10,7 +12,6 @@ import {
   Input,
   Notice,
   Panel,
-  Rail,
   Subhead,
   formatMoment,
   roleRungOf,
@@ -40,8 +41,8 @@ import { ladderDescending, type RoleCatalog } from "./useRoles";
 // is holdable only by a member of it, so the Role stop's ladder depends on
 // what Groups holds.
 //
-// The Head's one action follows `nextOpen`: absent until the stops are
-// answered, then "Send invitation". A rail with a permanently-present primary
+// Review offers "Send invitation" once the steps are answered. A wizard
+// with a permanently-present primary
 // action is a form with a decoration down its left edge.
 
 export function InvitePage({
@@ -67,9 +68,18 @@ export function InvitePage({
   onBack: () => void;
   onIssued: (invitationId: string) => void;
 }) {
+  const [open, setOpen] = useState(0);
+  const [furthest, setFurthest] = useState(0);
+  function go(index: number) { setOpen(index); setFurthest(held => Math.max(held, index)); }
   const [draft, setDraft] = useState<InviteDraft>(EMPTY_INVITE);
   const [issued, setIssued] = useState<UserInvitationResult | null>(null);
   const now = useNow(60_000);
+  useEffect(() => {
+    if (!actions.refusal) return;
+    const step = stopForRefusal(actions.refusal.code ?? "", actions.refusal.detail);
+    const index = step === "who" ? 0 : step === "groups" ? 1 : step === "role" ? 2 : -1;
+    if (index >= 0) go(index);
+  }, [actions.refusal]);
 
   const match = useMemo(() => domainMatch(draft.email, accounts), [draft.email, accounts]);
   const matchedGroup = useMemo(
@@ -152,40 +162,10 @@ export function InvitePage({
               That address is on {accountName(match)}'s domain, and they take people on it.
               {matchedGroup === null
                 ? " Their group is not in this window yet."
-                : ` ${matchedGroup.name} is filled in below.`}
+                : ` ${matchedGroup.name} is selected in Groups.`}
             </p>
           )}
           {refusalStop === "who" ? <RefusalLine actions={actions} /> : null}
-        </>
-      ),
-    },
-    {
-      id: "role",
-      name: "Role",
-      // `waiting`, never `pending`: on a COMPOSE rail every stop renders its
-      // body, and `pending` means NOT REACHABLE -- it dims the stop, so a form
-      // somebody may legitimately fill in reads as one they may not. Nothing
-      // here depends on the address having been typed first; the ORDER is
-      // advice, not a gate.
-      state: draft.role === "" ? "waiting" : "done",
-      sentence: "What they can do once they are here.",
-      answer: draft.role,
-      body: (
-        <>
-          <RoleLadderPicker
-            rungs={ladder}
-            value={draft.role}
-            onChange={(slug) => setDraft((held) => ({ ...held, role: slug }))}
-            context={assignContext}
-            actorRole={viewerRole}
-            label="The role this invitation grants"
-          />
-          {ladderSentence(ladder.map((rung) => rungRefusal(rung, assignContext))) === "" ? null : (
-            <p className="os-caption">
-              {ladderSentence(ladder.map((rung) => rungRefusal(rung, assignContext)))}
-            </p>
-          )}
-          {refusalStop === "role" ? <RefusalLine actions={actions} /> : null}
         </>
       ),
     },
@@ -217,6 +197,31 @@ export function InvitePage({
         </>
       ),
     },
+    {
+      id: "role",
+      name: "Role",
+      state: draft.role === "" ? "waiting" : "done",
+      sentence: "What they can do once they are here.",
+      answer: draft.role,
+      body: (
+        <>
+          <RoleLadderPicker
+            rungs={ladder}
+            value={draft.role}
+            onChange={(slug) => { setDraft((held) => ({ ...held, role: slug })); go(3); }}
+            context={assignContext}
+            actorRole={viewerRole}
+            label="The role this invitation grants"
+          />
+          {ladderSentence(ladder.map((rung) => rungRefusal(rung, assignContext))) === "" ? null : (
+            <p className="os-caption">
+              {ladderSentence(ladder.map((rung) => rungRefusal(rung, assignContext)))}
+            </p>
+          )}
+          {refusalStop === "role" ? <RefusalLine actions={actions} /> : null}
+        </>
+      ),
+    },
   ];
 
   const answered = inviteIsAnswered(draft);
@@ -239,36 +244,14 @@ export function InvitePage({
       ]
     : [];
 
-  return (
-    <div className="os-action-pane">
-      <div className="os-action-body os-app-stack">
-        <Head title="Invite somebody" back={{ label: "People", onSelect: onBack }} />
+  stops.push({ id: "review", name: "Review", state: "ahead", body: <Facts><Fact label="Invite" value={draft.email.trim()} /><Fact label="Role" value={ladder.find(role => role.slug === draft.role)?.name || draft.role} /><Fact label="Groups" value={groups.filter(group => draft.groupIds.includes(group.id)).map(group => group.name).join(", ") || "None"} /></Facts> });
+  const busy = actions.busyKey === `invite:${draft.email.trim()}`;
+  const ready = open < 2 ? inviteIsAnswered({ ...draft, role: "chosen" }) : answered;
+  const footer: Act[] = busy ? [] : [{ label: "Cancel", text: true, onAct: onBack }];
+  if (open === 3) footer.push(...acts);
+  else if (!busy && ready) footer.push({ label: "Next", tone: "primary", onAct: () => go(open + 1) });
+  return <Wizard icon={<UserPlus size={20} aria-hidden />} title="Invite somebody" label="What this invitation says" back={{ label: "People", onSelect: onBack }} steps={stops.map((stop, index) => ({ ...stop, state: index === open ? "open" : index < open ? "done" : index <= furthest ? "waiting" : "ahead" }))} open={stops[open]!.id} onOpen={id => { const index = stops.findIndex(stop => stop.id === id); if (!busy && index >= 0 && index <= furthest) setOpen(index); }} status={{ word: busy ? "Sending invitation" : open === 3 ? "Ready to send" : stops[open]!.name, tone: busy ? "busy" : "none" }} acts={footer} notices={actions.refusal && refusalStop !== stops[open]?.id ? <RefusalLine actions={actions} /> : null} />;
 
-        <Panel label="The invitation">
-          {/* NO `openStop`, and that is the COMPOSE reading of this control:
-              a rail with none is not a disclosure at all and every stop renders
-              its body (kit/Rail.tsx states it). Here the rail IS the form -- the
-              stops are what the person fills in, in the order the answers depend
-              on each other -- and collapsing the one being typed into would take
-              the field away at the first keystroke. The marks still carry which
-              stops are settled, which is the whole reason it is a rail rather
-              than three panels. */}
-          <Rail stops={stops} label="What this invitation says" />
-        </Panel>
-
-      </div>
-      <ActionBar
-        state={answered ? "Ready to send" : "Not answered yet"}
-        detail={
-          answered
-            ? undefined
-            : "An address and a role are what an invitation needs; groups are optional."
-        }
-        tone={answered ? "live" : "none"}
-        acts={acts}
-      />
-    </div>
-  );
 }
 
 /**
