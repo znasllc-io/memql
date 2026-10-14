@@ -250,16 +250,19 @@ func (e *MemQLEngine) evaluateFleetSetSharingExpression(ctx context.Context, arg
 	if e == nil {
 		return nil, fmt.Errorf("engine is nil")
 	}
+	if err := requireFleetSharingAccess(ctx); err != nil {
+		return nil, err
+	}
 	mode := strings.TrimSpace(stringArg(args, "mode"))
 	// REFUSED rather than read as `owner`. The modes mean different things and
 	// a typo has to be told about: silently keeping a machine private on a
 	// misspelling is safe, and silently doing anything else is not -- but an
 	// owner who typed `clustre` and saw nothing happen would try again, and
 	// eventually conclude the feature is broken.
-	if mode != SharingModeOwner && mode != SharingModePeople && mode != SharingModeCluster {
+	if mode != SharingModeOwner && mode != SharingModePeople {
 		return nil, modelPullRefusal{
 			Code:    "invalid_sharing_mode",
-			Message: fmt.Sprintf("sharing mode must be %q, %q or %q, not %q", SharingModeOwner, SharingModePeople, SharingModeCluster, mode),
+			Message: "choose specific people and groups, or keep model inference private",
 		}
 	}
 	registrationId := strings.TrimSpace(stringArg(args, "registrationId"))
@@ -398,4 +401,14 @@ func shareCountPhrase(people, groups int) string {
 		parts = append(parts, fmt.Sprintf("%d groups", groups))
 	}
 	return strings.Join(parts, " and ")
+}
+
+// The app and its write surface share the same role boundary. A direct
+// builtin call must not restore Fleet access hidden by the shell.
+func requireFleetSharingAccess(ctx context.Context) error {
+	subject, ok := auth.SubjectFromContext(ctx)
+	if !ok || !auth.CapableFor(ctx, subject, auth.VerbRead, "app:fleet") {
+		return modelPullRefusal{Code: "fleet_access_denied", Message: "only owners and developers can manage Fleet sharing"}
+	}
+	return nil
 }

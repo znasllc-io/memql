@@ -9,28 +9,30 @@ owner: znas
 
 # Sharing a machine
 
-Lending a machine you own — to named colleagues, to a group, or to everyone
-on the cluster — so their work runs on hardware somebody already paid for
-instead of on a metered API. Lent to everyone, it also serves the cluster's own
-work: automations, maintenance, anything with no acting human behind it. Epics
-[memql#5146](https://github.com/znasllc-io/memql/issues/5146) (sharing) and
-[memql#5344](https://github.com/znasllc-io/memql/issues/5344) (sharing with
-people and groups).
+Owners and developers can open Fleet and enroll Cockpit machines. Each machine
+belongs to the person who enrolled it. They can share its local models with
+specific people and groups; recipients can use model inference without access
+to Fleet.
 
-This is the one place in the product where your hardware answers to somebody
-else, so the whole design is about consent and about what the lender is
-entitled to know afterwards. Sharing lends a machine's **models**, never its
-shell: tool dispatch and app sessions stay yours alone.
+Sharing never grants file access, commands, computer control, app sessions, or
+workbench access. Those remain exclusive to the enrolling person. A cluster
+owner cannot take control of a developer's machine or change its sharing.
+Enrollment checks the person's current role and active state when issuing a
+credential and again when redeeming a pairing code.
 
 ---
 
-## Three answers, and only the owner gives them
+## Choose who can use the models
 
 | In Fleet | Stored as | Who the machine serves |
 |---|---|---|
 | **Only me** | `owner` (the default, and the absent case) | its owner |
 | **Specific people and groups** | `people`, with `userIds` and `groupIds` | the listed people, and the **active** members of the listed **active** groups |
-| **Everyone in this cluster** | `cluster` | everyone signed in to this cluster, **and** the cluster's own work |
+
+Existing **Everyone in this cluster** shares (`cluster`) remain visible and
+continue to serve signed-in people and the cluster's own work. New shares
+cannot use this mode. Replace an existing broad share by choosing people and
+groups, or **Only me**. The upgrade does not change existing machine shares.
 
 The consent lives on the machine's own row, `v1:worker:registration.sharing`:
 `{mode, userIds, groupIds, sharedAt, sharedBy}`, with ids stored bare. It is a
@@ -39,8 +41,8 @@ real one — and it is written only by `fleetSetSharing`, which resolves the
 machine through the caller's own machines (see [Only the owner may lend a
 machine](#only-the-owner-may-lend-a-machine)).
 
-The lists mean something only under `people`, and changing to either other
-mode **clears them**: a share you took back leaves no names behind for a later
+The lists mean something only under `people`, and changing to **Only me**
+**clears them**: a share you took back leaves no names behind for a later
 reader to honour by mistake. Every reader maps a value it does not know to
 `owner`, so an engine older than a mode reads it as private rather than as
 open, and a `people` share that names nobody is read as `owner` too.
@@ -120,7 +122,7 @@ The share dialog offers what you can already account for, and no more:
 - **the active people in those groups**, by display name.
 
 If you may already read every person on the cluster — `read` on `principal`,
-which owners, developers and admins hold by default and a grant can give or
+which owners and developers hold by default and a grant can give or
 take away — it offers every active person, with their email, and every active
 group. Nobody else is ever handed an email address.
 

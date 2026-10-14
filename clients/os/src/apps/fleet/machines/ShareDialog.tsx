@@ -90,18 +90,13 @@ import { useShareDirectory, type ShareDirectory } from "./useShareDirectory";
 // control of their own machine with it.
 
 const CHOICES: readonly ChoiceOption[] = [
-  { value: "owner", label: "Only me", description: "Nobody else's work runs on it." },
-  {
-    value: "people",
-    label: "Specific people and groups",
-    description: "The people you choose, and the members of the groups you choose.",
-  },
-  {
-    value: "cluster",
-    label: "Everyone in this cluster",
-    description: "Anyone signed in to this cluster, and the cluster's own automations.",
-  },
+  { value: "owner", label: "Only me" },
+  { value: "people", label: "Specific people and groups" },
 ];
+const LEGACY_CHOICE: ChoiceOption = {
+  value: "cluster", label: "Everyone in this cluster", unavailable: true,
+  description: "Existing share. Choose a narrower audience to replace it.",
+};
 
 /** One entry the search can offer. */
 interface Candidate {
@@ -308,6 +303,7 @@ export function ShareDialog({
   }
 
   async function save(): Promise<void> {
+    if (!canSave) return;
     setRefused(false);
     const receipt = await writes.setSharing(machine.id, draftChoice(draft));
     if (receipt === null) {
@@ -461,7 +457,7 @@ export function ShareDialog({
   const namesSomebody = draftNamesSomebody(draft);
   // NOT WHILE THERE IS A DECISION TO MAKE: that Save is the write that would
   // put the old draft back over a change made elsewhere.
-  const canSave = dirty && namesSomebody && !busy && !asking;
+  const canSave = draft.mode !== "cluster" && dirty && namesSomebody && !busy && !asking;
   const floor = asking
     ? "Choose which sharing to keep."
     : refused
@@ -508,9 +504,10 @@ export function ShareDialog({
       </header>
 
       <div className="fleet-share-body">
+        <Caption>People you choose can use local models. Files, commands, apps and computer control stay yours.</Caption>
         <ChoiceStack
           name={`fleet-share-mode-${machine.id}`}
-          label="Who can use this machine"
+          label="Who can use its models"
           voice="prose"
           value={draft.mode}
           onChange={(next) => {
@@ -518,7 +515,7 @@ export function ShareDialog({
             if (busy || next === draft.mode) return;
             edit((held) => ({ ...held, mode: next as SharingMode }));
           }}
-          options={CHOICES}
+          options={draft.mode === "cluster" ? [...CHOICES, LEGACY_CHOICE] : CHOICES}
         />
 
         {draft.mode === "people" ? (
@@ -589,7 +586,7 @@ export function ShareDialog({
               <Caption>
                 {directory.everyone
                   ? "Nobody else is on this cluster yet."
-                  : "Nobody shares a group with you yet. Choose Everyone, or ask an admin to add you to a group."}
+                  : "Nobody shares a group with you yet. Ask an admin to add you to a group."}
               </Caption>
             ) : null}
 
@@ -680,8 +677,8 @@ export function ShareDialog({
           // are deciding -- not from the receipt.
           <Notice
             tone="info"
-            sentence="This machine has not agreed to serve anyone else yet."
-            next="Until inference.serve is set to cluster in its policy.yaml, nobody else's work runs on it."
+            sentence="Model sharing is waiting for Cockpit."
+            next="On this machine, set inference.serve to cluster in policy.yaml."
           />
         ) : null}
 
@@ -690,8 +687,7 @@ export function ShareDialog({
               are about lending, so they stand only while the draft lends. */}
           {draft.mode !== "owner" ? (
             <Caption>
-              You see how many calls ran and for how many people. You never see what anybody asked or what the model
-              answered.
+              Usage shows counts, without prompts or responses.
             </Caption>
           ) : null}
           <Caption>Changes take effect on the next call. A call already running finishes.</Caption>

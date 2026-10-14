@@ -19,6 +19,7 @@ package worker
 
 import (
 	"context"
+	"fmt"
 	"strings"
 	"sync"
 	"testing"
@@ -387,6 +388,7 @@ func TestAfterTheMachineReconnectsHereTheDispatchIsLocal(t *testing.T) {
 		localRan = true
 		return okResult(d.GetCallId()), nil
 	})
+	localReg.WorkerById("laptop").OwnerUserId = h.owner
 	d := newTestDispatcher(t, h.store, localReg, nodeA, h.link.router)
 
 	res, err := d.Dispatch(authorityCtx(t, h.owner), h.request())
@@ -408,4 +410,33 @@ func authorityProtoFor(t *testing.T, userId string) *nodev1.ForwardedAuthority {
 		t.Fatalf("ForwardedAuthorityForUser: %v", err)
 	}
 	return node.ForwardedAuthorityToProto(a, nodeA, "agent")
+}
+
+// The inventory may be stale after a stream reconnect. Neither the local
+// path nor the cross-node path may use a stream belonging to someone else.
+func TestHostDispatchChecksConnectedOwnerOnBothNodes(t *testing.T) {
+	for _, local := range []bool{false, true} {
+		for _, connectedOwner := range []string{"", "v1:identity:user:bob"} {
+			t.Run(fmt.Sprintf("local=%t/owner=%s", local, connectedOwner), func(t *testing.T) {
+				called := false
+				h := newHop(t, func(_ context.Context, d *memqlv1.ToolDispatch, _ func(*memqlv1.ToolStream)) (*memqlv1.ToolResult, error) {
+					called = true
+					return okResult(d.GetCallId()), nil
+				}, nil)
+				h.registry.WorkerById("laptop").OwnerUserId = connectedOwner
+				dispatcher := h.dispatch
+				if local {
+					h.store.machines[0].ConnectedNodeId = nodeA
+					dispatcher = newTestDispatcher(t, h.store, h.registry, nodeA, h.link.router)
+				}
+				result, err := dispatcher.Dispatch(authorityCtx(t, h.owner), h.request())
+				if called || result.OK {
+					t.Fatalf("foreign stream executed: %+v %v", result, err)
+				}
+				if result.ErrorCode != "owner_mismatch" {
+					t.Fatalf("wrong refusal: %+v %v", result, err)
+				}
+			})
+		}
+	}
 }

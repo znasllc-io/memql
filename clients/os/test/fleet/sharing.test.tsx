@@ -168,16 +168,16 @@ const MOVED = "Sharing changed somewhere else while this was open.";
 describe("the sharing panel", () => {
   it("says who can use a private machine, with both consents, and no repair for a share nobody asked for", () => {
     mount(studio());
-    expect(screen.getByText("Only you")).toBeTruthy();
+    expect(screen.getAllByText("Only you")[0]).toBeTruthy();
     // TWO LINES, NOT ONE DERIVED FLAG: the owner's repair is an act on this
     // page and the cockpit's is a line in a file on that machine's disk, and a
     // single "not shared" sends half the people to the wrong place.
-    expect(screen.getByText("You have not shared it.")).toBeTruthy();
+    expect(screen.getByText("Model inference only")).toBeTruthy();
     // BUT A REPAIR IS FOR A DECISION SOMEBODY MADE. A private machine's
     // cockpit line states its position; telling the owner to edit
     // policy.yaml for a share they have not chosen is noise -- the repair
     // appears the moment a share does (below, and in the dialog).
-    expect(screen.getByText("Its cockpit serves only you.")).toBeTruthy();
+    expect(screen.getByText("Personal models only")).toBeTruthy();
     expect(screen.queryByText(/policy\.yaml/)).toBeNull();
   });
 
@@ -193,8 +193,8 @@ describe("the sharing panel", () => {
     expect(await screen.findByText("Shared with Ana Ruiz and Design")).toBeTruthy();
     // Names are asked for once, of the directory the owner already sees.
     expect(conn.query.fleetShareDirectory).toHaveBeenCalledTimes(1);
-    expect(screen.getByText(/^You shared it on /)).toBeTruthy();
-    expect(screen.getByText("Its cockpit has agreed to serve anyone you share it with.")).toBeTruthy();
+    expect(screen.getByText("Model inference only")).toBeTruthy();
+    expect(screen.getByText("Ready to serve shared models")).toBeTruthy();
   });
 
   it("names two and counts the rest", async () => {
@@ -229,8 +229,8 @@ describe("the sharing panel", () => {
   it("says everyone for a machine shared with the whole cluster", () => {
     mount(studio({ mode: "cluster" }));
     expect(screen.getByText("Everyone in this cluster")).toBeTruthy();
-    expect(screen.getByText(/^You shared it/)).toBeTruthy();
-    expect(screen.getByText(/Its cockpit has not agreed to serve anyone but you/)).toBeTruthy();
+    expect(screen.getByText("Model inference only")).toBeTruthy();
+    expect(screen.getByText(/Model sharing is waiting for Cockpit/)).toBeTruthy();
   });
 
   it("offers the act to the owner and to nobody else", () => {
@@ -247,7 +247,7 @@ describe("the sharing panel", () => {
     // The repair is the OWNER'S to make: a file on their machine's disk. A
     // non-owner is told the state and not handed an instruction they cannot
     // carry out.
-    expect(screen.getByText("Its cockpit has not agreed to serve anyone but its owner.")).toBeTruthy();
+    expect(screen.getByText("The person who enrolled this machine needs to enable model sharing in Cockpit.")).toBeTruthy();
     expect(screen.queryByText(/policy\.yaml/)).toBeNull();
     expect(conn.query.fleetShareDirectory).not.toHaveBeenCalled();
   });
@@ -347,6 +347,22 @@ describe("the week's ledger", () => {
 // ---------------------------------------------------------------------------
 
 describe("the share dialog", () => {
+  it("shows an existing broad share without offering to create it again", async () => {
+    const { conn } = mount(studio({ mode: "cluster" }, willing));
+    const dialog = await openDialog();
+    const legacy = within(dialog).getByRole("radio", { name: /^Everyone in this cluster/ });
+    expect(legacy.getAttribute("aria-checked")).toBe("true");
+    expect(legacy.getAttribute("aria-disabled")).toBe("true");
+    fireEvent.click(legacy);
+    expect(saveButton(dialog).disabled).toBe(true);
+    fireEvent.click(within(dialog).getByRole("radio", { name: /^Specific people and groups/ }));
+    expect(within(dialog).queryByRole("radio", { name: /^Everyone in this cluster/ })).toBeNull();
+    fireEvent.click(within(dialog).getByRole("option", { name: "Ana Ruiz" }));
+    fireEvent.click(saveButton(dialog));
+    await settle();
+    expect(conn.query.fleetSetSharing.mock.calls[0]?.[0]).toEqual({ registrationId: MACHINE_ID, mode: "people", userIds: ["ana"], groupIds: [] });
+  });
+
   it("reads the directory once per opening, and nothing before it opens", async () => {
     const { conn } = mount(studio());
     expect(conn.query.fleetShareDirectory).not.toHaveBeenCalled();
@@ -360,21 +376,19 @@ describe("the share dialog", () => {
     expect(conn.query.fleetShareDirectory).toHaveBeenCalledTimes(2);
   });
 
-  it("offers the three choices in the owner's words, and the terms of the offer", async () => {
+  it("offers only private or selected model sharing and explains the boundary", async () => {
     mount(studio());
     const dialog = await openDialog();
     const choices = within(dialog).getAllByRole("radio");
     expect(choices.map((c) => c.textContent)).toEqual([
-      "Only meNobody else's work runs on it.",
-      "Specific people and groupsThe people you choose, and the members of the groups you choose.",
-      "Everyone in this clusterAnyone signed in to this cluster, and the cluster's own automations.",
+      "Only me", "Specific people and groups",
     ]);
     expect(choices[0]?.getAttribute("aria-checked")).toBe("true");
     expect(within(dialog).getByText("Changes take effect on the next call. A call already running finishes.")).toBeTruthy();
-    fireEvent.click(choices[2]!);
+    fireEvent.click(choices[1]!);
     expect(
       within(dialog).getByText(
-        "You see how many calls ran and for how many people. You never see what anybody asked or what the model answered.",
+        "Usage shows counts, without prompts or responses.",
       ),
     ).toBeTruthy();
   });
@@ -386,17 +400,17 @@ describe("the share dialog", () => {
     // learn that before pressing Save, not from a receipt after it.
     mount(studio());
     const dialog = await openDialog();
-    expect(within(dialog).queryByText("This machine has not agreed to serve anyone else yet.")).toBeNull();
-    fireEvent.click(within(dialog).getAllByRole("radio")[2]!);
-    expect(within(dialog).getByText("This machine has not agreed to serve anyone else yet.")).toBeTruthy();
+    expect(within(dialog).queryByText("Model sharing is waiting for Cockpit.")).toBeNull();
+    fireEvent.click(within(dialog).getAllByRole("radio")[1]!);
+    expect(within(dialog).getByText("Model sharing is waiting for Cockpit.")).toBeTruthy();
     expect(within(dialog).getByText(/inference\.serve/)).toBeTruthy();
   });
 
   it("does not warn about a machine that has already agreed", async () => {
     mount(studio(undefined, willing));
     const dialog = await openDialog();
-    fireEvent.click(within(dialog).getAllByRole("radio")[2]!);
-    expect(within(dialog).queryByText("This machine has not agreed to serve anyone else yet.")).toBeNull();
+    fireEvent.click(within(dialog).getAllByRole("radio")[1]!);
+    expect(within(dialog).queryByText("Model sharing is waiting for Cockpit.")).toBeNull();
   });
 
   it("searches under Specific people and groups, turns a pick into a removable chip, and saves exactly the draft", async () => {
@@ -465,7 +479,7 @@ describe("the share dialog", () => {
     );
   });
 
-  it("sends empty lists under Only me and Everyone, whatever the draft held", async () => {
+  it("sends empty lists under Only me, while keeping the people draft on a detour", async () => {
     // G10: a list saved under another mode is residue a later reader could
     // honour by mistake. The draft keeps the chips while the dialog is open;
     // the write does not carry them.
@@ -475,17 +489,17 @@ describe("the share dialog", () => {
     );
     await settle();
     const dialog = await openDialog();
-    fireEvent.click(within(dialog).getByRole("radio", { name: /^Everyone in this cluster/ }));
+    fireEvent.click(within(dialog).getByRole("radio", { name: /^Only me/ }));
     fireEvent.click(within(dialog).getByRole("radio", { name: /^Specific people and groups/ }));
     // Back where it started: the chips survived the detour, and nothing differs.
     expect(within(dialog).getByRole("button", { name: "Remove Ana Ruiz" })).toBeTruthy();
     expect(saveButton(dialog).disabled).toBe(true);
-    fireEvent.click(within(dialog).getByRole("radio", { name: /^Everyone in this cluster/ }));
+    fireEvent.click(within(dialog).getByRole("radio", { name: /^Only me/ }));
     fireEvent.click(saveButton(dialog));
     await settle();
     expect(conn.query.fleetSetSharing.mock.calls[0]?.[0]).toEqual({
       registrationId: MACHINE_ID,
-      mode: "cluster",
+      mode: "owner",
       userIds: [],
       groupIds: [],
     });
@@ -544,7 +558,7 @@ describe("the share dialog", () => {
     const dialog = await openDialog();
     fireEvent.click(within(dialog).getByRole("radio", { name: /^Specific people and groups/ }));
     expect(
-      within(dialog).getByText("Nobody shares a group with you yet. Choose Everyone, or ask an admin to add you to a group."),
+      within(dialog).getByText("Nobody shares a group with you yet. Ask an admin to add you to a group."),
     ).toBeTruthy();
   });
 
@@ -607,7 +621,7 @@ describe("the share dialog", () => {
     );
     // Nothing on the panel claims a change happened.
     expect(screen.queryByText(/^Lent to/)).toBeNull();
-    expect(screen.getByText("Only you")).toBeTruthy();
+    expect(screen.getAllByText("Only you")[0]).toBeTruthy();
   });
 
   it("shows success only once the write has landed, then closes and says what the engine did", async () => {
@@ -691,8 +705,8 @@ describe("the share dialog", () => {
         {
           id: MACHINE_ID,
           machineId: MACHINE_ID,
-          mode: "cluster",
-          people: 0,
+          mode: "people", userIds: ["ana"],
+          people: 1,
           groups: 0,
           sentence:
             "Offered to everyone on this cluster, and to the cluster's own work. The machine itself has to agree too -- set `inference.serve: cluster` in its policy.yaml -- and until it does, nothing runs on it for anybody else.",
@@ -701,12 +715,13 @@ describe("the share dialog", () => {
     );
     const { rerender } = mount(studio(), { conn });
     const dialog = await openDialog();
-    fireEvent.click(within(dialog).getAllByRole("radio")[2]!);
+    fireEvent.click(within(dialog).getAllByRole("radio")[1]!);
+    fireEvent.click(within(dialog).getByRole("option", { name: "Ana Ruiz" }));
     fireEvent.click(saveButton(dialog));
     await settle();
-    rerender(studio({ mode: "cluster" }));
+    rerender(studio({ mode: "people", userIds: ["ana"] }));
     expect(screen.getByText(/The machine itself has to agree too/)).toBeTruthy();
-    rerender(studio({ mode: "cluster" }, willing));
+    rerender(studio({ mode: "people", userIds: ["ana"] }, willing));
     expect(screen.queryByText(/The machine itself has to agree too/)).toBeNull();
   });
 
@@ -739,7 +754,8 @@ describe("the share dialog", () => {
     );
     mount(studio(), { conn });
     const dialog = await openDialog();
-    fireEvent.click(within(dialog).getAllByRole("radio")[2]!);
+    fireEvent.click(within(dialog).getAllByRole("radio")[1]!);
+    fireEvent.click(within(dialog).getByRole("option", { name: "Ana Ruiz" }));
     fireEvent.click(saveButton(dialog));
     await settle();
     fireEvent.keyDown(dialog, { key: "Escape" });
@@ -781,11 +797,12 @@ describe("the share dialog", () => {
   it("discards on Cancel too, with nothing written", async () => {
     const { conn } = mount(studio());
     const dialog = await openDialog();
-    fireEvent.click(within(dialog).getByRole("radio", { name: /^Everyone in this cluster/ }));
+    fireEvent.click(within(dialog).getByRole("radio", { name: /^Specific people and groups/ }));
+    fireEvent.click(within(dialog).getByRole("option", { name: "Ana Ruiz" }));
     fireEvent.click(within(dialog).getByRole("button", { name: "Cancel" }));
     expect(screen.queryByRole("dialog")).toBeNull();
     expect(conn.query.fleetSetSharing).not.toHaveBeenCalled();
-    expect(screen.getByText("Only you")).toBeTruthy();
+    expect(screen.getAllByText("Only you")[0]).toBeTruthy();
   });
 });
 
@@ -804,7 +821,8 @@ describe("a share changed somewhere else while the dialog is open", () => {
   it("says so before Save can write over it, keeps the draft, and replaces the new share only when asked", async () => {
     const { conn, rerender } = mount(studio());
     const dialog = await openDialog();
-    fireEvent.click(radio(dialog, /^Everyone in this cluster/));
+    fireEvent.click(radio(dialog, /^Specific people and groups/));
+    fireEvent.click(within(dialog).getByRole("option", { name: "Ana Ruiz" }));
     // The person's hand is on Save when the other change lands.
     saveButton(dialog).focus();
 
@@ -817,7 +835,7 @@ describe("a share changed somewhere else while the dialog is open", () => {
     // things the person can see.
     expect(within(dialog).getByText("Shared with Bo Chen")).toBeTruthy();
     // The draft is the person's, and it stays.
-    expect(radio(dialog, /^Everyone in this cluster/).getAttribute("aria-checked")).toBe("true");
+    expect(radio(dialog, /^Specific people and groups/).getAttribute("aria-checked")).toBe("true");
     // Save cannot put the old draft back over the new share without a decision.
     expect(saveButton(dialog).disabled).toBe(true);
     expect(within(dialog).getByText("Choose which sharing to keep.")).toBeTruthy();
@@ -840,8 +858,8 @@ describe("a share changed somewhere else while the dialog is open", () => {
     expect(conn.query.fleetSetSharing).toHaveBeenCalledTimes(1);
     expect(conn.query.fleetSetSharing.mock.calls[0]?.[0]).toEqual({
       registrationId: MACHINE_ID,
-      mode: "cluster",
-      userIds: [],
+      mode: "people",
+      userIds: ["ana"],
       groupIds: [],
     });
   });
@@ -849,7 +867,8 @@ describe("a share changed somewhere else while the dialog is open", () => {
   it("takes the new share on request, and drops nothing but the draft it replaces", async () => {
     const { conn, rerender } = mount(studio());
     const dialog = await openDialog();
-    fireEvent.click(radio(dialog, /^Everyone in this cluster/));
+    fireEvent.click(radio(dialog, /^Specific people and groups/));
+    fireEvent.click(within(dialog).getByRole("option", { name: "Ana Ruiz" }));
     rerender(studio({ mode: "people", userIds: ["bo"] }));
     await settle();
 
@@ -910,8 +929,9 @@ describe("a share changed somewhere else while the dialog is open", () => {
   it("asks nothing when the draft already says what is now stored", async () => {
     const { rerender } = mount(studio());
     const dialog = await openDialog();
-    fireEvent.click(radio(dialog, /^Everyone in this cluster/));
-    rerender(studio({ mode: "cluster" }));
+    fireEvent.click(radio(dialog, /^Specific people and groups/));
+    fireEvent.click(within(dialog).getByRole("option", { name: "Ana Ruiz" }));
+    rerender(studio({ mode: "people", userIds: ["ana"] }));
     await settle();
     expect(within(dialog).queryByText(MOVED)).toBeNull();
     expect(within(dialog).getByText("Nothing changed yet.")).toBeTruthy();
