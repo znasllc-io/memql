@@ -86,18 +86,49 @@ func Load(fsys fs.FS, name string) (Catalog, error) {
 		return c, err
 	}
 	for _, s := range c.Scenarios {
-		for file, want := range s.Fixture.Files {
-			b, err := fs.ReadFile(fsys, path.Join(path.Dir(name), "fixtures", s.Fixture.ID, file))
-			if err != nil {
-				return c, fmt.Errorf("%s fixture: %w", s.ID, err)
-			}
-			h := sha256.Sum256(b)
-			if hex.EncodeToString(h[:]) != want {
-				return c, fmt.Errorf("%s fixture file %s changed without a reviewed digest", s.ID, file)
-			}
+		if _, err := ReadFixture(fsys, path.Dir(name), s.Fixture); err != nil {
+			return c, fmt.Errorf("%s fixture: %w", s.ID, err)
 		}
 	}
 	return c, nil
+}
+
+// ReadFixture returns the exact project files to materialize in an isolated
+// evaluation directory. Repository fixtures are data, so their go.mod and
+// intentionally broken code never enter the platform's module/build graph.
+func ReadFixture(fsys fs.FS, catalogDir string, fixture Fixture) (map[string][]byte, error) {
+	if !fs.ValidPath(catalogDir) || !identifier.MatchString(fixture.ID) || len(fixture.Files) == 0 {
+		return nil, fmt.Errorf("invalid fixture location or file manifest")
+	}
+	raw, err := fs.ReadFile(fsys, path.Join(catalogDir, "fixtures", fixture.ID+".json"))
+	if err != nil {
+		return nil, err
+	}
+	type snapshot struct {
+		SchemaVersion int               `json:"schemaVersion"`
+		Files         map[string]string `json:"files"`
+	}
+	saved, err := Decode[snapshot](raw)
+	if err != nil {
+		return nil, err
+	}
+	if saved.SchemaVersion != SchemaVersion || len(saved.Files) != len(fixture.Files) {
+		return nil, fmt.Errorf("fixture snapshot does not match its file manifest")
+	}
+	files := make(map[string][]byte, len(saved.Files))
+	for name, want := range fixture.Files {
+		content, exists := saved.Files[name]
+		if !exists || !fs.ValidPath(name) || name == "." || !digest.MatchString(want) {
+			return nil, fmt.Errorf("invalid or missing fixture file %q", name)
+		}
+		b := []byte(content)
+		h := sha256.Sum256(b)
+		if hex.EncodeToString(h[:]) != want {
+			return nil, fmt.Errorf("fixture file %s changed without a reviewed digest", name)
+		}
+		files[name] = b
+	}
+	return files, nil
 }
 
 func (c Catalog) Validate() error {

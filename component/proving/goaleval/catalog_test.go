@@ -1,6 +1,7 @@
 package goaleval
 
 import (
+	"encoding/json"
 	"os"
 	"strings"
 	"testing"
@@ -39,9 +40,17 @@ func TestFixtureTamperingAndUnknownFieldsAreRefused(t *testing.T) {
 	}
 	raw, _ := os.ReadFile("../../../test/proving/goals/catalog.json")
 	f := fstest.MapFS{"catalog.json": {Data: raw}}
-	for name := range c.Scenarios[0].Fixture.Files {
-		f["fixtures/go-totals/"+name] = &fstest.MapFile{Data: []byte("tampered")}
+	snapshot, err := ReadFixture(os.DirFS("../../.."), "test/proving/goals", c.Scenarios[0].Fixture)
+	if err != nil {
+		t.Fatal(err)
 	}
+	files := map[string]string{}
+	for name, content := range snapshot {
+		files[name] = string(content)
+	}
+	files["totals.go"] = "tampered"
+	changed, _ := json.Marshal(map[string]any{"schemaVersion": 1, "files": files})
+	f["fixtures/go-totals.json"] = &fstest.MapFile{Data: changed}
 	if _, err := Load(f, "catalog.json"); err == nil {
 		t.Fatal("modified fixture accepted")
 	}
