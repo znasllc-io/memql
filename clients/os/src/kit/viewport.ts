@@ -3,8 +3,8 @@
 // Extracted from the component for the reason a layout module is: a viewport
 // asserted through a rendered SVG is asserted through React, the DOM and a
 // transform string. These are four functions over four numbers, and they are
-// where the one genuinely fiddly rule lives -- a wheel zoom has to keep the
-// point under the cursor under the cursor, which is the difference between a
+// where the one genuinely fiddly rule lives -- a zoom has to keep its focal
+// point in place, which is the difference between a
 // map you can steer and one that runs away from you.
 //
 // IN `kit/` RATHER THAN IN AN APP, since epic memql#4785. It was written for
@@ -55,8 +55,8 @@ export function panBy(view: Viewport, dx: number, dy: number): Viewport {
  * here instead of inline in a pointer handler where it would be re-derived
  * every time somebody touched the file.
  *
- * The factor is applied to the CLAMPED result, so a wheel that keeps spinning
- * at the limit does not accumulate a debt the next scroll has to pay back.
+ * The factor is applied to the CLAMPED result, so zooming at the limit does
+ * not accumulate a debt the next zoom has to pay back.
  */
 export function zoomAt(view: Viewport, factor: number, px: number, py: number): Viewport {
   const scale = clampScale(view.scale * factor);

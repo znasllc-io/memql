@@ -12,7 +12,10 @@ describe("Automations",()=>{
  it("describes bounded parallel refusals",async()=>{h.connection=connection([row("limited",{mode:{kind:"parallel",max:3}})]);render(<AutomationsSection/>);fireEvent.click(await screen.findByRole("button",{name:"limited"}));expect(screen.getByText("Parallel: up to 3 runs at once. A fire at the limit is refused.")).not.toBeNull();});
  it("renders loaded structure, selection and keyboard navigation",async()=>{
   h.connection=connection();render(<AutomationsSection/>);
-  const route=await screen.findByRole("button",{name:/route, stratum/});fireEvent.focus(route);fireEvent.keyDown(route,{key:"ArrowRight"});expect(document.activeElement?.getAttribute("aria-label")).toContain("record, stratum");
+  const route=await screen.findByRole("button",{name:/route, stratum/});
+  const initial=document.querySelector("[data-os-map-view]")!.getAttribute("transform");
+  fireEvent.focus(route);fireEvent.keyDown(route,{key:"ArrowRight"});expect(document.activeElement?.getAttribute("aria-label")).toContain("record, stratum");
+  expect(document.querySelector("[data-os-map-view]")!.getAttribute("transform")).toBe(initial);
   fireEvent.keyDown(route,{key:"Enter"});expect(screen.getByRole("region",{name:"Automation route"})).not.toBeNull();expect(screen.getByText(/Stops when row.done/)).not.toBeNull();expect(screen.getByText("Calls the map cannot see")).not.toBeNull();fireEvent.keyDown(route,{key:"Escape"});expect(screen.getByText("Read the reactions")).not.toBeNull();
  });
  it("keeps successful graph evidence when stops are refused",async()=>{const c=connection();c.query.automationLoopStops.mockRejectedValue(new Error("capability_not_held"));h.connection=c;render(<AutomationsSection/>);expect(await screen.findByText("capability_not_held")).not.toBeNull();expect(screen.getByRole("button",{name:/route, stratum/})).not.toBeNull();expect(screen.queryByText(/No loop has been stopped/)).toBeNull();});
