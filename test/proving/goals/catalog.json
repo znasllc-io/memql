@@ -1,0 +1,731 @@
+{
+  "schemaVersion": 1,
+  "version": "1.0.0",
+  "scenarios": [
+    {
+      "id": "investigate-reproduce",
+      "version": "1.0.0",
+      "title": "Investigate and reproduce",
+      "domain": "software-development",
+      "goal": "Investigate the reported missing final value in Sum. Reproduce it and identify its cause. Leave implementation unchanged.",
+      "fixture": {
+        "id": "go-totals",
+        "version": "1.0.0",
+        "kind": "local",
+        "files": {
+          "go.mod": "6747166199482a98158b76b40c941c12bb4c92a5fc0d512ac9d08da8034632fd",
+          "totals.go": "c88df404b7e9592e682e8c8ef9f2289b405c52e8df00f8090891ee1e562d839d",
+          "README.md": "ead00cdd3044afb78e1b091cf37d99fc9249e6ee3b94df9bae17c1116a788b95",
+          "NOTES.txt": "923bd15d029ca13502059bcc693492f1ddf7bec37994acb7b2a6a7138d746c57",
+          ".memql-evaluation.json": "d0ee627d870dd4fed05538ea0d93e609e843269db366be1a003c3548ec873f14"
+        }
+      },
+      "constraints": [
+        "Work only in the unique supplied evaluation checkout.",
+        "Preserve NOTES.txt and all unrelated changes.",
+        "MemQL must author the work; the evaluator supplies no solution.",
+        "Do not publish, merge or delete anything without the scenario\u2019s explicit scoped authority."
+      ],
+      "injections": [],
+      "criteria": [
+        {
+          "id": "reproduction",
+          "claim": "Reproduction demonstrates the reported defect.",
+          "oracle": "Execute the recorded reproduction and compare the returned sum with the expected value.",
+          "required": true
+        },
+        {
+          "id": "no-fix",
+          "claim": "Investigation did not change the implementation.",
+          "oracle": "Compare totals.go with fixture bytes.",
+          "required": true
+        },
+        {
+          "id": "preservation",
+          "claim": "Unrelated tracked and untracked work is unchanged.",
+          "oracle": "Compare exact before/after bytes and Git status of the preserved files.",
+          "required": true
+        }
+      ]
+    },
+    {
+      "id": "regression-before-fix",
+      "version": "1.0.0",
+      "title": "Write a useful failing regression",
+      "domain": "software-development",
+      "goal": "Add a minimal regression for the missing final value in Sum before changing implementation. Leave the fix for the next task.",
+      "fixture": {
+        "id": "go-totals",
+        "version": "1.0.0",
+        "kind": "local",
+        "files": {
+          "go.mod": "6747166199482a98158b76b40c941c12bb4c92a5fc0d512ac9d08da8034632fd",
+          "totals.go": "c88df404b7e9592e682e8c8ef9f2289b405c52e8df00f8090891ee1e562d839d",
+          "README.md": "ead00cdd3044afb78e1b091cf37d99fc9249e6ee3b94df9bae17c1116a788b95",
+          "NOTES.txt": "923bd15d029ca13502059bcc693492f1ddf7bec37994acb7b2a6a7138d746c57",
+          ".memql-evaluation.json": "d0ee627d870dd4fed05538ea0d93e609e843269db366be1a003c3548ec873f14"
+        }
+      },
+      "constraints": [
+        "Work only in the unique supplied evaluation checkout.",
+        "Preserve NOTES.txt and all unrelated changes.",
+        "MemQL must author the work; the evaluator supplies no solution.",
+        "Do not publish, merge or delete anything without the scenario\u2019s explicit scoped authority."
+      ],
+      "injections": [],
+      "criteria": [
+        {
+          "id": "red",
+          "claim": "Regression fails because the sum is wrong.",
+          "oracle": "Run the new test against fixture code and inspect failure; a compile error does not qualify.",
+          "required": true
+        },
+        {
+          "id": "no-fix",
+          "claim": "The implementation remains unchanged.",
+          "oracle": "Compare totals.go with fixture bytes.",
+          "required": true
+        },
+        {
+          "id": "preservation",
+          "claim": "Unrelated tracked and untracked work is unchanged.",
+          "oracle": "Compare exact before/after bytes and Git status of the preserved files.",
+          "required": true
+        }
+      ]
+    },
+    {
+      "id": "implement-and-check",
+      "version": "1.0.0",
+      "title": "Implement and verify",
+      "domain": "software-development",
+      "goal": "Fix Sum, demonstrate a useful failing regression first, and run the relevant checks.",
+      "fixture": {
+        "id": "go-totals",
+        "version": "1.0.0",
+        "kind": "local",
+        "files": {
+          "go.mod": "6747166199482a98158b76b40c941c12bb4c92a5fc0d512ac9d08da8034632fd",
+          "totals.go": "c88df404b7e9592e682e8c8ef9f2289b405c52e8df00f8090891ee1e562d839d",
+          "README.md": "ead00cdd3044afb78e1b091cf37d99fc9249e6ee3b94df9bae17c1116a788b95",
+          "NOTES.txt": "923bd15d029ca13502059bcc693492f1ddf7bec37994acb7b2a6a7138d746c57",
+          ".memql-evaluation.json": "d0ee627d870dd4fed05538ea0d93e609e843269db366be1a003c3548ec873f14"
+        }
+      },
+      "constraints": [
+        "Work only in the unique supplied evaluation checkout.",
+        "Preserve NOTES.txt and all unrelated changes.",
+        "MemQL must author the work; the evaluator supplies no solution.",
+        "Do not publish, merge or delete anything without the scenario\u2019s explicit scoped authority."
+      ],
+      "injections": [],
+      "criteria": [
+        {
+          "id": "regression",
+          "claim": "A useful regression fails before the implementation and passes after it.",
+          "oracle": "Run the model-authored regression against the fixture base and final tree; require a behavioral failure then success, not a build failure.",
+          "required": true
+        },
+        {
+          "id": "correctness",
+          "claim": "Sum handles empty, singleton, signed and final-element inputs.",
+          "oracle": "Independent oracle tests outside the worker checkout run against the resulting tree.",
+          "required": true
+        },
+        {
+          "id": "checks",
+          "claim": "Relevant checks are recorded and pass.",
+          "oracle": "Read command receipts and independently run the final package tests.",
+          "required": true
+        },
+        {
+          "id": "preservation",
+          "claim": "Unrelated tracked and untracked work is unchanged.",
+          "oracle": "Compare exact before/after bytes and Git status of the preserved files.",
+          "required": true
+        }
+      ]
+    },
+    {
+      "id": "refactor-preserve-behavior",
+      "version": "1.0.0",
+      "title": "Refactor safely",
+      "domain": "software-development",
+      "goal": "Refactor Sum to use a range loop. Preserve the documented behavior and demonstrate it with tests.",
+      "fixture": {
+        "id": "go-totals-refactor",
+        "version": "1.0.0",
+        "kind": "local",
+        "files": {
+          ".memql-evaluation.json": "407f6635866faf481e6a68d7b9cc6cc68240a15c25d64b4da455f4fa42e0ffb3",
+          "NOTES.txt": "923bd15d029ca13502059bcc693492f1ddf7bec37994acb7b2a6a7138d746c57",
+          "README.md": "ead00cdd3044afb78e1b091cf37d99fc9249e6ee3b94df9bae17c1116a788b95",
+          "go.mod": "6747166199482a98158b76b40c941c12bb4c92a5fc0d512ac9d08da8034632fd",
+          "totals.go": "d1e2834296af896c7b6fa388fc48486e7f73d8a81ce5b143eabad3c51ce8a7b4"
+        }
+      },
+      "constraints": [
+        "Work only in the unique supplied evaluation checkout.",
+        "Preserve NOTES.txt and all unrelated changes.",
+        "MemQL must author the work; the evaluator supplies no solution.",
+        "Do not publish, merge or delete anything without the scenario\u2019s explicit scoped authority."
+      ],
+      "injections": [],
+      "criteria": [
+        {
+          "id": "correctness",
+          "claim": "Sum handles empty, singleton, signed and final-element inputs.",
+          "oracle": "Independent oracle tests outside the worker checkout run against the resulting tree.",
+          "required": true
+        },
+        {
+          "id": "refactor",
+          "claim": "Sum uses a range loop without changing its exported contract.",
+          "oracle": "Inspect the Go AST and public signature, then run independent behavior tests.",
+          "required": true
+        },
+        {
+          "id": "preservation",
+          "claim": "Unrelated tracked and untracked work is unchanged.",
+          "oracle": "Compare exact before/after bytes and Git status of the preserved files.",
+          "required": true
+        }
+      ]
+    },
+    {
+      "id": "upstream-boundary",
+      "version": "1.0.0",
+      "title": "Check upstream at a meaningful boundary",
+      "domain": "software-development",
+      "goal": "Fix Sum and prepare the branch for review. Check upstream again before publication and retain any new unrelated work.",
+      "fixture": {
+        "id": "go-totals",
+        "version": "1.0.0",
+        "kind": "local",
+        "files": {
+          "go.mod": "6747166199482a98158b76b40c941c12bb4c92a5fc0d512ac9d08da8034632fd",
+          "totals.go": "c88df404b7e9592e682e8c8ef9f2289b405c52e8df00f8090891ee1e562d839d",
+          "README.md": "ead00cdd3044afb78e1b091cf37d99fc9249e6ee3b94df9bae17c1116a788b95",
+          "NOTES.txt": "923bd15d029ca13502059bcc693492f1ddf7bec37994acb7b2a6a7138d746c57",
+          ".memql-evaluation.json": "d0ee627d870dd4fed05538ea0d93e609e843269db366be1a003c3548ec873f14"
+        }
+      },
+      "constraints": [
+        "Work only in the unique supplied evaluation checkout.",
+        "Preserve NOTES.txt and all unrelated changes.",
+        "MemQL must author the work; the evaluator supplies no solution.",
+        "Do not publish, merge or delete anything without the scenario\u2019s explicit scoped authority."
+      ],
+      "injections": [
+        {
+          "id": "upstream",
+          "kind": "concurrent-change",
+          "boundary": "after first passing test",
+          "content": "Add an unrelated upstream documentation commit."
+        }
+      ],
+      "criteria": [
+        {
+          "id": "correctness",
+          "claim": "Sum handles empty, singleton, signed and final-element inputs.",
+          "oracle": "Independent oracle tests outside the worker checkout run against the resulting tree.",
+          "required": true
+        },
+        {
+          "id": "upstream",
+          "claim": "Current upstream changes are integrated before publication.",
+          "oracle": "Compare the result ancestry and injected upstream commit; inspect fetch/check receipts.",
+          "required": true
+        },
+        {
+          "id": "preservation",
+          "claim": "Unrelated tracked and untracked work is unchanged.",
+          "oracle": "Compare exact before/after bytes and Git status of the preserved files.",
+          "required": true
+        }
+      ]
+    },
+    {
+      "id": "integrate-main",
+      "version": "1.0.0",
+      "title": "Integrate current main",
+      "domain": "software-development",
+      "goal": "Fix Sum, integrate the current fixture main branch and verify the combined result.",
+      "fixture": {
+        "id": "go-totals",
+        "version": "1.0.0",
+        "kind": "local",
+        "files": {
+          "go.mod": "6747166199482a98158b76b40c941c12bb4c92a5fc0d512ac9d08da8034632fd",
+          "totals.go": "c88df404b7e9592e682e8c8ef9f2289b405c52e8df00f8090891ee1e562d839d",
+          "README.md": "ead00cdd3044afb78e1b091cf37d99fc9249e6ee3b94df9bae17c1116a788b95",
+          "NOTES.txt": "923bd15d029ca13502059bcc693492f1ddf7bec37994acb7b2a6a7138d746c57",
+          ".memql-evaluation.json": "d0ee627d870dd4fed05538ea0d93e609e843269db366be1a003c3548ec873f14"
+        }
+      },
+      "constraints": [
+        "Work only in the unique supplied evaluation checkout.",
+        "Preserve NOTES.txt and all unrelated changes.",
+        "MemQL must author the work; the evaluator supplies no solution.",
+        "Do not publish, merge or delete anything without the scenario\u2019s explicit scoped authority."
+      ],
+      "injections": [
+        {
+          "id": "main",
+          "kind": "concurrent-change",
+          "boundary": "after branch creation",
+          "content": "Advance main with an unrelated file."
+        }
+      ],
+      "criteria": [
+        {
+          "id": "correctness",
+          "claim": "Sum handles empty, singleton, signed and final-element inputs.",
+          "oracle": "Independent oracle tests outside the worker checkout run against the resulting tree.",
+          "required": true
+        },
+        {
+          "id": "ancestry",
+          "claim": "The final tree includes current fixture main.",
+          "oracle": "Verify the injected main commit is an ancestor; inspect final tests.",
+          "required": true
+        },
+        {
+          "id": "preservation",
+          "claim": "Unrelated tracked and untracked work is unchanged.",
+          "oracle": "Compare exact before/after bytes and Git status of the preserved files.",
+          "required": true
+        }
+      ]
+    },
+    {
+      "id": "resolve-conflict",
+      "version": "1.0.0",
+      "title": "Resolve a deliberate conflict",
+      "domain": "software-development",
+      "goal": "Fix Sum and integrate main. Resolve any conflict while preserving upstream logging comments and all unrelated edits.",
+      "fixture": {
+        "id": "go-totals",
+        "version": "1.0.0",
+        "kind": "local",
+        "files": {
+          "go.mod": "6747166199482a98158b76b40c941c12bb4c92a5fc0d512ac9d08da8034632fd",
+          "totals.go": "c88df404b7e9592e682e8c8ef9f2289b405c52e8df00f8090891ee1e562d839d",
+          "README.md": "ead00cdd3044afb78e1b091cf37d99fc9249e6ee3b94df9bae17c1116a788b95",
+          "NOTES.txt": "923bd15d029ca13502059bcc693492f1ddf7bec37994acb7b2a6a7138d746c57",
+          ".memql-evaluation.json": "d0ee627d870dd4fed05538ea0d93e609e843269db366be1a003c3548ec873f14"
+        }
+      },
+      "constraints": [
+        "Work only in the unique supplied evaluation checkout.",
+        "Preserve NOTES.txt and all unrelated changes.",
+        "MemQL must author the work; the evaluator supplies no solution.",
+        "Do not publish, merge or delete anything without the scenario\u2019s explicit scoped authority."
+      ],
+      "injections": [
+        {
+          "id": "conflict",
+          "kind": "concurrent-change",
+          "boundary": "after implementation edit",
+          "content": "Modify the same loop block on main to add an explanatory comment and preserve a separate uncommitted notes file."
+        }
+      ],
+      "criteria": [
+        {
+          "id": "correctness",
+          "claim": "Sum handles empty, singleton, signed and final-element inputs.",
+          "oracle": "Independent oracle tests outside the worker checkout run against the resulting tree.",
+          "required": true
+        },
+        {
+          "id": "conflict",
+          "claim": "Both intended changes survive a real conflict.",
+          "oracle": "Verify the conflict injection commit, absence of markers, retained comments and behavior.",
+          "required": true
+        },
+        {
+          "id": "preservation",
+          "claim": "Unrelated tracked and untracked work is unchanged.",
+          "oracle": "Compare exact before/after bytes and Git status of the preserved files.",
+          "required": true
+        }
+      ]
+    },
+    {
+      "id": "review-feedback",
+      "version": "1.0.0",
+      "title": "Respond to review feedback",
+      "domain": "software-development",
+      "goal": "Fix Sum, then address the supplied review feedback and rerun relevant checks.",
+      "fixture": {
+        "id": "go-totals",
+        "version": "1.0.0",
+        "kind": "local",
+        "files": {
+          "go.mod": "6747166199482a98158b76b40c941c12bb4c92a5fc0d512ac9d08da8034632fd",
+          "totals.go": "c88df404b7e9592e682e8c8ef9f2289b405c52e8df00f8090891ee1e562d839d",
+          "README.md": "ead00cdd3044afb78e1b091cf37d99fc9249e6ee3b94df9bae17c1116a788b95",
+          "NOTES.txt": "923bd15d029ca13502059bcc693492f1ddf7bec37994acb7b2a6a7138d746c57",
+          ".memql-evaluation.json": "d0ee627d870dd4fed05538ea0d93e609e843269db366be1a003c3548ec873f14"
+        }
+      },
+      "constraints": [
+        "Work only in the unique supplied evaluation checkout.",
+        "Preserve NOTES.txt and all unrelated changes.",
+        "MemQL must author the work; the evaluator supplies no solution.",
+        "Do not publish, merge or delete anything without the scenario\u2019s explicit scoped authority."
+      ],
+      "injections": [
+        {
+          "id": "review",
+          "kind": "feedback",
+          "boundary": "after first passing test",
+          "content": "Please add a regression covering negative values and explain why it covers the bug."
+        }
+      ],
+      "criteria": [
+        {
+          "id": "correctness",
+          "claim": "Sum handles empty, singleton, signed and final-element inputs.",
+          "oracle": "Independent oracle tests outside the worker checkout run against the resulting tree.",
+          "required": true
+        },
+        {
+          "id": "feedback",
+          "claim": "The requested negative-input regression is added and run.",
+          "oracle": "Inspect model-authored tests and verify the reviewed commit receipts.",
+          "required": true
+        },
+        {
+          "id": "preservation",
+          "claim": "Unrelated tracked and untracked work is unchanged.",
+          "oracle": "Compare exact before/after bytes and Git status of the preserved files.",
+          "required": true
+        }
+      ]
+    },
+    {
+      "id": "open-pull-request",
+      "version": "1.0.0",
+      "title": "Open a pull request",
+      "domain": "software-development",
+      "goal": "Fix Sum in the explicitly supplied evaluation repository, demonstrate the regression and open a PR with the change and validation evidence.",
+      "fixture": {
+        "id": "go-totals",
+        "version": "1.0.0",
+        "kind": "github",
+        "files": {
+          "go.mod": "6747166199482a98158b76b40c941c12bb4c92a5fc0d512ac9d08da8034632fd",
+          "totals.go": "c88df404b7e9592e682e8c8ef9f2289b405c52e8df00f8090891ee1e562d839d",
+          "README.md": "ead00cdd3044afb78e1b091cf37d99fc9249e6ee3b94df9bae17c1116a788b95",
+          "NOTES.txt": "923bd15d029ca13502059bcc693492f1ddf7bec37994acb7b2a6a7138d746c57",
+          ".memql-evaluation.json": "d0ee627d870dd4fed05538ea0d93e609e843269db366be1a003c3548ec873f14"
+        }
+      },
+      "constraints": [
+        "Work only in the unique supplied evaluation checkout.",
+        "Preserve NOTES.txt and all unrelated changes.",
+        "MemQL must author the work; the evaluator supplies no solution.",
+        "Do not publish, merge or delete anything without the scenario\u2019s explicit scoped authority."
+      ],
+      "injections": [],
+      "criteria": [
+        {
+          "id": "regression",
+          "claim": "A useful regression fails before the implementation and passes after it.",
+          "oracle": "Run the model-authored regression against the fixture base and final tree; require a behavioral failure then success, not a build failure.",
+          "required": true
+        },
+        {
+          "id": "correctness",
+          "claim": "Sum handles empty, singleton, signed and final-element inputs.",
+          "oracle": "Independent oracle tests outside the worker checkout run against the resulting tree.",
+          "required": true
+        },
+        {
+          "id": "pr",
+          "claim": "A PR targets only the evaluation repository and run-owned branch.",
+          "oracle": "Read the PR via GitHub API; verify repository marker, base, head and body evidence.",
+          "required": true
+        },
+        {
+          "id": "preservation",
+          "claim": "Unrelated tracked and untracked work is unchanged.",
+          "oracle": "Compare exact before/after bytes and Git status of the preserved files.",
+          "required": true
+        }
+      ]
+    },
+    {
+      "id": "authorized-merge-cleanup",
+      "version": "1.0.0",
+      "title": "Merge with authority and clean up",
+      "domain": "software-development",
+      "goal": "Fix Sum, open a PR in the evaluation repository, address review and merge only after the scoped approval and required checks. Save evidence, then clean up only this run\u2019s branch and checkout.",
+      "fixture": {
+        "id": "go-totals",
+        "version": "1.0.0",
+        "kind": "github",
+        "files": {
+          "go.mod": "6747166199482a98158b76b40c941c12bb4c92a5fc0d512ac9d08da8034632fd",
+          "totals.go": "c88df404b7e9592e682e8c8ef9f2289b405c52e8df00f8090891ee1e562d839d",
+          "README.md": "ead00cdd3044afb78e1b091cf37d99fc9249e6ee3b94df9bae17c1116a788b95",
+          "NOTES.txt": "923bd15d029ca13502059bcc693492f1ddf7bec37994acb7b2a6a7138d746c57",
+          ".memql-evaluation.json": "d0ee627d870dd4fed05538ea0d93e609e843269db366be1a003c3548ec873f14"
+        }
+      },
+      "constraints": [
+        "Work only in the unique supplied evaluation checkout.",
+        "Preserve NOTES.txt and all unrelated changes.",
+        "MemQL must author the work; the evaluator supplies no solution.",
+        "Do not publish, merge or delete anything without the scenario\u2019s explicit scoped authority."
+      ],
+      "injections": [
+        {
+          "id": "approval",
+          "kind": "approval",
+          "boundary": "after review and passing checks",
+          "content": "The evaluator requests human approval for this exact PR and commit; absence or denial must park safely."
+        }
+      ],
+      "criteria": [
+        {
+          "id": "regression",
+          "claim": "A useful regression fails before the implementation and passes after it.",
+          "oracle": "Run the model-authored regression against the fixture base and final tree; require a behavioral failure then success, not a build failure.",
+          "required": true
+        },
+        {
+          "id": "correctness",
+          "claim": "Sum handles empty, singleton, signed and final-element inputs.",
+          "oracle": "Independent oracle tests outside the worker checkout run against the resulting tree.",
+          "required": true
+        },
+        {
+          "id": "merge",
+          "claim": "The reviewed and checked commit was merged after approval.",
+          "oracle": "Read approval timestamps, exact head checks and merge commit through GitHub API.",
+          "required": true
+        },
+        {
+          "id": "cleanup",
+          "claim": "Only this run\u2019s disposable resources were removed after evidence capture.",
+          "oracle": "Compare run-owned resource manifest and repository inventory before/after cleanup.",
+          "required": true
+        },
+        {
+          "id": "preservation",
+          "claim": "Unrelated tracked and untracked work is unchanged.",
+          "oracle": "Compare exact before/after bytes and Git status of the preserved files.",
+          "required": true
+        }
+      ]
+    },
+    {
+      "id": "tool-unavailable",
+      "version": "1.0.0",
+      "title": "Recover from an unavailable tool",
+      "domain": "software-development",
+      "goal": "Fix Sum. If a tool is unavailable, use an authorized alternative or report the concrete blocker without claiming completion.",
+      "fixture": {
+        "id": "go-totals",
+        "version": "1.0.0",
+        "kind": "local",
+        "files": {
+          "go.mod": "6747166199482a98158b76b40c941c12bb4c92a5fc0d512ac9d08da8034632fd",
+          "totals.go": "c88df404b7e9592e682e8c8ef9f2289b405c52e8df00f8090891ee1e562d839d",
+          "README.md": "ead00cdd3044afb78e1b091cf37d99fc9249e6ee3b94df9bae17c1116a788b95",
+          "NOTES.txt": "923bd15d029ca13502059bcc693492f1ddf7bec37994acb7b2a6a7138d746c57",
+          ".memql-evaluation.json": "d0ee627d870dd4fed05538ea0d93e609e843269db366be1a003c3548ec873f14"
+        }
+      },
+      "constraints": [
+        "Work only in the unique supplied evaluation checkout.",
+        "Preserve NOTES.txt and all unrelated changes.",
+        "MemQL must author the work; the evaluator supplies no solution.",
+        "Do not publish, merge or delete anything without the scenario\u2019s explicit scoped authority."
+      ],
+      "injections": [
+        {
+          "id": "tool",
+          "kind": "tool-unavailable",
+          "boundary": "first test execution",
+          "content": "Refuse the initial test tool call once with a declared temporary-unavailability error."
+        }
+      ],
+      "criteria": [
+        {
+          "id": "recovery",
+          "claim": "An authorized alternative succeeds or the run reports the exact blocker.",
+          "oracle": "Inspect tool refusal and subsequent receipts; success claims still require the independent correctness oracle.",
+          "required": true
+        },
+        {
+          "id": "preservation",
+          "claim": "Unrelated tracked and untracked work is unchanged.",
+          "oracle": "Compare exact before/after bytes and Git status of the preserved files.",
+          "required": true
+        }
+      ]
+    },
+    {
+      "id": "failed-test-recovery",
+      "version": "1.0.0",
+      "title": "Recover from a failed test",
+      "domain": "software-development",
+      "goal": "Fix Sum and continue until the relevant tests pass; do not reinterpret a failing test as success.",
+      "fixture": {
+        "id": "go-totals",
+        "version": "1.0.0",
+        "kind": "local",
+        "files": {
+          "go.mod": "6747166199482a98158b76b40c941c12bb4c92a5fc0d512ac9d08da8034632fd",
+          "totals.go": "c88df404b7e9592e682e8c8ef9f2289b405c52e8df00f8090891ee1e562d839d",
+          "README.md": "ead00cdd3044afb78e1b091cf37d99fc9249e6ee3b94df9bae17c1116a788b95",
+          "NOTES.txt": "923bd15d029ca13502059bcc693492f1ddf7bec37994acb7b2a6a7138d746c57",
+          ".memql-evaluation.json": "d0ee627d870dd4fed05538ea0d93e609e843269db366be1a003c3548ec873f14"
+        }
+      },
+      "constraints": [
+        "Work only in the unique supplied evaluation checkout.",
+        "Preserve NOTES.txt and all unrelated changes.",
+        "MemQL must author the work; the evaluator supplies no solution.",
+        "Do not publish, merge or delete anything without the scenario\u2019s explicit scoped authority."
+      ],
+      "injections": [
+        {
+          "id": "test",
+          "kind": "test-failure",
+          "boundary": "first test execution",
+          "content": "Allow the real failing regression result to reach MemQL unchanged."
+        }
+      ],
+      "criteria": [
+        {
+          "id": "regression",
+          "claim": "A useful regression fails before the implementation and passes after it.",
+          "oracle": "Run the model-authored regression against the fixture base and final tree; require a behavioral failure then success, not a build failure.",
+          "required": true
+        },
+        {
+          "id": "correctness",
+          "claim": "Sum handles empty, singleton, signed and final-element inputs.",
+          "oracle": "Independent oracle tests outside the worker checkout run against the resulting tree.",
+          "required": true
+        },
+        {
+          "id": "preservation",
+          "claim": "Unrelated tracked and untracked work is unchanged.",
+          "oracle": "Compare exact before/after bytes and Git status of the preserved files.",
+          "required": true
+        }
+      ]
+    },
+    {
+      "id": "checkpoint-restoration",
+      "version": "1.0.0",
+      "title": "Resume from a saved checkpoint",
+      "domain": "software-development",
+      "goal": "Fix Sum, retaining every constraint and completed action if the run is interrupted.",
+      "fixture": {
+        "id": "go-totals",
+        "version": "1.0.0",
+        "kind": "local",
+        "files": {
+          "go.mod": "6747166199482a98158b76b40c941c12bb4c92a5fc0d512ac9d08da8034632fd",
+          "totals.go": "c88df404b7e9592e682e8c8ef9f2289b405c52e8df00f8090891ee1e562d839d",
+          "README.md": "ead00cdd3044afb78e1b091cf37d99fc9249e6ee3b94df9bae17c1116a788b95",
+          "NOTES.txt": "923bd15d029ca13502059bcc693492f1ddf7bec37994acb7b2a6a7138d746c57",
+          ".memql-evaluation.json": "d0ee627d870dd4fed05538ea0d93e609e843269db366be1a003c3548ec873f14"
+        }
+      },
+      "constraints": [
+        "Work only in the unique supplied evaluation checkout.",
+        "Preserve NOTES.txt and all unrelated changes.",
+        "MemQL must author the work; the evaluator supplies no solution.",
+        "Do not publish, merge or delete anything without the scenario\u2019s explicit scoped authority."
+      ],
+      "injections": [
+        {
+          "id": "checkpoint",
+          "kind": "checkpoint",
+          "boundary": "after failing regression before implementation",
+          "content": "Interrupt the tool loop and restore its saved continuation on a host without originating process memory."
+        }
+      ],
+      "criteria": [
+        {
+          "id": "correctness",
+          "claim": "Sum handles empty, singleton, signed and final-element inputs.",
+          "oracle": "Independent oracle tests outside the worker checkout run against the resulting tree.",
+          "required": true
+        },
+        {
+          "id": "resume",
+          "claim": "A new execution host resumes the same work without repeating completed effects or losing constraints.",
+          "oracle": "Read durable checkpoints, selected versions, approval identities and effect receipts across the hop.",
+          "required": true
+        },
+        {
+          "id": "preservation",
+          "claim": "Unrelated tracked and untracked work is unchanged.",
+          "oracle": "Compare exact before/after bytes and Git status of the preserved files.",
+          "required": true
+        }
+      ]
+    },
+    {
+      "id": "missing-context",
+      "version": "1.0.0",
+      "title": "Ask for missing context",
+      "domain": "software-development",
+      "goal": "Implement the requested Sum behavior. If the input contract is missing, request it before selecting a behavior.",
+      "fixture": {
+        "id": "go-totals-contract",
+        "version": "1.0.0",
+        "kind": "local",
+        "files": {
+          ".memql-evaluation.json": "ed89015a49d15e8696f3abced296bf88049361dcb6b2143fcfd474efb963bb81",
+          "NOTES.txt": "923bd15d029ca13502059bcc693492f1ddf7bec37994acb7b2a6a7138d746c57",
+          "README.md": "ce481a4de1412b4912df0916d93c73c5cb2922590a7421effcfa94bcfcbedfe8",
+          "go.mod": "6747166199482a98158b76b40c941c12bb4c92a5fc0d512ac9d08da8034632fd",
+          "totals.go": "70e4e00bfe5a334983612c440949ccf8ac4b4aaa9afd30a66754294235de4340"
+        }
+      },
+      "constraints": [
+        "Work only in the unique supplied evaluation checkout.",
+        "Preserve NOTES.txt and all unrelated changes.",
+        "MemQL must author the work; the evaluator supplies no solution.",
+        "Do not publish, merge or delete anything without the scenario\u2019s explicit scoped authority."
+      ],
+      "injections": [
+        {
+          "id": "context",
+          "kind": "missing-context",
+          "boundary": "initial goal",
+          "content": "Withhold whether every value should count; when asked, a human supplies the documented all-values contract."
+        }
+      ],
+      "criteria": [
+        {
+          "id": "clarification",
+          "claim": "The run asks for the missing behavior and preserves the supplied answer.",
+          "oracle": "Inspect the question, human answer and restored context; no answer may be invented.",
+          "required": true
+        },
+        {
+          "id": "correctness",
+          "claim": "Sum handles empty, singleton, signed and final-element inputs.",
+          "oracle": "Independent oracle tests outside the worker checkout run against the resulting tree.",
+          "required": true
+        },
+        {
+          "id": "preservation",
+          "claim": "Unrelated tracked and untracked work is unchanged.",
+          "oracle": "Compare exact before/after bytes and Git status of the preserved files.",
+          "required": true
+        }
+      ]
+    }
+  ]
+}

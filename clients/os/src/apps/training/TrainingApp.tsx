@@ -11,6 +11,8 @@ import type { UploadProvider } from "../../items/upload";
 import { useChunkDecisions } from "./actions";
 import { CHUNK_CONCEPT, FILE_CONCEPT, RUN_CONCEPT, type ChunkDecision } from "./concepts";
 import { DomainsSection } from "./DomainsSection";
+import { SkillsSection } from "./SkillsSection";
+import { EvaluationsSection } from "./EvaluationsSection";
 import { ReviewSection } from "./ReviewSection";
 import {
   fileBelongsHere,
@@ -295,6 +297,8 @@ export function TrainingApp({
   if (sectionId === "domains") {
     return <DomainsSection feed={domains} onNavigate={navigate} />;
   }
+  if (sectionId === "skills") return <SkillsSection />;
+  if (sectionId === "evaluations") return <EvaluationsSection />;
   return (
     <UploadSection
       uploads={uploads}

@@ -11522,6 +11522,26 @@ QueryClient.prototype.skillNeedsRefresh = function (this: QueryClient, args: Ski
   return this.executeNamed("skillNeedsRefresh", buildSkillNeedsRefresh(args), opts);
 };
 
+/** Training can inspect retired skills to explain historical selections. This is the shared capability catalog; private lessons remain in the Library. */
+// Bound concept: v1:skills:skill (machine-readable: BoundConcepts["skillsForTraining"] in generated_concepts.ts).
+export interface SkillsForTrainingArgs {
+}
+
+export function buildSkillsForTraining(args: SkillsForTrainingArgs): string {
+  void args;
+  return "query skillsForTraining()";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    skillsForTraining(args?: SkillsForTrainingArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.skillsForTraining = function (this: QueryClient, args: SkillsForTrainingArgs = {} as SkillsForTrainingArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("skillsForTraining", buildSkillsForTraining(args), opts);
+};
+
 /** Every mirrored line item that names one product -- what soldByProduct groups. Unwindowed by construction: the date is the order's, so the tool intersects this with ordersInWindow rather than filtering here. */
 // Bound concept: v1:shopify:orderLineItem (machine-readable: BoundConcepts["soldByProduct"] in generated_concepts.ts).
 export interface SoldByProductArgs {
@@ -12693,6 +12713,26 @@ QueryClient.prototype.workDraftsForOwnerRun = function (this: QueryClient, args:
   return this.executeNamed("workDraftsForOwnerRun", buildWorkDraftsForOwnerRun(args), opts);
 };
 
+/** Durable goal-evaluation results, scoped by the same owner tier as their work. A missing result is not a successful measurement. */
+// Bound concept: v1:work:observation (machine-readable: BoundConcepts["workGoalEvaluationsForOwner"] in generated_concepts.ts).
+export interface WorkGoalEvaluationsForOwnerArgs {
+}
+
+export function buildWorkGoalEvaluationsForOwner(args: WorkGoalEvaluationsForOwnerArgs): string {
+  void args;
+  return "query workGoalEvaluationsForOwner()";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    workGoalEvaluationsForOwner(args?: WorkGoalEvaluationsForOwnerArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.workGoalEvaluationsForOwner = function (this: QueryClient, args: WorkGoalEvaluationsForOwnerArgs = {} as WorkGoalEvaluationsForOwnerArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("workGoalEvaluationsForOwner", buildWorkGoalEvaluationsForOwner(args), opts);
+};
+
 /** One of the caller's goals by id. */
 // Bound concept: v1:work:goal (machine-readable: BoundConcepts["workGoalForOwner"] in generated_concepts.ts).
 export interface WorkGoalForOwnerArgs {
@@ -13057,6 +13097,46 @@ declare module "./query.js" {
 
 QueryClient.prototype.workSignedRunsForOwner = function (this: QueryClient, args: WorkSignedRunsForOwnerArgs = {} as WorkSignedRunsForOwnerArgs, opts?: QueryCallOptions): Promise<Result> {
   return this.executeNamed("workSignedRunsForOwner", buildWorkSignedRunsForOwner(args), opts);
+};
+
+/** The immutable selection for one exact step version in owned work. */
+// Bound concept: v1:work:observation (machine-readable: BoundConcepts["workSkillSelectionForOwnerRun"] in generated_concepts.ts).
+export interface WorkSkillSelectionForOwnerRunArgs {
+}
+
+export function buildWorkSkillSelectionForOwnerRun(args: WorkSkillSelectionForOwnerRunArgs): string {
+  void args;
+  return "query workSkillSelectionForOwnerRun()";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    workSkillSelectionForOwnerRun(args?: WorkSkillSelectionForOwnerRunArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.workSkillSelectionForOwnerRun = function (this: QueryClient, args: WorkSkillSelectionForOwnerRunArgs = {} as WorkSkillSelectionForOwnerRunArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("workSkillSelectionForOwnerRun", buildWorkSkillSelectionForOwnerRun(args), opts);
+};
+
+/** Skill selection history visible only to the owner of the work. */
+// Bound concept: v1:work:observation (machine-readable: BoundConcepts["workSkillSelectionsForOwner"] in generated_concepts.ts).
+export interface WorkSkillSelectionsForOwnerArgs {
+}
+
+export function buildWorkSkillSelectionsForOwner(args: WorkSkillSelectionsForOwnerArgs): string {
+  void args;
+  return "query workSkillSelectionsForOwner()";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    workSkillSelectionsForOwner(args?: WorkSkillSelectionsForOwnerArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.workSkillSelectionsForOwner = function (this: QueryClient, args: WorkSkillSelectionsForOwnerArgs = {} as WorkSkillSelectionsForOwnerArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("workSkillSelectionsForOwner", buildWorkSkillSelectionsForOwner(args), opts);
 };
 
 /** One caller-owned execution receipt. A named key avoids reading an entire run when verifying a release artifact or one required check. */

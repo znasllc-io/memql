@@ -6852,6 +6852,21 @@ func StorefrontProbeBuild(args StorefrontProbeArgs) string {
 	return b.String()
 }
 
+// WorkSkillCatalog -- Inspect the catalog and verify baseline content against installed seeds.
+type WorkSkillCatalogArgs struct {
+}
+
+// WorkSkillCatalog calls the engine builtin workSkillCatalog.
+func (qc *QueryClient) WorkSkillCatalog(ctx context.Context, args WorkSkillCatalogArgs) (*Result, error) {
+	call := WorkSkillCatalogBuild(args)
+	return qc.executeNamed(ctx, "workSkillCatalog", call)
+}
+
+func WorkSkillCatalogBuild(args WorkSkillCatalogArgs) string {
+	_ = args
+	return "builtin workSkillCatalog()"
+}
+
 // WorkStepVersions -- Every VERSION of every step of one of the caller's runs -- the step timeline's read (design D18). The standard reads collapse an append-only row to its newest version; this answers each version once, folded to its newest row-version, with the run's head marked (current). Returns one entry per version, keyed <stepId>@v<version>.
 type WorkStepVersionsArgs struct {
 	// The caller's run.

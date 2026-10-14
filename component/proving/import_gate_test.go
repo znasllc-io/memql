@@ -14,6 +14,7 @@ import (
 // the capability envelope, the fake external world and the recorded responses.
 // This package -- and only this package -- touches the engine.
 var pureSubpackages = []string{
+	"github.com/znasllc-io/memql/component/proving/goaleval",
 	"github.com/znasllc-io/memql/component/proving/figure",
 	"github.com/znasllc-io/memql/component/proving/scenario",
 	"github.com/znasllc-io/memql/component/proving/scorecard",

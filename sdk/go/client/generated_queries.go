@@ -12182,6 +12182,23 @@ func SkillNeedsRefreshBuild(args SkillNeedsRefreshArgs) string {
 	return b.String()
 }
 
+// SkillsForTraining -- Training can inspect retired skills to explain historical selections. This is the shared capability catalog; private lessons remain in the Library.
+//
+// Bound concept: v1:skills:skill (machine-readable: BoundConcepts["skillsForTraining"] in generated_concepts.go).
+type SkillsForTrainingArgs struct {
+}
+
+// SkillsForTraining calls the engine query skillsForTraining.
+func (qc *QueryClient) SkillsForTraining(ctx context.Context, args SkillsForTrainingArgs) (*Result, error) {
+	call := SkillsForTrainingBuild(args)
+	return qc.executeNamed(ctx, "skillsForTraining", call)
+}
+
+func SkillsForTrainingBuild(args SkillsForTrainingArgs) string {
+	_ = args
+	return "query skillsForTraining()"
+}
+
 // SoldByProduct -- Every mirrored line item that names one product -- what soldByProduct groups. Unwindowed by construction: the date is the order's, so the tool intersects this with ordersInWindow rather than filtering here.
 //
 // Bound concept: v1:shopify:orderLineItem (machine-readable: BoundConcepts["soldByProduct"] in generated_concepts.go).
@@ -13387,6 +13404,23 @@ func WorkDraftsForOwnerRunBuild(args WorkDraftsForOwnerRunArgs) string {
 	return b.String()
 }
 
+// WorkGoalEvaluationsForOwner -- Durable goal-evaluation results, scoped by the same owner tier as their work. A missing result is not a successful measurement.
+//
+// Bound concept: v1:work:observation (machine-readable: BoundConcepts["workGoalEvaluationsForOwner"] in generated_concepts.go).
+type WorkGoalEvaluationsForOwnerArgs struct {
+}
+
+// WorkGoalEvaluationsForOwner calls the engine query workGoalEvaluationsForOwner.
+func (qc *QueryClient) WorkGoalEvaluationsForOwner(ctx context.Context, args WorkGoalEvaluationsForOwnerArgs) (*Result, error) {
+	call := WorkGoalEvaluationsForOwnerBuild(args)
+	return qc.executeNamed(ctx, "workGoalEvaluationsForOwner", call)
+}
+
+func WorkGoalEvaluationsForOwnerBuild(args WorkGoalEvaluationsForOwnerArgs) string {
+	_ = args
+	return "query workGoalEvaluationsForOwner()"
+}
+
 // WorkGoalForOwner -- One of the caller's goals by id.
 //
 // Bound concept: v1:work:goal (machine-readable: BoundConcepts["workGoalForOwner"] in generated_concepts.go).
@@ -13733,6 +13767,40 @@ func (qc *QueryClient) WorkSignedRunsForOwner(ctx context.Context, args WorkSign
 func WorkSignedRunsForOwnerBuild(args WorkSignedRunsForOwnerArgs) string {
 	_ = args
 	return "query workSignedRunsForOwner()"
+}
+
+// WorkSkillSelectionForOwnerRun -- The immutable selection for one exact step version in owned work.
+//
+// Bound concept: v1:work:observation (machine-readable: BoundConcepts["workSkillSelectionForOwnerRun"] in generated_concepts.go).
+type WorkSkillSelectionForOwnerRunArgs struct {
+}
+
+// WorkSkillSelectionForOwnerRun calls the engine query workSkillSelectionForOwnerRun.
+func (qc *QueryClient) WorkSkillSelectionForOwnerRun(ctx context.Context, args WorkSkillSelectionForOwnerRunArgs) (*Result, error) {
+	call := WorkSkillSelectionForOwnerRunBuild(args)
+	return qc.executeNamed(ctx, "workSkillSelectionForOwnerRun", call)
+}
+
+func WorkSkillSelectionForOwnerRunBuild(args WorkSkillSelectionForOwnerRunArgs) string {
+	_ = args
+	return "query workSkillSelectionForOwnerRun()"
+}
+
+// WorkSkillSelectionsForOwner -- Skill selection history visible only to the owner of the work.
+//
+// Bound concept: v1:work:observation (machine-readable: BoundConcepts["workSkillSelectionsForOwner"] in generated_concepts.go).
+type WorkSkillSelectionsForOwnerArgs struct {
+}
+
+// WorkSkillSelectionsForOwner calls the engine query workSkillSelectionsForOwner.
+func (qc *QueryClient) WorkSkillSelectionsForOwner(ctx context.Context, args WorkSkillSelectionsForOwnerArgs) (*Result, error) {
+	call := WorkSkillSelectionsForOwnerBuild(args)
+	return qc.executeNamed(ctx, "workSkillSelectionsForOwner", call)
+}
+
+func WorkSkillSelectionsForOwnerBuild(args WorkSkillSelectionsForOwnerArgs) string {
+	_ = args
+	return "query workSkillSelectionsForOwner()"
 }
 
 // WorkStepForOwnerRun -- One caller-owned execution receipt. A named key avoids reading an entire run when verifying a release artifact or one required check.

@@ -25,6 +25,7 @@ path, or use this detailed reference index. Layout + rules:
 - [The Harness](docs/public/overview/why-memql-harness.md) — the proof-driven tour of the work spine: the journal, resume, budgets, memory consolidation. Each claim names the test that backs it, and the ones not yet proven are listed as such.
 - [MemQL vs. Agent Libraries and Frameworks](docs/public/overview/vs-other-harnesses.md) — honest comparison with the Go + Python field.
 - [The Proving Scorecard](docs/public/overview/proving-scorecard.md) — generated. What the platform measures about itself against the same model in a bare tool loop, and — with equal prominence — what it does not measure and why.
+- [Proof of work](docs/public/overview/proof-of-work.md) — real goal cases, the system and skills used, observable artifacts, human assistance and the limits of each claim. Software evidence is being collected; other skill areas are coming soon.
 - [Quickstart](docs/public/overview/quickstart.md) — get running fast.
 - [Tech Stack & Practices](docs/public/overview/tech-stack.md) — the stack + engineering practices.
 

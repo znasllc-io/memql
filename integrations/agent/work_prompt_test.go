@@ -19,12 +19,23 @@ import (
 type workPromptEngine struct {
 	savedContinuation []common.ChatMessage
 	registryEngine
-	prompts *memql.PromptRegistry
-	viewer  map[string]any
-	execute func(context.Context, string) (any, error)
+	prompts    *memql.PromptRegistry
+	viewer     map[string]any
+	execute    func(context.Context, string) (any, error)
+	skills     any
+	skillError error
 }
 
 func (e *workPromptEngine) Execute(ctx context.Context, query string) (any, error) {
+	if strings.HasPrefix(query, "builtin workSelectSkills(") {
+		if e.skillError != nil {
+			return nil, e.skillError
+		}
+		if e.skills != nil {
+			return e.skills, nil
+		}
+		return []map[string]any{{"receiptId": "test-receipt", "selection": map[string]any{"selected": []any{}}}}, nil
+	}
 	if query == "builtin work.workViewerContext()" && e.viewer != nil {
 		return []map[string]any{e.viewer}, nil
 	}

@@ -5311,6 +5311,25 @@ QueryClient.prototype.storefrontProbe = function (this: QueryClient, args: Store
   return this.executeNamed("storefrontProbe", buildStorefrontProbe(args), opts);
 };
 
+/** Inspect the catalog and verify baseline content against installed seeds. */
+export interface WorkSkillCatalogArgs {
+}
+
+export function buildWorkSkillCatalog(args: WorkSkillCatalogArgs): string {
+  void args;
+  return "builtin workSkillCatalog()";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    workSkillCatalog(args?: WorkSkillCatalogArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.workSkillCatalog = function (this: QueryClient, args: WorkSkillCatalogArgs = {} as WorkSkillCatalogArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("workSkillCatalog", buildWorkSkillCatalog(args), opts);
+};
+
 /** Every VERSION of every step of one of the caller's runs -- the step timeline's read (design D18). The standard reads collapse an append-only row to its newest version; this answers each version once, folded to its newest row-version, with the run's head marked (current). Returns one entry per version, keyed <stepId>@v<version>. */
 export interface WorkStepVersionsArgs {
   /** The caller's run. */

@@ -3078,65 +3078,6 @@ QueryClient.prototype.createSite = function (this: QueryClient, args: CreateSite
   return this.executeNamed("createSite", buildCreateSite(args), opts);
 };
 
-/** Materialize a v1:skills:skill catalog row from a `seed skill ...` declaration under dsl/agents/skills/*.memql. Matches the SeedMaterializer's `mutationCreate<Concept>` naming convention -- the materializer stamps the seed body's id into `skillId` and forwards every other seed body field as a same-named arg, so this mutation's arg surface mirrors the on-disk seed body 1:1. Sibling to `mintSkill`: same row shape, but the seed path is for the predefined catalog (predefined defaults true) and carries no originatingPlanId / mintedByAgentId provenance triad. Was missing pre-#344, which made every skill seed in the bundled catalog fail to materialize with `function "createSkill" not found`. The materializer convention itself lives in component/memql/seed_materializer.go. */
-// Bound concept: v1:skills:skill (machine-readable: BoundConcepts["createSkill"] in generated_concepts.ts).
-export interface CreateSkillArgs {
-  skillId?: string;
-  slug: string;
-  name: string;
-  description?: string;
-  category?: string;
-  tags?: unknown[];
-  domainIds?: unknown[];
-  toolSlugs?: unknown[];
-  /** Inert since memql#5432 retired the live-knowledge mechanism; stored and never resolved. */
-  liveSourceIds?: unknown[];
-  tier: string;
-  predefined?: boolean;
-  active?: boolean;
-  instructions?: Record<string, unknown>;
-  scripts?: unknown[];
-  resources?: unknown[];
-  constructRefs?: unknown[];
-  effects?: Record<string, unknown>;
-  version?: number;
-  status?: string;
-}
-
-export function buildCreateSkill(args: CreateSkillArgs): string {
-  const parts: string[] = [];
-  if (args.skillId !== undefined) parts.push("skillId: " + renderMemQLValue(args.skillId));
-  parts.push("slug: " + renderMemQLValue(args.slug));
-  parts.push("name: " + renderMemQLValue(args.name));
-  if (args.description !== undefined) parts.push("description: " + renderMemQLValue(args.description));
-  if (args.category !== undefined) parts.push("category: " + renderMemQLValue(args.category));
-  if (args.tags !== undefined) parts.push("tags: " + renderMemQLValue(args.tags));
-  if (args.domainIds !== undefined) parts.push("domainIds: " + renderMemQLValue(args.domainIds));
-  if (args.toolSlugs !== undefined) parts.push("toolSlugs: " + renderMemQLValue(args.toolSlugs));
-  if (args.liveSourceIds !== undefined) parts.push("liveSourceIds: " + renderMemQLValue(args.liveSourceIds));
-  parts.push("tier: " + renderMemQLValue(args.tier));
-  if (args.predefined !== undefined) parts.push("predefined: " + renderMemQLValue(args.predefined));
-  if (args.active !== undefined) parts.push("active: " + renderMemQLValue(args.active));
-  if (args.instructions !== undefined) parts.push("instructions: " + renderMemQLValue(args.instructions));
-  if (args.scripts !== undefined) parts.push("scripts: " + renderMemQLValue(args.scripts));
-  if (args.resources !== undefined) parts.push("resources: " + renderMemQLValue(args.resources));
-  if (args.constructRefs !== undefined) parts.push("constructRefs: " + renderMemQLValue(args.constructRefs));
-  if (args.effects !== undefined) parts.push("effects: " + renderMemQLValue(args.effects));
-  if (args.version !== undefined) parts.push("version: " + renderMemQLValue(args.version));
-  if (args.status !== undefined) parts.push("status: " + renderMemQLValue(args.status));
-  return "mutation createSkill(" + parts.join(", ") + ")";
-}
-
-declare module "./query.js" {
-  interface QueryClient {
-    createSkill(args: CreateSkillArgs, opts?: QueryCallOptions): Promise<Result>;
-  }
-}
-
-QueryClient.prototype.createSkill = function (this: QueryClient, args: CreateSkillArgs = {} as CreateSkillArgs, opts?: QueryCallOptions): Promise<Result> {
-  return this.executeNamed("createSkill", buildCreateSkill(args), opts);
-};
-
 /** Append a v1:agents:skillChangeEvent row recording a skill attach / reconfigure on an agent. Phase 2 (#158) cut: every Planner Agent extendSpecialist / createSpecialist flow that lands a skill on an agent issues one of these per skill. Phase 3 also writes them from the cockpit Skills admin view when a human attaches a skill manually. Empty actorAgentId + actorUserId is allowed for system-driven attaches (the migration tool writes events with actorUserId='system:migration:phase2'). The caller is responsible for providing skillChangeEventId -- mint via the standard NewShortId / MustFromMap helpers caller-side. */
 // Bound concept: v1:agents:skillChangeEvent (machine-readable: BoundConcepts["createSkillChangeEvent"] in generated_concepts.ts).
 export interface CreateSkillChangeEventArgs {
@@ -4197,7 +4138,7 @@ QueryClient.prototype.markStoreRedacted = function (this: QueryClient, args: Mar
   return this.executeNamed("markStoreRedacted", buildMarkStoreRedacted(args), opts);
 };
 
-/** Mint a new v1:skills:skill catalog row from a Planner Agent mintSkill action (Phase 3 / memql#159). The caller is the planner integration; it has already run the authority gate (action='mintSkill' on the planner's agentAuthorization + tier in skillTierAllowlist) and the catalog-search heuristic (no existing skill covers >60% of the requested bundle) before invoking this. predefined is hard-stamped false -- the runtime mint surface is for user-/planner-created rows only; the predefined catalog stays in dsl/agents/skills/*.memql. originatingPlanId + mintedByAgentId carry the Phase 3 provenance triad. Server-side enforcement: the tier-validation rule from Phase 1 still applies (skill.tier >= max(domain tier)) -- a mint that violates it rejects with the same error path as the load-time check. */
+/** Mint a new v1:skills:skill catalog row from a Planner Agent mintSkill action (Phase 3 / memql#159). The caller is the planner integration; it has already run the authority gate (action='mintSkill' on the planner's agentAuthorization + tier in skillTierAllowlist) and the catalog-search heuristic (no existing skill covers >60% of the requested bundle) before invoking this. predefined is hard-stamped false -- the runtime mint surface is for user-/planner-created rows only; the predefined catalog stays in dsl/skills/seeds/*.memql. originatingGoalId + mintedByRunId carry the work provenance. Server-side enforcement: the tier-validation rule from Phase 1 still applies (skill.tier >= max(domain tier)) -- a mint that violates it rejects with the same error path as the load-time check. */
 // Bound concept: v1:skills:skill (machine-readable: BoundConcepts["mintSkill"] in generated_concepts.ts).
 export interface MintSkillArgs {
   skillId?: string;

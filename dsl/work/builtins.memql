@@ -18,6 +18,21 @@
 // caller-scoped rather than ranked: a person acts on their own goals, and
 // the row tier is what decides which those are.
 
+/// Inspect the catalog and verify baseline content against installed seeds.
+@sdk
+@executor("integration.work.skillCatalog")
+builtin workSkillCatalog {}
+
+/// Select and freeze reviewed context for the trusted current owned step.
+/// A public caller cannot supply the run context or the content to record.
+@executor("integration.work.selectSkills")
+builtin workSelectSkills {
+ text string
+ limit int!
+ minimumScore int!
+ maxBytes int!
+}
+
 /// Admit one human message about an owned approval. This cannot be called from
 /// a model run, changes no approval, and records a child before async dispatch.
 @executor("integration.work.openApprovalDiscussion")

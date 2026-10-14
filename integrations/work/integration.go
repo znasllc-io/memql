@@ -310,6 +310,8 @@ func (i *Integration) IntegrationName() string { return integrationName }
 // the registry lacks is a BOOT failure on every node type.
 func (i *Integration) Capabilities() []memql.IntegrationCapability {
 	return []memql.IntegrationCapability{
+		{Name: "skillCatalog", Description: "Inspect skill content and its verified installed-baseline provenance.", Handler: i.handleSkillCatalog},
+		{Name: "selectSkills", Description: "Bind exact reviewed skill versions to the current owned work step.", Handler: i.handleSelectSkills},
 		{Name: "approvalDiscussionState", Description: "Read human-guidance eligibility for one owned approval.", Handler: i.handleApprovalDiscussionState},
 		{Name: "openApprovalDiscussion", Description: "Record a human discussion message and open its bounded read-only child run.", Handler: i.handleOpenApprovalDiscussion},
 		{
