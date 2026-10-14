@@ -17,6 +17,7 @@ type payloadLookup struct {
 var payloadLookups = []payloadLookup{
 	{index: "memory_nodes_email_provider_lookup_idx", field: "providerMessageId", concepts: []string{"v1:email:sendOperation"}},
 	{index: "memory_nodes_work_journal_lookup_idx", field: "runId", concepts: []string{"v1:work:step", "v1:work:approval", "v1:work:modelCall", "v1:work:observation"}},
+	{index: "memory_nodes_work_run_owner_lookup_idx", field: "ownerUserId", concepts: []string{"v1:work:run"}},
 	{index: "memory_nodes_recipient_digest_lookup_idx", field: "emailDigest", concepts: []string{"v1:campaigns:recipient"}},
 	{index: "memory_nodes_consent_digest_lookup_idx", field: "emailDigest", concepts: []string{"v1:campaigns:consentEvent"}},
 }
