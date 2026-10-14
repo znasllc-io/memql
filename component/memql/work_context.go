@@ -60,7 +60,14 @@ func (e *MemQLEngine) CompactWorkContext(ctx context.Context, messages []common.
 	out := append([]common.ChatMessage(nil), messages...)
 	task := workContextTask(messages)
 	sourceLimit := workCheckpointInputBytes - len(task)
-	// Offload bulky, completed tool results first. Their envelopes and receipts
+	// Prefer retiring older history over archiving a fresh result that can fit
+	// with the pinned inputs. The bounded semantic pass below gets the first
+	// chance; exact archival remains the fallback if it cannot make room.
+	start, end := workContextChunk(out, sourceLimit, nil)
+	freshStart, freshEnd := workContextLatestToolExchange(out)
+	retainTail := freshStart >= 0 && end > start && workContextCanRetainTail(out, tools, target)
+	deferredTail := false
+	// Offload bulky, completed older results first. Their envelopes and receipts
 	// stay in the conversation; the exact bytes are durable before replacement.
 	for _, unit := range workContextUnits(out) {
 		if !unit.complete {
@@ -69,6 +76,10 @@ func (e *MemQLEngine) CompactWorkContext(ctx context.Context, messages []common.
 		for i := unit.start; i < unit.end && WorkContextSize(out, tools) > target; i++ {
 			m := out[i]
 			if m.Role != "tool" || len(m.Content) <= max(2048, min(12000, target/4*3)) || strings.HasPrefix(m.Content, "[Archived tool result ") {
+				continue
+			}
+			if retainTail && unit.start == freshStart && unit.end == freshEnd {
+				deferredTail = true
 				continue
 			}
 			raw, err := json.Marshal([]common.ChatMessage{m})
@@ -93,37 +104,8 @@ func (e *MemQLEngine) CompactWorkContext(ctx context.Context, messages []common.
 			// exceed the total budget even when each is below the ordinary
 			// per-result threshold. Archive completed results under pressure;
 			// retain the calls, IDs and receipts as one intact protocol unit.
-			var candidates []int
-			for _, unit := range workContextUnits(out) {
-				if !unit.complete {
-					continue
-				}
-				for index := unit.start; index < unit.end; index++ {
-					m := out[index]
-					if m.Role == "tool" && len(m.Content) > 2048 && !strings.HasPrefix(m.Content, "[Archived tool result ") {
-						candidates = append(candidates, index)
-					}
-				}
-			}
-			sort.Slice(candidates, func(a, b int) bool { return len(out[candidates[a]].Content) > len(out[candidates[b]].Content) })
-			for _, index := range candidates {
-				if WorkContextSize(out, tools) <= target {
-					return out, nil
-				}
-				m := out[index]
-				raw, err := json.Marshal([]common.ChatMessage{m})
-				if err != nil {
-					return nil, err
-				}
-				fingerprint := workContextHash("tool-v2", raw)
-				preview := workContextArchivedResult(out, index, fingerprint)
-				if len(preview) >= len(m.Content) {
-					continue
-				}
-				if err = e.saveWorkContextSource(ctx, fingerprint, string(raw), ""); err != nil {
-					return nil, err
-				}
-				out[index].Content = preview
+			if err := e.archiveWorkContextResults(ctx, out, tools, target); err != nil {
+				return nil, err
 			}
 			if WorkContextSize(out, tools) <= target {
 				return out, nil
@@ -190,10 +172,56 @@ func (e *MemQLEngine) CompactWorkContext(ctx context.Context, messages []common.
 		}
 		out = next
 	}
+	// Unproductive older candidates still consume the same eight attempts.
+	// Do not make deferral a new failure when the existing archival fallback
+	// can fit the request without another model call.
+	if deferredTail && WorkContextSize(out, tools) > target {
+		if err := e.archiveWorkContextResults(ctx, out, tools, target); err != nil {
+			return nil, err
+		}
+	}
 	if WorkContextSize(out, tools) > target {
 		return nil, fmt.Errorf("context checkpoint budget exhausted; originals were retained")
 	}
 	return out, nil
+}
+
+// archiveWorkContextResults keeps complete call/result units and persists each
+// exact result before replacing it. It never invokes a summarizer.
+func (e *MemQLEngine) archiveWorkContextResults(ctx context.Context, out []common.ChatMessage, tools []common.ToolDefinition, target int) error {
+	var candidates []int
+	for _, unit := range workContextUnits(out) {
+		if !unit.complete {
+			continue
+		}
+		for index := unit.start; index < unit.end; index++ {
+			m := out[index]
+			if m.Role == "tool" && len(m.Content) > 2048 && !strings.HasPrefix(m.Content, "[Archived tool result ") {
+				candidates = append(candidates, index)
+			}
+		}
+	}
+	sort.Slice(candidates, func(a, b int) bool { return len(out[candidates[a]].Content) > len(out[candidates[b]].Content) })
+	for _, index := range candidates {
+		if WorkContextSize(out, tools) <= target {
+			return nil
+		}
+		m := out[index]
+		raw, err := json.Marshal([]common.ChatMessage{m})
+		if err != nil {
+			return err
+		}
+		fingerprint := workContextHash("tool-v2", raw)
+		preview := workContextArchivedResult(out, index, fingerprint)
+		if len(preview) >= len(m.Content) {
+			continue
+		}
+		if err = e.saveWorkContextSource(ctx, fingerprint, string(raw), ""); err != nil {
+			return err
+		}
+		out[index].Content = preview
+	}
+	return nil
 }
 
 // A recalled page already points to durable history. Point back to that source
