@@ -2245,6 +2245,18 @@ other app carries.
   An `integration` or `node-type` gets a sentence explaining why there is no
   switch instead of a disabled one (rule 12).
 
+### Storage warning
+
+Owners see a compact capacity warning above the dock when the instance's
+existing database monitor reports a data or recovery-log volume above 80%.
+Review storage opens Readiness, where the report gives usage and its measurement
+time. The owner-only stream read checks the monitor's current database identity;
+missing or stale readings are unavailable. A last-known warning survives a read
+failure and clears only on a fresh complete report. The shared feed polls once
+per minute while visible and connected, stops on role change, and never writes
+another health record. The browser QA views `storage-warning`, `storage-healthy`,
+`storage-missing`, `storage-stale` and `storage-loading` exercise the states.
+
 ### Releases
 
 Cluster → Releases is the owner's review history. It shows immutable component

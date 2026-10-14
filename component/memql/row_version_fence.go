@@ -83,7 +83,7 @@ func (e *MemQLEngine) checkRowVersionFences(ctx context.Context, tx bun.Tx) erro
 			return err
 		}
 		var at time.Time
-		err := tx.NewSelect().Model((*memorynodes.MemoryNode)(nil)).Column("createdAt").Where("concept = ?", f.concept).Where("id = ?", f.id).OrderExpr(`"createdAt" DESC`).Limit(1).Scan(ctx, &at)
+		err := tx.NewSelect().Model((*memorynodes.MemoryNode)(nil)).ModelTableExpr(memorynodes.ObservedRowsSQL+" AS mn").Column("createdAt").Where("concept = ?", f.concept).Where("id = ?", f.id).OrderExpr(`"createdAt" DESC`).Limit(1).Scan(ctx, &at)
 		if errors.Is(err, sql.ErrNoRows) {
 			if f.version.IsZero() {
 				continue
@@ -116,7 +116,7 @@ func (e *MemQLEngine) fenceWriteTarget(ctx context.Context, concept, rowID strin
 		return nil, fmt.Errorf("row version fence requires a database")
 	}
 	var at time.Time
-	err := e.database().NewSelect().Model((*memorynodes.MemoryNode)(nil)).Column("createdAt").Where("concept = ?", concept).Where("id = ?", canonical).OrderExpr(`"createdAt" DESC`).Limit(1).Scan(ctx, &at)
+	err := e.database().NewSelect().Model((*memorynodes.MemoryNode)(nil)).ModelTableExpr(memorynodes.ObservedRowsSQL+" AS mn").Column("createdAt").Where("concept = ?", concept).Where("id = ?", canonical).OrderExpr(`"createdAt" DESC`).Limit(1).Scan(ctx, &at)
 	if err != nil && !errors.Is(err, sql.ErrNoRows) {
 		return nil, err
 	}

@@ -43,6 +43,56 @@ The existing log sweep reads logLine's retention declaration and verifies each
 archive before dropping a day's chunks. It continues to use
 `MEMQL_LOGS_ARCHIVE_CONTAINER` (falling back to `MEMQL_AZURE_BLOB_CONTAINER`).
 
+## Current liveness observations
+
+Worker registration heartbeats, cluster-node health and mesh observations, and
+module-readiness reports have one current row per record in `memory_liveness`.
+Repeated observations replace that row instead of appending history. The normal
+engine read path merges this table with `MemoryNodes` before filtering, sorting,
+authorization and pagination. Its `createdAt` remains the observation version,
+so live feeds and reads from another replica order updates consistently.
+
+The first record and changes outside the closed observation-field list still
+append to `MemoryNodes`. A business change clears its preceding observation in
+the same transaction. Every engine write to these concepts carries a version
+fence: a concurrent change rejects the stale decision rather than overwriting
+it. Normal ownership checks, schema validation and cluster event publication
+remain in the mutation path. Retiring all base versions also removes the current
+observation. The earlier bounded status-history sweep continues to clear legacy
+versions and keeps the latest base record.
+
+Historical reads retain business versions and, when within the requested time,
+the current observation. Superseded heartbeat samples are deliberately absent;
+backups retain the durable business records, and fresh heartbeats rebuild current
+liveness after a restore. During an upgrade, `memory_liveness_readers` must show
+recent support from every non-stopped node before `memory_liveness_storage`
+enables the switch. Offline nodes still block it. Downgrading after activation
+requires a complete backup restore; an old binary cannot read the observation
+store.
+
+## Steady writers
+
+Custom-domain `lastCheckedAt` and mirror `lastReconcileAt` / `lastAttemptAt`
+use the same current-observation store. Rechecking a healthy domain or a mirror
+with no drift advances its freshness and scheduling watermark without another
+business version. Changes to status, failures, drift or configuration still append
+history. Identical repeated results do nothing. This extension has its own
+`memory_reconcile_observation_readers` handshake, so an older reader that knows
+only the first three liveness concepts cannot enable it prematurely.
+
+Observation-only writes still refresh live readers and invalidate caches across
+replicas, but do not release a held scheduled work journal. Unchanged inbound
+retries also suppress graph events: the comparison runs after validation,
+create-only fields and read-merge, under the row's transaction fence. A retry
+cannot reset a processed delivery's state or its original arrival metadata.
+
+Reputation flushes acknowledge successfully saved windows and skip unchanged
+ones; failed saves remain eligible for retry. The magic-link sweep excludes
+already consumed requests. Package polling writes only a changed upstream head
+or availability, and seed materialization compares against a fresh read rather
+than a replica's cached result. These guards keep normal idle polling from
+creating business history.
+
 ## Shared row schemas
 
 `MemoryNodes` and `SecretMemoryNodes` store an immutable schema reference and
@@ -251,6 +301,26 @@ independently and returns both errors if they fail.
   or child owned by a user preserves the parent. Longer detail policies win.
 - Index migrations build one Timescale chunk per transaction, serialize index
   builders, and verify coverage after interrupted-build repair.
+
+## Owner storage warning
+
+MemQL OS reads the existing `database-health` Kubernetes Event through the
+owner-only `clusterStorageStatus` builtin on its ordinary stream. The read
+verifies the Event's source and current CloudNativePG cluster UID, so a report
+from a replaced installation cannot describe the new one. The shared base grants
+only `get` on that named Event and cluster. There is no new monitor or stored
+health history in the engine.
+
+The OS uses the monitor's data/WAL capacity warning (over 80%). Owners see one
+notice above the dock, opening Cluster → Readiness for usage and measurement
+time. Data usage is the monitor's estimate from summed database sizes and
+configured capacity; WAL usage comes from the exporter. It is not a filesystem
+free-space measurement. The five-minute monitor is read once a minute while the
+OS is visible and connected. Reports older than fifteen minutes, future reports,
+missing measurements and read failures are unavailable, never zero. A previously
+seen warning remains until a fresh complete report clears it. Other roles neither
+request nor render the report, and the native capability independently enforces
+the owner gate.
 
 ## Verify a deployment
 

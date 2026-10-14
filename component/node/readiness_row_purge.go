@@ -169,7 +169,7 @@ func (p sqlReadinessRowPurger) purgeForStoppedNodes(ctx context.Context) (int64,
 		    AND (? || (r.payload->>'nodeId')) IN (
 		      SELECT n.id FROM (
 		        SELECT DISTINCT ON (id) id, payload
-		          FROM "MemoryNodes"
+		          FROM "MemoryNodesObserved"
 		         WHERE concept = ?
 		         ORDER BY id, "createdAt" DESC
 		      ) AS n

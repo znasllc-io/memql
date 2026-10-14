@@ -1,3 +1,4 @@
+import { StorageWarning } from "../cluster/storage/StorageHealth";
 import { useRef, useState } from "react";
 import { ArrowLeft, LayoutGrid } from "lucide-react";
 
@@ -35,6 +36,7 @@ export function PhoneShell({ onSignOut }: { onSignOut: () => void }) {
   const { openAsk } = useAsk();
   const [currentAppId, setCurrentAppId] = useState<string | null>(null);
   const [sectionId, setSectionId] = useState("");
+  const [storageIntent, setStorageIntent] = useState<{ id: string; payload: Record<string, unknown> }>();
   const pageRoot = useRef<HTMLElement>(null);
 
   const apps = appsFor(registry);
@@ -88,6 +90,7 @@ export function PhoneShell({ onSignOut }: { onSignOut: () => void }) {
           Sign out
         </button>
       </header>
+      {!(current?.id === "cluster" && activeSection?.id === "readiness") ? <StorageWarning inline onReview={apps.some((app) => app.id === "cluster") ? () => { setStorageIntent({ id: "storage-warning", payload: { storageWarning: true } }); setCurrentAppId("cluster"); setSectionId("readiness"); } : undefined} /> : null}
       {current ? (
         <main className="os-phone-app" ref={pageRoot}>
           <PageNavigationProvider key={current.id} root={pageRoot} trail={[]}>
@@ -130,6 +133,8 @@ export function PhoneShell({ onSignOut }: { onSignOut: () => void }) {
               <WindowErrorBoundary key={current.id} app={current.id} section={activeSection?.id ?? ""}>
                 <current.component
                   sectionId={activeSection?.id ?? ""}
+                  intent={current.id === "cluster" ? storageIntent : undefined}
+                  consumeIntent={() => setStorageIntent(undefined)}
                   reportSetupState={reportSetupState}
                   navigate={setSectionId}
                   askContext={appAsk.askContext}

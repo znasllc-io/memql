@@ -1,3 +1,4 @@
+import { StorageScene } from "./storageScenes";
 import { emailScenes, EMAIL_CLICKS } from "./emailScenes";
 import { nexusApprovalScenes, NEXUS_APPROVAL_CLICKS } from "./nexusApprovalScenes";
 import { MATERIALIZER_VIEWS } from "./materializerScenes";
@@ -691,6 +692,12 @@ const VIEWS: Record<
   }
 > = {
   ...MATERIALIZER_VIEWS,
+  "storage-phone": { render: () => <StorageScene state="warning" phone /> },
+  "storage-warning": { render: () => <StorageScene state="warning" /> },
+  "storage-healthy": { render: () => <StorageScene state="healthy" /> },
+  "storage-missing": { render: () => <StorageScene state="missing" /> },
+  "storage-stale": { render: () => <StorageScene state="stale" /> },
+  "storage-loading": { render: () => <StorageScene state="loading" /> },
   "files": filesPreview("browse"),
   "files-empty": filesPreview("browse", true),
   "files-backups": filesPreview("backups"),

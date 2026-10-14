@@ -1,3 +1,4 @@
+import { StoragePanel } from "../../../cluster/storage/StorageHealth";
 import { ContentSkeleton } from "../../../kit/ContentSkeleton";
 import { useCallback, useMemo } from "react";
 import type { Row } from "@znasllc-io/memql-sdk-core/client";
@@ -90,6 +91,7 @@ export function ReadinessSection() {
         are read once when this section opens, and nothing here stops you using the rest of the
         product.
       </Caption>
+      <StoragePanel />
     </div>
   );
 }

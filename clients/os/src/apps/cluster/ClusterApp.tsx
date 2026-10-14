@@ -78,6 +78,12 @@ export function ClusterApp({
   // Readiness is not dragged back to their default.
   const applied = useRef(false);
   useEffect(() => {
+    if (intent?.payload.storageWarning !== true) return;
+    applied.current = true;
+    navigate("readiness");
+    consumeIntent?.(intent.id);
+  }, [intent, navigate, consumeIntent]);
+  useEffect(() => {
     if (applied.current) return;
     applied.current = true;
     // ONLY when the window opened on the SHELL's default. A window opened on
