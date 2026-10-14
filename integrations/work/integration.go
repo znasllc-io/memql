@@ -419,6 +419,12 @@ func (i *Integration) Capabilities() []memql.IntegrationCapability {
 			},
 		},
 		{
+			Name:        "refreshComputerPermission",
+			Description: "Review an unchanged pending computer permission again without granting access. Repairs a proven storage fingerprint mismatch and renews its review window.",
+			Handler:     i.handleRefreshComputerPermission,
+			ArgsSchema:  map[string]string{"approvalId": "string (required) -- the pending approval"},
+		},
+		{
 			Name:        "revokeComputerPermission",
 			Description: "Revoke one saved computer permission owned by the signed-in person.",
 			Handler:     i.handleRevokeComputerPermission,

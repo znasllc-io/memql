@@ -307,3 +307,10 @@ builtin requestSpecialistTraining {
 builtin revokeComputerPermission {
  permissionId string! @description("The approval receipt that granted the saved permission.")
 }
+
+/// Refresh the caller's pending computer-access review without approving it.
+@sdk
+@executor("integration.work.refreshComputerPermission")
+builtin refreshComputerPermission {
+  approvalId string!
+}

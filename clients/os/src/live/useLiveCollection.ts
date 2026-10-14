@@ -89,8 +89,21 @@ export function useLiveCollection<T>(
   useEffect(() => {
     if (collection === null) return;
     collection.retain();
-    return () => collection.release(() => {});
-  }, [collection]);
+    // This hook owns its collection directly, outside the SDK's LiveStore.
+    // It must therefore carry the same reconnect lifecycle: subscription
+    // replay alone cannot repair a failed seed or recover missed rows.
+    // The cycle fires AFTER subscriptions are restored, avoiding a gap
+    // between the fresh read and the stream that keeps it current.
+    const stopCycle = connection?.onConnectionCycle?.(() => collection.reseed());
+    const stopStatus = connection?.onStatusChange?.(({ status }) => {
+      if (status !== "connected") collection.markDisconnected();
+    });
+    return () => {
+      stopCycle?.();
+      stopStatus?.();
+      collection.release(() => {});
+    };
+  }, [collection, connection]);
 
   const snapshot = useSyncExternalStore(
     useMemo(

@@ -559,3 +559,31 @@ mutation approval revokeWorkComputerPermission {
   }
  }
 }
+
+/// Native review renewal: retains history and clears any unusable decision.
+/// actor.userId scoping alone cannot prove an interactive review, serialize
+/// against dispatch, or verify the saved fingerprint and exact parked run.
+/// The native gate holds that authority and refuses used permissions.
+@serverOnly
+mutation approval refreshWorkComputerPermission {
+  args {
+    approvalId string!
+    subject object!
+    artifactHash string!
+    requestedAt string!
+    expiresAt string!
+    versionTime datetime!
+  }
+  update {
+    accept { subject, artifactHash, requestedAt, expiresAt }
+    stamp {
+      id: args.approvalId
+      createdAt: args.versionTime
+      decision: ""
+      decidedAt: ""
+      decidedBy: ""
+      answer: {}
+      permissionRevokedAt: ""
+    }
+  }
+}
