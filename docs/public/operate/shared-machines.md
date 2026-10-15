@@ -35,7 +35,7 @@ cannot use this mode. Replace an existing broad share by choosing people and
 groups, or **Only me**. The upgrade does not change existing machine shares.
 
 The consent lives on the machine's own row, `v1:worker:registration.sharing`:
-`{mode, userIds, groupIds, sharedAt, sharedBy}`, with ids stored bare. It is a
+`{mode, userIds, groupIds, pausedUserIds, pausedGroupIds, sharedAt, sharedBy}`, with ids stored bare. It is a
 **closed** block — a misspelled key is refused rather than stored beside the
 real one — and it is written only by `fleetSetSharing`, which resolves the
 machine through the caller's own machines (see [Only the owner may lend a
@@ -45,7 +45,8 @@ The lists mean something only under `people`, and changing to **Only me**
 **clears them**: a share you took back leaves no names behind for a later
 reader to honour by mistake. Every reader maps a value it does not know to
 `owner`, so an engine older than a mode reads it as private rather than as
-open, and a `people` share that names nobody is read as `owner` too.
+open. A `people` share with no recipients admits nobody; the editor stays ready
+to add users and groups.
 
 Group membership comes from the same membership rows that decide what a person
 can see elsewhere in the product. Removing somebody from a group, or archiving
@@ -65,10 +66,23 @@ to finish in (see [What stopping does](#what-stopping-does)).
 
 ## Choose sharing once, in Fleet
 
-Open **Fleet → the machine → Sharing**. Turn on **Share models**, choose
-people or groups, then **Save**. Turn it off and save to keep inference private.
+Open **Fleet → the machine → Sharing**. Turn on **Share models**, then search
+under **Users and groups** to add recipients. Each change saves immediately.
+Turn sharing off to clear the recipients and keep inference private.
 Only the person who enrolled the machine can change this audience; cluster
 administration cannot volunteer somebody else's hardware.
+
+Each recipient row shows its active calls and icon controls to pause, resume or
+remove sharing. Pausing blocks new calls through that grant after any wait for
+capacity; a call already running finishes. A recipient with another active
+direct or group grant can still use the models. Remove an entry to delete that
+grant; it can be searched for and added again.
+
+Counts update through the machine's live registration feed. A call admitted
+through more than one grant appears in each matching row, so the rows are not
+additive. Counts contain no prompts or responses. A dash means the measurement
+is unavailable; disconnected machines show zero. Failed changes leave the
+saved list intact and offer a retry.
 
 The saved audience applies automatically to subsequent calls on every replica.
 No Cockpit setting, file edit, restart or second confirmation is needed.
@@ -112,11 +126,12 @@ made-up one does.
   cluster;
 - one **already on the list** is not re-checked. Somebody who left your group
   stays on your list until you remove them; the picker names them, marked as
-  no longer available to pick, and you remove them by saving without them;
+  no longer available to pick, and you can still remove them;
 - your own id is dropped rather than refused — your own machine is yours
   already;
-- a share names at least one person or group, and at most 50. A group is the
-  way to lend a machine to more people than that.
+- a share names at most 50 users and groups. An empty list grants nobody access.
+  A group is the way to lend a machine to more people than that;
+- paused recipients stay on the list, and only listed recipients may be paused.
 
 ---
 

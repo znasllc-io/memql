@@ -37,11 +37,13 @@ const (
 // `owner` or `cluster` is residue from an earlier share, and honouring it would
 // lend a machine its owner had taken back.
 type Sharing struct {
-	Mode     string
-	UserIds  []string
-	GroupIds []string
-	SharedAt string
-	SharedBy string
+	Mode           string
+	UserIds        []string
+	GroupIds       []string
+	PausedUserIds  []string
+	PausedGroupIds []string
+	SharedAt       string
+	SharedBy       string
 }
 
 // SharingFromRow reads registration.sharing.
@@ -69,12 +71,8 @@ func SharingFromRow(v any) Sharing {
 	if mode == SharingModePeople {
 		out.UserIds = subjectIds(row["userIds"])
 		out.GroupIds = subjectIds(row["groupIds"])
-		if len(out.UserIds) == 0 && len(out.GroupIds) == 0 {
-			// LENT TO NOBODY IS NOT LENT. fleetSetSharing refuses to write this,
-			// so it is a hand-edited or half-written row -- and reading it as
-			// `owner` is both the safe answer and the honest one.
-			out.Mode = SharingModeOwner
-		}
+		out.PausedUserIds = subjectIds(row["pausedUserIds"])
+		out.PausedGroupIds = subjectIds(row["pausedGroupIds"])
 	}
 	return out
 }
@@ -89,7 +87,7 @@ func (s Sharing) Row() map[string]any {
 	if mode != SharingModeCluster && mode != SharingModePeople {
 		mode = SharingModeOwner
 	}
-	userIds, groupIds := []any{}, []any{}
+	userIds, groupIds, pausedUserIds, pausedGroupIds := []any{}, []any{}, []any{}, []any{}
 	if mode == SharingModePeople {
 		for _, id := range s.UserIds {
 			userIds = append(userIds, id)
@@ -97,13 +95,21 @@ func (s Sharing) Row() map[string]any {
 		for _, id := range s.GroupIds {
 			groupIds = append(groupIds, id)
 		}
+		for _, id := range s.PausedUserIds {
+			pausedUserIds = append(pausedUserIds, id)
+		}
+		for _, id := range s.PausedGroupIds {
+			pausedGroupIds = append(pausedGroupIds, id)
+		}
 	}
 	return map[string]any{
-		"mode":     mode,
-		"userIds":  userIds,
-		"groupIds": groupIds,
-		"sharedAt": s.SharedAt,
-		"sharedBy": s.SharedBy,
+		"mode":           mode,
+		"userIds":        userIds,
+		"groupIds":       groupIds,
+		"pausedUserIds":  pausedUserIds,
+		"pausedGroupIds": pausedGroupIds,
+		"sharedAt":       s.SharedAt,
+		"sharedBy":       s.SharedBy,
 	}
 }
 
@@ -218,7 +224,7 @@ func (s Sharing) Admits(p *Person) bool {
 		return true
 	case SharingModePeople:
 		for _, id := range s.UserIds {
-			if SameSubjectId(id, p.UserId) {
+			if SameSubjectId(id, p.UserId) && !containsSubject(s.PausedUserIds, id) {
 				return true
 			}
 		}
@@ -228,7 +234,7 @@ func (s Sharing) Admits(p *Person) bool {
 		}
 		for _, have := range p.Groups() {
 			for _, want := range s.GroupIds {
-				if SameSubjectId(have, want) {
+				if SameSubjectId(have, want) && !containsSubject(s.PausedGroupIds, want) {
 					return true
 				}
 			}
@@ -325,6 +331,39 @@ func subjectIds(v any) []string {
 	}
 	if len(out) == 0 {
 		return nil
+	}
+	return out
+}
+
+// SharingSubjects records the grants that admitted a call, so a draining call
+// stays counted under its original grants even after they are paused or removed.
+type SharingSubjects struct{ UserIds, GroupIds []string }
+
+func containsSubject(ids []string, target string) bool {
+	for _, candidate := range ids {
+		if SameSubjectId(candidate, target) {
+			return true
+		}
+	}
+	return false
+}
+
+func (s Sharing) SubjectsFor(p *Person) SharingSubjects {
+	out := SharingSubjects{}
+	if p == nil || s.Mode != SharingModePeople || auth.IsSystemActorId(p.UserId) {
+		return out
+	}
+	for _, user := range s.UserIds {
+		if SameSubjectId(user, p.UserId) && !containsSubject(s.PausedUserIds, user) {
+			out.UserIds = append(out.UserIds, user)
+		}
+	}
+	if len(s.GroupIds) > 0 {
+		for _, group := range s.GroupIds {
+			if !containsSubject(s.PausedGroupIds, group) && containsSubject(p.Groups(), group) {
+				out.GroupIds = append(out.GroupIds, group)
+			}
+		}
 	}
 	return out
 }

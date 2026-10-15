@@ -1341,6 +1341,8 @@ mutation registration setWorkerSharing {
     userIds         []string
     /// Under people: the groups whose active members may use the machine.
     groupIds        []string
+    pausedUserIds   []string
+    pausedGroupIds  []string
   }
   update {
     id: args.registrationId
@@ -1348,6 +1350,8 @@ mutation registration setWorkerSharing {
       mode: args.mode,
       userIds: args.userIds ?? [],
       groupIds: args.groupIds ?? [],
+      pausedUserIds: args.pausedUserIds ?? [],
+      pausedGroupIds: args.pausedGroupIds ?? [],
       sharedAt: now,
       sharedBy: actor.userId
     }
@@ -1364,5 +1368,21 @@ mutation registration updateWorkerPermissions {
   update {
     accept { permissions }
     stamp { id: args.registrationId }
+  }
+}
+
+/// Publish counts only after the stream holder checks ownership and fences the
+/// registration version. Scoping to actor.userId is insufficient: even the
+/// owner must not invent active-call counts. Only the stream-owning engine has
+/// the live call handles and the registration version needed to publish them.
+@serverOnly
+mutation registration updateWorkerSharingActivity {
+  args {
+    registrationId  string!
+    sharingActivity object!
+  }
+  update {
+    id: args.registrationId
+    args.sharingActivity
   }
 }

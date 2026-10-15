@@ -159,13 +159,10 @@ func TestANilGroupSourceNarrowsAndNeverWidens(t *testing.T) {
 	}
 }
 
-func TestAPeopleShareNamingNobodyIsOwner(t *testing.T) {
-	// A people share with an empty list names nobody, and the honest reading of
-	// "lent to nobody" is "not lent". fleetSetSharing refuses to write one; this
-	// is what a hand-edited or half-written row reads as.
+func TestAnEmptySharingListAdmitsNobody(t *testing.T) {
 	got := SharingFromRow(map[string]any{"mode": "people"})
-	if got.Mode != SharingModeOwner || len(got.UserIds) != 0 || len(got.GroupIds) != 0 {
-		t.Fatalf("an empty people share must read as owner, got %+v", got)
+	if got.Mode != SharingModePeople || got.Admits(NewPerson(context.Background(), "ana", nil)) {
+		t.Fatalf("an enabled, empty list must remain editable and admit nobody: %+v", got)
 	}
 }
 
@@ -229,5 +226,34 @@ func TestASyntheticActorIsNeverOnAPeopleList(t *testing.T) {
 	}
 	if !SameSubjectId("v1:identity:user:ana", "ana") {
 		t.Fatal("a canonical user id and its bare form are one person")
+	}
+}
+
+func TestPausingARecipientKeepsItListedAndClosesOnlyThatGrant(t *testing.T) {
+	ctx := context.Background()
+	s := SharingFromRow(map[string]any{"mode": "people", "userIds": []string{"ana"}, "groupIds": []string{"design"}, "pausedUserIds": []string{"ana"}, "pausedGroupIds": []string{"design"}})
+	person := NewPerson(ctx, "v1:identity:user:ana", func(context.Context, string) []string { return []string{"v1:identity:group:design"} })
+	if s.Admits(person) {
+		t.Fatal("paused direct and group grants must refuse new calls")
+	}
+	if len(s.UserIds) != 1 || len(s.GroupIds) != 1 {
+		t.Fatal("pause must retain the recipient")
+	}
+	s.PausedGroupIds = nil
+	if !s.Admits(person) {
+		t.Fatal("another active grant still admits this user")
+	}
+	subjects := s.SubjectsFor(person)
+	if len(subjects.UserIds) != 0 || len(subjects.GroupIds) != 1 {
+		t.Fatalf("only the admitting grant is counted: %+v", subjects)
+	}
+	s.PausedUserIds = nil
+	subjects = s.SubjectsFor(person)
+	if len(subjects.UserIds) != 1 || len(subjects.GroupIds) != 1 {
+		t.Fatalf("overlapping active grants each count the call: %+v", subjects)
+	}
+	roundtrip := SharingFromRow(s.Row())
+	if !roundtrip.Admits(person) {
+		t.Fatal("resuming must survive a stored-row roundtrip")
 	}
 }

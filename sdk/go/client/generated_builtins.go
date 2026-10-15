@@ -2220,10 +2220,14 @@ type FleetSetSharingArgs struct {
 	RegistrationId string
 	// owner or people. Other values, including cluster, are refused.
 	Mode string
-	// Under people: the v1:identity:user ids to lend the machine to. At most 50 subjects across both lists, and at least one. Your own id is dropped rather than refused -- your own machine is yours already. Ignored under owner.
+	// Under people: the v1:identity:user ids to lend the machine to. At most 50 subjects across both lists, including paused entries. Your own id is dropped rather than refused -- your own machine is yours already. Ignored under owner.
 	UserIds []string
 	// Under people: the v1:identity:group ids whose active members may use the machine. Ignored under owner.
 	GroupIds []string
+	// Users on this list whose direct grant is paused. Existing calls finish.
+	PausedUserIds []string
+	// Groups on this list whose grant is paused. Existing calls finish.
+	PausedGroupIds []string
 }
 
 // FleetSetSharing calls the engine builtin fleetSetSharing.
@@ -2255,6 +2259,20 @@ func FleetSetSharingBuild(args FleetSetSharingArgs) string {
 		}
 		b.WriteString("groupIds: ")
 		b.WriteString(renderMemQLValue(args.GroupIds))
+	}
+	if args.PausedUserIds != nil {
+		if b.Len() > 24 {
+			b.WriteString(", ")
+		}
+		b.WriteString("pausedUserIds: ")
+		b.WriteString(renderMemQLValue(args.PausedUserIds))
+	}
+	if args.PausedGroupIds != nil {
+		if b.Len() > 24 {
+			b.WriteString(", ")
+		}
+		b.WriteString("pausedGroupIds: ")
+		b.WriteString(renderMemQLValue(args.PausedGroupIds))
 	}
 	b.WriteString(")")
 	return b.String()

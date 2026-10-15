@@ -64,6 +64,8 @@ export interface ShareChoice {
   mode: "owner" | "people" | "cluster";
   userIds: string[];
   groupIds: string[];
+  pausedUserIds?: string[];
+  pausedGroupIds?: string[];
 }
 
 /**
@@ -267,7 +269,7 @@ export function useMachineWrites(): MachineWrites {
       }
       const sent: ShareChoice =
         choice.mode === "people"
-          ? { mode: "people", userIds: [...choice.userIds], groupIds: [...choice.groupIds] }
+          ? { mode: "people", userIds: [...choice.userIds], groupIds: [...choice.groupIds], pausedUserIds: [...(choice.pausedUserIds ?? [])], pausedGroupIds: [...(choice.pausedGroupIds ?? [])] }
           : { mode: choice.mode, userIds: [], groupIds: [] };
       setBusyId(registrationId);
       setActionError("");

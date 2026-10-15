@@ -50,11 +50,11 @@ export function MachineDetail({
   // nowhere, so they arrive with the recommendation rather than on the row --
   // one read for both, because a page that fetched the class separately could
   // show a class the recommendation disagreed with.
-  const inference = useMachineInference(machine.id);
+  const inference = useMachineInference(machine.id, ["all", "details", "models"].includes(view));
 
   return (
     <Panel label={`${label} detail`}>
-      <AutoRefresh enabled={["all", "details", "models", "sharing"].includes(view)} busy={inference.loading} onRefresh={inference.refreshMeasurements} />
+      <AutoRefresh enabled={["all", "details", "models"].includes(view)} busy={inference.loading} onRefresh={inference.refreshMeasurements} />
       {view === "all" || view === "details" ? <>
       <RenameField machine={machine} busy={busy} rename={writes.rename} />
 
@@ -161,7 +161,7 @@ export function MachineDetail({
           lend this machine to -- only means something once a reader knows
           what the machine can serve. Offering it above an empty Models group
           would be asking somebody to volunteer a machine that runs nothing. */}
-      {view === "all" || view === "sharing" ? <SharingGroup machine={machine} writes={writes} ledger={inference.ledger} standalone={view === "sharing"} /> : null}
+      {view === "all" || view === "sharing" ? <SharingGroup machine={machine} writes={writes} standalone={view === "sharing"} /> : null}
 
       {view === "all" || view === "activity" ? <CallHistory standalone={view === "activity"} workerId={machine.id} machineLabel={label} /> : null}
 

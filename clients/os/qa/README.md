@@ -136,7 +136,11 @@ The `sharing-*` views exercise the inline Sharing editor: saved audiences,
 private machines, directory failures and non-owner access. `sharing-legacy-descriptor`
 verifies that an older machine descriptor does not block the saved audience.
 The `share-dialog*` fixture names are retained for their picker scenarios; they
-now render the inline editor. Use `&arrow=N` for keyboard selection captures.
+now render the inline editor. `fleet-equipment-sharing-people` exercises direct
+add/pause/resume/remove actions. `window.fleetQa.activity(n)` broadcasts changing
+recipient counts, including while paused. Check the divider, keyboard search,
+removing/re-adding the last recipient and refusal/retry at desktop and phone
+widths in every theme and mode.
 
 The `feedback` view shows information, warning and error notices, an actionable
 retry, domain errors and a removed-machine status. Check `theme=graphite`,
@@ -150,7 +154,8 @@ machine told its owner to edit `policy.yaml` for a share they had not chosen.
 The review's pass found two more that no jsdom case can see: arrowing scrolled
 the active option OUT of view (an unpositioned list, so `offsetTop` counted
 from the dialog), and a refusal at the end of the scrolling body sat below the
-fold at 1366x650 and 361x760 -- it is now pinned above the floor.
+fold at 1366x650 and 361x760. The current editor saves each action directly and
+keeps failures beside the scrolling body with an explicit retry.
 
 ## What it is, and what it is not
 

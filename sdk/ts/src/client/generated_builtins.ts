@@ -1654,10 +1654,14 @@ export interface FleetSetSharingArgs {
   registrationId: string;
   /** owner or people. Other values, including cluster, are refused. */
   mode: string;
-  /** Under people: the v1:identity:user ids to lend the machine to. At most 50 subjects across both lists, and at least one. Your own id is dropped rather than refused -- your own machine is yours already. Ignored under owner. */
+  /** Under people: the v1:identity:user ids to lend the machine to. At most 50 subjects across both lists, including paused entries. Your own id is dropped rather than refused -- your own machine is yours already. Ignored under owner. */
   userIds?: string[];
   /** Under people: the v1:identity:group ids whose active members may use the machine. Ignored under owner. */
   groupIds?: string[];
+  /** Users on this list whose direct grant is paused. Existing calls finish. */
+  pausedUserIds?: string[];
+  /** Groups on this list whose grant is paused. Existing calls finish. */
+  pausedGroupIds?: string[];
 }
 
 export function buildFleetSetSharing(args: FleetSetSharingArgs): string {
@@ -1666,6 +1670,8 @@ export function buildFleetSetSharing(args: FleetSetSharingArgs): string {
   parts.push("mode: " + renderMemQLValue(args.mode));
   if (args.userIds !== undefined) parts.push("userIds: " + renderMemQLValue(args.userIds));
   if (args.groupIds !== undefined) parts.push("groupIds: " + renderMemQLValue(args.groupIds));
+  if (args.pausedUserIds !== undefined) parts.push("pausedUserIds: " + renderMemQLValue(args.pausedUserIds));
+  if (args.pausedGroupIds !== undefined) parts.push("pausedGroupIds: " + renderMemQLValue(args.pausedGroupIds));
   return "builtin fleetSetSharing(" + parts.join(", ") + ")";
 }
 

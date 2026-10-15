@@ -250,11 +250,13 @@ func (l ModelCallLimits) toProto() *memqlv1.ModelCallLimits {
 
 // ModelCallRequest is what a caller asks a machine to run.
 type ModelCallRequest struct {
-	RequestId string
-	Model     string
-	Kind      string
-	Messages  []ModelCallMessage
-	Params    ModelCallParams
+	// Engine-only admission metadata; never sent to the machine or exposed with content.
+	SharingSubjects SharingSubjects
+	RequestId       string
+	Model           string
+	Kind            string
+	Messages        []ModelCallMessage
+	Params          ModelCallParams
 	// ResponseFormatSchema is a JSON Schema for structured output.
 	// Empty means free text.
 	ResponseFormatSchema []byte
@@ -327,9 +329,10 @@ type ModelCallOutcome struct {
 
 // ModelCallHandle is the caller's view of a running call.
 type ModelCallHandle struct {
-	requestId string
-	worker    *Worker
-	limits    ModelCallLimits
+	sharingSubjects SharingSubjects
+	requestId       string
+	worker          *Worker
+	limits          ModelCallLimits
 
 	deltas chan ModelCallDelta
 	done   chan struct{}

@@ -237,6 +237,12 @@ and wallpaper values only (see `src/themes/`), so nothing here is themeable.
   and individually removable entries with validation and keyboard support.
   Do not require comma-separated input to manage a visible list. Explain the
   consequence of the collection once, and show it only for modes that use it.
+- Sharing uses a toggle and one divider before a searchable Users and groups
+  list. Each recipient has a live call count and named, icon-only pause/resume
+  and remove controls. Row changes save directly, show pending state and retain
+  the saved value on failure with an explicit retry. Keep routine success
+  receipts, usage summaries and empty-directory explanations out of this flow;
+  describe draining calls and overlapping grants in the page's single help.
 - Build with the kit pieces; a surface needing a control the kit lacks
   promotes it on second use (`src/kit/controls.tsx` header) rather than
   respelling it locally.

@@ -43,6 +43,7 @@ import (
 
 	"github.com/znasllc-io/memql/component/auth"
 	memqlv1 "github.com/znasllc-io/memql/component/grpc/gen"
+	memqlengine "github.com/znasllc-io/memql/component/memql"
 	"github.com/znasllc-io/memql/component/node"
 	nodev1 "github.com/znasllc-io/memql/component/node/gen"
 	workerservice "github.com/znasllc-io/memql/component/worker"
@@ -338,26 +339,32 @@ func (h *ForwardHandler) verifyRegistration(ctx context.Context, ownerUserId, re
 // owned machines. That is the honest degradation, because a node that cannot
 // make the cross-owner read cannot establish that anything was shared.
 func (h *ForwardHandler) verifySharedRegistration(ctx context.Context, actingUserId, registrationId string) error {
+	_, err := h.admitSharedRegistration(ctx, actingUserId, registrationId)
+	return err
+}
+
+func (h *ForwardHandler) admitSharedRegistration(ctx context.Context, actingUserId, registrationId string) (workerservice.SharingSubjects, error) {
+	ctx = memqlengine.ContextWithFreshRead(ctx)
 	ownErr := h.verifyRegistration(ctx, actingUserId, registrationId)
 	switch {
 	case ownErr == nil:
-		return nil
+		return workerservice.SharingSubjects{}, nil
 	case errors.Is(ownErr, errRegistrationRevoked):
 		// Their own machine, revoked. The shared arm cannot rescue that, and
 		// saying "not shared with you" about somebody's own revoked machine
 		// would send them to the wrong repair.
-		return ownErr
+		return workerservice.SharingSubjects{}, ownErr
 	case errors.Is(ownErr, errNoFleetStore):
-		return ownErr
+		return workerservice.SharingSubjects{}, ownErr
 	}
 
 	shared, ok := h.store.(SharedFleetStore)
 	if !ok {
-		return ownErr
+		return workerservice.SharingSubjects{}, ownErr
 	}
 	machines, err := shared.SharedInferenceWorkers(ctx)
 	if err != nil {
-		return err
+		return workerservice.SharingSubjects{}, err
 	}
 	// The groups come from THIS replica's membership cache unless a test set a
 	// resolver: one read per person, reused until a membership or a group
@@ -374,14 +381,14 @@ func (h *ForwardHandler) verifySharedRegistration(ctx context.Context, actingUse
 			continue
 		}
 		if !m.RevokedAt.IsZero() {
-			return errRegistrationRevoked
+			return workerservice.SharingSubjects{}, errRegistrationRevoked
 		}
 		if !m.ServesPerson(person) {
-			return errRegistrationNotShared
+			return workerservice.SharingSubjects{}, errRegistrationNotShared
 		}
-		return nil
+		return m.Sharing().SubjectsFor(person), nil
 	}
-	return ownErr
+	return workerservice.SharingSubjects{}, ownErr
 }
 
 // ownerOfSharedMachine confirms that the LIVE registry entry for a machine

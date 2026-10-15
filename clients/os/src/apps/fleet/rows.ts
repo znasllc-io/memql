@@ -108,6 +108,9 @@ export interface MachineRow {
   /** Under `people`: the groups whose ACTIVE members may use it. Empty
    *  otherwise, for the same reason. */
   sharedGroupIds: string[];
+  pausedUserIds?: string[];
+  pausedGroupIds?: string[];
+  sharingActivity?: Record<string, unknown> | null;
   sharedAt: string;
   sharedBy: string;
   /** The TCC / X11 snapshot the cockpit took at register time and refreshes
@@ -369,6 +372,9 @@ export function machineFromRow(raw: Row): MachineRow {
     sharingMode: sharing.mode,
     sharedUserIds: sharing.userIds,
     sharedGroupIds: sharing.groupIds,
+    pausedUserIds: subjectIdsFrom(objectAt(row["sharing"])?.["pausedUserIds"]),
+    pausedGroupIds: subjectIdsFrom(objectAt(row["sharing"])?.["pausedGroupIds"]),
+    sharingActivity: objectAt(row["sharingActivity"]),
     sharedAt: nestedString(objectAt(row["sharing"]), "sharedAt"),
     sharedBy: nestedString(objectAt(row["sharing"]), "sharedBy"),
     permissions: permissionsFrom(row["permissions"]),
@@ -524,7 +530,6 @@ function sharingFrom(v: unknown): Sharing {
   if (mode !== "people") return { mode: "owner", userIds: [], groupIds: [] };
   const userIds = subjectIdsFrom(block?.["userIds"]);
   const groupIds = subjectIdsFrom(block?.["groupIds"]);
-  if (userIds.length === 0 && groupIds.length === 0) return { mode: "owner", userIds: [], groupIds: [] };
   return { mode: "people", userIds, groupIds };
 }
 

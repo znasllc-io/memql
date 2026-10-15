@@ -40,6 +40,8 @@ type Candidate struct {
 	// ServesPerson() is the only way to ask whether they include somebody.
 	SharedUserIds  []string
 	SharedGroupIds []string
+	PausedUserIds  []string
+	PausedGroupIds []string
 	// Apps is the local-app inventory the cockpit reported, verbatim -- ids
 	// this engine cannot drive included, so an operator surface can show an
 	// app the engine will never select.
@@ -79,7 +81,7 @@ func (c Candidate) SharingRefusal() string {
 
 // Sharing is the owner's decision as component/worker reads it.
 func (c Candidate) Sharing() workerservice.Sharing {
-	return workerservice.Sharing{Mode: c.SharingMode, UserIds: c.SharedUserIds, GroupIds: c.SharedGroupIds}
+	return workerservice.Sharing{Mode: c.SharingMode, UserIds: c.SharedUserIds, GroupIds: c.SharedGroupIds, PausedUserIds: c.PausedUserIds, PausedGroupIds: c.PausedGroupIds}
 }
 
 // ServesPerson applies the saved audience on every routing path.

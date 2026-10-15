@@ -285,12 +285,6 @@ func (e *MemQLEngine) evaluateFleetSetSharingExpression(ctx context.Context, arg
 		userIds = normalizeShareIds(stringSliceFromAny(args["userIds"]), machine.OwnerUserId, actingUserFromContext(ctx))
 		groupIds = normalizeShareIds(stringSliceFromAny(args["groupIds"]))
 		total := len(userIds) + len(groupIds)
-		if total == 0 {
-			return nil, modelPullRefusal{
-				Code:    "share_needs_someone",
-				Message: "choose at least one person or group to lend this machine to, or keep it to yourself",
-			}
-		}
 		if total > shareSubjectsMax {
 			return nil, modelPullRefusal{
 				Code:    "share_too_many",
@@ -337,11 +331,25 @@ func (e *MemQLEngine) evaluateFleetSetSharingExpression(ctx context.Context, arg
 		}
 	}
 
+	pausedUsers := normalizeShareIds(stringSliceFromAny(args["pausedUserIds"]))
+	pausedGroups := normalizeShareIds(stringSliceFromAny(args["pausedGroupIds"]))
+	if mode != SharingModePeople {
+		pausedUsers, pausedGroups = []string{}, []string{}
+	}
+	for _, pair := range []struct{ paused, subjects []string }{{pausedUsers, userIds}, {pausedGroups, groupIds}} {
+		for _, subject := range pair.paused {
+			if !containsShareSubject(pair.subjects, subject) {
+				return nil, modelPullRefusal{Code: "share_subject_unknown", Message: "only users and groups on this sharing list can be paused"}
+			}
+		}
+	}
 	call, err := langparser.RenderCall("setWorkerSharing", map[string]any{
 		"registrationId": registrationId,
 		"mode":           mode,
 		"userIds":        userIds,
 		"groupIds":       groupIds,
+		"pausedUserIds":  pausedUsers,
+		"pausedGroupIds": pausedGroups,
 	})
 	if err != nil {
 		return nil, fmt.Errorf("fleetSetSharing: render the write: %w", err)
@@ -369,6 +377,9 @@ func (e *MemQLEngine) evaluateFleetSetSharingExpression(ctx context.Context, arg
 func sharingReceiptSentence(mode string, people, groups int) string {
 	switch mode {
 	case SharingModePeople:
+		if people+groups == 0 {
+			return "Sharing enabled."
+		}
 		return "Lent to " + shareCountPhrase(people, groups) + "."
 	case SharingModeCluster:
 		return "Offered to everyone on this cluster, and to the cluster's own work."

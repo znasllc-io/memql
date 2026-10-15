@@ -25,18 +25,6 @@ import {
 // queues work on an agent and returns before the measurement lands. Visible
 // consumers use AutoRefresh for these reads, including probes started elsewhere.
 
-/** The week's usage of a shared machine, as the engine folded it. */
-export interface SharingLedger {
-  /** The one line the page shows. Written on the engine, because the promise
-   *  it carries -- counts and levels, never content -- is enforced with the
-   *  fold rather than in a renderer. */
-  sentence: string;
-  /** False when the read failed. A failed read is NOT an empty ledger:
-   *  telling somebody who lent their machine that nobody used it is a specific
-   *  claim, and a read that did not happen is not evidence for it. */
-  readable: boolean;
-}
-
 export interface MachineInference {
   recommended: RecommendedSet;
   /** Keyed by model id, for the machine this page is about. */
@@ -50,10 +38,8 @@ export interface MachineInference {
   /** Measure one model this machine already has. */
   probe: (modelId: string) => Promise<string>;
   probing: string;
-  /** Re-read the measurements, recommendation and sharing ledger. */
+  /** Re-read the measurements and recommendation. */
   refreshMeasurements: () => void;
-  /** The week's counts for a shared machine, or null while unread. */
-  ledger: SharingLedger | null;
 }
 
 function refusalFrom(err: unknown): string {
@@ -70,7 +56,6 @@ export function useMachineInference(workerId: string, enabled = true): MachineIn
   const [error, setError] = useState("");
   const [pullingSet, setPullingSet] = useState(false);
   const [probing, setProbing] = useState("");
-  const [ledger, setLedger] = useState<SharingLedger | null>(null);
   const [measurementNonce, setMeasurementNonce] = useState(0);
 
   useEffect(() => {
@@ -85,14 +70,10 @@ export function useMachineInference(workerId: string, enabled = true): MachineIn
 
     void (async () => {
       try {
-        const [set, measured, ledgerResult] = await Promise.all([
+        const [set, measured] = await Promise.all([
           connection.query.fleetRecommended({ registrationId: workerId }, { signal: controller.signal }),
           connection.query.measurementsForMachine(
             { machineId: workerId },
-            { signal: controller.signal },
-          ),
-          connection.query.fleetSharingLedger(
-            { registrationId: workerId },
             { signal: controller.signal },
           ),
         ]);
@@ -109,15 +90,6 @@ export function useMachineInference(workerId: string, enabled = true): MachineIn
           byModel.set(m.modelId, m);
         }
         setMeasurements(byModel);
-        const ledgerRow = (ledgerResult.rows()[0] as Row | undefined) ?? null;
-        setLedger(
-          ledgerRow === null
-            ? null
-            : {
-                sentence: typeof ledgerRow["sentence"] === "string" ? ledgerRow["sentence"] : "",
-                readable: ledgerRow["readable"] === true,
-              },
-        );
       } catch (err: unknown) {
         if (cancelled) return;
         // A FAILED READ HERE DOES NOT EMPTY THE GROUP. The models this machine
@@ -179,6 +151,5 @@ export function useMachineInference(workerId: string, enabled = true): MachineIn
     probe,
     probing,
     refreshMeasurements,
-    ledger,
   };
 }

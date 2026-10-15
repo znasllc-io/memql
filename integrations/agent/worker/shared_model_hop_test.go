@@ -33,6 +33,7 @@ package worker
 import (
 	"context"
 	"testing"
+	"testing/synctest"
 	"time"
 
 	memqlv1 "github.com/znasllc-io/memql/component/grpc/gen"
@@ -304,4 +305,94 @@ func TestOwnerAttributionToleratesTheBareCanonicalSplit(t *testing.T) {
 	if got := machineOwnerAttribution(cand, "olivia"); got != "" {
 		t.Fatalf("the bare and canonical forms of one subject must compare equal, got %q", got)
 	}
+}
+
+func TestRecipientPauseAndResumeAreEnforcedByTheReceivingReplica(t *testing.T) {
+	h := newPeopleHop(t, []string{sharedHopCaller}, nil, nil)
+	store := h.link.handler.store.(*sharedFleet)
+	store.all[0].PausedUserIds = []string{sharedHopCaller}
+	out, err := h.call(t, h.caller)
+	if err == nil && !out.RefusedBeforeStart {
+		t.Fatal("a paused grant reached the machine across the hop")
+	}
+	store.all[0].PausedUserIds = nil
+	out, err = h.call(t, h.caller)
+	if err != nil || out.RefusedBeforeStart || out.ErrorCode != "" {
+		t.Fatalf("resuming the listed recipient did not restore inference: %v %+v", err, out)
+	}
+}
+
+func TestAPauseLetsTheRunningCallFinishButRefusesTheNextCallAcrossTheHop(t *testing.T) {
+	h := newPeopleHop(t, []string{sharedHopCaller}, nil, nil)
+	started, release := make(chan workerservice.SharingSubjects, 1), make(chan struct{})
+	w := h.link.handler.registry.WorkerById("studio")
+	w.SetModelCallFunc(func(ctx context.Context, req workerservice.ModelCallRequest) (*workerservice.ModelCallHandle, error) {
+		handle, _, finish := workerservice.NewModelCallLoopback(req, func(string) {})
+		started <- req.SharingSubjects
+		go func() {
+			select {
+			case <-release:
+			case <-ctx.Done():
+			}
+			finish(workerservice.ModelCallOutcome{FinishReason: workerservice.ModelFinishStop, Content: "completed"})
+		}()
+		return handle, nil
+	})
+	result := make(chan ModelForwardOutcome, 1)
+	go func() { out, _ := h.call(t, h.caller); result <- out }()
+	var subjects workerservice.SharingSubjects
+	select {
+	case subjects = <-started:
+	case <-time.After(3 * time.Second):
+		t.Fatal("call never reached the receiving machine")
+	}
+	if len(subjects.UserIds) != 1 {
+		t.Fatalf("the receiving replica lost count attribution: %+v", subjects)
+	}
+	store := h.link.handler.store.(*sharedFleet)
+	store.all[0].PausedUserIds = []string{sharedHopCaller}
+	next, err := h.call(t, h.caller)
+	if err == nil && !next.RefusedBeforeStart {
+		t.Fatal("the next call was not refused")
+	}
+	close(release)
+	var finished ModelForwardOutcome
+	select {
+	case finished = <-result:
+	case <-time.After(3 * time.Second):
+		t.Fatal("running call did not finish after pause")
+	}
+	if finished.RefusedBeforeStart || finished.ErrorCode != "" || finished.End.GetContent() != "completed" {
+		t.Fatalf("pause interrupted ongoing work: %+v", finished)
+	}
+}
+
+// The slot wait is a real FIFO wait on the receiving worker, after the caller
+// has already planned this machine. No clock sleep guesses when it is queued.
+func TestARecipientPausedWhileWaitingForCapacityCannotStartAcrossTheHop(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		h := newPeopleHop(t, []string{sharedHopCaller}, nil, nil)
+		w := h.link.handler.registry.WorkerById("studio")
+		for i := 0; i < 2; i++ {
+			if err := w.Acquire(context.Background(), workerservice.ModelCapability); err != nil {
+				t.Fatal(err)
+			}
+		}
+		result := make(chan ModelForwardOutcome, 1)
+		go func() { out, _ := h.call(t, h.caller); result <- out }()
+		synctest.Wait()
+		select {
+		case <-result:
+			t.Fatal("call did not wait for capacity")
+		default:
+		}
+		h.link.handler.store.(*sharedFleet).all[0].PausedUserIds = []string{sharedHopCaller}
+		w.Release(workerservice.ModelCapability)
+		w.Release(workerservice.ModelCapability)
+		synctest.Wait()
+		out := <-result
+		if !out.RefusedBeforeStart || out.ErrorCode != "registration_refused" {
+			t.Fatalf("a queued call started after its grant was paused: %+v", out)
+		}
+	})
 }

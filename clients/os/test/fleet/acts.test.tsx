@@ -578,22 +578,27 @@ const CASES: ActsCase[] = [
         fakeConnection({
           myWorkersWithStatus: [MACHINE],
           fleetShareDirectory: [
-            shareDirectoryRow({ id: MACHINE_ID, people: [{ id: "ana", name: "Ana Ruiz", detail: "" }] }),
+            shareDirectoryRow({ id: MACHINE_ID, people: [{ id: "ana", name: "Ana Ruiz", detail: "" }, { id: "bo", name: "Bo Chen", detail: "" }] }),
           ],
         }),
       );
       await click(screen.getByRole("switch", { name: "Share models" }));
       await settle();
+      fireEvent.focus(screen.getByRole("combobox", { name: "Search users and groups" }));
+      await click(screen.getByRole("option", { name: "Ana Ruiz" }));
+      fireEvent.focus(screen.getByRole("combobox", { name: "Search users and groups" }));
     },
     acts: [
       {
         name: "Share models", count: 1, note: "inline access toggle",
       },
-      { name: "Search people and groups", count: 1, note: "people and groups together, in one search" },
-      { name: "People and groups you can choose", count: 1 },
-      { name: "Ana Ruiz", count: 1, within: "People and groups you can choose" },
-      { name: "Discard changes", count: 1, note: "restores the saved audience inline" },
-      { name: "Save", count: 1, note: "the one act, disabled until the draft differs and names somebody" },
+      { name: "Search users and groups", count: 1 },
+      { name: "Users and groups to add", count: 1 },
+      { name: "Bo Chen", count: 1, within: "Users and groups to add" },
+      { name: "Pause sharing with Ana Ruiz", count: 1 },
+      { name: "Remove sharing with Ana Ruiz", count: 1 },
+      { name: "Discard changes", count: 0, note: "each row action saves directly" },
+      { name: "Save", count: 0, note: "no second commit step" },
     ],
   },
 

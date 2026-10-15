@@ -1,37 +1,32 @@
 import { useSession } from "../../../chrome/access";
-import { Caption, Notice, Subhead } from "../../../kit";
+import { Caption, Subhead } from "../../../kit";
 import { PageHelp } from "../../../kit/pageHelp";
 import { isRevoked, type MachineRow } from "../rows";
 import { SharingEditor } from "./SharingEditor";
-import { ownsMachine, servesOthers, sharingSummary } from "./sharing";
+import { ownsMachine, sharingSummary } from "./sharing";
 import type { MachineWrites } from "./useMachineWrites";
-import type { SharingLedger } from "./useMachineInference";
 
-export function SharingGroup({ machine, writes, ledger, standalone = false }: {
+export function SharingGroup({ machine, writes, standalone = false }: {
   standalone?: boolean;
   machine: MachineRow;
   writes: MachineWrites;
-  ledger: SharingLedger | null;
 }) {
   const { access } = useSession();
   const isOwner = ownsMachine(machine, access?.userId ?? "");
   const revoked = isRevoked(machine);
 
-  const usage = servesOthers(machine) && ledger ? ledger.readable ? <Caption>{ledger.sentence}</Caption> : <Notice tone="warn" sentence={ledger.sentence} /> : null;
-
   return (
     <div className="os-fleet-sharing">
       {!standalone ? <Subhead>Model sharing</Subhead> : null}
       <PageHelp title="Model sharing">
-        <p>Enable Share models, then choose people and groups. Save applies your choices; Discard changes restores the saved audience. Turn sharing off and save to keep models private.</p>
+        <p>Enable Share models, then search for users or groups to add. Changes save automatically. Pause or resume each entry with its icon; remove an entry to end that grant. Removed entries can be added again. Turning Share models off removes the list and keeps inference private.</p>
         <p>Sharing grants model inference only. Files, commands, apps and computer control stay with the machine’s owner. Your saved audience applies automatically; no machine configuration is needed.</p>
-        <p>Changes apply to the next call; a call already running finishes. Usage shows counts without prompts or responses.</p>
-        <p>If another session changes sharing while you edit, choose whether to use the new sharing or keep your changes before saving.</p>
+        <p>Pausing blocks new calls through that grant; work already running finishes. Active calls update automatically. A call admitted through multiple grants appears on each matching row. A user with another active grant can still use the models. Counts contain no prompts or responses.</p>
+        <p>Unavailable call counts show a dash. A failed change leaves the saved list intact and offers a retry.</p>
       </PageHelp>
-      {isOwner && !revoked ? <SharingEditor key={machine.id} machine={machine} writes={writes}>{usage}</SharingEditor> : <>
+      {isOwner && !revoked ? <SharingEditor key={machine.id} machine={machine} writes={writes} /> : <>
         <p className="os-fleet-sharing-state">{sharingSummary(machine, isOwner, () => undefined)}</p>
         <Caption>{revoked ? "This machine was removed, so it cannot be shared." : "Only this machine's owner can change who it is shared with."}</Caption>
-        {usage}
       </>}
     </div>
   );

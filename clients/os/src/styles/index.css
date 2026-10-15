@@ -3275,11 +3275,8 @@ button.os-row.os-record-row:focus-visible { outline: 2px solid var(--os-accent);
 }
 .fleet-share-toggle { display: grid; gap: 6px; }
 .fleet-share-toggle > .os-caption { margin: 0; }
-.fleet-share-editor > .os-actbar { padding-inline: 0; }
-.fleet-share-receipt { margin: 0; }
 
-/* The Sharing tab gives its body the scroll and keeps Save on the window
- * floor. Other retained machine tabs keep their own scrolling layout. */
+/* The access list owns its scroll; retained machine tabs keep their layout. */
 .fleet-page:has(.fleet-home[data-machine-view="sharing"]:not([hidden])) {
   overflow: hidden;
   padding-bottom: 0;
@@ -3301,12 +3298,8 @@ button.os-row.os-record-row:focus-visible { outline: 2px solid var(--os-accent);
   overflow-y: auto;
   padding: 2px;
 }
-.fleet-home[data-machine-view="sharing"] .fleet-share-band { max-height: 45%; overflow-y: auto; }
-.fleet-home[data-machine-view="sharing"] .fleet-share-receipt { padding-bottom: 12px; }
 
-/* The picker: the chosen, then the search, then who is left to choose. One
- * left edge with the choices above it, and the subhead repeating the chosen
- * mode's own words, so it reads as that choice's detail and nothing else. */
+/* Search and saved recipients share one left edge beneath the toggle. */
 .fleet-share-picker {
   display: flex;
   flex-direction: column;
@@ -3316,81 +3309,6 @@ button.os-row.os-record-row:focus-visible { outline: 2px solid var(--os-accent);
   margin: 0;
 }
 
-/* A CHIP HERE HOLDS A NAME, which is prose. The kit's chip is the data voice
- * -- a label like `tier=gold` is typed somewhere else and the code face says
- * so -- and "Ana Ruiz" in a monospace face reads as an identifier. The same
- * call ChoiceStack's `voice="prose"` makes; promoted to the kit on a second
- * use. The remove control sits INSIDE the pill, so the pair reads as one
- * token and not as a chip beside a stray cross. */
-.fleet-share-chip {
-  display: inline-flex;
-  max-width: 100%;
-}
-.fleet-share-chip .os-chip {
-  max-width: 100%;
-  flex-wrap: wrap;
-  row-gap: 0;
-  padding: 2px 3px 2px 10px;
-  font-family: var(--os-font);
-  font-size: var(--os-text-sm);
-  line-height: 1.5;
-  color: var(--os-ink);
-}
-.fleet-share-chip .os-chip > svg {
-  flex: none;
-  color: var(--os-muted);
-}
-.fleet-share-chip-name {
-  min-width: 0;
-  overflow-wrap: anywhere;
-}
-/* Still on the list, no longer one to pick: the pill goes quiet and dashed,
- * and says why in words -- a style alone would be a riddle. */
-.fleet-share-chip[data-stale] .os-chip {
-  border-style: dashed;
-  color: var(--os-muted);
-}
-.fleet-share-chip-note {
-  font-size: var(--os-text-xs);
-  color: var(--os-muted);
-}
-.fleet-share-chip .os-chip-remove {
-  display: inline-grid;
-  place-items: center;
-  width: 20px;
-  height: 20px;
-  padding: 0;
-  border-radius: 50%;
-}
-.fleet-share-chip .os-chip-remove:hover:not(:disabled) {
-  background: var(--os-hover);
-}
-/* A STAND-IN, NOT A NAME (memql#5659): the directory could not be read, so the
- * chip says what it is and where it sits on the list ("Person 2") in the muted
- * ink. The edge stays solid -- it is on the list, which a dashed, stale chip
- * is only just. */
-.fleet-share-chip[data-stand-in] .fleet-share-chip-name {
-  color: var(--os-muted);
-}
-/* While the names are read, the chips' own shape: a pill per stored entry, the
- * height of a real one (its 20px remove control plus the padding), so nothing
- * moves when the names land. */
-.fleet-share-chip[data-shape] .os-chip {
-  height: 26px;
-  padding: 0 12px;
-}
-.fleet-share-chip-shape {
-  width: 60px;
-  height: 9px;
-}
-.fleet-share-chip[data-shape]:nth-child(3n + 2) .fleet-share-chip-shape {
-  width: 84px;
-}
-
-/* `flex: none` because `.os-input` is `flex: 1 1 12ch`, which is right in a
- * control ROW and wrong in this COLUMN: along a column's main axis that basis
- * is the input's HEIGHT, and the search drew about a hundred pixels tall. One
- * control line (DESIGN.md rule 5) is what the rendered pass is for. */
 .fleet-share-search {
   flex: none;
   width: 100%;
@@ -3460,44 +3378,6 @@ button.os-row.os-record-row:focus-visible { outline: 2px solid var(--os-accent);
 .fleet-share-option[data-active] .fleet-share-option-add {
   color: var(--os-accent);
 }
-/* THE BAND between the scrolling body and the floor, for what the person must
- * read before Save: a change made elsewhere, a refusal. It never scrolls away,
- * and the body gives up the height it needs; as a flex column it holds its
- * notices' margins inside, so it is exactly as tall as what it says. */
-.fleet-share-band {
-  flex: none;
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-  padding: 0;
-}
-/* A notice here can take focus -- the refusal, so it is read; a change made
- * elsewhere, when the Save that held focus was disabled under it -- and its
- * outline is the notice's own edge, not a second ring around it. */
-.fleet-share-refusal:focus,
-.fleet-share-moved:focus {
-  outline: none;
-}
-.fleet-share-refusal:focus-visible > .os-notice,
-.fleet-share-moved:focus-visible > .os-notice {
-  outline: 2px solid var(--os-accent);
-  outline-offset: 2px;
-}
-/* What is stored now is the half of the choice the editor does not show, so it
- * is set in the ink while its label stays quiet. */
-.fleet-share-moved-now {
-  color: var(--os-ink);
-}
-/* The two answers, side by side and equal: neither is the editor's act -- that
- * is Save, on the floor -- so neither is primary. */
-.fleet-share-moved-acts {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 8px;
-  margin-top: 6px;
-}
-
-
 /* At a narrow window the recommendation's four columns become two lines rather
  * than four cramped ones: the level and the model belong together, and the
  * size and the reason do. */
@@ -15338,3 +15218,13 @@ button[data-ask-control="running"], [data-ask-control="running"] > button { outl
 .os-backup-editor { max-width: 720px; display: flex; flex-direction: column; gap: 16px; }
 .os-backup-schedule { display: flex; align-items: end; gap: 12px; flex-wrap: wrap; }
 .os-backup-schedule .os-field { flex: 1; min-width: 120px; }
+
+/* One setting, then its access list. Row actions save directly. */
+.fleet-share-picker { border-top: 1px solid var(--os-line); padding-top: 20px; }
+.fleet-share-search-area { min-width: 0; }
+.fleet-share-picker .fleet-share-search { width: 100%; max-width: none; }
+.fleet-share-picker .os-subhead { margin-bottom: 0; }
+.fleet-share-calls { color: var(--os-muted); font-size: 12px; white-space: nowrap; font-variant-numeric: tabular-nums; }
+.fleet-share-picker .os-record-actions { gap: 2px; }
+/* A failed write stays reachable while a long recipient list scrolls. */
+.fleet-share-error { flex: none; max-height: 40%; overflow-y: auto; padding-bottom: 12px; }

@@ -865,8 +865,10 @@ builtin fleetRevokeMachine {
 builtin fleetSetSharing {
   registrationId  string!  @description("v1:worker:registration.id of the machine to set sharing on. It must be one of the caller's own.")
   mode            string!  @description("owner or people. Other values, including cluster, are refused.")
-  userIds         []string  @description("Under people: the v1:identity:user ids to lend the machine to. At most 50 subjects across both lists, and at least one. Your own id is dropped rather than refused -- your own machine is yours already. Ignored under owner.")
+  userIds         []string  @description("Under people: the v1:identity:user ids to lend the machine to. At most 50 subjects across both lists, including paused entries. Your own id is dropped rather than refused -- your own machine is yours already. Ignored under owner.")
   groupIds        []string  @description("Under people: the v1:identity:group ids whose active members may use the machine. Ignored under owner.")
+  pausedUserIds   []string  @description("Users on this list whose direct grant is paused. Existing calls finish.")
+  pausedGroupIds  []string  @description("Groups on this list whose grant is paused. Existing calls finish.")
 }
 
 // ---- Who a machine can be lent to (epic memql#5344, design G2) ----
