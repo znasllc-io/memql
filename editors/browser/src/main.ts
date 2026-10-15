@@ -56,7 +56,8 @@ export async function start(isBasic: () => boolean, ready: () => void) {
   if (!testMode) await createIndexedDBProviders();
   registerHTMLFileSystemProvider();
   for (const bundle of (isBasic() ? [] : bundledExtensions)) {
-    const extension = registerExtension(bundle.manifest as unknown as IExtensionManifest, ExtensionHostKind.LocalWebWorker, { system: true });
+    const manifest = { ...bundle.manifest, memqlRoleTest: testMode };
+    const extension = registerExtension(manifest as unknown as IExtensionManifest, ExtensionHostKind.LocalWebWorker, { system: true });
     for (const file of bundle.files) extension.registerFileUrl(file, new URL(`extensions/${bundle.name}/${file}`, document.baseURI).href);
   }
   const host = registerExtension({ name: 'editor-host', publisher: 'znasllc', version: '0.1.0', engines: { vscode: '*' } }, ExtensionHostKind.LocalProcess);
@@ -75,7 +76,7 @@ export async function start(isBasic: () => boolean, ready: () => void) {
     workspaceProvider: { workspace: undefined, trusted: true, async open() { return false; } },
     enableWorkspaceTrust: true,
     secretStorageProvider: testMode ? new MemorySecrets() : new BrowserSecrets(),
-    configurationDefaults: { "memql.roleTest": testMode, ...(themeName ? { 'workbench.colorTheme': themeName } : {}), 'workbench.startupEditor': 'none', 'telemetry.telemetryLevel': 'off', 'window.title': '${dirty}${activeEditorShort}${separator}MemQL Editor' },
+    configurationDefaults: { ...(themeName ? { 'workbench.colorTheme': themeName } : {}), 'workbench.startupEditor': 'none', 'telemetry.telemetryLevel': 'off', 'window.title': '${dirty}${activeEditorShort}${separator}MemQL Editor' },
     productConfiguration: { nameShort: 'MemQL Editor', nameLong: 'MemQL Editor', enableTelemetry: false },
   });
   const api = await host.getApi();

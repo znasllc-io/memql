@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"log/slog"
@@ -222,4 +223,121 @@ func TestRepositoryScopeSurvivesThePersistedCatalogRead(t *testing.T) {
 	if !scopes.Accepts("workerHost.pipeline_step", "O/A.git") || scopes.Accepts("workerHost.pipeline_step", "o/b") {
 		t.Fatalf("persisted repository policy changed: %v", scopes)
 	}
+}
+
+// The receiving replica has only a bound assertion, never the origin's stream.
+// Both its own read and the service's shared read must keep session validation.
+func TestRoleTestCatalogOnReceivingReplica(t *testing.T) {
+	ctx := context.Background()
+	db := bun.NewDB(sql.OpenDB(pgdriver.NewConnector(pgdriver.WithDSN(dbtest.DSN()))), pgdialect.New())
+	t.Cleanup(func() { _ = db.Close() })
+	if err := db.PingContext(ctx); err != nil {
+		dbtest.Unreachable(t, "role test fleet", dbtest.DSN(), err)
+		return
+	}
+	if _, err := memql.LoadUnifiedConcepts(nil); err != nil {
+		t.Fatal(err)
+	}
+	engine, err := memql.New(db)
+	if err != nil {
+		t.Fatal(err)
+	}
+	engine.Logger = slog.New(slog.NewTextHandler(io.Discard, nil))
+	if err := engine.Init(memorynodes.DefaultRegistry()); err != nil {
+		t.Fatal(err)
+	}
+	prefix := fmt.Sprintf("role-fleet-%d", time.Now().UnixNano())
+	persona := "v1:identity:user:role-test-" + prefix
+	operator := "v1:identity:user:" + prefix + "-operator"
+	ids := []string{}
+	t.Cleanup(func() {
+		_, _ = db.NewDelete().Model((*memorynodes.MemoryNode)(nil)).Where("concept = ?", "v1:worker:registration").Where("id IN (?)", bun.In(ids)).Exec(ctx)
+	})
+	for _, spec := range []struct{ name, owner, sharing string }{
+		{"mine", persona, "private"}, {"shared", operator, "cluster"}, {"private", operator, "private"},
+	} {
+		id := "v1:worker:registration:" + prefix + "-" + spec.name
+		ids = append(ids, id)
+		raw, _ := json.Marshal(map[string]any{"name": spec.name, "ownerUserId": spec.owner, "capabilities": []string{"MODEL"}, "labels": map[string]string{"model:" + prefix + "-" + spec.name: "ctx=32768,structured=1"}, "sharing": map[string]any{"mode": spec.sharing}, "lastSeenAt": time.Now().UTC().Format(time.RFC3339Nano), "connectedNodeId": "other-replica"})
+		row := memorynodes.MemoryNode{ID: id, CreatedAt: time.Now().UTC(), CreatedBy: spec.owner, Concept: "v1:worker:registration", Type: memorynodes.NodeTypeObject, Schema: json.RawMessage(`{}`), Payload: raw, Metadata: json.RawMessage(`{}`), Provenance: json.RawMessage(`{}`)}
+		if _, err := db.NewInsert().Model(&row).Exec(ctx); err != nil {
+			t.Fatal(err)
+		}
+	}
+	revoked := false
+	checks := 0
+	auth.SetRoleTestValidator(roleCatalogValidator(func(_ context.Context, session, subject string, role auth.Role) error {
+		checks++
+		if revoked {
+			return errors.New("role test ended")
+		}
+		if session != "test-session" || subject != persona {
+			return errors.New("wrong session")
+		}
+		return nil
+	}))
+	t.Cleanup(func() { auth.SetRoleTestValidator(nil) })
+	store := &fleetcatalog.EngineStore{Engine: engine}
+	reader := &fleetcatalog.Reader{Store: store}
+	engine.Providers().SetFleetCatalog(reader)
+	for _, role := range []auth.Role{auth.RoleReader, auth.RoleWriter, auth.RoleDeveloper, auth.RoleAdmin} {
+		t.Run(string(role), func(t *testing.T) {
+			assertion := auth.ForwardedAuthority{CredentialClass: auth.RoleTestClass, RoleTestSessionID: "test-session", Subject: persona, Role: role}
+			remote := auth.BindForwardedContext(ctx, map[string]string{"sub": persona, "role": string(role)}, &auth.AccessContext{UserId: persona, Role: role}, assertion)
+			checks = 0
+			result, err := engine.Execute(remote, "builtin fleetModels()")
+			if err != nil {
+				t.Fatal(err)
+			}
+			raw, _ := json.Marshal(result.OutputPayload())
+			var nodes map[string]memorynodes.MemoryNode
+			if err := json.Unmarshal(raw, &nodes); err != nil {
+				t.Fatal(err)
+			}
+			for _, want := range []string{"mine", "shared"} {
+				if _, ok := nodes[prefix+"-"+want]; !ok {
+					t.Fatalf("missing %s: %s", want, raw)
+				}
+			}
+			if _, ok := nodes[prefix+"-private"]; ok {
+				t.Fatal("test inherited operator's private machine")
+			}
+			if checks < 4 {
+				t.Fatalf("nested reads lost session checks: %d", checks)
+			}
+			if _, err := store.WorkersForOwner(remote, operator); err == nil {
+				t.Fatal("test borrowed operator")
+			}
+			revoked = true
+			if _, err := reader.Catalog(remote, persona); err == nil {
+				t.Fatal("revoked catalog succeeded")
+			}
+			if _, err := store.SharedInferenceWorkers(remote); err == nil {
+				t.Fatal("revoked shared read succeeded")
+			}
+			revoked = false
+			// Revocation while the trusted service read is running must withhold rows.
+			racing := &fleetcatalog.EngineStore{Engine: catalogExecuteFunc(func(c context.Context, source string) (*memql.ExecuteResult, error) {
+				result, err := engine.Execute(c, source)
+				revoked = true
+				return result, err
+			})}
+			if _, err := racing.SharedInferenceWorkers(remote); err == nil {
+				t.Fatal("revoked in-flight read exposed rows")
+			}
+			revoked = false
+		})
+	}
+}
+
+type roleCatalogValidator func(context.Context, string, string, auth.Role) error
+
+func (f roleCatalogValidator) ValidateRoleTest(ctx context.Context, session, subject string, role auth.Role) error {
+	return f(ctx, session, subject, role)
+}
+
+type catalogExecuteFunc func(context.Context, string) (*memql.ExecuteResult, error)
+
+func (f catalogExecuteFunc) Execute(ctx context.Context, source string) (*memql.ExecuteResult, error) {
+	return f(ctx, source)
 }
