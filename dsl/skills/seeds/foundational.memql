@@ -30,7 +30,7 @@ seed skill operator-computer-use {
   category:      "foundational"
   tags:          ["computer-use", "opt-in"]
   domainIds:     ["computer-use"]
-  toolSlugs:     ["workerHost", "workerComputer", "workerStatus", "requestComputerUseScope", "canvasPublish"]
+  toolSlugs:     ["workerHost", "workerComputer", "workerStatus", "requestComputerUseScope"]
   liveSourceIds: []
   tier:          "B"
   predefined:    true
