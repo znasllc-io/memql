@@ -116,14 +116,20 @@ func (s *Service) database() (*sql.DB, error) {
 	}
 	return s.DB(), nil
 }
-func (s *Service) gate(ctx context.Context, id string) (func(), error) {
+func (s *Service) gate(ctx context.Context, id string) (context.Context, func(), error) {
 	if !validID.MatchString(id) {
-		return nil, errors.New("invalid backup identifier")
+		return ctx, nil, errors.New("invalid backup identifier")
 	}
 	if s.GateDB == nil || s.GateDB() == nil {
-		return nil, errors.New("backup write gate is unavailable")
+		return ctx, nil, errors.New("backup write gate is unavailable")
 	}
-	return memql.AcquireWriteGate(ctx, s.GateDB(), "file-backup:"+id)
+	hold, err := memql.AcquireGateHold(ctx, s.GateDB(), 0, "file-backup:"+id)
+	if err != nil {
+		return ctx, nil, err
+	}
+	// Fixed order: transfer, storage object, sync source, library file. Every
+	// nested gate borrows this connection, even when the pool has only one slot.
+	return hold.Context(ctx), hold.Release, nil
 }
 func (s *Service) read(ctx context.Context, id, owner string) (Transfer, error) {
 	db, err := s.database()
@@ -172,7 +178,7 @@ func (s *Service) Create(ctx context.Context, id, workerID, p, kind string, meta
 	meta.WatchID = memql.BareShortId(meta.WatchID)
 	meta.FolderID = memql.BareShortId(meta.FolderID)
 	meta.SourceTransferID = memql.BareShortId(meta.SourceTransferID)
-	unlock, err := s.gate(ctx, id)
+	ctx, unlock, err := s.gate(ctx, id)
 	if err != nil {
 		return Transfer{}, err
 	}
@@ -277,7 +283,7 @@ func (s *Service) Prepare(ctx context.Context, id string, size int64, digest str
 	if err != nil {
 		return Transfer{}, err
 	}
-	unlock, err := s.gate(ctx, id)
+	ctx, unlock, err := s.gate(ctx, id)
 	if err != nil {
 		return Transfer{}, err
 	}
@@ -350,7 +356,7 @@ func (s *Service) Grant(ctx context.Context, id string, n int, md5, digest strin
 	if err != nil {
 		return azureblob.DirectRequest{}, err
 	}
-	unlock, err := s.gate(ctx, id)
+	ctx, unlock, err := s.gate(ctx, id)
 	if err != nil {
 		return azureblob.DirectRequest{}, err
 	}
@@ -460,7 +466,7 @@ func (s *Service) Checkpoint(ctx context.Context, id string, final bool) (Transf
 	if err != nil {
 		return Transfer{}, err
 	}
-	unlock, err := s.gate(ctx, id)
+	ctx, unlock, err := s.gate(ctx, id)
 	if err != nil {
 		return Transfer{}, err
 	}
@@ -499,7 +505,7 @@ func (s *Service) Control(ctx context.Context, id, action string) (Transfer, err
 	if err != nil {
 		return Transfer{}, err
 	}
-	unlock, err := s.gate(ctx, id)
+	ctx, unlock, err := s.gate(ctx, id)
 	if err != nil {
 		return Transfer{}, err
 	}
@@ -685,7 +691,7 @@ func (s *Service) Report(ctx context.Context, id, state, message string, offset 
 	if err != nil {
 		return Transfer{}, err
 	}
-	unlock, err := s.gate(ctx, id)
+	ctx, unlock, err := s.gate(ctx, id)
 	if err != nil {
 		return Transfer{}, err
 	}

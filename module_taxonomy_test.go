@@ -63,8 +63,9 @@ var pluginKinds = map[string]moduleKind{
 	// --- COMPONENTS: engine internals an operator cannot switch off. ---
 	// Turning any of these off does not remove a feature, it breaks the
 	// engine: there is no MemQL that does not authorise, route or read rows.
-	"auth": kindComponent,
-	"rbac": kindComponent,
+	"auth":        kindComponent,
+	"rbac":        kindComponent,
+	"fileBackups": kindComponent, // Mandatory transfer authorization, receipts and capacity enforcement for the core Files builtins; Blob I/O stays in the storage integration.
 	// procedure learns a template from rows the engine already wrote (epic
 	// memql#5402). It talks to nobody else's system -- that is the whole test
 	// -- and an operator cannot switch it off without leaving the catalog

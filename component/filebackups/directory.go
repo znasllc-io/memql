@@ -12,6 +12,8 @@ import (
 
 // A folder's live/pending logical footprint is independent of the physical
 // ledger: superseded versions and Bin bytes continue to count there.
+// staged-data: MUST-NOT-GATE -- capacity admission must see the latest watch
+// pause/removal; hiding it could keep admitting bytes for a stopped folder.
 func (s *Service) directory(ctx context.Context, t Transfer, action string) error {
 	if t.Kind != "sync_file" {
 		return nil

@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/uptrace/bun/driver/pgdriver"
+	"github.com/znasllc-io/memql/core/gatecontext"
 )
 
 // write_gate.go -- the write gate (memql#6022, F9 fix rounds 2 and 3).
@@ -188,10 +189,18 @@ func AcquireWriteGatesWithin(ctx context.Context, db *sql.DB, wait time.Duration
 type GateHold struct {
 	tx    *sql.Tx
 	conn  *sql.Conn
+	pool  *sql.DB
 	keys  []string
 	taken time.Time
 	once  sync.Once
 	done  atomic.Bool
+}
+
+// Context explicitly lends this gate's connection to synchronous nested gates.
+// They still take their own locks, in the caller's fixed order, but retain them
+// until this outer hold ends. Do not use the context for parallel operations.
+func (h *GateHold) Context(ctx context.Context) context.Context {
+	return gatecontext.WithTransaction(ctx, h.pool, h.tx)
 }
 
 // AcquireGateHold takes the locks like AcquireWriteGatesWithin and returns the
@@ -228,21 +237,25 @@ func AcquireGateHold(ctx context.Context, db *sql.DB, wait time.Duration, keys .
 	waitCtx, cancelWait := context.WithDeadline(ctx, deadline)
 	defer cancelWait()
 
-	if err := checkGatePool(waitCtx, db); err != nil {
-		return nil, gateWaitError(err, waitCtx)
+	tx := gatecontext.Transaction(ctx, db)
+	var conn *sql.Conn
+	var err error
+	if tx == nil {
+		if err = checkGatePool(waitCtx, db); err != nil {
+			return nil, gateWaitError(err, waitCtx)
+		}
+		conn, err = db.Conn(waitCtx)
+		if err != nil {
+			return nil, gateWaitError(err, waitCtx)
+		}
+		// The transaction lives as long as the caller, not the acquisition wait.
+		tx, err = conn.BeginTx(ctx, nil)
+		if err != nil {
+			_ = conn.Close()
+			return nil, gateWaitError(err, ctx)
+		}
 	}
-	conn, err := db.Conn(waitCtx)
-	if err != nil {
-		return nil, gateWaitError(err, waitCtx)
-	}
-	// The transaction lives as long as the caller's context, not the wait's: it must
-	// outlast this function, and it is rolled back when the caller's context ends.
-	tx, err := conn.BeginTx(ctx, nil)
-	if err != nil {
-		_ = conn.Close()
-		return nil, gateWaitError(err, ctx)
-	}
-	hold := &GateHold{tx: tx, conn: conn, keys: append([]string(nil), keys...), taken: time.Now()}
+	hold := &GateHold{tx: tx, conn: conn, pool: db, keys: append([]string(nil), keys...), taken: time.Now()}
 
 	lockCtx, cancelLock := context.WithDeadline(ctx, serverDeadline.Add(writeGateGrace))
 	defer cancelLock()
@@ -273,6 +286,9 @@ func (h *GateHold) Release() {
 	}
 	h.once.Do(func() {
 		h.done.Store(true)
+		if h.conn == nil {
+			return // Borrowed transaction: the outer gate owns every lock's lifetime.
+		}
 		if held := time.Since(h.taken); held > gateHeldTooLong {
 			slog.Warn("a write gate was held long enough that PostgreSQL may have ended it: a gate session is ended at its idle_in_transaction_session_timeout and the advisory lock goes with it, without a word to the holder",
 				"held", held.Round(time.Second).String(), "keys", h.keys)

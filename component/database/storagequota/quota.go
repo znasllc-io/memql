@@ -9,6 +9,9 @@ import (
 	"encoding/binary"
 	"errors"
 	"fmt"
+	"time"
+
+	"github.com/znasllc-io/memql/core/gatecontext"
 )
 
 const (
@@ -64,6 +67,7 @@ type Guard struct {
 	Store               *Store
 	Tx                  *sql.Tx
 	Key, Account, Owner string
+	borrowed            bool
 }
 
 func (s *Store) Guard(ctx context.Context, account, key, owner string) (*Guard, error) {
@@ -74,17 +78,47 @@ func (s *Store) Guard(ctx context.Context, account, key, owner string) (*Guard, 
 		return nil, errors.New("storage write gate pool is unavailable")
 	}
 	db := s.GateDB()
-	tx, err := db.BeginTx(ctx, nil)
+	tx := gatecontext.Transaction(ctx, db)
+	borrowed := tx != nil
+	var err error
+	if !borrowed {
+		tx, err = db.BeginTx(ctx, nil)
+		if err != nil {
+			return nil, err
+		}
+	}
+	// Bound the server's lock wait below the driver's socket deadline. A lock
+	// error aborts the shared transaction too; the outer operation must retry.
+	wait := 6 * time.Second
+	if deadline, ok := ctx.Deadline(); ok {
+		wait = min(wait, time.Until(deadline)-100*time.Millisecond)
+	}
+	if wait <= 0 {
+		if !borrowed {
+			_ = tx.Rollback()
+		}
+		return nil, context.DeadlineExceeded
+	}
+	_, err = tx.ExecContext(ctx, "SELECT set_config('lock_timeout', $1, true)", fmt.Sprint(max(int64(1), wait.Milliseconds())))
 	if err != nil {
+		if !borrowed {
+			_ = tx.Rollback()
+		}
 		return nil, err
 	}
 	if err = lock(ctx, tx, "object:"+key); err != nil {
-		tx.Rollback()
+		if !borrowed {
+			_ = tx.Rollback()
+		}
 		return nil, err
 	}
-	return &Guard{Store: s, Tx: tx, Key: key, Account: account, Owner: owner}, nil
+	return &Guard{Store: s, Tx: tx, Key: key, Account: account, Owner: owner, borrowed: borrowed}, nil
 }
-func (g *Guard) Close() { _ = g.Tx.Rollback() }
+func (g *Guard) Close() {
+	if !g.borrowed {
+		_ = g.Tx.Rollback()
+	}
+}
 
 // Initialize imports the provider inventory once, before any managed write.
 // The callback must include every retained object and staged block in the account.
@@ -163,6 +197,8 @@ func (s *Store) transaction(ctx context.Context, f func(*sql.Tx) error) error {
 
 // Fresh identity reads determine quota exemptions, including borrowed actors.
 // Token claims and cached role values cannot grant unlimited personal storage.
+// staged-data: MUST-NOT-GATE -- hiding a new role revocation would preserve a
+// superseded owner's quota exemption and admit storage after its removal.
 func userLimit(ctx context.Context, tx *sql.Tx, owner string) (int64, bool, error) {
 	if owner == "" {
 		return ClusterBytes, true, nil
