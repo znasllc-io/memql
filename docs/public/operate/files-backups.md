@@ -53,8 +53,13 @@ Bin. Synced files use the existing Files Bin and its restore controls.
 The capacity ledger is shared in PostgreSQL. All managed Blob write paths use
 it, including ordinary uploads and generated files. Requests that cannot verify
 available capacity fail without starting a new storage write. Initial inventory
-counts existing objects, including staged blocks. Storage writes made outside
-MemQL are outside this admission system and must be restricted operationally.
+counts existing objects, including staged blocks. This metadata-only scan runs
+in the background and survives the initiating request disconnecting. Until it
+finishes, storage requests report that accounting is preparing and must retry;
+partial inventories never admit writes. If its node restarts, the uncommitted
+inventory rolls back and the next request starts it again. Storage writes made
+outside MemQL are outside this admission system and must be restricted
+operationally.
 
 ## Pause, resume and download
 
