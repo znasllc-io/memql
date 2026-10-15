@@ -326,6 +326,11 @@ func (d *Dispatcher) Dispatch(ctx context.Context, req Request) (Result, error) 
 	if d == nil {
 		return Result{}, errors.New("agent.worker: dispatcher not initialized")
 	}
+	if req.Tool == "workerHost" && req.Action == "fs_read" {
+		if _, err := permission.ParseReadOptions(req.Args); err != nil {
+			return Result{ErrorCode: "bad_request", ErrorMessage: err.Error(), RefusedBeforeStart: true, RefusedByGate: true}, nil
+		}
+	}
 	startedAt := d.clock()
 
 	if req.Purpose == "" && d.permissions != nil {
@@ -379,6 +384,9 @@ func (d *Dispatcher) Dispatch(ctx context.Context, req Request) (Result, error) 
 			}
 		}
 		plan.Candidates = kept
+	}
+	if err == nil && req.Tool == "workerHost" && req.Action == "fs_read" && permission.ExtendedRead(req.Args) {
+		plan.RequireActionContract(permission.ReadContract, permission.ReadVersion)
 	}
 	record := plan.Record()
 	record.ReroutedFrom = req.ReroutedFrom
@@ -544,6 +552,9 @@ func (d *Dispatcher) attemptLocal(
 	// planned. Sharing only admits model inference; it never admits host tools.
 	if !sameSubject(w.OwnerUserId, req.OwnerUserId) {
 		return Result{ErrorCode: "owner_mismatch", ErrorMessage: "the connected machine does not belong to this user"}, ForwardRefusedBeforeStart
+	}
+	if !machineSupportsFileRead(w, req.Tool, req.Action, req.Args) {
+		return Result{ErrorCode: "unsupported_file_read", ErrorMessage: "Update MemQL Cockpit to use bounded ranges or search; no file read started."}, ForwardRefusedBeforeStart
 	}
 	// The machine's own consent, re-read here because this replica is the one
 	// dispatching (machineAllowsPipelines, RULING R20) -- the same check the

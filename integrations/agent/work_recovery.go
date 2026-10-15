@@ -26,16 +26,17 @@ type workRecoveryEngine interface {
 // system prompt which is refreshed at resume. Its position is the evidence
 // watermark: only completed batches AFTER it have not yet been observed.
 type workRecoveryState struct {
-	Version            int       `json:"version"`
-	DiscoveryRounds    int       `json:"discoveryRounds"`
-	RepeatedRounds     int       `json:"repeatedRounds"`
-	RecentEvidence     []string  `json:"recentEvidence,omitempty"`
-	ReviewActive       bool      `json:"reviewActive"`
-	StalledAfterReview int       `json:"stalledAfterReview"`
-	ReviewedLimit      int       `json:"reviewedLimit"`
-	AnsweredAt         time.Time `json:"answeredAt,omitempty"`
-	GuidanceIDs        []string  `json:"guidanceIds,omitempty"`
-	Instruction        string    `json:"instruction,omitempty"`
+	Version            int              `json:"version"`
+	ReadEvidence       workReadEvidence `json:"readEvidence,omitempty"`
+	DiscoveryRounds    int              `json:"discoveryRounds"`
+	RepeatedRounds     int              `json:"repeatedRounds"`
+	RecentEvidence     []string         `json:"recentEvidence,omitempty"`
+	ReviewActive       bool             `json:"reviewActive"`
+	StalledAfterReview int              `json:"stalledAfterReview"`
+	ReviewedLimit      int              `json:"reviewedLimit"`
+	AnsweredAt         time.Time        `json:"answeredAt,omitempty"`
+	GuidanceIDs        []string         `json:"guidanceIds,omitempty"`
+	Instruction        string           `json:"instruction,omitempty"`
 }
 
 func recoveryDigest(value any) string {
@@ -88,7 +89,7 @@ func recoveryState(messages []common.ChatMessage) (workRecoveryState, int, error
 		if marker >= 0 || len(message.Content) > 8192 {
 			return s, -1, fmt.Errorf("invalid recovery checkpoint")
 		}
-		if err := json.Unmarshal([]byte(message.Content), &s); err != nil || s.Version != 1 || len(s.RecentEvidence) > 8 || len(s.GuidanceIDs) > 16 {
+		if err := json.Unmarshal([]byte(message.Content), &s); err != nil || s.Version != 1 || len(s.RecentEvidence) > 8 || len(s.GuidanceIDs) > 16 || len(s.ReadEvidence.Recent) > 8 {
 			return s, -1, fmt.Errorf("unreadable recovery checkpoint")
 		}
 		marker = i
@@ -130,6 +131,7 @@ func (s *workRecoveryState) observe(messages []common.ChatMessage) {
 				args = decoded
 			}
 			name := call.Name[strings.LastIndex(call.Name, ".")+1:]
+			s.ReadEvidence.observe(name, call.ID, args, result)
 			evidence = append(evidence, recoveryDigest([]any{name, args, result}))
 			if name == "discoverCapabilities" {
 				discovery = true

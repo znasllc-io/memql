@@ -8,6 +8,7 @@ import (
 // CallObservation is public execution evidence from the actual provider attempt.
 // It contains no messages, credentials, tool results or private model reasoning.
 type CallObservation struct {
+	ContextReferences []string  `json:"contextReferences,omitempty"`
 	PromptName        string    `json:"promptName,omitempty"`
 	Purpose           string    `json:"purpose,omitempty"`
 	Attempt           int       `json:"attempt,omitempty"`
@@ -54,7 +55,18 @@ func WithCallPurpose(ctx context.Context, name string, attempt int) context.Cont
 	return context.WithValue(ctx, purposeKey{}, callPurpose{name, attempt})
 }
 
+type contextReferencesKey struct{}
+
+// WithContextReferences binds exact prepared-context receipts to this attempt.
+// The observer remains the existing spend/cancellation/journal observer.
+func WithContextReferences(ctx context.Context, refs []string) context.Context {
+	return context.WithValue(ctx, contextReferencesKey{}, append([]string(nil), refs...))
+}
+
 func Observe(ctx context.Context, event CallObservation) {
+	if refs, ok := ctx.Value(contextReferencesKey{}).([]string); ok {
+		event.ContextReferences = append([]string(nil), refs...)
+	}
 	if p, ok := ctx.Value(purposeKey{}).(callPurpose); ok {
 		event.Purpose, event.Attempt = p.Name, p.Attempt
 	}

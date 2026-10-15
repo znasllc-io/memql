@@ -213,6 +213,11 @@ func (h *ForwardHandler) HandleForwardedRequest(
 		return
 	}
 
+	if !machineSupportsFileRead(w, req.GetTool(), req.GetAction(), innerArgs) {
+		h.sendRefusal(send, requestId, "unsupported_file_read", "Update MemQL Cockpit to use bounded ranges or search; no file read started.")
+		return
+	}
+
 	capability := req.GetCapability()
 	timeout := time.Duration(req.GetTimeoutSec()) * time.Second
 	if timeout <= 0 {
