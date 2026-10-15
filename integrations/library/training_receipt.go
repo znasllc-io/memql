@@ -2,13 +2,12 @@ package library
 
 import (
 	"context"
-	"crypto/sha256"
-	"fmt"
 	"maps"
 
 	"github.com/znasllc-io/memql/component/auth"
 	"github.com/znasllc-io/memql/component/language/parser"
 	"github.com/znasllc-io/memql/core/common"
+	"github.com/znasllc-io/memql/core/id"
 )
 
 type trainingSelectionReceipt struct {
@@ -24,7 +23,7 @@ type trainingSelectionReceipt struct {
 	Rejected          []map[string]any `json:"rejected"`
 }
 
-func trainingDigest(v string) string { return fmt.Sprintf("%x", sha256.Sum256([]byte(v))) }
+func trainingDigest(v string) string { return string(id.NewUntracked().FromString(v)) }
 
 func (i *Integration) saveTrainingSelection(ctx context.Context, run common.RunContext, receiptID string, receipt trainingSelectionReceipt) error {
 	// This is the existing owned execution journal, not a second Training store.
