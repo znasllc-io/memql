@@ -517,7 +517,11 @@ func (s *Service) Control(ctx context.Context, id, action string) (Transfer, err
 		if err = s.save(ctx, t); err != nil {
 			return t, err
 		}
-		if t.Kind != "download" && t.SHA256 != "" {
+		unreserved, checkErr := s.unreserved(ctx, t)
+		if checkErr != nil {
+			return t, checkErr
+		}
+		if t.Kind != "download" && t.SHA256 != "" && !unreserved {
 			if s.Provider == nil {
 				return t, errors.New("backup storage is unavailable")
 			}
@@ -561,7 +565,11 @@ func (s *Service) Control(ctx context.Context, id, action string) (Transfer, err
 		if err = s.save(ctx, t); err != nil {
 			return t, err
 		}
-		if t.Kind != "download" && t.SHA256 != "" {
+		unreserved, checkErr := s.unreserved(ctx, t)
+		if checkErr != nil {
+			return t, checkErr
+		}
+		if t.Kind != "download" && t.SHA256 != "" && !unreserved {
 			if s.Provider == nil {
 				return t, errors.New("backup storage is unavailable")
 			}
@@ -708,4 +716,20 @@ func (s *Service) Report(ctx context.Context, id, state, message string, offset 
 	}
 	err = s.save(ctx, t)
 	return t, err
+}
+
+// Failed admission may have recorded the source before reserving any capacity.
+// A provider proof that no reservation or object exists permits pause/cancel
+// without creating a new tombstone that the user's zero allowance would refuse.
+func (s *Service) unreserved(ctx context.Context, t Transfer) (bool, error) {
+	if t.Kind == "download" || t.SHA256 == "" {
+		return true, nil
+	}
+	p, ok := s.Provider.(interface {
+		DirectUnreserved(context.Context, string, string) (bool, error)
+	})
+	if !ok {
+		return false, nil
+	}
+	return p.DirectUnreserved(ctx, s.Container, t.Object)
 }

@@ -329,3 +329,33 @@ func (u *AzureBlobUploader) RetireDirect(ctx context.Context, container, object,
 	defer capacity.Close()
 	return capacity.Retired(ctx)
 }
+
+// DirectUnreserved proves no managed write could have started: every effect
+// reserves first, and the caller serializes the transfer across replicas.
+func (u *AzureBlobUploader) DirectUnreserved(ctx context.Context, container, object string) (bool, error) {
+	g, err := u.beginCapacity(ctx, container, object)
+	if err != nil {
+		return false, err
+	}
+	if g == nil {
+		return false, nil
+	}
+	defer g.Close()
+	db, err := g.Store.Database()
+	if err != nil {
+		return false, err
+	}
+	var exists bool
+	if err = db.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM storage_capacity_objects WHERE object_key=$1)`, g.Key).Scan(&exists); err != nil || exists {
+		return false, err
+	}
+	bc, err := u.blockClient(container, object)
+	if err != nil {
+		return false, err
+	}
+	_, err = bc.GetProperties(ctx, nil)
+	if bloberror.HasCode(err, bloberror.BlobNotFound) {
+		return true, nil
+	}
+	return false, err
+}

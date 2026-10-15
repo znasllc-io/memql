@@ -422,3 +422,34 @@ func TestBackupFreshReplicaRefusesRevokedMachine(t *testing.T) {
 		t.Fatal("revoked machine prepared storage")
 	}
 }
+
+type deniedAdmissionProvider struct{ *storageFixture }
+
+func (p deniedAdmissionProvider) ReserveStorage(context.Context, string, string, int64) error {
+	return storagequota.ErrLimit
+}
+func (p deniedAdmissionProvider) DirectUnreserved(context.Context, string, string) (bool, error) {
+	return true, nil
+}
+func TestBackupDeniedAdmissionCanPauseAndCancelWithoutNewStorage(t *testing.T) {
+	s, _, ctx, p := serviceFixture(t)
+	s.Provider = deniedAdmissionProvider{p}
+	j, err := s.Create(ctx, "backup-001", "worker-001", "/source/test.zip", "archive", Metadata{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err = s.Prepare(ctx, j.ID, 4, strings.Repeat("a", 64)); !errors.Is(err, storagequota.ErrLimit) {
+		t.Fatal(err)
+	}
+	j, err = s.Control(ctx, j.ID, "pause")
+	if err != nil || j.State != "paused" {
+		t.Fatalf("pause: %+v %v", j, err)
+	}
+	j, err = s.Control(ctx, j.ID, "cancel")
+	if err != nil || j.State != "cancelled" {
+		t.Fatalf("cancel: %+v %v", j, err)
+	}
+	if p.lease != "" || p.retired {
+		t.Fatal("failed admission created storage while cancelling")
+	}
+}
