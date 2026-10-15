@@ -6,6 +6,8 @@
   how runs are triggered, what green covers, the capacity budget, the deep-scan
   cadence, where the required check will run, the approach); the six design
   sections were presented and each approved.
+- **October 15 owner update:** phase 2 requires one passing full run on the
+  epic branch instead of three. The full post-merge run on main remains.
 - **What it is:** the next phase of the pipelines program
   ([2026-09-16-pipelines-program-design.md](2026-09-16-pipelines-program-design.md),
   epic #5480), narrowed to continuous integration. The engine repository's own
@@ -206,7 +208,7 @@ required check on a released engine.
 |---|---|---|
 | 0. Baseline | #5697 as specified: a week of Go-touching pull requests on Actions, per lane, recorded in `docs/internal/ops/ci-design.md` D6 | The target number T is recorded |
 | 1. Bring-up | The local cluster with a build node, the amd64 toolchain, the 8-hour profile, the Job count, this cluster's GitHub App and the engine repository as a source (section 4) | A **Run latest** run reaches a terminal state with at least one step executed on the build node |
-| 2. Green | Manual full runs of the epic branch's head; every failure fixed at its cause (section 5) | Three consecutive full runs pass every stage, on three different commits of the epic branch, with no engine rollout during any of them; after the merge, one more on main's head |
+| 2. Green | Manual full runs of the epic branch's head; every failure fixed at its cause (section 5) | One full run passes every stage on the epic branch, with no engine rollout during it; after the merge, one more on main's head |
 | 3. Shadow and scans | Reconnect with polling; the scan cadence changes; SARIF upload; the four scan workflows retire (section 6) | Seven consecutive scheduled deep-scan runs pass with their CodeQL results visible in code scanning, and the four workflows are deleted |
 | 4. Fast | Measured tuning on shadow pull-request runs (section 7) | Over the last 20 Go-touching pull-request heads both systems completed, MemQL's median is at most T, and there is no false green (section 7) |
 
@@ -226,14 +228,19 @@ use.
 
 **The budget is enforced at the node.** The build node's container is capped at
 40 GB through `--agents-memory` (which also sets what the kubelet sees) and at 16
-CPUs through `docker update --cpus` on the cgroup-v2 host, so steps may burst
-without reaching the serving node or the rest of the workstation. `make up`
+CPUs through `docker update --cpus` on the cgroup-v2 host, reserving CPU and
+memory capacity for serving workloads and the rest of the workstation. These
+caps do not isolate the physical disk shared by all k3d nodes. `make up`
 derives both caps from the Docker host's capacity, leaving roughly a third of
 the host's CPUs and memory outside the build node (16 CPUs and 40 GB on this
 workstation, less on a smaller machine), and takes explicit values when given
 them. Inside the node the Job count
 (raised from 1 to 6 to start) and the per-step limits decide how many steps run
-at once; phase 4 tunes both from measured peaks.
+at once; phase 4 tunes both from measured peaks. The October 15 cold-cache
+rehearsal in #6018 exposed disk stalls and control-plane restarts with six
+Jobs, so the local ceiling was lowered to two during phase 2. Any later
+increase needs cold-cache storage and serving-health evidence alongside CPU
+and memory measurements.
 
 **Local overlay values.** `MEMQL_PIPELINES_NODE_POOL=builds` on every workbench
 replica, `components/pipelines-long-runs` composed, and the Job count. These are
@@ -298,9 +305,9 @@ time or memory on the deep scans; first-run image pulls; the isolation probe on
 k3s's built-in network-policy enforcement; and a toolchain whose Go version
 lags `go.work`, which would make every step download a toolchain or fail.
 
-**Exit.** Three consecutive full runs pass every stage, on three different
-commits of the epic branch, with no engine rollout during any of them. After
-the merge, one more full run on main's head confirms it there. Their per-step
+**Exit.** One full run passes every stage on the epic branch, with no engine
+rollout during it. After the merge, one more full run on main's head confirms
+it there. Their per-step
 timings are phase 4's starting profile.
 
 ## 6. Phase 3: shadow checks, scan cadence and retiring the scan workflows
@@ -435,7 +442,7 @@ native code performs one bounded operation and enforces its safety.
 - **Branch runs:** leaf tests for `ValidBranchName`, `RunLatest` tests for a
   named branch, a malformed name refused before GitHub, and one commit through
   two branches being one attempt; OS tests for **Other branch**.
-- **Live evidence:** the three green runs, the scheduled scans and the shadow
+- **Live evidence:** the passing branch and main runs, the scheduled scans and the shadow
   pull-request runs, with run ids recorded in the issues.
 
 ## 10. Tracking

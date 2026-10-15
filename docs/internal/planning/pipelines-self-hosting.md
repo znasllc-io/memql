@@ -19,6 +19,40 @@ unapproved; the cost research is a proposal, not provisioning authority.
 
 ## Boundaries
 
+### Local full-suite evidence (October 15)
+
+PR #6040's branch run `3663f9b7df65259c64015aa840acecc3` passed all 41
+steps across seven stages on commit
+`acb4f6a399f65411a8578d5eef7796d8038dd91c`. It was started through
+MemQL OS's manual branch action. Workbench executed the portable package with
+Cockpit disconnected, on a dedicated amd64 build node capped at 16 CPUs and
+40 GiB, with two Jobs at a time and two replicas of every engine node type.
+The original organization GitHub App reported the exact commit's
+[successful check](https://github.com/znasllc-io/memql/runs/116381190723).
+
+The run lasted 10:47:47–17:07:35 UTC (6h19m48s). History scanning took about
+3h52m, the queued test stage about 42 minutes, and analysis about 1h29m.
+Reported stage execution durations exclude some queue and orchestration time;
+their sum is not the run's wall time. Minute samples measured a build-node
+peak of 408.34% CPU and 7.77 GiB memory. The 80 retained artifacts include
+scanner logs and reports. CodeQL completed with 65 Go findings, one JavaScript
+finding and no Python findings under the existing report-for-triage policy;
+none has its primary location in a file changed by this PR. A passing scanner
+step is not a claim of zero security findings.
+
+No engine rollout occurred during the run; the serving images stayed at the
+clean branch build `8b26521c7`. One control server automatically restarted at
+15:52:54 after etcd disk stalls and a lost leadership lease. The CodeQL Jobs
+survived and the pipeline completed. This establishes a full portable CI pass,
+not uninterrupted serving availability or complete delivery recovery. #6115
+tracks the remaining shared-disk interference; the two-Job ceiling mitigates
+concurrency but does not isolate physical storage.
+
+The owner's revised phase-2 exit requires this one full branch pass, followed
+by one full run on merged main. Main integration, final combined-tree checks
+and that post-merge proof remain separate from this branch evidence. Shadow
+checks, scan cadence, SARIF publication and Actions retirement remain epic B.
+
 ### Workbench execution and local parity (owner clarification, October 6)
 
 Portable CI and image builds belong on the cluster's Workbench-managed
@@ -294,12 +328,13 @@ record write as a successful update.
   contract; verify direct writes cannot forge evidence (#5822).
 - [ ] Restrict inbound/outbound row visibility and verify every legitimate
   reader, writer and subscription (#5802, #5804).
-- [ ] Complete runner readiness, egress isolation proof, service-account
-  isolation, capacity and recovery cases (#5803, #5810, #5811, #5812, #5821,
-  #5823; check newer issue state before implementation).
+- [x] Ship runner readiness, egress and service-account isolation, repository
+  routing, queued forwarding and Secret retention (#5803, #5810, #5811,
+  #5812, #5821, #5823; all closed as checked on October 15). Installed
+  recovery across the complete delivery cycle remains a separate proof.
 - [ ] Finish channel management, false-green evidence and rollout verification
   in the existing OS surfaces (#5504, #5505, #5506).
-- [ ] Finish the default workflow policy boundary in public core DSL:
+- [x] Finish the default workflow policy boundary in public core DSL:
   - [x] Event-to-mode and event/mode-to-stage selection are DSL decisions;
     compilation requires an explicit selected stage set.
   - [x] A separately named workflow composes the sealed default and proves the
@@ -314,10 +349,11 @@ record write as a successful update.
   evidence before removing them.
 - [ ] Update template and instance consumption/configuration, docs and diagrams;
   reconcile already-resolved issues with merged evidence.
-- [ ] Test real local cluster execution, multi-replica ownership and recovery,
-  Cockpit native execution, candidate approval and local rollout. Verify the
-  portable cycle with Cockpit disconnected; retain regression coverage for any
-  still-supported Cockpit container execution.
+- [x] Prove the complete portable CI package on the installed local cluster
+  with Cockpit disconnected, retaining exact-SHA results and artifacts.
+- [ ] Prove multi-replica ownership and recovery across the delivery cycle,
+  Cockpit native execution, candidate approval and local rollout. Retain
+  regression coverage for any still-supported Cockpit container execution.
 - [ ] Review the rendered OS in Chrome with desktop/narrow and light/dark
   states. Label fixtures and simulated external services explicitly.
 - [ ] Present a working local demonstration and remaining production-only
