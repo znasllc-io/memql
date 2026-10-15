@@ -9,7 +9,7 @@
 // the engine would stop being that.
 module github.com/znasllc-io/memql/component/workjournal
 
-go 1.26.1
+go 1.26.8
 
 toolchain go1.27.2
 

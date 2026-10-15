@@ -13,6 +13,6 @@
 // it again if a function here ever needs work.GoalSignature.
 module github.com/znasllc-io/memql/component/procedure
 
-go 1.26.1
+go 1.26.8
 
 toolchain go1.27.2
