@@ -65,7 +65,7 @@ func testRunner(inv ModelInventory, now *time.Time) *Runner {
 // It registered with the fail-closed consent, which is what a runner with
 // no policy reports, so only the labels differ unless a test says so.
 func testConnection(fingerprint string) *Connection {
-	return &Connection{ModelFingerprint: fingerprint, AdvertisedServe: tools.ServeOwner}
+	return &Connection{ModelFingerprint: fingerprint}
 }
 
 func oneModel() models.Inventory {
@@ -312,18 +312,9 @@ func TestNextBackoffCapsAtDefaultReconnectMax(t *testing.T) {
 	}
 }
 
-// consentConnection registered with the given consent and the one-model
-// label set.
-func consentConnection(serve string) *Connection {
-	return &Connection{ModelFingerprint: advertisedFingerprint(oneModel().Labels()), AdvertisedServe: serve}
-}
-
-// pipelinesConnection registered with the one-model label set, the closed
-// sharing consent, and the given pipelines consent.
+// pipelinesConnection registered with one model and the given pipeline policy.
 func pipelinesConnection(pipelines bool) *Connection {
-	c := consentConnection(tools.ServeOwner)
-	c.AdvertisedPipelines = (tools.PipelinesPolicy{Allow: pipelines}).AdvertisementFingerprint()
-	return c
+	return &Connection{ModelFingerprint: advertisedFingerprint(oneModel().Labels()), AdvertisedPipelines: (tools.PipelinesPolicy{Allow: pipelines}).AdvertisementFingerprint()}
 }
 
 // TestAChangedPipelinesPolicyIsAChangedAdvertisement (memql#5494). The
@@ -364,78 +355,6 @@ func TestAChangedPipelinesPolicyIsAChangedAdvertisement(t *testing.T) {
 	}
 }
 
-// TestAChangedConsentIsAChangedAdvertisement (memql-cockpit#428). The
-// consent rides Register and nothing else, so a consent the live policy
-// no longer states has to be re-registered -- it used to wait for an
-// unrelated reconnect, which on a stable network is days.
-func TestAChangedConsentIsAChangedAdvertisement(t *testing.T) {
-	clock := time.Unix(1_700_000_000, 0)
-	inv := &fakeModelInventory{}
-	inv.serve(oneModel())
-	serve := tools.ServeOwner
-	r := testRunner(inv, &clock)
-	r.serve = func() string { return serve }
-
-	if r.maybeReadvertiseModels(context.Background(), consentConnection(tools.ServeOwner)) {
-		t.Fatal("the same consent and the same labels are no reason to reconnect")
-	}
-	serve = tools.ServeCluster
-	if !r.maybeReadvertiseModels(context.Background(), consentConnection(tools.ServeOwner)) {
-		t.Fatal("a GRANTED consent must be re-registered")
-	}
-	// A grant is an ordinary change: inside the floor it waits, unless a
-	// reload asked for it (the SIGHUP path always does).
-	clock = clock.Add(10 * time.Second)
-	if r.maybeReadvertiseModels(context.Background(), consentConnection(tools.ServeOwner)) {
-		t.Fatal("inside the floor, a grant with no request waits")
-	}
-	r.RequestImmediateReadvertise()
-	if !r.maybeReadvertiseModels(context.Background(), consentConnection(tools.ServeOwner)) {
-		t.Fatal("a requested grant skips the floor once")
-	}
-}
-
-// A WITHDRAWN consent skips the floor outright: until the cluster sees
-// it, other people's prompts keep arriving on hardware the owner has
-// taken back.
-func TestAWithdrawnConsentSkipsTheFloor(t *testing.T) {
-	clock := time.Unix(1_700_000_000, 0)
-	inv := &fakeModelInventory{}
-	inv.serve(oneModel())
-	r := testRunner(inv, &clock)
-	r.serve = func() string { return tools.ServeOwner }
-	r.lastReadvertise.Store(clock.UnixNano())
-	clock = clock.Add(time.Second)
-
-	if !r.maybeReadvertiseModels(context.Background(), consentConnection(tools.ServeCluster)) {
-		t.Fatal("a withdrawal must re-register at once, floor or no floor")
-	}
-}
-
-// Busy, a withdrawal does not reconnect -- it waits for idle, and the
-// flag that makes the heartbeat loop re-check every second is set.
-func TestAWithdrawalWhileBusyWaitsInsteadOfReconnecting(t *testing.T) {
-	clock := time.Unix(1_700_000_000, 0)
-	inv := &fakeModelInventory{}
-	inv.serve(oneModel())
-	r := testRunner(inv, &clock)
-	r.serve = func() string { return tools.ServeOwner }
-	r.activeCalls.Add(1)
-
-	conn := consentConnection(tools.ServeCluster)
-	if r.maybeReadvertiseModels(context.Background(), conn) {
-		t.Fatal("work in flight is never cut short for a re-registration")
-	}
-	if !r.withdrawing.Load() {
-		t.Fatal("a busy withdrawal must be recorded as waiting for idle")
-	}
-	// Restoring the consent before it lands ends the wait.
-	r.serve = func() string { return tools.ServeCluster }
-	if r.maybeReadvertiseModels(context.Background(), conn) || r.withdrawing.Load() {
-		t.Fatal("a withdrawal taken back must end the wait without a reconnect")
-	}
-}
-
 // A connection the runner is already closing to re-register is not
 // evaluated again: the next tick on the same heartbeat loop would
 // otherwise decide -- and log -- the same reconnect twice.
@@ -444,10 +363,9 @@ func TestAConnectionBeingClosedIsNotReEvaluated(t *testing.T) {
 	inv := &fakeModelInventory{}
 	inv.serve(oneModel())
 	r := testRunner(inv, &clock)
-	r.serve = func() string { return tools.ServeOwner }
-	conn := consentConnection(tools.ServeCluster)
+	conn := &Connection{}
 	if !r.maybeReadvertiseModels(context.Background(), conn) {
-		t.Fatal("the withdrawal must close the connection to re-register")
+		t.Fatal("changed model labels must close the connection to re-register")
 	}
 	if r.maybeReadvertiseModels(context.Background(), conn) {
 		t.Fatal("a connection already being closed must not be closed -- and announced -- again")
@@ -461,7 +379,7 @@ func TestRepositoryOnlyPolicyChangeReadvertises(t *testing.T) {
 	policy := tools.PipelinesPolicy{Allow: true, Repos: []string{"o/a"}}
 	r := testRunner(inv, &clock)
 	r.pipelines = func() tools.PipelinesPolicy { return policy }
-	conn := consentConnection(tools.ServeOwner)
+	conn := pipelinesConnection(true)
 	conn.AdvertisedPipelines = policy.AdvertisementFingerprint()
 	if r.maybeReadvertiseModels(context.Background(), conn) {
 		t.Fatal("unchanged scope reconnects")

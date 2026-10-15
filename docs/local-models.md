@@ -600,49 +600,18 @@ refused in both directions rather than run under the wrong number.
 
 ---
 
-## Serving the cluster, not just yourself
+## Sharing models
 
-`policy.yaml`'s `inference.serve` is this machine's answer to *who may this
-GPU serve*:
+In **Fleet → the machine → Sharing**, enable **Share models**, choose people
+or groups, and save. Turn sharing off and save to keep inference private.
+Only the enrolled owner can change this audience. The engine applies it to
+new calls on every replica; Cockpit needs no additional setting or restart.
 
-```yaml
-inference:
-  serve: cluster    # or owner, which is the default
-```
-
-**Sharing takes two consents and this is one of them.** The other is the
-owner's, set from the machine page; a machine serves somebody else's prompt
-only when both say `cluster`. A machine cannot grant a permission on its
-owner's behalf — the same rule that keeps `sharedInference` off the cockpit
-entirely.
-
-An unrecognised value is `owner`: not an error and not the grant. A typo must
-not widen a permission, and it must not stop a worker starting either.
-
-**A change re-registers every cluster stream.** The consent travels in the
-registration and nowhere else, so the worker re-registers to carry it — the
-field is re-read on `SIGHUP` (which `memql worker models --allow` and the
-inference setup send for you), and the reconnect it takes never cuts short
-work in flight:
-
-- **Granting** (`owner` → `cluster`) re-registers as soon as the worker is
-  idle, like a changed model set.
-- **Withdrawing** (`cluster` → `owner`) is the urgent direction — until the
-  cluster sees it, other people's prompts keep arriving. It skips the
-  two-minute floor, and if calls are running it checks every second and
-  re-registers at the first moment nothing is running. It does not refuse
-  new calls to get there sooner: the cluster does not yet send a refused
-  call to another machine — it fails it — so a machine kept busy without a
-  break (a long app session, a pull, back-to-back calls) is routed to until
-  that break comes. Restoring the consent before then needs no reconnect at
-  all.
-
-The log says which is happening:
-
-```
-inference.serve no longer shares this machine with the cluster; re-registering at the first moment nothing is running
-inference.serve withdrew this machine from the cluster; reconnecting so the cluster stops routing other people's calls here
-```
+The former `inference.serve` setting is no longer used. Existing Fleet sharing
+choices apply automatically. Model allowlists still decide which models the
+machine offers. Sharing inference does not grant files, commands, local app
+sessions or computer control. A machine must be online with an allowed model
+to serve a call. Calls already admitted finish when sharing is taken back.
 
 ---
 

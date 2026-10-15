@@ -75,7 +75,7 @@ func TestAppsAllowFor_ReturnsACopy(t *testing.T) {
 	}
 }
 
-// A SIGHUP REVOKES. The block replaces on reload, as inference.serve does:
+// A SIGHUP REVOKES. The block replaces on reload:
 // merging a consent would make withdrawing it take a restart, which is the
 // wrong direction for the setting that lets a cluster run an app here.
 func TestAppsHomes_AReloadGrantsAndRevokes(t *testing.T) {

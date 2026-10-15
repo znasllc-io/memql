@@ -69,7 +69,7 @@ func TestBuildRegister_CarriesAppDescriptors(t *testing.T) {
 			Harness: apps.HarnessClaudeHeadless, StructuredResult: true, FollowUps: true},
 		{Id: apps.IDCodex, Version: "codex-cli 0.153.4", Allowed: false,
 			Harness: apps.HarnessCodexAppServer, StructuredResult: true, FollowUps: true},
-	}, models.Inventory{}, hardware.Inventory{}, tools.ServeOwner, tools.PipelinesPolicy{Allow: false})
+	}, models.Inventory{}, hardware.Inventory{}, tools.PipelinesPolicy{Allow: false})
 
 	descs := register.GetAppDescriptors()
 	if len(descs) != 2 {

@@ -129,7 +129,7 @@ func TestPipelinesPolicyReplacesOnReloadSoTheConsentCanBeWithdrawn(t *testing.T)
 	}
 
 	// REPLACE, not merge -- the opposite of the allow lists beside it, and
-	// for the reason inference.serve replaces: this is a consent, and one
+	// because this is a consent, and one
 	// that a SIGHUP could not take back would be a grant the file no longer
 	// states.
 	write("shell:\n  allow: [ls]\n")

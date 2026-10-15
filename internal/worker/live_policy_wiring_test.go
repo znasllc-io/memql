@@ -17,7 +17,7 @@ import (
 // liveReaders are the Options fields that read the LIVE policy. Each is a
 // function because a SIGHUP changes its answer, and each decides something a
 // runner advertises -- or withholds -- on Register.
-var liveReaders = []string{"InferenceServe", "PipelinesPolicy"}
+var liveReaders = []string{"PipelinesPolicy"}
 
 // workerSources parses every non-test Go file of this package, build tags
 // regardless: a file built only on darwin builds a Runner on darwin.
@@ -49,8 +49,7 @@ func workerSources(t *testing.T) (*token.FileSet, map[string]*ast.File) {
 // build a Runner -- `worker run`'s single home, the fleet's runner per home,
 // and the run that follows `worker pair` -- and a reader one of them forgets
 // fails SILENTLY and closed: that runner never advertises the consent, while
-// its dispatcher, reading the same policy, admits the work. InferenceServe
-// and PipelinesAllowed drifted apart in exactly that way in pair.go.
+// its dispatcher, reading the same policy, admits the work.
 func TestEveryRunnerConstructionWiresTheLivePolicy(t *testing.T) {
 	var funcs []string
 	options := reflect.TypeOf(Options{})
@@ -108,7 +107,7 @@ func TestEveryRunnerConstructionWiresTheLivePolicy(t *testing.T) {
 // TestEverySIGHUPReloadsThroughOneFunction (memql#5494). The run paths each
 // handle SIGHUP, and the reload is where a changed consent is announced; a
 // path that reloads by hand announces nothing, which is how pair.go came to
-// say nothing about inference.serve. Every SIGHUP case calls reloadPolicy.
+// omit the changed repository scope. Every SIGHUP case calls reloadPolicy.
 func TestEverySIGHUPReloadsThroughOneFunction(t *testing.T) {
 	fset, files := workerSources(t)
 	found := 0
@@ -152,7 +151,7 @@ func namesSIGHUP(exprs []ast.Expr) bool {
 }
 
 // A reload says which consent changed, the same way on every run path:
-// both ride Register, so the cluster learns of either only by a
+// repository scopes ride Register, so the cluster learns of a change by a
 // re-registration the log should account for.
 func TestAPolicyReloadAnnouncesAChangedConsent(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "policy.yaml")
@@ -168,12 +167,12 @@ func TestAPolicyReloadAnnouncesAChangedConsent(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	write("inference:\n  serve: cluster\npipelines:\n  allow: true\n")
+	write("pipelines:\n  allow: true\n")
 	logs := &logBuffer{}
 	if !reloadPolicy(slogJSON(logs), policy) {
 		t.Fatalf("a valid file did not reload:\n%s", logs)
 	}
-	for _, want := range []string{"inference.serve changed", "pipeline repository policy changed"} {
+	for _, want := range []string{"pipeline repository policy changed"} {
 		if logs.count(want) != 1 {
 			t.Errorf("the reload did not say %q once:\n%s", want, logs)
 		}
