@@ -13,7 +13,6 @@ import (
 	"github.com/Azure/azure-sdk-for-go/sdk/storage/azblob/blockblob"
 	"github.com/znasllc-io/memql/component/auth"
 	"github.com/znasllc-io/memql/component/database/storagequota"
-	"github.com/znasllc-io/memql/component/memql"
 	"golang.org/x/sync/errgroup"
 )
 
@@ -31,7 +30,7 @@ func quotaOwner(ctx context.Context) string {
 	if !ok || ac == nil || ac.Synthetic {
 		return ""
 	}
-	return memql.BareShortId(ac.UserId)
+	return storagequota.OwnerID(ac.UserId)
 }
 
 func (u *AzureBlobUploader) capacity(ctx context.Context) (*storagequota.Store, error) {
@@ -99,7 +98,7 @@ func (u *AzureBlobUploader) inventory(ctx context.Context, add func(string, stri
 						owner := ""
 						parts := strings.SplitN(*b.Name, "/", 4)
 						if len(parts) >= 3 && (parts[0] == "library" || parts[0] == "backups" || parts[0] == "objects") {
-							owner = parts[1]
+							owner = storagequota.OwnerID(parts[1])
 						}
 						emit.Lock()
 						defer emit.Unlock()
@@ -121,6 +120,10 @@ func (u *AzureBlobUploader) beginCapacity(ctx context.Context, container, object
 	if !u.meterWrites {
 		return nil, nil
 	}
+	owner, err := storageOwner(ctx, object)
+	if err != nil {
+		return nil, err
+	}
 	if err := u.checkRetention(ctx, nil); err != nil {
 		return nil, err
 	}
@@ -131,14 +134,6 @@ func (u *AzureBlobUploader) beginCapacity(ctx context.Context, container, object
 	bc, err := u.blockClient(container, object)
 	if err != nil {
 		return nil, err
-	}
-	owner := quotaOwner(ctx)
-	parts := strings.SplitN(object, "/", 4)
-	if len(parts) >= 3 && (parts[0] == "library" || parts[0] == "backups" || parts[0] == "objects") {
-		if owner != "" && owner != parts[1] {
-			return nil, errors.New("storage destination belongs to another user")
-		}
-		owner = parts[1]
 	}
 	g, err := s.Guard(ctx, u.client.URL(), bc.URL(), owner)
 	if err != nil {
@@ -156,6 +151,21 @@ func (u *AzureBlobUploader) beginCapacity(ctx context.Context, container, object
 		}
 	}
 	return g, nil
+}
+
+// Storage paths may contain a canonical user ID while the verified request
+// carries its bare ID. Compare the same identity without changing object keys.
+func storageOwner(ctx context.Context, object string) (string, error) {
+	owner := quotaOwner(ctx)
+	parts := strings.SplitN(object, "/", 4)
+	if len(parts) >= 3 && (parts[0] == "library" || parts[0] == "backups" || parts[0] == "objects") {
+		destination := storagequota.OwnerID(parts[1])
+		if owner != "" && owner != destination {
+			return "", errors.New("storage destination belongs to another user")
+		}
+		owner = destination
+	}
+	return owner, nil
 }
 
 func (u *AzureBlobUploader) ReserveStorage(ctx context.Context, container, object string, size int64) error {

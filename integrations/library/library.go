@@ -53,6 +53,7 @@ const resultConcept = "integration:library:result"
 // handle so it can re-enter Execute for the read-then-write dance.
 type Integration struct {
 	engine          memql.IntegrationEngineAccess
+	authority       documentAuthority
 	reviewGoals     ReviewGoalOpener
 	revisionFiles   RevisionFileWriter
 	imageAssets     ImageAssetWriter
@@ -106,7 +107,8 @@ func NewIntegration(engine memql.IntegrationEngineAccess, gateDB ...func() *sql.
 		}
 		return memql.AcquireWriteGate(ctx, db, key)
 	}
-	return &Integration{engine: engine,
+	authority, _ := engine.(documentAuthority)
+	return &Integration{engine: engine, authority: authority,
 		versionGate: func(ctx context.Context, key string) (func(), error) {
 			return gate(ctx, "library-document:"+memql.BareShortId(key))
 		},
@@ -354,8 +356,7 @@ func (i *Integration) handleEditDocument(ctx context.Context, args map[string]an
 	// the document spine (title / source / format) onto both the new
 	// version's re-insert and -- when no history exists yet -- to seed
 	// version 1's owner. The documentId IS the generatedOutput id.
-	subject, ok := auth.SubjectFromContext(ctx)
-	if !ok || !auth.CapableFor(ctx, subject, auth.VerbCreate, auth.ResourceData) {
+	if !i.canManageDocument(ctx, auth.VerbCreate) {
 		return nil, fmt.Errorf("you do not have permission to edit this document")
 	}
 	release, err := i.versionGate(ctx, documentId)
@@ -484,8 +485,7 @@ func (i *Integration) handleRestoreDocumentVersion(ctx context.Context, args map
 	}
 	authorId := strings.TrimSpace(asString(args["authorId"]))
 
-	subject, ok := auth.SubjectFromContext(ctx)
-	if !ok || !auth.CapableFor(ctx, subject, auth.VerbCreate, auth.ResourceData) {
+	if !i.canManageDocument(ctx, auth.VerbCreate) {
 		return nil, fmt.Errorf("you do not have permission to edit this document")
 	}
 	release, err := i.versionGate(ctx, documentId)

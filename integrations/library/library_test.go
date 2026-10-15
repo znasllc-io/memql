@@ -26,6 +26,7 @@ import (
 // calls exercises the real handler logic (read history -> compute next
 // version -> append) end to end without a database.
 type stubEngine struct {
+	libraryTestAuthority
 	// doc is the backing generatedOutput, keyed by id. Updated in place
 	// by updateGeneratedOutputContent so the test can assert the
 	// latest-pointer reflects the newest content.

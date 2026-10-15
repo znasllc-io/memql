@@ -198,7 +198,7 @@ func (i *Integration) validateCurrentRevision(ctx context.Context, proposal map[
 }
 
 func (i *Integration) handleModifyRevisionItem(ctx context.Context, args map[string]any, _ int) ([]memorynodes.MemoryNode, error) {
-	if err := revisionWriter(ctx); err != nil {
+	if err := i.revisionWriter(ctx); err != nil {
 		return nil, err
 	}
 	if run, ok := common.RunFromContext(ctx); ok && run.RunId != "" {

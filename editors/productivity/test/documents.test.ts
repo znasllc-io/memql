@@ -7,6 +7,24 @@ import { UserInputError } from "../src/problems.js";
 import { readEmail } from "../src/emailDocument.js";
 import type { EditorConnectionAPI } from "../../vscode/src/connection/api.js";
 
+test("a failed upload explains recovery without requesting bytes; failed analysis remains readable", async () => {
+  const lease = { domain: "client.example", name: "client", generation: 1 };
+  const file = { name: "notes.md", status: "failed", blobUrl: "library/person/file/notes.md", versionNumber: 1 };
+  let reads = 0;
+  const api = { connect: async () => lease, execute: async (_lease: unknown, name: string) =>
+    name === "libraryArtifactById" ? [{ kind: "file", sourceConceptRef: "file" }] : [file],
+    readBytes: async () => { reads++; return new TextEncoder().encode("# Saved"); },
+  } as unknown as EditorConnectionAPI;
+  const documents = new Documents(api);
+  await assert.rejects(documents.read("memql-file://client.example/artifacts/artifact/notes.md"), error =>
+    error instanceof UserInputError && /Upload the original file again/.test(error.message));
+  assert.equal(reads, 0);
+  file.blobUrl = "https://storage.example/container/library/person/file/notes.md";
+  const opened = await documents.read("memql-file://client.example/artifacts/artifact/notes.md");
+  assert.equal(new TextDecoder().decode(opened.content), "# Saved");
+  assert.equal(reads, 1);
+});
+
 test("creating a file resolves its indexed upload receipt without uploading twice", async () => {
   const lease = {domain:"client.example",name:"client",generation:1};
   let uploads = 0, reads = 0;

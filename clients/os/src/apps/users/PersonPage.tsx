@@ -43,6 +43,8 @@ import { useGroupsForUser } from "./useGroups";
 import { rereadPerson } from "./usePeople";
 import { useSessions } from "./useSessions";
 import { StorageAllowance } from "../files/backups/StorageAllowance";
+import { useSession } from "../../chrome/access";
+import { holds } from "../../system/roles";
 
 // ONE PERSON: what they are, where they belong, and how they get in.
 //
@@ -87,6 +89,9 @@ export function PersonPage({
   onBack: () => void;
 }) {
   const connection = useOsConnection();
+  useSession();
+  const canManagePeople = holds("update", "principal");
+  const canManageGroups = holds("update", "group");
   const [local, setLocal] = useState<PersonRow | null>(seed);
   const [rereadFailed, setRereadFailed] = useState(false);
   const [adding, setAdding] = useState(false);
@@ -212,7 +217,7 @@ export function PersonPage({
   const sentence = ladderSentence(refusals);
 
   const acts: Act[] = [];
-  if (governable) {
+  if (governable && canManagePeople) {
     if (person.active && person.suspendedAt === "") {
       if (person.signInPolicy === "passkey_only") {
         acts.push({ label: "Reset sign-in policy", onAct: () => void applyReset() });
@@ -284,11 +289,11 @@ export function PersonPage({
                     people={people}
                     onRemove={() => void actions.groupMemberRemove(membership.groupId, person.id)}
                     busy={actions.busyKey === person.id}
-                    removable={governable}
+                    removable={governable && canManageGroups}
                   />
                 )}
               />
-              {governable ? (
+              {governable && canManageGroups ? (
                 adding ? (
                   <FormRow>
                     <GroupPicker
@@ -325,7 +330,7 @@ export function PersonPage({
 
         {/* ---- sign-in ---- */}
         <Panel label={`Sign-in for ${name}`}>
-          <Subhead meta={sessions.unknown ? undefined : `${sessions.live.length} recent sessions`}>Sign-in</Subhead>
+          <Subhead meta={!canManagePeople || sessions.unknown ? undefined : `${sessions.live.length} recent sessions`}>Sign-in</Subhead>
           <Facts>
             <Fact label="Signs in with" value={person.signInPolicy === "passkey_only" ? "A passkey only" : "A link or a passkey"} />
             <Fact label="Last seen" value={formatFreshness(person.lastSeenAt, now)} title={person.lastSeenAt || undefined} />
@@ -333,10 +338,9 @@ export function PersonPage({
             {person.sharedMailbox ? <Fact label="Mailbox" value={<Chip>shared</Chip>} /> : null}
           </Facts>
 
-          {sessions.unknown ? (
+          {!canManagePeople ? null : sessions.unknown ? (
             <p className="os-caption">
-              This window could not read this person's sessions, so it is not saying how many are
-              open. That read is owner and admin only.
+              Sessions could not be loaded. Try opening this person again.
             </p>
           ) : sessions.live.length === 0 ? (
             <p className="os-caption">No sessions open.</p>
@@ -346,7 +350,7 @@ export function PersonPage({
                 <RecordRow key={session.id}
                   name={session.clientLabel || session.source || "A session"}
                   secondary={formatFreshness(session.lastActivityAt, now)}
-                  actions={governable ? (
+                  actions={governable && canManagePeople ? (
                     <Button
                       onClick={() =>
                         void actions.endSession(session.id).then((ok) => {

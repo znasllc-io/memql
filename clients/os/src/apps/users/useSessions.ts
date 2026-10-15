@@ -1,6 +1,8 @@
 import { useEffect, useState } from "react";
 
 import { useOsConnection } from "../../live/connection";
+import { useSessionIfPresent } from "../../chrome/access";
+import { holds } from "../../system/roles";
 
 // How many sessions a person currently has, for the detail panel.
 //
@@ -78,11 +80,13 @@ function countLive(rows: readonly SessionRow[], now: number): number {
 
 export function useSessionsCount(userId: string): SessionsCount {
   const connection = useOsConnection();
+  useSessionIfPresent(); // Re-render when the session's effective grants change.
+  const permitted = holds("update", "principal");
   const [count, setCount] = useState<number | null>(null);
 
   useEffect(() => {
     setCount(null);
-    if (connection === null || userId === "") return;
+    if (connection === null || userId === "" || !permitted) return;
     const controller = new AbortController();
     let live = true;
     void (async () => {
@@ -103,11 +107,11 @@ export function useSessionsCount(userId: string): SessionsCount {
       live = false;
       controller.abort();
     };
-  }, [connection, userId]);
+  }, [connection, userId, permitted]);
 
   return {
-    count,
-    label: count === null ? "--" : `${count} ${COUNT_QUALIFIER}`,
+    count: permitted ? count : null,
+    label: !permitted || count === null ? "--" : `${count} ${COUNT_QUALIFIER}`,
   };
 }
 
@@ -151,12 +155,14 @@ export interface SessionsView {
  */
 export function useSessions(userId: string): SessionsView {
   const connection = useOsConnection();
+  useSessionIfPresent();
+  const permitted = holds("update", "principal");
   const [live, setLive] = useState<SessionRowView[] | null>(null);
   const [nonce, setNonce] = useState(0);
 
   useEffect(() => {
     setLive(null);
-    if (connection === null || userId === "") return;
+    if (connection === null || userId === "" || !permitted) return;
     const controller = new AbortController();
     let alive = true;
     void (async () => {
@@ -181,11 +187,11 @@ export function useSessions(userId: string): SessionsView {
       alive = false;
       controller.abort();
     };
-  }, [connection, userId, nonce]);
+  }, [connection, userId, nonce, permitted]);
 
   return {
-    live: live ?? [],
-    unknown: live === null,
+    live: permitted ? live ?? [] : [],
+    unknown: !permitted || live === null,
     reload: () => setNonce((n) => n + 1),
   };
 }

@@ -172,8 +172,7 @@ func (i *Integration) handleDocumentNotes(ctx context.Context, args map[string]a
 	return reviewResult(map[string]any{"notes": rows, "hasMore": more})
 }
 func (i *Integration) addDocumentAnnotation(ctx context.Context, args map[string]any, purpose string) ([]memorynodes.MemoryNode, error) {
-	subject, ok := auth.SubjectFromContext(ctx)
-	if !ok || !auth.CapableFor(ctx, subject, auth.VerbCreate, auth.ResourceData) {
+	if !i.canManageDocument(ctx, auth.VerbCreate) {
 		return nil, fmt.Errorf("you do not have permission to add feedback")
 	}
 	requestID, body := asString(args["requestId"]), strings.TrimSpace(asString(args["body"]))

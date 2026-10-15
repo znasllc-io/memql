@@ -112,7 +112,7 @@ func testHistoryBranchesAcrossReplicas(t *testing.T, f *revisionDB) {
 	if history["parentArtifactId"] != memql.BareShortId(artifact) || history["parentVersion"] != float64(0) || len(history["branches"].([]any)) != 1 {
 		t.Fatalf("lost branch lineage: %v", history)
 	}
-	for _, denied := range []context.Context{revisionActor(f.owner+"-outsider", auth.RoleWriter), revisionActor(f.owner, auth.RoleReader)} {
+	for _, denied := range []context.Context{revisionActor(f.owner+"-outsider", auth.RoleWriter), revisionActor(f.owner, "ungranted")} {
 		if _, err = f.first.handleForkDocumentVersion(denied, args, 0); err == nil {
 			t.Fatal("unauthorized fork accepted")
 		}

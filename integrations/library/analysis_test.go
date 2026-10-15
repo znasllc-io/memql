@@ -40,6 +40,7 @@ import (
 // --- the file-path stub engine -------------------------------------------
 
 type libStub struct {
+	libraryTestAuthority
 	// files keyed by BARE file id.
 	files map[string]map[string]any
 	// chunks keyed by CANONICAL node id.

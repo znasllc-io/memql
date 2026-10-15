@@ -33,6 +33,7 @@ func limitFromPayload(ctx context.Context, tx *sql.Tx, owner string, payload []b
 // SetLimit requires the caller to have freshly established owner/developer
 // authority. Lowering a quota preserves stored bytes and existing reservations.
 func (s *Store) SetLimit(ctx context.Context, actor, owner string, limit int64) error {
+	actor, owner = OwnerID(actor), OwnerID(owner)
 	if actor == "" || owner == "" || limit < 0 || limit > ClusterBytes {
 		return errors.New("invalid storage allowance")
 	}

@@ -1,5 +1,6 @@
 import { screen, waitFor, within } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
+import { installSeededAccess } from "../seededAccess";
 
 const h = vi.hoisted(() => ({ connection: null as unknown }));
 
@@ -74,6 +75,7 @@ function seed(extra: Parameters<typeof fakeConnection>[0] = {}) {
 }
 
 async function openAda(connection: Conn, role = "owner", showDeactivated = false) {
+  installSeededAccess(role);
   h.connection = connection;
   const view = renderApp(
     withSession(
@@ -171,6 +173,22 @@ describe("the offered rungs", () => {
 // ===========================================================================
 
 describe("opening a person", () => {
+  it("does not ask for sessions or offer management without the required capabilities", async () => {
+    const connection = seed();
+    await openAda(connection, "developer");
+    expect(connection.query.sessionsForSubjectAdmin).not.toHaveBeenCalled();
+    expect(screen.queryByRole("button", { name: "Deactivate" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Add to a group" })).toBeNull();
+    expect(screen.getByText("Signs in with")).toBeTruthy();
+  });
+
+  it.each(["admin", "owner"])("%s can read sessions and manage lower-ranked people", async role => {
+    const connection = seed();
+    await openAda(connection, role);
+    await waitFor(() => expect(connection.query.sessionsForSubjectAdmin).toHaveBeenCalled());
+    expect(screen.getByRole("button", { name: "Deactivate" })).toBeTruthy();
+  });
+
   it("re-reads them through the authorized path rather than trusting the list", async () => {
     // `v1:identity:user` broadcasts CREATES ONLY -- the row churns on
     // `lastSeenAt`, so an update rule would be an event per person per
