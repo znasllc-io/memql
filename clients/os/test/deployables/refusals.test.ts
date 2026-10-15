@@ -403,7 +403,7 @@ describe("pipeline refusal copy", () => {
     expect(copyFor("pipeline_fleet_disabled")?.next).toContain("Fleet");
     expect(copyFor("pipeline_clone_failed")?.next).toContain("GitHub App");
     expect(copyFor("pipeline_log_capped")?.next).toContain("Library");
-    expect(copyFor("pipeline_artifact_missing")?.title).toBe("A declared artifact path matched no file");
+    expect(copyFor("pipeline_artifact_missing")?.title).toBe("A log or artifact was not saved");
     expect(copyFor("pipeline_isolation_unenforced")?.next).toContain("network policy");
     expect(copyFor("pipeline_timings_unreadable")?.title).toBe("The step's Go test timings could not be read from its log");
     expect(copyFor("pipeline_outcome_trimmed")?.next).toContain("Library");
