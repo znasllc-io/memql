@@ -621,7 +621,7 @@ func (s *Service) List(ctx context.Context, workerID, after, scope string) ([]Tr
 	if err != nil {
 		return nil, err
 	}
-	rows, err := db.QueryContext(ctx, "SELECT "+columns+` FROM file_backup_transfers WHERE owner_id=$1 AND ($2='' OR worker_id=$2) AND transfer_id>$3 AND state NOT IN ('deleted','cancelled') AND ($4!='archives' OR source_kind!='sync_file') AND ($4!='active' OR state NOT IN ('complete','bin')) ORDER BY transfer_id LIMIT 101`, owner, workerID, after, scope)
+	rows, err := db.QueryContext(ctx, "SELECT "+columns+` FROM file_backup_transfers WHERE owner_id=$1 AND ($2='' OR worker_id=$2) AND ($3='' OR (created_at,transfer_id)<(SELECT created_at,transfer_id FROM file_backup_transfers WHERE transfer_id=$3 AND owner_id=$1)) AND state NOT IN ('deleted','cancelled') AND ($4!='archives' OR source_kind!='sync_file') AND ($4!='active' OR state NOT IN ('complete','bin')) ORDER BY created_at DESC, transfer_id DESC LIMIT 101`, owner, workerID, after, scope)
 	if err != nil {
 		return nil, err
 	}

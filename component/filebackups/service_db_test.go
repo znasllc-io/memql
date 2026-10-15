@@ -453,3 +453,28 @@ func TestBackupDeniedAdmissionCanPauseAndCancelWithoutNewStorage(t *testing.T) {
 		t.Fatal("failed admission created storage while cancelling")
 	}
 }
+
+func TestBackupListShowsNewestFirstWithStablePagination(t *testing.T) {
+	s, another, ctx, _ := serviceFixture(t)
+	for _, id := range []string{"backup-999", "backup-001", "backup-500"} {
+		if _, err := s.Create(ctx, id, "worker-001", "/"+id+".zip", "archive", Metadata{}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	page, err := another().List(ctx, "", "", "all")
+	if err != nil || len(page) != 3 || page[0].ID != "backup-500" || page[2].ID != "backup-999" {
+		t.Fatalf("newest first: %+v %v", page, err)
+	}
+	// Progress updates must not move a row across a pagination boundary.
+	if _, err = s.Control(ctx, "backup-999", "pause"); err != nil {
+		t.Fatal(err)
+	}
+	page, err = another().List(ctx, "", "backup-001", "all")
+	if err != nil || len(page) != 1 || page[0].ID != "backup-999" {
+		t.Fatalf("next page: %+v %v", page, err)
+	}
+	page, err = another().List(ctx, "", "unknown-cursor", "all")
+	if err != nil || len(page) != 0 {
+		t.Fatalf("unowned cursor: %+v %v", page, err)
+	}
+}

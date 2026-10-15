@@ -52,9 +52,10 @@ CREATE TABLE file_backup_transfers (
     etag text NOT NULL DEFAULT '',
     metadata jsonb NOT NULL DEFAULT '{}',
     failure text NOT NULL DEFAULT '',
+    created_at timestamptz NOT NULL DEFAULT clock_timestamp(),
     updated_at timestamptz NOT NULL DEFAULT clock_timestamp()
 );
-CREATE INDEX file_backup_transfers_owner ON file_backup_transfers(owner_id, updated_at);
+CREATE INDEX file_backup_transfers_owner ON file_backup_transfers(owner_id, created_at DESC, transfer_id DESC);
 CREATE TABLE file_backup_blocks (
     transfer_id text NOT NULL REFERENCES file_backup_transfers(transfer_id),
     ordinal integer NOT NULL CHECK (ordinal BETWEEN 0 AND 49999),

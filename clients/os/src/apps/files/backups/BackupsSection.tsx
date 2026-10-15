@@ -115,10 +115,10 @@ export function BackupsSection({ folders, files, source, writes }: BackupsSectio
     <section className="os-backups" aria-label="Backups">
       <Head
         title={editing ? "Edit backup" : "Backups"}
-        back={adding || editing ? {label: "Backups", onSelect: () => { setAdding(false); setEditingId(""); write.clearError(); }} : undefined}
-        meta={!adding && !editing ? listCount(source?.snapshot) : undefined}
+        back={editing ? {label: "Backups", onSelect: () => { setAdding(false); setEditingId(""); write.clearError(); }} : undefined}
+        meta={!editing ? listCount(source?.snapshot) : undefined}
       >
-        {!adding && !editing ? <AddButton label="Add backup"
+        {!editing ? <AddButton label="Add backup"
           onClick={() => {
             setArchiveId(newShortId()); setArchiveError(""); setAdding(true);
             setEditingId("");
@@ -160,7 +160,7 @@ export function BackupsSection({ folders, files, source, writes }: BackupsSectio
       ) : null}
 
       {!editing && <StorageAllowance />}
-      {!adding && !editing ? <LiveList<BackupRow>
+      {!editing ? <LiveList<BackupRow>
         source={source}
         rowId={(backup) => backup.id}
         fingerprint={backupFingerprint}
