@@ -19,7 +19,7 @@ func TestBuildRegister_CarriesTheAppInventory(t *testing.T) {
 	}, []apps.Info{
 		{Id: apps.IDClaudeCode, Version: "2.1.4", SignedIn: true, Subscription: apps.SubscriptionPresent, Allowed: true},
 		{Id: apps.IDCodex, Version: "0.9.1", SignedIn: false, Subscription: apps.SubscriptionUnknown, Allowed: false},
-	}, models.Inventory{}, hardware.Inventory{}, tools.ServeOwner, tools.PipelinesPolicy{Allow: false})
+	}, models.Inventory{}, hardware.Inventory{}, tools.PipelinesPolicy{Allow: false})
 
 	got := register.GetApps()
 	if len(got) != 2 {

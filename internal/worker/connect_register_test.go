@@ -39,7 +39,7 @@ func TestBuildRegister_CarriesValidCapabilityDescriptor(t *testing.T) {
 		Name:         "test-worker",
 		Capabilities: []string{"HEADLESS"},
 		Concurrency:  map[string]uint32{"HEADLESS": 1},
-	}, nil, models.Inventory{}, hardware.Inventory{}, tools.ServeOwner, tools.PipelinesPolicy{Allow: false})
+	}, nil, models.Inventory{}, hardware.Inventory{}, tools.PipelinesPolicy{Allow: false})
 
 	raw := register.GetCapabilityDescriptorJson()
 	if raw == "" {
@@ -99,7 +99,7 @@ func TestRegisterAdvertisesPipelinesOnlyWhenThePolicyAllows(t *testing.T) {
 		StateDir:     t.TempDir(),
 		Labels:       map[string]string{"team": "core"},
 	}
-	on := buildRegister(cfg, nil, models.Inventory{}, hardware.Inventory{}, tools.ServeOwner, tools.PipelinesPolicy{Allow: true})
+	on := buildRegister(cfg, nil, models.Inventory{}, hardware.Inventory{}, tools.PipelinesPolicy{Allow: true})
 	// The literal pair is the wire contract: the engine requires exactly
 	// pipelines=allowed of a machine it routes a pipeline step to.
 	if got := on.GetLabels()["pipelines"]; got != "allowed" {
@@ -109,13 +109,13 @@ func TestRegisterAdvertisesPipelinesOnlyWhenThePolicyAllows(t *testing.T) {
 		t.Errorf("the operator's own labels were lost: %v", on.GetLabels())
 	}
 
-	off := buildRegister(cfg, nil, models.Inventory{}, hardware.Inventory{}, tools.ServeOwner, tools.PipelinesPolicy{Allow: false})
+	off := buildRegister(cfg, nil, models.Inventory{}, hardware.Inventory{}, tools.PipelinesPolicy{Allow: false})
 	if v, ok := off.GetLabels()["pipelines"]; ok {
 		t.Fatalf("a machine whose policy allows no pipelines advertised pipelines=%q", v)
 	}
 
 	cfg.Labels = map[string]string{"pipelines": "allowed", "team": "core"}
-	claimed := buildRegister(cfg, nil, models.Inventory{}, hardware.Inventory{}, tools.ServeOwner, tools.PipelinesPolicy{Allow: false})
+	claimed := buildRegister(cfg, nil, models.Inventory{}, hardware.Inventory{}, tools.PipelinesPolicy{Allow: false})
 	if v, ok := claimed.GetLabels()["pipelines"]; ok {
 		t.Fatalf("a worker.yaml label claimed pipelines=%q that policy.yaml does not grant", v)
 	}
@@ -127,27 +127,19 @@ func TestRegisterAdvertisesPipelinesOnlyWhenThePolicyAllows(t *testing.T) {
 	}
 }
 
-// The sharing consent reaches the wire through the descriptor, and the
-// Register path is the only place it is read from the live policy.
-func TestRegisterCarriesTheSharingConsent(t *testing.T) {
-	for _, serve := range []string{tools.ServeOwner, tools.ServeCluster} {
-		register := buildRegister(Config{
-			Name:         "test-worker",
-			Capabilities: []string{"HEADLESS"},
-		}, nil, models.Inventory{}, hardware.Inventory{}, serve, tools.PipelinesPolicy{})
-
-		var got map[string]any
-		if err := json.Unmarshal([]byte(register.GetCapabilityDescriptorJson()), &got); err != nil {
-			t.Fatal(err)
-		}
-		if got["inferenceServe"] != serve {
-			t.Fatalf("inferenceServe = %v, want %q", got["inferenceServe"], serve)
-		}
-		// And the version the engine gates on is untouched. A bump here
-		// is a handshake refusal on every machine, not a missing field.
-		if got["schemaVersion"] != float64(1) {
-			t.Fatalf("schemaVersion = %v, want 1", got["schemaVersion"])
-		}
+// The worker reports capabilities; only the owner's stored Fleet audience
+// grants sharing. No second consent is advertised by the machine.
+func TestRegisterNeedsNoSharingConfiguration(t *testing.T) {
+	register := buildRegister(Config{Name: "test-worker", Capabilities: []string{"HEADLESS"}}, nil, models.Inventory{}, hardware.Inventory{}, tools.PipelinesPolicy{})
+	var got map[string]any
+	if err := json.Unmarshal([]byte(register.GetCapabilityDescriptorJson()), &got); err != nil {
+		t.Fatal(err)
+	}
+	if _, exists := got["inferenceServe"]; exists {
+		t.Fatal("sharing must be controlled by Fleet")
+	}
+	if got["schemaVersion"] != float64(1) {
+		t.Fatal("descriptor schema changed")
 	}
 }
 
@@ -155,7 +147,7 @@ func TestRegisterCarriesTheExactRepositoryConsent(t *testing.T) {
 	for _, policy := range []tools.PipelinesPolicy{
 		{}, {Allow: true}, {Allow: true, Repos: []string{" O/A.GIT ", "o/b"}},
 	} {
-		reg := buildRegister(Config{Name: "scope", StateDir: t.TempDir()}, nil, models.Inventory{}, hardware.Inventory{}, tools.ServeOwner, policy)
+		reg := buildRegister(Config{Name: "scope", StateDir: t.TempDir()}, nil, models.Inventory{}, hardware.Inventory{}, policy)
 		var descriptor tools.CapabilityDescriptor
 		if err := json.Unmarshal([]byte(reg.GetCapabilityDescriptorJson()), &descriptor); err != nil {
 			t.Fatal(err)

@@ -198,7 +198,7 @@ func TestX11MissingProbeIsUnknown(t *testing.T) {
 
 func TestRegisterAndEveryHeartbeatCarryCurrentPermissionSnapshot(t *testing.T) {
 	contract := permissionContract(t)
-	register := buildRegister(Config{Name: "permission-test", StateDir: t.TempDir()}, nil, models.Inventory{}, hardware.Inventory{}, tools.ServeOwner, tools.PipelinesPolicy{Allow: false})
+	register := buildRegister(Config{Name: "permission-test", StateDir: t.TempDir()}, nil, models.Inventory{}, hardware.Inventory{}, tools.PipelinesPolicy{Allow: false})
 	for _, source := range []struct {
 		name    protoreflect.Name
 		message proto.Message

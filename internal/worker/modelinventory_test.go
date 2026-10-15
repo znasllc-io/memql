@@ -34,7 +34,7 @@ func TestBuildRegister_CarriesTheModelInventory(t *testing.T) {
 		Name:         "test-worker",
 		Capabilities: []string{"HEADLESS"},
 		Concurrency:  map[string]uint32{"HEADLESS": 8},
-	}, nil, inv, hardware.Inventory{}, tools.ServeOwner, tools.PipelinesPolicy{Allow: false})
+	}, nil, inv, hardware.Inventory{}, tools.PipelinesPolicy{Allow: false})
 
 	var hasModel bool
 	for _, c := range register.GetCapabilities() {
@@ -91,7 +91,7 @@ func TestBuildRegister_NoModelsContributesNothing(t *testing.T) {
 				Capabilities: []string{"HEADLESS"},
 				Labels:       map[string]string{"team": "platform"},
 				Concurrency:  map[string]uint32{"HEADLESS": 8},
-			}, nil, inv, hardware.Inventory{}, tools.ServeOwner, tools.PipelinesPolicy{Allow: false})
+			}, nil, inv, hardware.Inventory{}, tools.PipelinesPolicy{Allow: false})
 
 			for _, c := range register.GetCapabilities() {
 				if c == models.Capability {

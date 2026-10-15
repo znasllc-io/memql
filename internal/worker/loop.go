@@ -34,24 +34,14 @@ import (
 // actually changed, only when no work is in flight, and never twice in
 // quick succession -- a runtime flapping up and down must not turn into a
 // worker that reconnects forever.
-//
-// The sharing consent is part of the same advertisement (memql-cockpit
-// #428): inference.serve rides Register's capability descriptor and
-// nothing else, so it obeys the same rules -- with the one difference a
-// WITHDRAWN consent needs, described at maybeReadvertiseModels.
 const (
 	// modelRefreshInterval is how often the offered set is re-checked.
 	modelRefreshInterval = 60 * time.Second
 	// modelReadvertiseMinInterval floors the gap between two
 	// model-triggered reconnects. RequestImmediateReadvertise is its one
 	// exception for a changed model set: see that method for why a pull
-	// somebody is watching does not wait it out. A withdrawn consent does
-	// not wait it out either.
+	// somebody is watching does not wait it out.
 	modelReadvertiseMinInterval = 2 * time.Minute
-	// withdrawalPoll is how often a runner with a withdrawn consent still to
-	// land re-checks whether it has gone idle. Short, because every second
-	// of it is a second the cluster may route somebody else's prompt here.
-	withdrawalPoll = time.Second
 )
 
 // Runner owns the worker's main loop: reconnect-with-backoff, the
@@ -68,7 +58,6 @@ type Runner struct {
 	sessions  *appsession.Manager
 	pulls     *modelPuller
 	heartbeat time.Duration
-	serve     func() string
 	pipelines func() tools.PipelinesPolicy
 	metrics   *Metrics
 
@@ -88,12 +77,6 @@ type Runner struct {
 	// ONE: a burst of pulls is one evaluation, not one reconnect each.
 	pendingReadvertise atomic.Bool
 	readvertiseNow     chan struct{}
-
-	// withdrawing is set while a withdrawn sharing consent waits for this
-	// worker to go idle so it can re-register; the heartbeat loop then
-	// re-checks every withdrawalPoll instead of every minute. See
-	// maybeReadvertiseModels.
-	withdrawing atomic.Bool
 
 	// refused is the runner's standing with a cluster that has refused it
 	// (refusal.go). Touched only by the goroutine in Run.
@@ -125,9 +108,6 @@ type Runner struct {
 	// waits it is asked for instead, which is how the backoff and the hold
 	// are asserted exactly rather than timed.
 	pause func(ctx context.Context, d time.Duration) bool
-	// withdrawalEvery is how often a pending withdrawal re-checks for idle
-	// (withdrawalPoll).
-	withdrawalEvery time.Duration
 
 	stopOnce sync.Once
 	stop     chan struct{}
@@ -218,16 +198,6 @@ type Options struct {
 	Sessions  *appsession.Manager
 	Heartbeat time.Duration
 	Metrics   *Metrics
-	// InferenceServe reads this machine's sharing consent from the live
-	// policy (memql-cockpit#399). A FUNCTION rather than a value,
-	// because the value is re-read on SIGHUP and a snapshot taken at
-	// startup would advertise a consent the file no longer states --
-	// and this is the one setting whose stale value hands somebody
-	// else's prompt to this machine's GPU.
-	//
-	// Nil reports tools.ServeOwner, which is the fail-closed default a
-	// build that does not wire this should send.
-	InferenceServe func() string
 	// PipelinesPolicy reads the live allow flag and repository list together.
 	// A policy reload changes both. Nil grants no pipeline execution.
 	PipelinesPolicy func() tools.PipelinesPolicy
@@ -263,7 +233,6 @@ func NewRunner(opts Options) (*Runner, error) {
 		sessions:  opts.Sessions,
 		heartbeat: hb,
 		metrics:   opts.Metrics,
-		serve:     opts.InferenceServe,
 		pipelines: opts.PipelinesPolicy,
 		stop:      make(chan struct{}),
 		closed:    make(chan struct{}),
@@ -435,12 +404,12 @@ func (r *Runner) connect(ctx context.Context) (*Connection, error) {
 	if dial == nil {
 		dial = func(ctx context.Context, cfg Config) (stream, error) { return dialSDK(ctx, cfg, r.logger) }
 	}
-	inventory, modelInv, serve, pipelines := r.inventory(ctx), r.modelInventory(ctx), r.inferenceServe(), r.pipelinesPolicy()
+	inventory, modelInv, pipelines := r.inventory(ctx), r.modelInventory(ctx), r.pipelinesPolicy()
 	s, err := dial(ctx, r.cfg)
 	if err != nil {
 		return nil, err
 	}
-	return handshake(ctx, s, r.cfg, inventory, modelInv, r.hardwareInventory(ctx), serve, pipelines, r.logger)
+	return handshake(ctx, s, r.cfg, inventory, modelInv, r.hardwareInventory(ctx), pipelines, r.logger)
 }
 
 // Close stops the runner: the loop ends at once, and the stream with it.
@@ -567,49 +536,20 @@ func (r *Runner) heartbeatLoop(ctx context.Context, conn *Connection, beat *atom
 	defer t.Stop()
 	refresh := time.NewTicker(modelRefreshInterval)
 	defer refresh.Stop()
-	// The withdrawal poll exists only while a withdrawal is waiting for
-	// idle; the rest of the time it is a nil channel, which a select never
-	// picks.
-	var poll *time.Ticker
-	var pollC <-chan time.Time
-	defer func() {
-		if poll != nil {
-			poll.Stop()
-		}
-	}()
-	evaluate := func() {
-		r.maybeReadvertiseModels(ctx, conn)
-		switch pending := r.withdrawing.Load(); {
-		case pending && poll == nil:
-			every := r.withdrawalEvery
-			if every <= 0 {
-				every = withdrawalPoll
-			}
-			poll = time.NewTicker(every)
-			pollC = poll.C
-		case !pending && poll != nil:
-			poll.Stop()
-			poll, pollC = nil, nil
-		}
-	}
 	beats := 0
 	for {
 		select {
 		case <-ctx.Done():
 			return
 		case <-refresh.C:
-			evaluate()
+			r.maybeReadvertiseModels(ctx, conn)
 		case <-r.readvertiseNow:
 			// A pull just finished with somebody watching, or the policy
 			// was reloaded. Evaluating here rather than at the next
 			// refresh tick is the difference between a change that
 			// lands now and one that lands in up to a minute -- and a
 			// minute of nothing happening reads as a pull that failed.
-			evaluate()
-		case <-pollC:
-			// A withdrawn consent waiting for idle: the first second
-			// nothing is running is the second to re-register.
-			evaluate()
+			r.maybeReadvertiseModels(ctx, conn)
 		case <-t.C:
 			// The inventory is re-taken on every beat rather than
 			// captured at connect. The engine applies an inventory
@@ -638,17 +578,6 @@ func (r *Runner) heartbeatLoop(ctx context.Context, conn *Connection, beat *atom
 	}
 }
 
-// inferenceServe reads the live sharing consent, defaulting closed.
-func (r *Runner) inferenceServe() string {
-	if r.serve == nil {
-		return tools.ServeOwner
-	}
-	if v := r.serve(); v == tools.ServeCluster {
-		return tools.ServeCluster
-	}
-	return tools.ServeOwner
-}
-
 // pipelinesPolicy reads the live pipelines consent, defaulting closed.
 func (r *Runner) pipelinesPolicy() tools.PipelinesPolicy {
 	if r.pipelines == nil {
@@ -675,78 +604,29 @@ func (r *Runner) hardwareInventory(ctx context.Context) hardware.Inventory {
 	return hardware.Local(ctx)
 }
 
-// maybeReadvertiseModels ends the stream when what this machine
-// advertises has changed, so the reconnect re-registers with the new
-// advertisement. It reports whether it did.
-//
-// The advertisement is two things, both bound at Register: the model
-// labels, and the sharing consent (inference.serve, in the capability
-// descriptor). Three guards, each closing a different failure:
-//
-//   - Nothing happens unless the ADVERTISEMENT differs. Discovery
-//     running again is not news; a model appearing is, and so is the
-//     owner changing who may use this machine.
-//   - Nothing happens while work is in flight. A model finishing its pull
-//     must not kill somebody's hour-long app session, a tool call halfway
-//     through, or a sibling pull still downloading -- and the change will
-//     still be there in a minute.
-//   - Nothing happens twice inside modelReadvertiseMinInterval. A runtime
-//     flapping between up and down would otherwise turn this worker into
-//     one that reconnects forever, which is worse than a stale label.
-//
-// The THIRD guard has two exceptions. A one-shot request from
-// RequestImmediateReadvertise is spent by the reconnect it asks for and by
-// nothing else; an early return leaves it armed -- busy, or labels that
-// have not changed YET because the policy reload naming the new model
-// landed a moment after the request -- so the next evaluation still gets
-// the bypass, rather than the machine that was mid-call being the one
-// that waits out the floor.
-//
-// And a WITHDRAWN consent (cluster -> owner) skips the floor outright
-// (memql-cockpit#428): until the cluster sees it, other people's prompts
-// keep arriving on hardware the owner has taken back. The busy guard
-// still holds -- work in flight is never cut short, the owner's own
-// included -- but while the withdrawal waits the heartbeat loop re-checks
-// every withdrawalPoll rather than every minute, so it lands at the first
-// idle second.
-//
-// The worker does NOT refuse new calls to get idle sooner. The engine
-// treats any error a worker ends a call with as the call having run and
-// does not reroute it, so a refusal would fail the call -- the owner's
-// own planner call among them, for as long as a long app session kept the
-// machine busy. A machine that is never idle therefore keeps being routed
-// to until it is; a worker-side refusal the engine retries elsewhere is
-// the engine change that would let this go further.
+// maybeReadvertiseModels reconnects only when the model inventory or repository
+// scope changed and no work is in flight. A deliberate pull or policy reload
+// can bypass the reconnect floor once. Model sharing is stored in Fleet and
+// takes effect on the next admission without a worker reconnect.
 func (r *Runner) maybeReadvertiseModels(ctx context.Context, conn *Connection) bool {
 	if r == nil || conn == nil || conn.closing.Load() {
 		return false
 	}
-	serve := r.inferenceServe()
-	serveChanged := serve != conn.AdvertisedServe
 	labelsChanged := false
 	if r.modelsInv != nil {
 		labelsChanged = advertisedFingerprint(r.modelInventory(ctx).Labels()) != conn.ModelFingerprint
 	}
-	// The pipelines label is the advertisement's third part (memql#5494),
+	// The pipelines label is another part of the advertisement (memql#5494),
 	// and an ordinary one: no floor bypass of its own, because a step routed
 	// on a stale grant is refused by the live policy before it runs.
 	pipelines := r.pipelinesPolicy()
 	pipelinesChanged := pipelines.AdvertisementFingerprint() != conn.AdvertisedPipelines
-	if !serveChanged && !labelsChanged && !pipelinesChanged {
-		// A withdrawal the owner took back before it landed: the
-		// advertisement on the wire is right again, so nothing is
-		// refused any longer.
-		r.endWithdrawal("the sharing consent is back to what the cluster already has")
+	if !labelsChanged && !pipelinesChanged {
 		return false
 	}
-	withdrawing := serveChanged && conn.AdvertisedServe == tools.ServeCluster
 	if r.busy() {
-		if withdrawing {
-			r.awaitIdleForWithdrawal()
-		}
 		r.logger.Debug("this machine's advertisement changed; deferring re-registration until this worker is idle",
 			"models_changed", labelsChanged,
-			"consent_changed", serveChanged,
 			"pipelines_changed", pipelinesChanged,
 		)
 		return false
@@ -754,8 +634,6 @@ func (r *Runner) maybeReadvertiseModels(ctx context.Context, conn *Connection) b
 	now := r.clock()
 	last := r.lastReadvertise.Load()
 	switch {
-	case withdrawing:
-		r.pendingReadvertise.Store(false)
 	case last != 0 && now.Sub(time.Unix(0, last)) < modelReadvertiseMinInterval:
 		// Swap rather than Load: the bypass must be consumed by the one
 		// reconnect it paid for. Left armed, it would sit there and let
@@ -770,12 +648,6 @@ func (r *Runner) maybeReadvertiseModels(ctx context.Context, conn *Connection) b
 	}
 	r.lastReadvertise.Store(now.UnixNano())
 	switch {
-	case withdrawing:
-		r.logger.Info("inference.serve withdrew this machine from the cluster; reconnecting so the cluster stops routing other people's calls here",
-			"from", conn.AdvertisedServe, "to", serve)
-	case serveChanged:
-		r.logger.Info("inference.serve changed; reconnecting so the cluster sees it",
-			"from", conn.AdvertisedServe, "to", serve)
 	case pipelinesChanged:
 		r.logger.Info("pipeline repository policy changed; reconnecting to update routing")
 	default:
@@ -789,33 +661,6 @@ func (r *Runner) maybeReadvertiseModels(ctx context.Context, conn *Connection) b
 	conn.closing.Store(true)
 	conn.Close()
 	return true
-}
-
-// awaitIdleForWithdrawal marks a withdrawn consent as waiting for this
-// worker to go idle, and says so once.
-func (r *Runner) awaitIdleForWithdrawal() {
-	if r.withdrawing.Swap(true) {
-		return
-	}
-	sessions := 0
-	if r.sessions != nil {
-		sessions = r.sessions.Live()
-	}
-	r.logger.Info("inference.serve no longer shares this machine with the cluster; re-registering at the first moment nothing is running",
-		"model_calls", r.calls.Live(),
-		"app_sessions", sessions,
-		"tool_calls", r.activeCalls.Load(),
-		"pulls", r.pulls.Live(),
-	)
-}
-
-// endWithdrawal stops waiting: the registration that carries the consent
-// landed, or the owner restored the consent before it had to.
-func (r *Runner) endWithdrawal(why string) {
-	if !r.withdrawing.Swap(false) {
-		return
-	}
-	r.logger.Info("the withdrawn consent no longer needs a re-registration", "why", why)
 }
 
 // RequestImmediateReadvertise says the local model set just changed and
@@ -846,8 +691,7 @@ func (r *Runner) endWithdrawal(why string) {
 // worker through the SIGHUP they already send after writing
 // models.allow, and the handler in cli.go asks for this after reloading
 // the policy -- a reloaded allow list that nobody re-advertised is a
-// model the cluster still cannot see. The same reload is how a changed
-// inference.serve reaches the runner. The cluster's own ModelPullStart
+// model the cluster still cannot see. The cluster's own ModelPullStart
 // arm (modelpull.go) calls it directly, after reloading the policy
 // itself and AFTER sending its End: the reconnect this asks for closes
 // the stream that End rides.

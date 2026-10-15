@@ -420,15 +420,15 @@ func handleRun(args []string) {
 			HTTPClient:        &http.Client{Timeout: 0},
 		})
 		runner, err = NewRunner(Options{
-			Logger:          logger,
-			Config:          legacyCfg,
-			Tools:           toolsFor(legacyCfg.Home),
-			Apps:            appInventories.For(legacyCfg.Home),
-			Models:          modelInventory,
-			Calls:           calls,
-			Sessions:        sessions,
-			Metrics:         metrics,
-			InferenceServe:  policy.InferenceServe,
+			Logger:   logger,
+			Config:   legacyCfg,
+			Tools:    toolsFor(legacyCfg.Home),
+			Apps:     appInventories.For(legacyCfg.Home),
+			Models:   modelInventory,
+			Calls:    calls,
+			Sessions: sessions,
+			Metrics:  metrics,
+
 			PipelinesPolicy: policy.Pipelines,
 			ModelPull: &ModelPullOptions{
 				PolicyPath:   policyPath,
@@ -1066,10 +1066,9 @@ func logLevelProblems(logger *slog.Logger, policy *tools.Policy) {
 //
 // EVERY RUN PATH CALLS THIS (TestEverySIGHUPReloadsThroughOneFunction). A
 // path that reloaded by hand announced nothing -- `worker pair`'s run said
-// nothing about inference.serve -- and the announcement is how a person
+// nothing about repository scopes -- and the announcement is how a person
 // reading the log learns why the worker is about to reconnect.
 func reloadPolicy(logger *slog.Logger, policy *tools.Policy) bool {
-	serveBefore := policy.InferenceServe()
 	pipelinesBefore := policy.Pipelines().AdvertisementFingerprint()
 	if err := policy.Reload(); err != nil {
 		logger.Warn("policy reload failed", "error", err)
@@ -1077,13 +1076,6 @@ func reloadPolicy(logger *slog.Logger, policy *tools.Policy) bool {
 	}
 	logger.Info("policy reloaded")
 	logLevelProblems(logger, policy)
-	if after := policy.InferenceServe(); after != serveBefore {
-		// The consent rides Register, so every home re-registers to carry
-		// it (memql-cockpit#428) -- as soon as its work in flight allows,
-		// and a withdrawal refuses new model calls meanwhile.
-		logger.Info("inference.serve changed; every cluster stream re-registers to carry it",
-			"from", serveBefore, "to", after)
-	}
 	if after := policy.Pipelines().AdvertisementFingerprint(); after != pipelinesBefore {
 		// So does the pipelines label (memql#5494). A step already routed
 		// here on the old answer meets the new one when it arrives: the

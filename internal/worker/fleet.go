@@ -334,15 +334,15 @@ func (f *Fleet) buildHome(home Home, machineID string) (homeRun, error) {
 		newRunner = NewRunner
 	}
 	runner, err := newRunner(Options{
-		Logger:          homeLogger,
-		Config:          cfg,
-		Tools:           dispatcher,
-		Apps:            appInventory,
-		Models:          f.modelsInv,
-		Calls:           calls,
-		Sessions:        sessions,
-		Metrics:         f.metrics,
-		InferenceServe:  f.inferenceServe(),
+		Logger:   homeLogger,
+		Config:   cfg,
+		Tools:    dispatcher,
+		Apps:     appInventory,
+		Models:   f.modelsInv,
+		Calls:    calls,
+		Sessions: sessions,
+		Metrics:  f.metrics,
+
 		PipelinesPolicy: f.pipelinesPolicy(),
 		ModelPull:       pull,
 	})
@@ -366,13 +366,6 @@ func (f *Fleet) buildHome(home Home, machineID string) (homeRun, error) {
 		sessions: sessions,
 		backups:  backups,
 	}, nil
-}
-
-func (f *Fleet) inferenceServe() func() string {
-	if f.policy == nil {
-		return nil
-	}
-	return f.policy.InferenceServe
 }
 
 // pipelinesPolicy is the live pipelines consent, shared by every home: the

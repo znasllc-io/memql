@@ -275,13 +275,13 @@ func runConfiguredWorker(clusterURL, token, name string, logger *slog.Logger) er
 			return fmt.Errorf("pair-run: %w", err)
 		}
 		runner, err = NewRunner(Options{
-			Logger:          logger,
-			Config:          cfg,
-			Tools:           toolsFor(cfg.Home),
-			Apps:            appInventories.For(cfg.Home),
-			Models:          modelInventory,
-			Metrics:         metrics,
-			InferenceServe:  policy.InferenceServe,
+			Logger:  logger,
+			Config:  cfg,
+			Tools:   toolsFor(cfg.Home),
+			Apps:    appInventories.For(cfg.Home),
+			Models:  modelInventory,
+			Metrics: metrics,
+
 			PipelinesPolicy: policy.Pipelines,
 		})
 		if err != nil {

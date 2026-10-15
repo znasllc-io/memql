@@ -549,15 +549,13 @@ by `(machine, model, suiteVersion)`, so an unknown version is refused in
 BOTH directions. Each case runs under its own deadline, because a
 whole-run ceiling loses every figure to the last case that hung.
 
-**`inference.serve` is one of TWO consents.** The other is the owner's,
-on the registration; a machine serves somebody else's prompt only when
-both say `cluster`. It rides the EXISTING `capability_descriptor_json`
-field -- the one place a cockpit can define a key ahead of the engine
-and have it travel, because `ParseCapabilityDescriptor` tolerates
-unknown keys (`displays` set that precedent) while `AsMap()` drops them.
-**`CapabilityDescriptorSchemaVersion` STAYS 1**: the engine admits that
-number and refuses any other BY VALUE, so a bump for an additive field
-is a handshake refusal on every machine at once.
+**Fleet owns model sharing.** The enrolled owner chooses private inference or
+specific people and groups on the machine's Sharing page. The engine checks
+that stored audience on every routing path and again on the receiving replica.
+Cockpit advertises capabilities and enforces its model allowlist; it does not
+need a separate sharing preference or a reconnect when the audience changes.
+Model sharing never grants commands, files, app sessions or computer control.
+**`CapabilityDescriptorSchemaVersion` STAYS 1** for this descriptor change.
 
 **Two of the four modality flags are real probes and two are not.**
 `vision` and `imagegen` come from Ollama's own `/api/show` capability
@@ -989,8 +987,7 @@ from anywhere else. CI runs the suite under `-race`.
 **A WORKER-SIDE REFUSAL IS A FAILED CALL.** At the current pin the engine
 treats any error a worker ends a model call with as the call having run, and
 does not try another machine. So nothing here refuses a call to make itself
-convenient: the model ceiling WAITS, and a consent withdrawal waits for idle
-rather than refusing its way there. Revisit both once the engine reroutes a
+convenient: the model ceiling WAITS rather than refusing its way to an idle slot. Revisit both once the engine reroutes a
 refusal made before start.
 
 **A REFUSAL BY THE CLUSTER IS NOT A BLIP, AND NOT A REASON TO DISABLE A
@@ -1011,13 +1008,10 @@ the real status there; without it a refused token read as "send: EOF".
 sent. A cluster that accepts Register and drops the stream used to be asked
 again every second, each time a full Register and a hardware scan.
 
-**THE CONSENT IS PART OF THE ADVERTISEMENT.** `inference.serve` rides
-Register's descriptor and nothing else, so a changed consent re-registers
-(`Connection.AdvertisedServe` beside `ModelFingerprint`). A WITHDRAWAL skips
-the two-minute floor; if work is in flight it waits, re-checking every
-second instead of every minute, and re-registers at the first idle second.
-It never cuts work short and never refuses a call to get there (see above).
-Restoring the consent before it lands ends the wait. The heartbeat goroutine
+**MODEL SHARING NEEDS NO RECONNECT.** The engine uses the owner's persisted
+Fleet audience for each new call. Model inventory and repository-scope changes
+still re-register, waiting until work in flight finishes.
+The heartbeat goroutine
 is joined before `runStream` returns, so a stale one can never act on the
 next stream's state. Each stream is opened on its own context, and
 `Connection.Close` cancels it if the graceful half-close is still stuck
