@@ -66,7 +66,6 @@ func (s *EngineStore) WorkersForOwner(ctx context.Context, ownerUserId string) (
 			SharingMode:      sharing.Mode,
 			SharedUserIds:    sharing.UserIds,
 			SharedGroupIds:   sharing.GroupIds,
-			InferenceServe:   capabilityInferenceServe(row["capabilityDescriptor"]),
 			RepositoryScopes: workerservice.RepositoryScopesFromMap(row["capabilityDescriptor"]),
 			ActionContracts:  workerservice.ActionContractsFromMap(row["capabilityDescriptor"]),
 			NativePlatform:   workerservice.NativePlatformFromMap(row["capabilityDescriptor"]),
@@ -117,7 +116,6 @@ func (s *EngineStore) SharedInferenceWorkers(ctx context.Context) ([]Candidate, 
 			SharingMode:      sharing.Mode,
 			SharedUserIds:    sharing.UserIds,
 			SharedGroupIds:   sharing.GroupIds,
-			InferenceServe:   capabilityInferenceServe(row["capabilityDescriptor"]),
 			RepositoryScopes: workerservice.RepositoryScopesFromMap(row["capabilityDescriptor"]),
 			ActionContracts:  workerservice.ActionContractsFromMap(row["capabilityDescriptor"]),
 			NativePlatform:   workerservice.NativePlatformFromMap(row["capabilityDescriptor"]),
@@ -213,17 +211,6 @@ func rowTime(row map[string]any, key string) time.Time {
 		}
 	}
 	return time.Time{}
-}
-func capabilityInferenceServe(v any) string {
-	descriptor, ok := v.(map[string]any)
-	if !ok {
-		return workerservice.InferenceServeOwner
-	}
-	serve, _ := descriptor["inferenceServe"].(string)
-	if strings.TrimSpace(serve) != workerservice.InferenceServeCluster {
-		return workerservice.InferenceServeOwner
-	}
-	return workerservice.InferenceServeCluster
 }
 func rowApps(row map[string]any, key string) []workerservice.AppInfo {
 	raw, ok := row[key].([]any)

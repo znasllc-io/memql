@@ -70,8 +70,7 @@ export interface ShareChoice {
  * What a sharing write did, in the engine's words.
  *
  * THE SENTENCE IS THE ENGINE'S, and it is the only success this surface
- * shows: it names the cockpit's half when that is still missing, which is the
- * difference between "lent" and "lent, and serving".
+ * shows. It acknowledges the saved audience, not model availability.
  */
 export interface SharingReceipt {
   mode: SharingMode;
@@ -119,12 +118,8 @@ export interface MachineWrites {
    *  Resolves to the receipt on success, or null on a refusal with
    *  `actionError` carrying the reason. */
   revoke: (registrationId: string, reason: string) => Promise<RemovalReceipt | null>;
-  /** The OWNER's half of the sharing consent (epic memql#5146, D6; three
-   *  modes since epic memql#5344). The cockpit's half comes from that
-   *  machine's own policy.yaml and is not writable from here -- deliberately:
-   *  it is a decision about where the machine is, and only the machine can
-   *  make it. Resolves to the engine's receipt, or null on a refusal with
-   *  `actionError` carrying the engine's words. */
+  /** Save the enrolled owner's audience. Resolves to the engine receipt,
+   *  or null with the refusal in actionError. */
   setSharing: (registrationId: string, choice: ShareChoice) => Promise<SharingReceipt | null>;
 }
 
@@ -260,8 +255,7 @@ export function useMachineWrites(): MachineWrites {
   // resolves the machine through the caller's OWN machines first.
   //
   // A RECEIPT, NOT A BOOLEAN (epic memql#5344). The panel shows the engine's
-  // own sentence as the only success it claims, and that sentence names the
-  // cockpit's half when it is still missing -- so the answer row is read
+  // own sentence as the only success it claims, so the answer row is read
   // rather than discarded. BOTH LISTS ARE ALWAYS SENT, empty outside
   // `people`: the engine ignores them there, and a write that left them out
   // would ask the reader to know that.

@@ -99,10 +99,7 @@ export interface MachineRow {
    *  `present` false means the cockpit predates the field -- NOT a machine
    *  with no memory. See machines/hardware.ts. */
   hardware: MachineHardware;
-  /** The OWNER's half of the sharing consent (D6, epic memql#5344 G1). The
-   *  cockpit's half is `inferenceServe` beside it, and a machine serves
-   *  anybody but its owner only when the owner said `people` or `cluster`
-   *  AND the cockpit said cluster. */
+  /** The enrolled owner's saved model-sharing audience. */
   sharingMode: SharingMode;
   /** Under `people`: the users it is lent to, in the spelling stored and in
    *  stored order. EMPTY under the other two modes whatever the row holds --
@@ -113,10 +110,6 @@ export interface MachineRow {
   sharedGroupIds: string[];
   sharedAt: string;
   sharedBy: string;
-  /** The COCKPIT's half, from that machine's own policy.yaml. Empty reads as
-   *  "owner": a cockpit that predates the field has said nothing, and silence
-   *  is not agreement to run other people's work on somebody's laptop. */
-  inferenceServe: string;
   /** The TCC / X11 snapshot the cockpit took at register time and refreshes
    *  on measured heartbeats. `present` false means the cockpit predates the
    *  report -- NOT a machine that was refused everything. */
@@ -378,7 +371,6 @@ export function machineFromRow(raw: Row): MachineRow {
     sharedGroupIds: sharing.groupIds,
     sharedAt: nestedString(objectAt(row["sharing"]), "sharedAt"),
     sharedBy: nestedString(objectAt(row["sharing"]), "sharedBy"),
-    inferenceServe: nestedString(descriptor, "inferenceServe") === "cluster" ? "cluster" : "owner",
     permissions: permissionsFrom(row["permissions"]),
     rttMs: rowNumber(row, "rttMs"),
     rttAt: rowString(row, "rttAt"),

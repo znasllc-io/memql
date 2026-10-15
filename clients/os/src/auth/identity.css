@@ -30,7 +30,7 @@
 .os-identity-footer a:hover { text-decoration: underline; }
 .os-identity-actions { justify-content: flex-end; }
 .os-signin .os-identity-actions > .os-button { flex: 1; min-height: 42px; justify-content: center; }
-.os-identity-notice { margin: 0; padding: 12px 16px; border-radius: var(--os-radius-xs); background: var(--os-accent-soft); line-height: 1.55; }
+.os-identity-notice { margin: 0; padding: 12px 16px; border-radius: 0; background: var(--os-accent-soft); line-height: 1.55; }
 .os-identity-notice[data-tone="error"] { border-left: 2px solid var(--os-error); background: var(--os-wash); }
 .os-identity-details { font-size: var(--os-text-sm); min-width: 0; }
 .os-identity-details summary { cursor: pointer; color: var(--os-muted); padding-block: 6px; }

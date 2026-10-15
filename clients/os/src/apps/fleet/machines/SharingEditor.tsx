@@ -71,7 +71,7 @@ export function SharingEditor({ machine, writes, children }: { machine: MachineR
   // Keep the acknowledged choice while its broadcast is in transit. A later
   // live change always wins over this temporary baseline.
   const [saved, setSaved] = useState<{
-    before: string; share: StoredShare; receipt: SharingReceipt; serve: string;
+    before: string; share: StoredShare; receipt: SharingReceipt;
   } | null>(null);
   const [echoed, setEchoed] = useState(false);
   const liveSig = sharingSignature(machine);
@@ -161,7 +161,7 @@ export function SharingEditor({ machine, writes, children }: { machine: MachineR
       return;
     }
     const share: StoredShare = { sharingMode: choice.mode, sharedUserIds: choice.userIds, sharedGroupIds: choice.groupIds };
-    setSaved({ before, share, receipt, serve: machine.inferenceServe });
+    setSaved({ before, share, receipt });
     setEchoed(false);
     setStart(share);
     setDraft(draftFrom(share));
@@ -287,7 +287,7 @@ export function SharingEditor({ machine, writes, children }: { machine: MachineR
           : "Nothing changed yet.";
 
   const showReceipt = saved !== null && !dirty && !asking &&
-    sharingSignature(current) === sharingSignature(saved.share) && machine.inferenceServe === saved.serve;
+    sharingSignature(current) === sharingSignature(saved.share);
 
   return (
     <section ref={editorRef} className="fleet-share-editor" aria-label="Model sharing"
@@ -445,14 +445,6 @@ export function SharingEditor({ machine, writes, children }: { machine: MachineR
               </>
             ) : null}
           </section>
-        ) : null}
-
-        {draft.mode !== "owner" && machine.inferenceServe !== "cluster" ? (
-          <Notice
-            tone="info"
-            sentence="Model sharing is waiting for Cockpit."
-            next="On this machine, set inference.serve to cluster in policy.yaml."
-          />
         ) : null}
 
         {children}

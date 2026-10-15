@@ -44,6 +44,9 @@ and wallpaper values only (see `src/themes/`), so nothing here is themeable.
    Selection controls use straight edges (`--os-selection-radius`), including
    local tabs, choice cards, menu options and equipment choices. Show selection
    with the theme accent, fill or underline; avoid rounded selection outlines.
+   Notices, warnings, errors and status panels also use straight edges. Keep
+   their tone marks straight, with theme colors and readable text; no curved
+   brackets or rounded message outlines. Use the shared `Notice` for feedback.
 
 2. **Filters are questions, not furniture.** Search and facet controls live
    behind one affordance (`kit` `Refine`): collapsed by

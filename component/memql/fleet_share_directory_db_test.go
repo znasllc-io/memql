@@ -95,8 +95,7 @@ func (f shareDirFixture) machine(name, owner string) string {
 	f.insert("v1:worker:registration", id, map[string]any{
 		"ownerUserId": owner, "name": name, "identityId": f.id("v1:identity:identity", name),
 		"capabilities": []string{"MODEL"}, "concurrency": map[string]any{"MODEL": 1},
-		"capabilityDescriptor": map[string]any{"inferenceServe": "cluster"},
-		"registeredAt":         time.Now().UTC().Format(time.RFC3339Nano),
+		"registeredAt": time.Now().UTC().Format(time.RFC3339Nano),
 	})
 	return id
 }

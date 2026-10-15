@@ -14,7 +14,7 @@ package worker
 // exactly the enumeration D12 closed, reopened by a copy edit.
 //
 // This package imports both, so this is where the two are held together. It
-// walks every mode, both cockpit answers and silence, and a listed and an
+// walks every mode, and a listed and an
 // unlisted person, and asks the classifier about every non-empty sentence.
 
 import (
@@ -33,7 +33,6 @@ func TestEverySharingRefusalIsCountedNeverNamed(t *testing.T) {
 		{Mode: workerservice.SharingModePeople, UserIds: []string{"ana"}},
 		{Mode: workerservice.SharingModePeople, GroupIds: []string{"design"}},
 	}
-	serves := []string{workerservice.InferenceServeOwner, workerservice.InferenceServeCluster, ""}
 	checked := 0
 	check := func(where, why string) {
 		t.Helper()
@@ -47,16 +46,14 @@ func TestEverySharingRefusalIsCountedNeverNamed(t *testing.T) {
 		}
 	}
 	for _, s := range shares {
-		for _, serve := range serves {
-			check("SharingRefusal", workerservice.SharingRefusal(s.Mode, serve))
-			check("SystemRefusal", workerservice.SystemRefusal(s, serve))
-			for _, user := range []string{"ana", "bo"} {
-				check("PersonRefusal", workerservice.PersonRefusal(s, serve, workerservice.NewPerson(context.Background(), user, noGroups)))
-			}
+		check("SharingRefusal", workerservice.SharingRefusal(s.Mode))
+		check("SystemRefusal", workerservice.SystemRefusal(s))
+		for _, user := range []string{"ana", "bo"} {
+			check("PersonRefusal", workerservice.PersonRefusal(s, workerservice.NewPerson(context.Background(), user, noGroups)))
 		}
 	}
 	// A walk that checked nothing would pass forever.
-	if checked < 10 {
+	if checked < 8 {
 		t.Fatalf("checked only %d refusal sentences; the walk is not reaching the refusals it exists for", checked)
 	}
 }

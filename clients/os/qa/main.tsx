@@ -25,7 +25,7 @@ import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 
 import "../src/styles/index.css";
 import { applyPackStyles, resolveThemePack } from "../src/themes/registry";
-import { Panel } from "../src/kit";
+import { Button, Notice, Panel } from "../src/kit";
 import { setRoleLadder } from "../src/system/roles";
 import { SEEDED_LADDER } from "../test/seededLadder";
 import {
@@ -686,6 +686,19 @@ function PreviewPage({ site }: { site: ReturnType<typeof siteFromRow> }) {
 // reason the README gives about the fake in general: each is the SUITE's, so a
 // screenshot cannot disagree with what those tests assert.
 
+function FeedbackPreview() {
+  const { actions } = useOs();
+  useEffect(() => { actions.setThemePack(resolveThemePack(new URLSearchParams(window.location.search).get("theme") ?? "graphite").id); }, [actions]);
+  const [saved, setSaved] = useState(false);
+  return <div className="os-window-content" style={{ display: "grid", gap: 16, alignContent: "start" }}>
+    <Notice sentence="Sharing applies to the people and groups you choose." />
+    <Notice tone="warn" sentence="People and groups may be out of date." next="Your choices are kept while the connection recovers." />
+    {saved ? <p role="status" className="os-caption">Sharing saved.</p> : <Notice tone="error" sentence="That change was not saved." next="Your choices are kept." detail="The connection was interrupted. Try again."><Button onClick={() => setSaved(true)}>Try again</Button></Notice>}
+    <div className="os-domain-problem"><p className="os-domain-problem-sentence">The domain could not be verified.</p><p className="os-domain-problem-detail">Check the DNS record, then try again.</p></div>
+    <div className="os-fleet-revoked"><p className="os-caption">This machine was removed from the fleet.</p></div>
+  </div>;
+}
+
 const VIEWS: Record<
   string,
   {
@@ -697,6 +710,7 @@ const VIEWS: Record<
     render: () => JSX.Element;
   }
 > = {
+  "feedback": { render: () => <WindowBody fallback="Notices"><FeedbackPreview /></WindowBody> },
   ...MATERIALIZER_VIEWS,
   ...mapScenes(WindowBody),
   ...fleetEquipmentScenes(WindowBody),
@@ -947,7 +961,7 @@ const VIEWS: Record<
   },
   // Sharing a machine (epic memql#5344). The panel in each reading of who can
   // use it, then the dialog. `sharing-people` is the one to read first: names,
-  // both consents given, and the week's split ledger line.
+  // the saved audience and the week's split ledger line.
   "sharing-owner": {
     connect: () => fleetConnection({}),
     wrap: (el) => fleetSession(<MachinesProvider>{el}</MachinesProvider>),
@@ -958,9 +972,8 @@ const VIEWS: Record<
     wrap: (el) => fleetSession(<MachinesProvider>{el}</MachinesProvider>),
     render: () => <SharingPane over={{ sharing: SHARED_WITH_PEOPLE, capabilityDescriptor: { inferenceServe: "cluster" } }} />,
   },
-  // Lent by its owner, not yet agreed to by the machine: the one-line state is
-  // muted and the cockpit's line says what to change and where.
-  "sharing-waiting": {
+  // A stored machine descriptor from an earlier Cockpit cannot block sharing.
+  "sharing-legacy-descriptor": {
     connect: () => fleetConnection({ fleetShareDirectory: [SHARE_DIRECTORY] }),
     wrap: (el) => fleetSession(<MachinesProvider>{el}</MachinesProvider>),
     render: () => <SharingPane over={{ sharing: SHARED_WITH_PEOPLE, capabilityDescriptor: { inferenceServe: "owner" } }} />,

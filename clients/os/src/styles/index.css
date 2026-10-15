@@ -2622,7 +2622,7 @@ button.os-row.os-record-row:focus-visible { outline: 2px solid var(--os-accent);
   gap: 3px;
   margin: 0;
   padding: 9px 12px;
-  border-radius: var(--os-radius-xs);
+  border-radius: 0;
   border-left: 2px solid var(--os-line);
   background: var(--os-raised);
   color: var(--os-ink);
@@ -2765,7 +2765,7 @@ button.os-row.os-record-row:focus-visible { outline: 2px solid var(--os-accent);
   padding: 8px 11px;
   border-left: 2px solid var(--os-line);
   background: var(--os-raised);
-  border-radius: var(--os-radius-xs);
+  border-radius: 0;
 }
 .os-nexus-door-head {
   display: flex;
@@ -3632,7 +3632,7 @@ button.os-row.os-record-row:focus-visible { outline: 2px solid var(--os-accent);
 .os-fleet-revoked {
   padding: 8px 11px;
   border-left: 2px solid var(--os-line);
-  border-radius: var(--os-radius-xs);
+  border-radius: 0;
   background: var(--os-raised);
 }
 .os-fleet-revoked .os-caption {
@@ -4944,7 +4944,7 @@ a.os-button {
   margin: 0;
   max-width: min(520px, 80vw);
   padding: 7px 12px;
-  border-radius: var(--os-radius-sm);
+  border-radius: 0;
   background: var(--os-glass-solid);
   border: 1px solid var(--os-error);
   color: var(--os-ink);
@@ -5273,7 +5273,7 @@ a.os-button {
   flex-direction: column;
   gap: 4px;
   padding: 8px 10px;
-  border-radius: var(--os-radius-xs);
+  border-radius: 0;
   background: var(--os-raised);
   border-left: 2px solid var(--os-error);
 }
@@ -12762,7 +12762,7 @@ button.os-cluster-mesh-peer:focus-visible {
   gap: 4px 12px;
   padding: 8px 12px;
   border-left: 1px solid var(--os-line);
-  border-radius: 0 var(--os-radius-xs) var(--os-radius-xs) 0;
+  border-radius: 0;
 }
 
 /* An OPEN door is the only block on this screen with a filled ground, which is
@@ -12851,7 +12851,7 @@ button.os-cluster-mesh-peer:focus-visible {
   padding: 12px 14px;
   border: 1px solid transparent;
   border-left: 2px solid var(--os-line);
-  border-radius: var(--os-radius-xs);
+  border-radius: 0;
 }
 
 .os-doorrow[data-os-door="open"] {
@@ -12924,7 +12924,7 @@ button.os-cluster-mesh-peer:focus-visible {
   gap: 4px 20px;
   padding: 12px 14px;
   border-left: 2px solid var(--os-line);
-  border-radius: var(--os-radius-xs);
+  border-radius: 0;
 }
 
 /* A level that costs money is the one to notice. */

@@ -156,7 +156,7 @@ describe("the inline sharing panel", () => {
     const { conn } = mount(studio({ mode: "people", userIds: ["ana"] }), { userId: "someone-else" });
     expect(screen.queryByRole("switch")).toBeNull();
     expect(screen.getByText("Shared with 1 person")).toBeTruthy();
-    expect(screen.getByText("The person who enrolled this machine needs to enable model sharing in Cockpit.")).toBeTruthy();
+    expect(screen.queryByText(/policy\.yaml|waiting for Cockpit/)).toBeNull();
     expect(conn.query.fleetShareDirectory).not.toHaveBeenCalled();
   });
 
@@ -173,12 +173,12 @@ describe("the words on the way into Sharing", () => {
       machineFromRow(studio(block, serve === undefined ? {} : { capabilityDescriptor: { inferenceServe: serve } })),
     );
 
-  it("say what the machine DOES: the owner's mode and the cockpit's consent together", () => {
+  it("show the saved audience without a second machine setting", () => {
     expect(words(undefined, "cluster")).toBe("Personal inference");
     expect(words({ mode: "people", userIds: ["ana"] }, "cluster")).toBe("Shared with people");
     expect(words({ mode: "cluster" }, "cluster")).toBe("Shared with everyone");
-    expect(words({ mode: "people", userIds: ["ana"] })).toBe("Personal inference");
-    expect(words({ mode: "cluster" }, "owner")).toBe("Personal inference");
+    expect(words({ mode: "people", userIds: ["ana"] })).toBe("Shared with people");
+    expect(words({ mode: "cluster" }, "owner")).toBe("Shared with everyone");
   });
 });
 
@@ -197,7 +197,7 @@ describe("the week's ledger", () => {
     const first = mount(studio(undefined, willing), { ledger: { sentence: WEEK, readable: true } });
     expect(screen.queryByText(WEEK)).toBeNull();
     first.rerender(studio({ mode: "people", userIds: ["ana"] }));
-    expect(screen.queryByText(WEEK)).toBeNull();
+    expect(screen.getByText(WEEK)).toBeTruthy();
   });
 
   it("does not let a ledger that could not be read look like a count", () => {
@@ -294,13 +294,13 @@ describe("the inline sharing editor", () => {
     expect(conn.query.fleetShareDirectory).toHaveBeenCalledTimes(3);
   });
 
-  it("says, while a draft lends it, that a machine which has not agreed serves nobody else yet", async () => {
+  it("shows an unsaved choice without sending the owner to machine configuration", async () => {
     mount(studio());
     const editor = await openEditor();
     expect(within(editor).queryByText("Model sharing is waiting for Cockpit.")).toBeNull();
     await setSharing(editor, true);
-    expect(within(editor).getByText("Model sharing is waiting for Cockpit.")).toBeTruthy();
-    expect(within(editor).getByText(/inference\.serve/)).toBeTruthy();
+    expect(within(editor).queryByText("Model sharing is waiting for Cockpit.")).toBeNull();
+    expect(within(editor).queryByText(/inference\.serve/)).toBeNull();
   });
 
   it("does not warn about a machine that has already agreed", async () => {
@@ -566,31 +566,17 @@ describe("the inline sharing editor", () => {
     expect(conn.query.fleetSetSharing).not.toHaveBeenCalled();
   });
 
-  it("retires the receipt when the machine's own consent changes under it", async () => {
-    const conn = fakeConnection({ fleetShareDirectory: [directory()] });
-    conn.query.fleetSetSharing.mockResolvedValueOnce(
-      builtinReply("fleetSetSharing", [
-        {
-          id: MACHINE_ID,
-          machineId: MACHINE_ID,
-          mode: "people", userIds: ["ana"],
-          people: 1,
-          groups: 0,
-          sentence:
-            "Offered to everyone on this cluster, and to the cluster's own work. The machine itself has to agree too -- set `inference.serve: cluster` in its policy.yaml -- and until it does, nothing runs on it for anybody else.",
-        },
-      ]),
-    );
-    const { rerender } = mount(studio(), { conn });
+  it("saves sharing in one step without requiring machine configuration", async () => {
+    const { conn } = mount(studio());
     const editor = await openEditor();
     await setSharing(editor, true);
     fireEvent.click(within(editor).getByRole("option", { name: "Ana Ruiz" }));
+    expect(screen.queryByText(/policy\.yaml|waiting for Cockpit/)).toBeNull();
     fireEvent.click(saveButton(editor));
     await settle();
-    rerender(studio({ mode: "people", userIds: ["ana"] }));
-    expect(screen.getByText(/The machine itself has to agree too/)).toBeTruthy();
-    rerender(studio({ mode: "people", userIds: ["ana"] }, willing));
-    expect(screen.queryByText(/The machine itself has to agree too/)).toBeNull();
+    expect(conn.query.fleetSetSharing).toHaveBeenCalledTimes(1);
+    expect(screen.getByText("Lent to 1 person.")).toBeTruthy();
+    expect(screen.queryByText(/policy\.yaml|waiting for Cockpit/)).toBeNull();
   });
 
   it("keeps focus in the search after the last one is picked", async () => {

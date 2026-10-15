@@ -63,59 +63,32 @@ to finish in (see [What stopping does](#what-stopping-does)).
 
 ---
 
-## Two consents, and neither is sufficient
+## Choose sharing once, in Fleet
 
-A machine serves anybody but its owner only when **both** of these are true:
+Open **Fleet → the machine → Sharing**. Turn on **Share models**, choose
+people or groups, then **Save**. Turn it off and save to keep inference private.
+Only the person who enrolled the machine can change this audience; cluster
+administration cannot volunteer somebody else's hardware.
 
-| Consent | Where it lives | Who gives it |
-|---|---|---|
-| The owner is willing to lend it | `sharing.mode` is `people` or `cluster` | the machine's owner, at Fleet → the machine → Sharing |
-| The machine is willing to serve | `inference.serve: cluster` in that machine's `policy.yaml` | whoever administers the machine |
+The saved audience applies automatically to subsequent calls on every replica.
+No Cockpit setting, file edit, restart or second confirmation is needed.
+A machine that is offline or has no allowed model is still unavailable; sharing
+does not install a model or change its allowlist. Files, commands, local apps
+and computer control keep their separate permissions.
 
-They are deliberately not one setting, and the split is not ceremony:
+Unlisted people are refused. Active members of a selected group may use the
+models; inactive memberships do not grant access. System work cannot use a
+people share. Existing cluster-wide shares remain supported, but new choices
+are private or specific people and groups.
 
-- **The owner's half is a decision about people.** It says *these colleagues
-  may have my hardware*. It is a graph row, so it survives the machine being
-  asleep, reinstalled or renamed, and it can only be set by the owner —
-  never by the machine.
-- **The machine's half is a decision about the machine.** It says *this box
-  is somewhere it can serve anyone but its owner* — plugged in, on a network
-  that allows it, not a laptop about to be carried into a meeting. Only the
-  machine can know that, which is why it is a file on the machine rather than
-  a checkbox in a browser. It keeps its two values: `cluster` means "may serve
-  people other than my owner", and **which** people is the owner's half.
-
-The Fleet page renders **both**, always, each with its own repair, because a
-machine that is not serving has exactly one reason and the person looking at
-it needs to know which. A refusal from the engine names the missing half for
-the same reason:
-
-| What is missing | What you are told |
-|---|---|
-| both | "Neither consent is given: the owner has not shared this machine with the cluster, and its cockpit's `policy.yaml` does not set `inference.serve` to `cluster`. Both are needed." |
-| the owner's | "The machine's cockpit is willing to serve the cluster, but its owner has not shared it. The owner turns this on from the machine's page in Fleet." |
-| the machine's | "The owner has shared this machine, but its cockpit is not willing to serve the cluster. Set `inference.serve` to `cluster` in that machine's `policy.yaml` -- it is a decision about where the machine is, and only the machine can make it." |
-| you are not on the list | "Its owner has shared it with specific people, and not with you." |
-| you are on the list, the machine has not agreed | "Its owner has shared it with you, but its cockpit is not willing to serve anyone but its owner. Set `inference.serve` to `cluster` in that machine's `policy.yaml` ..." -- counted as "1 machine lent to you is waiting on its own consent" |
-
-A refusal about somebody else's machine is **counted, never named** (epic
-memql#5327, D12): a person whose call ran out of options learns that machines
-exist that are not open to them, and never which ones.
-
-### What this replaces
-
-The `sharedInference=true` **operator label**. Pre-release, with no shim: a
-machine that reports `sharedInference` in its own labels is not selected, and
-a test asserts it. The label could say only one thing, and it could not say
-*which* consent was missing — so a machine that had been lent and then
-carried onto a train looked identical to one whose owner had never offered
-it.
+Refusals about other people’s private machines report counts without exposing
+their registration IDs.
 
 ---
 
 ## Who you can lend it to
 
-The share dialog offers what you can already account for, and no more:
+The inline sharing picker offers what you can already account for, and no more:
 
 - **The active groups you are an active member of**, each with its count of
   active people, and
@@ -138,7 +111,7 @@ made-up one does.
   one you may not pick, so the write is never a way to learn who is on the
   cluster;
 - one **already on the list** is not re-checked. Somebody who left your group
-  stays on your list until you remove them; the dialog names them, marked as
+  stays on your list until you remove them; the picker names them, marked as
   no longer available to pick, and you remove them by saving without them;
 - your own id is dropped rather than refused — your own machine is yours
   already;
@@ -249,18 +222,17 @@ it is offered, rather than in this document.
 - **The pairing user reaches their own machine without sharing.** Adding a
   machine to Fleet unlocks local inference on it for that user's Ask,
   Materialize, and Nexus work. Sharing is not a gate on your own hardware.
-- **Another person needs both consents, and needs to be lent the machine.**
+- **Another person must be in the owner’s saved audience.**
   A call for user B lands on user A's machine only when A shared it with
-  everyone, with B, or with a group B is an active member of — and the
-  machine itself agreed. Machines lent to you may serve your calls, with your
-  own machines always preferred first.
+  everyone, with B, or with a group B is an active member of. Your own
+  machines are always preferred first.
 - **Work done under your authority is yours.** An automation acting under
   your borrowed authority uses what is lent to you, exactly as your own calls
   do (see [The cluster's own work](#the-clusters-own-work)).
 - **A call pinned to one machine may name a machine lent to you.** "Ask it
   something" on a machine's page, or any call that names the machine that must
-  run it, reaches your own machines and every machine lent to you under both
-  consents — and nothing else. A pin never falls through to another machine,
+  run it, reaches your own machines and every machine lent to you under the
+  owner’s saved audience. A pin never falls through to another machine,
   and system work cannot pin: neither a call with no acting person nor one
   under an identity the cluster made for itself (an automation running as
   itself, a connector, the operator credential) may name a machine, even one
@@ -272,7 +244,7 @@ it is offered, rather than in this document.
   by the owner on 2026-10-04
   ([memql#5662](https://github.com/znasllc-io/memql/issues/5662)); before
   that, a pin reached your own machines only.
-- **System work** reaches only machines lent to everyone, with both consents.
+- **System work** reaches only machines lent to everyone, with the owner’s consent.
 
 When a person's own machines and a lent one could both serve a call, **the
 person's own machines come first, always**, and it is not a preference an
@@ -318,7 +290,7 @@ It worked exactly when the stream happened to be local. Fixed in epic
 [memql#5327](https://github.com/znasllc-io/memql/issues/5327) design D10: the
 receiving replica admits a machine that is the caller's own **or** unrevoked
 and lent to them, resolved through the same cross-owner read the router used
-to pick it. Both consents are still checked, on the receiver as well as in the
+to pick it. The saved audience is checked again, on the receiver as well as in the
 router — and for a machine lent to people, the receiver asks about the
 **verified** caller and reads their groups **itself**. Nothing in the
 forwarded envelope says who is in which group.

@@ -133,16 +133,10 @@ func (e *FleetUnavailable) consideredKeysForDisplay(omitNoise bool) []string {
 	actionable := make([]string, 0, len(e.Considered))
 	revoked := 0
 	foreignPrivate := 0
-	lentWaiting := 0
 	for k, why := range e.Considered {
 		switch {
 		case why == "revoked":
 			revoked++
-		case isLentButNotAgreed(why):
-			// Somebody else's machine, so counted and never named -- but LENT
-			// to this caller, so "not shared with you" would be false and would
-			// send them to its owner for a repair that belongs to the machine.
-			lentWaiting++
 		case isForeignPrivateShareNoise(why):
 			// COUNTED, NEVER COLLECTED. The id is another user's row and this
 			// function's output reaches a caller; see the note below.
@@ -171,30 +165,10 @@ func (e *FleetUnavailable) consideredKeysForDisplay(omitNoise bool) []string {
 	if revoked > 0 {
 		actionable = append(actionable, fmt.Sprintf("(%d revoked registration(s) omitted)", revoked))
 	}
-	if lentWaiting > 0 {
-		actionable = append(actionable, lentWaitingSummary(lentWaiting))
-	}
 	if foreignPrivate > 0 {
 		actionable = append(actionable, foreignPrivateSummary(foreignPrivate))
 	}
 	return actionable
-}
-
-// lentWaitingSummary is the line for machines LENT TO the caller whose own
-// consent is missing (epic memql#5344). It counts and names nothing, like
-// foreignPrivateSummary, and names the one repair that applies: the machine's
-// policy.yaml, which is its owner's to change.
-func lentWaitingSummary(n int) string {
-	if n == 1 {
-		return "(1 machine lent to you is waiting on its own consent -- its owner has to set inference.serve to cluster in that machine's policy.yaml)"
-	}
-	return fmt.Sprintf("(%d machines lent to you are waiting on their own consent -- each owner has to set inference.serve to cluster in that machine's policy.yaml)", n)
-}
-
-// isLentButNotAgreed recognises component/worker.PersonRefusal's sentence for a
-// person ON the list of a machine whose cockpit has not agreed.
-func isLentButNotAgreed(why string) bool {
-	return strings.Contains(strings.ToLower(why), "shared it with you, but its cockpit")
 }
 
 // foreignPrivateSummary is the one line a caller gets about machines that are
@@ -203,25 +177,21 @@ func isLentButNotAgreed(why string) bool {
 // It COUNTS and it EXPLAINS, and it names nothing. The count is worth having
 // -- "there is hardware on this cluster and none of it is open to you" leads
 // somewhere, where silence does not -- and the explanation is the whole repair:
-// both halves of the consent have to say cluster, and neither half is the
-// caller's to set.
+// only the enrolled owner can choose who may use the machine.
 func foreignPrivateSummary(n int) string {
 	if n == 1 {
-		return "(1 machine on this cluster is not shared with you -- its owner would have to offer it, and the machine itself would have to agree)"
+		return "(1 machine on this cluster is not shared with you -- its owner can choose who may use its models in Fleet)"
 	}
-	return fmt.Sprintf("(%d machines on this cluster are not shared with you -- each owner would have to offer theirs, and each machine would have to agree)", n)
+	return fmt.Sprintf("(%d machines on this cluster are not shared with you -- each owner can choose who may use their models in Fleet)", n)
 }
 
 func isForeignPrivateShareNoise(why string) bool {
 	why = strings.ToLower(why)
-	return strings.Contains(why, "both are needed") ||
-		strings.Contains(why, "has not shared") ||
-		strings.Contains(why, "policy.yaml") ||
-		strings.Contains(why, "inference.serve") ||
+	return strings.Contains(why, "has not shared") ||
 		// A machine lent to NAMED people (epic memql#5344): "shared it with
 		// specific people, and not with you" and "... not with the cluster's
 		// own work". Somebody else's machine either way, so it is counted and
-		// never named, exactly as the two-consent sentences are.
+		// never named, exactly as private machines are.
 		strings.Contains(why, "specific people")
 }
 
@@ -233,7 +203,7 @@ func isForeignPrivateShareNoise(why string) bool {
 // would slip back into the named list as an enumeration of other people's
 // machines.
 func IsForeignShareRefusal(why string) bool {
-	return isLentButNotAgreed(why) || isForeignPrivateShareNoise(why)
+	return isForeignPrivateShareNoise(why)
 }
 
 // Unwrap makes errors.Is(err, ErrFleetUnavailable) true, so a caller that only

@@ -32,22 +32,14 @@ export function isShared(machine: Pick<MachineRow, "sharingMode">): boolean {
   return machine.sharingMode !== "owner";
 }
 
-/** Both halves given: the owner lent it AND its cockpit agreed, so somebody
- *  else's call can actually land on it. */
-export function servesOthers(machine: Pick<MachineRow, "sharingMode" | "inferenceServe">): boolean {
-  return isShared(machine) && machine.inferenceServe === "cluster";
+/** The owner has shared model inference with other people. */
+export function servesOthers(machine: Pick<MachineRow, "sharingMode">): boolean {
+  return isShared(machine);
 }
 
-/**
- * The words on the Equipment view's way into Sharing.
- *
- * WHAT THE MACHINE DOES, NOT WHAT WAS ASKED OF IT: the owner's mode AND the
- * cockpit's consent together (design section 5). A share the cockpit has not
- * agreed to serves nobody else yet, so it reads as personal here -- the
- * Sharing view, one click away, says which half is missing.
- */
-export function sharingLinkWords(machine: Pick<MachineRow, "sharingMode" | "inferenceServe">): string {
-  if (!servesOthers(machine)) return "Personal inference";
+/** The saved audience; model availability is reported separately. */
+export function sharingLinkWords(machine: Pick<MachineRow, "sharingMode">): string {
+  if (!isShared(machine)) return "Personal inference";
   return machine.sharingMode === "people" ? "Shared with people" : "Shared with everyone";
 }
 

@@ -1648,15 +1648,15 @@ QueryClient.prototype.fleetRevokeMachine = function (this: QueryClient, args: Fl
   return this.executeNamed("fleetRevokeMachine", buildFleetRevokeMachine(args), opts);
 };
 
-/** Set the OWNER's half of a machine's sharing consent: `owner` keeps it to yourself, `people` lends it to the users and groups you name, `cluster` offers it to everybody on this cluster and to the cluster's own work. The machine's own half comes from its policy.yaml and is not settable from here -- deliberately, because it is a decision about where the machine IS and only the machine can make it; it must say cluster before anybody else's work runs on it. It resolves the machine through YOUR OWN machines, which is the whole reason this is a builtin: the row's tier grants a cluster owner the write, and lending somebody else's hardware is not a decision a cluster owner gets to make for them. Under `people`, a user or group not already on the machine's list must be one fleetShareDirectory offers you, and one sentence refuses both an id that does not exist and one you may not pick, so this is never a way to learn who is on the cluster. */
+/** Choose who may use the models on one of YOUR OWN machines. owner keeps inference private; people shares with the users and active group members you name. Fleet is the single sharing control: the saved audience applies to subsequent calls without changing a machine configuration file or reconnecting Cockpit. Sharing grants model inference only, never commands, files, apps or computer control. Only the enrolled owner may change it; cluster administration does not grant permission to lend another person's hardware. New subjects must be offered by fleetShareDirectory. A refusal does not distinguish a missing subject from one you may not select. Existing cluster-wide shares remain readable, but new writes must choose owner or people. */
 export interface FleetSetSharingArgs {
   /** v1:worker:registration.id of the machine to set sharing on. It must be one of the caller's own. */
   registrationId: string;
-  /** owner, people or cluster. Anything else is refused rather than read as owner -- a misspelling that silently meant `keep it private` would be safe, and one that silently meant anything else would not. */
+  /** owner or people. Other values, including cluster, are refused. */
   mode: string;
-  /** Under people: the v1:identity:user ids to lend the machine to. At most 50 subjects across both lists, and at least one. Your own id is dropped rather than refused -- your own machine is yours already. Ignored under owner and cluster. */
+  /** Under people: the v1:identity:user ids to lend the machine to. At most 50 subjects across both lists, and at least one. Your own id is dropped rather than refused -- your own machine is yours already. Ignored under owner. */
   userIds?: string[];
-  /** Under people: the v1:identity:group ids whose active members may use the machine. Ignored under owner and cluster. */
+  /** Under people: the v1:identity:group ids whose active members may use the machine. Ignored under owner. */
   groupIds?: string[];
 }
 
