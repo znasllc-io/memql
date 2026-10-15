@@ -2,7 +2,7 @@ import { useEffect, useId, useMemo, useRef, useState, type ReactNode } from "rea
 import { GripVertical, Lock } from "lucide-react";
 
 import { AddButton } from "../../../kit/AddButton";
-import { InfoDetail } from "../../../kit/InfoDetail";
+import { PageHelp } from "../../../kit/pageHelp";
 import { EmptyState, Notice, RecordList, RecordListSkeleton, AutoRefresh, Refine, Select } from "../../../kit";
 import { LEVELS } from "../../settings/routingFacts";
 import {
@@ -221,10 +221,10 @@ function RuleList({
     <div className="os-deploy-scroll">
       {header(
         <>
-          <InfoDetail title="How rules are tried">
+          <PageHelp title="How rules are tried">
             <p>Rules are tried top to bottom and the first that matches decides the route. {LOCKED_RULE_SENTENCE}</p>
             <p>Move one of yours with Alt and the arrow keys, or drag it.</p>
-          </InfoDetail>
+          </PageHelp>
           {ordered.length > 0 ? (
             <Refine label="Refine rules" search={search} onSearch={setSearch} placeholder="Search" chips={chips}>
               <Select id="fleet-rules-level" label="Level" value={level} onChange={setLevel}>

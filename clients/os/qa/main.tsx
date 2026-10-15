@@ -4,6 +4,7 @@ import { fakeConnection as usersConnection, withSession as usersSession, roleRow
 import { StorageScene } from "./storageScenes";
 import { emailScenes, EMAIL_CLICKS } from "./emailScenes";
 import { nexusApprovalScenes, NEXUS_APPROVAL_CLICKS } from "./nexusApprovalScenes";
+import { fleetEquipmentScenes } from "./fleetEquipmentScenes";
 import { mapScenes } from "./mapScenes";
 import { MATERIALIZER_VIEWS } from "./materializerScenes";
 import { FilesApp } from "../src/apps/files/FilesApp";
@@ -699,6 +700,7 @@ const VIEWS: Record<
 > = {
   ...MATERIALIZER_VIEWS,
   ...mapScenes(WindowBody),
+  ...fleetEquipmentScenes(WindowBody),
   "users-groups": usersWizardView("groups"),
   "users-roles": usersWizardView("roles"),
   "users-invite": usersWizardView("people"),

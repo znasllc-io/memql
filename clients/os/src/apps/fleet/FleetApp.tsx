@@ -5,6 +5,8 @@ import { AppLogsSection } from "../../logs/AppLogsSection";
 import { PageContent } from "../../kit/PageContent";
 import type { OsAppProps } from "../../system/registry";
 import { accessAdmits } from "../../system/registry";
+import { RoutingPolicyProvider } from "./routing/useRoutingPolicy";
+import { AppSessionsProvider } from "./apps/useAppSessions";
 import { AppsSection } from "./apps/AppsSection";
 import { useAddMachineFlow } from "./addMachine/useAddMachineFlow";
 import { FleetOverview } from "./overview/FleetOverview";
@@ -114,7 +116,7 @@ export function FleetApp({
   const [visited, setVisited] = useState<string[]>([sectionId || "overview"]);
   useEffect(() => { setVisited(held => held.includes(sectionId) ? held : [...held, sectionId]); }, [sectionId]);
   const panes = Array.from(new Set([...visited, sectionId]));
-  return <div className="fleet-app">
+  return <RoutingPolicyProvider><AppSessionsProvider><div className="fleet-app">
     {panes.map(id => {
       const section = FLEET_SECTIONS.find(s => s.id === id);
       if (!section || !accessAdmits(section.requires)) return null;
@@ -128,12 +130,12 @@ export function FleetApp({
               onAddMachine={() => { if (!addMachine.active) addMachine.start({ inference: true }); navigate("machines", { fromContent: true }); }} />
           : id === "workbenches" ? <WorkbenchesSection />
           : id === "apps" ? <AppsSection sessionTarget={sessionTarget} navigation={active ? navigation : undefined} />
-          : <FleetWorkspace onOpenSession={id => { setSessionTarget(held => ({ id, revision: (held?.revision ?? 0) + 1 })); navigate("apps", { fromContent: true }); }} selection={selection} select={select} navigate={navigate}
+          : <FleetWorkspace onAllSessions={() => { setSessionTarget(held => ({ id: "", revision: (held?.revision ?? 0) + 1 })); navigate("apps", { fromContent: true }); }} onOpenSession={id => { setSessionTarget(held => ({ id, revision: (held?.revision ?? 0) + 1 })); navigate("apps", { fromContent: true }); }} selection={selection} select={select} navigate={navigate}
               showRevoked={settings.showRevoked} flow={addMachine}
               intent={active ? intent : undefined} consumeIntent={consumeIntent} />}
       </PageContent>;
     })}
-  </div>;
+  </div></AppSessionsProvider></RoutingPolicyProvider>;
 }
 
 function FleetSettingsSection({

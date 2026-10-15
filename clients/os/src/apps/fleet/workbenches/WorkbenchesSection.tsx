@@ -1,7 +1,7 @@
 import { LocalTabs } from "../../../kit/LocalTabs";
 import { useMemo, useState } from "react";
 import { AutoRefresh, useFleetScroll } from "../FleetControls";
-import { InfoDetail } from "../../../kit/InfoDetail";
+import { PageHelp } from "../../../kit/pageHelp";
 import type { Row } from "@znasllc-io/memql-sdk-core/client";
 
 import { LiveList } from "../../../live/LiveList";
@@ -94,17 +94,17 @@ export function WorkbenchesSection() {
             that arrive on their own. When the caption says the feed IS
             behind, the same control is exactly the right one, and its
             appearance is itself the signal. */}
-        {feedIsBehind(state.workspaceState) ? (
+        {feedIsBehind(state.workspaceState, state.workspaceError) ? (
           <AutoRefresh onRefresh={state.reseedWorkspaces} />
         ) : null}
       </Head>
 
       <LocalTabs label="Cluster workspace views" value={tab} onChange={setTab} options={[["workspaces", "Workspaces"], ["replicas", "Replicas"]]} />
       </div>
-      <div className="fleet-section-context"><p>Temporary working folders for tasks running in the cluster.</p><InfoDetail title="Cluster workspaces"><p className="os-caption">
+      <div className="fleet-section-context"><p>Temporary working folders for tasks running in the cluster.</p><PageHelp title="Cluster workspaces"><p className="os-caption">
         A workspace is a sandboxed working directory for one plan, on one workbench replica's
         disk. Nothing on your own computer is touched.
-      </p></InfoDetail></div>
+      </p></PageHelp></div>
 
       <div hidden={tab !== "replicas"}><ReplicaPanel
         state={state}
@@ -177,7 +177,7 @@ function ReplicaPanel({
           keeps its row, so it does not change shape when the refresh comes. */}
       <Subhead
         meta={listCount(source?.snapshot)}
-        actions={feedIsBehind(state.nodeState) ? <AutoRefresh onRefresh={state.reseedNodes} /> : null}
+        actions={feedIsBehind(state.nodeState, state.nodeError) ? <AutoRefresh onRefresh={state.reseedNodes} /> : null}
       >
         Workbench replicas
       </Subhead>

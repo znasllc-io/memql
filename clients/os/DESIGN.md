@@ -41,6 +41,10 @@ and wallpaper values only (see `src/themes/`), so nothing here is themeable.
    Keep this in the shared list styles, including rows with separate actions
    and live-list wrappers; never add per-app row borders.
 
+   Selection controls use straight edges (`--os-selection-radius`), including
+   local tabs, choice cards, menu options and equipment choices. Show selection
+   with the theme accent, fill or underline; avoid rounded selection outlines.
+
 2. **Filters are questions, not furniture.** Search and facet controls live
    behind one affordance (`kit` `Refine`): collapsed by
    default, expanded while being asked, active constraints as removable
@@ -59,10 +63,10 @@ and wallpaper values only (see `src/themes/`), so nothing here is themeable.
    toolbar chrome. The empty state points at the setting when hiding is why
    it is empty.
 
-5. **One control line.** Inputs, selects, buttons and choice pills all
+5. **One control line.** Inputs, selects, buttons and choices all
    stand `--os-control-h` tall at `--os-text-base`. Field-shaped controls
-   share `--os-radius-xs`; the choice pill keeps its own radius because it
-   is the shell's selection language, not a field. Ask shares the window header
+   share `--os-radius-xs`; choices use the straight `--os-selection-radius`.
+   Ask shares the window header
    and icon controls, app-content text scale and page gutters; its sheet
    dimensions do not define a separate scale for its contents. Selects drop UA chrome
    (`Select` draws its own currentColor chevron). A date and time is
@@ -210,7 +214,10 @@ and wallpaper values only (see `src/themes/`), so nothing here is themeable.
   `TrailRow`, after Back and breadcrumbs, on desktop and phone. It opens the
   current page's help modal; until documentation exists, say “Documentation is
   coming soon.” Future help starts with a walkthrough video, followed by the
-  option details. Do not repeat information icons beside individual settings.
+  option details. Publish section documentation with `PageHelp`; the shared
+  page scope collects visible sections in order and excludes retained hidden
+  pages. Dialogs own their help scope and preserve their draft when help closes.
+  Do not repeat information icons beside individual settings.
   Keep essential permissions, download costs and destructive consequences in
   the flow where someone makes that choice.
 - Add Machine keeps the shared wizard's steps-left/content-right layout and

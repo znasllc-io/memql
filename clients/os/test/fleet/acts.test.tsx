@@ -673,7 +673,7 @@ const CASES: ActsCase[] = [
       await settle();
     },
     acts: [
-      { name: "About How a machine is chosen", count: 1 },
+
       { name: "Routing strategy", count: 1 },
       { name: "Routing fallback", count: 1 },
       { name: "Required labels", count: 2, note: "the chip list and the draft field" },
@@ -732,7 +732,7 @@ const CASES: ActsCase[] = [
       { name: "Rules", count: 1 },
       { name: "Machines", count: 1 },
       { name: "History", count: 1 },
-      { name: "About Routes", count: 1 },
+
       { name: "New route", count: 1 },
       { name: /^Open Local first,/, count: 1 },
       { name: /^Open Embeddings,/, count: 1 },
@@ -748,7 +748,7 @@ const CASES: ActsCase[] = [
       await click(screen.getByRole("button", { name: /^Open Local first,/ }));
     },
     acts: [
-      { name: "About How a route works", count: 1 },
+
       { name: /^(Description: .*|Add a description)$/, count: 1, note: "the one-line description, edited in place" },
       { name: "Sources, in the order they are tried", count: 1 },
       { name: /^1\. Strongest local model,/, count: 1 },
@@ -777,7 +777,7 @@ const CASES: ActsCase[] = [
       await renderRouting("owner", { intent: { id: "r", payload: { routingTab: "rules" } } });
     },
     acts: [
-      { name: "About How rules are tried", count: 1 },
+
       { name: "Refine rules", count: 2, note: "the affordance's group and its opener share the name" },
       { name: "Add a rule", count: 1 },
       { name: "Rules, in the order they are tried", count: 1 },
@@ -816,7 +816,7 @@ const CASES: ActsCase[] = [
       await renderRouting("admin", { intent: { id: "r", payload: { routingTab: "history" } } });
     },
     acts: [
-      { name: "About History", count: 1 },
+
       { name: "Refine history", count: 2, note: "the affordance's group and its opener share the name" },
       { name: "Recent routed calls", count: 1 },
     ],

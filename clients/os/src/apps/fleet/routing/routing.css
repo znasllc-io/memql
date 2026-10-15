@@ -65,7 +65,7 @@ button.fleet-route-description:focus-visible { outline: 2px solid var(--os-accen
 @keyframes fleet-serves-in { from { opacity: 0; transform: translateY(-2px); } to { opacity: 1; transform: none; } }
 
 /* A slot is a fixed tile: the sequence is the order, so every tile is the same size. */
-.fleet-slot { position: relative; display: flex; width: 212px; height: 64px; border: 1px solid var(--os-line); border-radius: var(--os-radius-sm); background: var(--os-plate); }
+.fleet-slot { position: relative; display: flex; width: 212px; height: 64px; border: 1px solid var(--os-line); border-radius: var(--os-selection-radius); background: var(--os-plate); }
 .fleet-slot[data-ready] { border-color: color-mix(in srgb, var(--os-ink) 22%, transparent); }
 .fleet-slot[data-serving] { border-color: var(--os-accent); }
 .fleet-slot[data-chosen] { box-shadow: 0 0 0 2px var(--os-hover); border-style: dashed; }

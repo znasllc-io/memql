@@ -1,7 +1,7 @@
 import { useMemo, useState, type ReactNode } from "react";
 
 import { Chip, EmptyState, Measure, Notice, RecordList, RecordListSkeleton, RecordRow, AutoRefresh, Refine, Select } from "../../../kit";
-import { InfoDetail } from "../../../kit/InfoDetail";
+import { PageHelp } from "../../../kit/pageHelp";
 import { formatDuration, formatMoment } from "../../../kit/format";
 import {
   NO_FILTERS,
@@ -87,9 +87,9 @@ export function HistoryTab({
     <div className="os-deploy-scroll">
       {header(
         <>
-          <InfoDetail title="History">
+          <PageHelp title="History">
             <p>Every routed call: the rule that decided it, the route it took, what served it and what it cost. Open a call to see every source it passed over, and why.</p>
-          </InfoDetail>
+          </PageHelp>
           {decisions.supported ? (
             <Refine label="Refine history" search={search} onSearch={setSearch} placeholder="Prompt or model" chips={chips}>
               <Select id="fleet-history-level" label="Level" value={level} onChange={setLevel}>

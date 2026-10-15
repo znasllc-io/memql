@@ -35,7 +35,7 @@ import { useShareDirectory, type ShareDirectory } from "./useShareDirectory";
 // A NATIVE MODAL, FOR WHAT THE PLATFORM ALREADY DOES
 // ===========================================================================
 // `showModal()` puts the dialog in the top layer, makes the window beneath it
-// inert and contains focus -- the InfoDetail / DetailDialog pattern, and the
+// inert and contains focus -- the PageHelp / DetailDialog pattern, and the
 // reason there is no focus trap written here. Escape is handled on the
 // dialog's own keydown rather than left to the close request, for two
 // reasons: a search with text in it takes the first Escape to clear itself,

@@ -21,14 +21,9 @@ import {
 // and then a list that never moves, which is the trap useModelPulls' header
 // already records for `fleetModels`.
 //
-// Measurements ARE real rows, and a live feed over them would be defensible.
-// They are read once anyway, because a measurement changes when somebody
-// presses Probe on this page and at no other time: the reading is not an event
-// with a duration, it is a fact with a date. The PROBE is the live thing, and
-// it rides v1:worker:modelProbe on the same feed shape the pull uses.
-//
-// After a probe finishes the figures are re-read once, which is the one moment
-// they can have changed.
+// Measurements are stored rows without a browser broadcast route. A probe
+// queues work on an agent and returns before the measurement lands. Visible
+// consumers use AutoRefresh for these reads, including probes started elsewhere.
 
 /** The week's usage of a shared machine, as the engine folded it. */
 export interface SharingLedger {
@@ -55,8 +50,7 @@ export interface MachineInference {
   /** Measure one model this machine already has. */
   probe: (modelId: string) => Promise<string>;
   probing: string;
-  /** Re-read the figures. Called when a probe reaches a terminal state, which
-   *  is the one moment they can have changed. */
+  /** Re-read the measurements, recommendation and sharing ledger. */
   refreshMeasurements: () => void;
   /** The week's counts for a shared machine, or null while unread. */
   ledger: SharingLedger | null;
@@ -68,7 +62,7 @@ function refusalFrom(err: unknown): string {
   return trimmed === "" ? "The cluster refused and said nothing about why." : trimmed;
 }
 
-export function useMachineInference(workerId: string): MachineInference {
+export function useMachineInference(workerId: string, enabled = true): MachineInference {
   const connection = useOsConnection();
   const [recommended, setRecommended] = useState<RecommendedSet>(EMPTY_SET);
   const [measurements, setMeasurements] = useState<Map<string, Measurement>>(new Map());
@@ -80,7 +74,7 @@ export function useMachineInference(workerId: string): MachineInference {
   const [measurementNonce, setMeasurementNonce] = useState(0);
 
   useEffect(() => {
-    if (connection === null || workerId === "") {
+    if (!enabled || connection === null || workerId === "") {
       setLoading(false);
       return;
     }
@@ -140,7 +134,7 @@ export function useMachineInference(workerId: string): MachineInference {
       cancelled = true;
       controller.abort();
     };
-  }, [connection, workerId, measurementNonce]);
+  }, [connection, workerId, measurementNonce, enabled]);
 
   const pullRecommended = useCallback(async (): Promise<string> => {
     if (connection === null) return "A pull can only be started over a live connection.";

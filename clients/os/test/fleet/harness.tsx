@@ -176,7 +176,7 @@ export interface FakeQuery {
 export interface FakeSubscriptions {
   subscribeGraph: (handler: (event: FakeEvent) => void, opts: { concept?: string }) => () => void;
   /** Push an event to every handler subscribed to `concept`. */
-  emit: (concept: string, payload: Row, kind?: string) => void;
+  emit: (concept: string, payload: Row, kind?: string, payloadOmitted?: boolean) => void;
 }
 
 export interface FakeEvent {
@@ -205,14 +205,14 @@ function fakeSubscriptions(): FakeSubscriptions {
       handlers.set(concept, set);
       return () => set.delete(handler);
     },
-    emit(concept, payload, kind = "NODE_UPDATED") {
+    emit(concept, payload, kind = "NODE_UPDATED", payloadOmitted = false) {
       for (const handler of handlers.get(concept) ?? []) {
         handler({
           subscriptionId: "sub-1",
           kind,
           timestamp: new Date(),
           payload,
-          payloadOmitted: false,
+          payloadOmitted,
           seq: 0,
           gapBefore: false,
         });

@@ -16,7 +16,7 @@ import {
   formatMoment,
   useNow,
 } from "../../kit";
-import { InfoDetail } from "../../kit/InfoDetail";
+import { PageHelp } from "../../kit/pageHelp";
 import { ActionBar, type Act, type ActionBarTone } from "../../kit/ActionBar";
 import { rungFrom, rungWord as reliabilityWord } from "./automations";
 import {
@@ -175,14 +175,14 @@ export function ProcedurePage({
         <Panel label="Where it stands">
           <div className="os-record-heading">
             <Subhead>Where it stands</Subhead>
-            <InfoDetail title="The certification ladder">
+            <PageHelp title="The certification ladder">
               <Facts>
                 {LADDER_RUNGS.map((rung) => (
                   <Fact key={rung} label={ladderWord(rung)} value={rungMeaning(rung)} />
                 ))}
                 <Fact label="Retired" value="Unused too long; it serves nothing" />
               </Facts>
-            </InfoDetail>
+            </PageHelp>
           </div>
           {climbingRung(p.ladder) === null ? (
             <OffTheLadder procedure={p} now={now} />

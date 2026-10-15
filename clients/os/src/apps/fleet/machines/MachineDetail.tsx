@@ -1,7 +1,7 @@
 import { Terminal } from "lucide-react";
 import { useSession } from "../../../chrome/access";
 import { localCockpitInstall } from "../addMachine/localInstall";
-import { InfoDetail } from "../../../kit/InfoDetail";
+import { PageHelp } from "../../../kit/pageHelp";
 import { useEffect, useState } from "react";
 
 import { CallHistory } from "../routing/CallHistory";
@@ -25,6 +25,7 @@ import { HardwareGroup } from "./HardwareGroup";
 import { LabelEditor } from "./LabelEditor";
 import { ModelsGroup } from "./ModelsGroup";
 import { SharingGroup } from "./SharingGroup";
+import { AutoRefresh } from "../../../kit/AutoRefresh";
 import { useMachineInference } from "./useMachineInference";
 import type { MachineWrites, RemovalReceipt } from "./useMachineWrites";
 
@@ -53,6 +54,7 @@ export function MachineDetail({
 
   return (
     <Panel label={`${label} detail`}>
+      <AutoRefresh enabled={["all", "details", "models", "sharing"].includes(view)} busy={inference.loading} onRefresh={inference.refreshMeasurements} />
       {view === "all" || view === "details" ? <>
       <RenameField machine={machine} busy={busy} rename={writes.rename} />
 
@@ -153,7 +155,7 @@ export function MachineDetail({
       {/* Below Apps, because the two answer the same shape of question about
           this machine -- what it can be asked to do -- and a person scanning
           for either reads them together. */}
-      {view === "all" || view === "models" ? <ModelsGroup machine={machine} standalone={view === "models"} /> : null}
+      {view === "all" || view === "models" ? <ModelsGroup machine={machine} inference={inference} standalone={view === "models"} /> : null}
 
       {/* SHARING AFTER MODELS, because the question it asks -- whom will you
           lend this machine to -- only means something once a reader knows
@@ -252,7 +254,7 @@ function LabelGroups({
         {/* The caveat is UI copy rather than a comment, because the person
             who needs it is the one about to look for an edit control here
             and not find one. */}
-        <InfoDetail title="Reported labels"><p>Read-only labels are replaced whenever Cockpit connects. Set operator labels below to override them in routing.</p></InfoDetail>
+        <PageHelp title="Reported labels"><p>Read-only labels are replaced whenever Cockpit connects. Set operator labels below to override them in routing.</p></PageHelp>
         <Chips label="Reported labels">
           {reportedKeys.length === 0 ? (
             <span className="os-caption">None reported.</span>
@@ -296,20 +298,20 @@ function PipelineStepsAnswer({ machine }: { machine: MachineRow }) {
   return (
     <>
       {pipelineStepsStatus(machine).answer}
-      <InfoDetail title="Pipeline steps">
+      <PageHelp title="Pipeline steps">
         <p>Set in the <code>pipelines</code> block of this machine&apos;s Cockpit <code>policy.yaml</code>.</p>
         <p>
           Setting <code>allow: true</code> lets it run pipeline steps, and its <code>repos</code> list names the
           repositories it accepts. An empty list accepts any.
         </p>
         <p>Labels you set in Fleet cannot allow it.</p>
-      </InfoDetail>
+      </PageHelp>
     </>
   );
 }
 
 export function MachineAppsHelp() {
-  return <InfoDetail title="Apps on this machine"><p>Apps installed on this machine that Cockpit reports to MemQL. Ready apps are supported, allowed by Cockpit and signed in. Subscription status comes from the app.</p></InfoDetail>;
+  return <PageHelp title="Apps on this machine"><p>Apps installed on this machine that Cockpit reports to MemQL. Ready apps are supported, allowed by Cockpit and signed in. Subscription status comes from the app.</p></PageHelp>;
 }
 
 function AppsGroup({ machine, standalone }: { machine: MachineRow; standalone: boolean }) {

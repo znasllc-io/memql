@@ -273,7 +273,7 @@ button:not(:disabled):active {
   padding: 6px 2px;
   background: none;
   border: 0;
-  border-radius: var(--os-radius-sm);
+  border-radius: var(--os-selection-radius);
   cursor: default;
 }
 .os-file[data-selected] .os-file-button,
@@ -824,7 +824,7 @@ button:not(:disabled):active {
   flex: 1;
   padding: 5px 0;
   border: 1px solid var(--os-line);
-  border-radius: var(--os-radius-xs);
+  border-radius: var(--os-selection-radius);
   background: none;
   font-size: var(--os-text-xs);
   color: var(--os-muted);
@@ -900,7 +900,7 @@ button:not(:disabled):active {
 .os-launcher-tab {
   padding: 5px 12px;
   border: 0;
-  border-radius: var(--os-radius-sm);
+  border-radius: var(--os-selection-radius);
   background: none;
   color: var(--os-muted);
   cursor: pointer;
@@ -1266,7 +1266,7 @@ button:not(:disabled):active {
   height: var(--os-control-h);
   padding: 0 14px;
   border: 1px solid var(--os-line);
-  border-radius: var(--os-radius-sm);
+  border-radius: var(--os-selection-radius);
   background: none;
   cursor: pointer;
   font-size: var(--os-text-base);
@@ -2364,7 +2364,7 @@ button.os-row.os-record-row:focus-visible { outline: 2px solid var(--os-accent);
   gap: 8px;
   /* `.os-menu-item`'s own padding and radius: one popup vocabulary, not two. */
   padding: 7px 10px;
-  border-radius: var(--os-radius-xs);
+  border-radius: var(--os-selection-radius);
   color: var(--os-ink);
   font-size: var(--os-text-base);
   cursor: pointer;
@@ -2459,7 +2459,7 @@ button.os-row.os-record-row:focus-visible { outline: 2px solid var(--os-accent);
 
 /* ---- a choice that needs explaining ----
  *
- * The shell's selection language is the accent-bordered pill (.os-choice, the
+ * The shell's selection language is the straight-edged accent choice (.os-choice, the
  * Settings mode and theme rows). This is its vertical sibling for options that
  * carry their own explanation, and it speaks the SAME language rather than
  * falling back to the platform's radio dot -- two appearances of one control
@@ -2480,7 +2480,7 @@ button.os-row.os-record-row:focus-visible { outline: 2px solid var(--os-accent);
   color: var(--os-muted);
   background: var(--os-raised);
   border: 1px solid var(--os-line);
-  border-radius: var(--os-radius-xs);
+  border-radius: var(--os-selection-radius);
   cursor: pointer;
   transition:
     border-color var(--os-duration-fast) var(--os-ease),
@@ -4459,8 +4459,7 @@ a.os-button {
   min-height: 0;
 }
 
-/* The kind tabs: the shell's one selection language (the accent-bordered
- * pill), at toolbar size. */
+/* Kind choices share the straight selection edge at toolbar size. */
 .os-files-kinds {
   display: inline-flex;
   gap: 4px;
@@ -4471,7 +4470,7 @@ a.os-button {
   height: var(--os-control-h);
   padding: 0 12px;
   border: 1px solid var(--os-line);
-  border-radius: 999px;
+  border-radius: var(--os-selection-radius);
   background: none;
   color: var(--os-muted);
   font-size: var(--os-text-base);
@@ -6496,7 +6495,7 @@ a.os-button {
 .os-theme-card {
   position: relative;
   border: 1px solid var(--os-line);
-  border-radius: var(--os-radius-sm);
+  border-radius: var(--os-selection-radius);
   background: var(--os-plate);
 }
 .os-theme-card[data-current] {
@@ -10239,9 +10238,6 @@ a.os-button {
  * control overflows the row rather than growing it. */
 .os-nexus-reuse-heading {
   min-height: 0;
-}
-.os-nexus-reuse-heading .os-info-detail {
-  margin: -6px 0;
 }
 /* Four choices, laid out evenly: all four across when the panel has room, two
  * by two when it does not -- never three and a stray one on a second line. */
@@ -14208,7 +14204,7 @@ button.os-cluster-mesh-peer:focus-visible {
 .fleet-workspace-body[data-has-machines] { grid-template-columns: 158px minmax(0,1fr); gap: 26px; }
 .fleet-machine-picker { border-right: 1px solid var(--os-line); padding-right: 16px; }
 .fleet-machine-picker ul { margin: 0; padding: 0; list-style: none; }
-.fleet-machine-choice, .fleet-equipment-slot { appearance: none; width: 100%; background: transparent; color: var(--os-ink); border: 1px solid transparent; border-radius: 7px; font: inherit; text-align: left; cursor: pointer; }
+.fleet-machine-choice, .fleet-equipment-slot { appearance: none; width: 100%; background: transparent; color: var(--os-ink); border: 1px solid transparent; border-radius: var(--os-selection-radius); font: inherit; text-align: left; cursor: pointer; }
 .fleet-machine-choice { display: flex; align-items: center; gap: 10px; padding: 12px 8px; margin-bottom: 6px; }
 .fleet-machine-choice span, .fleet-equipment-slot span { min-width: 0; }
 .fleet-machine-choice strong, .fleet-machine-choice small, .fleet-equipment-slot strong, .fleet-equipment-slot small { display: block; overflow-wrap: anywhere; }
@@ -14228,7 +14224,7 @@ button.os-cluster-mesh-peer:focus-visible {
 .fleet-equipment-bank ul { padding: 0; margin: 12px 0; list-style: none; max-height: 256px; overflow-y: auto; }
 .fleet-equipment-slot { display: flex; gap: 9px; align-items: center; padding: 10px 7px; font-size: var(--os-text-sm); }
 .fleet-equipment-slot svg { flex-shrink: 0; color: var(--os-muted); }
-.fleet-equipment-slot[aria-pressed="true"] { border-color: var(--os-line-strong); background: var(--os-raised); box-shadow: inset 3px 0 var(--os-accent); }
+.fleet-equipment-slot[aria-pressed="true"] { border-color: var(--os-accent); background: var(--os-accent-soft); box-shadow: inset 3px 0 var(--os-accent); }
 .fleet-device { text-align: center; padding: 12px 0; }
 .fleet-device-screen { min-height: 176px; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 14px; padding: 22px 12px 16px; border: 1px solid color-mix(in srgb, var(--os-ink) 32%, var(--os-ground)); border-radius: 14px; background: var(--os-plate); box-shadow: inset 0 0 0 5px var(--os-ground); }
 .fleet-device-screen > svg { color: var(--os-accent); }
@@ -14238,13 +14234,10 @@ button.os-cluster-mesh-peer:focus-visible {
 .fleet-device-screen dd { margin: 4px 0 0; font-size: var(--os-text-sm); }
 .fleet-device-base { height: 9px; margin: 6px -5px 12px; border: 1px solid color-mix(in srgb, var(--os-ink) 45%, var(--os-ground)); border-radius: 2px 2px 10px 10px; background: color-mix(in srgb, var(--os-ink) 28%, var(--os-raised)); }
 .fleet-device-work { display: flex; justify-content: center; align-items: center; font-size: var(--os-text-sm); }
-.fleet-equipment-reading { display: flex; justify-content: space-between; gap: 16px; align-items: center; margin-top: 20px; padding: 14px 16px; background: var(--os-plate); border-left: 2px solid var(--os-accent); border-radius: 0 7px 7px 0; }
+.fleet-equipment-reading { display: flex; justify-content: space-between; gap: 16px; align-items: center; margin-top: 20px; padding: 14px 16px; background: var(--os-plate); border-left: 2px solid var(--os-accent); border-radius: var(--os-selection-radius); }
 .fleet-equipment-reading strong { overflow-wrap: anywhere; }
 .fleet-equipment-reading p { color: var(--os-muted); font-size: var(--os-text-sm); margin: 6px 0 0; }
 .fleet-selection-hint { text-align: center; margin-block: 22px; }
-.fleet-machine-tools { display: flex; align-items: center; justify-content: space-between; gap: 14px; margin-top: 20px; border-top: 1px solid var(--os-line); padding-top: 14px; }
-.fleet-machine-tools > div { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; font-size: var(--os-text-sm); }
-.fleet-machine-tools > div > span { color: var(--os-muted); }
 .fleet-breadcrumb { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; color: var(--os-muted); font-size: var(--os-text-sm); margin-bottom: 16px; }
 .fleet-drilldown { padding: 16px 24px; }
 .fleet-drilldown > .os-settings { padding: 0; }
@@ -14271,20 +14264,14 @@ button.os-cluster-mesh-peer:focus-visible {
 .fleet-connections-grid strong, .fleet-connections-grid small { display: block; }
 .fleet-connections-grid strong { font-size: var(--os-text-sm); font-weight: 500; }
 .fleet-connections-grid small { font-size: var(--os-text-xs); color: var(--os-muted); margin-top: 4px; }
-.os-info-detail { display: inline-flex; vertical-align: middle; }
-.os-info-detail .os-icon-button { display: inline-flex; align-items: center; justify-content: center; width: 28px; height: 28px; border: 0; background: transparent; color: var(--os-muted); border-radius: 50%; cursor: pointer; }
-.os-info-detail .os-icon-button:hover:not(:disabled), .os-info-detail .os-icon-button:focus-visible:not(:disabled) { background: var(--os-hover); color: var(--os-ink); }
-/* Beside a fact's value (Fleet's "Pipeline steps", epic memql#5478) the info
- * control overflows the line rather than growing it -- the Reuse heading's
- * rule, one container down. Grown, its 28px button pushed the value 6px below
- * its own label and made the one row taller than every row around it. */
-.os-facts dd .os-info-detail { margin: -6px 0 -6px 6px; }
-.os-info-dialog { padding: 0; color: var(--os-ink); background: var(--os-raised); border: 1px solid var(--os-line-strong); border-radius: 12px; width: min(430px,calc(100vw - 40px)); max-height: calc(100vh - 60px); box-shadow: var(--os-shadow-float); }
-.os-info-dialog::backdrop { background: #0006; }
-.os-info-dialog-body { padding: 20px 24px; font-size: var(--os-text-sm); line-height: 1.65; }
-.os-info-dialog header { display: flex; align-items: center; justify-content: space-between; gap: 20px; }
-.os-info-dialog h3 { font: 600 17px var(--os-font); margin: 0; }
-.os-info-dialog p { margin: 14px 0 0; }
+/* Documentation is collected in the single page or modal help entry. */
+.os-page-help-anchor { display: none; }
+.os-page-help-body { display: flex; flex-direction: column; gap: 24px; font-size: var(--os-text-base); line-height: 1.65; }
+.os-page-help-body section > h4 { margin: 0 0 8px; font-size: var(--os-text-md); font-weight: 600; }
+.os-page-help-body p { margin: 8px 0 0; }
+.os-page-help-body .os-caption { font-size: inherit; }
+.os-page-help-inline { font-size: var(--os-text-sm); }
+.os-dialog-header-actions { display: flex; align-items: center; gap: 6px; flex: none; }
 
 /* ---- the kit Dialog (epic memql#5414) ----
  *
@@ -14380,7 +14367,7 @@ button.os-cluster-mesh-peer:focus-visible {
 @container (max-width: 490px) {
   .fleet-equipment-rig { grid-template-columns: minmax(0,1fr); }
   .fleet-device { grid-row: 1; max-width: 240px; justify-self: center; width: 100%; }
-  .fleet-machine-heading, .fleet-machine-tools, .fleet-equipment-reading { flex-wrap: wrap; }
+  .fleet-machine-heading, .fleet-equipment-reading { flex-wrap: wrap; }
   .fleet-connections-grid { grid-template-columns: 1fr; }
   .fleet-empty-capabilities { gap: 12px; }
 }
@@ -14398,7 +14385,8 @@ button.os-cluster-mesh-peer:focus-visible {
 .fleet-equipment-bank[aria-label="Local model equipment"] { grid-column: 1; grid-row: 2; text-align: center; }
 .fleet-equipment-bank[aria-label="Local model equipment"] .fleet-bank-heading { justify-content: center; }
 .fleet-equipment-bank[aria-label="Local model equipment"] ul { display: flex; justify-content: center; flex-wrap: wrap; gap: 6px; }
-.fleet-equipment-bank[aria-label="Local model equipment"] .fleet-equipment-slot { border: 1px solid var(--os-line); background: var(--os-plate); padding: 9px 12px; }
+.fleet-equipment-bank[aria-label="Local model equipment"] .fleet-equipment-slot { padding: 9px 12px; }
+.fleet-equipment-bank[aria-label="Local model equipment"] .fleet-equipment-slot:not([aria-pressed="true"]) { border-color: var(--os-line); background: var(--os-plate); }
 .fleet-equipment-bank[aria-label="App equipment"] { grid-column: 2; grid-row: 1 / 3; align-self: center; border-left: 1px solid var(--os-line); padding: 20px 0 20px 26px; }
 @container (max-width: 550px) {
   .fleet-equipment-rig { grid-template-columns: minmax(0,1fr); }
@@ -14466,7 +14454,7 @@ button.os-cluster-mesh-peer:focus-visible {
 .fleet-home .fleet-workspace-body { display: block; }
 .fleet-home .fleet-equipment-area { min-width: 0; }
 .os-local-tabs { display: flex; flex-wrap: wrap; gap: 4px; margin: 0 0 22px; }
-.os-local-tabs button { border: 0; border-bottom: 2px solid transparent; border-radius: var(--os-radius-xs); padding: 7px 10px; background: transparent; color: var(--os-muted); cursor: pointer; font: inherit; font-size: var(--os-text-sm); }
+.os-local-tabs button { border: 0; border-bottom: 2px solid transparent; border-radius: var(--os-selection-radius); padding: 7px 10px; background: transparent; color: var(--os-muted); cursor: pointer; font: inherit; font-size: var(--os-text-sm); }
 .os-local-tabs button[aria-current="page"] { color: var(--os-ink); background: var(--os-accent-soft); border-bottom-color: var(--os-accent); }
 .fleet-home .fleet-equipment-rig { display: grid; grid-template-columns: minmax(0,1.15fr) minmax(0,1fr); gap: 20px 32px; align-items: start; }
 .fleet-home .fleet-equipment-rig > .fleet-device { grid-column: 1; grid-row: 1; }
@@ -15414,7 +15402,7 @@ button[data-ask-control="running"], [data-ask-control="running"] > button { outl
 .os-ask-question { display: grid; gap: 10px; margin-top: 12px; padding: 12px; border-radius: var(--os-radius-sm); background: var(--os-plate); }
 .os-ask-question > p { margin: 0; }
 .os-ask-question-options { display: flex; flex-wrap: wrap; gap: 6px; }
-.os-ask-question-options button { border: 1px solid var(--os-line); border-radius: var(--os-radius-sm); background: var(--os-surface); color: var(--os-ink); padding: 6px 10px; font: inherit; cursor: pointer; }
+.os-ask-question-options button { border: 1px solid var(--os-line); border-radius: var(--os-selection-radius); background: var(--os-surface); color: var(--os-ink); padding: 6px 10px; font: inherit; cursor: pointer; }
 .os-ask-question-options button[aria-pressed="true"] { border-color: var(--os-accent); background: var(--os-hover); }
 .os-ask-question-input { display: flex; align-items: flex-end; gap: 8px; }
 .os-ask-question-input textarea { min-width: 0; flex: 1; resize: vertical; padding: 8px; border: 1px solid var(--os-line); border-radius: var(--os-radius-sm); background: var(--os-surface); color: var(--os-ink); font: inherit; }

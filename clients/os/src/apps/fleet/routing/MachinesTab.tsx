@@ -2,7 +2,7 @@ import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 
 import { ActionBar, type Act } from "../../../kit/ActionBar";
 import { ContentSkeleton } from "../../../kit/ContentSkeleton";
-import { InfoDetail } from "../../../kit/InfoDetail";
+import { PageHelp } from "../../../kit/pageHelp";
 import { Notice, AutoRefresh, Select } from "../../../kit";
 import { ActivityTarget } from "../../../kit/SemanticActivity";
 import { feedIsBehind } from "../../../live/useLiveCollection";
@@ -82,11 +82,11 @@ export function MachinesTab({ header }: { header: (actions: ReactNode, meta?: Re
         <ActivityTarget target="fleet:machine-routing" className="fleet-routing-machines">
           {header(
             <>
-              <InfoDetail title="How a machine is chosen">
+              <PageHelp title="How a machine is chosen">
                 <p>Required labels filter which of your machines can take a call. Preferred labels and the strategy order them. A refusal may try the next matching machine only before a call starts; a started call is never replayed.</p>
                 <p>Routes choose the source. The model order ranks your local models when a route reaches your machines.</p>
-              </InfoDetail>
-              {feedIsBehind(state.liveState) ? <AutoRefresh onRefresh={state.reseed} /> : null}
+              </PageHelp>
+              {feedIsBehind(state.liveState, state.error) ? <AutoRefresh onRefresh={state.reseed} /> : null}
             </>,
           )}
           {loading ? (

@@ -1,8 +1,9 @@
+import { useState } from 'react';
 import {act, cleanup, fireEvent, render, screen} from '@testing-library/react';
 import {afterEach, beforeEach, expect, it, vi} from 'vitest';
 const h=vi.hoisted(()=>({connection:null as any}));
 vi.mock('../../src/live/connection',()=>({useOsConnection:()=>h.connection,osBridgePath:'',bridgePathFor:()=>''}));
-const {fakeConnection,machineRow,withSession,rowsResult}=await import('./harness');
+const {fakeConnection,machineRow,appSessionRow,withSession,rowsResult}=await import('./harness');
 const {FleetApp}=await import('../../src/apps/fleet/FleetApp');
 const {MachinesProvider,WORKER_REGISTRATION_CONCEPT}=await import('../../src/live/machines');
 const {ActivityTarget,SemanticActivityProvider}=await import('../../src/kit/SemanticActivity');
@@ -74,7 +75,8 @@ it('selects the first model, keeps a chosen model across heartbeats and falls ba
  expect(screen.getByRole('region',{name:'Selected equipment'}).textContent).toContain('alpha');
  fireEvent.click(screen.getByRole('button',{name:'Manage models'}));expect(onInspect).toHaveBeenLastCalledWith('models');
  fireEvent.click(screen.getByRole('button',{name:'Call history'}));expect(onInspect).toHaveBeenLastCalledWith('activity');
- fireEvent.click(screen.getByRole('button',{name:'Personal inference'}));expect(onInspect).toHaveBeenLastCalledWith('sharing');
+ expect(screen.queryByRole('button',{name:'Personal inference'})).toBeNull();
+ expect(screen.queryByText('Tools')).toBeNull();
 });
 it('gives empty equipment and recent work their own empty states',async()=>{
  h.connection=fakeConnection({myWorkersWithStatus:[machineRow({id:'a',displayName:'Alpha'})]});fleet();
@@ -109,4 +111,18 @@ it('never presents a refused machine inventory as a zero count', async () => {
  fleet();
  await screen.findByRole('region', { name: 'Machines unavailable' });
  expect(screen.getByRole('heading', { name: 'Machines' }).closest('.os-head')?.querySelector('.os-head-meta')).toBeNull();
+});
+
+it('All app sessions returns to the full list after a previously opened session', async () => {
+ const session = appSessionRow({id:'session',workerId:'a',runId:'A recorded task'});
+ h.connection = fakeConnection({myWorkersWithStatus:[machineRow({id:'a',displayName:'Alpha'})],appSessionsForUser:[session],appSessionById:[session]});
+ function App() { const [section,setSection]=useState('machines');return <><button onClick={()=>setSection('machines')}>Machines section</button><FleetApp sectionId={section} navigate={setSection} askContext={vi.fn()} store={{load:()=>({version:1,defaultSection:'machines',showRevoked:false}),save:()=>{}}}/></>; }
+ render(withSession(<MachinesProvider><App/></MachinesProvider>));
+ await openMachine('Alpha');
+ fireEvent.click(await screen.findByRole('button',{name:/A recorded task/}));
+ await screen.findByText('Recording');
+ fireEvent.click(screen.getByRole('button',{name:'Machines section'}));
+ fireEvent.click(screen.getByRole('button',{name:'All app sessions'}));
+ expect(await screen.findByRole('button',{name:/A recorded task/})).toBeTruthy();
+ expect(h.connection.query.appSessionsForUser).toHaveBeenCalledTimes(1);
 });
