@@ -8,9 +8,9 @@ import (
 	"crypto/sha256"
 	"database/sql"
 	"encoding/hex"
+	"encoding/json"
 	"errors"
 	"fmt"
-	"strconv"
 	"strings"
 	"time"
 
@@ -19,6 +19,7 @@ import (
 	"github.com/znasllc-io/memql/component/identity"
 	"github.com/znasllc-io/memql/component/identity/verifier"
 	memql "github.com/znasllc-io/memql/component/memql"
+	"github.com/znasllc-io/memql/core/num"
 )
 
 const Lifetime = 30 * time.Minute
@@ -76,16 +77,35 @@ func (s *Service) actor(ctx context.Context) (*identity.UserRow, error) {
 	}
 	epoch := int64(0)
 	if value, exists := claims["revocation_epoch"]; exists {
-		epoch, err = strconv.ParseInt(fmt.Sprint(value), 10, 64)
-		if err != nil {
+		epoch, ok = integerClaim(value)
+		if !ok {
 			return nil, ErrDenied
 		}
 	}
-	expires, err := strconv.ParseInt(fmt.Sprint(claims["exp"]), 10, 64)
-	if err != nil || epoch != u.RevocationEpoch || !s.now().Before(time.Unix(expires, 0)) {
+	expires, ok := integerClaim(claims["exp"])
+	if !ok || epoch != u.RevocationEpoch || !s.now().Before(time.Unix(expires, 0)) {
 		return nil, ErrDenied
 	}
 	return u, nil
+}
+
+// JWT MapClaims uses float64 for JSON numbers, which fmt prints in exponent
+// notation for ordinary Unix timestamps. Read the numeric value directly and
+// refuse malformed, fractional or out-of-range authority claims.
+func integerClaim(value any) (int64, bool) {
+	switch v := value.(type) {
+	case float64:
+		return num.WholeInt64(v)
+	case int64:
+		return v, true
+	case int:
+		return int64(v), true
+	case json.Number:
+		n, err := v.Int64()
+		return n, err == nil
+	default:
+		return 0, false
+	}
 }
 
 // Developer sessions cannot restore capabilities denied to the operator. Read
