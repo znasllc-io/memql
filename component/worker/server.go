@@ -453,7 +453,9 @@ type streamSession struct {
 	// modelCalls holds the live model-call handles (memql#4677), under
 	// the same lock and for the same reason: a call's lifetime is the
 	// stream's, and a disconnect must end every one.
-	modelCalls map[string]*ModelCallHandle
+	modelCalls       map[string]*ModelCallHandle
+	sharingChanged   chan struct{}
+	sharingStartedAt time.Time
 	// modelPulls is the pull table. Separate from modelCalls because the
 	// id spaces are separate and a pull is not a call: conflating them
 	// would let a cancel for one reach the other.
@@ -537,17 +539,19 @@ func newStreamSession(
 	cancel context.CancelFunc,
 ) *streamSession {
 	return &streamSession{
-		server:      srv,
-		stream:      stream,
-		worker:      w,
-		ctx:         ctx,
-		cancel:      cancel,
-		pending:     make(map[string]chan *memqlv1.ToolResult),
-		chunkSinks:  make(map[string]func(*memqlv1.ToolStream)),
-		sessions:    make(map[string]*AppSessionHandle),
-		modelCalls:  make(map[string]*ModelCallHandle),
-		modelPulls:  make(map[string]*ModelPullHandle),
-		modelProbes: make(map[string]*ModelProbeHandle),
+		server:           srv,
+		stream:           stream,
+		worker:           w,
+		ctx:              ctx,
+		cancel:           cancel,
+		pending:          make(map[string]chan *memqlv1.ToolResult),
+		chunkSinks:       make(map[string]func(*memqlv1.ToolStream)),
+		sessions:         make(map[string]*AppSessionHandle),
+		modelCalls:       make(map[string]*ModelCallHandle),
+		sharingChanged:   make(chan struct{}, 1),
+		sharingStartedAt: time.Now().UTC(),
+		modelPulls:       make(map[string]*ModelPullHandle),
+		modelProbes:      make(map[string]*ModelProbeHandle),
 	}
 }
 
@@ -1267,6 +1271,7 @@ func (s *streamSession) send(msg *memqlv1.WorkerServerMessage) error {
 // close() ends it with everything else on the stream.
 func (s *streamSession) startPinger() {
 	go s.runPinger()
+	go s.runSharingActivity()
 }
 
 // runPinger sends the first Ping after FirstPingDelay and then one every
@@ -1719,14 +1724,15 @@ func (s *streamSession) openModelCall(ctx context.Context, req ModelCallRequest)
 		clock = s.server.clock
 	}
 	handle := &ModelCallHandle{
-		requestId:    req.RequestId,
-		worker:       s.worker,
-		limits:       limits,
-		deltas:       make(chan ModelCallDelta, modelDeltaBuffer),
-		done:         make(chan struct{}),
-		cancelFn:     s.sendModelCallCancel,
-		clock:        clock,
-		lastActivity: clock(),
+		requestId:       req.RequestId,
+		sharingSubjects: req.SharingSubjects,
+		worker:          s.worker,
+		limits:          limits,
+		deltas:          make(chan ModelCallDelta, modelDeltaBuffer),
+		done:            make(chan struct{}),
+		cancelFn:        s.sendModelCallCancel,
+		clock:           clock,
+		lastActivity:    clock(),
 	}
 	handle.detach = func() {
 		s.mu.Lock()
@@ -1734,6 +1740,7 @@ func (s *streamSession) openModelCall(ctx context.Context, req ModelCallRequest)
 			delete(s.modelCalls, req.RequestId)
 		}
 		s.mu.Unlock()
+		s.markSharingChanged()
 	}
 
 	s.mu.Lock()
@@ -1803,6 +1810,8 @@ func (s *streamSession) openModelCall(ctx context.Context, req ModelCallRequest)
 		}, err)
 		return nil, fmt.Errorf("worker: send model call start: %w", err)
 	}
+
+	s.markSharingChanged()
 
 	// A caller context that dies before the call ends cancels the
 	// generation on the machine.

@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 
 import { MapEditor } from "../MapEditor";
 import { chipsFromMap, type LabelMap } from "../labels";
@@ -20,9 +20,9 @@ import { chipsFromMap, type LabelMap } from "../labels";
 // ===========================================================================
 // OPTIMISTIC, WITH A ROLLBACK THE BOOLEAN PAYS FOR
 // ===========================================================================
-// A chip appears before the row comes back, because the round trip is long
+// A card appears before the row comes back, because the round trip is long
 // enough that waiting reads as a dropped click. That is only safe because the
-// write RESOLVES to whether it happened: a void write would leave a chip on
+// write RESOLVES to whether it happened: a void write would leave a card on
 // screen claiming a label the router will never match on -- the exact silent
 // disagreement the two-map split exists to prevent.
 
@@ -34,7 +34,7 @@ export function LabelEditor({
   operatorLabels: LabelMap;
   busy: boolean;
   /** Resolves false when the cluster refused, which is what rolls the
-   *  optimistic chip back. */
+   *  optimistic card back. */
   onSave: (labels: LabelMap) => Promise<boolean>;
 }) {
   const [local, setLocal] = useState<LabelMap>(operatorLabels);
@@ -46,6 +46,8 @@ export function LabelEditor({
   // a fresh object arrives on every heartbeat fold and would otherwise reset
   // this on a change that touched nothing here.
   const serialized = JSON.stringify(chipsFromMap(operatorLabels));
+  const latest = useRef({ serialized, labels: operatorLabels });
+  latest.current = { serialized, labels: operatorLabels };
   useEffect(() => {
     setLocal(operatorLabels);
     // THE DEP IS `serialized` ON PURPOSE: it is the value-identity of
@@ -53,12 +55,16 @@ export function LabelEditor({
     // fold -- depending on the object would reset the editor constantly.
   }, [serialized]);
 
-  function change(next: LabelMap) {
+  async function change(next: LabelMap) {
     const held = local;
+    const baseline = serialized;
     setLocal(next);
-    void onSave(next).then((ok) => {
-      if (!ok) setLocal(held);
-    });
+    let ok = false;
+    try { ok = await onSave(next); return ok; }
+    finally {
+      // A refusal must not roll a newer broadcast back to our older snapshot.
+      if (!ok) setLocal(latest.current.serialized === baseline ? held : latest.current.labels);
+    }
   }
 
   return (

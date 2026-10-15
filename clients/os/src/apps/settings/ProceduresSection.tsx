@@ -1,5 +1,5 @@
 import { ContentSkeleton, Fact, Facts, Head, Notice, Panel, Subhead } from "../../kit";
-import { InfoDetail } from "../../kit/InfoDetail";
+import { PageHelp } from "../../kit/pageHelp";
 import { useSession } from "../../chrome/access";
 import type { LadderPolicy } from "../nexus/ladder";
 import { useLadderPolicy } from "./useLadderPolicy";
@@ -65,7 +65,7 @@ export function ProceduresSection() {
       <Panel label="Certification ladder">
         <div className="os-record-heading">
           <Subhead>Certification ladder</Subhead>
-          <InfoDetail title="The certification ladder">
+          <PageHelp title="The certification ladder">
             <p>
               A learned procedure is work the system watched an app do more than once, turned into
               steps it can replay without a model. It starts as a candidate. In shadow it replays
@@ -86,7 +86,7 @@ export function ProceduresSection() {
               boot, so they change with a deploy rather than here; a cluster whose engine has not
               written them yet uses built-in values it does not publish.
             </p>
-          </InfoDetail>
+          </PageHelp>
         </div>
         {read.state === "loading" ? (
           // LOADING IS THE SHAPE OF THE CONTENT, NEVER A MESSAGE (DESIGN.md):

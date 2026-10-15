@@ -423,9 +423,6 @@ func ParseMachineSharing(v any) (mode string, userIds, groupIds []string) {
 	}
 	userIds = readShareIdList(row["userIds"])
 	groupIds = readShareIdList(row["groupIds"])
-	if len(userIds) == 0 && len(groupIds) == 0 {
-		return SharingModeOwner, nil, nil
-	}
 	return mode, userIds, groupIds
 }
 

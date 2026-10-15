@@ -16,7 +16,7 @@ afterEach(cleanup);
 it("makes saved-data removal explicit and describes app permission cleanup without claiming credentials are deleted", async () => {
   const machine = machineFromRow(machineRow({ id: "cleanup-machine", name: "Cleanup Mac", platformInfo: { os: "darwin", arch: "arm64" } }));
   const writes = { busyId: "", actionError: "", rename: vi.fn(), setOperatorLabels: vi.fn(), revoke: vi.fn(), setSharing: vi.fn() };
-  render(withSession(<MachineDetail machine={machine} writes={writes} now={new Date()} view="details" />));
+  render(withSession(<MachineDetail machine={machine} writes={writes} now={new Date()} view="settings" />));
   fireEvent.click(screen.getByRole("button", { name: "Remove this machine" }));
   const command = () => (screen.getByLabelText("the uninstall command") as HTMLInputElement).value;
   expect(command()).not.toContain("--purge");

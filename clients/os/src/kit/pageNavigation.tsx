@@ -1,4 +1,5 @@
 import { createContext, useContext, useEffect, useLayoutEffect, useMemo, useRef, useState, type RefObject, type ReactNode } from "react";
+import { PageHelpProvider } from "./pageHelp";
 import type { Breadcrumb } from "./Breadcrumbs";
 
 /** What a page heading tells its window about where the person is. */
@@ -85,7 +86,7 @@ export function PageNavigationProvider({ trail, root, children }: { trail: reado
   }, [host, root]);
   const navigation = useMemo(() => ({ trail, primary: state.primary, register: host.register, publish: host.publish }), [trail, state.primary, host]);
   const windowTrail = useMemo(() => ({ trail, page: host.page, signature: state.signature }), [trail, host, state.signature]);
-  return <Context.Provider value={navigation}><TrailContext.Provider value={windowTrail}>{children}</TrailContext.Provider></Context.Provider>;
+  return <Context.Provider value={navigation}><TrailContext.Provider value={windowTrail}><PageHelpProvider root={root}>{children}</PageHelpProvider></TrailContext.Provider></Context.Provider>;
 }
 
 /**

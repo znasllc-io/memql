@@ -7,37 +7,11 @@ import (
 	"testing"
 )
 
-func TestBothConsentsAreRequired(t *testing.T) {
-	// The whole of D6. Either half alone is not consent, and the table is
-	// written out rather than looped because each row is a different decision
-	// somebody made about a different thing.
-	cases := []struct {
-		name    string
-		owner   string
-		cockpit string
-		want    bool
-	}{
-		{"neither", SharingModeOwner, InferenceServeOwner, false},
-		{"owner only", SharingModeCluster, InferenceServeOwner, false},
-		{"cockpit only", SharingModeOwner, InferenceServeCluster, false},
-		{"both", SharingModeCluster, InferenceServeCluster, true},
-	}
-	for _, tc := range cases {
-		t.Run(tc.name, func(t *testing.T) {
-			if got := ServesTheCluster(tc.owner, tc.cockpit); got != tc.want {
-				t.Fatalf("owner=%q cockpit=%q -> %v, want %v", tc.owner, tc.cockpit, got, tc.want)
-			}
-		})
-	}
-}
-
-func TestAnAbsentCockpitConsentIsNotAConsent(t *testing.T) {
-	// A cockpit that predates the field has said nothing, and silence is not
-	// agreement to run other people's work on somebody's laptop. This is the
-	// one place in the epic where the reading of silence is the SAFE value
-	// rather than merely the honest one -- and the two coincide.
-	if ServesTheCluster(SharingModeCluster, "") {
-		t.Fatal("an unset inferenceServe must not count as consent")
+func TestClusterWorkRequiresTheOwnersClusterShare(t *testing.T) {
+	for _, mode := range []string{"", "owner", "people", "invalid", "cluster"} {
+		if got := ServesTheCluster(mode); got != (mode == "cluster") {
+			t.Fatalf("mode %q: %v", mode, got)
+		}
 	}
 }
 
@@ -73,36 +47,12 @@ func TestAMissingSharingObjectIsOwner(t *testing.T) {
 	}
 }
 
-func TestTheRefusalNamesWhichConsentIsMissing(t *testing.T) {
-	// THE REASON THIS IS A FUNCTION AND NOT A BOOLEAN. The two repairs are in
-	// different places and are performed by different people: the owner's is an
-	// act on a web page, the cockpit's is a line in a file on that machine's own
-	// disk. A single "not shared" sentence sends half the operators to the wrong
-	// machine, and the laptop's owner goes looking on a page for a setting that
-	// is not there.
-	if got := SharingRefusal(SharingModeCluster, InferenceServeCluster); got != "" {
-		t.Fatalf("a shared machine has no refusal, got %q", got)
+func TestSharingRefusalPointsToTheOwnerInFleet(t *testing.T) {
+	if got := SharingRefusal(SharingModeCluster); got != "" {
+		t.Fatal(got)
 	}
-
-	ownerMissing := SharingRefusal(SharingModeOwner, InferenceServeCluster)
-	if !strings.Contains(ownerMissing, "Fleet") {
-		t.Fatalf("the owner's half must point at the Fleet page, got %q", ownerMissing)
-	}
-	if strings.Contains(ownerMissing, "policy.yaml") {
-		t.Fatalf("the owner's half must not send them to a file on the machine, got %q", ownerMissing)
-	}
-
-	cockpitMissing := SharingRefusal(SharingModeCluster, InferenceServeOwner)
-	if !strings.Contains(cockpitMissing, "policy.yaml") {
-		t.Fatalf("the cockpit's half must name the file, got %q", cockpitMissing)
-	}
-	if strings.Contains(cockpitMissing, "Fleet") {
-		t.Fatalf("the cockpit's half must not send them to a web page, got %q", cockpitMissing)
-	}
-
-	neither := SharingRefusal(SharingModeOwner, InferenceServeOwner)
-	if !strings.Contains(neither, "Both") {
-		t.Fatalf("with neither given, the sentence must say both are needed, got %q", neither)
+	if got := SharingRefusal(SharingModeOwner); !strings.Contains(got, "Fleet") || strings.Contains(got, "policy.yaml") {
+		t.Fatal(got)
 	}
 }
 
@@ -115,20 +65,6 @@ func TestSharingRoundTripsThroughTheStoredShape(t *testing.T) {
 	people := Sharing{Mode: SharingModePeople, UserIds: []string{"v1:identity:user:ana"}, GroupIds: []string{"design"}, SharedAt: "2026-09-23T12:00:00Z", SharedBy: "v1:identity:user:olivia"}
 	if back := SharingFromRow(people.Row()); !reflect.DeepEqual(back, people) {
 		t.Fatalf("a people share must round-trip: %+v vs %+v", back, people)
-	}
-}
-
-func TestAMalformedInferenceServeRefusesTheRegistration(t *testing.T) {
-	// A consent value the engine does not understand must not be silently read
-	// as either answer. Refusing at register is the same direction the hardware
-	// inventory takes, and for a sharper reason: the two readings differ by
-	// whether a stranger's prompt runs on this machine.
-	_, err := ParseCapabilityDescriptor(`{"platform":"darwin","displayServer":"quartz","inferenceServe":"everyone","schemaVersion":1}`)
-	if err == nil {
-		t.Fatal("an unknown inferenceServe must refuse the registration")
-	}
-	if !strings.Contains(err.Error(), "everyone") {
-		t.Fatalf("the error must name the offending value, got %q", err)
 	}
 }
 
@@ -223,13 +159,10 @@ func TestANilGroupSourceNarrowsAndNeverWidens(t *testing.T) {
 	}
 }
 
-func TestAPeopleShareNamingNobodyIsOwner(t *testing.T) {
-	// A people share with an empty list names nobody, and the honest reading of
-	// "lent to nobody" is "not lent". fleetSetSharing refuses to write one; this
-	// is what a hand-edited or half-written row reads as.
+func TestAnEmptySharingListAdmitsNobody(t *testing.T) {
 	got := SharingFromRow(map[string]any{"mode": "people"})
-	if got.Mode != SharingModeOwner || len(got.UserIds) != 0 || len(got.GroupIds) != 0 {
-		t.Fatalf("an empty people share must read as owner, got %+v", got)
+	if got.Mode != SharingModePeople || got.Admits(NewPerson(context.Background(), "ana", nil)) {
+		t.Fatalf("an enabled, empty list must remain editable and admit nobody: %+v", got)
 	}
 }
 
@@ -246,38 +179,29 @@ func TestTheListsAreReadOnlyUnderPeople(t *testing.T) {
 	}
 }
 
-func TestServesPersonNeedsTheCockpitToo(t *testing.T) {
-	// The machine's own half is still required (G5): it is a decision about
-	// where the machine is, and who the owner lends it to does not change that.
+func TestSavedAudienceIsEnoughForModelSharing(t *testing.T) {
 	s := Sharing{Mode: SharingModePeople, UserIds: []string{"ana"}}
-	ana := NewPerson(context.Background(), "ana", nil)
-	if ServesPerson(s, InferenceServeOwner, ana) {
-		t.Fatal("the cockpit's half is still required for a people share")
+	if !ServesPerson(s, NewPerson(context.Background(), "ana", nil)) {
+		t.Fatal("a listed person must be admitted without machine setup")
 	}
-	if !ServesPerson(s, InferenceServeCluster, ana) {
-		t.Fatal("both halves given must serve the listed person")
-	}
-	if ServesTheCluster(SharingModePeople, InferenceServeCluster) {
-		t.Fatal("a people share is never a cluster share: system work must not ride it")
+	if ServesTheCluster(s.Mode) {
+		t.Fatal("a people share must not admit system work")
 	}
 }
 
-func TestRefusalsNameTheMissingHalfForPeopleShares(t *testing.T) {
+func TestRefusalsRespectPeopleShares(t *testing.T) {
 	s := Sharing{Mode: SharingModePeople, UserIds: []string{"ana"}}
-	if got := PersonRefusal(s, InferenceServeCluster, NewPerson(context.Background(), "bo", nil)); !strings.Contains(got, "specific people") {
-		t.Fatalf("a person not on the list: %q", got)
+	if got := PersonRefusal(s, NewPerson(context.Background(), "bo", nil)); !strings.Contains(got, "specific people") {
+		t.Fatal(got)
 	}
-	if got := PersonRefusal(s, InferenceServeOwner, NewPerson(context.Background(), "ana", nil)); !strings.Contains(got, "policy.yaml") {
-		t.Fatalf("a listed person on a machine that has not agreed: %q", got)
+	if got := PersonRefusal(s, NewPerson(context.Background(), "ana", nil)); got != "" {
+		t.Fatal(got)
 	}
-	if got := SystemRefusal(s, InferenceServeCluster); !strings.Contains(got, "cluster's own work") {
-		t.Fatalf("system work on a people share: %q", got)
+	if got := SystemRefusal(s); !strings.Contains(got, "cluster's own work") {
+		t.Fatal(got)
 	}
-	if got := PersonRefusal(s, InferenceServeCluster, NewPerson(context.Background(), "ana", nil)); got != "" {
-		t.Fatalf("a served person has no refusal, got %q", got)
-	}
-	if got := PersonRefusal(Sharing{Mode: SharingModeOwner}, InferenceServeCluster, NewPerson(context.Background(), "ana", nil)); got != SharingRefusal(SharingModeOwner, InferenceServeCluster) {
-		t.Fatalf("an owner-only machine keeps the two-consent sentence, got %q", got)
+	if got := PersonRefusal(Sharing{Mode: SharingModeOwner}, NewPerson(context.Background(), "ana", nil)); got != SharingRefusal(SharingModeOwner) {
+		t.Fatal(got)
 	}
 }
 
@@ -302,5 +226,34 @@ func TestASyntheticActorIsNeverOnAPeopleList(t *testing.T) {
 	}
 	if !SameSubjectId("v1:identity:user:ana", "ana") {
 		t.Fatal("a canonical user id and its bare form are one person")
+	}
+}
+
+func TestPausingARecipientKeepsItListedAndClosesOnlyThatGrant(t *testing.T) {
+	ctx := context.Background()
+	s := SharingFromRow(map[string]any{"mode": "people", "userIds": []string{"ana"}, "groupIds": []string{"design"}, "pausedUserIds": []string{"ana"}, "pausedGroupIds": []string{"design"}})
+	person := NewPerson(ctx, "v1:identity:user:ana", func(context.Context, string) []string { return []string{"v1:identity:group:design"} })
+	if s.Admits(person) {
+		t.Fatal("paused direct and group grants must refuse new calls")
+	}
+	if len(s.UserIds) != 1 || len(s.GroupIds) != 1 {
+		t.Fatal("pause must retain the recipient")
+	}
+	s.PausedGroupIds = nil
+	if !s.Admits(person) {
+		t.Fatal("another active grant still admits this user")
+	}
+	subjects := s.SubjectsFor(person)
+	if len(subjects.UserIds) != 0 || len(subjects.GroupIds) != 1 {
+		t.Fatalf("only the admitting grant is counted: %+v", subjects)
+	}
+	s.PausedUserIds = nil
+	subjects = s.SubjectsFor(person)
+	if len(subjects.UserIds) != 1 || len(subjects.GroupIds) != 1 {
+		t.Fatalf("overlapping active grants each count the call: %+v", subjects)
+	}
+	roundtrip := SharingFromRow(s.Row())
+	if !roundtrip.Admits(person) {
+		t.Fatal("resuming must survive a stored-row roundtrip")
 	}
 }

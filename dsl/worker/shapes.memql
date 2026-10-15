@@ -52,6 +52,7 @@ shape registration workerRegistrationFull {
   platformInfo
   hardware
   sharing
+  sharingActivity
   permissions
   apps
   appDescriptors

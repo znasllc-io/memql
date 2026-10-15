@@ -1,5 +1,5 @@
 // Labels, in the two shapes the Fleet needs them: the MAP the graph stores
-// and the `key=value` CHIP a person edits.
+// and the `key=value` summaries used in chips and stable value identities.
 //
 // ===========================================================================
 // TWO LABEL FIELDS, AND THE SPLIT IS THE WHOLE POINT
@@ -90,8 +90,8 @@ export function mergeLabels(reported: LabelMap, operator: LabelMap): MergedLabel
 // The chip form
 // ---------------------------------------------------------------------------
 //
-// A worker label is a PAIR, and the editor works in flat strings, so the chip
-// text is the pair written the way an operator would type it: `key=value`.
+// A worker label is a PAIR. The card editor names its two fields separately;
+// compact summaries and the helpers below spell the pair as `key=value`.
 // That is also the form docs/public/operate/workers-runbook.md's workers.yaml
 // already shows, so there is one spelling to learn rather than two.
 

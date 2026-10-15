@@ -4,6 +4,7 @@ import { fakeConnection as usersConnection, withSession as usersSession, roleRow
 import { StorageScene } from "./storageScenes";
 import { emailScenes, EMAIL_CLICKS } from "./emailScenes";
 import { nexusApprovalScenes, NEXUS_APPROVAL_CLICKS } from "./nexusApprovalScenes";
+import { fleetEquipmentScenes } from "./fleetEquipmentScenes";
 import { mapScenes } from "./mapScenes";
 import { MATERIALIZER_VIEWS } from "./materializerScenes";
 import { FilesApp } from "../src/apps/files/FilesApp";
@@ -24,7 +25,7 @@ import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 
 import "../src/styles/index.css";
 import { applyPackStyles, resolveThemePack } from "../src/themes/registry";
-import { Panel } from "../src/kit";
+import { Button, Notice, Panel } from "../src/kit";
 import { setRoleLadder } from "../src/system/roles";
 import { SEEDED_LADDER } from "../test/seededLadder";
 import {
@@ -77,7 +78,6 @@ import {
 } from "../test/deployables/harness";
 import { siteFromRow } from "../src/apps/deployables/rows";
 import { MachineDetail } from "../src/apps/fleet/machines/MachineDetail";
-import { ShareDialog } from "../src/apps/fleet/machines/ShareDialog";
 import type { MachineWrites } from "../src/apps/fleet/machines/useMachineWrites";
 import { machineFromRow } from "../src/apps/fleet/rows";
 import { MachinesProvider } from "../src/live/machines";
@@ -686,6 +686,19 @@ function PreviewPage({ site }: { site: ReturnType<typeof siteFromRow> }) {
 // reason the README gives about the fake in general: each is the SUITE's, so a
 // screenshot cannot disagree with what those tests assert.
 
+function FeedbackPreview() {
+  const { actions } = useOs();
+  useEffect(() => { actions.setThemePack(resolveThemePack(new URLSearchParams(window.location.search).get("theme") ?? "graphite").id); }, [actions]);
+  const [saved, setSaved] = useState(false);
+  return <div className="os-window-content" style={{ display: "grid", gap: 16, alignContent: "start" }}>
+    <Notice sentence="Sharing applies to the people and groups you choose." />
+    <Notice tone="warn" sentence="People and groups may be out of date." next="Your choices are kept while the connection recovers." />
+    {saved ? <p role="status" className="os-caption">Sharing saved.</p> : <Notice tone="error" sentence="That change was not saved." next="Your choices are kept." detail="The connection was interrupted. Try again."><Button onClick={() => setSaved(true)}>Try again</Button></Notice>}
+    <div className="os-domain-problem"><p className="os-domain-problem-sentence">The domain could not be verified.</p><p className="os-domain-problem-detail">Check the DNS record, then try again.</p></div>
+    <div className="os-fleet-revoked"><p className="os-caption">This machine was removed from the fleet.</p></div>
+  </div>;
+}
+
 const VIEWS: Record<
   string,
   {
@@ -697,8 +710,10 @@ const VIEWS: Record<
     render: () => JSX.Element;
   }
 > = {
+  "feedback": { render: () => <WindowBody fallback="Notices"><FeedbackPreview /></WindowBody> },
   ...MATERIALIZER_VIEWS,
   ...mapScenes(WindowBody),
+  ...fleetEquipmentScenes(WindowBody),
   "users-groups": usersWizardView("groups"),
   "users-roles": usersWizardView("roles"),
   "users-invite": usersWizardView("people"),
@@ -946,7 +961,7 @@ const VIEWS: Record<
   },
   // Sharing a machine (epic memql#5344). The panel in each reading of who can
   // use it, then the dialog. `sharing-people` is the one to read first: names,
-  // both consents given, and the week's split ledger line.
+  // the saved audience and the week's split ledger line.
   "sharing-owner": {
     connect: () => fleetConnection({}),
     wrap: (el) => fleetSession(<MachinesProvider>{el}</MachinesProvider>),
@@ -957,9 +972,8 @@ const VIEWS: Record<
     wrap: (el) => fleetSession(<MachinesProvider>{el}</MachinesProvider>),
     render: () => <SharingPane over={{ sharing: SHARED_WITH_PEOPLE, capabilityDescriptor: { inferenceServe: "cluster" } }} />,
   },
-  // Lent by its owner, not yet agreed to by the machine: the one-line state is
-  // muted and the cockpit's line says what to change and where.
-  "sharing-waiting": {
+  // A stored machine descriptor from an earlier Cockpit cannot block sharing.
+  "sharing-legacy-descriptor": {
     connect: () => fleetConnection({ fleetShareDirectory: [SHARE_DIRECTORY] }),
     wrap: (el) => fleetSession(<MachinesProvider>{el}</MachinesProvider>),
     render: () => <SharingPane over={{ sharing: SHARED_WITH_PEOPLE, capabilityDescriptor: { inferenceServe: "owner" } }} />,
@@ -1190,7 +1204,7 @@ function MachinePane({ over }: { over: Record<string, unknown> }) {
   };
   return (
     <div className="os-window-content">
-      <MachineDetail machine={machine} writes={writes} now={FLEET_NOW} view="details" />
+      <MachineDetail machine={machine} writes={writes} now={FLEET_NOW} view="settings" />
     </div>
   );
 }
@@ -1489,9 +1503,7 @@ function AccountsPane() {
 // --- Sharing a machine (epic memql#5344) -----------------------------------
 //
 // The panel and the dialog, over the suite's own fixture connection. The
-// dialog views render ShareDialog directly -- the harness does not click --
-// and `?modal=0` draws it in the page rather than the top layer, for a capture
-// tool that does not paint the top layer.
+// Sharing scenes use the inline production editor and its directory.
 
 const SHARED_WITH_PEOPLE = {
   mode: "people",
@@ -1566,28 +1578,19 @@ function SharingPane({ over }: { over: Record<string, unknown> }) {
   const machine = fleetMachine({ ownerUserId: "v1:identity:user:me", ...over });
   return (
     <div className="os-window-content">
-      <MachineDetail machine={machine} writes={qaWrites()} now={FLEET_NOW} view="sharing" />
+      <MachineDetail machine={machine} writes={qaWrites()} now={FLEET_NOW} view="settings" />
     </div>
   );
 }
 
 function SharePane({ over, startPeople = false, refuse = false }: { over: Record<string, unknown>; startPeople?: boolean; refuse?: boolean }) {
   const machine = fleetMachine({ ownerUserId: "v1:identity:user:me", ...over });
-  const modal = new URLSearchParams(window.location.search).get("modal") !== "0";
-  if (!modal) {
-    // In-page for a capture tool that does not paint the top layer: the SAME
-    // component and stylesheet, opened with show() instead of showModal().
-    HTMLDialogElement.prototype.showModal = HTMLDialogElement.prototype.show;
-  }
   useEffect(() => {
-    // One-shot captures cannot click: choose "Specific people and groups"
+    // One-shot captures cannot click: enable sharing
     // for the views that open on it, and press Save for the refused one.
     const timer = window.setTimeout(() => {
       if (startPeople) {
-        const people = Array.from(document.querySelectorAll<HTMLButtonElement>('[role="radio"]')).find((b) =>
-          (b.textContent ?? "").startsWith("Specific people"),
-        );
-        people?.click();
+        document.querySelector<HTMLInputElement>('[role="switch"]')?.click();
       }
       // `?arrow=N` arrows N times through the results from the search, so a
       // capture shows whether the active option is kept in view (the list is
@@ -1617,8 +1620,7 @@ function SharePane({ over, startPeople = false, refuse = false }: { over: Record
   }, [startPeople, refuse]);
   return (
     <div className="os-window-content">
-      <MachineDetail machine={machine} writes={qaWrites(refuse)} now={FLEET_NOW} view="sharing" />
-      <ShareDialog machine={machine} writes={qaWrites(refuse)} onDiscard={() => undefined} onSaved={() => undefined} />
+      <MachineDetail machine={machine} writes={qaWrites(refuse)} now={FLEET_NOW} view="settings" />
     </div>
   );
 }

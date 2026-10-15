@@ -41,6 +41,13 @@ and wallpaper values only (see `src/themes/`), so nothing here is themeable.
    Keep this in the shared list styles, including rows with separate actions
    and live-list wrappers; never add per-app row borders.
 
+   Selection controls use straight edges (`--os-selection-radius`), including
+   local tabs, choice cards, menu options and equipment choices. Show selection
+   with the theme accent, fill or underline; avoid rounded selection outlines.
+   Notices, warnings, errors and status panels also use straight edges. Keep
+   their tone marks straight, with theme colors and readable text; no curved
+   brackets or rounded message outlines. Use the shared `Notice` for feedback.
+
 2. **Filters are questions, not furniture.** Search and facet controls live
    behind one affordance (`kit` `Refine`): collapsed by
    default, expanded while being asked, active constraints as removable
@@ -59,10 +66,10 @@ and wallpaper values only (see `src/themes/`), so nothing here is themeable.
    toolbar chrome. The empty state points at the setting when hiding is why
    it is empty.
 
-5. **One control line.** Inputs, selects, buttons and choice pills all
+5. **One control line.** Inputs, selects, buttons and choices all
    stand `--os-control-h` tall at `--os-text-base`. Field-shaped controls
-   share `--os-radius-xs`; the choice pill keeps its own radius because it
-   is the shell's selection language, not a field. Ask shares the window header
+   share `--os-radius-xs`; choices use the straight `--os-selection-radius`.
+   Ask shares the window header
    and icon controls, app-content text scale and page gutters; its sheet
    dimensions do not define a separate scale for its contents. Selects drop UA chrome
    (`Select` draws its own currentColor chevron). A date and time is
@@ -89,6 +96,8 @@ and wallpaper values only (see `src/themes/`), so nothing here is themeable.
    confirmation messages concise. Detail pages reuse `Panel`, `Subhead`,
    `Facts` and `Fact`, as the Cluster Mesh node page does, instead of inventing
    another data layout or button arrangement.
+   Follow [Details and settings content](#details-and-settings-content) for
+   open sections, grouped edits, aligned facts and quiet copying.
 
 8. **One container language.** `Panel` + `Subhead` + `Field` is the
    grouping grammar. Settings groups keep their `fieldset` and `legend`
@@ -210,7 +219,10 @@ and wallpaper values only (see `src/themes/`), so nothing here is themeable.
   `TrailRow`, after Back and breadcrumbs, on desktop and phone. It opens the
   current page's help modal; until documentation exists, say “Documentation is
   coming soon.” Future help starts with a walkthrough video, followed by the
-  option details. Do not repeat information icons beside individual settings.
+  option details. Publish section documentation with `PageHelp`; the shared
+  page scope collects visible sections in order and excludes retained hidden
+  pages. Dialogs own their help scope and preserve their draft when help closes.
+  Do not repeat information icons beside individual settings.
   Keep essential permissions, download costs and destructive consequences in
   the flow where someone makes that choice.
 - Add Machine keeps the shared wizard's steps-left/content-right layout and
@@ -227,6 +239,13 @@ and wallpaper values only (see `src/themes/`), so nothing here is themeable.
   and individually removable entries with validation and keyboard support.
   Do not require comma-separated input to manage a visible list. Explain the
   consequence of the collection once, and show it only for modes that use it.
+- Sharing uses a toggle and one divider before the Users and groups collection.
+  Its search picker keeps checked choices until the plus action adds them
+  together. Each recipient card has a live call count and named, icon-only
+  pause/resume and remove controls. These actions save directly, show pending
+  state and retain the saved value on failure with an explicit retry. Keep routine success
+  receipts, usage summaries and empty-directory explanations out of this flow;
+  describe draining calls and overlapping grants in the page's single help.
 - Build with the kit pieces; a surface needing a control the kit lacks
   promotes it on second use (`src/kit/controls.tsx` header) rather than
   respelling it locally.
@@ -253,6 +272,91 @@ removed accurately, including partial completion and other cluster enrollments.
 Respect non-interactive output, narrow terminals and plain-text/no-color modes.
 These rules apply to human presentation; capability scripts retain their
 structured stdout contract and send human logs to stderr.
+
+## Details and settings content
+
+Fleet's machine Settings page is the reference for displaying an entity's
+configuration and reported facts. Apply this pattern when building or revising
+comparable pages in other apps; keep their existing capabilities and permissions.
+For a machine, Settings is the last tab, after History. General controls and
+Sharing precede reported facts on that one page. Sharing uses the same section
+grid, with a divider between its switch and users/groups collection; keep write errors
+beside the section that caused them. There is no separate Sharing tab.
+
+- **Open, named sections.** Group related information under a `Subhead`, with
+  generous vertical spacing and a single hairline between groups. Keep ordinary
+  details visible without expanding accordions. Avoid nested cards, repeated
+  captions and a separate container around every fact.
+- **One alignment.** Keep the full-width `PageContent` bounds. On wide windows,
+  place the section heading beside its body and align the label/value columns
+  across sections using `Facts` and `Fact`. As the window narrows, move headings
+  above their sections, then stack labels above values. Constrain individual
+  fields to a readable measure; long data wraps within the available width.
+- **Edits together.** Group entity settings such as rename, editable labels
+  and removal in a clearly named section, separate from reported facts. Removal
+  uses a borderless trash `IconButton` with an accessible name and tooltip.
+  Keep its consequences and confirmation beside the action, preserve the shared
+  confirmation hold and restore focus on cancel. Lifecycle actions that belong
+  in an `ActionBar` continue to follow rule 12.
+- **Quiet copying.** Use `Fact.copyValue` or `CopyValue presentation="row"`.
+  The value and its copy icon form one target; reserve the icon/receipt space so
+  hover and confirmation never shift the text. Give the target horizontal
+  padding at both ends, inside its width, and a faint theme-derived hover wash
+  with straight edges. Keep non-copyable values aligned with copyable ones.
+  Reveal the icon on hover or keyboard focus, keep it visible on touch, and
+  retain a clear keyboard focus ring. Support Enter/Space and manual selection.
+  Briefly show “Copied” only after success; on failure keep the text selectable
+  and report that nothing was copied. Use the shared control, not per-app copies
+  of its CSS or clipboard behavior.
+- **Readable, truthful data.** Copy exact timestamps behind relative dates;
+  copying a key/value entry includes both. Missing measurements remain “Not
+  reported” or “Not measured”, never invented zeroes or copyable placeholders.
+  Keep live values current without replacing an edit in progress. Supporting
+  explanations use `PageHelp` and the page's single information control;
+  essential consequences remain beside the relevant choice.
+
+The implementation reference is
+[`MachineDetailsInfo.tsx`](src/apps/fleet/machines/MachineDetailsInfo.tsx), with
+shared copy behavior in [`kit/controls.tsx`](src/kit/controls.tsx). Validate these
+surfaces in every built-in theme, in light and dark, at wide and narrow window
+sizes. Include long values, empty reports, hover, keyboard focus, touch,
+clipboard success/refusal and reduced motion. Check actual rendered spacing
+and overflow, not just whether the control exists.
+
+Small equipment, label and sharing collections share `kit/CardCarousel`: one or two
+cards according to available width, explicit previous/next arrows and an
+“x–y of n” counter. Paging never changes selection or intercepts the wheel;
+off-page controls are inert and resize keeps keyboard focus visible. Routing
+labels use `MapEditor`, with Label/Value search, a short creation instruction,
+unique names, value editing and an icon-only trash action on each card. Only a
+new name in Label mode offers creation. Preserve the parent's save moment,
+keep refused drafts for retry, and use the existing live feed for updates.
+
+Editable card collections share `kit/CardCollectionEditor` for their filter,
+search and borderless add line, card opening target, separate icon actions and
+loading geometry. Sharing follows the Routing labels setting row: the same muted
+label at the left, search and cards in the right column. Its Share models switch
+sits at the right edge, like the Remove machine action. Search can filter existing
+access or add an existing user/group from the directory; it never creates an
+identity. A card edits that recipient's sharing state, with direct pause/resume
+and remove icons and live call counts. Keep drafts through heartbeats and prevent
+an edit from overwriting a newer sharing decision.
+
+Routing label and sharing cards share a compact two-row layout and minimum
+height. Put the name above the details, with sharing call counts in the middle
+and pause/resume immediately before delete on the bottom row. Keep the whole
+card's subtle hover/focus wash continuous behind its separate action buttons.
+Page to one card when two would crowd the details or action targets.
+
+Sharing's search is a multi-select picker: the first five eligible options,
+then a Load more row that reveals five more. Search the full directory before
+paging. Checked selections survive filters, searches and reopening; show one
+`N selected` indicator and enable the plus action only with a selection. Commit
+the selected batch in one write, retain it on failure, and exclude entries that
+already have access. Options toggle checkmarks and never save on click.
+Use `kit/AnchoredPicker` to join the popup to the text field, escape scroll and
+transform clipping, follow the field as its window moves, and flip above when
+space below is tight. Keep keyboard position distinct from checked state.
 
 ## Record lists
 

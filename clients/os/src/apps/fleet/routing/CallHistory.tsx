@@ -1,6 +1,6 @@
 import { RecordListSkeleton } from "../../../kit/RecordListSkeleton";
 import { History } from "lucide-react";
-import { InfoDetail } from "../../../kit/InfoDetail";
+import { PageHelp } from "../../../kit/pageHelp";
 import { useState } from "react";
 
 import { Button, Notice, EmptyState, AutoRefresh, Subhead, RecordList, RecordRow } from "../../../kit";
@@ -33,7 +33,7 @@ export function CallHistory({ workerId, machineLabel, standalone = false }: { wo
           {open ? "Hide recent calls" : "Recent calls"}
         </Button>}
         {open ? <span className="fleet-heading-actions">
-          <InfoDetail title="Call history"><p>Calls routed to this machine. App sessions are listed separately in Activity.</p><p>{readAt === null ? "The first read has not completed." : `Read at ${formatMoment(readAt.toISOString())}. Updates automatically.`}</p></InfoDetail>
+          <PageHelp title="Call history"><p>Calls routed to this machine. App sessions are listed separately in Activity.</p><p>{readAt === null ? "The first read has not completed." : `Read at ${formatMoment(readAt.toISOString())}. Updates automatically.`}</p></PageHelp>
           <AutoRefresh busy={loading} onRefresh={refresh} />
         </span> : null}
       </div>

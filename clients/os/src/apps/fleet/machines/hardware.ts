@@ -133,7 +133,7 @@ export function acceleratorSentence(hw: MachineHardware): string {
     case "none":
       return "No accelerator the runtimes can reach. Models run on the processor, which works and is slow.";
     default:
-      return name;
+      return hw.gpu.name || "Not reported";
   }
 }
 

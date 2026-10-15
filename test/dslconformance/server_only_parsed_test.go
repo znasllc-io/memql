@@ -1417,6 +1417,9 @@ func TestServerOnlyParsedSetMatchesTheTree(t *testing.T) {
 		// caller's OWN machines -- the modelPullMachineFor precedent -- and is
 		// this mutation's only renderer.
 		{Path: "worker/mutations.memql", Name: "setWorkerSharing"}: true,
+		// Activity is measured by the stream holder. Owner scoping alone would
+		// let a browser forge live counts without holding that stream.
+		{Path: "worker/mutations.memql", Name: "updateWorkerSharingActivity"}: true,
 		// epic memql#5327, design D2. revokeWorker is HALF AN ACT: removing a
 		// machine is a registration revoke AND a credential revoke, and MemQL
 		// OS rendered only this one -- so the row left routing while the token

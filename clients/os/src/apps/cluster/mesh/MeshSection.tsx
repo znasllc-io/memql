@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 import type { Row } from "@znasllc-io/memql-sdk-core/client";
 
 import { Caption, Head, Notice, AutoRefresh } from "../../../kit";
-import { InfoDetail } from "../../../kit/InfoDetail";
+import { PageHelp } from "../../../kit/pageHelp";
 import { Measure } from "../../../kit/MeasureView";
 import { OverviewBreakdown, type OverviewSegment } from "../../../kit/Overview";
 import { RecordList, RecordRow } from "../../../kit/RecordRow";
@@ -148,7 +148,7 @@ export function MeshSection({
 
       <div className="os-cluster-mesh-context">
         <p>What each node hears of the events the cluster broadcasts.</p>
-        <InfoDetail title="Mesh">
+        <PageHelp title="Mesh">
           <p className="os-caption">
             Nodes pass the cluster&apos;s broadcast events to each other over the streams between
             them, in both directions, whichever node opened the stream. A node linked to the mesh
@@ -162,7 +162,7 @@ export function MeshSection({
             Identity sends its own events and takes none, by design. A node that has not reported
             is shown as not reported, never as hearing nothing.
           </p>
-        </InfoDetail>
+        </PageHelp>
       </div>
 
       {feed.error ? (

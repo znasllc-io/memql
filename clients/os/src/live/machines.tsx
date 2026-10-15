@@ -26,10 +26,9 @@
 // event payload updates the row in place instead; a full re-read is reserved
 // for an id-only notification, which is what `reread` answers.
 
-import { createContext, useContext, useEffect, useMemo, useState, type ReactNode } from "react";
+import { createContext, useContext, useMemo, type ReactNode } from "react";
 import {
   getRowByConceptAndId,
-  LiveCollection,
   type Row,
 } from "@znasllc-io/memql-sdk-core/client";
 
@@ -37,7 +36,8 @@ import type { MachinePresence } from "../items/provenance";
 import { isWorkerOnline } from "../apps/fleet/online";
 import { machineFromRow, machineName, type MachineRow } from "../apps/fleet/rows";
 import { useSessionIfPresent } from "../chrome/access";
-import { useOsConnection } from "./connection";
+import type { LiveListSource } from "./LiveList";
+import { useLiveCollection } from "./useLiveCollection";
 
 export const WORKER_REGISTRATION_CONCEPT = "v1:worker:registration";
 
@@ -58,7 +58,7 @@ interface MachinesValue {
    * `apps/fleet/rows.machineFromRow`, on the read side, where it runs over
    * whatever the collection currently holds. Same rule the portal follows.
    */
-  collection: LiveCollection<Row> | null;
+  collection: LiveListSource<Row> | null;
   /** Presence by BARE registration id, for the provenance dots. */
   presence: (workerId: string) => MachinePresence | null;
   /**
@@ -96,80 +96,23 @@ export function useMachines(): MachinesValue {
 }
 
 export function MachinesProvider({ children }: { children: ReactNode }) {
-  const connection = useOsConnection();
   const session = useSessionIfPresent();
   const userId = session?.access?.userId ?? "";
 
-  const collection = useMemo(() => {
-    if (!connection) return null;
-    const query = connection.query;
-    return new LiveCollection<Row>(
-      {
-        concept: WORKER_REGISTRATION_CONCEPT,
-        // The same read the portal's machines list uses: the caller's own
-        // machines, status included, scoped by the engine. Revoked rows come
-        // back too -- myWorkersWithStatus filters on ownership and nothing
-        // else -- which is what lets the show-revoked setting be a filter
-        // rather than a second read.
-        seed: async (_cursor, signal) => {
-          const result = await query.myWorkersWithStatus({}, { signal });
-          return { rows: result.rows(), nextCursor: "" };
-        },
-        reread: async (rowId, signal) => {
-          const row = await getRowByConceptAndId(query, WORKER_REGISTRATION_CONCEPT, rowId, {
-            signal,
-          });
-          return (row as Row) ?? null;
-        },
-        paged: false,
-      },
-      connection.subscriptions ?? null,
-      // Linger briefly so a window close/reopen does not tear the feed down.
-      5_000,
-    );
-    // userId is part of identity: after passkey, the signed-in subject can
-    // change while the websocket stays up. Rebuilding the collection reseeds
-    // myWorkersWithStatus under the actor that owns (or does not own) the fleet.
-  }, [connection, userId]);
-
-  // The presence map folds the same snapshot the list renders.
-  const [version, setVersion] = useState(0);
-
-  // RETAIN, AND RETAIN INSIDE THE EFFECT.
-  //
-  // A LiveCollection does nothing until it is retained: `start()` -- which
-  // opens the subscription and runs the seed -- is reachable from `retain()`
-  // and from nowhere else, and `subscribe()` only registers a change
-  // listener. A provider that subscribed without retaining held a collection
-  // that stayed in `seeding` with no rows forever, which renders as the
-  // LiveList's "Loading from the cluster" caption and never resolves. That
-  // was the foundation's exemplar (memql#4710), and it is the failure mode
-  // this whole substrate is hardest to see: nothing errors, nothing is
-  // logged, and an empty fleet is a completely plausible answer.
-  //
-  // Inside the effect rather than during render, for the reason the portal's
-  // useLive spells out: React 19's StrictMode renders twice before
-  // committing, so a retain taken during render is never balanced by this
-  // cleanup and the collection outlives every consumer. The double MOUNT is
-  // harmless -- release lingers, so the second retain reuses the same
-  // collection and issues no new read.
-  useEffect(() => {
-    if (!collection) return;
-    collection.retain();
-    const off = collection.subscribe(() => setVersion((v) => v + 1));
-    return () => {
-      off();
-      // The store's onExpire deletes the key from a registry this provider
-      // does not have -- the collection is constructed here rather than
-      // through a LiveStore -- so there is nothing to clean up beyond the
-      // close release() already performs.
-      collection.release(() => {});
-    };
-  }, [collection]);
+  const { source: collection, snapshot, reseed } = useLiveCollection<Row>(
+    userId ? `machines:${userId}` : null,
+    connection => ({
+      concept: WORKER_REGISTRATION_CONCEPT,
+      seed: async (_cursor, signal) => ({ rows: (await connection.query.myWorkersWithStatus({}, { signal })).rows(), nextCursor: "" }),
+      reread: async (rowId, signal) => (await getRowByConceptAndId(connection.query, WORKER_REGISTRATION_CONCEPT, rowId, { signal })) as Row | null,
+      // Cluster owners can receive other owners' events. Match the caller-
+      // scoped seed even when subscription admission is broader.
+      inScope: row => machineFromRow(row).ownerUserId === userId,
+      paged: false,
+    }),
+  );
 
   const { presence, count, feedState, settled } = useMemo(() => {
-    void version;
-    const snapshot = collection?.snapshot;
     const byId = new Map<string, MachinePresence>();
     const rows = snapshot ? snapshot.rows.map(machineFromRow) : [];
     for (const row of rows) {
@@ -179,14 +122,14 @@ export function MachinesProvider({ children }: { children: ReactNode }) {
       byId.set(row.id, entry);
       byId.set(bare, entry);
     }
-    const state = !collection ? "absent" : snapshot?.state ?? "seeding";
+    const state = !collection ? "absent" : snapshot.error ? "degraded" : snapshot.state;
     return {
       presence: (workerId: string) => byId.get(workerId) ?? null,
       count: rows.length,
       feedState: state as MachinesValue["feedState"],
       settled: state === "live" || state === "degraded",
     };
-  }, [collection, version]);
+  }, [collection, snapshot]);
 
   const value = useMemo(
     () => ({
@@ -195,9 +138,9 @@ export function MachinesProvider({ children }: { children: ReactNode }) {
       count,
       feedState,
       settled,
-      reload: () => collection?.reseed(),
+      reload: reseed,
     }),
-    [collection, presence, count, feedState, settled],
+    [collection, presence, count, feedState, settled, reseed],
   );
   return <Ctx.Provider value={value}>{children}</Ctx.Provider>;
 }

@@ -47,6 +47,8 @@
   --os-radius: 16px;
   --os-radius-sm: 10px;
   --os-radius-xs: 6px;
+  /* Selection edges stay straight in every app and theme. */
+  --os-selection-radius: 0px;
 
   /* THE CONTROL LINE (DESIGN.md rule 5): every piece of interactive chrome --
    * input, select, button, choice pill -- sits at this one height, at

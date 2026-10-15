@@ -157,11 +157,11 @@ describe("machineFromRow: who a machine is shared with", () => {
     expect(m.sharedGroupIds).toEqual([]);
   });
 
-  it("reads a people share naming nobody as owner", () => {
+  it("keeps an enabled empty sharing list editable", () => {
     // A legacy or hand-edited row: the engine admits nobody through it, so a
     // surface that called it "shared" would describe a share that serves no one.
     const m = sharing({ mode: "people" });
-    expect(m.sharingMode).toBe("owner");
+    expect(m.sharingMode).toBe("people");
     expect(m.sharedUserIds).toEqual([]);
     expect(m.sharedGroupIds).toEqual([]);
   });

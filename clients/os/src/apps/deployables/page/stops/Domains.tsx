@@ -39,7 +39,7 @@ import {
   type PointingMethod,
 } from "../../domains";
 import { useDomainDNSGuidance } from "../../useDomainDNSGuidance";
-import { InfoDetail } from "../../../../kit/InfoDetail";
+import { PageHelp } from "../../../../kit/pageHelp";
 import { useCustomDomains } from "../../useCustomDomains";
 import { liveUrlFor, type SiteRow } from "../../rows";
 import { siteStateWord } from "../../words";
@@ -584,7 +584,7 @@ function DomainStepBody({ domain: d, site, step }: { domain: DomainRow; site: Si
           <option value="ALIAS">ALIAS / ANAME — if supported</option>
         </Select>
       </Field>
-      <InfoDetail title="How domain routing works"><p>DNS sends visitors to the cluster. The binding for {d.hostname} selects this website, and the visitor keeps your domain in the address bar. Use the displayed current addresses; update these records if the cluster’s public addresses change.</p></InfoDetail>
+      <PageHelp title="How domain routing works"><p>DNS sends visitors to the cluster. The binding for {d.hostname} selects this website, and the visitor keeps your domain in the address bar. Use the displayed current addresses; update these records if the cluster’s public addresses change.</p></PageHelp>
     </div>
     {method === "CNAME" ? <Notice tone="info" sentence="A root domain needs provider support for CNAME flattening."
       next="GoDaddy does not support root CNAME records. Choose A / AAAA for a root domain there. For a subdomain, bind its full name, such as www.example.com." /> : null}

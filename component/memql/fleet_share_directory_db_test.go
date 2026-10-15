@@ -95,8 +95,7 @@ func (f shareDirFixture) machine(name, owner string) string {
 	f.insert("v1:worker:registration", id, map[string]any{
 		"ownerUserId": owner, "name": name, "identityId": f.id("v1:identity:identity", name),
 		"capabilities": []string{"MODEL"}, "concurrency": map[string]any{"MODEL": 1},
-		"capabilityDescriptor": map[string]any{"inferenceServe": "cluster"},
-		"registeredAt":         time.Now().UTC().Format(time.RFC3339Nano),
+		"registeredAt": time.Now().UTC().Format(time.RFC3339Nano),
 	})
 	return id
 }
@@ -290,8 +289,8 @@ func TestFleetSetSharingLendsOnlyToPeopleTheOwnerCanPick(t *testing.T) {
 	require.Equal(t, "share_subject_unknown", shareRefusalCode(err), "a NEW subject still is")
 
 	// The shape refusals.
-	require.Equal(t, "share_needs_someone", shareRefusalCode(f.share(asAna, machine, "people", nil, nil)))
-	require.Equal(t, "share_needs_someone", shareRefusalCode(f.share(asAna, machine, "people", []string{ana}, nil)),
+	require.NoError(t, f.share(asAna, machine, "people", nil, nil), "an empty enabled list admits nobody and can be edited")
+	require.NoError(t, f.share(asAna, machine, "people", []string{ana}, nil),
 		"a list naming only the owner names nobody")
 	many := make([]string, 51)
 	for i := range many {
@@ -421,4 +420,32 @@ func (f shareDirFixture) restrictDirectory(userId string) {
 		auth.SetMembershipSource(nil)
 		_, _ = f.db.NewDelete().Model((*memorynodes.MemoryNode)(nil)).Where("concept = ?", "v1:rbac:grant").Where("id = ?", grantId).Exec(context.Background())
 	})
+}
+
+func TestFleetSetSharingPausesRecipientsWithoutRemovingThem(t *testing.T) {
+	eng, db, _ := sharedReadMergeEngine(t)
+	f := shareDirFixture{t: t, eng: eng, db: db, prefix: uniqueSuffix("pause-sharing")}
+	owner, user := f.person("owner", true), f.person("user", true)
+	group := f.group("group", "active")
+	f.member(group, owner, "active")
+	f.member(group, user, "active")
+	machine := f.machine("machine", owner)
+	ctx := shareDirActor(context.Background(), owner, auth.RoleDeveloper)
+	args := map[string]any{"registrationId": machine, "mode": "people", "userIds": []string{user}, "groupIds": []string{group}, "pausedUserIds": []string{user}, "pausedGroupIds": []string{group}}
+	_, err := eng.evaluateFleetSetSharingExpression(ctx, args)
+	require.NoError(t, err)
+	row := f.sharingOf(machine)
+	require.Equal(t, []any{BareShortId(user)}, row["userIds"])
+	require.Equal(t, []any{BareShortId(user)}, row["pausedUserIds"])
+	require.Equal(t, []any{BareShortId(group)}, row["pausedGroupIds"])
+	args["pausedUserIds"] = []string{"not-on-list"}
+	_, err = eng.evaluateFleetSetSharingExpression(ctx, args)
+	require.Error(t, err)
+	require.Equal(t, []any{BareShortId(user)}, f.sharingOf(machine)["pausedUserIds"], "a refused change leaves the saved grant intact")
+	args["pausedUserIds"], args["pausedGroupIds"] = []string{}, []string{}
+	_, err = eng.evaluateFleetSetSharingExpression(ctx, args)
+	require.NoError(t, err)
+	require.Empty(t, f.sharingOf(machine)["pausedUserIds"])
+	_, err = eng.evaluateFleetSetSharingExpression(shareDirActor(context.Background(), user, auth.RoleOwner), args)
+	require.Equal(t, "not_your_machine", shareRefusalCode(err), "administration never permits pausing another owner's grants")
 }

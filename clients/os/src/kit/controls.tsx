@@ -7,6 +7,7 @@ import {
   Fragment,
   isValidElement,
   useEffect,
+  useId,
   useLayoutEffect,
   useRef,
   useState,
@@ -1300,18 +1301,21 @@ export function Fact({
   value,
   mono = false,
   title,
+  copyValue,
 }: {
   label: string;
   value: ReactNode;
   mono?: boolean;
   title?: string;
+  /** The exact value to copy; useful for timestamps displayed as relative time. */
+  copyValue?: string;
 }) {
   const empty = value === "" || value === null || value === undefined;
   return (
     <>
       <dt>{label}</dt>
       <dd className={mono ? "os-mono" : undefined} title={title}>
-        {empty ? "--" : value}
+        {empty ? "--" : copyValue ? <CopyValue value={copyValue} displayValue={value} label={label} presentation="row" /> : value}
       </dd>
     </>
   );
@@ -1343,19 +1347,28 @@ export function CopyValue({
   value,
   /** Names what the button copies: "Id" gives "Copy Id". */
   label,
+  displayValue,
+  presentation = "truncate",
 }: {
   value: string;
   label: string;
+  /** Static display content; the clipboard always receives `value`. */
+  displayValue?: ReactNode;
+  /** Rows wrap and copy from the whole value, keeping the icon quiet. */
+  presentation?: "truncate" | "row";
 }) {
+  const textId = useId();
   const [state, setState] = useState<"idle" | "copied" | "refused" | "unavailable">("idle");
   const decay = useRef<number | null>(null);
+  const attempt = useRef(0);
 
-  useEffect(
-    () => () => {
+  useEffect(() => {
+    setState("idle");
+    return () => {
+      attempt.current++;
       if (decay.current !== null) window.clearTimeout(decay.current);
-    },
-    [],
-  );
+    };
+  }, [value]);
 
   // A blank value has nothing to copy, so it reads as the em dash every absent
   // value in this shell reads as -- never a button that announces itself to a
@@ -1363,6 +1376,7 @@ export function CopyValue({
   if (value.trim() === "") return <>--</>;
 
   async function copy(): Promise<void> {
+    const current = ++attempt.current;
     if (decay.current !== null) window.clearTimeout(decay.current);
     const clipboard = globalThis.navigator?.clipboard;
     if (!clipboard) {
@@ -1371,19 +1385,32 @@ export function CopyValue({
     }
     try {
       await clipboard.writeText(value);
+      if (attempt.current !== current) return;
       setState("copied");
       decay.current = window.setTimeout(() => setState("idle"), 2000);
     } catch {
+      if (attempt.current !== current) return;
       setState("refused");
     }
   }
 
   const copied = state === "copied";
   return (
-    <span className="os-copyvalue">
-      <span className="os-copyvalue-line">
+    <span className="os-copyvalue" data-presentation={presentation}>
+      {presentation === "row" ? <button type="button" className="os-copyvalue-line os-copyvalue-row"
+        aria-label={copied ? `Copied ${label}` : `Copy ${label}`} aria-describedby={textId} title={copied ? "Copied" : `Copy ${label}`}
+        onClick={event => {
+          const selection = window.getSelection();
+          if (event.detail > 0 && selection && !selection.isCollapsed && event.currentTarget.contains(selection.anchorNode)) return;
+          void copy();
+        }}>
+        <span className="os-copyvalue-text" id={textId}>{displayValue ?? value}</span>
+        <span className="os-copyvalue-receipt" data-copied={copied || undefined} aria-hidden>
+          {copied ? <><span>Copied</span><CheckGlyph size={14} /></> : <Copy size={14} />}
+        </span>
+      </button> : <span className="os-copyvalue-line">
         <span className="os-copyvalue-text" title={value}>
-          {value}
+          {displayValue ?? value}
         </span>
         <button
           type="button"
@@ -1397,9 +1424,10 @@ export function CopyValue({
         >
           {copied ? <CheckGlyph size={12} aria-hidden /> : <Copy size={12} aria-hidden />}
         </button>
-      </span>
+      </span>}
+      {copied ? <span className="os-sr-only" role="status">Copied {label}</span> : null}
       {state === "refused" || state === "unavailable" ? (
-        <span className="os-copyvalue-note">
+        <span className="os-copyvalue-note" role="status">
           {state === "unavailable"
             ? "This browser offers no clipboard -- nothing was copied."
             : "The browser refused the copy -- nothing was copied."}

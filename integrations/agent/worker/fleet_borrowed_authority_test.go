@@ -91,13 +91,13 @@ func TestAnAutomationUnderAPersonsAuthorityIsServedByWhatIsLentToThem(t *testing
 				go finish(workerservice.ModelCallOutcome{FinishReason: workerservice.ModelFinishStop, Content: "served by bob's studio"})
 				return h, nil
 			})
-			// Lent to ana by name, both consents given, held by this replica.
+			// Lent to ana by name, by its owner, held by this replica.
 			studio := machine("bobs-studio")
 			studio.OwnerUserId = borrowedLender
 			studio.ConnectedNodeId = nodeA
 			studio.Capabilities = w.Capabilities
 			studio.Labels = w.Labels
-			lendTo([]string{"ana"}, nil, true)(&studio)
+			lendTo([]string{"ana"}, nil)(&studio)
 
 			f := newFleetInference(t, &sharedFleet{fakeFleet: &fakeFleet{owner: borrowedPerson}, all: []Candidate{studio}})
 			f.selfNodeId = nodeA

@@ -9,60 +9,14 @@ import (
 	"github.com/znasllc-io/memql/core/id"
 )
 
-// SHARING: two consents, and neither one alone (epic memql#5146, design D6).
-//
-// ===========================================================================
-// THE PROBLEM THIS SOLVES
-// ===========================================================================
-// A fleet machine serves only its owner's calls. A business with one Mac Studio
-// in the office has no way to make it serve the team, so "local by default" is
-// per PERSON rather than per COMPANY -- and the cost principle this platform is
-// built on applies to an individual instead of to the business whose logic it is
-// meant to hand back to them.
-//
-// ===========================================================================
-// WHY TWO CONSENTS AND NOT ONE FLAG
-// ===========================================================================
-// The owner's consent is a decision about their property. The cockpit's is a
-// decision about the machine's SITUATION: it may be a laptop on a train, a
-// build box under somebody's desk, a machine in a room where running strangers'
-// prompts is not allowed. Those are different questions and different people
-// answer them, so a single flag would let either one speak for the other.
-//
-// It is the `allowed` and `signedIn` shape the local-app door already uses, and
-// the reasoning is the same: the machine's own policy.yaml is the only thing
-// that knows what the machine is for.
-//
-// ===========================================================================
-// THE REFUSAL NAMES WHICH HALF IS MISSING
-// ===========================================================================
-// The two repairs are in different places -- the owner's is one act on the
-// Fleet page, the cockpit's is a line in that machine's policy.yaml -- so a
-// single "not shared" sentence sends half the operators to the wrong machine.
-// SharingRefusal is what stops that being a UI decision.
-//
-// ===========================================================================
-// LENT TO PEOPLE, NOT ONLY TO EVERYONE (epic memql#5344)
-// ===========================================================================
-// The owner's half has a third answer: `people`, with the users and groups the
-// machine is lent to. It is the same consent narrowed, and it lives on the same
-// row for the same reason -- it is the OWNER'S decision about their property,
-// which is why it is not a v1:rbac:grant (those are written under admin
-// governance, and a person lending their own laptop is not an admin act).
-//
-// The cockpit's half keeps its two values. `inference.serve: cluster` now
-// reads "this machine may serve people other than its owner"; WHICH people is
-// the owner's half. A people share is never a cluster share: the cluster's own
-// work -- an automation or a maintenance sweep running as itself, anything with
-// no acting person -- reaches only machines lent to everyone (design G3),
-// because a list of names is consent for those people and the cluster's own
-// work is nobody on the list.
-//
-// AN AUTOMATION ACTING FOR A PERSON IS THAT PERSON'S WORK (decided 2026-10-04,
-// memql#5662). One running under a listed person's borrowed authority carries
-// THEIR id, so every reader admits it as them and it uses what is lent to
-// them: lending to a person lends to all of their work, automated or not. Only
-// a synthetic `system:` identity is the cluster's own work.
+// Model sharing is the enrolled owner's decision, stored on registration.sharing.
+// Fleet is the single control: private by default, or shared with named people
+// and active group members. A worker's labels and capability advertisement
+// cannot grant access. Machine model allowlists and execution permissions remain
+// independent; sharing authorizes inference, never files, commands or apps.
+// Every catalog, routing path and receiving replica uses these predicates.
+// A synthetic system actor can use only a legacy cluster-wide share; an
+// automation acting for a person has that person's access.
 
 // SharingMode values on registration.sharing.mode.
 const (
@@ -76,18 +30,20 @@ const (
 	SharingModePeople = "people"
 )
 
-// Sharing is the owner's half, as stored on the registration row.
+// Sharing is the owner's decision, as stored on the registration row.
 //
 // UserIds and GroupIds mean something ONLY under SharingModePeople, and
 // SharingFromRow leaves them empty for every other mode: a list stored beside
 // `owner` or `cluster` is residue from an earlier share, and honouring it would
 // lend a machine its owner had taken back.
 type Sharing struct {
-	Mode     string
-	UserIds  []string
-	GroupIds []string
-	SharedAt string
-	SharedBy string
+	Mode           string
+	UserIds        []string
+	GroupIds       []string
+	PausedUserIds  []string
+	PausedGroupIds []string
+	SharedAt       string
+	SharedBy       string
 }
 
 // SharingFromRow reads registration.sharing.
@@ -115,12 +71,8 @@ func SharingFromRow(v any) Sharing {
 	if mode == SharingModePeople {
 		out.UserIds = subjectIds(row["userIds"])
 		out.GroupIds = subjectIds(row["groupIds"])
-		if len(out.UserIds) == 0 && len(out.GroupIds) == 0 {
-			// LENT TO NOBODY IS NOT LENT. fleetSetSharing refuses to write this,
-			// so it is a hand-edited or half-written row -- and reading it as
-			// `owner` is both the safe answer and the honest one.
-			out.Mode = SharingModeOwner
-		}
+		out.PausedUserIds = subjectIds(row["pausedUserIds"])
+		out.PausedGroupIds = subjectIds(row["pausedGroupIds"])
 	}
 	return out
 }
@@ -135,7 +87,7 @@ func (s Sharing) Row() map[string]any {
 	if mode != SharingModeCluster && mode != SharingModePeople {
 		mode = SharingModeOwner
 	}
-	userIds, groupIds := []any{}, []any{}
+	userIds, groupIds, pausedUserIds, pausedGroupIds := []any{}, []any{}, []any{}, []any{}
 	if mode == SharingModePeople {
 		for _, id := range s.UserIds {
 			userIds = append(userIds, id)
@@ -143,46 +95,36 @@ func (s Sharing) Row() map[string]any {
 		for _, id := range s.GroupIds {
 			groupIds = append(groupIds, id)
 		}
+		for _, id := range s.PausedUserIds {
+			pausedUserIds = append(pausedUserIds, id)
+		}
+		for _, id := range s.PausedGroupIds {
+			pausedGroupIds = append(pausedGroupIds, id)
+		}
 	}
 	return map[string]any{
-		"mode":     mode,
-		"userIds":  userIds,
-		"groupIds": groupIds,
-		"sharedAt": s.SharedAt,
-		"sharedBy": s.SharedBy,
+		"mode":           mode,
+		"userIds":        userIds,
+		"groupIds":       groupIds,
+		"pausedUserIds":  pausedUserIds,
+		"pausedGroupIds": pausedGroupIds,
+		"sharedAt":       s.SharedAt,
+		"sharedBy":       s.SharedBy,
 	}
 }
 
-// ServesTheCluster reports whether BOTH consents say cluster.
-//
-// `cockpitServe` is capabilityDescriptor.inferenceServe, and an EMPTY value is
-// `owner`: a cockpit that predates the field has said nothing, and silence is
-// not agreement.
-func ServesTheCluster(ownerMode, cockpitServe string) bool {
-	return strings.TrimSpace(ownerMode) == SharingModeCluster &&
-		strings.TrimSpace(cockpitServe) == InferenceServeCluster
+// ServesTheCluster admits system work only to a legacy cluster-wide share.
+func ServesTheCluster(ownerMode string) bool {
+	return strings.TrimSpace(ownerMode) == SharingModeCluster
 }
 
-// SharingRefusal names WHICH consent is missing, in the words of the repair.
-//
-// Empty when the machine does serve the cluster. The two sentences are
-// different because the two fixes are in different places and are performed by
-// different people; a single "not shared" would send half the operators to the
-// wrong machine, and the one who owns the laptop would go looking on a web page
-// for a setting that lives in a file on their own disk.
-func SharingRefusal(ownerMode, cockpitServe string) string {
-	ownerSaid := strings.TrimSpace(ownerMode) == SharingModeCluster
-	cockpitSaid := strings.TrimSpace(cockpitServe) == InferenceServeCluster
-	switch {
-	case ownerSaid && cockpitSaid:
+// SharingRefusal explains the owner's sharing boundary without naming a
+// private machine. Fleet is the only place the owner needs to configure it.
+func SharingRefusal(ownerMode string) string {
+	if ServesTheCluster(ownerMode) {
 		return ""
-	case !ownerSaid && !cockpitSaid:
-		return "Neither consent is given: the owner has not shared this machine with the cluster, and its cockpit's policy.yaml does not set inference.serve to cluster. Both are needed."
-	case !ownerSaid:
-		return "The machine's cockpit is willing to serve the cluster, but its owner has not shared it. The owner turns this on from the machine's page in Fleet."
-	default:
-		return "The owner has shared this machine, but its cockpit is not willing to serve the cluster. Set inference.serve to cluster in that machine's policy.yaml -- it is a decision about where the machine is, and only the machine can make it."
 	}
+	return "Its owner has not shared this machine with the cluster. The owner can choose who may use its models in Fleet."
 }
 
 // ---------------------------------------------------------------------------
@@ -254,8 +196,7 @@ func (p *Person) Groups() []string {
 	return p.groups
 }
 
-// Admits reports whether the OWNER'S half lets this person use the machine.
-// It is half of the question; ServesPerson is the whole of it.
+// Admits reports whether the owner's saved audience includes this person.
 //
 // NO ACTING PERSON IS NEVER ADMITTED, in any mode. An empty id is system work,
 // and system work asks ServesTheCluster instead (design G3) -- so a caller that
@@ -283,7 +224,7 @@ func (s Sharing) Admits(p *Person) bool {
 		return true
 	case SharingModePeople:
 		for _, id := range s.UserIds {
-			if SameSubjectId(id, p.UserId) {
+			if SameSubjectId(id, p.UserId) && !containsSubject(s.PausedUserIds, id) {
 				return true
 			}
 		}
@@ -293,7 +234,7 @@ func (s Sharing) Admits(p *Person) bool {
 		}
 		for _, have := range p.Groups() {
 			for _, want := range s.GroupIds {
-				if SameSubjectId(have, want) {
+				if SameSubjectId(have, want) && !containsSubject(s.PausedGroupIds, want) {
 					return true
 				}
 			}
@@ -302,49 +243,31 @@ func (s Sharing) Admits(p *Person) bool {
 	return false
 }
 
-// ServesPerson reports whether BOTH consents let this person's call run on the
-// machine: the cockpit said it may serve people other than its owner, and the
-// owner lent it to this person. The ONE predicate every person-path reader
-// asks -- the catalog, the shared plan and the replica-hop receiver -- so that
-// "is this machine lent to you" has one answer in the tree (design G7).
-func ServesPerson(s Sharing, cockpitServe string, p *Person) bool {
-	return strings.TrimSpace(cockpitServe) == InferenceServeCluster && s.Admits(p)
-}
+// ServesPerson is the shared admission predicate for catalogs, routing and the
+// replica-hop receiver. No separate machine configuration is needed.
+func ServesPerson(s Sharing, p *Person) bool { return s.Admits(p) }
 
-// PersonRefusal names why a machine does not serve this person, or "" when it
-// does. The owner-only and cluster cases keep SharingRefusal's two-consent
-// sentences; a people share gets its own, because "not shared" is the wrong
-// repair for somebody who is not on a list that exists.
-//
-// These sentences reach a routing plan's rejected map, where a machine that is
-// not the caller's is COUNTED and never named (memql#5327, D12) --
-// component/memql.IsForeignShareRefusal must recognise every one of them, and
-// a parity test in integrations/agent/worker holds the two together.
-func PersonRefusal(s Sharing, cockpitServe string, p *Person) string {
-	if ServesPerson(s, cockpitServe, p) {
+// PersonRefusal is counted, never named, for a foreign machine. Keep the
+// classifier in component/memql in step; sharing_parity_test enforces this.
+func PersonRefusal(s Sharing, p *Person) string {
+	if ServesPerson(s, p) {
 		return ""
 	}
-	if s.Mode != SharingModePeople {
-		return SharingRefusal(s.Mode, cockpitServe)
-	}
-	if !s.Admits(p) {
+	if s.Mode == SharingModePeople {
 		return "Its owner has shared it with specific people, and not with you."
 	}
-	return "Its owner has shared it with you, but its cockpit is not willing to serve anyone but its owner. Set inference.serve to cluster in that machine's policy.yaml -- it is a decision about where the machine is, and only the machine can make it."
+	return SharingRefusal(s.Mode)
 }
 
-// SystemRefusal names why a machine does not serve the cluster's own work, or
-// "" when it does. A people share is refused with its own sentence (design G3),
-// because the two-consent sentence would tell an operator to turn on a share
-// the owner has already turned on -- for somebody else.
-func SystemRefusal(s Sharing, cockpitServe string) string {
-	if ServesTheCluster(s.Mode, cockpitServe) {
+// SystemRefusal keeps a people share closed to the cluster's own work.
+func SystemRefusal(s Sharing) string {
+	if ServesTheCluster(s.Mode) {
 		return ""
 	}
 	if s.Mode == SharingModePeople {
 		return "Its owner has shared it with specific people, not with the cluster's own work."
 	}
-	return SharingRefusal(s.Mode, cockpitServe)
+	return SharingRefusal(s.Mode)
 }
 
 // SameSubjectId compares two identity ids tolerantly of the bare/canonical
@@ -408,6 +331,39 @@ func subjectIds(v any) []string {
 	}
 	if len(out) == 0 {
 		return nil
+	}
+	return out
+}
+
+// SharingSubjects records the grants that admitted a call, so a draining call
+// stays counted under its original grants even after they are paused or removed.
+type SharingSubjects struct{ UserIds, GroupIds []string }
+
+func containsSubject(ids []string, target string) bool {
+	for _, candidate := range ids {
+		if SameSubjectId(candidate, target) {
+			return true
+		}
+	}
+	return false
+}
+
+func (s Sharing) SubjectsFor(p *Person) SharingSubjects {
+	out := SharingSubjects{}
+	if p == nil || s.Mode != SharingModePeople || auth.IsSystemActorId(p.UserId) {
+		return out
+	}
+	for _, user := range s.UserIds {
+		if SameSubjectId(user, p.UserId) && !containsSubject(s.PausedUserIds, user) {
+			out.UserIds = append(out.UserIds, user)
+		}
+	}
+	if len(s.GroupIds) > 0 {
+		for _, group := range s.GroupIds {
+			if !containsSubject(s.PausedGroupIds, group) && containsSubject(p.Groups(), group) {
+				out.GroupIds = append(out.GroupIds, group)
+			}
+		}
 	}
 	return out
 }

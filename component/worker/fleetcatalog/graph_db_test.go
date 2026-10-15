@@ -117,12 +117,12 @@ func TestFleetCatalogGraphReaderEnforcesOwnerAndSharedBoundaries(t *testing.T) {
 				t.Fatalf("alice's own machine should read online: %+v", model)
 			}
 		}
-		for _, want := range []string{"mine", "shared", "lent-alice"} {
+		for _, want := range []string{"mine", "shared", "owner-consent-only", "lent-alice"} {
 			if !mineSeen[prefix+"-"+want] {
 				t.Fatalf("alice's catalog %v is missing %s", mineSeen, want)
 			}
 		}
-		for _, leak := range []string{"private", "owner-consent-only", "lent-carol"} {
+		for _, leak := range []string{"private", "lent-carol"} {
 			if mineSeen[prefix+"-"+leak] {
 				t.Fatalf("alice's catalog leaked %s: %v", leak, mineSeen)
 			}
@@ -135,7 +135,7 @@ func TestFleetCatalogGraphReaderEnforcesOwnerAndSharedBoundaries(t *testing.T) {
 		for _, model := range shared {
 			seen[model.ModelId] = true
 		}
-		if !seen[prefix+"-shared"] || seen[prefix+"-private"] || seen[prefix+"-owner-consent-only"] || seen[prefix+"-mine"] ||
+		if !seen[prefix+"-shared"] || seen[prefix+"-private"] || !seen[prefix+"-owner-consent-only"] || seen[prefix+"-mine"] ||
 			seen[prefix+"-lent-alice"] || seen[prefix+"-lent-carol"] {
 			t.Fatalf("shared catalog = %v; system work reaches only what is lent to everyone (design G3)", seen)
 		}
@@ -161,7 +161,7 @@ func TestFleetCatalogGraphReaderEnforcesOwnerAndSharedBoundaries(t *testing.T) {
 		if _, ok := nodes[prefix+"-lent-alice"]; !ok {
 			t.Fatalf("public builtin lost the model lent to alice: %s", raw)
 		}
-		for _, name := range []string{"private", "owner-consent-only", "lent-carol"} {
+		for _, name := range []string{"private", "lent-carol"} {
 			if _, ok := nodes[prefix+"-"+name]; ok {
 				t.Fatalf("public builtin leaked %s", name)
 			}

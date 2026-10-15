@@ -2,7 +2,7 @@ import { RecordListSkeleton } from "../../../kit/RecordListSkeleton";
 import { LocalTabs } from "../../../kit/LocalTabs";
 import { useMemo, useState } from "react";
 import { AutoRefresh, useFleetScroll } from "../FleetControls";
-import { InfoDetail } from "../../../kit/InfoDetail";
+import { PageHelp } from "../../../kit/pageHelp";
 
 import {
   Caption,
@@ -191,12 +191,12 @@ export function ModelsSection({ onHome }: { onHome?: () => void } = {}) {
           message on its own. */}
       {models.length === 0 ? null : (
         <>
-          <InfoDetail title="Model ranking"><Caption>
+          <PageHelp title="Model ranking"><Caption>
             This list shows your preferences, then active parameters per token (total when
             unreported), context window, and model id. A model that did not report its size sorts last.
             For <span className="os-mono">fleet:strongest</span>, measured structured-output reliability
             takes priority over preferences and size, so the model selected for a call can differ.
-          </Caption></InfoDetail>
+          </Caption></PageHelp>
 
           {preference.length > 0 ? (
             <Chips label="Your preferred order">

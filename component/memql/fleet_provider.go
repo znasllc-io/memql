@@ -253,7 +253,7 @@ type FleetCallRequest struct {
 	// down (memql#4678).
 	ActingUserId string
 	// RegistrationId strictly limits dispatch to ONE machine ActingUserId may
-	// use: one of their own, or one lent to them under both consents
+	// use: one of their own, or one lent to them under its owner's saved audience
 	// (memql#5662). It never falls through to another machine, and system work
 	// cannot set one. Empty retains normal fleet routing, own machines first.
 	RegistrationId string
