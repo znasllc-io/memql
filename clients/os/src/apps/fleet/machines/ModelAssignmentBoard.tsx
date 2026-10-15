@@ -1,4 +1,4 @@
-import { useId, useRef, useState } from "react";
+import { useId, useLayoutEffect, useRef, useState } from "react";
 import { ArrowRight, Braces, GripVertical, Image, LockKeyhole, MessageCircle, Mic, ScanEye, Search, Volume2, Wrench, X } from "lucide-react";
 import { Button, Notice, Subhead } from "../../../kit";
 import { IconButton } from "../../../kit/IconButton";
@@ -21,25 +21,32 @@ export function ModelAssignmentBoard({ view, choices, onChange, onSave, onDiscar
   const [selectedId, setSelectedId] = useState(() => installed.find(m => !m.blocked && m.memoryBytes)?.modelId ?? installed[0]?.modelId ?? "");
   const [preview, setPreview] = useState<ModelChoices | null>(null);
   const [message, setMessage] = useState("");
-  const [refusal, setRefusal] = useState("");
   const [dropTarget, setDropTarget] = useState("");
   const dragging = useRef("");
-  const taskButtons = useRef(new Map<string, HTMLButtonElement>());
+  const taskTargets = useRef(new Map<string, HTMLElement>());
+  const restoreTaskFocus = useRef("");
+  useLayoutEffect(() => {
+    if (restoreTaskFocus.current) taskTargets.current.get(restoreTaskFocus.current)?.focus();
+    restoreTaskFocus.current = "";
+  }, [choices]);
   const helpId = useId();
   const selected = installed.find(m => m.modelId === selectedId);
   const capacity = setupCapacity(choices, view.catalog, view.usableBytes);
   const displayed = setupCapacity(preview ?? choices, view.catalog, view.usableBytes);
   const delta = displayed.used - capacity.used;
   const matching = MODEL_PURPOSES.filter(([id]) => selected?.purposes.includes(id) && !(id === "embeddings" && view.boundEmbeddingModel && selected.modelId !== view.boundEmbeddingModel)).map(([id]) => id);
+  const proposals = new Map(MODEL_PURPOSES.map(([id]) => [id, selected ? assignmentProposal(choices, selected.modelId, [id], view) : null]));
+  const availableCount = [...proposals.values()].filter(proposal => proposal && !proposal.refusal).length;
+  const canAssignMatching = selected && matching.length > 1 && !assignmentProposal(choices, selected.modelId, matching, view).refusal;
   const suggestion = { ...view.suggestedChoices, ...(view.boundEmbeddingModel ? { embeddings: view.boundEmbeddingModel } : {}) };
   const hasSuggestion = Object.values(suggestion).some(Boolean) && setupCapacity(suggestion, view.catalog, view.usableBytes).fits;
   const apply = (modelId: string, purposes: string[]) => {
     if (saving) return;
     const result = assignmentProposal(choices, modelId, purposes, view);
-    setPreview(null); setDropTarget(""); setRefusal(result.refusal);
+    setPreview(null); setDropTarget("");
     if (result.refusal) return;
     onChange(result.choices);
-    setMessage(modelId ? `${purposes.length === 1 ? MODEL_PURPOSES.find(([id]) => id === purposes[0])?.[1] : `${purposes.length} tasks`} now uses ${modelId}.` : "Assignment cleared.");
+    setMessage(modelId ? `${purposes.length === 1 ? `${MODEL_PURPOSES.find(([id]) => id === purposes[0])?.[1]} now uses` : `${purposes.length} tasks now use`} ${modelId}.` : "Assignment cleared.");
   };
   const previewTask = (id: string) => {
     if (saving || !selected) return;
@@ -50,7 +57,7 @@ export function ModelAssignmentBoard({ view, choices, onChange, onSave, onDiscar
     <div className="fleet-models-heading">
       <Subhead>Model setup</Subhead>
       {hasSuggestion ? <button type="button" className="os-link fleet-assignment-suggest" disabled={saving} onClick={() => {
-        onChange(suggestion); setPreview(null); setRefusal(""); setMessage("Suggested models assigned.");
+        onChange(suggestion); setPreview(null); setMessage("Suggested models assigned.");
       }}>Use suggested</button> : null}
     </div>
     <section className="fleet-assignment-capacity" aria-label="Model capacity">
@@ -68,10 +75,10 @@ export function ModelAssignmentBoard({ view, choices, onChange, onSave, onDiscar
           const count = Object.values(choices).filter(id => id === model.modelId).length;
           const unavailable = model.blocked || (!model.memoryBytes ? "Memory estimate unavailable" : "");
           return <button key={model.modelId} type="button" className="fleet-assignment-model" aria-label={`Select ${model.modelId}`} aria-description={MODEL_PURPOSES.filter(([id]) => model.purposes.includes(id)).map(([, label]) => label).join(", ")} aria-pressed={selectedId === model.modelId} disabled={saving}
-            draggable={!saving && !unavailable} onClick={() => { setSelectedId(model.modelId); setPreview(null); setRefusal(""); setMessage(""); }}
+            draggable={!saving && !unavailable} onClick={() => { setSelectedId(model.modelId); setPreview(null); setMessage(""); }}
             onDragStart={event => {
               if (saving || unavailable) { event.preventDefault(); return; }
-              dragging.current = model.modelId; setSelectedId(model.modelId); setRefusal("");
+              dragging.current = model.modelId; setSelectedId(model.modelId);
               event.dataTransfer.setData(dragType, model.modelId); event.dataTransfer.effectAllowed = "all";
             }} onDragEnd={() => { dragging.current = ""; setDropTarget(""); setPreview(null); }}>
             <GripVertical size={13} aria-hidden className="fleet-assignment-grip" />
@@ -83,20 +90,22 @@ export function ModelAssignmentBoard({ view, choices, onChange, onSave, onDiscar
           </button>;
         })}</div>
         {!installed.length ? <p className="os-caption">No models installed. Browse the catalog to choose one.</p> : null}
-        {selected && !selected.blocked && selected.memoryBytes > 0 && matching.length > 1 ? <button type="button" className="os-link fleet-assignment-all" disabled={saving} onClick={() => apply(selected.modelId, matching)}>Use for {matching.length} matching tasks <ArrowRight size={14} aria-hidden /></button> : null}
+        {selected && canAssignMatching ? <button type="button" className="os-link fleet-assignment-all" disabled={saving} onClick={() => apply(selected.modelId, matching)}>Use for {matching.length} matching tasks <ArrowRight size={14} aria-hidden /></button> : null}
       </section>
       <section aria-label="Task assignments">
-        <Subhead meta={selected && !selected.blocked ? `${matching.length} compatible` : undefined}>Tasks</Subhead>
+        <Subhead meta={selected ? `${availableCount} available` : undefined}>Tasks</Subhead>
         <div className="fleet-assignment-tasks">{MODEL_PURPOSES.map(([id, label]) => {
           const Icon = taskIcons[id];
           const assigned = view.catalog.find(m => m.modelId === choices[id]);
           const locked = id === "embeddings" && !!view.boundEmbeddingModel;
-          const compatible = !!selected && !selected.blocked && selected.memoryBytes > 0 && matching.includes(id);
+          const proposal = proposals.get(id);
+          const compatible = !!proposal && !proposal.refusal;
+          const Target = compatible ? "button" : "div";
           const missing = !!choices[id] && (!assigned?.installed || !!assigned.blocked || !assigned.purposes.includes(id));
           return <div key={id} className="fleet-assignment-task">
-            <button ref={element => { if (element) taskButtons.current.set(id, element); else taskButtons.current.delete(id); }} type="button" className="fleet-assignment-task-target" disabled={saving}
-              aria-label={`${label}: ${choices[id] || "Not assigned"}`} aria-describedby={helpId} data-compatible={compatible} data-assigned={!!selected && choices[id] === selected.modelId} data-drop-target={dropTarget === id}
-              onClick={() => selected ? apply(selected.modelId, [id]) : setMessage("Select an installed model first.")}
+            <Target ref={(element: HTMLElement | null) => { if (element) taskTargets.current.set(id, element); else taskTargets.current.delete(id); }} type={compatible ? "button" : undefined} role={compatible ? undefined : "group"} tabIndex={compatible ? undefined : -1} className="fleet-assignment-task-target" disabled={compatible ? saving : undefined}
+              aria-label={`${label}: ${choices[id] || "Not assigned"}`} aria-describedby={compatible ? helpId : undefined} data-compatible={compatible} data-assigned={!!selected && choices[id] === selected.modelId} data-drop-target={dropTarget === id}
+              onClick={compatible && selected ? () => apply(selected.modelId, [id]) : undefined}
               onMouseEnter={() => previewTask(id)} onMouseLeave={() => setPreview(null)} onFocus={() => previewTask(id)} onBlur={() => setPreview(null)}
               onDragEnter={event => { if (dragging.current && !saving) { event.preventDefault(); event.stopPropagation(); } }}
               onDragOver={event => {
@@ -111,13 +120,17 @@ export function ModelAssignmentBoard({ view, choices, onChange, onSave, onDiscar
                 event.preventDefault();
                 event.stopPropagation();
                 const modelId = event.dataTransfer.getData(dragType);
-                if (!dragging.current || modelId !== dragging.current) return;
-                apply(modelId, [id]); dragging.current = ""; taskButtons.current.get(id)?.focus(); setPreview(null);
+                if (!dragging.current || modelId !== dragging.current || saving) return;
+                if (!assignmentProposal(choices, modelId, [id], view).refusal) {
+                  restoreTaskFocus.current = id;
+                  apply(modelId, [id]);
+                }
+                dragging.current = ""; setDropTarget(""); setPreview(null);
               }}>
               <span className="fleet-assignment-task-name"><Icon size={16} aria-hidden /><span>{label}</span>{locked ? <LockKeyhole size={13} aria-label="Bound memory search model" /> : null}</span>
               <span className="fleet-assignment-task-model">{choices[id] || (installed.some(m => m.purposes.includes(id)) ? "Not assigned" : "No model installed")}{missing ? " · unavailable" : ""}</span>
-            </button>
-            {choices[id] && !locked ? <IconButton className="fleet-assignment-clear" label={`Clear ${label}`} disabled={saving} onClick={() => { apply("", [id]); taskButtons.current.get(id)?.focus(); setPreview(null); }}><X size={14} aria-hidden /></IconButton> : null}
+            </Target>
+            {choices[id] && !locked ? <IconButton className="fleet-assignment-clear" label={`Clear ${label}`} disabled={saving} onClick={() => { restoreTaskFocus.current = id; apply("", [id]); }}><X size={14} aria-hidden /></IconButton> : null}
           </div>;
         })}</div>
         <p id={helpId} className="os-caption fleet-assignment-hint">Select a model, then a task. Or drag it into place.</p>
@@ -125,7 +138,6 @@ export function ModelAssignmentBoard({ view, choices, onChange, onSave, onDiscar
         <span className="os-sr-only" role="status">{message}</span>
       </section>
     </div>
-    {refusal ? <Notice tone="warn" sentence={refusal} /> : null}
     {!capacity.fits ? <Notice tone="warn" sentence="This setup needs attention." next="Clear unavailable assignments, choose smaller models or reuse one across tasks." /> : null}
     {saveError ? <Notice tone="error" sentence="The setup could not be saved." detail={saveError} /> : null}
     <div className="os-panel-actions fleet-assignment-actions">

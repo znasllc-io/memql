@@ -16,6 +16,7 @@ const view = modelSetupFromRow({ id: "machine", revision: "one", usableBytes: 32
     { modelId: "new-embed", installed: true, memoryBytes: 3 * GiB, purposes: ["embeddings"] },
     { modelId: "large", installed: true, memoryBytes: 28 * GiB, purposes: ["conversation"] },
     { modelId: "unknown", installed: true, memoryBytes: 0, purposes: ["conversation"] },
+    { modelId: "blocked", installed: true, memoryBytes: 2 * GiB, purposes: ["conversation"], blocked: "Runtime unavailable" },
     { modelId: "missing", installed: false, memoryBytes: 2 * GiB, purposes: ["conversation"] },
   ],
 });
@@ -31,6 +32,7 @@ function mount(overrides: Partial<ModelSetupView> = {}, saving = false) {
 }
 const select = (name: string) => fireEvent.click(screen.getByRole("button", { name: `Select ${name}` }));
 const task = (name: string) => screen.getByRole("button", { name: new RegExp(`^${name}:`) });
+const readOnlyTask = (name: string) => screen.getByRole("group", { name: new RegExp(`^${name}:`) });
 const memory = () => Number(screen.getByRole("meter").getAttribute("aria-valuenow")) / GiB;
 function transfer() {
   const values = new Map<string, string>();
@@ -62,20 +64,62 @@ describe("model assignment board", () => {
     expect(changes).toHaveBeenLastCalledWith({ conversation: "small", tools: "chat", embeddings: "embed" });
     expect(document.activeElement).toBe(task("Conversation"));
   });
-  it("refuses incompatible, oversized and unverified choices without changing assignments", () => {
+  it("keeps incompatible tasks readable without offering a click or keyboard action", () => {
     const { changes } = mount();
-    select("small"); fireEvent.click(task("Search & memory")); expect(screen.getByText("This model does not support that task.")).toBeTruthy();
-    select("large"); fireEvent.click(task("Conversation")); expect(screen.getByText(/would exceed capacity/)).toBeTruthy();
-    select("unknown"); fireEvent.click(task("Conversation")); expect(screen.getByText("This model's memory use has not been verified.")).toBeTruthy();
+    select("small");
+    expect(screen.queryByRole("button", { name: /^Search & memory:/ })).toBeNull();
+    const target = readOnlyTask("Search & memory");
+    expect(target.textContent).toContain("embed");
+    expect(target.tabIndex).toBe(-1);
+    fireEvent.click(target); fireEvent.keyDown(target, { key: "Enter" });
+    expect(changes).not.toHaveBeenCalled();
+    expect(screen.queryByText("This model does not support that task.")).toBeNull();
+    select("embed"); expect(task("Search & memory")).toBeTruthy();
+    expect(screen.queryByRole("button", { name: /^Conversation:/ })).toBeNull();
+    select("small"); expect(task("Conversation")).toBeTruthy();
+    // Removing an existing assignment remains a separate, legal action.
+    fireEvent.click(screen.getByRole("button", { name: "Clear Search & memory" }));
+    expect(changes).toHaveBeenLastCalledWith({ conversation: "chat", tools: "chat", embeddings: "" });
+    expect(document.activeElement).toBe(readOnlyTask("Search & memory"));
+  });
+  it("ignores incompatible drops without a warning or memory preview", () => {
+    const { changes } = mount(); const dataTransfer = transfer();
+    fireEvent.dragStart(screen.getByRole("button", { name: "Select small" }), { dataTransfer });
+    fireEvent.dragOver(readOnlyTask("Search & memory"), { dataTransfer });
+    expect(dataTransfer.dropEffect).toBe("none"); expect(memory()).toBe(22);
+    fireEvent.drop(readOnlyTask("Search & memory"), { dataTransfer });
+    expect(changes).not.toHaveBeenCalled();
+    expect(screen.queryByText("This model does not support that task.")).toBeNull();
+  });
+  it("offers no assignment action for oversized, blocked and unverified choices", () => {
+    const { changes } = mount();
+    for (const model of ["large", "unknown", "blocked"]) {
+      select(model);
+      expect(screen.queryByRole("button", { name: /^Conversation:/ })).toBeNull();
+      fireEvent.click(readOnlyTask("Conversation"));
+    }
     expect(screen.queryByRole("button", { name: "Select missing" })).toBeNull();
     expect(changes).not.toHaveBeenCalled(); expect(memory()).toBe(22);
+  });
+  it("offers a fitting batch even when individual replacements exceed capacity", () => {
+    const { changes } = mount({ usableBytes: 24 * GiB });
+    select("small");
+    expect(screen.queryByRole("button", { name: /^Conversation:/ })).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "Use for 2 matching tasks" }));
+    expect(changes).toHaveBeenLastCalledWith({ conversation: "small", tools: "small", embeddings: "embed" });
+    expect(memory()).toBe(8); expect(task("Conversation")).toBeTruthy();
+  });
+  it("omits a batch assignment that would exceed capacity", () => {
+    mount({ usableBytes: 4 * GiB, choices: { embeddings: "embed" } });
+    select("small");
+    expect(screen.queryByRole("button", { name: /Use for .* matching tasks/ })).toBeNull();
   });
   it("keeps a bound embedding model through manual, drag and suggested changes", () => {
     const { changes } = mount({ boundEmbeddingModel: "embed", suggestedChoices: { conversation: "small", embeddings: "new-embed" } });
     expect(screen.queryByRole("button", { name: "Clear Search & memory" })).toBeNull();
-    select("new-embed"); fireEvent.click(task("Search & memory")); expect(changes).not.toHaveBeenCalled();
+    select("new-embed"); fireEvent.click(readOnlyTask("Search & memory")); expect(changes).not.toHaveBeenCalled();
     const dataTransfer = transfer(); fireEvent.dragStart(screen.getByRole("button", { name: "Select new-embed" }), { dataTransfer });
-    fireEvent.drop(task("Search & memory"), { dataTransfer }); expect(changes).not.toHaveBeenCalled();
+    fireEvent.drop(readOnlyTask("Search & memory"), { dataTransfer }); expect(changes).not.toHaveBeenCalled();
     fireEvent.click(screen.getByRole("button", { name: "Use suggested" }));
     expect(changes).toHaveBeenLastCalledWith({ conversation: "small", embeddings: "embed" });
   });
@@ -91,7 +135,8 @@ describe("model assignment board", () => {
   it("shows an honest empty board with an exit", () => {
     const { discard } = mount({ choices: {}, catalog: [], suggestedChoices: {}, revision: "" });
     expect(screen.getByText(/No models installed. Browse/)).toBeTruthy();
-    fireEvent.click(task("Conversation")); expect(screen.getByRole("status").textContent).toContain("Select an installed model first");
+    expect(screen.queryByRole("button", { name: /^Conversation:/ })).toBeNull();
+    expect(readOnlyTask("Conversation").textContent).toContain("No model installed");
     fireEvent.click(screen.getByRole("button", { name: "Discard changes" })); expect(discard).toHaveBeenCalledOnce();
   });
   it("freezes every editing action while saving", () => {

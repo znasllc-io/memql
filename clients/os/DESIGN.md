@@ -324,7 +324,12 @@ clipboard success/refusal and reduced motion. Check actual rendered spacing
 and overflow, not just whether the control exists.
 
 Machine Model setup uses an assignment board: installed models beside task
-targets, with compatible tasks highlighted and a shared memory estimate.
+targets, with valid assignment targets highlighted and a shared memory estimate.
+Tasks that cannot accept the selected model stay visible as read-only tiles,
+without a click action, tab stop, hover treatment or accepted drop. Keep their
+existing assignments and independent clear controls; do not offer an action
+just to explain its predictable refusal afterward. Batch assignment follows
+the same capacity and compatibility checks before its action is offered.
 Clicking a model and task is the keyboard-accessible equivalent of dragging.
 One model serving several tasks counts once. Keep capacity, unavailable-model
 and bound-memory-search checks on every assignment path. The editor replaces

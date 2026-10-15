@@ -313,11 +313,13 @@ describe("model setup choices", () => {
  it("prevents an over-capacity save and excludes unknown memory profiles", async () => {
   const connection = await mount({"model:chat":"tools=1", "model:large":"ctx=32768"}, {setup:setupFixture});
   fireEvent.click(screen.getByRole("button", {name:"Change model setup"}));
-  await chooseTask("Conversation", "unknown");
+  fireEvent.click(screen.getByRole("button", { name: "Select unknown" }));
+  expect(screen.queryByRole("button", { name: "Conversation: chat" })).toBeNull();
   expect(screen.getAllByText("Memory estimate unavailable").length).toBeGreaterThan(0);
-  await chooseTask("Conversation", "large");
-  expect(screen.getByRole("button", {name:"Conversation: chat"})).toBeTruthy();
-  expect(screen.getByText(/This would exceed capacity/)).toBeTruthy();
+  fireEvent.click(screen.getByRole("button", { name: "Select large" }));
+  expect(screen.queryByRole("button", { name: "Conversation: chat" })).toBeNull();
+  fireEvent.click(screen.getByRole("group", { name: "Conversation: chat" }));
+  expect(screen.queryByText(/This would exceed capacity/)).toBeNull();
   expect(screen.queryByRole("button", {name:"Save setup"})).toBeNull();
   expect(connection.query.fleetSetModelSetup).not.toHaveBeenCalled();
  });
