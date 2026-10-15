@@ -188,7 +188,7 @@ func TestAPipelineFileLandsInItsOwnersLibrary(t *testing.T) {
 	if len(uploads) != 1 {
 		t.Fatalf("uploaded %d objects, want 1", len(uploads))
 	}
-	wantObject := "library/" + pipelinesTestOwner + "/" + got.FileID + "/tests.unit.log"
+	wantObject := "library/alice/" + got.FileID + "/tests.unit.log"
 	if uploads[0].bucket != "memql" || uploads[0].object != wantObject {
 		t.Errorf("the bytes went to %s/%s, want memql/%s -- the upload route's layout, so one bucket has one",
 			uploads[0].bucket, uploads[0].object, wantObject)
@@ -454,7 +454,7 @@ func TestAPipelineFileIsNamedTheWayAnUploadIs(t *testing.T) {
 				t.Fatalf("%d uploads and %d rows, want one of each", len(uploads), len(creates))
 			}
 			// Exactly the three separators library/{owner}/{fileId}/{name} has.
-			wantObject := "library/" + pipelinesTestOwner + "/" + got.FileID + "/" + want
+			wantObject := "library/alice/" + got.FileID + "/" + want
 			if object := uploads[0].object; object != wantObject {
 				t.Errorf("object path %q, want %q", object, wantObject)
 			}

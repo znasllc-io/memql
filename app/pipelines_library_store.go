@@ -12,6 +12,7 @@ import (
 
 	"github.com/znasllc-io/memql/component/auth"
 	"github.com/znasllc-io/memql/component/database/storagequota"
+	"github.com/znasllc-io/memql/component/memql"
 	"github.com/znasllc-io/memql/component/server"
 	"github.com/znasllc-io/memql/component/server/libraryfile"
 	"github.com/znasllc-io/memql/core/id"
@@ -178,7 +179,10 @@ func (s *pipelinesLibraryStore) StoreRunFile(ctx context.Context, f pipelinestep
 	// own artifact lie about what it is.
 	mimeType := server.ResolveLibraryMIME(f.MimeType, f.Bytes)
 	fileID := id.NewShortId()
-	object := fmt.Sprintf("library/%s/%s/%s", owner, fileID, name)
+	// Storage keys use the bare owner, as the upload route and streamed
+	// artifacts do. A pipeline row supplies a canonical user id; retaining
+	// that prefix here disagrees with the storage capacity gate's owner.
+	object := fmt.Sprintf("library/%s/%s/%s", memql.BareShortId(owner), fileID, name)
 	blobURL, err := s.uploader.Upload(ownerCtx, s.bucket, object, f.Bytes, mimeType)
 	if err != nil {
 		return pipelinesteps.StoredFile{}, fmt.Errorf("object storage refused the file, so nothing was stored: %w", err)

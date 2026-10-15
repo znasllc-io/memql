@@ -752,9 +752,10 @@ const COPY: Record<string, RefusalCopy> = {
     next: "Narrow the artifact paths.",
   },
   pipeline_artifact_missing: {
-    // A NOTE: the step's outcome stands; one declared path saved nothing.
-    title: "A declared artifact path matched no file",
-    next: "Check the path in memql-package.yaml.",
+    // A NOTE: the command's outcome stands. This also covers log archive
+    // and Library storage failures, not only unmatched artifact paths.
+    title: "A log or artifact was not saved",
+    next: "Check the details below, resolve the problem, then re-run.",
   },
   pipeline_artifact_unavailable: {
     title: "The step's artifacts could not be verified and saved",

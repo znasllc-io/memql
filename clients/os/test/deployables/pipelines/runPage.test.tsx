@@ -104,11 +104,13 @@ describe("the run page", () => {
     expect(within(screen.getByRole("region", { name: "Artifacts" })).getByText("dist/coverage.html")).toBeTruthy();
   });
 
-  it("draws no log box for a step whose log never reached the Library, and says why", async () => {
-    const failedNoLog = stepRow("tests.unit", { seq: 1, runId: "wr-1", status: "failed", errorMessage: "exit 1", logFileId: "",
-      result: { status: "failed", metadata: { notes: [{ code: "pipeline_artifact_missing", message: "The Library refused the log." }] } } });
-    mount(fakeConnection(seed({ workSteps: { "wr-1": [STEPS[0]!, failedNoLog] }, runArtifacts: { "wr-1": [] } })));
+  it.each(["done", "failed"] as const)("explains a %s step's unsaved log without inventing a manifest error", async (status) => {
+    const noLog = stepRow("tests.unit", { seq: 1, runId: "wr-1", status, errorMessage: status === "failed" ? "exit 1" : "", logFileId: "",
+      result: { status: status === "done" ? "passed" : "failed", metadata: { notes: [{ code: "pipeline_artifact_missing", message: "The Library refused the log." }] } } });
+    mount(fakeConnection(seed({ workSteps: { "wr-1": [STEPS[0]!, noLog] }, runArtifacts: { "wr-1": [] } })));
     expect(await screen.findByText("The Library refused the log.")).toBeTruthy();
+    expect(screen.getByText("A log or artifact was not saved")).toBeTruthy();
+    expect(screen.queryByText("Check the path in memql-package.yaml.")).toBeNull();
     expect(screen.queryByRole("button", { name: "Open the full log" })).toBeNull();
     expect(document.querySelector(".pipeline-log")).toBeNull();
   });
