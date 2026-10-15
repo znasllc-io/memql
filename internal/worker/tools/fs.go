@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"io"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -12,10 +11,11 @@ import (
 	"unicode/utf8"
 
 	memqlv1 "github.com/znasllc-io/memql/component/grpc/gen"
+	permission "github.com/znasllc-io/memql/core/computerpermission"
 )
 
 // runFsRead implements workerHost.fs_read.
-func runFsRead(_ context.Context, args map[string]any, policy *Policy) (*memqlv1.Success, *memqlv1.Failure) {
+func runFsRead(ctx context.Context, args map[string]any, policy *Policy) (*memqlv1.Success, *memqlv1.Failure) {
 	path := strings.TrimSpace(argString(args, "path"))
 	if path == "" {
 		return nil, failure("bad_request", "fs_read: path required")
@@ -26,7 +26,6 @@ func runFsRead(_ context.Context, args map[string]any, policy *Policy) (*memqlv1
 	if refusal := validateFsReadArgs(args); refusal != nil {
 		return nil, refusal
 	}
-	maxBytes := argInt(args, "maxBytes", 5*1024*1024)
 	f, err := os.Open(expandHome(path))
 	if err != nil {
 		if errors.Is(err, os.ErrNotExist) {
@@ -35,31 +34,14 @@ func runFsRead(_ context.Context, args map[string]any, policy *Policy) (*memqlv1
 		return nil, failure("fs_failed", err.Error())
 	}
 	defer f.Close()
-	info, err := f.Stat()
-	if err != nil {
-		return nil, failure("fs_failed", err.Error())
-	}
-	limited := io.LimitReader(f, int64(maxBytes))
-	body, err := io.ReadAll(limited)
-	if err != nil {
-		return nil, failure("fs_failed", err.Error())
-	}
-	return successJSON(map[string]any{
-		"path":      path,
-		"content":   string(body),
-		"size":      len(body),
-		"fileSize":  info.Size(),
-		"truncated": info.Size() > int64(len(body)),
-	}, 0, 0, len(body), fileReadPreview(body, info.Size())), nil
+	return readOpenedFile(ctx, path, f, args)
 }
 
 // Never turn an unsupported range or misspelled limit into a successful full
 // read. Both read paths call this after their existing gates, before opening.
 func validateFsReadArgs(args map[string]any) *memqlv1.Failure {
-	for key := range args {
-		if key != "path" && key != "maxBytes" {
-			return failure("bad_request", "fs_read supports only path and optional maxBytes. Line ranges, offsets, search and other arguments are not supported.")
-		}
+	if _, err := permission.ParseReadOptions(args); err != nil {
+		return failure("bad_request", "fs_read accepts path, maxBytes, and bounded range/search arguments: "+err.Error())
 	}
 	return nil
 }
