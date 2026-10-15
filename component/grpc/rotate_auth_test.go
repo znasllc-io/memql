@@ -288,6 +288,9 @@ func TestRotateAuth_HappyPath(t *testing.T) {
 	if sess.identity.Subject != "v1:identity:user:after-rotate" {
 		t.Errorf("identity not swapped; subject still %q", sess.identity.Subject)
 	}
+	if sess.credentialClaims["sub"] != "v1:identity:user:after-rotate" || sess.credentialClaims["exp"] == nil {
+		t.Error("role-test issuance must see the current subject and expiry after rotation")
+	}
 	if sess.identity.Email != "after@example.com" {
 		t.Errorf("identity email not swapped; got %q", sess.identity.Email)
 	}

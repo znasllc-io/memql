@@ -90,7 +90,7 @@ import (
 // refuses it, which is the direction this file fails in.
 func httpResolvableClass(class string) bool {
 	switch class {
-	case "", "user", "badge", verifier.ClassAppSession:
+	case "", "user", "badge", verifier.ClassAppSession, auth.RoleTestClass:
 		return true
 	default:
 		return false

@@ -1,3 +1,4 @@
+import { isRoleTestWindow } from "@znasllc-io/memql-sdk-core/identityadmin";
 import type { OsRuntimeConfig } from "../cluster/config";
 
 export const IDENTITY_MEDIA = "application/vnd.memql.identity+json";
@@ -37,6 +38,7 @@ export async function nativeIdentity(
   config: OsRuntimeConfig, path: string,
   options: { form?: Record<string, string>; csrf?: string; bearer?: string; signal?: AbortSignal } = {},
 ): Promise<IdentityPage> {
+  if (isRoleTestWindow()) throw new Error("Account security is unavailable during role tests. Use your original tab.");
   // A backend redirect may name an external OAuth client. Only the navigation
   // layer follows it; this function never sends identity headers to that host.
   const base = config.identityApiBaseUrl || window.location.origin;

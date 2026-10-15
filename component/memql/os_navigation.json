@@ -397,6 +397,10 @@
         "name": "Roles"
       },
       {
+        "id": "testing",
+        "name": "Role testing"
+      },
+      {
         "id": "logs",
         "name": "Logs",
         "requires": "app:users/logs"

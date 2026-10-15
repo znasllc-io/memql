@@ -1,3 +1,4 @@
+import { isRoleTestTab } from "../../auth/roleTest";
 import { useCallback, useMemo, type ReactNode } from "react";
 import type { Row } from "@znasllc-io/memql-sdk-core/client";
 
@@ -48,7 +49,7 @@ export function SetupFactsScope({ children }: { children: ReactNode }) {
   // request per boot that could not change a pixel.
   const passkeys = useReading<Row[]>(
     `setup:passkeys:${config.authEnabled ? "on" : "off"}`,
-    connection === null || !config.authEnabled ? null : readPasskeys,
+    connection === null || !config.authEnabled || isRoleTestTab() ? null : readPasskeys,
   );
 
   // A FAILED READ IS `unknown`, NEVER `none` (D6 of the first-run record).
@@ -66,7 +67,7 @@ export function SetupFactsScope({ children }: { children: ReactNode }) {
         : "none";
 
   const value = useMemo(() => {
-    const stops = stopsFor({ readiness, passkeys: reading, authEnabled: config.authEnabled });
+    const stops = stopsFor({ readiness, passkeys: reading, authEnabled: config.authEnabled && !isRoleTestTab() });
     return {
       stops,
       // DERIVED HERE, ONCE. Three surfaces branch on these two booleans, and

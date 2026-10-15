@@ -64,6 +64,7 @@ import (
 	"github.com/znasllc-io/memql/component/auth"
 	"github.com/znasllc-io/memql/component/identity"
 	"github.com/znasllc-io/memql/component/identity/pat"
+	"github.com/znasllc-io/memql/component/identity/roletest"
 	langparser "github.com/znasllc-io/memql/component/language/parser"
 	memqlengine "github.com/znasllc-io/memql/component/memql"
 	"github.com/znasllc-io/memql/core/id"
@@ -193,6 +194,7 @@ func fail(code int32, auditID, message string) Result {
 // Service performs the gated writes. Construct one per node; it holds no
 // per-call state.
 type Service struct {
+	RoleTests      *roletest.Service
 	AccessRequests *identity.Store
 	// Engine executes the DSL. Required.
 	Engine identity.EngineExecutor

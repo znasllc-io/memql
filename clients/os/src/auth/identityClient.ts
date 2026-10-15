@@ -1,3 +1,4 @@
+import { isRoleTestWindow } from "@znasllc-io/memql-sdk-core/identityadmin";
 import type { OsRuntimeConfig } from "../cluster/config";
 import { osRedirectPath } from "../cluster/config";
 
@@ -41,6 +42,7 @@ export function canCoordinateIdentityRefresh(): boolean {
  * document never rotates the predecessor concurrently. No credential enters
  * local storage or a broadcast channel. */
 async function fetchIdentityRefresh(config: OsRuntimeConfig, fetchImpl: IdentityFetch): Promise<Response> {
+  if (isRoleTestWindow()) throw new Error("Account security is unavailable during role tests. Use your original tab.");
   if (!canCoordinateIdentityRefresh()) {
     return Promise.reject(new Error("This browser needs Web Locks support to keep sign-in in sync across tabs. Update your browser and try again."));
   }
@@ -97,6 +99,7 @@ export async function exchangeCode(
   params: { code: string; codeVerifier: string; redirectUri: string },
   fetchImpl: IdentityFetch = fetch,
 ): Promise<boolean> {
+  if (isRoleTestWindow()) throw new Error("Role tests cannot sign in with account cookies.");
   const response = await fetchImpl(apiUrl(config, "/oauth/token"), {
     method: "POST",
     credentials: "include",
@@ -116,6 +119,7 @@ export async function logout(
   config: OsRuntimeConfig,
   fetchImpl: IdentityFetch = fetch,
 ): Promise<void> {
+  if (isRoleTestWindow()) throw new Error("End the role test without signing out your original account.");
   try {
     await fetchImpl(apiUrl(config, "/auth/logout"), {
       method: "POST",

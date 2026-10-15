@@ -358,3 +358,12 @@ approve production work, run commands, or call a model.
 an in-flight save, and a retryable save with the original draft retained.
 Saving keeps the request pending; it never raises a limit or resumes work.
 Inspect both modes and a narrow viewport, including the saved-text disclosure.
+
+## Role testing
+
+Open `/role-testing.html?mode=light` or `mode=dark` for the actual role-testing
+controls and session banner. `role=developer` omits Admin, `empty` shows no
+active tests, `pending` holds the list read, and `error` exercises Retry. End
+test removes the fixture session; Start deliberately refuses. This fixture
+creates no identities, credentials or network writes. Check 390px and desktop
+widths before live acceptance.

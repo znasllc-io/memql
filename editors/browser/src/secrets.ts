@@ -58,3 +58,13 @@ export class BrowserSecrets {
   async delete(name: string): Promise<void> { await this.request('secrets', 'readwrite', store => store.delete(name)); }
   async keys(): Promise<string[]> { return (await this.request('secrets', 'readonly', store => store.getAllKeys())).map(String); }
 }
+
+/** Role tests never read or modify the editor's persistent owner credentials. */
+export class MemorySecrets {
+  readonly type = 'in-memory' as const;
+  private readonly values = new Map<string, string>();
+  async get(name: string) { return this.values.get(name); }
+  async set(name: string, value: string) { this.values.set(name, value); }
+  async delete(name: string) { this.values.delete(name); }
+  async keys() { return [...this.values.keys()]; }
+}

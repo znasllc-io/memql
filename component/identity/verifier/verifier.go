@@ -22,8 +22,9 @@ import (
 type Source string
 
 const (
-	SourceJWT Source = "jwt"
-	SourcePAT Source = "pat"
+	SourceJWT      Source = "jwt"
+	SourcePAT      Source = "pat"
+	SourceRoleTest Source = "role_test"
 )
 
 // ErrUnknownKID is returned by VerifyBearer/verifyJWT when the token's
@@ -103,18 +104,26 @@ type PATVerifier interface {
 	VerifyToken(ctx context.Context, token string) (*pat.Claims, error)
 }
 
+type RoleTestVerifier interface {
+	VerifyRoleTest(context.Context, string) (*VerifiedClaims, error)
+}
+
+// SetRoleTestVerifier is bootstrap wiring, installed before serving requests.
+func (v *Verifier) SetRoleTestVerifier(r RoleTestVerifier) { v.roleTests = r }
+
 // Verifier is the per-node JWT+PAT verifier. Reads from a JWKSCache
 // to validate JWTs; delegates to PATVerifier for mql_pat_* tokens.
 //
 // The verifier itself is a stateless logic object — JWKSCache and
 // PATVerifier are the only state it depends on.
 type Verifier struct {
-	cache    *JWKSCache
-	cfg      Config
-	pat      PATVerifier
-	logger   *slog.Logger
-	issuer   string
-	audience string
+	cache     *JWKSCache
+	cfg       Config
+	pat       PATVerifier
+	logger    *slog.Logger
+	issuer    string
+	audience  string
+	roleTests RoleTestVerifier
 }
 
 // New constructs a Verifier. cache must be non-nil and already
@@ -146,6 +155,12 @@ func (v *Verifier) VerifyBearer(ctx context.Context, token string) (*VerifiedCla
 	if token == "" {
 		return nil, errors.New("verifier: empty bearer token")
 	}
+	if strings.HasPrefix(token, "mql_test_") {
+		if v.roleTests == nil {
+			return nil, errors.New("verifier: role testing is not configured")
+		}
+		return v.roleTests.VerifyRoleTest(ctx, token)
+	}
 	if pat.IsPATToken(token) {
 		return v.verifyPAT(ctx, token)
 	}
@@ -162,6 +177,9 @@ func (v *Verifier) verifyPAT(ctx context.Context, token string) (*VerifiedClaims
 	}
 	if c == nil {
 		return nil, errors.New("verifier: PAT verifier returned nil claims")
+	}
+	if auth.IsRoleTestUser(c.UserId) {
+		return nil, errors.New("verifier: test personas require a role-test session")
 	}
 	cm := map[string]any{
 		"sub":      c.UserId,
@@ -269,6 +287,9 @@ func (v *Verifier) verifyJWT(ctx context.Context, token string) (*VerifiedClaims
 				out.Partitions[k] = s
 			}
 		}
+	}
+	if auth.IsRoleTestUser(out.UserId) || out.Class == auth.RoleTestClass {
+		return nil, errors.New("verifier: test personas require a role-test session")
 	}
 	return out, nil
 }

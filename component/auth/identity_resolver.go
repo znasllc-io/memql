@@ -87,8 +87,9 @@ func (r *IdentityResolver) LoadFromClaims(ctx context.Context, claims map[string
 	}
 
 	return &AccessContext{
-		UserId:       userId,
-		PrimaryEmail: stringField(userRow, "primaryEmail"),
+		UserId:            userId,
+		RoleTestSessionID: roleTestSessionID(claims),
+		PrimaryEmail:      stringField(userRow, "primaryEmail"),
 		// Off the SAME row, on the read that has already happened. See the
 		// note on AccessContext.DisplayName for why it is not an
 		// authorization input and is not in the actor envelope.
@@ -130,8 +131,9 @@ func FallbackFromClaims(claims map[string]any) *AccessContext {
 		role = RoleReader
 	}
 	return &AccessContext{
-		UserId:       subject,
-		PrimaryEmail: email,
+		UserId:            subject,
+		RoleTestSessionID: roleTestSessionID(claims),
+		PrimaryEmail:      email,
 		// Best-effort, from the OIDC-style name claims the identity issuer
 		// stamps (component/identity/jwt.go). This path runs when there is no
 		// user row to read yet, so the claim is the only name that exists;
@@ -230,4 +232,11 @@ func quoteJSON(s string) string {
 		return `""`
 	}
 	return string(b)
+}
+
+func roleTestSessionID(claims map[string]any) string {
+	if stringClaim(claims, "class") == RoleTestClass {
+		return stringClaim(claims, "role_test_session")
+	}
+	return ""
 }

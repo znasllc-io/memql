@@ -9,6 +9,12 @@ export interface ProfileState {
   get<T>(key: string, fallback: T): T;
   update(key: string, value: unknown): PromiseLike<void>;
 }
+
+export class MemoryProfileState implements ProfileState {
+  private readonly values = new Map<string, unknown>();
+  get<T>(key: string, fallback: T): T { return this.values.has(key) ? this.values.get(key) as T : fallback; }
+  async update(key: string, value: unknown) { this.values.set(key, value); }
+}
 const registryKey = "memql.web.clusters.v1";
 const accessKey = accessTokenSecretKey;
 export class BrowserRegistry {

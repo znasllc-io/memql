@@ -175,6 +175,11 @@ export type ClusterSettingsEdit = IdentityAdminClusterSettingsPayload;
  * writes and nothing else.
  */
 export class IdentityAdminClient {
+  async roleTest(operation: "start" | "end" | "list", input: { role?: string; sessionId?: string } = {}, opts: IdentityAdminCallOptions = {}) {
+    const { result, raw } = await this.callRaw("role testing", { roleTest: { operation, ...input } }, opts);
+    return { ...result, token: raw.roleTestToken ?? "", sessions: raw.roleTestSessions ?? [] };
+  }
+
   /** Review a pending request through the server's serialized, audited gate. */
   async reviewAccessRequest(requestId: string, decision: "approve" | "reject", role = "", note = "", opts: IdentityAdminCallOptions = {}): Promise<AdminWriteResult & { url: string; emailSent: boolean; emailError: string }> {
     requireArg("reviewing an access request", "requestId", requestId);

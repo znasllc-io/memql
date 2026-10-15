@@ -170,3 +170,14 @@ func (e *MemQLEngine) grantsForSubjects(ctx context.Context, kind, subjectConcep
 	}
 	return out, nil
 }
+
+// Role-test issuance must distinguish a failed membership read from no groups.
+// Include memberships to archived groups too: over-refusing a test is safer
+// than losing a deny while deciding whether to issue another identity.
+func (s graphMembershipSource) ActiveGroupIdsForUserChecked(ctx context.Context, userId string) ([]string, error) {
+	db := s.engine.database()
+	if db == nil {
+		return nil, errNoDatabaseForCatalog
+	}
+	return activeGroupIdsForUserChecked(ctx, db, userId)
+}

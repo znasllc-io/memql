@@ -302,6 +302,7 @@ export interface IdentityAdminClusterSettingsPayload {
 }
 
 export type IdentityAdminRequestPayload =
+ | { roleTest: { operation: "start" | "end" | "list"; role?: string; sessionId?: string } }
   | { updateUserProfile: IdentityAdminUserProfilePayload }
   | { setUserRole: IdentityAdminSetRolePayload }
   | { setUserSuspended: IdentityAdminSetSuspendedPayload }
@@ -1017,7 +1018,10 @@ export interface DeployControlResultPayload {
 //
 // auditEventId is present on a REFUSAL too -- the refusal is itself an audited
 // event, and an operator arguing about a denial needs its id.
+export interface RoleTestSessionPayload { id: string; userId: string; role: string; expiresAt: number | string }
 export interface IdentityAdminResultPayload {
+  roleTestToken?: string;
+  roleTestSessions?: RoleTestSessionPayload[];
   requestId?: string;
   ok?: boolean;
   errorCode?: number;
