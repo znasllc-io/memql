@@ -173,6 +173,11 @@ func TestServerOnlyParsedSetMatchesTheTree(t *testing.T) {
 			"attribute name changed, which would silently exempt nothing and gate nothing.")
 	}
 	want := map[serverOnlyKey]bool{
+		// Capacity and revision admission cannot be replaced by actor.userId scoping.
+		{Path: "worker/mutations.memql", Name: "setWorkerModelSetup"}: true,
+		// Reports require a bounded harness turn; the singleton is seeded without an actor.
+		{Path: "models/mutations.memql", Name: "recordModelCatalogReview"}:          true,
+		{Path: "models/mutations.memql", Name: "createCatalogResearchSettings"}:     true,
 		{Path: "email/queries.memql", Name: "emailSendOperationByProviderId"}:       true,
 		{Path: "email/queries.memql", Name: "emailUnindexedConnections"}:            true,
 		{Path: "email/queries.memql", Name: "emailReadyFeedbackOrganizations"}:      true,

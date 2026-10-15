@@ -2127,6 +2127,26 @@ func FleetModelPullBuild(args FleetModelPullArgs) string {
 	return b.String()
 }
 
+// FleetModelSetup -- Read the local catalog, capacity and saved model choices for one of your machines. Does not run or download a model.
+type FleetModelSetupArgs struct {
+	RegistrationId string
+}
+
+// FleetModelSetup calls the engine builtin fleetModelSetup.
+func (qc *QueryClient) FleetModelSetup(ctx context.Context, args FleetModelSetupArgs) (*Result, error) {
+	call := FleetModelSetupBuild(args)
+	return qc.executeNamed(ctx, "fleetModelSetup", call)
+}
+
+func FleetModelSetupBuild(args FleetModelSetupArgs) string {
+	var b strings.Builder
+	b.WriteString("builtin fleetModelSetup(")
+	b.WriteString("registrationId: ")
+	b.WriteString(quoteMemQL(args.RegistrationId))
+	b.WriteString(")")
+	return b.String()
+}
+
 // FleetModels -- List every model the caller's fleet can run right now: the model id, its context window and capability flags, and the machines behind it with their online and busy state. Produced from live worker registrations, never persisted -- the answer is which machines are awake, so a stored copy's staleness would be indistinguishable from the condition it describes. Scoped to the caller's own machines plus the machines lent to them: shared with everyone, or with them or one of their groups. A model call carries the caller's prompts and routes only to those machines. Feeds the fleet machine cards.
 type FleetModelsArgs struct {
 }
@@ -2210,6 +2230,38 @@ func FleetRevokeMachineBuild(args FleetRevokeMachineArgs) string {
 		b.WriteString("reason: ")
 		b.WriteString(quoteMemQL(args.Reason))
 	}
+	b.WriteString(")")
+	return b.String()
+}
+
+// FleetSetModelSetup -- Save model choices by purpose on your machine after checking installed capabilities and combined memory. Existing calls finish. Later calls use the saved choices, with a 32K context ceiling.
+type FleetSetModelSetupArgs struct {
+	RegistrationId string
+	Revision       string
+	Choices        map[string]any
+}
+
+// FleetSetModelSetup calls the engine builtin fleetSetModelSetup.
+func (qc *QueryClient) FleetSetModelSetup(ctx context.Context, args FleetSetModelSetupArgs) (*Result, error) {
+	call := FleetSetModelSetupBuild(args)
+	return qc.executeNamed(ctx, "fleetSetModelSetup", call)
+}
+
+func FleetSetModelSetupBuild(args FleetSetModelSetupArgs) string {
+	var b strings.Builder
+	b.WriteString("builtin fleetSetModelSetup(")
+	b.WriteString("registrationId: ")
+	b.WriteString(quoteMemQL(args.RegistrationId))
+	if b.Len() > 27 {
+		b.WriteString(", ")
+	}
+	b.WriteString("revision: ")
+	b.WriteString(quoteMemQL(args.Revision))
+	if b.Len() > 27 {
+		b.WriteString(", ")
+	}
+	b.WriteString("choices: ")
+	b.WriteString(renderMemQLValue(args.Choices))
 	b.WriteString(")")
 	return b.String()
 }
@@ -4189,6 +4241,21 @@ func MoveRunHeadBuild(args MoveRunHeadArgs) string {
 	b.WriteString(fmt.Sprintf("%v", args.Version))
 	b.WriteString(")")
 	return b.String()
+}
+
+// OpenModelCatalogResearch -- Start a catalog review through the work harness. Local models only; no paid fallback. The owner must explicitly enable the catalog research configuration first.
+type OpenModelCatalogResearchArgs struct {
+}
+
+// OpenModelCatalogResearch calls the engine builtin openModelCatalogResearch.
+func (qc *QueryClient) OpenModelCatalogResearch(ctx context.Context, args OpenModelCatalogResearchArgs) (*Result, error) {
+	call := OpenModelCatalogResearchBuild(args)
+	return qc.executeNamed(ctx, "openModelCatalogResearch", call)
+}
+
+func OpenModelCatalogResearchBuild(args OpenModelCatalogResearchArgs) string {
+	_ = args
+	return "builtin openModelCatalogResearch()"
 }
 
 // PackageAnalyze -- Analyze a package source offline and return the report, deploying nothing (epic memql#4794, D12). Fetches the tracked source, walks the manifest, discovers the DSL domains and runs the SAME Init-grade gates strict boot runs -- so 'this DSL would refuse boot' is an answer produced here, before a pod is ever asked to run it. Returns {report, ok}: the report names every deployable with its build plan (or 'prebuilt output found -- build skipped'), every DSL domain with construct counts, any Go pack as reported-not-deployable, and every problem found. A refusal carries one of the stable codes in component/packages/refusal.go.

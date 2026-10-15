@@ -71,9 +71,13 @@ func TestRemoteFleetInferenceFromPlannerCrossesActualModelHop(t *testing.T) {
 	const model = "local-writer:27b"
 	store := &remoteFleetStore{candidates: []Candidate{{RegistrationId: "laptop", ConnectedNodeId: "agent-with-stream", LastSeenAt: time.Now(),
 		Capabilities: []string{workerservice.ModelCapability}, Labels: map[string]string{workerservice.ModelLabel(model): (ModelAttributes{ContextWindow: 131072, StructuredOutput: true}).String()}}}}
+	store.candidates[0].ModelSetup = memqlengine.ModelSetup{Revision: "selected", Choices: map[string]string{"structured": model}}
+	receiverStore := &remoteFleetStore{candidates: append([]Candidate(nil), store.candidates...)}
+	calls := 0
 	registry := workerservice.NewRegistry(slog.Default(), time.Now)
 	worker := &workerservice.Worker{RegistrationId: "laptop", OwnerUserId: "alice", Capabilities: []string{workerservice.ModelCapability}, Labels: store.candidates[0].Labels, Concurrency: map[string]uint32{workerservice.ModelCapability: 1}}
 	worker.SetModelCallFunc(func(ctx context.Context, req workerservice.ModelCallRequest) (*workerservice.ModelCallHandle, error) {
+		calls++
 		access, ok := auth.AccessFromContext(ctx)
 		if !ok || access.UserId != "alice" {
 			return nil, fmt.Errorf("planner authority did not reach the receiving agent")
@@ -94,7 +98,7 @@ func TestRemoteFleetInferenceFromPlannerCrossesActualModelHop(t *testing.T) {
 		return handle, nil
 	})
 	registry.Add(worker)
-	link := &plannerModelLink{handler: NewForwardHandler(registry, store, slog.Default())}
+	link := &plannerModelLink{handler: NewForwardHandler(registry, receiverStore, slog.Default())}
 	link.router = newForwardRouter(link, func() (string, string) { return "planner", "planner" }, slog.Default())
 	fleet := NewRemoteFleetInference(store, link.router, "planner", slog.Default())
 	if fleet.registry != nil {
@@ -117,6 +121,15 @@ func TestRemoteFleetInferenceFromPlannerCrossesActualModelHop(t *testing.T) {
 	}
 	if link.target != "agent-with-stream" || result.Content != `{"draft":"local result"}` || result.Usage.Model != model || result.Usage.InputTokens != 13 || result.Usage.OutputTokens != 7 {
 		t.Fatalf("planner's forwarded inference lost output or provenance: %+v target=%q", result, link.target)
+	}
+
+	// The sender still offers this model. Only the receiving replica knows that
+	// its owner changed the setup, and must refuse before invoking the machine.
+	receiverStore.candidates[0].ModelSetup = memqlengine.ModelSetup{Revision: "changed", Choices: map[string]string{"structured": "other"}}
+	_, err = fleet.Call(ctx, memqlengine.FleetCallRequest{ActingUserId: "alice", ModelId: model, Kind: memqlengine.FleetKindChat, ContextTokens: 8192,
+		Messages: []common.ChatMessage{{Role: "user", Content: "Draft"}}, Schema: &common.StructuredSchema{Name: "draft", Schema: json.RawMessage(`{"type":"object"}`), Strict: true}})
+	if err == nil || calls != 1 {
+		t.Fatalf("receiver accepted a stale setup: err=%v calls=%d", err, calls)
 	}
 }
 

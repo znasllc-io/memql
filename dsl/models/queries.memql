@@ -1,6 +1,6 @@
 // models/queries.memql -- reading the curated catalog.
 
-use common.traits.{ isActiveRecord }
+use common.traits.{ isActiveRecord, isNotDeleted }
 
 /// The catalog, optionally narrowed.
 ///
@@ -14,7 +14,7 @@ query modelProfile modelProfiles {
     /// Narrow to one category.
     category         enum("text", "reasoning", "omni", "vision", "audioIn", "audioOut", "imageGen", "videoGen", "embeddings")
     /// Narrow to one runtime.
-    runtime          enum("ollama", "mlx", "whispercpp", "nemo", "kokoro", "mflux", "comfyui")
+    runtime          enum("ollama", "mlx", "whispercpp", "nemo", "kokoro", "mflux", "comfyui", "openai-compatible", "cloud")
     /// Narrow to entries whose declared floor is exactly this machine class. NOT "everything a
     /// machine of this class can run" -- that is a comparison across five values, and doing it here
     /// would make the answer depend on an ordering the caller cannot see. The Fleet surface holds
@@ -39,4 +39,20 @@ query modelProfile modelProfileById {
   }
   filter  row => row.modelId == args.modelId && isActiveRecord(row)
   shape   modelProfileFull
+}
+
+/// The installation-wide research opt-in.
+@actor
+query catalogResearchSettings modelCatalogResearchSettings {
+  filter row => actor.isClusterOwner == true && row.id == "v1:models:catalogResearchSettings:weekly" && isNotDeleted(row)
+  shape catalogResearchSettingsFull
+}
+
+/// The latest completed research evidence.
+@actor
+query catalogReview latestModelCatalogReview {
+  filter row => actor.isClusterOwner == true && isNotDeleted(row)
+  sort "reviewedAt", "desc"
+  paginate 1
+  shape catalogReviewFull
 }

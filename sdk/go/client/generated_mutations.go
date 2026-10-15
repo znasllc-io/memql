@@ -1082,6 +1082,28 @@ func ConfigureAccountDomainsBuild(args ConfigureAccountDomainsArgs) string {
 	return b.String()
 }
 
+// ConfigureModelCatalogResearch -- Explicitly choose who owns future research. Disabled is the default.
+//
+// Bound concept: v1:models:catalogResearchSettings (machine-readable: BoundConcepts["configureModelCatalogResearch"] in generated_concepts.go).
+type ConfigureModelCatalogResearchArgs struct {
+	Enabled bool
+}
+
+// ConfigureModelCatalogResearch calls the engine mutation configureModelCatalogResearch.
+func (qc *QueryClient) ConfigureModelCatalogResearch(ctx context.Context, args ConfigureModelCatalogResearchArgs) (*Result, error) {
+	call := ConfigureModelCatalogResearchBuild(args)
+	return qc.executeNamed(ctx, "configureModelCatalogResearch", call)
+}
+
+func ConfigureModelCatalogResearchBuild(args ConfigureModelCatalogResearchArgs) string {
+	var b strings.Builder
+	b.WriteString("mutation configureModelCatalogResearch(")
+	b.WriteString("enabled: ")
+	b.WriteString(fmt.Sprintf("%v", args.Enabled))
+	b.WriteString(")")
+	return b.String()
+}
+
 // ConfirmRecord -- Human confirm a data record, updating confirm count and validation state
 //
 // Bound concept: v1:data:record (machine-readable: BoundConcepts["confirmRecord"] in generated_concepts.go).
@@ -7790,7 +7812,7 @@ type ModelProfileAddArgs struct {
 	ModelId   string
 	// Enum: text | reasoning | omni | vision | audioIn | audioOut | imageGen | videoGen | embeddings
 	Category string
-	// Enum: ollama | mlx | whispercpp | nemo | kokoro | mflux | comfyui
+	// Enum: ollama | mlx | whispercpp | nemo | kokoro | mflux | comfyui | openai-compatible | cloud
 	Runtime string
 	// Enum: 16 | 24 | 32 | 64 | 128
 	MinMachineClass string

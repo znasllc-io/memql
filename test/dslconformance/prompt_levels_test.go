@@ -47,6 +47,8 @@ var levels = map[string]bool{"fast": true, "strong": true, "reasoning": true, "e
 // confident wrong answer is worse than no answer, which is why the shipped
 // reasoningParks rule parks rather than degrading it.
 var promptLevels = map[string]string{
+	// Evidence synthesis across model cards needs the strong tier; the run route remains local-only.
+	"modelCatalogResearch": "strong",
 	// Named in D3.
 	"goalComplexityTriage": "fast",
 	// Initial document decomposition is bounded data, checked separately before execution.

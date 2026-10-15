@@ -851,6 +851,28 @@ QueryClient.prototype.configureAccountDomains = function (this: QueryClient, arg
   return this.executeNamed("configureAccountDomains", buildConfigureAccountDomains(args), opts);
 };
 
+/** Explicitly choose who owns future research. Disabled is the default. */
+// Bound concept: v1:models:catalogResearchSettings (machine-readable: BoundConcepts["configureModelCatalogResearch"] in generated_concepts.ts).
+export interface ConfigureModelCatalogResearchArgs {
+  enabled: boolean;
+}
+
+export function buildConfigureModelCatalogResearch(args: ConfigureModelCatalogResearchArgs): string {
+  const parts: string[] = [];
+  parts.push("enabled: " + renderMemQLValue(args.enabled));
+  return "mutation configureModelCatalogResearch(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    configureModelCatalogResearch(args: ConfigureModelCatalogResearchArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.configureModelCatalogResearch = function (this: QueryClient, args: ConfigureModelCatalogResearchArgs = {} as ConfigureModelCatalogResearchArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("configureModelCatalogResearch", buildConfigureModelCatalogResearch(args), opts);
+};
+
 /** Human confirm a data record, updating confirm count and validation state */
 // Bound concept: v1:data:record (machine-readable: BoundConcepts["confirmRecord"] in generated_concepts.ts).
 export interface ConfirmRecordArgs {
@@ -4232,7 +4254,7 @@ export interface ModelProfileAddArgs {
   modelId: string;
   // Enum: text | reasoning | omni | vision | audioIn | audioOut | imageGen | videoGen | embeddings
   category: string;
-  // Enum: ollama | mlx | whispercpp | nemo | kokoro | mflux | comfyui
+  // Enum: ollama | mlx | whispercpp | nemo | kokoro | mflux | comfyui | openai-compatible | cloud
   runtime: string;
   // Enum: 16 | 24 | 32 | 64 | 128
   minMachineClass: string;

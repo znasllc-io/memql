@@ -9,7 +9,7 @@ import { withSession } from "../test/deployables/harness";
 
 type Frame = ComponentType<{ fallback: string; children: ReactNode }>;
 export function fleetEquipmentScenes(Frame: Frame) {
-  return Object.fromEntries(["populated", "models", "details", "details-empty", "labels", "labels-empty", "at-limit", "empty", "error", "sharing", "sharing-people", "sharing-picker", "sharing-empty", "sharing-error", "sharing-pending"].map(state => [`fleet-equipment-${state}`, {
+  return Object.fromEntries(["populated", "models", "models-empty", "models-error", "details", "details-empty", "labels", "labels-empty", "at-limit", "empty", "error", "sharing", "sharing-people", "sharing-picker", "sharing-empty", "sharing-error", "sharing-pending"].map(state => [`fleet-equipment-${state}`, {
     connect: () => {
       const shareDirectory = shareDirectoryRow({ id: "studio", people: state === "sharing-empty" ? [] : [{ id: "ana", name: "Ana Ruiz", detail: "" }, { id: "bo", name: "Bo Chen", detail: "" }], groups: state === "sharing-empty" ? [] : [{ id: "design", name: "Design", members: 4 }, { id: "ops", name: "Operations", members: 7 }] });
       if (state === "sharing-picker") {
@@ -18,7 +18,7 @@ export function fleetEquipmentScenes(Frame: Frame) {
       }
       let currentMachine = machineRow({ id: "studio", ownerUserId: "me", displayName: "Studio Mac", sharing: (state === "sharing-people" || state === "sharing-picker") ? { mode: "people", userIds: ["ana"], groupIds: ["design"] } : { mode: "owner" }, labels: state === "empty" ? {} : { "model:qwen3.5:8b": "ctx=32768;tools=1", "model:llama3.2:3b": "ctx=8192", "model:nomic-embed-text": "embeddings=1" }, hardware: { chip: "Apple M4 Pro", memoryBytes: 51539607552, cpuCores: 12 }, apps: state === "empty" ? [] : [{ id: "claude-code", label: "Claude Code", allowed: true, signedIn: true }, { id: "codex", label: "Codex", allowed: true, signedIn: true }, { id: "gemini-cli", label: "Gemini CLI", allowed: false, signedIn: false, why: "Sign in on this machine." }] });
       currentMachine.sharingActivity = { nodeId: "agent-test", startedAt: new Date().toISOString(), observedAt: new Date().toISOString(), users: [{ id: "ana", activeCalls: 1 }], groups: [{ id: "design", activeCalls: 2 }] };
-      if (state === "models") currentMachine.labels = { "model:qwen3.5:8b": "ctx=32768,tools=1", "model:llama3.2:3b": "ctx=8192" };
+      if (state.startsWith("models")) currentMachine.labels = state === "models-empty" ? {"runtime:ollama":"0.33"} : { "model:qwen3.8:27b": "ctx=262144,params=27320697856,quant=Q4_K_M,tools=1,vision=1,structured=1", "model:qwen3.5:4b": "ctx=262144,params=4659865088,quant=Q4_K_M,tools=1,vision=1,structured=1", "model:qwen3-embedding:0.6b": "embeddings=1", "model:flux2-klein-4b": "imagegen=1" };
       if (state === "details" || state.startsWith("labels")) currentMachine = { ...currentMachine,
         name: "studio.local", platformInfo: { os: "darwin", arch: "arm64", hostname: "studio.local" }, version: "0.8.0", buildTag: "a91b2345678901234567890123456789012345678901234567890123456789012345",
         rttMs: 12, rttAt: new Date().toISOString(), clockSkewMs: 4, activeCount: 2,
@@ -35,6 +35,22 @@ export function fleetEquipmentScenes(Frame: Frame) {
         fleetShareDirectory: [shareDirectory],
         myWorkersWithStatus: [currentMachine],
         appSessionsForUser: state === "empty" ? [] : Array.from({ length: state === "at-limit" ? 5 : 8 }, (_, i) => appSessionRow({ id: `session-${i}`, ownerUserId: "me", workerId: "studio", runId: `work-${i + 1}`, app: i % 2 ? "codex" : "claude-code", status: i === 7 ? "running" : "ended", startedAt: `2026-10-14T10:0${i}:00Z` })),
+      });
+      let setup = { id: "studio", revision: state === "models-empty" ? "" : "setup-1", choices: state === "models-empty" ? {} : { conversation: "qwen3.8:27b", structured: "qwen3.8:27b", tools: "qwen3.8:27b", vision: "qwen3.8:27b", embeddings: "qwen3-embedding:0.6b", imageGen: "flux2-klein-4b" }, usableBytes: 48 * 2**30, diskFreeBytes: 199 * 2**30, researchEnabled: false, catalog: [
+        { modelId: "qwen3.8:27b", purposes: ["conversation", "structured", "tools", "vision"], memoryBytes: 22e9, sizeBytes: 18e9, recommended: true },
+        { modelId: "qwen3.5:4b", purposes: ["conversation", "structured", "tools", "vision"], memoryBytes: 8e9, sizeBytes: 4e9, recommended: true },
+        { modelId: "qwen3-embedding:0.6b", purposes: ["embeddings"], memoryBytes: 2e9, sizeBytes: 639e6, recommended: true },
+        { modelId: "flux2-klein-4b", purposes: ["imageGen"], memoryBytes: 13e9, sizeBytes: 0, recommended: false },
+        { modelId: "qwen3.5:122b", purposes: ["conversation", "structured", "tools", "vision"], memoryBytes: 90e9, sizeBytes: 81e9, blocked: "Needs more model memory", installBlocked: "Needs more model memory" },
+      ].map(m => ({ runtime: "ollama", blocked: "", installBlocked: "", installed: state !== "models-empty" && m.modelId !== "qwen3.5:122b", source: "https://ollama.com/library/" + m.modelId, reviewedAt: "2026-10-15T00:00:00Z", ...m })) };
+      connection.query.fleetModelSetup = vi.fn(async () => {
+        if (state === "models-error") throw new Error("Connection interrupted");
+        return builtinReply("fleetModelSetup", [setup]);
+      });
+      connection.query.fleetSetModelSetup = vi.fn(async args => {
+        if (refuseSave) throw new Error("The setup changed. Reload it before saving.");
+        setup = { ...setup, revision: "setup-2", choices: args.choices as typeof setup.choices };
+        return builtinReply("fleetSetModelSetup", [{ revision: setup.revision }]);
       });
       if (state === "error") connection.query.appSessionsForUser = vi.fn(async () => { throw new Error("Connection interrupted"); });
       let refuseSave = false, delaySave = false;

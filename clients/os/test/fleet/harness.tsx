@@ -152,6 +152,8 @@ export interface FakeQuery {
   // presses Probe and at no other time -- a fact with a date rather than an
   // event with a duration.
   fleetRecommended: ReturnType<typeof vi.fn>;
+  fleetModelSetup: ReturnType<typeof vi.fn>;
+  fleetSetModelSetup: ReturnType<typeof vi.fn>;
   measurementsForMachine: ReturnType<typeof vi.fn>;
   fleetSharingLedger: ReturnType<typeof vi.fn>;
   fleetPullRecommended: ReturnType<typeof vi.fn>;
@@ -260,6 +262,8 @@ export function fakeConnection(seed: Partial<Record<keyof FakeQuery, Row[]>> = {
       setDelegationPolicy: vi.fn(async () => rowsResult([])),
       fleetModelPull: vi.fn(async () => builtinReply("fleetModelPull", [])),
       fleetRecommended: builtin("fleetRecommended"),
+      fleetModelSetup: builtin("fleetModelSetup"),
+      fleetSetModelSetup: builtin("fleetSetModelSetup"),
       measurementsForMachine: read("measurementsForMachine"),
       // EVERY BUILTIN HERE ANSWERS IN THE BUILTIN WIRE SHAPE (builtinReply);
       // only the shaped queries and the mutations answer flat rows.

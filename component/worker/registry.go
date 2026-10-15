@@ -77,9 +77,10 @@ type Worker struct {
 	// anything voluntary.
 	terminateFn func(reason string)
 
-	mu           sync.Mutex
-	activePerCap map[string]uint32
-	queue        []chan struct{}
+	mu             sync.Mutex
+	activePerCap   map[string]uint32
+	queue          []chan struct{}
+	modelSetupSlot chan struct{}
 	// apps is the reported local-app inventory. Guarded by mu because
 	// heartbeats rewrite it while selection reads it.
 	apps []AppInfo
@@ -684,4 +685,21 @@ func (w *Worker) cancelQueueLocked() {
 		close(ch)
 	}
 	w.queue = nil
+}
+
+// AcquireModelSetup serializes configured model work on the stream-holding
+// replica. Forwarded and local calls share this handle, never a BFF-local lock.
+func (w *Worker) AcquireModelSetup(ctx context.Context) (func(), error) {
+	w.mu.Lock()
+	if w.modelSetupSlot == nil {
+		w.modelSetupSlot = make(chan struct{}, 1)
+	}
+	slot := w.modelSetupSlot
+	w.mu.Unlock()
+	select {
+	case slot <- struct{}{}:
+		return func() { <-slot }, nil
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	}
 }

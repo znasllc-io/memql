@@ -291,27 +291,32 @@ func (h *ForwardHandler) HandleForwardedRequest(
 // machine lends its GPU, not its shell, so `WorkerForward` stays owner-only
 // and verifySharedRegistration beside it is what the model forward asks.
 func (h *ForwardHandler) verifyRegistration(ctx context.Context, ownerUserId, registrationId string) error {
+	_, err := h.ownedRegistration(ctx, ownerUserId, registrationId)
+	return err
+}
+
+func (h *ForwardHandler) ownedRegistration(ctx context.Context, ownerUserId, registrationId string) (Candidate, error) {
 	if h.store == nil {
 		// No fleet store on this replica. The registry check below still
 		// establishes ownership from the live stream, but revocation would go
 		// unchecked -- so refuse rather than dispatch on a weaker check than
 		// the one this function exists to perform.
-		return errNoFleetStore
+		return Candidate{}, errNoFleetStore
 	}
 	machines, err := h.store.WorkersForOwner(ctx, ownerUserId)
 	if err != nil {
-		return err
+		return Candidate{}, err
 	}
 	for _, m := range machines {
 		if !sameRegistration(m.RegistrationId, registrationId) {
 			continue
 		}
 		if !m.RevokedAt.IsZero() {
-			return errRegistrationRevoked
+			return Candidate{}, errRegistrationRevoked
 		}
-		return nil
+		return m, nil
 	}
-	return errRegistrationNotOwned
+	return Candidate{}, errRegistrationNotOwned
 }
 
 // verifySharedRegistration is verifyRegistration for a MODEL call, and the
@@ -349,27 +354,32 @@ func (h *ForwardHandler) verifySharedRegistration(ctx context.Context, actingUse
 }
 
 func (h *ForwardHandler) admitSharedRegistration(ctx context.Context, actingUserId, registrationId string) (workerservice.SharingSubjects, error) {
+	_, subjects, err := h.admitSharedCandidate(ctx, actingUserId, registrationId)
+	return subjects, err
+}
+
+func (h *ForwardHandler) admitSharedCandidate(ctx context.Context, actingUserId, registrationId string) (Candidate, workerservice.SharingSubjects, error) {
 	ctx = memqlengine.ContextWithFreshRead(ctx)
-	ownErr := h.verifyRegistration(ctx, actingUserId, registrationId)
+	own, ownErr := h.ownedRegistration(ctx, actingUserId, registrationId)
 	switch {
 	case ownErr == nil:
-		return workerservice.SharingSubjects{}, nil
+		return own, workerservice.SharingSubjects{}, nil
 	case errors.Is(ownErr, errRegistrationRevoked):
 		// Their own machine, revoked. The shared arm cannot rescue that, and
 		// saying "not shared with you" about somebody's own revoked machine
 		// would send them to the wrong repair.
-		return workerservice.SharingSubjects{}, ownErr
+		return Candidate{}, workerservice.SharingSubjects{}, ownErr
 	case errors.Is(ownErr, errNoFleetStore):
-		return workerservice.SharingSubjects{}, ownErr
+		return Candidate{}, workerservice.SharingSubjects{}, ownErr
 	}
 
 	shared, ok := h.store.(SharedFleetStore)
 	if !ok {
-		return workerservice.SharingSubjects{}, ownErr
+		return Candidate{}, workerservice.SharingSubjects{}, ownErr
 	}
 	machines, err := shared.SharedInferenceWorkers(ctx)
 	if err != nil {
-		return workerservice.SharingSubjects{}, err
+		return Candidate{}, workerservice.SharingSubjects{}, err
 	}
 	// The groups come from THIS replica's membership cache unless a test set a
 	// resolver: one read per person, reused until a membership or a group
@@ -386,14 +396,14 @@ func (h *ForwardHandler) admitSharedRegistration(ctx context.Context, actingUser
 			continue
 		}
 		if !m.RevokedAt.IsZero() {
-			return workerservice.SharingSubjects{}, errRegistrationRevoked
+			return Candidate{}, workerservice.SharingSubjects{}, errRegistrationRevoked
 		}
 		if !m.ServesPerson(person) {
-			return workerservice.SharingSubjects{}, errRegistrationNotShared
+			return Candidate{}, workerservice.SharingSubjects{}, errRegistrationNotShared
 		}
-		return m.Sharing().SubjectsFor(person), nil
+		return m, m.Sharing().SubjectsFor(person), nil
 	}
-	return workerservice.SharingSubjects{}, ownErr
+	return Candidate{}, workerservice.SharingSubjects{}, ownErr
 }
 
 // ownerOfSharedMachine confirms that the LIVE registry entry for a machine

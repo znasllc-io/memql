@@ -43,6 +43,10 @@ export interface MachineModel {
   structuredOutput: boolean;
   tools: boolean;
   embeddings: boolean;
+  vision: boolean;
+  audioIn: boolean;
+  audioOut: boolean;
+  imageGen: boolean;
   /** The machine's per-model concurrency ceiling; 0 means it declared none,
    *  which the load ordering reads as unlimited. */
   maxConcurrent: number;
@@ -72,6 +76,7 @@ function attributesFrom(value: string): Omit<MachineModel, "modelId"> {
     structuredOutput: false,
     tools: false,
     embeddings: false,
+    vision: false, audioIn: false, audioOut: false, imageGen: false,
     maxConcurrent: 0,
   };
   for (const part of value.split(",")) {
@@ -92,6 +97,10 @@ function attributesFrom(value: string): Omit<MachineModel, "modelId"> {
       case "embeddings":
         out.embeddings = advertised(raw);
         break;
+      case "vision": out.vision = advertised(raw); break;
+      case "audioin": out.audioIn = advertised(raw); break;
+      case "audioout": out.audioOut = advertised(raw); break;
+      case "imagegen": out.imageGen = advertised(raw); break;
       case "params":
         out.params = positiveInt(raw);
         break;
@@ -257,4 +266,16 @@ export function pullStepLabel(pull: ModelPull): string {
     return `${formatBytes(pull.completedBytes)} fetched in this step`;
   }
   return `${formatBytes(pull.completedBytes)} of ${formatBytes(pull.totalBytes)} in this step`;
+}
+
+export function modelPurposeLabel(model: MachineModel): string {
+  if (model.embeddings) return "Embeddings";
+  if (model.imageGen) return "Image generation";
+  if (model.audioIn) return "Transcription";
+  if (model.audioOut) return "Speech";
+  if (model.vision) return model.tools ? "Conversation, tools & vision" : "Conversation & vision";
+  return model.tools ? "Conversation & tools" : "Conversation";
+}
+export function canConverse(model: MachineModel): boolean {
+  return !model.embeddings && !model.imageGen && !model.audioIn && !model.audioOut;
 }

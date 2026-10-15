@@ -4351,6 +4351,26 @@ QueryClient.prototype.ladderPolicyCurrent = function (this: QueryClient, args: L
   return this.executeNamed("ladderPolicyCurrent", buildLadderPolicyCurrent(args), opts);
 };
 
+/** The latest completed research evidence. */
+// Bound concept: v1:models:catalogReview (machine-readable: BoundConcepts["latestModelCatalogReview"] in generated_concepts.ts).
+export interface LatestModelCatalogReviewArgs {
+}
+
+export function buildLatestModelCatalogReview(args: LatestModelCatalogReviewArgs): string {
+  void args;
+  return "query latestModelCatalogReview()";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    latestModelCatalogReview(args?: LatestModelCatalogReviewArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.latestModelCatalogReview = function (this: QueryClient, args: LatestModelCatalogReviewArgs = {} as LatestModelCatalogReviewArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("latestModelCatalogReview", buildLatestModelCatalogReview(args), opts);
+};
+
 /** The caller's learned procedures, newest first, on every rung -- retired included, because Nexus shows where each one stands and the ladder's sweeps walk them all, page by page. A learned procedure is a construct the lift wrote into the `procedure` target namespace; nothing authored is ever written there. */
 // Bound concept: v1:authoring:construct (machine-readable: BoundConcepts["learnedProceduresForOwner"] in generated_concepts.ts).
 export interface LearnedProceduresForOwnerArgs {
@@ -5270,6 +5290,26 @@ QueryClient.prototype.missingCapabilityByKindAndName = function (this: QueryClie
   return this.executeNamed("missingCapabilityByKindAndName", buildMissingCapabilityByKindAndName(args), opts);
 };
 
+/** The installation-wide research opt-in. */
+// Bound concept: v1:models:catalogResearchSettings (machine-readable: BoundConcepts["modelCatalogResearchSettings"] in generated_concepts.ts).
+export interface ModelCatalogResearchSettingsArgs {
+}
+
+export function buildModelCatalogResearchSettings(args: ModelCatalogResearchSettingsArgs): string {
+  void args;
+  return "query modelCatalogResearchSettings()";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    modelCatalogResearchSettings(args?: ModelCatalogResearchSettingsArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.modelCatalogResearchSettings = function (this: QueryClient, args: ModelCatalogResearchSettingsArgs = {} as ModelCatalogResearchSettingsArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("modelCatalogResearchSettings", buildModelCatalogResearchSettings(args), opts);
+};
+
 /** One model's evidence at one level for one week -- the row a fold reads before deciding whether it has already proposed, and the row a decline writes back to.
 THE THREE ARGUMENTS ARE THE KEY. A fold that read only by model would re-propose at every level on the same evidence, and one that read only by week would collapse two models into one row. */
 // Bound concept: v1:platform:modelEvidence (machine-readable: BoundConcepts["modelEvidenceForKey"] in generated_concepts.ts).
@@ -5349,7 +5389,7 @@ export interface ModelProfilesArgs {
   // Enum: text | reasoning | omni | vision | audioIn | audioOut | imageGen | videoGen | embeddings
   category?: string;
   /** Narrow to one runtime. */
-  // Enum: ollama | mlx | whispercpp | nemo | kokoro | mflux | comfyui
+  // Enum: ollama | mlx | whispercpp | nemo | kokoro | mflux | comfyui | openai-compatible | cloud
   runtime?: string;
   /** Narrow to entries whose declared floor is exactly this machine class. NOT "everything a machine of this class can run" -- that is a comparison across five values, and doing it here would make the answer depend on an ordering the caller cannot see. The Fleet surface holds the machine's class and filters. */
   // Enum: 16 | 24 | 32 | 64 | 128

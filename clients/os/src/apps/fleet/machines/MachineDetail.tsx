@@ -78,7 +78,7 @@ export function MachineDetail({
       {/* Below Apps, because the two answer the same shape of question about
           this machine -- what it can be asked to do -- and a person scanning
           for either reads them together. */}
-      {view === "all" || view === "models" ? <ModelsGroup machine={machine} inference={inference} standalone={view === "models"} /> : null}
+      {view === "all" || view === "models" ? <ModelsGroup key={machine.id} machine={machine} inference={inference} standalone={view === "models"} /> : null}
 
       {view === "all" || view === "activity" ? <CallHistory standalone={view === "activity"} workerId={machine.id} machineLabel={label} /> : null}
 

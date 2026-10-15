@@ -236,7 +236,7 @@ func TestStrictAutomationBoot_EmbeddedTreeIsClean(t *testing.T) {
 // Measured after integrating skill context and the evaluation runner (memql#6080).
 // 171 -> 173: agentWorkProgressRecovery and agentWorkContextRecovery; the
 // strict loader measured both recovery templates in PR #6091 CI.
-const shippedAutomationCount = 173
+const shippedAutomationCount = 175
 
 //
 // 56 -> 57 in epic memql#5168 (the per-account front door):

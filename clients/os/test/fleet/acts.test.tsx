@@ -501,8 +501,8 @@ const CASES: ActsCase[] = [
       { name: "Previous labels", count: 1 },
       { name: "Next labels", count: 1 },
       { name: "Remove tier=gold", count: 1 },
-      { name: `Model to pull onto ${MACHINE_LABEL}`, count: 1 },
-      { name: "Pull", count: 1 },
+      { name: `Model to pull onto ${MACHINE_LABEL}`, count: 0, note: "installation moved into an eligible catalog detail" },
+      { name: "Pull", count: 0 },
       { name: `Recent calls on ${MACHINE_LABEL}`, count: 1 },
       { name: "Remove this machine", count: 1, note: "revoke, then the uninstall line (D12)" },
       { name: "Copy the uninstall command", count: 0, note: "offered inside the confirm, not beside the opener" },
@@ -516,7 +516,7 @@ const CASES: ActsCase[] = [
       // Two of the four are ZERO, and the zeros are the assertions worth
       // having.
       {
-        name: "Probe this model",
+        name: "Measure performance",
         count: 1,
         note: "one per advertised model, and this fixture advertises one",
       },

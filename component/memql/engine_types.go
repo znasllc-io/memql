@@ -544,7 +544,9 @@ const (
 	// implementation -- a second one in the browser would drift, and the drift
 	// presents as a page offering a pull the act then refuses. See
 	// fleet_recommended_read.go.
-	BuiltinExecutorFleetRecommended = "fleetRecommended"
+	BuiltinExecutorFleetRecommended   = "fleetRecommended"
+	BuiltinExecutorFleetModelSetup    = "fleetModelSetup"
+	BuiltinExecutorFleetSetModelSetup = "fleetSetModelSetup"
 	// BuiltinExecutorFleetSharingLedger answers what a shared machine has done
 	// this week, for the person who lent it (epic memql#5146, D6). Counts and
 	// levels, never content -- the narrowing happens in the engine so the

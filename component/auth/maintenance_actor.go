@@ -124,6 +124,7 @@ var maintenanceAutomations = map[string]string{
 		"stranded, which is precisely the state it exists to end. It is also the ONE writer allowed to close a " +
 		"stranded row (abandonPackageDeployment), so a sweep that cannot see one is a permission granted to " +
 		"nobody",
+	"weeklyModelCatalogResearch": "reads the explicitly enabled owner-configured catalog research schedule and opens a bounded work run under that owner; it never changes machine selections or installs models",
 	"sweepWaitingWorkRuns": "the wait-and-abandon sweep over v1:work:run (epic memql#4966). It resumes " +
 		"runs whose timer wait is due and re-claims runs whose node died, across EVERY owner -- a person whose " +
 		"run is parked on a replica that has gone cannot resume it themselves, which is the whole reason the " +

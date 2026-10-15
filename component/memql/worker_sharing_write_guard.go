@@ -46,7 +46,7 @@ import (
 // to workerRegistrationConsentFields, and is not protected until then: there is
 // no annotation that marks a field server-written, and a field on another
 // concept needs a guard of its own, as the construct ladder has.
-var workerRegistrationConsentFields = []string{"sharing"}
+var workerRegistrationConsentFields = []string{"sharing", "modelSetup"}
 
 // validateWorkerConsentServerOnly refuses a write to a v1:worker:registration
 // that changes the owner's consent without internal origin. It also refuses
@@ -63,6 +63,9 @@ func validateWorkerConsentServerOnly(ctx context.Context, prior, final map[strin
 	}
 	for _, field := range workerRegistrationConsentFields {
 		if payloadFieldChanged(prior, final, field) {
+			if field == "modelSetup" {
+				return errWorkerConsentWrite(field, "the owner-selected setup, validated by fleetSetModelSetup")
+			}
 			return errWorkerConsentWrite(field,
 				"its owner's consent to lend the machine, which only fleetSetSharing writes, through the caller's own machines")
 		}

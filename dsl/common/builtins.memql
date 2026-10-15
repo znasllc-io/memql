@@ -1006,3 +1006,19 @@ builtin routingGeneratePolicyProposal { prompt string! data object! }
 @executor("routingGenerateRuleProposal")
 @args(profile="object")
 builtin routingGenerateRuleProposal { prompt string! data object! }
+
+@sdk
+@executor("fleetModelSetup")
+@description("Read the local catalog, capacity and saved model choices for one of your machines. Does not run or download a model.")
+builtin fleetModelSetup {
+  registrationId string!
+}
+
+@sdk
+@executor("fleetSetModelSetup")
+@description("Save model choices by purpose on your machine after checking installed capabilities and combined memory. Existing calls finish. Later calls use the saved choices, with a 32K context ceiling.")
+builtin fleetSetModelSetup {
+  registrationId string!
+  revision string!
+  choices object!
+}

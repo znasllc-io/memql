@@ -44,7 +44,7 @@ func TestFleetPullRecommendedPersistsEachModelOnce(t *testing.T) {
 	insert("v1:worker:registration", registration, map[string]any{
 		"ownerUserId": owner, "name": "Dedup machine", "connectedNodeId": "another-agent",
 		"lastSeenAt": time.Now().UTC().Format(time.RFC3339), "platformInfo": map[string]any{"os": "linux"},
-		"hardware": map[string]any{"memoryBytes": 32 << 30, "gpu": map[string]any{"backend": "cuda", "vramBytes": 24 << 30}, "runtimes": []any{map[string]any{"name": "ollama"}}},
+		"hardware": map[string]any{"diskFreeBytes": 100 << 30, "reportedAt": time.Now().UTC().Format(time.RFC3339Nano), "memoryBytes": 32 << 30, "gpu": map[string]any{"backend": "cuda", "vramBytes": 24 << 30}, "runtimes": []any{map[string]any{"name": "ollama"}}},
 	})
 	for _, profile := range []struct {
 		model, category string
@@ -56,7 +56,7 @@ func TestFleetPullRecommendedPersistsEachModelOnce(t *testing.T) {
 		insert(ModelProfileConcept, ModelProfileConcept+":"+profile.model, map[string]any{
 			"modelId": profile.model, "category": profile.category, "runtime": "ollama", "active": true,
 			"minMachineClass": "16", "recommendedFor": profile.levels, "offeredOn": []string{"linux"},
-			"params": 900_000_000_000, "contextWindow": 8192,
+			"sizeBytes": 1 << 30, "memoryNeedBytes": 2 << 30, "params": 900_000_000_000, "contextWindow": 8192,
 		})
 	}
 	actor := auth.ContextWithUserActor(ctx, owner)
@@ -69,6 +69,22 @@ func TestFleetPullRecommendedPersistsEachModelOnce(t *testing.T) {
 	for i, level := range []string{"fast", "strong", "reasoning", "embeddings"} {
 		require.Equal(t, level, set[i].Level)
 	}
+	// A sibling's newer disk report must replace the cached 100 GiB reading.
+	// Each artifact fits alone, but the combined set cannot consume the reserve.
+	setDisk := func(bytes int64) {
+		_, err := db.NewUpdate().Model((*memorynodes.MemoryNode)(nil)).
+			Set("payload = jsonb_set(payload, '{hardware,diskFreeBytes}', to_jsonb(?::bigint))", bytes).
+			Where("concept = ?", WorkerRegistrationConcept).Where("id = ?", registration).Exec(ctx)
+		require.NoError(t, err)
+	}
+	setDisk(13 << 29) // 6.5 GiB: two 1 GiB artifacts plus a 5 GiB reserve do not fit.
+	_, err = eng.evaluateFleetPullRecommendedExpression(actor, map[string]any{"registrationId": registration})
+	require.ErrorContains(t, err, "exceed free storage")
+	count, err := db.NewSelect().Model((*memorynodes.MemoryNode)(nil)).Where("concept = ?", ModelPullConcept).
+		Where("payload->>'workerId' IN (?, ?)", registration, prefix).Count(ctx)
+	require.NoError(t, err)
+	require.Zero(t, count, "a capacity refusal must not dispatch any downloads")
+	setDisk(100 << 30)
 	result, err := eng.evaluateFleetPullRecommendedExpression(actor, map[string]any{"registrationId": registration})
 	require.NoError(t, err)
 	require.Len(t, result, 1)
@@ -86,4 +102,6 @@ func TestFleetPullRecommendedPersistsEachModelOnce(t *testing.T) {
 		Where("payload->>'workerId' IN (?, ?)", registration, prefix).Scan(ctx)
 	require.NoError(t, err)
 	require.Len(t, stored, 2, "the claiming replica must see only two persisted dispatches")
+	_, err = eng.evaluateFleetPullRecommendedExpression(actor, map[string]any{"registrationId": registration})
+	require.ErrorContains(t, err, "current download", "another request cannot reserve the same disk while downloads are pending")
 }

@@ -304,19 +304,12 @@ func (h *ForwardHandler) HandleForwardedModelCall(
 	// them would make a retry on one side collide with a live call on the
 	// other.
 	localId := id.NewShortId()
-	subjects, err := h.admitSharedRegistration(callCtx, owner, registrationId)
+	subjects, releaseSetup, err := h.admitModelSetup(callCtx, w, owner, registrationId, start)
 	if err != nil {
 		h.sendModelRefusal(send, requestId, "registration_refused", err.Error())
 		return
 	}
-	// Admission is checked AFTER the slot wait, once, on this receiver.
-	// Its live stream must still belong to the owner of the checked row.
-	if w.OwnerUserId != "" && !sameSubject(w.OwnerUserId, owner) {
-		if err := h.ownerOfSharedMachine(callCtx, registrationId, w.OwnerUserId); err != nil {
-			h.sendModelRefusal(send, requestId, "owner_mismatch", err.Error())
-			return
-		}
-	}
+	defer releaseSetup()
 	localRequest := modelCallRequestFromProto(localId, start, timeout)
 	localRequest.SharingSubjects = subjects
 	handle, err := w.StartModelCall(callCtx, localRequest)

@@ -171,6 +171,7 @@ func Project(machines []Candidate, now time.Time) []memqlengine.FleetModel {
 			}
 			entry.Machines = append(entry.Machines, memqlengine.FleetMachine{
 				RegistrationId: m.RegistrationId,
+				ModelSetup:     m.ModelSetup,
 				Name:           m.Name,
 				DisplayName:    m.DisplayName,
 				OwnerUserId:    m.OwnerUserId,

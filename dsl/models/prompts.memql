@@ -1,0 +1,8 @@
+/// Review primary model sources using a bounded local-model research harness.
+@level("strong")
+@templateFile("prompts/modelCatalogResearch.tmpl")
+prompt modelCatalogResearch {
+  catalog []object!
+  method string!
+  today string!
+}

@@ -36,6 +36,7 @@ shape invocation workerInvocationFull {
 /// online/offline state.
 @row
 shape registration workerRegistrationFull {
+  modelSetup
   row.id
   ownerUserId
   identityId

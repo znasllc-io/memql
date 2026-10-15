@@ -234,47 +234,11 @@ async function mountModels(opts: { recommended?: Row[]; measurements?: Row[] } =
   return connection;
 }
 
-describe("the Models group's recommended set", () => {
-  it("counts unique downloads while preserving each recommendation level", async () => {
-    const chat = { ...RECOMMENDED.entries[0], modelId: "qwen3.8:27b" };
-    await mountModels({ recommended: [{
-      ...RECOMMENDED,
-      entries: [
-        ...["fast", "strong", "reasoning"].map((level) => ({ ...chat, level })),
-        { ...chat, modelId: "qwen3-embedding:0.6b", level: "embeddings", category: "embedding" },
-      ],
-    } as unknown as Row] });
-    expect(screen.getByText(/2 models, pulled one after another/)).toBeTruthy();
-    expect(screen.getAllByText("qwen3.8:27b")).toHaveLength(3);
-    expect(screen.getByText("qwen3-embedding:0.6b")).toBeTruthy();
-  });
-
-  it("shows the set with one act, and keeps a blocked entry with its reason", async () => {
-    // A BLOCKED ENTRY STAYS ON SCREEN. Dropping it answers "why can my machine
-    // not do voice" with silence, which is indistinguishable from a catalog
-    // that never had one.
-    await mountModels({ recommended: [RECOMMENDED as unknown as Row] });
-    expect(screen.getByRole("button", { name: "Pull recommended set" })).toBeTruthy();
-    expect(screen.getByText(/Needs the Kokoro runtime/)).toBeTruthy();
-    expect(screen.getByText(/Installing the Kokoro runtime/)).toBeTruthy();
-  });
-
-  it("shows nothing at all when the machine has not reported its hardware", async () => {
-    // Not an empty set with every profile blocked -- NOTHING. The Hardware
-    // group above already says the cockpit has not spoken, and rule 7 is that
-    // a thing is said once.
-    await mountModels({
-      recommended: [{ ...RECOMMENDED, reported: false, entries: [] } as unknown as Row],
-    });
-    expect(screen.queryByRole("button", { name: "Pull recommended set" })).toBeNull();
-    expect(screen.queryByText(/the catalog recommends/)).toBeNull();
-  });
-
-  it("counts only the pullable half in the act's sentence", async () => {
-    // The button pulls what it can and reports the rest; saying "2 models"
-    // when one of them is blocked would promise work the act will not do.
-    await mountModels({ recommended: [RECOMMENDED as unknown as Row] });
-    expect(screen.getByText(/One model, pulled in the background/)).toBeTruthy();
+describe("the Models group's catalog boundary",()=>{
+  it("does not offer the old batch download act beside model details",async()=>{
+    const connection=await mountModels({recommended:[RECOMMENDED as unknown as Row]});
+    expect(screen.queryByRole("button",{name:"Pull recommended set"})).toBeNull();
+    expect(connection.query.fleetPullRecommended).not.toHaveBeenCalled();
   });
 });
 
@@ -340,6 +304,6 @@ describe("the Models group's measured figures", () => {
 
   it("offers Probe this model to the owner", async () => {
     await mountModels({ recommended: [RECOMMENDED as unknown as Row] });
-    expect(screen.getByRole("button", { name: "Probe this model" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Measure performance" })).toBeTruthy();
   });
 });

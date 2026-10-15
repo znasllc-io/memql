@@ -27,7 +27,7 @@ mutation modelProfile createModelProfile {
     modelProfileId   string!
     modelId          string!
     category         enum("text", "reasoning", "omni", "vision", "audioIn", "audioOut", "imageGen", "videoGen", "embeddings")!
-    runtime          enum("ollama", "mlx", "whispercpp", "nemo", "kokoro", "mflux", "comfyui")!
+    runtime          enum("ollama", "mlx", "whispercpp", "nemo", "kokoro", "mflux", "comfyui", "openai-compatible", "cloud")!
     minMachineClass  enum("16", "24", "32", "64", "128")!
     family           string
     params           int
@@ -38,6 +38,7 @@ mutation modelProfile createModelProfile {
     flags            []string
     dimensions       int
     license          string
+    reviewedAt       datetime
     source           string
     recommendedFor   []string
     offeredOn        []string
@@ -48,7 +49,7 @@ mutation modelProfile createModelProfile {
     unavailable      bool
   }
   insert {
-    accept { modelId, category, runtime, minMachineClass, family, params, quant, sizeBytes, memoryNeedBytes, contextWindow, flags, dimensions, license, source, recommendedFor, offeredOn, notes, measured }
+    accept { modelId, category, runtime, minMachineClass, family, params, quant, sizeBytes, memoryNeedBytes, contextWindow, flags, dimensions, license, source, reviewedAt, recommendedFor, offeredOn, notes, measured }
     stamp {
       id:          args.modelProfileId
       active:      args.active ?? true
@@ -72,7 +73,7 @@ mutation modelProfile modelProfileAdd {
     profileId        string!
     modelId          string!  @maxLength(200)
     category         enum("text", "reasoning", "omni", "vision", "audioIn", "audioOut", "imageGen", "videoGen", "embeddings")!
-    runtime          enum("ollama", "mlx", "whispercpp", "nemo", "kokoro", "mflux", "comfyui")!
+    runtime          enum("ollama", "mlx", "whispercpp", "nemo", "kokoro", "mflux", "comfyui", "openai-compatible", "cloud")!
     minMachineClass  enum("16", "24", "32", "64", "128")!
     family           string   @maxLength(100)
     params           int      @minimum(0)
@@ -116,5 +117,44 @@ mutation modelProfile modelProfileRemove {
   update {
     id:      args.profileId
     active:  false
+  }
+}
+
+/// Explicitly choose who owns future research. Disabled is the default.
+@actor
+@requiresRank("owner")
+mutation catalogResearchSettings configureModelCatalogResearch {
+  args { enabled bool! }
+  update {
+    id: "weekly"
+    enabled: args.enabled
+    ownerUserId: actor.userId
+  }
+}
+
+/// Store one bounded research report without changing operational profiles.
+/// actor.userId scoping cannot validate its sources or enforce the harness budget; only the bounded research turn supplies this evidence.
+@serverOnly
+mutation catalogReview recordModelCatalogReview {
+  args { runId string! summary string! findings []object! }
+  insert {
+    id: args.runId
+    runId: args.runId
+    reviewedAt: now
+    summary: args.summary
+    findings: args.findings
+  }
+}
+
+/// Seed the disabled schedule once; preserve the owner's later choice.
+/// No actor.userId exists during seed materialization; public configuration uses the owner-ranked mutation instead.
+@serverOnly
+@createOnly("enabled", "ownerUserId")
+mutation catalogResearchSettings createCatalogResearchSettings {
+  args { catalogResearchSettingsId string! enabled bool ownerUserId string }
+  insert {
+    id: args.catalogResearchSettingsId
+    enabled: args.enabled ?? false
+    ownerUserId: args.ownerUserId ?? ""
   }
 }

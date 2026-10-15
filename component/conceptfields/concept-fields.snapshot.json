@@ -3652,6 +3652,30 @@
       ]
     },
     {
+      "concept": "v1:models:catalogResearchSettings",
+      "file": "models/concepts.memql",
+      "fields": [
+        "enabled",
+        "ownerUserId"
+      ]
+    },
+    {
+      "concept": "v1:models:catalogReview",
+      "file": "models/concepts.memql",
+      "fields": [
+        "findings",
+        "reviewedAt",
+        "runId",
+        "summary"
+      ],
+      "required": [
+        "findings",
+        "reviewedAt",
+        "runId",
+        "summary"
+      ]
+    },
+    {
       "concept": "v1:models:modelProfile",
       "file": "models/concepts.memql",
       "fields": [
@@ -3672,6 +3696,7 @@
         "params",
         "quant",
         "recommendedFor",
+        "reviewedAt",
         "runtime",
         "sizeBytes",
         "source",
@@ -3703,12 +3728,14 @@
           "64"
         ],
         "runtime": [
+          "cloud",
           "comfyui",
           "kokoro",
           "mflux",
           "mlx",
           "nemo",
           "ollama",
+          "openai-compatible",
           "whispercpp"
         ]
       }
@@ -9105,6 +9132,7 @@
         "lastConnectedFromIP",
         "lastSeenAt",
         "lastSelectedAt",
+        "modelSetup",
         "name",
         "operatorLabels",
         "ownerUserId",

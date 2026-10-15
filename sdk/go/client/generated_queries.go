@@ -4402,6 +4402,23 @@ func LadderPolicyCurrentBuild(args LadderPolicyCurrentArgs) string {
 	return "query ladderPolicyCurrent()"
 }
 
+// LatestModelCatalogReview -- The latest completed research evidence.
+//
+// Bound concept: v1:models:catalogReview (machine-readable: BoundConcepts["latestModelCatalogReview"] in generated_concepts.go).
+type LatestModelCatalogReviewArgs struct {
+}
+
+// LatestModelCatalogReview calls the engine query latestModelCatalogReview.
+func (qc *QueryClient) LatestModelCatalogReview(ctx context.Context, args LatestModelCatalogReviewArgs) (*Result, error) {
+	call := LatestModelCatalogReviewBuild(args)
+	return qc.executeNamed(ctx, "latestModelCatalogReview", call)
+}
+
+func LatestModelCatalogReviewBuild(args LatestModelCatalogReviewArgs) string {
+	_ = args
+	return "query latestModelCatalogReview()"
+}
+
 // LearnedProceduresForOwner -- The caller's learned procedures, newest first, on every rung -- retired included, because Nexus shows where each one stands and the ladder's sweeps walk them all, page by page. A learned procedure is a construct the lift wrote into the `procedure` target namespace; nothing authored is ever written there.
 //
 // Bound concept: v1:authoring:construct (machine-readable: BoundConcepts["learnedProceduresForOwner"] in generated_concepts.go).
@@ -5325,6 +5342,23 @@ func MissingCapabilityByKindAndNameBuild(args MissingCapabilityByKindAndNameArgs
 	return b.String()
 }
 
+// ModelCatalogResearchSettings -- The installation-wide research opt-in.
+//
+// Bound concept: v1:models:catalogResearchSettings (machine-readable: BoundConcepts["modelCatalogResearchSettings"] in generated_concepts.go).
+type ModelCatalogResearchSettingsArgs struct {
+}
+
+// ModelCatalogResearchSettings calls the engine query modelCatalogResearchSettings.
+func (qc *QueryClient) ModelCatalogResearchSettings(ctx context.Context, args ModelCatalogResearchSettingsArgs) (*Result, error) {
+	call := ModelCatalogResearchSettingsBuild(args)
+	return qc.executeNamed(ctx, "modelCatalogResearchSettings", call)
+}
+
+func ModelCatalogResearchSettingsBuild(args ModelCatalogResearchSettingsArgs) string {
+	_ = args
+	return "query modelCatalogResearchSettings()"
+}
+
 // ModelEvidenceForKey -- One model's evidence at one level for one week -- the row a fold reads before deciding whether it has already proposed, and the row a decline writes back to.
 // THE THREE ARGUMENTS ARE THE KEY. A fold that read only by model would re-propose at every level on the same evidence, and one that read only by week would collapse two models into one row.
 //
@@ -5413,7 +5447,7 @@ type ModelProfilesArgs struct {
 	// Enum: text | reasoning | omni | vision | audioIn | audioOut | imageGen | videoGen | embeddings
 	Category string
 	// Narrow to one runtime.
-	// Enum: ollama | mlx | whispercpp | nemo | kokoro | mflux | comfyui
+	// Enum: ollama | mlx | whispercpp | nemo | kokoro | mflux | comfyui | openai-compatible | cloud
 	Runtime string
 	// Narrow to entries whose declared floor is exactly this machine class. NOT "everything a machine of this class can run" -- that is a comparison across five values, and doing it here would make the answer depend on an ordering the caller cannot see. The Fleet surface holds the machine's class and filters.
 	// Enum: 16 | 24 | 32 | 64 | 128

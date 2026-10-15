@@ -1,0 +1,25 @@
+.fleet-models-capacity { display: flex; flex-wrap: wrap; gap: 24px 52px; margin-block: 4px 16px; }
+.fleet-models-capacity > div { display: flex; flex-direction: column; gap: 5px; }
+.fleet-models-capacity strong { font-size: var(--os-text-xl); font-weight: 500; font-variant-numeric: tabular-nums; }
+.fleet-models-capacity span { color: var(--os-muted); font-size: var(--os-text-sm); }
+.fleet-models-capacity-track { display: flex; gap: 3px; height: 7px; border-radius: 4px; background: var(--os-line); overflow: hidden; }
+.fleet-models-capacity-track > span { flex-shrink: 1; min-width: 2px; background: var(--os-accent); border-radius: 3px; }
+.fleet-models-capacity-track > span:nth-child(even) { opacity: .6; }
+.fleet-models-capacity-track[data-over="true"] > span { background: var(--os-warn); }
+.fleet-models-setup-title, .fleet-models-heading, .fleet-models-catalog-intro { display: flex; align-items: center; gap: 16px; justify-content: space-between; }
+.fleet-models-heading { justify-content: flex-start; margin-bottom: 24px; flex-wrap: wrap; }
+.fleet-models-heading .os-subhead { margin: 0; overflow-wrap: anywhere; }
+.fleet-models-heading .os-refine { margin-left: auto; }
+.fleet-models-choices { border: 0; padding: 0; margin: 10px 0 0; min-width: 0; }
+.fleet-models-choice { display: grid; grid-template-columns: 160px minmax(0,1fr); gap: 24px; align-items: center; min-height: 44px; font-size: var(--os-text-sm); }
+.fleet-models-choice > span:first-child { color: var(--os-muted); }
+.fleet-models-choice > span:last-child { overflow-wrap: anywhere; padding-inline: 10px; }
+.fleet-models-catalog-intro strong { font-size: var(--os-text-sm); font-weight: 500; }
+.fleet-models-catalog-intro small { display: block; color: var(--os-muted); margin-top: 5px; font-size: var(--os-text-xs); }
+.fleet-models .os-card-track .fleet-equipment-slot { border-color: var(--os-line); }
+.fleet-models .os-button { gap: 7px; }
+@container machine-details (max-width: 560px) {
+  .fleet-models-choice { grid-template-columns: 1fr; gap: 6px; padding-block: 8px; }
+  .fleet-models-choice > span:last-child { padding-inline: 0; }
+  .fleet-models-catalog-intro { align-items: flex-start; flex-direction: column; }
+}
