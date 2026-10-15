@@ -27,6 +27,29 @@ func TestModelSetupCapacityAndCapabilities(t *testing.T) {
 	require.ErrorContains(t, err, "not installed")
 }
 
+func TestModelSetupCombinesMultimodalProfilesWithoutDuplicatingCapacity(t *testing.T) {
+	profiles := []CatalogProfile{
+		{ModelId: "omni", Category: "audioIn", Runtime: "ollama", MemoryNeedBytes: 8 << 30, Flags: []string{"audioIn"}, OfferedOn: []string{"macos", "linux"}},
+		{ModelId: "omni", Category: "text", Runtime: "ollama", MemoryNeedBytes: 10 << 30, Flags: []string{"vision", "tools"}, OfferedOn: []string{"macos"}},
+	}
+	merged := mergeSetupProfiles(profiles)
+	require.Len(t, merged, 1)
+	require.ElementsMatch(t, []string{"conversation", "tools", "vision", "audioIn"}, profilePurposes(merged[0]))
+	require.Equal(t, int64(10<<30), merged[0].MemoryNeedBytes)
+	require.Equal(t, []string{"macos"}, merged[0].OfferedOn)
+	require.Equal(t, []string{"audioIn"}, profiles[0].Flags, "normalization must not mutate the shared catalog")
+	h := MachineHardware{MemoryBytes: 64 << 30, Gpu: MachineGpu{Backend: GpuBackendMetal}, Runtimes: []MachineRuntime{{Name: "ollama"}}}
+	used, err := validateModelChoices(map[string]string{"conversation": "omni", "audioIn": "omni"}, merged, h, "darwin", map[string]any{"model:omni": "audioin=1"})
+	// A runtime advertising only transcription cannot claim conversation just
+	// because the model card lists it. Verify the catalog union independently.
+	require.Error(t, err)
+	used, err = validateModelChoices(map[string]string{"conversation": "omni", "tools": "omni", "audioIn": "omni"}, merged, h, "darwin", map[string]any{"model:omni": "tools=1,audioin=1"})
+	require.NoError(t, err)
+	require.Equal(t, uint64(10<<30), used)
+	profiles[1].Runtime = "mlx"
+	require.Zero(t, mergeSetupProfiles(profiles)[0].MemoryNeedBytes, "conflicting runtime profiles require verification")
+}
+
 func TestModelSetupFitUnknownDiscreteAndLargeServers(t *testing.T) {
 	p := CatalogProfile{ModelId: "large", Runtime: "ollama", MemoryNeedBytes: 200 << 30}
 	h := MachineHardware{MemoryBytes: 512 << 30, Gpu: MachineGpu{Backend: GpuBackendNone}, Runtimes: []MachineRuntime{{Name: "ollama"}}}

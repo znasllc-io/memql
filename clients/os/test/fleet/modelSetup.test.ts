@@ -24,4 +24,9 @@ describe("machine model setup", () => {
     expect(safeModelSource("javascript:alert(1)")).toBeUndefined();
     expect(safeModelSource("https://ollama.com/library/model")).toBe("https://ollama.com/library/model");
   });
+  it("keeps conversation available on a model that also supports audio", () => {
+    const [omni] = machineModelsFrom({"model:omni":"vision=1,tools=1,audioin=1,audioout=1"});
+    expect(canConverse(omni!)).toBe(true);
+    expect(modelPurposeLabel(omni!)).toBe("Conversation, tools & vision");
+  });
 });

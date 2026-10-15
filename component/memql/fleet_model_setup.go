@@ -81,6 +81,63 @@ func profilePurposes(p CatalogProfile) []string {
 	return out
 }
 
+// The curated catalog can describe one runtime ID under several categories.
+// A machine installs that artifact once. Combine its purposes, retaining the
+// larger capacity allowance and refusing incompatible runtime declarations.
+func mergeSetupProfiles(catalog []CatalogProfile) []CatalogProfile {
+	positions := map[string]int{}
+	ambiguous := map[string]bool{}
+	var result []CatalogProfile
+	union := func(a, b []string) []string {
+		out := append([]string(nil), a...)
+		for _, value := range b {
+			if !slices.Contains(out, value) {
+				out = append(out, value)
+			}
+		}
+		return out
+	}
+	for _, p := range catalog {
+		index, exists := positions[p.ModelId]
+		if !exists {
+			positions[p.ModelId] = len(result)
+			result = append(result, p)
+			continue
+		}
+		merged := &result[index]
+		if merged.Runtime != p.Runtime {
+			ambiguous[p.ModelId] = true
+		}
+		merged.Flags = union(union(merged.Flags, profilePurposes(*merged)), profilePurposes(p))
+		if slices.Contains(profilePurposes(p), "conversation") {
+			merged.Category = p.Category
+		}
+		merged.RecommendedFor = union(merged.RecommendedFor, p.RecommendedFor)
+		merged.MemoryNeedBytes = max(merged.MemoryNeedBytes, p.MemoryNeedBytes)
+		merged.SizeBytes = max(merged.SizeBytes, p.SizeBytes)
+		if len(merged.OfferedOn) == 0 {
+			merged.OfferedOn = append([]string(nil), p.OfferedOn...)
+		} else if len(p.OfferedOn) > 0 {
+			var common []string
+			for _, platform := range merged.OfferedOn {
+				if slices.Contains(p.OfferedOn, platform) {
+					common = append(common, platform)
+				}
+			}
+			merged.OfferedOn = common
+			if len(common) == 0 {
+				ambiguous[p.ModelId] = true
+			}
+		}
+	}
+	for index := range result {
+		if ambiguous[result[index].ModelId] {
+			result[index].MemoryNeedBytes = 0
+		}
+	}
+	return result
+}
+
 // Fit uses bytes rather than the old class ladder, including machines larger
 // than its top rung. Unknown residency is never presented as a confirmed fit.
 func modelFit(p CatalogProfile, h MachineHardware, platform string) string {
@@ -119,7 +176,7 @@ func advertisedPurpose(labels map[string]any, model, purpose string) bool {
 	}
 	yes := func(k string) bool { return attrs[k] == "1" || attrs[k] == "true" }
 	if purpose == "conversation" {
-		return !yes("embeddings") && !yes("imagegen") && !yes("audioin") && !yes("audioout")
+		return !yes("embeddings") && (yes("structured") || yes("tools") || yes("vision") || (!yes("imagegen") && !yes("audioin") && !yes("audioout")))
 	}
 	return yes(strings.ToLower(purpose))
 }
@@ -202,6 +259,7 @@ func (e *MemQLEngine) evaluateFleetModelSetup(ctx context.Context, args map[stri
 	if err != nil {
 		return nil, err
 	}
+	catalog = mergeSetupProfiles(catalog)
 	hw, platform, labels := setupHardware(row)
 	setup := ModelSetupFromRow(row["modelSetup"])
 	entries := make([]any, 0, len(catalog))
@@ -326,6 +384,7 @@ func (e *MemQLEngine) evaluateFleetSetModelSetup(ctx context.Context, args map[s
 	if err != nil {
 		return nil, err
 	}
+	catalog = mergeSetupProfiles(catalog)
 	hw, platform, labels := setupHardware(row)
 	if _, err := validateModelChoices(setup.Choices, catalog, hw, platform, labels); err != nil {
 		return nil, err
@@ -377,7 +436,7 @@ func (e *MemQLEngine) validateModelDownload(ctx context.Context, registration, m
 	if err != nil {
 		return err
 	}
-	for _, p := range catalog {
+	for _, p := range mergeSetupProfiles(catalog) {
 		if p.ModelId != model {
 			continue
 		}

@@ -147,7 +147,7 @@ func (e *MemQLEngine) evaluateFleetPullRecommendedExpression(ctx context.Context
 	}
 	remaining := hardware.DiskFreeBytes - modelDiskReserve
 	counted := map[string]bool{}
-	for _, p := range catalog {
+	for _, p := range mergeSetupProfiles(catalog) {
 		if plannedModels[p.ModelId] && !counted[p.ModelId] {
 			if p.SizeBytes <= 0 || uint64(p.SizeBytes) > remaining {
 				return nil, fmt.Errorf("The recommended downloads exceed free storage")
