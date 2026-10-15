@@ -106,7 +106,7 @@ type trainingCandidate struct {
 
 // Publication and current source ownership precede top-K, so other owners'
 // nearer hits cannot crowd this caller out. Every table folds latest first.
-// staged-data: GATE -- handleOwnedTrainingLessons withholds all four source concepts before these reads.
+// staged-data: GATE -- handleOwnedTrainingLessons withholds all source concepts before these reads.
 const ownedTrainingSourceSQL = `WITH chunks AS (
  SELECT DISTINCT ON(id) id,payload,"createdAt" FROM "MemoryNodes"
  WHERE concept='v1:knowledge:documentChunk' ORDER BY id,"createdAt" DESC
@@ -134,6 +134,7 @@ WHERE k.payload->>'source'='fileUpload' AND k.payload->>'validationStatus'='vali
 // Manual coaching is an owned Library source backed by immutable Work events.
 // Fold the complete history before testing availability: rejection/retirement
 // cannot reveal an older enabled revision.
+// staged-data: GATE -- handleOwnedTrainingLessons withholds Work observations before this current-head read.
 const manualTrainingSourceSQL = `
 UNION ALL SELECT m.id,m.payload,m."createdAt",'', '', '{}'::jsonb, '{}'::jsonb
 FROM (
