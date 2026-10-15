@@ -73,7 +73,7 @@ can run.
 | Cache access mode | `ReadWriteOnce` | `ReadWriteMany` | `ReadWriteMany` |
 | Cache size | 20Gi | 100Gi | 50Gi |
 | Cache marked `binds-on-first-use` | yes | no | no |
-| Steps at once | 6 | 2 | 1 |
+| Steps at once | 2 | 2 | 1 |
 | Container limit | 2 CPU / 4Gi | 2 CPU / 4Gi | 2 CPU / 4Gi |
 | Container request | 250m / 512Mi | 250m / 512Mi | 250m / 512Mi |
 | Container disk limit / request (`ephemeral-storage`) | 20Gi / 1Gi | 8Gi / 1Gi | 8Gi / 1Gi |
@@ -143,9 +143,9 @@ can run.
   move a volume. The unset setting retains unconstrained Linux placement.
   Locally, `make up` creates the pool's node (`k3d-<cluster>-build-0`, capped
   at two thirds of the Docker host by default) and the local overlay permits
-  six Jobs at once on it. All k3d nodes share the Docker host's resources;
-  adding nodes does not add physical capacity, which is why the build node is
-  capped rather than trusted. This setting
+  two Jobs at once on it. All k3d nodes share the Docker host's resources;
+  CPU and memory caps do not isolate disk I/O. Raising the Job ceiling requires
+  cold-cache storage measurements alongside compute measurements. This setting
   neither provisions a node pool nor proves every node's network enforcement.
 - **The limits are a `LimitRange` default**, so the runner sets no resources on
   a step and this is the one place a step's size is decided. It covers every

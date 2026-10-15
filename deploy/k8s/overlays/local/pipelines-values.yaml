@@ -11,13 +11,14 @@
 # THE CEILING AND THE LIMITS are this overlay's decision. Steps run on the
 # dedicated build node `make up` creates (scripts/k3d/up.sh,
 # ensure_build_node), capped at the CPUs and memory it was given -- 16 CPUs
-# and 40 GB on the workstation the 2026-10-11 design record sizes -- so six
+# and 40 GB on the workstation the 2026-10-11 design record sizes. Two
 # steps may run at once across all workbench replicas, each container
 # reserving 250m / 512Mi / 1 GiB of disk and capped at two CPUs / 4 GiB /
 # 20 GiB of disk -- the disk limit restated as the workspace's, in the
-# ConfigMap after the limits. The node's own caps, not this count, keep a
-# burst off the serving node; the count is tuned from the peaks phase 2 of
-# that record measures.
+# ConfigMap after the limits. CPU and memory caps do not isolate the shared
+# physical disk: six cold builds stalled etcd and restarted the serving
+# cluster in the October 15 rehearsal (#6018). Bound concurrent writers as
+# well as compute; increasing this count needs cold-cache storage evidence.
 apiVersion: v1
 kind: ResourceQuota
 metadata:
@@ -25,7 +26,7 @@ metadata:
   namespace: memql-pipelines
 spec:
   hard:
-    count/jobs.batch: "6"
+    count/jobs.batch: "2"
 ---
 # `limits` is replaced whole, not merged, so the item is restated in full.
 apiVersion: v1

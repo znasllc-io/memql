@@ -140,7 +140,7 @@ var pipelinesSizing = map[string]struct {
 }{
 	"cloud":       {ceiling: "2", limitCPU: "2", limitMemory: "4Gi", requestCPU: "250m", requestMemory: "512Mi", limitDisk: "8Gi", requestDisk: "1Gi"},
 	"cloud-entry": {ceiling: "1", limitCPU: "2", limitMemory: "4Gi", requestCPU: "250m", requestMemory: "512Mi", limitDisk: "8Gi", requestDisk: "1Gi"},
-	"local":       {ceiling: "6", limitCPU: "2", limitMemory: "4Gi", requestCPU: "250m", requestMemory: "512Mi", limitDisk: "20Gi", requestDisk: "1Gi"},
+	"local":       {ceiling: "2", limitCPU: "2", limitMemory: "4Gi", requestCPU: "250m", requestMemory: "512Mi", limitDisk: "20Gi", requestDisk: "1Gi"},
 }
 
 // The local overlay pins every step to the build node `make up` creates

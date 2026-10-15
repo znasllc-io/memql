@@ -209,9 +209,14 @@ environment repaves from scratch. It is idempotent and honors the same
 pipeline steps only: it is labelled and tainted
 `memql.io/pipeline-pool=builds`, so no serving pod lands on it, and the local
 overlay pins every step Job and isolation probe to that pool. Its container is
-capped, so a burst of steps cannot reach the serving node or the rest of the
-machine: two thirds of the Docker host's CPUs and memory by default (at least
+capped at two thirds of the Docker host's CPUs and memory by default (at least
 2 CPUs and 4g), or what you pass.
+
+These caps do not isolate disk I/O: all k3d nodes still share the Docker host's
+storage. The local overlay allows two pipeline Jobs at once to limit concurrent
+writes. Before raising that ceiling, verify cold-cache builds while monitoring
+the serving cluster's storage latency and node restarts; warm-cache passes alone
+do not establish that the host can sustain the larger workload.
 
 ```bash
 make up BUILD_NODE_CPUS=16 BUILD_NODE_MEMORY=40g   # explicit caps

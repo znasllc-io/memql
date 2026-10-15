@@ -562,7 +562,8 @@ The runner accepts an operator-selected `MEMQL_PIPELINES_NODE_POOL`, with an
 exact label and `NoSchedule` toleration shared by step Jobs and isolation
 probes. Repository configuration cannot add tolerations or choose arbitrary
 node selectors. The local overlay then permitted one Job across all Workbench
-replicas; it permits six since #6013. Invalid placement refuses before creating
+replicas; #6013 raised it to six, then the October 15 cold-cache rehearsal
+exposed shared-disk stalls and #6018 lowered it to two. Invalid placement refuses before creating
 external resources.
 
 A live test on local ARM64 K3s v1.32.13 checked out exact main commit

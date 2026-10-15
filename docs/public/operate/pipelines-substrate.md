@@ -285,7 +285,7 @@ multiplies with its services.
 
 | Overlay value | `local` | `cloud` | `cloud-entry` |
 |---|---|---|---|
-| Steps at once | 6 | 2 | 1 |
+| Steps at once | 2 | 2 | 1 |
 | Each container's request | 250m CPU, 512Mi, 1Gi of disk | 250m CPU, 512Mi, 1Gi of disk | 250m CPU, 512Mi, 1Gi of disk |
 | Each container's limit | 2 CPU, 4Gi, 20Gi of disk | 2 CPU, 4Gi, 8Gi of disk | 2 CPU, 4Gi, 8Gi of disk |
 | The workspace's size limit | 20Gi | 8Gi | 8Gi |
@@ -305,8 +305,10 @@ Provision the nodes before enabling this setting. The local overlay sets
 ([The pipeline build node](reproduce-the-cloud-locally.md#the-pipeline-build-node)).
 An existing local-path cache remains bound to its original node; changing
 placement does not migrate it. All local k3d nodes share one Docker VM's CPU,
-memory and disk. The local six-Job ceiling applies across Workbench replicas;
-additional virtual nodes do not increase physical capacity. An isolation probe
+memory and disk. The local two-Job ceiling applies across Workbench replicas;
+CPU and memory caps do not isolate disk I/O, and additional virtual nodes do
+not increase physical capacity. Raising concurrency requires cold-cache storage
+measurements as well as CPU and memory measurements. An isolation probe
 on a selected pool does not establish enforcement on every node in that pool.
 
 **Disk** is ephemeral storage. A container's own files outside any volume, and
