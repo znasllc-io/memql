@@ -148,8 +148,11 @@ introduced.
 
 Results include `path`, `content`, `size` (returned source bytes), `fileSize`,
 `offsetBytes`, `nextOffsetBytes`, `scannedBytes`, `modTime`, and the SHA-256 of
-returned source bytes. `complete`/`truncated` describe coverage of the requested
-range or search, not the entire file. `changedDuringRead` checks size and mtime
+returned source bytes. For prefix/offset reads, `complete` means reaching EOF;
+for line ranges, it means covering the requested lines or reaching EOF; for
+search, it means reaching EOF without withholding matches. It never establishes
+coverage before an offset or before the requested lines. `truncated` is the
+inverse of `complete`. `changedDuringRead` checks size and mtime
 on the same opened descriptor before and after the read; a detected change
 makes coverage incomplete. This is not a concurrent snapshot guarantee.
 
