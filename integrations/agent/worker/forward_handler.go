@@ -43,17 +43,20 @@ import (
 
 	"github.com/znasllc-io/memql/component/auth"
 	memqlv1 "github.com/znasllc-io/memql/component/grpc/gen"
+	memqlengine "github.com/znasllc-io/memql/component/memql"
 	"github.com/znasllc-io/memql/component/node"
 	nodev1 "github.com/znasllc-io/memql/component/node/gen"
 	workerservice "github.com/znasllc-io/memql/component/worker"
+	permission "github.com/znasllc-io/memql/core/computerpermission"
 	"github.com/znasllc-io/memql/core/id"
 )
 
 // ForwardHandler serves inbound WorkerForwardRequest envelopes.
 type ForwardHandler struct {
-	registry *workerservice.Registry
-	store    FleetStore
-	logger   *slog.Logger
+	registry    *workerservice.Registry
+	store       FleetStore
+	logger      *slog.Logger
+	permissions permission.Authority
 
 	mu       sync.Mutex
 	inflight map[string]context.CancelFunc
@@ -183,7 +186,7 @@ func (h *ForwardHandler) HandleForwardedRequest(
 			"this replica no longer holds a stream for that machine")
 		return
 	}
-	if w.OwnerUserId != "" && !sameSubject(w.OwnerUserId, owner) {
+	if !sameSubject(w.OwnerUserId, owner) {
 		// Belt and braces against a registry entry disagreeing with the row.
 		h.sendRefusal(send, requestId, "owner_mismatch",
 			"the connected machine is owned by a different user than the assertion names")
@@ -224,7 +227,7 @@ func (h *ForwardHandler) HandleForwardedRequest(
 	}
 	defer w.Release(capability)
 
-	envelope := buildToolDispatch(Request{
+	dispatchRequest := Request{
 		Tool:          req.GetTool(),
 		Action:        req.GetAction(),
 		Purpose:       req.GetPurpose(),
@@ -234,7 +237,18 @@ func (h *ForwardHandler) HandleForwardedRequest(
 		RunId:         req.GetRunId(),
 		StepId:        req.GetStepId(),
 		CorrelationId: req.GetCorrelationId(),
-	}, timeout)
+	}
+	if id := req.GetComputerPermissionId(); id != "" {
+		dispatchRequest.computerPermission = &permission.Grant{ID: id}
+		constraint, err := claimComputerPermission(dispatchCtx, h.permissions, dispatchRequest, w)
+		if err != nil {
+			h.sendRefusal(send, requestId, "computer_permission_refused", err.Error())
+			return
+		}
+		dispatchRequest.computerConstraint = constraint
+		dispatchRequest.computerOwner = w.OwnerUserId
+	}
+	envelope := buildToolDispatch(dispatchRequest, timeout)
 
 	// THE CALLER MAY ALREADY HAVE GONE: the node layer ends this context when
 	// the dispatch's cancel arrives, even one read before this goroutine ran.
@@ -325,26 +339,32 @@ func (h *ForwardHandler) verifyRegistration(ctx context.Context, ownerUserId, re
 // owned machines. That is the honest degradation, because a node that cannot
 // make the cross-owner read cannot establish that anything was shared.
 func (h *ForwardHandler) verifySharedRegistration(ctx context.Context, actingUserId, registrationId string) error {
+	_, err := h.admitSharedRegistration(ctx, actingUserId, registrationId)
+	return err
+}
+
+func (h *ForwardHandler) admitSharedRegistration(ctx context.Context, actingUserId, registrationId string) (workerservice.SharingSubjects, error) {
+	ctx = memqlengine.ContextWithFreshRead(ctx)
 	ownErr := h.verifyRegistration(ctx, actingUserId, registrationId)
 	switch {
 	case ownErr == nil:
-		return nil
+		return workerservice.SharingSubjects{}, nil
 	case errors.Is(ownErr, errRegistrationRevoked):
 		// Their own machine, revoked. The shared arm cannot rescue that, and
 		// saying "not shared with you" about somebody's own revoked machine
 		// would send them to the wrong repair.
-		return ownErr
+		return workerservice.SharingSubjects{}, ownErr
 	case errors.Is(ownErr, errNoFleetStore):
-		return ownErr
+		return workerservice.SharingSubjects{}, ownErr
 	}
 
 	shared, ok := h.store.(SharedFleetStore)
 	if !ok {
-		return ownErr
+		return workerservice.SharingSubjects{}, ownErr
 	}
 	machines, err := shared.SharedInferenceWorkers(ctx)
 	if err != nil {
-		return err
+		return workerservice.SharingSubjects{}, err
 	}
 	// The groups come from THIS replica's membership cache unless a test set a
 	// resolver: one read per person, reused until a membership or a group
@@ -361,14 +381,14 @@ func (h *ForwardHandler) verifySharedRegistration(ctx context.Context, actingUse
 			continue
 		}
 		if !m.RevokedAt.IsZero() {
-			return errRegistrationRevoked
+			return workerservice.SharingSubjects{}, errRegistrationRevoked
 		}
 		if !m.ServesPerson(person) {
-			return errRegistrationNotShared
+			return workerservice.SharingSubjects{}, errRegistrationNotShared
 		}
-		return nil
+		return m.Sharing().SubjectsFor(person), nil
 	}
-	return ownErr
+	return workerservice.SharingSubjects{}, ownErr
 }
 
 // ownerOfSharedMachine confirms that the LIVE registry entry for a machine

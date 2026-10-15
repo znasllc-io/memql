@@ -32,7 +32,12 @@
 /// that delegated it -- a delegated app session's recording run and a procedure's replay run both
 /// are -- and both are bound with no default, so a writer that has neither writes neither. routing
 /// is the owner's routing choice the run is opened with (v1:work:run.routing), bound with no default
-/// for the same reason: a run nobody chose for writes none.
+/// for the same reason: a run nobody chose for writes none. heartbeatAt is accepted for a run that
+/// opens LATE -- a scheduled firing's or a directly called logic's, held until its first write
+/// (component/automations/journal.go) -- so the first version of the row is already live: the work
+/// sweep judges a running run by heartbeatAt, else startedAt, and a late run's startedAt may be
+/// minutes old. Bound with no default for the same reason: a writer that names none writes none, and
+/// every other writer names none, so its rows are unchanged.
 @serverOnly
 @actor
 mutation run createWorkRun {
@@ -61,13 +66,14 @@ mutation run createWorkRun {
     initialChainHead       string
     waitingOn              object
     startedAt              string!
+    heartbeatAt            string
     parentRunId            string
     head                   object
     rerun                  object
     routing                object
   }
   insert {
-    accept { spine, executionAuthority, goalId, goalSignature, automationName, templateFingerprint, templateConstructId, templateVersion, input, inputFingerprint, triggeredBy, triggerEvent, variables, forkedFromRunId, forkAtStepKey, status, nodeId, initialChainHead, waitingOn, startedAt, parentRunId, head, rerun, routing }
+    accept { spine, executionAuthority, goalId, goalSignature, automationName, templateFingerprint, templateConstructId, templateVersion, input, inputFingerprint, triggeredBy, triggerEvent, variables, forkedFromRunId, forkAtStepKey, status, nodeId, initialChainHead, waitingOn, startedAt, heartbeatAt, parentRunId, head, rerun, routing }
     stamp {
       id: args.runId
       ownerUserId: actor.userId
@@ -444,6 +450,29 @@ mutation approval createWorkApproval {
   }
 }
 
+/// Save human guidance on an undecided budget checkpoint. The native approval
+/// gate proves the owner and exact pending wait; this write grants no budget.
+/// An actor.userId filter proves ownership alone, not that this is still the
+/// same undecided native checkpoint or that its decision lease is held. Only
+/// decideApproval may reach this writer after validating those facts and the
+/// bounded feedback-only answer; a direct owned write could replace guidance
+/// after a budget decision and change the instruction that resumes the run.
+@serverOnly
+mutation approval saveWorkApprovalGuidance {
+  args {
+    approvalId  string!
+    answer      object!
+    versionTime datetime!
+  }
+  update {
+    accept { answer }
+    stamp {
+      id: args.approvalId
+      createdAt: args.versionTime
+    }
+  }
+}
+
 /// Record a decision. @serverOnly in A1: decidedBy is the authority the row carries, and a mutation
 /// argument is whatever the caller typed, so a client-reachable version lets anyone write a
 /// colleague's name into an approval. Scoping to actor.userId asserts the row is the caller's,
@@ -489,6 +518,72 @@ mutation feedbackPolicy createFeedbackPolicy {
     accept { validateAnswers, reusableAfterSignatures }
     stamp {
       id: args.feedbackPolicyId
+    }
+  }
+}
+
+/// Only the native receipt gate can consume computer permission. actor.userId
+/// scoping alone would let a client clear or fabricate its own consumption time;
+/// the gate must verify the exact dispatch and serialize it across replicas.
+@serverOnly
+mutation approval useWorkComputerPermission {
+ args {
+  approvalId string!
+  permissionUsedAt datetime!
+  versionTime datetime!
+ }
+ update {
+  accept { permissionUsedAt }
+  stamp {
+   id: args.approvalId
+   createdAt: args.versionTime
+  }
+ }
+}
+
+/// Revocation is a native human decision. actor.userId scoping alone cannot
+/// prove an interactive person or serialize revocation against dispatch; the
+/// builtin verifies both while holding the approval decision gate.
+@serverOnly
+mutation approval revokeWorkComputerPermission {
+ args {
+  approvalId string!
+  permissionRevokedAt datetime!
+  versionTime datetime!
+ }
+ update {
+  accept { permissionRevokedAt }
+  stamp {
+   id: args.approvalId
+   createdAt: args.versionTime
+  }
+ }
+}
+
+/// Native review renewal: retains history and clears any unusable decision.
+/// actor.userId scoping alone cannot prove an interactive review, serialize
+/// against dispatch, or verify the saved fingerprint and exact parked run.
+/// The native gate holds that authority and refuses used permissions.
+@serverOnly
+mutation approval refreshWorkComputerPermission {
+  args {
+    approvalId string!
+    subject object!
+    artifactHash string!
+    requestedAt string!
+    expiresAt string!
+    versionTime datetime!
+  }
+  update {
+    accept { subject, artifactHash, requestedAt, expiresAt }
+    stamp {
+      id: args.approvalId
+      createdAt: args.versionTime
+      decision: ""
+      decidedAt: ""
+      decidedBy: ""
+      answer: {}
+      permissionRevokedAt: ""
     }
   }
 }

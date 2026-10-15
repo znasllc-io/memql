@@ -30,6 +30,7 @@ func (e *MemQLEngine) askSaveTurn(ctx context.Context, conversationID string, tu
 	if err := json.Unmarshal(raw, &transcript); err != nil {
 		return err
 	}
+
 	for n := range transcript.Turns {
 		if transcript.Turns[n].ID == turn.ID {
 			transcript.Turns[n] = turn
@@ -68,10 +69,53 @@ func (e *MemQLEngine) askConversationSnapshotBuiltin(ctx context.Context, args m
 }
 
 func (e *MemQLEngine) refreshAskRuns(ctx context.Context, transcript *askTranscript) error {
+	ctx = ContextWithFreshRead(ctx)
 	var answers []AskTurn
 	seen := map[string]bool{}
 	for _, turn := range transcript.Turns {
 		seen[turn.ID] = true
+	}
+	// Discussion links are separate from visible turns: merely opening a
+	// request invokes no model and must not manufacture a chat message.
+	if len(transcript.ApprovalIDs) > maxAskApprovalLinks {
+		return fmt.Errorf("conversation linked requests exceed their limit")
+	}
+	linked := map[string]bool{}
+	for _, approvalID := range transcript.ApprovalIDs {
+		approvalID = BareShortId(approvalID)
+		if approvalID == "" || linked[approvalID] {
+			continue
+		}
+		linked[approvalID] = true
+		approval, _, err := e.approvalRows(ctx, approvalID)
+		if err != nil {
+			return err
+		}
+		_, answer := askFeedbackProjection(approval)
+		if answer != nil && !seen[answer.ID] {
+			answers = append(answers, *answer)
+			seen[answer.ID] = true
+		}
+	}
+	guidanceRuns := map[string]map[string]any{}
+	for n := range transcript.Turns {
+		turn := &transcript.Turns[n]
+		target := turn.GuidanceTargetRunID
+		if target == "" || turn.GuidanceStatus != "queued" {
+			continue
+		}
+		run, seen := guidanceRuns[target]
+		if !seen {
+			rows, err := e.workRows(ctx, "workRunForOwner", target)
+			if err != nil {
+				return err
+			}
+			if len(rows) == 1 {
+				run = rows[0]
+			}
+			guidanceRuns[target] = run
+		}
+		projectWorkGuidance(turn, run)
 	}
 	for n := range transcript.Turns {
 		turn := &transcript.Turns[n]
@@ -86,9 +130,14 @@ func (e *MemQLEngine) refreshAskRuns(ctx context.Context, transcript *askTranscr
 			return fmt.Errorf("conversation work is unavailable")
 		}
 		run := runs[0]
+		turn.CanGuideWork = runningGuidanceTarget(run) && guidanceConversation(run) != ""
+		turn.GuidanceEpoch = ""
+		if turn.CanGuideWork {
+			turn.GuidanceEpoch = workGuidanceEpoch(run)
+		}
 		turn.WorkStatus, _ = run["status"].(string)
 		waiting, _ := run["waitingOn"].(map[string]any)
-		questions, err := e.workRows(ctx, "workQuestionsForOwnerRun", turn.RunID)
+		questions, err := e.workRows(ctx, "workApprovalsForOwnedRun", turn.RunID)
 		if err != nil {
 			return err
 		}

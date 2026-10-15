@@ -24,7 +24,7 @@ func TestMaterializeDB_AbandonedRunIsReadableOnAnotherReplica(t *testing.T) {
 	accepting := materializeDBEngine(t)
 	surviving := materializeDBEngine(t)
 	accept := New(accepting, accepting.Logger)
-	accept.SetGoalOpener(work.New(accepting, accepting.Logger))
+	accept.SetGoalOpener(gatedWork(t, accepting))
 	owner := fmt.Sprintf("materializer-abandoned-%d", time.Now().UnixNano())
 	ctx := auth.ContextWithUserActor(context.Background(), owner)
 	accepted, err := accept.materialize(ctx, owner, "", materializeDraft())
@@ -51,7 +51,7 @@ func TestMaterializeDB_AbandonedRunIsReadableOnAnotherReplica(t *testing.T) {
 		}
 		provider, err := registration.Factory(memql.PluginContext{
 			Engine: surviving, Logger: surviving.Logger,
-			BunDB: func() *bun.DB { return db }, AdmitSourceRow: memql.AdmitSourceRow,
+			BunDB: func() *bun.DB { return db }, GateDB: composeGatePool(t), AdmitSourceRow: memql.AdmitSourceRow,
 		})
 		if err != nil {
 			t.Fatal(err)

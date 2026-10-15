@@ -8,7 +8,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 
-import { QueryClient } from "../src/client/query.js";
+import { QueryClient, refusalSentence } from "../src/client/query.js";
 import type { Dispatcher } from "../src/client/dispatcher.js";
 import type {
   ClientMessage,
@@ -156,4 +156,70 @@ test("executeRaw -- forwards opts.cursor onto the wire", async () => {
   await promise;
 
   assert.equal(mock.lastExecuteQuery().cursor, "raw-cursor");
+});
+
+// ---------------------------------------------------------------------
+// refusalSentence: the sentence a person reads out of a refused call
+// ---------------------------------------------------------------------
+//
+// A builtin's refusal reaches a client in three frames: the server wraps an
+// internal engine error ("MemQL engine failed to execute query. Details: ",
+// buildEngineErrorMessage in component/grpc/server.go), the Go error may open
+// with its package ("compose: "), and executeNamed puts the call's name in
+// front. These are the words as they really arrive.
+
+const ENGINE = "MemQL engine failed to execute query. Details: ";
+
+test("executeNamed -- a refusal arrives in its frames, and refusalSentence leaves the sentence", async () => {
+  const mock = new MockDispatcher();
+  const qc = new QueryClient(mock.asDispatcher());
+  const promise = qc.executeNamed("composeMaterialize", 'builtin composeMaterialize(name: "Notes 10/11", format: "markdown")');
+  mock.reply({ queryError: { requestId: "r1", error: { message: ENGINE + "Enter a name without slashes." } } });
+  const refused = await promise.then(() => null, (error: unknown) => error);
+  assert.ok(refused instanceof Error);
+  assert.equal(refused.message, "composeMaterialize: " + ENGINE + "Enter a name without slashes.");
+  assert.equal(refusalSentence(refused, "composeMaterialize"), "Enter a name without slashes.");
+  // The caller need not know the call: a name in front of the engine's frame can only be the call's.
+  assert.equal(refusalSentence(refused), "Enter a name without slashes.");
+});
+
+test("refusalSentence -- takes off the call, the engine's frame and a Go package, once each", () => {
+  const cases: [string, string | undefined, string][] = [
+    ["composeMaterialize: " + ENGINE + "compose: the sources could not be read", "composeMaterialize", "the sources could not be read"],
+    ["composeCancel: " + ENGINE + "compose: no composition with that id is readable by you", undefined, "no composition with that id is readable by you"],
+    [ENGINE + "That folder isn't available. Choose another folder.", undefined, "That folder isn't available. Choose another folder."],
+    ["libraryAddDocumentComment: the document changed; reopen it", "libraryAddDocumentComment", "the document changed; reopen it"],
+    ["compose: a sentence a Go package still opens", undefined, "a sentence a Go package still opens"],
+    // One package name comes off, not a second one inside the sentence.
+    ["archiveComposition: " + ENGINE + "compose: library: refused", undefined, "library: refused"],
+    ["  composeRunRecipe: " + ENGINE + "compose: that recipe is archived  ", "composeRunRecipe", "that recipe is archived"],
+  ];
+  for (const [message, construct, sentence] of cases) {
+    assert.equal(refusalSentence(new Error(message), construct), sentence, message);
+  }
+});
+
+test("refusalSentence -- leaves alone what is not one of its frames", () => {
+  const cases: [string, string | undefined][] = [
+    ["Note: the document changed", "libraryAddDocumentComment"],              // a capitalised word and a colon is a sentence
+    ["the libraryAddDocumentComment: call failed", "libraryAddDocumentComment"], // not at the front
+    ["libraryAddDocumentComment:no space", "libraryAddDocumentComment"],         // not how executeNamed words it
+    ["composeCancel: the cluster did not answer", undefined],                    // a name, unknown, not before the engine's frame
+    ["Materializer did not confirm a composition. Check its history before retrying.", "composeMaterialize"],
+    ["invalid argument: composeMaterialize() statement cannot be empty", undefined], // two words: not a package
+  ];
+  for (const [message, construct] of cases) {
+    assert.equal(refusalSentence(new Error(message), construct), message, message);
+  }
+  // The construct's own name comes off once, from the front.
+  assert.equal(refusalSentence(new Error("libraryAddDocumentComment: libraryAddDocumentComment: twice"), "libraryAddDocumentComment"), "libraryAddDocumentComment: twice");
+  // A frame with nothing inside it is the whole of what the cluster said, and is kept.
+  assert.equal(refusalSentence(new Error("composeCancel: MemQL engine failed to execute query."), "composeCancel"), "MemQL engine failed to execute query.");
+  // Something that is not an Error is read as text.
+  assert.equal(refusalSentence(ENGINE + "compose: refused"), "refused");
+});
+
+
+test("refusalSentence -- an empty named frame carries no sentence", () => {
+  assert.equal(refusalSentence("campaignSaveJourney:", "campaignSaveJourney"), "");
 });

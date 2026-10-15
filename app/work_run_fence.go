@@ -14,6 +14,12 @@ func workRunCanStart(req work.DispatchRequest, j *automations.RunJournal, now ti
 	if work.IsDriverOwnedRun(j.TriggeredBy) {
 		return false
 	}
+	// A leased takeover of a stale answer claim is crash recovery, not a second
+	// human dispatch. Recheck the fresh heartbeat even before a running intent
+	// exists: another replica may just have reopened the same suspension.
+	if req.Recovery && req.HumanResumeRecovery && (j.HeartbeatAt.IsZero() || now.Sub(j.HeartbeatAt) < work.DefaultAbandonedAfterSeconds*time.Second) {
+		return false
+	}
 	// A renewable heartbeat fences the current executor after the arbitration
 	// lease expires. Failed steps have no live intent and remain resumable.
 	// Reopening a stopped run stamps heartbeatAt at requestedAt, before any

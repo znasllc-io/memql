@@ -215,47 +215,12 @@ func rerunSpecFrom(v any) *RerunSpec {
 	return spec
 }
 
-// guidanceAxes is the order a disliked version's axes are named in, which is
-// the framework's own: the result, the approach, the behaviour.
-var guidanceAxes = []string{"product", "process", "performance"}
-
 // stepOverrideFrom decodes a stored override object: {level, model, effort,
 // prompt, wholePrompt, inputs, guidance: {axes: {product, process,
 // performance}, reason, feedbackId}, requestedBy}. It answers nil for an
 // override that changes nothing about the call, so a context carries an
 // override only when there is one to apply.
-func stepOverrideFrom(m map[string]any) *common.StepOverride {
-	if len(m) == 0 {
-		return nil
-	}
-	whole, _ := m["wholePrompt"].(bool)
-	o := &common.StepOverride{
-		Level:       strings.TrimSpace(stringField(m, "level")),
-		Model:       strings.TrimSpace(stringField(m, "model")),
-		Effort:      strings.TrimSpace(stringField(m, "effort")),
-		Prompt:      stringField(m, "prompt"),
-		RequestedBy: strings.TrimSpace(stringField(m, "requestedBy")),
-	}
-	o.WholePrompt = whole && strings.TrimSpace(o.Prompt) != ""
-	if inputs, ok := m["inputs"].(map[string]any); ok && len(inputs) > 0 {
-		o.Inputs = inputs
-	}
-	if g, ok := m["guidance"].(map[string]any); ok {
-		if axes, ok := g["axes"].(map[string]any); ok {
-			for _, name := range guidanceAxes {
-				if on, _ := axes[name].(bool); on {
-					o.GuidanceAxes = append(o.GuidanceAxes, name)
-				}
-			}
-		}
-		o.GuidanceReason = stringField(g, "reason")
-		o.FeedbackId = strings.TrimSpace(stringField(g, "feedbackId"))
-	}
-	if o.Empty() {
-		return nil
-	}
-	return o
-}
+func stepOverrideFrom(m map[string]any) *common.StepOverride { return common.StepOverrideFromRecord(m) }
 
 // workspaceSnapshotFrom decodes rerun.snapshot, {files: [{path, fileId}],
 // unrecordedCommands}. A snapshot that names its files -- even none of them --

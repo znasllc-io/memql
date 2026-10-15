@@ -227,19 +227,19 @@ func (d *AuthoringCaptureDispatcher) existingBundleForRun(ctx context.Context, o
 	return getString(rows[0], "id"), nil
 }
 
-// persistConstructs writes one row per authored member construct.
+// persistConstructs writes one row per authored member construct, while the
+// bundle is still a draft, through the engine's construct writer
+// (createAuthoringConstruct is @serverOnly, memql#6022).
 func (d *AuthoringCaptureDispatcher) persistConstructs(ctx context.Context, ownerUserId, bundleId string, constructs []memql.SandboxConstruct) error {
 	for _, c := range constructs {
-		args := map[string]any{
-			"constructId":     id.NewShortId(),
-			"bundleId":        bundleId,
-			"kind":            c.Kind,
-			"name":            c.Name,
-			"targetNamespace": authoredTargetNamespace,
-			"source":          c.Source,
-		}
-		q := fmt.Sprintf(`createAuthoringConstruct(%s)`, encodeArgs(args))
-		if _, err := d.engine.Execute(ownerActorContext(ctx, ownerUserId), q); err != nil {
+		if err := writeAuthoredConstruct(ownerActorContext(ctx, ownerUserId), d.engine, memql.AuthoredConstructInput{
+			ConstructId:     id.NewShortId(),
+			BundleId:        bundleId,
+			Kind:            c.Kind,
+			Name:            c.Name,
+			TargetNamespace: authoredTargetNamespace,
+			Source:          c.Source,
+		}); err != nil {
 			return fmt.Errorf("construct %s/%s: %w", c.Kind, c.Name, err)
 		}
 	}

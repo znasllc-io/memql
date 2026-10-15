@@ -237,8 +237,15 @@ func (e *MemQLEngine) promoteBundleDurableWithStore(ctx context.Context, store p
 // satisfies it via enginePromoteStore; tests fake it.
 type promoteStore interface {
 	// CreatePromoteBundle persists a v1:authoring:bundle row for a durable
-	// promotion (status "active", marked via the durable-promote prefix/title).
+	// promotion, as a draft (marked via the durable-promote prefix/title).
+	// ActivatePromoteBundle makes it active once its construct is written: a
+	// construct joins a bundle only before the bundle's gates have run
+	// (memql#6022, authoring_construct_write_guard.go).
 	CreatePromoteBundle(ctx context.Context, bundleId, title, summary string) error
+	// ActivatePromoteBundle marks the durable-promote bundle active, after its
+	// construct, so the boot re-hydration's system-active enumeration picks it
+	// up.
+	ActivatePromoteBundle(ctx context.Context, bundleId string) error
 	// CreatePromoteConstruct persists a v1:authoring:construct row capturing the
 	// promoted construct's kind + name + source at the given lifecycle status.
 	//
@@ -325,6 +332,9 @@ func (e *MemQLEngine) promoteConstructDurableWithStore(ctx context.Context, stor
 	targetNamespace := promoteTargetNamespace(c)
 	if err := store.CreatePromoteConstruct(persistCtx, constructId, bundleId, c.Kind, c.Name, targetNamespace, c.Source, c.Origin, string(BundleActive)); err != nil {
 		return fmt.Errorf("authoring: persist promote construct: %w", err)
+	}
+	if err := store.ActivatePromoteBundle(persistCtx, bundleId); err != nil {
+		return fmt.Errorf("authoring: activate promote bundle: %w", err)
 	}
 
 	// The memql#3974 staged-DATA tier, resolved for this construct: stamp the row
@@ -911,38 +921,43 @@ func mutationCall(name string, args ...[2]string) string {
 	return b.String()
 }
 
+// CreatePromoteBundle writes the bundle as a draft: createAuthoringBundle
+// inserts status "draft", and the bundle stays there until its construct is
+// written (ActivatePromoteBundle). Through the engine's one bundle writer
+// (WriteAuthoringBundle: createAuthoringBundle is @serverOnly, memql#6022).
 func (s *enginePromoteStore) CreatePromoteBundle(ctx context.Context, bundleId, title, summary string) error {
-	if _, err := s.engine.Execute(ctx, mutationCall("createAuthoringBundle",
-		[2]string{"bundleId", bundleId},
-		[2]string{"title", title},
-		[2]string{"summary", summary},
-	)); err != nil {
-		return err
-	}
-	// createAuthoringBundle inserts status "draft"; transition it to
-	// active so the boot re-hydration's system-active enumeration picks it up.
-	if _, err := s.engine.Execute(ctx, fmt.Sprintf(`mutation activateAuthoringBundle(bundleId:%s)`, languageParser.QuoteString(bundleId))); err != nil {
-		return err
-	}
-	return nil
+	return s.engine.WriteAuthoringBundle(ctx, AuthoringBundleInput{BundleId: bundleId, Title: title, Summary: summary})
 }
 
+// ActivatePromoteBundle transitions the bundle to active so the boot
+// re-hydration's system-active enumeration picks it up.
+// activateAuthoringBundle is @serverOnly (memql#6022) and this promote is the
+// gated path -- the owner-only gate and Gate 1's compile/bind stand in front
+// of it -- so the one write stamps internal origin, inline.
+func (s *enginePromoteStore) ActivatePromoteBundle(ctx context.Context, bundleId string) error {
+	_, err := s.engine.Execute(auth.ContextWithInternalOrigin(ctx), fmt.Sprintf(`mutation activateAuthoringBundle(bundleId:%s)`, languageParser.QuoteString(bundleId)))
+	return err
+}
+
+// CreatePromoteConstruct writes the construct while its bundle is still a
+// draft, through the engine's one writer of a bundle's members
+// (WriteAuthoredConstruct: createAuthoringConstruct is @serverOnly, memql#6022).
 func (s *enginePromoteStore) CreatePromoteConstruct(ctx context.Context, constructId, bundleId, kind, name, targetNamespace, source, origin, status string) error {
-	if _, err := s.engine.Execute(ctx, mutationCall("createAuthoringConstruct",
-		[2]string{"constructId", constructId},
-		[2]string{"bundleId", bundleId},
-		[2]string{"kind", kind},
-		[2]string{"name", name},
-		[2]string{"targetNamespace", targetNamespace},
-		[2]string{"source", source},
+	if err := s.engine.WriteAuthoredConstruct(ctx, AuthoredConstructInput{
+		ConstructId:     constructId,
+		BundleId:        bundleId,
+		Kind:            kind,
+		Name:            name,
+		TargetNamespace: targetNamespace,
+		Source:          source,
 		// The tree-relative path the bundle was authored against (epic
 		// memql#5375): a promoted CONCEPT re-derives its canonical id at
 		// re-hydration and the namespace half comes from this path.
-		[2]string{"origin", origin},
+		Origin: origin,
 		// S6 (#2361): stamp the grammar epoch the source was authored
 		// under, so a future engine can tell a rotted row from a stale one.
-		[2]string{"grammarVersion", languageParser.GrammarVersion},
-	)); err != nil {
+		GrammarVersion: languageParser.GrammarVersion,
+	}); err != nil {
 		return err
 	}
 	// Flip the construct off "draft" -- to "active" for a promote, "staged" for

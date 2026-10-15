@@ -86,6 +86,8 @@ type RunJournal struct {
 	ForkAtStepKey         string
 	WaitingOn             map[string]any
 	HumanResumeId         string
+	ParentRunId           string
+	CancelRequested       bool
 	RunId                 string
 	AutomationName        string
 	TemplateVersion       string
@@ -144,8 +146,9 @@ type RunJournal struct {
 
 // StepState is one step's latest journal row: its status and its attempt.
 type StepState struct {
-	Status  string
-	Attempt int
+	Status     string
+	ChildRunId string
+	Attempt    int
 	// Version is the version the row belongs to (epic memql#5414); 0 on a
 	// row written before the field existed, whose attempt is its version.
 	Version int
@@ -153,6 +156,8 @@ type StepState struct {
 
 // ResumeOptions configures resume behavior.
 type ResumeOptions struct {
+	checkpoint *checkpointPlan
+
 	// FromStep overrides the resume point (defaults to the failed step).
 	FromStep string
 
@@ -262,6 +267,8 @@ func runJournalFromRows(run map[string]any, steps []map[string]any) (*RunJournal
 	j.WaitingOn, _ = run["waitingOn"].(map[string]any)
 	j.Spine, _ = run["spine"].(map[string]any)
 	j.HumanResumeId = stringField(run, "humanResumeId")
+	j.ParentRunId = stringField(run, "parentRunId")
+	j.CancelRequested = boolField(run, "cancelRequested")
 	j.Variables, _ = run["variables"].(map[string]any)
 	if ev, ok := run["triggerEvent"].(map[string]any); ok {
 		j.TriggerEvent = ev
@@ -275,7 +282,7 @@ func runJournalFromRows(run map[string]any, steps []map[string]any) (*RunJournal
 			// re-runs that statement, never into it.
 			continue
 		}
-		state := StepState{Status: stringField(row, "status"), Attempt: intField(row, "attempt"), Version: intField(row, "version")}
+		state := StepState{Status: stringField(row, "status"), ChildRunId: stringField(row, "childRunId"), Attempt: intField(row, "attempt"), Version: intField(row, "version")}
 		j.StepStates[key] = state
 		j.MaxAttempt[key] = max(state.Attempt, state.Version)
 		if record, ok := row["override"].(map[string]any); ok {
@@ -482,17 +489,53 @@ func (e *Executor) ResumeFrom(
 
 	// A registered capability may prove a durable continuation instead of
 	// repeating its effect. This exception applies to this suspended step only.
-	checkpoint := false
-	if !opts.AllowSideEffects && !e.stepRetryable(resumeStep) && rerun == nil &&
-		journal.StepStates[resumeStepId].Status == "waiting" && journal.HumanResumeId != "" &&
-		resumeStep.Type == StepTypeFunction && resumeStep.Function != nil && e.engine != nil &&
-		opts.Overrides[resumeStepId].Empty() {
+	checkpoint := opts.checkpoint != nil && opts.checkpoint.journal.RunId == journal.RunId && opts.checkpoint.stepID == resumeStepId
+	plan := opts.checkpoint
+	// A person's rerun authorized a new version, not repetition of the effects
+	// that version completed before a native human wait. Its answer must prove
+	// the checkpoint even though ordinary rerun admission allows effects.
+	waitingState := journal.StepStates[resumeStepId]
+	rerunWait := rerun != nil && waitingState.Status == "waiting"
+	// Run again can target a terminal run whose previous version stopped at
+	// a human wait. Only a persisted, explicitly newer version is a new
+	// execution; its old waiting receipt is not a checkpoint to resume.
+	// Branches and unknown/same generations still require native proof.
+	if rerunWait && rerun.Reason == RerunReasonRerun && rerun.RequestId != "" &&
+		journal.Status == "running" && journal.HumanResumeId == "" && journal.Rerun != nil &&
+		journal.Rerun.RequestId == rerun.RequestId && journal.Rerun.Reason == rerun.Reason && waitingState.Version > 0 {
+		floor := rerun.Versions[resumeStepId]
+		run, ok := common.RunFromContext(ctx)
+		if floor > waitingState.Version && floor > journal.MaxAttempt[resumeStepId] &&
+			journal.Rerun.Versions[resumeStepId] == floor && ok &&
+			memql.BareShortId(run.RunId) == memql.BareShortId(journal.RunId) && run.RerunRequestId == rerun.RequestId {
+			rerunWait = false
+		}
+	}
+	ordinaryWait := !opts.AllowSideEffects && !e.stepRetryable(resumeStep) && rerun == nil && !checkpoint &&
+		journal.StepStates[resumeStepId].Status == "waiting" && journal.HumanResumeId != "" && opts.Overrides[resumeStepId].Empty()
+	if rerunWait || ordinaryWait {
+		if e.engine == nil || !opts.Overrides[resumeStepId].Empty() {
+			return nil, fmt.Errorf("%w: unchanged checkpoint execution is unavailable", ErrNonRetryableStep)
+		}
+		request := memql.CheckpointResumeRequest{RunID: journal.RunId, StepKey: resumeStepId, ApprovalID: journal.HumanResumeId}
+		if rerunWait {
+			if journal.HumanResumeId == "" || rerun.Snapshot != nil {
+				return nil, fmt.Errorf("%w: checkpoint override changed", ErrNonRetryableStep)
+			}
+			request.RerunRequestID = rerun.RequestId
+			run, ok := common.RunFromContext(ctx)
+			if !ok || memql.BareShortId(run.RunId) != memql.BareShortId(journal.RunId) || run.RerunRequestId != rerun.RequestId {
+				return nil, fmt.Errorf("%w: checkpoint rerun context changed", ErrNonRetryableStep)
+			}
+		}
 		var err error
-		ctx, checkpoint, err = e.engine.PrepareCheckpointResume(ctx, resumeStep.Function.Name, memql.CheckpointResumeRequest{
-			RunID: journal.RunId, StepKey: resumeStepId, ApprovalID: journal.HumanResumeId,
-		})
+		ctx, plan, err = e.prepareCheckpoint(ctx, journal, automation, request, 0)
 		if err != nil {
 			return nil, fmt.Errorf("%w: step %q continuation: %v", ErrNonRetryableStep, resumeStepId, err)
+		}
+		checkpoint = plan != nil
+		if rerunWait && !checkpoint {
+			return nil, fmt.Errorf("%w: the waiting rerun has no native continuation", ErrNonRetryableStep)
 		}
 	}
 	if !e.stepRetryable(resumeStep) && !opts.AllowSideEffects && !checkpoint {
@@ -532,6 +575,7 @@ func (e *Executor) ResumeFrom(
 	// Create new execution tracking the resume
 	triggeredBy := fmt.Sprintf("resumed:%s", journal.RunId)
 	exec := NewExecution(automation.Name, triggeredBy)
+	exec.journalFingerprint = automation.DefinitionFingerprint(fingerprintEngine)
 	// The resumed run IS the original run: same id, new versions of its rows.
 	exec.ID = journal.RunId
 	// The SAME rule as executeWithEvent: internal origin requires a trusted
@@ -700,6 +744,10 @@ func (e *Executor) ResumeFrom(
 		ChainTrackingEnabled: e.chainTrackingEnabled,
 	}
 
+	if plan != nil && plan.child != nil {
+		stepCtx.ResumeChildStepID = plan.stepID
+		stepCtx.ResumeChild = e.childContinuation(plan)
+	}
 	return e.runStatementAutomation(ctx, automation, exec, nil, writer, stepCtx, chainHead, resumed)
 }
 

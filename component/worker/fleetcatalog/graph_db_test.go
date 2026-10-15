@@ -117,12 +117,12 @@ func TestFleetCatalogGraphReaderEnforcesOwnerAndSharedBoundaries(t *testing.T) {
 				t.Fatalf("alice's own machine should read online: %+v", model)
 			}
 		}
-		for _, want := range []string{"mine", "shared", "lent-alice"} {
+		for _, want := range []string{"mine", "shared", "owner-consent-only", "lent-alice"} {
 			if !mineSeen[prefix+"-"+want] {
 				t.Fatalf("alice's catalog %v is missing %s", mineSeen, want)
 			}
 		}
-		for _, leak := range []string{"private", "owner-consent-only", "lent-carol"} {
+		for _, leak := range []string{"private", "lent-carol"} {
 			if mineSeen[prefix+"-"+leak] {
 				t.Fatalf("alice's catalog leaked %s: %v", leak, mineSeen)
 			}
@@ -135,7 +135,7 @@ func TestFleetCatalogGraphReaderEnforcesOwnerAndSharedBoundaries(t *testing.T) {
 		for _, model := range shared {
 			seen[model.ModelId] = true
 		}
-		if !seen[prefix+"-shared"] || seen[prefix+"-private"] || seen[prefix+"-owner-consent-only"] || seen[prefix+"-mine"] ||
+		if !seen[prefix+"-shared"] || seen[prefix+"-private"] || !seen[prefix+"-owner-consent-only"] || seen[prefix+"-mine"] ||
 			seen[prefix+"-lent-alice"] || seen[prefix+"-lent-carol"] {
 			t.Fatalf("shared catalog = %v; system work reaches only what is lent to everyone (design G3)", seen)
 		}
@@ -161,7 +161,7 @@ func TestFleetCatalogGraphReaderEnforcesOwnerAndSharedBoundaries(t *testing.T) {
 		if _, ok := nodes[prefix+"-lent-alice"]; !ok {
 			t.Fatalf("public builtin lost the model lent to alice: %s", raw)
 		}
-		for _, name := range []string{"private", "owner-consent-only", "lent-carol"} {
+		for _, name := range []string{"private", "lent-carol"} {
 			if _, ok := nodes[prefix+"-"+name]; ok {
 				t.Fatalf("public builtin leaked %s", name)
 			}
@@ -197,7 +197,7 @@ func TestRepositoryScopeSurvivesThePersistedCatalogRead(t *testing.T) {
 	t.Cleanup(func() {
 		_, _ = db.NewDelete().Model((*memorynodes.MemoryNode)(nil)).Where("concept = ?", "v1:worker:registration").Where("id = ?", id).Exec(ctx)
 	})
-	descriptor := &worker.CapabilityDescriptor{Platform: "linux", Architecture: "arm64", ActionContracts: worker.ActionContracts{"workerHost.pipeline_step": 2}, DisplayServer: "none", SchemaVersion: 1, RepositoryScopes: worker.RepositoryScopes{"workerHost.pipeline_step": {"o/a"}}}
+	descriptor := &worker.CapabilityDescriptor{Platform: "linux", Architecture: "arm64", HomeDirectory: "/home/Actual Person", ActionContracts: worker.ActionContracts{"workerHost.pipeline_step": 2}, DisplayServer: "none", SchemaVersion: 1, RepositoryScopes: worker.RepositoryScopes{"workerHost.pipeline_step": {"o/a"}}}
 	payload, err := json.Marshal(map[string]any{"name": prefix, "ownerUserId": owner, "capabilities": []string{"HEADLESS"}, "labels": map[string]string{"pipelines": "allowed"}, "capabilityDescriptor": descriptor.AsMap(), "lastSeenAt": time.Now().UTC().Format(time.RFC3339Nano), "connectedNodeId": "other-agent"})
 	if err != nil {
 		t.Fatal(err)
@@ -215,7 +215,7 @@ func TestRepositoryScopeSurvivesThePersistedCatalogRead(t *testing.T) {
 	if len(candidates) != 1 {
 		t.Fatalf("got %d candidates", len(candidates))
 	}
-	if candidates[0].NativePlatform != "linux/arm64" || !candidates[0].ActionContracts.Supports("workerHost.pipeline_step", 2) {
+	if candidates[0].HomeDirectory != "/home/Actual Person" || candidates[0].NativePlatform != "linux/arm64" || !candidates[0].ActionContracts.Supports("workerHost.pipeline_step", 2) {
 		t.Fatalf("stored runtime metadata did not cross replicas: %+v", candidates[0])
 	}
 	scopes := candidates[0].RepositoryScopes

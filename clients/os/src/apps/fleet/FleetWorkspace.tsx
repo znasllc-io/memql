@@ -5,37 +5,37 @@ import { RecordList, RecordRow, listCount } from "../../kit/RecordRow";
 import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from "react";
 import type { Row } from "@znasllc-io/memql-sdk-core/client";
 import { ActivityTarget } from "../../kit/SemanticActivity";
-import { ArrowUpRight, Box, ChevronRight, Cpu, History, Info, Monitor, SlidersHorizontal, Terminal, Wrench } from "lucide-react";
+import { ArrowUpRight, ChevronRight, Cpu, Monitor, SlidersHorizontal, Terminal, Wrench } from "lucide-react";
 import type { OsAppProps } from "../../system/registry";
-import { Button, EmptyState, Refine, Head, Notice, ProvenanceDot, formatBytes, formatFreshness, useNow, Subhead } from "../../kit";
+import { Button, EmptyState, Refine, Head, Notice, ProvenanceDot, formatBytes, formatFreshness, useNow } from "../../kit";
 import { IconButton } from "../../kit/IconButton";
-import { InfoDetail } from "../../kit/InfoDetail";
+import { PageHelp } from "../../kit/pageHelp";
 import { useLiveView } from "../../live/liveView";
 import { useMachines } from "../../live/machines";
-import { useAppSessions } from "./apps/useAppSessions";
 import { AutoRefresh, useFleetScroll } from "./FleetControls";
 import { AddMachinePage } from "./addMachine/AddMachinePage";
 import type { AddMachineFlow } from "./addMachine/useAddMachineFlow";
 import { MachineDetail, MachineAppsHelp } from "./machines/MachineDetail";
 import { AppPermissionHelp } from "./machines/AppPermissionHelp";
 import { machineModelsFrom, type MachineModel } from "./machines/models";
-import { sharingLinkWords } from "./machines/sharing";
+import { EquipmentModelCarousel } from "./EquipmentModelCarousel";
+import { RecentWork } from "./apps/RecentWork";
 import { useMachineWrites } from "./machines/useMachineWrites";
 import { isWorkerOnline } from "./online";
-import { computerUseStatus, isRevoked, machineFromRow, machineName, type MachineRow } from "./rows";
+import { isRevoked, machineFromRow, machineName, type MachineRow } from "./rows";
 
-export type MachineView = "equipment" | "details" | "models" | "apps" | "sharing" | "activity";
+export type MachineView = "equipment" | "models" | "apps" | "activity" | "settings";
 export interface FleetSelection { machineId: string; view: MachineView }
-const VIEW_NAMES: Record<MachineView, string> = { equipment: "Equipment", details: "Details", models: "Models", apps: "Apps", sharing: "Sharing", activity: "History" };
+const VIEW_NAMES: Record<MachineView, string> = { equipment: "Equipment", models: "Models", apps: "Apps", activity: "History", settings: "Settings" };
 
-export function FleetWorkspace({ flow, showRevoked, selection, select, navigate, onOpenSession, intent, consumeIntent }: {
+export function FleetWorkspace({ flow, showRevoked, selection, select, navigate, onOpenSession, intent, consumeIntent, onAllSessions }: {
   onOpenSession?: (id: string) => void;
+  onAllSessions?: () => void;
   flow: AddMachineFlow; showRevoked: boolean; selection: FleetSelection;
   select: (selection: FleetSelection) => void; navigate: OsAppProps["navigate"];
   intent?: OsAppProps["intent"]; consumeIntent?: OsAppProps["consumeIntent"];
 }) {
   const { collection, settled, feedState, reload } = useMachines();
-  const sessions = useAppSessions();
   const consumed = useRef("");
   const now = useNow(15_000);
   const [machineSearch, setMachineSearch] = useState("");
@@ -86,7 +86,7 @@ export function FleetWorkspace({ flow, showRevoked, selection, select, navigate,
   const behind = feedState === "degraded" || feedState === "disconnected";
   return (<>
     {flow.active ? <AddMachinePage flow={flow} onLeave={machineId => { if (machineId) select({ machineId, view: "equipment" }); }} /> : null}
-    <div ref={scrollRoot} className="fleet-home" hidden={flow.active}>
+    <div ref={scrollRoot} className="fleet-home" data-machine-view={selection.view} hidden={flow.active}>
     <div className="fleet-workspace" data-os-page-context={JSON.stringify({ page: "Machines", machineId: machine?.id, machine: machine ? machineName(machine) : undefined, view: VIEW_NAMES[selection.view], search: machineSearch || undefined })}>
       <div className="fleet-workspace-header">
       {/* THE HEAD OWNS THE TRAIL on the list and on Equipment; every other
@@ -125,17 +125,12 @@ export function FleetWorkspace({ flow, showRevoked, selection, select, navigate,
               const retainedMachine = machines.find(value => value.id === item.machineId);
               if (!retainedMachine) return null;
               const shown = item.machineId === machine.id && item.view === selection.view;
-              return <div key={`${item.machineId}:${item.view}`} hidden={!shown}>
+              return <div key={`${item.machineId}:${item.view}`} data-machine-view={item.view} hidden={!shown}>
                 {item.view === "equipment" ? <><MachineEquipment machine={retainedMachine} now={now} onInspect={view => select({ machineId: item.machineId, view })} />
-                <section className="fleet-recent-work" aria-label="Recent app sessions"><div className="fleet-bank-heading"><Subhead meta={sessions.readAt && !sessions.loading && !sessions.error ? sessions.sessions.filter(session => session.workerId === item.machineId).slice(0, 5).length : undefined}>Recent work</Subhead><span className="fleet-heading-actions"><AutoRefresh busy={sessions.loading} onRefresh={sessions.reread} /><IconButton label="All app sessions" onClick={() => navigate("apps", { fromContent: true })}><ArrowUpRight size={16} aria-hidden /></IconButton></span></div>
-                  {sessions.error ? <Notice sentence="Recent app sessions could not be read." detail={sessions.error} /> : null}
-                  {sessions.loading && sessions.sessions.length === 0 && !sessions.error ? <RecordListSkeleton label="Loading recent app sessions" /> : null}
-                  <RecordList as="ul" label="Recent app sessions">{sessions.sessions.filter(session => session.workerId === item.machineId).slice(0, 5).map(session => <RecordRow key={session.id} name={session.app} secondary={session.runId || session.id} onOpen={onOpenSession ? () => onOpenSession(session.id) : undefined} state={session.status} />)}</RecordList>
-                  {!sessions.loading && !sessions.error && !sessions.sessions.some(session => session.workerId === item.machineId) ? <EmptyState icon={History} title="No recent work">App sessions will appear here when an app runs on this machine.</EmptyState> : null}
-                </section></> : <div className="fleet-inspector">
+                <RecentWork machineId={item.machineId} onOpenSession={onOpenSession} onAllSessions={onAllSessions ?? (() => navigate("apps", { fromContent: true }))} /></> : <div className="fleet-inspector">
                   <Head title={VIEW_NAMES[item.view]} meta={item.view === "apps" ? listCount(snapshot, retainedMachine.apps.length) : item.view === "models" ? listCount(snapshot, machineModelsFrom(retainedMachine.reportedLabels).length) : undefined} breadcrumbs={[{ label: "Machines", onSelect: toList }, { label: machineName(retainedMachine), onSelect: () => select({ machineId: item.machineId, view: "equipment" }) }, { label: VIEW_NAMES[item.view] }]} back={{ label: machineName(retainedMachine), onSelect: () => select({ machineId: item.machineId, view: "equipment" }) }}>
                     {item.view === "apps" ? <MachineAppsHelp /> : null}
-                    {item.view === "apps" || item.view === "activity" ? <IconButton label="App sessions" onClick={() => navigate("apps", { fromContent: true })}><History size={16} aria-hidden /></IconButton> : null}
+                    {item.view === "apps" || item.view === "activity" ? <IconButton label="App sessions" onClick={() => navigate("apps", { fromContent: true })}><ArrowUpRight size={16} aria-hidden /></IconButton> : null}
                   </Head>
                   <ScopedMachineDetail machine={retainedMachine} now={now} view={item.view} onRemoved={onRemoved} />
                 </div>}
@@ -214,20 +209,23 @@ export function MachineEquipment({ machine, now, onInspect }: { machine: Machine
   const selectedModel = chosenModel ?? (!chosenApp ? models[0] : undefined);
   const selectedApp = chosenApp ?? (!selectedModel ? machine.apps[0] : undefined);
   const hw = machine.hardware;
-  const desktop = computerUseStatus(machine);
   return <ActivityTarget target={`fleet:machine:${machine.id}`} className="fleet-equipment">
-    <header className="fleet-machine-heading"><div><h4>{machineName(machine)}</h4><span className="fleet-machine-presence"><ProvenanceDot tone={online ? "reachable" : "unreachable"} />{revoked ? "Revoked" : online ? "Online" : "Offline"}<span>{formatFreshness(machine.lastSeenAt, now)}</span></span></div><IconButton label="Machine details" onClick={() => onInspect("details")}><Info size={16} aria-hidden /></IconButton></header>
+    <PageHelp title="Machine status"><p>Online means Cockpit is connected. The last-seen time reflects the most recent report; an offline machine cannot accept new work. Open Settings to manage sharing and inspect its connection and permissions.</p></PageHelp>
+    <PageHelp title="Hardware"><p>The display shows the machine’s reported chip, memory and CPU cores. Unknown means that measurement was not reported.</p></PageHelp>
+    <PageHelp title="Local models"><p>Use the arrows to browse models, then select one to inspect its context size, quantization and supported features. Manage models opens the installed models and available downloads for this machine. Installed inventory is reported by Cockpit; it does not by itself prove that a model can answer successfully.</p></PageHelp>
+    <MachineAppsHelp />
+    <header className="fleet-machine-heading"><div><h4>{machineName(machine)}</h4><span className="fleet-machine-presence"><ProvenanceDot tone={online ? "reachable" : "unreachable"} />{revoked ? "Revoked" : online ? "Online" : "Offline"}<span>{formatFreshness(machine.lastSeenAt, now)}</span></span></div></header>
     <div className="fleet-equipment-rig">
-      <section className="fleet-equipment-bank" aria-label="Local model equipment"><div className="fleet-bank-heading"><Cpu size={16} aria-hidden /><h5>Local models</h5><span>{models.length}</span><IconButton label={models.length ? "Manage models" : "Find models that fit"} onClick={() => onInspect("models")}><SlidersHorizontal size={16} aria-hidden /></IconButton></div>
-        <ul>{models.map(model => <li key={model.modelId}><button className="fleet-equipment-slot" type="button" aria-pressed={selectedModel?.modelId === model.modelId} onClick={() => choose({ kind: "model", id: model.modelId })}><Box size={17} aria-hidden /><span><strong>{model.modelId}</strong><small>{model.embeddings ? "Embeddings" : model.tools ? "Chat & tools" : "Chat"}</small></span></button></li>)}</ul>
+      <section className="fleet-equipment-bank" aria-label="Local model equipment"><div className="fleet-bank-heading"><Cpu size={16} aria-hidden /><h5>Local models</h5><IconButton label={models.length ? "Manage models" : "Find models that fit"} onClick={() => onInspect("models")}><SlidersHorizontal size={16} aria-hidden /></IconButton></div>
+        <EquipmentModelCarousel models={models} selectedId={selectedModel?.modelId} onSelect={id => choose({ kind: "model", id })} />
         {models.length === 0 ? <EmptyState icon={Cpu} title="No local models">Find a model that fits this machine in Models.</EmptyState> : null}
       </section>
       <div className="fleet-device" aria-label="Machine hardware">
         <div className="fleet-device-screen"><Monitor size={35} strokeWidth={1.2} aria-hidden /><strong>{hw.chip || machine.platform || "Hardware not reported"}</strong><dl><div><dt>Memory</dt><dd>{hw.memoryBytes > 0 ? formatBytes(hw.memoryBytes) : "Unknown"}</dd></div><div><dt>CPU cores</dt><dd>{hw.cpuCores || "Unknown"}</dd></div></dl></div><div className="fleet-device-base" aria-hidden />
-        <div className="fleet-device-work"><span>{machine.activeCount} active {machine.activeCount === 1 ? "call" : "calls"}</span><InfoDetail title="Active work"><p>Reported at the last heartbeat. A newly started call can take a few seconds to appear.</p></InfoDetail><IconButton label="Call history" onClick={() => onInspect("activity")}><History size={16} aria-hidden /></IconButton></div>
+        <div className="fleet-device-work"><span>{machine.activeCount} active {machine.activeCount === 1 ? "call" : "calls"}</span><PageHelp title="Active work"><p>Reported at the last heartbeat. A newly started call can take a few seconds to appear.</p></PageHelp><IconButton label="Call history" onClick={() => onInspect("activity")}><ArrowUpRight size={16} aria-hidden /></IconButton></div>
       </div>
       <section className="fleet-equipment-bank" aria-label="App equipment"><div className="fleet-bank-heading"><Terminal size={16} aria-hidden /><h5>Installed apps</h5><span>{machine.apps.length}</span><IconButton label="Inspect apps" onClick={() => onInspect("apps")}><ArrowUpRight size={16} aria-hidden /></IconButton></div>
-        <ul>{machine.apps.map(app => <li key={app.id}><button className="fleet-equipment-slot" type="button" aria-pressed={selectedApp?.id === app.id} onClick={() => choose({ kind: "app", id: app.id })}><Terminal size={17} aria-hidden /><span><strong>{app.label}</strong><small>{!online ? "Machine offline" : app.runnable ? "Ready" : "Needs attention"}</small></span></button></li>)}</ul>
+        <ul>{machine.apps.map(app => <li key={app.id}><button className="fleet-equipment-slot" type="button" aria-pressed={selectedApp?.id === app.id} onClick={() => choose({ kind: "app", id: app.id })}><span><strong>{app.label}</strong><small>{!online ? "Machine offline" : app.runnable ? "Ready" : "Needs attention"}</small></span></button></li>)}</ul>
         {machine.apps.length === 0 ? <EmptyState icon={Terminal} title="No installed apps">Apps reported by this machine will appear here.</EmptyState> : null}
       </section>
     </div>
@@ -235,7 +233,7 @@ export function MachineEquipment({ machine, now, onInspect }: { machine: Machine
       {selectedModel ? <div><strong>{selectedModel.modelId}</strong><p>{modelSummary(selectedModel)}{!online ? " · Machine offline" : ""}</p></div>
         : selectedApp ? <div><strong>{selectedApp.label}</strong><p>{selectedApp.why || (selectedApp.runnable ? "Available to run on this machine." : "Not available to run.")}{!online ? " Machine offline." : ""}</p><AppPermissionHelp app={selectedApp} machine={machine} /></div> : null}
     </section> : null}
-    <div className="fleet-machine-tools"><div><Wrench size={16} aria-hidden /><strong>Tools</strong><span>{machine.capabilities.filter(c => c !== "MODEL").map(c => c === "HEADLESS" ? "Terminal" : c === "COMPUTERUSE" ? "Computer use" : c).join(", ") || "None reported"}</span><InfoDetail title="Machine capabilities"><p>{desktop.answer}</p><p>Capabilities are reported by this machine. Connecting it does not grant missing operating-system permissions.</p></InfoDetail></div><button type="button" className="fleet-reading-link" onClick={() => onInspect("sharing")}>{sharingLinkWords(machine)}<ChevronRight size={14} aria-hidden /></button></div>
+
   </ActivityTarget>;
 }
 

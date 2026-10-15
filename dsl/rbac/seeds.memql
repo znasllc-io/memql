@@ -298,7 +298,7 @@ seed capability cap-developer-read-app-accounts-logs { roleSlug: "developer"  ve
 @description("admin: open the logs section of the accounts app -- reproduces the OS registry floor min admin (memql#5300).")
 seed capability cap-admin-read-app-accounts-logs { roleSlug: "admin"  verb: "read"  resourceType: "app:accounts/logs"  predefined: true }
 
-// ---- app:campaigns (registry floor: no floor) ----
+// ---- app:email (registry floor: no floor) ----
 @description("owner: open the email app.")
 seed capability cap-owner-read-app-email { roleSlug: "owner" verb: "read" resourceType: "app:email" predefined: true }
 @description("developer: open the email app.")
@@ -313,25 +313,12 @@ seed capability cap-viewer-read-app-email { roleSlug: "viewer" verb: "read" reso
 seed capability cap-owner-read-app-email-inbox { roleSlug: "owner" verb: "read" resourceType: "app:email/inbox" predefined: true }
 @description("developer: inspect the restricted Email test inbox, which can hold sign-in links for any test recipient.")
 seed capability cap-developer-read-app-email-inbox { roleSlug: "developer" verb: "read" resourceType: "app:email/inbox" predefined: true }
+@description("owner: open the logs section of the email app -- reproduces the OS registry floor min admin (memql#5300).")
 seed capability cap-owner-read-app-email-logs { roleSlug: "owner" verb: "read" resourceType: "app:email/logs" predefined: true }
+@description("developer: open the logs section of the email app -- reproduces the OS registry floor min admin (memql#5300).")
 seed capability cap-developer-read-app-email-logs { roleSlug: "developer" verb: "read" resourceType: "app:email/logs" predefined: true }
+@description("admin: open the logs section of the email app -- reproduces the OS registry floor min admin (memql#5300).")
 seed capability cap-admin-read-app-email-logs { roleSlug: "admin" verb: "read" resourceType: "app:email/logs" predefined: true }
-@description("owner: open the campaigns app -- reproduces the OS registry floor no floor (memql#5300).")
-seed capability cap-owner-read-app-campaigns { roleSlug: "owner"  verb: "read"  resourceType: "app:campaigns"  predefined: true }
-@description("developer: open the campaigns app -- reproduces the OS registry floor no floor (memql#5300).")
-seed capability cap-developer-read-app-campaigns { roleSlug: "developer"  verb: "read"  resourceType: "app:campaigns"  predefined: true }
-@description("admin: open the campaigns app -- reproduces the OS registry floor no floor (memql#5300).")
-seed capability cap-admin-read-app-campaigns { roleSlug: "admin"  verb: "read"  resourceType: "app:campaigns"  predefined: true }
-@description("user: open the campaigns app -- reproduces the OS registry floor no floor (memql#5300).")
-seed capability cap-user-read-app-campaigns { roleSlug: "user"  verb: "read"  resourceType: "app:campaigns"  predefined: true }
-@description("viewer: open the campaigns app -- reproduces the OS registry floor no floor (memql#5300).")
-seed capability cap-viewer-read-app-campaigns { roleSlug: "viewer"  verb: "read"  resourceType: "app:campaigns"  predefined: true }
-@description("owner: open the logs section of the campaigns app -- reproduces the OS registry floor min admin (memql#5300).")
-seed capability cap-owner-read-app-campaigns-logs { roleSlug: "owner"  verb: "read"  resourceType: "app:campaigns/logs"  predefined: true }
-@description("developer: open the logs section of the campaigns app -- reproduces the OS registry floor min admin (memql#5300).")
-seed capability cap-developer-read-app-campaigns-logs { roleSlug: "developer"  verb: "read"  resourceType: "app:campaigns/logs"  predefined: true }
-@description("admin: open the logs section of the campaigns app -- reproduces the OS registry floor min admin (memql#5300).")
-seed capability cap-admin-read-app-campaigns-logs { roleSlug: "admin"  verb: "read"  resourceType: "app:campaigns/logs"  predefined: true }
 
 // ---- app:cluster (registry floor: min admin) ----
 @description("owner: open the cluster app -- reproduces the OS registry floor min admin (memql#5300).")
@@ -434,23 +421,15 @@ seed capability cap-owner-read-app-deployables-runs { roleSlug: "owner"  verb: "
 @description("developer: open the runs section of the deployables app -- the pipeline runs of the sources you connected (memql#5498).")
 seed capability cap-developer-read-app-deployables-runs { roleSlug: "developer"  verb: "read"  resourceType: "app:deployables/runs"  predefined: true }
 
-// ---- app:fleet (registry floor: no floor) ----
-@description("owner: open the fleet app -- reproduces the OS registry floor no floor (memql#5300).")
+// ---- app:fleet (owners and developers only) ----
+@description("owner: manage Fleet and enroll personal machines.")
 seed capability cap-owner-read-app-fleet { roleSlug: "owner"  verb: "read"  resourceType: "app:fleet"  predefined: true }
-@description("developer: open the fleet app -- reproduces the OS registry floor no floor (memql#5300).")
+@description("developer: manage Fleet and enroll personal machines.")
 seed capability cap-developer-read-app-fleet { roleSlug: "developer"  verb: "read"  resourceType: "app:fleet"  predefined: true }
-@description("admin: open the fleet app -- reproduces the OS registry floor no floor (memql#5300).")
-seed capability cap-admin-read-app-fleet { roleSlug: "admin"  verb: "read"  resourceType: "app:fleet"  predefined: true }
-@description("user: open the fleet app -- reproduces the OS registry floor no floor (memql#5300).")
-seed capability cap-user-read-app-fleet { roleSlug: "user"  verb: "read"  resourceType: "app:fleet"  predefined: true }
-@description("viewer: open the fleet app -- reproduces the OS registry floor no floor (memql#5300).")
-seed capability cap-viewer-read-app-fleet { roleSlug: "viewer"  verb: "read"  resourceType: "app:fleet"  predefined: true }
-@description("owner: open the logs section of the fleet app -- reproduces the OS registry floor min admin (memql#5300).")
+@description("owner: read Fleet logs.")
 seed capability cap-owner-read-app-fleet-logs { roleSlug: "owner"  verb: "read"  resourceType: "app:fleet/logs"  predefined: true }
-@description("developer: open the logs section of the fleet app -- reproduces the OS registry floor min admin (memql#5300).")
+@description("developer: read Fleet logs.")
 seed capability cap-developer-read-app-fleet-logs { roleSlug: "developer"  verb: "read"  resourceType: "app:fleet/logs"  predefined: true }
-@description("admin: open the logs section of the fleet app -- reproduces the OS registry floor min admin (memql#5300).")
-seed capability cap-admin-read-app-fleet-logs { roleSlug: "admin"  verb: "read"  resourceType: "app:fleet/logs"  predefined: true }
 
 // ---- app:logs (registry floor: min admin) ----
 @description("owner: open the logs app -- reproduces the OS registry floor min admin (memql#5300).")

@@ -177,7 +177,8 @@ GATE 3 -- User approval                   [reuse planner approval-gate pattern -
 Promote + register                       [authored runtime + scheduler -- NEW, #959]
    bundle -> active ; deps -> owner-catalog (embedded for future reuse, #957)
    runs under author's authz envelope ; per-automation circuit breaker ;
-   leader-gated in cluster ; live pause / retire / version
+   events fire where they happen (claimed once), schedules leader-gated ;
+   live pause / retire / version
 ```
 
 ## Build sequence (validation-first)
@@ -205,7 +206,17 @@ hand-authored mistakes today too).
   **same scope grants + kill-switch** the planner already enforces. Reuse, don't
   reinvent.
 - **Per-automation circuit breaker** fault-isolates a misbehaving authored
-  automation (auto-pause + surface); never cascades.
+  automation (auto-pause + surface); never cascades. A trip records the pause
+  on the bundle row and disarms the bundle on every replica (memql#6022). It
+  pauses only the version that failed, and only while its breaker is still
+  open: a fix armed in the meantime is left running. The node that records
+  the pause tells the engine's pause listeners, which is how an email rule's
+  own row comes to read paused.
+- **Multi-node firing:** an event-triggered authored automation fires on the
+  node where its triggering event happened, and each event run is claimed once
+  across replicas; a scheduled one runs on its owner's assigned node only
+  (leader-gating like the core scheduler, #561). Arming and disarming reach
+  every replica by broadcast plus a periodic reconcile against the database.
 - **Global kill-switch** for all authored automations.
 - **Audit** event on every activation / retirement.
 - **Edit/version semantics:** editing a Responsibility or a shared cataloged dep
@@ -217,8 +228,6 @@ hand-authored mistakes today too).
 - **Syntax & ergonomics** of authored bundles -- what the `.memql` actually looks
   like, how bundles + dependency reuse are expressed, and how the planner emits
   it. (Owner explicitly deferred this.)
-- **Multi-node ownership** specifics -- which node owns an owner's authored
-  automations; leader-gating like the core scheduler (#561).
 - **Catalog GC / retention** -- retiring unused cataloged constructs.
 
 ## Relationship to existing systems

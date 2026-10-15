@@ -433,6 +433,8 @@ export const CAPABILITY_SCRIPTS: Record<string, string> = {
   // ContainerCreating forever with no log line.
   "deploy.installClusterOperators": "scripts/deploy/install-cluster-operators.sh",
   "deploy.seedInstanceSecrets": "scripts/deploy/seed-instance-secrets.sh",
+  "deploy.inspectAzureEmail": "scripts/deploy/inspect-azure-email.sh",
+  "deploy.configureAzureEmail": "scripts/deploy/configure-azure-email.sh",
   "deploy.wireExternalSecrets": "scripts/deploy/wire-external-secrets.sh",
   "deploy.registerGitOpsRepo": "scripts/deploy/register-gitops-repo.sh",
   "deploy.verifyInstallDependencies": "scripts/deploy/verify-install-dependencies.sh",

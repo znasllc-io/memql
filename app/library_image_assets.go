@@ -50,13 +50,10 @@ func (s *libraryImageAssets) SaveImage(ctx context.Context, w library.ImageAsset
 		}
 		return nil
 	}
-	files, versions, sessions, err := s.store.StorageFootprint(ctx)
-	if err != nil {
+	if err := server.CheckStorageAdmission(ctx, s.uploader, s.store.StorageFootprint, int64(len(w.Data)), server.LibraryUserQuotaBytes()); err != nil {
 		return err
 	}
-	if files+versions+sessions+int64(len(w.Data)) > server.LibraryUserQuotaBytes() {
-		return fmt.Errorf("the image would exceed your Library storage quota")
-	}
+
 	object := fmt.Sprintf("library/%s/%s/%s/%s", memql.BareShortId(ac.UserId), w.FileID, digest, w.Name)
 	receipt, err := uploader.CreateVerifiedStream(ctx, s.bucket, object, bytes.NewReader(w.Data), int64(len(w.Data)), digest, w.MIME)
 	if err != nil {

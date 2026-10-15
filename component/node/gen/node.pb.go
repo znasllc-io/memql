@@ -2773,9 +2773,11 @@ type WorkerForwardRequest struct {
 	// it is refused before anything is dispatched -- on the machine it is a shell
 	// command admitted without a consent window, so a sender that forwarded one
 	// past its gate is not trusted to have been right.
-	Purpose       string `protobuf:"bytes,14,opt,name=purpose,proto3" json:"purpose,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
+	Purpose string `protobuf:"bytes,14,opt,name=purpose,proto3" json:"purpose,omitempty"`
+	// Receipt ID only: the stream holder must claim fresh durable authority.
+	ComputerPermissionId string `protobuf:"bytes,15,opt,name=computer_permission_id,json=computerPermissionId,proto3" json:"computer_permission_id,omitempty"`
+	unknownFields        protoimpl.UnknownFields
+	sizeCache            protoimpl.SizeCache
 }
 
 func (x *WorkerForwardRequest) Reset() {
@@ -2902,6 +2904,13 @@ func (x *WorkerForwardRequest) GetAuthority() *ForwardedAuthority {
 func (x *WorkerForwardRequest) GetPurpose() string {
 	if x != nil {
 		return x.Purpose
+	}
+	return ""
+}
+
+func (x *WorkerForwardRequest) GetComputerPermissionId() string {
+	if x != nil {
+		return x.ComputerPermissionId
 	}
 	return ""
 }
@@ -5104,7 +5113,7 @@ const file_node_proto_rawDesc = "" +
 	"\rerror_message\x18\x04 \x01(\tR\ferrorMessage\"K\n" +
 	"\fNodeShutdown\x12\x16\n" +
 	"\x06reason\x18\x01 \x01(\tR\x06reason\x12#\n" +
-	"\rgrace_seconds\x18\x02 \x01(\x05R\fgraceSeconds\"\xe1\x03\n" +
+	"\rgrace_seconds\x18\x02 \x01(\x05R\fgraceSeconds\"\x97\x04\n" +
 	"\x14WorkerForwardRequest\x12\x1d\n" +
 	"\n" +
 	"request_id\x18\x01 \x01(\tR\trequestId\x12'\n" +
@@ -5124,7 +5133,8 @@ const file_node_proto_rawDesc = "" +
 	"\vtimeout_sec\x18\f \x01(\x05R\n" +
 	"timeoutSec\x12G\n" +
 	"\tauthority\x18\r \x01(\v2).znasllc.memql.node.v1.ForwardedAuthorityR\tauthority\x12\x18\n" +
-	"\apurpose\x18\x0e \x01(\tR\apurpose\"\xbc\x02\n" +
+	"\apurpose\x18\x0e \x01(\tR\apurpose\x124\n" +
+	"\x16computer_permission_id\x18\x0f \x01(\tR\x14computerPermissionId\"\xbc\x02\n" +
 	"\x15WorkerForwardResponse\x12\x1d\n" +
 	"\n" +
 	"request_id\x18\x01 \x01(\tR\trequestId\x12\x0e\n" +

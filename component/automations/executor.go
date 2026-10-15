@@ -184,6 +184,11 @@ type AutomationTrigger interface {
 
 // StepContext holds the context for step execution.
 type StepContext struct {
+	// ResumeChild exists only for a proven suspended automation call. It never
+	// authorizes an ordinary invocation or a different child/argument set.
+	ResumeChildStepID string
+	ResumeChild       func(context.Context, string, string, map[string]any) (*AutomationExecution, error)
+
 	Logger            *slog.Logger
 	Engine            *memql.MemQLEngine
 	EventBus          *events.Bus
@@ -228,6 +233,11 @@ type ExecutorOptions struct {
 	// was what produced the resumable row. NewExecutor holds no journal at all
 	// when this is set, which is the mechanical form of that rule.
 	SandboxRun bool
+
+	// TerminalFailures is for a bounded native analysis capability whose scope
+	// cannot expand through classification, a budget approval or replanning.
+	// Journal writes remain enabled; only failure recovery is disabled.
+	TerminalFailures bool
 
 	// CancelPollInterval bounds how often a run re-reads its own
 	// `cancelRequested` flag (memql#5066, cancel.go). Zero takes the default.
@@ -296,6 +306,7 @@ func NewExecutor(opts ExecutorOptions) *Executor {
 	// than letting newWorkJournal decide.
 	if !opts.SandboxRun && opts.Engine != nil {
 		e.journal = newWorkJournal(opts.Engine, opts.Logger)
+		e.journal.terminalFailures = opts.TerminalFailures
 	}
 
 	// Initialize dedup tracker if dedup is enabled
@@ -434,6 +445,7 @@ func (e *Executor) executeWithEvent(ctx context.Context, automation *Automation,
 	}
 
 	exec := NewExecution(automation.Name, triggeredBy)
+	exec.journalFingerprint = automation.DefinitionFingerprint(fingerprintEngine)
 	if adopt != nil {
 		exec.ID = adopt.RunId
 	}
@@ -686,8 +698,11 @@ func (e *Executor) executeWithEvent(ctx context.Context, automation *Automation,
 	}
 	bindRunAmbient(ctx, e.engine, evaluator)
 
+	// Debug, not Info: a scheduled firing that writes nothing now leaves no run
+	// row (journal.go), so this line promised an execution record that may never
+	// exist, and on an idle instance it was one line per tick on the cron leader.
 	if e.logger != nil {
-		e.logger.Info("starting automation execution",
+		e.logger.Debug("starting automation execution",
 			"component", ComponentName,
 			"automation", automation.Name,
 			"executionId", exec.ID,
@@ -743,10 +758,13 @@ func (e *Executor) executeWithEvent(ctx context.Context, automation *Automation,
 		}
 	}
 
-	// Open the run row before the first step, so every later write has a
-	// home. An automation whose trigger names a v1:work:* concept is NOT
-	// journaled: its own step rows would re-fire it, and a feedback loop
-	// through the graph is the failure an event-sourced substrate makes easy.
+	// Give the run its row before anything is written against it: at open, ahead
+	// of the first step, unless it is a held cron tick (holdsScheduledJournal,
+	// below), whose row waits for the tick's first graph write, its failure or
+	// its park on a human wait. An adopted run's row exists already. An
+	// automation whose trigger names a v1:work:* concept is NOT journaled: its
+	// own step rows would re-fire it, and a feedback loop through the graph is
+	// the failure an event-sourced substrate makes easy.
 	journal := e.journal
 	if journalSkipsAutomation(automation) {
 		journal = nil
@@ -772,8 +790,33 @@ func (e *Executor) executeWithEvent(ctx context.Context, automation *Automation,
 	if adopt != nil {
 		exec.overrides = adopt.Overrides
 	}
+	parentJournal, _ := runJournalFrom(ctx)
+	if journal != nil && parentJournal != nil && parentJournal.hold != nil && automation.JournalRequired {
+		// A required child must be durable before it starts, including its parent.
+		parentJournal.release()
+	}
 	if adopt != nil {
 		journal.adoptRun(ctx, automation, exec)
+	} else if journal != nil && parentJournal != nil && parentJournal.hold != nil && !automation.JournalRequired {
+		// A sync child shares the parent's lifetime. Even if the child finishes
+		// before the parent's first write, its queued rows follow the parent's
+		// open. A child failure releases the same queue. Async dispatch has no
+		// parent context and therefore still opens an independent journal.
+		child := *journal
+		child.hold = parentJournal.hold
+		journal = &child
+		journal.openRun(ctx, automation, exec, triggeringEvent, parentCause)
+	} else if journal != nil && holdsScheduledJournal(automation, triggeredBy, adopt) {
+		// A CRON TICK'S RUN OPENS AT ITS FIRST WRITE, NOT HERE (journal.go, the
+		// header). An idle instance's ticks mostly change nothing, and a durable
+		// run of three or more versions plus its steps for each was about 35% of the
+		// rows an idle production instance wrote (2026-10-11). The journal this run
+		// writes through is a copy that holds every row, and the observer on ctx
+		// opens the run when the engine reports a graph write beneath it; a failure
+		// (closeRun) or a park on a human wait (sequence.go) opens it too. The cancel read at the first step boundary still
+		// runs, and still finds no row, which is the answer: nothing can have asked
+		// to cancel a run that is not on file.
+		ctx, journal = journal.heldUntilWrite(ctx, automation, exec, triggeringEvent, parentCause)
 	} else {
 		journal.openRun(ctx, automation, exec, triggeringEvent, parentCause)
 	}
@@ -895,6 +938,11 @@ func (e *Executor) executeStep(ctx context.Context, step *Step, stepCtx *StepCon
 		stepExecCtx = e.engine.ObserveWorkCalls(callContext, cancel)
 	}
 	result, err := e.stepRegistry.Execute(stepExecCtx, step, stepCtx)
+	if errors.Is(err, memql.ErrWorkCheckpointRequired) {
+		// A failed mandatory budget receipt is not an authored step failure:
+		// retry/on-error-continue must never spend the exhausted allowance.
+		return nil, fmt.Errorf("%w: %v", ErrJournalRequired, err)
+	}
 	if isHumanWait(err) {
 		// The question is already persisted. Suspension is neither completion
 		// nor failure and must not trigger repair automations.
@@ -983,6 +1031,10 @@ func (e *Executor) withRunContext(ctx context.Context, stepCtx *StepContext, ste
 	if run, ok := common.RunFromContext(ctx); ok {
 		if memql.BareShortId(run.RunId) == memql.BareShortId(exec.ID) {
 			run.StepKey = key
+			run.RerunRequestId = ""
+			if exec.rerun != nil {
+				run.RerunRequestId = exec.rerun.RequestId
+			}
 			if run.Continuation != nil && run.Continuation.StepKey != key {
 				run.Continuation = nil
 			}

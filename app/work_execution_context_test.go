@@ -366,7 +366,7 @@ func TestAReplayRunsWithTheOverridesItsSourceRecorded(t *testing.T) {
 // owner's routing choice is part of that row: every model call the run's steps
 // make reads it from here.
 func TestExecutionHopRestoresTheOwnersRouteChoice(t *testing.T) {
-	choice := common.RouteChoice{Source: "policy:localFirst", Level: "reasoning", By: "u"}
+	choice := common.RouteChoice{Source: "policy:localFirst", Level: "reasoning", By: "u", NoPaidProviders: true}
 	j := &automations.RunJournal{RunId: "r", GoalId: "g", OwnerUserId: "u", Mode: "live", Routing: choice}
 	ctx, err := workExecutionContext(context.Background(), j, nil, nil)
 	if err != nil {
@@ -390,5 +390,22 @@ func TestHumanResumeClaimMustMatchLatestPersistedAnswer(t *testing.T) {
 		if got := workRerunServable(workspine.DispatchRequest{HumanResumeId: tc.id, Recovery: tc.recovery}, j); got != tc.want {
 			t.Fatalf("claim %+v = %v", tc, got)
 		}
+	}
+}
+
+func TestLeasedHumanResumeClaimCannotServeANewerAnswerOrRerun(t *testing.T) {
+	j := finishedDispatchJournal(nil)
+	j.HumanResumeId = "answer-2"
+	req := workspine.DispatchRequest{HumanResumeId: "answer-1", Recovery: true, HumanResumeRecovery: true}
+	if workRerunServable(req, j) {
+		t.Fatal("old answer lease served a newer answer")
+	}
+	req.HumanResumeId = "answer-2"
+	if !workRerunServable(req, j) {
+		t.Fatal("exact leased answer refused")
+	}
+	j.Rerun = &automations.RerunSpec{RequestId: "new-rerun"}
+	if workRerunServable(req, j) {
+		t.Fatal("answer lease served a new rerun")
 	}
 }

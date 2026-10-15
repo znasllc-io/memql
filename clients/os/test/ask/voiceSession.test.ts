@@ -227,6 +227,8 @@ describe("VoiceSession -- refusals", () => {
       phase: "idle",
       problem: { kind: "denied" },
     });
+    // The microphone's own sentence, as it wrote it.
+    expect(h.session.current().problem?.message).toBe("The browser is not letting this site use the microphone.");
 
     h.session.clearProblem();
     expect(h.session.current().problem).toBeNull();
@@ -245,6 +247,33 @@ describe("VoiceSession -- refusals", () => {
     // it names the fix and a friendlier paraphrase would drop it.
     expect(problem?.message).toBe("streaming transcription is not configured");
     expect(h.capture.stopped).toBe(1);
+  });
+
+  it("takes the server's own frame off as well, and keeps the sentence inside it", async () => {
+    // An error the server classifies as internal arrives as the call's name,
+    // then "MemQL engine failed to execute query. Details: ", then its sentence.
+    const h = harness();
+    h.session.press();
+    await settle();
+    h.wire.refuse(
+      new Error("pushToTalk: MemQL engine failed to execute query. Details: streaming transcription is not configured"),
+    );
+    await settle();
+
+    expect(h.session.current().problem).toEqual({ kind: "failed", message: "streaming transcription is not configured" });
+  });
+
+  it.each([
+    ["something that is not an error", "boom"],
+    ["an error with no words", new Error("")],
+  ])("says that voice did not work when the failure is %s", async (_what, failure) => {
+    const h = harness();
+    h.session.press();
+    await settle();
+    h.wire.refuse(failure);
+    await settle();
+
+    expect(h.session.current().problem).toEqual({ kind: "failed", message: "Voice did not work that time." });
   });
 
   it("does not open a second microphone while one is live", async () => {

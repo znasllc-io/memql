@@ -222,11 +222,7 @@ func TestPipelineLifecycleRequiresAuthorityBeforeJournal(t *testing.T) {
 	}
 }
 
-// The cases use unique owners and fresh stores, with two independent real
-// engines/connections owned by this parent. Reusing only their immutable DSL
-// loading preserves replica behavior without paying a full boot per case.
-func TestPipelineLifecycleDB(t *testing.T) {
-	replicas := pipelineDBTestReplicas(t)
+func testPipelineLifecycleDB(t *testing.T, replicas pipelineDBReplicas) {
 	t.Run("TestPipelineLifecycleDBPinsAndPermanentReleaseAcrossReplicas", func(t *testing.T) {
 		testPipelineLifecycleDBPinsAndPermanentReleaseAcrossReplicas(t, replicas.caseFactory())
 	})

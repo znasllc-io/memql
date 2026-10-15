@@ -21,26 +21,9 @@ import {
 // and then a list that never moves, which is the trap useModelPulls' header
 // already records for `fleetModels`.
 //
-// Measurements ARE real rows, and a live feed over them would be defensible.
-// They are read once anyway, because a measurement changes when somebody
-// presses Probe on this page and at no other time: the reading is not an event
-// with a duration, it is a fact with a date. The PROBE is the live thing, and
-// it rides v1:worker:modelProbe on the same feed shape the pull uses.
-//
-// After a probe finishes the figures are re-read once, which is the one moment
-// they can have changed.
-
-/** The week's usage of a shared machine, as the engine folded it. */
-export interface SharingLedger {
-  /** The one line the page shows. Written on the engine, because the promise
-   *  it carries -- counts and levels, never content -- is enforced with the
-   *  fold rather than in a renderer. */
-  sentence: string;
-  /** False when the read failed. A failed read is NOT an empty ledger:
-   *  telling somebody who lent their machine that nobody used it is a specific
-   *  claim, and a read that did not happen is not evidence for it. */
-  readable: boolean;
-}
+// Measurements are stored rows without a browser broadcast route. A probe
+// queues work on an agent and returns before the measurement lands. Visible
+// consumers use AutoRefresh for these reads, including probes started elsewhere.
 
 export interface MachineInference {
   recommended: RecommendedSet;
@@ -55,11 +38,8 @@ export interface MachineInference {
   /** Measure one model this machine already has. */
   probe: (modelId: string) => Promise<string>;
   probing: string;
-  /** Re-read the figures. Called when a probe reaches a terminal state, which
-   *  is the one moment they can have changed. */
+  /** Re-read the measurements and recommendation. */
   refreshMeasurements: () => void;
-  /** The week's counts for a shared machine, or null while unread. */
-  ledger: SharingLedger | null;
 }
 
 function refusalFrom(err: unknown): string {
@@ -68,7 +48,7 @@ function refusalFrom(err: unknown): string {
   return trimmed === "" ? "The cluster refused and said nothing about why." : trimmed;
 }
 
-export function useMachineInference(workerId: string): MachineInference {
+export function useMachineInference(workerId: string, enabled = true): MachineInference {
   const connection = useOsConnection();
   const [recommended, setRecommended] = useState<RecommendedSet>(EMPTY_SET);
   const [measurements, setMeasurements] = useState<Map<string, Measurement>>(new Map());
@@ -76,11 +56,10 @@ export function useMachineInference(workerId: string): MachineInference {
   const [error, setError] = useState("");
   const [pullingSet, setPullingSet] = useState(false);
   const [probing, setProbing] = useState("");
-  const [ledger, setLedger] = useState<SharingLedger | null>(null);
   const [measurementNonce, setMeasurementNonce] = useState(0);
 
   useEffect(() => {
-    if (connection === null || workerId === "") {
+    if (!enabled || connection === null || workerId === "") {
       setLoading(false);
       return;
     }
@@ -91,14 +70,10 @@ export function useMachineInference(workerId: string): MachineInference {
 
     void (async () => {
       try {
-        const [set, measured, ledgerResult] = await Promise.all([
+        const [set, measured] = await Promise.all([
           connection.query.fleetRecommended({ registrationId: workerId }, { signal: controller.signal }),
           connection.query.measurementsForMachine(
             { machineId: workerId },
-            { signal: controller.signal },
-          ),
-          connection.query.fleetSharingLedger(
-            { registrationId: workerId },
             { signal: controller.signal },
           ),
         ]);
@@ -115,15 +90,6 @@ export function useMachineInference(workerId: string): MachineInference {
           byModel.set(m.modelId, m);
         }
         setMeasurements(byModel);
-        const ledgerRow = (ledgerResult.rows()[0] as Row | undefined) ?? null;
-        setLedger(
-          ledgerRow === null
-            ? null
-            : {
-                sentence: typeof ledgerRow["sentence"] === "string" ? ledgerRow["sentence"] : "",
-                readable: ledgerRow["readable"] === true,
-              },
-        );
       } catch (err: unknown) {
         if (cancelled) return;
         // A FAILED READ HERE DOES NOT EMPTY THE GROUP. The models this machine
@@ -140,7 +106,7 @@ export function useMachineInference(workerId: string): MachineInference {
       cancelled = true;
       controller.abort();
     };
-  }, [connection, workerId, measurementNonce]);
+  }, [connection, workerId, measurementNonce, enabled]);
 
   const pullRecommended = useCallback(async (): Promise<string> => {
     if (connection === null) return "A pull can only be started over a live connection.";
@@ -185,6 +151,5 @@ export function useMachineInference(workerId: string): MachineInference {
     probe,
     probing,
     refreshMeasurements,
-    ledger,
   };
 }

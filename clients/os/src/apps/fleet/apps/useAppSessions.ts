@@ -1,164 +1,85 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { createContext, createElement, useContext, type ReactNode } from "react";
+import type { LiveState, Row } from "@znasllc-io/memql-sdk-core/client";
+import { useSessionIfPresent } from "../../../chrome/access";
+import { useLiveCollection } from "../../../live/useLiveCollection";
+import { useLiveView, type LiveView } from "../../../live/liveView";
 
-import { useOsConnection } from "../../../live/connection";
-import { useReading, type Reading } from "../../../cluster/reading";
 import {
   appSessionDetailFromRow,
   appSessionFromRow,
-  sessionIsLive,
   sessionsNewestFirst,
   type AppSessionDetailRow,
   type AppSessionRow,
 } from "../rows";
 
-// Delegated app sessions: the caller's list, and one run's detail
-// (epic memql#5009).
-//
-// ===========================================================================
-// NEITHER IS LIVE, AND THAT IS THE HONEST ANSWER
-// ===========================================================================
-// `v1:worker:appSession` carries no broadcast routing rule
-// (component/node/routing.go names registration, routingPolicy and
-// workbench:workspace and stops), so a subscription over it would render
-// "Loading from the cluster" and then a list that never moves. The list reads
-// once, says when it looked, and offers to look again -- `useReading`.
-//
-// THE TRANSCRIPT IS THE ONE EXCEPTION, and it POLLS rather than subscribes:
-// the row grows while the run is going and stops when it ends, so the detail
-// re-reads on a timer WHILE the status is starting or running and stops the
-// moment it is not. A finished session re-read forever is load for a row that
-// will never change again, and a surface that never settles.
-//
-// THE TWO READS PROJECT DIFFERENT SHAPES ON PURPOSE. `appSessionsForUser`
-// answers `workerAppSessionCard`, which carries neither the prompt nor the
-// workspace -- a list renders a handful of lines and must not pull a page of
-// text per row to do it. Only `appSessionById` (`workerAppSessionFull`) asks
-// for those, and for the recording's own counters.
-//
-// THERE IS NO WRITE HERE AT ALL. Every writer of this concept is
-// `@serverOnly` and absent from the SDK, so this surface is strictly a
-// reading of somebody's run.
-
-const POLL_INTERVAL_MS = 3000;
+// Created and updated app-session events broadcast from the worker's agent
+// replica to the browser's BFF (component/node/routing.go). One retained feed
+// serves Equipment's short list and Activity's full list. The named reads and
+// event scope both stay on the signed-in user's sessions, including for owners.
+export const APP_SESSION_CONCEPT = "v1:worker:appSession";
 
 export interface AppSessionsState {
+  source: LiveView<AppSessionRow> | null;
   sessions: AppSessionRow[];
+  state: LiveState;
   loading: boolean;
   error: string;
-  readAt: Date | null;
   reread: () => void;
 }
 
-export function useAppSessions(): AppSessionsState {
-  const connection = useOsConnection();
+const AppSessionsContext = createContext<AppSessionsState | null>(null);
 
-  const read = useMemo(() => {
-    const query = connection?.query ?? null;
-    if (query === null) return null;
-    return async (signal: AbortSignal) => {
-      // No ownerUserId argument: the query scopes on actor.userId at the
-      // engine. An id the client chose would be a scope the server has to
-      // distrust anyway.
-      const result = await query.appSessionsForUser({}, { signal });
-      return sessionsNewestFirst(
-        result.rows().map(appSessionFromRow).filter((one) => one.id !== ""),
-      );
-    };
-  }, [connection]);
-
-  const reading: Reading<AppSessionRow[]> = useReading("fleet:appSessions", read);
-
+function useAppSessionsFeed(enabled = true): AppSessionsState {
+  const userId = useSessionIfPresent()?.access?.userId ?? "";
+  const feed = useLiveCollection<Row>(enabled && userId ? `fleet:appSessions:${userId}` : null, connection => ({
+    concept: APP_SESSION_CONCEPT,
+    seed: async (_cursor, signal) => ({ rows: (await connection.query.appSessionsForUser({}, { signal })).rows(), nextCursor: "" }),
+    reread: async (sessionId, signal) => (await connection.query.appSessionById({ sessionId }, { signal })).rows()[0] ?? null,
+    inScope: row => appSessionFromRow(row).ownerUserId === userId,
+    paged: false,
+  }));
+  const source = useLiveView(feed.source, "newest", rows => sessionsNewestFirst(rows.map(appSessionFromRow).filter(row => row.id !== "")));
   return {
-    sessions: reading.value ?? [],
-    loading: reading.state === "reading" || reading.state === "unread",
-    error: reading.error,
-    readAt: reading.at,
-    reread: reading.reread,
+    source,
+    sessions: source?.snapshot.rows ?? [],
+    state: feed.snapshot.state,
+    loading: feed.snapshot.state === "seeding",
+    error: feed.snapshot.error,
+    reread: feed.reseed,
   };
+}
+
+export function AppSessionsProvider({ children }: { children: ReactNode }) {
+  const value = useAppSessionsFeed();
+  return createElement(AppSessionsContext.Provider, { value }, children);
+}
+
+export function useAppSessions(): AppSessionsState {
+  const shared = useContext(AppSessionsContext);
+  const standalone = useAppSessionsFeed(shared === null);
+  return shared ?? standalone;
 }
 
 export interface AppSessionDetailState {
   session: AppSessionDetailRow | null;
   loading: boolean;
   error: string;
-  /** When the most recent read landed. */
-  readAt: Date | null;
-  /** True while the view is re-reading a LIVE run, so the surface can say
-   *  "refreshing" honestly rather than implying a subscription it has not
-   *  got. False the instant the status turns terminal. */
-  polling: boolean;
+  state: LiveState;
   reread: () => void;
 }
 
+// The list seed deliberately omits transcripts. Keep one scoped detail feed
+// while a transcript is open; payload events fold in without another query.
 export function useAppSessionDetail(sessionId: string): AppSessionDetailState {
-  const connection = useOsConnection();
-  const [session, setSession] = useState<AppSessionDetailRow | null>(null);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState("");
-  const [readAt, setReadAt] = useState<Date | null>(null);
-  const [polling, setPolling] = useState(false);
-  const [attempt, setAttempt] = useState(0);
-  const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
-
-  useEffect(() => {
-    const query = connection?.query ?? null;
-    if (query === null || sessionId === "") return;
-    let live = true;
-
-    const read = (first: boolean): void => {
-      if (first) setLoading(true);
-      void query
-        .appSessionById({ sessionId })
-        .then((result) => {
-          if (!live) return;
-          const row = result.rows()[0];
-          if (row === undefined) {
-            setSession(null);
-            setPolling(false);
-            setReadAt(new Date());
-            return;
-          }
-          const detail = appSessionDetailFromRow(row);
-          setSession(detail);
-          setError("");
-          setReadAt(new Date());
-          // POLL ONLY WHILE THE RUN IS LIVE. Terminal is terminal: the
-          // engine drops out-of-order and duplicate chunks, so an ended
-          // transcript is final and a timer over it never settles.
-          if (sessionIsLive(detail.status)) {
-            setPolling(true);
-            timer.current = setTimeout(() => read(false), POLL_INTERVAL_MS);
-          } else {
-            setPolling(false);
-          }
-        })
-        .catch((err: unknown) => {
-          if (!live) return;
-          // The server's own sentence. A wrapper of ours would name this
-          // surface instead of naming the refusal.
-          setError(err instanceof Error ? err.message : String(err));
-          setPolling(false);
-        })
-        .finally(() => {
-          if (live && first) setLoading(false);
-        });
-    };
-
-    read(true);
-
-    return () => {
-      live = false;
-      if (timer.current !== null) clearTimeout(timer.current);
-      timer.current = null;
-    };
-  }, [connection, sessionId, attempt]);
-
-  return {
-    session,
-    loading,
-    error,
-    readAt,
-    polling,
-    reread: () => setAttempt((n) => n + 1),
-  };
+  const userId = useSessionIfPresent()?.access?.userId ?? "";
+  const feed = useLiveCollection<Row>(userId && sessionId ? `fleet:appSession:${userId}:${sessionId}` : null, connection => ({
+    concept: APP_SESSION_CONCEPT,
+    seed: async (_cursor, signal) => ({ rows: (await connection.query.appSessionById({ sessionId }, { signal })).rows(), nextCursor: "" }),
+    reread: async (id, signal) => id === sessionId ? (await connection.query.appSessionById({ sessionId }, { signal })).rows()[0] ?? null : null,
+    inScope: row => { const session = appSessionFromRow(row); return session.id === sessionId && session.ownerUserId === userId; },
+    paged: false,
+  }));
+  const row = feed.snapshot.rows[0];
+  return { session: row ? appSessionDetailFromRow(row) : null, loading: feed.snapshot.state === "seeding",
+    error: feed.snapshot.error, state: feed.snapshot.state, reread: feed.reseed };
 }

@@ -35,6 +35,42 @@ package automations
 // checkpoint (memql#2932): nothing resumes a preview, and the write would
 // escape the sandbox.
 //
+// A SCHEDULED FIRING THAT WRITES NOTHING LEAVES NO JOURNAL. On 2026-10-11 an
+// idle production instance held 226,713 work runs, 93% of them maintenance ticks
+// that changed nothing, each a durable v1:work:run of three or more versions
+// plus its v1:work:step rows: about 35% of the rows the instance wrote. A cron
+// tick therefore holds its journal the way a directly called logic does
+// (heldWrites, logic_statements.go): the run row and every step row wait until
+// the engine reports the run's first graph write (common.NotifyWrite), or until
+// the run fails or parks on a human wait (runStatementAutomation), and are then
+// written in the order they were made. A tick that completes without a write
+// writes nothing at all. holdsScheduledJournal is the rule: a cron tick that is
+// neither adopted (its row exists already and the adoption advances it) nor
+// @journalRequired (it promises confirmed boundaries, and a boundary that waits
+// for a write is not one). Every other trigger is journaled at open, as it
+// always was.
+//
+// A LATE RUN OPENS LIVE. The work sweep judges a running run by its newest
+// heartbeat, heartbeatAt else startedAt, and hands one that has been silent for
+// a minute to another replica, which resumes it from the step in flight while
+// this one is still executing it. A held run's startedAt is the firing's own,
+// possibly minutes old, and the beats it held were stamped when they were
+// made, so replaying them as they were would leave the row looking abandoned
+// from the moment it existed. The row is therefore created carrying a heartbeat
+// of the moment it is written (createWorkRun takes one for this), the pulses
+// made while the run was held are dropped, and the heartbeat on a held step
+// receipt is stamped when it is replayed (heldUntilWrite).
+//
+// THE TRADE-OFF, ACCEPTED: only a write through the engine's mutation path
+// reaches the observer. A builtin that writes through raw SQL alone -- a raw-SQL
+// archive and delete, such as the logs sweep (logsRetentionSweep) -- reports
+// nothing, so a scheduled automation whose only effect is raw SQL leaves no
+// journal unless it fails. Its failure is journaled in full (closeRun opens the
+// run before it classifies or closes it); its success is the one thing it no
+// longer records. workJournalRetentionSweep is not one: when it has detail to
+// retire, its builtin first folds each run's summary through updateWorkRun, an
+// engine write, and that opens its run.
+//
 // AN AUTOMATION THAT REACTS TO WORK ROWS IS NOT JOURNALED. Its own step
 // rows would re-fire its trigger, and a feedback loop through the graph
 // is the one failure the design's event-sourced substrate makes easy.
@@ -46,6 +82,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"maps"
 	"os"
 	"regexp"
 	"sort"
@@ -86,10 +123,13 @@ type workJournal struct {
 	// a node that can reach a model. Nil is a working state: a table miss then
 	// falls to ActAsk, which is what a failed run did before any of this was
 	// wired. See failure_path.go.
-	classifier SymptomClassifier
+	classifier       SymptomClassifier
+	terminalFailures bool
 
 	// hold, when set, keeps every write until release: a directly called
-	// logic's journal, whose run opens only if the logic writes.
+	// logic's journal, whose run opens only if the logic writes, and a
+	// scheduled firing's (heldUntilWrite), whose run opens at its first write,
+	// its failure, or a park on a human wait.
 	hold *heldWrites
 }
 
@@ -149,6 +189,59 @@ func journalSkipsAutomation(a *Automation) bool {
 		return false
 	}
 	return workTriggerPattern.MatchString(strings.TrimSpace(a.Trigger.Event))
+}
+
+// holdsScheduledJournal reports whether a run's journal is held until the run
+// writes (the file comment): a cron tick that is neither adopted nor
+// @journalRequired. "schedule" is the core scheduler's cron firing alone. An
+// authored automation's firing ("authored"), an operator's run of a scheduled
+// automation ("run:client"), a sub-automation and an http trigger each carry
+// their own triggeredBy, and a scheduler recovery re-adopts the row the tick
+// left (adopt.go) -- the case the adopt check is for, since that row says
+// "schedule" too.
+func holdsScheduledJournal(a *Automation, triggeredBy string, adopt *RunAdoption) bool {
+	return a != nil && triggeredBy == "schedule" && adopt == nil && !a.JournalRequired
+}
+
+// heldUntilWrite returns a copy of j whose run opens at the firing's first
+// graph write instead of now, and ctx with the observer that opens it: the
+// pattern of a directly called logic (logic_statements.go), with the run row
+// openRun would have written.
+//
+// A COPY, because the executor's journal is shared by every run it executes.
+// A hold set on it would leave the next run on that executor -- an event
+// firing, a @journalRequired one -- waiting for a write that opens a run nobody
+// is watching. requireRunJournal copies for the same reason.
+//
+// The row is rendered when it is written, so it carries the firing's own start
+// time and not the write's. It is opened under a context that outlives a
+// cancellation, as every held write is (heldWrites.keep): the write that opens
+// it may land after the firing's context is cancelled (a `restart` mode run
+// that a newer fire superseded, a shutdown), and the rows held behind it hang
+// from this one.
+//
+// IT OPENS LIVE, AND REPLAYS NOTHING THAT IS NOT. The work sweep judges a
+// running run by its newest heartbeat, heartbeatAt else startedAt
+// (integrations/work sweep.go lastHeartbeat), and hands one silent for a minute
+// to another replica, which resumes it from the step in flight while this
+// executor is still running it. A late run's startedAt is the firing's own,
+// possibly minutes old, and the heartbeats it held back were each stamped when
+// they were made: born with the start alone and fed those, the row would read
+// as silent from the moment it existed until the last of them landed. So the
+// row is created carrying a heartbeat of the moment it is written (the
+// mutation takes one for this), the pulses duringStep makes while the run is
+// held are dropped (heldWrites.dropsPulses), and the heartbeat on a held step
+// receipt is stamped when it is replayed, not when it was made
+// (heldWrites.beating). reopenRun beats for the same reason.
+func (j *workJournal) heldUntilWrite(ctx context.Context, automation *Automation, exec *AutomationExecution, triggeringEvent *events.Event, parent events.Cause) (context.Context, *workJournal) {
+	h := *j
+	openCtx := context.WithoutCancel(ctx)
+	h.hold = &heldWrites{opensLive: true, open: func() {
+		args := h.openRunArgs(automation, exec, triggeringEvent, parent)
+		args["heartbeatAt"] = rfc3339(time.Now())
+		h.write(openCtx, "createWorkRun", args)
+	}}
+	return common.ContextWithWriteObserver(ctx, func(string, string) { h.release() }), &h
 }
 
 // stepIdUnsafe matches every character a MemQL short id may not carry.
@@ -287,6 +380,19 @@ func (j *workJournal) write(ctx context.Context, name string, args map[string]an
 		return failure
 	}
 	defer func() { j.required.fail(name, err) }()
+	if writes, ok := ctx.Value(cancellationWriteVerifierKey{}).(*cancellationWrites); ok {
+		defer func() {
+			if err != nil && writes.err == nil {
+				writes.err = err
+			}
+		}()
+		if writes.err != nil {
+			return writes.err
+		}
+		if err := writes.verify(ctx); err != nil {
+			return err
+		}
+	}
 	query, err := journalArgs(name, args)
 	if err != nil {
 		j.warn(name, err)
@@ -326,15 +432,23 @@ func (j *workJournal) persistApproval(ctx context.Context, exec *AutomationExecu
 
 // heldWrites keeps a journal's writes until the run they belong to opens: a
 // directly called logic's run, which opens at the logic's first write
-// (logic_statements.go). A journal whose run never opens writes nothing.
-// Held writes are kept unrendered; they cost a render only if they are
-// written.
+// (logic_statements.go), and a scheduled firing's, which opens at the run's
+// first write, when it fails, or when it parks on a human wait
+// (heldUntilWrite, closeRun, sequence.go). A journal whose run
+// never opens writes nothing. Held writes are kept unrendered; they cost a
+// render only if they are written.
 type heldWrites struct {
 	mu       sync.Mutex
 	released bool
 	// open writes the run row when the run opens, ahead of every held write.
-	open   func()
-	writes []heldWrite
+	open func()
+	// opensLive marks the hold of a run that opens LATE, after its firing or
+	// call began: a scheduled firing's (heldUntilWrite) and a directly called
+	// logic's (logic_statements.go), so every hold today. Its run is judged by
+	// its heartbeat the moment it exists, so none of the beats held for it may
+	// be replayed as they were made: see dropsPulses and beating.
+	opensLive bool
+	writes    []heldWrite
 }
 
 type heldWrite struct {
@@ -381,9 +495,42 @@ func (j *workJournal) release() {
 		h.open()
 	}
 	for _, w := range h.writes {
-		j.write(w.ctx, w.name, w.args)
+		j.write(w.ctx, w.name, h.beating(w))
 	}
 	h.writes = nil
+}
+
+// dropsPulses reports whether a heartbeat pulse made now has nothing to renew:
+// the hold is a late run's (opensLive) and the run is not open yet, so there is
+// no row to keep alive and none for the sweep to judge. Kept, a pulse would be
+// replayed once the run opened as one more write that says nothing the open has
+// not said, and a step that runs for minutes would pile up one every fifteen
+// seconds in the meantime. It takes the hold's lock, so a pulse made while the
+// run is being opened waits for it and then goes straight through.
+func (h *heldWrites) dropsPulses() bool {
+	if h == nil || !h.opensLive {
+		return false
+	}
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	return !h.released
+}
+
+// beating is what a held write is written as. A late run (opensLive) is judged
+// by its newest heartbeat, so a run update that carries one -- a step receipt's
+// -- is written with the moment it is written and not the moment it was made,
+// which for a run that opened late is minutes earlier. Everything else is
+// written as it was held. release calls it with the hold's lock taken.
+func (h *heldWrites) beating(w heldWrite) map[string]any {
+	if !h.opensLive || (w.name != "updateWorkRun" && w.name != "createWorkRun") {
+		return w.args
+	}
+	if _, beats := w.args["heartbeatAt"]; !beats {
+		return w.args
+	}
+	args := maps.Clone(w.args)
+	args["heartbeatAt"] = rfc3339(time.Now())
+	return args
 }
 
 // runJournalKey carries, beside the run on a context, the journal that run
@@ -435,7 +582,14 @@ func (j *workJournal) openRun(ctx context.Context, automation *Automation, exec 
 	if j == nil || automation == nil || exec == nil {
 		return
 	}
-	j.call(ctx, "createWorkRun", j.openRunArgs(automation, exec, triggeringEvent, parent))
+	args := j.openRunArgs(automation, exec, triggeringEvent, parent)
+	if parentID, _ := ctx.Value(automationParentKey{}).(string); parentID != "" && parentID != exec.ID {
+		args["parentRunId"] = parentID
+	}
+	if j.hold != nil {
+		args["heartbeatAt"] = rfc3339(time.Now())
+	}
+	j.call(ctx, "createWorkRun", args)
 }
 
 // openRunArgs is the run row openRun writes; parent is openRun's.
@@ -601,6 +755,11 @@ func (j *workJournal) stepFinishedRowOnly(ctx context.Context, exec *AutomationE
 		"durationMs":        result.Duration.Milliseconds(),
 	}
 	if status == "waiting" {
+		if step.Type == StepTypeAutomation && result.Metadata != nil {
+			if child, _ := result.Metadata["executionId"].(string); child != "" {
+				args["childRunId"] = child
+			}
+		}
 		delete(args, "finishedAt")
 		delete(args, "resultFingerprint")
 	}
@@ -657,6 +816,7 @@ func (j *workJournal) reopenRun(ctx context.Context, exec *AutomationExecution) 
 	j.call(ctx, "updateWorkRun", map[string]any{
 		"runId":       exec.ID,
 		"status":      "running",
+		"nodeId":      j.nodeId,
 		"heartbeatAt": rfc3339(time.Now()),
 	})
 }
@@ -664,6 +824,10 @@ func (j *workJournal) reopenRun(ctx context.Context, exec *AutomationExecution) 
 // closeRun writes the terminal status. The executor's status vocabulary
 // (completed / failed / cancelled) maps onto the spec's.
 func (j *workJournal) closeRun(ctx context.Context, exec *AutomationExecution, chainHead string) {
+	if j != nil && j.terminalFailures {
+		j.closeRunRecord(ctx, exec, chainHead)
+		return
+	}
 	if j == nil || exec == nil {
 		return
 	}
@@ -689,6 +853,15 @@ func (j *workJournal) closeRun(ctx context.Context, exec *AutomationExecution, c
 	// nothing to do with the run. Failing it would throw away a compiled
 	// template and a journal because somebody closed a laptop.
 	if status == "failed" {
+		// A HELD RUN OPENS HERE. A scheduled firing that failed without ever
+		// writing (the logs sweep, whose raw-SQL DELETE timed out) is held, and
+		// its failure is the one record it can leave. Everything below reads or
+		// updates the run's row, so the row has to exist first: release writes it,
+		// then the steps held behind it, in order. It is a no-op on a journal that
+		// is not held. Short of a write, only a failure here or a park on a human
+		// wait (sequence.go) opens a hold -- a firing cancelled before it wrote
+		// anything (a shutdown, a superseded `restart` run) stays unrecorded.
+		j.release()
 		// Integration/mesh errors may retain the message but lose their Go
 		// type. The shared Stop receipt is authoritative on every replica;
 		// do not turn it into a retry, budget request or model-classified

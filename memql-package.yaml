@@ -66,6 +66,7 @@ pipeline:
     # tree missing here would run its database tests in go-tests, with no
     # database, where they skip.
     dbGated:
+      - component/filebackups
       - app
       - component/memql
       - component/automations
@@ -80,10 +81,11 @@ pipeline:
       - component/node
       - component/packages
       - component/pipelinerun
+      - component/retention
       - component/server
       - component/sitehealth
       - component/sitetraffic
-      - component/worker/fleetcatalog
+      - component/worker
       - integrations/compose
       - integrations/embedding
       - integrations/knowledge
@@ -102,6 +104,7 @@ pipeline:
       - packs
       - test/inboundhop
       - test/pipelinehop
+      - test/clustere2e
     buckets:
       # Filesystem gates read Go source as well as manifests and docs. The
       # import graph cannot discover these dependencies, so every PR runs them,
@@ -401,6 +404,7 @@ pipeline:
             export MEMQL_REQUIRE_DB=1
             export MEMQL_DIFFERENTIAL_REQUIRED=1
             go test -count=1 -timeout=600s -v ./test/conformance/...
+            go test -count=1 -tags agent -timeout=300s -run 'TestComputerPermissionDBFullApprovalAndForwardedListing|TestWorkDBComputerScopeInputIsModelCorrectable' ./integrations/agent/worker/ ./app/
         - name: proving
           placement: cluster
           services: [postgres]
@@ -503,7 +507,7 @@ pipeline:
             set -eu
             export GOFLAGS=-p=1 GOMEMLIMIT=512MiB GOGC=50
             bash scripts/identity/build-css.sh
-            go test -count=1 -timeout=300s ./ ./integrations ./cmd/envscan/... ./component/architecture/... ./component/envregistry/... ./scripts/... ./test/dslconformance/... ./examples/... ./component/auth/... ./deploy/...
+            go test -count=1 -timeout=300s ./ ./integrations ./integrations/customdomain ./integrations/compose ./cmd/envscan/... ./component/architecture/... ./component/envregistry/... ./scripts/... ./test/dslconformance/... ./examples/... ./component/auth/... ./deploy/...
 
     # Analysis records findings independently of build/test success. It runs on
     # main pushes and release qualification, including their re-runs. The

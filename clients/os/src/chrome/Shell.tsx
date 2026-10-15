@@ -1,3 +1,4 @@
+import { StorageHealthProvider, StorageWarning } from "../cluster/storage/StorageHealth";
 import { AskNavigator } from "../ask/AskNavigator";
 import { SharedExternalConnectionsProvider } from "../modules/connections/useExternalConnections";
 import { SharedCredentialsProvider } from "../modules/connections/useSourceCredentials";
@@ -37,6 +38,7 @@ import { useResolvedAccess } from "../modules/profile/useResolvedAccess";
 import { useRoleLadder } from "../modules/profile/useRoleLadder";
 import { useEffectiveAccess } from "../modules/profile/useEffectiveAccess";
 import type { PlacementTokens } from "../system/placement";
+import { activeDesk } from "../system/desks";
 import { GraphDesktopStore } from "../system/graphStore";
 import { LocalDesktopStore, type DesktopStore } from "../system/store";
 import { SessionProvider, useSession } from "./access";
@@ -136,6 +138,7 @@ export function Shell({
             surfaces that ask (epic memql#5118). Above the desk, because the
             gate below renders instead of it and the presence effect inside it
             has to run when the setup widget is absent. */}
+        <StorageHealthProvider>
         <SetupFactsScope>
         <MachinesProvider>
           <ShellTransports source={source} ports={ports}>
@@ -185,6 +188,7 @@ export function Shell({
           </ShellTransports>
         </MachinesProvider>
         </SetupFactsScope>
+        </StorageHealthProvider>
         </SessionScope>
       </OsConnectionProvider>
     </AuthSourceProvider>
@@ -255,14 +259,10 @@ function ShellRoster({
   layout: ChromeLayout;
   children: ReactNode;
 }) {
-  const { access, config, ladderLoaded, accessEpoch } = useSession();
-  const registry = useMemo(() => ({
-    ...OS_REGISTRY,
-    apps: OS_REGISTRY.apps.filter(app => app.id !== "email" || config.emailAppEnabled !== false),
-  }), [config.emailAppEnabled]);
+  const { access, ladderLoaded, accessEpoch } = useSession();
   return (
     <OsProvider
-      registry={registry}
+      registry={OS_REGISTRY}
       actorRole={access?.role ?? ""}
       // The effective set's epoch (epic memql#5289): the roster gates on the
       // capability set now, and it lands after the role and changes on
@@ -378,15 +378,17 @@ function DesktopChrome({
   onSignOut: () => void;
 }) {
   const { actions, state } = useOs();
+  const fullscreen = activeDesk(state.shell).windows.some(id => state.shell.windows[id]?.mode === "fullscreen");
   const [launcherOpen, setLauncherOpen] = useState(false);
   // Themes is chrome, like Ask -- see themes/ThemeStore.tsx. Opening it
   // CLOSES the Launcher, because the Launcher is a full-screen glass overlay
   // and the marketplace's whole gesture is watching this desktop restyle.
   const [themesOpen, setThemesOpen] = useState(false);
 
+  const [storageWarningHeight, setStorageWarningHeight] = useState(0);
   const placement = useMemo<PlacementTokens>(
-    () => ({ margin: 28, gutter: 16, dockReserve: 118, maxSoloWidth: 1280 }),
-    [],
+    () => ({ margin: 28, gutter: 16, dockReserve: 118 + storageWarningHeight, maxSoloWidth: 1280 }),
+    [storageWarningHeight],
   );
 
   // Desk keyboard bindings (spec A): scoped off editable targets and off
@@ -432,8 +434,8 @@ function DesktopChrome({
           never resolve a drop in the dock at all. The Bin is the first target
           on the far side of that line. */}
       <ShellDragScope>
-        <Desktop viewport={viewport} placement={placement} uploads={uploads} />
-        <Dock onOpenLauncher={() => setLauncherOpen(true)} onSignOut={onSignOut} />
+        <Desktop viewport={viewport} placement={placement} uploads={uploads} hidePager={fullscreen} />
+        <Dock hidden={fullscreen} onOpenLauncher={() => setLauncherOpen(true)} onSignOut={onSignOut} />
       </ShellDragScope>
       <LauncherOverlay
         open={launcherOpen}
@@ -443,6 +445,7 @@ function DesktopChrome({
           setThemesOpen(true);
         }}
       />
+      <StorageWarning onHeightChange={setStorageWarningHeight} />
       <ThemeStore open={themesOpen} onClose={() => setThemesOpen(false)} />
       <AskNavigator />
       <AskSheet dockReserve={placement.dockReserve} />

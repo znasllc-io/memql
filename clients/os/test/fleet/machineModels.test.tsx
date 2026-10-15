@@ -246,20 +246,14 @@ describe("a pull in flight", () => {
   // ===========================================================================
   // THE ROW'S workerId IS CANONICAL AND THE MACHINE'S id IS BARE
   // ===========================================================================
-  // `workerId` is a relationship field, so it is stored canonicalized
-  // (`v1:worker:registration:studio`) while the machine row's own id reaches
-  // the shell bare (`studio`) -- the engine bare-ifies ids on egress. A `===`
-  // comparison would therefore match NOTHING in production while matching
-  // everything in a fixture that happens to use the bare form, which is the
-  // shape of bug a test can create rather than catch.
-  it("matches a pull whose workerId is the canonical id", async () => {
+  it("matches the bare worker id returned on the wire", async () => {
     await mount(
       { "runtime:ollama": "1" },
       {
         pulls: [
           modelPullRow({
             id: "pull-1",
-            workerId: "v1:worker:registration:laptop",
+            workerId: "laptop",
             status: "running",
             statusLine: "pulling manifest",
           }),

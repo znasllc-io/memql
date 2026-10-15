@@ -132,6 +132,10 @@ type DispatchRequest struct {
 	RerunRequestId string
 	// HumanResumeId binds an answered question to its own once-only claim.
 	HumanResumeId string
+	// HumanResumeRecovery is set only by the execution seam after a fresh
+	// stale-heartbeat check. It permits leased takeover of the SAME answer claim if its prior
+	// claimant died before recording the resumed intent. No second key is used.
+	HumanResumeRecovery bool
 	// TriggeredBy is the run's triggeredBy, as the event or the sweep's row
 	// read carried it. Unlike Status it is not a hint: createWorkRun writes it
 	// once and updateWorkRun does not accept it, so every copy of it is the
@@ -445,6 +449,19 @@ func (i *Integration) dispatchRun(ctx context.Context, req DispatchRequest) bool
 		return false
 	}
 
+	// A human answer may arrive before the original executor has persisted
+	// its suspended step. The execution seam can wait for that receipt before
+	// consuming the answer claim; its recovery path preserves the durable wakeup.
+	if preparer, ok := d.(interface {
+		PrepareDispatch(context.Context, DispatchRequest) (DispatchRequest, bool)
+	}); ok {
+		var ready bool
+		req, ready = preparer.PrepareDispatch(ctx, req)
+		if !ready {
+			return false
+		}
+	}
+
 	// The claim key is the RUN ID, which is the identity of the work. Keying
 	// on the automation name instead would let one run of a template block
 	// every other run of the same template.
@@ -495,9 +512,15 @@ func (i *Integration) dispatchRun(ctx context.Context, req DispatchRequest) bool
 // re-run request instead, which its own events claim under.
 func runClaimKey(req DispatchRequest) (string, time.Duration) {
 	// Recovery uses the leased run claim after the execution heartbeat expires.
-	if !req.Recovery {
+	if !req.Recovery || req.HumanResumeRecovery {
 		if id := strings.TrimSpace(req.HumanResumeId); id != "" {
-			return req.RunId + "#answer:" + id + "#rerun:" + strings.TrimSpace(req.RerunRequestId), 0
+			ttl := time.Duration(0)
+			if req.HumanResumeRecovery {
+				// Compete on the original answer row, never an alternate run key.
+				// A fresh answer claimant fences stale sweeps before intent exists.
+				ttl = runClaimTTL
+			}
+			return req.RunId + "#answer:" + id + "#rerun:" + strings.TrimSpace(req.RerunRequestId), ttl
 		}
 	}
 	if id := strings.TrimSpace(req.RerunRequestId); id != "" {
@@ -653,6 +676,7 @@ func (i *Integration) FailRun(ctx context.Context, ownerUserId, runId, code, mes
 
 // DirectGoal is a goal whose template is already known.
 type DirectGoal struct {
+	ParentRunID string
 	// AccountIds and Ceilings apply the same scope and limits as a compiled goal.
 	AccountIds []string
 	Ceilings   map[string]any

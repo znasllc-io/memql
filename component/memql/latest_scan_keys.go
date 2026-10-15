@@ -21,9 +21,12 @@ import (
 // Only a mandatory concept equality makes this bounded. Never extract a
 // constraint from OR, NOT, relationships, or other expression wrappers. ID
 // conjuncts are also safe to push down: an ID never changes across versions.
+// A mandatory equality or membership on an indexed payload field narrows the
+// enumeration to the ids that index finds (latestLookupKeys).
 func (e *MemQLEngine) latestScanKeys(expr ExpressionNode, timestamp *time.Time) *bun.SelectQuery {
 	var concept string
 	var ids []*ComparisonExpression
+	var terms []payloadLookupTerm
 	var visit func(ExpressionNode)
 	visit = func(expr ExpressionNode) {
 		switch n := expr.(type) {
@@ -33,7 +36,14 @@ func (e *MemQLEngine) latestScanKeys(expr ExpressionNode, timestamp *time.Time) 
 				visit(n.Right)
 			}
 		case *ComparisonExpression:
-			if n == nil || len(n.Field.Parts) != 1 {
+			if n == nil {
+				return
+			}
+			if term, ok := payloadLookupTermOf(n); ok {
+				terms = append(terms, term)
+				return
+			}
+			if len(n.Field.Parts) != 1 {
 				return
 			}
 			field, ok := resolveIntrinsicField(n.Field.Parts[0])
@@ -55,14 +65,24 @@ func (e *MemQLEngine) latestScanKeys(expr ExpressionNode, timestamp *time.Time) 
 	if concept == "" {
 		return nil
 	}
-	keys := e.database().NewSelect().Model((*memorynodes.MemoryNode)(nil)).
-		Column("id", "createdAt").DistinctOn("id").
-		Where("concept = ?", concept).OrderExpr(`id ASC, "createdAt" DESC`)
+	idFilters := make([]compiledExpression, 0, len(ids))
 	for _, id := range ids {
 		filter, err := e.compileComparisonExpressionWithContext(id, concept)
 		if err != nil {
 			return nil
 		}
+		idFilters = append(idFilters, filter)
+	}
+	if keys := e.latestLookupKeys(concept, terms, idFilters, timestamp); keys != nil && !memorynodes.HasLiveness(concept) {
+		return keys
+	}
+	keys := e.database().NewSelect().Model((*memorynodes.MemoryNode)(nil)).
+		Column("id", "createdAt").DistinctOn("id").
+		Where("concept = ?", concept).OrderExpr(`id ASC, "createdAt" DESC`)
+	if memorynodes.HasLiveness(concept) {
+		keys = keys.ModelTableExpr(memorynodes.ObservedRowsSQL + " AS mn")
+	}
+	for _, filter := range idFilters {
 		keys = keys.Where(filter.sql, filter.args...)
 	}
 	if timestamp != nil {

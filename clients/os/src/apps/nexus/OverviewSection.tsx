@@ -3,11 +3,11 @@ import type { LiveSnapshot, Row } from "@znasllc-io/memql-sdk-core/client";
 import { Waypoints } from "lucide-react";
 
 import { Button, Caption, ContentSkeleton, EmptyState, Notice } from "../../kit";
-import { InfoDetail } from "../../kit/InfoDetail";
+import { PageHelp } from "../../kit/pageHelp";
 import { absent, figureOf, type Figure } from "../../kit/measure";
 import { Overview, OverviewBreakdown, type OverviewMetric } from "../../kit/Overview";
 import { anyLabelled, reuseTally } from "./reuse";
-import { approvalFromRow, goalFromRow, runFromRow, runIsTerminal } from "./rows";
+import { approvalFromRow, approvalIsPending, goalFromRow, runFromRow, runIsTerminal } from "./rows";
 import { useReusableAfter } from "./useInterventions";
 import { reuseWord } from "./words";
 
@@ -62,7 +62,7 @@ export function OverviewSection({
     [runs.rows],
   );
   const waiting = useMemo(
-    () => approvals.rows.map(approvalFromRow).filter((approval) => approval.id !== "").length,
+    () => approvals.rows.map(approvalFromRow).filter((approval) => approval.id !== "" && approvalIsPending(approval)).length,
     [approvals.rows],
   );
   const tally = useMemo(
@@ -108,7 +108,7 @@ export function OverviewSection({
         /* THE RULES BEHIND THE FIGURES, ONE CLICK AWAY rather than standing
            under them (DESIGN.md rule 7): what each counts, and the reuse
            threshold as the cluster's own policy states it. */
-        <InfoDetail title="About this overview">
+        <PageHelp title="About this overview">
           <p>
             <strong>Goals open</strong> are the ones not closed yet. <strong>Runs in flight</strong> are working
             something out, running, or waiting. <strong>Approvals waiting</strong> are runs stopped on you.
@@ -123,7 +123,7 @@ export function OverviewSection({
             label you gave an automation yourself counts instead of the evidence.
           </p>
           <p>Not yet labelled means nothing has looked at its evidence yet. It is not counted as either.</p>
-        </InfoDetail>
+        </PageHelp>
       }
     >
       {goals.error || runs.error || approvals.error ? (

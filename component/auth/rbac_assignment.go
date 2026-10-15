@@ -260,6 +260,9 @@ func IsClusterOperator(role Role) bool {
 // ScopedRoleMayUse bounds grants as well as role capabilities: a grant is not
 // permission to turn an organization administrator into a cluster operator.
 func ScopedRoleMayUse(role Role, resource string) bool {
+	if resource == "app:fleet" || strings.HasPrefix(resource, "app:fleet/") {
+		return MayManageFleet(role)
+	}
 	if RoleAccountScope(role) == "" {
 		return true
 	}

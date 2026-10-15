@@ -14,7 +14,7 @@ export {
   type ReconnectOptions,
 } from "./connection.js";
 export { Dispatcher, type DispatcherOptions } from "./dispatcher.js";
-export { QueryClient, type QueryCallOptions, type ConceptRegistryFollow } from "./query.js";
+export { QueryClient, refusalSentence, type QueryCallOptions, type ConceptRegistryFollow } from "./query.js";
 export {
   ModulesClient,
   type Module,
@@ -61,12 +61,14 @@ export {
   rowNumber,
   rowObject,
   rowString,
+  versionOrder,
   type AccessSummary,
   type Concept,
   type ConceptField,
   type ConceptFieldKind,
   type ConceptRegistryDelta,
   type ConceptRelationship,
+  type CountAnswer,
   type DomainSubscription,
   type Event,
   type GraphAction,
@@ -87,6 +89,13 @@ export {
 export { renderMemQLValue } from "./memqlValue.js";
 export { deepStripNulls } from "./payload.js";
 export { displayDomainIds, isSyntheticDomainId } from "./domainIds.js";
+// The one way a client creates a file: start a Materializer composition, follow
+// it to its Files entry, and hand a description to the Library's revision
+// workflow (docs/superpowers/specs/2026-10-11-materializer-front-door-design.md).
+export * from "./materialize.js";
+// The rule for what a person may call a new file, which every client checks a
+// name with as it is typed.
+export { fileNameProblem, fileNameStem } from "./fileName.js";
 
 // -----------------------------------------------------------------------------
 // The generated typed construct surface (memql#4232).

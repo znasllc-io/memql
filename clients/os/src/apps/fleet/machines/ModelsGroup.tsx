@@ -29,7 +29,9 @@ import {
 } from "./recommended";
 import { runtimeLabel } from "./hardware";
 import { AskIt } from "../addMachine/AskIt";
-import { useMachineInference } from "./useMachineInference";
+import { AutoRefresh } from "../../../kit/AutoRefresh";
+import { feedIsBehind } from "../../../live/useLiveCollection";
+import { useMachineInference, type MachineInference } from "./useMachineInference";
 import { useModelPulls } from "./useModelPulls";
 
 // The Models group on a machine's detail: what this machine runs, and the act
@@ -59,11 +61,12 @@ import { useModelPulls } from "./useModelPulls";
 // person where a pull has got to, and it is not parsed into a phase vocabulary
 // this side would have to keep in step with somebody else's release.
 
-export function ModelsGroup({ machine, standalone = false }: { machine: MachineRow; standalone?: boolean }) {
+export function ModelsGroup({ machine, standalone = false, inference: supplied }: { machine: MachineRow; standalone?: boolean; inference?: MachineInference }) {
   const { access } = useSession();
   const now = useNow();
-  const { pulls, live, loading, feedError, start, starting } = useModelPulls(machine.id);
-  const inference = useMachineInference(machine.id);
+  const { pulls, live, loading, feedError, state, reseed, start, starting } = useModelPulls(machine.id);
+  const ownInference = useMachineInference(machine.id, !supplied);
+  const inference = supplied ?? ownInference;
 
   const models = useMemo(() => machineModelsFrom(machine.reportedLabels), [machine.reportedLabels]);
   const chatModel = models.find((model) => !model.embeddings);
@@ -88,6 +91,8 @@ export function ModelsGroup({ machine, standalone = false }: { machine: MachineR
 
   return (
     <div className="os-fleet-machinemodels">
+      {!supplied ? <AutoRefresh busy={inference.loading} onRefresh={inference.refreshMeasurements} /> : null}
+      <AutoRefresh enabled={feedIsBehind(state, feedError)} busy={loading} onRefresh={reseed} />
       {!standalone ? <Subhead meta={models.length}>Models</Subhead> : null}
 
       <RuntimeLine runtimes={runtimes} modelCount={models.length} />

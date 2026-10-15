@@ -2,7 +2,7 @@ import { useEffect, useId, useRef, useState } from "react";
 
 import { ActionBar, type Act } from "../../../kit/ActionBar";
 import { Head, Notice } from "../../../kit";
-import { InfoDetail } from "../../../kit/InfoDetail";
+import { PageHelp } from "../../../kit/pageHelp";
 import { ActivityTarget } from "../../../kit/SemanticActivity";
 import { useOsConnection } from "../../../live/connection";
 import { policyDescription, type TaskPolicy } from "../taskPolicies";
@@ -189,10 +189,10 @@ export function RouteComposer({
             breadcrumbs={[{ label: "Routes", onSelect: onBack }, { label: title }]}
             back={{ label: "Routes", onSelect: onBack }}
           >
-            <InfoDetail title="How a route works">
+            <PageHelp title="How a route works">
               <p>A route tries its sources in order and a call takes the first one that can serve. The line runs as far as a call would get right now and stops at the source that would answer it.</p>
               <p>A source that cannot serve stays in the route and is used again when it can. Vendors bill per call. An app in a route does not grant it permissions on your machine.</p>
-            </InfoDetail>
+            </PageHelp>
           </Head>
           <Description
             value={shown.description}

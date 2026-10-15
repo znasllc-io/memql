@@ -1,5 +1,6 @@
 import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
+import { readTheBar } from "../readTheBar";
 import type { Row } from "@znasllc-io/memql-sdk-core/client";
 
 const h = vi.hoisted(() => ({ connection: null as unknown }));
@@ -151,12 +152,14 @@ describe("goals, the landing surface", () => {
     });
     mount(conn);
     fireEvent.click(await screen.findByText("Reconcile the ledger"));
-    fireEvent.click(await screen.findByText("Close this goal"));
+    await screen.findByLabelText(/Type the goal's own words/);
+    expect(screen.queryByText("Close this goal")).toBeNull();
     expect(conn.query.cancelGoal).not.toHaveBeenCalled();
 
     fireEvent.change(screen.getByLabelText(/Type the goal's own words/), {
       target: { value: "Reconcile the ledger" },
     });
+    await readTheBar();
     fireEvent.click(screen.getByText("Close this goal"));
     await waitFor(() => expect(conn.query.cancelGoal).toHaveBeenCalled());
     expect(conn.query.cancelGoal.mock.calls[0]?.[0]).toMatchObject({ goalId: "g1" });
@@ -320,13 +323,31 @@ describe("the arrival cue", () => {
         runRow({ id: "r1", status: "waiting", waitingOn: { kind: "approval" } }),
       );
     });
-    await waitFor(() => expect(screen.getByText("waiting for you")).toBeTruthy());
+    await waitFor(() => expect(screen.getByText("Waiting")).toBeTruthy());
+    expect(screen.queryByText("waiting for you")).toBeNull();
     const row = screen.getByText("nightlyReconcile").closest("li");
     expect(row?.getAttribute("data-arrival")).toBe("updated");
   });
 });
 
 describe("the runs list", () => {
+  it("shows the generated summary instead of repeating the full request and toggles chronological order", async () => {
+    const statement = "Please examine this repository, read its instructions, diagnose the bug, implement a solution and run its tests.";
+    mount(fakeConnection({
+      goals: [goalRow({ id: "g1", statement })],
+      runs: [
+        runRow({ id: "r1", goalId: "g1", classification: { workTitle: "Fix repository bug" }, createdAt: "2026-09-01T09:00:00Z" }),
+        runRow({ id: "r2", workTitle: "Review release notes", createdAt: "2026-09-02T09:00:00Z" }),
+      ],
+    }), "runs");
+    await screen.findByText("Fix repository bug");
+    expect(screen.queryByText(statement)).toBeNull();
+    const titles = () => [...document.querySelectorAll(".os-nexus-run-name")].map(row => row.textContent);
+    expect(titles()).toEqual(["Review release notes", "Fix repository bug"]);
+    fireEvent.click(screen.getByRole("button", { name: "Sort order: Newest first" }));
+    await waitFor(() => expect(titles()).toEqual(["Fix repository bug", "Review release notes"]));
+  });
+
   it("seeds UNFILTERED, so the show-finished toggle cannot re-baseline the cue", async () => {
     const conn = fakeConnection({ runs: [runRow({ id: "r1" })] });
     mount(conn, "runs");

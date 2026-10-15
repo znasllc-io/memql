@@ -103,23 +103,30 @@ builtin logsSearch(windowStart: "2026-09-02T00:00:00Z", windowEnd: "2026-09-03T0
 
 The `logsRetentionSweep` automation runs nightly at 03:20 UTC on the cron
 leader (a Postgres advisory lock, so exactly one replica runs it) and calls
-`builtin logsSweep`. For every UTC day older than `MEMQL_LOGS_RETENTION_DAYS`
-(default 30), at most sixty per run:
+`builtin logsSweep`. For every UTC day older than logLine's declared
+`@retention(ttl="30d", keepLatest=false, archive="required")`, at most sixty
+per run:
 
 1. each node type's rows for the day are written as one object,
    `logs/<YYYY-MM-DD>/<nodeType>.ndjson.gz`, into
    `MEMQL_LOGS_ARCHIVE_CONTAINER` (default: the cluster's
    `MEMQL_AZURE_BLOB_CONTAINER`) -- one JSON object per line, the concept's
    field names, gzip;
-2. only once every node type of that day is uploaded, that day's rows are
-   deleted.
+2. each uploaded object is downloaded with a size limit and compared byte for
+   byte; only once every node type of that day is verified, the day's chunk is
+   dropped whole (`drop_chunks` bounded to the day), which gives its disk
+   back at once and never decompresses a compressed chunk. Only rows that no
+   chunk lying wholly inside the day holds -- a plain table, or a chunk that
+   straddles midnight -- are deleted instead, in batches.
 
 **No archive, no delete.** A cluster with no object storage configured keeps
 its lines, and the sweep says so in its own log line every night (search for
 component `logs`, level `warn`). Set a container, and the next run catches
-up. The run's one INFO line carries days archived, rows archived and rows
-deleted; `memql_logs_archived_total` and `memql_logs_deleted_total` carry the
-same figures for alerting. An owner may run the sweep by hand with
+up. The run's one INFO line carries days archived, rows archived, rows
+deleted and chunks dropped (`chunksDropped` in the builtin's reply); a
+dropped day's rows count as deleted at what the day archived.
+`memql_logs_archived_total` and `memql_logs_deleted_total` carry the same row
+figures for alerting. An owner may run the sweep by hand with
 `builtin logsSweep()`; a second sweep while one runs answers `skipped`.
 
 ### Bringing a day back
@@ -144,7 +151,7 @@ next nightly run: read it now.
 |---|---|---|
 | `MEMQL_LOGS_LEVEL` | `info` | The store's floor on this node: `debug`, `info`, `warn`, `error`, or `off`. The console level is untouched. |
 | `MEMQL_LOGS_MAX_LINES_PER_SECOND` | `2000` | Per-node cap (10..100000); beyond it lines are dropped and counted as `rate`. |
-| `MEMQL_LOGS_RETENTION_DAYS` | `30` | Days kept before the nightly sweep archives and deletes (1..365). |
+| `MEMQL_LOGS_RETENTION_DAYS` | `30` | Fallback days (1..365) when logLine has no `@retention` declaration. The declared policy takes precedence. |
 | `MEMQL_LOGS_ARCHIVE_CONTAINER` | `MEMQL_AZURE_BLOB_CONTAINER` | The blob container the archive lands in. Empty means no archive, and no delete. |
 
 All four are registered in `scripts/secrets/manifest.yaml` under

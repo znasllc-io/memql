@@ -1,262 +1,301 @@
+import { useEffect, useState } from "react";
+import {
+  rowBool,
+  rowString,
+  sameEntityId,
+  type Row,
+} from "@znasllc-io/memql-sdk-core/client";
+import {
+  Button,
+  ContentSkeleton,
+  EmptyState,
+  Fact,
+  Facts,
+  Head,
+  LiveList,
+  Notice,
+  Panel,
+  RecordRow,
+  Refine,
+  listCount,
+  useLiveView,
+  type LiveListSource,
+} from "../../kit";
 import { AddButton } from "../../kit/AddButton";
-import { InlineSkeleton } from "../../kit/ContentSkeleton";
-import { useTemplateFiles } from "./useCompose";
-import { artifactFromRow } from "../files/rows";
-import { AccountPicker } from "../accounts/AccountPicker";
-import { accountIsArchived, type AccountRow } from "../accounts/rows";
-import { useState } from "react";
-
-import { Button, Caption, Field, Head, Input, Notice, Panel, RecordList, RecordRow, Select, Subhead, formatMoment } from "../../kit";
+import { ActionBar } from "../../kit/ActionBar";
+import { accountName, type AccountRow } from "../accounts/rows";
+import { AddTemplateWizard } from "./AddTemplateWizard";
 import type { NewTemplateFacts } from "./actions";
-import type { RecipeRow, TemplateRow } from "./rows";
-import { FORMATS, RECIPES_EMPTY, TEMPLATES_EMPTY, formatWord } from "./words";
-
-// TemplatesSection -- what makes an output repeatable, in two halves.
-//
-// ===========================================================================
-// TEMPLATES AND RECIPES ARE DIFFERENT ANSWERS TO THE SAME QUESTION, so
-// they share a section rather than each taking one.
-// ===========================================================================
-// A TEMPLATE makes the output LOOK the same: a branded document, an HTML
-// shell. A RECIPE makes it BE the same: the sources, the target and the
-// template, re-run against whatever the graph holds now. Somebody asking
-// "how do I make this again next quarter" is asking about both, and two
-// sections would make them answer it twice.
-//
-// ===========================================================================
-// A TEMPLATE IS A BINDING, AND THE BYTES ARE THE LIBRARY'S
-// ===========================================================================
-// The form takes a Library FILE ID, not an upload. That is design D7 made
-// visible: uploading is what the Files app is for, and this app binding a
-// file it did not upload is what gives templates versions, chunked
-// transfers and archive-to-Bin without any of them being built here. The
-// caption says so, because a form asking for an id with no explanation
-// reads as an unfinished upload control.
+import { templateFingerprint, templateFromRow } from "./rows";
+import { fileWord, type FileOption } from "./ingredientFiles";
+import { formatWord } from "./words";
 
 export interface TemplatesSectionProps {
-  templates: TemplateRow[];
+  source: LiveListSource<Row> | null;
   accounts: AccountRow[];
-  recipes: RecipeRow[];
+  files: readonly Row[];
+  filesLoading: boolean;
+  filesError: string;
   busy: boolean;
   error: string;
-  onCreateTemplate: (facts: NewTemplateFacts) => Promise<string>;
-  onArchiveTemplate: (templateId: string) => void;
-  onRestoreTemplate: (templateId: string) => void;
-  onRunRecipe: (recipeId: string) => void;
-  onArchiveRecipe: (recipeId: string) => void;
-  onRestoreRecipe: (recipeId: string) => void;
   showArchived: boolean;
-  templatesAvailable?: boolean;
-  recipesAvailable?: boolean;
+  onRetry: () => void;
+  onRetryFiles: () => void;
+  onReset: () => void;
+  onCreateTemplate: (facts: NewTemplateFacts) => Promise<string>;
+  onArchiveTemplate: (id: string) => void;
+  onRestoreTemplate: (id: string) => void;
+  onFilesNeeded: (needed: boolean) => void;
 }
-
 export function TemplatesSection({
+  source,
   accounts,
-  templates,
-  recipes,
+  files,
+  filesLoading,
+  filesError,
   busy,
   error,
+  showArchived,
+  onRetry,
+  onRetryFiles,
+  onReset,
   onCreateTemplate,
   onArchiveTemplate,
   onRestoreTemplate,
-  onRunRecipe,
-  onArchiveRecipe,
-  onRestoreRecipe,
-  showArchived,
-  templatesAvailable = false,
-  recipesAvailable = false,
+  onFilesNeeded,
 }: TemplatesSectionProps) {
-  const [adding, setAdding] = useState(false);
-  const visibleTemplates = templates.filter((t) => showArchived || !t.archived);
-  const visibleRecipes = recipes.filter((r) => showArchived || !r.archived);
-
+  const [search, setSearch] = useState(""),
+    [page, setPage] = useState(""),
+    [adding, setAdding] = useState(false);
+  const view = useLiveView(source, `${showArchived}|${search}`, (rows) =>
+    rows.filter((row) => {
+      const t = templateFromRow(row);
+      return (
+        (showArchived || !t.archived) &&
+        `${t.name} ${t.description}`
+          .toLowerCase()
+          .includes(search.trim().toLowerCase())
+      );
+    }),
+  );
+  const selected = source?.snapshot.rows.find((row) =>
+    sameEntityId(rowString(row, "id"), page),
+  );
+  const template = selected ? templateFromRow(selected) : null;
+  useEffect(() => {
+    onFilesNeeded(adding || !!page);
+    return () => onFilesNeeded(false);
+  }, [adding, page, onFilesNeeded]);
+  function back() {
+    setAdding(false);
+    setPage("");
+    onReset();
+  }
+  const fileOptions: FileOption[] = files
+    .filter(
+      (row) =>
+        !rowBool(row, "archived") &&
+        !rowBool(row, "deleted") &&
+        fileWord(rowString(row, "name")) !== "ZIP",
+    )
+    .map((row) => ({
+      id: rowString(row, "id"),
+      name: rowString(row, "name"),
+      kind: fileWord(rowString(row, "name")),
+      createdAt: rowString(row, "createdAt"),
+    }))
+    .sort((a, b) => b.createdAt.localeCompare(a.createdAt));
+  const organizationName = (id: string) => {
+    const a = accounts.find((a) => sameEntityId(a.id, id));
+    return a ? accountName(a) : "Unavailable organization";
+  };
   return (
-    <div className="os-mz-templates">
-      <Head title="Templates" meta={templatesAvailable ? visibleTemplates.length : undefined}>
-        {adding ? <Button tone="quiet" onClick={() => setAdding(false)}>Cancel</Button>
-          : <AddButton label="Bind a file" onClick={() => setAdding(true)} />}
-      </Head>
-
-      {error ? <Notice tone="error" sentence={error} /> : null}
-
+    <>
+      <div hidden={adding || !!page} className="mz-list-host">
+        <div className="mz-list-section">
+          <Head
+            title="Templates"
+            navigation={!adding && !page}
+            meta={listCount(view?.snapshot)}
+          >
+            <Refine
+              search={search}
+              onSearch={setSearch}
+              label="Refine templates"
+            />
+            <AddButton
+              label="Add a template"
+              onClick={() => {
+                onReset();
+                setAdding(true);
+              }}
+            />
+          </Head>
+          <LiveList
+            source={view}
+            label="Templates"
+            rowId={(row) => templateFromRow(row).id}
+            fingerprint={(row) => templateFingerprint(templateFromRow(row))}
+            errorContent={
+              <>
+                <Notice
+                  tone="error"
+                  sentence="This cluster did not return your templates."
+                  detail={source?.snapshot.error}
+                />
+                <Button tone="quiet" onClick={onRetry}>
+                  Try again
+                </Button>
+              </>
+            }
+            emptyContent={
+              <EmptyState
+                title={search.trim() ? "No matches" : "No templates yet"}
+              >
+                {search.trim()
+                  ? "Clear the filters to see everything."
+                  : "A template is a Library file whose look a new file can take."}
+              </EmptyState>
+            }
+            renderRow={(row) => {
+              const t = templateFromRow(row);
+              return (
+                <RecordRow
+                  name={t.name}
+                  secondary={t.description}
+                  state={t.archived ? "Archived" : "Active"}
+                  dim={t.archived}
+                  onOpen={() => {
+                    onReset();
+                    setPage(t.id);
+                  }}
+                >
+                  {t.placeholders.length
+                    ? `Asks for ${t.placeholders.map((p) => p.name).join(", ")}`
+                    : null}
+                </RecordRow>
+              );
+            }}
+          />
+        </div>
+      </div>
       {adding ? (
-        <NewTemplateForm
+        <AddTemplateWizard
+          files={fileOptions}
+          filesLoading={filesLoading}
+          filesError={filesError}
           accounts={accounts}
           busy={busy}
-          onCreate={async (facts) => {
-            const id = await onCreateTemplate(facts);
-            if (id) setAdding(false);
+          refusal={error}
+          onCancel={back}
+          onRetryFiles={onRetryFiles}
+          onAdd={(facts) => {
+            void onCreateTemplate(facts).then((id) => {
+              if (id) {
+                setAdding(false);
+                setPage(id);
+              }
+            });
           }}
         />
       ) : null}
-
-      {visibleTemplates.length === 0 ? (
-        <p className="os-caption">{TEMPLATES_EMPTY}</p>
-      ) : (
-        <RecordList as="ul" label="Templates">
-          {visibleTemplates.map((t) => (
-            <div key={t.id}>
-              <RecordRow
-                name={t.name}
-                secondary={t.description || undefined}
-                state={t.archived ? "Archived" : formatWord(t.format)}
-                dim={t.archived}
-                actions={
-                  <>
-                    {t.archived ? (
-                      <Button tone="quiet" onClick={() => onRestoreTemplate(t.id)}>
-                        Restore
-                      </Button>
-                    ) : (
-                      <Button tone="quiet" onClick={() => onArchiveTemplate(t.id)}>
-                        Archive
-                      </Button>
-                    )}
-                  </>
-                }
-              >
-                <span className="os-mz-template-desc">
-                  {t.placeholders.length > 0 ? `Asks for ${t.placeholders.map((p) => p.name).join(", ")}` : ""}
-                </span>
-              </RecordRow>
+      {page && !adding ? (
+        template ? (
+          <div className="os-deploy-pane">
+            <div className="os-deploy-scroll">
+              <Head
+                title={template.name}
+                breadcrumbs={[
+                  { label: "Templates", onSelect: back },
+                  { label: template.name },
+                ]}
+                back={{ label: "Templates", onSelect: back }}
+              />
+              <Panel label="The template">
+                <Facts>
+                  <Fact label="Makes" value={formatWord(template.format)} />
+                  <Fact
+                    label="File"
+                    value={
+                      rowString(
+                        files.find((row) =>
+                          sameEntityId(rowString(row, "id"), template.fileId),
+                        ) ?? {},
+                        "name",
+                      ) ||
+                      (filesLoading ? (
+                        <ContentSkeleton label="Reading the file" />
+                      ) : (
+                        "Unavailable file"
+                      ))
+                    }
+                  />
+                  <Fact
+                    label="Description"
+                    value={template.description || "None"}
+                  />
+                  <Fact
+                    label="Organization"
+                    value={
+                      template.accountIds.map(organizationName).join(", ") ||
+                      "None"
+                    }
+                  />
+                  <Fact
+                    label="Asks for"
+                    value={
+                      template.placeholders.map((p) => p.name).join(", ") ||
+                      "Nothing"
+                    }
+                  />
+                </Facts>
+              </Panel>
+              {error ? <Notice tone="error" sentence={error} /> : null}
             </div>
-          ))}
-        </RecordList>
-      )}
-
-      <Subhead meta={recipesAvailable ? visibleRecipes.length : undefined}>Recipes</Subhead>
-      <Caption>
-        A recipe re-runs a composition against whatever the graph holds now — it stores the
-        selection, not the rows the selection returned. A re-run that matches what was done before
-        reaches no model at all.
-      </Caption>
-
-      {visibleRecipes.length === 0 ? (
-        <p className="os-caption">{RECIPES_EMPTY}</p>
-      ) : (
-        <RecordList as="ul" label="Recipes">
-          {visibleRecipes.map((r) => (
-            <div key={r.id}>
-              <RecordRow
-                name={r.name}
-                secondary={r.description || undefined}
-                state={r.archived ? "Archived" : formatWord(r.format)}
-                dim={r.archived}
-                actions={
-                  <>
-                    {r.archived ? (
-                      <Button tone="quiet" onClick={() => onRestoreRecipe(r.id)}>
-                        Restore
-                      </Button>
-                    ) : (
-                      <>
-                        <Button tone="quiet" onClick={() => onArchiveRecipe(r.id)}>
-                          Archive
-                        </Button>
-                        {/* DEFAULT, NOT PRIMARY. A primary tone on every row
-                            of a list is a column of green, and the accent
-                            stops meaning "this is the thing to do" when
-                            every row claims it. The one primary act on this
-                            section is the Head's Bind a file. */}
-                        <Button busy={busy} onClick={() => onRunRecipe(r.id)}>
-                          Run it again
-                        </Button>
-                      </>
-                    )}
-                  </>
-                }
-              >
-                <span className="os-mz-template-desc">
-                  {/* ABSENT IS NOT ZERO for most fields in this shell, and
-                      here it genuinely IS zero: nothing wrote runCount
-                      before the concept existed, because the concept is
-                      new. So "not yet" is honest rather than a guess.
-
-                      `lastRunAt` is rendered CONTINUOUSLY and is absent
-                      from the arrival-cue fingerprint: a recipe on a
-                      schedule would touch it forever, and naming it as news
-                      would strobe this list on that cycle. It goes through
-                      the kit's own formatter -- a raw RFC3339 string is the
-                      data voice, and "when did this last run" is a question
-                      a person asks in months. */}
-                  {r.runCount === 0
-                    ? "Not run yet"
-                    : `Made ${r.runCount} ${r.runCount === 1 ? "time" : "times"}, last on ${formatMoment(r.lastRunAt)}`}
-                </span>
-              </RecordRow>
+            <ActionBar
+              state={template.archived ? "Archived" : "Active"}
+              acts={[
+                template.archived
+                  ? {
+                      label: "Restore",
+                      tone: "primary",
+                      busy,
+                      onAct: () => onRestoreTemplate(template.id),
+                    }
+                  : {
+                      label: "Archive",
+                      text: true,
+                      busy,
+                      onAct: () => onArchiveTemplate(template.id),
+                    },
+              ]}
+            />
+          </div>
+        ) : (
+          <div className="os-deploy-pane">
+            <div className="os-deploy-scroll">
+              <Head
+                title="Template"
+                back={{ label: "Templates", onSelect: back }}
+              />
+              {source?.snapshot.error ? (
+                <>
+                  <Notice
+                    tone="error"
+                    sentence="This cluster did not return the template."
+                    detail={source.snapshot.error}
+                  />
+                  <Button tone="quiet" onClick={onRetry}>
+                    Try again
+                  </Button>
+                </>
+              ) : (
+                <ContentSkeleton label="Reading the template" />
+              )}
             </div>
-          ))}
-        </RecordList>
-      )}
-    </div>
-  );
-}
-
-function NewTemplateForm({
-  accounts,
-  busy,
-  onCreate,
-}: {
-  busy: boolean;
-  onCreate: (facts: NewTemplateFacts) => void;
-  accounts: AccountRow[];
-}) {
-  const [name, setName] = useState("");
-  const [accountId, setAccountId] = useState("");
-  const [description, setDescription] = useState("");
-  const [fileId, setFileId] = useState("");
-  const [format, setFormat] = useState("docx");
-  const feed = useTemplateFiles();
-  const files = feed.snapshot.rows.map(artifactFromRow).filter(file =>
-    file.kind === "file" && !file.archived && file.sourceConceptRef &&
-    !/\.zip$/i.test(file.title) && !/zip/i.test(file.mimeType));
-  const selectedFile = files.find(file => file.sourceConceptRef === fileId);
-
-  return (
-    <Panel label="Bind a Library file as a template">
-      <Field label="Organization">
-        <AccountPicker id="mz-template-organization" label="Organization" required value={accountId} onChange={setAccountId} accounts={accounts} />
-      </Field>
-      <Field label="Name">
-        <Input id="mz-tpl-name" value={name} onChange={setName} label="Name" placeholder="Acme quarterly" />
-      </Field>
-      <Field label="What it is for">
-        <Input
-          id="mz-tpl-desc"
-          value={description}
-          onChange={setDescription}
-          label="What it is for"
-          placeholder="The branded report we send Acme"
-        />
-      </Field>
-      <Field label="Library file">
-        <Select id="mz-tpl-file" value={selectedFile ? fileId : ""} onChange={setFileId} label="Library file">
-          <option value="" disabled>Choose a file</option>
-          {files.map(file => <option key={file.id} value={file.sourceConceptRef}>{file.title || "Untitled file"}</option>)}
-        </Select>
-        {feed.snapshot.error ? <Notice tone="error" sentence={feed.snapshot.error} /> : null}
-        {feed.snapshot.state === "seeding" && files.length === 0 ? <InlineSkeleton label="Loading files" /> : null}
-      </Field>
-      <Field label="What it produces">
-        <Select id="mz-tpl-format" value={format} onChange={setFormat} label="What it produces">
-          {FORMATS.map((f) => (
-            <option key={f} value={f}>
-              {formatWord(f)}
-            </option>
-          ))}
-        </Select>
-      </Field>
-      <Caption>
-        Upload the file in Files first — a template is a binding to a file your Library already
-        holds, so it keeps that file's versions and archives with it.
-      </Caption>
-      <div className="os-panel-actions">{accounts.some(account => account.id === accountId && !accountIsArchived(account)) && name.trim() && selectedFile ? <Button
-        tone="primary"
-        busy={busy}
-        onClick={() => onCreate({ name, description, fileId, format, accountId })}
-      >
-        Bind it
-      </Button> : null}</div>
-    </Panel>
+          </div>
+        )
+      ) : null}
+    </>
   );
 }

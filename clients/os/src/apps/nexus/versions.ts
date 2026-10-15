@@ -1,3 +1,4 @@
+import { versionOrder } from "@znasllc-io/memql-sdk-core/client";
 import { rowNumber, rowString, type Row } from "@znasllc-io/memql-sdk-core/client";
 
 import { flatten } from "../../kit/rows";
@@ -68,7 +69,7 @@ export function versionsByKey(versions: readonly StepVersion[]): Map<string, Ste
     if (version.key === "") continue;
     const held = byKey.get(version.key) ?? new Map<number, StepVersion>();
     const prior = held.get(version.version);
-    if (prior === undefined || prior.createdAt <= version.createdAt) held.set(version.version, version);
+    if (prior === undefined || (versionOrder(prior.createdAt, version.createdAt) ?? 0) <= 0) held.set(version.version, version);
     byKey.set(version.key, held);
   }
   const out = new Map<string, StepVersion[]>();

@@ -190,17 +190,15 @@ type costHop struct {
 // replica B, its stream.
 func costMachine(id, owner string, sharing map[string]any) (map[string]any, *workerservice.Worker) {
 	row := map[string]any{
-		"id":              id,
-		"name":            id,
-		"ownerUserId":     owner,
-		"capabilities":    []any{workerservice.CapabilityHeadless, workerservice.ModelCapability},
-		"labels":          map[string]any{workerservice.ModelLabel(costModel): "ctx=8192"},
-		"connectedNodeId": nodeB,
-		"lastSeenAt":      fleetNow().Format(time.RFC3339Nano),
-		"sharing":         sharing,
-		"capabilityDescriptor": map[string]any{
-			"inferenceServe": workerservice.InferenceServeCluster,
-		},
+		"id":                   id,
+		"name":                 id,
+		"ownerUserId":          owner,
+		"capabilities":         []any{workerservice.CapabilityHeadless, workerservice.ModelCapability},
+		"labels":               map[string]any{workerservice.ModelLabel(costModel): "ctx=8192"},
+		"connectedNodeId":      nodeB,
+		"lastSeenAt":           fleetNow().Format(time.RFC3339Nano),
+		"sharing":              sharing,
+		"capabilityDescriptor": map[string]any{},
 	}
 	w := &workerservice.Worker{
 		RegistrationId: id, OwnerUserId: owner, Name: id,

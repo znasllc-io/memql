@@ -54,11 +54,40 @@ func (i *Integration) handleDecideApproval(ctx context.Context, args map[string]
 	if i.decisionGate == nil {
 		return nil, fmt.Errorf("work: approval coordination is unavailable")
 	}
-	release, err := i.decisionGate(ctx, approvalId)
+	var release func()
+	var verifyPermissionDecision func(context.Context) error
+	_, typedPermission := argMap(args, "answer")["permissionMode"]
+	_, typedGuidance := argMap(args, "answer")["feedback"]
+	_, budgetLimit := argMap(args, "answer")["newLimit"]
+	_, choiceAnswer := argMap(args, "answer")["value"]
+	modelCheckpointAnswer := false
+	if choiceAnswer && decision == "answered" {
+		// This read selects lock lifetime only. Ownership and the exact pending
+		// decision are checked again under that lock below.
+		rows, readErr := i.store().query(memql.ContextWithFreshRead(ctx), "query "+call("workApprovalForOwner", map[string]any{"approvalId": approvalId}))
+		if readErr != nil {
+			return nil, readErr
+		}
+		modelCheckpointAnswer = len(rows) == 1 && rowString(rows[0], "kind") == "feedback" && work.IsModelCallCheckpoint(rowMap(rows[0], "subject"))
+	}
+	if ((typedPermission || budgetLimit) && decision == "approved") || ((typedGuidance || modelCheckpointAnswer) && decision == "answered") {
+		release, verifyPermissionDecision, err = i.computerPermissionDecisionGate(ctx, approvalId)
+	} else {
+		release, err = i.decisionGate(ctx, approvalId)
+	}
 	if err != nil {
 		return nil, err
 	}
 	defer release()
+	if verifyPermissionDecision != nil {
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
+		var cancel context.CancelFunc
+		ctx, cancel = context.WithTimeout(context.WithoutCancel(ctx), 15*time.Second)
+		defer cancel()
+		ctx = context.WithValue(ctx, approvalDecisionVerifierKey{}, verifyPermissionDecision)
+	}
 	ctx = memql.ContextWithFreshRead(ctx)
 	st := i.store()
 
@@ -79,6 +108,22 @@ func (i *Integration) handleDecideApproval(ctx context.Context, args map[string]
 		}
 	}
 	if approval == nil {
+		if recovered, err := i.recoverComputerDecision(ctx, approvalId, decision, argMap(args, "answer")); err != nil {
+			return nil, err
+		} else if recovered != nil {
+			return i.resultNode(recovered), nil
+		}
+
+		if recovered, err := i.recoverBudgetDecision(ctx, approvalId, decision, argMap(args, "answer")); err != nil {
+			return nil, err
+		} else if recovered != nil {
+			return i.resultNode(recovered), nil
+		}
+		if recovered, err := i.recoverGuidanceDecision(ctx, approvalId, decision, argMap(args, "answer")); err != nil {
+			return nil, err
+		} else if recovered != nil {
+			return i.resultNode(recovered), nil
+		}
 		if recovered, err := i.recoverReviewDecision(ctx, approvalId, decision, argMap(args, "answer")); err != nil {
 			return nil, err
 		} else if recovered != nil {
@@ -88,6 +133,14 @@ func (i *Integration) handleDecideApproval(ctx context.Context, args map[string]
 	}
 
 	kind := rowString(approval, "kind")
+	answer := argMap(args, "answer")
+	guidance, err := i.approvalGuidance(ctx, approval, decision, answer)
+	if err != nil {
+		return nil, err
+	}
+	if guidance != "" {
+		answer = map[string]any{"feedback": guidance}
+	}
 	if kind == work.ApprovalKindPlanReview && rowString(rowMap(approval, "subject"), "reviewType") != "" && decision == "answered" {
 		return nil, fmt.Errorf("work: this draft request needs an approval or a rejection")
 	}
@@ -101,8 +154,11 @@ func (i *Integration) handleDecideApproval(ctx context.Context, args map[string]
 	// recorded -- spending the approval -- and then move nothing, leaving the
 	// construct waiting on an approval nobody can decide again. So it is
 	// refused before anything is read or written.
-	if kind == "scopeElevation" && decision == "answered" {
+	if kind == "scopeElevation" && decision == "answered" && guidance == "" {
 		return nil, fmt.Errorf("work: computer access requires approval or rejection")
+	}
+	if kind == work.ApprovalKindBudget && decision == "answered" && guidance == "" {
+		return nil, fmt.Errorf("work: a budget request needs approval, rejection, or explicit guidance saved for its checkpoint")
 	}
 	if kind == work.ApprovalKindProcedurePromotion && decision == "answered" {
 		return nil, fmt.Errorf("work: a procedure promotion is decided approved (the procedure moves from shadow to canary) or rejected (it stays in shadow); it takes no answer")
@@ -158,19 +214,31 @@ func (i *Integration) handleDecideApproval(ctx context.Context, args map[string]
 	}
 
 	now := i.clock().UTC()
+	if kind == "scopeElevation" && decision == "approved" && rowMap(approval, "subject")["computerPermission"] != nil {
+		if state, message := computerDecisionState(approval, answer, now); state != "" {
+			return i.resultNode(map[string]any{"approvalId": approvalId, "runId": runId, "permissionState": state, "message": message, "runResumed": false}), nil
+		}
+	}
 	if kind == "scopeElevation" && decision == "approved" {
 		until, valid := rowTime(approval, "expiresAt")
 		if !valid || !now.Before(until) {
 			return nil, fmt.Errorf("work: this computer-access request has expired")
 		}
 	}
-	answer := argMap(args, "answer")
+	if err := validateComputerPermissionDecision(approval, decision, answer); err != nil {
+		return nil, err
+	}
 	if decision == "approved" {
 		if err := i.validatePlanReviewAnswer(ctx, kind, rowMap(approval, "subject"), answer); err != nil {
 			return nil, err
 		}
 	}
-	if kind == "feedback" && decision != "rejected" {
+	if kind == "feedback" && work.IsModelCallCheckpoint(rowMap(approval, "subject")) && decision != "rejected" && guidance == "" {
+		if !modelCheckpointAnswer || verifyPermissionDecision == nil || decision != "answered" || len(answer) != 1 || (answer["value"] != "retry" && answer["value"] != "abandon") {
+			return nil, fmt.Errorf("work: choose Retry or Abandon for this saved model checkpoint")
+		}
+	}
+	if kind == "feedback" && decision != "rejected" && guidance == "" {
 		if err := validateFeedbackAnswer(rowMap(approval, "subject"), decision, answer); err != nil {
 			return nil, err
 		}
@@ -184,10 +252,21 @@ func (i *Integration) handleDecideApproval(ctx context.Context, args map[string]
 	// came off the approval row this caller already read under their own
 	// actor.
 	writeCtx := ownerActor(ctx, owner)
+
+	if kind == work.ApprovalKindBudget && guidance != "" {
+		return i.saveBudgetGuidance(writeCtx, approval, guidance, now)
+	}
 	if decision == "approved" && kind == work.ApprovalKindBudget {
+		answer, err = budgetAnswerWithSavedGuidance(approval, answer)
+		if err != nil {
+			return nil, err
+		}
 		if err := i.raiseApprovedBudget(writeCtx, approval, answer, now); err != nil {
 			return nil, err
 		}
+	}
+	if err := verifyApprovalDecisionWrite(writeCtx); err != nil {
+		return nil, err
 	}
 	if err := st.decideApprovalRow(writeCtx, approvalId, decision, strings.TrimSpace(ac.UserId), now, answer, workRowVersionAfter(approval["createdAt"], now)); err != nil {
 		return nil, err
@@ -243,7 +322,10 @@ func (i *Integration) handleDecideApproval(ctx context.Context, args map[string]
 		retry = &failureRetry{stepKey: rowString(approval, "stepKey"), symptom: work.SymptomPlan,
 			reason: rowString(rowMap(approval, "subject"), "resumeReason")}
 	}
-	if work.IsFailureQuestion(approval["options"]) || (kind == "scopeElevation") || (kind == "feedback" && rowString(rowMap(approval, "subject"), "question") != "") {
+	// An ordinary question pauses the current execution. Its answer must keep
+	// that lineage: the saved tool checkpoint is bound to it, including inside
+	// an explicit rerun. Answering it is not a failure retry.
+	if !(kind == "feedback" && work.IsModelCallCheckpoint(rowMap(approval, "subject"))) && (work.IsFailureQuestion(approval["options"]) || (kind == "scopeElevation" && !typedPermission)) {
 		retry = &failureRetry{stepKey: rowString(approval, "stepKey"), decidedBy: strings.TrimSpace(ac.UserId)}
 		if work.IsFailureQuestion(approval["options"]) {
 			retry.symptom = work.Symptom(rowString(rowMap(approval, "subject"), "symptom"))
@@ -254,6 +336,12 @@ func (i *Integration) handleDecideApproval(ctx context.Context, args map[string]
 			}
 			retry.reason = rowString(rowMap(approval, "evidence"), "reason") + "\n" + rowString(rowMap(approval, "subject"), "errorMessage")
 		}
+	}
+	if guidance != "" {
+		// A human asked for a different approach, not for the gated operation
+		// to execute. Native model/typed-scope checkpoints take the correction;
+		// other requests keep their existing replan path. Neither grants access.
+		retry = guidanceRetry(approval, guidance, strings.TrimSpace(ac.UserId))
 	}
 	resumed, err := i.resumeParkedRun(writeCtx, runId, approvalId, runDecision, retry, now)
 	if err != nil {
@@ -417,14 +505,25 @@ func (i *Integration) resumeParkedRun(ctx context.Context, runId, approvalId, de
 			// completed prefix. Automatic retry limits and spend stay intact.
 			act := actRun{row: run, id: runId, owner: rowString(run, "ownerUserId"), order: topLevelOrder(rowStringSlice(run, "stepOrder"))}
 			key := topLevelStepKey(retry.stepKey)
-			if retry.symptom == work.SymptomPlan && act.requireExecutable() == nil && act.requireTopLevel(key) == nil {
+			if retry.symptom == work.SymptomPlan && act.requireExecutable() == nil {
+				if err := i.requireApprovalStep(ctx, &act, key); err != nil {
+					return false, err
+				}
 				fields["status"] = runStatusWaiting
 				fields["waitingOn"] = map[string]any{"kind": waitKindReplan, "subject": key, "reason": strings.TrimSpace(retry.reason), "since": rfc(now)}
+				if len(act.order) > len(topLevelOrder(rowStringSlice(run, "stepOrder"))) {
+					fields["stepOrder"] = act.checkpointOrder()
+				}
 			} else if request, stale, ok := i.failureRetryRequest(ctx, run, runId, *retry, now); ok {
 				fields["rerun"] = request
 				fields["staleSteps"] = stale
 			}
 		}
+	}
+	// A saved guidance receipt can enter here through recovery without a new
+	// decision write. Recheck its held receipt gate at this actual commit seam.
+	if err := verifyApprovalDecisionWrite(ctx); err != nil {
+		return false, err
 	}
 	if err := st.updateRun(ctx, runId, fields); err != nil {
 		return false, err

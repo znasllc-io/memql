@@ -549,7 +549,7 @@ func (c Config) RequireUnsubscribe() string {
 //     Scheme and Host empty -- so without this check it concatenates into
 //     `api.example.com/unsubscribe`, a relative URI in a header that
 //     requires an absolute one.
-//   - No query or fragment. unsubscribeURL appends `?token=`, so a base that
+//   - No query or fragment. linkURL appends `?token=`, so a base that
 //     already carries one produces a URL with two.
 //
 // A trailing PATH is allowed and preserved. UnsubscribePaths() composes

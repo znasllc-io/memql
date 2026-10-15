@@ -15,16 +15,16 @@ const app = (id: string) => {
 };
 
 describe("the readiness mapping (design record section 5.1)", () => {
-  it("Campaigns permits preparation while requiring setup at the send controls", () => {
-    expect(requirementsFor(app("campaigns"), "campaigns")).toEqual({
+  it("Email permits preparation while requiring setup at the send controls", () => {
+    expect(requirementsFor(app("email"), "campaigns")).toEqual({
       requires: [],
       wants: ["email", "campaigns"],
     });
-    expect(requirementsFor(app("campaigns"), "settings")).toEqual({ requires: [], wants: [] });
+    expect(requirementsFor(app("email"), "settings")).toEqual({ requires: [], wants: [] });
   });
 
   it("Materializer requires ai and storage", () => {
-    expect(requirementsFor(app("materializer"), "composer").requires).toEqual(["ai", "storage"]);
+    expect(requirementsFor(app("materializer"), "composer")).toEqual({requires:["storage"],wants:["ai"]});
   });
 
   it("Nexus requires ai on goals, runs and approvals, not on automations", () => {

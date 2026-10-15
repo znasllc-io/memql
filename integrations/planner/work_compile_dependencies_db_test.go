@@ -26,7 +26,7 @@ func TestSealWorkDraftDBUsesOwnedCurrentCatalog(t *testing.T) {
 	if err := db.PingContext(ctx); err != nil {
 		dbtest.Unreachable(t, "work dependency snapshot", dbtest.DSN(), err)
 	}
-	for _, q := range []string{`CREATE TEMP TABLE "MemoryNodes" (LIKE public."MemoryNodes" INCLUDING ALL)`, `CREATE TEMP TABLE node_vectors (LIKE public.node_vectors INCLUDING ALL)`} {
+	for _, q := range []string{`CREATE TEMP TABLE "MemoryNodes" (LIKE public."MemoryNodes" INCLUDING ALL)`, `CREATE TEMP TABLE memory_liveness (LIKE public.memory_liveness INCLUDING ALL)`, `CREATE TEMP TABLE node_vectors (LIKE public.node_vectors INCLUDING ALL)`} {
 		if _, err := db.ExecContext(ctx, q); err != nil {
 			t.Fatal(err)
 		}
@@ -44,7 +44,13 @@ func TestSealWorkDraftDBUsesOwnedCurrentCatalog(t *testing.T) {
 	}
 	write := func(owner, name string, args map[string]any) {
 		t.Helper()
-		if _, err := e.Execute(auth.ContextWithUserActor(ctx, owner), "mutation "+name+"("+encodeArgs(args)+")"); err != nil {
+		wctx := auth.ContextWithUserActor(ctx, owner)
+		if name == "createAuthoringBundle" || name == "createAuthoringConstruct" {
+			// @serverOnly (memql#6022): the pipeline's writes, under internal
+			// origin -- the bundle, then its member while it is a draft.
+			wctx = auth.ContextWithInternalOrigin(wctx)
+		}
+		if _, err := e.Execute(wctx, "mutation "+name+"("+encodeArgs(args)+")"); err != nil {
 			t.Fatal(err)
 		}
 	}

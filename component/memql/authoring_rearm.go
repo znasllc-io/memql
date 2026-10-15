@@ -27,11 +27,12 @@ package memql
 //     writer envelope), exactly as the live activation path does.
 //
 // Governance is preserved automatically: the scheduler enforces the global kill
-// switch (#1034) and the cluster owner gate (#1030) at FIRE time inside
-// runUnderAuthor, so a restart neither double-fires (the owner gate keeps an
-// owner's automation on one node) nor bypasses a halt (the kill switch suppresses
-// every firing when off). Re-arm only re-establishes the registrations; it does
-// not re-fire anything itself.
+// switch (#1034) at FIRE time, an event firing runs once (on the node its event
+// happened on, claimed across replicas -- memql#6022) and a schedule runs on its
+// owner's node only (the cluster owner gate, #1030), so a restart neither
+// double-fires nor bypasses a halt (the kill switch suppresses every firing
+// when off). Re-arm only re-establishes the registrations; it does not re-fire
+// anything itself.
 
 import (
 	"context"
@@ -213,6 +214,13 @@ func (s *engineRearmStore) LoadSystemActiveBundles(ctx context.Context) ([]Autho
 	if err != nil {
 		return nil, err
 	}
+	return activeBundleRows(res)
+}
+
+// activeBundleRows parses one page of systemActiveAuthoringBundles into bundle
+// rows. Shared by the boot re-arm and the arming reconcile pass
+// (authoring_arm_propagate.go), so both arm exactly the same set.
+func activeBundleRows(res *ExecuteResult) ([]AuthoringBundleRow, error) {
 	if res == nil || res.Bundle == nil {
 		return nil, nil
 	}

@@ -63,6 +63,8 @@ type reputationCounts struct {
 // reputationCollector accumulates counters and flushes them.
 type reputationCollector struct {
 	mu       sync.Mutex
+	flushMu  sync.Mutex // one flush at a time; observations still accumulate
+	saved    map[reputationKey]reputationCounts
 	counts   map[reputationKey]*reputationCounts
 	seeded   map[reputationKey]bool
 	identity string
@@ -82,6 +84,7 @@ func newReputationCollector(identity, nodeID string) *reputationCollector {
 	}
 	return &reputationCollector{
 		counts:   map[reputationKey]*reputationCounts{},
+		saved:    map[reputationKey]reputationCounts{},
 		seeded:   map[reputationKey]bool{},
 		identity: identity,
 		nodeID:   nodeID,
@@ -150,8 +153,10 @@ func (c *reputationCollector) pending() []reputationKey {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	keys := make([]reputationKey, 0, len(c.counts))
-	for k := range c.counts {
-		keys = append(keys, k)
+	for k, counts := range c.counts {
+		if prior, ok := c.saved[k]; !ok || prior != *counts {
+			keys = append(keys, k)
+		}
 	}
 	sort.Slice(keys, func(i, j int) bool {
 		if keys[i].day != keys[j].day {
@@ -182,6 +187,7 @@ func (c *reputationCollector) seed(key reputationKey, prior reputationCounts) {
 		return
 	}
 	c.seeded[key] = true
+	c.saved[key] = prior
 	bucket, ok := c.counts[key]
 	if !ok {
 		bucket = &reputationCounts{}
@@ -206,6 +212,8 @@ func (w *Worker) flushReputation(systemCtx context.Context) {
 	if w.reputation == nil || w.store == nil {
 		return
 	}
+	w.reputation.flushMu.Lock()
+	defer w.reputation.flushMu.Unlock()
 	for _, key := range w.reputation.pending() {
 		if w.reputation.needsSeed(key) {
 			prior, err := w.store.ReputationForBucket(systemCtx, key, w.reputation.nodeID)
@@ -224,7 +232,13 @@ func (w *Worker) flushReputation(systemCtx context.Context) {
 		}
 		if err := w.store.RecordReputationWindow(systemCtx, key, w.reputation.nodeID, counts); err != nil {
 			w.logger.Debug("campaigns: could not write reputation counters", "domain", key.domain, "error", err)
+			continue
 		}
+		// Acknowledge the snapshot actually written, not the current bucket: an
+		// observation arriving during storage must still be pending next pass.
+		w.reputation.mu.Lock()
+		w.reputation.saved[key] = counts
+		w.reputation.mu.Unlock()
 	}
 }
 

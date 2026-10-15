@@ -1,0 +1,63 @@
+{
+  "automation": "bench/automations.memql runGoalEvaluation",
+  "runs": {
+    "invocation | 0 rows": {
+      "input": {
+        "event": {
+          "kind": "unspecified",
+          "payload": {},
+          "topic": "automation.invocation.runGoalEvaluation"
+        },
+        "rows": 0
+      },
+      "outcome": {
+        "calls": [
+          {
+            "kind": "builtin",
+            "name": "goalEvaluationPrepare"
+          },
+          {
+            "kind": "builtin",
+            "name": "goalEvaluationRecord"
+          }
+        ],
+        "result": {
+          "output": {
+            "args": {},
+            "builtin": "goalEvaluationRecord"
+          },
+          "status": "completed"
+        }
+      }
+    },
+    "invocation | 2 rows": {
+      "input": {
+        "event": {
+          "kind": "unspecified",
+          "payload": {},
+          "topic": "automation.invocation.runGoalEvaluation"
+        },
+        "rows": 2
+      },
+      "outcome": {
+        "calls": [
+          {
+            "kind": "builtin",
+            "name": "goalEvaluationPrepare"
+          },
+          {
+            "kind": "builtin",
+            "name": "goalEvaluationRecord"
+          }
+        ],
+        "result": {
+          "output": {
+            "args": {},
+            "builtin": "goalEvaluationRecord"
+          },
+          "status": "completed"
+        }
+      }
+    }
+  }
+}

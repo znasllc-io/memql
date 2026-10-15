@@ -174,6 +174,7 @@ func RoutingExclusions() []RoutingExclusion {
 			Pattern: "graph.node.*.v1:campaigns:newsletterSignup",
 			Reason:  "Shopper-volume signup and welcome receipts. Campaigns reads their recent outcomes on demand, with an explicit refresh; configuration is broadcast separately.",
 		},
+		{Pattern: "graph.node.*.v1:campaigns:journeyEnrollment", Reason: "Recipient-volume automation state is read on demand; only automation configuration is broadcast."},
 		{
 			Pattern: "graph.node.*.v1:campaigns:recipient",
 			Reason: "A roster row, and the judgment call of the three campaigns " +

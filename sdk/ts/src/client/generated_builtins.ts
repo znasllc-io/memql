@@ -27,6 +27,56 @@ QueryClient.prototype.artifactProbe = function (this: QueryClient, args: Artifac
   return this.executeNamed("artifactProbe", buildArtifactProbe(args), opts);
 };
 
+/** Discuss an owned request in its original conversation. Opening this view neither calls a model nor approves, retries or resumes the blocked work. */
+export interface AskApprovalDiscussionArgs {
+  approvalId: string;
+}
+
+export function buildAskApprovalDiscussion(args: AskApprovalDiscussionArgs): string {
+  const parts: string[] = [];
+  parts.push("approvalId: " + renderMemQLValue(args.approvalId));
+  return "builtin askApprovalDiscussion(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    askApprovalDiscussion(args: AskApprovalDiscussionArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.askApprovalDiscussion = function (this: QueryClient, args: AskApprovalDiscussionArgs = {} as AskApprovalDiscussionArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("askApprovalDiscussion", buildAskApprovalDiscussion(args), opts);
+};
+
+/** Record a human message and return its read-only child analysis immediately. advisor selects an independent second opinion only on an explicit request. */
+export interface AskApprovalMessageArgs {
+  approvalId: string;
+  conversationId: string;
+  requestId: string;
+  prompt: string;
+  advisor?: boolean;
+}
+
+export function buildAskApprovalMessage(args: AskApprovalMessageArgs): string {
+  const parts: string[] = [];
+  parts.push("approvalId: " + renderMemQLValue(args.approvalId));
+  parts.push("conversationId: " + renderMemQLValue(args.conversationId));
+  parts.push("requestId: " + renderMemQLValue(args.requestId));
+  parts.push("prompt: " + renderMemQLValue(args.prompt));
+  if (args.advisor !== undefined) parts.push("advisor: " + renderMemQLValue(args.advisor));
+  return "builtin askApprovalMessage(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    askApprovalMessage(args: AskApprovalMessageArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.askApprovalMessage = function (this: QueryClient, args: AskApprovalMessageArgs = {} as AskApprovalMessageArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("askApprovalMessage", buildAskApprovalMessage(args), opts);
+};
+
 /** Read this person's conversation with current progress and completed results projected from its durable work runs. Reconnects never execute work again. */
 export interface AskConversationSnapshotArgs {
   conversationId: string;
@@ -46,6 +96,35 @@ declare module "./query.js" {
 
 QueryClient.prototype.askConversationSnapshot = function (this: QueryClient, args: AskConversationSnapshotArgs = {} as AskConversationSnapshotArgs, opts?: QueryCallOptions): Promise<Result> {
   return this.executeNamed("askConversationSnapshot", buildAskConversationSnapshot(args), opts);
+};
+
+/** Record guidance for owned running work in its existing conversation. This starts no goal and grants no permission; the existing agent receives the message at its next safe reasoning boundary. Retries reuse requestId. */
+export interface AskGuideWorkArgs {
+  targetEpoch: string;
+  runId: string;
+  conversationId: string;
+  requestId: string;
+  prompt: string;
+}
+
+export function buildAskGuideWork(args: AskGuideWorkArgs): string {
+  const parts: string[] = [];
+  parts.push("targetEpoch: " + renderMemQLValue(args.targetEpoch));
+  parts.push("runId: " + renderMemQLValue(args.runId));
+  parts.push("conversationId: " + renderMemQLValue(args.conversationId));
+  parts.push("requestId: " + renderMemQLValue(args.requestId));
+  parts.push("prompt: " + renderMemQLValue(args.prompt));
+  return "builtin askGuideWork(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    askGuideWork(args: AskGuideWorkArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.askGuideWork = function (this: QueryClient, args: AskGuideWorkArgs = {} as AskGuideWorkArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("askGuideWork", buildAskGuideWork(args), opts);
 };
 
 /** Open this owner's existing work in its Ask conversation, creating a private conversation for Nexus-originated work without starting another run. */
@@ -196,8 +275,8 @@ QueryClient.prototype.campaignActivateEmailRule = function (this: QueryClient, a
 export interface CampaignConfigureNewsletterArgs {
   siteId: string;
   audienceId: string;
-  templateId: string;
-  senderIdentityId: string;
+  templateId?: string;
+  senderIdentityId?: string;
   consentText: string;
   enabled: boolean;
   expectedRevision?: string;
@@ -207,8 +286,8 @@ export function buildCampaignConfigureNewsletter(args: CampaignConfigureNewslett
   const parts: string[] = [];
   parts.push("siteId: " + renderMemQLValue(args.siteId));
   parts.push("audienceId: " + renderMemQLValue(args.audienceId));
-  parts.push("templateId: " + renderMemQLValue(args.templateId));
-  parts.push("senderIdentityId: " + renderMemQLValue(args.senderIdentityId));
+  if (args.templateId !== undefined) parts.push("templateId: " + renderMemQLValue(args.templateId));
+  if (args.senderIdentityId !== undefined) parts.push("senderIdentityId: " + renderMemQLValue(args.senderIdentityId));
   parts.push("consentText: " + renderMemQLValue(args.consentText));
   parts.push("enabled: " + renderMemQLValue(args.enabled));
   if (args.expectedRevision !== undefined) parts.push("expectedRevision: " + renderMemQLValue(args.expectedRevision));
@@ -280,6 +359,29 @@ declare module "./query.js" {
 
 QueryClient.prototype.campaignConfigureTestAudience = function (this: QueryClient, args: CampaignConfigureTestAudienceArgs = {} as CampaignConfigureTestAudienceArgs, opts?: QueryCallOptions): Promise<Result> {
   return this.executeNamed("campaignConfigureTestAudience", buildCampaignConfigureTestAudience(args), opts);
+};
+
+/** Draft an email automation from one sentence using this organization's resources. Returns a proposal and what it needs, saves nothing. Save it with campaignSaveJourney. */
+export interface CampaignDescribeJourneyArgs {
+  accountId: string;
+  sentence: string;
+}
+
+export function buildCampaignDescribeJourney(args: CampaignDescribeJourneyArgs): string {
+  const parts: string[] = [];
+  parts.push("accountId: " + renderMemQLValue(args.accountId));
+  parts.push("sentence: " + renderMemQLValue(args.sentence));
+  return "builtin campaignDescribeJourney(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    campaignDescribeJourney(args: CampaignDescribeJourneyArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.campaignDescribeJourney = function (this: QueryClient, args: CampaignDescribeJourneyArgs = {} as CampaignDescribeJourneyArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("campaignDescribeJourney", buildCampaignDescribeJourney(args), opts);
 };
 
 /** Import recipients into an audience from a CSV file already uploaded to the Library (memql#4822). The file is read SERVER-SIDE under the caller's own actor, so a file the caller cannot read is a file this cannot import -- the artifact id is not a capability. The header row must carry an `email` column (case-insensitive; `displayName` and `name` are also recognized) and EVERY OTHER COLUMN lands verbatim in the recipient's `fields` map, reachable from a template as {{fields.<key>}}. Per row: the address is normalized and shape-validated, deduplicated against the audience's existing recipients AND against earlier rows of the same file (first occurrence wins). The import refuses WHOLE when the resulting roster would exceed MEMQL_CAMPAIGNS_MAX_AUDIENCE -- it never silently truncates, because a partially-imported list is one nobody knows is partial. Returns {added, duplicates, invalid, total} plus up to 20 sample invalid lines with their line numbers, so the operator's next action is fixing the file rather than guessing at it. Each added recipient also gets a consent grant event with source 'import'. */
@@ -399,28 +501,111 @@ QueryClient.prototype.campaignRetryNewsletterWelcome = function (this: QueryClie
   return this.executeNamed("campaignRetryNewsletterWelcome", buildCampaignRetryNewsletterWelcome(args), opts);
 };
 
-/** Save an organization email template with an exact revision precondition. Empty expectedRevision creates a draft under a new caller-generated ID; editing always returns it to draft. Publishing or archiving requires the saved content and revision to match exactly. This never sends mail. */
+/** Save an email automation with an exact revision. Omit expectedRevision to create one under a new caller-generated id. Editable while draft or paused. Never sends mail; returns the revision and what still blocks turning it on. */
+export interface CampaignSaveJourneyArgs {
+  /** Stable caller-generated id; reuse it after an uncertain create. */
+  journeyId: string;
+  /** Owning organization; immutable after creation. */
+  accountId: string;
+  name: string;
+  description?: string;
+  /** {kind: joined | confirmed, audienceId} */
+  trigger: Record<string, unknown>;
+  /** Ordered steps: {id, kind: send | confirm | wait, templateId?, senderIdentityId?, days?, hours?, timeoutDays?} */
+  steps: Record<string, unknown>[];
+  /** Exact revision from journeyById; omit when creating. */
+  expectedRevision?: string;
+}
+
+export function buildCampaignSaveJourney(args: CampaignSaveJourneyArgs): string {
+  const parts: string[] = [];
+  parts.push("journeyId: " + renderMemQLValue(args.journeyId));
+  parts.push("accountId: " + renderMemQLValue(args.accountId));
+  parts.push("name: " + renderMemQLValue(args.name));
+  if (args.description !== undefined) parts.push("description: " + renderMemQLValue(args.description));
+  parts.push("trigger: " + renderMemQLValue(args.trigger));
+  parts.push("steps: " + renderMemQLValue(args.steps));
+  if (args.expectedRevision !== undefined) parts.push("expectedRevision: " + renderMemQLValue(args.expectedRevision));
+  return "builtin campaignSaveJourney(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    campaignSaveJourney(args: CampaignSaveJourneyArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.campaignSaveJourney = function (this: QueryClient, args: CampaignSaveJourneyArgs = {} as CampaignSaveJourneyArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("campaignSaveJourney", buildCampaignSaveJourney(args), opts);
+};
+
+/** Save an organization email layout with an exact revision precondition, or archive or restore it. Saving validates a layout-mode email document; custom HTML cannot be a layout. Empty expectedRevision creates the layout under the caller-generated layoutId. Archive and restore need only the exact revision. */
+export interface CampaignSaveLayoutArgs {
+  /** Stable caller-generated layout id; reuse it on an uncertain creation response. */
+  layoutId: string;
+  /** Owning organization; immutable after creation. */
+  accountId: string;
+  /** Required when saving. */
+  name?: string;
+  description?: string;
+  /** The layout-mode email document. Required when saving. */
+  document?: Record<string, unknown>;
+  /** The Library file the layout comes from. */
+  sourceArtifactId?: string;
+  /** Exact createdAt from emailLayoutById; empty only when creating. */
+  expectedRevision: string;
+  /** save (default), archive or restore. */
+  action?: string;
+}
+
+export function buildCampaignSaveLayout(args: CampaignSaveLayoutArgs): string {
+  const parts: string[] = [];
+  parts.push("layoutId: " + renderMemQLValue(args.layoutId));
+  parts.push("accountId: " + renderMemQLValue(args.accountId));
+  if (args.name !== undefined) parts.push("name: " + renderMemQLValue(args.name));
+  if (args.description !== undefined) parts.push("description: " + renderMemQLValue(args.description));
+  if (args.document !== undefined) parts.push("document: " + renderMemQLValue(args.document));
+  if (args.sourceArtifactId !== undefined) parts.push("sourceArtifactId: " + renderMemQLValue(args.sourceArtifactId));
+  parts.push("expectedRevision: " + renderMemQLValue(args.expectedRevision));
+  if (args.action !== undefined) parts.push("action: " + renderMemQLValue(args.action));
+  return "builtin campaignSaveLayout(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    campaignSaveLayout(args: CampaignSaveLayoutArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.campaignSaveLayout = function (this: QueryClient, args: CampaignSaveLayoutArgs = {} as CampaignSaveLayoutArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("campaignSaveLayout", buildCampaignSaveLayout(args), opts);
+};
+
+/** Save an organization email template with an exact revision precondition. content is the email document (a *.email.json file): a layout document made of blocks, or custom HTML with its plain-text body. The server renders it and stores the subject, the text and HTML parts and the document, and answers {templateId, revision, status, saved, issues}. issues are what keeps the email from being sent as it is: a missing picture or link, a picture the caller cannot read, a missing unsubscribe link, an email that is too large. Saving works with issues and returns the template to draft. Publishing requires the exact saved revision and the exact saved content, and is refused while any issue remains. Archive and restore require only the exact revision; the content in the call is ignored, and restore returns a template to draft. Empty expectedRevision creates a draft. With sourceArtifactId (the Library file the email is written in) there is one template per organization and file: the template already published from that file is updated whatever templateId says, and the first save creates it, so templateId may be left empty. This never sends mail. */
 export interface CampaignSaveTemplateArgs {
-  /** Stable caller-generated template ID; reuse on an uncertain creation response. */
-  templateId: string;
+  /** Stable caller-generated template ID; reuse on an uncertain creation response. May be empty only when sourceArtifactId is given. */
+  templateId?: string;
   /** Owning organization; immutable after creation. */
   accountId: string;
   /** Template name. */
   name: string;
-  /** The reviewed email file: subject, textBody, htmlBody. */
+  /** The email document: a layout document {subject, preheader, layout, theme, blocks} or custom HTML {subject, preheader, textBody, htmlBody}. Ignored when archiving or restoring. */
   content: Record<string, unknown>;
-  /** Exact createdAt from templateById; empty only when creating. */
+  /** The Library file the email is written in. Keeps one template per organization and file; see above. */
+  sourceArtifactId?: string;
+  /** Exact createdAt from templateById or templateForSource; empty only when creating. */
   expectedRevision: string;
-  /** save (default), publish, or archive. Publishing is an explicit human action. */
+  /** save (default), publish, archive or restore. Publishing is an explicit human action. */
   action?: string;
 }
 
 export function buildCampaignSaveTemplate(args: CampaignSaveTemplateArgs): string {
   const parts: string[] = [];
-  parts.push("templateId: " + renderMemQLValue(args.templateId));
+  if (args.templateId !== undefined) parts.push("templateId: " + renderMemQLValue(args.templateId));
   parts.push("accountId: " + renderMemQLValue(args.accountId));
   parts.push("name: " + renderMemQLValue(args.name));
   parts.push("content: " + renderMemQLValue(args.content));
+  if (args.sourceArtifactId !== undefined) parts.push("sourceArtifactId: " + renderMemQLValue(args.sourceArtifactId));
   parts.push("expectedRevision: " + renderMemQLValue(args.expectedRevision));
   if (args.action !== undefined) parts.push("action: " + renderMemQLValue(args.action));
   return "builtin campaignSaveTemplate(" + parts.join(", ") + ")";
@@ -484,6 +669,32 @@ declare module "./query.js" {
 
 QueryClient.prototype.campaignSendingReadiness = function (this: QueryClient, args: CampaignSendingReadinessArgs = {} as CampaignSendingReadinessArgs, opts?: QueryCallOptions): Promise<Result> {
   return this.executeNamed("campaignSendingReadiness", buildCampaignSendingReadiness(args), opts);
+};
+
+/** Turn an email automation on, pause it, or archive it. Turning on checks templates, senders and the audience first; archiving is permanent and exits everyone still in it. */
+export interface CampaignSetJourneyStateArgs {
+  journeyId: string;
+  // Enum: activate | pause | archive
+  action: string;
+  expectedRevision: string;
+}
+
+export function buildCampaignSetJourneyState(args: CampaignSetJourneyStateArgs): string {
+  const parts: string[] = [];
+  parts.push("journeyId: " + renderMemQLValue(args.journeyId));
+  parts.push("action: " + renderMemQLValue(args.action));
+  parts.push("expectedRevision: " + renderMemQLValue(args.expectedRevision));
+  return "builtin campaignSetJourneyState(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    campaignSetJourneyState(args: CampaignSetJourneyStateArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.campaignSetJourneyState = function (this: QueryClient, args: CampaignSetJourneyStateArgs = {} as CampaignSetJourneyStateArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("campaignSetJourneyState", buildCampaignSetJourneyState(args), opts);
 };
 
 /** Preflight and start a campaign send. Refuses -- rather than partially sending -- when no email sender is registered on the node, when one-click unsubscribe is not configured (MEMQL_CAMPAIGNS_UNSUBSCRIBE_SECRET / _BASE_URL), when the template is not marked ready, or when the audience is empty or at the MEMQL_CAMPAIGNS_MAX_AUDIENCE ceiling. Requires a readable campaign and update permission on data in its organization. Returns the recipient count the send will work through. */
@@ -556,7 +767,7 @@ QueryClient.prototype.campaignTestAudienceSend = function (this: QueryClient, ar
   return this.executeNamed("campaignTestAudienceSend", buildCampaignTestAudienceSend(args), opts);
 };
 
-/** Send one test copy of a campaign to a named address (memql#4822). Renders the campaign's template against a synthetic recipient -- display name 'Test Recipient', the address you name, and the `fields` of the audience's first real recipient when one exists, so {{fields.*}} show the shape they will actually have. The subject is prefixed '[Test] ', the message goes through the campaign's resolved sending identity, and the unsubscribe footer carries an obviously-inert token. It writes NO delivery row and touches NO counter, so a test send can never make a campaign look partly sent; it does consume the ordinary send-rate token bucket, because a test is a real message to a real mailbox. Returns the list of merge tags it could not resolve -- the check that catches a typo'd {{fields.compnay}} before the whole audience gets it. `to` is REQUIRED and never defaults to the caller's own address: a builtin that mails somewhere you did not name is one you have to remember the default of. */
+/** Send one test copy of a campaign to a named address (memql#4822). Renders the campaign's template against a synthetic recipient -- display name 'Test Recipient', the address you name, and the `fields` of the audience's first real recipient when one exists, so {{fields.*}} show the shape they will actually have. The subject is prefixed '[Test] ', the message goes through the campaign's resolved sending identity, and the unsubscribe footer and the four link tags ({{unsubscribeUrl}}, {{preferencesUrl}}, {{viewUrl}}, {{confirmUrl}}) carry an obviously-inert token, so every link renders and none of them does anything. It writes NO delivery row and touches NO counter, so a test send can never make a campaign look partly sent; it does consume the ordinary send-rate token bucket, because a test is a real message to a real mailbox. Returns the list of merge tags it could not resolve -- the check that catches a typo'd {{fields.compnay}} before the whole audience gets it. `to` is REQUIRED and never defaults to the caller's own address: a builtin that mails somewhere you did not name is one you have to remember the default of. */
 export interface CampaignTestSendArgs {
   /** The campaign to render. The caller must be able to read it. */
   campaignId: string;
@@ -604,6 +815,25 @@ declare module "./query.js" {
 
 QueryClient.prototype.cancelGoal = function (this: QueryClient, args: CancelGoalArgs = {} as CancelGoalArgs, opts?: QueryCallOptions): Promise<Result> {
   return this.executeNamed("cancelGoal", buildCancelGoal(args), opts);
+};
+
+/** Read the current installation's database storage report. Cluster owner only. The monitor owns its alert thresholds; consumers must show the report age. */
+export interface ClusterStorageStatusArgs {
+}
+
+export function buildClusterStorageStatus(args: ClusterStorageStatusArgs): string {
+  void args;
+  return "builtin clusterStorageStatus()";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    clusterStorageStatus(args?: ClusterStorageStatusArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.clusterStorageStatus = function (this: QueryClient, args: ClusterStorageStatusArgs = {} as ClusterStorageStatusArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("clusterStorageStatus", buildClusterStorageStatus(args), opts);
 };
 
 /** One B2B account: its orders in a window, how many still have payment terms outstanding, and its MemQL-owned credit limit. The two halves come from different systems, and the question a rep asks -- can this account order -- needs both. */
@@ -760,23 +990,25 @@ QueryClient.prototype.composeCancel = function (this: QueryClient, args: Compose
 
 /** Start a Materializer work run using the known materializeFile template. The composition and immutable source snapshot are saved before dispatch. Returns {compositionId, goalId, runId}; progress and the eventual outputFileId arrive on the composition row. */
 export interface ComposeMaterializeArgs {
-  /** What to call it, and the filename stem of the output. Sanitised server-side the way an upload's name is. */
+  /** What to call it, and the filename stem of the output. A name with a slash is refused (folderId chooses where it is filed), and one trailing extension that already names the format is dropped, because the extension is added when the file is filed: Plan.md is filed as Plan.md, never Plan.md.md. */
   name: string;
-  /** What you asked for, in your own words. Becomes the goal's statement, so it is what Nexus shows and what the catalog keys on. */
+  /** What you asked for, in your own words. Becomes the goal's statement, so it is what Nexus shows and what the catalog keys on. A Markdown file asked for with a statement and nothing of its own to compose from (no draft, sectionKeys, templateId, recipeId, outputKind or deployableKind), whose sources, if any, are all Library files the Library can attach to a review comment (a .md file up to 32 KiB, or a PNG, JPEG, GIF or WebP picture up to 8 MiB), is created EMPTY outside a work run, and the statement stays on its composition: the caller hands it, with those files, to the Library's revision workflow, as the person (the SDK's handOffDescription), which writes the document. Any other source (a record, a query, or a Library file the Library cannot attach) keeps the composer, which reads it. Inside a work run the composer still writes the file from the statement. */
   statement?: string;
   /** markdown, html, txt, csv, json, docx or pdf. Audio and video are named in the brief and deliberately unoffered -- audio wants a compose-then-speak pipeline with a cost ceiling of its own, video a generation provider this cluster has none of. */
   format: string;
-  /** email_template produces a validated .email.json with subject, editable HTML, and plain-text alternative; requires format json. Empty creates an ordinary document. The result is a draft, never published or sent automatically. */
+  /** email_template writes a .email.json email document into a layout (layoutId); requires format json and one accountIds entry. With no statement, draft or sources it files the layout itself without a model call. The result is a draft, never published or sent. */
   outputKind?: string;
+  /** builtin:confirmation, builtin:letter, builtin:article or builtin:spotlight, or an organization layout's id from emailLayouts. Email templates only; empty means builtin:article. */
+  layoutId?: string;
   /** What to compose from: a list of {kind, ref, label, content?} where kind is concept_row | library_file | query. Set content=true only for a library_file to capture its bytes as reference input, including bounded inspection of supported ZIP members. A `query` source is a SELECTION and is resolved at run time under your own actor, which is what makes it re-runnable; the other two name one row each. */
   sources?: Record<string, unknown>[];
-  /** A draft to start from, when the person has already written one. Empty means the compose step writes it from the sources. Supplying one seeds the configured composer. With no composer available, the supplied draft can be rendered directly. */
+  /** A draft to start from, when the person has already written one. Empty means the compose step writes it from the sources. Supplying one seeds the configured composer. With no composer available, the supplied draft can be rendered directly -- except an email template's: an email is only ever its layout, written by the composer, so on a node with no composer its draft is refused. */
   draft?: string;
   /** Ordered completed text step keys in the CURRENT work run. Renders their saved replies verbatim, separated by blank lines, without another model call. Exclude research-only notes; include every final chapter in delivery order. Preserves recorded model/source provenance. Requires a prose format and no draft, outputKind or deployableKind. Missing, unfinished, duplicate or non-text sections are refused. */
   sectionKeys?: string[];
-  /** v1:compose:template to render through. Resolved under your own actor, so a template you cannot read is refused rather than rendered through. */
+  /** v1:compose:template to render through. Resolved under your own actor, so a template you cannot read is refused rather than rendered through. An archived template, or one that makes another format than the request's (a template that names no format fits any), is refused before anything is written. */
   templateId?: string;
-  /** v1:library:folder to file the output into. Empty means the Library root. */
+  /** v1:library:folder to file the output into. Empty means the Library root. A folder you cannot read, or one in the Bin, is refused before anything is written. */
   folderId?: string;
   /** Optional account tags -- a record of who the work is for, never a visibility scope. */
   accountIds?: string[];
@@ -786,6 +1018,8 @@ export interface ComposeMaterializeArgs {
   recipeId?: string;
   /** {tokenBudget, costCeiling, wallClockMs, maxRetries, maxModelCalls, maxEvents} for the goal. Omitted fields take the deployment's defaults; a zero is 'unset', never 'nothing allowed'. */
   ceilings?: Record<string, unknown>;
+  /** Caller-chosen id for this request. Repeating it returns the same composition instead of starting another, so a double click makes one file. */
+  requestId?: string;
 }
 
 export function buildComposeMaterialize(args: ComposeMaterializeArgs): string {
@@ -794,6 +1028,7 @@ export function buildComposeMaterialize(args: ComposeMaterializeArgs): string {
   if (args.statement !== undefined) parts.push("statement: " + renderMemQLValue(args.statement));
   parts.push("format: " + renderMemQLValue(args.format));
   if (args.outputKind !== undefined) parts.push("outputKind: " + renderMemQLValue(args.outputKind));
+  if (args.layoutId !== undefined) parts.push("layoutId: " + renderMemQLValue(args.layoutId));
   if (args.sources !== undefined) parts.push("sources: " + renderMemQLValue(args.sources));
   if (args.draft !== undefined) parts.push("draft: " + renderMemQLValue(args.draft));
   if (args.sectionKeys !== undefined) parts.push("sectionKeys: " + renderMemQLValue(args.sectionKeys));
@@ -803,6 +1038,7 @@ export function buildComposeMaterialize(args: ComposeMaterializeArgs): string {
   if (args.deployableKind !== undefined) parts.push("deployableKind: " + renderMemQLValue(args.deployableKind));
   if (args.recipeId !== undefined) parts.push("recipeId: " + renderMemQLValue(args.recipeId));
   if (args.ceilings !== undefined) parts.push("ceilings: " + renderMemQLValue(args.ceilings));
+  if (args.requestId !== undefined) parts.push("requestId: " + renderMemQLValue(args.requestId));
   return "builtin composeMaterialize(" + parts.join(", ") + ")";
 }
 
@@ -865,6 +1101,13 @@ QueryClient.prototype.composeRunRecipe = function (this: QueryClient, args: Comp
 
 /** Accept a goal and start work on it. Opens a v1:work:goal owned by the caller and its first v1:work:run in `compiling`, then dispatches compile: catalog exact match, then near-match with a gap list, then the cheap triage. Returns {goalId, runId}. A goal that fully matches the catalog reaches no model at all. */
 export interface CreateGoalArgs {
+  /** Human-selected execution ceiling: no federation provider may serve any call of this goal, including embeddings, step overrides and fallback. Child goals inherit it and cannot relax it. */
+  noPaidProviders?: boolean;
+  /** The human caller's routing choice, using the same source grammar as Ask. A pinned fleet source never falls back to a paid provider. Child/model calls cannot replace their inherited choice. */
+  source?: string;
+  /** Optional human-selected intelligence level for this goal's steps; compiler calls retain their own levels. */
+  // Enum: fast | strong | reasoning
+  level?: string;
   /** Installed Spine template name. Defaults to defaultWorkSpine. Its templates, pure logic, scoped actions and selected phase recipes are frozen onto this run before compilation. */
   spine?: string;
   /** The goal in the person's own words. */
@@ -881,6 +1124,9 @@ export interface CreateGoalArgs {
 
 export function buildCreateGoal(args: CreateGoalArgs): string {
   const parts: string[] = [];
+  if (args.noPaidProviders !== undefined) parts.push("noPaidProviders: " + renderMemQLValue(args.noPaidProviders));
+  if (args.source !== undefined) parts.push("source: " + renderMemQLValue(args.source));
+  if (args.level !== undefined) parts.push("level: " + renderMemQLValue(args.level));
   if (args.spine !== undefined) parts.push("spine: " + renderMemQLValue(args.spine));
   parts.push("statement: " + renderMemQLValue(args.statement));
   if (args.input !== undefined) parts.push("input: " + renderMemQLValue(args.input));
@@ -1213,6 +1459,57 @@ QueryClient.prototype.emailInbox = function (this: QueryClient, args: EmailInbox
   return this.executeNamed("emailInbox", buildEmailInbox(args), opts);
 };
 
+/** The email layouts an organization can start from: the four built-in layouts, then its own active layouts (all of them with includeArchived). Rows are {id, kind, name, description, document, status} plus layoutId, revision and sourceArtifactId for organization layouts. Documents are included up to an 8 MiB answer budget; later rows carry documentOmitted: true instead of document. Read emailLayoutById with the row layoutId when its document is needed. The id is opaque: pass it to composeMaterialize as layoutId. */
+export interface EmailLayoutsArgs {
+  accountId: string;
+  includeArchived?: boolean;
+}
+
+export function buildEmailLayouts(args: EmailLayoutsArgs): string {
+  const parts: string[] = [];
+  parts.push("accountId: " + renderMemQLValue(args.accountId));
+  if (args.includeArchived !== undefined) parts.push("includeArchived: " + renderMemQLValue(args.includeArchived));
+  return "builtin emailLayouts(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    emailLayouts(args: EmailLayoutsArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.emailLayouts = function (this: QueryClient, args: EmailLayoutsArgs = {} as EmailLayoutsArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("emailLayouts", buildEmailLayouts(args), opts);
+};
+
+/** Render an email document for preview: pictures you can read are embedded, sample merge values are applied, and {subject, html, text, issues} comes back. Never saves or sends anything. */
+export interface EmailRenderArgs {
+  /** The *.email.json document, in layout or custom mode. */
+  document: Record<string, unknown>;
+  /** The organization the email is for. You need read access to its data. */
+  accountId: string;
+  /** Sample values: displayName, email, accountName, campaignName, and fields (an object of column values). */
+  sample?: Record<string, unknown>;
+}
+
+export function buildEmailRender(args: EmailRenderArgs): string {
+  const parts: string[] = [];
+  parts.push("document: " + renderMemQLValue(args.document));
+  parts.push("accountId: " + renderMemQLValue(args.accountId));
+  if (args.sample !== undefined) parts.push("sample: " + renderMemQLValue(args.sample));
+  return "builtin emailRender(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    emailRender(args: EmailRenderArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.emailRender = function (this: QueryClient, args: EmailRenderArgs = {} as EmailRenderArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("emailRender", buildEmailRender(args), opts);
+};
+
 /** Ask one of YOUR OWN fleet machines to measure a model it already has, and return at once with the id of the record to watch. The suite is pinned by this engine and echoed back by the machine, so figures can never be filed under a suite that was not run. Owner-only, and the machine must be yours, unrevoked and connected right now -- the same refusals a pull makes, reused deliberately, because offline is offline whichever act is asking. Progress lands per case on the v1:worker:modelProbe row this returns the id of; the figures land on a v1:platform:modelMeasurement row keyed by machine, model and suite version. Every figure is a measured statistic OR a named reason there is none: a machine nobody has probed and a model that failed every case are different answers, and a page that renders both as zero would lead to opposite actions. */
 export interface FleetModelProbeArgs {
   /** v1:worker:registration.id of the machine to measure on. It must be one of the caller's own; another user's id answers exactly as a made-up one does. */
@@ -1351,16 +1648,20 @@ QueryClient.prototype.fleetRevokeMachine = function (this: QueryClient, args: Fl
   return this.executeNamed("fleetRevokeMachine", buildFleetRevokeMachine(args), opts);
 };
 
-/** Set the OWNER's half of a machine's sharing consent: `owner` keeps it to yourself, `people` lends it to the users and groups you name, `cluster` offers it to everybody on this cluster and to the cluster's own work. The machine's own half comes from its policy.yaml and is not settable from here -- deliberately, because it is a decision about where the machine IS and only the machine can make it; it must say cluster before anybody else's work runs on it. It resolves the machine through YOUR OWN machines, which is the whole reason this is a builtin: the row's tier grants a cluster owner the write, and lending somebody else's hardware is not a decision a cluster owner gets to make for them. Under `people`, a user or group not already on the machine's list must be one fleetShareDirectory offers you, and one sentence refuses both an id that does not exist and one you may not pick, so this is never a way to learn who is on the cluster. */
+/** Choose who may use the models on one of YOUR OWN machines. owner keeps inference private; people shares with the users and active group members you name. Fleet is the single sharing control: the saved audience applies to subsequent calls without changing a machine configuration file or reconnecting Cockpit. Sharing grants model inference only, never commands, files, apps or computer control. Only the enrolled owner may change it; cluster administration does not grant permission to lend another person's hardware. New subjects must be offered by fleetShareDirectory. A refusal does not distinguish a missing subject from one you may not select. Existing cluster-wide shares remain readable, but new writes must choose owner or people. */
 export interface FleetSetSharingArgs {
   /** v1:worker:registration.id of the machine to set sharing on. It must be one of the caller's own. */
   registrationId: string;
-  /** owner, people or cluster. Anything else is refused rather than read as owner -- a misspelling that silently meant `keep it private` would be safe, and one that silently meant anything else would not. */
+  /** owner or people. Other values, including cluster, are refused. */
   mode: string;
-  /** Under people: the v1:identity:user ids to lend the machine to. At most 50 subjects across both lists, and at least one. Your own id is dropped rather than refused -- your own machine is yours already. Ignored under owner and cluster. */
+  /** Under people: the v1:identity:user ids to lend the machine to. At most 50 subjects across both lists, including paused entries. Your own id is dropped rather than refused -- your own machine is yours already. Ignored under owner. */
   userIds?: string[];
-  /** Under people: the v1:identity:group ids whose active members may use the machine. Ignored under owner and cluster. */
+  /** Under people: the v1:identity:group ids whose active members may use the machine. Ignored under owner. */
   groupIds?: string[];
+  /** Users on this list whose direct grant is paused. Existing calls finish. */
+  pausedUserIds?: string[];
+  /** Groups on this list whose grant is paused. Existing calls finish. */
+  pausedGroupIds?: string[];
 }
 
 export function buildFleetSetSharing(args: FleetSetSharingArgs): string {
@@ -1369,6 +1670,8 @@ export function buildFleetSetSharing(args: FleetSetSharingArgs): string {
   parts.push("mode: " + renderMemQLValue(args.mode));
   if (args.userIds !== undefined) parts.push("userIds: " + renderMemQLValue(args.userIds));
   if (args.groupIds !== undefined) parts.push("groupIds: " + renderMemQLValue(args.groupIds));
+  if (args.pausedUserIds !== undefined) parts.push("pausedUserIds: " + renderMemQLValue(args.pausedUserIds));
+  if (args.pausedGroupIds !== undefined) parts.push("pausedGroupIds: " + renderMemQLValue(args.pausedGroupIds));
   return "builtin fleetSetSharing(" + parts.join(", ") + ")";
 }
 
@@ -1823,6 +2126,27 @@ QueryClient.prototype.integrationStatus = function (this: QueryClient, args: Int
   return this.executeNamed("integrationStatus", buildIntegrationStatus(args), opts);
 };
 
+/** Install only selected registered capability manuals. Explicit cluster-owner operation; no domain catalog creation or generated content. Returns per-domain ready, preserved, embedded and olderPublished counts. */
+export interface KnowledgeInstallCapabilityCorporaArgs {
+  domainIds: string[];
+}
+
+export function buildKnowledgeInstallCapabilityCorpora(args: KnowledgeInstallCapabilityCorporaArgs): string {
+  const parts: string[] = [];
+  parts.push("domainIds: " + renderMemQLValue(args.domainIds));
+  return "builtin knowledgeInstallCapabilityCorpora(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    knowledgeInstallCapabilityCorpora(args: KnowledgeInstallCapabilityCorporaArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.knowledgeInstallCapabilityCorpora = function (this: QueryClient, args: KnowledgeInstallCapabilityCorporaArgs = {} as KnowledgeInstallCapabilityCorporaArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("knowledgeInstallCapabilityCorpora", buildKnowledgeInstallCapabilityCorpora(args), opts);
+};
+
 /** The MemQL line this cluster speaks, the forms it deprecates, and where the DSL it loaded still spells one. ONE row: language, edition, status (frozen or draft), grammarVersion, editorRelease, deprecationWindowMinors, and forms[] with rule, spelling, replacement, migrator, deprecatedIn, refusedFrom (a floor, not a date), state (deprecated | refused) and uses[] (file, line, column, text). The uses are the answering node's last load; every mesh node mounts the same tree, so any of them answers for the cluster. */
 export interface LanguageStatusArgs {
 }
@@ -1927,6 +2251,308 @@ declare module "./query.js" {
 
 QueryClient.prototype.libraryAddDocumentNote = function (this: QueryClient, args: LibraryAddDocumentNoteArgs = {} as LibraryAddDocumentNoteArgs, opts?: QueryCallOptions): Promise<Result> {
   return this.executeNamed("libraryAddDocumentNote", buildLibraryAddDocumentNote(args), opts);
+};
+
+/** libraryBackupBlock wraps the builtin named "libraryBackupBlock". */
+export interface LibraryBackupBlockArgs {
+  id: string;
+  ordinal: number;
+  md5: string;
+  sha256: string;
+}
+
+export function buildLibraryBackupBlock(args: LibraryBackupBlockArgs): string {
+  const parts: string[] = [];
+  parts.push("id: " + renderMemQLValue(args.id));
+  parts.push("ordinal: " + renderMemQLValue(args.ordinal));
+  parts.push("md5: " + renderMemQLValue(args.md5));
+  parts.push("sha256: " + renderMemQLValue(args.sha256));
+  return "builtin libraryBackupBlock(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    libraryBackupBlock(args: LibraryBackupBlockArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.libraryBackupBlock = function (this: QueryClient, args: LibraryBackupBlockArgs = {} as LibraryBackupBlockArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("libraryBackupBlock", buildLibraryBackupBlock(args), opts);
+};
+
+/** libraryBackupCheckpoint wraps the builtin named "libraryBackupCheckpoint". */
+export interface LibraryBackupCheckpointArgs {
+  id: string;
+  final: boolean;
+}
+
+export function buildLibraryBackupCheckpoint(args: LibraryBackupCheckpointArgs): string {
+  const parts: string[] = [];
+  parts.push("id: " + renderMemQLValue(args.id));
+  parts.push("final: " + renderMemQLValue(args.final));
+  return "builtin libraryBackupCheckpoint(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    libraryBackupCheckpoint(args: LibraryBackupCheckpointArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.libraryBackupCheckpoint = function (this: QueryClient, args: LibraryBackupCheckpointArgs = {} as LibraryBackupCheckpointArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("libraryBackupCheckpoint", buildLibraryBackupCheckpoint(args), opts);
+};
+
+/** libraryBackupControl wraps the builtin named "libraryBackupControl". */
+export interface LibraryBackupControlArgs {
+  id: string;
+  // Enum: pause | resume | cancel | trash | restore | purge
+  action: string;
+}
+
+export function buildLibraryBackupControl(args: LibraryBackupControlArgs): string {
+  const parts: string[] = [];
+  parts.push("id: " + renderMemQLValue(args.id));
+  parts.push("action: " + renderMemQLValue(args.action));
+  return "builtin libraryBackupControl(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    libraryBackupControl(args: LibraryBackupControlArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.libraryBackupControl = function (this: QueryClient, args: LibraryBackupControlArgs = {} as LibraryBackupControlArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("libraryBackupControl", buildLibraryBackupControl(args), opts);
+};
+
+/** libraryBackupCreate wraps the builtin named "libraryBackupCreate". */
+export interface LibraryBackupCreateArgs {
+  id: string;
+  workerId: string;
+  path: string;
+  // Enum: archive | sync_file | download
+  kind: string;
+  metadata?: Record<string, unknown>;
+}
+
+export function buildLibraryBackupCreate(args: LibraryBackupCreateArgs): string {
+  const parts: string[] = [];
+  parts.push("id: " + renderMemQLValue(args.id));
+  parts.push("workerId: " + renderMemQLValue(args.workerId));
+  parts.push("path: " + renderMemQLValue(args.path));
+  parts.push("kind: " + renderMemQLValue(args.kind));
+  if (args.metadata !== undefined) parts.push("metadata: " + renderMemQLValue(args.metadata));
+  return "builtin libraryBackupCreate(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    libraryBackupCreate(args: LibraryBackupCreateArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.libraryBackupCreate = function (this: QueryClient, args: LibraryBackupCreateArgs = {} as LibraryBackupCreateArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("libraryBackupCreate", buildLibraryBackupCreate(args), opts);
+};
+
+/** libraryBackupDownloadBlock wraps the builtin named "libraryBackupDownloadBlock". */
+export interface LibraryBackupDownloadBlockArgs {
+  id: string;
+  ordinal: number;
+}
+
+export function buildLibraryBackupDownloadBlock(args: LibraryBackupDownloadBlockArgs): string {
+  const parts: string[] = [];
+  parts.push("id: " + renderMemQLValue(args.id));
+  parts.push("ordinal: " + renderMemQLValue(args.ordinal));
+  return "builtin libraryBackupDownloadBlock(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    libraryBackupDownloadBlock(args: LibraryBackupDownloadBlockArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.libraryBackupDownloadBlock = function (this: QueryClient, args: LibraryBackupDownloadBlockArgs = {} as LibraryBackupDownloadBlockArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("libraryBackupDownloadBlock", buildLibraryBackupDownloadBlock(args), opts);
+};
+
+/** libraryBackupList wraps the builtin named "libraryBackupList". */
+export interface LibraryBackupListArgs {
+  // Enum: active | archives | all
+  scope?: string;
+  workerId?: string;
+  after?: string;
+}
+
+export function buildLibraryBackupList(args: LibraryBackupListArgs): string {
+  const parts: string[] = [];
+  if (args.scope !== undefined) parts.push("scope: " + renderMemQLValue(args.scope));
+  if (args.workerId !== undefined) parts.push("workerId: " + renderMemQLValue(args.workerId));
+  if (args.after !== undefined) parts.push("after: " + renderMemQLValue(args.after));
+  return "builtin libraryBackupList(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    libraryBackupList(args: LibraryBackupListArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.libraryBackupList = function (this: QueryClient, args: LibraryBackupListArgs = {} as LibraryBackupListArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("libraryBackupList", buildLibraryBackupList(args), opts);
+};
+
+/** libraryBackupPrepare wraps the builtin named "libraryBackupPrepare". */
+export interface LibraryBackupPrepareArgs {
+  id: string;
+  size: number;
+  sha256: string;
+}
+
+export function buildLibraryBackupPrepare(args: LibraryBackupPrepareArgs): string {
+  const parts: string[] = [];
+  parts.push("id: " + renderMemQLValue(args.id));
+  parts.push("size: " + renderMemQLValue(args.size));
+  parts.push("sha256: " + renderMemQLValue(args.sha256));
+  return "builtin libraryBackupPrepare(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    libraryBackupPrepare(args: LibraryBackupPrepareArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.libraryBackupPrepare = function (this: QueryClient, args: LibraryBackupPrepareArgs = {} as LibraryBackupPrepareArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("libraryBackupPrepare", buildLibraryBackupPrepare(args), opts);
+};
+
+/** libraryBackupRead wraps the builtin named "libraryBackupRead". */
+export interface LibraryBackupReadArgs {
+  id: string;
+}
+
+export function buildLibraryBackupRead(args: LibraryBackupReadArgs): string {
+  const parts: string[] = [];
+  parts.push("id: " + renderMemQLValue(args.id));
+  return "builtin libraryBackupRead(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    libraryBackupRead(args: LibraryBackupReadArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.libraryBackupRead = function (this: QueryClient, args: LibraryBackupReadArgs = {} as LibraryBackupReadArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("libraryBackupRead", buildLibraryBackupRead(args), opts);
+};
+
+/** libraryBackupReport wraps the builtin named "libraryBackupReport". */
+export interface LibraryBackupReportArgs {
+  id: string;
+  // Enum: waiting | error | downloading | complete
+  state: string;
+  message?: string;
+  offset: number;
+}
+
+export function buildLibraryBackupReport(args: LibraryBackupReportArgs): string {
+  const parts: string[] = [];
+  parts.push("id: " + renderMemQLValue(args.id));
+  parts.push("state: " + renderMemQLValue(args.state));
+  if (args.message !== undefined) parts.push("message: " + renderMemQLValue(args.message));
+  parts.push("offset: " + renderMemQLValue(args.offset));
+  return "builtin libraryBackupReport(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    libraryBackupReport(args: LibraryBackupReportArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.libraryBackupReport = function (this: QueryClient, args: LibraryBackupReportArgs = {} as LibraryBackupReportArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("libraryBackupReport", buildLibraryBackupReport(args), opts);
+};
+
+/** libraryBackupSetUserLimit wraps the builtin named "libraryBackupSetUserLimit". */
+export interface LibraryBackupSetUserLimitArgs {
+  userId: string;
+  bytes: number;
+}
+
+export function buildLibraryBackupSetUserLimit(args: LibraryBackupSetUserLimitArgs): string {
+  const parts: string[] = [];
+  parts.push("userId: " + renderMemQLValue(args.userId));
+  parts.push("bytes: " + renderMemQLValue(args.bytes));
+  return "builtin libraryBackupSetUserLimit(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    libraryBackupSetUserLimit(args: LibraryBackupSetUserLimitArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.libraryBackupSetUserLimit = function (this: QueryClient, args: LibraryBackupSetUserLimitArgs = {} as LibraryBackupSetUserLimitArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("libraryBackupSetUserLimit", buildLibraryBackupSetUserLimit(args), opts);
+};
+
+/** libraryBackupSyncDelete wraps the builtin named "libraryBackupSyncDelete". */
+export interface LibraryBackupSyncDeleteArgs {
+  watchId: string;
+  workerId: string;
+  path: string;
+  fileId: string;
+  sha256: string;
+  version: number;
+}
+
+export function buildLibraryBackupSyncDelete(args: LibraryBackupSyncDeleteArgs): string {
+  const parts: string[] = [];
+  parts.push("watchId: " + renderMemQLValue(args.watchId));
+  parts.push("workerId: " + renderMemQLValue(args.workerId));
+  parts.push("path: " + renderMemQLValue(args.path));
+  parts.push("fileId: " + renderMemQLValue(args.fileId));
+  parts.push("sha256: " + renderMemQLValue(args.sha256));
+  parts.push("version: " + renderMemQLValue(args.version));
+  return "builtin libraryBackupSyncDelete(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    libraryBackupSyncDelete(args: LibraryBackupSyncDeleteArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.libraryBackupSyncDelete = function (this: QueryClient, args: LibraryBackupSyncDeleteArgs = {} as LibraryBackupSyncDeleteArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("libraryBackupSyncDelete", buildLibraryBackupSyncDelete(args), opts);
+};
+
+/** libraryBackupUsage wraps the builtin named "libraryBackupUsage". */
+export interface LibraryBackupUsageArgs {
+  userId?: string;
+}
+
+export function buildLibraryBackupUsage(args: LibraryBackupUsageArgs): string {
+  const parts: string[] = [];
+  if (args.userId !== undefined) parts.push("userId: " + renderMemQLValue(args.userId));
+  return "builtin libraryBackupUsage(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    libraryBackupUsage(args: LibraryBackupUsageArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.libraryBackupUsage = function (this: QueryClient, args: LibraryBackupUsageArgs = {} as LibraryBackupUsageArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("libraryBackupUsage", buildLibraryBackupUsage(args), opts);
 };
 
 /** Read owned document history metadata, with a version cursor and branch provenance. */
@@ -2406,7 +3032,7 @@ QueryClient.prototype.logsStatus = function (this: QueryClient, args: LogsStatus
   return this.executeNamed("logsStatus", buildLogsStatus(args), opts);
 };
 
-/** Run the retention sweep now: archive every expired UTC day per node type as logs/<day>/<nodeType>.ndjson.gz in MEMQL_LOGS_ARCHIVE_CONTAINER, then delete that day; at most sixty days per run. NO ARCHIVE, NO DELETE: with no container configured the sweep keeps every line and says so in its own log line. A second sweep while one runs answers skipped. The nightly logsRetentionSweep automation calls this on the cron leader; an owner may call it by hand. Answers { daysArchived, rowsArchived, rowsDeleted, skipped, refused }. */
+/** Run the retention sweep now: archive every expired UTC day per node type as logs/<day>/<nodeType>.ndjson.gz in MEMQL_LOGS_ARCHIVE_CONTAINER, then, once every node type of the day is uploaded, drop the day's chunk whole; only rows no chunk wholly inside the day holds (a plain table, or a chunk that straddles midnight) go by a batched DELETE instead. At most sixty days per run. NO ARCHIVE, NO DELETE: with no container configured the sweep keeps every line and says so in its own log line. A second sweep while one runs answers skipped. The nightly logsRetentionSweep automation calls this on the cron leader; an owner may call it by hand. Answers { daysArchived, rowsArchived, rowsDeleted, chunksDropped, skipped, refused }; a dropped day's rows count in rowsDeleted at what the day archived. */
 export interface LogsSweepArgs {
 }
 
@@ -3160,6 +3786,27 @@ QueryClient.prototype.recordFeedback = function (this: QueryClient, args: Record
   return this.executeNamed("recordFeedback", buildRecordFeedback(args), opts);
 };
 
+/** Refresh the caller's pending computer-access review without approving it. */
+export interface RefreshComputerPermissionArgs {
+  approvalId: string;
+}
+
+export function buildRefreshComputerPermission(args: RefreshComputerPermissionArgs): string {
+  const parts: string[] = [];
+  parts.push("approvalId: " + renderMemQLValue(args.approvalId));
+  return "builtin refreshComputerPermission(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    refreshComputerPermission(args: RefreshComputerPermissionArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.refreshComputerPermission = function (this: QueryClient, args: RefreshComputerPermissionArgs = {} as RefreshComputerPermissionArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("refreshComputerPermission", buildRefreshComputerPermission(args), opts);
+};
+
 /** Separately approve the exact reviewed candidate after fresh verification. */
 export interface ReleaseApproveCandidateArgs {
   candidateId: string;
@@ -3754,6 +4401,28 @@ declare module "./query.js" {
 
 QueryClient.prototype.restoreDocumentVersion = function (this: QueryClient, args: RestoreDocumentVersionArgs = {} as RestoreDocumentVersionArgs, opts?: QueryCallOptions): Promise<Result> {
   return this.executeNamed("restoreDocumentVersion", buildRestoreDocumentVersion(args), opts);
+};
+
+/** Revoke one of this person's saved computer permissions. In-flight actions may finish; no later dispatch may claim the receipt. */
+export interface RevokeComputerPermissionArgs {
+  /** The approval receipt that granted the saved permission. */
+  permissionId: string;
+}
+
+export function buildRevokeComputerPermission(args: RevokeComputerPermissionArgs): string {
+  const parts: string[] = [];
+  parts.push("permissionId: " + renderMemQLValue(args.permissionId));
+  return "builtin revokeComputerPermission(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    revokeComputerPermission(args: RevokeComputerPermissionArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.revokeComputerPermission = function (this: QueryClient, args: RevokeComputerPermissionArgs = {} as RevokeComputerPermissionArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("revokeComputerPermission", buildRevokeComputerPermission(args), opts);
 };
 
 /** Create a custom role with its grants, in one internal-origin write. Guards, in order: the caller holds `create` on `role`; the slug matches ^[a-z][a-z0-9-]{1,39}$ and is claimed by no role and no alias (role_slug_taken); the rank is strictly below the caller's (role_rank_not_below_caller) and equal to no existing rung (role_rank_taken); every grant is a pair the caller themselves holds (role_grant_not_held, naming the pair); accountId, if given, scopes the role to that account (D10) and only members of it may then hold the role. Writes the role row (predefined false, active true) and one active capability row per grant. Returns {ok, slug, code}. */
@@ -4982,6 +5651,48 @@ declare module "./query.js" {
 
 QueryClient.prototype.storefrontProbe = function (this: QueryClient, args: StorefrontProbeArgs = {} as StorefrontProbeArgs, opts?: QueryCallOptions): Promise<Result> {
   return this.executeNamed("storefrontProbe", buildStorefrontProbe(args), opts);
+};
+
+/** Record an external evaluator's artifact verdicts for the human caller's finished run. MemQL verifies ownership and call receipts, not local files. Model calls cannot publish their own evaluation. Repeated identities are idempotent only for identical evidence; changed claims are refused. */
+export interface WorkRecordGoalEvaluationArgs {
+  scenario: Record<string, unknown>;
+  result: Record<string, unknown>;
+}
+
+export function buildWorkRecordGoalEvaluation(args: WorkRecordGoalEvaluationArgs): string {
+  const parts: string[] = [];
+  parts.push("scenario: " + renderMemQLValue(args.scenario));
+  parts.push("result: " + renderMemQLValue(args.result));
+  return "builtin workRecordGoalEvaluation(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    workRecordGoalEvaluation(args: WorkRecordGoalEvaluationArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.workRecordGoalEvaluation = function (this: QueryClient, args: WorkRecordGoalEvaluationArgs = {} as WorkRecordGoalEvaluationArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("workRecordGoalEvaluation", buildWorkRecordGoalEvaluation(args), opts);
+};
+
+/** Inspect the catalog and verify baseline content against installed seeds. */
+export interface WorkSkillCatalogArgs {
+}
+
+export function buildWorkSkillCatalog(args: WorkSkillCatalogArgs): string {
+  void args;
+  return "builtin workSkillCatalog()";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    workSkillCatalog(args?: WorkSkillCatalogArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.workSkillCatalog = function (this: QueryClient, args: WorkSkillCatalogArgs = {} as WorkSkillCatalogArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("workSkillCatalog", buildWorkSkillCatalog(args), opts);
 };
 
 /** Every VERSION of every step of one of the caller's runs -- the step timeline's read (design D18). The standard reads collapse an append-only row to its newest version; this answers each version once, folded to its newest row-version, with the run's head marked (current). Returns one entry per version, keyed <stepId>@v<version>. */

@@ -68,6 +68,7 @@ export function Button({
   ariaLabel,
   ariaExpanded,
   title,
+  className = "",
 }: {
   children: ReactNode;
   onClick?: () => void;
@@ -79,11 +80,12 @@ export function Button({
   ariaLabel?: string;
   ariaExpanded?: boolean;
   title?: string;
+  className?: string;
 }) {
   return (
     <button
       type={type}
-      className="os-button"
+      className={`os-button ${className}`.trim()}
       data-tone={tone}
       // A busy control is disabled for its duration. Writes in this shell are
       // non-idempotent from the person's side -- a second revoke is a second
@@ -160,6 +162,107 @@ export function Input({
               }
             : undefined
         }
+      />
+    </>
+  );
+}
+
+/**
+ * A local date and time, named for assistive tech.
+ *
+ * The value is the browser's own `datetime-local` string ("2026-10-14T09:00"):
+ * the viewer's zone, no offset, minute precision. The control neither parses
+ * nor converts it, because what a zone MEANS is the caller's call -- Logs turns
+ * a pair of these into an instant, the Email app names the zone in the label --
+ * and a control that guessed would be wrong for one of them.
+ *
+ * It is a field like `Input` and stands on the same control line (rule 5): the
+ * height, text size, radius and colours are `.os-input`'s. The label is
+ * visually hidden, as `Input`'s is; wrap the control in a `Field` when the form
+ * wants the name above it.
+ *
+ * PROMOTED FROM apps/logs, where the custom window's From and To were two raw
+ * `<input type="datetime-local">` elements, each respelling `Input`'s label and
+ * class. The Email app's Schedule and Repeat are the second surface.
+ */
+export function DateTimeInput({
+  value,
+  onChange,
+  id,
+  label,
+  min,
+}: {
+  value: string;
+  onChange: (next: string) => void;
+  id: string;
+  /** Always required, visually hidden. A control with no name is unreachable
+   *  by anyone not using their eyes. */
+  label: string;
+  /** The earliest time the browser's own picker offers, in the same string
+   *  form as `value`. It does not stop a person typing an earlier one. */
+  min?: string;
+}) {
+  return (
+    <>
+      <label className="os-sr-only" htmlFor={id}>
+        {label}
+      </label>
+      <input
+        id={id}
+        type="datetime-local"
+        className="os-input"
+        value={value}
+        min={min}
+        onChange={(e) => onChange(e.target.value)}
+      />
+    </>
+  );
+}
+
+/**
+ * Prose a person writes: a description, a sentence for a compiler.
+ *
+ * It is a field (`.os-input`: colour, border, radius and text size, rule 5) and
+ * the one field that is not a single line -- `.os-textarea` starts it two
+ * control lines tall and lets the person pull it taller. The label is visually
+ * hidden, as `Input`'s is; wrap it in a `Field` when the form wants the name
+ * above it. `onChange` hands back the text, not the event, like every control
+ * in this file.
+ *
+ * PROMOTED FROM apps/fleet/routing, where "Describe a rule" drew a raw
+ * `<textarea>` and a stylesheet rule of its own for it. The Email app's
+ * "Describe the automation" is the second surface.
+ */
+export function TextArea({
+  value,
+  onChange,
+  id,
+  label,
+  placeholder,
+  rows,
+}: {
+  value: string;
+  onChange: (next: string) => void;
+  id: string;
+  /** Always required, visually hidden. A control with no name is unreachable
+   *  by anyone not using their eyes. */
+  label: string;
+  placeholder?: string;
+  /** Lines showing before the person resizes it. Three unless asked. */
+  rows?: number;
+}) {
+  return (
+    <>
+      <label className="os-sr-only" htmlFor={id}>
+        {label}
+      </label>
+      <textarea
+        id={id}
+        className="os-input os-textarea"
+        rows={rows ?? 3}
+        value={value}
+        placeholder={placeholder}
+        onChange={(e) => onChange(e.target.value)}
       />
     </>
   );
@@ -725,23 +828,21 @@ export function Select({
   );
 }
 
-/** A quiet order menu, shared by lists. Settings still owns the default. */
+/** Two orders, one direct toggle. Settings still owns the default. */
 export function SortControl({ ascending, onToggle, descLabel = "Newest first", ascLabel = "Oldest first" }: {
   ascending: boolean;
   onToggle: () => void;
   descLabel?: string;
   ascLabel?: string;
 }) {
-  const id = useId();
   const Glyph = ascending ? ArrowUpWideNarrow : ArrowDownWideNarrow;
-  return <div className="os-sort">
+  const current = ascending ? ascLabel : descLabel;
+  const next = ascending ? descLabel : ascLabel;
+  return <button type="button" className="os-sort" onClick={onToggle}
+    aria-label={`Sort order: ${current}`} title={`Switch to ${next.toLowerCase()}`}>
     <Glyph size={14} aria-hidden />
-    <Select id={id} label="Sort order" value={ascending ? "ascending" : "descending"}
-      onChange={value => { if ((value === "ascending") !== ascending) onToggle(); }}>
-      <option value="descending">{descLabel}</option>
-      <option value="ascending">{ascLabel}</option>
-    </Select>
-  </div>;
+    <span>{current}</span>
+  </button>;
 }
 
 /** One active constraint shown while Refine is collapsed; removable in place. */
@@ -1029,8 +1130,25 @@ export function Head({ title, meta, children, breadcrumbs, back, navigation = tr
   </>;
 }
 
-export function Subhead({ children, meta }: { children: ReactNode; meta?: ReactNode }) {
-  return <h4 className="os-subhead">{children}{meta !== undefined && meta !== null ? <> <span className="os-head-meta os-subhead-meta">{meta}</span></> : null}</h4>;
+/**
+ * A subject's heading inside a page: GitHub accounts, Senders, Testing.
+ *
+ * `actions` is where the subject's own act stands, on the heading's right edge
+ * (DESIGN.md rule 1: "their Add control on the section heading") -- the slot a
+ * page `Head` uses. Every place that had one wrote the row out by hand (an
+ * `.os-head`, this heading, an `.os-head-actions`), so the row was whatever
+ * each author remembered.
+ *
+ * Passing `actions` makes the heading a row; leaving it out leaves the plain
+ * `h4` it always was. `null` counts as passed: a heading whose act is absent
+ * for now (rule 12: absent, never disabled) keeps its row, so it does not
+ * change shape when the act comes. The slot itself is drawn only when it holds
+ * something.
+ */
+export function Subhead({ children, meta, actions }: { children: ReactNode; meta?: ReactNode; actions?: ReactNode }) {
+  const heading = <h4 className="os-subhead">{children}{meta !== undefined && meta !== null ? <> <span className="os-head-meta os-subhead-meta">{meta}</span></> : null}</h4>;
+  if (actions === undefined) return heading;
+  return <div className="os-head">{heading}{actions ? <div className="os-head-actions">{actions}</div> : null}</div>;
 }
 
 export function FormRow({ children }: { children: ReactNode }) {
@@ -1183,18 +1301,21 @@ export function Fact({
   value,
   mono = false,
   title,
+  copyValue,
 }: {
   label: string;
   value: ReactNode;
   mono?: boolean;
   title?: string;
+  /** The exact value to copy; useful for timestamps displayed as relative time. */
+  copyValue?: string;
 }) {
   const empty = value === "" || value === null || value === undefined;
   return (
     <>
       <dt>{label}</dt>
       <dd className={mono ? "os-mono" : undefined} title={title}>
-        {empty ? "--" : value}
+        {empty ? "--" : copyValue ? <CopyValue value={copyValue} displayValue={value} label={label} presentation="row" /> : value}
       </dd>
     </>
   );
@@ -1226,19 +1347,28 @@ export function CopyValue({
   value,
   /** Names what the button copies: "Id" gives "Copy Id". */
   label,
+  displayValue,
+  presentation = "truncate",
 }: {
   value: string;
   label: string;
+  /** Static display content; the clipboard always receives `value`. */
+  displayValue?: ReactNode;
+  /** Rows wrap and copy from the whole value, keeping the icon quiet. */
+  presentation?: "truncate" | "row";
 }) {
+  const textId = useId();
   const [state, setState] = useState<"idle" | "copied" | "refused" | "unavailable">("idle");
   const decay = useRef<number | null>(null);
+  const attempt = useRef(0);
 
-  useEffect(
-    () => () => {
+  useEffect(() => {
+    setState("idle");
+    return () => {
+      attempt.current++;
       if (decay.current !== null) window.clearTimeout(decay.current);
-    },
-    [],
-  );
+    };
+  }, [value]);
 
   // A blank value has nothing to copy, so it reads as the em dash every absent
   // value in this shell reads as -- never a button that announces itself to a
@@ -1246,6 +1376,7 @@ export function CopyValue({
   if (value.trim() === "") return <>--</>;
 
   async function copy(): Promise<void> {
+    const current = ++attempt.current;
     if (decay.current !== null) window.clearTimeout(decay.current);
     const clipboard = globalThis.navigator?.clipboard;
     if (!clipboard) {
@@ -1254,19 +1385,32 @@ export function CopyValue({
     }
     try {
       await clipboard.writeText(value);
+      if (attempt.current !== current) return;
       setState("copied");
       decay.current = window.setTimeout(() => setState("idle"), 2000);
     } catch {
+      if (attempt.current !== current) return;
       setState("refused");
     }
   }
 
   const copied = state === "copied";
   return (
-    <span className="os-copyvalue">
-      <span className="os-copyvalue-line">
+    <span className="os-copyvalue" data-presentation={presentation}>
+      {presentation === "row" ? <button type="button" className="os-copyvalue-line os-copyvalue-row"
+        aria-label={copied ? `Copied ${label}` : `Copy ${label}`} aria-describedby={textId} title={copied ? "Copied" : `Copy ${label}`}
+        onClick={event => {
+          const selection = window.getSelection();
+          if (event.detail > 0 && selection && !selection.isCollapsed && event.currentTarget.contains(selection.anchorNode)) return;
+          void copy();
+        }}>
+        <span className="os-copyvalue-text" id={textId}>{displayValue ?? value}</span>
+        <span className="os-copyvalue-receipt" data-copied={copied || undefined} aria-hidden>
+          {copied ? <><span>Copied</span><CheckGlyph size={14} /></> : <Copy size={14} />}
+        </span>
+      </button> : <span className="os-copyvalue-line">
         <span className="os-copyvalue-text" title={value}>
-          {value}
+          {displayValue ?? value}
         </span>
         <button
           type="button"
@@ -1280,9 +1424,10 @@ export function CopyValue({
         >
           {copied ? <CheckGlyph size={12} aria-hidden /> : <Copy size={12} aria-hidden />}
         </button>
-      </span>
+      </span>}
+      {copied ? <span className="os-sr-only" role="status">Copied {label}</span> : null}
       {state === "refused" || state === "unavailable" ? (
-        <span className="os-copyvalue-note">
+        <span className="os-copyvalue-note" role="status">
           {state === "unavailable"
             ? "This browser offers no clipboard -- nothing was copied."
             : "The browser refused the copy -- nothing was copied."}

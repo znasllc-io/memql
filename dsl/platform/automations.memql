@@ -179,3 +179,9 @@ automation accountDoorReconcileWorkflow {
  }
  builtin customDomainRequireReservations()
 }
+
+/// Resume declared retention from shared database cursors every hour.
+@trigger(schedule="0 40 * * * *")
+automation retireDeclaredConceptVersions {
+  sweep := builtin conceptRetentionSweep(dryRun: false)
+}

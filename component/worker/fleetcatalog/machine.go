@@ -14,10 +14,12 @@ import (
 // -- a candidate may be held by another replica, in which case this node has
 // no handle for it at all and dispatch goes over the forward.
 type Candidate struct {
+	HomeDirectory    string
 	NativePlatform   string
 	ActionContracts  workerservice.ActionContracts
 	RepositoryScopes workerservice.RepositoryScopes
 	RegistrationId   string
+	MachineId        string // Raw enrollment identity; operator labels cannot replace it.
 	Name             string
 	DisplayName      string
 	// OwnerUserId is always stamped when known: SharedInferenceWorkers reads
@@ -29,33 +31,17 @@ type Candidate struct {
 	// Labels is the MERGE: the cockpit's `labels` overlaid by the owner's
 	// `operatorLabels`, operator side winning (design D3).
 	Labels map[string]string
-	// The TWO CONSENTS that let this machine serve somebody other than its
-	// owner (epic memql#5146, D6). They are separate fields, and keeping them
-	// separate is the design rather than an accident of parsing.
-	//
-	// SharingMode is the OWNER's, from registration.sharing.mode, set by an act
-	// on the Fleet page. InferenceServe is the COCKPIT's, from that machine's
-	// own policy.yaml, arriving on the capability descriptor.
-	//
-	// They replace the `sharedInference` OPERATOR LABEL this field used to be
-	// projected from (memql#4676). The label carried one consent where two are
-	// needed -- a person may own a machine they are not entitled to volunteer,
-	// and a machine may sit somewhere its policy forbids serving strangers --
-	// and it carried the owner's half in a map whose sibling is rewritten from
-	// the Register message on every reconnect, so the prohibition against
-	// reading the MERGE had to be maintained by hand at every reader. A
-	// structured field on the row cannot be spoofed by a machine reporting a
-	// label of that name, so the prohibition became unnecessary rather than
-	// merely documented.
-	//
-	// ServesCluster() is the only way to ask; neither half alone is consent.
-	SharingMode    string
-	InferenceServe string
+	// SharingMode is the enrolled owner's decision from registration.sharing.
+	// Never derive it from a worker or operator label: advertisements cannot
+	// volunteer a machine. The owner chooses the audience in Fleet.
+	SharingMode string
 	// SharedUserIds and SharedGroupIds are who the owner lent the machine to
 	// under SharingModePeople (epic memql#5344), empty in every other mode.
 	// ServesPerson() is the only way to ask whether they include somebody.
 	SharedUserIds  []string
 	SharedGroupIds []string
+	PausedUserIds  []string
+	PausedGroupIds []string
 	// Apps is the local-app inventory the cockpit reported, verbatim -- ids
 	// this engine cannot drive included, so an operator surface can show an
 	// app the engine will never select.
@@ -83,46 +69,35 @@ type Candidate struct {
 	RevokedAt       time.Time
 }
 
-// ServesCluster reports whether BOTH consents say cluster.
-//
-// It delegates to component/worker rather than comparing here, so there is one
-// implementation of "is this machine shared" in the tree. Two would drift, and
-// the drift would be a machine serving a stranger's prompt on one code path and
-// not on another.
+// ServesCluster admits only the owner's legacy cluster-wide share.
 func (c Candidate) ServesCluster() bool {
-	return workerservice.ServesTheCluster(c.SharingMode, c.InferenceServe)
+	return workerservice.ServesTheCluster(c.SharingMode)
 }
 
-// SharingRefusal names WHICH consent is missing, for the routing plan's
-// rejected map and for the machine page. The two repairs are in different
-// places, so one sentence for both would send half the operators to the wrong
-// machine.
+// SharingRefusal explains why the saved audience excludes cluster work.
 func (c Candidate) SharingRefusal() string {
-	return workerservice.SharingRefusal(c.SharingMode, c.InferenceServe)
+	return workerservice.SharingRefusal(c.SharingMode)
 }
 
-// Sharing is the owner's half as component/worker reads it.
+// Sharing is the owner's decision as component/worker reads it.
 func (c Candidate) Sharing() workerservice.Sharing {
-	return workerservice.Sharing{Mode: c.SharingMode, UserIds: c.SharedUserIds, GroupIds: c.SharedGroupIds}
+	return workerservice.Sharing{Mode: c.SharingMode, UserIds: c.SharedUserIds, GroupIds: c.SharedGroupIds, PausedUserIds: c.PausedUserIds, PausedGroupIds: c.PausedGroupIds}
 }
 
-// ServesPerson reports whether BOTH consents let this person's call run here
-// (epic memql#5344, design G7). It is the question every person-path reader
-// asks -- the catalog, the shared plan, the replica-hop receiver -- so that
-// "is this machine lent to you" has one answer.
+// ServesPerson applies the saved audience on every routing path.
 func (c Candidate) ServesPerson(p *workerservice.Person) bool {
-	return workerservice.ServesPerson(c.Sharing(), c.InferenceServe, p)
+	return workerservice.ServesPerson(c.Sharing(), p)
 }
 
 // PersonRefusal names why the machine does not serve this person, or "".
 func (c Candidate) PersonRefusal(p *workerservice.Person) string {
-	return workerservice.PersonRefusal(c.Sharing(), c.InferenceServe, p)
+	return workerservice.PersonRefusal(c.Sharing(), p)
 }
 
 // SystemRefusal names why the machine does not serve the cluster's own work,
 // or "". A machine lent to named people never does (design G3).
 func (c Candidate) SystemRefusal() string {
-	return workerservice.SystemRefusal(c.Sharing(), c.InferenceServe)
+	return workerservice.SystemRefusal(c.Sharing())
 }
 
 // Label returns the machine's display label for a card or a log line.

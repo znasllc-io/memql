@@ -624,6 +624,43 @@ are independent: an edge is `child` because of what the engine did with it, and
 `assignedTo` because of what its author said it means. `as` is additive, so a
 client that ignores it sees exactly the previous contract.
 
+### Version retention
+
+Declare version lifetime on the concept:
+
+<!-- corpus: 2026/examples/memql/retention/policy.memql -->
+```memql
+@retention(ttl="30d", keepLatest=true, archive="required")
+concept reading {
+  value float
+}
+```
+
+`ttl` is required and measures each stored version's `createdAt`, independent
+of payload dates. Use whole days (`30d`) or a duration such as `24h`; the range
+is one second through 36500 days. `keepLatest` defaults to `true`: older
+versions may expire, but the newest version of each record, including a deletion
+marker, stays. Set `keepLatest=false` when the record itself may expire.
+
+`archive` defaults to `"required"`. The engine uploads complete versions,
+including their historical schema, then reads back and compares the archive
+before deleting only unchanged, exact version keys. Missing or failed archive
+verification preserves the rows. Use `archive="none"` explicitly for disposable
+history. Concepts without the annotation keep their existing behavior, including
+any existing specialized retention policy.
+
+The hourly `retireDeclaredConceptVersions` automation runs bounded batches and
+stores progress in the shared database. Another replica can continue after a
+restart. The cluster-owner builtin `conceptRetentionSweep(dryRun: true)` previews
+one page per concept and table without deleting or advancing progress. Expiry is
+asynchronous; TTL is eligibility for maintenance, not a query visibility filter.
+
+`observability.logLine` uses the same annotation through its chunk-aware nightly
+sweeper. Logs require whole days, `keepLatest=false` and `archive="required"`.
+Its declaration takes precedence over `MEMQL_LOGS_RETENTION_DAYS`; the environment
+setting remains the fallback when a supplied log concept has no annotation.
+
+
 ## Expressions
 
 A `.memql` file writes every expression in one language: a query's `filter` and
@@ -1058,17 +1095,25 @@ Frames are JSON encodings of the existing protobuf envelopes. A typical request/
 }
 ```
 
-The bridge enforces a small per-connection window (four concurrent queries and a 5 MiB frame limit). Clients should reuse a single socket and listen for `queryResult.done` or `queryError` payloads.
+The bridge enforces a small per-connection window (four concurrent queries). A request that finds the bridge's queue of waiting requests full is refused at once with a `queryError` (`ResourceExhausted`, "too many concurrent MemQL queries") that carries the request's message id in `correlateTo`, as every reply does, so the client that sent it settles the call with the refusal. Clients should reuse a single socket and listen for `queryResult.done` or `queryError` payloads.
+
+One answer can be as large as 32 MiB, the limit of the gRPC stream in both directions, which the bridge shares so that it can receive anything the server sends. An answer over that is never sent: the request that asked gets a `queryError` with code `ResourceExhausted`, metadata `code` of `RESULT_TOO_LARGE` (with `sizeBytes` and `limitBytes`), and a sentence that names the size and the limit. The socket and every other request carry on. Ask for fewer rows or fewer fields, or read one row by id, and try again.
+
+A request from the browser can be as large as the same 32 MiB (`MEMQL_WS_MAX_MESSAGE_BYTES`), which a template save with a large document needs. A session that has not signed in (public reads, see [site hosting](../operate/site-hosting.md)) keeps a limit of 5 MiB, or the operator's limit if that is smaller: nothing it may do needs more. A node running with `MEMQL_IDENTITY_ENABLED=false` (troubleshooting only) verifies no credential over HTTP, so no session on its bridge has signed in: every one keeps the 5 MiB limit, although its stream is admitted as the cluster owner. A request over the limit fails by itself, the same way: a `queryError` with code `ResourceExhausted`, metadata `code` of `REQUEST_TOO_LARGE` (with `sizeBytes` and `limitBytes`) and a sentence that names the size and the limit, carrying the ids the request came with so that the client that sent it can match the refusal to it. The socket and every other request carry on. To do this the bridge reads and discards up to twice the limit; a message larger than that closes the connection, since a client that sends without end is not one request that failed. The ids are looked for in the first 64 KiB and the last 4 KiB of the message, which is where clients write them. A request is also measured the way the server will measure it: as protocol buffers, which is not the size of its JSON text (a list of small numbers is two bytes of JSON each and eleven encoded), and with the request id the bridge gives an `executeQuery` that came without one (its message id). One the server would not take is refused by itself in the same way, with the size the server counts.
+
+Before a request is decoded it is measured by its shape, because decoding can cost up to a hundred times a request's size. One request may hold at most 100,000 values (in JSON its strings, numbers, booleans, nulls, objects and arrays, keys not counted; in protocol buffers the message, its fields and the fields of the messages inside it), nested at most 1,000 levels deep. A request over either fails by itself in the same way: metadata `code` of `REQUEST_TOO_LARGE` with `values` and `limitValues`, or `REQUEST_TOO_DEEP` with `limitDepth`, and a sentence. JSON is measured as it arrives, so a request over a bound is not even held whole: its ids are looked for in what had been read when the bound was crossed (up to its first 64 KiB, not always all of them) and in its last 4 KiB. The message id, which clients write last, is still found there, so the refusal carries it in `correlateTo` and the call settles. A template save holds a handful of values however large its document, which travels as one string.
+
+The time allowed to write a message to the browser is `MEMQL_WS_WRITE_TIMEOUT_MS` plus one second for each MiB of the message, so a large answer is not cut off on an ordinary connection. A message's deadline starts when it is its turn to be written, so a refusal the bridge sends behind an answer that is still going is delivered after it and not given up on. No keepalive ping is sent while a message is being written, nor while one is arriving and bytes of it are still coming (only the sender's own bytes count, not what the bridge writes to it); a sender that stops in the middle of a message is not exempt from the keepalive.
 
 Configuration variables (prefixed with `MEMQL_WS_`) let you tune the gateway:
 
 | Variable | Description | Default |
 |----------|-------------|---------|
 | `MEMQL_WS_DIAL_TIMEOUT_MS` | How long to wait when dialing the internal gRPC server. | `5000` |
-| `MEMQL_WS_WRITE_TIMEOUT_MS` | Per-message write deadline applied to the WebSocket. | `10000` |
+| `MEMQL_WS_WRITE_TIMEOUT_MS` | Per-message write deadline applied to the WebSocket, plus one second for each MiB of the message. | `10000` |
 | `MEMQL_WS_MAX_CONCURRENT_REQUESTS` | Maximum in-flight `executeQuery` messages per WebSocket. | `4` |
-| `MEMQL_WS_MAX_MESSAGE_BYTES` | Maximum accepted frame size from the browser. | `5242880` (5 MiB) |
-| `MEMQL_WS_PING_INTERVAL_MS` | Interval for server-side WebSocket keepalive pings. Prevents idle connection timeouts on edge/proxy infrastructure. Set to `0` to disable. | `30000` (30s) |
+| `MEMQL_WS_MAX_MESSAGE_BYTES` | Largest request accepted from the browser. A larger one fails by itself with a sentence (see above). A session that has not signed in is held to 5 MiB at most, and so is every session on a node running with `MEMQL_IDENTITY_ENABLED=false`. | `33554432` (32 MiB, the server's own message cap) |
+| `MEMQL_WS_PING_INTERVAL_MS` | Interval for server-side WebSocket keepalive pings. Prevents idle connection timeouts on edge/proxy infrastructure. Set to `0` to disable. | `15000` (15s) |
 
 ## The internal query form
 

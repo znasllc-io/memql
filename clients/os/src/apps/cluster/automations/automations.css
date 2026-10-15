@@ -2,8 +2,6 @@
 .os-automation-body { display:grid; grid-template-columns:minmax(0,1fr) 320px; min-height:0; flex:1; }
 .os-automation-overview,.os-automation-detail { min-width:0; overflow:auto; padding:0 16px 20px; }
 .os-automation-detail { border-left:1px solid var(--os-line); }
-.os-automation-canvas { overflow:auto; }
-.os-automation-map { display:block; overflow:visible; }
 .os-automation-column { fill:var(--os-raised); }
 .os-automation-map text { fill:var(--os-ink); font-family:var(--os-font-mono); font-size:var(--os-text-sm); }
 .os-automation-map .os-automation-numeral { font-family:var(--os-font-display); font-size:var(--os-text-lg); fill:var(--os-muted); }

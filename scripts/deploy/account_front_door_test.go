@@ -21,14 +21,14 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/znasllc-io/memql/component/deploycontrol"
 	"github.com/znasllc-io/memql/component/frontdoor"
+	"github.com/znasllc-io/memql/core/capabilityresult"
 	"gopkg.in/yaml.v3"
 )
 
 // resultOf decodes the envelope's result object. env.Result is raw JSON so a
 // script may return any shape; every assertion below reads it as a map.
-func resultOf(t *testing.T, env deploycontrol.CapabilityResult) map[string]any {
+func resultOf(t *testing.T, env capabilityresult.CapabilityResult) map[string]any {
 	t.Helper()
 	var out map[string]any
 	if len(env.Result) == 0 {
@@ -353,5 +353,62 @@ func TestBindDoorRefusesAMalformedWorkerPrefix(t *testing.T) {
 				t.Errorf("exit code = %d, want 2 (bad parameter)", code)
 			}
 		})
+	}
+}
+
+// An account's front door is four Ingresses and only two of them can fall back
+// to the error pages using a Service that speaks its backend protocol. HTTP
+// uses error-pages, identity HTTPS uses error-pages-tls, and gRPC is excluded.
+//
+// Parsed from --renderTo, because the envelope re-checks the input and the
+// objects are what a cluster applies.
+func TestBindDoorFallsBackToTheErrorPagesOnItsPlainHTTPIngresses(t *testing.T) {
+	rendered := filepath.Join(t.TempDir(), "door.yaml")
+	env, code := envelopeFrom(t, bindDoorScript,
+		"--accountId="+testAccountID, "--reservedName="+testReservedName,
+		"--issuer=letsencrypt-prod", "--apiPaths=/healthz,/memql/ws", "--dryRun=true",
+		"--renderTo="+rendered)
+	if code != 0 || !env.OK {
+		t.Fatalf("dry run: exit %d ok=%v", code, env.OK)
+	}
+	raw, err := os.ReadFile(rendered)
+	if err != nil {
+		t.Fatalf("reading the rendered manifest: %v", err)
+	}
+
+	want := map[string]struct {
+		fits bool
+		why  string
+	}{
+		"-app":      {true, "the edge, plain HTTP"},
+		"-api":      {true, "bff-http, plain HTTP"},
+		"-api-grpc": {false, "backend-protocol GRPC: the proxy would speak h2c to a server that speaks HTTP/1.1"},
+		"-id":       {true, "HTTPS fallback uses the TLS Service"},
+	}
+	ingresses := ingressesOfManifest(t, string(raw))
+	if len(ingresses) != len(want) {
+		t.Fatalf("the script rendered %d Ingresses, want %d", len(ingresses), len(want))
+	}
+	for _, ing := range ingresses {
+		suffix := strings.TrimPrefix(ing.Metadata.Name, testObjectName)
+		w, known := want[suffix]
+		if !known {
+			t.Errorf("an Ingress named %q has no expectation here; decide whether the error pages can stand behind it", ing.Metadata.Name)
+			continue
+		}
+		got, has := ing.Metadata.Annotations[scriptDefaultBackendKey]
+		expected := scriptErrorPagesService
+		if suffix == "-id" {
+			expected = "error-pages-tls"
+		}
+		switch {
+		case w.fits && got != expected:
+			t.Errorf("%s carries %s=%q, want %q (%s)", ing.Metadata.Name, scriptDefaultBackendKey, got, scriptErrorPagesService, w.why)
+		case !w.fits && has:
+			t.Errorf("%s carries %s=%q, but it must not (%s); the proxy would answer 502", ing.Metadata.Name, scriptDefaultBackendKey, got, w.why)
+		}
+		if _, ok := ing.Metadata.Annotations[scriptCustomErrorsKey]; ok {
+			t.Errorf("%s sets %s, which would replace the application's own error responses", ing.Metadata.Name, scriptCustomErrorsKey)
+		}
 	}
 }

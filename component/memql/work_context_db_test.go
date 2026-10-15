@@ -247,7 +247,7 @@ func TestWorkContextVerboseCheckpointContinuesAndRetainsExactSource(t *testing.T
 	require.Contains(t, fmt.Sprint(compacted), "incomplete")
 	after, _ := json.Marshal(messages)
 	require.Equal(t, before, after)
-	start, end := workContextChunk(messages, workCheckpointInputBytes-len(workContextTask(messages)))
+	start, end := workContextChunk(messages, workCheckpointInputBytes-len(workContextTask(messages)), nil)
 	source, _ := json.Marshal(messages[start:end])
 	fingerprint := workCheckpointHash(source, workContextTask(messages))
 	call, _ := parser.RenderCall("workCheckpointForOwner", map[string]any{"fingerprint": fingerprint})

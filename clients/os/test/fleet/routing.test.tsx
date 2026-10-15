@@ -168,6 +168,7 @@ describe("how a machine is chosen (Routing > Machines)", () => {
     // button while its feed is live, precisely because it does not need one.
     await act(async () => {
       connection.subscriptions.emit("v1:worker:routingPolicy", {
+        ownerUserId: "v1:identity:user:me",
         id: "p1",
         strategy: "leastLoaded",
         fallback: "none",
@@ -216,6 +217,7 @@ describe("how a machine is chosen (Routing > Machines)", () => {
 
     await act(async () => {
       connection.subscriptions.emit("v1:worker:routingPolicy", {
+        ownerUserId: "v1:identity:user:me",
         id: "p1",
         strategy: "roundRobin",
         fallback: "none",

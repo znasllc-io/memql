@@ -137,9 +137,9 @@ describe("a domain's detail", () => {
         "domain-sales": [
           [
             chunkRow({ id: "c-1", documentId: "doc-terms", text: "From the terms." }),
-            chunkRow({ id: "c-2", documentId: "", text: "From the corpus." }),
+            chunkRow({ id: "c-2", documentId: "", source: "llmSeeded", text: "From the corpus." }),
           ],
-          [chunkRow({ id: "c-3", documentId: "", text: "Page two." })],
+          [chunkRow({ id: "c-3", documentId: "", source: "llmSeeded", text: "Page two." })],
         ],
       },
     });
@@ -156,6 +156,22 @@ describe("a domain's detail", () => {
     await click(screen.getByText("Load more"));
     await settle();
     expect(screen.getByText(/3 chunks loaded -- that is all of them/)).toBeTruthy();
+  });
+
+  it("keeps an uploaded artifact distinct from seeded content after review", async () => {
+    const sourceRef = "artifact:sample-document";
+    const connection = fakeConnection({
+      domainRows: [domainLiteRow("domain-sales", "validated")],
+      chunkPages: { "domain-sales": [[chunkRow({ id: "upload", text: "Verified practice.", sourceRef, validationStatus: "validated" })]] },
+    });
+    mount(connection);
+    await settle();
+    await click(screen.getByText("domain-sales"));
+    await settle();
+    const uploads = screen.getByRole("region", { name: "Uploaded files" });
+    expect(within(uploads).getByText(`fileUpload · ${sourceRef}`)).toBeTruthy();
+    expect(within(uploads).getByText("validated")).toBeTruthy();
+    expect(screen.queryByText("Seeded corpus")).toBeNull();
   });
 
   it("marks a SUPERSEDED chunk without hiding it -- it is history, not work", async () => {

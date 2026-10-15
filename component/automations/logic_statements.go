@@ -39,6 +39,7 @@ import (
 	"reflect"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/znasllc-io/memql/component/auth"
 	"github.com/znasllc-io/memql/component/events"
@@ -161,8 +162,16 @@ func (r *LogicRunner) RunPreparedLogicBody(ctx context.Context, a *Automation, a
 	} else if held = r.logicJournal(); held != nil {
 		exec.Input, exec.CallerSuppliedPayload = args, true
 		openCtx := ctx
-		held.hold = &heldWrites{open: func() {
-			held.write(openCtx, "createWorkRun", held.openRunArgs(a, exec, nil, events.Cause{}))
+		// The run opens LATE, at the logic's first write, so it opens live as a
+		// scheduled firing's held run does (heldUntilWrite): created carrying a
+		// heartbeat of the moment it is written, its held pulses dropped and its
+		// held receipts' heartbeats restamped when they are replayed. The work
+		// sweep judges a running run by its newest heartbeat and hands one silent
+		// for a minute to another replica.
+		held.hold = &heldWrites{opensLive: true, open: func() {
+			runArgs := held.openRunArgs(a, exec, nil, events.Cause{})
+			runArgs["heartbeatAt"] = rfc3339(time.Now())
+			held.write(openCtx, "createWorkRun", runArgs)
 		}}
 		run.journal, run.orders = held, true
 		ctx = common.ContextWithWriteObserver(ctx, func(string, string) { held.release() })

@@ -55,7 +55,7 @@ var clauseDocs = map[string]string{
 	"sort":         "Query clause: order the result -- `sort \"row.createdAt\", \"desc\"`. Payload keys are bare; row intrinsics take the row. namespace.",
 	"paginate":     "Query clause: bound the result to a window -- `paginate 25`. A list-returning query carries paginate, sort, count or @unbounded(\"reason\") (memql#1965).",
 	"asOf":         "Query clause: read the stream as of a moment -- `asOf latest`, or `asOf args.at ?? latest`. Query-only (core-builtins ADR 2.3).",
-	"count":        "Query clause: aggregate the matching set to {count: N} -- a bare `count`. Mutually exclusive with shape, sort and paginate.",
+	"count":        "Query clause: aggregate the matching set to {count: N, atLeast: B} -- a bare `count`. The count reads up to the engine's window: past it, N is the window and atLeast is true. Mutually exclusive with shape, sort and paginate.",
 	"insert":       "Mutation block: the row to create. Exactly one insert OR update per mutation.",
 	"update":       "Mutation block: partial read-merge-write of an existing row (keyed by id).",
 	"accept":       "Write-block sugar: `accept { name, ... }` lists the public fields the mutation accepts -- each auto-binds to its same-named arg (`name` -> `name: args.name`). Every name must be a declared arg. Nested inside insert{}/update{} (or top-level, which means insert). Never mixed with loose fields.",

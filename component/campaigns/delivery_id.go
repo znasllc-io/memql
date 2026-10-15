@@ -66,6 +66,18 @@ func deliveryRowID(campaignID, recipientID string) string {
 	return sha256Hex(campaign + recipient)
 }
 
+// singleDeliveryRowID reproduces recordCampaignDelivery's derived id for a single
+// send made under a REQUEST (memql#6022, F7): the request id stands where a
+// campaign's canonical id does, so each message to a person has a row of its own.
+//
+// The request id is hashed as it is -- a request id is not a concept id and is not
+// canonicalised -- and it cannot alias a campaign's row: a canonical campaign id
+// always carries a colon (or is empty), and singleSendRequestID admits neither.
+func singleDeliveryRowID(requestID, recipientID string) string {
+	recipient := sha256Hex(canonicalIDFor(recipientConcept, recipientID))
+	return sha256Hex(sha256Hex(requestID) + recipient)
+}
+
 // canonicalIDFor mirrors the engine's canonicalizeIdValue for the one shape
 // this package produces.
 //

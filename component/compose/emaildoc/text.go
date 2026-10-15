@@ -1,0 +1,179 @@
+package emaildoc
+
+import (
+	"strconv"
+	"strings"
+
+	"golang.org/x/net/html"
+	"golang.org/x/net/html/atom"
+)
+
+// layoutText is the plain-text part of a layout. Each block that has words
+// gives one or more chunks, in document order (the blocks of a section, then
+// of each column in turn, where the container is), and the chunks are joined
+// by a blank line:
+//
+//   - a heading and a highlight, as written;
+//   - each paragraph of a text block, without its emphasis markers and with
+//     each link as "label (address)", and each list, one "- item" or
+//     "N. item" line per item;
+//   - a button, as "Label: address" (only the label while it has no link);
+//   - a social block, its title as a heading, then its links, one
+//     "Network: address" line each (only the network while it has no link);
+//   - a footer, its links as "Label: address" lines (only the label while it
+//     has no link), then its lines;
+//   - an html block, the text a reader sees in it.
+//
+// Pictures, dividers and spacers have no words. A link whose address breaks
+// the link rule is its words alone, as in the HTML. The part ends with one
+// newline, and is empty when no block has words. Merge tags stay as written,
+// to be filled like the rest of the part.
+func layoutText(blocks []Block) string {
+	var chunks []string
+	walkBlocks(blocks, func(b Block) bool {
+		chunks = appendText(chunks, b)
+		return true
+	})
+	if len(chunks) == 0 {
+		return ""
+	}
+	return strings.Join(chunks, "\n\n") + "\n"
+}
+
+// appendText adds the chunks of one block.
+func appendText(chunks []string, b Block) []string {
+	add := func(chunk string) {
+		if chunk = strings.Trim(chunk, htmlSpace); chunk != "" {
+			chunks = append(chunks, chunk)
+		}
+	}
+	switch b.Type {
+	case typeHeading, typeHighlight:
+		add(oneNewline(b.Text))
+	case typeText:
+		for _, element := range markdownOf(b.Text) {
+			add(elementText(element))
+		}
+	case typeButton:
+		add(linkLine(b.Label, b.Href))
+	case typeSocial:
+		add(oneNewline(b.Title))
+		lines := make([]string, len(b.Links))
+		for i, link := range b.Links {
+			lines[i] = linkLine(link.Network, link.Href)
+		}
+		add(strings.Join(lines, "\n"))
+	case typeFooter:
+		lines := make([]string, 0, len(b.Links)+len(b.Lines))
+		for _, link := range b.Links {
+			lines = append(lines, linkLine(link.Label, link.Href))
+		}
+		for _, line := range b.Lines {
+			lines = append(lines, oneNewline(line))
+		}
+		add(strings.Join(lines, "\n"))
+	case typeHTML:
+		if normalized, err := safeMarkup(b.HTML); err == nil {
+			add(markupText(normalized))
+		}
+	}
+	return chunks
+}
+
+// linkLine is a link as a line of the text part: "Label: address", or the
+// label alone while it has no address (or one that breaks the link rule).
+func linkLine(label, href string) string {
+	label = oneNewline(label)
+	if href = checkedHref(href); href == "" {
+		return label
+	}
+	return label + ": " + href
+}
+
+// elementText is a paragraph, or a list with an item on each line.
+func elementText(element mdElement) string {
+	if element.Kind == mdParagraph {
+		return inlineText(element.Inline)
+	}
+	lines := make([]string, len(element.Items))
+	for i, item := range element.Items {
+		marker := "- "
+		if element.Kind == mdNumberedList {
+			marker = strconv.Itoa(item.Number) + ". "
+		}
+		lines[i] = marker + inlineText(item.Inline)
+	}
+	return strings.Join(lines, "\n")
+}
+
+// inlineText is the runs of a paragraph or a list item as plain text.
+func inlineText(runs []mdInline) string {
+	var b strings.Builder
+	for _, run := range runs {
+		switch run.Kind {
+		case mdLink:
+			if href := checkedHref(run.URL); href != "" {
+				b.WriteString(run.Text + " (" + href + ")")
+			} else {
+				b.WriteString(run.Text)
+			}
+		case mdBreak:
+			b.WriteByte('\n')
+		default:
+			b.WriteString(run.Text)
+		}
+	}
+	return b.String()
+}
+
+// htmlSpace is what HTML counts as white space. A no-break space is not: it
+// stays, as the character it is.
+const htmlSpace = " \t\n\f\r"
+
+// lineElements start and end a line of an html block's text.
+var lineElements = wordSet("p div table thead tbody tfoot tr caption h1 h2 h3 h4 h5 h6 blockquote pre ul ol li center hr")
+
+// markupText is the text a reader sees in the normalized markup of an html
+// block: a line for each block element, list item, table row and line break,
+// the cells of a row side by side, white space collapsed as a browser
+// collapses it, and blank lines dropped.
+func markupText(normalized string) string {
+	nodes, err := html.ParseFragment(strings.NewReader(normalized), &html.Node{Type: html.ElementNode, Data: "td", DataAtom: atom.Td})
+	if err != nil {
+		return ""
+	}
+	var b strings.Builder
+	var walk func(n *html.Node)
+	walk = func(n *html.Node) {
+		switch {
+		case n.Type == html.TextNode:
+			b.WriteString(n.Data)
+			return
+		case n.Type != html.ElementNode:
+			return
+		case n.Data == "br":
+			b.WriteByte('\n')
+			return
+		case n.Data == "td" || n.Data == "th":
+			b.WriteByte(' ')
+		case lineElements[n.Data]:
+			b.WriteByte('\n')
+			defer b.WriteByte('\n')
+		}
+		for child := n.FirstChild; child != nil; child = child.NextSibling {
+			walk(child)
+		}
+	}
+	for _, node := range nodes {
+		walk(node)
+	}
+	var lines []string
+	for _, line := range strings.Split(b.String(), "\n") {
+		if line = strings.Join(strings.FieldsFunc(line, isHTMLSpace), " "); line != "" {
+			lines = append(lines, line)
+		}
+	}
+	return strings.Join(lines, "\n")
+}
+
+func isHTMLSpace(r rune) bool { return strings.ContainsRune(htmlSpace, r) }

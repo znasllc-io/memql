@@ -5,6 +5,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"html/template"
 	"strings"
@@ -105,6 +106,55 @@ func Render(f Format, d Draft, p Provenance) (Result, error) {
 		return Result{}, err
 	}
 	return Result{Bytes: out, Embedded: f.CarriesProvenance(), Note: note}, nil
+}
+
+// ---- blank: the empty document for a format ----
+
+// ErrBlankFormat is the refusal for a blank docx or pdf, and it is a sentence a
+// person reads (the Materializer returns it as written), which is why it is
+// capitalised and punctuated like one.
+//
+//nolint:staticcheck // ST1005: person-facing copy, not a log fragment.
+var ErrBlankFormat = errors.New("A blank file can be Markdown, text, HTML, CSV or JSON.")
+
+// blankHTMLDoc is the empty page. It goes through html/template for the reason
+// htmlDoc does: the title is a person's free text and lands inside an element,
+// so it is escaped for where it lands rather than by a call site remembering to.
+var blankHTMLDoc = template.Must(template.New("blank").Parse(
+	"<!doctype html>\n<html><head><meta charset=\"utf-8\"><title>{{.}}</title></head><body></body></html>\n"))
+
+// blankNote is the sentence stamped on a blank file's composition in place of
+// the format's provenance note. Without it the app would read a blank Markdown
+// file's missing front matter as "this format has nowhere to put provenance",
+// which is not why it is missing.
+const blankNote = "Created blank. Its history is kept on its composition, not in the file."
+
+// RenderBlank writes the empty document for a format. No provenance is
+// embedded: a blank file's history lives on its composition row, and a Markdown
+// file with front matter would not read as empty in the editor.
+//
+// docx and pdf have no useful empty document and nothing asks for one, so they
+// are refused with ErrBlankFormat rather than written as a file that looks like
+// an error when opened. So is any format this package cannot write.
+func RenderBlank(f Format, title string) (Result, error) {
+	var out []byte
+	switch f {
+	case FormatMarkdown:
+		out = []byte("\n")
+	case FormatText, FormatCSV:
+		out = []byte{}
+	case FormatJSON:
+		out = []byte("{}\n")
+	case FormatHTML:
+		var b bytes.Buffer
+		if err := blankHTMLDoc.Execute(&b, title); err != nil {
+			return Result{}, fmt.Errorf("compose: writing a blank html page: %w", err)
+		}
+		out = b.Bytes()
+	default:
+		return Result{}, ErrBlankFormat
+	}
+	return Result{Bytes: out, Embedded: false, Note: blankNote}, nil
 }
 
 // ---- markdown: YAML front matter ----

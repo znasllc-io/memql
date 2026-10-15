@@ -3,9 +3,12 @@ package client
 import (
 	"context"
 	"fmt"
+	"math"
 	"regexp"
 	"sort"
+	"strconv"
 	"strings"
+	"time"
 
 	langparser "github.com/znasllc-io/memql/component/language/parser"
 )
@@ -133,24 +136,18 @@ func RowSlice(r Row, key string) []any {
 }
 
 // Rows returns the result's projected rows in source order. Handles
-// both shape-wrapped (`{"data": [...]}`) and bundle-bearing
-// (`{"bundle": {"nodes": [...]}}`) envelopes; for the bundle path it
-// flattens each MemoryNode's `payload` fields onto the top level so
-// downstream callers read uniform `row.String("foo")` regardless of
-// which envelope the engine produced.
+// shape-wrapped (`{"data": [...]}`) and bundle-bearing
+// (`{"bundle": {"nodes": [...]}}`) envelopes. Builtin replies inside data
+// carry an id-keyed node map; these are unwrapped in createdAt descending
+// order, preserving the engine's nanosecond PreserveOrder stamps. Both node
+// paths flatten payload fields onto the top level, matching the TS SDK.
 func (r *Result) Rows() []Row {
 	if r == nil || r.payload == nil {
 		return nil
 	}
 	switch x := r.payload.(type) {
 	case []any:
-		out := make([]Row, 0, len(x))
-		for _, item := range x {
-			if m, ok := item.(map[string]any); ok {
-				out = append(out, Row(m))
-			}
-		}
-		return out
+		return rowsFromItems(x)
 	case map[string]any:
 		if bundle, ok := x["bundle"].(map[string]any); ok {
 			if nodes, ok := bundle["nodes"].([]any); ok {
@@ -160,41 +157,115 @@ func (r *Result) Rows() []Row {
 					if !ok {
 						continue
 					}
-					row := Row{}
-					if id, ok := m["id"].(string); ok {
-						row["id"] = id
-					}
-					if concept, ok := m["concept"].(string); ok {
-						row["concept"] = concept
-					}
-					if createdAt, ok := m["createdAt"]; ok {
-						row["createdAt"] = createdAt
-					}
-					if payload, ok := m["payload"].(map[string]any); ok {
-						for k, v := range payload {
-							row[k] = v
-						}
-					}
-					out = append(out, row)
+					out = append(out, flattenNode(m))
 				}
 				return out
 			}
 		}
 		for _, key := range []string{"data", "rows", "results", "items"} {
 			if arr, ok := x[key].([]any); ok {
-				out := make([]Row, 0, len(arr))
-				for _, item := range arr {
-					if m, ok := item.(map[string]any); ok {
-						out = append(out, Row(m))
-					}
-				}
-				return out
+				return rowsFromItems(arr)
 			}
 		}
 		// Single-row envelope: return as a one-element slice.
 		return []Row{Row(x)}
 	}
 	return nil
+}
+
+func rowsFromItems(items []any) []Row {
+	out := make([]Row, 0, len(items))
+	for _, item := range items {
+		m, ok := item.(map[string]any)
+		if !ok {
+			continue
+		}
+		if nodes := builtinReplyNodes(m); nodes != nil {
+			for _, node := range nodes {
+				out = append(out, flattenNode(node))
+			}
+		} else {
+			out = append(out, m)
+		}
+	}
+	return out
+}
+
+func flattenNode(node map[string]any) Row {
+	row := Row{}
+	if id, ok := node["id"].(string); ok {
+		row["id"] = id
+	}
+	if concept, ok := node["concept"].(string); ok {
+		row["concept"] = concept
+	}
+	if createdAt := node["createdAt"]; createdAt != nil {
+		row["createdAt"] = createdAt
+	}
+	if payload, ok := node["payload"].(map[string]any); ok {
+		for k, v := range payload {
+			row[k] = v
+		}
+	}
+	return row
+}
+
+// builtinReplyNodes mirrors sdk/ts/src/client/types.ts. Only a non-empty
+// map whose EVERY value has string id and concept fields is a builtin reply.
+// Ordinary projected objects (including empty maps) remain single rows.
+func builtinReplyNodes(value map[string]any) []Row {
+	if len(value) == 0 {
+		return nil
+	}
+	// protojson sorts map keys, but Object.keys in TS enumerates array-index
+	// keys first, numerically. Reconstruct that order when timestamps tie;
+	// Go map iteration cannot retain the JSON object's order.
+	const nonIndex = 1<<32 - 1 // JavaScript array indices exclude 2^32-1.
+	type entry struct {
+		key       string
+		index     uint64
+		node      Row
+		createdAt time.Time
+		validTime bool
+	}
+	entries := make([]entry, 0, len(value))
+	for key, v := range value {
+		node, ok := v.(map[string]any)
+		if !ok {
+			return nil
+		}
+		if _, ok := node["id"].(string); !ok {
+			return nil
+		}
+		if _, ok := node["concept"].(string); !ok {
+			return nil
+		}
+		index, err := strconv.ParseUint(key, 10, 32)
+		if err != nil || strconv.FormatUint(index, 10) != key {
+			index = nonIndex
+		}
+		stamp, err := time.Parse(time.RFC3339Nano, RowString(node, "createdAt"))
+		entries = append(entries, entry{key, index, node, stamp, err == nil})
+	}
+	sort.Slice(entries, func(i, j int) bool {
+		a, b := entries[i], entries[j]
+		if a.validTime != b.validTime {
+			// TS's descending compareInstant places unparseable stamps first.
+			return !a.validTime
+		}
+		if a.validTime && !a.createdAt.Equal(b.createdAt) {
+			return a.createdAt.After(b.createdAt)
+		}
+		if a.index != b.index {
+			return a.index < b.index
+		}
+		return a.key < b.key
+	})
+	nodes := make([]Row, 0, len(entries))
+	for _, entry := range entries {
+		nodes = append(nodes, entry.node)
+	}
+	return nodes
 }
 
 // Single returns the first projected row, or nil when the result is
@@ -206,6 +277,50 @@ func (r *Result) Single() Row {
 		return nil
 	}
 	return rows[0]
+}
+
+// CountAnswer is what a `count` query answered: Count rows matched, or --
+// when AtLeast is true -- the engine stopped at its window and at least that
+// many did (memql#6033). Read by Result.Count.
+type CountAnswer struct {
+	Count   int64
+	AtLeast bool
+}
+
+// Count reads the aggregate a `count` query answers (memql#6033): how many
+// rows matched, and whether the engine stopped at its window. The engine
+// reads a count up to its window (5,000 by default, and configurable) and one
+// row past it, so a larger set answers the window with AtLeast true -- "this
+// many or more". Read the signal rather than comparing the figure with a
+// window a client cannot know. ok is false when the result is not a count.
+func (r *Result) Count() (CountAnswer, bool) {
+	row := r.Single()
+	if row == nil {
+		return CountAnswer{}, false
+	}
+	var n float64
+	switch v := row["count"].(type) {
+	case float64:
+		n = v
+	case int64:
+		n = float64(v)
+	case int:
+		n = float64(v)
+	case string:
+		// The wire carries large integers as strings in places.
+		parsed, err := strconv.ParseFloat(strings.TrimSpace(v), 64)
+		if err != nil {
+			return CountAnswer{}, false
+		}
+		n = parsed
+	default:
+		return CountAnswer{}, false
+	}
+	if math.IsNaN(n) || math.IsInf(n, 0) {
+		return CountAnswer{}, false
+	}
+	atLeast, _ := row["atLeast"].(bool)
+	return CountAnswer{Count: int64(n), AtLeast: atLeast}, true
 }
 
 // RawNodes returns the result's rows preserving the FULL nested

@@ -559,7 +559,7 @@ export function approvalDecidedNext(kind: string, decision: string): string {
     case "routingReview":
       return decision === "approved" ? "The rule was added." : "Routing was left as it is.";
     default:
-      return "The run was told, and picked up from where it parked.";
+      return "Your response was recorded.";
   }
 }
 

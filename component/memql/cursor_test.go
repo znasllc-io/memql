@@ -69,11 +69,14 @@ func TestCursor_ContextPlumbing(t *testing.T) {
 	if got := cursorFromContext(ctx); got != "" {
 		t.Fatalf("empty context cursor = %q, want \"\"", got)
 	}
-	// Empty cursor is a no-op (offset / first-page path stays unchanged).
+	// Empty cursor starts at the first page.
 	if c := ContextWithCursor(ctx, "  "); cursorFromContext(c) != "" {
-		t.Fatal("ContextWithCursor with blank must be a no-op")
+		t.Fatal("ContextWithCursor with blank must start at the first page")
 	}
 	c := ContextWithCursor(ctx, "tok-123")
+	if got := CursorFromContext(ContextWithCursor(c, "")); got != "" {
+		t.Fatalf("new traversal inherited cursor %q", got)
+	}
 	if got := cursorFromContext(c); got != "tok-123" {
 		t.Fatalf("cursorFromContext = %q, want tok-123", got)
 	}

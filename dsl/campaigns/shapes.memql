@@ -15,6 +15,7 @@
 /// portal's audience list and the audience picker in the campaign editor.
 @row
 shape audience audienceFull {
+  confirmation
   row.id
   ownerUserId
   name
@@ -28,11 +29,14 @@ shape audience audienceFull {
 /// gates on the caller.
 @row
 shape recipient recipientFull {
+  joinedAt
+  confirmedAt
   row.id
   ownerUserId
   accountId
   audienceId
   email
+  emailDigest
   displayName
   subscriptionStatus
   unsubscribedAt
@@ -41,8 +45,35 @@ shape recipient recipientFull {
   row.createdAt
 }
 
-/// Full template projection: the authored content plus its lifecycle. Backs the template list, the
-/// template editor and the campaign editor's preview.
+/// Template summary: what a list shows of a template, and nothing of what it holds. It carries no
+/// body and no document, which can weigh megabytes each (a query answer is one message, and a list
+/// holds up to fifty), so a list never outgrows the browser's receive limit. Backs the template list
+/// and the campaign editor's template picker; a template is read whole with templateById.
+@row
+shape template templateSummary {
+  row.id
+  ownerUserId
+  name
+  subject
+  status
+  accountId
+  layoutId
+  preheader
+  sourceArtifactId
+  row.createdAt
+}
+
+/// A template named and dated: which template, and at which revision (createdAt). Backs the lookup of
+/// the template published from a file.
+@row
+shape template templateRef {
+  row.id
+  row.createdAt
+}
+
+/// Full template projection: the authored content plus its lifecycle, the document and the bodies a
+/// send uses. Backs templateById, the template editor's read and the revision check
+/// campaignSaveTemplate makes before it writes. Lists use templateSummary instead.
 @row
 shape template templateFull {
   row.id
@@ -53,6 +84,25 @@ shape template templateFull {
   htmlBody
   status
   accountId
+  document
+  layoutId
+  preheader
+  sourceArtifactId
+  row.createdAt
+}
+
+/// Full email-layout projection: the saved document and its lifecycle. Backs the layout picker
+/// (emailLayouts) and the revision check campaignSaveLayout makes before it writes.
+@row
+shape emailLayout emailLayoutFull {
+  row.id
+  ownerUserId
+  accountId
+  name
+  description
+  document
+  sourceArtifactId
+  status
   row.createdAt
 }
 
@@ -89,6 +139,8 @@ shape campaign campaignFull {
 /// query binding it gates on the caller.
 @row
 shape delivery deliveryFull {
+  providerStatus
+  providerAt
   row.id
   ownerUserId
   accountId
@@ -101,6 +153,9 @@ shape delivery deliveryFull {
   lastError
   sentAt
   emailRuleId
+  requestId
+  templateId
+  senderIdentityId
   row.createdAt
 }
 
@@ -147,6 +202,7 @@ shape sendJob sendJobFull {
 /// most identifying thing in it.
 @row
 shape suppression suppressionFull {
+  liftedAt
   row.id
   accountId
   emailDigest
@@ -353,5 +409,102 @@ shape testSettings campaignTestSettingsFull {
   row.id
   accountId
   audienceId
+  row.createdAt
+}
+
+/// References needed to retry a deferred send under its recorded owner.
+@row
+shape delivery deferredSendRef {
+ row.id
+ status
+ lastError
+ ownerUserId
+ accountId
+ recipientId
+ emailRuleId
+ templateId
+ senderIdentityId
+ requestId
+ attempts
+ nextAttemptAt
+ row.createdAt
+}
+
+/// Automation state without the recipient mailbox.
+@row
+shape journey journeyFull {
+ row.id
+ ownerUserId
+ accountId
+ name
+ description
+ trigger
+ steps
+ status
+ activatedAt
+ retiredAt
+ lastError
+ row.createdAt
+}
+
+/// Automation state without the recipient mailbox.
+@row
+shape journeyEnrollment journeyEnrollmentFull {
+ row.id
+ ownerUserId
+ accountId
+ journeyId
+ recipientId
+ emailDigest
+ stepId
+ stepIndex
+ nextAt
+ status
+ exitReason
+ enrolledAt
+ triggeredAt
+ completedAt
+ lastError
+ attempts
+ row.createdAt
+}
+
+/// Automation state without the recipient mailbox.
+@row
+shape recipient recipientEnrollmentRef {
+ row.id
+ accountId
+ audienceId
+ emailDigest
+ subscriptionStatus
+ joinedAt
+ confirmedAt
+ row.createdAt
+}
+
+@row
+shape consentEvent providerConsentIdentity {
+ row.id
+}
+
+/// Internal repair queue and ledger projection. No address is needed to count outcomes.
+@row
+shape delivery providerCounterEntry {
+  row.id
+  campaignId
+  accountId
+  ownerUserId
+  status
+  providerCountersPending
+  row.createdAt
+}
+
+/// Internal historical attribution, independent of the former sender's current grants.
+@row
+shape campaign providerCounterCampaign {
+  row.id
+  ownerUserId
+  accountId
+  status
   row.createdAt
 }

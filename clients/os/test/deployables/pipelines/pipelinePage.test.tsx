@@ -1,6 +1,7 @@
 import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import type { Row } from "@znasllc-io/memql-sdk-core/client";
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import { readTheBar } from "../../readTheBar";
 
 const h = vi.hoisted(() => ({ connection: null as unknown }));
 
@@ -119,6 +120,8 @@ describe("pipeline settings", () => {
     expect(bar().buttons).toEqual(["Disconnect"]);
     expect(document.querySelector(".os-actbar-acts .os-button")?.getAttribute("data-tone")).toBe("danger");
     expect(connection.callsNamed("pipelinesDisconnect")).toEqual([]);
+    // The bar just turned into the question, and takes no press until it is read.
+    await readTheBar();
     await click(screen.getByRole("button", { name: "Keep" }));
     expect(bar().word).toBe("Checks on");
     expect(connection.callsNamed("pipelinesDisconnect")).toEqual([]);
@@ -129,6 +132,7 @@ describe("pipeline settings", () => {
     mount(connection);
     await openSettings();
     await click(screen.getByRole("button", { name: "Disconnect" }));
+    await readTheBar();
     await click(screen.getByRole("button", { name: "Disconnect" }));
     expect(connection.callsNamed("pipelinesDisconnect")).toEqual(['builtin pipelinesDisconnect(pipelineId: "pl-shop")']);
     // The cluster said yes; the pipeline row has not arrived yet.
@@ -148,6 +152,7 @@ describe("pipeline settings", () => {
     mount(connection);
     const page = await openSettings();
     await click(screen.getByRole("button", { name: "Disconnect" }));
+    await readTheBar();
     await click(screen.getByRole("button", { name: "Disconnect" }));
     expect(await within(page).findByText("This needs a part of Deployables you have not been granted")).toBeTruthy();
     expect(within(page).getByText("the caller does not hold execute on app:deployables/connect")).toBeTruthy();
@@ -204,6 +209,7 @@ describe("pipeline settings", () => {
     chooseOption(trigger, "feature/cart");
     await waitFor(() => expect(bar().acts).toEqual(["Cancel", "Run"]));
     expect(bar().buttons).toEqual(["Run"]);
+    await readTheBar();
     await click(screen.getByRole("button", { name: "Run" }));
     expect(connection.callsNamed("pipelinesRunLatest")).toEqual(['builtin pipelinesRunLatest(pipelineId: "pl-shop", branch: "feature/cart")']);
     await waitFor(() => expect(bar().word).toBe("Manual run queued"));
@@ -235,9 +241,11 @@ describe("pipeline settings", () => {
     mount(connection);
     await openSettings();
     await click(screen.getByRole("button", { name: "Other branch" }));
+    await readTheBar();
     await click(screen.getByRole("button", { name: "Cancel" }));
     expect(bar().word).toBe("Disconnected");
     expect(screen.queryByLabelText("Branch to run")).toBeNull();
+    await readTheBar();
     await click(screen.getByRole("button", { name: "Other branch" }));
     fireEvent.keyDown(await screen.findByLabelText("Branch to run"), { key: "Escape" });
     await waitFor(() => expect(bar().word).toBe("Disconnected"));
@@ -255,6 +263,7 @@ describe("pipeline settings", () => {
     await click(screen.getByRole("button", { name: "Other branch" }));
     const field = await screen.findByLabelText("Branch to run");
     fireEvent.change(field, { target: { value: "a..b" } });
+    await readTheBar();
     await click(screen.getByRole("button", { name: "Run" }));
     expect(await within(page).findByText("That is not a branch name GitHub accepts")).toBeTruthy();
     expect((screen.getByLabelText("Branch to run") as HTMLInputElement).value).toBe("a..b");

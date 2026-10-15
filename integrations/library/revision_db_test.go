@@ -20,6 +20,7 @@ import (
 	"github.com/znasllc-io/memql/component/auth"
 	"github.com/znasllc-io/memql/component/automations"
 	"github.com/znasllc-io/memql/component/automations/steps"
+	"github.com/znasllc-io/memql/component/database"
 	"github.com/znasllc-io/memql/component/database/dbtest"
 	memorynodes "github.com/znasllc-io/memql/component/database/memory-nodes"
 	langparser "github.com/znasllc-io/memql/component/language/parser"
@@ -67,6 +68,8 @@ type revisionAI struct {
 	researchDocument      string
 	researchPassages      string
 	editDocument          string
+	editSchemas           []any
+	editBlankDestinations []bool
 	appStarted            chan struct{}
 	headlessStarted       chan struct{}
 	expectedReference     string
@@ -255,6 +258,8 @@ func (a *revisionAI) Capabilities() []memql.IntegrationCapability {
 				return reviewResult(map[string]any{"reply": reply})
 			}
 			a.editDocument = asString(data["document"])
+			a.editSchemas = append(a.editSchemas, args["responseSchema"])
+			a.editBlankDestinations = append(a.editBlankDestinations, data["blankDestination"] == true)
 			passages, valid := data["passages"].(string)
 			expectedEvidence := "Editorial change:"
 			if a.needsResearch {
@@ -336,8 +341,16 @@ func newRevisionDB(t *testing.T) *revisionDB {
 			t.Fatal(err)
 		}
 		e.SetLogicRunner(automations.NewLogicRunner(e, steps.NewRegistry(), e.Logger))
-		lib := NewIntegration(e, func() *sql.DB { return db.DB })
+		// The write gates of both integrations run on a pool of their own, as the
+		// Database component opens it (memql#6022), not on the engine's pool.
+		gates, gerr := database.NewGatePool(dbtest.DSN(), 0)
+		if gerr != nil {
+			t.Fatal(gerr)
+		}
+		t.Cleanup(func() { _ = gates.Close() })
+		lib := NewIntegration(e, func() *sql.DB { return gates })
 		w := work.New(e, e.Logger, func() *bun.DB { return db })
+		w.SetGateDB(func() *sql.DB { return gates })
 		lib.SetReviewGoals(w)
 		for _, integration := range []memql.IntegrationProvider{lib, w, f.ai} {
 			if err = e.RegisterIntegration(integration); err != nil {
@@ -495,6 +508,7 @@ func TestDocumentRevisionWorkflow(t *testing.T) {
 			{"PersonalDocumentNotesNeverEnterAIRevision", testPersonalDocumentNotesNeverEnterAIRevision},
 			{"ArtifactForFileResolvesBareReceiptAcrossEngines", testArtifactForFileResolvesBareReceiptAcrossEngines},
 			{"ReviewAttachmentsAcrossReplicas", testReviewAttachmentsAcrossReplicas},
+			{"BlankDestinationWithReference", testBlankDestinationWithReference},
 			{"AppliedFeedbackCannotBeDeletedAcrossReplicas", testAppliedFeedbackCannotBeDeletedAcrossReplicas},
 			{"DeleteDocumentAnnotationsAcrossReplicas", testDeleteDocumentAnnotationsAcrossReplicas},
 			{"DeleteProposedFeedbackInvalidatesStaleReview", testDeleteProposedFeedbackInvalidatesStaleReview},
@@ -997,6 +1011,7 @@ func testDocumentRetryReusesCompletedAppEvidence(t *testing.T, f *revisionDB) {
 	if err := f.execute(f.engine, request, false); !errors.As(err, &wait) {
 		t.Fatal(err)
 	}
+	originalApproval := wait.ApprovalID
 	ids, _, _, _, err := f.first.revisionRequest(memql.ContextWithFreshRead(f.ctx), request)
 	if err != nil {
 		t.Fatal(err)
@@ -1009,6 +1024,30 @@ func testDocumentRetryReusesCompletedAppEvidence(t *testing.T, f *revisionDB) {
 	})
 	if err = f.execute(f.other, request, true); !errors.As(err, &wait) {
 		t.Fatal(err)
+	}
+	currentApproval := wait.ApprovalID
+	if currentApproval == originalApproval {
+		t.Fatal("a new execution reused the previous review receipt")
+	}
+	var current map[string]any
+	for _, replica := range []*Integration{f.first, f.second} {
+		selected, _, _, approval, selectErr := replica.revisionRequest(memql.ContextWithFreshRead(f.ctx), request)
+		if selectErr != nil || selected.ApprovalID != currentApproval || asString(approval["decision"]) != "" {
+			t.Fatalf("replica did not select the pending current-generation review: %s %v %v", selected.ApprovalID, approval, selectErr)
+		}
+		current = approval
+	}
+	if receipts := f.query(f.other, memql.ContextWithFreshRead(f.ctx), "query", "workApprovalsForOwnedRun", map[string]any{"runId": ids.RunID}); len(receipts) != 2 {
+		t.Fatalf("the old review must remain in history alongside the current review: %v", receipts)
+	}
+	for _, readErr := range []error{nil, errors.New("run read failed")} {
+		reader := &revisionMissingRunEngine{IntegrationEngineAccess: f.other, err: readErr}
+		isolated := *f.second
+		isolated.engine = reader
+		_, _, _, _, gotErr := isolated.revisionRequest(memql.ContextWithFreshRead(f.ctx), request)
+		if gotErr == nil || (readErr != nil && !errors.Is(gotErr, readErr)) || reader.readApprovals {
+			t.Fatalf("an unavailable run reached historical approval selection: err=%v approvals=%v", gotErr, reader.readApprovals)
+		}
 	}
 	if f.ai.appCalls.Load() != 1 || f.ai.researchCalls.Load() != 2 {
 		t.Fatalf("same-run retry repeated app research: app=%d headless=%d rows=%v", f.ai.appCalls.Load(), f.ai.researchCalls.Load(), f.query(f.other, f.ctx, "query", "workCompletedStepsForOwnerRuns", map[string]any{"runIds": []string{ids.RunID}, "stepKey": "evidence.app/report"}))
@@ -1056,6 +1095,41 @@ func testDocumentRetryReusesCompletedAppEvidence(t *testing.T, f *revisionDB) {
 	if err != nil || len(fmt.Sprint(different["previousRunIds"])) > 2 {
 		t.Fatalf("new feedback inherited old evidence: %v %v", different, err)
 	}
+	// Two distinct proposals in the SAME execution are still a conflict. Only
+	// receipts whose native identity proves an earlier execution are ignored.
+	conflicting := make(map[string]any)
+	for key, value := range revisionMap(current["subject"]) {
+		conflicting[key] = value
+	}
+	conflicting["summary"] = "A different proposal in the current execution"
+	hash := workstate.ArtifactHash(conflicting)
+	step := asString(current["stepKey"])
+	f.query(f.other, auth.ContextWithInternalOrigin(f.ctx), "mutation", "createWorkApproval", map[string]any{
+		"approvalId": workstate.HumanQuestionID(memql.BareShortId(ids.RunID), step, workstate.ApprovalKindPlanReview, hash, "same-run-retry"),
+		"runId":      ids.RunID, "stepKey": step, "kind": workstate.ApprovalKindPlanReview,
+		"subject": conflicting, "artifactHash": hash, "requestedAt": time.Now().UTC().Format(time.RFC3339Nano),
+	})
+	for _, replica := range []*Integration{f.first, f.second} {
+		if _, _, _, _, err = replica.revisionRequest(memql.ContextWithFreshRead(f.ctx), request); err == nil || !strings.Contains(err.Error(), "conflicting approval receipts") {
+			t.Fatalf("conflicting current-generation reviews were accepted: %v", err)
+		}
+	}
+}
+
+type revisionMissingRunEngine struct {
+	memql.IntegrationEngineAccess
+	err           error
+	readApprovals bool
+}
+
+func (e *revisionMissingRunEngine) Execute(ctx context.Context, query string) (*memql.ExecuteResult, error) {
+	if strings.HasPrefix(query, "query workRunForOwner(") {
+		return bundleOf(nil), e.err
+	}
+	if strings.HasPrefix(query, "query workApprovalsForOwnedRun(") {
+		e.readApprovals = true
+	}
+	return e.IntegrationEngineAccess.Execute(ctx, query)
 }
 
 func testDocumentResearchScopesContext(t *testing.T, f *revisionDB) {

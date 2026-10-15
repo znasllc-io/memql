@@ -1,6 +1,8 @@
 import { act, render, screen, waitFor, within } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
+import { betweenTheClicks, readTheBar, useFakeDate } from "../readTheBar";
+
 const h = vi.hoisted(() => ({ connection: null as unknown }));
 
 // The connection is a module-level context read, and its provider dials a
@@ -134,8 +136,10 @@ describe("the machines directory", () => {
     const reported = screen.getByRole("list", { name: "Reported labels" });
     // The reported values are SHOWN -- the router matches on them --
     // but nothing in that group removes or edits one.
-    expect(within(reported).getByText(/os=darwin/)).toBeTruthy();
-    expect(within(reported).queryByRole("button")).toBeNull();
+    expect(within(reported).getByText("darwin")).toBeTruthy();
+    // Read-only values can be copied, but cannot be edited or removed.
+    expect(within(reported).getAllByRole("button").every(button => button.getAttribute("aria-label")?.startsWith("Copy "))).toBe(true);
+    expect(within(reported).queryByRole("textbox")).toBeNull();
 
     // The operator group is where the controls are.
     const operator = screen.getByRole("list", { name: "Operator labels" });
@@ -210,6 +214,7 @@ describe("the machines directory", () => {
     expect((screen.getByLabelText("the uninstall command") as HTMLInputElement).value).toContain("uninstall-mac.sh");
 
     await type(screen.getByLabelText("Reason (optional)") as HTMLInputElement, "returned it");
+    await readTheBar();
     await click(screen.getByRole("button", { name: "Remove Studio mini" }));
 
     // ONE CALL, AND IT IS THE BUILTIN (epic memql#5327, design D2). This used
@@ -232,6 +237,7 @@ describe("the machines directory", () => {
     mount(connection);
     await click(await screen.findByText("Studio mini"));
     await click(screen.getByRole("button", { name: "Remove this machine" }));
+    await readTheBar();
     await click(screen.getByRole("button", { name: "Remove Studio mini" }));
 
     const args = connection.query.fleetRevokeMachine.mock.calls[0]?.[0] as Record<string, unknown>;
@@ -262,6 +268,7 @@ describe("the machines directory", () => {
     mount(connection);
     await click(await screen.findByText("Studio mini"));
     await click(screen.getByRole("button", { name: "Remove this machine" }));
+    await readTheBar();
     await click(screen.getByRole("button", { name: "Remove Studio mini" }));
 
     expect(await screen.findByText(/could not be revoked/)).toBeTruthy();
@@ -409,5 +416,45 @@ describe("the machines directory", () => {
     // ...and it says so in words too, which is the cue a reduced-motion
     // reader gets when the animation is suppressed.
     expect(within(row).getByText("new")).toBeTruthy();
+  });
+});
+
+// Removing a machine asks in place, naming it (memql#6033); the confirmation
+// stands where "Remove this machine" stood, outside any bar, so the second
+// click of a double-click on it must not remove the machine.
+describe("removing a machine, one double-click later", () => {
+  useFakeDate();
+
+  async function ask() {
+    const connection = fakeConnection({ myWorkersWithStatus: [LIVE] });
+    mount(connection);
+    await click(await screen.findByText("Studio mini"));
+    await click(screen.getByRole("button", { name: "Remove this machine" }));
+    expect(screen.getByRole("group", { name: "Removing Studio mini" })).toBeTruthy();
+    return connection;
+  }
+
+  it("does not remove on the second click of the double-click that asked, and does once it is read", async () => {
+    const connection = await ask();
+    betweenTheClicks();
+    await click(screen.getByRole("button", { name: "Remove Studio mini" }));
+    expect(connection.query.fleetRevokeMachine).not.toHaveBeenCalled();
+    // Still asking: the press that came too soon neither answered nor withdrew the question.
+    expect(screen.getByRole("group", { name: "Removing Studio mini" })).toBeTruthy();
+
+    await readTheBar();
+    await click(screen.getByRole("button", { name: "Remove Studio mini" }));
+    expect(connection.query.fleetRevokeMachine).toHaveBeenCalledTimes(1);
+  });
+
+  it("does not keep it on that click either", async () => {
+    const connection = await ask();
+    betweenTheClicks();
+    await click(screen.getByRole("button", { name: "Keep it" }));
+    expect(screen.getByRole("group", { name: "Removing Studio mini" })).toBeTruthy();
+    await readTheBar();
+    await click(screen.getByRole("button", { name: "Keep it" }));
+    expect(screen.queryByRole("group", { name: "Removing Studio mini" })).toBeNull();
+    expect(connection.query.fleetRevokeMachine).not.toHaveBeenCalled();
   });
 });

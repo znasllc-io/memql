@@ -1,29 +1,26 @@
-import { Terminal } from "lucide-react";
+import { Terminal, Trash2 } from "lucide-react";
 import { useSession } from "../../../chrome/access";
 import { localCockpitInstall } from "../addMachine/localInstall";
-import { InfoDetail } from "../../../kit/InfoDetail";
-import { useEffect, useState } from "react";
+import { PageHelp } from "../../../kit/pageHelp";
+import { useEffect, useRef, useState } from "react";
 
 import { CallHistory } from "../routing/CallHistory";
-import { Button, EmptyState, Caption, Chip, Chips, CopyField, Fact, Facts, Notice, Panel, Subhead, Switch, RecordList, RecordRow } from "../../../kit";
-import { formatFreshness, formatMoment } from "../../../kit/format";
+import { Button, EmptyState, Caption, CopyField, Fact, Facts, Notice, Panel, Subhead, Switch, RecordList, RecordRow } from "../../../kit";
+import { IconButton } from "../../../kit/IconButton";
+import { formatMoment } from "../../../kit/format";
+import { InPlaceAsk } from "../../../kit/pressHold";
 import { uninstallCommand, workerClusterUrl, type InstallPlatform } from "../addMachine/install";
-import { roundTripFigure } from "../addMachine/flow";
-import { isWorkerOnline } from "../online";
 import {
-  computerUseStatus,
-  formatClockOffset,
-  hasRoundTrip,
   machineName,
-  pipelineStepsStatus,
   type MachineRow,
 } from "../rows";
 import { CredentialHealth } from "./CredentialHealth";
 import { AppPermissionHelp } from "./AppPermissionHelp";
-import { HardwareGroup } from "./HardwareGroup";
+import { MachineDetailsInfo, MachineDetailsSection } from "./MachineDetailsInfo";
 import { LabelEditor } from "./LabelEditor";
 import { ModelsGroup } from "./ModelsGroup";
 import { SharingGroup } from "./SharingGroup";
+import { AutoRefresh } from "../../../kit/AutoRefresh";
 import { useMachineInference } from "./useMachineInference";
 import type { MachineWrites, RemovalReceipt } from "./useMachineWrites";
 
@@ -39,137 +36,54 @@ export function MachineDetail({
   machine: MachineRow;
   writes: MachineWrites;
   now: Date;
-  view?: "all" | "details" | "models" | "apps" | "sharing" | "activity";
+  view?: "all" | "settings" | "models" | "apps" | "activity";
 }) {
   const label = machineName(machine);
   const busy = writes.busyId === machine.id;
-  const online = isWorkerOnline(machine, now);
   // The CLASS and the usable figure are computed on the engine and stored
   // nowhere, so they arrive with the recommendation rather than on the row --
   // one read for both, because a page that fetched the class separately could
   // show a class the recommendation disagreed with.
-  const inference = useMachineInference(machine.id);
+  const inference = useMachineInference(machine.id, ["all", "settings", "models"].includes(view));
 
   return (
     <Panel label={`${label} detail`}>
-      {view === "all" || view === "details" ? <>
-      <RenameField machine={machine} busy={busy} rename={writes.rename} />
-
-      {/* ABOVE the facts, and only when there is something to say. The two
-          things it warns about -- a credential about to expire, a clock far
-          enough out to have decided `online` under the old rule -- are both
-          facts a reader would otherwise meet AFTER the machine had stopped
-          working, inside a collapsed section. Everything it reports is on the
-          list below too; this is the half that goes looking for the reader
-          rather than waiting to be found. */}
-      <CredentialHealth machine={machine} now={now} />
-
-      <details className="fleet-machine-facts"><summary>Connection, permissions & registration</summary>
-      <Facts>
-        <Fact label="Reported name" value={machine.name} mono />
-        <Fact label="Hostname" value={machine.hostname} mono />
-        <Fact label="Platform" value={machine.platform} mono />
-        <Fact
-          label="Last heartbeat"
-          value={formatFreshness(machine.lastSeenAt, now)}
-          title={machine.lastSeenAt || undefined}
-        />
-        <Fact label="Online" value={online ? "yes" : "no"} />
-        {/* THE CLUSTER'S OWN ROUND TRIP (design record
-            2026-09-08-cockpit-install-wizard, D11): the last Ping the holding
-            replica sent and this machine answered. ABSENT IS "NOT MEASURED",
-            never slow -- a cockpit that predates the ping never answers one. */}
-        <Fact
-          label="Round trip"
-          value={hasRoundTrip(machine) ? roundTripFigure(machine, now) : "not measured -- this cockpit does not answer pings"}
-          title={machine.rttAt || undefined}
-        />
-        {/* THE MACHINE'S OWN CLOCK against the cluster's (epic memql#5327,
-            design D6). Nothing routes on it and nothing is timed by it -- the
-            cluster stamps lastSeenAt from its own clock -- but the difference
-            used to decide `online`, so a machine that once read offline while
-            it was connected has an explanation here instead of a mystery.
-            ABSENT IS "not reported", never zero: a measured zero means the
-            clocks agree, which is a different answer. */}
-        <Fact
-          label="Clock offset"
-          value={
-            machine.clockSkewKnown
-              ? formatClockOffset(machine.clockSkewMs)
-              : "not reported -- this cockpit does not timestamp its heartbeats"
-          }
-        />
-        {/* THE CREDENTIAL'S DEADLINE (design D4), mirrored onto the
-            registration so this page can say it without reading the
-            credential table. EMPTY MEANS NO EXPIRY -- every token minted
-            before expiry existed -- and saying "does not expire" is the true
-            reading rather than a blank that looks like a missing value. */}
-        <Fact
-          label="Credential expires"
-          value={
-            machine.credentialExpiresAt === ""
-              ? "does not expire"
-              : formatMoment(machine.credentialExpiresAt)
-          }
-          title={machine.credentialExpiresAt || undefined}
-        />
-        <Fact label="Calls in flight" value={String(machine.activeCount)} />
-        <Fact label="Registered" value={formatMoment(machine.registeredAt)} />
-        <Fact label="Cockpit version" value={machine.version} mono />
-        <Fact label="Build" value={machine.buildTag} mono />
-        <Fact label="Display server" value={machine.displayServer} mono />
-        <Fact label="Computer use" value={computerUseStatus(machine).answer} />
-        <Fact label="Pipeline steps" value={<PipelineStepsAnswer machine={machine} />} />
-        <Fact label="Registration id" value={machine.id} mono />
-      </Facts>
-
-      {/* `activeCount` is up to one heartbeat interval stale by construction
-          -- it is what the machine reported on its last beat, not a live
-          count -- and saying so is cheaper than an operator concluding the
-          number is wrong. */}
-      <p className="os-caption">
-        Calls in flight is as of the last heartbeat, so it can trail a call that started since.
-      </p>
-
-      </details>
-      {/* HARDWARE FIRST, because what a machine IS precedes what it can be
-          asked to do -- and because the machine class it computes is what the
-          Models group's recommendation rests on. A reader who meets the
-          recommendation first has to scroll back to find out why it is that
-          set. */}
-      <HardwareGroup
-        machine={machine}
-        machineClass={inference.recommended.machineClass}
-        usableBytes={inference.recommended.usableBytes}
-        now={now}
-      />
-
-      <LabelGroups machine={machine} busy={busy} writes={writes} />
-      </> : null}
+      <AutoRefresh enabled={["all", "settings", "models"].includes(view)} busy={inference.loading} onRefresh={inference.refreshMeasurements} />
+      {view === "all" || view === "settings" ? <div className="fleet-machine-details">
+        <CredentialHealth machine={machine} now={now} />
+        <MachineDetailsSection title="General">
+          <div className="fleet-machine-setting">
+            <span className="fleet-machine-setting-name">Name</span>
+            <RenameField machine={machine} busy={busy} rename={writes.rename} />
+          </div>
+          <div className="fleet-machine-setting">
+            <span className="fleet-machine-setting-name">Routing labels</span>
+            <PageHelp title="Routing labels">
+              <p>Operator labels influence routing and override matching labels reported by the machine. Each change saves automatically.</p>
+              <p>Search by label name or value. In Label mode, enter a new name, choose Add and set its value. Names are unique within this machine and case-sensitive. Select a card to edit its value, or use its trash button to remove it.</p>
+            </PageHelp>
+            <LabelEditor key={machine.id} operatorLabels={machine.operatorLabels} busy={busy} onSave={labels => writes.setOperatorLabels(machine.id, labels)} />
+          </div>
+          <RemoveControl machine={machine} busy={busy} revoke={writes.revoke} />
+          {writes.actionError && writes.actionErrorScope !== "sharing" ? <Notice tone="error" sentence="The cluster refused that change." next="Nothing was written." detail={writes.actionError} /> : null}
+        </MachineDetailsSection>
+        <MachineDetailsSection title="Sharing">
+          <SharingGroup machine={machine} writes={writes} />
+        </MachineDetailsSection>
+        <MachineDetailsInfo machine={machine} now={now} machineClass={inference.recommended.machineClass} usableBytes={inference.recommended.usableBytes} />
+      </div> : null}
 
       {view === "all" || view === "apps" ? <AppsGroup machine={machine} standalone={view === "apps"} /> : null}
 
       {/* Below Apps, because the two answer the same shape of question about
           this machine -- what it can be asked to do -- and a person scanning
           for either reads them together. */}
-      {view === "all" || view === "models" ? <ModelsGroup machine={machine} standalone={view === "models"} /> : null}
-
-      {/* SHARING AFTER MODELS, because the question it asks -- whom will you
-          lend this machine to -- only means something once a reader knows
-          what the machine can serve. Offering it above an empty Models group
-          would be asking somebody to volunteer a machine that runs nothing. */}
-      {view === "all" || view === "sharing" ? <SharingGroup machine={machine} writes={writes} ledger={inference.ledger} standalone={view === "sharing"} /> : null}
+      {view === "all" || view === "models" ? <ModelsGroup machine={machine} inference={inference} standalone={view === "models"} /> : null}
 
       {view === "all" || view === "activity" ? <CallHistory standalone={view === "activity"} workerId={machine.id} machineLabel={label} /> : null}
 
-      {view === "all" || view === "details" ? <RemoveControl machine={machine} busy={busy} revoke={writes.revoke} /> : null}
-
-      {/* NOT ON THE SHARING VIEW, whose one write is made from its dialog and
-          refused there, beside the draft it refused -- the dialog keeps the
-          engine's words until the next save. Repeated down here it would say
-          it twice while the dialog is open, and go on saying it after the
-          person had cancelled the change it was about. */}
-      {writes.actionError && view !== "sharing" ? (
+      {/* Sharing keeps refusals beside its inline draft. */}
+      {writes.actionError && !["all", "settings"].includes(view) ? (
         <Notice
           tone="error"
           sentence="The cluster refused that change."
@@ -204,7 +118,7 @@ function RenameField({
 
   return (
     <form
-      className="os-form-row"
+      className="os-form-row fleet-machine-rename"
       onSubmit={(e) => {
         e.preventDefault();
         if (!changed) return;
@@ -233,82 +147,8 @@ function RenameField({
   );
 }
 
-function LabelGroups({
-  machine,
-  busy,
-  writes,
-}: {
-  machine: MachineRow;
-  busy: boolean;
-  writes: MachineWrites;
-}) {
-  const reportedKeys = Object.keys(machine.reportedLabels).sort();
-
-  return (
-    <div className="os-fleet-labels">
-      <details className="fleet-machine-facts">
-        <summary>Reported by the machine</summary>
-        {/* The caveat is UI copy rather than a comment, because the person
-            who needs it is the one about to look for an edit control here
-            and not find one. */}
-        <InfoDetail title="Reported labels"><p>Read-only labels are replaced whenever Cockpit connects. Set operator labels below to override them in routing.</p></InfoDetail>
-        <Chips label="Reported labels">
-          {reportedKeys.length === 0 ? (
-            <span className="os-caption">None reported.</span>
-          ) : (
-            reportedKeys.map((key) => {
-              const overridden = machine.operatorLabels[key] !== undefined;
-              return (
-                <Chip
-                  key={key}
-                  tone="muted"
-                  title={overridden ? "Overridden by an operator label below" : undefined}
-                >
-                  {`${key}=${machine.reportedLabels[key] ?? ""}`}
-                  {overridden ? <span className="os-fleet-overridden">overridden</span> : null}
-                </Chip>
-              );
-            })
-          )}
-        </Chips>
-      </details>
-
-      <div className="os-fleet-labelgroup">
-        <Subhead>Set by you</Subhead>
-        <p className="os-caption">
-          Use labels to influence routing. Your labels override matching labels reported by the machine.
-        </p>
-        <LabelEditor
-          operatorLabels={machine.operatorLabels}
-          busy={busy}
-          onSave={(labels) => writes.setOperatorLabels(machine.id, labels)}
-        />
-      </div>
-    </div>
-  );
-}
-
-/** Whether this machine takes pipeline steps, and where that is decided (epic
- *  memql#5478, ruling R35). The answer is the machine's own policy, so the
- *  help names its file and keys rather than anything on this page. */
-function PipelineStepsAnswer({ machine }: { machine: MachineRow }) {
-  return (
-    <>
-      {pipelineStepsStatus(machine).answer}
-      <InfoDetail title="Pipeline steps">
-        <p>Set in the <code>pipelines</code> block of this machine&apos;s Cockpit <code>policy.yaml</code>.</p>
-        <p>
-          Setting <code>allow: true</code> lets it run pipeline steps, and its <code>repos</code> list names the
-          repositories it accepts. An empty list accepts any.
-        </p>
-        <p>Labels you set in Fleet cannot allow it.</p>
-      </InfoDetail>
-    </>
-  );
-}
-
 export function MachineAppsHelp() {
-  return <InfoDetail title="Apps on this machine"><p>Apps installed on this machine that Cockpit reports to MemQL. Ready apps are supported, allowed by Cockpit and signed in. Subscription status comes from the app.</p></InfoDetail>;
+  return <PageHelp title="Apps on this machine"><p>Apps installed on this machine that Cockpit reports to MemQL. Ready apps are supported, allowed by Cockpit and signed in. Subscription status comes from the app.</p></PageHelp>;
 }
 
 function AppsGroup({ machine, standalone }: { machine: MachineRow; standalone: boolean }) {
@@ -366,6 +206,13 @@ function RemoveControl({
   const { config } = useSession();
   const localTest = platformOf(machine) === "mac" ? localCockpitInstall(config.domain) : null;
   const [confirming, setConfirming] = useState(false);
+  const root = useRef<HTMLDivElement>(null);
+  const wasConfirming = useRef(false);
+  useEffect(() => {
+    if (confirming) root.current?.focus();
+    else if (wasConfirming.current) root.current?.querySelector<HTMLButtonElement>(".fleet-machine-remove")?.focus();
+    wasConfirming.current = confirming;
+  }, [confirming]);
   const [reason, setReason] = useState("");
   const [purge, setPurge] = useState(false);
   // The receipt from the last removal on THIS machine (epic memql#5327,
@@ -448,10 +295,11 @@ function RemoveControl({
   // wrong one because nothing on the dialog said which.
   if (!confirming) {
     return (
-      <div className="os-head-actions">
-        <Button tone="danger" onClick={() => setConfirming(true)}>
-          Remove this machine
-        </Button>
+      <div className="fleet-machine-remove-row" ref={root}>
+        <span>Remove machine</span>
+        <IconButton label="Remove this machine" className="fleet-machine-remove" disabled={busy} onClick={() => setConfirming(true)}>
+          <Trash2 size={17} aria-hidden />
+        </IconButton>
       </div>
     );
   }
@@ -463,7 +311,7 @@ function RemoveControl({
     // puts the page in. Two controls answering to one accessible name is a
     // screen reader saying "Remove Studio mini, group" and then "Remove Studio
     // mini, button", which is the same phrase twice for two different things.
-    <div className="os-fleet-confirm" role="group" aria-label={`Removing ${label}`}>
+    <div ref={root} role="group" tabIndex={-1} aria-label={`Removing ${label}`}><InPlaceAsk className="os-fleet-confirm">
       {/* WHAT THIS SENTENCE SAYS IS NOW TRUE. It has always claimed the token
           stops working immediately; until epic memql#5327 the shell made one
           call, which revoked the registration and left the credential active,
@@ -487,7 +335,10 @@ function RemoveControl({
         placeholder="Reason (optional)"
         onChange={(e) => setReason(e.target.value)}
       />
-      <div className="os-head-actions">
+      <div className="os-panel-actions">
+        <Button disabled={busy} onClick={() => setConfirming(false)}>
+          Keep it
+        </Button>
         <Button
           tone="danger"
           busy={busy}
@@ -507,10 +358,7 @@ function RemoveControl({
         >
           Remove {label}
         </Button>
-        <Button disabled={busy} onClick={() => setConfirming(false)}>
-          Keep it
-        </Button>
       </div>
-    </div>
+    </InPlaceAsk></div>
   );
 }

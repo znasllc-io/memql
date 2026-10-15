@@ -89,6 +89,9 @@ const (
 // decision record must be able to say. Every call site that reaches a model
 // builds one.
 type ResolveRequest struct {
+	// NoPaidProviders is an execution ceiling, not routing preference. Native
+	// chain selection and call-time fallback both refuse federation entries.
+	NoPaidProviders bool
 	// Level is what the call declares it needs. Required: a request with no
 	// level is refused rather than defaulted, because a guessed level is a
 	// policy decision nobody wrote.

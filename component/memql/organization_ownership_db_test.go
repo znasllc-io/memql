@@ -299,16 +299,16 @@ func TestOrganizationPersistedAttributionAndCrossReplicaMembership(t *testing.T)
 	if err := organizationInsert(t, receiver, delegatedCtx, "v1:campaigns:audience", "beta-source-"+suffix, map[string]any{"accountId": acme}); err == nil {
 		t.Fatal("Acme write grant moved a Beta row without source write authority")
 	}
-	writeGrant(t, engine, auth.SubjectKindGroup, "g-"+acme, auth.VerbRead, "app:campaigns", auth.GrantAllow)
-	writeGrant(t, engine, auth.SubjectKindGroup, "g-"+beta, auth.VerbRead, "app:campaigns", auth.GrantDeny)
+	writeGrant(t, engine, auth.SubjectKindGroup, "g-"+acme, auth.VerbRead, "app:email", auth.GrantAllow)
+	writeGrant(t, engine, auth.SubjectKindGroup, "g-"+beta, auth.VerbRead, "app:email", auth.GrantDeny)
 	subject, _ := auth.SubjectFromContext(delegatedCtx)
-	if auth.CapableFor(delegatedCtx, subject, auth.VerbRead, "app:campaigns") {
+	if auth.CapableFor(delegatedCtx, subject, auth.VerbRead, "app:email") {
 		t.Fatal("control: global deny-wins answer should be denied")
 	}
 	discovered := receiver.ResolveOrganizationCapabilities(delegatedCtx, auth.EffectiveCapabilities(delegatedCtx, subject))
 	byAccount := map[string]string{}
 	for _, entry := range discovered {
-		if entry.Verb == auth.VerbRead && entry.Resource == "app:campaigns" {
+		if entry.Verb == auth.VerbRead && entry.Resource == "app:email" {
 			byAccount[entry.AccountID] = entry.Effect
 		}
 	}
@@ -375,7 +375,7 @@ func TestOrganizationPersistedAttributionAndCrossReplicaMembership(t *testing.T)
 		t.Fatalf("denied action reached deploy executor: %d", deploys)
 	}
 	borrowed := auth.ContextWithUserActor(context.Background(), member)
-	if !receiver.organizationAppAllows(borrowed, acme, "app:campaigns") {
+	if !receiver.organizationAppAllows(borrowed, acme, "app:email") {
 		t.Fatal("borrowed owner's initial app permission missing")
 	}
 	campaignQuery := fmt.Sprintf(`query campaignById(campaignId: %s)`, langparser.QuoteString(campaign))
@@ -383,12 +383,12 @@ func TestOrganizationPersistedAttributionAndCrossReplicaMembership(t *testing.T)
 	if err != nil || len(MaterializeRows(beforeDeny)) != 1 {
 		t.Fatalf("before denial: %v", err)
 	}
-	writeGrant(t, engine, auth.SubjectKindUser, member, auth.VerbRead, "app:campaigns", auth.GrantDeny)
+	writeGrant(t, engine, auth.SubjectKindUser, member, auth.VerbRead, "app:email", auth.GrantDeny)
 	afterDeny, err := receiver.Execute(auth.ContextWithUserActor(context.Background(), member), campaignQuery)
 	if err != nil || len(MaterializeRows(afterDeny)) != 0 {
 		t.Fatalf("cached read survived app denial: %v", err)
 	}
-	if receiver.organizationAppAllows(auth.ContextWithUserActor(context.Background(), member), acme, "app:campaigns") {
+	if receiver.organizationAppAllows(auth.ContextWithUserActor(context.Background(), member), acme, "app:email") {
 		t.Fatal("borrowed worker ignored persisted app denial")
 	}
 	// Neither an internal stamp nor owning the old row bypasses that denial.

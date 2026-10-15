@@ -2,6 +2,7 @@ package app
 
 import (
 	"context"
+	"database/sql"
 	"fmt"
 	"strings"
 
@@ -11,6 +12,7 @@ import (
 	"github.com/znasllc-io/memql/component/observe"
 	"github.com/znasllc-io/memql/component/server"
 	memqldsl "github.com/znasllc-io/memql/dsl"
+	"github.com/znasllc-io/memql/integrations/azureblob"
 
 	"github.com/uptrace/bun"
 )
@@ -22,6 +24,17 @@ func (a *App) databaseAndConcepts() {
 		a.fatal("failed to create database", "error", err)
 	}
 	a.db = mnd
+	azureblob.ConfigureCapacity(func() *sql.DB {
+		if a.db == nil || a.db.BunDB() == nil {
+			return nil
+		}
+		return a.db.BunDB().DB
+	}, func() *sql.DB {
+		if a.db == nil {
+			return nil
+		}
+		return a.db.GateDB()
+	})
 
 	// Product concepts can import a storefront pack's concepts. Register the
 	// pack trees before this FIRST concept pass, not in the later engine
@@ -116,6 +129,11 @@ func (a *App) databaseAndConcepts() {
 		}
 		return a.db.BunDB()
 	}
+	schemaCompactor, err := memoryNodesDatabase.NewSchemaCompactor(provider, a.startupNodeID, a.Logger)
+	if err != nil {
+		a.fatal("invalid schema-reference activation configuration", "error", err)
+	}
+	a.Dependencies = append(a.Dependencies, schemaCompactor)
 	observeSink := observe.NewSinkComponent(a.Logger, provider, observe.TimescaleSinkOptions{Logger: a.Logger}, 0)
 	a.Dependencies = append(a.Dependencies, observeSink)
 

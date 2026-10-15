@@ -1,9 +1,10 @@
-import { getRowByConceptAndId, type LiveState, type Row } from "@znasllc-io/memql-sdk-core/client";
+import { getRowByConceptAndId, versionOrder, type LiveState, type Row } from "@znasllc-io/memql-sdk-core/client";
 
 import type { LiveListSource } from "../../../live/LiveList";
 import { useOsConnection } from "../../../live/connection";
 import { useLiveCollection } from "../../../live/useLiveCollection";
-import { nodeFromRow, WORKBENCH_NODE_TYPE } from "../rows";
+import { useSessionIfPresent } from "../../../chrome/access";
+import { workspaceFromRow, nodeFromRow, WORKBENCH_NODE_TYPE } from "../rows";
 
 export const WORKBENCH_WORKSPACE_CONCEPT = "v1:workbench:workspace";
 export const CLUSTER_NODE_CONCEPT = "v1:cluster:node";
@@ -50,10 +51,14 @@ export const CLUSTER_NODE_CONCEPT = "v1:cluster:node";
 // folds by id and therefore keeps whichever row it saw LAST -- which, over an
 // unordered read, is an arbitrary one of a replica's lifetime.
 //
-// So latestPerId runs INSIDE the seed, over the whole history, before the
+// So the collapse runs INSIDE the seed, over the whole history, before the
 // collection ever sees it. That makes the collapse a property of the read
-// rather than of the order the read happened to come back in. Folded events
-// need no such care: they arrive newest-last by construction.
+// rather than of the order the read happened to come back in. The newest row
+// is the one with the later `createdAt`, compared as an INSTANT (the SDK's
+// `versionOrder`): the engine trims the fraction's trailing zeros, so as a
+// string `.3251Z` is greater than `.325101Z` and is the earlier time. Folded
+// events need no such care: the live list orders them by the same version
+// time.
 //
 // staleClusterNodes would have collapsed server-side, but it also filters
 // `health!="stopped"`, and a replica that STOPPED is the most interesting row
@@ -84,9 +89,10 @@ export interface WorkbenchesState {
 
 export function useWorkbenches(): WorkbenchesState {
   const connection = useOsConnection();
+  const userId = useSessionIfPresent()?.access?.userId ?? "";
 
   const workspaces = useLiveCollection<Row>(
-    connection === null ? null : "fleet:workspaces",
+    userId ? `fleet:workspaces:${userId}` : null,
     (conn) => ({
       concept: WORKBENCH_WORKSPACE_CONCEPT,
       // myWorkspaces is scoped server-side on actor.userId and returns live
@@ -102,6 +108,7 @@ export function useWorkbenches(): WorkbenchesState {
         });
         return (row as Row) ?? null;
       },
+      inScope: row => workspaceFromRow(row).ownerUserId === userId,
       paged: false,
     }),
   );
@@ -120,7 +127,9 @@ export function useWorkbenches(): WorkbenchesState {
           const node = nodeFromRow(raw);
           if (node.id === "" || node.nodeType !== WORKBENCH_NODE_TYPE) continue;
           const held = newest.get(node.id);
-          if (held === undefined || node.createdAt >= held.createdAt) {
+          // A version with no time to compare, on either side, is placed by
+          // the order it was read in, as the live list places an arrival.
+          if (held === undefined || (versionOrder(node.createdAt, held.createdAt) ?? 0) >= 0) {
             newest.set(node.id, { createdAt: node.createdAt, raw });
           }
         }

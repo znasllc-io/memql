@@ -26,13 +26,13 @@ the instance's ceiling — across steady state **and** deploys — to prevent
 > managed control-plane `deployer` pool.
 >
 > **Count every pool and rollout overlap.** The main pool's configured limit
-> does not bound the process's separate direct and startup migration pools.
-> Their combined peak must fit under `max_connections - reserved`, because every
-> Postgres backend is a process with its own memory and raising the ceiling
+> does not bound the process's separate direct, startup migration and write-gate
+> pools. Their combined peak must fit under `max_connections - reserved`, because
+> every Postgres backend is a process with its own memory and raising the ceiling
 > trades RAM for headroom.
 > `scripts/deploy/conn-headroom-check.sh` was **kept** and rewritten for the
 > same reason — it is the one thing standing between a replica-count bump and
-> the storm that caused memql#1817.
+> the storm that caused memql#1817 — and it counts all four pools of a process.
 >
 > Platform: [database-platform.md](database-platform.md).
 
@@ -48,6 +48,7 @@ limits.
 
 ```
 per_process       =  main_pool_limit + direct_pool_limit + migration_pool_limit
+                     + gate_pool_limit
 peak_connections  =  Σ_over_workloads( peak_concurrent_processes × per_process )
                   +  separate_jobs_and_monitors + operator_and_backup_headroom
 
@@ -65,9 +66,51 @@ REQUIRE:  peak_connections  ≤  max_connections − reserved_connections
   Jobs and scheduled monitors. Do not count an in-process startup migration
   again as a separate Job; count actual independent Jobs separately.
 - With the shipped main pool limit of four, a configured direct pool adds up to
-  four and a startup migration adds one: budget up to nine per process. If no
-  direct DSN is configured, direct calls share the main pool. Any additional
-  independent database pool must be counted too.
+  four, a startup migration adds one, and the write-gate pool (below) adds up to
+  four: budget up to thirteen per process. If no direct DSN is configured,
+  direct calls share the main pool and the direct term is zero (every shipped
+  install configures one: the local secrets seed copies the main DSN when no
+  direct one is given). Any additional independent database pool must be counted
+  too.
+- **What the shipped base fits.** Six DB-connecting Deployments of two replicas,
+  at thirteen per process, are 6 × 2 × 13 = 156 connections at steady state. The
+  entry preset's `max_connections` is 200 less ten reserved, 190 usable: 34 to
+  spare, above the gate's 80% soft line (152), so it warns and passes. A roll is
+  not steady state. The rule above (two processes per replica, plus surge) gives
+  6 × (2 × 2 + 0) × 13 = 312 for the base, which only the 400 presets hold (390
+  usable). The base rolls with `maxSurge: 0` and `maxUnavailable: 1`, so what
+  overlaps is one terminating process per Deployment while it rolls, thirteen
+  more connections each: two Deployments rolling together reach 182 and fit the
+  entry preset, three reach 195 and do not, all six at once reach 234. On the
+  entry preset, roll at most two Deployments at a time; the 400 presets carry
+  any roll. `scripts/deploy/conn-headroom-check.sh` prints the steady arithmetic
+  per Deployment (`main + direct + migration + gate`), reads the main pool from
+  the `memql-db-pool` ConfigMap and the gate pool from `MEMQL_DB_GATE_POOL_SIZE`,
+  and takes `--direct-pool=0` for an install with no direct DSN. It adds only
+  `maxSurge` for a roll, which is zero in the base, so it reports 156 for the base
+  at a roll as well: it does not see terminating pods, and the rule above is
+  where they are counted. The local overlay raises the main pool to eight
+  (seventeen per process) and its Postgres to `max_connections` 400 (390 usable):
+  its seven Deployments fit at one replica each (119 steady, 153 at a bff roll)
+  and at two (238 steady, 289 at a bff roll), the case `make scale N=2` makes;
+  `deploy/k8s/overlays/local/render_connections_test.go` runs the gate on the
+  rendered overlay at two replicas to hold the number to that.
+- **The write-gate pool** (`MEMQL_DB_GATE_POOL_SIZE`, default four) holds the
+  transactions of write gates -- the advisory locks that serialise a signup, a
+  welcome, a library file version, an approval decision -- and nothing else. A
+  gate is taken on these connections, never on the main pool, so the work its
+  holder does keeps all of the main pool's connections, and the sessions may sit
+  idle in a transaction for minutes (`MEMQL_DB_GATE_IDLE_IN_TX_TIMEOUT_MS`, five)
+  where the main pool's end an idle transaction after sixty seconds and take the
+  lock with it. A connection is opened when a gate is taken and none is free; a
+  connection given back is kept warm only while fewer than two are idle (any
+  more close at once), and a warm one closes after two minutes unused. So an
+  idle process holds **no** gate connection, a busy one up to two between its
+  gates, and four is the burst. Four is enough for the bounded phases that hold
+  gates (a signup's thirty seconds, a welcome's send); a fifth caller waits up to
+  six seconds for a connection and then answers that coordination is busy,
+  which every caller treats as "nothing attempted, try later". Raise the size
+  only if the budget above has the room.
 
 ## The knobs (per-pod pool — `component/database/database.go`)
 
@@ -79,13 +122,17 @@ Source of truth is the code; defaults are conservative and overridable per env:
 | `MAX_IDLE_CONNS` | 1 | warm idle connections kept per pod |
 | `CONN_MAX_LIFETIME_MS` | 3600000 (1h) | rotate connections hourly (bounds long-lived leaks) |
 | `CONN_MAX_IDLE_TIME_MS` | 120000 (2m) | close idle connections after 2 min (reclaims slack) |
+| `MEMQL_DB_GATE_POOL_SIZE` | 4 | hard cap on the write-gate pool (see the budget above); not under the `MEMORY_NODES_DATABASE_` prefix |
+| `MEMQL_DB_GATE_IDLE_IN_TX_TIMEOUT_MS` | 300000 (5m) | how long a write-gate session may sit idle in its transaction; a gate refuses a pool below two minutes |
 
 `MAX_OPEN_CONNS` is a **hard cap on that pool**, not on the whole pod. The
 memory-nodes instance reads the `MEMORY_NODES_DATABASE_` prefix; the shared
 `memql-db-pool` ConfigMap sets its main open/idle limits to four/two. The direct
 pool has a separate fixed limit of four and ignores these knobs; startup SQL
 migrations can use one dedicated connection. Check
-`component/database/database.go` when those implementation bounds change.
+`component/database/database.go` when those implementation bounds change: the
+headroom gate's defaults are held to them by
+`scripts/deploy/conn_headroom_test.go`.
 Right-size the combined budget against the actual instance ceiling before
 changing replicas or adding a pooler.
 

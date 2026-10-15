@@ -103,3 +103,16 @@ func TestComputerGrantCannotChangeOwnerRunAgentHashOrMachineSet(t *testing.T) {
 		t.Fatal("wire IDs lost a valid grant")
 	}
 }
+
+func TestTypedComputerPermissionNeverBecomesLegacyBroadScope(t *testing.T) {
+	req := approvedRequest()
+	req.RequireLabels = map[string]string{"os": "darwin"}
+	row := grantRow(req, fleetNow().Add(time.Hour))
+	subject := row["subject"].(map[string]any)
+	subject["scope"] = "full"
+	subject["computerPermission"] = map[string]any{"kind": "directory_read"}
+	row["artifactHash"] = work.ArtifactHash(subject)
+	if approvedComputerScope([]map[string]any{row}, req, fleetNow()) != "" {
+		t.Fatal("typed receipt widened to a legacy full run grant")
+	}
+}

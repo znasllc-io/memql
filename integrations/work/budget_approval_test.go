@@ -14,9 +14,13 @@ func budgetApprovalFixture(t *testing.T) (*Integration, *recordingEngine, *[]str
 	t.Helper()
 	i, eng := newTestIntegration(t)
 	keys := []string{}
-	i.decisionGate = func(_ context.Context, key string) (func(), error) {
-		keys = append(keys, key)
+	i.decisionGate = func(_ context.Context, key ...string) (func(), error) {
+		keys = append(keys, key...)
 		return func() {}, nil
+	}
+	i.computerDecisionGate = func(ctx context.Context, id string) (func(), func(context.Context) error, error) {
+		release, err := i.decisionGate(ctx, id)
+		return release, func(context.Context) error { return nil }, err
 	}
 	subject := map[string]any{"ceiling": "modelCalls", "limit": "16 calls", "actual": "16 made"}
 	eng.reply("workApprovalsForOwner", map[string]any{

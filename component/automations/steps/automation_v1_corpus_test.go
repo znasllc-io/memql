@@ -148,14 +148,18 @@ func probeStepArgs(ctx context.Context, step *automations.Step, stepCtx *automat
 // a capability script's envelope (steps/action.go executeAuthored), whose
 // innermost `result` an action statement binds.
 func probeActionAnswer(ref string) map[string]any {
+	result := map[string]any{
+		"action": ref, "passed": true, "status": "succeeded", "version": "1.2.3",
+		"deploymentId": "dep-2", "previousDeploymentId": "dep-1",
+	}
+	if ref == "inspectAzureEmail" {
+		result = map[string]any{"issuerHash": strings.Repeat("a", 64), "serviceSuffix": strings.Repeat("a", 48), "location": "northeurope", "geography": "Europe", "installed": map[string]any{}}
+	}
 	return map[string]any{
 		"authored": true, "ref": ref, "capability": "probe." + ref, "resultFingerprint": "probe",
 		"result": map[string]any{
 			"ok": true, "changed": true,
-			"result": map[string]any{
-				"action": ref, "passed": true, "status": "succeeded", "version": "1.2.3",
-				"deploymentId": "dep-2", "previousDeploymentId": "dep-1",
-			},
+			"result": result,
 		},
 	}
 }

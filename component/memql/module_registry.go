@@ -13,6 +13,7 @@ import (
 	"github.com/uptrace/bun"
 
 	"github.com/znasllc-io/memql/component/auth"
+	memorynodes "github.com/znasllc-io/memql/component/database/memory-nodes"
 	"github.com/znasllc-io/memql/component/envregistry"
 	langparser "github.com/znasllc-io/memql/component/language/parser"
 	memqldsl "github.com/znasllc-io/memql/dsl"
@@ -554,7 +555,7 @@ type clusterConceptRow struct {
 // concepts. Missing relation reads as empty (a cluster that has never
 // registered a node simply has no node-type rows).
 //
-// staged-data: MUST-NOT-GATE -- the module inventory reports the cluster's
+// The module inventory reports the cluster's
 // operating state to owner/admin callers; withholding a topology row would
 // report a node type as absent while the mesh runs it. The v1:cluster:*
 // concepts this reads are system-written bookkeeping, never authored
@@ -570,7 +571,7 @@ func latestRowsByConcept(ctx context.Context, db *bun.DB, conceptID string) ([]c
 	}
 	err := db.NewRaw(
 		`SELECT DISTINCT ON (id) id, "createdAt", payload
-		   FROM "MemoryNodes"
+		   FROM `+memorynodes.ObservedRowsSQL+` AS observed
 		  WHERE concept = ?
 		  ORDER BY id, "createdAt" DESC`,
 		conceptID,

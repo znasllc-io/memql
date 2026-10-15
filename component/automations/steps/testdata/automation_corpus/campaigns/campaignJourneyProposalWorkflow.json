@@ -1,0 +1,73 @@
+{
+  "automation": "campaigns/automations.memql campaignJourneyProposalWorkflow",
+  "runs": {
+    "invocation | 0 rows": {
+      "input": {
+        "event": {
+          "kind": "unspecified",
+          "payload": {
+            "sentence": "s-sentence"
+          },
+          "topic": "automation.invocation.campaignJourneyProposalWorkflow"
+        },
+        "rows": 0
+      },
+      "outcome": {
+        "calls": [
+          {
+            "kind": "builtin",
+            "name": "campaignJourneyCatalog"
+          },
+          {
+            "args": {
+              "data": {
+                "sentence": "s-sentence"
+              },
+              "prompt": "composeEmailJourney"
+            },
+            "kind": "builtin",
+            "name": "campaignGenerateJourneyProposal"
+          }
+        ],
+        "result": {
+          "output": null,
+          "status": "completed"
+        }
+      }
+    },
+    "invocation | 2 rows": {
+      "input": {
+        "event": {
+          "kind": "unspecified",
+          "payload": {
+            "sentence": "s-sentence"
+          },
+          "topic": "automation.invocation.campaignJourneyProposalWorkflow"
+        },
+        "rows": 2
+      },
+      "outcome": {
+        "calls": [
+          {
+            "kind": "builtin",
+            "name": "campaignJourneyCatalog"
+          },
+          {
+            "args": {
+              "data": {
+                "sentence": "s-sentence"
+              },
+              "prompt": "composeEmailJourney"
+            },
+            "kind": "builtin",
+            "name": "campaignGenerateJourneyProposal"
+          }
+        ],
+        "result": {
+          "output": null,
+          "status": "completed"
+        }
+      }
+    }
+  }
+}

@@ -7,11 +7,22 @@ type RenderRecipe struct {
 	DeployableKind string     `json:"deployableKind,omitempty"`
 	Draft          Draft      `json:"draft"`
 	Provenance     Provenance `json:"provenance"`
+	// Blank says this recipe renders its format's empty document, whatever the
+	// draft holds. It is ON THE RECIPE, and not a flag the first run kept to
+	// itself, because the recipe is what a resumed run restores: the snapshot
+	// saved before the file was filed is all a sibling replica has, and without
+	// this it would render a blank request as an ordinary document with front
+	// matter and a heading. omitempty keeps every other recipe's JSON, and the
+	// source packages built from it, byte for byte what it was.
+	Blank bool `json:"blank,omitempty"`
 }
 
 func RenderRecipeBytes(r RenderRecipe) (Result, error) {
+	if r.Blank {
+		return RenderBlank(r.Format, r.Name)
+	}
 	if r.OutputKind == "email_template" {
-		return RenderEmailTemplate(r.Draft.Body)
+		return RenderEmailFile(r.Draft.Body)
 	}
 	if r.DeployableKind != "" {
 		kind, err := ParseDeployableKind(r.DeployableKind)

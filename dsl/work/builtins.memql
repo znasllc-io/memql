@@ -18,6 +18,47 @@
 // caller-scoped rather than ranked: a person acts on their own goals, and
 // the row tier is what decides which those are.
 
+/// Inspect the catalog and verify baseline content against installed seeds.
+@sdk
+@executor("integration.work.skillCatalog")
+builtin workSkillCatalog {}
+
+/// Record an external evaluator's artifact verdicts for the human caller's
+/// finished run. MemQL verifies ownership and call receipts, not local files.
+/// Model calls cannot publish their own evaluation. Repeated identities are
+/// idempotent only for identical evidence; changed claims are refused.
+@sdk
+@executor("integration.work.recordGoalEvaluation")
+builtin workRecordGoalEvaluation {
+  scenario object!
+  result object!
+}
+
+/// Select and freeze reviewed context for the trusted current owned step.
+/// A public caller cannot supply the run context or the content to record.
+@executor("integration.work.selectSkills")
+builtin workSelectSkills {
+ text string
+ limit int!
+ minimumScore int!
+ maxBytes int!
+}
+
+/// Admit one human message about an owned approval. This cannot be called from
+/// a model run, changes no approval, and records a child before async dispatch.
+@executor("integration.work.openApprovalDiscussion")
+builtin workOpenApprovalDiscussion {
+ approvalId string!
+ conversationId string!
+ requestId string!
+ prompt string!
+ advisor bool
+}
+
+/// Project the same owned, pending executable-run gate used by Send guidance.
+@executor("integration.work.approvalDiscussionState")
+builtin workApprovalDiscussionState { approvalId string! }
+
 /// Accept a goal and start work on it. Opens a v1:work:goal owned by the caller and its first
 /// v1:work:run in `compiling`, then dispatches compile: catalog exact match, then near-match with a
 /// gap list, then the cheap triage. Returns {goalId, runId}. A goal that fully matches the catalog
@@ -25,6 +66,9 @@
 @sdk
 @executor("integration.work.createGoal")
 builtin createGoal {
+  noPaidProviders bool @description("Human-selected execution ceiling: no federation provider may serve any call of this goal, including embeddings, step overrides and fallback. Child goals inherit it and cannot relax it.")
+  source        string   @description("The human caller's routing choice, using the same source grammar as Ask. A pinned fleet source never falls back to a paid provider. Child/model calls cannot replace their inherited choice.")
+  level         enum("fast", "strong", "reasoning") @description("Optional human-selected intelligence level for this goal's steps; compiler calls retain their own levels.")
   spine         string   @description("Installed Spine template name. Defaults to defaultWorkSpine. Its templates, pure logic, scoped actions and selected phase recipes are frozen onto this run before compilation.")
   statement     string!  @description("The goal in the person's own words.")
   input         object   @description("The typed input object: the shape the chosen template's args declare.")
@@ -254,4 +298,19 @@ builtin requestSpecialistTraining {
   specialistId  string!  @description("The v1:agents:agent to train.")
   topic         string   @description("What to train on. The resolved knowledge domain when empty.")
   mode          enum("initial", "refresh")  @description("initial (default) for a fresh training run, refresh for an incremental update.")
+}
+
+/// Revoke one of this person's saved computer permissions. In-flight actions
+/// may finish; no later dispatch may claim the receipt.
+@sdk
+@executor("integration.work.revokeComputerPermission")
+builtin revokeComputerPermission {
+ permissionId string! @description("The approval receipt that granted the saved permission.")
+}
+
+/// Refresh the caller's pending computer-access review without approving it.
+@sdk
+@executor("integration.work.refreshComputerPermission")
+builtin refreshComputerPermission {
+  approvalId string!
 }

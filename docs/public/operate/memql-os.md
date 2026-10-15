@@ -250,8 +250,8 @@ Two consequences worth knowing:
 | **Concepts** | Declared concepts, field definitions, and rows visible to your account |
 | **Cluster** | Readiness, modules, data origins, agents, and the audit trail |
 | **Training** | Training from Library files and reviewing knowledge |
-| **Materializer** | Composing data into a file |
-| **Campaigns** | Mail audiences, templates, senders, rules, and sending |
+| **Materializer** | Making a new file from a description, from your data, or both |
+| **Email** | Campaigns, automations, audiences, templates and, for owners and developers, the capture inbox |
 | **Stores** | Shopify store configuration, health, subscriptions, and mirror state |
 | **Users** | People, roles, invitations, enrolment, and sessions |
 | **Accounts** | Accounts the cluster works for and their configuration |
@@ -267,6 +267,69 @@ Access is granted by app and section through the engine's access model, not by a
 single universal role floor. The current roster is declared in
 `clients/os/src/apps/registry.tsx`. An app's presence does not grant permission
 to its operations. See [app access](auth/access-model.md).
+
+### Materializer
+
+The Materializer makes a new file and keeps a **composition**: what you asked for,
+what it was made from, which models worked on it, and the resulting file.
+**Materialized**, **Templates**, and **Recipes** open lists; choosing an item opens
+its own page. Upload a file you already have through Files.
+
+The plus in Materialized opens **Make a file**. Its steps cover the kind of file,
+an optional template, **From**, **Describe**, **Name**, **Folder**, and organization.
+From mixes Library files and records in one searchable tray. Picked items appear
+above it and can be removed individually. Describe is optional. Name is checked as
+you type, and the folder control shows where the file will go. An email template
+needs an organization; an ordinary file does not.
+
+A name alone can make a blank file. **Make the file** is available as soon as the
+answers can be used, from any step. The floor says whether the file starts blank,
+is written by a model, or will have a draft to review in the editor. If Inference
+needs setup, people with permission can open its setup from the wizard.
+
+| The request | What is made |
+|---|---|
+| A name and kind, with no description, sources or template | A blank Markdown, text, HTML, CSV or JSON file, with no model call. Word and PDF need something to write |
+| Markdown described in words, with nothing picked or only Markdown files up to 32 KiB each and PNG, JPEG, GIF or WebP pictures up to 8 MiB each | A blank Markdown file whose description the client hands to the Library's revision workflow. You review its draft in the editor |
+| Markdown described in words with any other file, a record or a query | A file written by the composer, which reads the supplied sources |
+| A template, another kind of file, an email template or a package | A file written by the composer |
+
+The OS offers each of these paths. Audio and video are not offered. A folder you
+cannot read or that is in the Bin is refused before anything is written:
+“That folder isn't available. Choose another folder.” You can choose another in
+the Folder step.
+
+After Make the file, the same wizard shows progress with **Stop** and **Leave**.
+Leave lets the work continue. The finished file's page shows its kind, folder,
+sources, description, models and provenance. **Open in editor** opens the file;
+packages offer Download and Deploy it. A failed or stopped composition offers
+**Start over** with its answers available to review. Archiving a composition
+keeps its file in Files.
+
+When the browser editor is selected, a blank or described file opens there by
+itself once its Files entry is ready. For a described file, the window first sends
+the description as you. If that hand-off fails, the file's page gives the reason
+and the editor still offers Describe document. The revision workflow accepts at
+most eight references within its total size limits; each reference beyond those
+totals is named beside the made file. A file whose type or individual size cannot
+be attached takes the composer path instead.
+
+Templates take their look from a Library file. Add a template by choosing its
+file, kind and name, with an optional description and organization. A recipe
+keeps a reusable request: save one from an eligible made file, then open it in
+Recipes to inspect its inputs and **Run it again**.
+
+Files' **Add to this folder** menu offers **New Markdown file**. It opens Make a
+file on Name, with Markdown and the current folder answered and a way back to
+Files. Another app can supply the same starting setup, including sources and an
+organization requirement. A setup is for one file and starts no work by itself.
+Files' **Open in Materializer** opens the made file's composition page.
+
+Every client creates files through the SDK's `materialize` path. A request id
+belongs to one action, so a double click starts one file. The OS uses
+`startMaterialize`, follows the live composition and Files feeds, and calls
+`handOffDescription` for described Markdown. The editor follows the same SDK
+contract. Guard tests prevent another creation path.
 
 ### Settings
 

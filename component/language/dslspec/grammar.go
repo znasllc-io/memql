@@ -290,6 +290,9 @@ func constructBodyProduction(c Construct) string {
 			}
 			return production(name, "<concept-field>*")
 		}
+		if c.Keyword == "tool" {
+			return production(name, "<tool-field>*")
+		}
 		return production(name, "<field>*")
 	case BodyFormPaths:
 		return production(name, "<path>*")
@@ -543,6 +546,7 @@ func fieldReceiverNames() []fieldReceiver {
 func fieldProduction(spec *Spec) string {
 	var b strings.Builder
 	b.WriteString("\n(* ---- Fields ---- *)\n")
+	b.WriteString(production("tool-field", `<name> <field-type> [ "!" ] <tool-field-annotation>* [ "{" <tool-field>* "}" ]`))
 	b.WriteString(production("field", `<doc-comment>* <name> <field-type> [ "!" ] <field-annotation>*`))
 	// A concept property has two more forms, and neither is available to an
 	// args, tool, prompt or builtin field: a nested object written as a BLOCK

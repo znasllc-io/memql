@@ -35,6 +35,54 @@ const clusterIssuer = "letsencrypt-prod"
 // the annotations below change together and nothing else here does.
 const ingressClass = "nginx"
 
+// defaultBackendAnnotation and errorPagesService point an Ingress at the error
+// pages (deploy/k8s/components/error-pages, `memql error-pages`): when the
+// Service an Ingress routes to has no ready endpoints, ingress-nginx sends the
+// request to this Service instead of answering its own bare "503 Service
+// Temporarily Unavailable", which is what every host on the cluster did on
+// 2026-10-11, when the whole mesh was down.
+//
+// integrations/customdomain stamps the same annotation on the Ingresses the
+// engine creates at runtime for a client's own domain and an account's reserved
+// name (ErrorPagesBackendAnnotation, ErrorPagesServiceName). A generator should
+// not link the reconciler, so the two literals are duplicated and
+// manifest_test.go holds the copies equal: an outage must show the same page
+// on the platform's hosts and on every customer's.
+//
+// HTTP backends use error-pages; HTTPS identity backends use error-pages-tls.
+// ingress-nginx preserves the location protocol when swapping backends. The TLS
+// listener has an in-memory certificate; identity already disables upstream
+// verification. GRPC remains excluded because a gRPC client cannot read a page.
+// mcp-front-door remains excluded because it can be intentionally disabled.
+//
+// ENTERING OR LEAVING THE FALLBACK COSTS A FULL NGINX RELOAD: ingress-nginx's
+// Location.Equal compares the location's Backend, which the swap changes, so a
+// role whose ready endpoints flap at zero reloads the controller each time, and
+// a reload closes long-lived connections controller-wide once
+// worker-shutdown-timeout has passed.
+//
+// NEVER `custom-http-errors`: that would make ingress-nginx replace the
+// application's own 4xx and 5xx responses, the API's JSON error bodies
+// included, with the maintenance page. The fallback is for a Service with no
+// endpoints and nothing else.
+//
+// ingress-nginx resolves the Service in the Ingress's OWN namespace, which for
+// every Ingress below is the one the overlay's NamespaceTransformer sets, where
+// error-pages is rendered beside the mesh.
+const (
+	defaultBackendAnnotation = "nginx.ingress.kubernetes.io/default-backend"
+	errorPagesService        = "error-pages"
+	errorPagesTLSService     = "error-pages-tls"
+)
+
+// errorPagesBackend is the annotation line a plain-HTTP Ingress carries, at the
+// indentation of an annotations map entry.
+func errorPagesBackend() string {
+	return "    # THE MAINTENANCE PAGE: where ingress-nginx sends a request when this Ingress's Service has\n" +
+		"    # no ready endpoints, in place of its own bare 503 (see the top of this file).\n" +
+		"    " + defaultBackendAnnotation + ": " + errorPagesService + "\n"
+}
+
 // manifest renders one instance overlay's whole front door.
 //
 // The order is: certificate first (nothing else works without it), then the
@@ -103,6 +151,17 @@ func header(overlay, domain string) string {
 		"# render; an install overrides these through the ArgoCD Application's\n" +
 		"# spec.source.kustomize.patches. `.localhost` is unroutable, so a cluster reconciled\n" +
 		"# before its domain is set fails visibly rather than half-working.\n" +
+		"#\n" +
+		"# THE ERROR PAGES. Every Ingress below whose proxy speaks plain HTTP to its backend, bar\n" +
+		"# mcp-front-door, carries " + defaultBackendAnnotation + ": " + errorPagesService + ",\n" +
+		"# so that when the Service it routes to has no ready endpoints ingress-nginx answers with the\n" +
+		"# maintenance page (`memql error-pages`, deploy/k8s/components/error-pages) instead of its own\n" +
+		"# bare 503. Identity uses error-pages-tls because its backend protocol is HTTPS.\n" +
+		"# api-front-door-grpc remains excluded: a gRPC client cannot read a page.\n" +
+		"# mcp-front-door remains excluded because it can be intentionally disabled. Nothing sets\n" +
+		"# custom-http-errors, which would replace the application's own error responses.\n" +
+		"# cmd/frontdoorhosts/manifest.go has the reasoning and\n" +
+		"# deploy/k8s/overlays/frontdoor_error_pages_test.go holds the rule.\n" +
 		"#\n" +
 		"# NO ROUTER-PRIORITY ANNOTATIONS, unlike the local overlay's traefik front door. nginx\n" +
 		"# resolves server_name by specificity in its own core -- an exact name beats a leading\n" +
@@ -194,6 +253,7 @@ func apiIngress(domain, pathBlock string) string {
 		"    # the local overlay needs no counterpart -- recorded here because 'works\n" +
 		"    # locally' is therefore no evidence about this annotation.\n" +
 		"    nginx.ingress.kubernetes.io/proxy-body-size: \"48m\"\n" +
+		errorPagesBackend() +
 		"spec:\n" +
 		"  ingressClassName: " + ingressClass + "\n" +
 		tlsBlock(host) +
@@ -244,6 +304,9 @@ func apiGRPCIngress(domain string) string {
 		"  namespace: memql\n" +
 		"  annotations:\n" +
 		"    nginx.ingress.kubernetes.io/backend-protocol: \"GRPC\"\n" +
+		"    # NO default-backend HERE (see the top of this file): behind grpc_pass ingress-nginx would hand\n" +
+		"    # the error pages the gRPC protocol, and they speak HTTP/1.1. The proxy would answer 502, not\n" +
+		"    # the page, and a gRPC client could not render the page anyway.\n" +
 		"    # WORKER STREAM IDLE (Jose 408@60.000s). ingress-nginx defaults\n" +
 		"    # proxy-read-timeout / proxy-send-timeout to 60s. A held WorkerService\n" +
 		"    # bidi with no DATA frame for a minute is then answered HTTP 408 from\n" +
@@ -297,6 +360,7 @@ func identityIngress(domain string) string {
 		"  annotations:\n" +
 		"    nginx.ingress.kubernetes.io/backend-protocol: \"HTTPS\"\n" +
 		"    nginx.ingress.kubernetes.io/proxy-ssl-verify: \"off\"\n" +
+		"    " + defaultBackendAnnotation + ": " + errorPagesTLSService + "\n" +
 		"spec:\n" +
 		"  ingressClassName: " + ingressClass + "\n" +
 		tlsBlock(host) +
@@ -318,6 +382,8 @@ func mcpIngress(domain string) string {
 		"# speaking plain HTTP, and backend protocol is not a per-path setting. Not proxied\n" +
 		"# through the edge either -- MCP clients configure a URL, they are not browsers, and an\n" +
 		"# extra hop on a tool-calling path buys nothing.\n" +
+		"#\n" +
+		"# NO default-backend (see the top of this file): entry installs run mcp at 0 replicas; MCP is for machines.\n" +
 		"apiVersion: networking.k8s.io/v1\n" +
 		"kind: Ingress\n" +
 		"metadata:\n" +
@@ -369,6 +435,8 @@ func platformSiteIngress(site, domain string) string {
 		"metadata:\n" +
 		"  name: " + site + "-front-door\n" +
 		"  namespace: memql\n" +
+		"  annotations:\n" +
+		errorPagesBackend() +
 		"spec:\n" +
 		"  ingressClassName: " + ingressClass + "\n" +
 		tlsBlock(host) +
@@ -427,6 +495,8 @@ func edgeIngress(domain string) string {
 		"metadata:\n" +
 		"  name: edge-front-door\n" +
 		"  namespace: memql\n" +
+		"  annotations:\n" +
+		errorPagesBackend() +
 		"spec:\n" +
 		"  ingressClassName: " + ingressClass + "\n" +
 		tlsBlock(apex) +

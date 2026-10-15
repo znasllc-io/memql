@@ -3,7 +3,7 @@ import { useCallback, useMemo, useState } from "react";
 import type { Module, ModuleDetail as ModuleDetailWire, ModulesClient } from "@znasllc-io/memql-sdk-core/client";
 
 import { ActionBar, type Act, type ActionBarTone } from "../../../kit/ActionBar";
-import { Button, Caption, Chip, Fact, Facts, Head, Notice, Panel, Subhead, RecordList, RecordRow, stateWords } from "../../../kit";
+import { Caption, Chip, Fact, Facts, Head, Notice, Panel, Subhead, RecordList, RecordRow, stateWords } from "../../../kit";
 import { useSession } from "../../../chrome/access";
 import { useReading } from "../../../cluster/reading";
 import type { Verdict } from "../../../system/readinessFold";
@@ -105,8 +105,23 @@ export function ModuleDetail({
   }, [client, module.name, enabled, onFlipped]);
 
   // The acts legal from this state, computed rather than rendered-then-hidden.
+  // The confirm is the bar's acts too, as every ask in the shell is: the way
+  // out as a quiet label, the act itself as the button, and the question drawn
+  // beside them. A bar that changes holds every press for a moment, so the
+  // second click of a double-click on the ask answers nothing.
   const acts: Act[] = useMemo(() => {
     if (!flippable || !mayFlip) return [];
+    if (confirming) {
+      return [
+        { label: "Cancel", text: true, onAct: () => setConfirming(false) },
+        {
+          label: enabled ? "Disable" : "Enable",
+          tone: enabled ? "danger" : "primary",
+          busy,
+          onAct: () => void flip(),
+        },
+      ];
+    }
     return [
       {
         label: enabled ? "Disable this pack" : "Enable this pack",
@@ -114,7 +129,7 @@ export function ModuleDetail({
         onAct: () => setConfirming(true),
       },
     ];
-  }, [flippable, mayFlip, enabled]);
+  }, [flippable, mayFlip, enabled, confirming, busy, flip]);
 
   const envVars = detail.value?.envVars ?? [];
 
@@ -235,26 +250,13 @@ export function ModuleDetail({
         state={barState(module.state, flippable, enabled)}
         detail={flippable ? packBarDetail(module.stateDetail) : module.stateDetail}
         tone={barTone(module.state)}
-        acts={confirming ? [] : acts}
+        acts={acts}
       >
-        {confirming ? (
-          <span className="os-cluster-confirm">
-            <span className="os-cluster-confirm-text">
-              {enabled
-                ? `Disable ${module.name}? Nodes keep running it until they restart.`
-                : `Enable ${module.name}? Nodes pick it up when they restart.`}
-            </span>
-            <Button tone="quiet" onClick={() => setConfirming(false)}>
-              Cancel
-            </Button>
-            <Button
-              tone={enabled ? "danger" : "primary"}
-              busy={busy}
-              busyLabel="Recording"
-              onClick={() => void flip()}
-            >
-              {enabled ? "Disable" : "Enable"}
-            </Button>
+        {confirming && acts.length > 0 ? (
+          <span className="os-actbar-confirm">
+            {enabled
+              ? `Disable ${module.name}? Nodes keep running it until they restart.`
+              : `Enable ${module.name}? Nodes pick it up when they restart.`}
           </span>
         ) : null}
       </ActionBar>

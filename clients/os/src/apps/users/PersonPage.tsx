@@ -42,6 +42,7 @@ import { ladderDescending, type RoleCatalog } from "./useRoles";
 import { useGroupsForUser } from "./useGroups";
 import { rereadPerson } from "./usePeople";
 import { useSessions } from "./useSessions";
+import { StorageAllowance } from "../files/backups/StorageAllowance";
 
 // ONE PERSON: what they are, where they belong, and how they get in.
 //
@@ -238,6 +239,8 @@ export function PersonPage({
         {governable ? null : (
           <PeerRowReadOnly actorRole={viewerRole} ownerRole={person.role} ownerName={name} />
         )}
+
+        {(viewerRole === "owner" || viewerRole === "developer") && <Panel label={`Storage for ${name}`}><Subhead>Storage</Subhead><StorageAllowance userId={person.id} editable /></Panel>}
 
         {/* ---- role ---- */}
         <Panel label={`Role for ${name}`}>

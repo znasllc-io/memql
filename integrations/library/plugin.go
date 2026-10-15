@@ -2,7 +2,7 @@ package library
 
 import (
 	"context"
-	"database/sql"
+	"fmt"
 
 	"github.com/znasllc-io/memql/component/fileprocessor"
 	"github.com/znasllc-io/memql/component/memql"
@@ -20,17 +20,17 @@ import (
 // runs at process start.
 func init() {
 	memql.RegisterPlugin("library", func(pctx memql.PluginContext) (memql.IntegrationProvider, error) {
-		i := NewIntegration(pctx.Engine, func() *sql.DB {
-			if pctx.BunDB == nil {
-				return nil
-			}
-			db := pctx.BunDB()
-			if db == nil {
-				return nil
-			}
-			return db.DB
-		})
+		// The document and file version gates run on the gate pool (memql#6022)
+		// and on nothing else: without it every edit, restore, fork and review
+		// decision would be refused, so the plug-in refuses first.
+		if pctx.GateDB == nil {
+			return nil, fmt.Errorf("library plug-in: no GateDB in plugin context: its document and file version writes take write gates on the gate pool (database.Database.GateDB; a test or a tool opens one with database.NewGatePool)")
+		}
+		i := NewIntegration(pctx.Engine, pctx.GateDB)
 		i.SetLogger(pctx.Logger)
+		if err := i.setTrainingReader(pctx); err != nil {
+			return nil, err
+		}
 		// The analysis pass's text extractor (memql#4342). Built from the
 		// SAME processor the attachment route uses, so "which types can
 		// this node read" has one answer rather than two.

@@ -204,6 +204,13 @@ func doorIngressWithRoutes(req DoorBindRequest, b doorBackend, routes []doorRout
 	for k, v := range b.annotations {
 		annotations[k] = v
 	}
+	// AFTER the copy: whether the error pages can stand behind this Ingress is
+	// decided by the backend protocol the copy just brought in. The app. and
+	// api. HTTP Ingresses use HTTP; identity uses the TLS Service. gRPC is excluded. The Service is looked up in
+	// req.Namespace, so a door created outside the engine's namespace needs its
+	// own `error-pages` there (withErrorPagesBackend says what happens until
+	// it has one).
+	withErrorPagesBackend(annotations)
 
 	rules := make([]any, 0, len(routes))
 	for _, r := range routes {

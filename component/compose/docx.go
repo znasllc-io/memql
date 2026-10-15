@@ -84,15 +84,8 @@ func renderDOCX(d Draft, p Provenance) ([]byte, error) {
 	return buf.Bytes(), nil
 }
 
-// docxDocument renders the draft as WordprocessingML paragraphs.
-//
-// The title takes the built-in `Title` style and each paragraph is plain
-// body text. THIS IS NOT A MARKDOWN RENDERER, for renderHTML's reason:
-// a half-implemented one that handles bold and not tables produces
-// documents wrong in ways nobody predicts. A template (design D7) is how
-// a branded, styled document is produced, and that is the honest
-// division -- this writer makes a correct document, a template makes a
-// handsome one.
+// docxDocument retains the simple title and paragraph styling, and writes GFM
+// tables as actual Word tables so composed tabular content remains readable.
 func docxDocument(d Draft) string {
 	var b strings.Builder
 	b.WriteString(`<?xml version="1.0" encoding="UTF-8" standalone="yes"?>` + "\n")
@@ -102,9 +95,13 @@ func docxDocument(d Draft) string {
 		b.WriteString(escapeXML(title))
 		b.WriteString(`</w:t></w:r></w:p>`)
 	}
-	for _, para := range splitParagraphs(d.Body) {
+	for _, block := range documentBlocks(d.Body) {
+		if block.table != nil {
+			writeDOCXTable(&b, block.table)
+			continue
+		}
 		b.WriteString(`<w:p><w:r><w:t xml:space="preserve">`)
-		b.WriteString(escapeXML(para))
+		b.WriteString(escapeXML(block.paragraph))
 		b.WriteString(`</w:t></w:r></w:p>`)
 	}
 	b.WriteString(`<w:sectPr><w:pgSz w:w="11906" w:h="16838"/><w:pgMar w:top="1440" w:right="1440" w:bottom="1440" w:left="1440" w:header="708" w:footer="708" w:gutter="0"/></w:sectPr>`)

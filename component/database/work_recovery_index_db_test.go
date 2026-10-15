@@ -22,6 +22,17 @@ func TestWorkRecoveryIndexBuildsAndRepairsChunkCoverage(t *testing.T) {
 func TestWorkJournalLookupIndexBuildsAndRepairsChunkCoverage(t *testing.T) {
 	testWorkIndex(t, "memory_nodes_work_journal_lookup_idx", database.EnsureWorkJournalLookupIndex)
 }
+func TestEmailProviderLookupIndexBuildsAndRepairsChunkCoverage(t *testing.T) {
+	testWorkIndex(t, "memory_nodes_email_provider_lookup_idx", database.EnsureEmailProviderLookupIndex)
+}
+func TestWorkRunOwnerLookupIndexBuildsAndRepairsChunkCoverage(t *testing.T) {
+	testWorkIndex(t, "memory_nodes_work_run_owner_lookup_idx", database.EnsureWorkRunOwnerLookupIndex)
+}
+func TestEmailDigestLookupIndexesBuildAndRepairChunkCoverage(t *testing.T) {
+	for _, index := range []string{"memory_nodes_recipient_digest_lookup_idx", "memory_nodes_consent_digest_lookup_idx"} {
+		t.Run(index, func(t *testing.T) { testWorkIndex(t, index, database.EnsureEmailDigestLookupIndexes) })
+	}
+}
 func testWorkIndex(t *testing.T, indexName string, build func(context.Context, *bun.DB, *slog.Logger, string) error) {
 	admin := conceptIndexDB(t)
 	ctx := context.Background()
@@ -79,5 +90,11 @@ func testWorkIndex(t *testing.T, indexName string, build func(context.Context, *
 				}
 			}
 		})
+	}
+}
+
+func TestRetentionIndexesBuildAndRepairChunkCoverage(t *testing.T) {
+	for _, name := range []string{"memory_nodes_retention_goal_idx", "memory_nodes_retention_time_idx"} {
+		t.Run(name, func(t *testing.T) { testWorkIndex(t, name, database.EnsureRetentionIndexes) })
 	}
 }

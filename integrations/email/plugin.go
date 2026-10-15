@@ -2,8 +2,10 @@ package email
 
 import (
 	"context"
-	"database/sql"
 	"errors"
+	"fmt"
+	"os"
+	"time"
 
 	"github.com/znasllc-io/memql/component/auth"
 	"github.com/znasllc-io/memql/component/memql"
@@ -23,17 +25,16 @@ import (
 // stash; that target has never existed and the seeder reads a .env file.)
 func init() {
 	memql.RegisterPlugin("email", func(pctx memql.PluginContext) (memql.IntegrationProvider, error) {
+		// The Azure connection state and its send receipts take write gates on the
+		// gate pool (memql#6022) and on nothing else; a context without it is
+		// refused here rather than by the first connection an operator saves.
+		if pctx.GateDB == nil {
+			return nil, fmt.Errorf("email plug-in: no GateDB in plugin context: its Azure connection state and send receipts take write gates on the gate pool (database.Database.GateDB; a test or a tool opens one with database.NewGatePool)")
+		}
 		writer := NewConfigWriter(pctx.Engine)
-		azure := &azureSetup{store: &connectionStore{engine: writer, database: func() *sql.DB {
-			if pctx.BunDB == nil {
-				return nil
-			}
-			db := pctx.BunDB()
-			if db == nil {
-				return nil
-			}
-			return db.DB
-		}}, protocol: newAzureProtocol("")}
+		// The connection store's gate and the Azure send receipts' run on the gate
+		// pool (memql#6022), not on the request pool the engine works on.
+		azure := &azureSetup{store: &connectionStore{engine: writer, gateDB: pctx.GateDB}, protocol: newAzureProtocol("")}
 		if engine, ok := pctx.Engine.(interface {
 			OrganizationCapable(context.Context, string, string, string) bool
 		}); ok {
@@ -51,7 +52,25 @@ func init() {
 			}
 			return application.ClientID, err
 		}
+		installation, err := readEmailInstallation(os.Getenv(emailInstallationEnv))
+		if err != nil {
+			return nil, err
+		}
+		azure.installation = installation
 		envSender, err := NewSenderFromEnv("", pctx.Logger)
+		if installation != nil {
+			ctx, cancel := context.WithTimeout(context.Background(), 25*time.Second)
+			setupErr := azure.bootstrapInstallation(ctx)
+			cancel()
+			if setupErr != nil {
+				if errors.Is(err, ErrLogOnlyRefused) {
+					return nil, fmt.Errorf("email installation is not ready: %w", setupErr)
+				}
+				if pctx.Logger != nil {
+					pctx.Logger.Warn("Email installation will continue after startup", "error", setupErr)
+				}
+			}
+		}
 		if errors.Is(err, ErrLogOnlyRefused) {
 			// A saved operator-organization ACS connection satisfies the
 			// existing boot requirement. Client credentials never do.

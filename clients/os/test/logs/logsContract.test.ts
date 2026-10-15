@@ -36,21 +36,20 @@ describe("the logs-section contract over the real registry", () => {
     expect(OS_REGISTRY.apps.length).toBeGreaterThan(0);
   });
 
-  it("the role pins: admin, developer and owner see the section; writer and reader do not", () => {
+  it("logs follow their seeded roles, with Fleet reserved for owners and developers", () => {
     for (const app of OS_REGISTRY.apps) {
       const logs = (app.sections ?? []).find((s) => s.id === app.logsSection);
-      // The seeds put every logs section on exactly the log store's floor.
-      expect(rolesOpening(logs!.requires!), `${app.id}'s logs resource`).toEqual(["owner", "developer", "admin"]);
-      for (const role of ["admin", "developer", "owner"]) {
+      const allowed = app.id === "fleet" ? ["owner", "developer"] : ["owner", "developer", "admin"];
+      expect(rolesOpening(logs!.requires!), `${app.id}'s logs resource`).toEqual(allowed);
+      for (const role of allowed) {
         installSeededAccess(role);
         expect(sectionsFor(app).map((s) => s.id), `${app.id} for ${role}`).toContain(app.logsSection);
       }
-      for (const role of ["writer", "reader"]) {
+      for (const role of ["admin", "writer", "reader"].filter((role) => !allowed.includes(role))) {
         installSeededAccess(role);
         // `sectionsFor` filters on SECTION resources only; an app whose door
         // the role does not hold never renders a nav at all, and that is the
-        // answer for it (the Logs app is the one, and its door is pinned
-        // below).
+        // answer for apps such as Logs and Fleet.
         if (!appsFor(OS_REGISTRY).some((a) => a.id === app.id)) continue;
         expect(sectionsFor(app).map((s) => s.id), `${app.id} for ${role}`).not.toContain(app.logsSection);
       }

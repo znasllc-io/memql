@@ -17,20 +17,20 @@
 // coordinates directly would just restate the arithmetic in the component and
 // would still pass if the standoff were wired to the wrong node.
 
-import { describe, expect, it } from "vitest";
-import { render } from "@testing-library/react";
+import { describe, expect, it, vi } from "vitest";
+import { fireEvent, render, screen } from "@testing-library/react";
 
 import { BeaconMap } from "../../src/apps/nexus/BeaconMap";
 import { chainWorld, fanOutWorld } from "../../src/nexus/scene/fixtures";
 import type { GoalWorld } from "../../src/nexus/scene/world";
 
-function draw(world: GoalWorld): SVGSVGElement {
+function draw(world: GoalWorld, selectStep = (_key: string) => {}): SVGSVGElement {
   const { container } = render(
     <BeaconMap
       world={world}
-      state={{ status: "ready" } as never}
+      state="live"
       selectedStepKey=""
-      onSelectStep={() => {}}
+      onSelectStep={selectStep}
       onOpenApproval={() => {}}
       expandedColumns={new Set()}
       expandedFolds={new Set()}
@@ -152,5 +152,35 @@ describe("the ends of the road", () => {
     const labels = [...svg.querySelectorAll("text")].map((t) => t.textContent);
     expect(labels).toContain("start");
     expect(labels).not.toContain("you");
+  });
+});
+
+describe("steering the beacon map", () => {
+  it("leaves scrolling alone and offers the shared zoom controls", () => {
+    const svg = draw(chainWorld(5));
+    const transform = () => svg.querySelector("[data-os-map-view]")!.getAttribute("transform");
+    const initial = transform();
+    const wheel = new WheelEvent("wheel", { deltaY: -120, bubbles: true, cancelable: true });
+    fireEvent(svg, wheel);
+    expect(wheel.defaultPrevented).toBe(false);
+    expect(transform()).toBe(initial);
+    fireEvent.click(screen.getByRole("button", { name: "Zoom in" }));
+    expect(transform()).not.toBe(initial);
+    fireEvent.click(screen.getByRole("button", { name: "Reset zoom and position" }));
+    expect(transform()).toBe(initial);
+  });
+
+  it("does not open a dragged step, but still opens it from the keyboard afterwards", () => {
+    const select = vi.fn();
+    const svg = draw(chainWorld(5, "running"), select);
+    const step = svg.querySelector('[data-kind="step"]')!;
+    expect(step).not.toBeNull();
+    fireEvent.pointerDown(step, { pointerId: 1, clientX: 10, clientY: 10 });
+    fireEvent.pointerMove(svg, { pointerId: 1, clientX: 80, clientY: 10 });
+    fireEvent.pointerUp(svg, { pointerId: 1, clientX: 80, clientY: 10 });
+    fireEvent.click(step, { detail: 1 });
+    expect(select).not.toHaveBeenCalled();
+    fireEvent.keyDown(step, { key: "Enter" });
+    expect(select).toHaveBeenCalledTimes(1);
   });
 });

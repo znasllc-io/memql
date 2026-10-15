@@ -54,7 +54,7 @@ type lentPinHop struct {
 }
 
 // newLentPinHop builds both replicas. `lend` sets the OWNER's and the
-// machine's halves of the consent on the lent machine's row; both replicas
+// saved audience on the lent machine's row; both replicas
 // read that same row. groupsOf answers who is in which group, on both
 // replicas.
 func newLentPinHop(t *testing.T, lend func(*Candidate), groupsOf workerservice.GroupResolver) *lentPinHop {
@@ -138,21 +138,18 @@ func (h *lentPinHop) call(t *testing.T, actingUserId, pin string) (memqlengine.F
 	})
 }
 
-func lendTo(userIds, groupIds []string, machineAgrees bool) func(*Candidate) {
+func lendTo(userIds, groupIds []string) func(*Candidate) {
 	return func(c *Candidate) {
 		c.SharingMode = workerservice.SharingModePeople
 		c.SharedUserIds = userIds
 		c.SharedGroupIds = groupIds
-		c.InferenceServe = ""
-		if machineAgrees {
-			c.InferenceServe = workerservice.InferenceServeCluster
-		}
+
 	}
 }
 
 func lendToEveryone(c *Candidate) {
 	c.SharingMode = workerservice.SharingModeCluster
-	c.InferenceServe = workerservice.InferenceServeCluster
+
 }
 
 func callerInDesign(_ context.Context, userId string) []string {
@@ -169,8 +166,8 @@ func TestAPinToAMachineLentToTheCallerIsServedAcrossTheHop(t *testing.T) {
 		groupsOf workerservice.GroupResolver
 	}{
 		// Stored bare, asked canonical: the comparison is the share list's own.
-		{"lent to the caller by name", lendTo([]string{"ursula"}, nil, true), nil},
-		{"lent to a group the caller is in", lendTo(nil, []string{"design"}, true), callerInDesign},
+		{"lent to the caller by name", lendTo([]string{"ursula"}, nil), nil},
+		{"lent to a group the caller is in", lendTo(nil, []string{"design"}), callerInDesign},
 		{"lent to everyone", lendToEveryone, nil},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
@@ -199,11 +196,10 @@ func TestAPinToAMachineNotLentToTheCallerKeepsThePinsRefusal(t *testing.T) {
 		groupsOf workerservice.GroupResolver
 	}{
 		{"kept private by its owner", nil, nil},
-		{"lent to somebody else", lendTo([]string{"v1:identity:user:somebody-else"}, nil, true), nil},
-		{"lent to a group the caller is not in", lendTo(nil, []string{"design"}, true), func(context.Context, string) []string { return nil }},
-		{"lent to the caller, but the machine has not agreed", lendTo([]string{"ursula"}, nil, false), nil},
+		{"lent to somebody else", lendTo([]string{"v1:identity:user:somebody-else"}, nil), nil},
+		{"lent to a group the caller is not in", lendTo(nil, []string{"design"}), func(context.Context, string) []string { return nil }},
 		{"lent to the caller, and revoked", func(c *Candidate) {
-			lendTo([]string{"ursula"}, nil, true)(c)
+			lendTo([]string{"ursula"}, nil)(c)
 			c.RevokedAt = fleetNow()
 		}, nil},
 	} {
@@ -243,7 +239,7 @@ func TestAPinToTheCallersOwnMachineIsUnchanged(t *testing.T) {
 	// The positive control. The lent machine is lent to the caller and could
 	// serve, so a pin to their OWN machine landing there would be the widening
 	// going wrong in the other direction.
-	h := newLentPinHop(t, lendTo([]string{"ursula"}, nil, true), nil)
+	h := newLentPinHop(t, lendTo([]string{"ursula"}, nil), nil)
 	res, err := h.call(t, sharedHopCaller, ownMachineId)
 	if err != nil {
 		t.Fatalf("a pin to the caller's own machine: %v", err)
@@ -258,9 +254,9 @@ func TestTheReceiverStillReDecidesAPinnedCall(t *testing.T) {
 	// lands, the owner has taken it back. The receiver re-reads the row and
 	// refuses before start -- and the pinned plan has nothing to fall through
 	// to, so the caller's own machine is not used instead.
-	h := newLentPinHop(t, lendTo([]string{"ursula"}, nil, true), nil)
+	h := newLentPinHop(t, lendTo([]string{"ursula"}, nil), nil)
 	for i := range h.receiverAll.all {
-		lendTo([]string{"v1:identity:user:somebody-else"}, nil, true)(&h.receiverAll.all[i])
+		lendTo([]string{"v1:identity:user:somebody-else"}, nil)(&h.receiverAll.all[i])
 	}
 	_, err := h.call(t, sharedHopCaller, lentPin)
 	if !errors.Is(err, memqlengine.ErrFleetUnavailable) {
@@ -294,7 +290,7 @@ func TestSystemWorkCannotPinAMachine(t *testing.T) {
 		{"the operator credential's stream, on a machine lent to everyone", "cluster:operator", lentPin, lendToEveryone},
 		// The automation's NAME spells the caller's short id. The share list
 		// names "ursula"; the automation is not her.
-		{"a synthetic actor named after a listed person", "system:automation:ursula", lentPin, lendTo([]string{"ursula"}, nil, true)},
+		{"a synthetic actor named after a listed person", "system:automation:ursula", lentPin, lendTo([]string{"ursula"}, nil)},
 		// Nor is it the OWNER its name spells. The own-machine arm compared
 		// ids by the text after the last colon, which read
 		// `system:automation:ursula` as `ursula` and handed the automation her
@@ -341,7 +337,7 @@ func TestAPinnedCallIsNoNarrowerThanTheGateThatAdmittedIt(t *testing.T) {
 	// the executor refused it with the pin's sentence: the gate's extra reach
 	// was dead code. This walks the seam AiChat walks -- resolve
 	// `fleet:<model>` for the person, then call it under the pin.
-	h := newLentPinHop(t, lendTo([]string{"ursula"}, nil, true), nil)
+	h := newLentPinHop(t, lendTo([]string{"ursula"}, nil), nil)
 	registry := memqlengine.NewProviderRegistryForTest()
 	registry.SetFleetInference(h.f)
 	ctx := common.ContextWithFleetRegistration(authorityCtx(t, sharedHopCaller), lentPin)

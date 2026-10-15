@@ -111,6 +111,16 @@ var gateInputs = []struct {
 	{"examples/referencepack/dsl/namespace.pin", ".", "TestEmbeddedFileCountsAreStable"},
 	{"packs/reviewspack/dsl/namespace.pin", ".", "TestEmbeddedFileCountsAreStable"},
 	{"integrations/integrations.json", ".", "TestEmbeddedFileCountsAreStable"},
+	// The error pages (after the 2026-10-11 outage): component/errorpages embeds
+	// its two templates, the brand mark and the wordmark face, and the inventory
+	// pins all four. Named by a template, which no other `gates` glob covers.
+	{"component/errorpages/maintenance.html.tmpl", ".", "TestEmbeddedFileCountsAreStable"},
+	// The operator page's upgrade backfill for the error pages. Its gate reads
+	// the page and holds the documented command to what the custom-domain and
+	// door builders label and annotate, so it lives beside the builders, in
+	// integrations/customdomain -- a package no other row put in this step. A
+	// `.md`-only change reaches this lane and nothing else.
+	{"docs/public/operate/front-door.md", "integrations/customdomain", "TestTheUpgradeBackfillInTheDocsSelectsWhatTheBuildersLabel"},
 	// Not embedded either, and the newest of this shape (memql#3326).
 	// clients_allowlist_test.go sweeps `git ls-files clients` from the root
 	// package, so every file under clients/ is a gate input. A new client is
@@ -121,6 +131,15 @@ var gateInputs = []struct {
 	// `**/*.md` already covers clients/README.md, so a row for that file would
 	// stay green with `clients/**` deleted and would assert nothing.
 	{"clients/os/package.json", ".", "TestClientsDirectoryIsAllowlisted"},
+	// The Materializer app copies some of the engine's rules (which files the composer
+	// reads, what can start blank, the name a file is filed under) because a person is told
+	// before the engine is asked, and os_copies_test.go in integrations/compose reads the
+	// app's source to hold each copy to the engine. The app is TypeScript under `clients/**`,
+	// so a PR touching only it reaches this lane and nothing else: the package has to be one
+	// the step runs, or the guard fires only on the next Go change (the app once said an
+	// email template is filed as .json where the engine files .email.json).
+	{"clients/os/src/apps/materializer/make.ts", "integrations/compose", "TestTheAppOffersExactlyTheFilesTheComposerReads"},
+	{"clients/os/src/items/materialize.ts", "integrations/compose", "TestTheAppOffersExactlyTheFormatsAndPackagesTheEngineWrites"},
 	// Not embedded, so embed_inventory_test.go does not pin it -- but a gate
 	// input all the same, and in no bucket this lane read until the same
 	// sweep found it. Renaming a `service:` reddens the model staleness check,

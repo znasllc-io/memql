@@ -7,9 +7,11 @@ import (
 	"encoding/json"
 	"fmt"
 	"strings"
+	"unicode/utf8"
 
 	"github.com/znasllc-io/memql/component/auth"
 	"github.com/znasllc-io/memql/component/language/parser"
+	"github.com/znasllc-io/memql/component/work"
 	"github.com/znasllc-io/memql/core/common"
 )
 
@@ -20,6 +22,10 @@ func (e *MemQLEngine) SaveWorkContinuation(ctx context.Context, messages []commo
 	ac, _ := auth.AccessFromContext(ctx)
 	if !ok || ac == nil || BareShortId(ac.UserId) != BareShortId(run.OwnerUserId) {
 		return fmt.Errorf("continuation requires owned work")
+	}
+	overrideKey, err := common.StepOverrideFingerprint(run.Override)
+	if err != nil {
+		return fmt.Errorf("invalid checkpoint override: %w", err)
 	}
 	raw, err := json.Marshal(messages)
 	if err != nil {
@@ -33,7 +39,7 @@ func (e *MemQLEngine) SaveWorkContinuation(ctx context.Context, messages []commo
 		// Tool output may contain NUL, which JSON allows but PostgreSQL JSONB
 		// cannot represent in a string. Encode the complete exchange rather than
 		// strip bytes or change tool arguments/results (and their receipt hash).
-		"data": map[string]any{"continuation": true, "messagesEncoding": "json-base64-v1", "messages": base64.StdEncoding.EncodeToString(raw)},
+		"data": map[string]any{"continuation": true, "rerunRequestId": run.RerunRequestId, "overrideKey": overrideKey, "messagesEncoding": "json-base64-v1", "messages": base64.StdEncoding.EncodeToString(raw)},
 	})
 	if err != nil {
 		return err
@@ -45,14 +51,14 @@ func (e *MemQLEngine) SaveWorkContinuation(ctx context.Context, messages []commo
 func (e *MemQLEngine) RestoreWorkContinuation(ctx context.Context, messages []common.ChatMessage) ([]common.ChatMessage, error) {
 	run, ok := common.RunFromContext(ctx)
 	if ok && run.Continuation != nil {
-		if run.Continuation.StepKey != run.StepKey || !run.Override.Empty() || run.Mode == common.RunModeReplay {
+		if run.Continuation.StepKey != run.StepKey || run.Mode == common.RunModeReplay {
 			return nil, fmt.Errorf("work continuation does not match this execution")
 		}
-		if _, err := e.PrepareWorkContinuation(ctx, CheckpointResumeRequest{RunID: run.RunId, StepKey: run.StepKey, ApprovalID: run.Continuation.ApprovalID}); err != nil {
+		if _, err := e.PrepareWorkContinuation(ctx, CheckpointResumeRequest{RunID: run.RunId, StepKey: run.StepKey, ApprovalID: run.Continuation.ApprovalID, RerunRequestID: run.RerunRequestId}); err != nil {
 			return nil, err
 		}
 	}
-	if !ok || run.GoalId == "" || run.Mode == common.RunModeReplay || !run.Override.Empty() {
+	if !ok || run.GoalId == "" || run.Mode == common.RunModeReplay {
 		return messages, nil
 	}
 	rows, err := e.workRows(ContextWithFreshRead(ctx), "workRunForOwner", run.RunId)
@@ -81,6 +87,12 @@ func (e *MemQLEngine) RestoreWorkContinuation(ctx context.Context, messages []co
 		return nil, fmt.Errorf("the required work checkpoint changed")
 	}
 	saved, _ := checkpoints[0]["data"].(map[string]any)
+	if !continuationExecutionMatches(run, saved) {
+		if run.Continuation != nil {
+			return nil, fmt.Errorf("the required work checkpoint belongs to another execution request")
+		}
+		return messages, nil
+	}
 	prior, err := decodeWorkContinuation(saved)
 	if err != nil {
 		return nil, err
@@ -122,7 +134,20 @@ func (e *MemQLEngine) RestoreWorkContinuation(ctx context.Context, messages []co
 }
 
 func continuationID(run common.RunContext, raw []byte) string {
-	return fmt.Sprintf("continuation-%s-%x", BareShortId(run.RunId), sha256.Sum256(append([]byte(run.StepKey), raw...)))
+	overrideKey, err := common.StepOverrideFingerprint(run.Override)
+	if err != nil {
+		return ""
+	}
+	prefix := []byte(run.StepKey)
+	if run.RerunRequestId != "" {
+		// A fresh rerun cannot overwrite an earlier identical transcript or borrow
+		// its approval. Preserve the identity of existing ordinary checkpoints.
+		prefix, _ = json.Marshal([]string{"rerun-v1", run.StepKey, run.RerunRequestId})
+	}
+	if overrideKey != "" {
+		prefix, _ = json.Marshal([]string{"override-v1", run.StepKey, run.RerunRequestId, overrideKey})
+	}
+	return fmt.Sprintf("continuation-%s-%x", BareShortId(run.RunId), sha256.Sum256(append(prefix, raw...)))
 }
 
 func decodeWorkContinuation(saved map[string]any) ([]common.ChatMessage, error) {
@@ -160,7 +185,7 @@ func (e *MemQLEngine) PrepareWorkContinuation(ctx context.Context, request Check
 	ac, _ := auth.AccessFromContext(ctx)
 	if !ok || run.GoalId == "" || run.OwnerUserId == "" || ac == nil ||
 		BareShortId(ac.UserId) != BareShortId(run.OwnerUserId) || BareShortId(run.RunId) != BareShortId(request.RunID) ||
-		request.StepKey == "" || request.ApprovalID == "" || !run.Override.Empty() || run.Mode == common.RunModeReplay {
+		request.StepKey == "" || request.ApprovalID == "" || request.RerunRequestID != run.RerunRequestId || run.Mode == common.RunModeReplay {
 		return nil, fmt.Errorf("continuation requires the unchanged owned work execution")
 	}
 	ctx = ContextWithFreshRead(ctx)
@@ -168,10 +193,20 @@ func (e *MemQLEngine) PrepareWorkContinuation(ctx context.Context, request Check
 	if err != nil {
 		return nil, err
 	}
-	if len(rows) != 1 || stringField(rows[0], "status") != "running" ||
+	if len(rows) != 1 || rows[0]["cancelRequested"] == true || stringField(rows[0], "status") != "running" ||
 		BareShortId(stringField(rows[0], "goalId")) != BareShortId(run.GoalId) ||
 		BareShortId(stringField(rows[0], "humanResumeId")) != BareShortId(request.ApprovalID) {
 		return nil, fmt.Errorf("the run is not continuing from this human decision")
+	}
+	storedRerun, _ := rows[0]["rerun"].(map[string]any)
+	if stringField(storedRerun, "requestId") != request.RerunRequestID {
+		return nil, fmt.Errorf("the execution request changed before continuation")
+	}
+	if stringField(storedRerun, "stepKey") == request.StepKey {
+		recorded, _ := storedRerun["override"].(map[string]any)
+		if !common.SameStepOverride(common.StepOverrideFromRecord(recorded), run.Override) {
+			return nil, fmt.Errorf("the execution override changed before continuation")
+		}
 	}
 	read := func(name string, args map[string]any) ([]map[string]any, error) {
 		call, err := parser.RenderCall(name, args)
@@ -193,8 +228,13 @@ func (e *MemQLEngine) PrepareWorkContinuation(ctx context.Context, request Check
 	}
 	a := approvals[0]
 	decision, kind := stringField(a, "decision"), stringField(a, "kind")
+	subject, _ := a["subject"].(map[string]any)
+	answer, _ := a["answer"].(map[string]any)
+	permissionGuidance := decision == "answered" &&
+		BareShortId(stringField(a, "decidedBy")) == BareShortId(run.OwnerUserId) &&
+		WorkPermissionGuidance(kind, subject, answer, stringField(a, "artifactHash"))
 	if BareShortId(stringField(a, "runId")) != BareShortId(run.RunId) || stringField(a, "stepKey") != request.StepKey ||
-		!((kind == "feedback" && decision == "answered") || (kind == "scopeElevation" && decision == "approved")) {
+		!((kind == "feedback" && decision == "answered") || (kind == "scopeElevation" && decision == "approved") || (kind == "budget" && decision == "approved") || permissionGuidance) {
 		return nil, fmt.Errorf("the human decision does not authorize this continuation")
 	}
 	checkpoints, err := read("workContinuationForOwnerRun", map[string]any{"runId": run.RunId, "stepKey": request.StepKey})
@@ -205,6 +245,9 @@ func (e *MemQLEngine) PrepareWorkContinuation(ctx context.Context, request Check
 		return nil, fmt.Errorf("the saved work checkpoint is unavailable")
 	}
 	saved, _ := checkpoints[0]["data"].(map[string]any)
+	if !continuationExecutionMatches(run, saved) {
+		return nil, fmt.Errorf("the saved checkpoint belongs to another execution request")
+	}
 	messages, err := decodeWorkContinuation(saved)
 	if err != nil || len(messages) == 0 {
 		return nil, fmt.Errorf("the saved work checkpoint is invalid")
@@ -215,10 +258,29 @@ func (e *MemQLEngine) PrepareWorkContinuation(ctx context.Context, request Check
 		return nil, err
 	}
 	checkpointID := BareShortId(stringField(checkpoints[0], "id"))
+	modelCheckpoint := kind == "feedback" && work.IsModelCallCheckpoint(subject)
+	if modelCheckpoint {
+		answer, _ := a["answer"].(map[string]any)
+		feedback, _ := answer["feedback"].(string)
+		guided := strings.TrimSpace(feedback) != "" && feedback == strings.TrimSpace(feedback) && utf8.RuneCountInString(feedback) <= 4000
+		if len(answer) != 1 || (answer["value"] != "retry" && !guided) {
+			return nil, fmt.Errorf("the provider checkpoint has no retry or guidance answer")
+		}
+	}
+	if kind == "budget" || modelCheckpoint {
+		if stringField(subject, "resumeKind") != "checkpoint" || BareShortId(stringField(subject, "continuationId")) != checkpointID {
+			return nil, fmt.Errorf("the decision does not name this saved checkpoint")
+		}
+	}
 	if checkpointID != continuationID(run, canonical) {
 		return nil, fmt.Errorf("the saved work checkpoint content changed")
 	}
-	run.Continuation = &common.StepContinuation{StepKey: request.StepKey, ObservationID: checkpointID, ApprovalID: request.ApprovalID}
+	if permissionGuidance && subject["computerPermission"] == nil {
+		if !scopeCheckpointMatches(run, subject, checkpointID, messages) {
+			return nil, fmt.Errorf("the computer scope decision does not name this pending call")
+		}
+	}
+	run.Continuation = &common.StepContinuation{StepKey: request.StepKey, ObservationID: checkpointID, ApprovalID: request.ApprovalID, OverrideKey: stringField(saved, "overrideKey")}
 	return common.ContextWithRun(ctx, run), nil
 }
 
@@ -238,4 +300,9 @@ func (e *MemQLEngine) PrepareWorkTool(ctx context.Context) error {
 	}
 	_, err := writer.PrepareWorkTool(ctx)
 	return err
+}
+
+func continuationExecutionMatches(run common.RunContext, saved map[string]any) bool {
+	key, err := common.StepOverrideFingerprint(run.Override)
+	return err == nil && stringField(saved, "overrideKey") == key && stringField(saved, "rerunRequestId") == run.RerunRequestId
 }

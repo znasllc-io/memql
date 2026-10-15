@@ -54,7 +54,7 @@ func TestOrganizationDataPermissionsThroughExecuteQuery(t *testing.T) {
 		execute(fmt.Sprintf(`mutation writeGroup(groupId: %s, name: %s, kind: "account", accountId: %s, status: "active")`, quote("g-"+account), quote(account), quote(account)))
 		execute(fmt.Sprintf(`mutation writeGroupMembership(membershipId: %s, groupId: %s, userId: %s, origin: "added", status: "active", accountId: %s)`, quote("m-"+account), quote("g-"+account), quote(user), quote(account)))
 		put("v1:campaigns:audience", "aud-"+account, map[string]any{"name": account, "status": "active", "accountId": account, "ownerUserId": user})
-		for _, vr := range []struct{ verb, resource string }{{"read", "data"}, {"create", "data"}, {"update", "data"}, {"read", "app:campaigns"}} {
+		for _, vr := range []struct{ verb, resource string }{{"read", "data"}, {"create", "data"}, {"update", "data"}, {"read", "app:email"}} {
 			effect := "deny"
 			if account == a && vr.verb != "create" {
 				effect = "allow"

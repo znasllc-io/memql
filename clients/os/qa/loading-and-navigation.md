@@ -13,10 +13,10 @@ verification is tracked separately from a passing typecheck.
 | Bin | Shared `LiveList` handles initial reads and preserves archived rows during refresh. |
 | Files | Shared live lists and explicit file-version skeletons; the folder hierarchy and version chronology retain their navigation model. |
 | Deployables | Shared list reads, map, source metadata, repository/account choices, compose prerequisites, versions, domain guidance, traffic, inline workspace values and store connections. Ordered deployment/setup rails remain workflows. |
-| Campaigns | Shared live collections; audience members, template sample, delivery ledger and breakdown reads. Recipient filters remain filters. |
+| Email | Shared live collections; audience members, template sample, delivery ledger and breakdown reads. Recipient filters remain filters. |
 | Concepts | Registry, concept details, initial rows and additional pages. Schema and row inspectors retain their split view. |
 | Logs | Search/tail data and settings reads; loaded virtual rows remain usable on refresh. |
-| Materializer | Live collections and composer prerequisite form. |
+| Materializer | Live compositions, templates and recipes; their pages replace the lists. The Make a file wizard keeps local answers while the From tray groups load as skeletons. Its making stage shows the running operation with Stop and Leave. A described file waits for its Files entry on a live feed; notices stay beside the file and are announced. |
 | Nexus | Live lists, maps, step histories, automation catalog and journal. Execution and approval status remains visible. |
 | Training | Review queue, knowledge domains and shared live collections. Document ingestion is an operation, with its own progress. |
 | Settings | Access roster, rules, decisions, language, cluster/mail facts, benchmark, tokens, keys, policies, integration reports and provider registry. Access's two sibling views use `LocalTabs`; saved preferences remain form choices. |

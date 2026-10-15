@@ -258,7 +258,7 @@ func (s *spineScope) classify(ctx context.Context, _ map[string]any) (any, error
 		out.Reply = out.Workload == "quick"
 	}
 	s.guidance, s.decision = guidance, sectionable
-	return map[string]any{"complexity": string(complexity), "intent": sectionable.Intent, "sectionable": sectionable.Sectionable, "requiresFile": sectionable.RequiresFile != nil && *sectionable.RequiresFile, "conversational": conversational, "workload": out.Workload, "acknowledgement": out.Acknowledgement}, nil
+	return map[string]any{"complexity": string(complexity), "intent": sectionable.Intent, "sectionable": sectionable.Sectionable, "requiresFile": sectionable.RequiresFile != nil && *sectionable.RequiresFile, "hasEffects": sectionable.hasEffects(), "conversational": conversational, "workload": out.Workload, "acknowledgement": out.Acknowledgement}, nil
 }
 
 func (s *spineScope) acknowledge(ctx context.Context, _ map[string]any) (any, error) {
@@ -449,6 +449,25 @@ func spineRepairCap() int { return min(repairAttemptCap(), 32) }
 type spineMeteredEngine struct {
 	Engine
 	scope *spineScope
+}
+
+// WriteAuthoredConstruct passes a member-construct write through to the
+// metered engine: writing is not a model call, and an embedded Engine does not
+// carry the optional writer (memql#6022).
+func (e *spineMeteredEngine) WriteAuthoredConstruct(ctx context.Context, c memql.AuthoredConstructInput) error {
+	return writeAuthoredConstruct(ctx, e.Engine, c)
+}
+
+// WriteAuthoringBundle passes a bundle creation through to the metered engine,
+// for the same reason (memql#6022).
+func (e *spineMeteredEngine) WriteAuthoringBundle(ctx context.Context, b memql.AuthoringBundleInput) error {
+	return writeAuthoringBundle(ctx, e.Engine, b)
+}
+
+// RecordBundleValidation passes a Gate 1 verdict through to the metered engine,
+// for the same reason (memql#6022).
+func (e *spineMeteredEngine) RecordBundleValidation(ctx context.Context, v memql.BundleValidationInput) error {
+	return recordBundleValidation(ctx, e.Engine, v)
 }
 
 func (e *spineMeteredEngine) InvokeAI(ctx context.Context, name string, data map[string]any) (any, error) {

@@ -318,3 +318,48 @@ func TestLoadReplanContextCarriesWhatResumeBinds(t *testing.T) {
 		})
 	}
 }
+
+func TestReplanContextIncludesOnlyTheCurrentUnfinishedGuidanceStep(t *testing.T) {
+	for _, scenario := range []string{"waiting", "running", "done", "another step", "another wait", "cancelled", "run moved"} {
+		t.Run(scenario, func(t *testing.T) {
+			i, eng := newTestIntegration(t)
+			run := installedReplanRun(t)
+			run["waitingOn"] = map[string]any{"kind": waitKindReplan, "subject": "draft", "reason": "Use the person's new guidance."}
+			status := "waiting"
+			if scenario == "running" || scenario == "done" {
+				status = scenario
+			}
+			if scenario == "another step" {
+				rowMap(run, "waitingOn")["subject"] = "other"
+			}
+			if scenario == "another wait" {
+				rowMap(run, "waitingOn")["kind"] = "approval"
+			}
+			if scenario == "cancelled" {
+				run["cancelRequested"] = true
+			}
+			if scenario == "run moved" {
+				run["status"] = runStatusRunning
+			}
+			eng.reply("workRunForOwner", run)
+			eng.reply("workStepsForOwnerRun", map[string]any{"key": "fetch", "status": "done", "result": "retained evidence"}, map[string]any{"key": "draft", "status": status, "call": map[string]any{"name": "runAgentTurn"}})
+			result, err := i.LoadReplanContext(context.Background(), "u-alice", remedyRunId, "draft")
+			if err != nil {
+				t.Fatal(err)
+			}
+			want := scenario == "waiting" || scenario == "running"
+			if (result.FailedStep != nil) != want {
+				t.Fatalf("target = %#v; want admitted=%v", result.FailedStep, want)
+			}
+			if want && (rowString(result.FailedStep, "key") != "draft" || rowString(result.FailedStep, "errorMessage") != "Use the person's new guidance.") {
+				t.Fatalf("guidance context lost: %#v", result.FailedStep)
+			}
+			if len(result.CompletedSteps) == 0 || result.CompletedSteps[0]["result"] != "retained evidence" {
+				t.Fatalf("completed prefix lost: %#v", result.CompletedSteps)
+			}
+			if len(mutationsIn(eng)) != 0 {
+				t.Fatal("context read wrote a step receipt")
+			}
+		})
+	}
+}

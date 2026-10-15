@@ -357,6 +357,7 @@ message ToolDispatch {
   // Discriminated-union args: {action: <X>, X: {...}} serialized as JSON.
   bytes args_json = 8;
   google.protobuf.Duration timeout = 9;
+  ComputerPermissionConstraint computer_permission = 10;
 }
 
 message ToolCancel {
@@ -1222,4 +1223,17 @@ message ProbeFigure {
 message ModelProbeCancel {
   string request_id = 1;
   string reason = 2;
+}
+
+// An engine-verified receipt, constrained again by the selected machine.
+// Never overrides the machine's consent window or local policy.
+message ComputerPermissionConstraint {
+ string permission_id = 1;
+ string owner_user_id = 2;
+ string registration_id = 3;
+ string machine_id = 4;
+ string kind = 5;
+ string directory = 6;
+ string args_hash = 7;
+ uint32 version = 8;
 }

@@ -1,5 +1,6 @@
 import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
+import { readTheBar } from "../readTheBar";
 
 const h = vi.hoisted(() => ({ connection: null as unknown }));
 
@@ -14,7 +15,7 @@ const { NexusApp } = await import("../../src/apps/nexus/NexusApp");
 const { LocalNexusSettingsStore } = await import("../../src/apps/nexus/settings");
 const { answerPayload, budgetApprovalAnswer } = await import("../../src/apps/nexus/ApprovalsSection");
 const { approvalFromRow } = await import("../../src/apps/nexus/rows");
-const { approvalRow, fakeConnection, procedureRow, runRow, withSession } = await import("./harness");
+const { approvalRow, fakeConnection, procedureRow, runRow, rowsResult, withSession } = await import("./harness");
 
 type Conn = ReturnType<typeof fakeConnection>;
 
@@ -80,6 +81,26 @@ describe("the inbox", () => {
     mount(conn);
     expect(await screen.findByText("Email the invoice to Acme")).toBeTruthy();
     expect(screen.getAllByText("Side effect").length).toBeGreaterThan(0);
+  });
+
+  it("opens details in place and returns to the retained list search", async () => {
+    mount(fakeConnection({ approvals: [
+      approvalRow({ id: "invoice", subject: { summary: "Send the invoice" } }),
+      approvalRow({ id: "report", subject: { summary: "Publish the report" } }),
+    ] }));
+    fireEvent.click(await screen.findByRole("button", { name: "Search your approvals" }));
+    fireEvent.change(screen.getByRole("textbox", { name: "Kind, question or reason" }), { target: { value: "invoice" } });
+    fireEvent.click(await screen.findByText("Send the invoice"));
+    expect(screen.queryByLabelText("Approvals waiting for you")).toBeNull();
+    expect(screen.queryByRole("group", { name: "Search your approvals" })).toBeNull();
+    expect(screen.queryByText("Publish the report")).toBeNull();
+    expect(await screen.findByRole("region", { name: "What is being asked" })).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "Back to Approvals" }));
+    expect(await screen.findByLabelText("Approvals waiting for you")).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "Search your approvals" }));
+    expect((screen.getByRole("textbox", { name: "Kind, question or reason" }) as HTMLInputElement).value).toBe("invoice");
+    expect(screen.queryByRole("region", { name: "What is being asked" })).toBeNull();
+    expect(screen.queryByText("Approve")).toBeNull();
   });
 });
 
@@ -255,7 +276,8 @@ describe("a question", () => {
     fireEvent.click(await screen.findByText("Yes"));
     expect(await screen.findByText("Send answer")).toBeTruthy();
 
-    fireEvent.click(screen.getByText("Second question?"));
+    fireEvent.click(screen.getByRole("button", { name: "Back to Approvals" }));
+    fireEvent.click(await screen.findByText("Second question?"));
     await waitFor(() => expect(screen.queryByText("Send answer")).toBeNull());
   });
 });
@@ -284,17 +306,40 @@ describe("the answer payload", () => {
 });
 
 describe("the queue is live", () => {
-  it("takes a decided approval off the list, which is the confirmation", async () => {
-    // Nothing is patched locally: the decision broadcasts and the row leaves
-    // the pending feed on its own update.
+  it("withdraws decisions when the open item leaves the pending feed", async () => {
+    const conn = fakeConnection({ approvals: [approvalRow({ id: "a1" })] });
+    mount(conn);
+    fireEvent.click(await screen.findByText("Step sendInvoice"));
+    expect(await screen.findByText("Approve")).toBeTruthy();
+    await act(async () => { conn.subscriptions.emit(APPROVAL, approvalRow({ id: "a1" }), "NODE_DELETED"); });
+    expect(await screen.findByText("This approval is no longer waiting.")).toBeTruthy();
+    expect(screen.queryByText("Approve")).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "Back to Approvals" }));
+    expect(await screen.findByText("Nothing needs your input.")).toBeTruthy();
+  });
+  it("takes a decided approval off the list when its live row is updated", async () => {
     const conn = fakeConnection({ approvals: [approvalRow({ id: "a1" })] });
     mount(conn);
     await screen.findByText("Step sendInvoice");
 
     await act(async () => {
-      conn.subscriptions.emit(APPROVAL, approvalRow({ id: "a1" }), "NODE_DELETED");
+      conn.subscriptions.emit(APPROVAL, approvalRow({ id: "a1", decision: "approved", createdAt: "2026-09-01T13:00:00Z" }), "NODE_UPDATED");
     });
     await waitFor(() => expect(screen.queryByText("Step sendInvoice")).toBeNull());
+    expect(screen.getByText("Nothing needs your input.")).toBeTruthy();
+  });
+
+  it("keeps the decided detail as a receipt while Back returns to an empty queue", async () => {
+    const conn = fakeConnection({ approvals: [approvalRow({ id: "a1" })] });
+    mount(conn);
+    fireEvent.click(await screen.findByText("Step sendInvoice"));
+    await act(async () => {
+      conn.subscriptions.emit(APPROVAL, approvalRow({ id: "a1", decision: "approved", createdAt: "2026-09-01T13:00:00Z" }), "NODE_UPDATED");
+    });
+    expect(screen.queryByRole("button", { name: "Approve" })).toBeNull();
+    expect(screen.getByRole("region", { name: "What is being asked" })).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "Back to Approvals" }));
+    expect(await screen.findByText("Nothing needs your input.")).toBeTruthy();
   });
 
   it("announces one that arrived while somebody was looking", async () => {
@@ -311,6 +356,229 @@ describe("the queue is live", () => {
     });
     const row = (await screen.findByText("Step chargeCard")).closest("li");
     expect(row?.getAttribute("data-arrival")).toBe("added");
+  });
+});
+
+describe("a failure question", () => {
+  it.each(["planReview", "feedback", "budget"])("answers a %s failure with retry or abandon, without claiming a repair or permission", async kind => {
+    const conn = fakeConnection({ approvals: [approvalRow({
+      id: "failed", kind, question: "How should this work continue?",
+      subject: { symptom: "environment", stepKey: "inspect", errorMessage: "context checkpoint did not free space; originals were retained" },
+      options: [{ label: "Retry", value: "retry" }, { label: "Abandon", value: "abandon" }],
+    })] });
+    mount(conn);
+    fireEvent.click(await screen.findByText("How should this work continue?"));
+    expect(await screen.findByText("context checkpoint did not free space; originals were retained")).toBeTruthy();
+    expect(screen.queryByText(/A repair was proposed/)).toBeNull();
+    expect(screen.queryByText("Approve")).toBeNull();
+    expect(screen.queryByText(/Always/)).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "Retry" }));
+    await waitFor(() => expect(conn.query.decideApproval).toHaveBeenCalledWith({ approvalId: "failed", decision: "answered", answer: { value: "retry" } }));
+    fireEvent.click(screen.getByRole("button", { name: "Abandon" }));
+    await waitFor(() => expect(conn.query.decideApproval).toHaveBeenCalledWith({ approvalId: "failed", decision: "answered", answer: { value: "abandon" } }));
+    await act(async () => {
+      conn.subscriptions.emit(APPROVAL, approvalRow({ id: "failed", kind, decision: "answered", answer: { value: "abandon" }, createdAt: "2026-09-01T13:00:00Z" }), "NODE_UPDATED");
+    });
+    expect(screen.getAllByText("Your response was recorded.").length).toBeGreaterThan(0);
+    expect(screen.queryByText(/picked up from where it parked/)).toBeNull();
+    expect(screen.queryByRole("button", { name: "Abandon" })).toBeNull();
+  });
+});
+
+const scopedComputerRequest = (kind = "directory_read") => ({
+  version: 1, kind, registrationId: "registration", machineId: "machine", machineLabel: "Studio Mac",
+  tool: "workerHost", action: kind === "directory_read" ? "fs_list" : "exec", argsHash: "exact-inputs",
+  ...(kind === "directory_read" ? { directory: "/Users/dana/projects" } : { command: "git status --short", cwd: "/Users/dana/projects/memql", timeoutSeconds: 60 }),
+  allowedModes: ["once", "always"],
+});
+
+describe("computer permission choices", () => {
+  it("offers a retry when the selected request's older run cannot be read", async () => {
+    const conn = fakeConnection({ approvals: [approvalRow({ id: "old-scope", runId: "older-run", kind: "scopeElevation", question: "Inspect older work", expiresAt: "2020-01-01T00:00:00Z", subject: { computerPermission: scopedComputerRequest() } })] });
+    conn.query.workRunSummaryForOwner.mockRejectedValueOnce(new Error("Disconnected"))
+      .mockResolvedValueOnce(rowsResult([runRow({ id: "older-run", status: "waiting", waitingOn: { kind: "approval", subject: "old-scope" } })]));
+    mount(conn);
+    fireEvent.click(await screen.findByText("Inspect older work"));
+    expect(await screen.findByRole("alert")).toHaveProperty("textContent", "Could not check this work. Try again.");
+    fireEvent.click(await screen.findByRole("button", { name: "Try again" }));
+    expect(await screen.findByRole("button", { name: "Review again" })).toBeTruthy();
+    expect(conn.query.decideApproval).not.toHaveBeenCalled();
+  });
+
+  it("loads the parked run when an old approval lies beyond the run history page", async () => {
+    const conn = fakeConnection({ approvals: [approvalRow({ id: "old-scope", runId: "older-run", kind: "scopeElevation", question: "Inspect older work", expiresAt: "2020-01-01T00:00:00Z", subject: { computerPermission: scopedComputerRequest() } })] });
+    conn.query.workRunSummaryForOwner.mockResolvedValueOnce(rowsResult([runRow({ id: "older-run", status: "waiting", waitingOn: { kind: "approval", subject: "old-scope" } })]));
+    mount(conn);
+    fireEvent.click(await screen.findByText("Inspect older work"));
+    expect(await screen.findByRole("button", { name: "Review again" })).toBeTruthy();
+    expect(conn.query.workRunSummaryForOwner).toHaveBeenCalledWith({ runId: "older-run" }, expect.anything());
+    await act(async () => conn.subscriptions.emit("v1:work:run", runRow({ id: "older-run", status: "cancelled", cancelRequested: true }), "NODE_UPDATED"));
+    await waitFor(() => expect(screen.queryByRole("button", { name: "Review again" })).toBeNull());
+  });
+
+  it("refreshes an expired permission for a fresh review without granting it", async () => {
+    const original = approvalRow({ id: "expired-scope", runId: "parked-run", kind: "scopeElevation", question: "Inspect the repository", expiresAt: "2020-01-01T00:00:00Z", subject: { computerPermission: scopedComputerRequest() } });
+    const conn = fakeConnection({ approvals: [original], runs: [runRow({ id: "parked-run", status: "waiting", waitingOn: { kind: "approval", subject: "expired-scope" } })] });
+    mount(conn);
+    fireEvent.click(await screen.findByText("Inspect the repository"));
+    await act(async () => { fireEvent.click(await screen.findByRole("button", { name: "Review again" })); });
+    await waitFor(() => expect(conn.query.refreshComputerPermission).toHaveBeenCalledWith({ approvalId: "expired-scope" }));
+    expect(conn.query.decideApproval).not.toHaveBeenCalled();
+    await act(async () => conn.subscriptions.emit(APPROVAL, { ...original, createdAt: "2026-09-01T09:05:00Z", expiresAt: "2099-01-01T00:00:00Z", artifactHash: "fresh-review" }, "NODE_UPDATED"));
+    expect(await screen.findByRole("button", { name: "Allow once" })).toBeTruthy();
+    expect((screen.getByRole("checkbox", { name: "Always allow reading this directory" }) as HTMLInputElement).checked).toBe(false);
+    await readTheBar();
+    fireEvent.click(screen.getByRole("button", { name: "Allow once" }));
+    await waitFor(() => expect(conn.query.decideApproval).toHaveBeenCalledWith({ approvalId: "expired-scope", decision: "approved", answer: { permissionMode: "once", permissionHash: "fresh-review" } }));
+  });
+
+  it("opens an expired scope request in its conversation without granting access", async () => {
+    const conn = fakeConnection({
+      approvals: [approvalRow({ id: "expired-scope", runId: "parked-run", kind: "scopeElevation", question: "Inspect the repository", expiresAt: "2020-01-01T00:00:00Z", subject: { computerPermission: scopedComputerRequest() } })],
+      runs: [runRow({ id: "parked-run", status: "waiting", waitingOn: { kind: "approval", subject: "expired-scope" } })],
+    });
+    h.connection = conn;
+    const discussApproval = vi.fn(async () => ({ conversationId: "original-conversation", approval: { id: "expired-scope", runId: "parked-run", kind: "scopeElevation", question: "Inspect the repository", status: "expired" }, canSendGuidance: true, canAskAdvisor: false }));
+    const transport = { ask: vi.fn(), discussApproval, conversations: { list: async () => [], read: async () => [], create: async () => ({ id: "unused", title: "Unused" }) } };
+    render(withSession(<AskProvider transport={transport}><NexusApp sectionId="approvals" navigate={() => {}} askContext={() => {}} /></AskProvider>));
+    fireEvent.click(await screen.findByText("Inspect the repository"));
+    expect(screen.getByText("This request has expired.")).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "Allow once" })).toBeNull();
+    expect(screen.queryByRole("checkbox")).toBeNull();
+    expect(screen.queryByRole("button", { name: /Reject this/ })).toBeNull();
+    fireEvent.click(await screen.findByRole("button", { name: "Discuss in Ask" }));
+    await waitFor(() => expect(discussApproval).toHaveBeenCalledWith("expired-scope"));
+    expect(conn.query.decideApproval).not.toHaveBeenCalled();
+    expect(transport.ask).not.toHaveBeenCalled();
+    await act(async () => {
+      conn.subscriptions.emit("v1:work:run", runRow({ id: "parked-run", status: "waiting", waitingOn: { kind: "approval", subject: "replacement" } }), "NODE_UPDATED");
+    });
+    await waitFor(() => expect(screen.queryByRole("button", { name: "Discuss in Ask" })).toBeNull());
+  });
+
+  it.each([
+    { status: "waiting", cancelRequested: true, waitingOn: { kind: "approval", subject: "expired-scope" } },
+    { status: "succeeded", waitingOn: { kind: "approval", subject: "expired-scope" } },
+    { status: "waiting", waitingOn: { kind: "approval", subject: "another-request" } },
+  ])("offers no expired-scope recovery when the run no longer waits: %j", async state => {
+    const conn = fakeConnection({
+      approvals: [approvalRow({ id: "expired-scope", runId: "parked-run", kind: "scopeElevation", question: "Inspect the repository", expiresAt: "2020-01-01T00:00:00Z", subject: { computerPermission: scopedComputerRequest() } })],
+      runs: [runRow({ id: "parked-run", ...state })],
+    });
+    mount(conn);
+    fireEvent.click(await screen.findByText("Inspect the repository"));
+    expect(screen.queryByRole("button", { name: "Discuss in Ask" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Review again" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Allow once" })).toBeNull();
+    expect(conn.query.decideApproval).not.toHaveBeenCalled();
+  });
+
+  it.each(["directory_read", "exact_command"])("shows the exact %s scope and sends one dispatch by default", async kind => {
+    const scope = scopedComputerRequest(kind);
+    const conn = fakeConnection({ approvals: [approvalRow({ id: "permission", kind: "scopeElevation", question: "Inspect the repository", subject: { computerPermission: scope } })] });
+    mount(conn);
+    fireEvent.click(await screen.findByText("Inspect the repository"));
+    expect(screen.getByText("Studio Mac")).toBeTruthy();
+    expect(screen.getAllByText("directory" in scope ? scope.directory : scope.command).length).toBeGreaterThan(0);
+    if (kind === "exact_command") expect(screen.getByText("60 seconds")).toBeTruthy();
+    expect((screen.getByRole("checkbox") as HTMLInputElement).checked).toBe(false);
+    fireEvent.click(screen.getByRole("button", { name: "Allow once" }));
+    await waitFor(() => expect(conn.query.decideApproval).toHaveBeenCalledWith({ approvalId: "permission", decision: "approved", answer: { permissionMode: "once", permissionHash: "sha256:abc123" } }));
+  });
+
+  it("sends an explicit remembered choice and never attaches it to rejection", async () => {
+    const conn = fakeConnection({ approvals: [approvalRow({ id: "permission", kind: "scopeElevation", question: "Inspect the repository", subject: { computerPermission: scopedComputerRequest() } })] });
+    mount(conn);
+    fireEvent.click(await screen.findByText("Inspect the repository"));
+    fireEvent.click(screen.getByRole("checkbox", { name: "Always allow reading this directory" }));
+    await readTheBar();
+    fireEvent.click(screen.getByRole("button", { name: "Always allow" }));
+    await waitFor(() => expect(conn.query.decideApproval).toHaveBeenCalledWith({ approvalId: "permission", decision: "approved", answer: { permissionMode: "always", permissionHash: "sha256:abc123" } }));
+    fireEvent.click(screen.getByRole("button", { name: /^Reject this:/ }));
+    await waitFor(() => expect(conn.query.decideApproval).toHaveBeenCalledWith({ approvalId: "permission", decision: "rejected" }));
+  });
+
+  it("does not carry a remembered choice into a changed artifact", async () => {
+    const original = approvalRow({ id: "permission", kind: "scopeElevation", question: "Inspect the repository", subject: { computerPermission: scopedComputerRequest() } });
+    const conn = fakeConnection({ approvals: [original] });
+    mount(conn);
+    fireEvent.click(await screen.findByText("Inspect the repository"));
+    fireEvent.click(screen.getByRole("checkbox"));
+    await act(async () => conn.subscriptions.emit(APPROVAL, { ...original, createdAt: "2026-09-01T09:05:00Z", artifactHash: "changed", subject: { computerPermission: { ...scopedComputerRequest(), directory: "/Users/dana/notes" } } }, "NODE_UPDATED"));
+    await waitFor(() => expect((screen.getByRole("checkbox") as HTMLInputElement).checked).toBe(false));
+    expect(screen.getByRole("button", { name: "Allow once" })).toBeTruthy();
+  });
+
+  it.each([
+    ["desktop", "observe", "View the desktop"],
+    ["desktop", "full", "View and control the desktop"],
+    ["file_write", "full", "Write files"],
+    ["http", "observe", "Make HTTP requests"],
+  ])("shows the explicit %s session boundary", async (sessionKind, sessionScope, label) => {
+    mount(fakeConnection({ approvals: [approvalRow({ id: "session", kind: "scopeElevation", question: "Use selected access", subject: { sessionKind, sessionScope } })] }));
+    fireEvent.click(await screen.findByText("Use selected access"));
+    expect(screen.getByText(label)).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Allow for this work" })).toBeTruthy();
+    expect(screen.queryByRole("checkbox")).toBeNull();
+  });
+
+  it("refuses unknown or conflicting session boundaries", async () => {
+    mount(fakeConnection({ approvals: [approvalRow({ id: "session", kind: "scopeElevation", question: "Use selected access", subject: { sessionKind: "desktop", sessionScope: "observe", scope: "full" } })] }));
+    fireEvent.click(await screen.findByText("Use selected access"));
+    expect(screen.queryByRole("button", { name: /Allow/ })).toBeNull();
+    expect(screen.getAllByText("This permission request cannot be read.").length).toBeGreaterThan(0);
+  });
+
+  it("keeps legacy access limited to this work and refuses an unreadable typed scope", async () => {
+    mount(fakeConnection({ approvals: [
+      approvalRow({ id: "legacy", kind: "scopeElevation", question: "Use my computer", subject: { scope: "observe" } }),
+      approvalRow({ id: "unknown", kind: "scopeElevation", question: "Future permission", subject: { computerPermission: { ...scopedComputerRequest(), version: 2 } } }),
+    ] }));
+    fireEvent.click(await screen.findByText("Use my computer"));
+    expect(screen.getByRole("button", { name: "Allow for this work" })).toBeTruthy();
+    expect(screen.queryByRole("checkbox")).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "Back to Approvals" }));
+    fireEvent.click(await screen.findByText("Future permission"));
+    expect(screen.queryByRole("button", { name: /Allow/ })).toBeNull();
+    expect(screen.getAllByText("This permission request cannot be read.").length).toBeGreaterThan(0);
+  });
+});
+
+describe("saved permissions", () => {
+  it("opens from Approvals, shows the saved scope and revokes only the selected receipt", async () => {
+    const conn = fakeConnection({ computerPermissions: [
+      approvalRow({ id: "first", decidedAt: "2026-09-01T09:04:00Z", subject: { computerPermission: scopedComputerRequest() } }),
+      approvalRow({ id: "second", subject: { computerPermission: scopedComputerRequest("exact_command") } }),
+    ] });
+    mount(conn);
+    fireEvent.click(await screen.findByRole("button", { name: "Saved permissions" }));
+    fireEvent.click(await screen.findByText("/Users/dana/projects"));
+    expect(screen.queryByLabelText("Saved computer permissions")).toBeNull();
+    expect(screen.getByText("Studio Mac")).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "Revoke permission" }));
+    await waitFor(() => expect(conn.query.revokeComputerPermission).toHaveBeenCalledWith({ permissionId: "first" }));
+    expect(await screen.findByText("git status --short")).toBeTruthy();
+    expect(screen.queryByText("/Users/dana/projects")).toBeNull();
+    expect(conn.query.decideApproval).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole("button", { name: "Back to Approvals" }));
+    expect(await screen.findByText("Nothing needs your input.")).toBeTruthy();
+  });
+
+  it("keeps a refused revocation on its details with the server reason", async () => {
+    const conn = fakeConnection({ computerPermissions: [approvalRow({ id: "first", subject: { computerPermission: scopedComputerRequest() } })], writeError: new Error("This permission belongs to another user.") });
+    mount(conn);
+    fireEvent.click(await screen.findByRole("button", { name: "Saved permissions" }));
+    fireEvent.click(await screen.findByText("/Users/dana/projects"));
+    fireEvent.click(screen.getByRole("button", { name: "Revoke permission" }));
+    expect(await screen.findByRole("alert")).toHaveProperty("textContent", "This permission belongs to another user.");
+    expect(screen.getByRole("button", { name: "Revoke permission" })).toBeTruthy();
+  });
+
+  it("does not describe an unreadable permission list as empty", async () => {
+    mount(fakeConnection({ computerPermissions: new Error("Access refused.") }));
+    fireEvent.click(await screen.findByRole("button", { name: "Saved permissions" }));
+    expect(await screen.findByText("Access refused.")).toBeTruthy();
+    expect(screen.queryByText("No saved permissions.")).toBeNull();
   });
 });
 
@@ -570,13 +838,13 @@ describe("crossing to the run", () => {
 it("opens a typed question in Ask without sending a decision from Nexus", async () => {
  const conn = fakeConnection({ approvals: [approvalRow({id:"ask-question",runId:"original-run",kind:"feedback",question:"Which output format?",subject:{kind:"text"}})] });
  h.connection = conn;
- const openWork = vi.fn(async () => ({id:"original-conversation",title:"Original"}));
- const transport = {ask:vi.fn(),openWork,conversations:{list:async()=>[],read:async()=>[],create:async()=>({id:"unused",title:"Unused"})}};
+ const discussApproval = vi.fn(async () => ({conversationId:"original-conversation",approval:{id:"ask-question",runId:"original-run",kind:"feedback",question:"Which output format?",status:"pending"},canSendGuidance:true,canAskAdvisor:true}));
+ const transport = {ask:vi.fn(),discussApproval,conversations:{list:async()=>[],read:async()=>[],create:async()=>({id:"unused",title:"Unused"})}};
  render(withSession(<AskProvider transport={transport}><NexusApp sectionId="approvals" navigate={()=>{}} askContext={()=>{}} /></AskProvider>));
  fireEvent.click(await screen.findByText("Which output format?"));
  expect(screen.queryByRole("textbox",{name:"Answer"})).toBeNull();
- fireEvent.click(await screen.findByRole("button",{name:"Answer in Ask"}));
- await waitFor(()=>expect(openWork).toHaveBeenCalledWith("original-run"));
+ fireEvent.click(await screen.findByRole("button",{name:"Discuss in Ask"}));
+ await waitFor(()=>expect(discussApproval).toHaveBeenCalledWith("ask-question"));
  expect(conn.query.decideApproval).not.toHaveBeenCalled();
  expect(transport.ask).not.toHaveBeenCalled();
 });
@@ -585,15 +853,18 @@ it("opens a typed question in Ask without sending a decision from Nexus", async 
 describe("a budget approval", () => {
   it("shows the allowance without exposing internal recovery metadata", async () => {
     const conn = fakeConnection({ approvals: [approvalRow({ id: "budget-replan", kind: "budget", question: "More calls needed", subject: {
-      ceiling: "modelCalls", limit: "48 calls", actual: "48 made", resumeKind: "replan", resumeReason: "internal recovery diagnostic",
+      ceiling: "modelCalls", limit: "48 calls", actual: "48 made", resumeKind: "checkpoint", resumeReason: "internal recovery diagnostic", continuationId: "continuation-private-receipt",
     } })] });
     mount(conn);
     fireEvent.click(await screen.findByText("More calls needed"));
     expect(screen.getByText("48 calls")).toBeTruthy();
     expect(screen.getByText("48 made")).toBeTruthy();
     expect(screen.queryByText("resumeKind")).toBeNull();
+    expect(screen.queryByText("continuation-private-receipt")).toBeNull();
     expect(screen.queryByText("internal recovery diagnostic")).toBeNull();
     fireEvent.change(screen.getByLabelText("New total model calls"), { target: { value: "96" } });
+    // Raise limit just joined the bar, and a bar that has just changed takes no press for a moment.
+    await readTheBar();
     fireEvent.click(screen.getByRole("button", { name: "Raise limit" }));
     await waitFor(() => expect(conn.query.decideApproval).toHaveBeenCalledWith({ approvalId: "budget-replan", decision: "approved", answer: { newLimit: 96 } }));
   });
@@ -611,6 +882,7 @@ describe("a budget approval", () => {
     fireEvent.click(await screen.findByText("More time needed"));
     expect(screen.queryByRole("button", { name: "Raise limit" })).toBeNull();
     fireEvent.change(screen.getByLabelText("New total time (minutes)"), { target: { value: "240" } });
+    await readTheBar();
     fireEvent.click(screen.getByRole("button", { name: "Raise limit" }));
     await waitFor(() => expect(conn.query.decideApproval).toHaveBeenCalledWith({ approvalId: "budget", decision: "approved", answer: { newLimit: 14_400_000 } }));
     // A live update may retain the decided row for history. It must stop

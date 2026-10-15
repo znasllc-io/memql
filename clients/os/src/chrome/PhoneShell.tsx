@@ -1,3 +1,4 @@
+import { StorageWarning } from "../cluster/storage/StorageHealth";
 import { useRef, useState } from "react";
 import { ArrowLeft, LayoutGrid } from "lucide-react";
 
@@ -5,6 +6,7 @@ import { useAsk } from "../ask/AskProvider";
 import { ProvenanceDot } from "../kit";
 import { PageNavigationProvider } from "../kit/pageNavigation";
 import { TrailRow } from "../kit/TrailRow";
+import { PageContent } from "../kit/PageContent";
 import {
   canConfigure,
   gateFor,
@@ -35,6 +37,7 @@ export function PhoneShell({ onSignOut }: { onSignOut: () => void }) {
   const { openAsk } = useAsk();
   const [currentAppId, setCurrentAppId] = useState<string | null>(null);
   const [sectionId, setSectionId] = useState("");
+  const [storageIntent, setStorageIntent] = useState<{ id: string; payload: Record<string, unknown> }>();
   const pageRoot = useRef<HTMLElement>(null);
 
   const apps = appsFor(registry);
@@ -57,7 +60,7 @@ export function PhoneShell({ onSignOut }: { onSignOut: () => void }) {
   const { settingsTone, reportSetupState } = useAppSetupMark(current?.id ?? "", current ? markToneFor(appGate) : null);
   // The dot inside a button is DECORATIVE and the button says the state
   // itself: a labelled role="img" nested in a button appends to the button's
-  // accessible name, so "Settings" would announce as "Settings Campaigns is
+  // accessible name, so "Settings" would announce as "Settings Email is
   // not set up" -- the right information in a shape nothing can match on.
   const settingsStatePhrase = settingsTone === "needsSetup" ? "not set up" : "partly set up";
   const unmetIsSectionOnly = gate.unmet.some((id) => !(current?.needs ?? []).includes(id));
@@ -88,8 +91,9 @@ export function PhoneShell({ onSignOut }: { onSignOut: () => void }) {
           Sign out
         </button>
       </header>
+      {!(current?.id === "cluster" && activeSection?.id === "readiness") ? <StorageWarning inline onReview={apps.some((app) => app.id === "cluster") ? () => { setStorageIntent({ id: "storage-warning", payload: { storageWarning: true } }); setCurrentAppId("cluster"); setSectionId("readiness"); } : undefined} /> : null}
       {current ? (
-        <main className="os-phone-app" ref={pageRoot}>
+        <PageContent as="main" className="os-phone-app" ref={pageRoot}>
           <PageNavigationProvider key={current.id} root={pageRoot} trail={[]}>
             {sections.length > 1 ? (
               <nav className="os-phone-sections" aria-label={`${current.name} sections`}>
@@ -130,6 +134,8 @@ export function PhoneShell({ onSignOut }: { onSignOut: () => void }) {
               <WindowErrorBoundary key={current.id} app={current.id} section={activeSection?.id ?? ""}>
                 <current.component
                   sectionId={activeSection?.id ?? ""}
+                  intent={current.id === "cluster" ? storageIntent : undefined}
+                  consumeIntent={() => setStorageIntent(undefined)}
                   reportSetupState={reportSetupState}
                   navigate={setSectionId}
                   askContext={appAsk.askContext}
@@ -138,7 +144,7 @@ export function PhoneShell({ onSignOut }: { onSignOut: () => void }) {
               </WindowErrorBoundary>
             )}
           </PageNavigationProvider>
-        </main>
+        </PageContent>
       ) : (
         <main className="os-phone-home">
           {apps.map((app) => {

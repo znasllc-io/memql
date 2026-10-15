@@ -65,6 +65,13 @@ spec:
     spec:
       serviceAccountName: memql-engine
       volumes:
+        - name: azure-email-identity
+          projected:
+            sources:
+              - serviceAccountToken:
+                  audience: api://AzureADTokenExchange
+                  expirationSeconds: 3600
+                  path: token
         - name: package-config
           configMap:
             name: memql-package
@@ -132,6 +139,9 @@ spec:
             - { name: node, containerPort: 50060 }
             - { name: mcp, containerPort: 8090 }
           envFrom:
+            - configMapRef:
+                name: memql-email-installation
+                optional: true
             - secretRef:
                 name: memql-secrets
             # The four Anthropic federation ids. optional: true because the
@@ -206,6 +216,9 @@ spec:
             - { name: MEMQL_SERVER_ALLOWED_ORIGINS, value: "*" }
             - { name: MEMORY_NODES_DATABASE_MIGRATE_ON_START, value: "false" }
           volumeMounts:
+            - name: azure-email-identity
+              mountPath: /var/run/secrets/azure-email
+              readOnly: true
             - { name: package-config, mountPath: /etc/memql/package, readOnly: true }
             - { name: memql-ca, mountPath: /etc/memql/cacerts, readOnly: true }
             - { name: anthropic-identity, mountPath: /var/run/secrets/anthropic.com, readOnly: true }

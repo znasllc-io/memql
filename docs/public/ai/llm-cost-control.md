@@ -259,12 +259,58 @@ Verdict: no loop lacks a per-turn terminal condition. The agent / engine tool
 loops have no native cross-turn cap and rely on Layer 0 (process) and Layer 4
 (per plan-lineage / work run) for cumulative bounding.
 
+### Run usage across replicas
+
+Before admission, the run guard reads fresh, paged usage summaries and counts
+an identity-based union of durable model-call receipts and local charges.
+Returning to a replica that previously ran the same work does not lose calls
+completed on a peer. Each completed request shares one receipt ID between its
+charge and journal write; rereading that receipt does not charge it again.
+Metered, subscription and local tokens keep their separate buckets.
+
+A failed journal write and an unjournaled cache hit remain counted on the
+current process. They cannot be reconstructed on another process or after
+that run's in-memory entry is evicted. The guard retains at most 2,048 run
+entries and 4,096 receipt identities per entry; reaching the receipt bound or
+failing to read every summary page refuses further calls rather than dropping
+identities. These are completed-call counters, not distributed reservations:
+simultaneous calls can be admitted before either has completed.
+
+The model-call `served` enum includes `subscription` so covered calls can be
+journaled and recovered on another replica. After those rows are written,
+rolling back to an engine whose schema lacks that value is unsafe: its schema
+can reject writes involving those rows. Keep a compatible engine during
+rollback or prepare an explicit data migration first.
+
 ### Run time limits and approved continuation
 
 A run's wall-clock deadline is a budget boundary, including when it interrupts
 an active model call. It parks the saved run on a budget approval rather than
 retrying an expired allowance as a network timeout. Ordinary provider timeouts
 retain their separate recovery behavior.
+
+Owned agent turns reconsider before exhausting their allowance. The installed
+`agentProgressRecovery` policy requests a review at 75% of a model-call limit
+of at least six, or when three calls remain. It also requests a review after
+three capability-discovery rounds without a new task operation, or three
+occurrences of the same tool evidence in a bounded recent window. Rereading
+archived context does not erase a discovery loop; new research results count
+as progress, including alongside discovery in a parallel batch.
+
+The review uses the next ordinary reasoning call. It asks the model to use the
+evidence, consider an authorized alternative, finish a verified result, or ask
+a specific question. Two further stalled rounds cause a native feedback pause;
+one is enough if only one model call remains. Nearing the cap alone does not
+pause productive work. Context checkpoints retain a DSL-declared reserve of
+three calls by archiving exact sources without another model summary when
+necessary. The model-call guard still enforces the hard limit, including
+context summaries and resumed work.
+
+The recovery record is bounded and survives compaction and another replica.
+New accepted human guidance permits reconsideration; old answers replayed from
+history and a raised limit alone do not erase stalled progress. Guidance grants
+neither access nor additional model calls. These initial thresholds are policy
+choices to evaluate against observed tasks, not universal model guarantees.
 
 Nexus budget approvals accept a new **total** limit. The decision raises only
 that ceiling and preserves spent counters and completed steps. An explicit
@@ -274,6 +320,36 @@ intersects them with the current declared limits, so an older approval cannot
 undo a later tighter limit. Waiting for human input does not consume active
 work time. Continuing a long goal uses durable checkpoints and renewed explicit
 allowances, never an unbounded model call or a reset of prior usage.
+
+A budget discussion in Ask is advisory until the person chooses **Save
+guidance**. For a saved native checkpoint, that action stores the human's
+correction on the pending request without deciding it, making another model
+call, changing limits or resetting usage. The person can revise the saved text
+while the request remains pending. A later explicit **Raise limit** decision
+carries that guidance into the exact suspended execution; earlier accepted
+guidance and completed tool results remain in its saved progress. Other budget
+gates without a native checkpoint keep their own review process.
+
+If the decision is saved but releasing the waiting run fails, Nexus offers
+**Resume work** for that approved checkpoint. Retrying uses the recorded total
+and saved guidance; it does not raise the limit again or repeat the decision.
+The latest checkpoint, owner and execution request must still match. A changed
+or cancelled execution is refused instead of being restarted from an old receipt.
+
+An agent tool loop saves its exact completed exchanges before publishing a budget
+question. Synchronous parent and child invocations then wait on that same question;
+the saved child links and checkpoint identify the continuation on another replica.
+An answer arriving before that unwind finishes is retained until the waiting
+receipts are ready. Raising a limit gives no tool permission and does not replay
+completed effects. A failed legacy step without those links, a missing or changed
+checkpoint, or an uncertain in-flight tool outcome cannot use this continuation.
+
+The same rule applies after a person chooses **Run again** with unchanged inputs.
+That act starts a new version, but a later native question pauses that version
+rather than starting it again. Its saved progress is bound to the exact rerun
+request and survives the hop to another replica. A missing or changed request,
+checkpoint, override, or child link is refused; an older question cannot authorize
+the newer version. Prior usage and the completed prefix remain intact.
 
 ## Layer 4 — subscription spend, counted but not charged (memql#4362)
 
@@ -352,6 +428,20 @@ per-plan `cloudApproved` metric — a field on a concept (`v1:planner:plan`) tha
 went with memql#5000.
 
 ## Environment reference
+
+### Per-goal no-paid-provider ceiling
+
+A human API caller may set `createGoal.noPaidProviders` to true. This is a
+persisted execution ceiling on the goal and its runs, inherited by child work
+and restored on another replica. It covers every routed modality, including
+embeddings. The router refuses federation entries before selection and checks
+again during call-time fallback or cloud consent. A step's model override
+cannot remove it. Leaving the field absent preserves ordinary routing.
+
+The local goal evaluator requires this ceiling in addition to its exact fleet
+source pin. It also reads and records a fleet embedding binding before admission
+so asynchronous indexing has a local source. It does not treat a zero dollar
+ceiling as no-spend: the ordinary numeric ceiling uses zero to mean unset.
 
 ### Layer 0 — kill-switch
 | env | default | meaning |

@@ -149,9 +149,10 @@ describe("overview selection", () => {
     expect(screen.queryByText(/Pick the one to open/)).toBeNull();
   });
 
-  it("offers map help beside its heading instead of standing instructions", async () => {
+  it("leaves map help to the shared page control", async () => {
     mount(fakeConnection({ sites: [SHOP] }));
-    await screen.findByRole("button", { name: "About Deployment map" });
+    await screen.findByRole("heading", { name: "Deployment map" });
+    expect(screen.queryByRole("button", { name: "About Deployment map" })).toBeNull();
     expect(document.querySelector(".os-deploy-map > .os-caption")).toBeNull();
   });
 });
@@ -282,15 +283,17 @@ describe("steering", () => {
     // the pan handler and then ends in a click on that node. Without the
     // travel threshold, steering past a deployable opens it.
     const connection = fakeConnection({ sites: [SHOP] });
-    mount(connection);
+    const navigate = vi.fn();
+    mount(connection, { navigate });
     const node = await screen.findByLabelText(/^Deployable shop.memql.example.com/);
 
     fireEvent.pointerDown(node, { pointerId: 1, clientX: 100, clientY: 100 });
     fireEvent.pointerMove(canvas(), { pointerId: 1, clientX: 180, clientY: 140 });
     fireEvent.pointerUp(canvas(), { pointerId: 1, clientX: 180, clientY: 140 });
-    await click(node);
+    fireEvent.click(node, { detail: 1 });
 
     expect(viewTransform()).toBe("translate(80 40) scale(1)");
+    expect(navigate).not.toHaveBeenCalled();
     expect(screen.queryByRole("region", { name: "Deployable shop.memql.example.com" })).toBeNull();
   });
 
@@ -503,7 +506,9 @@ describe("no three.js under clients/os", () => {
     const deploy = Object.entries(sources).find(([p]) =>
       p.endsWith("deployables/map/DeployMap.tsx"),
     );
-    expect(deploy?.[1] ?? "").toContain("os-deploy-map-canvas");
+    expect(deploy?.[1] ?? "").toContain('label="Deploy map"');
+    const canvas = Object.entries(sources).find(([p]) => p.endsWith("kit/MapCanvas.tsx"));
+    expect(canvas?.[1] ?? "").toContain("os-map-canvas");
     // The Nexus map is the one the owner named, so its absence from the scan
     // would make this guard silent about exactly the surface it is for.
     const beacon = Object.entries(sources).find(([p]) => p.endsWith("nexus/BeaconMap.tsx"));
@@ -609,9 +614,6 @@ describe("a source's checks on the map", () => {
     expect(node.querySelector(".os-deploy-node-label")?.textContent).toBe("Checks");
     expect(node.querySelector(".os-deploy-node-sub")?.textContent).toBe("Failed on main, at tests");
     expect(node.querySelector(".os-deploy-node-dot")?.getAttribute("data-status")).toBe("failed");
-    // The help says what it is for, inside the heading's information control
-    // rather than standing on the map.
-    expect(document.querySelector(".os-map-heading .os-info-dialog")?.textContent ?? "").toContain("Choose it to open that source");
   });
 
   it("runs a checks edge along its own row, then into the node: never diagonally through the artifact column", async () => {

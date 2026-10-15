@@ -162,20 +162,23 @@ export const SOURCE_MEANINGS: Readonly<Record<string, string>> = {
   augment: "added from a chat, to close a retrieval gap",
   llmSeeded: "generated when the domain was first seeded",
   crossDomainBridge: "written to bridge two of an agent's domains",
-  appStructure: "the product UI corpus, cited silently",
+  appStructure: "application-provided knowledge; review status is recorded separately",
 };
 
 export function sourceMeaning(source: string): string {
   return SOURCE_MEANINGS[source] ?? "";
 }
 
-/**
- * The group a chunk with no `documentId` belongs to.
- *
- * `documentId` is populated for chunks the analyzer produced from an upload
- * and null for seeded corpus content, and the concept's own comment records
- * that `v1:knowledge:document` is declared nowhere -- so this is a LABEL for
- * an absent back-reference, never a lookup that failed.
- */
-export const CORPUS_GROUP_ID = "";
-export const CORPUS_GROUP_LABEL = "Seeded corpus";
+/** An absent documentId does not imply a seed: Library uploads carry their
+ * artifact identity in sourceRef. Keep the declared provenance distinct. */
+export function sourceGroupLabel(source: string): string {
+  const labels: Readonly<Record<string, string>> = {
+    fileUpload: "Uploaded files",
+    trainerAgent: "Trainer Agent",
+    augment: "Chat additions",
+    llmSeeded: "Seeded corpus",
+    crossDomainBridge: "Domain bridges",
+    appStructure: "Application knowledge",
+  };
+  return labels[source] ?? (source || "Source unrecorded");
+}

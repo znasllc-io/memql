@@ -443,8 +443,17 @@ func (f *FleetInference) attemptLocal(
 	}
 	defer w.Release(workerservice.ModelCapability)
 
-	handle, err := w.StartModelCall(ctx, modelCallRequestFromProto(
-		id.NewShortId(), start, workerservice.ModelCallTimeoutDefault))
+	admission := &ForwardHandler{store: f.store}
+	if f.router != nil {
+		admission.groups = f.router.groups
+	}
+	subjects, err := admission.admitSharedRegistration(ctx, req.ActingUserId, cand.RegistrationId)
+	if err != nil {
+		return memqlengine.FleetCallResult{}, ForwardRefusedBeforeStart, err
+	}
+	localRequest := modelCallRequestFromProto(id.NewShortId(), start, workerservice.ModelCallTimeoutDefault)
+	localRequest.SharingSubjects = subjects
+	handle, err := w.StartModelCall(ctx, localRequest)
 	if err != nil {
 		return memqlengine.FleetCallResult{}, ForwardRefusedBeforeStart, err
 	}

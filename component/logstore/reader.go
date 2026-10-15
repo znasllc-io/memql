@@ -147,6 +147,9 @@ func tailQuery(db *bun.DB, q Query, rows *[]Row) (*bun.SelectQuery, bool) {
 	sel := applyFacets(db.NewSelect().Model(rows), q)
 	limit := normalizeLimit(q.Limit)
 	if !q.AfterAt.IsZero() && strings.TrimSpace(q.AfterId) != "" {
+		// TimescaleDB cannot prune old chunks from the tuple predicate alone.
+		// Keep this inclusive: higher IDs at the cursor timestamp are newer.
+		sel = sel.Where("occurred_at >= ?", q.AfterAt.UTC())
 		sel = sel.Where("(occurred_at, id) > (?, ?)", q.AfterAt.UTC(), strings.TrimSpace(q.AfterId))
 		return sel.OrderExpr("occurred_at ASC, id ASC").Limit(int64(limit)), false
 	}

@@ -9,7 +9,7 @@ import (
 func TestOrganizationRoleCannotGainClusterAuthorityThroughRankOrGrants(t *testing.T) {
 	cat := assignmentCatalog()
 	cat.ranks["acct-lead"] = 350
-	for _, resource := range []string{ResourcePrincipal, ResourceRole, ResourceAdmission, ResourceDeployment, ResourceConstruct, "app:settings/cluster", "app:cluster", ResourceGroup, ResourceData, "app:campaigns"} {
+	for _, resource := range []string{ResourcePrincipal, ResourceRole, ResourceAdmission, ResourceDeployment, ResourceConstruct, "app:settings/cluster", "app:cluster", ResourceGroup, ResourceData, "app:email"} {
 		cat.grants["acct-lead"][VerbResource{Verb: VerbUpdate, Resource: resource}] = true
 	}
 	installFake(t, cat)
@@ -38,7 +38,7 @@ func TestOrganizationRoleCannotGainClusterAuthorityThroughRankOrGrants(t *testin
 			t.Errorf("scoped role gained %s", resource)
 		}
 	}
-	for _, resource := range []string{ResourceGroup, ResourceData, "app:campaigns"} {
+	for _, resource := range []string{ResourceGroup, ResourceData, "app:email"} {
 		if !CapableFor(context.Background(), subject, VerbUpdate, resource) {
 			t.Errorf("lost explicitly granted org capability %s", resource)
 		}

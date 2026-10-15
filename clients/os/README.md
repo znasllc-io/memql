@@ -273,6 +273,34 @@ rename, and stays silent on a heartbeat.
 
 ## Fleet, the first real app (memql#4729)
 
+Fleet retains one machine feed for the OS and one app-session and routing-policy
+feed per Fleet window. All use the shared retain/reconnect lifecycle: events
+fold in place, reconnects reseed after subscription restoration, and teardown
+releases listeners. Caller-scoped feeds include the actor in their identity and
+apply the named read's owner filter to incoming events (including cluster owners).
+Workspace feeds also filter owners; model downloads filter owner and machine;
+workbench replicas filter node type. App-session details retain a separate scoped
+feed only while open because list reads omit recording details.
+
+Equipment's Recent work shows the latest five matching sessions from the loaded
+recent history. All app sessions opens Activity only when this machine has more
+than five loaded sessions. Both views share one
+feed; a payload event causes no additional list read. Catalogs, recommendations,
+measurements, sharing ledgers, delegation settings and call history have no
+browser broadcast stream: visible views use `AutoRefresh` for those reads.
+Do not poll healthy graph feeds or automatically repeat probes or writes.
+Failed initial reads also need recovery, even if a collection has no prior rows.
+
+Machine tabs end with **History**, then **Settings**. Settings contains General
+controls, inline Sharing and reported machine information in the same section
+grid. Sharing's live counts use the retained machine feed; directory reads stay
+on demand and use the visible view's refresh lifecycle. There is no separate
+Sharing tab. Fleet's app-level Settings still contains the app's preferences.
+Routing labels and sharing use `CardCollectionEditor` with `CardCarousel` for
+the same search/add line, editable cards and paging. Sharing searches the
+authorized directory and edits grants; it does not create or rename identities.
+
+
 `src/apps/fleet/` is the promotion of the foundation's read-only exemplar
 into the whole app: **Machines** (rename, operator labels, remove,
 per-machine detail, and the guided cockpit install), **Routing** (routes,
@@ -955,6 +983,20 @@ and then `libraryTrainFile(fileId, domainId)` ingests those into a domain as
 review queue is for. The surface says so, because hiding the second act is what
 made the first one look like it had done something.
 
+A cluster owner can enter a domain ID in the existing Teach form, including
+the first domain on an empty cluster. The picker still lists catalog and
+chunk-derived domains. Entry uses the same `libraryTrainFile` authorization and
+does not create a domain catalog row or approve knowledge. After teaching, the
+app re-reads its domains and offers Review; new passages remain pending until
+somebody explicitly approves or rejects them. Other roles keep the picker and
+the server's existing domain-write authorization.
+
+Review and Domains group chunks with a document back-reference by that document;
+other chunks use their declared provenance, keeping uploaded files, chat additions,
+Trainer Agent output and seeded content distinct. Source references remain intact.
+Review shows the complete passage before a decision; long text and references wrap
+within the Training window.
+
 **The section is a WORKLIST, not a log.** Every file is a row that says where it
 is and offers exactly the act legal from there -- rule 12 applied per row,
 because here the state is per row. `unreadable` (a photograph, a zip) offers
@@ -1069,6 +1111,12 @@ label chips. Label filters still work. Open remains a text action; desktop,
 download and Delete use named icons. Delete moves the file to the Bin, where it
 can be restored until purged.
 
+**Add to this folder** offers Upload files, New Markdown file, and New folder.
+New Markdown file opens Make a file on Name with Markdown, the current folder,
+and a way back to Files. Searching, Bin, Materializer and the Library root name
+no destination folder. The Markdown item is absent when Materializer cannot be
+opened.
+
 Ordinary uploads are independent copies. Host-path tracking belongs only to
 explicit folder backups; see the [upload contract](../../docs/public/operate/library.md#uploads-and-folder-backups).
 Backups use a plus action, a full-page form, a schedule, and a hidden-file switch.
@@ -1131,6 +1179,25 @@ Backups use a plus action, a full-page form, a schedule, and a hidden-file switc
   online/focus, recovering missed events and failed reads. It never refreshes
   hidden panes or overlaps a busy read. In-flight reads abort on file changes
   and unmount; the last successful history stays visible during recovery.
+
+## Account domain defaults
+
+Accounts → select an account → Domains assigns multiple domain names and a
+default domain and sender. `configureAccountDomains` validates these settings
+on the engine; the account's existing organization authorization applies.
+`apps/accounts/defaults.ts` is the shared source of creation suggestions for
+Deployables, Email, automations and signup forms. A deployable starts with
+`<slug>.<defaultDomain>`; an explicit manifest domain or typed value (including
+an empty value) wins. A single active sender matching the account's default
+domain is suggested unless the account names a different default sender.
+Missing or disabled explicit senders require another choice.
+
+These are defaults for **new work**, not a bulk edit of existing resources.
+Absent assigned domains use the existing profile domain; an explicitly empty
+list opts out. Domain assignment neither proves ownership nor enables user
+joining. Custom-domain DNS/TLS checks and email-provider readiness still run.
+The domains needed by Shopify connections and cluster transport are separate
+configuration and do not inherit these defaults.
 
 ## Accounts, the sixth app (memql#4800)
 
@@ -1328,7 +1395,8 @@ folder is still archived moves it to Library root. Purging remains in the Bin ap
 Materializer shows live files whose backing file is named by a composition’s
 `outputFileId`. Empty or failed compositions do not create placeholder file rows;
 archived outputs belong in Bin. Folders scope this same subset. **Open in
-Materializer** opens the composition, and appears only when that app is installed.
+Materializer** opens the composition’s finished-file page in Materialized, and
+appears only when that app can be opened.
 The composition feed is retained once at the app root, alongside the file feeds.
 
 ### Folder-backup state
@@ -1348,169 +1416,50 @@ Failures stay beside the operation that failed, and local machine policy can
 refuse a directory even when its owner requested the backup in Files.
 
 
-## Campaigns, the eighth app (epic memql#4827 / #4828 / #4830)
+## Email
 
-`src/apps/campaigns/` is mail: the audiences it goes to, the copy it is made
-of, the mailboxes it leaves from, the sends themselves, and the rules that
-send one message when something happens in the cluster. It is the first app
-whose subject LEAVES the cluster, and six things about it are new rules
-rather than repetitions of the seven before it.
+`apps/email/EmailApp.tsx` owns Overview, Campaigns, Automations, Audiences,
+Templates, Inbox, Logs and Settings. Inbox and Logs follow their own access
+gates. The app keeps opened sections mounted behind hidden panes so edits and
+wizard answers survive navigation; `AutoRefresh` pauses with those panes.
 
-- **A HEARTBEAT IS NOT NEWS, AND THIS IS THE SHARPEST CASE OF IT SO FAR.**
-  Fleet's heartbeat moves every fifteen seconds and the Domains sweep every
-  two minutes; the drain worker writes `sentCount` / `failedCount` /
-  `skippedCount` on every batch of every running send. Naming one in
-  `campaignFingerprint` would ring every row in the list, repeatedly, for the
-  whole duration of every send in the cluster -- arriving exactly when
-  somebody is watching. `recipientCount` is out for a second reason: the
-  preflight freezes it at the same instant the status flips, so it would fire
-  a second cue for a change the status already announced. The fingerprint is
-  `name | status | scheduledAt | audienceId | templateId | senderIdentityId |
-  accountId | lastError`.
+Six retained root feeds carry campaigns, audiences, templates, senders, event
+rules and journeys. Composed reads carry each campaign's repeating series,
+each organization's testing audience and each audience's signup forms.
+`useEmailRecordFeeds` retains the composed feeds once per window. Queries
+establish membership; CDC events fold with full-precision version ordering,
+and omitted payloads re-read through the authorized path. A capped list says
+that some records are outside its loaded window.
 
-  **The counters must still RE-RENDER live**, which is the whole point of the
-  send bar filling under the person watching it. Re-rendering and ringing are
-  different statements and the fingerprint is the only thing that separates
-  them, so `test/campaigns/app.test.tsx` pins BOTH: a counter tick leaves
-  `data-arrival` null AND puts the new figure on screen; a rename rings. A
-  test of one half passes against a cue that fires on everything.
+Delivery ledgers, campaign statistics, tests, roster samples, signup welcomes
+and journey enrollment counts are ordinary reads because their volume does
+not belong in broadcasts. The shared refresher reads them while visible,
+keeps the last answer during a new read, cancels stale requests and stops when
+the window is parked. An absent figure stays absent, rather than becoming zero.
+The send bar divides the campaign's total into sent, skipped, failed and pending;
+engagement rates use delivered recipients as their denominator.
 
-- **AUTOMATIC UPDATES WITHOUT RECIPIENT-VOLUME BROADCASTS.** Operator records
-  use existing graph subscriptions. Delivery, engagement and recipient events
-  remain mesh routing exclusions because CSV imports and sends can produce tens
-  of thousands of rows. Visible statistics, ledgers, audience rosters, welcome
-  outcomes and test history re-read every five seconds after the preceding read
-  settles. Reads never overlap, pause in hidden browser tabs, resume on focus or
-  reconnect, abort on navigation, and retry errors. Loaded data remains during
-  background reads; failed reads show their error. Routine refresh buttons are
-  absent. Campaign results and the latest test show separate progress bars, so a
-  test unsubscribe cannot be mistaken for a change to the original send.
+Every record opens its own page, with one heading and one pinned action bar.
+`acts.ts` and the per-noun action tables offer only legal actions. Adds use the
+kit Wizard and Rail; list questions live in Refine. An audience's import
+report stays in place until Done, including unreadable line samples. No Email
+surface deletes a record; archive, restore and retirement retain history.
 
-- **AN ABSENT FIGURE IS AN EM DASH WITH A REASON, NEVER A ZERO.**
-  `campaignStats` reports a unique open or click count as UNMEASURED when the
-  fold behind it hit its bound, and reports no soft-bounce figure at all
-  because nothing measures one per campaign. A `0` there would be this window
-  inventing a fact about somebody's send -- and a zero open rate is a thing
-  operators act on. `Figure` is `{value: number | null, absentBecause}`, an
-  absent key and an explicit null are the same answer, and a rate is OF
-  DELIVERED rather than of the audience: an open rate over the whole roster
-  silently punishes a campaign for its suppressions, which is the opposite of
-  what suppressing was for.
+The automation Flow is a vertical trigger, sequence of Send, Confirm and Wait
+cards, and End. Its inspector sits alongside at wide widths and beneath the
+selected card in narrow windows. Arrow keys move focus, Alt+arrows reorder,
+Delete removes and Escape returns focus from the inspector. Step IDs survive
+reordering, editing and saves. Counts follow the engine's enrollment state:
+Confirm shows waiting rows, Wait reads the next step's active rows, and End
+shows completed, exited and failed rows. Activation uses the reviewed revision.
+Describe validates without writing; Save draft and Turn on are explicit actions.
 
-- **A SEND IS A BAR, NOT A ROW OF STAT CARDS.** Four numbers in four boxes
-  makes a person add them up to learn the one thing they came for. One band,
-  the width of the panel, partitions the audience into `sent | skipped |
-  failed | pending` -- which is literally what happened to it -- with a legend
-  giving the exact figures beneath. It makes the SKIPPED slice visible, the
-  compliance-relevant number nobody goes looking for. `pending` is DERIVED
-  rather than read, so the slices always sum to the whole and the band can
-  never show a gap that reads as a rendering fault; the counts CLAMP at zero,
-  because when a frozen estimate and live observations disagree the
-  observations win. It is `flex-grow` and four token colours, not a chart
-  library, and it carries `role="img"` with an `aria-label` stating the
-  figures in words -- a bar a screen reader cannot read is a bar that excluded
-  somebody, and the picture's whole content is proportion. Engagement sits
-  BELOW it, smaller, as a rate of delivered plus the raw unique-of-total: it
-  is a different question about the sent slice only, and a fifth segment would
-  put two denominators in one band.
-
-- **THE IMPORT REPORT IS A PANEL THE PERSON DISMISSES.** The operator's next
-  action after a CSV import is fixing the file -- open it, go to line 412 --
-  so the outcome sentence and the sample bad lines with their numbers stay on
-  screen until they say they are done. A toast puts that evidence on a timer,
-  which is the reason this shell has none. The upload itself rides
-  `items/edgeUpload.ts` like every other transfer in the OS
-  (`test/files/onePath.test.ts` fails the build on a second speaker), so
-  chunking, resume, retry and verbatim refusals apply with nothing new
-  learning them; the artifact id then goes to the engine, which reads the file
-  under the CALLER'S OWN actor. The id is not a capability.
-
-- **MERGE TAGS SHOW WHAT THEY RENDER TO, WHICH IS DOCUMENTATION THAT CANNOT
-  GO STALE.** Four base tags are a closed set the renderer knows;
-  `{{fields.*}}` is not, because those exist only because somebody's CSV had a
-  `company` column. No list in this repo could know that, so the strip samples
-  a real recipient from a chosen audience -- which is the only way an operator
-  discovers `fields.*` at all, and which also catches the case a spelling
-  check cannot, a column present but blank for the person you sampled.
-  Clicking inserts at the cursor and leaves the cursor after the tag. The test
-  send's UNRESOLVED list renders in the same vocabulary, right where the
-  copy is being written: a typo'd `{{fields.compnay}}` goes out as its own
-  literal text and looks like nothing from this side, so this is the only
-  check that catches it before the whole audience does.
-
-- **THE RULES BUILDER IS A SENTENCE, AND THE DELIVERY LANE IS NEVER A
-  TOGGLE.** "When a *[thing]* is *[created / changes]* -- optionally *[only
-  when ...]* -- email *[template]* to *[who]*." Six labelled boxes would make
-  somebody assemble that meaning themselves, from parts that only mean
-  anything together. The `who` control is the ONLY place the recipient mode is
-  chosen and the two delivery lanes are a CONSEQUENCE of it: each choice says
-  in one plain line what it does -- "no unsubscribe footer, and the do-not-mail
-  list is not consulted" versus "the do-not-mail list is checked before each
-  message, an unsubscribe link is attached, every outcome is recorded" -- as an
-  EFFECT rather than as a term of art. The words "operational lane" and
-  "marketing lane" appear nowhere in the surface, and a test asserts that.
-  Trigger concepts come from the LIVE registry (`listConcepts`, the SDK's own
-  `ConceptsListMsg` accessor; the OS had none before this surface), because a
-  fixed list would make the newest half of a cluster's schema untriggerable
-  with no way to tell. A rule whose bundle failed validation or whose circuit
-  breaker tripped renders the ENGINE'S OWN SENTENCE, never a paraphrase.
-
-- **A CLUSTER-WIDE FACT IS A BANNER OVER THE LIST, NEVER A STATUS ON EACH
-  ROW.** `authoredAutomationsEnabled` is a global hard stop: with it off, the
-  scheduler's `GlobalGate` suppresses every firing for every owner on every
-  node, checked before owner-gating and before the breaker -- and NOTHING about
-  a rule row changes. Every rule still reads `active`, which is true: they are
-  active AND inert, all of them at once. Painting "halted" onto each row would
-  claim something about each rule that is not true of any of them, so the fact
-  is stated once, above the thing it applies to. Without it an operator reads a
-  list of active rules that send nothing and has nowhere on screen to find out
-  why, which is the exact silent failure this app exists to remove.
-
-  **ABSENT IS NOT FALSE, and that half is bigger than the banner.** A missing
-  settings row, a shape that stops projecting the field, and a failed read are
-  all *unknown*; only an explicit `false` shows the banner. The SDK's `rowBool`
-  answers `false` for a missing key, so reading the switch through it would put
-  "your rules are halted" on every fresh cluster there is -- `kit`'s `boolOr`
-  with a `true` fallback is the honest read, and it matches what the engine's
-  own gate does with an absent row. A read that FAILED says quietly that it
-  could not check, rather than claiming the switch is on: "we could not check"
-  is a fact about this window, not about the cluster. Three tests pin the
-  silences and one pins the appearance, because the silences are the half that
-  turns a banner into a scare.
-
-- **TWO THINGS WEAR THE STATUS `paused`, AND ONLY ONE IS SOMEBODY'S
-  DECISION.** `setEmailRuleStatus` is the operator's stop button; a rule can
-  also stop after its runs kept failing, and the failure that did it is on
-  `lastError`. Saying "you paused this" over the second case throws away the
-  only diagnostic there is and is wrong about who did it. The reading is made
-  from the EVIDENCE rather than from a mechanism the browser cannot observe --
-  a paused rule carrying a run failure is reported as paused *with* that
-  failure, and the copy never names who stopped it.
-
-### What it deliberately does not do
-
-**There is no delete anywhere in this app, and every surface says why rather
-than leaving somebody hunting for one.** An audience is archived because every
-delivery record names it; a campaign is cancelled because what already went
-out stays sent; a mailbox is retired because past campaigns name the row and
-the reputation and warmup history are keyed on its address. Removing any of
-them orphans the evidence a deliverability review is made of.
-
-**Campaign tests use the ordinary sending queue.** Settings selects an active,
-organization-owned testing audience. `campaignTestAudienceSend` makes an immutable
-run and invokes the same admission and worker as a live send; a stable request id
-recovers an uncertain result across replicas. Active and completed sources remain
-testable. Repeating sources use the saved series definition without advancing it.
-Recent tests and their delivery records update automatically while visible;
-they do not inflate the live campaign’s counters or the regular campaign feed.
-
-**Senders live here rather than in Settings -> Integrations**, even though the
-two sit next to each other. Integrations is about CREDENTIALS -- the things an
-operator rotates from a shell -- and a sending identity carries none: it is a
-campaigns record saying a mailbox exists and may be used. What it cannot do is
-make a mailbox sendable; that is the tenant's own policy, and an address
-declared here but missing from it comes back as the provider's own 403 on the
-campaign's `lastError`.
+`words.ts` owns user-facing status vocabulary. `Preview` keeps formatted HTML
+styles inside a sandboxed frame, offers plain text, and renders unresolved tag
+issues beside the result. Templates and organization layouts use editor drafts
+with exact-revision saves and retain the author's work on refusals. Settings
+chooses one organization for domain, sender and testing controls; the operator
+organization may use the cluster sender.
 
 ## Logs, the ninth app -- and a section on every other one (epic memql#4895)
 
@@ -1576,136 +1525,162 @@ wrong by default.
   is absolute against the list's relative root, never fixed -- the desk plate
   is CSS-transformed and becomes a fixed element's containing block.
 
-## The Materializer, the eleventh app (epic memql#4977)
+## The Materializer and the one way a file is made
 
-`src/apps/materializer/` is where a person and the model compose data from
-the memory graph into a file: a report, a spreadsheet, a branded document, a
-package a site is deployed from. Design record:
-[2026-09-05-compose-materializer-design.md](../../docs/superpowers/specs/2026-09-05-compose-materializer-design.md).
+`src/apps/materializer/` makes files and shows their composition records. Its
+visible tabs are **Materialized**, **Templates**, and **Recipes**; Settings holds
+preferences and prerequisite setup. The app id is `materializer`, and its records
+live in `v1:compose:*`. The shared creation and navigation contracts live in
+`src/items/materialize.ts` and the SDK. Design records:
+[Materializer app](../../docs/superpowers/specs/2026-10-12-materializer-app-design.md)
+and [one creation path](../../docs/superpowers/specs/2026-10-11-materializer-front-door-design.md).
 
-**THE APP IS `materializer` AND THE ROWS ARE `v1:compose:*`, and that split is
-the epic's rather than a slip.** `materializer` already names the engine's boot
-seeder (`component/memql/seed_materializer.go`), so the namespace could not
-take the word without putting `system:seedMaterializer` and `v1:materializer:*`
-one word apart in every log line. The SURFACE keeps the name --
-`v1:work:goal.requestedVia` has carried the string since before this app
-existed.
+### Make a file
 
-Five things about it are new rules rather than repetitions of the ten apps
-before it.
+The plus in Materialized, Start over, and a starting setup open the shared
+`Wizard` in `MakeWizard.tsx`. The model in `make.ts` decides its steps, answers,
+opening step, status and request. The steps are Kind of file, Template when
+relevant, From, Describe, Name, Folder and Organization, followed by File while
+making. Optional answers start usable; a blank file needs only a name. Make the
+file is offered from any step once the answers can be used. The Name field uses
+the SDK's `fileNameProblem`, including the same words used in the editor.
 
-- **THE COLUMNS ARE THE COMPOSITION'S OWN STRUCTURE, NOT A LAYOUT.** Sources,
-  the draft, the target: what goes in, what it is, what comes out. Three
-  columns is a shape this shell had not used and it earns it because the
-  subject genuinely has three parts a person moves between -- not because
-  three panels looked balanced. Below a pointer breakpoint they stack in that
-  reading order.
+`Ingredients.tsx` mixes readable Library files and available record types in a
+searchable From tray. Picked items appear as removable cards, with record counts.
+The file list shows the twenty newest until a search narrows it. Marked record
+types come first; the setting to offer every record type includes usable
+unmarked types. A record without a list query is not offered. Feed groups load
+as skeletons, and errors stay beside the group they affect.
 
-  **The draft leads** (design D5, the owner's decision). The obvious build is
-  a chat transcript in the middle with the draft one click away, which is what
-  every AI writing tool does, and it is wrong here for one reason: the FILE is
-  the deliverable, and a surface where the deliverable is never on screen
-  cannot answer "which version am I about to send". It is rule 11 read
-  forward -- a list and its detail never share a scroll column, and a
-  transcript and its draft are that pair.
+`FolderSelect` shows the Library root and usable folders. A setup's inaccessible
+folder stays visible as Unavailable folder; the client does not silently replace
+it with the root. The cluster checks the chosen folder before writing and its
+refusal stays in the wizard, where the Folder step can correct it. An email
+template requires an organization and starts with the person's default one when
+available. Other kinds can have no organization. Inference setup is offered only
+to people who can perform it.
 
-- **THE PROVENANCE CHAIN IS THE ONE DEVICE THIS APP SPENDS ANYTHING ON, and it
-  is drawn in INK RATHER THAN HUE.** One line under the draft reads the whole
-  claim -- *from 3 rows, 1 file → through Acme quarterly → by
-  anthropic/claude-sonnet-5 → as PDF* -- with a sentence beneath saying whether
-  that survives the file leaving the cluster. The direction is drawn because
-  the direction is a RULE (sources feed the template, which produces the file),
-  which is the same ground the Files backup wire draws one on.
+The floor tells the person whether the request starts blank, produces a model's
+file, or produces a draft to review in the editor. Audio and video are not
+offered. Requests follow this table in the OS, the SDK and the engine:
 
-  The models link is a **hollow mark where no model was reached and a filled
-  one where one was**: the Work app's own axis, reused deliberately rather than
-  re-invented, so somebody who has read one run already knows what a filled
-  mark means. Hue was the wrong axis for the reason the Work spine records --
-  amber is `warn`, red is `error`, the accent is live/primary/yes-here, and a
-  colour-per-state legend would put status hues on a partition that has nothing
-  to do with status.
+| The request | Path |
+|---|---|
+| A name and kind, with no description, sources or template | Blank Markdown, text, HTML, CSV or JSON, with no model call. Word and PDF need content |
+| Markdown described in words with nothing picked, or only Markdown files up to 32 KiB each and PNG, JPEG, GIF or WebP pictures up to 8 MiB each | Blank file followed by the person's Library revision request |
+| Markdown described in words with any other file, a record or a query | Composer reads the sources and writes the file |
+| A template, another kind of file, an email template or a package | Composer writes the file |
 
-  **It is live, and that is the point.** Changing the target changes the last
-  link and the claim under the person's hand, which is how somebody learns that
-  some formats cannot carry provenance by USING the app rather than by reading
-  a design record.
+The SDK's `readDescribedMarkdown` reads missing Library file facts before
+starting; its shared predicate determines the route. Every picked Library file
+travels with `content: true`, so the composer can read it when that route is
+chosen. The model uses the same predicate over known rows to describe the path
+on screen. Unknown or unreadable facts never promise an editor draft. The
+engine's copy tests hold file types, blank formats, packages and filed names to
+the OS model.
 
-- **THREE ANSWERS ABOUT PROVENANCE, NEVER TWO.** `provenanceEmbedded` is read
-  through `optionalBool` rather than the SDK's `rowBool`, which answers `false`
-  for a missing key. A composition still composing has not reached the stamp
-  step, so nothing has answered yet -- and reading that as `false` would put
-  "the record is the only copy" on a file that will carry its own the moment it
-  is written. Absent renders NO claim at all. `test/materializer/rows.test.ts`
-  pins all three.
+### Making and the file's page
 
-  The `false` case is not a failure and the surface never draws it as one:
-  markdown, HTML, docx and PDF embed the record in their own bytes; txt, CSV
-  and JSON are written EXACTLY as composed -- no `#` header, no
-  `{provenance, rows}` wrapper -- because either would break the spreadsheet
-  or the parser downstream. The app says which it is, in the format's name.
+Starting keeps the wizard in view. File becomes its current step; the status
+moves through Starting, Composing and Writing the file, with elapsed time.
+**Stop** requests cancellation. **Leave** leaves the work running and returns to
+the app that supplied the setup when it is available, or to Materialized. A live
+ready, failed or cancelled result opens its page only while that wizard is still
+showing the same work. It does not move a window the person has taken elsewhere.
 
-- **THE SOURCES COLUMN IS THE `@composable` MARK, AND AN UNMARKED CONCEPT IS
-  UNMARKED RATHER THAN FORBIDDEN.** `composableConcepts` reads the concept
-  registry -- so it is an on-demand read that says when it looked, not a feed:
-  there is no `graph.node.*` event for a registry, and a `useLiveCollection`
-  over one would render "Loading from the cluster" and then a list that
-  silently never moved. The set changes when a DSL bundle is redeployed, not
-  while somebody is composing.
+`CompositionPage.tsx` replaces the list and presents the file's kind, folder,
+sources, description, optional template and organization, models, provenance and
+creation time. It shows the composition's own provenance sentence. A model mark
+names the model and opens its run where permitted; it does not copy the file's
+contents. Blank and described files have their own captions and say No model
+when none wrote them. Description and attachment notices stay beside the file
+and are announced through a mounted status region.
 
-  **"Nothing is marked" and "this node cannot read the registry" look identical
-  from an empty list**, and only one of them is something an operator can fix,
-  so the engine reports which and the column says so. A marked concept with no
-  `list` query is rendered and DISABLED with the reason on it -- there the
-  useful statement is "the cluster has this and cannot offer it", which an
-  absent row could not make.
+`pageActs` keeps the permitted actions to at most three, primary last. A ready
+file offers Open in editor, with Save as recipe when the request can run again.
+A package offers Download and Deploy it. A failed or stopped record offers Start
+over, which puts its answers back into Make a file for review. Archived records
+can be restored and their existing files opened; archiving a composition leaves
+the file in Files.
 
-- **THE APP ASKS THE SHELL WHETHER IT IS THERE** (`useOsIfPresent`, new in
-  `chrome/state.tsx`). The only thing this app wants from the shell is handing
-  off to another one -- Files for the output, Nexus for the goal -- and both
-  happen on a click. Reaching for `useOs` at an app root makes the whole app
-  unmountable without a desktop, which costs every one of its tests a shell it
-  does not otherwise need; a test that has to build a desktop to assert a
-  sentence is one that stops being written. `useOs` KEEPS ITS THROW for chrome,
-  where a missing provider is a wiring bug worth failing loudly on.
+For a blank or described request with the browser editor selected,
+`editorOpening.ts` reserves a tab during the person's Make press. It navigates
+only after the file's Library index entry exists and, for described Markdown,
+after the description hand-off has settled. Refused, failed or stopped work
+closes the reservation. A browser refusal is shown beside the file and Open in
+editor remains available. With the desktop editor selected, opening stays an
+explicit action. A composed file is also opened explicitly.
 
-### The seam with Files
+### One way to make a file
 
-Agreed with the Files-places epic (memql#4981) and recorded in both places:
-**a composition has one record and its output has one file.** This app's
-Materialized section answers *what was made, from what, by which models*; the
-Files rail's Materializer place answers *where is the file*. Files carries
-"Open in Materializer" and one sentence; it never edits a composition, and this
-app never shows a file tree. `compositionForOutputFile` is the file-to-record
-direction for a surface that does not already hold the composition set.
+Every client uses the SDK's `materialize` contract. The OS calls
+`startMaterialize` and follows retained live collections for compositions and
+Library artifacts, then calls `handOffDescription`; editors use
+`followComposition` through `materialize`. No app writes a new Library file or
+calls the compose builtins through another path. `test/onePathCreate.test.ts`
+and the editor's matching guard fail on a competing creation path. Uploading an
+existing file remains an upload.
 
-A composition whose bytes never stored is `failed` with an EMPTY
-`outputFileId`, so it is absent from the Files place by construction -- there
-is no file for it to show -- and visible only here, where the failure and its
-reason belong.
+A request id belongs to one action and survives retry, so a double press starts
+one composition. Changed inputs use a new id. The description's comment and
+revision ids derive from that request. The cluster enforces authorization,
+format, folder and stored request consistency.
 
-### What it deliberately does not do
+A described Markdown file is created blank. `descriptionHandOff.ts` waits for its
+ready composition and Files entry, then sends the description as the person,
+through the Library's revision workflow. A work run cannot do that on the
+person's behalf. It attaches the picked files within the Library's total limits
+(at most eight references) and names any excess beside the made file. Individual
+file types and sizes were already checked when choosing the route. A hand-off
+failure leaves the file usable and the editor offers Describe document. Nothing
+polls here; closing the window before the hand-off leaves the composition's
+statement for the person to continue from. A Stop that races with file creation
+keeps the file and records that its description was stopped before sending.
 
-**There is no document editor.** The draft is Markdown in a textarea. A rich
-text editor is a product of its own, and half of one is worse than none -- a
-template is how a document gets a shape, which is what design D7 makes a
-template FOR.
+### A starting setup
 
-**There is no Retry on a failed composition**, and Start over is offered
-instead. The record holds the sources it RESOLVED rather than the form that
-produced them, so a retry would silently re-run something slightly different
-from what was asked for; Start over opens the composer where a person can see
-what they are about to re-run.
+A sender imports `src/items/materialize.ts`, never `apps/materializer/`:
 
-**Audio and video are named and unoffered.** The brief asks for both. Audio
-wants a compose-then-speak pipeline with a spending ceiling of its own and
-video wants a generation provider this cluster does not have, so the Target
-column says so -- an absent option with no account of itself reads as something
-nobody got round to building, which is the rule the Bin states about its
-missing retention control.
+```ts
+actions.openApp(MATERIALIZER_APP_ID, MATERIALIZER_COMPOSE_SECTION, composeIntent({
+  format: "markdown",
+  folderId,
+  sources: [{ kind: "library_file", ref, label }],
+  returnTo: { appId: "files", sectionId: "browse" },
+}));
+```
 
-**Nothing in this app sets a budget.** A materialization is a goal, and a
-goal's ceilings are set when the goal is accepted. The Settings section says
-that rather than leaving the gap somebody would go looking in.
+A setup starts no work. `readComposeIntent` keeps supported formats and source
+kinds, complete return addresses, and opaque ids exactly as received. An email
+template uses `outputKind: "email_template"` with JSON. The wizard applies the
+setup together to a fresh draft and opens the next unanswered step; Files' New
+Markdown file opens Name. Leaving abandons the draft. Its first made file keeps
+the way back only for that trip; Start over creates a new draft without it.
+The way back appears only when the shell holds the destination app and the
+person may open it. Section ids are shared constants: `composer` for a setup,
+`materialized` for a composition's page. A running composition intent opens the
+making stage.
+
+### Templates, recipes and Files
+
+Templates and Recipes use live lists and pages that replace their lists. Add a
+template is a wizard over an existing Library file, its kind, name, optional
+description and organization; ZIPs are excluded. Template pages show their file,
+format, description, organizations and declared inputs, with Archive or Restore.
+Recipes show the saved kind, folder, sources, description, template and
+organization. Run it again starts a fresh composition. Unavailable folders remain
+visible and the cluster can refuse them.
+
+Settings selects the opening tab and starting kind and uses switches for Include
+archived and Offer every record type. File creation does not set goal budgets;
+the engine enforces the goal's accepted ceilings.
+
+A composition has one record and its output has one file. Materialized answers
+what was made and how; Files answers where the file is. Files' New Markdown file
+sends its current folder and return address. Open in Materializer opens the
+composition's page through `MATERIALIZER_MADE_SECTION`. A failed composition
+without an output has no Files placeholder. This app never edits a file tree;
+Files never edits a composition.
 
 ## Ask conversations and voice
 
@@ -1716,8 +1691,16 @@ permission-scoped MemQL agent; test transports live under `test/ask`.
 
 Quick replies stay inline. Longer requests return a durable queue receipt, free
 the composer, and continue as independent Nexus runs. `AskWorkQueue` shows up to
-three cards above the composer, then a single count linked to the conversation's
-runs. A card opens its run; no new task is submitted by navigation or polling.
+three cards above the composer. With more cards, the count expands when work can
+receive guidance; Open Nexus still opens the conversation's runs. A card opens
+its run. Guide this work explicitly scopes the existing composer to a server-
+advertised active run and its opaque guidance epoch; Return to conversation exits guidance mode without
+losing the draft or retracting a message already sent. No new task is submitted by navigation,
+polling or guidance. `askGuideWork` records a human-only conversation receipt:
+queued until a reasoning call uses it, applied after use, or not received if the
+work ended or changed first. It never grants permission. Unknown write outcomes
+retry the original request ID, target epoch and text while preserving newer
+writing. Waiting approvals retain their separate approval discussion path.
 `askConversationSnapshot` projects progress from persisted runs on any replica.
 `conversationFeed` keeps the acceptance in place and places a completed result
 at its completion time with the original request's title. Polling must preserve
@@ -1919,11 +1902,34 @@ three came with epic memql#5414 (versions, verdicts and the reuse ratio).
   and counters, and resumes the saved run. A human-approved allowance overrides
   the workload estimate only for that named limit, across replicas.
 
-  **`answer` is the one contract this window guesses at.** It is declared
-  `object` on both the concept and the builtin and epic A2 owns the executor
-  that reads it, so `answerPayload` sends back the option the approval itself
-  offered (`{value, label}`) or `{text}` for a question with none -- written
-  down in one function rather than spread through the surface.
+  Approvals open in place with Back to the list. Failure questions offer
+  Retry and Abandon even when a historical row says `planReview`; their offered
+  option values identify the failure contract. They do not imply a proposed
+  repair or a permission grant.
+
+  Typed computer permissions name the machine and exact directory read or
+  command, working directory and time limit. **Allow once** is the default;
+  remembering a scope is an explicit choice. Legacy broad requests remain
+  **Allow for this work**. Saved permissions are nested under Approvals and can
+  be revoked individually.
+
+  An expired computer-access request keeps **Discuss in Ask** while its run
+  still waits on that exact request. Guidance can resume the saved work to
+  request fresh permission; it does not renew the expired grant. Approval
+  and advisor actions remain unavailable on the expired request.
+
+  **Discuss in Ask** reuses the request's conversation. Discussion messages and
+  explicit **Ask another agent** investigations are read-only child work;
+  neither decides the request. The composer remains editable during advice.
+  **Send guidance** submits the human's draft only when the server says the
+  waiting work can accept it. A recorded answer that did not resume offers
+  **Retry continuing**, using the exact stored guidance, including after a
+  reload via **View request** on the persisted guidance message. Retrying never substitutes a newer composer draft or grants access.
+  A resumable budget request instead offers **Save guidance**. It keeps the
+  request pending and shows the saved text; **Raise limit** later applies that
+  guidance while continuing the saved work. Saving again replaces the pending
+  guidance. An uncertain save offers **Retry saving** with its original text,
+  never **Retry continuing**. Discussion alone remains advisory.
 
 - **THE JOURNAL IS NOT LIVE AND SAYS SO; THE STEPS FEED BELONGS TO THE PAGE.**
   `v1:work:goal`, `run`, `step` and `approval` broadcast; `modelCall` and
@@ -2318,6 +2324,18 @@ other app carries.
   An `integration` or `node-type` gets a sentence explaining why there is no
   switch instead of a disabled one (rule 12).
 
+### Storage warning
+
+Owners see a compact capacity warning above the dock when the instance's
+existing database monitor reports a data or recovery-log volume above 80%.
+Review storage opens Readiness, where the report gives usage and its measurement
+time. The owner-only stream read checks the monitor's current database identity;
+missing or stale readings are unavailable. A last-known warning survives a read
+failure and clears only on a fresh complete report. The shared feed polls once
+per minute while visible and connected, stops on role change, and never writes
+another health record. The browser QA views `storage-warning`, `storage-healthy`,
+`storage-missing`, `storage-stale` and `storage-loading` exercise the states.
+
 ### Releases
 
 Cluster → Releases is the owner's review history. It shows immutable component
@@ -2504,11 +2522,3 @@ actual detail page, including arrival while a different tab is selected.
 A navigation event holds a quiet window/tab glow long enough to be seen. Only
 an explicitly bound action control receives a control cue; reads and unrelated
 tool completions must not move focus or erase a navigation cue. No fake cursor.
-
-### Email app availability
-
-`MEMQL_EMAIL_APP_ENABLED=false` on Edge removes the operator test inbox from
-the OS registry, including the launcher and restored windows.
-It defaults to enabled and is independent of `MEMQL_EMAIL_TRANSPORT`; Campaigns
-and transactional mail continue using their configured providers. Set this value
-in the installation overlay, never by branching on its domain or environment.

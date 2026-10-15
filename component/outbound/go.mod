@@ -41,6 +41,7 @@ require (
 	github.com/prometheus/common v0.70.1 // indirect
 	github.com/prometheus/procfs v0.21.1 // indirect
 	github.com/puzpuzpuz/xsync/v3 v3.5.1 // indirect
+	github.com/robfig/cron/v3 v3.0.1 // indirect
 	github.com/santhosh-tekuri/jsonschema/v5 v5.3.1 // indirect
 	github.com/standard-webhooks/standard-webhooks/libraries v0.0.1 // indirect
 	github.com/tidwall/gjson v1.19.0 // indirect
@@ -56,6 +57,7 @@ require (
 	github.com/yuin/goldmark v1.8.6 // indirect
 	github.com/zeozeozeo/gomplerate v0.0.0-20250404113140-0fbb236df825 // indirect
 	github.com/znasllc-io/memql/component/actions v0.0.0 // indirect
+	github.com/znasllc-io/memql/component/automations v0.0.0 // indirect
 	github.com/znasllc-io/memql/component/bus v0.0.0 // indirect
 	github.com/znasllc-io/memql/component/bus/gen v0.0.0 // indirect
 	github.com/znasllc-io/memql/component/compose v0.0.0 // indirect
@@ -71,6 +73,7 @@ require (
 	github.com/znasllc-io/memql/component/provenance v0.0.0 // indirect
 	github.com/znasllc-io/memql/component/safety v0.0.0 // indirect
 	github.com/znasllc-io/memql/component/secret v0.0.0 // indirect
+	github.com/znasllc-io/memql/component/work v0.0.0 // indirect
 	github.com/znasllc-io/memql/docs v0.0.0 // indirect
 	github.com/znasllc-io/memql/dsl v0.0.0 // indirect
 	go.opentelemetry.io/otel v1.44.0 // indirect
@@ -135,3 +138,9 @@ replace github.com/znasllc-io/memql/component/frontdoor => ../frontdoor
 replace github.com/znasllc-io/memql/component/metrics => ../metrics
 
 replace github.com/znasllc-io/memql/component/compose => ../compose
+
+replace github.com/znasllc-io/memql/component/automations => ../automations
+
+replace github.com/znasllc-io/memql/component/work => ../work
+
+replace github.com/znasllc-io/memql/component/healing => ../healing

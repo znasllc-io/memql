@@ -491,6 +491,31 @@ All optional. Defaults baked into `component/database/database.go`:
 | `MEMORY_NODES_DATABASE_CONN_MAX_LIFETIME_MS`          | `3600000`   |
 | `MEMORY_NODES_DATABASE_CONN_MAX_IDLE_TIME_MS`         | `120000`    |
 
+`MEMQL_DATABASE_SCHEMA_REFERENCES_ACTIVATE` defaults to `false` and is read
+at startup. It permits the **first activation** of shared row-schema references;
+it does not select a reader format. Every upgraded replica advertises reader
+support while this setting is false. A true replica can activate the shared
+format only when every registered node that has not stopped recently advertised
+support. An invalid or empty boolean refuses startup.
+
+Keep this setting false on **every replica** during the reader upgrade and its
+rollback observation window. A topology row marked stopped is not proof that
+the old process has closed its existing streams. Verify all old serving
+processes have exited, check the upgraded service and a full-schema backup, and
+choose a reference-capable rollback image before a separate activation rollout.
+Setting true on even one replica permits cluster-wide activation. Change the
+desired startup configuration through the installation's GitOps overlay and
+roll the affected pods; changing a ConfigMap alone does not update process
+environment.
+
+After `memory_schema_storage.references_enabled` becomes true, false does not
+reverse existing references, stop normalization of new writes, or suspend
+remaining conversion. Readers always support both inline and referenced
+schemas. An image-only rollback must use a reference-capable engine; returning
+to an older engine requires a tested full-schema restore and its recovery
+window. The down migration refuses that downgrade. Before activation, schemas
+remain inline, but other release changes still need their own rollback checks.
+
 A migration runs only after acquiring the shared migration lock. A competing
 replica defers and retries later. If a connection or context deadline expires,
 the server may still be executing the migration: the runner retains the lock
@@ -630,13 +655,13 @@ site, still carries runtime settings and still records traffic. Full context:
 
 All in `component/server/memqlws/env.go`:
 
-| Variable                              | Default            |
-|---------------------------------------|--------------------|
-| `MEMQL_WS_DIAL_TIMEOUT_MS`            | `5000`             |
-| `MEMQL_WS_WRITE_TIMEOUT_MS`           | `10000`            |
-| `MEMQL_WS_MAX_CONCURRENT_REQUESTS`    | `4`                |
-| `MEMQL_WS_MAX_MESSAGE_BYTES`          | `5242880` (5 MB)   |
-| `MEMQL_WS_PING_INTERVAL_MS`           | `30000`            |
+| Variable                              | Default             |
+|---------------------------------------|---------------------|
+| `MEMQL_WS_DIAL_TIMEOUT_MS`            | `5000`              |
+| `MEMQL_WS_WRITE_TIMEOUT_MS`           | `10000`             |
+| `MEMQL_WS_MAX_CONCURRENT_REQUESTS`    | `4`                 |
+| `MEMQL_WS_MAX_MESSAGE_BYTES`          | `33554432` (32 MiB); a session that has not signed in is held to 5 MiB at most |
+| `MEMQL_WS_PING_INTERVAL_MS`           | `15000`             |
 
 ---
 
@@ -649,7 +674,7 @@ MemQL OS Logs app reads them (epic memql#4893). Runbook: [Logs](logs.md).
 |-------------------------------------|-------------------------------|------------------------------------------------------------------------------------------------------------------------|
 | `MEMQL_LOGS_LEVEL`                  | `info`                        | The store's floor on this node: `debug`, `info`, `warn`, `error` or `off`. The console handler's level is untouched, so a node keeps printing what it printed. |
 | `MEMQL_LOGS_MAX_LINES_PER_SECOND`   | `2000`                        | Per-node, per-second cap on stored lines (clamped 10..100000). Beyond it a line is dropped and counted on `memql_logs_dropped_total{reason="rate"}`; the node writes one stored warning per minute naming the drops, so the gap is visible in the Logs app. |
-| `MEMQL_LOGS_RETENTION_DAYS`         | `30`                          | Days of lines kept before the nightly `logsRetentionSweep` archives a day to blob storage and then deletes it (clamped 1..365). No archive, no delete: with no container the sweep keeps every line and says so. |
+| `MEMQL_LOGS_RETENTION_DAYS`         | `30`                          | Fallback log lifetime when logLine has no `@retention` declaration (clamped 1..365). The declared policy takes precedence. The nightly sweep verifies each archive before deletion; with no archive, every line stays. |
 | `MEMQL_LOGS_ARCHIVE_CONTAINER`      | `MEMQL_AZURE_BLOB_CONTAINER`  | The blob container the archive objects (`logs/<day>/<nodeType>.ndjson.gz`) land in. Empty means no archive is configured. |
 
 #### Pipelines (the substrate)
@@ -1074,6 +1099,11 @@ overrides a stored global variable; every window above except the two
 journal-detail windows honors an existing global setting, including the legacy
 `WORKER_INVOCATION_RETENTION_DAYS` global variable. Invalid/nonpositive values
 use the documented defaults.
+
+The sweep reads each window's records one UTC day at a time, oldest first, and
+spends at most four minutes, shared among the policies; a backlog older than
+that is retired over several nights, and the sweep's result marks the policies
+that ran out of their share with `budgetExhausted`.
 
 `MEMQL_WORK_ARCHIVE_CONTAINER` defaults to `MEMQL_AZURE_BLOB_CONTAINER`.
 Archives use `retention/<UTC-day>/<sha256>.ndjson.gz`, with the original node

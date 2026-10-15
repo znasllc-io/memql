@@ -1,7 +1,8 @@
 import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { readTheBar } from "../readTheBar";
 import { chooseOption } from "../selectControl";
-import { rowsResult, withSession } from "../campaigns/harness";
+import { rowsResult, withSession } from "../email/harness";
 const h = vi.hoisted(() => ({ connection: null as unknown }));
 vi.mock("../../src/live/connection", () => ({ useOsConnection: () => h.connection }));
 vi.mock("../../src/apps/accounts/tie", () => ({ useAccountOptions: () => [
@@ -16,7 +17,13 @@ const query = (reply: (args: Args) => Record<string, unknown> | Promise<Record<s
   h.connection = { query: { emailAzureSetup: call, packageCampaigns: vi.fn(async () => rowsResult([{status:"installed",manifest:null}])) } };
   return call;
 };
-const click = async (name: string) => { const button = vi.isFakeTimers() ? screen.getByRole("button", { name }) : await screen.findByRole("button", { name }); await act(async () => { fireEvent.click(button); }); };
+/** Clicks a button; one of the bar's acts is clicked once the bar has been read, since a bar that has just changed takes no press for a moment. */
+const click = async (name: string) => {
+  const find = () => (vi.isFakeTimers() ? screen.getByRole("button", { name }) : screen.findByRole("button", { name }));
+  if ((await find()).closest('[aria-label="What you can do with this"]') !== null) await readTheBar();
+  const button = await find();
+  await act(async () => { fireEvent.click(button); });
+};
 afterEach(() => { h.connection = null; sessionStorage.clear(); vi.useRealTimers(); });
 
 describe("one Azure configuration per cluster", () => {
@@ -46,7 +53,7 @@ describe("one Azure configuration per cluster", () => {
     expect(call.mock.calls.find(([args]) => args.action === "saveCluster")?.[0]).toMatchObject({ accountId: "self", sessionId: "session", options: { subscriptionId: "subscription", resourceGroup: "mail" } });
     expect(call.mock.calls.some(([args]) => args.action === "provision")).toBe(false);
   });
-  it("keeps cluster connection controls out of Campaigns", async () => {
+  it("keeps cluster connection controls out of Email", async () => {
     const call = query(args => args.action === "clusterStatus" ? { status: "unconfigured", capture: true } : { status: "unconfigured" });
     render(withSession(<AzureEmailConnections manageCluster={false}/>));
     expect(await screen.findByText(/Configure Azure once in Settings/)).toBeTruthy();
@@ -246,8 +253,77 @@ describe("one Azure configuration per cluster", () => {
     chooseOption(screen.getByRole("combobox", { name: "Organization" }), "Client");
     await click("Manage email for Client"); await click("Check sends");
     expect(await screen.findByText("Processing completed")).toBeTruthy();
-    expect(screen.getByText(/does not confirm inbox delivery/)).toBeTruthy();
+    expect(screen.getByText("Delivery unconfirmed")).toBeTruthy();
+    expect(screen.getByText("Unavailable")).toBeTruthy();
     expect(call.mock.calls.find(([args]) => args.action === "operations")?.[0].accountId).toBe("client");
+  });
+  it.each([
+    ["ready", "Connected"], ["pending", "Preparing"], ["not-configured", "Not connected"],
+  ])("reads delivery feedback readiness %s with an empty receipt list", async (deliveryFeedback, label) => {
+    query(args => args.action === "clusterStatus" ? cluster : args.action === "operations" ? { status: "ok", deliveryFeedback, operations: [] } : { status: "ready", sender: "news@client.example", plan });
+    render(withSession(<AzureEmailConnections/>));
+    await click("Manage email for Our company"); await click("Check sends");
+    const section = screen.getByRole("region", { name: "Azure send processing" });
+    expect(within(section).getByText(label)).toBeTruthy();
+    expect(within(section).getByText("No Azure sends recorded for this organization.")).toBeTruthy();
+    expect(within(section).queryByText("Delivery unconfirmed")).toBeNull();
+  });
+  it("keeps provider verdicts and their timestamps separate from transport completion", async () => {
+    const at = "2026-10-01T12:04:00Z";
+    const verdicts = ["delivered", "bounced", "suppressed", "quarantined", "filtered-spam", "failed", "expanded"];
+    query(args => args.action === "clusterStatus" ? cluster : args.action === "operations" ? { status: "ok", deliveryFeedback: "ready", operations: verdicts.map((deliveryStatus, i) => ({ operationId: String(i), status: "succeeded", detail: "", submittedAt: "2026-10-01T12:00:00Z", deliveryStatus, deliveryAt: at })) } : { status: "ready", sender: "news@client.example", plan });
+    render(withSession(<AzureEmailConnections/>));
+    await click("Manage email for Our company"); await click("Check sends");
+    const section = screen.getByRole("region", { name: "Azure send processing" });
+    expect(within(section).getAllByText("Processing completed")).toHaveLength(7);
+    for (const label of ["Confirmed by recipient server", "Delivery bounced", "Delivery suppressed", "Delivery quarantined", "Filtered as spam", "Delivery failed", "Expanded to a distribution list"]) expect(within(section).getByText(label)).toBeTruthy();
+    expect(within(section).getAllByText(new Date(at).toLocaleString())).toHaveLength(7);
+    expect(within(section).queryByText(/inbox|delivered/i)).toBeNull();
+  });
+  it("does not confirm delivery from missing, zero or invalid report data", async () => {
+    const reports = [{}, { deliveryStatus: "delivered" }, { deliveryStatus: "delivered", deliveryAt: "0001-01-01T00:00:00Z" }, { deliveryStatus: "delivered", deliveryAt: "invalid" }, { deliveryAt: "2026-10-01T12:04:00Z" }];
+    query(args => args.action === "clusterStatus" ? cluster : args.action === "operations" ? { status: "ok", deliveryFeedback: "ready", operations: reports.map((report, i) => ({ operationId: String(i), status: "succeeded", detail: "", submittedAt: "2026-10-01T12:00:00Z", ...report })) } : { status: "ready", sender: "news@client.example", plan });
+    render(withSession(<AzureEmailConnections/>));
+    await click("Manage email for Our company"); await click("Check sends");
+    const section = screen.getByRole("region", { name: "Azure send processing" });
+    expect(within(section).getAllByText("Delivery unconfirmed")).toHaveLength(5);
+    expect(within(section).queryByText("Reported")).toBeNull();
+    expect(within(section).queryByText("Confirmed by recipient server")).toBeNull();
+  });
+  it("refreshes feedback readiness and recipient reports together without resubmitting mail", async () => {
+    let reads = 0;
+    const call = query(args => args.action === "clusterStatus" ? cluster : args.action === "operations" ? { status: "ok", deliveryFeedback: ++reads === 1 ? "pending" : "ready", operations: [{ operationId: "receipt", status: "succeeded", detail: "", submittedAt: "2026-10-01T12:00:00Z", ...(reads > 1 ? { deliveryStatus: "delivered", deliveryAt: "2026-10-01T12:04:00Z" } : {}) }] } : { status: "ready", sender: "news@client.example", plan });
+    render(withSession(<AzureEmailConnections/>));
+    await click("Manage email for Our company");
+    vi.useFakeTimers();
+    await click("Check sends");
+    expect(screen.getByText("Preparing")).toBeTruthy();
+    expect(screen.getByText("Delivery unconfirmed")).toBeTruthy();
+    await act(async () => { await vi.advanceTimersByTimeAsync(15_000); });
+    expect(reads).toBe(2);
+    const section = screen.getByRole("region", { name: "Azure send processing" });
+    expect(within(section).getByText("Connected")).toBeTruthy();
+    expect(within(section).getByText("Confirmed by recipient server")).toBeTruthy();
+    expect(within(section).queryByText("Delivery unconfirmed")).toBeNull();
+    expect(call.mock.calls.every(([args]) => ["clusterStatus", "status", "operations"].includes(args.action))).toBe(true);
+  });
+  it("keeps Check sends available after an unreadable response", async () => {
+    let reads = 0;
+    query(args => {
+      if (args.action === "clusterStatus") return cluster;
+      if (args.action === "operations") {
+        if (++reads === 1) throw Error("Send reports could not be read.");
+        return { status: "ok", deliveryFeedback: "ready", operations: [] };
+      }
+      return { status: "ready", sender: "news@client.example", plan };
+    });
+    render(withSession(<AzureEmailConnections/>));
+    await click("Manage email for Our company"); await click("Check sends");
+    expect(screen.getByText("Send reports could not be read.")).toBeTruthy();
+    expect(screen.queryByText("No Azure sends recorded for this organization.")).toBeNull();
+    await click("Check sends");
+    expect(screen.getByText("No Azure sends recorded for this organization.")).toBeTruthy();
+    expect(screen.queryByText("Send reports could not be read.")).toBeNull();
   });
   it("discards a previous organization's late domain response", async () => {
     let resolve: (value: Record<string, unknown>) => void = () => {};

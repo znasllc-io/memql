@@ -1,13 +1,22 @@
+import { UsersApp } from "../src/apps/users/UsersApp";
+import { LocalUsersSettingsStore } from "../src/apps/users/settings";
+import { fakeConnection as usersConnection, withSession as usersSession, roleRow as usersRole, grantRow as usersGrant, groupRow as usersGroup } from "../test/users/harness";
+import { StorageScene } from "./storageScenes";
+import { emailScenes, EMAIL_CLICKS } from "./emailScenes";
+import { nexusApprovalScenes, NEXUS_APPROVAL_CLICKS } from "./nexusApprovalScenes";
+import { fleetEquipmentScenes } from "./fleetEquipmentScenes";
+import { mapScenes } from "./mapScenes";
+import { MATERIALIZER_VIEWS } from "./materializerScenes";
 import { FilesApp } from "../src/apps/files/FilesApp";
 import { LocalFilesSettingsStore } from "../src/apps/files/settings";
 import { fakeConnection as filesConnection, artifactRow as filesArtifact, folderRow as filesFolder, fileRow as filesFile, versionRow as filesVersion, watchedFolderRow, withSession as filesSession } from "../test/files/harness";
-import { CampaignsSettingsSection } from "../src/apps/campaigns/CampaignsSettingsSection";
+import { EmailApp } from "../src/apps/email/EmailApp";
 import { AzureEmailConnections } from "../src/modules/connections/AzureEmailConnections";
-import { DEFAULT_CAMPAIGNS_SETTINGS } from "../src/apps/campaigns/settings";
-import { fakeConnection as campaignConnection, rowsResult, withSession as campaignSession } from "../test/campaigns/harness";
-import { NewsletterPanel } from "../src/apps/campaigns/NewsletterPanel";
-import { useCampaignFeeds } from "../src/apps/campaigns/useCampaigns";
-import { RecurrencePanel } from "../src/apps/campaigns/RecurrencePanel";
+import { LocalEmailSettingsStore } from "../src/apps/email/settings";
+import { audienceRow as campaignAudience, campaignRow as emailCampaign, deliveryRow as emailDelivery, fakeConnection as campaignConnection, pagedResult as emailPage, rowsResult, ruleRow as emailRule, senderRow as campaignSender, templateRow as emailTemplate, withSession as campaignSession } from "../test/email/harness";
+import { useEmailFeeds } from "../src/apps/email/useEmail";
+import { EmailNavigationContext } from "../src/apps/email/openRequest";
+import { OverviewSection } from "../src/apps/email/overview/OverviewSection";
 import { AccountsApp } from "../src/apps/accounts/AccountsApp";
 import { LocalAccountsSettingsStore } from "../src/apps/accounts/settings";
 import { fakeConnection as accountConnection, accountRow, withSession as accountSession } from "../test/accounts/harness";
@@ -16,7 +25,7 @@ import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 
 import "../src/styles/index.css";
 import { applyPackStyles, resolveThemePack } from "../src/themes/registry";
-import { Panel } from "../src/kit";
+import { Button, Notice, Panel } from "../src/kit";
 import { setRoleLadder } from "../src/system/roles";
 import { SEEDED_LADDER } from "../test/seededLadder";
 import {
@@ -69,7 +78,6 @@ import {
 } from "../test/deployables/harness";
 import { siteFromRow } from "../src/apps/deployables/rows";
 import { MachineDetail } from "../src/apps/fleet/machines/MachineDetail";
-import { ShareDialog } from "../src/apps/fleet/machines/ShareDialog";
 import type { MachineWrites } from "../src/apps/fleet/machines/useMachineWrites";
 import { machineFromRow } from "../src/apps/fleet/rows";
 import { MachinesProvider } from "../src/live/machines";
@@ -86,6 +94,8 @@ import { useAutomationFeeds } from "../src/apps/nexus/useAutomations";
 import {
   constructRow as nexusConstructRow,
   fakeConnection as nexusConnection,
+  goalRow as nexusGoal,
+  runRow as nexusRun,
   ladderPolicyRow as nexusLadderPolicyRow,
   procedureRow as nexusProcedureRow,
   withSession as nexusSession,
@@ -675,25 +685,18 @@ function PreviewPage({ site }: { site: ReturnType<typeof siteFromRow> }) {
 // `syncStatesAll`. Two fixture harnesses rather than one widened one, for the
 // reason the README gives about the fake in general: each is the SUITE's, so a
 // screenshot cannot disagree with what those tests assert.
-const recurrenceQaRow = { id: "qa-series", sourceCampaignId: "qa-campaign", intervalWeeks: 3, timeZone: "America/Phoenix", status: "active", anchorAt: "2026-10-09T16:00:00Z", nextAt: "2026-10-30T16:00:00Z", createdAt: "2026-10-01T12:00:00Z" };
-function RecurrenceQa() {
-  const narrow = new URLSearchParams(window.location.search).get("width") === "narrow";
-  return <div className="os-window-content" style={{ maxWidth: narrow ? 390 : 880, margin: "0 auto" }}><RecurrencePanel campaignId="qa-campaign" /></div>;
-}
 
-const newsletterQaSite = { id: "qa-shop", accountId: "qa-client", title: "Client storefront", status: "live" };
-const newsletterQaBinding = { id: "qa-newsletter", siteId: "qa-shop", accountId: "qa-client", audienceId: "qa-audience", templateId: "qa-welcome", senderIdentityId: "qa-sender", enabled: true, consentText: "Send me product news and offers by email.", createdAt: "2026-10-01T12:00:00Z" };
-function newsletterQaConnection(populated: boolean) {
-  return campaignConnection({ sites: [newsletterQaSite], newsletters: populated ? [newsletterQaBinding] : [],
-    templates: [{ id: "qa-welcome", accountId: "qa-client", name: "Thanks for subscribing", status: "ready" }],
-    senderIdentities: [{ id: "qa-sender", accountId: "qa-client", address: "hello@client.example", status: "active" }],
-    welcomes: populated ? [{ id: "qa-sent", email: "alex@example.test", displayName: "Alex", requestedAt: "2026-10-01T13:00:00Z", status: "sent" }, { id: "qa-blocked", email: "jordan@example.test", displayName: "Jordan", requestedAt: "2026-10-01T13:02:00Z", status: "blocked", lastError: "This sender is disabled. Review the sending identity before continuing." }] : [],
-  });
-}
-function NewsletterQa() {
-  const resources = useCampaignFeeds();
-  const narrow = new URLSearchParams(window.location.search).get("width") === "narrow";
-  return <div className="os-window-content" style={{ maxWidth: narrow ? 390 : 880, margin: "0 auto" }}><NewsletterPanel audienceId="qa-audience" accountId="qa-client" resources={resources} /></div>;
+function FeedbackPreview() {
+  const { actions } = useOs();
+  useEffect(() => { actions.setThemePack(resolveThemePack(new URLSearchParams(window.location.search).get("theme") ?? "graphite").id); }, [actions]);
+  const [saved, setSaved] = useState(false);
+  return <div className="os-window-content" style={{ display: "grid", gap: 16, alignContent: "start" }}>
+    <Notice sentence="Sharing applies to the people and groups you choose." />
+    <Notice tone="warn" sentence="People and groups may be out of date." next="Your choices are kept while the connection recovers." />
+    {saved ? <p role="status" className="os-caption">Sharing saved.</p> : <Notice tone="error" sentence="That change was not saved." next="Your choices are kept." detail="The connection was interrupted. Try again."><Button onClick={() => setSaved(true)}>Try again</Button></Notice>}
+    <div className="os-domain-problem"><p className="os-domain-problem-sentence">The domain could not be verified.</p><p className="os-domain-problem-detail">Check the DNS record, then try again.</p></div>
+    <div className="os-fleet-revoked"><p className="os-caption">This machine was removed from the fleet.</p></div>
+  </div>;
 }
 
 const VIEWS: Record<
@@ -707,6 +710,19 @@ const VIEWS: Record<
     render: () => JSX.Element;
   }
 > = {
+  "feedback": { render: () => <WindowBody fallback="Notices"><FeedbackPreview /></WindowBody> },
+  ...MATERIALIZER_VIEWS,
+  ...mapScenes(WindowBody),
+  ...fleetEquipmentScenes(WindowBody),
+  "users-groups": usersWizardView("groups"),
+  "users-roles": usersWizardView("roles"),
+  "users-invite": usersWizardView("people"),
+  "storage-phone": { render: () => <StorageScene state="warning" phone /> },
+  "storage-warning": { render: () => <StorageScene state="warning" /> },
+  "storage-healthy": { render: () => <StorageScene state="healthy" /> },
+  "storage-missing": { render: () => <StorageScene state="missing" /> },
+  "storage-stale": { render: () => <StorageScene state="stale" /> },
+  "storage-loading": { render: () => <StorageScene state="loading" /> },
   "files": filesPreview("browse"),
   "files-empty": filesPreview("browse", true),
   "files-backups": filesPreview("backups"),
@@ -714,25 +730,31 @@ const VIEWS: Record<
   "azure-email-dns": azureEmailView("dns"),
   "azure-email-provisioning": azureEmailView("provisioning"),
   "azure-email-empty": azureEmailView("unconfigured"),
-  "campaigns-settings": campaignSettingsView(false),
-  "campaigns-settings-connected": campaignSettingsView(true),
-  "campaign-newsletter-empty": { connect: () => newsletterQaConnection(false), wrap: el => campaignSession(el), render: () => <NewsletterQa /> },
-  "campaign-newsletter-active": { connect: () => newsletterQaConnection(true), wrap: el => campaignSession(el), render: () => <NewsletterQa /> },
-  "campaign-repeat-empty": {
-    connect: () => campaignConnection(),
-    wrap: el => campaignSession(el),
-    render: () => <RecurrenceQa />,
-  },
-  "campaign-repeat-active": {
-    connect: () => campaignConnection({ campaignSeries: [recurrenceQaRow] }),
-    wrap: el => campaignSession(el),
-    render: () => <RecurrenceQa />,
-  },
-  "campaign-repeat-blocked": {
-    connect: () => campaignConnection({ campaignSeries: [{ ...recurrenceQaRow, status: "blocked", lastError: "Publish the template before resuming this schedule." }] }),
-    wrap: el => campaignSession(el),
-    render: () => <RecurrenceQa />,
-  },
+  "azure-email-sends": azureEmailView("ready"),
+  "azure-email-sends-pending": azureEmailView("ready", "pending"),
+  "azure-email-sends-empty": azureEmailView("ready", "not-configured"),
+  ...emailScenes(WindowBody),
+  ...nexusApprovalScenes(WindowBody),
+  // Email -> Campaigns (memql#6033): the list, and Add a campaign reached the
+  // way a person reaches it, `&click=Add a campaign|Newsletter|...`.
+
+  // The same, for somebody who chooses between organizations: Review's sentence
+  // then says whose campaign it is.
+  "email-campaigns-organizations": emailCampaignsView(true, true),
+  // Email -> Overview (memql#6033): a month of mail; a cluster with none; every
+  // read still on its way; every read refused; and a rate the engine could not
+  // state exactly.
+  "email-overview": emailOverviewView("populated"),
+  "email-overview-empty": emailOverviewView("empty"),
+  "email-overview-reading": emailOverviewView("reading"),
+  "email-overview-refused": emailOverviewView("refused"),
+  "email-overview-unmeasured": emailOverviewView("unmeasured"),
+  "email-overview-untracked": emailOverviewView("untracked"),
+  "email-overview-floor": emailOverviewView("floor"),
+  // The page a moment after the cluster stopped answering: the figures it had, and one
+  // notice -- the cluster refusing a refresh, and the connection dropping.
+  "email-overview-interrupted": emailOverviewInterruptedView("refused"),
+  "email-overview-reconnecting": emailOverviewInterruptedView("disconnected"),
   // NEXUS (epic memql#5414): what an automation is for. The procedure's page
   // in the three readings its Reuse panel has -- the evidence deciding, a
   // person's own label over evidence that disagrees, and nothing counted yet
@@ -758,6 +780,22 @@ const VIEWS: Record<
     connect: () => nexusConnection({ learnedProcedures: [nexusProcedureRow({ id: "p1" })], ladderPolicy: [nexusLadderPolicyRow()] }),
     wrap: (el, role) => nexusSession(el, { role }),
     render: () => <NexusPane section="automations" intent={{ id: "qa", payload: { procedureId: "p1" } }} />,
+  },
+  "nexus-runs": {
+    connect: () => nexusConnection({
+      goals: [nexusGoal({ id: "g1", statement: "Please inspect the repository in my home directory, read its instructions, find the reported issue, fix it and open a pull request with the test results." })],
+      runs: [
+        nexusRun({ id: "r1", goalId: "g1", classification: { workTitle: "Fix repository issue" }, status: "waiting", waitingOn: { kind: "approval" }, createdAt: "2026-09-02T09:00:00Z" }),
+        nexusRun({ id: "r2", workTitle: "Review release notes", status: "running", createdAt: "2026-09-01T09:00:00Z" }),
+      ],
+    }),
+    wrap: (el, role) => nexusSession(el, { role }),
+    render: () => <NexusPane section="runs" />,
+  },
+  "nexus-runs-empty": {
+    connect: () => nexusConnection({ runs: [] }),
+    wrap: (el, role) => nexusSession(el, { role }),
+    render: () => <NexusPane section="runs" />,
   },
   "nexus-automations": {
     connect: () => nexusConnection(nexusLibrary()),
@@ -923,7 +961,7 @@ const VIEWS: Record<
   },
   // Sharing a machine (epic memql#5344). The panel in each reading of who can
   // use it, then the dialog. `sharing-people` is the one to read first: names,
-  // both consents given, and the week's split ledger line.
+  // the saved audience and the week's split ledger line.
   "sharing-owner": {
     connect: () => fleetConnection({}),
     wrap: (el) => fleetSession(<MachinesProvider>{el}</MachinesProvider>),
@@ -934,9 +972,8 @@ const VIEWS: Record<
     wrap: (el) => fleetSession(<MachinesProvider>{el}</MachinesProvider>),
     render: () => <SharingPane over={{ sharing: SHARED_WITH_PEOPLE, capabilityDescriptor: { inferenceServe: "cluster" } }} />,
   },
-  // Lent by its owner, not yet agreed to by the machine: the one-line state is
-  // muted and the cockpit's line says what to change and where.
-  "sharing-waiting": {
+  // A stored machine descriptor from an earlier Cockpit cannot block sharing.
+  "sharing-legacy-descriptor": {
     connect: () => fleetConnection({ fleetShareDirectory: [SHARE_DIRECTORY] }),
     wrap: (el) => fleetSession(<MachinesProvider>{el}</MachinesProvider>),
     render: () => <SharingPane over={{ sharing: SHARED_WITH_PEOPLE, capabilityDescriptor: { inferenceServe: "owner" } }} />,
@@ -1167,12 +1204,12 @@ function MachinePane({ over }: { over: Record<string, unknown> }) {
   };
   return (
     <div className="os-window-content">
-      <MachineDetail machine={machine} writes={writes} now={FLEET_NOW} view="details" />
+      <MachineDetail machine={machine} writes={writes} now={FLEET_NOW} view="settings" />
     </div>
   );
 }
 
-function azureEmailView(status: string) {
+function azureEmailView(status: string, feedback = "ready") {
   return {
     connect: () => {
       const conn = campaignConnection({ accounts: [accountRow({ id: "studio", name: "Our Studio" })] });
@@ -1186,21 +1223,38 @@ function azureEmailView(status: string) {
       Object.assign(conn.query, { emailAzureSetup: async ({ action }: { action: string }) => rowsResult([
         action === "clusterStatus" ? { status: "connected", capture: true, resourceGroup: "mail" } :
         action === "prepare" ? { status: "planned", plan, planId: "qa" } :
+        action === "operations" ? { status: "ok", deliveryFeedback: feedback, operations: feedback === "not-configured" ? [] : [
+          { operationId: "confirmed", status: "succeeded", detail: "", submittedAt: "2026-10-12T12:00:00Z", deliveryStatus: feedback === "ready" ? "delivered" : "", deliveryAt: feedback === "ready" ? "2026-10-12T12:00:30Z" : "" },
+          { operationId: "bounced", status: "succeeded", detail: "", submittedAt: "2026-10-12T11:58:00Z", deliveryStatus: feedback === "ready" ? "bounced" : "", deliveryAt: feedback === "ready" ? "2026-10-12T11:58:30Z" : "" },
+          { operationId: "waiting", status: "accepted", detail: "", submittedAt: "2026-10-12T11:56:00Z" },
+        ] } :
         status === "unconfigured" ? { status } :
-        { status, plan, planId: "qa", ...(status === "dns" ? { records } : {}) },
+        { status, plan, planId: "qa", ...(status === "ready" ? { sender: "news@studio.example", replyTo: "hello@studio.example" } : {}), ...(status === "dns" ? { records } : {}) },
       ]) });
       return conn;
     },
     wrap: (el: JSX.Element, role: string) => campaignSession(el, { role }),
-    render: () => <WindowBody fallback="Campaigns" width={new URLSearchParams(window.location.search).get("width") === "narrow" ? 390 : undefined}><AzureEmailConnections manageCluster={false}/></WindowBody>,
+    render: () => <WindowBody fallback="Email" width={new URLSearchParams(window.location.search).get("width") === "narrow" ? 390 : undefined}><AzureEmailConnections manageCluster={false}/></WindowBody>,
   };
 }
 
 function campaignSettingsView(connected: boolean) {
   return {
     connect: () => {
-      const conn = campaignConnection({ accounts: [accountRow({ id: "studio", name: "Our Studio" })] });
+      const conn = campaignConnection({
+        accounts: [accountRow({ id: "studio", name: "Our Studio" })],
+        // The connected scene is the populated one: senders (one put away), and an audience to test with.
+        ...(connected ? {
+          senderIdentities: [
+            campaignSender({ id: "qa-sender-1", address: "news@studio.example", fromName: "Studio News", replyTo: "hello@studio.example", accountId: "studio", createdAt: "2026-09-02T00:00:00Z" }),
+            campaignSender({ id: "qa-sender-2", address: "events@studio.example", fromName: "Studio Events", accountId: "studio", status: "disabled", createdAt: "2026-08-01T00:00:00Z" }),
+          ],
+          audiences: [campaignAudience({ id: "qa-audience-1", name: "Studio reviewers", accountId: "studio" })],
+          testSettings: [{ id: "qa-test", accountId: "studio", audienceId: "qa-audience-1", createdAt: "2026-09-03T00:00:00Z" }],
+        } : {}),
+      });
       Object.assign(conn.query, { emailAzureSetup: async ({ action }: { action: string }) => rowsResult([
+        action === "clusterStatus" ? { status: "connected", capture: true, resourceGroup: "mail" } :
         action === "begin" ? { status: "waiting", sessionId: "qa", userCode: "WXYZ-1234", verificationUri: "https://microsoft.com/devicelogin" } :
         connected ? { status: "ready", sender: "news@studio.example", replyTo: "hello@studio.example", plan: { domain: "studio.example" } } : { status: "unconfigured" },
       ]) });
@@ -1210,9 +1264,235 @@ function campaignSettingsView(connected: boolean) {
     render: () => <CampaignSettingsPane />,
   };
 }
+// Email -> Settings as the window shows it: the page inside the app that holds
+// it, so its organization, senders, testing audience and package read the same
+// feeds a real window's do. (Task 19 renames the scenes.)
 function CampaignSettingsPane() {
-  const [settings, setSettings] = useState(DEFAULT_CAMPAIGNS_SETTINGS);
-  return <WindowBody fallback="Campaigns"><CampaignsSettingsSection settings={settings} update={patch => setSettings(old => ({ ...old, ...patch }))}/></WindowBody>;
+  const [store] = useState(() => new LocalEmailSettingsStore({ getItem: () => null, setItem: () => {} }));
+  return <WindowBody fallback="Email"><EmailApp sectionId="settings" navigate={() => {}} askContext={() => {}} store={store}/></WindowBody>;
+}
+
+// The campaigns a list is judged with: one in every state, a draft a series
+// repeats from, and the audiences, templates and sender Add a campaign offers.
+// Generic names and addresses only (acme.com, client.example).
+function emailCampaignsView(populated: boolean, organizations = false) {
+  const audiences = [
+    campaignAudience({ id: "qa-newsletter", name: "Newsletter" }),
+    campaignAudience({ id: "qa-signups", name: "Signups" }),
+    campaignAudience({ id: "qa-reviewers", name: "Reviewers" }),
+  ];
+  const templates = [
+    emailTemplate({ id: "qa-august", name: "August update" }),
+    emailTemplate({ id: "qa-welcome", name: "Welcome 2" }),
+    emailTemplate({ id: "qa-autumn", name: "Autumn sale", status: "draft" }),
+  ];
+  const campaigns = populated ? [
+    emailCampaign({ id: "qa-c-sending", name: "August update", audienceId: "qa-newsletter", templateId: "qa-august", status: "sending", recipientCount: 1250, sentCount: 1204, startedAt: "2026-10-11T15:00:00Z" }),
+    emailCampaign({ id: "qa-c-scheduled", name: "Launch day", audienceId: "qa-newsletter", templateId: "qa-welcome", status: "scheduled", scheduledAt: "2031-10-14T16:00:00Z" }),
+    emailCampaign({ id: "qa-c-repeat", name: "Weekly digest", audienceId: "qa-signups", templateId: "qa-welcome" }),
+    emailCampaign({ id: "qa-c-draft", name: "Autumn sale", audienceId: "qa-newsletter", templateId: "qa-autumn" }),
+    emailCampaign({ id: "qa-c-ready", name: "October update", audienceId: "qa-newsletter", templateId: "qa-august", senderIdentityId: "qa-news" }),
+    emailCampaign({ id: "qa-c-sent", name: "July update", audienceId: "qa-newsletter", templateId: "qa-august", status: "sent", recipientCount: 1204, sentCount: 1176, skippedCount: 24, failedCount: 4, startedAt: "2026-10-03T16:00:00Z", completedAt: "2026-10-03T18:00:00Z", replyTo: "hello@acme.com" }),
+    emailCampaign({ id: "qa-c-failed", name: "Spring promo", audienceId: "qa-signups", templateId: "qa-welcome", status: "failed", lastError: "The sending service refused the sender address." }),
+    emailCampaign({ id: "qa-c-cancelled", name: "Holiday preview", audienceId: "qa-newsletter", templateId: "qa-august", status: "cancelled" }),
+  ] : [];
+  return {
+    connect: () => {
+      const conn = campaignConnection({
+        ...(organizations ? {
+          accounts: [
+            { id: "self", name: "Operator organization", status: "active" },
+            { id: "qa-client", name: "Client Studio", status: "active" },
+          ],
+        } : {}),
+        campaigns,
+        campaignSeries: populated ? [{ id: "qa-series", sourceCampaignId: "qa-c-repeat", status: "active", intervalWeeks: 1, timeZone: "America/Phoenix", anchorAt: "2031-10-14T16:00:00Z", nextAt: "2031-10-21T16:00:00Z", createdAt: "2026-10-01T12:00:00Z" }] : [],
+        audiences,
+        templates,
+        senderIdentities: [campaignSender({ id: "qa-news", address: "news@acme.com", fromName: "Acme News" })],
+        subscriberCounts: { "qa-newsletter": 1204, "qa-signups": 86, "qa-reviewers": 3 },
+        testSettings: [{ id: "qa-testing", accountId: "self", audienceId: "qa-reviewers", createdAt: "2026-10-01T12:00:00Z" }],
+      });
+      // A campaign page reads its results, its ledger and its tests per campaign:
+      // answered here per campaign, so each page reads as the send it describes.
+      return populated ? emailCampaignReads(conn) : conn;
+    },
+    wrap: (el: JSX.Element, role: string) => campaignSession(el, { role }),
+    render: () => <EmailCampaignsPane />,
+  };
+}
+
+/** What the campaign pages of the populated scene read: the sent and sending campaigns' results, a ledger, and tests. */
+function emailCampaignReads(conn: ReturnType<typeof campaignConnection>) {
+  const stats: Record<string, Record<string, unknown>> = {
+    "qa-c-sent": { recipients: 1204, pending: 0, sent: 1176, failed: 4, skipped: { total: 24, suppressed: 15, unsubscribed: 9, other: 0 }, bounces: { hard: 3 }, complaints: 1, unsubscribed: 7, opens: { total: 1642, unique: 702 }, clicks: { total: 318, unique: 187 } },
+    "qa-c-sending": { recipients: 1250, pending: 46, sent: 1204, failed: 0, skipped: { total: 0, suppressed: 0, unsubscribed: 0, other: 0 }, bounces: { hard: 0 }, complaints: 0, unsubscribed: 1, opens: { total: 341 }, clicks: { total: 40, unique: 31 } },
+  };
+  const at = (minute: number) => `2026-10-03T16:${String(minute).padStart(2, "0")}:00Z`;
+  const ledger = [
+    emailDelivery({ id: "qa-d6", campaignId: "qa-c-sent", email: "dana@acme.com", status: "sent", sentAt: at(59), createdAt: at(59) }),
+    emailDelivery({ id: "qa-d5", campaignId: "qa-c-sent", email: "lee@client.example", status: "skipped", skipReason: "unsubscribed", sentAt: "", createdAt: at(58) }),
+    emailDelivery({ id: "qa-d4", campaignId: "qa-c-sent", email: "sam@client.example", status: "failed", lastError: "The receiving server said the mailbox is full.", sentAt: "", createdAt: at(57) }),
+    emailDelivery({ id: "qa-d3", campaignId: "qa-c-sent", email: "kim@acme.com", status: "sent", sentAt: at(56), createdAt: at(56) }),
+    emailDelivery({ id: "qa-d2", campaignId: "qa-c-sent", email: "ari@client.example", status: "sent", sentAt: at(55), createdAt: at(55) }),
+  ];
+  const older = [emailDelivery({ id: "qa-d1", campaignId: "qa-c-sent", email: "jo@acme.com", status: "sent", sentAt: at(54), createdAt: at(54) })];
+  const runs = [
+    emailCampaign({ id: "qa-run-2", name: "July update · Test", testSourceCampaignId: "qa-c-sent", audienceId: "qa-reviewers", status: "sent", recipientCount: 3, sentCount: 2, skippedCount: 1, startedAt: "2026-10-02T17:15:00Z", completedAt: "2026-10-02T17:16:00Z" }),
+    emailCampaign({ id: "qa-run-1", name: "July update · Test", testSourceCampaignId: "qa-c-sent", audienceId: "qa-reviewers", status: "sent", recipientCount: 3, sentCount: 3, startedAt: "2026-10-01T15:40:00Z", completedAt: "2026-10-01T15:41:00Z" }),
+  ];
+  const runLedger = [
+    emailDelivery({ id: "qa-rd1", campaignId: "qa-run-2", email: "reviewer@acme.com", status: "sent", sentAt: "2026-10-02T17:15:30Z", createdAt: "2026-10-02T17:15:30Z" }),
+    emailDelivery({ id: "qa-rd2", campaignId: "qa-run-2", email: "editor@acme.com", status: "skipped", skipReason: "unsubscribed", sentAt: "", createdAt: "2026-10-02T17:15:20Z" }),
+    emailDelivery({ id: "qa-rd3", campaignId: "qa-run-2", email: "owner@acme.com", status: "sent", sentAt: "2026-10-02T17:15:10Z", createdAt: "2026-10-02T17:15:10Z" }),
+  ];
+  Object.assign(conn.query, {
+    campaignStats: async ({ campaignId }: { campaignId: string }) => rowsResult(stats[campaignId] ? [stats[campaignId]] : []),
+    deliveriesForCampaign: async ({ campaignId }: { campaignId: string }, opts?: { cursor?: string }) =>
+      campaignId === "qa-run-2" ? rowsResult(runLedger) : campaignId !== "qa-c-sent" ? rowsResult([]) : opts?.cursor ? rowsResult(older) : emailPage(ledger, "qa-more"),
+    campaignTestRuns: async ({ campaignId }: { campaignId: string }) => rowsResult(campaignId === "qa-c-sent" ? runs : []),
+  });
+  return conn;
+}
+
+function EmailCampaignsPane() {
+  return <EmailPane section="campaigns" />;
+}
+
+function EmailPane({ section }: { section: string }) {
+  const [store] = useState(() => new LocalEmailSettingsStore({ getItem: () => null, setItem: () => {} }));
+  // The window follows `navigate`, as the shell's does: a press that leaves for
+  // another tab (the Overview's "Add a campaign") can be captured arriving.
+  const [current, setCurrent] = useState(section);
+  return <WindowBody fallback="Email"><EmailApp sectionId={current} navigate={(id) => setCurrent(id)} askContext={() => {}} store={store}/></WindowBody>;
+}
+
+type OverviewScene = "populated" | "empty" | "reading" | "refused" | "unmeasured" | "untracked" | "floor";
+
+/**
+ * Email -> Overview as it reads in each of the ways it can. Dates are relative to
+ * the clock, because the figures look back thirty days from now: a fixed date
+ * would drift out of the window. Generic names and addresses only.
+ */
+function emailOverviewView(scene: OverviewScene) {
+  const ago = (days: number) => new Date(Date.now() - days * 86_400_000).toISOString();
+  // Nothing counted opens or clicks: both rates have the same reason, said once.
+  const tracking = scene === "untracked" ? { trackOpens: false, trackClicks: false } : {};
+  const campaigns = scene === "empty" ? [] : [
+    emailCampaign({ id: "qa-c-sending", name: "August update", audienceId: "qa-newsletter", status: "sending", recipientCount: 1250, sentCount: 1204, startedAt: ago(0), ...tracking }),
+    emailCampaign({ id: "qa-c-sent", name: "July update", audienceId: "qa-newsletter", status: "sent", recipientCount: 1204, sentCount: 1176, skippedCount: 24, failedCount: 4, startedAt: ago(3), completedAt: ago(3), ...tracking }),
+    emailCampaign({ id: "qa-c-digest", name: "Weekly digest", audienceId: "qa-signups", status: "sent", recipientCount: 2980, sentCount: 2980, startedAt: ago(12), completedAt: ago(12), ...tracking }),
+    emailCampaign({ id: "qa-c-old", name: "Summer sale", audienceId: "qa-newsletter", status: "sent", recipientCount: 3100, sentCount: 3100, startedAt: ago(61), completedAt: ago(61) }),
+    emailCampaign({ id: "qa-c-scheduled", name: "Launch day", audienceId: "qa-newsletter", status: "scheduled", scheduledAt: "2031-10-14T16:00:00Z" }),
+    emailCampaign({ id: "qa-c-draft", name: "Autumn sale", audienceId: "qa-newsletter" }),
+    emailCampaign({ id: "qa-c-failed", name: "Spring promo", audienceId: "qa-signups", status: "failed", lastError: "The sending service refused the sender address." }),
+    emailCampaign({ id: "qa-c-cancelled", name: "Holiday preview", audienceId: "qa-newsletter", status: "cancelled" }),
+  ];
+  const stats: Record<string, Record<string, unknown>> = {
+    "qa-c-sending": { sent: 1204, opens: { unique: 318, total: 402 }, clicks: { unique: 77, total: 95 } },
+    "qa-c-sent": { sent: 1176, opens: { unique: 502, total: 688 }, clicks: { unique: 131, total: 174 } },
+    "qa-c-digest": { sent: 2980, opens: scene === "unmeasured" ? { total: 3410 } : { unique: 1104, total: 1620 }, clicks: { unique: 262, total: 340 } },
+  };
+  return {
+    connect: () => {
+      const conn = campaignConnection({
+        campaigns,
+        audiences: scene === "empty" ? [] : [
+          campaignAudience({ id: "qa-newsletter", name: "Newsletter" }),
+          campaignAudience({ id: "qa-signups", name: "Signups" }),
+          campaignAudience({ id: "qa-reviewers", name: "Reviewers" }),
+          campaignAudience({ id: "qa-old", name: "Old list", status: "archived" }),
+        ],
+        subscriberCounts: scene === "refused"
+          ? { "qa-newsletter": new Error("Counting subscribers is not yours to do."), "qa-signups": 86, "qa-reviewers": 3 }
+          : scene === "floor"
+            // Newsletter is past the engine's window: its count stopped at 5,000.
+            ? { "qa-newsletter": { atLeast: 5000 }, "qa-signups": 86, "qa-reviewers": 3, "qa-old": 500 }
+            : { "qa-newsletter": 1204, "qa-signups": 86, "qa-reviewers": 3, "qa-old": 500 },
+        emailRules: scene === "empty" ? [] : [
+          emailRule({ id: "qa-r1", name: "Tell the owner about new admins", status: "active" }),
+          emailRule({ id: "qa-r2", name: "Welcome new users", status: "active" }),
+          emailRule({ id: "qa-r3", name: "Weekly recap", status: "active" }),
+          emailRule({ id: "qa-r4", name: "Invoice reminder", status: "paused" }),
+        ],
+        ...(scene === "refused" ? { campaignStats: new Error("Reading the breakdown is not yours to do.") } : {}),
+      });
+      // The harness's `vi.fn` is a shim without `mockImplementation`: answers are assigned.
+      if (scene === "refused") {
+        Object.assign(conn.query, { emailRules: async () => { throw new Error("Reading automations is not yours to do."); } });
+      } else if (scene === "reading") {
+        // Every read is on its way and none arrives: the shape of the page is what is judged.
+        const never = () => new Promise<never>(() => {});
+        Object.assign(conn.query, { campaigns: never, audiences: never, emailRules: never, campaignStats: never, audienceSubscriberCount: never });
+      } else {
+        Object.assign(conn.query, {
+          campaignStats: async (args: { campaignId?: string }) => {
+            const row = stats[args.campaignId ?? ""];
+            return rowsResult(row === undefined ? [] : [row]);
+          },
+        });
+      }
+      return conn;
+    },
+    wrap: (el: JSX.Element, role: string) => campaignSession(el, { role }),
+    render: () => <EmailPane section="overview" />,
+  };
+}
+
+/**
+ * The Overview a few seconds after the cluster stopped answering. The page opens
+ * on a month of mail, and 2.5 s in either the cluster refuses a re-read of the
+ * campaigns and the refresh of the breakdowns and counts ("refused"), or the
+ * connection drops ("disconnected"). What is judged is what stays on screen and
+ * what the one notice says.
+ */
+function emailOverviewInterruptedView(how: "refused" | "disconnected") {
+  const scene = emailOverviewView("populated");
+  let held: ReturnType<typeof campaignConnection> | null = null;
+  return {
+    connect: () => {
+      held = scene.connect();
+      return held;
+    },
+    wrap: scene.wrap,
+    render: () => (
+      <EmailOverviewInterruptedPane
+        how={how}
+        refuse={() => {
+          const sentence = "The cluster did not answer in time.";
+          const refuse = async () => { throw new Error(sentence); };
+          if (held !== null) Object.assign(held.query, { campaigns: refuse, campaignStats: refuse, audienceSubscriberCount: refuse });
+        }}
+      />
+    ),
+  };
+}
+
+function EmailOverviewInterruptedPane({ how, refuse }: { how: "refused" | "disconnected"; refuse: () => void }) {
+  const feeds = useEmailFeeds();
+  useEffect(() => {
+    const timer = window.setTimeout(() => {
+      if (how === "disconnected") {
+        (feeds.campaigns.source as unknown as { markDisconnected: () => void } | null)?.markDisconnected();
+        return;
+      }
+      refuse();
+      feeds.campaigns.reseed();
+      // Coming back to the window reads the breakdowns and counts again.
+      window.dispatchEvent(new Event("focus"));
+    }, 2500);
+    return () => window.clearTimeout(timer);
+    // Once, a few seconds in.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+  const navigation = useMemo(() => ({ openRecord: () => {}, openSettings: () => {}, openInbox: () => {} }), []);
+  return (
+    <WindowBody fallback="Email">
+      <EmailNavigationContext.Provider value={navigation}>
+        <OverviewSection feeds={feeds} />
+      </EmailNavigationContext.Provider>
+    </WindowBody>
+  );
 }
 
 function AccountsPane() {
@@ -1223,9 +1503,7 @@ function AccountsPane() {
 // --- Sharing a machine (epic memql#5344) -----------------------------------
 //
 // The panel and the dialog, over the suite's own fixture connection. The
-// dialog views render ShareDialog directly -- the harness does not click --
-// and `?modal=0` draws it in the page rather than the top layer, for a capture
-// tool that does not paint the top layer.
+// Sharing scenes use the inline production editor and its directory.
 
 const SHARED_WITH_PEOPLE = {
   mode: "people",
@@ -1300,28 +1578,19 @@ function SharingPane({ over }: { over: Record<string, unknown> }) {
   const machine = fleetMachine({ ownerUserId: "v1:identity:user:me", ...over });
   return (
     <div className="os-window-content">
-      <MachineDetail machine={machine} writes={qaWrites()} now={FLEET_NOW} view="sharing" />
+      <MachineDetail machine={machine} writes={qaWrites()} now={FLEET_NOW} view="settings" />
     </div>
   );
 }
 
 function SharePane({ over, startPeople = false, refuse = false }: { over: Record<string, unknown>; startPeople?: boolean; refuse?: boolean }) {
   const machine = fleetMachine({ ownerUserId: "v1:identity:user:me", ...over });
-  const modal = new URLSearchParams(window.location.search).get("modal") !== "0";
-  if (!modal) {
-    // In-page for a capture tool that does not paint the top layer: the SAME
-    // component and stylesheet, opened with show() instead of showModal().
-    HTMLDialogElement.prototype.showModal = HTMLDialogElement.prototype.show;
-  }
   useEffect(() => {
-    // One-shot captures cannot click: choose "Specific people and groups"
+    // One-shot captures cannot click: enable sharing
     // for the views that open on it, and press Save for the refused one.
     const timer = window.setTimeout(() => {
       if (startPeople) {
-        const people = Array.from(document.querySelectorAll<HTMLButtonElement>('[role="radio"]')).find((b) =>
-          (b.textContent ?? "").startsWith("Specific people"),
-        );
-        people?.click();
+        document.querySelector<HTMLInputElement>('[role="switch"]')?.click();
       }
       // `?arrow=N` arrows N times through the results from the search, so a
       // capture shows whether the active option is kept in view (the list is
@@ -1351,8 +1620,7 @@ function SharePane({ over, startPeople = false, refuse = false }: { over: Record
   }, [startPeople, refuse]);
   return (
     <div className="os-window-content">
-      <MachineDetail machine={machine} writes={qaWrites(refuse)} now={FLEET_NOW} view="sharing" />
-      <ShareDialog machine={machine} writes={qaWrites(refuse)} onDiscard={() => undefined} onSaved={() => undefined} />
+      <MachineDetail machine={machine} writes={qaWrites(refuse)} now={FLEET_NOW} view="settings" />
     </div>
   );
 }
@@ -1672,11 +1940,28 @@ if (new URLSearchParams(window.location.search).get("open") === "1") {
 // `?click=A|B` presses the first control whose text (or accessible name) is A
 // once the reads have landed, then B a beat later. `element.click()` is a real
 // click event, which React's root listener handles like a person's.
-const clicks = (new URLSearchParams(window.location.search).get("click") ?? "").split("|").filter((c) => c !== "");
+const clicks = (new URLSearchParams(window.location.search).get("click") ?? NEXUS_APPROVAL_CLICKS[new URLSearchParams(window.location.search).get("view") ?? ""] ?? EMAIL_CLICKS[new URLSearchParams(window.location.search).get("view") ?? ""] ?? "").split("|").filter((c) => c !== "");
 clicks.forEach((label, i) => {
   window.setTimeout(() => {
+    // A choice card and a record row answer to their names: a card's note ("1,204
+    // subscribers") and a row's other lines are not part of what is pressed.
+    if (label.startsWith("fill:")) {
+      const [field, ...value] = label.slice(5).split("=");
+      const target = Array.from(document.querySelectorAll<HTMLInputElement | HTMLTextAreaElement>("input, textarea")).find(el => el.getAttribute("aria-label") === field || Array.from(el.labels ?? []).some(l => l.textContent?.trim() === field));
+      if (target) { const proto = target instanceof HTMLTextAreaElement ? HTMLTextAreaElement.prototype : HTMLInputElement.prototype; Object.getOwnPropertyDescriptor(proto, "value")!.set!.call(target, value.join("=")); target.dispatchEvent(new Event("input", { bubbles: true })); }
+      return;
+    }
+    if (label === "file:people") {
+      const target = document.querySelector<HTMLInputElement>('input[type="file"]');
+      if (target) { const data = new DataTransfer(); data.items.add(new File(["email,name\ndana@example.com,Dana"], "people.csv", { type: "text/csv" })); target.files = data.files; target.dispatchEvent(new Event("change", { bubbles: true })); }
+      return;
+    }
     const target = Array.from(document.querySelectorAll<HTMLElement>("button, [role=tab], [role=radio], a")).find(
-      (el) => (el.textContent ?? "").trim() === label || el.getAttribute("aria-label") === label,
+      (el) => el.checkVisibility() && (
+        (el.textContent ?? "").trim() === label ||
+        el.getAttribute("aria-label") === label ||
+        el.querySelector(".os-choice-card-name")?.textContent?.trim() === label ||
+        el.querySelector(".os-row-name")?.textContent?.trim() === label),
     );
     target?.click();
   }, 2500 + i * 1200);
@@ -1709,4 +1994,23 @@ function FilesQa({section}: {section: string}) {
  const {actions} = useOs();
  useEffect(() => { actions.setThemePack(resolveThemePack(new URLSearchParams(window.location.search).get("theme") ?? "graphite").id); }, [actions]);
  return <div className="os-window-content" style={{ height: "100dvh" }}><FilesApp sectionId={section} navigate={()=>{}} askContext={()=>{}} store={new LocalFilesSettingsStore(null)} /></div>;
+}
+
+
+function usersWizardView(section: string) {
+  return {
+    role: "owner",
+    connect: () => usersConnection({
+      activeRoles: [usersRole({ slug: "owner", name: "Owner", rank: 400 }), usersRole({ slug: "developer", name: "Developer", rank: 300 }), usersRole({ slug: "admin", name: "Admin", rank: 200 }), usersRole({ slug: "user", name: "Member", rank: 100, aliases: ["writer"] })],
+      activeCapabilities: ["principal", "role", "group", "admission"].flatMap(resource => ["read", "create", "update", "delete"].map(verb => usersGrant("owner", verb, resource))),
+      clientAccountsAll: [accountRow({ id: "acme", name: "Acme", domain: "acme.com", domainStatus: "verified", joinOnDomain: true })],
+      groupsAll: [usersGroup({ id: "acme-group", name: "Acme", kind: "account", accountId: "acme" })],
+    }),
+    wrap: (el: JSX.Element, role: string) => withSession(usersSession(el, { role }), { role }),
+    render: () => <UsersWizardQa section={section} />,
+  };
+}
+function UsersWizardQa({ section }: { section: string }) {
+  const [store] = useState(() => new LocalUsersSettingsStore({ getItem: () => null, setItem: () => {} }));
+  return <WindowBody fallback="Users"><UsersApp sectionId={section} navigate={() => {}} askContext={() => {}} store={store} /></WindowBody>;
 }

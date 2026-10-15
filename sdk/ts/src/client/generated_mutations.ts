@@ -29,31 +29,11 @@ QueryClient.prototype.acknowledgeAttention = function (this: QueryClient, args: 
   return this.executeNamed("acknowledgeAttention", buildAcknowledgeAttention(args), opts);
 };
 
-/** Activate a bundle after Gate 3 approval: status -> active and activatedAt stamped. The authored-construct runtime (#959) registers the bundle's constructs on this transition; member constructs are flipped to active via setConstructStatus. */
-// Bound concept: v1:authoring:bundle (machine-readable: BoundConcepts["activateAuthoringBundle"] in generated_concepts.ts).
-export interface ActivateAuthoringBundleArgs {
-  bundleId: string;
-}
-
-export function buildActivateAuthoringBundle(args: ActivateAuthoringBundleArgs): string {
-  const parts: string[] = [];
-  parts.push("bundleId: " + renderMemQLValue(args.bundleId));
-  return "mutation activateAuthoringBundle(" + parts.join(", ") + ")";
-}
-
-declare module "./query.js" {
-  interface QueryClient {
-    activateAuthoringBundle(args: ActivateAuthoringBundleArgs, opts?: QueryCallOptions): Promise<Result>;
-  }
-}
-
-QueryClient.prototype.activateAuthoringBundle = function (this: QueryClient, args: ActivateAuthoringBundleArgs = {} as ActivateAuthoringBundleArgs, opts?: QueryCallOptions): Promise<Result> {
-  return this.executeNamed("activateAuthoringBundle", buildActivateAuthoringBundle(args), opts);
-};
-
-/** Add one address to an audience. Owned. source defaults to 'manual' via ?? rather than via the concept's @default, which is never applied on insert. */
+/** Add one address to an audience. Owned. source defaults to 'manual' via ?? rather than via the concept's @default, which is never applied on insert. Stamps the address's digest (emailDigest) so the membership can be found by it (recipientInAudienceByDigest). */
 // Bound concept: v1:campaigns:recipient (machine-readable: BoundConcepts["addRecipient"] in generated_concepts.ts).
 export interface AddRecipientArgs {
+  // Enum: subscribed | pending
+  subscriptionStatus?: string;
   recipientId: string;
   audienceId: string;
   email: string;
@@ -65,6 +45,7 @@ export interface AddRecipientArgs {
 
 export function buildAddRecipient(args: AddRecipientArgs): string {
   const parts: string[] = [];
+  if (args.subscriptionStatus !== undefined) parts.push("subscriptionStatus: " + renderMemQLValue(args.subscriptionStatus));
   parts.push("recipientId: " + renderMemQLValue(args.recipientId));
   parts.push("audienceId: " + renderMemQLValue(args.audienceId));
   parts.push("email: " + renderMemQLValue(args.email));
@@ -842,6 +823,34 @@ QueryClient.prototype.completeTodo = function (this: QueryClient, args: Complete
   return this.executeNamed("completeTodo", buildCompleteTodo(args), opts);
 };
 
+/** Configure the domains and sender used as defaults for new work in this account. Assignment is configuration, not DNS proof or permission to send mail. */
+// Bound concept: v1:accounts:account (machine-readable: BoundConcepts["configureAccountDomains"] in generated_concepts.ts).
+export interface ConfigureAccountDomainsArgs {
+  accountId: string;
+  domains: string[];
+  defaultDomain: string;
+  defaultSenderIdentityId?: string;
+}
+
+export function buildConfigureAccountDomains(args: ConfigureAccountDomainsArgs): string {
+  const parts: string[] = [];
+  parts.push("accountId: " + renderMemQLValue(args.accountId));
+  parts.push("domains: " + renderMemQLValue(args.domains));
+  parts.push("defaultDomain: " + renderMemQLValue(args.defaultDomain));
+  if (args.defaultSenderIdentityId !== undefined) parts.push("defaultSenderIdentityId: " + renderMemQLValue(args.defaultSenderIdentityId));
+  return "mutation configureAccountDomains(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    configureAccountDomains(args: ConfigureAccountDomainsArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.configureAccountDomains = function (this: QueryClient, args: ConfigureAccountDomainsArgs = {} as ConfigureAccountDomainsArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("configureAccountDomains", buildConfigureAccountDomains(args), opts);
+};
+
 /** Human confirm a data record, updating confirm count and validation state */
 // Bound concept: v1:data:record (machine-readable: BoundConcepts["confirmRecord"] in generated_concepts.ts).
 export interface ConfirmRecordArgs {
@@ -1306,6 +1315,8 @@ QueryClient.prototype.createAskConversation = function (this: QueryClient, args:
 /** Create an audience owned by the caller. Owned: ownerUserId is stamped from actor.userId, so a caller can only ever create their own audiences. */
 // Bound concept: v1:campaigns:audience (machine-readable: BoundConcepts["createAudience"] in generated_concepts.ts).
 export interface CreateAudienceArgs {
+  // Enum: none | required
+  confirmation?: string;
   audienceId: string;
   name: string;
   description?: string;
@@ -1314,6 +1325,7 @@ export interface CreateAudienceArgs {
 
 export function buildCreateAudience(args: CreateAudienceArgs): string {
   const parts: string[] = [];
+  if (args.confirmation !== undefined) parts.push("confirmation: " + renderMemQLValue(args.confirmation));
   parts.push("audienceId: " + renderMemQLValue(args.audienceId));
   parts.push("name: " + renderMemQLValue(args.name));
   if (args.description !== undefined) parts.push("description: " + renderMemQLValue(args.description));
@@ -1467,79 +1479,6 @@ declare module "./query.js" {
 
 QueryClient.prototype.createAuthSession = function (this: QueryClient, args: CreateAuthSessionArgs = {} as CreateAuthSessionArgs, opts?: QueryCallOptions): Promise<Result> {
   return this.executeNamed("createAuthSession", buildCreateAuthSession(args), opts);
-};
-
-/** Create a draft authoring bundle -- the atomic unit a Responsibility compiles into. ownerUserId is stamped from actor.userId. Members are added via createAuthoringConstruct; reused (composed) constructs are recorded on reusedConstructRefs. */
-// Bound concept: v1:authoring:bundle (machine-readable: BoundConcepts["createAuthoringBundle"] in generated_concepts.ts).
-export interface CreateAuthoringBundleArgs {
-  bundleId: string;
-  title: string;
-  summary?: string;
-  responsibilityId?: string;
-  sourceRunId?: string;
-  version?: number;
-  supersedesBundleId?: string;
-  reusedConstructRefs?: Record<string, unknown>[];
-}
-
-export function buildCreateAuthoringBundle(args: CreateAuthoringBundleArgs): string {
-  const parts: string[] = [];
-  parts.push("bundleId: " + renderMemQLValue(args.bundleId));
-  parts.push("title: " + renderMemQLValue(args.title));
-  if (args.summary !== undefined) parts.push("summary: " + renderMemQLValue(args.summary));
-  if (args.responsibilityId !== undefined) parts.push("responsibilityId: " + renderMemQLValue(args.responsibilityId));
-  if (args.sourceRunId !== undefined) parts.push("sourceRunId: " + renderMemQLValue(args.sourceRunId));
-  if (args.version !== undefined) parts.push("version: " + renderMemQLValue(args.version));
-  if (args.supersedesBundleId !== undefined) parts.push("supersedesBundleId: " + renderMemQLValue(args.supersedesBundleId));
-  if (args.reusedConstructRefs !== undefined) parts.push("reusedConstructRefs: " + renderMemQLValue(args.reusedConstructRefs));
-  return "mutation createAuthoringBundle(" + parts.join(", ") + ")";
-}
-
-declare module "./query.js" {
-  interface QueryClient {
-    createAuthoringBundle(args: CreateAuthoringBundleArgs, opts?: QueryCallOptions): Promise<Result>;
-  }
-}
-
-QueryClient.prototype.createAuthoringBundle = function (this: QueryClient, args: CreateAuthoringBundleArgs = {} as CreateAuthoringBundleArgs, opts?: QueryCallOptions): Promise<Result> {
-  return this.executeNamed("createAuthoringBundle", buildCreateAuthoringBundle(args), opts);
-};
-
-/** Create an authored construct (the .memql source for one concept / automation / logic / shape / spec / trait / policy / mutation / query / prompt) as a member of a bundle. ownerUserId stamped from actor.userId; status starts draft and follows the bundle. */
-// Bound concept: v1:authoring:construct (machine-readable: BoundConcepts["createAuthoringConstruct"] in generated_concepts.ts).
-export interface CreateAuthoringConstructArgs {
-  constructId: string;
-  bundleId: string;
-  // Enum: concept | automation | logic | shape | spec | trait | policy | mutation | query | prompt
-  kind: string;
-  name: string;
-  targetNamespace: string;
-  source: string;
-  origin?: string;
-  grammarVersion?: string;
-}
-
-export function buildCreateAuthoringConstruct(args: CreateAuthoringConstructArgs): string {
-  const parts: string[] = [];
-  parts.push("constructId: " + renderMemQLValue(args.constructId));
-  parts.push("bundleId: " + renderMemQLValue(args.bundleId));
-  parts.push("kind: " + renderMemQLValue(args.kind));
-  parts.push("name: " + renderMemQLValue(args.name));
-  parts.push("targetNamespace: " + renderMemQLValue(args.targetNamespace));
-  parts.push("source: " + renderMemQLValue(args.source));
-  if (args.origin !== undefined) parts.push("origin: " + renderMemQLValue(args.origin));
-  if (args.grammarVersion !== undefined) parts.push("grammarVersion: " + renderMemQLValue(args.grammarVersion));
-  return "mutation createAuthoringConstruct(" + parts.join(", ") + ")";
-}
-
-declare module "./query.js" {
-  interface QueryClient {
-    createAuthoringConstruct(args: CreateAuthoringConstructArgs, opts?: QueryCallOptions): Promise<Result>;
-  }
-}
-
-QueryClient.prototype.createAuthoringConstruct = function (this: QueryClient, args: CreateAuthoringConstructArgs = {} as CreateAuthoringConstructArgs, opts?: QueryCallOptions): Promise<Result> {
-  return this.executeNamed("createAuthoringConstruct", buildCreateAuthoringConstruct(args), opts);
 };
 
 /** Register a badge identity (shared-terminal operator credential). Stores only the SHA-256 hex hash of the badge/device id. */
@@ -1845,6 +1784,7 @@ export interface CreateComposeRecipeArgs {
   templateId?: string;
   format: string;
   outputKind?: string;
+  layoutId?: string;
   folderId?: string;
   accountIds?: string[];
 }
@@ -1858,6 +1798,7 @@ export function buildCreateComposeRecipe(args: CreateComposeRecipeArgs): string 
   if (args.templateId !== undefined) parts.push("templateId: " + renderMemQLValue(args.templateId));
   parts.push("format: " + renderMemQLValue(args.format));
   if (args.outputKind !== undefined) parts.push("outputKind: " + renderMemQLValue(args.outputKind));
+  if (args.layoutId !== undefined) parts.push("layoutId: " + renderMemQLValue(args.layoutId));
   if (args.folderId !== undefined) parts.push("folderId: " + renderMemQLValue(args.folderId));
   if (args.accountIds !== undefined) parts.push("accountIds: " + renderMemQLValue(args.accountIds));
   return "mutation createComposeRecipe(" + parts.join(", ") + ")";
@@ -2342,65 +2283,6 @@ QueryClient.prototype.createIdentityProvider = function (this: QueryClient, args
   return this.executeNamed("createIdentityProvider", buildCreateIdentityProvider(args), opts);
 };
 
-/** Create a Library file row for bytes already written to blob storage. Owner-acted: ownerUserId is stamped from actor.userId, so a file can only ever be created for the person the call runs as. format is the caller's MIME-derived classification, defaulting to 'other' (the metadata-only card) for a type nothing recognises. status starts at 'stored' -- the bytes are durable and nothing has looked at them yet; the analysis pass moves it on through setLibraryFileStatus. That status is STAMPED rather than accepted is load-bearing beyond this mutation: indexFileOnCreate filters on `row.status == "stored"` so it promotes exactly once, because graph.node.created fires on every write and a second promotion would wipe the artifact's labels -- a caller-supplied status would let a later write re-enter that state. indexFileOnCreate folds the new row into the Library index automatically. */
-// Bound concept: v1:library:file (machine-readable: BoundConcepts["createLibraryFile"] in generated_concepts.ts).
-export interface CreateLibraryFileArgs {
-  backupWorkerId?: string;
-  backupPath?: string;
-  producedByRunId?: string;
-  producedByStepKey?: string;
-  fileId: string;
-  name: string;
-  mimeType: string;
-  size: number;
-  sha256?: string;
-  blobUrl: string;
-  // Enum: uploaded | exported | agent_generated | derived | app_session | vision_input | pipeline
-  source: string;
-  // Enum: markdown | document | pdf | spreadsheet | image | text | conversation | other
-  format?: string;
-  summary?: string;
-  folderId?: string;
-  uploadedFromWorkerId?: string;
-  uploadedFromWorkerName?: string;
-  uploadedFromPath?: string;
-  /** {app, model, effort, sessionId} when an app session produced this. Absent otherwise. */
-  producedBy?: Record<string, unknown>;
-}
-
-export function buildCreateLibraryFile(args: CreateLibraryFileArgs): string {
-  const parts: string[] = [];
-  if (args.backupWorkerId !== undefined) parts.push("backupWorkerId: " + renderMemQLValue(args.backupWorkerId));
-  if (args.backupPath !== undefined) parts.push("backupPath: " + renderMemQLValue(args.backupPath));
-  if (args.producedByRunId !== undefined) parts.push("producedByRunId: " + renderMemQLValue(args.producedByRunId));
-  if (args.producedByStepKey !== undefined) parts.push("producedByStepKey: " + renderMemQLValue(args.producedByStepKey));
-  parts.push("fileId: " + renderMemQLValue(args.fileId));
-  parts.push("name: " + renderMemQLValue(args.name));
-  parts.push("mimeType: " + renderMemQLValue(args.mimeType));
-  parts.push("size: " + renderMemQLValue(args.size));
-  if (args.sha256 !== undefined) parts.push("sha256: " + renderMemQLValue(args.sha256));
-  parts.push("blobUrl: " + renderMemQLValue(args.blobUrl));
-  parts.push("source: " + renderMemQLValue(args.source));
-  if (args.format !== undefined) parts.push("format: " + renderMemQLValue(args.format));
-  if (args.summary !== undefined) parts.push("summary: " + renderMemQLValue(args.summary));
-  if (args.folderId !== undefined) parts.push("folderId: " + renderMemQLValue(args.folderId));
-  if (args.uploadedFromWorkerId !== undefined) parts.push("uploadedFromWorkerId: " + renderMemQLValue(args.uploadedFromWorkerId));
-  if (args.uploadedFromWorkerName !== undefined) parts.push("uploadedFromWorkerName: " + renderMemQLValue(args.uploadedFromWorkerName));
-  if (args.uploadedFromPath !== undefined) parts.push("uploadedFromPath: " + renderMemQLValue(args.uploadedFromPath));
-  if (args.producedBy !== undefined) parts.push("producedBy: " + renderMemQLValue(args.producedBy));
-  return "mutation createLibraryFile(" + parts.join(", ") + ")";
-}
-
-declare module "./query.js" {
-  interface QueryClient {
-    createLibraryFile(args: CreateLibraryFileArgs, opts?: QueryCallOptions): Promise<Result>;
-  }
-}
-
-QueryClient.prototype.createLibraryFile = function (this: QueryClient, args: CreateLibraryFileArgs = {} as CreateLibraryFileArgs, opts?: QueryCallOptions): Promise<Result> {
-  return this.executeNamed("createLibraryFile", buildCreateLibraryFile(args), opts);
-};
-
 /** Write one chunk of a Library file's extracted text, ready for embedding. Owner-acted: ownerUserId is stamped from actor.userId, and the analysis pass runs under the file owner, so a chunk always lands owned by the same person as its file. artifactId is resolved by the pass through libraryArtifactBySourceConceptRef so a similarity hit folds up to the Library row with no second read. */
 // Bound concept: v1:library:fileChunk (machine-readable: BoundConcepts["createLibraryFileChunk"] in generated_concepts.ts).
 export interface CreateLibraryFileChunkArgs {
@@ -2463,6 +2345,8 @@ QueryClient.prototype.createLibraryFolder = function (this: QueryClient, args: C
 The machine is NOT verified here. That is the header's decision, not an omission: the row is a preference, a watch naming a machine the caller does not own is read by no cockpit, and the push it would attempt is refused at the upload by a check that CAN see the caller's fleet. */
 // Bound concept: v1:library:watchedFolder (machine-readable: BoundConcepts["createLibraryWatchedFolder"] in generated_concepts.ts).
 export interface CreateLibraryWatchedFolderArgs {
+  // Enum: retain | sync
+  mode?: string;
   intervalMinutes?: number;
   watchId: string;
   workerId: string;
@@ -2474,6 +2358,7 @@ export interface CreateLibraryWatchedFolderArgs {
 
 export function buildCreateLibraryWatchedFolder(args: CreateLibraryWatchedFolderArgs): string {
   const parts: string[] = [];
+  if (args.mode !== undefined) parts.push("mode: " + renderMemQLValue(args.mode));
   if (args.intervalMinutes !== undefined) parts.push("intervalMinutes: " + renderMemQLValue(args.intervalMinutes));
   parts.push("watchId: " + renderMemQLValue(args.watchId));
   parts.push("workerId: " + renderMemQLValue(args.workerId));
@@ -3222,65 +3107,6 @@ declare module "./query.js" {
 
 QueryClient.prototype.createSite = function (this: QueryClient, args: CreateSiteArgs = {} as CreateSiteArgs, opts?: QueryCallOptions): Promise<Result> {
   return this.executeNamed("createSite", buildCreateSite(args), opts);
-};
-
-/** Materialize a v1:skills:skill catalog row from a `seed skill ...` declaration under dsl/agents/skills/*.memql. Matches the SeedMaterializer's `mutationCreate<Concept>` naming convention -- the materializer stamps the seed body's id into `skillId` and forwards every other seed body field as a same-named arg, so this mutation's arg surface mirrors the on-disk seed body 1:1. Sibling to `mintSkill`: same row shape, but the seed path is for the predefined catalog (predefined defaults true) and carries no originatingPlanId / mintedByAgentId provenance triad. Was missing pre-#344, which made every skill seed in the bundled catalog fail to materialize with `function "createSkill" not found`. The materializer convention itself lives in component/memql/seed_materializer.go. */
-// Bound concept: v1:skills:skill (machine-readable: BoundConcepts["createSkill"] in generated_concepts.ts).
-export interface CreateSkillArgs {
-  skillId?: string;
-  slug: string;
-  name: string;
-  description?: string;
-  category?: string;
-  tags?: unknown[];
-  domainIds?: unknown[];
-  toolSlugs?: unknown[];
-  /** Inert since memql#5432 retired the live-knowledge mechanism; stored and never resolved. */
-  liveSourceIds?: unknown[];
-  tier: string;
-  predefined?: boolean;
-  active?: boolean;
-  instructions?: Record<string, unknown>;
-  scripts?: unknown[];
-  resources?: unknown[];
-  constructRefs?: unknown[];
-  effects?: Record<string, unknown>;
-  version?: number;
-  status?: string;
-}
-
-export function buildCreateSkill(args: CreateSkillArgs): string {
-  const parts: string[] = [];
-  if (args.skillId !== undefined) parts.push("skillId: " + renderMemQLValue(args.skillId));
-  parts.push("slug: " + renderMemQLValue(args.slug));
-  parts.push("name: " + renderMemQLValue(args.name));
-  if (args.description !== undefined) parts.push("description: " + renderMemQLValue(args.description));
-  if (args.category !== undefined) parts.push("category: " + renderMemQLValue(args.category));
-  if (args.tags !== undefined) parts.push("tags: " + renderMemQLValue(args.tags));
-  if (args.domainIds !== undefined) parts.push("domainIds: " + renderMemQLValue(args.domainIds));
-  if (args.toolSlugs !== undefined) parts.push("toolSlugs: " + renderMemQLValue(args.toolSlugs));
-  if (args.liveSourceIds !== undefined) parts.push("liveSourceIds: " + renderMemQLValue(args.liveSourceIds));
-  parts.push("tier: " + renderMemQLValue(args.tier));
-  if (args.predefined !== undefined) parts.push("predefined: " + renderMemQLValue(args.predefined));
-  if (args.active !== undefined) parts.push("active: " + renderMemQLValue(args.active));
-  if (args.instructions !== undefined) parts.push("instructions: " + renderMemQLValue(args.instructions));
-  if (args.scripts !== undefined) parts.push("scripts: " + renderMemQLValue(args.scripts));
-  if (args.resources !== undefined) parts.push("resources: " + renderMemQLValue(args.resources));
-  if (args.constructRefs !== undefined) parts.push("constructRefs: " + renderMemQLValue(args.constructRefs));
-  if (args.effects !== undefined) parts.push("effects: " + renderMemQLValue(args.effects));
-  if (args.version !== undefined) parts.push("version: " + renderMemQLValue(args.version));
-  if (args.status !== undefined) parts.push("status: " + renderMemQLValue(args.status));
-  return "mutation createSkill(" + parts.join(", ") + ")";
-}
-
-declare module "./query.js" {
-  interface QueryClient {
-    createSkill(args: CreateSkillArgs, opts?: QueryCallOptions): Promise<Result>;
-  }
-}
-
-QueryClient.prototype.createSkill = function (this: QueryClient, args: CreateSkillArgs = {} as CreateSkillArgs, opts?: QueryCallOptions): Promise<Result> {
-  return this.executeNamed("createSkill", buildCreateSkill(args), opts);
 };
 
 /** Append a v1:agents:skillChangeEvent row recording a skill attach / reconfigure on an agent. Phase 2 (#158) cut: every Planner Agent extendSpecialist / createSpecialist flow that lands a skill on an agent issues one of these per skill. Phase 3 also writes them from the cockpit Skills admin view when a human attaches a skill manually. Empty actorAgentId + actorUserId is allowed for system-driven attaches (the migration tool writes events with actorUserId='system:migration:phase2'). The caller is responsible for providing skillChangeEventId -- mint via the standard NewShortId / MustFromMap helpers caller-side. */
@@ -4343,7 +4169,7 @@ QueryClient.prototype.markStoreRedacted = function (this: QueryClient, args: Mar
   return this.executeNamed("markStoreRedacted", buildMarkStoreRedacted(args), opts);
 };
 
-/** Mint a new v1:skills:skill catalog row from a Planner Agent mintSkill action (Phase 3 / memql#159). The caller is the planner integration; it has already run the authority gate (action='mintSkill' on the planner's agentAuthorization + tier in skillTierAllowlist) and the catalog-search heuristic (no existing skill covers >60% of the requested bundle) before invoking this. predefined is hard-stamped false -- the runtime mint surface is for user-/planner-created rows only; the predefined catalog stays in dsl/agents/skills/*.memql. originatingPlanId + mintedByAgentId carry the Phase 3 provenance triad. Server-side enforcement: the tier-validation rule from Phase 1 still applies (skill.tier >= max(domain tier)) -- a mint that violates it rejects with the same error path as the load-time check. */
+/** Mint a new v1:skills:skill catalog row from a Planner Agent mintSkill action (Phase 3 / memql#159). The caller is the planner integration; it has already run the authority gate (action='mintSkill' on the planner's agentAuthorization + tier in skillTierAllowlist) and the catalog-search heuristic (no existing skill covers >60% of the requested bundle) before invoking this. predefined is hard-stamped false -- the runtime mint surface is for user-/planner-created rows only; the predefined catalog stays in dsl/skills/seeds/*.memql. originatingGoalId + mintedByRunId carry the work provenance. Server-side enforcement: the tier-validation rule from Phase 1 still applies (skill.tier >= max(domain tier)) -- a mint that violates it rejects with the same error path as the load-time check. */
 // Bound concept: v1:skills:skill (machine-readable: BoundConcepts["mintSkill"] in generated_concepts.ts).
 export interface MintSkillArgs {
   skillId?: string;
@@ -4672,64 +4498,6 @@ declare module "./query.js" {
 
 QueryClient.prototype.recordApprovalDecision = function (this: QueryClient, args: RecordApprovalDecisionArgs = {} as RecordApprovalDecisionArgs, opts?: QueryCallOptions): Promise<Result> {
   return this.executeNamed("recordApprovalDecision", buildRecordApprovalDecision(args), opts);
-};
-
-/** Record the Gate 2 (tiered behavioral dry-run, #958) result on a bundle and transition status. status is dryRunPassed on success or failed otherwise; dryRunReport carries the trace + side-effect manifest + cost estimate (the Gate 3 approval artifact). */
-// Bound concept: v1:authoring:bundle (machine-readable: BoundConcepts["recordBundleDryRun"] in generated_concepts.ts).
-export interface RecordBundleDryRunArgs {
-  bundleId: string;
-  // Enum: dryRunPassed | failed
-  status: string;
-  dryRunReport: Record<string, unknown>;
-  failureReason?: string;
-}
-
-export function buildRecordBundleDryRun(args: RecordBundleDryRunArgs): string {
-  const parts: string[] = [];
-  parts.push("bundleId: " + renderMemQLValue(args.bundleId));
-  parts.push("status: " + renderMemQLValue(args.status));
-  parts.push("dryRunReport: " + renderMemQLValue(args.dryRunReport));
-  if (args.failureReason !== undefined) parts.push("failureReason: " + renderMemQLValue(args.failureReason));
-  return "mutation recordBundleDryRun(" + parts.join(", ") + ")";
-}
-
-declare module "./query.js" {
-  interface QueryClient {
-    recordBundleDryRun(args: RecordBundleDryRunArgs, opts?: QueryCallOptions): Promise<Result>;
-  }
-}
-
-QueryClient.prototype.recordBundleDryRun = function (this: QueryClient, args: RecordBundleDryRunArgs = {} as RecordBundleDryRunArgs, opts?: QueryCallOptions): Promise<Result> {
-  return this.executeNamed("recordBundleDryRun", buildRecordBundleDryRun(args), opts);
-};
-
-/** Record the Gate 1 (isolated compile+bind, #956) result on a bundle and transition status. status is validated on success or failed on a binding error; validationReport carries the structured diagnostics; failureReason carries the headline on failure. Re-stamps ownerUserId (keeps the row owned + satisfies per-row authz). */
-// Bound concept: v1:authoring:bundle (machine-readable: BoundConcepts["recordBundleValidation"] in generated_concepts.ts).
-export interface RecordBundleValidationArgs {
-  bundleId: string;
-  // Enum: validated | failed
-  status: string;
-  validationReport: Record<string, unknown>;
-  failureReason?: string;
-}
-
-export function buildRecordBundleValidation(args: RecordBundleValidationArgs): string {
-  const parts: string[] = [];
-  parts.push("bundleId: " + renderMemQLValue(args.bundleId));
-  parts.push("status: " + renderMemQLValue(args.status));
-  parts.push("validationReport: " + renderMemQLValue(args.validationReport));
-  if (args.failureReason !== undefined) parts.push("failureReason: " + renderMemQLValue(args.failureReason));
-  return "mutation recordBundleValidation(" + parts.join(", ") + ")";
-}
-
-declare module "./query.js" {
-  interface QueryClient {
-    recordBundleValidation(args: RecordBundleValidationArgs, opts?: QueryCallOptions): Promise<Result>;
-  }
-}
-
-QueryClient.prototype.recordBundleValidation = function (this: QueryClient, args: RecordBundleValidationArgs = {} as RecordBundleValidationArgs, opts?: QueryCallOptions): Promise<Result> {
-  return this.executeNamed("recordBundleValidation", buildRecordBundleValidation(args), opts);
 };
 
 /** Append a provider bounce event. Append-only. */
@@ -5798,6 +5566,28 @@ QueryClient.prototype.restoreArtifact = function (this: QueryClient, args: Resto
   return this.executeNamed("restoreArtifact", buildRestoreArtifact(args), opts);
 };
 
+/** Restore an archived audience: it returns to the campaign and automation pickers. Authorized organization peers may restore it; the engine preserves its original owner and records the current writer on the new version. */
+// Bound concept: v1:campaigns:audience (machine-readable: BoundConcepts["restoreAudience"] in generated_concepts.ts).
+export interface RestoreAudienceArgs {
+  audienceId: string;
+}
+
+export function buildRestoreAudience(args: RestoreAudienceArgs): string {
+  const parts: string[] = [];
+  parts.push("audienceId: " + renderMemQLValue(args.audienceId));
+  return "mutation restoreAudience(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    restoreAudience(args: RestoreAudienceArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.restoreAudience = function (this: QueryClient, args: RestoreAudienceArgs = {} as RestoreAudienceArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("restoreAudience", buildRestoreAudience(args), opts);
+};
+
 /** Restore an archived recipe. Owned. */
 // Bound concept: v1:compose:recipe (machine-readable: BoundConcepts["restoreComposeRecipe"] in generated_concepts.ts).
 export interface RestoreComposeRecipeArgs {
@@ -6423,6 +6213,31 @@ QueryClient.prototype.setArtifactAccounts = function (this: QueryClient, args: S
   return this.executeNamed("setArtifactAccounts", buildSetArtifactAccounts(args), opts);
 };
 
+/** Choose whether new newsletter members must confirm their address. */
+// Bound concept: v1:campaigns:audience (machine-readable: BoundConcepts["setAudienceConfirmation"] in generated_concepts.ts).
+export interface SetAudienceConfirmationArgs {
+  audienceId: string;
+  // Enum: none | required
+  confirmation: string;
+}
+
+export function buildSetAudienceConfirmation(args: SetAudienceConfirmationArgs): string {
+  const parts: string[] = [];
+  parts.push("audienceId: " + renderMemQLValue(args.audienceId));
+  parts.push("confirmation: " + renderMemQLValue(args.confirmation));
+  return "mutation setAudienceConfirmation(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    setAudienceConfirmation(args: SetAudienceConfirmationArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.setAudienceConfirmation = function (this: QueryClient, args: SetAudienceConfirmationArgs = {} as SetAudienceConfirmationArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("setAudienceConfirmation", buildSetAudienceConfirmation(args), opts);
+};
+
 /** Flip the cluster-wide GLOBAL KILL SWITCH for planner-authored automations (epic memql#954, issue #961). Partial-update of the singleton cluster-settings row (id='cluster'): sets authoredAutomationsEnabled true (resume) or false (halt). false halts EVERY authored automation across the whole cluster -- the governance hard stop -- independent of any bundle status or per-user kill switch. Operator-only in practice (the admin settings surface calls it); the authored scheduler reads the flag through clusterSettingsCurrent on its global gate. */
 // Bound concept: v1:identity:clusterSettings (machine-readable: BoundConcepts["setAuthoredAutomationsEnabled"] in generated_concepts.ts).
 export interface SetAuthoredAutomationsEnabledArgs {
@@ -6443,33 +6258,6 @@ declare module "./query.js" {
 
 QueryClient.prototype.setAuthoredAutomationsEnabled = function (this: QueryClient, args: SetAuthoredAutomationsEnabledArgs = {} as SetAuthoredAutomationsEnabledArgs, opts?: QueryCallOptions): Promise<Result> {
   return this.executeNamed("setAuthoredAutomationsEnabled", buildSetAuthoredAutomationsEnabled(args), opts);
-};
-
-/** Generic lifecycle transition for the remaining bundle states: paused (circuit breaker / user hold), retired (superseded or removed), or failed. retiredAt is stamped by retireAuthoringBundle; this mutation handles pause/unpause + failed. failureReason optional. */
-// Bound concept: v1:authoring:bundle (machine-readable: BoundConcepts["setAuthoringBundleStatus"] in generated_concepts.ts).
-export interface SetAuthoringBundleStatusArgs {
-  bundleId: string;
-  // Enum: draft | paused | active | failed
-  status: string;
-  failureReason?: string;
-}
-
-export function buildSetAuthoringBundleStatus(args: SetAuthoringBundleStatusArgs): string {
-  const parts: string[] = [];
-  parts.push("bundleId: " + renderMemQLValue(args.bundleId));
-  parts.push("status: " + renderMemQLValue(args.status));
-  if (args.failureReason !== undefined) parts.push("failureReason: " + renderMemQLValue(args.failureReason));
-  return "mutation setAuthoringBundleStatus(" + parts.join(", ") + ")";
-}
-
-declare module "./query.js" {
-  interface QueryClient {
-    setAuthoringBundleStatus(args: SetAuthoringBundleStatusArgs, opts?: QueryCallOptions): Promise<Result>;
-  }
-}
-
-QueryClient.prototype.setAuthoringBundleStatus = function (this: QueryClient, args: SetAuthoringBundleStatusArgs = {} as SetAuthoringBundleStatusArgs, opts?: QueryCallOptions): Promise<Result> {
-  return this.executeNamed("setAuthoringBundleStatus", buildSetAuthoringBundleStatus(args), opts);
 };
 
 /** Flip the published flag (and optional hours) without a deploy. */
@@ -7841,6 +7629,7 @@ export interface UpdateComposeRecipeArgs {
   templateId?: string;
   format?: string;
   outputKind?: string;
+  layoutId?: string;
   folderId?: string;
   accountIds?: string[];
 }
@@ -7854,6 +7643,7 @@ export function buildUpdateComposeRecipe(args: UpdateComposeRecipeArgs): string 
   if (args.templateId !== undefined) parts.push("templateId: " + renderMemQLValue(args.templateId));
   if (args.format !== undefined) parts.push("format: " + renderMemQLValue(args.format));
   if (args.outputKind !== undefined) parts.push("outputKind: " + renderMemQLValue(args.outputKind));
+  if (args.layoutId !== undefined) parts.push("layoutId: " + renderMemQLValue(args.layoutId));
   if (args.folderId !== undefined) parts.push("folderId: " + renderMemQLValue(args.folderId));
   if (args.accountIds !== undefined) parts.push("accountIds: " + renderMemQLValue(args.accountIds));
   return "mutation updateComposeRecipe(" + parts.join(", ") + ")";
@@ -8398,6 +8188,7 @@ QueryClient.prototype.updateRoutingPolicy = function (this: QueryClient, args: U
 /** ENGINE: stamp a send job's progress or lifecycle transition. Called by the drain worker after each batch and on every terminal outcome. clusterOwner tier. */
 // Bound concept: v1:campaigns:sendJob (machine-readable: BoundConcepts["updateSendJob"] in generated_concepts.ts).
 export interface UpdateSendJobArgs {
+  versionTime?: string;
   sendJobId: string;
   status?: string;
   recipientCount?: number;
@@ -8414,6 +8205,7 @@ export interface UpdateSendJobArgs {
 
 export function buildUpdateSendJob(args: UpdateSendJobArgs): string {
   const parts: string[] = [];
+  if (args.versionTime !== undefined) parts.push("versionTime: " + renderMemQLValue(args.versionTime));
   parts.push("sendJobId: " + renderMemQLValue(args.sendJobId));
   if (args.status !== undefined) parts.push("status: " + renderMemQLValue(args.status));
   if (args.recipientCount !== undefined) parts.push("recipientCount: " + renderMemQLValue(args.recipientCount));

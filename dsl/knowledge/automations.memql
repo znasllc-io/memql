@@ -189,7 +189,7 @@ automation knowledgeBridgeWorkflow {
  return args.bridgeId
 }
 
-/// Create missing catalog entries, replace changed corpus sources and remove retired sources.
+/// Create missing catalog entries, ingest current corpora without erasing review decisions, and remove retired sources.
 @template
 automation knowledgeSeedCatalogWorkflow {
  args { domains []any! corpora []any! retired []any! forceIngest bool! }
@@ -204,7 +204,6 @@ automation knowledgeSeedCatalogWorkflow {
  for corpus in args.corpora {
   exists := builtin knowledgeSeedCorpusExists(key: corpus.key)
   if args.forceIngest || exists != true {
-   builtin knowledgePurgeSeedCorpus(key: corpus.key) on error continue
    builtin knowledgeIngestSeedCorpus(key: corpus.key, source: "appStructure") on error continue
   }
  }
@@ -267,3 +266,28 @@ automation knowledgeOpenRefreshWorkflow {
   input: {domainId: args.domainId, mode: "refresh", specialistId: "", topic: name},
   requestedVia: "api", triggeredBy: "refresh.cadence")
 }
+
+/// Install only the selected registered chunks. Every embedding/publication failure stops the operation; a later explicit call repairs missing vectors.
+@template
+automation knowledgeInstallCapabilityCorporaWorkflow {
+ args { chunkIds []string! }
+ for chunkId in args.chunkIds {
+  builtin knowledgeInstallCapabilityChunk(chunkId: chunkId)
+ }
+}
+
+/// Publish the explicit release selection before indexing; failed chunks retain their review state and retry later.
+@template
+automation knowledgeReconcileReleaseSeeds {
+ args { chunkIds []string! publish bool! index bool! }
+ if args.publish {
+  for chunkId in args.chunkIds { builtin knowledgePublishReleaseChunk(chunkId: chunkId) on error continue }
+ }
+ if args.index {
+  for chunkId in args.chunkIds { builtin knowledgeIndexReleaseChunk(chunkId: chunkId) on error continue }
+ }
+}
+
+/// First boot can precede inference setup. Retry only the registered release selection, with a bounded paid-work pass.
+@trigger(schedule="0 */2 * * * *", node="bff", lease="release-knowledge")
+automation reconcileReleaseKnowledge { builtin knowledgeReconcileReleaseKnowledge() }

@@ -3,6 +3,7 @@ package agent
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"sort"
 	"strings"
@@ -409,6 +410,7 @@ func (r *Replier) runStreamingToolLoop(
 	// next window instead of ending the turn on a limit that is the model's
 	// property rather than the task's.
 	contextHandoffs := 0
+	var guidance workGuidanceCursor
 
 	maxIter := maxStreamingToolLoopIterations()
 	wallclock := turnWallclockFor(turnCtx)
@@ -449,9 +451,19 @@ StreamLoop:
 			textChunks++
 		}
 
+		guided, _, guidanceErr := r.receiveWorkGuidance(ctx, &guidance, messages, nil)
+		if guidanceErr != nil {
+			return nil, guidanceErr
+		}
+		messages = guided
+		messages, guidanceErr = r.recoverWorkProgress(ctx, messages, turnCtx, sink, &guidance)
+		if guidanceErr != nil {
+			return nil, guidanceErr
+		}
+
 		compacted, compactErr := r.compactWorkContext(ctx, messages, tools, memql.WorkContextTarget(messages, tools, 20000))
 		if compactErr != nil {
-			return nil, compactErr
+			return nil, r.pauseAtBudgetBoundary(ctx, compactErr, messages)
 		}
 		messages = compacted
 
@@ -471,9 +483,19 @@ StreamLoop:
 		)
 		attempt := 0
 		for {
+			// Compaction or a retry can take time; check again before reasoning.
+			guided, _, guidanceErr := r.receiveWorkGuidance(ctx, &guidance, messages, nil)
+			if guidanceErr != nil {
+				return nil, guidanceErr
+			}
+			messages = guided
+			messages, guidanceErr = r.recoverWorkProgress(ctx, messages, turnCtx, sink, &guidance)
+			if guidanceErr != nil {
+				return nil, guidanceErr
+			}
 			budgetCtx, stopBudget, budgetErr := r.workCallContext(ctx)
 			if budgetErr != nil {
-				return nil, budgetErr
+				return nil, r.pauseAtBudgetBoundary(ctx, budgetErr, messages)
 			}
 			attemptCtx, stopAttempt := context.WithCancel(budgetCtx)
 			cancelAttempt := func() { stopAttempt(); stopBudget() }
@@ -482,8 +504,19 @@ StreamLoop:
 				budgetFailure := r.workCallFailure(attemptCtx)
 				cancelAttempt()
 				if budgetFailure != nil {
-					terminalErr = budgetFailure
+					terminalErr = r.pauseAtBudgetBoundary(ctx, budgetFailure, messages)
 					break StreamLoop
+				}
+				var ceiling *memql.RunCeilingError
+				if errors.As(err, &ceiling) {
+					return nil, r.pauseAtBudgetBoundary(ctx, err, messages)
+				}
+				if handled, recoveryErr := r.recoverModelCeiling(ctx, err, messages, attempt, true); handled {
+					if recoveryErr != nil {
+						return nil, recoveryErr
+					}
+					attempt++
+					continue
 				}
 				if next, ok := r.handOffContext(ctx, err, messages, &contextHandoffs, iter, requestId); ok {
 					messages = next
@@ -516,13 +549,25 @@ StreamLoop:
 			budgetFailure := r.workCallFailure(attemptCtx)
 			cancelAttempt()
 			if budgetFailure != nil {
-				terminalErr = budgetFailure
+				terminalErr = r.pauseAtBudgetBoundary(ctx, budgetFailure, messages)
 				break StreamLoop
 			}
 			if streamErr != nil {
+				var ceiling *memql.RunCeilingError
+				if errors.As(streamErr, &ceiling) {
+					terminalErr = r.pauseAtBudgetBoundary(ctx, streamErr, messages)
+					break StreamLoop
+				}
 				if ctx.Err() != nil {
 					terminalErr = ctx.Err()
 					break StreamLoop
+				}
+				if handled, recoveryErr := r.recoverModelCeiling(ctx, streamErr, messages, attempt, turnText == "" && len(turnCalls) == 0); handled {
+					if recoveryErr != nil {
+						return nil, recoveryErr
+					}
+					attempt++
+					continue
 				}
 				if next, ok := r.handOffContext(ctx, streamErr, messages, &contextHandoffs, iter, requestId); ok {
 					messages = next
@@ -554,6 +599,20 @@ StreamLoop:
 			// Success: exit the inner retry loop and proceed to
 			// consume turnCalls / emit tool results.
 			break
+		}
+
+		if err := r.acknowledgeWorkGuidance(ctx, &guidance); err != nil {
+			return nil, err
+		}
+		// Do not dispatch a stale proposal, including a terminal response, if a
+		// human corrected the work while that model call was in flight.
+		guided, redirected, guidanceErr := r.receiveWorkGuidance(ctx, &guidance, messages, nil)
+		if guidanceErr != nil {
+			return nil, guidanceErr
+		}
+		messages = guided
+		if redirected {
+			continue StreamLoop
 		}
 
 		if workOutcomeRequired && isDelegatedWorkSession(provider) {
@@ -654,10 +713,19 @@ StreamLoop:
 		// forward them. The sink contract allows both ToolCall and
 		// ToolResult so cognition has the full picture.
 		hadSuccess := false
-		for _, tc := range turnCalls {
+		for callIndex, tc := range turnCalls {
+			guided, redirected, guidanceErr := r.receiveWorkGuidance(ctx, &guidance, messages, turnCalls[callIndex:])
+			if guidanceErr != nil {
+				return nil, guidanceErr
+			}
+			messages = guided
+			if redirected {
+				terminalEnvelope = nil
+				continue StreamLoop
+			}
 			// Calls after a human question have not started yet.
 			if err := r.prepareWorkTool(ctx); err != nil {
-				return nil, err
+				return nil, r.pauseAtBudgetBoundary(ctx, err, messages)
 			}
 			sink.ToolCall(tc.ID, tc.Name, tc.Arguments)
 			args := parseToolArgs(tc.Arguments)
@@ -720,6 +788,7 @@ StreamLoop:
 				}
 			}
 			var content string
+			var failureAbort error
 			if execErr != nil {
 				// Structured, typed tool error (#584): classify the raw
 				// error into {type, message, retryable, userFixable} so the
@@ -731,19 +800,14 @@ StreamLoop:
 					"retryable", se.Retryable, "userFixable", se.UserFixable,
 					"error", execErr)
 				content = se.JSON()
-				sink.ToolResult(tc.ID, "", execErr.Error())
+				sink.ToolResult(tc.ID, result, execErr.Error())
 				// Repeated-identical-failure breaker (memql#1128): abort the
 				// whole turn rather than loop to maxIterations when the model
 				// is stuck re-issuing the same failing call.
 				if trip, count := failBreaker.observeFailure(tc.Name, tc.Arguments, execErr); trip {
 					r.logger.Warn("agent streaming: aborting turn -- repeated identical tool failure",
 						"tool", tc.Name, "count", count, "requestId", requestId)
-					return &TurnResult{
-						FinalText:  strings.TrimSpace(fullText.String()),
-						TextChunks: textChunks,
-						ToolCalls:  allToolCalls,
-						Iterations: iterations,
-					}, repeatFailureAbortError(tc.Name, count)
+					failureAbort = repeatFailureAbortError(tc.Name, count)
 				}
 			} else {
 				content = result
@@ -797,7 +861,15 @@ StreamLoop:
 				Content:    content,
 			})
 			if err := r.saveWorkProgress(ctx, messages); err != nil {
+				if failureAbort != nil {
+					return nil, fmt.Errorf("%w: saving final failed tool result: %v", memql.ErrWorkCheckpointRequired, err)
+				}
 				return nil, err
+			}
+			// Retain the final failed operation's evidence before aborting;
+			// saveWorkProgress pairs undispatched siblings as not executed.
+			if failureAbort != nil {
+				return &TurnResult{FinalText: strings.TrimSpace(fullText.String()), TextChunks: textChunks, ToolCalls: allToolCalls, Iterations: iterations}, failureAbort
 			}
 		}
 

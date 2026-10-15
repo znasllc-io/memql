@@ -98,6 +98,7 @@ export interface FakeSeed {
   versions?: Row[];
   /** The watched-folder arrangements (epic memql#4783). */
   backups?: Row[];
+  transfers?: Row[];
   /** The Materializer's records (epic memql#4981) -- what `compositions`
    *  answers. */
   compositions?: Row[];
@@ -131,6 +132,8 @@ export function fakeConnection(seed: FakeSeed = {}): FakeConnection {
       if (call.startsWith("query libraryFileVersionsForFile(")) return rowsResult(seed.versions ?? []);
       if (call.startsWith("query libraryWatchedFolders(")) return rowsResult(seed.backups ?? []);
       if (call.startsWith("query compositions(")) return rowsResult(seed.compositions ?? []);
+      if (name === "libraryBackupUsage") return rowsResult([{ used: 0, reserved: 0, available: 10_000_000_000, limit: 10_000_000_000, clusterUsed: 0, clusterReserved: 0, clusterLimit: 5_000_000_000_000, exempt: false } as never]);
+      if (name === "libraryBackupList") return rowsResult([{ transfers: seed.transfers ?? [], nextCursor: "" } as never]);
       if (call.startsWith("mutation ") || call.startsWith("builtin ")) return rowsResult([]);
 
       const match = /id==(\S+)/.exec(call);

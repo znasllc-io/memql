@@ -1,0 +1,22 @@
+Our mission?
+
+Make the small daily jobs a little easier.
+
+We'll learn together, find the easy wins and make every morning a little more fun.
+
+Meet Ace
+
+Follow us
+
+Instagram
+YouTube
+LinkedIn
+
+Contact us
+Manage preferences: {{preferencesUrl}}
+Unsubscribe: {{unsubscribeUrl}}
+View in browser: {{viewUrl}}
+ACME
+123 Example Street, Springfield
+You're receiving this email because you signed up for updates from Acme.
+© 2026 Acme

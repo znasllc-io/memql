@@ -93,6 +93,8 @@ cells/concept/mirroredTo/beside-an-external-origin.memql
 cells/concept/mirroredTo/with-an-unquoted-value.memql
 cells/concept/origin/a-string.memql
 cells/concept/origin/with-an-unquoted-value.memql
+cells/concept/retention/declared-policy.memql
+cells/concept/retention/invalid-ttl.memql
 cells/concept/rowAuthz/a-flag-given-a-value.memql
 cells/concept/rowAuthz/a-misspelled-key.memql
 cells/concept/rowAuthz/keyword-arguments.memql
@@ -471,6 +473,7 @@ examples/memql/queries/query-syntax.memql
 examples/memql/queries/sort-paginate.memql
 examples/memql/quickstart/basic-query.memql
 examples/memql/refine/refine.memql
+examples/memql/retention/policy.memql
 examples/memql/routing/policy.memql
 examples/memql/routing/prompt-input.memql
 examples/memql/routing/prompt-level.memql

@@ -9,6 +9,7 @@ import { decideBinDrop } from "../apps/bin/drop";
 import { LocalFilesSettingsStore } from "../apps/files/settings";
 import { useOsConnection } from "../live/connection";
 import { Button, Notice } from "../kit";
+import { InPlaceAsk } from "../kit/pressHold";
 import { dockOrder, isPinned } from "../system/dock";
 import { appById, appsFor, canOpen, fixturesFor, isDockFixture } from "../system/registry";
 import { useActiveDrag, useShellDragClaim } from "./dragScope";
@@ -284,15 +285,18 @@ function AvatarMenu({ onSignOut }: { onSignOut: () => void }) {
 export function Dock({
   onOpenLauncher,
   onSignOut,
+  hidden = false,
 }: {
   onOpenLauncher: () => void;
   onSignOut: () => void;
+  hidden?: boolean;
 }) {
   const { state, actions, registry, accessEpoch, notice } = useOs();
   const { openAsk, availability } = useAsk();
   const connection = useConnectionStatus();
   const connectionTone = connectionDotTone(connection, availability);
   const [menu, setMenu] = useState<{ x: number; y: number; appId: AppId } | null>(null);
+  useEffect(() => { if (hidden) setMenu(null); }, [hidden]);
 
   // `accessEpoch` in the deps for the launcher's reason (memql#4857):
   // fixturesFor reads the effective capability set out of band, so a fixture
@@ -413,29 +417,34 @@ export function Dock({
     return () => clearTimeout(t);
   }, [binNote]);
 
+  // THE WHOLE NOTICE IS THE ASK, question and all: a second file dropped while
+  // this one is open changes the question under the same Archive and Cancel,
+  // and a hold on the buttons alone would not notice (see InPlaceAsk).
   const binBubble: ReactNode =
     pending !== null ? (
-      <Notice
-        tone="warn"
-        sentence={`Archive "${pending.name}"?`}
-        next="It goes to the Bin and keeps its bytes, its history and its provenance. Nothing is deleted."
-      >
-        <div className="os-dock-bubble-actions">
-          <Button
-            tone="danger"
-            busy={archiving}
-            busyLabel="Archiving"
-            onClick={() => {
-              const drop = pending;
-              setPending(null);
-              void archive(drop);
-            }}
-          >
-            Archive
-          </Button>
-          <Button onClick={() => setPending(null)}>Cancel</Button>
-        </div>
-      </Notice>
+      <InPlaceAsk>
+        <Notice
+          tone="warn"
+          sentence={`Archive "${pending.name}"?`}
+          next="It goes to the Bin and keeps its bytes, its history and its provenance. Nothing is deleted."
+        >
+          <div className="os-dock-bubble-actions">
+            <Button
+              tone="danger"
+              busy={archiving}
+              busyLabel="Archiving"
+              onClick={() => {
+                const drop = pending;
+                setPending(null);
+                void archive(drop);
+              }}
+            >
+              Archive
+            </Button>
+            <Button onClick={() => setPending(null)}>Cancel</Button>
+          </div>
+        </Notice>
+      </InPlaceAsk>
     ) : binNote !== null ? (
       <Notice tone={binNote.tone} sentence={binNote.sentence} next={binNote.next} detail={binNote.detail} />
     ) : null;
@@ -462,7 +471,7 @@ export function Dock({
   }
 
   return (
-    <footer className="os-dock" data-os-dock>
+    <footer className="os-dock" data-os-dock hidden={hidden}>
       <button
         type="button"
         className="os-dock-app os-dock-launcher"
@@ -532,7 +541,7 @@ export function Dock({
         <Clock />
         <AvatarMenu onSignOut={onSignOut} />
       </div>
-      {menu ? (
+      {!hidden && menu ? (
         <ContextMenu
           x={menu.x}
           y={menu.y}

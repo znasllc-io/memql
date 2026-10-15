@@ -138,6 +138,29 @@ const (
 	// arbitrary application events may carry the same topic and payload.
 	KindAutomationRunRequest
 	KindAutomationRunTrace
+
+	// KindAuthoringArm is emitted on the dedicated authoring-arm broadcast
+	// channel (memql#6022, F1) when an authored bundle activates. It carries
+	// the bundle id + owner so EVERY replica arms the bundle into its own
+	// authored registry and scheduler within seconds -- before it, a bundle
+	// was armed only on the node that activated it and reached the others at
+	// their next boot. Only the authoring-arm subscriber consumes it, so a
+	// single broadcast routing rule forwards it everywhere with zero side
+	// effects (no automations).
+	//
+	// Appended here, after the run-relay kinds, because the mesh carries a
+	// kind as its int32 value: inserting it earlier would renumber every kind
+	// after it on a node still running the previous build. The subscriber
+	// requires this kind as well as the topic, and an authored event step
+	// cannot mint it (steps.mapEventKind), so a DSL publish on the topic is
+	// not a broadcast.
+	KindAuthoringArm
+
+	// KindAuthoringDisarm is the inverse of KindAuthoringArm (memql#6022,
+	// F1): emitted when an active authored bundle is retired, so every
+	// replica takes the bundle out of its own registry and scheduler. Same
+	// single-consumer broadcast shape, same append-only placement.
+	KindAuthoringDisarm
 )
 
 // String returns a human-readable name for the event kind.
@@ -213,6 +236,10 @@ func (k Kind) String() string {
 		return "authoring_promote"
 	case KindAuthoringDemote:
 		return "authoring_demote"
+	case KindAuthoringArm:
+		return "authoring_arm"
+	case KindAuthoringDisarm:
+		return "authoring_disarm"
 	default:
 		return "unspecified"
 	}
@@ -289,6 +316,23 @@ const (
 	// node's shared registry within seconds (no restart). Single-consumer
 	// broadcast topic with zero automation side effects, like authoring.promote.
 	TopicAuthoringDemote = "authoring.demote"
+
+	// Authoring-arm broadcast (memql#6022, F1). Activating an authored bundle
+	// emits authoring.arm.<bundleId> on this channel, ONLY the authoring-arm
+	// subscriber consumes it, and a single broadcast routing rule
+	// (authoring.arm.*) forwards it to every node, so every replica arms the
+	// bundle into its own authored registry and scheduler within seconds (no
+	// restart). Distinct from authoring.promote, which re-hydrates PLAIN
+	// constructs into the shared registry: arming registers owner-scoped
+	// constructs, automations among them, into each node's authored runtime.
+	TopicAuthoringArm = "authoring.arm"
+
+	// Authoring-disarm broadcast (memql#6022, F1). The inverse of
+	// authoring.arm: retiring an active authored bundle emits
+	// authoring.disarm.<bundleId>, and a single broadcast routing rule
+	// (authoring.disarm.*) forwards it to every node, so every replica takes
+	// the bundle's constructs out of its own authored runtime.
+	TopicAuthoringDisarm = "authoring.disarm"
 
 	// Providers-reload broadcast (epic memql#4440). A dedicated channel: the
 	// owner-gated `providersReload` builtin emits

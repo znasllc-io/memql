@@ -44,6 +44,17 @@
 # spec.source.kustomize.patches. `.localhost` is unroutable, so a cluster reconciled
 # before its domain is set fails visibly rather than half-working.
 #
+# THE ERROR PAGES. Every Ingress below whose proxy speaks plain HTTP to its backend, bar
+# mcp-front-door, carries nginx.ingress.kubernetes.io/default-backend: error-pages,
+# so that when the Service it routes to has no ready endpoints ingress-nginx answers with the
+# maintenance page (`memql error-pages`, deploy/k8s/components/error-pages) instead of its own
+# bare 503. Identity uses error-pages-tls because its backend protocol is HTTPS.
+# api-front-door-grpc remains excluded: a gRPC client cannot read a page.
+# mcp-front-door remains excluded because it can be intentionally disabled. Nothing sets
+# custom-http-errors, which would replace the application's own error responses.
+# cmd/frontdoorhosts/manifest.go has the reasoning and
+# deploy/k8s/overlays/frontdoor_error_pages_test.go holds the rule.
+#
 # NO ROUTER-PRIORITY ANNOTATIONS, unlike the local overlay's traefik front door. nginx
 # resolves server_name by specificity in its own core -- an exact name beats a leading
 # wildcard -- so the role hosts and the platform sites outrank *.<domain> without anything
@@ -124,6 +135,9 @@ metadata:
     # the local overlay needs no counterpart -- recorded here because 'works
     # locally' is therefore no evidence about this annotation.
     nginx.ingress.kubernetes.io/proxy-body-size: "48m"
+    # THE MAINTENANCE PAGE: where ingress-nginx sends a request when this Ingress's Service has
+    # no ready endpoints, in place of its own bare 503 (see the top of this file).
+    nginx.ingress.kubernetes.io/default-backend: error-pages
 spec:
   ingressClassName: nginx
   tls:
@@ -163,6 +177,20 @@ spec:
                 name: bff-http
                 port:
                   number: 8085
+          - path: /email/events/azure
+            pathType: Prefix
+            backend:
+              service:
+                name: bff-http
+                port:
+                  number: 8085
+          - path: /email/preferences
+            pathType: Prefix
+            backend:
+              service:
+                name: bff-http
+                port:
+                  number: 8085
           - path: /auth/callback
             pathType: Prefix
             backend:
@@ -171,6 +199,13 @@ spec:
                 port:
                   number: 8085
           - path: /auth/exchange
+            pathType: Prefix
+            backend:
+              service:
+                name: bff-http
+                port:
+                  number: 8085
+          - path: /email/confirm
             pathType: Prefix
             backend:
               service:
@@ -213,6 +248,13 @@ spec:
                 port:
                   number: 8085
           - path: /auth/login
+            pathType: Prefix
+            backend:
+              service:
+                name: bff-http
+                port:
+                  number: 8085
+          - path: /email/view
             pathType: Prefix
             backend:
               service:
@@ -305,6 +347,9 @@ metadata:
   namespace: memql
   annotations:
     nginx.ingress.kubernetes.io/backend-protocol: "GRPC"
+    # NO default-backend HERE (see the top of this file): behind grpc_pass ingress-nginx would hand
+    # the error pages the gRPC protocol, and they speak HTTP/1.1. The proxy would answer 502, not
+    # the page, and a gRPC client could not render the page anyway.
     # WORKER STREAM IDLE (Jose 408@60.000s). ingress-nginx defaults
     # proxy-read-timeout / proxy-send-timeout to 60s. A held WorkerService
     # bidi with no DATA frame for a minute is then answered HTTP 408 from
@@ -368,6 +413,7 @@ metadata:
   annotations:
     nginx.ingress.kubernetes.io/backend-protocol: "HTTPS"
     nginx.ingress.kubernetes.io/proxy-ssl-verify: "off"
+    nginx.ingress.kubernetes.io/default-backend: error-pages-tls
 spec:
   ingressClassName: nginx
   tls:
@@ -393,6 +439,8 @@ spec:
 # speaking plain HTTP, and backend protocol is not a per-path setting. Not proxied
 # through the edge either -- MCP clients configure a URL, they are not browsers, and an
 # extra hop on a tool-calling path buys nothing.
+#
+# NO default-backend (see the top of this file): entry installs run mcp at 0 replicas; MCP is for machines.
 apiVersion: networking.k8s.io/v1
 kind: Ingress
 metadata:
@@ -441,6 +489,10 @@ kind: Ingress
 metadata:
   name: os-front-door
   namespace: memql
+  annotations:
+    # THE MAINTENANCE PAGE: where ingress-nginx sends a request when this Ingress's Service has
+    # no ready endpoints, in place of its own bare 503 (see the top of this file).
+    nginx.ingress.kubernetes.io/default-backend: error-pages
 spec:
   ingressClassName: nginx
   tls:
@@ -484,6 +536,10 @@ kind: Ingress
 metadata:
   name: vscode-front-door
   namespace: memql
+  annotations:
+    # THE MAINTENANCE PAGE: where ingress-nginx sends a request when this Ingress's Service has
+    # no ready endpoints, in place of its own bare 503 (see the top of this file).
+    nginx.ingress.kubernetes.io/default-backend: error-pages
 spec:
   ingressClassName: nginx
   tls:
@@ -525,6 +581,10 @@ kind: Ingress
 metadata:
   name: edge-front-door
   namespace: memql
+  annotations:
+    # THE MAINTENANCE PAGE: where ingress-nginx sends a request when this Ingress's Service has
+    # no ready endpoints, in place of its own bare 503 (see the top of this file).
+    nginx.ingress.kubernetes.io/default-backend: error-pages
 spec:
   ingressClassName: nginx
   tls:

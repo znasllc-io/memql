@@ -9,6 +9,7 @@ import (
 	"github.com/znasllc-io/memql/component/automations/workflowhost"
 	pure "github.com/znasllc-io/memql/component/compose"
 	memorynodes "github.com/znasllc-io/memql/component/database/memory-nodes"
+	"github.com/znasllc-io/memql/component/memql"
 )
 
 // handlers.go -- the four capabilities that are not `materialize`.
@@ -68,6 +69,10 @@ func (i *Integration) handleRunRecipe(ctx context.Context, args map[string]any, 
 		Statement:  stringOf(row["description"]),
 		Format:     format,
 		OutputKind: stringOf(row["outputKind"]),
+		// The layout its emails are written into. materialize checks it as it
+		// would a request's: refused for anything but an email, and refused
+		// loudly when it has been archived or belongs to another organization.
+		LayoutId:   strings.TrimSpace(stringOf(row["layoutId"])),
 		Sources:    refs,
 		TemplateId: strings.TrimSpace(stringOf(row["templateId"])),
 		FolderId:   strings.TrimSpace(stringOf(row["folderId"])),
@@ -165,6 +170,12 @@ func selectorsToSources(raw any) ([]SourceRef, error) {
 // matters at this surface: a render already in flight finishes and is
 // journaled, so a transcript can never claim a composition stopped while
 // its bytes were still being written somewhere.
+//
+// THE STATUS IT DECIDES ON IS READ FRESH. The run making the file usually
+// finishes on another replica, and this node's cached copy of the composition
+// can still say `composing` after that replica marked it ready. A stop decided
+// on the cached copy would mark a ready composition cancelled, and the client
+// would report a stop for a file that exists.
 func (i *Integration) handleCancel(ctx context.Context, args map[string]any, _ int) ([]memorynodes.MemoryNode, error) {
 	if _, err := requirePrincipal(ctx); err != nil {
 		return nil, err
@@ -173,6 +184,7 @@ func (i *Integration) handleCancel(ctx context.Context, args map[string]any, _ i
 	if compositionId == "" {
 		return nil, fmt.Errorf("compose: cancel needs a compositionId")
 	}
+	ctx = memql.ContextWithFreshRead(ctx)
 	st := i.store()
 	row, err := st.compositionById(ctx, compositionId)
 	if err != nil {

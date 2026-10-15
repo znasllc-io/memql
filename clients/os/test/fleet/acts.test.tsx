@@ -1,5 +1,6 @@
 import { act, cleanup, render, screen } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { readTheBar } from "../readTheBar";
 
 // =============================================================================
 // NOTHING LOST (design decision D5, memql#5159)
@@ -454,6 +455,8 @@ const CASES: ActsCase[] = [
       await screen.findByText(MACHINE_LABEL);
       await click(screen.getByLabelText("Add a machine"));
       await type(screen.getByLabelText("Machine name") as HTMLInputElement, "mini");
+      // Continue joined the bar with the name, and a bar that has just changed takes no press for a moment.
+      await readTheBar();
       await click(screen.getByRole("button", { name: "Continue" }));
       await settle();
       await click(screen.getByText("Connection token"));
@@ -490,12 +493,13 @@ const CASES: ActsCase[] = [
       { name: `Name for ${MACHINE_LABEL}`, count: 1 },
       { name: "Rename", count: 1 },
       { name: "Reported labels", count: 1, note: "shown, and deliberately carrying no edit act" },
-      {
-        name: "Operator labels",
-        count: 2,
-        note: "the chip list and the draft field, both named for the map they edit",
-      },
-      { name: "Add", count: 1 },
+      { name: "Operator labels", count: 1, note: "the card list" },
+      { name: "Search operator labels", count: 1 },
+      { name: "Search operator labels by", count: 1 },
+      { name: "Add label", count: 1 },
+      { name: "Edit tier", count: 1 },
+      { name: "Previous labels", count: 1 },
+      { name: "Next labels", count: 1 },
       { name: "Remove tier=gold", count: 1 },
       { name: `Model to pull onto ${MACHINE_LABEL}`, count: 1 },
       { name: "Pull", count: 1 },
@@ -517,9 +521,9 @@ const CASES: ActsCase[] = [
         note: "one per advertised model, and this fixture advertises one",
       },
       {
-        name: "Change sharing",
+        name: "Share models",
         count: 1,
-        note: "the owner's half of the two consents, in every mode (epic memql#5344): the two-way toggle became one act that opens the share dialog; the machine's half is still a file on the machine",
+        note: "inline sharing switch; no second view",
       },
       {
         name: "Share with the cluster",
@@ -569,35 +573,35 @@ const CASES: ActsCase[] = [
     // Everything the toggle did, and what it could not: the three modes, the
     // search over whom the owner may pick, and the one act that commits them
     // (epic memql#5344, design section 5).
-    what: "Machines -- the share dialog",
+    what: "Machines -- inline sharing",
     open: async () => {
       await openMachineDetail(
         fakeConnection({
           myWorkersWithStatus: [MACHINE],
           fleetShareDirectory: [
-            shareDirectoryRow({ id: MACHINE_ID, people: [{ id: "ana", name: "Ana Ruiz", detail: "" }] }),
+            shareDirectoryRow({ id: MACHINE_ID, people: [{ id: "ana", name: "Ana Ruiz", detail: "" }, { id: "bo", name: "Bo Chen", detail: "" }] }),
           ],
         }),
       );
-      await click(screen.getByRole("button", { name: "Change sharing" }));
+      await click(screen.getByRole("switch", { name: "Share models" }));
       await settle();
-      await click(screen.getByRole("radio", { name: /^Specific people and groups/ }));
+      fireEvent.focus(screen.getByRole("combobox", { name: "Search users and groups" }));
+      await click(screen.getByRole("option", { name: "Ana Ruiz" }));
+      await click(screen.getByRole("button", { name: "Add selected users and groups" }));
+      fireEvent.focus(screen.getByRole("combobox", { name: "Search users and groups" }));
     },
     acts: [
       {
-        name: "Change sharing",
-        count: 1,
-        note: "the opener, still on the page behind its dialog -- and the dialog does not answer to the same name",
+        name: "Share models", count: 1, note: "inline access toggle",
       },
-      { name: "Who can use this machine", count: 1, note: "the three modes, one radio group" },
-      { name: /^Only me/, count: 1, within: "Who can use this machine" },
-      { name: /^Specific people and groups/, count: 1, within: "Who can use this machine" },
-      { name: /^Everyone in this cluster/, count: 1, within: "Who can use this machine" },
-      { name: "Search people and groups", count: 1, note: "people and groups together, in one search" },
-      { name: "People and groups you can choose", count: 1 },
-      { name: "Ana Ruiz", count: 1, within: "People and groups you can choose" },
-      { name: "Cancel", count: 1, note: "the way out: a label on the floor, never a second button" },
-      { name: "Save", count: 1, note: "the one act, disabled until the draft differs and names somebody" },
+      { name: "Search users and groups", count: 1 },
+      { name: "Users and groups to add", count: 1 },
+      { name: "Add selected users and groups", count: 1 },
+      { name: "Bo Chen", count: 1, within: "Users and groups to add" },
+      { name: "Pause sharing with Ana Ruiz", count: 1 },
+      { name: "Remove sharing with Ana Ruiz", count: 1 },
+      { name: "Discard changes", count: 0, note: "each row action saves directly" },
+      { name: "Save", count: 0, note: "no second commit step" },
     ],
   },
 
@@ -670,13 +674,21 @@ const CASES: ActsCase[] = [
       await settle();
     },
     acts: [
-      { name: "About How a machine is chosen", count: 1 },
+
       { name: "Routing strategy", count: 1 },
       { name: "Routing fallback", count: 1 },
-      { name: "Required labels", count: 2, note: "the chip list and the draft field" },
-      { name: "Preferred labels", count: 2 },
+      { name: "Required labels", count: 1, note: "the card list" },
+      { name: "Preferred labels", count: 1 },
+      { name: "Search required labels", count: 1 },
+      { name: "Search required labels by", count: 1 },
+      { name: "Search preferred labels", count: 1 },
+      { name: "Search preferred labels by", count: 1 },
       { name: "Preferred model order, one model id per line", count: 1 },
-      { name: "Add", count: 2, note: "one per label map, and they must stay two" },
+      { name: "Add label", count: 2, note: "one per label map, and they must stay two" },
+      { name: "Edit tier", count: 1 },
+      { name: "Edit room", count: 1 },
+      { name: "Previous labels", count: 2 },
+      { name: "Next labels", count: 2 },
       { name: "Remove tier=gold", count: 1 },
       { name: "Remove room=studio", count: 1 },
       { name: "Save", count: 0, note: "nothing changed, so nothing to save -- absent, never disabled" },
@@ -729,7 +741,7 @@ const CASES: ActsCase[] = [
       { name: "Rules", count: 1 },
       { name: "Machines", count: 1 },
       { name: "History", count: 1 },
-      { name: "About Routes", count: 1 },
+
       { name: "New route", count: 1 },
       { name: /^Open Local first,/, count: 1 },
       { name: /^Open Embeddings,/, count: 1 },
@@ -745,7 +757,7 @@ const CASES: ActsCase[] = [
       await click(screen.getByRole("button", { name: /^Open Local first,/ }));
     },
     acts: [
-      { name: "About How a route works", count: 1 },
+
       { name: /^(Description: .*|Add a description)$/, count: 1, note: "the one-line description, edited in place" },
       { name: "Sources, in the order they are tried", count: 1 },
       { name: /^1\. Strongest local model,/, count: 1 },
@@ -774,7 +786,7 @@ const CASES: ActsCase[] = [
       await renderRouting("owner", { intent: { id: "r", payload: { routingTab: "rules" } } });
     },
     acts: [
-      { name: "About How rules are tried", count: 1 },
+
       { name: "Refine rules", count: 2, note: "the affordance's group and its opener share the name" },
       { name: "Add a rule", count: 1 },
       { name: "Rules, in the order they are tried", count: 1 },
@@ -813,7 +825,7 @@ const CASES: ActsCase[] = [
       await renderRouting("admin", { intent: { id: "r", payload: { routingTab: "history" } } });
     },
     acts: [
-      { name: "About History", count: 1 },
+
       { name: "Refine history", count: 2, note: "the affordance's group and its opener share the name" },
       { name: "Recent routed calls", count: 1 },
     ],

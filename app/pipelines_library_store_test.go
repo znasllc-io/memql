@@ -61,6 +61,10 @@ func (f *pipelinesFakeLibraryEngine) Execute(ctx context.Context, q string) (any
 	if f.failOn != "" && strings.Contains(q, f.failOn) {
 		return nil, fmt.Errorf("the engine refused %s", f.failOn)
 	}
+	// @serverOnly, as the engine holds it: an unstamped create is refused.
+	if strings.Contains(q, "createLibraryFile(") && !auth.OriginFromContext(ctx).IsInternal() {
+		return nil, fmt.Errorf("function %q is server-only and cannot be called by a client", "createLibraryFile")
+	}
 	sized := func(n int64) any {
 		return memqlengine.NewResultWithOutput([]any{map[string]any{"size": n}})
 	}

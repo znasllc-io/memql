@@ -1287,10 +1287,7 @@ mutation modelProbe finishModelProbe {
 
 // ---- setWorkerSharing (epic memql#5146, D6) ----
 //
-// The OWNER's half of the two consents that let a machine serve the cluster.
-// The cockpit's half is capabilityDescriptor.inferenceServe, which arrives on
-// Register and is not writable from here -- deliberately: it is a decision
-// about where the machine IS, and only the machine can make it.
+// The enrolled owner's model-sharing audience, controlled from Fleet.
 //
 // @serverOnly SINCE epic memql#5327 (finding M-2), and the paragraph that used
 // to be here was WRONG in a way worth recording rather than deleting.
@@ -1317,9 +1314,8 @@ mutation modelProbe finishModelProbe {
 // rather than accepted, so the record of WHO shared it cannot be written by
 // whoever is holding the keyboard.
 
-/// Set the OWNER's half of a machine's sharing consent. The cockpit's half comes from that
-/// machine's own policy.yaml and is not writable here; both must say cluster before the machine
-/// serves anybody else.
+/// Set the enrolled owner's model-sharing audience. Fleet applies this choice
+/// automatically; machine availability and model allowlists remain separate.
 ///
 /// @serverOnly because actor.userId scoping is NOT the fix here: the caller IS the owner on the
 /// legitimate path, so a self-scoped filter admits exactly the call that is already allowed and
@@ -1345,6 +1341,8 @@ mutation registration setWorkerSharing {
     userIds         []string
     /// Under people: the groups whose active members may use the machine.
     groupIds        []string
+    pausedUserIds   []string
+    pausedGroupIds  []string
   }
   update {
     id: args.registrationId
@@ -1352,6 +1350,8 @@ mutation registration setWorkerSharing {
       mode: args.mode,
       userIds: args.userIds ?? [],
       groupIds: args.groupIds ?? [],
+      pausedUserIds: args.pausedUserIds ?? [],
+      pausedGroupIds: args.pausedGroupIds ?? [],
       sharedAt: now,
       sharedBy: actor.userId
     }
@@ -1368,5 +1368,21 @@ mutation registration updateWorkerPermissions {
   update {
     accept { permissions }
     stamp { id: args.registrationId }
+  }
+}
+
+/// Publish counts only after the stream holder checks ownership and fences the
+/// registration version. Scoping to actor.userId is insufficient: even the
+/// owner must not invent active-call counts. Only the stream-owning engine has
+/// the live call handles and the registration version needed to publish them.
+@serverOnly
+mutation registration updateWorkerSharingActivity {
+  args {
+    registrationId  string!
+    sharingActivity object!
+  }
+  update {
+    id: args.registrationId
+    args.sharingActivity
   }
 }

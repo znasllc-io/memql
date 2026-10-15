@@ -1,9 +1,12 @@
+import type { Readiness } from "../../src/live/readiness";
 import type { ReactNode } from "react";
 import { vi } from "vitest";
 import { Result, type Row } from "@znasllc-io/memql-sdk-core/client";
 
 import { SessionProvider } from "../../src/chrome/access";
 import { UNKNOWN_RUNTIME_CONFIG, type OsRuntimeConfig } from "../../src/cluster/config";
+import { LocalMaterializerSettingsStore } from "../../src/apps/materializer/settings";
+import { parseCall } from "./callArgs";
 
 // The Materializer's test harness: a connection-shaped double.
 //
@@ -17,6 +20,42 @@ import { UNKNOWN_RUNTIME_CONFIG, type OsRuntimeConfig } from "../../src/cluster/
 
 export function rowsResult(rows: Row[]): Result {
   return new Result({ data: rows } as never);
+}
+
+/**
+ * One page of a paged read, as the engine answers it: the rows, and the cursor of the NEXT page
+ * in `meta.cursor` (none on the last). A feed that walks pages follows that cursor and nothing else.
+ */
+export function pagedResult(rows: Row[], cursor = ""): Result {
+  return new Result({ data: rows, ...(cursor === "" ? {} : { meta: { cursor } }) } as never);
+}
+
+/** The engine's page for the reads the Materializer walks (`paginate 50` in dsl/compose and dsl/library). */
+export const PAGE_SIZE = 50;
+
+/**
+ * A read that pages the way the engine's do: PAGE_SIZE rows a page, each naming the next ("p2", "p3", ...)
+ * and the last naming none. The cursor comes in the call's options, where the SDK puts it. A cursor this
+ * fake did not mint is refused loudly: a feed that invents or mangles one must not read as an empty page.
+ */
+function pagesOf(rows: readonly Row[], opts?: unknown): Result {
+  const cursor = (opts as { cursor?: unknown } | undefined)?.cursor;
+  const page = cursor === undefined || cursor === "" ? 1 : /^p[1-9]\d*$/.test(String(cursor)) ? Number(String(cursor).slice(1)) : 0;
+  if (page === 0) throw new Error(`the fake read was given a cursor it did not mint: ${JSON.stringify(cursor)}`);
+  const from = (page - 1) * PAGE_SIZE;
+  return pagedResult(rows.slice(from, from + PAGE_SIZE), from + PAGE_SIZE < rows.length ? `p${page + 1}` : "");
+}
+
+/**
+ * A refusal AS THE APP REALLY RECEIVES IT. The server wraps an internal engine
+ * error in "MemQL engine failed to execute query. Details: "
+ * (buildEngineErrorMessage, component/grpc/server.go) and the SDK's executeNamed
+ * puts the call's name in front, so a typed method rejects with both. A fake
+ * that rejected with the bare sentence would pass an app that shows a person
+ * the frames.
+ */
+export function refused(construct: string, sentence: string): Error {
+  return new Error(`${construct}: MemQL engine failed to execute query. Details: ${sentence}`);
 }
 
 export function bundleResult(rows: Row[]): Result {
@@ -66,7 +105,15 @@ function fakeSubscriptions() {
 export interface FakeSeed {
   compositions?: Row[];
   accounts?: Row[];
+  /** What `libraryArtifactsByLens` answers: the Library's artifact index rows (see `libraryFiles` for file rows). */
   files?: Row[];
+  /**
+   * The person's Library FILE rows, what `libraryFilesForOwner` answers (a page of 50, then the next by
+   * cursor): `id`, `name`, `mimeType`, `size`, `status`, `archived`, `createdAt`. See `libraryFileRow`.
+   */
+  libraryFiles?: Row[];
+  /** The person's live folders, what `libraryFolders` answers (paged the same way). See `folderRow`. */
+  folders?: Row[];
   runs?: Row[];
   templates?: Row[];
   recipes?: Row[];
@@ -74,22 +121,45 @@ export interface FakeSeed {
   composables?: Row;
   /** What `composeResolveSources` answers with. */
   resolved?: Row;
-  /** Make a write REFUSE: the surface must show the server's own sentence. */
+  /**
+   * Make a write REFUSE with this sentence: it arrives framed as a real refusal
+   * does (see `refused`), and the surface must show the sentence alone.
+   */
   writeError?: Error;
   /** What `composeMaterialize` answers with. */
   materializeReply?: Row;
+  /** What `composeCancel` answers with (`{ cancelled: false }` is the cluster saying the file had already finished). */
+  cancelReply?: Row;
   byId?: Record<string, Row>;
   outputFile?: Row;
   outputArtifact?: Row;
+  /**
+   * The Files entry / file row of a SPECIFIC file, for a test whose sources
+   * are files of their own. A file not named here answers with
+   * `outputArtifact` / `outputFile`, as every file did before these existed.
+   */
+  artifactsByFile?: Record<string, Row>;
+  filesById?: Record<string, Row>;
+  /** What the Library answers a document comment / a revision request with. */
+  commentReply?: Row;
+  revisionReply?: Row;
 }
 
 export function fakeConnection(seed: FakeSeed = {}) {
-  const write = (reply?: Row) =>
+  const write = (construct: string, reply?: Row) =>
     vi.fn(async (_args: Record<string, unknown>) => {
-      if (seed.writeError) throw seed.writeError;
+      if (seed.writeError) throw refused(construct, seed.writeError.message);
       return rowsResult(reply ? [reply] : []);
     });
-  return {
+  // Read lazily, so a test can add the Files entry AFTER the file is ready --
+  // the order a slow index produces.
+  const fileRow = (rows: Record<string, Row> | undefined, fallback: Row | undefined, args: Record<string, unknown>) => {
+    const found = rows?.[String(args["fileId"])] ?? fallback;
+    return rowsResult(found ? [found] : []);
+  };
+  const fake = {
+    /** The seed, so a test can change what the cluster answers mid-test. */
+    seed,
     query: {
       libraryArtifactsByLens: vi.fn(async (_args?: Record<string, unknown>, _opts?: unknown) => rowsResult(seed.files ?? [])),
       clientAccountsAll: vi.fn(async (_args?: Record<string, unknown>, _opts?: unknown) => rowsResult(seed.accounts ?? [{id: "client-a", name: "Client A", status: "active"}] as Row[])),
@@ -97,39 +167,60 @@ export function fakeConnection(seed: FakeSeed = {}) {
       // has an empty parameter list, so `.mock.calls[0][0]` is a tuple of
       // length zero and `tsc -b` -- which covers test/ -- refuses the
       // index. A test that asserts a read was issued UNFILTERED needs it.
-      compositions: vi.fn(async (_args?: Record<string, unknown>, _opts?: unknown) =>
-        rowsResult(seed.compositions ?? []),
-      ),
+      compositions: vi.fn(async (_args?: Record<string, unknown>, opts?: unknown) => pagesOf(seed.compositions ?? [], opts)),
       workRunForOwner: vi.fn(async (args: Record<string, unknown>, _opts?: unknown) =>
         rowsResult((seed.runs ?? []).filter((row) => row.id === args.runId)),
       ),
-      composeTemplates: vi.fn(async (_args?: Record<string, unknown>, _opts?: unknown) =>
-        rowsResult(seed.templates ?? []),
-      ),
-      composeRecipes: vi.fn(async (_args?: Record<string, unknown>, _opts?: unknown) =>
-        rowsResult(seed.recipes ?? []),
-      ),
+      composeTemplates: vi.fn(async (_args?: Record<string, unknown>, opts?: unknown) => pagesOf(seed.templates ?? [], opts)),
+      composeRecipes: vi.fn(async (_args?: Record<string, unknown>, opts?: unknown) => pagesOf(seed.recipes ?? [], opts)),
+      libraryFilesForOwner: vi.fn(async (_args?: Record<string, unknown>, opts?: unknown) => pagesOf(seed.libraryFiles ?? [], opts)),
+      libraryFolders: vi.fn(async (_args?: Record<string, unknown>, opts?: unknown) => pagesOf(seed.folders ?? [], opts)),
       composableConcepts: vi.fn(async (_args?: Record<string, unknown>, _opts?: unknown) =>
         rowsResult(seed.composables ? [seed.composables] : [{ concepts: [], registryAvailable: true }]),
       ),
       composeResolveSources: vi.fn(async (_args?: Record<string, unknown>, _opts?: unknown) =>
         rowsResult(seed.resolved ? [seed.resolved] : [{ sources: [], total: 0 }]),
       ),
-      libraryArtifactForFile: vi.fn(async (_args: Record<string, unknown>) => rowsResult(seed.outputArtifact ? [seed.outputArtifact] : [])),
-      libraryFileById: vi.fn(async (_args: Record<string, unknown>) => rowsResult(seed.outputFile ? [seed.outputFile] : [])),
-      composeMaterialize: write(seed.materializeReply),
-      composeRunRecipe: write(seed.materializeReply),
-      composeCancel: write(),
-      archiveComposition: write(),
-      restoreComposition: write(),
-      createComposeTemplate: write(),
-      archiveComposeTemplate: write(),
-      restoreComposeTemplate: write(),
-      createComposeRecipe: write(),
-      archiveComposeRecipe: write(),
-      restoreComposeRecipe: write(),
-      executeNamed: vi.fn(async (_name: string, filter: string) => {
-        const match = /id==(\S+)/.exec(filter);
+      libraryArtifactForFile: vi.fn(async (args: Record<string, unknown>, _opts?: unknown) =>
+        fileRow(seed.artifactsByFile, seed.outputArtifact, args),
+      ),
+      libraryFileById: vi.fn(async (args: Record<string, unknown>) => fileRow(seed.filesById, seed.outputFile, args)),
+      // A TRIPWIRE, NOT A FIXTURE. The app never reads a folder itself: the
+      // cluster decides whether a folder can be filed into (compose refuses one
+      // the caller cannot read or that is archived), and the app shows that
+      // answer. This exists so a test can prove no read was made.
+      libraryFolderById: vi.fn(async (_args: Record<string, unknown>) => rowsResult([])),
+      libraryAddDocumentComment: write("libraryAddDocumentComment", seed.commentReply ?? ({ saved: true, commentId: "comment-1" } as Row)),
+      libraryRequestDocumentRevision: write("libraryRequestDocumentRevision", seed.revisionReply ?? ({ runId: "run-1", proposal: "proposal-1" } as Row)),
+      composeMaterialize: write("composeMaterialize", seed.materializeReply),
+      composeRunRecipe: write("composeRunRecipe", seed.materializeReply),
+      composeCancel: write("composeCancel", seed.cancelReply),
+      archiveComposition: write("archiveComposition"),
+      restoreComposition: write("restoreComposition"),
+      createComposeTemplate: write("createComposeTemplate"),
+      archiveComposeTemplate: write("archiveComposeTemplate"),
+      restoreComposeTemplate: write("restoreComposeTemplate"),
+      createComposeRecipe: write("createComposeRecipe"),
+      archiveComposeRecipe: write("archiveComposeRecipe"),
+      restoreComposeRecipe: write("restoreComposeRecipe"),
+      // THE FUNNEL THE SDK HELPERS SPEAK. `startMaterialize` and
+      // `handOffDescription` take an `execute(name, call)` over this method,
+      // not the typed methods above, so a call to a construct that has a mock
+      // here is handed to THAT mock with the args it was rendered from. A test
+      // therefore sees `composeMaterialize.mock.calls[0][0]` as an object
+      // whichever way the app reached it. A name with no mock here is the
+      // by-id read, answered from `byId`. A mock's refusal is passed on as it
+      // is: a typed mock already rejects the way the real call does (`refused`),
+      // and the real executeNamed is where that wording comes from.
+      //
+      // The explicit return type is what lets this refer to `fake`: without
+      // it the object's type depends on its own initializer.
+      executeNamed: vi.fn(async (name: string, call: string): Promise<Result> => {
+        const handler = (fake.query as Record<string, unknown>)[name];
+        if (name !== "executeNamed" && typeof handler === "function") {
+          return (handler as (args: Record<string, unknown>) => Promise<Result>)(parseCall(call).args);
+        }
+        const match = /id==(\S+)/.exec(call);
         const wanted = match?.[1] ?? "";
         const row = wanted === "" ? undefined : seed.byId?.[wanted];
         return bundleResult(row ? [row] : []);
@@ -138,11 +229,23 @@ export function fakeConnection(seed: FakeSeed = {}) {
     subscriptions: fakeSubscriptions(),
     dispatcher: { sendAndWait: vi.fn() },
   };
+  return fake;
 }
 
 export type FakeConnection = ReturnType<typeof fakeConnection>;
 
-export function withSession(children: ReactNode, overrides: { role?: string } = {}) {
+/** The app's settings store over a plain map, so no test reads another's. */
+export function memoryStore(over: Record<string, unknown> = {}) {
+  const bag = new Map<string, string>();
+  const store = new LocalMaterializerSettingsStore({
+    getItem: (k: string) => bag.get(k) ?? null,
+    setItem: (k: string, v: string) => void bag.set(k, v),
+  });
+  if (Object.keys(over).length > 0) store.save({ ...store.load(), ...over });
+  return store;
+}
+
+export function withSession(children: ReactNode, overrides: { role?: string; readiness?: Readiness } = {}) {
   const config: OsRuntimeConfig = { ...UNKNOWN_RUNTIME_CONFIG, domain: "memql.example.com" };
   return (
     <SessionProvider
@@ -155,6 +258,7 @@ export function withSession(children: ReactNode, overrides: { role?: string } = 
           rank: 0,
         },
         config,
+        readiness: overrides.readiness,
       }}
     >
       {children}
@@ -194,6 +298,30 @@ export function compositionRow(over: Partial<Row> & { id: string }): Row {
     failureReason: "",
     archived: false,
     createdAt: "2026-09-05T12:00:00Z",
+    ...over,
+  };
+}
+
+/** A Library file row (libraryFilesForOwner): the facts the tray offers a file by and the routing reads. */
+export function libraryFileRow(over: Partial<Row> & { id: string }): Row {
+  return {
+    name: "notes.md",
+    mimeType: "text/markdown",
+    size: 2048,
+    status: "ready",
+    archived: false,
+    createdAt: "2026-09-05T12:00:00Z",
+    ...over,
+  };
+}
+
+/** A Library folder row (libraryFolders). A top-level folder unless it names a parent. */
+export function folderRow(over: Partial<Row> & { id: string }): Row {
+  return {
+    name: over.id,
+    parentFolderId: "",
+    archived: false,
+    createdAt: "2026-08-19T10:00:00Z",
     ...over,
   };
 }

@@ -264,7 +264,20 @@ mutation generatedOutput updateGeneratedOutputContent {
 /// graph.node.created fires on every write and a second promotion would wipe the artifact's
 /// labels -- a caller-supplied status would let a later write re-enter that state.
 /// indexFileOnCreate folds the new row into the Library index automatically.
+///
+/// @serverOnly, and actor.userId scoping is not the fix because it is ALREADY in place: the row is
+/// the caller's either way. What a caller must never author is blobUrl -- the storage path every
+/// reader of this file streams with the NODE's credential, so a client-written one pointed a row
+/// the caller owns at somebody else's object and GET /artifacts/{id}/content streamed it back. The
+/// server's writers compose it from the verified actor and an engine-minted fileId after writing
+/// the bytes there; the upload routes and the recorders reach this through
+/// component/server/libraryfile and the Materializer through its own stamp site, both of which
+/// refuse a key outside the actor's own library/{owner}/ prefix before stamping. ownerUserId and
+/// blobUrl are @createOnly because internal origin skips the write guard's owner check on an
+/// existing row: a later create onto an existing id cannot re-own it or re-point its bytes.
+@serverOnly
 @actor
+@createOnly("ownerUserId", "blobUrl")
 mutation file createLibraryFile {
   args {
     backupWorkerId string
@@ -926,6 +939,7 @@ mutation file supersedeLibraryFileHead {
 @actor
 mutation watchedFolder createLibraryWatchedFolder {
   args {
+    mode enum("retain", "sync")
     intervalMinutes int @minimum(5) @maximum(525600)
     watchId        string!
     workerId       string!
@@ -935,7 +949,7 @@ mutation watchedFolder createLibraryWatchedFolder {
     includeHidden  boolean
   }
   insert {
-    accept { workerId, localPath, folderId, excludeGlobs }
+    accept { workerId, localPath, folderId, excludeGlobs, mode }
     stamp {
       id: args.watchId
       ownerUserId: actor.userId

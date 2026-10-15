@@ -19,12 +19,15 @@ mutation capturedMessage recordCapturedEmail {
 @serverOnly
 mutation connectionState storeEmailConnectionState {
   args {
+    purpose string
+    accountId string
+    nextAttemptAt datetime
     id string!
     encryptedValue string!
     versionTime datetime!
   }
   insert {
-    accept { id, encryptedValue }
+    accept { id, encryptedValue, purpose, accountId, nextAttemptAt }
     stamp { createdAt: args.versionTime }
   }
 }
@@ -36,13 +39,27 @@ mutation sendOperation storeEmailSendOperation {
   args {
     id string!
     accountId string!
+    providerMessageId string
     status string!
     nextPollAt datetime!
     encryptedValue string!
     versionTime datetime!
   }
   insert {
-    accept { id, accountId, status, nextPollAt, encryptedValue }
+    accept { id, accountId, providerMessageId, status, nextPollAt, encryptedValue }
     stamp { createdAt: args.versionTime }
   }
+}
+
+/// Service-only scheduling metadata for sealed transport records. actor.userId cannot classify shared credentials; the native service re-reads under the original connection lock and never replaces encryptedValue here.
+@serverOnly
+mutation connectionState indexEmailConnectionState {
+ args {
+ id string!
+ purpose string!
+ accountId string
+ nextAttemptAt datetime!
+ versionTime datetime!
+ }
+ update { accept { purpose, accountId, nextAttemptAt } stamp { id: args.id, createdAt: args.versionTime } }
 }

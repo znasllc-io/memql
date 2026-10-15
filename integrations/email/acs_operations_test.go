@@ -20,9 +20,13 @@ type memoryACSOperations struct {
 	writes    int
 }
 
-func (s *memoryACSOperations) lock(context.Context, string) (func(), error) {
+type memoryOperationGate struct{ release func() }
+
+func (h memoryOperationGate) Release()                         { h.release() }
+func (h memoryOperationGate) Verify(ctx context.Context) error { return ctx.Err() }
+func (s *memoryACSOperations) lock(context.Context, string, ...string) (acsOperationGate, error) {
 	s.gate.Lock()
-	return s.gate.Unlock, nil
+	return memoryOperationGate{release: s.gate.Unlock}, nil
 }
 func (s *memoryACSOperations) read(_ context.Context, key string) (acsOperation, time.Time, bool, error) {
 	value, found := s.rows[key]
@@ -117,11 +121,12 @@ func TestACSDelayedPOSTDoesNotOverwriteAReconciledOperation(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	s.client.Transport = acsRoundTrip(func(*http.Request) (*http.Response, error) {
-		// The submission context expires and another worker reconciles the
-		// persisted operation before the original network call returns.
+		// The submission context expires and the persisted operation turns out to be
+		// reconciled before the original network call returns. The delivery holds the
+		// receipt's lock across the POST, so no other worker can have done it while
+		// the message was out; this is the receipt a lock lost under the sender
+		// would show, and the outcome must not regress it.
 		cancel()
-		release, _ := store.lock(context.Background(), "")
-		defer release()
 		for key, op := range store.rows {
 			op.Status = "succeeded"
 			store.rows[key] = op

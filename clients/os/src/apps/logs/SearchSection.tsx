@@ -2,7 +2,7 @@ import { RecordListSkeleton } from "../../kit/RecordListSkeleton";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { buildLogsSearch, type LogsSearchArgs } from "@znasllc-io/memql-sdk-core/client";
 
-import { Button, Caption, Chip, CopyValue, Field, Head, Notice, Refine, useNow, type RefineChip } from "../../kit";
+import { Button, Caption, Chip, CopyValue, DateTimeInput, Field, Head, Notice, Refine, useNow, type RefineChip } from "../../kit";
 import { formatFreshness } from "../../kit/format";
 import { useOsConnection } from "../../live/connection";
 import { LevelFloorChoice, WindowChoice } from "../../logs/facets";
@@ -131,28 +131,10 @@ export function SearchSection({
           {filters.window === "custom" ? (
             <div className="os-logs-range">
               <Field label="From">
-                <label className="os-sr-only" htmlFor="logs-search-from">
-                  From
-                </label>
-                <input
-                  id="logs-search-from"
-                  className="os-input"
-                  type="datetime-local"
-                  value={filters.from}
-                  onChange={(event) => patch({ from: event.target.value })}
-                />
+                <DateTimeInput id="logs-search-from" label="From" value={filters.from} onChange={(from) => patch({ from })} />
               </Field>
               <Field label="To">
-                <label className="os-sr-only" htmlFor="logs-search-to">
-                  To
-                </label>
-                <input
-                  id="logs-search-to"
-                  className="os-input"
-                  type="datetime-local"
-                  value={filters.to}
-                  onChange={(event) => patch({ to: event.target.value })}
-                />
+                <DateTimeInput id="logs-search-to" label="To" value={filters.to} onChange={(to) => patch({ to })} />
               </Field>
             </div>
           ) : null}

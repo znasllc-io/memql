@@ -16,10 +16,8 @@ import {
   delegationPolicyFromRow,
   invocationFromRow,
   isRevoked,
-  latestPerId,
   machineFromRow,
   machineName,
-  nodeFromRow,
   routingPolicyFromRow,
   sessionIsLive,
   sessionsNewestFirst,
@@ -159,11 +157,11 @@ describe("machineFromRow: who a machine is shared with", () => {
     expect(m.sharedGroupIds).toEqual([]);
   });
 
-  it("reads a people share naming nobody as owner", () => {
+  it("keeps an enabled empty sharing list editable", () => {
     // A legacy or hand-edited row: the engine admits nobody through it, so a
     // surface that called it "shared" would describe a share that serves no one.
     const m = sharing({ mode: "people" });
-    expect(m.sharingMode).toBe("owner");
+    expect(m.sharingMode).toBe("people");
     expect(m.sharedUserIds).toEqual([]);
     expect(m.sharedGroupIds).toEqual([]);
   });
@@ -271,14 +269,40 @@ describe("workspaces and replicas", () => {
     expect(groups[0]?.nodeId).toBe("");
   });
 
-  it("collapses the append-only node history to the latest row per id", () => {
-    const nodes = [
-      nodeFromRow({ id: "wb-1", nodeType: "workbench", health: "starting", createdAt: "2026-08-01T00:00:00Z" }),
-      nodeFromRow({ id: "wb-1", nodeType: "workbench", health: "healthy", createdAt: "2026-08-02T00:00:00Z" }),
-      nodeFromRow({ id: "wb-2", nodeType: "workbench", health: "stopped", createdAt: "2026-08-01T00:00:00Z" }),
+  // The engine writes a version's time with the fraction's trailing zeros
+  // trimmed, so as TEXT `.3251Z` is greater than `.325101Z` and is the earlier
+  // instant. A workspace's place in the list is its instant.
+  it("orders a replica's workspaces by the instant they were made, not by their text", () => {
+    const rows = [
+      workspaceFromRow({ id: "earlier", nodeId: "wb-1", createdAt: "2026-08-01T00:00:00.3251Z" }),
+      workspaceFromRow({ id: "later", nodeId: "wb-1", createdAt: "2026-08-01T00:00:00.325101Z" }),
+      workspaceFromRow({ id: "later-second", nodeId: "wb-1", createdAt: "2026-08-01T00:00:01Z" }),
     ];
-    const latest = latestPerId(nodes);
-    expect(latest.map((n) => `${n.id}:${n.health}`)).toEqual(["wb-1:healthy", "wb-2:stopped"]);
+    const [group] = workspacesByNode(rows);
+    expect(group?.workspaces.map((w) => w.id)).toEqual(["later-second", "later", "earlier"]);
+    // However they were read.
+    const [reversed] = workspacesByNode([...rows].reverse());
+    expect(reversed?.workspaces.map((w) => w.id)).toEqual(["later-second", "later", "earlier"]);
+  });
+
+  it("puts a workspace with no time after every one that has one, and keeps the order those were read in", () => {
+    const rows = [
+      workspaceFromRow({ id: "z-no-time", nodeId: "wb-1", createdAt: "" }),
+      workspaceFromRow({ id: "old", nodeId: "wb-1", createdAt: "2026-08-01T00:00:00Z" }),
+      workspaceFromRow({ id: "a-no-time", nodeId: "wb-1", createdAt: "whenever" }),
+      workspaceFromRow({ id: "new", nodeId: "wb-1", createdAt: "2026-08-02T00:00:00Z" }),
+    ];
+    const [group] = workspacesByNode(rows);
+    // Not by id: nothing says one of the two without a time is newer than the other.
+    expect(group?.workspaces.map((w) => w.id)).toEqual(["new", "old", "z-no-time", "a-no-time"]);
+  });
+
+  it("breaks a tie of the same instant by id, however the instant is spelled", () => {
+    const rows = [
+      workspaceFromRow({ id: "a", nodeId: "wb-1", createdAt: "2026-08-01T00:00:00.5Z" }),
+      workspaceFromRow({ id: "b", nodeId: "wb-1", createdAt: "2026-08-01T00:00:00.500000Z" }),
+    ];
+    expect(workspacesByNode(rows)[0]?.workspaces.map((w) => w.id)).toEqual(["b", "a"]);
   });
 });
 

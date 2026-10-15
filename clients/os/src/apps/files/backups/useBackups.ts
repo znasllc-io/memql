@@ -125,10 +125,11 @@ export function useBackupWrites(): BackupWrites {
       // The id is minted HERE, client-side (the mutationCreateSpace pattern):
       // the live feed delivers the row, so the create does not need to hand
       // one back and the form does not need a second read to find it.
-      const watchId = newShortId();
+      const watchId = spec.requestId ?? newShortId();
       return run(CREATE_BUSY_KEY, (query) =>
         query.createLibraryWatchedFolder({
           watchId,
+          mode: spec.mode ?? "sync",
           workerId: spec.workerId,
           localPath: spec.localPath,
           ...(spec.folderId !== "" ? { folderId: spec.folderId } : {}),

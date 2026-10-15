@@ -267,6 +267,11 @@ func (w *Worker) fireTimePreflight(ownerCtx context.Context, campaign Campaign, 
 // write the reason onto the CAMPAIGN row, because that is the row the
 // operator who scheduled it is looking at -- a reason that lives only in a
 // node log recreates the silence this feature exists to remove.
+//
+// The terminal arm hands the whole refusal to failJob, which fails the job and
+// marks the campaign `failed` with the reason in one place. The waiting arm
+// writes lastError and NOTHING else -- in particular not a status -- so the
+// campaign stays `scheduled` and the next tick tries again.
 func (w *Worker) refuseScheduledSend(
 	systemCtx, ownerCtx context.Context,
 	job SendJob,
@@ -274,18 +279,13 @@ func (w *Worker) refuseScheduledSend(
 	reason string,
 	terminal bool,
 ) {
-	detail := truncateError(reason)
-	progress := CampaignProgress{LastError: &detail}
-	if terminal {
-		failed := "failed"
-		progress.Status = &failed
-	}
-	if err := w.store.UpdateCampaignProgress(ownerCtx, campaign.ID, progress); err != nil {
-		w.logger.Warn("campaigns worker: could not record why a scheduled send was refused", "campaign", campaign.ID, "error", err)
-	}
 	if terminal {
 		w.failJob(systemCtx, job, "scheduled send refused: "+reason)
 		return
+	}
+	detail := truncateError(reason)
+	if err := w.store.UpdateCampaignProgress(ownerCtx, campaign.ID, CampaignProgress{LastError: &detail}); err != nil {
+		w.logger.Warn("campaigns worker: could not record why a scheduled send was refused", "campaign", campaign.ID, "error", err)
 	}
 	w.logger.Warn("campaigns worker: scheduled campaign is due but cannot send yet; will retry",
 		"campaign", campaign.ID, "reason", reason)

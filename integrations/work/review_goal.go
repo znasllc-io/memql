@@ -2,9 +2,9 @@ package work
 
 import (
 	"context"
-	"database/sql"
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/znasllc-io/memql/component/auth"
 	"github.com/znasllc-io/memql/component/memql"
@@ -44,23 +44,33 @@ func (i *Integration) openReviewGoal(ctx context.Context, requestKey string, g D
 	}
 	receipt = ReviewGoalIdentity(owner, requestKey)
 	identity := receipt.GoalID
-	var db *sql.DB
-	if i.bunDB != nil {
-		if handle := i.bunDB(); handle != nil {
-			db = handle.DB
-		}
-	}
-	release, err := memql.AcquireWriteGate(ctx, db, "work-review-goal:"+identity)
+	gates, err := i.gatePool()
 	if err != nil {
 		return receipt, err
 	}
-	defer release()
+	hold, err := memql.AcquireGateHold(context.WithoutCancel(ctx), gates, 15*time.Second, "work-review-goal:"+identity)
+	if err != nil {
+		return receipt, err
+	}
+	defer hold.Release()
+	commit := func(write func(context.Context) error) error {
+		writeCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 30*time.Second)
+		defer cancel()
+		if err := hold.Verify(writeCtx); err != nil {
+			return err
+		}
+		return write(writeCtx)
+	}
 	ctx = memql.ContextWithFreshRead(ctx)
-	fingerprint := workstate.ArtifactHash(map[string]any{
+	fingerprintInput := map[string]any{
 		"statement": g.Statement, "automation": g.AutomationName, "input": optMap(g.Input),
 		"accounts": optStrings(g.AccountIds), "ceilings": optMap(g.Ceilings),
 		"requestedVia": g.RequestedVia, "triggeredBy": g.TriggeredBy, "subject": subject, "question": question,
-	})
+	}
+	if g.ParentRunID != "" {
+		fingerprintInput["parentRunId"] = g.ParentRunID
+	}
+	fingerprint := workstate.ArtifactHash(fingerprintInput)
 	scoped := ownerActor(ctx, owner)
 	st := i.store()
 	goal, err := st.goalForOwner(scoped, receipt.GoalID)
@@ -82,8 +92,10 @@ func (i *Integration) openReviewGoal(ctx context.Context, requestKey string, g D
 		}
 	}
 	if goal == nil {
-		if err = st.createGoalRow(scoped, goalSeed{GoalId: receipt.GoalID, Statement: g.Statement, Origin: "user", Input: g.Input,
-			AccountIds: g.AccountIds, Ceilings: g.Ceilings, RequestedVia: g.RequestedVia, RequestFingerprint: fingerprint}); err != nil {
+		if err = commit(func(c context.Context) error {
+			return st.createGoalRow(ownerActor(c, owner), goalSeed{GoalId: receipt.GoalID, Statement: g.Statement, Origin: "user", Input: g.Input,
+				AccountIds: g.AccountIds, Ceilings: g.Ceilings, RequestedVia: g.RequestedVia, RequestFingerprint: fingerprint})
+		}); err != nil {
 			return receipt, err
 		}
 	}
@@ -93,7 +105,7 @@ func (i *Integration) openReviewGoal(ctx context.Context, requestKey string, g D
 		}
 		// The consumer binds before any run or approval becomes reachable.
 		if g.BeforeRun != nil {
-			if err = g.BeforeRun(scoped, receipt.GoalID, receipt.RunID); err != nil {
+			if err = commit(func(c context.Context) error { return g.BeforeRun(ownerActor(c, owner), receipt.GoalID, receipt.RunID) }); err != nil {
 				return receipt, err
 			}
 		}
@@ -111,10 +123,12 @@ func (i *Integration) openReviewGoal(ctx context.Context, requestKey string, g D
 			status = runStatusRunning
 			waiting = nil
 		}
-		if err = st.createRunRow(scoped, runSeed{Spine: spine, RunId: receipt.RunID, GoalId: receipt.GoalID, AutomationName: g.AutomationName,
-			Input: g.Input, Variables: g.Input, Mode: modeLive, Status: status, NodeId: selfNodeId(), StartedAt: now,
-			OwnerUserId: owner, TriggeredBy: g.TriggeredBy, ExecutionAuthority: authority,
-			WaitingOn: waiting}); err != nil {
+		if err = commit(func(c context.Context) error {
+			return st.createRunRow(ownerActor(c, owner), runSeed{Spine: spine, RunId: receipt.RunID, GoalId: receipt.GoalID, AutomationName: g.AutomationName, ParentRunID: g.ParentRunID,
+				Input: g.Input, Variables: g.Input, Mode: modeLive, Status: status, NodeId: selfNodeId(), StartedAt: now,
+				OwnerUserId: owner, TriggeredBy: g.TriggeredBy, ExecutionAuthority: authority,
+				WaitingOn: waiting})
+		}); err != nil {
 			return receipt, err
 		}
 	}
@@ -130,9 +144,11 @@ func (i *Integration) openReviewGoal(ctx context.Context, requestKey string, g D
 		if run != nil && rowString(run, "status") != runStatusWaiting {
 			return receipt, fmt.Errorf("work: this review run is no longer waiting")
 		}
-		if err = st.createApprovalRow(scoped, approvalSeed{ApprovalId: receipt.ApprovalID, RunId: receipt.RunID,
-			Kind: workstate.ApprovalKindPlanReview, Subject: subject, ArtifactHash: workstate.ArtifactHash(subject),
-			Question: question, RequestedAt: i.clock().UTC()}); err != nil {
+		if err = commit(func(c context.Context) error {
+			return st.createApprovalRow(ownerActor(c, owner), approvalSeed{ApprovalId: receipt.ApprovalID, RunId: receipt.RunID,
+				Kind: workstate.ApprovalKindPlanReview, Subject: subject, ArtifactHash: workstate.ArtifactHash(subject),
+				Question: question, RequestedAt: i.clock().UTC()})
+		}); err != nil {
 			return receipt, err
 		}
 	}

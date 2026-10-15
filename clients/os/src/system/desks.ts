@@ -122,7 +122,7 @@ function replaceDesk(state: ShellState, desk: Desk): ShellState {
 }
 
 function deskHasVacancy(desk: Desk, state?: ShellState): boolean {
-  return desk.windows.length < DESK_CAP && !desk.windows.some(id => state?.windows[id]?.fullscreenReturn);
+  return desk.windows.length < DESK_CAP && !desk.windows.some(id => state?.windows[id]?.expandedReturn);
 }
 
 /**
@@ -207,7 +207,7 @@ export function closeWindow(state: ShellState, windowId: WindowId): ShellResult 
 export function setWindowMode(state: ShellState, windowId: WindowId, mode: OsWindow["mode"]): ShellState {
   const win = state.windows[windowId];
   if (!win || win.mode === mode) return state;
-  let next: ShellState = { ...state, windows: { ...state.windows, [windowId]: { ...win, mode, minimizedFrom: mode === "minimized" ? (win.mode === "fullscreen" ? "fullscreen" : "normal") : undefined } } };
+  let next: ShellState = { ...state, windows: { ...state.windows, [windowId]: { ...win, mode, minimizedFrom: mode === "minimized" && win.mode !== "minimized" ? win.mode : undefined } } };
   if (mode === "minimized" && state.focusedWindowId === windowId) {
     const desk = deskOfWindow(state, windowId);
     const sibling = desk?.windows.find((id) => {
@@ -256,18 +256,21 @@ export function setWindowSection(state: ShellState, windowId: WindowId, sectionI
   return { ...state, windows: { ...state.windows, [windowId]: { ...win, sectionId, sectionTrail, sectionNavigation: { origin, revision: (win.sectionNavigation?.revision ?? 0) + 1 } } } };
 }
 
-/** Maximize onto a dedicated MemQL desk. Keep the window id and return slot. */
-export function toggleFullscreen(state: ShellState, windowId: WindowId, deskHasSurfaceContent?: (deskId: DeskId) => boolean): ShellState {
+/** Normal → maximized above the dock → full viewport → original desk slot. */
+export function cycleWindowMode(state: ShellState, windowId: WindowId, deskHasSurfaceContent?: (deskId: DeskId) => boolean): ShellState {
   const win = state.windows[windowId];
   const from = deskOfWindow(state, windowId);
-  if (!win || !from) return state;
-  if (win.mode === "fullscreen" || win.fullscreenReturn) {
-    const target = win.fullscreenReturn && deskById(state, win.fullscreenReturn.deskId);
-    const { fullscreenReturn, minimizedFrom: _minimized, ...rest } = win;
+  if (!win || !from || win.mode === "minimized") return state;
+  if (win.mode === "maximized") {
+    return { ...state, activeDeskId: from.id, focusedWindowId: windowId, windows: { ...state.windows, [windowId]: { ...win, mode: "fullscreen" } } };
+  }
+  if (win.mode === "fullscreen") {
+    const target = win.expandedReturn && deskById(state, win.expandedReturn.deskId);
+    const { expandedReturn, minimizedFrom: _minimized, ...rest } = win;
     let next: ShellState = { ...state, windows: { ...state.windows, [windowId]: { ...rest, mode: "normal" } }, focusedWindowId: windowId, activeDeskId: from.id };
     if (target && target.id !== from.id && deskHasVacancy(target, state)) {
       const ids = [...target.windows];
-      ids.splice(Math.min(fullscreenReturn!.index, ids.length), 0, windowId);
+      ids.splice(Math.min(expandedReturn!.index, ids.length), 0, windowId);
       next = replaceDesk(next, { ...from, windows: from.windows.filter(id => id !== windowId) });
       next = replaceDesk(next, { ...target, windows: ids });
       next.activeDeskId = target.id;
@@ -280,7 +283,7 @@ export function toggleFullscreen(state: ShellState, windowId: WindowId, deskHasS
   const at = state.desks.findIndex(d => d.id === from.id) + 1;
   const desks = state.desks.map(d => d.id === from.id ? { ...d, windows: d.windows.filter(id => id !== windowId) } : d);
   desks.splice(at, 0, dedicated);
-  return { ...state, desks, activeDeskId: dedicated.id, focusedWindowId: windowId, windows: { ...state.windows, [windowId]: { ...win, mode: "fullscreen", fullscreenReturn: { deskId: from.id, index: from.windows.indexOf(windowId) } } } };
+  return { ...state, desks, activeDeskId: dedicated.id, focusedWindowId: windowId, windows: { ...state.windows, [windowId]: { ...win, mode: "maximized", expandedReturn: { deskId: from.id, index: from.windows.indexOf(windowId) } } } };
 }
 
 /** Swap the two windows of a desk (left <-> right). No-op on a solo desk. */
@@ -318,8 +321,8 @@ export function throwToDesk(state: ShellState, windowId: WindowId, target: DeskI
   next = replaceDesk(next, { ...landed, windows: [...landed.windows, windowId] });
   next = { ...next, activeDeskId: landed.id, focusedWindowId: windowId };
   const moved = next.windows[windowId];
-  if (moved?.fullscreenReturn) {
-    const { fullscreenReturn: _return, minimizedFrom: _minimized, ...rest } = moved;
+  if (moved?.expandedReturn) {
+    const { expandedReturn: _return, minimizedFrom: _minimized, ...rest } = moved;
     next = { ...next, windows: { ...next.windows, [windowId]: { ...rest, mode: "normal" } } };
   }
   return { state: gcAutoDesks(next), effect: { kind: "placed", deskId: landed.id, windowId } };
@@ -365,7 +368,7 @@ export function gcAutoDesks(
       d.id === state.activeDeskId ||
       d.createdBy === "user" ||
       d.windows.length > 0 ||
-      Object.values(state.windows).some(w => w.fullscreenReturn?.deskId === d.id) ||
+      Object.values(state.windows).some(w => w.expandedReturn?.deskId === d.id) ||
       (deskHasSurfaceContent?.(d.id) ?? false),
   );
   if (keep.length === state.desks.length) return state;

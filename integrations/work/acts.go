@@ -472,6 +472,9 @@ func rerunRequest(reason, stepKey string, o work.Override, versions map[string]i
 //     from it: a run re-run an hour after it finished carries an hour-old
 //     heartbeat, and the sweep's next pass would judge it dead before the
 //     claiming replica had written its first one.
+//   - humanResumeId belongs to an answered suspension of the old execution.
+//     The new request claims its own lineage; it must not wait for the old
+//     answer's already-consumed suspended receipt. The approval itself remains.
 func reopenFields(now time.Time) map[string]any {
 	return map[string]any{
 		"status":          runStatusRunning,
@@ -482,6 +485,7 @@ func reopenFields(now time.Time) map[string]any {
 		"cancelRequested": false,
 		"cancelledBy":     "",
 		"waitingOn":       map[string]any{},
+		"humanResumeId":   "",
 	}
 }
 

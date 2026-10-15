@@ -5,10 +5,13 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"net/url"
+	"sort"
 	"strings"
 	"sync"
 	"testing"
 	"time"
+	"unicode/utf8"
 
 	"github.com/znasllc-io/memql/component/auth"
 	"github.com/znasllc-io/memql/component/memql"
@@ -90,9 +93,27 @@ type fakeEngine struct {
 	// accounts backs clientAccountById, keyed by bare id.
 	accounts map[string]map[string]any
 
+	// audiences backs audienceById, keyed by the id as the query carries it. An
+	// organization's campaign is checked against its audience's organization
+	// before it sends.
+	audiences map[string]map[string]any
+
 	// emailRules backs emailRuleById (memql#4829), keyed by bare id. Its one
 	// consumer is sendToRecipient resolving which audience a rule mails.
 	emailRules map[string]map[string]any
+
+	// emailLayouts backs emailLayoutById and emailLayoutsForAccount (the
+	// organization layouts), keyed by bare id. Absent means "not visible to
+	// this caller", which is the answer the real queries give a person
+	// outside the organization.
+	emailLayouts map[string]map[string]any
+
+	// templateBySource backs templateForSource, the template published from one
+	// Library file, keyed "accountId|sourceArtifactId" with both as the query
+	// is called (bare). Absent means "no template for that file in that
+	// organization", which is also what the real query says of a template the
+	// caller cannot see.
+	templateBySource map[string]map[string]any
 
 	// libraryArtifacts / libraryFiles back the CSV import's two owner-gated
 	// reads (memql#4822), keyed by bare id. Absent means "not visible to
@@ -128,6 +149,11 @@ func (e *fakeEngine) Execute(ctx context.Context, q string) (any, error) {
 		return rowsEnvelope([]map[string]any{e.campaign}), nil
 	case strings.HasPrefix(q, "query templateById"):
 		return rowsEnvelope([]map[string]any{e.template}), nil
+	case strings.HasPrefix(q, "query templateForSource"):
+		if row, ok := e.templateBySource[argOf(q, "accountId")+"|"+argOf(q, "sourceArtifactId")]; ok {
+			return rowsEnvelope([]map[string]any{row}), nil
+		}
+		return rowsEnvelope(nil), nil
 	case strings.HasPrefix(q, "query audienceRosterForSend"):
 		// PAGED, because the send walks it (memql#3460). A fake that
 		// returned the whole roster at once would make every paging test
@@ -163,6 +189,11 @@ func (e *fakeEngine) Execute(ctx context.Context, q string) (any, error) {
 			return rowsEnvelope([]map[string]any{row}), nil
 		}
 		return rowsEnvelope(nil), nil
+	case strings.HasPrefix(q, "query audienceById"):
+		if row, ok := e.audiences[argOf(q, "audienceId")]; ok {
+			return rowsEnvelope([]map[string]any{row}), nil
+		}
+		return rowsEnvelope(nil), nil
 	case strings.HasPrefix(q, "query clientAccountById"):
 		if row, ok := e.accounts[argOf(q, "accountId")]; ok {
 			return rowsEnvelope([]map[string]any{row}), nil
@@ -190,6 +221,30 @@ func (e *fakeEngine) Execute(ctx context.Context, q string) (any, error) {
 			return rowsEnvelope([]map[string]any{row}), nil
 		}
 		return rowsEnvelope(nil), nil
+	case strings.HasPrefix(q, "query emailLayoutById"):
+		if row, ok := e.emailLayouts[argOf(q, "layoutId")]; ok {
+			return rowsEnvelope([]map[string]any{row}), nil
+		}
+		return rowsEnvelope(nil), nil
+	case strings.HasPrefix(q, "query emailLayoutsForAccount"):
+		// Narrowed by organization and, when the call names one, by status --
+		// the two arguments the real query filters on. Ordered by id so a test
+		// can name the order it expects.
+		ids := make([]string, 0, len(e.emailLayouts))
+		for id := range e.emailLayouts {
+			ids = append(ids, id)
+		}
+		sort.Strings(ids)
+		account, status := argOf(q, "accountId"), argOf(q, "status")
+		var rows []map[string]any
+		for _, id := range ids {
+			row := e.emailLayouts[id]
+			if bare(str(row, "accountId")) != bare(account) || (status != "" && str(row, "status") != status) {
+				continue
+			}
+			rows = append(rows, row)
+		}
+		return rowsEnvelope(rows), nil
 	case strings.HasPrefix(q, "query audiences("):
 		rows := make([]map[string]any, 0, 1)
 		if len(e.roster) > 0 {
@@ -434,10 +489,12 @@ func senderIdentityRow(id, address, fromName, status string) map[string]any {
 func newTestWorker(t *testing.T, engine Engine, sender email.Sender) *Worker {
 	t.Helper()
 	w := &Worker{
-		store:   NewStore(engine),
-		claimer: nil, // single "replica" in a test; the claim is exercised separately
-		resolve: func() email.Sender { return sender },
-		logger:  quietLogger(),
+		progressGate:       func(context.Context, string) (gateHold, error) { return openGate{}, nil },
+		providerLedgerGate: func(context.Context, string) (gateHold, error) { return openGate{}, nil },
+		store:              NewStore(engine),
+		claimer:            nil, // single "replica" in a test; the claim is exercised separately
+		resolve:            func() email.Sender { return sender },
+		logger:             quietLogger(),
 		cfg: Config{
 			Enabled:            true,
 			BatchSize:          50,
@@ -920,6 +977,267 @@ func TestUnsubscribeHeadersArePresent(t *testing.T) {
 	}
 }
 
+// linkTokenIn pulls the token out of the first <prefix>?token=<token> URL in a
+// body, decoded the way a mail client's request would carry it.
+func linkTokenIn(t *testing.T, body, prefix string) string {
+	t.Helper()
+	marker := prefix + "?token="
+	i := strings.Index(body, marker)
+	if i < 0 {
+		t.Fatalf("no %s link in the body:\n%s", prefix, body)
+	}
+	rest := body[i+len(marker):]
+	if j := strings.IndexAny(rest, " \t\r\n\"'<>"); j >= 0 {
+		rest = rest[:j]
+	}
+	token, err := url.QueryUnescape(rest)
+	if err != nil {
+		t.Fatalf("the token in %s does not decode: %v", prefix, err)
+	}
+	return token
+}
+
+// TestCampaignSendsCarryPreferencesAndViewLinks -- every campaign message can
+// point at its preferences page and at itself in a browser, and the view link
+// carries what was SENT, not what the template says by the time somebody
+// clicks it: the template revision the job froze at queue time, and the names
+// the footer and {{campaignName}} showed.
+func TestCampaignSendsCarryPreferencesAndViewLinks(t *testing.T) {
+	const revision = "2026-10-11T09:30:00.123456789Z"
+	job := jobRow()
+	job["templateSnapshot"] = map[string]any{
+		"id": testTemplate, "subject": "Reviewed copy", "status": "ready", "revision": revision,
+		"textBody": "Manage: {{preferencesUrl}}\nView: {{viewUrl}}\n",
+		"htmlBody": `<p><a href="{{preferencesUrl}}">Manage</a> <a href="{{viewUrl}}">View</a></p>`,
+	}
+	campaign := campaignRow()
+	campaign["fromName"] = "Acme News"
+	// The template has moved on since the job was queued.
+	edited := templateRow()
+	edited["textBody"] = "Edited later"
+	engine := &fakeEngine{
+		jobs: []map[string]any{job}, campaign: campaign, template: edited,
+		roster: []map[string]any{recipientRow("r-1", "reader@example.test", "subscribed")},
+	}
+	sender := &recordingSender{}
+	w := newTestWorker(t, engine, sender)
+
+	w.DrainOnce(context.Background())
+
+	if sender.count() != 1 {
+		t.Fatalf("want one message, got %d", sender.count())
+	}
+	msg := sender.sent[0]
+	keys := w.cfg.UnsubscribeKeys()
+	now := time.Now()
+
+	preferences, err := ParseLinkToken(keys, LinkPreferences, linkTokenIn(t, msg.TextBody, "https://example.test"+PreferencesPath), now)
+	if err != nil {
+		t.Fatalf("the preferences link does not verify for its own page: %v", err)
+	}
+	if preferences.OwnerUserID != testOwner || preferences.RecipientID != "r-1" || preferences.CampaignID != testCampaign ||
+		preferences.EmailDigest != EmailDigest("reader@example.test") {
+		t.Errorf("preferences payload = %+v", preferences)
+	}
+
+	view, err := ParseLinkToken(keys, LinkView, linkTokenIn(t, msg.TextBody, "https://example.test"+ViewPath), now)
+	if err != nil {
+		t.Fatalf("the view link does not verify for its own page: %v", err)
+	}
+	if view.RecipientID != "r-1" || view.EmailDigest != EmailDigest("reader@example.test") {
+		t.Errorf("view payload names the wrong person: %+v", view)
+	}
+	if view.TemplateID != testTemplate || view.TemplateRevision != revision {
+		t.Errorf("the view link carries template %q at %q, want the job's frozen snapshot %q at %q",
+			view.TemplateID, view.TemplateRevision, testTemplate, revision)
+	}
+	if view.CampaignName != "August update" || view.SenderName != "Acme News" {
+		t.Errorf("the view link carries campaign %q and sender %q, want what the message showed", view.CampaignName, view.SenderName)
+	}
+
+	// The same two links are in the HTML part, and none of them is tracked.
+	hrefs := anchorHrefs(t, msg.HTMLBody)
+	if len(hrefs) < 2 || !strings.Contains(hrefs[0], PreferencesPath) || !strings.Contains(hrefs[1], ViewPath) {
+		t.Errorf("the HTML part's links = %v", hrefs)
+	}
+	// The footer names the sender, and a campaign send never asks for a confirm link.
+	if !strings.Contains(msg.TextBody, "you subscribed to Acme News.") {
+		t.Errorf("the footer does not name the sender: %s", msg.TextBody)
+	}
+	if strings.Contains(msg.TextBody, ConfirmPath) {
+		t.Errorf("a campaign message carries a confirm link: %s", msg.TextBody)
+	}
+}
+
+// TestTheViewLinkCarriesTheSenderTheFooterNamed -- the view page shows the
+// message as it was sent, footer included, so the token carries the name the
+// footer SHOWED: the sender's, else the organization's, else "this mailing
+// list". Carrying the identity's name as it was stored would leave the page to
+// guess when there was none, and print a different footer.
+func TestTheViewLinkCarriesTheSenderTheFooterNamed(t *testing.T) {
+	const organization = "client-a"
+	for name, tc := range map[string]struct {
+		campaignFromName string // the campaign's own override
+		identityFromName string // the sending identity's, for an organization's campaign
+		organizationName string // "" for a campaign that belongs to none
+		want             string
+	}{
+		"the campaign's own name":                   {"Acme News", "", "", "Acme News"},
+		"the identity's name over the organization": {"", "Acme Identity", "Acme Org", "Acme Identity"},
+		"the organization when there is no sender":  {"", "", "Acme Org", "Acme Org"},
+		"neither":                 {"", "", "", "this mailing list"},
+		"a name that spans lines": {"Acme\n  News", "", "", "Acme News"},
+	} {
+		job := jobRow()
+		job["templateSnapshot"] = map[string]any{
+			"id": testTemplate, "subject": "Reviewed copy", "status": "ready", "revision": "2026-10-11T09:30:00.123456789Z",
+			"textBody": "View: {{viewUrl}}\n", "htmlBody": `<p><a href="{{viewUrl}}">View</a></p>`,
+		}
+		campaign := campaignRow()
+		campaign["fromName"] = tc.campaignFromName
+		recipient := recipientRow("r-1", "reader@example.test", "subscribed")
+		engine := &fakeEngine{jobs: []map[string]any{job}, campaign: campaign, template: templateRow(), roster: []map[string]any{recipient}}
+		if tc.organizationName != "" {
+			// An organization's campaign sends as one of its sender identities, and
+			// every resource it touches belongs to the organization.
+			job["templateSnapshot"].(map[string]any)["accountId"] = organization
+			job["campaignAccountId"] = organization
+			campaign["accountId"], campaign["senderIdentityId"] = organization, "sender"
+			recipient["accountId"] = organization
+			engine.senderIdentities = map[string]map[string]any{"sender": {
+				"id": "sender", "accountId": organization, "address": "hello@client-a.test", "fromName": tc.identityFromName, "status": "active",
+			}}
+			engine.accounts = map[string]map[string]any{organization: {"name": tc.organizationName}}
+			engine.audiences = map[string]map[string]any{testAudience: {"id": "v1:campaigns:audience:" + testAudience, "accountId": organization}}
+		}
+		sender := &recordingSender{}
+		w := newTestWorker(t, engine, sender)
+
+		w.DrainOnce(context.Background())
+
+		if sender.count() != 1 {
+			t.Errorf("%s: want one message, got %d", name, sender.count())
+			continue
+		}
+		msg := sender.sent[0]
+		view, err := ParseLinkToken(w.cfg.UnsubscribeKeys(), LinkView, linkTokenIn(t, msg.TextBody, "https://example.test"+ViewPath), time.Now())
+		if err != nil {
+			t.Errorf("%s: the view link does not verify: %v", name, err)
+			continue
+		}
+		if view.SenderName != tc.want {
+			t.Errorf("%s: the view link carries the sender %q, want %q", name, view.SenderName, tc.want)
+		}
+		if footer := "you subscribed to " + tc.want + "."; !strings.Contains(msg.TextBody, footer) {
+			t.Errorf("%s: the footer does not say %q.\n%s", name, footer, msg.TextBody)
+		}
+	}
+}
+
+// TestAnOrganizationNameTooLongForTheViewLinkIsClippedNotDropped -- the footer
+// can name the organization, and an organization's name has no cap of its own,
+// unlike a sender's. The view link's token has a size limit, and a name that
+// would break it must not cost the message its view link (a link that cannot be
+// sealed is left out): the name the link carries is cut to the sender cap, and
+// the footer still says all of it. Every "&" is six bytes in the token's JSON.
+func TestAnOrganizationNameTooLongForTheViewLinkIsClippedNotDropped(t *testing.T) {
+	const organization = "client-a"
+	long := strings.Repeat("&", 800)
+	job := jobRow()
+	job["templateSnapshot"] = map[string]any{
+		"id": testTemplate, "subject": "Reviewed copy", "status": "ready", "revision": "2026-10-11T09:30:00.123456789Z",
+		"textBody": "View: {{viewUrl}}\n", "htmlBody": `<p><a href="{{viewUrl}}">View</a></p>`, "accountId": organization,
+	}
+	job["campaignAccountId"] = organization
+	campaign := campaignRow()
+	campaign["accountId"], campaign["senderIdentityId"] = organization, "sender"
+	recipient := recipientRow("r-1", "reader@example.test", "subscribed")
+	recipient["accountId"] = organization
+	engine := &fakeEngine{jobs: []map[string]any{job}, campaign: campaign, template: templateRow(), roster: []map[string]any{recipient}}
+	engine.senderIdentities = map[string]map[string]any{"sender": {
+		"id": "sender", "accountId": organization, "address": "hello@client-a.test", "fromName": "", "status": "active",
+	}}
+	engine.accounts = map[string]map[string]any{organization: {"name": long}}
+	engine.audiences = map[string]map[string]any{testAudience: {"id": "v1:campaigns:audience:" + testAudience, "accountId": organization}}
+	sender := &recordingSender{}
+	w := newTestWorker(t, engine, sender)
+
+	w.DrainOnce(context.Background())
+
+	if sender.count() != 1 {
+		t.Fatalf("want one message, got %d", sender.count())
+	}
+	msg := sender.sent[0]
+	if !strings.Contains(msg.TextBody, "you subscribed to "+long+".") {
+		t.Errorf("the footer does not name the whole organization")
+	}
+	view, err := ParseLinkToken(w.cfg.UnsubscribeKeys(), LinkView, linkTokenIn(t, msg.TextBody, "https://example.test"+ViewPath), time.Now())
+	if err != nil {
+		t.Fatalf("the message has no view link that verifies: %v", err)
+	}
+	if want := strings.Repeat("&", maxSenderNameRunes); view.SenderName != want {
+		t.Errorf("the view link carries a sender of %d characters, want it cut to %d", utf8.RuneCountInString(view.SenderName), maxSenderNameRunes)
+	}
+}
+
+// TestACampaignWhoseTemplateCannotCarryItsFooterFailsWithAPlainReason -- a
+// template whose HTML ends inside a comment or a tag, is a frameset, leaves an
+// Outlook section open where the footer goes, or has a spot a client's parser
+// would not show, cannot be sent: no message goes out, the job fails, and the
+// reason the author reads on the campaign is the sentence that says what to fix,
+// not a wrapper around it.
+func TestACampaignWhoseTemplateCannotCarryItsFooterFailsWithAPlainReason(t *testing.T) {
+	for name, tc := range map[string]struct{ html, want string }{
+		"a comment that never ends":          {"<p>Hi</p><!--", wantEndsOpen},
+		"a frameset":                         {"<frameset><frame src=x></frameset>", wantFrames},
+		"an Outlook section left open":       {"<html><body><p>Hi</p><![if !mso]><p>modern</p></body></html>", wantOutlookOpen},
+		"a comment only a tree builder sees": {"<html><body><p>Hi</p><noscript><!--</noscript></body></html>", wantEndsOpen},
+		"an svg style that opens a comment":  {"<html><body><p>Hi</p><svg><style><!--</style></svg></body></html>", wantEndsOpen},
+	} {
+		template := templateRow()
+		template["htmlBody"] = tc.html
+		engine := &fakeEngine{
+			jobs: []map[string]any{jobRow()}, campaign: campaignRow(), template: template,
+			roster: []map[string]any{recipientRow("r-1", "reader@example.test", "subscribed")},
+		}
+		sender := &recordingSender{}
+		w := newTestWorker(t, engine, sender)
+
+		w.DrainOnce(context.Background())
+
+		if sender.count() != 0 {
+			t.Errorf("%s: a message went out", name)
+		}
+		failed := false
+		for _, c := range engine.mutations("updateSendJob") {
+			if argOf(c.query, "status") == "failed" {
+				failed = true
+				if got := argOf(c.query, "lastError"); got != tc.want {
+					t.Errorf("%s: the job's reason is %q, want the sentence %q", name, got, tc.want)
+				}
+			}
+		}
+		if !failed {
+			t.Errorf("%s: the job was not failed, so nobody learns why the campaign sent nothing", name)
+		}
+		// The campaign carries the reason too, and the test must not pass when it
+		// does not: a write that never happened, or one with no reason, says nothing.
+		onCampaign := false
+		for _, c := range engine.mutations("updateCampaignProgress") {
+			if argOf(c.query, "status") != "failed" {
+				continue
+			}
+			onCampaign = true
+			if got := argOf(c.query, "lastError"); got != tc.want {
+				t.Errorf("%s: the campaign's reason is %q, want the sentence %q", name, got, tc.want)
+			}
+		}
+		if !onCampaign {
+			t.Errorf("%s: the campaign was not marked failed, so its author reads no reason there", name)
+		}
+	}
+}
+
 // TestSendIsRefusedWithoutUnsubscribeConfig -- fail closed on the
 // precondition. Sending without a working opt-out is not a degraded send.
 func TestSendIsRefusedWithoutUnsubscribeConfig(t *testing.T) {
@@ -1011,6 +1329,98 @@ func TestCompletionStampsBothRows(t *testing.T) {
 	}
 	if !jobDone || !campaignSent {
 		t.Errorf("completion did not stamp both rows: jobCompleted=%v campaignSent=%v", jobDone, campaignSent)
+	}
+}
+
+// TestAFailedJobMarksItsCampaignFailed is the failure-side twin of
+// TestCompletionStampsBothRows (memql#6022). A send job that went terminal
+// `failed` used to leave its campaign reading `sending` for good: the operator,
+// who reads the campaign and never the clusterOwner-tier job, saw a send still
+// in flight behind a job nothing would ever drain again. So the failure and its
+// reason land on the campaign too, under the campaign OWNER'S actor -- the same
+// borrowed identity the completion write uses, and not the engine's own.
+//
+// The template read answering nothing is the cheapest real refusal that
+// reaches failJob after the owner has been established.
+func TestAFailedJobMarksItsCampaignFailed(t *testing.T) {
+	engine := &fakeEngine{
+		jobs:     []map[string]any{jobRow()},
+		campaign: campaignRow(),
+		// No template: templateById answers empty, which is the "template is
+		// not readable" refusal.
+		roster: []map[string]any{recipientRow("r-1", "a@example.test", "subscribed")},
+	}
+	sender := &recordingSender{}
+	w := newTestWorker(t, engine, sender)
+	frozen := time.Date(2026, 8, 14, 9, 0, 0, 0, time.UTC)
+	atClock(w, frozen)
+
+	w.DrainOnce(context.Background())
+
+	if sender.count() != 0 {
+		t.Fatalf("sent %d messages for a job whose template could not be read", sender.count())
+	}
+	if !wroteContaining(engine, "mutation updateSendJob", `status: "failed"`) {
+		t.Fatal("the job was not failed, so this test is not reaching the path it is about")
+	}
+
+	progress := engine.mutations("updateCampaignProgress")
+	if len(progress) != 1 {
+		t.Fatalf("want exactly one campaign write for the failed job, got %d: %+v", len(progress), progress)
+	}
+	// Asserted over the whole rendered call rather than through argOf: the
+	// reason is a sentence, and the point is that the OPERATOR can read it.
+	for _, want := range []string{
+		`campaignId: "` + testCampaign + `"`,
+		`status: "failed"`,
+		`lastError: "template is not readable; refusing to send"`,
+		`completedAt: "` + frozen.Format(time.RFC3339) + `"`,
+	} {
+		if !strings.Contains(progress[0].query, want) {
+			t.Errorf("campaign write is missing %s:\n%s", want, progress[0].query)
+		}
+	}
+	if progress[0].actorID != testOwner {
+		t.Errorf("campaign failure written under actor %q, want the campaign owner %q -- an owned-tier "+
+			"write under any other identity is refused or lands on a row the owner cannot read",
+			progress[0].actorID, testOwner)
+	}
+	if progress[0].isOwner {
+		t.Error("the campaign failure ran as a CLUSTER OWNER. The worker borrows exactly the campaign " +
+			"owner's authority for owned-tier rows; anything more means the owner tier bounds nothing")
+	}
+}
+
+// TestAJobWithNoOwnerFailsWithoutWritingTheCampaign is the other side of the
+// same write. The campaign is an OWNED-tier row, so reaching it takes the
+// owner's identity -- and a job that names no owner has none to borrow. The job
+// still fails (that is the clusterOwner-tier row, written under the engine's own
+// identity), but the worker must not fall through to writing the campaign as
+// somebody else: ownerActorContext returns its context UNCHANGED for a blank
+// owner, which is the engine's system identity, and that is exactly the
+// attribution this refuses to make.
+func TestAJobWithNoOwnerFailsWithoutWritingTheCampaign(t *testing.T) {
+	job := jobRow()
+	job["campaignOwnerUserId"] = ""
+	engine := &fakeEngine{
+		jobs:     []map[string]any{job},
+		campaign: campaignRow(),
+		template: templateRow(),
+		roster:   []map[string]any{recipientRow("r-1", "a@example.test", "subscribed")},
+	}
+	sender := &recordingSender{}
+	w := newTestWorker(t, engine, sender)
+
+	w.DrainOnce(context.Background())
+
+	if sender.count() != 0 {
+		t.Fatalf("sent %d messages for a job with no owner to run the send under", sender.count())
+	}
+	if !wroteContaining(engine, "mutation updateSendJob", `status: "failed"`) {
+		t.Fatal("a job with no campaign owner was not failed")
+	}
+	if progress := engine.mutations("updateCampaignProgress"); len(progress) != 0 {
+		t.Errorf("the campaign was written for a job with no owner, under %q: %+v", progress[0].actorID, progress)
 	}
 }
 

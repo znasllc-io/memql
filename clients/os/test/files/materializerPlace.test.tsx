@@ -18,7 +18,7 @@ import {
 } from "./harness";
 import { COMPOSITION_CONCEPT } from "../../src/apps/files/concepts";
 import { Layers } from "lucide-react";
-import { MATERIALIZER_APP } from "../../src/apps/files/materializer";
+import { MATERIALIZER_APP_ID } from "../../src/items/materialize";
 import type { OsAppManifest } from "../../src/system/registry";
 
 // The Materializer place (epic memql#4981, #4983): the rail's fourth place,
@@ -181,10 +181,11 @@ describe("the Materializer place", () => {
  * case would otherwise stop being tested the day the app lands, and the
  * "act is present" case could not be written before it. What the fixture
  * pins is MY side of the seam -- the app id and the section this app opens,
- * which are `materializer.ts`'s constants and nothing else's.
+ * which are the Materializer's own names in `items/materialize.ts`, where
+ * every app that opens it finds them.
  */
 const MATERIALIZER_MANIFEST: OsAppManifest = {
-  id: MATERIALIZER_APP,
+  id: MATERIALIZER_APP_ID,
   name: "Materializer",
   icon: Layers,
   requires: "app:materializer",
@@ -293,7 +294,7 @@ describe("the handoff to the Materializer", () => {
       artifacts: [outputArtifact({ id: "a-made", title: "Q3 report.pdf", fileId: "f-1" })],
       compositions: [compositionRow({ id: "c-1", outputFileId: "f-1" })],
     });
-    await renderFiles({ registry: registryWith(null, MATERIALIZER_APP) });
+    await renderFiles({ registry: registryWith(null, MATERIALIZER_APP_ID) });
 
     await click(screen.getByRole("button", { name: /^Materializer/ }));
     expect(screen.getByRole("button", { name: /Q3 report\.pdf/ })).toBeTruthy();
@@ -314,7 +315,7 @@ describe("the handoff to the Materializer", () => {
   it("reaches the REAL Materializer app, not only the fixture", async () => {
     // The two cases above pin MY side of the seam from a fixture, so neither
     // depends on when the sibling epic lands. This one is the integration:
-    // the app id in `materializer.ts` has to be the id the shell's own
+    // the app id in `items/materialize.ts` has to be the id the shell's own
     // registry holds, or the act renders and opens nothing.
     h.connection = fakeConnection({
       artifacts: [outputArtifact({ id: "a-made", title: "Q3 report.pdf", fileId: "f-1" })],

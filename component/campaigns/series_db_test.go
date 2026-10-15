@@ -9,6 +9,7 @@ import (
 	"sync"
 	"testing"
 	"time"
+	"unicode/utf8"
 
 	"github.com/uptrace/bun"
 	"github.com/uptrace/bun/dialect/pgdialect"
@@ -46,7 +47,7 @@ func TestRecurringCampaignsAcrossReplicas(t *testing.T) {
 		}
 		engines[n] = e
 		workers[n] = newTestWorker(t, deliveryDBEngine{e}, sender)
-		wired := NewWorker(deliveryDBEngine{e}, nil, nil, quietLogger(), func() *sql.DB { return db.DB })
+		wired := NewWorker(deliveryDBEngine{e}, nil, nil, quietLogger(), gatePoolFor(t))
 		workers[n].seriesGate, workers[n].templateGate = wired.seriesGate, wired.templateGate
 	}
 	suffix := fmt.Sprintf("series-%d", time.Now().UnixNano())
@@ -77,7 +78,10 @@ func TestRecurringCampaignsAcrossReplicas(t *testing.T) {
 	}
 
 	blueprint := suffix + "-blueprint"
-	execute(owner, call("mutation", "createCampaign", arg{"campaignId", blueprint}, arg{"accountId", org}, arg{"name", "Client newsletter"}, arg{"audienceId", audience}, arg{"templateId", template}, arg{"senderIdentityId", identity}))
+	// A name at the cap: the occurrence's name is this plus a date, and the engine
+	// refuses a campaign saved over the cap, so the base has to give way.
+	blueprintName := strings.Repeat("n", maxCampaignNameRunes)
+	execute(owner, call("mutation", "createCampaign", arg{"campaignId", blueprint}, arg{"accountId", org}, arg{"name", blueprintName}, arg{"audienceId", audience}, arg{"templateId", template}, arg{"senderIdentityId", identity}))
 	now := time.Date(2028, 1, 1, 12, 0, 0, 0, time.UTC)
 	for _, w := range workers {
 		w.now = func() time.Time { return now }
@@ -131,6 +135,14 @@ func TestRecurringCampaignsAcrossReplicas(t *testing.T) {
 	firstID := occurrenceID(seriesID(blueprint), first)
 	if bare(str(row, "lastCampaignId")) != firstID || !templateTime(row["nextAt"]).Equal(first.AddDate(0, 0, 14)) {
 		t.Fatalf("wrong occurrence: %v", row)
+	}
+	occurrence, found, err := workers[0].store.CampaignByID(memql.ContextWithFreshRead(owner), firstID)
+	if err != nil || !found {
+		t.Fatalf("the occurrence campaign was not saved: %v", err)
+	}
+	if date := " · " + first.UTC().Format("2006-01-02 15:04 UTC"); utf8.RuneCountInString(occurrence.Name) != maxCampaignNameRunes || !strings.HasSuffix(occurrence.Name, date) {
+		t.Fatalf("an occurrence of a campaign named at the cap is %q (%d characters), want the cap exactly and the date at the end",
+			occurrence.Name, utf8.RuneCountInString(occurrence.Name))
 	}
 	deliver := func(w *Worker, id string) {
 		t.Helper()

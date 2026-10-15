@@ -46,7 +46,7 @@ type preparedImageStore struct {
 func (s *preparedImageStore) SaveImage(ctx context.Context, w ImageAssetWrite) error {
 	s.writes++
 	digest := sha256.Sum256(w.Data)
-	s.f.query(s.f.engine, auth.ContextWithInternalOrigin(ctx), "mutation", "recordPreparedLibraryImage", map[string]any{"fileId": w.FileID, "name": w.Name, "mimeType": w.MIME, "size": len(w.Data), "sha256": hex.EncodeToString(digest[:]), "blobUrl": "https://storage.invalid/image.png", "producedByRunId": w.RunID, "producedByStepKey": w.StepKey, "imageProvenance": w.Provenance, "source": "agent_generated"})
+	s.f.query(s.f.engine, auth.ContextWithInternalOrigin(ctx), "mutation", "recordPreparedLibraryImage", map[string]any{"fileId": w.FileID, "name": w.Name, "mimeType": w.MIME, "size": len(w.Data), "sha256": hex.EncodeToString(digest[:]), "blobUrl": "https://storage.invalid/memql-library/library/" + memql.BareShortId(s.f.owner) + "/" + w.FileID + "/" + hex.EncodeToString(digest[:]) + "/" + w.Name, "producedByRunId": w.RunID, "producedByStepKey": w.StepKey, "imageProvenance": w.Provenance, "source": "agent_generated"})
 	row := s.f.query(s.f.engine, ctx, "mutation", "createArtifact", map[string]any{"sourceConceptRef": fileSourceRef(w.FileID), "ownerUserId": s.f.owner, "lens": "artifact", "kind": "file", "source": "agent_generated", "title": w.Name, "format": "image"})[0]
 	s.artifact = memql.BareShortId(asString(row["id"]))
 	if s.appendProposal {

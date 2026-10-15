@@ -3,6 +3,7 @@ package worker
 import (
 	"encoding/json"
 	"fmt"
+	permission "github.com/znasllc-io/memql/core/computerpermission"
 	"regexp"
 )
 
@@ -17,6 +18,7 @@ import (
 // field: this struct serialized as JSON. Unknown JSON fields are
 // tolerated (additive evolution does not bump schemaVersion).
 type CapabilityDescriptor struct {
+	HomeDirectory        string           `json:"homeDirectory,omitempty"`
 	Architecture         string           `json:"architecture,omitempty"`
 	ActionContracts      ActionContracts  `json:"actionContracts,omitempty"`
 	RepositoryScopes     RepositoryScopes `json:"repositoryScopes,omitempty"`
@@ -24,27 +26,8 @@ type CapabilityDescriptor struct {
 	DisplayServer        string           `json:"displayServer"`
 	ComputerUseAvailable bool             `json:"computerUseAvailable"`
 	Actions              []string         `json:"actions"`
-	// InferenceServe is the COCKPIT's half of the sharing consent (epic
-	// memql#5146, D6), read from that machine's own policy.yaml
-	// `inference.serve`: "owner" or "cluster".
-	//
-	// AN EMPTY VALUE IS "owner", and that is not a default chosen for
-	// convenience -- it is the reading of silence. A cockpit that predates the
-	// field has said nothing, and silence is not agreement to run other
-	// people's work on somebody's laptop.
-	InferenceServe string `json:"inferenceServe"`
-	SchemaVersion  int    `json:"schemaVersion"`
+	SchemaVersion        int              `json:"schemaVersion"`
 }
-
-// The two values inference.serve may take.
-const (
-	// InferenceServeOwner is the machine serving its owner's calls only.
-	InferenceServeOwner = "owner"
-	// InferenceServeCluster is the machine offered to everyone -- the cockpit's
-	// half of the consent. The owner's half is registration.sharing.mode, and
-	// BOTH must say cluster.
-	InferenceServeCluster = "cluster"
-)
 
 const (
 	// CapabilityDescriptorSchemaVersion is the only schema version
@@ -96,9 +79,8 @@ func ParseCapabilityDescriptor(raw string) (*CapabilityDescriptor, error) {
 	if _, ok := validDisplayServers[d.DisplayServer]; !ok {
 		return nil, fmt.Errorf("capability descriptor: unknown displayServer %q (want quartz|x11|wayland|none)", d.DisplayServer)
 	}
-	if d.InferenceServe != "" && d.InferenceServe != InferenceServeOwner && d.InferenceServe != InferenceServeCluster {
-		return nil, fmt.Errorf("capability descriptor: unknown inferenceServe %q (want %s|%s)",
-			d.InferenceServe, InferenceServeOwner, InferenceServeCluster)
+	if d.HomeDirectory != "" && !permission.CleanAbsolute(d.HomeDirectory) {
+		return nil, fmt.Errorf("capability descriptor: homeDirectory must be a canonical absolute directory other than root")
 	}
 	if d.Architecture != "" && !capabilityNamePattern.MatchString(d.Architecture) {
 		return nil, fmt.Errorf("capability descriptor: invalid architecture %q", d.Architecture)
@@ -144,6 +126,7 @@ func (d *CapabilityDescriptor) AsMap() map[string]any {
 	}
 	out := map[string]any{
 		"platform":             d.Platform,
+		"homeDirectory":        d.HomeDirectory,
 		"displayServer":        d.DisplayServer,
 		"computerUseAvailable": d.ComputerUseAvailable,
 		"actions":              actions,
@@ -203,4 +186,15 @@ func (d *CapabilityDescriptor) NativePlatform() string {
 func NativePlatformFromMap(value any) string {
 	m, _ := value.(map[string]any)
 	return capabilityDescriptorFromMap(m).NativePlatform()
+}
+
+// HomeDirectoryFromMap reads machine metadata only from the registered descriptor,
+// never from operator labels. An older worker reports no path, not a guess.
+func HomeDirectoryFromMap(value any) string {
+	m, _ := value.(map[string]any)
+	home, _ := m["homeDirectory"].(string)
+	if permission.CleanAbsolute(home) {
+		return home
+	}
+	return ""
 }

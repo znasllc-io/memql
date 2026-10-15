@@ -6,12 +6,107 @@ Notable changes to the client-agnostic runtime core. Entries are newest first.
 
 ### Added
 
+**`materialize` and its parts -- the one way a client creates a file**
+(`@znasllc-io/memql-sdk-core/client`, memql#6023). `materialize(ports, request)`
+starts a composition, follows it until the file has its Files entry (the first
+look 300 ms after the start, the rest one `intervalMs` apart, two seconds by
+default), and returns `{ compositionId, fileId, artifactId, name }`. `startMaterialize` and
+`followComposition` are its two halves, for a client that follows its own live
+feed or polls; `isDescribedMarkdown(request, files)` says which requests the
+cluster files empty: a Markdown request with a statement and nothing of its own to
+compose from, whose picked files are all ones the Library can attach to a review
+comment (a `.md` file up to 32 KiB, or a PNG, JPEG, GIF or WebP picture up to
+8 MiB), judged on each file row's name and size through `files`, a
+`LibraryFileLookup` over `LibraryFileFacts` (`libraryFileFacts(row)` makes them
+from a file row). Any other picked file keeps the composer, which reads it, so a
+file is used and never dropped. `readDescribedMarkdown(execute, request, known?)`
+answers the same by reading the rows it is not told, one `libraryFileById` per
+picked file and nothing for a request that cannot be described, and `materialize`
+reads the picked files' rows before it starts. `handOffDescription` gives such a
+file's description to the Library's revision workflow as the person (a
+document-level comment with the `library_file` sources the Library accepts
+attached, then a revision request) and returns `revisionId` or `revisionFailure`
+without throwing, with the references it could not attach in `unattached`.
+`composeMaterialize` gains `requestId`: repeating it returns the same
+composition, so mint a new one for every person action. An aborted signal
+cancels a composition that is still being made. Stopping never deletes a file
+that was already made: it stays in Files, and `materialize` returns it when it is
+already in Files at the moment of the stop (a described request then carries
+`revisionFailure` "Stopped before the description was sent."), and throws
+`MaterializeCancelled` when it is not yet. A described request's id may use
+letters, digits, `-` and `_`, at most 111 characters. `fileNameProblem(name,
+format)` is the name rule a client checks as a name is typed (no slash, no
+control character, not empty, at most 150 characters, something before the
+extension) in the words a person reads, and `fileNameStem(name, format)` the
+name the cluster files it under (one trailing extension of the format dropped).
+
+**`refusalSentence(error, construct?)`** (`@znasllc-io/memql-sdk-core/client`,
+beside `QueryClient`) -- the sentence a person reads out of a refused call. A
+refusal arrives as `<construct>: MemQL engine failed to execute query. Details:
+compose: ...`; this takes off the call's name `executeNamed` puts in front, the
+server's frame and a leading Go package name, once each, and leaves the rest as
+the cluster wrote it. `startMaterialize` throws, and `handOffDescription`
+reports, refusals in these words.
+
 **`AiChatOptions.level`** -- how much intelligence a chat call needs: `""`
 (Auto: the cluster's rules decide), `"fast"`, `"strong"` or `"reasoning"`. It
 rides `AiChatMsg.level` beside `provider` on both `aiChat` and `aiChatStream`,
 and like `provider` it is omitted from the wire when empty. MemQL OS's Ask
 route picker sends a conversation's chosen source as `provider` and its Effort
 as `level`.
+
+**`Result.count()` and `CountAnswer`** (memql#6033) -- read the aggregate a
+`count` query answers as `{ count, atLeast }`, or `null` when the result is
+not a count. The engine reads a count up to its window
+(`MEMQL_MEMORY_ENGINE_MAX_WINDOW`, 5,000 by default) and one row past it; a
+larger set now answers the window with `atLeast: true`, read as "this many or
+more". The window is configurable, so read `atLeast` rather than comparing the
+figure with a number you assume. `countConcept` still answers the number
+alone.
+
+**`versionOrder(a, b)`** (`@znasllc-io/memql-sdk-core/client`, memql#6033) --
+which of two version times is later. A row's `createdAt`, on a read and on a
+graph event, is the time of that version of the row; `versionOrder` compares
+two of them as instants at every fractional digit, not as strings (the engine
+trims trailing zeros, so `.3251Z` is the earlier instant and the larger string
+beside `.325101Z`), and folds a zone offset. It answers a negative number, 0 or
+a positive number, and `null` when either side is not a time to order by -- the
+caller then decides what a copy it cannot place means. It is the ordering a
+`LiveCollection` applies by default, now exported so a client that keeps the
+newer of two copies of a row by hand does not write a second.
+
+### Changed
+
+**A `LiveCollection` seed keeps what arrives while it reads** (memql#6033).
+A seed replaces the rows on screen with the read's answer, and the pages it
+read were answered before anything that arrived during the walk -- so an update
+that landed between two pages was overwritten by the older page until the next
+reseed, an insert that sorted onto a page already read never appeared, and a
+delete came back. Each seed now keeps the last arrival per row from before its
+first page until its answer is installed, and replays it onto that answer
+through the fold's own rules (a removal removes; a row is judged by the
+ordering below, then by `inScope`). Arrivals still fold onto the rows on screen
+as they come.
+
+**A `LiveCollection` orders engine rows by their version by default**
+(memql#6033). The engine delivers each graph event on its own goroutine and a
+read can answer after an event it is newer than, so the last arrival is not
+always the newest copy. With no `supersedes` of its own, a collection now
+compares the `createdAt` each row and event carries at the top level -- the time
+of the row's version, at every digit the wire carries -- and refuses an arrival
+older than the row it holds; the same version or a newer one replaces it, and
+where either side has no version time the arrival wins as before. A copy refused
+as older is refused before `inScope` reads it, so it cannot take a newer row out
+of the list either, and a removal always lands. Once a row is out -- removed by
+an event that carried a version time, or taken out of the read's scope by a
+newer copy -- the collection keeps that time, across seeds (up to 1,024 rows,
+oldest forgotten first; a row removed again at a newer version moves to the back
+of that line), so a late OLDER copy does not bring it back; a copy at that
+version or a newer one is placed. Pass `supersedes` to order by something else,
+or to take every arrival; such a feed keeps no tombstones and owns its rows'
+history. The engine's `graph.node.created` and `graph.node.updated` events carry
+that `createdAt` to the microsecond the row keeps (`.created` carried it to the
+second, `.updated` not at all).
 
 ### Changed -- BREAKING for anyone importing the rotation helpers directly
 

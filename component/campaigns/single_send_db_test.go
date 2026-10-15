@@ -48,7 +48,7 @@ func TestSingleSendReceiptAcrossReplicas(t *testing.T) {
 		}
 		engines[n] = e
 		workers[n] = newTestWorker(t, deliveryDBEngine{e}, sender)
-		wired := NewWorker(deliveryDBEngine{e}, nil, nil, quietLogger(), func() *sql.DB { return db.DB })
+		wired := NewWorker(deliveryDBEngine{e}, nil, nil, quietLogger(), gatePoolFor(t))
 		workers[n].singleSendGate, workers[n].templateGate = wired.singleSendGate, wired.templateGate
 	}
 	suffix := fmt.Sprintf("single-%d", time.Now().UnixNano())

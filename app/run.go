@@ -36,8 +36,9 @@ const DefaultShutdownDrainDelay = 5 * time.Second
 // (endpoint-removal window) has elapsed, for in-flight work to finish before
 // it transitions the node Draining -> Stopped and runs the dependency Stop
 // sweep (memql#1269, the graceful-drain BEHAVIOUR on top of the #1268
-// lifecycle seams). The node is already de-routed (readiness 503, gossip
-// DRAINING) so no NEW work arrives; this grace lets the in-flight user streams
+// lifecycle seams). The node is de-routed (readiness 503, gossip DRAINING),
+// but existing bidirectional streams can still submit work. This grace lets
+// the in-flight user streams
 // (server.ActiveStreams via RunConfig.ActiveWork) drain to zero so a rolling
 // deploy doesn't drop a turn mid-flight. In-flight that outlives the grace is
 // cut off at the deadline (the bounded #1119 GracefulStop in the Stop sweep
@@ -323,7 +324,8 @@ func runApplication(cfg RunConfig, application *App) {
 	applyShutdownDrain(cfg.Logger, cfg.BeginDrain, cfg.DrainDelay, time.Sleep)
 
 	// Finish in-flight work (memql#1269): the node is now de-routed
-	// (readiness 503, gossip DRAINING) so no NEW work arrives. Wait -- bounded
+	// (readiness 503, gossip DRAINING). Existing streams remain open until
+	// the transport stop below. Wait -- bounded
 	// by GracePeriod -- for the in-flight user streams to drain to zero before
 	// tearing the transport down, so a rolling deploy doesn't drop a turn
 	// mid-flight. Work that outlives the grace is cut off at the deadline (the
@@ -342,10 +344,11 @@ func runApplication(cfg RunConfig, application *App) {
 	// before the Stop sweep closes the transport. No-op on non-mesh binaries.
 	application.MarkNodeStopped()
 
-	// Release the database connection pool as an explicit drain phase
-	// (memql#1875). The node is already de-routed (readiness 503, gossip
-	// DRAINING) and in-flight work has drained, so hand the TigerDB sessions
-	// back NOW -- before the (potentially slow, per-dependency-timeout-bounded)
+	// Close public streams, then release the database connection pool as an
+	// explicit drain phase (memql#1875). Endpoint removal does not close an
+	// existing browser/Cockpit stream: it can still submit requests after the
+	// in-flight grace expires. Stop that transport before handing sessions
+	// back -- before the (potentially slow, per-dependency-timeout-bounded)
 	// Stop sweep below -- rather than holding up to MaxOpenConns connections
 	// open the whole time the process lingers in the blue-green scale-down
 	// window. This shrinks the deploy-time connection overlap that exhausts the
@@ -361,8 +364,8 @@ func runApplication(cfg RunConfig, application *App) {
 	cfg.Logger.Info("shutdown complete")
 }
 
-// releaseDatabasePools closes the node's database connection pool as an
-// explicit drain phase, BEFORE the dependency Stop sweep, so a draining
+// releaseDatabasePools first stops public gRPC streams, then closes the node's
+// database connection pool BEFORE the dependency Stop sweep, so a draining
 // blue-green color hands its TigerDB connections back promptly instead of
 // holding them until process exit (memql#1875). No-op on a build without a
 // database handle. The released-connection counts are logged so a deploy can
@@ -374,6 +377,14 @@ func (a *App) releaseDatabasePools(timeout time.Duration) {
 
 	ctx, cancel := context.WithTimeout(context.Background(), timeout)
 	defer cancel()
+
+	// Readiness and endpoint removal cannot de-route a frame on an already
+	// open bidirectional stream. Stop waits for the existing graceful bound,
+	// or force-closes the transport at this deadline, before returning. The
+	// later dependency Stop is idempotent; neither path retries a mutation.
+	if a.grpcServer != nil {
+		a.grpcServer.Stop(ctx)
+	}
 
 	stats := a.db.ClosePool(ctx)
 

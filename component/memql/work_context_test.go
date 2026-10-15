@@ -42,13 +42,14 @@ func TestWorkCheckpointRetainsSourcesReusesExactMemoryAndIsolatesOwners(t *testi
 	e.SetAIResolver(testAIResolver{fn: func(context.Context, airoute.ResolveRequest) (ResolvedProvider, error) {
 		return ResolvedProvider{Client: model, Resolution: airoute.Resolution{ProviderName: "fleet:test", Model: "test"}}, nil
 	}})
-	messages := []common.ChatMessage{{Role: "system", Content: "Complete the work"}}
+	messages := []common.ChatMessage{{Role: "system", Content: "Complete the work.\nReviewed skill software-development v1, receipt skill-selection-saved: preserve unrelated edits and the original approval."}}
 	for n := range 60 {
 		messages = append(messages, common.ChatMessage{Role: "user", Content: fmt.Sprintf("Turn %d: CNAS %s", n, strings.Repeat("evidence ", 150))})
 	}
 	compacted, err := e.CompactWorkContext(ctx, messages, nil, 15000)
 	require.NoError(t, err)
 	require.Less(t, WorkContextSize(compacted, nil), 15001)
+	require.Equal(t, messages[0], compacted[0], "selected skill versions and their receipt remain exact across compaction")
 	require.Equal(t, messages[len(messages)-6:], compacted[len(compacted)-6:])
 	require.Equal(t, messages[1], compacted[1], "the original request stays exact")
 	require.Contains(t, compacted[2].Content, "owner@example.test")

@@ -1,5 +1,5 @@
-import { useMemo } from "react";
-import type { Row } from "@znasllc-io/memql-sdk-core/client";
+import { createContext, useContext, useMemo, type ReactNode } from "react";
+import type { LiveState, Row } from "@znasllc-io/memql-sdk-core/client";
 
 import { useSession } from "../../chrome/access";
 import { useLiveCollection } from "../../live/useLiveCollection";
@@ -39,6 +39,11 @@ import { ACCOUNT_CONCEPT, accountFromRow, type AccountRow } from "./rows";
  * a shell-level change that would want to move every app's collection at once
  * rather than being invented for this picker.
  *
+ * AN APP WITH A PICKER IN MORE THAN ONE PLACE FOLLOWS THE ACCOUNTS APP'S RULE
+ * with `AccountOptionsProvider`: it retains the one feed at its root, and
+ * every `useAccountOptions()` under it reads that instead of opening its own.
+ * Outside a provider nothing changes.
+ *
  * `includeArchived: true` for the reason the app's own feed asks for
  * everything: a picker must be able to show an archived client that a row is
  * ALREADY tied to, and filtering server-side would make that tie render as an
@@ -48,9 +53,31 @@ export function useAccountOptions(): AccountRow[] {
   return useAccountOptionsFeed().accounts;
 }
 
+export interface AccountOptions {
+  accounts: AccountRow[];
+  state: LiveState;
+  error: string;
+}
+
+const SharedAccountOptions = createContext<AccountOptions | null>(null);
+
+/** Retain the account list ONCE for everything under it. See `useAccountOptions`. */
+export function AccountOptionsProvider({ children }: { children: ReactNode }) {
+  const options = useOwnAccountOptions(true);
+  return <SharedAccountOptions.Provider value={options}>{children}</SharedAccountOptions.Provider>;
+}
+
 /** Options together with their read state for creation flows. */
-export function useAccountOptionsFeed() {
-  const { snapshot } = useLiveCollection<Row>("accounts:options", (connection) => ({
+export function useAccountOptionsFeed(): AccountOptions {
+  const shared = useContext(SharedAccountOptions);
+  // Under a provider this opens NO collection of its own: a null key is "no
+  // subscription", which is the whole point of having a provider.
+  const own = useOwnAccountOptions(shared === null);
+  return shared ?? own;
+}
+
+function useOwnAccountOptions(enabled: boolean): AccountOptions {
+  const { snapshot } = useLiveCollection<Row>(enabled ? "accounts:options" : null, (connection) => ({
     concept: ACCOUNT_CONCEPT,
     seed: async (_cursor, signal) => {
       const result = await connection.query.clientAccountsAll({ includeArchived: true }, { signal });
@@ -103,7 +130,9 @@ export function useAccountOptionsFeed() {
     }
     return fromGroups;
   }, [snapshot, access]);
-  return { accounts, state: snapshot.state, error: snapshot.error };
+  // One object per change, so a provider's value does not change identity on
+  // every render of the app that holds it.
+  return useMemo(() => ({ accounts, state: snapshot.state, error: snapshot.error }), [accounts, snapshot.state, snapshot.error]);
 }
 
 /**

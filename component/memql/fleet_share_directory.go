@@ -318,6 +318,9 @@ func (e *MemQLEngine) evaluateFleetShareDirectoryExpression(ctx context.Context,
 	if e == nil {
 		return nil, fmt.Errorf("engine is nil")
 	}
+	if err := requireFleetSharingAccess(ctx); err != nil {
+		return nil, err
+	}
 	registrationId := strings.TrimSpace(stringArg(args, "registrationId"))
 	machine, err := e.modelPullMachineFor(ctx, registrationId)
 	if err != nil {
@@ -420,9 +423,6 @@ func ParseMachineSharing(v any) (mode string, userIds, groupIds []string) {
 	}
 	userIds = readShareIdList(row["userIds"])
 	groupIds = readShareIdList(row["groupIds"])
-	if len(userIds) == 0 && len(groupIds) == 0 {
-		return SharingModeOwner, nil, nil
-	}
 	return mode, userIds, groupIds
 }
 

@@ -9,7 +9,13 @@ import (
 	"github.com/znasllc-io/memql/core/common"
 )
 
-const workExecutionDirective = `You are executing the current MemQL request now. Complete the requested work in this run. A research or section step returns evidence, source references and a complete draft for its next step; it must not save the final file itself. When this step is responsible for a final file or document, use composeFile to write it to the user's Library. Supply a descriptive name, the requested format (markdown by default), and a complete statement of the requested content; optionally provide your finished draft or source references. The call finishes the file before returning its outputFileId. Compound formats automatically include a reproducible source ZIP, returned as sourceFileId; link both files when present. A default document style is provided when no template was selected, so ordinary file requests do not need a template search. Confirm success only after receiving that outputFileId. Do not use produceArtifact or open another goal to delegate this same work. An answer-only goal needs no file; deliver its answer using the supplied response contract.`
+const workExecutionDirective = `You are executing the current MemQL request now. Complete this section's declared work and outputs in this run, using the requested destination and authorized capabilities.
+
+A research-only section returns evidence, source references and any requested draft for its next step; it does not create a final deliverable assigned to a later section. A section assigned repository, source-code or test-file changes must perform those changes through the authorized computer or repository tools and verify the required results. Being a section does not make it research-only. Do not substitute a Library document for a requested repository change. All writes and commands remain subject to existing permissions and run limits.
+
+Ordinary generated documents go to the user's Library unless another destination is requested. For a Library deliverable, use composeFile to write it. Supply a descriptive name, the requested format (markdown by default), and a complete statement of the requested content; optionally provide your finished draft or source references. The call finishes the Library file before returning its outputFileId. Compound formats automatically include a reproducible source ZIP, returned as sourceFileId; link both files when present. A default document style is provided when no template was selected, so ordinary Library document requests do not need a template search. Confirm that Library file is saved only after receiving its outputFileId.
+
+Do not use produceArtifact or open another goal to delegate this same work. An answer-only goal needs no file; deliver its answer using the supplied response contract.`
 
 func isOwnedWorkExecution(ctx context.Context) bool {
 	run, ok := common.RunFromContext(ctx)

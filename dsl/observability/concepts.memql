@@ -83,11 +83,12 @@ concept codeMetric {
 /// in their Go handlers, which is why the concept declares no row tier --
 /// no row of it ever passes graph admission. Retention is the nightly
 /// logsRetentionSweep automation: archive to blob storage first, delete
-/// second, thirty days by MEMQL_LOGS_RETENTION_DAYS. `subject` plus
+/// second, for the lifetime declared by @retention. `subject` plus
 /// `subjectConcept` is the one seam between a line and the thing it is about
 /// (a deployment, a site, a plan); logger.Subject stamps both. Design:
 /// docs/superpowers/specs/2026-09-03-logs-design.md.
 @displayCard(primary="message", secondary="component", tertiary="node", status="level")
+@retention(ttl="30d", keepLatest=false, archive="required")
 concept logLine {
   occurredAt      datetime!  @description("When the line was written. The hypertable time column; createdAt on the wire.")
   nodeType        enum("identity", "bff", "agent", "planner", "workbench", "mcp", "edge", "os")!  @description("Which kind of process wrote it. `os` is the MemQL OS front end, whose lines arrive through logsRecordClient.")

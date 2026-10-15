@@ -1,0 +1,47 @@
+{
+  "subject": "Line and paragraph separators, written as the engine writes them",
+  "preheader": "Café ☕ for two <and> “quotes”",
+  "layout": "builtin:letter",
+  "theme": {
+    "page": "#eef0f3",
+    "canvas": "#ffffff",
+    "primary": "#1f5f8b",
+    "secondary": "#5b8fb9",
+    "accent": "#d2322d",
+    "tint": "#f6f4ef",
+    "text": "#1c1c1c",
+    "muted": "#696e77",
+    "headingFont": "Georgia",
+    "bodyFont": "Arial"
+  },
+  "blocks": [
+    {
+      "id": "headline",
+      "type": "heading",
+      "text": "One line\u2028and another, one paragraph\u2029and the next"
+    },
+    {
+      "id": "body",
+      "type": "text",
+      "text": "Hello \"friend\" \\ welcome to Acme & co.\n\n- **Bold** and *italic* 😀\n- [A link](https://acme.example/start?a=1&b=2)"
+    },
+    {
+      "id": "raw",
+      "type": "html",
+      "html": "<p class=\"note\">A &amp; B <b>bold</b> \u2028 kept</p>"
+    },
+    {
+      "id": "foot",
+      "type": "footer",
+      "links": [
+        {
+          "label": "Unsubscribe",
+          "href": "{{unsubscribeUrl}}"
+        }
+      ],
+      "lines": [
+        "Acme, 1 Example Street"
+      ]
+    }
+  ]
+}

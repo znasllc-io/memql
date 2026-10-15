@@ -4,26 +4,10 @@ import type { Connection } from "@znasllc-io/memql-sdk-core/client";
 import { useOsConnection } from "../../../live/connection";
 import { subjectKey } from "./sharing";
 
-// Who the owner may lend a machine to (epic memql#5344, design section 4):
-// the `fleetShareDirectory` builtin, read ON DEMAND.
-//
-// ===========================================================================
-// NOT LIVE, AND READ ONCE PER OPENING
-// ===========================================================================
-// The directory is a virtual row computed per request from three concepts --
-// users, groups, memberships -- so there is no event behind it to fold, and a
-// collection over it would render "Loading" and then a list that never moves.
-// It is read when the dialog OPENS, which is the one moment the answer is
-// needed, and once: typing in the search narrows what was read rather than
-// asking again.
-//
-// ===========================================================================
-// A FAILED READ IS NOT AN EMPTY DIRECTORY
-// ===========================================================================
-// "Nobody shares a group with you yet" is a specific claim about the cluster,
-// and a read that did not happen is not evidence for it. So the three states
-// are kept apart all the way to the pixel: loading, failed (with the engine's
-// words and a way to ask again), and an answer -- which may itself be empty.
+// The virtual directory is read when sharing is first revealed, then reused
+// through edits. No broadcast exists for this computed query; visible refresh
+// reads it again without dropping the draft or the last successful directory.
+// Failed reads are never empty directories.
 
 /** Somebody the owner may pick. `detail` is an email, sent only to a caller
  *  at admin rank or above, who already sees it in Users. */
@@ -65,7 +49,7 @@ export interface ShareDirectory {
 
 export type DirectoryRead =
   | { state: "loading" }
-  | { state: "ready"; directory: ShareDirectory }
+  | { state: "ready"; directory: ShareDirectory; error?: string }
   | { state: "failed"; error: string };
 
 function objectAt(v: unknown): Record<string, unknown> | null {
@@ -153,36 +137,42 @@ export async function readShareDirectory(
 }
 
 /**
- * The directory, read once when the component mounts -- which for the share
- * dialog is once per opening -- and again only when `retry` asks.
+ * The directory, read once when enabled, and again when `retry` asks.
  */
-export function useShareDirectory(registrationId: string): { read: DirectoryRead; retry: () => void } {
+export function useShareDirectory(registrationId: string, enabled = true): { read: DirectoryRead; refreshing: boolean; retry: () => void } {
   const connection = useOsConnection();
   const [read, setRead] = useState<DirectoryRead>({ state: "loading" });
+  const [refreshing, setRefreshing] = useState(false);
   const [attempt, setAttempt] = useState(0);
 
   useEffect(() => {
+    if (!enabled) return;
     if (connection === null) {
+      setRefreshing(false);
       setRead({ state: "failed", error: "Not connected to the cluster, so nobody could be looked up." });
       return;
     }
     const controller = new AbortController();
     let cancelled = false;
-    setRead({ state: "loading" });
+    setRefreshing(true);
+    setRead(held => held.state === "ready" ? held : { state: "loading" });
     readShareDirectory(connection, registrationId, controller.signal).then(
       (directory) => {
-        if (!cancelled) setRead({ state: "ready", directory });
+        if (!cancelled) { setRead({ state: "ready", directory }); setRefreshing(false); }
       },
       (err: unknown) => {
-        if (!cancelled) setRead({ state: "failed", error: describe(err) });
+        if (!cancelled) {
+          setRead(held => held.state === "ready" ? { ...held, error: describe(err) } : { state: "failed", error: describe(err) });
+          setRefreshing(false);
+        }
       },
     );
     return () => {
       cancelled = true;
       controller.abort();
     };
-  }, [connection, registrationId, attempt]);
+  }, [connection, registrationId, attempt, enabled]);
 
   const retry = useCallback(() => setAttempt((n) => n + 1), []);
-  return { read, retry };
+  return { read, refreshing, retry };
 }

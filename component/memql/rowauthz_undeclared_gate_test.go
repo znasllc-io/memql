@@ -720,14 +720,6 @@ var undeclaredRowAuthzConstructs = map[string]struct {
 	// v1:agents:skillChangeEvent
 	"skillChangeEventsForAgent": {"v1:agents:skillChangeEvent", undeclaredGrandfatherReason},
 
-	// v1:authoring:bundle
-	"activeAuthoringBundles":           {"v1:authoring:bundle", undeclaredGrandfatherReason},
-	"authoringBundleById":              {"v1:authoring:bundle", undeclaredGrandfatherReason},
-	"authoringBundleForRun":            {"v1:authoring:bundle", undeclaredGrandfatherReason},
-	"authoringBundleForResponsibility": {"v1:authoring:bundle", undeclaredGrandfatherReason},
-	"authoringBundlesForOwner":         {"v1:authoring:bundle", undeclaredGrandfatherReason},
-	"systemActiveAuthoringBundles":     {"v1:authoring:bundle", undeclaredGrandfatherReason},
-
 	// v1:cluster:cluster
 	"existingCluster": {"v1:cluster:cluster", undeclaredGrandfatherReason},
 

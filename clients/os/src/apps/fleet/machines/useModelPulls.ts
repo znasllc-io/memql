@@ -1,7 +1,9 @@
 import { useCallback, useMemo, useState } from "react";
-import { getRowByConceptAndId, type Row } from "@znasllc-io/memql-sdk-core/client";
+import { getRowByConceptAndId, rowString, type LiveState, type Row } from "@znasllc-io/memql-sdk-core/client";
 
+import { flatten } from "../../../kit/rows";
 import { useOsConnection } from "../../../live/connection";
+import { useSessionIfPresent } from "../../../chrome/access";
 import { useLiveCollection } from "../../../live/useLiveCollection";
 import { pullFromRow, pullIsLive, type ModelPull } from "./models";
 
@@ -40,6 +42,8 @@ export interface ModelPullsHandle {
    *  seed was still in flight would tell somebody their pull had vanished. */
   loading: boolean;
   feedError: string;
+  state: LiveState;
+  reseed: () => void;
   /** Start a pull. Resolves to "" on success, or the refusal to show. */
   start: (model: string) => Promise<string>;
   starting: boolean;
@@ -63,13 +67,14 @@ function refusalFrom(err: unknown): string {
 
 export function useModelPulls(workerId: string): ModelPullsHandle {
   const connection = useOsConnection();
+  const userId = useSessionIfPresent()?.access?.userId ?? "";
   const [starting, setStarting] = useState(false);
 
   // The KEY is the machine, because that is what changes the read. It must
   // not carry anything that merely arrives late -- a key change restarts the
   // collection from empty, which would blank a pull somebody is watching.
-  const { snapshot } = useLiveCollection<Row>(
-    workerId === "" ? null : `fleet:pulls:${workerId}`,
+  const { snapshot, reseed } = useLiveCollection<Row>(
+    !workerId || !userId ? null : `fleet:pulls:${userId}:${workerId}`,
     (conn) => ({
       concept: MODEL_PULL_CONCEPT,
       seed: async (_cursor, signal) => {
@@ -80,6 +85,7 @@ export function useModelPulls(workerId: string): ModelPullsHandle {
         const row = await getRowByConceptAndId(conn.query, MODEL_PULL_CONCEPT, rowId, { signal });
         return (row as Row) ?? null;
       },
+      inScope: row => pullFromRow(row).workerId === workerId && rowString(flatten(row), "ownerUserId") === userId,
       paged: false,
     }),
   );
@@ -91,7 +97,7 @@ export function useModelPulls(workerId: string): ModelPullsHandle {
     // otherwise appear under the machine they are looking at.
     const rows = snapshot.rows.map(pullFromRow).filter((p) => p.pullId !== "");
     return rows
-      .filter((p) => p.workerId === workerId || p.workerId.endsWith(`:${workerId}`))
+      .filter((p) => p.workerId === workerId)
       .sort((a, b) => (a.requestedAt < b.requestedAt ? 1 : a.requestedAt > b.requestedAt ? -1 : 0));
   }, [snapshot, workerId]);
 
@@ -124,7 +130,9 @@ export function useModelPulls(workerId: string): ModelPullsHandle {
     pulls,
     live,
     loading: snapshot.state === "seeding",
-    feedError: snapshot.error,
+    feedError: snapshot.error || (snapshot.state === "disconnected" ? "Download updates are interrupted. Showing the last known state." : ""),
+    state: snapshot.state,
+    reseed,
     start,
     starting,
   };

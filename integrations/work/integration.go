@@ -31,6 +31,7 @@ import (
 	"time"
 
 	"github.com/uptrace/bun"
+	"github.com/znasllc-io/memql/component/automations/workflowhost"
 
 	memorynodes "github.com/znasllc-io/memql/component/database/memory-nodes"
 	"github.com/znasllc-io/memql/component/memql"
@@ -53,8 +54,15 @@ const resultConcept = "v1:work:result"
 
 // Integration exposes the work capabilities.
 type Integration struct {
-	engine                 Engine
-	decisionGate           func(context.Context, string) (func(), error)
+	engine Engine
+
+	// decisionGate takes the decision locks for the keys it is given, in the
+	// order given, with ONE acquisition: one transaction on one connection of
+	// the gate pool (memql.AcquireWriteGates). A flow that needs several names
+	// them together rather than taking one inside another (memql#6022).
+	decisionGate func(context.Context, ...string) (func(), error)
+	// Optional test seam for verified decision holds; production uses GateDB.
+	computerDecisionGate   func(context.Context, string) (func(), func(context.Context) error, error)
 	reviewValidators       map[string]func(context.Context, map[string]any) error
 	reviewAnswerValidators map[string]func(context.Context, map[string]any, map[string]any) error
 	logger                 *slog.Logger
@@ -65,6 +73,12 @@ type Integration struct {
 	// is the only way to ask them today (see sweep.go's header, which also
 	// records the DSL queries that would replace it).
 	bunDB func() *bun.DB
+
+	// gateDB is the pool this integration's write gates run on (memql#6022):
+	// connections used for nothing else, never the request pool bunDB hands out.
+	// Unset, a gate refuses -- naming the wiring it lacks (gatePool below) -- rather
+	// than take a connection the work under it needs.
+	gateDB func() *sql.DB
 
 	// admitRow is the per-row authorization gate applied to the rows the
 	// sweeps fetch THEMSELVES. A hand-rolled SELECT passes through neither
@@ -170,14 +184,16 @@ func New(engine Engine, logger *slog.Logger, database ...func() *bun.DB) *Integr
 	if len(database) > 0 {
 		i.bunDB = database[0]
 	}
-	i.decisionGate = func(ctx context.Context, key string) (func(), error) {
-		var db *sql.DB
-		if i.bunDB != nil {
-			if handle := i.bunDB(); handle != nil {
-				db = handle.DB
-			}
+	i.decisionGate = func(ctx context.Context, keys ...string) (func(), error) {
+		db, err := i.gatePool()
+		if err != nil {
+			return nil, err
 		}
-		return memql.AcquireWriteGate(ctx, db, "work-approval-decision:"+memql.BareShortId(key))
+		locks := make([]string, len(keys))
+		for n, key := range keys {
+			locks[n] = "work-approval-decision:" + memql.BareShortId(key)
+		}
+		return memql.AcquireWriteGates(ctx, db, locks...)
 	}
 	i.rowsInFlight = i.runsInFlight
 	return i
@@ -193,8 +209,16 @@ func init() {
 		if pctx.AdmitSourceRow == nil {
 			return nil, fmt.Errorf("work plug-in: no AdmitSourceRow in plugin context")
 		}
+		// The same for the gate pool (memql#6022). Every decision this spine
+		// makes -- an approval decided, a goal cancelled or re-run, a question
+		// parked, a review goal opened -- takes a write gate on it and on nothing
+		// else; without it the spine would materialize and refuse each of them.
+		if pctx.GateDB == nil {
+			return nil, fmt.Errorf("work plug-in: no GateDB in plugin context: its approval decisions, goal lifecycle and review goals take write gates on the gate pool (database.Database.GateDB; a test or a tool opens one with database.NewGatePool)")
+		}
 		i := New(pctx.Engine, pctx.Logger)
 		i.bunDB = pctx.BunDB
+		i.SetGateDB(pctx.GateDB)
 		i.admitRow = pctx.AdmitSourceRow
 		if archiveContainer() != "" {
 			uploader, err := azureblob.New(context.Background())
@@ -206,6 +230,19 @@ func init() {
 		}
 		return i, nil
 	})
+}
+
+// SetGateDB installs the resolver of the pool this integration's write gates run
+// on (memql#6022): the gate pool, not the request pool.
+func (i *Integration) SetGateDB(gate func() *sql.DB) { i.gateDB = gate }
+
+// gatePool resolves the gate pool, or says which wiring is missing.
+func (i *Integration) gatePool() (*sql.DB, error) {
+	var resolve func() *sql.DB
+	if i != nil {
+		resolve = i.gateDB
+	}
+	return memql.ResolveWriteGatePool(resolve, "work", "give it database.Database.GateDB with Integration.SetGateDB (a node's plug-in takes it from PluginContext.GateDB; a test or a tool opens one with database.NewGatePool)")
 }
 
 // SetCompiler installs the compile surface. Called once, from the node that
@@ -273,18 +310,26 @@ func (i *Integration) IntegrationName() string { return integrationName }
 // set against dsl/work/builtins.memql, because a capability the DSL names and
 // the registry lacks is a BOOT failure on every node type.
 func (i *Integration) Capabilities() []memql.IntegrationCapability {
-	return []memql.IntegrationCapability{
+	return append(workflowhost.ScopedCapabilities(evaluationPorts()), []memql.IntegrationCapability{
+		{Name: "skillCatalog", Description: "Inspect skill content and its verified installed-baseline provenance.", Handler: i.handleSkillCatalog},
+		{Name: "selectSkills", Description: "Bind exact reviewed skill versions to the current owned work step.", Handler: i.handleSelectSkills},
+		{Name: "recordGoalEvaluation", Description: "Publish owned external-harness evidence after verifying goal and model receipts.", Handler: i.handleRecordGoalEvaluation},
+		{Name: "approvalDiscussionState", Description: "Read human-guidance eligibility for one owned approval.", Handler: i.handleApprovalDiscussionState},
+		{Name: "openApprovalDiscussion", Description: "Record a human discussion message and open its bounded read-only child run.", Handler: i.handleOpenApprovalDiscussion},
 		{
 			Name:        "createGoal",
 			Description: "Accept a goal and start work on it: opens a v1:work:goal owned by the caller and its first v1:work:run in `compiling`, then dispatches compile (locally or via the run graph event to a planner). Refuses with no compile surface when neither a local compiler nor event forward is available. Returns {goalId, runId, compileDispatched}.",
 			Handler:     i.handleCreateGoal,
 			ArgsSchema: map[string]string{
-				"spine":        "string -- installed Spine template; frozen at admission",
-				"statement":    "string (required) -- the goal in the person's own words",
-				"input":        "object -- the typed input object the chosen template's args declare",
-				"accountIds":   "[]string -- account tags; a record of who the work is for, never a visibility scope",
-				"ceilings":     "object -- {tokenBudget, costCeiling, wallClockMs, maxRetries, maxModelCalls, maxEvents}; a zero is 'unset', never 'nothing allowed'",
-				"requestedVia": "string -- api | ask | nexus | responsibility | library | materializer; empty when unknown",
+				"spine":           "string -- installed Spine template; frozen at admission",
+				"statement":       "string (required) -- the goal in the person's own words",
+				"input":           "object -- the typed input object the chosen template's args declare",
+				"accountIds":      "[]string -- account tags; a record of who the work is for, never a visibility scope",
+				"ceilings":        "object -- {tokenBudget, costCeiling, wallClockMs, maxRetries, maxModelCalls, maxEvents}; a zero is 'unset', never 'nothing allowed'",
+				"requestedVia":    "string -- api | ask | nexus | responsibility | library | materializer; empty when unknown",
+				"source":          "string -- human-chosen source or route; child goals inherit their parent's choice",
+				"level":           "string -- fast | strong | reasoning",
+				"noPaidProviders": "bool -- inherited hard ceiling across every model modality",
 			},
 		},
 		{
@@ -374,6 +419,18 @@ func (i *Integration) Capabilities() []memql.IntegrationCapability {
 			},
 		},
 		{
+			Name:        "refreshComputerPermission",
+			Description: "Review an unchanged pending computer permission again without granting access. Repairs a proven storage fingerprint mismatch and renews its review window.",
+			Handler:     i.handleRefreshComputerPermission,
+			ArgsSchema:  map[string]string{"approvalId": "string (required) -- the pending approval"},
+		},
+		{
+			Name:        "revokeComputerPermission",
+			Description: "Revoke one saved computer permission owned by the signed-in person.",
+			Handler:     i.handleRevokeComputerPermission,
+			ArgsSchema:  map[string]string{"permissionId": "string (required) -- the approval receipt"},
+		},
+		{
 			Name:        "decideApproval",
 			Description: "Decide one of the caller's pending approvals and resume the run parked on it. Refused when the artifact changed since it was approved. Returns {approvalId, runId, decision, runResumed}.",
 			Handler:     i.handleDecideApproval,
@@ -418,7 +475,7 @@ func (i *Integration) Capabilities() []memql.IntegrationCapability {
 				"dryRun": "boolean -- report what would be archived and deleted without doing either",
 			},
 		},
-	}
+	}...)
 }
 
 // ---------------------------------------------------------------------------

@@ -64,14 +64,15 @@ export interface ShareChoice {
   mode: "owner" | "people" | "cluster";
   userIds: string[];
   groupIds: string[];
+  pausedUserIds?: string[];
+  pausedGroupIds?: string[];
 }
 
 /**
  * What a sharing write did, in the engine's words.
  *
  * THE SENTENCE IS THE ENGINE'S, and it is the only success this surface
- * shows: it names the cockpit's half when that is still missing, which is the
- * difference between "lent" and "lent, and serving".
+ * shows. It acknowledges the saved audience, not model availability.
  */
 export interface SharingReceipt {
   mode: SharingMode;
@@ -113,18 +114,16 @@ export interface MachineWrites {
   /** The last refusal, in the server's own words. Cleared when a write
    *  starts, so it is never read as belonging to the current attempt. */
   actionError: string;
+  /** Keep a refusal beside the setting that caused it. */
+  actionErrorScope?: "machine" | "sharing";
   rename: (registrationId: string, displayName: string) => Promise<boolean>;
   setOperatorLabels: (registrationId: string, labels: LabelMap) => Promise<boolean>;
   /** Remove a machine: its registration AND its credential, as one act.
    *  Resolves to the receipt on success, or null on a refusal with
    *  `actionError` carrying the reason. */
   revoke: (registrationId: string, reason: string) => Promise<RemovalReceipt | null>;
-  /** The OWNER's half of the sharing consent (epic memql#5146, D6; three
-   *  modes since epic memql#5344). The cockpit's half comes from that
-   *  machine's own policy.yaml and is not writable from here -- deliberately:
-   *  it is a decision about where the machine is, and only the machine can
-   *  make it. Resolves to the engine's receipt, or null on a refusal with
-   *  `actionError` carrying the engine's words. */
+  /** Save the enrolled owner's audience. Resolves to the engine receipt,
+   *  or null with the refusal in actionError. */
   setSharing: (registrationId: string, choice: ShareChoice) => Promise<SharingReceipt | null>;
 }
 
@@ -163,9 +162,11 @@ export function useMachineWrites(): MachineWrites {
   const connection = useOsConnection();
   const [busyId, setBusyId] = useState("");
   const [actionError, setActionError] = useState("");
+  const [actionErrorScope, setActionErrorScope] = useState<"machine" | "sharing">("machine");
 
   const run = useCallback(
     async (registrationId: string, write: () => Promise<unknown>): Promise<boolean> => {
+      setActionErrorScope("machine");
       if (connection === null) {
         setActionError("Not connected to the cluster, so nothing was written.");
         return false;
@@ -227,6 +228,7 @@ export function useMachineWrites(): MachineWrites {
   // removed a machine must not be writable by whoever is holding the keyboard.
   const revoke = useCallback(
     async (registrationId: string, reason: string): Promise<RemovalReceipt | null> => {
+      setActionErrorScope("machine");
       if (connection === null) {
         setActionError("Not connected to the cluster, so nothing was written.");
         return null;
@@ -260,20 +262,20 @@ export function useMachineWrites(): MachineWrites {
   // resolves the machine through the caller's OWN machines first.
   //
   // A RECEIPT, NOT A BOOLEAN (epic memql#5344). The panel shows the engine's
-  // own sentence as the only success it claims, and that sentence names the
-  // cockpit's half when it is still missing -- so the answer row is read
+  // own sentence as the only success it claims, so the answer row is read
   // rather than discarded. BOTH LISTS ARE ALWAYS SENT, empty outside
   // `people`: the engine ignores them there, and a write that left them out
   // would ask the reader to know that.
   const setSharing = useCallback(
     async (registrationId: string, choice: ShareChoice): Promise<SharingReceipt | null> => {
+      setActionErrorScope("sharing");
       if (connection === null) {
         setActionError("Not connected to the cluster, so nothing was written.");
         return null;
       }
       const sent: ShareChoice =
         choice.mode === "people"
-          ? { mode: "people", userIds: [...choice.userIds], groupIds: [...choice.groupIds] }
+          ? { mode: "people", userIds: [...choice.userIds], groupIds: [...choice.groupIds], pausedUserIds: [...(choice.pausedUserIds ?? [])], pausedGroupIds: [...(choice.pausedGroupIds ?? [])] }
           : { mode: choice.mode, userIds: [], groupIds: [] };
       setBusyId(registrationId);
       setActionError("");
@@ -290,5 +292,5 @@ export function useMachineWrites(): MachineWrites {
     [connection],
   );
 
-  return { busyId, actionError, rename, setOperatorLabels, revoke, setSharing };
+  return { busyId, actionError, actionErrorScope, rename, setOperatorLabels, revoke, setSharing };
 }

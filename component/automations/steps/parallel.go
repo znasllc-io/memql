@@ -338,26 +338,11 @@ func (e *ParallelExecutor) Execute(ctx context.Context, step *automations.Step, 
 		"errorCount":   len(errors),
 	}
 
-	// Record step execution in the database
-	runId := ""
-	if stepCtx.Execution != nil {
-		runId = stepCtx.Execution.ID
-	}
-	stepRecordQuery := RecordStepExecution(ctx, stepCtx.Engine, StepRecordData{
-		RunId:     runId,
-		StepId:    step.ID,
-		StepType:  "parallel",
-		Status:    result.Status,
-		ItemCount: len(branchResults),
-		Duration:  float64(result.Duration.Milliseconds()),
-	})
-
 	if stepCtx.Logger != nil {
 		stepCtx.Logger.Debug("parallel step completed",
 			"step", step.ID,
 			"branches", len(branches),
 			"errors", len(errors),
-			"stepRecord", stepRecordQuery,
 			"duration", formatDuration(result.Duration),
 		)
 	}

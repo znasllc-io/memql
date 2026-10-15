@@ -176,6 +176,72 @@ func TestDocumentPlanningFailurePreservesRunCancellation(t *testing.T) {
 	}
 }
 
+// Repository edits, external operations and a Library report can coexist.
+// The document refiner has a text-only output contract, so routing these
+// sections through it would erase the effects before tools can read evidence.
+func TestEffectfulSectionsKeepGroundedToolTurnsAndOptionalFileDelivery(t *testing.T) {
+	for _, file := range []bool{false, true} {
+		t.Run(fmt.Sprintf("file=%v", file), func(t *testing.T) {
+			req := compileReq()
+			req.Statement = "Read the supplied maintenance request, make the requested change on the selected computer, verify it, and publish the result."
+			if file {
+				req.Statement += " Also save a Markdown report in the Library."
+			}
+			pinned, err := workintegration.CaptureSpine("")
+			if err != nil {
+				t.Fatal(err)
+			}
+			req.Spine, err = workflowhost.SnapshotFromMap(pinned.Map())
+			if err != nil {
+				t.Fatal(err)
+			}
+			engine := &documentSectionsEngine{countingCompileEngine: &countingCompileEngine{triage: map[string]any{
+				"intent": "task", "complexity": "complex", "requiresFile": file, "fileName": "maintenance-report", "fileFormat": "markdown", "sectionable": true,
+				"assembly": "Report the observed changes, verification and published result from the receipts.",
+				"sections": []map[string]any{
+					{"label": "Read request", "instruction": "Read the supplied request and applicable instructions. Return supported requirements and gaps without guessing implementation details.", "outputs": []string{"requirements"}, "effects": []string{}},
+					{"label": "Apply change", "instruction": "Use the observed requirements to make only the requested change on the selected computer and verify the result.", "inputs": []string{"requirements"}, "outputs": []string{"verification"}, "effects": []string{"machine", "files"}, "postcondition": "The requested change and its verification are recorded in tool receipts."},
+					{"label": "Publish result", "instruction": "Publish the verified change and record its actual URL.", "inputs": []string{"verification"}, "outputs": []string{"published"}, "effects": []string{"external"}, "postcondition": "The external service confirms the published result."},
+				},
+			}}}
+			out, err := (&PlannerAgentLoop{engine: engine}).CompileGoalForRun(context.Background(), req, nil, realSandbox{})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if out.ModelCalls != 1 || len(engine.aiCalls) != 1 || len(engine.structuredCalls) != 0 {
+				t.Fatalf("action plan entered document-only model planning: %+v, %v", out, engine.aiCalls)
+			}
+			if out.Route != work.RouteSectionable || len(out.Sections) != 3 || !out.Sections[1].Section.Effects.Machine || !out.Sections[1].Section.Effects.Files || !out.Sections[2].Section.Effects.External {
+				t.Fatalf("declared effects lost: %+v", out)
+			}
+			source := persistedSource(t, engine.countingCompileEngine, out.AutomationName)
+			if strings.Count(source, "builtin runAgentTurn(") < 3 || !strings.Contains(source, "Carry out only the section") || !strings.Contains(source, "requirements") || !strings.Contains(source, "verification") {
+				t.Fatalf("grounded tool turns or dependencies lost: %s", source)
+			}
+			wantFiles := 0
+			if file {
+				wantFiles = 1
+			}
+			if strings.Count(source, "builtin composeMaterialize(") != wantFiles {
+				t.Fatalf("explicit Library delivery changed: %s", source)
+			}
+		})
+	}
+}
+
+func TestDocumentRefinementCannotEraseDeclaredEffects(t *testing.T) {
+	for _, effect := range []string{"files", "machine", "external", "spend", "concept:v1:todos:todo", "unknown-effect"} {
+		t.Run(effect, func(t *testing.T) {
+			file := true
+			scope := &spineScope{classified: true, decision: sectionableDecision{RequiresFile: &file, Sections: []sectionSpec{{Effects: []string{effect}}}}}
+			_, err := scope.refineSections(context.Background(), map[string]any{"prompt": "workDocumentSections", "maxWords": 800, "timeoutSeconds": 120})
+			if err == nil || !strings.Contains(err.Error(), "declared effects") || scope.sectionRefinements != 0 {
+				t.Fatalf("effect %q was erased or spent a model call: %v", effect, err)
+			}
+		})
+	}
+}
+
 func (e *documentSectionsEngine) InvokeAIStructured(ctx context.Context, name string, data map[string]any, schemaName string, schema json.RawMessage, strict bool) (string, error) {
 	if !strict || !json.Valid(schema) || (schemaName != "documentSections" && schemaName != "documentCoverage") {
 		return "", fmt.Errorf("missing strict planning schema")

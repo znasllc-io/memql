@@ -1,0 +1,196 @@
+// Package computerpermission defines the bounded, versioned permission shared by
+// Nexus, the dispatching replica and Cockpit. It contains no authority source.
+package computerpermission
+
+import (
+	"context"
+	"crypto/sha256"
+	"encoding/hex"
+	"encoding/json"
+	"fmt"
+	"math"
+	"path"
+	"strings"
+
+	"github.com/znasllc-io/memql/core/num"
+)
+
+const Contract = "workerHost.computer_permission"
+const Version = 1
+
+const defaultCommandTimeoutSeconds = 60
+
+// Scope is produced by the server, never copied from a model's approval subject.
+type Scope struct {
+	Version        int      `json:"version"`
+	Kind           string   `json:"kind"`
+	RegistrationID string   `json:"registrationId"`
+	MachineID      string   `json:"machineId"`
+	MachineLabel   string   `json:"machineLabel"`
+	Tool           string   `json:"tool"`
+	Action         string   `json:"action"`
+	Directory      string   `json:"directory,omitempty"`
+	Command        string   `json:"command,omitempty"`
+	CWD            string   `json:"cwd,omitempty"`
+	TimeoutSeconds int      `json:"timeoutSeconds,omitempty"`
+	ArgsHash       string   `json:"argsHash"`
+	AllowedModes   []string `json:"allowedModes"`
+}
+
+type Request struct {
+	OwnerID, AgentID, RunID, Tool, Action string
+	Args                                  map[string]any
+	// MachineID narrows receipt lookup when work selected a fleet target.
+	// It is not authority; Claim still verifies the actual stream enrollment.
+	MachineID string
+}
+
+type Grant struct {
+	ID    string
+	Scope Scope
+}
+
+// Authority re-reads durable receipts. Claim is called only by the replica
+// holding the selected stream, immediately before one dispatch.
+type Authority interface {
+	Find(context.Context, Request) (*Grant, error)
+	Claim(context.Context, string, Request, string, string) (*Scope, error)
+}
+
+func Hash(tool, action string, args map[string]any) (string, error) {
+	b, err := json.Marshal(struct {
+		Tool   string         `json:"tool"`
+		Action string         `json:"action"`
+		Args   map[string]any `json:"args"`
+	}{tool, action, args})
+	if err != nil {
+		return "", err
+	}
+	h := sha256.Sum256(b)
+	return hex.EncodeToString(h[:]), nil
+}
+
+func Parse(v any) (Scope, error) {
+	b, err := json.Marshal(v)
+	if err != nil {
+		return Scope{}, err
+	}
+	var s Scope
+	if err := json.Unmarshal(b, &s); err != nil {
+		return Scope{}, err
+	}
+	return s, s.Validate()
+}
+
+func (s Scope) Map() map[string]any {
+	b, _ := json.Marshal(s)
+	var m map[string]any
+	_ = json.Unmarshal(b, &m)
+	return m
+}
+
+// CleanAbsolute restricts this contract to explicit POSIX paths. Cockpit also
+// proves their real filesystem identity and opens each component without
+// following symlinks, then reads the held descriptor.
+func CleanAbsolute(p string) bool {
+	return strings.HasPrefix(p, "/") && p != "/" && path.Clean(p) == p && !strings.ContainsAny(p, "\x00\\")
+}
+func Within(root, p string) bool {
+	return CleanAbsolute(root) && CleanAbsolute(p) && (p == root || strings.HasPrefix(p, root+"/"))
+}
+func (s Scope) Validate() error {
+	if s.Version != Version || s.RegistrationID == "" || s.MachineID == "" || s.MachineLabel == "" || s.Tool != "workerHost" || len(s.ArgsHash) != 64 {
+		return fmt.Errorf("invalid computer permission identity or version")
+	}
+	if _, err := hex.DecodeString(s.ArgsHash); err != nil {
+		return fmt.Errorf("invalid computer permission arguments")
+	}
+	if len(s.AllowedModes) != 2 || s.AllowedModes[0] != "once" || s.AllowedModes[1] != "always" {
+		return fmt.Errorf("unsupported computer permission modes")
+	}
+	switch s.Kind {
+	case "directory_read":
+		if !CleanAbsolute(s.Directory) || !ReadAction(s.Action) || s.Command != "" || s.CWD != "" || s.TimeoutSeconds != 0 {
+			return fmt.Errorf("directory permission needs an explicit directory and read action")
+		}
+	case "exact_command":
+		if s.Action != "exec" || strings.TrimSpace(s.Command) == "" || !CleanAbsolute(s.CWD) || s.Directory != "" || s.TimeoutSeconds < 1 || s.TimeoutSeconds > 600 {
+			return fmt.Errorf("command permission needs an exact command and explicit working directory")
+		}
+	default:
+		return fmt.Errorf("unsupported computer permission kind")
+	}
+	return nil
+}
+func ReadAction(action string) bool {
+	return action == "fs_read" || action == "fs_list" || action == "fs_stat"
+}
+
+// CommandInput accepts only reviewable command inputs. Environment overrides,
+// stdin and unknown options are refused rather than hidden behind a hash or
+// written as potential secrets into a long-lived approval receipt.
+func CommandInput(args map[string]any) (command, cwd string, seconds int, err error) {
+	for key := range args {
+		if key != "cmd" && key != "cwd" && key != "timeoutSec" {
+			return "", "", 0, fmt.Errorf("exact-command approval supports only cmd, cwd and timeoutSec; remove %s and request the exact supported command, without requesting broader access", key)
+		}
+	}
+	command, _ = args["cmd"].(string)
+	cwd, _ = args["cwd"].(string)
+	seconds = defaultCommandTimeoutSeconds
+	if strings.TrimSpace(command) == "" || !CleanAbsolute(cwd) {
+		return "", "", 0, fmt.Errorf("command permission needs an exact command and explicit working directory")
+	}
+	if value, present := args["timeoutSec"]; present {
+		raw, e := json.Marshal(value)
+		var n float64
+		if e != nil || json.Unmarshal(raw, &n) != nil || n < 1 || n > 600 || math.Trunc(n) != n {
+			return "", "", 0, fmt.Errorf("timeoutSec must be a whole number from 1 to 600")
+		}
+		seconds = num.Float64OrZero(n)
+	}
+	return
+}
+func (s Scope) Matches(req Request, mode string) bool {
+	if req.MachineID != "" && req.MachineID != s.MachineID {
+		return false
+	}
+	if s.Validate() != nil || req.Tool != s.Tool || (mode != "once" && mode != "always") {
+		return false
+	}
+	h, err := Hash(req.Tool, req.Action, req.Args)
+	if err != nil {
+		return false
+	}
+	if s.Kind == "exact_command" {
+		cmd, cwd, timeout, err := CommandInput(req.Args)
+		if err != nil || req.Action != s.Action || cmd != s.Command || cwd != s.CWD || timeout != s.TimeoutSeconds {
+			return false
+		}
+		if h == s.ArgsHash {
+			return true
+		}
+		// Only the optional timeout's two encodings have the same meaning.
+		// CommandInput has rejected every other key and invalid value, and
+		// both the reviewed scope and this invocation resolve to the default.
+		// Keep Hash and dispatch args raw: Cockpit still verifies the exact
+		// bytes sent, and older replicas can only refuse this equivalence.
+		if timeout != defaultCommandTimeoutSeconds {
+			return false
+		}
+		equivalent := map[string]any{"cmd": cmd, "cwd": cwd}
+		if _, explicit := req.Args["timeoutSec"]; !explicit {
+			equivalent["timeoutSec"] = defaultCommandTimeoutSeconds
+		}
+		equivalentHash, err := Hash(req.Tool, req.Action, equivalent)
+		return err == nil && equivalentHash == s.ArgsHash
+	}
+	p, _ := req.Args["path"].(string)
+	if !ReadAction(req.Action) || !Within(s.Directory, p) {
+		return false
+	}
+	if mode == "once" {
+		return req.Action == s.Action && h == s.ArgsHash
+	}
+	return true
+}

@@ -2,7 +2,7 @@ import { useCallback, useMemo, useRef, useState, type DragEvent } from "react";
 import type { LiveSnapshot } from "@znasllc-io/memql-sdk-core/client";
 import { FileUp, ScrollText, Upload } from "lucide-react";
 
-import { Button, Caption, Chip, Head, Notice, RecordRow, listCount, Select } from "../../kit";
+import { Button, Caption, Chip, Field, Head, Input, Notice, RecordRow, listCount, Select } from "../../kit";
 import { formatBytes, formatFreshness } from "../../kit/format";
 import { useNow } from "../../kit/useNow";
 import { LiveList } from "../../live/LiveList";
@@ -52,6 +52,8 @@ export function UploadSection({
   runsByFileId,
   domains,
   train,
+  canEnterDomain,
+  onReview,
   onReseed,
   onAsk,
 }: {
@@ -61,6 +63,8 @@ export function UploadSection({
   runsByFileId: Map<string, AnalysisRun>;
   domains: DomainsFeed;
   train: TrainAct;
+  canEnterDomain: boolean;
+  onReview: () => void;
   onReseed: () => void;
   onAsk?: (tag: string) => void;
 }) {
@@ -242,6 +246,8 @@ export function UploadSection({
             now={now}
             domains={domains}
             train={train}
+            canEnterDomain={canEnterDomain}
+            onReview={onReview}
           />
         )}
         />
@@ -267,6 +273,8 @@ function FileLine({
   now,
   domains,
   train,
+  canEnterDomain,
+  onReview,
 }: {
   file: TrainingFile;
   run: AnalysisRun | undefined;
@@ -274,10 +282,14 @@ function FileLine({
   now: Date;
   domains: DomainsFeed;
   train: TrainAct;
+  canEnterDomain: boolean;
+  onReview: () => void;
 }) {
   const stage = stageOf(file, run);
   const [picking, setPicking] = useState(false);
   const [domainId, setDomainId] = useState("");
+  const [enteringDomain, setEnteringDomain] = useState(false);
+  const [teachingRecorded, setTeachingRecorded] = useState(false);
   const refusal = train.refusals[file.id] ?? "";
   const busy = train.busyFileId === file.id;
 
@@ -314,6 +326,12 @@ function FileLine({
     return named;
   }, [domains.domains, domains.rollups]);
 
+  // The owner may make the first write through libraryTrainFile. This only
+  // offers that existing capability; the engine still authorizes each call.
+  const entering = canEnterDomain && (enteringDomain || options.length === 0);
+  const chosenDomain = domainId.trim();
+  const canTeach = chosenDomain !== "" && (entering || options.some(option => option.id === chosenDomain));
+
   // A domain this cluster no longer names still renders, as its id. An
   // unresolvable lookup is the id, never blank -- the view-kit rule, and the
   // honest one: the file WAS taught to something.
@@ -322,10 +340,14 @@ function FileLine({
     .join(", ");
 
   async function teach() {
-    const accepted = await train.train(file.id, domainId);
+    if (!canTeach || train.busyFileId !== "") return;
+    const accepted = await train.train(file.id, chosenDomain);
     if (accepted) {
       setPicking(false);
       setDomainId("");
+      setEnteringDomain(false);
+      setTeachingRecorded(true);
+      domains.reload();
     }
   }
 
@@ -344,27 +366,26 @@ function FileLine({
           : stage === "trained" && taught !== "" ? `Teaching ${taught}` : undefined}
         stateExtra={tick === "added" ? <span className="os-livelist-tick">new</span> : null}
         actions={(stage === "untrained" || stage === "trained") && !picking ? (
-          <Button onClick={() => setPicking(true)}>{stage === "trained" ? "Teach another" : "Teach a domain"}</Button>
+          <Button onClick={() => { setPicking(true); setEnteringDomain(canEnterDomain && options.length === 0); setTeachingRecorded(false); }}>{stage === "trained" ? "Teach another" : "Teach a domain"}</Button>
         ) : null}
       >
         <span className="os-caption">{formatBytes(file.size)}{passageLine(run)} · {formatFreshness(file.createdAt, now)}</span>
       </RecordRow>
       {/* The teach form and refusals remain visible at narrow widths. */}
       {picking || refusal !== "" ? <div className="os-app-stack">
-        {/* AN EMPTY PICKER IS A DEAD END, so it says what to do instead rather
-            than offering a control with nothing in it. This is the honest state
-            on a cluster whose knowledge domains have never been seeded, and the
-            Domains section is where somebody would go to look. */}
-        {picking && options.length === 0 ? (
+        {picking && options.length === 0 && !canEnterDomain ? (
           <span className="os-caption">
-            This cluster has no knowledge domains yet, so there is nothing to teach into. The Domains
-            section lists what it has.
+            A cluster owner can enter the first knowledge domain.
           </span>
         ) : null}
 
-        {picking && options.length > 0 ? (
-          <span className="os-train-teach">
-            <Select
+        {picking ? <>
+          {entering ? <div className="os-train-domain-entry">
+            <Field label="Knowledge domain">
+              <Input id={`teach-${file.id}`} label={`Knowledge domain to teach from ${file.name || "this file"}`} value={domainId} onChange={setDomainId} onEnter={() => void teach()} disabled={busy} code />
+            </Field>
+            <Caption>Use the exact domain ID from your agent’s skills. New passages will await review.</Caption>
+          </div> : options.length > 0 ? <div className="os-train-teach"><Select
               id={`teach-${file.id}`}
               label={`Knowledge domain to teach from ${file.name || "this file"}`}
               value={domainId}
@@ -376,13 +397,15 @@ function FileLine({
                   {option.name}
                 </option>
               ))}
-            </Select>
-            <Button tone="primary" disabled={busy || domainId === ""} onClick={() => void teach()}>
+            </Select></div> : null}
+          <div className="os-train-teach">
+            {canEnterDomain && options.length > 0 ? <Button tone="quiet" disabled={busy} onClick={() => { setEnteringDomain(!entering); setDomainId(""); }}>{entering ? "Choose a domain" : "Enter a domain"}</Button> : null}
+            <Button disabled={busy} onClick={() => { setPicking(false); setEnteringDomain(false); setDomainId(""); }}>Cancel</Button>
+            {entering || options.length > 0 ? <Button tone="primary" disabled={train.busyFileId !== "" || !canTeach} onClick={() => void teach()}>
               {busy ? "Teaching..." : "Teach"}
-            </Button>
-            <Button onClick={() => setPicking(false)}>Cancel</Button>
-          </span>
-        ) : null}
+            </Button> : null}
+          </div>
+        </> : null}
 
         {/* The refusal belongs on the row that produced it. */}
         {refusal !== "" ? <span className="os-train-plan-error">{refusal}</span> : null}
@@ -393,6 +416,7 @@ function FileLine({
           </span>
         ) : null}
       </div> : null}
+      {teachingRecorded && !picking ? <div className="os-train-teach" role="status"><Caption>Teaching recorded. New passages await review.</Caption><Button onClick={onReview}>Review</Button></div> : null}
     </>
   );
 }

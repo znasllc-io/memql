@@ -4,13 +4,9 @@ package steps
 import (
 	"context"
 	"fmt"
-	"strings"
 	"time"
 
 	"github.com/znasllc-io/memql/component/automations"
-	memoryNodes "github.com/znasllc-io/memql/component/database/memory-nodes"
-	langparser "github.com/znasllc-io/memql/component/language/parser"
-	"github.com/znasllc-io/memql/component/memql"
 )
 
 // formatDuration returns a human-readable duration string in milliseconds.
@@ -18,105 +14,6 @@ import (
 func formatDuration(d time.Duration) string {
 	ms := float64(d.Nanoseconds()) / float64(time.Millisecond)
 	return fmt.Sprintf("%.3fms", ms)
-}
-
-// StepRecordData contains the data for a step execution record.
-type StepRecordData struct {
-	RunId          string  // Execution ID of the parent automation run
-	StepId         string  // Step identifier from the automation definition
-	StepType       string  // Type of step (function, event, action, etc.)
-	Sequence       int     // Execution order
-	Status         string  // success, failed, skipped
-	Query          string  // The resolved query that was executed (for query steps)
-	ResultQuery    string  // Query to retrieve the result
-	ItemCount      int     // Number of items in result
-	Duration       float64 // Duration in milliseconds
-	Error          string  // Error message if failed
-	ParentStepId   string  // For nested steps, the parent step record ID
-	IterationIndex int     // For forEach iterations, the index
-	Topic          string  // For event steps
-	FunctionName   string  // For function steps
-}
-
-// RecordStepExecution inserts a v1:memql:automation:step record and returns the retrieval query.
-// Returns empty string if recording fails (errors are logged but not fatal).
-func RecordStepExecution(ctx context.Context, engine *memql.MemQLEngine, data StepRecordData) string {
-	if engine == nil || memql.InBeforeWrite(ctx) {
-		return ""
-	}
-
-	// Build the payload fields
-	payloadParts := []string{
-		fmt.Sprintf(`runId: %s`, jsonString(data.RunId)),
-		fmt.Sprintf(`stepId: %s`, jsonString(data.StepId)),
-		fmt.Sprintf(`stepType: %s`, jsonString(data.StepType)),
-		fmt.Sprintf(`status: %s`, jsonString(data.Status)),
-	}
-
-	if data.Sequence > 0 {
-		payloadParts = append(payloadParts, fmt.Sprintf(`sequence: %d`, data.Sequence))
-	}
-	if data.Query != "" {
-		payloadParts = append(payloadParts, fmt.Sprintf(`query: %s`, jsonString(data.Query)))
-	}
-	if data.ResultQuery != "" {
-		payloadParts = append(payloadParts, fmt.Sprintf(`resultQuery: %s`, jsonString(data.ResultQuery)))
-	}
-	if data.ItemCount > 0 {
-		payloadParts = append(payloadParts, fmt.Sprintf(`itemCount: %d`, data.ItemCount))
-	}
-	if data.Duration > 0 {
-		payloadParts = append(payloadParts, fmt.Sprintf(`duration: %.2f`, data.Duration))
-	}
-	if data.Error != "" {
-		payloadParts = append(payloadParts, fmt.Sprintf(`error: %s`, jsonString(data.Error)))
-	}
-	if data.ParentStepId != "" {
-		payloadParts = append(payloadParts, fmt.Sprintf(`parentStepId: %s`, jsonString(data.ParentStepId)))
-	}
-	if data.IterationIndex > 0 {
-		payloadParts = append(payloadParts, fmt.Sprintf(`iterationIndex: %d`, data.IterationIndex))
-	}
-	if data.Topic != "" {
-		payloadParts = append(payloadParts, fmt.Sprintf(`topic: %s`, jsonString(data.Topic)))
-	}
-	if data.FunctionName != "" {
-		payloadParts = append(payloadParts, fmt.Sprintf(`functionName: %s`, jsonString(data.FunctionName)))
-	}
-
-	// Build the insert query
-	insertQuery := fmt.Sprintf(`insert("%s", { payload: { %s } })`,
-		memoryNodes.ConceptMemQLAutomationStep, strings.Join(payloadParts, ", "))
-
-	// Execute the insert
-	_, err := engine.Execute(ctx, insertQuery)
-	if err != nil {
-		// Log error but don't fail the step
-		return ""
-	}
-
-	// Return the retrieval query
-	return fmt.Sprintf(`concept==%s&&payload.runId==%s&&payload.stepId==%s`,
-		memoryNodes.ConceptMemQLAutomationStep, jsonString(data.RunId), jsonString(data.StepId))
-}
-
-// jsonString renders a MemQL string literal for the step-execution record's
-// insert.
-//
-// One line, deliberately: it is an ALIAS for langparser.QuoteString, not a
-// second implementation. The body was json.Marshal with HTML escaping left on
-// -- never a live parse defect, since json.Marshal emits exactly the escapes
-// the lexer implements, but a second definition of the escape set sitting in
-// the same package as the step renderer, which DID carry the %q bug. Two
-// definitions is the cost memql#3035 demonstrated; this collapses one of them.
-// memql#3192.
-//
-// The only visible change is that <, > and & now go out raw rather than
-// unicode-escaped: QuoteString turns HTML escaping off, the lexer accepts all
-// three raw, and the parsed value is identical either way. Nothing built here
-// reaches a browser.
-func jsonString(s string) string {
-	return langparser.QuoteString(s)
 }
 
 // Context is an alias for automations.StepContext for convenience.

@@ -5,11 +5,9 @@ import { Monitor } from "lucide-react";
 import { useSession } from "../../../chrome/access";
 import { EmptyState, Notice, useNow } from "../../../kit";
 import { Overview, OverviewBreakdown } from "../../../kit/Overview";
-import { MapControls } from "../../../kit/MapControls";
+import { MapCanvas } from "../../../kit/MapCanvas";
 import { MapHeading } from "../../../kit/MapHeading";
 import { absent, figureOf } from "../../../kit/measure";
-import { usePanZoom } from "../../../kit/usePanZoom";
-import { transformOf } from "../../../kit/viewport";
 import { useLiveView } from "../../../live/liveView";
 import { useMachines } from "../../../live/machines";
 import { isWorkerOnline } from "../online";
@@ -34,26 +32,20 @@ export function FleetOverview({ onOpenMachine }: { onOpenMachine: (id: string) =
     { label: "Reported apps", figure: count(machines.reduce((sum, m) => sum + m.apps.length, 0)) },
   ]}>
     {behind || snapshot?.error ? <Notice tone="warn" sentence="Machine updates are interrupted." next="Showing the last reported connections. Reconnecting automatically." /> : null}
-    {!machines.length && !fresh && !snapshot?.error ? <ContentSkeleton kind="map" label="Loading fleet connections" /> : !machines.length ? <EmptyState icon={Monitor} title={fresh ? "No machines connected" : "Machines unavailable"}>{fresh ? "Add a machine from Machines to see its connection here." : "Reconnect to read this cluster’s machine inventory."}</EmptyState> : <FleetMap machines={machines} now={now} cluster={config.domain || "This cluster"} fresh={fresh} onOpenMachine={onOpenMachine} />}
     {fresh ? <OverviewBreakdown title="Machine availability" segments={[
       { label: "Online", count: online.length, tone: "good" },
       { label: "Offline", count: machines.length - online.length, tone: "quiet" },
     ]} /> : null}
+    {!machines.length && !fresh && !snapshot?.error ? <ContentSkeleton kind="map" label="Loading fleet connections" /> : !machines.length ? <EmptyState icon={Monitor} title={fresh ? "No machines connected" : "Machines unavailable"}>{fresh ? "Add a machine from Machines to see its connection here." : "Reconnect to read this cluster’s machine inventory."}</EmptyState> : <FleetMap machines={machines} now={now} cluster={config.domain || "This cluster"} fresh={fresh} onOpenMachine={onOpenMachine} />}
   </Overview>;
 }
 
 function FleetMap({ machines, now, cluster, fresh, onOpenMachine }: { machines: readonly MachineRow[]; now: Date; cluster: string; fresh: boolean; onOpenMachine: (id: string) => void }) {
   const ordered = useMemo(() => [...machines].sort((a, b) => machineName(a).localeCompare(machineName(b)) || a.id.localeCompare(b.id)), [machines]);
   const height = Math.max(200, ordered.length * 100 + 40);
-  const pan = usePanZoom({ width: 620, height, ready: true, wheelZoom: false, resetToFit: true });
   return <div className="os-deploy-map" data-behind={!fresh || undefined}>
-    <MapHeading title="Connection map">
-      <p>Machines visible to your account in this cluster. A solid line means an active connection with a recent heartbeat. A dashed line means the machine is registered but offline.</p>
-      <p>Activity is the latest reported count of calls on online machines. Other clusters are not included in this cluster’s inventory.</p>
-    </MapHeading>
-    <div className="os-map-frame" ref={pan.frameRef}>
-      <svg className="os-deploy-map-canvas" role="application" aria-label="Fleet connection map" tabIndex={0} {...pan.handlers}>
-        <g data-os-map-view transform={transformOf(pan.view)}>
+    <MapHeading title="Connection map" />
+    <MapCanvas label="Fleet connection map" width={620} height={height} ready behind={!fresh}>
           {ordered.map((machine, index) => {
             const y = (height - ordered.length * 100) / 2 + index * 100;
             const online = fresh && isWorkerOnline(machine, now);
@@ -70,7 +62,7 @@ function FleetMap({ machines, now, cluster, fresh, onOpenMachine }: { machines: 
             const y = (height - ordered.length * 100) / 2 + index * 100;
             const online = fresh && isWorkerOnline(machine, now);
             const state = !fresh ? "Unknown" : online ? "Online" : "Offline";
-            return <g key={machine.id} className="fleet-map-node" transform={`translate(350 ${y})`} role="button" tabIndex={0} aria-label={`Open ${name}, ${state.toLowerCase()}`} onClick={() => { if (!pan.steering()) onOpenMachine(machine.id); }} onKeyDown={event => {
+            return <g key={machine.id} className="fleet-map-node" transform={`translate(350 ${y})`} role="button" tabIndex={0} aria-label={`Open ${name}, ${state.toLowerCase()}`} onClick={() => onOpenMachine(machine.id)} onKeyDown={event => {
               if (event.key === "Enter" || event.key === " ") { event.preventDefault(); event.stopPropagation(); onOpenMachine(machine.id); }
             }}>
               <rect width={246} height={64} rx={9} />
@@ -80,10 +72,7 @@ function FleetMap({ machines, now, cluster, fresh, onOpenMachine }: { machines: 
               <title>{name} · {state}</title>
             </g>;
           })}
-        </g>
-      </svg>
-      <MapControls zoomIn={pan.zoomIn} zoomOut={pan.zoomOut} reset={pan.reset} />
-    </div>
+    </MapCanvas>
   </div>;
 }
 

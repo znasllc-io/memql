@@ -37,6 +37,7 @@ export function LiveList<T>({
   label,
   emptyText,
   emptyContent,
+  errorContent,
 }: {
   /** Null renders the disconnected caption -- never a fake empty list. */
   source: LiveListSource<T> | null;
@@ -45,8 +46,16 @@ export function LiveList<T>({
   fingerprint: (row: T) => string;
   renderRow: (row: T, tick: ArrivalKind | null) => React.ReactNode;
   label: string;
-  emptyText: string;
+  /** The quiet sentence for a settled empty list. Used only when there is no
+   *  `emptyContent`: a caller that draws its own empty state needs neither a
+   *  sentence it never shows nor a placeholder to satisfy the type. */
+  emptyText?: string;
   emptyContent?: React.ReactNode;
+  /** What the list draws when its last read failed, in place of the raw
+   *  engine line -- so a caller that already says what failed (a `Notice`
+   *  with a way to try again) is not read twice. A caller that gives none
+   *  gets the line, and a failure is never silent. */
+  errorContent?: React.ReactNode;
 }) {
   const snapshot = useSyncExternalStore(
     useMemo(() => (source ? source.subscribe.bind(source) : () => () => {}), [source]),
@@ -81,13 +90,14 @@ export function LiveList<T>({
           );
         })}
       </ul>
-      {snapshot.rows.length === 0 && snapshot.state === "live" ? (
-        emptyContent ?? <Caption>{emptyText}</Caption>
+      {snapshot.rows.length === 0 && snapshot.state === "live" && !snapshot.error ? (
+        emptyContent ?? (emptyText ? <Caption>{emptyText}</Caption> : null)
       ) : null}
       {snapshot.state === "seeding" && snapshot.rows.length === 0
         ? <RecordListSkeleton label="Loading from the cluster" />
         : stateLine ? <Caption>{stateLine}</Caption> : null}
-      {snapshot.error ? <p className="os-ask-error">{snapshot.error}</p> : null}
+      {snapshot.truncated ? <Caption>Some records aren’t shown because this list reached its limit.</Caption> : null}
+      {snapshot.error ? (errorContent ?? <p className="os-ask-error">{snapshot.error}</p>) : null}
     </div>
   );
 }

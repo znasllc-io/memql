@@ -144,6 +144,13 @@ func (p *Parser) parseToolDecl(attrs []*ast.Attribute) (*ast.ToolDecl, error) {
 // annotations stop at the next bare identifier (next field's name)
 // or the body's closing brace.
 func (p *Parser) parseToolFieldDecl(toolName string) (*ast.ToolFieldDecl, error) {
+	return p.parseToolFieldDepth(toolName, 0)
+}
+
+func (p *Parser) parseToolFieldDepth(toolName string, depth int) (*ast.ToolFieldDecl, error) {
+	if depth > 8 {
+		return nil, newParseErrorf(&p.current, "tool %q: object nesting exceeds 8", toolName)
+	}
 	if !p.check(TokenIdentifier) {
 		return nil, newParseErrorf(&p.current, "tool %q: expected field name, got %q", toolName, p.current.Literal)
 	}
@@ -209,6 +216,31 @@ func (p *Parser) parseToolFieldDecl(toolName string) (*ast.ToolFieldDecl, error)
 		}
 	}
 
+	if p.check(TokenBraceOpen) {
+		if field.Type != "object" {
+			return nil, newParseErrorf(&p.current, "tool %q field %q: only object fields may declare properties", toolName, field.Name)
+		}
+		p.advance()
+		field.Fields = []ast.ToolFieldDecl{}
+		seen := map[string]bool{}
+		for !p.check(TokenBraceClose) && !p.check(TokenEOF) {
+			child, err := p.parseToolFieldDepth(toolName+"."+field.Name, depth+1)
+			if err != nil {
+				return nil, err
+			}
+			if child.AutoInjected {
+				return nil, newParseErrorf(&p.current, "tool %q: nested fields cannot be autoInjected", toolName)
+			}
+			if seen[child.Name] {
+				return nil, newParseErrorf(&p.current, "tool %q: duplicate object field %q", toolName, child.Name)
+			}
+			seen[child.Name] = true
+			field.Fields = append(field.Fields, *child)
+		}
+		if err := p.expect(TokenBraceClose); err != nil {
+			return nil, err
+		}
+	}
 	return field, nil
 }
 

@@ -19,7 +19,9 @@ import (
 	"github.com/znasllc-io/memql/component/auth"
 	"github.com/znasllc-io/memql/component/memql"
 	"github.com/znasllc-io/memql/component/server/fileversion"
+	"github.com/znasllc-io/memql/component/server/libraryfile"
 	"github.com/znasllc-io/memql/core/id"
+	"github.com/znasllc-io/memql/core/librarykey"
 	"github.com/znasllc-io/memql/core/num"
 )
 
@@ -281,11 +283,15 @@ type LibraryFileRow struct {
 	BackupPath     string
 	CreatedAt      time.Time
 	ID             string
-	Name           string
-	MimeType       string
-	Size           int
-	BlobUrl        string
-	Status         string
+	// OwnerUserId is who the row belongs to, as stored (the canonical user
+	// id). The content route holds BlobUrl to this owner's own
+	// library/{owner}/ prefix before it reads a byte.
+	OwnerUserId string
+	Name        string
+	MimeType    string
+	Size        int
+	BlobUrl     string
+	Status      string
 	// Sha256 is blank when nothing has measured it yet (a chunked upload
 	// whose analysis pass has not streamed the blob). Never "no hash exists".
 	Sha256  string
@@ -352,13 +358,16 @@ type LibraryExportBody struct {
 // BundlePublisher): component/server is a tiered module with its own go.mod
 // (memql#3228), and a test must be able to drive the handler without standing
 // up an engine. EngineLibraryStore below is the production implementation, and
-// every one of its calls runs under the CALLER's actor -- none of these five
-// DSL constructs is @serverOnly, and all of them are owner-gated, so per-row
-// authorization is what decides the answer rather than anything in Go.
+// every one of its calls runs under the CALLER's actor and is owner-gated, so
+// per-row authorization is what decides the answer rather than anything in Go.
+// The writes that carry a storage path -- CreateFile and SupersedeFile -- are
+// @serverOnly, and each reaches its constructs through the one package that
+// holds that stamp (component/server/libraryfile, component/server/fileversion).
 type LibraryStore interface {
 	// CreateFile runs createLibraryFile. The mutation stamps ownerUserId from
 	// actor.userId and status from nothing at all, so the row is the caller's
-	// by construction.
+	// by construction; it is @serverOnly because blobUrl is a storage path,
+	// and BlobUrl must sit under the caller's own library/{owner}/ prefix.
 	CreateFile(ctx context.Context, p LibraryFileCreateParams) error
 	// SetFileStatus runs setLibraryFileStatus (a read-merge; absent fields are
 	// not written).
@@ -1399,6 +1408,9 @@ func (h *ArtifactHandler) serveFileBytes(w http.ResponseWriter, r *http.Request,
 		http.Error(w, "not found", http.StatusNotFound)
 		return
 	}
+	// The FILE's owner, held for the key check below: a version row is the same
+	// person's, and is judged against them.
+	owner := row.OwnerUserId
 
 	// An OLDER version: resolved through the owner-gated version read, so a
 	// version of a file the caller may not see does not resolve -- and the
@@ -1438,6 +1450,20 @@ func (h *ArtifactHandler) serveFileBytes(w http.ResponseWriter, r *http.Request,
 			BlobUrl:  version.BlobUrl,
 			Status:   libraryStatusReady,
 		}
+	}
+	// THE KEY HAS TO BE THE OWNER'S, judged before a byte is read. Row
+	// admission has already said the caller may see this row; it says
+	// nothing about which object the node's storage credential opens next.
+	// createLibraryFile is @serverOnly, so a client cannot write a row naming
+	// somebody else's object any more -- but a row written before that, or a
+	// version frozen from one, still could, and serving it would hand over
+	// another person's bytes with every gate green. Same 404 as every other
+	// refusal here; the log line is the only place the reason goes.
+	if err := librarykey.Check(row.BlobUrl, owner, h.bucket); err != nil {
+		h.logger.Error("library file row names a blob key outside its owner's library; refusing to read it",
+			"error", err, "artifactId", artifact.ID, "fileId", row.ID, "ownerUserId", owner)
+		http.Error(w, "not found", http.StatusNotFound)
+		return
 	}
 	// The constant-memory path (memql#4782, design C5): stream, with
 	// Content-Length from the ROW, honouring a single-range Range. The
@@ -1734,12 +1760,14 @@ func isRequestTooLarge(err error) bool {
 // memql#4340 declared, through the same MemQLExecutor seam
 // EngineAttachmentStore uses.
 //
-// EVERY CALL RUNS UNDER THE CALLER'S ACTOR. None of these constructs is
-// @serverOnly and all of them are owner-gated over concepts that declare
+// EVERY CALL RUNS UNDER THE CALLER'S ACTOR, over concepts that declare
 // @rowAuthz(owner="ownerUserId", clusterOwner), so authorization is the
 // engine's answer and not something this type re-implements. That is why the
 // download path can treat an empty result as 404 without a separate ownership
-// probe: an empty result IS the refusal.
+// probe: an empty result IS the refusal. The two writes that carry a storage
+// path are @serverOnly and go through the packages that hold their stamps
+// (libraryfile for CreateFile, fileversion for SupersedeFile); the actor is
+// still the caller's.
 type EngineLibraryStore struct {
 	engine      MemQLExecutor
 	versionGate func(context.Context, string) (func(), error)
@@ -1748,12 +1776,21 @@ type EngineLibraryStore struct {
 var _ LibraryStore = (*EngineLibraryStore)(nil)
 
 // NewEngineLibraryStore creates a LibraryStore backed by a MemQL engine.
-func NewEngineLibraryStore(engine MemQLExecutor, database ...func() *sql.DB) *EngineLibraryStore {
+//
+// gateDB resolves the pool the file-version write gate runs on
+// (database.Database.GateDB, memql#6022): never the request pool the engine
+// works on. Without one the gate refuses, saying which wiring is missing.
+func NewEngineLibraryStore(engine MemQLExecutor, gateDB ...func() *sql.DB) *EngineLibraryStore {
+	var resolve func() *sql.DB
+	if len(gateDB) > 0 {
+		resolve = gateDB[0]
+	}
 	return &EngineLibraryStore{engine: engine, versionGate: func(ctx context.Context, key string) (func(), error) {
-		if len(database) == 0 || database[0] == nil {
-			return nil, fmt.Errorf("file version coordination is unavailable")
+		db, err := memql.ResolveWriteGatePool(resolve, "library file versions", "pass database.Database.GateDB to server.NewEngineLibraryStore (a test or a tool opens one with database.NewGatePool)")
+		if err != nil {
+			return nil, err
 		}
-		return memql.AcquireWriteGate(ctx, database[0](), "library-file:"+memql.BareShortId(key))
+		return memql.AcquireWriteGate(ctx, db, "library-file:"+memql.BareShortId(key))
 	}}
 }
 
@@ -1772,7 +1809,10 @@ func (s *EngineLibraryStore) exec(ctx context.Context, fn string, args map[strin
 	return res, nil
 }
 
-// CreateFile runs createLibraryFile.
+// CreateFile runs createLibraryFile, through component/server/libraryfile:
+// the mutation is @serverOnly because blobUrl is a storage path the content
+// route streams, and that package holds the one stamp, refusing a key outside
+// the caller's own library/{owner}/ prefix before applying it.
 //
 // Only the fields the mutation DECLARES are passed. An argument it does not
 // declare is not refused -- rejectUnknownArgs is gated behind the MCP boundary
@@ -1808,8 +1848,10 @@ func (s *EngineLibraryStore) CreateFile(ctx context.Context, p LibraryFileCreate
 		args["backupWorkerId"] = p.UploadedFromWorkerId
 		args["backupPath"] = v
 	}
-	_, err := s.exec(ctx, "createLibraryFile", args)
-	return err
+	if s == nil || s.engine == nil {
+		return fmt.Errorf("engine not configured")
+	}
+	return libraryfile.NewStore(s.engine).Create(ctx, args)
 }
 
 // libraryWorkerConcept prefixes a canonical worker-registration node id, for
@@ -1871,7 +1913,7 @@ func (s *EngineLibraryStore) OwnedWorker(ctx context.Context, workerId string) (
 	want := strings.TrimPrefix(workerId, libraryWorkerConcept+":")
 	for _, r := range memql.MaterializeRows(res) {
 		got := strings.TrimPrefix(rowString(r, "id"), libraryWorkerConcept+":")
-		if got == "" || got != want {
+		if got == "" || got != want || rowString(r, "revokedAt") != "" {
 			continue
 		}
 		return &LibraryWorkerRef{
@@ -2061,6 +2103,7 @@ func libraryFileRowFrom(r map[string]any) *LibraryFileRow {
 		ImageProvenance: provenance,
 		CreatedAt:       createdAt,
 		ID:              rowString(r, "id"),
+		OwnerUserId:     rowString(r, "ownerUserId"),
 		Name:            rowString(r, "name"),
 		MimeType:        rowString(r, "mimeType"),
 		Size:            rowInt(r, "size"),

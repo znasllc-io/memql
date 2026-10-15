@@ -3,8 +3,7 @@ import { useCallback, useMemo } from "react";
 import type { LiveState } from "@znasllc-io/memql-sdk-core/client";
 
 import { Caption, formatMoment } from "../../kit";
-import { transformOf } from "../../kit/viewport";
-import { usePanZoom } from "../../kit/usePanZoom";
+import { MapCanvas } from "../../kit/MapCanvas";
 import { layout, type LayoutNode, type LayoutResult } from "../../nexus/scene/layout";
 import { goalProgress } from "../../nexus/scene/scene";
 import type { GoalWorld } from "../../nexus/scene/world";
@@ -177,17 +176,6 @@ export function BeaconMap({
   const width = (model.bounds.maxX - model.bounds.minX) * UNIT + PAD * 2;
   const height = (model.bounds.maxY - model.bounds.minY) * UNIT + PAD * 2;
 
-  const { view, frameRef, handlers, steering } = usePanZoom({
-    width,
-    height,
-    ready: model.nodes.size > 1,
-    // FILLS THE CANVAS RATHER THAN SITTING IN THE MIDDLE OF IT. A short run is
-    // a thin road with four stops, and at scale 1 it drew as a small band with
-    // empty canvas all round -- which reads as a picture that failed to load.
-    // Capped, so a one-step run does not become a diagram of one circle.
-    maxFit: 1.8,
-  });
-
   // A DEGRADED FEED MUST NOT READ AS A LIVE RUN. A map is a picture of now;
   // when the subscription is behind, the picture is of some earlier now, and
   // the only honest thing to do is say so and dim it.
@@ -213,7 +201,6 @@ export function BeaconMap({
 
   const activate = useCallback(
     (node: LayoutNode) => {
-      if (steering()) return;
       if (node.kind === "cluster") return onToggleColumn(node.depth);
       if (node.kind === "fold") return onToggleFold(node.depth);
       if (node.kind === "approval") return onOpenApproval(node.rowId);
@@ -227,7 +214,7 @@ export function BeaconMap({
       // Files.
       if (node.stepKey !== "") return onSelectStep(node.stepKey);
     },
-    [onOpenApproval, onSelectStep, onToggleColumn, onToggleFold, steering],
+    [onOpenApproval, onSelectStep, onToggleColumn, onToggleFold],
   );
 
   if (world.goal === null) {
@@ -242,15 +229,16 @@ export function BeaconMap({
   const road = model.road;
 
   return (
-    <div className="os-nexus-map" ref={frameRef} data-behind={behind || undefined}>
-      <svg
-        className="os-nexus-map-canvas"
-        role="application"
-        aria-label={mapDescription(world, progress, at)}
-        tabIndex={0}
-        {...handlers}
+    <div className="os-nexus-map" data-behind={behind || undefined}>
+      <MapCanvas
+        label={mapDescription(world, progress, at)}
+        canvasClassName="os-nexus-map-canvas"
+        width={width}
+        height={height}
+        ready={model.nodes.size > 0}
+        maxFit={1.8}
+        behind={behind}
       >
-        <g data-os-map-view transform={transformOf(view)}>
           {/* THE ROAD, drawn segment by segment so each carries its own
               weight and its own brightness. One path with a dash pattern
               could not: the weight changes along it, and a stretch that has
@@ -338,8 +326,7 @@ export function BeaconMap({
               />
             ),
           )}
-        </g>
-      </svg>
+      </MapCanvas>
 
       {/* The caption is the map's own sentence about itself, and it is the
           only place a rewound map says so -- a picture of an earlier moment
@@ -583,7 +570,7 @@ function describe(node: LayoutNode): string {
 function legend(progress: { completed: number; total: number; compiling: boolean }): string {
   if (progress.compiling) return "Working out how to do this. The map fills in as steps appear.";
   if (progress.total === 0) return "No steps yet.";
-  return "Thick road is where the machine had to think. Drag to pan, scroll to zoom.";
+  return "Thick road is where the machine had to think.";
 }
 
 function mapDescription(

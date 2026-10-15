@@ -211,6 +211,9 @@ func routedByChoice(req airoute.ResolveRequest) bool {
 // override names (see the file comment for why that one wins).
 func ApplyRunRouting(ctx context.Context, req airoute.ResolveRequest) (airoute.ResolveRequest, error) {
 	rc, ok := common.RunFromContext(ctx)
+	if ok && rc.Routing.NoPaidProviders {
+		req.NoPaidProviders = true
+	}
 	if !ok || rc.Routing.IsZero() || !routedByChoice(req) {
 		return req, nil
 	}

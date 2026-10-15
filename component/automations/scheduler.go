@@ -653,7 +653,8 @@ func (s *Scheduler) subscribeToEventTrigger(automation *Automation) error {
 			}
 		}
 
-		s.logInfo("event trigger fired",
+		// 2026-10-11 idle-instance log volume (71,105 duplicate-prevented warnings in six hours, about a million log lines a day in total): a per-event fire is Debug.
+		s.logDebug("event trigger fired",
 			"automation", a.Name,
 			"topic", event.Topic,
 		)
@@ -753,7 +754,20 @@ func (s *Scheduler) executeAutomation(automation *Automation, triggeredBy string
 	if execution.ChainHead != "" {
 		logArgs = append(logArgs, "chainHead", execution.ChainHead[:16]+"...")
 	}
-	s.logInfo("automation execution completed", logArgs...)
+	// 2026-10-11 idle-instance log volume (71,105 duplicate-prevented warnings in six hours, about a million log lines a day in total): a completed or skipped run is Debug; every other status stays Info.
+	if completionLogsAtDebug(execution.Status) {
+		s.logDebug("automation execution completed", logArgs...)
+	} else {
+		s.logInfo("automation execution completed", logArgs...)
+	}
+}
+
+// completionLogsAtDebug reports whether the completion line of a run that ended
+// with status is Debug. Completed is the normal outcome. Skipped is a refusal the
+// executor made by design (a duplicate, a mode, budget, args or precondition
+// refusal). Every other status, failures and cancellations included, stays Info.
+func completionLogsAtDebug(status string) bool {
+	return status == "completed" || status == "skipped"
 }
 
 // Logging helpers - component is already set by common.NewLogger
@@ -787,4 +801,17 @@ func (s *Scheduler) logError(msg string, args ...any) {
 func formatDurationMs(d time.Duration) string {
 	ms := float64(d.Nanoseconds()) / float64(time.Millisecond)
 	return fmt.Sprintf("%.3fms", ms)
+}
+
+// ResolveAutomation returns only the deployed definition used for invocation.
+func (s *Scheduler) ResolveAutomation(_ context.Context, name string) (*Automation, error) {
+	a := s.LookupAutomation(name)
+	if a == nil {
+		return nil, fmt.Errorf("automation %q not found", name)
+	}
+	return a, nil
+}
+
+func (s *Scheduler) EnterAutomationInvocation(ctx context.Context, _ string) (context.Context, error) {
+	return ctx, nil
 }

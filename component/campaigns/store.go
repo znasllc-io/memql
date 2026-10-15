@@ -94,6 +94,7 @@ func NewStore(engine Engine) *Store { return &Store{engine: engine} }
 
 // SendJob is one row of v1:campaigns:sendJob.
 type SendJob struct {
+	CreatedAt           time.Time
 	TemplateSnapshot    *Template
 	ID                  string
 	CampaignID          string
@@ -145,6 +146,7 @@ func (j SendJob) Progress() int { return j.SentCount + j.SkippedCount + j.Failed
 
 // Campaign is the subset of v1:campaigns:campaign the sender reads.
 type Campaign struct {
+	CreatedAt            time.Time
 	TestSourceCampaignID string
 	ID                   string
 	OwnerUserID          string
@@ -206,6 +208,7 @@ func (s SenderIdentity) Disabled() bool { return s.Status == "disabled" }
 
 // Template is the authored content.
 type Template struct {
+	Name      string `json:"name"`
 	AccountID string `json:"accountId"`
 	ID        string `json:"id"`
 	Subject   string `json:"subject"`
@@ -213,12 +216,22 @@ type Template struct {
 	HTMLBody  string `json:"htmlBody"`
 	Status    string `json:"status"`
 	Revision  string `json:"revision"`
+
+	// ExpectsHTML says the template was written to have an HTML part: it is a
+	// layout email, or custom HTML. Its HTMLBody is then empty only when it was
+	// too large to send, which a draft stores without HTML. A template saved
+	// before documents, and a text email written as a document, expect none and
+	// are plain text by design. It is read from the stored row and never
+	// written into a send job's copy of the template.
+	ExpectsHTML bool `json:"-"`
 }
 
 // Recipient is one address in the audience roster.
 type Recipient struct {
-	AccountID string
-	ID        string
+	JoinedAt, ConfirmedAt time.Time
+	AudienceID            string
+	AccountID             string
+	ID                    string
 	// CanonicalID is the stored `v1:campaigns:recipient:<short>` form. Kept
 	// alongside the bare id because the ledger page read compares a LIST of
 	// recipient ids, and the engine's relationship-canonicalizing pre-walk
@@ -324,6 +337,7 @@ func (s *Store) CampaignByID(ctx context.Context, campaignID string) (Campaign, 
 	}
 	r := rows[0]
 	return Campaign{
+		CreatedAt:            templateTime(r["createdAt"]),
 		TestSourceCampaignID: bare(str(r, "testSourceCampaignId")),
 		ID:                   bare(str(r, "id")),
 		OwnerUserID:          bare(str(r, "ownerUserId")),
@@ -439,13 +453,38 @@ func (s *Store) TemplateByID(ctx context.Context, templateID string) (Template, 
 	r := rows[0]
 	return Template{
 		Revision:  templateTime(r["createdAt"]).Format(time.RFC3339Nano),
+		Name:      str(r, "name"),
 		AccountID: bare(str(r, "accountId")),
 		ID:        bare(str(r, "id")),
 		Subject:   str(r, "subject"),
 		TextBody:  str(r, "textBody"),
 		HTMLBody:  str(r, "htmlBody"),
 		Status:    str(r, "status"),
+
+		ExpectsHTML: templateExpectsHTML(r),
 	}, true, nil
+}
+
+// lacksItsHTML says that the template was written to have an HTML part and has
+// none: a draft too large to send. Nothing that builds a message from it should
+// go on as if it were plain text.
+func (t Template) lacksItsHTML() bool {
+	return t.ExpectsHTML && strings.TrimSpace(t.HTMLBody) == ""
+}
+
+// templateExpectsHTML says whether a stored template was written to have an
+// HTML part: a layout is named, or its document is a layout email (it has
+// blocks) or custom HTML (it carries some). A template with neither is plain
+// text, however it was saved.
+func templateExpectsHTML(row map[string]any) bool {
+	if str(row, "layoutId") != "" {
+		return true
+	}
+	document, _ := row["document"].(map[string]any)
+	if _, layout := document["blocks"]; layout {
+		return true
+	}
+	return strings.TrimSpace(str(document, "htmlBody")) != ""
 }
 
 // RosterPage reads ONE PAGE of the audience, suppressed members included --
@@ -478,7 +517,9 @@ func (s *Store) RosterPage(ctx context.Context, audienceID, cursor string) ([]Re
 func recipientFromRow(r map[string]any) Recipient {
 	canonical := str(r, "id")
 	return Recipient{
-		AccountID:          bare(str(r, "accountId")),
+		AccountID:  bare(str(r, "accountId")),
+		AudienceID: bare(str(r, "audienceId")),
+		JoinedAt:   templateTime(r["joinedAt"]), ConfirmedAt: templateTime(r["confirmedAt"]),
 		ID:                 bare(canonical),
 		CanonicalID:        canonical,
 		Email:              str(r, "email"),
@@ -491,7 +532,9 @@ func recipientFromRow(r map[string]any) Recipient {
 // Roster reads the whole audience by walking every page. OWNED tier.
 //
 // Retained for the callers that genuinely want the set rather than a batch:
-// the unsubscribe endpoint resolving one recipient, and tests. THE SEND PATH
+// the recipient import, which de-duplicates a whole file against the whole
+// audience, and tests. A caller that wants ONE member by address does not
+// belong here -- that is RecipientInAudienceByDigest (memql#6022). THE SEND PATH
 // DOES NOT USE IT -- it walks RosterPage, because materializing a
 // hundred-thousand-address audience once per batch is the shape memql#3460
 // removed. maxRows bounds it so "the whole audience" cannot become an
@@ -525,28 +568,62 @@ const rosterWalkCap = 100000
 // the memql#3460 lesson in one line: measuring a bounded page and calling it
 // a total is how the 5000 ceiling came to be load-bearing.
 func (s *Store) RosterSize(ctx context.Context, audienceID string) (int, error) {
-	return s.count(ctx, call("query", "audienceRosterSize", arg{"audienceId", audienceID}))
+	n, bounded, err := s.countValue(ctx, call("query", "audienceRosterSize", arg{"audienceId", audienceID}))
+	if err != nil || !bounded {
+		return n, err
+	}
+	// A bounded count cannot authorize a whole-audience send or capacity write.
+	// Walk fresh cursor pages to an exact cardinality rather than materializing it.
+	total, cursor := 0, ""
+	seen := map[string]bool{}
+	for {
+		page, next, err := s.RosterPage(memql.ContextWithFreshRead(ctx), audienceID, cursor)
+		if err != nil {
+			return 0, err
+		}
+		total += len(page)
+		if next == "" {
+			return total, nil
+		}
+		if seen[next] {
+			return 0, fmt.Errorf("audience count pagination repeated a cursor")
+		}
+		seen[next] = true
+		cursor = next
+	}
+
 }
 
 // count issues a `count` query and lifts the aggregate off the result.
 //
-// Every stats bucket that CAN go through here does, and the reason is the
-// memql#3460 lesson generalized: a count is exact at any audience size, while
-// the length of a bounded read is a truncation wearing a number's clothes.
+// Every stats bucket that CAN go through here does. The engine marks a count
+// as atLeast when its source reaches the read window; callers retain that
+// completeness signal rather than treating a bounded result as exact.
 // The portal counted a capped page of delivery rows client-side and
 // under-reported every campaign past the bound, silently, which is what
 // campaignStats replaces.
+type countObservationKey struct{}
+type countObservation struct{ bounded map[string]bool }
+
 func (s *Store) count(ctx context.Context, q string) (int, error) {
+	n, _, err := s.countValue(ctx, q)
+	return n, err
+}
+func (s *Store) countValue(ctx context.Context, q string) (int, bool, error) {
 	res, err := s.engine.Execute(ctx, q)
 	if err != nil {
-		return 0, fmt.Errorf("campaigns: %s: %w", firstWords(q), err)
+		return 0, false, fmt.Errorf("campaigns: %s: %w", firstWords(q), err)
 	}
 	for _, row := range memql.MaterializeRows(res) {
 		if _, ok := row["count"]; ok {
-			return integer(row, "count"), nil
+			bounded, _ := row["atLeast"].(bool)
+			if observation, ok := ctx.Value(countObservationKey{}).(*countObservation); ok {
+				observation.bounded[q] = bounded
+			}
+			return integer(row, "count"), bounded, nil
 		}
 	}
-	return 0, nil
+	return 0, false, fmt.Errorf("campaigns: %s returned no count", firstWords(q))
 }
 
 // DeliveryCountByStatus is the exact number of this campaign's deliveries in
@@ -758,6 +835,7 @@ func (s *Store) EnqueueSend(ctx context.Context, job SendJob) error {
 // requests -- `updateSendJob` accepts every field it is handed, so a
 // zero-valued struct would blank the counters on every progress stamp.
 type SendJobPatch struct {
+	VersionTime    *time.Time
 	Status         *string
 	RecipientCount *int
 	SentCount      *int
@@ -777,6 +855,9 @@ type SendJobPatch struct {
 // UpdateJob stamps a patch onto a send job. clusterOwner-tier.
 func (s *Store) UpdateJob(ctx context.Context, sendJobID string, patch SendJobPatch) error {
 	args := []arg{{"sendJobId", sendJobID}}
+	if patch.VersionTime != nil {
+		args = append(args, arg{"versionTime", patch.VersionTime.UTC().Format(time.RFC3339Nano)})
+	}
 	args = appendStr(args, "status", patch.Status)
 	args = appendInt(args, "recipientCount", patch.RecipientCount)
 	args = appendInt(args, "sentCount", patch.SentCount)
@@ -793,15 +874,17 @@ func (s *Store) UpdateJob(ctx context.Context, sendJobID string, patch SendJobPa
 
 // Delivery is one per-recipient outcome to record.
 type Delivery struct {
-	CampaignID    string
-	RecipientID   string
-	Email         string
-	Status        string
-	SkipReason    string
-	LastError     string
-	SentAt        time.Time
-	Attempts      int
-	NextAttemptAt time.Time
+	VersionTime             *time.Time
+	ProviderCountersPending bool
+	CampaignID              string
+	RecipientID             string
+	Email                   string
+	Status                  string
+	SkipReason              string
+	LastError               string
+	SentAt                  time.Time
+	Attempts                int
+	NextAttemptAt           time.Time
 
 	// AccountID is the client this row is for, copied from its PARENT at
 	// write (epic memql#5165, section J). Denormalized rather than joined
@@ -825,6 +908,18 @@ type Delivery struct {
 	// until the concept gained the field -- meant the answer existed for the
 	// length of one HTTP response.
 	EmailRuleID string
+
+	// RequestID, TemplateID and SenderIdentityID describe a SINGLE send (memql#6022,
+	// F7), and are EMPTY on a campaign delivery, whose template and sender are its
+	// campaign's. RequestID is the stable request the message was sent under, and it
+	// is the ledger key of a send with no campaign: the row's id derives from
+	// (RequestID, RecipientID), so each message to a person has a row of its own
+	// (singleDeliveryRowID). TemplateID and SenderIdentityID say what the message
+	// was and who it went out as, which the rule or journey that sent it may no
+	// longer say once it has been edited. Each is rendered only when set.
+	RequestID        string
+	TemplateID       string
+	SenderIdentityID string
 }
 
 // RecordDelivery writes the ledger row. OWNED tier: issue under the
@@ -838,6 +933,12 @@ func (s *Store) RecordDelivery(ctx context.Context, d Delivery) error {
 		{"status", d.Status},
 		{"attempts", d.Attempts},
 	}
+	if d.VersionTime != nil {
+		args = append(args, arg{"versionTime", d.VersionTime.UTC().Format(time.RFC3339Nano)})
+	}
+	if d.ProviderCountersPending {
+		args = append(args, arg{"providerCountersPending", true})
+	}
 	if d.CampaignID != "" {
 		args = append(args, arg{"campaignId", d.CampaignID})
 	}
@@ -846,6 +947,15 @@ func (s *Store) RecordDelivery(ctx context.Context, d Delivery) error {
 	}
 	if d.EmailRuleID != "" {
 		args = append(args, arg{"emailRuleId", d.EmailRuleID})
+	}
+	if d.RequestID != "" {
+		args = append(args, arg{"requestId", d.RequestID})
+	}
+	if d.TemplateID != "" {
+		args = append(args, arg{"templateId", d.TemplateID})
+	}
+	if d.SenderIdentityID != "" {
+		args = append(args, arg{"senderIdentityId", d.SenderIdentityID})
 	}
 	if d.LastError != "" {
 		args = append(args, arg{"lastError", truncateError(d.LastError)})
@@ -864,6 +974,7 @@ func (s *Store) RecordDelivery(ctx context.Context, d Delivery) error {
 
 // CampaignProgress is the counter set stamped onto the campaign row.
 type CampaignProgress struct {
+	VersionTime    *time.Time
 	Status         *string
 	RecipientCount *int
 	SentCount      *int
@@ -887,6 +998,9 @@ type CampaignProgress struct {
 // tier: campaign owner's identity.
 func (s *Store) UpdateCampaignProgress(ctx context.Context, campaignID string, p CampaignProgress) error {
 	args := []arg{{"campaignId", campaignID}}
+	if p.VersionTime != nil {
+		args = append(args, arg{"versionTime", p.VersionTime.UTC().Format(time.RFC3339Nano)})
+	}
 	args = appendStr(args, "status", p.Status)
 	args = appendInt(args, "recipientCount", p.RecipientCount)
 	args = appendInt(args, "sentCount", p.SentCount)
@@ -957,11 +1071,12 @@ func (s *Store) SetRecipientSubscription(ctx context.Context, recipientID, statu
 // more often than it is an identifier -- and a bare key there is a parse
 // error at call time, which is the failure mode a fake-engine test suite
 // cannot see (memql#3035's shape).
-func (s *Store) AddRecipient(ctx context.Context, recipientID, audienceID, email, displayName, source, accountID string, fields map[string]string) error {
+func (s *Store) AddRecipient(ctx context.Context, recipientID, audienceID, email, displayName, source, accountID, status string, fields map[string]string) error {
 	args := []arg{
 		{"recipientId", recipientID},
 		{"audienceId", audienceID},
 		{"email", email},
+		{"subscriptionStatus", status},
 	}
 	if displayName != "" {
 		args = append(args, arg{"displayName", displayName})
@@ -1061,12 +1176,15 @@ var consentMutations = map[string]string{
 // LibraryFileRef is what the CSV import needs off the Library: where the
 // bytes are and what the row says they are.
 type LibraryFileRef struct {
-	FileID   string
-	Name     string
-	MimeType string
-	Size     int
-	BlobURL  string
-	Archived bool
+	FileID string
+	// OwnerUserID is who the row belongs to. The import holds BlobURL to this
+	// owner's own library/{owner}/ prefix before it reads a byte.
+	OwnerUserID string
+	Name        string
+	MimeType    string
+	Size        int
+	BlobURL     string
+	Archived    bool
 }
 
 // LibraryFileForArtifact resolves a Library artifact id to its backing file
@@ -1116,12 +1234,13 @@ func (s *Store) LibraryFileForArtifact(ctx context.Context, artifactID string) (
 	}
 	f := fileRows[0]
 	return LibraryFileRef{
-		FileID:   bare(str(f, "id")),
-		Name:     str(f, "name"),
-		MimeType: str(f, "mimeType"),
-		Size:     integer(f, "size"),
-		BlobURL:  str(f, "blobUrl"),
-		Archived: boolean(f, "archived"),
+		FileID:      bare(str(f, "id")),
+		OwnerUserID: str(f, "ownerUserId"),
+		Name:        str(f, "name"),
+		MimeType:    str(f, "mimeType"),
+		Size:        integer(f, "size"),
+		BlobURL:     str(f, "blobUrl"),
+		Archived:    boolean(f, "archived"),
 	}, "", nil
 }
 
@@ -1213,6 +1332,70 @@ func (s *Store) RecipientByID(ctx context.Context, recipientID string) (Recipien
 		return Recipient{}, false, err
 	}
 	return recipientFromRow(rows[0]), true, nil
+}
+
+// RecipientsInAudienceByDigest returns the memberships of one audience that
+// carry the digest of one address (EmailDigest, which addRecipient stamps on
+// every recipient it writes as emailDigest), oldest first and in ANY
+// subscription state. OWNED tier: organization-authorized, like every read of a
+// recipient.
+//
+// EVERY match comes back, not the first. A mailbox can hold more than one row (a
+// manual add beside an earlier row, a race), one of them can have opted out by
+// hand while another has not, and a caller that looked at one row would act for
+// the mailbox on the strength of the wrong one. A form refuses when ANY of them
+// is not subscribed (memql#6022).
+//
+// The digest is a KEY, not proof: a raw write can set a digest that is not the
+// digest of the row's own address, so a caller compares each row's address
+// before it believes the match. MailboxMembers does.
+//
+// Rows that carry no digest are checked by RecipientsWithoutDigestInAudience.
+// A full page returns ErrMailboxUndecidable: an opted-out duplicate may follow
+// it. The page bounds the result, not the number of rows the planner examines.
+//
+// A digest of "" matches NOTHING and is not sent: EmailDigest answers "" for an
+// address that cannot be a mailbox, and as a filter value "" would select every
+// row that has no digest at all.
+func (s *Store) RecipientsInAudienceByDigest(ctx context.Context, audienceID, digest string) ([]Recipient, error) {
+	if digest == "" {
+		return nil, nil
+	}
+	rows, err := s.rows(ctx, call("query", "recipientInAudienceByDigest", arg{"audienceId", audienceID}, arg{"emailDigest", digest}))
+	if err != nil {
+		return nil, err
+	}
+	// A full page can hide an opted-out duplicate. This read also runs under
+	// the signup lock, so refuse an incomplete answer instead of walking more
+	// pages while holding the lock.
+	if len(rows) >= digestWindow {
+		return nil, fmt.Errorf("%w: the mailbox filled the digest lookup's %d-row window", ErrMailboxUndecidable, digestWindow)
+	}
+	return recipientsFromRows(rows), nil
+}
+
+// RecipientsWithoutDigestInAudience returns ONE PAGE (digestLessWindow rows,
+// oldest first) of the audience's recipients that carry no digest, in any
+// subscription state. OWNED tier.
+//
+// Those are the rows written before the digest existed, by a replica still on
+// the previous release, or by a raw write, until the digest sweep fills them in.
+// A lookup by digest cannot see them. A page that is FULL proves nothing about
+// the rows beyond it; MailboxMembers does not read it as "no such row".
+func (s *Store) RecipientsWithoutDigestInAudience(ctx context.Context, audienceID string) ([]Recipient, error) {
+	rows, err := s.rows(ctx, call("query", "recipientsWithoutDigestInAudience", arg{"audienceId", audienceID}))
+	if err != nil {
+		return nil, err
+	}
+	return recipientsFromRows(rows), nil
+}
+
+func recipientsFromRows(rows []map[string]any) []Recipient {
+	out := make([]Recipient, 0, len(rows))
+	for _, r := range rows {
+		out = append(out, recipientFromRow(r))
+	}
+	return out
 }
 
 // --- plumbing -----------------------------------------------------------
@@ -1322,40 +1505,13 @@ func (s *Store) rows(ctx context.Context, q string) ([]map[string]any, error) {
 // it and there should not be -- a cursor spelled into a query string would be
 // a caller-supplied scan position on an owned-tier read.
 func (s *Store) rowsPage(ctx context.Context, cursor, q string) ([]map[string]any, string, error) {
-	if cursor != "" {
-		ctx = memql.ContextWithCursor(ctx, cursor)
-	}
+	ctx = memql.ContextWithCursor(ctx, cursor)
 	res, err := s.engine.Execute(ctx, q)
 	if err != nil {
 		return nil, "", fmt.Errorf("campaigns: %s: %w", firstWords(q), err)
 	}
-	return memql.MaterializeRows(res), cursorFromResult(res), nil
-}
-
-// cursorFromResult lifts the continuation token off whatever the engine seam
-// handed back. Two shapes, and both are real: the in-process engine returns
-// an *ExecuteResult carrying ResultMeta, and the package's tests fake flat row
-// envelopes (the seam is `Execute(ctx, string) (any, error)` precisely so they
-// can). A result with neither is an exhausted page, which is the safe reading
-// -- it ends the walk rather than continuing from a position nobody supplied.
-func cursorFromResult(res any) string {
-	type metaCarrier interface{ GetMeta() *memql.ResultMeta }
-	if carrier, ok := res.(metaCarrier); ok {
-		if meta := carrier.GetMeta(); meta != nil {
-			return strings.TrimSpace(meta.Cursor)
-		}
-	}
-	if envelope, ok := res.(map[string]any); ok {
-		if raw, ok := envelope["cursor"].(string); ok {
-			return strings.TrimSpace(raw)
-		}
-		if meta, ok := envelope["meta"].(map[string]any); ok {
-			if raw, ok := meta["cursor"].(string); ok {
-				return strings.TrimSpace(raw)
-			}
-		}
-	}
-	return ""
+	next, err := memql.ResultPageCursor(res)
+	return memql.MaterializeRows(res), next, err
 }
 
 func (s *Store) exec(ctx context.Context, q string) error {
@@ -1400,6 +1556,7 @@ func firstWords(q string) string {
 
 func sendJobFromRow(r map[string]any) SendJob {
 	return SendJob{
+		CreatedAt:           templateTime(r["createdAt"]),
 		TemplateSnapshot:    templateSnapshot(r["templateSnapshot"]),
 		ID:                  bare(str(r, "id")),
 		CampaignID:          bare(str(r, "campaignId")),
@@ -1710,4 +1867,31 @@ func templateSnapshot(value any) *Template {
 		return &Template{}
 	}
 	return &snapshot
+}
+
+type Audience struct{ ID, AccountID, Name, Status, Confirmation string }
+
+func (s *Store) AudienceByID(ctx context.Context, id string) (Audience, bool, error) {
+	rows, err := s.rows(ctx, call("query", "audienceById", arg{"audienceId", bare(id)}))
+	if err != nil || len(rows) == 0 {
+		return Audience{}, false, err
+	}
+	r := rows[0]
+	return Audience{ID: bare(str(r, "id")), AccountID: bare(str(r, "accountId")), Name: str(r, "name"), Status: str(r, "status"), Confirmation: str(r, "confirmation")}, true, nil
+}
+func (s *Store) ConfirmRecipient(ctx context.Context, id string, at time.Time) error {
+	return s.execServerOnly(ctx, call("mutation", "confirmRecipientSubscription", arg{"recipientId", bare(id)}, arg{"confirmedAt", at.UTC().Format(time.RFC3339Nano)}))
+}
+
+// RejoinRecipient starts a new membership after an explicit renewed opt-in.
+// Its caller holds the shared recipient and mailbox gates and has checked consent.
+func (s *Store) RejoinRecipient(ctx context.Context, id, status string, at time.Time) error {
+	if status != "pending" && status != "subscribed" {
+		return fmt.Errorf("invalid renewed subscription status")
+	}
+	confirmed := ""
+	if status == "subscribed" {
+		confirmed = at.UTC().Format(time.RFC3339Nano)
+	}
+	return s.execServerOnly(ctx, call("mutation", "restartRecipientMembership", arg{"recipientId", bare(id)}, arg{"subscriptionStatus", status}, arg{"joinedAt", at.UTC().Format(time.RFC3339Nano)}, arg{"confirmedAt", confirmed}))
 }

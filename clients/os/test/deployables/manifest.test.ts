@@ -10,7 +10,7 @@ const manifest: PackageManifest = {formatVersion:1,name:"fylo",deployables:[{nam
 describe("manifest deployment configuration", () => {
   it("prefills the wizard and sends all domains under the stable identity", () => {
     const draft=addressFromManifest(app,"organization");
-    expect(draft).toEqual({slug:"quiet-cedar",accountId:"organization",ownDomain:"shop.example.com, www.example.com"});
+    expect(draft).toEqual({slug:"quiet-cedar",accountId:"organization",ownDomain:"shop.example.com, www.example.com",domainSource:"explicit"});
     const wire=placementsPayload(placementsFrom([app.name],{[app.name]:draft},"memql.localhost"));
     expect(wire).toEqual({storefront:{hostname:"quiet-cedar.memql.localhost",accountId:"organization",domains:["shop.example.com","www.example.com"],target:"serving"}});
   });

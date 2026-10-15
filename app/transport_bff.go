@@ -39,6 +39,8 @@ func (a *App) transportBFF() {
 	// MEMQL_INBOUND_SOURCE_ALLOWLIST it answers 404 to everything.
 	a.mountInboundEndpoints()
 	a.mountUnsubscribeEndpoint()
+	a.mountEmailLinkEndpoints()
+	a.mountAzureEmailFeedback()
 	a.mountShopperSurface()
 	// Campaign open + click tracking (GET /t/o/{token}, GET /t/c/{token},
 	// memql#4823). Bff-only for the same reason the unsubscribe endpoint

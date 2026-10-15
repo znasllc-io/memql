@@ -119,8 +119,8 @@ func TestAPersonsCatalogContainsTheSharedCatalog(t *testing.T) {
 	}
 
 	shared := read("")
-	if len(shared) != 2 || !shared["model-bob-everyone on bob-everyone"] || !shared["model-carol-everyone on carol-everyone"] {
-		t.Fatalf("the shared catalog is the machines lent to everyone with both consents, got %v", shared)
+	if len(shared) != 3 || !shared["model-bob-everyone on bob-everyone"] || !shared["model-carol-everyone on carol-everyone"] {
+		t.Fatalf("the shared catalog is the machines lent to everyone by their owners, got %v", shared)
 	}
 	for _, person := range []string{
 		"alice", "v1:identity:user:alice", // listed by name, owns a private machine

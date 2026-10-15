@@ -810,7 +810,7 @@ func (i *Integration) LoadReplanContext(ctx context.Context, ownerUserId, runId,
 	if i == nil {
 		return ReplanContext{}, errNoIntegration
 	}
-	actorCtx := ownerActor(ctx, ownerUserId)
+	actorCtx := memql.ContextWithFreshRead(ownerActor(ctx, ownerUserId))
 	st := i.store()
 
 	run, err := st.runForOwner(actorCtx, runId)
@@ -836,6 +836,12 @@ func (i *Integration) LoadReplanContext(ctx context.Context, ownerUserId, runId,
 	if err != nil {
 		return ReplanContext{}, err
 	}
+	// Human guidance can replace the approach while its tool turn is still
+	// parked, before that turn has a failed receipt. Admit that unfinished
+	// target only while the fresh run still names this exact replan wait.
+	kind, target, reason, _, waiting := failureWait(run)
+	cancelled, _ := run["cancelRequested"].(bool)
+	guidedTarget := waiting && kind == waitKindReplan && target == stepKey && rowString(run, "status") == runStatusWaiting && !cancelled
 	out.Recorded = map[string]string{}
 	for _, step := range steps {
 		key := rowString(step, "key")
@@ -864,6 +870,14 @@ func (i *Integration) LoadReplanContext(ctx context.Context, ownerUserId, runId,
 			if out.FailedStep == nil || key == stepKey {
 				entry["errorMessage"] = rowString(step, "errorMessage")
 				entry["symptom"] = rowString(step, "symptom")
+				out.FailedStep = entry
+			}
+		case "waiting", "running":
+			if guidedTarget && key == stepKey {
+				// FailedStep is the replanner's replacement target, not a new
+				// journal verdict. Preserve the actual unfinished receipt.
+				entry["errorMessage"] = reason
+				entry["symptom"] = work.SymptomPlan
 				out.FailedStep = entry
 			}
 		}

@@ -33,6 +33,51 @@ export interface ConceptRegistryFollow {
   unsubscribe: () => void;
 }
 
+// The frame the server puts around an engine error it classifies as internal
+// (buildEngineErrorMessage, component/grpc/server.go), which is most refusals a
+// builtin or a mutation words for a person.
+const ENGINE_FRAME = "MemQL engine failed to execute query.";
+const ENGINE_DETAILS = /^Details:\s*/;
+// A call's name as executeNamed puts it in front of a refusal: an identifier, a
+// colon and a space.
+const CALL_NAME = /^[A-Za-z_][A-Za-z0-9_]*: /;
+// A Go package's name in front of its error ("compose: ..."): one all-lowercase
+// word and a colon, which a sentence written for a person never opens with.
+const PACKAGE_NAME = /^[a-z][a-z0-9]*: /;
+
+/**
+ * The sentence a person reads out of a refused call.
+ *
+ * A refusal reaches a client in up to three frames, none of which is the
+ * refusal: executeNamed puts the call's name in front (`composeMaterialize: `),
+ * the server wraps an internal engine error ("MemQL engine failed to execute
+ * query. Details: "), and a Go error may still open with its package's name
+ * (`compose: `). Shown as it came, a person reads two technical prefixes before
+ * the one thing that tells them what to do. This takes all three off, once each
+ * and only from the front, and leaves the rest as the cluster wrote it.
+ *
+ * Pass `construct`, the name the call was made with, where it is known: then
+ * exactly that name comes off. Without it a name comes off only in front of the
+ * engine's frame, where it can only be the call's. A frame with nothing inside
+ * it is kept, because it is then the whole of what the cluster said.
+ */
+export function refusalSentence(error: unknown, construct?: string): string {
+  let text = (error instanceof Error ? error.message : String(error)).trim();
+  if (construct && text === `${construct}:`) return "";
+  const named = construct ? `${construct}: ` : "";
+  if (named && text.startsWith(named)) {
+    text = text.slice(named.length);
+  } else {
+    const call = CALL_NAME.exec(text);
+    if (call && text.slice(call[0].length).startsWith(ENGINE_FRAME)) text = text.slice(call[0].length);
+  }
+  if (text.startsWith(ENGINE_FRAME)) {
+    const inside = text.slice(ENGINE_FRAME.length).trim().replace(ENGINE_DETAILS, "");
+    if (inside !== "") text = inside;
+  }
+  return text.replace(PACKAGE_NAME, "");
+}
+
 export interface QueryCallOptions {
   signal?: AbortSignal;
   /**

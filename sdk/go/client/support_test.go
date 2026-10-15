@@ -205,3 +205,39 @@ var _ Row = (map[string]any)(nil)
 // rest of the SDK uses, so future test cases can switch to it
 // without surprise.
 var _ = reflect.DeepEqual
+
+// TestResult_Count_SaysWhenTheWindowWasReached pins what a `count` query
+// answers (memql#6033): how many rows matched, and whether that is the whole
+// number or the engine's window. The engine reads one row past its window, so
+// a set larger than the window answers the window with atLeast true; a client
+// cannot guess the window, so it reads the signal.
+func TestResult_Count_SaysWhenTheWindowWasReached(t *testing.T) {
+	cases := []struct {
+		name string
+		rows []Row
+		want CountAnswer
+		ok   bool
+	}{
+		{"within the window", []Row{{"count": float64(1204), "atLeast": false}}, CountAnswer{Count: 1204}, true},
+		{"none matched", []Row{{"count": float64(0), "atLeast": false}}, CountAnswer{Count: 0}, true},
+		{"at the window", []Row{{"count": float64(5000), "atLeast": true}}, CountAnswer{Count: 5000, AtLeast: true}, true},
+		{"carried as a string", []Row{{"count": "5000", "atLeast": true}}, CountAnswer{Count: 5000, AtLeast: true}, true},
+		{"only a true makes a floor", []Row{{"count": float64(12), "atLeast": "true"}}, CountAnswer{Count: 12}, true},
+		{"no signal", []Row{{"count": float64(12)}}, CountAnswer{Count: 12}, true},
+		{"not a count", []Row{{"id": "a"}}, CountAnswer{}, false},
+		{"an unreadable count", []Row{{"count": "many"}}, CountAnswer{}, false},
+		{"no rows", nil, CountAnswer{}, false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got, ok := ResultFromRows(tc.rows).Count()
+			if ok != tc.ok || got != tc.want {
+				t.Fatalf("Count() = %+v, %v; want %+v, %v", got, ok, tc.want, tc.ok)
+			}
+		})
+	}
+	var none *Result
+	if _, ok := none.Count(); ok {
+		t.Fatal("a nil result has no count")
+	}
+}

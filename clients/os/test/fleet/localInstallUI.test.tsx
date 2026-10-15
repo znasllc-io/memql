@@ -10,15 +10,17 @@ import { EMPTY_DRAFT } from "../../src/apps/fleet/addMachine/flow";
 import { MachineDetail } from "../../src/apps/fleet/machines/MachineDetail";
 import { machineFromRow } from "../../src/apps/fleet/rows";
 import { machineRow, withSession } from "./harness";
+import { readTheBar } from "../readTheBar";
 afterEach(cleanup);
 
-it("makes saved-data removal explicit and describes app permission cleanup without claiming credentials are deleted", () => {
+it("makes saved-data removal explicit and describes app permission cleanup without claiming credentials are deleted", async () => {
   const machine = machineFromRow(machineRow({ id: "cleanup-machine", name: "Cleanup Mac", platformInfo: { os: "darwin", arch: "arm64" } }));
   const writes = { busyId: "", actionError: "", rename: vi.fn(), setOperatorLabels: vi.fn(), revoke: vi.fn(), setSharing: vi.fn() };
-  render(withSession(<MachineDetail machine={machine} writes={writes} now={new Date()} view="details" />));
+  render(withSession(<MachineDetail machine={machine} writes={writes} now={new Date()} view="settings" />));
   fireEvent.click(screen.getByRole("button", { name: "Remove this machine" }));
   const command = () => (screen.getByLabelText("the uninstall command") as HTMLInputElement).value;
   expect(command()).not.toContain("--purge");
+  await readTheBar();
   fireEvent.click(screen.getByRole("switch", { name: "Remove saved worker data" }));
   expect(command()).toContain("--purge");
   expect(command()).toContain("--cluster=");

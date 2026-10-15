@@ -51,6 +51,21 @@ export function editorTemplateURL(domain: string, templateId: string, name: stri
   return editorResourceURL(`memql-file://${encodeURIComponent(domain)}/templates/${encodeURIComponent(templateId)}/${encodeURIComponent(filename)}`, preference);
 }
 
+/**
+ * The VS Code productivity tool's New email page for one organization (memql#6033).
+ * A resource kind of its own: three path segments, no query, because the editor's
+ * validators refuse a query. `accountId` is the bare id, and the domain is spelled
+ * in lower case as the editor spells it (a custom scheme keeps a host's case, and
+ * the browser editor's address is read out of this resource).
+ */
+export function editorNewEmailURI(domain: string, accountId: string): string {
+  return `memql-file://${encodeURIComponent(domain.toLowerCase())}/new-email/${encodeURIComponent(accountId)}/New%20email`;
+}
+
+export function editorNewEmailURL(domain: string, accountId: string, preference = readEditorPreference()): string {
+  return editorResourceURL(editorNewEmailURI(domain, accountId), preference);
+}
+
 function editorResourceURL(resource: string, preference: EditorPreference): string {
   const appearance = currentEditorAppearance();
   const theme = appearance ? `&appearance=${encodeURIComponent(JSON.stringify(appearance))}` : "";

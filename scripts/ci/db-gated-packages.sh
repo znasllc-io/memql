@@ -244,7 +244,25 @@ readonly MODULE_PATH="github.com/znasllc-io/memql"
 # machine of whoever happened to have Postgres up. What the complement now
 # means, having looked: the package holds nothing but this test and its
 # routing assertion, so it moves from go-checks to db-tests whole.
+#
+# memql#6022 (F1) added `test/clustere2e`. An email rule activated on one
+# replica must arm on every replica, because the authored owner gate runs an
+# owner's automations on ONE node of the mesh -- and "it armed over there" is a
+# claim about two engines that share Postgres and nothing else.
+# email_rule_arming_db_test.go activates a rule through the real engine on node
+# A, carries the authoring.arm broadcast to node B through the real routing
+# decision, and requires B to read the bundle out of the shared database, arm
+# it and fire it -- then to disarm it when A retires the rule. A fake store
+# answers "armed" whether or not the bundle row says so, and a db-gated test
+# outside this lane only ever runs on the machine of whoever happened to have
+# Postgres up. What the complement now means, having looked: the tree's
+# untagged files (this test, its TestMain, and the hop gates that drive
+# in-process fakes) move from go-checks to db-tests; its live-cluster files
+# stay `//go:build clustere2e` and run in neither lane, exactly as before.
+# Worker activity persistence exercises two engines and reconnect fencing.
+# Include the stream owner as well as its fleet catalog in the DB lane.
 readonly DB_GATED_TREES=(
+    component/filebackups
 	"app"
 	"component/memql"
 	"component/automations"
@@ -256,13 +274,14 @@ readonly DB_GATED_TREES=(
 	"component/grpc"
 	"component/identity"
 	"component/logstore"
+	"component/retention"
 	"component/node"
 	"component/packages"
 	"component/pipelinerun"
 	"component/server"
 	"component/sitehealth"
 	"component/sitetraffic"
-	"component/worker/fleetcatalog"
+	"component/worker"
 	"integrations/compose"
 	"integrations/embedding"
 	"integrations/knowledge"
@@ -281,6 +300,7 @@ readonly DB_GATED_TREES=(
 	"packs"
 	"test/inboundhop"
 	"test/pipelinehop"
+	"test/clustere2e"
 )
 
 # KNOWN_GO_MOD_DIRS is every directory this script knows carries a `go.mod`,

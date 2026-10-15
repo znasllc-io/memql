@@ -14,7 +14,7 @@
 .fleet-routing-tab { display: flex; flex-direction: column; height: 100%; min-height: 0; }
 .fleet-routing-tab[hidden] { display: none; }
 .fleet-routing-tab > .os-deploy-scroll,
-.fleet-routing-tab > .os-deploy-pane > .os-deploy-scroll { padding: 0 20px 28px; gap: 14px; }
+.fleet-routing-tab > .os-deploy-pane > .os-deploy-scroll { padding: 0 var(--os-page-gutter, 20px) 28px; gap: 14px; }
 .fleet-routing-tab > .os-deploy-pane { height: 100%; }
 .fleet-routing-tab .os-wizard { height: 100%; }
 
@@ -65,7 +65,7 @@ button.fleet-route-description:focus-visible { outline: 2px solid var(--os-accen
 @keyframes fleet-serves-in { from { opacity: 0; transform: translateY(-2px); } to { opacity: 1; transform: none; } }
 
 /* A slot is a fixed tile: the sequence is the order, so every tile is the same size. */
-.fleet-slot { position: relative; display: flex; width: 212px; height: 64px; border: 1px solid var(--os-line); border-radius: var(--os-radius-sm); background: var(--os-plate); }
+.fleet-slot { position: relative; display: flex; width: 212px; height: 64px; border: 1px solid var(--os-line); border-radius: var(--os-selection-radius); background: var(--os-plate); }
 .fleet-slot[data-ready] { border-color: color-mix(in srgb, var(--os-ink) 22%, transparent); }
 .fleet-slot[data-serving] { border-color: var(--os-accent); }
 .fleet-slot[data-chosen] { box-shadow: 0 0 0 2px var(--os-hover); border-style: dashed; }
@@ -82,7 +82,7 @@ button.fleet-route-description:focus-visible { outline: 2px solid var(--os-accen
 .fleet-slot:hover .fleet-slot-remove,
 .fleet-slot:focus-within .fleet-slot-remove { opacity: 1; }
 .fleet-slot-remove:hover { background: var(--os-hover); color: var(--os-ink); }
-.fleet-slot-empty { align-items: center; justify-content: center; border-style: dashed; background: transparent; color: var(--os-muted); cursor: pointer; font: inherit; }
+.fleet-slot-empty { align-items: center; justify-content: center; border: 0; background: transparent; color: var(--os-muted); cursor: pointer; font: inherit; }
 .fleet-slot-empty:hover { color: var(--os-ink); background: var(--os-hover); }
 .fleet-slot-empty:focus-visible { outline: 2px solid var(--os-accent); outline-offset: 2px; }
 
@@ -126,7 +126,7 @@ button.fleet-rule-line[draggable="true"] { cursor: grab; }
 .fleet-rule-described { margin: -6px 0 0; max-width: 80ch; font-size: var(--os-text-sm); color: var(--os-muted); }
 .fleet-rule-when-step { display: grid; gap: 12px; max-width: 34rem; }
 .fleet-rule-review { display: grid; gap: 14px; max-width: 34rem; }
-.fleet-rule-page .os-rule-textarea { max-width: 80ch; }
+.fleet-rule-page .os-textarea { max-width: 80ch; }
 .fleet-rule-page .os-form { max-width: 34rem; }
 
 /* ---- the Settings side's one quiet link ---- */

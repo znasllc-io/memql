@@ -1012,8 +1012,11 @@ func startFakeOutbox(store *memStore) *fakeOutbox {
 				case "pending":
 					o.store.setOutbound(row.State.ID, "sending", 0, "")
 				case "sending":
-					o.store.setOutbound(row.State.ID, "sent", 1, "")
+					// The driver can finish as soon as the row reads sent. Keep
+					// its publication and this fake's delivery record together
+					// so the test cannot observe one without the other.
 					o.mu.Lock()
+					o.store.setOutbound(row.State.ID, "sent", 1, "")
 					o.delivered = append(o.delivered, row.State.ID)
 					o.mu.Unlock()
 				}

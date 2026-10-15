@@ -1,0 +1,8 @@
+{
+  "cases": [
+    {
+      "file": "policy.memql",
+      "verdict": "load_ok"
+    }
+  ]
+}

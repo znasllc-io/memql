@@ -1,0 +1,81 @@
+{
+  "automation": "agents/automations.memql agentWorkSkillContext",
+  "runs": {
+    "invocation | 0 rows": {
+      "input": {
+        "event": {
+          "kind": "unspecified",
+          "payload": {
+            "text": "s-text"
+          },
+          "topic": "automation.invocation.agentWorkSkillContext"
+        },
+        "rows": 0
+      },
+      "outcome": {
+        "calls": [
+          {
+            "args": {
+              "limit": 3,
+              "maxBytes": 8000,
+              "minimumScore": 1,
+              "text": "s-text"
+            },
+            "kind": "builtin",
+            "name": "agentSelectWorkSkills"
+          }
+        ],
+        "result": {
+          "output": {
+            "args": {
+              "limit": 3,
+              "maxBytes": 8000,
+              "minimumScore": 1,
+              "text": "s-text"
+            },
+            "builtin": "agentSelectWorkSkills"
+          },
+          "status": "completed"
+        }
+      }
+    },
+    "invocation | 2 rows": {
+      "input": {
+        "event": {
+          "kind": "unspecified",
+          "payload": {
+            "text": "s-text"
+          },
+          "topic": "automation.invocation.agentWorkSkillContext"
+        },
+        "rows": 2
+      },
+      "outcome": {
+        "calls": [
+          {
+            "args": {
+              "limit": 3,
+              "maxBytes": 8000,
+              "minimumScore": 1,
+              "text": "s-text"
+            },
+            "kind": "builtin",
+            "name": "agentSelectWorkSkills"
+          }
+        ],
+        "result": {
+          "output": {
+            "args": {
+              "limit": 3,
+              "maxBytes": 8000,
+              "minimumScore": 1,
+              "text": "s-text"
+            },
+            "builtin": "agentSelectWorkSkills"
+          },
+          "status": "completed"
+        }
+      }
+    }
+  }
+}

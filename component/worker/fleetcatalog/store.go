@@ -47,6 +47,7 @@ func (s *EngineStore) WorkersForOwner(ctx context.Context, ownerUserId string) (
 		sharing := workerservice.SharingFromRow(row["sharing"])
 		out = append(out, Candidate{
 			RegistrationId: id,
+			MachineId:      rowStringMap(row, "labels")["machineId"],
 			Name:           rowString(row, "name"),
 			DisplayName:    rowString(row, "displayName"),
 			// Stamp the scoped owner so PlanUserModelWithShared recovery and
@@ -65,10 +66,12 @@ func (s *EngineStore) WorkersForOwner(ctx context.Context, ownerUserId string) (
 			SharingMode:      sharing.Mode,
 			SharedUserIds:    sharing.UserIds,
 			SharedGroupIds:   sharing.GroupIds,
-			InferenceServe:   capabilityInferenceServe(row["capabilityDescriptor"]),
+			PausedUserIds:    sharing.PausedUserIds,
+			PausedGroupIds:   sharing.PausedGroupIds,
 			RepositoryScopes: workerservice.RepositoryScopesFromMap(row["capabilityDescriptor"]),
 			ActionContracts:  workerservice.ActionContractsFromMap(row["capabilityDescriptor"]),
 			NativePlatform:   workerservice.NativePlatformFromMap(row["capabilityDescriptor"]),
+			HomeDirectory:    workerservice.HomeDirectoryFromMap(row["capabilityDescriptor"]),
 			Apps:             rowApps(row, "apps"),
 			AppDescriptors:   rowAppDescriptors(row, "appDescriptors"),
 			Hardware:         workerservice.InventoryFromRow(row["hardware"]),
@@ -107,6 +110,7 @@ func (s *EngineStore) SharedInferenceWorkers(ctx context.Context) ([]Candidate, 
 		sharing := workerservice.SharingFromRow(row["sharing"])
 		out = append(out, Candidate{
 			RegistrationId:   id,
+			MachineId:        rowStringMap(row, "labels")["machineId"],
 			Name:             rowString(row, "name"),
 			DisplayName:      rowString(row, "displayName"),
 			Capabilities:     rowStringList(row, "capabilities"),
@@ -114,10 +118,12 @@ func (s *EngineStore) SharedInferenceWorkers(ctx context.Context) ([]Candidate, 
 			SharingMode:      sharing.Mode,
 			SharedUserIds:    sharing.UserIds,
 			SharedGroupIds:   sharing.GroupIds,
-			InferenceServe:   capabilityInferenceServe(row["capabilityDescriptor"]),
+			PausedUserIds:    sharing.PausedUserIds,
+			PausedGroupIds:   sharing.PausedGroupIds,
 			RepositoryScopes: workerservice.RepositoryScopesFromMap(row["capabilityDescriptor"]),
 			ActionContracts:  workerservice.ActionContractsFromMap(row["capabilityDescriptor"]),
 			NativePlatform:   workerservice.NativePlatformFromMap(row["capabilityDescriptor"]),
+			HomeDirectory:    workerservice.HomeDirectoryFromMap(row["capabilityDescriptor"]),
 			Apps:             rowApps(row, "apps"),
 			AppDescriptors:   rowAppDescriptors(row, "appDescriptors"),
 			Hardware:         workerservice.InventoryFromRow(row["hardware"]),
@@ -209,17 +215,6 @@ func rowTime(row map[string]any, key string) time.Time {
 		}
 	}
 	return time.Time{}
-}
-func capabilityInferenceServe(v any) string {
-	descriptor, ok := v.(map[string]any)
-	if !ok {
-		return workerservice.InferenceServeOwner
-	}
-	serve, _ := descriptor["inferenceServe"].(string)
-	if strings.TrimSpace(serve) != workerservice.InferenceServeCluster {
-		return workerservice.InferenceServeOwner
-	}
-	return workerservice.InferenceServeCluster
 }
 func rowApps(row map[string]any, key string) []workerservice.AppInfo {
 	raw, ok := row[key].([]any)

@@ -28,36 +28,54 @@ and wallpaper values only (see `src/themes/`), so nothing here is themeable.
    Pause hidden/offline views, avoid overlapping requests, and cancel stale reads.
    Explicit probes and writes stay deliberate actions; never repeat them on a timer.
    Creation actions use the shared icon-only `AddButton` (plus), with an
-   accessible label and tooltip. Do not replace it with a text button such as
+   accessible label and tooltip. Keep it borderless in light and dark, with
+   theme-aware icon color, hover feedback and a visible keyboard focus ring.
+   Use the shared component’s style for creation links too; never add per-app
+   borders. Do not replace it with a text button such as
    "Connect GitHub account". A settings page is titled **Settings**; subjects
    such as **GitHub accounts** are sections beneath that title, with their Add
-   control on the section heading. Settings lists use the available width.
+   control on the section heading (`kit` `Subhead` `actions`). Settings lists
+   use the available width.
    Shared record lists draw dividers **only between items**: no top line on
    the first, no bottom line on the last, and no lines for a single item.
    Keep this in the shared list styles, including rows with separate actions
    and live-list wrappers; never add per-app row borders.
 
-2. **Filters are questions, not furniture.** Search and facet controls live
-   behind one affordance on the Head line (`kit` `Refine`): collapsed by
-   default, expanded while being asked, active constraints as removable
-   chips beside it. A section never shows filter chrome over no content.
+   Selection controls use straight edges (`--os-selection-radius`), including
+   local tabs, choice cards, menu options and equipment choices. Show selection
+   with the theme accent, fill or underline; avoid rounded selection outlines.
+   Notices, warnings, errors and status panels also use straight edges. Keep
+   their tone marks straight, with theme colors and readable text; no curved
+   brackets or rounded message outlines. Use the shared `Notice` for feedback.
 
-3. **Sort is a quiet menu.** `kit` `SortControl` shows the current order, a
-   direction icon and a chevron. Its menu exposes both orders and marks the
-   selected one. The default order stays an app-settings preference.
+2. **Filters are questions, not furniture.** Search and facet controls live
+   behind one affordance (`kit` `Refine`): collapsed by
+   default, expanded while being asked, active constraints as removable
+   chips beside it. Place it with sorting beside local tabs when present;
+   otherwise use the Head line. A section never shows filter chrome over no content.
+
+3. **Sort is a quiet two-state toggle.** `kit` `SortControl` shows the current
+   order and direction icon. A press switches directly to the other order;
+   two choices need no menu. Place it at the right of the local tab row
+   (`LocalTabs.actions`), keeping the Head’s Add button by itself. Without
+   local tabs, use the right of the Head. The default order stays an
+   app-settings preference.
 
 4. **Micro-preferences live in the app's Settings section.** Show revoked,
    show deactivated, include archived, default sort -- preferences, not
    toolbar chrome. The empty state points at the setting when hiding is why
    it is empty.
 
-5. **One control line.** Inputs, selects, buttons and choice pills all
+5. **One control line.** Inputs, selects, buttons and choices all
    stand `--os-control-h` tall at `--os-text-base`. Field-shaped controls
-   share `--os-radius-xs`; the choice pill keeps its own radius because it
-   is the shell's selection language, not a field. Ask shares the window header
+   share `--os-radius-xs`; choices use the straight `--os-selection-radius`.
+   Ask shares the window header
    and icon controls, app-content text scale and page gutters; its sheet
    dimensions do not define a separate scale for its contents. Selects drop UA chrome
-   (`Select` draws its own currentColor chevron). Forms use `Field` --
+   (`Select` draws its own currentColor chevron). A date and time is
+   `DateTimeInput`, on the line like `Input`; prose is `TextArea`, the one field
+   taller than the line (two lines to start, resizable) with the same radius and
+   text size. Forms use `Field` --
    label above, control on the line; nothing invents a third field size.
 
 6. **Actions are verbs, nouns are nouns.** An action is never styled as a
@@ -78,6 +96,8 @@ and wallpaper values only (see `src/themes/`), so nothing here is themeable.
    confirmation messages concise. Detail pages reuse `Panel`, `Subhead`,
    `Facts` and `Fact`, as the Cluster Mesh node page does, instead of inventing
    another data layout or button arrangement.
+   Follow [Details and settings content](#details-and-settings-content) for
+   open sections, grouped edits, aligned facts and quiet copying.
 
 8. **One container language.** `Panel` + `Subhead` + `Field` is the
    grouping grammar. Settings groups keep their `fieldset` and `legend`
@@ -86,7 +106,10 @@ and wallpaper values only (see `src/themes/`), so nothing here is themeable.
    one look, not two. Panel actions align to the right edge in the shared
    `os-panel-actions` row. An action such as Disconnect stays on that same
    edge when it expands into Cancel and confirmation; do not shift the
-   controls left or fill the panel width. Confirmation copy sits above them.
+   controls left or fill the panel width. Confirmation copy sits above them,
+   and the confirmation holds presses for a moment after it appears
+   (`InPlaceAsk`, rule 12), so the second click of a double-click on the act
+   that asked cannot answer it.
    A deliberate MOMENT (the Accounts first-run card's
    eyebrow and headline) may keep its voice; chrome may not.
 
@@ -100,6 +123,11 @@ and wallpaper values only (see `src/themes/`), so nothing here is themeable.
    maximised one. The measure belongs to the THING (a sentence at ~80ch, a
    field at ~34rem), never to the page: capping the page to keep a text box
    from stretching is how the margins got painted empty.
+   `kit/PageContent` owns the full-width page bounds and responsive horizontal
+   gutter for window contents and retained pages. Use it once around the app
+   or each retained page, rather than adding width fixes to each section.
+   Page roots must not add centered maximum widths; constrain individual prose,
+   fields or diagrams inside them when their content needs a readable measure.
 
 10. **In-surface state is never a checkbox.** "Show archived" as a standing
     checkbox is the legacy tell this language exists to remove: archived
@@ -129,6 +157,32 @@ and wallpaper values only (see `src/themes/`), so nothing here is themeable.
     one surface, and the person had to know which was which.
     Account and organization details use this footer too: state on the left,
     Back/Disconnect on the right; Cancel/confirmation stay on that same edge.
+    **Everything pressable in a bar is held for a moment after the bar
+    changes** (`CONFIRM_SETTLE_MS`, 400 ms): its acts, and whatever it
+    draws beside them -- a typed confirmation's Keep it, a question's own
+    buttons -- by pointer or by keyboard. A change is any change to what
+    the bar offers, whatever caused it and whatever now stands under the
+    pointer: an ask turning the bar into a question, the way back from one
+    (Discard changes where Keep stood), Pause turning into Resume, a
+    refusal drawn beside the acts, an act that only changes its tone, a
+    wizard moving to its next step (`scope`). So the second click of a
+    double-click cannot answer a question nobody read, or press what the
+    first click put there. An ask is the bar's acts (the way out a text
+    act, the act itself the button) with the question drawn beside them.
+    Every bar, decided in the kit; a bar's first acts, and a bar that did
+    not change, take a press at once. Text that changes on its own (the
+    measure of a wait, a live figure) goes in the bar's `meta`, in the state
+    group outside what the hold watches, never beside the acts, where every
+    tick would hold the bar's presses again.
+    **A question answered in place, outside any bar, is held the same way**
+    (a row's Revoke that becomes "Revoke it / Keep it", a panel's
+    Disconnect that expands into Cancel and a confirmation, a dropped
+    file's "Archive / Cancel"): wrap what a press could be answering in the
+    kit's `InPlaceAsk`, which is the bar's own hold (`kit/pressHold`), held
+    from the moment the question appears -- the buttons, and the question too
+    where it can change while the same buttons stay (a second file dropped
+    on the Bin). A question in a bar's acts or children needs nothing; the
+    bar holds it.
     Read-only repository details offer navigation, not deployment actions.
 
 ## Applying them
@@ -165,7 +219,10 @@ and wallpaper values only (see `src/themes/`), so nothing here is themeable.
   `TrailRow`, after Back and breadcrumbs, on desktop and phone. It opens the
   current page's help modal; until documentation exists, say “Documentation is
   coming soon.” Future help starts with a walkthrough video, followed by the
-  option details. Do not repeat information icons beside individual settings.
+  option details. Publish section documentation with `PageHelp`; the shared
+  page scope collects visible sections in order and excludes retained hidden
+  pages. Dialogs own their help scope and preserve their draft when help closes.
+  Do not repeat information icons beside individual settings.
   Keep essential permissions, download costs and destructive consequences in
   the flow where someone makes that choice.
 - Add Machine keeps the shared wizard's steps-left/content-right layout and
@@ -182,6 +239,13 @@ and wallpaper values only (see `src/themes/`), so nothing here is themeable.
   and individually removable entries with validation and keyboard support.
   Do not require comma-separated input to manage a visible list. Explain the
   consequence of the collection once, and show it only for modes that use it.
+- Sharing uses a toggle and one divider before the Users and groups collection.
+  Its search picker keeps checked choices until the plus action adds them
+  together. Each recipient card has a live call count and named, icon-only
+  pause/resume and remove controls. These actions save directly, show pending
+  state and retain the saved value on failure with an explicit retry. Keep routine success
+  receipts, usage summaries and empty-directory explanations out of this flow;
+  describe draining calls and overlapping grants in the page's single help.
 - Build with the kit pieces; a surface needing a control the kit lacks
   promotes it on second use (`src/kit/controls.tsx` header) rather than
   respelling it locally.
@@ -208,6 +272,91 @@ removed accurately, including partial completion and other cluster enrollments.
 Respect non-interactive output, narrow terminals and plain-text/no-color modes.
 These rules apply to human presentation; capability scripts retain their
 structured stdout contract and send human logs to stderr.
+
+## Details and settings content
+
+Fleet's machine Settings page is the reference for displaying an entity's
+configuration and reported facts. Apply this pattern when building or revising
+comparable pages in other apps; keep their existing capabilities and permissions.
+For a machine, Settings is the last tab, after History. General controls and
+Sharing precede reported facts on that one page. Sharing uses the same section
+grid, with a divider between its switch and users/groups collection; keep write errors
+beside the section that caused them. There is no separate Sharing tab.
+
+- **Open, named sections.** Group related information under a `Subhead`, with
+  generous vertical spacing and a single hairline between groups. Keep ordinary
+  details visible without expanding accordions. Avoid nested cards, repeated
+  captions and a separate container around every fact.
+- **One alignment.** Keep the full-width `PageContent` bounds. On wide windows,
+  place the section heading beside its body and align the label/value columns
+  across sections using `Facts` and `Fact`. As the window narrows, move headings
+  above their sections, then stack labels above values. Constrain individual
+  fields to a readable measure; long data wraps within the available width.
+- **Edits together.** Group entity settings such as rename, editable labels
+  and removal in a clearly named section, separate from reported facts. Removal
+  uses a borderless trash `IconButton` with an accessible name and tooltip.
+  Keep its consequences and confirmation beside the action, preserve the shared
+  confirmation hold and restore focus on cancel. Lifecycle actions that belong
+  in an `ActionBar` continue to follow rule 12.
+- **Quiet copying.** Use `Fact.copyValue` or `CopyValue presentation="row"`.
+  The value and its copy icon form one target; reserve the icon/receipt space so
+  hover and confirmation never shift the text. Give the target horizontal
+  padding at both ends, inside its width, and a faint theme-derived hover wash
+  with straight edges. Keep non-copyable values aligned with copyable ones.
+  Reveal the icon on hover or keyboard focus, keep it visible on touch, and
+  retain a clear keyboard focus ring. Support Enter/Space and manual selection.
+  Briefly show “Copied” only after success; on failure keep the text selectable
+  and report that nothing was copied. Use the shared control, not per-app copies
+  of its CSS or clipboard behavior.
+- **Readable, truthful data.** Copy exact timestamps behind relative dates;
+  copying a key/value entry includes both. Missing measurements remain “Not
+  reported” or “Not measured”, never invented zeroes or copyable placeholders.
+  Keep live values current without replacing an edit in progress. Supporting
+  explanations use `PageHelp` and the page's single information control;
+  essential consequences remain beside the relevant choice.
+
+The implementation reference is
+[`MachineDetailsInfo.tsx`](src/apps/fleet/machines/MachineDetailsInfo.tsx), with
+shared copy behavior in [`kit/controls.tsx`](src/kit/controls.tsx). Validate these
+surfaces in every built-in theme, in light and dark, at wide and narrow window
+sizes. Include long values, empty reports, hover, keyboard focus, touch,
+clipboard success/refusal and reduced motion. Check actual rendered spacing
+and overflow, not just whether the control exists.
+
+Small equipment, label and sharing collections share `kit/CardCarousel`: one or two
+cards according to available width, explicit previous/next arrows and an
+“x–y of n” counter. Paging never changes selection or intercepts the wheel;
+off-page controls are inert and resize keeps keyboard focus visible. Routing
+labels use `MapEditor`, with Label/Value search, a short creation instruction,
+unique names, value editing and an icon-only trash action on each card. Only a
+new name in Label mode offers creation. Preserve the parent's save moment,
+keep refused drafts for retry, and use the existing live feed for updates.
+
+Editable card collections share `kit/CardCollectionEditor` for their filter,
+search and borderless add line, card opening target, separate icon actions and
+loading geometry. Sharing follows the Routing labels setting row: the same muted
+label at the left, search and cards in the right column. Its Share models switch
+sits at the right edge, like the Remove machine action. Search can filter existing
+access or add an existing user/group from the directory; it never creates an
+identity. A card edits that recipient's sharing state, with direct pause/resume
+and remove icons and live call counts. Keep drafts through heartbeats and prevent
+an edit from overwriting a newer sharing decision.
+
+Routing label and sharing cards share a compact two-row layout and minimum
+height. Put the name above the details, with sharing call counts in the middle
+and pause/resume immediately before delete on the bottom row. Keep the whole
+card's subtle hover/focus wash continuous behind its separate action buttons.
+Page to one card when two would crowd the details or action targets.
+
+Sharing's search is a multi-select picker: the first five eligible options,
+then a Load more row that reveals five more. Search the full directory before
+paging. Checked selections survive filters, searches and reopening; show one
+`N selected` indicator and enable the plus action only with a selection. Commit
+the selected batch in one write, retain it on failure, and exclude entries that
+already have access. Options toggle checkmarks and never save on click.
+Use `kit/AnchoredPicker` to join the popup to the text field, escape scroll and
+transform clipping, follow the field as its window moves, and flip above when
+space below is tight. Keep keyboard position distinct from checked state.
 
 ## Record lists
 
@@ -256,12 +405,22 @@ Audit inventory: [loading and navigation coverage](qa/loading-and-navigation.md)
 Overview is the shared summary destination. Use `kit/Overview` for the header
 and measured statistics, and `OverviewBreakdown` for a current distribution.
 Each app supplies facts from its existing authorized reads; unavailable values
-use `Figure` absence semantics instead of zero. Only draw activity history when
+use `Figure` absence semantics instead of zero. A count the engine stopped at
+its window is a floor (`countFigure`, from the SDK's `Result.count()`) and
+reads "5,000 or more", never as exact; a sum with a floor in it is a floor
+too. Only draw activity history when
 a real time series exists. Keep record lists and editors in their own sections.
+Four figures stand in one row, then two; five stand in one row while each label
+fits on one line, then three, then two.
 
-Maps use `MapHeading` for title alignment, `MapControls` for bottom-right zoom
-and reset actions, and `usePanZoom` with wheel zoom disabled and fitted reset
-enabled. Dragging pans; wheel scrolling belongs to the page. Keep routine map
+Maps and navigable diagrams use `MapCanvas` for their SVG viewport and
+`MapHeading` when a title is needed. `MapCanvas` owns top-right zoom and reset
+controls, initial fitting, resize behavior, drag/pinch, keyboard navigation
+and the distinction between dragging and selecting a node. Apps supply the
+drawing, its dimensions and its selection actions. Reset fits the current
+content. Wheel scrolling belongs to the page; there is no wheel-zoom option.
+Node-specific keyboard navigation takes precedence over canvas arrow keys;
+focusing an offscreen node brings it into view without changing zoom. Keep routine map
 instructions in the shared page-help control described above, without adding
 another information icon. Errors and stale-data notices remain visible.
 
@@ -447,6 +606,9 @@ surface in the shell that read as a single thought.
   who can set it up. "Not known" is not "no":
   when the question goes unanswered the old offer stands, and the refusal
   still lands in place.
+- **Deliberate navigation brings the next question into keyboard reach.** After
+  a footer action or a rail choice opens a step, the shared wizard focuses its
+  first input or choice. Background progress never takes focus from the user.
 - **The orb names the subject.** The gate wears the MemQL mark, because what is
   being set up there is the cluster. An add wears the thing being added: a
   globe, a machine, a rocket. Same circle, same theme tokens.
@@ -472,8 +634,9 @@ surface in the shell that read as a single thought.
   runs, hide Retry; offer Done only after every required check passes.
 - **A wait is visible.** When it is the cluster's turn (`tone: "busy"`) there
   is no forward act, the bar's top hairline becomes a moving thread, the dot
-  becomes a spinner, the state takes the accent, and `meta` measures the wait
-  ("0:42", "checked 40s ago"). Waiting for a record somebody has not created
+  becomes a spinner, the state takes the accent, and `meta` carries the measure
+  of the wait ("0:42", "checked 40s ago") -- the one place text that ticks
+  belongs (rule 12). Waiting for a record somebody has not created
   yet is a wait and is drawn as one, not as a failure. Reduced motion keeps the
   held line and the held dot.
 - **The floor has two verbs and one button.** *Cancel* undoes the whole thing:

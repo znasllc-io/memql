@@ -33,6 +33,7 @@ require (
 	github.com/znasllc-io/memql/component/provenance v0.0.0
 	github.com/znasllc-io/memql/component/safety v0.0.0
 	github.com/znasllc-io/memql/component/secret v0.0.0
+	github.com/znasllc-io/memql/component/work v0.0.0
 	github.com/znasllc-io/memql/core v0.0.0
 	github.com/znasllc-io/memql/docs v0.0.0
 	github.com/znasllc-io/memql/dsl v0.0.0
@@ -127,3 +128,5 @@ replace github.com/znasllc-io/memql/dsl => ../../dsl
 replace github.com/znasllc-io/memql/component/frontdoor => ../frontdoor
 
 replace github.com/znasllc-io/memql/component/metrics => ../metrics
+
+replace github.com/znasllc-io/memql/component/work => ../work

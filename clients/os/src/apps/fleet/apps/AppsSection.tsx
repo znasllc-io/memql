@@ -1,11 +1,10 @@
-import { RecordListSkeleton } from "../../../kit/RecordListSkeleton";
 import { ContentSkeleton } from "../../../kit/ContentSkeleton";
 import { LocalTabs } from "../../../kit/LocalTabs";
 import { useEffect, useState } from "react";
 import { AutoRefresh, useFleetScroll } from "../FleetControls";
-import { InfoDetail } from "../../../kit/InfoDetail";
+import { PageHelp } from "../../../kit/pageHelp";
 
-import { Button, Check, Switch, EmptyState, Chip, Field, Head, Input, Notice, Panel, RecordList, RecordRow, Select, Subhead } from "../../../kit";
+import { Button, Check, Switch, EmptyState, Chip, Field, Head, Input, Notice, Panel, RecordRow, Select, Subhead } from "../../../kit";
 import { formatFreshness, formatMoment } from "../../../kit/format";
 import { useNow } from "../../../kit/useNow";
 import { Measure } from "../../../kit/MeasureView";
@@ -19,6 +18,8 @@ import {
   type AppSessionRow,
 } from "../rows";
 import { SessionPage } from "./SessionPage";
+import { LiveList } from "../../../live/LiveList";
+import { feedIsBehind } from "../../../live/useLiveCollection";
 import { useAppSessions } from "./useAppSessions";
 import { useDelegationPolicy, type DelegationPolicyDraft } from "./useDelegationPolicy";
 
@@ -41,7 +42,7 @@ export function AppsSection({ sessionTarget, navigation }: { sessionTarget?: { i
   const policy = useDelegationPolicy();
   const sessions = useAppSessions();
   const [openSessionId, setOpenSessionId] = useState("");
-  useEffect(() => { if (sessionTarget) setOpenSessionId(sessionTarget.id); }, [sessionTarget?.revision]);
+  useEffect(() => { if (sessionTarget) { setOpenSessionId(sessionTarget.id); setView("sessions"); } }, [sessionTarget?.revision]);
   useEffect(() => { if (navigation?.origin === "peer") { setOpenSessionId(""); setView("sessions"); } }, [navigation?.revision]);
   const now = useNow(30_000);
 
@@ -53,9 +54,10 @@ export function AppsSection({ sessionTarget, navigation }: { sessionTarget?: { i
     {openSessionId ? <SessionPage sessionId={openSessionId} onBack={() => setOpenSessionId("")} /> : null}
     <div className="fleet-pane-overview" hidden={openSessionId !== ""}>
       <div className="fleet-section-header">
-      <Head title="Activity" meta={view === "sessions" && sessions.readAt && !sessions.loading && !sessions.error ? sessions.sessions.length : undefined}>
+      <Head title="Activity" meta={view === "sessions" && sessions.state === "live" && !sessions.error ? sessions.sessions.length : undefined}>
 
-        <AutoRefresh busy={sessions.loading || policy.loading} onRefresh={() => { policy.reread(); sessions.reread(); }} />
+        <AutoRefresh busy={policy.loading} onRefresh={policy.reread} />
+        <AutoRefresh busy={sessions.loading} enabled={feedIsBehind(sessions.state, sessions.error)} onRefresh={sessions.reread} />
       </Head>
 
       <LocalTabs label="Activity views" value={view} onChange={setView} options={[["sessions", "App sessions"], ["delegation", "Delegation"]]} />
@@ -64,38 +66,12 @@ export function AppsSection({ sessionTarget, navigation }: { sessionTarget?: { i
       <div hidden={view !== "sessions"}>
 
       <Subhead>Delegated runs</Subhead>
-      <p className="os-caption">
-        {sessions.readAt === null
-          ? "Not read yet."
-          : `Read ${formatFreshness(sessions.readAt.toISOString(), now)}. Updates automatically.`}
-      </p>
-
-      {sessions.error === "" ? null : (
-        <Notice
-          tone="error"
-          sentence="The delegated runs could not be read."
-          next={
-            sessions.sessions.length > 0
-              ? "The runs below are the last ones that were read."
-              : "Nothing was loaded."
-          }
-          detail={sessions.error}
-        />
-      )}
-
-      {sessions.loading && sessions.sessions.length === 0 ? (
-        <RecordListSkeleton label="Loading your delegated runs" />
-      ) : null}
-
-      {!sessions.loading && sessions.sessions.length === 0 && sessions.error === "" ? (
-        <EmptyState title="No app sessions yet" action={<Button onClick={() => setView("delegation")}>Review delegation</Button>}>Sessions appear when MemQL hands a task to an allowed app on one of your machines.</EmptyState>
-      ) : null}
-
-      <RecordList as="ul" label="Delegated runs">
-        {sessions.sessions.map((session) => (
-          <SessionLine key={session.id} session={session} now={now} onOpen={() => setOpenSessionId(session.id)} />
-        ))}
-      </RecordList>
+      <PageHelp title="App sessions"><p>These are your delegated app runs, newest first. New sessions and status changes arrive automatically. Open a run to read its recording; Delegation controls when tasks may use your local apps.</p></PageHelp>
+      <LiveList source={sessions.source} label="Delegated runs" rowId={session => session.id}
+        fingerprint={session => `${session.status}:${session.billing}:${session.endedAt}`}
+        renderRow={session => <SessionLine session={session} now={now} onOpen={() => setOpenSessionId(session.id)} />}
+        errorContent={<Notice tone="error" sentence="The delegated runs could not be read." next={sessions.sessions.length ? "Showing the last known runs." : "Nothing was loaded."} detail={sessions.error} />}
+        emptyContent={<EmptyState title="No app sessions yet" action={<Button onClick={() => setView("delegation")}>Review delegation</Button>}>Sessions appear when MemQL hands a task to an allowed app on one of your machines.</EmptyState>} />
       </div></div>
     </div>
   );
@@ -218,9 +194,9 @@ function DelegationPanel({ state }: { state: ReturnType<typeof useDelegationPoli
         {/* ORDER IS PRIORITY, and it is stated because nothing about a pair of
             checkboxes says so. The chosen order is shown back, so the list is
             not something to infer from click history. */}
-        <InfoDetail title="App ordering"><p className="os-caption">
+        <PageHelp title="App ordering"><p className="os-caption">
           MemQL tries selected apps in the order shown below. Only these apps may use your subscriptions. Remove and reselect an app to move it to the end.
-        </p></InfoDetail>
+        </p></PageHelp>
         <p className="os-caption">
           {draft.appOrder.length === 0
             ? "No app listed, so nothing can be selected even with delegation on."

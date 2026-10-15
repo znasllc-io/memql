@@ -1,6 +1,7 @@
 package campaigns
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -52,6 +53,10 @@ func (w *Worker) Capabilities() []memql.IntegrationCapability {
 		ops[name] = nil
 	}
 	return append([]memql.IntegrationCapability{
+		{Name: "describeJourney", Description: "Draft an email automation for review without saving.", Handler: w.handleDescribeJourney},
+		{Name: "saveJourney", Description: "Save a revision of an email automation.", Handler: w.handleSaveJourney},
+		{Name: "setJourneyState", Description: "Turn an email automation on, pause or archive it.", Handler: w.handleSetJourneyState},
+		{Name: "stageOperationalEmail", Description: "Render a published operational rule template into the server outbox.", Handler: w.handleStageOperationalEmail},
 		{Name: "configureTestAudience", Description: "Configure the organization testing audience.", Handler: w.handleConfigureTestAudience},
 		{Name: "testAudienceSend", Description: "Queue a test through the normal campaign worker.", Handler: w.handleTestAudienceSend},
 		{Name: "sendingReadiness", Description: "Check the selected organization's sender and unsubscribe setup without sending mail.", Handler: w.handleSendingReadiness},
@@ -60,6 +65,12 @@ func (w *Worker) Capabilities() []memql.IntegrationCapability {
 		{Name: "retryNewsletterWelcome", Description: "Recheck a blocked welcome without repeating an uncertain delivery attempt.", Handler: w.handleRetryNewsletterWelcome},
 		{Name: "configureSeries", Description: "Save, pause or resume a recurring campaign under current organization authority.", Handler: w.handleConfigureSeries},
 		{Name: "saveTemplate", Description: "Save or publish the reviewed revision of an organization email template.", Handler: w.handleSaveTemplate},
+		{Name: "saveLayout", Description: "Save an organization email layout on the reviewed revision, or archive or restore it.", Handler: w.handleSaveLayout},
+		// PreserveOrder: the picker lists the built-in layouts first, in catalogue
+		// order, and then the organization's own, newest first. A builtin's nodes
+		// are keyed by id, which sorts them; the flag is what keeps this order.
+		{Name: "emailLayouts", Description: "List the email layouts an organization can start from: the built-in layouts, then its own.", Handler: w.handleEmailLayouts, PreserveOrder: true},
+		{Name: "renderEmail", Description: "Render an email document for preview, embedding the pictures the caller can read. Saves and sends nothing.", Handler: w.handleRenderEmail},
 		{
 			Name:        "startSend",
 			Description: "Preflight and start a campaign send. Refuses rather than partially sending when the sender, one-click unsubscribe, template or audience is not ready.",
@@ -365,6 +376,14 @@ func (w *Worker) preflight(ctx context.Context, op string, campaign Campaign) (i
 }
 
 func (w *Worker) preflightAudience(ctx context.Context, op string, campaign Campaign, allowEmpty bool) (int, Template, error) {
+	return w.preflightAudienceWith(ctx, op, campaign, allowEmpty, nil)
+}
+
+// preflightAudienceWith is preflightAudience for a caller that has just counted the
+// audience itself: known is that count, and the audience is not counted a second
+// time. Every count reads every recipient in the cluster, whatever the audience
+// holds, so a caller that already has the number hands it in.
+func (w *Worker) preflightAudienceWith(ctx context.Context, op string, campaign Campaign, allowEmpty bool, known *int) (int, Template, error) {
 	if err := w.requireSendAuthority(ctx, campaign.AccountID); err != nil {
 		return 0, Template{}, err
 	}
@@ -413,9 +432,13 @@ func (w *Worker) preflightAudience(ctx context.Context, op string, campaign Camp
 	// difference is the whole issue: measuring a bounded page and calling it
 	// a total is what made 5000 a ceiling, and a count query has no window
 	// to be bounded by.
-	size, err := w.store.RosterSize(ctx, campaign.AudienceID)
-	if err != nil {
+	var size int
+	if known != nil {
+		size = *known
+	} else if counted, err := w.store.RosterSize(ctx, campaign.AudienceID); err != nil {
 		return 0, Template{}, fmt.Errorf("campaigns.%s: %w", op, err)
+	} else {
+		size = counted
 	}
 	if size == 0 && !allowEmpty {
 		return 0, Template{}, fmt.Errorf("campaigns.%s: audience %q has no recipients", op, campaign.AudienceID)
@@ -645,12 +668,29 @@ func argString(args map[string]any, key string) string {
 	return fmt.Sprintf("%v", v)
 }
 
+// plainJSON is v written as JSON with nothing escaped that JSON does not need
+// escaped. encoding/json by default writes each "<", ">" and "&" of a string as
+// six bytes (\u003c), a safeguard for JSON that is placed inside HTML; the
+// answer of a builtin is not, and an answer that carries an email would be
+// several times its size, built inside the work that made it and read again by
+// everything that carries it after.
+func plainJSON(v any) ([]byte, error) {
+	var buf bytes.Buffer
+	encoder := json.NewEncoder(&buf)
+	encoder.SetEscapeHTML(false)
+	if err := encoder.Encode(v); err != nil {
+		return nil, err
+	}
+	// Encode ends what it writes with a newline.
+	return bytes.TrimSuffix(buf.Bytes(), []byte("\n")), nil
+}
+
 // resultNode wraps a builtin reply. Synthetic in the strict sense --
 // never persisted, and a `concept` string outside the
 // v{major}:{domain}:{entity} grammar so nothing mistakes it for graph
-// state (the integrationStatus precedent).
+// state (the integrationStatus precedent). The payload is plain JSON.
 func resultNode(kind string, payload map[string]any) ([]memorynodes.MemoryNode, error) {
-	body, err := json.Marshal(payload)
+	body, err := plainJSON(payload)
 	if err != nil {
 		return nil, fmt.Errorf("campaigns: marshal result: %w", err)
 	}
@@ -661,4 +701,41 @@ func resultNode(kind string, payload map[string]any) ([]memorynodes.MemoryNode, 
 		CreatedAt: time.Now().UTC(),
 		Payload:   body,
 	}}, nil
+}
+
+// resultRows wraps a builtin's list reply: one node per row, keyed by the row's
+// own id, under the same made-up concept resultNode uses so no row-authorization
+// tier can mistake a row for stored state.
+//
+// The id is the key the engine files a builtin's nodes under, and the engine
+// drops a node whose id is blank and keeps one of two that share an id. Either
+// would take a row out of the answer without a word, so both are refused here.
+// The order of rows is the order of nodes; a capability that wants it kept on the
+// wire declares PreserveOrder.
+func resultRows(kind string, rows []map[string]any) ([]memorynodes.MemoryNode, error) {
+	nodes := make([]memorynodes.MemoryNode, 0, len(rows))
+	seen := make(map[string]bool, len(rows))
+	now := time.Now().UTC()
+	for _, row := range rows {
+		id := str(row, "id")
+		if strings.TrimSpace(id) == "" {
+			return nil, fmt.Errorf("campaigns: %s row has no id", kind)
+		}
+		if seen[id] {
+			return nil, fmt.Errorf("campaigns: two %s rows share the id %q", kind, id)
+		}
+		seen[id] = true
+		body, err := plainJSON(row)
+		if err != nil {
+			return nil, fmt.Errorf("campaigns: marshal %s row %q: %w", kind, id, err)
+		}
+		nodes = append(nodes, memorynodes.MemoryNode{
+			ID:        id,
+			Concept:   "integration:campaigns:" + kind,
+			Type:      memorynodes.NodeTypeObject,
+			CreatedAt: now,
+			Payload:   body,
+		})
+	}
+	return nodes, nil
 }

@@ -84,16 +84,25 @@ type Integration struct {
 	// `status` -- which is exactly how it behaved before epic memql#4970,
 	// so the absence is a downgrade rather than a failure. See
 	// SetWorkJournal in analysis.go.
-	journal *workjournal.Journal
+	journal  *workjournal.Journal
+	training *trainingReader
 }
 
 // NewIntegration wires the engine handle. The factory is in plugin.go;
 // this constructor is exposed for tests that supply a stub engine.
-func NewIntegration(engine memql.IntegrationEngineAccess, database ...func() *sql.DB) *Integration {
+//
+// gateDB resolves the pool the document and file version write gates run on
+// (database.Database.GateDB, memql#6022): never the request pool the engine
+// works on. Without one the gates refuse, saying which wiring is missing.
+func NewIntegration(engine memql.IntegrationEngineAccess, gateDB ...func() *sql.DB) *Integration {
+	var resolve func() *sql.DB
+	if len(gateDB) > 0 {
+		resolve = gateDB[0]
+	}
 	gate := func(ctx context.Context, key string) (func(), error) {
-		var db *sql.DB
-		if len(database) > 0 && database[0] != nil {
-			db = database[0]()
+		db, err := memql.ResolveWriteGatePool(resolve, "library", "pass database.Database.GateDB to library.NewIntegration (a node's plug-in takes it from PluginContext.GateDB; a test or a tool opens one with database.NewGatePool)")
+		if err != nil {
+			return nil, err
 		}
 		return memql.AcquireWriteGate(ctx, db, key)
 	}
@@ -113,6 +122,8 @@ func (i *Integration) IntegrationName() string { return "library" }
 // Capabilities implements memql.IntegrationProvider.
 func (i *Integration) Capabilities() []memql.IntegrationCapability {
 	return append([]memql.IntegrationCapability{
+		{Name: "workTrainingContext", Description: "Read the current owned work scope for Training retrieval.", Handler: i.handleWorkTrainingContext},
+		{Name: "ownedTrainingLessons", Description: "Read bounded reviewed passages from the current work owner's taught Library files.", Handler: i.handleOwnedTrainingLessons, PreserveOrder: true},
 		{Name: "removeDocumentAnnotation", Description: "Remove your document feedback or personal note.", Handler: i.handleRemoveDocumentAnnotation},
 		{Name: "documentNotes", Description: "Read the caller’s personal notes.", Handler: i.handleDocumentNotes},
 		{Name: "addDocumentNote", Description: "Save a personal note, excluded from AI feedback.", Handler: i.handleAddDocumentNote},

@@ -1,0 +1,9 @@
+Research evidence and source retrieval
+
+Use targeted searches within catalog records or bibliographies to locate a missing title, abstract, finding or license. Bibliographic metadata verifies identity, not scientific findings: retrieve the primary abstract or paper when the finding is missing. Treat an established title or identifier as completed work; pursue the unresolved finding instead of repeatedly verifying identity.
+
+Keep a compact evidence ledger: the precise retrieved source URL, the claim it supports, a supporting passage or faithful paraphrase, retrieval failures and remaining gaps. Prefer primary sources when available. Never cite a blocked source as read, invent its publication date or substitute a familiar source name for its exact URL. Remembered background and interpretation are not retrieved evidence.
+
+A research-only section hands its evidence ledger to the consuming section. Check names, dates, chronology, causal claims and who performed each action against the sources. Label inferred motives as interpretations. Drafting retains source links and limitations; earlier model prose is not independent verification. Respect the section's requested coverage and output contract: evidence notes do not replace a required complete draft.
+
+If PDF text extraction fails, inspect the error and file before selecting an available alternative such as OCR or a different extractor. Use only authorized tools, preserve successful extraction receipts and verify recovered text against the source. Missing or inaccessible material remains an explicit evidence gap; an alternative route grants no new permission.

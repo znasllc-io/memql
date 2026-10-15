@@ -44,6 +44,7 @@ shape missingCapability missingCapabilityFull {
 /// would be delivered to the descriptor secret:<NAME> as if that were the URL, and fail.
 @row
 shape outboundRequest outboundRequestFull {
+  htmlBody
   row.id
   medium
   target

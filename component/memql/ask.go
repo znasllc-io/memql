@@ -2,6 +2,7 @@ package memql
 
 import (
 	"context"
+	"database/sql"
 	"database/sql/driver"
 	"encoding/json"
 	"errors"
@@ -19,26 +20,32 @@ import (
 )
 
 type AskTurn struct {
-	VoiceInterrupted bool         `json:"voiceInterrupted,omitempty"`
-	ID               string       `json:"id"`
-	Prompt           string       `json:"prompt"`
-	Answer           string       `json:"answer"`
-	Context          string       `json:"context,omitempty"`
-	State            string       `json:"state"`
-	StartedAt        time.Time    `json:"startedAt"`
-	EndedAt          *time.Time   `json:"endedAt,omitempty"`
-	Activity         []WorkEvent  `json:"activity"`
-	Error            string       `json:"error,omitempty"`
-	GoalID           string       `json:"goalId,omitempty"`
-	RunID            string       `json:"runId,omitempty"`
-	Workload         string       `json:"workload,omitempty"`
-	Background       bool         `json:"background,omitempty"`
-	Acknowledgement  string       `json:"acknowledgement,omitempty"`
-	AcknowledgedAt   *time.Time   `json:"acknowledgedAt,omitempty"`
-	WorkStatus       string       `json:"workStatus,omitempty"`
-	WorkTitle        string       `json:"workTitle,omitempty"`
-	Question         *AskQuestion `json:"question,omitempty"`
-	AnswerOnly       bool         `json:"answerOnly,omitempty"`
+	CanGuideWork        bool         `json:"canGuideWork,omitempty"`
+	GuidanceTargetRunID string       `json:"guidanceTargetRunId,omitempty"`
+	GuidanceStatus      string       `json:"guidanceStatus,omitempty"`
+	GuidanceEpoch       string       `json:"guidanceEpoch,omitempty"`
+	ApprovalID          string       `json:"approvalId,omitempty"`
+	Advisor             bool         `json:"advisor,omitempty"`
+	VoiceInterrupted    bool         `json:"voiceInterrupted,omitempty"`
+	ID                  string       `json:"id"`
+	Prompt              string       `json:"prompt"`
+	Answer              string       `json:"answer"`
+	Context             string       `json:"context,omitempty"`
+	State               string       `json:"state"`
+	StartedAt           time.Time    `json:"startedAt"`
+	EndedAt             *time.Time   `json:"endedAt,omitempty"`
+	Activity            []WorkEvent  `json:"activity"`
+	Error               string       `json:"error,omitempty"`
+	GoalID              string       `json:"goalId,omitempty"`
+	RunID               string       `json:"runId,omitempty"`
+	Workload            string       `json:"workload,omitempty"`
+	Background          bool         `json:"background,omitempty"`
+	Acknowledgement     string       `json:"acknowledgement,omitempty"`
+	AcknowledgedAt      *time.Time   `json:"acknowledgedAt,omitempty"`
+	WorkStatus          string       `json:"workStatus,omitempty"`
+	WorkTitle           string       `json:"workTitle,omitempty"`
+	Question            *AskQuestion `json:"question,omitempty"`
+	AnswerOnly          bool         `json:"answerOnly,omitempty"`
 	// Route is the source choice the turn's goal was opened with; absent for
 	// Auto. The run row carries the choice every node honours -- this is the
 	// conversation's own record of it.
@@ -62,7 +69,8 @@ type AskRoute struct {
 }
 
 type askTranscript struct {
-	Turns []AskTurn `json:"turns"`
+	Turns       []AskTurn `json:"turns"`
+	ApprovalIDs []string  `json:"approvalIds,omitempty"`
 }
 
 // RunAsk is shared by text and live voice. Only the server can append an
@@ -405,6 +413,41 @@ func (e *MemQLEngine) lockAskConversation(ctx context.Context, conversationID st
 	return e.lockAskConversationKind(ctx, conversationID, "turn")
 }
 func (e *MemQLEngine) lockAskConversationKind(ctx context.Context, conversationID, kind string) (func(), error) {
+	hold, err := e.holdAskConversation(ctx, conversationID, kind)
+	if err != nil {
+		return nil, err
+	}
+	return hold.release, nil
+}
+
+type askConversationHold struct {
+	conn *sql.Conn
+	key  int64
+}
+
+func (h *askConversationHold) verify(ctx context.Context) error {
+	var held bool
+	err := h.conn.QueryRowContext(ctx, `SELECT EXISTS (SELECT 1 FROM pg_locks WHERE locktype='advisory' AND granted AND pid=pg_backend_pid() AND objsubid=1 AND classid::bigint=(($1::bigint >> 32) & 4294967295) AND objid::bigint=($1::bigint & 4294967295))`, h.key).Scan(&held)
+	if err != nil {
+		return err
+	}
+	if !held {
+		return ErrWriteGateLost
+	}
+	return nil
+}
+func (h *askConversationHold) release() {
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	if _, err := h.conn.ExecContext(ctx, "SELECT pg_advisory_unlock($1)", h.key); err != nil {
+		_ = h.conn.Raw(func(any) error { return driver.ErrBadConn })
+	}
+	_ = h.conn.Close()
+}
+
+// Session locks outlive acquisition-context cancellation. The connection is
+// retained until the bounded write settles; no transaction inherits that clock.
+func (e *MemQLEngine) holdAskConversation(ctx context.Context, conversationID, kind string) (*askConversationHold, error) {
 	db := e.database()
 	if db == nil {
 		return nil, fmt.Errorf("conversation storage is unavailable")
@@ -436,12 +479,5 @@ func (e *MemQLEngine) lockAskConversationKind(ctx context.Context, conversationI
 		}
 		return nil, fmt.Errorf("MemQL is already working in this conversation")
 	}
-	return func() {
-		release, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-		defer cancel()
-		if _, err := conn.ExecContext(release, "SELECT pg_advisory_unlock($1)", key); err != nil {
-			_ = conn.Raw(func(any) error { return driver.ErrBadConn })
-		}
-		_ = conn.Close()
-	}, nil
+	return &askConversationHold{conn: conn, key: key}, nil
 }

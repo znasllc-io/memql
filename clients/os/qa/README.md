@@ -43,7 +43,7 @@ what says the page has not become a wall of advisories), or `overview`,
 `origins-silent`, `origins-mixed`, `origins-reporting` (Data origins), or
 `mesh-healthy`, `mesh-island`, `mesh-empty`, `mesh-node-bff`, `mesh-node-edge`,
 `mesh-node-identity`, `mesh-node-unreported` (Cluster > Mesh), or
-`sharing-owner`, `sharing-people`, `sharing-waiting`, `sharing-everyone`,
+`sharing-owner`, `sharing-people`, `sharing-legacy-descriptor`, `sharing-everyone`,
 `sharing-viewer`, `share-dialog`, `share-dialog-admin`, `share-dialog-empty`,
 `share-dialog-refused` (a machine's Sharing view and its dialog), or
 `nexus-procedure-evidence`, `nexus-procedure-overridden`,
@@ -132,17 +132,20 @@ behind "and 1 other", and broke a node id at its hyphen across two lines; a
 node with no report was dated "Report written"; identity's panel was titled
 "What it hears"; and a three-hour silence read "180 minutes".
 
-The `sharing-*` and `share-dialog*` views are a machine's Sharing view and
-the dialog behind its one act (epic memql#5344). `sharing-people` is the one to
-read first: names, both consents given, and the week's split ledger line;
-`sharing-waiting` is the same share with the machine's own consent missing, and
-`sharing-viewer` is somebody else's machine, which is counted rather than named.
-The dialog views render the dialog directly and script the one click a view
-needs; `&modal=0` draws it in the page for a capture tool that does not paint
-the top layer (a one-shot `--headless=new --screenshot` does paint it).
-`&arrow=N` arrows N times through the results from the search: take
-`share-dialog-admin&arrow=1` and the first option must be highlighted AND in
-view (the list is its options' offsetParent only while it is positioned).
+The `sharing-*` views exercise the inline Sharing editor: saved audiences,
+private machines, directory failures and non-owner access. `sharing-legacy-descriptor`
+verifies that an older machine descriptor does not block the saved audience.
+The `share-dialog*` fixture names are retained for their picker scenarios; they
+now render the inline editor. `fleet-equipment-sharing-people` exercises direct
+add/pause/resume/remove actions. `window.fleetQa.activity(n)` broadcasts changing
+recipient counts, including while paused. Check the divider, keyboard search,
+removing/re-adding the last recipient and refusal/retry at desktop and phone
+widths in every theme and mode.
+
+The `feedback` view shows information, warning and error notices, an actionable
+retry, domain errors and a removed-machine status. Check `theme=graphite`,
+`cobalt` and `vellum`, light/dark modes, and desktop/phone widths. Tone rails
+and message edges must stay straight; text wraps and keyboard retry works.
 
 Their first rendered pass found what 447 green cases could not: the search box
 drew about a hundred pixels tall, because `.os-input` is `flex: 1 1 12ch` and
@@ -151,7 +154,8 @@ machine told its owner to edit `policy.yaml` for a share they had not chosen.
 The review's pass found two more that no jsdom case can see: arrowing scrolled
 the active option OUT of view (an unpositioned list, so `offsetTop` counted
 from the dialog), and a refusal at the end of the scrolling body sat below the
-fold at 1366x650 and 361x760 -- it is now pinned above the floor.
+fold at 1366x650 and 361x760. The current editor saves each action directly and
+keeps failures beside the scrolling body with an explicit retry.
 
 ## What it is, and what it is not
 
@@ -250,16 +254,107 @@ behind the shell's window surface; also inspect a narrow viewport. All themes
 share the approved Fold geometry (3.1% / 1.7% ground–ink mixes). There are no
 nodes, lines, canvas or animation. The palette and numeral remain the theme's.
 
-Recurring campaigns use `campaign-repeat-empty`, `campaign-repeat-active`, and
-`campaign-repeat-blocked`. Add `width=narrow` for the constrained panel. Open
-**Set up repeating sends** on the empty view to inspect the date/cadence form.
+Email's full scene set uses `emailSeeds.ts` and `emailScenes.tsx`. Each renders
+real components over the suite's fixture connection, with public example data.
+The named scenes drive the same controls a person uses; `click=A|B` can override
+the scene's interaction sequence. `fill:Label=value` fills a field, and the CSV
+report scene supplies a browser File to the upload port. No scene sends email.
 
-Newsletter signup fixtures: `campaign-newsletter-empty` and `campaign-newsletter-active`. Open the plus control to review setup; use `width=narrow` for the compact layout.
+- Campaigns: `email-campaigns`, `email-campaigns-empty`, `email-campaign-add`,
+  `email-campaign-add-waiting`, `email-campaign-add-review`, `email-campaign-draft`,
+  `email-campaign-scheduled`, `email-campaign-sending`, `email-campaign-sent`,
+  `email-campaign-repeating`, `email-campaign-edit`.
+- Automations: `email-automations`, `email-automations-empty`,
+  `email-automation-draft`, `email-automation-on`, `email-automation-add`,
+  `email-automation-describe`, `email-rule`. Inspect the selected card's inspector,
+  issue placement, proposal outline, counts and narrow vertical reading order.
+- Audiences: `email-audiences`, `email-audiences-empty`, `email-audience`,
+  `email-audience-add`, `email-people-report`, `email-signup-form`. Inspect the
+  subscriber states, persistent import evidence and copyable signup code.
+- Templates: `email-templates`, `email-templates-empty`, `email-template`,
+  `email-template-plain`, `email-template-issues`, `email-template-create`,
+  `email-layouts`, `email-layouts-none`, `email-layout`, `email-layout-builtin`.
+  Inspect styled and plain previews, issues, publication actions and editor waits.
+- Inbox: `email-inbox`, `email-inbox-empty`, `email-inbox-external`, `email-message`.
+- Settings: `email-settings`, `email-settings-member`, `email-settings-single`,
+  `email-sender`. The member fixture verifies that actions follow access.
+
+Capture all scenes at 1400 and 520 pixels, light and dark. Check one heading,
+one pinned action bar, readable copy and keyboard focus. Rendering fixtures do
+not establish live cluster behavior; the component tests exercise subscriptions,
+version order, omitted-payload re-reads and refusals separately.
+
+Email's Overview: `email-overview` is a month of mail (five measured figures and
+the campaigns by state), `email-overview-empty` is first use (real zeros, one
+sentence and `Add a campaign` -- `&click=Add a campaign` follows it to the
+wizard), `email-overview-reading` has every read still on its way (shapes, no
+warning), `email-overview-refused` has three reads refused with nothing to show
+(dashes and the engine's sentences, never a zero), `email-overview-unmeasured`
+has a rate the engine could not state exactly (a dash with its reason beneath)
+and `email-overview-untracked` has two rates with the same reason (said once,
+under the first). `email-overview-floor` has an audience past the engine's count
+window, so Subscriptions is a floor: `5,089 or more`, never an exact-looking sum.
+Two scenes catch the page a few seconds after the cluster
+stopped answering, with every figure still the last one: `email-overview-interrupted`
+(the cluster refuses the refreshes: one notice carrying its sentence) and
+`email-overview-reconnecting` (the connection dropped: the same notice, saying it
+is reconnecting). Take the 520 capture too: the five figures fall to three and two.
 
 Azure email setup: `azure-email-dns`, `azure-email-provisioning`, and
-`azure-email-empty` use the shared Campaigns/Settings domain wizard. Open the
+`azure-email-empty` use the shared Email Settings domain wizard. Open the
 domain row (or Add sending domain on the empty view). Inspect both modes and
 `width=narrow`: DNS names and values use the same copyable strips as Deployables
 domain binding; the footer stays reachable and prior steps reopen. Provisioning
 shows an elapsed wait and continues automatically using the fixture connection.
 These views never contact Azure or change DNS.
+
+
+## Materializer
+
+The `materializer-*` scenes mount the real wizard, pages and lists. Capture at
+1400×900 and 520×900 in light and dark. The 25 scenes cover populated, empty
+and archived-only lists; the plus and Files entry points; mixed ingredients;
+blank PDF and inference refusals; a retained folder refusal; making progress;
+ready, archived, failed, described and deployable file pages; templates and
+recipes, including their add/detail pages; and Settings. The `files-add-menu`
+scene covers the Files entry point.
+
+The October 12 review inspected all 100 Materializer captures, with an
+independent dark-mode review. It removed the old composer styles, corrected
+search input sizing, separated and labelled preferences, corrected back
+labels, and made the current File step visible while making on narrow screens.
+The integrated browser pass rechecked Settings, progress and description
+refusal states after those corrections. There was no remaining accessory to
+remove without losing navigation, filtering, status or an action. Captures
+and the per-scene critique index stay outside this public repository.
+
+These fixture scenes verify layout and content. They do not claim that an
+Azure sender was provisioned or that a live model generated a document.
+
+Azure send receipts: `azure-email-sends`, `azure-email-sends-pending`, and
+`azure-email-sends-empty`. Choose **Our Studio**, open **Manage email for
+Our Studio**, then **Check sends**.
+These fixtures separate transport completion from timestamped recipient reports,
+show missing reports as unconfirmed, and expose feedback readiness with empty
+and populated lists. They never send email or provision Azure resources.
+
+Nexus approvals: `nexus-approvals`, `nexus-approvals-empty`,
+`nexus-approval-failure`, `nexus-approval-directory`, `nexus-approval-command`,
+`nexus-approval-message`, `nexus-permissions`, `nexus-permissions-empty`, and
+`nexus-permission` show the inbox, in-place decisions, and saved permissions.
+`nexus-approval-discussion`, `nexus-approval-advice`,
+`nexus-approval-advice-running`, `nexus-approval-guidance-recorded`, and
+`nexus-approval-guidance-history` open the
+real Ask sheet from a selected approval. Inspect both modes at desktop and
+narrow widths, including the action bar, named computer scope, readable advice,
+editable composer during investigation, and recorded-but-not-resumed guidance
+with **Retry continuing** using the saved answer. The history scene shows
+**View request** on persisted guidance so recovery remains reachable after reload.
+These scenes use synthetic conversation and permission receipts; they never
+approve production work, run commands, or call a model.
+
+`/ask-guidance.html?budget=1` shows a resumable budget discussion. Use
+`state=saved`, `state=pending`, or `state=error` to review saved guidance,
+an in-flight save, and a retryable save with the original draft retained.
+Saving keeps the request pending; it never raises a limit or resumes work.
+Inspect both modes and a narrow viewport, including the saved-text disclosure.

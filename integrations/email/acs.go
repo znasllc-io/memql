@@ -16,6 +16,7 @@ import (
 	"time"
 
 	"github.com/znasllc-io/memql/component/compose"
+	"github.com/znasllc-io/memql/component/memql"
 	"github.com/znasllc-io/memql/core/id"
 )
 
@@ -26,12 +27,13 @@ const acsEmailAPIVersion = "2025-09-01"
 // display names. Neither a caller's From header nor a different organization's
 // connection can enlarge that set.
 type ACSConfig struct {
-	AccountID string            `json:"accountId"`
-	Endpoint  string            `json:"endpoint"`
-	AccessKey string            `json:"accessKey"`
-	Senders   map[string]string `json:"senders"`
-	Default   string            `json:"defaultSender"`
-	ReplyTo   string            `json:"replyTo,omitempty"`
+	AccountID  string            `json:"accountId"`
+	ResourceID string            `json:"resourceId,omitempty"`
+	Endpoint   string            `json:"endpoint"`
+	AccessKey  string            `json:"accessKey"`
+	Senders    map[string]string `json:"senders"`
+	Default    string            `json:"defaultSender"`
+	ReplyTo    string            `json:"replyTo,omitempty"`
 }
 
 // ACSSender uses ACS's outbound Email API. A successful call means Azure
@@ -145,7 +147,7 @@ func (s *ACSSender) Send(ctx context.Context, msg Message, as SendAs) error {
 	if len(body) > 10<<20 {
 		return permanentSendRefusal("email exceeds the Azure message size limit")
 	}
-	return s.submitOnce(ctx, msg.IntentID, body)
+	return s.submitOnce(withACSMessage(ctx, msg, address), msg.IntentID, body)
 }
 
 func (s *ACSSender) post(ctx context.Context, operationID string, body []byte) error {
@@ -178,6 +180,115 @@ func (s *ACSSender) post(ctx context.Context, operationID string, body []byte) e
 	return classifyHTTPSend(response.StatusCode, response.Header.Get("Retry-After"), "Azure did not accept the message")
 }
 
+// acsHoldLimit bounds how long one delivery holds its receipt's lock: the POST (the
+// client gives up at 30 s) and the write of its outcome (5 s), with room. Far
+// inside the gate session's idle limit.
+const acsHoldLimit = 90 * time.Second
+
+// acsBusyRetryAfter is how long a delivery that could not take its receipt's lock
+// asks its caller to wait. The lock is the pod's, not the provider's, and it clears
+// in moments; the caller's provider-throttle handling does the waiting.
+const acsBusyRetryAfter = 15 * time.Second
+
+// operationKey is the receipt's key for a delivery: the organization and the
+// message's intent.
+func (s *ACSSender) operationKey(intent string) string {
+	return emailStateID("acs-send:" + s.cfg.AccountID + ":" + intent)
+}
+
+// heldOperationKey carries, in a context, the receipt key whose lock the caller
+// reserved (Reserve) and holds until the delivery is over.
+type heldOperationKey struct{}
+
+type heldOperationScope struct {
+	key  string
+	hold acsOperationGate
+	keys []string
+}
+
+func withHeldOperation(ctx context.Context, key string, hold acsOperationGate, keys []string) context.Context {
+	return context.WithValue(ctx, heldOperationKey{}, heldOperationScope{key: key, hold: hold, keys: keys})
+}
+func heldOperation(ctx context.Context) heldOperationScope {
+	hold, _ := ctx.Value(heldOperationKey{}).(heldOperationScope)
+	return hold
+}
+
+// CopyDeliveryGates preserves native reservation evidence on the caller's own
+// identity context. It carries no serialized or caller-supplied authority.
+func CopyDeliveryGates(target, source context.Context) context.Context {
+	return context.WithValue(target, heldOperationKey{}, heldOperation(source))
+}
+
+// BorrowDeliveryGate verifies a lock already reserved with the send receipt on
+// the same connection. Its lifetime belongs to the reservation's caller.
+func BorrowDeliveryGate(ctx context.Context, key string) (func(context.Context) error, bool) {
+	scope := heldOperation(ctx)
+	for _, held := range scope.keys {
+		if held == key && scope.hold != nil {
+			return scope.hold.Verify, true
+		}
+	}
+	return nil, false
+}
+
+type boundedOperationGate struct {
+	acsOperationGate
+	cancel context.CancelFunc
+}
+
+func (h boundedOperationGate) Release() { h.acsOperationGate.Release(); h.cancel() }
+
+// lockDelivery takes a delivery's receipt lock and returns the function that gives
+// it up. The lock is held on a context the caller's CANCELLATION does not end: a
+// request that stops waiting while the message is out still has the outcome it
+// never saw recorded under the lock, not after the lock was rolled back with the
+// caller's transaction. It is bounded (acsHoldLimit), and a caller whose own
+// context is done by the time the lock is taken gets that back with nothing
+// attempted.
+//
+// A lock that is busy is a refusal made before anything is attempted, and it says
+// so as a throttle: the callers that already know how to wait for a provider
+// (the bulk drain parks the job, the transactional worker backs off) wait, and
+// it costs no attempt.
+func (s *ACSSender) lockDelivery(ctx context.Context, key string, keys ...string) (acsOperationGate, error) {
+	hold, cancel := context.WithTimeout(context.WithoutCancel(ctx), acsHoldLimit)
+	gate, err := s.operations.lock(hold, key, keys...)
+	if err != nil {
+		cancel()
+		if memql.IsWriteGateBusy(err) {
+			return nil, &SendError{
+				Throttled: true, RetryAfter: acsBusyRetryAfter,
+				Detail: "Azure send coordination is busy, so nothing was submitted; try again in a moment (" + memql.ErrWriteGateBusy.Error() + ")",
+				Cause:  err,
+			}
+		}
+		return nil, err
+	}
+	if err := ctx.Err(); err != nil {
+		gate.Release()
+		cancel()
+		return nil, err
+	}
+	return boundedOperationGate{acsOperationGate: gate, cancel: cancel}, nil
+}
+
+// Reserve takes the receipt's lock for a delivery before its caller records that an
+// attempt has begun (Reserver). The Send that follows, called with the context
+// returned here, does not ask for the lock again; the caller gives it back when the
+// delivery is over.
+func (s *ACSSender) Reserve(ctx context.Context, msg Message, _ SendAs, keys ...string) (context.Context, func(), error) {
+	if s.operations == nil || msg.IntentID == "" {
+		return ctx, func() {}, nil
+	}
+	key := s.operationKey(msg.IntentID)
+	hold, err := s.lockDelivery(ctx, key, keys...)
+	if err != nil {
+		return nil, nil, err
+	}
+	return withHeldOperation(ctx, key, hold, keys), hold.Release, nil
+}
+
 func (s *ACSSender) submitOnce(ctx context.Context, intent string, body []byte) error {
 	if s.operations == nil {
 		return permanentSendRefusal("Azure send receipt storage is unavailable")
@@ -185,17 +296,22 @@ func (s *ACSSender) submitOnce(ctx context.Context, intent string, body []byte) 
 	if intent == "" {
 		intent = "transactional:" + id.NewShortId()
 	}
-	key := emailStateID("acs-send:" + s.cfg.AccountID + ":" + intent)
-	release, err := s.operations.lock(ctx, key)
-	if err != nil {
-		return err
-	}
-	locked := true
-	defer func() {
-		if locked {
-			release()
+	key := s.operationKey(intent)
+	// ONE hold, from before the first receipt to after the last. The lock is not
+	// given up while the message is out and asked for again afterwards: a request
+	// for it that is refused for being busy once the POST has gone would leave a
+	// message the provider accepted, whose receipt says "submitting" and so can
+	// never be submitted again, and whose caller was told it failed. Nothing that
+	// can be refused for being busy happens after the first receipt.
+	scope := heldOperation(ctx)
+	if scope.key != key {
+		hold, err := s.lockDelivery(ctx, key)
+		if err != nil {
+			return err
 		}
-	}()
+		defer hold.Release()
+		scope = heldOperationScope{key: key, hold: hold}
+	}
 	op, prior, found, err := s.operations.read(ctx, key)
 	if err != nil {
 		return err
@@ -213,16 +329,25 @@ func (s *ACSSender) submitOnce(ctx context.Context, intent string, body []byte) 
 		}
 	} else {
 		op = acsOperation{ID: id.NewShortId(), AccountID: s.cfg.AccountID, Endpoint: s.cfg.Endpoint, Digest: digest, Intent: intent}
+		op.ResourceID = s.cfg.ResourceID
+		if message, ok := ctx.Value(acsMessageKey{}).(acsMessageIdentity); ok {
+			op.DeliveryID, op.RecipientDigest, op.SenderDigest = message.DeliveryID, message.RecipientDigest, message.SenderDigest
+		}
 	}
 	op.Status, op.Detail, op.SubmittedAt, op.NextPollAt = "submitting", "", s.now().UTC(), s.now().UTC().Add(15*time.Second)
-	_, err = s.operations.write(ctx, key, op, prior)
+	if err = scope.hold.Verify(ctx); err != nil {
+		return err
+	}
+	// The engine may finish a dispatched mutation after the caller stops
+	// waiting. Keep the reservation until this bounded receipt commit settles.
+	commit, finish := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
+	if err = scope.hold.Verify(commit); err == nil {
+		_, err = s.operations.write(commit, key, op, prior)
+	}
+	finish()
 	if err != nil {
 		return err
 	} // No POST before its durable receipt.
-	// The persisted submitting state is the at-most-once claim. Do not keep a
-	// caller-cancelled transaction as the lock for the later recovery write.
-	release()
-	locked = false
 	sendErr := s.post(ctx, op.ID, body)
 	op.CheckedAt = s.now().UTC()
 	if sendErr == nil {
@@ -238,13 +363,10 @@ func (s *ACSSender) submitOnce(ctx context.Context, intent string, body []byte) 
 			op.Status, op.Detail = "rejected", "Azure refused this send request."
 		}
 	}
+	// The outcome is written on a context the caller's cancellation does not end,
+	// under the lock this delivery has held since before its first receipt.
 	persist, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
 	defer cancel()
-	finish, err := s.operations.lock(persist, key)
-	if err != nil {
-		return permanentSendRefusal("Azure acceptance needs reconciliation; the saved attempt prevents another submission")
-	}
-	defer finish()
 	current, revision, exists, err := s.operations.read(persist, key)
 	if err != nil || !exists || current.ID != op.ID {
 		return permanentSendRefusal("Azure acceptance needs reconciliation; the saved attempt prevents another submission")
@@ -254,6 +376,9 @@ func (s *ACSSender) submitOnce(ctx context.Context, intent string, body []byte) 
 		return operationSendOutcome(current)
 	}
 	prior = revision
+	if err = scope.hold.Verify(persist); err != nil {
+		return permanentSendRefusal("Azure acceptance needs reconciliation; the saved attempt prevents another submission")
+	}
 	if _, err = s.operations.write(persist, key, op, prior); err != nil {
 		return permanentSendRefusal("Azure acceptance needs reconciliation; the saved attempt prevents another submission")
 	}

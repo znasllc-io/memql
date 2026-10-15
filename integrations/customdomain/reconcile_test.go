@@ -8,8 +8,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/znasllc-io/memql/component/deploycontrol"
 	langparser "github.com/znasllc-io/memql/component/language/parser"
+	"github.com/znasllc-io/memql/core/capabilityresult"
 )
 
 // The state machine, end to end, with no database, no cluster and no network.
@@ -499,7 +499,7 @@ func TestScriptSubstrateFoldsARefusalEnvelopeIntoATypedOutcome(t *testing.T) {
 	stdout := []byte(`{"ok":false,"capability":"domain.bind","changed":false,` +
 		`"result":{"reason":"no_acme_issuer","detail":"this cluster declares no ACME issuer"},` +
 		`"error":{"code":3,"message":"no ACME issuer configured"}}`)
-	env, err := deploycontrol.ParseCapabilityResult(stdout)
+	env, err := capabilityresult.ParseCapabilityResult(stdout)
 	if err != nil {
 		t.Fatalf("ParseCapabilityResult: %v", err)
 	}
@@ -524,7 +524,7 @@ func TestScriptSubstrateReadsCertificateReadyInBothEncodings(t *testing.T) {
 	for _, encoded := range []string{`true`, `"true"`} {
 		stdout := []byte(`{"ok":true,"capability":"domain.bind","changed":true,` +
 			`"result":{"certificateReady":` + encoded + `,"certificateStatus":"the certificate is Ready"}}`)
-		env, err := deploycontrol.ParseCapabilityResult(stdout)
+		env, err := capabilityresult.ParseCapabilityResult(stdout)
 		if err != nil {
 			t.Fatalf("ParseCapabilityResult(%s): %v", encoded, err)
 		}
@@ -540,11 +540,11 @@ func TestScriptSubstrateReadsCertificateReadyInBothEncodings(t *testing.T) {
 }
 
 type stubScriptRunner struct {
-	res deploycontrol.CapabilityResult
+	res capabilityresult.CapabilityResult
 	err error
 }
 
-func (s stubScriptRunner) Run(_ context.Context, _ string, _ map[string]any) (deploycontrol.CapabilityResult, error) {
+func (s stubScriptRunner) Run(_ context.Context, _ string, _ map[string]any) (capabilityresult.CapabilityResult, error) {
 	return s.res, s.err
 }
 

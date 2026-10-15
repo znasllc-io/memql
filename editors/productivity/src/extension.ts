@@ -2,17 +2,18 @@ import { configureProblems, ProblemReporter, UserInputError, userOperation } fro
 import { setProblemOutput, showProblem } from "./problemUI.js";
 import * as vscode from "vscode";
 import type { EditorConnectionAPI } from "../../vscode/src/connection/api.js";
-import { Documents, isZip, resourceFrom, type OpenDocument } from "./documents.js";
-import { newTemplate } from "./templates.js";
-import { TemplateEditor } from "./templateEditor.js";
-import { TemplatePublisher } from "./templatePublish.js";
-import { TemplateExamples } from "./templateExamples.js";
+import { Documents, isZip, NEW_EMAIL_IS_A_PAGE, resourceFrom, type OpenDocument } from "./documents.js";
+import { EmailEditor } from "./emailEditor.js";
+import { NewEmail } from "./newEmail.js";
+import { DocumentDictation } from "./dictation.js";
+import { newMarkdown } from "./newMarkdown.js";
 import { MarkdownEditor } from "./markdownEditor.js";
 import { PDFEditor, PDFDocument } from "./pdfEditor.js";
 import { syncDesktopAppearance } from "./themeSync.js";
-import { imageMarkdown, imageMime, MAX_IMAGE_BYTES, rasterImageName } from "./markdownAssets.js";
+import { imageMime, rasterImageName } from "./markdownAssets.js";
+import { insertImage } from "./insertImage.js";
 
-class MemQLFiles implements vscode.FileSystemProvider {
+export class MemQLFiles implements vscode.FileSystemProvider {
   readonly changed = new vscode.EventEmitter<vscode.FileChangeEvent[]>();
   readonly onDidChangeFile = this.changed.event;
   private readonly documents = new Map<string, OpenDocument>();
@@ -44,13 +45,25 @@ class MemQLFiles implements vscode.FileSystemProvider {
     }
     return pending;
   }
+  /**
+   * A New email link names a page, not a file, so it answers from the link alone: no network call, no bytes, no writes.
+   * Anything that is not a well-formed New email link takes the unchanged path, which refuses a bad link as it always did.
+   */
+  private isNewEmail(uri: vscode.Uri): boolean {
+    try { return resourceFrom(uri.toString()).kind === "new-email"; } catch { return false; }
+  }
   async stat(uri: vscode.Uri): Promise<vscode.FileStat> {
+    if (this.isNewEmail(uri)) return { type: vscode.FileType.File, ctime: 0, mtime: 0, size: 0, permissions: vscode.FilePermission.Readonly };
     const doc = await this.load(uri);
     return { type: vscode.FileType.File, ctime: 0, mtime: Date.parse(doc.revision || "") || doc.version, size: doc.content.length,
       permissions: ["file", "generated_output", "campaign_template"].includes(doc.kind) ? undefined : vscode.FilePermission.Readonly };
   }
-  async readFile(uri: vscode.Uri): Promise<Uint8Array> { return new Uint8Array((await this.load(uri)).content); }
+  async readFile(uri: vscode.Uri): Promise<Uint8Array> {
+    if (this.isNewEmail(uri)) return new Uint8Array();
+    return new Uint8Array((await this.load(uri)).content);
+  }
   async writeFile(uri: vscode.Uri, content: Uint8Array): Promise<void> {
+    if (this.isNewEmail(uri)) throw vscode.FileSystemError.NoPermissions(NEW_EMAIL_IS_A_PAGE);
     const doc = this.documents.get(uri.toString());
     if (!doc) throw vscode.FileSystemError.NoPermissions("Open and read the current file before saving a new version.");
     await userOperation("save the file", () => this.files.save(doc, content));
@@ -75,6 +88,7 @@ export async function activate(context: vscode.ExtensionContext) {
   context.subscriptions.push(problems);
   const files = new Documents(connection);
   const provider = new MemQLFiles(files);
+  const dictation = new DocumentDictation(context, files);
   const markdown = new MarkdownEditor(context, files, uri => provider.load(uri), async document => {
     if (document.isDirty) return false;
     const version = document.version;
@@ -83,7 +97,7 @@ export async function activate(context: vscode.ExtensionContext) {
     provider.useBase(document.uri, latest);
     provider.changed.fire([{type:vscode.FileChangeType.Changed,uri:document.uri}]);
     return true;
-  });
+  }, dictation);
   const pdf = new PDFEditor(context, {
     base: async uri => { const doc = await provider.load(uri); return { version: doc.version, revision: doc.revision, sourceId: doc.sourceId }; },
     recover: async (uri, base) => {
@@ -94,9 +108,8 @@ export async function activate(context: vscode.ExtensionContext) {
     refresh: async uri => { provider.useBase(uri, await provider.latest(uri)); },
     release: uri => { if (!vscode.workspace.textDocuments.some(doc => doc.uri.toString() === uri.toString())) provider.close(uri); },
   });
-  const publisher = new TemplatePublisher(connection, context, uri => provider.load(uri));
-  const templates = new TemplateEditor(context, document => publisher.publish(document));
-  const examples = new TemplateExamples(connection, context);
+  const emails = new EmailEditor(context, connection, files, uri => provider.load(uri));
+  const newEmail = new NewEmail(context, connection, dictation);
   const comparisons = new Map<string, { snapshot: vscode.Uri; document: OpenDocument }>();
   const snapshots = new Map<string, string>();
   let snapshotNumber = 0;
@@ -111,54 +124,19 @@ export async function activate(context: vscode.ExtensionContext) {
       if (comparison) { snapshots.delete(comparison.snapshot.toString()); comparisons.delete(key); }
       if (document.uri.scheme === "memql-review") snapshots.delete(key);
     }),
-    vscode.window.registerCustomEditorProvider("memql.productivity.email", { resolveCustomTextEditor: (document, panel) => userOperation("open the email preview", () => templates.resolveCustomTextEditor(document, panel)) }, { supportsMultipleEditorsPerDocument: true }),
-    ...(["source", "preview", "split"] as const).map(mode => vscode.commands.registerCommand(`memql.productivity.template.${mode}`, async (uri?: vscode.Uri) => {
-      try { await templates.show(mode, uri); } catch (error) { void showProblem(error, "open the email preview"); }
+    vscode.window.registerCustomEditorProvider("memql.productivity.email", { resolveCustomTextEditor: (document, panel) => userOperation("open the email", () => emails.resolveCustomTextEditor(document, panel)) }, { supportsMultipleEditorsPerDocument: true }),
+    ...(["design", "source", "split"] as const).map(mode => vscode.commands.registerCommand(`memql.productivity.email.${mode}`, async (uri?: vscode.Uri) => {
+      try { await emails.show(mode, uri); } catch (error) { void showProblem(error, "open the email view"); }
     })),
-    vscode.commands.registerCommand("memql.productivity.templateFromExamples", async () => {
-      try { await examples.start(); } catch (error) { void showProblem(error, "create the email draft"); }
-    }),
-    vscode.commands.registerCommand("memql.productivity.resumeEmailComposition", async () => {
-      try { await examples.resume(); } catch (error) { void showProblem(error, "resume the email draft"); }
+    vscode.window.registerCustomEditorProvider("memql.productivity.newEmail", newEmail),
+    vscode.commands.registerCommand("memql.productivity.newEmail", async () => {
+      try { await newEmail.open(); } catch (error) { void showProblem(error, "open New email"); }
     }),
     vscode.window.registerCustomEditorProvider("memql.productivity.markdown", { resolveCustomTextEditor: (document, panel) => userOperation("open the document", () => markdown.resolveCustomTextEditor(document, panel)) }, { supportsMultipleEditorsPerDocument: true, webviewOptions: { enableFindWidget: false } }),
     vscode.commands.registerCommand("memql.productivity.newMarkdown", async () => {
-      try {
-        const lease = connection.current();
-        if (!lease) throw new UserInputError("Connect to your cluster in MemQL before creating a document.");
-        const name = await vscode.window.showInputBox({ title: "New Markdown document", value: "Untitled.md", prompt: `Save in ${lease.name}. Add content in Source or request it in Review.`,
-          validateInput: value => !value.trim() || /[\\/\u0000-\u001f]/.test(value) || value.length > 150 ? "Enter a file name, without a folder path." : undefined });
-        if (!name) return;
-        const filename = /\.(md|markdown)$/i.test(name) ? name : `${name}.md`;
-        const uri = await files.createFile(lease, filename, "text/markdown", new TextEncoder().encode("\n"));
-        await markdown.show("review", vscode.Uri.parse(uri));
-      } catch (error) { void showProblem(error, "create the Markdown document"); }
+      try { await newMarkdown(connection, uri => markdown.show("review", uri)); } catch (error) { void showProblem(error, "create the Markdown document"); }
     }),
-    vscode.commands.registerCommand("memql.productivity.markdown.insertImage", async () => {
-      try {
-        const editor = vscode.window.activeTextEditor;
-        if (!editor || editor.document.languageId !== "markdown" || editor.document.uri.scheme !== "memql-file") throw new UserInputError("Open a MemQL Markdown document in Source to insert an image.");
-        const document = editor.document, version = document.version, selection = editor.selection;
-        const base = await provider.load(document.uri);
-        const selected = await vscode.window.showOpenDialog({ title: "Insert image", openLabel: "Insert image", canSelectMany: false, canSelectFiles: true, canSelectFolders: false,
-          defaultUri: vscode.Uri.file("/"), filters: { Images: ["png", "jpg", "jpeg", "gif", "webp"] } });
-        if (!selected?.[0]) return;
-        if ((await vscode.workspace.fs.stat(selected[0])).size > MAX_IMAGE_BYTES) throw new UserInputError("Choose an image smaller than 8 MiB.");
-        const bytes = await vscode.workspace.fs.readFile(selected[0]);
-        const name = selected[0].path.split("/").pop()!;
-        const mime = imageMime(name, bytes);
-        const alt = await vscode.window.showInputBox({ title: "Image description", prompt: "Describe what the image shows for readers using assistive technology.", value: name.replace(/\.[^.]+$/, "").replace(/[-_]/g, " ") });
-        if (alt === undefined) return;
-        if (document.isClosed || document.version !== version) throw new UserInputError("The document changed. Insert the image again at the intended position.");
-        const uri = await files.createFile(base.lease, name, mime, bytes);
-        // Upload is durable. If an edit raced it, offer the saved link without
-        // applying a stale selection or uploading a duplicate.
-        if (document.isClosed || document.version !== version || !await editor.edit(edit => edit.replace(selection, imageMarkdown(alt, uri)))) {
-          await vscode.env.clipboard.writeText(imageMarkdown(alt, uri));
-          void vscode.window.showInformationMessage("The image was saved. Its Markdown link is copied; paste it at the intended position in Source.");
-        }
-      } catch (error) { void showProblem(error, "insert the image"); }
-    }),
+    vscode.commands.registerCommand("memql.productivity.markdown.insertImage", insertImage(files, uri => provider.load(uri))),
     ...(["source", "reading", "review", "split"] as const).map(mode => vscode.commands.registerCommand(`memql.productivity.markdown.${mode}`, async (uri?: vscode.Uri) => {
       try { await markdown.show(mode, uri); } catch (error) { void showProblem(error, "open the Markdown view"); }
     })),
@@ -206,15 +184,6 @@ export async function activate(context: vscode.ExtensionContext) {
       revertCustomDocument: (document) => userOperation("reload the PDF", () => pdf.revertCustomDocument(document)),
       backupCustomDocument: (document, backup) => userOperation("back up the PDF", () => pdf.backupCustomDocument(document, backup)),
     } satisfies vscode.CustomEditorProvider<PDFDocument>, { supportsMultipleEditorsPerDocument: true }),
-    vscode.commands.registerCommand("memql.productivity.newTemplate", async () => {
-      try {
-        const doc = await vscode.workspace.openTextDocument({ language: "json", content: newTemplate() });
-        await vscode.window.showTextDocument(doc);
-      } catch (error) { await showProblem(error, "create an email template"); }
-    }),
-    vscode.commands.registerCommand("memql.productivity.previewTemplate", async () => {
-      try { await templates.show("split"); } catch (error) { void showProblem(error, "preview the email"); }
-    }),
     vscode.commands.registerCommand("memql.productivity.openFile", async () => {
       const uri = await vscode.window.showInputBox({ title: "MemQL file link", placeHolder: "memql-file://cluster.example/artifacts/id/document.md" });
       if (uri) { try { await open(uri); } catch (error) { await showProblem(error, "open the file"); } }
@@ -235,5 +204,5 @@ export async function activate(context: vscode.ExtensionContext) {
     resourceFrom(resource);
     await vscode.commands.executeCommand("vscode.open", vscode.Uri.parse(resource));
   }
-  return { connectionVersion: connection.version, ...(context.extensionMode === vscode.ExtensionMode.Test ? { templateReady: (uri: vscode.Uri, version?: number) => templates.whenRendered(uri, version), pdfReady: (uri: vscode.Uri) => pdf.whenRendered(uri), markdownReady: (uri: vscode.Uri, version?: number) => markdown.whenRendered(uri, version) } : {}) };
+  return { connectionVersion: connection.version, ...(context.extensionMode === vscode.ExtensionMode.Test ? { newEmailReady: (uri: vscode.Uri) => newEmail.whenShown(uri), emailReady: (uri: vscode.Uri, version?: number) => emails.whenShown(uri, version), pdfReady: (uri: vscode.Uri) => pdf.whenRendered(uri), markdownReady: (uri: vscode.Uri, version?: number) => markdown.whenRendered(uri, version) } : {}) };
 }

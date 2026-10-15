@@ -63,3 +63,48 @@ func TestCapabilityShortlistIncludesUsableContractsWithoutUnboundedContext(t *te
 	_, err := e.workCapabilitiesBuiltin(context.Background(), map[string]any{"search": "records"}, 0)
 	require.Error(t, err)
 }
+
+// TestWorkCapabilityAppNamesAnAppTheSeedsAndTheOSBothHave pins the namespace to
+// OS-app map workCapabilityApp answers. A capability is offered only to a caller
+// holding `read` on `app:<id>` (workCapabilityAllowed), and the action event it
+// records tells the desktop to open the app of that id (the OS looks it up in
+// the registry), so an id the seeds or the OS registry no longer has makes every
+// construct in that namespace unusable to an agent and unnavigable on the
+// desktop, with no error anywhere. The campaigns namespace is the one that
+// moved: Campaigns became Email (memql#6033) and its constructs follow the app.
+func TestWorkCapabilityAppNamesAnAppTheSeedsAndTheOSBothHave(t *testing.T) {
+	_, seeded := seededAppResources(t)
+	registered := map[string]bool{}
+	for _, app := range navigationApps() {
+		registered[app.ID] = true
+	}
+	if len(seeded) == 0 || len(registered) == 0 {
+		t.Fatalf("read %d seeded apps and %d registered apps; the seeds or the navigation catalog moved", len(seeded), len(registered))
+	}
+	for _, tc := range []struct{ origin, name, want string }{
+		{"campaigns/queries.memql", "campaigns", "email"},
+		{"campaigns/mutations.memql", "createCampaign", "email"},
+		{"accounts/queries.memql", "accounts", "accounts"},
+		{"platform/queries.memql", "sitesAll", "deployables"},
+		{"library/queries.memql", "artifacts", "files"},
+		{"identity/queries.memql", "usersAll", "users"},
+		{"identity/queries.memql", "myProfile", "identity"},
+		{"groups/queries.memql", "groups", "users"},
+		{"cluster/queries.memql", "nodes", "cluster"},
+		{"worker/queries.memql", "workers", "fleet"},
+		{"work/queries.memql", "goals", "nexus"},
+		{"knowledge/queries.memql", "documents", "training"},
+	} {
+		got := workCapabilityApp(&Function{Name: tc.name, Origin: tc.origin})
+		if got != tc.want {
+			t.Errorf("%s (%s) belongs to app %q, want %q", tc.name, tc.origin, got, tc.want)
+			continue
+		}
+		if _, ok := seeded["app:"+got]; !ok {
+			t.Errorf("%s (%s) names app %q and the seeds declare no `read app:%s`; no role could ever use it", tc.name, tc.origin, got, got)
+		}
+		if !registered[got] {
+			t.Errorf("%s (%s) names app %q and the OS navigation catalog has no such app; the desktop could never open it", tc.name, tc.origin, got)
+		}
+	}
+}

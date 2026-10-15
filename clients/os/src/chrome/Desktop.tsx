@@ -65,11 +65,13 @@ export function Desktop({
   viewport,
   placement,
   uploads,
+  hidePager = false,
   handoffPorts = browserHandoffPorts,
 }: {
   viewport: { w: number; h: number };
   placement: PlacementTokens;
   uploads: UploadProvider;
+  hidePager?: boolean;
   handoffPorts?: HandoffPorts;
 }) {
   const { state, actions, registry, actorRole, grid } = useOs();
@@ -537,7 +539,7 @@ export function Desktop({
             {deskError}
           </p>
         ) : null}
-        <DeskPager draggingWindow={draggingWindow} />
+        {!hidePager ? <DeskPager draggingWindow={draggingWindow} /> : null}
         {menu ? (
           <ContextMenu
             x={menu.x}

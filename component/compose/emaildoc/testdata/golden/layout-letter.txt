@@ -1,0 +1,36 @@
+Thanks for joining us
+
+I'm Sam Rivera, and I started Acme to make everyday routines a little lighter.
+
+People kept telling me the same thing: it's the small daily jobs that wear you down.
+
+So we built Acme: simple tools, made with care, that each do one job well.
+
+We also made Ace, a friendly guide that turns routines into small wins.
+
+Every week I'll share practical tips, behind-the-scenes stories and ideas you can try right away.
+
+Thanks for joining us. There's plenty more to come.
+
+Read our story
+
+Founder of Acme
+
+Stay in touch!
+
+We share one useful idea every week.
+
+Follow us
+
+Instagram
+YouTube
+LinkedIn
+
+Contact us
+Manage preferences: {{preferencesUrl}}
+Unsubscribe: {{unsubscribeUrl}}
+View in browser: {{viewUrl}}
+ACME
+123 Example Street, Springfield
+You're receiving this email because you signed up for updates from Acme.
+© 2026 Acme

@@ -41,7 +41,7 @@ func TestReviewCommentsAcrossReplicasAndDocumentRevisions(t *testing.T) {
 		if err = engine.Init(memorynodes.DefaultRegistry()); err != nil {
 			t.Fatal(err)
 		}
-		return NewIntegration(engine, func() *sql.DB { return db.DB }), engine
+		return NewIntegration(engine, replicaGatePool(t)), engine
 	}
 	first, engine := open()
 	second, _ := open()
@@ -158,8 +158,9 @@ func TestReviewCommentsAcrossReplicasAndDocumentRevisions(t *testing.T) {
 	// Uploaded Markdown takes the blob path on whichever replica receives the
 	// call. No blob is read until both the index and backing row admit the user.
 	fileID := documentID + "-file"
-	call, _ := langparser.RenderCall("createLibraryFile", map[string]any{"fileId": fileID, "name": "review.md", "mimeType": "text/markdown", "size": 13, "blobUrl": "https://store.example/review.md", "source": "uploaded", "format": "markdown"})
-	if _, err = engine.Execute(ctx, "mutation "+call); err != nil {
+	call, _ := langparser.RenderCall("createLibraryFile", map[string]any{"fileId": fileID, "name": "review.md", "mimeType": "text/markdown", "size": 13, "blobUrl": "https://store.example/memql-library/library/" + owner + "/" + fileID + "/review.md", "source": "uploaded", "format": "markdown"})
+	// @serverOnly: seeded with internal origin, as component/server/libraryfile writes it.
+	if _, err = engine.Execute(auth.ContextWithInternalOrigin(ctx), "mutation "+call); err != nil {
 		t.Fatal(err)
 	}
 	call, _ = langparser.RenderCall("createArtifact", map[string]any{"sourceConceptRef": fileID, "ownerUserId": owner, "lens": "artifact", "kind": "file", "source": "uploaded", "title": "review.md", "format": "markdown"})

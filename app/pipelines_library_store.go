@@ -11,8 +11,9 @@ import (
 	"strings"
 
 	"github.com/znasllc-io/memql/component/auth"
-	langparser "github.com/znasllc-io/memql/component/language/parser"
+	"github.com/znasllc-io/memql/component/database/storagequota"
 	"github.com/znasllc-io/memql/component/server"
+	"github.com/znasllc-io/memql/component/server/libraryfile"
 	"github.com/znasllc-io/memql/core/id"
 	"github.com/znasllc-io/memql/integrations/pipelinesteps"
 )
@@ -36,15 +37,17 @@ import (
 // for the same reason.
 //
 // ===========================================================================
-// THE OWNER'S ACTOR, AND NO INTERNAL-ORIGIN STAMP
+// THE OWNER'S ACTOR, AND THE STAMP ONLY WHERE THE WRITE NEEDS IT
 // ===========================================================================
 // createLibraryFile, setLibraryFileStatus and the three quota reads are owner
 // constructs: a file is created for the person the call runs as, and the row
-// is theirs to read. So every call below borrows the owner's actor and stamps
-// nothing -- the owner's authority is exactly the authority these constructs
-// want. A file with no owner is REFUSED, never written: ContextWithUserActor
-// leaves a blank owner's context as it was, and on the workbench that context
-// is the engine's own forward.
+// is theirs to read. So every call below borrows the owner's actor. Only the
+// create is @serverOnly -- blobUrl is a storage path the node's credential
+// reads back -- and it goes through component/server/libraryfile, which holds
+// that one stamp and refuses a key outside the owner's own library/{owner}/
+// prefix; this file stamps nothing itself. A file with no owner is REFUSED,
+// never written: ContextWithUserActor leaves a blank owner's context as it
+// was, and on the workbench that context is the engine's own forward.
 //
 // ===========================================================================
 // THE UPLOAD ROUTE'S RULES, NOT A SECOND SET
@@ -158,13 +161,11 @@ func (s *pipelinesLibraryStore) StoreRunFile(ctx context.Context, f pipelinestep
 	// THE QUOTA BEFORE A BYTE MOVES, like every other refusal on the upload
 	// route. A footprint that cannot be read refuses: a quota read that
 	// failed is not a quota that admits.
-	fileBytes, versionBytes, sessionBytes, err := s.library.StorageFootprint(ownerCtx)
-	if err != nil {
-		return pipelinesteps.StoredFile{}, fmt.Errorf("the owner's Library could not be measured against its quota, so nothing was stored: %w", err)
-	}
-	if total, quota := fileBytes+versionBytes+sessionBytes+size, s.userQuota(); total > quota {
-		return pipelinesteps.StoredFile{Omitted: fmt.Sprintf(
-			"it would take the owner's Library to %d bytes, over the quota of %d bytes (%s)", total, quota, server.LibraryUserQuotaBytesEnv)}, nil
+	if err := server.CheckStorageAdmission(ownerCtx, s.uploader, s.library.StorageFootprint, size, s.userQuota()); err != nil {
+		if errors.Is(err, storagequota.ErrLimit) {
+			return pipelinesteps.StoredFile{Omitted: err.Error()}, nil
+		}
+		return pipelinesteps.StoredFile{}, err
 	}
 
 	// THE BYTES, THEN THE ROW. Never the other way round: a row written first
@@ -178,7 +179,7 @@ func (s *pipelinesLibraryStore) StoreRunFile(ctx context.Context, f pipelinestep
 	mimeType := server.ResolveLibraryMIME(f.MimeType, f.Bytes)
 	fileID := id.NewShortId()
 	object := fmt.Sprintf("library/%s/%s/%s", owner, fileID, name)
-	blobURL, err := s.uploader.Upload(ctx, s.bucket, object, f.Bytes, mimeType)
+	blobURL, err := s.uploader.Upload(ownerCtx, s.bucket, object, f.Bytes, mimeType)
 	if err != nil {
 		return pipelinesteps.StoredFile{}, fmt.Errorf("object storage refused the file, so nothing was stored: %w", err)
 	}
@@ -205,11 +206,7 @@ func (s *pipelinesLibraryStore) StoreRunFile(ctx context.Context, f pipelinestep
 	if step := strings.TrimSpace(f.StepKey); step != "" {
 		args["producedByStepKey"] = step
 	}
-	call, err := langparser.RenderCall("createLibraryFile", args)
-	if err != nil {
-		return pipelinesteps.StoredFile{}, fmt.Errorf("the file's row could not be composed, so it was not recorded: %w", err)
-	}
-	if _, err := s.engine.Execute(ownerCtx, "mutation "+call); err != nil {
+	if err := libraryfile.NewStore(s.engine).Create(ownerCtx, args); err != nil {
 		// THE BYTES STAY BEHIND, AND THIS SAYS SO. No row points at them, so
 		// nothing lists, serves or counts them against the owner's quota (the
 		// footprint is read from rows), but they occupy the bucket. Taking them

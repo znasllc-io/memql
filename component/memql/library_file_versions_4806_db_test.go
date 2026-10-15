@@ -67,7 +67,7 @@ func TestFileVersionChainIsReadableAndOwned(t *testing.T) {
 	// whole authorization.
 	writeA := auth.ContextWithInternalOrigin(ctxA)
 
-	runMutation(t, ctxA, eng, "createLibraryFile", versionedFileArgs(fileId, userA))
+	runMutation(t, auth.ContextWithInternalOrigin(ctxA), eng, "createLibraryFile", versionedFileArgs(fileId, userA))
 
 	// --- the supersede: freeze v1, move the head to v2 ---
 	runMutation(t, writeA, eng, "createLibraryFileVersion", map[string]any{
@@ -180,7 +180,7 @@ func TestSupersedeBlanksTheHashItCannotInherit(t *testing.T) {
 	ctxA := rowAuthzCallerCtx(userA)
 	writeA := auth.ContextWithInternalOrigin(ctxA)
 
-	storedId := runMutation(t, ctxA, eng, "createLibraryFile", versionedFileArgs(fileId, userA))
+	storedId := runMutation(t, auth.ContextWithInternalOrigin(ctxA), eng, "createLibraryFile", versionedFileArgs(fileId, userA))
 
 	// The head starts at version 1 with a measured hash, both STAMPED rather
 	// than accepted -- a caller-chosen version number would let an upload

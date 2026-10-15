@@ -146,7 +146,7 @@ func (r *Router) withLentMachines(
 			// The caller's own machine the owner-scoped read never returned.
 			// Still THEIR hardware: evaluate without ServesCluster. Pairing a
 			// machine must unlock Ask / Materialize / Nexus for that user without
-			// Fleet share + inference.serve:cluster (those consents are only for
+			// Fleet model sharing (this consent is only for
 			// a different account).
 			switch {
 			case !c.RevokedAt.IsZero():

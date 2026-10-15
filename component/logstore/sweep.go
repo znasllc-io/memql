@@ -30,6 +30,37 @@ import (
 // night. There is no TimescaleDB retention policy on log_line for exactly
 // this reason: the archive must come first, and a policy cannot be told to
 // wait for one.
+//
+// A DAY LEAVES AS A CHUNK, NOT AS ROWS. log_line is a hypertable with one-day
+// chunks compressed after one day, and deleting rows from a compressed chunk
+// decompresses it first. On 2026-10-10 and again on 2026-10-11 the sweep
+// archived 2026-09-09's 18,010 rows and its DELETE then hit the request pool's
+// 8 s statement_timeout ("logstore: delete 2026-09-09: ERROR: canceling
+// statement due to statement timeout", 8.3 s and 8.9 s). The day stayed, the
+// run stopped at it, and every later day waited behind it; the instance filled
+// its disk that day. A DELETE that does finish gives the disk nothing back
+// either: new rows go to the newest chunk only, so space freed in a closed one
+// is never reused. And it does not scale with the volume: measured on
+// TimescaleDB 2.29.0, a batched DELETE over a compressed day of 1,000,000 rows
+// (about a day's lines now) decompresses the whole day first, 3.1 s with the
+// limit lifted, and under the default
+// timescaledb.max_tuples_decompressed_per_dml_transaction of 100,000 it fails
+// outright after about 2 s ("tuple decompression limit exceeded by operation").
+//
+// Once a day's archive has succeeded, the sweep therefore drops the day's whole
+// chunk (drop_chunks bounded to the day): 2 ms for a compressed 18,010-row day
+// and 5.5 ms for a compressed 1,000,000-row one, measured the same way, and the
+// disk comes back. Only rows the drop could not take still go by the batched
+// DELETE, with the DELETE's limits: a plain table, or a chunk that straddles
+// midnight and so is not wholly the day's. Neither is expected on a table the
+// migration made.
+//
+// That is "no archive, no delete" unchanged. The drop is the day's delete: it
+// runs at the one place the DELETE ran, after the same archive of every node
+// type of the day, and drop_chunks takes only a chunk that lies wholly inside
+// the bounds it is given, so a neighbouring day, which has not been archived,
+// is out of its reach (TestPgSourceDropDayDropsTheDaysChunk reads that off
+// TimescaleDB 2.29 rather than assuming it).
 
 // Archiver is the narrow slice of object storage the sweep and the restore
 // need. azureblob.AzureBlobUploader is the production one; tests hold an
@@ -89,6 +120,12 @@ type Report struct {
 	Refused      string    `json:"refused,omitempty"`
 	Truncated    bool      `json:"truncated,omitempty"` // more expired days remain
 	Took         string    `json:"took"`
+
+	// ChunksDropped is how many chunks went whole instead of being deleted
+	// from; zero means every row of the run went by DELETE. A drop reports
+	// chunks, not rows, so the rows inside a dropped chunk are counted in
+	// RowsDeleted at the count their day archived.
+	ChunksDropped int64 `json:"chunksDropped"`
 }
 
 // RestoreReport is what one restore answers.
@@ -151,6 +188,13 @@ type rowSource interface {
 	page(ctx context.Context, day time.Time, nodeType string, afterAt time.Time, afterId string, limit int) ([]Row, error)
 	// deleteDay removes up to limit rows of [day, day+1) and reports how many.
 	deleteDay(ctx context.Context, day time.Time, limit int) (int64, error)
+	// dropDay drops the chunks that lie wholly inside [day, day+1) and reports
+	// how many went. Zero is an answer, not a failure: the table is not a
+	// hypertable, or no chunk lies wholly inside the day. It removes no row
+	// from outside the day.
+	dropDay(ctx context.Context, day time.Time) (chunksDropped int64, err error)
+	// dayHasRows reports whether any row of [day, day+1) remains.
+	dayHasRows(ctx context.Context, day time.Time) (bool, error)
 	// insertIgnore inserts rows with ON CONFLICT DO NOTHING and reports how
 	// many landed.
 	insertIgnore(ctx context.Context, rows []Row) (int64, error)
@@ -231,9 +275,10 @@ func (s *Sweeper) Run(ctx context.Context) (Report, error) {
 		if err != nil {
 			return s.finish(rep, started, err)
 		}
-		deleted, err := s.deleteDay(ctx, src, day)
+		dropped, deleted, err := s.clearDay(ctx, src, day, archived)
 		rep.RowsArchived += archived
 		rep.RowsDeleted += deleted
+		rep.ChunksDropped += dropped
 		rep.Objects = append(rep.Objects, objects...)
 		rep.Days = append(rep.Days, day.Format("2006-01-02"))
 		rep.DaysArchived++
@@ -269,6 +314,19 @@ func (s *Sweeper) archiveDay(ctx context.Context, src rowSource, day time.Time) 
 		object := ArchiveObjectName(day, nt)
 		if _, err := s.Archive.Upload(ctx, s.Container, object, body, archiveContentType); err != nil {
 			return total, objects, fmt.Errorf("logstore: archive %s: %w", object, err)
+		}
+		verifier, ok := s.Archive.(interface {
+			DownloadWithLimit(context.Context, string, string, int64) ([]byte, error)
+		})
+		if !ok {
+			return total, objects, fmt.Errorf("logstore: bounded archive verification unavailable; lines preserved")
+		}
+		stored, err := verifier.DownloadWithLimit(ctx, s.Container, object, int64(len(body))+1)
+		if err != nil {
+			return total, objects, fmt.Errorf("logstore: archive verification failed; lines preserved: %w", err)
+		}
+		if !bytes.Equal(body, stored) {
+			return total, objects, fmt.Errorf("logstore: archive verification mismatch; lines preserved")
 		}
 		total += n
 		objects = append(objects, object)
@@ -307,6 +365,41 @@ func (s *Sweeper) encodeDay(ctx context.Context, src rowSource, day time.Time, n
 		return nil, count, fmt.Errorf("logstore: gzip: %w", err)
 	}
 	return buf.Bytes(), count, nil
+}
+
+// clearDay removes a day whose archive succeeded and returns the chunks it
+// dropped and the rows it removed. The day's whole chunks go first, because a
+// DELETE over a compressed chunk decompresses it (2026-10-10 and 2026-10-11,
+// see the header). Only rows still in the day afterwards go by the batched
+// DELETE.
+//
+// A drop that fails is the day's error, as a failing DELETE is: the day was
+// archived, nothing is deleted behind the failure, and the next run archives
+// it again under the same object names and retries.
+//
+// A drop reports chunks, not rows, so rows that left inside a chunk are
+// counted at what the day archived. That keeps a day that ends empty reading
+// "archived N, removed N" and keeps memql_logs_deleted_total from running past
+// memql_logs_archived_total, which its help promises.
+func (s *Sweeper) clearDay(ctx context.Context, src rowSource, day time.Time, archived int64) (chunks, rows int64, err error) {
+	chunks, err = src.dropDay(ctx, day)
+	if err != nil {
+		return 0, 0, err
+	}
+	left, err := src.dayHasRows(ctx, day)
+	if err != nil {
+		return chunks, 0, err
+	}
+	if left {
+		rows, err = s.deleteDay(ctx, src, day)
+		if err != nil {
+			return chunks, rows, err
+		}
+	}
+	if chunks > 0 && rows < archived {
+		rows = archived
+	}
+	return chunks, rows, nil
 }
 
 // deleteDay removes the day in batches and returns how many rows went.
@@ -543,6 +636,7 @@ func (s *Sweeper) logRun(rep Report, err error) {
 		"days_archived", rep.DaysArchived,
 		"rows_archived", rep.RowsArchived,
 		"rows_deleted", rep.RowsDeleted,
+		"chunks_dropped", rep.ChunksDropped,
 		"took", rep.Took,
 	}
 	switch {
@@ -649,6 +743,73 @@ func (p *pgSource) deleteDay(ctx context.Context, day time.Time, limit int) (int
 	}
 	n, _ := res.RowsAffected()
 	return n, nil
+}
+
+// dropDay drops the chunks of log_line that lie wholly inside [day, day+1).
+// drop_chunks takes a chunk only when its whole range falls between newer_than
+// (range_start >= it) and older_than (range_end <= it), so with the day's own
+// bounds a neighbouring day's chunk is out of reach, and so is a chunk that
+// straddles the day's edge; that chunk's rows are left to deleteDay. The
+// bounds are cast to timestamptz so they are typed whatever the driver sends.
+//
+// A plain table (the migration keeps one where TimescaleDB is absent) answers
+// zero: drop_chunks on one is an error (TS001), and the rows go by deleteDay.
+func (p *pgSource) dropDay(ctx context.Context, day time.Time) (int64, error) {
+	hypertable, err := p.logLineIsHypertable(ctx)
+	if err != nil {
+		return 0, err
+	}
+	if !hypertable {
+		return 0, nil
+	}
+	var dropped int64
+	if err := p.db.DB.QueryRowContext(ctx,
+		`SELECT count(*) FROM drop_chunks('log_line', older_than => $2::timestamptz, newer_than => $1::timestamptz)`,
+		day.UTC(), day.UTC().AddDate(0, 0, 1)).Scan(&dropped); err != nil {
+		return 0, fmt.Errorf("logstore: drop chunks of %s: %w", day.Format("2006-01-02"), err)
+	}
+	return dropped, nil
+}
+
+// dayHasRows is the sweep's check that a day is empty. An EXISTS stops at the
+// first row it finds, so what the day still holds does not make it slower.
+func (p *pgSource) dayHasRows(ctx context.Context, day time.Time) (bool, error) {
+	var has bool
+	if err := p.db.DB.QueryRowContext(ctx,
+		`SELECT EXISTS (SELECT 1 FROM log_line WHERE occurred_at >= $1 AND occurred_at < $2)`,
+		day.UTC(), day.UTC().AddDate(0, 0, 1)).Scan(&has); err != nil {
+		return false, fmt.Errorf("logstore: rows left in %s: %w", day.Format("2006-01-02"), err)
+	}
+	return has, nil
+}
+
+// logLineIsHypertable reports whether log_line is a TimescaleDB hypertable on
+// this database. The view is looked up by name first because it does not exist
+// without the extension and a statement naming it would fail outright. The
+// table is matched by the relation its name RESOLVES to on this connection --
+// the one every statement here means -- and never by bare name, as
+// timescaledb_information lists every schema.
+func (p *pgSource) logLineIsHypertable(ctx context.Context) (bool, error) {
+	var installed bool
+	if err := p.db.DB.QueryRowContext(ctx,
+		`SELECT to_regclass('timescaledb_information.hypertables') IS NOT NULL`).Scan(&installed); err != nil {
+		return false, fmt.Errorf("logstore: probe for TimescaleDB: %w", err)
+	}
+	if !installed {
+		return false, nil
+	}
+	var hypertable bool
+	if err := p.db.DB.QueryRowContext(ctx, `
+		SELECT EXISTS (
+		  SELECT 1
+		    FROM timescaledb_information.hypertables AS h
+		    JOIN pg_class AS c ON c.oid = to_regclass('log_line')
+		    JOIN pg_namespace AS n ON n.oid = c.relnamespace
+		   WHERE h.hypertable_schema = n.nspname
+		     AND h.hypertable_name = c.relname)`).Scan(&hypertable); err != nil {
+		return false, fmt.Errorf("logstore: probe for the log_line hypertable: %w", err)
+	}
+	return hypertable, nil
 }
 
 func (p *pgSource) insertIgnore(ctx context.Context, rows []Row) (int64, error) {

@@ -1,6 +1,6 @@
 import { render, screen, waitFor, within } from "@testing-library/react";
 import { act } from "react";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const h = vi.hoisted(() => ({ connection: null as unknown }));
 
@@ -34,6 +34,7 @@ import {
   type FakeConnection,
   type FakeSeed,
 } from "./harness";
+import { readTheBar } from "../readTheBar";
 import { seededAccessWithout } from "../seededAccess";
 import type { EffectiveCapability } from "../../src/system/roles";
 
@@ -128,11 +129,14 @@ async function chooseRepository(region: HTMLElement): Promise<void> {
 
 /** Follow the wizard to its address step without writing anything. */
 async function openAddresses(): Promise<void> {
-  const continueButton = forwardAct("Continue");
-  if (continueButton) await click(continueButton);
-  const chooseAddresses = forwardAct("Choose addresses");
-  if (chooseAddresses) await click(chooseAddresses);
-  else await click(screen.getByRole("button", { name: /^Address/ }));
+  if (forwardAct("Continue")) {
+    await readTheBar();
+    await click(forwardAct("Continue"));
+  }
+  if (forwardAct("Choose addresses")) {
+    await readTheBar();
+    await click(forwardAct("Choose addresses"));
+  } else await click(screen.getByRole("button", { name: /^Address/ }));
 }
 
 /** Type into a field by its accessible name, the way a person would. */
@@ -169,6 +173,12 @@ function railStates(region: HTMLElement): (string | null)[] {
 
 beforeEach(() => {
   h.connection = null;
+  // A fake Date, so reading a bar costs nothing: the address check and the
+  // reads run on real timers.
+  vi.useFakeTimers({ toFake: ["Date"] });
+});
+afterEach(() => {
+  vi.useRealTimers();
 });
 
 // ---------------------------------------------------------------------------
@@ -307,6 +317,9 @@ function forwardAct(name: string): HTMLButtonElement | null {
 async function forward(name: string): Promise<HTMLButtonElement> {
   // Saving persists a new repository source; analysis is a separate act.
   await waitFor(() => expect(forwardAct(name)).toBeTruthy());
+  // The act joined a bar that has just changed, and such a bar takes no press
+  // for a moment (kit ActionBar): read it first, as a person does.
+  await readTheBar();
   return forwardAct(name)!;
 }
 
@@ -485,7 +498,7 @@ describe("the compose flow: a zip in Files", () => {
     await waitFor(() => expect(forwardAct("Deploy")).toBeTruthy());
     // The draft exists now, so going would KEEP it: the word is Leave.
     expect(floorNow()).toEqual([["Leave", true], ["Deploy", false]]);
-    await click(forwardAct("Deploy"));
+    await click(await forward("Deploy"));
     expect(connection.callsNamed("sitePublishFromArtifact")[0]).toContain('artifactId: "artifact-zip"');
     // THE OUTCOME IS THE BAR'S NOW, not a notice in the panel: it used to be
     // said in both places, and the act sat on the notice while the bar offered
@@ -591,6 +604,31 @@ async function analyzed(
 }
 
 describe("the compose flow: where each app will live", () => {
+  it("inherits late account defaults, follows account and slug changes, and preserves explicit blanks", async () => {
+    const { connection } = await analyzed({ accounts: [{ id: "self", name: "Studio", status: "active" }, { id: "beta", name: "Beta", status: "active", domains: ["beta.test"], defaultDomain: "beta.test" }] });
+    await fill("The name storefront answers at", "shop");
+    const domain = () => screen.getByLabelText("A domain of the client's own for storefront") as HTMLInputElement;
+    expect(domain().value).toBe("");
+    await act(async () => connection.subscriptions.emit("v1:accounts:account", { id: "self", name: "Studio", status: "active", domains: ["studio.test"], defaultDomain: "studio.test" }));
+    await waitFor(() => expect(domain().value).toBe("shop.studio.test"));
+    await fill("The name storefront answers at", "docs");
+    expect(domain().value).toBe("docs.studio.test");
+    await choose("The account storefront is for", "Beta");
+    expect(domain().value).toBe("docs.beta.test");
+    await fill("A domain of the client's own for storefront", "");
+    await fill("The name storefront answers at", "shop");
+    expect(domain().value).toBe("");
+    await click(await forward("Deploy"));
+    expect(connection.callsNamed("packageDeploy")[1]).toContain('domains: []');
+  });
+
+  it("sends the inherited domain in the deployment placement", async () => {
+    const { connection } = await analyzed({ accounts: [{ id: "self", name: "Studio", status: "active", domains: ["studio.test"], defaultDomain: "studio.test" }] });
+    await fill("The name storefront answers at", "shop");
+    await click(await forward("Deploy"));
+    expect(connection.callsNamed("packageDeploy")[1]).toContain('domains: ["shop.studio.test"]');
+  });
+
   it("asks for a hostname only on a deployable's first deploy, and previews it", async () => {
     const { region } = await analyzed();
 
@@ -776,6 +814,7 @@ describe("the compose flow: where each app will live", () => {
     expect(within(region).queryByText(/Go live starts serving/)).toBeNull();
 
     // Going live flips the app this run put in place, and the bar says so.
+    await readTheBar();
     await click(within(bar()).getByRole("button", { name: "Go live" }));
     await waitFor(() =>
       expect(connection.callsNamed("updateSiteStatus")).toEqual(['mutation updateSiteStatus(siteId: "site-a", status: "live")']),
@@ -1410,6 +1449,7 @@ describe("discarding an unplaced setup", () => {
     await click(await screen.findByRole("button", { name: "Discard" }));
     expect(connection.callsNamed("packageArchive")).toHaveLength(0);
     await fill("Type acme to confirm", "acme");
+    await readTheBar();
     await click(screen.getByRole("button", {name: "Discard"}));
     await waitFor(() => expect(onBack).toHaveBeenCalledOnce());
     expect(connection.callsNamed("packageArchive")[0]).toContain('packageId: "pkg-acme"');
@@ -1419,6 +1459,7 @@ describe("discarding an unplaced setup", () => {
     const {onBack} = setup({}, "archive_failed: Cannot archive this source");
     await click(await screen.findByRole("button", {name: "Discard"}));
     await fill("Type acme to confirm", "acme");
+    await readTheBar();
     await click(screen.getByRole("button", {name: "Discard"}));
     expect(await screen.findByText("Cannot archive this source")).toBeTruthy();
     expect(onBack).not.toHaveBeenCalled();
@@ -1437,6 +1478,7 @@ describe("discarding an unplaced setup", () => {
     const {connection, onBack} = setup({only: "storefront", placedSources: [{packageId: "pkg-acme", name: "web", siteId: "existing"}]});
     await click(await screen.findByRole("button", {name: "Deactivate"}));
     await fill("Type storefront to confirm", "storefront");
+    await readTheBar();
     await click(screen.getByRole("button", {name: "Deactivate"}));
     await waitFor(() => expect(onBack).toHaveBeenCalledOnce());
     expect(connection.callsNamed("packageArchive")).toHaveLength(0);

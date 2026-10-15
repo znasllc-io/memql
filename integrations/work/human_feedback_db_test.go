@@ -27,7 +27,9 @@ func TestHumanFeedbackDBTwoReplicasAskOnceResumeAndRestoreCompletedTools(t *test
 	for range 2 {
 		pool := workHeadsPeer(t, db)
 		engine := dispatchDBEngine(t, pool)
-		peers = append(peers, New(engine, testLogger(), func() *bun.DB { return pool }))
+		peer := New(engine, testLogger(), func() *bun.DB { return pool })
+		peer.SetGateDB(testGates(t))
+		peers = append(peers, peer)
 		engines = append(engines, engine)
 	}
 	if err = peers[0].store().updateRun(person, runID, map[string]any{"status": "running", "automationName": "test"}); err != nil {

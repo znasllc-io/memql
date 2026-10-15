@@ -274,6 +274,8 @@ func (i *Integration) Capabilities() []memql.IntegrationCapability {
 			Description: "Ask for a durable, run-scoped computer-access approval in Nexus before using a personal machine.",
 			Handler:     i.handleRequestScope,
 			ArgsSchema: map[string]string{
+				"operation":      "object -- required for directory reads and exact commands; checked against saved permissions",
+				"sessionKind":    "string -- desktop / file_write / http only; explicit expiring access instead of operation",
 				"intent":         "string (required) -- short imperative summary",
 				"requestedScope": "string (required) -- observe / full (legacy `interact` accepted for backward compat, treated as full)",
 				"summary":        "string (required) -- one-paragraph card body",
@@ -353,13 +355,19 @@ func (i *Integration) handleDispatch(ctx context.Context, tool string, args map[
 		"bytesOut":      res.BytesOut,
 		"outputPreview": res.OutputPreview,
 	})
-	return []memorynodes.MemoryNode{{
+	nodes := []memorynodes.MemoryNode{{
 		ID:        fmt.Sprintf("worker-call:%d", time.Now().UnixNano()),
 		Concept:   "integration:worker:result",
 		Type:      memorynodes.NodeTypeObject,
 		CreatedAt: time.Now().UTC(),
 		Payload:   payload,
-	}}, nil
+	}}
+	if !res.OK {
+		// Native compositions may inspect the failed receipt. The builtin error
+		// still prevents an automation from journaling it as a completed effect.
+		return nodes, fmt.Errorf("worker %s %s failed (%s): %s", tool, action, res.ErrorCode, res.ErrorMessage)
+	}
+	return nodes, nil
 }
 
 // dispatchAnswerMargin is how much longer than a command's own time limit
@@ -624,9 +632,8 @@ func (i *Integration) handleRequestScope(ctx context.Context, args map[string]an
 		return nil, fmt.Errorf("worker integration: agentId and ownerUserId required (auto-injection failed)")
 	}
 
-	// D6: the card names the requirements AND the current choice, because the
-	// user's Allow covers the task on any machine that matches -- so the card
-	// has to describe the set it is authorizing, not just today's pick.
+	// The card names a selected machine. Bind the scope before asking so a
+	// later connection or routing change cannot redirect the person's approval.
 	//
 	// The capability asked for here is HEADLESS rather than COMPUTERUSE, and
 	// deliberately: the card is about a SCOPE, not a single action, and both
@@ -639,10 +646,47 @@ func (i *Integration) handleRequestScope(ctx context.Context, args map[string]an
 	requireLabels := LabelsFromArgs(args["requireLabels"])
 	target := ""
 	if i.dispatcher != nil {
+		plan, err := i.dispatcher.Router().Plan(ctx, ownerUserId, workerservice.CapabilityHeadless, requireLabels, nil)
+		if err != nil {
+			return nil, err
+		}
+		if err := requireSingleComputerTarget(plan); err != nil {
+			return nil, err
+		}
+		// Keep a legacy desktop/session approval on the same selected machine
+		// even if another machine connects before the person answers it.
+		candidates := append(append([]Candidate(nil), plan.Candidates...), plan.OfflineCandidates...)
+		if len(candidates) == 0 || candidates[0].MachineId == "" {
+			return nil, computerPermissionInputError("requireLabels", "No eligible computer matches this selection. Check workerStatus and select an enrolled machine before requesting access.")
+		}
+		if requireLabels == nil {
+			requireLabels = map[string]string{}
+		}
+		requireLabels["machineId"] = candidates[0].MachineId
 		target = i.dispatcher.ConsentCardTarget(ctx, ownerUserId, workerservice.CapabilityHeadless, requireLabels, nil)
 	}
-	if target != "" {
+	if target != "" && args["operation"] == nil {
 		summary = strings.TrimRight(summary, " .") + ". Runs " + target + "."
+	}
+	// Never interpret a missing exact operation as a broader session request.
+	// In particular, doing so skips saved directory/command grants and parks
+	// otherwise authorized work on a redundant approval. The model must repair
+	// its arguments before we write any approval or pause the run.
+	sessionKind := asString(args["sessionKind"])
+	if _, supplied := args["operation"]; supplied {
+		if sessionKind != "" {
+			return nil, computerPermissionInputError("sessionKind", "Supply operation or sessionKind, not both. Directory reads and commands require operation with exact args.")
+		}
+	} else {
+		switch sessionKind {
+		case "desktop", "file_write", "http":
+			// These actions use the existing, expiring run-scoped contract.
+			if sessionKind == "file_write" && scope != "full" {
+				return nil, computerPermissionInputError("requestedScope", "Writing files requires requestedScope=full. Directory reads require an exact operation instead of a file_write session.")
+			}
+		default:
+			return nil, computerPermissionInputError("operation", "Supply operation={tool: workerHost, action: fs_list, args: {path: <absolute directory>}, directory: <same absolute directory>} for a directory listing. Reads (fs_read/fs_list/fs_stat) and exec require an exact operation so saved permissions can be checked. Only desktop interaction, fs_write or http_fetch may explicitly use sessionKind=desktop, file_write or http. Omitting operation does not request a session.")
+		}
 	}
 
 	rc, ok := common.RunFromContext(ctx)
@@ -650,7 +694,44 @@ func (i *Integration) handleRequestScope(ctx context.Context, args map[string]an
 		return nil, fmt.Errorf("computer access requires an owned work run with durable approvals")
 	}
 	subject := map[string]any{"agentId": agentId, "scope": scope, "requireLabels": requireLabels, "intent": intent, "summary": summary, "target": target}
-	approvalID, err := i.ScopeRequester(ctx, ownerUserId, rc.RunId, subject)
+	approvalID := ""
+	if raw, supplied := args["operation"]; supplied {
+		operation, typed := raw.(map[string]any)
+		if !typed {
+			return nil, computerPermissionInputError("operation", "computer permission operation must be an object")
+		}
+		if i.dispatcher == nil {
+			return nil, fmt.Errorf("computer routing is unavailable")
+		}
+		permission, existing, err := i.dispatcher.prepareComputerPermission(ctx, ownerUserId, agentId, rc.RunId, operation, requireLabels)
+		if err != nil {
+			return nil, err
+		}
+		// Older agents recognize only scope and would otherwise widen this exact
+		// receipt during a rolling upgrade. Typed authority lives solely below.
+		delete(subject, "scope")
+		subject["computerPermission"] = permission.Map()
+		subject["target"] = permission.MachineLabel
+		target = permission.MachineLabel
+		if existing != nil {
+			approvalID = existing.ID
+		}
+	} else {
+		subject["sessionKind"] = sessionKind
+		subject["sessionScope"] = scope
+		// Previous replicas only understand scope. Omit it so they refuse a
+		// narrowed session instead of widening it during a rolling upgrade.
+		delete(subject, "scope")
+		// Only a saved, still-unexecuted native call can receive feedback
+		// without replanning. This witness conveys no computer permission.
+		subject, err = i.engine.BindWorkScopeCheckpoint(ctx, args, subject)
+		if err != nil {
+			return nil, err
+		}
+	}
+	if approvalID == "" {
+		approvalID, err = i.ScopeRequester(ctx, ownerUserId, rc.RunId, subject)
+	}
 	if err != nil {
 		return nil, err
 	}
@@ -668,7 +749,7 @@ func (i *Integration) handleRequestScope(ctx context.Context, args map[string]an
 			return nil, fmt.Errorf("computer access was declined")
 		}
 	}
-	payload, _ := json.Marshal(map[string]any{"status": status, "runId": rc.RunId, "approvalId": approvalID, "requestedScope": scope, "target": target})
+	payload, _ := json.Marshal(map[string]any{"status": status, "runId": rc.RunId, "approvalId": approvalID, "requestedScope": scope, "target": target, "requireLabels": requireLabels})
 
 	return []memorynodes.MemoryNode{{
 		ID:        fmt.Sprintf("scope-elevation:%d", time.Now().UnixNano()),

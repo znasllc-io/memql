@@ -12,3 +12,17 @@ builtin emailAzureSetup {
   sessionId string
   options object
 }
+
+// Private installation operations: registered for boot audit but callable only
+// through the native startup workflow scope, never through a wire caller.
+@executor("integration.email.emailInstallationConnect")
+builtin emailInstallationConnect {}
+@executor("integration.email.emailInstallationPrepare")
+builtin emailInstallationPrepare {}
+@executor("integration.email.emailInstallationProvision")
+builtin emailInstallationProvision {}
+@executor("integration.email.emailInstallationSender")
+builtin emailInstallationSender {}
+
+@executor("integration.email.emailInstallationAccount")
+builtin emailInstallationAccount {}

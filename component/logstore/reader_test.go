@@ -102,7 +102,7 @@ func TestTailSQLCursorAscendsAndBaselineReverses(t *testing.T) {
 	if reverse {
 		t.Errorf("a cursor tail must not be reversed")
 	}
-	if !strings.Contains(s, "(occurred_at, id) > ('2026-09-01 00:00:00+00:00', 'r1')") || !strings.Contains(s, "ORDER BY occurred_at ASC, id ASC") || !strings.Contains(s, "LIMIT 50") {
+	if !strings.Contains(s, "occurred_at >= '2026-09-01 00:00:00+00:00'") || !strings.Contains(s, "(occurred_at, id) > ('2026-09-01 00:00:00+00:00', 'r1')") || !strings.Contains(s, "ORDER BY occurred_at ASC, id ASC") || !strings.Contains(s, "LIMIT 50") {
 		t.Errorf("tail with a cursor:\n%s", s)
 	}
 	baseline, reverse := tailQuery(db, Query{}, &rows)
@@ -113,10 +113,12 @@ func TestTailSQLCursorAscendsAndBaselineReverses(t *testing.T) {
 	if !strings.Contains(b, "ORDER BY occurred_at DESC, id DESC") || !strings.Contains(b, "LIMIT 200") {
 		t.Errorf("baseline tail:\n%s", b)
 	}
-	// A cursor with no id is not a cursor.
-	half, _ := tailQuery(db, Query{AfterAt: time.Now()}, &rows)
-	if strings.Contains(half.String(), "(occurred_at, id) >") {
-		t.Errorf("afterAt without afterId must not form a cursor")
+	// A partial cursor must neither filter rows nor change baseline ordering.
+	for _, q := range []Query{{AfterAt: time.Now()}, {AfterAt: time.Now(), AfterId: " "}, {AfterId: "r1"}} {
+		half, reverse := tailQuery(db, q, &rows)
+		if strings.Contains(half.String(), "WHERE") || !reverse {
+			t.Errorf("partial cursor must retain the unfiltered baseline: %s", half.String())
+		}
 	}
 }
 

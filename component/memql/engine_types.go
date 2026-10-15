@@ -41,9 +41,11 @@ type QueryPlan struct {
 	ShapeTemplateName string // Named shape reference; resolved at execution time
 	IncludeBundle     bool   // when true, include bundle in shape response
 	InlineSpecs       map[string]*Spec
-	// Count, when true, makes the query return a numeric {count: N}
-	// aggregate over the matching set instead of the rows themselves.
-	// Peeled off the outermost CountExpression by applyDirectiveWrappers.
+	// Count, when true, makes the query return a numeric
+	// {count: N, atLeast: B} aggregate over the matching set instead of the
+	// rows themselves (atLeast: the read reached the engine's window and N is
+	// the window, memql#6033). Peeled off the outermost CountExpression by
+	// applyDirectiveWrappers.
 	Count bool
 
 	// Refine is the query's `refine` clause (memql#5366): an in-process
@@ -703,9 +705,9 @@ func (*DepthExpression) isExpressionNode() {}
 
 // CountExpression aggregates its target expression to a numeric row
 // count instead of materializing rows. Execution returns a
-// self-describing {count: N} envelope. Like the other directive
-// wrappers it is peeled off into the plan (plan.Count) by
-// applyDirectiveWrappers and must be the outermost node.
+// self-describing {count: N, atLeast: B} envelope (executeCountPlan).
+// Like the other directive wrappers it is peeled off into the plan
+// (plan.Count) by applyDirectiveWrappers and must be the outermost node.
 type CountExpression struct {
 	Target ExpressionNode
 }

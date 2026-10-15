@@ -1,5 +1,6 @@
 import { act, cleanup, fireEvent, screen, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { readTheBarNow } from "../readTheBar";
 
 // Fleet > Routing > Routes: the list, the route page (the composer) and the
 // New route wizard -- against the real Fleet reads and the routing builtins
@@ -57,6 +58,18 @@ function tray(name: RegExp): HTMLElement {
 }
 function bar(): HTMLElement {
   return screen.getByRole("group", { name: "What you can do with this" });
+}
+
+// A bar that has just changed takes no press for a moment (kit ActionBar), and
+// a step, a choice or a write changes the routing bars: each press reads the
+// bar first, on a fake Date so reading costs nothing.
+beforeEach(() => { vi.useFakeTimers({ toFake: ["Date"] }); });
+afterEach(() => { vi.useRealTimers(); });
+
+/** Presses one of a bar's acts once the bar has been read. */
+function pressBar(group: () => HTMLElement, name: string | RegExp) {
+  readTheBarNow();
+  fireEvent.click(within(group()).getByRole("button", { name }));
 }
 
 describe("the routes list", () => {
@@ -254,7 +267,7 @@ describe("saving and restoring", () => {
     await openRoute("Mine");
     fireEvent.keyDown(slotButton(1), { key: "ArrowLeft" });
     await settle();
-    fireEvent.click(within(bar()).getByRole("button", { name: "Save route" }));
+    pressBar(bar, "Save route");
     await settle();
     expect(calls.routingPolicySave).toHaveBeenCalledWith({ name: "mine", description: "Mine first", primary: "app:*", fallbacks: ["fleet:strongest"], expectedRevision: 7 });
     expect(calls.routerListPolicies.mock.calls.length).toBeGreaterThan(1);
@@ -266,7 +279,7 @@ describe("saving and restoring", () => {
     await renderRouting();
     await openRoute("Mine");
     fireEvent.click(tray(/^Claude Code:/));
-    fireEvent.click(within(bar()).getByRole("button", { name: "Save route" }));
+    pressBar(bar, "Save route");
     await settle();
     expect(screen.getByText("Routing changed since this page read it.")).toBeTruthy();
     expect(screen.queryByText(/routing policies/)).toBeNull();
@@ -280,7 +293,7 @@ describe("saving and restoring", () => {
     await renderRouting();
     await openRoute("Mine");
     fireEvent.click(tray(/^Claude Code:/));
-    fireEvent.click(within(bar()).getByRole("button", { name: "Save route" }));
+    pressBar(bar, "Save route");
     await settle();
     expect(screen.getByText("The route was not saved.")).toBeTruthy();
     expect(screen.getByText('source "app:cursor": "cursor" is not an app this engine drives')).toBeTruthy();
@@ -292,7 +305,7 @@ describe("saving and restoring", () => {
     await renderRouting();
     await openRoute("Mine");
     fireEvent.click(tray(/^Claude Code:/));
-    fireEvent.click(within(bar()).getByRole("button", { name: "Cancel" }));
+    pressBar(bar, "Cancel");
     await settle();
     expect(slotNames()).toEqual(["Strongest local model", "Any signed-in app"]);
     expect(within(bar()).getByText("Saved")).toBeTruthy();
@@ -311,10 +324,10 @@ describe("saving and restoring", () => {
     await renderRouting();
     await openRoute("Local first");
     expect(within(bar()).getByText("Changed from shipped")).toBeTruthy();
-    fireEvent.click(within(bar()).getByRole("button", { name: "Restore shipped" }));
+    pressBar(bar, "Restore shipped");
     expect(within(bar()).getByText("Restore shipped sources?")).toBeTruthy();
     expect(calls.routingPolicyReset).not.toHaveBeenCalled();
-    fireEvent.click(within(bar()).getByRole("button", { name: "Restore shipped" }));
+    pressBar(bar, "Restore shipped");
     await settle();
     expect(calls.routingPolicyReset).toHaveBeenCalledWith({ name: "localFirst", expectedRevision: 7 });
   });
@@ -356,7 +369,7 @@ describe("saving and restoring", () => {
     fireEvent.change(screen.getByLabelText("Description"), { target: { value: "New words" } });
     fireEvent.keyDown(screen.getByLabelText("Description"), { key: "Enter" });
     expect(within(bar()).getByText("Unsaved")).toBeTruthy();
-    fireEvent.click(within(bar()).getByRole("button", { name: "Save route" }));
+    pressBar(bar, "Save route");
     await settle();
     expect(calls.routingPolicySave).toHaveBeenCalledWith(expect.objectContaining({ description: "New words" }));
   });
@@ -378,7 +391,7 @@ describe("a source by its exact name", () => {
     fireEvent.keyDown(exact(), { key: "Enter" });
     expect(slotNames()).toEqual(["Strongest local model", "Claude Code · opus"]);
     expect(exact().value).toBe("");
-    fireEvent.click(within(bar()).getByRole("button", { name: "Save route" }));
+    pressBar(bar, "Save route");
     await settle();
     expect(calls.routingPolicySave).toHaveBeenCalledWith(expect.objectContaining({ primary: "fleet:strongest", fallbacks: ["app:claude-code:opus"] }));
   });
@@ -457,15 +470,15 @@ describe("New route", () => {
     // No name, no Next -- absent, never disabled.
     expect(within(floor()).queryByRole("button", { name: "Next" })).toBeNull();
     fireEvent.change(screen.getByLabelText("Route name"), { target: { value: "Night shift" } });
-    fireEvent.click(within(floor()).getByRole("button", { name: "Next" }));
+    pressBar(floor, "Next");
     // Sources: the same composer. Nothing in it yet, so no Next.
     expect(within(floor()).queryByRole("button", { name: "Next" })).toBeNull();
     fireEvent.click(tray(/^Claude Code:/));
     fireEvent.click(tray(/^Cheapest vendor:/));
     expect(slotNames()).toEqual(["Claude Code", "Cheapest vendor"]);
-    fireEvent.click(within(floor()).getByRole("button", { name: "Next" }));
+    pressBar(floor, "Next");
     expect(screen.getByText("Serves with Claude Code")).toBeTruthy();
-    fireEvent.click(within(floor()).getByRole("button", { name: "Save route" }));
+    pressBar(floor, "Save route");
     await settle();
     expect(calls.routingPolicySave).toHaveBeenCalledWith({ name: "nightShift", description: "", primary: "app:claude-code", fallbacks: ["federation:cheapest"], expectedRevision: 7 });
   });
@@ -475,9 +488,9 @@ describe("New route", () => {
     fireEvent.click(screen.getByRole("button", { name: "New route" }));
     const floor = () => screen.getByRole("group", { name: "What you can do with this" });
     fireEvent.change(screen.getByLabelText("Route name"), { target: { value: "Night shift" } });
-    fireEvent.click(within(floor()).getByRole("button", { name: "Next" }));
+    pressBar(floor, "Next");
     fireEvent.click(tray(/^Claude Code:/));
-    fireEvent.click(within(floor()).getByRole("button", { name: "Next" }));
+    pressBar(floor, "Next");
     // Hold the re-read, and look at every render until it lands.
     let release: () => void = () => {};
     const held = new Promise<void>((resolve) => { release = resolve; });
@@ -491,7 +504,7 @@ describe("New route", () => {
       for (const r of records) for (const n of r.addedNodes) if (n.textContent?.includes("That route is gone")) flashed = true;
     });
     watch.observe(document.body, { childList: true, subtree: true, characterData: true });
-    fireEvent.click(within(floor()).getByRole("button", { name: "Save route" }));
+    pressBar(floor, "Save route");
     await settle();
     release();
     await settle();
@@ -505,11 +518,11 @@ describe("New route", () => {
     fireEvent.click(screen.getByRole("button", { name: "New route" }));
     const floor = () => screen.getByRole("group", { name: "What you can do with this" });
     fireEvent.change(screen.getByLabelText("Route name"), { target: { value: "Night shift" } });
-    fireEvent.click(within(floor()).getByRole("button", { name: "Next" }));
+    pressBar(floor, "Next");
     fireEvent.click(tray(/^Claude Code:/));
-    fireEvent.click(within(floor()).getByRole("button", { name: "Next" }));
+    pressBar(floor, "Next");
     calls.routerListPolicies.mockRejectedValue(new Error("connection lost"));
-    fireEvent.click(within(floor()).getByRole("button", { name: "Save route" }));
+    pressBar(floor, "Save route");
     await settle();
     expect(screen.queryByText("That route is gone")).toBeNull();
     expect(screen.getByText("The route could not be read.")).toBeTruthy();

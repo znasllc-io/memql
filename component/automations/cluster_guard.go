@@ -139,6 +139,39 @@ func (c StrictClusterClaimer) ClaimWithTTL(ctx context.Context, name, key string
 	return c.guard.claimWithTTL(ctx, name, key, ttl, false)
 }
 
+// Release gives back a claim this node took, so the same (name, key) can be
+// claimed again. See ClusterExecutionGuard.ReleaseClaim.
+func (c StrictClusterClaimer) Release(ctx context.Context, name, key string) bool {
+	if c.guard == nil {
+		return false
+	}
+	return c.guard.ReleaseClaim(ctx, name, key)
+}
+
+// ReleaseClaim gives back a claim THIS node took, so a later delivery of the same
+// event can claim it again. It is for work that was claimed and then could not
+// begin -- nothing was attempted -- and so must remain possible; work that began
+// keeps its claim for the retention window, which is the point of one. Only the
+// claimant's own row is removed. It reports whether a claim was removed; a claim
+// that cannot be reached is left, and logged, and the work stays claimed (the safe
+// side: a duplicate is worse than a delay).
+func (g *ClusterExecutionGuard) ReleaseClaim(ctx context.Context, automationName, dedupKey string) bool {
+	db := g.dbGetter()
+	if db == nil || db.DB == nil {
+		return false
+	}
+	res, err := db.DB.ExecContext(ctx,
+		`DELETE FROM automation_execution_claims WHERE automation_name = $1 AND dedup_key = $2 AND claimed_by = $3`,
+		automationName, dedupKey, g.nodeId)
+	if err != nil {
+		g.warn("automation execution claim could not be released; it stays claimed",
+			"automation", automationName, "dedupKey", dedupKey, "error", err)
+		return false
+	}
+	n, err := res.RowsAffected()
+	return err == nil && n > 0
+}
+
 // ClaimWithTTL is Claim with an optional attempt-scoped lease. It is the
 // opt-in variant (memql#2548): the default Claim path (ttl <= 0) is unchanged,
 // so automation/planner callers keep exactly-once-within-retention semantics.
@@ -231,7 +264,8 @@ func (g *ClusterExecutionGuard) claimWithTTL(ctx context.Context, automationName
 	if n == 0 {
 		// Another replica already owns this (automation, event) -> duplicate.
 		g.prevented.Add(1)
-		g.warn("duplicate automation execution prevented by cluster guard",
+		// 2026-10-11 idle-instance log volume: 71,105 of these warnings in six hours, about a million log lines a day in total; Debug, the prevented counter keeps the count.
+		g.debug("duplicate automation execution prevented by cluster guard",
 			"automation", automationName, "dedupKey", dedupKey, "node", g.nodeId)
 		return false
 	}

@@ -242,6 +242,11 @@ type MemQLEngine struct {
 	// app; this one is reached from the engine's own promote path, which has no
 	// deps bundle to carry it.
 	authoredAudit AuthoredAuditSink
+	// arming is this node's half of the authored arm/disarm broadcast
+	// (memql#6022, F1): the live authored-runtime deps a peer's activation is
+	// armed into, and the lock that applies one broadcast at a time. Wired
+	// via SetAuthoredRuntimeDeps; see authoring_arm_propagate.go.
+	arming authoredArming
 	// loadReport is the structured account of the DSL load pass built by
 	// Init (epic #2351 / S2, memql#2357): every unified loader's skipped
 	// constructs + the S5 uniqueness-gate duplicates. Init refuses to boot
@@ -1396,7 +1401,8 @@ func planIsUnbound(plan *QueryPlan) bool {
 // matching set rather than the rows. We fetch up to MaxWindow
 // candidates so the count is not silently capped at the smaller
 // default page size (MaxResults) the row path uses. A true SQL-pushdown
-// COUNT(*) is a future optimization tracked separately -- it cannot be
+// COUNT(*) is a future optimization; a source that reaches its window
+// is reported as atLeast even when later filtering makes the result short. It cannot be
 // a naive COUNT because the versioned hypertable stores multiple rows
 // per id and the latest-version re-filter happens in Go.
 func (e *MemQLEngine) executeCountPlan(ctx context.Context, plan *QueryPlan, timestamp *time.Time, sorter *compiledSort, startTime time.Time) (*ExecuteResult, error) {
@@ -1404,14 +1410,35 @@ func (e *MemQLEngine) executeCountPlan(ctx context.Context, plan *QueryPlan, tim
 		return nil, ErrEmptyQuery
 	}
 
-	set, err := e.evaluateExpressionSet(ctx, plan.Root, timestamp, e.config.MaxWindow, sorter)
+	completeness := &countCompleteness{}
+	ctx = context.WithValue(ctx, countCompletenessKey{}, completeness)
+	window := e.config.MaxWindow
+	if window <= 0 {
+		window = e.config.MaxResults
+	}
+	// Probe one extra candidate to distinguish an exactly full window from
+	// an incomplete scan. Keep source completeness as well: authorization or
+	// latest-version filtering may shorten an otherwise truncated source.
+	target := window
+	if target > 0 && target < int(^uint(0)>>1) {
+		target++
+	}
+	set, err := e.evaluateExpressionSet(ctx, plan.Root, timestamp, target, sorter)
 	if err != nil {
 		return nil, err
 	}
 
 	count := int64(len(set))
+	if window > 0 && len(set) > window {
+		count = int64(window)
+		completeness.truncated.Store(true)
+	}
 	result := newExecuteResult(nil)
-	result.setOutput(map[string]any{"count": count})
+	output := map[string]any{"count": count}
+	if completeness.truncated.Load() {
+		output["atLeast"] = true
+	}
+	result.setOutput(output)
 	result.setIncludeBundle(false)
 	result.SetCount(count)
 
@@ -2068,6 +2095,19 @@ func (e *MemQLEngine) run(ctx context.Context, markStarted func()) error {
 	// demoted bundle's constructs from this node's shared registry on receipt,
 	// so a demote on node A takes effect on node B within seconds (no restart).
 	e.StartAuthoringDemoteSubscriber(ctx)
+
+	// memql#6022 (F1): wire LIVE cross-node ARMING of authored bundles. An
+	// activation on any node broadcasts authoring.arm.<bundleId> and a retire
+	// broadcasts authoring.disarm.<bundleId>; this subscriber reads the bundle
+	// from the shared DB and arms or disarms it in this node's authored
+	// registry and scheduler, so an email rule activated on node A fires on
+	// whichever node its triggering write lands. Broadcasts are best effort,
+	// so it also reconciles against the database -- now, and every few
+	// minutes -- which covers a dropped broadcast and anything sent before
+	// this subscription.
+	// Inert until app/ hands the engine the authored runtime
+	// (SetAuthoredRuntimeDeps).
+	e.StartAuthoringArmSubscriber(ctx)
 
 	markStarted()
 

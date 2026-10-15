@@ -37,6 +37,19 @@ func (s stubBlobs) Download(_ context.Context, _ string, key string) ([]byte, er
 	return body, nil
 }
 
+// DownloadWithLimit is Download for a reader with a ceiling: an object over it
+// is an error, as the real storage's is.
+func (s stubBlobs) DownloadWithLimit(ctx context.Context, container, key string, maxBytes int64) ([]byte, error) {
+	body, err := s.Download(ctx, container, key)
+	if err != nil {
+		return nil, err
+	}
+	if int64(len(body)) > maxBytes {
+		return nil, fmt.Errorf("object %q exceeds the download limit of %d bytes", key, maxBytes)
+	}
+	return body, nil
+}
+
 const testArtifact = "art-1"
 
 func importWorker(t *testing.T, engine *fakeEngine, csv string) *Worker {
@@ -55,14 +68,54 @@ func importWorker(t *testing.T, engine *fakeEngine, csv string) *Worker {
 			"name":     "list.csv",
 			"mimeType": "text/csv",
 			"size":     len(csv),
-			"blobUrl":  "library/u-1/file-1/list.csv",
+			// libraryFileById answers only the caller's own rows, and the
+			// writers key the bytes under that owner.
+			"ownerUserId": "v1:identity:user:" + testOwner,
+			"blobUrl":     "library/" + testOwner + "/file-1/list.csv",
 		},
 	}
 	w := newTestWorker(t, engine, &recordingSender{})
 	w.newBlobReader = func(context.Context) (blobReader, string, error) {
-		return stubBlobs{objects: map[string][]byte{"library/u-1/file-1/list.csv": []byte(csv)}}, "memql", nil
+		return stubBlobs{objects: map[string][]byte{"library/" + testOwner + "/file-1/list.csv": []byte(csv)}}, "memql", nil
 	}
 	return w
+}
+
+// askedBlobs records every key the import asked storage for.
+type askedBlobs struct{ asked *[]string }
+
+func (a askedBlobs) Download(_ context.Context, _ string, key string) ([]byte, error) {
+	*a.asked = append(*a.asked, key)
+	return []byte("email\nsomeone@example.test\n"), nil
+}
+
+// DownloadWithLimit records the key as Download does.
+func (a askedBlobs) DownloadWithLimit(ctx context.Context, container, key string, _ int64) ([]byte, error) {
+	return a.Download(ctx, container, key)
+}
+
+// TestImportRefusesAFileWhoseKeyIsNotItsOwners: the caller owns the row, and
+// its key names another person's object -- the row a client could write before
+// createLibraryFile was @serverOnly. The import reads keys with the node's
+// storage credential, so it refuses before storage is asked; otherwise somebody
+// else's list would become the caller's audience.
+func TestImportRefusesAFileWhoseKeyIsNotItsOwners(t *testing.T) {
+	engine := &fakeEngine{}
+	w := importWorker(t, engine, "email\na@example.test")
+	engine.libraryFiles["file-1"]["blobUrl"] = "library/someone-else/file-9/list.csv"
+	var asked []string
+	w.newBlobReader = func(context.Context) (blobReader, string, error) {
+		return askedBlobs{asked: &asked}, "memql", nil
+	}
+
+	if _, err := w.handleImportRecipients(importCtx(), map[string]any{
+		"audienceId": testAudience, "artifactId": testArtifact,
+	}, 0); err == nil {
+		t.Fatal("a file whose key is another owner's was imported")
+	}
+	if len(asked) != 0 {
+		t.Fatalf("storage was asked for %q before the refusal", asked)
+	}
 }
 
 func importCtx() context.Context {

@@ -10,8 +10,18 @@
 
 /// Create a draft authoring bundle -- the atomic unit a Responsibility compiles into. ownerUserId
 /// is stamped from actor.userId. Members are added via createAuthoringConstruct; reused (composed)
-/// constructs are recorded on reusedConstructRefs.
+/// constructs are recorded on reusedConstructRefs. @serverOnly (memql#6022): an email or routing
+/// rule's bundle id is derived, so the id a person's next activation writes is known before it is
+/// written, and a bundle anyone could create was a bundle another person could create there first
+/// -- theirs from then on, and the owner's activation refused at a row it did not own. Its writers
+/// are the server pipelines (the rule activations, the planner's capture and work compile, the
+/// procedure learner, the durable promote), under internal origin. SCOPING TO actor.userId IS NOT
+/// THE FIX: the stamp already makes the bundle the caller's, and owning a row at someone else's
+/// next id is exactly the block; what must not be caller-writable is a bundle coming to exist. A
+/// raw insert() never consults this annotation, so creation is also held at the write chokepoint:
+/// component/memql/authoring_bundle_create_write_guard.go.
 @actor
+@serverOnly
 mutation bundle createAuthoringBundle {
   args {
     bundleId            string!
@@ -36,8 +46,16 @@ mutation bundle createAuthoringBundle {
 
 /// Create an authored construct (the .memql source for one concept / automation / logic / shape /
 /// spec / trait / policy / mutation / query / prompt) as a member of a bundle. ownerUserId stamped
-/// from actor.userId; status starts draft and follows the bundle.
+/// from actor.userId; status starts draft and follows the bundle. @serverOnly (memql#6022): an
+/// active bundle arms every construct it holds, so the constructs are what its gates saw -- written
+/// by the server pipelines that run those gates, under internal origin, and only while the bundle
+/// reads draft. SCOPING TO actor.userId IS NOT THE FIX: the construct and the bundle are already the
+/// owner's, and the owner is exactly who the gates stand in front of; what must not be
+/// caller-writable is a construct joining a bundle the gates did not see it in. A raw insert() or
+/// update() never consults this annotation, so membership and content are also held at the write
+/// chokepoint: component/memql/authoring_construct_write_guard.go.
 @actor
+@serverOnly
 mutation construct createAuthoringConstruct {
   args {
     constructId      string!
@@ -62,8 +80,15 @@ mutation construct createAuthoringConstruct {
 /// Record the Gate 1 (isolated compile+bind, #956) result on a bundle and transition status. status
 /// is validated on success or failed on a binding error; validationReport carries the structured
 /// diagnostics; failureReason carries the headline on failure. Re-stamps ownerUserId (keeps the row
-/// owned + satisfies per-row authz).
+/// owned + satisfies per-row authz). @serverOnly (memql#6022): a gate's verdict is the claim that the
+/// gate ran -- a work template runs from a bundle only once it reads validated, and a bundle
+/// activates only from dryRunPassed -- so it is the server pipelines that run Gate 1 that record it,
+/// under internal origin. SCOPING TO actor.userId IS NOT THE FIX: the bundle is already its owner's,
+/// and the owner is exactly who the gates stand in front of; what must not be caller-writable is the
+/// verdict. A raw insert() or update() never consults this annotation, so the verdict fields are
+/// also held at the write chokepoint: component/memql/authoring_bundle_verdict_write_guard.go.
 @actor
+@serverOnly
 mutation bundle recordBundleValidation {
   args {
     bundleId          string!
@@ -82,8 +107,13 @@ mutation bundle recordBundleValidation {
 
 /// Record the Gate 2 (tiered behavioral dry-run, #958) result on a bundle and transition status.
 /// status is dryRunPassed on success or failed otherwise; dryRunReport carries the trace +
-/// side-effect manifest + cost estimate (the Gate 3 approval artifact).
+/// side-effect manifest + cost estimate (the Gate 3 approval artifact). @serverOnly (memql#6022), for
+/// recordBundleValidation's reason: dryRunPassed is the claim that the dry run ran, and only a
+/// dryRunPassed bundle activates. SCOPING TO actor.userId IS NOT THE FIX: the bundle is already its
+/// owner's; what must not be caller-writable is the verdict. Raw writes are held at the write
+/// chokepoint too: component/memql/authoring_bundle_verdict_write_guard.go.
 @actor
+@serverOnly
 mutation bundle recordBundleDryRun {
   args {
     bundleId       string!
@@ -102,8 +132,16 @@ mutation bundle recordBundleDryRun {
 
 /// Activate a bundle after Gate 3 approval: status -> active and activatedAt stamped. The
 /// authored-construct runtime (#959) registers the bundle's constructs on this transition; member
-/// constructs are flipped to active via setConstructStatus.
+/// constructs are flipped to active via setConstructStatus. @serverOnly (memql#6022): every replica
+/// arms every bundle that reads active -- the boot re-arm, each reconcile pass and the arm
+/// broadcast all follow this row -- so `active` must mean the gated activation ran. SCOPING TO
+/// actor.userId IS NOT THE FIX: the bundle is already its owner's, and the owner is exactly who the
+/// gates stand in front of; what must not be caller-writable is the claim that the gates passed.
+/// Its writers are the gated activation (ActivateApprovedBundle) and the durable promote, under
+/// internal origin. A raw insert() or update() never consults this annotation, so the transition
+/// is also held at the write chokepoint: component/memql/authoring_bundle_activation_write_guard.go.
 @actor
+@serverOnly
 mutation bundle activateAuthoringBundle {
   args {
     bundleId  string!
@@ -113,17 +151,28 @@ mutation bundle activateAuthoringBundle {
     ownerUserId: actor.userId
     status: "active"
     activatedAt: now
+    // A live bundle carries no failure reason and no retirement. A bundle id
+    // can be written again -- an email rule turned off and on restarts at
+    // version 1 under the same derived id -- and the row read-merges, so
+    // without these the reason a breaker paused it with, and the time it was
+    // retired, rode along into the live bundle.
+    failureReason: ""
+    retiredAt: ""
   }
 }
 
-/// Generic lifecycle transition for the remaining bundle states: paused (circuit breaker / user
-/// hold), retired (superseded or removed), or failed. retiredAt is stamped by
-/// retireAuthoringBundle; this mutation handles pause/unpause + failed. failureReason optional.
+/// Generic lifecycle transition for the remaining bundle states: paused (the circuit breaker),
+/// draft, or failed. retiredAt is stamped by retireAuthoringBundle, and active is
+/// activateAuthoringBundle's alone. failureReason optional. @serverOnly (memql#6022): the breaker's
+/// pause is the system's own decision, recorded under internal origin, and no client calls it.
+/// SCOPING TO actor.userId IS NOT THE FIX: the row is already its owner's -- what it records is
+/// the engine's account of a bundle's lifecycle, which a caller may not assert for their own rows.
 @actor
+@serverOnly
 mutation bundle setAuthoringBundleStatus {
   args {
     bundleId       string!
-    status         enum("draft", "paused", "active", "failed")!
+    status         enum("draft", "paused", "failed")!
     failureReason  string
   }
   update {

@@ -13,6 +13,16 @@ test('opens only a single resource on this installation', () => {
   ]) assert.throws(() => requestedResource(handoff(invalid)));
   assert.throws(() => requestedResource(handoff(resource) + '&resource=another'));
 });
+test('a New email link opens on this installation only', () => {
+  const link = 'memql-file://cluster.example/new-email/client-org/New%20email';
+  assert.equal(requestedResource(handoff(link)), link);
+  for (const invalid of [
+    'memql-file://cluster.example/new/email?account=client-org&returnTo=email',
+    link.replace('cluster.example', 'other.example'),
+    link.replace('client-org', 'v1:accounts:account:client-org'),
+    link + '#x', link + '/', link.replace('/new-email/', '//new-email/'), link.replace('client-org', '%61'), link.replace('cluster.example/', 'cluster.example:/'),
+  ]) assert.throws(() => requestedResource(handoff(invalid)));
+});
 test('requires successful activation of both tools and the shared connection API', async () => {
   for (const result of [undefined, {}, { coreActive: true }, { coreActive: true, productivityActive: true, connectionVersion: 2 }]) {
     await assert.rejects(checkTools(async () => result));

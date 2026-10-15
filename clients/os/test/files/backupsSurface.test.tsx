@@ -1,4 +1,4 @@
-import { fireEvent, screen } from "@testing-library/react";
+import { fireEvent, screen, within } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 // The connection seam, mocked at the MODULE so the real LiveCollection
@@ -14,6 +14,7 @@ vi.mock("../../src/live/connection", () => ({
 
 import { click, fakeConnection, fileRow, folderRow, renderFiles, watchedFolderRow } from "./harness";
 import { selectedLabel } from "../selectControl";
+import { betweenTheClicks, readTheBar, useFakeDate } from "../readTheBar";
 
 // The Backups surface (epic memql#4783, the cockpit half memql#4841).
 //
@@ -154,6 +155,7 @@ describe("stopping a backup", () => {
     expect(screen.getByText(/The files already here stay/)).toBeTruthy();
     expect(screen.getByText(/nothing on the machine is touched/)).toBeTruthy();
 
+    await readTheBar();
     await click(screen.getByRole("button", { name: "Stop backing up" }));
     expect(connection.callsNamed("archiveLibraryWatchedFolder").length).toBe(1);
     // And it is an ARCHIVE. Nothing on this surface deletes anything.
@@ -169,7 +171,50 @@ describe("stopping a backup", () => {
     await renderFiles({ section: "backups" });
 
     await click(screen.getByRole("button", { name: /Stop backing up \/Users\/ana\/Clients/ }));
+    await readTheBar();
     await click(screen.getByRole("button", { name: "Keep it" }));
+    expect(connection.callsNamed("archiveLibraryWatchedFolder").length).toBe(0);
+  });
+});
+
+// The confirmation stands under the Stop that asked it, outside any bar
+// (memql#6033): the second click of a double-click on Stop must not stop it.
+describe("stopping a backup, one double-click later", () => {
+  useFakeDate();
+
+  async function ask() {
+    const connection = fakeConnection({
+      backups: [watchedFolderRow({ id: "w-1", localPath: "/Users/ana/Clients" })],
+      machines: [{ id: "wkr-1", name: "laptop", capabilities: ["HEADLESS"] } as never],
+    });
+    h.connection = connection;
+    await renderFiles({ section: "backups" });
+    await click(screen.getByRole("button", { name: /Stop backing up \/Users\/ana\/Clients/ }));
+    expect(screen.getByText(/The files already here stay/)).toBeTruthy();
+    return connection;
+  }
+
+  it("does not stop on the second click of the double-click that asked, and does once it is read", async () => {
+    const connection = await ask();
+    betweenTheClicks();
+    await click(screen.getByRole("button", { name: "Stop backing up" }));
+    expect(connection.callsNamed("archiveLibraryWatchedFolder").length).toBe(0);
+    // Still asking: the press that came too soon neither answered nor withdrew the question.
+    expect(screen.getByText(/The files already here stay/)).toBeTruthy();
+
+    await readTheBar();
+    await click(screen.getByRole("button", { name: "Stop backing up" }));
+    expect(connection.callsNamed("archiveLibraryWatchedFolder").length).toBe(1);
+  });
+
+  it("does not keep it on that click either", async () => {
+    const connection = await ask();
+    betweenTheClicks();
+    await click(screen.getByRole("button", { name: "Keep it" }));
+    expect(screen.getByText(/The files already here stay/)).toBeTruthy();
+    await readTheBar();
+    await click(screen.getByRole("button", { name: "Keep it" }));
+    expect(screen.queryByText(/The files already here stay/)).toBeNull();
     expect(connection.callsNamed("archiveLibraryWatchedFolder").length).toBe(0);
   });
 });
@@ -194,8 +239,8 @@ describe("the empty state", () => {
   it("invites the person to act rather than reporting an absence", async () => {
     h.connection = fakeConnection({ backups: [] });
     await renderFiles({ section: "backups" });
-    expect(screen.getByText(/No folder backups yet/)).toBeTruthy();
-    expect(screen.getByRole("button", { name: "Add folder backup" })).toBeTruthy();
+    expect(screen.getByText(/No folder syncs yet/)).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Add backup" })).toBeTruthy();
   });
 });
 
@@ -273,17 +318,25 @@ describe("editing", () => {
 
 
 describe("folder backup schedule",()=>{
+ useFakeDate();
  it("creates a scheduled directory backup and refuses an invalid interval",async()=>{
   const connection=fakeConnection({machines:[{id:"wkr-1",name:"laptop",capabilities:["HEADLESS"]} as never]}); h.connection=connection;
   await renderFiles({section:"backups"});
-  await click(screen.getByRole("button",{name:"Add folder backup"}));
+  await click(screen.getByRole("button",{name:"Add backup"}));
   fireEvent.change(screen.getByLabelText("Folder on that machine"),{target:{value:"/Users/ana/Reports"}});
-  fireEvent.change(screen.getByLabelText("Back up every"),{target:{value:"0"}});
-  expect((screen.getByRole("button",{name:"Start backing up"}) as HTMLButtonElement).disabled).toBe(true);
-  fireEvent.change(screen.getByLabelText("Back up every"),{target:{value:"3"}});
-  await click(screen.getByRole("button",{name:"Start backing up"}));
+  await readTheBar();
+  await click(screen.getByRole("button",{name:"Continue"}));
+  fireEvent.change(screen.getByLabelText("Check every (minutes)"),{target:{value:"0"}});
+  expect(within(screen.getByRole("group",{name:"What you can do with this"})).queryByRole("button",{name:"Review"})).toBeNull();
+  fireEvent.change(screen.getByLabelText("Check every (minutes)"),{target:{value:"4320"}});
+  await readTheBar();
+  await click(within(screen.getByRole("group",{name:"What you can do with this"})).getByRole("button",{name:"Review"}));
+  await readTheBar();
+  await click(screen.getByRole("button",{name:"Start sync"}));
   expect(connection.callsNamed("createLibraryWatchedFolder")[0]).toContain('intervalMinutes: 4320');
+  expect(connection.callsNamed("createLibraryWatchedFolder")[0]).toContain('mode: "sync"');
+  expect(connection.callsNamed("createLibraryWatchedFolder")[0]).toContain('includeHidden: true');
   expect(connection.callsNamed("createLibraryWatchedFolder")[0]).toContain('localPath: "/Users/ana/Reports"');
-  expect(screen.getByRole("button",{name:"Add folder backup"})).toBeTruthy();
+  expect(screen.getByRole("button",{name:"Add backup"})).toBeTruthy();
  });
 });

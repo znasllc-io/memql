@@ -4238,7 +4238,10 @@ func TestRunnerCancelDeletesTheJobAndSecret(t *testing.T) {
 // ceiling has no Job to delete, and would otherwise create one -- and touches
 // nothing of another run.
 func TestCancelRunStopsThisReplicasRunsAndDeletesTheRun(t *testing.T) {
-	h := newRunnerHarness(t)
+	// Keep the quota-refused step parked after its first durable rejection.
+	// A 2ms retry interval can start another POST between the progress notice
+	// and CancelRun; unknown in-flight creation correctly refuses cleanup.
+	h := newRunnerHarness(t, func(c *Config) { c.PollInterval = time.Hour })
 	a := rtRun()
 	b := rtRun()
 	b.StepKey, b.Attempt = "tests/lint", 1
@@ -4256,7 +4259,11 @@ func TestCancelRunStopsThisReplicasRunsAndDeletesTheRun(t *testing.T) {
 	doneB := h.start(context.Background(), b)
 	doneOther := h.start(otherCtx, other)
 	rtWaitUntil(t, "two steps running and one queued", func() bool {
-		return len(h.sink.messages()) == 3 && len(h.c.requestsFor(http.MethodPost, kubeJobs)) >= 3
+		queued := false
+		h.c.with(func(c *rtCluster) {
+			queued = c.secrets[SecretName(bJob)].Metadata.Annotations[annotCreation] == creationQueued
+		})
+		return queued && len(h.sink.messages()) == 3 && len(h.c.requestsFor(http.MethodPost, kubeJobs)) >= 3
 	})
 
 	n, err := h.r.CancelRun(context.Background(), CancelRequest{RunID: "run-7f3a"})

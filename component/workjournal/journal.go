@@ -365,6 +365,7 @@ func (j *Journal) Begin(ctx context.Context, w Work) (*Run, error) {
 		arg("status", "running"),
 		arg("nodeId", j.nodeID),
 		arg("startedAt", started.Format(time.RFC3339)),
+		arg("heartbeatAt", started.Format(time.RFC3339Nano)),
 		arg("goalSignature", w.GoalSignature),
 		arg("parentRunId", w.ParentRunID),
 		objectArg("variables", w.Variables),
@@ -372,15 +373,12 @@ func (j *Journal) Begin(ctx context.Context, w Work) (*Run, error) {
 	if err := j.exec(ctx, runCall); err != nil {
 		return nil, fmt.Errorf("workjournal: open run: %w", err)
 	}
-	// The first heartbeat rides this write: `createWorkRun` takes no
-	// heartbeatAt, and a run whose driver dies before the first tick is then
-	// judged from the moment it opened rather than from its start time alone.
-	opened := []string{arg("runId", runID), arg("heartbeatAt", started.Format(time.RFC3339Nano))}
+	// The initial heartbeat is already in the first version. Only the step
+	// order still needs an update; a run with no steps opens in one write.
 	if len(order) > 0 {
-		opened = append(opened, stringListArg("stepOrder", order))
-	}
-	if err := j.exec(ctx, call("mutation updateWorkRun", opened...)); err != nil {
-		return nil, fmt.Errorf("workjournal: record initial heartbeat and step order: %w", err)
+		if err := j.exec(ctx, call("mutation updateWorkRun", arg("runId", runID), stringListArg("stepOrder", order))); err != nil {
+			return nil, fmt.Errorf("workjournal: record step order: %w", err)
+		}
 	}
 	run := &Run{
 		j: j, goalID: goalID, runID: runID, owner: owner, order: w.Steps, started: started,

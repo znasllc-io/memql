@@ -1,4 +1,4 @@
-import { bareShortId, rowArray, rowNumber, rowObject, rowString, type Row } from "@znasllc-io/memql-sdk-core/client";
+import { bareShortId, rowArray, rowNumber, rowObject, rowString, versionOrder, type Row } from "@znasllc-io/memql-sdk-core/client";
 
 import { absent, figureFrom, figureOf, figureValue, type Figure } from "../../kit/measure";
 import { flatten } from "../../kit/rows";
@@ -99,10 +99,7 @@ export interface MachineRow {
    *  `present` false means the cockpit predates the field -- NOT a machine
    *  with no memory. See machines/hardware.ts. */
   hardware: MachineHardware;
-  /** The OWNER's half of the sharing consent (D6, epic memql#5344 G1). The
-   *  cockpit's half is `inferenceServe` beside it, and a machine serves
-   *  anybody but its owner only when the owner said `people` or `cluster`
-   *  AND the cockpit said cluster. */
+  /** The enrolled owner's saved model-sharing audience. */
   sharingMode: SharingMode;
   /** Under `people`: the users it is lent to, in the spelling stored and in
    *  stored order. EMPTY under the other two modes whatever the row holds --
@@ -111,12 +108,11 @@ export interface MachineRow {
   /** Under `people`: the groups whose ACTIVE members may use it. Empty
    *  otherwise, for the same reason. */
   sharedGroupIds: string[];
+  pausedUserIds?: string[];
+  pausedGroupIds?: string[];
+  sharingActivity?: Record<string, unknown> | null;
   sharedAt: string;
   sharedBy: string;
-  /** The COCKPIT's half, from that machine's own policy.yaml. Empty reads as
-   *  "owner": a cockpit that predates the field has said nothing, and silence
-   *  is not agreement to run other people's work on somebody's laptop. */
-  inferenceServe: string;
   /** The TCC / X11 snapshot the cockpit took at register time and refreshes
    *  on measured heartbeats. `present` false means the cockpit predates the
    *  report -- NOT a machine that was refused everything. */
@@ -376,9 +372,11 @@ export function machineFromRow(raw: Row): MachineRow {
     sharingMode: sharing.mode,
     sharedUserIds: sharing.userIds,
     sharedGroupIds: sharing.groupIds,
+    pausedUserIds: subjectIdsFrom(objectAt(row["sharing"])?.["pausedUserIds"]),
+    pausedGroupIds: subjectIdsFrom(objectAt(row["sharing"])?.["pausedGroupIds"]),
+    sharingActivity: objectAt(row["sharingActivity"]),
     sharedAt: nestedString(objectAt(row["sharing"]), "sharedAt"),
     sharedBy: nestedString(objectAt(row["sharing"]), "sharedBy"),
-    inferenceServe: nestedString(descriptor, "inferenceServe") === "cluster" ? "cluster" : "owner",
     permissions: permissionsFrom(row["permissions"]),
     rttMs: rowNumber(row, "rttMs"),
     rttAt: rowString(row, "rttAt"),
@@ -532,7 +530,6 @@ function sharingFrom(v: unknown): Sharing {
   if (mode !== "people") return { mode: "owner", userIds: [], groupIds: [] };
   const userIds = subjectIdsFrom(block?.["userIds"]);
   const groupIds = subjectIdsFrom(block?.["groupIds"]);
-  if (userIds.length === 0 && groupIds.length === 0) return { mode: "owner", userIds: [], groupIds: [] };
   return { mode: "people", userIds, groupIds };
 }
 
@@ -834,27 +831,6 @@ export function nodeFromRow(raw: Row): WorkbenchNodeRow {
 export const WORKBENCH_NODE_TYPE = "workbench";
 
 /**
- * Collapse the append-only node stream to one row per id.
- *
- * v1:cluster:node is append-only -- every liveness transition writes a new
- * row under the same id -- and `clusterNodes` declares no `asOf latest`, so
- * it returns the WHOLE history. Its own DSL comment says the CLI collapses in
- * Go; this is that same collapse, and without it a single replica renders
- * once per heartbeat it has ever sent.
- *
- * Ties (equal createdAt, or none at all) keep the LAST one seen, which is the
- * later row in the query's own order.
- */
-export function latestPerId(nodes: readonly WorkbenchNodeRow[]): WorkbenchNodeRow[] {
-  const byId = new Map<string, WorkbenchNodeRow>();
-  for (const node of nodes) {
-    const held = byId.get(node.id);
-    if (held === undefined || node.createdAt >= held.createdAt) byId.set(node.id, node);
-  }
-  return [...byId.values()].sort((a, b) => a.id.localeCompare(b.id));
-}
-
-/**
  * Group workspaces by the replica whose disk holds them, newest first within
  * each group.
  *
@@ -873,13 +849,24 @@ export function workspacesByNode(
     else byNode.set(one.nodeId, [one]);
   }
   return [...byNode.entries()]
-    .map(([nodeId, rows]) => ({
-      nodeId,
-      workspaces: [...rows].sort((a, b) =>
-        a.createdAt === b.createdAt ? (a.id < b.id ? 1 : -1) : a.createdAt < b.createdAt ? 1 : -1,
-      ),
-    }))
+    .map(([nodeId, rows]) => ({ nodeId, workspaces: [...rows].sort(newestFirst) }))
     .sort((a, b) => a.nodeId.localeCompare(b.nodeId));
+}
+
+/**
+ * Newest first, by the INSTANT a workspace was made (the SDK's `versionOrder`):
+ * the engine trims the fraction's trailing zeros, so as text `.3251Z` is greater
+ * than `.325101Z` and is the earlier time. The same instant breaks its tie by
+ * id. A workspace whose time cannot be read goes after every one whose can, and
+ * two of those stay in the order they were read in (the sort is stable): nothing
+ * says one is newer than the other.
+ */
+function newestFirst(a: WorkspaceRow, b: WorkspaceRow): number {
+  const order = versionOrder(b.createdAt, a.createdAt);
+  if (order !== null) return order !== 0 ? order : a.id === b.id ? 0 : a.id < b.id ? 1 : -1;
+  const aTimed = versionOrder(a.createdAt, a.createdAt) !== null;
+  const bTimed = versionOrder(b.createdAt, b.createdAt) !== null;
+  return aTimed === bTimed ? 0 : aTimed ? -1 : 1;
 }
 
 // ---------------------------------------------------------------------------

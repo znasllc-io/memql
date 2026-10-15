@@ -1,3 +1,4 @@
+import { readTheBar } from "../readTheBar";
 import { screen, waitFor, within } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 
@@ -79,6 +80,12 @@ async function type(label: string, value: string): Promise<void> {
   });
 }
 
+async function reachRoles() {
+  const email = screen.queryByLabelText("Email address") as HTMLInputElement | null;
+  if (email && !email.value) await type("Email address", "kit@example.com");
+  for (let i = 0; i < 2; i++) { await readTheBar(); await click(screen.getByRole("button", { name: "Next" })); }
+}
+
 // ===========================================================================
 // THE DOMAIN MATCH
 // ===========================================================================
@@ -121,7 +128,7 @@ describe("the Invite rail", () => {
 
     expect(await screen.findByText(/Acme's domain, and they take people on it/)).toBeTruthy();
     // The stop's own answer line names the group that was filled in.
-    await waitFor(() => expect(screen.getByText(/Acme is filled in below/)).toBeTruthy());
+    await waitFor(() => expect(screen.getByText(/Acme is selected in Groups/)).toBeTruthy());
     view.unmount();
   });
 
@@ -133,6 +140,7 @@ describe("the Invite rail", () => {
     await type("Email address", "kit@example.com");
     expect(within(bar()).queryByRole("button", { name: "Send invitation" })).toBeNull();
 
+    await reachRoles();
     const ladder = screen.getByRole("list", { name: /The role this invitation grants/ });
     await click(within(ladder).getByRole("button", { name: /Member/ }));
 
@@ -155,9 +163,10 @@ describe("the Invite rail", () => {
     });
     const view = await openInvite(connection);
     await type("Email address", "kit@acme.com");
+    await reachRoles();
     const ladder = screen.getByRole("list", { name: /The role this invitation grants/ });
     await click(within(ladder).getByRole("button", { name: /Member/ }));
-    await click(screen.getByRole("button", { name: "Send invitation" }));
+    await readTheBar(); await click(screen.getByRole("button", { name: "Send invitation" }));
 
     await waitFor(() =>
       expect(connection.dispatcher.sendAndWait).toHaveBeenCalledWith(
@@ -186,9 +195,10 @@ describe("the Invite rail", () => {
     );
     const view = await openInvite(connection);
     await type("Email address", "kit@example.com");
+    await reachRoles();
     const ladder = screen.getByRole("list", { name: /The role this invitation grants/ });
     await click(within(ladder).getByRole("button", { name: /Member/ }));
-    await click(screen.getByRole("button", { name: "Send invitation" }));
+    await readTheBar(); await click(screen.getByRole("button", { name: "Send invitation" }));
 
     // The Role stop is where the refused value was entered; a refusal at the
     // bottom of a three-stop rail makes somebody re-read all three.
@@ -277,6 +287,7 @@ describe("the rungs a developer is offered", () => {
 
   it("offers admin to a developer, and the button is clickable", async () => {
     await openInvite(rungSeed(), "developer");
+    await reachRoles();
     const admin = rung("admin");
     expect(admin.disabled, "the admin rung must be clickable for a developer").toBe(false);
     expect(admin.title ?? "", "an offered rung carries no refusal sentence").toBe("");
@@ -284,6 +295,7 @@ describe("the rungs a developer is offered", () => {
 
   it("still refuses owner to a developer -- the rank cap is untouched", async () => {
     await openInvite(rungSeed(), "developer");
+    await reachRoles();
     const owner = rung("owner");
     expect(owner.disabled).toBe(true);
     expect(owner.title).toContain("at or above your own");
@@ -291,6 +303,7 @@ describe("the rungs a developer is offered", () => {
 
   it("still refuses a peer admin to an admin", async () => {
     await openInvite(rungSeed(), "admin");
+    await reachRoles();
     expect(rung("admin").disabled).toBe(true);
   });
 
@@ -298,6 +311,7 @@ describe("the rungs a developer is offered", () => {
     const connection = rungSeed();
     await openInvite(connection, "developer");
     await type("Email address", "colleague@example.test");
+    await reachRoles();
     await click(rung("admin"));
     await waitFor(() =>
       expect(screen.getByRole("button", { name: "Send invitation" })).toBeTruthy(),

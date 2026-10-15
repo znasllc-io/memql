@@ -173,6 +173,45 @@ func TestServerOnlyParsedSetMatchesTheTree(t *testing.T) {
 			"attribute name changed, which would silently exempt nothing and gate nothing.")
 	}
 	want := map[serverOnlyKey]bool{
+		{Path: "email/queries.memql", Name: "emailSendOperationByProviderId"}:       true,
+		{Path: "email/queries.memql", Name: "emailUnindexedConnections"}:            true,
+		{Path: "email/queries.memql", Name: "emailReadyFeedbackOrganizations"}:      true,
+		{Path: "email/mutations.memql", Name: "indexEmailConnectionState"}:          true,
+		{Path: "campaigns/queries.memql", Name: "providerCountersToRepair"}:         true,
+		{Path: "campaigns/queries.memql", Name: "providerCounterCampaignById"}:      true,
+		{Path: "campaigns/queries.memql", Name: "providerCounterLedger"}:            true,
+		{Path: "campaigns/mutations.memql", Name: "repairProviderCampaignCounters"}: true,
+		{Path: "campaigns/mutations.memql", Name: "markProviderCounterRepair"}:      true,
+		{Path: "campaigns/mutations.memql", Name: "liftOrganizationSuppression"}:    true,
+		{Path: "campaigns/mutations.memql", Name: "clearProviderCounterRepair"}:     true,
+		{Path: "campaigns/queries.memql", Name: "providerDeliveryById"}:             true,
+		{Path: "campaigns/queries.memql", Name: "providerConsentById"}:              true,
+		{Path: "campaigns/mutations.memql", Name: "recordProviderDelivery"}:         true,
+		{Path: "campaigns/mutations.memql", Name: "recordProviderBounce"}:           true,
+		// Durable email automation coordination; public callers use gated capabilities.
+		{Path: "campaigns/queries.memql", Name: "deferredSingleSendById"}:         true,
+		{Path: "campaigns/mutations.memql", Name: "settleDeferredSingleSend"}:     true,
+		{Path: "campaigns/queries.memql", Name: "deferredSingleSends"}:            true,
+		{Path: "campaigns/queries.memql", Name: "activeJourneys"}:                 true,
+		{Path: "campaigns/queries.memql", Name: "journeysToRetire"}:               true,
+		{Path: "campaigns/queries.memql", Name: "dueEnrollmentsForJourney"}:       true,
+		{Path: "campaigns/queries.memql", Name: "openEnrollmentsForJourney"}:      true,
+		{Path: "campaigns/queries.memql", Name: "newestJourneyEnrollment"}:        true,
+		{Path: "campaigns/queries.memql", Name: "journeyEnrollmentById"}:          true,
+		{Path: "campaigns/queries.memql", Name: "audienceJoinersSince"}:           true,
+		{Path: "campaigns/queries.memql", Name: "audienceConfirmationsSince"}:     true,
+		{Path: "campaigns/queries.memql", Name: "waitingEnrollmentsForRecipient"}: true,
+		{Path: "campaigns/queries.memql", Name: "recipientJourneyEnrollments"}:    true,
+		{Path: "campaigns/mutations.memql", Name: "confirmRecipientSubscription"}: true,
+		{Path: "campaigns/mutations.memql", Name: "restartRecipientMembership"}:   true,
+		{Path: "campaigns/mutations.memql", Name: "createJourney"}:                true,
+		{Path: "campaigns/mutations.memql", Name: "updateJourney"}:                true,
+		{Path: "campaigns/mutations.memql", Name: "setJourneyStatus"}:             true,
+		{Path: "campaigns/mutations.memql", Name: "recordJourneyDrain"}:           true,
+		{Path: "campaigns/mutations.memql", Name: "enrollJourneyRecipient"}:       true,
+		{Path: "campaigns/mutations.memql", Name: "advanceJourneyEnrollment"}:     true,
+		{Path: "campaigns/mutations.memql", Name: "nudgeJourneyEnrollment"}:       true,
+
 		// Webhook resolution has no signed-in user. The connector's internal
 		// cluster-owner actor walks the installation directory at one snapshot;
 		// per-user scoping would silently discard other configured stores.
@@ -319,6 +358,42 @@ func TestServerOnlyParsedSetMatchesTheTree(t *testing.T) {
 		// and still not yours to write".
 		{Path: "authoring/mutations.memql", Name: "recordConstructGoalSignature"}: true,
 
+		// memql#6022. A bundle that reads active is armed on every replica --
+		// the boot re-arm, each reconcile pass and the arm broadcast all follow
+		// the row -- so `active` is the claim that the gates passed. Scoping to
+		// actor.userId is not the missing piece: the bundle IS its owner's, and
+		// the owner is exactly who the gates stand in front of. What a caller
+		// may not do is make the claim at all; the gated activation and the
+		// durable promote write it under internal origin, and the breaker's
+		// pause is the system's own decision. Raw writes are held at the write
+		// chokepoint too (component/memql/authoring_bundle_activation_write_guard.go).
+		{Path: "authoring/mutations.memql", Name: "activateAuthoringBundle"}:  true,
+		{Path: "authoring/mutations.memql", Name: "setAuthoringBundleStatus"}: true,
+		// The same argument for a bundle's MEMBERS: an active bundle arms every
+		// construct it holds, so a construct joining a bundle is a claim that
+		// the bundle's gates saw it. The pipelines that run the gates write
+		// them, under internal origin, while the bundle reads draft; the write
+		// guard holds raw writes to the same rule
+		// (component/memql/authoring_construct_write_guard.go).
+		{Path: "authoring/mutations.memql", Name: "createAuthoringConstruct"}: true,
+		// And a bundle COMING TO EXIST (memql#6022): an email or
+		// routing rule's bundle id is derived from its owner and the rule, so
+		// the id a person's next activation writes is known before it is
+		// written, and a bundle another person created there first was theirs
+		// -- the owner's activation refused at a row it did not own. Only the
+		// server pipelines create a bundle, each deriving for its own owner or
+		// minting a fresh id; the create guard holds raw writes to the same
+		// rule (component/memql/authoring_bundle_create_write_guard.go).
+		{Path: "authoring/mutations.memql", Name: "createAuthoringBundle"}: true,
+		// And a GATE'S VERDICT (memql#6022): the claim that a gate ran. A work
+		// template runs from a bundle only once it reads validated, and a bundle
+		// activates only from dryRunPassed, so the server pipelines that run the
+		// gates record them, under internal origin; the verdict guard holds raw
+		// writes to the same rule
+		// (component/memql/authoring_bundle_verdict_write_guard.go).
+		{Path: "authoring/mutations.memql", Name: "recordBundleValidation"}: true,
+		{Path: "authoring/mutations.memql", Name: "recordBundleDryRun"}:     true,
+
 		// epic memql#4966. workRunsInFlight is the wait-and-abandon sweep's
 		// read. (A2 briefly carried a closeWorkGoal beside it; epic A3's
 		// updateWorkGoal is the same write with a wider argument list, so
@@ -397,8 +472,12 @@ func TestServerOnlyParsedSetMatchesTheTree(t *testing.T) {
 		// Caller scoping admits authorized writers but cannot enforce that gate;
 		// direct writes could overwrite a concurrent edit or publish stale copy.
 		// campaignSaveTemplate retains the actor and checks organization rights.
-		{Path: "campaigns/mutations.memql", Name: "createTemplate"}:         true,
-		{Path: "campaigns/mutations.memql", Name: "updateTemplate"}:         true,
+		{Path: "campaigns/mutations.memql", Name: "createTemplate"}: true,
+		{Path: "campaigns/mutations.memql", Name: "updateTemplate"}: true,
+		// Layout content shares the template revision gate; campaignSaveLayout
+		// retains the actor and checks organization rights.
+		{Path: "campaigns/mutations.memql", Name: "createEmailLayout"}:      true,
+		{Path: "campaigns/mutations.memql", Name: "updateEmailLayout"}:      true,
 		{Path: "campaigns/mutations.memql", Name: "startCampaign"}:          true,
 		{Path: "campaigns/mutations.memql", Name: "pauseCampaign"}:          true,
 		{Path: "campaigns/mutations.memql", Name: "resumeCampaign"}:         true,
@@ -416,6 +495,10 @@ func TestServerOnlyParsedSetMatchesTheTree(t *testing.T) {
 		// Only its handler derives organization/digest and writes engine state;
 		// actor scoping would either exclude mail clients or admit forged claims.
 		{Path: "campaigns/mutations.memql", Name: "recordOrganizationSuppression"}: true,
+		// Rejoining also comes from a mailed token, without an actor.userId
+		// session. Caller ownership cannot prove renewed consent. The verified
+		// preferences handler records that consent under shared locks before
+		// lifting only the token's organization opt-out, never a safety block.
 		// An actor may request a send, but only the provider adapter can attest
 		// that an attempt began. The receipt and its replay read are private.
 		// Ownership cannot attest locked scheduling or a committed occurrence.
@@ -1159,6 +1242,16 @@ func TestServerOnlyParsedSetMatchesTheTree(t *testing.T) {
 		// version would put that back in a caller's hands.
 		{Path: "library/mutations.memql", Name: "createLibraryFileVersion"}: true,
 		{Path: "library/mutations.memql", Name: "supersedeLibraryFileHead"}: true,
+		// The HEAD row's create, on the same asset: blobUrl is the storage
+		// path every reader of the file streams with the node's credential,
+		// and while this was client-reachable any signed-in caller could
+		// write a file row of their own naming another user's object and
+		// read it back through GET /artifacts/{id}/content. actor-scoping
+		// was already in place and was never the question -- the row was the
+		// caller's; the bytes were not. Its writers reach it through
+		// component/server/libraryfile, which refuses a key outside the
+		// actor's own library/{owner}/ prefix before stamping.
+		{Path: "library/mutations.memql", Name: "createLibraryFile"}: true,
 
 		// Ownership does not attest storage: only the internal finalizer may
 		// record the durable journal's verified bytes and reserved file id.
@@ -1324,6 +1417,9 @@ func TestServerOnlyParsedSetMatchesTheTree(t *testing.T) {
 		// caller's OWN machines -- the modelPullMachineFor precedent -- and is
 		// this mutation's only renderer.
 		{Path: "worker/mutations.memql", Name: "setWorkerSharing"}: true,
+		// Activity is measured by the stream holder. Owner scoping alone would
+		// let a browser forge live counts without holding that stream.
+		{Path: "worker/mutations.memql", Name: "updateWorkerSharingActivity"}: true,
 		// epic memql#5327, design D2. revokeWorker is HALF AN ACT: removing a
 		// machine is a registration revoke AND a credential revoke, and MemQL
 		// OS rendered only this one -- so the row left routing while the token
@@ -1517,6 +1613,16 @@ func TestServerOnlyParsedSetMatchesTheTree(t *testing.T) {
 		{Path: "work/mutations.memql", Name: "createWorkObservation"}: true,
 		{Path: "work/mutations.memql", Name: "createWorkApproval"}:    true,
 		{Path: "work/mutations.memql", Name: "decideWorkApproval"}:    true,
+		// Ownership alone does not establish the pending native checkpoint or
+		// its held decision lease; decideApproval validates both before saving.
+		{Path: "work/mutations.memql", Name: "saveWorkApprovalGuidance"}: true,
+		// Native receipt gates establish owner, exact scope and current version.
+		// Callers cannot consume or revoke a receipt by invoking these writers.
+		{Path: "work/mutations.memql", Name: "useWorkComputerPermission"}:    true,
+		{Path: "work/mutations.memql", Name: "revokeWorkComputerPermission"}: true,
+		// Ownership cannot prove a fresh interactive review or hold its decision
+		// lease; the native gate verifies the fingerprint and exact parked run.
+		{Path: "work/mutations.memql", Name: "refreshWorkComputerPermission"}: true,
 
 		// THE PROVING SUITE'S PUBLISHED RECORD (epic memql#4993, design section
 		// G). Caller-scoping is not available even in principle, for the reason
@@ -1567,10 +1673,14 @@ func TestServerOnlyParsedSetMatchesTheTree(t *testing.T) {
 		// conjunct to narrow by, and adding one would hide the catalog the
 		// concept exists to describe. `ownerUserId` on these rows is
 		// provenance, never a scope.
-		{Path: "skills/mutations.memql", Name: "createSkillEdge"}: true,
-		{Path: "skills/mutations.memql", Name: "commitSkillEdge"}: true,
-		{Path: "skills/mutations.memql", Name: "setSkillScripts"}: true,
-		{Path: "skills/mutations.memql", Name: "reinforceSkill"}:  true,
+		// Shared installed seed content has no actor.userId scope. A caller
+		// may propose a private candidate, but cannot impersonate a release.
+		{Path: "skills/mutations.memql", Name: "createSkill"}:      true,
+		{Path: "skills/mutations.memql", Name: "createSkillEdge"}:  true,
+		{Path: "skills/mutations.memql", Name: "proposeSkillEdge"}: true,
+		{Path: "skills/mutations.memql", Name: "commitSkillEdge"}:  true,
+		{Path: "skills/mutations.memql", Name: "setSkillScripts"}:  true,
+		{Path: "skills/mutations.memql", Name: "reinforceSkill"}:   true,
 
 		// design record 2026-09-06-configuration-readiness, section 4.4.
 		// recordModuleReadiness writes the engine's OWN OBSERVATION of one

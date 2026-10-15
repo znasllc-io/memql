@@ -809,6 +809,66 @@ model depends on it, and a proposal that routes application traffic through it
 is the port-forward-as-architecture anti-pattern
 [environment-parity.md](environment-parity.md) rejects.
 
+## When a front door has no ready endpoints
+
+Every front-door Ingress whose proxy speaks plain HTTP, bar `mcp-front-door`,
+carries `nginx.ingress.kubernetes.io/default-backend: error-pages`. When the
+Service **that Ingress routes to** has no ready endpoints -- and only then --
+ingress-nginx answers with `memql error-pages` instead of its own bare `503`; a
+Service with a ready pod is untouched. The error pages run in the cloud overlays
+(`cloud` and `cloud-entry` compose `deploy/k8s/components/error-pages`), and the
+page needs a ready `error-pages` pod of its own: with none, ingress-nginx skips the
+fallback and answers its own `503`. It is always a `503` with `Retry-After: 120`:
+an installation page on `identity.`, `os.` and `vscode.`, a neutral page on the
+apex, hosted sites and custom domains, and JSON on `api.<domain>` and for any
+`Accept: application/json`. Entering or leaving the fallback costs a full nginx
+reload, because ingress-nginx's `Location.Equal` compares the location's backend:
+a role whose ready endpoints flap at zero reloads the controller each time, and a
+reload closes long-lived connections controller-wide once
+`worker-shutdown-timeout` has passed.
+
+`identity-front-door` and a reserved name's `id.` Ingress use
+`nginx.ingress.kubernetes.io/default-backend: error-pages-tls`. ingress-nginx
+preserves their HTTPS protocol; this separate Service's first port reaches the
+fallback's TLS listener on 8443. Its certificate is generated in memory. These
+identity locations already disable upstream certificate verification. The probe
+port is exposed by neither Service: public `/healthz` still answers 503.
+The gRPC Ingresses remain excluded because their clients cannot read a page.
+`mcp-front-door` does not carry it either, by choice rather than protocol: mcp is
+disabled by default (`cloud-entry` renders it at 0 replicas), so the page's
+"being updated, back in a few minutes" would be permanent and false there, and
+MCP is a machine surface. `mcp.` keeps ingress-nginx's answer. A local cluster
+(traefik) has neither the pods nor the fallback: traefik ignores the annotation
+and the local overlay renders no `error-pages` objects, so a local Service with
+no ready endpoints gets traefik's own answer. The Service is looked up in the
+Ingress's own namespace, so a `MEMQL_CUSTOM_DOMAIN_NAMESPACE` other than `memql`
+needs an `error-pages` Deployment **and** Service there too -- a Service alone
+selects no pods in that namespace -- or the fallback is skipped.
+
+The page process reads no database or secrets. By default all pages are neutral,
+so an installation whose saved branding is unavailable never shows someone
+else's name. To include the installation name, set `MEMQL_IDENTITY_BRAND_NAME`
+in the existing `memql-domain` ConfigMap and roll the error-pages Deployment.
+`MemQL` explicitly selects its mark and wordmark; any other name uses the neutral
+layout with that name. Customer domains always remain neutral. The optional
+name must be maintained alongside installation branding; the fallback does not
+query the cluster settings row during an outage.
+
+The engine applies an Ingress only while a binding is issuing, so doors already
+live at the upgrade need their fallback annotation added once. Match the stored
+protocol and preserve the existing verification setting:
+
+```bash
+NS=memql   # MEMQL_CUSTOM_DOMAIN_NAMESPACE, if you set it
+for sel in app.kubernetes.io/name=custom-domain app.kubernetes.io/name=account-front-door; do
+  kubectl -n "$NS" get ingress -l "$sel" \
+    -o jsonpath='{range .items[*]}{.metadata.name}{"\t"}{.metadata.annotations.nginx\.ingress\.kubernetes\.io/backend-protocol}{"\t"}{.metadata.annotations.nginx\.ingress\.kubernetes\.io/proxy-ssl-verify}{"\n"}{end}' \
+    | awk -F'\t' '$2 == "" || toupper($2) == "HTTP" || (toupper($2) == "HTTPS" && $3 == "off") { print $1, (toupper($2) == "HTTPS" ? "error-pages-tls" : "error-pages") }' \
+    | while read -r ing backend; do kubectl -n "$NS" annotate ingress "$ing" \
+        nginx.ingress.kubernetes.io/default-backend="$backend" --overwrite; done
+done
+```
+
 ## Verifying a front door
 
 Requires a running cluster, so it belongs on an operator machine or in CI.

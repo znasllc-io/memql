@@ -1,4 +1,3 @@
-import { normalizeHostname } from "../../../domains";
 import { useEffect, useRef } from "react";
 import { Shuffle } from "lucide-react";
 
@@ -314,7 +313,7 @@ function AppAddress({
               label={`The account ${heading || "this deployable"} is for`}
               value={address.accountId}
               accounts={accounts}
-              onChange={(accountId) => onAddress({ accountId, ...prefillDomain(accounts, accountId, address) })}
+              onChange={(accountId) => onAddress({ accountId })}
             />
           </Field>
 
@@ -328,7 +327,7 @@ function AppAddress({
                   id={`os-compose-domain-${key}`}
                   label={`A domain of the client's own for ${heading || "this deployable"}`}
                   value={address.ownDomain}
-                  onChange={(next) => onAddress({ ownDomain: next })}
+                  onChange={(next) => onAddress({ ownDomain: next, domainSource: "explicit" })}
                   placeholder="shop.acme.com, www.acme.com"
                 />
               </Field>
@@ -440,23 +439,4 @@ function PlacedApp({
       {outcome.domainRefusal ? <ProblemNotice problem={outcome.domainRefusal} tone="warn" /> : null}
     </section>
   );
-}
-
-/**
- * Choosing a client PREFILLS their own domain, and never overwrites one.
- *
- * The account record carries the client's domain (`v1:accounts:account.domain`),
- * and typing it again by hand is how a typo gets into a DNS binding. It fills
- * only an empty field: somebody who has already typed a subdomain of their own
- * must not have it replaced by picking the client it belongs to.
- */
-function prefillDomain(
-  accounts: AccountRow[],
-  accountId: string,
-  held: AddressDraft,
-): Partial<AddressDraft> {
-  if (held.ownDomain.trim() !== "") return {};
-  const account = accounts.find((a) => a.id === accountId.trim());
-  const domain = normalizeHostname(account?.domain ?? "");
-  return domain === "" ? {} : { ownDomain: domain };
 }

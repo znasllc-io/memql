@@ -98,8 +98,10 @@ func (a *App) semanticCacheDBGetter() func() *sql.DB {
 // packs observe live state even if they stash the context.
 func (a *App) pluginContext() memql.PluginContext {
 	return memql.PluginContext{
-		Logger: a.Logger,
-		Engine: a.engine,
+		Logger:            a.Logger,
+		Concepts:          a.engine.Concepts(),
+		InvalidateConcept: a.engine.InvalidateCacheForConcept,
+		Engine:            a.engine,
 		BunDB: func() *bun.DB {
 			if a.db == nil {
 				return nil
@@ -112,6 +114,8 @@ func (a *App) pluginContext() memql.PluginContext {
 			}
 			return a.db.DirectBunDB()
 		},
+		// The pool write gates run on (memql#6022): not the request pool above.
+		GateDB: a.gateDBGetter(),
 		// Both of these RESOLVE now, and the field names say so (epic
 		// memql#5127, design D2). They used to reach the registry directly --
 		// one for its default vision provider, one for a named embedding

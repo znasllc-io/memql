@@ -1,5 +1,6 @@
 import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
+import { readTheBar } from "../readTheBar";
 
 const h = vi.hoisted(() => ({ connection: null as unknown }));
 
@@ -194,7 +195,10 @@ describe("what a run's bar offers", () => {
     expect(screen.queryByText("Branch from here")).toBeNull();
 
     fireEvent.click(within(timeline).getByLabelText(/Step 3, classify/));
-    fireEvent.click(await screen.findByText("Branch from here"));
+    await screen.findByText("Branch from here");
+    // Picking the step changed the bar, and a bar that has just changed takes no press for a moment.
+    await readTheBar();
+    fireEvent.click(screen.getByText("Branch from here"));
     const dialog = await screen.findByRole("dialog", { name: /Branch from here/ });
     fireEvent.click(within(dialog).getByRole("button", { name: "Branch from here" }));
     await waitFor(() => expect(conn.query.branchRun).toHaveBeenCalled());
@@ -768,6 +772,6 @@ it("keeps unrelated live steps out of an open run and uses its work title", asyn
 it("keeps the goal readable after a terminal outcome replaces compile metadata", async () => {
   const conn = fakeConnection({ goals: [goalRow({ id: "g1", statement: "Find the saved contact" })], runs: [runRow({ id: "r1", goalId: "g1", status: "succeeded", outcome: { executorStatus: "completed" } })] });
   mount(conn);
-  fireEvent.click(await screen.findByText("Find the saved contact"));
+  fireEvent.click(await screen.findByText("nightlyReconcile"));
   expect(await screen.findByRole("heading", { name: "Find the saved contact" })).toBeTruthy();
 });

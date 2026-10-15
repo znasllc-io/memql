@@ -14,11 +14,25 @@ import (
 	"github.com/uptrace/bun/dialect/pgdialect"
 	"github.com/uptrace/bun/driver/pgdriver"
 	"github.com/znasllc-io/memql/component/auth"
+	"github.com/znasllc-io/memql/component/database"
 	"github.com/znasllc-io/memql/component/database/dbtest"
 	memorynodes "github.com/znasllc-io/memql/component/database/memory-nodes"
 	langparser "github.com/znasllc-io/memql/component/language/parser"
 	"github.com/znasllc-io/memql/component/memql"
 )
+
+// replicaGatePool opens one replica's write-gate pool, as its database opens one
+// (database.NewGatePool at the deployed size; memql#6022): the version gates hold
+// their locks there, never on the engine's pool.
+func replicaGatePool(t *testing.T) func() *sql.DB {
+	t.Helper()
+	gates, err := database.NewGatePool(dbtest.DSN(), 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = gates.Close() })
+	return func() *sql.DB { return gates }
+}
 
 func TestDocumentEditsOnDifferentReplicasPreserveAuthorityAndVersions(t *testing.T) {
 	reachable, err := dbtest.EnsureSchema(context.Background())
@@ -42,7 +56,7 @@ func TestDocumentEditsOnDifferentReplicasPreserveAuthorityAndVersions(t *testing
 		if err = e.Init(memorynodes.DefaultRegistry()); err != nil {
 			t.Fatal(err)
 		}
-		return NewIntegration(e, func() *sql.DB { return db.DB }), e, db
+		return NewIntegration(e, replicaGatePool(t)), e, db
 	}
 	a, ea, db := open()
 	b, _, _ := open()

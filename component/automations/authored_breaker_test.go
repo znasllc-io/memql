@@ -25,6 +25,11 @@ import (
 
 // --- breaker in isolation ---
 
+// subject is a failing run of (owner, name) with no bundle behind it.
+func subject(owner, name string) automations.BreakerSubject {
+	return automations.BreakerSubject{Owner: owner, Automation: name}
+}
+
 // TestBreaker_TripsAfterThreshold: consecutive failures trip the breaker at the
 // threshold and not before.
 func TestBreaker_TripsAfterThreshold(t *testing.T) {
@@ -32,21 +37,21 @@ func TestBreaker_TripsAfterThreshold(t *testing.T) {
 	if !b.Allow("u", "a") {
 		t.Fatal("a fresh breaker must allow")
 	}
-	if b.RecordFailure("u", "a", "boom") || b.RecordFailure("u", "a", "boom") {
+	if b.RecordFailure(subject("u", "a"), "boom") || b.RecordFailure(subject("u", "a"), "boom") {
 		t.Fatal("breaker tripped before threshold")
 	}
 	if b.IsOpen("u", "a") {
 		t.Fatal("breaker open before threshold")
 	}
 	// Third failure trips it.
-	if !b.RecordFailure("u", "a", "boom") {
+	if !b.RecordFailure(subject("u", "a"), "boom") {
 		t.Fatal("third failure should trip the breaker")
 	}
 	if !b.IsOpen("u", "a") || b.Allow("u", "a") {
 		t.Fatal("tripped breaker must be open and disallow")
 	}
 	// A later failure does not re-report a trip.
-	if b.RecordFailure("u", "a", "boom") {
+	if b.RecordFailure(subject("u", "a"), "boom") {
 		t.Error("an already-open breaker must not re-trip")
 	}
 }
@@ -54,10 +59,10 @@ func TestBreaker_TripsAfterThreshold(t *testing.T) {
 // TestBreaker_SuccessResets: a success clears a partial failure streak.
 func TestBreaker_SuccessResets(t *testing.T) {
 	b := automations.NewAuthoredBreaker(3, nil)
-	b.RecordFailure("u", "a", "x")
-	b.RecordFailure("u", "a", "x")
+	b.RecordFailure(subject("u", "a"), "x")
+	b.RecordFailure(subject("u", "a"), "x")
 	b.RecordSuccess("u", "a") // streak cleared
-	if b.RecordFailure("u", "a", "x") {
+	if b.RecordFailure(subject("u", "a"), "x") {
 		t.Fatal("success should have reset the streak; one failure must not trip")
 	}
 }
@@ -66,8 +71,8 @@ func TestBreaker_SuccessResets(t *testing.T) {
 // (different automation, or different owner).
 func TestBreaker_FaultIsolation(t *testing.T) {
 	b := automations.NewAuthoredBreaker(2, nil)
-	b.RecordFailure("u", "bad", "x")
-	b.RecordFailure("u", "bad", "x") // trips "bad"
+	b.RecordFailure(subject("u", "bad"), "x")
+	b.RecordFailure(subject("u", "bad"), "x") // trips "bad"
 	if !b.IsOpen("u", "bad") {
 		t.Fatal("bad should be open")
 	}
@@ -82,7 +87,7 @@ func TestBreaker_FaultIsolation(t *testing.T) {
 // TestBreaker_ResetReopens: Reset clears a tripped breaker (re-activation path).
 func TestBreaker_ResetReopens(t *testing.T) {
 	b := automations.NewAuthoredBreaker(1, nil)
-	b.RecordFailure("u", "a", "x") // trips immediately at threshold 1
+	b.RecordFailure(subject("u", "a"), "x") // trips immediately at threshold 1
 	if !b.IsOpen("u", "a") {
 		t.Fatal("should be open")
 	}
@@ -231,5 +236,53 @@ func TestBreaker_FaultingAutomationTripsWithoutCascade(t *testing.T) {
 	bus.PublishSync(events.NewEvent("graph.node.created.v1:identity:user", events.KindNodeCreated, map[string]any{"id": "y"}))
 	if runner.count("user-a", "badAuto") <= before {
 		t.Error("re-activated automation must fire again")
+	}
+}
+
+// TestATripNamesTheVersionThatFailed: a trip reports the bundle and version
+// the failing runs were armed from (memql#6022). The pause it leads to runs
+// later, off the failing run's goroutine; by then a fix may be armed under the
+// same name, and only the version on the trip tells the two apart.
+func TestATripNamesTheVersionThatFailed(t *testing.T) {
+	loadConceptsForAuthored(t)
+	bus := events.NewBus()
+	t.Cleanup(bus.Close)
+	var mu sync.Mutex
+	var trips []automations.BreakerTripInfo
+	breaker := automations.NewAuthoredBreaker(2, func(info automations.BreakerTripInfo) {
+		mu.Lock()
+		trips = append(trips, info)
+		mu.Unlock()
+	})
+	s, err := automations.NewAuthoredScheduler(automations.AuthoredSchedulerOptions{
+		Loader:   automations.NewLoader(automations.LoaderOptions{Registry: concept.DefaultRegistry()}),
+		EventBus: bus,
+		Run: func(context.Context, *automations.Automation, *events.Event) error {
+			return fmt.Errorf("deliberate fault")
+		},
+		Breaker: breaker,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(s.Stop)
+	construct := authoredAutomationConstruct("user-a", "failingRule", eventAutomationSrc("failingRule"))
+	construct.BundleId = "v1:authoring:bundle:failing-v7"
+	construct.Version = 7
+	if err := s.Activate(construct); err != nil {
+		t.Fatalf("Activate: %v", err)
+	}
+
+	for i := 0; i < 2; i++ {
+		bus.PublishSync(events.NewEvent("graph.node.created.v1:identity:user", events.KindNodeCreated, map[string]any{"id": fmt.Sprint(i)}))
+	}
+	mu.Lock()
+	defer mu.Unlock()
+	if len(trips) != 1 {
+		t.Fatalf("expected one trip, got %d", len(trips))
+	}
+	got := trips[0]
+	if got.Owner != "user-a" || got.Automation != "failingRule" || got.BundleId != "v1:authoring:bundle:failing-v7" || got.Version != 7 {
+		t.Fatalf("the trip names %+v; it must name the bundle and version the failing runs were armed from", got)
 	}
 }

@@ -1,8 +1,9 @@
 import { AddButton } from "../../../kit/AddButton";
 import { useMemo, useState } from "react";
-import { rowString, type Row } from "@znasllc-io/memql-sdk-core/client";
+import { newShortId, rowString, type Row } from "@znasllc-io/memql-sdk-core/client";
 
 import { Button, Caption, Head, RecordRow, listCount, LiveList, Notice, formatBytes, formatFreshness, useLiveView, useNow, type LiveListSource } from "../../../kit";
+import { InPlaceAsk } from "../../../kit/pressHold";
 import { flatten } from "../../../kit/rows";
 import { useMachines } from "../../../live/machines";
 import { isWorkerOnline } from "../../fleet/online";
@@ -10,6 +11,11 @@ import { machineFromRow, machineName, isRevoked, type MachineRow } from "../../f
 import { linkStateOf, LINK_LABEL, LINK_SENTENCE, type LinkState } from "../links";
 import { folderFromRow, type FolderRow } from "../rows";
 import { BackupForm } from "./BackupForm";
+import { BackupSetup } from "./BackupSetup";
+import { ArchiveTransfers, DownloadSetup } from "./ArchiveTransfers";
+import type { BackupTransfer } from "./transfers";
+import { StorageAllowance } from "./StorageAllowance";
+import { useOsConnection } from "../../../live/connection";
 import {
   backupFingerprint,
   backupSchedule,
@@ -49,7 +55,13 @@ export function BackupsSection({ folders, files, source, writes }: BackupsSectio
   const ownWrites = useBackupWrites();
   const write = writes ?? ownWrites;
 
+  const [downloading, setDownloading] = useState<BackupTransfer | null>(null);
   const [adding, setAdding] = useState(false);
+  const connection = useOsConnection();
+  const [archiveId, setArchiveId] = useState(newShortId);
+  const [archiveBusy, setArchiveBusy] = useState(false);
+  const [archiveError, setArchiveError] = useState("");
+  const [transferRefresh, setTransferRefresh] = useState(0);
   const [editingId, setEditingId] = useState("");
   const [confirmingId, setConfirmingId] = useState("");
 
@@ -91,39 +103,29 @@ export function BackupsSection({ folders, files, source, writes }: BackupsSectio
 
   const editing = editingId === "" ? null : (source?.snapshot.rows.find((row) => row.id === editingId) ?? null);
 
+  if (downloading) return <DownloadSetup source={downloading} machines={machineList} onCancel={() => setDownloading(null)} onStarted={() => { setDownloading(null); setTransferRefresh(n => n + 1); }} />;
+  if (adding) return <BackupSetup machines={machineList} folders={folderRows} busy={archiveBusy || write.busyId === CREATE_BUSY_KEY} error={archiveError || (write.errorId === CREATE_BUSY_KEY ? write.actionError : "")}
+    onCancel={() => { setAdding(false); write.clearError(); setArchiveError(""); }}
+    onFolder={async spec => { if (await write.create(spec)) setAdding(false); }}
+    onArchive={async (workerId, path) => { if (!connection) { setArchiveError("Connect to the cluster to start a backup."); return; } setArchiveBusy(true); setArchiveError("");
+      try { await connection.query.libraryBackupCreate({ id: archiveId, workerId, path, kind: "archive" }); setAdding(false); setTransferRefresh(n => n + 1); }
+      catch (e) { setArchiveError(e instanceof Error ? e.message : String(e)); } finally { setArchiveBusy(false); }
+    }} />;
   return (
     <section className="os-backups" aria-label="Backups">
       <Head
-        title={adding ? "New folder backup" : editing ? "Edit backup" : "Backups"}
-        back={adding || editing ? {label: "Backups", onSelect: () => { setAdding(false); setEditingId(""); write.clearError(); }} : undefined}
-        meta={!adding && !editing ? listCount(source?.snapshot) : undefined}
+        title={editing ? "Edit backup" : "Backups"}
+        back={editing ? {label: "Backups", onSelect: () => { setAdding(false); setEditingId(""); write.clearError(); }} : undefined}
+        meta={!editing ? listCount(source?.snapshot) : undefined}
       >
-        {!adding && !editing ? <AddButton label="Add folder backup"
+        {!editing ? <AddButton label="Add backup"
           onClick={() => {
-            setAdding((open) => !open);
+            setArchiveId(newShortId()); setArchiveError(""); setAdding(true);
             setEditingId("");
             write.clearError();
           }}
         /> : null}
       </Head>
-
-      {adding ? (
-        <BackupForm
-          machines={machineList}
-          folders={folderRows}
-          now={now}
-          busy={write.busyId === CREATE_BUSY_KEY}
-          error={write.errorId === CREATE_BUSY_KEY ? write.actionError : ""}
-          editing={null}
-          onSubmit={async (spec: NewBackup) => {
-            if (await write.create(spec)) setAdding(false);
-          }}
-          onCancel={() => {
-            setAdding(false);
-            write.clearError();
-          }}
-        />
-      ) : null}
 
       {editing !== null ? (
         // KEYED ON THE ROW, so switching Edit from one backup to another
@@ -157,12 +159,13 @@ export function BackupsSection({ folders, files, source, writes }: BackupsSectio
         />
       ) : null}
 
-      {!adding && !editing ? <LiveList<BackupRow>
+      {!editing && <StorageAllowance />}
+      {!editing ? <LiveList<BackupRow>
         source={source}
         rowId={(backup) => backup.id}
         fingerprint={backupFingerprint}
         label="Backups"
-        emptyText="No folder backups yet. Add a folder and choose a schedule."
+        emptyText="No folder syncs yet. Add a backup to get started."
         renderRow={(backup) => (
           <BackupLine
             backup={backup}
@@ -183,6 +186,7 @@ export function BackupsSection({ folders, files, source, writes }: BackupsSectio
           />
         )}
       /> : null}
+      {!editing && <ArchiveTransfers machines={machineList} refresh={transferRefresh} onDownload={setDownloading} />}
     </section>
   );
 }
@@ -228,7 +232,7 @@ function BackupLine({
     <article className="os-backup" data-tone={tone}>
       <RecordRow
         name={backup.localPath}
-        secondary={`${name} · ${destination} · ${backupSchedule(backup.intervalMinutes)}`}
+        secondary={`${name} · ${destination} · ${backup.mode === "sync" ? "Folder sync" : "Keep deleted originals"} · ${backupSchedule(backup.intervalMinutes)}`}
         state={TONE_LABEL[tone]}
         tone={tone === "settled" ? "accent" : tone === "paused" ? "muted" : "warn"}
         current={online}
@@ -287,7 +291,7 @@ function BackupLine({
           sentence={`Stop backing up ${backup.localPath}?`}
           next="The files already here stay, and nothing on the machine is touched. Only the arrangement ends."
         >
-          <div className="os-backup-confirm">
+          <InPlaceAsk className="os-backup-confirm">
             <Button
               tone="danger"
               busy={busy}
@@ -298,7 +302,7 @@ function BackupLine({
               Stop backing up
             </Button>
             <Button onClick={onDismiss}>Keep it</Button>
-          </div>
+          </InPlaceAsk>
         </Notice>
       ) : null}
 

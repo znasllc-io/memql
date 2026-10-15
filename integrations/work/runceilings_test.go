@@ -72,7 +72,12 @@ func answerRows(eng *recordingEngine, ceilings map[string]any, calls ...map[stri
 		goal["ceilings"] = ceilings
 	}
 	eng.reply("workGoalForOwner", goal)
-	eng.reply("workModelCallsForOwnerRun", calls...)
+	for n, row := range calls {
+		row["id"] = "receipt-" + itoa(n)
+		row["ownerUserId"] = ceilingOwner
+		row["runId"] = ceilingRunId
+	}
+	eng.reply("workModelCallsPageForOwnerRun", calls...)
 }
 
 // -----------------------------------------------------------------------------
@@ -179,7 +184,7 @@ func TestAGoalThatCannotBeReadFailsClosed(t *testing.T) {
 		}},
 		{"the journal read fails", func(eng *recordingEngine) {
 			answerRows(eng, map[string]any{"maxModelCalls": 5.0})
-			eng.refuse("workModelCallsForOwnerRun", errors.New("the database went away"))
+			eng.refuse("workModelCallsPageForOwnerRun", errors.New("the database went away"))
 		}},
 	} {
 		c, eng := newTestCeilings(t)
@@ -297,7 +302,7 @@ func TestTheCeilingsThisSeamCannotEvaluateAreClearedNotSilentlyPassed(t *testing
 		t.Fatalf("a retry or event cap must not be evaluated against a spend this seam never sees: %+v", b)
 	}
 	c.mu.Lock()
-	b := c.runs[memqlengine.BareShortId(ceilingRunId)]
+	b := c.runs[runBudgetKey(rc)]
 	c.mu.Unlock()
 	if b == nil {
 		t.Fatal("no budget was seeded")

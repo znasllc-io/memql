@@ -173,9 +173,8 @@ func (j *ModelJournal) readRun(ctx context.Context, ownerUserId, runId string) (
 	return readModelCalls(ctx, j.store, ownerUserId, runId)
 }
 
-// readModelCalls is readRun's body as a package function, because the run
-// ceiling guard folds the SAME rows into the run's spend (runceilings.go) and
-// the two must not disagree about which query opens them.
+// readModelCalls is readRun's body as a package function for journal readers.
+// Budget accounting uses paged summaries instead; it never loads responses.
 func readModelCalls(ctx context.Context, s *store, ownerUserId, runId string) ([]map[string]any, error) {
 	if strings.TrimSpace(ownerUserId) != "" {
 		return s.query(ownerActor(ctx, ownerUserId),
@@ -190,8 +189,14 @@ func (j *ModelJournal) Record(ctx context.Context, ownerUserId string, c memqlen
 	if j == nil || j.store == nil {
 		return nil
 	}
+	receiptID := strings.TrimSpace(c.ReceiptID)
+	if receiptID == "" {
+		receiptID = newRowId(concept.ConceptWorkModelCall)
+	} else {
+		receiptID = concept.ConceptWorkModelCall + ":" + memqlengine.BareShortId(receiptID)
+	}
 	return j.store.writeInternal(ownerActor(ctx, ownerUserId), "mutation "+call("createWorkModelCall", map[string]any{
-		"modelCallId":   newRowId(concept.ConceptWorkModelCall),
+		"modelCallId":   receiptID,
 		"runId":         c.RunId,
 		"stepKey":       c.StepKey,
 		"requestHash":   c.RequestHash,

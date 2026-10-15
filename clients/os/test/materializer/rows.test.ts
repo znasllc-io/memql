@@ -13,13 +13,14 @@ import {
   templateFromRow,
 } from "../../src/apps/materializer/rows";
 import {
+  madeCaption,
   modelsPhrase,
+  notSentDetail,
   provenanceClaim,
   sourcesPhrase,
   statusTone,
   statusWord,
 } from "../../src/apps/materializer/words";
-import { actsFor, stateLine } from "../../src/apps/materializer/acts";
 import {
   sanitizeSettings,
   DEFAULT_MATERIALIZER_SETTINGS,
@@ -141,6 +142,75 @@ describe("the arrival cue's fingerprint", () => {
   });
 });
 
+// ---------------------------------------------------------------------------
+// What the composer says a finished file is
+// ---------------------------------------------------------------------------
+//
+// "The composed text is in the file" is true of a file a model wrote and false of
+// the two the cluster files empty: a blank one (nothing was composed) and a
+// described one (empty until the person approves the Library's draft). The
+// caption follows what is known: the row (a statement, its sources, whether a
+// model was called and whether the file carries its provenance) and, for a file
+// this window asked for by describing it, what became of the hand-off.
+
+const BLANK_NOTE = "Created blank. Its history is kept on its composition, not in the file.";
+const blankRow = (over: Record<string, unknown> = {}) =>
+  compositionRow({ format: "markdown", statement: "", sources: [], modelsUsed: [], provenanceEmbedded: false, provenanceNote: BLANK_NOTE, ...over });
+const describedRow = (over: Record<string, unknown> = {}) => blankRow({ statement: "A one page brief", ...over });
+const caption = (row: Row, here = false, outcome?: { failure: string }) =>
+  madeCaption(compositionFromRow(row), sourcesOf(row), modelsOf(row), here, outcome);
+
+describe("the caption under what was asked for", () => {
+  it("says a blank file was created blank, whatever kind of file it is", () => {
+    for (const format of ["markdown", "txt", "csv", "json", "html"]) {
+      expect(caption(blankRow({ format })), format).toBe("This file was created blank.");
+    }
+  });
+
+  it("says the description was sent once this window has sent it", () => {
+    expect(caption(describedRow(), true, { failure: "" })).toBe("Your description was sent to be written. Open it in the editor to review and approve the draft.");
+    // What this window knows wins over what the row shows: it asked for this file by describing it.
+    expect(caption(describedRow({ provenanceEmbedded: undefined }), true, { failure: "" })).toBe("Your description was sent to be written. Open it in the editor to review and approve the draft.");
+    expect(caption(describedRow({ provenanceEmbedded: undefined }))).toBe("The composed text is in the file.");
+  });
+
+  it("leaves a description this window could not send to the notice that says so", () => {
+    expect(caption(describedRow(), true, { failure: "revision budget exhausted" })).toBe("");
+  });
+
+  it("says only that the file came from a description when this window does not know what became of it", () => {
+    // Opened later from the list: the row alone says it was described (a statement, no model, nothing embedded).
+    expect(caption(describedRow())).toBe("This file was created from a description. Open it in the editor to continue.");
+    // Library files travel with a description, so they do not make it a composed file.
+    expect(caption(describedRow({ sources: [{ kind: "library_file", ref: "f1", label: "notes.md", capturedAt: "" }] }))).toBe("This file was created from a description. Open it in the editor to continue.");
+    // This window asked for it and has not heard back yet.
+    expect(caption(describedRow(), true)).toBe("This file was created from a description. Open it in the editor to continue.");
+  });
+
+  it("keeps the composed-file caption for a file a model wrote", () => {
+    expect(caption(compositionRow())).toBe("The composed text is in the file.");
+    // A Markdown file written from records by the composer: a model was called and the file carries its provenance.
+    expect(caption(compositionRow({ format: "markdown", provenanceEmbedded: true }))).toBe("The composed text is in the file.");
+  });
+
+  it("says nothing about a file that does not exist yet, or failed to", () => {
+    for (const status of ["draft", "composing", "rendering", "failed", "cancelled"]) {
+      expect(caption(compositionRow({ status })), status).toBe("");
+      expect(caption(blankRow({ status })), status).toBe("");
+      expect(caption(describedRow({ status }), true), status).toBe("");
+    }
+  });
+});
+
+describe("a description that was not sent", () => {
+  // The notice's own sentence already says the description was not sent; the SDK's lead-in saying so
+  // again is dropped, and what is left is the cluster's reason.
+  it("shows the cluster's reason without the lead-in", () => {
+    expect(notSentDetail("The description could not be sent for writing: revision budget exhausted")).toBe("revision budget exhausted");
+    expect(notSentDetail("Stopped before the description was sent.")).toBe("Stopped before the description was sent.");
+  });
+});
+
 describe("the words", () => {
   it("counts and pluralises sources by kind", () => {
     expect(sourcesPhrase(sourcesOf(compositionRow()))).toBe("2 rows, 1 file");
@@ -169,100 +239,6 @@ describe("the words", () => {
   it("keeps status hue off the chip", () => {
     for (const status of ["draft", "composing", "rendering", "ready", "failed", "cancelled"] as const) {
       expect(["neutral", "accent", "muted"]).toContain(statusTone(status));
-    }
-  });
-});
-
-describe("acts follow the state", () => {
-  const noDraft = { sourceCount: 0, hasContent: false, hasFormat: true, hasOrganization: true, submitting: false };
-  const ready = { sourceCount: 2, hasContent: false, hasFormat: true, hasOrganization: true, submitting: false };
-
-  // AN ILLEGAL ACT IS ABSENT, NEVER DISABLED.
-  it("offers nothing to compose without content or sources, and says why on the bar", () => {
-    expect(actsFor(null, noDraft)).toEqual([]);
-    expect(stateLine(null, noDraft)).toContain("Describe what to make");
-  });
-
-  it("offers Materialize for supplied content without graph sources", () => {
-    const content = { ...noDraft, hasContent: true };
-    expect(actsFor(null, content).map((a) => a.id)).toEqual(["materialize"]);
-    expect(stateLine(null, content)).toBe("Ready to compose your file");
-    expect(actsFor(null, { ...content, hasFormat: false })).toEqual([]);
-  });
-
-  it("offers Materialize once there is something to compose from", () => {
-    expect(actsFor(null, ready).map((a) => a.id)).toEqual(["materialize"]);
-  });
-
-  // A RUNNING COMPOSITION OFFERS NO MATERIALIZE: re-materializing would
-  // open a second composition against the same sources and produce a
-  // second file, with nothing on the page saying which is the deliverable.
-  it("offers only Stop while it is running", () => {
-    for (const status of ["composing", "rendering"] as const) {
-      const acts = actsFor(compositionFromRow(compositionRow({ status })), ready);
-      expect(acts.map((a) => a.id)).toEqual(["stop"]);
-    }
-  });
-
-  // PRIMARY LAST, because that is where the eye lands (rule 12) -- and the
-  // primary act on a finished materialization is opening the thing it
-  // made. A rendered pass put Archive there instead, which is the act
-  // somebody reaches for least.
-  it("offers archive, a recipe and the file once it is ready, primary last", () => {
-    const acts = actsFor(compositionFromRow(compositionRow()), ready);
-    expect(acts.map((a) => a.id)).toEqual(["archive", "saveRecipe", "openFile"]);
-    expect(acts[acts.length - 1]?.tone).toBe("primary");
-    expect(acts.filter((a) => a.tone === "primary")).toHaveLength(1);
-  });
-
-  // A PACKAGE'S NEXT STEP IS A DEPLOY, and the three-act limit forces a
-  // real choice rather than an arbitrary trim: a document's repeatability
-  // is a recipe, a deployable's is the Deployables pipeline's own redeploy.
-  it("offers the deploy hand-off on a package, and drops Save as recipe for it", () => {
-    const pkg = compositionFromRow(compositionRow({ deployableKind: "shopify_storefront" }));
-    const acts = actsFor(pkg, ready);
-    expect(acts.map((a) => a.id)).toEqual(["archive", "openFile", "openDeployables"]);
-    expect(acts[acts.length - 1]?.tone).toBe("primary");
-    expect(acts.map((a) => a.id)).not.toContain("saveRecipe");
-  });
-
-  // The reachable positive: an ordinary document does NOT get the deploy
-  // act, so the assertion above is about `deployableKind` rather than
-  // about the function returning a constant.
-  it("does not offer the deploy hand-off on an ordinary document", () => {
-    const acts = actsFor(compositionFromRow(compositionRow()), ready);
-    expect(acts.map((a) => a.id)).not.toContain("openDeployables");
-  });
-
-  it("does not offer Save as recipe on a composition that came from one", () => {
-    const acts = actsFor(compositionFromRow(compositionRow({ recipeId: "r1" })), ready);
-    expect(acts.map((a) => a.id)).not.toContain("saveRecipe");
-  });
-
-  // NO RETRY, deliberately: the record holds the sources it RESOLVED
-  // rather than the form that produced them, so "retry" would silently
-  // mean something slightly different from what was asked for.
-  it("offers Start over rather than Retry on a failure, and names the reason", () => {
-    const failed = compositionFromRow(
-      compositionRow({ status: "failed", failureReason: "object storage refused the upload" }),
-    );
-    const acts = actsFor(failed, ready);
-    expect(acts.map((a) => a.id)).toEqual(["startOver", "archive"]);
-    expect(acts.map((a) => a.id)).not.toContain("materialize");
-    expect(stateLine(failed, ready)).toContain("object storage refused");
-  });
-
-  it("an archived record offers its file and a restore, and nothing else", () => {
-    const acts = actsFor(compositionFromRow(compositionRow({ archived: true })), ready);
-    expect(acts.map((a) => a.id)).toEqual(["openFile", "restore"]);
-  });
-
-  it("never offers more than three acts", () => {
-    for (const status of ["draft", "composing", "rendering", "ready", "failed", "cancelled"] as const) {
-      for (const archived of [false, true]) {
-        const acts = actsFor(compositionFromRow(compositionRow({ status, archived })), ready);
-        expect(acts.length).toBeLessThanOrEqual(3);
-      }
     }
   });
 });

@@ -1,13 +1,19 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useOsConnection } from "../../live/connection";
-import { Button, Caption, Fact, Facts, Field, Notice, Panel, Select, Subhead } from "../../kit";
+import { Button, Caption, Fact, Facts, Field, Notice, Select, Subhead } from "../../kit";
 import { flatten } from "../../kit/rows";
 import { manifestYaml } from "../../apps/deployables/packages/manifest";
 import type { PackageManifest } from "../../apps/deployables/packages/rows";
 
 type Reply = { status: string; manifest?: PackageManifest | null; yaml?: string };
 
-/** One package file for app and email choices. Credentials never enter it. */
+/**
+ * One package file for app and email choices. Credentials never enter it.
+ *
+ * A subject of the page that holds it (Email -> Settings, and the Connections
+ * page of an app that sets up email), not a box of its own: its heading is
+ * `Package` and its acts stand on the right edge beneath what it says.
+ */
 export function CampaignPackageConfig({ accountId, organizationName, onImported }: {
   accountId: string; organizationName: string; onImported: () => void;
 }) {
@@ -65,24 +71,24 @@ export function CampaignPackageConfig({ accountId, organizationName, onImported 
     window.setTimeout(() => URL.revokeObjectURL(url), 1000);
     setMessage("Configuration exported.");
   }
-  return <Panel label="Package configuration">
-    <Subhead>Package configuration</Subhead>
+  return <section className="os-app-stack" aria-label="Package">
+    <Subhead>Package</Subhead>
     <Caption>{manifest ? `${manifest.name} · memql-package.yaml` : "Load your package to keep its Deployables and add email configuration to the same file."}</Caption>
     <input ref={file} type="file" accept=".yaml,.yml,application/yaml,text/yaml" aria-label="Package file" hidden onChange={event => { void load(event.currentTarget.files?.[0]); event.currentTarget.value = ""; }}/>
     <div className="os-panel-actions">
-      <Button disabled={busy} onClick={() => file.current?.click()}>Load package</Button>
-      <Button disabled={busy} onClick={() => { void exportConfiguration(); }}>Export configuration</Button>
+      <Button busy={busy} onClick={() => file.current?.click()}>Load package</Button>
+      <Button busy={busy} onClick={() => { void exportConfiguration(); }}>Export configuration</Button>
     </div>
     {domains.length ? <details><summary>Import email configuration</summary>
       <div className="os-app-stack">
         <Field label="Package organization"><Select id="campaign-package-organization" label="Package organization" value={selection} onChange={value => { if (!busy) setSelection(value); }}><option value="">Choose an organization</option>{domains.map(domain => <option key={domain.organization} value={domain.organization}>{domain.organization}</option>)}</Select></Field>
         {chosen ? <><Facts><Fact label="Import for" value={organizationName}/><Fact label="Domain" value={chosen.domain}/><Fact label="Sender" value={chosen.sender ? `${chosen.sender.username}@${chosen.domain}` : "Choose during setup"}/><Fact label="Resource group" value={manifest?.campaigns?.azure.resourceGroup || ""}/></Facts>
           <Caption>Import prepares setup. Microsoft sign-in and domain verification are still required. DNS records are references until checked with Azure.</Caption>
-          <Button disabled={busy} onClick={() => { void run("import", source, selection, true).then(reply => { if (reply?.status === "imported") { setMessage("Configuration imported. Open the sending domain to continue setup."); onImported(); } }); }}>Import for {organizationName}</Button>
+          <Button busy={busy} onClick={() => { void run("import", source, selection, true).then(reply => { if (reply?.status === "imported") { setMessage("Configuration imported. Open the sending domain to continue setup."); onImported(); } }); }}>Import for {organizationName}</Button>
         </> : null}
       </div>
     </details> : null}
     {message ? <Notice tone="info" sentence={message}/> : null}
     {error ? <Notice tone="error" sentence="Package configuration could not be completed." detail={error}/> : null}
-  </Panel>;
+  </section>;
 }

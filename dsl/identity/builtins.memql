@@ -99,6 +99,18 @@ builtin transferRowOwnership {
   rowId       string
 }
 
+/// Rename an existing user's display name without changing any other profile
+/// or authorization fields. Resolve the user through a bounded directory read
+/// before calling; the result identifies the saved name and its audit event.
+/// The native admin service rechecks the owner/admin gate on every invocation.
+@description("Change, update or rename an existing user's display name. Owner/admin only; audited. Takes the resolved userId and new displayName. Preserves roles, permissions, sign-in settings, email, contact details and preferences.")
+@requiresCapability("update", "principal")
+@executor("integration.identity.setUserDisplayName")
+builtin setUserDisplayName {
+  userId string!
+  displayName string!
+}
+
 /// Begin GitHub Connect: answer the URL the browser navigates to, with a server-held state bound to
 /// the signed-in caller.
 ///

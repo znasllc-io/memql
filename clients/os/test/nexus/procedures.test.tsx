@@ -1,4 +1,5 @@
-import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { renderPage as render } from "../pageHarness";
+import { act, fireEvent, screen, waitFor, within } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 import type { Row } from "@znasllc-io/memql-sdk-core/client";
 
@@ -108,7 +109,7 @@ describe("the ladder", () => {
     expect(within(rung("trusted")).getByText("Not reached")).toBeTruthy();
     // What each rung means is one tap away, not stood under every rung.
     expect(within(rung("trusted")).queryByText("Runs without a model")).toBeNull();
-    expect(screen.getByRole("button", { name: "About The certification ladder" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: /^Help with/ })).toBeTruthy();
     // Retired is not a fifth rung.
     expect(within(screen.getByRole("list", { name: /The certification ladder/ })).getAllByRole("listitem")).toHaveLength(4);
   });

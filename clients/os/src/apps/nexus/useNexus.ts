@@ -100,12 +100,11 @@ export function useRuns(): LiveCollectionHandle<Row> {
 }
 
 /**
- * The caller's PENDING approvals.
+ * The caller's approvals, seeded from the pending queue.
  *
- * The read carries `decision==""` in the DSL, so this feed is the inbox by
- * construction. A decided approval leaves it on its own update -- which is
- * exactly right: deciding one is the act that empties the queue, and watching
- * the row go is the confirmation.
+ * The seed carries `decision==""` in the DSL. Live updates retain a decided
+ * row so an open detail can show its receipt; the list and waiting count
+ * must project only pending rows. A decision is an update, not a deletion.
  */
 export function useApprovals(): LiveCollectionHandle<Row> {
   return useLiveCollection<Row>("work:approvals", (connection) => ({

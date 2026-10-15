@@ -107,25 +107,10 @@ func (e *EventExecutor) Execute(ctx context.Context, step *automations.Step, ste
 		"kind":  kind.String(),
 	}
 
-	// Record step execution in the database
-	runId := ""
-	if stepCtx.Execution != nil {
-		runId = stepCtx.Execution.ID
-	}
-	stepRecordQuery := RecordStepExecution(ctx, stepCtx.Engine, StepRecordData{
-		RunId:    runId,
-		StepId:   step.ID,
-		StepType: "event",
-		Status:   result.Status,
-		Topic:    topic,
-		Duration: float64(result.Duration.Milliseconds()),
-	})
-
 	if stepCtx.Logger != nil {
 		stepCtx.Logger.Debug("event step completed",
 			"step", step.ID,
 			"topic", topic,
-			"stepRecord", stepRecordQuery,
 			"duration", formatDuration(result.Duration),
 		)
 	}

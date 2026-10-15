@@ -6,6 +6,7 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"sort"
@@ -478,7 +479,7 @@ func lastHeartbeat(run map[string]any) (time.Time, bool) {
 //
 // Two shapes share the abandoned status and must NOT share a sentence:
 //
-//   - A run that was executing and whose node went silent -- "lost the node".
+//   - A run whose execution heartbeat stopped; node liveness is unknown.
 //   - A run that never left `compiling` / still carries the work.compile
 //     sentinel -- compile never ran. Saying the node was lost sends the reader
 //     at infrastructure for a goal the bff accepted with no compile surface.
@@ -493,7 +494,7 @@ func abandonedMessage(run map[string]any, last time.Time) string {
 		where = fmt.Sprintf(" (%s)", node)
 	}
 	return fmt.Sprintf(
-		"this cluster lost the node that was running this%s; it was last heard from at %s. Completed steps are in the journal, so a resume serves them rather than running them again.",
+		"This run stopped reporting progress%s. Its last update was at %s. Completed steps are saved; resume will check them before continuing.",
 		where, last.UTC().Format(time.RFC3339))
 }
 
@@ -567,17 +568,29 @@ func (i *Integration) RetentionSweep(ctx context.Context, dryRun bool) (Retentio
 	if err := requireClusterOwner(ctx); err != nil {
 		return RetentionResult{}, err
 	}
-	result, err := i.journalRetentionSweep(ctx, dryRun)
-	if err != nil {
-		return result, err
+	// The halves have independent bounded reads and independent failure handling.
+	// A journal archive failure must not prevent operational retirement.
+	//
+	// Running the operational half after a journal failure is safe. A run whose
+	// model calls or observations are still stored is kept by the operational
+	// half's own read (retentionCandidateRead's child test, and retireVerified's
+	// guard), whatever became of the journal half that would have retired them.
+	result, journalErr := i.journalRetentionSweep(ctx, dryRun)
+	if journalErr != nil {
+		i.log().Warn("work: the journal retention sweep failed; the operational retention pass runs regardless",
+			"component", "work.retention", "dryRun", dryRun, "error", journalErr)
 	}
-	result.Operational, err = i.operationalRetention(ctx, dryRun)
+	var operationalErr error
+	result.Operational, operationalErr = i.operationalRetention(ctx, dryRun)
 	for _, p := range result.Operational {
 		result.RowsArchived += p.ArchivedVersions
 		result.RowsDeleted += p.DeletedVersions
 		result.Objects = append(result.Objects, p.Objects...)
 		result.Oversized = append(result.Oversized, p.Oversized...)
 	}
+	// Both failures come back, in one error: a night's operator needs to see that
+	// the journal half failed even when the operational half went through.
+	err := errors.Join(journalErr, operationalErr)
 	i.log().Info("work: operational retention pass complete", "component", "work.retention", "dryRun", dryRun, "policies", result.Operational, "error", err)
 	return result, err
 }
@@ -766,38 +779,54 @@ JOIN LATERAL (
 ORDER BY n."createdAt", n.id
 `
 
-// expiredJournalRowsSQL is the retention read. The boundary is applied to the
-// LATEST version's createdAt, so a row rewritten inside the window is kept.
-//
-// staged-data: MUST-NOT-GATE -- a staged journal row SKIPPED HERE SURVIVES ITS
-// RETENTION WINDOW FOREVER, and unlike a skipped run there is nothing left to
-// find it: no later pass looks at a row this one did not return, so the table
-// grows past the window an operator configured and past whatever the
-// deployment promised about how long a model request is kept. It is the
-// argument integrations/shopify's PurgeStore makes about shop/redact, with a
-// retention window in place of a legal deadline. Row-level authorization still
-// applies, per row as fetched.
-const expiredJournalRowsSQL = `
-WITH latest AS (
-    SELECT DISTINCT ON (id) id, "createdAt"
-    FROM "MemoryNodes"
-    WHERE concept = ?
-    ORDER BY id, "createdAt" DESC
-), expired AS MATERIALIZED (
-    SELECT id, "createdAt" FROM latest
-    WHERE "createdAt" < ?
-    ORDER BY "createdAt" ASC
-    LIMIT ?
-)
-SELECT n.id, n."createdAt", n.payload
-FROM expired e JOIN "MemoryNodes" n
-    ON n.id = e.id AND n."createdAt" = e."createdAt"
-WHERE ` + retentionInactiveParentSQL + `
-ORDER BY n."createdAt" ASC
-`
-
+// expiredJournalRows walks bounded UTC-day pages of latest journal versions.
+// Every page uses the same inactive-parent and newer-version guards as the
+// operational sweep. A refused/live first page cannot hide later eligible rows.
+// staged-data: MUST-NOT-GATE -- retention includes staged rows; admission still
+// runs on every fetched row through selectAdmittedPage.
 func (i *Integration) expiredJournalRows(ctx context.Context, concept string, boundary time.Time) ([]map[string]any, error) {
-	return i.selectAdmitted(ctx, concept, expiredJournalRowsSQL, concept, boundary.UTC(), sweepMaxRows)
+	oldest, found, err := i.oldestRetentionVersion(ctx, concept, time.Time{}, boundary)
+	if err != nil || !found {
+		return nil, err
+	}
+	started := i.clock()
+	var rows []map[string]any
+	p := operationalPolicy{concept: concept, predicate: "TRUE"}
+	for lo := oldest.UTC().Truncate(retentionCandidateWindow); lo.Before(boundary); {
+		hi := lo.Add(retentionCandidateWindow)
+		if hi.After(boundary) {
+			hi = boundary
+		}
+		var after *pageEnd
+		for {
+			if i.clock().Sub(started) >= retentionRunBudget/2 || len(rows) >= sweepMaxRows {
+				return rows, nil
+			}
+			query, params := retentionCandidateRead(p, boundary, lo, hi, after)
+			pageRows, page, err := i.selectAdmittedPage(ctx, concept, query, params...)
+			if err != nil {
+				return nil, err
+			}
+			rows = append(rows, pageRows...)
+			if page.scanned < retentionCandidateLimit {
+				break
+			}
+			after = &page
+		}
+		if !hi.Before(boundary) {
+			break
+		}
+		// Skip gaps in the stored history rather than issuing a query per empty day.
+		ahead, more, err := i.oldestRetentionVersion(ctx, concept, hi, boundary)
+		if err != nil {
+			return nil, err
+		}
+		if !more {
+			break
+		}
+		lo = ahead.UTC().Truncate(retentionCandidateWindow)
+	}
+	return rows, nil
 }
 
 // selectAdmitted runs one hand-rolled read and applies the row-authz gate to
@@ -810,31 +839,68 @@ func (i *Integration) expiredJournalRows(ctx context.Context, concept string, bo
 // refused at construction, and an undecidable tier is denied by the gate
 // itself.
 func (i *Integration) selectAdmitted(ctx context.Context, concept, query string, params ...any) ([]map[string]any, error) {
-	// The admission gate is checked FIRST, and the order is the fail-closed
-	// direction: "there is no database" is a configuration answer, while "we
-	// cannot tell who may see this row" is the one that must never be
-	// resolved by proceeding.
+	rows, _, err := i.selectAdmittedPage(ctx, concept, query, params...)
+	return rows, err
+}
+
+// pageEnd says how far a read got, which the admitted rows alone cannot: scanned
+// is how many rows the database returned, admitted or not, and at and id are the
+// key of the last of them. A caller that reads in pages needs both. A page is
+// full when the database filled it, and the next page starts after the last row
+// the read went through -- a row the gate refused included, or the rows behind a
+// refused run of them would never be read.
+type pageEnd struct {
+	scanned int
+	at      time.Time
+	id      string
+}
+
+// selectAdmittedPage is selectAdmitted that also reports where the read ended.
+func (i *Integration) selectAdmittedPage(ctx context.Context, concept, query string, params ...any) ([]map[string]any, pageEnd, error) {
+	db, err := i.gatedDB()
+	if err != nil {
+		return nil, pageEnd{}, err
+	}
+	return i.scanAdmitted(ctx, db, concept, query, params...)
+}
+
+// gatedDB is the database handle a hand-rolled sweep read may use, or the
+// reason it may not.
+//
+// The admission gate is checked FIRST, and the order is the fail-closed
+// direction: "there is no database" is a configuration answer, while "we
+// cannot tell who may see this row" is the one that must never be
+// resolved by proceeding.
+func (i *Integration) gatedDB() (*bun.DB, error) {
 	if i.admitRow == nil {
 		return nil, fmt.Errorf("work: no row-admission gate is wired; refusing a hand-rolled read rather than admitting every row")
 	}
 	if i.bunDB == nil || i.bunDB() == nil {
 		return nil, fmt.Errorf("work: the sweeps need a database handle")
 	}
-	return i.selectAdmittedFrom(ctx, i.bunDB(), concept, query, params...)
+	return i.bunDB(), nil
 }
 
 // selectAdmittedFrom also supports the recovery snapshot transaction.
 func (i *Integration) selectAdmittedFrom(ctx context.Context, db bun.IDB, concept, query string, params ...any) ([]map[string]any, error) {
+	rows, _, err := i.scanAdmitted(ctx, db, concept, query, params...)
+	return rows, err
+}
+
+func (i *Integration) scanAdmitted(ctx context.Context, db bun.IDB, concept, query string, params ...any) ([]map[string]any, pageEnd, error) {
 	if i.admitRow == nil {
-		return nil, fmt.Errorf("work: no row-admission gate is wired")
+		return nil, pageEnd{}, fmt.Errorf("work: no row-admission gate is wired")
 	}
 	rows, err := db.QueryContext(ctx, query, params...)
 	if err != nil {
-		return nil, fmt.Errorf("work: read %s: %w", concept, err)
+		return nil, pageEnd{}, fmt.Errorf("work: read %s: %w", concept, err)
 	}
 	defer func() { _ = rows.Close() }()
 
-	var out []map[string]any
+	var (
+		out  []map[string]any
+		page pageEnd
+	)
 	for rows.Next() {
 		var (
 			idv       string
@@ -842,8 +908,10 @@ func (i *Integration) selectAdmittedFrom(ctx context.Context, db bun.IDB, concep
 			payload   []byte
 		)
 		if err := rows.Scan(&idv, &createdAt, &payload); err != nil {
-			return nil, fmt.Errorf("work: scan %s: %w", concept, err)
+			return nil, pageEnd{}, fmt.Errorf("work: scan %s: %w", concept, err)
 		}
+		page.scanned++
+		page.at, page.id = createdAt, idv
 		node := memorynodes.MemoryNode{
 			ID:        idv,
 			Concept:   concept,
@@ -869,9 +937,9 @@ func (i *Integration) selectAdmittedFrom(ctx context.Context, db bun.IDB, concep
 		out = append(out, row)
 	}
 	if err := rows.Err(); err != nil {
-		return nil, fmt.Errorf("work: read %s: %w", concept, err)
+		return nil, pageEnd{}, fmt.Errorf("work: read %s: %w", concept, err)
 	}
-	return out, nil
+	return out, page, nil
 }
 
 // ---------------------------------------------------------------------------
