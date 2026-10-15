@@ -46,7 +46,7 @@ function directory(over: Partial<Row> = {}): Row {
 
 function Panel({ row }: { row: Row }) {
   const writes = useMachineWrites();
-  return <SharingGroup machine={machineFromRow(row)} writes={writes} standalone />;
+  return <SharingGroup machine={machineFromRow(row)} writes={writes} />;
 }
 
 function mount(
@@ -77,6 +77,7 @@ async function click(label: string) { fireEvent.click(screen.getByRole("button",
 async function findAndAdd(name: string) {
   fireEvent.focus(searchBox()); fireEvent.change(searchBox(), { target: { value: name } });
   fireEvent.click(screen.getByRole("option", { name })); await settle();
+  await click("Add selected users and groups");
 }
 
 describe("the sharing access list", () => {
@@ -88,7 +89,7 @@ describe("the sharing access list", () => {
     expect(conn.query.fleetShareDirectory).toHaveBeenCalledTimes(1);
     expect(screen.getByRole("region", { name: "Users and groups" })).toBeTruthy();
   });
-  it("shows current users and groups as rows and searches only entries not yet added", async () => {
+  it("shows current users and groups as cards and offers only entries not yet added", async () => {
     mount(studio(shared())); await settle();
     const list = screen.getByRole("list", { name: "Shared users and groups" });
     expect(within(list).getByText("Ana Ruiz")).toBeTruthy();
@@ -97,7 +98,7 @@ describe("the sharing access list", () => {
     expect(screen.queryByRole("option", { name: "Ana Ruiz" })).toBeNull();
     expect(screen.getByRole("option", { name: "Bo Chen" })).toBeTruthy();
   });
-  it("adds a searched user immediately without a confirmation sentence", async () => {
+  it("adds a selected user through the plus button without a confirmation sentence", async () => {
     const { conn } = mount(studio(shared())); await settle(); await findAndAdd("Bo Chen");
     expect(conn.query.fleetSetSharing).toHaveBeenLastCalledWith(expect.objectContaining({ userIds: ["ana", "bo"], groupIds: ["design"] }));
     expect(screen.getByRole("button", { name: "Pause sharing with Bo Chen" })).toBeTruthy();
@@ -108,7 +109,147 @@ describe("the sharing access list", () => {
     mount(studio(shared())); await settle();
     fireEvent.focus(searchBox()); fireEvent.change(searchBox(), { target: { value: "Ops" } });
     fireEvent.keyDown(searchBox(), { key: "Enter" }); await settle();
+    await click("Add selected users and groups");
     expect(screen.getByRole("button", { name: "Pause sharing with Ops" })).toBeTruthy();
+  });
+  it("reveals five candidates at a time and searches the entire directory before paging", async () => {
+    const people = Array.from({ length: 12 }, (_, index) => ({ id: `p${index}`, name: `Person ${String(index).padStart(2, "0")}`, detail: "" }));
+    const { conn } = mount(studio(shared()), { directory: directory({ people, groups: [] }) }); await settle();
+    fireEvent.focus(searchBox());
+    expect(screen.getAllByRole("option")).toHaveLength(5);
+    await click("Load more");
+    expect(screen.getAllByRole("option")).toHaveLength(10);
+    await click("Load more");
+    expect(screen.getAllByRole("option")).toHaveLength(12);
+    expect(screen.queryByRole("button", { name: "Load more" })).toBeNull();
+    fireEvent.change(searchBox(), { target: { value: "Person 11" } });
+    expect(screen.getAllByRole("option")).toHaveLength(1);
+    expect(screen.getByRole("option", { name: "Person 11" })).toBeTruthy();
+    fireEvent.change(searchBox(), { target: { value: "" } });
+    expect(screen.getAllByRole("option")).toHaveLength(5);
+    fireEvent.change(searchBox(), { target: { value: "Person 11" } });
+    expect(screen.getByRole("option", { name: "Person 11" })).toBeTruthy();
+    expect(conn.query.fleetShareDirectory).toHaveBeenCalledTimes(1);
+    expect(conn.query.fleetSetSharing).not.toHaveBeenCalled();
+  });
+  it("holds multiple selections across filters and searches, then adds them in one write", async () => {
+    const { conn } = mount(studio(shared())); await settle();
+    const add = screen.getByRole("button", { name: "Add selected users and groups" }) as HTMLButtonElement;
+    expect(add.disabled).toBe(true); expect(screen.getByText("0 selected")).toBeTruthy();
+    fireEvent.focus(searchBox()); fireEvent.click(screen.getByRole("option", { name: "Bo Chen" }));
+    expect(screen.getByRole("option", { name: "Bo Chen" }).getAttribute("aria-selected")).toBe("true");
+    fireEvent.change(searchBox(), { target: { value: "Ops" } });
+    fireEvent.click(screen.getByRole("option", { name: "Ops" }));
+    expect(screen.getAllByText("2 selected")).toHaveLength(1);
+    fireEvent.click(screen.getByRole("combobox", { name: "Search users and groups by" }));
+    fireEvent.click(screen.getByRole("option", { name: "Users" }));
+    fireEvent.change(searchBox(), { target: { value: "" } });
+    expect(screen.getByRole("option", { name: "Bo Chen" }).getAttribute("aria-selected")).toBe("true");
+    fireEvent.click(screen.getByRole("option", { name: "Bo Chen" }));
+    expect(screen.getByText("1 selected")).toBeTruthy();
+    fireEvent.click(screen.getByRole("option", { name: "Cy Diaz" }));
+    expect(conn.query.fleetSetSharing).not.toHaveBeenCalled();
+    fireEvent.click(add); await settle();
+    expect(conn.query.fleetSetSharing).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({ userIds: ["ana", "cy"], groupIds: ["design", "ops"] }));
+    expect(screen.getByText("0 selected")).toBeTruthy(); expect(add.disabled).toBe(true);
+  });
+  it("keeps checked selections on failure and retries the batch without duplicates", async () => {
+    const { conn } = mount(studio(shared())); await settle();
+    fireEvent.focus(searchBox()); fireEvent.click(screen.getByRole("option", { name: "Bo Chen" }));
+    fireEvent.click(screen.getByRole("option", { name: "Ops" }));
+    conn.query.fleetSetSharing.mockRejectedValueOnce(new Error("connection closed"));
+    await click("Add selected users and groups");
+    expect(screen.getByText("2 selected")).toBeTruthy();
+    fireEvent.focus(searchBox());
+    expect(screen.getByRole("option", { name: "Ops" }).getAttribute("aria-selected")).toBe("true");
+    await click("Try again");
+    expect(conn.query.fleetSetSharing).toHaveBeenCalledTimes(2);
+    expect(conn.query.fleetSetSharing).toHaveBeenLastCalledWith(expect.objectContaining({ userIds: ["ana", "bo"], groupIds: ["design", "ops"] }));
+    expect(screen.getByText("0 selected")).toBeTruthy();
+  });
+  it("does not retry deselected recipients or re-add a grant delivered on the live feed", async () => {
+    const { conn, rerender } = mount(studio(shared())); await settle();
+    fireEvent.focus(searchBox()); fireEvent.click(screen.getByRole("option", { name: "Bo Chen" }));
+    conn.query.fleetSetSharing.mockRejectedValueOnce(new Error("connection closed"));
+    await click("Add selected users and groups");
+    fireEvent.focus(searchBox()); fireEvent.click(screen.getByRole("option", { name: "Bo Chen" }));
+    expect(screen.queryByRole("button", { name: "Try again" })).toBeNull();
+    expect((screen.getByRole("button", { name: "Add selected users and groups" }) as HTMLButtonElement).disabled).toBe(true);
+    fireEvent.click(screen.getByRole("option", { name: "Bo Chen" }));
+    rerender(studio(shared({ userIds: ["ana", "bo"] }))); await settle();
+    expect(screen.getByText("0 selected")).toBeTruthy();
+    expect(screen.queryByRole("option", { name: "Bo Chen" })).toBeNull();
+  });
+  it("filters existing access by name and kind while adding only a real directory entry", async () => {
+    const { conn } = mount(studio(shared())); await settle();
+    fireEvent.change(searchBox(), { target: { value: "ana" } });
+    expect(screen.getByRole("button", { name: "Edit sharing with Ana Ruiz" })).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "Edit sharing with Design" })).toBeNull();
+    expect((screen.getByRole("button", { name: "Add selected users and groups" }) as HTMLButtonElement).disabled).toBe(true);
+    fireEvent.change(searchBox(), { target: { value: "Does not exist" } });
+    expect(screen.queryByRole("option")).toBeNull();
+    expect(conn.query.fleetSetSharing).not.toHaveBeenCalled();
+    fireEvent.change(searchBox(), { target: { value: "" } });
+    fireEvent.click(screen.getByRole("combobox", { name: "Search users and groups by" }));
+    fireEvent.click(screen.getByRole("option", { name: "Groups" }));
+    expect(screen.getByRole("button", { name: "Edit sharing with Design" })).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "Edit sharing with Ana Ruiz" })).toBeNull();
+    fireEvent.change(searchBox(), { target: { value: "Ops" } });
+    fireEvent.click(screen.getByRole("option", { name: "Ops" }));
+    await click("Add selected users and groups");
+    expect(conn.query.fleetSetSharing).toHaveBeenLastCalledWith(expect.objectContaining({ userIds: ["ana"], groupIds: ["design", "ops"] }));
+  });
+  it("edits sharing from a card, saves explicitly and can cancel without changing access", async () => {
+    const { conn } = mount(studio(shared())); await settle();
+    await click("Edit sharing with Ana Ruiz");
+    const toggle = screen.getByRole("switch", { name: "Allow new calls" });
+    expect(document.activeElement).toBe(toggle);
+    fireEvent.click(toggle);
+    await click("Cancel");
+    expect(conn.query.fleetSetSharing).not.toHaveBeenCalled();
+    expect(document.activeElement).toBe(searchBox());
+    await click("Edit sharing with Ana Ruiz");
+    fireEvent.click(screen.getByRole("switch", { name: "Allow new calls" }));
+    await click("Save");
+    expect(conn.query.fleetSetSharing).toHaveBeenLastCalledWith(expect.objectContaining({ pausedUserIds: ["ana"], groupIds: ["design"] }));
+    expect(screen.queryByRole("group", { name: "Edit sharing with Ana Ruiz" })).toBeNull();
+    expect(screen.getByRole("button", { name: "Resume sharing with Ana Ruiz" })).toBeTruthy();
+  });
+  it("keeps a refused card edit for retry and closes it only when saved", async () => {
+    const { conn } = mount(studio(shared())); await settle();
+    await click("Edit sharing with Design");
+    fireEvent.click(screen.getByRole("switch", { name: "Allow new calls" }));
+    conn.query.fleetSetSharing.mockRejectedValueOnce(new Error("connection closed"));
+    await click("Save");
+    expect((screen.getByRole("switch", { name: "Allow new calls" }) as HTMLInputElement).checked).toBe(false);
+    expect(screen.getByRole("group", { name: "Edit sharing with Design" })).toBeTruthy();
+    await click("Try again");
+    expect(screen.queryByRole("group", { name: "Edit sharing with Design" })).toBeNull();
+    expect(screen.getByRole("button", { name: "Resume sharing with Design" })).toBeTruthy();
+  });
+  it("preserves an open sharing draft through heartbeats and blocks a save over changed access", async () => {
+    const { conn, rerender } = mount(studio(shared())); await settle();
+    await click("Edit sharing with Design");
+    fireEvent.click(screen.getByRole("switch", { name: "Allow new calls" }));
+    rerender(studio(shared(), { activeCount: 5 })); await settle();
+    expect((screen.getByRole("switch", { name: "Allow new calls" }) as HTMLInputElement).checked).toBe(false);
+    rerender(studio(shared({ userIds: ["bo"] }))); await settle();
+    expect(screen.getByText("Sharing changed elsewhere.")).toBeTruthy();
+    expect((screen.getByRole("button", { name: "Save" }) as HTMLButtonElement).disabled).toBe(true);
+    expect(conn.query.fleetSetSharing).not.toHaveBeenCalled();
+    await click("Cancel");
+    expect(screen.getByRole("button", { name: "Edit sharing with Bo Chen" })).toBeTruthy();
+  });
+  it("pages access cards, keeps hidden actions inert and clamps the last page after removal", async () => {
+    mount(studio(shared({ userIds: ["ana", "bo", "cy"], groupIds: ["design", "ops"] }))); await settle();
+    expect(screen.getByText("1–2 of 5 entries")).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "Edit sharing with Ops" })).toBeNull();
+    await click("Next entries"); await click("Next entries");
+    expect(screen.getByText("5 of 5 entries")).toBeTruthy();
+    await click("Remove sharing with Ops");
+    expect(screen.getByText("3–4 of 4 entries")).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Edit sharing with Design" })).toBeTruthy();
+    expect((screen.getByRole("button", { name: "Next entries" }) as HTMLButtonElement).disabled).toBe(true);
   });
   it("pauses then resumes a grant without deleting the recipient", async () => {
     const { conn } = mount(studio(shared())); await settle();

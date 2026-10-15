@@ -99,12 +99,12 @@ export function MachinesTab({ header }: { header: (actions: ReactNode, meta?: Re
                 <details className="fleet-routing-stage">
                   <summary><small>1 · Eligibility</small><strong>Required labels</strong><span>{chipsFromMap(draft.requireLabels).join(", ") || "Any eligible machine"}</span></summary>
                   <p className="os-caption">Every label must match exactly.</p>
-                  <MapEditor value={draft.requireLabels} onChange={(requireLabels) => edit({ requireLabels })} busy={state.saving} label="Required labels" idPrefix="fleet-require" tone="neutral" />
+                  <MapEditor value={draft.requireLabels} onChange={(requireLabels) => edit({ requireLabels })} busy={state.saving} label="Required labels" idPrefix="fleet-require" />
                 </details>
                 <details className="fleet-routing-stage">
                   <summary><small>2 · Preference</small><strong>Preferred labels</strong><span>{chipsFromMap(draft.preferLabels).join(", ") || "No preference"}</span></summary>
                   <p className="os-caption">Matching labels move a machine up; they never rule one out.</p>
-                  <MapEditor value={draft.preferLabels} onChange={(preferLabels) => edit({ preferLabels })} busy={state.saving} label="Preferred labels" idPrefix="fleet-prefer" tone="neutral" />
+                  <MapEditor value={draft.preferLabels} onChange={(preferLabels) => edit({ preferLabels })} busy={state.saving} label="Preferred labels" idPrefix="fleet-prefer" />
                 </details>
                 <details className="fleet-routing-stage">
                   <summary><small>3 · Order</small><strong>Strategy</strong><span>{strategyLabel(draft.strategy)}</span></summary>

@@ -1,121 +1,132 @@
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
+import { Trash2 } from "lucide-react";
+import { Button, Notice } from "../../kit";
+import { CardCollectionSearch, EditableCard } from "../../kit/CardCollectionEditor";
+import { CardCarousel } from "../../kit/CardCarousel";
+import { IconButton } from "../../kit/IconButton";
+import type { LabelMap } from "./labels";
 
-import { Button, Chip, Chips, type ChipTone } from "../../kit";
-import { chipsFromMap, parseLabelChip, type LabelMap } from "./labels";
+type Draft = { key: string; value: string; original: string | null };
 
-// A controlled label-map editor: chips in, chips out, no writes of its own.
-//
-// The two label maps this app edits -- a machine's `operatorLabels` and a
-// routing policy's require/prefer sets -- are the same VALUE with different
-// save moments. A machine's labels save per chip (the row is the truth, and a
-// half-edited set is a real state); a policy's save with the form (the row is
-// replaced wholesale, and a half-edited set is not). Keeping the widget
-// controlled is what lets both exist without two editors that look the same
-// and behave differently.
-//
-// `key=value` is the chip form throughout, which is what
-// docs/public/operate/workers-runbook.md's workers.yaml already shows, so
-// there is one spelling to learn rather than two.
-
-export function MapEditor({
-  value,
-  onChange,
-  busy = false,
-  label,
-  idPrefix,
-  tone = "accent",
-}: {
+// One editor for operator labels and routing predicates. The parent owns the
+// save moment: machine edits return a receipt; a route updates its form draft.
+export function MapEditor({ value, onChange, busy = false, label, idPrefix }: {
   value: LabelMap;
-  onChange: (next: LabelMap) => void;
+  /** A false receipt keeps the draft for retry; the parent displays its error. */
+  onChange: (next: LabelMap) => void | boolean | Promise<boolean>;
   busy?: boolean;
-  /** Accessible name for the chip list and the input. */
   label: string;
-  /** Unique across the surface: two editors on one screen must not share an
-   *  input id, or a label points at the wrong control. */
   idPrefix: string;
-  tone?: ChipTone;
 }) {
-  const [draft, setDraft] = useState("");
-  const [hint, setHint] = useState("");
-  const chips = chipsFromMap(value);
-  const inputId = `${idPrefix}-draft`;
+  const [query, setQuery] = useState("");
+  const [searchBy, setSearchBy] = useState("label");
+  const [draft, setDraft] = useState<Draft | null>(null);
+  const [saving, setSaving] = useState(false);
+  const [failure, setFailure] = useState("");
+  const [revealKey, setRevealKey] = useState<string>();
+  const [focusRequest, setFocusRequest] = useState(0);
+  const search = useRef<HTMLInputElement>(null);
+  const locked = useRef(false);
+  const restoreSearch = useRef(false);
+  const disabled = busy || saving;
+  const name = query.trim();
+  const needle = name.toLocaleLowerCase();
+  const entries = Object.entries(value).sort(([a], [b]) => a.localeCompare(b));
+  const matches = entries.filter(([key, text]) => (searchBy === "label" ? key : text).toLocaleLowerCase().includes(needle));
+  const validName = name !== "" && !name.includes("=");
+  const canAdd = searchBy === "label" && validName && !Object.hasOwn(value, name);
+  const conflict = draft !== null && (Object.hasOwn(value, draft.key) ? value[draft.key] : null) !== draft.original;
+  const hintId = `${idPrefix}-hint`;
 
-  function commit() {
-    const text = draft.trim();
-    if (text === "") return;
-    const pair = parseLabelChip(text);
-    if (pair === null) {
-      // Refused rather than guessed: a bare word is a value with no key, and
-      // inventing one is how a routing rule ends up matching something
-      // nobody wrote.
-      setHint("A label is a pair: write key=value.");
-      return;
+  useEffect(() => {
+    if (restoreSearch.current && !disabled && !draft) {
+      restoreSearch.current = false;
+      search.current?.focus();
     }
-    setHint("");
-    setDraft("");
-    // The same key twice is a REPLACEMENT, not a duplicate -- the map it
-    // becomes has one entry, so showing two chips would misreport what will
-    // be sent.
-    onChange({ ...value, [pair.key]: pair.value });
+  }, [disabled, draft, focusRequest]);
+
+  function begin(key: string, original: string | null) {
+    if (disabled || draft) return;
+    setFailure("");
+    setDraft({ key, value: original ?? "", original });
   }
 
-  function remove(key: string) {
+  function cancel() {
+    restoreSearch.current = true;
+    setDraft(null);
+    setFailure("");
+  }
+
+  async function change(next: LabelMap) {
+    if (disabled || locked.current) return false;
+    locked.current = true;
+    setSaving(true);
+    setFailure("");
+    try { return (await onChange(next)) !== false; }
+    catch { setFailure("The labels could not be saved. Try again."); return false; }
+    finally { locked.current = false; setSaving(false); }
+  }
+
+  async function save() {
+    if (!draft || conflict) return;
+    const key = draft.key;
+    if (await change({ ...value, [key]: draft.value.trim() })) {
+      restoreSearch.current = true;
+      setDraft(null);
+      setQuery("");
+      setRevealKey(key);
+    }
+  }
+
+  async function remove(key: string) {
     const next = { ...value };
     delete next[key];
-    onChange(next);
+    setRevealKey(undefined);
+    // Restore focus after the pressed card disappears, including a last page.
+    restoreSearch.current = true;
+    await change(next);
+    setFocusRequest(request => request + 1);
   }
 
-  return (
-    <div className="os-fleet-labeledit">
-      <Chips label={label}>
-        {chips.length === 0 ? (
-          <span className="os-caption">None set.</span>
-        ) : (
-          chips.map((chip) => {
-            const pair = parseLabelChip(chip);
-            const key = pair?.key ?? chip;
-            return (
-              <span key={key} className="os-chip-editable" role="listitem">
-                <Chip tone={tone}>{chip}</Chip>
-                <button
-                  type="button"
-                  className="os-chip-remove"
-                  aria-label={`Remove ${chip}`}
-                  disabled={busy}
-                  onClick={() => remove(key)}
-                >
-                  &times;
-                </button>
-              </span>
-            );
-          })
-        )}
-      </Chips>
-      {/* A nested <form> is invalid HTML, so this is a div: the policy editor
-          mounts two of these INSIDE its own form, and a submit here would
-          otherwise submit that one. Enter is handled explicitly instead. */}
+  return <div className="os-fleet-labeledit" aria-busy={disabled}>
+    <CardCollectionSearch label={`Find or add ${label.toLowerCase()}`} query={query} inputRef={search}
+      onQueryChange={next => { setQuery(next); setRevealKey(undefined); setFailure(""); }}
+      mode={{ label: `Search ${label.toLowerCase()} by`, value: searchBy, options: [["label", "Label"], ["value", "Value"]], onChange: next => { setSearchBy(next); setFailure(""); } }}
+      disabled={disabled || draft !== null} clearLabel="Clear label search"
+      add={searchBy === "label" ? { label: canAdd ? `Add label ${name}` : "Add label", enabled: canAdd, onClick: () => begin(name, null) } : undefined}
+      inputProps={{ id: `${idPrefix}-search`, "aria-label": `Search ${label.toLowerCase()}`, "aria-describedby": hintId,
+        onKeyDown: event => {
+          if (event.key === "Escape") { event.preventDefault(); setQuery(""); }
+          if (event.key !== "Enter" || event.nativeEvent.isComposing) return;
+          event.preventDefault();
+          if (canAdd) begin(name, null);
+          else if (searchBy === "label" && Object.hasOwn(value, name)) begin(name, value[name]!);
+        },
+      }} />
+    <p className="os-caption fleet-label-hint" id={hintId}>Search by label or value. Enter a new label name to add it.</p>
+    {searchBy === "label" && name.includes("=") ? <p className="os-caption" role="status">Enter the label name first, then its value.</p> : null}
+    {draft ? <div className="os-card-draft" role="group" aria-label={`${draft.original === null ? "Add" : "Edit"} ${draft.key}`}>
+      <label htmlFor={`${idPrefix}-value`}>Value for <strong>{draft.key}</strong></label>
       <div className="os-form-row">
-        <label className="os-sr-only" htmlFor={inputId}>
-          {label}
-        </label>
-        <input
-          id={inputId}
-          className="os-input"
-          value={draft}
-          disabled={busy}
-          placeholder="key=value"
-          onChange={(e) => setDraft(e.target.value)}
-          onKeyDown={(e) => {
-            if (e.key !== "Enter") return;
-            e.preventDefault();
-            commit();
-          }}
-        />
-        <Button onClick={commit} disabled={busy || draft.trim() === ""}>
-          Add
-        </Button>
+        <input autoFocus id={`${idPrefix}-value`} className="os-input" value={draft.value} disabled={disabled}
+          onChange={event => setDraft({ ...draft, value: event.target.value })}
+          onKeyDown={event => {
+            if (event.key === "Enter" && !event.nativeEvent.isComposing) { event.preventDefault(); void save(); }
+            if (event.key === "Escape" && !disabled) { event.preventDefault(); cancel(); }
+          }} />
       </div>
-      {hint ? <p className="os-caption">{hint}</p> : null}
-    </div>
-  );
+      {conflict && !disabled ? <Notice tone="warn" sentence="This label changed elsewhere." next="Cancel and reopen it to edit the current value." /> : null}
+      <div className="os-panel-actions">
+        <Button disabled={disabled} onClick={cancel}>Cancel</Button>
+        <Button tone="primary" disabled={conflict || (draft.original !== null && draft.value.trim() === draft.original)} busy={disabled} busyLabel="Saving..." onClick={() => { void save(); }}>{draft.original === null ? "Add" : "Save"}</Button>
+      </div>
+    </div> : null}
+    {failure ? <Notice tone="error" sentence={failure} /> : null}
+    {matches.length ? <CardCarousel key={`${searchBy}:${query}`} items={matches} itemKey={([key]) => key} revealKey={revealKey} minCardWidth={240}
+      label={`${label} cards`} listLabel={label} noun="label" renderItem={([key, text]) => <EditableCard
+        label={`Edit ${key}`} descriptionId={`${idPrefix}-card-${encodeURIComponent(key)}`} disabled={disabled || draft !== null} onEdit={() => begin(key, text)}
+        actions={<IconButton className="os-card-remove" label={`Remove ${key}=${text}`} disabled={disabled || draft !== null} onClick={() => { void remove(key); }}><Trash2 size={15} aria-hidden /></IconButton>}>
+        <strong>{key}</strong><span id={`${idPrefix}-card-${encodeURIComponent(key)}`}>{text || "No value"}</span>
+      </EditableCard>} /> : !draft ? <p className="os-caption" role="status">{entries.length ? "No matching labels." : "No routing labels."}</p> : null}
+  </div>;
 }

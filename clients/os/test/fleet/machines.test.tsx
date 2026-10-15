@@ -136,8 +136,10 @@ describe("the machines directory", () => {
     const reported = screen.getByRole("list", { name: "Reported labels" });
     // The reported values are SHOWN -- the router matches on them --
     // but nothing in that group removes or edits one.
-    expect(within(reported).getByText(/os=darwin/)).toBeTruthy();
-    expect(within(reported).queryByRole("button")).toBeNull();
+    expect(within(reported).getByText("darwin")).toBeTruthy();
+    // Read-only values can be copied, but cannot be edited or removed.
+    expect(within(reported).getAllByRole("button").every(button => button.getAttribute("aria-label")?.startsWith("Copy "))).toBe(true);
+    expect(within(reported).queryByRole("textbox")).toBeNull();
 
     // The operator group is where the controls are.
     const operator = screen.getByRole("list", { name: "Operator labels" });

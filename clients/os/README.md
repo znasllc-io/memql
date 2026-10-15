@@ -291,6 +291,15 @@ browser broadcast stream: visible views use `AutoRefresh` for those reads.
 Do not poll healthy graph feeds or automatically repeat probes or writes.
 Failed initial reads also need recovery, even if a collection has no prior rows.
 
+Machine tabs end with **History**, then **Settings**. Settings contains General
+controls, inline Sharing and reported machine information in the same section
+grid. Sharing's live counts use the retained machine feed; directory reads stay
+on demand and use the visible view's refresh lifecycle. There is no separate
+Sharing tab. Fleet's app-level Settings still contains the app's preferences.
+Routing labels and sharing use `CardCollectionEditor` with `CardCarousel` for
+the same search/add line, editable cards and paging. Sharing searches the
+authorized directory and edits grants; it does not create or rename identities.
+
 
 `src/apps/fleet/` is the promotion of the foundation's read-only exemplar
 into the whole app: **Machines** (rename, operator labels, remove,

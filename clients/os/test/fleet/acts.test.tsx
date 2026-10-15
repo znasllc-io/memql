@@ -493,12 +493,13 @@ const CASES: ActsCase[] = [
       { name: `Name for ${MACHINE_LABEL}`, count: 1 },
       { name: "Rename", count: 1 },
       { name: "Reported labels", count: 1, note: "shown, and deliberately carrying no edit act" },
-      {
-        name: "Operator labels",
-        count: 2,
-        note: "the chip list and the draft field, both named for the map they edit",
-      },
-      { name: "Add", count: 1 },
+      { name: "Operator labels", count: 1, note: "the card list" },
+      { name: "Search operator labels", count: 1 },
+      { name: "Search operator labels by", count: 1 },
+      { name: "Add label", count: 1 },
+      { name: "Edit tier", count: 1 },
+      { name: "Previous labels", count: 1 },
+      { name: "Next labels", count: 1 },
       { name: "Remove tier=gold", count: 1 },
       { name: `Model to pull onto ${MACHINE_LABEL}`, count: 1 },
       { name: "Pull", count: 1 },
@@ -586,6 +587,7 @@ const CASES: ActsCase[] = [
       await settle();
       fireEvent.focus(screen.getByRole("combobox", { name: "Search users and groups" }));
       await click(screen.getByRole("option", { name: "Ana Ruiz" }));
+      await click(screen.getByRole("button", { name: "Add selected users and groups" }));
       fireEvent.focus(screen.getByRole("combobox", { name: "Search users and groups" }));
     },
     acts: [
@@ -594,6 +596,7 @@ const CASES: ActsCase[] = [
       },
       { name: "Search users and groups", count: 1 },
       { name: "Users and groups to add", count: 1 },
+      { name: "Add selected users and groups", count: 1 },
       { name: "Bo Chen", count: 1, within: "Users and groups to add" },
       { name: "Pause sharing with Ana Ruiz", count: 1 },
       { name: "Remove sharing with Ana Ruiz", count: 1 },
@@ -674,10 +677,18 @@ const CASES: ActsCase[] = [
 
       { name: "Routing strategy", count: 1 },
       { name: "Routing fallback", count: 1 },
-      { name: "Required labels", count: 2, note: "the chip list and the draft field" },
-      { name: "Preferred labels", count: 2 },
+      { name: "Required labels", count: 1, note: "the card list" },
+      { name: "Preferred labels", count: 1 },
+      { name: "Search required labels", count: 1 },
+      { name: "Search required labels by", count: 1 },
+      { name: "Search preferred labels", count: 1 },
+      { name: "Search preferred labels by", count: 1 },
       { name: "Preferred model order, one model id per line", count: 1 },
-      { name: "Add", count: 2, note: "one per label map, and they must stay two" },
+      { name: "Add label", count: 2, note: "one per label map, and they must stay two" },
+      { name: "Edit tier", count: 1 },
+      { name: "Edit room", count: 1 },
+      { name: "Previous labels", count: 2 },
+      { name: "Next labels", count: 2 },
       { name: "Remove tier=gold", count: 1 },
       { name: "Remove room=studio", count: 1 },
       { name: "Save", count: 0, note: "nothing changed, so nothing to save -- absent, never disabled" },

@@ -1204,7 +1204,7 @@ function MachinePane({ over }: { over: Record<string, unknown> }) {
   };
   return (
     <div className="os-window-content">
-      <MachineDetail machine={machine} writes={writes} now={FLEET_NOW} view="details" />
+      <MachineDetail machine={machine} writes={writes} now={FLEET_NOW} view="settings" />
     </div>
   );
 }
@@ -1578,7 +1578,7 @@ function SharingPane({ over }: { over: Record<string, unknown> }) {
   const machine = fleetMachine({ ownerUserId: "v1:identity:user:me", ...over });
   return (
     <div className="os-window-content">
-      <MachineDetail machine={machine} writes={qaWrites()} now={FLEET_NOW} view="sharing" />
+      <MachineDetail machine={machine} writes={qaWrites()} now={FLEET_NOW} view="settings" />
     </div>
   );
 }
@@ -1620,7 +1620,7 @@ function SharePane({ over, startPeople = false, refuse = false }: { over: Record
   }, [startPeople, refuse]);
   return (
     <div className="os-window-content">
-      <MachineDetail machine={machine} writes={qaWrites(refuse)} now={FLEET_NOW} view="sharing" />
+      <MachineDetail machine={machine} writes={qaWrites(refuse)} now={FLEET_NOW} view="settings" />
     </div>
   );
 }

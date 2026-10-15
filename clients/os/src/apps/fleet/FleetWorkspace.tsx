@@ -5,7 +5,7 @@ import { RecordList, RecordRow, listCount } from "../../kit/RecordRow";
 import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from "react";
 import type { Row } from "@znasllc-io/memql-sdk-core/client";
 import { ActivityTarget } from "../../kit/SemanticActivity";
-import { ArrowUpRight, Box, ChevronRight, Cpu, Monitor, SlidersHorizontal, Terminal, Wrench } from "lucide-react";
+import { ArrowUpRight, ChevronRight, Cpu, Monitor, SlidersHorizontal, Terminal, Wrench } from "lucide-react";
 import type { OsAppProps } from "../../system/registry";
 import { Button, EmptyState, Refine, Head, Notice, ProvenanceDot, formatBytes, formatFreshness, useNow } from "../../kit";
 import { IconButton } from "../../kit/IconButton";
@@ -18,14 +18,15 @@ import type { AddMachineFlow } from "./addMachine/useAddMachineFlow";
 import { MachineDetail, MachineAppsHelp } from "./machines/MachineDetail";
 import { AppPermissionHelp } from "./machines/AppPermissionHelp";
 import { machineModelsFrom, type MachineModel } from "./machines/models";
+import { EquipmentModelCarousel } from "./EquipmentModelCarousel";
 import { RecentWork } from "./apps/RecentWork";
 import { useMachineWrites } from "./machines/useMachineWrites";
 import { isWorkerOnline } from "./online";
 import { isRevoked, machineFromRow, machineName, type MachineRow } from "./rows";
 
-export type MachineView = "equipment" | "details" | "models" | "apps" | "sharing" | "activity";
+export type MachineView = "equipment" | "models" | "apps" | "activity" | "settings";
 export interface FleetSelection { machineId: string; view: MachineView }
-const VIEW_NAMES: Record<MachineView, string> = { equipment: "Equipment", details: "Details", models: "Models", apps: "Apps", sharing: "Sharing", activity: "History" };
+const VIEW_NAMES: Record<MachineView, string> = { equipment: "Equipment", models: "Models", apps: "Apps", activity: "History", settings: "Settings" };
 
 export function FleetWorkspace({ flow, showRevoked, selection, select, navigate, onOpenSession, intent, consumeIntent, onAllSessions }: {
   onOpenSession?: (id: string) => void;
@@ -209,14 +210,14 @@ export function MachineEquipment({ machine, now, onInspect }: { machine: Machine
   const selectedApp = chosenApp ?? (!selectedModel ? machine.apps[0] : undefined);
   const hw = machine.hardware;
   return <ActivityTarget target={`fleet:machine:${machine.id}`} className="fleet-equipment">
-    <PageHelp title="Machine status"><p>Online means Cockpit is connected. The last-seen time reflects the most recent report; an offline machine cannot accept new work. Open machine details to inspect its connection and permissions.</p></PageHelp>
+    <PageHelp title="Machine status"><p>Online means Cockpit is connected. The last-seen time reflects the most recent report; an offline machine cannot accept new work. Open Settings to manage sharing and inspect its connection and permissions.</p></PageHelp>
     <PageHelp title="Hardware"><p>The display shows the machine’s reported chip, memory and CPU cores. Unknown means that measurement was not reported.</p></PageHelp>
-    <PageHelp title="Local models"><p>Select a model to inspect its context size, quantization and supported features. Manage models opens the installed models and available downloads for this machine. Installed inventory is reported by Cockpit; it does not by itself prove that a model can answer successfully.</p></PageHelp>
+    <PageHelp title="Local models"><p>Use the arrows to browse models, then select one to inspect its context size, quantization and supported features. Manage models opens the installed models and available downloads for this machine. Installed inventory is reported by Cockpit; it does not by itself prove that a model can answer successfully.</p></PageHelp>
     <MachineAppsHelp />
     <header className="fleet-machine-heading"><div><h4>{machineName(machine)}</h4><span className="fleet-machine-presence"><ProvenanceDot tone={online ? "reachable" : "unreachable"} />{revoked ? "Revoked" : online ? "Online" : "Offline"}<span>{formatFreshness(machine.lastSeenAt, now)}</span></span></div></header>
     <div className="fleet-equipment-rig">
-      <section className="fleet-equipment-bank" aria-label="Local model equipment"><div className="fleet-bank-heading"><Cpu size={16} aria-hidden /><h5>Local models</h5><span>{models.length}</span><IconButton label={models.length ? "Manage models" : "Find models that fit"} onClick={() => onInspect("models")}><SlidersHorizontal size={16} aria-hidden /></IconButton></div>
-        <ul>{models.map(model => <li key={model.modelId}><button className="fleet-equipment-slot" type="button" aria-pressed={selectedModel?.modelId === model.modelId} onClick={() => choose({ kind: "model", id: model.modelId })}><Box size={17} aria-hidden /><span><strong>{model.modelId}</strong><small>{model.embeddings ? "Embeddings" : model.tools ? "Chat & tools" : "Chat"}</small></span></button></li>)}</ul>
+      <section className="fleet-equipment-bank" aria-label="Local model equipment"><div className="fleet-bank-heading"><Cpu size={16} aria-hidden /><h5>Local models</h5><IconButton label={models.length ? "Manage models" : "Find models that fit"} onClick={() => onInspect("models")}><SlidersHorizontal size={16} aria-hidden /></IconButton></div>
+        <EquipmentModelCarousel models={models} selectedId={selectedModel?.modelId} onSelect={id => choose({ kind: "model", id })} />
         {models.length === 0 ? <EmptyState icon={Cpu} title="No local models">Find a model that fits this machine in Models.</EmptyState> : null}
       </section>
       <div className="fleet-device" aria-label="Machine hardware">

@@ -114,6 +114,8 @@ export interface MachineWrites {
   /** The last refusal, in the server's own words. Cleared when a write
    *  starts, so it is never read as belonging to the current attempt. */
   actionError: string;
+  /** Keep a refusal beside the setting that caused it. */
+  actionErrorScope?: "machine" | "sharing";
   rename: (registrationId: string, displayName: string) => Promise<boolean>;
   setOperatorLabels: (registrationId: string, labels: LabelMap) => Promise<boolean>;
   /** Remove a machine: its registration AND its credential, as one act.
@@ -160,9 +162,11 @@ export function useMachineWrites(): MachineWrites {
   const connection = useOsConnection();
   const [busyId, setBusyId] = useState("");
   const [actionError, setActionError] = useState("");
+  const [actionErrorScope, setActionErrorScope] = useState<"machine" | "sharing">("machine");
 
   const run = useCallback(
     async (registrationId: string, write: () => Promise<unknown>): Promise<boolean> => {
+      setActionErrorScope("machine");
       if (connection === null) {
         setActionError("Not connected to the cluster, so nothing was written.");
         return false;
@@ -224,6 +228,7 @@ export function useMachineWrites(): MachineWrites {
   // removed a machine must not be writable by whoever is holding the keyboard.
   const revoke = useCallback(
     async (registrationId: string, reason: string): Promise<RemovalReceipt | null> => {
+      setActionErrorScope("machine");
       if (connection === null) {
         setActionError("Not connected to the cluster, so nothing was written.");
         return null;
@@ -263,6 +268,7 @@ export function useMachineWrites(): MachineWrites {
   // would ask the reader to know that.
   const setSharing = useCallback(
     async (registrationId: string, choice: ShareChoice): Promise<SharingReceipt | null> => {
+      setActionErrorScope("sharing");
       if (connection === null) {
         setActionError("Not connected to the cluster, so nothing was written.");
         return null;
@@ -286,5 +292,5 @@ export function useMachineWrites(): MachineWrites {
     [connection],
   );
 
-  return { busyId, actionError, rename, setOperatorLabels, revoke, setSharing };
+  return { busyId, actionError, actionErrorScope, rename, setOperatorLabels, revoke, setSharing };
 }

@@ -3273,63 +3273,33 @@ button.os-row.os-record-row:focus-visible { outline: 2px solid var(--os-accent);
   min-width: 0;
   gap: 16px;
 }
-.fleet-share-toggle { display: grid; gap: 6px; }
-.fleet-share-toggle > .os-caption { margin: 0; }
+.fleet-share-toggle { display: flex; align-items: center; justify-content: space-between; gap: 16px; padding-block: 8px 0; font-size: var(--os-text-sm); }
+.fleet-share-toggle .os-caption { margin: 6px 0 0; }
+.fleet-share-toggle > .os-switch { flex: none; gap: 0; }
+.fleet-share-collection { min-width: 0; display: flex; flex-direction: column; gap: 8px; }
 
-/* The access list owns its scroll; retained machine tabs keep their layout. */
-.fleet-page:has(.fleet-home[data-machine-view="sharing"]:not([hidden])) {
-  overflow: hidden;
-  padding-bottom: 0;
+/* A joined picker escapes window clipping and inherits its field's theme. */
+.os-anchored-picker {
+  position: fixed;
+  z-index: 95;
+  box-sizing: border-box;
+  overflow: auto;
+  overscroll-behavior: contain;
+  border: 1px solid var(--os-accent);
+  border-radius: 0 0 var(--os-radius-xs) var(--os-radius-xs);
+  background: var(--os-glass-solid);
+  color: var(--os-ink);
+  box-shadow: var(--os-shadow-float);
 }
-.fleet-home[data-machine-view="sharing"]:not([hidden]) { height: 100%; }
-.fleet-home[data-machine-view="sharing"] :is(.fleet-workspace, .fleet-workspace-body, .fleet-equipment-area, [data-machine-view="sharing"]:not([hidden]), .fleet-inspector, .fleet-inspector > .os-panel, .os-fleet-sharing, .fleet-share-editor) {
-  display: flex;
-  flex-direction: column;
-  flex: 1;
-  min-height: 0;
-}
-.fleet-home[data-machine-view="sharing"] > .fleet-workspace { height: 100%; }
-.fleet-home[data-machine-view="sharing"] .fleet-workspace-header { flex: none; }
-.fleet-home[data-machine-view="sharing"] .fleet-workspace-body { margin-top: 0; }
-.fleet-home[data-machine-view="sharing"] .fleet-share-editor { overflow: hidden; }
-.fleet-home[data-machine-view="sharing"] .fleet-share-body {
-  flex: 1;
-  min-height: 0;
-  overflow-y: auto;
-  padding: 2px;
-}
-
-/* Search and saved recipients share one left edge beneath the toggle. */
-.fleet-share-picker {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-}
-.fleet-share-picker .os-subhead {
-  margin: 0;
-}
-
-.fleet-share-search {
-  flex: none;
-  width: 100%;
-  min-width: 0;
-}
-/* THE LIST STAYS OPEN under the search, at about five rows: a person who does
- * not know whom they may pick reads the answer instead of guessing names, and
- * a long directory scrolls inside its own box rather than pushing the floor
- * off the editor. */
-/* `position: relative` MAKES THE LIST THE OPTIONS' offsetParent. Without it
- * an option's offsetTop is measured from the editor, counting everything
- * above the list, and arrowing scrolled the active option OUT of view -- the
- * kit Select escapes this only because its list is `position: fixed`. */
-.fleet-share-results {
-  position: relative;
-  max-height: 212px;
-  overflow-y: auto;
-  border: 1px solid var(--os-line);
-  border-radius: var(--os-selection-radius);
-  background: var(--os-plate);
-}
+.os-anchored-picker[data-side="above"] { border-radius: var(--os-radius-xs) var(--os-radius-xs) 0 0; }
+.os-input[data-picker-side] { border-color: var(--os-accent); }
+.os-input[data-picker-side]:focus-visible { outline: none; }
+.os-input[data-picker-side="below"] { border-bottom-left-radius: 0; border-bottom-right-radius: 0; }
+.os-input[data-picker-side="above"] { border-top-left-radius: 0; border-top-right-radius: 0; }
+.os-picker-more { display: block; width: 100%; padding: 10px 12px; border: 0; border-top: 1px solid var(--os-line); background: transparent; color: var(--os-muted); font: inherit; font-size: var(--os-text-sm); text-align: left; cursor: pointer; }
+.os-picker-more:hover, .os-picker-more:focus-visible { background: var(--os-hover); color: var(--os-ink); }
+.os-picker-empty { margin: 0; padding: 12px; color: var(--os-muted); font-size: var(--os-text-sm); }
+.fleet-share-selection-count { margin: 0; }
 .fleet-share-option {
   display: grid;
   grid-template-columns: 14px minmax(0, 1fr) 14px;
@@ -3344,9 +3314,8 @@ button.os-row.os-record-row:focus-visible { outline: 2px solid var(--os-accent);
 .fleet-share-option:hover {
   background: var(--os-hover);
 }
-/* The active option is the one Enter adds: the selection language (accent
- * wash, accent edge), and never the focus ring, which stays on the search the
- * keys are typed into. */
+/* Keyboard position and selection stay distinct: a wash follows the active
+ * row, and a checked box persists on every chosen recipient. */
 .fleet-share-option[data-active] {
   background: var(--os-accent-soft);
   box-shadow: inset 2px 0 var(--os-accent);
@@ -3369,15 +3338,8 @@ button.os-row.os-record-row:focus-visible { outline: 2px solid var(--os-accent);
   color: var(--os-muted);
   overflow-wrap: anywhere;
 }
-.fleet-share-option-add {
-  grid-column: 3;
-  grid-row: 1;
-  color: var(--os-muted);
-}
-.fleet-share-option:hover .fleet-share-option-add,
-.fleet-share-option[data-active] .fleet-share-option-add {
-  color: var(--os-accent);
-}
+.fleet-share-option-check { grid-column: 3; grid-row: 1; display: grid; place-items: center; box-sizing: border-box; width: 14px; height: 14px; border: 1px solid var(--os-muted); border-radius: var(--os-selection-radius); color: var(--os-accent-fg); }
+.fleet-share-option[aria-selected="true"] .fleet-share-option-check { background: var(--os-accent); border-color: var(--os-accent); }
 /* At a narrow window the recommendation's four columns become two lines rather
  * than four cramped ones: the level and the model belong together, and the
  * size and the reason do. */
@@ -4496,6 +4458,27 @@ a.os-button {
   font-size: var(--os-text-xs);
   color: var(--os-muted);
 }
+
+/* Keep the copy wash quieter than navigation hover, with room around both
+ * the value and its receipt. Padding stays inside the available width. */
+.os-copyvalue-row { width: 100%; min-height: 36px; padding: 6px 10px; box-sizing: border-box; border: 0; border-radius: var(--os-selection-radius); background: transparent; color: inherit; font: inherit; text-align: left; cursor: copy; }
+.os-copyvalue-row:hover { background: color-mix(in srgb, var(--os-hover) 35%, transparent); }
+.os-copyvalue-row .os-copyvalue-text { white-space: normal; overflow: visible; overflow-wrap: anywhere; user-select: text; }
+.os-copyvalue-receipt { display: inline-flex; align-items: center; justify-content: flex-end; flex: 0 0 58px; gap: 5px; font-family: var(--os-font); font-size: var(--os-text-xs); color: var(--os-muted); opacity: 0; }
+.os-copyvalue-row:hover .os-copyvalue-receipt, .os-copyvalue-row:focus-visible .os-copyvalue-receipt, .os-copyvalue-receipt[data-copied] { opacity: 1; }
+.os-copyvalue-receipt[data-copied] { color: var(--os-accent); }
+@media (hover: none) { .os-copyvalue-receipt { opacity: 1; } }
+
+/* Shared card paging: explicit arrows, one or two visible cards, no wheel
+ * interception. Off-page cards are inert; reserve room for focus outlines. */
+.os-card-carousel { min-width: 0; }
+.os-card-viewport { overflow: hidden; padding: 3px; }
+.os-card-carousel .os-card-track { display: grid; grid-auto-flow: column; padding: 0; margin: 0; max-height: none; overflow: visible; list-style: none; transition: transform var(--os-duration-med) var(--os-ease); }
+.os-card-track > li { min-width: 0; }
+.os-card-pager { display: flex; justify-content: center; align-items: center; gap: 10px; margin-top: 6px; }
+.os-card-pager .os-icon-button:disabled { opacity: .35; cursor: default; }
+.os-card-pager > span { min-width: 100px; color: var(--os-muted); font-size: var(--os-text-xs); font-variant-numeric: tabular-nums; text-align: center; }
+@media (prefers-reduced-motion: reduce) { .os-card-carousel .os-card-track { transition: none; } }
 
 /* THE PANEL'S GROUPS (DESIGN.md rule 8). A hairline and a Subhead, and no
  * nested Panel: a bordered box inside a bordered panel is the second container
@@ -14170,7 +14153,6 @@ button.os-cluster-mesh-peer:focus-visible {
 .fleet-device { grid-column: 1; grid-row: 1; width: min(100%,300px); justify-self: center; }
 .fleet-equipment-bank[aria-label="Local model equipment"] { grid-column: 1; grid-row: 2; text-align: center; }
 .fleet-equipment-bank[aria-label="Local model equipment"] .fleet-bank-heading { justify-content: center; }
-.fleet-equipment-bank[aria-label="Local model equipment"] ul { display: flex; justify-content: center; flex-wrap: wrap; gap: 6px; }
 .fleet-equipment-bank[aria-label="Local model equipment"] .fleet-equipment-slot { padding: 9px 12px; }
 .fleet-equipment-bank[aria-label="Local model equipment"] .fleet-equipment-slot:not([aria-pressed="true"]) { border-color: var(--os-line); background: var(--os-plate); }
 .fleet-equipment-bank[aria-label="App equipment"] { grid-column: 2; grid-row: 1 / 3; align-self: center; border-left: 1px solid var(--os-line); padding: 20px 0 20px 26px; }
@@ -14246,10 +14228,11 @@ button.os-cluster-mesh-peer:focus-visible {
 .fleet-home .fleet-equipment-rig > .fleet-device { grid-column: 1; grid-row: 1; }
 .fleet-home .fleet-equipment-rig > .fleet-equipment-bank:first-child { grid-column: 1; grid-row: 2; }
 .fleet-home .fleet-equipment-rig > .fleet-equipment-bank:last-child { grid-column: 2; grid-row: 1 / 3; }
-.fleet-home .fleet-equipment-rig > .fleet-equipment-bank:first-child ul { display: grid; grid-template-columns: repeat(2,minmax(0,1fr)); gap: 6px; }
 .fleet-home .fleet-device-screen { max-width: 260px; margin-inline: auto; }
 .fleet-home .fleet-device { min-height: 0; }
 .fleet-home .fleet-bank-heading { margin-bottom: 12px; }
+.fleet-equipment-bank[aria-label="Local model equipment"] .fleet-bank-heading > .os-icon-button { margin-left: auto; }
+.os-card-track .fleet-equipment-slot { min-height: 70px; height: 100%; }
 @container os-window (max-width: 680px) {
   .os-window-secondary-nav { display: none; }
   .os-window-more-nav { display: block; }
@@ -14286,7 +14269,7 @@ button.os-cluster-mesh-peer:focus-visible {
 .fleet-page .os-fleet-addpage { margin: 0; height: 100%; }
 .fleet-page > .os-logs > .os-head { position: sticky; top: 0; z-index: 3; background: var(--os-glass-solid); padding: 18px 0 12px; }
 @container fleet-page (max-width: 820px) { .fleet-routing-stages { grid-template-columns: repeat(2,minmax(0,1fr)); } }
-@container fleet-page (max-width: 420px) { .fleet-routing-stages { grid-template-columns: minmax(0,1fr); } .fleet-routing-stage[open] { grid-column: auto; } .fleet-home .fleet-equipment-rig > .fleet-equipment-bank:first-child ul { grid-template-columns: minmax(0,1fr); } }
+@container fleet-page (max-width: 420px) { .fleet-routing-stages { grid-template-columns: minmax(0,1fr); } .fleet-routing-stage[open] { grid-column: auto; } }
 
 /* Real registry app switcher: open/focus keeps each app's existing window. */
 .os-window-bar .os-window-grip { flex: 0 0 auto; padding-inline: 8px; }
@@ -14455,6 +14438,78 @@ button.os-cluster-mesh-peer:focus-visible {
 .fleet-inspector > .os-panel { padding: 0; }
 .fleet-inspector .os-fleet-apps, .fleet-inspector .os-fleet-machinemodels, .fleet-inspector .os-fleet-sharing { padding-block: 0; }
 .fleet-inspector .os-empty-state { padding-block: 24px; }
+
+/* Machine details follow one settings rhythm: section, aligned facts, then
+ * the next section. Edits share their own group; all information stays open. */
+.fleet-machine-details { container: machine-details / inline-size; }
+.fleet-details-section { display: grid; grid-template-columns: 170px minmax(0, 1fr); gap: 32px; padding-block: 28px; border-top: 1px solid var(--os-line); }
+.fleet-details-section:first-of-type { border-top: 0; padding-top: 0; }
+.fleet-details-section > .os-subhead { margin: 8px 0 0; font-size: var(--os-text-base); font-weight: 600; }
+.fleet-details-section-body { min-width: 0; }
+.fleet-machine-details .os-facts { grid-template-columns: 160px minmax(0, 1fr); gap: 2px 24px; margin: 0; }
+.fleet-machine-details .os-facts dt, .fleet-machine-details .os-facts dd { font-size: var(--os-text-sm); line-height: 1.6; padding-block: 7px; margin: 0; }
+.fleet-machine-details .os-facts dd:has(> .os-copyvalue) { padding: 0; }
+.fleet-machine-details .os-facts dd:not(:has(> .os-copyvalue)) { padding-inline: 10px; }
+.fleet-machine-details .os-fleet-class { margin-bottom: 12px; font-size: var(--os-text-sm); }
+.fleet-details-runtimes { display: flex; flex-direction: column; gap: 6px; }
+.fleet-machine-setting { display: grid; grid-template-columns: 160px minmax(0, 1fr); align-items: start; gap: 24px; padding-block: 8px 16px; }
+.fleet-machine-setting-name { color: var(--os-muted); font-size: var(--os-text-sm); padding-top: 7px; }
+.fleet-machine-rename { width: 100%; max-width: 34rem; }
+.fleet-machine-setting .os-fleet-labeledit { width: 100%; min-width: 0; }
+.os-card-search { display: flex; align-items: center; gap: 6px; border: 0; padding: 0; margin: 0; min-width: 0; max-width: 34rem; }
+.os-card-search-mode { flex: 0 0 84px; }
+.os-card-search-mode .os-select { width: 100%; }
+.os-card-search-input { position: relative; flex: 1; min-width: 0; }
+.os-card-search-input > svg { position: absolute; inset-inline-start: 10px; top: 50%; transform: translateY(-50%); color: var(--os-muted); pointer-events: none; }
+.os-card-search-input .os-input { width: 100%; min-width: 0; box-sizing: border-box; padding-inline: 30px 36px; }
+.os-card-search-input .os-icon-button { position: absolute; inset-inline-end: 0; top: 50%; transform: translateY(-50%); }
+.os-card-search > .os-add-button { flex: none; }
+.fleet-label-hint { margin: 0 0 4px; }
+.os-editable-card { display: grid; grid-template-columns: minmax(0, 1fr) auto auto; grid-template-rows: auto minmax(36px, auto); align-items: center; column-gap: 8px; height: 100%; min-height: 70px; box-sizing: border-box; padding: 6px 10px 4px 12px; border: 1px solid var(--os-line); border-radius: var(--os-selection-radius); background: var(--os-plate); }
+.os-editable-card:has(> .os-editable-card-meta) { grid-template-columns: minmax(74px, 1fr) minmax(0, auto) minmax(74px, 1fr); }
+.os-editable-card-open { grid-area: 1 / 1 / 3 / -1; display: grid; grid-template-columns: subgrid; grid-template-rows: subgrid; align-items: center; min-width: 0; align-self: stretch; border: 0; padding: 0; border-radius: var(--os-selection-radius); text-align: left; font: inherit; color: var(--os-ink); background: transparent; cursor: pointer; }
+.os-editable-card-open > strong, .os-editable-card-open > span { display: block; min-width: 0; overflow-wrap: anywhere; font-size: var(--os-text-sm); }
+.os-editable-card-open > :first-child { grid-area: 1 / 1 / 2 / -1; }
+.os-editable-card-open > :nth-child(2) { grid-area: 2 / 1 / 3 / 2; color: var(--os-muted); }
+.os-editable-card-meta { grid-area: 2 / 2; position: relative; min-width: 0; color: var(--os-muted); font-size: var(--os-text-sm); text-align: center; pointer-events: none; }
+.os-editable-card-open em { font-style: normal; }
+.os-card-skeleton { container: card-skeleton / inline-size; }
+.os-card-skeleton > div { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
+@container card-skeleton (max-width: 487px) {
+  .os-card-skeleton > div { grid-template-columns: minmax(0, 1fr); }
+  .os-card-skeleton .os-editable-card:nth-child(n+2) { display: none; }
+}
+.os-editable-card:has(button:enabled):is(:hover, :focus-within) { background: color-mix(in srgb, var(--os-hover) 50%, var(--os-plate)); }
+.os-editable-card-actions { grid-area: 2 / 3; position: relative; display: flex; align-items: center; justify-self: end; gap: 2px; }
+.os-editable-card .os-card-remove:hover:not(:disabled) { color: var(--os-error); }
+.os-card-draft { display: flex; flex-direction: column; gap: 8px; max-width: 34rem; padding-block: 8px; }
+.os-card-draft > :is(label, .os-card-draft-title) { overflow-wrap: anywhere; font-size: var(--os-text-sm); color: var(--os-muted); }
+.os-card-draft > :is(label, .os-card-draft-title) strong { color: var(--os-ink); }
+.fleet-machine-rename .os-input { min-width: 0; }
+.fleet-machine-rename .os-button { flex: none; }
+.fleet-machine-remove-row { display: flex; align-items: center; justify-content: space-between; gap: 16px; padding-top: 12px; margin-top: 8px; border-top: 1px solid var(--os-line); font-size: var(--os-text-sm); }
+.fleet-machine-remove:hover:not(:disabled), .fleet-machine-remove:focus-visible:not(:disabled) { color: var(--os-error); }
+.fleet-machine-details .os-fleet-confirm { margin-top: 12px; padding: 20px; border-color: var(--os-line); border-radius: var(--os-selection-radius); }
+.fleet-machine-details .os-fleet-confirm > .os-input { flex: none; width: 100%; max-width: 34rem; }
+.fleet-machine-details .os-fleet-confirm .os-caption, .fleet-machine-details .os-fleet-confirm-line { max-width: 80ch; }
+.fleet-details-labels { padding: 0; margin: 0; list-style: none; }
+.fleet-details-labels li + li { margin-top: 4px; }
+.fleet-details-label-value { display: grid; grid-template-columns: 160px minmax(0, 1fr); gap: 24px; font-size: var(--os-text-sm); line-height: 1.6; }
+.fleet-details-label-value > span:first-child { color: var(--os-muted); }
+.fleet-details-label-value small { display: block; margin-top: 4px; color: var(--os-muted); }
+@container machine-details (max-width: 760px) {
+  .fleet-details-section { grid-template-columns: minmax(0, 1fr); gap: 14px; padding-block: 24px; }
+  .fleet-details-section > .os-subhead { margin: 0; }
+}
+@container machine-details (max-width: 480px) {
+  .fleet-machine-details .os-facts, .fleet-machine-setting { grid-template-columns: minmax(0, 1fr); gap: 0; }
+  .fleet-machine-details .os-facts dt { padding: 10px 0 0; }
+  .fleet-machine-details .os-facts dd { padding: 4px 0; margin-bottom: 8px; }
+  .fleet-machine-setting { gap: 8px; }
+  .fleet-machine-setting-name { padding-top: 0; }
+  .fleet-details-label-value { grid-template-columns: minmax(0, 1fr); gap: 3px; }
+  .fleet-machine-details .os-fleet-confirm { padding: 14px; }
+}
 .os-fleet-history > .fleet-bank-heading { margin-bottom: 0; }
 .fleet-bank-heading > .os-subhead { margin: 0; }
 
@@ -15220,11 +15275,8 @@ button[data-ask-control="running"], [data-ask-control="running"] > button { outl
 .os-backup-schedule .os-field { flex: 1; min-width: 120px; }
 
 /* One setting, then its access list. Row actions save directly. */
-.fleet-share-picker { border-top: 1px solid var(--os-line); padding-top: 20px; }
-.fleet-share-search-area { min-width: 0; }
-.fleet-share-picker .fleet-share-search { width: 100%; max-width: none; }
-.fleet-share-picker .os-subhead { margin-bottom: 0; }
-.fleet-share-calls { color: var(--os-muted); font-size: 12px; white-space: nowrap; font-variant-numeric: tabular-nums; }
-.fleet-share-picker .os-record-actions { gap: 2px; }
-/* A failed write stays reachable while a long recipient list scrolls. */
-.fleet-share-error { flex: none; max-height: 40%; overflow-y: auto; padding-bottom: 12px; }
+.fleet-share-picker { border-top: 1px solid var(--os-line); padding-top: 20px; padding-bottom: 0; }
+.fleet-share-search-area { position: relative; min-width: 0; max-width: 34rem; }
+.fleet-share-calls { font-variant-numeric: tabular-nums; }
+/* Keep a refusal beside the sharing controls in the Settings page flow. */
+.fleet-share-error { min-width: 0; }

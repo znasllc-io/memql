@@ -64,8 +64,8 @@ it("keeps Add a machine on the list", async () => {
 });
 
 // THE REGRESSION THIS PINS. Every machine view published its depth except the
-// one a machine opens on: Equipment read "Machines" while Details, one click
-// away, read "Machines > Alpha > Details" -- as though selecting a machine had
+// one a machine opens on: Equipment read "Machines" while Settings, one click
+// away, read "Machines > Alpha > Settings" -- as though selecting a machine had
 // not happened until you left its first page.
 it("names the machine and the view on Equipment, the same as on every other view", async () => {
   h.connection = fakeConnection({ myWorkersWithStatus: [machineRow({ id: "a", displayName: "Alpha" })] });
@@ -73,18 +73,18 @@ it("names the machine and the view on Equipment, the same as on every other view
   await openMachine("Alpha");
   await waitFor(() => expect(crumbs()).toEqual(["Machines", "Alpha", "Equipment"]));
 
-  fireEvent.click(screen.getByRole("button", { name: "Details" }));
-  await waitFor(() => expect(crumbs()).toEqual(["Machines", "Alpha", "Details"]));
+  fireEvent.click(screen.getByRole("button", { name: "Settings" }));
+  await waitFor(() => expect(crumbs()).toEqual(["Machines", "Alpha", "Settings"]));
 });
 
 it("never draws a second trail, whichever machine view is open", async () => {
   h.connection = fakeConnection({ myWorkersWithStatus: [machineRow({ id: "a", displayName: "Alpha" })] });
   fleet();
   await openMachine("Alpha");
-  await screen.findByRole("button", { name: "Details" });
+  await screen.findByRole("button", { name: "Settings" });
   expect(screen.getAllByRole("navigation", { name: "Breadcrumbs" })).toHaveLength(1);
-  fireEvent.click(screen.getByRole("button", { name: "Details" }));
-  await waitFor(() => expect(crumbs().at(-1)).toBe("Details"));
+  fireEvent.click(screen.getByRole("button", { name: "Settings" }));
+  await waitFor(() => expect(crumbs().at(-1)).toBe("Settings"));
   expect(screen.getAllByRole("navigation", { name: "Breadcrumbs" })).toHaveLength(1);
   expect(screen.getAllByRole("button", { name: /^Back/ })).toHaveLength(1);
 });
@@ -105,8 +105,8 @@ it("goes Back from a machine to the list, and from a view to the machine", async
   h.connection = fakeConnection({ myWorkersWithStatus: [machineRow({ id: "a", displayName: "Alpha" })] });
   fleet();
   await openMachine("Alpha");
-  fireEvent.click(await screen.findByRole("button", { name: "Details" }));
-  await waitFor(() => expect(crumbs()).toEqual(["Machines", "Alpha", "Details"]));
+  fireEvent.click(await screen.findByRole("button", { name: "Settings" }));
+  await waitFor(() => expect(crumbs()).toEqual(["Machines", "Alpha", "Settings"]));
 
   fireEvent.click(screen.getByRole("button", { name: "Back to Alpha" }));
   await waitFor(() => expect(crumbs()).toEqual(["Machines", "Alpha", "Equipment"]));
