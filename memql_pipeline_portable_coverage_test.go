@@ -172,7 +172,10 @@ func TestEngineSecurityScansDoNotTurnFindingsIntoSuccess(t *testing.T) {
 			t.Fatal(refusal)
 		}
 		wantStage := "secrets-history"
-		wantCommands := []string{"--unshallow --tags", `--head="$MEMQL_SHA"`, "python3 scripts/ci/gitleaks-history.py", "--jobs=4", "--batch-size=1", "--timeout=20700"}
+		// The history helper fetches tags and unshallows with bounded retries;
+		// its real-Git tests prove that incomplete history cannot reach scanning.
+		// Keep the manifest wired to that fetch, not just to a local inventory.
+		wantCommands := []string{`--fetch-remote="https://github.com/${MEMQL_REPOSITORY}.git"`, `--head="$MEMQL_SHA"`, "python3 scripts/ci/gitleaks-history.py", "--jobs=4", "--batch-size=1", "--timeout=20700"}
 		forbidden := "gitleaks dir ."
 		if event == pipelines.EventPullRequest {
 			wantStage = "secrets-current"
