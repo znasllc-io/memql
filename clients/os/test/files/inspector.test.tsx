@@ -31,6 +31,30 @@ async function openInspector(title: string): Promise<HTMLElement> {
   return screen.getByRole("region", { name: "File details" });
 }
 
+it("explains failed uploads and offers no open or download for missing bytes", async () => {
+  h.connection = fakeConnection({
+    artifacts: [artifactRow({ id: "failed-artifact", kind: "file", title: "notes.md", sourceConceptRef: "failed-file" })],
+    files: [{ id: "failed-file", name: "notes.md", status: "failed", blobUrl: "library/person/file/notes.md", versionNumber: 1 }],
+  });
+  await renderFiles();
+  const inspector = await openInspector("notes\\.md");
+  expect(within(inspector).getByText("This upload did not finish.")).toBeTruthy();
+  expect(within(inspector).getByText("Upload the original file again from Files.")).toBeTruthy();
+  expect(within(inspector).queryByRole("button", { name: "Open" })).toBeNull();
+  expect(within(inspector).queryByRole("button", { name: "Download" })).toBeNull();
+});
+
+it("keeps a stored file available when only its analysis failed", async () => {
+  h.connection = fakeConnection({
+    artifacts: [artifactRow({ id: "saved-artifact", kind: "file", title: "notes.md", sourceConceptRef: "saved-file" })],
+    files: [{ id: "saved-file", name: "notes.md", status: "failed", blobUrl: "https://storage.example/container/library/person/file/notes.md", versionNumber: 1 }],
+  });
+  await renderFiles();
+  const inspector = await openInspector("notes\\.md");
+  expect(within(inspector).queryByText("This upload did not finish.")).toBeNull();
+  expect(within(inspector).getByRole("button", { name: "Open" })).toBeTruthy();
+});
+
 describe("the inspector header", () => {
   it("declares the selected file for the window Ask without a duplicate icon", async () => {
     h.connection = fakeConnection({ artifacts: [artifactRow({ id: "a-1", title: "brief.pdf" })] });

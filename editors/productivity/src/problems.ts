@@ -72,7 +72,10 @@ function clusterSentence(error: unknown): string | undefined {
 // cut them off.
 function withCauses(error: unknown): string {
   if (!(error instanceof Error)) return String(error);
-  const stack = error.stack || error.message;
+  // WebKit stacks can contain only frames (or just "@"). Always retain the
+  // error's message before those frames, as Chromium/Node normally do.
+  const heading = `${error.name || "Error"}: ${error.message}`;
+  const stack = error.stack?.startsWith(heading) ? error.stack : `${heading}${error.stack ? `\n${error.stack}` : ""}`;
   const causes: string[] = [];
   let cause: unknown = error.cause;
   for (let depth = 0; cause !== undefined && cause !== null && depth < 4; depth++) {
