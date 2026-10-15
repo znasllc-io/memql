@@ -95,6 +95,29 @@ function local_image_nodes_match() {
     done <<< "$nodes"
 }
 
+# One direct-mode import attempt, bounded. Direct mode feeds one `docker save`
+# stream to every node; when one node's ctr stops reading early, k3d v5.9.0
+# stops feeding the others and then waits on them forever (pkg/client/tools.go,
+# loadImageFromStream). Any second node, such as the pipeline build node, makes
+# that reachable, so an attempt that outlives LOCAL_IMAGE_IMPORT_LIMIT_SECONDS
+# (default 600) is killed and reconciled like any other failed import.
+function local_image_import_bounded() {
+    local image="$1" cluster="$2" limit="${LOCAL_IMAGE_IMPORT_LIMIT_SECONDS:-600}" pid deadline
+    k3d image import "$image" --cluster "$cluster" --mode direct >&2 &
+    pid=$!
+    deadline=$((SECONDS + limit))
+    while kill -0 "$pid" 2>/dev/null; do
+        if [[ "$SECONDS" -ge "$deadline" ]]; then
+            printf 'WARNING: k3d image import of %s did not finish within %ss; stopping it.\n' "$image" "$limit" >&2
+            kill -KILL "$pid" 2>/dev/null || true
+            wait "$pid" 2>/dev/null || true
+            return 124
+        fi
+        sleep 0.2 2>/dev/null || sleep 1
+    done
+    wait "$pid"
+}
+
 function import_local_image_verified() {
     local image="$1" cluster="$2" expected="$3" nodes after canonical attempt import_status
     local attempt
@@ -108,7 +131,7 @@ function import_local_image_verified() {
     # unpacked content for this captured image ID. Otherwise one bounded,
     # idempotent import retry may complete the same image transfer.
     for attempt in 1 2; do
-        if k3d image import "$image" --cluster "$cluster" --mode direct >&2; then
+        if local_image_import_bounded "$image" "$cluster"; then
             import_status=0
         else
             import_status=$?

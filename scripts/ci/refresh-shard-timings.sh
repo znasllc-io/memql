@@ -34,11 +34,26 @@ repo_root() {
 	cd -- "$(dirname -- "${BASH_SOURCE[0]}")/../.." && pwd
 }
 
+# gh_log_flag prints the flag `gh api` needs to print a job log, or nothing.
+# GitHub's job logs carry terminal escape sequences, and since gh 2.102
+# `gh api` refuses such a response unless --allow-escape-sequences is passed;
+# an older gh does not know the flag, so it is passed only where gh offers it.
+# The help is captured before it is matched: piped into `grep -q`, gh can die
+# of SIGPIPE and pipefail would read the match as a failure.
+gh_log_flag() {
+	local help
+	help="$(gh api --help 2>/dev/null || true)"
+	if [[ "$help" == *--allow-escape-sequences* ]]; then
+		echo "--allow-escape-sequences"
+	fi
+}
+
 # fetch_logs writes one log file per green shard job of the last $runs green
 # push runs, named <lane>-<run>-<job>.log, into $dir.
 fetch_logs() {
 	local repo="$1" runs="$2" dir="$3"
-	local run_ids run id name lane
+	local run_ids run id name lane log_flag
+	log_flag="$(gh_log_flag)"
 	run_ids="$(gh run list --repo "$repo" --workflow ci.yml --branch main --event push \
 		--status success --limit "$runs" --json databaseId --jq '.[].databaseId')"
 	if [[ -z "$run_ids" ]]; then
@@ -52,7 +67,7 @@ fetch_logs() {
 			if [[ "$name" == db-tests* ]]; then
 				lane="db"
 			fi
-			gh api "repos/$repo/actions/jobs/$id/logs" >"$dir/$lane-$run-$id.log"
+			gh api ${log_flag:+"$log_flag"} "repos/$repo/actions/jobs/$id/logs" >"$dir/$lane-$run-$id.log"
 		done < <(gh api "repos/$repo/actions/runs/$run/jobs?per_page=100" --jq \
 			'.jobs[] | select(.conclusion == "success") | select((.name | startswith("go-tests (")) or (.name | startswith("db-tests ("))) | "\(.id)\t\(.name)"')
 	done
@@ -99,7 +114,9 @@ main() {
 	cd "$(repo_root)"
 	local dir
 	dir="$(mktemp -d)"
-	trap 'rm -rf "$dir"' EXIT
+	# Expanded NOW: the EXIT trap runs after main returns, when the local is
+	# gone and `set -u` would abort on it.
+	trap "rm -rf -- '$dir'" EXIT
 
 	fetch_logs "$repo" "$runs" "$dir"
 	merge_lane go "$dir"

@@ -448,3 +448,10 @@ components:
   # overlays compose; its objects keep their explicit namespace only because
   # this overlay's namespace transformer is unsetOnly.
   - ../../components/pipelines
+  # THE 8-HOUR RUN PROFILE (design record
+  # 2026-10-11-pipelines-local-green-and-fast, section 4). The engine's own
+  # memql-package.yaml declares a 6-hour step and a 3-hour one, so a full run
+  # of it cannot finish under the 2-hour default. Composed here on purpose:
+  # this cluster runs that package. The cloud overlays keep the default until
+  # a cloud cluster runs it.
+  - ../../components/pipelines-long-runs

@@ -495,6 +495,7 @@ const (
 	CodePipelineSecretMissing              = "pipeline_secret_missing"
 	CodePipelineDisconnected               = "pipeline_disconnected"
 	CodePipelineManualRequiresDisconnected = "pipeline_manual_requires_disconnected"
+	CodePipelineBranchInvalid              = "pipeline_branch_invalid"
 	CodePipelineCheckPermissionMissing     = "pipeline_check_permission_missing"
 
 	// Skips: a step the plan or the run decided not to execute.

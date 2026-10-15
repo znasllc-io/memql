@@ -71,7 +71,7 @@ func TestEnginePortableLanesKeepHostedCommands(t *testing.T) {
 	proving, _ := engineDeclaredStep(spec, "proving")
 	for _, command := range []string{
 		"go run ./cmd/memql-bench --print-spec > .memql-proving/spec.json",
-		"go run ./cmd/memql-bench --do=gate --runner=workbench-linux-arm64 > .memql-proving/envelope.json 2> .memql-proving/gate.txt || status=$?",
+		"go run ./cmd/memql-bench --do=gate --runner=workbench-linux-amd64 > .memql-proving/envelope.json 2> .memql-proving/gate.txt || status=$?",
 		`test "$(wc -l < .memql-proving/envelope.json)" -eq 1`,
 		`jq -e '.ok == true' .memql-proving/envelope.json > /dev/null`,
 		`test "$status" -eq 0`,
@@ -172,7 +172,10 @@ func TestEngineSecurityScansDoNotTurnFindingsIntoSuccess(t *testing.T) {
 			t.Fatal(refusal)
 		}
 		wantStage := "secrets-history"
-		wantCommands := []string{"--unshallow --tags", `--head="$MEMQL_SHA"`, "python3 scripts/ci/gitleaks-history.py", "--jobs=4", "--batch-size=1", "--timeout=20700"}
+		// The history helper fetches tags and unshallows with bounded retries;
+		// its real-Git tests prove that incomplete history cannot reach scanning.
+		// Keep the manifest wired to that fetch, not just to a local inventory.
+		wantCommands := []string{`--fetch-remote="https://github.com/${MEMQL_REPOSITORY}.git"`, `--head="$MEMQL_SHA"`, "python3 scripts/ci/gitleaks-history.py", "--jobs=4", "--batch-size=1", "--timeout=20700"}
 		forbidden := "gitleaks dir ."
 		if event == pipelines.EventPullRequest {
 			wantStage = "secrets-current"
@@ -215,5 +218,11 @@ func TestEngineSecurityScansDoNotTurnFindingsIntoSuccess(t *testing.T) {
 	// its text-mode verdict until machine reports have an explicit evaluator.
 	if !strings.Contains(vuln.Run, "@v1.7.0") || !strings.Contains(vuln.Run, "govulncheck github.com/znasllc-io/memql/...") || strings.Contains(vuln.Run, "-format") || !strings.Contains(vuln.Run, `test "$status" -eq 0`) {
 		t.Fatal("Go vulnerability findings can disappear behind formatting or incomplete module coverage")
+	}
+	// govulncheck over every module holds the whole program in memory: at the
+	// namespace default (4 GiB) the kernel killed it at 4.2 GB resident (run
+	// 45f5502f, 2026-10-11), so the budget is declared, not inherited.
+	if vuln.MemoryMiB < 8192 {
+		t.Fatalf("Go vulnerability check reserves %d MiB; it was OOM-killed at the 4 GiB default", vuln.MemoryMiB)
 	}
 }

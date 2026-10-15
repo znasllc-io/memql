@@ -5,7 +5,9 @@
 # record D12). A run reads this file at its own commit; the seam
 # (component/pipelines, component/pipelinerun) compiles the pipeline: block into
 # steps. Portable steps use isolated Workbench Jobs; native host work is declared
-# explicitly in separate steps. Local ARM64 pins do not prove amd64 releases.
+# explicitly in separate steps. The package targets linux/amd64, the
+# architecture of the local build node and of AKS (design record
+# 2026-10-11-pipelines-local-green-and-fast, D9).
 #
 # The command parity gates compare the retained GitHub lanes with this package.
 # Working legacy workflows remain until equivalent local and production evidence
@@ -17,15 +19,15 @@ formatVersion: 1
 name: memql
 pipeline:
   schedule: daily
-  platform: linux/arm64
+  platform: linux/amd64
   # deploy/toolchain-image: Go 1.27.2, Node 22, protoc 33.4, kubectl 1.32.13, the
   # Docker client (no daemon), git, make, jq, python3 and the PostgreSQL client,
   # as uid 1000. Pinned by the digest build-toolchain-image.yml's run on main
-  # printed for version 1.1.0-arm64 (run 37416894805); a rebuild takes a new version
+  # printed for version 1.2.0-amd64 (run 38146575497); a rebuild takes a new version
   # and a new pin, and the manifest's test fails on any reference that is not a
   # digest of this repository. These rehearsal images are public; private
   # image access must use the Workbench registry credential contract.
-  image: ghcr.io/znasllc-io/memql-toolchain@sha256:7a457e4d96d2e7f03032a686a65d5447c3b6a78987c19d5622bdbfdc917e11fc
+  image: ghcr.io/znasllc-io/memql-toolchain@sha256:ae195dcff54b4f67eac2c5669612ba1a886f789fae1e6325adcfaab9679a7bf9
   services:
     # TimescaleDB + pgvector: the mirror ci.yml's db-tests lane runs, at the same
     # digest and with the same user, password and database (the test holds all
@@ -39,6 +41,12 @@ pipeline:
         POSTGRES_USER: memql
         POSTGRES_PASSWORD: memql_dev
         POSTGRES_DB: memql
+        # A throwaway database never waits on the disk. A build node's steps
+        # share one, and on a workstation a commit there took seconds while the
+        # tests stage built, long enough to expire a db test's read deadline.
+        # These change only what survives a crash, never what a query sees.
+        # initdb takes -c from PostgreSQL 16, which the image runs.
+        POSTGRES_INITDB_ARGS: -c fsync=off -c synchronous_commit=off -c full_page_writes=off
       # Over TCP, the way the step connects. The image's first start runs its
       # initialization on a server listening on its socket alone and then
       # restarts it, so a socket probe can pass before the server the step will
@@ -232,6 +240,10 @@ pipeline:
         - name: go-vulnerabilities
           placement: cluster
           timeout: 30m
+          # govulncheck over every module holds the whole program in memory:
+          # at the namespace default (4 GiB) the kernel killed it at 4.2 GB
+          # resident (run 45f5502f, 2026-10-11).
+          memoryMiB: 8192
           artifacts: [.memql-security/go]
           run: |
             set -eu
@@ -240,6 +252,7 @@ pipeline:
             mkdir -p .memql-security/go
             go install golang.org/x/vuln/cmd/govulncheck@v1.7.0
             govulncheck -version > .memql-security/go/scanner.txt
+            export GOMEMLIMIT=7GiB GOGC=100
             status=0
             govulncheck github.com/znasllc-io/memql/... > .memql-security/go/findings.txt 2> .memql-security/go/errors.txt || status=$?
             cat .memql-security/go/findings.txt .memql-security/go/errors.txt
@@ -287,13 +300,7 @@ pipeline:
             mkdir -p .memql-security/gitleaks
             go install github.com/zricethezav/gitleaks/v8@v8.30.1
             export GOMAXPROCS=1 GOMEMLIMIT=1GiB GOGC=100
-            if [ "$(git rev-parse --is-shallow-repository)" = true ]; then
-              git fetch --unshallow --tags "https://github.com/${MEMQL_REPOSITORY}.git" "$MEMQL_SHA"
-            else
-              git fetch --tags "https://github.com/${MEMQL_REPOSITORY}.git" "$MEMQL_SHA"
-            fi
-            test "$(git rev-parse HEAD)" = "$MEMQL_SHA"
-            python3 scripts/ci/gitleaks-history.py --head="$MEMQL_SHA" --gitleaks="$(command -v gitleaks)" --output-dir=.memql-security/gitleaks --jobs=4 --batch-size=1 --timeout=20700
+            python3 scripts/ci/gitleaks-history.py --head="$MEMQL_SHA" --fetch-remote="https://github.com/${MEMQL_REPOSITORY}.git" --gitleaks="$(command -v gitleaks)" --output-dir=.memql-security/gitleaks --jobs=4 --batch-size=1 --timeout=20700
     - name: tests
       steps:
         # ci.yml go-tests: every package outside the db-gated trees that the
@@ -420,7 +427,7 @@ pipeline:
             test "$(wc -l < .memql-proving/spec.json)" -eq 1
             jq -e '.capability == "bench.run" and (.params | length) > 0' .memql-proving/spec.json > /dev/null
             status=0
-            go run ./cmd/memql-bench --do=gate --runner=workbench-linux-arm64 > .memql-proving/envelope.json 2> .memql-proving/gate.txt || status=$?
+            go run ./cmd/memql-bench --do=gate --runner=workbench-linux-amd64 > .memql-proving/envelope.json 2> .memql-proving/gate.txt || status=$?
             cat .memql-proving/gate.txt
             test "$(wc -l < .memql-proving/envelope.json)" -eq 1
             jq -e '.ok == true' .memql-proving/envelope.json > /dev/null

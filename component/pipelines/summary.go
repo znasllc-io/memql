@@ -71,6 +71,7 @@ var refusalTitles = map[string]string{
 	CodeForkRefused:                "pull request from a fork",
 	CodeDisconnected:               "pipeline disconnected",
 	CodeManualRequiresDisconnected: "automatic delivery still connected",
+	CodeBranchInvalid:              "branch name not accepted",
 	CodeAlreadyConnected:           "repository already has a pipeline",
 	CodeNothingToRerun:             "nothing failed to re-run",
 }
@@ -96,6 +97,7 @@ var refusalRemedies = map[string]string{
 	CodeForkRefused:                "Checks run only on branches in this repository. Push the branch here to run them.",
 	CodeDisconnected:               "Reconnect the pipeline in MemQL OS to run checks again.",
 	CodeManualRequiresDisconnected: "Disconnect automatic delivery in MemQL OS before starting a manual rehearsal.",
+	CodeBranchInvalid:              "Name the branch as GitHub shows it, such as main or feature/login.",
 	CodeAlreadyConnected:           "Disconnect the pipeline the other source holds, or work from that source.",
 	CodeNothingToRerun:             "Re-run the whole run in MemQL OS instead.",
 }

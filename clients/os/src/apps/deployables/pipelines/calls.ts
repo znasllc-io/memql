@@ -81,8 +81,10 @@ export async function disconnectPipeline(query: QueryClient, pipelineId: string)
   await query.pipelinesDisconnect({ pipelineId });
 }
 
-export async function runLatestPipeline(query: QueryClient, pipelineId: string): Promise<{ runId: string; sha: string; branch: string }> {
-  const result = await query.pipelinesRunLatest({ pipelineId });
+/** Run a branch's newest commit; a blank branch is the repository's default. */
+export async function runLatestPipeline(query: QueryClient, pipelineId: string, branch = ""): Promise<{ runId: string; sha: string; branch: string }> {
+  const named = branch.trim();
+  const result = await query.pipelinesRunLatest(named === "" ? { pipelineId } : { pipelineId, branch: named });
   const row = firstRow(result);
   return { runId: row ? rowString(row, "runId") : "", sha: rowString(row ?? {}, "sha"), branch: rowString(row ?? {}, "branch") };
 }

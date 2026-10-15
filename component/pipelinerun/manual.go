@@ -12,7 +12,7 @@ import (
 
 // handleRunLatest is the owner-facing entry for an on-demand local rehearsal.
 func (i *Integration) handleRunLatest(ctx context.Context, args map[string]any, _ int) ([]memorynodes.MemoryNode, error) {
-	run, err := i.RunLatest(handlerContext(ctx), stringArg(args, "pipelineId"))
+	run, err := i.RunLatest(handlerContext(ctx), stringArg(args, "pipelineId"), stringArg(args, "branch"))
 	if err != nil {
 		return nil, err
 	}
@@ -25,11 +25,13 @@ func (i *Integration) handleRunLatest(ctx context.Context, args map[string]any, 
 	}), nil
 }
 
-// RunLatest opens a full manual rehearsal of the current default-branch head.
+// RunLatest opens a full manual rehearsal of a branch head: the named branch
+// of the pipeline's repository, or its default branch when branch is empty.
 // Automatic delivery must already be disconnected, so a local run cannot
-// duplicate a webhook or poll run. The source's owner's GitHub grant is used
-// to read and check the exact commit; the commit is pinned in the run row.
-func (i *Integration) RunLatest(ctx context.Context, pipelineID string) (Run, error) {
+// duplicate a webhook or poll run. A name GitHub would not accept is refused
+// before any request leaves the cluster. The source's owner's GitHub grant is
+// used to read and check the exact commit; the commit is pinned in the run row.
+func (i *Integration) RunLatest(ctx context.Context, pipelineID, branch string) (Run, error) {
 	if _, err := personFrom(ctx); err != nil {
 		return Run{}, err
 	}
@@ -43,6 +45,9 @@ func (i *Integration) RunLatest(ctx context.Context, pipelineID string) (Run, er
 	pipelineID = strings.TrimSpace(pipelineID)
 	if pipelineID == "" {
 		return Run{}, fmt.Errorf("pipelines: pipelineId is required")
+	}
+	if branch != "" && !pipelines.ValidBranchName(branch) {
+		return Run{}, pipelines.Refuse(pipelines.CodeBranchInvalid, "", "%q is not a branch name GitHub accepts", branch)
 	}
 	// Owner-scoped first: a stranger resolves no row and makes no GitHub call.
 	p, err := d.Store.PipelineForOwner(ctx, pipelineID)
@@ -70,9 +75,11 @@ func (i *Integration) RunLatest(ctx context.Context, pipelineID string) (Run, er
 	if err != nil {
 		return Run{}, fmt.Errorf("pipelines: reading %s: %w", p.Repository, err)
 	}
-	branch := strings.TrimSpace(info.DefaultBranch)
 	if branch == "" {
-		return Run{}, fmt.Errorf("pipelines: GitHub names no default branch for %s", p.Repository)
+		branch = strings.TrimSpace(info.DefaultBranch)
+		if branch == "" {
+			return Run{}, fmt.Errorf("pipelines: GitHub names no default branch for %s", p.Repository)
+		}
 	}
 	sha, title, err := d.GitHub.BranchHead(ctx, token, p.Repository, branch)
 	if err != nil {

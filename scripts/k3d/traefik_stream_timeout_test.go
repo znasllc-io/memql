@@ -34,6 +34,7 @@ exit 0
 source "$TRAEFIK_DRIVER"
 check_prerequisites(){ :; }
 create_cluster(){ :; }
+ensure_build_node(){ :; }
 install_argocd(){ exit 0; }
 ensure_db_image(){ :; }
 prewarm_build_frontend(){ :; }

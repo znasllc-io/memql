@@ -1863,16 +1863,16 @@ jobs:
   # adding the TestMain without the tree fails the gate.
   db-tests:
     name: db-tests (${{ matrix.name }})
-    # 40, not the 20 the 2026-08-06 audit sized against a 5.8-minute lane: the
-    # unsharded lane's measured median was 19.4 min (13 successful runs on main
-    # and PRs, 2026-09-13, spread 15.3-19.9 by runner), and two runs -- one of
-    # them a push to main -- were cancelled AT 20 having never failed a test.
-    # scripts/ci/workflow_timeout_test.go holds every timeout to at least 2x its
-    # lane's RECORDED median, which is still that unsharded one; each shard is
-    # far shorter, so move the median (and then this cap) only once a week of
-    # sharded runs has measured it. This bounds a HANG. The per-package budgets
-    # in the planner's class table bound the tests, and they are unchanged.
-    timeout-minutes: 40
+    # 25: the smallest multiple of 5 that is at least 3x the sharded lane's
+    # measured median and 1.5x its maximum. The week of 2026-10-04 to 10-10
+    # (212 Go-touching pull-request runs, memql#5697, scripts/ci/prtiming) put
+    # each run's slowest db-tests shard at a median of 7.4 min and a maximum of
+    # 12.0. The unsharded lane's 19.4-minute median, which held this cap at 40,
+    # predates the shards. scripts/ci/workflow_timeout_test.go holds every
+    # timeout to at least 2x its lane's RECORDED median. This bounds a HANG. The
+    # per-package budgets in the planner's class table bound the tests, and
+    # they are unchanged.
+    timeout-minutes: 25
     needs: [changes, plan]
     if: ${{ github.event_name != 'pull_request' || needs.plan.outputs.db_count != '0' }}
     runs-on: ubuntu-latest

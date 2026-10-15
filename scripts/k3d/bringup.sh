@@ -66,6 +66,9 @@ cap_spec_param "namespace"       "k8s namespace"
 cap_spec_param "revision"        "git revision for the ArgoCD Application"
 cap_spec_param "servers"         "k3d server node count"
 cap_spec_param "agents"          "k3d agent node count"
+cap_spec_param "no-build-node"   "do not create the dedicated pipeline build node (flag, forwarded to up.sh)"
+cap_spec_param "build-node-cpus" "CPUs the build node may use (forwarded to up.sh)"
+cap_spec_param "build-node-memory" "memory the build node may use, such as 40g (forwarded to up.sh)"
 cap_spec_param "clean"           "tear down the cluster first (clean slate, fresh DB) (flag)"
 cap_spec_param "no-secrets"      "skip secret seeding (flag)"
 cap_spec_param "repo-url"        "git repo URL for the ArgoCD Application (downstream repos pass their own)"
@@ -86,6 +89,9 @@ CLUSTER_NAME="${CLUSTER:-${MEMQL_K3D_CLUSTER:-memql}}"
 NAMESPACE="${NAMESPACE:-${MEMQL_K3D_NAMESPACE:-memql}}"
 SERVERS="${SERVERS:-}"
 AGENTS="${AGENTS:-}"
+NO_BUILD_NODE=""
+BUILD_NODE_CPUS="${BUILD_NODE_CPUS:-}"
+BUILD_NODE_MEMORY="${BUILD_NODE_MEMORY:-}"
 REVISION="${REVISION:-}"
 CLEAN=""
 NO_SECRETS=""
@@ -156,6 +162,9 @@ function bringup() {
         ${REVISION:+--revision="${REVISION}"} \
         ${SERVERS:+--servers="${SERVERS}"} \
         ${AGENTS:+--agents="${AGENTS}"} \
+        ${NO_BUILD_NODE:+--no-build-node} \
+        ${BUILD_NODE_CPUS:+--build-node-cpus="${BUILD_NODE_CPUS}"} \
+        ${BUILD_NODE_MEMORY:+--build-node-memory="${BUILD_NODE_MEMORY}"} \
         ${REPO_URL:+--repo-url="${REPO_URL}"} \
         ${APP_NAME:+--app-name="${APP_NAME}"} \
         ${OVERLAY_PATH:+--overlay-path="${OVERLAY_PATH}"} \
@@ -448,6 +457,9 @@ function main() {
     REVISION="$(cap_param revision "$REVISION")"
     SERVERS="$(cap_param servers "$SERVERS")"
     AGENTS="$(cap_param agents "$AGENTS")"
+    NO_BUILD_NODE="$(cap_flag no-build-node)"
+    BUILD_NODE_CPUS="$(cap_param build-node-cpus "$BUILD_NODE_CPUS")"
+    BUILD_NODE_MEMORY="$(cap_param build-node-memory "$BUILD_NODE_MEMORY")"
     CLEAN="$(cap_flag clean)"
     NO_SECRETS="$(cap_flag no-secrets)"
     REPO_URL="$(cap_param repo-url "${MEMQL_K3D_REPO_URL:-}")"

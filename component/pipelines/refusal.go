@@ -74,6 +74,9 @@ const (
 	CodeSecretMissing              = "pipeline_secret_missing"
 	CodeDisconnected               = "pipeline_disconnected"
 	CodeManualRequiresDisconnected = "pipeline_manual_requires_disconnected"
+	// CodeBranchInvalid: a manual run named a branch GitHub would not accept
+	// (ValidBranchName). Refused before any request leaves the cluster.
+	CodeBranchInvalid = "pipeline_branch_invalid"
 	// One pipeline per repository: a second source connecting a repository
 	// another source already runs would write a second, same-named check
 	// run on every commit.
@@ -174,6 +177,7 @@ var codeClasses = map[string]Class{
 	CodeForkRefused:                ClassRefusal,
 	CodeDisconnected:               ClassRefusal,
 	CodeManualRequiresDisconnected: ClassRefusal,
+	CodeBranchInvalid:              ClassRefusal,
 	CodeAlreadyConnected:           ClassRefusal,
 	CodeNothingToRerun:             ClassRefusal,
 

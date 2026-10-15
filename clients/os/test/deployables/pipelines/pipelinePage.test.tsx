@@ -1,4 +1,5 @@
-import { render, screen, waitFor, within } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import type { Row } from "@znasllc-io/memql-sdk-core/client";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { readTheBar } from "../../readTheBar";
 
@@ -13,6 +14,7 @@ import { LocalDeployablesSettingsStore } from "../../../src/apps/deployables/set
 import { PIPELINE_CONCEPT, RUN_CONCEPT } from "../../../src/apps/deployables/pipelines/rows";
 import { formatMoment } from "../../../src/kit/format";
 import { click, emit, fakeConnection, siteRow, withSession, type FakeConnection, type FakeSeed } from "../harness";
+import { chooseOption, openSelect } from "../../selectControl";
 import { PACKAGE_ID, VIEWER, minutesAgo, packageRow, pipelineRow, runRow } from "./fixtures";
 
 // Pipeline settings (epic memql#5479, D14; issue memql#5501): a source's
@@ -140,7 +142,8 @@ describe("pipeline settings", () => {
     // It arrives on the feed, and the page reads it.
     await emit(connection, PIPELINE_CONCEPT, pipelineRow({ status: "disconnected" }));
     await waitFor(() => expect(bar().word).toBe("Disconnected"));
-    expect(bar().acts).toEqual(["Run latest", "Connect again"]);
+    // Primary last (DESIGN.md rule 12), the two ways to run side by side.
+    expect(bar().acts).toEqual(["Connect again", "Other branch", "Run latest"]);
     expect(bar().buttons).toEqual(["Run latest"]);
   });
 
@@ -179,6 +182,92 @@ describe("pipeline settings", () => {
     // The live collection applies the owner's read scope to graph events too.
     await emit(connection, RUN_CONCEPT, runRow({ id: "run-manual", ownerUserId: VIEWER, event: "manual", trigger: "manual", headBranch: "main", status: "queued" }), "NODE_CREATED");
     await waitFor(() => expect(screen.getByRole("region", { name: "Run Show the cart" })).toBeTruthy());
+  });
+
+  it("runs another branch, chosen from the repository's branches", async () => {
+    const connection = fakeConnection(seed({
+      pipelines: [pipelineRow({ status: "disconnected" })],
+      sourceProbe: { "cred-1": { reachable: true, defaultBranch: "main", branches: ["main", "feature/cart"] } as unknown as Row },
+      pipelinesRunLatestResult: { runId: "run-branch", sha: "9a8b7c6d5e4f3a2b1c0d9e8f7a6b5c4d3e2f1a0b", branch: "feature/cart" } as unknown as Row,
+    }));
+    mount(connection);
+    await openSettings();
+    await click(screen.getByRole("button", { name: "Other branch" }));
+    expect(bar().word).toBe("Run a branch");
+    expect(bar().detail).toBe("Runs its newest commit.");
+    expect(bar().acts).toEqual(["Cancel"]);
+    const trigger = await screen.findByLabelText("Branch to run");
+    // The branches are read under the source's own GitHub grant.
+    expect(connection.callsNamed("sourceProbe")).toEqual(['builtin sourceProbe(repoUrl: "https://github.com/acme/shop", credentialId: "cred-1")']);
+    await waitFor(() => expect(document.activeElement).toBe(trigger));
+    // The default branch is Run latest's; the list offers the others.
+    expect(within(openSelect(trigger)).queryByRole("option", { name: "main" })).toBeNull();
+    // Escape closes the open list, not the choice.
+    fireEvent.keyDown(trigger, { key: "Escape" });
+    expect(trigger.getAttribute("aria-expanded")).toBe("false");
+    expect(bar().word).toBe("Run a branch");
+    chooseOption(trigger, "feature/cart");
+    await waitFor(() => expect(bar().acts).toEqual(["Cancel", "Run"]));
+    expect(bar().buttons).toEqual(["Run"]);
+    await readTheBar();
+    await click(screen.getByRole("button", { name: "Run" }));
+    expect(connection.callsNamed("pipelinesRunLatest")).toEqual(['builtin pipelinesRunLatest(pipelineId: "pl-shop", branch: "feature/cart")']);
+    await waitFor(() => expect(bar().word).toBe("Manual run queued"));
+    expect(bar().detail).toBe("feature/cart · 9a8b7c6");
+    expect(screen.queryByLabelText("Branch to run")).toBeNull();
+  });
+
+  it("takes a typed branch when the repository lists none, and sends nothing for a blank one", async () => {
+    const connection = fakeConnection(seed({
+      pipelines: [pipelineRow({ status: "disconnected" })],
+      sourceProbe: { "cred-1": { reachable: true, defaultBranch: "main", branches: [] } as unknown as Row },
+    }));
+    mount(connection);
+    await openSettings();
+    await click(screen.getByRole("button", { name: "Other branch" }));
+    const field = await screen.findByLabelText("Branch to run");
+    await waitFor(() => expect(document.activeElement).toBe(field));
+    fireEvent.change(field, { target: { value: "   " } });
+    expect(bar().acts).toEqual(["Cancel"]);
+    fireEvent.keyDown(field, { key: "Enter" });
+    expect(connection.callsNamed("pipelinesRunLatest")).toEqual([]);
+    fireEvent.change(field, { target: { value: "feature/typed" } });
+    fireEvent.keyDown(field, { key: "Enter" });
+    await waitFor(() => expect(connection.callsNamed("pipelinesRunLatest")).toEqual(['builtin pipelinesRunLatest(pipelineId: "pl-shop", branch: "feature/typed")']));
+  });
+
+  it("cancels without a call, by Cancel or by Escape", async () => {
+    const connection = fakeConnection(seed({ pipelines: [pipelineRow({ status: "disconnected" })] }));
+    mount(connection);
+    await openSettings();
+    await click(screen.getByRole("button", { name: "Other branch" }));
+    await readTheBar();
+    await click(screen.getByRole("button", { name: "Cancel" }));
+    expect(bar().word).toBe("Disconnected");
+    expect(screen.queryByLabelText("Branch to run")).toBeNull();
+    await readTheBar();
+    await click(screen.getByRole("button", { name: "Other branch" }));
+    fireEvent.keyDown(await screen.findByLabelText("Branch to run"), { key: "Escape" });
+    await waitFor(() => expect(bar().word).toBe("Disconnected"));
+    expect(connection.callsNamed("pipelinesRunLatest")).toEqual([]);
+  });
+
+  it("keeps the typed name and says why when the branch is refused", async () => {
+    const connection = fakeConnection(seed({
+      pipelines: [pipelineRow({ status: "disconnected" })],
+      sourceProbe: { "cred-1": { reachable: true, defaultBranch: "main", branches: [] } as unknown as Row },
+      pipelinesRunLatestError: 'pipeline_branch_invalid: "a..b" is not a branch name GitHub accepts',
+    }));
+    mount(connection);
+    const page = await openSettings();
+    await click(screen.getByRole("button", { name: "Other branch" }));
+    const field = await screen.findByLabelText("Branch to run");
+    fireEvent.change(field, { target: { value: "a..b" } });
+    await readTheBar();
+    await click(screen.getByRole("button", { name: "Run" }));
+    expect(await within(page).findByText("That is not a branch name GitHub accepts")).toBeTruthy();
+    expect((screen.getByLabelText("Branch to run") as HTMLInputElement).value).toBe("a..b");
+    expect(bar().word).toBe("Run a branch");
   });
 
   it("opens the connect flow over the source for Change, and goes back to the source", async () => {

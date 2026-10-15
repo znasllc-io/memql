@@ -679,6 +679,48 @@ under 7 minutes for a week) needs those packages made cheaper, by the rule
 this file and `ci.yml` already state: split by CONCERN, never by `-run`. The
 week of measurement against section 1's numbers is tracked as its own issue.
 
+### The M0 measurement (2026-10-11, memql#5697)
+
+Measured with `go run ./scripts/ci/prtiming --since=2026-10-04 --until=2026-10-10`
+over every green pull-request `ci.yml` run in that week: 244 runs, 212 of them
+Go-touching (a `go-tests` or `db-tests` shard ran). Medians and the middle half,
+never a best case.
+
+| Clock (Go-touching runs) | Median | Middle half |
+|---|---:|---|
+| The run's creation to `ci-required`'s completion (**T**) | 10.2 min | 8.3 to 11.5 min |
+| The first job's start to `ci-required`'s completion | 9.8 min | 8.1 to 11.1 min |
+
+| Plan | Runs | Median (creation clock) |
+|---|---:|---:|
+| affected | 156 | 9.6 min |
+| full | 56 | 11.0 min |
+
+Affected plans selected a median of 112 packages: narrowing is real but small,
+as predicted above. The critical path is the slowest lanes, each a median of:
+`db-tests (memql-1)` 8.6 min, `os-checks` 8.4 min, `go-checks` 7.4 min. The
+slowest `db-tests` shard per run has a median of 7.4 min and a maximum of
+12.0 min; `scripts/ci/workflow_timeout_test.go` now records that median and the
+lane's cap moved from 40 to 25 minutes (3x the median, 2x the maximum).
+
+**M0 is not met**: a Go-touching pull request takes 10.2 minutes, not under 7,
+and `component/memql` alone holds a shard above 8. The next step is the one
+stated above, splitting the heaviest packages by concern.
+
+**T is the target of the local green-and-fast design record**
+(`docs/superpowers/specs/2026-10-11-pipelines-local-green-and-fast-design.md`,
+D2): a MemQL pull-request run is fast when its median is at most T, on the same
+creation clock.
+
+**The Go cache works as designed.** `main` writes one `go-v1-*` key a day per
+`go.sum` hash (two on 2026-10-11, 1.3 and 1.5 GiB, because a Go bump landed that
+day), and a pull request's shards restore it: `go-tests (default-1)` of run
+38140927594 hit the day's key and restored it in about 30 seconds.
+
+`scripts/ci/shard-timings.tsv` was refreshed from the last five green push runs
+(163 go-lane and 77 db-lane packages); the seeded table came from the unsharded
+lanes, so most packages measure lower (`component/memql` 496 s to 367 s).
+
 ---
 
 ## Sequencing

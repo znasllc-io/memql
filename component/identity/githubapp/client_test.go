@@ -11,8 +11,10 @@ import (
 	"encoding/json"
 	"encoding/pem"
 	"errors"
+	"fmt"
 	"io"
 	"net/http"
+	"strconv"
 	"strings"
 	"sync"
 	"testing"
@@ -495,6 +497,75 @@ func TestA401UnderAUserTokenIsReauthorize(t *testing.T) {
 		t.Errorf("a 404 must not read as a dead authorization: %v", err)
 	} else if StatusOf(err) != http.StatusNotFound {
 		t.Errorf("want a 404 status, got %v", err)
+	}
+}
+
+// branchPages answers a branches route from names the way GitHub does: sorted
+// as given, per_page and page in the query, a short or empty page past the
+// end.
+func branchPages(names []string) hubHandler {
+	return func(r *http.Request) (int, string) {
+		per, _ := strconv.Atoi(r.URL.Query().Get("per_page"))
+		page, _ := strconv.Atoi(r.URL.Query().Get("page"))
+		if per < 1 {
+			per = 30
+		}
+		if page < 1 {
+			page = 1
+		}
+		lo := min((page-1)*per, len(names))
+		hi := min(lo+per, len(names))
+		rows := make([]map[string]string, 0, hi-lo)
+		for _, name := range names[lo:hi] {
+			rows = append(rows, map[string]string{"name": name})
+		}
+		body, _ := json.Marshal(rows)
+		return http.StatusOK, string(body)
+	}
+}
+
+// GitHub answers a repository's branches a page at a time, sorted by name. A
+// list that stops at the first page drops every branch sorting after it -- on
+// the Other branch picker, possibly the very branch a person came to run.
+func TestBranchesFollowsEveryPage(t *testing.T) {
+	names := make([]string, 0, 130)
+	for i := range 130 {
+		names = append(names, fmt.Sprintf("feature/b%03d", i))
+	}
+	now := time.Now().UTC()
+	hub := newHub().on("/repos/acme/widget/branches", branchPages(names))
+	c := testClient(t, hub, &now)
+	got, err := c.Branches(context.Background(), "ghu_LIVE", "acme", "widget")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != len(names) || got[len(got)-1] != names[len(names)-1] {
+		t.Fatalf("got %d branches ending %q, want all %d ending %q", len(got), got[len(got)-1], len(names), names[len(names)-1])
+	}
+	if n := hub.hits("/repos/acme/widget/branches"); n != 2 {
+		t.Errorf("%d page requests for 130 branches, want 2", n)
+	}
+}
+
+// A repository that keeps answering full pages is read to the bound, not
+// without end.
+func TestBranchesStopsAtThePageBound(t *testing.T) {
+	names := make([]string, 0, (BranchPagesMax+2)*RepositoriesPerPage)
+	for i := range cap(names) {
+		names = append(names, fmt.Sprintf("b%05d", i))
+	}
+	now := time.Now().UTC()
+	hub := newHub().on("/repos/acme/widget/branches", branchPages(names))
+	c := testClient(t, hub, &now)
+	got, err := c.Branches(context.Background(), "ghu_LIVE", "acme", "widget")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if n := hub.hits("/repos/acme/widget/branches"); n != BranchPagesMax {
+		t.Errorf("%d page requests, want the bound %d", n, BranchPagesMax)
+	}
+	if len(got) != BranchPagesMax*RepositoriesPerPage {
+		t.Errorf("got %d branches, want %d", len(got), BranchPagesMax*RepositoriesPerPage)
 	}
 }
 

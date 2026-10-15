@@ -673,3 +673,16 @@ decided where this record left a choice open. The operator's account is
   and the open stop is drawn as a selection apart from its state and from focus.
   They are read from the step rows -- the run row's stage table moves only at
   stage boundaries -- and fall back to the table when no step rows exist.
+
+## 11. Next phase
+
+Recorded 2026-10-11. The program's next phase narrows to continuous
+integration and has its own record,
+[2026-10-11-pipelines-local-green-and-fast-design.md](2026-10-11-pipelines-local-green-and-fast-design.md)
+(epic #6011 under #5480): the engine's own `memql-package.yaml` passes every
+stage on a local cluster with a dedicated build node, then reports a
+non-required `MemQL / memql` check on every pull request and main push, the
+Actions scan workflows retire, and a pull-request run is brought to the Actions
+baseline (T = 10.2 minutes, measured in `docs/internal/ops/ci-design.md`, D6)
+or faster. Where that record and this one conflict for CI, that record wins;
+release candidates and installation updates stay as written here.

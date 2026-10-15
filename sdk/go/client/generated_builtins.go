@@ -4717,10 +4717,12 @@ func PipelinesRerunBuild(args PipelinesRerunArgs) string {
 	return b.String()
 }
 
-// PipelinesRunLatest -- Start a full manual rehearsal of the current default-branch head for one of the caller's disconnected pipelines. Automatic delivery must be disconnected so this run cannot duplicate a webhook or poll. The source owner's GitHub grant reads the branch and the exact SHA is pinned in the run. The sealed workflow includes stages with no `on` list and stages explicitly marked `on: [manual]`; it does not treat manual as push or release, so future publication steps remain opted out. Repeated requests for the same head resolve to the existing attempt; re-run that attempt to start another.
+// PipelinesRunLatest -- Start a full manual rehearsal of a branch head for one of the caller's disconnected pipelines: the branch named, or the repository's default branch when none is. Automatic delivery must be disconnected so this run cannot duplicate a webhook or poll. The source owner's GitHub grant reads the branch, the exact SHA is pinned in the run, and the run writes its check run on that commit. A name GitHub would not accept is refused pipeline_branch_invalid before GitHub is asked. The sealed workflow includes stages with no `on` list and stages explicitly marked `on: [manual]`; it does not treat manual as push or release, so future publication steps remain opted out. Repeated requests for the same head resolve to the existing attempt, whichever branch named it; re-run that attempt to start another.
 type PipelinesRunLatestArgs struct {
 	// The caller's v1:pipelines:pipeline. It must be disconnected.
 	PipelineId string
+	// A branch of the same repository, named as GitHub shows it (main, feature/login). Absent or empty runs the default branch.
+	Branch string
 }
 
 // PipelinesRunLatest calls the engine builtin pipelinesRunLatest.
@@ -4734,6 +4736,13 @@ func PipelinesRunLatestBuild(args PipelinesRunLatestArgs) string {
 	b.WriteString("builtin pipelinesRunLatest(")
 	b.WriteString("pipelineId: ")
 	b.WriteString(quoteMemQL(args.PipelineId))
+	if args.Branch != "" {
+		if b.Len() > 27 {
+			b.WriteString(", ")
+		}
+		b.WriteString("branch: ")
+		b.WriteString(quoteMemQL(args.Branch))
+	}
 	b.WriteString(")")
 	return b.String()
 }

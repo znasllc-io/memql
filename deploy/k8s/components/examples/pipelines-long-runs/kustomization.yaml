@@ -1,7 +1,10 @@
-# Renderable example only; installed instance overlays remain unchanged.
+# Renderable example only; installed instance overlays remain unchanged. It
+# shows a CLOUD install opting into the 8-hour run profile: the local overlay
+# composes the profile itself (it runs the engine's own package, whose longest
+# step is 6 hours), so the example builds on the cloud overlay, which does not.
 apiVersion: kustomize.config.k8s.io/v1beta1
 kind: Kustomization
 resources:
-  - ../../../overlays/local
+  - ../../../overlays/cloud
 components:
   - ../../pipelines-long-runs

@@ -203,6 +203,36 @@ following in order:
 environment repaves from scratch. It is idempotent and honors the same
 `SERVERS`/`AGENTS`/`REVISION` overrides as `make up`.
 
+### The pipeline build node
+
+`make up` also creates one more k3d agent, `k3d-<cluster>-build-0`, for
+pipeline steps only: it is labelled and tainted
+`memql.io/pipeline-pool=builds`, so no serving pod lands on it, and the local
+overlay pins every step Job and isolation probe to that pool. Its container is
+capped at two thirds of the Docker host's CPUs and memory by default (at least
+2 CPUs and 4g), or what you pass.
+
+These caps do not isolate disk I/O: all k3d nodes still share the Docker host's
+storage. The local overlay allows two pipeline Jobs at once to limit concurrent
+writes. Before raising that ceiling, verify cold-cache builds while monitoring
+the serving cluster's storage latency and node restarts; warm-cache passes alone
+do not establish that the host can sustain the larger workload.
+
+```bash
+make up BUILD_NODE_CPUS=16 BUILD_NODE_MEMORY=40g   # explicit caps
+make up NO_BUILD_NODE=1                             # no build node; steps then wait
+```
+
+An existing cluster gains the node on its next `make up`. A value larger than
+the Docker host is refused before anything is created. On an existing node,
+`make up` applies a new CPU cap in place, but k3d sets memory only when it
+creates the node: `make up` reports the memory the node has, and when you
+asked for another it names the repair (`k3d node delete
+k3d-<cluster>-build-0`, then `make up` again). If the pipelines cache was bound
+to another node before the build node existed, `make up` says so and prints
+the repair: delete the `memql-pipelines-cache` claim, which holds only caches,
+and Argo CD recreates it on the build node.
+
 ## Choosing a domain
 
 The cluster is served at `memql.localhost` by default -- an RFC 6761 loopback

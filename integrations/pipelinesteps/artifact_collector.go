@@ -11,6 +11,7 @@ import (
 	"strings"
 
 	pl "github.com/znasllc-io/memql/component/pipelines"
+	"github.com/znasllc-io/memql/core/id"
 )
 
 const (
@@ -240,11 +241,25 @@ func (f stepFiles) storeVerifiedArtifact(ctx context.Context, file SnapshotFile,
 	}
 	r := got.Receipt
 	if r == nil || got.FileID == "" || r.FileID != got.FileID || !pl.ValidArtifactIntentIDs([]string{r.IntentID}) ||
-		r.OwnerUserID != f.run.OwnerUserID || r.WorkRunID != f.run.WorkRunID || r.StepKey != f.run.StepKey || r.Attempt != f.run.Attempt ||
+		!sameNodeID(r.OwnerUserID, f.run.OwnerUserID) || !sameNodeID(r.WorkRunID, f.run.WorkRunID) || r.StepKey != f.run.StepKey || r.Attempt != f.run.Attempt ||
 		r.Path != file.Path || r.Size != file.Size || r.SHA256 != file.SHA256 || r.Container == "" || r.Object == "" || r.URL == "" || r.ETag == "" {
 		return StoredFile{}, errors.New("artifact storage returned no matching verified receipt")
 	}
 	return got, nil
+}
+
+// sameNodeID is one node in either spelling. The Library keys a receipt by
+// the bare id, and a request may carry the canonical one: the owner, read off
+// the pipeline row, arrives as v1:identity:user:<id> (run b304c28a lost a
+// stored, verified report to the spelling alone).
+func sameNodeID(a, b string) bool { return bareNodeID(a) == bareNodeID(b) }
+
+func bareNodeID(v string) string {
+	v = strings.TrimSpace(v)
+	if _, short, err := id.ParseNodeId(v); err == nil && short != "" {
+		return short
+	}
+	return v
 }
 
 func sameCollectorSpec(a, b *Container) bool {

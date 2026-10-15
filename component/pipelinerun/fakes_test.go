@@ -1418,10 +1418,15 @@ type fakeWork struct {
 	runs  map[string]map[string]any
 	steps map[string]map[string]any
 	// refuse fails every call, as an engine that refuses the writes would;
-	// refuseCall fails only the calls to one mutation, with refuseErr.
-	refuse     error
-	refuseCall string
-	refuseErr  error
+	// refuseCall fails only the calls to one mutation, with refuseErr --
+	// every one, or only the first refuseTimes when that is set. onRefuse
+	// runs at each refusal, as whatever moved the row under the write would.
+	refuse      error
+	refuseCall  string
+	refuseErr   error
+	refuseTimes int
+	refused     int
+	onRefuse    func()
 }
 
 // journalCall is one write the journal made.
@@ -1456,7 +1461,11 @@ func (w *fakeWork) Execute(ctx context.Context, query string) (any, error) {
 	if w.refuse != nil {
 		return nil, w.refuse
 	}
-	if w.refuseErr != nil && fn.Name == w.refuseCall {
+	if w.refuseErr != nil && fn.Name == w.refuseCall && (w.refuseTimes == 0 || w.refused < w.refuseTimes) {
+		w.refused++
+		if w.onRefuse != nil {
+			w.onRefuse()
+		}
 		return nil, w.refuseErr
 	}
 	w.calls = append(w.calls, journalCall{

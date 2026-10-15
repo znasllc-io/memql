@@ -15,7 +15,7 @@ func TestRunLatestPinsTheDisconnectedPipelinesCurrentDefaultHead(t *testing.T) {
 	h.github.repos[repoName] = githubapp.RepositoryInfo{FullName: "acme/shop", DefaultBranch: "trunk"}
 	h.github.heads[repoName+"@trunk"] = headAnswer{SHA: shaA, Message: "Rehearse this commit\nbody"}
 
-	got, err := h.integ.RunLatest(personCtx(ownerID), p.ID)
+	got, err := h.integ.RunLatest(personCtx(ownerID), p.ID, "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -30,7 +30,7 @@ func TestRunLatestPinsTheDisconnectedPipelinesCurrentDefaultHead(t *testing.T) {
 
 	// A double click or a lost UI response resolves to the same attempt and
 	// cannot leave two check runs on one commit.
-	again, err := h.integ.RunLatest(personCtx(ownerID), p.ID)
+	again, err := h.integ.RunLatest(personCtx(ownerID), p.ID, "")
 	if err != nil || again.ID != got.ID || len(h.github.created) != 1 {
 		t.Fatalf("repeated manual request = %+v, checks %d, error %v", again, len(h.github.created), err)
 	}
@@ -52,7 +52,7 @@ func TestRunLatestRequiresOwnerAndDisconnectedPipeline(t *testing.T) {
 		p := testPipeline(DeliveryWebhook)
 		p.Status = PipelineDisconnected
 		h.store.addPipeline(p)
-		if _, err := h.integ.RunLatest(personCtx(otherID), p.ID); err == nil {
+		if _, err := h.integ.RunLatest(personCtx(otherID), p.ID, ""); err == nil {
 			t.Fatal("another owner's pipeline was not refused")
 		}
 		if len(h.github.tokenMints) != 0 || len(h.github.created) != 0 {
@@ -64,7 +64,7 @@ func TestRunLatestRequiresOwnerAndDisconnectedPipeline(t *testing.T) {
 		h := newHarness(t)
 		p := testPipeline(DeliveryWebhook)
 		h.store.addPipeline(p)
-		if _, err := h.integ.RunLatest(personCtx(ownerID), p.ID); refusalCode(err) != pipelines.CodeManualRequiresDisconnected {
+		if _, err := h.integ.RunLatest(personCtx(ownerID), p.ID, ""); refusalCode(err) != pipelines.CodeManualRequiresDisconnected {
 			t.Fatalf("active pipeline refusal = %v", err)
 		}
 		if len(h.github.tokenMints) != 0 || len(h.github.created) != 0 {
@@ -90,12 +90,84 @@ func TestRunLatestRefusesUnpinnedOrChangedInstallation(t *testing.T) {
 			h.github.installationID = tc.installation
 			h.github.repos[repoName] = githubapp.RepositoryInfo{DefaultBranch: "main"}
 			h.github.heads[repoName+"@main"] = headAnswer{SHA: tc.sha, Message: "commit"}
-			if _, err := h.integ.RunLatest(personCtx(ownerID), p.ID); err == nil {
+			if _, err := h.integ.RunLatest(personCtx(ownerID), p.ID, ""); err == nil {
 				t.Fatal("manual run was opened without a stable repository pin")
 			}
 			if len(h.github.created) != 0 {
 				t.Fatalf("invalid request created check runs: %+v", h.github.created)
 			}
 		})
+	}
+}
+
+func TestRunLatestRunsTheNamedBranchHead(t *testing.T) {
+	h := newHarness(t)
+	p := testPipeline(DeliveryWebhook)
+	p.Status = PipelineDisconnected
+	h.store.addPipeline(p)
+	h.github.repos[repoName] = githubapp.RepositoryInfo{FullName: "acme/shop", DefaultBranch: "trunk"}
+	h.github.heads[repoName+"@trunk"] = headAnswer{SHA: shaA, Message: "Default head"}
+	h.github.heads[repoName+"@epic/green"] = headAnswer{SHA: shaB, Message: "Branch head\nbody"}
+
+	got, err := h.integ.RunLatest(personCtx(ownerID), p.ID, "epic/green")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.SHA != shaB || got.HeadBranch != "epic/green" || got.Title != "Branch head" ||
+		got.Event != pipelines.EventManual || got.Mode != pipelines.ModeFull || got.Trigger != TriggerManual {
+		t.Fatalf("named-branch run = %+v", got)
+	}
+	if len(h.github.created) != 1 {
+		t.Fatalf("check runs written = %d, want 1", len(h.github.created))
+	}
+}
+
+func TestRunLatestRefusesAMalformedBranchBeforeGitHub(t *testing.T) {
+	for _, branch := range []string{" main", "a..b", "-x", "refs/heads/main", "x:y", "feature/", "a b"} {
+		t.Run(branch, func(t *testing.T) {
+			h := newHarness(t)
+			p := testPipeline(DeliveryWebhook)
+			p.Status = PipelineDisconnected
+			h.store.addPipeline(p)
+			if _, err := h.integ.RunLatest(personCtx(ownerID), p.ID, branch); refusalCode(err) != pipelines.CodeBranchInvalid {
+				t.Fatalf("refusal = %v, want %s", err, pipelines.CodeBranchInvalid)
+			}
+			if len(h.github.tokenMints) != 0 || len(h.github.created) != 0 {
+				t.Fatalf("a malformed branch reached GitHub: tokens %d checks %d", len(h.github.tokenMints), len(h.github.created))
+			}
+		})
+	}
+}
+
+func TestRunLatestThroughTwoBranchesToOneCommitIsOneAttempt(t *testing.T) {
+	h := newHarness(t)
+	p := testPipeline(DeliveryWebhook)
+	p.Status = PipelineDisconnected
+	h.store.addPipeline(p)
+	h.github.repos[repoName] = githubapp.RepositoryInfo{FullName: "acme/shop", DefaultBranch: "trunk"}
+	h.github.heads[repoName+"@trunk"] = headAnswer{SHA: shaA, Message: "One commit"}
+	h.github.heads[repoName+"@also"] = headAnswer{SHA: shaA, Message: "One commit"}
+
+	first, err := h.integ.RunLatest(personCtx(ownerID), p.ID, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	second, err := h.integ.RunLatest(personCtx(ownerID), p.ID, "also")
+	if err != nil || second.ID != first.ID || len(h.github.created) != 1 {
+		t.Fatalf("second request = %+v, checks %d, error %v", second, len(h.github.created), err)
+	}
+}
+
+func TestRunLatestReportsABranchGitHubDoesNotHave(t *testing.T) {
+	h := newHarness(t)
+	p := testPipeline(DeliveryWebhook)
+	p.Status = PipelineDisconnected
+	h.store.addPipeline(p)
+	h.github.repos[repoName] = githubapp.RepositoryInfo{FullName: "acme/shop", DefaultBranch: "trunk"}
+	if _, err := h.integ.RunLatest(personCtx(ownerID), p.ID, "gone"); err == nil {
+		t.Fatal("a missing branch opened a run")
+	}
+	if len(h.github.created) != 0 {
+		t.Fatalf("a missing branch wrote %d check runs", len(h.github.created))
 	}
 }
