@@ -202,8 +202,51 @@ func StreamInterceptorWithEpoch(v *Verifier, logger *slog.Logger, epoch *EpochCh
 			go runEpochRecheck(derived, logger, info.FullMethod, vc, epoch.Resolver, interval, cancel)
 			ctx = derived
 		}
+		if vc.Source == SourceRoleTest {
+			// Deadlines stop in-flight work; each received message rechecks the
+			// shared row so revocation on another replica is effective as well.
+			derived, cancel := context.WithDeadline(ctx, vc.ExpiresAt)
+			defer cancel()
+			go func() {
+				ticker := time.NewTicker(5 * time.Second)
+				defer ticker.Stop()
+				for {
+					select {
+					case <-derived.Done():
+						return
+					case <-ticker.C:
+						if _, err := v.VerifyBearer(derived, token); err != nil {
+							cancel()
+							return
+						}
+					}
+				}
+			}()
+			return handler(srv, &roleTestStream{ServerStream: ss, ctx: derived, verifier: v, token: token})
+		}
 		return handler(srv, &authenticatedStream{ServerStream: ss, ctx: ctx})
 	}
+}
+
+type roleTestStream struct {
+	grpc.ServerStream
+	ctx      context.Context
+	verifier *Verifier
+	token    string
+}
+
+func (s *roleTestStream) Context() context.Context { return s.ctx }
+func (s *roleTestStream) RecvMsg(m any) error {
+	if err := s.ServerStream.RecvMsg(m); err != nil {
+		return err
+	}
+	if err := s.ctx.Err(); err != nil {
+		return status.Error(codes.Unauthenticated, "role-test session ended")
+	}
+	if _, err := s.verifier.VerifyBearer(s.ctx, s.token); err != nil {
+		return status.Error(codes.Unauthenticated, "role-test session ended")
+	}
+	return nil
 }
 
 // runEpochRecheck polls the EpochResolver every `interval` and

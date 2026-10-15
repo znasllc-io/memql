@@ -1,3 +1,4 @@
+import { isRoleTestTab } from "../../auth/roleTest";
 import { useEffect } from "react";
 import { useOs } from "../../chrome/state";
 import { identityEntry } from "../../auth/nativeIdentity";
@@ -5,6 +6,7 @@ import { identityEntry } from "../../auth/nativeIdentity";
 export function IdentityOpenDispatcher() {
   const { actions } = useOs();
   useEffect(() => {
+    if (isRoleTestTab()) return;
     const path = identityEntry()?.split("?")[0];
     if (!path?.startsWith("/me")) return;
     const section = path === "/me/tokens" ? "tokens" : path === "/me/settings" ? "settings" : path === "/me/devices" ? "devices" : "profile";

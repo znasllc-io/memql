@@ -350,6 +350,13 @@ func (e *MemQLEngine) resolveAccountScope(ctx context.Context) *accountScope {
 // NEW version rather than deleting the old one. Without the collapse a removed
 // member's original `active` row is still there and still grants.
 func activeGroupIdsForUser(ctx context.Context, db *bun.DB, userId string) []string {
+	groups, _ := activeGroupIdsForUserChecked(ctx, db, userId)
+	return groups
+}
+
+// staged-data: MUST-NOT-GATE -- membership is authorization evidence. Hiding
+// a staged membership can hide its deny grant and incorrectly admit a role test.
+func activeGroupIdsForUserChecked(ctx context.Context, db *bun.DB, userId string) ([]string, error) {
 	var nodes []memorynodes.MemoryNode
 	if err := db.NewSelect().
 		Model(&nodes).
@@ -357,7 +364,7 @@ func activeGroupIdsForUser(ctx context.Context, db *bun.DB, userId string) []str
 		Where("concept = ?", conceptIdentityGroupMembership).
 		OrderExpr(`id ASC, "createdAt" DESC`).
 		Scan(ctx); err != nil {
-		return nil
+		return nil, err
 	}
 	bareUser := BareShortId(userId)
 	seen := map[string]struct{}{}
@@ -387,7 +394,7 @@ func activeGroupIdsForUser(ctx context.Context, db *bun.DB, userId string) []str
 		seen[groupId] = struct{}{}
 		out = append(out, groupId)
 	}
-	return out
+	return out, nil
 }
 
 // staged-data: MUST-NOT-GATE -- the second half of the same authorization

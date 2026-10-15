@@ -15280,3 +15280,8 @@ button[data-ask-control="running"], [data-ask-control="running"] > button { outl
 .fleet-share-calls { font-variant-numeric: tabular-nums; }
 /* Keep a refusal beside the sharing controls in the Settings page flow. */
 .fleet-share-error { min-width: 0; }
+
+/* The session label stays visible over app windows, including narrow layouts. */
+.os-role-test-banner { position: fixed; inset: 0 0 auto; height: 64px; z-index: 10000; display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; gap: 4px 12px; padding: 6px 12px; overflow: auto; border-bottom: 1px solid var(--os-warn); background: var(--os-glass-solid); color: var(--os-ink); }
+.os-role-test-banner [role="alert"] { grid-column: 1 / -1; }
+.os-root[data-role-test] { top: 64px; }

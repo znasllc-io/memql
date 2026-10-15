@@ -1,6 +1,7 @@
 package verifier
 
 import (
+	"context"
 	"errors"
 	"log/slog"
 	"net/http"
@@ -87,6 +88,11 @@ func HTTPMiddleware(v *Verifier, opts MiddlewareOptions) func(http.Handler) http
 					"path", r.URL.Path)
 			}
 			ctx := AttachToContext(r.Context(), vc)
+			if vc.Source == SourceRoleTest {
+				var cancel context.CancelFunc
+				ctx, cancel = context.WithDeadline(ctx, vc.ExpiresAt)
+				defer cancel()
+			}
 			if opts.DelegationResolver != nil {
 				if dc, derr := opts.DelegationResolver.ResolveActiveDelegation(ctx, vc.UserId); derr == nil && dc != nil {
 					ctx = auth.ContextWithDelegation(ctx, dc)

@@ -26,15 +26,16 @@ import (
 // stamping the audit-only origin fields from the sending node.
 func ForwardedAuthorityToProto(a auth.ForwardedAuthority, originNodeId, originNodeType string) *nodev1.ForwardedAuthority {
 	out := &nodev1.ForwardedAuthority{
-		ContractVersion: a.Version,
-		Subject:         a.Subject,
-		PrimaryEmail:    a.PrimaryEmail,
-		Role:            string(a.Role),
-		IdentityId:      a.IdentityId,
-		CredentialClass: a.CredentialClass,
-		RoleCeiling:     string(a.RoleCeiling),
-		OriginNodeId:    originNodeId,
-		OriginNodeType:  originNodeType,
+		ContractVersion:   a.Version,
+		Subject:           a.Subject,
+		PrimaryEmail:      a.PrimaryEmail,
+		Role:              string(a.Role),
+		IdentityId:        a.IdentityId,
+		CredentialClass:   a.CredentialClass,
+		RoleTestSessionId: a.RoleTestSessionID,
+		RoleCeiling:       string(a.RoleCeiling),
+		OriginNodeId:      originNodeId,
+		OriginNodeType:    originNodeType,
 		// Provenance only (memql#3221) -- see the field comments on
 		// auth.ForwardedAuthority. Carried so identity.displayName lands the
 		// same on a row this hop writes as on one the user writes directly.
@@ -67,15 +68,16 @@ func ForwardedAuthorityFromProto(p *nodev1.ForwardedAuthority) auth.ForwardedAut
 		return auth.ForwardedAuthority{}
 	}
 	a := auth.ForwardedAuthority{
-		Version:         p.GetContractVersion(),
-		Subject:         p.GetSubject(),
-		PrimaryEmail:    p.GetPrimaryEmail(),
-		Role:            auth.Role(p.GetRole()),
-		IdentityId:      p.GetIdentityId(),
-		CredentialClass: p.GetCredentialClass(),
-		RoleCeiling:     auth.Role(p.GetRoleCeiling()),
-		OriginNodeId:    p.GetOriginNodeId(),
-		OriginNodeType:  p.GetOriginNodeType(),
+		Version:           p.GetContractVersion(),
+		Subject:           p.GetSubject(),
+		PrimaryEmail:      p.GetPrimaryEmail(),
+		Role:              auth.Role(p.GetRole()),
+		IdentityId:        p.GetIdentityId(),
+		CredentialClass:   p.GetCredentialClass(),
+		RoleTestSessionID: p.GetRoleTestSessionId(),
+		RoleCeiling:       auth.Role(p.GetRoleCeiling()),
+		OriginNodeId:      p.GetOriginNodeId(),
+		OriginNodeType:    p.GetOriginNodeType(),
 		// Provenance only. Read back so the worker's metadata collector can
 		// stamp identity.displayName; VerifyForwardedAuthority never looks at
 		// them and the AccessContext it returns has nowhere to put them.

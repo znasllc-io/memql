@@ -1033,6 +1033,7 @@ type streamSession struct {
 	// credentialClass carries the verifier's ""->"user" fallback already
 	// applied, so it is never empty once stamped.
 	credentialClass   string
+	credentialClaims  map[string]any
 	credentialCeiling string
 
 	// authoredSession is the owner-scoped authored-construct registry for this
@@ -1386,6 +1387,13 @@ const (
 	badgeGateRestricted
 )
 
+func (s *streamSession) authorityClass() string {
+	s.accessMu.Lock()
+	defer s.accessMu.Unlock()
+	s.ensureAuthorityStampedLocked()
+	return s.credentialClass
+}
+
 func (s *streamSession) badgeGate(envelope *memqlv1.MemqlClientMessage) badgeGateVerdict {
 	switch envelope.GetPayload().(type) {
 	case *memqlv1.MemqlClientMessage_ClientHello,
@@ -1400,6 +1408,7 @@ func (s *streamSession) badgeGate(envelope *memqlv1.MemqlClientMessage) badgeGat
 	s.ensureAuthorityStampedLocked()
 	active := !s.badgeExpiresAt.IsZero()
 	expiresAt := s.badgeExpiresAt
+	class := s.credentialClass
 	s.accessMu.Unlock()
 
 	if !active {
@@ -1407,6 +1416,9 @@ func (s *streamSession) badgeGate(envelope *memqlv1.MemqlClientMessage) badgeGat
 	}
 	if !time.Now().Before(expiresAt) {
 		return badgeGateExpired
+	}
+	if class == auth.RoleTestClass {
+		return roleTestPayloadGate(envelope)
 	}
 	// A live badge grant is attribution-grade, not a full user session:
 	// pin it away from credential/session/admin management so a
@@ -1551,7 +1563,7 @@ func badgeExpiryFromClaims(claims map[string]any) time.Time {
 		return time.Time{}
 	}
 	class, _ := claims["class"].(string)
-	if class != "badge" {
+	if class != "badge" && class != auth.RoleTestClass {
 		return time.Time{}
 	}
 	switch exp := claims["exp"].(type) {
@@ -1592,6 +1604,7 @@ func (s *streamSession) ensureAuthorityStampedLocked() {
 		return
 	}
 	claims, _ := auth.ClaimsFromContext(s.stream.Context())
+	s.credentialClaims = claims
 	s.stampAuthorityLocked(
 		claimString(claims, "class"),
 		claimString(claims, "role_ceiling"),
@@ -1624,6 +1637,9 @@ func (s *streamSession) stampAuthorityLocked(class, ceiling string, expiresAt ti
 	// assertion look clamped while its class says nothing enforces it.
 	s.credentialCeiling = ""
 	s.badgeExpiresAt = time.Time{}
+	if class == auth.RoleTestClass {
+		s.badgeExpiresAt = expiresAt
+	}
 }
 
 // handleRotateAuth swaps the bearer on a live stream. Re-verifies the
@@ -1676,6 +1692,10 @@ func (s *streamSession) handleRotateAuth(envelope *memqlv1.MemqlClientMessage, m
 		return reply(false, "invalid_token", err.Error())
 	}
 
+	claims, _ := auth.ClaimsFromContext(s.stream.Context())
+	if vc.Class == auth.RoleTestClass || claims["class"] == auth.RoleTestClass {
+		return reply(false, "role_test_reconnect_required", "Role tests use a separate connection; start a new test session.")
+	}
 	// Build the new UserIdentity off a synthetic context the verifier's
 	// AttachToContext populates -- this routes through the same
 	// auth.BuildTokenInfo path the interceptor uses, so the rotated
@@ -1754,6 +1774,7 @@ func (s *streamSession) handleRotateAuth(envelope *memqlv1.MemqlClientMessage, m
 	// -- and it is why the forwarded assertion is sourced from the session
 	// rather than from the stream context, which cannot see this at all.
 	s.stampAuthorityLocked(vc.Class, claimString(vc.ClaimsMap, "role_ceiling"), vc.ExpiresAt)
+	s.credentialClaims = vc.ClaimsMap
 
 	if s.logger != nil {
 		s.logger.Info("rotate_auth: identity swapped",
@@ -1770,6 +1791,9 @@ func (s *streamSession) handleMessage(envelope *memqlv1.MemqlClientMessage) erro
 
 	switch s.badgeGate(envelope) {
 	case badgeGateExpired:
+		if s.authorityClass() == auth.RoleTestClass {
+			return s.sendQueryError(badgePayloadRequestId(envelope), envelope.GetMessageId(), codes.Unauthenticated, "role_test_expired: start another role test from Users")
+		}
 		// The operator grant this stream rotated in has expired: the
 		// operator walked away (or the kiosk missed the re-tap). Reject
 		// work until the client rotates back to the terminal bearer or
@@ -1781,6 +1805,9 @@ func (s *streamSession) handleMessage(envelope *memqlv1.MemqlClientMessage) erro
 		return s.sendQueryError(badgePayloadRequestId(envelope), envelope.GetMessageId(), codes.Unauthenticated,
 			"badge_grant_expired: the operator grant has expired; rotate back to the terminal bearer or present a fresh badge grant")
 	case badgeGateRestricted:
+		if s.authorityClass() == auth.RoleTestClass {
+			return s.sendQueryError(badgePayloadRequestId(envelope), envelope.GetMessageId(), codes.PermissionDenied, "role_test_restricted: test sessions cannot manage credentials, other sessions, or cluster deployment")
+		}
 		// Live grant, restricted surface: credential/session/admin
 		// management stays with real user sessions.
 		return s.sendQueryError(badgePayloadRequestId(envelope), envelope.GetMessageId(), codes.PermissionDenied,
