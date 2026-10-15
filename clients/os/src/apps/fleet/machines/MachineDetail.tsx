@@ -167,11 +167,7 @@ export function MachineDetail({
 
       {view === "all" || view === "details" ? <RemoveControl machine={machine} busy={busy} revoke={writes.revoke} /> : null}
 
-      {/* NOT ON THE SHARING VIEW, whose one write is made from its dialog and
-          refused there, beside the draft it refused -- the dialog keeps the
-          engine's words until the next save. Repeated down here it would say
-          it twice while the dialog is open, and go on saying it after the
-          person had cancelled the change it was about. */}
+      {/* Sharing keeps refusals beside its inline draft. */}
       {writes.actionError && view !== "sharing" ? (
         <Notice
           tone="error"

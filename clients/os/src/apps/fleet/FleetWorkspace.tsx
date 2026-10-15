@@ -85,7 +85,7 @@ export function FleetWorkspace({ flow, showRevoked, selection, select, navigate,
   const behind = feedState === "degraded" || feedState === "disconnected";
   return (<>
     {flow.active ? <AddMachinePage flow={flow} onLeave={machineId => { if (machineId) select({ machineId, view: "equipment" }); }} /> : null}
-    <div ref={scrollRoot} className="fleet-home" hidden={flow.active}>
+    <div ref={scrollRoot} className="fleet-home" data-machine-view={selection.view} hidden={flow.active}>
     <div className="fleet-workspace" data-os-page-context={JSON.stringify({ page: "Machines", machineId: machine?.id, machine: machine ? machineName(machine) : undefined, view: VIEW_NAMES[selection.view], search: machineSearch || undefined })}>
       <div className="fleet-workspace-header">
       {/* THE HEAD OWNS THE TRAIL on the list and on Equipment; every other
@@ -124,7 +124,7 @@ export function FleetWorkspace({ flow, showRevoked, selection, select, navigate,
               const retainedMachine = machines.find(value => value.id === item.machineId);
               if (!retainedMachine) return null;
               const shown = item.machineId === machine.id && item.view === selection.view;
-              return <div key={`${item.machineId}:${item.view}`} hidden={!shown}>
+              return <div key={`${item.machineId}:${item.view}`} data-machine-view={item.view} hidden={!shown}>
                 {item.view === "equipment" ? <><MachineEquipment machine={retainedMachine} now={now} onInspect={view => select({ machineId: item.machineId, view })} />
                 <RecentWork machineId={item.machineId} onOpenSession={onOpenSession} onAllSessions={onAllSessions ?? (() => navigate("apps", { fromContent: true }))} /></> : <div className="fleet-inspector">
                   <Head title={VIEW_NAMES[item.view]} meta={item.view === "apps" ? listCount(snapshot, retainedMachine.apps.length) : item.view === "models" ? listCount(snapshot, machineModelsFrom(retainedMachine.reportedLabels).length) : undefined} breadcrumbs={[{ label: "Machines", onSelect: toList }, { label: machineName(retainedMachine), onSelect: () => select({ machineId: item.machineId, view: "equipment" }) }, { label: VIEW_NAMES[item.view] }]} back={{ label: machineName(retainedMachine), onSelect: () => select({ machineId: item.machineId, view: "equipment" }) }}>

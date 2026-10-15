@@ -78,7 +78,6 @@ import {
 } from "../test/deployables/harness";
 import { siteFromRow } from "../src/apps/deployables/rows";
 import { MachineDetail } from "../src/apps/fleet/machines/MachineDetail";
-import { ShareDialog } from "../src/apps/fleet/machines/ShareDialog";
 import type { MachineWrites } from "../src/apps/fleet/machines/useMachineWrites";
 import { machineFromRow } from "../src/apps/fleet/rows";
 import { MachinesProvider } from "../src/live/machines";
@@ -1491,9 +1490,7 @@ function AccountsPane() {
 // --- Sharing a machine (epic memql#5344) -----------------------------------
 //
 // The panel and the dialog, over the suite's own fixture connection. The
-// dialog views render ShareDialog directly -- the harness does not click --
-// and `?modal=0` draws it in the page rather than the top layer, for a capture
-// tool that does not paint the top layer.
+// Sharing scenes use the inline production editor and its directory.
 
 const SHARED_WITH_PEOPLE = {
   mode: "people",
@@ -1575,21 +1572,12 @@ function SharingPane({ over }: { over: Record<string, unknown> }) {
 
 function SharePane({ over, startPeople = false, refuse = false }: { over: Record<string, unknown>; startPeople?: boolean; refuse?: boolean }) {
   const machine = fleetMachine({ ownerUserId: "v1:identity:user:me", ...over });
-  const modal = new URLSearchParams(window.location.search).get("modal") !== "0";
-  if (!modal) {
-    // In-page for a capture tool that does not paint the top layer: the SAME
-    // component and stylesheet, opened with show() instead of showModal().
-    HTMLDialogElement.prototype.showModal = HTMLDialogElement.prototype.show;
-  }
   useEffect(() => {
-    // One-shot captures cannot click: choose "Specific people and groups"
+    // One-shot captures cannot click: enable sharing
     // for the views that open on it, and press Save for the refused one.
     const timer = window.setTimeout(() => {
       if (startPeople) {
-        const people = Array.from(document.querySelectorAll<HTMLButtonElement>('[role="radio"]')).find((b) =>
-          (b.textContent ?? "").startsWith("Specific people"),
-        );
-        people?.click();
+        document.querySelector<HTMLInputElement>('[role="switch"]')?.click();
       }
       // `?arrow=N` arrows N times through the results from the search, so a
       // capture shows whether the active option is kept in view (the list is
@@ -1620,7 +1608,6 @@ function SharePane({ over, startPeople = false, refuse = false }: { over: Record
   return (
     <div className="os-window-content">
       <MachineDetail machine={machine} writes={qaWrites(refuse)} now={FLEET_NOW} view="sharing" />
-      <ShareDialog machine={machine} writes={qaWrites(refuse)} onDiscard={() => undefined} onSaved={() => undefined} />
     </div>
   );
 }

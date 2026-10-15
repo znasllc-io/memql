@@ -6,7 +6,7 @@ import { isRevoked, type MachineRow, type SharingMode } from "../rows";
 // design section 5).
 //
 // PURE, beside the components that draw it, for the reason rows.ts is: the
-// sentence the panel says and the draft the dialog holds are the parts of this
+// sentence the panel says and the draft the editor holds are the parts of this
 // surface a person is promised things by, and asserting them through render()
 // asserts them through three layers that can each fail for unrelated reasons.
 //
@@ -159,20 +159,6 @@ export function sharingSignature(
   return [machine.sharingMode, ...who.sort()].join("|");
 }
 
-/**
- * Whether a save's receipt still describes what is stored: the same mode and,
- * under `people`, lists of the sizes it reported. The receipt carries counts,
- * never ids, so that is as much as it can be held to.
- */
-export function receiptDescribes(
-  receipt: { mode: SharingMode; people: number; groups: number },
-  machine: Pick<MachineRow, "sharingMode" | "sharedUserIds" | "sharedGroupIds">,
-): boolean {
-  if (receipt.mode !== machine.sharingMode) return false;
-  if (receipt.mode !== "people") return true;
-  return receipt.people === machine.sharedUserIds.length && receipt.groups === machine.sharedGroupIds.length;
-}
-
 /** "2 people and 1 group", with the plurals right -- the engine's own
  *  phrasing for the same counts (shareCountPhrase). */
 export function countPhrase(people: number, groups: number): string {
@@ -191,14 +177,14 @@ export function groupSize(members: number): string {
 }
 
 // ---------------------------------------------------------------------------
-// The dialog's draft
+// The editor's draft
 // ---------------------------------------------------------------------------
 
 /**
- * What the dialog holds while it is open.
+ * What the editor holds while it is open.
  *
- * THE LIST SURVIVES A CHANGE OF MODE. Choosing Everyone and then Specific
- * people again brings the chips back: the draft is the person's until they
+ * THE LIST SURVIVES A CHANGE OF MODE. Turning sharing off and then on again
+ * brings the chips back: the draft is the person's until they
  * save or cancel (design G10), and only the WRITE drops the list -- see
  * `draftChoice`.
  */
@@ -218,13 +204,12 @@ export function draftFrom(machine: StoredShare): ShareDraft {
  * A copy of the stored decision, taken when a draft is: the draft's STARTING
  * value (memql#5659).
  *
- * Whether the stored share MOVED while the dialog was open is a question about
+ * Whether the stored share MOVED while the editor was open is a question about
  * the row and this value -- never about the row and the draft, which differ
  * the moment anybody picks. Asking the second made a change from another tab
  * look like the owner's own unsaved edit, and Save wrote the old draft back
- * over it. It is the discipline the panel already keeps for its receipt
- * (SharingGroup's `before`), which retires a stale receipt when the row moves
- * away from the state the save was made against.
+ * over it. SharingEditor also tracks its acknowledged save until the live
+ * echo arrives.
  */
 export function storedShare(machine: StoredShare): StoredShare {
   return {
@@ -250,7 +235,7 @@ export function draftUntouched(draft: ShareDraft, start: StoredShare): boolean {
 /**
  * Whether saving the draft would change anything.
  *
- * AGAINST THE ROW AS IT IS NOW, not as it was when the dialog opened: a change
+ * AGAINST THE ROW AS IT IS NOW, not as it was when the editor opened: a change
  * landing from another tab is what is stored, and Save must say whether THIS
  * draft differs from it. Lists are compared as SETS of bare ids -- order is
  * not a decision anybody made, and the spelling is not either.

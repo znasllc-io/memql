@@ -3265,93 +3265,44 @@ button.os-row.os-record-row:focus-visible { outline: 2px solid var(--os-accent);
   flex-direction: column;
   gap: 12px;
 }
-/* THE ONE LINE THE PANEL IS FOR: who can use this machine. Set a step above
- * the body and below the section's own title, so it reads as the answer to
- * the heading rather than as one more caption. In full ink only while it is
- * in force -- a share the cockpit has not agreed to is the owner's decision
- * still waiting on the machine, and the consent line beneath says so. */
-.os-fleet-sharing-state {
-  margin: 0 0 2px;
-  max-width: 80ch;
-  font-size: var(--os-text-md);
-  font-weight: 600;
-  line-height: 1.35;
-  color: var(--os-muted);
-  overflow-wrap: anywhere;
-}
-.os-fleet-sharing-state[data-in-force] {
-  color: var(--os-ink);
-}
-.os-fleet-sharing-act {
+/* Sharing is an inline editor, using the same switch as Add Machine. */
+.os-fleet-sharing-state { margin: 0; font-weight: 600; }
+.fleet-share-editor, .fleet-share-body {
   display: flex;
   flex-direction: column;
-  gap: 4px;
-  align-items: flex-start;
-  margin-top: 6px;
+  min-width: 0;
+  gap: 16px;
 }
-.os-fleet-sharing > .os-caption,
-.os-fleet-sharing > .os-notice,
-.fleet-share-receipt {
-  max-width: 80ch;
-}
+.fleet-share-toggle { display: grid; gap: 6px; }
+.fleet-share-toggle > .os-caption { margin: 0; }
+.fleet-share-editor > .os-actbar { padding-inline: 0; }
+.fleet-share-receipt { margin: 0; }
 
-/* ---- the share dialog (epic memql#5344) ----
- *
- * A native modal in the top layer, sized for a FORM: a readable measure wide,
- * never wider than the viewport less a 16px gutter each side, and never
- * taller than it. The body scrolls and the floor does not, so Save and Cancel
- * are on screen however long the list of people grows. The plate is the
- * window's own ground, so the choice cards and chips look exactly as they do
- * on a page; the floor is the raised plane beneath them. */
-.fleet-share-dialog {
-  width: min(520px, calc(100vw - 32px));
-  max-height: calc(100dvh - 48px);
-  padding: 0;
+/* The Sharing tab gives its body the scroll and keeps Save on the window
+ * floor. Other retained machine tabs keep their own scrolling layout. */
+.fleet-page:has(.fleet-home[data-machine-view="sharing"]:not([hidden])) {
   overflow: hidden;
-  color: var(--os-ink);
-  background: var(--os-plate);
-  border: 1px solid var(--os-line);
-  border-radius: var(--os-radius-sm);
-  box-shadow: var(--os-shadow-float);
-  font-family: var(--os-font);
-  font-size: var(--os-text-base);
+  padding-bottom: 0;
 }
-.fleet-share-dialog[open] {
+.fleet-home[data-machine-view="sharing"]:not([hidden]) { height: 100%; }
+.fleet-home[data-machine-view="sharing"] :is(.fleet-workspace, .fleet-workspace-body, .fleet-equipment-area, [data-machine-view="sharing"]:not([hidden]), .fleet-inspector, .fleet-inspector > .os-panel, .os-fleet-sharing, .fleet-share-editor) {
   display: flex;
   flex-direction: column;
+  flex: 1;
+  min-height: 0;
 }
-.fleet-share-dialog::backdrop {
-  background: color-mix(in srgb, var(--os-ground) 72%, transparent);
-}
-.fleet-share-head {
-  flex: none;
-  padding: 18px 20px 0;
-}
-.fleet-share-head h3 {
-  margin: 0;
-  font-size: var(--os-text-lg);
-  font-weight: 600;
-}
-/* Which machine, under the act's own name -- a dialog that did not say would
- * invite the change to the wrong one of two. */
-.fleet-share-head p {
-  margin: 2px 0 0;
-  font-size: var(--os-text-sm);
-  color: var(--os-muted);
-  overflow-wrap: anywhere;
-}
-.fleet-share-body {
-  flex: 1 1 auto;
+.fleet-home[data-machine-view="sharing"] > .fleet-workspace { height: 100%; }
+.fleet-home[data-machine-view="sharing"] .fleet-workspace-header { flex: none; }
+.fleet-home[data-machine-view="sharing"] .fleet-workspace-body { margin-top: 0; }
+.fleet-home[data-machine-view="sharing"] .fleet-share-editor { overflow: hidden; }
+.fleet-home[data-machine-view="sharing"] .fleet-share-body {
+  flex: 1;
   min-height: 0;
   overflow-y: auto;
-  padding: 14px 20px 18px;
-  display: flex;
-  flex-direction: column;
-  gap: 14px;
+  padding: 2px;
 }
-.fleet-share-dialog > .os-actbar {
-  padding-inline: 20px;
-}
+.fleet-home[data-machine-view="sharing"] .fleet-share-band { max-height: 45%; overflow-y: auto; }
+.fleet-home[data-machine-view="sharing"] .fleet-share-receipt { padding-bottom: 12px; }
 
 /* The picker: the chosen, then the search, then who is left to choose. One
  * left edge with the choices above it, and the subhead repeating the chosen
@@ -3448,9 +3399,9 @@ button.os-row.os-record-row:focus-visible { outline: 2px solid var(--os-accent);
 /* THE LIST STAYS OPEN under the search, at about five rows: a person who does
  * not know whom they may pick reads the answer instead of guessing names, and
  * a long directory scrolls inside its own box rather than pushing the floor
- * off the dialog. */
+ * off the editor. */
 /* `position: relative` MAKES THE LIST THE OPTIONS' offsetParent. Without it
- * an option's offsetTop is measured from the dialog, counting everything
+ * an option's offsetTop is measured from the editor, counting everything
  * above the list, and arrowing scrolled the active option OUT of view -- the
  * kit Select escapes this only because its list is `position: fixed`. */
 .fleet-share-results {
@@ -3458,7 +3409,7 @@ button.os-row.os-record-row:focus-visible { outline: 2px solid var(--os-accent);
   max-height: 212px;
   overflow-y: auto;
   border: 1px solid var(--os-line);
-  border-radius: var(--os-radius-xs);
+  border-radius: var(--os-selection-radius);
   background: var(--os-plate);
 }
 .fleet-share-option {
@@ -3518,9 +3469,7 @@ button.os-row.os-record-row:focus-visible { outline: 2px solid var(--os-accent);
   display: flex;
   flex-direction: column;
   gap: 8px;
-  padding: 12px 20px 14px;
-  /* The body scrolls behind this band; the hairline says where it stops. */
-  border-top: 1px solid var(--os-line);
+  padding: 0;
 }
 /* A notice here can take focus -- the refusal, so it is read; a change made
  * elsewhere, when the Save that held focus was disabled under it -- and its
@@ -3534,12 +3483,12 @@ button.os-row.os-record-row:focus-visible { outline: 2px solid var(--os-accent);
   outline: 2px solid var(--os-accent);
   outline-offset: 2px;
 }
-/* What is stored now is the half of the choice the dialog does not show, so it
+/* What is stored now is the half of the choice the editor does not show, so it
  * is set in the ink while its label stays quiet. */
 .fleet-share-moved-now {
   color: var(--os-ink);
 }
-/* The two answers, side by side and equal: neither is the dialog's act -- that
+/* The two answers, side by side and equal: neither is the editor's act -- that
  * is Save, on the floor -- so neither is primary. */
 .fleet-share-moved-acts {
   display: flex;
@@ -3547,12 +3496,7 @@ button.os-row.os-record-row:focus-visible { outline: 2px solid var(--os-accent);
   gap: 8px;
   margin-top: 6px;
 }
-.fleet-share-terms {
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-  max-width: 80ch;
-}
+
 
 /* At a narrow window the recommendation's four columns become two lines rather
  * than four cramped ones: the level and the model belong together, and the
