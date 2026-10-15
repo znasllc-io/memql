@@ -59,7 +59,13 @@ func (r *Runner) createRetirement(ctx context.Context, name, runID string) error
 
 func (s *step) checkRetirement() error {
 	for _, name := range []string{s.jobName + retirementSuffix, runRetirementName(s.run.RunID)} {
-		_, err := s.r.kube.SecretMetadata(s.ctx, name)
+		// A dropped read is not proof of either retirement or permission to
+		// create. Use the same bounded, cancellable retry as the other API
+		// gates; no creation effect occurs until both reads answer absence.
+		err := s.retryAPI(func() error {
+			_, err := s.r.kube.SecretMetadata(s.ctx, name)
+			return err
+		})
 		if deploycontrol.IsNotFound(err) {
 			continue
 		}
