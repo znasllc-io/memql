@@ -8,8 +8,11 @@ import (
 // ChatMessage represents a message in a chat conversation with proper roles.
 // This enables proper multi-turn conversation support with AI models.
 type ChatMessage struct {
-	Role    string // "system", "user", or "assistant"
-	Content string
+	// ContextReferences are server-attached provenance, not prompt text or authority.
+	// Provider adapters omit them from vendor message bodies; call observations retain them.
+	ContextReferences []string `json:"contextReferences,omitempty"`
+	Role              string   // "system", "user", or "assistant"
+	Content           string
 	// Name is optional and may be used by some providers (e.g., tool messages).
 	Name string
 	// ToolCallId is used for Role="tool" to associate a tool result to a prior tool call.

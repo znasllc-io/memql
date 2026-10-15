@@ -41,7 +41,7 @@
       "domainId": "computer-use",
       "sourceRef": "computerUse:fileReads",
       "catalog": "computerUse",
-      "sha256": "5bc8664608197927626610c57a35fc67c5234d0ae2510ff936427bf70c51b012"
+      "sha256": "7efeb231583414e8d984054d3dcf6f726f3a721c7b0652bc9eae3c664f653826"
     },
     {
       "domainId": "computer-use",

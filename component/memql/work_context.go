@@ -16,14 +16,17 @@ import (
 // A checkpoint is a derived memory, never authority or a replacement for the
 // source. Originals remain in the owner-scoped journal and can be recalled.
 type workCheckpoint struct {
-	Facts       []string `json:"facts"`
-	Entities    []string `json:"entities"`
-	Decisions   []string `json:"decisions"`
-	Constraints []string `json:"constraints"`
-	Unfinished  []string `json:"unfinished"`
+	NextArtifact       string   `json:"nextArtifact,omitempty"`
+	UnresolvedQuestion string   `json:"unresolvedQuestion,omitempty"`
+	EvidenceReferences []string `json:"evidenceReferences,omitempty"`
+	Facts              []string `json:"facts"`
+	Entities           []string `json:"entities"`
+	Decisions          []string `json:"decisions"`
+	Constraints        []string `json:"constraints"`
+	Unfinished         []string `json:"unfinished"`
 }
 
-const workCheckpointSchema = `{"type":"object","properties":{"facts":{"type":"array","items":{"type":"string"}},"entities":{"type":"array","items":{"type":"string"}},"decisions":{"type":"array","items":{"type":"string"}},"constraints":{"type":"array","items":{"type":"string"}},"unfinished":{"type":"array","items":{"type":"string"}}},"required":["facts","entities","decisions","constraints","unfinished"],"additionalProperties":false}`
+const workCheckpointSchema = `{"type":"object","properties":{"nextArtifact":{"type":"string"},"unresolvedQuestion":{"type":"string"},"evidenceReferences":{"type":"array","items":{"type":"string"}},"facts":{"type":"array","items":{"type":"string"}},"entities":{"type":"array","items":{"type":"string"}},"decisions":{"type":"array","items":{"type":"string"}},"constraints":{"type":"array","items":{"type":"string"}},"unfinished":{"type":"array","items":{"type":"string"}}},"required":["nextArtifact","unresolvedQuestion","evidenceReferences","facts","entities","decisions","constraints","unfinished"],"additionalProperties":false}`
 
 // A strong checkpoint can consolidate several bounded retrievals together.
 // The smaller fast-model window forced even ordinary parallel results into
@@ -340,7 +343,7 @@ func workCheckpointHash(source []byte, task string) string {
 	// Equal source bytes can serve different goals. Relevance context must be
 	// part of the cache key; sourceMessages itself stays byte-for-byte intact.
 	raw, _ := json.Marshal([]string{string(source), task})
-	return workContextHash("summary-v3", raw)
+	return workContextHash("summary-v4", raw)
 }
 
 func boundedWorkCheckpoint(checkpoint workCheckpoint, budget int) string {
@@ -354,10 +357,20 @@ func boundedWorkCheckpoint(checkpoint workCheckpoint, budget int) string {
 	bounded := workCheckpoint{Facts: []string{}, Entities: []string{}, Decisions: []string{}, Constraints: []string{}, Unfinished: []string{
 		"This checkpoint is incomplete. Recall the archived source for omitted details; absence here is not evidence of absence.",
 	}}
+	// Keep named gaps explicit when they fit; these remain derived claims.
+	for _, field := range []struct {
+		target *string
+		value  string
+	}{{&bounded.NextArtifact, checkpoint.NextArtifact}, {&bounded.UnresolvedQuestion, checkpoint.UnresolvedQuestion}} {
+		*field.target = field.value
+		if len(encode(bounded)) > budget {
+			*field.target = ""
+		}
+	}
 	// Round-robin across categories so lengthy background facts cannot crowd
 	// out unfinished work, constraints, decisions or exact source references.
-	sources := [][]string{checkpoint.Unfinished, checkpoint.Constraints, checkpoint.Decisions, checkpoint.Entities, checkpoint.Facts}
-	targets := []*[]string{&bounded.Unfinished, &bounded.Constraints, &bounded.Decisions, &bounded.Entities, &bounded.Facts}
+	sources := [][]string{checkpoint.EvidenceReferences, checkpoint.Unfinished, checkpoint.Constraints, checkpoint.Decisions, checkpoint.Entities, checkpoint.Facts}
+	targets := []*[]string{&bounded.EvidenceReferences, &bounded.Unfinished, &bounded.Constraints, &bounded.Decisions, &bounded.Entities, &bounded.Facts}
 	for index := 0; ; index++ {
 		found := false
 		for category, entries := range sources {

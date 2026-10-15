@@ -118,6 +118,27 @@ func TestOwnedTrainingReadsReviewedTaughtSourcesAcrossReplicas(t *testing.T) {
 	require.Equal(t, memql.BareShortId(chunk), got[0]["chunkId"])
 	require.Equal(t, memql.BareShortId(artifact), got[0]["artifactId"])
 	require.Contains(t, got[0]["text"], "required checks")
+	receiptID := stringField(got[0], "selectionReceiptId")
+	require.NotEmpty(t, receiptID)
+	receipts := f.query(f.engine, memql.ContextWithFreshRead(person), "query", "workObservationsForOwnerRun", map[string]any{"runId": runID})
+	var selectedReceipt map[string]any
+	for _, row := range receipts {
+		if memql.BareShortId(stringField(row, "id")) == receiptID {
+			selectedReceipt = row
+		}
+	}
+	require.NotNil(t, selectedReceipt, "another replica reads the same owned selection receipt")
+	require.Contains(t, fmt.Sprint(selectedReceipt), "textDigest")
+	require.Contains(t, fmt.Sprint(selectedReceipt), "required checks")
+	foreignActor := auth.ContextWithInternalOrigin(revisionActor(f.owner+"receipt-outsider", auth.RoleOwner))
+	require.Empty(t, f.query(f.other, foreignActor, "query", "workObservationsForOwnerRun", map[string]any{"runId": runID}))
+	// A reviewed passage too large for its allocation is withheld whole and the
+	// bounded decision records the reason, without treating it as delivered.
+	tiny, err := f.second.handleOwnedTrainingLessons(ctx, map[string]any{"text": "Verify a change", "limit": 1, "minimumSimilarity": 0.6, "maxTokens": 1}, 0)
+	require.NoError(t, err)
+	require.Empty(t, tiny)
+	receipts = f.query(f.engine, memql.ContextWithFreshRead(person), "query", "workObservationsForOwnerRun", map[string]any{"runId": runID})
+	require.Contains(t, fmt.Sprint(receipts), "context-byte-limit")
 
 	originalAdmit := f.second.training.admit
 	f.second.training.admit = func(ctx context.Context, row memorynodes.MemoryNode) bool {

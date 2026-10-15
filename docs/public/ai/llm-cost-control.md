@@ -312,6 +312,24 @@ history and a raised limit alone do not erase stalled progress. Guidance grants
 neither access nor additional model calls. These initial thresholds are policy
 choices to evaluate against observed tasks, not universal model guarantees.
 
+The same durable recovery record also observes repeated read results across
+changed query wording. This additional signal is observation-only: it does not
+change the installed review thresholds, pause a run, require a write, or make
+another model call. New result bytes, source versions and archive pages remain
+new evidence. Checkpoints separately retain the next missing deliverable, its
+unresolved question and exact public evidence references as derived claims.
+These fields do not prove completion or authorize an operation.
+
+Optional reviewed Training selections are recorded in the existing owned work
+observation journal, with exact selected text/version digests, bounded rejected
+candidate reasons and the declared query/allocation limits. The receipt covers
+only the admitted ranked candidate window, not every item in the corpus.
+A revoked source contributes no text or identity to a rejection receipt. Each
+actual provider-attempt observation carries the receipt IDs attached to its
+rendered context, including fallback attempts. Selection, delivery, adherence
+and successful completion remain separate evidence. Saved receipts never
+replace current source review and ownership checks on a new turn.
+
 Nexus budget approvals accept a new **total** limit. The decision raises only
 that ceiling and preserves spent counters and completed steps. An explicit
 approval also supersedes the smaller workload estimate for that ceiling;

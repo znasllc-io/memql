@@ -143,7 +143,7 @@ JOIN %s v ON v.id=s.id AND v.concept='v1:knowledge:documentChunk' AND v.vector_f
 WHERE 1-(v.embedding <=> $2::vector) >= $3
 ORDER BY v.embedding <=> $2::vector,(s.artifact_id<>'') DESC,s.id LIMIT $4`
 
-func (i *Integration) handleOwnedTrainingLessons(ctx context.Context, args map[string]any, _ int) ([]memorynodes.MemoryNode, error) {
+func (i *Integration) handleOwnedTrainingLessons(ctx context.Context, args map[string]any, _ int) (result []memorynodes.MemoryNode, failure error) {
 	run, _, err := i.ownedTrainingScope(ctx)
 	if err != nil {
 		return nil, err
@@ -152,12 +152,6 @@ func (i *Integration) handleOwnedTrainingLessons(ctx context.Context, args map[s
 	if r == nil || r.db() == nil {
 		return nil, fmt.Errorf("owned Training retrieval is not wired")
 	}
-	for _, concept := range []string{"v1:knowledge:documentChunk", "v1:library:artifact", "v1:library:file", "v1:library:fileChunk"} {
-		// staged-data: GATE -- all source concepts are checked before raw reads.
-		if r.staged(concept) {
-			return nil, nil
-		}
-	}
 	limit, valid := intArg(args["limit"])
 	tokens, validTokens := intArg(args["maxTokens"])
 	threshold := floatField(args, "minimumSimilarity")
@@ -165,12 +159,30 @@ func (i *Integration) handleOwnedTrainingLessons(ctx context.Context, args map[s
 	if !valid || !validTokens || limit < 1 || limit > 10 || tokens < 1 || tokens > 4000 || math.IsNaN(threshold) || threshold < 0 || threshold > 1 || text == "" || len(text) > 12000 {
 		return nil, fmt.Errorf("owned Training retrieval requires bounded text, count, similarity and context limits")
 	}
+	receiptID := "training-selection-" + id.NewShortId()
+	receipt := trainingSelectionReceipt{SchemaVersion: 1, Method: "bounded-cosine-ranked-v1", QueryDigest: trainingDigest(text), Limit: limit, MinimumSimilarity: threshold, MaxBytes: tokens * 3, CandidateLimit: limit * 4, Status: "no-indexed-candidates", Selected: []map[string]any{}, Rejected: []map[string]any{}}
+	defer func() {
+		if failure == nil {
+			failure = i.saveTrainingSelection(ctx, run, receiptID, receipt)
+			if failure != nil {
+				result = nil
+			}
+		}
+	}()
+	for _, concept := range []string{"v1:knowledge:documentChunk", "v1:library:artifact", "v1:library:file", "v1:library:fileChunk"} {
+		// staged-data: GATE -- all source concepts are checked before raw reads.
+		if r.staged(concept) {
+			receipt.Status = "source-concept-staged"
+			return nil, nil
+		}
+	}
 	// Empty first-use corpora require neither an embedding binding nor a model.
 	var present bool
 	if err := r.db().QueryRowContext(ctx, "SELECT EXISTS("+trainingSourceSQL+")", memql.BareShortId(run.OwnerUserId)).Scan(&present); err != nil {
 		return nil, err
 	}
 	if !present {
+		receipt.Status = "empty-eligible-corpus"
 		return nil, nil
 	}
 
@@ -183,6 +195,7 @@ func (i *Integration) handleOwnedTrainingLessons(ctx context.Context, args map[s
 	if !ownedPresent {
 		binding, err := memql.CurrentEmbedderBinding(ctx)
 		if errors.Is(err, memql.ErrNoEmbedderBound) {
+			receipt.Status = "embedder-unbound"
 			return nil, nil
 		}
 		if err != nil {
@@ -197,12 +210,14 @@ func (i *Integration) handleOwnedTrainingLessons(ctx context.Context, args map[s
 			return nil, err
 		}
 		if !exists {
+			receipt.Status = "index-unavailable"
 			return nil, nil
 		}
 		if err = r.db().QueryRowContext(ctx, "SELECT EXISTS(SELECT 1 FROM ("+trainingSourceSQL+") s JOIN "+table+" v ON v.id=s.id AND v.concept='v1:knowledge:documentChunk' AND v.vector_field='content')", memql.BareShortId(run.OwnerUserId)).Scan(&exists); err != nil {
 			return nil, err
 		}
 		if !exists {
+			receipt.Status = "index-unavailable"
 			return nil, nil
 		}
 	}
@@ -254,28 +269,42 @@ func (i *Integration) handleOwnedTrainingLessons(ctx context.Context, args map[s
 	out := []memorynodes.MemoryNode{}
 	seenText := map[string]bool{}
 	remaining := tokens * 3 // WorkContextSize's conservative byte budget, including provenance.
+	receipt.Status = "ranked"
 	for _, c := range candidates {
-		if len(out) == limit {
-			break
-		}
 		payload, ok, err := i.revalidateTrainingCandidate(ctx, c)
 		if err != nil {
 			return nil, err
 		}
 		if !ok {
+			// Revoked or changed sources disclose no text or source identity.
+			receipt.Rejected = append(receipt.Rejected, map[string]any{"reason": "source-unavailable"})
+			continue
+		}
+		decision := map[string]any{"chunkId": payload["chunkId"], "chunkVersionAt": payload["chunkVersionAt"], "similarity": c.score}
+		reject := func(reason string) {
+			decision["reason"] = reason
+			receipt.Rejected = append(receipt.Rejected, decision)
+		}
+		if len(out) == limit {
+			reject("count-limit")
 			continue
 		}
 		text, _ := payload["text"].(string)
 		if seenText[text] {
+			reject("duplicate-text")
 			continue
 		}
+		payload["selectionReceiptId"] = receiptID
+		payload["citation"] = stringField(payload, "citation") + " [Training receipt " + receiptID + "]"
 		raw, err := json.Marshal(payload)
 		if err != nil {
 			return nil, err
 		}
 		if len(raw) > remaining {
+			reject("context-byte-limit")
 			continue
 		} // Never turn a reviewed passage into a truncated claim.
+		receipt.Selected = append(receipt.Selected, selectedTrainingEvidence(payload))
 		remaining -= len(raw)
 		seenText[text] = true
 		out = append(out, memorynodes.MemoryNode{ID: c.node.ID, Concept: resultConcept, Type: memorynodes.NodeTypeObject, CreatedAt: time.Now().UTC(), Payload: raw})

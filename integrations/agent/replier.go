@@ -661,7 +661,7 @@ func (r *Replier) prepareTurn(ctx context.Context, msg *memqlv1.AgentGenerateTur
 		"requestId", msg.RequestId,
 	)
 
-	messages := []common.ChatMessage{{Role: "system", Content: prompt}}
+	messages := []common.ChatMessage{{Role: "system", Content: prompt, ContextReferences: trainingContextReferences(prompt, trainingPassages)}}
 	for _, m := range msg.History {
 		role := strings.TrimSpace(m.Role)
 		content := strings.TrimSpace(m.Content)

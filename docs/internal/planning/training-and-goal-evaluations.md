@@ -129,3 +129,29 @@ candidate case, not a completed success or an autonomous benchmark. Its
 coaching, approvals and missing regression/delivery evidence must remain
 visible. Do not retrofit the new skill bindings onto a run that did not record
 them, and do not treat its live product issue as an evaluation fixture.
+
+## Work-quality changes from the coaching exercise
+
+The approved first phase extends the existing recovery checkpoint, optional
+Training reader and provider observations. It does not implement the planned
+Learn milestone, change the baseline model matrix or start its scheduled runs.
+Worker range/search reads use the existing fs_read operation and directory
+permission, with an advertised contract checked again on the stream-holding
+replica. Cockpit and engine must both carry that contract.
+
+Targeted implementation evaluations use the existing test and goal-fixture
+infrastructure. They are not live model benchmarks:
+
+| Case | Executable evidence | Negative/control case |
+| --- | --- | --- |
+| Repeated investigation | `TestReadEvidenceObservationSurvivesResumeWithoutChangingRecovery` | Changed query wording with the same result remains visible; observation cannot park the run |
+| Legitimate exploration | `TestReadEvidenceDoesNotTreatWritesOrUnknownToolsAsReads` and existing progress-recovery tests | New source bytes/pages reset the repeated-result signal; unknown effects are not guessed |
+| Named output and missing evidence | `TestWorkCheckpointPreservesNamedGapAndEvidenceWithinBudget` | Large background text cannot crowd out a fitting gap and source reference |
+| Focused read and permission boundaries | Cockpit `TestBoundedFileInspectionBothPermissionLanes`, `TestFileInspectionDoesNotEscapeApprovedDirectory`; engine `TestExtendedReadContractRecheckedAcrossReplicaHop` | Old read implementation refuses the new requests; incomplete searches cannot establish absence; stale contract or symlink escape refuses |
+| Lesson selection and delivery | `TestOwnedTrainingReadsReviewedTaughtSourcesAcrossReplicas`, `TestWorkDBApprovedTrainingReachesOrdinaryTurnOnAnotherReplica`, `TestTrainingReceiptReachesActualProviderObservationsInBothLoops` | Foreign/rejected sources withheld, oversized text omitted whole with a reason, actual attempt IDs remain separate from selection |
+| Recovery and skill versions | Existing `TestSkillSelectionSurvivesReplicaHopAndCatalogChange` and goal-fixture oracle suite | Saved versions remain unchanged after a catalog update; false regression greens and lost unrelated work are rejected |
+
+Software-development baseline version 2 adds explicit recovery-point coverage,
+named uncertainty/next-deliverable guidance and conditional inspection advice.
+Its behavioral benefit still needs the independently operated live baseline;
+passing the checks above is not evidence of faster or more autonomous models.
