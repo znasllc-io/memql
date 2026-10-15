@@ -283,7 +283,8 @@ workbench replicas filter node type. App-session details retain a separate scope
 feed only while open because list reads omit recording details.
 
 Equipment's Recent work shows the latest five matching sessions from the loaded
-recent history, with All app sessions opening Activity. Both views share one
+recent history. All app sessions opens Activity only when this machine has more
+than five loaded sessions. Both views share one
 feed; a payload event causes no additional list read. Catalogs, recommendations,
 measurements, sharing ledgers, delegation settings and call history have no
 browser broadcast stream: visible views use `AutoRefresh` for those reads.

@@ -18,7 +18,7 @@ function fleet(){return render(withSession(<MachinesProvider><FleetApp sectionId
 it('returns to the list when the selected machine disappears, never to another machine',async()=>{
  h.connection=fakeConnection({myWorkersWithStatus:[machineRow({id:'a',displayName:'Alpha'}),machineRow({id:'b',displayName:'Beta'})]});fleet();
  await openMachine('Beta');
- fireEvent.click(await screen.findByRole('button',{name:/Machine details/}));expect(screen.getByLabelText('Name for Beta')).toBeTruthy();
+ fireEvent.click(await screen.findByRole('button',{name:'Details'}));expect(screen.getByLabelText('Name for Beta')).toBeTruthy();
  await act(async()=>h.connection.subscriptions.emit(WORKER_REGISTRATION_CONCEPT,machineRow({id:'b',displayName:'Beta',revokedAt:new Date().toISOString()}),'NODE_UPDATED'));
  expect(await screen.findByRole('button',{name:/^Open Alpha/})).toBeTruthy();expect(screen.queryByRole('navigation',{name:'Machine views'})).toBeNull();expect(screen.queryByLabelText('Name for Alpha')).toBeNull();expect(screen.queryByText('That machine is no longer in this view')).toBeNull();
 });
@@ -36,7 +36,7 @@ it('has no AI activity by default and never changes keyboard focus as activity u
 it.each([false,true])('returns to Machines after confirmed removal, with another machine: %s',async(other)=>{
  h.connection=fakeConnection({myWorkersWithStatus:[machineRow({id:'a',displayName:'Alpha'}),...(other?[machineRow({id:'b',displayName:'Beta'})]:[])]});fleet();
  await openMachine('Alpha');
- fireEvent.click(await screen.findByRole('button',{name:/Machine details/}));
+ fireEvent.click(await screen.findByRole('button',{name:'Details'}));
  fireEvent.click(screen.getByRole('button',{name:'Remove this machine'}));
  await readTheBar();
  fireEvent.click(screen.getByRole('button',{name:'Remove Alpha'}));
@@ -51,7 +51,7 @@ it('keeps a refused removal on its machine details',async()=>{
  h.connection=fakeConnection({myWorkersWithStatus:[machineRow({id:'a',displayName:'Alpha'})]});
  h.connection.query.fleetRevokeMachine.mockRejectedValue(new Error('Removal refused'));fleet();
  await openMachine('Alpha');
- fireEvent.click(await screen.findByRole('button',{name:/Machine details/}));
+ fireEvent.click(await screen.findByRole('button',{name:'Details'}));
  fireEvent.click(screen.getByRole('button',{name:'Remove this machine'}));
  await readTheBar();
  fireEvent.click(screen.getByRole('button',{name:'Remove Alpha'}));
@@ -75,6 +75,7 @@ it('selects the first model, keeps a chosen model across heartbeats and falls ba
  expect(screen.getByRole('region',{name:'Selected equipment'}).textContent).toContain('alpha');
  fireEvent.click(screen.getByRole('button',{name:'Manage models'}));expect(onInspect).toHaveBeenLastCalledWith('models');
  fireEvent.click(screen.getByRole('button',{name:'Call history'}));expect(onInspect).toHaveBeenLastCalledWith('activity');
+ expect(screen.queryByRole('button',{name:'Machine details'})).toBeNull();
  expect(screen.queryByRole('button',{name:'Personal inference'})).toBeNull();
  expect(screen.queryByText('Tools')).toBeNull();
 });
@@ -115,7 +116,7 @@ it('never presents a refused machine inventory as a zero count', async () => {
 
 it('All app sessions returns to the full list after a previously opened session', async () => {
  const session = appSessionRow({id:'session',workerId:'a',runId:'A recorded task'});
- h.connection = fakeConnection({myWorkersWithStatus:[machineRow({id:'a',displayName:'Alpha'})],appSessionsForUser:[session],appSessionById:[session]});
+ h.connection = fakeConnection({myWorkersWithStatus:[machineRow({id:'a',displayName:'Alpha'})],appSessionsForUser:[session,...Array.from({length:5},(_,i)=>appSessionRow({id:`older-${i}`,workerId:'a',runId:`Older task ${i}`,startedAt:'2026-01-01T00:00:00Z'}))],appSessionById:[session]});
  function App() { const [section,setSection]=useState('machines');return <><button onClick={()=>setSection('machines')}>Machines section</button><FleetApp sectionId={section} navigate={setSection} askContext={vi.fn()} store={{load:()=>({version:1,defaultSection:'machines',showRevoked:false}),save:()=>{}}}/></>; }
  render(withSession(<MachinesProvider><App/></MachinesProvider>));
  await openMachine('Alpha');

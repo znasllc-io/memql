@@ -73,7 +73,7 @@ it("names the machine and the view on Equipment, the same as on every other view
   await openMachine("Alpha");
   await waitFor(() => expect(crumbs()).toEqual(["Machines", "Alpha", "Equipment"]));
 
-  fireEvent.click(screen.getByRole("button", { name: /Machine details/ }));
+  fireEvent.click(screen.getByRole("button", { name: "Details" }));
   await waitFor(() => expect(crumbs()).toEqual(["Machines", "Alpha", "Details"]));
 });
 
@@ -81,9 +81,9 @@ it("never draws a second trail, whichever machine view is open", async () => {
   h.connection = fakeConnection({ myWorkersWithStatus: [machineRow({ id: "a", displayName: "Alpha" })] });
   fleet();
   await openMachine("Alpha");
-  await screen.findByRole("button", { name: /Machine details/ });
+  await screen.findByRole("button", { name: "Details" });
   expect(screen.getAllByRole("navigation", { name: "Breadcrumbs" })).toHaveLength(1);
-  fireEvent.click(screen.getByRole("button", { name: /Machine details/ }));
+  fireEvent.click(screen.getByRole("button", { name: "Details" }));
   await waitFor(() => expect(crumbs().at(-1)).toBe("Details"));
   expect(screen.getAllByRole("navigation", { name: "Breadcrumbs" })).toHaveLength(1);
   expect(screen.getAllByRole("button", { name: /^Back/ })).toHaveLength(1);
@@ -105,7 +105,7 @@ it("goes Back from a machine to the list, and from a view to the machine", async
   h.connection = fakeConnection({ myWorkersWithStatus: [machineRow({ id: "a", displayName: "Alpha" })] });
   fleet();
   await openMachine("Alpha");
-  fireEvent.click(await screen.findByRole("button", { name: /Machine details/ }));
+  fireEvent.click(await screen.findByRole("button", { name: "Details" }));
   await waitFor(() => expect(crumbs()).toEqual(["Machines", "Alpha", "Details"]));
 
   fireEvent.click(screen.getByRole("button", { name: "Back to Alpha" }));

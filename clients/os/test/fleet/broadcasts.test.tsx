@@ -18,14 +18,22 @@ beforeEach(() => { h.connection = null; });
 
 describe("Fleet broadcast connections", () => {
   it("shares sessions, folds new work and status without rereads, and keeps recent work at five", async () => {
-    const connection = fakeConnection({ appSessionsForUser: [1, 2, 3, 4, 5, 6].map(id => session(String(id))) });
+    const connection = fakeConnection({ appSessionsForUser: [1, 2, 3, 4, 5].map(id => session(String(id))) });
     h.connection = connection;
     const open = vi.fn(), all = vi.fn();
     function OtherConsumer() { const feed = useAppSessions(); return <output aria-label="All sessions">{feed.sessions.length}</output>; }
     render(withSession(<StrictMode><AppSessionsProvider><RecentWork machineId="machine" onOpenSession={open} onAllSessions={all} /><OtherConsumer /></AppSessionsProvider></StrictMode>, { userId: "me" }));
-    await screen.findByText("run-6");
+    await screen.findByText("run-5");
+    expect(screen.getByText("run-1")).toBeTruthy();
+    expect(screen.getByLabelText("All sessions").textContent).toBe("5");
+    expect(screen.queryByRole("button", { name: "All app sessions" })).toBeNull();
+    await act(async () => {
+      connection.subscriptions.emit(APP_SESSION_CONCEPT, session("8", { workerId: "elsewhere" }), "NODE_CREATED");
+      connection.subscriptions.emit(APP_SESSION_CONCEPT, session("9", { ownerUserId: "someone-else" }), "NODE_CREATED");
+    });
+    expect(screen.queryByRole("button", { name: "All app sessions" })).toBeNull();
+    await act(async () => connection.subscriptions.emit(APP_SESSION_CONCEPT, session("6"), "NODE_CREATED"));
     expect(screen.queryByText("run-1")).toBeNull();
-    expect(screen.getByLabelText("All sessions").textContent).toBe("6");
     expect(connection.query.appSessionsForUser).toHaveBeenCalledTimes(1);
     const nav = screen.getByRole("button", { name: "All app sessions" });
     nav.focus();
@@ -45,6 +53,12 @@ describe("Fleet broadcast connections", () => {
     expect(within(row).getByText("failed")).toBeTruthy();
     fireEvent.click(row); expect(open).toHaveBeenCalledWith("7");
     fireEvent.click(nav); expect(all).toHaveBeenCalledOnce();
+    await act(async () => {
+      connection.subscriptions.emit(APP_SESSION_CONCEPT, session("7", { workerId: "elsewhere" }));
+      connection.subscriptions.emit(APP_SESSION_CONCEPT, session("6", { workerId: "elsewhere" }));
+    });
+    expect(screen.queryByRole("button", { name: "All app sessions" })).toBeNull();
+    expect(screen.getByText("run-1")).toBeTruthy();
     expect(connection.query.appSessionsForUser).toHaveBeenCalledTimes(1);
   });
 
@@ -110,7 +124,7 @@ describe("Fleet broadcast connections", () => {
     const view = renderHook(() => useModelPulls("machine"), { wrapper: ({ children }) => withSession(children, { userId: "me" }) });
     await waitFor(() => expect(view.result.current.state).toBe("live"));
     await act(async () => {
-      for (const [id, ownerUserId, workerId] of [["mine", "me", "machine"], ["foreign", "other", "machine"], ["elsewhere", "me", "other-machine"]]) {
+      for (const [id, ownerUserId, workerId] of [["mine", "me", "machine"], ["foreign", "other", "machine"], ["elsewhere", "me", "other-machine"]] as const) {
         connection.subscriptions.emit("v1:worker:modelPull", { id, payload: modelPullRow({ id, ownerUserId, workerId, status: "running", completedBytes: 50, totalBytes: 100 }) });
       }
     });

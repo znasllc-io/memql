@@ -15,15 +15,17 @@ export function RecentWork({ machineId, onOpenSession, onAllSessions }: {
   machineId: string; onOpenSession?: (id: string) => void; onAllSessions: () => void;
 }) {
   const sessions = useAppSessions();
-  const source = useLiveView(sessions.source, machineId, rows => rows.filter(session => session.workerId === machineId).slice(0, RECENT_WORK_LIMIT));
+  const machineSessions = useLiveView(sessions.source, machineId, rows => rows.filter(session => session.workerId === machineId));
+  const source = useLiveView(machineSessions, "recent", rows => rows.slice(0, RECENT_WORK_LIMIT));
+  const hasMore = (machineSessions?.snapshot.rows.length ?? 0) > RECENT_WORK_LIMIT;
   const count = sessions.state === "live" && !sessions.error ? source?.snapshot.rows.length : undefined;
   return <section className="fleet-recent-work" aria-label="Recent app sessions">
     <div className="fleet-bank-heading">
       <Subhead meta={count}>Recent work</Subhead>
-      <PageHelp title="Recent work"><p>The latest five sessions for this machine from your recent app-session history. New work and status changes appear automatically. Open a session to inspect it, or use All app sessions to browse your full activity list.</p></PageHelp>
+      <PageHelp title="Recent work"><p>The latest five sessions for this machine from your recent app-session history. New work and status changes appear automatically. Open a session to inspect it. When there are more than five, All app sessions opens your activity list.</p></PageHelp>
       <span className="fleet-heading-actions">
         <AutoRefresh busy={sessions.loading} enabled={feedIsBehind(sessions.state, sessions.error)} onRefresh={sessions.reread} />
-        <IconButton label="All app sessions" onClick={onAllSessions}><ArrowUpRight size={16} aria-hidden /></IconButton>
+        {hasMore ? <IconButton label="All app sessions" onClick={onAllSessions}><ArrowUpRight size={16} aria-hidden /></IconButton> : null}
       </span>
     </div>
     <LiveList source={source} label="Recent app sessions" rowId={session => session.id}
