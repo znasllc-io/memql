@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"errors"
 	"strings"
+	"sync"
 	"sync/atomic"
 
 	"github.com/Azure/azure-sdk-for-go/sdk/storage/azblob"
@@ -13,6 +14,7 @@ import (
 	"github.com/znasllc-io/memql/component/auth"
 	"github.com/znasllc-io/memql/component/database/storagequota"
 	"github.com/znasllc-io/memql/component/memql"
+	"golang.org/x/sync/errgroup"
 )
 
 var capacityStore atomic.Pointer[storagequota.Store]
@@ -37,29 +39,37 @@ func (u *AzureBlobUploader) capacity(ctx context.Context) (*storagequota.Store, 
 	if s == nil {
 		return nil, errors.New("storage accounting is not configured")
 	}
-	err := s.Initialize(ctx, u.client.URL(), func(add func(string, string, int64) error) error {
-		// Paginate the whole account. Historical versions and deleted/snapshot
-		// payloads count too. Nothing is downloaded during inventory.
-		containers := u.client.ServiceClient().NewListContainersPager(nil)
-		for containers.More() {
-			page, err := containers.NextPage(ctx)
-			if err != nil {
-				return err
+	err := s.EnsureInitialized(ctx, u.client.URL(), u.inventory)
+	return s, err
+}
+
+func (u *AzureBlobUploader) inventory(ctx context.Context, add func(string, string, int64) error) error {
+	var emit sync.Mutex
+	// Paginate the whole account. Historical versions and deleted/snapshot
+	// payloads count too. Nothing is downloaded during inventory.
+	containers := u.client.ServiceClient().NewListContainersPager(nil)
+	for containers.More() {
+		page, err := containers.NextPage(ctx)
+		if err != nil {
+			return err
+		}
+		for _, c := range page.ContainerItems {
+			if c.Name == nil {
+				continue
 			}
-			for _, c := range page.ContainerItems {
-				if c.Name == nil {
-					continue
+			blobs := u.client.NewListBlobsFlatPager(*c.Name, &azblob.ListBlobsFlatOptions{Include: azblob.ListBlobsInclude{Snapshots: true, Versions: true, Deleted: true, UncommittedBlobs: true}})
+			for blobs.More() {
+				p, err := blobs.NextPage(ctx)
+				if err != nil {
+					return err
 				}
-				blobs := u.client.NewListBlobsFlatPager(*c.Name, &azblob.ListBlobsFlatOptions{Include: azblob.ListBlobsInclude{Snapshots: true, Versions: true, Deleted: true, UncommittedBlobs: true}})
-				for blobs.More() {
-					p, err := blobs.NextPage(ctx)
-					if err != nil {
-						return err
+				group, scanCtx := errgroup.WithContext(ctx)
+				group.SetLimit(16)
+				for _, b := range p.Segment.BlobItems {
+					if b.Name == nil {
+						continue
 					}
-					for _, b := range p.Segment.BlobItems {
-						if b.Name == nil {
-							continue
-						}
+					group.Go(func() error {
 						bc, err := u.blockClient(*c.Name, *b.Name)
 						if err != nil {
 							return err
@@ -75,7 +85,7 @@ func (u *AzureBlobUploader) capacity(ctx context.Context) (*storagequota.Store, 
 							key += "?versionid=" + *b.VersionID
 						}
 						if key == bc.URL() {
-							staged, err := u.UncommittedBlocks(ctx, *c.Name, *b.Name)
+							staged, err := u.UncommittedBlocks(scanCtx, *c.Name, *b.Name)
 							if err != nil {
 								return err
 							}
@@ -91,16 +101,18 @@ func (u *AzureBlobUploader) capacity(ctx context.Context) (*storagequota.Store, 
 						if len(parts) >= 3 && (parts[0] == "library" || parts[0] == "backups" || parts[0] == "objects") {
 							owner = parts[1]
 						}
-						if err := add(key, owner, size); err != nil {
-							return err
-						}
-					}
+						emit.Lock()
+						defer emit.Unlock()
+						return add(key, owner, size)
+					})
+				}
+				if err := group.Wait(); err != nil {
+					return err
 				}
 			}
 		}
-		return nil
-	})
-	return s, err
+	}
+	return nil
 }
 
 // beginCapacity is intentionally private. SDK-only protocol fixtures construct
