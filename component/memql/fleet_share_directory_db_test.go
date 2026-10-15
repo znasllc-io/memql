@@ -212,7 +212,8 @@ func TestShareDirectoryOffersCoMembersAndAnAdminEveryone(t *testing.T) {
 
 	// A PLAIN USER sees the people they share an active group with, and those
 	// groups -- no email, and never themselves (design G2).
-	asAna := shareDirActor(context.Background(), ana, auth.RoleWriter)
+	asAna := shareDirActor(context.Background(), ana, auth.RoleDeveloper)
+	f.restrictDirectory(ana)
 	got := f.directory(asAna, anasMachine)
 	require.False(t, got.Everyone, "a plain user is not offered the whole cluster")
 	require.Equal(t, []string{BareShortId(bo)}, dirPeopleIds(got), "ana's co-members: bo only (dee is inactive, cy is in no group ana is in, old is archived)")
@@ -222,7 +223,7 @@ func TestShareDirectoryOffersCoMembersAndAnAdminEveryone(t *testing.T) {
 
 	// AN ADMIN sees every active person, with the email they already see in
 	// Users, and every active group.
-	asAda := shareDirActor(context.Background(), ada, auth.RoleAdmin)
+	asAda := shareDirActor(context.Background(), ada, auth.RoleOwner)
 	all := f.directory(asAda, adasMachine)
 	require.True(t, all.Everyone)
 	offered := map[string]string{}
@@ -253,7 +254,8 @@ func TestFleetSetSharingLendsOnlyToPeopleTheOwnerCanPick(t *testing.T) {
 	f.member(design, ana, "active")
 	f.member(design, bo, "active")
 	machine := f.machine("anas-mac", ana)
-	asAna := shareDirActor(context.Background(), ana, auth.RoleWriter)
+	asAna := shareDirActor(context.Background(), ana, auth.RoleDeveloper)
+	f.restrictDirectory(ana)
 
 	// Somebody outside ana's directory is refused, with the one sentence that
 	// does not say whether the id exists (design G9).
@@ -305,8 +307,8 @@ func TestFleetSetSharingLendsOnlyToPeopleTheOwnerCanPick(t *testing.T) {
 	require.Equal(t, "owner", stored["mode"])
 	require.Equal(t, []any{}, stored["userIds"])
 	require.Equal(t, []any{}, stored["groupIds"])
-	require.NoError(t, f.share(asAna, machine, "cluster", nil, nil))
-	require.Equal(t, "cluster", f.sharingOf(machine)["mode"])
+	require.Equal(t, "invalid_sharing_mode", shareRefusalCode(f.share(asAna, machine, "cluster", nil, nil)))
+	require.Equal(t, "owner", f.sharingOf(machine)["mode"], "refused broad sharing leaves the machine private")
 }
 
 func TestARowSharedBeforeTheBlockClosedStillWrites(t *testing.T) {
@@ -319,7 +321,8 @@ func TestARowSharedBeforeTheBlockClosedStillWrites(t *testing.T) {
 	eng, db, _ := sharedReadMergeEngine(t)
 	f := shareDirFixture{t: t, eng: eng, db: db, prefix: uniqueSuffix("sharingblock")}
 	ana := f.person("ana", true)
-	asAna := shareDirActor(context.Background(), ana, auth.RoleWriter)
+	asAna := shareDirActor(context.Background(), ana, auth.RoleDeveloper)
+	f.restrictDirectory(ana)
 
 	legacy := f.id("v1:worker:registration", "legacy")
 	f.insert("v1:worker:registration", legacy, map[string]any{
@@ -378,16 +381,44 @@ func TestTheDirectoryFollowsTheGrantOnReadingPeople(t *testing.T) {
 		})
 	}
 
-	asAda := shareDirActor(context.Background(), ada, auth.RoleAdmin)
+	asAda := shareDirActor(context.Background(), ada, auth.RoleOwner)
 	require.True(t, f.directory(asAda, adasMachine).Everyone, "an admin holds read on principal by default")
 
 	grant(ada, "deny")
 	require.False(t, f.directory(asAda, adasMachine).Everyone, "a deny on reading people must narrow the directory to co-members")
 
-	asAna := shareDirActor(context.Background(), ana, auth.RoleWriter)
+	asAna := shareDirActor(context.Background(), ana, auth.RoleDeveloper)
+	f.restrictDirectory(ana)
 	require.False(t, f.directory(asAna, anasMachine).Everyone)
 	grant(ana, "allow")
 	all := f.directory(asAna, anasMachine)
 	require.True(t, all.Everyone, "a person GRANTED read on principal sees everyone, whatever their rank")
 	require.Contains(t, dirPeopleIds(all), BareShortId(bo))
+}
+
+func TestFleetSharingCannotBypassAppAccess(t *testing.T) {
+	eng, db, _ := sharedReadMergeEngine(t)
+	f := shareDirFixture{t: t, eng: eng, db: db, prefix: uniqueSuffix("fleet-role")}
+	person := f.person("person", true)
+	machine := f.machine("private", person)
+	for _, role := range []auth.Role{auth.RoleReader, auth.RoleWriter, auth.RoleAdmin} {
+		ctx := shareDirActor(context.Background(), person, role)
+		require.Equal(t, "fleet_access_denied", shareRefusalCode(f.share(ctx, machine, "owner", nil, nil)))
+		_, err := eng.evaluateFleetShareDirectoryExpression(ctx, map[string]any{"registrationId": machine})
+		require.Equal(t, "fleet_access_denied", shareRefusalCode(err))
+		require.Nil(t, f.sharingOf(machine))
+	}
+}
+
+// A developer may enroll a machine while their directory is restricted by a
+// principal-read deny. This exercises the co-member sharing boundary without
+// giving an ineligible role access to Fleet.
+func (f shareDirFixture) restrictDirectory(userId string) {
+	f.eng.InstallGrantResolution()
+	grantId := writeGrant(f.t, f.eng, "user", userId, "read", "principal", "deny")
+	f.t.Cleanup(func() {
+		auth.SetGrantSource(nil)
+		auth.SetMembershipSource(nil)
+		_, _ = f.db.NewDelete().Model((*memorynodes.MemoryNode)(nil)).Where("concept = ?", "v1:rbac:grant").Where("id = ?", grantId).Exec(context.Background())
+	})
 }

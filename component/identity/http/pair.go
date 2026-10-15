@@ -2,6 +2,7 @@ package http
 
 import (
 	"encoding/json"
+	"errors"
 	"log/slog"
 	"net/http"
 	"os"
@@ -65,7 +66,7 @@ func (s *Server) requireSecureRequest(w http.ResponseWriter, r *http.Request) bo
 
 // PairCreateRequest is the JSON body for POST /pair/codes. Authenticated
 // callers (the product's Connect Computer modal) supply their cluster
-// URL + an optional owner override (admin-only). The server stamps
+// URL. An optional owner id must name the caller. The server stamps
 // expiresAt and the owner user id.
 type PairCreateRequest struct {
 	ClusterURL  string `json:"clusterUrl"`
@@ -151,11 +152,13 @@ func (s *Server) handlePairCreate(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	ownerUserId := strings.TrimSpace(body.OwnerUserId)
-	if ownerUserId == "" {
-		ownerUserId = callerUserId
-	} else if ownerUserId != callerUserId && !isAdminRole(caller.Role) {
-		s.writePairError(w, http.StatusForbidden, "permission_denied", "only admins may mint pairing codes for other users")
+	ownerUserId, err := s.Store.FleetEnrollmentOwner(r.Context(), callerUserId, body.OwnerUserId)
+	if err != nil {
+		status, code := http.StatusServiceUnavailable, "unavailable"
+		if errors.Is(err, identity.ErrFleetEnrollmentDenied) {
+			status, code = http.StatusForbidden, "permission_denied"
+		}
+		s.writePairError(w, status, code, err.Error())
 		return
 	}
 
@@ -281,6 +284,15 @@ func (s *Server) handlePairRedeem(w http.ResponseWriter, r *http.Request) {
 	}
 	if row.IsExpired(now) {
 		s.writeRedeemError(w, http.StatusGone, "expired", "pairing code expired")
+		return
+	}
+
+	if _, err := s.Store.FleetEnrollmentOwner(ctx, row.OwnerUserId, row.OwnerUserId); err != nil {
+		status, code := http.StatusServiceUnavailable, "unavailable"
+		if errors.Is(err, identity.ErrFleetEnrollmentDenied) {
+			status, code = http.StatusForbidden, "permission_denied"
+		}
+		s.writeRedeemError(w, status, code, err.Error())
 		return
 	}
 

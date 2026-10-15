@@ -318,6 +318,9 @@ func (e *MemQLEngine) evaluateFleetShareDirectoryExpression(ctx context.Context,
 	if e == nil {
 		return nil, fmt.Errorf("engine is nil")
 	}
+	if err := requireFleetSharingAccess(ctx); err != nil {
+		return nil, err
+	}
 	registrationId := strings.TrimSpace(stringArg(args, "registrationId"))
 	machine, err := e.modelPullMachineFor(ctx, registrationId)
 	if err != nil {

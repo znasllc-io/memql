@@ -97,7 +97,7 @@ func TestAClusterOwnerCannotRewriteSharingOnAMachineTheyDoNotOwn(t *testing.T) {
 			require.Equal(t, ana, storedRegistrationOwner(t, f, machine), "a refused takeover must leave the owner untouched")
 		})
 	}
-	require.Equal(t, "not_your_machine", shareRefusalCode(f.share(asOperator, machine, "cluster", nil, nil)),
+	require.Equal(t, "not_your_machine", shareRefusalCode(f.share(asOperator, machine, "people", []string{stranger}, nil)),
 		"fleetSetSharing still resolves the machine through the caller's own, and it is not the operator's")
 }
 
@@ -110,7 +110,8 @@ func TestAnOwnersRawWriteCannotSkipFleetSetSharing(t *testing.T) {
 	ana := f.person("ana", true)
 	outsider := f.person("outsider", true)
 	machine := f.machine("anas-mac", ana)
-	asAna := shareDirActor(context.Background(), ana, auth.RoleWriter)
+	asAna := shareDirActor(context.Background(), ana, auth.RoleDeveloper)
+	f.restrictDirectory(ana)
 
 	_, err := eng.Execute(asAna, rawRegistrationWrite(machine, map[string]any{
 		"sharing": map[string]any{"mode": "people", "userIds": []string{BareShortId(outsider)}, "groupIds": []string{}},
@@ -129,13 +130,13 @@ func TestTheLegitimateSharingAndOperatorPathsStillWork(t *testing.T) {
 	operator := f.person("operator", true)
 	lent := f.machine("anas-mac", ana)
 	offboarded := f.machine("anas-old-laptop", ana)
-	asAna := shareDirActor(context.Background(), ana, auth.RoleWriter)
+	asAna := shareDirActor(context.Background(), ana, auth.RoleDeveloper)
 	asOperator := shareDirActor(context.Background(), operator, auth.RoleOwner)
 
 	// (a)
-	require.NoError(t, f.share(asAna, lent, "cluster", nil, nil), "the owner's own fleetSetSharing was refused")
+	require.NoError(t, f.share(asAna, lent, "people", []string{operator}, nil), "the owner's own fleetSetSharing was refused")
 	stored := f.sharingOf(lent)
-	require.Equal(t, "cluster", stored["mode"])
+	require.Equal(t, "people", stored["mode"])
 	require.Equal(t, ana, stored["sharedBy"])
 
 	// A write that does not touch the block passes the guard: every heartbeat,
@@ -144,7 +145,7 @@ func TestTheLegitimateSharingAndOperatorPathsStillWork(t *testing.T) {
 	_, err := eng.Execute(asAna, fmt.Sprintf(`mutation renameWorker(registrationId: %s, displayName: "Ana's Mac")`,
 		langparser.QuoteString(BareShortId(lent))))
 	require.NoError(t, err, "a rename carries `sharing` through the read-merge unchanged and must not be judged as a change to it")
-	require.Equal(t, "cluster", f.sharingOf(lent)["mode"], "the rename must not have disturbed the consent")
+	require.Equal(t, "people", f.sharingOf(lent)["mode"], "the rename must not have disturbed the consent")
 
 	// (b)
 	internal := auth.ContextWithInternalOrigin(asOperator)
