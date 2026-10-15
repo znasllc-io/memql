@@ -411,12 +411,13 @@ func handleRun(args []string) {
 			Inventory: modelInventory,
 		})
 		backups := backup.New(backup.Options{
-			Logger:     logger,
-			StateDir:   legacyCfg.StateDir,
-			BaseURL:    backupBaseURL(legacyCfg.ClusterURL),
-			Bearer:     backupBearer(legacyCfg.ClusterURL, logger),
-			CheckPath:  policy.CheckBackupPath,
-			HTTPClient: &http.Client{Timeout: 0},
+			Logger:            logger,
+			StateDir:          legacyCfg.StateDir,
+			BaseURL:           backupBaseURL(legacyCfg.ClusterURL),
+			Bearer:            backupBearer(legacyCfg.ClusterURL, logger),
+			CheckPath:         policy.CheckBackupPath,
+			CheckDownloadPath: policy.CheckBackupDownloadPath,
+			HTTPClient:        &http.Client{Timeout: 0},
 		})
 		runner, err = NewRunner(Options{
 			Logger:   logger,

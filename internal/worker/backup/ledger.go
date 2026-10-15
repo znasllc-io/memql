@@ -1,9 +1,13 @@
 package backup
 
 import (
+	"bufio"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
@@ -36,7 +40,9 @@ const (
 
 // Record is what the ledger remembers about one file.
 type Record struct {
-	Stamp Stamp `json:"stamp"`
+	TransferID string `json:"transferId,omitempty"`
+	InBin      bool   `json:"inBin,omitempty"`
+	Stamp      Stamp  `json:"stamp"`
 	// FileID is the v1:library:file the last push produced. Kept so the
 	// verify lane can report a state without asking the engine which row a
 	// path belongs to on every sweep; an empty value simply means "ask".
@@ -67,21 +73,24 @@ type Record struct {
 	UploadSHA256 string `json:"uploadSHA256,omitempty"`
 }
 
-// Ledger is one watch's record set, held in memory and persisted whole.
-//
-// Persisted WHOLE rather than appended to, because it is small (one line per
-// file) and because a partial write is the one failure that would matter: a
-// half-written append is a corrupt file, while a rename is atomic and either
-// lands or does not.
+// Ledger checkpoints changed paths in an append journal. A folder with many
+// files must not rewrite every previous receipt for each completed upload.
+// Checksummed records survive a torn tail; periodic snapshots carry a sequence
+// so replay cannot roll them back after an interrupted compaction.
 type Ledger struct {
-	mu    sync.Mutex
-	path  string
-	files map[string]Record
+	mu            sync.Mutex
+	path          string
+	files         map[string]Record
+	dirty         map[string]*Record
+	sequence      uint64
+	journalBytes  int64
+	snapshotBytes int64
 }
 
 type ledgerDoc struct {
-	Version int               `json:"version"`
-	Files   map[string]Record `json:"files"`
+	Version  int               `json:"version"`
+	Sequence uint64            `json:"sequence,omitempty"`
+	Files    map[string]Record `json:"files"`
 }
 
 // LoadLedger reads the ledger for one watch, or returns an empty one.
@@ -90,19 +99,65 @@ type ledgerDoc struct {
 // cache must not prevent verification. The manager compares the remote
 // digest before adopting the current version, and refuses unknown conflicts.
 func LoadLedger(stateDir, watchID string) *Ledger {
-	l := &Ledger{path: ledgerPath(stateDir, watchID), files: map[string]Record{}}
+	l := &Ledger{path: ledgerPath(stateDir, watchID), files: map[string]Record{}, dirty: map[string]*Record{}}
 	data, err := os.ReadFile(l.path)
-	if err != nil {
-		return l
+	if err == nil {
+		var doc ledgerDoc
+		if json.Unmarshal(data, &doc) == nil && doc.Version == 1 && doc.Files != nil {
+			l.files = doc.Files
+			l.sequence = doc.Sequence
+			l.snapshotBytes = int64(len(data))
+		}
 	}
-	var doc ledgerDoc
-	if err := json.Unmarshal(data, &doc); err != nil || doc.Version != 1 {
-		return l
-	}
-	if doc.Files != nil {
-		l.files = doc.Files
-	}
+	l.replay()
 	return l
+}
+
+type ledgerChange struct {
+	Sequence uint64  `json:"sequence"`
+	Path     string  `json:"path"`
+	Record   *Record `json:"record"`
+}
+type ledgerEnvelope struct {
+	Data     json.RawMessage `json:"data"`
+	Checksum string          `json:"checksum"`
+}
+
+func (l *Ledger) replay() {
+	f, err := os.Open(l.path + ".journal")
+	if err != nil {
+		return
+	}
+	defer f.Close()
+	reader := bufio.NewReaderSize(f, 256<<10)
+	for {
+		line, err := reader.ReadSlice('\n')
+		if err != nil {
+			return
+		}
+		if len(line) > 256<<10 {
+			return
+		}
+		var envelope ledgerEnvelope
+		var change ledgerChange
+		if json.Unmarshal(line, &envelope) != nil {
+			return
+		}
+		digest := sha256.Sum256(envelope.Data)
+		if hex.EncodeToString(digest[:]) != envelope.Checksum || json.Unmarshal(envelope.Data, &change) != nil || change.Path == "" || change.Sequence == 0 {
+			return
+		}
+		l.journalBytes += int64(len(line))
+		if change.Sequence <= l.sequence {
+			continue
+		}
+		if change.Record == nil {
+			delete(l.files, change.Path)
+		} else {
+			l.files[change.Path] = *change.Record
+		}
+		l.sequence = change.Sequence
+	}
 }
 
 func ledgerPath(stateDir, watchID string) string {
@@ -122,6 +177,11 @@ func (l *Ledger) Put(path string, rec Record) {
 	l.mu.Lock()
 	defer l.mu.Unlock()
 	l.files[path] = rec
+	if l.dirty == nil {
+		l.dirty = map[string]*Record{}
+	}
+	copy := rec
+	l.dirty[path] = &copy
 }
 
 // Paths returns every path the ledger knows, so the verify lane can notice
@@ -147,23 +207,89 @@ func (l *Ledger) Forget(path string) {
 	l.mu.Lock()
 	defer l.mu.Unlock()
 	delete(l.files, path)
+	if l.dirty == nil {
+		l.dirty = map[string]*Record{}
+	}
+	l.dirty[path] = nil
 }
 
-// Save writes the ledger atomically.
+// Save syncs only changed receipts before returning. A failed write retains the
+// dirty set, and the next attempt truncates any uncertain tail before retrying.
 func (l *Ledger) Save() error {
 	l.mu.Lock()
-	doc := ledgerDoc{Version: 1, Files: make(map[string]Record, len(l.files))}
-	for k, v := range l.files {
-		doc.Files[k] = v
+	defer l.mu.Unlock()
+	if len(l.dirty) == 0 {
+		return nil
 	}
-	path := l.path
-	l.mu.Unlock()
-
-	body, err := json.Marshal(doc)
+	if err := os.MkdirAll(filepath.Dir(l.path), ledgerDirMode); err != nil {
+		return err
+	}
+	f, err := os.OpenFile(l.path+".journal", os.O_CREATE|os.O_RDWR, ledgerFileMode)
 	if err != nil {
-		return fmt.Errorf("backup: encode ledger: %w", err)
+		return err
 	}
-	return writeFileAtomic(path, body, ledgerFileMode)
+	defer f.Close()
+	if err = f.Truncate(l.journalBytes); err != nil {
+		return err
+	}
+	if _, err = f.Seek(l.journalBytes, io.SeekStart); err != nil {
+		return err
+	}
+	var written int64
+	for path, record := range l.dirty {
+		l.sequence++
+		data, e := json.Marshal(ledgerChange{l.sequence, path, record})
+		if e != nil {
+			return e
+		}
+		sum := sha256.Sum256(data)
+		envelope, e := json.Marshal(ledgerEnvelope{data, hex.EncodeToString(sum[:])})
+		if e != nil {
+			return e
+		}
+		envelope = append(envelope, '\n')
+		n, e := f.Write(envelope)
+		if e != nil {
+			return e
+		}
+		if n != len(envelope) {
+			return io.ErrShortWrite
+		}
+		written += int64(n)
+	}
+	if err = f.Sync(); err != nil {
+		return err
+	}
+	d, err := os.Open(filepath.Dir(l.path))
+	if err != nil {
+		return err
+	}
+	err = d.Sync()
+	d.Close()
+	if err != nil {
+		return err
+	}
+	l.journalBytes += written
+	l.dirty = map[string]*Record{}
+	if l.journalBytes < max(16<<20, 2*l.snapshotBytes) {
+		return nil
+	}
+	data, err := json.Marshal(ledgerDoc{Version: 1, Sequence: l.sequence, Files: l.files})
+	if err != nil {
+		return err
+	}
+	if err = writeFileAtomic(l.path, data, ledgerFileMode); err != nil {
+		return err
+	}
+	l.snapshotBytes = int64(len(data))
+	if err = f.Truncate(0); err != nil {
+		return err
+	}
+	if err = f.Sync(); err != nil {
+		return err
+	}
+	l.journalBytes = 0
+	return nil
 }
 
 // writeFileAtomic writes through a temp file in the SAME directory and

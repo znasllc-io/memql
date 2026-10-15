@@ -350,12 +350,13 @@ func (f *Fleet) buildHome(home Home, machineID string) (homeRun, error) {
 		return homeRun{}, err
 	}
 	backups := backup.New(backup.Options{
-		Logger:     homeLogger,
-		StateDir:   cfg.StateDir,
-		BaseURL:    backupBaseURL(cfg.ClusterURL),
-		Bearer:     backupBearer(cfg.ClusterURL, f.logger),
-		CheckPath:  f.policyBackupCheck(),
-		HTTPClient: &http.Client{Timeout: 0},
+		Logger:            homeLogger,
+		StateDir:          cfg.StateDir,
+		BaseURL:           backupBaseURL(cfg.ClusterURL),
+		Bearer:            backupBearer(cfg.ClusterURL, f.logger),
+		CheckPath:         f.policyBackupCheck(),
+		CheckDownloadPath: f.policyDownloadCheck(),
+		HTTPClient:        &http.Client{Timeout: 0},
 	})
 	return homeRun{
 		home:     home,
@@ -386,7 +387,14 @@ func (f *Fleet) policyCheckPath() func(string) error {
 
 func (f *Fleet) policyBackupCheck() func(string) error {
 	if f.policy == nil {
-		return func(string) error { return nil }
+		return func(string) error { return fmt.Errorf("backup reads are not allowed on this machine") }
 	}
 	return f.policy.CheckBackupPath
+}
+
+func (f *Fleet) policyDownloadCheck() func(string) error {
+	if f.policy == nil {
+		return nil
+	}
+	return f.policy.CheckBackupDownloadPath
 }

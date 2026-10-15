@@ -4,11 +4,13 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"github.com/znasllc-io/memql-cockpit/internal/worker/transfer"
 	"io/fs"
 	"log/slog"
 	"math/rand"
 	"net/http"
 	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"sync"
@@ -18,17 +20,9 @@ import (
 // The watched-folder backup: one folder on this machine, kept arriving in the
 // Library (memql#4841, the cockpit half of epic memql#4783).
 //
-// ===========================================================================
-// THE INVARIANT, RESTATED HERE BECAUSE THIS IS THE CODE THAT COULD BREAK IT
-// ===========================================================================
-// ONE-WAY, FOREVER. Nothing in this package reads the Library and writes this
-// machine, and nothing anywhere deletes, moves or hides a copy because of
-// something that happened at the origin. A file deleted here is FLAGGED there
-// (`origin_gone`) and stays whole and downloadable -- because a backup whose
-// copy follows the original into the bin is not a backup.
-//
-// Two-way sync and conflict resolution are refused deliberately. That is the
-// complexity cliff this feature exists on the safe side of.
+// Existing retain-mode arrangements keep deleted originals in Files. Explicit
+// sync-mode arrangements move confirmed deletions to the Bin. Both are one-way:
+// this sweeper never changes source files on the computer.
 //
 // ===========================================================================
 // WHO DECIDES WHAT
@@ -67,7 +61,9 @@ const (
 // that package's own header gives: one struct the caller fills from policy and
 // config, with the seams the tests replace.
 type Options struct {
-	Logger *slog.Logger
+	CheckDownloadPath func(string) error
+	Transfers         *transfer.Runner
+	Logger            *slog.Logger
 	// StateDir is where the per-watch ledgers live.
 	StateDir string
 	// BaseURL is the cluster's HTTP origin. Derived from the worker's own
@@ -89,10 +85,12 @@ type Options struct {
 
 // Manager runs the sweep loop.
 type Manager struct {
-	opts    Options
-	graph   *Graph
-	library *Library
-	logger  *slog.Logger
+	transfers *transfer.Runner
+	rpc       *transfer.RPC
+	opts      Options
+	graph     *Graph
+	library   *Library
+	logger    *slog.Logger
 
 	mu      sync.Mutex
 	ledgers map[string]*Ledger
@@ -119,7 +117,14 @@ func New(opts Options) *Manager {
 	if strings.TrimSpace(opts.BaseURL) == "" || opts.Bearer == nil {
 		return nil
 	}
+	var rpc *transfer.RPC
+	transfers := opts.Transfers
+	if transfers == nil {
+		rpc = &transfer.RPC{Endpoint: opts.BaseURL, Bearer: opts.Bearer}
+		transfers = &transfer.Runner{Control: rpc, StateDir: opts.StateDir, CheckRead: opts.CheckPath, CheckWrite: opts.CheckDownloadPath, HTTP: opts.HTTPClient}
+	}
 	return &Manager{
+		transfers: transfers, rpc: rpc,
 		opts:    opts,
 		graph:   NewGraph(opts.BaseURL, opts.HTTPClient, opts.Bearer),
 		library: NewLibrary(opts.BaseURL, opts.HTTPClient, opts.Bearer),
@@ -143,6 +148,14 @@ func (m *Manager) Run(ctx context.Context, registrationID func() string) {
 	if m == nil || registrationID == nil {
 		return
 	}
+	if m.rpc != nil {
+		defer m.rpc.Close()
+	}
+	transferCtx, stopTransfers := context.WithCancel(ctx)
+	defer stopTransfers()
+	transfersDone := make(chan struct{})
+	go func() { defer close(transfersDone); m.transfers.RunPending(transferCtx, registrationID) }()
+	defer func() { stopTransfers(); <-transfersDone }()
 	if !sleepFor(ctx, initialDelay) {
 		return
 	}
@@ -204,6 +217,16 @@ func (m *Manager) sweep(ctx context.Context, workerID string, force bool) {
 		m.logger.Warn("backup: no registration id, so nothing was swept -- a push cannot name its machine without one")
 		return
 	}
+	unlock, err := transfer.LockLocal(filepath.Join(m.opts.StateDir, "backup", "sweep.lock"))
+	if err != nil {
+		m.logger.Debug("backup: another sweep is active", "error", err)
+		return
+	}
+	defer unlock()
+	// Another process may have completed a sweep since our last pass.
+	m.mu.Lock()
+	m.ledgers = map[string]*Ledger{}
+	m.mu.Unlock()
 	m.workerID = workerID
 	watches, err := m.graph.Watches(ctx, workerID)
 	if err != nil {
@@ -242,7 +265,13 @@ func (m *Manager) sweepWatch(ctx context.Context, watch Watch) {
 
 	// The same veto, applied to every entry beneath the root rather than only
 	// to the root itself.
-	scan, err := Scan(watch.LocalPath, watch.ExcludeGlobs, watch.IncludeHidden, check)
+	var scan ScanResult
+	var err error
+	if watch.Mode == "sync" {
+		scan, err = scanFolder(watch.LocalPath, watch.ExcludeGlobs, watch.IncludeHidden, check, false)
+	} else {
+		scan, err = Scan(watch.LocalPath, watch.ExcludeGlobs, watch.IncludeHidden, check)
+	}
 	if err != nil {
 		state := "unreadable"
 		if errors.Is(err, fs.ErrNotExist) || errors.Is(err, os.ErrNotExist) {
@@ -255,6 +284,10 @@ func (m *Manager) sweepWatch(ctx context.Context, watch Watch) {
 		return
 	}
 
+	if watch.Mode == "sync" && scan.Bytes > transfer.MaxBytes {
+		m.report(ctx, watch.ID, "ok", len(scan.Entries), scan.Bytes, "A synced folder cannot exceed 1 TB. No changes were sent.")
+		return
+	}
 	ledger := m.ledgerFor(watch.ID)
 	// DEFERRED, so a sweep cut short by a cancelled context still keeps the
 	// record of what it already sent. Saving only at the end made the unit of
@@ -267,14 +300,22 @@ func (m *Manager) sweepWatch(ctx context.Context, watch Watch) {
 			log.Warn("backup: could not save this machine's record of what it sent", "error", err)
 		}
 	}()
-	m.followMoves(ctx, ledger, scan)
+	if watch.Mode != "sync" {
+		m.followMoves(ctx, ledger, scan)
+	}
 	var pushErr string
 	pushed := 0
 	for _, entry := range scan.Entries {
 		if err := ctx.Err(); err != nil {
 			return
 		}
-		changed, err := m.pushIfChanged(ctx, watch, ledger, entry)
+		var changed bool
+		var err error
+		if watch.Mode == "sync" {
+			changed, err = m.pushSync(ctx, watch, ledger, entry)
+		} else {
+			changed, err = m.pushIfChanged(ctx, watch, ledger, entry)
+		}
 		if err != nil {
 			// The FIRST failure is what is reported; the sweep carries on, so
 			// one file the cluster refuses does not stop the other thousand.
@@ -289,7 +330,11 @@ func (m *Manager) sweepWatch(ctx context.Context, watch Watch) {
 		}
 	}
 
-	m.verify(ctx, ledger, scan)
+	if watch.Mode == "sync" {
+		m.syncDeletions(ctx, watch, ledger, scan)
+	} else {
+		m.verify(ctx, ledger, scan)
+	}
 
 	state := "ok"
 	message := pushErr

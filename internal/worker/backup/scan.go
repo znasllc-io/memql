@@ -71,8 +71,9 @@ type Entry struct {
 
 // ScanResult is one pass over one watched folder.
 type ScanResult struct {
-	Entries []Entry
-	Bytes   int64
+	RootIdentity string
+	Entries      []Entry
+	Bytes        int64
 	// Skipped counts entries the walk could not stat or read. They are NOT
 	// silently dropped: a folder half of which is unreadable is a different
 	// answer from a folder that is fine, and the caller reports it.
@@ -111,6 +112,9 @@ var defaultExcludes = []string{
 // the Library. A nil deny denies nothing, which is only correct for a caller
 // that has already decided (the tests); the sweeper always passes one.
 func Scan(root string, excludes []string, includeHidden bool, deny func(string) error) (ScanResult, error) {
+	return scanFolder(root, excludes, includeHidden, deny, true)
+}
+func scanFolder(root string, excludes []string, includeHidden bool, deny func(string) error, defaults bool) (ScanResult, error) {
 	info, err := os.Stat(root)
 	if err != nil {
 		return ScanResult{}, err
@@ -119,7 +123,7 @@ func Scan(root string, excludes []string, includeHidden bool, deny func(string) 
 		return ScanResult{}, errors.New("not a folder")
 	}
 
-	out := ScanResult{}
+	out := ScanResult{RootIdentity: fileIdentity(info)}
 	walkErr := filepath.WalkDir(root, func(path string, d fs.DirEntry, err error) error {
 		if err != nil {
 			// A directory that cannot be opened, or an entry that vanished
@@ -141,7 +145,7 @@ func Scan(root string, excludes []string, includeHidden bool, deny func(string) 
 			return nil
 		}
 		if d.IsDir() {
-			if isExcludedName(name) {
+			if defaults && isExcludedName(name) {
 				return fs.SkipDir
 			}
 			if deny != nil && deny(path) != nil {
@@ -163,7 +167,7 @@ func Scan(root string, excludes []string, includeHidden bool, deny func(string) 
 		// The excluded-NAME list applies to files too. `.DS_Store` is on it and
 		// is a file, so with hidden entries included it was backed up despite
 		// being named as something no backup wants.
-		if isExcludedName(name) {
+		if defaults && isExcludedName(name) {
 			return nil
 		}
 		if deny != nil && deny(path) != nil {

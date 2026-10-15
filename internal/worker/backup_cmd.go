@@ -122,12 +122,13 @@ func handleBackup(args []string) {
 		os.Exit(4)
 	}
 	manager := backup.New(backup.Options{
-		Logger:     logger,
-		StateDir:   cfg.StateDir,
-		BaseURL:    baseURL,
-		Bearer:     bearer,
-		CheckPath:  policy.CheckBackupPath,
-		HTTPClient: &http.Client{},
+		Logger:            logger,
+		StateDir:          cfg.StateDir,
+		BaseURL:           baseURL,
+		Bearer:            bearer,
+		CheckPath:         policy.CheckBackupPath,
+		CheckDownloadPath: policy.CheckBackupDownloadPath,
+		HTTPClient:        &http.Client{},
 	})
 	sweepCtx, cancelSweep := context.WithTimeout(context.Background(), backupSweepTimeout)
 	defer cancelSweep()

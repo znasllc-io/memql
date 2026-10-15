@@ -2,7 +2,7 @@
 
 Keep a folder on this machine arriving in a MemQL Library folder, continuously.
 
-The arrangement is made in MemQL OS — **Files → Backups → Back up a folder** —
+The arrangement is made in MemQL OS — **Files → Backups → Add backup** —
 and this machine does the watching. Engine half: epic memql#4783. This half:
 memql#4841.
 
@@ -13,10 +13,12 @@ memql#4841.
 **One-way, forever.** Files go from this machine to MemQL and never the other
 way. Nothing MemQL does can change, move or delete a file here.
 
-**A deletion here flags the copy; it never removes it.** Delete a file from a
-watched folder and the copy in the Library is labelled *gone from the machine*
-and stays whole and downloadable. That is the point of a backup, and it is the
-one rule the whole design is arranged around.
+**New folder backups sync deletions to the Bin.** A complete, successful scan
+must confirm a deletion before the worker asks the cluster to move the exact
+recorded cloud revision to the Bin. Offline, unreadable or partially scanned
+folders never imply deletion. Existing arrangements without `mode: sync`
+keep their old behavior: the cloud copy is flagged as missing at the source.
+The Bin and saved versions continue to count toward storage limits.
 
 **This machine decides which folders it will honour.** A backup is arranged in
 the cluster — from a browser, possibly on a different computer — so the path in
@@ -188,3 +190,35 @@ stored file, Cockpit reports a conflict and preserves it. It does not write back
 to the host or silently choose a winner. If the local ledger was lost, a matching
 stored digest restores the baseline; unmatched content requires explicit review.
 Trashed origins are refused by the cluster rather than recreated by the watcher.
+
+
+## Direct archive transfers and downloads
+
+Files → Backups also accepts ZIP, TAR, TAR.GZ and TGZ files. Archives upload once;
+folders sync as regular files and are not automatically archived. The worker
+uses the cluster's bounded storage grants, never a general storage write token.
+One backup is limited to 1 TB, the cluster to 5 TB, and ordinary users start at
+10 GB. Owner/developer personal exemptions do not bypass the other ceilings.
+
+Pause, resume and download controls live in Backups. Transfers survive closing
+the browser or restarting Cockpit. Keep the worker's state directory: manifests,
+checksums, transfer identities and verified download offsets live there. A
+process lock prevents two worker processes from writing the same local transfer.
+A source that changes is refused rather than silently producing mixed bytes.
+
+Downloads require an additional local policy list, separate from `backup.roots`:
+
+```yaml
+backup:
+  download_roots:
+    - /Users/you/Downloads
+```
+
+The directory must exist. Existing files are never overwritten; the filesystem
+must support hard links. Partial bytes are synced before their checkpoint and
+verified after a restart. The whole checksum is checked before publication.
+
+Folder sync preserves regular file bytes, not symlinks, empty directories,
+permissions or extended attributes. Use a metadata-preserving archive when you
+need a portable filesystem backup. Checksumming can reread a large file after
+an interrupted preparation; completed network blocks do not need reuploading.
