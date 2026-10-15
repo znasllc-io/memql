@@ -102,7 +102,9 @@ functionality. The transport admits an exact set of core owner-scoped folder,
 file-organizing and conversation-creation mutations. It does not grant
 `create data`, permit raw inserts, accept arbitrary Library mutations, or
 expose server-owned transcript/version writes. The personal exception requires
-a signed-in ranked user and effective read access to data and the app.
+a signed-in ranked user and effective global read access to data and the app.
+Organization-bound grants cannot widen or suppress these personal permissions;
+direct user denials and global group grants still apply.
 Document edit, feedback, history and revision handlers retain their existing
 ownership, author, version and approval checks. The Library byte routes already
 admit the human owner, including delegated `app_session` credentials.

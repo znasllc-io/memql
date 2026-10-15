@@ -40,6 +40,13 @@ func TestPersonalMutationGateCoversOnlyOwnedAppDoors(t *testing.T) {
 			require.False(t, eng.PersonalDataPlaneEnforced(ctx, q), "%s: %s", role, q)
 		}
 	}
+	for _, access := range []*auth.AccessContext{
+		{}, {UserId: "personal", Role: auth.RoleReader, Synthetic: true},
+		{UserId: "personal", Role: auth.RoleReader, Unranked: true}, {Role: auth.RoleReader},
+	} {
+		ctx := auth.ContextWithAccess(context.Background(), access)
+		require.False(t, eng.PersonalAppCapable(ctx, "files"), "%+v", access)
+	}
 	for _, role := range []auth.Role{"", "unknown"} {
 		s, cs := gateTestSession(t, eng, role)
 		driveGateQuery(t, s, "unknown-personal", `mutation createAskConversation(requestId: "new", title: "New")`)

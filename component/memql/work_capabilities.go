@@ -33,7 +33,7 @@ func (e *MemQLEngine) workCapabilityAllowed(ctx context.Context, fn *Function) b
 	// checks; personal mutations retain their owner checks.
 	if (fn.FunctionKind == "mutation" || fn.FunctionKind == "logic") && !e.GlobalDataCapable(ctx, auth.VerbCreate) {
 		organizationWrite := fn.FunctionKind == "mutation" && fn.MutationTemplate != nil && organizationDataWriteConcept(fn.MutationTemplate.Concept)
-		if !organizationWrite && !auth.CanManageOwnAppData(ctx, personalMutationApp(fn)) {
+		if !organizationWrite && !e.PersonalAppCapable(ctx, personalMutationApp(fn)) {
 			return false
 		}
 	}
@@ -46,9 +46,15 @@ func (e *MemQLEngine) workCapabilityAllowed(ctx context.Context, fn *Function) b
 		return false
 	}
 	if app := workCapabilityApp(fn); app != "" {
-		subject, ok := auth.SubjectFromContext(ctx)
-		if !ok || !auth.CapableFor(ctx, subject, "read", "app:"+app) {
-			return false
+		if app == "files" || app == "ask" {
+			if !e.OrganizationCapable(ctx, "", auth.VerbRead, "app:"+app) {
+				return false
+			}
+		} else {
+			subject, ok := auth.SubjectFromContext(ctx)
+			if !ok || !auth.CapableFor(ctx, subject, auth.VerbRead, "app:"+app) {
+				return false
+			}
 		}
 	}
 	return true

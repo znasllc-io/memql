@@ -16,7 +16,7 @@ import (
 // the approval lock has the same order as item modification and human approval.
 func (i *Integration) handleRemoveDocumentAnnotation(ctx context.Context, args map[string]any, _ int) ([]memorynodes.MemoryNode, error) {
 	access, _ := auth.AccessFromContext(ctx)
-	if access == nil || access.UserId == "" || !canManageDocument(ctx, auth.VerbUpdate) {
+	if access == nil || access.UserId == "" || !i.canManageDocument(ctx, auth.VerbUpdate) {
 		return nil, fmt.Errorf("permission denied to remove document feedback")
 	}
 	ctx = memql.ContextWithFreshRead(ctx)

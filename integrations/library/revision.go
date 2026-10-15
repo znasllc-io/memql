@@ -67,9 +67,9 @@ func revisionIdentity(ctx context.Context, requestID string) (work.ReviewGoalRec
 	}
 	return work.ReviewGoalIdentity(ac.UserId, "library-revision:"+requestID), nil
 }
-func revisionWriter(ctx context.Context) error {
+func (i *Integration) revisionWriter(ctx context.Context) error {
 	ac, ok := auth.AccessFromContext(ctx)
-	if !ok || ac == nil || ac.UserId == "" || ac.Synthetic || ac.Unranked || !canManageDocument(ctx, auth.VerbCreate) {
+	if !ok || ac == nil || ac.UserId == "" || ac.Synthetic || ac.Unranked || !i.canManageDocument(ctx, auth.VerbCreate) {
 		return fmt.Errorf("you do not have permission to request document changes")
 	}
 	return nil
@@ -143,7 +143,7 @@ func revisionCommentIDs(v any) ([]string, error) {
 }
 
 func (i *Integration) handleRequestDocumentRevision(ctx context.Context, args map[string]any, _ int) ([]memorynodes.MemoryNode, error) {
-	if err := revisionWriter(ctx); err != nil {
+	if err := i.revisionWriter(ctx); err != nil {
 		return nil, err
 	}
 	if run, ok := common.RunFromContext(ctx); ok && run.RunId != "" {
@@ -280,7 +280,7 @@ func (i *Integration) handleRequestDocumentRevision(ctx context.Context, args ma
 // ValidateRevisionProposal is used by the shared Nexus decision path as well
 // as by execution. A valid hash alone cannot attest still-current source bytes.
 func (i *Integration) ValidateRevisionProposal(ctx context.Context, proposal map[string]any) error {
-	if err := revisionWriter(ctx); err != nil {
+	if err := i.revisionWriter(ctx); err != nil {
 		return err
 	}
 	ctx = memql.ContextWithFreshRead(ctx)
@@ -422,7 +422,7 @@ func (i *Integration) revisionRun(ctx context.Context, requestID string) (work.R
 	if !ok || memql.BareShortId(rc.RunId) != ids.RunID || memql.BareShortId(rc.GoalId) != ids.GoalID || asString(run["automationName"]) != documentRevisionTemplate || asString(run["status"]) != "running" || run["cancelRequested"] == true {
 		return ids, nil, nil, fmt.Errorf("this live run does not own the document revision request")
 	}
-	if err := revisionWriter(ctx); err != nil {
+	if err := i.revisionWriter(ctx); err != nil {
 		return ids, nil, nil, err
 	}
 	goal, err := i.revisionRow(ctx, "workGoalForOwner", map[string]any{"goalId": ids.GoalID})

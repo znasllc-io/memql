@@ -74,9 +74,9 @@ type dataPlaneGateExemption struct {
 // appearing as an untracked `if` somewhere in a handler.
 var dataPlaneGateExemptions = []dataPlaneGateExemption{
 	{
-		Name:     "personal Files/Ask mutations",
+		Name:     "personal Files/Ask actions",
 		Enforced: true,
-		Reason:   "Exact core personal mutations admit signed-in app users without shared-data write authority. Creates stamp the verified caller and updates retain owner guards; raw, mixed and server-only writes are excluded.",
+		Reason:   "Exact core personal mutations and owner-checked Library editor/review capabilities admit signed-in app users without shared-data write authority. Creates stamp the verified caller and updates retain owner guards; raw, mixed and server-only writes are excluded.",
 	},
 	{
 		Name:     "CallToolMsg",

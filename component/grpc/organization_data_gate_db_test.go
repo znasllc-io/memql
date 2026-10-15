@@ -115,6 +115,26 @@ func TestOrganizationDataPermissionsThroughExecuteQuery(t *testing.T) {
 	require.NoError(t, json.Unmarshal(stored.Payload, &payload))
 	require.Equal(t, "Updated through wire", payload["name"])
 	require.Equal(t, user, memqlengine.BareShortId(stored.CreatedBy))
+	// Organization decisions must neither widen nor suppress private Files
+	// and Ask access. Global user denials must still take effect immediately.
+	for _, app := range []string{"files", "ask"} {
+		grant := auth.GrantRowID("group", "g-"+b, "read", "app:"+app)
+		execute(fmt.Sprintf(`mutation writeGrant(grantId: %s, subjectKind: "group", subjectId: %s, verb: "read", resourceType: %s, effect: "deny", grantedBy: "org-wire-fixture")`, quote(grant), quote("g-"+b), quote("app:"+app)))
+	}
+	for _, tc := range []struct{ app, query string }{
+		{"files", fmt.Sprintf(`mutation createLibraryFolder(folderId: %s, name: "Private notes")`, quote(suffix+"-folder"))},
+		{"ask", `mutation createAskConversation(requestId: "private", title: "Private conversation")`},
+	} {
+		request := "personal-" + tc.app
+		driveGateQuery(t, session, request, tc.query)
+		waitForQueryResult(t, stream, request, 15*time.Second)
+		grant := auth.GrantRowID("user", user, "read", "app:"+tc.app)
+		execute(fmt.Sprintf(`mutation writeGrant(grantId: %s, subjectKind: "user", subjectId: %s, verb: "read", resourceType: %s, effect: "deny", grantedBy: "org-wire-fixture")`, quote(grant), quote(user), quote("app:"+tc.app)))
+		driveGateQuery(t, session, request+"-denied", tc.query)
+		_, denied := awaitAccountOutcome(t, stream, request+"-denied", 15*time.Second)
+		require.NotNil(t, denied, "explicit personal app denial was ignored")
+		require.Contains(t, denied.GetMessage(), "permission denied")
+	}
 }
 
 // Only the role catalog is fixed for this test. Memberships, grants, resource

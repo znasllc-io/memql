@@ -6,6 +6,23 @@ import (
 	"github.com/znasllc-io/memql/component/auth"
 )
 
+// PersonalAppCapable admits a signed-in person's private Files/Ask actions.
+// Organization grants cannot widen or deny this personal authority. Every
+// caller must still enforce ownership and action-specific validation.
+func (e *MemQLEngine) PersonalAppCapable(ctx context.Context, app string) bool {
+	if e == nil || (app != "files" && app != "ask") {
+		return false
+	}
+	access, ok := auth.AccessFromContext(ctx)
+	if !ok || access == nil || access.Synthetic || access.Unranked || access.IsAnonymousActor() || access.IsConnector() {
+		return false
+	}
+	subject, ok := auth.SubjectFromContext(ctx)
+	return ok && subject.UserId != "" && auth.RoleRank(subject.Role) > 0 &&
+		e.GlobalDataCapable(ctx, auth.VerbRead) &&
+		e.OrganizationCapable(ctx, "", auth.VerbRead, "app:"+app)
+}
+
 // PersonalDataPlaneEnforced admits only complete calls to the core personal
 // mutations below. Creates stamp the verified actor; updates retain the engine's
 // owner write guard. Raw writes, arbitrary namespace members, internal transcript
@@ -19,7 +36,7 @@ func (e *MemQLEngine) PersonalDataPlaneEnforced(ctx context.Context, query strin
 		return false
 	}
 	fn, ok := e.functions.Lookup(plan.MutationCall.Name)
-	return ok && auth.CanManageOwnAppData(ctx, personalMutationApp(fn))
+	return ok && e.PersonalAppCapable(ctx, personalMutationApp(fn))
 }
 
 func personalMutationApp(fn *Function) string {
