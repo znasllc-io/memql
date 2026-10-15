@@ -103,7 +103,7 @@ func doGoalEvaluation(c *capability.Capability) int {
 	if err := os.Mkdir(output, 0700); err != nil {
 		return c.Fail(capability.ExitRefused, "evidence directory must be new: %v", err)
 	}
-	runner := proving.GoalRunner{Client: client.NewQueryClient(conn.Dispatcher()), Files: os.DirFS("."), CatalogDir: filepath.ToSlash(filepath.Dir(name)), OutputDir: output, EngineCommit: engineCommit, HarnessCommit: strings.TrimSpace(harness)}
+	runner := proving.GoalRunner{LessonID: c.Param("lesson-id", ""), LessonReceipt: c.Param("lesson-receipt", ""), Client: client.NewQueryClient(conn.Dispatcher()), Files: os.DirFS("."), CatalogDir: filepath.ToSlash(filepath.Dir(name)), OutputDir: output, EngineCommit: engineCommit, HarnessCommit: strings.TrimSpace(harness)}
 	c.Step("running local goal matrix; paid providers disabled; receipts in %s", output)
 	report, err := runner.Run(ctx, catalog, matrix)
 	c.Changed()

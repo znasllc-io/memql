@@ -13185,6 +13185,90 @@ QueryClient.prototype.workStepsForOwnerRun = function (this: QueryClient, args: 
   return this.executeNamed("workStepsForOwnerRun", buildWorkStepsForOwnerRun(args), opts);
 };
 
+/** workTrainingEvidenceById wraps the query named "workTrainingEvidenceById". */
+// Bound concept: v1:work:observation (machine-readable: BoundConcepts["workTrainingEvidenceById"] in generated_concepts.ts).
+export interface WorkTrainingEvidenceByIdArgs {
+  observationId: string;
+}
+
+export function buildWorkTrainingEvidenceById(args: WorkTrainingEvidenceByIdArgs): string {
+  const parts: string[] = [];
+  parts.push("observationId: " + renderMemQLValue(args.observationId));
+  return "query workTrainingEvidenceById(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    workTrainingEvidenceById(args: WorkTrainingEvidenceByIdArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.workTrainingEvidenceById = function (this: QueryClient, args: WorkTrainingEvidenceByIdArgs = {} as WorkTrainingEvidenceByIdArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("workTrainingEvidenceById", buildWorkTrainingEvidenceById(args), opts);
+};
+
+/** Manual lesson events share the owned work journal. Highest sequence is the head. */
+// Bound concept: v1:work:observation (machine-readable: BoundConcepts["workTrainingLessonEvents"] in generated_concepts.ts).
+export interface WorkTrainingLessonEventsArgs {
+  lessonId: string;
+}
+
+export function buildWorkTrainingLessonEvents(args: WorkTrainingLessonEventsArgs): string {
+  const parts: string[] = [];
+  parts.push("lessonId: " + renderMemQLValue(args.lessonId));
+  return "query workTrainingLessonEvents(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    workTrainingLessonEvents(args: WorkTrainingLessonEventsArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.workTrainingLessonEvents = function (this: QueryClient, args: WorkTrainingLessonEventsArgs = {} as WorkTrainingLessonEventsArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("workTrainingLessonEvents", buildWorkTrainingLessonEvents(args), opts);
+};
+
+/** workTrainingLessonsForOwner wraps the query named "workTrainingLessonsForOwner". */
+// Bound concept: v1:work:observation (machine-readable: BoundConcepts["workTrainingLessonsForOwner"] in generated_concepts.ts).
+export interface WorkTrainingLessonsForOwnerArgs {
+}
+
+export function buildWorkTrainingLessonsForOwner(args: WorkTrainingLessonsForOwnerArgs): string {
+  void args;
+  return "query workTrainingLessonsForOwner()";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    workTrainingLessonsForOwner(args?: WorkTrainingLessonsForOwnerArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.workTrainingLessonsForOwner = function (this: QueryClient, args: WorkTrainingLessonsForOwnerArgs = {} as WorkTrainingLessonsForOwnerArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("workTrainingLessonsForOwner", buildWorkTrainingLessonsForOwner(args), opts);
+};
+
+/** Selection and provider-delivery receipts for owned Training inspection. */
+// Bound concept: v1:work:observation (machine-readable: BoundConcepts["workTrainingUsageForOwner"] in generated_concepts.ts).
+export interface WorkTrainingUsageForOwnerArgs {
+}
+
+export function buildWorkTrainingUsageForOwner(args: WorkTrainingUsageForOwnerArgs): string {
+  void args;
+  return "query workTrainingUsageForOwner()";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    workTrainingUsageForOwner(args?: WorkTrainingUsageForOwnerArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.workTrainingUsageForOwner = function (this: QueryClient, args: WorkTrainingUsageForOwnerArgs = {} as WorkTrainingUsageForOwnerArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("workTrainingUsageForOwner", buildWorkTrainingUsageForOwner(args), opts);
+};
+
 /** Human and validator verdicts only. Other decisions and tool/checkpoint data are not verdicts and must not travel to the feedback controls. */
 // Bound concept: v1:work:observation (machine-readable: BoundConcepts["workVerdictsForOwnerRun"] in generated_concepts.ts).
 export interface WorkVerdictsForOwnerRunArgs {

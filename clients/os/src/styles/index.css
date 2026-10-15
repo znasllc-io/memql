@@ -15280,3 +15280,10 @@ button[data-ask-control="running"], [data-ask-control="running"] > button { outl
 .fleet-share-calls { font-variant-numeric: tabular-nums; }
 /* Keep a refusal beside the sharing controls in the Settings page flow. */
 .fleet-share-error { min-width: 0; }
+
+/* Keep lesson evidence readable within narrow Training panes. */
+.training-lesson-review { container-type: inline-size; }
+@container (max-width: 540px) {
+  .training-lesson-review .os-facts { grid-template-columns: minmax(0, 1fr); gap: 4px; }
+  .training-lesson-review .os-facts dd { margin-bottom: 10px; }
+}

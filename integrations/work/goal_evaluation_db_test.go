@@ -60,6 +60,13 @@ func TestGoalEvaluationPublicationIsOwnedAndImmutableAcrossReplicas(t *testing.T
 	if _, err := second.handleRecordGoalEvaluation(actorCtx("another-owner"), args, 0); err == nil {
 		t.Fatal("foreign run accepted")
 	}
+	forged := result
+	forged.ID = "forged-lesson-binding"
+	forged.Bindings = []goaleval.Binding{{ID: "lesson-unselected", Version: "1", Digest: strings.Repeat("a", 64), Source: "observation:invented-delivery"}}
+	_, err = second.handleRecordGoalEvaluation(actorCtx(a.owner), map[string]any{"result": object(forged), "scenario": object(scenario)}, 0)
+	if err == nil || !strings.Contains(err.Error(), "successful provider delivery") {
+		t.Fatalf("unobserved lesson binding accepted: %v", err)
+	}
 	result.Artifacts = []string{"fixture:different-claim"}
 	args["result"] = object(result)
 	if _, err := second.handleRecordGoalEvaluation(actorCtx(a.owner), args, 0); err == nil {
