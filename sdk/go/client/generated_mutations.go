@@ -4189,6 +4189,8 @@ func CreateLibraryFolderBuild(args CreateLibraryFolderArgs) string {
 //
 // Bound concept: v1:library:watchedFolder (machine-readable: BoundConcepts["createLibraryWatchedFolder"] in generated_concepts.go).
 type CreateLibraryWatchedFolderArgs struct {
+	// Enum: retain | sync
+	Mode             string
 	IntervalMinutes  int
 	WatchId          string
 	WorkerId         string
@@ -4208,7 +4210,14 @@ func (qc *QueryClient) CreateLibraryWatchedFolder(ctx context.Context, args Crea
 func CreateLibraryWatchedFolderBuild(args CreateLibraryWatchedFolderArgs) string {
 	var b strings.Builder
 	b.WriteString("mutation createLibraryWatchedFolder(")
+	if args.Mode != "" {
+		b.WriteString("mode: ")
+		b.WriteString(quoteMemQL(args.Mode))
+	}
 	if args.IntervalMinutes != 0 {
+		if b.Len() > 36 {
+			b.WriteString(", ")
+		}
 		b.WriteString("intervalMinutes: ")
 		b.WriteString(fmt.Sprintf("%v", args.IntervalMinutes))
 	}

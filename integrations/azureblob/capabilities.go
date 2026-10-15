@@ -4,6 +4,9 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"github.com/znasllc-io/memql/component/auth"
+	"path"
+	"strings"
 	"time"
 
 	memorynodes "github.com/znasllc-io/memql/component/database/memory-nodes"
@@ -63,6 +66,22 @@ func (s *StorageIntegration) handleUpload(ctx context.Context, args map[string]a
 		return nil, fmt.Errorf("storage.upload requires container and objectName")
 	}
 
+	// Public storage calls cannot choose a library/backup object or charge the
+	// cluster identity. Native producers use the uploader with their own authority.
+	ac, ok := auth.AccessFromContext(ctx)
+	if !ok || ac == nil || ac.IsAnonymous || ac.UserId == "" {
+		return nil, fmt.Errorf("storage.upload requires an authenticated actor")
+	}
+	if !ac.Synthetic {
+		subject, ok := auth.SubjectFromContext(ctx)
+		if !ok || !auth.CapableFor(ctx, subject, auth.VerbCreate, auth.ResourceData) {
+			return nil, fmt.Errorf("storage.upload requires permission to write files")
+		}
+		if container != s.container || strings.HasPrefix(objectName, "/") || path.Clean(objectName) != objectName || strings.ContainsAny(objectName, "\\\x00\r\n") {
+			return nil, fmt.Errorf("invalid storage upload destination")
+		}
+		objectName = "objects/" + memql.BareShortId(ac.UserId) + "/" + objectName
+	}
 	url, err := s.uploader.Upload(ctx, container, objectName, []byte(dataStr), contentType)
 	if err != nil {
 		return nil, fmt.Errorf("storage upload: %w", err)

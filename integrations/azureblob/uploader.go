@@ -5,6 +5,7 @@
 package azureblob
 
 import (
+	"bytes"
 	"context"
 	"fmt"
 	"io"
@@ -13,9 +14,12 @@ import (
 	"os"
 	"strings"
 
+	"github.com/Azure/azure-sdk-for-go/sdk/azcore/policy"
+	"github.com/Azure/azure-sdk-for-go/sdk/azcore/streaming"
 	"github.com/Azure/azure-sdk-for-go/sdk/storage/azblob"
 	"github.com/Azure/azure-sdk-for-go/sdk/storage/azblob/blob"
 	"github.com/Azure/azure-sdk-for-go/sdk/storage/azblob/bloberror"
+	"github.com/Azure/azure-sdk-for-go/sdk/storage/azblob/blockblob"
 )
 
 // maxDownloadBytes caps a single blob read so an oversized object can't
@@ -32,7 +36,8 @@ type Uploader interface {
 
 // AzureBlobUploader is the real Azure implementation over the azblob SDK.
 type AzureBlobUploader struct {
-	client *azblob.Client
+	client      *azblob.Client
+	meterWrites bool
 }
 
 // New creates an AzureBlobUploader from the connection string in
@@ -44,11 +49,11 @@ func New(_ context.Context) (*AzureBlobUploader, error) {
 	if connStr == "" {
 		return nil, fmt.Errorf("azure blob: MEMQL_AZURE_STORAGE_CONNECTION_STRING is not set")
 	}
-	client, err := azblob.NewClientFromConnectionString(connStr, nil)
+	client, err := azblob.NewClientFromConnectionString(connStr, &azblob.ClientOptions{ClientOptions: policy.ClientOptions{Retry: policy.RetryOptions{MaxRetries: -1}}})
 	if err != nil {
 		return nil, fmt.Errorf("create azure blob client: %w", err)
 	}
-	return &AzureBlobUploader{client: client}, nil
+	return &AzureBlobUploader{client: client, meterWrites: true}, nil
 }
 
 // Upload stores data in the given container under objectName and returns the
@@ -65,13 +70,38 @@ func (u *AzureBlobUploader) Upload(ctx context.Context, container, objectName st
 	if objectName == "" {
 		return "", fmt.Errorf("azure blob object name is required")
 	}
+	capacity, err := u.beginCapacity(ctx, container, objectName)
+	if err != nil {
+		return "", err
+	}
+	if capacity != nil {
+		defer capacity.Close()
+		if err := capacity.Put(ctx, int64(len(data))); err != nil {
+			return "", err
+		}
+	}
 
-	opts := &azblob.UploadBufferOptions{}
+	opts := &blockblob.UploadOptions{}
 	if ct := strings.TrimSpace(contentType); ct != "" {
 		opts.HTTPHeaders = &blob.HTTPHeaders{BlobContentType: &ct}
 	}
-	if _, err := u.client.UploadBuffer(ctx, container, objectName, data, opts); err != nil {
+	bc, err := u.blockClient(container, objectName)
+	if err != nil {
+		return "", err
+	}
+	// A single Put Blob has no hidden SDK-generated staging blocks. Its
+	// physical bound is reserved above, including overlap with the old value.
+	response, err := bc.Upload(ctx, streaming.NopCloser(bytes.NewReader(data)), opts)
+	if err != nil {
 		return "", fmt.Errorf("upload to azure blob: %w", err)
+	}
+	if capacity != nil {
+		if err = u.checkRetention(ctx, response.VersionID); err != nil {
+			return "", err
+		}
+		if err := capacity.Settled(ctx, int64(len(data)), true); err != nil {
+			return "", err
+		}
 	}
 
 	return storedBlobURL(u.client.ServiceClient().NewContainerClient(container).NewBlockBlobClient(objectName).URL())

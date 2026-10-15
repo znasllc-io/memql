@@ -11,6 +11,7 @@ import (
 	"strings"
 
 	"github.com/znasllc-io/memql/component/auth"
+	"github.com/znasllc-io/memql/component/database/storagequota"
 	"github.com/znasllc-io/memql/component/server"
 	"github.com/znasllc-io/memql/component/server/libraryfile"
 	"github.com/znasllc-io/memql/core/id"
@@ -160,13 +161,11 @@ func (s *pipelinesLibraryStore) StoreRunFile(ctx context.Context, f pipelinestep
 	// THE QUOTA BEFORE A BYTE MOVES, like every other refusal on the upload
 	// route. A footprint that cannot be read refuses: a quota read that
 	// failed is not a quota that admits.
-	fileBytes, versionBytes, sessionBytes, err := s.library.StorageFootprint(ownerCtx)
-	if err != nil {
-		return pipelinesteps.StoredFile{}, fmt.Errorf("the owner's Library could not be measured against its quota, so nothing was stored: %w", err)
-	}
-	if total, quota := fileBytes+versionBytes+sessionBytes+size, s.userQuota(); total > quota {
-		return pipelinesteps.StoredFile{Omitted: fmt.Sprintf(
-			"it would take the owner's Library to %d bytes, over the quota of %d bytes (%s)", total, quota, server.LibraryUserQuotaBytesEnv)}, nil
+	if err := server.CheckStorageAdmission(ownerCtx, s.uploader, s.library.StorageFootprint, size, s.userQuota()); err != nil {
+		if errors.Is(err, storagequota.ErrLimit) {
+			return pipelinesteps.StoredFile{Omitted: err.Error()}, nil
+		}
+		return pipelinesteps.StoredFile{}, err
 	}
 
 	// THE BYTES, THEN THE ROW. Never the other way round: a row written first
@@ -180,7 +179,7 @@ func (s *pipelinesLibraryStore) StoreRunFile(ctx context.Context, f pipelinestep
 	mimeType := server.ResolveLibraryMIME(f.MimeType, f.Bytes)
 	fileID := id.NewShortId()
 	object := fmt.Sprintf("library/%s/%s/%s", owner, fileID, name)
-	blobURL, err := s.uploader.Upload(ctx, s.bucket, object, f.Bytes, mimeType)
+	blobURL, err := s.uploader.Upload(ownerCtx, s.bucket, object, f.Bytes, mimeType)
 	if err != nil {
 		return pipelinesteps.StoredFile{}, fmt.Errorf("object storage refused the file, so nothing was stored: %w", err)
 	}

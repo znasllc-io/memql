@@ -2253,6 +2253,308 @@ QueryClient.prototype.libraryAddDocumentNote = function (this: QueryClient, args
   return this.executeNamed("libraryAddDocumentNote", buildLibraryAddDocumentNote(args), opts);
 };
 
+/** libraryBackupBlock wraps the builtin named "libraryBackupBlock". */
+export interface LibraryBackupBlockArgs {
+  id: string;
+  ordinal: number;
+  md5: string;
+  sha256: string;
+}
+
+export function buildLibraryBackupBlock(args: LibraryBackupBlockArgs): string {
+  const parts: string[] = [];
+  parts.push("id: " + renderMemQLValue(args.id));
+  parts.push("ordinal: " + renderMemQLValue(args.ordinal));
+  parts.push("md5: " + renderMemQLValue(args.md5));
+  parts.push("sha256: " + renderMemQLValue(args.sha256));
+  return "builtin libraryBackupBlock(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    libraryBackupBlock(args: LibraryBackupBlockArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.libraryBackupBlock = function (this: QueryClient, args: LibraryBackupBlockArgs = {} as LibraryBackupBlockArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("libraryBackupBlock", buildLibraryBackupBlock(args), opts);
+};
+
+/** libraryBackupCheckpoint wraps the builtin named "libraryBackupCheckpoint". */
+export interface LibraryBackupCheckpointArgs {
+  id: string;
+  final: boolean;
+}
+
+export function buildLibraryBackupCheckpoint(args: LibraryBackupCheckpointArgs): string {
+  const parts: string[] = [];
+  parts.push("id: " + renderMemQLValue(args.id));
+  parts.push("final: " + renderMemQLValue(args.final));
+  return "builtin libraryBackupCheckpoint(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    libraryBackupCheckpoint(args: LibraryBackupCheckpointArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.libraryBackupCheckpoint = function (this: QueryClient, args: LibraryBackupCheckpointArgs = {} as LibraryBackupCheckpointArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("libraryBackupCheckpoint", buildLibraryBackupCheckpoint(args), opts);
+};
+
+/** libraryBackupControl wraps the builtin named "libraryBackupControl". */
+export interface LibraryBackupControlArgs {
+  id: string;
+  // Enum: pause | resume | cancel | trash | restore | purge
+  action: string;
+}
+
+export function buildLibraryBackupControl(args: LibraryBackupControlArgs): string {
+  const parts: string[] = [];
+  parts.push("id: " + renderMemQLValue(args.id));
+  parts.push("action: " + renderMemQLValue(args.action));
+  return "builtin libraryBackupControl(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    libraryBackupControl(args: LibraryBackupControlArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.libraryBackupControl = function (this: QueryClient, args: LibraryBackupControlArgs = {} as LibraryBackupControlArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("libraryBackupControl", buildLibraryBackupControl(args), opts);
+};
+
+/** libraryBackupCreate wraps the builtin named "libraryBackupCreate". */
+export interface LibraryBackupCreateArgs {
+  id: string;
+  workerId: string;
+  path: string;
+  // Enum: archive | sync_file | download
+  kind: string;
+  metadata?: Record<string, unknown>;
+}
+
+export function buildLibraryBackupCreate(args: LibraryBackupCreateArgs): string {
+  const parts: string[] = [];
+  parts.push("id: " + renderMemQLValue(args.id));
+  parts.push("workerId: " + renderMemQLValue(args.workerId));
+  parts.push("path: " + renderMemQLValue(args.path));
+  parts.push("kind: " + renderMemQLValue(args.kind));
+  if (args.metadata !== undefined) parts.push("metadata: " + renderMemQLValue(args.metadata));
+  return "builtin libraryBackupCreate(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    libraryBackupCreate(args: LibraryBackupCreateArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.libraryBackupCreate = function (this: QueryClient, args: LibraryBackupCreateArgs = {} as LibraryBackupCreateArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("libraryBackupCreate", buildLibraryBackupCreate(args), opts);
+};
+
+/** libraryBackupDownloadBlock wraps the builtin named "libraryBackupDownloadBlock". */
+export interface LibraryBackupDownloadBlockArgs {
+  id: string;
+  ordinal: number;
+}
+
+export function buildLibraryBackupDownloadBlock(args: LibraryBackupDownloadBlockArgs): string {
+  const parts: string[] = [];
+  parts.push("id: " + renderMemQLValue(args.id));
+  parts.push("ordinal: " + renderMemQLValue(args.ordinal));
+  return "builtin libraryBackupDownloadBlock(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    libraryBackupDownloadBlock(args: LibraryBackupDownloadBlockArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.libraryBackupDownloadBlock = function (this: QueryClient, args: LibraryBackupDownloadBlockArgs = {} as LibraryBackupDownloadBlockArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("libraryBackupDownloadBlock", buildLibraryBackupDownloadBlock(args), opts);
+};
+
+/** libraryBackupList wraps the builtin named "libraryBackupList". */
+export interface LibraryBackupListArgs {
+  // Enum: active | archives | all
+  scope?: string;
+  workerId?: string;
+  after?: string;
+}
+
+export function buildLibraryBackupList(args: LibraryBackupListArgs): string {
+  const parts: string[] = [];
+  if (args.scope !== undefined) parts.push("scope: " + renderMemQLValue(args.scope));
+  if (args.workerId !== undefined) parts.push("workerId: " + renderMemQLValue(args.workerId));
+  if (args.after !== undefined) parts.push("after: " + renderMemQLValue(args.after));
+  return "builtin libraryBackupList(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    libraryBackupList(args: LibraryBackupListArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.libraryBackupList = function (this: QueryClient, args: LibraryBackupListArgs = {} as LibraryBackupListArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("libraryBackupList", buildLibraryBackupList(args), opts);
+};
+
+/** libraryBackupPrepare wraps the builtin named "libraryBackupPrepare". */
+export interface LibraryBackupPrepareArgs {
+  id: string;
+  size: number;
+  sha256: string;
+}
+
+export function buildLibraryBackupPrepare(args: LibraryBackupPrepareArgs): string {
+  const parts: string[] = [];
+  parts.push("id: " + renderMemQLValue(args.id));
+  parts.push("size: " + renderMemQLValue(args.size));
+  parts.push("sha256: " + renderMemQLValue(args.sha256));
+  return "builtin libraryBackupPrepare(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    libraryBackupPrepare(args: LibraryBackupPrepareArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.libraryBackupPrepare = function (this: QueryClient, args: LibraryBackupPrepareArgs = {} as LibraryBackupPrepareArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("libraryBackupPrepare", buildLibraryBackupPrepare(args), opts);
+};
+
+/** libraryBackupRead wraps the builtin named "libraryBackupRead". */
+export interface LibraryBackupReadArgs {
+  id: string;
+}
+
+export function buildLibraryBackupRead(args: LibraryBackupReadArgs): string {
+  const parts: string[] = [];
+  parts.push("id: " + renderMemQLValue(args.id));
+  return "builtin libraryBackupRead(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    libraryBackupRead(args: LibraryBackupReadArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.libraryBackupRead = function (this: QueryClient, args: LibraryBackupReadArgs = {} as LibraryBackupReadArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("libraryBackupRead", buildLibraryBackupRead(args), opts);
+};
+
+/** libraryBackupReport wraps the builtin named "libraryBackupReport". */
+export interface LibraryBackupReportArgs {
+  id: string;
+  // Enum: waiting | error | downloading | complete
+  state: string;
+  message?: string;
+  offset: number;
+}
+
+export function buildLibraryBackupReport(args: LibraryBackupReportArgs): string {
+  const parts: string[] = [];
+  parts.push("id: " + renderMemQLValue(args.id));
+  parts.push("state: " + renderMemQLValue(args.state));
+  if (args.message !== undefined) parts.push("message: " + renderMemQLValue(args.message));
+  parts.push("offset: " + renderMemQLValue(args.offset));
+  return "builtin libraryBackupReport(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    libraryBackupReport(args: LibraryBackupReportArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.libraryBackupReport = function (this: QueryClient, args: LibraryBackupReportArgs = {} as LibraryBackupReportArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("libraryBackupReport", buildLibraryBackupReport(args), opts);
+};
+
+/** libraryBackupSetUserLimit wraps the builtin named "libraryBackupSetUserLimit". */
+export interface LibraryBackupSetUserLimitArgs {
+  userId: string;
+  bytes: number;
+}
+
+export function buildLibraryBackupSetUserLimit(args: LibraryBackupSetUserLimitArgs): string {
+  const parts: string[] = [];
+  parts.push("userId: " + renderMemQLValue(args.userId));
+  parts.push("bytes: " + renderMemQLValue(args.bytes));
+  return "builtin libraryBackupSetUserLimit(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    libraryBackupSetUserLimit(args: LibraryBackupSetUserLimitArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.libraryBackupSetUserLimit = function (this: QueryClient, args: LibraryBackupSetUserLimitArgs = {} as LibraryBackupSetUserLimitArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("libraryBackupSetUserLimit", buildLibraryBackupSetUserLimit(args), opts);
+};
+
+/** libraryBackupSyncDelete wraps the builtin named "libraryBackupSyncDelete". */
+export interface LibraryBackupSyncDeleteArgs {
+  watchId: string;
+  workerId: string;
+  path: string;
+  fileId: string;
+  sha256: string;
+  version: number;
+}
+
+export function buildLibraryBackupSyncDelete(args: LibraryBackupSyncDeleteArgs): string {
+  const parts: string[] = [];
+  parts.push("watchId: " + renderMemQLValue(args.watchId));
+  parts.push("workerId: " + renderMemQLValue(args.workerId));
+  parts.push("path: " + renderMemQLValue(args.path));
+  parts.push("fileId: " + renderMemQLValue(args.fileId));
+  parts.push("sha256: " + renderMemQLValue(args.sha256));
+  parts.push("version: " + renderMemQLValue(args.version));
+  return "builtin libraryBackupSyncDelete(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    libraryBackupSyncDelete(args: LibraryBackupSyncDeleteArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.libraryBackupSyncDelete = function (this: QueryClient, args: LibraryBackupSyncDeleteArgs = {} as LibraryBackupSyncDeleteArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("libraryBackupSyncDelete", buildLibraryBackupSyncDelete(args), opts);
+};
+
+/** libraryBackupUsage wraps the builtin named "libraryBackupUsage". */
+export interface LibraryBackupUsageArgs {
+  userId?: string;
+}
+
+export function buildLibraryBackupUsage(args: LibraryBackupUsageArgs): string {
+  const parts: string[] = [];
+  if (args.userId !== undefined) parts.push("userId: " + renderMemQLValue(args.userId));
+  return "builtin libraryBackupUsage(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    libraryBackupUsage(args: LibraryBackupUsageArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.libraryBackupUsage = function (this: QueryClient, args: LibraryBackupUsageArgs = {} as LibraryBackupUsageArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("libraryBackupUsage", buildLibraryBackupUsage(args), opts);
+};
+
 /** Read owned document history metadata, with a version cursor and branch provenance. */
 export interface LibraryDocumentHistoryArgs {
   artifactId: string;

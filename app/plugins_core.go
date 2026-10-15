@@ -88,6 +88,7 @@ import (
 	// boot-time resolution failure on every node type -- and it imports
 	// integrations/azureblob for the archive, which the root module already
 	// requires and integrations could not import back.
+	_ "github.com/znasllc-io/memql/component/filebackups"
 	_ "github.com/znasllc-io/memql/component/logstore"
 	_ "github.com/znasllc-io/memql/component/retention"
 	_ "github.com/znasllc-io/memql/integrations/library"

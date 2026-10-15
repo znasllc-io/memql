@@ -1,4 +1,4 @@
-import { fireEvent, screen } from "@testing-library/react";
+import { fireEvent, screen, within } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 // The connection seam, mocked at the MODULE so the real LiveCollection
@@ -239,8 +239,8 @@ describe("the empty state", () => {
   it("invites the person to act rather than reporting an absence", async () => {
     h.connection = fakeConnection({ backups: [] });
     await renderFiles({ section: "backups" });
-    expect(screen.getByText(/No folder backups yet/)).toBeTruthy();
-    expect(screen.getByRole("button", { name: "Add folder backup" })).toBeTruthy();
+    expect(screen.getByText(/No folder syncs yet/)).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Add backup" })).toBeTruthy();
   });
 });
 
@@ -318,17 +318,25 @@ describe("editing", () => {
 
 
 describe("folder backup schedule",()=>{
+ useFakeDate();
  it("creates a scheduled directory backup and refuses an invalid interval",async()=>{
   const connection=fakeConnection({machines:[{id:"wkr-1",name:"laptop",capabilities:["HEADLESS"]} as never]}); h.connection=connection;
   await renderFiles({section:"backups"});
-  await click(screen.getByRole("button",{name:"Add folder backup"}));
+  await click(screen.getByRole("button",{name:"Add backup"}));
   fireEvent.change(screen.getByLabelText("Folder on that machine"),{target:{value:"/Users/ana/Reports"}});
-  fireEvent.change(screen.getByLabelText("Back up every"),{target:{value:"0"}});
-  expect((screen.getByRole("button",{name:"Start backing up"}) as HTMLButtonElement).disabled).toBe(true);
-  fireEvent.change(screen.getByLabelText("Back up every"),{target:{value:"3"}});
-  await click(screen.getByRole("button",{name:"Start backing up"}));
+  await readTheBar();
+  await click(screen.getByRole("button",{name:"Continue"}));
+  fireEvent.change(screen.getByLabelText("Check every (minutes)"),{target:{value:"0"}});
+  expect(within(screen.getByRole("group",{name:"What you can do with this"})).queryByRole("button",{name:"Review"})).toBeNull();
+  fireEvent.change(screen.getByLabelText("Check every (minutes)"),{target:{value:"4320"}});
+  await readTheBar();
+  await click(within(screen.getByRole("group",{name:"What you can do with this"})).getByRole("button",{name:"Review"}));
+  await readTheBar();
+  await click(screen.getByRole("button",{name:"Start sync"}));
   expect(connection.callsNamed("createLibraryWatchedFolder")[0]).toContain('intervalMinutes: 4320');
+  expect(connection.callsNamed("createLibraryWatchedFolder")[0]).toContain('mode: "sync"');
+  expect(connection.callsNamed("createLibraryWatchedFolder")[0]).toContain('includeHidden: true');
   expect(connection.callsNamed("createLibraryWatchedFolder")[0]).toContain('localPath: "/Users/ana/Reports"');
-  expect(screen.getByRole("button",{name:"Add folder backup"})).toBeTruthy();
+  expect(screen.getByRole("button",{name:"Add backup"})).toBeTruthy();
  });
 });

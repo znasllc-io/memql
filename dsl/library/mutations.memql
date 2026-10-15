@@ -939,6 +939,7 @@ mutation file supersedeLibraryFileHead {
 @actor
 mutation watchedFolder createLibraryWatchedFolder {
   args {
+    mode enum("retain", "sync")
     intervalMinutes int @minimum(5) @maximum(525600)
     watchId        string!
     workerId       string!
@@ -948,7 +949,7 @@ mutation watchedFolder createLibraryWatchedFolder {
     includeHidden  boolean
   }
   insert {
-    accept { workerId, localPath, folderId, excludeGlobs }
+    accept { workerId, localPath, folderId, excludeGlobs, mode }
     stamp {
       id: args.watchId
       ownerUserId: actor.userId

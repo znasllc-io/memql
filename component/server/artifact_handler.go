@@ -1913,7 +1913,7 @@ func (s *EngineLibraryStore) OwnedWorker(ctx context.Context, workerId string) (
 	want := strings.TrimPrefix(workerId, libraryWorkerConcept+":")
 	for _, r := range memql.MaterializeRows(res) {
 		got := strings.TrimPrefix(rowString(r, "id"), libraryWorkerConcept+":")
-		if got == "" || got != want {
+		if got == "" || got != want || rowString(r, "revokedAt") != "" {
 			continue
 		}
 		return &LibraryWorkerRef{

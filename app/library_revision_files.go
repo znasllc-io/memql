@@ -87,13 +87,10 @@ func (s *libraryRevisionFiles) SaveRevision(ctx context.Context, write library.R
 	if size > server.LibraryMaxUploadBytes() {
 		return fmt.Errorf("the revised document exceeds the upload limit")
 	}
-	files, versions, sessions, err := s.store.StorageFootprint(ctx)
-	if err != nil {
+	if err := server.CheckStorageAdmission(ctx, s.uploader, s.store.StorageFootprint, size, server.LibraryUserQuotaBytes()); err != nil {
 		return err
 	}
-	if files+versions+sessions+size > server.LibraryUserQuotaBytes() {
-		return fmt.Errorf("the revised document would exceed your Library storage quota")
-	}
+
 	blobURL, err := s.uploader.Upload(ctx, s.bucket, objectName, write.Content, current.MimeType)
 	if err != nil {
 		return fmt.Errorf("could not store the approved revision: %w", err)
