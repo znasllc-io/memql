@@ -56,9 +56,9 @@ func TestFullyRegisteredNodeReportsNothingUnavailable(t *testing.T) {
 // them either fails every engine-only boot (treating absent as missing) or
 // re-hides the parse bug (treating missing as absent).
 func TestPartialAndAbsentAreDifferentOutcomes(t *testing.T) {
-	names := CapabilityToolNames("workbench-use")
+	names := CapabilityToolNames("computer-use-headless")
 	if len(names) < 2 {
-		t.Skipf("workbench-use expands to %d tool(s); the partial case needs at least 2", len(names))
+		t.Fatalf("computer-use-headless expands to %d tool(s); the partial case needs at least 2", len(names))
 	}
 	onlyFirst := func(s string) bool { return s == HarnessToolBinding(names[0]) }
 
@@ -68,7 +68,7 @@ func TestPartialAndAbsentAreDifferentOutcomes(t *testing.T) {
 	}
 	if got := UnavailableCapabilitySlugs(onlyFirst); len(got) != 0 {
 		for _, s := range got {
-			if s == "workbench-use" {
+			if s == "computer-use-headless" {
 				t.Error("a partially-registered slug must NOT be reported as merely unavailable")
 			}
 		}
