@@ -10,6 +10,7 @@ import (
 	workstate "github.com/znasllc-io/memql/component/work"
 	"github.com/znasllc-io/memql/core/common"
 	permission "github.com/znasllc-io/memql/core/computerpermission"
+	"github.com/znasllc-io/memql/core/id"
 )
 
 func validateComputerPermissionDecision(row map[string]any, decision string, answer map[string]any) error {
@@ -43,12 +44,26 @@ func samePermissionID(a, b string) bool {
 	return a != "" && b != "" && memql.BareShortId(a) == memql.BareShortId(b)
 }
 
+// Approval subjects are immutable review evidence, including their original
+// agent spelling. Resolve both supported ID forms on lookup instead of rewriting
+// the subject (which would invalidate the person's recorded decision).
+func computerPermissionAgentIDs(agent string) (string, string, error) {
+	concept, short, err := id.ParseNodeId(agent)
+	canonical := id.BuildNodeId("v1:agents:agent", short)
+	if err != nil || short == "" || (concept != "" && (concept != "v1:agents:agent" || agent != canonical)) {
+		return "", "", fmt.Errorf("computer permission requires a valid agent ID")
+	}
+	return canonical, short, nil
+}
+
 func permissionFromRow(row map[string]any, req permission.Request, now time.Time) *permission.Grant {
 	if rowString(row, "kind") != "scopeElevation" || rowString(row, "decision") != "approved" || !samePermissionID(rowString(row, "ownerUserId"), req.OwnerID) || !samePermissionID(rowString(row, "decidedBy"), req.OwnerID) || rowString(row, "permissionRevokedAt") != "" {
 		return nil
 	}
 	subject := rowMap(row, "subject")
-	if !samePermissionID(rowString(subject, "agentId"), req.AgentID) || workstate.ArtifactHash(subject) != rowString(row, "artifactHash") {
+	storedAgent, _, storedErr := computerPermissionAgentIDs(rowString(subject, "agentId"))
+	requestedAgent, _, requestErr := computerPermissionAgentIDs(req.AgentID)
+	if storedErr != nil || requestErr != nil || storedAgent != requestedAgent || workstate.ArtifactHash(subject) != rowString(row, "artifactHash") {
 		return nil
 	}
 	scope, err := permission.Parse(subject["computerPermission"])
@@ -95,13 +110,19 @@ func (i *Integration) Find(ctx context.Context, req permission.Request) (*permis
 	if err := i.permissionRun(ctx, req, false); err != nil {
 		return nil, err
 	}
-	rows, err := i.store().query(memql.ContextWithFreshRead(ctx), "query "+call("workComputerPermissionsForAgent", map[string]any{"agentId": req.AgentID}))
+	canonical, short, err := computerPermissionAgentIDs(req.AgentID)
 	if err != nil {
 		return nil, err
 	}
-	for _, row := range rows {
-		if grant := permissionFromRow(row, req, i.clock()); grant != nil {
-			return grant, nil
+	for _, agent := range []string{canonical, short} {
+		rows, err := i.store().query(memql.ContextWithFreshRead(ctx), "query "+call("workComputerPermissionsForAgent", map[string]any{"agentId": agent}))
+		if err != nil {
+			return nil, err
+		}
+		for _, row := range rows {
+			if grant := permissionFromRow(row, req, i.clock()); grant != nil {
+				return grant, nil
+			}
 		}
 	}
 	return nil, nil

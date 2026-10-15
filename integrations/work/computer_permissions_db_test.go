@@ -24,6 +24,7 @@ func TestComputerPermissionDB(t *testing.T) {
 	}{
 		{"TwoReplicasConsumeOnceAndRevokeAlways", testComputerPermissionDBTwoReplicasConsumeOnceAndRevokeAlways},
 		{"SelectedMachinesKeepSeparateReceipts", testComputerPermissionDBSelectedMachinesKeepSeparateReceipts},
+		{"AgentIDFormsReuseTheOriginalReceipt", testComputerPermissionDBAgentIDForms},
 		{"CancelledCallerRetainsClaimAndDecisionGate", testComputerPermissionDBCancelledCallerRetainsClaimAndDecisionGate},
 		{"ApprovalContinuesWithoutBlanketRerun", testComputerPermissionDBApprovalContinuesWithoutBlanketRerun},
 		{"DefaultTimeoutKeepsOneDurableClaim", testComputerPermissionDBDefaultTimeoutKeepsOneDurableClaim},
@@ -33,6 +34,42 @@ func TestComputerPermissionDB(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			a, b := computerPermissionCase(t, first, second)
 			tc.run(t, a, b)
+		})
+	}
+}
+
+func testComputerPermissionDBAgentIDForms(t *testing.T, first, second actsDB) {
+	for _, storedAgent := range []string{"agent", "v1:agents:agent:agent"} {
+		t.Run(storedAgent, func(t *testing.T) {
+			a, b := computerPermissionCase(t, first, second)
+			run := a.openRun(t, nil)
+			row, req := computerPermissionFixture()
+			req.OwnerID, req.RunID = a.owner, run
+			subject := rowMap(row, "subject")
+			subject["agentId"] = storedAgent
+			approval := newRowId(approvalConcept)
+			a.write(t, "createWorkApproval", map[string]any{"approvalId": approval, "runId": run, "kind": "scopeElevation", "subject": subject, "artifactHash": workstate.ArtifactHash(subject), "requestedAt": rfc(time.Now()), "expiresAt": rfc(time.Now().Add(time.Hour))})
+			a.write(t, "decideWorkApproval", map[string]any{"approvalId": approval, "decision": "approved", "decidedBy": a.owner, "decidedAt": rfc(time.Now()), "answer": map[string]any{"permissionMode": "always"}})
+			person := actorCtx(a.owner)
+			for _, agent := range []string{"agent", "v1:agents:agent:agent"} {
+				req.AgentID = agent
+				grant, err := b.i.Find(person, req)
+				if err != nil || grant == nil || !samePermissionID(grant.ID, approval) {
+					t.Fatalf("stored %q requested %q: %v %v", storedAgent, agent, grant, err)
+				}
+				if _, err := b.i.Claim(person, grant.ID, req, "worker", "machine"); err != nil {
+					t.Fatal(err)
+				}
+			}
+			for _, agent := range []string{"other", "v1:identity:user:agent", "legacy:v1:agents:agent:agent"} {
+				req.AgentID = agent
+				if grant, _ := b.i.Find(person, req); grant != nil {
+					t.Fatalf("unrelated or malformed agent found a receipt: %q", agent)
+				}
+				if _, err := b.i.Claim(person, approval, req, "worker", "machine"); err == nil {
+					t.Fatalf("unrelated or malformed agent claimed a receipt: %q", agent)
+				}
+			}
 		})
 	}
 }

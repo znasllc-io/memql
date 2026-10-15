@@ -355,13 +355,19 @@ func (i *Integration) handleDispatch(ctx context.Context, tool string, args map[
 		"bytesOut":      res.BytesOut,
 		"outputPreview": res.OutputPreview,
 	})
-	return []memorynodes.MemoryNode{{
+	nodes := []memorynodes.MemoryNode{{
 		ID:        fmt.Sprintf("worker-call:%d", time.Now().UnixNano()),
 		Concept:   "integration:worker:result",
 		Type:      memorynodes.NodeTypeObject,
 		CreatedAt: time.Now().UTC(),
 		Payload:   payload,
-	}}, nil
+	}}
+	if !res.OK {
+		// Native compositions may inspect the failed receipt. The builtin error
+		// still prevents an automation from journaling it as a completed effect.
+		return nodes, fmt.Errorf("worker %s %s failed (%s): %s", tool, action, res.ErrorCode, res.ErrorMessage)
+	}
+	return nodes, nil
 }
 
 // dispatchAnswerMargin is how much longer than a command's own time limit

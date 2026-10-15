@@ -105,6 +105,7 @@ func TestComputerPermissionDBFullApprovalAndForwardedListing(t *testing.T) {
 			require.NoError(t, err)
 			execute(engines[1], person, "query", "decideApproval", map[string]any{"approvalId": choice, "decision": "answered", "answer": map[string]any{"value": "laptop"}})
 			req := h.Request()
+			req.AgentId = "v1:agents:agent:" + memql.BareShortId(req.AgentId)
 			req.RunId = run
 			req.Args = map[string]any{"path": dir}
 			req.Action = "fs_list"
@@ -146,6 +147,9 @@ func TestComputerPermissionDBFullApprovalAndForwardedListing(t *testing.T) {
 				freshRun := id.NewShortId()
 				execute(engines[1], write, "mutation", "createWorkRun", map[string]any{"runId": freshRun, "goalId": goal, "automationName": "permission-test", "templateFingerprint": "fixture", "mode": "live", "status": "running", "startedAt": time.Now().UTC().Format(time.RFC3339Nano)})
 				rc.RunId, req.RunId = freshRun, freshRun
+				// Recovery receives the wire form of the same assistant ID.
+				req.AgentId = memql.BareShortId(req.AgentId)
+				requestArgs["agentId"] = req.AgentId
 				ctx = common.ContextWithRun(person, rc)
 				operation := requestArgs["operation"]
 				delete(requestArgs, "operation")
