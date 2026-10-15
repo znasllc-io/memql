@@ -111,6 +111,12 @@ func (d *Dispatcher) prepareComputerPermission(ctx context.Context, owner, agent
 		return scope, nil, err
 	}
 	plan.RequireActionContract(permission.Contract, permission.Version)
+	if action == "fs_read" && permission.ExtendedRead(args) {
+		if _, err := permission.ParseReadOptions(args); err != nil {
+			return scope, nil, computerPermissionInputError("operation.args", err.Error())
+		}
+		plan.RequireActionContract(permission.ReadContract, permission.ReadVersion)
+	}
 	for _, candidate := range plan.Candidates {
 		if candidate.MachineId == "" {
 			continue

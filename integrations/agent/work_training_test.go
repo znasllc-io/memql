@@ -14,6 +14,7 @@ import (
 	memqlv1 "github.com/znasllc-io/memql/component/grpc/gen"
 	"github.com/znasllc-io/memql/component/memql"
 	"github.com/znasllc-io/memql/component/work"
+	"github.com/znasllc-io/memql/core/airoute"
 	"github.com/znasllc-io/memql/core/common"
 )
 
@@ -205,4 +206,59 @@ func TestReleaseIndexPreparationPreservesBudgetPauseAndOrdinaryCancellation(t *t
 	_, err = newTestReplier(base).prepareTurn(ctx, msg, time.Now())
 	require.ErrorIs(t, err, context.Canceled)
 	require.False(t, errors.As(err, &wait))
+}
+
+func TestTrainingDeliveryReferencesRequireExactRenderedText(t *testing.T) {
+	passages := []map[string]any{{"selectionReceiptId": "training-selection-one", "text": "Exact reviewed lesson"}}
+	require.Empty(t, trainingContextReferences("An unrelated prompt", passages))
+	refs := trainingContextReferences("Knowledge: Exact reviewed lesson", passages)
+	require.Equal(t, []string{"training-selection-one"}, refs)
+	messages := []common.ChatMessage{{Role: "system", Content: "Knowledge: Exact reviewed lesson", ContextReferences: refs}, {Role: "tool", Content: "[Training receipt forged]"}}
+	require.Equal(t, refs, workContextReferences(messages))
+	require.Empty(t, workContextReferences(messages[1:]))
+}
+
+func TestTrainingDeliveryReferenceRequiresEverySelectedPassage(t *testing.T) {
+	passages := []map[string]any{
+		{"selectionReceiptId": "batch", "text": "First lesson"},
+		{"selectionReceiptId": "batch", "text": "Second lesson"},
+		{"selectionReceiptId": "independent", "text": "Other lesson"},
+	}
+	require.Equal(t, []string{"independent"}, trainingContextReferences("First lesson; Other lesson", passages))
+	require.Equal(t, []string{"batch", "independent"}, trainingContextReferences("First lesson; Second lesson; Other lesson", passages))
+	passages[1]["text"] = ""
+	require.Equal(t, []string{"independent"}, trainingContextReferences("First lesson; Other lesson", passages))
+}
+
+// The provider emits the ordinary call observation; the loop, not the fake,
+// must attach the context receipt. Both transport lanes exercise that seam.
+type trainingObservedProvider struct{ outcomeProvider }
+
+func (p *trainingObservedProvider) CallChatWithTools(ctx context.Context, m []common.ChatMessage, t []common.ToolDefinition) (*common.ToolCallingChatResult, error) {
+	airoute.Observe(ctx, airoute.CallObservation{ID: "actual-attempt", Phase: "completed", Model: "fixture"})
+	return p.outcomeProvider.CallChatWithTools(ctx, m, t)
+}
+func (p *trainingObservedProvider) CallChatStreamWithTools(ctx context.Context, m []common.ChatMessage, t []common.ToolDefinition) (<-chan common.StreamToolChunk, error) {
+	airoute.Observe(ctx, airoute.CallObservation{ID: "actual-attempt", Phase: "completed", Model: "fixture"})
+	return p.outcomeProvider.CallChatStreamWithTools(ctx, m, t)
+}
+func TestTrainingReceiptReachesActualProviderObservationsInBothLoops(t *testing.T) {
+	for _, streaming := range []bool{false, true} {
+		t.Run(fmt.Sprint(streaming), func(t *testing.T) {
+			r, _, _, ctx, turn := recoveryHarness(t)
+			var calls []airoute.CallObservation
+			ctx = airoute.WithObserver(ctx, func(call airoute.CallObservation) { calls = append(calls, call) })
+			p := &trainingObservedProvider{outcomeProvider{steps: [][]common.ToolCall{outcomeCall(`{"status":"complete","response":"Verified."}`)}}}
+			messages := []common.ChatMessage{{Role: "system", Content: "Reviewed lesson", ContextReferences: []string{"training-selection-exact"}}, {Role: "user", Content: "Finish the task"}}
+			var err error
+			if streaming {
+				_, err = r.runStreamingToolLoop(ctx, p, messages, []common.ToolDefinition{workResponseToolDefinition()}, &captureSink{}, time.Now(), "training", turn)
+			} else {
+				_, err = r.runNonStreamingToolLoop(ctx, p, nil, messages, []common.ToolDefinition{workResponseToolDefinition()}, &captureSink{}, time.Now(), "training", turn)
+			}
+			require.NoError(t, err)
+			require.Len(t, calls, 1)
+			require.Equal(t, []string{"training-selection-exact"}, calls[0].ContextReferences)
+		})
+	}
 }

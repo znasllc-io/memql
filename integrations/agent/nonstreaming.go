@@ -413,7 +413,7 @@ BackgroundLoop:
 				return nil, r.pauseAtBudgetBoundary(ctx, budgetErr, messages)
 			}
 			callCtx, cancel := context.WithTimeout(budgetCtx, reqTimeout)
-			stepResult, stepErr = provider.CallChatWithTools(callCtx, messages, tools)
+			stepResult, stepErr = provider.CallChatWithTools(airoute.WithContextReferences(callCtx, workContextReferences(messages)), messages, tools)
 			budgetFailure := r.workCallFailure(callCtx)
 			cancel()
 			stopBudget()

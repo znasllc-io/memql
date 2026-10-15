@@ -14,6 +14,7 @@ import (
 	"github.com/znasllc-io/memql/component/auth"
 	langparser "github.com/znasllc-io/memql/component/language/parser"
 	"github.com/znasllc-io/memql/component/memql"
+	"github.com/znasllc-io/memql/core/airoute"
 	"github.com/znasllc-io/memql/core/common"
 	"github.com/znasllc-io/memql/core/env"
 	"github.com/znasllc-io/memql/core/id"
@@ -499,7 +500,7 @@ StreamLoop:
 			}
 			attemptCtx, stopAttempt := context.WithCancel(budgetCtx)
 			cancelAttempt := func() { stopAttempt(); stopBudget() }
-			chunks, err = provider.CallChatStreamWithTools(attemptCtx, messages, tools)
+			chunks, err = provider.CallChatStreamWithTools(airoute.WithContextReferences(attemptCtx, workContextReferences(messages)), messages, tools)
 			if err != nil {
 				budgetFailure := r.workCallFailure(attemptCtx)
 				cancelAttempt()

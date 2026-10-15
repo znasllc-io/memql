@@ -5,6 +5,8 @@ import (
 	"errors"
 	"fmt"
 	"maps"
+	"slices"
+	"strings"
 	"time"
 	"unicode/utf8"
 
@@ -129,4 +131,37 @@ func trainingResultRows(result any) []map[string]any {
 		}
 	}
 	return rows
+}
+
+// Receipt presence is recorded only for exact selected text in the rendered
+// prompt. Later provider observations carry these IDs, separately from the
+// selection decision. Neither stage asserts adherence or task success.
+func trainingContextReferences(prompt string, passages []map[string]any) []string {
+	var refs []string
+	missing := map[string]bool{}
+	for _, p := range passages {
+		receipt, _ := p["selectionReceiptId"].(string)
+		text, _ := p["text"].(string)
+		if receipt == "" {
+			continue
+		}
+		if !slices.Contains(refs, receipt) {
+			refs = append(refs, receipt)
+		}
+		if text == "" || !strings.Contains(prompt, text) {
+			missing[receipt] = true
+		}
+	}
+	// One selection receipt can name several passages. A partial rendering
+	// must not imply that the whole recorded selection reached the provider.
+	return slices.DeleteFunc(refs, func(receipt string) bool { return missing[receipt] })
+}
+
+func workContextReferences(messages []common.ChatMessage) []string {
+	// Only the current native-rendered first system message supplies metadata.
+	// Historical tools and copied citations cannot manufacture delivery receipts.
+	if len(messages) > 0 && messages[0].Role == "system" {
+		return messages[0].ContextReferences
+	}
+	return nil
 }
