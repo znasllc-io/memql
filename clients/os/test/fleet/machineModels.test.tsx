@@ -295,8 +295,8 @@ const setupFixture = {
  ],
 };
 async function chooseTask(label: string, model: string) {
- fireEvent.click(screen.getByRole("combobox", { name: label }));
- fireEvent.click(screen.getByRole("option", { name: model }));
+ fireEvent.click(screen.getByRole("button", { name: `Select ${model}` }));
+ fireEvent.click(screen.getByRole("button", { name: new RegExp(`^${label}:`) }));
 }
 describe("model setup choices", () => {
  it("saves the expected revision and deduplicates a model serving several tasks", async () => {
@@ -313,9 +313,11 @@ describe("model setup choices", () => {
  it("prevents an over-capacity save and excludes unknown memory profiles", async () => {
   const connection = await mount({"model:chat":"tools=1", "model:large":"ctx=32768"}, {setup:setupFixture});
   fireEvent.click(screen.getByRole("button", {name:"Change model setup"}));
-  fireEvent.click(screen.getByRole("combobox", {name:"Conversation"}));
-  expect(screen.queryByRole("option", {name:"unknown"})).toBeNull();
-  fireEvent.click(screen.getByRole("option", {name:"large"}));
+  await chooseTask("Conversation", "unknown");
+  expect(screen.getAllByText("Memory estimate unavailable").length).toBeGreaterThan(0);
+  await chooseTask("Conversation", "large");
+  expect(screen.getByRole("button", {name:"Conversation: chat"})).toBeTruthy();
+  expect(screen.getByText(/This would exceed capacity/)).toBeTruthy();
   expect(screen.queryByRole("button", {name:"Save setup"})).toBeNull();
   expect(connection.query.fleetSetModelSetup).not.toHaveBeenCalled();
  });
@@ -327,7 +329,32 @@ describe("model setup choices", () => {
   await waitFor(() => expect((screen.getByRole("button", {name:"Save setup"}) as HTMLButtonElement).disabled).toBe(false));
   await act(async () => { await new Promise(resolve => setTimeout(resolve, 450)); });
   await act(async () => { fireEvent.click(screen.getByRole("button", {name:"Save setup"})); });
-  expect(screen.getByRole("combobox", {name:"Conversation"}).textContent).toContain("small");
+  expect(screen.getByRole("button", {name:"Conversation: small"})).toBeTruthy();
   expect(screen.getByText("The setup changed. Reload it before saving.")).toBeTruthy();
+ });
+ it("retains a refused draft when the recovery read also fails", async () => {
+  const connection = await mount({"model:chat":"tools=1", "model:small":"tools=1"}, {setup:setupFixture});
+  fireEvent.click(screen.getByRole("button", {name:"Change model setup"}));
+  await chooseTask("Conversation", "small");
+  connection.query.fleetSetModelSetup.mockRejectedValueOnce(new Error("Connection interrupted"));
+  connection.query.fleetModelSetup.mockRejectedValueOnce(new Error("Still disconnected"));
+  await act(async () => { fireEvent.click(screen.getByRole("button", {name:"Save setup"})); });
+  expect(screen.getByRole("button", {name:"Conversation: small"})).toBeTruthy();
+  expect(screen.queryByRole("button", {name:"Save setup"})).toBeNull();
+  expect(screen.getByRole("button", {name:"Discard changes"})).toBeTruthy();
+ });
+ it("holds choices and prevents a second write while saving", async () => {
+  const connection = await mount({"model:chat":"tools=1", "model:small":"tools=1"}, {setup:setupFixture});
+  let finish!: () => void;
+  connection.query.fleetSetModelSetup.mockImplementationOnce(() => new Promise<void>(resolve => { finish = resolve; }));
+  fireEvent.click(screen.getByRole("button", {name:"Change model setup"}));
+  await chooseTask("Conversation", "small");
+  fireEvent.click(screen.getByRole("button", {name:"Save setup"}));
+  fireEvent.click(screen.getByRole("button", {name:"Saving setup…"}));
+  expect(connection.query.fleetSetModelSetup).toHaveBeenCalledTimes(1);
+  expect((screen.getByRole("button", {name:"Discard changes"}) as HTMLButtonElement).disabled).toBe(true);
+  expect((screen.getByRole("button", {name:"Select chat"}) as HTMLButtonElement).disabled).toBe(true);
+  await act(async () => finish());
+  expect(screen.getByText("Model setup saved.")).toBeTruthy();
  });
 });

@@ -9,7 +9,7 @@ import { withSession } from "../test/deployables/harness";
 
 type Frame = ComponentType<{ fallback: string; children: ReactNode }>;
 export function fleetEquipmentScenes(Frame: Frame) {
-  return Object.fromEntries(["populated", "models", "models-empty", "models-error", "details", "details-empty", "labels", "labels-empty", "at-limit", "empty", "error", "sharing", "sharing-people", "sharing-picker", "sharing-empty", "sharing-error", "sharing-pending"].map(state => [`fleet-equipment-${state}`, {
+  return Object.fromEntries(["populated", "models", "models-empty", "models-error", "models-save-error", "models-pending", "models-bound", "details", "details-empty", "labels", "labels-empty", "at-limit", "empty", "error", "sharing", "sharing-people", "sharing-picker", "sharing-empty", "sharing-error", "sharing-pending"].map(state => [`fleet-equipment-${state}`, {
     connect: () => {
       const shareDirectory = shareDirectoryRow({ id: "studio", people: state === "sharing-empty" ? [] : [{ id: "ana", name: "Ana Ruiz", detail: "" }, { id: "bo", name: "Bo Chen", detail: "" }], groups: state === "sharing-empty" ? [] : [{ id: "design", name: "Design", members: 4 }, { id: "ops", name: "Operations", members: 7 }] });
       if (state === "sharing-picker") {
@@ -43,17 +43,20 @@ export function fleetEquipmentScenes(Frame: Frame) {
         { modelId: "flux2-klein-4b", purposes: ["imageGen"], memoryBytes: 13e9, sizeBytes: 0, recommended: false },
         { modelId: "qwen3.5:122b", purposes: ["conversation", "structured", "tools", "vision"], memoryBytes: 90e9, sizeBytes: 81e9, blocked: "Needs more model memory", installBlocked: "Needs more model memory" },
       ].map(m => ({ runtime: "ollama", blocked: "", installBlocked: "", installed: state !== "models-empty" && m.modelId !== "qwen3.5:122b", source: "https://ollama.com/library/" + m.modelId, reviewedAt: "2026-10-15T00:00:00Z", ...m })) };
+      Object.assign(setup, { suggestedChoices: setup.choices });
+      if (state === "models-bound") Object.assign(setup, { boundEmbeddingModel: "qwen3-embedding:0.6b" });
       connection.query.fleetModelSetup = vi.fn(async () => {
         if (state === "models-error") throw new Error("Connection interrupted");
         return builtinReply("fleetModelSetup", [setup]);
       });
       connection.query.fleetSetModelSetup = vi.fn(async args => {
-        if (refuseSave) throw new Error("The setup changed. Reload it before saving.");
+        if (delaySave) await new Promise<void>(resolve => { finishSave = resolve; });
+        if (refuseSave) throw new Error("Connection interrupted. Your choices are kept; try saving again.");
         setup = { ...setup, revision: "setup-2", choices: args.choices as typeof setup.choices };
         return builtinReply("fleetSetModelSetup", [{ revision: setup.revision }]);
       });
       if (state === "error") connection.query.appSessionsForUser = vi.fn(async () => { throw new Error("Connection interrupted"); });
-      let refuseSave = false, delaySave = false;
+      let refuseSave = state === "models-save-error", delaySave = state === "models-pending";
       let finishSave: (() => void) | undefined;
       let finishRead: (() => void) | undefined;
       if (state === "sharing-error") connection.query.fleetShareDirectory = vi.fn(async () => { throw new Error("Connection interrupted"); });

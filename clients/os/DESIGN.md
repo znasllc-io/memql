@@ -323,6 +323,15 @@ sizes. Include long values, empty reports, hover, keyboard focus, touch,
 clipboard success/refusal and reduced motion. Check actual rendered spacing
 and overflow, not just whether the control exists.
 
+Machine Model setup uses an assignment board: installed models beside task
+targets, with compatible tasks highlighted and a shared memory estimate.
+Clicking a model and task is the keyboard-accessible equivalent of dragging.
+One model serving several tasks counts once. Keep capacity, unavailable-model
+and bound-memory-search checks on every assignment path. The editor replaces
+the Models overview while open and preserves a refused draft. Save setup and
+Discard changes use one plain, right-aligned page action row outside the board;
+there is no nested lifecycle footer or “Choose your setup” status bar.
+
 Small equipment, label and sharing collections share `kit/CardCarousel`: one or two
 cards according to available width, explicit previous/next arrows and an
 “x–y of n” counter. Paging never changes selection or intercepts the wheel;

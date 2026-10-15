@@ -51,6 +51,32 @@ export function setupCapacity(choices: ModelChoices, catalog: SetupModel[], budg
   });
   return { selected, used, known, fits: known && !invalid && (selected.length === 0 || budget > 0) && used <= budget };
 }
+/** The same validation serves clicks, keyboard activation, drops and batch assignments. */
+export function assignmentProposal(choices: ModelChoices, modelId: string, purposes: string[], view: ModelSetupView): { choices: ModelChoices; refusal: string } {
+  const next = { ...choices };
+  const model = view.catalog.find(m => m.modelId === modelId);
+  for (const purpose of purposes) {
+    if (!MODEL_PURPOSES.some(([id]) => id === purpose)) return { choices, refusal: "That task is unavailable." };
+    if (purpose === "embeddings" && view.boundEmbeddingModel && modelId !== view.boundEmbeddingModel) return { choices, refusal: `Memory search keeps ${view.boundEmbeddingModel}. Switching requires a reindex.` };
+    if (modelId) {
+      if (!model?.installed) return { choices, refusal: "Install this model before assigning it." };
+      if (model.blocked) return { choices, refusal: model.blocked };
+      if (!model.purposes.includes(purpose)) return { choices, refusal: "This model does not support that task." };
+      if (!model.memoryBytes) return { choices, refusal: "This model's memory use has not been verified." };
+    }
+    next[purpose] = modelId;
+  }
+  // Clearing an assignment must remain possible when repairing an invalid saved setup.
+  if (modelId) {
+    const capacity = setupCapacity(next, view.catalog, view.usableBytes);
+    if (!capacity.known) return { choices, refusal: "Clear the unavailable assignments first." };
+    if (!view.usableBytes || capacity.used > view.usableBytes) return { choices, refusal: "This would exceed capacity. Reuse a model or choose a smaller one." };
+  }
+  return { choices: next, refusal: "" };
+}
+export function sameModelChoices(a: ModelChoices, b: ModelChoices) {
+  return MODEL_PURPOSES.every(([id]) => (a[id] || "") === (b[id] || ""));
+}
 export function safeModelSource(source: string): string | undefined {
   try { const url = new URL(source); return url.protocol === "https:" ? url.href : undefined; } catch { return undefined; }
 }

@@ -1,4 +1,4 @@
-import { useCallback, useMemo, useState } from "react";
+import { useCallback, useMemo, useRef, useState } from "react";
 import type { Row } from "@znasllc-io/memql-sdk-core/client";
 import { ArrowLeft, Box, Library, Pencil } from "lucide-react";
 import { useSession } from "../../../chrome/access";
@@ -24,7 +24,8 @@ import { canConverse, machineModelsFrom, modelPurposeLabel } from "./models";
 import { LivePull, MeasuredLine, PullHistory } from "./ModelDownloads";
 import { useMachineInference, type MachineInference } from "./useMachineInference";
 import { useModelPulls } from "./useModelPulls";
-import { MODEL_PURPOSES, modelSetupFromRow, safeModelSource, setupCapacity, type ModelChoices, type SetupModel } from "./modelSetup";
+import { MODEL_PURPOSES, modelSetupFromRow, safeModelSource, sameModelChoices, setupCapacity, type ModelChoices, type ModelSetupView, type SetupModel } from "./modelSetup";
+import { ModelAssignmentBoard } from "./ModelAssignmentBoard";
 import "./machineModels.css";
 
 export function MachineModels({ machine, inference: supplied }: { machine: MachineRow; standalone?: boolean; inference?: MachineInference }) {
@@ -46,8 +47,10 @@ export function MachineModels({ machine, inference: supplied }: { machine: Machi
   const reading = useReading(`model-setup:${machine.id}:${own}`, connection && own ? read : null);
   const view = reading.value;
   const [draft, setDraft] = useState<ModelChoices | null>(null);
+  const [editBase, setEditBase] = useState<ModelSetupView | null>(null);
   const [revision, setRevision] = useState("");
   const [saving, setSaving] = useState(false);
+  const savePending = useRef(false);
   const [error, setError] = useState("");
   const [saved, setSaved] = useState(false);
   const [catalogOpen, setCatalogOpen] = useState(false);
@@ -60,16 +63,19 @@ export function MachineModels({ machine, inference: supplied }: { machine: Machi
   const profile = view?.catalog.find(m => m.modelId === selected);
   const localModel = installed.find(m => m.modelId === selected);
   const editing = draft !== null;
-  const dirty = editing && JSON.stringify(draft) !== JSON.stringify(view?.choices ?? {});
-  const beginEdit = () => { setDraft({ ...(view?.revision ? view.choices : view?.suggestedChoices) }); setRevision(view?.revision ?? ""); setError(""); setSaved(false); };
+  const dirty = editing && !sameModelChoices(draft, editBase?.choices ?? {});
+  const editView = view ?? editBase;
+  const staleDraft = editing && !!view && view.revision !== revision;
+  const beginEdit = () => { if (!view) return; setEditBase(view); setDraft({ ...(view.revision ? view.choices : view.suggestedChoices) }); setRevision(view.revision); setError(""); setSaved(false); };
   const save = async () => {
-    if (!connection || !draft || !capacity.fits) return;
+    if (!own || !connection || !draft || !view || staleDraft || reading.error || !capacity.fits || savePending.current) return;
+    savePending.current = true;
     setSaving(true); setError("");
     try {
       await connection.query.fleetSetModelSetup({ registrationId: machine.id, revision, choices: draft });
-      setDraft(null); setSaved(true); reading.reread();
+      setDraft(null); setEditBase(null); setSaved(true); reading.reread();
     } catch (err) { setError(err instanceof Error ? err.message : String(err)); reading.reread(); }
-    finally { setSaving(false); }
+    finally { savePending.current = false; setSaving(false); }
   };
   const back = () => { setSelected(null); setError(""); };
   const install = async (model: SetupModel) => {
@@ -78,16 +84,17 @@ export function MachineModels({ machine, inference: supplied }: { machine: Machi
   };
   const shown = (view?.catalog ?? []).filter(m => (!search || m.modelId.toLowerCase().includes(search.toLowerCase())) && (!purpose || m.purposes.includes(purpose)) && (availability === "all" || (availability === "installed" ? m.installed : !m.blocked)));
   return <div className="fleet-machine-details fleet-models">
-    <AutoRefresh enabled={own && !editing} busy={reading.state === "reading"} onRefresh={reading.reread} />
+    <AutoRefresh enabled={own && (!editing || reading.state === "failed")} busy={reading.state === "reading"} onRefresh={reading.reread} />
     <AutoRefresh enabled={feedIsBehind(downloads.state, downloads.feedError)} busy={downloads.loading} onRefresh={downloads.reseed} />
     <PageHelp title="Models on this machine">
       <p>Installed models occupy storage. Your setup chooses which model serves each task. One model can serve several tasks; its memory counts once. Automatic means MemQL chooses among the models this machine offers.</p>
       <p>Memory is a planning estimate at up to 32K context, with room left for the operating system. It is not a live measurement. Saved setups limit subsequent calls to that context and run one model call at a time. Other applications and larger images can change actual use.</p>
       <p>Catalog recommendations favor local models that fit. Installing does not change your setup. Existing memory search keeps its bound model; switching it requires a separate reindex.</p>
+      <p>In Model setup, select an installed model and click a task, or drag the model onto it. Highlighted tasks are compatible. Use matching tasks to share one model across them. Save setup applies the choices to new calls; existing work finishes.</p>
       <p>Catalog research can review primary sources weekly using a local model. It starts off and must be enabled separately. It cannot install models or change your choices.</p>
     </PageHelp>
     {reading.error ? <Notice tone="error" sentence="The catalog could not be read." next="Your installed models are still shown below." detail={reading.error} /> : null}
-    {error ? <Notice tone="error" sentence="That change could not be completed." detail={error} /> : null}
+    {error && !editing ? <Notice tone="error" sentence="That change could not be completed." detail={error} /> : null}
     {downloads.feedError ? <Notice tone="warn" sentence="Download updates are interrupted." detail={downloads.feedError} /> : null}
     {downloads.live ? <LivePull pull={downloads.live} /> : null}
     {selected ? <>
@@ -125,6 +132,11 @@ export function MachineModels({ machine, inference: supplied }: { machine: Machi
         stateTitle={m.blocked || undefined} tone={m.installed || m.recommended && !m.blocked ? "accent" : "muted"}
         onOpen={() => setSelected(m.modelId)}>{m.blocked || (m.memoryBytes ? `${formatBytes(m.memoryBytes)} memory` : "Memory not verified")}</RecordRow>)}</RecordList>
         : <EmptyState icon={Box} title="No matching models">Try another task or clear the filter.</EmptyState>}
+    </> : editing && editView ? <>
+      {staleDraft ? <Notice tone="warn" sentence="This setup changed elsewhere." next="Discard changes to load the latest setup before editing again." /> : null}
+      <ModelAssignmentBoard view={editView} choices={draft} onChange={setDraft} saving={saving} saveError={error}
+        canSave={own && !!connection && !!view && !reading.error && !staleDraft && (dirty || !revision)} onSave={() => { void save(); }}
+        onDiscard={() => { if (!saving) { setDraft(null); setEditBase(null); setError(""); } }} />
     </> : <>
       {own && !view && (reading.state === "reading" || reading.state === "unread") ? <RecordListSkeleton label="Loading model setup" /> : null}
       {view ? <>
@@ -139,24 +151,17 @@ export function MachineModels({ machine, inference: supplied }: { machine: Machi
           <p className="os-caption">{editing && !capacity.fits ? "Choose smaller models or reuse one across tasks." : "Memory estimate · room left for your system"}</p>
         </MachineDetailsSection>
         {installed.length > 0 || view.revision ? <MachineDetailsSection title="Model setup">
-          <div className="fleet-models-setup-title"><span className="os-caption">{editing ? "Choose a model for each task." : view.revision ? "Your choices" : "MemQL chooses automatically"}</span>
+          <div className="fleet-models-setup-title"><span className="os-caption">{view.revision ? "Your choices" : "MemQL chooses automatically"}</span>
             {own && !editing ? <IconButton label="Change model setup" onClick={beginEdit}><Pencil size={16} aria-hidden /></IconButton> : null}
           </div>
-          <fieldset className="fleet-models-choices" disabled={saving}>
+          <div className="fleet-models-choices">
             {MODEL_PURPOSES.map(([id,label]) => <div className="fleet-models-choice" key={id}>
               <span>{label}</span>
-              {editing ? <Select id={`model-choice-${id}`} label={label} value={choices[id] ?? ""} onChange={model => setDraft(previous => ({ ...previous, [id]: model }))}>
-                <option value="" disabled={id === "embeddings" && !!view.boundEmbeddingModel}>Not assigned</option>
-                {view.catalog.filter(m => m.installed && m.purposes.includes(id) && !m.blocked).map(m => <option key={m.modelId} value={m.modelId} disabled={id === "embeddings" && !!view.boundEmbeddingModel && m.modelId !== view.boundEmbeddingModel}>{m.modelId}</option>)}
-                {choices[id] && !view.catalog.some(m => m.installed && !m.blocked && m.modelId === choices[id] && m.purposes.includes(id)) ? <option value={choices[id]} disabled>{choices[id]} · unavailable</option> : null}
-              </Select> : <span className={choices[id] ? "" : "os-caption"}>{choices[id] || (view.revision ? "Not assigned" : installed.some(m => view.catalog.some(p => p.modelId === m.modelId && p.purposes.includes(id))) ? "Automatic" : "No model installed")}</span>}
+              <span className={choices[id] ? "" : "os-caption"}>{choices[id] || (view.revision ? "Not assigned" : installed.some(m => view.catalog.some(p => p.modelId === m.modelId && p.purposes.includes(id))) ? "Automatic" : "No model installed")}</span>
             </div>)}
-          </fieldset>
-          {editing && view.boundEmbeddingModel ? <p className="os-caption">Memory search keeps {view.boundEmbeddingModel}. Switching requires a reindex.</p> : null}
+          </div>
           {view.warning ? <Notice tone="warn" sentence="Your saved setup needs attention." detail={view.warning} /> : null}
           {saved && !editing ? <p className="os-caption" role="status">Model setup saved.</p> : null}
-          {editing ? <ActionBar state={dirty ? "Unsaved choices" : "Choose your setup"} detail="Applies to new calls. Existing work finishes."
-            acts={[{ label: "Cancel", text: true, onAct: () => { if (!saving) { setDraft(null); setError(""); } } }, ...(capacity.fits && (dirty || !view.revision) ? [{ label: "Save setup", tone: "primary" as const, busy: saving, onAct: () => { void save(); } }] : [])]} /> : null}
         </MachineDetailsSection> : null}
       </> : null}
       <MachineDetailsSection title="Installed">
