@@ -260,6 +260,7 @@ readonly MODULE_PATH="github.com/znasllc-io/memql"
 # in-process fakes) move from go-checks to db-tests; its live-cluster files
 # stay `//go:build clustere2e` and run in neither lane, exactly as before.
 readonly DB_GATED_TREES=(
+    component/filebackups
 	"app"
 	"component/memql"
 	"component/automations"

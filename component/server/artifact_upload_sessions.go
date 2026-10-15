@@ -43,6 +43,7 @@ import (
 	"strings"
 
 	"github.com/znasllc-io/memql/component/auth"
+	"github.com/znasllc-io/memql/component/database/storagequota"
 	"github.com/znasllc-io/memql/component/memql"
 	"github.com/znasllc-io/memql/component/server/fileversion"
 	"github.com/znasllc-io/memql/component/server/uploadsession"
@@ -266,6 +267,18 @@ func (h *ArtifactHandler) verifyProvenance(ctx context.Context, workerId, worker
 // one row per file and would otherwise have no way to reconcile the total.
 // Returns (0, "") when admitted.
 func (h *ArtifactHandler) checkQuota(ctx context.Context, addBytes int64) (int, string) {
+	if metered, ok := h.uploader.(interface {
+		StorageUsage(context.Context) (storagequota.Usage, error)
+	}); ok {
+		usage, err := metered.StorageUsage(ctx)
+		if err != nil {
+			return http.StatusServiceUnavailable, err.Error()
+		}
+		if addBytes > usage.Available {
+			return http.StatusInsufficientStorage, storagequota.ErrLimit.Error()
+		}
+		return 0, ""
+	}
 	if h.userQuotaBytes <= 0 {
 		return 0, ""
 	}
@@ -457,6 +470,14 @@ func (h *ArtifactHandler) handleUploadInit(w http.ResponseWriter, r *http.Reques
 		expectedVersion = head.VersionNumber
 	}
 
+	if metered, ok := h.uploader.(interface {
+		ReserveStorage(context.Context, string, string, int64) error
+	}); ok {
+		if err := metered.ReserveStorage(ctx, h.bucket, blobPath, req.Size); err != nil {
+			http.Error(w, err.Error(), http.StatusInsufficientStorage)
+			return
+		}
+	}
 	if err := h.sessions.Create(ctx, uploadsession.CreateParams{
 		UploadId: uploadId, Name: name, Size: req.Size,
 		MimeType: strings.TrimSpace(req.MimeType), FolderId: strings.TrimSpace(req.FolderId),

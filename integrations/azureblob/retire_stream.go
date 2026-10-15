@@ -12,6 +12,7 @@ import (
 	"github.com/Azure/azure-sdk-for-go/sdk/storage/azblob/bloberror"
 	"github.com/Azure/azure-sdk-for-go/sdk/storage/azblob/blockblob"
 	"github.com/Azure/azure-sdk-for-go/sdk/storage/azblob/lease"
+	"github.com/znasllc-io/memql/component/database/storagequota"
 	"github.com/znasllc-io/memql/core/id"
 )
 
@@ -53,6 +54,16 @@ func (u *AzureBlobUploader) RetireVerifiedStream(ctx context.Context, container,
 	bc, err := u.blockClient(container, object)
 	if err != nil {
 		return RetiredBlob{}, err
+	}
+	capacity, err := u.beginCapacity(ctx, container, object)
+	if err != nil {
+		return RetiredBlob{}, err
+	}
+	if capacity != nil {
+		defer capacity.Close()
+		if err = capacity.Plan(ctx, 0); err != nil && !errors.Is(err, storagequota.ErrRetired) {
+			return RetiredBlob{}, err
+		}
 	}
 	marker := string(id.NewUntracked().FromString(fmt.Sprintf("%s\n%d\n%s\n%s", leaseID, receipt.Size, receipt.SHA256, receipt.ETag)))
 	props, err := bc.GetProperties(ctx, nil)
@@ -121,6 +132,14 @@ func (u *AzureBlobUploader) RetireVerifiedStream(ctx context.Context, container,
 	blocks, err := bc.GetBlockList(ctx, blockblob.BlockListTypeUncommitted, &blockblob.GetBlockListOptions{AccessConditions: access})
 	if err != nil || len(blocks.UncommittedBlocks) != 0 {
 		return RetiredBlob{}, retirementUncertain(fmt.Errorf("uncommitted block inventory has %d blocks", len(blocks.UncommittedBlocks)), writeErr, err)
+	}
+	if err = u.checkRetention(ctx, props.VersionID); err != nil {
+		return RetiredBlob{}, err
+	}
+	if capacity != nil {
+		if err = capacity.Retired(ctx); err != nil {
+			return RetiredBlob{}, err
+		}
 	}
 	return RetiredBlob{ETag: string(*props.ETag)}, nil
 }

@@ -58,6 +58,7 @@ pipeline:
     # tree missing here would run its database tests in go-tests, with no
     # database, where they skip.
     dbGated:
+      - component/filebackups
       - app
       - component/memql
       - component/automations

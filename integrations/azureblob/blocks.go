@@ -58,6 +58,16 @@ func (u *AzureBlobUploader) StageBlock(ctx context.Context, container, objectNam
 	if len(chunk) == 0 {
 		return fmt.Errorf("azure blob block body is empty")
 	}
+	capacity, err := u.beginCapacity(ctx, container, objectName)
+	if err != nil {
+		return err
+	}
+	if capacity != nil {
+		defer capacity.Close()
+		if err := capacity.Stage(ctx, blockID, int64(len(chunk))); err != nil {
+			return err
+		}
+	}
 	if _, err := bc.StageBlock(ctx, blockID, streaming.NopCloser(bytes.NewReader(chunk)), nil); err != nil {
 		return fmt.Errorf("stage azure blob block: %w", err)
 	}
@@ -77,12 +87,26 @@ func (u *AzureBlobUploader) CommitBlockList(ctx context.Context, container, obje
 	if len(blockIDs) == 0 {
 		return fmt.Errorf("azure blob commit needs at least one block id")
 	}
+	capacity, err := u.commitCapacity(ctx, container, objectName, blockIDs)
+	if err != nil {
+		return err
+	}
+	if capacity != nil {
+		defer capacity.Close()
+	}
 	opts := &blockblob.CommitBlockListOptions{}
 	if ct := strings.TrimSpace(contentType); ct != "" {
 		opts.HTTPHeaders = &blob.HTTPHeaders{BlobContentType: &ct}
 	}
-	if _, err := bc.CommitBlockList(ctx, blockIDs, opts); err != nil {
+	response, err := bc.CommitBlockList(ctx, blockIDs, opts)
+	if err != nil {
 		return fmt.Errorf("commit azure blob block list: %w", err)
+	}
+	if capacity != nil {
+		if err = u.checkRetention(ctx, response.VersionID); err != nil {
+			return err
+		}
+		return capacity.BlocksCommitted(ctx, blockIDs, true)
 	}
 	return nil
 }

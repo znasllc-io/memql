@@ -3526,6 +3526,7 @@
         "lastSweepAt",
         "lastSweepError",
         "localPath",
+        "mode",
         "originState",
         "ownerUserId",
         "status",
@@ -3538,6 +3539,10 @@
         "workerId"
       ],
       "enums": {
+        "mode": [
+          "retain",
+          "sync"
+        ],
         "originState": [
           "missing",
           "ok",

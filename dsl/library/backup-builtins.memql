@@ -1,0 +1,109 @@
+// Native authority, byte reservations and durable transfer receipts.
+// Control calls use the existing authenticated gRPC/WS surface.
+
+@sdk
+@executor("integration.fileBackups.create")
+@args(profile="object")
+builtin libraryBackupCreate {
+  id string!
+  workerId string!
+  path string!
+  kind enum("archive", "sync_file", "download")!
+  metadata object
+}
+
+@sdk
+@executor("integration.fileBackups.prepare")
+@args(profile="object")
+builtin libraryBackupPrepare {
+  id string!
+  size int!
+  sha256 string!
+}
+
+@sdk
+@executor("integration.fileBackups.block")
+@args(profile="object")
+builtin libraryBackupBlock {
+  id string!
+  ordinal int!
+  md5 string!
+  sha256 string!
+}
+
+@sdk
+@executor("integration.fileBackups.checkpoint")
+@args(profile="object")
+builtin libraryBackupCheckpoint {
+  id string!
+  final bool!
+}
+
+@sdk
+@executor("integration.fileBackups.control")
+@args(profile="object")
+builtin libraryBackupControl {
+  id string!
+  action enum("pause", "resume", "cancel", "trash", "restore", "purge")!
+}
+
+@sdk
+@executor("integration.fileBackups.read")
+@args(profile="object")
+builtin libraryBackupRead {
+  id string!
+}
+
+@sdk
+@executor("integration.fileBackups.list")
+@args(profile="object")
+builtin libraryBackupList {
+  scope enum("active", "archives", "all")
+  workerId string
+  after string
+}
+
+@sdk
+@executor("integration.fileBackups.downloadBlock")
+@args(profile="object")
+builtin libraryBackupDownloadBlock {
+  id string!
+  ordinal int!
+}
+
+@sdk
+@executor("integration.fileBackups.report")
+@args(profile="object")
+builtin libraryBackupReport {
+  id string!
+  state enum("waiting", "error", "downloading", "complete")!
+  message string
+  offset int!
+}
+
+@sdk
+@executor("integration.fileBackups.usage")
+@args(profile="object")
+builtin libraryBackupUsage {
+  userId string
+}
+
+@sdk
+@executor("integration.fileBackups.setUserLimit")
+@args(profile="object")
+builtin libraryBackupSetUserLimit {
+  userId string!
+  bytes int!
+}
+
+@sdk
+@executor("integration.fileBackups.syncDelete")
+@args(profile="object")
+builtin libraryBackupSyncDelete {
+  watchId string!
+  workerId string!
+  path string!
+  fileId string!
+  sha256 string!
+  version int!
+}

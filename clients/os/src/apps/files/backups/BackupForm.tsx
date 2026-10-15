@@ -7,20 +7,8 @@ import { foldFolderTree, type TreeNode } from "../fold";
 import type { FolderRow } from "../rows";
 import type { BackupRow, NewBackup } from "./rows";
 
-// The one form, in two modes.
-//
-// NOT A WIZARD, and there is no stepper anywhere in this shell to copy even if
-// one were wanted. Setting up a backup is three decisions -- which machine,
-// which folder there, where it lands -- and three decisions with no ordering
-// law between them is a form, not a sequence. The Deployables stage rail earns
-// its steps because a deploy has an actual law about its order; this does not.
-//
-// CREATE AND EDIT ARE THE SAME FORM because they are the same decisions, minus
-// the two an existing backup cannot change. The machine and the path are the
-// backup's IDENTITY -- the (machine, path) key every re-push is matched on --
-// so editing them would orphan the machine's local ledger and start the whole
-// folder again as new files. Changing where it lands is the edit people
-// actually want, and it is one field.
+// Existing folder arrangements retain their machine and source identity.
+// New backups use BackupSetup, which offers folder sync and archive upload.
 
 export interface BackupFormProps {
   machines: readonly MachineRow[];
