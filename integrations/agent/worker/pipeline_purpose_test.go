@@ -739,8 +739,8 @@ func TestPipelineStepIsRefusedWithoutThePipelinePurpose(t *testing.T) {
 				"requireLabels": map[string]any{PipelinesLabel: PipelinesAllowed},
 				"purpose":       PurposePipeline, // not an argument the builtin reads
 			}, 0)
-			if err != nil {
-				t.Fatalf("handleDispatchHost: %v", err)
+			if err == nil || !strings.Contains(err.Error(), "denied_pipeline_purpose") {
+				t.Fatalf("refused effect must fail the builtin: %v", err)
 			}
 			var out map[string]any
 			if len(nodes) != 1 || json.Unmarshal(nodes[0].Payload, &out) != nil {

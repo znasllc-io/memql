@@ -135,8 +135,9 @@ func TestRequestedComputerPermissionHasNoLegacyGrant(t *testing.T) {
 	}{
 		{"typed directory", "observe", "fs_read", map[string]any{"path": "/docs/report"}, true},
 		{"typed command", "full", "exec", map[string]any{"cmd": "pwd", "cwd": "/docs", "timeoutSec": 30}, true},
-		{"legacy observe", "observe", "fs_read", map[string]any{"path": "/docs/report"}, false},
-		{"legacy full", "full", "exec", map[string]any{"cmd": "pwd", "cwd": "/docs"}, false},
+		{"desktop session", "observe", "screenshot", nil, false},
+		{"write session", "full", "fs_write", map[string]any{"path": "/docs/report", "content": "fixture"}, false},
+		{"HTTP session", "observe", "http_fetch", map[string]any{"url": "https://example.com"}, false},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			var dispatched *memqlv1.ToolDispatch
@@ -153,6 +154,9 @@ func TestRequestedComputerPermissionHasNoLegacyGrant(t *testing.T) {
 			h.dispatch.SetComputerPermissions(&permissionTestAuthority{})
 			req := h.request()
 			req.Action, req.Args = tc.action, tc.args
+			if tc.action == "screenshot" {
+				req.Tool = "workerComputer"
+			}
 			ctx := common.ContextWithRun(authorityCtx(t, h.owner), common.RunContext{OwnerUserId: h.owner, RunId: req.RunId, GoalId: "goal"})
 			var subject map[string]any
 			captured := errors.New("captured before persistence")
@@ -166,6 +170,12 @@ func TestRequestedComputerPermissionHasNoLegacyGrant(t *testing.T) {
 			args := map[string]any{"intent": "inspect", "requestedScope": tc.requestedScope, "summary": "Inspect requested files", "agentId": req.AgentId}
 			if tc.typed {
 				args["operation"] = map[string]any{"tool": req.Tool, "action": req.Action, "args": req.Args, "directory": "/docs"}
+			} else if req.Tool == "workerComputer" {
+				args["sessionKind"] = "desktop"
+			} else if req.Action == "http_fetch" {
+				args["sessionKind"] = "http"
+			} else {
+				args["sessionKind"] = "file_write"
 			}
 			if _, err := i.handleRequestScope(ctx, args, 0); !errors.Is(err, captured) {
 				t.Fatalf("request did not reach approval boundary: %v", err)
@@ -177,8 +187,8 @@ func TestRequestedComputerPermissionHasNoLegacyGrant(t *testing.T) {
 					t.Fatal("a machine-bound approval admitted an untargeted call")
 				}
 				req.RequireLabels = map[string]string{"machineId": "machine"}
-				if got := legacy026ComputerScope(row, req, now); got != tc.requestedScope {
-					t.Fatalf("legacy request changed: got %q", got)
+				if got := legacy026ComputerScope(row, req, now); got != "" {
+					t.Fatalf("previous engine widened an explicit session to %q", got)
 				}
 				if got := approvedComputerScope([]map[string]any{row}, req, now); got != tc.requestedScope {
 					t.Fatalf("current legacy reader changed: got %q", got)

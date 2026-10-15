@@ -12,13 +12,16 @@ tool workerStatus {
  agentId string @autoInjected
 }
 
-/// Ask for time-limited computer access for the current goal. Explain the
-/// purpose and the chosen machine's requireLabels from workerStatus. If several
+/// Check saved permission or request access for the exact operation. Reads and
+/// commands MUST include operation; a missing operation is an error, not a
+/// request for broader access. Use sessionKind only for desktop, writes or HTTP.
+/// Explain the purpose and the chosen machine's requireLabels from workerStatus. If several
 /// machines match, ask which to use with requestUserFeedback first. A selection
 /// is not permission. Approval is shown in Nexus; no action runs first.
 @handler(type="function", name="agentworkerRequestScope")
 @requiresAgentRole("assistant", "specialist")
 tool requestComputerUseScope {
+ sessionKind enum("desktop", "file_write", "http") @description("Only for desktop interaction, fs_write or http_fetch, using expiring access for this run. Never use for fs_read, fs_list, fs_stat or exec: those require operation. Do not supply both.")
  operation object @description("Supply this for a headless read or exact command. Copy paths from the selected machine's homeDirectory or the person; do not guess. Never replace a refused operation with broader access.") {
   tool enum("workerHost")!
   action enum("fs_read", "fs_list", "fs_stat", "exec")!

@@ -274,6 +274,8 @@ func (i *Integration) Capabilities() []memql.IntegrationCapability {
 			Description: "Ask for a durable, run-scoped computer-access approval in Nexus before using a personal machine.",
 			Handler:     i.handleRequestScope,
 			ArgsSchema: map[string]string{
+				"operation":      "object -- required for directory reads and exact commands; checked against saved permissions",
+				"sessionKind":    "string -- desktop / file_write / http only; explicit expiring access instead of operation",
 				"intent":         "string (required) -- short imperative summary",
 				"requestedScope": "string (required) -- observe / full (legacy `interact` accepted for backward compat, treated as full)",
 				"summary":        "string (required) -- one-paragraph card body",
@@ -353,13 +355,19 @@ func (i *Integration) handleDispatch(ctx context.Context, tool string, args map[
 		"bytesOut":      res.BytesOut,
 		"outputPreview": res.OutputPreview,
 	})
-	return []memorynodes.MemoryNode{{
+	nodes := []memorynodes.MemoryNode{{
 		ID:        fmt.Sprintf("worker-call:%d", time.Now().UnixNano()),
 		Concept:   "integration:worker:result",
 		Type:      memorynodes.NodeTypeObject,
 		CreatedAt: time.Now().UTC(),
 		Payload:   payload,
-	}}, nil
+	}}
+	if !res.OK {
+		// Native compositions may inspect the failed receipt. The builtin error
+		// still prevents an automation from journaling it as a completed effect.
+		return nodes, fmt.Errorf("worker %s %s failed (%s): %s", tool, action, res.ErrorCode, res.ErrorMessage)
+	}
+	return nodes, nil
 }
 
 // dispatchAnswerMargin is how much longer than a command's own time limit
@@ -660,6 +668,26 @@ func (i *Integration) handleRequestScope(ctx context.Context, args map[string]an
 	if target != "" && args["operation"] == nil {
 		summary = strings.TrimRight(summary, " .") + ". Runs " + target + "."
 	}
+	// Never interpret a missing exact operation as a broader session request.
+	// In particular, doing so skips saved directory/command grants and parks
+	// otherwise authorized work on a redundant approval. The model must repair
+	// its arguments before we write any approval or pause the run.
+	sessionKind := asString(args["sessionKind"])
+	if _, supplied := args["operation"]; supplied {
+		if sessionKind != "" {
+			return nil, computerPermissionInputError("sessionKind", "Supply operation or sessionKind, not both. Directory reads and commands require operation with exact args.")
+		}
+	} else {
+		switch sessionKind {
+		case "desktop", "file_write", "http":
+			// These actions use the existing, expiring run-scoped contract.
+			if sessionKind == "file_write" && scope != "full" {
+				return nil, computerPermissionInputError("requestedScope", "Writing files requires requestedScope=full. Directory reads require an exact operation instead of a file_write session.")
+			}
+		default:
+			return nil, computerPermissionInputError("operation", "Supply operation={tool: workerHost, action: fs_list, args: {path: <absolute directory>}, directory: <same absolute directory>} for a directory listing. Reads (fs_read/fs_list/fs_stat) and exec require an exact operation so saved permissions can be checked. Only desktop interaction, fs_write or http_fetch may explicitly use sessionKind=desktop, file_write or http. Omitting operation does not request a session.")
+		}
+	}
 
 	rc, ok := common.RunFromContext(ctx)
 	if !ok || rc.RunId == "" || memql.BareShortId(rc.OwnerUserId) != memql.BareShortId(ownerUserId) || i.ScopeRequester == nil {
@@ -689,6 +717,11 @@ func (i *Integration) handleRequestScope(ctx context.Context, args map[string]an
 			approvalID = existing.ID
 		}
 	} else {
+		subject["sessionKind"] = sessionKind
+		subject["sessionScope"] = scope
+		// Previous replicas only understand scope. Omit it so they refuse a
+		// narrowed session instead of widening it during a rolling upgrade.
+		delete(subject, "scope")
 		// Only a saved, still-unexecuted native call can receive feedback
 		// without replanning. This witness conveys no computer permission.
 		subject, err = i.engine.BindWorkScopeCheckpoint(ctx, args, subject)
