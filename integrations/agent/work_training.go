@@ -138,14 +138,23 @@ func trainingResultRows(result any) []map[string]any {
 // selection decision. Neither stage asserts adherence or task success.
 func trainingContextReferences(prompt string, passages []map[string]any) []string {
 	var refs []string
+	missing := map[string]bool{}
 	for _, p := range passages {
 		receipt, _ := p["selectionReceiptId"].(string)
 		text, _ := p["text"].(string)
-		if receipt != "" && text != "" && strings.Contains(prompt, text) && !slices.Contains(refs, receipt) {
+		if receipt == "" {
+			continue
+		}
+		if !slices.Contains(refs, receipt) {
 			refs = append(refs, receipt)
 		}
+		if text == "" || !strings.Contains(prompt, text) {
+			missing[receipt] = true
+		}
 	}
-	return refs
+	// One selection receipt can name several passages. A partial rendering
+	// must not imply that the whole recorded selection reached the provider.
+	return slices.DeleteFunc(refs, func(receipt string) bool { return missing[receipt] })
 }
 
 func workContextReferences(messages []common.ChatMessage) []string {

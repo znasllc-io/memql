@@ -218,6 +218,18 @@ func TestTrainingDeliveryReferencesRequireExactRenderedText(t *testing.T) {
 	require.Empty(t, workContextReferences(messages[1:]))
 }
 
+func TestTrainingDeliveryReferenceRequiresEverySelectedPassage(t *testing.T) {
+	passages := []map[string]any{
+		{"selectionReceiptId": "batch", "text": "First lesson"},
+		{"selectionReceiptId": "batch", "text": "Second lesson"},
+		{"selectionReceiptId": "independent", "text": "Other lesson"},
+	}
+	require.Equal(t, []string{"independent"}, trainingContextReferences("First lesson; Other lesson", passages))
+	require.Equal(t, []string{"batch", "independent"}, trainingContextReferences("First lesson; Second lesson; Other lesson", passages))
+	passages[1]["text"] = ""
+	require.Equal(t, []string{"independent"}, trainingContextReferences("First lesson; Other lesson", passages))
+}
+
 // The provider emits the ordinary call observation; the loop, not the fake,
 // must attach the context receipt. Both transport lanes exercise that seam.
 type trainingObservedProvider struct{ outcomeProvider }
