@@ -79,8 +79,15 @@ updated_at=clock_timestamp() WHERE intent_id=$1 RETURNING generation`, x.ID).Sca
 	if err := s.admitPipelineStream(ctx, tx, identity); err != nil {
 		return x, err
 	}
-	x.FileID, x.Generation, x.State = id.NewShortId(), 1, "reserved"
+	x.FileID, x.Generation, x.State = string(id.NewUntracked().FromString(x.ID)), 1, "reserved"
 	x.Object = fmt.Sprintf("library/%s/%s/%s", identity.OwnerUserID, x.FileID, identity.Name)
+	if p, ok := s.uploader.(interface {
+		ReserveStorage(context.Context, string, string, int64) error
+	}); ok {
+		if err := p.ReserveStorage(ctx, identity.Container, x.Object, identity.Size); err != nil {
+			return x, err
+		}
+	}
 	payload, err := json.Marshal(identity)
 	if err != nil {
 		return x, err
@@ -104,6 +111,12 @@ func lockPipelineUploadOwner(ctx context.Context, tx *sql.Tx, owner string) erro
 // deduplicating only a current file which names exactly those same bytes. Owner locking also
 // covers finalization, so no reservation can disappear between these reads.
 func (s *pipelinesLibraryStore) admitPipelineStream(ctx context.Context, tx *sql.Tx, identity pipelineStreamIdentity) error {
+	if _, ok := s.uploader.(interface {
+		ReserveStorage(context.Context, string, string, int64) error
+	}); ok {
+		return nil
+	} // Shared atomic reservation follows, before the intent is admitted.
+
 	remaining := s.userQuota()
 	charge := func(size int64) error {
 		if size < 0 || size > remaining {

@@ -51,7 +51,7 @@ func (s *pipelinesLibraryStore) StoreRunFileStream(ctx context.Context, f pipeli
 	if err != nil {
 		return pipelinesteps.StoredFile{}, err
 	}
-	verified, err := uploader.CreateVerifiedStream(ctx, identity.Container, intent.Object, f.Body, identity.Size, identity.SHA256, identity.MimeType)
+	verified, err := uploader.CreateVerifiedStream(ownerCtx, identity.Container, intent.Object, f.Body, identity.Size, identity.SHA256, identity.MimeType)
 	if err != nil {
 		// Even a transport error can follow a successful remote commit. Keep
 		// identity and capacity; a replacement verifies the same destination.

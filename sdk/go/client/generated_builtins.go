@@ -2953,6 +2953,400 @@ func LibraryAddDocumentNoteBuild(args LibraryAddDocumentNoteArgs) string {
 	return b.String()
 }
 
+// LibraryBackupBlock wraps the builtin named "libraryBackupBlock".
+type LibraryBackupBlockArgs struct {
+	Id      string
+	Ordinal int
+	Md5     string
+	Sha256  string
+}
+
+// LibraryBackupBlock calls the engine builtin libraryBackupBlock.
+func (qc *QueryClient) LibraryBackupBlock(ctx context.Context, args LibraryBackupBlockArgs) (*Result, error) {
+	call := LibraryBackupBlockBuild(args)
+	return qc.executeNamed(ctx, "libraryBackupBlock", call)
+}
+
+func LibraryBackupBlockBuild(args LibraryBackupBlockArgs) string {
+	var b strings.Builder
+	b.WriteString("builtin libraryBackupBlock(")
+	b.WriteString("id: ")
+	b.WriteString(quoteMemQL(args.Id))
+	if b.Len() > 27 {
+		b.WriteString(", ")
+	}
+	b.WriteString("ordinal: ")
+	b.WriteString(fmt.Sprintf("%v", args.Ordinal))
+	if b.Len() > 27 {
+		b.WriteString(", ")
+	}
+	b.WriteString("md5: ")
+	b.WriteString(quoteMemQL(args.Md5))
+	if b.Len() > 27 {
+		b.WriteString(", ")
+	}
+	b.WriteString("sha256: ")
+	b.WriteString(quoteMemQL(args.Sha256))
+	b.WriteString(")")
+	return b.String()
+}
+
+// LibraryBackupCheckpoint wraps the builtin named "libraryBackupCheckpoint".
+type LibraryBackupCheckpointArgs struct {
+	Id    string
+	Final bool
+}
+
+// LibraryBackupCheckpoint calls the engine builtin libraryBackupCheckpoint.
+func (qc *QueryClient) LibraryBackupCheckpoint(ctx context.Context, args LibraryBackupCheckpointArgs) (*Result, error) {
+	call := LibraryBackupCheckpointBuild(args)
+	return qc.executeNamed(ctx, "libraryBackupCheckpoint", call)
+}
+
+func LibraryBackupCheckpointBuild(args LibraryBackupCheckpointArgs) string {
+	var b strings.Builder
+	b.WriteString("builtin libraryBackupCheckpoint(")
+	b.WriteString("id: ")
+	b.WriteString(quoteMemQL(args.Id))
+	if b.Len() > 32 {
+		b.WriteString(", ")
+	}
+	b.WriteString("final: ")
+	b.WriteString(fmt.Sprintf("%v", args.Final))
+	b.WriteString(")")
+	return b.String()
+}
+
+// LibraryBackupControl wraps the builtin named "libraryBackupControl".
+type LibraryBackupControlArgs struct {
+	Id string
+	// Enum: pause | resume | cancel | trash | restore | purge
+	Action string
+}
+
+// LibraryBackupControl calls the engine builtin libraryBackupControl.
+func (qc *QueryClient) LibraryBackupControl(ctx context.Context, args LibraryBackupControlArgs) (*Result, error) {
+	call := LibraryBackupControlBuild(args)
+	return qc.executeNamed(ctx, "libraryBackupControl", call)
+}
+
+func LibraryBackupControlBuild(args LibraryBackupControlArgs) string {
+	var b strings.Builder
+	b.WriteString("builtin libraryBackupControl(")
+	b.WriteString("id: ")
+	b.WriteString(quoteMemQL(args.Id))
+	if b.Len() > 29 {
+		b.WriteString(", ")
+	}
+	b.WriteString("action: ")
+	b.WriteString(quoteMemQL(args.Action))
+	b.WriteString(")")
+	return b.String()
+}
+
+// LibraryBackupCreate wraps the builtin named "libraryBackupCreate".
+type LibraryBackupCreateArgs struct {
+	Id       string
+	WorkerId string
+	Path     string
+	// Enum: archive | sync_file | download
+	Kind     string
+	Metadata map[string]any
+}
+
+// LibraryBackupCreate calls the engine builtin libraryBackupCreate.
+func (qc *QueryClient) LibraryBackupCreate(ctx context.Context, args LibraryBackupCreateArgs) (*Result, error) {
+	call := LibraryBackupCreateBuild(args)
+	return qc.executeNamed(ctx, "libraryBackupCreate", call)
+}
+
+func LibraryBackupCreateBuild(args LibraryBackupCreateArgs) string {
+	var b strings.Builder
+	b.WriteString("builtin libraryBackupCreate(")
+	b.WriteString("id: ")
+	b.WriteString(quoteMemQL(args.Id))
+	if b.Len() > 28 {
+		b.WriteString(", ")
+	}
+	b.WriteString("workerId: ")
+	b.WriteString(quoteMemQL(args.WorkerId))
+	if b.Len() > 28 {
+		b.WriteString(", ")
+	}
+	b.WriteString("path: ")
+	b.WriteString(quoteMemQL(args.Path))
+	if b.Len() > 28 {
+		b.WriteString(", ")
+	}
+	b.WriteString("kind: ")
+	b.WriteString(quoteMemQL(args.Kind))
+	if args.Metadata != nil {
+		if b.Len() > 28 {
+			b.WriteString(", ")
+		}
+		b.WriteString("metadata: ")
+		b.WriteString(renderMemQLValue(args.Metadata))
+	}
+	b.WriteString(")")
+	return b.String()
+}
+
+// LibraryBackupDownloadBlock wraps the builtin named "libraryBackupDownloadBlock".
+type LibraryBackupDownloadBlockArgs struct {
+	Id      string
+	Ordinal int
+}
+
+// LibraryBackupDownloadBlock calls the engine builtin libraryBackupDownloadBlock.
+func (qc *QueryClient) LibraryBackupDownloadBlock(ctx context.Context, args LibraryBackupDownloadBlockArgs) (*Result, error) {
+	call := LibraryBackupDownloadBlockBuild(args)
+	return qc.executeNamed(ctx, "libraryBackupDownloadBlock", call)
+}
+
+func LibraryBackupDownloadBlockBuild(args LibraryBackupDownloadBlockArgs) string {
+	var b strings.Builder
+	b.WriteString("builtin libraryBackupDownloadBlock(")
+	b.WriteString("id: ")
+	b.WriteString(quoteMemQL(args.Id))
+	if b.Len() > 35 {
+		b.WriteString(", ")
+	}
+	b.WriteString("ordinal: ")
+	b.WriteString(fmt.Sprintf("%v", args.Ordinal))
+	b.WriteString(")")
+	return b.String()
+}
+
+// LibraryBackupList wraps the builtin named "libraryBackupList".
+type LibraryBackupListArgs struct {
+	// Enum: active | archives | all
+	Scope    string
+	WorkerId string
+	After    string
+}
+
+// LibraryBackupList calls the engine builtin libraryBackupList.
+func (qc *QueryClient) LibraryBackupList(ctx context.Context, args LibraryBackupListArgs) (*Result, error) {
+	call := LibraryBackupListBuild(args)
+	return qc.executeNamed(ctx, "libraryBackupList", call)
+}
+
+func LibraryBackupListBuild(args LibraryBackupListArgs) string {
+	var b strings.Builder
+	b.WriteString("builtin libraryBackupList(")
+	if args.Scope != "" {
+		b.WriteString("scope: ")
+		b.WriteString(quoteMemQL(args.Scope))
+	}
+	if args.WorkerId != "" {
+		if b.Len() > 26 {
+			b.WriteString(", ")
+		}
+		b.WriteString("workerId: ")
+		b.WriteString(quoteMemQL(args.WorkerId))
+	}
+	if args.After != "" {
+		if b.Len() > 26 {
+			b.WriteString(", ")
+		}
+		b.WriteString("after: ")
+		b.WriteString(quoteMemQL(args.After))
+	}
+	b.WriteString(")")
+	return b.String()
+}
+
+// LibraryBackupPrepare wraps the builtin named "libraryBackupPrepare".
+type LibraryBackupPrepareArgs struct {
+	Id     string
+	Size   int
+	Sha256 string
+}
+
+// LibraryBackupPrepare calls the engine builtin libraryBackupPrepare.
+func (qc *QueryClient) LibraryBackupPrepare(ctx context.Context, args LibraryBackupPrepareArgs) (*Result, error) {
+	call := LibraryBackupPrepareBuild(args)
+	return qc.executeNamed(ctx, "libraryBackupPrepare", call)
+}
+
+func LibraryBackupPrepareBuild(args LibraryBackupPrepareArgs) string {
+	var b strings.Builder
+	b.WriteString("builtin libraryBackupPrepare(")
+	b.WriteString("id: ")
+	b.WriteString(quoteMemQL(args.Id))
+	if b.Len() > 29 {
+		b.WriteString(", ")
+	}
+	b.WriteString("size: ")
+	b.WriteString(fmt.Sprintf("%v", args.Size))
+	if b.Len() > 29 {
+		b.WriteString(", ")
+	}
+	b.WriteString("sha256: ")
+	b.WriteString(quoteMemQL(args.Sha256))
+	b.WriteString(")")
+	return b.String()
+}
+
+// LibraryBackupRead wraps the builtin named "libraryBackupRead".
+type LibraryBackupReadArgs struct {
+	Id string
+}
+
+// LibraryBackupRead calls the engine builtin libraryBackupRead.
+func (qc *QueryClient) LibraryBackupRead(ctx context.Context, args LibraryBackupReadArgs) (*Result, error) {
+	call := LibraryBackupReadBuild(args)
+	return qc.executeNamed(ctx, "libraryBackupRead", call)
+}
+
+func LibraryBackupReadBuild(args LibraryBackupReadArgs) string {
+	var b strings.Builder
+	b.WriteString("builtin libraryBackupRead(")
+	b.WriteString("id: ")
+	b.WriteString(quoteMemQL(args.Id))
+	b.WriteString(")")
+	return b.String()
+}
+
+// LibraryBackupReport wraps the builtin named "libraryBackupReport".
+type LibraryBackupReportArgs struct {
+	Id string
+	// Enum: waiting | error | downloading | complete
+	State   string
+	Message string
+	Offset  int
+}
+
+// LibraryBackupReport calls the engine builtin libraryBackupReport.
+func (qc *QueryClient) LibraryBackupReport(ctx context.Context, args LibraryBackupReportArgs) (*Result, error) {
+	call := LibraryBackupReportBuild(args)
+	return qc.executeNamed(ctx, "libraryBackupReport", call)
+}
+
+func LibraryBackupReportBuild(args LibraryBackupReportArgs) string {
+	var b strings.Builder
+	b.WriteString("builtin libraryBackupReport(")
+	b.WriteString("id: ")
+	b.WriteString(quoteMemQL(args.Id))
+	if b.Len() > 28 {
+		b.WriteString(", ")
+	}
+	b.WriteString("state: ")
+	b.WriteString(quoteMemQL(args.State))
+	if args.Message != "" {
+		if b.Len() > 28 {
+			b.WriteString(", ")
+		}
+		b.WriteString("message: ")
+		b.WriteString(quoteMemQL(args.Message))
+	}
+	if b.Len() > 28 {
+		b.WriteString(", ")
+	}
+	b.WriteString("offset: ")
+	b.WriteString(fmt.Sprintf("%v", args.Offset))
+	b.WriteString(")")
+	return b.String()
+}
+
+// LibraryBackupSetUserLimit wraps the builtin named "libraryBackupSetUserLimit".
+type LibraryBackupSetUserLimitArgs struct {
+	UserId string
+	Bytes  int
+}
+
+// LibraryBackupSetUserLimit calls the engine builtin libraryBackupSetUserLimit.
+func (qc *QueryClient) LibraryBackupSetUserLimit(ctx context.Context, args LibraryBackupSetUserLimitArgs) (*Result, error) {
+	call := LibraryBackupSetUserLimitBuild(args)
+	return qc.executeNamed(ctx, "libraryBackupSetUserLimit", call)
+}
+
+func LibraryBackupSetUserLimitBuild(args LibraryBackupSetUserLimitArgs) string {
+	var b strings.Builder
+	b.WriteString("builtin libraryBackupSetUserLimit(")
+	b.WriteString("userId: ")
+	b.WriteString(quoteMemQL(args.UserId))
+	if b.Len() > 34 {
+		b.WriteString(", ")
+	}
+	b.WriteString("bytes: ")
+	b.WriteString(fmt.Sprintf("%v", args.Bytes))
+	b.WriteString(")")
+	return b.String()
+}
+
+// LibraryBackupSyncDelete wraps the builtin named "libraryBackupSyncDelete".
+type LibraryBackupSyncDeleteArgs struct {
+	WatchId  string
+	WorkerId string
+	Path     string
+	FileId   string
+	Sha256   string
+	Version  int
+}
+
+// LibraryBackupSyncDelete calls the engine builtin libraryBackupSyncDelete.
+func (qc *QueryClient) LibraryBackupSyncDelete(ctx context.Context, args LibraryBackupSyncDeleteArgs) (*Result, error) {
+	call := LibraryBackupSyncDeleteBuild(args)
+	return qc.executeNamed(ctx, "libraryBackupSyncDelete", call)
+}
+
+func LibraryBackupSyncDeleteBuild(args LibraryBackupSyncDeleteArgs) string {
+	var b strings.Builder
+	b.WriteString("builtin libraryBackupSyncDelete(")
+	b.WriteString("watchId: ")
+	b.WriteString(quoteMemQL(args.WatchId))
+	if b.Len() > 32 {
+		b.WriteString(", ")
+	}
+	b.WriteString("workerId: ")
+	b.WriteString(quoteMemQL(args.WorkerId))
+	if b.Len() > 32 {
+		b.WriteString(", ")
+	}
+	b.WriteString("path: ")
+	b.WriteString(quoteMemQL(args.Path))
+	if b.Len() > 32 {
+		b.WriteString(", ")
+	}
+	b.WriteString("fileId: ")
+	b.WriteString(quoteMemQL(args.FileId))
+	if b.Len() > 32 {
+		b.WriteString(", ")
+	}
+	b.WriteString("sha256: ")
+	b.WriteString(quoteMemQL(args.Sha256))
+	if b.Len() > 32 {
+		b.WriteString(", ")
+	}
+	b.WriteString("version: ")
+	b.WriteString(fmt.Sprintf("%v", args.Version))
+	b.WriteString(")")
+	return b.String()
+}
+
+// LibraryBackupUsage wraps the builtin named "libraryBackupUsage".
+type LibraryBackupUsageArgs struct {
+	UserId string
+}
+
+// LibraryBackupUsage calls the engine builtin libraryBackupUsage.
+func (qc *QueryClient) LibraryBackupUsage(ctx context.Context, args LibraryBackupUsageArgs) (*Result, error) {
+	call := LibraryBackupUsageBuild(args)
+	return qc.executeNamed(ctx, "libraryBackupUsage", call)
+}
+
+func LibraryBackupUsageBuild(args LibraryBackupUsageArgs) string {
+	var b strings.Builder
+	b.WriteString("builtin libraryBackupUsage(")
+	if args.UserId != "" {
+		b.WriteString("userId: ")
+		b.WriteString(quoteMemQL(args.UserId))
+	}
+	b.WriteString(")")
+	return b.String()
+}
+
 // LibraryDocumentHistory -- Read owned document history metadata, with a version cursor and branch provenance.
 type LibraryDocumentHistoryArgs struct {
 	ArtifactId    string

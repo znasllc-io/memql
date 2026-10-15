@@ -2345,6 +2345,8 @@ QueryClient.prototype.createLibraryFolder = function (this: QueryClient, args: C
 The machine is NOT verified here. That is the header's decision, not an omission: the row is a preference, a watch naming a machine the caller does not own is read by no cockpit, and the push it would attempt is refused at the upload by a check that CAN see the caller's fleet. */
 // Bound concept: v1:library:watchedFolder (machine-readable: BoundConcepts["createLibraryWatchedFolder"] in generated_concepts.ts).
 export interface CreateLibraryWatchedFolderArgs {
+  // Enum: retain | sync
+  mode?: string;
   intervalMinutes?: number;
   watchId: string;
   workerId: string;
@@ -2356,6 +2358,7 @@ export interface CreateLibraryWatchedFolderArgs {
 
 export function buildCreateLibraryWatchedFolder(args: CreateLibraryWatchedFolderArgs): string {
   const parts: string[] = [];
+  if (args.mode !== undefined) parts.push("mode: " + renderMemQLValue(args.mode));
   if (args.intervalMinutes !== undefined) parts.push("intervalMinutes: " + renderMemQLValue(args.intervalMinutes));
   parts.push("watchId: " + renderMemQLValue(args.watchId));
   parts.push("workerId: " + renderMemQLValue(args.workerId));

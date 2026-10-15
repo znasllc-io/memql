@@ -649,6 +649,7 @@ concept uploadSession {
 @displayCard(primary="localPath", secondary="workerId", tertiary="lastSweepAt", status="status")
 @rowAuthz(owner="ownerUserId", clusterOwner)
 concept watchedFolder {
+  mode enum("retain", "sync") @description("Absent or retain preserves deleted originals in Files. Sync moves confirmed local deletions to the Bin; Bin storage remains charged until purged.")
   intervalMinutes int @minimum(5) @maximum(525600) @description("Minutes between directory backups. Absent preserves the existing five-minute schedule. Missed runs are combined into one run when the machine is available.")
   ownerUserId   string!  @serverSet  @description("v1:identity:user.id that set this watch up. Stamped from actor.userId on every write and never accepted as a mutation arg (@serverSet makes that a load-time rejection, memql#3175). The load-bearing per-row authz key, and also the routing key: a cockpit signed in as this user is the only one that will ever read this row.")
 

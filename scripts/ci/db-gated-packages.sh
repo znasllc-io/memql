@@ -262,6 +262,7 @@ readonly MODULE_PATH="github.com/znasllc-io/memql"
 # Worker activity persistence exercises two engines and reconnect fencing.
 # Include the stream owner as well as its fleet catalog in the DB lane.
 readonly DB_GATED_TREES=(
+    component/filebackups
 	"app"
 	"component/memql"
 	"component/automations"

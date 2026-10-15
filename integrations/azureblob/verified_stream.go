@@ -57,12 +57,33 @@ func (u *AzureBlobUploader) CreateVerifiedStream(ctx context.Context, container,
 	if err := verifiedStreamIdentity(size, digest); err != nil {
 		return VerifiedBlob{}, err
 	}
+	if err := u.ReserveStorage(ctx, container, object, size); err != nil {
+		return VerifiedBlob{}, err
+	}
 	bc, err := u.blockClient(container, object)
 	if err != nil {
 		return VerifiedBlob{}, err
 	}
 	// Recovery does not restage or replace an existing committed object.
 	if stored, err := verifyStream(ctx, bc, size, digest); err == nil {
+		// A prior successful commit may have lost its SQL receipt. Keep orphan
+		// staging charged unless the provider proves there are no such blocks.
+		g, e := u.beginCapacity(ctx, container, object)
+		if e != nil {
+			return VerifiedBlob{}, e
+		}
+		if g != nil {
+			defer g.Close()
+			staged, e := u.UncommittedBlocks(ctx, container, object)
+			if e != nil {
+				return VerifiedBlob{}, e
+			}
+			if len(staged) == 0 {
+				if e = g.Settled(ctx, size, true); e != nil {
+					return VerifiedBlob{}, e
+				}
+			}
+		}
 		return stored, nil
 	} else if !bloberror.HasCode(err, bloberror.BlobNotFound) {
 		return VerifiedBlob{}, err
@@ -106,11 +127,30 @@ func (u *AzureBlobUploader) CreateVerifiedStream(ctx context.Context, container,
 	if contentType = strings.TrimSpace(contentType); contentType != "" {
 		opts.HTTPHeaders = &blob.HTTPHeaders{BlobContentType: &contentType}
 	}
+	capacity, err := u.commitCapacity(ctx, container, object, blocks)
+	if err != nil {
+		return VerifiedBlob{}, err
+	}
+	if capacity != nil {
+		defer capacity.Close()
+	}
 	_, commitErr := bc.CommitBlockList(ctx, blocks, opts)
 	// A successful response, a conflict and a lost response all need the same
 	// evidence. Never replay the commit without its create-only condition.
 	stored, verifyErr := verifyStream(ctx, bc, size, digest)
 	if verifyErr == nil {
+		if capacity != nil {
+			props, e := bc.GetProperties(ctx, nil)
+			if e != nil {
+				return VerifiedBlob{}, e
+			}
+			if e = u.checkRetention(ctx, props.VersionID); e != nil {
+				return VerifiedBlob{}, e
+			}
+			if err := capacity.BlocksCommitted(ctx, blocks, true); err != nil {
+				return VerifiedBlob{}, err
+			}
+		}
 		return stored, nil
 	}
 	return VerifiedBlob{}, fmt.Errorf("%w: %w", ErrBlobCommitUncertain, errors.Join(commitErr, verifyErr))

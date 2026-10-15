@@ -269,6 +269,7 @@ shape fileChunk libraryFileChunkFull {
 /// projection that omitted them would make "nothing has reported yet" unreadable rather than empty.
 @row
 shape watchedFolder watchedFolderFull {
+  mode
   intervalMinutes
   row.id
   ownerUserId

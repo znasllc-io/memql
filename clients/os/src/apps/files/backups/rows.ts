@@ -28,6 +28,7 @@ export const ORIGIN_STATES = ["ok", "missing", "unreadable", "refused_by_policy"
 export type OriginState = (typeof ORIGIN_STATES)[number];
 
 export interface BackupRow {
+  mode?: "retain" | "sync";
   id: string;
   ownerUserId: string;
   /** v1:worker:registration.id of the machine that does the watching. */
@@ -55,6 +56,7 @@ export function backupFromRow(raw: Row): BackupRow {
   const origin = rowString(row, "originState");
   return {
     id: rowString(row, "id"),
+    mode: rowString(row,"mode") === "sync" ? "sync" : "retain",
     ownerUserId: rowString(row, "ownerUserId"),
     workerId: rowString(row, "workerId"),
     localPath: rowString(row, "localPath"),
@@ -85,6 +87,8 @@ export function backupFromRow(raw: Row): BackupRow {
  *  orphan the machine's local ledger and start the whole folder again as new
  *  files. */
 export interface NewBackup {
+  requestId?: string;
+  mode?: "retain" | "sync";
   workerId: string;
   localPath: string;
   folderId: string;

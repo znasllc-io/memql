@@ -3,7 +3,15 @@ package packages
 import (
 	"bytes"
 	"context"
+	"database/sql"
+	"fmt"
+	"os"
+	"time"
+
 	"encoding/base64"
+	"github.com/uptrace/bun/driver/pgdriver"
+	"github.com/znasllc-io/memql/component/database/dbtest"
+	"github.com/znasllc-io/memql/integrations/azureblob"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -13,11 +21,22 @@ import (
 )
 
 func TestExternalAssetCacheUsesAzureProtocolAndDeclaredReadBudget(t *testing.T) {
+	assetCapacityFixture(t)
 	var mu sync.Mutex
 	objects := map[string][]byte{}
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		mu.Lock()
 		defer mu.Unlock()
+		if r.URL.Query().Get("comp") == "properties" && r.URL.Query().Get("restype") == "service" {
+			w.Header().Set("Content-Type", "application/xml")
+			io.WriteString(w, `<StorageServiceProperties><DeleteRetentionPolicy><Enabled>false</Enabled></DeleteRetentionPolicy></StorageServiceProperties>`)
+			return
+		}
+		if r.URL.Query().Get("comp") == "list" {
+			w.Header().Set("Content-Type", "application/xml")
+			io.WriteString(w, `<EnumerationResults><Containers/><NextMarker/></EnumerationResults>`)
+			return
+		}
 		if r.Method == http.MethodPut {
 			raw, err := io.ReadAll(r.Body)
 			if err != nil {
@@ -59,4 +78,49 @@ func TestExternalAssetCacheUsesAzureProtocolAndDeclaredReadBudget(t *testing.T) 
 	if _, _, err := (azureAssetCache{}).Read(ctx, object, 4); err == nil {
 		t.Fatal("cache read ignored declared byte limit")
 	}
+}
+
+// Exercise the production metering constructor rather than giving the asset
+// writer a test-only quota bypass. The schema belongs only to this fixture.
+func assetCapacityFixture(t *testing.T) {
+	t.Helper()
+	dsn := os.Getenv("MEMQL_STORAGE_TEST_DSN")
+	if dsn == "" {
+		dsn = dbtest.DSN()
+	}
+	admin := sql.OpenDB(pgdriver.NewConnector(pgdriver.WithDSN(dsn)))
+	t.Cleanup(func() { admin.Close() })
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	err := admin.PingContext(ctx)
+	cancel()
+	if err != nil {
+		dbtest.Unreachable(t, "metered Azure package assets", dsn, err)
+	}
+	schema := fmt.Sprintf("asset_quota_%d", time.Now().UnixNano())
+	if _, err = admin.Exec(`CREATE SCHEMA ` + schema); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { admin.Exec(`DROP SCHEMA ` + schema + ` CASCADE`) })
+	open := func() *sql.DB {
+		return sql.OpenDB(pgdriver.NewConnector(pgdriver.WithDSN(dsn), pgdriver.WithConnParams(map[string]any{"search_path": schema})))
+	}
+	db, gates := open(), open()
+	migration, err := os.ReadFile("../database/memory-nodes/migrations/20261015010000_storage_capacity.up.sql")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err = db.Exec(string(migration)); err != nil {
+		t.Fatal(err)
+	}
+	previous := azureblob.CapacityStore()
+	azureblob.ConfigureCapacity(func() *sql.DB { return db }, func() *sql.DB { return gates })
+	t.Cleanup(func() {
+		if previous == nil {
+			azureblob.ConfigureCapacity(nil, nil)
+		} else {
+			azureblob.ConfigureCapacity(previous.DB, previous.GateDB)
+		}
+		db.Close()
+		gates.Close()
+	})
 }
