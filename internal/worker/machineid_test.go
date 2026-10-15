@@ -39,7 +39,7 @@ func TestBuildRegisterCarriesMachineId(t *testing.T) {
 		StateDir:     dir,
 		Labels:       map[string]string{"os": "darwin"},
 		Concurrency:  map[string]uint32{"HEADLESS": 1},
-	}, nil, models.Inventory{}, hardware.Inventory{}, tools.ServeOwner, tools.PipelinesPolicy{Allow: false})
+	}, nil, models.Inventory{}, hardware.Inventory{}, tools.PipelinesPolicy{Allow: false})
 	if register.Labels[LabelMachineId] == "" {
 		t.Fatal("Register must carry machineId label")
 	}
@@ -48,7 +48,7 @@ func TestBuildRegisterCarriesMachineId(t *testing.T) {
 		Capabilities: []string{"HEADLESS"},
 		StateDir:     dir,
 		Concurrency:  map[string]uint32{"HEADLESS": 1},
-	}, nil, models.Inventory{}, hardware.Inventory{}, tools.ServeOwner, tools.PipelinesPolicy{Allow: false})
+	}, nil, models.Inventory{}, hardware.Inventory{}, tools.PipelinesPolicy{Allow: false})
 	if again.Labels[LabelMachineId] != register.Labels[LabelMachineId] {
 		t.Fatalf("machineId must be stable across Registers: %q vs %q", again.Labels[LabelMachineId], register.Labels[LabelMachineId])
 	}
@@ -91,7 +91,7 @@ func TestOneMachineIDWhicheverWayTheWorkerStarted(t *testing.T) {
 
 	var ids []string
 	for _, cfg := range []Config{fleet, single, mirror} {
-		reg := buildRegister(cfg, nil, models.Inventory{}, hardware.Inventory{}, tools.ServeOwner, tools.PipelinesPolicy{Allow: false})
+		reg := buildRegister(cfg, nil, models.Inventory{}, hardware.Inventory{}, tools.PipelinesPolicy{Allow: false})
 		ids = append(ids, reg.Labels[LabelMachineId])
 	}
 	if ids[0] == "" || ids[0] != ids[1] || ids[1] != ids[2] {

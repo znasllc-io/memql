@@ -230,9 +230,6 @@ func (r *Runner) afterConnect() {
 	if err := clearRefusal(r.cfg.StateDir); err != nil {
 		r.logger.Warn("could not clear the recorded refusal", "error", err)
 	}
-	// A registration carries the live consent, so a withdrawal waiting to
-	// re-register has landed.
-	r.endWithdrawal("the new registration carries it")
 }
 
 func (r *Runner) holdMinOrDefault() time.Duration {

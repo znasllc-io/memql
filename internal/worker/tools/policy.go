@@ -34,7 +34,6 @@ type Policy struct {
 	http       HTTPPolicy
 	apps       AppsPolicy
 	models     ModelsPolicy
-	inference  InferencePolicy
 	backup     BackupPolicy
 	pipelines  PipelinesPolicy
 	configPath string
@@ -335,36 +334,6 @@ type HTTPPolicy struct {
 	BlockPrivateNet bool     `yaml:"block_private_net"`
 }
 
-// InferencePolicy is this machine's answer to "who may this GPU serve"
-// (engine memql#5146, record D6).
-//
-// SHARING TAKES TWO CONSENTS AND THIS IS ONLY ONE OF THEM. The other is
-// the owner's, set from the machine page and stored on the
-// registration; a machine serves somebody else's prompt only when both
-// say `cluster`. That split is the same rule that keeps `sharedInference`
-// off the cockpit entirely: a machine cannot grant a permission on its
-// owner's behalf, and one that could would be granting itself one.
-//
-// It is a string rather than a bool because the engine's half spells the
-// same two words, and a bool here would have to be named for one of them
-// -- `share: true` reads as a grant where `serve: cluster` reads as a
-// setting, and only the second survives being read back a year later.
-//
-//	inference:
-//	  serve: cluster    # or owner, which is the default
-type InferencePolicy struct {
-	Serve string `yaml:"serve"`
-}
-
-const (
-	// ServeOwner: only this machine's owner. The default, and where an
-	// unrecognised value lands.
-	ServeOwner = "owner"
-	// ServeCluster: anyone in the cluster, subject to the OWNER's
-	// separate grant. This half alone grants nothing.
-	ServeCluster = "cluster"
-)
-
 // rawPolicy is the YAML-unmarshal target.
 type rawPolicy struct {
 	Shell     ShellPolicy     `yaml:"shell"`
@@ -373,7 +342,6 @@ type rawPolicy struct {
 	Apps      AppsPolicy      `yaml:"apps"`
 	Backup    BackupPolicy    `yaml:"backup"`
 	Models    ModelsPolicy    `yaml:"models"`
-	Inference InferencePolicy `yaml:"inference"`
 	Pipelines PipelinesPolicy `yaml:"pipelines"`
 }
 
@@ -507,7 +475,7 @@ func (p *Policy) reload() error {
 	if raw.HTTP.BlockPrivateNet {
 		p.http.BlockPrivateNet = true
 	}
-	// apps.homes REPLACES, for inference.serve's reason below: it is a
+	// apps.homes REPLACES: it is a
 	// consent, and merging it would make withdrawing one -- `memql worker
 	// apps --deny`, or deleting the line -- take a restart. There is no
 	// baseline either way: DefaultPolicy names no cluster, which is the
@@ -536,12 +504,6 @@ func (p *Policy) reload() error {
 	// operator nor this code intended -- an endpoint moved to a new port
 	// would keep answering on the old one until a restart.
 	p.models.Runtimes = raw.Models.Runtimes
-	// inference.serve REPLACES, so a SIGHUP that removed the key
-	// returns this machine to `owner` rather than leaving a grant the
-	// file no longer mentions. Merging a consent would make it
-	// unrevokable without a restart, which is the wrong direction for
-	// the one setting here that hands a stranger this machine's GPU.
-	p.inference.Serve = raw.Inference.Serve
 	// pipelines REPLACES, whole, for the same reason: allow is a consent, and
 	// a narrowed repos list that kept the repository it dropped would admit a
 	// step the file no longer names.
@@ -619,31 +581,6 @@ func absoluteRoot(p string) (string, bool) {
 		return "", false
 	}
 	return root, true
-}
-
-// InferenceServe reports this machine's sharing consent: ServeOwner or
-// ServeCluster.
-//
-// AN UNRECOGNISED VALUE IS ServeOwner, and it is neither an error nor a
-// grant. A typo in policy.yaml must not widen a permission -- the
-// fail-closed direction every other list in this file runs in -- and it
-// must not stop a worker starting either, because a machine that
-// refused to boot over a misspelled sharing preference is a machine
-// nobody can reach to fix it.
-func (p *Policy) InferenceServe() string {
-	// A nil policy reports the closed default rather than panicking,
-	// which is what every sibling accessor here does. Unreachable from
-	// handleRun today; the guard costs a line and the alternative is a
-	// panic on the Register path.
-	if p == nil {
-		return ServeOwner
-	}
-	p.mu.RLock()
-	defer p.mu.RUnlock()
-	if p.inference.Serve == ServeCluster {
-		return ServeCluster
-	}
-	return ServeOwner
 }
 
 // CheckShell returns nil if the supplied command is allowed.

@@ -84,7 +84,7 @@ func (s *eofStream) Close()                                      {}
 func TestRegisterSurfacesTheStatusBehindASendEOF(t *testing.T) {
 	s := &eofStream{recvErr: status.Error(codes.Unauthenticated, "invalid worker token")}
 	_, err := handshake(context.Background(), s, Config{Name: "m", Capabilities: []string{"HEADLESS"}, StateDir: t.TempDir()},
-		nil, models.Inventory{}, hardware.Inventory{}, tools.ServeOwner, tools.PipelinesPolicy{}, quietLogger())
+		nil, models.Inventory{}, hardware.Inventory{}, tools.PipelinesPolicy{}, quietLogger())
 	if err == nil {
 		t.Fatal("a refused handshake must fail")
 	}
@@ -96,7 +96,7 @@ func TestRegisterSurfacesTheStatusBehindASendEOF(t *testing.T) {
 	// And an EOF with nothing behind it stays an EOF: not a refusal.
 	s = &eofStream{recvErr: io.EOF}
 	_, err = handshake(context.Background(), s, Config{Name: "m", Capabilities: []string{"HEADLESS"}, StateDir: t.TempDir()},
-		nil, models.Inventory{}, hardware.Inventory{}, tools.ServeOwner, tools.PipelinesPolicy{}, quietLogger())
+		nil, models.Inventory{}, hardware.Inventory{}, tools.PipelinesPolicy{}, quietLogger())
 	if _, ok := refusalOf(err); ok || !errors.Is(err, io.EOF) {
 		t.Fatalf("a bare EOF = %v (refusal=%v), want an EOF that is not a refusal", err, ok)
 	}
@@ -110,7 +110,7 @@ func TestARegisterErrorIsTyped(t *testing.T) {
 		Code: "register_failed", Message: "worker is revoked",
 	}}})
 	_, err := handshake(context.Background(), s, Config{Name: "m", Capabilities: []string{"HEADLESS"}, StateDir: t.TempDir()},
-		nil, models.Inventory{}, hardware.Inventory{}, tools.ServeOwner, tools.PipelinesPolicy{}, quietLogger())
+		nil, models.Inventory{}, hardware.Inventory{}, tools.PipelinesPolicy{}, quietLogger())
 	var refused *RegisterRefusedError
 	if !errors.As(err, &refused) || refused.Code != "register_failed" || refused.Message != "worker is revoked" {
 		t.Fatalf("err = %v, want a *RegisterRefusedError carrying the cluster's code and words", err)

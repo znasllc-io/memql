@@ -213,7 +213,7 @@ func TestPipelineActionContractComesFromTheBuild(t *testing.T) {
 	if got := descriptor.ActionContracts["workerHost.pipeline_step"]; got != 3 {
 		t.Fatalf("pipeline contract = %d", got)
 	}
-	raw, err := CapabilityDescriptorJSONFor(ServeOwner, nil)
+	raw, err := CapabilityDescriptorJSONFor(nil)
 	if err != nil {
 		t.Fatal(err)
 	}
