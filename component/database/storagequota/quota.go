@@ -7,8 +7,10 @@ import (
 	"crypto/sha256"
 	"database/sql"
 	"encoding/binary"
+	"encoding/json"
 	"errors"
 	"fmt"
+	"sync"
 	"time"
 
 	"github.com/znasllc-io/memql/core/gatecontext"
@@ -28,8 +30,10 @@ var ErrLimit = errors.New("storage limit reached; stored files, the Bin and unfi
 var ErrRetired = errors.New("this storage destination has been permanently retired")
 
 type Store struct {
-	DB     func() *sql.DB
-	GateDB func() *sql.DB
+	DB          func() *sql.DB
+	GateDB      func() *sql.DB
+	inventoryMu sync.Mutex
+	inventories map[string]*inventoryFlight
 }
 type Usage struct {
 	Used            int64 `json:"used"`
@@ -133,8 +137,15 @@ func (s *Store) Initialize(ctx context.Context, account string, inventory func(f
 		return err
 	}
 	defer tx.Rollback()
-	if err = lock(ctx, tx, "capacity"); err != nil {
+	// Another replica can be importing for minutes. Never fill the request
+	// pool with waiters for an inventory that must finish before writes open.
+	sum := sha256.Sum256([]byte("storage-capacity-v1:capacity"))
+	var acquired bool
+	if err = tx.QueryRowContext(ctx, "SELECT pg_try_advisory_xact_lock($1)", int64(binary.BigEndian.Uint64(sum[:8]))).Scan(&acquired); err != nil {
 		return err
+	}
+	if !acquired {
+		return ErrInventoryPending
 	}
 	if _, err = tx.ExecContext(ctx, `INSERT INTO storage_capacity_accounts(account) VALUES($1) ON CONFLICT DO NOTHING`, account); err != nil {
 		return err
@@ -148,25 +159,48 @@ func (s *Store) Initialize(ctx context.Context, account string, inventory func(f
 		return errors.New(blocked)
 	}
 	if !ready {
+		type entry struct {
+			Key   string `json:"key"`
+			Owner string `json:"owner"`
+			Size  int64  `json:"size"`
+		}
+		batch := make([]entry, 0, 512)
+		flush := func() error {
+			if len(batch) == 0 {
+				return nil
+			}
+			data, e := json.Marshal(batch)
+			if e != nil {
+				return e
+			}
+			_, e = tx.ExecContext(ctx, `WITH added AS (
+INSERT INTO storage_capacity_objects(object_key,account,owner_id,used_bytes,capacity_bytes)
+SELECT x.key,$1,x.owner,x.size+$3,x.size+$3 FROM jsonb_to_recordset($2::jsonb) AS x(key text,owner text,size bigint)
+ON CONFLICT(object_key) DO NOTHING RETURNING owner_id,capacity_bytes
+), changes AS (
+SELECT 'cluster' AS scope,sum(capacity_bytes) AS used FROM added
+UNION ALL SELECT 'user:' || owner_id,sum(capacity_bytes) FROM added GROUP BY owner_id
+)
+INSERT INTO storage_capacity_totals(scope,used_bytes,reserved_bytes)
+SELECT scope,used,0 FROM changes WHERE used IS NOT NULL
+ON CONFLICT(scope) DO UPDATE SET used_bytes=storage_capacity_totals.used_bytes+EXCLUDED.used_bytes`, account, string(data), ObjectOverhead)
+			batch = batch[:0]
+			return e
+		}
 		err = inventory(func(key, owner string, size int64) error {
 			if size < 0 || size > ClusterBytes {
 				return ErrLimit
 			}
-			result, e := tx.ExecContext(ctx, `INSERT INTO storage_capacity_objects(object_key,account,owner_id,used_bytes,capacity_bytes)
-VALUES($1,$2,$3,$4,$4) ON CONFLICT(object_key) DO NOTHING`, key, account, owner, size+ObjectOverhead)
-			if e != nil {
-				return e
-			}
-			n, e := result.RowsAffected()
-			if e != nil {
-				return e
-			}
-			if n > 0 {
-				return totals(ctx, tx, owner, size+ObjectOverhead, 0)
+			batch = append(batch, entry{Key: key, Owner: owner, Size: size})
+			if len(batch) == cap(batch) {
+				return flush()
 			}
 			return nil
 		})
 		if err != nil {
+			return err
+		}
+		if err = flush(); err != nil {
 			return err
 		}
 		if _, err = tx.ExecContext(ctx, `UPDATE storage_capacity_accounts SET inventoried=true WHERE account=$1`, account); err != nil {
