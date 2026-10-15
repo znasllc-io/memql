@@ -603,12 +603,15 @@ half landed in epic memql#4783; this is the half that can see the origin.
 `internal/worker/backup/`, plus `memql worker backup [--once]`. Operator doc:
 [docs/watched-folders.md](docs/watched-folders.md).
 
-**ONE-WAY, FOREVER.** Nothing in that package reads the Library and writes this
-machine, and nothing deletes, moves or hides a copy because of something at the
-origin. A file deleted here is FLAGGED there (`origin_gone`) and stays whole and
-downloadable. Two-way sync and conflict resolution are refused deliberately --
-that is the complexity cliff this sits on the safe side of, and a test asserts
-the sweeper sends no destructive call at all.
+**ONE-WAY SYNC IS EXPLICIT.** New `mode: sync` watches upload changed regular
+files and conditionally move confirmed local deletions to the Files Bin. Legacy
+watches without that mode retain deleted originals with `origin_gone`. A
+complete scan, the same root identity and fresh local consent are required
+before deletion; the cluster also checks the exact file version and SHA-256.
+`internal/worker/transfer` handles bounded direct Blob transfers and downloads,
+with durable checkpoints and separate `backup.download_roots` consent. Archive
+uploads do not create a watch. The shared server quota includes retained Bin
+copies and reservations; native workers cannot bypass it.
 
 **The credential is the SIGNED-IN USER'S, and it has to be.** The Library's
 HTTP routes gate on the actor RESOLVING TO A USER -- the upload path stamps
@@ -653,7 +656,7 @@ route send only that many bytes of a file that has since grown, the engine's
 commit check passes (staged == declared), and the copy is silently truncated
 and then never repaired, because the digest already matches.
 
-The ledger under `<state_dir>/backup/<watchId>.json` is a CACHE -- losing it
+The ledger under `<state_dir>/backup/<watchId>.json`, with its append journal, is a CACHE -- losing it
 costs one expensive sweep, because every re-push is keyed on `(machine, path)`
 and lands as a new VERSION rather than a duplicate. It is saved BEFORE sending a chunked session's first bytes and after each
 completed file, as well as on sweep exit. The saved session is bound to a

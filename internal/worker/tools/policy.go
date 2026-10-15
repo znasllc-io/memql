@@ -240,7 +240,8 @@ type ModelsPolicy struct {
 // that quietly ignored a watch would be indistinguishable from one that was
 // offline.
 type BackupPolicy struct {
-	Roots []string `yaml:"roots"`
+	DownloadRoots []string `yaml:"download_roots"`
+	Roots         []string `yaml:"roots"`
 }
 
 // PipelinesPolicy controls workerHost.pipeline_step: whether the cluster may
@@ -496,6 +497,7 @@ func (p *Policy) reload() error {
 	p.fs.Allow = mergeUnique(p.fs.Allow, raw.FS.Allow)
 	p.fs.Deny = mergeUnique(p.fs.Deny, raw.FS.Deny)
 	p.backup.Roots = mergeUnique(p.backup.Roots, raw.Backup.Roots)
+	p.backup.DownloadRoots = mergeUnique(p.backup.DownloadRoots, raw.Backup.DownloadRoots)
 	p.http.AllowURLs = mergeUnique(p.http.AllowURLs, raw.HTTP.AllowURLs)
 	p.http.DenyURLs = mergeUnique(p.http.DenyURLs, raw.HTTP.DenyURLs)
 	if raw.HTTP.MaxBodyBytes > 0 {
@@ -727,8 +729,18 @@ func (p *Policy) CheckBackupPath(path string) error {
 	if len(p.backup.Roots) == 0 {
 		return fmt.Errorf("this machine backs up nothing yet: add %q (or a folder above it) to backup.roots in policy.yaml", cleaned)
 	}
+	resolved, e := resolveBackupPath(cleaned)
+	if e != nil {
+		return e
+	}
+	for _, deny := range p.fs.Deny {
+		if matchesPath(resolved, expandHome(deny)) {
+			return errors.New("the source resolves to a denied path")
+		}
+	}
 	for _, root := range p.backup.Roots {
-		if matchesPath(cleaned, expandHome(root)) {
+		allowed, e := resolveBackupPath(expandHome(root))
+		if e == nil && matchesPath(resolved, allowed) {
 			return nil
 		}
 	}
@@ -1452,4 +1464,60 @@ func isPrivateIP(ip net.IP) bool {
 		}
 	}
 	return false
+}
+
+// Download permission is separate from read permission. Merely consenting to
+// back up a directory never authorizes the cluster to write into it.
+func (p *Policy) CheckBackupDownloadPath(path string) error {
+	if p == nil {
+		return errors.New("backup downloads are not allowed on this machine")
+	}
+	cleaned, e := canonicalPath(path)
+	if e != nil {
+		return e
+	}
+	resolved, e := resolveBackupPath(cleaned)
+	if e != nil {
+		return e
+	}
+	p.mu.RLock()
+	defer p.mu.RUnlock()
+	for _, deny := range p.fs.Deny {
+		if matchesPath(cleaned, expandHome(deny)) || matchesPath(resolved, expandHome(deny)) {
+			return errors.New("the download destination is denied by this machine")
+		}
+	}
+	for _, root := range p.backup.DownloadRoots {
+		allowed, e := resolveBackupPath(expandHome(root))
+		if e == nil && matchesPath(resolved, allowed) && resolved != allowed {
+			return nil
+		}
+	}
+	return errors.New("allow this destination in backup.download_roots on this machine before downloading")
+}
+func resolveBackupPath(p string) (string, error) {
+	absolute, e := filepath.Abs(p)
+	if e != nil {
+		return "", e
+	}
+	tail := []string{}
+	current := absolute
+	for {
+		resolved, e := filepath.EvalSymlinks(current)
+		if e == nil {
+			for i := len(tail) - 1; i >= 0; i-- {
+				resolved = filepath.Join(resolved, tail[i])
+			}
+			return resolved, nil
+		}
+		if !errors.Is(e, os.ErrNotExist) {
+			return "", e
+		}
+		parent := filepath.Dir(current)
+		if parent == current {
+			return "", e
+		}
+		tail = append(tail, filepath.Base(current))
+		current = parent
+	}
 }

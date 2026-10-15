@@ -24,6 +24,8 @@ require (
 	gopkg.in/yaml.v3 v3.0.1
 )
 
+require github.com/znasllc-io/memql/component/work v0.0.0 // indirect
+
 require (
 	fyne.io/systray v1.12.2
 	github.com/99designs/go-keychain v0.0.0-20191008050251-8e49817e8af4 // indirect
@@ -225,3 +227,5 @@ replace github.com/znasllc-io/memql/core => ../memql/core
 replace github.com/znasllc-io/memql/docs => ../memql/docs
 
 replace github.com/znasllc-io/memql/dsl => ../memql/dsl
+
+replace github.com/znasllc-io/memql/component/work => ../memql/component/work

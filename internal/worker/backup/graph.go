@@ -145,6 +145,7 @@ func constructOf(call string) string {
 
 // Watch is one arrangement this machine is asked to keep.
 type Watch struct {
+	Mode            string
 	IntervalMinutes int
 	LastSweepAt     time.Time
 	ID              string
@@ -184,6 +185,7 @@ func (g *Graph) Watches(ctx context.Context, workerID string) ([]Watch, error) {
 	out := make([]Watch, 0, len(rows))
 	for _, row := range rows {
 		w := Watch{
+			Mode:            rowString(row, "mode"),
 			ID:              rowString(row, "id"),
 			WorkerID:        rowString(row, "workerId"),
 			LocalPath:       rowString(row, "localPath"),
