@@ -21,10 +21,8 @@ import (
 	concept "github.com/znasllc-io/memql/component/database/memory-nodes"
 	"github.com/znasllc-io/memql/component/identity"
 	"github.com/znasllc-io/memql/component/identity/verifier"
+	langparser "github.com/znasllc-io/memql/component/language/parser"
 	memql "github.com/znasllc-io/memql/component/memql"
-	"github.com/znasllc-io/memql/component/node"
-	nodev1 "github.com/znasllc-io/memql/component/node/gen"
-	"google.golang.org/protobuf/proto"
 )
 
 func TestMain(m *testing.M) {
@@ -105,27 +103,24 @@ func TestRealPersonaAcrossReplicasAndRevocation(t *testing.T) {
 	require.Equal(t, "reader", vc.Role)
 	auth.SetRoleTestValidator(two)
 	viewer := personaContext(t, two, otherEngine, session.Token)
-	_, err = otherEngine.Execute(viewer, fmt.Sprintf(`mutation createAskConversation(requestId: %q, title: "Role test")`, uuid.NewString()))
+	_, err = otherEngine.Execute(viewer, fmt.Sprintf(`mutation createAskConversation(requestId: %s, title: "Role test")`, langparser.QuoteString(uuid.NewString())))
 	require.NoError(t, err)
 	folder := "v1:library:folder:" + uuid.NewString()
-	_, err = engine.Execute(viewer, fmt.Sprintf(`mutation createLibraryFolder(folderId: %q, name: "Test folder")`, folder))
+	_, err = engine.Execute(viewer, fmt.Sprintf(`mutation createLibraryFolder(folderId: %s, name: "Test folder")`, langparser.QuoteString(folder)))
 	require.NoError(t, err)
-	_, err = otherEngine.Execute(viewer, fmt.Sprintf(`mutation renameLibraryFolder(folderId: %q, name: "Edited")`, folder))
+	_, err = otherEngine.Execute(viewer, fmt.Sprintf(`mutation renameLibraryFolder(folderId: %s, name: "Edited")`, langparser.QuoteString(folder)))
 	require.NoError(t, err)
 	stranger := seedOperator(t, one, "owner")
 	second, err := one.Start(stranger, "reader")
 	require.NoError(t, err)
 	otherViewer := personaContext(t, two, otherEngine, second.Token)
-	_, err = otherEngine.Execute(otherViewer, fmt.Sprintf(`mutation renameLibraryFolder(folderId: %q, name: "Not mine")`, folder))
+	_, err = otherEngine.Execute(otherViewer, fmt.Sprintf(`mutation renameLibraryFolder(folderId: %s, name: "Not mine")`, langparser.QuoteString(folder)))
 	require.Error(t, err)
 	ac, _ := auth.AccessFromContext(viewer)
 	authority, err := auth.ForwardedAuthorityForUser(ac, auth.RoleTestClass, "", session.ExpiresAt, time.Now())
 	require.NoError(t, err)
-	wire, err := proto.Marshal(node.ForwardedAuthorityToProto(authority, "replica-one", "bff"))
-	require.NoError(t, err)
-	received := new(nodev1.ForwardedAuthority)
-	require.NoError(t, proto.Unmarshal(wire, received))
-	authority = node.ForwardedAuthorityFromProto(received)
+	// The node module tests the protobuf round trip; this lower-level module
+	// exercises the receiving replica's shared validation and durable restore.
 	require.Equal(t, session.ID, authority.RoleTestSessionID)
 	resolved, err := auth.VerifyForwardedAuthority(authority, time.Now())
 	require.NoError(t, err)
@@ -243,7 +238,7 @@ func TestDeveloperRestrictionAndPersonaGrantInvalidateTests(t *testing.T) {
 	write := func(user, effect string) {
 		t.Helper()
 		grantID := auth.GrantRowID(auth.SubjectKindUser, user, auth.VerbRead, auth.ResourceData)
-		query := fmt.Sprintf(`mutation writeGrant(grantId: %q, subjectKind: "user", subjectId: %q, verb: "read", resourceType: "data", effect: %q, grantedBy: "role-test-regression")`, grantID, user, effect)
+		query := fmt.Sprintf(`mutation writeGrant(grantId: %s, subjectKind: "user", subjectId: %s, verb: "read", resourceType: "data", effect: %s, grantedBy: "role-test-regression")`, langparser.QuoteString(grantID), langparser.QuoteString(user), langparser.QuoteString(effect))
 		_, err := engine.Execute(auth.ContextWithInternalOrigin(identity.ContextWithSystemCredentialActor(context.Background())), query)
 		require.NoError(t, err)
 	}

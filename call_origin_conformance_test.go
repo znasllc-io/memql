@@ -99,6 +99,7 @@ func TestOnlyAllowlistedPackagesStampInternalOrigin(t *testing.T) {
 		"component/automations":       "trusted automation dispatch; the untrusted branch stamps CLIENT (memql#2879)",
 		"component/identity":          "identity store internals, server-initiated; and the audit sink (EngineAuditSink), whose one stamp is on the createAuditEvent it composes, because that cluster-owner-tier create admits only a cluster owner or server code and the sink records every caller's decisions (memql#5624)",
 		"component/identity/adminops": "identity-admin write surface -- REQUEST-DERIVED, one of the two exceptions here; its precondition (every path is downstream of the owner/admin gate in the same function) is asserted by component/identity/adminops/gate_test.go, memql#3324",
+		"component/identity/roletest": "bounded persona provisioning -- REQUEST-DERIVED; the single inline stamp opens user creation only after fresh operator authentication and the owner/developer role boundary, with a server-generated reserved persona ID and unchanged actor. service_db_test.go exercises denied roles, nested tests and revoked credentials; the stamped context never escapes",
 		"component/identity/pat":      "personal-access-token store, server-initiated",
 		// The campaigns sending engine and the event-email rule runtime (epic
 		// memql#4819). SERVER-INITIATED, not request-derived: the callers are a

@@ -206,6 +206,10 @@ func (s *Service) Start(ctx context.Context, role string) (out Session, err erro
 	}
 	if u == nil {
 		name := map[string]string{"reader": "Viewer", "writer": "Member", "developer": "Developer", "admin": "Admin"}[role]
+		// The preceding actor/mayTest gates authorize exactly this bounded
+		// persona. Its reserved ID is server-generated, the actor is unchanged,
+		// and this inline stamp opens only the server-only user-creation write.
+		// Never return the stamped context or accept a caller-selected user ID.
 		err = s.Store.CreateUserOnFirstLogin(auth.ContextWithInternalOrigin(ctx), userID, "Test "+name,
 			strings.TrimPrefix(userID, "v1:identity:user:")+"@role-test.invalid", role, false, identity.UserProfileSeed{})
 		if err != nil {
