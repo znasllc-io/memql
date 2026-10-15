@@ -59,7 +59,7 @@
       "domainId": "computer-use",
       "sourceRef": "computerUse:perTaskApproval",
       "catalog": "computerUse",
-      "sha256": "3008c619b0602e965102156cd6eaef1e29091911255bff3c1b045ec491d685fb"
+      "sha256": "baf4d192b995e89f4d49386a8985cb9cce4978e05f527c7378c60f5b25d40943"
     },
     {
       "domainId": "computer-use",
@@ -125,7 +125,7 @@
       "domainId": "workbench",
       "sourceRef": "workbench:failureFallbackManual",
       "catalog": "workbench",
-      "sha256": "7923bc7383b50bafd21db6c2e0235e33b22aab132ab153e73d1da3125830d23d"
+      "sha256": "b14a30b039770609c67c02acb4da3ee3796fb4c8609a3e8761f0bf8edab0c7d1"
     },
     {
       "domainId": "workbench",

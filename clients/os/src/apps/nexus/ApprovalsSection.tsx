@@ -30,7 +30,7 @@ import {
 import { useOsConnection } from "../../live/connection";
 import { ActionBar, type Act } from "../../kit/ActionBar";
 import type { DecideApprovalState } from "./actions";
-import { computerPermission, permissionRememberLabel } from "./computerPermissions";
+import { computerPermission, computerSessionAccess, permissionRememberLabel } from "./computerPermissions";
 import { ComputerPermissionsPage } from "./ComputerPermissionsPage";
 import {
   appWord,
@@ -256,7 +256,7 @@ export function ApprovalsSection({
   const isFeedback = selected?.kind === "feedback";
   const failure = selected !== null && isFailureQuestion(selected);
   const permission = !failure && selected?.kind === "scopeElevation" ? computerPermission(selected.subject) : null;
-  const invalidPermission = !failure && selected?.kind === "scopeElevation" && selected.subject?.computerPermission !== undefined && permission === null;
+  const invalidPermission = !failure && selected?.kind === "scopeElevation" && ((selected.subject?.computerPermission !== undefined && permission === null) || computerSessionAccess(selected.subject) === null);
   const permissionMode = rememberPermission && permission?.allowedModes.includes("always") ? "always" : "once";
   const budget = failure ? null : budgetControl(selected);
   const budgetAnswer = budgetApprovalAnswer(selected, freeText);
@@ -635,8 +635,8 @@ function ApprovalDetail({
         </Facts></div>
         <Caption>{permission.kind === "directory_read" ? "Includes files and folders inside this directory. Does not allow writing files or running commands." : "Applies only to this command, working directory and time limit on this computer."}</Caption>
         {canDecide && permission.allowedModes.includes("always") ? <div className="os-nexus-permission-remember"><Check checked={rememberPermission} onChange={onRememberPermission}>{permissionRememberLabel(permission)}</Check><Caption>Saved permissions can be revoked from Approvals.</Caption></div> : null}
-      </Panel> : !failure && approval.kind === "scopeElevation" && approval.subject?.computerPermission !== undefined ? <Notice tone="warn" sentence="This permission request cannot be read." next="You can reject it and ask for a new request." /> : !failure && approval.kind === "scopeElevation" ? <Panel label="Computer access"><Facts>
-        <Fact label="Access" value={approval.subject?.scope === "observe" ? "Read and observe" : "Read, write and control"} />
+      </Panel> : !failure && approval.kind === "scopeElevation" && (approval.subject?.computerPermission !== undefined || computerSessionAccess(approval.subject) === null) ? <Notice tone="warn" sentence="This permission request cannot be read." next="You can reject it and ask for a new request." /> : !failure && approval.kind === "scopeElevation" ? <Panel label="Computer access"><Facts>
+        <Fact label="Access" value={computerSessionAccess(approval.subject)} />
         <Fact label="Machines" value={String(approval.subject?.target || "Your enrolled computers matching the request")} />
         <Fact label="Expires" value={formatMoment(approval.expiresAt)} />
       </Facts></Panel> : null}

@@ -509,6 +509,26 @@ describe("computer permission choices", () => {
     expect(screen.getByRole("button", { name: "Allow once" })).toBeTruthy();
   });
 
+  it.each([
+    ["desktop", "observe", "View the desktop"],
+    ["desktop", "full", "View and control the desktop"],
+    ["file_write", "full", "Write files"],
+    ["http", "observe", "Make HTTP requests"],
+  ])("shows the explicit %s session boundary", async (sessionKind, sessionScope, label) => {
+    mount(fakeConnection({ approvals: [approvalRow({ id: "session", kind: "scopeElevation", question: "Use selected access", subject: { sessionKind, sessionScope } })] }));
+    fireEvent.click(await screen.findByText("Use selected access"));
+    expect(screen.getByText(label)).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Allow for this work" })).toBeTruthy();
+    expect(screen.queryByRole("checkbox")).toBeNull();
+  });
+
+  it("refuses unknown or conflicting session boundaries", async () => {
+    mount(fakeConnection({ approvals: [approvalRow({ id: "session", kind: "scopeElevation", question: "Use selected access", subject: { sessionKind: "desktop", sessionScope: "observe", scope: "full" } })] }));
+    fireEvent.click(await screen.findByText("Use selected access"));
+    expect(screen.queryByRole("button", { name: /Allow/ })).toBeNull();
+    expect(screen.getAllByText("This permission request cannot be read.").length).toBeGreaterThan(0);
+  });
+
   it("keeps legacy access limited to this work and refuses an unreadable typed scope", async () => {
     mount(fakeConnection({ approvals: [
       approvalRow({ id: "legacy", kind: "scopeElevation", question: "Use my computer", subject: { scope: "observe" } }),

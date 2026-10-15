@@ -31,3 +31,14 @@ export function computerPermission(subject: unknown): ComputerPermission | null 
 export function permissionRememberLabel(permission: ComputerPermission): string {
   return permission.kind === "directory_read" ? "Always allow reading this directory" : "Always allow this exact command";
 }
+
+export function computerSessionAccess(subject?: Record<string, unknown> | null): string | null {
+  if (subject?.sessionKind === undefined) return subject?.scope === "observe" ? "Read and observe" : "Read, write and control";
+  if (subject.scope !== undefined || !["observe", "full"].includes(String(subject.sessionScope))) return null;
+  switch (subject.sessionKind) {
+    case "desktop": return subject.sessionScope === "observe" ? "View the desktop" : "View and control the desktop";
+    case "file_write": return subject.sessionScope === "full" ? "Write files" : null;
+    case "http": return "Make HTTP requests";
+    default: return null;
+  }
+}
