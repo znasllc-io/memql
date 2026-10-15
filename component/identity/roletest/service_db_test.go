@@ -3,9 +3,12 @@ package roletest
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"fmt"
 	"io"
 	"log/slog"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"sync"
 	"testing"
@@ -71,7 +74,13 @@ func seedOperator(t *testing.T, s *Service, role string) context.Context {
 	id := "v1:identity:user:" + uuid.NewString()
 	ctx := identity.ContextWithSystemCredentialActor(context.Background())
 	require.NoError(t, s.Store.CreateUserOnFirstLogin(auth.ContextWithInternalOrigin(ctx), id, "Operator", "operator-"+uuid.NewString()+"@example.test", role, false, identity.UserProfileSeed{}))
-	ctx = verifier.AttachToContext(context.Background(), &verifier.VerifiedClaims{ClaimsMap: map[string]any{"sub": id, "role": role, "class": "user", "exp": time.Now().Add(time.Hour).Unix()}})
+	// JWT MapClaims decodes numeric dates as float64. Exercise that wire shape,
+	// not just the int64 a Go fixture naturally constructs.
+	wire, err := json.Marshal(map[string]any{"sub": id, "role": role, "class": "user", "exp": time.Now().Add(time.Hour).Unix()})
+	require.NoError(t, err)
+	var claims map[string]any
+	require.NoError(t, json.Unmarshal(wire, &claims))
+	ctx = verifier.AttachToContext(context.Background(), &verifier.VerifiedClaims{ClaimsMap: claims})
 	return auth.ContextWithAccess(ctx, &auth.AccessContext{UserId: id, Role: auth.Role(role)})
 }
 func personaContext(t *testing.T, s *Service, e *memql.MemQLEngine, token string) context.Context {
@@ -89,6 +98,40 @@ func personaContext(t *testing.T, s *Service, e *memql.MemQLEngine, token string
 	ac, err := resolver.LoadFromClaims(ctx, vc.ClaimsMap)
 	require.NoError(t, err)
 	return auth.ContextWithAccess(ctx, ac)
+}
+
+func TestRoleTestingFromVerifiedOwnerJWT(t *testing.T) {
+	service, _ := realService(t)
+	owner := seedOperator(t, service, "owner")
+	ac, _ := auth.AccessFromContext(owner)
+	epoch, err := service.Store.BumpUserRevocationEpoch(auth.ContextWithInternalOrigin(owner), ac.UserId)
+	require.NoError(t, err)
+	keys, err := identity.NewKeyManager(t.TempDir(), "")
+	require.NoError(t, err)
+	require.NoError(t, keys.Load())
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(identity.BuildJWKS(keys, time.Now()))
+	}))
+	t.Cleanup(server.Close)
+	issuer, err := identity.NewJWTIssuer(keys, identity.Config{Enabled: true, BaseURL: server.URL, JWTAudience: "memql"})
+	require.NoError(t, err)
+	token, _, err := issuer.IssueAccessToken(identity.IssueInput{UserId: ac.UserId, Role: "owner", RevocationEpoch: epoch}, time.Now())
+	require.NoError(t, err)
+	config := verifier.Config{BaseURL: server.URL, ExpectedAudience: "memql", JWKSRefreshInterval: time.Hour, JWKSFetchTimeout: 5 * time.Second}
+	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
+	cache, err := verifier.NewJWKSCache(config, logger)
+	require.NoError(t, err)
+	verify, err := verifier.New(config, cache, nil, logger)
+	require.NoError(t, err)
+	claims, err := verify.VerifyBearer(context.Background(), token)
+	require.NoError(t, err)
+	require.IsType(t, float64(0), claims.ClaimsMap["exp"])
+	require.IsType(t, float64(0), claims.ClaimsMap["revocation_epoch"])
+	ctx := auth.ContextWithAccess(verifier.AttachToContext(context.Background(), claims), ac)
+	session, err := service.Start(ctx, "reader")
+	require.NoError(t, err)
+	require.NoError(t, service.End(ctx, session.ID))
 }
 
 func TestRealPersonaAcrossReplicasAndRevocation(t *testing.T) {
