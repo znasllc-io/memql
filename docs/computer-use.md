@@ -130,17 +130,34 @@ following symlinks and reads through the held descriptor, including list
 metadata. A link or alias is refused with an instruction to request the
 real directory. Local workspace and filesystem deny rules still apply.
 
-`fs_read` accepts `{path, maxBytes?}` and returns a prefix from the beginning
-of the file; it does not accept offsets or line ranges. The default is 5 MiB,
-and scoped reads require `maxBytes` between 1 and 5,242,880. The result keeps
-`path`, `content` and `size` (bytes returned), and also reports `fileSize`
-(the opened file's byte size) and `truncated` (the returned prefix is shorter
-than that size). An exact-size read reports `truncated: false`. These are byte
-counts, not character counts. Metadata comes from the same opened descriptor
-before the read; it is not a snapshot guarantee if another process changes
-the file concurrently. The same result fields apply to ordinary host reads.
-The bounded output preview also ends with returned bytes, file size and
-truncation status, so archived result previews retain these facts.
+`fs_read` retains `{path, maxBytes?}` prefix reads and advertises action contract
+`workerHost.fs_read: 2` for bounded inspection of one specified file:
+
+- `offsetBytes` with `maxBytes` reads a byte range.
+- `startLine` with `lineCount` reads a one-based line range.
+- `search` finds a nonempty literal, with optional `maxMatches` (default 20,
+  maximum 100). `content` contains whole matching lines; `matches` identifies
+  each source line/byte offset and its byte span within `content`.
+
+These three modes cannot be combined. All reads bound `maxBytes` to 1–5,242,880
+(default 5 MiB). Line ranges and search also accept `maxScanBytes`, default
+5 MiB and maximum 16 MiB; skipped lines count toward that scan bound. A partial
+line at the scan boundary is withheld. An empty incomplete search does not
+establish absence. No recursive filesystem search or command permission is
+introduced.
+
+Results include `path`, `content`, `size` (returned source bytes), `fileSize`,
+`offsetBytes`, `nextOffsetBytes`, `scannedBytes`, `modTime`, and the SHA-256 of
+returned source bytes. `complete`/`truncated` describe coverage of the requested
+range or search, not the entire file. `changedDuringRead` checks size and mtime
+on the same opened descriptor before and after the read; a detected change
+makes coverage incomplete. This is not a concurrent snapshot guarantee.
+
+Engine status exposes `boundedFileReadSupported`; routing and the receiving
+replica check the advertised contract before dispatch, so an old worker cannot
+silently substitute a prefix read. This capability check grants no access.
+Saved directory and exact-once permissions still apply to these read arguments,
+and Cockpit's local filesystem rules and symlink checks remain authoritative.
 
 Command permissions accept only `cmd`, an explicit canonical absolute
 `cwd`, and optional integer `timeoutSec` from 1 to 600 (default 60).

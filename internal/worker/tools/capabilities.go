@@ -120,7 +120,7 @@ func computeCapabilities(goos string, getenv func(string) string) CapabilityDesc
 	if displayServer == "quartz" || displayServer == "x11" {
 		displays = displayCount()
 	}
-	contracts := map[string]int{"workerHost.pipeline_step": 3}
+	contracts := map[string]int{"workerHost.pipeline_step": 3, "workerHost.fs_read": 2}
 	if goos == "darwin" || goos == "linux" {
 		contracts["workerHost.computer_permission"] = 1
 	}

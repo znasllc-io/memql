@@ -32,7 +32,7 @@ func TestFileReadDispatcherRefusesUnsupportedArgumentsBeforeOpening(t *testing.T
 				{"range 30-60", map[string]any{"startLine": 30, "endLine": 60}},
 				{"range 290-310", map[string]any{"startLine": 290, "endLine": 310}},
 				{"offset", map[string]any{"offset": 32}},
-				{"search", map[string]any{"search": "source"}},
+				{"invalid search", map[string]any{"search": ""}},
 				{"misspelled byte limit", map[string]any{"maxByets": 8}},
 			} {
 				for _, missing := range []bool{false, true} {
