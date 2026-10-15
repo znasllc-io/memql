@@ -24,21 +24,20 @@ func TestVerifyCapabilityToolsRegistered_AllPresent_NoMissing(t *testing.T) {
 	}
 }
 
-// The memql#1154 shape: workbenchHost dropped while its sibling canvasPublish
-// (same workbench-use slug) is still registered -> the partial set is the bug
-// and must be reported.
+// A worker primitive dropped while its status/scope siblings remain is a
+// partial core capability and must still be reported.
 func TestVerifyCapabilityToolsRegistered_PartialDrop_Reported(t *testing.T) {
 	set := allCapabilityTools()
-	delete(set, "workbench.workbenchHost")
+	delete(set, "worker.workerHost")
 	missing := VerifyCapabilityToolsRegistered(func(s string) bool { return set[s] }, testGuardLogger())
 	found := false
 	for _, m := range missing {
-		if m == "workbenchHost" {
+		if m == "workerHost" {
 			found = true
 		}
 	}
 	if !found {
-		t.Fatalf("dropping workbenchHost while canvasPublish is present must be reported, got %v", missing)
+		t.Fatalf("dropping workerHost while its siblings are present must be reported, got %v", missing)
 	}
 }
 
@@ -52,13 +51,12 @@ func TestVerifyCapabilityToolsRegistered_NoneRegistered_SelfScopesOut(t *testing
 	}
 }
 
-// Dropping the WHOLE worker set (all of computer-use-headless) but keeping the
-// shared canvasPublish: the slug still has canvasPublish present (anyPresent),
-// so the dropped worker tools must be reported.
-func TestVerifyCapabilityToolsRegistered_WholeWorkerSetDropped_Reported(t *testing.T) {
-	set := map[string]bool{"canvasPublish": true} // only the shared tool survives
+// Dropping both execution primitives while keeping core status must report
+// the broken bundles. Product presentation tools cannot satisfy this check.
+func TestVerifyCapabilityToolsRegistered_ExecutionToolsDropped_Reported(t *testing.T) {
+	set := map[string]bool{"worker.workerStatus": true, "canvasPublish": true}
 	missing := VerifyCapabilityToolsRegistered(func(s string) bool { return set[s] }, testGuardLogger())
-	for _, want := range []string{"workerHost", "workerStatus", "requestComputerUseScope"} {
+	for _, want := range []string{"workerHost", "workerComputer", "requestComputerUseScope"} {
 		seen := false
 		for _, m := range missing {
 			if m == want {
@@ -66,7 +64,7 @@ func TestVerifyCapabilityToolsRegistered_WholeWorkerSetDropped_Reported(t *testi
 			}
 		}
 		if !seen {
-			t.Fatalf("expected %q reported missing (canvasPublish present so the slug is checked), got %v", want, missing)
+			t.Fatalf("expected %q reported missing (workerStatus present so the slug is checked), got %v", want, missing)
 		}
 	}
 }

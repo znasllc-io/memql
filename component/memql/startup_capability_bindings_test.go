@@ -20,7 +20,12 @@ func TestCapabilityAuditResolvesCoreToolsDespiteBundleCollisions(t *testing.T) {
 	for _, name := range []string{"workerHost", "workerComputer", "workerStatus", "requestComputerUseScope"} {
 		require.NotContains(t, missing, name)
 	}
-	// A product namesake cannot satisfy a missing core execution surface.
+	// A product namesake cannot make the single-tool core workbench surface
+	// available. A missing worker primitive still makes its bundle incomplete.
 	require.NoError(t, registry.Upsert(&Tool{Name: "workbenchHost", Origin: "testproduct/tools.memql"}))
-	require.Contains(t, VerifyCapabilityToolsRegistered(registry.Has, nil), "workbenchHost")
+	require.Contains(t, UnavailableCapabilitySlugs(registry.Has), "workbench-use")
+	partial := newToolRegistry()
+	require.NoError(t, partial.Upsert(&Tool{Name: "workerStatus", Origin: "worker/tools.memql"}))
+	require.NoError(t, partial.Upsert(&Tool{Name: "workerHost", Origin: "testproduct/tools.memql"}))
+	require.Contains(t, VerifyCapabilityToolsRegistered(partial.Has, nil), "workerHost")
 }

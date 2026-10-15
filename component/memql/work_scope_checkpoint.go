@@ -103,7 +103,18 @@ func scopeCheckpointWitness(subject map[string]any) (map[string]any, bool) {
 	if !ok || len(w) != 4 || (w["version"] != 1 && w["version"] != float64(1)) || stringField(w, "continuationId") == "" || stringField(w, "toolCallId") == "" || stringField(w, "requestHash") == "" {
 		return nil, false
 	}
-	return w, subject["scope"] == "observe" || subject["scope"] == "full"
+	scope := checkpointComputerScope(subject)
+	return w, scope == "observe" || scope == "full"
+}
+
+func checkpointComputerScope(subject map[string]any) string {
+	if stringField(subject, "sessionKind") != "" {
+		if stringField(subject, "scope") != "" {
+			return ""
+		}
+		return stringField(subject, "sessionScope")
+	}
+	return stringField(subject, "scope")
 }
 
 func scopeCheckpointMatches(run common.RunContext, subject map[string]any, checkpointID string, messages []common.ChatMessage) bool {
@@ -171,6 +182,9 @@ func scopeRequestMatches(run common.RunContext, args, subject map[string]any) bo
 	if _, typed := subject["computerPermission"]; typed {
 		return false
 	}
+	if stringField(args, "sessionKind") != stringField(subject, "sessionKind") {
+		return false
+	}
 	for key, expected := range map[string]string{"ownerUserId": run.OwnerUserId, "agentId": stringField(subject, "agentId")} {
 		if supplied, ok := args[key]; ok && BareShortId(fmt.Sprint(supplied)) != BareShortId(expected) {
 			return false
@@ -207,5 +221,5 @@ func scopeRequestMatches(run common.RunContext, args, subject map[string]any) bo
 	if len(storedLabels) == 0 {
 		storedLabels = map[string]string{}
 	}
-	return (scope == "observe" || scope == "full") && subject["scope"] == scope && strings.TrimSpace(stringField(args, "intent")) != "" && subject["intent"] == strings.TrimSpace(stringField(args, "intent")) && summary != "" && subject["summary"] == summary && reflect.DeepEqual(labels, storedLabels)
+	return (scope == "observe" || scope == "full") && checkpointComputerScope(subject) == scope && strings.TrimSpace(stringField(args, "intent")) != "" && subject["intent"] == strings.TrimSpace(stringField(args, "intent")) && summary != "" && subject["summary"] == summary && reflect.DeepEqual(labels, storedLabels)
 }

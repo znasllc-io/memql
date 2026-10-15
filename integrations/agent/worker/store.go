@@ -504,6 +504,13 @@ func approvedComputerScope(rows []map[string]any, req Request, now time.Time) st
 		if _, typed := subject["computerPermission"]; typed {
 			continue // A narrow receipt is never a broad run scope.
 		}
+		allowed := scopeString(subject["scope"])
+		if kind, explicit := subject["sessionKind"]; explicit {
+			if allowed != "" || !computerSessionAllows(scopeString(kind), req) {
+				continue
+			}
+			allowed = scopeString(subject["sessionScope"])
+		}
 		if work.ArtifactHash(subject) != scopeString(row["artifactHash"]) || memqlengine.BareShortId(scopeString(subject["agentId"])) != memqlengine.BareShortId(req.AgentId) {
 			continue
 		}
@@ -517,7 +524,6 @@ func approvedComputerScope(rows []map[string]any, req Request, now time.Time) st
 		if !matches {
 			continue
 		}
-		allowed := scopeString(subject["scope"])
 		if allowed == "full" {
 			return "full"
 		}
@@ -529,3 +535,16 @@ func approvedComputerScope(rows []map[string]any, req Request, now time.Time) st
 }
 
 func scopeString(v any) string { s, _ := v.(string); return s }
+
+func computerSessionAllows(kind string, req Request) bool {
+	switch kind {
+	case "desktop":
+		return req.Tool == "workerComputer"
+	case "file_write":
+		return req.Tool == "workerHost" && req.Action == "fs_write"
+	case "http":
+		return req.Tool == "workerHost" && req.Action == "http_fetch"
+	default:
+		return false
+	}
+}

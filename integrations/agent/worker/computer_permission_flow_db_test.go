@@ -105,13 +105,15 @@ func TestComputerPermissionDBFullApprovalAndForwardedListing(t *testing.T) {
 			require.NoError(t, err)
 			execute(engines[1], person, "query", "decideApproval", map[string]any{"approvalId": choice, "decision": "answered", "answer": map[string]any{"value": "laptop"}})
 			req := h.Request()
+			req.AgentId = "v1:agents:agent:" + memql.BareShortId(req.AgentId)
 			req.RunId = run
 			req.Args = map[string]any{"path": dir}
 			req.Action = "fs_list"
 			req.RequireLabels = map[string]string{"machineId": "machine"}
 			integration := NewIntegration(h.Origin(), h.Registry(), engines[0], slog.New(slog.NewTextHandler(io.Discard, nil)))
 			integration.ScopeRequester = authority[0].AskComputerScope
-			nodes, err := RequestScopeForTest(integration, ctx, map[string]any{"ownerUserId": owner, "agentId": req.AgentId, "intent": "List home", "requestedScope": "observe", "summary": "Read the selected directory", "requireLabels": map[string]any{"machineId": "machine"}, "operation": map[string]any{"tool": "workerHost", "action": "fs_list", "args": req.Args, "directory": dir}})
+			requestArgs := map[string]any{"ownerUserId": owner, "agentId": req.AgentId, "intent": "List home", "requestedScope": "observe", "summary": "Read the selected directory", "requireLabels": map[string]any{"machineId": "machine"}, "operation": map[string]any{"tool": "workerHost", "action": "fs_list", "args": req.Args, "directory": dir}}
+			nodes, err := RequestScopeForTest(integration, ctx, requestArgs)
 			require.NoError(t, err)
 			require.Len(t, nodes, 1)
 			var response map[string]any
@@ -140,11 +142,37 @@ func TestComputerPermissionDBFullApprovalAndForwardedListing(t *testing.T) {
 				require.NoError(t, err)
 				require.True(t, result.OK)
 				require.Equal(t, 3, calls)
+				// A new run after restart must correct a malformed model call without
+				// writing another approval, then reuse the original Always receipt.
+				freshRun := id.NewShortId()
+				execute(engines[1], write, "mutation", "createWorkRun", map[string]any{"runId": freshRun, "goalId": goal, "automationName": "permission-test", "templateFingerprint": "fixture", "mode": "live", "status": "running", "startedAt": time.Now().UTC().Format(time.RFC3339Nano)})
+				rc.RunId, req.RunId = freshRun, freshRun
+				// Recovery receives the wire form of the same assistant ID.
+				req.AgentId = memql.BareShortId(req.AgentId)
+				requestArgs["agentId"] = req.AgentId
+				ctx = common.ContextWithRun(person, rc)
+				operation := requestArgs["operation"]
+				delete(requestArgs, "operation")
+				_, err = RequestScopeForTest(integration, ctx, requestArgs)
+				require.ErrorContains(t, err, "operation")
+				require.Empty(t, execute(engines[1], person, "query", "workComputerScopesForOwnerRun", map[string]any{"runId": freshRun}))
+				requestArgs["operation"] = operation
+				nodes, err = RequestScopeForTest(integration, ctx, requestArgs)
+				require.NoError(t, err)
+				require.Len(t, nodes, 1)
+				require.NoError(t, json.Unmarshal(nodes[0].Payload, &response))
+				require.Equal(t, "approved", response["status"])
+				require.Equal(t, memql.BareShortId(approval.(string)), memql.BareShortId(response["approvalId"].(string)))
+				require.Empty(t, execute(engines[1], person, "query", "workComputerScopesForOwnerRun", map[string]any{"runId": freshRun}))
+				result, err = h.Origin().Dispatch(ctx, req)
+				require.NoError(t, err)
+				require.True(t, result.OK)
+				require.Equal(t, 4, calls)
 				execute(engines[1], person, "query", "revokeComputerPermission", map[string]any{"permissionId": approval})
 				result, err = h.Origin().Dispatch(ctx, req)
 				require.NoError(t, err)
 				require.False(t, result.OK)
-				require.Equal(t, 3, calls)
+				require.Equal(t, 4, calls)
 			}
 		})
 	}

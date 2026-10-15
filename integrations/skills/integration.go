@@ -257,6 +257,17 @@ func (s *capabilitySurface) Call(ctx context.Context, req Request, action string
 	}
 	nodes, err := s.handler(ctx, s.envelope(req, action, args), 1)
 	if err != nil {
+		// Worker builtins fail the automation step for a refused/failed effect,
+		// while retaining its receipt for native compositions. A script runner
+		// must still recognize an absent remote file before its first upload.
+		// Only that explicit failed worker envelope is a result; a transport
+		// error, malformed receipt or success-plus-error keeps the error.
+		if s.name == SurfaceMachine && len(nodes) == 1 && nodes[0].Concept == "integration:worker:result" {
+			var body map[string]any
+			if json.Unmarshal(nodes[0].Payload, &body) == nil && body["ok"] == false && asString(body["errorCode"]) != "" {
+				return s.read(body), nil
+			}
+		}
 		return CallResult{}, err
 	}
 	if len(nodes) == 0 {
