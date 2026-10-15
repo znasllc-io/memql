@@ -66,20 +66,25 @@ to finish in (see [What stopping does](#what-stopping-does)).
 
 ## Choose sharing once, in Fleet
 
-Open **Fleet → the machine → Sharing**. Turn on **Share models**, then search
-under **Users and groups** to add recipients. Each change saves immediately.
+Open **Fleet → the machine → Settings → Sharing**. Turn on **Share models**, then
+open the search field under **Users and groups**. The picker shows five eligible
+recipients at a time; **Load more** reveals five more, and search covers the full
+directory. Select or unselect users and groups across searches, then use **+**
+to add the selection together. One counter shows how many are selected; the
+add button is disabled when none are selected.
 Turn sharing off to clear the recipients and keep inference private.
 Only the person who enrolled the machine can change this audience; cluster
 administration cannot volunteer somebody else's hardware.
 
-Each recipient row shows its active calls and icon controls to pause, resume or
-remove sharing. Pausing blocks new calls through that grant after any wait for
+Each recipient card shows its active calls and icon controls to pause, resume or
+remove sharing. These controls save immediately; opening a card offers an edit
+with Save and Cancel. Pausing blocks new calls through that grant after any wait for
 capacity; a call already running finishes. A recipient with another active
 direct or group grant can still use the models. Remove an entry to delete that
 grant; it can be searched for and added again.
 
 Counts update through the machine's live registration feed. A call admitted
-through more than one grant appears in each matching row, so the rows are not
+through more than one grant appears in each matching card, so the counts are not
 additive. Counts contain no prompts or responses. A dash means the measurement
 is unavailable; disconnected machines show zero. Failed changes leave the
 saved list intact and offer a retry.
