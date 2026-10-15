@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useSyncExternalStore } from "react";
+import { useCallback, useEffect, useMemo, useSyncExternalStore } from "react";
 import {
   LiveCollection,
   type Connection,
@@ -46,10 +46,11 @@ const LINGER_MS = 5_000;
  * `degraded` and `disconnected` are the two states where the rows on screen
  * are the last known answer, which is the only condition under which a manual
  * re-read is worth offering -- on a healthy feed a refresh control quietly
- * contradicts the thing it sits next to.
+ * contradicts the thing it sits next to. A failed initial seed has no rows
+ * to degrade and can report `live` with an error; that also needs recovery.
  */
-export function feedIsBehind(state: LiveState): boolean {
-  return state === "degraded" || state === "disconnected";
+export function feedIsBehind(state: LiveState, error = ""): boolean {
+  return error !== "" || state === "degraded" || state === "disconnected";
 }
 
 export interface LiveCollectionHandle<T> {
@@ -113,9 +114,10 @@ export function useLiveCollection<T>(
     () => (collection ? collection.snapshot : (EMPTY as LiveSnapshot<T>)),
   );
 
+  const reseed = useCallback(() => collection?.reseed(), [collection]);
   return {
     source: collection,
     snapshot,
-    reseed: () => collection?.reseed(),
+    reseed,
   };
 }

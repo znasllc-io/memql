@@ -77,7 +77,7 @@ pipeline:
       - component/server
       - component/sitehealth
       - component/sitetraffic
-      - component/worker/fleetcatalog
+      - component/worker
       - integrations/compose
       - integrations/embedding
       - integrations/knowledge

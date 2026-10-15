@@ -71,7 +71,7 @@ func TestIndependentGraphReadersProjectTheSameOwnerCatalog(t *testing.T) {
 		t.Fatal("independent readers disagree")
 	}
 }
-func TestSharedGraphCatalogRequiresBothConsents(t *testing.T) {
+func TestSharedGraphCatalogUsesOwnerSharingOnly(t *testing.T) {
 	now := time.Now().UTC()
 	var rows []any
 	for i, consent := range [][2]string{{"cluster", "cluster"}, {"cluster", "owner"}, {"private", "cluster"}, {"private", "owner"}} {
@@ -82,7 +82,7 @@ func TestSharedGraphCatalogRequiresBothConsents(t *testing.T) {
 	}
 	r := &Reader{Store: &EngineStore{Engine: dualFixture{t: t, all: rows}}, Now: func() time.Time { return now }}
 	got, err := r.Catalog(context.Background(), "")
-	if err != nil || len(got) != 1 || got[0].ModelId != "model0" {
+	if err != nil || len(got) != 2 || got[0].ModelId != "model0" || got[1].ModelId != "model1" {
 		t.Fatalf("shared catalog = %+v, %v", got, err)
 	}
 }
@@ -149,14 +149,14 @@ func TestAPersonsCatalogIncludesMachinesSharedWithThem(t *testing.T) {
 	for _, m := range got {
 		seen[m.ModelId] = true
 	}
-	for _, want := range []string{"model-mine", "model-with-alice", "model-via-group", "model-everyone"} {
+	for _, want := range []string{"model-mine", "model-with-alice", "model-via-group", "model-everyone", "model-not-agreed"} {
 		if !seen[want] {
 			t.Fatalf("catalog %v is missing %s", seen, want)
 		}
 	}
-	for _, leak := range []string{"model-with-carol", "model-not-agreed"} {
+	for _, leak := range []string{"model-with-carol"} {
 		if seen[leak] {
-			t.Fatalf("%s leaked into alice's catalog: lent to somebody else, or the machine has not agreed", leak)
+			t.Fatalf("%s leaked into alice's catalog: lent to somebody else", leak)
 		}
 	}
 

@@ -2,7 +2,7 @@ import type { ReactNode } from "react";
 import { Minus, ShieldAlert, ShieldCheck, ThumbsDown, ThumbsUp } from "lucide-react";
 
 import { Button, Caption, InlineSkeleton, Notice } from "../../kit";
-import { InfoDetail } from "../../kit/InfoDetail";
+import { PageHelp } from "../../kit/pageHelp";
 import {
   anyAxis,
   dislikeSummary,
@@ -174,7 +174,7 @@ export function VerdictBelow({
         <div id={`${id}-question`} className="os-nexus-dislike" role="group" aria-label="What was wrong?">
           <div className="os-nexus-dislike-ask">
             <span>What was wrong?</span>
-            <InfoDetail title="What was wrong?">
+            <PageHelp title="What was wrong?">
               <p>
                 These are the three things the AI Fluency framework asks you to judge in work an AI
                 did. Naming the one that was wrong tells the next attempt where to look.
@@ -191,7 +191,7 @@ export function VerdictBelow({
                 <strong>The behaviour</strong> -- how it acted while it worked: its tone, its pace and
                 whether it followed your instructions. The framework calls this the performance.
               </p>
-            </InfoDetail>
+            </PageHelp>
           </div>
           <div className="os-nexus-dislike-axes">
             {AXES.map((axis) => (

@@ -2,7 +2,7 @@ import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 
 import { ActionBar, type Act } from "../../../kit/ActionBar";
 import { ContentSkeleton } from "../../../kit/ContentSkeleton";
-import { InfoDetail } from "../../../kit/InfoDetail";
+import { PageHelp } from "../../../kit/pageHelp";
 import { Notice, AutoRefresh, Select } from "../../../kit";
 import { ActivityTarget } from "../../../kit/SemanticActivity";
 import { feedIsBehind } from "../../../live/useLiveCollection";
@@ -82,11 +82,11 @@ export function MachinesTab({ header }: { header: (actions: ReactNode, meta?: Re
         <ActivityTarget target="fleet:machine-routing" className="fleet-routing-machines">
           {header(
             <>
-              <InfoDetail title="How a machine is chosen">
+              <PageHelp title="How a machine is chosen">
                 <p>Required labels filter which of your machines can take a call. Preferred labels and the strategy order them. A refusal may try the next matching machine only before a call starts; a started call is never replayed.</p>
                 <p>Routes choose the source. The model order ranks your local models when a route reaches your machines.</p>
-              </InfoDetail>
-              {feedIsBehind(state.liveState) ? <AutoRefresh onRefresh={state.reseed} /> : null}
+              </PageHelp>
+              {feedIsBehind(state.liveState, state.error) ? <AutoRefresh onRefresh={state.reseed} /> : null}
             </>,
           )}
           {loading ? (
@@ -99,12 +99,12 @@ export function MachinesTab({ header }: { header: (actions: ReactNode, meta?: Re
                 <details className="fleet-routing-stage">
                   <summary><small>1 · Eligibility</small><strong>Required labels</strong><span>{chipsFromMap(draft.requireLabels).join(", ") || "Any eligible machine"}</span></summary>
                   <p className="os-caption">Every label must match exactly.</p>
-                  <MapEditor value={draft.requireLabels} onChange={(requireLabels) => edit({ requireLabels })} busy={state.saving} label="Required labels" idPrefix="fleet-require" tone="neutral" />
+                  <MapEditor value={draft.requireLabels} onChange={(requireLabels) => edit({ requireLabels })} busy={state.saving} label="Required labels" idPrefix="fleet-require" />
                 </details>
                 <details className="fleet-routing-stage">
                   <summary><small>2 · Preference</small><strong>Preferred labels</strong><span>{chipsFromMap(draft.preferLabels).join(", ") || "No preference"}</span></summary>
                   <p className="os-caption">Matching labels move a machine up; they never rule one out.</p>
-                  <MapEditor value={draft.preferLabels} onChange={(preferLabels) => edit({ preferLabels })} busy={state.saving} label="Preferred labels" idPrefix="fleet-prefer" tone="neutral" />
+                  <MapEditor value={draft.preferLabels} onChange={(preferLabels) => edit({ preferLabels })} busy={state.saving} label="Preferred labels" idPrefix="fleet-prefer" />
                 </details>
                 <details className="fleet-routing-stage">
                   <summary><small>3 · Order</small><strong>Strategy</strong><span>{strategyLabel(draft.strategy)}</span></summary>

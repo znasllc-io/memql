@@ -259,6 +259,8 @@ readonly MODULE_PATH="github.com/znasllc-io/memql"
 # untagged files (this test, its TestMain, and the hop gates that drive
 # in-process fakes) move from go-checks to db-tests; its live-cluster files
 # stay `//go:build clustere2e` and run in neither lane, exactly as before.
+# Worker activity persistence exercises two engines and reconnect fencing.
+# Include the stream owner as well as its fleet catalog in the DB lane.
 readonly DB_GATED_TREES=(
     component/filebackups
 	"app"
@@ -279,7 +281,7 @@ readonly DB_GATED_TREES=(
 	"component/server"
 	"component/sitehealth"
 	"component/sitetraffic"
-	"component/worker/fleetcatalog"
+	"component/worker"
 	"integrations/compose"
 	"integrations/embedding"
 	"integrations/knowledge"

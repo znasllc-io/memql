@@ -9117,6 +9117,7 @@
         "rttAt",
         "rttMs",
         "sharing",
+        "sharingActivity",
         "version"
       ],
       "required": [

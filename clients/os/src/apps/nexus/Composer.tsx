@@ -5,7 +5,7 @@ import { Caption, ContentSkeleton, Dialog, Field, Input, Notice, Select } from "
 import { ActionBar } from "../../kit/ActionBar";
 import { AddButton } from "../../kit/AddButton";
 import { IconButton } from "../../kit/IconButton";
-import { InfoDetail } from "../../kit/InfoDetail";
+import { PageHelp } from "../../kit/pageHelp";
 import type { Axes } from "./feedback";
 import type { ComposerDraft, InputRow } from "./versions";
 import { OVERRIDE_EFFORTS, OVERRIDE_LEVELS, axesPhrase, effortWord, levelWord } from "./words";
@@ -200,13 +200,13 @@ export function Composer({
                   </option>
                 ))}
               </Select>
-              <InfoDetail title="Effort">
+              <PageHelp title="Effort">
                 <p>
                   How hard an app works on the step -- Claude Code or Codex, when one answers it. A step a
                   model answers directly has no such setting and ignores it.
                 </p>
                 <p>Left alone, the level decides.</p>
-              </InfoDetail>
+              </PageHelp>
             </Field>
           </div>
 
@@ -219,7 +219,7 @@ export function Composer({
               placeholder="The level decides"
               onChange={(model) => onDraft({ ...draft, model })}
             />
-            <InfoDetail title="Model">
+            <PageHelp title="Model">
               <p>Pins one place to answer the step instead of letting the level choose. Any one of:</p>
               <p>
                 <code>chat54Mini</code> -- a provider by its name.
@@ -231,7 +231,7 @@ export function Composer({
                 <code>app:claude-code:opus</code> -- an app, and the model it should use.
               </p>
               <p>Left empty, the level decides.</p>
-            </InfoDetail>
+            </PageHelp>
           </Field>
 
           <div className="os-form-field">
@@ -265,13 +265,13 @@ export function Composer({
       <div className="os-form-field os-nexus-inputs">
         <div className="os-nexus-inputs-head">
           <span className="os-form-field-label">Inputs</span>
-          <InfoDetail title="Inputs">
+          <PageHelp title="Inputs">
             <p>Arguments to use instead of the step's own, by name. An input you leave alone keeps its value.</p>
             <p>
               A value is read as JSON when it looks like JSON -- <code>42</code>, <code>true</code>,{" "}
               <code>["a", "b"]</code> -- and as text otherwise.
             </p>
-          </InfoDetail>
+          </PageHelp>
           <AddButton
             label="Add an input"
             onClick={() =>

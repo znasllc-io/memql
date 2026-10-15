@@ -33,6 +33,7 @@ package worker
 import (
 	"context"
 	"testing"
+	"testing/synctest"
 	"time"
 
 	memqlv1 "github.com/znasllc-io/memql/component/grpc/gen"
@@ -54,10 +55,9 @@ const (
 	sharedHopCaller = "v1:identity:user:ursula"
 )
 
-// newSharedHop stands up both replicas. `shareMode` is the OWNER's half of the
-// consent and `serve` the machine's half, so a test can withhold either one
-// and see which refusal it gets.
-func newSharedHop(t *testing.T, shareMode string, cockpitServes bool, withStore bool) *sharedHop {
+// newSharedHop stands up two replicas with the owner's saved audience. The
+// receiver has no originating stream state and rechecks the stored sharing.
+func newSharedHop(t *testing.T, shareMode string, withStore bool) *sharedHop {
 	t.Helper()
 
 	regB := workerservice.NewRegistry(testLogger(), fleetNow)
@@ -85,10 +85,6 @@ func newSharedHop(t *testing.T, shareMode string, cockpitServes bool, withStore 
 	cand.Capabilities = []string{workerservice.CapabilityHeadless, workerservice.ModelCapability}
 	cand.Labels = map[string]string{workerservice.ModelLabel(sharedHopModel): "1"}
 	cand.SharingMode = shareMode
-	cand.InferenceServe = ""
-	if cockpitServes {
-		cand.InferenceServe = "cluster"
-	}
 
 	// THE OWNED READ ANSWERS NOTHING FOR THE CALLER, which is the whole
 	// premise: `owner` scopes fakeFleet exactly as workersForOwner's filter
@@ -121,9 +117,9 @@ func (h *sharedHop) call(t *testing.T, actingUserId string) (ModelForwardOutcome
 }
 
 func TestASharedMachineServesAForeignCallerAcrossTheHop(t *testing.T) {
-	// THE WHOLE OF H-2. Both consents given, the machine is on replica B, the
+	// THE WHOLE OF H-2. The owner shared it, the machine is on replica B, the
 	// turn is on replica A, and the caller does not own it.
-	h := newSharedHop(t, "cluster", true, true)
+	h := newSharedHop(t, "cluster", true)
 
 	out, err := h.call(t, h.caller)
 	if err != nil {
@@ -143,7 +139,7 @@ func TestAPrivateMachineStillRefusesAForeignCallerAcrossTheHop(t *testing.T) {
 	// THE NEGATIVE CONTROL FOR THE TEST ABOVE. Widening the receiver to admit
 	// shared machines is only worth having if it did not admit everything --
 	// and a widening that did would pass the first test and nothing else.
-	h := newSharedHop(t, "owner", true, true)
+	h := newSharedHop(t, "owner", true)
 
 	out, err := h.call(t, h.caller)
 	if err == nil && !out.RefusedBeforeStart {
@@ -155,7 +151,7 @@ func TestTheOwnersOwnCallStillReachesTheirMachineAcrossTheHop(t *testing.T) {
 	// THE POSITIVE CONTROL. The owned arm runs first and unconditionally, so
 	// a machine the caller owns is admitted without the cross-owner read
 	// happening at all -- including one they have never shared.
-	h := newSharedHop(t, "owner", false, true)
+	h := newSharedHop(t, "owner", true)
 
 	out, err := h.call(t, h.owner)
 	if err != nil {
@@ -172,7 +168,7 @@ func TestAReplicaWithNoCrossOwnerReadDegradesToOwnerOnly(t *testing.T) {
 	// did before D10: only owned machines. Admitting on a weaker check than
 	// the one this exists to perform is the alternative, and it is the wrong
 	// one.
-	h := newSharedHop(t, "cluster", true, false)
+	h := newSharedHop(t, "cluster", false)
 
 	out, err := h.call(t, h.caller)
 	if err == nil && !out.RefusedBeforeStart {
@@ -180,16 +176,11 @@ func TestAReplicaWithNoCrossOwnerReadDegradesToOwnerOnly(t *testing.T) {
 	}
 }
 
-func TestBothConsentsAreStillNeededAcrossTheHop(t *testing.T) {
-	// THE MACHINE'S OWN HALF. The owner has offered it and the cockpit has
-	// not, which is the state a person is most likely to be in: they pressed
-	// the button on the Fleet page and have not touched policy.yaml. The
-	// receiver must not treat the owner's half as the whole consent.
-	h := newSharedHop(t, "cluster", false, true)
-
+func TestOwnerShareWorksWithoutMachineConfigurationAcrossTheHop(t *testing.T) {
+	h := newSharedHop(t, "cluster", true)
 	out, err := h.call(t, h.caller)
-	if err == nil && !out.RefusedBeforeStart {
-		t.Fatal("both halves of the consent are needed, on the receiver as well as in the router")
+	if err != nil || out.RefusedBeforeStart || out.ErrorCode != "" {
+		t.Fatalf("owner share must work across replicas: %v %+v", err, out)
 	}
 }
 
@@ -206,7 +197,7 @@ func TestBothConsentsAreStillNeededAcrossTheHop(t *testing.T) {
 // the receiver's group reads answered by groupsOf.
 func newPeopleHop(t *testing.T, userIds, groupIds []string, groupsOf workerservice.GroupResolver) *sharedHop {
 	t.Helper()
-	h := newSharedHop(t, workerservice.SharingModePeople, true, true)
+	h := newSharedHop(t, workerservice.SharingModePeople, true)
 	store, ok := h.link.handler.store.(*sharedFleet)
 	if !ok {
 		t.Fatal("the hop's receiver has no cross-owner read")
@@ -260,15 +251,15 @@ func TestSomebodyNotOnTheListIsRefusedAcrossTheHop(t *testing.T) {
 	}
 }
 
-func TestAListedPersonStillNeedsTheMachineToAgreeAcrossTheHop(t *testing.T) {
+func TestTakingBackSharingIsRecheckedAcrossTheHop(t *testing.T) {
 	h := newPeopleHop(t, []string{sharedHopCaller}, nil, nil)
 	store := h.link.handler.store.(*sharedFleet)
 	for i := range store.all {
-		store.all[i].InferenceServe = ""
+		store.all[i].SharingMode = workerservice.SharingModeOwner
 	}
 	out, err := h.call(t, h.caller)
 	if err == nil && !out.RefusedBeforeStart {
-		t.Fatal("the cockpit's half is still required for a people share, on the receiver too")
+		t.Fatal("the receiving replica must refuse a share taken back after planning")
 	}
 }
 
@@ -314,4 +305,94 @@ func TestOwnerAttributionToleratesTheBareCanonicalSplit(t *testing.T) {
 	if got := machineOwnerAttribution(cand, "olivia"); got != "" {
 		t.Fatalf("the bare and canonical forms of one subject must compare equal, got %q", got)
 	}
+}
+
+func TestRecipientPauseAndResumeAreEnforcedByTheReceivingReplica(t *testing.T) {
+	h := newPeopleHop(t, []string{sharedHopCaller}, nil, nil)
+	store := h.link.handler.store.(*sharedFleet)
+	store.all[0].PausedUserIds = []string{sharedHopCaller}
+	out, err := h.call(t, h.caller)
+	if err == nil && !out.RefusedBeforeStart {
+		t.Fatal("a paused grant reached the machine across the hop")
+	}
+	store.all[0].PausedUserIds = nil
+	out, err = h.call(t, h.caller)
+	if err != nil || out.RefusedBeforeStart || out.ErrorCode != "" {
+		t.Fatalf("resuming the listed recipient did not restore inference: %v %+v", err, out)
+	}
+}
+
+func TestAPauseLetsTheRunningCallFinishButRefusesTheNextCallAcrossTheHop(t *testing.T) {
+	h := newPeopleHop(t, []string{sharedHopCaller}, nil, nil)
+	started, release := make(chan workerservice.SharingSubjects, 1), make(chan struct{})
+	w := h.link.handler.registry.WorkerById("studio")
+	w.SetModelCallFunc(func(ctx context.Context, req workerservice.ModelCallRequest) (*workerservice.ModelCallHandle, error) {
+		handle, _, finish := workerservice.NewModelCallLoopback(req, func(string) {})
+		started <- req.SharingSubjects
+		go func() {
+			select {
+			case <-release:
+			case <-ctx.Done():
+			}
+			finish(workerservice.ModelCallOutcome{FinishReason: workerservice.ModelFinishStop, Content: "completed"})
+		}()
+		return handle, nil
+	})
+	result := make(chan ModelForwardOutcome, 1)
+	go func() { out, _ := h.call(t, h.caller); result <- out }()
+	var subjects workerservice.SharingSubjects
+	select {
+	case subjects = <-started:
+	case <-time.After(3 * time.Second):
+		t.Fatal("call never reached the receiving machine")
+	}
+	if len(subjects.UserIds) != 1 {
+		t.Fatalf("the receiving replica lost count attribution: %+v", subjects)
+	}
+	store := h.link.handler.store.(*sharedFleet)
+	store.all[0].PausedUserIds = []string{sharedHopCaller}
+	next, err := h.call(t, h.caller)
+	if err == nil && !next.RefusedBeforeStart {
+		t.Fatal("the next call was not refused")
+	}
+	close(release)
+	var finished ModelForwardOutcome
+	select {
+	case finished = <-result:
+	case <-time.After(3 * time.Second):
+		t.Fatal("running call did not finish after pause")
+	}
+	if finished.RefusedBeforeStart || finished.ErrorCode != "" || finished.End.GetContent() != "completed" {
+		t.Fatalf("pause interrupted ongoing work: %+v", finished)
+	}
+}
+
+// The slot wait is a real FIFO wait on the receiving worker, after the caller
+// has already planned this machine. No clock sleep guesses when it is queued.
+func TestARecipientPausedWhileWaitingForCapacityCannotStartAcrossTheHop(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		h := newPeopleHop(t, []string{sharedHopCaller}, nil, nil)
+		w := h.link.handler.registry.WorkerById("studio")
+		for i := 0; i < 2; i++ {
+			if err := w.Acquire(context.Background(), workerservice.ModelCapability); err != nil {
+				t.Fatal(err)
+			}
+		}
+		result := make(chan ModelForwardOutcome, 1)
+		go func() { out, _ := h.call(t, h.caller); result <- out }()
+		synctest.Wait()
+		select {
+		case <-result:
+			t.Fatal("call did not wait for capacity")
+		default:
+		}
+		h.link.handler.store.(*sharedFleet).all[0].PausedUserIds = []string{sharedHopCaller}
+		w.Release(workerservice.ModelCapability)
+		w.Release(workerservice.ModelCapability)
+		synctest.Wait()
+		out := <-result
+		if !out.RefusedBeforeStart || out.ErrorCode != "registration_refused" {
+			t.Fatalf("a queued call started after its grant was paused: %+v", out)
+		}
+	})
 }

@@ -302,7 +302,7 @@ describe("one run's recording", () => {
     expect(screen.getByText(/The saved transcript is shortened/)).toBeTruthy();
   });
 
-  it("does NOT poll a finished run, and offers to re-read it instead", async () => {
+  it("keeps a completed session current without polling", async () => {
     vi.useFakeTimers();
     try {
       const connection = withDetail({ status: "ended" });
@@ -317,51 +317,22 @@ describe("one run's recording", () => {
         vi.advanceTimersByTime(30_000);
       });
       expect(connection.query.appSessionById).toHaveBeenCalledTimes(1);
-      expect(screen.getByText(/Last updated/)).toBeTruthy();
+      expect(screen.getByText("Updates automatically.")).toBeTruthy();
       expect(screen.queryByRole("button", { name: "Refresh app session" })).toBeNull();
     } finally {
       vi.useRealTimers();
     }
   });
 
-  it("POLLS a running one, and stops the moment it turns terminal", async () => {
-    vi.useFakeTimers();
-    try {
-      const connection = withDetail({ status: "running", endedAt: "" });
-      mount(connection);
-      await act(async () => {});
-      await click(screen.getByRole("button", { name: /Claude Code/ }));
-      await act(async () => {});
-      expect(connection.query.appSessionById).toHaveBeenCalledTimes(1);
-
-      await act(async () => {
-        vi.advanceTimersByTime(3000);
-      });
-      await act(async () => {});
-      expect(connection.query.appSessionById).toHaveBeenCalledTimes(2);
-
-      // The run ends: the next answer is terminal, and the timer stops.
-      connection.query.appSessionById = vi.fn(async () =>
-        (await import("./harness")).rowsResult([
-          appSessionRow({
-            id: "v1:worker:appSession:a",
-            status: "ended",
-            sessionRunId: "v1:work:run:rec",
-            recordedSteps: 12,
-          }),
-        ]),
-      );
-      await act(async () => {
-        vi.advanceTimersByTime(3000);
-      });
-      await act(async () => {});
-      const afterEnd = connection.query.appSessionById.mock.calls.length;
-      await act(async () => {
-        vi.advanceTimersByTime(30_000);
-      });
-      expect(connection.query.appSessionById.mock.calls.length).toBe(afterEnd);
-    } finally {
-      vi.useRealTimers();
-    }
+  it("folds a running session's completion and transcript without polling", async () => {
+    const connection = withDetail({ status: "running", endedAt: "" });
+    await openRun(connection);
+    expect(connection.query.appSessionById).toHaveBeenCalledTimes(1);
+    await act(async () => connection.subscriptions.emit("v1:worker:appSession", appSessionRow({
+      id: "v1:worker:appSession:a", status: "ended", prompt: "Finished through the broadcast",
+      sessionRunId: "v1:work:run:rec", recordedSteps: 12,
+    })));
+    expect(screen.getByText("Finished through the broadcast")).toBeTruthy();
+    expect(connection.query.appSessionById).toHaveBeenCalledTimes(1);
   });
 });

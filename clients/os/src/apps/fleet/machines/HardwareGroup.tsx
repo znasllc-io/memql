@@ -1,5 +1,5 @@
 import { Monitor } from "lucide-react";
-import { EmptyState, Chip, Chips, Fact, Facts, Subhead } from "../../../kit";
+import { CopyValue, EmptyState, Fact, Facts, Subhead } from "../../../kit";
 import { formatBytes, formatFreshness } from "../../../kit/format";
 import {
   acceleratorSentence,
@@ -45,6 +45,7 @@ export function HardwareGroup({
   machineClass,
   usableBytes,
   now,
+  heading = true,
 }: {
   machine: MachineRow;
   /** Computed by the engine and stored nowhere: "" when the cockpit has not
@@ -52,13 +53,14 @@ export function HardwareGroup({
   machineClass: string;
   usableBytes: number;
   now: Date;
+  heading?: boolean;
 }) {
   const hw = machine.hardware;
 
   if (!hw.present) {
     return (
       <div className="os-fleet-hardware">
-        <Subhead>Hardware</Subhead>
+        {heading ? <Subhead>Hardware</Subhead> : null}
         <EmptyState icon={Monitor} title="Hardware not reported">{NOT_REPORTED}</EmptyState>
       </div>
     );
@@ -68,45 +70,35 @@ export function HardwareGroup({
 
   return (
     <div className="os-fleet-hardware">
-      <Subhead>Hardware</Subhead>
+      {heading ? <Subhead>Hardware</Subhead> : null}
 
-      <p className="os-fleet-class" data-unsupported={unsupported || undefined}>
-        {classSentence(machineClass, usableBytes)}
-      </p>
+      {machineClass ? <p className="os-fleet-class" data-unsupported={unsupported || undefined}>
+        <CopyValue value={classSentence(machineClass, usableBytes)} label="Machine class" presentation="row" />
+      </p> : null}
       {unsupported ? <p className="os-caption">{FLOOR_SENTENCE}</p> : null}
 
       <Facts>
-        <Fact label="Chip" value={hw.chip} />
-        <Fact label="Memory" value={hw.memoryBytes > 0 ? formatBytes(hw.memoryBytes) : ""} />
-        <Fact label="Accelerator" value={acceleratorSentence(hw)} />
-        <Fact label="Cores" value={hw.cpuCores > 0 ? String(hw.cpuCores) : ""} />
-        <Fact label="System" value={hw.osVersion} mono />
-        <Fact label="Free disk" value={hw.diskFreeBytes > 0 ? formatBytes(hw.diskFreeBytes) : ""} />
+        <Fact label="Chip" value={hw.chip} copyValue={hw.chip} />
+        <Fact label="Memory" value={hw.memoryBytes > 0 ? formatBytes(hw.memoryBytes) : ""} copyValue={hw.memoryBytes > 0 ? formatBytes(hw.memoryBytes) : undefined} />
+        <Fact label="Accelerator" value={acceleratorSentence(hw)} copyValue={acceleratorSentence(hw)} />
+        <Fact label="Cores" value={hw.cpuCores > 0 ? String(hw.cpuCores) : ""} copyValue={hw.cpuCores > 0 ? String(hw.cpuCores) : undefined} />
+        <Fact label="System" value={hw.osVersion} copyValue={hw.osVersion} />
+        <Fact label="Free disk" value={hw.diskFreeBytes > 0 ? formatBytes(hw.diskFreeBytes) : ""} copyValue={hw.diskFreeBytes > 0 ? formatBytes(hw.diskFreeBytes) : undefined} />
         <Fact
           label="Reported"
           value={formatFreshness(hw.reportedAt, now)}
           title={hw.reportedAt || undefined}
+          copyValue={hw.reportedAt}
         />
       </Facts>
 
-      <RuntimeChips runtimes={hw.runtimes} />
+      <RuntimeFacts runtimes={hw.runtimes} />
     </div>
   );
 }
 
-/**
- * The runtimes, as chips.
- *
- * CHIPS RATHER THAN A FACT, because a runtime is a THING THE MACHINE HAS and
- * the list grows -- a fact row with a comma-joined value reads as one value
- * that happens to contain commas, and stops being scannable at three.
- *
- * A runtime with no version shows its name alone. The version is
- * operator-facing detail the machine happened not to state, and a "(unknown)"
- * beside it would spend a reader's attention on an absence that decides
- * nothing.
- */
-function RuntimeChips({ runtimes }: { runtimes: { name: string; version: string }[] }) {
+/** Runtime names stay individually readable and copy as one line per runtime. */
+function RuntimeFacts({ runtimes }: { runtimes: { name: string; version: string }[] }) {
   // NOTHING, and rule 7 is why. The Models group below already says a machine
   // with no runtime cannot serve a model, and says how to install one -- so a
   // sentence here would be the same fact twice on one screen, and the browser
@@ -118,13 +110,12 @@ function RuntimeChips({ runtimes }: { runtimes: { name: string; version: string 
   // owns the act.
   if (runtimes.length === 0) return null;
   return (
-    <Chips label="Runtimes">
-      {runtimes.map((r) => (
-        <Chip key={r.name} tone="muted">
+    <Facts><Fact label="Runtimes" copyValue={runtimes.map(r => [runtimeLabel(r.name), r.version].filter(Boolean).join(" ")).join("\n")}
+      value={<span className="fleet-details-runtimes">{runtimes.map((r) => (
+        <span key={r.name}>
           {runtimeLabel(r.name)}
           {r.version ? <span className="os-fleet-runtime-version">{r.version}</span> : null}
-        </Chip>
-      ))}
-    </Chips>
+        </span>
+      ))}</span>} /></Facts>
   );
 }

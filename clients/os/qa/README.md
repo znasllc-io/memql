@@ -43,7 +43,7 @@ what says the page has not become a wall of advisories), or `overview`,
 `origins-silent`, `origins-mixed`, `origins-reporting` (Data origins), or
 `mesh-healthy`, `mesh-island`, `mesh-empty`, `mesh-node-bff`, `mesh-node-edge`,
 `mesh-node-identity`, `mesh-node-unreported` (Cluster > Mesh), or
-`sharing-owner`, `sharing-people`, `sharing-waiting`, `sharing-everyone`,
+`sharing-owner`, `sharing-people`, `sharing-legacy-descriptor`, `sharing-everyone`,
 `sharing-viewer`, `share-dialog`, `share-dialog-admin`, `share-dialog-empty`,
 `share-dialog-refused` (a machine's Sharing view and its dialog), or
 `nexus-procedure-evidence`, `nexus-procedure-overridden`,
@@ -132,17 +132,20 @@ behind "and 1 other", and broke a node id at its hyphen across two lines; a
 node with no report was dated "Report written"; identity's panel was titled
 "What it hears"; and a three-hour silence read "180 minutes".
 
-The `sharing-*` and `share-dialog*` views are a machine's Sharing view and
-the dialog behind its one act (epic memql#5344). `sharing-people` is the one to
-read first: names, both consents given, and the week's split ledger line;
-`sharing-waiting` is the same share with the machine's own consent missing, and
-`sharing-viewer` is somebody else's machine, which is counted rather than named.
-The dialog views render the dialog directly and script the one click a view
-needs; `&modal=0` draws it in the page for a capture tool that does not paint
-the top layer (a one-shot `--headless=new --screenshot` does paint it).
-`&arrow=N` arrows N times through the results from the search: take
-`share-dialog-admin&arrow=1` and the first option must be highlighted AND in
-view (the list is its options' offsetParent only while it is positioned).
+The `sharing-*` views exercise the inline Sharing editor: saved audiences,
+private machines, directory failures and non-owner access. `sharing-legacy-descriptor`
+verifies that an older machine descriptor does not block the saved audience.
+The `share-dialog*` fixture names are retained for their picker scenarios; they
+now render the inline editor. `fleet-equipment-sharing-people` exercises direct
+add/pause/resume/remove actions. `window.fleetQa.activity(n)` broadcasts changing
+recipient counts, including while paused. Check the divider, keyboard search,
+removing/re-adding the last recipient and refusal/retry at desktop and phone
+widths in every theme and mode.
+
+The `feedback` view shows information, warning and error notices, an actionable
+retry, domain errors and a removed-machine status. Check `theme=graphite`,
+`cobalt` and `vellum`, light/dark modes, and desktop/phone widths. Tone rails
+and message edges must stay straight; text wraps and keyboard retry works.
 
 Their first rendered pass found what 447 green cases could not: the search box
 drew about a hundred pixels tall, because `.os-input` is `flex: 1 1 12ch` and
@@ -151,7 +154,8 @@ machine told its owner to edit `policy.yaml` for a share they had not chosen.
 The review's pass found two more that no jsdom case can see: arrowing scrolled
 the active option OUT of view (an unpositioned list, so `offsetTop` counted
 from the dialog), and a refusal at the end of the scrolling body sat below the
-fold at 1366x650 and 361x760 -- it is now pinned above the floor.
+fold at 1366x650 and 361x760. The current editor saves each action directly and
+keeps failures beside the scrolling body with an explicit retry.
 
 ## What it is, and what it is not
 

@@ -1,4 +1,5 @@
-import { act, render, screen, within } from "@testing-library/react";
+import { renderPage as render } from "../pageHarness";
+import { act, screen, within } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import type { ReactNode } from "react";
@@ -121,6 +122,7 @@ describe("Settings -> Procedures: the ladder's values", () => {
     expect(screen.getByText("30 days")).toBeTruthy();
     // Why there is nothing to edit here is guidance, so it is behind the
     // information control rather than standing under the values (rule 7).
+    await act(async () => screen.getByRole("button", { name: /^Help with/ }).click());
     expect(screen.getByText(/The seed writes them again on every boot/).closest("dialog")).not.toBeNull();
     expect(screen.queryByRole("textbox")).toBeNull();
   });
@@ -167,7 +169,7 @@ describe("Settings -> Procedures: the ladder's values", () => {
 
   it("explains the ladder behind the one information control", async () => {
     await renderProcedures();
-    expect(await screen.findByRole("button", { name: "About The certification ladder" })).toBeTruthy();
+    expect(await screen.findByRole("button", { name: /^Help with/ })).toBeTruthy();
   });
 });
 

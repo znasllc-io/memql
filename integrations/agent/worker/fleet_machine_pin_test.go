@@ -79,7 +79,7 @@ func TestPinnedFleetRefusesWithoutDispatchingAnAlternate(t *testing.T) {
 				// nothing else: fleet_lent_pin_test.go holds the lent cases.
 				foreign := *selected
 				foreign.OwnerUserId = "v1:identity:user:bob"
-				foreign.SharingMode, foreign.InferenceServe = workerservice.SharingModeOwner, workerservice.InferenceServeCluster
+				foreign.SharingMode = workerservice.SharingModeOwner
 				h.store.machines = h.store.machines[:1]
 				f.router = NewRouter(&sharedFleet{fakeFleet: h.store.fakeFleet, all: []Candidate{foreign}}, testLogger(), fleetNow)
 			case "disconnected before start":

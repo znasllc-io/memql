@@ -3,7 +3,8 @@ import { getRowByConceptAndId, versionOrder, type LiveState, type Row } from "@z
 import type { LiveListSource } from "../../../live/LiveList";
 import { useOsConnection } from "../../../live/connection";
 import { useLiveCollection } from "../../../live/useLiveCollection";
-import { nodeFromRow, WORKBENCH_NODE_TYPE } from "../rows";
+import { useSessionIfPresent } from "../../../chrome/access";
+import { workspaceFromRow, nodeFromRow, WORKBENCH_NODE_TYPE } from "../rows";
 
 export const WORKBENCH_WORKSPACE_CONCEPT = "v1:workbench:workspace";
 export const CLUSTER_NODE_CONCEPT = "v1:cluster:node";
@@ -88,9 +89,10 @@ export interface WorkbenchesState {
 
 export function useWorkbenches(): WorkbenchesState {
   const connection = useOsConnection();
+  const userId = useSessionIfPresent()?.access?.userId ?? "";
 
   const workspaces = useLiveCollection<Row>(
-    connection === null ? null : "fleet:workspaces",
+    userId ? `fleet:workspaces:${userId}` : null,
     (conn) => ({
       concept: WORKBENCH_WORKSPACE_CONCEPT,
       // myWorkspaces is scoped server-side on actor.userId and returns live
@@ -106,6 +108,7 @@ export function useWorkbenches(): WorkbenchesState {
         });
         return (row as Row) ?? null;
       },
+      inScope: row => workspaceFromRow(row).ownerUserId === userId,
       paged: false,
     }),
   );

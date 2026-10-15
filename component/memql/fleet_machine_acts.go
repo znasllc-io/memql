@@ -238,7 +238,7 @@ func (e *MemQLEngine) revokeWorkerCredential(ctx context.Context, identityId str
 }
 
 // evaluateFleetSetSharingExpression serves the `fleetSetSharing` builtin: the
-// OWNER's half of a machine's sharing consent, written through the caller's
+// owner's model sharing choice, written through the caller's
 // own machines.
 //
 // THREE MODES (epic memql#5344). `owner` keeps it, `cluster` offers it to
@@ -285,12 +285,6 @@ func (e *MemQLEngine) evaluateFleetSetSharingExpression(ctx context.Context, arg
 		userIds = normalizeShareIds(stringSliceFromAny(args["userIds"]), machine.OwnerUserId, actingUserFromContext(ctx))
 		groupIds = normalizeShareIds(stringSliceFromAny(args["groupIds"]))
 		total := len(userIds) + len(groupIds)
-		if total == 0 {
-			return nil, modelPullRefusal{
-				Code:    "share_needs_someone",
-				Message: "choose at least one person or group to lend this machine to, or keep it to yourself",
-			}
-		}
 		if total > shareSubjectsMax {
 			return nil, modelPullRefusal{
 				Code:    "share_too_many",
@@ -337,11 +331,25 @@ func (e *MemQLEngine) evaluateFleetSetSharingExpression(ctx context.Context, arg
 		}
 	}
 
+	pausedUsers := normalizeShareIds(stringSliceFromAny(args["pausedUserIds"]))
+	pausedGroups := normalizeShareIds(stringSliceFromAny(args["pausedGroupIds"]))
+	if mode != SharingModePeople {
+		pausedUsers, pausedGroups = []string{}, []string{}
+	}
+	for _, pair := range []struct{ paused, subjects []string }{{pausedUsers, userIds}, {pausedGroups, groupIds}} {
+		for _, subject := range pair.paused {
+			if !containsShareSubject(pair.subjects, subject) {
+				return nil, modelPullRefusal{Code: "share_subject_unknown", Message: "only users and groups on this sharing list can be paused"}
+			}
+		}
+	}
 	call, err := langparser.RenderCall("setWorkerSharing", map[string]any{
 		"registrationId": registrationId,
 		"mode":           mode,
 		"userIds":        userIds,
 		"groupIds":       groupIds,
+		"pausedUserIds":  pausedUsers,
+		"pausedGroupIds": pausedGroups,
 	})
 	if err != nil {
 		return nil, fmt.Errorf("fleetSetSharing: render the write: %w", err)
@@ -360,26 +368,21 @@ func (e *MemQLEngine) evaluateFleetSetSharingExpression(ctx context.Context, arg
 		"mode":      mode,
 		"people":    len(userIds),
 		"groups":    len(groupIds),
-		"sentence":  sharingReceiptSentence(mode, len(userIds), len(groupIds), machine.InferenceServe == "cluster"),
+		"sentence":  sharingReceiptSentence(mode, len(userIds), len(groupIds)),
 	})
 }
 
-// sharingReceiptSentence is what the act says it did.
-//
-// IT NAMES THE OTHER HALF ONLY WHEN IT IS MISSING. A consent that is half given
-// looks exactly like one that is not given at all, so an owner who lends a
-// machine whose policy.yaml still says no is told so here -- and one whose
-// machine has already agreed is not sent to edit a file that needs no edit.
-func sharingReceiptSentence(mode string, people, groups int, machineAgreed bool) string {
-	machineHalf := ""
-	if !machineAgreed {
-		machineHalf = " The machine itself has to agree too -- set `inference.serve: cluster` in its policy.yaml -- and until it does, nothing runs on it for anybody else."
-	}
+// sharingReceiptSentence reports the audience saved by the owner. Online and
+// model readiness remain separate facts; a saved share is not a model probe.
+func sharingReceiptSentence(mode string, people, groups int) string {
 	switch mode {
 	case SharingModePeople:
-		return "Lent to " + shareCountPhrase(people, groups) + "." + machineHalf
+		if people+groups == 0 {
+			return "Sharing enabled."
+		}
+		return "Lent to " + shareCountPhrase(people, groups) + "."
 	case SharingModeCluster:
-		return "Offered to everyone on this cluster, and to the cluster's own work." + machineHalf
+		return "Offered to everyone on this cluster, and to the cluster's own work."
 	default:
 		return "Kept to you. Nobody else's work will run on this machine."
 	}

@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 
 import { Fact, Facts, Panel, Subhead } from "../../kit";
-import { InfoDetail } from "../../kit/InfoDetail";
+import { PageHelp } from "../../kit/pageHelp";
 import type { ReuseFacts } from "./reuse";
 import { useReusableAfter } from "./useInterventions";
 import { useSetConstructReuse, type ReuseWrite } from "./useAutomations";
@@ -65,7 +65,7 @@ export function ReusePanel({ constructId, facts }: ReusePanelProps) {
     <Panel label="Reuse">
       <div className="os-record-heading os-nexus-reuse-heading">
         <Subhead>Reuse</Subhead>
-        <InfoDetail title="Reuse labels">
+        <PageHelp title="Reuse labels">
           <Facts>
             {CHOICES.map((choice) => (
               <Fact key={choice.label} label={choice.label} value={reuseMeaning(choice.value, reusableAfter)} />
@@ -74,7 +74,7 @@ export function ReusePanel({ constructId, facts }: ReusePanelProps) {
           <p className="os-caption">
             Your own label wins. How the automation is used keeps being counted underneath it.
           </p>
-        </InfoDetail>
+        </PageHelp>
       </div>
       <div className="os-choice-row os-nexus-reuse-choices" role="radiogroup" aria-label="Reuse label">
         {CHOICES.map((choice) => (

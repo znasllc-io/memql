@@ -6,7 +6,7 @@ import { AutoDeploySwitch } from "./stops/Source";
 import { useState } from "react";
 import { IconButton } from "../../../kit/IconButton";
 import type { ReactNode } from "react";
-import { AppWindow, Building2, ChevronRight, FileArchive, GitBranch, Globe, Hammer, Info, Link, Shapes, ShoppingBag, SlidersHorizontal } from "lucide-react";
+import { AppWindow, Building2, ChevronRight, FileArchive, GitBranch, Globe, Hammer, ArrowUpRight, Link, Shapes, ShoppingBag, SlidersHorizontal } from "lucide-react";
 import { Button, Caption, Notice, useLiveView } from "../../../kit";
 import { ActivityTarget } from "../../../kit/SemanticActivity";
 import { accountNameFrom, type AccountRow } from "../../accounts/rows";
@@ -94,7 +94,7 @@ export function DeployableWorkspace({ site, pkg, run, runs, can, accounts, canDo
       <header><h3>Versions</h3></header>
       {pkg ? <AvailableVersion key={pkg.id} pkg={pkg} onUpdate={onUpdate} /> : null}
       <Versions site={site} runs={runs ?? []} canPublish={can?.publish ?? false} lifecycle={lifecycle} />
-      {pkg ? <div className="deployable-version-row"><span><Hammer size={14} aria-hidden />Latest attempt</span><div><strong>{run ? candidateAttempt ? "Deployed as candidate" : attemptWord(run.status) : knownTimeline ? "No attempt yet" : "History unavailable"}</strong><small>{run ? [shortVersion(run.sourceVersion), candidateAttempt ? "the live site is unchanged" : build?.reason].filter(Boolean).join(" · ") : timelineState === "loading" || timelineState === "seeding" ? <InlineSkeleton label="Loading deployment history" /> : "Deploy an update to start a new attempt"}</small></div>{run ? <IconButton label="Latest attempt details" onClick={() => onInspect(run.status === "awaiting_confirm" ? "whatItIs" : "build")}><Info size={16} aria-hidden /></IconButton> : null}</div> : null}
+      {pkg ? <div className="deployable-version-row"><span><Hammer size={14} aria-hidden />Latest attempt</span><div><strong>{run ? candidateAttempt ? "Deployed as candidate" : attemptWord(run.status) : knownTimeline ? "No attempt yet" : "History unavailable"}</strong><small>{run ? [shortVersion(run.sourceVersion), candidateAttempt ? "the live site is unchanged" : build?.reason].filter(Boolean).join(" · ") : timelineState === "loading" || timelineState === "seeding" ? <InlineSkeleton label="Loading deployment history" /> : "Deploy an update to start a new attempt"}</small></div>{run ? <IconButton label="Latest attempt details" onClick={() => onInspect(run.status === "awaiting_confirm" ? "whatItIs" : "build")}><ArrowUpRight size={16} aria-hidden /></IconButton> : null}</div> : null}
       {deployChoice ? <DeployTargetChoice {...deployChoice} /> : null}
       {failed && site.status === "live" ? <Caption>The latest attempt did not replace the published version.</Caption> : null}
       {pkg && timelineError ? <Notice tone="error" sentence="Deployment history could not be read." detail={timelineError}><Button onClick={onRetryRead}>Try again</Button></Notice> : null}

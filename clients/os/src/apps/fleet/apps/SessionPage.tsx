@@ -1,5 +1,6 @@
 import { ContentSkeleton } from "../../../kit/ContentSkeleton";
 import { RecordList, RecordRow } from "../../../kit/RecordRow";
+import { feedIsBehind } from "../../../live/useLiveCollection";
 import { AutoRefresh } from "../FleetControls";
 
 import { EmptyState, Chip, Fact, Facts, Head, Notice, Panel, Subhead, formatMoment } from "../../../kit";
@@ -52,12 +53,12 @@ export function SessionPage({
   sessionId: string;
   onBack: () => void;
 }) {
-  const { session, loading, error, polling, readAt, reread } = useAppSessionDetail(sessionId);
+  const { session, loading, error, state, reread } = useAppSessionDetail(sessionId);
 
   return (
     <div className="os-fleet os-fleet-session" data-os-page-context={JSON.stringify({ page: "App session", sessionId, app: session?.app, status: session?.status })}>
       <Head title={session === null ? "Run" : `${appLabel(session.app)} -- ${session.kind}`} back={{ label: "Activity", onSelect: onBack }}>
-        <AutoRefresh enabled={error !== ""} busy={loading} onRefresh={reread} />
+        <AutoRefresh enabled={feedIsBehind(state, error)} busy={loading} onRefresh={reread} />
       </Head>
 
       {error === "" ? null : (
@@ -71,12 +72,14 @@ export function SessionPage({
 
       {loading && session === null ? <ContentSkeleton kind="detail" label="Loading this run" /> : null}
 
-      {!loading && session === null && error === "" ? (
+      {state === "disconnected" ? <Notice tone="warn" sentence="Session updates are interrupted." next="Showing the last known state." /> : null}
+
+      {state === "live" && session === null && error === "" ? (
         <EmptyState title="Session no longer available">It may have been removed since the list was last updated.</EmptyState>
       ) : null}
 
       {session === null ? null : (
-        <SessionBody session={session} polling={polling} readAt={readAt} settled={!loading && !error} />
+        <SessionBody session={session} settled={state === "live" && !error} />
       )}
     </div>
   );
@@ -84,13 +87,9 @@ export function SessionPage({
 
 function SessionBody({
   session,
-  polling,
-  readAt,
   settled,
 }: {
   session: AppSessionDetailRow;
-  polling: boolean;
-  readAt: Date | null;
   settled: boolean;
 }) {
   const live = sessionIsLive(session.status);
@@ -107,7 +106,6 @@ function SessionBody({
                 <span className="os-fleet-session-status" data-tone={statusTone(session.status)}>
                   {session.status}
                 </span>
-                {polling ? <span className="os-caption"> refreshing</span> : null}
               </>
             }
           />
@@ -141,11 +139,7 @@ function SessionBody({
         )}
 
         <p className="os-caption">
-          {readAt === null
-            ? "Not read yet."
-            : live
-              ? `Updates automatically while ${session.status}. Last updated ${formatMoment(readAt.toISOString())}.`
-              : `Last updated ${formatMoment(readAt.toISOString())}.`}
+          {settled ? "Updates automatically." : "Showing the last available session details."}
         </p>
 
         {session.errorMessage === "" ? null : (

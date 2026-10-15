@@ -1,12 +1,12 @@
 import { bareShortId, sameEntityId } from "@znasllc-io/memql-sdk-core/client";
 
-import { isRevoked, type MachineRow, type SharingMode } from "../rows";
+import { isRevoked, type MachineRow } from "../rows";
 
 // Who a machine is lent to, read and edited as values (epic memql#5344,
 // design section 5).
 //
 // PURE, beside the components that draw it, for the reason rows.ts is: the
-// sentence the panel says and the draft the dialog holds are the parts of this
+// saved audience and individual grants are the parts of this
 // surface a person is promised things by, and asserting them through render()
 // asserts them through three layers that can each fail for unrelated reasons.
 //
@@ -32,22 +32,14 @@ export function isShared(machine: Pick<MachineRow, "sharingMode">): boolean {
   return machine.sharingMode !== "owner";
 }
 
-/** Both halves given: the owner lent it AND its cockpit agreed, so somebody
- *  else's call can actually land on it. */
-export function servesOthers(machine: Pick<MachineRow, "sharingMode" | "inferenceServe">): boolean {
-  return isShared(machine) && machine.inferenceServe === "cluster";
+/** The owner has shared model inference with other people. */
+export function servesOthers(machine: Pick<MachineRow, "sharingMode">): boolean {
+  return isShared(machine);
 }
 
-/**
- * The words on the Equipment view's way into Sharing.
- *
- * WHAT THE MACHINE DOES, NOT WHAT WAS ASKED OF IT: the owner's mode AND the
- * cockpit's consent together (design section 5). A share the cockpit has not
- * agreed to serves nobody else yet, so it reads as personal here -- the
- * Sharing view, one click away, says which half is missing.
- */
-export function sharingLinkWords(machine: Pick<MachineRow, "sharingMode" | "inferenceServe">): string {
-  if (!servesOthers(machine)) return "Personal inference";
+/** The saved audience; model availability is reported separately. */
+export function sharingLinkWords(machine: Pick<MachineRow, "sharingMode">): string {
+  if (!isShared(machine)) return "Personal inference";
   return machine.sharingMode === "people" ? "Shared with people" : "Shared with everyone";
 }
 
@@ -61,6 +53,7 @@ export type SubjectKind = "person" | "group";
 export interface Subject {
   kind: SubjectKind;
   id: string;
+  paused?: boolean;
 }
 
 /** The comparison key for a subject: its kind and its BARE id, so a stored
@@ -70,21 +63,11 @@ export function subjectKey(kind: SubjectKind, id: string): string {
 }
 
 /** The machine's stored list, people first, each in stored order. */
-export function storedSubjects(machine: Pick<MachineRow, "sharedUserIds" | "sharedGroupIds">): Subject[] {
+export function storedSubjects(machine: Pick<MachineRow, "sharedUserIds" | "sharedGroupIds" | "pausedUserIds" | "pausedGroupIds">): Subject[] {
   return [
-    ...machine.sharedUserIds.map((id): Subject => ({ kind: "person", id })),
-    ...machine.sharedGroupIds.map((id): Subject => ({ kind: "group", id })),
+    ...machine.sharedUserIds.map((id): Subject => ({ kind: "person", id, paused: machine.pausedUserIds?.some((v) => sameEntityId(v, id)) })),
+    ...machine.sharedGroupIds.map((id): Subject => ({ kind: "group", id, paused: machine.pausedGroupIds?.some((v) => sameEntityId(v, id)) })),
   ];
-}
-
-/** Whether two lists name the same subjects, as SETS of kind and bare id:
- *  order is not a decision anybody made, and the spelling is not either. */
-function sameSubjects(a: readonly Subject[], b: readonly Subject[]): boolean {
-  const left = new Set(a.map((s) => subjectKey(s.kind, s.id)));
-  const right = new Set(b.map((s) => subjectKey(s.kind, s.id)));
-  if (left.size !== right.size) return false;
-  for (const key of left) if (!right.has(key)) return false;
-  return true;
 }
 
 /**
@@ -123,8 +106,7 @@ export function standInNames(
 // ---------------------------------------------------------------------------
 
 /**
- * Who can use the machine, in one line -- the owner's decision, which the two
- * consent lines beneath it qualify.
+ * The saved audience, in one line for viewers without editing access.
  *
  * NAMES WHEN EVERY ONE IS KNOWN, COUNTS OTHERWISE. Two names, then how many
  * more: "Shared with Ana Ruiz, Design and 2 more". A list whose names have not
@@ -133,13 +115,14 @@ export function standInNames(
  * with nothing guessed, where a half-named list or a bare id would not be.
  */
 export function sharingSummary(
-  machine: Pick<MachineRow, "sharingMode" | "sharedUserIds" | "sharedGroupIds">,
+  machine: Pick<MachineRow, "sharingMode" | "sharedUserIds" | "sharedGroupIds" | "pausedUserIds" | "pausedGroupIds">,
   viewerIsOwner: boolean,
   nameOf: (subject: Subject) => string | undefined,
 ): string {
   if (machine.sharingMode === "cluster") return "Everyone in this cluster";
   if (machine.sharingMode !== "people") return viewerIsOwner ? "Only you" : "Only its owner";
   const subjects = storedSubjects(machine);
+  if (subjects.length === 0) return "No users or groups added";
   const names = subjects.map(nameOf);
   if (names.every((name): name is string => name !== undefined && name !== "")) {
     const [first, second] = names;
@@ -153,24 +136,10 @@ export function sharingSummary(
 /** The stored decision as one comparable value: the mode, and who, by kind
  *  and bare id. Heartbeats and renames leave it alone. */
 export function sharingSignature(
-  machine: Pick<MachineRow, "sharingMode" | "sharedUserIds" | "sharedGroupIds">,
+  machine: Pick<MachineRow, "sharingMode" | "sharedUserIds" | "sharedGroupIds" | "pausedUserIds" | "pausedGroupIds">,
 ): string {
-  const who = storedSubjects(machine).map((s) => subjectKey(s.kind, s.id));
+  const who = storedSubjects(machine).map((s) => `${subjectKey(s.kind, s.id)}:${s.paused === true}`);
   return [machine.sharingMode, ...who.sort()].join("|");
-}
-
-/**
- * Whether a save's receipt still describes what is stored: the same mode and,
- * under `people`, lists of the sizes it reported. The receipt carries counts,
- * never ids, so that is as much as it can be held to.
- */
-export function receiptDescribes(
-  receipt: { mode: SharingMode; people: number; groups: number },
-  machine: Pick<MachineRow, "sharingMode" | "sharedUserIds" | "sharedGroupIds">,
-): boolean {
-  if (receipt.mode !== machine.sharingMode) return false;
-  if (receipt.mode !== "people") return true;
-  return receipt.people === machine.sharedUserIds.length && receipt.groups === machine.sharedGroupIds.length;
 }
 
 /** "2 people and 1 group", with the plurals right -- the engine's own
@@ -190,103 +159,8 @@ export function groupSize(members: number): string {
   return members === 1 ? "Group of 1 person" : `Group of ${members} people`;
 }
 
-// ---------------------------------------------------------------------------
-// The dialog's draft
-// ---------------------------------------------------------------------------
-
-/**
- * What the dialog holds while it is open.
- *
- * THE LIST SURVIVES A CHANGE OF MODE. Choosing Everyone and then Specific
- * people again brings the chips back: the draft is the person's until they
- * save or cancel (design G10), and only the WRITE drops the list -- see
- * `draftChoice`.
- */
-export interface ShareDraft {
-  mode: SharingMode;
-  subjects: Subject[];
-}
-
-/** The stored decision, as the three fields a draft is taken from. */
-export type StoredShare = Pick<MachineRow, "sharingMode" | "sharedUserIds" | "sharedGroupIds">;
-
-export function draftFrom(machine: StoredShare): ShareDraft {
-  return { mode: machine.sharingMode, subjects: storedSubjects(machine) };
-}
-
-/**
- * A copy of the stored decision, taken when a draft is: the draft's STARTING
- * value (memql#5659).
- *
- * Whether the stored share MOVED while the dialog was open is a question about
- * the row and this value -- never about the row and the draft, which differ
- * the moment anybody picks. Asking the second made a change from another tab
- * look like the owner's own unsaved edit, and Save wrote the old draft back
- * over it. It is the discipline the panel already keeps for its receipt
- * (SharingGroup's `before`), which retires a stale receipt when the row moves
- * away from the state the save was made against.
- */
-export function storedShare(machine: StoredShare): StoredShare {
-  return {
-    sharingMode: machine.sharingMode,
-    sharedUserIds: [...machine.sharedUserIds],
-    sharedGroupIds: [...machine.sharedGroupIds],
-  };
-}
-
-/**
- * Whether a draft is still exactly the share it was taken from: the same mode
- * and the same people and groups -- INCLUDING a list kept under another mode,
- * which the person built and which comes back if they choose people again.
- *
- * STRICTER THAN `draftDiffers` ON PURPOSE. This decides whether a change made
- * elsewhere may replace the draft without asking, and a list the person
- * assembled is theirs even while it is not in force.
- */
-export function draftUntouched(draft: ShareDraft, start: StoredShare): boolean {
-  return draft.mode === start.sharingMode && sameSubjects(draft.subjects, storedSubjects(start));
-}
-
-/**
- * Whether saving the draft would change anything.
- *
- * AGAINST THE ROW AS IT IS NOW, not as it was when the dialog opened: a change
- * landing from another tab is what is stored, and Save must say whether THIS
- * draft differs from it. Lists are compared as SETS of bare ids -- order is
- * not a decision anybody made, and the spelling is not either.
- */
-export function draftDiffers(draft: ShareDraft, machine: StoredShare): boolean {
-  if (draft.mode !== machine.sharingMode) return true;
-  if (draft.mode !== "people") return false;
-  return !sameSubjects(draft.subjects, storedSubjects(machine));
-}
-
-/** A people share must name somebody (the engine's share_needs_someone). */
-export function draftNamesSomebody(draft: ShareDraft): boolean {
-  return draft.mode !== "people" || draft.subjects.length > 0;
-}
-
-/** The choice a save sends: the lists only under `people`, and empty under
- *  the other two modes whatever the draft still holds (design G10). */
-export function draftChoice(draft: ShareDraft): { mode: SharingMode; userIds: string[]; groupIds: string[] } {
-  if (draft.mode !== "people") return { mode: draft.mode, userIds: [], groupIds: [] };
-  return {
-    mode: "people",
-    userIds: draft.subjects.filter((s) => s.kind === "person").map((s) => s.id),
-    groupIds: draft.subjects.filter((s) => s.kind === "group").map((s) => s.id),
-  };
-}
-
-export function withSubject(draft: ShareDraft, subject: Subject): ShareDraft {
-  const key = subjectKey(subject.kind, subject.id);
-  if (draft.subjects.some((s) => subjectKey(s.kind, s.id) === key)) return draft;
-  return { ...draft, subjects: [...draft.subjects, subject] };
-}
-
-export function withoutSubject(draft: ShareDraft, subject: Subject): ShareDraft {
-  const key = subjectKey(subject.kind, subject.id);
-  return { ...draft, subjects: draft.subjects.filter((s) => subjectKey(s.kind, s.id) !== key) };
-}
+/** The saved audience and the individual grants that are paused. */
+export type StoredShare = Pick<MachineRow, "sharingMode" | "sharedUserIds" | "sharedGroupIds" | "pausedUserIds" | "pausedGroupIds">;
 
 // ---------------------------------------------------------------------------
 // Search

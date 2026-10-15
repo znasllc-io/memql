@@ -1,4 +1,4 @@
-import { useCallback, useMemo, useState } from "react";
+import { createContext, createElement, useContext, useCallback, useMemo, useState, type ReactNode } from "react";
 import {
   getRowByConceptAndId,
   newShortId,
@@ -6,6 +6,7 @@ import {
   type Row,
 } from "@znasllc-io/memql-sdk-core/client";
 
+import { useSessionIfPresent } from "../../../chrome/access";
 import { useOsConnection } from "../../../live/connection";
 import { useLiveCollection } from "../../../live/useLiveCollection";
 import type { LabelMap } from "../labels";
@@ -90,20 +91,16 @@ function describe(err: unknown): string {
   return err instanceof Error ? err.message : String(err);
 }
 
-export function useRoutingPolicy(): RoutingPolicyState {
-  const connection = useOsConnection();
-  const [saving, setSaving] = useState(false);
-  const [saveError, setSaveError] = useState("");
-  const [announcement, setAnnouncement] = useState("");
-
+function useRoutingFeed(enabled = true) {
+  const userId = useSessionIfPresent()?.access?.userId ?? "";
   // RAW rows. The fold upserts an arriving event's payload AS the row type
   // with no projection hook in between, so a collection typed with
   // RoutingPolicyRow would be correct until the first edit landed from
   // anywhere and hold a raw wire row after it -- and `activePolicy` reads
   // `active`, which is exactly the field a raw row spells differently from a
   // projected one. Projected on the way out, below.
-  const { snapshot, reseed } = useLiveCollection<Row>(
-    connection === null ? null : "fleet:routingPolicy",
+  return useLiveCollection<Row>(
+    enabled && userId ? `fleet:routingPolicy:${userId}` : null,
     (conn) => ({
       concept: WORKER_ROUTING_POLICY_CONCEPT,
       seed: async (_cursor, signal) => {
@@ -119,9 +116,27 @@ export function useRoutingPolicy(): RoutingPolicyState {
         );
         return (row as Row) ?? null;
       },
+      inScope: row => routingPolicyFromRow(row).ownerUserId === userId,
       paged: false,
     }),
   );
+}
+
+const RoutingFeedContext = createContext<ReturnType<typeof useRoutingFeed> | null>(null);
+export function RoutingPolicyProvider({ children }: { children: ReactNode }) {
+  const feed = useRoutingFeed();
+  return createElement(RoutingFeedContext.Provider, { value: feed }, children);
+}
+
+export function useRoutingPolicy(): RoutingPolicyState {
+  const connection = useOsConnection();
+  const [saving, setSaving] = useState(false);
+  const [saveError, setSaveError] = useState("");
+  const [announcement, setAnnouncement] = useState("");
+
+  const shared = useContext(RoutingFeedContext);
+  const standalone = useRoutingFeed(shared === null);
+  const { snapshot, reseed } = shared ?? standalone;
 
   // The newest ACTIVE row. myRoutingPolicies sorts newest first, so this is
   // the same choice routingPolicyForOwner makes server-side -- and that

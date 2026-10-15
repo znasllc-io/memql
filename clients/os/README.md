@@ -273,6 +273,34 @@ rename, and stays silent on a heartbeat.
 
 ## Fleet, the first real app (memql#4729)
 
+Fleet retains one machine feed for the OS and one app-session and routing-policy
+feed per Fleet window. All use the shared retain/reconnect lifecycle: events
+fold in place, reconnects reseed after subscription restoration, and teardown
+releases listeners. Caller-scoped feeds include the actor in their identity and
+apply the named read's owner filter to incoming events (including cluster owners).
+Workspace feeds also filter owners; model downloads filter owner and machine;
+workbench replicas filter node type. App-session details retain a separate scoped
+feed only while open because list reads omit recording details.
+
+Equipment's Recent work shows the latest five matching sessions from the loaded
+recent history. All app sessions opens Activity only when this machine has more
+than five loaded sessions. Both views share one
+feed; a payload event causes no additional list read. Catalogs, recommendations,
+measurements, sharing ledgers, delegation settings and call history have no
+browser broadcast stream: visible views use `AutoRefresh` for those reads.
+Do not poll healthy graph feeds or automatically repeat probes or writes.
+Failed initial reads also need recovery, even if a collection has no prior rows.
+
+Machine tabs end with **History**, then **Settings**. Settings contains General
+controls, inline Sharing and reported machine information in the same section
+grid. Sharing's live counts use the retained machine feed; directory reads stay
+on demand and use the visible view's refresh lifecycle. There is no separate
+Sharing tab. Fleet's app-level Settings still contains the app's preferences.
+Routing labels and sharing use `CardCollectionEditor` with `CardCarousel` for
+the same search/add line, editable cards and paging. Sharing searches the
+authorized directory and edits grants; it does not create or rename identities.
+
+
 `src/apps/fleet/` is the promotion of the foundation's read-only exemplar
 into the whole app: **Machines** (rename, operator labels, remove,
 per-machine detail, and the guided cockpit install), **Routing** (routes,

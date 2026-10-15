@@ -15,7 +15,7 @@ func sharedMachine(id, owner string) Candidate {
 	c := modelMachine(id, map[string]ModelAttributes{smallModel: {}})
 	c.OwnerUserId = owner
 	c.SharingMode = workerservice.SharingModeCluster
-	c.InferenceServe = workerservice.InferenceServeCluster
+
 	return c
 }
 
@@ -70,17 +70,13 @@ func TestAnotherUsersUNSHAREDMachineIsNotAvailableToMe(t *testing.T) {
 	}
 }
 
-func TestEitherConsentMissingKeepsAMachineOutOfMyPlan(t *testing.T) {
-	// Either half alone is not consent, on the USER path as well as the system
-	// one. A person may own a machine they are not entitled to volunteer, and a
-	// machine may sit somewhere its policy forbids serving strangers.
+func TestOwnerSharingAddsOnlyTheSharedMachineToMyPlan(t *testing.T) {
 	mine := privateMachine("mine", "alice")
 
 	ownerOnly := privateMachine("owner-only", "bob")
 	ownerOnly.SharingMode = workerservice.SharingModeCluster
 
 	cockpitOnly := privateMachine("cockpit-only", "carol")
-	cockpitOnly.InferenceServe = workerservice.InferenceServeCluster
 
 	store := &sharedFleet{
 		fakeFleet: &fakeFleet{machines: []Candidate{mine}, owner: "alice"},
@@ -90,8 +86,8 @@ func TestEitherConsentMissingKeepsAMachineOutOfMyPlan(t *testing.T) {
 	if err != nil {
 		t.Fatalf("PlanUserModelWithShared: %v", err)
 	}
-	if got := ids(plan.Candidates); len(got) != 1 || got[0] != "mine" {
-		t.Fatalf("candidates = %v, want only my own machine", got)
+	if got := ids(plan.Candidates); len(got) != 2 || got[0] != "mine" || got[1] != "owner-only" {
+		t.Fatalf("candidates = %v, want my own machine first, then the owner-shared machine", got)
 	}
 	for _, id := range []string{"owner-only", "cockpit-only"} {
 		if why, ok := plan.Rejected[id]; ok {
@@ -180,7 +176,7 @@ func TestOwnMachineFirstToleratesTheBareCanonicalSplit(t *testing.T) {
 
 func TestOwnerPrivateMachineWorksWithoutShareWhenOwnReadMisses(t *testing.T) {
 	// Product lock: pairing unlocks Ask/Materialize/Nexus for THAT user without
-	// Fleet share + inference.serve:cluster. Those consents are only for a
+	// Fleet model sharing. That consent is only for a
 	// different account.
 	//
 	// Regression: WorkersForOwner empty while the cross-owner read still listed

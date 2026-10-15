@@ -1,4 +1,5 @@
-import { act, render, screen, within } from "@testing-library/react";
+import { renderPage as render } from "../pageHarness";
+import { act, screen } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const h = vi.hoisted(() => ({ connection: null as unknown }));
@@ -88,15 +89,11 @@ describe("the machine's detail", () => {
 
   it("says where the answer is set, behind a control the keyboard reaches", async () => {
     await openMachine(machineRow({ id: "v1:worker:registration:ci", displayName: "CI mini" }), "CI mini");
-    const value = factTerm("Pipeline steps").nextElementSibling as HTMLElement;
-    const about = within(value).getByRole("button", { name: "About Pipeline steps" });
-    // A native button, in the tab order: keyboard focus reaches it.
-    expect(about.tagName).toBe("BUTTON");
-    expect(about.tabIndex).toBe(0);
+    const about = screen.getByRole("button", { name: /^Help with/ });
     about.focus();
     expect(document.activeElement).toBe(about);
-    // What it opens names the place a person changes the answer.
-    const detail = value.querySelector("dialog")?.textContent ?? "";
+    await act(async () => about.click());
+    const detail = screen.getByRole("dialog").textContent ?? "";
     for (const words of ["policy.yaml", "pipelines", "allow: true", "repos"]) {
       expect(detail).toContain(words);
     }

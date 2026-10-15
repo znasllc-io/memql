@@ -18,7 +18,7 @@ package worker
 //     reads through WorkersForOwner, which is caller-scoped at the query
 //     (`ownerUserId==actor.userId`). There is no filter to forget because
 //     there is no cross-user read in it at all. The one widening is a machine
-//     somebody LENT to the user, under both consents, and it lives in
+//     somebody LENT to the user, under its owner's saved audience, and it lives in
 //     shared_resolution.go behind its own interface -- for an unpinned call
 //     (PlanUserModelWithShared) and for a pinned one (PlanPinnedModel,
 //     memql#5662) alike.
@@ -93,7 +93,7 @@ func (r *Router) PlanModel(
 //
 // THE PIN NARROWS, IT NEVER WIDENS. It selects from exactly the machines the
 // same call is planned over unpinned -- the caller's own, then the ones lent
-// to them under both consents (PlanUserModelWithShared) -- so naming a machine
+// to them under its owner's saved audience (PlanUserModelWithShared) -- so naming a machine
 // cannot reach one the person could not otherwise use, and cannot skip the
 // model, context or capability checks narrowToModel applies. A pin to a
 // machine lent to the caller is served; one to a machine that is not lent to

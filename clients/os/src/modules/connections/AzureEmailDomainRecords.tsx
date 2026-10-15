@@ -1,6 +1,6 @@
 import { Caption, ContentSkeleton, Notice } from "../../kit";
 import { DnsRecord } from "../../kit/DnsRecord";
-import { InfoDetail } from "../../kit/InfoDetail";
+import { PageHelp } from "../../kit/pageHelp";
 import type { AzureEmailReply } from "./azureEmailSetup";
 
 const purposes: Record<string, string> = {
@@ -21,6 +21,6 @@ export function AzureEmailDomainRecords({ domain, records }: { domain: string; r
       <DnsRecord key={record.purpose} record={{ kind: record.type, name: record.name, value: record.value, purpose: purposes[record.purpose] || record.purpose }} status={statuses[record.status] || "Not verified"}/>,
     )}
     <Caption>Merge SPF into its existing record; do not create a second SPF record. Keep existing mail and website records.</Caption>
-    <InfoDetail title="Entering DNS names"><p>If your provider appends {domain} automatically, use @ for the name {domain}. Keep the DKIM names as shown.</p></InfoDetail>
+    <PageHelp title="Entering DNS names"><p>If your provider appends {domain} automatically, use @ for the name {domain}. Keep the DKIM names as shown.</p></PageHelp>
   </>;
 }
