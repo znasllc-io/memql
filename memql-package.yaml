@@ -297,13 +297,7 @@ pipeline:
             mkdir -p .memql-security/gitleaks
             go install github.com/zricethezav/gitleaks/v8@v8.30.1
             export GOMAXPROCS=1 GOMEMLIMIT=1GiB GOGC=100
-            if [ "$(git rev-parse --is-shallow-repository)" = true ]; then
-              git fetch --unshallow --tags "https://github.com/${MEMQL_REPOSITORY}.git" "$MEMQL_SHA"
-            else
-              git fetch --tags "https://github.com/${MEMQL_REPOSITORY}.git" "$MEMQL_SHA"
-            fi
-            test "$(git rev-parse HEAD)" = "$MEMQL_SHA"
-            python3 scripts/ci/gitleaks-history.py --head="$MEMQL_SHA" --gitleaks="$(command -v gitleaks)" --output-dir=.memql-security/gitleaks --jobs=4 --batch-size=1 --timeout=20700
+            python3 scripts/ci/gitleaks-history.py --head="$MEMQL_SHA" --fetch-remote="https://github.com/${MEMQL_REPOSITORY}.git" --gitleaks="$(command -v gitleaks)" --output-dir=.memql-security/gitleaks --jobs=4 --batch-size=1 --timeout=20700
     - name: tests
       steps:
         # ci.yml go-tests: every package outside the db-gated trees that the

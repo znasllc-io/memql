@@ -221,6 +221,106 @@ sys.exit(int(args["--exit-code"]) if fault in ("findings", "disagreement", "outs
         self.assertIn("complete Git history", result["error"])
         self.assertEqual(result["totalCommits"], 0)
 
+    def shallow_clone(self):
+        remote = self.repo.as_uri()
+        shallow = self.root / "shallow"
+        subprocess.run(["git", "clone", "-q", "--depth=1", remote, str(shallow)], check=True)
+        self.repo = shallow
+        return remote
+
+    def test_interrupted_fetch_retries_then_scans_complete_head_and_tag_history(self):
+        remote = self.shallow_clone()
+        original = history.run_scanner
+        attempts = []
+
+        def interrupted(command, log, remaining, cancelled=None):
+            if command[0] == "git":
+                attempts.append(command)
+                if len(attempts) == 1:
+                    log.write("error: RPC failed; curl 56 Recv failure: Connection reset by peer\n"
+                              "fatal: early EOF\n")
+                    return 128
+            return original(command, log, remaining, cancelled)
+
+        with patch.object(history, "run_scanner", interrupted), patch.object(history.time, "sleep"):
+            result = history.scan(self.repo, self.head, self.output, self.config,
+                                  str(self.scanner), 1, 20, fetch_remote=remote)
+        self.assertEqual(result["status"], "clean")
+        self.assertEqual(result["completedCommits"], 3)
+        self.assertEqual(len(attempts), 2)
+        self.assertEqual(self.git("rev-parse", "HEAD"), self.head)
+        self.assertEqual(self.git("rev-parse", "--is-shallow-repository"), "false")
+        self.assertIn("Connection reset", (self.output / "fetch-1.log").read_text())
+        self.assertIn(self.tag_commit, (self.output / "commits.txt").read_text())
+
+    def test_fetch_rechecks_shallow_state_after_a_partial_success(self):
+        remote = self.shallow_clone()
+        original = history.run_scanner
+        attempts = []
+
+        def interrupted_after_fetch(command, log, remaining, cancelled=None):
+            code = original(command, log, remaining, cancelled)
+            if command[0] == "git":
+                attempts.append(command)
+                if len(attempts) == 1:
+                    self.assertEqual(code, 0)
+                    log.write("fatal: the remote end hung up unexpectedly\n")
+                    return 128
+            return code
+
+        with patch.object(history, "run_scanner", interrupted_after_fetch), patch.object(history.time, "sleep"):
+            result = history.scan(self.repo, self.head, self.output, self.config,
+                                  str(self.scanner), 1, 20, fetch_remote=remote)
+        self.assertEqual(result["status"], "clean")
+        self.assertIn("--unshallow", attempts[0])
+        self.assertNotIn("--unshallow", attempts[1])
+
+    def test_failed_fetch_is_bounded_and_keeps_incomplete_evidence_without_scanning(self):
+        remote = self.shallow_clone()
+        for fault, expected_attempts in (("reset", 3), ("timeout", 3), ("missing", 1)):
+            with self.subTest(fault=fault):
+                output = self.root / fault
+                output.mkdir()
+                calls = []
+
+                def failed(command, log, remaining, cancelled=None):
+                    self.assertEqual(command[0], "git", "scanner ran after an incomplete fetch")
+                    self.assertLessEqual(remaining, 20)
+                    calls.append(command)
+                    if fault == "timeout":
+                        raise subprocess.TimeoutExpired(command, remaining)
+                    log.write("fatal: early EOF\n" if fault == "reset" else
+                              "fatal: repository not found\n")
+                    return 128
+
+                with patch.object(history, "run_scanner", failed), patch.object(history.time, "sleep"):
+                    result = history.scan(self.repo, self.head, output, self.config,
+                                          str(self.scanner), 1, 20, fetch_remote=remote)
+                self.assertEqual(len(calls), expected_attempts)
+                self.assertEqual(result["status"], "incomplete")
+                self.assertEqual(result["completedCommits"], 0)
+                self.assertEqual(json.loads((output / "summary.json").read_text())["status"], "incomplete")
+                self.assertTrue((output / "fetch-1.log").is_file())
+
+    def test_fetch_refuses_a_checkout_other_than_the_pinned_head(self):
+        with patch.object(history, "run_scanner") as runner:
+            result = history.scan(self.repo, self.initial, self.output, self.config,
+                                  str(self.scanner), 1, 20, fetch_remote=self.repo.as_uri())
+        runner.assert_not_called()
+        self.assertEqual(result["status"], "incomplete")
+        self.assertIn("checkout", result["error"])
+
+    def test_cli_fetches_before_inventory_and_keeps_a_successful_receipt(self):
+        remote = self.shallow_clone()
+        result = subprocess.run([sys.executable, history.__file__, "--source", str(self.repo),
+                                 "--head", self.head, "--fetch-remote", remote,
+                                 "--output-dir", str(self.output), "--config", str(self.config),
+                                 "--gitleaks", str(self.scanner)], text=True, capture_output=True)
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        envelope = json.loads(result.stdout)
+        self.assertTrue(envelope["ok"])
+        self.assertEqual(envelope["result"]["completedCommits"], 3)
+
     def test_timeout_cannot_acknowledge_a_batch(self):
         with patch.dict(os.environ, SCANNER_FAULT="hang"):
             result = history.scan(self.repo, self.head, self.output, self.config, str(self.scanner), 1, 1)

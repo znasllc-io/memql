@@ -1,9 +1,10 @@
 #!/usr/bin/env python3
 """Scan pinned Git history in bounded Gitleaks processes, retaining coverage.
 
-Scheduling, fetching and publication belong to the caller. Every commit reachable
-from the selected head and the captured tags is scanned. Process failure or an
-incomplete report can never produce a successful coverage receipt.
+Scheduling and publication belong to the caller. An optional remote fetch fills
+in shallow history before inventory, within the same deadline. Every commit
+reachable from the selected head and the captured tags is scanned. Process
+failure or an incomplete report can never produce a successful coverage receipt.
 """
 import argparse
 from concurrent.futures import FIRST_COMPLETED, ThreadPoolExecutor, wait
@@ -146,13 +147,61 @@ def scan_batches(source, commits, output, config, binary, batch_size, jobs, dead
                 future.cancel()
 
 
-def scan(source, head, output, config, binary, batch_size, timeout, jobs=1):
+def fetch_history(source, head, remote, output, deadline):
+    """Retry interrupted transfers, retaining evidence before scanning anything.
+
+    Run 10 of #6018 lost a GitHub transfer at its last 5303 bytes. A successful
+    retry must still supply full history and leave the checkout pinned. Git may
+    have updated shallow metadata before failing, so inspect it on each attempt.
+    The existing process-group runner bounds and reaps Git's helpers as well.
+    """
+    expected = git(source, "rev-parse", "--verify", head + "^{commit}")
+    if git(source, "rev-parse", "HEAD") != expected:
+        raise RuntimeError("history fetch requires the checkout to match the pinned head")
+    transient = re.compile(
+        r"early EOF|unexpected disconnect|remote end hung up|connection reset|"
+        r"GnuTLS recv error|could not resolve host|failed to connect|"
+        r"(?:HTTP|returned error:)\s*(?:429|5\d\d)\b", re.IGNORECASE)
+    for attempt in range(1, 4):
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
+            raise RuntimeError("history fetch exhausted the scan deadline")
+        command = ["git", "-C", str(source), "fetch", "--tags"]
+        if git(source, "rev-parse", "--is-shallow-repository") == "true":
+            command.append("--unshallow")
+        command.extend(["--", remote, expected])
+        path = output / f"fetch-{attempt}.log"
+        timed_out = False
+        with path.open("w") as log:
+            try:
+                code = run_scanner(command, log, min(300, remaining))
+            except subprocess.TimeoutExpired:
+                timed_out = True
+                code = 124
+                log.write("history fetch attempt timed out\n")
+        if code == 0:
+            if git(source, "rev-parse", "HEAD") != expected:
+                raise RuntimeError("history fetch changed the pinned checkout")
+            if git(source, "rev-parse", "--is-shallow-repository") != "false":
+                raise RuntimeError("history fetch left incomplete shallow history")
+            return
+        retryable = timed_out or transient.search(path.read_text(errors="replace"))
+        if not retryable or attempt == 3:
+            raise RuntimeError(f"history fetch failed after {attempt} attempt(s) (exit {code}); see {path.name}")
+        print(f"history fetch attempt {attempt} interrupted; retrying (see {path.name})",
+              file=sys.stderr, flush=True)
+        time.sleep(min(attempt * 2, max(0, deadline - time.monotonic())))
+
+
+def scan(source, head, output, config, binary, batch_size, timeout, jobs=1, fetch_remote=None):
     summary = {"status": "incomplete", "version": VERSION, "completedCommits": 0,
                "totalCommits": 0, "findings": 0, "batchSize": batch_size,
                "jobs": jobs, "batchArchive": "batches.tar", "batches": []}
     deadline = time.monotonic() + timeout
     findings = []
     try:
+        if fetch_remote is not None:
+            fetch_history(source, head, fetch_remote, output, deadline)
         if git(source, "rev-parse", "--is-shallow-repository") != "false":
             raise RuntimeError("full-history scanning requires a complete Git history")
         head = git(source, "rev-parse", "--verify", head + "^{commit}")
@@ -234,6 +283,7 @@ def main():
     parser = Parser(description=__doc__)
     parser.add_argument("--source", type=Path, default=Path.cwd())
     parser.add_argument("--head", default="HEAD")
+    parser.add_argument("--fetch-remote", help="fetch complete history and tags before inventory, with bounded retries")
     parser.add_argument("--output-dir", type=Path, required=True)
     parser.add_argument("--config", type=Path, default=Path(".gitleaks.toml"))
     parser.add_argument("--gitleaks", default="gitleaks")
@@ -252,7 +302,8 @@ def main():
         return emit(error=str(exc), code=5)
     try:
         summary = scan(args.source.resolve(), args.head, args.output_dir.resolve(),
-                       args.config.resolve(), args.gitleaks, args.batch_size, args.timeout, args.jobs)
+                       args.config.resolve(), args.gitleaks, args.batch_size, args.timeout,
+                       args.jobs, args.fetch_remote)
     except OSError as exc:
         # Evidence persistence can itself fail (for example, a full disk).
         # No final coverage receipt is permission to report success.
