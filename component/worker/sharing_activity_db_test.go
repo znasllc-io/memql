@@ -16,6 +16,7 @@ import (
 	"github.com/znasllc-io/memql/component/auth"
 	"github.com/znasllc-io/memql/component/database/dbtest"
 	memorynodes "github.com/znasllc-io/memql/component/database/memory-nodes"
+	langparser "github.com/znasllc-io/memql/component/language/parser"
 	"github.com/znasllc-io/memql/component/memql"
 )
 
@@ -61,7 +62,7 @@ func TestSharingActivityPersistsAcrossReplicasAndRejectsFormerStreams(t *testing
 		t.Fatal(err)
 	}
 	read := func() map[string]any {
-		nodes, err := b.executeAndExtract(auth.ContextWithUserActor(memql.ContextWithFreshRead(ctx), owner), fmt.Sprintf("query workersForUser(ownerUserId:%q)", owner))
+		nodes, err := b.executeAndExtract(auth.ContextWithUserActor(memql.ContextWithFreshRead(ctx), owner), fmt.Sprintf("query workersForUser(ownerUserId:%s)", langparser.QuoteString(owner)))
 		if err != nil {
 			t.Fatal(err)
 		}
