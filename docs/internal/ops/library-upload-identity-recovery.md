@@ -78,7 +78,9 @@ capabilities.
 | Operation | Viewer | Member | Admin | Developer | Owner |
 |---|---|---|---|---|---|
 | Open Files and read authorized Markdown | Yes | Yes | Yes | Yes | Yes |
-| Ordinary data mutations | No | Yes | Yes | Yes | Yes |
+| Manage own files, folders, reviews and history | Yes | Yes | Yes | Yes | Yes |
+| Start private Ask conversations and submit requests | Yes | Yes | Yes | Yes | Yes |
+| Ordinary shared-data mutations | No | Yes | Yes | Yes | Yes |
 | Campaign/audience creation | No by base role | Subject to organization scope | Subject to scope/grants | Subject to scope/grants | Subject to scope/grants |
 | Manage people, groups and other people's sessions | No | No | Yes, within governance rules | No | Yes, within governance rules |
 | Author constructs | No | No | No | Yes | Yes |
@@ -95,17 +97,23 @@ offering principal management, and `update group` before group changes.
 It no longer sends the session query merely because Developer outranks the
 person being viewed. The server's existing denial remains in place.
 
-Two additional boundaries need explicit acceptance testing when changing a
-person's role:
+Viewer is read-only for shared business data, with personal Files and Ask
+functionality. The transport admits an exact set of core owner-scoped folder,
+file-organizing and conversation-creation mutations. It does not grant
+`create data`, permit raw inserts, accept arbitrary Library mutations, or
+expose server-owned transcript/version writes. The personal exception requires
+a signed-in ranked user and effective read access to data and the app.
+Document edit, feedback, history and revision handlers retain their existing
+ownership, author, version and approval checks. The Library byte routes already
+admit the human owner, including delegated `app_session` credentials.
 
-- **Personal file writes:** Library HTTP byte routes deliberately admit a
-  human owner, including the delegated `app_session` class, without requiring
-  a data-write grant (`component/server/http_access.go`). Viewer is otherwise
-  read-only; review comments and ordinary mutations follow data capabilities.
-  This repair preserves the byte-route contract. Making Viewer strictly
-  read-only everywhere, or formally allowing personal file editing, is a
-  separate policy decision that must cover uploads, chunks, completion,
-  superseding, editor saves and delegated apps together.
+Ask's action runner applies the same personal/shared-data distinction before
+execution. Organization actions still use their target-specific grants and
+membership checks. A prompt cannot grant campaign/audience creation, and the
+assistant cannot forge conversation history.
+
+One additional boundary needs acceptance testing when changing a person's role:
+
 - **Existing sessions:** the stream resolves the user on connection and
   reloads on successful authentication rotation. HTTP handlers derive their
   actor from verified token claims. Refocusing OS refreshes effective grants
@@ -116,7 +124,14 @@ person's role:
 
 ## Validation
 
-The regression coverage includes bare/canonical caller and path combinations
+Viewer tests exercise folder creation/rename/archive/restore and conversation
+creation through the browser request handler on two independent engines; they
+refuse foreign folders, raw writes, business writes and forged transcripts.
+Document tests cover Viewer editing, comments, history forks, note removal and
+approval/application across replicas. Ask tests cover private histories, turn
+retries and personal-versus-business action permissions.
+
+The regression coverage also includes bare/canonical caller and path combinations
 for every seeded role and alias; rejection of another identity; inventory
 normalization; an idempotent repair with existing usage/reservations; and a
 second database pool continuing a repaired object's operation. The database

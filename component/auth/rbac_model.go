@@ -169,7 +169,8 @@ var capabilitySets = map[Role]map[verbResource]bool{
 		vr("read", "agent"), vr("read", "group"),
 	),
 	RoleReader: setOf(
-		// reader -> viewer tier: read-only.
+		// reader -> viewer tier: shared-data reads. Personal Files/Ask
+		// actions are separately admitted and remain owner-scoped.
 		vr("read", "data"), vr("read", "agent"), vr("read", "group"),
 	),
 }

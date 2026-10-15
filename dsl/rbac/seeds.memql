@@ -86,12 +86,12 @@ seed role user {
   aliases:     ["writer"]
 }
 
-@description("viewer: the read-only tier. The E1.5 (memql#2073) reconciliation target for the legacy reader slug -- reads the data plane + catalogs, writes nothing. Ranked below user (member) so a member out-ranks a viewer. Mirrors component/auth/rbac_model.go's reader/viewer capability profile.")
+@description("viewer: reads shared data and catalogs, manages owned Files content and private Ask conversations through their guarded app actions. No shared-data writes or management. The reader slug maps here; ranked below Member.")
 seed role viewer {
   slug:        "viewer"
   name:        "Viewer"
   rank:        50
-  description: "Read-only tier: reads the data plane and the catalogs; no writes, no management. The reader slug maps here."
+  description: "Reads shared data and catalogs; manages own files and Ask conversations. No shared-data writes or management. The reader slug maps here."
   predefined:  true
   aliases:     ["reader"]
 }
@@ -237,7 +237,7 @@ seed capability cap-user-read-group { roleSlug: "user"  verb: "read"    resource
 
 // =============================================================================
 //   viewer -- read-only tier (the reader-slug reconciliation target, E1.5).
-//   Reads the data plane + catalogs; writes nothing.
+//   Reads shared data + catalogs. Personal Files/Ask actions retain owner guards.
 // =============================================================================
 
 @description("viewer: read the data plane (read-only tier).")

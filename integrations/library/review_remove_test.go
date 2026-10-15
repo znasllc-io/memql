@@ -31,8 +31,8 @@ func testDeleteDocumentAnnotationsAcrossReplicas(t *testing.T, f *revisionDB) {
 			if _, err = f.second.handleRemoveDocumentAnnotation(revisionActor(f.owner+"-outsider", auth.RoleWriter), remove, 0); err == nil {
 				t.Fatal("outsider deleted annotation")
 			}
-			if _, err = f.second.handleRemoveDocumentAnnotation(revisionActor(f.owner, auth.RoleReader), remove, 0); err == nil {
-				t.Fatal("reader deleted annotation")
+			if _, err = f.second.handleRemoveDocumentAnnotation(revisionActor(f.owner, "ungranted"), remove, 0); err == nil {
+				t.Fatal("unknown role deleted annotation")
 			}
 			// Cluster visibility does not make another person's private note yours.
 			if _, err = f.second.handleRemoveDocumentAnnotation(revisionActor(f.owner+"-admin", auth.RoleOwner), remove, 0); err == nil {

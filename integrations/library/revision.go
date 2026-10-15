@@ -69,8 +69,7 @@ func revisionIdentity(ctx context.Context, requestID string) (work.ReviewGoalRec
 }
 func revisionWriter(ctx context.Context) error {
 	ac, ok := auth.AccessFromContext(ctx)
-	subject, hasSubject := auth.SubjectFromContext(ctx)
-	if !ok || ac == nil || ac.UserId == "" || ac.Synthetic || ac.Unranked || !hasSubject || !auth.CapableFor(ctx, subject, auth.VerbCreate, auth.ResourceData) {
+	if !ok || ac == nil || ac.UserId == "" || ac.Synthetic || ac.Unranked || !canManageDocument(ctx, auth.VerbCreate) {
 		return fmt.Errorf("you do not have permission to request document changes")
 	}
 	return nil

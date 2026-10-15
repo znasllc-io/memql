@@ -331,7 +331,8 @@ func repoRootForGateTest(t *testing.T) string {
 // than appearing as an untracked `if` in some handler.
 func TestDataPlaneGateExemptions_AreEnumerated(t *testing.T) {
 	want := map[string]bool{ // name -> enforced in allowDataPlaneAccess
-		"CallToolMsg": false,
+		"CallToolMsg":                  false,
+		"personal Files/Ask mutations": true,
 	}
 
 	got := map[string]bool{}

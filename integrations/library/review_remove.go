@@ -15,9 +15,8 @@ import (
 // resurrect it. The document lock serializes it with capture and application;
 // the approval lock has the same order as item modification and human approval.
 func (i *Integration) handleRemoveDocumentAnnotation(ctx context.Context, args map[string]any, _ int) ([]memorynodes.MemoryNode, error) {
-	subject, ok := auth.SubjectFromContext(ctx)
 	access, _ := auth.AccessFromContext(ctx)
-	if !ok || access == nil || access.UserId == "" || !auth.CapableFor(ctx, subject, auth.VerbUpdate, auth.ResourceData) {
+	if access == nil || access.UserId == "" || !canManageDocument(ctx, auth.VerbUpdate) {
 		return nil, fmt.Errorf("permission denied to remove document feedback")
 	}
 	ctx = memql.ContextWithFreshRead(ctx)

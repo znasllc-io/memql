@@ -28,6 +28,15 @@ func (e *MemQLEngine) workCapabilityAllowed(ctx context.Context, fn *Function) b
 	if fn.FunctionKind != "query" && fn.FunctionKind != "mutation" && fn.FunctionKind != "logic" && fn.FunctionKind != "builtin" {
 		return false
 	}
+	// Discovery cannot advertise unrestricted mutation/logic authority to a
+	// Viewer. Organization mutations retain their target-specific executor
+	// checks; personal mutations retain their owner checks.
+	if (fn.FunctionKind == "mutation" || fn.FunctionKind == "logic") && !e.GlobalDataCapable(ctx, auth.VerbCreate) {
+		organizationWrite := fn.FunctionKind == "mutation" && fn.MutationTemplate != nil && organizationDataWriteConcept(fn.MutationTemplate.Concept)
+		if !organizationWrite && !auth.CanManageOwnAppData(ctx, personalMutationApp(fn)) {
+			return false
+		}
+	}
 	for _, field := range workCapabilityFields(fn) {
 		if workCapabilitySecret(field) {
 			return false
@@ -234,6 +243,16 @@ func (e *MemQLEngine) workExecuteBuiltin(ctx context.Context, args map[string]an
 	// Runtime calls accept qualified names; `use` belongs to declarations,
 	// not executable expressions. Keep the namespace to avoid ambiguous names.
 	call = fn.FunctionKind + " " + call
+	// Apply the direct request's data boundary before any work receipt/effect.
+	// Ask keeps the person's authority on this replica, never a system actor.
+	if !e.OrganizationDataPlaneEnforced(ctx, call) {
+		if !e.GlobalDataCapable(ctx, auth.VerbRead) {
+			return nil, fmt.Errorf("permission denied: this action requires data access")
+		}
+		if e.DataVerbFor(ctx, call) != auth.VerbRead && !e.GlobalDataCapable(ctx, auth.VerbCreate) && !e.PersonalDataPlaneEnforced(ctx, call) {
+			return nil, fmt.Errorf("permission denied: this action requires data write access")
+		}
+	}
 	event := WorkEvent{ID: id.NewShortId(), Kind: "action", Phase: "running", Name: name, App: workCapabilityApp(fn), Navigate: workCapabilityApp(fn) != "" && fn.FunctionKind == "mutation"}
 	// Only resource identifiers are navigation hints. Never mirror arbitrary
 	// content or credentials into desktop events.

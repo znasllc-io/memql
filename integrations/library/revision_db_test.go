@@ -493,6 +493,24 @@ func (f *revisionDB) execute(engine *memql.MemQLEngine, request string, resume b
 // DSL on two independent replicas.
 // Bootstrap them once under this parent; each case owns fresh document/run IDs
 // and model state. Do not use a package-global fixture or parallel subtests.
+func TestViewerDocumentManagementAcrossReplicas(t *testing.T) {
+	f := newRevisionDB(t)
+	for _, tc := range []struct {
+		name string
+		run  func(*testing.T, *revisionDB)
+	}{
+		{"history", testHistoryBranchesAcrossReplicas},
+		{"feedback", testDeleteDocumentAnnotationsAcrossReplicas},
+		{"approval", testDocumentRevisionAnalyzesThenApprovesAndAppliesAcrossReplicas},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			personal := f.isolatedCase(t)
+			personal.ctx = revisionActor(personal.owner, auth.RoleReader)
+			tc.run(t, personal)
+		})
+	}
+}
+
 func TestDocumentRevisionWorkflow(t *testing.T) {
 	type revisionCase struct {
 		name string
@@ -632,8 +650,8 @@ func testDocumentRevisionAnalyzesThenApprovesAndAppliesAcrossReplicas(t *testing
 			if _, err = f.second.handleDocumentRevisionStatus(revisionActor("outsider", auth.RoleWriter), map[string]any{"requestId": request}, 0); err == nil {
 				t.Fatal("outsider read review")
 			}
-			if err = f.second.ValidateRevisionProposal(revisionActor(f.owner, auth.RoleReader), captured); err == nil {
-				t.Fatal("reader approved write")
+			if err = f.second.ValidateRevisionProposal(revisionActor(f.owner, "ungranted"), captured); err == nil {
+				t.Fatal("unknown role approved write")
 			}
 			decision := map[string]any{"approvalId": memql.BareShortId(asString(approval["id"])), "decision": "approved", "answer": f.accepted(request)}
 			f.query(f.other, f.ctx, "query", "decideApproval", decision)
