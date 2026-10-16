@@ -4866,6 +4866,34 @@ func PipelinesRunLatestBuild(args PipelinesRunLatestArgs) string {
 	return b.String()
 }
 
+// PipelinesRunRelease -- Start a full release build at an existing tag of the caller's connected pipeline. Resolves the immutable source commit through the source owner's current GitHub grant and supplies the tag as MEMQL_VERSION. Includes the manifest's release stages. Creates no tag, GitHub release, candidate approval or publication. A repeated request or later release webhook recovers the same attempt; use pipelinesRerun to repeat a completed attempt. A second tag for a commit already recorded under another release version is refused.
+type PipelinesRunReleaseArgs struct {
+	// The caller's connected v1:pipelines:pipeline.
+	PipelineId string
+	// An existing repository tag, such as v1.2.3, without refs/tags/.
+	Tag string
+}
+
+// PipelinesRunRelease calls the engine builtin pipelinesRunRelease.
+func (qc *QueryClient) PipelinesRunRelease(ctx context.Context, args PipelinesRunReleaseArgs) (*Result, error) {
+	call := PipelinesRunReleaseBuild(args)
+	return qc.executeNamed(ctx, "pipelinesRunRelease", call)
+}
+
+func PipelinesRunReleaseBuild(args PipelinesRunReleaseArgs) string {
+	var b strings.Builder
+	b.WriteString("builtin pipelinesRunRelease(")
+	b.WriteString("pipelineId: ")
+	b.WriteString(quoteMemQL(args.PipelineId))
+	if b.Len() > 28 {
+		b.WriteString(", ")
+	}
+	b.WriteString("tag: ")
+	b.WriteString(quoteMemQL(args.Tag))
+	b.WriteString(")")
+	return b.String()
+}
+
 // PipelinesStatus -- Read pipeline configuration and each workbench's last runner isolation verdict. This read never starts a build or an isolation probe. Restricted to cluster operators.
 type PipelinesStatusArgs struct {
 }

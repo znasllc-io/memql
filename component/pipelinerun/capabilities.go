@@ -99,6 +99,12 @@ func (i *Integration) Capabilities() []memql.IntegrationCapability {
 			ArgsSchema:  map[string]string{"pipelineId": "string (required) -- the caller's v1:pipelines:pipeline; it must be disconnected"},
 		},
 		{
+			Name:        "runRelease",
+			Description: "Open a full release build for an existing tag of the caller's connected pipeline. Resolves and pins the exact commit through the owner's current grant; deduplicates with release webhooks. Creates no tag, public release or publication. Answers {runId, attempt, status, sha, version}.",
+			Handler:     i.handleRunRelease,
+			ArgsSchema:  map[string]string{"pipelineId": "string (required) -- the caller's connected pipeline", "tag": "string (required) -- an existing repository tag"},
+		},
+		{
 			Name:        "rerun",
 			Description: "Re-run one of the caller's runs: the next attempt of its run key, with the original's mode and event, trigger rerun and rerunOf naming the original, and a new check run. With failedOnly, only what the original did not pass runs again -- every step it passed with the same package slice is carried over as skipped pipeline_passed_earlier -- and a run with no failed or cancelled step is refused pipeline_nothing_to_rerun. Refused while the key's newest attempt is still going. Answers {runId, attempt, rerunOf, status, failedOnly}.",
 			Handler:     i.handleRerun,

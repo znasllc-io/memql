@@ -128,6 +128,16 @@ builtin pipelinesRunLatest {
 }
 
 @sdk
+@executor("integration.pipelines.runRelease")
+@args(profile="object")
+@requiresCapability("execute", "app:deployables/rerun")
+@description("Start a full release build at an existing tag of the caller's connected pipeline. Resolves the immutable source commit through the source owner's current GitHub grant and supplies the tag as MEMQL_VERSION. Includes the manifest's release stages. Creates no tag, GitHub release, candidate approval or publication. A repeated request or later release webhook recovers the same attempt; use pipelinesRerun to repeat a completed attempt. A second tag for a commit already recorded under another release version is refused.")
+builtin pipelinesRunRelease {
+  pipelineId string! @description("The caller's connected v1:pipelines:pipeline.")
+  tag string! @description("An existing repository tag, such as v1.2.3, without refs/tags/.")
+}
+
+@sdk
 @executor("integration.pipelines.cancel")
 @args(profile="object")
 @requiresCapability("execute", "app:deployables/cancel")
