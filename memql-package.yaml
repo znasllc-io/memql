@@ -4,40 +4,45 @@
 formatVersion: 1
 name: memql-cockpit
 pipeline:
-  image: ghcr.io/znasllc-io/memql-toolchain@sha256:7a457e4d96d2e7f03032a686a65d5447c3b6a78987c19d5622bdbfdc917e11fc
-  platform: linux/arm64
+  schedule: daily
+  image: ghcr.io/znasllc-io/memql-toolchain@sha256:ae195dcff54b4f67eac2c5669612ba1a886f789fae1e6325adcfaab9679a7bf9
+  platform: linux/amd64
   stages:
   - name: checks
     steps:
     - name: build
       placement: cluster
+      caches: [go]
       timeout: 30m
       run: |
         set -eu
-        export GOTOOLCHAIN=go1.26.6 GOWORK=off GOFLAGS=-p=2 GOMAXPROCS=2
+        export GOTOOLCHAIN=go1.26.9 GOWORK=off GOFLAGS=-p=2 GOMAXPROCS=2
         python3 scripts/ci/prepare.py
         cd .memql-ci/memql-cockpit
         CGO_ENABLED=0 go build ./...
     - name: vet
       placement: cluster
+      caches: [go]
       timeout: 30m
       run: |
         set -eu
-        export GOTOOLCHAIN=go1.26.6 GOWORK=off GOFLAGS=-p=2 GOMAXPROCS=2
+        export GOTOOLCHAIN=go1.26.9 GOWORK=off GOFLAGS=-p=2 GOMAXPROCS=2
         python3 scripts/ci/prepare.py
         cd .memql-ci/memql-cockpit
         go vet ./...
     - name: gofmt
       placement: cluster
+      caches: [go]
       timeout: 30m
       run: |
         set -eu
-        export GOTOOLCHAIN=go1.26.6 GOWORK=off GOFLAGS=-p=2 GOMAXPROCS=2
+        export GOTOOLCHAIN=go1.26.9 GOWORK=off GOFLAGS=-p=2 GOMAXPROCS=2
         python3 scripts/ci/prepare.py
         cd .memql-ci/memql-cockpit
         test -z "$(gofmt -l .)"
     - name: memql-pin-guard
       placement: cluster
+      caches: [go]
       timeout: 30m
       run: |
         set -eu
@@ -52,7 +57,7 @@ pipeline:
         docker: true
       run: |
         set -eu
-        export GOTOOLCHAIN=go1.26.6 GOWORK=off GOFLAGS=-p=2 GOMAXPROCS=2
+        export GOTOOLCHAIN=go1.26.9 GOWORK=off GOFLAGS=-p=2 GOMAXPROCS=2
         python3 scripts/ci/prepare.py
         cd .memql-ci/memql-cockpit
         docker info >/dev/null
@@ -61,10 +66,11 @@ pipeline:
         go test -race -count=1 -timeout=600s ./...
     - name: fuzz
       placement: cluster
+      caches: [go]
       timeout: 60m
       run: |
         set -eu
-        export GOTOOLCHAIN=go1.26.6 GOWORK=off GOFLAGS=-p=2 GOMAXPROCS=2
+        export GOTOOLCHAIN=go1.26.9 GOWORK=off GOFLAGS=-p=2 GOMAXPROCS=2
         python3 scripts/ci/prepare.py
         cd .memql-ci/memql-cockpit
         bash <<'MEMQL_FUZZ'
@@ -101,7 +107,7 @@ pipeline:
       platform: linux/amd64
       run: |
         set -eu
-        export GOTOOLCHAIN=go1.26.6 GOWORK=off GOFLAGS=-p=2 GOMAXPROCS=2
+        export GOTOOLCHAIN=go1.26.9 GOWORK=off GOFLAGS=-p=2 GOMAXPROCS=2
         python3 scripts/ci/prepare.py
         cd .memql-ci/memql-cockpit
         CGO_ENABLED=1 go build -tags computeruse ./...
@@ -115,7 +121,7 @@ pipeline:
         macos_tooling: true
       run: |
         set -eu
-        export GOTOOLCHAIN=go1.26.6 GOWORK=off GOFLAGS=-p=2 GOMAXPROCS=2
+        export GOTOOLCHAIN=go1.26.9 GOWORK=off GOFLAGS=-p=2 GOMAXPROCS=2
         python3 scripts/ci/prepare.py
         cd .memql-ci/memql-cockpit
         CGO_ENABLED=1 go build -tags computeruse ./...
@@ -158,66 +164,98 @@ pipeline:
         bash scripts/install/menubar_test.sh
         python3 scripts/install/render-mark.py --check
         python3 scripts/install/ui_test.py
-  - name: security
+  - name: vulnerabilities
+    on: [pull_request, merge_group, push, release, schedule, manual]
     runAfterFailure: true
     steps:
     - name: govulncheck
       placement: cluster
+      caches: [go]
       timeout: 30m
       artifacts:
       - .memql-ci/memql-cockpit/.memql-security/go
       run: |
         set -eu
-        export GOTOOLCHAIN=go1.26.6 GOWORK=off GOFLAGS=-p=2 GOMAXPROCS=2
+        export GOTOOLCHAIN=go1.26.9 GOWORK=off GOFLAGS=-p=2 GOMAXPROCS=2
         python3 scripts/ci/prepare.py
         cd .memql-ci/memql-cockpit
         mkdir -p .memql-security/go
         go install golang.org/x/vuln/cmd/govulncheck@v1.3.0
         export PATH="$(go env GOPATH)/bin:$PATH"
         govulncheck ./... > .memql-security/go/findings.txt 2>&1
+  - name: secrets-current
+    on: [pull_request, merge_group, push]
+    runAfterFailure: true
+    steps:
     - name: gitleaks
       placement: cluster
-      timeout: 90m
-      artifacts:
-      - .memql-security/gitleaks
+      caches: [go]
+      timeout: 45m
+      memoryMiB: 4096
+      artifacts: [.memql-security/gitleaks]
       run: |
         set -eu
-        export GOTOOLCHAIN=go1.26.6 GOMAXPROCS=2 GOMEMLIMIT=768MiB
-        mkdir -p .memql-security/gitleaks
+        export GOTOOLCHAIN=go1.26.9 GOMAXPROCS=2 GOFLAGS=-p=2 GOMEMLIMIT=768MiB
+        export GIT_CONFIG_GLOBAL=/dev/null GIT_CONFIG_SYSTEM=/dev/null GIT_TERMINAL_PROMPT=0
+        export GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=safe.directory GIT_CONFIG_VALUE_0="$PWD"
         go install github.com/zricethezav/gitleaks/v8@v8.30.1
         export PATH="$(go env GOPATH)/bin:$PATH"
+        python3 scripts/ci/gitleaks-history.py --head="$MEMQL_SHA" --base="$MEMQL_BASE_SHA" --fetch-remote="https://github.com/${MEMQL_REPOSITORY}.git" --gitleaks="$(command -v gitleaks)" --output-dir=.memql-security/gitleaks --jobs=2 --batch-size=8 --timeout=2400
+  - name: security
+    schedule: weekly
+    on: [release, schedule, manual]
+    runAfterFailure: true
+    steps:
+    - name: gitleaks
+      placement: cluster
+      caches: [go]
+      timeout: 45m
+      memoryMiB: 4096
+      artifacts: [.memql-security/gitleaks]
+      run: |
+        set -eu
+        export GOTOOLCHAIN=go1.26.9 GOMAXPROCS=2 GOFLAGS=-p=2 GOMEMLIMIT=768MiB
         export GIT_CONFIG_GLOBAL=/dev/null GIT_CONFIG_SYSTEM=/dev/null GIT_TERMINAL_PROMPT=0
-        if [ "$(git rev-parse --is-shallow-repository)" = true ]; then
-          git -c credential.helper= fetch --unshallow --tags https://github.com/znasllc-io/memql-cockpit.git "$MEMQL_SHA"
-        else
-          git -c credential.helper= fetch --tags https://github.com/znasllc-io/memql-cockpit.git "$MEMQL_SHA"
-        fi
-        test "$(git rev-parse HEAD)" = "$MEMQL_SHA"
-        gitleaks git . --no-banner --redact=100 --report-format=json --report-path=.memql-security/gitleaks/findings.json
+        export GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=safe.directory GIT_CONFIG_VALUE_0="$PWD"
+        go install github.com/zricethezav/gitleaks/v8@v8.30.1
+        export PATH="$(go env GOPATH)/bin:$PATH"
+        python3 scripts/ci/gitleaks-history.py --head="$MEMQL_SHA" --fetch-remote="https://github.com/${MEMQL_REPOSITORY}.git" --gitleaks="$(command -v gitleaks)" --output-dir=.memql-security/gitleaks --jobs=2 --batch-size=8 --timeout=2400
     - name: codeql-go
       placement: cluster
+      caches: [go]
       timeout: 3h
       artifacts:
       - .memql-ci/memql-cockpit/.memql-security/codeql
       run: |
         set -eu
-        export GOTOOLCHAIN=go1.26.6 GOWORK=off GOFLAGS=-p=2 GOMAXPROCS=2
+        export GOTOOLCHAIN=go1.26.9 GOWORK=off GOFLAGS=-p=2 GOMAXPROCS=2
         python3 scripts/ci/prepare.py
         cd .memql-ci/memql-cockpit
         mkdir -p .memql-security/codeql
-        curl --fail --location --output ../codeql.tar.gz https://github.com/github/codeql-action/releases/download/codeql-bundle-v2.27.1/codeql-bundle-linux-arm64.tar.gz
-        printf '%s  %s\n' 5f05cc0793971e48824d00e570afe6144a27a325360b43bd823d755aed919817 ../codeql.tar.gz | sha256sum -c -
+        curl --fail --location --output ../codeql.tar.gz https://github.com/github/codeql-action/releases/download/codeql-bundle-v2.27.1/codeql-bundle-linux64.tar.gz
+        printf '%s  %s\n' 1d380f79896ededc654c7b21fafb3360136f1aeb678ad4df4df9af3910c6b815 ../codeql.tar.gz | sha256sum -c -
         tar -xzf ../codeql.tar.gz -C ..
         ../codeql/codeql version --format=json > .memql-security/codeql/version.json
         ../codeql/codeql database create ../codeql-database --language=go --source-root="$PWD" --command='go build ./...' --threads=2 --ram=4096
         ../codeql/codeql database analyze ../codeql-database codeql/go-queries:codeql-suites/go-security-and-quality.qls --threads=2 --ram=4096 --format=sarifv2.1.0 --sarif-category=/language:go --output=.memql-security/codeql/results.sarif
       memoryMiB: 6144
+  - name: security-reports
+    schedule: weekly
+    on: [release, schedule, manual]
+    runAfterFailure: true
+    steps:
+    - name: codeql-go
+      timeout: 5m
+      sarif:
+        step: security.codeql-go
+        path: .memql-ci/memql-cockpit/.memql-security/codeql/results.sarif
   - name: release-build
     'on':
     - release
     steps:
     - name: headless
       placement: cluster
+      caches: [go]
       timeout: 60m
       artifacts:
       - .memql-ci/memql-cockpit/dist
@@ -225,7 +263,7 @@ pipeline:
       - .memql-ci/memql-cockpit/sbom
       run: |
         set -eu
-        export GOTOOLCHAIN=go1.26.6 GOWORK=off GOFLAGS=-p=2 GOMAXPROCS=2
+        export GOTOOLCHAIN=go1.26.9 GOWORK=off GOFLAGS=-p=2 GOMAXPROCS=2
         python3 scripts/ci/prepare.py
         cd .memql-ci/memql-cockpit
         env -u GOFLAGS make dist
@@ -250,7 +288,7 @@ pipeline:
       - .memql-ci/memql-cockpit/sbom
       run: |
         set -eu
-        export GOTOOLCHAIN=go1.26.6 GOWORK=off GOFLAGS=-p=2 GOMAXPROCS=2
+        export GOTOOLCHAIN=go1.26.9 GOWORK=off GOFLAGS=-p=2 GOMAXPROCS=2
         python3 scripts/ci/prepare.py
         cd .memql-ci/memql-cockpit
         test "$(go env GOOS)/$(go env GOARCH)" = darwin/arm64
@@ -280,7 +318,7 @@ pipeline:
       - .memql-ci/memql-cockpit/sbom
       run: |
         set -eu
-        export GOTOOLCHAIN=go1.26.6 GOWORK=off GOFLAGS=-p=2 GOMAXPROCS=2
+        export GOTOOLCHAIN=go1.26.9 GOWORK=off GOFLAGS=-p=2 GOMAXPROCS=2
         python3 scripts/ci/prepare.py
         cd .memql-ci/memql-cockpit
         test "$(go env GOOS)/$(go env GOARCH)" = darwin/amd64
@@ -307,7 +345,7 @@ pipeline:
       - .memql-ci/memql-cockpit/sbom
       run: |
         set -eu
-        export GOTOOLCHAIN=go1.26.6 GOWORK=off GOFLAGS=-p=2 GOMAXPROCS=2
+        export GOTOOLCHAIN=go1.26.9 GOWORK=off GOFLAGS=-p=2 GOMAXPROCS=2
         python3 scripts/ci/prepare.py
         cd .memql-ci/memql-cockpit
         test "$(go env GOOS)/$(go env GOARCH)" = linux/arm64
@@ -330,7 +368,7 @@ pipeline:
       - .memql-ci/memql-cockpit/sbom
       run: |
         set -eu
-        export GOTOOLCHAIN=go1.26.6 GOWORK=off GOFLAGS=-p=2 GOMAXPROCS=2
+        export GOTOOLCHAIN=go1.26.9 GOWORK=off GOFLAGS=-p=2 GOMAXPROCS=2
         python3 scripts/ci/prepare.py
         cd .memql-ci/memql-cockpit
         test "$(go env GOOS)/$(go env GOARCH)" = linux/amd64

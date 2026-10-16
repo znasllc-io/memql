@@ -24,8 +24,8 @@ is not evidence that its host, trigger or publication path has run.
 | `ci.yml` | Headless build, race suite, discovered 20-second fuzz targets, gofmt, vet, single engine-pin guard; native Linux/macOS computer-use build and vet; macOS archive and isolated installer checks | Native Linux amd64 with Docker and X11 headers; macOS arm64 with Xcode. Real computer-use tests remain excluded because they operate a display. |
 | `install-scripts-lint.yml` | Bash/POSIX syntax, ShellCheck, installer library/menu tests and rendered-mark/UI assertions on Linux amd64 and macOS arm64 | ShellCheck must already be installed on each consenting host. No host package installation is implicit. |
 | `govulncheck.yml` | Exact v1.3.0 scanner, complete module, retained findings | Weekly trigger and installed run; findings and scanner failures remain failures. |
-| `gitleaks.yml` | Exact v8.30.1 scanner, candidate history and tags, redacted report | Installed full-history run. Cockpit's legacy PR scan is also full-history; this port preserves it. |
-| `codeql.yml` | Go manual build, pinned CodeQL 2.27.1 bundle with verified SHA-256, **security-and-quality**, retained SARIF | Weekly trigger and SARIF publication remain unqualified. Local Linux headless scan passed; other build tags and operating systems need their own coverage. |
+| `gitleaks.yml` | Exact v8.30.1 scanner; introduced commits on PR/push/merge candidates, full candidate history and tags weekly and on release, redacted coverage receipts | Installed commit-range and full-history runs. A secret introduced and removed inside a PR remains in the selected commit range. |
+| `codeql.yml` | Go manual build, pinned CodeQL 2.27.1 bundle with verified SHA-256, **security-and-quality**, retained SARIF | Weekly trigger and driver-owned SARIF publication are declared; installed delivery remains unqualified. Local Linux headless scan passed; other build tags and operating systems need their own coverage. |
 | `release.yml` | Headless four-platform build/archives; native computer-use builds on darwin/linux × arm64/amd64; macOS menu/app archives | Exact release-event/tag qualification, collection of all four computer-use checksums, immutable cross-step artifact aggregation and GitHub release upload. No upload command or credential is introduced here. |
 | `sbom.yml` | CycloneDX v1.10.0 inventories **each built binary**, JSON and XML retained with that build | Cross-step collection and publication of the eight binary inventories; manual release-asset re-inventory trigger. A source dependency list cannot substitute for these binary inventories. |
 | `scorecard.yml` | No equivalent declared | Scorecard's branch-protection event, weekly trigger, identity-token attestation, public result publication and SARIF upload require an installed authorized equivalent. This row cannot be marked passed by another scan. |
@@ -34,8 +34,8 @@ PR, merge-candidate, push and release selection use the pipeline event contract.
 The core workflow retains a failure while running the security stage, and blocks
 release builds after any required failure. The manifest never turns a missing
 platform, missing tool or denied consent into a successful skipped command.
-Linux container commands use the public pinned ARM64 toolchain and explicitly
-select Go 1.26.6, matching the legacy lanes. Native commands require the exact
+Linux container commands use the public pinned AMD64 toolchain and explicitly
+select Go 1.26.9. The image matches the bounded AKS build pool. Native commands require the exact
 declared platform; Linux hosts also need CGO's compiler and X11 development
 headers, and macOS hosts need Xcode command-line tools. Release packaging is
 the existing local/ad-hoc signing path; distribution signing credentials and
@@ -90,3 +90,16 @@ source rather than a zero-finding claim for the changed source. The final
 exact-source scan at `bb81d162c46ff4cb5ad1e2dc54499033e792622b` completed with
 zero SARIF findings, again covering 172 of 379 Go files. The affected Linux
 inference package tests passed in the same pinned Linux container.
+
+## Current build-pool port
+
+The recipe now selects Linux AMD64 and Go 1.26.9. Native host declarations
+remain explicit. The daily schedule selects only opted-in stages; full-history
+secret checks run weekly and on release/manual qualification. PR, push and
+merge-candidate scans cover every introduced commit, including a secret added
+and removed before the final tree. A missing predecessor falls back to full
+history; an unreadable nonempty base fails. The bounded scanner and its
+regressions are copied from the engine, preserving failure and coverage receipts.
+These additions require an engine containing memql#6137's stage cadence; the
+Cockpit SARIF delivery step also requires memql#6146. Historical results above
+are not qualification of this rebased source or of installed execution.
