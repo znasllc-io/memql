@@ -436,6 +436,12 @@ func (i *Integration) dispatchRun(ctx context.Context, req DispatchRequest) bool
 		// (runnerOwnsRecovery).
 		return false
 	}
+	var err error
+	ctx, err = i.runOwnerActor(ctx, req.RunId, req.OwnerUserId)
+	if err != nil {
+		i.log().Warn("work dispatch: could not restore intake authority", "run", req.RunId, "error", err)
+		return false
+	}
 	claimer := i.runClaimerRef()
 	if claimer == nil {
 		// REFUSED, not degraded. Running unclaimed on a multi-replica agent
