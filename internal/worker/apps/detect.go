@@ -2,6 +2,7 @@ package apps
 
 import (
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"os"
@@ -456,6 +457,9 @@ func probeCodex(home string) authState {
 		if strings.TrimSpace(access) != "" || strings.TrimSpace(idTok) != "" {
 			state.signedIn = true
 		}
+		// Codex stores its reported ChatGPT plan in the ID token's auth claim.
+		// This is display metadata only, never an authentication/permission gate.
+		state.subscription = codexReportedPlan(idTok)
 		if sub := reportedSubscription(tokens); sub != "" {
 			state.subscription = sub
 		}
@@ -518,4 +522,34 @@ func readJSONObject(path string) (map[string]any, bool) {
 		return nil, false
 	}
 	return obj, true
+}
+
+// Decode only the bounded plan claim, never return or log the token payload.
+// Missing, malformed and expired claims remain unknown. No network or keychain
+// access is needed on the heartbeat path.
+func codexReportedPlan(token string) string {
+	if len(token) > 64*1024 {
+		return ""
+	}
+	parts := strings.Split(token, ".")
+	if len(parts) != 3 {
+		return ""
+	}
+	raw, err := base64.RawURLEncoding.DecodeString(parts[1])
+	if err != nil {
+		return ""
+	}
+	var claims map[string]any
+	if json.Unmarshal(raw, &claims) != nil {
+		return ""
+	}
+	expiry, ok := claims["exp"].(float64)
+	if !ok || expiry <= float64(time.Now().Unix()) {
+		return ""
+	}
+	account, ok := claims["https://api.openai.com/auth"].(map[string]any)
+	if !ok {
+		return ""
+	}
+	return reportedSubscription(account)
 }
