@@ -120,6 +120,15 @@ func TestRoleTestWorkDB_RecoveryAndForgedOrExpiredGrants(t *testing.T) {
 		})
 	}
 	maintenance := auth.ContextWithAccess(context.Background(), auth.MaintenanceActor("sweepWaitingWorkRuns"))
+	restored, err := planners[0].runOwnerActor(auth.ContextWithInternalOrigin(maintenance), runID, owner)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ac, ok := auth.AccessFromContext(restored)
+	if !ok || ac.Role != auth.RoleReader || ac.Synthetic || ac.Unranked || ac.IsClusterOwner() ||
+		auth.OriginFromContext(restored) != auth.OriginClient {
+		t.Fatalf("service read leaked privilege into the returned context: %+v", ac)
+	}
 	res, err := planners[0].SweepWaiting(maintenance, time.Minute)
 	if err != nil || res.Redispatched != 1 {
 		t.Fatalf("missed event was not recovered under the test grant: %+v %v", res, err)
