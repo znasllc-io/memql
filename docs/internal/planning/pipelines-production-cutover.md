@@ -155,6 +155,16 @@ success. The live API reports nine instance workflows, ten Cockpit workflows
 
 ## Acceptance and issue closure
 
+There is a measured queue-budget incompatibility to resolve under #5507:
+the ruleset waits sixty minutes, while `secrets-history` currently selects
+`merge_group` with a six-hour full-history scan budget. Analysis already skips
+merge groups, but history still takes hours in the local proof. The daily
+schedule includes analysis and currently excludes history. Establish and test
+the intended incremental/full-history event coverage before changing the
+required context; preserve secret detection and periodic complete scans.
+Neither skipping a scan nor silently extending the queue timeout establishes
+an equivalent, usable replacement.
+
 Keep #5504 (notification) and #5505 (external rollout verification) attached to
 their typed implementations and real delivery evidence. Keep #5813 for Azure
 cache behavior, #5835 for replay/recovery, and #6041 if source onboarding hits
