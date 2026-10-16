@@ -121,11 +121,19 @@ func imageBuildAgainstKubernetes(t *testing.T, controls pipelineTestControls) {
 	}
 	body, _ = json.Marshal(job)
 	kubectl(body, "-n", ns, "create", "-f", "-")
+	created := time.Now()
 	var pod *Pod
 	for ctx.Err() == nil {
 		pod, err = kube.JobPod(ctx, name)
 		if err != nil {
 			t.Fatal(err)
+		}
+		current, err := kube.GetJob(ctx, name)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if observation := Classify(current, pod, created, time.Now(), cfg, ""); observation.Failure != nil {
+			t.Fatalf("builder cannot run: %s\n%s", observation.Detail, kubectl(nil, "-n", ns, "get", "events", "-o", "wide"))
 		}
 		if state := podContainer(pod, false, ContainerStep); state != nil && state.State.Terminated != nil {
 			if state.State.Terminated.ExitCode != 0 {
