@@ -28,15 +28,26 @@ type candidateFileTarget struct {
 	Draft             *githubrelease.Metadata `json:"draft,omitempty"`
 	AssetName         string                  `json:"assetName"`
 	CredentialSecret  string                  `json:"credentialSecret"`
+	UseGitHubApp      bool                    `json:"useGitHubApp,omitempty"`
 	RootCAPEM         string                  `json:"rootCaPem,omitempty"`
 	AllowLoopbackHTTP bool                    `json:"allowLoopbackHttp,omitempty"`
 }
 
 func (t candidateFileTarget) snapshot() (candidateFileTarget, githubrelease.Target, string, error) {
 	if !candidateTargetName.MatchString(t.ID) || !candidateTargetName.MatchString(t.Component) || !candidateTargetName.MatchString(t.Artifact) ||
-		!candidateSecretName.MatchString(t.CredentialSecret) || len(t.RootCAPEM) > 64<<10 {
+		len(t.RootCAPEM) > 64<<10 {
 		return t, githubrelease.Target{}, "", errors.New("release asset target requires bounded identities and an explicit credential reference")
 	}
+	if t.UseGitHubApp {
+		// The installed App is authority for GitHub.com only. Operator trust
+		// overrides must never send its token to another server or trust root.
+		if t.CredentialSecret != "" || t.APIOrigin != "https://api.github.com" || t.UploadOrigin != "https://uploads.github.com" || t.RootCAPEM != "" || t.AllowLoopbackHTTP {
+			return t, githubrelease.Target{}, "", errors.New("GitHub App release targets require official GitHub origins and no credential or trust override")
+		}
+	} else if !candidateSecretName.MatchString(t.CredentialSecret) {
+		return t, githubrelease.Target{}, "", errors.New("release asset target requires an explicit credential reference or GitHub App selection")
+	}
+
 	t.DownloadOrigins = slices.Clone(t.DownloadOrigins)
 	slices.Sort(t.DownloadOrigins)
 	target := githubrelease.Target{APIOrigin: t.APIOrigin, UploadOrigin: t.UploadOrigin, DownloadOrigins: t.DownloadOrigins,
@@ -134,12 +145,9 @@ func (r candidateTargetReader) boundFilePublisher(ctx context.Context, d pl.Rele
 	if target.ReleaseID <= 0 {
 		return nil, errors.New("release upload requires a native draft binding")
 	}
-	if r.secret == nil {
-		return nil, errors.New("release asset credential resolver is unavailable")
-	}
-	token, err := r.secret(ctx, t.CredentialSecret)
-	if err != nil || token == "" || len(token) > 16<<10 {
-		return nil, errors.New("release asset credential is unavailable")
+	token, err := r.fileToken(ctx, t)
+	if err != nil {
+		return nil, err
 	}
 	target.Token = token
 	return githubrelease.NewPublisher(target)
@@ -150,12 +158,32 @@ func (r candidateTargetReader) fileLifecycle(ctx context.Context, d pl.ReleaseDe
 	if err != nil {
 		return nil, err
 	}
-	if r.secret == nil {
-		return nil, errors.New("release credential resolver is unavailable")
-	}
-	target.Token, err = r.secret(ctx, t.CredentialSecret)
-	if err != nil || target.Token == "" || len(target.Token) > 16<<10 {
-		return nil, errors.New("release credential is unavailable")
+	target.Token, err = r.fileToken(ctx, t)
+	if err != nil {
+		return nil, err
 	}
 	return githubrelease.NewLifecycle(target)
+}
+
+func (r candidateTargetReader) fileToken(ctx context.Context, t candidateFileTarget) (string, error) {
+	var token string
+	var err error
+	if t.UseGitHubApp {
+		repo, ok := parseRepo(t.Repository)
+		if !ok || r.appToken == nil {
+			return "", errors.New("release GitHub App credential resolver is unavailable")
+		}
+		// Existing mintReleaseToken restricts each fresh token to this one
+		// repository and Contents write. No credential enters a worker step.
+		token, err = r.appToken(ctx, repo)
+	} else {
+		if r.secret == nil {
+			return "", errors.New("release credential resolver is unavailable")
+		}
+		token, err = r.secret(ctx, t.CredentialSecret)
+	}
+	if err != nil || token == "" || len(token) > 16<<10 {
+		return "", errors.New("release credential is unavailable")
+	}
+	return token, nil
 }

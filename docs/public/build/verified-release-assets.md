@@ -53,6 +53,17 @@ and hyphen, starting with a letter or digit and never ending with a period.
 Tags are bounded ASCII Git references; source commits are exact 40-character
 lowercase Git object IDs.
 
+An operator release-asset target can select `useGitHubApp: true` instead of
+`credentialSecret`. Each native draft or publication operation then mints a
+fresh installation token restricted to that target's repository and Contents
+write permission. The App installation must have Contents write permission
+approved by its owner. This mode requires `https://api.github.com` and
+`https://uploads.github.com`, system certificate trust, and no secret reference
+or loopback transport. A missing App installation or token failure refuses the
+operation; it never falls back to another credential. The approved target
+fingerprint includes the credential selection. Registry publication continues
+to use its separately configured registry credential.
+
 The explicit draft ID matters: GitHub's
 [release-by-tag endpoint](https://docs.github.com/en/rest/releases/releases)
 finds published releases. A workflow must select or create its draft separately
