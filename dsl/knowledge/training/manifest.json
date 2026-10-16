@@ -125,7 +125,7 @@
       "domainId": "workbench",
       "sourceRef": "workbench:failureFallbackManual",
       "catalog": "workbench",
-      "sha256": "b14a30b039770609c67c02acb4da3ee3796fb4c8609a3e8761f0bf8edab0c7d1"
+      "sha256": "576ffbe39d3509f82c07e17dfe1e8a8797506ef06b32e594af79c1b10c90c06d"
     },
     {
       "domainId": "workbench",

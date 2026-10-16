@@ -1101,6 +1101,9 @@ QueryClient.prototype.composeRunRecipe = function (this: QueryClient, args: Comp
 
 /** Accept a goal and start work on it. Opens a v1:work:goal owned by the caller and its first v1:work:run in `compiling`, then dispatches compile: catalog exact match, then near-match with a gap list, then the cheap triage. Returns {goalId, runId}. A goal that fully matches the catalog reaches no model at all. */
 export interface CreateGoalArgs {
+  /** Where this goal's tools execute. Auto selects by capabilities and capacity. A change from an explicit choice requires recorded permission. Computer access still requires Cockpit and scoped access permission. Child goals inherit this choice. */
+  // Enum: auto | workbench | computer
+  destination?: string;
   /** Human-selected execution ceiling: no federation provider may serve any call of this goal, including embeddings, step overrides and fallback. Child goals inherit it and cannot relax it. */
   noPaidProviders?: boolean;
   /** The human caller's routing choice, using the same source grammar as Ask. A pinned fleet source never falls back to a paid provider. Child/model calls cannot replace their inherited choice. */
@@ -1124,6 +1127,7 @@ export interface CreateGoalArgs {
 
 export function buildCreateGoal(args: CreateGoalArgs): string {
   const parts: string[] = [];
+  if (args.destination !== undefined) parts.push("destination: " + renderMemQLValue(args.destination));
   if (args.noPaidProviders !== undefined) parts.push("noPaidProviders: " + renderMemQLValue(args.noPaidProviders));
   if (args.source !== undefined) parts.push("source: " + renderMemQLValue(args.source));
   if (args.level !== undefined) parts.push("level: " + renderMemQLValue(args.level));

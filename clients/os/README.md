@@ -1705,7 +1705,13 @@ writing. Waiting approvals retain their separate approval discussion path.
 `conversationFeed` keeps the acceptance in place and places a completed result
 at its completion time with the original request's title. Polling must preserve
 a newer local stream and reject stale reads after conversation selection changes.
-Ask always uses automatic per-step routing; no preference is kept per conversation.
+Ask uses automatic per-step model routing. The small **Run work on** selector
+beside the composer independently chooses Auto, Workbench or Computer for the
+next submitted goal. Text and voice capture it before asynchronous conversation
+creation; changing the control never rewrites accepted work. Nexus uses the same
+kit selector for a new goal. The saved run carries the choice through background
+execution and child goals. Moving between execution destinations requires the
+owner's recorded approval; selecting Computer does not grant filesystem access.
 Background acknowledgments carry a persisted `acknowledgedAt`, independently of
 the final result's `endedAt`. The queue reads the durable `workStatus`; accepting
 background work does not mean it is still queued. If acknowledgment generation

@@ -548,6 +548,13 @@ func cleanTreePath(p string) (string, error) {
 // runBuildLocal is the build itself, on THIS node: the forwarded path lands
 // here on the workbench replica, and a non-remote node lands here directly.
 func (i *Integration) runBuildLocal(ctx context.Context, req BuildRequest) BuildResult {
+	// A package build can spawn a compiler tree: it takes the whole executor
+	// budget and queues alongside user commands before unpacking any source.
+	release, err := i.acquireCapacity(ctx, true)
+	if err != nil {
+		return buildRefusal("workbench_capacity_unavailable", err.Error())
+	}
+	defer release()
 	started := time.Now()
 	limits := req.Limits.normalized()
 	self := selfNodeId()
@@ -699,6 +706,7 @@ func (i *Integration) runBuildLocal(ctx context.Context, req BuildRequest) Build
 				slog.String("noDropReason", noDropReason))...)
 	}
 	runErr := cmd.Run()
+	cleanProcessGroup(cmd)
 	lines.flush()
 
 	res := BuildResult{LogTail: tail.String()}

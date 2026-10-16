@@ -32,6 +32,9 @@ type fakeFleet struct {
 	touchErr  error
 }
 
+// Fixture work is admitted unless a consent-specific store overrides this.
+func (f *fakeFleet) CheckExecutionDestination(context.Context, string, string) error { return nil }
+
 func (f *fakeFleet) WorkersForOwner(_ context.Context, ownerUserId string) ([]Candidate, error) {
 	if f.readErr != nil {
 		return nil, f.readErr

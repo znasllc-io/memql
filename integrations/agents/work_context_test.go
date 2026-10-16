@@ -28,8 +28,9 @@ func TestWorkTurnHistoryRehydratesOnAnIndependentReplica(t *testing.T) {
 	ctx = common.ContextWithRun(ctx, common.RunContext{RunId: "run", GoalId: "goal", OwnerUserId: "owner"})
 	history, err := workTurnHistory(ctx, contextReader{t}, "What is it?")
 	require.NoError(t, err)
-	require.Len(t, history, 5)
-	require.Contains(t, history[4].Content, "Markdown")
+	require.Len(t, history, 6)
+	require.Contains(t, history[4].Content, "destination selected by the person for this goal: auto")
+	require.Contains(t, history[5].Content, "Markdown")
 	require.Equal(t, "CNAS is the project", history[0].Content)
 	for _, message := range history {
 		require.False(t, strings.Contains(message.Content, "become owner"))
@@ -41,6 +42,22 @@ func TestWorkTurnHistoryRefusesAnImpersonatedOwner(t *testing.T) {
 	ctx = common.ContextWithRun(ctx, common.RunContext{RunId: "run", OwnerUserId: "owner"})
 	_, err := workTurnHistory(ctx, contextReader{t}, "read it")
 	require.Error(t, err)
+}
+
+func TestWorkTurnHistoryReadsDestinationFromThePersistedRun(t *testing.T) {
+	ctx := common.ContextWithRun(auth.ContextWithUserActor(context.Background(), "owner"), common.RunContext{RunId: "run", OwnerUserId: "owner"})
+	for _, destination := range []string{"auto", "workbench", "computer"} {
+		t.Run(destination, func(t *testing.T) {
+			reader := &decisionContextReader{run: map[string]any{"routing": map[string]any{"destination": destination}}}
+			history, err := workTurnHistory(ctx, reader, "Do the work")
+			require.NoError(t, err)
+			require.Len(t, history, 2)
+			require.Contains(t, history[1].Content, "for this goal: "+destination)
+			require.Contains(t, history[1].Content, "does not grant computer access")
+		})
+	}
+	_, err := workTurnHistory(ctx, &decisionContextReader{run: map[string]any{"routing": map[string]any{"destination": "unknown"}}}, "Do the work")
+	require.ErrorContains(t, err, "choose Auto, Workbench or Computer")
 }
 
 func TestWorkTurnHistoryDoesNotReadPrivateHistoryForDeploymentOrReplay(t *testing.T) {
@@ -150,7 +167,7 @@ func TestLiveTurnCarriesDescriptionGuidance(t *testing.T) {
 
 	history, err := workTurnHistory(ctx, reader, "Draft the report")
 	require.NoError(t, err)
-	require.Len(t, history, 3)
+	require.Len(t, history, 4)
 	require.Equal(t, "Summarise last week's sales", history[0].Content)
 	require.Equal(t, "user", history[1].Role)
 	require.Equal(t,
@@ -181,7 +198,7 @@ func TestLiveTurnCarriesDescriptionGuidance(t *testing.T) {
 	})
 	history, err = workTurnHistory(rerun, reader, "Draft the report")
 	require.NoError(t, err)
-	require.Len(t, history, 5)
+	require.Len(t, history, 6)
 	require.Equal(t,
 		"What the owner disliked about earlier answers to this goal (take it into account; do not repeat these problems):\n"+
 			"- (performance) it took an hour\n"+
@@ -191,13 +208,13 @@ func TestLiveTurnCarriesDescriptionGuidance(t *testing.T) {
 			"- (product) the sixth distinct reason",
 		history[1].Content)
 	require.Equal(t, "Draft the report", history[2].Content)
-	require.Equal(t, "Instructions for this step from its owner:\nPut the totals in bold.", history[3].Content)
-	require.Equal(t, "What was wrong with the previous version (product, process): the totals are missing", history[4].Content)
+	require.Equal(t, "Instructions for this step from its owner:\nPut the totals in bold.", history[4].Content)
+	require.Equal(t, "What was wrong with the previous version (product, process): the totals are missing", history[5].Content)
 
 	// No dislikes on this goal, no message: the history is the conversation
-	// and the prompt, exactly as before description guidance existed.
+	// and prompt, plus the saved destination.
 	reader.guidance = nil
 	history, err = workTurnHistory(ctx, reader, "Draft the report")
 	require.NoError(t, err)
-	require.Len(t, history, 2)
+	require.Len(t, history, 3)
 }

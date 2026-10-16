@@ -66,6 +66,7 @@ builtin workApprovalDiscussionState { approvalId string! }
 @sdk
 @executor("integration.work.createGoal")
 builtin createGoal {
+  destination enum("auto", "workbench", "computer") @description("Where this goal's tools execute. Auto selects by capabilities and capacity. A change from an explicit choice requires recorded permission. Computer access still requires Cockpit and scoped access permission. Child goals inherit this choice.")
   noPaidProviders bool @description("Human-selected execution ceiling: no federation provider may serve any call of this goal, including embeddings, step overrides and fallback. Child goals inherit it and cannot relax it.")
   source        string   @description("The human caller's routing choice, using the same source grammar as Ask. A pinned fleet source never falls back to a paid provider. Child/model calls cannot replace their inherited choice.")
   level         enum("fast", "strong", "reasoning") @description("Optional human-selected intelligence level for this goal's steps; compiler calls retain their own levels.")
@@ -76,6 +77,10 @@ builtin createGoal {
   ceilings      object   @description("{tokenBudget, costCeiling, wallClockMs, maxRetries, maxModelCalls, maxEvents}. Omitted fields take the deployment's defaults; a zero is 'unset', never 'nothing allowed'.")
   requestedVia  string   @description("The surface the goal arrived through: api, ask, nexus, responsibility, library, materializer. Empty when unknown.")
 }
+
+/// Ask before moving a Computer-selected goal to the Workbench. No work executes until approval.
+@executor("integration.work.requestWorkbenchUse")
+builtin workRequestWorkbenchUse { reason string! }
 
 /// Close one of the caller's goals and ask every run of it to stop. Cancellation is REQUESTED
 /// rather than done: a run notices at its next step boundary, so a step already in flight finishes

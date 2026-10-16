@@ -170,7 +170,7 @@ func (e *CockpitAppExecutor) Run(ctx context.Context, req planner.ExecutorReques
 	if err != nil {
 		return planner.ExecutorResult{}, err
 	}
-	if refusal := e.admitSession(ctx, ownerUserId, memqlengine.AppDoorPin{}); refusal != nil {
+	if refusal := e.admitSession(ctx, ownerUserId, memqlengine.AppDoorPin{}, req.RunId); refusal != nil {
 		return planner.ExecutorResult{}, fmt.Errorf("cockpit-app: %w", refusal)
 	}
 	return e.runAdmitted(ctx, req, progress)
@@ -180,8 +180,8 @@ func (e *CockpitAppExecutor) Run(ctx context.Context, req planner.ExecutorReques
 // a pin owner did not make, and the kill switch. No agent scope is read: an
 // app session is not an agent's shell command, and a cluster where nobody
 // granted one still opens the sessions its owner routed to an app.
-func (e *CockpitAppExecutor) admitSession(ctx context.Context, ownerUserId string, pin memqlengine.AppDoorPin) *appGateRefusal {
-	return admitAppSession(ctx, e.prefs, e.logger, ownerUserId, pin)
+func (e *CockpitAppExecutor) admitSession(ctx context.Context, ownerUserId string, pin memqlengine.AppDoorPin, runID string) *appGateRefusal {
+	return admitAppSession(ctx, e.prefs, e.logger, ownerUserId, pin, runID)
 }
 
 // appSessionTarget is the owner and app a request names, or the refusal that

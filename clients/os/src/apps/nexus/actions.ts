@@ -50,6 +50,7 @@ const NOT_CONNECTED = "Not connected to the cluster, so nothing was written.";
 // ---------------------------------------------------------------------------
 
 export interface NewGoalFacts {
+  destination?: "auto" | "workbench" | "computer";
   statement: string;
   accountIds: string[];
 }
@@ -106,6 +107,7 @@ export function useCreateGoal(): CreateGoalState {
         const result = await query.createGoal({
           statement,
           requestedVia: "nexus",
+          destination: facts.destination ?? "auto",
           ...(facts.accountIds.length > 0 ? { accountIds: facts.accountIds } : {}),
         });
         const reply = result.rows()[0] ?? null;

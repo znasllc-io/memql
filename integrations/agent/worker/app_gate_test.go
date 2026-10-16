@@ -65,6 +65,11 @@ type gateStore struct {
 	prefs              Preferences
 	prefsErr           error
 	authorizationReads int
+	destinationErr     error
+}
+
+func (s *gateStore) CheckExecutionDestination(context.Context, string, string) error {
+	return s.destinationErr
 }
 
 func (s *gateStore) UserPreferences(context.Context, string) (Preferences, error) {
@@ -551,5 +556,23 @@ func TestARefusedSessionDoorOpensNoChildRun(t *testing.T) {
 	}
 	if got := f.capture.started(); len(got) != 0 {
 		t.Fatalf("%d session(s) reached the machine with the kill switch engaged", len(got))
+	}
+}
+
+func TestDestinationConsentClosesBothAppDoorsBeforeStarting(t *testing.T) {
+	f := newAppGateFixture(t, "user-1")
+	f.store.destinationErr = &memqlengine.ExecutionDestinationRequired{From: "workbench", To: "computer"}
+	_, err := f.executor(t, nil).Run(context.Background(), handedOverStep(), nil)
+	if refusalCode(err) != AppGateDestination {
+		t.Fatalf("session bypassed destination: %v", err)
+	}
+	req := chatTurn()
+	req.RunId = "goal-run"
+	_, _, err = f.inference(nil).ServeForwardedAppCall(context.Background(), "reg-app", req)
+	if refusalCode(err) != AppGateDestination {
+		t.Fatalf("forwarded app bypassed destination: %v", err)
+	}
+	if len(f.capture.started()) != 0 {
+		t.Fatal("computer app started without permission")
 	}
 }

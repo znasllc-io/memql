@@ -1519,6 +1519,9 @@ func ComposeRunRecipeBuild(args ComposeRunRecipeArgs) string {
 
 // CreateGoal -- Accept a goal and start work on it. Opens a v1:work:goal owned by the caller and its first v1:work:run in `compiling`, then dispatches compile: catalog exact match, then near-match with a gap list, then the cheap triage. Returns {goalId, runId}. A goal that fully matches the catalog reaches no model at all.
 type CreateGoalArgs struct {
+	// Where this goal's tools execute. Auto selects by capabilities and capacity. A change from an explicit choice requires recorded permission. Computer access still requires Cockpit and scoped access permission. Child goals inherit this choice.
+	// Enum: auto | workbench | computer
+	Destination string
 	// Human-selected execution ceiling: no federation provider may serve any call of this goal, including embeddings, step overrides and fallback. Child goals inherit it and cannot relax it.
 	NoPaidProviders    bool
 	NoPaidProvidersSet bool // set true to send noPaidProviders; required because zero-value bool is ambiguous
@@ -1550,7 +1553,14 @@ func (qc *QueryClient) CreateGoal(ctx context.Context, args CreateGoalArgs) (*Re
 func CreateGoalBuild(args CreateGoalArgs) string {
 	var b strings.Builder
 	b.WriteString("builtin createGoal(")
+	if args.Destination != "" {
+		b.WriteString("destination: ")
+		b.WriteString(quoteMemQL(args.Destination))
+	}
 	if args.NoPaidProvidersSet {
+		if b.Len() > 19 {
+			b.WriteString(", ")
+		}
 		b.WriteString("noPaidProviders: ")
 		b.WriteString(fmt.Sprintf("%v", args.NoPaidProviders))
 	}

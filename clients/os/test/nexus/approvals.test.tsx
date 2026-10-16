@@ -901,3 +901,15 @@ describe("a budget approval", () => {
     expect(budgetApprovalAnswer(approvalFromRow(approvalRow({ id: "question", kind: "feedback" })), "128")).toBeUndefined();
   });
 });
+
+
+it("approves a destination-only move to Workbench without suggesting computer access", async () => {
+ const conn=fakeConnection({approvals:[approvalRow({id:"destination",kind:"scopeElevation",question:"Use the Workbench for this Computer goal?",subject:{executionDestination:{from:"computer",to:"workbench"},summary:"The selected computer is offline"}})]});
+ mount(conn); fireEvent.click(await screen.findByText("Use the Workbench for this Computer goal?"));
+ expect(screen.getByLabelText("Execution destination")).toBeTruthy();
+ expect(screen.queryByText("Computer access")).toBeNull();
+ expect(screen.queryByRole("checkbox")).toBeNull();
+ fireEvent.click(screen.getByRole("button",{name:"Use Workbench"}));
+ await waitFor(()=>expect(conn.query.decideApproval).toHaveBeenCalled());
+ expect(conn.query.decideApproval.mock.calls[0]?.[0]).toMatchObject({approvalId:"destination",decision:"approved"});
+});

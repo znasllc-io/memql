@@ -74,6 +74,15 @@ func workTurnHistory(ctx context.Context, engine interface {
 		history = append(history, &memqlv1.AgentTurnMessage{Role: "user", Content: guidance})
 	}
 	history = append(history, &memqlv1.AgentTurnMessage{Role: "user", Content: prompt})
+	choice := common.RouteChoiceFrom(rows[0]["routing"])
+	destination, err := memql.ParseExecutionDestination(choice.Destination)
+	if err != nil {
+		return nil, err
+	}
+	if destination == "" {
+		destination = "auto"
+	}
+	history = append(history, &memqlv1.AgentTurnMessage{Role: "user", Content: "[Execution destination selected by the person for this goal: " + destination + ". This choice does not grant computer access.]"})
 	questionsCall, _ := parser.RenderCall("workQuestionsForOwnerRun", map[string]any{"runId": run.RunId})
 	questions, err := engine.Execute(memql.ContextWithFreshRead(ctx), "query "+questionsCall)
 	if err != nil {

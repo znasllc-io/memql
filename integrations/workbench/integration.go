@@ -44,10 +44,12 @@ import (
 //     the old degrade-to-local behaviour for anyone who wants it, as an
 //     explicit choice rather than as the consequence of missing config.
 type Integration struct {
-	manager *Manager
-	logger  *slog.Logger
-	router  *ForwardRouter
-	remote  bool
+	capacity     *capacityGate
+	capacityOnce sync.Once
+	manager      *Manager
+	logger       *slog.Logger
+	router       *ForwardRouter
+	remote       bool
 	// localFallback is the MEMQL_WORKBENCH_LOCAL_FALLBACK opt-in
 	// (memql#3506). Only consulted in remote mode, where it restores the
 	// old degrade-to-local behaviour for an unreachable workbench. Off by
@@ -222,6 +224,15 @@ func (i *Integration) handleDispatchHost(ctx context.Context, args map[string]an
 	if innerArgs == nil {
 		innerArgs = map[string]any{}
 	}
+	if i.engine != nil {
+		if err := memql.CheckExecutionDestination(ctx, i.engine, runId, "workbench"); err != nil {
+			var required *memql.ExecutionDestinationRequired
+			if errors.As(err, &required) {
+				return errorResultNode(runId, action, "execution_destination_requires_permission", err.Error()+" Use requestWorkbenchUse to ask.", started), nil
+			}
+			return errorResultNode(runId, action, "execution_destination_unavailable", err.Error(), started), nil
+		}
+	}
 
 	// The environment hint (memql#4353). A CALLER-CONTRACT check, which is why
 	// it sits up here with the missing-arg checks rather than down among the
@@ -322,6 +333,26 @@ func (i *Integration) handleDispatchHost(ctx context.Context, args map[string]an
 	planOwner, ownerErr := i.workspaceOwner(ctx, runId)
 	if ownerErr != nil {
 		return i.refuseWorkspaceOwner(ctx, runId, action, ownerErr, started), nil
+	}
+
+	release, err := i.acquireHostCapacity(ctx, runId, planOwner)
+	if err != nil {
+		code := "workbench_capacity_unavailable"
+		if errors.Is(err, errWorkbenchQueueFull) {
+			code = "workbench_queue_full"
+		}
+		if ctx.Err() != nil {
+			code = "cancelled_before_start"
+		}
+		return errorResultNode(runId, action, code, err.Error(), started), nil
+	}
+	defer release()
+	// A queued call may outlive a permission or be cancelled while waiting.
+	// Re-read immediately before its first workspace effect, on this replica.
+	if i.engine != nil {
+		if err := memql.CheckExecutionDestination(ctx, i.engine, runId, "workbench"); err != nil {
+			return errorResultNode(runId, action, "execution_destination_unavailable", err.Error(), started), nil
+		}
 	}
 
 	ws, err := i.manager.provisionForPlan(runId)

@@ -27,12 +27,13 @@ export class LiveVoiceSession {
   if (this.state.phase !== "off") return;
   if (!this.transport.startVoice) { this.patch({ error: "Live voice is unavailable in this window." }); return; }
   const generation = ++this.generation;
+  const executionDestination = this.conversation.getSnapshot().destination ?? "auto";
   const abort = new AbortController(); this.abort = abort;
   this.patch({ phase: "connecting", error: "", activity: [], echoCancellation: undefined, startedAt: new Date().toISOString() });
   try {
    const conversationId = await this.conversation.beginVoice();
    if (generation !== this.generation) return;
-   const credentials = await this.transport.startVoice({ conversationId, pageContext: context ?? "", voice }, abort.signal);
+   const credentials = await this.transport.startVoice({ conversationId, pageContext: context ?? "", voice, executionDestination }, abort.signal);
    if (generation !== this.generation) return;
    const { Room, RoomEvent, Track } = await import("livekit-client");
    if (generation !== this.generation) return;

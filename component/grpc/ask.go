@@ -28,7 +28,7 @@ import (
 // route the cluster does not have is the engine's to refuse, and arrives with
 // the same code.
 func (s *streamSession) handleAskStream(ctx context.Context, requestID, correlate string, request *memqlv1.AiChatMsg) {
-	route := engine.AskRoute{Source: request.GetProvider(), Level: request.GetLevel()}
+	route := engine.AskRoute{Source: request.GetProvider(), Level: request.GetLevel(), Destination: request.GetExecutionDestination()}
 	if _, err := engine.ParseRouteChoice(route.Source, route.Level); err != nil {
 		code, message, metadata := askFailureStatus(err)
 		_ = s.sendQueryErrorWithMetadata(requestID, correlate, code, message, metadata)

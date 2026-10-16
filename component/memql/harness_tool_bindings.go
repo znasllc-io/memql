@@ -12,7 +12,7 @@ func HarnessToolBinding(name string) string {
 	switch name {
 	case "workerStatus", "requestComputerUseScope", "workerHost", "workerComputer":
 		return "worker." + name
-	case "workbenchHost":
+	case "workbenchHost", "requestWorkbenchUse":
 		return "workbench." + name
 	default:
 		return name

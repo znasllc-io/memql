@@ -20,3 +20,11 @@ func isolateProcessGroup(cmd *exec.Cmd) {
 		return syscall.Kill(-cmd.Process.Pid, syscall.SIGKILL)
 	}
 }
+
+// Shell success must not leave background descendants running after admission
+// releases the slot. Both commands and builds own their entire process group.
+func cleanProcessGroup(cmd *exec.Cmd) {
+	if cmd.Process != nil {
+		_ = syscall.Kill(-cmd.Process.Pid, syscall.SIGKILL)
+	}
+}

@@ -25,6 +25,13 @@ type EngineStore struct {
 	Engine *memqlengine.MemQLEngine
 }
 
+func (s *EngineStore) CheckExecutionDestination(ctx context.Context, runID, target string) error {
+	if s == nil || s.Engine == nil {
+		return fmt.Errorf("execution destination verification is unavailable")
+	}
+	return memqlengine.CheckExecutionDestination(ctx, s.Engine, runID, target)
+}
+
 // UserPreferences resolves the user's computer-use kill switch. Any error or
 // missing row leaves it NOT engaged (Q13: opt in to disable) -- see
 // killSwitchEngaged for the one value that engages it.

@@ -42,3 +42,14 @@ export function computerSessionAccess(subject?: Record<string, unknown> | null):
     default: return null;
   }
 }
+export function executionDestinationChange(subject?: Record<string, unknown> | null): {
+  from: "auto" | "workbench" | "computer";
+  to: "workbench" | "computer";
+} | null {
+  const raw = subject?.executionDestination;
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) return null;
+  const change = raw as Record<string, unknown>;
+  if (change.to === "workbench" && change.from === "computer" && subject?.computerPermission === undefined && subject?.sessionKind === undefined && subject?.scope === undefined) return { from: "computer", to: "workbench" };
+  if (change.to === "computer" && (change.from === "auto" || change.from === "workbench")) return { from: change.from, to: "computer" };
+  return null;
+}

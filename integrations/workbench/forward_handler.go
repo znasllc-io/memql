@@ -166,10 +166,18 @@ func (h *ForwardHandler) HandleForwardedRequest(ctx context.Context, req *nodev1
 		return
 	}
 
-	// Everything below answers before it returns, so it is tracked for exactly
-	// that long.
+	// Register before yielding: a cancel received immediately after this
+	// request must find queued work too. Never park the mesh receive loop on
+	// executor admission (it also carries cancels and other users' requests).
 	cctx, release := h.track(actx, requestId)
-	defer release()
+	go func() {
+		defer release()
+		h.handleForwardedHost(cctx, req, send)
+	}()
+}
+
+func (h *ForwardHandler) handleForwardedHost(cctx context.Context, req *nodev1.WorkbenchForwardRequest, send func(*nodev1.NodeServerMessage) error) {
+	requestId := req.GetRequestId()
 
 	// THE BUILD ENTRY (epic memql#4900, task #4901) is a different caller with
 	// a different contract, and it forks here rather than inside

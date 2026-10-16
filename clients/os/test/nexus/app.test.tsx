@@ -184,10 +184,13 @@ describe("a new goal", () => {
     fireEvent.change(screen.getByLabelText("The goal, in your own words"), {
       target: { value: "Reconcile the ledger" },
     });
+    fireEvent.click(screen.getByRole("combobox", { name: "Run work on" }));
+    fireEvent.click(screen.getByRole("option", { name: "Computer" }));
     fireEvent.click(screen.getByText("Start work"));
     await waitFor(() => expect(conn.query.createGoal).toHaveBeenCalled());
     expect(conn.query.createGoal.mock.calls[0]?.[0]).toMatchObject({
       statement: "Reconcile the ledger",
+      destination: "computer",
       // Guessing "api" would file every goal a person typed as one a program
       // submitted.
       requestedVia: "nexus",
