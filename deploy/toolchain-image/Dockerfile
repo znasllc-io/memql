@@ -14,6 +14,7 @@
 #   Go        1.27.2   go.work's `toolchain` line, which overrides every go.mod
 #   Node      22 LTS   node:22-bookworm-slim
 #   protoc    33.4     scripts/dev/proto-gen.sh's PROTOC_VERSION
+#   Tailwind  4.1.11   scripts/identity/build-css.sh's TAILWIND_VERSION
 #   kubectl   1.32.13  the minor of scripts/k3d/up.sh's K3S_VERSION, the deploy
 #                      target's Kubernetes (the patch may differ)
 #   docker    29.8.2   the CLIENT only; there is no daemon (see its stage)
@@ -126,6 +127,30 @@ RUN set -eux; \
     test -x /opt/protoc/bin/protoc; \
     test -f /opt/protoc/include/google/protobuf/timestamp.proto
 
+# Each Go step builds identity CSS. Bake its standalone compiler once instead
+# of downloading ~120 MB into every fresh checkout (memql#5816). Like protoc,
+# download on the build platform and verify the target architecture's release
+# asset against GitHub's published digest; no target execution is needed here.
+FROM --platform=$BUILDPLATFORM debian:bookworm-slim@sha256:7c7b2c966bc9ee8cedfeef67e0e279108992c77681fa595db4a9d65c06ccc587 AS tailwind-dist
+
+ARG TAILWIND_VERSION=v4.1.11
+ARG TAILWIND_SHA256_AMD64=64805b84af4292e043ea6f86d242f191c0ac75359c1a498455dfe6c642afdbab
+ARG TAILWIND_SHA256_ARM64=0409aa4222969f47fa6f4160fe5387e79bf7269e7afe0e8b22f7532c98e1d314
+ARG TARGETARCH
+
+RUN set -eux; \
+    apt-get update; \
+    apt-get install -y --no-install-recommends ca-certificates curl; \
+    case "${TARGETARCH}" in \
+        amd64) asset=linux-x64; sum="${TAILWIND_SHA256_AMD64}" ;; \
+        arm64) asset=linux-arm64; sum="${TAILWIND_SHA256_ARM64}" ;; \
+        *) echo "ERROR: no pinned Tailwind ${TAILWIND_VERSION} checksum for ${TARGETARCH}" >&2; exit 1 ;; \
+    esac; \
+    curl -fsSL --retry 5 --retry-all-errors --retry-delay 2 -o /tmp/tailwindcss \
+        "https://github.com/tailwindlabs/tailwindcss/releases/download/${TAILWIND_VERSION}/tailwindcss-${asset}"; \
+    echo "${sum}  /tmp/tailwindcss" | sha256sum -c -; \
+    chmod 755 /tmp/tailwindcss
+
 # ------------------------------------------------------------------------------
 # The image.
 # ------------------------------------------------------------------------------
@@ -190,6 +215,7 @@ COPY --from=node-dist /usr/local/lib/node_modules /usr/local/lib/node_modules
 # binary, so the two land side by side under /usr/local.
 COPY --from=protoc-dist /opt/protoc/bin/protoc /usr/local/bin/protoc
 COPY --from=protoc-dist /opt/protoc/include /usr/local/include
+COPY --from=tailwind-dist /tmp/tailwindcss /usr/local/bin/tailwindcss
 COPY --from=kubectl-dist /bin/kubectl /usr/local/bin/kubectl
 COPY --from=docker-dist /usr/local/bin/docker /usr/local/bin/docker
 
@@ -216,5 +242,5 @@ RUN go version && node --version && protoc --version && git --version && psql --
     kubectl version --client && docker --version
 
 LABEL org.opencontainers.image.title="memql-toolchain" \
-      org.opencontainers.image.description="The container MemQL pipeline steps run in: Go, Node, protoc, kubectl, the Docker client (no daemon), git, make, jq, python3 and the PostgreSQL client on Debian bookworm, as uid 1000" \
+      org.opencontainers.image.description="The container MemQL pipeline steps run in: Go, Node, protoc, Tailwind, kubectl, the Docker client (no daemon), git, make, jq, python3 and the PostgreSQL client on Debian bookworm, as uid 1000" \
       org.opencontainers.image.source="https://github.com/znasllc-io/memql"

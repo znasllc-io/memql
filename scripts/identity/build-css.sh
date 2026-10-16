@@ -5,7 +5,7 @@
 # Compile the Tailwind input source into the served app.css.
 #
 # Resolves the right standalone Tailwind binary for the host
-# platform, downloads it on demand into bin/tools/ if missing,
+# platform, reuses the pinned version on PATH or downloads it into bin/tools/,
 # then runs it against component/identity/web/tailwind/input.css
 # scanning the templ sources for class names.
 #
@@ -54,6 +54,16 @@ function detect_platform() {
 # resolve_tailwind_binary → echoes the path to the Tailwind CLI for
 # the current platform; downloads it from github releases if missing.
 function resolve_tailwind_binary() {
+    # Pipeline checkouts are ephemeral; the toolchain image carries this
+    # compiler once for every step. A different host version must not silently
+    # change the generated CSS, so only reuse an exact, working pin.
+    local installed help
+    if installed="$(command -v tailwindcss)" && \
+       help="$(NO_COLOR=1 "${installed}" --help 2>/dev/null)" && \
+       [[ "${help%%$'\n'*}" == "≈ tailwindcss ${TAILWIND_VERSION}" ]]; then
+        echo "${installed}"
+        return 0
+    fi
     local platform
     platform="$(detect_platform)"
     local bin_path="${TOOLS_DIR}/tailwindcss-${platform}"
