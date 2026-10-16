@@ -1095,10 +1095,9 @@ node and of AKS.
 | `checks` | `go-checks` (30 min: build, vet, the env registry, the DSL lint and engine load, and the SDK, concept-snapshot, authoring-surface and proto drift gates), `path-routing`, the five `build-<tag>` passes, `build-clustere2e`, `module-boundaries` and `bash32-smoke` | every run |
 | `vulnerabilities` | `go-vulnerabilities` (govulncheck) and `npm-vulnerabilities` | every event, after a failure too |
 | `secrets-current` | `gitleaks` over every new commit since the pinned event base | pull requests, merge groups and pushes, after a failure too |
-| `secrets-history` | `gitleaks` over full reachable history (6 hours, 3 CPUs) | weekly audits, releases and manual runs, after a failure too |
 | `tests` | `go-tests` (affected packages outside the db-gated trees, 4 shards), `db-tests` (the affected db-gated packages, 5 shards, each beside its own Postgres sidecar), `fuzz`, `os-checks` when the change touches the OS bucket, `sdk-ts-typecheck`, `viewkit-checks`, `mcp-conformance`, `proving` and the seven `test-<tag>` passes | every run |
 | `gates` | `gate-inputs` | pull requests and manual runs |
-| `analysis` | `codeql-go` (3 hours), `codeql-javascript`, `codeql-python` and `sbom` | weekly audits, releases and manual runs, after a failure too |
+| `analysis` | Full-history `gitleaks` (6 hours, 3 CPUs), `codeql-go` (3 hours), `codeql-javascript`, `codeql-python` and `sbom` | weekly audits, releases and manual runs, after a failure too |
 
 No step names a need, so the pipeline runs on the cluster alone and connects
 with `compute: cluster`. Its longest steps outlast the default 2-hour run
@@ -1136,8 +1135,9 @@ the tested head but not the saved base. They therefore detect secrets removed
 before the final commit as well as secrets still present. An unreadable base or
 incomplete fetch fails the scan. With no predecessor, the scan explicitly falls
 back to full history; its ordinary 30-minute budget may then require an operator
-rerun with a suitable budget. Full-history and CodeQL work runs weekly and for
-release qualification. Daily dependency vulnerability checks remain enabled.
+rerun with a suitable budget. Full-history and CodeQL work shares one stage, so admitted Jobs can overlap
+instead of adding their longest durations. It runs weekly and for release
+qualification. Daily dependency vulnerability checks remain enabled.
 
 ### The toolchain image
 

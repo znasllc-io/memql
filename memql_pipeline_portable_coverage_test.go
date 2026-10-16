@@ -175,7 +175,7 @@ func TestEngineSecurityScansDoNotTurnFindingsIntoSuccess(t *testing.T) {
 		wantCommands := []string{`--fetch-remote="https://github.com/${MEMQL_REPOSITORY}.git"`, `--head="$MEMQL_SHA"`, "python3 scripts/ci/gitleaks-history.py", "--jobs=3", "--batch-size=1"}
 		wantTimeout := 30 * 60
 		if event == pipelines.EventRelease {
-			wantStage = "secrets-history"
+			wantStage = "analysis"
 			wantTimeout = 6 * 60 * 60
 			wantCommands = append(wantCommands, "--timeout=20700")
 		} else {

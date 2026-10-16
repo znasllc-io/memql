@@ -357,7 +357,7 @@ func TestEngineManifestCompilesForEveryOpening(t *testing.T) {
 	}
 
 	fullStages := []string{manifestStageChecks, "vulnerabilities", "secrets-current", manifestStageTests}
-	analysisStages := []string{manifestStageChecks, "vulnerabilities", "secrets-history", manifestStageTests, "analysis"}
+	analysisStages := []string{manifestStageChecks, "vulnerabilities", manifestStageTests, "analysis"}
 	pullRequestStages := []string{manifestStageChecks, "vulnerabilities", "secrets-current", manifestStageTests, manifestStageGates}
 	every := []string{manifestStepGoChecks, manifestStepPathRouting,
 		manifestStepGoTests, manifestStepDBTests, manifestStepFuzz, manifestStepOSChecks,
@@ -516,7 +516,7 @@ func TestEngineWeeklyAuditDoesNotRepeatDailyOrOrdinaryFunctionalChecks(t *testin
 			stages = append(stages, step.Stage)
 		}
 	}
-	if !slices.Equal(stages, []string{"secrets-history", "analysis"}) {
+	if !slices.Equal(stages, []string{"analysis"}) {
 		t.Fatalf("weekly stages = %v", stages)
 	}
 }
