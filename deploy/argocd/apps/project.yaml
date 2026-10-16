@@ -1,6 +1,7 @@
 # AppProject scoping the memql GitOps surface (deployment-v2 Phase 2, #700).
 # Restricts what the reconciler may deploy: only THIS repo, only the memql,
-# memql-pipelines (the Jobs pipeline steps run as) and argocd (for the
+# memql-pipelines (the Jobs pipeline steps run as), memql-build-system (the
+# optional image-builder profiles) and argocd (for the
 # app-of-apps) namespaces, on the in-cluster API. A tighter blast radius than
 # the default project.
 apiVersion: argoproj.io/v1alpha1
@@ -29,9 +30,11 @@ spec:
     - server: https://kubernetes.default.svc
       namespace: memql-pipelines
     - server: https://kubernetes.default.svc
+      namespace: memql-build-system
+    - server: https://kubernetes.default.svc
       namespace: argocd
   # Cluster-scoped resources the mesh legitimately needs (none today beyond the
-  # two namespaces, memql and memql-pipelines, which the overlay creates). Keep
+  # mesh/pipeline namespaces and the optional builder namespace). Keep
   # empty-ish; widen on need.
   clusterResourceWhitelist:
     - group: ''
