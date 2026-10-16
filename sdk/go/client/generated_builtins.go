@@ -3505,6 +3505,32 @@ func LibraryForkDocumentVersionBuild(args LibraryForkDocumentVersionArgs) string
 	return b.String()
 }
 
+// LibraryIndexTrainingLesson -- Explicitly index an already reviewed lesson for future owned work.
+type LibraryIndexTrainingLessonArgs struct {
+	LessonId        string
+	ExpectedReceipt string
+}
+
+// LibraryIndexTrainingLesson calls the engine builtin libraryIndexTrainingLesson.
+func (qc *QueryClient) LibraryIndexTrainingLesson(ctx context.Context, args LibraryIndexTrainingLessonArgs) (*Result, error) {
+	call := LibraryIndexTrainingLessonBuild(args)
+	return qc.executeNamed(ctx, "libraryIndexTrainingLesson", call)
+}
+
+func LibraryIndexTrainingLessonBuild(args LibraryIndexTrainingLessonArgs) string {
+	var b strings.Builder
+	b.WriteString("builtin libraryIndexTrainingLesson(")
+	b.WriteString("lessonId: ")
+	b.WriteString(quoteMemQL(args.LessonId))
+	if b.Len() > 35 {
+		b.WriteString(", ")
+	}
+	b.WriteString("expectedReceipt: ")
+	b.WriteString(quoteMemQL(args.ExpectedReceipt))
+	b.WriteString(")")
+	return b.String()
+}
+
 // LibraryModifyRevisionItem -- Revise one proposal item with AI; retain every other item unchanged.
 type LibraryModifyRevisionItemArgs struct {
 	RequestId    string
@@ -3647,6 +3673,89 @@ func LibraryRequestDocumentRevisionBuild(args LibraryRequestDocumentRevisionArgs
 	}
 	b.WriteString("requestId: ")
 	b.WriteString(quoteMemQL(args.RequestId))
+	b.WriteString(")")
+	return b.String()
+}
+
+// LibrarySaveTrainingLesson -- One manual, version-guarded lesson event. Never invoked by automatic mining.
+type LibrarySaveTrainingLessonArgs struct {
+	RequestId string
+	// Enum: propose | edit | review | reject | enable | retire
+	Action          string
+	LessonId        string
+	ExpectedReceipt string
+	ConversationId  string
+	TurnId          string
+	Draft           map[string]any
+	EvaluationIds   []string
+	Reason          string
+}
+
+// LibrarySaveTrainingLesson calls the engine builtin librarySaveTrainingLesson.
+func (qc *QueryClient) LibrarySaveTrainingLesson(ctx context.Context, args LibrarySaveTrainingLessonArgs) (*Result, error) {
+	call := LibrarySaveTrainingLessonBuild(args)
+	return qc.executeNamed(ctx, "librarySaveTrainingLesson", call)
+}
+
+func LibrarySaveTrainingLessonBuild(args LibrarySaveTrainingLessonArgs) string {
+	var b strings.Builder
+	b.WriteString("builtin librarySaveTrainingLesson(")
+	b.WriteString("requestId: ")
+	b.WriteString(quoteMemQL(args.RequestId))
+	if b.Len() > 34 {
+		b.WriteString(", ")
+	}
+	b.WriteString("action: ")
+	b.WriteString(quoteMemQL(args.Action))
+	if args.LessonId != "" {
+		if b.Len() > 34 {
+			b.WriteString(", ")
+		}
+		b.WriteString("lessonId: ")
+		b.WriteString(quoteMemQL(args.LessonId))
+	}
+	if args.ExpectedReceipt != "" {
+		if b.Len() > 34 {
+			b.WriteString(", ")
+		}
+		b.WriteString("expectedReceipt: ")
+		b.WriteString(quoteMemQL(args.ExpectedReceipt))
+	}
+	if args.ConversationId != "" {
+		if b.Len() > 34 {
+			b.WriteString(", ")
+		}
+		b.WriteString("conversationId: ")
+		b.WriteString(quoteMemQL(args.ConversationId))
+	}
+	if args.TurnId != "" {
+		if b.Len() > 34 {
+			b.WriteString(", ")
+		}
+		b.WriteString("turnId: ")
+		b.WriteString(quoteMemQL(args.TurnId))
+	}
+	if args.Draft != nil {
+		if b.Len() > 34 {
+			b.WriteString(", ")
+		}
+		b.WriteString("draft: ")
+		b.WriteString(renderMemQLValue(args.Draft))
+	}
+	if args.EvaluationIds != nil {
+		if b.Len() > 34 {
+			b.WriteString(", ")
+		}
+		b.WriteString("evaluationIds: ")
+		b.WriteString(renderMemQLValue(args.EvaluationIds))
+	}
+	if args.Reason != "" {
+		if b.Len() > 34 {
+			b.WriteString(", ")
+		}
+		b.WriteString("reason: ")
+		b.WriteString(quoteMemQL(args.Reason))
+	}
 	b.WriteString(")")
 	return b.String()
 }

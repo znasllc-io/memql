@@ -639,3 +639,36 @@ query approval workComputerPermissionsForAgent {
  filter row => row.ownerUserId == actor.userId && row.kind == "scopeElevation" && row.decision == "approved" && row.?subject.agentId == args.agentId && row.?subject.computerPermission.version == 1
  shape workApprovalFull
 }
+
+/// Manual lesson events share the owned work journal. Highest sequence is the head.
+@actor
+query observation workTrainingLessonEvents {
+ args { lessonId string! }
+ filter row => row.ownerUserId == actor.userId && row.?data.trainingLesson.id == args.lessonId
+ sort "row.createdAt", "desc"
+ paginate 101
+ shape workObservationFull
+}
+
+@actor
+query observation workTrainingLessonsForOwner {
+ filter row => row.ownerUserId == actor.userId && row.?data.trainingLesson.schemaVersion == 1
+ sort "row.createdAt", "desc"
+ shape workObservationFull
+}
+
+@actor
+query observation workTrainingEvidenceById {
+ args { observationId string! }
+ filter row => row.ownerUserId == actor.userId && row.id == args.observationId
+ paginate 1
+ shape workObservationFull
+}
+
+/// Selection and provider-delivery receipts for owned Training inspection.
+@actor
+query observation workTrainingUsageForOwner {
+ filter row => row.ownerUserId == actor.userId && (row.?data.trainingSelection.schemaVersion == 1 || row.?data.execution.call != nil)
+ sort "row.createdAt", "desc"
+ shape workObservationFull
+}

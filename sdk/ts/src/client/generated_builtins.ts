@@ -2693,6 +2693,29 @@ QueryClient.prototype.libraryForkDocumentVersion = function (this: QueryClient, 
   return this.executeNamed("libraryForkDocumentVersion", buildLibraryForkDocumentVersion(args), opts);
 };
 
+/** Explicitly index an already reviewed lesson for future owned work. */
+export interface LibraryIndexTrainingLessonArgs {
+  lessonId: string;
+  expectedReceipt: string;
+}
+
+export function buildLibraryIndexTrainingLesson(args: LibraryIndexTrainingLessonArgs): string {
+  const parts: string[] = [];
+  parts.push("lessonId: " + renderMemQLValue(args.lessonId));
+  parts.push("expectedReceipt: " + renderMemQLValue(args.expectedReceipt));
+  return "builtin libraryIndexTrainingLesson(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    libraryIndexTrainingLesson(args: LibraryIndexTrainingLessonArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.libraryIndexTrainingLesson = function (this: QueryClient, args: LibraryIndexTrainingLessonArgs = {} as LibraryIndexTrainingLessonArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("libraryIndexTrainingLesson", buildLibraryIndexTrainingLesson(args), opts);
+};
+
 /** Revise one proposal item with AI; retain every other item unchanged. */
 export interface LibraryModifyRevisionItemArgs {
   requestId: string;
@@ -2797,6 +2820,44 @@ declare module "./query.js" {
 
 QueryClient.prototype.libraryRequestDocumentRevision = function (this: QueryClient, args: LibraryRequestDocumentRevisionArgs = {} as LibraryRequestDocumentRevisionArgs, opts?: QueryCallOptions): Promise<Result> {
   return this.executeNamed("libraryRequestDocumentRevision", buildLibraryRequestDocumentRevision(args), opts);
+};
+
+/** One manual, version-guarded lesson event. Never invoked by automatic mining. */
+export interface LibrarySaveTrainingLessonArgs {
+  requestId: string;
+  // Enum: propose | edit | review | reject | enable | retire
+  action: string;
+  lessonId?: string;
+  expectedReceipt?: string;
+  conversationId?: string;
+  turnId?: string;
+  draft?: Record<string, unknown>;
+  evaluationIds?: string[];
+  reason?: string;
+}
+
+export function buildLibrarySaveTrainingLesson(args: LibrarySaveTrainingLessonArgs): string {
+  const parts: string[] = [];
+  parts.push("requestId: " + renderMemQLValue(args.requestId));
+  parts.push("action: " + renderMemQLValue(args.action));
+  if (args.lessonId !== undefined) parts.push("lessonId: " + renderMemQLValue(args.lessonId));
+  if (args.expectedReceipt !== undefined) parts.push("expectedReceipt: " + renderMemQLValue(args.expectedReceipt));
+  if (args.conversationId !== undefined) parts.push("conversationId: " + renderMemQLValue(args.conversationId));
+  if (args.turnId !== undefined) parts.push("turnId: " + renderMemQLValue(args.turnId));
+  if (args.draft !== undefined) parts.push("draft: " + renderMemQLValue(args.draft));
+  if (args.evaluationIds !== undefined) parts.push("evaluationIds: " + renderMemQLValue(args.evaluationIds));
+  if (args.reason !== undefined) parts.push("reason: " + renderMemQLValue(args.reason));
+  return "builtin librarySaveTrainingLesson(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    librarySaveTrainingLesson(args: LibrarySaveTrainingLessonArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.librarySaveTrainingLesson = function (this: QueryClient, args: LibrarySaveTrainingLessonArgs = {} as LibrarySaveTrainingLessonArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("librarySaveTrainingLesson", buildLibrarySaveTrainingLesson(args), opts);
 };
 
 /** Search the caller's Library by meaning and get whole artifacts back, best match first. */

@@ -113,6 +113,8 @@ func run(argv []string, stdout, stderr io.Writer) int {
 		Summary: "Run the MemQL proving corpus and publish what it measured",
 		Params: []capability.Param{
 			{Name: "do", Description: "run | gate | scorecard | record | goal-plan | goal-run", Required: true},
+			{Name: "lesson-id", Description: "optional manual lesson candidate for this evaluation only"},
+			{Name: "lesson-receipt", Description: "exact candidate receipt to test; requires lesson-id"},
 			{Name: "goal-catalog", Description: "versioned goal catalog (default test/proving/goals/catalog.json)"},
 			{Name: "matrix", Description: "manual goal matrix (default test/proving/goals/matrix.json)"},
 			{Name: "output", Description: "new directory for isolated fixtures and raw evaluation receipts"},

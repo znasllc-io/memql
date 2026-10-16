@@ -20,7 +20,7 @@ domain independent; software expertise belongs in reviewed skills and lessons.
 | Catalog | Versioned goal scenarios, fixtures, oracle contracts, model matrix and result format under `test/proving/goals` | Loader rejects ambiguous versions, missing criteria and unsafe repository targets | In progress |
 | Inspect | Training Skills and Evaluations lists with drilldown into content, provenance, exact versions and evidence | UI behavior and desktop/narrow light/dark inspection | Implemented locally; review and live verification pending |
 | Bind | Multiple relevant skills and reviewed passages selected by installed DSL; immutable receipt on the owned work run | Exact text/version/score/reason survives a checkpoint and a replica hop | Skill snapshots tested across two engine instances; merged PR6070 supplies reviewed lessons through the existing Training path |
-| Learn | Successful work, human guidance and research can propose owner-scoped lessons | Candidate never silently validates; source and verification receipts required for promotion; no private-to-official publication | Planned |
+| Learn | Manual owner-scoped proposal from saved Ask guidance, review and evaluation-bound enablement | Immutable source and revision decisions; application and counterexample results; normal retrieval excludes candidates | Manual slice implemented; live candidate evaluation pending. Automatic mining deferred |
 | Execute | Manual goal evaluation through MemQL, observed by independent artifact oracles | MemQL and the selected model perform the task; evaluator performs only fixture setup, declared injections and verification | Runner and five local case adapters pass workflow and cross-replica publication checks. Nine advanced adapters remain prerequisites |
 | Baseline | First manually run model/scenario matrix | Complete raw result records including failures and interventions | Not run |
 | Repeat | Configurable monthly product evaluation, comparison with prior compatible runs | Explicit model/budget/fixture authority; schedule disabled until owner enables it | Planned |
@@ -54,7 +54,7 @@ behavioral red/green, build-failure rejection and preservation controls.
 The scoped workflow, no-paid-provider ceiling, strict DSL boot and publication
 checks now pass. The publication check uses the isolated scratch database and
 two engine instances. The live baseline still awaits release of the shared model.
-The advanced adapters, learning and baseline milestones remain open.
+The advanced adapters, automatic learning and baseline milestones remain open. The manual Learn slice is described below.
 
 ## Source of truth and scope
 
@@ -63,8 +63,9 @@ The advanced adapters, learning and baseline milestones remain open.
 * Reviewed release lessons use the Training seed manifest introduced by
   PR6070. Fresh installation is reproducible from exact reviewed bytes.
   That PR is a dependency, not permission to copy private learned material.
-* Private learned lessons stay attached to the owner's Library sources and
-  existing knowledge review. An official baseline requires a repository change
+* Private manual lessons use the existing Training Review destination and
+  Library retrieval, with immutable owned Work observations as the source.
+  Existing taught documents retain their Library source and knowledge review. An official baseline requires a repository change
   and review. A successful run is evidence for a proposal, not a proof that its
   advice generalizes. Normal retrieval and learning do not change model weights.
 * `v1:work:observation` holds owned selection and learning evidence. Saved
@@ -155,3 +156,57 @@ Software-development baseline version 2 adds explicit recovery-point coverage,
 named uncertainty/next-deliverable guidance and conditional inspection advice.
 Its behavioral benefit still needs the independently operated live baseline;
 passing the checks above is not evidence of faster or more autonomous models.
+
+
+### Manual Learn slice
+
+A person can propose one candidate from a saved Ask guidance message. The
+engine reads that message itself and binds its exact quote, conversation, turn,
+run and delivery status. The person supplies the proposed rule, applicability,
+exceptions, observed outcome, alternative, principle, separate confidence
+statements and two declared scenarios. Duplicate requests return the original
+receipt; the same feedback cannot silently create a second candidate.
+
+Training's existing Review destination owns editing, review, rejection,
+retirement and enablement. An edit creates a new content version and resets
+review and eligibility. Decisions require the current receipt and share a
+PostgreSQL gate across replicas. Immutable `v1:work:observation` events retain
+history; no new skill catalog, learning service or scheduler is introduced.
+Only the native writers can create or amend protected lesson, evaluator,
+selection and provider-delivery evidence. Receipt access remains owner scoped.
+
+A candidate can be tested through the existing `memql-bench` goal runner using
+`--lesson-id` and `--lesson-receipt`, alongside its existing scenario and setup
+arguments. Both flags must be supplied together. The owned goal explicitly
+pins the current candidate and declared fixture/scenario; this fleet-only
+path records an evaluation-only selection. It does not enable ordinary
+retrieval. The publisher verifies the exact candidate version/digest against
+a successful provider delivery receipt. The independent harness still owns
+artifact verdicts; no delivery receipt proves that advice was followed.
+
+Enablement requires manual review plus two successful saved evaluations for
+that exact content version: the declared application and counterexample.
+Autonomous versus assisted outcomes remain in those evaluations. Enabling
+then indexes the lesson with the configured embedding route. Ordinary work
+uses the existing bounded Training reader and selection receipts; a fresh
+head check excludes retired, rejected, changed or unreviewed versions even
+when an older vector remains indexed. An explicit indexing retry is available.
+Neither enablement nor a successful delivery claims general behavioral benefit.
+
+The first private proposal is **Identify the refused gate**: distinguish task
+permission from worker policy after a refusal; use a permitted alternative or
+identify the operator change needed. Optional diagnostics can be skipped when
+unnecessary. It is an unpublished candidate with assisted source evidence,
+not an approved lesson or an autonomous success. Its application scenario is
+`tool-unavailable`, with `implement-and-check` as the counterexample. The
+Training program owns the unavailable-tool adapter and live matrix. This
+slice does not implement that adapter, start model runs, change routing or
+publish the exercise ledger. Automatic mining remains deferred.
+
+Targeted checks cover two-engine concurrent and stale decisions, cross-owner
+refusal, immutable receipts, exact evaluation bindings, candidate-only test
+selection, failed delivery versus successful fallback, and withholding an
+older indexed version after retirement. These use an isolated PostgreSQL
+instance with pgvector and deterministic provider fixtures; they are not a
+live benchmark or TimescaleDB cluster certification. UI checks use synthetic
+records, including failed-save draft preservation and narrow light/dark views.

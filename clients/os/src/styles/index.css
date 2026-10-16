@@ -12376,7 +12376,7 @@ button.os-cluster-mesh-peer:focus-visible {
 
 /* ===================================================================   THE CORE GATE -- the shell held before the desk
    (design record 2026-09-07-core-gate-and-honest-install, D1, D2 and D6)
-   ===================================================================
+   ============================================================
    NOT AN ERROR, AND NOT DRESSED AS ONE. Nobody has told this cluster what to
    talk to yet, which is a thing to do rather than a thing that broke. So the
    surface uses the Ask orb's theme-colored brand mark above a muted sentence
@@ -14628,10 +14628,10 @@ button[data-ask-control="running"], [data-ask-control="running"] > button { outl
 @keyframes os-ask-control-settle { 0% { transform: scale(.97); outline: 1px solid var(--os-accent); } 100% { transform: scale(1); outline: 1px solid transparent; } }
 @media (prefers-reduced-motion: reduce) { [data-ask-control] > button { animation: none; } }
 
-/* ===========================================================================
+/* ====================================================================
  * Nexus -> Automations: learned procedures and the certification ladder
  * (epic memql#5408, task memql#5412)
- * ===========================================================================
+ * ====================================================================
  * The page spends its boldness in ONE place, the ladder; everything else is
  * the shell's Panel, Subhead and Facts. Every colour is a token, so a theme
  * pack restyles it with no code and the light mode is not a second drawing.
@@ -15280,6 +15280,13 @@ button[data-ask-control="running"], [data-ask-control="running"] > button { outl
 .fleet-share-calls { font-variant-numeric: tabular-nums; }
 /* Keep a refusal beside the sharing controls in the Settings page flow. */
 .fleet-share-error { min-width: 0; }
+
+/* Keep lesson evidence readable within narrow Training panes. */
+.training-lesson-review { container-type: inline-size; }
+@container (max-width: 540px) {
+  .training-lesson-review .os-facts { grid-template-columns: minmax(0, 1fr); gap: 4px; }
+  .training-lesson-review .os-facts dd { margin-bottom: 10px; }
+}
 
 /* The session label stays visible over app windows, including narrow layouts. */
 .os-role-test-banner { position: fixed; inset: 0 0 auto; height: 64px; z-index: 10000; display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; gap: 4px 12px; padding: 6px 12px; overflow: auto; border-bottom: 1px solid var(--os-warn); background: var(--os-glass-solid); color: var(--os-ink); }
