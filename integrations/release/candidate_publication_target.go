@@ -2,16 +2,15 @@ package release
 
 import (
 	"context"
-	"crypto/sha256"
 	"database/sql"
 	"encoding/json"
 	"errors"
-	"fmt"
 	"net"
 	"net/url"
 	"strings"
 
 	pl "github.com/znasllc-io/memql/component/pipelines"
+	"github.com/znasllc-io/memql/core/id"
 )
 
 // The full approved configuration stays private. Historical catalog projection
@@ -132,7 +131,7 @@ func registryTagKey(t candidateRegistryTarget) string {
 	} else if strings.Contains(host, ":") {
 		host = "[" + host + "]"
 	}
-	return fmt.Sprintf("sha256:%x", sha256.Sum256([]byte(u.Scheme+"://"+host+"/"+t.Repository+":"+t.Tag)))
+	return "sha256:" + string(id.NewUntracked().FromString(u.Scheme+"://"+host+"/"+t.Repository+":"+t.Tag))
 }
 
 func readPublicationTarget(ctx context.Context, tx *sql.Tx, candidateID, approvalID string, d pl.ReleaseDestination) (candidatePublicationTarget, candidatePublicationReceipt, error) {
