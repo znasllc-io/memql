@@ -375,7 +375,7 @@ func TestAGitHubDeliveryIsOpenedOnTheBffAndDrivenOnTheAgent(t *testing.T) {
 		s := c.connect(t, "table", pipelinerun.DeliveryWebhook)
 		pr, queued, landed, tagged := c.commit(s, "pr-31"), c.commit(s, "queue-31"), c.commit(s, "main-31"), c.commit(s, "v1.31.0")
 		const tag = "v1.31.0"
-		c.github.update(s.name, func(r *fakeRepo) { r.tags["tags/"+tag] = tagged })
+		c.github.update(s.name, func(r *fakeRepo) { r.tags["refs/tags/"+tag] = tagged })
 
 		table := []struct {
 			header  string
@@ -413,7 +413,7 @@ func TestAGitHubDeliveryIsOpenedOnTheBffAndDrivenOnTheAgent(t *testing.T) {
 		}
 		// The release named a tag, and its commit was asked of GitHub where
 		// the delivery was handled.
-		if refs := c.github.callsOf(&c.github.refs, s.name); !slices.Equal(refs, []ghCall{{Node: nodeA, Repository: s.name, Arg: "tags/" + tag}}) {
+		if refs := c.github.callsOf(&c.github.refs, s.name); !slices.Equal(refs, []ghCall{{Node: nodeA, Repository: s.name, Arg: "refs/tags/" + tag}}) {
 			t.Errorf("the tag was resolved by %+v; want one ask for tags/%s by %s", refs, tag, nodeA)
 		}
 
