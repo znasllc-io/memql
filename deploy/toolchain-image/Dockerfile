@@ -157,12 +157,24 @@ RUN set -eux; \
         git \
         gzip \
         jq \
+        fonts-liberation \
+        libasound2 \
+        libatk-bridge2.0-0 \
+        libatspi2.0-0 \
+        libcups2 \
+        libgbm1 \
+        libgtk-3-0 \
+        libnss3 \
+        libsecret-1-0 \
+        libxkbfile1 \
         make \
         postgresql-client \
         python3 \
         python3-yaml \
         tar \
-        unzip; \
+        unzip \
+        xauth \
+        xvfb; \
     rm -rf /var/lib/apt/lists/*; \
     groupadd --gid 1000 memql; \
     useradd --uid 1000 --gid 1000 --create-home --home-dir /home/memql --shell /bin/bash memql; \
