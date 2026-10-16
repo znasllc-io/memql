@@ -25,7 +25,7 @@ import {
 } from "../../../kit";
 import { figureFrom, type Figure } from "../../../kit/measure";
 import { CatalogSection } from "./CatalogSection";
-import { EmbeddingBinding } from "./EmbeddingBinding";
+import { EmbeddingStatus } from "./EmbeddingStatus";
 import { eligibleFor, formatContext, formatParams, orderModels, type ModelNeeds } from "./ordering";
 import { useInference, type CatalogModel, type DoorsReading } from "./useInference";
 
@@ -517,7 +517,7 @@ function ModelLine({
         </Chip>
       </Chips>
 
-      {model.embeddings ? <EmbeddingBinding model={model.modelId} online={model.online} /> : null}
+      {model.embeddings ? <EmbeddingStatus model={model.modelId} /> : null}
 
       {model.machines.length === 0 ? null : (
         <RecordList as="ul" label="Machines serving this model">

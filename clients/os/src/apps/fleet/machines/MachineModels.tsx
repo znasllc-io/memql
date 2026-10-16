@@ -1,15 +1,16 @@
 import { useCallback, useMemo, useRef, useState } from "react";
 import type { Row } from "@znasllc-io/memql-sdk-core/client";
-import { ArrowLeft, Box, Library, Pencil } from "lucide-react";
+import { Box, Library, Pencil } from "lucide-react";
 import { useSession } from "../../../chrome/access";
 import { useReading } from "../../../cluster/reading";
 import { useOsConnection } from "../../../live/connection";
 import { feedIsBehind } from "../../../live/useLiveCollection";
-import { Button, EmptyState, Fact, Facts, Notice, Refine, Select, Subhead, useNow } from "../../../kit";
+import { Button, EmptyState, Fact, Facts, Head, Notice, Refine, Select, useNow } from "../../../kit";
 import { IconButton } from "../../../kit/IconButton";
 import { ActionBar } from "../../../kit/ActionBar";
 import { AutoRefresh } from "../../../kit/AutoRefresh";
 import { PageHelp } from "../../../kit/pageHelp";
+import type { PageTrail } from "../../../kit/pageNavigation";
 import { CardCarousel } from "../../../kit/CardCarousel";
 import { RecordList, RecordRow } from "../../../kit/RecordRow";
 import { RecordListSkeleton } from "../../../kit/RecordListSkeleton";
@@ -18,7 +19,7 @@ import { machineName, type MachineRow } from "../rows";
 import { isWorkerOnline } from "../online";
 import { AskIt } from "../addMachine/AskIt";
 import { formatParams, formatContext } from "../models/ordering";
-import { EmbeddingBinding } from "../models/EmbeddingBinding";
+import { EmbeddingStatus } from "../models/EmbeddingStatus";
 import { MachineDetailsSection } from "./MachineDetailsInfo";
 import { canConverse, machineModelsFrom, modelPurposeLabel } from "./models";
 import { LivePull, MeasuredLine, PullHistory } from "./ModelDownloads";
@@ -28,7 +29,7 @@ import { MODEL_PURPOSES, modelSetupFromRow, safeModelSource, sameModelChoices, s
 import { ModelAssignmentBoard } from "./ModelAssignmentBoard";
 import "./machineModels.css";
 
-export function MachineModels({ machine, inference: supplied }: { machine: MachineRow; standalone?: boolean; inference?: MachineInference }) {
+export function MachineModels({ machine, inference: supplied, navigation }: { machine: MachineRow; standalone?: boolean; inference?: MachineInference; navigation?: Omit<PageTrail, "title"> }) {
   const { access } = useSession();
   const connection = useOsConnection();
   const now = useNow();
@@ -78,19 +79,34 @@ export function MachineModels({ machine, inference: supplied }: { machine: Machi
     finally { savePending.current = false; setSaving(false); }
   };
   const back = () => { setSelected(null); setError(""); };
+  const toModels = () => { setSelected(null); setCatalogOpen(false); setError(""); };
   const install = async (model: SetupModel) => {
     setError(""); const refusal = await downloads.start(model.modelId);
     if (refusal) setError(refusal); else { setSelected(null); setCatalogOpen(false); reading.reread(); }
   };
   const shown = (view?.catalog ?? []).filter(m => (!search || m.modelId.toLowerCase().includes(search.toLowerCase())) && (!purpose || m.purposes.includes(purpose)) && (availability === "all" || (availability === "installed" ? m.installed : !m.blocked)));
+  const title = selected ?? (catalogOpen ? "Catalog" : "Models");
+  const breadcrumbs = [
+    ...(navigation?.breadcrumbs ?? []),
+    { label: "Models", onSelect: selected || catalogOpen ? toModels : undefined },
+    ...(catalogOpen ? [{ label: "Catalog", onSelect: selected ? back : undefined }] : []),
+    ...(selected ? [{ label: selected }] : []),
+  ];
   return <div className="fleet-machine-details fleet-models">
+    <Head title={title} meta={selected ? undefined : catalogOpen ? shown.length : installed.length}
+      breadcrumbs={breadcrumbs} back={selected ? { label: catalogOpen ? "Catalog" : "Models", onSelect: back } : catalogOpen ? { label: "Models", onSelect: toModels } : navigation?.back}>
+      {catalogOpen && !selected ? <Refine label="Refine model catalog" search={search} onSearch={setSearch} placeholder="Find a model">
+        <Select id="model-purpose-filter" label="Task" value={purpose} onChange={setPurpose}><option value="">All tasks</option>{MODEL_PURPOSES.map(([id,label]) => <option key={id} value={id}>{label}</option>)}</Select>
+        <Select id="model-fit-filter" label="Availability" value={availability} onChange={setAvailability}><option value="all">All models</option><option value="fits">Fits this machine</option><option value="installed">Installed</option></Select>
+      </Refine> : null}
+    </Head>
     <AutoRefresh enabled={own && (!editing || reading.state === "failed")} busy={reading.state === "reading"} onRefresh={reading.reread} />
     <AutoRefresh enabled={feedIsBehind(downloads.state, downloads.feedError)} busy={downloads.loading} onRefresh={downloads.reseed} />
     <PageHelp title="Models on this machine">
       <p>Installed models occupy storage. Your setup chooses which model serves each task. One model can serve several tasks; its memory counts once. Automatic means MemQL chooses among the models this machine offers.</p>
       <p>Memory is a planning estimate at up to 32K context, with room left for the operating system. It is not a live measurement. Saved setups limit subsequent calls to that context and run one model call at a time. Other applications and larger images can change actual use.</p>
       <p>Catalog recommendations favor local models that fit. Installing does not change your setup. Existing memory search keeps its bound model; switching it requires a separate reindex.</p>
-      <p>In Model setup, select an installed model and click a task, or drag the model onto it. Highlighted tasks are compatible. Use matching tasks to share one model across them. Save setup applies the choices to new calls; existing work finishes.</p>
+      <p>In Model setup, select an installed model and click a task, or drag the model onto it. Highlighted tasks use the selected model. Plain solid borders mark available assignments; dashed borders mark unavailable ones. Use matching tasks to share one model across them. Save setup applies the choices to new calls; existing work finishes.</p>
       <p>Catalog research can review primary sources weekly using a local model. It starts off and must be enabled separately. It cannot install models or change your choices.</p>
     </PageHelp>
     {reading.error ? <Notice tone="error" sentence="The catalog could not be read." next="Your installed models are still shown below." detail={reading.error} /> : null}
@@ -98,7 +114,6 @@ export function MachineModels({ machine, inference: supplied }: { machine: Machi
     {downloads.feedError ? <Notice tone="warn" sentence="Download updates are interrupted." detail={downloads.feedError} /> : null}
     {downloads.live ? <LivePull pull={downloads.live} /> : null}
     {selected ? <>
-      <div className="fleet-models-heading"><Button onClick={back}><ArrowLeft size={15} aria-hidden />{catalogOpen ? "Catalog" : "Models"}</Button><Subhead>{selected}</Subhead></div>
       <MachineDetailsSection title="Overview"><Facts>
         <Fact label="Available for" value={profile?.purposes.map(p => MODEL_PURPOSES.find(([id]) => id === p)?.[1] ?? p).join(", ") || (localModel ? modelPurposeLabel(localModel) : "Not reported")} />
         {localModel ? <><Fact label="Parameters" value={formatParams(localModel.params) || "Not reported"} /><Fact label="Quantization" value={localModel.quant || "Not reported"} /><Fact label="Maximum context" value={formatContext(localModel.contextWindow) || "Not reported"} /></> : null}
@@ -110,7 +125,7 @@ export function MachineModels({ machine, inference: supplied }: { machine: Machi
         {safeModelSource(profile?.source ?? "") ? <Fact label="Source" value={<a href={safeModelSource(profile!.source)} target="_blank" rel="noreferrer">Model card</a>} /> : null}
       </Facts></MachineDetailsSection>
       {profile?.notes ? <MachineDetailsSection title="About"><p className="os-caption">{profile.notes}</p></MachineDetailsSection> : null}
-      {localModel?.embeddings ? <MachineDetailsSection title="Memory search"><EmbeddingBinding model={localModel.modelId} online={online} /></MachineDetailsSection> : null}
+      {localModel?.embeddings ? <EmbeddingStatus model={localModel.modelId} /> : null}
       {localModel && canConverse(localModel) ? <MachineDetailsSection title="Test">
         {inference.error ? <Notice tone="warn" sentence="Performance results could not be read." detail={inference.error} /> : null}
         <MeasuredLine measurement={inference.measurements.get(localModel.modelId) ?? null} />
@@ -120,12 +135,6 @@ export function MachineModels({ machine, inference: supplied }: { machine: Machi
       {profile && !localModel ? <ActionBar state={profile.installBlocked || (online ? "Ready to install" : "Machine offline")}
         acts={own && online && !profile.installBlocked && !downloads.live ? [{ label: "Install model", tone: "primary", busy: downloads.starting, onAct: () => { void install(profile); } }] : []} /> : null}
     </> : catalogOpen ? <>
-      <div className="fleet-models-heading"><Button onClick={() => setCatalogOpen(false)}><ArrowLeft size={15} aria-hidden />Models</Button><Subhead meta={shown.length}>Catalog</Subhead>
-        <Refine label="Refine model catalog" search={search} onSearch={setSearch} placeholder="Find a model">
-          <Select id="model-purpose-filter" label="Task" value={purpose} onChange={setPurpose}><option value="">All tasks</option>{MODEL_PURPOSES.map(([id,label]) => <option key={id} value={id}>{label}</option>)}</Select>
-          <Select id="model-fit-filter" label="Availability" value={availability} onChange={setAvailability}><option value="all">All models</option><option value="fits">Fits this machine</option><option value="installed">Installed</option></Select>
-        </Refine>
-      </div>
       {shown.length ? <RecordList as="ul" label="Model catalog">{shown.map(m => <RecordRow key={m.modelId} name={m.modelId}
         secondary={m.purposes.map(p => MODEL_PURPOSES.find(([id]) => id === p)?.[1]).filter(Boolean).join(" · ")}
         state={m.installed ? "Installed" : m.blocked ? "Unavailable" : m.recommended ? "Recommended" : "Fits"}

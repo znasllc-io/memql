@@ -10,6 +10,7 @@ import type { OsAppProps } from "../../system/registry";
 import { Button, EmptyState, Refine, Head, Notice, ProvenanceDot, formatBytes, formatFreshness, useNow } from "../../kit";
 import { IconButton } from "../../kit/IconButton";
 import { PageHelp } from "../../kit/pageHelp";
+import type { PageTrail } from "../../kit/pageNavigation";
 import { useLiveView } from "../../live/liveView";
 import { useMachines } from "../../live/machines";
 import { AutoRefresh, useFleetScroll } from "./FleetControls";
@@ -128,11 +129,12 @@ export function FleetWorkspace({ flow, showRevoked, selection, select, navigate,
               return <div key={`${item.machineId}:${item.view}`} data-machine-view={item.view} hidden={!shown}>
                 {item.view === "equipment" ? <><MachineEquipment machine={retainedMachine} now={now} onInspect={view => select({ machineId: item.machineId, view })} />
                 <RecentWork machineId={item.machineId} onOpenSession={onOpenSession} onAllSessions={onAllSessions ?? (() => navigate("apps", { fromContent: true }))} /></> : <div className="fleet-inspector">
-                  <Head title={VIEW_NAMES[item.view]} meta={item.view === "apps" ? listCount(snapshot, retainedMachine.apps.length) : item.view === "models" ? listCount(snapshot, machineModelsFrom(retainedMachine.reportedLabels).length) : undefined} breadcrumbs={[{ label: "Machines", onSelect: toList }, { label: machineName(retainedMachine), onSelect: () => select({ machineId: item.machineId, view: "equipment" }) }, { label: VIEW_NAMES[item.view] }]} back={{ label: machineName(retainedMachine), onSelect: () => select({ machineId: item.machineId, view: "equipment" }) }}>
+                  {item.view !== "models" ? <Head title={VIEW_NAMES[item.view]} meta={item.view === "apps" ? listCount(snapshot, retainedMachine.apps.length) : undefined} breadcrumbs={[{ label: "Machines", onSelect: toList }, { label: machineName(retainedMachine), onSelect: () => select({ machineId: item.machineId, view: "equipment" }) }, { label: VIEW_NAMES[item.view] }]} back={{ label: machineName(retainedMachine), onSelect: () => select({ machineId: item.machineId, view: "equipment" }) }}>
                     {item.view === "apps" ? <MachineAppsHelp /> : null}
                     {item.view === "apps" || item.view === "activity" ? <IconButton label="App sessions" onClick={() => navigate("apps", { fromContent: true })}><ArrowUpRight size={16} aria-hidden /></IconButton> : null}
-                  </Head>
-                  <ScopedMachineDetail machine={retainedMachine} now={now} view={item.view} onRemoved={onRemoved} />
+                  </Head> : null}
+                  <ScopedMachineDetail machine={retainedMachine} now={now} view={item.view} onRemoved={onRemoved}
+                    modelNavigation={{ breadcrumbs: [{ label: "Machines", onSelect: toList }, { label: machineName(retainedMachine), onSelect: () => select({ machineId: item.machineId, view: "equipment" }) }], back: { label: machineName(retainedMachine), onSelect: () => select({ machineId: item.machineId, view: "equipment" }) } }} />
                 </div>}
               </div>;
             })
@@ -241,12 +243,12 @@ function modelSummary(model: MachineModel): string {
   return [model.contextWindow ? `${model.contextWindow.toLocaleString()} context` : "Context not reported", model.quant, model.tools ? "Tool calling" : "", model.structuredOutput ? "Structured output" : ""].filter(Boolean).join(" · ");
 }
 
-function ScopedMachineDetail({ machine, now, view, onRemoved }: { machine: MachineRow; now: Date; view: Exclude<MachineView, "equipment">; onRemoved: (id: string) => void }) {
+function ScopedMachineDetail({ machine, now, view, onRemoved, modelNavigation }: { machine: MachineRow; now: Date; view: Exclude<MachineView, "equipment">; onRemoved: (id: string) => void; modelNavigation: Omit<PageTrail, "title"> }) {
   const writes = useMachineWrites();
   const revoke = async (id: string, reason: string) => {
     const ok = await writes.revoke(id, reason);
     if (ok) onRemoved(id);
     return ok;
   };
-  return <MachineDetail machine={machine} writes={{ ...writes, revoke }} now={now} view={view} />;
+  return <MachineDetail machine={machine} writes={{ ...writes, revoke }} now={now} view={view} modelNavigation={modelNavigation} />;
 }

@@ -324,7 +324,10 @@ clipboard success/refusal and reduced motion. Check actual rendered spacing
 and overflow, not just whether the control exists.
 
 Machine Model setup uses an assignment board: installed models beside task
-targets, with valid assignment targets highlighted and a shared memory estimate.
+targets and a shared memory estimate. Highlight only tasks assigned to the
+selected model. Available tasks use a plain solid border with no accent fill;
+clearing an assignment removes its highlight. Tasks unavailable to the selected
+model use a muted dashed border. A valid drag target may highlight temporarily.
 Tasks that cannot accept the selected model stay visible as read-only tiles,
 without a click action, tab stop, hover treatment or accepted drop. Keep their
 existing assignments and independent clear controls; do not offer an action
@@ -336,6 +339,14 @@ and bound-memory-search checks on every assignment path. The editor replaces
 the Models overview while open and preserves a refused draft. Save setup and
 Discard changes use one plain, right-aligned page action row outside the board;
 there is no nested lifecycle footer or “Choose your setup” status bar.
+Installed model details and the machine catalog extend the same window trail:
+Models → model, or Models → Catalog → model. Back returns one level along
+that path, and the Models crumb returns to the overview. Neither destination
+adds a separate Back button inside its content; catalog filters survive a
+visit to a model and back.
+Task assignments belong exclusively on the Assignment board. Machine model
+details and the Model library show embedding-binding status without offering
+their own assignment buttons. Existing corpus bindings remain protected.
 
 Small equipment, label and sharing collections share `kit/CardCarousel`: one or two
 cards according to available width, explicit previous/next arrows and an

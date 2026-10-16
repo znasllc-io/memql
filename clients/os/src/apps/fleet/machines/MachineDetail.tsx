@@ -2,6 +2,7 @@ import { Terminal, Trash2 } from "lucide-react";
 import { useSession } from "../../../chrome/access";
 import { localCockpitInstall } from "../addMachine/localInstall";
 import { PageHelp } from "../../../kit/pageHelp";
+import type { PageTrail } from "../../../kit/pageNavigation";
 import { useEffect, useRef, useState } from "react";
 
 import { CallHistory } from "../routing/CallHistory";
@@ -32,11 +33,13 @@ export function MachineDetail({
   writes,
   now,
   view = "all",
+  modelNavigation,
 }: {
   machine: MachineRow;
   writes: MachineWrites;
   now: Date;
   view?: "all" | "settings" | "models" | "apps" | "activity";
+  modelNavigation?: Omit<PageTrail, "title">;
 }) {
   const label = machineName(machine);
   const busy = writes.busyId === machine.id;
@@ -78,7 +81,7 @@ export function MachineDetail({
       {/* Below Apps, because the two answer the same shape of question about
           this machine -- what it can be asked to do -- and a person scanning
           for either reads them together. */}
-      {view === "all" || view === "models" ? <ModelsGroup key={machine.id} machine={machine} inference={inference} standalone={view === "models"} /> : null}
+      {view === "all" || view === "models" ? <ModelsGroup key={machine.id} machine={machine} inference={inference} standalone={view === "models"} navigation={modelNavigation} /> : null}
 
       {view === "all" || view === "activity" ? <CallHistory standalone={view === "activity"} workerId={machine.id} machineLabel={label} /> : null}
 

@@ -154,6 +154,7 @@ export interface FakeQuery {
   fleetRecommended: ReturnType<typeof vi.fn>;
   fleetModelSetup: ReturnType<typeof vi.fn>;
   fleetSetModelSetup: ReturnType<typeof vi.fn>;
+  activeEmbedderBinding: ReturnType<typeof vi.fn>;
   measurementsForMachine: ReturnType<typeof vi.fn>;
   fleetSharingLedger: ReturnType<typeof vi.fn>;
   fleetPullRecommended: ReturnType<typeof vi.fn>;
@@ -263,6 +264,7 @@ export function fakeConnection(seed: Partial<Record<keyof FakeQuery, Row[]>> = {
       fleetModelPull: vi.fn(async () => builtinReply("fleetModelPull", [])),
       fleetRecommended: builtin("fleetRecommended"),
       fleetModelSetup: builtin("fleetModelSetup"),
+      activeEmbedderBinding: vi.fn(async () => rowsResult(seed.activeEmbedderBinding ?? [])),
       fleetSetModelSetup: builtin("fleetSetModelSetup"),
       measurementsForMachine: read("measurementsForMachine"),
       // EVERY BUILTIN HERE ANSWERS IN THE BUILTIN WIRE SHAPE (builtinReply);
