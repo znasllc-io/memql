@@ -115,7 +115,7 @@ func imageBuildContainer(cfg Config, run StepRun, jobName string) Container {
 	compiled.Env = nil // arbitrary forwarded variables cannot configure BuildKit
 	c := stepContainer(compiled, jobName, "", nil)
 	c.Env = append(c.Env,
-		plainVar("BUILDKITD_FLAGS", "--oci-worker-snapshotter=native"),
+		plainVar("BUILDKITD_FLAGS", "--oci-worker-snapshotter=overlayfs"),
 		plainVar("BUILDKIT_HOST", ""),
 	)
 	c.SecurityContext = &SecurityContext{

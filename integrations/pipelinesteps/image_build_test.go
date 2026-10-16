@@ -115,8 +115,8 @@ func TestImageBuildJobHasOnlyItsBoundedRootlessPrivileges(t *testing.T) {
 		if v.ValueFrom != nil || v.Name == "ROOTLESSKIT_FLAGS" || v.Name == gitTokenKey {
 			t.Fatalf("builder received uncontrolled environment: %+v", v)
 		}
-		if v.Name == "BUILDKITD_FLAGS" && strings.Contains(v.Value, "no-process-sandbox") {
-			t.Fatalf("builder still shares the daemon PID namespace: %q", v.Value)
+		if v.Name == "BUILDKITD_FLAGS" && v.Value != "--oci-worker-snapshotter=overlayfs" {
+			t.Fatalf("builder lost its process sandbox or copy-on-write snapshots: %q", v.Value)
 		}
 	}
 	wire, err := json.Marshal(job)

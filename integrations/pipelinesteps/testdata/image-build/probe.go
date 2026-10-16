@@ -33,6 +33,15 @@ func main() {
 	checks["root_maps_to_unprivileged_user"] = err == nil && len(uidMap) >= 3 && uidMap[0] == "0" && uidMap[1] == "1000"
 	raw, err = os.ReadFile("/proc/self/status")
 	checks["seccomp_filter_active"] = err == nil && strings.Contains(string(raw), "Seccomp:\t2")
+	raw, err = os.ReadFile("/proc/self/attr/current")
+	checks["apparmor_policy_enforced"] = err == nil && strings.HasPrefix(string(raw), "memql-rootless-buildkit-v1-") && strings.HasSuffix(strings.TrimSpace(string(raw)), "(enforce)")
+	if f, err := os.CreateTemp("", "mapped-id-"); err == nil {
+		f.Close()
+		checks["nobody_uid_and_gid_mapped"] = os.Chown(f.Name(), 65534, 65534) == nil
+		os.Remove(f.Name())
+	} else {
+		checks["nobody_uid_and_gid_mapped"] = false
+	}
 	if os.Args[1] != "" {
 		checks["no_other_container_process"] = true
 	}

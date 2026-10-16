@@ -148,6 +148,7 @@ func imageBuildAgainstKubernetes(t *testing.T, controls pipelineTestControls) {
 		}
 	}
 	positive()
+	t.Logf("builder output:\n%s", kubectl(nil, "-n", ns, "logs", pod.Metadata.Name, "-c", ContainerStep))
 	var digest string
 	for attempt := 0; attempt < 2; attempt++ {
 		snapshot, err := NewKube(kube.api, ns).CollectArtifacts(ctx, run, pod, 32<<20)

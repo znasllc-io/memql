@@ -504,10 +504,13 @@ seccomp profile, pod user namespace, Dockerfile process sandbox and network
 isolation remain mandatory. Other containers keep their runtime AppArmor defaults.
 No node-wide AppArmor or user-namespace setting is changed.
 
-Rootless BuildKit uses its native snapshotter and process sandbox for every
+Rootless BuildKit uses the kernel's OverlayFS snapshotter and a process sandbox for every
 Dockerfile `RUN`; the untrusted process cannot inspect or signal the builder
 daemon through `/proc`. The disposable container PID boundary and complete Pod
 deletion also contain failures; builds cannot share a daemon across attempts.
+Copy-on-write layers avoid copying the entire accumulated filesystem for each
+Dockerfile instruction. The node must support rootless OverlayFS over its pod
+volumes; there is no silent full-copy or FUSE fallback.
 The profile does not grant BuildKit insecure entitlements. Host user-namespace
 and AppArmor policy must support this profile; qualify the actual node runtime
 and architecture before opting in. Local ARM64 qualification does not certify
