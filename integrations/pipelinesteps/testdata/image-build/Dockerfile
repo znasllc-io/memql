@@ -1,3 +1,4 @@
+# syntax=docker/dockerfile:1@sha256:4edf897a3ffa55b89f906fc8cc78afdb3f1834cc9c7083565e611a8a7d5fe99e
 FROM golang:1.27.2@sha256:5bc7f572bbaa98885a3a1fd9c0aa76b59e3e14e8628bfc316bbfd0c701e4818c AS probe
 ENV CGO_ENABLED=0 GOMAXPROCS=2 GOMEMLIMIT=512MiB
 COPY probe.go /probe.go
