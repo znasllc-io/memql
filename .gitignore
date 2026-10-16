@@ -12,6 +12,7 @@
 *.test
 
 # Code coverage profiles and other test artifacts
+/.memql-editor/
 *.out
 coverage.*
 *.coverprofile

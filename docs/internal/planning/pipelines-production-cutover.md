@@ -94,7 +94,7 @@ outputs, publication and failure evidence, not merely a command in a manifest.
 
 | Engine workflow | Replacement or remaining evidence | Owner |
 |---|---|---|
-| `ci.yml` | Existing 41-step package; close editor-host, OS Docker-stage, PR-base and DB-plan gaps; production PR and exact merge-group proof | #5506, #5507 |
+| `ci.yml` | Native package adds editor tests/packaging and the rootless OS Docker stage, retains per-package DB budgets and carries PR bases. Editor hosts plus production PR and exact merge-group proof remain | #5506, #5507 |
 | `gitleaks.yml` | Existing current-tree and history scans; production event/cadence evidence | #5506 |
 | `govulncheck.yml` | Existing scan; production merge-group/push/schedule evidence | #5506 |
 | `codeql.yml` | Existing Go/JS/Python analysis; journaled SARIF upload and receipt still needed | #5480 |
@@ -132,6 +132,31 @@ success. The live API reports nine instance workflows, ten Cockpit workflows
 | `memql-znas` | `ci`, `bash32`, `gitleaks`, `instance-ci`, `package-config`, `publish-images`, `engine-version-watch`, `template-drift`, `docs-sync` | #5480/#5508; instance #164 for automatic site delivery |
 | `memql-cockpit` | `ci`, `codeql`, `gitleaks`, `govulncheck`, `install-scripts-lint`, `release`, `sbom`, `scorecard`, generated Dependabot updates/graph | #5480; native host consent/signing remains a separate qualification |
 | `memql-project` | `ci`, `deployment-observer-tests`, `engine-version-watch`, `gitleaks`, `publish-images`, `template-ci`, `template-drift` | #5480/#5508; change shared operational files in the template first |
+
+## Portable coverage additions
+
+The native `editor-packages` step runs LSP drift guards, all VS Code unit tests,
+the hosted browser editor build/typecheck/tests, Productivity unit tests and
+Linux VSIX packaging. The exact command passed in the pinned toolchain as uid
+1000: 2,840 extension tests, 14 browser tests and 325 Productivity tests, plus a
+36.91 MB VSIX whose 55 staged scripts retain executable modes. This is portable
+command evidence; it does not qualify the separate desktop/web host matrices.
+The first local harness attempt failed because its bind mount created a
+root-owned parent cache directory; the corrected harness mounts the Go cache
+under `/cache`, like the actual runner.
+
+`os-image` uses the fixed rootless image builder for Dockerfile's `spa-build`
+stage, retaining the OCI archive and metadata. Its path bucket includes the
+Dockerfile and the OS sources. Its production execution remains required.
+
+The DB step retains the exact package selection and five isolated databases,
+but groups each shard's packages by the CI planner's existing budget classes.
+All invocations stay serial and uncached; fast suites keep 180 seconds,
+packages 300 seconds, and engine/campaigns 600 seconds. An empty selection,
+missing required-database setting or failing test refuses. The class table
+remains in the checked-in workflow while both definitions are retained; reading
+it requires no Actions execution. Tests exercise failure propagation and every
+current class, and the command passed against a real database.
 
 ## Acceptance and issue closure
 
