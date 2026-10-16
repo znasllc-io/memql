@@ -9,18 +9,16 @@ import (
 	"slices"
 	"strconv"
 	"strings"
-	"time"
 
 	pl "github.com/znasllc-io/memql/component/pipelines"
 	"github.com/znasllc-io/memql/core/id"
 )
 
 const (
-	artifactVolume       = "artifacts"
-	artifactPath         = "/memql-artifacts"
-	artifactFile         = artifactPath + "/completed.tar"
-	ContainerArtifacts   = "artifacts"
-	artifactReadAttempts = 3
+	artifactVolume     = "artifacts"
+	artifactPath       = "/memql-artifacts"
+	artifactFile       = artifactPath + "/completed.tar"
+	ContainerArtifacts = "artifacts"
 )
 
 // The collector has no credentials, command environment, cache or checkout.
@@ -68,8 +66,8 @@ func (k *Kube) CollectArtifacts(ctx context.Context, run StepRun, observed *Pod,
 	if err != nil {
 		return nil, err
 	}
-	snapshot, err := readArtifactSnapshotWithRetry(ctx, run.Artifacts, maxBytes, func(readCtx context.Context, dst io.Writer) error {
-		_, readErr := k.api.ReadPodFile(readCtx, k.ns, before.Metadata.Name, ContainerArtifacts, artifactFile, dst, maxBytes)
+	snapshot, err := readArtifactSnapshot(ctx, run.Artifacts, maxBytes, func(readCtx context.Context, dst io.Writer) error {
+		_, readErr := k.api.ReadPodFileResumable(readCtx, k.ns, before.Metadata.Name, ContainerArtifacts, artifactFile, dst, maxBytes)
 		return readErr
 	})
 	if err != nil {
@@ -91,22 +89,6 @@ func (k *Kube) CollectArtifacts(ctx context.Context, run StepRun, observed *Pod,
 		return nil, err
 	}
 	return snapshot, nil
-}
-
-func readArtifactSnapshotWithRetry(ctx context.Context, declared []string, maxBytes int64, readFile artifactFileReader) (*ArtifactSnapshot, error) {
-	for attempt := 1; attempt <= artifactReadAttempts; attempt++ {
-		snapshot, err := readArtifactSnapshot(ctx, declared, maxBytes, readFile)
-		if err == nil || !retryableArtifactRead(ctx, err) || attempt == artifactReadAttempts {
-			return snapshot, err
-		}
-		// The producer has terminated and this is a read of the same immutable
-		// archive. A fresh pipe and snapshot discard every partial byte before a
-		// retry; no Library write happens until a complete snapshot exists.
-		if err := waitArtifactRetry(ctx, attempt); err != nil {
-			return nil, errors.Join(err, ctx.Err())
-		}
-	}
-	return nil, errors.New("unreachable artifact retry state")
 }
 
 type artifactFileReader func(context.Context, io.Writer) error
@@ -134,30 +116,6 @@ func readArtifactSnapshot(ctx context.Context, declared []string, maxBytes int64
 		return nil, errors.Join(snapshotErr, transferErr)
 	}
 	return snapshot, nil
-}
-
-func retryableArtifactRead(ctx context.Context, err error) bool {
-	if err == nil || ctx.Err() != nil {
-		return false
-	}
-	if errors.Is(err, io.ErrUnexpectedEOF) || errors.Is(err, context.DeadlineExceeded) {
-		return true
-	}
-	message := err.Error()
-	return strings.Contains(message, "pod file transport:") ||
-		strings.Contains(message, "pod file transport ended without a normal close") ||
-		strings.Contains(message, "pod file command did not report success")
-}
-
-func waitArtifactRetry(ctx context.Context, attempt int) error {
-	timer := time.NewTimer(time.Duration(attempt) * 200 * time.Millisecond)
-	defer timer.Stop()
-	select {
-	case <-ctx.Done():
-		return ctx.Err()
-	case <-timer.C:
-		return nil
-	}
 }
 
 func artifactJobOwned(job Job, run StepRun) bool {

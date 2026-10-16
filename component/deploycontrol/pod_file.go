@@ -25,6 +25,10 @@ const (
 
 var podFileName = regexp.MustCompile(`^[a-z0-9]([-a-z0-9.]*[a-z0-9])?$`)
 
+// Only transport interruptions can be retried. A failed remote command, a
+// protocol violation or a writer failure must remain a failure.
+var errPodFileInterrupted = errors.New("pod file transport")
+
 // ReadPodFile copies one file through Kubernetes' authenticated exec protocol.
 // It executes only cat with a separate literal path argument: no shell, stdin,
 // terminal, uploaded executable, or caller-selected command. The caller must
@@ -38,19 +42,32 @@ var podFileName = regexp.MustCompile(`^[a-z0-9]([-a-z0-9.]*[a-z0-9])?$`)
 // A supplied writer must return from Write (and honor cancellation if it can
 // block). The caller owns it. The operation has a maximum 30-minute lifetime.
 func (e *ClusterAPI) ReadPodFile(ctx context.Context, namespace, pod, container, file string, dst io.Writer, maxBytes int64) (int64, error) {
+	if err := validatePodFile(namespace, pod, container, file, dst, maxBytes); err != nil {
+		return 0, err
+	}
+	ctx, cancel := context.WithTimeout(ctx, 30*time.Minute)
+	defer cancel()
+	return e.readPodFileCommand(ctx, namespace, pod, container, []string{"cat", "--", file}, dst, maxBytes)
+}
+
+func validatePodFile(namespace, pod, container, file string, dst io.Writer, maxBytes int64) error {
 	for _, name := range []string{namespace, pod, container} {
 		if len(name) > 253 || !podFileName.MatchString(name) || name == "." || name == ".." {
-			return 0, errors.New("pod file read requires literal Kubernetes names")
+			return errors.New("pod file read requires literal Kubernetes names")
 		}
 	}
 	if dst == nil || maxBytes < 0 || maxBytes > MaxPodFileBytes || len(file) > 4096 ||
 		!strings.HasPrefix(file, "/") || path.Clean(file) != file || strings.ContainsAny(file, "\x00\r\n") {
-		return 0, errors.New("pod file read requires an absolute clean path, writer and 0 through 2 GiB bound")
+		return errors.New("pod file read requires an absolute clean path, writer and 0 through 2 GiB bound")
 	}
-	ctx, cancel := context.WithTimeout(ctx, 30*time.Minute)
-	defer cancel()
+	return nil
+}
+
+// The command is constructed only by the two file-read primitives. Never
+// expose caller-selected commands through this helper.
+func (e *ClusterAPI) readPodFileCommand(ctx context.Context, namespace, pod, container string, command []string, dst io.Writer, maxBytes int64) (int64, error) {
 	q := url.Values{"container": {container}, "stdout": {"true"}, "stderr": {"true"},
-		"stdin": {"false"}, "tty": {"false"}, "command": {"cat", "--", file}}
+		"stdin": {"false"}, "tty": {"false"}, "command": command}
 	req, err := e.newRequest(ctx, http.MethodGet, "api/v1/namespaces/"+namespace+"/pods/"+pod+"/exec?"+q.Encode(), "", nil)
 	if err != nil {
 		return 0, err
@@ -65,7 +82,7 @@ func (e *ClusterAPI) ReadPodFile(ctx context.Context, namespace, pod, container,
 		if response != nil {
 			return 0, fmt.Errorf("pod file transport refused: HTTP %d", response.StatusCode)
 		}
-		return 0, fmt.Errorf("pod file transport: %w", err)
+		return 0, fmt.Errorf("%w: %w", errPodFileInterrupted, err)
 	}
 	defer conn.CloseNow()
 	if conn.Subprotocol() != podFileProtocol {
@@ -82,7 +99,10 @@ func (e *ClusterAPI) ReadPodFile(ctx context.Context, namespace, pod, container,
 				return written, ctx.Err()
 			}
 			if websocket.CloseStatus(err) != websocket.StatusNormalClosure {
-				return written, errors.New("pod file transport ended without a normal close")
+				return written, podFileStreamFailure("closure", written, err)
+			}
+			if status.Len() == 0 {
+				return written, fmt.Errorf("%w: command status was lost after %d bytes", errPodFileInterrupted, written)
 			}
 			var result struct {
 				Status string `json:"status"`
@@ -120,7 +140,7 @@ func (e *ClusterAPI) ReadPodFile(ctx context.Context, namespace, pod, container,
 					break
 				}
 				if readErr != nil {
-					return written, readErr
+					return written, podFileStreamFailure("stdout", written, readErr)
 				}
 			}
 		case 2, 3: // stderr / Kubernetes Status, bounded across every frame
@@ -132,7 +152,7 @@ func (e *ClusterAPI) ReadPodFile(ctx context.Context, namespace, pod, container,
 			}
 			n, err := io.CopyBuffer(target, io.LimitReader(reader, limit+1), buffer)
 			if err != nil {
-				return written, err
+				return written, podFileStreamFailure("control", written, err)
 			}
 			if n > limit {
 				return written, errors.New("pod file control stream exceeds its bound")
@@ -143,5 +163,15 @@ func (e *ClusterAPI) ReadPodFile(ctx context.Context, namespace, pod, container,
 		default:
 			return written, errors.New("pod file transport received an unexpected channel")
 		}
+	}
+}
+
+func podFileStreamFailure(phase string, written int64, err error) error {
+	switch websocket.CloseStatus(err) {
+	case websocket.StatusProtocolError, websocket.StatusUnsupportedData,
+		websocket.StatusInvalidFramePayloadData, websocket.StatusPolicyViolation, websocket.StatusMessageTooBig:
+		return fmt.Errorf("pod file %s rejected after %d bytes: %w", phase, written, err)
+	default:
+		return fmt.Errorf("%w: %s interrupted after %d bytes: %w", errPodFileInterrupted, phase, written, err)
 	}
 }
