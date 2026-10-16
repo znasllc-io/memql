@@ -13139,6 +13139,28 @@ QueryClient.prototype.workSkillSelectionsForOwner = function (this: QueryClient,
   return this.executeNamed("workSkillSelectionsForOwner", buildWorkSkillSelectionsForOwner(args), opts);
 };
 
+/** Public source receipts only; generated answers are not source evidence. */
+// Bound concept: v1:work:step (machine-readable: BoundConcepts["workSourceStepsForOwnerRun"] in generated_concepts.ts).
+export interface WorkSourceStepsForOwnerRunArgs {
+  runId: string;
+}
+
+export function buildWorkSourceStepsForOwnerRun(args: WorkSourceStepsForOwnerRunArgs): string {
+  const parts: string[] = [];
+  parts.push("runId: " + renderMemQLValue(args.runId));
+  return "query workSourceStepsForOwnerRun(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    workSourceStepsForOwnerRun(args: WorkSourceStepsForOwnerRunArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.workSourceStepsForOwnerRun = function (this: QueryClient, args: WorkSourceStepsForOwnerRunArgs = {} as WorkSourceStepsForOwnerRunArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("workSourceStepsForOwnerRun", buildWorkSourceStepsForOwnerRun(args), opts);
+};
+
 /** One caller-owned execution receipt. A named key avoids reading an entire run when verifying a release artifact or one required check. */
 // Bound concept: v1:work:step (machine-readable: BoundConcepts["workStepForOwnerRun"] in generated_concepts.ts).
 export interface WorkStepForOwnerRunArgs {

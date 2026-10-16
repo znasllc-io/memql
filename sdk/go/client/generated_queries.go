@@ -13803,6 +13803,28 @@ func WorkSkillSelectionsForOwnerBuild(args WorkSkillSelectionsForOwnerArgs) stri
 	return "query workSkillSelectionsForOwner()"
 }
 
+// WorkSourceStepsForOwnerRun -- Public source receipts only; generated answers are not source evidence.
+//
+// Bound concept: v1:work:step (machine-readable: BoundConcepts["workSourceStepsForOwnerRun"] in generated_concepts.go).
+type WorkSourceStepsForOwnerRunArgs struct {
+	RunId string
+}
+
+// WorkSourceStepsForOwnerRun calls the engine query workSourceStepsForOwnerRun.
+func (qc *QueryClient) WorkSourceStepsForOwnerRun(ctx context.Context, args WorkSourceStepsForOwnerRunArgs) (*Result, error) {
+	call := WorkSourceStepsForOwnerRunBuild(args)
+	return qc.executeNamed(ctx, "workSourceStepsForOwnerRun", call)
+}
+
+func WorkSourceStepsForOwnerRunBuild(args WorkSourceStepsForOwnerRunArgs) string {
+	var b strings.Builder
+	b.WriteString("query workSourceStepsForOwnerRun(")
+	b.WriteString("runId: ")
+	b.WriteString(quoteMemQL(args.RunId))
+	b.WriteString(")")
+	return b.String()
+}
+
 // WorkStepForOwnerRun -- One caller-owned execution receipt. A named key avoids reading an entire run when verifying a release artifact or one required check.
 //
 // Bound concept: v1:work:step (machine-readable: BoundConcepts["workStepForOwnerRun"] in generated_concepts.go).

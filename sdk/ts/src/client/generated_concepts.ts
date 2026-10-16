@@ -1131,6 +1131,7 @@ export const BoundConcepts = {
   workSignedRunsForOwner: "v1:work:run",
   workSkillSelectionForOwnerRun: "v1:work:observation",
   workSkillSelectionsForOwner: "v1:work:observation",
+  workSourceStepsForOwnerRun: "v1:work:step",
   workStepForOwnerRun: "v1:work:step",
   workStepsForOwnerRun: "v1:work:step",
   workTrainingEvidenceById: "v1:work:observation",
