@@ -363,7 +363,7 @@ export class ConversationSession {
     }
   };
   select = async (id: string, forDiscussion = false) => {
-    if (id === this.state.selectedId && !this.state.openingId) return true;
+    if (id === this.state.selectedId && !this.state.openingId && !this.state.loading) return true;
     if (this.state.busy || this.state.voiceActive || !this.transport.conversations) return false;
     if (!forDiscussion) this.leaveDiscussion();
     const selection = ++this.selection;

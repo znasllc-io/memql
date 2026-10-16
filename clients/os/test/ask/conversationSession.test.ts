@@ -103,3 +103,13 @@ it("keeps the current draft when conversation creation fails", async () => {
  expect(session.getSnapshot()).toMatchObject({draft:"Keep this",error:"Permission denied",loading:false});
  session.dispose();
 });
+it("returning to the current conversation cancels a pending New selection", async () => {
+ const pending = deferred<{id:string;title:string}>();
+ const session = setup({create:()=>pending.promise});
+ await session.select("current");
+ const creating = session.createConversation();
+ await session.select("current");
+ pending.resolve({id:"late",title:"New conversation"}); await creating;
+ expect(session.getSnapshot()).toMatchObject({selectedId:"current",loading:false});
+ session.dispose();
+});
