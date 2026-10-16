@@ -233,7 +233,7 @@ func (i *Integration) released(ctx context.Context, d Deps, p Pipeline, t pipeli
 	if err != nil {
 		return OpenResult{}, "", err
 	}
-	sha, _, err := d.GitHub.CommitForRef(ctx, token, p.Repository, "tags/"+t.ReleaseTag)
+	sha, _, err := d.GitHub.CommitForRef(ctx, token, p.Repository, "refs/tags/"+t.ReleaseTag)
 	if err != nil {
 		return OpenResult{}, "", fmt.Errorf("release %s: resolving its tag: %w", t.ReleaseTag, err)
 	}

@@ -11,7 +11,7 @@ func TestRequestedReleaseBuildPinsTheTagAndDeduplicatesWithItsWebhook(t *testing
 	h := newHarness(t)
 	p := testPipeline(DeliveryWebhook)
 	h.store.addPipeline(p)
-	h.github.commits[repoName+"@tags/v1.4.0"] = headAnswer{SHA: shaC}
+	h.github.commits[repoName+"@refs/tags/v1.4.0"] = headAnswer{SHA: shaC}
 	run, err := h.integ.RunRelease(personCtx(ownerID), p.ID, "v1.4.0")
 	if err != nil {
 		t.Fatal(err)
@@ -27,7 +27,7 @@ func TestRequestedReleaseBuildPinsTheTagAndDeduplicatesWithItsWebhook(t *testing
 	if len(res.Opened) != 0 || len(res.Existing) != 1 || res.Existing[0].ID != run.ID || len(h.github.created) != 1 {
 		t.Fatalf("later publication created duplicate release work: %+v; checks %d", res, len(h.github.created))
 	}
-	h.github.commits[repoName+"@tags/v1.5.0"] = headAnswer{SHA: shaC}
+	h.github.commits[repoName+"@refs/tags/v1.5.0"] = headAnswer{SHA: shaC}
 	if _, err := h.integ.RunRelease(personCtx(ownerID), p.ID, "v1.5.0"); err == nil || !strings.Contains(err.Error(), "recorded version") {
 		t.Fatalf("another tag must not silently reuse a differently stamped image: %v", err)
 	}
@@ -55,7 +55,7 @@ func TestReleaseRequestRefusesBeforeWritingACheck(t *testing.T) {
 			}
 			h.store.addPipeline(p)
 			if name != "missing tag" {
-				h.github.commits[repoName+"@tags/v1.4.0"] = headAnswer{SHA: sha}
+				h.github.commits[repoName+"@refs/tags/v1.4.0"] = headAnswer{SHA: sha}
 			}
 			if _, err := h.integ.RunRelease(personCtx(owner), p.ID, tag); err == nil {
 				t.Fatal("unsafe release request accepted")
@@ -95,7 +95,7 @@ pipeline:
 	p, _ := dh.store.pipeline(dh.p.ID)
 	p.Status = PipelineDisconnected
 	dh.store.addPipeline(p)
-	dh.github.commits[repoName+"@tags/v1.4.0"] = headAnswer{SHA: shaA}
+	dh.github.commits[repoName+"@refs/tags/v1.4.0"] = headAnswer{SHA: shaA}
 	run, err := dh.integ.RunRelease(personCtx(ownerID), dh.p.ID, "v1.4.0")
 	if err != nil {
 		t.Fatal(err)

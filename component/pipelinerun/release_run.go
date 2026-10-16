@@ -59,7 +59,7 @@ func (i *Integration) RunRelease(ctx context.Context, pipelineID, tag string) (R
 	if installationID == 0 || installationID != p.InstallationID {
 		return Run{}, fmt.Errorf("pipelines: the source's GitHub installation changed; reconnect the pipeline before building a release")
 	}
-	sha, _, err := d.GitHub.CommitForRef(ctx, token, p.Repository, "tags/"+tag)
+	sha, _, err := d.GitHub.CommitForRef(ctx, token, p.Repository, "refs/tags/"+tag)
 	if err != nil {
 		return Run{}, fmt.Errorf("pipelines: resolving release tag %s: %w", tag, err)
 	}

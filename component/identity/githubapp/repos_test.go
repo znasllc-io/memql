@@ -215,11 +215,11 @@ func TestCommitForRefResolvesARefToItsCommit(t *testing.T) {
 	// them with their patches: the reply is read whole however large it is
 	// within reason, because the two facts asked for sit at its top.
 	files := compareBody(300, strings.Repeat("+line\n", 3500))
-	hub := newHub().json("/repos/acme/widget/commits/tags/v1.4.0", http.StatusOK,
+	hub := newHub().json("/repos/acme/widget/commits/refs/tags/v1.4.0", http.StatusOK,
 		`{"sha":"`+headSHA+`","commit":{"message":"Release 1.4.0"},`+strings.TrimPrefix(files, `{`))
 	c := testClient(t, hub, &now)
 
-	sha, message, err := c.CommitForRef(context.Background(), installToken, "acme", "widget", "tags/v1.4.0")
+	sha, message, err := c.CommitForRef(context.Background(), installToken, "acme", "widget", "refs/tags/v1.4.0")
 	if err != nil {
 		t.Fatalf("commit for ref: %v", err)
 	}

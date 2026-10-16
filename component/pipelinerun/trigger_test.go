@@ -484,7 +484,7 @@ func TestARerequestOfARunStillGoingOpensNothing(t *testing.T) {
 func TestAReleaseResolvesItsTagToTheCommit(t *testing.T) {
 	h := newHarness(t)
 	h.store.addPipeline(testPipeline(DeliveryWebhook))
-	h.github.commits[repoName+"@tags/v1.4.0"] = headAnswer{SHA: shaC, Message: "Release 1.4"}
+	h.github.commits[repoName+"@refs/tags/v1.4.0"] = headAnswer{SHA: shaC, Message: "Release 1.4"}
 
 	res := trigger(t, h, "release", "d5", releaseDelivery(t, "v1.4.0", testInstallation))
 	if len(res.Opened) != 1 {
