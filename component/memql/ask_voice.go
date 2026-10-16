@@ -56,13 +56,14 @@ func (e *MemQLEngine) StartAskVoice(ctx context.Context, opts AskVoiceOptions) (
 	if _, _, err := ResolveAITyped[SpeechAIProvider](ctx, e, AudioResolveRequest(airoute.ModalitySpeech, opts.SpeechProvider)); err != nil {
 		return audio.RoomCredentials{}, fmt.Errorf("no speech route: %w", err)
 	}
-	release, err := e.lockAskConversationKind(ctx, opts.ConversationID, "voice")
+	hold, err := e.holdAskConversation(ctx, opts.ConversationID, "voice")
 	if err != nil {
 		return audio.RoomCredentials{}, err
 	}
 	// The authenticated identity survives the start envelope's mesh lifetime.
 	// Room departure, media failure and the session lease cancel all model work.
 	sessionCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 30*time.Minute)
+	sessionCtx = hold.observationContext(sessionCtx)
 	stopStartupCancellation := context.AfterFunc(ctx, cancel)
 	defer stopStartupCancellation()
 	input := make(chan []byte, 64)
@@ -82,11 +83,11 @@ func (e *MemQLEngine) StartAskVoice(ctx context.Context, opts AskVoiceOptions) (
 			room.Close()
 		}
 		cancel()
-		release()
+		hold.release()
 		return audio.RoomCredentials{}, err
 	}
 	go func() {
-		defer release()
+		defer hold.release()
 		defer cancel()
 		defer room.Close()
 		e.driveAskVoice(sessionCtx, room, input, opts)

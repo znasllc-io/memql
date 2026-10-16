@@ -2,12 +2,9 @@ package memql
 
 import (
 	"context"
-	"database/sql"
-	"database/sql/driver"
 	"encoding/json"
 	"errors"
 	"fmt"
-	"hash/fnv"
 	"sort"
 	"strings"
 	"sync"
@@ -116,11 +113,12 @@ func (e *MemQLEngine) RunAsk(ctx context.Context, conversationID, turnID, prompt
 	if _, err = e.askRead(ctx, conversationID); err != nil {
 		return "", err
 	}
-	observer, err := e.lockAskConversationKind(ctx, conversationID, "observer:"+turnID)
+	observer, err := e.holdAskConversation(ctx, conversationID, "observer:"+turnID)
 	if err != nil {
 		return "", err
 	}
-	defer observer()
+	defer observer.release()
+	ctx = observer.observationContext(ctx)
 	release, err := e.lockAskConversationKind(ctx, conversationID, "write")
 	if err != nil {
 		return "", err
@@ -403,6 +401,13 @@ func (e *MemQLEngine) askSave(ctx context.Context, conversationID, title string,
 	if err != nil {
 		return err
 	}
+	// A detached cancellation receipt still carries its observer token. Once
+	// another replica owns the observation, the old one cannot save over it.
+	if observer, ok := ctx.Value(askObserverContextKey{}).(*askConversationHold); ok {
+		if err := observer.verify(ctx); err != nil {
+			return err
+		}
+	}
 	_, err = e.Execute(auth.ContextWithInternalOrigin(ctx), "mutation "+call)
 	return err
 }
@@ -424,66 +429,4 @@ func (e *MemQLEngine) lockAskConversationKind(ctx context.Context, conversationI
 		return nil, err
 	}
 	return hold.release, nil
-}
-
-type askConversationHold struct {
-	conn *sql.Conn
-	key  int64
-}
-
-func (h *askConversationHold) verify(ctx context.Context) error {
-	var held bool
-	err := h.conn.QueryRowContext(ctx, `SELECT EXISTS (SELECT 1 FROM pg_locks WHERE locktype='advisory' AND granted AND pid=pg_backend_pid() AND objsubid=1 AND classid::bigint=(($1::bigint >> 32) & 4294967295) AND objid::bigint=($1::bigint & 4294967295))`, h.key).Scan(&held)
-	if err != nil {
-		return err
-	}
-	if !held {
-		return ErrWriteGateLost
-	}
-	return nil
-}
-func (h *askConversationHold) release() {
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-	defer cancel()
-	if _, err := h.conn.ExecContext(ctx, "SELECT pg_advisory_unlock($1)", h.key); err != nil {
-		_ = h.conn.Raw(func(any) error { return driver.ErrBadConn })
-	}
-	_ = h.conn.Close()
-}
-
-// Session locks outlive acquisition-context cancellation. The connection is
-// retained until the bounded write settles; no transaction inherits that clock.
-func (e *MemQLEngine) holdAskConversation(ctx context.Context, conversationID, kind string) (*askConversationHold, error) {
-	db := e.database()
-	if db == nil {
-		return nil, fmt.Errorf("conversation storage is unavailable")
-	}
-	conn, err := db.DB.Conn(ctx)
-	if err != nil {
-		return nil, err
-	}
-	_, bareID, err := id.ParseNodeId(conversationID)
-	if err != nil {
-		_ = conn.Close()
-		return nil, err
-	}
-	hash := fnv.New64a()
-	_, _ = hash.Write([]byte("ask:" + kind + ":" + bareID))
-	key := int64(hash.Sum64())
-	var held bool
-	if kind == "write" || kind == "memory-index" {
-		_, err = conn.ExecContext(ctx, "SELECT pg_advisory_lock($1)", key)
-		held = err == nil
-	} else {
-		err = conn.QueryRowContext(ctx, "SELECT pg_try_advisory_lock($1)", key).Scan(&held)
-	}
-	if err != nil || !held {
-		_ = conn.Raw(func(any) error { return driver.ErrBadConn })
-		_ = conn.Close()
-		if err != nil {
-			return nil, err
-		}
-		return nil, fmt.Errorf("MemQL is already working in this conversation")
-	}
-	return &askConversationHold{conn: conn, key: key}, nil
 }
