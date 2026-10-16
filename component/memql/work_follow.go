@@ -167,7 +167,7 @@ func followWorkRun(ctx context.Context, runID string, read workRowReader, onText
 		// Elapsed time says nothing about intent. A cold classifier must not
 		// turn a greeting into background work. Classification is durable, so
 		// every observing replica makes the same handoff decision.
-		if mode == followSnapshot || (mode == followBackground && workload != "" && workload != "quick") {
+		if mode == followSnapshot || (mode == followBackground && ((workload != "" && workload != "quick") || strings.TrimSpace(ack) != "")) {
 			return answer, pending
 		}
 		timer := time.NewTimer(interval)

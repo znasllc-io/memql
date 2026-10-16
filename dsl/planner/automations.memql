@@ -175,7 +175,7 @@ automation defaultWorkSpine {
   }
  }
  triage := builtin spineClassify()
- if triage.conversational && triage.workload != "quick" && triage.acknowledgement == "" {
+ if triage.conversational && (triage.workload != "quick" || triage.intent != "reply") && triage.acknowledgement == "" {
   builtin spineAcknowledge()
  }
  route := logic workSpineRoute(triage: triage)

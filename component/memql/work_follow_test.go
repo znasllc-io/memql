@@ -229,3 +229,18 @@ func TestWorkObserverCompletedResponseReplacesEarlierAttemptsWithoutJournalReply
 	require.NoError(t, err)
 	require.Equal(t, "Final answer.", answer)
 }
+
+func TestAcknowledgedShortTaskHandsOffAfterClassification(t *testing.T) {
+	read := func(_ context.Context, name, _ string) ([]map[string]any, error) {
+		if name == "workRunForOwner" {
+			return []map[string]any{{"status": "running", "classification": map[string]any{"workload": "quick", "acknowledgement": "I’ll prepare the coffee notes."}}}, nil
+		}
+		return nil, nil
+	}
+	ctx, cancel := context.WithTimeout(context.WithValue(context.Background(), workFollowModeKey{}, followBackground), time.Second)
+	defer cancel()
+	_, err := followWorkRun(ctx, "run", read, nil, nil, time.Millisecond)
+	var pending *workPending
+	require.ErrorAs(t, err, &pending)
+	require.Equal(t, "I’ll prepare the coffee notes.", pending.Acknowledgement)
+}

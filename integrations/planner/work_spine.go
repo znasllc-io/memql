@@ -248,18 +248,6 @@ func (s *spineScope) classify(ctx context.Context, _ map[string]any) (any, error
 	default:
 		return nil, fmt.Errorf("work compile: invalid workload classification")
 	}
-	// Quick is the inline reply contract, not an estimate for a short action.
-	// Preserve the model's requested task and delivery contract if it labels
-	// a file or action quick; those still need a work acknowledgment.
-	if conversational && out.Workload == "quick" && sectionable.Intent != "reply" {
-		out.Workload = "lookup"
-		if *sectionable.RequiresFile || sectionable.Intent == "automation" {
-			out.Workload = "research"
-		}
-	}
-	if out.Workload == "quick" {
-		out.Acknowledgement = ""
-	}
 	if len([]rune(out.WorkTitle)) > 80 {
 		out.WorkTitle = string([]rune(out.WorkTitle)[:80])
 	}
@@ -268,6 +256,9 @@ func (s *spineScope) classify(ctx context.Context, _ map[string]any) (any, error
 			return nil, fmt.Errorf("work compile: conflicting reply delivery contract; retry the request")
 		}
 		out.Reply = out.Workload == "quick"
+		if out.Reply {
+			out.Acknowledgement = ""
+		}
 	}
 	sectionable.Workload = out.Workload
 	s.guidance, s.decision = guidance, sectionable

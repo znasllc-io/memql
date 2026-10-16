@@ -583,7 +583,7 @@ function message(error: unknown) { return error instanceof Error ? error.message
 
 export function isBackgroundTurn(turn: AskTurn) { return Boolean(turn.runId) && (turn.state === "queued" || turn.state === "waiting" || turn.state === "interrupted"); }
 /** A recovered unclassified/quick request stays inline while observation resumes. */
-export function isConversationalWait(turn: AskTurn) { return isBackgroundTurn(turn) && turn.state !== "waiting" && (turn.workload === "quick" || (!turn.background && !turn.acknowledgement && !turn.workload)); }
+export function isConversationalWait(turn: AskTurn) { return isBackgroundTurn(turn) && turn.state !== "waiting" && !turn.background && !turn.acknowledgement && (!turn.workload || turn.workload === "quick"); }
 
 export function canGuideTurn(turn: AskTurn) { return turn.canGuideWork === true && !!turn.guidanceEpoch && !turn.approvalId && !turn.answerOnly && isBackgroundTurn(turn); }
 
