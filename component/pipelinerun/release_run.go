@@ -22,6 +22,8 @@ func (i *Integration) handleRunRelease(ctx context.Context, args map[string]any,
 // neither a tag nor a public release. The owner requests one run; source and
 // version are resolved through that owner's current grant, and the ordinary
 // release run key deduplicates this request with a later published webhook.
+// Automatic delivery may stay disconnected during a bootstrap: the explicit
+// owner request authorizes this release, without subscribing to other changes.
 func (i *Integration) RunRelease(ctx context.Context, pipelineID, tag string) (Run, error) {
 	if _, err := personFrom(ctx); err != nil {
 		return Run{}, err
@@ -46,9 +48,6 @@ func (i *Integration) RunRelease(ctx context.Context, pipelineID, tag string) (R
 	}
 	if p == nil {
 		return Run{}, fmt.Errorf("pipelines: you have no pipeline %q", pipelineID)
-	}
-	if !p.Active() {
-		return Run{}, pipelines.Refuse(pipelines.CodeDisconnected, "", "Connect this pipeline before requesting a release build.")
 	}
 	if strings.TrimSpace(p.CredentialID) == "" {
 		return Run{}, fmt.Errorf("pipelines: this source has no GitHub connection; reconnect it before building a release")

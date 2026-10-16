@@ -34,7 +34,7 @@ func TestRequestedReleaseBuildPinsTheTagAndDeduplicatesWithItsWebhook(t *testing
 }
 
 func TestReleaseRequestRefusesBeforeWritingACheck(t *testing.T) {
-	for _, name := range []string{"stranger", "disconnected", "missing connection", "changed installation", "missing tag", "malformed SHA", "branch syntax", "empty tag"} {
+	for _, name := range []string{"stranger", "missing connection", "changed installation", "missing tag", "malformed SHA", "branch syntax", "empty tag"} {
 		t.Run(name, func(t *testing.T) {
 			h := newHarness(t)
 			p := testPipeline(DeliveryWebhook)
@@ -42,8 +42,6 @@ func TestReleaseRequestRefusesBeforeWritingACheck(t *testing.T) {
 			switch name {
 			case "stranger":
 				owner = otherID
-			case "disconnected":
-				p.Status = PipelineDisconnected
 			case "missing connection":
 				p.CredentialID = ""
 			case "changed installation":
@@ -65,7 +63,7 @@ func TestReleaseRequestRefusesBeforeWritingACheck(t *testing.T) {
 			if len(h.github.created) != 0 {
 				t.Fatal("refused release request wrote a check")
 			}
-			if name == "stranger" || name == "disconnected" || name == "missing connection" || name == "branch syntax" || name == "empty tag" {
+			if name == "stranger" || name == "missing connection" || name == "branch syntax" || name == "empty tag" {
 				if len(h.github.tokenMints) != 0 {
 					t.Fatal("refused owner/pipeline/tag reached GitHub")
 				}
@@ -92,6 +90,11 @@ pipeline:
           run: rehearse
 `
 	dh := newDriveHarness(t, manifest)
+	// The request is explicit; automatic delivery stays disconnected so a
+	// bootstrap neither subscribes to other PRs nor races a main push.
+	p, _ := dh.store.pipeline(dh.p.ID)
+	p.Status = PipelineDisconnected
+	dh.store.addPipeline(p)
 	dh.github.commits[repoName+"@tags/v1.4.0"] = headAnswer{SHA: shaA}
 	run, err := dh.integ.RunRelease(personCtx(ownerID), dh.p.ID, "v1.4.0")
 	if err != nil {
@@ -110,5 +113,22 @@ pipeline:
 	sent := dh.exec.sent()
 	if len(sent) != 1 || sent[0].Event != pipelines.EventRelease || sent[0].Version != "v1.4.0" || sent[0].SHA != shaA || sent[0].Step.Run != "build-release" {
 		t.Fatalf("release stages did not retain their source/version across the hop: %+v", sent)
+	}
+	p, _ = dh.store.pipeline(dh.p.ID)
+	if p.Active() {
+		t.Fatal("an explicit release request enabled automatic delivery")
+	}
+}
+
+func TestAutomaticReleaseCannotStartAfterDeliveryIsDisconnected(t *testing.T) {
+	dh := newDriveHarness(t, driveManifest)
+	run := dh.openRun(t, Opening{Event: pipelines.EventRelease, Mode: pipelines.ModeFull, SHA: shaA, ReleaseTag: "v1.4.0", Trigger: TriggerWebhook})
+	p, _ := dh.store.pipeline(dh.p.ID)
+	p.Status = PipelineDisconnected
+	dh.store.addPipeline(p)
+	deliver(t, dh.peer("agent-b"), run)
+	got, _ := dh.store.run(run.ID)
+	if got.Conclusion != ConclusionFailure || got.RefusalCode != pipelines.CodeDisconnected || len(dh.exec.sent()) != 0 {
+		t.Fatalf("automatic release ran after disconnect: %+v; steps %v", got, dh.exec.sentKeys())
 	}
 }

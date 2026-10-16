@@ -17,7 +17,8 @@ bytes. A ready candidate requires separate owner approval and publication.
 
 To build before publishing a GitHub release, call
 `pipelinesRunRelease(pipelineId: "…", tag: "v1.2.3")` for an existing tag of
-your connected pipeline. MemQL resolves and pins the tag's commit through your
+your pipeline. Automatic delivery can stay disconnected for this explicit
+request, so a bootstrap does not subscribe to unrelated changes. MemQL resolves and pins the tag's commit through your
 source connection, runs the full release stages, and supplies the tag as
 `MEMQL_VERSION`. The operation creates no tag or public release and grants no
 publication approval. Retrying, or receiving a later release webhook, recovers
