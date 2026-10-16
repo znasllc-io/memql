@@ -3611,6 +3611,52 @@ QueryClient.prototype.pipelinesPreview = function (this: QueryClient, args: Pipe
   return this.executeNamed("pipelinesPreview", buildPipelinesPreview(args), opts);
 };
 
+/** Publish one retained SARIF artifact from the caller's successful native pipeline. Source/ref/bytes come from verified journal and storage receipts, never from a caller-supplied URL or report. Returns publicationId, state, uploadId and sha256. Only complete proves ingestion; accepted is pending. Calling again observes the same upload. An uncertain or rejected upload is retained for inspection and never silently posted again. Report selection, polling and failure handling belong to the calling automation. */
+export interface PipelinesPublishSARIFArgs {
+  runId: string;
+  stepKey: string;
+  path: string;
+}
+
+export function buildPipelinesPublishSARIF(args: PipelinesPublishSARIFArgs): string {
+  const parts: string[] = [];
+  parts.push("runId: " + renderMemQLValue(args.runId));
+  parts.push("stepKey: " + renderMemQLValue(args.stepKey));
+  parts.push("path: " + renderMemQLValue(args.path));
+  return "builtin pipelinesPublishSARIF(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    pipelinesPublishSARIF(args: PipelinesPublishSARIFArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.pipelinesPublishSARIF = function (this: QueryClient, args: PipelinesPublishSARIFArgs = {} as PipelinesPublishSARIFArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("pipelinesPublishSARIF", buildPipelinesPublishSARIF(args), opts);
+};
+
+/** Read a caller-owned upload receipt, refreshing pending ingestion from GitHub. A terminal receipt survives ordinary artifact retention. This never uploads. */
+export interface PipelinesReadSARIFArgs {
+  publicationId: string;
+}
+
+export function buildPipelinesReadSARIF(args: PipelinesReadSARIFArgs): string {
+  const parts: string[] = [];
+  parts.push("publicationId: " + renderMemQLValue(args.publicationId));
+  return "builtin pipelinesReadSARIF(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    pipelinesReadSARIF(args: PipelinesReadSARIFArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.pipelinesReadSARIF = function (this: QueryClient, args: PipelinesReadSARIFArgs = {} as PipelinesReadSARIFArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("pipelinesReadSARIF", buildPipelinesReadSARIF(args), opts);
+};
+
 /** Re-run one of the caller's pipeline runs: open the next attempt of its run key with the original's mode and event, trigger rerun, rerunOf naming the original, and a new check run. With failedOnly, only what did not pass runs again: every step the original passed, with the same package slice, is carried over as skipped pipeline_passed_earlier, and a run with no failed or cancelled step is refused pipeline_nothing_to_rerun. The original stays exactly as it ended. */
 export interface PipelinesRerunArgs {
   /** The v1:pipelines:run to re-run. Must be the caller's own. */

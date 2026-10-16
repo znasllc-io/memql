@@ -47,6 +47,9 @@ type Deps struct {
 	Store        Store
 	GitHub       GitHub
 	Gate         Gate
+	// SARIF holds native publication storage and owner-scoped journal reads.
+	// It never gives a command step the GitHub installation bearer.
+	SARIF *SARIFDependencies
 	// RunnerReadiness reads remote workbench evidence on front-door nodes too.
 	// Reporting does not register a step executor or make this node a driver.
 	RunnerReadiness pipelines.ReadinessReporter

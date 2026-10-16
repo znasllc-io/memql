@@ -4805,6 +4805,58 @@ func PipelinesPreviewBuild(args PipelinesPreviewArgs) string {
 	return b.String()
 }
 
+// PipelinesPublishSARIF -- Publish one retained SARIF artifact from the caller's successful native pipeline. Source/ref/bytes come from verified journal and storage receipts, never from a caller-supplied URL or report. Returns publicationId, state, uploadId and sha256. Only complete proves ingestion; accepted is pending. Calling again observes the same upload. An uncertain or rejected upload is retained for inspection and never silently posted again. Report selection, polling and failure handling belong to the calling automation.
+type PipelinesPublishSARIFArgs struct {
+	RunId   string
+	StepKey string
+	Path    string
+}
+
+// PipelinesPublishSARIF calls the engine builtin pipelinesPublishSARIF.
+func (qc *QueryClient) PipelinesPublishSARIF(ctx context.Context, args PipelinesPublishSARIFArgs) (*Result, error) {
+	call := PipelinesPublishSARIFBuild(args)
+	return qc.executeNamed(ctx, "pipelinesPublishSARIF", call)
+}
+
+func PipelinesPublishSARIFBuild(args PipelinesPublishSARIFArgs) string {
+	var b strings.Builder
+	b.WriteString("builtin pipelinesPublishSARIF(")
+	b.WriteString("runId: ")
+	b.WriteString(quoteMemQL(args.RunId))
+	if b.Len() > 30 {
+		b.WriteString(", ")
+	}
+	b.WriteString("stepKey: ")
+	b.WriteString(quoteMemQL(args.StepKey))
+	if b.Len() > 30 {
+		b.WriteString(", ")
+	}
+	b.WriteString("path: ")
+	b.WriteString(quoteMemQL(args.Path))
+	b.WriteString(")")
+	return b.String()
+}
+
+// PipelinesReadSARIF -- Read a caller-owned upload receipt, refreshing pending ingestion from GitHub. A terminal receipt survives ordinary artifact retention. This never uploads.
+type PipelinesReadSARIFArgs struct {
+	PublicationId string
+}
+
+// PipelinesReadSARIF calls the engine builtin pipelinesReadSARIF.
+func (qc *QueryClient) PipelinesReadSARIF(ctx context.Context, args PipelinesReadSARIFArgs) (*Result, error) {
+	call := PipelinesReadSARIFBuild(args)
+	return qc.executeNamed(ctx, "pipelinesReadSARIF", call)
+}
+
+func PipelinesReadSARIFBuild(args PipelinesReadSARIFArgs) string {
+	var b strings.Builder
+	b.WriteString("builtin pipelinesReadSARIF(")
+	b.WriteString("publicationId: ")
+	b.WriteString(quoteMemQL(args.PublicationId))
+	b.WriteString(")")
+	return b.String()
+}
+
 // PipelinesRerun -- Re-run one of the caller's pipeline runs: open the next attempt of its run key with the original's mode and event, trigger rerun, rerunOf naming the original, and a new check run. With failedOnly, only what did not pass runs again: every step the original passed, with the same package slice, is carried over as skipped pipeline_passed_earlier, and a run with no failed or cancelled step is refused pipeline_nothing_to_rerun. The original stays exactly as it ended.
 type PipelinesRerunArgs struct {
 	// The v1:pipelines:run to re-run. Must be the caller's own.

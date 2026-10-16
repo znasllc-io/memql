@@ -28,7 +28,7 @@ import (
 // from that, and both are the point:
 //
 //   - WHAT IS ASKED OF GITHUB CANNOT WIDEN. RequestedPermissions is the whole
-//     ask: reads on the repositories people choose, plus the one write a
+//     ask: reads on the repositories people choose, plus the reporting writes a
 //     pipeline run reports back with, checks (decision C8 of the Connect
 //     design, widened by D4 of the pipelines record). A manifest a browser
 //     could influence is a manifest that could ask for more write access under
@@ -114,19 +114,22 @@ type ManifestWebhook struct {
 //     the tree at the SHA it runs; pushes and releases are delivered under it.
 //   - metadata read: GitHub grants it with any repository permission.
 //   - checks write: a pipeline run reports a check run on the commit it ran,
-//     the one write the app holds. An app without it still runs pipelines;
+//     without granting source writes. An app without it still runs pipelines;
 //     their check-run writes answer 403 and the run says so.
+//   - security_events write: upload retained scanner reports and observe their
+//     ingestion. Existing installations must accept this permission first.
 //   - pull_requests read: the heads a pull-request run is for, both delivered
 //     and polled (`pull_request` events need it).
 //   - merge_queues read: GitHub will not subscribe an app to `merge_group`
 //     without it, and a merge queue's run is the full-suite gate.
 func RequestedPermissions() map[string]string {
 	return map[string]string{
-		"checks":        "write",
-		"contents":      "read",
-		"merge_queues":  "read",
-		"metadata":      "read",
-		"pull_requests": "read",
+		"checks":          "write",
+		"security_events": "write",
+		"contents":        "read",
+		"merge_queues":    "read",
+		"metadata":        "read",
+		"pull_requests":   "read",
 	}
 }
 

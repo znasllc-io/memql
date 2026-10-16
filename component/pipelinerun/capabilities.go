@@ -45,6 +45,8 @@ func (i *Integration) IntegrationName() string { return IntegrationName }
 // the readiness evaluator reads it directly by its executor name.
 func (i *Integration) Capabilities() []memql.IntegrationCapability {
 	return []memql.IntegrationCapability{
+		{Name: "readSARIF", Description: "Observe a caller-owned native SARIF upload without re-uploading. Only complete proves ingestion; uncertain never retries the write.", Handler: i.handleReadSARIF, ArgsSchema: map[string]string{"publicationId": "string (required) -- exact native SARIF publication identity"}},
+		{Name: "publishSARIF", Description: "Publish one successful native scanner artifact through the source owner's current GitHub grant. Journal the upload before observing ingestion; repeated calls never retry an uncertain POST.", Handler: i.handlePublishSARIF, ArgsSchema: map[string]string{"runId": "string (required) -- caller-owned pipeline run", "stepKey": "string (required) -- completed scanner step", "path": "string (required) -- exact retained .sarif path"}},
 		{Name: "workflowFacts", Description: "Read the current claimed workflow's step receipts.", Handler: workflowCapability("workflowFacts")},
 		{Name: "skipStep", Description: "Record a skipped step in the current claimed workflow's journal.", Handler: workflowCapability("skipStep")},
 		{Name: "executeStep", Description: "Execute one compiled step of the current claimed workflow.", Handler: workflowCapability("executeStep")},
