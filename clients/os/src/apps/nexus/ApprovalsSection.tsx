@@ -30,7 +30,7 @@ import {
 import { useOsConnection } from "../../live/connection";
 import { ActionBar, type Act } from "../../kit/ActionBar";
 import type { DecideApprovalState } from "./actions";
-import { computerPermission, computerSessionAccess, permissionRememberLabel } from "./computerPermissions";
+import { computerPermission, computerSessionAccess, executionDestinationChange, permissionRememberLabel } from "./computerPermissions";
 import { ComputerPermissionsPage } from "./ComputerPermissionsPage";
 import {
   appWord,
@@ -256,7 +256,8 @@ export function ApprovalsSection({
   const isFeedback = selected?.kind === "feedback";
   const failure = selected !== null && isFailureQuestion(selected);
   const permission = !failure && selected?.kind === "scopeElevation" ? computerPermission(selected.subject) : null;
-  const invalidPermission = !failure && selected?.kind === "scopeElevation" && ((selected.subject?.computerPermission !== undefined && permission === null) || computerSessionAccess(selected.subject) === null);
+  const destination = selected?.kind === "scopeElevation" ? executionDestinationChange(selected.subject) : null;
+  const invalidPermission = !failure && selected?.kind === "scopeElevation" && ((selected.subject?.executionDestination !== undefined && !destination) || (selected.subject?.computerPermission !== undefined && permission === null) || computerSessionAccess(selected.subject) === null);
   const permissionMode = rememberPermission && permission?.allowedModes.includes("always") ? "always" : "once";
   const budget = failure ? null : budgetControl(selected);
   const budgetAnswer = budgetApprovalAnswer(selected, freeText);
@@ -411,6 +412,7 @@ export function ApprovalsSection({
             : lapsed ? "This request has expired."
             : failure ? "Retry resumes saved work. Abandon stops this run."
             : invalidPermission ? "This permission request cannot be read."
+            : destination?.to === "workbench" ? "Allows this goal to use the Workbench until the request expires."
             : permission ? permissionMode === "always" ? "Saves this permission until you revoke it." : "Allows one use of the requested operation."
             : selected.kind === "scopeElevation" ? "Allows access for this work until the request expires."
             : budget !== null && !answerReady ? "Enter a new total limit above the recorded usage."
@@ -550,6 +552,7 @@ function ApprovalDetail({
 }) {
   const failure = isFailureQuestion(approval);
   const permission = !failure && approval.kind === "scopeElevation" ? computerPermission(approval.subject) : null;
+  const destination = approval.kind === "scopeElevation" ? executionDestinationChange(approval.subject) : null;
   const isFeedback = !failure && approval.kind === "feedback";
   const budget = failure ? null : budgetControl(approval);
   const shutDoors = doorsFromSubject(approval);
@@ -623,7 +626,12 @@ function ApprovalDetail({
         ) : null}
       </Panel>
 
-      {!failure && approval.kind === "scopeElevation" && permission ? <Panel label="Computer access">
+      {!failure && destination ? <Panel label="Execution destination"><Facts>
+        <Fact label="Selected" value={destination.from === "auto" ? "Auto" : destination.from === "workbench" ? "Workbench" : "Computer"} />
+        <Fact label="Use instead" value={destination.to === "workbench" ? "Workbench" : "Computer"} />
+        <Fact label="Expires" value={formatMoment(approval.expiresAt)} />
+      </Facts><Caption>{destination.to === "workbench" ? "Allows this goal to use the hosted Workbench. Grants no access to your computer." : "Allows this goal to use your computer with the access shown below. Other goals keep their selected destination."}</Caption></Panel> : null}
+      {destination?.to === "workbench" ? null : !failure && approval.kind === "scopeElevation" && permission ? <Panel label="Computer access">
         <div className="os-nexus-permission-scope"><Facts>
           <Fact label="Computer" value={permission.machineLabel} />
           <Fact label="Access" value={permission.kind === "directory_read" ? "Read files, list folders and inspect file details" : "Run this exact command"} />
@@ -830,7 +838,7 @@ function approvalContext(approval: ApprovalRow, run: RunRow | null): string {
  * falls back to the words every other kind uses.
  */
 function decisionLabels(approval: ApprovalRow): { approve: string; reject: string } {
-  if (approval.kind === "scopeElevation") return { approve: "Allow for this work", reject: "Reject" };
+  if (approval.kind === "scopeElevation") return { approve: executionDestinationChange(approval.subject)?.to === "workbench" ? "Use Workbench" : "Allow for this work", reject: "Reject" };
   if (approval.subject?.reviewType === "library-document") return { approve: "Apply all changes", reject: "Decline all" };
   if (approval.kind !== PROCEDURE_PROMOTION) return { approve: "Approve", reject: "Reject" };
   const offered = (value: string) => approval.options.find((o) => o.value === value)?.label.trim() ?? "";

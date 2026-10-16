@@ -99,7 +99,7 @@ func (s *toolRecoveryScope) operations() map[string]workflowhost.Operation {
 		},
 		"integration.agents.spineRequestScope": func(ctx context.Context, args map[string]any) (any, error) {
 			code := rerouteErrorCode(s.last)
-			if s.lastErr != nil || !s.attempted || s.requested || (code != "denied_no_per_task_approval" && code != "denied_by_scope") {
+			if s.lastErr != nil || !s.attempted || s.requested || (code != "denied_no_per_task_approval" && code != "denied_by_scope" && code != "execution_destination_requires_permission") {
 				return nil, fmt.Errorf("scope request requires this invocation's verified consent refusal and may run once")
 			}
 			summary := strings.TrimSpace(stringFromArgs(args, "summary"))
@@ -232,7 +232,17 @@ type workbenchReroute struct {
 func planWorkbenchReroute(result string, args map[string]any, turnCtx turnContext) (workbenchReroute, bool) {
 	mismatch, ok := workbench.EnvironmentMismatchFromPayload([]byte(result))
 	if !ok {
-		return workbenchReroute{}, false
+		// Capacity refusal is emitted only before a process starts. Never
+		// replay a timeout, crash or an unknown outcome on another machine.
+		var refusal struct {
+			OK        bool   `json:"ok"`
+			ErrorCode string `json:"errorCode"`
+			Action    string `json:"action"`
+		}
+		if json.Unmarshal([]byte(result), &refusal) != nil || refusal.OK || refusal.ErrorCode != "workbench_queue_full" || refusal.Action != "exec" {
+			return workbenchReroute{}, false
+		}
+		mismatch = workbench.EnvironmentMismatch{UnmetNeeds: []string{"available_capacity"}}
 	}
 	action := strings.TrimSpace(stringFromArgs(args, "action"))
 	inner, _ := args["args"].(map[string]any)

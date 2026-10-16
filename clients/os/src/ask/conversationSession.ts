@@ -1,5 +1,6 @@
 import type { AskHandle, AskTransport, WorkGuidanceRequest } from "./askController";
 import { AUTO_ROUTING } from "./askRoute";
+import type { ExecutionDestination } from "../kit/ExecutionDestination";
 
 export interface AskActivity {
   id: string;
@@ -61,6 +62,7 @@ export interface AskConversationStore {
   read(id: string): Promise<AskTurn[]>;
 }
 export interface ConversationState {
+  destination?: ExecutionDestination;
   workGuidance?: { targetEpoch: string; runId: string; conversationId: string; title: string } | null;
   workGuidanceSending?: boolean;
   workGuidanceRetry?: WorkGuidanceRequest | null;
@@ -92,7 +94,7 @@ export interface ConversationState {
 
 /** One session survives closing the overlay and is observed by both surfaces.
  * Transcripts live on the cluster; no private conversation enters localStorage.
- * Routing stays automatic; deliberate overrides belong to run controls. */
+ * Model routing stays automatic; deliberate overrides belong to run controls. */
 export class ConversationSession {
   private state: ConversationState = { conversations: [], dictationActivity: [], historyLoading: false, historyError: "", selectionError: "", openingId: null, selectedId: null, turns: [], draft: "", busy: false, loading: false, error: "", snapshotError: "", activity: null, voiceActive: false };
   private listeners = new Set<() => void>();
@@ -122,6 +124,7 @@ export class ConversationSession {
   subscribe = (listener: () => void) => { this.listeners.add(listener); return () => { this.listeners.delete(listener); }; };
   private patch(patch: Partial<ConversationState>) { this.state = { ...this.state, ...patch }; this.listeners.forEach(listener => listener()); }
   setDraft = (draft: string) => this.patch({ draft });
+  setDestination = (destination: ExecutionDestination) => this.patch({ destination });
   questionFocused = () => this.patch({ focusQuestionId: null });
   beginWorkGuidance = (turnId: string): boolean => {
     const turn = this.state.turns.find(item => item.id === turnId);
@@ -529,7 +532,7 @@ export class ConversationSession {
     const epoch = ++this.epoch;
     this.stopRequested = false; this.requestStarted = false;
     const turn: AskTurn = { id: crypto.randomUUID(), prompt: prompt.trim(), answer: "", state: "streaming", startedAt: new Date().toISOString(), activity: [] };
-    const routing = AUTO_ROUTING;
+    const routing = this.state.destination && this.state.destination !== "auto" ? { ...AUTO_ROUTING, destination: this.state.destination } : AUTO_ROUTING;
     this.patch({ busy: true, draft: "", error: "", turns: [...this.state.turns, turn] });
     const patchTurn = (patch: Partial<AskTurn>) => {
       if (epoch !== this.epoch) return;
@@ -568,7 +571,7 @@ export class ConversationSession {
           },
           done: () => finish(turn.answer.trim() || isBackgroundTurn(turn) ? undefined : "MemQL finished without an answer."),
           error: error => finish(error),
-        }, id ? { conversationId: id, turnId: turn.id, routing } : undefined);
+        }, { conversationId: id ?? "", turnId: turn.id, routing });
         if (epoch === this.epoch) this.active = handle;
       } catch (error) { finish(message(error)); }
     })();

@@ -513,6 +513,7 @@ export interface AiChatMessageWire {
 }
 
 export interface AiChatPayload {
+  executionDestination?: "auto" | "workbench" | "computer";
   requestId: string;
   messages: AiChatMessageWire[];
   provider?: string;
@@ -1799,5 +1800,5 @@ export function streamRequestId(msg: ServerMessage): string {
   return "";
 }
 
-export interface AskVoiceStartPayload { requestId: string; conversationId: string; pageContext?: string; voice: "male" | "female"; chatProvider?: string; transcriptionProvider?: string; speechProvider?: string }
+export interface AskVoiceStartPayload { executionDestination?: "auto" | "workbench" | "computer"; requestId: string; conversationId: string; pageContext?: string; voice: "male" | "female"; chatProvider?: string; transcriptionProvider?: string; speechProvider?: string }
 export interface AskVoiceStartResultPayload { requestId: string; url: string; token: string; room: string }

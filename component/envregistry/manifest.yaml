@@ -2780,6 +2780,20 @@ variables:
 
   # --- workbench ---
 
+  - name: MEMQL_WORKBENCH_MAX_ACTIVE
+    component: workbench
+    scope: node
+    default: "2"
+    optional: true
+    description: "Concurrent command slots per Workbench executor (1-32). Package builds reserve all slots. Pipeline Jobs use separate namespace admission. Invalid settings keep the default limit."
+
+  - name: MEMQL_WORKBENCH_MAX_QUEUED
+    component: workbench
+    scope: node
+    default: "32"
+    optional: true
+    description: "Maximum queued commands/builds per Workbench executor (1-256). Waiting work starts no child process; cancellation removes it. A full queue refuses before execution."
+
   - name: MEMQL_WORKBENCH_REMOTE
     component: workbench
     scope: node

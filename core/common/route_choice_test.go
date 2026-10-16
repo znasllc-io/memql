@@ -10,7 +10,7 @@ import (
 // crosses the hop is its map form: what one node writes, the next must read
 // back unchanged, and a row without one must read as Auto.
 func TestRouteChoiceSurvivesItsRowForm(t *testing.T) {
-	choice := RouteChoice{Source: "app:claude-code", Level: "strong", By: "v1:identity:user:alice", NoPaidProviders: true}
+	choice := RouteChoice{Source: "app:claude-code", Level: "strong", Destination: "computer", By: "v1:identity:user:alice", NoPaidProviders: true}
 
 	// Through JSON, because that is how the row comes back: a decoded payload,
 	// never the Go value that was written.

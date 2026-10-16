@@ -85,3 +85,19 @@ it("closes the microphone when the browser explicitly disables echo cancellation
   expect(conversation.getSnapshot().voiceActive).toBe(false);
   expect(rtc.disconnect).toHaveBeenCalled();
 });
+
+
+it("captures the destination before voice conversation creation completes", async () => {
+ let resolve!: (value:{id:string;title:string})=>void;
+ const created = new Promise<{id:string;title:string}>(done=>{resolve=done;});
+ const startVoice = vi.fn<NonNullable<AskTransport["startVoice"]>>(async()=>({url:"wss://voice.example.com",token:"fixture",room:"fixture"}));
+ const transport: AskTransport = {ask:()=>({cancel(){}}),startVoice,conversations:{list:async()=>[],read:async()=>[],create:()=>created}};
+ const conversation = new ConversationSession(transport);
+ const voice = new LiveVoiceSession(transport,conversation);
+ conversation.setDestination("computer");
+ const pending=voice.start(null,"female");
+ conversation.setDestination("workbench");
+ resolve({id:"voice",title:"Voice"}); await pending;
+ expect(startVoice.mock.calls[0]?.[0]).toMatchObject({executionDestination:"computer"});
+ voice.stop(); conversation.dispose();
+});

@@ -12,10 +12,23 @@ import (
 
 func (d *Dispatcher) SetComputerPermissions(authority permission.Authority) {
 	d.permissions = authority
+	d.destination, _ = d.store.(destinationChecker)
+	if gate, ok := authority.(destinationChecker); ok {
+		d.destination = gate
+	}
 }
 func (h *ForwardHandler) SetComputerPermissions(authority permission.Authority) {
 	h.permissions = authority
+	h.destination, _ = h.store.(destinationChecker)
+	if gate, ok := authority.(destinationChecker); ok {
+		h.destination = gate
+	}
 }
+
+type destinationChecker interface {
+	CheckExecutionDestination(context.Context, string, string) error
+}
+
 func permissionRequest(req Request) permission.Request {
 	return permission.Request{OwnerID: req.OwnerUserId, AgentID: req.AgentId, RunID: req.RunId, Tool: req.Tool, Action: req.Action, Args: req.Args, MachineID: req.RequireLabels["machineId"]}
 }

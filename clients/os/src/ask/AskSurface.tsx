@@ -3,6 +3,7 @@ import { guidanceReceiptLabel } from "../apps/training/lessons";
 import { AddButton } from "../kit/AddButton";
 import { ContentSkeleton } from "../kit/ContentSkeleton";
 import { Button } from "../kit";
+import { ExecutionDestinationSelect } from "../kit/ExecutionDestination";
 import { Mark } from "../chrome/Mark";
 import { AccountAvatar } from "../chrome/AccountAvatar";
 import { AskLiveVoice } from "./AskLiveVoice";
@@ -359,6 +360,10 @@ export function AskSurface({
       </div>
       }
       {error ? <p className="os-ask-error" role="alert">{askErrorSummary(error)}</p> : null}
+      {panel === "conversation" && !state.voiceActive && !state.workGuidance && !state.discussion && !state.discussionDraft && !state.discussionOpening ? <div className="os-ask-destination">
+        <span className="os-caption">Run on</span>
+        <ExecutionDestinationSelect value={state.destination ?? "auto"} onChange={conversation.setDestination} />
+      </div> : null}
       {state.guidanceNotice ? <p className="os-ask-guidance-notice" role="status">{state.guidanceNotice}</p> : null}
       {liveVoice && !state.voiceActive ? <AskLiveVoice session={liveVoice} errorsOnly /> : null}
       {!state.voiceActive && panel === "conversation" ? <AskWorkQueue turns={exchanges.filter(turn => !turn.approvalId)} onOpen={onOpenWork ? runId => onOpenWork(runId, state.selectedId ?? undefined) : undefined} onGuide={transport.guideWork ? turnId => { controls?.cancel(); if (conversation.beginWorkGuidance(turnId)) inputRef.current?.focus(); } : undefined} guideDisabled={busy || state.loading || state.workGuidanceSending || !!state.discussion || !!state.discussionDraft || state.discussionOpening} /> : null}

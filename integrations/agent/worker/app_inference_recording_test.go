@@ -117,6 +117,7 @@ func appDoorFixture(t *testing.T, owner string) (*memqlengine.ProviderRegistry, 
 
 	recorder := &openCapture{}
 	door := &AppInference{
+		prefs:    &gateStore{},
 		router:   NewRouter(store, logger, nil),
 		store:    store,
 		registry: registry,

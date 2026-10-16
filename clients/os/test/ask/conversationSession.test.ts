@@ -113,3 +113,24 @@ it("returning to the current conversation cancels a pending New selection", asyn
  expect(session.getSnapshot()).toMatchObject({selectedId:"current",loading:false});
  session.dispose();
 });
+
+
+it("keeps the submitted destination while conversation creation is pending", async () => {
+ const created = deferred<{id:string;title:string}>();
+ const ask = vi.fn<AskTransport["ask"]>(() => ({cancel(){}}));
+ const session = new ConversationSession({ask,conversations:{create:()=>created.promise,list:async()=>[],read:async()=>[]}});
+ session.setDestination("workbench");
+ expect(session.send("Build a report",null)).toBe(true);
+ session.setDestination("computer");
+ created.resolve({id:"new",title:"Report"});
+ await Promise.resolve(); await Promise.resolve();
+ expect(ask.mock.calls[0]?.[3]).toMatchObject({routing:{destination:"workbench"}});
+ session.dispose();
+});
+it("passes the destination even when the transport has no conversation store", () => {
+ const ask = vi.fn<AskTransport["ask"]>(()=>({cancel(){}}));
+ const session = new ConversationSession({ask});
+ session.setDestination("computer"); session.send("Use my files",null);
+ expect(ask.mock.calls[0]?.[3]).toMatchObject({routing:{destination:"computer"}});
+ session.dispose();
+});

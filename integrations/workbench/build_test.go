@@ -363,15 +363,17 @@ func (m *buildMesh) Forward(ctx context.Context, req *nodev1.WorkbenchForwardReq
 	if req.GetRequestId() == "" {
 		req.RequestId = id.NewShortId()
 	}
-	var got *nodev1.WorkbenchForwardResponse
+	responses := make(chan *nodev1.WorkbenchForwardResponse, 1)
 	m.handler.HandleForwardedRequest(ctx, req, func(msg *nodev1.NodeServerMessage) error {
-		got = msg.GetWorkbenchForwardResponse()
+		responses <- msg.GetWorkbenchForwardResponse()
 		return nil
 	})
-	if got == nil {
-		m.t.Fatal("the workbench side sent no response")
+	select {
+	case got := <-responses:
+		return got, "workbench-test-1", nil
+	case <-ctx.Done():
+		return nil, "", ctx.Err()
 	}
-	return got, "workbench-test-1", nil
 }
 
 func newBuildMesh(t *testing.T, workbenchSide *Integration) *buildMesh {
@@ -482,17 +484,15 @@ func TestTheBuildEntryAnswersOnlyToTheEngine(t *testing.T) {
 	if err != nil {
 		t.Fatalf("authority: %v", err)
 	}
-	var got *nodev1.WorkbenchForwardResponse
+	send, response := collectResponse(t)
 	handler.HandleForwardedRequest(context.Background(), &nodev1.WorkbenchForwardRequest{
 		RequestId: "r1",
 		RunId:     "deployment:abc-storefront",
 		Action:    BuildAction,
 		ArgsJson:  payload,
 		Authority: node.ForwardedAuthorityToProto(userAuthority, "agent-1", "agent"),
-	}, func(msg *nodev1.NodeServerMessage) error {
-		got = msg.GetWorkbenchForwardResponse()
-		return nil
-	})
+	}, send)
+	got := response()
 	if got == nil {
 		t.Fatal("the refusal must be sent, not dropped")
 	}
@@ -510,17 +510,15 @@ func TestTheBuildEntryAnswersOnlyToTheEngine(t *testing.T) {
 	if err != nil {
 		t.Fatalf("system authority: %v", err)
 	}
-	got = nil
+	send, response = collectResponse(t)
 	handler.HandleForwardedRequest(context.Background(), &nodev1.WorkbenchForwardRequest{
 		RequestId: "r2",
 		RunId:     "deployment:abc-storefront",
 		Action:    BuildAction,
 		ArgsJson:  payload,
 		Authority: node.ForwardedAuthorityToProto(systemAuthority, "bff-1", "bff"),
-	}, func(msg *nodev1.NodeServerMessage) error {
-		got = msg.GetWorkbenchForwardResponse()
-		return nil
-	})
+	}, send)
+	got = response()
 	if got == nil || got.GetErrorCode() != "" {
 		t.Fatalf("the engine's own assertion must be admitted, got %+v", got)
 	}

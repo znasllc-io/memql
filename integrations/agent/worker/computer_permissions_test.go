@@ -20,13 +20,17 @@ import (
 )
 
 type permissionTestAuthority struct {
-	mu       sync.Mutex
-	grant    *permission.Grant
-	claims   int
-	origin   bool
-	ctxOwner string
+	mu             sync.Mutex
+	grant          *permission.Grant
+	claims         int
+	origin         bool
+	ctxOwner       string
+	destinationErr error
 }
 
+func (a *permissionTestAuthority) CheckExecutionDestination(context.Context, string, string) error {
+	return a.destinationErr
+}
 func (a *permissionTestAuthority) Find(context.Context, permission.Request) (*permission.Grant, error) {
 	return a.grant, nil
 }
@@ -293,6 +297,31 @@ func TestMalformedComputerPermissionIdentifiesTheRepairField(t *testing.T) {
 			}
 			if structured.Details["field"] != tc.field {
 				t.Fatalf("field = %v; want %s", structured.Details, tc.field)
+			}
+		})
+	}
+}
+
+func TestExecutionDestinationCheckedOnOriginAndServingReplica(t *testing.T) {
+	for _, receiving := range []bool{false, true} {
+		t.Run(fmt.Sprint(receiving), func(t *testing.T) {
+			sent := false
+			h := newHop(t, func(_ context.Context, d *memqlv1.ToolDispatch, _ func(*memqlv1.ToolStream)) (*memqlv1.ToolResult, error) {
+				sent = true
+				return okResult(d.GetCallId()), nil
+			}, nil)
+			refusal := &memql.ExecutionDestinationRequired{From: "workbench", To: "computer"}
+			origin, holder := &permissionTestAuthority{}, &permissionTestAuthority{}
+			if receiving {
+				holder.destinationErr = refusal
+			} else {
+				origin.destinationErr = refusal
+			}
+			h.dispatch.SetComputerPermissions(origin)
+			h.link.handler.SetComputerPermissions(holder)
+			res, err := h.dispatch.Dispatch(authorityCtx(t, h.owner), h.request())
+			if err != nil || res.OK || sent || res.ErrorCode != "execution_destination_requires_permission" || !res.RefusedBeforeStart {
+				t.Fatalf("destination escaped: %+v %v sent=%v", res, err, sent)
 			}
 		})
 	}

@@ -39,6 +39,29 @@ finish at a safe boundary and keep their receipts. A lost connection only
 detaches the viewer. Fresh-data questions
 still read fresh sources even when the procedure is reused.
 
+## Where work runs
+
+**Run work on** beside the composer offers Auto, Workbench and Computer. Nexus
+uses the same choice when starting a goal. The choice applies to the submitted
+goal, its background work and child goals; changing the control affects the
+next submission. Live voice captures the choice when the call starts. Model
+selection continues to follow the configured routing policies.
+
+- **Auto** uses the Workbench when its capabilities fit. If work needs your
+  computer, or the Workbench queue is full, MemQL explains the reason and asks
+  before using a connected computer.
+- **Workbench** keeps shell and filesystem work on the hosted Workbench. If a
+  required capability is unavailable, MemQL asks before moving it to your computer.
+- **Computer** sends shell and filesystem work to your connected MemQL Cockpit.
+  If that destination cannot do the work, MemQL asks before using the Workbench.
+
+Selecting Computer does not grant file or command access. Those permissions
+still name the exact operation and machine. An existing saved command permission
+does not approve moving a new Auto or Workbench goal onto your computer. Approval
+is recorded on the goal's run, expires, and is rechecked on the replica that
+executes the operation. Work waiting for capacity starts no process until admitted;
+the run's activity shows the wait. Stop cancels queued work too.
+
 ## Background work and memory
 
 The same classifier separates quick replies, saved-data lookups, research and

@@ -84,7 +84,7 @@ spec:
                   expirationSeconds: 3600
                   path: token
         - name: workbench-workspaces
-          emptyDir: {}
+          emptyDir: { sizeLimit: 8Gi }
       # Graceful shutdown (#552): must exceed MEMQL_SHUTDOWN_DRAIN_DELAY (5s
       # default) + the app Stop budget (30s) so drain + GracefulStop finish.
       terminationGracePeriodSeconds: 45
@@ -205,6 +205,7 @@ spec:
             failureThreshold: 3
           resources:
             requests: { cpu: 200m, memory: 256Mi }
+            limits: { cpu: "1", memory: 1536Mi, ephemeral-storage: 8Gi }
 ---
 apiVersion: v1
 kind: Service

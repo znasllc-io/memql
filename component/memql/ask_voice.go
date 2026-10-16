@@ -19,7 +19,7 @@ import (
 // Installed once at bootstrap on agent nodes; live media never owns authority.
 func (e *MemQLEngine) SetVoiceTransport(transport audio.RoomTransport) { e.voiceTransport = transport }
 
-type AskVoiceOptions struct{ ConversationID, PageContext, Voice, ChatProvider, TranscriptionProvider, SpeechProvider string }
+type AskVoiceOptions struct{ ConversationID, PageContext, Voice, ChatProvider, TranscriptionProvider, SpeechProvider, ExecutionDestination string }
 type AskVoiceEvent struct {
 	Type     string     `json:"type"`
 	State    string     `json:"state,omitempty"`
@@ -30,6 +30,9 @@ type AskVoiceEvent struct {
 }
 
 func (e *MemQLEngine) StartAskVoice(ctx context.Context, opts AskVoiceOptions) (audio.RoomCredentials, error) {
+	if _, err := ParseExecutionDestination(opts.ExecutionDestination); err != nil {
+		return audio.RoomCredentials{}, err
+	}
 	subject, ok := auth.SubjectFromContext(ctx)
 	if !ok || !auth.CapableFor(ctx, subject, "read", "app:ask") {
 		return audio.RoomCredentials{}, fmt.Errorf("Ask is unavailable for this person")
@@ -291,7 +294,7 @@ func (e *MemQLEngine) askVoiceTurn(ctx context.Context, room audio.Room, opts As
 		case <-ctx.Done():
 		}
 	}
-	_, err := e.RunAsk(ctx, opts.ConversationID, turnID, input.text, opts.PageContext, AskRoute{}, func(text string) {
+	_, err := e.RunAsk(ctx, opts.ConversationID, turnID, input.text, opts.PageContext, AskRoute{Destination: opts.ExecutionDestination}, func(text string) {
 		_ = room.Event(AskVoiceEvent{Type: "text", TurnID: turnID, Text: text})
 		pending += text
 		for {

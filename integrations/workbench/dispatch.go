@@ -108,6 +108,8 @@ func (i *Integration) handleExec(ctx context.Context, ws *workspace, args map[st
 	cctx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
 	c := exec.CommandContext(cctx, "/bin/sh", "-c", cmd)
+	isolateProcessGroup(c)
+	c.WaitDelay = 2 * time.Second
 	c.Dir = cwd
 	if len(envExtra.pairs) > 0 {
 		c.Env = append(os.Environ(), envExtra.pairs...)
@@ -122,6 +124,7 @@ func (i *Integration) handleExec(ctx context.Context, ws *workspace, args map[st
 
 	startedAt := time.Now()
 	runErr := c.Run()
+	cleanProcessGroup(c)
 	durationMs := time.Since(startedAt).Milliseconds()
 	exitCode := 0
 	signal := ""

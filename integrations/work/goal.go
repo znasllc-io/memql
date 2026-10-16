@@ -102,7 +102,7 @@ func (i *Integration) handleCreateGoal(ctx context.Context, args map[string]any,
 	owner := strings.TrimSpace(ac.UserId)
 	// API callers have the same explicit route choice as Ask. A model or
 	// child run cannot replace its inherited routing authority through args.
-	if source, level := argString(args, "source"), argString(args, "level"); source != "" || level != "" || args["noPaidProviders"] == true {
+	if source, level := argString(args, "source"), argString(args, "level"); source != "" || level != "" || args["noPaidProviders"] == true || args["destination"] != nil {
 		if rc, ok := common.RunFromContext(ctx); ok && rc.IsRun() {
 			return nil, fmt.Errorf("work: a child goal cannot replace its inherited route")
 		}
@@ -111,6 +111,10 @@ func (i *Integration) handleCreateGoal(ctx context.Context, args map[string]any,
 			return nil, err
 		}
 		choice.By = owner
+		choice.Destination, err = memql.ParseExecutionDestination(argString(args, "destination"))
+		if err != nil {
+			return nil, err
+		}
 		choice.NoPaidProviders = args["noPaidProviders"] == true
 		ctx = memql.ContextWithGoalRouteChoice(ctx, choice)
 	}
@@ -325,6 +329,10 @@ func goalRouting(ctx context.Context, owner string) (common.RouteChoice, error) 
 	}
 	parsed.By = routing.By
 	parsed.NoPaidProviders = routing.NoPaidProviders
+	parsed.Destination, err = memql.ParseExecutionDestination(routing.Destination)
+	if err != nil {
+		return common.RouteChoice{}, err
+	}
 	return parsed, nil
 }
 

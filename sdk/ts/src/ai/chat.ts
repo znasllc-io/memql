@@ -26,6 +26,8 @@ export interface AiChatResult {
 }
 
 export interface AiChatOptions {
+  /** Goal tool destination; independent of the model/provider. */
+  executionDestination?: "auto" | "workbench" | "computer";
   conversationId?: string;
   pageContext?: string;
   requestId?: string;
@@ -83,6 +85,7 @@ export async function aiChat(
         ...(opts.conversationId ? { conversationId: opts.conversationId, pageContext: opts.pageContext ?? "" } : {}),
         ...(opts.provider ? { provider: opts.provider } : {}),
         ...(opts.level ? { level: opts.level } : {}),
+        ...(opts.executionDestination ? { executionDestination: opts.executionDestination } : {}),
         ...(opts.fleetRegistrationId ? { fleetRegistrationId: opts.fleetRegistrationId } : {}),
         // Always non-streaming on this surface; callers wanting
         // deltas use aiChatStream.
@@ -196,6 +199,7 @@ export function aiChatStream(
           stream: true,
           ...(opts.provider ? { provider: opts.provider } : {}),
           ...(opts.level ? { level: opts.level } : {}),
+        ...(opts.executionDestination ? { executionDestination: opts.executionDestination } : {}),
           ...(opts.fleetRegistrationId ? { fleetRegistrationId: opts.fleetRegistrationId } : {}),
         },
       });

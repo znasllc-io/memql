@@ -64,8 +64,9 @@ type AskQuestion struct {
 // Auto, a pinned source, or a route `policy:<name>` -- and a Level, empty for
 // Auto. ParseRouteChoice is its grammar.
 type AskRoute struct {
-	Source string `json:"source,omitempty"`
-	Level  string `json:"level,omitempty"`
+	Source      string `json:"source,omitempty"`
+	Level       string `json:"level,omitempty"`
+	Destination string `json:"destination,omitempty"`
 }
 
 type askTranscript struct {
@@ -96,6 +97,10 @@ func (e *MemQLEngine) RunAsk(ctx context.Context, conversationID, turnID, prompt
 		return "", fmt.Errorf("invalid turn id")
 	}
 	choice, err := ParseRouteChoice(route.Source, route.Level)
+	if err != nil {
+		return "", err
+	}
+	choice.Destination, err = ParseExecutionDestination(route.Destination)
 	if err != nil {
 		return "", err
 	}
@@ -162,7 +167,7 @@ func (e *MemQLEngine) RunAsk(ctx context.Context, conversationID, turnID, prompt
 	if resumeIndex < 0 {
 		turn := AskTurn{ID: turnID, Prompt: prompt, Context: pageContext, State: "streaming", StartedAt: time.Now().UTC(), Activity: []WorkEvent{}}
 		if !choice.IsZero() {
-			turn.Route = &AskRoute{Source: choice.Source, Level: choice.Level}
+			turn.Route = &AskRoute{Source: choice.Source, Level: choice.Level, Destination: choice.Destination}
 		}
 		transcript.Turns = append(transcript.Turns, turn)
 		resumeIndex = len(transcript.Turns) - 1

@@ -311,6 +311,7 @@ func (i *Integration) IntegrationName() string { return integrationName }
 // the registry lacks is a BOOT failure on every node type.
 func (i *Integration) Capabilities() []memql.IntegrationCapability {
 	return append(workflowhost.ScopedCapabilities(evaluationPorts()), []memql.IntegrationCapability{
+		{Name: "requestWorkbenchUse", Description: "Request permission to use the Workbench for a Computer-selected goal.", Handler: i.handleRequestWorkbenchUse},
 		{Name: "skillCatalog", Description: "Inspect skill content and its verified installed-baseline provenance.", Handler: i.handleSkillCatalog},
 		{Name: "selectSkills", Description: "Bind exact reviewed skill versions to the current owned work step.", Handler: i.handleSelectSkills},
 		{Name: "recordGoalEvaluation", Description: "Publish owned external-harness evidence after verifying goal and model receipts.", Handler: i.handleRecordGoalEvaluation},
@@ -329,6 +330,7 @@ func (i *Integration) Capabilities() []memql.IntegrationCapability {
 				"requestedVia":    "string -- api | ask | nexus | responsibility | library | materializer; empty when unknown",
 				"source":          "string -- human-chosen source or route; child goals inherit their parent's choice",
 				"level":           "string -- fast | strong | reasoning",
+				"destination":     "string -- auto | workbench | computer; child goals inherit the parent destination",
 				"noPaidProviders": "bool -- inherited hard ceiling across every model modality",
 			},
 		},

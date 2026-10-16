@@ -28,7 +28,7 @@ func (s *streamSession) handleAskVoiceStart(envelope *memqlv1.MemqlClientMessage
 		defer release()
 		ctx, cancel := context.WithTimeout(ctx, 20*time.Second)
 		defer cancel()
-		credentials, err := s.service.engine.StartAskVoice(ctx, engine.AskVoiceOptions{ConversationID: msg.GetConversationId(), PageContext: msg.GetPageContext(), Voice: msg.GetVoice(), ChatProvider: msg.GetChatProvider(), TranscriptionProvider: msg.GetTranscriptionProvider(), SpeechProvider: msg.GetSpeechProvider()})
+		credentials, err := s.service.engine.StartAskVoice(ctx, engine.AskVoiceOptions{ConversationID: msg.GetConversationId(), PageContext: msg.GetPageContext(), Voice: msg.GetVoice(), ChatProvider: msg.GetChatProvider(), TranscriptionProvider: msg.GetTranscriptionProvider(), SpeechProvider: msg.GetSpeechProvider(), ExecutionDestination: msg.GetExecutionDestination()})
 		if err != nil {
 			_ = s.sendQueryError(requestID, envelope.GetMessageId(), codes.FailedPrecondition, err.Error())
 			return

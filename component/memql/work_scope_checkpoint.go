@@ -104,7 +104,7 @@ func scopeCheckpointWitness(subject map[string]any) (map[string]any, bool) {
 		return nil, false
 	}
 	scope := checkpointComputerScope(subject)
-	return w, scope == "observe" || scope == "full"
+	return w, scope == "observe" || scope == "full" || workbenchDestinationSubject(subject)
 }
 
 func checkpointComputerScope(subject map[string]any) string {
@@ -165,7 +165,7 @@ func pendingScopeCall(messages []common.ChatMessage) (common.ToolCall, map[strin
 			first = &copy
 		}
 	}
-	if first == nil || first.Name != "requestComputerUseScope" {
+	if first == nil || (first.Name != "requestComputerUseScope" && first.Name != "requestWorkbenchUse") {
 		return common.ToolCall{}, nil, false
 	}
 	var args map[string]any
@@ -178,7 +178,18 @@ func pendingScopeCall(messages []common.ChatMessage) (common.ToolCall, map[strin
 	return *first, args, true
 }
 
+// A destination-only approval grants no computer session or filesystem scope.
+func workbenchDestinationSubject(subject map[string]any) bool {
+	destination, _ := subject["executionDestination"].(map[string]any)
+	return destination["from"] == "computer" && destination["to"] == "workbench" && subject["computerPermission"] == nil && subject["scope"] == nil && subject["sessionKind"] == nil
+}
+
 func scopeRequestMatches(run common.RunContext, args, subject map[string]any) bool {
+	if workbenchDestinationSubject(subject) {
+		reason := strings.TrimSpace(stringField(args, "reason"))
+		return reason != "" && subject["summary"] == "Use the Workbench for this Computer goal? "+reason
+	}
+
 	if _, typed := subject["computerPermission"]; typed {
 		return false
 	}

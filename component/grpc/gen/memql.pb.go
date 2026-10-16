@@ -4473,9 +4473,12 @@ type AiChatMsg struct {
 	// make (the reply, a compose); compile-time calls such as triage keep their
 	// own level and still honour the source. Anything else refuses the turn with
 	// metadata code "route_level_invalid", field "level".
-	Level         string `protobuf:"bytes,8,opt,name=level,proto3" json:"level,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
+	Level string `protobuf:"bytes,8,opt,name=level,proto3" json:"level,omitempty"`
+	// Ask goal execution destination: auto (or empty), workbench, computer.
+	// This selects tools' execution surface, never the model provider.
+	ExecutionDestination string `protobuf:"bytes,9,opt,name=execution_destination,json=executionDestination,proto3" json:"execution_destination,omitempty"`
+	unknownFields        protoimpl.UnknownFields
+	sizeCache            protoimpl.SizeCache
 }
 
 func (x *AiChatMsg) Reset() {
@@ -4560,6 +4563,13 @@ func (x *AiChatMsg) GetPageContext() string {
 func (x *AiChatMsg) GetLevel() string {
 	if x != nil {
 		return x.Level
+	}
+	return ""
+}
+
+func (x *AiChatMsg) GetExecutionDestination() string {
+	if x != nil {
+		return x.ExecutionDestination
 	}
 	return ""
 }
@@ -17791,6 +17801,7 @@ type AskVoiceStartMsg struct {
 	ChatProvider          string                 `protobuf:"bytes,5,opt,name=chat_provider,json=chatProvider,proto3" json:"chat_provider,omitempty"`
 	TranscriptionProvider string                 `protobuf:"bytes,6,opt,name=transcription_provider,json=transcriptionProvider,proto3" json:"transcription_provider,omitempty"`
 	SpeechProvider        string                 `protobuf:"bytes,7,opt,name=speech_provider,json=speechProvider,proto3" json:"speech_provider,omitempty"`
+	ExecutionDestination  string                 `protobuf:"bytes,8,opt,name=execution_destination,json=executionDestination,proto3" json:"execution_destination,omitempty"`
 	unknownFields         protoimpl.UnknownFields
 	sizeCache             protoimpl.SizeCache
 }
@@ -17870,6 +17881,13 @@ func (x *AskVoiceStartMsg) GetTranscriptionProvider() string {
 func (x *AskVoiceStartMsg) GetSpeechProvider() string {
 	if x != nil {
 		return x.SpeechProvider
+	}
+	return ""
+}
+
+func (x *AskVoiceStartMsg) GetExecutionDestination() string {
+	if x != nil {
+		return x.ExecutionDestination
 	}
 	return ""
 }
@@ -18241,7 +18259,7 @@ const file_memql_proto_rawDesc = "" +
 	"\x04text\x18\x02 \x01(\tR\x04text\x12\x1b\n" +
 	"\tmime_type\x18\x03 \x01(\tR\bmimeType\x12\x12\n" +
 	"\x04data\x18\x04 \x01(\tR\x04data\x12\x10\n" +
-	"\x03uri\x18\x05 \x01(\tR\x03uri\"\xb1\x02\n" +
+	"\x03uri\x18\x05 \x01(\tR\x03uri\"\xe6\x02\n" +
 	"\tAiChatMsg\x12\x1d\n" +
 	"\n" +
 	"request_id\x18\x01 \x01(\tR\trequestId\x12;\n" +
@@ -18251,7 +18269,8 @@ const file_memql_proto_rawDesc = "" +
 	"\x15fleet_registration_id\x18\x05 \x01(\tR\x13fleetRegistrationId\x12'\n" +
 	"\x0fconversation_id\x18\x06 \x01(\tR\x0econversationId\x12!\n" +
 	"\fpage_context\x18\a \x01(\tR\vpageContext\x12\x14\n" +
-	"\x05level\x18\b \x01(\tR\x05level\"Q\n" +
+	"\x05level\x18\b \x01(\tR\x05level\x123\n" +
+	"\x15execution_destination\x18\t \x01(\tR\x14executionDestination\"Q\n" +
 	"\rAiChatMessage\x12\x12\n" +
 	"\x04role\x18\x01 \x01(\tR\x04role\x12\x18\n" +
 	"\acontent\x18\x02 \x01(\tR\acontent\x12\x12\n" +
@@ -19365,7 +19384,7 @@ const file_memql_proto_rawDesc = "" +
 	"\x10restart_required\x18\x05 \x01(\bR\x0frestartRequired\x12\x1d\n" +
 	"\n" +
 	"error_code\x18\x06 \x01(\x05R\terrorCode\x12#\n" +
-	"\rerror_message\x18\a \x01(\tR\ferrorMessage\"\x98\x02\n" +
+	"\rerror_message\x18\a \x01(\tR\ferrorMessage\"\xcd\x02\n" +
 	"\x10AskVoiceStartMsg\x12\x1d\n" +
 	"\n" +
 	"request_id\x18\x01 \x01(\tR\trequestId\x12'\n" +
@@ -19374,7 +19393,8 @@ const file_memql_proto_rawDesc = "" +
 	"\x05voice\x18\x04 \x01(\tR\x05voice\x12#\n" +
 	"\rchat_provider\x18\x05 \x01(\tR\fchatProvider\x125\n" +
 	"\x16transcription_provider\x18\x06 \x01(\tR\x15transcriptionProvider\x12'\n" +
-	"\x0fspeech_provider\x18\a \x01(\tR\x0espeechProvider\"p\n" +
+	"\x0fspeech_provider\x18\a \x01(\tR\x0espeechProvider\x123\n" +
+	"\x15execution_destination\x18\b \x01(\tR\x14executionDestination\"p\n" +
 	"\x13AskVoiceStartResult\x12\x1d\n" +
 	"\n" +
 	"request_id\x18\x01 \x01(\tR\trequestId\x12\x10\n" +

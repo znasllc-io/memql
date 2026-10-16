@@ -114,7 +114,7 @@ export class SdkAskTransport implements AskTransport {
     }
     void (async () => {
       try {
-        const handle = this.stream(dispatcher, [{ role: "user", content: prompt }], { signal: abort.signal, conversationId: options.conversationId, requestId: options.turnId, pageContext: context ?? "", provider: options.routing?.source ?? "", level: options.routing?.level ?? "" });
+        const handle = this.stream(dispatcher, [{ role: "user", content: prompt }], { signal: abort.signal, conversationId: options.conversationId, requestId: options.turnId, pageContext: context ?? "", provider: options.routing?.source ?? "", level: options.routing?.level ?? "", executionDestination: options.routing?.destination ?? "auto" });
         let settled = false;
         let answer = "";
         let backgroundAccepted = false;
