@@ -502,6 +502,7 @@ func TestViewerDocumentManagementAcrossReplicas(t *testing.T) {
 		{"history", testHistoryBranchesAcrossReplicas},
 		{"feedback", testDeleteDocumentAnnotationsAcrossReplicas},
 		{"approval", testDocumentRevisionAnalyzesThenApprovesAndAppliesAcrossReplicas},
+		{"end insertion", testViewerEndInsertionAcrossReplicas},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			personal := f.isolatedCase(t)

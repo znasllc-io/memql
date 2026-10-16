@@ -254,6 +254,7 @@ automation workSpineDraftProgram {
  facts := builtin spineDraftFacts()
  inputHeading := "\n\nGoal input (JSON):\n"
  if facts.navigation { return builtin spineDraftAppend(kind: "navigation") }
+ if facts.quickReply { return builtin spineDraftAppend(kind: "quickReply", templateId: "workQuickReply", instruction: facts.goal) }
  if !facts.fanout {
   if facts.file && facts.research {
    builtin spineDraftAppend(kind: "research", inputHeading: inputHeading, instruction: facts.goal + "\nGather the evidence required for this deliverable using authorized capabilities. Preserve source references, uncertainties and the complete draft. Do not save the final file: the next step renders it from your result.")

@@ -103,3 +103,33 @@ func TestRemedyRecipeCannotSuppressAnUnfinishedSpentAttempt(t *testing.T) {
 		t.Fatalf("spent remedy left retryable: calls=%v asked=%v installed=%v", eng.aiCalls, recorder.asked, recorder.installed)
 	}
 }
+
+func TestQuickReplyRecipeCannotSkipActionsOrResearch(t *testing.T) {
+	for _, key := range []string{"intent", "workload", "requiresFile", "requiresResearch", "sectionable", "sections", "navigation"} {
+		fields := map[string]any{"intent": "reply", "workload": "quick", "requiresFile": false}
+		switch key {
+		case "intent":
+			fields[key] = "task"
+		case "workload":
+			fields[key] = "lookup"
+		case "sections":
+			fields[key] = []map[string]any{{"label": "read", "effects": []string{"read"}}}
+		case "navigation":
+			fields[key] = map[string]any{"app": "files"}
+		default:
+			fields[key] = true
+		}
+		if key == "requiresFile" {
+			fields["fileName"] = "report"
+			fields["fileFormat"] = "markdown"
+		}
+		req := compileReq()
+		req.Spine = spineWithPhase(t, workDraftProgram, `@template
+automation workSpineDraftProgram {
+ return builtin spineDraftAppend(kind: "quickReply", templateId: "workQuickReply", instruction: "hello")
+}`)
+		if _, err := synthesizeWorkReasoningBundle(req, "agent", parseSectionableDecision(fields)); err == nil {
+			t.Fatalf("quick reply bypassed %s", key)
+		}
+	}
+}
