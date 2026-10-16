@@ -24,6 +24,7 @@ func (r StepRequest) Environment() map[string]string {
 		"MEMQL_STEP":        r.StepKey,
 		"MEMQL_REPOSITORY":  r.Repository.FullName(),
 		"MEMQL_SHA":         r.SHA,
+		"MEMQL_BASE_SHA":    r.BaseSHA,
 		"MEMQL_MODE":        string(r.Mode),
 		"MEMQL_EVENT":       string(r.Event),
 		"MEMQL_VERSION":     r.Version,

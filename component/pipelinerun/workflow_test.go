@@ -278,7 +278,7 @@ func TestStageApplicabilityComesFromPinnedPipelineDSL(t *testing.T) {
 		{pipelines.EventManual, pipelines.ModeFull, []string{"always", "manual"}},
 	}
 	for _, tc := range cases {
-		got, err := dr.selectStages(context.Background(), stages, tc.event, tc.mode)
+		got, err := dr.selectStages(context.Background(), &pipelines.Spec{Stages: stages}, tc.event, tc.mode, "owner/repo@head:full:schedule:2026-10-16")
 		if err != nil || !slices.Equal(got.Included, tc.want) {
 			t.Errorf("selectStages(%s/%s) = %v, %v; want %v", tc.event, tc.mode, got.Included, err, tc.want)
 		}
@@ -294,7 +294,7 @@ func TestChangedStagePolicyChangesPipelineWorkflowIdentity(t *testing.T) {
 		t.Fatal(err)
 	}
 	changedPolicy := workflowSource(t, `@template automation pipelineStageIncluded {
- args { event string! mode string! on []string! }
+ args { event string! mode string! on []string! runSchedule string! stageSchedule string! }
  return false
 }`)
 	changed := &runDriver{d: Deps{LoadWorkflow: workflowLoader(changedPolicy)}}
@@ -303,6 +303,41 @@ func TestChangedStagePolicyChangesPipelineWorkflowIdentity(t *testing.T) {
 	}
 	if base.workflowIdentity() == changed.workflowIdentity() {
 		t.Fatal("a changed stage selector retained the same run workflow identity")
+	}
+}
+
+func TestScheduledStagesUseTheSavedPeriodAndManualRunsKeepExplicitCoverage(t *testing.T) {
+	dr := &runDriver{}
+	if err := dr.prepareWorkflow(""); err != nil {
+		t.Fatal(err)
+	}
+	spec := &pipelines.Spec{Schedule: "daily", Stages: []pipelines.StageSpec{
+		{Name: "tests"},
+		{Name: "dependencies", On: []string{"schedule", "pull_request", "manual"}},
+		{Name: "deep", Schedule: "weekly", On: []string{"schedule", "release", "manual"}},
+	}}
+	for _, tc := range []struct {
+		event pipelines.Event
+		slot  string
+		want  []string
+	}{
+		{pipelines.EventSchedule, "2026-10-14", []string{"dependencies"}},
+		{pipelines.EventSchedule, "week:2026-10-12", []string{"deep"}},
+		{pipelines.EventPullRequest, "", []string{"tests", "dependencies"}},
+		{pipelines.EventRelease, "", []string{"tests", "deep"}},
+		{pipelines.EventManual, "", []string{"tests", "dependencies", "deep"}},
+	} {
+		key := ""
+		if tc.slot != "" {
+			key = mustScheduledRunKey(t, repoName, shaA, pipelines.ModeFull, tc.slot)
+		}
+		got, err := dr.selectStages(context.Background(), spec, tc.event, pipelines.ModeFull, key)
+		if err != nil || !slices.Equal(got.Included, tc.want) {
+			t.Errorf("%s/%s: selected %v, %v; want %v", tc.event, tc.slot, got.Included, err, tc.want)
+		}
+	}
+	if _, err := dr.selectStages(context.Background(), spec, pipelines.EventSchedule, pipelines.ModeFull, "missing-slot"); err == nil {
+		t.Fatal("scheduled run accepted without its persisted period")
 	}
 }
 

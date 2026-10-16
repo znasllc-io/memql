@@ -10,7 +10,9 @@
             "mode": "s-mode",
             "on": [
               "a"
-            ]
+            ],
+            "runSchedule": "s-runSchedule",
+            "stageSchedule": "s-stageSchedule"
           },
           "topic": "automation.invocation.pipelineStageIncluded"
         },
@@ -33,7 +35,9 @@
             "mode": "s-mode",
             "on": [
               "a"
-            ]
+            ],
+            "runSchedule": "s-runSchedule",
+            "stageSchedule": "s-stageSchedule"
           },
           "topic": "automation.invocation.pipelineStageIncluded"
         },

@@ -28,29 +28,59 @@ func RunKey(repository, sha string, mode Mode, event Event) string {
 		strings.ToLower(strings.TrimSpace(sha)) + ":" + string(mode) + ":" + string(event)
 }
 
-// ScheduledRunKey adds the UTC day to a scheduled run's identity. A daily
-// scan must run again when the branch head is unchanged, while duplicate
-// scheduler deliveries on the same day must collapse to one run.
-func ScheduledRunKey(repository, sha string, mode Mode, day string) (string, error) {
+// ScheduleSlot binds a run to a UTC calendar period. A weekly slot starts on
+// Monday; a missed Monday still opens that week's scan on the next invocation.
+func ScheduleSlot(cadence string, now time.Time) (string, error) {
+	now = now.UTC()
+	switch cadence {
+	case "daily":
+		return now.Format("2006-01-02"), nil
+	case "weekly":
+		monday := now.AddDate(0, 0, -((int(now.Weekday()) + 6) % 7))
+		return "week:" + monday.Format("2006-01-02"), nil
+	default:
+		return "", fmt.Errorf("pipelines: unsupported schedule cadence %q", cadence)
+	}
+}
+
+func ScheduleCadence(slot string) (string, error) {
+	cadence, day := "daily", slot
+	if strings.HasPrefix(slot, "week:") {
+		cadence, day = "weekly", strings.TrimPrefix(slot, "week:")
+	}
+	parsed, err := time.Parse("2006-01-02", day)
+	if err != nil || parsed.Format("2006-01-02") != day || (cadence == "weekly" && parsed.Weekday() != time.Monday) {
+		return "", fmt.Errorf("pipelines: schedule slot %q must be YYYY-MM-DD or week:YYYY-MM-DD naming a Monday", slot)
+	}
+	return cadence, nil
+}
+
+// Daily keys preserve their existing identity. Weekly keys deliberately omit
+// the head SHA: the first opening pins that week's source, so later main pushes
+// cannot turn a weekly deep scan into a daily scan. The same atomic opening gate
+// deduplicates concurrent replicas; a manual retry retains the original SHA.
+func ScheduledRunKey(repository, sha string, mode Mode, slot string) (string, error) {
 	if mode != ModeFull {
 		return "", fmt.Errorf("pipelines: scheduled run mode %q must be full", mode)
 	}
-	parsed, err := time.Parse("2006-01-02", day)
-	if err != nil || parsed.Format("2006-01-02") != day {
-		return "", fmt.Errorf("pipelines: scheduled run day %q must be YYYY-MM-DD", day)
+	cadence, err := ScheduleCadence(slot)
+	if err != nil {
+		return "", err
 	}
-	return RunKey(repository, sha, mode, EventSchedule) + ":" + day, nil
+	if cadence == "weekly" {
+		sha = "weekly"
+	}
+	return RunKey(repository, sha, mode, EventSchedule) + ":" + slot, nil
 }
 
-// ScheduledDayFromRunKey recovers the day a manual re-run must preserve.
-func ScheduledDayFromRunKey(key string) (string, bool) {
-	base, day, ok := strings.Cut(key, ":schedule:")
-	if !ok || strings.Contains(day, ":") || !strings.HasSuffix(base, ":full") || !strings.Contains(base, "@") {
+// ScheduledSlotFromRunKey recovers the calendar slot a retry must preserve.
+func ScheduledSlotFromRunKey(key string) (string, bool) {
+	base, slot, ok := strings.Cut(key, ":schedule:")
+	if !ok || !strings.HasSuffix(base, ":full") || !strings.Contains(base, "@") {
 		return "", false
 	}
-	parsed, err := time.Parse("2006-01-02", day)
-	if err != nil || parsed.Format("2006-01-02") != day {
+	if _, err := ScheduleCadence(slot); err != nil {
 		return "", false
 	}
-	return day, true
+	return slot, true
 }

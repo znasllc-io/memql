@@ -193,15 +193,35 @@ func (dr *runDriver) prepareWorkflow(name string) error {
 	return nil
 }
 
-func (dr *runDriver) selectStages(ctx context.Context, stages []pipelines.StageSpec, event pipelines.Event, mode pipelines.Mode) (pipelines.StageSelection, error) {
-	selection := pipelines.StageSelection{Included: make([]string, 0, len(stages))}
-	for _, stage := range stages {
+func (dr *runDriver) selectStages(ctx context.Context, spec *pipelines.Spec, event pipelines.Event, mode pipelines.Mode, runKey string) (pipelines.StageSelection, error) {
+	runCadence := ""
+	if event == pipelines.EventSchedule {
+		slot, ok := pipelines.ScheduledSlotFromRunKey(runKey)
+		if !ok {
+			return pipelines.StageSelection{}, fmt.Errorf("scheduled pipeline has no valid saved calendar slot")
+		}
+		var err error
+		runCadence, err = pipelines.ScheduleCadence(slot)
+		if err != nil {
+			return pipelines.StageSelection{}, err
+		}
+	}
+	selection := pipelines.StageSelection{Included: make([]string, 0, len(spec.Stages))}
+	for _, stage := range spec.Stages {
+		stageCadence := stage.Schedule
+		if stageCadence == "" {
+			stageCadence = spec.Schedule
+		}
+		if stageCadence == "" {
+			stageCadence = "daily"
+		}
 		on := stage.On
 		if on == nil {
 			on = []string{}
 		}
 		value, err := dr.runPinnedWorkflow(ctx, "pipelineStageIncluded", map[string]any{
 			"event": string(event), "mode": string(mode), "on": on,
+			"runSchedule": runCadence, "stageSchedule": stageCadence,
 		})
 		if err != nil {
 			return pipelines.StageSelection{}, err

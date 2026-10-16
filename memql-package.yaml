@@ -132,9 +132,9 @@ pipeline:
         # ci.yml go-checks: build, vet, the env-var registry, the DSL lint and
         # engine load, and the SDK, concept-snapshot, authoring-surface and proto
         # drift gates. These read the whole tree, so they run on every change
-        # rather than behind a copy of ci.yml's go, dsl and proto buckets. A run
-        # names no base commit, so memqlbreaking-base.sh compares against the
-        # committed baseline, and says so.
+        # rather than behind a copy of ci.yml's go, dsl and proto buckets.
+        # The saved event base survives the replica hop and supplies the
+        # authoring-surface comparison; a first push has no predecessor.
         - name: go-checks
           placement: cluster
           timeout: 30m
@@ -149,7 +149,7 @@ pipeline:
             go test -run TestEngineInitLoadsFullDSL ./component/memql/
             make sdk-gen-check
             make concept-snapshot-check
-            bash scripts/ci/memqlbreaking-base.sh
+            BASE_SHA="$MEMQL_BASE_SHA" bash scripts/ci/memqlbreaking-base.sh
             make proto-gen-check
         # ci.yml path-routing: the path-routing and CI-configuration guards, on
         # every change.
@@ -265,33 +265,17 @@ pipeline:
             set -eu
             python3 scripts/ci/npm-audit.py --report-dir=.memql-security/npm
     # Event selection is declared, so the plan exposes the selected scan.
-    # Both scans preserve failure reports even when an earlier check failed.
+    # New-commit scans preserve reports even when an earlier check failed.
+    # Full history shares the later weekly analysis stage with CodeQL, so
+    # the two-job admission can overlap the expensive work.
     - name: secrets-current
-      on: [pull_request, manual]
+      on: [pull_request, merge_group, push]
       runAfterFailure: true
       steps:
         - name: gitleaks
           placement: cluster
-          timeout: 90m
-          memoryMiB: 8192
-          artifacts: [.memql-security/gitleaks]
-          run: |
-            set -eu
-            export GOFLAGS=-p=1 GOMEMLIMIT=512MiB GOGC=50
-            mkdir -p .memql-security/gitleaks
-            go install github.com/zricethezav/gitleaks/v8@v8.30.1
-            export GOMAXPROCS=2 GOMEMLIMIT=2GiB
-            gitleaks dir . --no-banner --redact=100 --report-format=json --report-path=.memql-security/gitleaks/findings.json
-    - name: secrets-history
-      on: [push, merge_group, release, manual]
-      runAfterFailure: true
-      steps:
-        - name: gitleaks
-          placement: cluster
-          # Full reachable history measured 3h53m on four CPUs. This explicit
-          # budget needs an operator's longer run ceiling; defaults stay 2h.
-          timeout: 6h
-          cpuMilli: 4000
+          timeout: 30m
+          cpuMilli: 3000
           memoryMiB: 6144
           artifacts: [.memql-security/gitleaks]
           run: |
@@ -300,7 +284,7 @@ pipeline:
             mkdir -p .memql-security/gitleaks
             go install github.com/zricethezav/gitleaks/v8@v8.30.1
             export GOMAXPROCS=1 GOMEMLIMIT=1GiB GOGC=100
-            python3 scripts/ci/gitleaks-history.py --head="$MEMQL_SHA" --fetch-remote="https://github.com/${MEMQL_REPOSITORY}.git" --gitleaks="$(command -v gitleaks)" --output-dir=.memql-security/gitleaks --jobs=4 --batch-size=1 --timeout=20700
+            python3 scripts/ci/gitleaks-history.py --head="$MEMQL_SHA" --base="$MEMQL_BASE_SHA" --fetch-remote="https://github.com/${MEMQL_REPOSITORY}.git" --gitleaks="$(command -v gitleaks)" --output-dir=.memql-security/gitleaks --jobs=3 --batch-size=1 --timeout=1500
     - name: tests
       steps:
         # ci.yml go-tests: every package outside the db-gated trees that the
@@ -510,12 +494,28 @@ pipeline:
             go test -count=1 -timeout=300s ./ ./integrations ./integrations/customdomain ./integrations/compose ./cmd/envscan/... ./component/architecture/... ./component/envregistry/... ./scripts/... ./test/dslconformance/... ./examples/... ./component/auth/... ./deploy/...
 
     # Analysis records findings independently of build/test success. It runs on
-    # main pushes and release qualification, including their re-runs. The
-    # scheduler owns periodic full runs; a skipped scan is never a clean scan.
+    # release qualification and weekly audits, including their re-runs.
+    # The saved UTC week prevents new main heads from repeating the audit.
     - name: analysis
-      on: [push, release, schedule, manual]
+      schedule: weekly
+      on: [release, schedule, manual]
       runAfterFailure: true
       steps:
+        - name: gitleaks
+          placement: cluster
+          # Full history is weekly and on release qualification. Three CPUs
+          # leave room for another Job and its services on the bounded pool.
+          timeout: 6h
+          cpuMilli: 3000
+          memoryMiB: 6144
+          artifacts: [.memql-security/gitleaks]
+          run: |
+            set -eu
+            export GOFLAGS=-p=1 GOMEMLIMIT=512MiB GOGC=50
+            mkdir -p .memql-security/gitleaks
+            go install github.com/zricethezav/gitleaks/v8@v8.30.1
+            export GOMAXPROCS=1 GOMEMLIMIT=1GiB GOGC=100
+            python3 scripts/ci/gitleaks-history.py --head="$MEMQL_SHA" --fetch-remote="https://github.com/${MEMQL_REPOSITORY}.git" --gitleaks="$(command -v gitleaks)" --output-dir=.memql-security/gitleaks --jobs=3 --batch-size=1 --timeout=20700
         - name: codeql-go
           placement: cluster
           memoryMiB: 6144

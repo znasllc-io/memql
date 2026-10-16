@@ -172,6 +172,7 @@ type StepRequest struct {
 	OwnerUserID  string     `json:"ownerUserId"`
 	Repository   Repository `json:"repository"`
 	SHA          string     `json:"sha"`
+	BaseSHA      string     `json:"baseSha,omitempty"`
 	Mode         Mode       `json:"mode"`
 	Event        Event      `json:"event"`
 	Version      string     `json:"version"`

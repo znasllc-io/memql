@@ -141,7 +141,12 @@ function ensure_base_commit() {
 		return 0
 	fi
 	log "fetching the base commit ${sha} (a CI checkout is shallow)"
-	if git fetch --no-tags --depth=1 origin "${sha}" >&2; then
+	local remote=origin
+	# MemQL steps deliberately retain no authenticated clone remote.
+	if [[ -n "${MEMQL_REPOSITORY:-}" ]]; then
+		remote="https://github.com/${MEMQL_REPOSITORY}.git"
+	fi
+	if git fetch --no-tags --depth=1 "${remote}" "${sha}" >&2; then
 		return 0
 	fi
 	return 1

@@ -171,16 +171,15 @@ func TestEngineSecurityScansDoNotTurnFindingsIntoSuccess(t *testing.T) {
 		if refusal != nil {
 			t.Fatal(refusal)
 		}
-		wantStage := "secrets-history"
-		// The history helper fetches tags and unshallows with bounded retries;
-		// its real-Git tests prove that incomplete history cannot reach scanning.
-		// Keep the manifest wired to that fetch, not just to a local inventory.
-		wantCommands := []string{`--fetch-remote="https://github.com/${MEMQL_REPOSITORY}.git"`, `--head="$MEMQL_SHA"`, "python3 scripts/ci/gitleaks-history.py", "--jobs=4", "--batch-size=1", "--timeout=20700"}
-		forbidden := "gitleaks dir ."
-		if event == pipelines.EventPullRequest {
-			wantStage = "secrets-current"
-			wantCommands = []string{"--redact=100", "gitleaks dir ."}
-			forbidden = "gitleaks-history.py"
+		wantStage := "secrets-current"
+		wantCommands := []string{`--fetch-remote="https://github.com/${MEMQL_REPOSITORY}.git"`, `--head="$MEMQL_SHA"`, "python3 scripts/ci/gitleaks-history.py", "--jobs=3", "--batch-size=1"}
+		wantTimeout := 30 * 60
+		if event == pipelines.EventRelease {
+			wantStage = "analysis"
+			wantTimeout = 6 * 60 * 60
+			wantCommands = append(wantCommands, "--timeout=20700")
+		} else {
+			wantCommands = append(wantCommands, `--base="$MEMQL_BASE_SHA"`, "--timeout=1500")
 		}
 		count := 0
 		for _, step := range plan.Steps() {
@@ -191,7 +190,7 @@ func TestEngineSecurityScansDoNotTurnFindingsIntoSuccess(t *testing.T) {
 			if step.Stage != wantStage || !step.RunAfterFailure || step.Skip != nil || len(step.Artifacts) == 0 || strings.Contains(step.Run, "|| true") {
 				t.Fatalf("%s selects the wrong scan, skips it, discards reports or ignores failure: %+v", event, step)
 			}
-			if strings.Contains(step.Run, "MEMQL_EVENT") || strings.Contains(step.Run, forbidden) {
+			if strings.Contains(step.Run, "MEMQL_EVENT") || strings.Contains(step.Run, "gitleaks dir .") {
 				t.Fatalf("%s hides scan selection inside the command", event)
 			}
 			for _, need := range append(wantCommands, "@v8.30.1") {
@@ -199,10 +198,10 @@ func TestEngineSecurityScansDoNotTurnFindingsIntoSuccess(t *testing.T) {
 					t.Errorf("%s scan omits %s", event, need)
 				}
 			}
-			if event != pipelines.EventPullRequest && (step.CPUMilli != 4000 || step.MemoryMiB != 6144) {
+			if step.CPUMilli != 3000 || step.MemoryMiB != 6144 {
 				t.Fatal("history scan allocation differs from its bounded parallel rehearsal")
 			}
-			if event != pipelines.EventPullRequest && step.TimeoutSeconds != 6*60*60 {
+			if step.TimeoutSeconds != wantTimeout {
 				t.Fatal("history scan must declare the measured long-workload budget explicitly")
 			}
 		}

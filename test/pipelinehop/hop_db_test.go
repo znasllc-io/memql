@@ -184,7 +184,7 @@ func TestAGitHubDeliveryIsOpenedOnTheBffAndDrivenOnTheAgent(t *testing.T) {
 			if req.WorkRunID != memql.BareShortId(run.WorkRunID) || req.WorkRunID != memql.BareShortId(req.WorkRunID) {
 				t.Errorf("%s: WorkRunID %q; want the work run's bare id %q", req.StepKey, req.WorkRunID, memql.BareShortId(run.WorkRunID))
 			}
-			if req.Attempt != 1 || req.RunAttempt != 1 || req.SHA != head || req.Mode != pipelines.ModeAffected ||
+			if req.Attempt != 1 || req.RunAttempt != 1 || req.SHA != head || req.BaseSHA != s.base || req.Environment()["MEMQL_BASE_SHA"] != s.base || req.Mode != pipelines.ModeAffected ||
 				req.Event != pipelines.EventPullRequest || req.Version != head || req.InstallationID != s.installation ||
 				req.PipelineID != memql.BareShortId(s.pipeline.ID) || req.Repository.Owner+"/"+req.Repository.Name != s.name {
 				t.Errorf("%s: the request = %+v", req.StepKey, req)
