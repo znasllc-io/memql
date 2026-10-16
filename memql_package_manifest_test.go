@@ -381,7 +381,7 @@ func TestEngineManifestCompilesForEveryOpening(t *testing.T) {
 			runs: every, absent: []string{manifestStepGateInputs}},
 		{name: "a merge group", event: pipelines.EventMergeGroup, stages: fullStages,
 			runs: every, absent: []string{manifestStepGateInputs}},
-		{name: "a release", event: pipelines.EventRelease, stages: append(slices.Clone(analysisStages), "images"),
+		{name: "a release", event: pipelines.EventRelease, stages: append(slices.Clone(analysisStages), "release-files", "images"),
 			runs: every, absent: []string{manifestStepGateInputs}},
 		// A scheduled scan selects only its explicit opt-in stages; default
 		// stages such as checks and history scans are intentionally absent.
