@@ -590,8 +590,8 @@ func TestCompileDB_QuickEstimatePromotesAcrossReplicasWithoutResettingSpend(t *t
 		t.Fatal(err)
 	}
 	declared, err := guard.DeclaredDeadline(ctx, rc)
-	if err != nil || declared.Sub(quick) != 3*time.Minute {
-		t.Fatalf("declared/estimated deadline %v %v: %v", declared, quick, err)
+	if err != nil || !declared.Equal(quick) {
+		t.Fatalf("quick estimate must preserve the declared admission deadline: declared=%v quick=%v: %v", declared, quick, err)
 	}
 	for range 3 {
 		if breach := guard.Admit(ctx, rc, 0); breach != nil {
