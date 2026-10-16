@@ -1,11 +1,10 @@
 import { ArrowUpRight } from "lucide-react";
 import type { AskTurn } from "./conversationSession";
 
-/** A quiet receipt beneath the model's acknowledgment. The entire button opens
- * the real run; queue state comes from the runtime, never from generated prose. */
+/** A quiet inline shortcut at the end of the model's acknowledgment. */
 export function AskWorkLink({ title, state, onOpen }: { title: string; state: AskTurn["state"]; onOpen: () => void }) {
   const label = state === "waiting" ? "Needs your input" : "View work";
-  return <div className="os-ask-work-link"><button type="button" className="os-icon-button" title={label} aria-label={`${label}: ${title} — open in Nexus`} onClick={onOpen}>
-    <ArrowUpRight size={14} aria-hidden />
-  </button></div>;
+  return <button type="button" className="os-ask-work-link" title={label} aria-label={`${label}: ${title} — open in Nexus`} onClick={onOpen}>
+    <ArrowUpRight size={12} aria-hidden />
+  </button>;
 }

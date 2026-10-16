@@ -26,15 +26,22 @@ type libraryRevisionFileStore interface {
 }
 
 type libraryRevisionFiles struct {
-	store    libraryRevisionFileStore
-	uploader server.FileUploader
-	bucket   string
+	store     libraryRevisionFileStore
+	uploader  server.FileUploader
+	bucket    string
+	authority libraryRevisionFileAuthority
+}
+
+type libraryRevisionFileAuthority interface {
+	GlobalDataCapable(context.Context, string) bool
+	PersonalAppCapable(context.Context, string) bool
 }
 
 func (s *libraryRevisionFiles) SaveRevision(ctx context.Context, write library.RevisionFileWrite) error {
 	ac, ok := auth.AccessFromContext(ctx)
-	subject, hasSubject := auth.SubjectFromContext(ctx)
-	if !ok || ac == nil || ac.UserId == "" || !hasSubject || !auth.CapableFor(ctx, subject, auth.VerbCreate, auth.ResourceData) {
+	_, hasSubject := auth.SubjectFromContext(ctx)
+	if !ok || ac == nil || ac.UserId == "" || !hasSubject || s.authority == nil ||
+		!(s.authority.GlobalDataCapable(ctx, auth.VerbCreate) || s.authority.PersonalAppCapable(ctx, "files")) {
 		return fmt.Errorf("you do not have permission to save this revision")
 	}
 	if s.uploader == nil || s.bucket == "" {
@@ -50,6 +57,11 @@ func (s *libraryRevisionFiles) SaveRevision(ctx context.Context, write library.R
 	}
 	if current == nil || current.Archived {
 		return fmt.Errorf("the document is unavailable")
+	}
+	// Personal Files authority never grants another document owner's bytes.
+	// Check before uploading, even if a store can return a readable shared row.
+	if memql.BareShortId(current.OwnerUserId) != memql.BareShortId(ac.UserId) {
+		return fmt.Errorf("the document does not belong to this caller")
 	}
 	digestBytes := sha256.Sum256(write.Content)
 	digest := hex.EncodeToString(digestBytes[:])

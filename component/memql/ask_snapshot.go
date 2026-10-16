@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"strings"
 
 	memorynodes "github.com/znasllc-io/memql/component/database/memory-nodes"
 )
@@ -156,10 +157,12 @@ func (e *MemQLEngine) refreshAskRuns(ctx context.Context, transcript *askTranscr
 		// earlier observer may have persisted drafts from a superseded attempt.
 		outcome, _ := run["classification"].(map[string]any)
 		workload, _ := outcome["workload"].(string)
-		if workload != "" && workload != "quick" {
-			turn.Background = true
+		ack, _ := outcome["acknowledgement"].(string)
+		turn.Background = (workload != "" && workload != "quick") || strings.TrimSpace(ack) != "" || turn.Question != nil
+		if !turn.Background {
+			turn.Acknowledgement, turn.AcknowledgedAt = "", nil
 		}
-		if ack, _ := outcome["acknowledgement"].(string); ack != "" && turn.Background {
+		if ack != "" && turn.Background {
 			turn.Acknowledgement = ack
 			if at, valid := askTimestamp(outcome["acknowledgedAt"]); valid {
 				turn.AcknowledgedAt = &at
@@ -187,7 +190,7 @@ func (e *MemQLEngine) refreshAskRuns(ctx context.Context, transcript *askTranscr
 			turn.Answer = turn.Acknowledgement
 			turn.State, turn.Error, turn.EndedAt = "queued", "", nil
 			if pending.Waiting {
-				turn.State = "waiting"
+				turn.State, turn.Background = "waiting", true
 			}
 		case err != nil:
 			if run["status"] != "failed" && run["status"] != "cancelled" && run["status"] != "abandoned" {

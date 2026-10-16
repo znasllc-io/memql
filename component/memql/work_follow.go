@@ -164,9 +164,10 @@ func followWorkRun(ctx context.Context, runID string, read workRowReader, onText
 			return answer, fmt.Errorf("%s", message)
 		}
 		mode, _ := ctx.Value(workFollowModeKey{}).(string)
-		started, hasStart := askTimestamp(run["startedAt"])
-		queuedClassification := run["status"] == "compiling" && hasStart && time.Since(started) >= 15*time.Second
-		if mode == followSnapshot || (mode == followBackground && ((workload != "" && workload != "quick") || queuedClassification)) {
+		// Elapsed time says nothing about intent. A cold classifier must not
+		// turn a greeting into background work. Classification is durable, so
+		// every observing replica makes the same handoff decision.
+		if mode == followSnapshot || (mode == followBackground && ((workload != "" && workload != "quick") || strings.TrimSpace(ack) != "")) {
 			return answer, pending
 		}
 		timer := time.NewTimer(interval)

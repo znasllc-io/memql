@@ -15227,18 +15227,14 @@ button[data-ask-control="running"], [data-ask-control="running"] > button { outl
 .os-ask-work-body { flex: 1; min-width: 0; display: grid; gap: 4px; }
 .os-ask-work-body > strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: var(--os-text-sm); font-weight: 500; }
 .os-ask-work-card > svg:last-child { margin-left: auto; flex: none; color: var(--os-muted); }
-.os-ask-work-row { display: flex; align-items: center; gap: 8px; min-width: 0; border: 1px solid var(--os-line); border-radius: var(--os-radius-sm); background: var(--os-plate); }
-.os-ask-work-row > .os-ask-work-card { flex: 1; min-width: 0; border: 0; background: transparent; }
-.os-ask-work-row > .os-ask-work-card:hover { background: var(--os-hover); }
-.os-ask-work-guide { flex: none; margin: 0 12px 0 0; font-size: var(--os-text-sm); }
-.os-ask-work-summary { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px; }
-.os-ask-work-summary > button { display: inline-flex; align-items: center; gap: 8px; margin: 0; }
 
 
 .os-ask-message .os-ask-result-context { color: var(--os-muted); font-size: var(--os-text-sm); font-weight: 500; line-height: 1.5; margin: 0 0 8px; }
 
-.os-ask-work-link { display: flex; justify-content: flex-start; margin-top: 8px; }
-.os-ask-work-link > .os-icon-button { border: 1px solid color-mix(in srgb, var(--os-muted) 55%, transparent); }
+.os-ask-answer-with-link > p:nth-last-child(2) { display: inline; }
+.os-ask-work-link { display: inline-flex; align-items: center; justify-content: center; width: 24px; height: 24px; margin-inline-start: 4px; padding: 0; vertical-align: text-bottom; border: 0; border-radius: var(--os-radius-sm); background: transparent; color: var(--os-muted); cursor: pointer; }
+.os-ask-work-link:hover { color: var(--os-ink); background: var(--os-hover); }
+.os-ask-work-link:focus-visible { outline: 2px solid var(--os-accent); outline-offset: 2px; }
 
 .os-ask-question { display: grid; gap: 10px; margin-top: 12px; padding: 12px; border-radius: var(--os-radius-sm); background: var(--os-plate); }
 .os-ask-question > p { margin: 0; }

@@ -33,7 +33,7 @@ it("blocks loading before readiness is known", () => {
 });
 it("shows waiting and Stop, preserves partial text, and retries a stopped reply", async () => {
   const w = wire(); render(<AskSurface {...{ transport: w.transport, variant: "sheet" as const, availability: ready }} />);
-  typePrompt(); send(); expect(screen.getByText(/Thinking/)).toBeTruthy();
+  typePrompt(); send(); expect(screen.getByText(/Waiting for your model/)).toBeTruthy();
   act(() => w.callbacks().delta("First part"));
   act(() => w.callbacks().activity?.({id:"run",kind:"run",phase:"running",at:new Date().toISOString(),arguments:{goalId:"goal",runId:"run"}}));
   await act(async () => { fireEvent.click(screen.getByRole("button", { name: "Stop reply" })); });

@@ -256,6 +256,9 @@ func (s *spineScope) classify(ctx context.Context, _ map[string]any) (any, error
 			return nil, fmt.Errorf("work compile: conflicting reply delivery contract; retry the request")
 		}
 		out.Reply = out.Workload == "quick"
+		if out.Reply {
+			out.Acknowledgement = ""
+		}
 	}
 	sectionable.Workload = out.Workload
 	s.guidance, s.decision = guidance, sectionable
