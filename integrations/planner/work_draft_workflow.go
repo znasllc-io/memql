@@ -84,6 +84,9 @@ func synthesizeWorkReasoningBundleInScope(ctx context.Context, req CompileReques
 	}
 	s.body.WriteString("}\n")
 	var imports strings.Builder
+	if s.hasQuickReply {
+		imports.WriteString("use agents.builtins.{ ai }\nuse work.context.{ workViewerContext }\n")
+	}
 	if s.hasTurns {
 		imports.WriteString("use agents.builtins.{ runAgentTurn }\n")
 	}
@@ -125,6 +128,7 @@ type draftSourceScope struct {
 	seen                                                  map[string]bool
 	sectionIndex                                          int
 	collected, finished, hasTurns, hasFile, hasNavigation bool
+	hasQuickReply                                         bool
 }
 
 func (s *draftSourceScope) operations() map[string]workflowhost.Operation {
@@ -158,6 +162,7 @@ func (s *draftSourceScope) facts() map[string]any {
 		}
 	}
 	return map[string]any{"goal": s.req.Statement, "file": *s.dec.RequiresFile, "research": s.dec.RequiresResearch,
+		"quickReply": s.dec.quickReply(),
 		"navigation": s.dec.Navigation != nil && !s.dec.Sectionable && !*s.dec.RequiresFile && strings.TrimSpace(s.dec.Navigation.App) != "",
 		"fanout":     s.dec.Sectionable && len(s.sections) >= minSectionsForFanout, "sections": items,
 		"prose":        s.fileFormat == "markdown" || s.fileFormat == "txt" || s.fileFormat == "html" || s.fileFormat == "pdf" || s.fileFormat == "docx",
@@ -172,6 +177,17 @@ func (s *draftSourceScope) append(args map[string]any) error {
 	instruction := getString(args, "instruction")
 	heading := getString(args, "inputHeading")
 	switch kind {
+	case "quickReply":
+		if !s.dec.quickReply() || s.sectionIndex > 0 || s.seen["research"] {
+			return fmt.Errorf("quick reply requires a conversational request without actions or research")
+		}
+		conversation := langparser.QuoteString("[]")
+		if _, ok := s.req.Input["conversation"]; ok {
+			conversation = "toString(args.conversation)"
+		}
+		s.body.WriteString("  viewer := builtin workViewerContext()\n")
+		fmt.Fprintf(&s.body, "  reason := builtin ai(templateId: %s, progress: true, data: {statement: %s, conversation: %s, viewerContext: toString(viewer)})\n", langparser.QuoteString(getString(args, "templateId")), langparser.QuoteString(instruction), conversation)
+		s.hasQuickReply, s.finished = true, true
 	case "navigation":
 		target := s.dec.Navigation
 		if target == nil || *s.dec.RequiresFile || s.dec.Sectionable || s.seen["research"] {

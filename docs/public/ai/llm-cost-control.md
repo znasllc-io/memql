@@ -124,17 +124,25 @@ nobody can audit is an assertion; see
 
 Ask classifies the current message with its conversation context. Follow-ups
 do not reuse templates matched only to the latest words. Classification has
-a 15-second deadline; missing, invalid, or failed classification stops with
+a 60-second deadline; missing, invalid, or failed classification stops with
 a retryable error instead of escalating into automation authoring. Only an
 automation intent can send a conversation through that authoring path.
 
 New Ask runs start with a ten-minute allowance, twelve model calls, and one
-automatic retry. A conversational reply tightens those limits to sixty
-seconds and three model calls, preserving stricter existing ceilings. Time
+automatic retry. A conversational reply tightens those limits to two minutes
+and three model calls, preserving stricter existing ceilings. Time
 is measured from the stored run start, including classification; a retry or
 move to another replica does not restart the clock. The deadline covers
 in-flight prompt calls and the agent tool loop. Direct agent attempts also
 consume the run's model-call allowance and write attempt receipts.
+
+A classified quick conversational reply uses the `workQuickReply` prompt at
+`fast` through the normal `ai` builtin, with output progress and the durable
+run journal. It reads the authenticated person's profile on the execution
+replica and the conversation from the saved run variables. It does not
+retrieve knowledge or enter the agent tool loop. A request for a
+file, research, navigation or action retains its normal execution recipe;
+`quick` alone never authorizes skipping those requirements.
 
 Automation repairs receive the complete bundle and its diagnostics. They
 may repair failing members or add missing dependencies, but cannot rewrite

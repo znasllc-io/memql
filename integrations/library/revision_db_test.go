@@ -495,6 +495,9 @@ func (f *revisionDB) execute(engine *memql.MemQLEngine, request string, resume b
 // and model state. Do not use a package-global fixture or parallel subtests.
 func TestViewerDocumentManagementAcrossReplicas(t *testing.T) {
 	f := newRevisionDB(t)
+	// Initialize registries serially, then overlap independent owner fixtures.
+	// Each persona keeps its own engines, model answers and document/run IDs.
+	t.Parallel()
 	for _, tc := range []struct {
 		name string
 		run  func(*testing.T, *revisionDB)
@@ -502,6 +505,7 @@ func TestViewerDocumentManagementAcrossReplicas(t *testing.T) {
 		{"history", testHistoryBranchesAcrossReplicas},
 		{"feedback", testDeleteDocumentAnnotationsAcrossReplicas},
 		{"approval", testDocumentRevisionAnalyzesThenApprovesAndAppliesAcrossReplicas},
+		{"end insertion", testViewerEndInsertionAcrossReplicas},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			personal := f.isolatedCase(t)

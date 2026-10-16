@@ -217,7 +217,7 @@ elif sys.argv[1:3]==['database','analyze']:
                     suite = root / f"qlpacks/codeql/{pack}-queries/1.0.0/codeql-suites/{pack}-code-quality.qls"
                     suite.parent.mkdir(parents=True)
                     suite.write_text("- queries: .\n")
-                    self.assertEqual(module.quality_suite(root / "codeql", language), suite)
+                    self.assertEqual(module.quality_suite(root / "codeql", language), suite.resolve())
                     second = root / f"qlpacks/codeql/{pack}-queries/2.0.0/codeql-suites/{pack}-code-quality.qls"
                     second.parent.mkdir(parents=True)
                     second.write_text("- queries: .\n")

@@ -76,3 +76,13 @@ prompt validateStepAnswer {
   answer       string!  @description("The step's answer, as the person would read it.")
   now          string!  @description("RFC3339 wall-clock at invocation.")
 }
+
+/// A conversational reply after triage has excluded actions, files and research.
+/// One fast text call, still routed, budgeted and journaled by the work harness.
+@level("fast")
+@templateFile("prompts/workQuickReply.tmpl")
+prompt workQuickReply {
+  statement string!
+  conversation string
+  viewerContext string
+}
