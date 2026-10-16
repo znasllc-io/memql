@@ -243,6 +243,11 @@ func podFailure(pod *Pod, step *ContainerStatus, created, now time.Time, cfg Con
 	if f := cachePrepFailure(podContainer(pod, true, ContainerCachePrep), created, now, cfg); f != nil {
 		return f
 	}
+	if ids := podContainer(pod, true, imageBuildIDsVolume); ids != nil {
+		if ended := ids.State.Terminated; ended != nil && ended.ExitCode != 0 {
+			return &pl.Failure{Code: pl.CodeJobRejected, Message: "the image builder's user mapping could not be prepared: " + exitPhrase(ended)}
+		}
+	}
 	if clone := podContainer(pod, true, ContainerClone); clone != nil {
 		if t := clone.State.Terminated; t != nil && t.ExitCode != 0 {
 			return &pl.Failure{Code: pl.CodeCloneFailed, Message: "the clone " + exitPhrase(t) + messageOf(t)}

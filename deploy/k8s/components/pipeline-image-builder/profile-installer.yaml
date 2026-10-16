@@ -1,5 +1,7 @@
-# Optional operator component. The only host mount is its own seccomp directory;
-# it has no cluster API credential, privileged container, or host namespace.
+# Optional operator component, with no API credential or host namespace.
+# The seccomp writer mounts only its own directory. The AppArmor loader uses
+# the node's parser through a read-only host root; only AppArmor's policy
+# interface is writable. Neither container consumes repository code.
 # The build pool value must match MEMQL_PIPELINES_NODE_POOL in its overlay.
 apiVersion: apps/v1
 kind: DaemonSet
@@ -57,6 +59,37 @@ spec:
           volumeMounts:
             - { name: profiles, mountPath: /profiles, readOnly: true }
             - { name: installed, mountPath: /installed }
+        - name: apparmor
+          image: docker.io/rancher/mirrored-library-busybox@sha256:101b4afd76732482eff9b95cae5f94bcf295e521fbec4e01b69c5421f3f3f3e5
+          command: [sh, -ec]
+          args:
+            - |
+              main() {
+                file=/profiles/rootless-buildkit-v1.apparmor
+                digest=$(sha256sum "$file"); digest=${digest%% *}
+                name="memql-rootless-buildkit-v1-$digest"
+                sed "s/PROFILE_NAME/$name/g" "$file" |
+                  chroot /host /usr/sbin/apparmor_parser --replace --skip-cache
+                exec sleep 2147483647
+              }
+              main
+          readinessProbe:
+            exec:
+              command: [sh, -ec, 'digest=$(sha256sum /profiles/rootless-buildkit-v1.apparmor); digest=${digest%% *}; grep -Fx "memql-rootless-buildkit-v1-$digest (enforce)" /host/sys/kernel/security/apparmor/profiles']
+            periodSeconds: 10
+          securityContext:
+            runAsUser: 0
+            readOnlyRootFilesystem: true
+            allowPrivilegeEscalation: false
+            appArmorProfile: { type: Unconfined }
+            capabilities: { drop: [ALL], add: [MAC_ADMIN, SYS_CHROOT] }
+          resources:
+            requests: { cpu: 10m, memory: 16Mi, ephemeral-storage: 1Mi }
+            limits: { cpu: 100m, memory: 64Mi, ephemeral-storage: 1Mi }
+          volumeMounts:
+            - { name: profiles, mountPath: /profiles, readOnly: true }
+            - { name: host-root, mountPath: /host, readOnly: true, recursiveReadOnly: Enabled }
+            - { name: apparmor, mountPath: /host/sys/kernel/security/apparmor }
       volumes:
         - name: profiles
           configMap: { name: memql-rootless-buildkit-v1 }
@@ -64,3 +97,7 @@ spec:
           hostPath:
             path: /var/lib/kubelet/seccomp/memql/pipelines
             type: DirectoryOrCreate
+        - name: host-root
+          hostPath: { path: /, type: Directory }
+        - name: apparmor
+          hostPath: { path: /sys/kernel/security/apparmor, type: Directory }

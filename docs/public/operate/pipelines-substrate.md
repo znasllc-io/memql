@@ -457,6 +457,13 @@ feature-gated Kubernetes releases, enable `UserNamespacesSupport` on the API
 server and kubelet, and `UserNamespacesPodSecurityStandards` on the API server
 when baseline Pod Security admission is enforced. Clusters that cannot run this
 pod contract cannot execute typed image builds.
+
+The fixed ID-preparation init container supplies read-only subordinate-ID
+files for the builder. Its nested namespace stays inside Kubernetes' default
+65,536-ID pod range and maps inner IDs 0–65,534; it excludes the outer root and
+the builder's own ID from the subordinate ranges. Images requiring a higher
+numeric owner cannot use this profile. The init container sees only its small
+scratch volume, with no checkout or credentials.
 The runner supplies the pinned commit as `MEMQL_COMMIT` and, for a release
 event, the bare release version as `MEMQL_RELEASE`; both names are reserved and
 cannot be set in the manifest. Other events receive an empty `MEMQL_RELEASE`.
@@ -469,9 +476,13 @@ Operators explicitly install the optional `pipeline-image-builder` Kubernetes
 component, set `MEMQL_PIPELINES_IMAGE_BUILDER=rootless-buildkit-v1`, and choose a
 dedicated `MEMQL_PIPELINES_NODE_POOL`. The component's default pool is `builds`;
 its selector and toleration must match any configured value. It installs
-content-addressed seccomp profiles on those nodes. A missing profile refuses
-container startup; there is no permissive fallback. The fixed installer alone
-mounts its kubelet seccomp directory in `memql-build-system`. That operator
+content-addressed seccomp and AppArmor profiles on those nodes. A missing profile
+refuses container startup; there is no permissive fallback. The fixed installer
+writes its kubelet seccomp directory in `memql-build-system`. Its separate
+AppArmor loader uses the node's `apparmor_parser` through a recursively read-only
+host root and a writable AppArmor policy interface, with only `MAC_ADMIN` and
+`SYS_CHROOT`. It accepts only the fixed ConfigMap profile, never repository code.
+The node must provide an AppArmor parser supporting the `userns` rule. That operator
 namespace admits host paths; the untrusted `memql-pipelines` namespace keeps
 baseline admission and its service accounts have no grants in the operator
 namespace. The installer has no API token or allowed network access.
@@ -484,10 +495,22 @@ service-account token, shared cache, service sidecar or forwarded secret.
 Network isolation and CPU, memory, scratch, duration and collection ceilings
 still apply. Clone credentials stay in the separate init container.
 
-Rootless BuildKit uses its native snapshotter and process sandbox for every
+The builder uses a content-pinned `Localhost` AppArmor profile: the runtime's
+default denies the nested mounts required by rootless BuildKit. The dedicated
+profile permits those mounts and user namespaces while denying writes to kernel
+settings and the security interface. The operator's profile loader alone uses
+`Unconfined`; builder Jobs remain admissible under baseline policy. The pinned
+seccomp profile, pod user namespace, Dockerfile process sandbox and network
+isolation remain mandatory. Other containers keep their runtime AppArmor defaults.
+No node-wide AppArmor or user-namespace setting is changed.
+
+Rootless BuildKit uses the kernel's OverlayFS snapshotter and a process sandbox for every
 Dockerfile `RUN`; the untrusted process cannot inspect or signal the builder
 daemon through `/proc`. The disposable container PID boundary and complete Pod
 deletion also contain failures; builds cannot share a daemon across attempts.
+Copy-on-write layers avoid copying the entire accumulated filesystem for each
+Dockerfile instruction. The node must support rootless OverlayFS over its pod
+volumes; there is no silent full-copy or FUSE fallback.
 The profile does not grant BuildKit insecure entitlements. Host user-namespace
 and AppArmor policy must support this profile; qualify the actual node runtime
 and architecture before opting in. Local ARM64 qualification does not certify
@@ -500,6 +523,32 @@ Its default `network` mode proves positive and denied network controls; the
 NetworkPolicy. Both prove process restrictions, pinned checkout, image export,
 two independent artifact readers, OCI verification and
 foreground Job/Pod cleanup. Runtime profile changes require repeating this proof.
+
+### Qualifying another Kubernetes installation
+
+The selected-cluster tests use the same generated Jobs and controls in fresh,
+owned namespaces. They never change existing namespace policies, application
+workloads, credentials or shared storage. The older local tests still refuse
+non-local API servers. Before running the image case, install the fixed profile
+component through the installation's GitOps configuration. These tests may start
+a node in the selected pool; include its cost in the qualification budget.
+
+```bash
+MEMQL_PIPELINES_QUALIFICATION_CONTEXT=<explicit-context> \
+MEMQL_PIPELINES_QUALIFICATION_SERVER=https://<expected-api-server> \
+MEMQL_PIPELINES_TEST_NODE_POOL=builds \
+MEMQL_PIPELINES_IMAGE_BUILD_TEST_SHA=<pushed-fixture-commit> \
+MEMQL_PIPELINES_IMAGE_BUILD_TEST_PLATFORM=linux/amd64 \
+  go test ./integrations/pipelinesteps -run '^TestSelectedCluster' -count=1 -v -timeout=45m
+```
+
+The API server must match the independently selected HTTPS endpoint. Run the
+isolation case from a zero-node pool to measure cold admission; capture the
+node count before it starts. It includes positive connectivity, denied egress,
+and intentionally broken policy controls inside its own namespace. The image
+case requires network controls and verifies process isolation, exact source,
+OCI export/read-back and cleanup. A skipped case is not qualification. Namespace
+cleanup does not remove the operator's profile installer or shared cache.
 
 ## The isolation proof
 

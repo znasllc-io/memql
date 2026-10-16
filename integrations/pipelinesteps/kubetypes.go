@@ -189,13 +189,20 @@ type Resources struct {
 // because 0 -- root -- is a value the runner writes, and absent means the
 // image's own user.
 type SecurityContext struct {
-	SeccompProfile           *SeccompProfile `json:"seccompProfile,omitempty"`
-	ProcMount                string          `json:"procMount,omitempty"`
-	RunAsGroup               *int64          `json:"runAsGroup,omitempty"`
-	ReadOnlyRootFilesystem   *bool           `json:"readOnlyRootFilesystem,omitempty"`
-	RunAsUser                *int64          `json:"runAsUser,omitempty"`
-	AllowPrivilegeEscalation *bool           `json:"allowPrivilegeEscalation,omitempty"`
-	Capabilities             *Capabilities   `json:"capabilities,omitempty"`
+	AppArmorProfile          *AppArmorProfile `json:"appArmorProfile,omitempty"`
+	SeccompProfile           *SeccompProfile  `json:"seccompProfile,omitempty"`
+	ProcMount                string           `json:"procMount,omitempty"`
+	RunAsGroup               *int64           `json:"runAsGroup,omitempty"`
+	ReadOnlyRootFilesystem   *bool            `json:"readOnlyRootFilesystem,omitempty"`
+	RunAsUser                *int64           `json:"runAsUser,omitempty"`
+	AllowPrivilegeEscalation *bool            `json:"allowPrivilegeEscalation,omitempty"`
+	Capabilities             *Capabilities    `json:"capabilities,omitempty"`
+}
+
+// AppArmorProfile selects an operator-installed, content-pinned Linux policy.
+type AppArmorProfile struct {
+	Type             string `json:"type"`
+	LocalhostProfile string `json:"localhostProfile,omitempty"`
 }
 
 // Capabilities are the Linux capabilities a container gives up from the
