@@ -38,6 +38,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/znasllc-io/memql/component/auth"
 	"github.com/znasllc-io/memql/component/events"
 	"github.com/znasllc-io/memql/component/memql"
 	"github.com/znasllc-io/memql/component/work"
@@ -203,7 +204,17 @@ func LoadRunJournal(ctx context.Context, exec journalExecutor, runId string) (*R
 	if runId == "" {
 		return nil, fmt.Errorf("%w: empty run id", ErrRunJournalInvalid)
 	}
-	jctx := journalContext(ctx)
+	if err := auth.ValidateRoleTestContext(ctx); err != nil {
+		return nil, err
+	}
+	// Recovery uses a fixed service read. Do not present that service actor as
+	// the persona; retain and recheck the original session around the read.
+	readCtx := ctx
+	if auth.IsRoleTestContext(ctx) {
+		readCtx = auth.ContextWithForwardedAuthority(ctx, auth.ForwardedAuthority{})
+		readCtx = auth.ContextWithClaims(readCtx, map[string]any{"sub": workJournalActor, "role": "system"})
+	}
+	jctx := journalContext(readCtx)
 	runCall, err := journalArgs("workRunById", map[string]any{"runId": runId})
 	if err != nil {
 		return nil, err
@@ -216,6 +227,12 @@ func LoadRunJournal(ctx context.Context, exec journalExecutor, runId string) (*R
 	if len(runs) == 0 {
 		return nil, ErrRunNotFound
 	}
+	if auth.IsRoleTestContext(ctx) {
+		ac, ok := auth.AccessFromContext(ctx)
+		if !ok || strings.TrimPrefix(stringField(runs[0], "ownerUserId"), "v1:identity:user:") != strings.TrimPrefix(ac.UserId, "v1:identity:user:") {
+			return nil, ErrRunNotFound
+		}
+	}
 	stepCall, err := journalArgs("workStepsForRun", map[string]any{"runId": runId})
 	if err != nil {
 		return nil, err
@@ -223,6 +240,9 @@ func LoadRunJournal(ctx context.Context, exec journalExecutor, runId string) (*R
 	res, err = exec.Execute(jctx, "query "+stepCall)
 	if err != nil {
 		return nil, fmt.Errorf("load steps of run %s: %w", runId, err)
+	}
+	if err := auth.ValidateRoleTestContext(ctx); err != nil {
+		return nil, err
 	}
 	return runJournalFromRows(runs[0], memql.MaterializeRows(res))
 }
