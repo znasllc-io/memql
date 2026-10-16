@@ -147,6 +147,12 @@ can run.
   CPU and memory caps do not isolate disk I/O. Raising the Job ceiling requires
   cold-cache storage measurements alongside compute measurements. This setting
   neither provisions a node pool nor proves every node's network enforcement.
+  The first credential-free isolation listener may wait up to ten minutes for
+  a node to provision and pull its image. Holder readiness then has 90 seconds
+  and the network test 60 seconds; the probe Job expires after 13 minutes even
+  if its runner disappears. A cold node never waives the positive and negative
+  network checks. Qualify actual zero-to-one startup and idle deletion before
+  relying on a scale-to-zero pool; timing out still refuses the pipeline.
 - **The limits are a `LimitRange` default**, so the runner sets no resources on
   a step and this is the one place a step's size is decided. It covers every
   container in the pod — the clone init container and each service sidecar as

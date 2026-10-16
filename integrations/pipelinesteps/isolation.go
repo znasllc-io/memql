@@ -90,9 +90,14 @@ type isolationProof struct {
 }
 
 const (
-	// probeUpTimeout bounds the probe's pods coming up, images pulled
-	// included: index 0's listener ready, index 1's running.
-	probeUpTimeout = 90 * time.Second
+	// The credential-free listener is also the first schedulable workload on
+	// a build pool scaled to zero. Allow the same ten minutes as step
+	// scheduling for node provisioning, networking and its cold image pull.
+	// This does not trust isolation: every connector must still prove it.
+	probeUpTimeout = 10 * time.Minute
+	// Once the listener runs, its holder and the gated connectors only need
+	// their normal startup window. Do not extend the network-test deadlines.
+	probeReadyTimeout = 90 * time.Second
 	// probeEndTimeout bounds the connector, from the probe Secret's creation
 	// to its end: its settle and three rounds of two attempts, each bounded
 	// at five seconds, come to at most 37 seconds.
@@ -346,8 +351,8 @@ func (p *prober) create() (Job, error) {
 			// Stopped with the create in flight: the API server may have made
 			// the Job though its answer never came back, and remove's delete
 			// can overtake the create. A Job left so ends at its own deadline
-			// and is collected by its TTL -- probeJobDeadline and probeJobTTL,
-			// some four minutes -- unless this replica's next proof deletes it
+			// and is collected by its TTL -- probeJobDeadline and probeJobTTL --
+			// unless this replica's next proof deletes it
 			// first. Until then it holds a slot under the ceiling: on
 			// cloud-entry, the only one.
 			return Job{}, errProbeStopped
@@ -436,7 +441,7 @@ func (p *prober) up(job Job) (probeListener, error) {
 // until the holder has started and the listener's full pod is Ready; a ready
 // sidecar alone is insufficient. Role labels still precede CNI endpoint creation.
 func (p *prober) startConnectors(job Job, listener probeListener) error {
-	ctx, cancel := context.WithTimeout(p.ctx, p.r.probeUpWait)
+	ctx, cancel := context.WithTimeout(p.ctx, p.r.probeReadyWait)
 	defer cancel()
 	released := false
 	for first := true; ; first = false {

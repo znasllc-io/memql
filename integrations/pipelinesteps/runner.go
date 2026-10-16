@@ -181,13 +181,13 @@ type Runner struct {
 	statusTrouble apiTrouble
 
 	// The isolation proof (isolation.go): the last verdict and the proof in
-	// flight, if any, guarded by isoMu; probeUpWait, probeEndWait and
-	// probeKubeletWait are probeUpTimeout, probeEndTimeout and
-	// probeKubeletTimeout.
+	// flight, if any, guarded by isoMu. Probe waits default to the bounded
+	// startup, holder readiness, connector and kubelet intervals in isolation.go.
 	isoMu            sync.Mutex
 	isoLast          IsolationVerdict
 	isoProof         *isolationProof
 	probeUpWait      time.Duration
+	probeReadyWait   time.Duration
 	probeEndWait     time.Duration
 	probeKubeletWait time.Duration
 }
@@ -232,6 +232,7 @@ func NewRunner(cfg Config, kube *Kube, sink func() LineSink, library LibraryStor
 		claims:           map[string]*step{},
 		statusTrouble:    apiTrouble{},
 		probeUpWait:      probeUpTimeout,
+		probeReadyWait:   probeReadyTimeout,
 		probeEndWait:     probeEndTimeout,
 		probeKubeletWait: probeKubeletTimeout,
 	}
