@@ -147,7 +147,7 @@ func TestRepeatedWorkflowActionsKeepOneReceipt(t *testing.T) {
 func TestPipelineWorkflowOperationsRefuseOutsideAClaimedRun(t *testing.T) {
 	i := New(Deps{})
 	for _, c := range i.Capabilities() {
-		if !slices.Contains([]string{"workflowFacts", "skipStep", "executeStep", "reportProgress"}, c.Name) {
+		if !slices.Contains([]string{"workflowFacts", "skipStep", "executeStep", "reportProgress", "reportPublish", "reportObserve"}, c.Name) {
 			continue
 		}
 		if _, err := c.Handler(context.Background(), map[string]any{"stepKey": "checks.vet"}, 0); err == nil || !strings.Contains(err.Error(), "active claimed run") {

@@ -41,6 +41,25 @@ func InspectReleaseWorkReceipt(owner, runID, stepKey string, run, step map[strin
 // that actually executed. DSL decides which skip reasons its policy permits;
 // an unplanned skip, failed delivery or ambiguous command can never pass here.
 func InspectReleaseStepReceipt(owner, runID, stepKey string, run, step map[string]any) (ReleaseWorkReceipt, error) {
+	return inspectPipelineStepReceipt(owner, runID, stepKey, run, step, false)
+}
+
+// InspectScannerReceipt admits a completed scanner while its enclosing run is
+// still running or has failed elsewhere. It never relaxes release admission.
+// Its identity excludes the enclosing run's changing status, so recovery after
+// completion still addresses the same external publication.
+func InspectScannerReceipt(owner, runID, stepKey string, run, step map[string]any) (ReleaseWorkReceipt, error) {
+	out, err := inspectPipelineStepReceipt(owner, runID, stepKey, run, step, true)
+	if err != nil {
+		return out, err
+	}
+	if out.StepKind != string(StepCommand) || out.Status != "done" {
+		return ReleaseWorkReceipt{}, errors.New("scanner evidence requires an actually successful command")
+	}
+	return out, nil
+}
+
+func inspectPipelineStepReceipt(owner, runID, stepKey string, run, step map[string]any, scanner bool) (ReleaseWorkReceipt, error) {
 	var out ReleaseWorkReceipt
 	var r struct {
 		ID, OwnerUserID, Status, TemplateFingerprint, TriggeredBy, Mode string
@@ -60,6 +79,7 @@ func InspectReleaseStepReceipt(owner, runID, stepKey string, run, step map[strin
 		Result struct {
 			Status, Code, Reason, Channel, Kind, NotificationStatus string
 			RequestIDs                                              []string
+			PublicationID, UploadID, SHA256, IngestionStatus        string
 			Metadata                                                struct {
 				ExitCode          *int
 				ArtifactIntentIDs []string
@@ -79,16 +99,20 @@ func InspectReleaseStepReceipt(owner, runID, stepKey string, run, step map[strin
 	if err := decode(step, &s); err != nil {
 		return out, err
 	}
+	runAdmitted := r.Status == "succeeded"
+	if scanner {
+		runAdmitted = r.Status == "running" || r.Status == "succeeded" || r.Status == "failed"
+	}
 	definition := "sha256:" + strings.TrimPrefix(s.Call.DefinitionFingerprint, "work-definition-v2:")
 	if !releaseIdentity(owner) || !releaseIdentity(runID) || !releaseIdentity(stepKey) ||
 		r.ID != runID || r.OwnerUserID != owner || s.OwnerUserID != owner || s.RunID != runID || s.Key != stepKey ||
 		!releaseIdentity(s.ID) || s.CreatedAt == "" || s.FinishedAt == "" || s.Attempt < 1 ||
-		r.Status != "succeeded" || r.CancelRequested || r.CallerSuppliedPayload || r.Mode != "live" ||
+		!runAdmitted || r.CancelRequested || r.CallerSuppliedPayload || r.Mode != "live" ||
 		r.TriggeredBy != WorkTriggerPrefix+r.Input.Mode || r.Input.PipelineID == "" || r.Input.PipelineRunID == "" || r.Input.Attempt < 1 ||
 		!strings.HasPrefix(r.TemplateFingerprint, "work-definition-v2:") || !releaseDigest("sha256:"+strings.TrimPrefix(r.TemplateFingerprint, "work-definition-v2:")) ||
 		(s.Status != "done" && s.Status != "skipped") || s.StepType != "exec" || s.Kind != "deterministic" || s.Call.Construct != "pipeline" ||
 		!strings.HasPrefix(s.Call.DefinitionFingerprint, "work-definition-v2:") || !releaseDigest(definition) ||
-		(s.Call.PipelineKind != string(StepCommand) && s.Call.PipelineKind != string(StepNotify)) ||
+		(s.Call.PipelineKind != string(StepCommand) && s.Call.PipelineKind != string(StepNotify) && s.Call.PipelineKind != string(StepSARIF)) ||
 		!ValidArtifactIntentIDs(s.Result.Metadata.ArtifactIntentIDs) || !releaseSource.MatchString(r.Input.Repository) || !releaseCommit.MatchString(r.Input.SHA) {
 		return out, errors.New("release evidence requires a successful live pipeline and exact successful execution receipt")
 	}
@@ -105,6 +129,12 @@ func InspectReleaseStepReceipt(owner, runID, stepKey string, run, step map[strin
 		case StepCommand:
 			if s.Result.Metadata.ExitCode == nil || *s.Result.Metadata.ExitCode != 0 {
 				return out, errors.New("release command requires explicit exit zero")
+			}
+		case StepSARIF:
+			if s.Result.IngestionStatus != "complete" || !releaseDigest("sha256:"+s.Result.SHA256) ||
+				!releaseDigest("sha256:"+s.Result.PublicationID) || !releaseIdentity(s.Result.UploadID) ||
+				s.Result.Metadata.ExitCode != nil || len(s.Result.Metadata.ArtifactIntentIDs) != 0 {
+				return out, errors.New("release security report requires confirmed ingestion of exact bytes")
 			}
 		case StepNotify:
 			if s.Result.NotificationStatus != "delivered" || s.Result.Channel == "" || (s.Result.Kind != "email" && s.Result.Kind != "discord") ||
@@ -123,6 +153,11 @@ func InspectReleaseStepReceipt(owner, runID, stepKey string, run, step map[strin
 	// Hash only journal facts relevant to the receipt. Heartbeats and the node
 	// currently serving the read may change without changing completed work.
 	// Full call/result values are included, including fields unknown here.
+	prefix := "memql.release-work-receipt.v1\x00"
+	if scanner {
+		r.Status = "" // mutable enclosing state is gated above, not publication identity
+		prefix = "memql.scanner-work-receipt.v1\x00"
+	}
 	identity := struct {
 		Run  any
 		Step any
@@ -136,7 +171,7 @@ func InspectReleaseStepReceipt(owner, runID, stepKey string, run, step map[strin
 	if err != nil {
 		return out, err
 	}
-	digest := sha256.Sum256(append([]byte("memql.release-work-receipt.v1\x00"), body...))
+	digest := sha256.Sum256(append([]byte(prefix), body...))
 	ids := slices.Clone(s.Result.Metadata.ArtifactIntentIDs)
 	slices.Sort(ids)
 	out = ReleaseWorkReceipt{

@@ -738,8 +738,8 @@ func TestEveryPipelinesBuiltinResolvesToACapability(t *testing.T) {
 			executors++
 		}
 	}
-	if executors != 16 {
-		t.Fatalf("dsl/pipelines declares %d integration.pipelines builtins on this engine, want 16", executors)
+	if executors != 18 {
+		t.Fatalf("dsl/pipelines declares %d integration.pipelines builtins on this engine, want 18", executors)
 	}
 	if err := eng.AuditIntegrationExecutors(); err != nil {
 		t.Fatalf("the shipped DSL names a pipelines capability this integration does not offer: %v", err)

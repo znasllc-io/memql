@@ -651,7 +651,7 @@ what to do. Fix the block and push: the next run reads the fixed manifest.
 ## Publishing retained security reports
 
 `pipelinesPublishSARIF(runId: ..., stepKey: ..., path: ...)` publishes one
-retained `.sarif` file from a completed, successful native pipeline. The caller
+retained `.sarif` file from a successful scanner in a native pipeline. The caller
 must own the pipeline and still reach its repository through the source's
 GitHub connection. The installed GitHub App needs **Code scanning alerts: Read
 and write** (`security_events: write`); existing installations must accept that
@@ -685,11 +685,37 @@ GitHub accepted nothing.
 Terminal receipts release this consumer's artifact pin, so normal retention
 can reclaim the file; the publication journal remains. Uncertain uploads retain
 their evidence for investigation. `complete` proves report delivery, not an
-absence of security findings. The current operation requires the overall run
-to have succeeded; failed runs retain their reports but cannot publish through
-this entry point. Selection, automatic triggering, polling cadence and failure
-notification belong to the calling automation. Declaring an artifact alone
-does not enable automatic upload.
+absence of security findings. A scanner must have succeeded, but its enclosing
+run may still be active or have failed elsewhere. Cancelled runs cannot publish.
+
+Declare a report step after the stage that retains the scanner's artifact:
+
+```yaml
+- name: security-reports
+  runAfterFailure: true
+  steps:
+    - name: codeql-go
+      timeout: 5m
+      sarif:
+        step: analysis.codeql-go
+        path: .memql-security/codeql-go/results.sarif
+```
+
+Give this stage the same event and schedule selection as its producer. The
+producer must be an unsharded command in an earlier stage. The report step
+runs in the driver, with no repository command or credentials sent to a worker.
+It appears in the normal work journal and check result. The installed
+`pipelineSARIFDelivery` recipe publishes once and observes ingestion with
+bounded waits. Missing artifacts, failed producers, rejected or uncertain
+uploads, and ingestion still pending at the deadline fail the step. An
+unrelated failed test does not prevent reports when `runAfterFailure` is set.
+
+A replacement driver recovers the existing publication identity and observes
+its receipt without repeating an uncertain write. A new failed-only attempt
+runs report producers again: an older attempt's skipped scanner is not proof of
+artifact production in the new run. Retrying a delivery therefore differs from
+recovering its interrupted driver. Declaring an artifact alone does not enable
+automatic upload.
 
 GitHub's [SARIF API](https://docs.github.com/en/rest/code-scanning/code-scanning)
 defines the asynchronous ingestion status and required repository permission.
@@ -987,6 +1013,8 @@ says where: `<stage>/<step>`, a stage, or a path into the block.
 | `pipeline_channel_not_allowed` | failure | The channel does not accept deliveries from this pipeline | Allow the pipeline on the channel, then re-run |
 | `pipeline_channel_invalid` | failure | The channel cannot deliver as it is set up: a Discord secret name outside `^[A-Z][A-Z0-9_]{0,63}$` or in `MEMQL_`, a secret that holds no Discord webhook URL, or a recipient that is not a bare email address | Correct the channel, then re-run |
 | `pipeline_notify_failed` | failure | The outbound worker gave the delivery up, or it could not be handed over | Read the worker's error the sentence quotes, then re-run |
+| `pipeline_sarif_delivery_failed` | failure | Scanner evidence, storage, authorization or GitHub's report protocol could not be confirmed | Read the error and inspect the publication receipt before starting another scan |
+| `pipeline_sarif_undelivered` | failure | GitHub has not confirmed ingestion, or the upload is rejected or uncertain | Inspect the retained receipt; pending ingestion can finish later, and an uncertain write is never retried automatically |
 | `pipeline_notify_undelivered` | failure | The delivery had not arrived when the step's time ran out; the sentence says where it stood | Wait for a delivery still being retried, or re-run, which sends another |
 | `pipeline_stage_blocked` | skip | An earlier stage failed | Fix that stage |
 | `pipeline_not_affected` | skip | The change touched nothing the step covers | Nothing |

@@ -796,6 +796,14 @@ const COPY: Record<string, RefusalCopy> = {
     title: "The notification was not delivered",
     next: "The message says why. Check the channel's webhook or addresses and the cluster's outbound allowlist, then re-run.",
   },
+  pipeline_sarif_delivery_failed: {
+    title: "The security report could not be delivered",
+    next: "Read the step's error and check the GitHub connection. Inspect the publication receipt before starting another scan.",
+  },
+  pipeline_sarif_undelivered: {
+    title: "Security report delivery is unconfirmed",
+    next: "Check the publication receipt and GitHub's ingestion status. A pending upload can finish later; an uncertain upload is not sent again automatically.",
+  },
   pipeline_notify_undelivered: {
     // NOT "failed": the step stopped waiting, and its sentence says where the
     // delivery stood. One still being retried can arrive later.

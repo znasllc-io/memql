@@ -77,10 +77,17 @@ type StageSpec struct {
 	Steps []StepSpec `yaml:"steps,omitempty" json:"steps,omitempty"`
 }
 
-// StepSpec is one step: a shell command in the image's working copy, with
-// the same contract as a deployable's build.command. There is no step
-// language.
+// SARIFReport selects one retained scanner artifact from an earlier step.
+// The source repository/ref and publication authority come from the run.
+type SARIFReport struct {
+	Step string `yaml:"step" json:"step"`
+	Path string `yaml:"path" json:"path"`
+}
+
+// StepSpec declares a command, isolated image build or driver-owned report.
+// Commands have the same shell contract as a deployable's build.command.
 type StepSpec struct {
+	SARIF *SARIFReport `yaml:"sarif,omitempty" json:"sarif,omitempty"`
 	// CPUMilli requests a bounded CPU reservation for the cluster command.
 	// Zero uses the operator's namespace default; 1000 means one CPU.
 	CPUMilli int `yaml:"cpuMilli,omitempty" json:"cpuMilli,omitempty"`

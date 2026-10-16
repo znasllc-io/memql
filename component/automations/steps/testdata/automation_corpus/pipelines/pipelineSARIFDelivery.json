@@ -1,0 +1,55 @@
+{
+  "automation": "pipelines/automations.memql pipelineSARIFDelivery",
+  "runs": {
+    "invocation | 0 rows": {
+      "input": {
+        "event": {
+          "kind": "unspecified",
+          "payload": {},
+          "topic": "automation.invocation.pipelineSARIFDelivery"
+        },
+        "rows": 0
+      },
+      "outcome": {
+        "calls": [
+          {
+            "kind": "builtin",
+            "name": "pipelineReportPublish"
+          }
+        ],
+        "result": {
+          "output": {
+            "args": {},
+            "builtin": "pipelineReportPublish"
+          },
+          "status": "completed"
+        }
+      }
+    },
+    "invocation | 2 rows": {
+      "input": {
+        "event": {
+          "kind": "unspecified",
+          "payload": {},
+          "topic": "automation.invocation.pipelineSARIFDelivery"
+        },
+        "rows": 2
+      },
+      "outcome": {
+        "calls": [
+          {
+            "kind": "builtin",
+            "name": "pipelineReportPublish"
+          }
+        ],
+        "result": {
+          "output": {
+            "args": {},
+            "builtin": "pipelineReportPublish"
+          },
+          "status": "completed"
+        }
+      }
+    }
+  }
+}

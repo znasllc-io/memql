@@ -590,6 +590,27 @@ pipeline:
             go install github.com/anchore/syft/cmd/syft@v1.54.1
             python3 scripts/ci/sbom.py --output-dir=.memql-security/sbom
 
+    - name: security-reports
+      schedule: weekly
+      on: [release, schedule, manual]
+      runAfterFailure: true
+      steps:
+        - name: codeql-go
+          timeout: 5m
+          sarif:
+            step: analysis.codeql-go
+            path: .memql-security/codeql-go/results.sarif
+        - name: codeql-javascript
+          timeout: 5m
+          sarif:
+            step: analysis.codeql-javascript
+            path: .memql-security/codeql-javascript/results.sarif
+        - name: codeql-python
+          timeout: 5m
+          sarif:
+            step: analysis.codeql-python
+            path: .memql-security/codeql-python/results.sarif
+
     - name: release-files
       on: [release]
       steps:

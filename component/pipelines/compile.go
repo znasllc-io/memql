@@ -231,6 +231,14 @@ func Compile(spec *Spec, in CompileInput) (Plan, *Refusal) {
 		}
 		plan.Stages = append(plan.Stages, planned)
 	}
+	// A report cannot claim success for an excluded producer stage.
+	planned := map[string]bool{}
+	for _, s := range plan.Steps() {
+		if s.SARIF != nil && !planned[s.SARIF.Step] {
+			return Plan{}, Refuse(CodeStepInvalid, s.Key, "SARIF producer %q is not an earlier step in this run.", s.SARIF.Step)
+		}
+		planned[s.Key] = true
+	}
 	return plan, nil
 }
 
@@ -250,6 +258,15 @@ type planCompiler struct {
 
 func (c *planCompiler) compileStep(stage string, declared StepSpec, dependsOn []string) ([]Step, *Refusal) {
 	scope := stage + "/" + declared.Name
+	if declared.SARIF != nil {
+		report := *declared.SARIF
+		timeout := 5 * 60
+		if declared.Timeout != "" {
+			timeout = stepTimeoutSeconds(declared.Timeout)
+		}
+		return []Step{{Key: StepKey(stage, declared.Name), Stage: stage, Name: declared.Name, Kind: StepSARIF,
+			SARIF: &report, TimeoutSeconds: timeout, DependsOn: compiledCopy(dependsOn)}}, nil
+	}
 
 	needs := stepNeeds(declared)
 	if r := stepConsent(scope, declared, c.in.Compute, c.in.AllowedSecrets); r != nil {
@@ -466,6 +483,10 @@ func compiledLinks(links []Link) []Link {
 // cloneCompiledStep copies a step so that no slice or map is shared with the
 // step it came from: each shard of a step is a value of its own.
 func cloneCompiledStep(s Step) Step {
+	if s.SARIF != nil {
+		report := *s.SARIF
+		s.SARIF = &report
+	}
 	if s.Services != nil {
 		services := make(map[string]Service, len(s.Services))
 		for name, service := range s.Services {
