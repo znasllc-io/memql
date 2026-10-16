@@ -995,7 +995,7 @@ func TestFleetStepCutByItsMachinesCapSaysSo(t *testing.T) {
 // here -- change the two together -- and
 // TestAFleetStepsGraceStaysInsideTheDrivers reads driver.go to check the pin
 // still says what the driver does.
-const driverStepGrace = 10 * time.Minute
+const driverStepGrace = 25 * time.Minute
 
 // TestAFleetStepsGraceStaysInsideTheDrivers: a fleet step can take its
 // effective timeout and fleetGrace past it -- the machine's clone and packing,
@@ -1004,6 +1004,9 @@ const driverStepGrace = 10 * time.Minute
 // the effective timeout, counted from the hand-over, never passes. A step
 // still filing its files must never read as one that never reported.
 func TestAFleetStepsGraceStaysInsideTheDrivers(t *testing.T) {
+	if nodeLostGrace >= driverStepGrace {
+		t.Errorf("cluster executor grace %v must stay inside driver grace %v", nodeLostGrace, driverStepGrace)
+	}
 	if fleetGrace >= driverStepGrace {
 		t.Errorf("fleetGrace = %v (clone and packing %v + Library window %v), want it inside the driver's stepGrace %v",
 			fleetGrace, fleetCloneSlack, libraryPhaseTimeout, driverStepGrace)
