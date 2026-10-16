@@ -178,7 +178,7 @@ func (i *Integration) configuredCandidate(ctx context.Context) (*candidatePrepar
 		}
 		versions.sources[source.Component] = source
 	}
-	targets := &candidateTargetReader{targets: map[string]candidateRegistryTarget{}, files: map[string]candidateFileTarget{}, secret: i.resolver.systemSecret}
+	targets := &candidateTargetReader{targets: map[string]candidateRegistryTarget{}, files: map[string]candidateFileTarget{}, secret: i.resolver.systemSecret, appToken: i.resolver.appToken}
 	for _, target := range cfg.Registries {
 		owned, _, _, err := target.snapshot()
 		if err != nil {

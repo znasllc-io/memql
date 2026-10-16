@@ -75,9 +75,10 @@ func (t candidateRegistryTarget) snapshot() (candidateRegistryTarget, ociregistr
 }
 
 type candidateTargetReader struct {
-	targets map[string]candidateRegistryTarget
-	files   map[string]candidateFileTarget
-	secret  func(context.Context, string) (string, error)
+	targets  map[string]candidateRegistryTarget
+	files    map[string]candidateFileTarget
+	secret   func(context.Context, string) (string, error)
+	appToken func(context.Context, repoRef) (string, error)
 }
 
 // check re-resolves current operator configuration against the candidate's
