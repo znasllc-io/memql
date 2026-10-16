@@ -125,6 +125,7 @@ pipeline:
       # Shell source and the Docker stage that packages it.
       # Keep Dockerfile changes in the same validation path as the shell.
       os:
+        - integrations/agent/worker/pipeline_purpose.go
         - Dockerfile
         - clients/**
         - sdk/ts/**

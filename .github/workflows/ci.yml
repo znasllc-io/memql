@@ -741,6 +741,8 @@ jobs:
             # os-checks for no reason. component/edge's own Go test suite
             # covers it instead.
             osclient:
+              # Fleet eligibility reads the engine's pipeline worker contract.
+              - 'integrations/agent/worker/pipeline_purpose.go'
               # Checked against the live OS manifests by navigationContract.test.ts.
               - 'component/memql/os_navigation.json'
               # The engine's table of filed names, which make.test.ts runs through the app's

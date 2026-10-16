@@ -418,6 +418,11 @@ func TestEngineManifestCompilesForEveryOpening(t *testing.T) {
 			runs:  append(slices.Clone(always), manifestStepGateInputs, manifestStepOSChecks),
 			skips: []string{manifestStepDBTests},
 		},
+		{
+			name: "a worker protocol change checks the OS fleet contract", event: pipelines.EventPullRequest,
+			changed: []string{"integrations/agent/worker/pipeline_purpose.go"}, stages: pullRequestStages,
+			runs: append(slices.Clone(always), manifestStepGateInputs, manifestStepOSChecks),
+		},
 	}
 
 	for _, o := range openings {
