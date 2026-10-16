@@ -158,6 +158,12 @@ COPY . .
 #   docker build --build-arg BUILD_TAGS=edge --build-arg SPA_DIST_STAGE=spa-build .   # edge (serves hosted sites, the OS shell among them)
 ARG BUILD_TAGS=""
 
+# Operators may bound compiler parallelism and memory on a shared build pool.
+# Unset arguments preserve Go's defaults for local development.
+ARG GOFLAGS
+ARG GOMEMLIMIT
+ARG GOGC
+
 # BUILD_TAGS must name a node type this tree actually builds (memql#5057).
 #
 # THE CHECK ASKS THE TREE, NOT A LIST. `app/build_<type>.go` is what makes a tag
