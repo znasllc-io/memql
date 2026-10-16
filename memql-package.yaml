@@ -629,6 +629,22 @@ pipeline:
     # release event's exact source commit. It stamps MEMQL_COMMIT/MEMQL_RELEASE
     # and returns an OCI archive plus digest metadata to the Library. Registry
     # credentials belong only to the separate verified publication service.
+    # Bootstrap the next pinned toolchain using the currently installed one.
+    # The isolated builder retains an OCI archive; publication is a separate
+    # reviewed release effect after smoke-testing that exact cloud-built image.
+    - name: build-tools
+      on: [release]
+      steps:
+        - name: toolchain
+          placement: cluster
+          caches: []
+          cpuMilli: 3000
+          memoryMiB: 8192
+          timeout: 45m
+          imageBuild:
+            context: deploy/toolchain-image
+            dockerfile: deploy/toolchain-image/Dockerfile
+
     - name: images
       on: [release]
       steps:

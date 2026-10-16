@@ -81,3 +81,33 @@ func TestEnginePipelineBuildsEveryReleaseImage(t *testing.T) {
 		}
 	}
 }
+
+func TestToolchainBuildIsReleaseOnlyAndRetainsUnpublishedOCI(t *testing.T) {
+	spec := engineManifest(t).Pipeline
+	graph, _ := engineImportGraph(t)
+	for _, event := range []pipelines.Event{pipelines.EventRelease, pipelines.EventPullRequest, pipelines.EventPush, pipelines.EventMergeGroup, pipelines.EventManual, pipelines.EventSchedule} {
+		plan, refusal := compileEngineOpening(spec, graph, event, nil)
+		if refusal != nil {
+			t.Fatal(refusal)
+		}
+		found := 0
+		for _, step := range plan.Steps() {
+			if step.Stage != "build-tools" {
+				continue
+			}
+			found++
+			if step.Key != "build-tools.toolchain" || step.ImageBuild == nil || step.ImageBuild.Context != "deploy/toolchain-image" || step.ImageBuild.Dockerfile != "deploy/toolchain-image/Dockerfile" || step.ImageBuild.Target != "" || len(step.ImageBuild.Args) != 0 {
+				t.Fatalf("toolchain build lost its committed Dockerfile: %+v", step)
+			}
+			if step.RunAfterFailure || step.Skip != nil || step.RequiresFleet() || len(step.Services) != 0 || len(step.Caches) != 0 || len(step.Secrets) != 0 || step.Run != "" || step.Image != "" {
+				t.Fatalf("toolchain build bypasses qualification or carries publication authority: %+v", step)
+			}
+			if !slices.Equal(step.Artifacts, pipelines.ImageBuildArtifacts()) || step.CPUMilli != 3000 || step.MemoryMiB != 8192 || step.TimeoutSeconds != 45*60 || step.Platform != "linux/amd64" {
+				t.Fatalf("toolchain build lost provenance or capacity bounds: %+v", step)
+			}
+		}
+		if (event == pipelines.EventRelease && found != 1) || (event != pipelines.EventRelease && found != 0) {
+			t.Fatalf("%s selected %d toolchain builds", event, found)
+		}
+	}
+}
