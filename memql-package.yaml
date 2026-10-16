@@ -110,6 +110,18 @@ pipeline:
       # import graph cannot discover these dependencies, so every PR runs them,
       # matching ci.yml's declared gate packages in scripts/ci/selection.
       gates: ["**"]
+      deploy-gate:
+        - cmd/deploy-gate-check/**
+        - component/grpc/gen/**
+        - core/id/**
+        - go.mod
+        - go.sum
+        - go.work
+        - go.work.sum
+        - "**/go.mod"
+        - "**/go.sum"
+        - memql-package.yaml
+        - .github/workflows/deploy-gate-image.yml
       # Shell source and the Docker stage that packages it.
       # Keep Dockerfile changes in the same validation path as the shell.
       os:
@@ -376,6 +388,19 @@ pipeline:
             context: .
             dockerfile: Dockerfile
             target: spa-build
+        # Preserve the deploy-gate workflow's build validation, including the
+        # workspace manifests its nested Go modules need. The builder returns
+        # an unpublished OCI archive and its immutable provenance.
+        - name: deploy-gate-image
+          placement: cluster
+          when: { bucket: deploy-gate }
+          caches: []
+          cpuMilli: 3000
+          memoryMiB: 8192
+          timeout: 30m
+          imageBuild:
+            context: .
+            dockerfile: cmd/deploy-gate-check/Dockerfile
         - name: editor-packages
           placement: cluster
           when: { bucket: editors }

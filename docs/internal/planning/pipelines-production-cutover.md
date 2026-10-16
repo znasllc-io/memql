@@ -124,7 +124,7 @@ outputs, publication and failure evidence, not merely a command in a manifest.
 | `build-toolchain-image.yml` | Build and publish future toolchains without Actions | #5509 |
 | `build-db-image.yml` | Build and publish the database image without Actions | #5509 |
 | `mirror-fixture-images.yml` | Digest-verified fixture mirroring without Actions | #5509 |
-| `deploy-gate-image.yml` | Build-stage and image evidence for changed deploy inputs | #5509 |
+| `deploy-gate-image.yml` | Native deploy-gate image validation selects command/workspace changes on PRs and retains an unpublished OCI archive; cloud execution evidence remains | #5509 |
 | `install-e2e.yml` | Native host lifecycle matrix and cleanup | #5480 |
 | `install-cluster-e2e.yml` | Installed-cluster lifecycle and cleanup; preserve actual failure evidence | #5480 |
 | `pipelines-live.yml` | Disposable cluster runtime qualification and retained logs | #5480 |
