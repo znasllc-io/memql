@@ -115,6 +115,12 @@ for daemon in dockerd containerd; do
 done
 docker manifest --help >/dev/null || { echo "ERROR: 'docker manifest' is not available; release.sh's tag probe runs it" >&2; exit 1; }
 printf '  %-10s %s\n' "daemon" "none (no dockerd, no containerd); docker manifest: OK"
+# Real editor hosts run as the same unprivileged user. Their locked npm
+# dependencies download the browser; system display libraries belong here.
+xvfb-run -a sh -c 'test -n "$DISPLAY"' || { echo "ERROR: the editor host display could not start" >&2; exit 1; }
+for library in libnss3.so libgbm.so.1 libxkbfile.so.1 libsecret-1.so.0 libasound.so.2 libgtk-3.so.0 libatk-bridge-2.0.so.0; do
+	ldconfig -p | grep -F "$library" >/dev/null || { echo "ERROR: editor host library ${library} is unavailable" >&2; exit 1; }
+done
 SCRIPT
 }
 
