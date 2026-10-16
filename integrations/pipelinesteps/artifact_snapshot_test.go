@@ -118,6 +118,62 @@ func TestArtifactSnapshotKeepsMeasuredBytesInPrivateFiles(t *testing.T) {
 	}
 }
 
+func TestArtifactSnapshotRetriesInterruptedReadFromFreshStream(t *testing.T) {
+	tmp := t.TempDir()
+	t.Setenv("TMPDIR", tmp)
+	want := snapshotTar(t, []tar.Header{{Name: "dist/report.txt", Typeflag: tar.TypeReg, Mode: 0600, Size: 7}})
+	reads := 0
+	got, err := readArtifactSnapshotWithRetry(t.Context(), []string{"dist"}, int64(len(want)), func(_ context.Context, dst io.Writer) error {
+		reads++
+		if reads == 1 {
+			if _, err := dst.Write(want[:len(want)/2]); err != nil {
+				return err
+			}
+			return io.ErrUnexpectedEOF
+		}
+		_, err := dst.Write(want)
+		return err
+	})
+	if err != nil {
+		t.Fatalf("retry recovered stream: %v", err)
+	}
+	if reads != 2 || len(got.Files) != 1 || got.Files[0].Path != "dist/report.txt" {
+		t.Fatalf("reads/snapshot = %d/%+v, want a fresh complete second stream", reads, got.Files)
+	}
+	if err := got.Close(); err != nil {
+		t.Fatal(err)
+	}
+	entries, err := os.ReadDir(tmp)
+	if err != nil || len(entries) != 0 {
+		t.Fatalf("failed stream left artifacts behind: %v %v", entries, err)
+	}
+}
+
+func TestArtifactSnapshotDoesNotRetryMissingDeclaredFile(t *testing.T) {
+	invalid := snapshotTar(t, []tar.Header{{Name: "other/report.txt", Typeflag: tar.TypeReg, Mode: 0600, Size: 7}})
+	reads := 0
+	_, err := readArtifactSnapshotWithRetry(t.Context(), []string{"dist"}, 4096, func(_ context.Context, dst io.Writer) error {
+		reads++
+		_, writeErr := dst.Write(invalid)
+		return writeErr
+	})
+	if err == nil || reads != 1 {
+		t.Fatalf("invalid archive err/reads = %v/%d, want one refusal without retry", err, reads)
+	}
+}
+
+func TestArtifactSnapshotStopsAfterBoundedInterruptedReads(t *testing.T) {
+	reads := 0
+	_, err := readArtifactSnapshotWithRetry(t.Context(), []string{"dist"}, 4096, func(_ context.Context, dst io.Writer) error {
+		reads++
+		_, _ = io.WriteString(dst, "partial stream")
+		return io.ErrUnexpectedEOF
+	})
+	if err == nil || reads != artifactReadAttempts {
+		t.Fatalf("interrupted stream err/reads = %v/%d, want refusal after %d attempts", err, reads, artifactReadAttempts)
+	}
+}
+
 type snapshotErrorReader struct{ err error }
 
 func (r snapshotErrorReader) Read([]byte) (int, error) { return 0, r.err }

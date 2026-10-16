@@ -171,16 +171,18 @@ func TestEngineSecurityScansDoNotTurnFindingsIntoSuccess(t *testing.T) {
 		if refusal != nil {
 			t.Fatal(refusal)
 		}
+		if event == pipelines.EventRelease {
+			for _, step := range plan.Steps() {
+				if step.Name == "gitleaks" {
+					t.Fatal("release qualification repeated the deep scan; the same commit is covered by its push scan and full history runs weekly")
+				}
+			}
+			continue
+		}
 		wantStage := "secrets-current"
 		wantCommands := []string{`--fetch-remote="https://github.com/${MEMQL_REPOSITORY}.git"`, `--head="$MEMQL_SHA"`, "python3 scripts/ci/gitleaks-history.py", "--jobs=3", "--batch-size=1"}
 		wantTimeout := 30 * 60
-		if event == pipelines.EventRelease {
-			wantStage = "analysis"
-			wantTimeout = 6 * 60 * 60
-			wantCommands = append(wantCommands, "--timeout=20700")
-		} else {
-			wantCommands = append(wantCommands, `--base="$MEMQL_BASE_SHA"`, "--timeout=1500")
-		}
+		wantCommands = append(wantCommands, `--base="$MEMQL_BASE_SHA"`, "--timeout=1500")
 		count := 0
 		for _, step := range plan.Steps() {
 			if step.Name != "gitleaks" {
@@ -208,6 +210,23 @@ func TestEngineSecurityScansDoNotTurnFindingsIntoSuccess(t *testing.T) {
 		if count != 1 {
 			t.Fatalf("%s plans %d secret scans, want exactly one", event, count)
 		}
+	}
+	weekly, refusal := compileEngineCadence(spec, graph, pipelines.EventSchedule, nil, "weekly")
+	if refusal != nil {
+		t.Fatal(refusal)
+	}
+	deepScans := 0
+	for _, step := range weekly.Steps() {
+		if step.Name != "gitleaks" {
+			continue
+		}
+		deepScans++
+		if step.Stage != "analysis" || step.TimeoutSeconds != 6*60*60 || !strings.Contains(step.Run, "--timeout=20700") || !strings.Contains(step.Run, "--batch-size=32") || strings.Contains(step.Run, "--base=") {
+			t.Fatalf("weekly full-history scan has the wrong scope or budget: %+v", step)
+		}
+	}
+	if deepScans != 1 {
+		t.Fatalf("weekly audit plans %d full-history secret scans, want 1", deepScans)
 	}
 	vuln, found := engineDeclaredStep(spec, "go-vulnerabilities")
 	if !found || len(vuln.Artifacts) == 0 || strings.Contains(vuln.Run, "|| true") {

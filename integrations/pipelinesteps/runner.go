@@ -71,8 +71,11 @@ const (
 	quickCallTimeout = 10 * time.Second
 	// libraryPhaseTimeout bounds the owner's Library writes of one settled
 	// step -- its log and its artifacts -- under a context a late cancel
-	// cannot end, and that no other phase of settling shares.
-	libraryPhaseTimeout = 2 * time.Minute
+	// cannot end, and that no other phase of settling shares. Build outputs
+	// stream through the Kubernetes API and then to object storage; the former
+	// two-minute window expired on ordinary release artifacts before either
+	// transfer completed.
+	libraryPhaseTimeout = 15 * time.Minute
 	// persistTimeout bounds recording the outcome on the Job, retries
 	// included: a window of its own, so nothing spent before it is taken
 	// from it.

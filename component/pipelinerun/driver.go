@@ -53,8 +53,9 @@ const (
 	maxConcurrentSteps = 16
 	// stepGrace is how long past a run's ceiling the driver waits for the
 	// runner to report a step before it stops waiting (pipeline_run_ceiling;
-	// ruling R31b, stepDeadline).
-	stepGrace = 10 * time.Minute
+	// ruling R31b, stepDeadline). This must outlast both the cluster runner's
+	// settling budget and the fleet's clone/packing plus Library transfer.
+	stepGrace = 25 * time.Minute
 	// executorCancelTimeout bounds Executor.Cancel.
 	executorCancelTimeout = 30 * time.Second
 	// githubCallTimeout bounds one call to GitHub the drive waits on: a token
