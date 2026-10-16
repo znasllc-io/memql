@@ -501,6 +501,32 @@ NetworkPolicy. Both prove process restrictions, pinned checkout, image export,
 two independent artifact readers, OCI verification and
 foreground Job/Pod cleanup. Runtime profile changes require repeating this proof.
 
+### Qualifying another Kubernetes installation
+
+The selected-cluster tests use the same generated Jobs and controls in fresh,
+owned namespaces. They never change existing namespace policies, application
+workloads, credentials or shared storage. The older local tests still refuse
+non-local API servers. Before running the image case, install the fixed profile
+component through the installation's GitOps configuration. These tests may start
+a node in the selected pool; include its cost in the qualification budget.
+
+```bash
+MEMQL_PIPELINES_QUALIFICATION_CONTEXT=<explicit-context> \
+MEMQL_PIPELINES_QUALIFICATION_SERVER=https://<expected-api-server> \
+MEMQL_PIPELINES_TEST_NODE_POOL=builds \
+MEMQL_PIPELINES_IMAGE_BUILD_TEST_SHA=<pushed-fixture-commit> \
+MEMQL_PIPELINES_IMAGE_BUILD_TEST_PLATFORM=linux/amd64 \
+  go test ./integrations/pipelinesteps -run '^TestSelectedCluster' -count=1 -v -timeout=45m
+```
+
+The API server must match the independently selected HTTPS endpoint. Run the
+isolation case from a zero-node pool to measure cold admission; capture the
+node count before it starts. It includes positive connectivity, denied egress,
+and intentionally broken policy controls inside its own namespace. The image
+case requires network controls and verifies process isolation, exact source,
+OCI export/read-back and cleanup. A skipped case is not qualification. Namespace
+cleanup does not remove the operator's profile installer or shared cache.
+
 ## The isolation proof
 
 Before the first step it creates, each workbench replica proves that

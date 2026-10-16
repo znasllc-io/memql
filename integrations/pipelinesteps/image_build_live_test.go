@@ -19,6 +19,10 @@ import (
 // authority or shared storage is touched; controls and Job live in one disposable
 // namespace. The real generated clone, builder and collector all execute.
 func TestImageBuildAgainstLocalKubernetes(t *testing.T) {
+	imageBuildAgainstKubernetes(t, localPipelineControls)
+}
+
+func imageBuildAgainstKubernetes(t *testing.T, controls pipelineTestControls) {
 	mode := os.Getenv("MEMQL_PIPELINES_IMAGE_BUILD_TEST_MODE")
 	if mode == "" {
 		mode = "network"
@@ -34,7 +38,7 @@ func TestImageBuildAgainstLocalKubernetes(t *testing.T) {
 	if !shaShape.MatchString(sha) {
 		t.Fatal("fixture requires a full source commit")
 	}
-	ctx, cluster, ns, kubectl := localPipelineControls(t)
+	ctx, cluster, ns, kubectl := controls(t)
 	kubectl(nil, "label", "namespace", ns, "pod-security.kubernetes.io/enforce=baseline")
 	var kube *Kube
 	if networkChecks {
