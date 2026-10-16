@@ -1,11 +1,11 @@
 import { useCallback, useMemo, useRef, useState } from "react";
 import type { Row } from "@znasllc-io/memql-sdk-core/client";
-import { Box, Library, Pencil } from "lucide-react";
+import { ArrowUpRight, Box, Pencil } from "lucide-react";
 import { useSession } from "../../../chrome/access";
 import { useReading } from "../../../cluster/reading";
 import { useOsConnection } from "../../../live/connection";
 import { feedIsBehind } from "../../../live/useLiveCollection";
-import { Button, EmptyState, Fact, Facts, Head, Notice, Refine, Select, useNow } from "../../../kit";
+import { EmptyState, Fact, Facts, Head, Notice, Refine, Select, useNow } from "../../../kit";
 import { IconButton } from "../../../kit/IconButton";
 import { ActionBar } from "../../../kit/ActionBar";
 import { AutoRefresh } from "../../../kit/AutoRefresh";
@@ -169,7 +169,7 @@ export function MachineModels({ machine, navigation }: { machine: MachineRow; st
       </MachineDetailsSection>
       {view ? <MachineDetailsSection title="Catalog">
         <div className="fleet-models-catalog-intro"><span><strong>{view.catalog.filter(m => !m.blocked).length} models fit this machine</strong><small>Local models first. Your setup stays yours.</small></span>
-          <Button onClick={() => setCatalogOpen(true)}><Library size={16} aria-hidden />Browse catalog</Button></div>
+          <IconButton label="Browse catalog" onClick={() => setCatalogOpen(true)}><ArrowUpRight size={16} aria-hidden /></IconButton></div>
         <p className="os-caption">{view.researchEnabled ? "Weekly research is on." : "Weekly research is off."}{view.researchAt ? ` Last review ${formatMoment(view.researchAt)}.` : ""}</p>
         {view.researchSummary ? <p className="os-caption">{view.researchSummary}</p> : null}
       </MachineDetailsSection> : null}
