@@ -58,6 +58,7 @@ func (a *App) engineAndBus() {
 		a.fatal("memory nodes database bun handle not available", "component", memql.ComponentName)
 	}
 	a.engine.SetDatabaseGetter(a.db.BunDB)
+	a.engine.SetAskCoordinationPool(a.gateDBGetter())
 
 	// Per-instance pack enablement (module-registry design section 4.2):
 	// read v1:platform:packState in the window where the database is live

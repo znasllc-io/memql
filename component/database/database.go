@@ -1102,7 +1102,13 @@ func (d *Database) tryPing(ctx context.Context) bool {
 	d.Unlock()
 
 	if currentDB != nil {
-		if err := currentDB.PingContext(ctx); err == nil {
+		// The monitor itself needs a request connection. A saturated pool used
+		// to leave this goroutine waiting forever, preserving a stale healthy
+		// verdict and preventing even pool-pressure logs from being emitted.
+		pingCtx, cancelPing := context.WithTimeout(ctx, 5*time.Second)
+		pingErr := currentDB.PingContext(pingCtx)
+		cancelPing()
+		if pingErr == nil {
 			// A POOL THAT STARTS WORKING IS NOT A RECONNECT (memql#3879).
 			//
 			// Migrations are re-run below, on the reconnect path -- but only a
@@ -1129,6 +1135,16 @@ func (d *Database) tryPing(ctx context.Context) bool {
 				d.runMigrations(ctx, d.migrationBun())
 			}
 			return true
+		}
+		if ctx.Err() != nil {
+			return false
+		}
+		stats := currentDB.Stats()
+		if errors.Is(pingErr, context.DeadlineExceeded) && stats.MaxOpenConnections > 0 && stats.InUse >= stats.MaxOpenConnections {
+			// Replacing a busy pool adds connections and Close waits for its
+			// borrowers. Leave it intact; report unhealthy and retry next tick.
+			d.Logger.Warn("database monitor could not acquire a request connection", "inUse", stats.InUse, "maxOpen", stats.MaxOpenConnections)
+			return false
 		}
 
 		d.Logger.Warn("ping failed, attempting reconnect", "dsn", d.safeDSN())

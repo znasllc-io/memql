@@ -2,6 +2,7 @@ package memql
 
 import (
 	"context"
+	"database/sql"
 	"encoding/json"
 	"fmt"
 	"github.com/znasllc-io/memql/component/auth"
@@ -59,6 +60,7 @@ type MemQLEngine struct {
 	seedMaterializer        *SeedMaterializer
 	providers               *ProviderRegistry
 	voiceTransport          audio.RoomTransport
+	askCoordinationPool     func() *sql.DB
 	policies                *PolicyRegistry
 	// rules is the routing-rule corpus (epic memql#5127). Unpopulated until
 	// the rule loader lands: every reader is nil-safe, and a nil registry

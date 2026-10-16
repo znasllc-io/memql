@@ -93,7 +93,7 @@ func TestApprovalDiscussionRefusesLostConversationLock(t *testing.T) {
 	require.NoError(t, err)
 	defer hold.release()
 	require.NoError(t, hold.verify(ctx))
-	_, err = hold.conn.ExecContext(ctx, "SELECT pg_advisory_unlock($1)", hold.key)
+	err = hold.tx.Rollback()
 	require.NoError(t, err)
 	require.ErrorIs(t, hold.verify(ctx), ErrWriteGateLost)
 }

@@ -19,6 +19,7 @@ import (
 	"github.com/uptrace/bun/driver/pgdriver"
 
 	"github.com/znasllc-io/memql/component/auth"
+	"github.com/znasllc-io/memql/component/database"
 	"github.com/znasllc-io/memql/component/database/dbtest"
 	concept "github.com/znasllc-io/memql/component/database/memory-nodes"
 )
@@ -124,6 +125,10 @@ func readMergeTestEngine(t *testing.T) (*MemQLEngine, *bun.DB, context.Context) 
 	registry := concept.DefaultRegistry()
 	eng, err := New(db)
 	require.NoError(t, err)
+	gate, err := database.NewGatePool(dsn, 4)
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = gate.Close() })
+	eng.SetAskCoordinationPool(func() *sql.DB { return gate })
 	eng.Logger = slog.New(slog.NewTextHandler(io.Discard, &slog.HandlerOptions{Level: slog.LevelError}))
 	require.NoError(t, eng.Init(registry))
 
@@ -216,9 +221,17 @@ func sharedReadMergeEngine(t *testing.T) (*MemQLEngine, *bun.DB, context.Context
 			_ = db.Close()
 			return
 		}
+		gate, err := database.NewGatePool(s.dsn, 4)
+		if err != nil {
+			s.bootErr = fmt.Errorf("Ask gate pool: %w", err)
+			_ = db.Close()
+			return
+		}
+		eng.SetAskCoordinationPool(func() *sql.DB { return gate })
 		eng.Logger = slog.New(slog.NewTextHandler(io.Discard, &slog.HandlerOptions{Level: slog.LevelError}))
 		if err := eng.Init(concept.DefaultRegistry()); err != nil {
 			s.bootErr = fmt.Errorf("Init: %w", err)
+			_ = gate.Close()
 			_ = db.Close()
 			return
 		}
