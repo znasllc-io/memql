@@ -18,6 +18,11 @@ type revisionFileFixture struct {
 	loseAcknowledgment, race bool
 }
 
+type revisionFileAuthority struct{ global, personal bool }
+
+func (a revisionFileAuthority) GlobalDataCapable(context.Context, string) bool  { return a.global }
+func (a revisionFileAuthority) PersonalAppCapable(context.Context, string) bool { return a.personal }
+
 func (f *revisionFileFixture) File(context.Context, string) (*server.LibraryFileRow, error) {
 	h := f.head
 	return &h, nil
@@ -58,8 +63,8 @@ func (f *revisionFileFixture) SupersedeFile(_ context.Context, snap server.Libra
 	return nil
 }
 func TestLibraryRevisionFileSaveRecoversReceiptWithoutAnotherVersion(t *testing.T) {
-	f := &revisionFileFixture{head: server.LibraryFileRow{Name: "A name with spaces.md", VersionNumber: 3, BlobUrl: "original", Sha256: "old", MimeType: "text/markdown"}, history: map[int]*server.LibraryFileVersionRow{}, loseAcknowledgment: true}
-	s := &libraryRevisionFiles{store: f, uploader: f, bucket: "library"}
+	f := &revisionFileFixture{head: server.LibraryFileRow{OwnerUserId: "writer", Name: "A name with spaces.md", VersionNumber: 3, BlobUrl: "original", Sha256: "old", MimeType: "text/markdown"}, history: map[int]*server.LibraryFileVersionRow{}, loseAcknowledgment: true}
+	s := &libraryRevisionFiles{store: f, uploader: f, bucket: "library", authority: revisionFileAuthority{global: true}}
 	ctx := auth.ContextWithAccess(auth.ContextWithToken(context.Background(), &auth.TokenInfo{Subject: "writer"}), &auth.AccessContext{UserId: "writer", Role: auth.RoleWriter})
 	write := library.RevisionFileWrite{FileID: "doc", Version: 3, BlobURL: "original", OperationID: "one-run", Content: []byte("Approved bytes")}
 	for n := 0; n < 2; n++ {
@@ -86,19 +91,34 @@ func TestLibraryRevisionFileSaveRecoversReceiptWithoutAnotherVersion(t *testing.
 		t.Fatal("different operation reused the receipt")
 	}
 }
-func TestLibraryRevisionFileSaveRejectsRaceAndReader(t *testing.T) {
-	f := &revisionFileFixture{head: server.LibraryFileRow{VersionNumber: 3, BlobUrl: "original"}, history: map[int]*server.LibraryFileVersionRow{}, race: true}
-	s := &libraryRevisionFiles{store: f, uploader: f, bucket: "library"}
+func TestLibraryRevisionFileSaveRejectsRaceAndMissingFileAuthority(t *testing.T) {
+	f := &revisionFileFixture{head: server.LibraryFileRow{OwnerUserId: "writer", VersionNumber: 3, BlobUrl: "original"}, history: map[int]*server.LibraryFileVersionRow{}, race: true}
+	s := &libraryRevisionFiles{store: f, uploader: f, bucket: "library", authority: revisionFileAuthority{}}
 	write := library.RevisionFileWrite{FileID: "doc", Version: 3, BlobURL: "original", OperationID: "run", Content: []byte("Approved bytes")}
 	ctx := auth.ContextWithAccess(auth.ContextWithToken(context.Background(), &auth.TokenInfo{Subject: "writer"}), &auth.AccessContext{UserId: "writer", Role: auth.RoleReader})
 	if err := s.SaveRevision(ctx, write); err == nil || f.uploads != 0 {
-		t.Fatal("reader wrote revision")
+		t.Fatal("caller without Files authority wrote revision")
 	}
 	ctx = auth.ContextWithAccess(ctx, &auth.AccessContext{UserId: "writer", Role: auth.RoleWriter})
+	s.authority = revisionFileAuthority{global: true}
 	if err := s.SaveRevision(ctx, write); err == nil || !strings.Contains(err.Error(), "commit") {
 		t.Fatalf("concurrent save not refused: %v", err)
 	}
 	if f.head.BlobUrl != "manual-edit" || f.saves != 0 {
 		t.Fatal("concurrent edit overwritten")
+	}
+}
+
+func TestLibraryRevisionFileSaveRejectsReadableForeignFileBeforeUpload(t *testing.T) {
+	f := &revisionFileFixture{head: server.LibraryFileRow{OwnerUserId: "another-owner", VersionNumber: 3, BlobUrl: "original"}}
+	s := &libraryRevisionFiles{store: f, uploader: f, bucket: "library", authority: revisionFileAuthority{personal: true}}
+	ctx := auth.ContextWithAccess(auth.ContextWithToken(context.Background(), &auth.TokenInfo{Subject: "viewer"}), &auth.AccessContext{UserId: "viewer", Role: auth.RoleReader})
+	if err := s.SaveRevision(ctx, library.RevisionFileWrite{FileID: "doc", Version: 3, BlobURL: "original", Content: []byte("Approved bytes")}); err == nil || f.uploads != 0 {
+		t.Fatal("personal Files authority changed somebody else's document")
+	}
+	s.authority = nil
+	f.head.OwnerUserId = "viewer"
+	if err := s.SaveRevision(ctx, library.RevisionFileWrite{}); err == nil || f.uploads != 0 {
+		t.Fatal("missing authority did not fail closed")
 	}
 }
