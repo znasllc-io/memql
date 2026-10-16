@@ -522,7 +522,7 @@ func TestEngineWeeklyAuditDoesNotRepeatDailyOrOrdinaryFunctionalChecks(t *testin
 			stages = append(stages, step.Stage)
 		}
 	}
-	if !slices.Equal(stages, []string{"analysis"}) {
+	if !slices.Equal(stages, []string{"analysis", "security-reports"}) {
 		t.Fatalf("weekly stages = %v", stages)
 	}
 }
