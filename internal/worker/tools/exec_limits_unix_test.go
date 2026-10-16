@@ -78,7 +78,7 @@ func verifyChildLimits(t *testing.T) {
 	p.shell.MaxOpenFiles = 128
 	run("128\n3\n")
 	out := &recordedOutput{}
-	result, fail := runPipelineStep(context.Background(), "", stepArgs(t, fx, report, nil), p, out.emit)
+	result, fail := runPipelineStep(context.Background(), "", stepArgs(t, fx, report, nil), p, out.emit, out.artifact)
 	if got := decodeStep(t, result, fail); got.ExitCode != 0 {
 		t.Fatalf("pipeline exit=%d", got.ExitCode)
 	}

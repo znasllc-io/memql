@@ -1,6 +1,9 @@
 # Binaries and build outputs
 bin/
 dist/
+.memql-ci/
+.memql-security/
+__pycache__/
 *.exe
 *.exe~
 *.dll

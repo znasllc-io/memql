@@ -27,3 +27,10 @@ regexes        = ['''eyJ[A-Za-z0-9_\-]+\.[A-Za-z0-9_\-]+\.[A-Za-z0-9_\-]+''']
 paths = [
   '''^cli/crash/redact_test\.go$''',
 ]
+
+[[allowlists]]
+description = "The same planted sanitizer JWT after cli/crash moved to internal/crash. Its signature is the literal signature_data_here; it is never issued or used for authentication. Only these exact fixture bytes are allowed at the current test path."
+condition = "AND"
+regexTarget = "secret"
+regexes = ['''^eyJhbGciOiJSUzI1NiJ9\.eyJzdWIiOiJ0ZXN0In0\.signature_data_here$''']
+paths = ['''^internal/crash/redact_test\.go$''']

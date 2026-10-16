@@ -110,7 +110,7 @@ func TestPipelineCachesRequireScopeAndLocalEnrollment(t *testing.T) {
 		}
 	}
 	policy, root := pipelineTestPolicy(t, "")
-	_, fail := runPipelineStep(context.Background(), "", stepArgs(t, fx, "exit 0", base), policy, nil)
+	_, fail := runPipelineStep(context.Background(), "", stepArgs(t, fx, "exit 0", base), policy, nil, nil)
 	if fail == nil || fail.GetErrorCode() != "bad_request" {
 		t.Fatalf("unbound cluster got a cache: %v", fail)
 	}
@@ -132,7 +132,7 @@ func TestPipelineCachesRealDocker(t *testing.T) {
 	var output recordedOutput
 	run := func(ctx context.Context, command string) {
 		t.Helper()
-		result := decoded(t)(runPipelineStep(ctx, "", stepArgs(t, fx, command, extra), policy, output.emit))
+		result := decoded(t)(runPipelineStep(ctx, "", stepArgs(t, fx, command, extra), policy, output.emit, output.artifact))
 		if result.ExitCode != 0 {
 			t.Fatalf("cache command exited %d: %s %s", result.ExitCode, output.text(false), output.text(true))
 		}
