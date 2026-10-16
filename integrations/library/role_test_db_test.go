@@ -18,6 +18,9 @@ func (f libraryRoleValidator) ValidateRoleTest(ctx context.Context, session, sub
 
 func TestRoleTestDocumentManagementAcrossReplicas(t *testing.T) {
 	f := newRevisionDB(t)
+	// Initialize registries serially, then overlap independent owner fixtures.
+	// Each persona keeps its own engines, model answers and document/run IDs.
+	t.Parallel()
 	for _, tc := range []struct {
 		name string
 		run  func(*testing.T, *revisionDB)
