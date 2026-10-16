@@ -288,6 +288,12 @@ func (i *Integration) serveRetry(ctx context.Context, runId, owner, since string
 	if i.dispatcherRef() == nil || strings.TrimSpace(since) == "" {
 		return false
 	}
+	var err error
+	ctx, err = i.runOwnerActor(ctx, runId, owner)
+	if err != nil {
+		i.log().Warn("work retry: could not restore intake authority", "run", runId, "error", err)
+		return false
+	}
 	run, err := i.store().runForOwner(ownerActor(memql.ContextWithFreshRead(ctx), owner), runId)
 	if err != nil || run == nil || !onRetryWait(run, since, i.clock()) {
 		return false
@@ -490,6 +496,11 @@ func (i *Integration) handOffRemedy(ctx context.Context, kind, runId, owner, sin
 func (i *Integration) serveRemedy(remedy Remedy, kind, runId, owner, since string) {
 	ctx, cancel := context.WithTimeout(context.Background(), remedyTimeout)
 	defer cancel()
+	ctx, err := i.runOwnerActor(ctx, runId, owner)
+	if err != nil {
+		i.log().Warn("work remedy: could not restore intake authority", "run", runId, "error", err)
+		return
+	}
 	run, err := i.remedyRun(ctx, owner, runId, kind)
 	if err != nil {
 		i.log().Info("work: a claimed remedy found its run no longer waiting on it; nothing to serve",

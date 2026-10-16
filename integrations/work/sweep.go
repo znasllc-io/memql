@@ -160,7 +160,11 @@ func (i *Integration) SweepWaiting(ctx context.Context, olderThan time.Duration)
 		// Borrowed authority. The write guard ignores the clusterOwner arm,
 		// so even the maintenance principal writes an owned row AS its
 		// owner; the value comes off the row just read.
-		writeCtx := ownerActor(ctx, owner)
+		writeCtx, authorityErr := i.runOwnerActor(ctx, runId, owner)
+		if authorityErr != nil {
+			i.log().Warn("work sweep: could not restore intake authority", "run", runId, "error", authorityErr)
+			continue
+		}
 		status := rowString(run, "status")
 		triggeredBy := rowString(run, "triggeredBy")
 		if runnerOwnsRecovery(triggeredBy) {

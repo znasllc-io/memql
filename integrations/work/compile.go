@@ -54,7 +54,11 @@ func (i *Integration) dispatchCompile(ctx context.Context, hint CompileRequest) 
 			"component", "work.goal", "goal", hint.GoalId, "run", hint.RunId)
 		return false
 	}
-	base := ownerActor(context.WithoutCancel(ctx), hint.OwnerUserId)
+	base, err := i.runOwnerActor(context.WithoutCancel(ctx), hint.RunId, hint.OwnerUserId)
+	if err != nil {
+		i.log().Warn("work compile: could not restore intake authority", "run", hint.RunId, "error", err)
+		return false
+	}
 	// Finish ownership well within the lease: an indefinitely stalled
 	// claimant must not wake after a peer took its expired claim.
 	claimCtx, cancelClaim := context.WithTimeout(base, compileHeartbeatInterval)
@@ -92,8 +96,8 @@ func (i *Integration) dispatchCompile(ctx context.Context, hint CompileRequest) 
 	return true
 }
 
-// pendingCompile reads under the event's owner, with no internal-origin or
-// cluster-owner read bypass. A forged/mismatched owner therefore reads no run.
+// pendingCompile reads under the restored owner's authority, with no
+// internal-origin or cluster-owner read bypass.
 // heartbeatAt is the durable evidence that a planner already took this run;
 // older versions wrote the intake BFF into nodeId before any compiler ran.
 func (i *Integration) pendingCompile(ctx context.Context, runId string) (CompileRequest, common.RunContext, bool, error) {
