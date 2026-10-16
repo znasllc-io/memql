@@ -1016,7 +1016,7 @@ func (h *ArtifactHandler) handleUpload(w http.ResponseWriter, r *http.Request) {
 	if head != nil {
 		h.restampAfterSupersede(ctx, fileId, targetArtifact.ID)
 		h.applyLabels(ctx, targetArtifact.ID, r.FormValue(libraryFormLabelsKey))
-		h.startAnalysis(userId, targetArtifact.ID, LibraryFileCreateParams{
+		h.startAnalysis(ctx, userId, targetArtifact.ID, LibraryFileCreateParams{
 			FileId:   fileId,
 			Name:     name,
 			MimeType: mimeType,
@@ -1046,7 +1046,7 @@ func (h *ArtifactHandler) handleUpload(w http.ResponseWriter, r *http.Request) {
 		h.applyLabels(ctx, artifactId, r.FormValue(libraryFormLabelsKey))
 	}
 
-	h.startAnalysis(userId, artifactId, LibraryFileCreateParams{
+	h.startAnalysis(ctx, userId, artifactId, LibraryFileCreateParams{
 		FileId:   fileId,
 		Name:     name,
 		MimeType: mimeType,
@@ -1268,13 +1268,14 @@ func (h *ArtifactHandler) applyLabels(ctx context.Context, artifactId, raw strin
 
 // startAnalysis hands off to memql#4342's pass, or closes the lifecycle here.
 //
-// The detached context carries the OWNER's actor, not the request's: the pass
-// writes chunks and status transitions that must land owned by the same person
-// as the file, and a background context with no actor at all would stamp "".
-// context.Background() rather than r.Context() so the client hanging up does
-// not cancel work whose bytes are already stored.
-func (h *ArtifactHandler) startAnalysis(userId, artifactId string, p LibraryFileCreateParams, data []byte) {
-	ctx := auth.ContextWithUserActor(context.Background(), userId)
+// Detach cancellation after bytes are stored, but retain a test persona's
+// original authority, expiry and revocation checks throughout analysis.
+func (h *ArtifactHandler) startAnalysis(parent context.Context, userId, artifactId string, p LibraryFileCreateParams, data []byte) {
+	ctx, cancel, err := auth.DetachUserWork(parent, userId)
+	if err != nil {
+		h.logger.Warn("start library file analysis", "error", err, "fileId", p.FileId)
+		return
+	}
 
 	// Opaque files short-circuit to ready -- EXCEPT when the hash is still
 	// absent (a chunked upload, memql#4782 D10): those go to the pass even
@@ -1283,6 +1284,7 @@ func (h *ArtifactHandler) startAnalysis(userId, artifactId string, p LibraryFile
 	// ready-without-hash is the honest degraded state and the row says
 	// nothing false -- absent means "not measured".
 	if h.analyzer == nil || (p.Format == libraryFormatOther && p.Sha256 != "") {
+		defer cancel()
 		// Opaque, or nothing to analyze with. Either way the file is as
 		// finished as it is going to get, and leaving it in `stored` would
 		// read as "analysis pending" forever.
@@ -1308,7 +1310,10 @@ func (h *ArtifactHandler) startAnalysis(userId, artifactId string, p LibraryFile
 		BlobUrl:     p.BlobUrl,
 		Data:        data,
 	}
-	go h.analyzer.AnalyzeFile(ctx, req)
+	go func() {
+		defer cancel()
+		h.analyzer.AnalyzeFile(ctx, req)
+	}()
 }
 
 // ---------------------------------------------------------------------------

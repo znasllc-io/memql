@@ -809,7 +809,7 @@ func (h *ArtifactHandler) handleUploadComplete(w http.ResponseWriter, r *http.Re
 				h.logger.Warn("apply session label", "error", err, "artifactId", artifactId, "label", label)
 			}
 		}
-		h.startAnalysis(userId, artifactId, params, nil)
+		h.startAnalysis(ctx, userId, artifactId, params, nil)
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusCreated)
 		_ = json.NewEncoder(w).Encode(ArtifactUploadResponse{
@@ -849,7 +849,7 @@ func (h *ArtifactHandler) handleUploadComplete(w http.ResponseWriter, r *http.Re
 	// Data is nil ON PURPOSE: no handler on this path ever held the file.
 	// The analysis pass streams the committed blob -- for the hash always,
 	// and for extraction when the type is readable.
-	h.startAnalysis(userId, artifactId, params, nil)
+	h.startAnalysis(ctx, userId, artifactId, params, nil)
 
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusCreated)
