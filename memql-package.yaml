@@ -110,11 +110,10 @@ pipeline:
       # import graph cannot discover these dependencies, so every PR runs them,
       # matching ci.yml's declared gate packages in scripts/ci/selection.
       gates: ["**"]
-      # What the OS shell's checks read: a hand copy of ci.yml's osclient bucket
-      # (nothing holds the two together) without the root Dockerfile, which only
-      # that lane's image build reads and this step does not run, and with the
-      # Makefile and this file, which say what the step runs.
+      # Shell source and the Docker stage that packages it.
+      # Keep Dockerfile changes in the same validation path as the shell.
       os:
+        - Dockerfile
         - clients/**
         - sdk/ts/**
         - brand/**
@@ -122,6 +121,19 @@ pipeline:
         - component/memql/os_navigation.json
         - Makefile
         - memql-package.yaml
+      editors:
+        - brand/tokens.css
+        - brand/editorAppearance.ts
+        - editors/**
+        - cmd/memql-lsp/**
+        - scripts/vscode/**
+        - sdk/ts/**
+        - sdk/ts-viewkit/**
+        - test/fixtures/**
+        - component/compose/emaildoc/**
+        - Makefile
+        - memql-package.yaml
+        - .github/workflows/**
   stages:
     # Stages run in the order written, and a failed stage skips every later one:
     # a change that does not build, vet or pass its drift gates starts no test.
@@ -160,6 +172,7 @@ pipeline:
             export GOFLAGS=-p=1 GOMEMLIMIT=512MiB GOGC=50
             bash scripts/identity/build-css.sh
             go test -count=1 -timeout=300s ./scripts/ci/ ./scripts/dev/
+            python3 -m unittest discover -s scripts/ci -p pipeline_db_tests_test.py
         - name: build-identity
           placement: cluster
           timeout: 30m
@@ -303,13 +316,9 @@ pipeline:
             export GOFLAGS=-p=1 GOMEMLIMIT=512MiB GOGC=50
             bash scripts/identity/build-css.sh
             go test -count=1 -timeout=600s $MEMQL_PACKAGES
-        # ci.yml db-tests: the db-gated packages the change reaches, over five
-        # shards, the count ci.yml's class table gives that lane today (a hand
-        # copy), each beside its own Postgres. The extensions are the ones that
-        # lane creates before it tests. A step cannot give component/memql the
-        # serial class and 600s budget ci.yml's planner does, so every package
-        # here runs under them; MEMQL_REQUIRE_DB=1 makes a database the tests
-        # cannot reach a failure, not a step of skips.
+        # Each shard keeps its own Postgres. The runner groups its exact
+        # selected packages under the CI planner's original timeout classes;
+        # slow engine tests cannot raise the budget of unrelated DB suites.
         - name: db-tests
           placement: cluster
           packages: affected
@@ -329,7 +338,7 @@ pipeline:
             SQL
             export MEMQL_DATABASE_DSN='postgres://memql:memql_dev@localhost:5432/memql?sslmode=disable'
             export MEMQL_REQUIRE_DB=1
-            go test -count=1 -p=1 -timeout=600s $MEMQL_PACKAGES
+            python3 scripts/ci/pipeline-db-tests.py
         # ci.yml go-checks' bounded fuzz, a step of its own here so the search
         # holds no test behind it. None of the three packages imports
         # component/identity/web, so it needs no stylesheet.
@@ -343,9 +352,7 @@ pipeline:
             go test ./component/memql -run '^FuzzLower$' -fuzz '^FuzzLower$' -fuzztime=40s
             go test ./component/memql -run '^FuzzEvalExpr$' -fuzz '^FuzzEvalExpr$' -fuzztime=40s
             go test ./test/conformance -run '^FuzzParse$' -fuzz '^FuzzParse$' -fuzztime=40s
-        # ci.yml os-checks, without its Docker build of the image's shell stage:
-        # a step's pod has no Docker daemon. The install is retried as that lane
-        # retries it; the checks are not.
+        # ci.yml os-checks. Network setup may retry; tests run once.
         - name: os-checks
           placement: cluster
           artifacts: [clients/os/dist]
@@ -356,6 +363,37 @@ pipeline:
             make os-typecheck
             make os-test
             make os-build
+        # The fixed rootless builder validates the same Docker stage as CI.
+        # Its OCI archive and metadata are retained by the image-build contract.
+        - name: os-image
+          placement: cluster
+          when: { bucket: os }
+          caches: []
+          cpuMilli: 3000
+          memoryMiB: 8192
+          timeout: 30m
+          imageBuild:
+            context: .
+            dockerfile: Dockerfile
+            target: spa-build
+        - name: editor-packages
+          placement: cluster
+          when: { bucket: editors }
+          timeout: 30m
+          artifacts: [.memql-editor]
+          run: |
+            set -eu
+            export GOFLAGS=-p=1 GOMEMLIMIT=512MiB GOGC=50
+            mkdir -p .memql-editor
+            bash scripts/identity/build-css.sh
+            go test -count=1 ./cmd/memql-lsp/...
+            make vscode-test
+            node editors/browser/build.mjs
+            npm --prefix editors/browser run typecheck
+            npm --prefix editors/browser test
+            npm --prefix editors/productivity test
+            scripts/ci/retry.sh -- bash scripts/vscode/package.sh --out="$PWD/.memql-editor/memql.vsix"
+            test -s .memql-editor/memql.vsix
         - name: sdk-ts-typecheck
           placement: cluster
           run: |

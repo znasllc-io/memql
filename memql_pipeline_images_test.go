@@ -36,7 +36,7 @@ func TestEnginePipelineBuildsEveryReleaseImage(t *testing.T) {
 		}
 		got := map[string]bool{}
 		for _, step := range plan.Steps() {
-			if step.ImageBuild == nil {
+			if step.ImageBuild == nil || step.Stage != "images" {
 				continue
 			}
 			if event != pipelines.EventRelease {
