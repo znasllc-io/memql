@@ -41,6 +41,7 @@ import (
 	"context"
 	"time"
 
+	"github.com/znasllc-io/memql/component/auth"
 	"github.com/znasllc-io/memql/component/memql"
 )
 
@@ -96,14 +97,30 @@ func (j *workJournal) cancelRequested(ctx context.Context, runId string) (asked 
 	if j == nil || runId == "" {
 		return false, ""
 	}
-	call, err := journalArgs("workRunById", map[string]any{"runId": runId})
+	queryName, readCtx := "workRunById", journalContext(ctx)
+	if auth.IsRoleTestContext(ctx) {
+		// A test run belongs to the persona. Its own read preserves the
+		// bounded session and cannot expose another person's cancellation.
+		// Replacing the actor with the journal service while retaining the
+		// test assertion would instead make every poll fail authorization.
+		if err := auth.ValidateRoleTestContext(ctx); err != nil {
+			j.warn("workRunForOwner", err)
+			return false, ""
+		}
+		queryName, readCtx = "workRunForOwner", ctx
+	}
+	call, err := journalArgs(queryName, map[string]any{"runId": runId})
 	if err != nil {
-		j.warn("workRunById", err)
+		j.warn(queryName, err)
 		return false, ""
 	}
-	res, err := j.exec.Execute(memql.ContextWithFreshRead(journalContext(ctx)), "query "+call)
+	res, err := j.exec.Execute(memql.ContextWithFreshRead(readCtx), "query "+call)
 	if err != nil {
-		j.warn("workRunById", err)
+		j.warn(queryName, err)
+		return false, ""
+	}
+	if err := auth.ValidateRoleTestContext(ctx); err != nil {
+		j.warn(queryName, err)
 		return false, ""
 	}
 	rows := memql.MaterializeRows(res)
