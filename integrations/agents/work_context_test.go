@@ -29,13 +29,13 @@ func TestWorkTurnHistoryRehydratesOnAnIndependentReplica(t *testing.T) {
 	history, err := workTurnHistory(ctx, contextReader{t}, "What is it?")
 	require.NoError(t, err)
 	require.Len(t, history, 6)
-	require.Contains(t, history[4].Content, "destination selected by the person for this goal: auto")
+	require.Contains(t, history[3].Content, "destination selected by the person for this goal: auto")
 	require.Contains(t, history[5].Content, "Markdown")
 	require.Equal(t, "CNAS is the project", history[0].Content)
 	for _, message := range history {
 		require.False(t, strings.Contains(message.Content, "become owner"))
 	}
-	require.Equal(t, "What is it?", history[3].Content)
+	require.Equal(t, "What is it?", history[4].Content)
 }
 func TestWorkTurnHistoryRefusesAnImpersonatedOwner(t *testing.T) {
 	ctx := auth.ContextWithUserActor(context.Background(), "stranger")
@@ -52,8 +52,8 @@ func TestWorkTurnHistoryReadsDestinationFromThePersistedRun(t *testing.T) {
 			history, err := workTurnHistory(ctx, reader, "Do the work")
 			require.NoError(t, err)
 			require.Len(t, history, 2)
-			require.Contains(t, history[1].Content, "for this goal: "+destination)
-			require.Contains(t, history[1].Content, "does not grant computer access")
+			require.Contains(t, history[0].Content, "for this goal: "+destination)
+			require.Contains(t, history[0].Content, "does not grant computer access")
 		})
 	}
 	_, err := workTurnHistory(ctx, &decisionContextReader{run: map[string]any{"routing": map[string]any{"destination": "unknown"}}}, "Do the work")
@@ -178,7 +178,7 @@ func TestLiveTurnCarriesDescriptionGuidance(t *testing.T) {
 			"- (process) it guessed the week\n"+
 			"- (performance) it wrote in French",
 		history[1].Content)
-	require.Equal(t, "Draft the report", history[2].Content, "the guidance goes BEFORE the prompt")
+	require.Equal(t, "Draft the report", history[3].Content, "the guidance goes BEFORE the prompt")
 
 	// Read for THIS goal's signature, as its owner, through the quoted call.
 	require.Contains(t, reader.queries, `query workDescriptionGuidance(goalSignature: "sig-weekly-report")`)
@@ -207,7 +207,7 @@ func TestLiveTurnCarriesDescriptionGuidance(t *testing.T) {
 			"- (performance) it wrote in French\n"+
 			"- (product) the sixth distinct reason",
 		history[1].Content)
-	require.Equal(t, "Draft the report", history[2].Content)
+	require.Equal(t, "Draft the report", history[3].Content)
 	require.Equal(t, "Instructions for this step from its owner:\nPut the totals in bold.", history[4].Content)
 	require.Equal(t, "What was wrong with the previous version (product, process): the totals are missing", history[5].Content)
 

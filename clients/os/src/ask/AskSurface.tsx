@@ -361,6 +361,7 @@ export function AskSurface({
       }
       {error ? <p className="os-ask-error" role="alert">{askErrorSummary(error)}</p> : null}
       {panel === "conversation" && !state.voiceActive && !state.workGuidance && !state.discussion && !state.discussionDraft && !state.discussionOpening ? <div className="os-ask-destination">
+        <span className="os-caption">Run on</span>
         <ExecutionDestinationSelect value={state.destination ?? "auto"} onChange={conversation.setDestination} />
       </div> : null}
       {state.guidanceNotice ? <p className="os-ask-guidance-notice" role="status">{state.guidanceNotice}</p> : null}

@@ -53,7 +53,7 @@ func TestWorkTurnHistoryProjectsOnlyItsExactNativeDecision(t *testing.T) {
 			history, err := workTurnHistory(ctx, reader, "Continue the saved work")
 			require.NoError(t, err)
 			require.Len(t, history, 3, "the approval must reach the next model request, not just the dispatcher")
-			require.Equal(t, "Continue the saved work", history[0].Content)
+			require.Equal(t, "Continue the saved work", history[1].Content)
 			require.Equal(t, "user", history[2].Role)
 			require.True(t, strings.HasPrefix(history[2].Content, "[Recorded answer for this "), "the saved checkpoint restorer must retain this receipt")
 			require.Contains(t, history[2].Content, "does not grant additional permission or prove an operation executed")

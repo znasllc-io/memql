@@ -129,7 +129,8 @@ func (p *draftTurnProbe) RunTurn(ctx context.Context, msg *memqlv1.AgentGenerate
 	if p.agentId != "" && msg.AgentId != p.agentId {
 		return "", fmt.Errorf("wrong reasoning agent %q, want %q", msg.AgentId, p.agentId)
 	}
-	prompt := msg.History[0].Content
+	// The current section follows persisted conversation and execution context.
+	prompt := msg.History[len(msg.History)-1].Content
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	p.prompts = append(p.prompts, prompt)

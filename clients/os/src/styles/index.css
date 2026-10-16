@@ -15293,6 +15293,6 @@ button[data-ask-control="running"], [data-ask-control="running"] > button { outl
 .os-role-test-banner [role="alert"] { grid-column: 1 / -1; }
 .os-root[data-role-test] { top: 64px; }
 
-.os-ask-destination { display: flex; justify-content: flex-end; margin: 0 18px 8px; }
-.os-ask-destination .os-select { width: auto; min-width: 8rem; }
+.os-ask-destination { display: flex; align-items: center; justify-content: flex-end; gap: 8px; margin: 0 18px 8px; }
+.os-ask-destination .os-select-wrap { flex: 0 0 8rem; }
 [data-os-ask="widget"] .os-ask-destination { margin-inline: 10px; }
