@@ -3219,41 +3219,6 @@ button.os-row.os-record-row:focus-visible { outline: 2px solid var(--os-accent);
   margin-top: 3px;
 }
 
-/* The measured line: a third reading under a model, in the same key as the two
- * above it. The figures are tabular so a column of them lines up, and the
- * absent ones draw the em dash `.os-figure-absent` already defines -- the one
- * place on this page where a missing value is deliberately VISIBLE rather than
- * quiet, because somebody scanning for the model nobody has probed has to be
- * able to find the gap. */
-.os-fleet-measured {
-  display: flex;
-  align-items: baseline;
-  gap: 11px;
-  flex-wrap: wrap;
-  font-variant-numeric: tabular-nums;
-}
-.os-fleet-measured[data-unmeasured] {
-  font-variant-numeric: normal;
-  opacity: 0.75;
-}
-.os-fleet-measured-pair {
-  display: inline-flex;
-  align-items: baseline;
-  gap: 4px;
-}
-.os-fleet-measured-label {
-  opacity: 0.75;
-}
-.os-fleet-measured-when {
-  opacity: 0.6;
-}
-/* A probe that ran PARTLY leaves figures AND a sentence. It is a real state
- * rather than a contradiction, so it gets its own line rather than replacing
- * the numbers that did come back. */
-.os-fleet-measured-partial {
-  flex-basis: 100%;
-  color: var(--os-muted);
-}
 .os-fleet-machinemodel-act {
   align-self: flex-start;
   margin-top: 3px;
@@ -13874,37 +13839,6 @@ button.os-cluster-mesh-peer:focus-visible {
 }
 .os-fleet-leave .os-caption {
   margin: 0;
-}
-
-/* ---- ask it something (D14) ---- */
-.os-fleet-askit {
-  display: grid;
-  gap: 8px;
-  margin: 4px 0;
-}
-.os-fleet-askit-act {
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-  align-items: flex-start;
-}
-/* THE ANSWER IS CONTENT, not a notice: nothing went wrong and there is
- * nothing to dismiss. It reads at the surface's own size, with the figure
- * beside it in the caption voice. */
-.os-fleet-askit-answer {
-  margin: 0;
-  display: flex;
-  align-items: baseline;
-  gap: 10px;
-  flex-wrap: wrap;
-  font-size: var(--os-text-base);
-  color: var(--os-ink);
-}
-.os-fleet-askit-text {
-  padding: 4px 9px;
-  border: 1px solid var(--os-line);
-  border-radius: var(--os-radius-xs);
-  background: var(--os-raised);
 }
 
 /* ---------------------------------------------------------------------------

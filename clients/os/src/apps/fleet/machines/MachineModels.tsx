@@ -15,28 +15,24 @@ import { CardCarousel } from "../../../kit/CardCarousel";
 import { RecordList, RecordRow } from "../../../kit/RecordRow";
 import { RecordListSkeleton } from "../../../kit/RecordListSkeleton";
 import { formatBytes, formatMoment } from "../../../kit/format";
-import { machineName, type MachineRow } from "../rows";
+import type { MachineRow } from "../rows";
 import { isWorkerOnline } from "../online";
-import { AskIt } from "../addMachine/AskIt";
 import { formatParams, formatContext } from "../models/ordering";
 import { EmbeddingStatus } from "../models/EmbeddingStatus";
 import { MachineDetailsSection } from "./MachineDetailsInfo";
-import { canConverse, machineModelsFrom, modelPurposeLabel } from "./models";
-import { LivePull, MeasuredLine, PullHistory } from "./ModelDownloads";
-import { useMachineInference, type MachineInference } from "./useMachineInference";
+import { machineModelsFrom, modelPurposeLabel } from "./models";
+import { LivePull, PullHistory } from "./ModelDownloads";
 import { useModelPulls } from "./useModelPulls";
 import { MODEL_PURPOSES, modelSetupFromRow, safeModelSource, sameModelChoices, setupCapacity, type ModelChoices, type ModelSetupView, type SetupModel } from "./modelSetup";
 import { ModelAssignmentBoard } from "./ModelAssignmentBoard";
 import "./machineModels.css";
 
-export function MachineModels({ machine, inference: supplied, navigation }: { machine: MachineRow; standalone?: boolean; inference?: MachineInference; navigation?: Omit<PageTrail, "title"> }) {
+export function MachineModels({ machine, navigation }: { machine: MachineRow; standalone?: boolean; navigation?: Omit<PageTrail, "title"> }) {
   const { access } = useSession();
   const connection = useOsConnection();
   const now = useNow();
   const own = !!access?.userId && access.userId === machine.ownerUserId;
   const online = isWorkerOnline(machine, now);
-  const ownInference = useMachineInference(machine.id, !supplied);
-  const inference = supplied ?? ownInference;
   const downloads = useModelPulls(machine.id);
   const installed = useMemo(() => machineModelsFrom(machine.reportedLabels), [machine.reportedLabels]);
   const read = useCallback(async (signal: AbortSignal) => {
@@ -126,12 +122,6 @@ export function MachineModels({ machine, inference: supplied, navigation }: { ma
       </Facts></MachineDetailsSection>
       {profile?.notes ? <MachineDetailsSection title="About"><p className="os-caption">{profile.notes}</p></MachineDetailsSection> : null}
       {localModel?.embeddings ? <EmbeddingStatus model={localModel.modelId} /> : null}
-      {localModel && canConverse(localModel) ? <MachineDetailsSection title="Test">
-        {inference.error ? <Notice tone="warn" sentence="Performance results could not be read." detail={inference.error} /> : null}
-        <MeasuredLine measurement={inference.measurements.get(localModel.modelId) ?? null} />
-        {own && online ? <><AskIt modelId={localModel.modelId} registrationId={machine.id} machineLabel={machineName(machine)} />
-          <Button busy={inference.probing === localModel.modelId} onClick={() => { void inference.probe(localModel.modelId).then(setError); }}>Measure performance</Button></> : null}
-      </MachineDetailsSection> : null}
       {profile && !localModel ? <ActionBar state={profile.installBlocked || (online ? "Ready to install" : "Machine offline")}
         acts={own && online && !profile.installBlocked && !downloads.live ? [{ label: "Install model", tone: "primary", busy: downloads.starting, onAct: () => { void install(profile); } }] : []} /> : null}
     </> : catalogOpen ? <>

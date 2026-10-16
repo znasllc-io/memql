@@ -44,11 +44,16 @@ async function mount(
 }
 
 describe("the Models group", () => {
-  it.each(["qwen3.5:9b","qwen3.8:27b","qwen3.8:27b-q8_0"])("keeps the conversation test in the selected model detail: %s",async modelId=>{
-    await mount({["model:"+modelId]:"tools=1,ctx=32768","model:embed":"embeddings=1"});
+  it.each(["qwen3.5:9b","qwen3.8:27b","qwen3.8:27b-q8_0"])("keeps installed model details informational: %s",async modelId=>{
+    const connection = await mount({["model:"+modelId]:"tools=1,ctx=32768","model:embed":"embeddings=1"});
     expect(screen.queryByRole("button",{name:"Ask it something"})).toBeNull();
     fireEvent.click(screen.getByRole("button",{name:new RegExp(modelId.replaceAll(".","\\."))}));
-    expect(screen.getByRole("button",{name:"Ask it something"})).toBeTruthy();
+    expect(screen.getByRole("region", {name:"Overview"})).toBeTruthy();
+    expect(screen.queryByRole("region", {name:"Test"})).toBeNull();
+    expect(screen.queryByRole("button",{name:"Ask it something"})).toBeNull();
+    expect(screen.queryByRole("button",{name:"Measure performance"})).toBeNull();
+    expect(connection.query.measurementsForMachine).not.toHaveBeenCalled();
+    expect(connection.query.fleetModelProbe).not.toHaveBeenCalled();
   });
   it("never offers a conversation check to image models",async()=>{
     await mount({"model:flux":"imagegen=1"});

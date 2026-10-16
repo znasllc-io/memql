@@ -22,7 +22,7 @@ import { LabelEditor } from "./LabelEditor";
 import { ModelsGroup } from "./ModelsGroup";
 import { SharingGroup } from "./SharingGroup";
 import { AutoRefresh } from "../../../kit/AutoRefresh";
-import { useMachineInference } from "./useMachineInference";
+import { useMachineRecommendation } from "./useMachineRecommendation";
 import type { MachineWrites, RemovalReceipt } from "./useMachineWrites";
 
 // One machine, in full: what it reported, what its owner set, what it can
@@ -47,11 +47,11 @@ export function MachineDetail({
   // nowhere, so they arrive with the recommendation rather than on the row --
   // one read for both, because a page that fetched the class separately could
   // show a class the recommendation disagreed with.
-  const inference = useMachineInference(machine.id, ["all", "settings", "models"].includes(view));
+  const recommendation = useMachineRecommendation(machine.id, ["all", "settings"].includes(view));
 
   return (
     <Panel label={`${label} detail`}>
-      <AutoRefresh enabled={["all", "settings", "models"].includes(view)} busy={inference.loading} onRefresh={inference.refreshMeasurements} />
+      <AutoRefresh enabled={["all", "settings"].includes(view)} busy={recommendation.state === "reading"} onRefresh={recommendation.reread} />
       {view === "all" || view === "settings" ? <div className="fleet-machine-details">
         <CredentialHealth machine={machine} now={now} />
         <MachineDetailsSection title="General">
@@ -73,7 +73,7 @@ export function MachineDetail({
         <MachineDetailsSection title="Sharing">
           <SharingGroup machine={machine} writes={writes} />
         </MachineDetailsSection>
-        <MachineDetailsInfo machine={machine} now={now} machineClass={inference.recommended.machineClass} usableBytes={inference.recommended.usableBytes} />
+        <MachineDetailsInfo machine={machine} now={now} machineClass={recommendation.recommended.machineClass} usableBytes={recommendation.recommended.usableBytes} />
       </div> : null}
 
       {view === "all" || view === "apps" ? <AppsGroup machine={machine} standalone={view === "apps"} /> : null}
@@ -81,7 +81,7 @@ export function MachineDetail({
       {/* Below Apps, because the two answer the same shape of question about
           this machine -- what it can be asked to do -- and a person scanning
           for either reads them together. */}
-      {view === "all" || view === "models" ? <ModelsGroup key={machine.id} machine={machine} inference={inference} standalone={view === "models"} navigation={modelNavigation} /> : null}
+      {view === "all" || view === "models" ? <ModelsGroup key={machine.id} machine={machine} standalone={view === "models"} navigation={modelNavigation} /> : null}
 
       {view === "all" || view === "activity" ? <CallHistory standalone={view === "activity"} workerId={machine.id} machineLabel={label} /> : null}
 

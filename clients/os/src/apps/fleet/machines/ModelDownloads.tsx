@@ -1,45 +1,8 @@
 import { RecordListSkeleton } from "../../../kit/RecordListSkeleton";
 import { RecordList, RecordRow } from "../../../kit/RecordRow";
-import { Measure } from "../../../kit/MeasureView";
 import { Subhead } from "../../../kit";
 import { formatMoment } from "../../../kit/format";
 import { pullProgressFraction, pullStepLabel, type ModelPull } from "./models";
-import { formatRate, formatTps, type Measurement } from "./recommended";
-
-export function MeasuredLine({ measurement }: { measurement: Measurement | null }) {
-  if (measurement === null) {
-    return (
-      <span className="os-fleet-measured" data-unmeasured="true">
-        Not measured on this machine yet.
-      </span>
-    );
-  }
-  return (
-    <span className="os-fleet-measured">
-      <span className="os-fleet-measured-pair">
-        <span className="os-fleet-measured-label">Valid</span>
-        <Measure figure={measurement.structuredValidity} format={formatRate} />
-      </span>
-      <span className="os-fleet-measured-pair">
-        <span className="os-fleet-measured-label">Tools</span>
-        <Measure figure={measurement.toolCallCorrectness} format={formatRate} />
-      </span>
-      <span className="os-fleet-measured-pair">
-        <span className="os-fleet-measured-label">Speed</span>
-        <Measure figure={measurement.throughputTps} format={formatTps} suffix=" tok/s" />
-      </span>
-      <span
-        className="os-fleet-measured-when"
-        title={`Suite ${measurement.suiteVersion}, measured ${measurement.measuredAt}`}
-      >
-        suite {measurement.suiteVersion}
-      </span>
-      {measurement.probeError ? (
-        <span className="os-fleet-measured-partial">{measurement.probeError}</span>
-      ) : null}
-    </span>
-  );
-}
 
 export function LivePull({ pull }: { pull: ModelPull }) {
   const fraction = pullProgressFraction(pull);

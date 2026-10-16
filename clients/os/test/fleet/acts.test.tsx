@@ -517,8 +517,8 @@ const CASES: ActsCase[] = [
       // having.
       {
         name: "Measure performance",
-        count: 1,
-        note: "one per advertised model, and this fixture advertises one",
+        count: 0,
+        note: "installed model details are informational; model testing was removed",
       },
       {
         name: "Share models",

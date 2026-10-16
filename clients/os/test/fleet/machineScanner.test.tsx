@@ -15,18 +15,13 @@ const { ModelsGroup } = await import("../../src/apps/fleet/machines/ModelsGroup"
 const { machineFromRow } = await import("../../src/apps/fleet/rows");
 const { fakeConnection, machineRow, withSession } = await import("./harness");
 
-// The scanner's three groups on the machine page (epic memql#5146).
+// Hardware facts and model details on the machine page (epic memql#5146).
 //
 // ===========================================================================
 // WHAT IS ASSERTED HERE
 // ===========================================================================
-// One idea, three times: ABSENCE IS AS LEGIBLE AS PRESENCE, and the three
-// kinds of absence must not look alike. A machine that has not reported, a
-// machine that reported and is under the floor, and a model nobody has probed
-// lead to opposite actions -- do nothing, buy hardware, press a button -- and
-// the generic rendering collapses all three into a blank or a zero.
-//
-// Everything below is a test for one of those collapses.
+// Missing hardware must remain distinct from an unsupported machine.
+// Model details are informational and must not read or start performance tests.
 
 afterEach(cleanup);
 
@@ -179,7 +174,7 @@ describe("the Hardware group", () => {
 // machine serves somebody else and a notice when it could not be read, and
 // the act offered to the owner alone. Each of those promises is kept there.
 
-// --- Models: the recommended set and the measured figures --------------------
+// --- Models: informational details -----------------------------------------
 
 const RECOMMENDED = {
   workerId: "laptop",
@@ -242,68 +237,23 @@ describe("the Models group's catalog boundary",()=>{
   });
 });
 
-describe("the Models group's measured figures", () => {
-  it("says a model is not measured rather than showing zeroes", async () => {
-    // THE COLLAPSE THIS WHOLE EPIC EXISTS TO PREVENT. "0%" and "0 tok/s" read
-    // exactly like a model that failed every case, and the two lead to
-    // opposite actions.
-    await mountModels({ recommended: [RECOMMENDED as unknown as Row] });
-    expect(screen.getByText(/Not measured on this machine yet/)).toBeTruthy();
-    expect(screen.queryByText("0%")).toBeNull();
-    expect(screen.queryByText(/0 tok\/s/)).toBeNull();
-  });
-
-  it("renders a MEASURED ZERO as a zero, because it is a measurement", async () => {
-    // The other half of the pair. Five cases that ran and all failed is a real
-    // and useful 0%, and it must not read as a model nobody probed.
-    await mountModels({
+describe("model details stay informational", () => {
+  it("does not read or render performance results even when measurements exist", async () => {
+    const connection = await mountModels({
       recommended: [RECOMMENDED as unknown as Row],
-      measurements: [
-        {
-          machineId: "laptop",
-          modelId: "qwen3.5:9b",
-          suiteVersion: "1",
-          measuredAt: "2026-09-07T10:00:00Z",
-          structuredValidity: { measured: true, median: 0, n: 5 },
-          toolCallCorrectness: { measured: true, median: 0.67, n: 3 },
-          throughputTps: { measured: true, median: 42 },
-          ttftMs: { measured: false, absentReason: "unmeasured" },
-          probeError: "",
-        } as unknown as Row,
-      ],
+      measurements: [{
+        machineId: "laptop", modelId: "qwen3.5:9b", suiteVersion: "1",
+        measuredAt: "2026-09-07T10:00:00Z",
+        structuredValidity: { measured: true, median: 0, n: 5 },
+        throughputTps: { measured: true, median: 42 },
+      } as unknown as Row],
     });
-    expect(screen.getByText("0%")).toBeTruthy();
-    expect(screen.getByText("67%")).toBeTruthy();
-    expect(screen.getByText("42")).toBeTruthy();
+    expect(screen.getByRole("region", { name: "Overview" })).toBeTruthy();
+    expect(screen.queryByRole("region", { name: "Test" })).toBeNull();
     expect(screen.queryByText(/Not measured on this machine yet/)).toBeNull();
-  });
-
-  it("reads the measured FLAG and never a median beside a false one", async () => {
-    // The kit's figureFrom reads KEY PRESENCE, which on this shape returns a
-    // measured 12.4 for a figure that says it is not one. This asserts the
-    // adapter reads the flag first.
-    await mountModels({
-      recommended: [RECOMMENDED as unknown as Row],
-      measurements: [
-        {
-          machineId: "laptop",
-          modelId: "qwen3.5:9b",
-          suiteVersion: "1",
-          measuredAt: "2026-09-07T10:00:00Z",
-          structuredValidity: { measured: false, median: 12.4, absentReason: "failed" },
-          toolCallCorrectness: { measured: false, absentReason: "unmeasured" },
-          throughputTps: { measured: false, absentReason: "unmeasured" },
-          ttftMs: { measured: false, absentReason: "unmeasured" },
-          probeError: "",
-        } as unknown as Row,
-      ],
-    });
-    expect(screen.queryByText(/1240%/)).toBeNull();
-    expect(screen.queryByText("12.4")).toBeNull();
-  });
-
-  it("offers Probe this model to the owner", async () => {
-    await mountModels({ recommended: [RECOMMENDED as unknown as Row] });
-    expect(screen.getByRole("button", { name: "Measure performance" })).toBeTruthy();
+    expect(screen.queryByText("0%")).toBeNull();
+    expect(screen.queryByText("42")).toBeNull();
+    expect(connection.query.measurementsForMachine).not.toHaveBeenCalled();
+    expect(connection.query.fleetModelProbe).not.toHaveBeenCalled();
   });
 });

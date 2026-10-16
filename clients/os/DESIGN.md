@@ -347,6 +347,8 @@ visit to a model and back.
 Task assignments belong exclusively on the Assignment board. Machine model
 details and the Model library show embedding-binding status without offering
 their own assignment buttons. Existing corpus bindings remain protected.
+Installed model details are informational: model facts, source notes and binding
+status. Do not offer a Test section, chat prompts or performance probes here.
 
 Small equipment, label and sharing collections share `kit/CardCarousel`: one or two
 cards according to available width, explicit previous/next arrows and an
