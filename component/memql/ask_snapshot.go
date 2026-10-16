@@ -156,8 +156,9 @@ func (e *MemQLEngine) refreshAskRuns(ctx context.Context, transcript *askTranscr
 		// earlier observer may have persisted drafts from a superseded attempt.
 		outcome, _ := run["classification"].(map[string]any)
 		workload, _ := outcome["workload"].(string)
-		if workload != "" && workload != "quick" {
-			turn.Background = true
+		turn.Background = (workload != "" && workload != "quick") || turn.Question != nil
+		if !turn.Background {
+			turn.Acknowledgement, turn.AcknowledgedAt = "", nil
 		}
 		if ack, _ := outcome["acknowledgement"].(string); ack != "" && turn.Background {
 			turn.Acknowledgement = ack
@@ -187,7 +188,7 @@ func (e *MemQLEngine) refreshAskRuns(ctx context.Context, transcript *askTranscr
 			turn.Answer = turn.Acknowledgement
 			turn.State, turn.Error, turn.EndedAt = "queued", "", nil
 			if pending.Waiting {
-				turn.State = "waiting"
+				turn.State, turn.Background = "waiting", true
 			}
 		case err != nil:
 			if run["status"] != "failed" && run["status"] != "cancelled" && run["status"] != "abandoned" {

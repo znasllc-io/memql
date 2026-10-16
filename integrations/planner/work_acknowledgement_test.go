@@ -127,3 +127,28 @@ func TestAcknowledgementFailureNeverLoopsOrManufacturesProse(t *testing.T) {
 		})
 	}
 }
+
+func TestShortActionsStillReceiveAnAcknowledgement(t *testing.T) {
+	for _, test := range []struct {
+		name     string
+		file     bool
+		workload string
+	}{
+		{"short action", false, "lookup"},
+		{"short file", true, "research"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			engine := &acknowledgementTestEngine{countingCompileEngine: &countingCompileEngine{triage: map[string]any{
+				"complexity": "trivial", "intent": "task", "requiresFile": test.file, "fileFormat": "markdown", "fileName": "coffee.md", "workload": "quick", "workTitle": "Coffee notes",
+			}}, repair: map[string]any{"acknowledgement": "I’ll prepare the coffee notes you requested."}}
+			req := compileReq()
+			req.Input = map[string]any{"conversation": map[string]any{"messages": []any{}}}
+			out, err := (&PlannerAgentLoop{engine: engine}).CompileGoalForRun(context.Background(), req, nil, realSandbox{})
+			require.NoError(t, err)
+			require.Equal(t, test.workload, out.Workload)
+			require.False(t, out.Reply)
+			require.Equal(t, "I’ll prepare the coffee notes you requested.", out.Acknowledgement)
+			require.Equal(t, []string{"goalComplexityTriage", "workAcknowledgement"}, engine.aiCalls)
+		})
+	}
+}

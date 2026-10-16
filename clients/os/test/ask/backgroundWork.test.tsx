@@ -1,5 +1,6 @@
 import { afterEach, expect, it, vi } from "vitest";
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { AskSurface } from "../../src/ask/AskSurface";
 import { AskWorkLink } from "../../src/ask/AskWorkLink";
 import { AskWorkQueue } from "../../src/ask/AskWorkQueue";
 import { conversationFeed } from "../../src/ask/conversationFeed";
@@ -7,7 +8,7 @@ import { ConversationSession, type AskTurn } from "../../src/ask/conversationSes
 import type { AskCallbacks, AskTransport } from "../../src/ask/askController";
 
 afterEach(() => { cleanup(); vi.useRealTimers(); });
-const turn = (id: string, fields: Partial<AskTurn> = {}): AskTurn => ({ id, runId: `run-${id}`, prompt: `Request ${id}`, workTitle: `Work ${id}`, answer: "Accepted", state: "queued", activity: [], startedAt: "2026-10-05T10:00:00Z", ...fields });
+const turn = (id: string, fields: Partial<AskTurn> = {}): AskTurn => ({ id, runId: `run-${id}`, prompt: `Request ${id}`, workTitle: `Work ${id}`, answer: "Accepted", background: true, state: "queued", activity: [], startedAt: "2026-10-05T10:00:00Z", ...fields });
 it("shows one to three work cards; four collapses to a scoped list link", () => {
  const onOpen = vi.fn(); const turns = [turn("a"), turn("b", {state:"waiting"}), turn("c")];
  const view = render(<AskWorkQueue turns={turns} onOpen={onOpen} />);
@@ -22,7 +23,7 @@ it("shows one to three work cards; four collapses to a scoped list link", () => 
 });
 it("places a late result after intervening replies and retains its original request", () => {
  const task = turn("a", { acknowledgement:"I’m working on this.", answer:"Research result", state:"done", endedAt:"2026-10-05T10:03:00Z" });
- const quick = turn("b", { state:"done", startedAt:"2026-10-05T10:01:00Z", endedAt:"2026-10-05T10:01:02Z", answer:"Quick answer" });
+ const quick = turn("b", { background: false, state:"done", startedAt:"2026-10-05T10:01:00Z", endedAt:"2026-10-05T10:01:02Z", answer:"Quick answer" });
  const feed = conversationFeed([task,quick]);
  expect(feed.map(item => item.key)).toEqual(["a","b","a:result"]);
  expect(feed[0]?.turn.answer).toBe(task.acknowledgement);
@@ -105,5 +106,30 @@ it("accepts a running background receipt without losing run identity on later ev
  callbacks.delta("I’ll check those records."); callbacks.done();
  expect(session.getSnapshot().busy).toBe(false);
  expect(session.getSnapshot().turns[0]).toMatchObject({runId:"r",goalId:"g",background:true,workStatus:"running",acknowledgedAt:"2026-10-05T10:00:01Z",acknowledgement:"I’ll check those records.",state:"queued"});
+ session.dispose();
+});
+
+it.each([undefined, "quick"])("keeps a recovered %s conversation inline without a work card", async workload => {
+ const stored = turn("greeting", { background: false, answer: "", workload, workStatus: "compiling" });
+ const transport = { ask: vi.fn(() => ({ cancel() {} })), conversations: { list: async () => [], create: async () => ({id:"chat",title:"Chat"}), read: async () => [stored] } };
+ const session = new ConversationSession(transport); await session.select("chat");
+ render(<AskSurface conversation={session} transport={transport} variant="sheet" availability={{state:"ready",message:"",refresh(){}}} onOpenWork={vi.fn()} />);
+ expect(screen.getByLabelText("Waiting for your model")).toBeTruthy();
+ expect(screen.queryByLabelText("Background work")).toBeNull();
+ expect(screen.queryByRole("button", {name:/View work/})).toBeNull();
+ expect(screen.queryByRole("alert")).toBeNull();
+ session.dispose();
+});
+it("places the work shortcut after acknowledgement text and keeps only navigation on the card", async () => {
+ const stored = turn("task", { acknowledgement: "I’ll compare the **reports**.", answer: "I’ll compare the **reports**.", canGuideWork: true, guidanceEpoch: "current" });
+ const transport = { ask: vi.fn(() => ({cancel(){}})), conversations: { list: async()=>[], create:async()=>({id:"chat",title:"Chat"}), read:async()=>[stored] } };
+ const session = new ConversationSession(transport); await session.select("chat"); const onOpen = vi.fn();
+ const view = render(<AskSurface conversation={session} transport={transport} variant="sheet" availability={{state:"ready",message:"",refresh(){}}} onOpenWork={onOpen} />);
+ const shortcut = screen.getByRole("button", {name:/View work: Work task/});
+ expect(shortcut.parentElement?.classList.contains("os-ask-answer-with-link")).toBe(true);
+ expect(shortcut.previousElementSibling?.textContent).toBe("I’ll compare the reports.");
+ fireEvent.click(shortcut); expect(onOpen).toHaveBeenLastCalledWith("run-task", "chat");
+ expect(view.container.querySelectorAll(".os-ask-work-queue button")).toHaveLength(1);
+ expect(screen.queryByRole("button", {name:/Guide this work/})).toBeNull();
  session.dispose();
 });

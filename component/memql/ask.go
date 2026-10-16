@@ -291,11 +291,12 @@ func (e *MemQLEngine) RunAsk(ctx context.Context, conversationID, turnID, prompt
 		if pending.Waiting {
 			phase = "waiting"
 		}
+		// Deliver the model's acknowledgment before exposing its work card.
+		if onText != nil && answer == "" && turn.Answer != "" {
+			onText(turn.Answer)
+		}
 		if err = emit(WorkEvent{ID: "work:" + turn.RunID, Kind: "run", Phase: phase, Name: turn.WorkTitle, Arguments: map[string]any{"goalId": turn.GoalID, "runId": turn.RunID, "workload": turn.Workload, "workTitle": turn.WorkTitle, "background": true, "workStatus": turn.WorkStatus, "acknowledgedAt": turn.AcknowledgedAt}}); err != nil {
 			return "", err
-		}
-		if onText != nil && answer == "" {
-			onText(turn.Answer)
 		}
 		return turn.Answer, nil
 	}

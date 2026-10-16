@@ -115,18 +115,34 @@ func TestWorkObserverDeliversPersistedBuiltinFileReceipt(t *testing.T) {
 	require.Empty(t, workResultFiles(steps), "a failed step is not a delivery receipt")
 }
 
-func TestSlowClassificationReleasesTheComposerWithoutResubmitting(t *testing.T) {
-	read := func(_ context.Context, name, _ string) ([]map[string]any, error) {
-		if name == "workRunForOwner" {
-			return []map[string]any{{"status": "compiling", "startedAt": time.Now().Add(-20 * time.Second).Format(time.RFC3339Nano)}}, nil
+func TestSlowClassificationKeepsQuickRepliesInline(t *testing.T) {
+	reads := 0
+	read := func(_ context.Context, name, runID string) ([]map[string]any, error) {
+		require.Equal(t, "same-run", runID)
+		switch name {
+		case "workRunForOwner":
+			reads++
+			if reads == 1 {
+				return []map[string]any{{"status": "compiling", "startedAt": time.Now().Add(-30 * time.Second).Format(time.RFC3339Nano)}}, nil
+			}
+			status := "running"
+			if reads > 2 {
+				status = "succeeded"
+			}
+			return []map[string]any{{"status": status, "classification": map[string]any{"workload": "quick"}}}, nil
+		case "workStepsForOwnerRun":
+			return []map[string]any{responseStep(1, "done", "¡Hola! ¿Cómo estás?")}, nil
 		}
 		return nil, nil
 	}
-	ctx := context.WithValue(context.Background(), workFollowModeKey{}, followBackground)
-	_, err := followWorkRun(ctx, "run", read, nil, nil, time.Millisecond)
-	var pending *workPending
-	require.ErrorAs(t, err, &pending)
-	require.False(t, pending.Waiting)
+	ctx, cancel := context.WithTimeout(context.WithValue(context.Background(), workFollowModeKey{}, followBackground), time.Second)
+	defer cancel()
+	var delivered []string
+	answer, err := followWorkRun(ctx, "same-run", read, func(text string) { delivered = append(delivered, text) }, nil, time.Millisecond)
+	require.NoError(t, err)
+	require.Equal(t, "¡Hola! ¿Cómo estás?", answer)
+	require.Equal(t, []string{answer}, delivered)
+	require.Equal(t, 3, reads)
 }
 
 func TestCapabilityDiscoveryRanksRelevantPartialMatches(t *testing.T) {

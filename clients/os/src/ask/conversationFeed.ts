@@ -7,7 +7,7 @@ export function conversationFeed(turns: AskTurn[]) {
     // The queue receipt records when the acknowledgment was ready. Keep it
     // distinct from the request's start and the eventual background result.
     const acknowledgedAt = turn.acknowledgement?.trim() ? (turn.acknowledgedAt && Number.isFinite(Date.parse(turn.acknowledgedAt)) ? turn.acknowledgedAt : turn.activity.find(event =>
-      event.kind === "run" && (event.phase === "queued" || event.phase === "waiting") && Number.isFinite(Date.parse(event.at)),
+      event.kind === "run" && (event.arguments?.background === true || event.phase === "queued" || event.phase === "waiting") && Number.isFinite(Date.parse(event.at)),
     )?.at) : undefined;
     const completedAt = turn.state === "done" ? turn.endedAt : undefined;
     const first = { turn, completion: false, key: turn.id, at: turn.startedAt, workState: turn.state, responseAt: acknowledgedAt ?? completedAt };

@@ -94,7 +94,15 @@ func TestAskBackgroundResultReconstructedOnAnotherReplica(t *testing.T) {
 		raw, _ := json.Marshal(map[string]any{"runId": runID, "goalId": "goal"})
 		return []memorynodes.MemoryNode{{ID: "intake", Payload: raw}}, nil
 	}
-	answer, err := a.RunAsk(ctx, conversation, "first", "Research birds", "", AskRoute{}, nil, nil)
+	var delivery []string
+	answer, err := a.RunAsk(ctx, conversation, "first", "Research birds", "", AskRoute{}, func(text string) {
+		delivery = append(delivery, "ack:"+text)
+	}, func(event WorkEvent) {
+		if event.Arguments["background"] == true {
+			delivery = append(delivery, "card")
+		}
+	})
+	require.Equal(t, []string{"ack:I’ll look into the birds you asked about.", "card"}, delivery)
 	require.NoError(t, err)
 	require.NotEmpty(t, answer)
 	runCtx := common.ContextWithRun(ctx, common.RunContext{RunId: runID, GoalId: "goal", OwnerUserId: ac.UserId, StepKey: "reason"})
@@ -181,8 +189,13 @@ func TestLateAcknowledgementAndRunStatusSurviveReplicaChanges(t *testing.T) {
 	}
 	before := read(b)
 	require.Equal(t, "compiling", before.WorkStatus)
+	require.False(t, before.Background, "an observer on another replica must not turn cold classification into work")
 	require.Empty(t, before.Acknowledgement)
 	require.Nil(t, before.AcknowledgedAt)
+	write(b, "updateWorkRun", map[string]any{"runId": runID, "classification": map[string]any{"workload": "quick"}})
+	quick := read(a)
+	require.False(t, quick.Background, "a recovered greeting stays inline")
+	require.Empty(t, quick.Acknowledgement)
 	ackAt := time.Now().UTC()
 	write(b, "updateWorkRun", map[string]any{"runId": runID, "status": "running", "classification": map[string]any{"workload": "lookup", "workTitle": "Check records", "acknowledgement": "I’ll check the available records.", "acknowledgedAt": ackAt.Format(time.RFC3339Nano)}})
 	running := read(a)

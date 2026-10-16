@@ -48,7 +48,8 @@ it("refreshes a terminal linked run on ordinary reopen while retaining its draft
   act(() => test.controls.closeAsk());
   test.setStored([{ ...lost, error: undefined, state: "queued", workStatus: "running", canGuideWork: true, guidanceEpoch: "rerun" }]);
   await open();
-  fireEvent.click(screen.getByRole("button", { name: "Guide this work: Verify change" }));
+  expect(screen.queryByRole("button", { name: /Guide this work/ })).toBeNull();
+  act(() => { test.controls.conversation.beginWorkGuidance(lost.id); });
   expect(test.controls.conversation.getSnapshot().workGuidance).toMatchObject({ runId: "same-run", targetEpoch: "rerun" });
   expect(screen.getByRole("textbox", { name: "Ask" })).toHaveProperty("value", "My unsent review");
   expect(test.store.list).toHaveBeenCalledTimes(histories);

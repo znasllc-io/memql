@@ -101,10 +101,14 @@ files, sections or workload. When it does not fit, write a fresh acknowledgment.
 Estimate workload separately from intent and from the length of the user's
 message. "quick" means a greeting, supplied information, or an answer already
 supported by the current context/general knowledge, with no retrieval or
-research needed. "lookup" means a short search of saved information or current
+research needed. A greeting such as "hi", "hola", or "how are you?" stays a
+quick reply even if the model takes time to start. Do not invent a task for it.
+Only intent "reply" can be quick. Every requested action or saved file needs a
+work acknowledgement, including a short Markdown file. Its complexity can still
+be trivial. "lookup" means a short search of saved information or current
 state (including personal facts from previous conversations). Missing a personal
 fact in this conversation is a lookup, not a quick denial of knowledge. "research" means
-finding and evaluating multiple sources, or producing a substantive file.
+finding and evaluating multiple sources, or producing any saved file.
 "project" means substantial multi-phase production or a deployable. Never
 classify a question as quick merely because it is short. The quick path replies
 inline; the other workloads can continue in the background while the person
