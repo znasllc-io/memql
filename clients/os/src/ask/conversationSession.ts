@@ -346,8 +346,24 @@ export class ConversationSession {
     this.leaveWorkGuidance();
     this.patch({ selectedId: null, openingId: null, selectionError: "", turns: [], dictationActivity: [], draft: "", error: "", snapshotError: "", loading: false, focusQuestionId: null });
   };
+  /** The explicit New action persists even when no inference is available. */
+  createConversation = async () => {
+    if (this.disposed || this.state.busy || this.state.loading || this.state.voiceActive) return;
+    const selection = ++this.selection;
+    this.patch({ loading: true, error: "" });
+    try {
+      if (!this.transport.conversations) throw new Error("Conversations are unavailable.");
+      const item = await this.transport.conversations.create();
+      if (selection !== this.selection || this.disposed) return;
+      this.historyEpoch++;
+      this.newConversation();
+      this.patch({ selectedId: item.id, conversations: [item, ...this.state.conversations.filter(row => row.id !== item.id)], historyLoading: false });
+    } catch (error) {
+      if (selection === this.selection && !this.disposed) this.patch({ loading: false, error: message(error) });
+    }
+  };
   select = async (id: string, forDiscussion = false) => {
-    if (id === this.state.selectedId && !this.state.openingId) return true;
+    if (id === this.state.selectedId && !this.state.openingId && !this.state.loading) return true;
     if (this.state.busy || this.state.voiceActive || !this.transport.conversations) return false;
     if (!forDiscussion) this.leaveDiscussion();
     const selection = ++this.selection;

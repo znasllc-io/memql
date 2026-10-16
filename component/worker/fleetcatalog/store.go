@@ -27,7 +27,19 @@ func (s *EngineStore) WorkersForOwner(ctx context.Context, ownerUserId string) (
 	if strings.TrimSpace(ownerUserId) == "" {
 		return nil, fmt.Errorf("agent.worker store: ownerUserId is required")
 	}
-	res, err := s.Engine.Execute(auth.ContextWithUserActor(ctx, ownerUserId), `query myWorkersWithStatus()`)
+	if err := auth.ValidateRoleTestContext(ctx); err != nil {
+		return nil, err
+	}
+	readCtx := ctx
+	if ac, ok := auth.AccessFromContext(ctx); !ok || !workerservice.SameSubjectId(ac.UserId, ownerUserId) {
+		// A test persona can only act as itself. Never turn a caller-supplied
+		// owner into borrowed authority for a test session.
+		if auth.IsRoleTestUser(ownerUserId) || roleTestContext(ctx) {
+			return nil, fmt.Errorf("fleet read: role test cannot borrow another owner")
+		}
+		readCtx = auth.ContextWithUserActor(ctx, ownerUserId)
+	}
+	res, err := s.Engine.Execute(readCtx, `query myWorkersWithStatus()`)
 	if err != nil {
 		return nil, fmt.Errorf("fleet read: %w", err)
 	}
@@ -89,9 +101,21 @@ func (s *EngineStore) SharedInferenceWorkers(ctx context.Context) ([]Candidate, 
 	if s == nil || s.Engine == nil {
 		return nil, nil
 	}
-	res, err := s.Engine.Execute(systemFleetContext(ctx), `query allWorkersWithStatus()`)
+	if err := auth.ValidateRoleTestContext(ctx); err != nil {
+		return nil, err
+	}
+	// This fixed internal read already borrows the fleet service's authority.
+	// It must not pretend that authority is the persona's forwarded identity.
+	// Keep the original caller for validation before AND after the read; only
+	// this one named query sees the service actor. Reader filters its result
+	// through the machine owner's sharing consent before exposing a catalog.
+	readCtx := auth.ContextWithForwardedAuthority(ctx, auth.ForwardedAuthority{})
+	res, err := s.Engine.Execute(systemFleetContext(readCtx), `query allWorkersWithStatus()`)
 	if err != nil {
 		return nil, fmt.Errorf("shared fleet read: %w", err)
+	}
+	if err := auth.ValidateRoleTestContext(ctx); err != nil {
+		return nil, err
 	}
 	if res == nil {
 		return nil, nil
@@ -294,6 +318,14 @@ func systemFleetContext(ctx context.Context) context.Context {
 }
 
 const systemFleetActor = "system:fleet-inference"
+
+func roleTestContext(ctx context.Context) bool {
+	if a, ok := auth.ForwardedAuthorityFromContext(ctx); ok && a.CredentialClass == auth.RoleTestClass {
+		return true
+	}
+	c, ok := auth.ClaimsFromContext(ctx)
+	return ok && c["class"] == auth.RoleTestClass
+}
 
 func outputPayloadRows(payload any) []map[string]any {
 	if payload == nil {

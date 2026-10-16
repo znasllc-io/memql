@@ -6,6 +6,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/znasllc-io/memql/component/auth"
 	memqlengine "github.com/znasllc-io/memql/component/memql"
 	workerservice "github.com/znasllc-io/memql/component/worker"
 )
@@ -68,6 +69,11 @@ func (r *Reader) Catalog(ctx context.Context, owner string) ([]memqlengine.Fleet
 				machines = append(machines, lentToPerson(ctx, owner, machines, all, r.Groups)...)
 			}
 		}
+	}
+	// Shared-read failures normally preserve the own catalog. A session that
+	// ended during either read must instead withhold the entire result.
+	if err := auth.ValidateRoleTestContext(ctx); err != nil {
+		return nil, err
 	}
 	now := time.Now()
 	if r.Now != nil {

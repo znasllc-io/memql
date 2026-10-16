@@ -11,7 +11,10 @@ import { revokeRefreshToken, signOutMessage } from "./auth/revoke.js";
 import type { ClusterConfig } from "./clusters/model.js";
 
 export function activate(context: vscode.ExtensionContext) {
-  const roleTestMode = vscode.workspace.getConfiguration("memql").get("roleTest") === true;
+  // The dedicated host sets this launch-only manifest value before the worker
+  // starts. Configuration defaults are not transported for undeclared settings
+  // and user settings must never be able to switch an isolated tab's identity.
+  const roleTestMode = context.extension.packageJSON.memqlRoleTest === true;
   const registry = new BrowserRegistry(roleTestMode ? new MemoryProfileState() : context.globalState, context.secrets);
   const store = { secrets: context.secrets, writeCluster: registry.write };
   let selected: ClusterConfig | undefined;
