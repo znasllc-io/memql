@@ -40,6 +40,15 @@ toolchain through MemQL, publish its verified OCI artifact, then pin that digest
 before wiring the host suite into the package. The older pinned image lacks the
 required libraries; changing the Dockerfile alone does not upgrade it.
 
+The release pipeline declares `build-tools.toolchain`, an isolated Linux AMD64
+image build from `deploy/toolchain-image`. It runs only after preceding release
+checks pass, with three CPUs, 8 GiB and a 45-minute deadline. It retains the OCI
+archive and metadata in the Library and receives no publication credential.
+Load that exact cloud-built archive into Docker and run
+`deploy/toolchain-image/smoke-test.sh` against it before approving publication;
+the earlier local build's smoke result does not qualify a different archive.
+Publication and the subsequent reviewed digest pin remain separate steps.
+
 Each attempt requires an empty output directory. Preparation failures stop
 before any host starts. Once prepared, all selected hosts run even if one fails,
 with a separate log and result for each. Any missing or failed host makes the
