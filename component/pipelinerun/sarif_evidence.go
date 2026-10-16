@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 
+	langparser "github.com/znasllc-io/memql/component/language/parser"
 	"github.com/znasllc-io/memql/component/memql"
 	"github.com/znasllc-io/memql/component/pipelines"
 )
@@ -36,11 +37,11 @@ func readSARIFEvidence(ctx context.Context, engine Engine, owner string, r Run, 
 		}
 		return rows[0], nil
 	}
-	run, err := one(fmt.Sprintf("query workRunForOwner(runId: %q)", r.WorkRunID))
+	run, err := one(fmt.Sprintf("query workRunForOwner(runId: %s)", langparser.QuoteString(r.WorkRunID)))
 	if err != nil {
 		return pipelines.ReleaseWorkReceipt{}, err
 	}
-	step, err := one(fmt.Sprintf("query workStepForOwnerRun(runId: %q, stepKey: %q)", r.WorkRunID, key))
+	step, err := one(fmt.Sprintf("query workStepForOwnerRun(runId: %s, stepKey: %s)", langparser.QuoteString(r.WorkRunID), langparser.QuoteString(key)))
 	if err != nil {
 		return pipelines.ReleaseWorkReceipt{}, err
 	}
