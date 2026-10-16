@@ -125,7 +125,7 @@ export class SdkAskTransport implements AskTransport {
             if (chunk.textDelta) { answer += chunk.textDelta; on.delta(chunk.textDelta); }
             if (chunk.metadata?.ask) {
               const activity = chunk.metadata.ask as AskActivity;
-              if (activity.kind === "run" && (activity.phase === "queued" || activity.phase === "waiting")) backgroundAccepted = true;
+              if (activity.kind === "run" && (activity.arguments?.background === true || activity.phase === "queued" || activity.phase === "waiting")) backgroundAccepted = true;
               on.activity?.(activity);
             }
           }
