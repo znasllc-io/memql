@@ -1,5 +1,4 @@
 use agents.builtins.{ ai }
-use work.context.{ workSourceContext }
 
 // automations.memql
 //
@@ -92,10 +91,12 @@ automation workPrepareFileEvidence {
   properties: {ready: {type: "boolean"}, reply: {type: "string"}, basis: {type: "string"}, usesRecordedSources: {type: "boolean"}}
  }, data: {statement: args.statement, conversation: args.conversation, sources: toString(sources), draft: args.draft})
  decision := assessment.structured
+ explanation := trim(decision.reply ?? "")
+ brief := trim(decision.basis ?? "")
  if decision.ready != true {
-  if trim(decision.reply ?? "") == "" { return error("Source check did not explain the missing evidence.") }
+  if explanation == "" { return error("Source check did not explain the missing evidence.") }
   return {ready: false, reply: decision.reply, basis: "", sources: []}
  }
- if trim(decision.basis ?? "") == "" { return error("Source check did not provide a grounded brief.") }
+ if brief == "" { return error("Source check did not provide a grounded brief.") }
  return {ready: true, reply: "", basis: decision.basis, sources: decision.usesRecordedSources ? sources.references : []}
 }

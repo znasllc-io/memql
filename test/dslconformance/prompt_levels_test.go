@@ -57,6 +57,8 @@ var promptLevels = map[string]string{
 	"workDocumentSectionsRepair": "strong",
 	// One bounded repair of acknowledgment wording; never reclassifies work.
 	"workAcknowledgement": "fast",
+	// Source sufficiency and unsupported inferences require the judgment tier before filing.
+	"workFileEvidence": "strong",
 	// Quick conversational replies have no research, file or tool obligations.
 	// Fast avoids paying for a strong agent loop after the classifier already
 	// excluded those tasks; the run still carries its ordinary call/time budget.
