@@ -48,8 +48,12 @@ release publication, deployment, notification, or complete Actions coverage.
 
 ## Capacity and networking proposal
 
-Use one Linux amd64 `builds` user pool, D8as_v7 (8 vCPUs, 32 GiB), with
+Use one Linux amd64 `builds` user pool, D16as_v7 (16 vCPUs, 64 GiB), with
 autoscaling 0–1, a 128 GiB managed OS disk and scale-down mode `Delete`.
+Two allowed steps may each reserve four CPUs; an eight-vCPU node has less
+than eight allocatable CPUs and would leave the second step unschedulable.
+Sixteen CPUs accommodate both reservations and system overhead, matching the
+CPU capacity of the local full-suite proof. Keep the two-Job limit initially.
 The subscription's SKU response lists no restrictions for this size in East
 US, but that does not reserve allocation capacity. This SKU does not support
 ephemeral OS disks. Set both label and matching `NoSchedule` taint to
@@ -57,19 +61,19 @@ ephemeral OS disks. Set both label and matching `NoSchedule` taint to
 that pool. Keep the existing shared cache PVC. Do not move builds onto serving
 nodes if capacity is missing.
 
-Request regional and Dasv7 quotas of **32 vCPUs**. Eight existing plus eight
-build vCPUs use sixteen normally; a build-node surge and one two-vCPU surge
-in each existing pool could require twenty-eight. Quota is headroom, not a
-request to run thirty-two vCPUs. The steady build-pool maximum remains one;
+Request regional and Dasv7 quotas of **48 vCPUs**. Eight existing plus sixteen
+build vCPUs use twenty-four normally; a build-node surge and one two-vCPU surge
+in each existing pool could require forty-four. Quota is headroom, not a
+request to run forty-eight vCPUs. The steady build-pool maximum remains one;
 an explicitly managed upgrade can temporarily add a surge node.
 
 East US public pay-as-you-go prices observed through the
 [Azure Retail Prices API](https://learn.microsoft.com/en-us/rest/api/cost-management/retail-prices/azure-retail-prices)
-on October 16: Linux D8as_v7 **$0.363/hour**, P10 LRS 128 GiB OS disk
+on October 16: Linux D16as_v7 **$0.726/hour**, P10 LRS 128 GiB OS disk
 **$19.71/month**, premium LRS block-blob storage **$0.15/GB-month**. At 730
-node-hours, compute plus one OS disk is approximately **$284.70/month**.
+node-hours, compute plus one OS disk is approximately **$549.69/month**.
 At 240 node-hours, an indicative hourly-prorated compute/disk estimate is
-**$93.60/month**. A full 50 GB cache adds approximately **$7.50/month** of
+**$180.72/month**. A full 50 GB cache adds approximately **$7.50/month** of
 stored bytes. These estimates exclude taxes, transactions, network transfer,
 temporary surge capacity and retained Library artifacts; actual billing must
 be measured. The cache is persistent and its PVC request is not a retention
