@@ -17,6 +17,9 @@ profile PROFILE_NAME flags=(attach_disconnected,mediate_deleted) {
   signal (receive) peer=runc,
   signal (receive) peer=crun,
   signal (send,receive) peer=PROFILE_NAME,
+  # runc must read its own child mount namespace while creating the sandbox.
+  # The seccomp policy still denies ptrace and process_vm_* system calls.
+  ptrace (read,readby) peer=PROFILE_NAME,
   ptrace (readby,tracedby) peer=unconfined,
   ptrace (readby,tracedby) peer=runc,
   deny /proc/sys/** w,

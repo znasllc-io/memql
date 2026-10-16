@@ -6,6 +6,7 @@ import (
 	"net"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"syscall"
 	"time"
@@ -13,11 +14,22 @@ import (
 
 func main() {
 	checks := map[string]bool{}
+	// syscall's frozen amd64 table predates process_vm_*. These are the Linux
+	// syscall ABI numbers for the two platforms admitted by the image builder.
+	var readVM, writeVM uintptr
+	switch runtime.GOARCH {
+	case "amd64":
+		readVM, writeVM = 310, 311
+	case "arm64":
+		readVM, writeVM = 270, 271
+	default:
+		panic("unsupported probe architecture")
+	}
 	_, _, e := syscall.RawSyscall(syscall.SYS_PTRACE, 0, 0, 0)
 	checks["ptrace_denied"] = e == syscall.EPERM
-	_, _, e = syscall.RawSyscall6(syscall.SYS_PROCESS_VM_READV, uintptr(os.Getpid()), 0, 0, 0, 0, 0)
+	_, _, e = syscall.RawSyscall6(readVM, uintptr(os.Getpid()), 0, 0, 0, 0, 0)
 	checks["process_vm_read_denied"] = e == syscall.EPERM
-	_, _, e = syscall.RawSyscall6(syscall.SYS_PROCESS_VM_WRITEV, uintptr(os.Getpid()), 0, 0, 0, 0, 0)
+	_, _, e = syscall.RawSyscall6(writeVM, uintptr(os.Getpid()), 0, 0, 0, 0, 0)
 	checks["process_vm_write_denied"] = e == syscall.EPERM
 	f, err := os.OpenFile("/proc/sys/kernel/hostname", os.O_WRONLY, 0)
 	checks["kernel_settings_not_writable"] = err != nil
