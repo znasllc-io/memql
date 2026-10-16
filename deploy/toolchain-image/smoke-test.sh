@@ -18,9 +18,10 @@
 #                                            and NO dockerd or containerd. A
 #                                            miss exits non-zero naming the
 #                                            tool.
-#   2. Go and protoc are the versions this repository pins, read from WHERE it
+#   2. Go, protoc and Tailwind are the versions this repository pins, read from WHERE it
 #      pins them (go.work's toolchain line, scripts/dev/proto-gen.sh's
-#      PROTOC_VERSION) rather than from a third copy here. A pinned image
+#      PROTOC_VERSION, scripts/identity/build-css.sh's TAILWIND_VERSION) rather
+#      than from a third copy here. A pinned image
 #      carrying another Go would test the repository on a Go nothing else runs.
 #      Node's MAJOR is the one this image's Dockerfile declares
 #      (`FROM node:<major>-...`): no file pins Node repository-wide (the
@@ -87,6 +88,13 @@ function declared_node_major() {
 	printf '%s' "$v"
 }
 
+function pinned_tailwind() {
+	local v
+	v="$(sed -n 's/^TAILWIND_VERSION="\([^"]*\)"$/\1/p' "${REPO_ROOT}/scripts/identity/build-css.sh")"
+	[[ -n "$v" ]] || fail "could not read TAILWIND_VERSION from scripts/identity/build-css.sh"
+	printf '%s' "$v"
+}
+
 function assert_tools_run() {
 	info "(1) every tool a step reaches for runs..."
 	in_image <<'SCRIPT' || fail "a tool a pipeline step needs is missing or broken (see above)"
@@ -125,12 +133,13 @@ SCRIPT
 }
 
 function assert_pinned_versions() {
-	local want_go want_protoc want_node
+	local want_go want_protoc want_node want_tailwind
 	want_go="$(pinned_go)"
 	want_protoc="$(pinned_protoc)"
 	want_node="$(declared_node_major)"
-	info "(2) Go is ${want_go} (go.work), protoc ${want_protoc} (scripts/dev/proto-gen.sh), Node ${want_node}.x (its Dockerfile)..."
-	in_image -e "WANT_GO=${want_go}" -e "WANT_PROTOC=${want_protoc}" -e "WANT_NODE_MAJOR=${want_node}" <<'SCRIPT' || fail "the image does not carry the toolchain this repository pins"
+	want_tailwind="$(pinned_tailwind)"
+	info "(2) pinned Go ${want_go}, protoc ${want_protoc}, Tailwind ${want_tailwind}, Node ${want_node}.x..."
+	in_image -e "WANT_GO=${want_go}" -e "WANT_PROTOC=${want_protoc}" -e "WANT_NODE_MAJOR=${want_node}" -e "WANT_TAILWIND=${want_tailwind}" <<'SCRIPT' || fail "the image does not carry the toolchain this repository pins"
 set -euo pipefail
 # GOTOOLCHAIN=local: report the Go INSTALLED here, never one fetched on demand.
 got_go="$(GOTOOLCHAIN=local go env GOVERSION)"
@@ -150,7 +159,32 @@ if [[ "$got_node_major" != "$WANT_NODE_MAJOR" ]]; then
 	echo "ERROR: the image's Node is ${got_node}; its Dockerfile declares node ${WANT_NODE_MAJOR}" >&2
 	exit 1
 fi
-echo "  go ${got_go#go}, protoc ${got_protoc#libprotoc }, node ${got_node#v}"
+got_tailwind="$(NO_COLOR=1 tailwindcss --help)"
+if [[ "${got_tailwind%%$'\n'*}" != "≈ tailwindcss ${WANT_TAILWIND}" ]]; then
+	echo "ERROR: the image's Tailwind differs from scripts/identity/build-css.sh's ${WANT_TAILWIND}" >&2
+	exit 1
+fi
+echo "  go ${got_go#go}, protoc ${got_protoc#libprotoc }, node ${got_node#v}, tailwind ${WANT_TAILWIND}"
+SCRIPT
+}
+
+# A fresh checkout with no bin/tools and no network proves the actual build
+# script uses the baked compiler. Mount the source read-only and copy only the
+# CSS inputs to a temporary checkout so the smoke test never edits the host.
+function assert_identity_css_builds_offline() {
+	info "identity CSS compiles in a fresh checkout without downloads..."
+	in_image --network=none -v "${REPO_ROOT}:/source:ro" <<'SCRIPT' || fail "identity CSS could not compile without downloading Tailwind"
+set -euo pipefail
+cd "$(mktemp -d)"
+mkdir -p scripts/identity component/identity/web/static
+cp /source/scripts/identity/{build-css.sh,lib.sh} scripts/identity/
+cp -R /source/brand .
+cp -R /source/component/identity/web/{tailwind,templ} component/identity/web/
+bash scripts/identity/build-css.sh
+test -s component/identity/web/static/app.css
+test -s component/identity/web/static/favicon.svg
+test ! -e bin/tools
+echo "  identity CSS: compiled offline with the toolchain's Tailwind"
 SCRIPT
 }
 
@@ -279,6 +313,7 @@ function main() {
 	assert_tools_run
 	assert_pinned_versions
 	assert_toolchain_builds
+	assert_identity_css_builds_offline
 	assert_runtime_contract
 	assert_git_reads_a_foreign_checkout
 	info "SUCCESS: ${IMAGE} passed every smoke check"
