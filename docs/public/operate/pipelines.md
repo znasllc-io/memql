@@ -648,6 +648,52 @@ what to do. Fix the block and push: the next run reads the fixed manifest.
 
 ---
 
+## Publishing retained security reports
+
+`pipelinesPublishSARIF(runId: ..., stepKey: ..., path: ...)` publishes one
+retained `.sarif` file from a completed, successful native pipeline. The caller
+must own the pipeline and still reach its repository through the source's
+GitHub connection. The installed GitHub App needs **Code scanning alerts: Read
+and write** (`security_events: write`); existing installations must accept that
+permission before publication. The App manifest requests it alongside check
+reporting permissions. No installation token reaches a scanner container.
+
+The source commit and full Git ref come from the recorded run. The native
+publisher checks the successful scanner journal, pins the exact artifact,
+and verifies its object version, size and SHA-256 before uploading. The report
+must fit the 32 MiB uncompressed bound and GitHub's compressed upload bound.
+The result identifies the durable `publicationId`, exact `sha256`, and state:
+
+| State | Meaning |
+|---|---|
+| `prepared` | Inputs recorded; no upload claimed yet |
+| `accepted` | GitHub supplied an upload ID; ingestion is still pending |
+| `complete` | GitHub confirmed ingestion |
+| `failed` | GitHub rejected the report during ingestion |
+| `rejected` | The upload was definitively refused |
+| `uncertain` | An uploader is still unresolved, or its reply/receipt was lost |
+
+Use `pipelinesReadSARIF(publicationId: ...)` to observe a pending upload from
+any replica. It never uploads. A repeated publish call for the same evidence
+also observes the existing receipt. A recorded `accepted` state survives a
+status-read failure; a replacement host continues GET requests for that ID.
+An unresolved POST is never silently repeated, including after losing the
+database write that would have recorded its response. Inspect that operation
+before explicitly starting a new scanner run; a timeout is not evidence that
+GitHub accepted nothing.
+
+Terminal receipts release this consumer's artifact pin, so normal retention
+can reclaim the file; the publication journal remains. Uncertain uploads retain
+their evidence for investigation. `complete` proves report delivery, not an
+absence of security findings. The current operation requires the overall run
+to have succeeded; failed runs retain their reports but cannot publish through
+this entry point. Selection, automatic triggering, polling cadence and failure
+notification belong to the calling automation. Declaring an artifact alone
+does not enable automatic upload.
+
+GitHub's [SARIF API](https://docs.github.com/en/rest/code-scanning/code-scanning)
+defines the asynchronous ingestion status and required repository permission.
+
 ## Secrets
 
 A manifest carries secret **names**, never values:
