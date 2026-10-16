@@ -556,17 +556,17 @@ pipeline:
             bash scripts/identity/build-css.sh
             go test -count=1 -timeout=300s ./ ./integrations ./integrations/customdomain ./integrations/compose ./cmd/envscan/... ./component/architecture/... ./component/envregistry/... ./scripts/... ./test/dslconformance/... ./examples/... ./component/auth/... ./deploy/...
 
-    # Analysis records findings independently of build/test success. It runs on
-    # release qualification and weekly audits, including their re-runs.
+    # Analysis records findings independently of build/test success. The deep
+    # history and CodeQL scans run weekly (or on demand), not on every release.
     # The saved UTC week prevents new main heads from repeating the audit.
     - name: analysis
       schedule: weekly
-      on: [release, schedule, manual]
+      on: [schedule, manual]
       runAfterFailure: true
       steps:
         - name: gitleaks
           placement: cluster
-          # Full history is weekly and on release qualification. Three CPUs
+          # Full history runs on the weekly audit or on demand. Three CPUs
           # leave room for another Job and its services on the bounded pool.
           timeout: 6h
           cpuMilli: 3000
@@ -578,7 +578,7 @@ pipeline:
             mkdir -p .memql-security/gitleaks
             go install github.com/zricethezav/gitleaks/v8@v8.30.1
             export GOMAXPROCS=1 GOMEMLIMIT=1GiB GOGC=100
-            python3 scripts/ci/gitleaks-history.py --head="$MEMQL_SHA" --fetch-remote="https://github.com/${MEMQL_REPOSITORY}.git" --gitleaks="$(command -v gitleaks)" --output-dir=.memql-security/gitleaks --jobs=3 --batch-size=1 --timeout=20700
+            python3 scripts/ci/gitleaks-history.py --head="$MEMQL_SHA" --fetch-remote="https://github.com/${MEMQL_REPOSITORY}.git" --gitleaks="$(command -v gitleaks)" --output-dir=.memql-security/gitleaks --jobs=3 --batch-size=32 --timeout=20700
         - name: codeql-go
           placement: cluster
           memoryMiB: 6144
@@ -617,7 +617,7 @@ pipeline:
 
     - name: security-reports
       schedule: weekly
-      on: [release, schedule, manual]
+      on: [schedule, manual]
       runAfterFailure: true
       steps:
         - name: codeql-go
