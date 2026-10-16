@@ -68,8 +68,8 @@ func TestScheduledRunKeyDeduplicatesOneUTCDateAndRescansUnchangedHeadsNextDate(t
 	if err != nil || nextDay == one {
 		t.Fatalf("next day key = %q, err %v; same-head daily scans must be distinct", nextDay, err)
 	}
-	if day, ok := ScheduledDayFromRunKey(one); !ok || day != "2026-10-07" {
-		t.Fatalf("ScheduledDayFromRunKey(%q) = %q, %v", one, day, ok)
+	if day, ok := ScheduledSlotFromRunKey(one); !ok || day != "2026-10-07" {
+		t.Fatalf("ScheduledSlotFromRunKey(%q) = %q, %v", one, day, ok)
 	}
 	if _, err := ScheduledRunKey("acme-corp/storefront", sha, ModeFull, "2026-10-7"); err == nil {
 		t.Fatal("accepted a non-canonical scheduled date")
@@ -77,7 +77,7 @@ func TestScheduledRunKeyDeduplicatesOneUTCDateAndRescansUnchangedHeadsNextDate(t
 	if _, err := ScheduledRunKey("acme-corp/storefront", sha, ModeAffected, "2026-10-07"); err == nil {
 		t.Fatal("accepted an affected-mode scheduled run")
 	}
-	if _, ok := ScheduledDayFromRunKey("acme-corp/storefront@" + sha + ":affected:schedule:2026-10-07"); ok {
+	if _, ok := ScheduledSlotFromRunKey("acme-corp/storefront@" + sha + ":affected:schedule:2026-10-07"); ok {
 		t.Fatal("accepted a malformed scheduled run key")
 	}
 }

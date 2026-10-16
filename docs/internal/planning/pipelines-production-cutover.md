@@ -14,9 +14,11 @@ asked that existing issues track the work through closure. This continues
 [epic #5480](https://github.com/znasllc-io/memql/issues/5480), using its
 existing milestones rather than opening another epic. The implementation
 contracts in [self-hosted delivery](pipelines-self-hosting.md) still apply.
-The previous local-only phase has ended; production migration preparation is
-authorized. The specific Azure capacity and disruptive networking operation
-below remain proposals, not executed changes.
+The owner authorized implementation, testing, merge, production deployment,
+cleanup and retirement of Actions. Keep one consecutive full qualification pass
+as the acceptance target, with targeted failure/recovery checks; do not repeat
+three expensive full passes. Close issues only when their actual replacement
+and production evidence are complete.
 
 ## Observed baseline, October 16, 2026 UTC
 
@@ -46,64 +48,42 @@ Its [evidence](https://github.com/znasllc-io/memql/issues/6018#issuecomment-6206
 qualifies local portable execution. It does not qualify production execution,
 release publication, deployment, notification, or complete Actions coverage.
 
-## Capacity and networking proposal
+## Applied infrastructure and capacity decision
 
-Use one Linux amd64 `builds` user pool, D16as_v7 (16 vCPUs, 64 GiB), with
-autoscaling 0–1, a 128 GiB managed OS disk and scale-down mode `Delete`.
-Two allowed steps may each reserve four CPUs; an eight-vCPU node has less
-than eight allocatable CPUs and would leave the second step unschedulable.
-Sixteen CPUs accommodate both reservations and system overhead, matching the
-CPU capacity of the local full-suite proof. Keep the two-Job limit initially.
-The subscription's SKU response lists no restrictions for this size in East
-US, but that does not reserve allocation capacity. This SKU does not support
-ephemeral OS disks. Set both label and matching `NoSchedule` taint to
-`memql.io/pipeline-pool=builds`; Workbench already selects and tolerates exactly
-that pool. Keep the existing shared cache PVC. Do not move builds onto serving
-nodes if capacity is missing.
+The instance PR [memql-znas#209](https://github.com/znasllc-io/memql-znas/pull/209)
+carries the current configuration, measurements and maintenance receipts. The
+initial baseline above is historical; read live state before each rollout.
 
-Request regional and Dasv7 quotas of **48 vCPUs**. Eight existing plus sixteen
-build vCPUs use twenty-four normally; a build-node surge and one two-vCPU surge
-in each existing pool could require forty-four. Quota is headroom, not a
-request to run forty-eight vCPUs. The steady build-pool maximum remains one;
-an explicitly managed upgrade can temporarily add a surge node.
+Azure now has a `builds` user pool, **Standard_D8s_v6, 8 vCPUs / 32 GiB**,
+Ubuntu, managed 128 GiB OS disk, autoscale **0–1**, scale-down mode `Delete`,
+maxSurge=0/maxUnavailable=1. It was created at zero nodes. The label and matching
+NoSchedule taint are `memql.io/pipeline-pool=builds`. The Dasv7 quota increase
+was refused; the existing Dsv6 quota is 10 vCPUs and regional quota is now 48.
+No additional serving or user-workbench pool was purchased.
 
-East US public pay-as-you-go prices observed through the
-[Azure Retail Prices API](https://learn.microsoft.com/en-us/rest/api/cost-management/retail-prices/azure-retail-prices)
-on October 16: Linux D16as_v7 **$0.726/hour**, P10 LRS 128 GiB OS disk
-**$19.71/month**, premium LRS block-blob storage **$0.15/GB-month**. At 730
-node-hours, compute plus one OS disk is approximately **$549.69/month**.
-At 240 node-hours, an indicative hourly-prorated compute/disk estimate is
-**$180.72/month**. A full 50 GB cache adds approximately **$7.50/month** of
-stored bytes. These estimates exclude taxes, transactions, network transfer,
-temporary surge capacity and retained Library artifacts; actual billing must
-be measured. The cache is persistent and its PVC request is not a retention
-policy. Use deletion, not deallocation, and verify idle VM and OS-disk removal.
-[Azure scale-down behavior](https://learn.microsoft.com/en-us/azure/aks/scale-down-mode).
+Heavy pipeline steps reserve three CPUs, leaving room for two steps, sidecars
+and system overhead on the bounded pool. Live allocation, cold start, mixed-load
+throughput and idle deletion are still acceptance checks. The indicative
+compute-plus-OS-disk rate is $0.430/node-hour; the $150/month CI target is not
+a forecast or billing cap. With a provisional $10 storage allowance it permits
+about 326 active hours/month. Measure rather than assuming that demand.
 
-There is a cold-start prerequisite, [#6132](https://github.com/znasllc-io/memql/issues/6132):
-the released isolation probe waits only 90 seconds for a node. The proposed
-fix permits ten minutes for its credential-free listener, retains the later
-90-second readiness and 60-second network-test windows, and bounds an orphan
-probe Job at thirteen minutes plus its one-minute TTL. Ship that fix before
-qualifying automatic zero-to-one operation. A manually warmed node can support
-the initial controlled rehearsal; it does not prove autoscaling.
+The pre-maintenance CNPG backup completed at 05:58:56 UTC on October 16;
+its isolated restore verified a writable 20.46 GB database and 1,603,793
+MemoryNodes. Temporary restore resources were removed; the backup and original
+PVCs remain. The Cilium migration is in progress. Postgres shut down cleanly
+at 06:30:27 and accepted connections at 06:39:00. The OS returned HTTP 200 and
+database monitoring reported healthy with no WAL archive backlog. Complete all
+node and serving checks before introducing CI load. Restore the temporary DB
+pool maxSurge=0/maxUnavailable=1 to its prior 10%/0 after migration.
 
-The supported networking change is Azure CNI's Cilium dataplane, preserving
-the existing overlay CIDRs. Microsoft documents that this operation reimages
-**all node pools** and enforcement starts after reimaging finishes. It cannot
-be staged one pool at a time. The single database instance means planned
-service interruption is possible. A GitOps revert does not undo this Azure
-networking operation; no instant reverse migration is assumed.
-[Microsoft migration procedure](https://learn.microsoft.com/en-us/azure/aks/update-azure-cni#update-the-data-plane-to-azure-cni-powered-by-cilium).
-
-Before the maintenance decision, verify the current-generation backup and WAL
-archive and review the instance's recovery procedure. Audit all existing
-NetworkPolicies, since they become active together: the observed policies
-cover ArgoCD, konnectivity and pipeline isolation. Preserve the database PVC
-and archive. Do not add broad CIDR exceptions to make a failed probe pass.
-After reimaging, verify DNS, ingress, identity, mesh, database, ArgoCD, storage
-and the pipeline's positive and negative controls before connecting repository
-triggers. The instance PR carries the exact configuration and execution order.
+The cold-probe fix [#6133](https://github.com/znasllc-io/memql/pull/6133) and
+Workbench routing/capacity [#6136](https://github.com/znasllc-io/memql/pull/6136)
+are merged. They require deployment and production verification. The cadence
+change adds daily dependency audits and weekly history/CodeQL, with separate
+check names and cross-replica weekly deduplication. PR/queue/push secret scans
+cover every newly introduced commit; saved comparison bases also close the
+authoring-surface parity gap. No scheduled scan may satisfy a required PR check.
 
 ## Workflow retirement ledger
 
@@ -155,15 +135,12 @@ success. The live API reports nine instance workflows, ten Cockpit workflows
 
 ## Acceptance and issue closure
 
-There is a measured queue-budget incompatibility to resolve under #5507:
-the ruleset waits sixty minutes, while `secrets-history` currently selects
-`merge_group` with a six-hour full-history scan budget. Analysis already skips
-merge groups, but history still takes hours in the local proof. The daily
-schedule includes analysis and currently excludes history. Establish and test
-the intended incremental/full-history event coverage before changing the
-required context; preserve secret detection and periodic complete scans.
-Neither skipping a scan nor silently extending the queue timeout establishes
-an equivalent, usable replacement.
+The cadence change removes the multi-hour full-history scan from ordinary
+merge groups and main pushes. Validate the remaining exact-tree functional
+work against the merge queue's sixty-minute budget on the actual build pool.
+Neither skipping required coverage nor extending the timeout alone demonstrates
+usable throughput. Daily and weekly audit results stay separate from required
+PR/queue status, and failed audits remain visible until repaired.
 
 Keep #5504 (notification) and #5505 (external rollout verification) attached to
 their typed implementations and real delivery evidence. Keep #5813 for Azure
@@ -171,15 +148,14 @@ cache behavior, #5835 for replay/recovery, and #6041 if source onboarding hits
 the reserved-domain failure. The new cold-start defect has its own #6132;
 an implementation PR alone cannot close its live AKS qualification.
 
-M1 (#5506) requires the released production instance's check beside
-`ci-required` for two weeks, with false-green accounting. M2 (#5507) requires
-two weeks of exact merge-queue results before retiring the corresponding
-Actions triggers. M3 (#5508) requires three verified releases before replacing
-the deployment observer and docs delivery. M4 (#5509) retires engine CI and
-image-building last, after independent bootstrap/recovery is proven. These
-are the existing issue criteria, retained unless the owner explicitly changes
-them. The one-full-pass direction for the prior local phase does not silently
-rewrite production observation periods.
+M1 (#5506) requires a real production PR check, retained logs/artifacts and
+false-green controls. M2 (#5507) requires the exact merge candidate, a required
+MemQL context and rejection of a failing candidate. M3 (#5508) requires one
+complete release/deploy/docs delivery and targeted rollback/recovery evidence.
+M4 (#5509) retires remaining Actions only after native image build/publication
+and independent bootstrap/recovery work. This follows the owner's current
+one-pass direction in place of the earlier two-week/two-week/three-release
+observation proposal. Coverage and failure evidence remain required.
 
 Every closure must link a merged implementation and actual acceptance evidence.
 A skipped lane, missing artifact, absent status check or fixture-only receipt

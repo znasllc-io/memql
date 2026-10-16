@@ -218,6 +218,10 @@ func engineImportGraph(t *testing.T) (*pipelines.Graph, map[string]bool) {
 // The Cockpit trial requires the owner's explicit fleet consent. The separate
 // consent guard below proves a cluster-only connection refuses this manifest.
 func compileEngineOpening(spec *pipelines.Spec, graph *pipelines.Graph, event pipelines.Event, changed []string) (pipelines.Plan, *pipelines.Refusal) {
+	return compileEngineCadence(spec, graph, event, changed, "daily")
+}
+
+func compileEngineCadence(spec *pipelines.Spec, graph *pipelines.Graph, event pipelines.Event, changed []string, cadence string) (pipelines.Plan, *pipelines.Refusal) {
 	if refusal := pipelines.Validate(spec); refusal != nil {
 		return pipelines.Plan{}, refusal
 	}
@@ -232,8 +236,13 @@ func compileEngineOpening(spec *pipelines.Spec, graph *pipelines.Graph, event pi
 		if on == nil {
 			on = []string{}
 		}
+		stageCadence := stage.Schedule
+		if stageCadence == "" {
+			stageCadence = spec.Schedule
+		}
 		value, err := workflowhost.Run(context.Background(), "pipelineStageIncluded", map[string]any{
 			"event": string(event), "mode": string(mode), "on": on,
+			"runSchedule": cadence, "stageSchedule": stageCadence,
 		}, workflowhost.Options{})
 		included, ok := value.(bool)
 		if err != nil || !ok {
@@ -347,8 +356,8 @@ func TestEngineManifestCompilesForEveryOpening(t *testing.T) {
 		t.Fatalf("the pipeline declares no %q service, so the db-gated trees have nothing to test against", manifestPostgresService)
 	}
 
-	fullStages := []string{manifestStageChecks, "vulnerabilities", "secrets-history", manifestStageTests}
-	analysisStages := append(slices.Clone(fullStages), "analysis")
+	fullStages := []string{manifestStageChecks, "vulnerabilities", "secrets-current", manifestStageTests}
+	analysisStages := []string{manifestStageChecks, "vulnerabilities", "secrets-history", manifestStageTests, "analysis"}
 	pullRequestStages := []string{manifestStageChecks, "vulnerabilities", "secrets-current", manifestStageTests, manifestStageGates}
 	every := []string{manifestStepGoChecks, manifestStepPathRouting,
 		manifestStepGoTests, manifestStepDBTests, manifestStepFuzz, manifestStepOSChecks,
@@ -368,7 +377,7 @@ func TestEngineManifestCompilesForEveryOpening(t *testing.T) {
 		// A full run tests every package in go-tests, the gate packages among
 		// them, so the gates stage is absent, as ci.yml runs that step only on a
 		// pull request.
-		{name: "a push to the default branch", event: pipelines.EventPush, stages: analysisStages,
+		{name: "a push to the default branch", event: pipelines.EventPush, stages: fullStages,
 			runs: every, absent: []string{manifestStepGateInputs}},
 		{name: "a merge group", event: pipelines.EventMergeGroup, stages: fullStages,
 			runs: every, absent: []string{manifestStepGateInputs}},
@@ -377,7 +386,7 @@ func TestEngineManifestCompilesForEveryOpening(t *testing.T) {
 		// A scheduled scan selects only its explicit opt-in stages; default
 		// stages such as checks and history scans are intentionally absent.
 		{name: "a daily scheduled security scan", event: pipelines.EventSchedule,
-			stages: []string{"vulnerabilities", "analysis"}, absent: []string{manifestStepGateInputs}},
+			stages: []string{"vulnerabilities"}, absent: []string{manifestStepGateInputs}},
 		// The compiler of this very manifest: Go source only, and the db-gated
 		// driver (component/pipelinerun) imports it, so the change reaches both
 		// test steps and the filesystem-gates bucket.
@@ -491,6 +500,24 @@ func TestEngineManifestCompilesForEveryOpening(t *testing.T) {
 				checkEngineTestsPartitionEveryPackage(t, spec, graph, byName)
 			}
 		})
+	}
+}
+
+func TestEngineWeeklyAuditDoesNotRepeatDailyOrOrdinaryFunctionalChecks(t *testing.T) {
+	spec := engineManifest(t).Pipeline
+	graph, _ := engineImportGraph(t)
+	plan, refusal := compileEngineCadence(spec, graph, pipelines.EventSchedule, nil, "weekly")
+	if refusal != nil {
+		t.Fatal(refusal)
+	}
+	var stages []string
+	for _, step := range plan.Steps() {
+		if !slices.Contains(stages, step.Stage) {
+			stages = append(stages, step.Stage)
+		}
+	}
+	if !slices.Equal(stages, []string{"secrets-history", "analysis"}) {
+		t.Fatalf("weekly stages = %v", stages)
 	}
 }
 

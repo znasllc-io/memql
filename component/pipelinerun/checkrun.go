@@ -63,8 +63,18 @@ func ReportFor(p Pipeline, r Run, steps []pipelines.StepReport) pipelines.RunRep
 // FAILURE there (decision 15) -- neutral would satisfy a required check.
 func ComposeCheckRun(osOrigin string, p Pipeline, r Run, report pipelines.RunReport) githubapp.CheckRun {
 	title, summary, text := pipelines.CheckOutput(report)
+	name := pipelines.CheckRunName(p.Name)
+	// A periodic audit must never satisfy or overwrite the required PR/queue
+	// check for the same SHA. Daily and weekly audits also report separately.
+	if r.Event == pipelines.EventSchedule {
+		cadence := "invalid"
+		if slot, ok := pipelines.ScheduledSlotFromRunKey(r.RunKey); ok {
+			cadence, _ = pipelines.ScheduleCadence(slot)
+		}
+		name += " / " + cadence
+	}
 	run := githubapp.CheckRun{
-		Name:       pipelines.CheckRunName(p.Name),
+		Name:       name,
 		HeadSHA:    r.SHA,
 		Status:     checkStatus(report.Status),
 		ExternalID: bareID(r.ID),

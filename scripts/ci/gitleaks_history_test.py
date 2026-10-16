@@ -90,6 +90,39 @@ sys.exit(int(args["--exit-code"]) if fault in ("findings", "disagreement", "outs
         self.assertEqual(result["completedCommits"], 3)
         self.assertEqual(len(json.loads((self.output / "findings.json").read_text())), 3)
 
+    def test_incremental_inventory_keeps_intermediate_commits_and_excludes_old_tags(self):
+        # HEAD alone must not hide a secret introduced and removed in a PR.
+        (self.repo / "file").write_text("removed again\n")
+        self.git("commit", "-qam", "remove candidate")
+        final = self.git("rev-parse", "HEAD")
+        with patch.dict(os.environ, SCANNER_FAULT="findings"):
+            result = history.scan(self.repo, final, self.output, self.config,
+                                  str(self.scanner), 1, 20, base=self.initial)
+        self.assertEqual(result["status"], "findings")
+        self.assertEqual(result["coverage"], "new-commits")
+        self.assertEqual(result["baseCommit"], self.initial)
+        self.assertEqual(set((self.output / "commits.txt").read_text().splitlines()),
+                         {self.head, final})
+        self.assertEqual(result["completedCommits"], 2)
+
+    def test_missing_or_malformed_base_cannot_report_clean(self):
+        for base in ("f" * 40, "main", "--all"):
+            with self.subTest(base=base):
+                self.output = self.root / ("missing-" + base)
+                self.output.mkdir()
+                result = history.scan(self.repo, self.head, self.output, self.config,
+                                      str(self.scanner), 1, 20, base=base)
+                self.assertEqual(result["status"], "incomplete")
+                self.assertEqual(result["completedCommits"], 0)
+
+    def test_missing_predecessor_explicitly_falls_back_to_full_history(self):
+        result = history.scan(self.repo, self.head, self.output, self.config,
+                              str(self.scanner), 1, 20, base="0" * 40)
+        self.assertEqual(result["status"], "clean")
+        self.assertEqual(result["coverage"], "full-history")
+        self.assertEqual(result["completedCommits"], 3)
+        self.assertIn("no predecessor", result["coverageReason"])
+
     def test_crash_missing_report_and_exit_disagreement_are_incomplete(self):
         for fault in ("crash", "missing", "disagreement", "partial", "outside"):
             with self.subTest(fault=fault), patch.dict(os.environ, SCANNER_FAULT=fault):
@@ -363,6 +396,14 @@ sys.exit(int(args["--exit-code"]) if fault in ("findings", "disagreement", "outs
         parallel = self.run_scan(jobs=2)
         self.assertEqual(parallel["status"], "findings")
         self.assertEqual(parallel["completedCommits"], 5)
+        self.assertEqual(sorted(item["Fingerprint"] for item in json.loads(
+            (self.output / "findings.json").read_text())), serial)
+        self.output = self.root / "incremental-evidence"
+        self.output.mkdir()
+        incremental = history.scan(self.repo, self.head, self.output, self.config,
+                                   str(self.scanner), 1, 20, jobs=2, base=self.initial)
+        self.assertEqual(incremental["status"], "findings")
+        self.assertEqual(incremental["completedCommits"], 4)
         self.assertEqual(sorted(item["Fingerprint"] for item in json.loads(
             (self.output / "findings.json").read_text())), serial)
 

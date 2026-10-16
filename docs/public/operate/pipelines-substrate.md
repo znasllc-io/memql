@@ -1094,11 +1094,11 @@ node and of AKS.
 |---|---|---|
 | `checks` | `go-checks` (30 min: build, vet, the env registry, the DSL lint and engine load, and the SDK, concept-snapshot, authoring-surface and proto drift gates), `path-routing`, the five `build-<tag>` passes, `build-clustere2e`, `module-boundaries` and `bash32-smoke` | every run |
 | `vulnerabilities` | `go-vulnerabilities` (govulncheck) and `npm-vulnerabilities` | every event, after a failure too |
-| `secrets-current` | `gitleaks` over the working tree | pull requests and manual runs, after a failure too |
-| `secrets-history` | `gitleaks` over full reachable history (6 hours, 4 CPUs) | push, merge group, release and manual runs, after a failure too |
+| `secrets-current` | `gitleaks` over every new commit since the pinned event base | pull requests, merge groups and pushes, after a failure too |
+| `secrets-history` | `gitleaks` over full reachable history (6 hours, 3 CPUs) | weekly audits, releases and manual runs, after a failure too |
 | `tests` | `go-tests` (affected packages outside the db-gated trees, 4 shards), `db-tests` (the affected db-gated packages, 5 shards, each beside its own Postgres sidecar), `fuzz`, `os-checks` when the change touches the OS bucket, `sdk-ts-typecheck`, `viewkit-checks`, `mcp-conformance`, `proving` and the seven `test-<tag>` passes | every run |
 | `gates` | `gate-inputs` | pull requests and manual runs |
-| `analysis` | `codeql-go` (3 hours), `codeql-javascript`, `codeql-python` and `sbom` | push, release, scheduled and manual runs, after a failure too |
+| `analysis` | `codeql-go` (3 hours), `codeql-javascript`, `codeql-python` and `sbom` | weekly audits, releases and manual runs, after a failure too |
 
 No step names a need, so the pipeline runs on the cluster alone and connects
 with `compute: cluster`. Its longest steps outlast the default 2-hour run
@@ -1126,10 +1126,18 @@ What a run of it costs, and where it falls short of `ci.yml`: every step clones
 the commit on its own (10 to 76 seconds a step for this repository, measured on
 a local cluster); every Go step fetches the standalone Tailwind CLI into the
 checkout to build the identity stylesheet, which no declared cache holds; and
-`go-checks`' authoring-surface gate (`scripts/ci/memqlbreaking-base.sh`) has no
-base commit in a run -- a step's checkout is one commit with no remote -- so it
-compares against the committed baseline, which the change under test can edit
-too, and says so: `ci.yml`'s lane stays the gate for it.
+`go-checks`' authoring-surface gate uses `MEMQL_BASE_SHA`, which carries the
+saved event base across executor replicas. It fetches that pinned commit when
+needed instead of trusting a baseline edited by the same PR. An event without
+a predecessor falls back explicitly to the committed baseline.
+
+PR, merge-group and push secret scans inventory every commit reachable from
+the tested head but not the saved base. They therefore detect secrets removed
+before the final commit as well as secrets still present. An unreadable base or
+incomplete fetch fails the scan. With no predecessor, the scan explicitly falls
+back to full history; its ordinary 30-minute budget may then require an operator
+rerun with a suitable budget. Full-history and CodeQL work runs weekly and for
+release qualification. Daily dependency vulnerability checks remain enabled.
 
 ### The toolchain image
 

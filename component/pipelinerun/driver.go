@@ -1184,7 +1184,7 @@ type requestFacts struct {
 	attempt                             int
 	startedAt                           string
 	repository                          pipelines.Repository
-	sha, version                        string
+	sha, baseSHA, version               string
 	mode                                pipelines.Mode
 	event                               pipelines.Event
 	installation                        int64
@@ -1219,7 +1219,7 @@ func (dr *runDriver) setFacts() {
 		repository: pipelines.Repository{
 			Owner: owner, Name: name, CloneURL: "https://github.com/" + owner + "/" + name + ".git",
 		},
-		sha: dr.run.SHA, version: version, mode: dr.run.Mode, event: dr.run.Event,
+		sha: dr.run.SHA, baseSHA: dr.run.BaseSHA, version: version, mode: dr.run.Mode, event: dr.run.Event,
 		installation: dr.installation, compute: dr.p.Compute,
 		domain: dr.d.Domain(),
 		title:  dr.run.Title, branch: dr.run.HeadBranch, pullRequest: dr.run.PullRequest,
@@ -1243,6 +1243,7 @@ func (dr *runDriver) request(t *stepTrack, secrets map[string]string) pipelines.
 		OwnerUserID:    f.owner,
 		Repository:     f.repository,
 		SHA:            f.sha,
+		BaseSHA:        f.baseSHA,
 		Mode:           f.mode,
 		Event:          f.event,
 		Version:        f.version,

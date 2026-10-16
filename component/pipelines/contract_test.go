@@ -103,6 +103,7 @@ func TestEnvironmentRendersTheContractAndPlatformNamesWin(t *testing.T) {
 		StepKey:    "tests/go-tests#2",
 		Repository: Repository{Owner: "acme", Name: "app"},
 		SHA:        "abc",
+		BaseSHA:    "previous",
 		Mode:       ModeAffected,
 		Event:      EventPullRequest,
 		Version:    "abc",
@@ -110,7 +111,7 @@ func TestEnvironmentRendersTheContractAndPlatformNamesWin(t *testing.T) {
 			Packages: []string{"example.test/a", "example.test/b"},
 			Shard:    ShardRef{Index: 2, Count: 4},
 		},
-		Secrets: map[string]string{"NPM_TOKEN": "s3cret", "MEMQL_SHA": "forged"},
+		Secrets: map[string]string{"NPM_TOKEN": "s3cret", "MEMQL_SHA": "forged", "MEMQL_BASE_SHA": "forged-base"},
 	}
 	env := req.Environment()
 	want := map[string]string{
@@ -119,6 +120,7 @@ func TestEnvironmentRendersTheContractAndPlatformNamesWin(t *testing.T) {
 		"MEMQL_STEP":        "tests/go-tests#2",
 		"MEMQL_REPOSITORY":  "acme/app",
 		"MEMQL_SHA":         "abc",
+		"MEMQL_BASE_SHA":    "previous",
 		"MEMQL_MODE":        "affected",
 		"MEMQL_EVENT":       "pull_request",
 		"MEMQL_VERSION":     "abc",

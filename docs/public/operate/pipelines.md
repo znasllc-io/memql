@@ -342,6 +342,20 @@ identities, receipts and the final verdict. See
 mounts is the runner's ([Caches](pipelines-substrate.md#caches)): it knows
 `go` and `npm`, and a step declaring any other fails `pipeline_job_rejected`.
 
+### Scheduled scans
+
+Set `pipeline.schedule` to `daily` or `weekly` and opt each audit stage in with
+`on: [schedule]`. A stage may override the pipeline cadence with its own
+`schedule`. Other declared events remain independent: a weekly audit can also
+run on a release or a manual qualification.
+
+The daily scheduler uses UTC. A weekly period starts Monday; if Monday is
+missed, the next invocation catches up. The first weekly opening pins that
+week's commit, and later main pushes do not repeat it. A failed weekly scan
+remains visible until explicitly rerun; its retry keeps the same commit and
+period. Daily and weekly checks have `/ daily` and `/ weekly` suffixes, so they
+cannot satisfy the required PR or merge-queue check.
+
 ### `select`
 
 | Key | Value | Refused when |
@@ -357,7 +371,8 @@ mounts is the runner's ([Caches](pipelines-substrate.md#caches)): it knows
 |---|---|---|
 | `name` | The stage's name | Missing, breaking the rule, or used twice: `pipeline_stage_invalid` |
 | `needs` | Earlier stages this one depends on. Recorded rather than scheduled on: stages run in the order written whatever it says | A stage that comes later, the stage itself, or no stage at all: `pipeline_stage_invalid` |
-| `on` | The events (`pull_request`, `merge_group`, `push`, `release`, `schedule`, `manual`) and modes (`affected`, `full`) the stage runs for. Absent means every run, including a manual rehearsal | Anything else: `pipeline_event_unknown` |
+| `schedule` | Override the pipeline cadence with `daily` or `weekly` | Requires a pipeline schedule and `on: [schedule]`; otherwise `pipeline_stage_invalid` |
+| `on` | The events (`pull_request`, `merge_group`, `push`, `release`, `schedule`, `manual`) and modes (`affected`, `full`) the stage runs for. Absent means every non-scheduled run, including a manual rehearsal | Anything else: `pipeline_event_unknown` |
 | `runAfterFailure` | Boolean, default `false`. Run this stage even when an earlier stage failed; useful for independent security analysis. Does not erase failures or bypass cancellation | Non-boolean values fail manifest parsing |
 | `steps` | The stage's steps, which run at once | Both `steps` and `channel`, or neither: `pipeline_stage_invalid` |
 | `channel` | Makes the stage a notify stage naming a channel. It carries no steps, and compiles to one step, `<stage>.notify` | A name that breaks the rule: `pipeline_stage_invalid` |
@@ -427,6 +442,7 @@ Every runner exports the same environment to a step's command:
 | `MEMQL_STEP` | The step's key: `<stage>.<step>`, with `#<i>` for a shard |
 | `MEMQL_REPOSITORY` | `owner/name` |
 | `MEMQL_SHA` | The commit under test |
+| `MEMQL_BASE_SHA` | The event's pinned comparison base; empty for an event without a predecessor |
 | `MEMQL_MODE` | `affected` or `full` |
 | `MEMQL_EVENT` | `pull_request`, `merge_group`, `push` or `release` |
 | `MEMQL_VERSION` | The release's tag on a release, the commit otherwise |
