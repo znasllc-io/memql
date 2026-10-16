@@ -19,14 +19,14 @@ func validAcknowledgement(text string) bool {
 	return strings.TrimSpace(text) != "" && len([]rune(text)) <= 280
 }
 
-func (l *PlannerAgentLoop) repairAcknowledgement(ctx context.Context, req CompileRequest, conversation any, out *CompileOutcome) string {
+func (l *PlannerAgentLoop) repairAcknowledgement(ctx context.Context, req CompileRequest, conversation any, out *CompileOutcome, timeout time.Duration) string {
 	data := map[string]any{"goal": truncate(req.Statement, maxGoalChars), "workload": out.Workload, "workTitle": out.WorkTitle}
 	if conversation != nil {
 		if preview, err := conversationPreview(conversation); err == nil {
 			data["conversation"] = preview
 		}
 	}
-	bounded, cancel := context.WithTimeout(airoute.WithCallPurpose(ctx, "Acknowledging request", 1), 15*time.Second)
+	bounded, cancel := context.WithTimeout(airoute.WithCallPurpose(ctx, "Acknowledging request", 1), timeout)
 	defer cancel()
 	response, err := l.engine.InvokeAI(systemActorContext(bounded), "workAcknowledgement", data)
 	if err == nil || !memql.IsProviderUnavailable(err) {

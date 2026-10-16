@@ -236,7 +236,11 @@ func (h *ForwardHandler) HandleForwardedRequest(
 	defer dcancel()
 
 	if err := w.Acquire(dispatchCtx, capability); err != nil {
-		h.sendRefusal(send, requestId, "worker_busy", err.Error())
+		code := "worker_busy"
+		if dispatchCtx.Err() != nil {
+			code = ForwardCallerCancelled
+		}
+		h.sendRefusal(send, requestId, code, err.Error())
 		return
 	}
 	defer w.Release(capability)

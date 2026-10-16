@@ -94,6 +94,21 @@ func (e *draftPromptEngine) InvokeAIProgress(ctx context.Context, name string, d
 	return e.MemQLEngine.InvokeAIProgress(ctx, name, data)
 }
 
+func (e *draftPromptEngine) InvokeAIStructured(ctx context.Context, name string, data map[string]any, schemaName string, schema json.RawMessage, strict bool) (string, error) {
+	if e.invoke != nil {
+		value, err := e.invoke(ctx, name, data)
+		if err != nil {
+			return "", err
+		}
+		text, ok := value.(string)
+		if !ok {
+			return "", fmt.Errorf("structured test response is not text")
+		}
+		return text, nil
+	}
+	return e.MemQLEngine.InvokeAIStructured(ctx, name, data, schemaName, schema, strict)
+}
+
 type draftTurnProbe struct {
 	agentId string
 	mu      sync.Mutex
@@ -240,6 +255,10 @@ func TestCompileDraftDB_SeparateReplicaReadsAndRunsValidatedDraft(t *testing.T) 
 		t.Fatal(gerr)
 	}
 	t.Cleanup(func() { _ = gates.Close() })
+
+	t.Run("file evidence across replicas", func(t *testing.T) {
+		testFileEvidenceDraftAcrossReplica(t, db, plannerEngine, receiver, promptEngine, composerProbe, uploaderProbe, ctx)
+	})
 
 	t.Run("quick replies keep viewer authority and history across replicas", func(t *testing.T) {
 		prompts := memql.NewPromptRegistry()

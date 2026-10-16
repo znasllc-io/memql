@@ -193,13 +193,13 @@ builtin spineUseCandidate {
 /// A bounded operation inside an authorized work.spine/1 planning scope.
 @executor("integration.planner.spineClassify")
 builtin spineClassify {
-
+ timeoutSeconds int
 }
 
 /// A bounded operation inside an authorized work.spine/1 planning scope.
 @executor("integration.planner.spineAcknowledge")
 builtin spineAcknowledge {
-
+ timeoutSeconds int
 }
 
 /// Refine document sections before execution. Native bounds validate each output and preserve the delivery contract.

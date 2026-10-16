@@ -438,10 +438,11 @@ func (f *FleetInference) attemptLocal(
 			fmt.Errorf("no live worker stream on this replica for %s; forward or retry required (connectedNodeId=%q)",
 				cand.Label(), cand.ConnectedNodeId)
 	}
-	if err := w.Acquire(ctx, workerservice.ModelCapability); err != nil {
+	limit := fleetcatalog.ParseModelAttributes(w.LabelsSnapshot()[workerservice.ModelLabel(req.ModelId)]).MaxConcurrent
+	if err := w.AcquireModel(ctx, req.ModelId, limit); err != nil {
 		return memqlengine.FleetCallResult{}, ForwardRefusedBeforeStart, err
 	}
-	defer w.Release(workerservice.ModelCapability)
+	defer w.ReleaseModel(req.ModelId)
 
 	admission := &ForwardHandler{store: f.store}
 	if f.router != nil {

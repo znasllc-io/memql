@@ -672,3 +672,12 @@ query observation workTrainingUsageForOwner {
  sort "row.createdAt", "desc"
  shape workObservationFull
 }
+
+/// Public source receipts only; generated answers are not source evidence.
+@actor
+query step workSourceStepsForOwnerRun {
+ args { runId string! }
+ filter row => row.runId == args.runId && row.ownerUserId == actor.userId && row.status == "done" && row.?call.name != "ai" && row.?call.name != "runAgentTurn"
+ paginate 40
+ shape workStepFull
+}
