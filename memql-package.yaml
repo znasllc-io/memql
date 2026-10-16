@@ -590,6 +590,20 @@ pipeline:
             go install github.com/anchore/syft/cmd/syft@v1.54.1
             python3 scripts/ci/sbom.py --output-dir=.memql-security/sbom
 
+    - name: release-files
+      on: [release]
+      steps:
+        - name: packages
+          placement: cluster
+          cpuMilli: 3000
+          memoryMiB: 6144
+          timeout: 60m
+          artifacts: [.memql-release]
+          run: |
+            set -eu
+            export GOFLAGS=-p=2 GOMEMLIMIT=1GiB GOGC=75
+            python3 scripts/ci/pipeline-release-assets.py
+
     # Release images are produced by the fixed rootless builder, from the
     # release event's exact source commit. It stamps MEMQL_COMMIT/MEMQL_RELEASE
     # and returns an OCI archive plus digest metadata to the Library. Registry

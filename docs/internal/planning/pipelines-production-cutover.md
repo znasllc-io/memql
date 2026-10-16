@@ -71,11 +71,29 @@ about 326 active hours/month. Measure rather than assuming that demand.
 The pre-maintenance CNPG backup completed at 05:58:56 UTC on October 16;
 its isolated restore verified a writable 20.46 GB database and 1,603,793
 MemoryNodes. Temporary restore resources were removed; the backup and original
-PVCs remain. The Cilium migration is in progress. Postgres shut down cleanly
+PVCs remain. The Cilium migration completed successfully. Postgres shut down cleanly
 at 06:30:27 and accepted connections at 06:39:00. The OS returned HTTP 200 and
-database monitoring reported healthy with no WAL archive backlog. Complete all
-node and serving checks before introducing CI load. Restore the temporary DB
-pool maxSurge=0/maxUnavailable=1 to its prior 10%/0 after migration.
+database monitoring reported healthy with no WAL archive backlog. All nodes
+returned Ready and the endpoint probe passed 24/24 requests. The temporary DB
+pool maintenance settings were restored to maxSurge=10%/maxUnavailable=0.
+
+Instance [PR #211](https://github.com/znasllc-io/memql-znas/pull/211) replaced
+the disposable Blob NFS cache with a 64 GiB Premium SSD claim. Two concurrent
+small Go builds measured 163/166 seconds cold and 28.3 seconds warm on NFS,
+versus 18.3/18.3 seconds cold and 0.88/0.93 seconds warm on SSD, producing
+identical binaries. The SSD is $10.207/month at the observed East US list price,
+within the provisional storage allowance. It supports concurrent Jobs on the
+single build node; revisit the RWO topology before increasing the pool maximum.
+Live ownership/isolation checks passed after Argo reconciled the replacement.
+This fixture does not establish full-suite throughput or an overall bill.
+
+The `v0.29.7` bootstrap release at `5a0bcabf14abbec61caca405fd988a5161516e50`
+started through MemQL at 09:03:35 UTC on October 16. Its
+[check](https://github.com/znasllc-io/memql/runs/116897094312) records pipeline
+run `4aae632a393d46284de90ff27b811f50`. Local MemQL controls this bootstrap;
+Jobs run on the dedicated AKS pool through a temporary namespace-scoped grant.
+That is distinct from installed-production qualification. The serving release
+remains v0.29.5 until verified native image publication and GitOps deployment.
 
 The cold-probe fix [#6133](https://github.com/znasllc-io/memql/pull/6133) and
 Workbench routing/capacity [#6136](https://github.com/znasllc-io/memql/pull/6136)
@@ -111,10 +129,10 @@ outputs, publication and failure evidence, not merely a command in a manifest.
 | `install-cluster-e2e.yml` | Installed-cluster lifecycle and cleanup; preserve actual failure evidence | #5480 |
 | `pipelines-live.yml` | Disposable cluster runtime qualification and retained logs | #5480 |
 | `proving-live.yml` | Credentialed proving run with explicit authorization and evidence | #5480 |
-| `publish-docs-bundle.yml` | Versioned docs bundle, release attachment and downstream delivery receipt | #5508, #5712 |
+| `publish-docs-bundle.yml` | Native release-files builds and verifies the exact-version bundle with complete Git history; release attachment and downstream delivery receipt remain | #5508, #5712 |
 | `docs-current-check.yml` | Scheduled public docs freshness check and failure notification | #5508, #5712 |
-| `publish-sdk-core.yml` | Exact-version npm publication and immutable receipt | #5480 |
-| `publish-vscode-extension.yml` | Editor build and registry publication; web artifact delivery | #5480 |
+| `publish-sdk-core.yml` | Native release-files retains the compiled, version-checked npm archive; registry publication and immutable receipt remain | #5480 |
+| `publish-vscode-extension.yml` | Native release-files verifies all four native targets plus web; registry publication remains | #5480 |
 | `vscode-site.yml` | Static editor-site build and its deployed version proof | #5480 |
 | `ruleset-drift.yml` | Scheduled policy audit; retain code-owner and required-check enforcement | #5507 |
 | `dependabot-tidy.yml` | Trusted dependency-PR maintenance, without exposing write authority to PR code | #5480 |
@@ -157,6 +175,23 @@ missing required-database setting or failing test refuses. The class table
 remains in the checked-in workflow while both definitions are retained; reading
 it requires no Actions execution. Tests exercise failure propagation and every
 current class, and the command passed against a real database.
+
+The release-only `release-files.packages` step builds the documentation bundle,
+SDK npm package, and Linux x64/ARM64, macOS x64/ARM64 and web VSIX archives.
+It checks the pinned commit and engine version before building, fills shallow
+history for page dates, and retains seven verified files plus a checksum
+manifest. Documentation metadata and npm package identity must match the source.
+Native VSIX files must contain exactly their target's executable LSP, verified
+from ELF/Mach-O headers; web archives must carry a browser entry point and no
+native binaries or installer scripts. This packages macOS binaries by cross
+compilation; it does not replace running the macOS host tests.
+
+The complete command passed as uid 1000 in the pinned toolchain at
+`5a0bcabf14abbec61caca405fd988a5161516e50`: 130 documentation pages, SDK 0.8.0
+and all five editor 0.6.11 archives. It held no publication credentials and
+published nothing. Future native execution and approved publication are still
+required. Separate SDK/editor tag triggers and registry receipts remain in the
+retirement scope; an engine release's package build is not their replacement.
 
 ## Acceptance and issue closure
 
