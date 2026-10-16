@@ -5,7 +5,6 @@ package pipelinesteps
 import (
 	"context"
 	"crypto/sha256"
-	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
@@ -202,7 +201,7 @@ func TestFleetStepRoutesByNeedLabelsAndPipelinesLabel(t *testing.T) {
 	f, _, tokens, _ := newTestFleet(t, d)
 	req := fleetReq()
 	req.Step.Artifacts = []string{"coverage.out"}
-	d.answer = fleetArtifactAnswer(base64.StdEncoding.EncodeToString(extractTestTgz(t, []extractTestEntry{{name: "coverage.out", body: "proof"}})))
+	d.answer = fleetArtifactAnswer(extractTestTgz(t, []extractTestEntry{{name: "coverage.out", body: "proof"}}))
 	if res := runFleet(t, f, req); res.Status != pl.OutcomeSucceeded {
 		t.Fatalf("result = %+v, want success", res)
 	}
@@ -582,12 +581,16 @@ func TestFleetStepStoresItsArtifactsAndNotes(t *testing.T) {
 		{name: "coverage.out", body: "mode: set\n"},
 		{name: "dist/report.json", body: `{"passed":3}`},
 	})
-	output := func(extra string) string {
-		return `{"exitCode":0,"durationMs":10,"artifactsTgzBase64":"` + base64.StdEncoding.EncodeToString(tgz) +
-			`","artifactsMissing":[]` + extra + `}`
-	}
-	answer := func(out string) func(context.Context, worker.Request) (worker.Result, error) {
-		return func(context.Context, worker.Request) (worker.Result, error) {
+	output := func(_ string) string { return fleetArtifactOutput(tgz) }
+	answer := func(out string, archive ...[]byte) func(context.Context, worker.Request) (worker.Result, error) {
+		return func(_ context.Context, req worker.Request) (worker.Result, error) {
+			data := tgz
+			if len(archive) > 0 {
+				data = archive[0]
+			}
+			if strings.Contains(out, "artifactsArchiveSHA256") {
+				sendFleetArchive(req, data)
+			}
 			return worker.Result{OK: true, OutputJSON: out, WorkerId: "reg-1", NodeId: "agent-b"}, nil
 		}
 	}
@@ -663,7 +666,7 @@ func TestFleetStepStoresItsArtifactsAndNotes(t *testing.T) {
 	})
 
 	t.Run("an invalid archive fails the step", func(t *testing.T) {
-		d := &fakeDispatcher{answer: answer(`{"exitCode":0,"durationMs":10,"artifactsTgzBase64":"bm90IGEgdGFyLmd6","artifactsMissing":[]}`)}
+		d := &fakeDispatcher{answer: answer(fleetArtifactOutput([]byte("not a tar.gz")), []byte("not a tar.gz"))}
 		f, lib, _, _ := newTestFleet(t, d)
 		res := runFleet(t, f, fleetArtifactReq())
 		if res.Status != pl.OutcomeFailed || res.Failure == nil || res.Failure.Code != pl.CodeArtifactUnavailable {
@@ -681,11 +684,11 @@ func TestFleetStepStoresItsArtifactsAndNotes(t *testing.T) {
 		missing   []string
 	}{
 		{"no archive: the paths the machine says matched nothing",
-			`{"exitCode":0,"durationMs":10,"artifactsTgzBase64":"","artifactsMissing":["missing.txt"]}`, []string{"missing.txt"}},
+			`{"exitCode":0,"durationMs":10,"artifactsMissing":["missing.txt"]}`, []string{"missing.txt"}},
 		{"no archive from a failed command that packed nothing and names nothing",
-			`{"exitCode":2,"durationMs":10,"artifactsTgzBase64":"","artifactsMissing":[]}`, nil},
+			`{"exitCode":2,"durationMs":10,"artifactsMissing":[]}`, nil},
 		{"no archive and no word from the machine: every declared path",
-			`{"exitCode":0,"durationMs":10,"artifactsTgzBase64":""}`, nil},
+			`{"exitCode":0,"durationMs":10}`, nil},
 	} {
 		t.Run(c.name, func(t *testing.T) {
 			d := &fakeDispatcher{answer: answer(c.out)}
@@ -717,10 +720,8 @@ func TestFleetStepStoresItsArtifactsAndNotes(t *testing.T) {
 	})
 
 	t.Run("an archive past the cap is refused before it is decoded", func(t *testing.T) {
-		// Base64 of zeros: no gzip at all, so only the size check can say it is
-		// too large -- decoded, it would read as an archive that is not one.
-		d := &fakeDispatcher{answer: answer(`{"exitCode":0,"durationMs":10,"artifactsTgzBase64":"` +
-			strings.Repeat("A", 90000) + `","artifactsMissing":[]}`)}
+		// No gzip at all: the stream size check must refuse it before extraction.
+		d := &fakeDispatcher{answer: answer(fleetArtifactOutput([]byte(strings.Repeat("A", 90000))), []byte(strings.Repeat("A", 90000)))}
 		f, _, _, _ := newTestFleet(t, d)
 		f.cfg.ArtifactMaxBytes = 4
 		res := runFleet(t, f, fleetArtifactReq())
@@ -775,8 +776,8 @@ func TestFleetStepStoresItsArtifactsAndNotes(t *testing.T) {
 		for i := 0; i < files; i++ {
 			entries = append(entries, extractTestEntry{name: fmt.Sprintf("dist/f%04d.txt", i), body: "x"})
 		}
-		many := base64.StdEncoding.EncodeToString(extractTestTgz(t, entries))
-		d := &fakeDispatcher{answer: answer(`{"exitCode":0,"durationMs":10,"artifactsTgzBase64":"` + many + `","artifactsMissing":[]}`)}
+		many := extractTestTgz(t, entries)
+		d := &fakeDispatcher{answer: answer(fleetArtifactOutput(many), many)}
 		f, _, _, _ := newTestFleet(t, d)
 		f.library = &rtLibrary{idPad: "-" + strings.Repeat("i", 800)}
 		req := fleetArtifactReq()
@@ -848,10 +849,7 @@ func TestFleetStepMasksASecretInAnArtifactEntryName(t *testing.T) {
 				{name: "coverage.out", body: "mode: set\n"},
 				{name: c.entry, body: "x"},
 			})
-			d := &fakeDispatcher{answer: func(context.Context, worker.Request) (worker.Result, error) {
-				return worker.Result{OK: true, WorkerId: "reg-1", NodeId: "agent-b", OutputJSON: `{"exitCode":0,"durationMs":10,` +
-					`"artifactsTgzBase64":"` + base64.StdEncoding.EncodeToString(tgz) + `","artifactsMissing":[]}`}, nil
-			}}
+			d := &fakeDispatcher{answer: fleetArtifactAnswer(tgz)}
 			f, lib, _, _ := newTestFleet(t, d)
 			req := fleetReq()
 			req.Step.Artifacts = []string{"coverage.out"}
@@ -1083,9 +1081,9 @@ func TestFleetStepFilesWhatACancelledStepCaptured(t *testing.T) {
 		tgz := extractTestTgz(t, []extractTestEntry{{name: "coverage.out", body: "mode: set\n"}})
 		d := &fakeDispatcher{answer: func(_ context.Context, req worker.Request) (worker.Result, error) {
 			req.OnStreamChunk(chunk("stdout", "PASS\n"))
+			sendFleetArchive(req, tgz)
 			cancel(errRunCancelled) // lands as the machine sends its answer
-			return worker.Result{OK: true, WorkerId: "reg-1", NodeId: "agent-b", OutputJSON: `{"exitCode":0,"durationMs":10,` +
-				`"artifactsTgzBase64":"` + base64.StdEncoding.EncodeToString(tgz) + `","artifactsMissing":[]}`}, nil
+			return worker.Result{OK: true, WorkerId: "reg-1", NodeId: "agent-b", OutputJSON: fleetArtifactOutput(tgz)}, nil
 		}}
 		f, lib, _, _ := newTestFleet(t, d)
 		req := fleetReq()
@@ -1110,13 +1108,16 @@ func TestFleetStepFilesWhatACancelledStepCaptured(t *testing.T) {
 		{"cancelled as the machine answered its artifacts too large, it stays cancelled",
 			`{"exitCode":0,"durationMs":10,"artifactsTooLarge":true}`},
 		{"cancelled as the machine answered an archive past the cap, it stays cancelled",
-			`{"exitCode":0,"durationMs":10,"artifactsTgzBase64":"` + strings.Repeat("A", 90000) + `"}`},
+			fleetArtifactOutput([]byte(strings.Repeat("A", 90000)))},
 	} {
 		t.Run(c.name, func(t *testing.T) {
 			ctx, cancel := context.WithCancelCause(context.Background())
 			defer cancel(nil)
 			d := &fakeDispatcher{answer: func(_ context.Context, req worker.Request) (worker.Result, error) {
 				req.OnStreamChunk(chunk("stdout", "PASS\n"))
+				if strings.Contains(c.out, "artifactsArchiveSHA256") {
+					sendFleetArchive(req, []byte(strings.Repeat("A", 90000)))
+				}
 				cancel(errRunCancelled) // lands as the machine sends its answer
 				return worker.Result{OK: true, WorkerId: "reg-1", NodeId: "agent-b", OutputJSON: c.out}, nil
 			}}

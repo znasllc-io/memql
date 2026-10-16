@@ -739,7 +739,7 @@ replica holds is reached over a forward under the owner's authority -- skipped,
 never failed, when it cannot be. With no machine that offers the need and allows pipelines, the step is
 refused `pipeline_no_machine_for_need`, and nothing ran. An otherwise eligible
 worker that is offline can keep admission waiting for its connection; revoked
-workers, withdrawn repository consent and incompatible contracts cannot. Under contract 3, policy rejection, busy build capacity and an unavailable
+workers, withdrawn repository consent and incompatible contracts cannot. Under contract 4, policy rejection, busy build capacity and an unavailable
 runtime are confirmed pre-execution refusals and permit another candidate.
 When the dispatcher confirms that shared build capacity was busy, an eligible
 worker is offline, or its connection disappeared before dispatch, the fleet
@@ -781,7 +781,16 @@ enrollments, repository hosts, architectures, images and runtime users. Pull
 request writes never enter the trusted push/release cache. Cockpit retains up
 to 10 GiB between builds, evicting oldest cache directories; this is not a hard
 disk quota while a command runs. Native steps cannot declare services or these
-managed caches. Upgrade the engine and Cockpit together for contract 3.
+managed caches. Upgrade the engine and Cockpit together for contract 4.
+
+Artifacts use the existing authenticated worker stream, in data frames of at
+most 256 KiB before the terminal result. The receiver spools to a private file
+and checks the terminal byte count and SHA-256 before extraction. Missing,
+truncated, oversized or corrupt transfers cannot receive Library receipts.
+Cockpit admits at most 1024 files, 256 MiB of file contents and 256 MiB of
+compressed archive; the engine's configured artifact quota may be lower.
+Output logs remain separate and secret-masked. Older workers are ineligible
+until upgraded; there is no fallback to an inline archive.
 
 **What the machine does with the step** -- the clone (the cluster Job's own
 clone script, over `https` only), the command in the machine's own environment,
