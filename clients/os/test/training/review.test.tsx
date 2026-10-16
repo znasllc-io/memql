@@ -146,7 +146,7 @@ describe("the queue", () => {
     });
     mount(connection);
     await settle(6);
-    expect(screen.getByText("Nothing awaiting review.")).toBeTruthy();
+    expect(screen.getByText("No document passages awaiting review.")).toBeTruthy();
     // A queue with nothing to walk must not read as one that never loaded.
     expect(connection.callsNamed("documentChunksForDomain")).toHaveLength(0);
   });

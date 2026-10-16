@@ -961,6 +961,17 @@ func (e *MemQLEngine) executeWrite(ctx context.Context, mutation MutationNode, r
 		// their role holds the verb, and the guard resolves that from the
 		// same function the read path uses.
 		ctx = contextWithAccountScopeMemo(ctx, e)
+		if conceptMeta.Name == "v1:work:observation" {
+			if err := guardTrainingEvidence(ctx, priorPayload, payload); err != nil {
+				return nil, meta, err
+			}
+			if err := guardGoalEvaluationEvent(ctx, priorPayload, payload); err != nil {
+				return nil, meta, err
+			}
+			if err := guardTrainingLessonEvent(ctx, priorPayload, payload); err != nil {
+				return nil, meta, err
+			}
+		}
 		if err := guardRowAuthzWrite(ctx, conceptMeta.Name, id, priorPayload, existed, requirePrior); err != nil {
 			return nil, meta, err
 		}
@@ -1343,6 +1354,17 @@ func (e *MemQLEngine) executeWrite(ctx context.Context, mutation MutationNode, r
 		}
 	}
 
+	if conceptMeta.Name == "v1:work:observation" {
+		if err := guardTrainingEvidence(ctx, nil, payload); err != nil {
+			return nil, meta, err
+		}
+		if err := guardGoalEvaluationEvent(ctx, nil, payload); err != nil {
+			return nil, meta, err
+		}
+		if err := guardTrainingLessonEvent(ctx, nil, payload); err != nil {
+			return nil, meta, err
+		}
+	}
 	actor, err := mutationActor(ctx)
 	if err != nil {
 		return nil, meta, err

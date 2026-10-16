@@ -125,12 +125,12 @@ it("does not let a stale poll erase an acknowledged guidance turn", async () => 
   expect(test.session.getSnapshot().turns).toHaveLength(2); test.session.dispose();
 });
 
-it("shows applied only from the refreshed durable receipt", async () => {
+it("shows receipt acknowledgement only from the refreshed durable receipt", async () => {
   const test = setup(); await test.session.select("chat"); test.session.beginWorkGuidance("work"); test.session.send("Guidance", null);
   await waitFor(() => expect(test.session.getSnapshot().workGuidanceSending).toBe(false)); mount(test);
-  expect(screen.queryByText("Used by this work.")).toBeNull();
+  expect(screen.queryByText("Received by this work.")).toBeNull();
   test.setTurns([work(), { ...test.session.getSnapshot().turns[1]!, guidanceStatus: "applied" }]); await act(async () => test.session.reload());
-  expect(screen.getByText("Used by this work.")).toBeTruthy(); test.session.dispose();
+  expect(screen.getByText("Received by this work.")).toBeTruthy(); test.session.dispose();
 });
 
 it("records with models unavailable, bounds Unicode guidance and refuses live voice", async () => {

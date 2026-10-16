@@ -69,7 +69,7 @@ func (e *MemQLEngine) RecordWorkProgress(ctx context.Context, event WorkEvent) e
 	if err != nil {
 		return err
 	}
-	_, err = e.Execute(auth.ContextWithInternalOrigin(ctx), "mutation "+call)
+	_, err = e.Execute(auth.ContextWithInternalOrigin(ContextWithTrainingEvidenceWrite(ctx)), "mutation "+call)
 	return err
 }
 

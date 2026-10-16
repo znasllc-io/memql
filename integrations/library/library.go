@@ -85,8 +85,9 @@ type Integration struct {
 	// `status` -- which is exactly how it behaved before epic memql#4970,
 	// so the absence is a downgrade rather than a failure. See
 	// SetWorkJournal in analysis.go.
-	journal  *workjournal.Journal
-	training *trainingReader
+	journal      *workjournal.Journal
+	training     *trainingReader
+	lessonSource func(context.Context, string, string) (map[string]any, error)
 }
 
 // NewIntegration wires the engine handle. The factory is in plugin.go;
@@ -124,6 +125,8 @@ func (i *Integration) IntegrationName() string { return "library" }
 // Capabilities implements memql.IntegrationProvider.
 func (i *Integration) Capabilities() []memql.IntegrationCapability {
 	return append([]memql.IntegrationCapability{
+		{Name: "saveTrainingLesson", Description: "Append one owner-reviewed manual lesson revision or decision.", Handler: i.handleSaveTrainingLesson},
+		{Name: "indexTrainingLesson", Description: "Index an exact enabled manual lesson revision.", Handler: i.handleIndexTrainingLesson},
 		{Name: "workTrainingContext", Description: "Read the current owned work scope for Training retrieval.", Handler: i.handleWorkTrainingContext},
 		{Name: "ownedTrainingLessons", Description: "Read bounded reviewed passages from the current work owner's taught Library files.", Handler: i.handleOwnedTrainingLessons, PreserveOrder: true},
 		{Name: "removeDocumentAnnotation", Description: "Remove your document feedback or personal note.", Handler: i.handleRemoveDocumentAnnotation},

@@ -106,7 +106,7 @@ type trainingCandidate struct {
 
 // Publication and current source ownership precede top-K, so other owners'
 // nearer hits cannot crowd this caller out. Every table folds latest first.
-// staged-data: GATE -- handleOwnedTrainingLessons withholds all four source concepts before these reads.
+// staged-data: GATE -- handleOwnedTrainingLessons withholds all source concepts before these reads.
 const ownedTrainingSourceSQL = `WITH chunks AS (
  SELECT DISTINCT ON(id) id,payload,"createdAt" FROM "MemoryNodes"
  WHERE concept='v1:knowledge:documentChunk' ORDER BY id,"createdAt" DESC
@@ -131,20 +131,36 @@ WHERE k.payload->>'source'='fileUpload' AND k.payload->>'validationStatus'='vali
  AND jsonb_typeof(f.payload->'trainedIntoDomainIds')='array'
  AND (f.payload->'trainedIntoDomainIds') ? (k.payload->>'domainId')`
 
+// Manual coaching is an owned Library source backed by immutable Work events.
+// Fold the complete history before testing availability: rejection/retirement
+// cannot reveal an older enabled revision.
+// staged-data: GATE -- handleOwnedTrainingLessons withholds Work observations before this current-head read.
+const manualTrainingSourceSQL = `
+UNION ALL SELECT m.id,m.payload,m."createdAt",'', '', '{}'::jsonb, '{}'::jsonb
+FROM (
+ SELECT DISTINCT ON(payload->'data'->'trainingLesson'->>'id') id,payload,"createdAt"
+ FROM "MemoryNodes" WHERE concept='v1:work:observation'
+ AND payload->>'ownerUserId' IN ($1,'v1:identity:user:'||$1)
+ AND payload->'data'->'trainingLesson'->>'schemaVersion'='1'
+ ORDER BY payload->'data'->'trainingLesson'->>'id', (payload->'data'->'trainingLesson'->>'sequence')::int DESC
+) m
+WHERE m.payload->'data'->'trainingLesson'->>'enabled'='true'
+ AND m.payload->'data'->'trainingLesson'->>'review'='reviewed'`
+
 var trainingSourceSQL = ownedTrainingSourceSQL + `
 UNION ALL SELECT k.id,k.payload,k."createdAt",'' AS artifact_id,'' AS file_id,'{}'::jsonb AS artifact_payload,'{}'::jsonb AS file_payload
 FROM chunks k WHERE k.payload->>'validationStatus'='validated'
- AND COALESCE(k.payload->>'superseded','false')='false' AND ` + seeddata.CurrentSQL("k", true)
+ AND COALESCE(k.payload->>'superseded','false')='false' AND ` + seeddata.CurrentSQL("k", true) + manualTrainingSourceSQL
 
 // staged-data: GATE -- handleOwnedTrainingLessons checks all source concepts before this ranked read.
 var trainingCandidateSQL = `SELECT s.id,s.payload,s."createdAt",s.artifact_id,s.file_id,s.artifact_payload,s.file_payload,1-(v.embedding <=> $2::vector)
 FROM (` + trainingSourceSQL + `) s
-JOIN %s v ON v.id=s.id AND v.concept='v1:knowledge:documentChunk' AND v.vector_field='content'
+JOIN %s v ON v.id=s.id AND v.concept=CASE WHEN s.payload->'data'->'trainingLesson' IS NOT NULL THEN 'v1:work:observation' ELSE 'v1:knowledge:documentChunk' END AND v.vector_field='content'
 WHERE 1-(v.embedding <=> $2::vector) >= $3
 ORDER BY v.embedding <=> $2::vector,(s.artifact_id<>'') DESC,s.id LIMIT $4`
 
 func (i *Integration) handleOwnedTrainingLessons(ctx context.Context, args map[string]any, _ int) (result []memorynodes.MemoryNode, failure error) {
-	run, _, err := i.ownedTrainingScope(ctx)
+	run, goal, err := i.ownedTrainingScope(ctx)
 	if err != nil {
 		return nil, err
 	}
@@ -169,12 +185,29 @@ func (i *Integration) handleOwnedTrainingLessons(ctx context.Context, args map[s
 			}
 		}
 	}()
-	for _, concept := range []string{"v1:knowledge:documentChunk", "v1:library:artifact", "v1:library:file", "v1:library:fileChunk"} {
+	for _, concept := range []string{"v1:knowledge:documentChunk", "v1:library:artifact", "v1:library:file", "v1:library:fileChunk", "v1:work:observation"} {
 		// staged-data: GATE -- all source concepts are checked before raw reads.
 		if r.staged(concept) {
 			receipt.Status = "source-concept-staged"
 			return nil, nil
 		}
+	}
+	if input, ok := goal["input"].(map[string]any); ok && input["lessonEvaluation"] != nil {
+		passage, err := i.evaluationLesson(ctx, run, input["lessonEvaluation"])
+		if err != nil {
+			return nil, err
+		}
+		passage["selectionReceiptId"] = receiptID
+		raw, err := json.Marshal(passage)
+		if err != nil {
+			return nil, err
+		}
+		receipt.Status = "evaluation-only"
+		if len(raw) > tokens*3 {
+			return nil, fmt.Errorf("evaluation lesson exceeds the context allocation")
+		}
+		receipt.Selected = append(receipt.Selected, selectedTrainingEvidence(passage))
+		return []memorynodes.MemoryNode{{ID: receiptID, Concept: resultConcept, Payload: raw}}, nil
 	}
 	// Empty first-use corpora require neither an embedding binding nor a model.
 	var present bool
@@ -213,7 +246,7 @@ func (i *Integration) handleOwnedTrainingLessons(ctx context.Context, args map[s
 			receipt.Status = "index-unavailable"
 			return nil, nil
 		}
-		if err = r.db().QueryRowContext(ctx, "SELECT EXISTS(SELECT 1 FROM ("+trainingSourceSQL+") s JOIN "+table+" v ON v.id=s.id AND v.concept='v1:knowledge:documentChunk' AND v.vector_field='content')", memql.BareShortId(run.OwnerUserId)).Scan(&exists); err != nil {
+		if err = r.db().QueryRowContext(ctx, "SELECT EXISTS(SELECT 1 FROM ("+trainingSourceSQL+") s JOIN "+table+" v ON v.id=s.id AND v.concept=CASE WHEN s.payload->'data'->'trainingLesson' IS NOT NULL THEN 'v1:work:observation' ELSE 'v1:knowledge:documentChunk' END AND v.vector_field='content')", memql.BareShortId(run.OwnerUserId)).Scan(&exists); err != nil {
 			return nil, err
 		}
 		if !exists {
@@ -249,6 +282,12 @@ func (i *Integration) handleOwnedTrainingLessons(ctx context.Context, args map[s
 		}
 		c.artifact.ID, c.artifact.Concept = c.artifactID, "v1:library:artifact"
 		c.file.ID, c.file.Concept = c.fileID, "v1:library:file"
+		if err = json.Unmarshal(c.node.Payload, &c.payload); err != nil {
+			break
+		}
+		if data, ok := c.payload["data"].(map[string]any); ok && data["trainingLesson"] != nil {
+			c.node.Concept = "v1:work:observation"
+		}
 		// Admit the actual latest source rows before materializing a passage.
 		if !r.admit(ctx, c.node) || (c.artifactID != "" && (!r.admit(ctx, c.artifact) || !r.admit(ctx, c.file))) {
 			continue
@@ -318,6 +357,20 @@ func (i *Integration) handleOwnedTrainingLessons(ctx context.Context, args map[s
 // staged-data: GATE -- called only after handleOwnedTrainingLessons checks all source concepts.
 func (i *Integration) revalidateTrainingCandidate(ctx context.Context, c trainingCandidate) (map[string]any, bool, error) {
 	ctx = memql.ContextWithFreshRead(ctx)
+	if c.node.Concept == "v1:work:observation" {
+		l, err := lessonFromRow(c.payload)
+		if err != nil {
+			return nil, false, err
+		}
+		events, err := i.lessonEvents(ctx, l.ID)
+		if err != nil {
+			return nil, false, err
+		}
+		if len(events) == 0 || events[0].Receipt != l.Receipt || !events[0].Enabled || events[0].Review != "reviewed" || lessonDigest(l.Draft) != l.Digest {
+			return nil, false, nil
+		}
+		return map[string]any{"chunkId": l.Receipt, "chunkVersionAt": c.node.CreatedAt.Format(time.RFC3339Nano), "source": "manual-coaching", "sourceRef": "lesson:" + l.ID, "lessonId": l.ID, "lessonVersion": l.Version, "lessonDigest": l.Digest, "citation": l.Draft.Title, "text": lessonPassage(l), "similarity": c.score}, true, nil
+	}
 	if c.artifactID == "" {
 		return i.revalidateReleaseLesson(ctx, c)
 	}
