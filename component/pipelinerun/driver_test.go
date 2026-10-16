@@ -1896,7 +1896,7 @@ func TestARerunOfFailedStepsRunsOnlyWhatDidNotPass(t *testing.T) {
 // delivered announced the attempt it ran in, and this one is another.
 func TestCarryPassedCarriesOnlyIdenticalPasses(t *testing.T) {
 	track := func(key string, packages ...string) *stepTrack {
-		return &stepTrack{step: pipelines.Step{Key: key, Packages: packages}, definition: "same-definition"}
+		return &stepTrack{step: pipelines.Step{Key: key, Kind: pipelines.StepCommand, Packages: packages}, definition: "same-definition"}
 	}
 	vet, shardSame, shardMoved, db, carried := track("checks.vet"), track("tests.go#1", "a", "b"), track("tests.go#2", "c"), track("tests.db"), track("tests.lint")
 	planned := track("tests.os")

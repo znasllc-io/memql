@@ -282,7 +282,7 @@ func TestSARIFLostReplyNeverRetriesAndKnownReceiptSurvivesStatusFailure(t *testi
 }
 
 func TestSARIFRefusalsPrecedeExternalWrites(t *testing.T) {
-	for _, name := range []string{"stranger", "wrong work source", "wrong work run", "failed scanner", "failed run", "changed bytes", "wrong path", "changed installation", "revoked while reading artifact"} {
+	for _, name := range []string{"stranger", "wrong work source", "wrong work run", "failed scanner", "cancelled run", "changed bytes", "wrong path", "changed installation", "revoked while reading artifact"} {
 		t.Run(name, func(t *testing.T) {
 			h := newSARIFHarness(t)
 			caller := h.owner
@@ -296,9 +296,9 @@ func TestSARIFRefusalsPrecedeExternalWrites(t *testing.T) {
 				h.work["input"].(map[string]any)["pipelineRunId"] = "other"
 			case "failed scanner":
 				h.step["status"] = "failed"
-			case "failed run":
+			case "cancelled run":
 				r := h.run
-				r.Conclusion = "failure"
+				r.Conclusion = "cancelled"
 				h.h.store.addRun(r)
 			case "changed bytes":
 				h.library.body = []byte("modified")

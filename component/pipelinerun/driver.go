@@ -633,6 +633,14 @@ func (dr *runDriver) carryFromOriginal(ctx context.Context) bool {
 // ran in; this attempt has an outcome of its own -- most often, that the
 // pipeline recovered -- and a carried notification would leave it unsaid.
 func carryPassed(tracks []*stepTrack, prior []WorkStep, priorAttempt int) {
+	// Report publications bind the producing run, so a new attempt must produce
+	// its own scanner artifacts instead of carrying a skip from an older run.
+	producers := map[string]bool{}
+	for _, t := range tracks {
+		if t.step.SARIF != nil {
+			producers[t.step.SARIF.Step] = true
+		}
+	}
 	byKey := make(map[string]WorkStep, len(prior))
 	for _, row := range prior {
 		if row.Key != "" {
@@ -641,7 +649,7 @@ func carryPassed(tracks []*stepTrack, prior []WorkStep, priorAttempt int) {
 	}
 	for _, t := range tracks {
 		row, ok := byKey[t.step.Key]
-		if !ok || t.step.Skip != nil || t.step.Kind == pipelines.StepNotify {
+		if !ok || t.step.Skip != nil || t.step.Kind != pipelines.StepCommand || producers[t.step.Key] {
 			continue
 		}
 		passed := row.Status == WorkStepDone
@@ -949,6 +957,9 @@ func (dr *runDriver) runStep(ctx context.Context, t *stepTrack) {
 	switch {
 	case step.Skip != nil:
 		dr.settle(ctx, t, skipReceipt(step.Skip.Code, step.Skip.Reason))
+		return
+	case step.Kind == pipelines.StepSARIF:
+		dr.runSARIFReport(ctx, t)
 		return
 	case step.Kind == pipelines.StepNotify:
 		// The driver delivers a notification itself, over the outbound path

@@ -4805,7 +4805,7 @@ func PipelinesPreviewBuild(args PipelinesPreviewArgs) string {
 	return b.String()
 }
 
-// PipelinesPublishSARIF -- Publish one retained SARIF artifact from the caller's successful native pipeline. Source/ref/bytes come from verified journal and storage receipts, never from a caller-supplied URL or report. Returns publicationId, state, uploadId and sha256. Only complete proves ingestion; accepted is pending. Calling again observes the same upload. An uncertain or rejected upload is retained for inspection and never silently posted again. Report selection, polling and failure handling belong to the calling automation.
+// PipelinesPublishSARIF -- Publish one retained SARIF artifact from a successful scanner in the caller's native pipeline, including a run that is still active or failed elsewhere. Source/ref/bytes come from verified journal and storage receipts, never from a caller-supplied URL or report. Returns publicationId, state, uploadId and sha256. Only complete proves ingestion; accepted is pending. Calling again observes the same upload. An uncertain or rejected upload is retained for inspection and never silently posted again. Report selection, polling and failure handling belong to the calling automation.
 type PipelinesPublishSARIFArgs struct {
 	RunId   string
 	StepKey string

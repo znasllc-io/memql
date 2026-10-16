@@ -3611,7 +3611,7 @@ QueryClient.prototype.pipelinesPreview = function (this: QueryClient, args: Pipe
   return this.executeNamed("pipelinesPreview", buildPipelinesPreview(args), opts);
 };
 
-/** Publish one retained SARIF artifact from the caller's successful native pipeline. Source/ref/bytes come from verified journal and storage receipts, never from a caller-supplied URL or report. Returns publicationId, state, uploadId and sha256. Only complete proves ingestion; accepted is pending. Calling again observes the same upload. An uncertain or rejected upload is retained for inspection and never silently posted again. Report selection, polling and failure handling belong to the calling automation. */
+/** Publish one retained SARIF artifact from a successful scanner in the caller's native pipeline, including a run that is still active or failed elsewhere. Source/ref/bytes come from verified journal and storage receipts, never from a caller-supplied URL or report. Returns publicationId, state, uploadId and sha256. Only complete proves ingestion; accepted is pending. Calling again observes the same upload. An uncertain or rejected upload is retained for inspection and never silently posted again. Report selection, polling and failure handling belong to the calling automation. */
 export interface PipelinesPublishSARIFArgs {
   runId: string;
   stepKey: string;

@@ -78,6 +78,20 @@ automation runPipelineStages {
   }
 }
 
+/// Deliver once, then observe GitHub's asynchronous ingestion. An uncertain
+/// write is never retried. The native host accepts only its actual complete
+/// receipt; leaving this bounded polling window pending fails the report step.
+@template
+automation pipelineSARIFDelivery {
+  upload := builtin pipelineReportPublish()
+  if upload.state != "accepted" { return upload }
+  for delay in [2, 5, 10, 20, 30, 60, 60, 60] {
+    observed := builtin pipelineReportObserve(waitSeconds: delay)
+    if observed.state != "accepted" { return observed }
+  }
+  return upload
+}
+
 /// Stage applicability is pipeline policy: the manifest declares the events
 /// and modes, and the sealed workflow decides which stages a run includes.
 @template

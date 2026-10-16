@@ -357,7 +357,7 @@ func TestEngineManifestCompilesForEveryOpening(t *testing.T) {
 	}
 
 	fullStages := []string{manifestStageChecks, "vulnerabilities", "secrets-current", manifestStageTests}
-	analysisStages := []string{manifestStageChecks, "vulnerabilities", manifestStageTests, "analysis"}
+	analysisStages := []string{manifestStageChecks, "vulnerabilities", manifestStageTests, "analysis", "security-reports"}
 	pullRequestStages := []string{manifestStageChecks, "vulnerabilities", "secrets-current", manifestStageTests, manifestStageGates}
 	every := []string{manifestStepGoChecks, manifestStepPathRouting,
 		manifestStepGoTests, manifestStepDBTests, manifestStepFuzz, manifestStepOSChecks,
@@ -445,8 +445,14 @@ func TestEngineManifestCompilesForEveryOpening(t *testing.T) {
 			byName := map[string][]pipelines.Step{}
 			for _, step := range plan.Steps() {
 				byName[step.Name] = append(byName[step.Name], step)
-				if step.RunAfterFailure != (step.Stage == "analysis" || step.Stage == "vulnerabilities" || step.Stage == "secrets-current" || step.Stage == "secrets-history") {
+				if step.RunAfterFailure != (step.Stage == "analysis" || step.Stage == "security-reports" || step.Stage == "vulnerabilities" || step.Stage == "secrets-current" || step.Stage == "secrets-history") {
 					t.Errorf("failure policy was lost or leaked to another stage: %+v", step)
+				}
+				if step.Kind == pipelines.StepSARIF {
+					if step.Stage != "security-reports" || step.SARIF == nil || step.Image != "" || step.Run != "" || step.Execution != "" || len(step.Secrets) != 0 {
+						t.Errorf("report lost its driver-owned artifact contract: %+v", step)
+					}
+					continue
 				}
 				if step.Kind != pipelines.StepCommand || step.Image != expectedEngineStepImage(spec, step.Name) {
 					t.Errorf("step %s is a %s step in %q; every step is a command in the toolchain image %q",

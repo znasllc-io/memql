@@ -32,8 +32,8 @@
 // item's (`read app:settings/pipelines`): it asks GitHub about the cluster's
 // own app, which is an owner's question, not a source's.
 
-/// Publish one retained SARIF artifact from the caller's successful native
-/// pipeline. Source/ref/bytes come from verified journal and storage receipts,
+/// Publish one retained SARIF artifact from a successful scanner in the caller's native
+/// pipeline, including a run that is still active or failed elsewhere. Source/ref/bytes come from verified journal and storage receipts,
 /// never from a caller-supplied URL or report. Returns publicationId, state,
 /// uploadId and sha256. Only complete proves ingestion; accepted is pending.
 /// Calling again observes the same upload. An uncertain or rejected upload is
@@ -58,6 +58,15 @@ builtin pipelinesPublishSARIF {
 builtin pipelinesReadSARIF {
   publicationId string!
 }
+
+/// Available only inside one claimed report step, bound to its compiled artifact.
+@executor("integration.pipelines.reportPublish")
+builtin pipelineReportPublish { }
+
+/// Observe that step's accepted upload after a bounded, cancelable wait.
+@executor("integration.pipelines.reportObserve")
+@args(profile="object")
+builtin pipelineReportObserve { waitSeconds integer! }
 
 /// Read only this claimed run's compiled step states. Unavailable outside a pipeline workflow.
 @executor("integration.pipelines.workflowFacts")

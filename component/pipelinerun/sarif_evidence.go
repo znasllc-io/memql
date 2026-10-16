@@ -45,7 +45,7 @@ func readSARIFEvidence(ctx context.Context, engine Engine, owner string, r Run, 
 	if err != nil {
 		return pipelines.ReleaseWorkReceipt{}, err
 	}
-	proof, err := pipelines.InspectReleaseWorkReceipt(owner, r.WorkRunID, key, run, step)
+	proof, err := pipelines.InspectScannerReceipt(owner, r.WorkRunID, key, run, step)
 	if err != nil {
 		return proof, err
 	}

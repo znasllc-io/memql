@@ -313,6 +313,10 @@ func validateStep(spec *Spec, stage string, j int, step StepSpec, seen map[strin
 	}
 	scope := stage + "/" + step.Name
 
+	if step.SARIF != nil {
+		return validateSARIFStep(spec, stage, step)
+	}
+
 	if strings.TrimSpace(step.Run) == "" && step.ImageBuild == nil {
 		return Refuse(CodeStepInvalid, scope, "Step %s has no command to run.", scope)
 	}

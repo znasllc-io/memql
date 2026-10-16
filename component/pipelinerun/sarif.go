@@ -259,8 +259,8 @@ func sarifSource(ctx context.Context, d Deps, owner, runID string) (Run, Pipelin
 	if err != nil {
 		return Run{}, Pipeline{}, err
 	}
-	if r == nil || memql.BareShortId(r.OwnerUserID) != owner || !r.Finished() || r.Conclusion != "success" || r.CancelRequested || r.WorkRunID == "" {
-		return Run{}, Pipeline{}, errors.New("SARIF publication requires the caller's completed successful native pipeline")
+	if r == nil || memql.BareShortId(r.OwnerUserID) != owner || (r.Status != StatusInProgress && (r.Status != StatusCompleted || (r.Conclusion != "success" && r.Conclusion != "failure"))) || r.CancelRequested || r.WorkRunID == "" {
+		return Run{}, Pipeline{}, errors.New("SARIF publication requires the caller's active or completed native pipeline without cancellation")
 	}
 	p, err := d.Store.PipelineForOwner(ctx, r.PipelineID)
 	if err != nil {

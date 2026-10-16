@@ -79,7 +79,7 @@ func (dr *runDriver) prepareWorkflow(name string) error {
 			switch step.Type {
 			case automations.StepTypeExpression, automations.StepTypeReturn:
 			case automations.StepTypeFunction:
-				if step.Function == nil || (step.Function.Name != "pipelineWorkflowFacts" && step.Function.Name != "pipelineSkipStep") {
+				if step.Function == nil || (step.Function.Name != "pipelineWorkflowFacts" && step.Function.Name != "pipelineSkipStep" && step.Function.Name != "pipelineReportPublish" && step.Function.Name != "pipelineReportObserve") {
 					return fmt.Errorf("pipeline workflow step %q calls a function outside its run-scoped contract", step.ID)
 				}
 			case automations.StepTypeAction:
@@ -182,7 +182,7 @@ func (dr *runDriver) prepareWorkflow(name string) error {
 	// recipes are part of the immutable execution contract as well.
 	for _, helper := range []string{
 		"pipelineStageIncluded", "pipelinePackageSelection", "pipelinePackageStepSelection", "pipelineBucketIncluded",
-		"pipelineNotificationCopy", "pipelineNotificationOutcome",
+		"pipelineNotificationCopy", "pipelineNotificationOutcome", "pipelineSARIFDelivery",
 	} {
 		if err := visit(helper); err != nil {
 			return err
