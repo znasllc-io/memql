@@ -111,3 +111,49 @@ func TestToolchainBuildIsReleaseOnlyAndRetainsUnpublishedOCI(t *testing.T) {
 		}
 	}
 }
+
+func TestDeployGateImageFollowsBuildInputsAndStaysUnpublished(t *testing.T) {
+	spec := engineManifest(t).Pipeline
+	graph, _ := engineImportGraph(t)
+	for _, tc := range []struct {
+		path string
+		runs bool
+	}{
+		{"cmd/deploy-gate-check/main.go", true},
+		{"cmd/deploy-gate-check/Dockerfile", true},
+		{"component/grpc/gen/memql.pb.go", true},
+		{"core/id/id.go", true},
+		{"component/grpc/gen/go.mod", true},
+		{"go.mod", true},
+		{"go.sum", true},
+		{"go.work", true},
+		{"memql-package.yaml", true},
+		{".github/workflows/deploy-gate-image.yml", true},
+		{"docs/public/overview/quickstart.md", false},
+		{"clients/os/src/main.tsx", false},
+	} {
+		t.Run(tc.path, func(t *testing.T) {
+			plan, refusal := compileEngineOpening(spec, graph, pipelines.EventPullRequest, []string{tc.path})
+			if refusal != nil {
+				t.Fatal(refusal)
+			}
+			for _, step := range plan.Steps() {
+				if step.Key != "tests.deploy-gate-image" {
+					continue
+				}
+				if (step.Skip == nil) != tc.runs {
+					t.Fatalf("build selected=%v for %s, want %v", step.Skip == nil, tc.path, tc.runs)
+				}
+				build := step.ImageBuild
+				if build == nil || build.Context != "." || build.Dockerfile != "cmd/deploy-gate-check/Dockerfile" {
+					t.Fatalf("build does not exercise the deployed gate Dockerfile: %+v", build)
+				}
+				if step.RequiresFleet() || len(step.Secrets) != 0 || len(step.Caches) != 0 || step.Run != "" || step.RunAfterFailure || !slices.Equal(step.Artifacts, pipelines.ImageBuildArtifacts()) {
+					t.Fatalf("build lost its isolated unpublished OCI contract: %+v", step)
+				}
+				return
+			}
+			t.Fatal("deploy-gate image validation is absent")
+		})
+	}
+}
