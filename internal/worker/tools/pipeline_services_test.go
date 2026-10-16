@@ -120,11 +120,11 @@ func TestPipelineServicesRealDocker(t *testing.T) {
 	var output recordedOutput
 	command := `psql -h 127.0.0.1 -U memql -d memql -Atc 'SELECT 42' > result.txt && test "$(cat result.txt)" = 42 && test "$(cat file.txt)" = second`
 	extra["artifacts"] = []string{"result.txt"}
-	result := decoded(t)(runPipelineStep(context.Background(), "", stepArgs(t, fx, command, extra), policy, output.emit))
+	result := decoded(t)(runPipelineStep(context.Background(), "", stepArgs(t, fx, command, extra), policy, output.emit, output.artifact))
 	if result.ExitCode != 0 {
 		t.Fatalf("database command: %d %s %s", result.ExitCode, output.text(true), output.text(false))
 	}
-	if files := untarGz(t, result.ArtifactsTgzBase64); files["result.txt"] != "42\n" {
+	if files := untarGz(t, output.artifactBytes()); files["result.txt"] != "42\n" {
 		t.Fatalf("artifact: %v", files)
 	}
 	if entries, err := os.ReadDir(root); err != nil || len(entries) != 0 {
@@ -198,7 +198,7 @@ func TestPipelineServicesRealDocker(t *testing.T) {
 		cancel()
 	}
 	began := time.Now()
-	_, fail := runPipelineStep(ctx, "", stepArgs(t, fx, "echo database-ready-for-cancel; sleep 300", extra), policy, cancelled.emit)
+	_, fail := runPipelineStep(ctx, "", stepArgs(t, fx, "echo database-ready-for-cancel; sleep 300", extra), policy, cancelled.emit, cancelled.artifact)
 	if inspectionErr != nil {
 		t.Fatal(inspectionErr)
 	}

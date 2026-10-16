@@ -35,7 +35,7 @@ esac`)
 				"execution": "container", "platform": "linux/arm64", "image": containerTestDigest,
 				// A cluster request cannot enlarge the machine's policy.
 				"container_memory_mib": 32768,
-			}), policy, nil))
+			}), policy, nil, nil))
 			if result.ExitCode != 0 {
 				t.Fatalf("container exit %d", result.ExitCode)
 			}
@@ -61,7 +61,7 @@ func TestInvalidPipelineMemoryRefusesBeforeCheckout(t *testing.T) {
 	for _, limit := range []int{-1, 255, 32769} {
 		t.Run(fmt.Sprint(limit), func(t *testing.T) {
 			policy, root := pipelineTestPolicy(t, fmt.Sprintf("  container_memory_mib: %d\n", limit))
-			_, fail := runPipelineStep(context.Background(), "", stepArgs(t, fx, "exit 0", nil), policy, nil)
+			_, fail := runPipelineStep(context.Background(), "", stepArgs(t, fx, "exit 0", nil), policy, nil, nil)
 			if fail == nil || fail.GetErrorCode() != "denied_by_policy" || !strings.Contains(fail.GetErrorMessage(), "container_memory_mib") {
 				t.Fatalf("invalid memory was not explained/refused: %v", fail)
 			}
@@ -107,7 +107,7 @@ func TestNativeDockerNeedChecksTheDaemonBeforeCheckout(t *testing.T) {
 	allowLocalClones(t)
 	fakePipelineDocker(t, "exit 1")
 	policy, root := pipelineTestPolicy(t, "")
-	_, fail := runPipelineStep(context.Background(), "", stepArgs(t, fx, "exit 0", map[string]any{"needs": []any{"docker"}}), policy, nil)
+	_, fail := runPipelineStep(context.Background(), "", stepArgs(t, fx, "exit 0", map[string]any{"needs": []any{"docker"}}), policy, nil, nil)
 	if fail == nil || fail.GetErrorCode() != "pipeline_runtime_unavailable" {
 		t.Fatalf("failure: %v", fail)
 	}
@@ -151,7 +151,7 @@ func TestPipelineDockerHealthIsCheckedBeforeClone(t *testing.T) {
 		t.Run(answer, func(t *testing.T) {
 			fakePipelineDocker(t, answer)
 			policy, root := pipelineTestPolicy(t, "")
-			_, fail := runPipelineStep(context.Background(), "", stepArgs(t, fx, "exit 0", map[string]any{"execution": "container", "platform": "linux/arm64", "image": containerTestDigest}), policy, nil)
+			_, fail := runPipelineStep(context.Background(), "", stepArgs(t, fx, "exit 0", map[string]any{"execution": "container", "platform": "linux/arm64", "image": containerTestDigest}), policy, nil, nil)
 			if fail == nil || fail.GetErrorCode() != "pipeline_runtime_unavailable" {
 				t.Fatalf("failure: %v", fail)
 			}
@@ -202,11 +202,11 @@ func TestPipelineContainerRealDocker(t *testing.T) {
 		"secrets": map[string]any{"SECRET": "secret'with\nmultiple-lines", "DOCKER_HOST": "this-must-not-configure-the-host-client"}, "artifacts": []string{"result.txt"}}
 	var output recordedOutput
 	command := `test "$(uname -s)" = Linux && test ! "${MEMQL_CONTAINER_HOST_ONLY+x}" && test ! "${MEMQL_WORKER_TOKEN+x}" && test "$(cat file.txt)" = second && printf '%s' "$SECRET" && printf '%s' "$SECRET" > result.txt`
-	result := decoded(t)(runPipelineStep(context.Background(), "", stepArgs(t, fx, command, extra), policy, output.emit))
+	result := decoded(t)(runPipelineStep(context.Background(), "", stepArgs(t, fx, command, extra), policy, output.emit, output.artifact))
 	if result.ExitCode != 0 {
 		t.Fatalf("container exited %d: %s", result.ExitCode, output.text(true))
 	}
-	if files := untarGz(t, result.ArtifactsTgzBase64); files["result.txt"] != "secret'with\nmultiple-lines" {
+	if files := untarGz(t, output.artifactBytes()); files["result.txt"] != "secret'with\nmultiple-lines" {
 		t.Fatalf("artifact: %v", files)
 	}
 	if text := output.text(false); strings.Contains(text, "secret'with") || strings.Contains(text, "multiple-lines") {
@@ -277,7 +277,7 @@ func TestPipelineContainerRealDocker(t *testing.T) {
 		}
 	}
 	began := time.Now()
-	_, fail := runPipelineStep(ctx, "", stepArgs(t, fx, "echo container-ready; sleep 300", extra), policy, cancelled.emit)
+	_, fail := runPipelineStep(ctx, "", stepArgs(t, fx, "echo container-ready; sleep 300", extra), policy, cancelled.emit, cancelled.artifact)
 	if fail == nil || fail.GetErrorCode() != "cancelled" {
 		t.Fatalf("cancellation: %v", fail)
 	}

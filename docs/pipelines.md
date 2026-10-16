@@ -10,7 +10,7 @@ memql#5494). This half: the `pipeline_step` action, the `pipelines` policy and
 the `pipelines=allowed` registration label and the action's reported repository
 scope. A machine that does not report a scope is not eligible for a pipeline
 step; upgrade and reconnect it first. The runtime also reports
-`actionContracts["workerHost.pipeline_step"] = 3`. The engine requires this
+`actionContracts["workerHost.pipeline_step"] = 4`. The engine requires this
 contract before sending an explicit native/container request; operator labels
 are not evidence of an implemented action contract.
 
@@ -170,9 +170,12 @@ here on the old answer in the meantime is refused by the new one.
 8. **Artifacts**, the declared paths or globs relative to the checkout,
    directories taken whole, packed as a GNU `tar.gz` so long and Unicode
    names do not require PAX metadata. Only regular files travel,
-   and never through a link that leads out of the checkout. Up to 64 MiB of
-   files and 20 MiB compressed -- what one result can carry on the worker
-   stream, whose messages are capped at 32 MiB. Over either, the archive is
+   and never through a link that leads out of the checkout. At most 1024 files,
+   256 MiB raw and 256 MiB compressed travel, subject to the engine's lower
+   configured quota. A private archive is streamed in frames of at most
+   256 KiB before the terminal result names its byte count and SHA-256 digest.
+   Both sides spool to disk; the engine verifies the complete transfer before
+   extracting anything. Over a size or file-count limit, the archive is
    left out and the result says `artifactsTooLarge`; the step keeps its own
    exit status. A declared path nothing matched is listed in
    `artifactsMissing`. The receiving engine verifies the complete archive and

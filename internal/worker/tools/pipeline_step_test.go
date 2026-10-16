@@ -6,6 +6,7 @@ import (
 	"compress/gzip"
 	"context"
 	"crypto/rand"
+	"crypto/sha256"
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
@@ -145,9 +146,10 @@ func roundTrip(t *testing.T, v map[string]any) map[string]any {
 
 // recordedOutput is the stream a step's output goes to.
 type recordedOutput struct {
-	mu      sync.Mutex
-	chunks  []recordedChunk
-	onChunk func(recordedChunk)
+	mu             sync.Mutex
+	chunks         []recordedChunk
+	artifactStream bytes.Buffer
+	onChunk        func(recordedChunk)
 }
 
 type recordedChunk struct {
@@ -164,6 +166,18 @@ func (r *recordedOutput) emit(stderr bool, data []byte) {
 	if hook != nil {
 		hook(c)
 	}
+}
+
+func (r *recordedOutput) artifact(data []byte) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	_, err := r.artifactStream.Write(data)
+	return err
+}
+func (r *recordedOutput) artifactBytes() []byte {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return append([]byte(nil), r.artifactStream.Bytes()...)
 }
 
 func (r *recordedOutput) text(stderr bool) string {
@@ -188,11 +202,12 @@ func (r *recordedOutput) count() int {
 
 // stepResult is the result contract, field for field.
 type stepResult struct {
-	ExitCode           int      `json:"exitCode"`
-	DurationMs         int64    `json:"durationMs"`
-	ArtifactsTgzBase64 string   `json:"artifactsTgzBase64"`
-	ArtifactsMissing   []string `json:"artifactsMissing"`
-	ArtifactsTooLarge  bool     `json:"artifactsTooLarge"`
+	ExitCode               int      `json:"exitCode"`
+	DurationMs             int64    `json:"durationMs"`
+	ArtifactsArchiveBytes  int64    `json:"artifactsArchiveBytes"`
+	ArtifactsArchiveSHA256 string   `json:"artifactsArchiveSHA256"`
+	ArtifactsMissing       []string `json:"artifactsMissing"`
+	ArtifactsTooLarge      bool     `json:"artifactsTooLarge"`
 }
 
 // decoded returns decodeStep bound to t, so a step's two results can be
@@ -222,15 +237,11 @@ func decodeStep(t *testing.T, s *memqlv1.Success, f *memqlv1.Failure) stepResult
 	return res
 }
 
-func untarGz(t *testing.T, b64 string) map[string]string {
+func untarGz(t *testing.T, raw []byte) map[string]string {
 	t.Helper()
 	files := map[string]string{}
-	if b64 == "" {
+	if len(raw) == 0 {
 		return files // no archive: nothing was packed
-	}
-	raw, err := base64.StdEncoding.DecodeString(b64)
-	if err != nil {
-		t.Fatalf("artifactsTgzBase64 is not base64: %v", err)
 	}
 	gz, err := gzip.NewReader(bytes.NewReader(raw))
 	if err != nil {
@@ -287,7 +298,7 @@ func TestPipelineStepRefusedUnlessThisMachineAllowsPipelines(t *testing.T) {
 	} {
 		t.Run(name, func(t *testing.T) {
 			out := &recordedOutput{}
-			success, fail := runPipelineStep(context.Background(), "", stepArgs(t, fx, "echo ran", nil), policyWith(t, body), out.emit)
+			success, fail := runPipelineStep(context.Background(), "", stepArgs(t, fx, "echo ran", nil), policyWith(t, body), out.emit, out.artifact)
 			if success != nil || fail == nil {
 				t.Fatalf("a machine that allows no pipelines ran a step: %+v", success)
 			}
@@ -313,10 +324,13 @@ func TestPipelineStepRefusedUnlessThisMachineAllowsPipelines(t *testing.T) {
 	}
 }
 
-func runPipelineStepQuietly(t *testing.T, args map[string]any, p *Policy) (*memqlv1.Success, *memqlv1.Failure) {
+func runPipelineStepQuietly(t *testing.T, args map[string]any, p *Policy, recorded ...*recordedOutput) (*memqlv1.Success, *memqlv1.Failure) {
 	t.Helper()
 	out := &recordedOutput{}
-	return runPipelineStep(context.Background(), "", args, p, out.emit)
+	if len(recorded) == 1 {
+		out = recorded[0]
+	}
+	return runPipelineStep(context.Background(), "", args, p, out.emit, out.artifact)
 }
 
 func TestPipelineStepRefusesARepositoryThePolicyDoesNotList(t *testing.T) {
@@ -368,7 +382,7 @@ func TestPipelineStepRefusesMalformedRequests(t *testing.T) {
 	} {
 		t.Run(name, func(t *testing.T) {
 			out := &recordedOutput{}
-			_, fail := runPipelineStep(context.Background(), "", stepArgs(t, fx, "echo ran", extra), p, out.emit)
+			_, fail := runPipelineStep(context.Background(), "", stepArgs(t, fx, "echo ran", extra), p, out.emit, out.artifact)
 			if fail == nil || fail.GetErrorCode() != "bad_request" {
 				t.Fatalf("want bad_request, got %+v", fail)
 			}
@@ -399,7 +413,7 @@ func TestPipelineStepDispatchedByAnAgentIsRefused(t *testing.T) {
 	fx := newPipelineFixture(t)
 	p, root := pipelineTestPolicy(t, "")
 	out := &recordedOutput{}
-	_, fail := runPipelineStep(context.Background(), "v1:agents:agent:abc123", stepArgs(t, fx, "echo ran", nil), p, out.emit)
+	_, fail := runPipelineStep(context.Background(), "v1:agents:agent:abc123", stepArgs(t, fx, "echo ran", nil), p, out.emit, out.artifact)
 	if fail == nil || fail.GetErrorCode() != "denied_by_policy" {
 		t.Fatalf("a step an agent dispatched must be refused by policy, got %+v", fail)
 	}
@@ -412,7 +426,7 @@ func TestPipelineStepDispatchedByAnAgentIsRefused(t *testing.T) {
 	assertNoStepDirs(t, root)
 
 	// The reachable positive: the same request from the runner runs.
-	if res := decoded(t)(runPipelineStep(context.Background(), "", stepArgs(t, fx, "echo ran", nil), p, out.emit)); res.ExitCode != 0 {
+	if res := decoded(t)(runPipelineStep(context.Background(), "", stepArgs(t, fx, "echo ran", nil), p, out.emit, out.artifact)); res.ExitCode != 0 {
 		t.Fatalf("the runner's step exited %d", res.ExitCode)
 	}
 }
@@ -473,7 +487,7 @@ func TestPipelineStepFetchesTheShaAndRunsTheCommandThere(t *testing.T) {
 	p, root := pipelineTestPolicy(t, "")
 	out := &recordedOutput{}
 	success, fail := runPipelineStep(context.Background(), "",
-		stepArgs(t, fx, `cat file.txt; git rev-parse HEAD; git log --oneline | wc -l | tr -d ' '`, nil), p, out.emit)
+		stepArgs(t, fx, `cat file.txt; git rev-parse HEAD; git log --oneline | wc -l | tr -d ' '`, nil), p, out.emit, out.artifact)
 	res := decodeStep(t, success, fail)
 	if res.ExitCode != 0 {
 		t.Fatalf("exit %d; output:\n%s", res.ExitCode, out.all())
@@ -517,7 +531,7 @@ func TestPipelineStepResultIsTheContractShape(t *testing.T) {
 		keys = append(keys, k)
 	}
 	sort.Strings(keys)
-	want := []string{"artifactsMissing", "artifactsTgzBase64", "durationMs", "exitCode"}
+	want := []string{"artifactsArchiveBytes", "artifactsArchiveSHA256", "artifactsMissing", "durationMs", "exitCode"}
 	if strings.Join(keys, ",") != strings.Join(want, ",") {
 		t.Fatalf("result keys %v, want exactly %v", keys, want)
 	}
@@ -532,7 +546,7 @@ func TestPipelineStepReportsTheCommandsOwnExitStatus(t *testing.T) {
 	p, _ := pipelineTestPolicy(t, "")
 
 	out := &recordedOutput{}
-	res := decoded(t)(runPipelineStep(context.Background(), "", stepArgs(t, fx, "echo out; echo err >&2; exit 7", nil), p, out.emit))
+	res := decoded(t)(runPipelineStep(context.Background(), "", stepArgs(t, fx, "echo out; echo err >&2; exit 7", nil), p, out.emit, out.artifact))
 	// A failing command is the step's own answer, not a failed call.
 	if res.ExitCode != 7 {
 		t.Errorf("exitCode %d, want 7", res.ExitCode)
@@ -562,7 +576,7 @@ func TestPipelineStepInheritsTheMachineEnvironment(t *testing.T) {
 		map[string]any{
 			"env":     map[string]any{"MEMQL_RUN_ID": "run-7"},
 			"secrets": map[string]any{"DEPLOY_KEY": "hunter2-long-value"},
-		}), p, out.emit))
+		}), p, out.emit, out.artifact))
 	if res.ExitCode != 0 {
 		t.Fatalf("exit %d:\n%s", res.ExitCode, out.all())
 	}
@@ -589,7 +603,7 @@ func TestPipelineStepTimeoutIsClampedToThePolicyMaximum(t *testing.T) {
 	out := &recordedOutput{}
 	started := time.Now()
 	success, fail := runPipelineStep(context.Background(), "",
-		stepArgs(t, fx, "echo started; sleep 30; echo never", map[string]any{"timeoutSec": 600}), p, out.emit)
+		stepArgs(t, fx, "echo started; sleep 30; echo never", map[string]any{"timeoutSec": 600}), p, out.emit, out.artifact)
 	elapsed := time.Since(started)
 	if success != nil || fail == nil || fail.GetErrorCode() != "timeout" {
 		t.Fatalf("a step past its clamped timeout must fail with timeout; got success=%v failure=%+v", success, fail)
@@ -638,7 +652,7 @@ func TestPipelineStepAsksAStepToStopBeforeKillingIt(t *testing.T) {
 
 	out := &recordedOutput{}
 	_, fail := runPipelineStep(context.Background(), "",
-		stepArgs(t, fx, "trap 'echo got-term; exit 0' TERM; echo started; sleep 30 & wait", nil), p, out.emit)
+		stepArgs(t, fx, "trap 'echo got-term; exit 0' TERM; echo started; sleep 30 & wait", nil), p, out.emit, out.artifact)
 	if fail == nil || fail.GetErrorCode() != "timeout" {
 		t.Fatalf("want timeout, got %+v", fail)
 	}
@@ -710,7 +724,7 @@ func TestPipelineStepStreamsOutputWhileTheCommandRuns(t *testing.T) {
 	// see the file, and would say so.
 	res := decoded(t)(runPipelineStep(context.Background(), "", stepArgs(t, fx,
 		`echo first-line; i=0; while [ ! -f "$GATE" ]; do i=$((i+1)); [ $i -gt 200 ] && { echo held-back; exit 9; }; sleep 0.05; done; echo second-line`,
-		map[string]any{"env": map[string]any{"GATE": gate}}), p, out.emit))
+		map[string]any{"env": map[string]any{"GATE": gate}}), p, out.emit, out.artifact))
 	if res.ExitCode != 0 || !strings.Contains(out.text(false), "second-line") {
 		t.Fatalf("output was not streamed while the command ran (exit %d):\n%s", res.ExitCode, out.all())
 	}
@@ -722,7 +736,7 @@ func TestPipelineStepCloneFailureIsTyped(t *testing.T) {
 	p, root := pipelineTestPolicy(t, "")
 	out := &recordedOutput{}
 	_, fail := runPipelineStep(context.Background(), "",
-		stepArgs(t, fx, "echo ran", map[string]any{"sha": strings.Repeat("0", 40)}), p, out.emit)
+		stepArgs(t, fx, "echo ran", map[string]any{"sha": strings.Repeat("0", 40)}), p, out.emit, out.artifact)
 	if fail == nil || fail.GetErrorCode() != "pipeline_clone_failed" {
 		t.Fatalf("a sha the repository does not have must fail as pipeline_clone_failed, got %+v", fail)
 	}
@@ -796,7 +810,7 @@ func TestPipelineStepNeverPutsTheTokenOnDiskOrInArgv(t *testing.T) {
 				map[string]any{
 					"token": tc.token,
 					"env":   map[string]any{"NEEDLE_TOKEN": token, "NEEDLE_HEADER": header},
-				}), p, out.emit))
+				}), p, out.emit, out.artifact))
 			if res.ExitCode != 0 {
 				t.Fatalf("exit %d:\n%s", res.ExitCode, out.all())
 			}
@@ -860,13 +874,14 @@ func TestPipelineStepPacksTheDeclaredArtifacts(t *testing.T) {
 	allowLocalClones(t)
 	fx := newPipelineFixture(t)
 	p, _ := pipelineTestPolicy(t, "")
+	out := &recordedOutput{}
 	res := decoded(t)(runPipelineStepQuietly(t, stepArgs(t, fx,
 		`mkdir -p dist/sub && echo report > dist/report.xml && echo a > dist/sub/a.txt && echo b > dist/sub/b.log && echo top > top.txt`,
-		map[string]any{"artifacts": []any{"dist/report.xml", "dist/sub", "*.txt", "missing/*.xml", "nope.txt"}}), p))
+		map[string]any{"artifacts": []any{"dist/report.xml", "dist/sub", "*.txt", "missing/*.xml", "nope.txt"}}), p, out))
 	if res.ExitCode != 0 {
 		t.Fatalf("exit %d", res.ExitCode)
 	}
-	files := untarGz(t, res.ArtifactsTgzBase64)
+	files := untarGz(t, out.artifactBytes())
 	want := map[string]string{
 		"dist/report.xml": "report\n",
 		"dist/sub/a.txt":  "a\n",
@@ -900,10 +915,11 @@ func TestPipelineStepArtifactGlobsAreRelativeToTheCheckoutOnly(t *testing.T) {
 	fx := newPipelineFixture(t)
 	root := filepath.Join(t.TempDir(), "ci [main] *")
 	p := policyWith(t, "pipelines:\n  allow: true\n  workspace_root: \""+root+"\"\n")
+	out := &recordedOutput{}
 	res := decoded(t)(runPipelineStepQuietly(t, stepArgs(t, fx,
 		`mkdir -p dist/sub && echo report > dist/report.xml && echo a > dist/sub/a.txt`,
-		map[string]any{"artifacts": []any{"dist/*.xml", "dist/sub/", "./dist/sub/a.txt"}}), p))
-	files := untarGz(t, res.ArtifactsTgzBase64)
+		map[string]any{"artifacts": []any{"dist/*.xml", "dist/sub/", "./dist/sub/a.txt"}}), p, out))
+	files := untarGz(t, out.artifactBytes())
 	if files["dist/report.xml"] != "report\n" || files["dist/sub/a.txt"] != "a\n" || len(files) != 2 {
 		t.Errorf("artifacts under a workspace path with glob characters: %v (missing %v)", files, res.ArtifactsMissing)
 	}
@@ -921,13 +937,14 @@ func TestPipelineStepArtifactsNeverFollowALinkOutOfTheStep(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(outside, "secret.txt"), []byte("outside the step\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
+	out := &recordedOutput{}
 	res := decoded(t)(runPipelineStepQuietly(t, stepArgs(t, fx,
 		`ln -s "$OUTSIDE" out && ln -s "$OUTSIDE/secret.txt" link.txt && mkdir d && ln -s "$OUTSIDE/secret.txt" d/inner.txt && echo ok > d/ok.txt`,
 		map[string]any{
 			"env":       map[string]any{"OUTSIDE": outside},
 			"artifacts": []any{"out/secret.txt", "link.txt", "d"},
-		}), p))
-	files := untarGz(t, res.ArtifactsTgzBase64)
+		}), p, out))
+	files := untarGz(t, out.artifactBytes())
 	if len(files) != 1 || files["d/ok.txt"] != "ok\n" {
 		t.Errorf("the archive followed a link out of the step: %v", files)
 	}
@@ -952,8 +969,8 @@ func TestPipelineStepArtifactsOverALimitAreReportedNotFailed(t *testing.T) {
 		name  string
 		limit *int64
 	}{
-		{"the 64 MiB archive limit", &pipelineArtifactMaxBytes},
-		{"what one stream message can carry", &pipelineArtifactWireBytes},
+		{"the raw artifact limit", &pipelineArtifactMaxBytes},
+		{"the compressed transfer limit", &pipelineArtifactWireBytes},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			prev := *tc.limit
@@ -970,14 +987,14 @@ func TestPipelineStepArtifactsOverALimitAreReportedNotFailed(t *testing.T) {
 				map[string]any{
 					"env":       map[string]any{"SRC": src},
 					"artifacts": []any{"big.bin"},
-				}), p, out.emit))
+				}), p, out.emit, out.artifact))
 			// The step keeps its own exit status: an artifact problem is a
-			// note on the step, never the step failing.
+			// separate result fact; the engine requires artifact receipts.
 			if res.ExitCode != 4 {
 				t.Errorf("exitCode %d, want the command's own 4", res.ExitCode)
 			}
-			if !res.ArtifactsTooLarge || res.ArtifactsTgzBase64 != "" {
-				t.Errorf("an over-limit archive was returned (tooLarge=%v, %d base64 bytes)", res.ArtifactsTooLarge, len(res.ArtifactsTgzBase64))
+			if !res.ArtifactsTooLarge || res.ArtifactsArchiveBytes != 0 {
+				t.Errorf("an over-limit archive was returned (tooLarge=%v, %d streamed bytes)", res.ArtifactsTooLarge, len(out.artifactBytes()))
 			}
 			if len(res.ArtifactsMissing) != 0 {
 				t.Errorf("a file that exists is not missing: %v", res.ArtifactsMissing)
@@ -1006,7 +1023,7 @@ func TestPipelineStepMasksSecretsInEveryChunkAndTheResult(t *testing.T) {
 		map[string]any{
 			"secrets":   map[string]any{"API_KEY": key, "PEM": pem, "SHORT": "abc"},
 			"artifacts": []any{key},
-		}), p, out.emit))
+		}), p, out.emit, out.artifact))
 	if res.ExitCode != 0 {
 		t.Fatalf("exit %d", res.ExitCode)
 	}
@@ -1478,19 +1495,25 @@ func TestDispatcher_StreamsAPipelineStepAsToolStreamChunks(t *testing.T) {
 		return nil
 	}
 	success, fail := d.DispatchStream(context.Background(),
-		pipelineDispatch(t, "call-9", stepArgs(t, fx, "echo to-stdout; echo to-stderr >&2", nil)), send)
+		pipelineDispatch(t, "call-9", stepArgs(t, fx, "echo to-stdout; echo to-stderr >&2; echo artifact > proof.txt", map[string]any{"artifacts": []any{"proof.txt"}})), send)
 	if res := decodeStep(t, success, fail); res.ExitCode != 0 {
 		t.Fatalf("exit %d", res.ExitCode)
 	}
 	mu.Lock()
 	defer mu.Unlock()
 	var stdout, stderr string
+	var artifact bytes.Buffer
 	for _, c := range chunks {
 		if c.GetCallId() != "call-9" {
 			t.Errorf("a chunk carries call id %q, want call-9", c.GetCallId())
 		}
 		stdout += string(c.GetStdoutChunk())
 		stderr += string(c.GetStderrChunk())
+		artifact.Write(c.GetDataChunk())
+	}
+	res := decodeStep(t, success, fail)
+	if res.ArtifactsArchiveBytes != int64(artifact.Len()) || res.ArtifactsArchiveSHA256 != fmt.Sprintf("sha256:%x", sha256.Sum256(artifact.Bytes())) || untarGz(t, artifact.Bytes())["proof.txt"] != "artifact\n" {
+		t.Fatal("terminal result preceded or mismatched its artifact chunks")
 	}
 	if !strings.Contains(stdout, "to-stdout") || !strings.Contains(stderr, "to-stderr") {
 		t.Errorf("stdout=%q stderr=%q", stdout, stderr)
@@ -1519,16 +1542,14 @@ func TestPipelineStepArtifactHeadersFitVerifiedSnapshotContract(t *testing.T) {
 	fx := newPipelineFixture(t)
 	p, _ := pipelineTestPolicy(t, "")
 	name := "dist/" + strings.Repeat("long-", 35) + "résumé %2F #.txt"
+	out := &recordedOutput{}
 	res := decoded(t)(runPipelineStepQuietly(t, stepArgs(t, fx,
 		`mkdir -p dist && printf 'verified bytes\n' > "$ARTIFACT_PATH"`,
-		map[string]any{"artifacts": []any{"dist/*"}, "env": map[string]any{"ARTIFACT_PATH": name}}), p))
+		map[string]any{"artifacts": []any{"dist/*"}, "env": map[string]any{"ARTIFACT_PATH": name}}), p, out))
 	if res.ExitCode != 0 || len(res.ArtifactsMissing) != 0 || res.ArtifactsTooLarge {
 		t.Fatalf("artifact producer failed: %+v", res)
 	}
-	data, err := base64.StdEncoding.DecodeString(res.ArtifactsTgzBase64)
-	if err != nil {
-		t.Fatal(err)
-	}
+	data := out.artifactBytes()
 	gz, err := gzip.NewReader(bytes.NewReader(data))
 	if err != nil {
 		t.Fatal(err)
