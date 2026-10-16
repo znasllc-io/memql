@@ -8,6 +8,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/znasllc-io/memql/component/auth"
 	"github.com/znasllc-io/memql/component/identity"
 )
 
@@ -127,6 +128,9 @@ func (v *Verifier) verifyPAT(ctx context.Context, token string) (*Claims, error)
 	}
 	if row == nil {
 		return nil, ErrPATNotFound
+	}
+	if auth.IsRoleTestUser(row.UserId) {
+		return nil, ErrPATRevoked
 	}
 	if !row.Active {
 		v.audit(ctx, identity.AuditEvent{

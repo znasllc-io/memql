@@ -382,6 +382,7 @@ message ForwardedAuthority {
   // by accident.
   string first_name = 13;
   string last_name = 14;
+  string role_test_session_id = 15; // bounded session, rechecked on the receiver
 }
 
 enum ForwardedPrincipalKind {

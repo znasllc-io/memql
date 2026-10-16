@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/golang-jwt/jwt/v5"
+	"github.com/znasllc-io/memql/component/auth"
 )
 
 // AccessTokenClaims is the JWT payload identity issues for every
@@ -211,6 +212,9 @@ type IssueInput struct {
 // signed compact-form string plus the absolute expiry time so the
 // caller can stamp the right value into v1:identity:authSession.
 func (j *JWTIssuer) IssueAccessToken(in IssueInput, now time.Time) (string, time.Time, error) {
+	if auth.IsRoleTestUser(in.UserId) {
+		return "", time.Time{}, errors.New("identity: test personas cannot acquire login credentials")
+	}
 	if in.UserId == "" {
 		return "", time.Time{}, errors.New("identity: IssueInput.UserId required")
 	}
@@ -445,6 +449,9 @@ func (j *JWTIssuer) IssueServiceAccountAccessToken(in ServiceAccountIssueInput, 
 // issueLabelledAccessToken is the body both labelled machine mints share.
 // `class` is the only thing that varies between them.
 func (j *JWTIssuer) issueLabelledAccessToken(class string, in ServiceAccountIssueInput, now time.Time) (string, time.Time, error) {
+	if auth.IsRoleTestUser(in.Subject) {
+		return "", time.Time{}, errors.New("identity: test personas cannot acquire login credentials")
+	}
 	if strings.TrimSpace(in.Subject) == "" {
 		return "", time.Time{}, errors.New("identity: ServiceAccountIssueInput.Subject required")
 	}
@@ -519,6 +526,9 @@ type BadgeGrantIssueInput struct {
 // actor.userId to the operator with zero engine changes. There is no
 // refresh path: renewal is a fresh badge tap.
 func (j *JWTIssuer) IssueBadgeGrantToken(in BadgeGrantIssueInput, now time.Time) (string, time.Time, error) {
+	if auth.IsRoleTestUser(in.UserId) {
+		return "", time.Time{}, errors.New("identity: test personas cannot acquire login credentials")
+	}
 	if strings.TrimSpace(in.UserId) == "" {
 		return "", time.Time{}, errors.New("identity: BadgeGrantIssueInput.UserId required")
 	}

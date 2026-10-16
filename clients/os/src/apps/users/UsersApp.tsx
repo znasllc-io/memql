@@ -1,3 +1,4 @@
+import { RoleTestingSection } from "./RoleTestingSection";
 import { holds } from "../../system/roles";
 import { listCount } from "../../kit/RecordRow";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
@@ -175,6 +176,7 @@ export function UsersApp({
     [navigate],
   );
 
+  if (sectionId === "testing") return <RoleTestingSection role={viewerRole} />;
   if (sectionId === "settings") {
     return <UsersSettingsSection settings={settings} update={update} />;
   }

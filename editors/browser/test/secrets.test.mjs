@@ -6,7 +6,7 @@ import { indexedDB } from 'fake-indexeddb';
 globalThis.indexedDB = indexedDB;
 const source = await readFile(new URL('../src/secrets.ts', import.meta.url), 'utf8');
 const code = ts.transpileModule(source, { compilerOptions: { target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.ESNext } }).outputText;
-const { BrowserSecrets } = await import('data:text/javascript;base64,' + Buffer.from(code).toString('base64'));
+const { BrowserSecrets, MemorySecrets } = await import('data:text/javascript;base64,' + Buffer.from(code).toString('base64'));
 test('concurrent tabs share a persistent key without overwriting credentials', async () => {
   const first = new BrowserSecrets(), second = new BrowserSecrets();
   await Promise.all([first.set('one','first-token'), second.set('two','second-token')]);
@@ -27,4 +27,17 @@ test('stored records contain encrypted bytes and an unexportable key', async () 
   assert.notEqual(new TextDecoder().decode(record.bytes),'second-token');
   await assert.rejects(crypto.subtle.exportKey('raw', key));
   db.close();
+});
+
+test('test profiles neither read nor change the normal editor credentials', async () => {
+  const normal = new BrowserSecrets();
+  await normal.set('operator', 'original-session');
+  const testProfile = new MemorySecrets();
+  assert.equal(await testProfile.get('operator'), undefined);
+  await testProfile.set('operator', 'test-session');
+  assert.equal(await normal.get('operator'), 'original-session');
+  const anotherTest = new MemorySecrets();
+  assert.equal(await anotherTest.get('operator'), undefined);
+  await testProfile.delete('operator');
+  assert.equal(await normal.get('operator'), 'original-session');
 });

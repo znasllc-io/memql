@@ -12,6 +12,7 @@ import (
 	"github.com/znasllc-io/memql/component/identity"
 	"github.com/znasllc-io/memql/component/identity/adminops"
 	"github.com/znasllc-io/memql/component/identity/emailsender"
+	"github.com/znasllc-io/memql/component/identity/roletest"
 	"github.com/znasllc-io/memql/component/identity/verifier"
 	memqlengine "github.com/znasllc-io/memql/component/memql"
 	"github.com/znasllc-io/memql/component/memql/sense"
@@ -114,6 +115,11 @@ func (a *App) transportBase() {
 		if err != nil {
 			a.fatal("identity admin: build failed", "error", err)
 		}
+		identityAdmin.RoleTests = &roletest.Service{Store: identityAdmin.AccessRequests, Audit: identityAdmin.Audit}
+		if a.identityVerifier != nil {
+			a.identityVerifier.SetRoleTestVerifier(identityAdmin.RoleTests)
+		}
+		auth.SetRoleTestValidator(identityAdmin.RoleTests)
 		a.grpcServer.SetIdentityAdminHandler(identityAdmin)
 
 		// The module registry's one write (SetPackEnabledMsg, memql#4183)

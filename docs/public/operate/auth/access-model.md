@@ -985,3 +985,9 @@ hidden control appearing late, never one that works when it should not.
   narrative.
 - [docs/public/language/authoring-rules.md](../../language/authoring-rules.md)
 - [docs/internal/planning/roadmap.md](../../../internal/planning/roadmap.md) -- deferred follow-up work.
+
+## Testing role behavior
+
+Owners and developers can open temporary test personas in MemQL OS. See
+[Role testing](role-testing.md) for the allowed roles, session lifetime, and
+production data boundaries.

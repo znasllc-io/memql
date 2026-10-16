@@ -42,10 +42,13 @@ func CaptureExecutionAuthority(ctx context.Context) (map[string]any, error) {
 		}
 		class, expiry = forwarded.CredentialClass, forwarded.ExpiresAt
 	}
-	if class != ForwardedClassUser && class != ForwardedClassBadge && class != ForwardedClassPat {
-		return nil, fmt.Errorf("work requires a user, personal token or badge authority")
+	if class != ForwardedClassUser && class != ForwardedClassBadge && class != ForwardedClassPat && class != RoleTestClass {
+		return nil, fmt.Errorf("work requires a user, personal token, badge or role-test authority")
 	}
 	result := map[string]any{"roleCeiling": string(access.Role), "credentialClass": class}
+	if class == RoleTestClass {
+		result["roleTestSessionId"] = forwarded.RoleTestSessionID
+	}
 	if !expiry.IsZero() {
 		result["expiresAt"] = expiry.UTC().Format(time.RFC3339Nano)
 	}
@@ -69,17 +72,19 @@ func ContextWithPersistedOwner(ctx context.Context, ownerUserId string, grant ma
 	if len(grant) != 0 {
 		storedCeiling, _ := grant["roleCeiling"].(string)
 		class, _ = grant["credentialClass"].(string)
-		if !IsValidRole(Role(storedCeiling)) || (class != ForwardedClassUser && class != ForwardedClassBadge && class != ForwardedClassPat) {
+		if !IsValidRole(Role(storedCeiling)) || (class != ForwardedClassUser && class != ForwardedClassBadge && class != ForwardedClassPat && class != RoleTestClass) {
 			return nil, fmt.Errorf("auth: invalid persisted work authority")
 		}
-		if class == ForwardedClassBadge {
+		if class == ForwardedClassBadge || class == RoleTestClass {
 			value, _ := grant["expiresAt"].(string)
 			var err error
 			expires, err = time.Parse(time.RFC3339Nano, value)
 			if err != nil || !time.Now().Before(expires) {
-				return nil, fmt.Errorf("auth: persisted work badge authority expired")
+				return nil, fmt.Errorf("auth: persisted work authority expired")
 			}
-			ceiling = Role(storedCeiling)
+			if class == ForwardedClassBadge {
+				ceiling = Role(storedCeiling)
+			}
 		}
 		var err error
 		access, err = resolver.LoadFromClaims(ctx, map[string]any{"sub": owner})
@@ -90,6 +95,9 @@ func ContextWithPersistedOwner(ctx context.Context, ownerUserId string, grant ma
 			return nil, fmt.Errorf("auth: work owner has no valid role")
 		}
 		access.Role = RoleAtMost(access.Role, Role(storedCeiling))
+		if class == RoleTestClass {
+			access.RoleTestSessionID, _ = grant["roleTestSessionId"].(string)
+		}
 	}
 	now := time.Now()
 	authority, err := ForwardedAuthorityForUser(access, class, ceiling, expires, now)
@@ -107,7 +115,11 @@ func ContextWithPersistedOwner(ctx context.Context, ownerUserId string, grant ma
 	// role IS a resolution -- the owner's current role under the recorded
 	// ceiling -- and stands as it is.
 	verified.RoleStandIn = len(grant) == 0
-	return BindForwardedContext(ctx, authority.Principal().Claims, verified, authority), nil
+	bound := BindForwardedContext(ctx, authority.Principal().Claims, verified, authority)
+	if err := ValidateRoleTestContext(bound); err != nil {
+		return nil, err
+	}
+	return bound, nil
 }
 
 // QueryRunnerFunc adapts an engine's shaped result without introducing a

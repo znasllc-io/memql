@@ -28,6 +28,8 @@ import (
 // a name is presentation, and adding it to the envelope would invite a
 // filter to key on one.
 type AccessContext struct {
+	RoleTestSessionID string
+
 	UserId       string
 	PrimaryEmail string
 	DisplayName  string

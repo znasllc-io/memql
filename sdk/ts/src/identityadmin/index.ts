@@ -17,3 +17,5 @@ export {
   type IdentityAdminCallOptions,
   type UserProfileEdit,
 } from "./identityAdmin.js";
+
+export { deliverRoleTest, receiveRoleTest, roleTestNonce, isRoleTestWindow, type RoleTestCredential } from "./roleTestHandoff.js";

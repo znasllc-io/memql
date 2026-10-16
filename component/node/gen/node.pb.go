@@ -1986,10 +1986,11 @@ type ForwardedAuthority struct {
 	// field above is an authorization input the receiver binds; these two are
 	// not, and the distinction is the only thing keeping them from becoming one
 	// by accident.
-	FirstName     string `protobuf:"bytes,13,opt,name=first_name,json=firstName,proto3" json:"first_name,omitempty"`
-	LastName      string `protobuf:"bytes,14,opt,name=last_name,json=lastName,proto3" json:"last_name,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
+	FirstName         string `protobuf:"bytes,13,opt,name=first_name,json=firstName,proto3" json:"first_name,omitempty"`
+	LastName          string `protobuf:"bytes,14,opt,name=last_name,json=lastName,proto3" json:"last_name,omitempty"`
+	RoleTestSessionId string `protobuf:"bytes,15,opt,name=role_test_session_id,json=roleTestSessionId,proto3" json:"role_test_session_id,omitempty"` // bounded session, rechecked on the receiver
+	unknownFields     protoimpl.UnknownFields
+	sizeCache         protoimpl.SizeCache
 }
 
 func (x *ForwardedAuthority) Reset() {
@@ -2116,6 +2117,13 @@ func (x *ForwardedAuthority) GetFirstName() string {
 func (x *ForwardedAuthority) GetLastName() string {
 	if x != nil {
 		return x.LastName
+	}
+	return ""
+}
+
+func (x *ForwardedAuthority) GetRoleTestSessionId() string {
+	if x != nil {
+		return x.RoleTestSessionId
 	}
 	return ""
 }
@@ -5050,7 +5058,7 @@ const file_node_proto_rawDesc = "" +
 	"\fcontinuation\x18\x06 \x01(\bR\fcontinuation\x1a7\n" +
 	"\tAuthEntry\x12\x10\n" +
 	"\x03key\x18\x01 \x01(\tR\x03key\x12\x14\n" +
-	"\x05value\x18\x02 \x01(\tR\x05value:\x028\x01J\x04\b\x03\x10\x04R\tpartition\"\xb5\x04\n" +
+	"\x05value\x18\x02 \x01(\tR\x05value:\x028\x01J\x04\b\x03\x10\x04R\tpartition\"\xe6\x04\n" +
 	"\x12ForwardedAuthority\x12)\n" +
 	"\x10contract_version\x18\x01 \x01(\tR\x0fcontractVersion\x12T\n" +
 	"\x0eprincipal_kind\x18\x02 \x01(\x0e2-.znasllc.memql.node.v1.ForwardedPrincipalKindR\rprincipalKind\x12\x18\n" +
@@ -5068,7 +5076,8 @@ const file_node_proto_rawDesc = "" +
 	"\x10asserted_at_unix\x18\f \x01(\x03R\x0eassertedAtUnix\x12\x1d\n" +
 	"\n" +
 	"first_name\x18\r \x01(\tR\tfirstName\x12\x1b\n" +
-	"\tlast_name\x18\x0e \x01(\tR\blastName\"p\n" +
+	"\tlast_name\x18\x0e \x01(\tR\blastName\x12/\n" +
+	"\x14role_test_session_id\x18\x0f \x01(\tR\x11roleTestSessionId\"p\n" +
 	"\x11AiForwardResponse\x12\x1d\n" +
 	"\n" +
 	"request_id\x18\x01 \x01(\tR\trequestId\x12(\n" +

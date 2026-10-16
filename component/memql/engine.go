@@ -698,6 +698,9 @@ func (e *MemQLEngine) Execute(ctx context.Context, query string) (*ExecuteResult
 // pre-rejection; default false everywhere else.
 func (e *MemQLEngine) executeWith(ctx context.Context, query string, fns *FunctionRegistry, specOverlay map[string]*Spec, allowInline bool) (out *ExecuteResult, err error) {
 	startTime := time.Now()
+	if err := auth.ValidateRoleTestContext(ctx); err != nil {
+		return nil, err
+	}
 
 	// `took` MEANS THIS CALL, ON EVERY RETURN PATH (memql#4860).
 	//

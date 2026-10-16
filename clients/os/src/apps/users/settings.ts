@@ -22,6 +22,7 @@ export const USERS_SECTIONS: OsAppSection[] = [
   { id: "requests", name: "Access requests" },
   { id: "groups", name: "Groups" },
   { id: "roles", name: "Roles" },
+ { id: "testing", name: "Role testing" },
   // The app's slice of the cluster's logs (epic memql#4895): the lines it
   // tagged and the lines about the things it owns. Admin-floored because
   // every read on the log store is (spec L3), and this is the ONE section
