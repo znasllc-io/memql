@@ -22,6 +22,13 @@ func TestSelectedClusterIsolation(t *testing.T) {
 	isolationProofAgainstNetworkPolicy(t, selectedClusterControls)
 }
 
+// The generated producer and collector run on the selected dedicated build
+// pool. Each independent client must recover a larger archive than the native
+// OS image that exhausted the capture window, within that same window.
+func TestSelectedClusterArtifactCollector(t *testing.T) {
+	artifactCollectorAgainstKubernetes(t, selectedClusterControls, 256, "linux/amd64")
+}
+
 func TestSelectedClusterImageBuild(t *testing.T) {
 	if os.Getenv("MEMQL_PIPELINES_QUALIFICATION_CONTEXT") == "" {
 		t.Skip("set the explicit qualification context and API server")
