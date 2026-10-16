@@ -27,7 +27,10 @@ import (
 // bearer exchange; an unconfigured challenge cannot choose a credential sink.
 // No ambient keychain, proxy, credential helper or registry discovery is used.
 type Target struct {
-	Origin, Repository              string
+	Origin, Repository string
+	// Tag is optional, explicit publication intent. The caller must reserve it
+	// durably across replicas before publishing. Existing different bytes refuse.
+	Tag                             string
 	Username, Password, BearerToken string
 	TokenEndpoint, TokenService     string
 	// BlobDownloadOrigins permits credential-free GETs for verified blob
@@ -49,6 +52,7 @@ type Publisher struct {
 
 type Receipt struct {
 	Repository    string
+	Tag           string
 	ArchiveSHA256 string
 	ArchiveSize   int64
 	ImageDigest   string
@@ -60,8 +64,11 @@ type Receipt struct {
 // candidate and target. Do not select a new version, delete data or report success.
 var ErrUncertain = errors.New("OCI publication outcome is uncertain")
 
+var ErrTagConflict = errors.New("OCI tag already names different content")
+
 var repositoryPattern = regexp.MustCompile(`^[a-z0-9]+(?:(?:[._]|__|[-]+)[a-z0-9]+)*(?:/[a-z0-9]+(?:(?:[._]|__|[-]+)[a-z0-9]+)*)*$`)
 var uploadIDPattern = regexp.MustCompile(`^[A-Za-z0-9_.-]{1,256}$`)
+var tagPattern = regexp.MustCompile(`^[A-Za-z0-9_][A-Za-z0-9_.-]{0,127}$`)
 
 func endpoint(raw string, allowHTTP bool) (*url.URL, error) {
 	u, err := url.Parse(raw)
@@ -84,6 +91,9 @@ func NewPublisher(t Target) (*Publisher, error) {
 	}
 	if (u.Path != "" && u.Path != "/") || !repositoryPattern.MatchString(t.Repository) || len(t.Repository) > 255 {
 		return nil, errors.New("invalid configured registry repository")
+	}
+	if t.Tag != "" && !tagPattern.MatchString(t.Tag) {
+		return nil, errors.New("invalid configured registry tag")
 	}
 	if (t.Username == "") != (t.Password == "") || (t.BearerToken != "" && t.Username != "") || strings.ContainsAny(t.BearerToken, "\r\n") {
 		return nil, errors.New("configure one explicit registry credential")
@@ -152,13 +162,23 @@ func (p *Publisher) Publish(ctx context.Context, v *VerifiedImage) (Receipt, err
 	for _, b := range v.blobs {
 		allowed[b.Digest] = b.Size
 	}
-	guard := &scopedTransport{publisher: p, inner: httpTransport, image: v.expected.ImageDigest, blobs: allowed}
+	guard := &scopedTransport{publisher: p, inner: httpTransport, image: v.expected.ImageDigest, blobs: allowed, tag: p.target.Tag}
 	opts := []remote.Option{
 		remote.WithContext(ctx), remote.WithTransport(guard), remote.WithJobs(2),
 		remote.WithAuth(authn.FromConfig(authn.AuthConfig{Username: p.target.Username, Password: p.target.Password, RegistryToken: p.target.BearerToken})),
 		remote.WithRetryBackoff(remote.Backoff{Duration: 100 * time.Millisecond, Factor: 2, Jitter: 0.1, Steps: 3}),
 	}
 	ref := p.repo.Digest(v.expected.ImageDigest)
+	// Refuse a known collision before uploading any content. Read again just
+	// before the tag write: uploading a large image may take many minutes.
+	if p.target.Tag != "" {
+		if _, err := p.readTag(ctx, v.expected.ImageDigest, opts); err != nil {
+			if errors.Is(err, ErrTagConflict) {
+				return Receipt{}, ErrTagConflict
+			}
+			return Receipt{}, errors.New("OCI tag verification failed before publication")
+		}
+	}
 	ready, err := p.readback(ctx, v, opts)
 	if err == nil && !ready {
 		writeErr := remote.Write(ref, v.image, opts...)
@@ -183,8 +203,43 @@ func (p *Publisher) Publish(ctx context.Context, v *VerifiedImage) (Receipt, err
 		}
 		return Receipt{}, errors.New("OCI registry verification failed before publication")
 	}
+	if p.target.Tag != "" {
+		ready, err = p.readTag(ctx, v.expected.ImageDigest, opts)
+		if err == nil && !ready {
+			// Tag writes are not blindly retried. After a lost reply, only fresh
+			// readback can prove completion; a later invocation reconciles first.
+			writeOpts := append(append([]remote.Option(nil), opts...), remote.WithRetryBackoff(remote.Backoff{Steps: 1}))
+			_ = remote.Tag(p.repo.Tag(p.target.Tag), v.image, writeOpts...)
+			ready, err = p.readTag(ctx, v.expected.ImageDigest, opts)
+		}
+		if errors.Is(err, ErrTagConflict) {
+			return Receipt{}, ErrTagConflict
+		}
+		if err != nil || !ready {
+			return Receipt{}, ErrUncertain
+		}
+	}
 	w := v.expected
-	return Receipt{Repository: p.repo.Name(), ArchiveSHA256: w.ArchiveSHA256, ArchiveSize: w.ArchiveSize, ImageDigest: w.ImageDigest, Platform: w.Platform}, nil
+	return Receipt{Repository: p.repo.Name(), Tag: p.target.Tag, ArchiveSHA256: w.ArchiveSHA256, ArchiveSize: w.ArchiveSize, ImageDigest: w.ImageDigest, Platform: w.Platform}, nil
+}
+
+func (p *Publisher) readTag(ctx context.Context, digest string, opts []remote.Option) (bool, error) {
+	desc, err := remote.Get(p.repo.Tag(p.target.Tag), opts...)
+	if err != nil {
+		var transportErr *transport.Error
+		if errors.As(err, &transportErr) && transportErr.StatusCode == http.StatusNotFound {
+			return false, nil
+		}
+		return false, err
+	}
+	h, _, err := hashCopy(ctx, nil, strings.NewReader(string(desc.Manifest)), maxJSON)
+	if err != nil {
+		return false, err
+	}
+	if h != digest {
+		return false, ErrTagConflict
+	}
+	return true, nil
 }
 
 func (p *Publisher) readback(ctx context.Context, v *VerifiedImage, opts []remote.Option) (bool, error) {
@@ -233,6 +288,7 @@ type scopedTransport struct {
 	publisher *Publisher
 	inner     http.RoundTripper
 	image     string
+	tag       string
 	blobs     map[string]int64
 	// Availability admits only reads of descriptors discovered beneath the
 	// requested immutable root. A publisher leaves these fields unset.
@@ -291,6 +347,9 @@ func (s *scopedTransport) permitted(r *http.Request) (int64, error) {
 		}
 	}
 	if u.Path == prefix+"manifests/"+s.image && len(q) == 0 && (read || r.Method == http.MethodPut) {
+		return maxJSON, nil
+	}
+	if !s.readOnly && s.tag != "" && u.Path == prefix+"manifests/"+s.tag && len(q) == 0 && (read || r.Method == http.MethodPut) {
 		return maxJSON, nil
 	}
 	if strings.HasPrefix(u.Path, prefix+"blobs/sha256:") && read && len(q) == 0 {

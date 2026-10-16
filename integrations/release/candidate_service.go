@@ -235,7 +235,7 @@ func (i *Integration) handleCandidateConfiguration(ctx context.Context, _ map[st
 		if err != nil {
 			return nil, err
 		}
-		targets = append(targets, targetView{ReleaseDestination: pl.ReleaseDestination{TargetID: target.ID, TargetDigest: digest, Component: target.Component, Artifact: target.Artifact, Operation: "publish"}, Kind: "oci", Origin: target.Origin, Repository: target.Repository, CredentialConfigured: target.PasswordSecret != "" || target.BearerSecret != ""})
+		targets = append(targets, targetView{ReleaseDestination: pl.ReleaseDestination{TargetID: target.ID, TargetDigest: digest, Component: target.Component, Artifact: target.Artifact, Operation: "publish"}, Kind: "oci", Origin: target.Origin, Repository: target.Repository, Tag: target.Tag, CredentialConfigured: target.PasswordSecret != "" || target.BearerSecret != ""})
 	}
 	for _, target := range p.targetReader.files {
 		_, _, digest, err := target.snapshot()
