@@ -299,15 +299,11 @@ beside the section that caused them. There is no separate Sharing tab.
   confirmation hold and restore focus on cancel. Lifecycle actions that belong
   in an `ActionBar` continue to follow rule 12.
 - **Quiet copying.** Use `Fact.copyValue` or `CopyValue presentation="row"`.
-  The value and its copy icon form one target; reserve the icon/receipt space so
-  hover and confirmation never shift the text. Give the target horizontal
-  padding at both ends, inside its width, and a faint theme-derived hover wash
-  with straight edges. Keep non-copyable values aligned with copyable ones.
-  Reveal the icon on hover or keyboard focus, keep it visible on touch, and
-  retain a clear keyboard focus ring. Support Enter/Space and manual selection.
-  Briefly show “Copied” only after success; on failure keep the text selectable
-  and report that nothing was copied. Use the shared control, not per-app copies
-  of its CSS or clipboard behavior.
+  Text stays selectable with its normal cursor. Only the separate copy icon
+  copies; clicking or hovering a value never changes the clipboard. Keep the
+  icon visible, reserve its space, and give it a keyboard focus ring. Confirm
+  success on the icon and report clipboard failures beside the value. Dates
+  copy their exact timestamps.
 - **Readable, truthful data.** Copy exact timestamps behind relative dates;
   copying a key/value entry includes both. Missing measurements remain “Not
   reported” or “Not measured”, never invented zeroes or copyable placeholders.

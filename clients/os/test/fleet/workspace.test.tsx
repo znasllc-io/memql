@@ -22,10 +22,10 @@ function sharedMachine() {
  return row;
 }
 
-it('places Settings after History and groups configuration, sharing and reported facts on that page',async()=>{
+it('places Settings after Activity and groups configuration, sharing and reported facts on that page',async()=>{
  sharedMachine();fleet();await openMachine('Alpha');
  const tabs=screen.getByRole('navigation',{name:'Machine views'});
- expect(within(tabs).getAllByRole('button').map(button=>button.textContent)).toEqual(['Equipment','Models','Apps','History','Settings']);
+ expect(within(tabs).getAllByRole('button').map(button=>button.textContent)).toEqual(['Equipment','Models','Apps','Activity','Settings']);
  fireEvent.click(within(tabs).getByRole('button',{name:'Settings'}));
  expect(within(screen.getByRole('region',{name:'General'})).getByLabelText('Name for Alpha')).toBeTruthy();
  expect(within(screen.getByRole('region',{name:'Sharing'})).getByRole('switch',{name:'Share models'})).toBeTruthy();
@@ -40,7 +40,7 @@ it('retains Settings drafts across machine tabs and updates sharing counts from 
  await screen.findByRole('button',{name:'Pause sharing with Ana Ruiz'});
  fireEvent.change(screen.getByLabelText('Name for Alpha'),{target:{value:'Unsaved name'}});
  fireEvent.change(search,{target:{value:'Bo'}});
- fireEvent.click(screen.getByRole('button',{name:'History'}));
+ fireEvent.click(screen.getByRole('button',{name:'Activity'}));
  fireEvent.click(screen.getByRole('button',{name:'Equipment'}));
  await act(async()=>h.connection.subscriptions.emit(WORKER_REGISTRATION_CONCEPT,{...row,sharingActivity:{nodeId:'agent-test',observedAt:new Date().toISOString(),users:[{id:'ana',activeCalls:3}],groups:[]}},'NODE_UPDATED'));
  fireEvent.click(screen.getByRole('button',{name:'Settings'}));
@@ -130,7 +130,7 @@ it('selects the first model, keeps a chosen model across heartbeats and falls ba
  view.rerender(<MachineEquipment machine={{...machine,reportedLabels:{'model:alpha':'ctx=4096'}}} now={now} onInspect={onInspect}/>);
  expect(screen.getByRole('region',{name:'Selected equipment'}).textContent).toContain('alpha');
  fireEvent.click(screen.getByRole('button',{name:'Manage models'}));expect(onInspect).toHaveBeenLastCalledWith('models');
- fireEvent.click(screen.getByRole('button',{name:'Call history'}));expect(onInspect).toHaveBeenLastCalledWith('activity');
+ fireEvent.click(screen.getByRole('button',{name:'Activity'}));expect(onInspect).toHaveBeenLastCalledWith('activity');
  expect(screen.queryByRole('button',{name:'Machine details'})).toBeNull();
  expect(screen.queryByRole('button',{name:'Personal inference'})).toBeNull();
  expect(screen.queryByText('Tools')).toBeNull();

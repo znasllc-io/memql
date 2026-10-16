@@ -23,11 +23,11 @@ import { EquipmentModelCarousel } from "./EquipmentModelCarousel";
 import { RecentWork } from "./apps/RecentWork";
 import { useMachineWrites } from "./machines/useMachineWrites";
 import { isWorkerOnline } from "./online";
-import { isRevoked, machineFromRow, machineName, type MachineRow } from "./rows";
+import { isRevoked, machineFromRow, machineName, RUNNABLE_APPS, type MachineRow } from "./rows";
 
 export type MachineView = "equipment" | "models" | "apps" | "activity" | "settings";
 export interface FleetSelection { machineId: string; view: MachineView }
-const VIEW_NAMES: Record<MachineView, string> = { equipment: "Equipment", models: "Models", apps: "Apps", activity: "History", settings: "Settings" };
+const VIEW_NAMES: Record<MachineView, string> = { equipment: "Equipment", models: "Models", apps: "Apps", activity: "Activity", settings: "Settings" };
 
 export function FleetWorkspace({ flow, showRevoked, selection, select, navigate, onOpenSession, intent, consumeIntent, onAllSessions }: {
   onOpenSession?: (id: string) => void;
@@ -129,7 +129,7 @@ export function FleetWorkspace({ flow, showRevoked, selection, select, navigate,
               return <div key={`${item.machineId}:${item.view}`} data-machine-view={item.view} hidden={!shown}>
                 {item.view === "equipment" ? <><MachineEquipment machine={retainedMachine} now={now} onInspect={view => select({ machineId: item.machineId, view })} />
                 <RecentWork machineId={item.machineId} onOpenSession={onOpenSession} onAllSessions={onAllSessions ?? (() => navigate("apps", { fromContent: true }))} /></> : <div className="fleet-inspector">
-                  {item.view !== "models" ? <Head title={VIEW_NAMES[item.view]} meta={item.view === "apps" ? listCount(snapshot, retainedMachine.apps.length) : undefined} breadcrumbs={[{ label: "Machines", onSelect: toList }, { label: machineName(retainedMachine), onSelect: () => select({ machineId: item.machineId, view: "equipment" }) }, { label: VIEW_NAMES[item.view] }]} back={{ label: machineName(retainedMachine), onSelect: () => select({ machineId: item.machineId, view: "equipment" }) }}>
+                  {!["models", "activity"].includes(item.view) ? <Head title={VIEW_NAMES[item.view]} meta={item.view === "apps" ? listCount(snapshot, RUNNABLE_APPS.length) : undefined} breadcrumbs={[{ label: "Machines", onSelect: toList }, { label: machineName(retainedMachine), onSelect: () => select({ machineId: item.machineId, view: "equipment" }) }, { label: VIEW_NAMES[item.view] }]} back={{ label: machineName(retainedMachine), onSelect: () => select({ machineId: item.machineId, view: "equipment" }) }}>
                     {item.view === "apps" ? <MachineAppsHelp /> : null}
                     {item.view === "apps" || item.view === "activity" ? <IconButton label="App sessions" onClick={() => navigate("apps", { fromContent: true })}><ArrowUpRight size={16} aria-hidden /></IconButton> : null}
                   </Head> : null}
@@ -224,7 +224,7 @@ export function MachineEquipment({ machine, now, onInspect }: { machine: Machine
       </section>
       <div className="fleet-device" aria-label="Machine hardware">
         <div className="fleet-device-screen"><Monitor size={35} strokeWidth={1.2} aria-hidden /><strong>{hw.chip || machine.platform || "Hardware not reported"}</strong><dl><div><dt>Memory</dt><dd>{hw.memoryBytes > 0 ? formatBytes(hw.memoryBytes) : "Unknown"}</dd></div><div><dt>CPU cores</dt><dd>{hw.cpuCores || "Unknown"}</dd></div></dl></div><div className="fleet-device-base" aria-hidden />
-        <div className="fleet-device-work"><span>{machine.activeCount} active {machine.activeCount === 1 ? "call" : "calls"}</span><PageHelp title="Active work"><p>Reported at the last heartbeat. A newly started call can take a few seconds to appear.</p></PageHelp><IconButton label="Call history" onClick={() => onInspect("activity")}><ArrowUpRight size={16} aria-hidden /></IconButton></div>
+        <div className="fleet-device-work"><span>{machine.activeCount} active {machine.activeCount === 1 ? "call" : "calls"}</span><PageHelp title="Active work"><p>Reported at the last heartbeat. A newly started call can take a few seconds to appear.</p></PageHelp><IconButton label="Activity" onClick={() => onInspect("activity")}><ArrowUpRight size={16} aria-hidden /></IconButton></div>
       </div>
       <section className="fleet-equipment-bank" aria-label="App equipment"><div className="fleet-bank-heading"><Terminal size={16} aria-hidden /><h5>Installed apps</h5><span>{machine.apps.length}</span><IconButton label="Inspect apps" onClick={() => onInspect("apps")}><ArrowUpRight size={16} aria-hidden /></IconButton></div>
         <ul>{machine.apps.map(app => <li key={app.id}><button className="fleet-equipment-slot" type="button" aria-pressed={selectedApp?.id === app.id} onClick={() => choose({ kind: "app", id: app.id })}><span><strong>{app.label}</strong><small>{!online ? "Machine offline" : app.runnable ? "Ready" : "Needs attention"}</small></span></button></li>)}</ul>

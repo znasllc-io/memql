@@ -1,3 +1,4 @@
+import { useGraphRevision } from "../../../live/useGraphRevision";
 import { useCallback } from "react";
 import type { Row } from "@znasllc-io/memql-sdk-core/client";
 import { useReading } from "../../../cluster/reading";
@@ -12,6 +13,7 @@ export function useMachineRecommendation(workerId: string, enabled = true) {
     const result = await connection!.query.fleetRecommended({ registrationId: workerId }, { signal });
     return recommendedSetFrom(result.rows()[0] as Row | undefined);
   }, [connection, workerId]);
-  const reading = useReading(`machine-recommendation:${workerId}`, enabled && connection && workerId ? read : null);
+  const liveRevision = useGraphRevision(["v1:worker:registration", "v1:models:modelProfile"], enabled);
+  const reading = useReading(`machine-recommendation:${workerId}:${liveRevision}`, enabled && connection && workerId ? read : null);
   return { ...reading, recommended: reading.value ?? EMPTY_SET };
 }

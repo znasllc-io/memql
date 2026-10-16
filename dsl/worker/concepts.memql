@@ -330,3 +330,21 @@ concept modelProbe {
   @relationship(type="parent", field="workerId", target=registration, direction="outgoing")
   @relationship(type="references", as="measuredAs", field="measurementId", target=modelMeasurement, direction="outgoing")
 }
+
+/// Machine-local execution lifecycle. Written by the replica holding the stream,
+/// before capacity admission, at dispatch, and on completion. No prompts or output.
+/// Shared model calls expose only their model and state to the hardware owner.
+@rowAuthz(owner="ownerUserId", clusterOwner)
+@displayCard(primary="label", secondary="kind", status="status")
+concept activity {
+  ownerUserId string! @serverSet
+  workerId string!
+  kind enum("model", "tool")!
+  label string!
+  status enum("queued", "running", "succeeded", "failed", "cancelled", "interrupted")!
+  correlationId string
+  startedAt datetime!
+  endedAt datetime
+  expiresAt datetime!
+  detail string
+}

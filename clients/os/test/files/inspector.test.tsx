@@ -235,14 +235,10 @@ describe("the inspector never scrolls sideways", () => {
     expect(block(".os-files-inspector")).toContain("overflow-x: hidden;");
   });
 
-  it("reserves the copy button's space so revealing it shifts nothing", () => {
-    // Hidden by OPACITY, never by leaving the flow: a button that appears on
-    // hover by being added to the layout moves the line out from under the
-    // pointer aiming at it.
+  it("keeps the explicit copy button visible and in the layout", () => {
     const copy = block(".os-copyvalue-copy");
-    expect(copy).toContain("opacity: 0;");
+    expect(copy).not.toContain("opacity: 0;");
     expect(copy).not.toContain("display: none");
-    // ...and where there is no hover to reveal it with, it simply stands.
-    expect(CSS).toContain("@media (hover: none) {");
+    expect(copy).toContain("flex: 0 0 28px;");
   });
 });

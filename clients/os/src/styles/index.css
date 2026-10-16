@@ -4370,51 +4370,15 @@ a.os-button {
   text-overflow: ellipsis;
   white-space: nowrap;
 }
-/* THE BUTTON'S SPACE IS RESERVED AT ALL TIMES AND ONLY ITS INK ARRIVES.
- * Revealing it by putting it into the flow would shift the line out from under
- * the pointer that is reaching for it -- the value would move at the exact
- * moment somebody aims at it. So it is always laid out, and `opacity` is the
- * only thing that changes. */
+/* An explicit, always-visible copy control; the value remains selectable. */
 .os-copyvalue-copy {
-  flex: none;
-  display: grid;
-  place-items: center;
-  width: 18px;
-  height: 18px;
-  padding: 0;
-  border: 0;
-  border-radius: var(--os-radius-xs);
-  background: transparent;
-  color: var(--os-muted);
-  cursor: pointer;
-  opacity: 0;
-  transition: opacity var(--os-duration-fast) var(--os-ease);
+  display: grid; place-items: center; flex: 0 0 28px; width: 28px; height: 28px;
+  padding: 0; border: 0; border-radius: var(--os-radius-xs); background: transparent;
+  color: var(--os-muted); cursor: pointer;
 }
-.os-copyvalue:hover .os-copyvalue-copy,
-.os-copyvalue-copy:focus-visible {
-  opacity: 1;
-}
-.os-copyvalue-copy:hover {
-  color: var(--os-ink);
-}
-/* The confirmation outlives the pointer. It fires on a click, and a hand that
- * has already moved on would otherwise fade the only answer there was. */
-.os-copyvalue-copy[data-copied] {
-  opacity: 1;
-  color: var(--os-accent);
-}
-/* No hover to reveal it with means it simply stands. A touch reader must never
- * be left looking at a truncated value with no way to take it. */
-@media (hover: none) {
-  .os-copyvalue-copy {
-    opacity: 1;
-  }
-}
-@media (prefers-reduced-motion: reduce) {
-  .os-copyvalue-copy {
-    transition: none;
-  }
-}
+.os-copyvalue-copy:hover { color: var(--os-ink); background: var(--os-hover); }
+.os-copyvalue-copy:focus-visible { outline: 2px solid var(--os-accent); outline-offset: 2px; }
+.os-copyvalue-copy[data-copied] { color: var(--os-accent); }
 /* The note is the SURFACE speaking, not data, so it takes the UI face back
  * from the mono `dd` it is nested in. A refusal set in a monospace face reads
  * as part of the value it is about. */
@@ -4424,15 +4388,9 @@ a.os-button {
   color: var(--os-muted);
 }
 
-/* Keep the copy wash quieter than navigation hover, with room around both
- * the value and its receipt. Padding stays inside the available width. */
-.os-copyvalue-row { width: 100%; min-height: 36px; padding: 6px 10px; box-sizing: border-box; border: 0; border-radius: var(--os-selection-radius); background: transparent; color: inherit; font: inherit; text-align: left; cursor: copy; }
-.os-copyvalue-row:hover { background: color-mix(in srgb, var(--os-hover) 35%, transparent); }
-.os-copyvalue-row .os-copyvalue-text { white-space: normal; overflow: visible; overflow-wrap: anywhere; user-select: text; }
-.os-copyvalue-receipt { display: inline-flex; align-items: center; justify-content: flex-end; flex: 0 0 58px; gap: 5px; font-family: var(--os-font); font-size: var(--os-text-xs); color: var(--os-muted); opacity: 0; }
-.os-copyvalue-row:hover .os-copyvalue-receipt, .os-copyvalue-row:focus-visible .os-copyvalue-receipt, .os-copyvalue-receipt[data-copied] { opacity: 1; }
-.os-copyvalue-receipt[data-copied] { color: var(--os-accent); }
-@media (hover: none) { .os-copyvalue-receipt { opacity: 1; } }
+/* Facts keep normal selectable text and a separate, always-visible copy icon. */
+.os-copyvalue-row { width: 100%; min-height: 36px; padding: 4px 10px; box-sizing: border-box; }
+.os-copyvalue-row .os-copyvalue-text { white-space: pre-wrap; overflow: visible; overflow-wrap: anywhere; user-select: text; }
 
 /* Shared card paging: explicit arrows, one or two visible cards, no wheel
  * interception. Off-page cards are inert; reserve room for focus outlines. */
@@ -13735,7 +13693,7 @@ button.os-cluster-mesh-peer:focus-visible {
   border: 1px solid var(--os-line);
   border-radius: var(--os-radius-sm);
   background: var(--os-raised);
-  cursor: pointer;
+  cursor: text;
 }
 .os-copyfield-line:focus-within { outline: 2px solid var(--os-accent); outline-offset: 2px; }
 .os-copyfield-input.os-input {
@@ -13748,7 +13706,7 @@ button.os-cluster-mesh-peer:focus-visible {
   box-shadow: none;
   background: transparent;
   text-overflow: ellipsis;
-  cursor: pointer;
+  cursor: text;
 }
 .os-copyfield-input.os-mono { font-size: var(--os-text-sm); }
 .os-copyfield-copy {
@@ -15214,3 +15172,7 @@ button[data-ask-control="running"], [data-ask-control="running"] > button { outl
 .fleet-share-calls { font-variant-numeric: tabular-nums; }
 /* Keep a refusal beside the sharing controls in the Settings page flow. */
 .fleet-share-error { min-width: 0; }
+
+.fleet-app-status { color: var(--os-muted); }
+.fleet-app-status[data-ready] { color: var(--os-accent); }
+.fleet-section-actions { display: flex; justify-content: flex-end; margin-top: 12px; }

@@ -285,6 +285,9 @@ func (h *ForwardHandler) HandleForwardedModelCall(
 	callCtx, ccancel := context.WithTimeout(cctx, timeout)
 	defer ccancel()
 
+	activity := beginMachineActivity(callCtx, h.store, h.logger, w.OwnerUserId, req.GetRegistrationId(), "model", start.GetModel()+" · "+start.GetKind(), "", timeout)
+	defer activity.interrupted(callCtx)
+
 	if err := w.Acquire(callCtx, workerservice.ModelCapability); err != nil {
 		h.sendModelRefusal(send, requestId, "worker_busy", err.Error())
 		return
@@ -312,6 +315,7 @@ func (h *ForwardHandler) HandleForwardedModelCall(
 	defer releaseSetup()
 	localRequest := modelCallRequestFromProto(localId, start, timeout)
 	localRequest.SharingSubjects = subjects
+	activity.running()
 	handle, err := w.StartModelCall(callCtx, localRequest)
 	if err != nil {
 		// StartModelCall fails only before anything reached the machine --
@@ -332,6 +336,13 @@ func (h *ForwardHandler) HandleForwardedModelCall(
 	}()
 
 	outcome, waitErr := handle.Wait(callCtx)
+	if waitErr == nil && outcome.Error == "" {
+		activity.end("succeeded")
+	} else if callCtx.Err() != nil {
+		activity.end("cancelled")
+	} else {
+		activity.end("failed")
+	}
 	wg.Wait()
 
 	end := modelOutcomeEnd(requestId, outcome)

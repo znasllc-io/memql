@@ -1,3 +1,4 @@
+import { useGraphRevision } from "../../live/useGraphRevision";
 import { useCallback, useEffect, useState } from "react";
 
 import type { Row } from "@znasllc-io/memql-sdk-core/client";
@@ -246,6 +247,7 @@ export function useDecisions(enabled: boolean, filters: DecisionFilters): Decisi
   const [fetchedAt, setFetchedAt] = useState<number | null>(null);
   const [epoch, setEpoch] = useState(0);
   const reload = useCallback(() => setEpoch((n) => n + 1), []);
+  const liveRevision = useGraphRevision(["v1:router:call"], enabled);
 
   const { since, level, door, rule, outcome } = filters;
 
@@ -294,7 +296,7 @@ export function useDecisions(enabled: boolean, filters: DecisionFilters): Decisi
       stale = true;
       controller.abort();
     };
-  }, [connection, enabled, epoch, since, level, door, rule, outcome]);
+  }, [connection, enabled, epoch, since, level, door, rule, outcome, liveRevision]);
 
   return { rows, loading, supported, error, fetchedAt, reload };
 }

@@ -226,6 +226,9 @@ func (h *ForwardHandler) HandleForwardedRequest(
 	dispatchCtx, dcancel := context.WithTimeout(cctx, timeout)
 	defer dcancel()
 
+	activity := beginMachineActivity(dispatchCtx, h.store, h.logger, w.OwnerUserId, req.GetRegistrationId(), "tool", req.GetTool()+"."+req.GetAction(), req.GetCorrelationId(), timeout)
+	defer activity.interrupted(dispatchCtx)
+
 	if err := w.Acquire(dispatchCtx, capability); err != nil {
 		h.sendRefusal(send, requestId, "worker_busy", err.Error())
 		return
@@ -267,10 +270,18 @@ func (h *ForwardHandler) HandleForwardedRequest(
 
 	// After dispatch, only the versioned worker contract's explicit admission
 	// refusals prove nothing started. A mid-call disconnect remains uncertain.
+	activity.running()
 	res, err := w.DispatchWithStream(dispatchCtx, envelope, func(chunk *memqlv1.ToolStream) {
 		h.relayChunk(send, requestId, chunk)
 	})
 	out := translateResult(envelope.GetCallId(), res, err)
+	if out.OK {
+		activity.end("succeeded")
+	} else if dispatchCtx.Err() != nil {
+		activity.end("cancelled")
+	} else {
+		activity.end("failed")
+	}
 	h.send(send, &nodev1.WorkerForwardResponse{
 		RefusedBeforeStart: pipelineRefusedBeforeStart(req.GetPurpose(), out, err),
 		RequestId:          requestId,

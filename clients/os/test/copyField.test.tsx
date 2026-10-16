@@ -10,7 +10,7 @@ function clipboard(writeText = vi.fn().mockResolvedValue(undefined)) {
 }
 
 describe("copying a whole command field", () => {
-  it.each(["text", "padding", "button", "icon"])("copies exactly once from %s and visibly confirms", async (target) => {
+  it.each(["button", "icon"])("copies exactly once from %s and visibly confirms", async (target) => {
     const write = clipboard();
     const { container } = render(<CopyField value="memql worker setup" label="the command" />);
     const field = screen.getByRole("textbox", { name: "the command" });
@@ -23,10 +23,12 @@ describe("copying a whole command field", () => {
     expect(screen.getByRole("status").textContent).toBe("Copied the command");
   });
 
-  it.each(["Enter", " "])("copies with %s from the selectable field", async (key) => {
+  it.each(["Enter", " "])("keeps %s in the selectable field separate from copying", async (key) => {
     const write = clipboard();
     render(<CopyField value="command" label="the command" />);
     fireEvent.keyDown(screen.getByRole("textbox"), { key });
+    expect(write).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole("button", { name: "Copy the command" }));
     await screen.findByRole("button", { name: "Copied" });
     expect(write).toHaveBeenCalledExactlyOnceWith("command");
   });
@@ -35,7 +37,7 @@ describe("copying a whole command field", () => {
     vi.useFakeTimers();
     const write = clipboard();
     render(<CopyField value="command" label="the command" />);
-    await act(async () => { fireEvent.click(screen.getByRole("textbox")); });
+    await act(async () => { fireEvent.click(screen.getByRole("button", { name: "Copy the command" })); });
     act(() => vi.advanceTimersByTime(1500));
     await act(async () => { fireEvent.click(screen.getByRole("button", { name: "Copied" })); });
     act(() => vi.advanceTimersByTime(1500));
@@ -49,7 +51,7 @@ describe("copying a whole command field", () => {
     if (failure === "refused") clipboard(vi.fn().mockRejectedValue(new Error("denied")));
     else vi.stubGlobal("navigator", {});
     render(<CopyField value="command" label="the command" />);
-    fireEvent.click(screen.getByRole("textbox"));
+    fireEvent.click(screen.getByRole("button", { name: "Copy the command" }));
     await screen.findByText(/select the text and copy it/);
     expect(screen.queryByRole("button", { name: "Copied" })).toBeNull();
     const input = screen.getByRole("textbox") as HTMLInputElement;
@@ -64,7 +66,7 @@ describe("copying a whole command field", () => {
     let resolve!: () => void;
     clipboard(vi.fn().mockReturnValue(new Promise<void>(done => { resolve = done; })));
     const view = render(<CopyField value="old" label="the command" />);
-    fireEvent.click(screen.getByRole("textbox"));
+    fireEvent.click(screen.getByRole("button", { name: "Copy the command" }));
     view.rerender(<CopyField value="new" label="the command" />);
     await act(async () => resolve());
     expect(screen.queryByRole("button", { name: "Copied" })).toBeNull();

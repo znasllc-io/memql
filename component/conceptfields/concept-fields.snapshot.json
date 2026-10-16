@@ -8898,6 +8898,45 @@
       }
     },
     {
+      "concept": "v1:worker:activity",
+      "file": "worker/concepts.memql",
+      "fields": [
+        "correlationId",
+        "detail",
+        "endedAt",
+        "expiresAt",
+        "kind",
+        "label",
+        "ownerUserId",
+        "startedAt",
+        "status",
+        "workerId"
+      ],
+      "required": [
+        "expiresAt",
+        "kind",
+        "label",
+        "ownerUserId",
+        "startedAt",
+        "status",
+        "workerId"
+      ],
+      "enums": {
+        "kind": [
+          "model",
+          "tool"
+        ],
+        "status": [
+          "cancelled",
+          "failed",
+          "interrupted",
+          "queued",
+          "running",
+          "succeeded"
+        ]
+      }
+    },
+    {
       "concept": "v1:worker:appSession",
       "file": "worker/concepts.memql",
       "fields": [

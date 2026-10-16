@@ -527,6 +527,28 @@ func ActiveEmbedderBindingBuild(args ActiveEmbedderBindingArgs) string {
 	return "query activeEmbedderBinding()"
 }
 
+// ActiveMachineActivity wraps the query named "activeMachineActivity".
+//
+// Bound concept: v1:worker:activity (machine-readable: BoundConcepts["activeMachineActivity"] in generated_concepts.go).
+type ActiveMachineActivityArgs struct {
+	WorkerId string
+}
+
+// ActiveMachineActivity calls the engine query activeMachineActivity.
+func (qc *QueryClient) ActiveMachineActivity(ctx context.Context, args ActiveMachineActivityArgs) (*Result, error) {
+	call := ActiveMachineActivityBuild(args)
+	return qc.executeNamed(ctx, "activeMachineActivity", call)
+}
+
+func ActiveMachineActivityBuild(args ActiveMachineActivityArgs) string {
+	var b strings.Builder
+	b.WriteString("query activeMachineActivity(")
+	b.WriteString("workerId: ")
+	b.WriteString(quoteMemQL(args.WorkerId))
+	b.WriteString(")")
+	return b.String()
+}
+
 // ActiveProjects -- List active v1:forge:project rows.
 //
 // Bound concept: v1:forge:project (machine-readable: BoundConcepts["activeProjects"] in generated_concepts.go).
@@ -3793,6 +3815,28 @@ func FindEventsBuild(args FindEventsArgs) string {
 	return b.String()
 }
 
+// FirstMachineActivity -- The durable transition from completion-only model history to live receipts.
+//
+// Bound concept: v1:worker:activity (machine-readable: BoundConcepts["firstMachineActivity"] in generated_concepts.go).
+type FirstMachineActivityArgs struct {
+	WorkerId string
+}
+
+// FirstMachineActivity calls the engine query firstMachineActivity.
+func (qc *QueryClient) FirstMachineActivity(ctx context.Context, args FirstMachineActivityArgs) (*Result, error) {
+	call := FirstMachineActivityBuild(args)
+	return qc.executeNamed(ctx, "firstMachineActivity", call)
+}
+
+func FirstMachineActivityBuild(args FirstMachineActivityArgs) string {
+	var b strings.Builder
+	b.WriteString("query firstMachineActivity(")
+	b.WriteString("workerId: ")
+	b.WriteString(quoteMemQL(args.WorkerId))
+	b.WriteString(")")
+	return b.String()
+}
+
 // GeneratedOutputById -- Drill-in read: fetch a generated-output's full content (inline body or attachment ref) by id, gated to the caller. Owned: `row.ownerUserId == actor.userId`. Called by the Library viewer when opening a generated_output artifact resolved from its sourceConceptRef.
 //
 // Bound concept: v1:library:generatedOutput (machine-readable: BoundConcepts["generatedOutputById"] in generated_concepts.go).
@@ -5152,6 +5196,50 @@ func LiveCustomDomainByHostnameBuild(args LiveCustomDomainByHostnameArgs) string
 	return b.String()
 }
 
+// MachineActivity wraps the query named "machineActivity".
+//
+// Bound concept: v1:worker:activity (machine-readable: BoundConcepts["machineActivity"] in generated_concepts.go).
+type MachineActivityArgs struct {
+	WorkerId string
+}
+
+// MachineActivity calls the engine query machineActivity.
+func (qc *QueryClient) MachineActivity(ctx context.Context, args MachineActivityArgs) (*Result, error) {
+	call := MachineActivityBuild(args)
+	return qc.executeNamed(ctx, "machineActivity", call)
+}
+
+func MachineActivityBuild(args MachineActivityArgs) string {
+	var b strings.Builder
+	b.WriteString("query machineActivity(")
+	b.WriteString("workerId: ")
+	b.WriteString(quoteMemQL(args.WorkerId))
+	b.WriteString(")")
+	return b.String()
+}
+
+// MachineActivityById wraps the query named "machineActivityById".
+//
+// Bound concept: v1:worker:activity (machine-readable: BoundConcepts["machineActivityById"] in generated_concepts.go).
+type MachineActivityByIdArgs struct {
+	ActivityId string
+}
+
+// MachineActivityById calls the engine query machineActivityById.
+func (qc *QueryClient) MachineActivityById(ctx context.Context, args MachineActivityByIdArgs) (*Result, error) {
+	call := MachineActivityByIdBuild(args)
+	return qc.executeNamed(ctx, "machineActivityById", call)
+}
+
+func MachineActivityByIdBuild(args MachineActivityByIdArgs) string {
+	var b strings.Builder
+	b.WriteString("query machineActivityById(")
+	b.WriteString("activityId: ")
+	b.WriteString(quoteMemQL(args.ActivityId))
+	b.WriteString(")")
+	return b.String()
+}
+
 // MagicLinkRequestByTokenHash -- Returns the magic-link request whose tokenHash matches the argument. Zero or one result.
 //
 // Bound concept: v1:identity:magicLinkRequest (machine-readable: BoundConcepts["magicLinkRequestByTokenHash"] in generated_concepts.go).
@@ -5575,6 +5663,28 @@ func (qc *QueryClient) MyDesktop(ctx context.Context, args MyDesktopArgs) (*Resu
 func MyDesktopBuild(args MyDesktopArgs) string {
 	_ = args
 	return "query myDesktop()"
+}
+
+// MyModelCallsOnMachine -- The caller's own earlier model calls on a selected machine. This does not expose other people's prompts or identities on a shared machine.
+//
+// Bound concept: v1:router:call (machine-readable: BoundConcepts["myModelCallsOnMachine"] in generated_concepts.go).
+type MyModelCallsOnMachineArgs struct {
+	WorkerId string
+}
+
+// MyModelCallsOnMachine calls the engine query myModelCallsOnMachine.
+func (qc *QueryClient) MyModelCallsOnMachine(ctx context.Context, args MyModelCallsOnMachineArgs) (*Result, error) {
+	call := MyModelCallsOnMachineBuild(args)
+	return qc.executeNamed(ctx, "myModelCallsOnMachine", call)
+}
+
+func MyModelCallsOnMachineBuild(args MyModelCallsOnMachineArgs) string {
+	var b strings.Builder
+	b.WriteString("query myModelCallsOnMachine(")
+	b.WriteString("workerId: ")
+	b.WriteString(quoteMemQL(args.WorkerId))
+	b.WriteString(")")
+	return b.String()
 }
 
 // MyRequests -- List the caller's own submitted requests, newest-first. Open to any team member.
@@ -13967,6 +14077,28 @@ func WorkerByIdentityIdBuild(args WorkerByIdentityIdArgs) string {
 	b.WriteString("query workerByIdentityId(")
 	b.WriteString("identityId: ")
 	b.WriteString(quoteMemQL(args.IdentityId))
+	b.WriteString(")")
+	return b.String()
+}
+
+// WorkerInvocationById wraps the query named "workerInvocationById".
+//
+// Bound concept: v1:worker:invocation (machine-readable: BoundConcepts["workerInvocationById"] in generated_concepts.go).
+type WorkerInvocationByIdArgs struct {
+	InvocationId string
+}
+
+// WorkerInvocationById calls the engine query workerInvocationById.
+func (qc *QueryClient) WorkerInvocationById(ctx context.Context, args WorkerInvocationByIdArgs) (*Result, error) {
+	call := WorkerInvocationByIdBuild(args)
+	return qc.executeNamed(ctx, "workerInvocationById", call)
+}
+
+func WorkerInvocationByIdBuild(args WorkerInvocationByIdArgs) string {
+	var b strings.Builder
+	b.WriteString("query workerInvocationById(")
+	b.WriteString("invocationId: ")
+	b.WriteString(quoteMemQL(args.InvocationId))
 	b.WriteString(")")
 	return b.String()
 }

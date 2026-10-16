@@ -1,3 +1,4 @@
+import { useGraphRevision } from "../../../live/useGraphRevision";
 import { useCallback, useEffect, useState } from "react";
 import type { Connection } from "@znasllc-io/memql-sdk-core/client";
 
@@ -144,6 +145,7 @@ export function useShareDirectory(registrationId: string, enabled = true): { rea
   const [read, setRead] = useState<DirectoryRead>({ state: "loading" });
   const [refreshing, setRefreshing] = useState(false);
   const [attempt, setAttempt] = useState(0);
+  const liveRevision = useGraphRevision(["v1:identity:user", "v1:identity:group", "v1:identity:groupMembership", "v1:worker:registration"], enabled);
 
   useEffect(() => {
     if (!enabled) return;
@@ -171,7 +173,7 @@ export function useShareDirectory(registrationId: string, enabled = true): { rea
       cancelled = true;
       controller.abort();
     };
-  }, [connection, registrationId, attempt, enabled]);
+  }, [connection, registrationId, attempt, enabled, liveRevision]);
 
   const retry = useCallback(() => setAttempt((n) => n + 1), []);
   return { read, refreshing, retry };

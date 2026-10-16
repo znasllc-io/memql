@@ -147,3 +147,14 @@ query call routerCallsInWindow {
   filter  row => actor.isClusterOwner == true && row.createdAt >= args.since && row.createdAt < args.until
   shape   routerCallEvidence
 }
+
+/// The caller's own earlier model calls on a selected machine. This does not
+/// expose other people's prompts or identities on a shared machine.
+@actor
+query call myModelCallsOnMachine {
+  args { workerId string! }
+  filter row => row.userId == actor.userId && row.executionSurface == "fleet:" + canonicalId(args.workerId, "v1:worker:registration")
+  sort "row.createdAt", "desc"
+  paginate 100
+  shape routerDecision
+}

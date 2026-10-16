@@ -1,3 +1,4 @@
+import { useGraphRevision } from "../../../live/useGraphRevision";
 import { useCallback, useMemo, useRef, useState } from "react";
 import type { Row } from "@znasllc-io/memql-sdk-core/client";
 import { ArrowUpRight, Box, Pencil } from "lucide-react";
@@ -41,7 +42,8 @@ export function MachineModels({ machine, navigation }: { machine: MachineRow; st
     if (!row) throw new Error("The machine did not return its model setup.");
     return modelSetupFromRow(row as Row);
   }, [connection, machine.id]);
-  const reading = useReading(`model-setup:${machine.id}:${own}`, connection && own ? read : null);
+  const liveRevision = useGraphRevision(["v1:worker:registration", "v1:models:modelProfile", "v1:models:catalogResearchSettings", "v1:models:catalogReview", "v1:platform:embedderBinding", "v1:worker:modelPull"]);
+  const reading = useReading(`model-setup:${machine.id}:${own}:${liveRevision}`, connection && own ? read : null);
   const view = reading.value;
   const [draft, setDraft] = useState<ModelChoices | null>(null);
   const [editBase, setEditBase] = useState<ModelSetupView | null>(null);

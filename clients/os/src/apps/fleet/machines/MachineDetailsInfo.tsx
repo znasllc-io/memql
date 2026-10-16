@@ -25,7 +25,7 @@ export function MachineDetailsInfo({ machine, now, machineClass, usableBytes }: 
   const pipelines = pipelineStepsStatus(machine).answer;
   const reportedKeys = Object.keys(machine.reportedLabels).sort();
   return <>
-    <PageHelp title="Machine information"><p>Hover over a value or focus it with the keyboard to reveal Copy. Click the value or press Enter to copy it. Relative dates copy their exact timestamps.</p></PageHelp>
+    <PageHelp title="Machine information"><p>Use the copy icon beside a value to copy it. Text can also be selected normally. Relative dates copy their exact timestamps.</p></PageHelp>
     <MachineDetailsSection title="System">
       <Facts>
         <Fact label="Reported name" value={machine.name} copyValue={machine.name} />

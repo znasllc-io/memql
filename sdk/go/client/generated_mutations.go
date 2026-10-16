@@ -4283,6 +4283,23 @@ func CreateLibraryWatchedFolderBuild(args CreateLibraryWatchedFolderArgs) string
 	return b.String()
 }
 
+// CreateMachineActivity wraps the mutation named "createMachineActivity".
+//
+// Bound concept: v1:worker:activity (machine-readable: BoundConcepts["createMachineActivity"] in generated_concepts.go).
+type CreateMachineActivityArgs struct {
+}
+
+// CreateMachineActivity calls the engine mutation createMachineActivity.
+func (qc *QueryClient) CreateMachineActivity(ctx context.Context, args CreateMachineActivityArgs) (*Result, error) {
+	call := CreateMachineActivityBuild(args)
+	return qc.executeNamed(ctx, "createMachineActivity", call)
+}
+
+func CreateMachineActivityBuild(args CreateMachineActivityArgs) string {
+	_ = args
+	return "mutation createMachineActivity()"
+}
+
 // CreateMagicLinkRequest -- Create a magic-link request row at issuance time.
 //
 // Bound concept: v1:identity:magicLinkRequest (machine-readable: BoundConcepts["createMagicLinkRequest"] in generated_concepts.go).
@@ -13494,6 +13511,23 @@ func UpdateLibraryWatchedFolderBuild(args UpdateLibraryWatchedFolderArgs) string
 	}
 	b.WriteString(")")
 	return b.String()
+}
+
+// UpdateMachineActivity wraps the mutation named "updateMachineActivity".
+//
+// Bound concept: v1:worker:activity (machine-readable: BoundConcepts["updateMachineActivity"] in generated_concepts.go).
+type UpdateMachineActivityArgs struct {
+}
+
+// UpdateMachineActivity calls the engine mutation updateMachineActivity.
+func (qc *QueryClient) UpdateMachineActivity(ctx context.Context, args UpdateMachineActivityArgs) (*Result, error) {
+	call := UpdateMachineActivityBuild(args)
+	return qc.executeNamed(ctx, "updateMachineActivity", call)
+}
+
+func UpdateMachineActivityBuild(args UpdateMachineActivityArgs) string {
+	_ = args
+	return "mutation updateMachineActivity()"
 }
 
 // UpdateMissingCapabilityStatus -- Operator-driven status transition on a missingCapability row. Used by the platform team's backlog tooling to mark a gap as in_progress, resolved (with a note on what shipped), or wontfix.

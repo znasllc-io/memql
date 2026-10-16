@@ -1,3 +1,4 @@
+import { useGraphRevision } from "../../../live/useGraphRevision";
 import { useCallback, useMemo } from "react";
 import type { Row } from "@znasllc-io/memql-sdk-core/client";
 
@@ -183,6 +184,7 @@ export function modelProfileFromRow(row: Row): ModelProfile {
 }
 
 export function useInference() {
+  const liveRevision = useGraphRevision(["v1:worker:registration", "v1:models:modelProfile", "v1:worker:delegationPolicy", "v1:worker:routingPolicy"]);
   const connection = useOsConnection();
 
   const readCatalog = useCallback(
@@ -223,15 +225,15 @@ export function useInference() {
   );
 
   const catalog = useReading<CatalogModel[]>(
-    "fleet:models:catalog",
+    `fleet:models:catalog:${liveRevision}`,
     connection === null ? null : readCatalog,
   );
   const profiles = useReading<ModelProfile[]>(
-    "fleet:models:profiles",
+    `fleet:models:profiles:${liveRevision}`,
     connection === null ? null : readProfiles,
   );
   const doors = useReading<DoorsReading | null>(
-    "fleet:models:doors",
+    `fleet:models:doors:${liveRevision}`,
     connection === null ? null : readDoors,
   );
 

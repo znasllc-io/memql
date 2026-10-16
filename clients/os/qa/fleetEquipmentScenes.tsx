@@ -9,7 +9,7 @@ import { withSession } from "../test/deployables/harness";
 
 type Frame = ComponentType<{ fallback: string; children: ReactNode }>;
 export function fleetEquipmentScenes(Frame: Frame) {
-  return Object.fromEntries(["populated", "models", "models-empty", "models-error", "models-save-error", "models-pending", "models-bound", "details", "details-empty", "labels", "labels-empty", "at-limit", "empty", "error", "sharing", "sharing-people", "sharing-picker", "sharing-empty", "sharing-error", "sharing-pending"].map(state => [`fleet-equipment-${state}`, {
+  return Object.fromEntries(["populated", "apps", "apps-missing", "apps-offline", "activity", "activity-empty", "activity-error", "models", "models-empty", "models-error", "models-save-error", "models-pending", "models-bound", "details", "details-empty", "labels", "labels-empty", "at-limit", "empty", "error", "sharing", "sharing-people", "sharing-picker", "sharing-empty", "sharing-error", "sharing-pending"].map(state => [`fleet-equipment-${state}`, {
     connect: () => {
       const shareDirectory = shareDirectoryRow({ id: "studio", people: state === "sharing-empty" ? [] : [{ id: "ana", name: "Ana Ruiz", detail: "" }, { id: "bo", name: "Bo Chen", detail: "" }], groups: state === "sharing-empty" ? [] : [{ id: "design", name: "Design", members: 4 }, { id: "ops", name: "Operations", members: 7 }] });
       if (state === "sharing-picker") {
@@ -30,12 +30,24 @@ export function fleetEquipmentScenes(Frame: Frame) {
       if (state === "labels") currentMachine.operatorLabels = { region: "us-west", room: "Studio", tier: "production", team: "Design", gpu: "metal", purpose: "Model inference", availability: "Office hours" };
       if (state === "labels-empty") currentMachine.operatorLabels = {};
       if (state === "details-empty") currentMachine = { ...currentMachine, labels: {}, hardware: {} };
+      if (state.startsWith("apps")) currentMachine = { ...currentMachine,
+        apps: state === "apps-missing" ? [{ id: "claude-code", label: "Claude Code", allowed: false, signedIn: false, subscription: "unknown", version: "2.1.0" }] : [{ id: "claude-code", label: "Claude Code", allowed: true, signedIn: true, subscription: "unknown", version: "2.1.0" }, { id: "codex", label: "Codex", allowed: true, signedIn: true, subscription: "present", version: "0.118.0" }],
+        ...(state === "apps-offline" ? { connectedNodeId: "", lastSeenAt: "2026-01-01T00:00:00Z" } : {}),
+      };
+      const activityRows = state === "activity-empty" ? [] : [
+        { id: "call-a", kind: "model", label: "qwen3.8:27b · chat", status: "running" },
+        { id: "call-b", kind: "model", label: "qwen3-embedding:0.6b · embedding", status: "queued" },
+        { id: "call-c", kind: "tool", label: "fs.read", status: "succeeded" },
+        { id: "call-d", kind: "tool", label: "exec.run", status: "failed", detail: "The command exited before completing. No files were changed." },
+      ].map((row, i) => ({ ...row, ownerUserId: "me", workerId: "studio", startedAt: new Date(Date.now() - i * 60_000).toISOString(), expiresAt: new Date(Date.now() + 600_000).toISOString(), ...(i > 1 ? { endedAt: new Date(Date.now() - i * 60_000 + 4_000).toISOString() } : {}) }));
       const connection = fakeConnection({
+        machineActivity: state.startsWith("activity") ? activityRows : [],
         fleetRecommended: state === "details" || state.startsWith("labels") ? [{ id: "studio", machineClass: "32", usableBytes: 38654705664 }] : [],
         fleetShareDirectory: [shareDirectory],
         myWorkersWithStatus: [currentMachine],
-        appSessionsForUser: state === "empty" ? [] : Array.from({ length: state === "at-limit" ? 5 : 8 }, (_, i) => appSessionRow({ id: `session-${i}`, ownerUserId: "me", workerId: "studio", runId: `work-${i + 1}`, app: i % 2 ? "codex" : "claude-code", status: i === 7 ? "running" : "ended", startedAt: `2026-10-14T10:0${i}:00Z` })),
+        appSessionsForUser: state === "empty" || state.startsWith("activity") ? [] : Array.from({ length: state === "at-limit" ? 5 : 8 }, (_, i) => appSessionRow({ id: `session-${i}`, ownerUserId: "me", workerId: "studio", runId: `work-${i + 1}`, app: i % 2 ? "codex" : "claude-code", status: i === 7 ? "running" : "ended", startedAt: `2026-10-14T10:0${i}:00Z` })),
       });
+      if (state === "activity-error") connection.query.machineActivity = vi.fn(async () => { throw new Error("The connection was interrupted."); });
       let setup = { id: "studio", revision: state === "models-empty" ? "" : "setup-1", choices: state === "models-empty" ? {} : { conversation: "qwen3.8:27b", structured: "qwen3.8:27b", tools: "qwen3.8:27b", vision: "qwen3.8:27b", embeddings: "qwen3-embedding:0.6b", imageGen: "flux2-klein-4b" }, usableBytes: 48 * 2**30, diskFreeBytes: 199 * 2**30, researchEnabled: false, catalog: [
         { modelId: "qwen3.8:27b", purposes: ["conversation", "structured", "tools", "vision"], memoryBytes: 22e9, sizeBytes: 18e9, recommended: true },
         { modelId: "qwen3.5:4b", purposes: ["conversation", "structured", "tools", "vision"], memoryBytes: 8e9, sizeBytes: 4e9, recommended: true },
@@ -91,6 +103,10 @@ export function fleetEquipmentScenes(Frame: Frame) {
         return builtinReply("fleetRevokeMachine", [{ credentialState: "revoked", sentence: "Removed." }]);
       });
       Object.assign(window, { fleetQa: {
+        advance: (status: string) => {
+          const row = { ...activityRows[0], status };
+          connection.subscriptions.emit("v1:worker:activity", row, "NODE_UPDATED");
+        },
         models: (labels: Record<string, string>) => {
           currentMachine = { ...currentMachine, labels, lastSeenAt: new Date().toISOString() };
           connection.subscriptions.emit("v1:worker:registration", currentMachine, "NODE_UPDATED");

@@ -331,6 +331,9 @@ func (d *Dispatcher) Dispatch(ctx context.Context, req Request) (Result, error) 
 			return Result{ErrorCode: "bad_request", ErrorMessage: err.Error(), RefusedBeforeStart: true, RefusedByGate: true}, nil
 		}
 	}
+	if req.CorrelationId == "" {
+		req.CorrelationId = newCallId()
+	}
 	startedAt := d.clock()
 
 	if req.Purpose == "" && d.permissions != nil {
@@ -571,6 +574,9 @@ func (d *Dispatcher) attemptLocal(
 	dispatchCtx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
 
+	activity := beginMachineActivity(dispatchCtx, d.store, d.logger, w.OwnerUserId, cand.RegistrationId, "tool", req.Tool+"."+req.Action, req.CorrelationId, timeout)
+	defer activity.interrupted(dispatchCtx)
+
 	if err := w.Acquire(dispatchCtx, capability); err != nil {
 		return Result{
 			OK:           false,
@@ -603,8 +609,16 @@ func (d *Dispatcher) attemptLocal(
 			}
 		}
 	}
+	activity.running()
 	res, err := w.DispatchWithStream(dispatchCtx, envelope, onChunk)
 	out := translateResult(envelope.GetCallId(), res, err)
+	if out.OK {
+		activity.end("succeeded")
+	} else if dispatchCtx.Err() != nil {
+		activity.end("cancelled")
+	} else {
+		activity.end("failed")
+	}
 	if pipelineRefusedBeforeStart(req.Purpose, out, err) {
 		return out, ForwardRefusedBeforeStart
 	}

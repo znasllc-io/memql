@@ -1401,3 +1401,29 @@ mutation registration setWorkerModelSetup {
     modelSetup: args.setup
   }
 }
+
+@actor
+mutation activity createMachineActivity {
+  args { activityId string! workerId string! kind string! label string! correlationId string startedAt string! expiresAt string! }
+  insert {
+    id: args.activityId
+    ownerUserId: actor.userId
+    args.workerId
+    args.kind
+    args.label
+    correlationId: args.correlationId ?? ""
+    status: "queued"
+    args.startedAt
+    args.expiresAt
+  }
+}
+
+mutation activity updateMachineActivity {
+  args { activityId string! status string! endedAt string detail string }
+  update {
+    id: args.activityId
+    args.status
+    endedAt: args.endedAt ?? ""
+    detail: args.detail ?? ""
+  }
+}

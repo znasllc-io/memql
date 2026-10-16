@@ -205,3 +205,19 @@ shape modelProbe workerModelProbeFull {
   endedAt
   row.createdAt
 }
+
+@row
+shape activity workerActivityFull {
+  row.id
+  row.createdAt
+  ownerUserId
+  workerId
+  kind
+  label
+  status
+  correlationId
+  startedAt
+  endedAt
+  expiresAt
+  detail
+}
