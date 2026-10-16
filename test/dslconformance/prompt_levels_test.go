@@ -56,7 +56,11 @@ var promptLevels = map[string]string{
 	// Escalate an observed incomplete plan to the design/judgment tier, not another cheap retry.
 	"workDocumentSectionsRepair": "strong",
 	// One bounded repair of acknowledgment wording; never reclassifies work.
-	"workAcknowledgement":  "fast",
+	"workAcknowledgement": "fast",
+	// Quick conversational replies have no research, file or tool obligations.
+	// Fast avoids paying for a strong agent loop after the classifier already
+	// excluded those tasks; the run still carries its ordinary call/time budget.
+	"workQuickReply":       "fast",
 	"responsibilityIntake": "fast",
 	"classifySymptom":      "fast",
 	"docSummary":           "fast",
