@@ -162,6 +162,16 @@ approved destination with `releasePublishCandidate`. Each repeats verification.
 uncertain publication must reconcile its existing intent and retained bytes.
 Assembly does not install an update, promote a draft or retire GitHub Actions.
 
+An OCI registry target may declare `tag`, for example `"v0.29.7"`. It must
+equal the resolved component version, optionally prefixed with `v`; floating
+names such as `latest` refuse. The tag is part of the destination approval and
+is permanently reserved for that publication intent before a registry write.
+Another candidate cannot claim the same registry/repository/tag, even from
+another replica. A conflicting existing registry tag refuses, and completion
+requires both full digest readback and exact tag readback. Omit `tag` for
+digest-only publication. Keep competing publisher credentials disabled or use
+registry tag immutability; deployment consumers should continue pinning digests.
+
 Related: [Engine, integration and workflow boundaries](../build/integration-boundary.md),
 [Pipelines](pipelines.md) and [Verified OCI publication](../build/verified-oci-publication.md).
 

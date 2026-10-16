@@ -104,7 +104,14 @@ func (r candidateTargetReader) checkArtifact(ctx context.Context, d pl.ReleaseDe
 	if a.Kind != "oci" {
 		return errors.New("registry destination requires an OCI image artifact")
 	}
-	return r.check(ctx, d)
+	t, _, err := r.resolve(ctx, d)
+	if err != nil {
+		return err
+	}
+	if t.Tag != "" && t.Tag != c.Version && t.Tag != "v"+c.Version {
+		return errors.New("registry tag must name the exact approved component version")
+	}
+	return nil
 }
 
 func (r candidateTargetReader) filePublisher(ctx context.Context, d pl.ReleaseDestination) (*githubrelease.Publisher, error) {

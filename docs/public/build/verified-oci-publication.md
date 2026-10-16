@@ -11,8 +11,8 @@ owner: znas
 
 The native `integrations/ociregistry` package supplies a bounded registry effect.
 It verifies an immutable artifact and publishes one exact image digest to one
-operator-configured repository. It does not choose versions, select candidates,
-approve releases, create mutable tags or deploy images. Those decisions belong
+operator-configured repository, optionally with one explicit version tag. It
+does not choose versions, select candidates, approve releases or deploy images. Those decisions belong
 to the workflow and its authorization and execution records. The package has
 no public DSL registration: a release controller must first bind its approved
 candidate, destination, durable publication intent and artifact pins.
@@ -57,7 +57,7 @@ endpoint and service. Requests for broader repository scopes are refused.
 
 The protocol implementation uses pinned `go-containerregistry` v0.22.1. Every
 request is checked against the configured origin, repository, verified digests
-and supported upload paths before transport. Mutable manifest tags, cross-repo
+and supported upload paths before transport. Undeclared manifest tags, cross-repo
 mounts, unknown digests and arbitrary token realms are refused. Write, manifest
 and token redirects are refused too.
 
@@ -83,6 +83,24 @@ every referenced blob before returning a receipt. A duplicate call from a
 different controller can reconcile through those registry bytes without the
 original controller's local state. A lost final write reply may still produce
 success when readback proves the complete image.
+
+When `Target.Tag` is set, publication first reads that exact tag and refuses
+different content before uploading anything. After complete digest verification,
+it reads the tag again, writes the verified manifest only when absent, and
+hashes a fresh tag readback before returning the tag in its receipt. Tag writes
+are not automatically retried after a lost response. A new invocation reconciles
+the same reserved tag through fresh reads. A conflicting tag returns
+`ErrTagConflict`; it is never intentionally overwritten.
+
+The release controller binds the tag into the approved target digest and permits
+only the component version, with an optional `v` prefix. Before registry writes,
+a database uniqueness constraint reserves the normalized origin, repository and
+tag for one durable publication intent across owners and replicas. The reservation
+survives process loss and cannot be reassigned to another candidate. Registries
+do not provide a portable atomic create-if-absent tag operation: operators must
+restrict competing publishers or enforce tag immutability at the registry.
+Digest-pinned deployment remains the content identity; a tag receipt does not
+promise protection from later writes by an independent registry administrator.
 
 If a write may have happened but readback cannot prove completion, the result is
 `ErrUncertain`. Keep the durable intent and artifact pins, and retry the same

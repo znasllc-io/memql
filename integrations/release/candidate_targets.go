@@ -22,6 +22,7 @@ type candidateRegistryTarget struct {
 	Artifact            string   `json:"artifact"`
 	Origin              string   `json:"origin"`
 	Repository          string   `json:"repository"`
+	Tag                 string   `json:"tag,omitempty"`
 	Username            string   `json:"username,omitempty"`
 	PasswordSecret      string   `json:"passwordSecret,omitempty"`
 	BearerSecret        string   `json:"bearerSecret,omitempty"`
@@ -50,7 +51,7 @@ func (t candidateRegistryTarget) snapshot() (candidateRegistryTarget, ociregistr
 			return t, ociregistry.Target{}, "", errors.New("registry blob origin exceeds its bound")
 		}
 	}
-	target := ociregistry.Target{Origin: t.Origin, Repository: t.Repository, TokenEndpoint: t.TokenEndpoint, TokenService: t.TokenService,
+	target := ociregistry.Target{Origin: t.Origin, Repository: t.Repository, Tag: t.Tag, TokenEndpoint: t.TokenEndpoint, TokenService: t.TokenService,
 		BlobDownloadOrigins: t.BlobDownloadOrigins, AllowLoopbackHTTP: t.AllowLoopbackHTTP}
 	if t.RootCAPEM != "" {
 		pool := x509.NewCertPool()
