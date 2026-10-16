@@ -133,3 +133,11 @@ it("places the work shortcut after acknowledgement text and keeps only navigatio
  expect(screen.queryByRole("button", {name:/Guide this work/})).toBeNull();
  session.dispose();
 });
+
+it("does not repeat an acknowledgement as the result of failed work", () => {
+ const feed = conversationFeed([turn("failed", { acknowledgement: "I’ll check the report.", answer: "I’ll check the report.", state: "error", error: "Provider unavailable", endedAt: "2026-10-05T10:03:00Z" })]);
+ expect(feed[0]?.turn.answer).toBe("I’ll check the report.");
+ expect(feed[1]?.turn.answer).toBe("");
+ expect(feed[1]?.turn.error).toBe("Provider unavailable");
+ expect(feed[1]?.showAssistant).toBe(true);
+});

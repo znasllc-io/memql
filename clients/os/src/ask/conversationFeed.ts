@@ -14,7 +14,7 @@ export function conversationFeed(turns: AskTurn[]) {
     if (!(turn.acknowledgement || turn.background) || !turn.endedAt || (turn.state !== "done" && turn.state !== "error")) return [first];
     return [
       { ...first, responseAt: acknowledgedAt, turn: { ...turn, answer: turn.acknowledgement || "", state: "queued" as const, error: undefined, activity: [], endedAt: undefined } },
-      { turn, completion: true, key: `${turn.id}:result`, at: turn.endedAt, workState: turn.state, responseAt: completedAt },
+      { turn: turn.state === "error" && turn.answer === turn.acknowledgement ? { ...turn, answer: "" } : turn, completion: true, key: `${turn.id}:result`, at: turn.endedAt, workState: turn.state, responseAt: completedAt },
     ];
   });
   return entries.map(entry => ({ ...entry, showAssistant: !entry.turn.answerOnly && Boolean(entry.turn.answer.trim() || entry.turn.question || entry.turn.error || !entry.turn.background) }))
