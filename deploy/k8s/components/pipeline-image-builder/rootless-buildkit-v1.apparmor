@@ -8,6 +8,9 @@ profile PROFILE_NAME flags=(attach_disconnected,mediate_deleted) {
   network inet,
   network inet6,
   network unix,
+  # runc configures loopback inside the frontend's private network namespace.
+  # This is netlink control traffic, not a grant of raw IP/packet sockets.
+  network netlink raw,
   capability,
   userns,
   mount,

@@ -19,7 +19,7 @@ const (
 	imageBuildIDsPath         = "/image-build-ids"
 	imageBuildProfileAMD64    = "700baaefa1069f7a497a41c40d48ca56d928acef43ff17b8051c01b317b15d4a"
 	imageBuildProfileARM64    = "6be44c311d1681aa336f133a6176cd4d9f48fd8a300891bf032e48dc16127efa"
-	imageBuildAppArmorProfile = "memql-rootless-buildkit-v1-e738e652bc8d582891db9835b2cac159f9e089843b24b06b59eccede4dbce499"
+	imageBuildAppArmorProfile = "memql-rootless-buildkit-v1-91e68b456bef5cb6ad7fa88619fd163f9777934b708556f297322488c3bc0ae1"
 )
 
 // Kubernetes assigns 65536 IDs to a pod user namespace by default. The pinned
