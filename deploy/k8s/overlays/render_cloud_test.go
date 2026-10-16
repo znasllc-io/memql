@@ -379,7 +379,7 @@ func TestTheAppOfAppsRendersTheApplication(t *testing.T) {
 			permitted[d.Namespace] = true
 		}
 	}
-	for _, ns := range []string{cloudNamespace, pipelinesNamespace} {
+	for _, ns := range []string{cloudNamespace, pipelinesNamespace, "memql-build-system"} {
 		if !permitted[ns] {
 			t.Errorf("the memql AppProject does not permit namespace %s on the in-cluster API server, so the %s "+
 				"Application's objects there are rejected at sync", ns, cloudApp)

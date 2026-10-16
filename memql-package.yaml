@@ -11,9 +11,9 @@
 #
 # The command parity gates compare the retained GitHub lanes with this package.
 # Working legacy workflows remain until equivalent local and production evidence
-# and retirement gates are satisfied. Remaining gaps include image builds,
-# installed-cluster lifecycle tests, editor host matrices, SARIF publication and
-# release publication. The daily scan is declared here but still needs a real
+# and retirement gates are satisfied. Remaining gaps include installed-cluster lifecycle tests, editor host matrices,
+# SARIF publication and release publication. Release image builds are declared
+# below; their cloud publication still requires verified candidate receipts. The daily scan is declared here but still needs a real
 # run from an installed MemQL build. No missing lane is considered passed.
 formatVersion: 1
 name: memql
@@ -551,3 +551,123 @@ pipeline:
             go install github.com/CycloneDX/cyclonedx-gomod/cmd/cyclonedx-gomod@v1.12.0
             go install github.com/anchore/syft/cmd/syft@v1.54.1
             python3 scripts/ci/sbom.py --output-dir=.memql-security/sbom
+
+    # Release images are produced by the fixed rootless builder, from the
+    # release event's exact source commit. It stamps MEMQL_COMMIT/MEMQL_RELEASE
+    # and returns an OCI archive plus digest metadata to the Library. Registry
+    # credentials belong only to the separate verified publication service.
+    - name: images
+      on: [release]
+      steps:
+        - name: identity
+          placement: cluster
+          caches: []
+          cpuMilli: 3000
+          memoryMiB: 8192
+          timeout: 90m
+          imageBuild:
+            context: .
+            dockerfile: Dockerfile
+            target: runtime
+            args:
+              BUILD_TAGS: identity
+              SPA_DIST_STAGE: spa-skip
+              GOFLAGS: -p=2
+              GOMEMLIMIT: 1GiB
+              GOGC: "75"
+        - name: bff
+          placement: cluster
+          caches: []
+          cpuMilli: 3000
+          memoryMiB: 8192
+          timeout: 90m
+          imageBuild:
+            context: .
+            dockerfile: Dockerfile
+            target: runtime
+            args:
+              BUILD_TAGS: bff
+              SPA_DIST_STAGE: spa-skip
+              GOFLAGS: -p=2
+              GOMEMLIMIT: 1GiB
+              GOGC: "75"
+        - name: mcp
+          placement: cluster
+          caches: []
+          cpuMilli: 3000
+          memoryMiB: 8192
+          timeout: 90m
+          imageBuild:
+            context: .
+            dockerfile: Dockerfile
+            target: runtime
+            args:
+              BUILD_TAGS: mcp
+              SPA_DIST_STAGE: spa-skip
+              GOFLAGS: -p=2
+              GOMEMLIMIT: 1GiB
+              GOGC: "75"
+        - name: agent
+          placement: cluster
+          caches: []
+          cpuMilli: 3000
+          memoryMiB: 8192
+          timeout: 90m
+          imageBuild:
+            context: .
+            dockerfile: Dockerfile
+            target: runtime
+            args:
+              BUILD_TAGS: agent
+              SPA_DIST_STAGE: spa-skip
+              GOFLAGS: -p=2
+              GOMEMLIMIT: 1GiB
+              GOGC: "75"
+        - name: planner
+          placement: cluster
+          caches: []
+          cpuMilli: 3000
+          memoryMiB: 8192
+          timeout: 90m
+          imageBuild:
+            context: .
+            dockerfile: Dockerfile
+            target: runtime
+            args:
+              BUILD_TAGS: planner
+              SPA_DIST_STAGE: spa-skip
+              GOFLAGS: -p=2
+              GOMEMLIMIT: 1GiB
+              GOGC: "75"
+        - name: workbench
+          placement: cluster
+          caches: []
+          cpuMilli: 3000
+          memoryMiB: 8192
+          timeout: 90m
+          imageBuild:
+            context: .
+            dockerfile: Dockerfile
+            target: workbench-runtime
+            args:
+              BUILD_TAGS: workbench
+              SPA_DIST_STAGE: spa-skip
+              GOFLAGS: -p=2
+              GOMEMLIMIT: 1GiB
+              GOGC: "75"
+        - name: edge
+          placement: cluster
+          caches: []
+          cpuMilli: 3000
+          memoryMiB: 8192
+          timeout: 90m
+          imageBuild:
+            context: .
+            dockerfile: Dockerfile
+            target: runtime
+            args:
+              BUILD_TAGS: edge
+              SPA_DIST_STAGE: spa-build
+              GOFLAGS: -p=2
+              GOMEMLIMIT: 1GiB
+              GOGC: "75"

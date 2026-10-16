@@ -487,6 +487,12 @@ namespace admits host paths; the untrusted `memql-pipelines` namespace keeps
 baseline admission and its service accounts have no grants in the operator
 namespace. The installer has no API token or allowed network access.
 
+The ArgoCD project must permit `memql-build-system` as a destination in addition
+to the pipeline namespace. Update an existing project's explicit destination
+list when installing the component; otherwise ArgoCD refuses its namespace
+resources. Keep the installer component pinned to the same engine release as
+the instance. Qualify the profile before enabling image execution.
+
 BuildKit runs as UID/GID 1000 with only SETUID/SETGID for its pinned mapping
 helpers. The local seccomp profile permits rootless namespaces and mounts but
 denies process inspection (`ptrace`, `process_vm_readv`, `process_vm_writev`) and

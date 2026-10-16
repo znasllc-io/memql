@@ -90,6 +90,7 @@ func TestNoPersonReachesAnotherOwnersRows(t *testing.T) {
 		"disconnect": func() error { _, err := integ.Disconnect(stranger, "p1"); return err },
 		"rerun":      func() error { _, err := integ.Rerun(stranger, "r1", false); return err },
 		"runLatest":  func() error { _, err := integ.RunLatest(stranger, "p1", ""); return err },
+		"runRelease": func() error { _, err := integ.RunRelease(stranger, "p1", "v1.2.3"); return err },
 		"cancel": func() error {
 			_, err := integ.handleCancel(stranger, map[string]any{"runId": "r1"}, 0)
 			return err

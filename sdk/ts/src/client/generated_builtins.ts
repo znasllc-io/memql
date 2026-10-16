@@ -3661,6 +3661,31 @@ QueryClient.prototype.pipelinesRunLatest = function (this: QueryClient, args: Pi
   return this.executeNamed("pipelinesRunLatest", buildPipelinesRunLatest(args), opts);
 };
 
+/** Start a full release build at an existing tag of the caller's connected pipeline. Resolves the immutable source commit through the source owner's current GitHub grant and supplies the tag as MEMQL_VERSION. Includes the manifest's release stages. Creates no tag, GitHub release, candidate approval or publication. A repeated request or later release webhook recovers the same attempt; use pipelinesRerun to repeat a completed attempt. A second tag for a commit already recorded under another release version is refused. */
+export interface PipelinesRunReleaseArgs {
+  /** The caller's connected v1:pipelines:pipeline. */
+  pipelineId: string;
+  /** An existing repository tag, such as v1.2.3, without refs/tags/. */
+  tag: string;
+}
+
+export function buildPipelinesRunRelease(args: PipelinesRunReleaseArgs): string {
+  const parts: string[] = [];
+  parts.push("pipelineId: " + renderMemQLValue(args.pipelineId));
+  parts.push("tag: " + renderMemQLValue(args.tag));
+  return "builtin pipelinesRunRelease(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    pipelinesRunRelease(args: PipelinesRunReleaseArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.pipelinesRunRelease = function (this: QueryClient, args: PipelinesRunReleaseArgs = {} as PipelinesRunReleaseArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("pipelinesRunRelease", buildPipelinesRunRelease(args), opts);
+};
+
 /** Read pipeline configuration and each workbench's last runner isolation verdict. This read never starts a build or an isolation probe. Restricted to cluster operators. */
 export interface PipelinesStatusArgs {
 }
