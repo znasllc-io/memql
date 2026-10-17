@@ -152,7 +152,7 @@ func TestDirectGoalsPinDefaultOrInheritTheSameOwnersRecipes(t *testing.T) {
 				t.Fatal(err)
 			}
 			snapshot, err := workflowhost.SnapshotFromMap(argMap(engine.callTo(t, "createWorkRun").Args(t), "spine"))
-			if err != nil || len(snapshot.Phases) != 5 {
+			if err != nil || len(snapshot.Phases) != 6 {
 				t.Fatalf("direct run has no full Spine: %v", err)
 			}
 			if tc.name == "another owner" && snapshot.Version == parent.Version {

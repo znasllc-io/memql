@@ -80,6 +80,14 @@ automation workModelCallRecovery {
  return { act: "ask", question: "The model did not finish within its call time limit. Completed work is saved. Retry from that progress, or abandon this work?" }
 }
 
+/// Goal-independent clarification policy. Runtime gates retain consent and budgets.
+@template
+automation workFeedbackPolicy {
+ args { optional bool! }
+ if args.optional { return { waitSeconds: 60 } }
+ return { waitSeconds: 0 }
+}
+
 /// File readiness is a workflow decision; source reads retain their native owner gates.
 @template
 automation workPrepareFileEvidence {

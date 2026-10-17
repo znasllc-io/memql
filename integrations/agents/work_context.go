@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/znasllc-io/memql/component/auth"
 	memqlv1 "github.com/znasllc-io/memql/component/grpc/gen"
@@ -89,6 +90,14 @@ func workTurnHistory(ctx context.Context, engine interface {
 		return nil, fmt.Errorf("work context: reading recorded answers: %w", err)
 	}
 	for _, question := range memql.MaterializeRows(questions) {
+		if contract, _, optional := work.OptionalFeedback(question); optional &&
+			(contract["templateFingerprint"] != rows[0]["templateFingerprint"] || asString(contract["rerunRequestId"]) != run.RerunRequestId) {
+			continue
+		}
+		if question["decision"] == "" && work.OptionalFeedbackContinued(question, time.Now()) {
+			raw, _ := json.Marshal(map[string]any{"question": question["question"], "continuedAt": question["continuedAt"]})
+			history = append(history, &memqlv1.AgentTurnMessage{Role: "user", Content: "[Recorded answer for this run: NO ANSWER. The optional wait ended. Continue useful authorized work without repeating this question. Silence grants no permission, supplies no fact, and does not change budgets. A late answer may arrive as guidance.]\n" + string(raw)})
+		}
 		if question["decision"] != "answered" {
 			continue
 		}
@@ -141,7 +150,7 @@ func workContinuationAnswer(ctx context.Context, engine interface {
 		memql.BareShortId(asString(a["runId"])) != memql.BareShortId(run.RunId) || asString(a["stepKey"]) != run.StepKey {
 		return nil, fmt.Errorf("work context: the recorded decision belongs to another execution")
 	}
-	if a["kind"] == "feedback" && a["decision"] == "answered" {
+	if a["kind"] == "feedback" && (a["decision"] == "answered" || (a["decision"] == "" && work.OptionalFeedbackContinued(a, time.Now()))) {
 		return nil, nil // Already included by workQuestionsForOwnerRun above.
 	}
 	subject, _ := a["subject"].(map[string]any)

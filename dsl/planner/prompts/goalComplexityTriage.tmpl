@@ -34,12 +34,48 @@ Output ONLY a JSON object -- no markdown fences, no prose:
 `sectionable` / `assembly` / `sections` are OPTIONAL -- include them ONLY when the deliverable decomposes into sections (see SECTIONABLE below). Omit them, or set `sectionable: false` with `sections: []`, otherwise.
 
 First decide whether the current context actually contains the facts needed to
-answer. Questions about this person's preferences, previous decisions or saved
+answer. An assertion the person asks you to confirm is the claim to test, not
+proof of itself. Confirming or explaining a volatile claim requires fresh
+evidence even when the question confidently assumes the answer. Questions about this person's preferences, previous decisions or saved
 work need "lookup" unless the requested fact itself is supplied below. Knowing
 who the person is does not establish their other facts. A previous unsuccessful
 lookup is not the missing fact either. Such a request can have intent "reply"
 and complexity "trivial" while workload is "lookup". Write its acknowledgment.
 Greetings, supplied information and general-knowledge answers remain "quick".
+
+Questions about changing external conditions need "lookup" and
+requiresResearch=true when relevant fresh evidence is absent, even when phrased
+casually as an explanation. Do not wait
+for a request for sources or words such as "current", "latest" or "verify";
+judge volatility from the fact being asked about and the conversation.
+First inspect conversation.sourceContext.recordedSources: these are recorded
+source responses, separate from earlier assistant prose. Compare the source's
+observation time, retrieval time, update cadence and entity/location/scope with
+the current request. Persistence time alone does not make an old observation fresh.
+An immediate follow-up asking for advice, interpretation, a calculation or a
+summary based on just-checked conditions can be "quick", requiresResearch=false,
+when those receipts suffice. "Right now" does not itself require another fetch.
+For example, applying a status report checked moments ago to a recommendation
+needs no repeat status lookup. Preserve the source's limits; do not invent new
+facts about the person's needs or surroundings.
+Refresh only for an explicit update, stale/undated/conflicting evidence, a new
+entity/location/time or a material fact the receipts do not establish. A new
+cause may need additional evidence even when the observed conditions are known.
+Fetch only that gap. When receipts suffice, answer directly without a research
+acknowledgment. Missing receipts or assistant claims alone do not qualify.
+Distinguish
+an explanation of a general mechanism from what is happening at a particular
+place or time. Facts describing an event do not necessarily explain its cause:
+a case-specific diagnosis needs evidence linking the cause to that event. Route
+missing causal evidence to lookup/research when retrieval is needed and permitted;
+a request explicitly limited to supplied evidence can stay self-contained and
+explain that evidence's limits. A general mechanism needs no case investigation.
+Missing an input may call for clarification or authorized retrieval; it never
+proves that capabilities are unavailable. A greeting before a question does not
+make the question social. Use conversation context to
+interpret short answers and follow-ups in any language. Classify the evidence
+needed independently of whether a particular tool is online. Respect the
+person's requested scope and explicit restrictions.
 
 `requiresFile` is REQUIRED and must be a JSON boolean on every answer, including trivial goals. Set it true when the requested deliverable must be saved as a file (for example a Markdown file in the Library, a PDF, a spreadsheet, or a downloadable document). Set it false when replying with the content itself fully satisfies the goal. Judge the requested outcome, not mentions of files used as sources. A true answer makes final delivery verify that this run actually saved a ready file; a prose confirmation alone cannot satisfy it.
 
@@ -61,7 +97,7 @@ on the computer, tools, models and delegation in the section instructions.
 
 A request to explain how a previous answer knew something needs the saved source receipts, not independent verification of the claim in public registries. The file-evidence check reads those receipts before creation; use research only when additional retrieval is needed beyond that source audit.
 
-`requiresResearch` decides whether a file needs an evidence-gathering step BEFORE creation. Set it true only when required source facts must be retrieved, checked or researched beyond the supplied request/context. Set it false for self-contained creation or formatting of supplied content, even when workload is lookup, research or project. A PDF, default style, source ZIP, rendering or packaging does not itself require research: the native Materializer supplies those. This decision is separate from estimated duration and file format. Return a JSON boolean on every answer.
+`requiresResearch` describes missing evidence for ANY answer or deliverable, including a conversational reply. Set it true when required source facts must be retrieved, checked or researched beyond the supplied request/context, including current weather, news, prices, schedules or service status. For a file it also selects an evidence-gathering step BEFORE creation. Set it false for general knowledge, self-contained creation or formatting of supplied content, even when workload is lookup, research or project. A PDF, default style, source ZIP, rendering or packaging does not itself require research: the native Materializer supplies those. This decision is separate from estimated duration and file format. Return a JSON boolean on every answer. requiresResearch=true cannot be a quick reply.
 
 When `requiresFile` is true, `fileName` and `fileFormat` are REQUIRED. Preserve the requested filename and format when specified; otherwise choose a concise descriptive name and the appropriate supported format for the requested deliverable. The only supported formats are markdown, html, txt, csv, json, docx, and pdf. Do not silently substitute a supported format when the user explicitly requests an unsupported one: return that requested format so compilation can refuse it. Omit both fields when `requiresFile` is false. File delivery calls the native Materializer directly with these validated choices; it does not need an agent turn to select a file tool.
 
@@ -136,7 +172,7 @@ select an organization/client for this work. Missing facts still need retrieval.
 ## GOAL
 "{{.goal}}"
 Check the workload against the evidence supplied above: a personal or saved
-fact absent from that context requires "lookup", even when a short answer is
+fact or current external condition absent from that context requires "lookup", even when a short answer is
 expected. Write its request-specific acknowledgment. General knowledge or a
 fact already established above can stay "quick"; do not search again merely
 because the subject is personal. Complexity and workload are separate decisions.

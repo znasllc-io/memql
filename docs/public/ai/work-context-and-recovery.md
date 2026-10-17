@@ -65,6 +65,23 @@ prefix and accumulated usage, and does not replenish automatic retries or
 raise resource limits. A transient failure's **Retry** instead repeats the
 failed step. Either decision is persisted for the cluster to resume safely.
 
+Clarifications can be optional when useful authorized work can proceed without
+the answer. The pinned Spine policy allows 60 seconds to answer; the durable
+two-minute sweep resumes the saved work on its next pass. The question remains
+available while work continues. A late answer joins the active execution at a
+safe model or tool boundary, without replaying completed operations. Required
+information, access approvals, spending approvals and substantive decisions
+still wait for an explicit answer. Silence supplies neither a fact nor consent.
+Continuation preserves accumulated usage, resource limits and permissions.
+
+The next useful step depends on the goal and available evidence. It can use
+authorized concepts, profile facts, memory, retrieved sources, search, a direct
+API, or permitted computer and app capabilities. A failed search provider does
+not establish that every web route is unavailable. The agent should choose a
+sufficient route within its remaining budget, avoid repeating unchanged failed
+attempts, and explain any unresolved input or access requirement. A preference
+such as “find it for me” does not grant access or override an explicit restriction.
+
 **Guide this work** adds a human message to the selected running work in its
 existing Ask conversation. It creates no second goal. The message is durably
 queued for the next safe boundary: an operation already in flight can finish,
