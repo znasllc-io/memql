@@ -40,6 +40,14 @@
                   "basis": {
                     "type": "string"
                   },
+                  "evidence": {
+                    "enum": [
+                      "supported",
+                      "not_required",
+                      "missing"
+                    ],
+                    "type": "string"
+                  },
                   "ready": {
                     "type": "boolean"
                   },
@@ -52,6 +60,7 @@
                 },
                 "required": [
                   "ready",
+                  "evidence",
                   "reply",
                   "basis",
                   "usesRecordedSources"
@@ -110,6 +119,14 @@
                   "basis": {
                     "type": "string"
                   },
+                  "evidence": {
+                    "enum": [
+                      "supported",
+                      "not_required",
+                      "missing"
+                    ],
+                    "type": "string"
+                  },
                   "ready": {
                     "type": "boolean"
                   },
@@ -122,6 +139,7 @@
                 },
                 "required": [
                   "ready",
+                  "evidence",
                   "reply",
                   "basis",
                   "usesRecordedSources"
