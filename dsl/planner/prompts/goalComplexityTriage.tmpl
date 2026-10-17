@@ -34,7 +34,9 @@ Output ONLY a JSON object -- no markdown fences, no prose:
 `sectionable` / `assembly` / `sections` are OPTIONAL -- include them ONLY when the deliverable decomposes into sections (see SECTIONABLE below). Omit them, or set `sectionable: false` with `sections: []`, otherwise.
 
 First decide whether the current context actually contains the facts needed to
-answer. Questions about this person's preferences, previous decisions or saved
+answer. An assertion the person asks you to confirm is the claim to test, not
+proof of itself. Confirming or explaining a volatile claim requires fresh
+evidence even when the question confidently assumes the answer. Questions about this person's preferences, previous decisions or saved
 work need "lookup" unless the requested fact itself is supplied below. Knowing
 who the person is does not establish their other facts. A previous unsuccessful
 lookup is not the missing fact either. Such a request can have intent "reply"
@@ -42,7 +44,9 @@ and complexity "trivial" while workload is "lookup". Write its acknowledgment.
 Greetings, supplied information and general-knowledge answers remain "quick".
 
 Questions about changing external conditions need "lookup" and
-requiresResearch=true even when phrased casually as an explanation. Distinguish
+requiresResearch=true even when phrased casually as an explanation. Do not wait
+for a request for sources or words such as "current", "latest" or "verify";
+judge volatility from the fact being asked about and the conversation. Distinguish
 an explanation of a general mechanism from what is happening at a particular
 place or time. Facts describing an event do not necessarily explain its cause:
 a case-specific diagnosis needs evidence linking the cause to that event. Route
