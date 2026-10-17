@@ -2848,6 +2848,55 @@ for _version_case in '0.16.0+gabc|0.16.0|yes' '0.16.0-dev.ci+gabc|0.16.0-dev.ci|
     expect_eq "build selection $_actual -> $_selected" "$_matched" "$_expected"
 done
 
+# Run the actual binary install against executable release fixtures. A release
+# number alone must not preserve an older build before the native app check.
+function binary_install_fixture() (
+    set -e
+    local mode="$1" before="$2" downloaded="$3" target="$4" selected="$5" expected="$6" action="$7" status="$8"
+    local fixture rc=0
+    fixture="$(mktemp -d)"
+    trap 'rm -rf "$fixture"' EXIT
+    function install_mode_dir() { printf '%s/bin\n' "$fixture"; }
+    function resolve_target_version() { printf '%s\n' "$target"; }
+    function require_sudo() { :; }
+    function install_sudo() { "$@"; }
+    function download_binary() {
+        printf '#!/bin/bash\nprintf "memql %%s (computeruse)\\n" %s\n' "$downloaded" > "$2"
+        chmod +x "$2"
+    }
+    mkdir -p "$fixture/bin"
+    printf '#!/bin/bash\nprintf "memql %%s (computeruse)\\n" %s\n' "$before" > "$fixture/bin/worker"
+    chmod +x "$fixture/bin/worker"
+    ln -s "$fixture/bin/worker" "$fixture/bin/memql"
+    install_binary_with_mode "$mode" fixture://release worker memql "$target" "$selected" > "$fixture/install.log" 2>&1 || rc=$?
+    if [[ "$rc" != "$status" || "$INSTALL_BINARY_ACTION" != "$action" || "$(read_binary_version_exact "$fixture/bin/memql")" != "$expected" ]]; then
+        cat "$fixture/install.log" >&2
+        printf 'got status=%s action=%s version=%s; wanted %s %s %s\n' "$rc" "$INSTALL_BINARY_ACTION" "$(read_binary_version_exact "$fixture/bin/memql")" "$status" "$action" "$expected" >&2
+        return 1
+    fi
+)
+
+for _mode in user-local system; do
+    while IFS='|' read -r _case _before _downloaded _target _selected _expected _action _status; do
+        if binary_install_fixture "$_mode" "$_before" "$_downloaded" "$_target" "$_selected" "$_expected" "$_action" "$_status"; then
+            pass "$_mode binary install: $_case"
+        else
+            fail "$_mode binary install: $_case"
+        fi
+    done <<'CASES'
+latest replaces another commit|0.19.0+gold|0.19.0+gnew|||0.19.0+gnew|upgrade|0
+latest replaces an unstamped build|0.19.0|0.19.0+gnew|||0.19.0+gnew|upgrade|0
+latest replaces a prerelease|0.19.0-dev.before+gold|0.19.0+gnew|||0.19.0+gnew|upgrade|0
+pinned release replaces another commit|0.19.0+gold|0.19.0+gnew|0.19.0|0.19.0|0.19.0+gnew|upgrade|0
+pinned prerelease replaces another commit|0.19.0-dev.ci+gold|0.19.0-dev.ci+gnew|0.19.0|0.19.0-dev.ci|0.19.0-dev.ci+gnew|upgrade|0
+resolved release verifies the build|0.19.0+gold|0.19.0+gnew|0.19.0||0.19.0+gnew|upgrade|0
+identical build stays installed|0.19.0+gnew|0.19.0+gnew|||0.19.0+gnew|skip|0
+pinned identical build stays installed|0.19.0+gnew|0.19.0+gnew|0.19.0|0.19.0|0.19.0+gnew|skip|0
+latest refuses a downgrade|0.20.0+gold|0.19.0+gnew|||0.20.0+gold|refuse|3
+pinned release refuses a downgrade|0.20.0+gold|0.19.0+gnew|0.19.0|0.19.0|0.20.0+gold|refuse|3
+CASES
+done
+
 # ---------------------------------------------------------------
 # Summary
 # ---------------------------------------------------------------
