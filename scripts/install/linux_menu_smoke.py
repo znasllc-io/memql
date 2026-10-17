@@ -32,7 +32,7 @@ def line(process):
     ready, _, _ = select.select([process.stdout], [], [], 15)
     if not ready:
         raise AssertionError("tray did not register with the desktop watcher")
-    result = process.stdout.readline().strip()
+    result = process.stdout.readline().decode().strip()
     assert result, "tray/watcher exited before registration"
     return result
 
@@ -52,7 +52,10 @@ def inspect(binary):
     processes = []
 
     def start_watcher():
-        process = subprocess.Popen([sys.executable, __file__, "--watcher"], stdout=subprocess.PIPE, text=True)
+        # Readiness and registration can arrive together after a panel restart.
+        # A buffered text reader can consume both, leaving select() waiting on
+        # an empty pipe while the registration is already in Python's buffer.
+        process = subprocess.Popen([sys.executable, __file__, "--watcher"], stdout=subprocess.PIPE, bufsize=0)
         processes.append(process)
         assert line(process) == "ready"
         return process
