@@ -305,6 +305,35 @@ echo "  git log on a root-made checkout: $(git -C /workspace log -1 --format=%s)
 SCRIPT
 }
 
+function assert_computeruse_toolchain() {
+	info "computer-use libraries compile and link without a display..."
+	in_image <<'SCRIPT' || fail "computer-use C toolchain is incomplete"
+set -euo pipefail
+cd "$(mktemp -d)"
+cat > probe.c <<'C'
+#include <X11/Xlib.h>
+#include <X11/extensions/XTest.h>
+#include <X11/extensions/Xinerama.h>
+#include <xkbcommon/xkbcommon.h>
+#include <png.h>
+int main(void) {
+    struct xkb_context *context = xkb_context_new(XKB_CONTEXT_NO_FLAGS);
+    if (!context || !png_access_version_number()) return 1;
+    xkb_context_unref(context);
+    /* Take addresses so the linker must resolve the X libraries too. */
+    return XOpenDisplay == 0 || XTestFakeKeyEvent == 0 || XineramaIsActive == 0;
+}
+C
+gcc probe.c -o native $(pkg-config --cflags --libs x11 xtst xinerama xkbcommon libpng)
+./native
+if [ "$(dpkg --print-architecture)" = amd64 ]; then
+    export PKG_CONFIG_LIBDIR=/usr/lib/aarch64-linux-gnu/pkgconfig:/usr/share/pkgconfig
+    aarch64-linux-gnu-gcc probe.c -o arm64 $(pkg-config --cflags --libs x11 xtst xinerama xkbcommon libpng)
+    qemu-aarch64 -L / ./arm64
+fi
+SCRIPT
+}
+
 function main() {
 	trap cleanup EXIT
 	command -v docker >/dev/null || fail "docker is required"
@@ -316,6 +345,7 @@ function main() {
 	assert_identity_css_builds_offline
 	assert_runtime_contract
 	assert_git_reads_a_foreign_checkout
+	assert_computeruse_toolchain
 	info "SUCCESS: ${IMAGE} passed every smoke check"
 }
 
