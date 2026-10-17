@@ -351,7 +351,7 @@ pipeline:
         cd .memql-ci/memql-cockpit
         test "$(go env GOOS)/$(go env GOARCH)" = linux/amd64
         CC=aarch64-linux-gnu-gcc CXX=aarch64-linux-gnu-g++ env -u GOFLAGS make cockpit-computeruse-linux-arm64
-        qemu-aarch64 -L /usr/aarch64-linux-gnu ./bin/memql-computeruse-linux-arm64 --version
+        timeout --signal=KILL 60s qemu-aarch64 -L / ./bin/memql-computeruse-linux-arm64 --version
         mkdir -p sbom
         go install github.com/CycloneDX/cyclonedx-gomod/cmd/cyclonedx-gomod@v1.10.0
         export PATH="$(go env GOPATH)/bin:$PATH"
