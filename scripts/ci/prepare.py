@@ -10,6 +10,7 @@ import json
 import os
 from pathlib import Path
 import re
+import shlex
 import subprocess
 import sys
 
@@ -53,7 +54,18 @@ def pin_from(root):
 def checkout(source, revision, destination):
     destination.mkdir()
     git("init", "-q", cwd=destination)
-    git("fetch", "-q", "--depth=1", "--no-tags", source, revision, cwd=destination,
+    local = Path(source).is_absolute()
+    # Local transport drops the parent's command-line configuration before
+    # upload-pack, whose ownership check sees the source's .git directory.
+    # The cluster clone runs as another uid. Pass trust to that exact child,
+    # never a wildcard safe.directory or an operator's global configuration.
+    transport = []
+    if local:
+        upload_pack = ["git", "-c", "core.hooksPath=" + os.devnull,
+                       "-c", "safe.directory=" + source,
+                       "-c", "safe.directory=" + str(Path(source) / ".git"), "upload-pack"]
+        transport = ["--upload-pack=" + shlex.join(upload_pack)]
+    git("fetch", "-q", "--depth=1", "--no-tags", *transport, source, revision, cwd=destination,
         trusted_source=source if Path(source).is_absolute() else None)
     git("checkout", "-q", "--detach", "FETCH_HEAD", cwd=destination)
     actual = git("rev-parse", "HEAD", cwd=destination, capture=True).stdout.strip()
