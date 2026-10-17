@@ -22,6 +22,23 @@ function sharedMachine() {
  return row;
 }
 
+it('updates the owner and shared call breakdown in Equipment from the existing machine feed', async () => {
+ const row=sharedMachine(); fleet(); await openMachine('Alpha');
+ const breakdown=screen.getByLabelText('Active call breakdown');
+ expect(within(breakdown).getAllByText('—')).toHaveLength(2);
+ const report={nodeId:'agent-test',observedAt:new Date().toISOString(),ownerCalls:2,sharedCalls:3,users:[{id:'ana',activeCalls:3}],groups:[{id:'design',activeCalls:3}]};
+ await act(async()=>h.connection.subscriptions.emit(WORKER_REGISTRATION_CONCEPT,{...row,activeCount:99,sharingActivity:report},'NODE_UPDATED'));
+ expect(within(breakdown).getByText('Your calls').nextElementSibling?.textContent).toBe('2');
+ expect(within(breakdown).getByText('Shared calls').nextElementSibling?.textContent).toBe('3');
+ expect(screen.getByText('5 active calls')).toBeTruthy();
+ expect(screen.queryByText('99 active calls')).toBeNull();
+ await act(async()=>h.connection.subscriptions.emit(WORKER_REGISTRATION_CONCEPT,{...row,connectedNodeId:'agent-next',sharingActivity:report},'NODE_UPDATED'));
+ expect(within(breakdown).getAllByText('—')).toHaveLength(2);
+ expect(h.connection.query.myWorkersWithStatus).toHaveBeenCalledTimes(1);
+ fireEvent.click(screen.getByRole('button',{name:'Call history'}));
+ expect(screen.getByRole('button',{name:'History'}).getAttribute('aria-current')).toBeTruthy();
+});
+
 it('places Settings after History and groups configuration, sharing and reported facts on that page',async()=>{
  sharedMachine();fleet();await openMachine('Alpha');
  const tabs=screen.getByRole('navigation',{name:'Machine views'});

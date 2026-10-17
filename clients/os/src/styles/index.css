@@ -14389,6 +14389,9 @@ button.os-cluster-mesh-peer:focus-visible {
 .fleet-equipment-bank .os-empty-state h4, .fleet-recent-work .os-empty-state h4 { font-size: var(--os-text-sm); }
 .fleet-recent-work .os-empty-state { padding: 22px 0; }
 .fleet-device-work { gap: 2px; flex-wrap: wrap; }
+.fleet-device-call-breakdown { display: flex; justify-content: center; flex-wrap: wrap; gap: 4px 16px; margin: 2px 0 0; color: var(--os-muted); font-size: var(--os-text-xs); }
+.fleet-device-call-breakdown > div { display: flex; gap: 6px; }
+.fleet-device-call-breakdown dd { margin: 0; font-variant-numeric: tabular-nums; }
 
 /* Detail pages share a reading path above the title; navigation sits at right. */
 /* THE TRAIL ROW (kit/TrailRow) -- one per window, drawn by the window frame
