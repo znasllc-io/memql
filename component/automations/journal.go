@@ -195,13 +195,17 @@ func journalSkipsAutomation(a *Automation) bool {
 // writes (the file comment): a cron tick that is neither adopted nor
 // @journalRequired, or an event handler declaring @journalOnWrite.
 // "schedule" is the core scheduler's cron firing alone. An
-// authored automation's firing ("authored"), an operator's run of a scheduled
-// automation ("run:client"), a sub-automation and an http trigger each carry
+// authored event firing also opts in; authored schedules retain their journal.
+// An operator's run ("run:client"), a sub-automation and an http trigger carry
 // their own triggeredBy, and a scheduler recovery re-adopts the row the tick
 // left (adopt.go) -- the case the adopt check is for, since that row says
 // "schedule" too.
 func holdsBackgroundJournal(a *Automation, triggeredBy string, adopt *RunAdoption) bool {
-	return a != nil && (triggeredBy == "schedule" || a.JournalOnWrite && strings.HasPrefix(triggeredBy, "event:")) && adopt == nil && !a.JournalRequired
+	if a == nil || adopt != nil || a.JournalRequired {
+		return false
+	}
+	eventFiring := strings.HasPrefix(triggeredBy, "event:") || triggeredBy == "authored" && a.IsEventTriggered()
+	return triggeredBy == "schedule" || a.JournalOnWrite && eventFiring
 }
 
 // heldUntilWrite returns a copy of j whose run opens at the firing's first

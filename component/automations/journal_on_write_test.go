@@ -16,6 +16,7 @@ func TestEventJournalOnWrite(t *testing.T) {
 		optIn, wantJournal         bool
 	}{
 		{"noop", "event:delivery", "", "", true, false},
+		{"authored-event", "authored", "", "", true, false},
 		{"write", "event:delivery", "a", "", true, true},
 		{"failure", "event:delivery", "", "a", true, true},
 		{"manual", "run:client", "", "", true, true},
@@ -27,6 +28,7 @@ func TestEventJournalOnWrite(t *testing.T) {
 			e := scheduledHoldExecutor(rec, probe)
 			defer e.Close()
 			a := &Automation{Name: "inboundProbe", JournalOnWrite: tc.optIn, Steps: scheduledSteps("a")}
+			a.Trigger = &TriggerConfig{Event: "graph.node.created.v1:platform:inboundRequest"}
 			exec, err := e.Execute(context.Background(), a, tc.trigger)
 			if tc.fail == "" && (err != nil || exec.Status != "completed") {
 				t.Fatalf("execution: %v, %v", exec, err)
