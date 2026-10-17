@@ -432,19 +432,26 @@ func TestRunnerStreamsProgressLive(t *testing.T) {
 	}
 }
 
-// waitForSession blocks until the runner has registered its session
-// on the stream, so a test can play the worker's half without racing
-// the start.
+// waitForSession waits for Start to reach the fake worker. Registration alone
+// precedes the owner's final feature check: an End injected in that interval
+// releases the feature lease and cancels a session that has not been sent yet.
+// A real worker cannot answer before receiving Start.
 func waitForSession(t *testing.T, s *streamSession, sessionId string) {
 	t.Helper()
+	stream, ok := s.stream.(*fakeCockpitStream)
+	if !ok {
+		t.Fatal("session fixture requires the fake cockpit stream")
+	}
 	deadline := time.Now().Add(3 * time.Second)
 	for time.Now().Before(deadline) {
-		if s.lookupAppSession(sessionId) != nil {
-			return
+		for _, start := range stream.starts() {
+			if start.GetSessionId() == sessionId {
+				return
+			}
 		}
 		time.Sleep(2 * time.Millisecond)
 	}
-	t.Errorf("session %s never opened", sessionId)
+	t.Errorf("session %s never sent Start", sessionId)
 }
 
 // TestRunnerClassifiesCancellation: a caller giving up is a CANCELLED
