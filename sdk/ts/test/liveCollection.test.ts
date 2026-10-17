@@ -1176,6 +1176,170 @@ test("rereadEveryEvent without a reread falls back to trusting the payload", asy
   store.dispose();
 });
 
+test("event re-reads share a connection-wide bound and coalesce queued row updates", async () => {
+  const subs = new FakeSubscriptions();
+  const store = new LiveStore(hostWith(subs).host);
+  let release!: () => void;
+  const gate = new Promise<void>((resolve) => { release = resolve; });
+  let active = 0;
+  let peak = 0;
+  const reads: string[] = [];
+  const handles = ["a", "b"].map((concept) => store.collection<Row>(concept, {
+    concept,
+    seed: async () => ({ rows: [], nextCursor: "" }),
+    rereadEveryEvent: true,
+    reread: async (id) => {
+      reads.push(`${concept}:${id}`);
+      peak = Math.max(peak, ++active);
+      await gate;
+      active--;
+      return { id };
+    },
+  }));
+  await settle();
+  try {
+    // Two live panes, well over the bridge's 64 waiting-query capacity.
+    // Deliver repeats before a queued read starts: one read sees them all.
+    for (let repeat = 0; repeat < 3; repeat++) {
+      for (let id = 0; id < 100; id++) {
+        for (const concept of ["a", "b"]) {
+          subs.deliver(event({ kind: "NODE_UPDATED", payload: { id: String(id) } }), concept);
+        }
+      }
+    }
+    await settle();
+    assert.equal(active, 2, "background reads leave capacity for foreground page loads");
+    release();
+    await settle();
+    assert.equal(peak, 2, "the limit is shared, not multiplied by the number of collections");
+    assert.equal(reads.length, 200, "queued updates to the same row collapse into one read");
+    assert.deepEqual(handles.map((h) => h.value.snapshot.rows.length), [100, 100]);
+  } finally {
+    release();
+    store.dispose();
+  }
+});
+
+test("updates during an in-flight re-read request one fresh answer after it settles", async () => {
+  const subs = new FakeSubscriptions();
+  const store = new LiveStore(hostWith(subs).host);
+  const answers: Array<(row: Row) => void> = [];
+  const handle = store.collection<Row>("k", {
+    concept: "c",
+    seed: async () => ({ rows: [], nextCursor: "" }),
+    rereadEveryEvent: true,
+    reread: () => new Promise<Row>((resolve) => { answers.push(resolve); }),
+  });
+  await settle();
+  subs.deliver(event({ kind: "NODE_UPDATED", payload: { id: "r1" } }));
+  await settle();
+  for (let i = 0; i < 100; i++) {
+    subs.deliver(event({ kind: "NODE_UPDATED", payload: { id: "r1" } }));
+  }
+  assert.equal(answers.length, 1, "only one read of the row may be in flight");
+  answers[0]!({ id: "r1", name: "earlier" });
+  await settle();
+  assert.equal(answers.length, 2, "do not lose updates that happened after the first read began");
+  answers[1]!({ id: "r1", name: "latest" });
+  await settle();
+  assert.equal(answers.length, 2);
+  assert.equal(handle.value.snapshot.rows[0]?.["name"], "latest");
+  store.dispose();
+});
+
+test("deletes discard queued re-reads and prevent in-flight answers from restoring rows", async () => {
+  const subs = new FakeSubscriptions();
+  const store = new LiveStore(hostWith(subs).host);
+  const answers: Array<{ id: string; resolve: (row: Row) => void }> = [];
+  const handle = store.collection<Row>("k", {
+    concept: "c",
+    seed: async () => ({ rows: [{ id: "a" }, { id: "b" }, { id: "c" }], nextCursor: "" }),
+    reread: (id) => new Promise<Row>((resolve) => { answers.push({ id, resolve }); }),
+  });
+  await settle();
+  for (const id of ["a", "b", "c"]) {
+    subs.deliver(event({ kind: "NODE_UPDATED", payloadOmitted: true, payload: { id } }));
+  }
+  await settle();
+  assert.deepEqual(answers.map((a) => a.id), ["a", "b"]);
+  for (const id of ["a", "c"]) {
+    subs.deliver(event({ kind: "NODE_DELETED", payload: { id } }));
+  }
+  // These unversioned results have no timestamp for the tombstone to weigh.
+  for (const answer of answers) answer.resolve({ id: answer.id });
+  await settle();
+  assert.deepEqual(handle.value.snapshot.rows.map((r) => r["id"]), ["b"]);
+  assert.equal(answers.length, 2, "the deleted queued row was never queried");
+  subs.deliver(event({ kind: "NODE_CREATED", payloadOmitted: true, payload: { id: "a" } }));
+  await settle();
+  answers[2]!.resolve({ id: "a", name: "recreated" });
+  await settle();
+  assert.equal(byId(handle.value.snapshot.rows)["a"]?.["name"], "recreated");
+  store.dispose();
+});
+
+for (const transition of ["disconnect", "close"] as const) {
+  test(`${transition} discards queued re-reads and ignores late answers`, async () => {
+    const subs = new FakeSubscriptions();
+    const connection = hostWith(subs);
+    const store = new LiveStore(connection.host);
+    let release!: () => void;
+    const gate = new Promise<void>((resolve) => { release = resolve; });
+    const signals: AbortSignal[] = [];
+    const handle = store.collection<Row>("k", {
+      concept: "c",
+      seed: async () => ({ rows: [{ id: "seed" }], nextCursor: "" }),
+      reread: async (id, signal) => {
+        signals.push(signal);
+        // A consumer may ignore cancellation; its result still must not land.
+        await gate;
+        return { id };
+      },
+    });
+    await settle();
+    for (let id = 0; id < 100; id++) {
+      subs.deliver(event({ payloadOmitted: true, payload: { id: String(id) } }));
+    }
+    await settle();
+    if (transition === "disconnect") connection.status("reconnecting");
+    else handle.value.close();
+    assert.equal(signals.length, 2);
+    assert.ok(signals.every((signal) => signal.aborted));
+    release();
+    await settle();
+    assert.equal(signals.length, 2, "queued reads cannot leak into a later connection cycle");
+    assert.deepEqual(handle.value.snapshot.rows, [{ id: "seed" }]);
+    if (transition === "disconnect") {
+      connection.cycle(2);
+      await settle();
+      subs.deliver(event({ payloadOmitted: true, payload: { id: "new" } }));
+      await settle();
+      assert.ok(byId(handle.value.snapshot.rows)["new"], "the new cycle can read normally");
+    }
+    store.dispose();
+  });
+}
+
+test("a refused background read releases capacity for the next authorized row", async () => {
+  const subs = new FakeSubscriptions();
+  const store = new LiveStore(hostWith(subs).host);
+  const handle = store.collection<Row>("k", {
+    concept: "c",
+    seed: async () => ({ rows: [], nextCursor: "" }),
+    reread: async (id) => {
+      if (id !== "allowed") throw new Error("permission denied");
+      return { id };
+    },
+  });
+  for (const id of ["denied1", "denied2", "allowed"]) {
+    subs.deliver(event({ payloadOmitted: true, payload: { id } }));
+  }
+  await settle();
+  assert.deepEqual(handle.value.snapshot.rows, [{ id: "allowed" }]);
+  assert.equal(handle.value.snapshot.error, "");
+  store.dispose();
+});
+
 test("supersedes refuses a row that would roll a newer one backwards", async () => {
   // Two re-reads issued a moment apart can settle in either order. Without a
   // watermark that means an older copy overwrites a newer one -- silently,
