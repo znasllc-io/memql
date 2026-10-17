@@ -8,8 +8,21 @@ import (
 	"github.com/znasllc-io/memql/component/memql"
 )
 
-func TestRerunCancelledGoalAcrossReplicas(t *testing.T) {
-	a, b := openActsDB(t), openActsDB(t)
+func TestRerunGoalAcrossReplicas(t *testing.T) {
+	first, second := openActsDB(t), openActsDB(t)
+	for _, tc := range []struct {
+		name string
+		run  func(*testing.T, actsDB, actsDB)
+	}{
+		{"RerunCancelledGoalAcrossReplicas", testRerunCancelledGoalAcrossReplicas},
+		{"RerunInterruptedIntentAcrossReplicas", testRerunInterruptedIntentAcrossReplicas},
+	} {
+		t.Run(tc.name, func(t *testing.T) { tc.run(t, first, second) })
+	}
+}
+
+func testRerunCancelledGoalAcrossReplicas(t *testing.T, first, second actsDB) {
+	a, b := freshActsDBPair(t, first, second)
 	b.owner = a.owner
 	runID := a.openRun(t, nil)
 	a.writeVersion(t, runID, runID, "draft", 0, 1, nil, "preserved draft", nil)
@@ -42,8 +55,8 @@ func TestRerunCancelledGoalAcrossReplicas(t *testing.T) {
 	require.Equal(t, float64(3), rowMap(run, "spent")["modelCalls"])
 }
 
-func TestRerunInterruptedIntentAcrossReplicas(t *testing.T) {
-	a, b := openActsDB(t), openActsDB(t)
+func testRerunInterruptedIntentAcrossReplicas(t *testing.T, first, second actsDB) {
+	a, b := freshActsDBPair(t, first, second)
 	b.owner = a.owner
 	runID := a.openRun(t, nil)
 	a.writeVersion(t, runID, runID, "research", 0, 1, nil, "retained research", nil)
