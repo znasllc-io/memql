@@ -20,7 +20,7 @@ function main() {
     [[ "$output" == /* ]] || cap_fail 2 "output must be absolute"
     create_build_scratch memql-menu-package
     stage="$COCKPIT_BUILD_SCRATCH"
-    "$REPO_ROOT/scripts/macos/build-menubar.sh" --output="$stage/MemQL Cockpit.app" --version="$version" >&2 || cap_fail 5 "menu build failed"
+    "$REPO_ROOT/scripts/macos/build-menubar.sh" --output="$stage/MemQL Cockpit.app" --version="$version" --arch="$arch" >&2 || cap_fail 5 "menu build failed"
     expected_arch="$arch"
     [[ "$arch" != amd64 ]] || expected_arch=x86_64
     [[ "$(lipo -archs "$stage/MemQL Cockpit.app/Contents/MacOS/MemQLCockpit")" == "$expected_arch" ]] || cap_fail 3 "native binary architecture does not match requested asset"

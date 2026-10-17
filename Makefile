@@ -82,9 +82,9 @@ cockpit-computeruse-linux-arm64: ## Computer-use cross-build for Linux aarch64
 
 cockpit-computeruse-all-platforms: cockpit-computeruse-darwin-arm64 cockpit-computeruse-darwin-amd64 cockpit-computeruse-linux-amd64 cockpit-computeruse-linux-arm64  ## Computer-use cross-build for all platforms
 
-# release.yml's computeruse matrix builds NATIVELY, one runner per platform
-# (CGO + RobotGo rules out cross-compiling the set from one host), so this
-# target overrides no GOOS/GOARCH -- it builds for the host and stamps the
+# This target builds natively. Cross-builds use the named platform targets
+# above with the target C compiler and libraries; macOS also needs its SDK.
+# This target overrides no GOOS/GOARCH -- it builds for the host and stamps the
 # host platform into the artifact name the token installers download
 # (memql-computeruse-<os>-<arch>). Same tags/flags as the per-platform
 # targets above; only the name's os/arch come from `go env`.

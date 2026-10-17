@@ -57,7 +57,7 @@ pipeline:
         docker: true
       run: |
         set -eu
-        export GOTOOLCHAIN=go1.26.9 GOWORK=off GOFLAGS=-p=2 GOMAXPROCS=2
+        . ./scripts/ci/native-env.sh
         python3 scripts/ci/prepare.py
         cd .memql-ci/memql-cockpit
         docker info >/dev/null
@@ -107,7 +107,7 @@ pipeline:
       platform: linux/amd64
       run: |
         set -eu
-        export GOTOOLCHAIN=go1.26.9 GOWORK=off GOFLAGS=-p=2 GOMAXPROCS=2
+        . ./scripts/ci/native-env.sh
         python3 scripts/ci/prepare.py
         cd .memql-ci/memql-cockpit
         CGO_ENABLED=1 go build -tags computeruse ./...
@@ -121,7 +121,7 @@ pipeline:
         macos_tooling: true
       run: |
         set -eu
-        export GOTOOLCHAIN=go1.26.9 GOWORK=off GOFLAGS=-p=2 GOMAXPROCS=2
+        . ./scripts/ci/native-env.sh
         python3 scripts/ci/prepare.py
         cd .memql-ci/memql-cockpit
         CGO_ENABLED=1 go build -tags computeruse ./...
@@ -288,7 +288,7 @@ pipeline:
       - .memql-ci/memql-cockpit/sbom
       run: |
         set -eu
-        export GOTOOLCHAIN=go1.26.9 GOWORK=off GOFLAGS=-p=2 GOMAXPROCS=2
+        . ./scripts/ci/native-env.sh
         python3 scripts/ci/prepare.py
         cd .memql-ci/memql-cockpit
         test "$(go env GOOS)/$(go env GOARCH)" = darwin/arm64
@@ -318,7 +318,7 @@ pipeline:
       - .memql-ci/memql-cockpit/sbom
       run: |
         set -eu
-        export GOTOOLCHAIN=go1.26.9 GOWORK=off GOFLAGS=-p=2 GOMAXPROCS=2
+        . ./scripts/ci/native-env.sh
         python3 scripts/ci/prepare.py
         cd .memql-ci/memql-cockpit
         test "$(go env GOOS)/$(go env GOARCH)" = darwin/amd64
@@ -345,7 +345,7 @@ pipeline:
       - .memql-ci/memql-cockpit/sbom
       run: |
         set -eu
-        export GOTOOLCHAIN=go1.26.9 GOWORK=off GOFLAGS=-p=2 GOMAXPROCS=2
+        . ./scripts/ci/native-env.sh
         python3 scripts/ci/prepare.py
         cd .memql-ci/memql-cockpit
         test "$(go env GOOS)/$(go env GOARCH)" = linux/arm64
@@ -368,7 +368,7 @@ pipeline:
       - .memql-ci/memql-cockpit/sbom
       run: |
         set -eu
-        export GOTOOLCHAIN=go1.26.9 GOWORK=off GOFLAGS=-p=2 GOMAXPROCS=2
+        . ./scripts/ci/native-env.sh
         python3 scripts/ci/prepare.py
         cd .memql-ci/memql-cockpit
         test "$(go env GOOS)/$(go env GOARCH)" = linux/amd64

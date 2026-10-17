@@ -12,12 +12,14 @@ cap_spec_param "version" "Version matching the worker"
 function main() {
     cap_handle_meta "$@"
     cap_parse_flags "$@"
-    local worker output version stage helper actual_version minimum_os
+    local worker output version stage helper actual_version minimum_os worker_arch
     worker="$(cap_param worker)"
     output="$(cap_param output "$REPO_ROOT/bin/MemQL.app")"
     version="$(cap_param version "$(cat "$REPO_ROOT/VERSION")")"
     [[ "$worker" == /* && -x "$worker" ]] || cap_fail 2 "worker must name a built executable"
     [[ "$output" == /* && "$output" == *.app ]] || cap_fail 2 "output must be an absolute .app path"
+    worker_arch="$(lipo -archs "$worker")"
+    [[ "$worker_arch" == arm64 || "$worker_arch" == x86_64 ]] || cap_fail 3 "worker must contain one supported Mac architecture"
     actual_version="$("$worker" --version)"
     # Build metadata identifies the worker without changing its release number.
     local reported_version
@@ -32,7 +34,7 @@ function main() {
     stage="$COCKPIT_BUILD_SCRATCH"
     helper="$stage/MemQL.app/Contents/Library/LoginItems/MemQL Menu.app"
     mkdir -p "$(dirname "$helper")" "$stage/MemQL.app/Contents/MacOS" "$stage/MemQL.app/Contents/Resources"
-    "$REPO_ROOT/scripts/macos/build-menubar.sh" --output="$helper" --version="$version" >&2 || cap_fail 5 "menu build failed"
+    "$REPO_ROOT/scripts/macos/build-menubar.sh" --output="$helper" --version="$version" --arch="$worker_arch" >&2 || cap_fail 5 "menu build failed"
     cp "$worker" "$stage/MemQL.app/Contents/MacOS/MemQL"
     cp "$REPO_ROOT/native/macos/WorkerInfo.plist" "$stage/MemQL.app/Contents/Info.plist"
     cp "$helper/Contents/Resources/MemQL.icns" "$stage/MemQL.app/Contents/Resources/MemQL.icns"
