@@ -141,7 +141,11 @@ export async function runWorkerDownload(input: {
   frame.hidden = true;
   frame.src = url;
   document.body.appendChild(frame);
-  setTimeout(() => frame.remove(), 60_000);
-
-  await pumpToPort(response.body, channel.port1);
+  try {
+    await pumpToPort(response.body, channel.port1);
+  } finally {
+    // A large transfer may take minutes. Keep its navigation alive until the
+    // pump settles, then allow the browser to consume the remaining chunks.
+    setTimeout(() => frame.remove(), 60_000);
+  }
 }
