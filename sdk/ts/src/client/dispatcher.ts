@@ -39,7 +39,7 @@ export interface DispatcherOptions {
 }
 
 export interface PendingError extends Error {
-  reason: "closed" | "transport";
+  reason: "closed" | "transport" | "overloaded";
 }
 
 function pendingError(message: string, reason: PendingError["reason"]): PendingError {
@@ -58,6 +58,11 @@ export class Dispatcher {
   private readonly logger: DispatcherOptions["logger"];
   private readonly supervised: boolean;
   private readonly pending = new Map<string, PendingEntry>();
+  // Admission belongs to the transport, shared by every QueryClient and live
+  // collection. Never fill the bridge's queue with work the caller abandoned.
+  private activeQueries = 0;
+  private activeBackgroundQueries = 0;
+  private readonly queuedQueries = new Map<string, { send: () => void; background: boolean }>();
   private readonly streams = new Map<string, StreamListener>();
   private readonly eventListeners = new Set<ServerListener>();
   private readonly transportCloseListeners = new Set<() => void>();
@@ -128,7 +133,7 @@ export class Dispatcher {
   // sendAndWait blocks until a server envelope with correlateTo ==
   // messageId arrives (or the stream tears down / the signal fires).
   // The Go SDK calls this for every request-response method.
-  async sendAndWait(msg: ClientMessage, signal?: AbortSignal): Promise<ServerMessage> {
+  async sendAndWait(msg: ClientMessage, signal?: AbortSignal, priority?: "background"): Promise<ServerMessage> {
     const out: ClientMessage = { ...msg };
     if (!out.messageId) out.messageId = newShortId();
     const id = out.messageId;
@@ -137,35 +142,83 @@ export class Dispatcher {
         reject(pendingError("aborted", "closed"));
         return;
       }
-      const entry: PendingEntry = { resolve, reject };
-      this.pending.set(id, entry);
-      const abortListener = () => {
-        const cur = this.pending.get(id);
-        if (cur === entry) this.pending.delete(id);
-        reject(pendingError("aborted", "closed"));
-      };
-      if (signal) signal.addEventListener("abort", abortListener, { once: true });
-      try {
-        this.rawSend(out);
-      } catch (err) {
-        this.pending.delete(id);
-        reject(pendingError(`send failed: ${(err as Error).message}`, "transport"));
+      if (this.stopped || this.socketDown) {
+        reject(pendingError("stream closed", "transport"));
         return;
       }
-      const cleanup = () => {
-        if (signal) signal.removeEventListener("abort", abortListener);
+      const query = "executeQuery" in out ? out.executeQuery : undefined;
+      const background = priority === "background";
+      // Leave two waiting places as well as two execution slots for actions.
+      if (query && this.queuedQueries.size >= (background ? 62 : 64)) {
+        reject(pendingError("Too many queries are waiting on this connection.", "overloaded"));
+        return;
+      }
+      let sent = false;
+      let finished = false;
+      const finish = () => {
+        if (finished) return;
+        finished = true;
+        this.pending.delete(id);
+        this.queuedQueries.delete(id);
+        signal?.removeEventListener("abort", abortListener);
+        if (query && sent) {
+          this.activeQueries--;
+          if (background) this.activeBackgroundQueries--;
+        }
+        this.drainQueries();
       };
-      const wrap = (orig: (msg: ServerMessage) => void) => (msg: ServerMessage) => {
-        cleanup();
-        orig(msg);
+      const entry: PendingEntry = {
+        resolve: (response) => { finish(); resolve(response); },
+        reject: (err) => { finish(); reject(err); },
       };
-      const wrapErr = (orig: (err: PendingError) => void) => (err: PendingError) => {
-        cleanup();
-        orig(err);
+      const abortListener = () => {
+        if (finished) return;
+        reject(pendingError("aborted", "closed"));
+        if (query && sent) {
+          // Keep correlation AND admission until the server answers. Cancel is
+          // a request to stop, not evidence that the work has already stopped.
+          // The bridge also answers queued cancellations on the original id.
+          void this.sendAndWait({ cancelRequest: { requestId: query.requestId } })
+            .catch(() => {});
+        } else {
+          finish();
+        }
       };
-      entry.resolve = wrap(entry.resolve);
-      entry.reject = wrapErr(entry.reject);
+      this.pending.set(id, entry);
+      signal?.addEventListener("abort", abortListener, { once: true });
+      const send = () => {
+        sent = true;
+        if (query) {
+          this.activeQueries++;
+          if (background) this.activeBackgroundQueries++;
+        }
+        try {
+          this.rawSend(out);
+        } catch (err) {
+          entry.reject(pendingError(`send failed: ${(err as Error).message}`, "transport"));
+        }
+      };
+      if (query) {
+        this.queuedQueries.set(id, { send, background });
+        this.drainQueries();
+      } else {
+        send();
+      }
     });
+  }
+
+  private drainQueries(): void {
+    if (this.stopped || this.socketDown) return;
+    while (this.activeQueries < 4) {
+      // Interactive calls go first. Background traffic can use at most half
+      // the bridge's four slots, even during sustained live invalidations.
+      const waiting = [...this.queuedQueries.entries()];
+      const next = waiting.find(([, entry]) => !entry.background)
+        ?? (this.activeBackgroundQueries < 2 ? waiting[0] : undefined);
+      if (!next) return;
+      this.queuedQueries.delete(next[0]);
+      next[1].send();
+    }
   }
 
   // addEventListener attaches a fanout handler for uncorrelated

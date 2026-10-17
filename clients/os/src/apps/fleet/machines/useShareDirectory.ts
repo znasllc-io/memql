@@ -1,5 +1,6 @@
+import { useReadEffect } from "../../../live/useReadEffect";
 import { useGraphRevision } from "../../../live/useGraphRevision";
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useState } from "react";
 import type { Connection } from "@znasllc-io/memql-sdk-core/client";
 
 import { useOsConnection } from "../../../live/connection";
@@ -133,7 +134,7 @@ export async function readShareDirectory(
   signal?: AbortSignal,
   resource: SharingResource = "models",
 ): Promise<ShareDirectory> {
-  const result = await connection.query.fleetShareDirectory({ registrationId, ...(resource === "workbench" ? { resource } : {}) }, { signal });
+  const result = await connection.query.fleetShareDirectory({ registrationId, ...(resource === "workbench" ? { resource } : {}) }, { signal, priority: "background" });
   const directory = shareDirectoryFrom(result.rows()[0] ?? null);
   if (directory === null) throw new Error("The cluster answered without saying who you can share with.");
   return directory;
@@ -149,33 +150,27 @@ export function useShareDirectory(registrationId: string, enabled = true, resour
   const [attempt, setAttempt] = useState(0);
   const liveRevision = useGraphRevision(["v1:identity:user", "v1:identity:group", "v1:identity:groupMembership", "v1:worker:registration"], enabled);
 
-  useEffect(() => {
+  useReadEffect((signal) => {
     if (!enabled) return;
     if (connection === null) {
       setRefreshing(false);
       setRead({ state: "failed", error: "Not connected to the cluster, so nobody could be looked up." });
       return;
     }
-    const controller = new AbortController();
-    let cancelled = false;
     setRefreshing(true);
     setRead(held => held.state === "ready" ? held : { state: "loading" });
-    readShareDirectory(connection, registrationId, controller.signal, resource).then(
+    return readShareDirectory(connection, registrationId, signal, resource).then(
       (directory) => {
-        if (!cancelled) { setRead({ state: "ready", directory }); setRefreshing(false); }
+        if (!signal.aborted) { setRead({ state: "ready", directory }); setRefreshing(false); }
       },
       (err: unknown) => {
-        if (!cancelled) {
+        if (!signal.aborted) {
           setRead(held => held.state === "ready" ? { ...held, error: describe(err) } : { state: "failed", error: describe(err) });
           setRefreshing(false);
         }
       },
     );
-    return () => {
-      cancelled = true;
-      controller.abort();
-    };
-  }, [connection, registrationId, attempt, enabled, resource, liveRevision]);
+  }, [connection, registrationId, enabled, resource], `${attempt}:${liveRevision}`);
 
   const retry = useCallback(() => setAttempt((n) => n + 1), []);
   return { read, refreshing, retry };

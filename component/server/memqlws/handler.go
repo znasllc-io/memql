@@ -380,6 +380,9 @@ type session struct {
 	// serverBytes is the server's message cap (see Handler.serverMessageBytes).
 	serverBytes int
 
+	// Serializes gRPC sends and the dispatch/cancel decision. Cancel must not
+	// pass a query that is between admission and its Send.
+	sendMu   sync.Mutex
 	activeMu sync.Mutex
 	active   map[string]struct{}
 
@@ -473,7 +476,8 @@ func (s *session) run() error {
 
 	err := <-errCh
 	s.conn.Close(websocket.StatusNormalClosure, "")
-	s.stream.CloseSend()
+	// ServeHTTP owns the gRPC connection and closes it on return. Closing
+	// Send here can race the dispatch loop or wait behind a blocked Send.
 	return err
 }
 
@@ -736,6 +740,8 @@ func (s *session) forwardClientMessage(msg *memqlv1.MemqlClientMessage) error {
 	}
 	switch payload := msg.GetPayload().(type) {
 	case *memqlv1.MemqlClientMessage_ExecuteQuery:
+		s.sendMu.Lock()
+		defer s.sendMu.Unlock()
 		requestId := assignRequestId(msg)
 
 		// If this request is already pending or in-flight, ignore duplicates.
@@ -763,17 +769,21 @@ func (s *session) forwardClientMessage(msg *memqlv1.MemqlClientMessage) error {
 			return nil
 		}
 	case *memqlv1.MemqlClientMessage_CancelRequest:
+		s.sendMu.Lock()
+		defer s.sendMu.Unlock()
 		requestId := strings.TrimSpace(payload.CancelRequest.GetRequestId())
-		if requestId != "" {
+		// A queued request must be answered by the bridge. An active one keeps
+		// its token until its terminal reply: cancellation is not completion.
+		s.pendingMu.Lock()
+		_, queued := s.pendingSet[requestId]
+		s.pendingMu.Unlock()
+		if queued {
 			s.markCancelled(requestId)
-			if s.releaseRequest(requestId) {
-				s.releaseToken()
-			}
-			s.logDebug("memql ws cancel forwarded", "request_id", requestId)
 		}
-		// Forward cancellation to the MemQL stream as well.
 		return s.stream.Send(msg)
 	}
+	s.sendMu.Lock()
+	defer s.sendMu.Unlock()
 	return s.stream.Send(msg)
 }
 
@@ -807,14 +817,14 @@ func (s *session) dispatchLoop() error {
 				continue
 			}
 
-			// No longer pending.
-			s.unmarkPending(qe.requestId)
-
-			// If cancelled while queued, skip dispatching.
+			// The same lock orders cancellation and completion of queued work.
+			s.sendMu.Lock()
 			if s.isCancelled(qe.requestId) {
-				s.unmarkCancelled(qe.requestId)
+				s.answerQueuedCancellation(qe)
+				s.sendMu.Unlock()
 				continue
 			}
+			s.sendMu.Unlock()
 
 			// Acquire an in-flight token before sending to gRPC.
 			select {
@@ -823,21 +833,28 @@ func (s *session) dispatchLoop() error {
 				return s.ctx.Err()
 			}
 
-			// If cancelled after acquiring a token, release and skip.
+			// Decide and send under the same lock as cancellation, so a cancel
+			// cannot reach the backend before the query it is meant to stop.
+			s.sendMu.Lock()
 			if s.isCancelled(qe.requestId) {
-				s.unmarkCancelled(qe.requestId)
+				s.answerQueuedCancellation(qe)
+				s.sendMu.Unlock()
 				s.releaseToken()
 				continue
 			}
+			s.unmarkPending(qe.requestId)
 
 			// Mark request as in-flight.
 			if !s.beginInFlight(qe.requestId) {
+				s.sendMu.Unlock()
 				// Duplicate in-flight; release token and skip.
 				s.releaseToken()
 				continue
 			}
 
-			if err := s.stream.Send(qe.msg); err != nil {
+			err := s.stream.Send(qe.msg)
+			s.sendMu.Unlock()
+			if err != nil {
 				// Best-effort cleanup so tokens don't leak. Clear the
 				// in-flight record (side effect) then release the token
 				// unconditionally -- both former branches did the same.
@@ -848,6 +865,15 @@ func (s *session) dispatchLoop() error {
 			s.logDebug("memql ws execute dispatched", "request_id", qe.requestId)
 		}
 	}
+}
+
+// A queued cancellation still has a caller waiting on the original message.
+// Only ids of requests currently queued can enter cancelledSet; unknown and
+// already active cancellations cannot grow it indefinitely.
+func (s *session) answerQueuedCancellation(qe *queuedExecute) {
+	s.unmarkPending(qe.requestId)
+	s.unmarkCancelled(qe.requestId)
+	s.queueLocalError(qe.requestId, qe.msg.GetMessageId(), codes.Canceled, "query cancelled")
 }
 
 func (s *session) releaseRequest(requestId string) bool {

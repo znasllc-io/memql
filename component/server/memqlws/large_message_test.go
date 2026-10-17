@@ -39,7 +39,7 @@ import (
 
 // startBridge serves the bridge in front of a real gRPC server running svc, with
 // the server's own message caps, and returns the WebSocket URL of the bridge.
-func startBridge(t *testing.T, opts Options, svc *stubMemqlService) string {
+func startBridge(t *testing.T, opts Options, svc memqlv1.MemqlServiceServer) string {
 	t.Helper()
 	return startBridgeWith(t, opts, svc, bridgeSetup{})
 }
@@ -56,7 +56,7 @@ type bridgeSetup struct {
 	anonymous bool
 }
 
-func startBridgeWith(t *testing.T, opts Options, svc *stubMemqlService, setup bridgeSetup) string {
+func startBridgeWith(t *testing.T, opts Options, svc memqlv1.MemqlServiceServer, setup bridgeSetup) string {
 	t.Helper()
 	serverCap := setup.serverCap
 	if serverCap == 0 {

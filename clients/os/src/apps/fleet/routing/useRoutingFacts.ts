@@ -48,12 +48,12 @@ export function useRoutingFacts(routes: readonly RouteLike[], enabled = true): R
     const query = connection?.query ?? null;
     if (!enabled || query === null) return null;
     return async (signal: AbortSignal) => {
-      const row = (await query.delegationPolicyForUser({}, { signal })).rows()[0];
+      const row = (await query.delegationPolicyForUser({}, { signal, priority: "background" })).rows()[0];
       return row === undefined ? [] : delegationPolicyFromRow(row).appOrder;
     };
   }, [connection, enabled]);
   const liveRevision = useGraphRevision(["v1:worker:delegationPolicy"], enabled);
-  const appOrder = useReading<string[]>(`fleet:routing:appOrder:${access?.userId ?? ""}:${liveRevision}`, readOrder).value;
+  const appOrder = useReading<string[]>(`fleet:routing:appOrder:${access?.userId ?? ""}`, readOrder, liveRevision).value;
 
   const rows = snapshot?.rows;
   const preference = machineChoice.policy?.modelPreference;

@@ -1,3 +1,4 @@
+import { isBackgroundRead } from "./queryPriority.js";
 // QueryClient is the base dispatch surface for query / mutation /
 // logic calls. The per-product SDK package
 // generates typed methods from its DSL and layers them onto this
@@ -79,6 +80,8 @@ export function refusalSentence(error: unknown, construct?: string): string {
 }
 
 export interface QueryCallOptions {
+  /** Live refreshes share a smaller budget, leaving capacity for user actions. */
+  priority?: "background";
   signal?: AbortSignal;
   /**
    * Opaque keyset continuation cursor (memql#1985 / 5.12). When set, the
@@ -115,6 +118,7 @@ export class QueryClient {
         },
       },
       opts.signal,
+      ...((opts.priority === "background" || isBackgroundRead(opts.signal)) ? ["background" as const] : []),
     );
     const payload = readServerPayload(resp);
     if (payload?.kind === "queryError") {
@@ -142,6 +146,7 @@ export class QueryClient {
         },
       },
       opts.signal,
+      ...((opts.priority === "background" || isBackgroundRead(opts.signal)) ? ["background" as const] : []),
     );
     const payload = readServerPayload(resp);
     if (payload?.kind === "queryError") {

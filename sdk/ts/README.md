@@ -166,6 +166,25 @@ Two things to get right if you fold rows by hand:
 
 `LiveCollection` below does all of this for you.
 
+### Query pressure and cancellation
+
+All generated query, builtin, logic, and mutation calls share the connection's
+admission budget: four requests on the wire and at most 64 waiting locally.
+`priority: "background"` allows at most two concurrent refreshes, leaving room
+for interactive calls. Live-collection rereads carry this priority automatically.
+A caller that creates more work than the bounded queue accepts receives an error;
+the SDK never retries or replays a mutation to hide overload.
+
+Abort an obsolete read with its `AbortSignal`. A queued read is removed before
+transmission. A sent query transmits the existing cancellation message and rejects
+the caller promptly, but holds its slot until the server's terminal reply. This
+keeps cancelled-but-still-running work inside the concurrency limit. Disconnect
+rejects both queued and active calls; none are replayed after reconnect.
+
+Live computed views should separate their identity from invalidation: finish the
+current read and remember one follow-up when inputs change while it runs. Abort
+when the identity changes or the view closes, not on every heartbeat.
+
 ### Auto-reconnect
 
 Opt in at dial time and the SDK owns the drop: exponential backoff with full
