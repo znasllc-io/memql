@@ -35,13 +35,14 @@ func quotaOwner(ctx context.Context) string {
 
 // actsAsEngine reports a node acting for itself: the actor was bound from a
 // verified SYSTEM-class forwarded assertion (a build forwarded to the
-// workbench, a pipeline step), whose subject is a node's name and never a
-// person. What it writes belongs to the cluster, exactly as a Synthetic
-// actor's does; looking the name up as a user refuses the write ("cannot
-// resolve storage owner"), which is how an oversized site build failed to
-// store its output. The subject must be the actor's own, so a person's
-// context never qualifies. Synthetic is not set for these actors on purpose:
-// about forty call sites read it to skip checks.
+// workbench, a pipeline step). Only engine code mints that class
+// (auth.ForwardedAuthorityForSystem, naming a node), and verification refuses
+// a canonical user id as its subject. What it writes belongs to the cluster,
+// exactly as a Synthetic actor's does; looking the name up as a user refuses
+// the write ("cannot resolve storage owner"), which is how an oversized site
+// build failed to store its output. The subject must be the actor's own, so a
+// person's context never qualifies. Synthetic is not set for these actors on
+// purpose: more than forty files read it, some to skip checks.
 func actsAsEngine(ctx context.Context, ac *auth.AccessContext) bool {
 	fa, ok := auth.ForwardedAuthorityFromContext(ctx)
 	return ok && fa.Kind == auth.ForwardedPrincipalSystem && fa.CredentialClass == auth.ForwardedClassSystem &&
