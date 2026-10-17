@@ -26,6 +26,7 @@ import (
 	"time"
 
 	"github.com/uptrace/bun/driver/pgdriver"
+	"github.com/znasllc-io/memql/core/id"
 	"github.com/znasllc-io/memql/integrations/azureblob"
 )
 
@@ -62,7 +63,15 @@ func TestAnOversizedBuildOutputIsStoredUnderTheRealQuota(t *testing.T) {
 	if _, err := db.Exec(`CREATE TABLE "MemoryNodes"(id text,concept text,payload jsonb,"createdAt" timestamptz DEFAULT clock_timestamp())`); err != nil {
 		t.Fatal(err)
 	}
+	previous := azureblob.CapacityStore()
 	azureblob.ConfigureCapacity(func() *sql.DB { return db }, func() *sql.DB { return gate })
+	t.Cleanup(func() {
+		if previous == nil {
+			azureblob.ConfigureCapacity(nil, nil)
+		} else {
+			azureblob.ConfigureCapacity(previous.DB, previous.GateDB)
+		}
+	})
 
 	// The production uploader: every constructor of it meters its writes.
 	store, err := azureblob.New(ctx)
@@ -83,6 +92,11 @@ func TestAnOversizedBuildOutputIsStoredUnderTheRealQuota(t *testing.T) {
 	origin.SetBuildBlobStore(store, container)
 
 	req := buildRequest(t, "mkdir -p dist && head -c 3000000 /dev/urandom > dist/big.bin && printf 'hello' > dist/index.html", webFixture())
+	// A deployment of its own, so the object key is new on every run: the
+	// ledger inventories the whole Azurite account, and an object left by an
+	// earlier run would be refused for a different reason than the one this
+	// test is about.
+	req.DeploymentId = "v1:platform:packageDeployment:" + id.NewShortId()
 	// Smaller than the 3 MB output (random bytes do not compress), so the
 	// output must go through object storage, as a real storefront's does.
 	req.Limits.MaxInlineBytes = 1 << 20
