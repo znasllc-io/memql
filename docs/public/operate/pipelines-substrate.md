@@ -1387,3 +1387,42 @@ missing proof or unknown/dirty engine revision stops recovery. Finished receipts
 are preserved; an explicit new attempt can run a newly reviewed definition.
 A failed-only rerun reuses earlier success only when that definition matches.
 This does not yet pin the transitive definitions of arbitrary DSL automations.
+
+
+## Reclaiming a bounded cache
+
+Compiled Go objects can fill a shared cache long before its downloaded modules
+expire. A full cache is a failed step, even if earlier tests passed. Increasing
+the disk is not necessary for ordinary turnover.
+
+On a filesystem with working file locks across every cache-using pod, set
+`MEMQL_PIPELINES_CACHE_GC_PERCENT=70` in the workbench configuration. Zero, the
+default, leaves reclamation disabled. Do not enable it on Azure Blob NFS, whose
+locking contract does not satisfy this requirement. A single-node managed CSI
+disk with `ReadWriteOnce` is the production installation's supported choice;
+keep its Jobs on the same bounded build pool. A cached command image must
+provide `flock`; the pinned toolchain smoke check verifies it.
+
+Before first enabling this setting, stop new Job admission, allow existing
+cached Jobs to finish, verify there are no old cache users, then roll out every
+workbench replica with the same setting and restore the existing Job limit.
+Changing between enabled and disabled also requires this drain. Old wrappers
+do not participate in the locks. Do not replace the PVC or its lock files
+under running Jobs.
+
+Each cached step holds a shared kernel lease through command execution and
+artifact export. When byte or inode usage reaches the configured threshold,
+the fixed initializer blocks new cache users and waits for current users to
+finish. It removes disposable Go build caches first, retaining downloaded
+modules and npm content where space allows. If usage remains above the
+threshold, it clears the remaining disposable cache contents. It preserves
+scope directories and lock inodes, and does not follow cache symlinks. Only
+this initializer can see all cache scopes; commands retain their owner,
+repository and trust isolation.
+
+Reclamation happens during an already-requested step. It creates no scheduled
+Job and does not wake an idle build node. The existing Job deadline bounds a
+wait for active users. The disk and Job limits remain the hard capacity
+bounds: unusually large concurrent writes can still exhaust the reserve and
+fail explicitly. Retained logs, published artifacts and user workbench files
+are not on this cache volume and are never removed by this operation.
