@@ -11,8 +11,21 @@ import (
 	"github.com/znasllc-io/memql/core/common"
 )
 
-func TestExecutionDestinationDB_AnotherReplicaRequiresAndReadsTheDecision(t *testing.T) {
-	a, b := openActsDB(t), openActsDB(t)
+func TestExecutionDestinationDBAcrossReplicas(t *testing.T) {
+	first, second := openActsDB(t), openActsDB(t)
+	for _, tc := range []struct {
+		name string
+		run  func(*testing.T, actsDB, actsDB)
+	}{
+		{"ExecutionDestinationDB_AnotherReplicaRequiresAndReadsTheDecision", testExecutionDestinationDB_AnotherReplicaRequiresAndReadsTheDecision},
+		{"ExecutionDestinationDBWorkbenchRequestParksAndReadsSiblingDecision", testExecutionDestinationDBWorkbenchRequestParksAndReadsSiblingDecision},
+	} {
+		t.Run(tc.name, func(t *testing.T) { tc.run(t, first, second) })
+	}
+}
+
+func testExecutionDestinationDB_AnotherReplicaRequiresAndReadsTheDecision(t *testing.T, first, second actsDB) {
+	a, b := freshActsDBPair(t, first, second)
 	b.owner = a.owner
 	for _, destination := range []string{"workbench", "computer", "auto"} {
 		t.Run(destination, func(t *testing.T) {
@@ -76,10 +89,10 @@ func TestExecutionDestinationAcceptedOnBothRowsAndInheritedByChildren(t *testing
 	}
 }
 
-func TestExecutionDestinationDBWorkbenchRequestParksAndReadsSiblingDecision(t *testing.T) {
+func testExecutionDestinationDBWorkbenchRequestParksAndReadsSiblingDecision(t *testing.T, first, second actsDB) {
 	for _, decision := range []string{"approved", "rejected"} {
 		t.Run(decision, func(t *testing.T) {
-			a, b := openActsDB(t), openActsDB(t)
+			a, b := freshActsDBPair(t, first, second)
 			b.owner = a.owner
 			runID := a.openRun(t, map[string]any{"routing": map[string]any{"destination": "computer", "by": a.owner}})
 			person := actorCtx(a.owner)
