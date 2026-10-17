@@ -79,3 +79,32 @@ func testViewerRewordAndAppend(t *testing.T, f *revisionDB, repair bool) {
 		t.Fatalf("approved result: %q / %v", changed.backing["body"], err)
 	}
 }
+
+func testViewerProvenanceAnchorAcrossReplicas(t *testing.T, shared *revisionDB) {
+	f := shared.isolatedCase(t)
+	f.ctx = revisionActor(f.owner, auth.RoleReader)
+	source := "---\nstatement: \"Create a file with Grind fresh beans before brewing.\"\n---\n# Coffee\n\nGrind fresh beans before brewing.\n"
+	artifact, doc := f.document(source)
+	args, note := f.submit(artifact, doc, map[string]any{"kind": "document-end"}, "Append Enjoy: Serve the coffee warm.")
+	if _, err := f.first.handleRequestDocumentRevision(f.ctx, args, 0); err != nil {
+		t.Fatal(err)
+	}
+	request := asString(args["requestId"])
+	f.ai.answer = revisionAnswer{Summary: "Add Enjoy", Edits: []revisionReplacement{{Before: "Grind fresh beans before brewing.", After: "Grind fresh beans before brewing.\n\n## Enjoy\n\nServe the coffee warm.", Reason: "Append the requested section", CommentIDs: []string{note}}}}
+	var wait *workstate.HumanWait
+	if err := f.execute(f.other, request, false); !errors.As(err, &wait) {
+		t.Fatalf("first attempt did not reach approval: %v", err)
+	}
+	if f.ai.calls.Load() != 1 || f.ai.repairCalls.Load() != 0 {
+		t.Fatal("unnecessary repair for a unique body passage")
+	}
+	f.query(f.engine, f.ctx, "query", "decideApproval", map[string]any{"approvalId": wait.ApprovalID, "decision": "approved", "answer": f.accepted(request)})
+	if err := f.execute(f.engine, request, true); err != nil {
+		t.Fatal(err)
+	}
+	changed, err := f.second.reviewDocument(memql.ContextWithFreshRead(f.ctx), artifact)
+	want := source[:len(source)-1] + "\n\n## Enjoy\n\nServe the coffee warm.\n"
+	if err != nil || asString(changed.backing["body"]) != want {
+		t.Fatalf("applied content: %v %v", changed.backing, err)
+	}
+}

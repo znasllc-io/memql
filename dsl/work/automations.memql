@@ -1,3 +1,5 @@
+use agents.builtins.{ ai }
+
 // automations.memql
 //
 // The work spine's two sweeps (design record
@@ -76,4 +78,25 @@ automation workModelCallRecovery {
  args { retriesSpent int! maxRetries int! }
  if args.retriesSpent < 1 && args.retriesSpent < args.maxRetries { return { act: "retry" } }
  return { act: "ask", question: "The model did not finish within its call time limit. Completed work is saved. Retry from that progress, or abandon this work?" }
+}
+
+/// File readiness is a workflow decision; source reads retain their native owner gates.
+@template
+automation workPrepareFileEvidence {
+ args { statement string! conversation string conversationId string! turnId string draft string }
+ sources := builtin workSourceContext(conversationId: args.conversationId, turnId: args.turnId)
+ assessment := builtin ai(templateId: "workFileEvidence", responseSchema: {
+  type: "object", additionalProperties: false,
+  required: ["ready", "reply", "basis", "usesRecordedSources"],
+  properties: {ready: {type: "boolean"}, reply: {type: "string"}, basis: {type: "string"}, usesRecordedSources: {type: "boolean"}}
+ }, data: {statement: args.statement, conversation: args.conversation, sources: toString(sources), draft: args.draft})
+ decision := assessment.structured
+ explanation := trim(decision.reply ?? "")
+ brief := trim(decision.basis ?? "")
+ if decision.ready != true {
+  if explanation == "" { return error("Source check did not explain the missing evidence.") }
+  return {ready: false, reply: decision.reply, basis: "", sources: []}
+ }
+ if brief == "" { return error("Source check did not provide a grounded brief.") }
+ return {ready: true, reply: "", basis: decision.basis, sources: decision.usesRecordedSources ? sources.references : []}
 }

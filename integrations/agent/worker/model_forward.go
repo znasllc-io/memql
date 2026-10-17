@@ -33,6 +33,7 @@ import (
 	"github.com/znasllc-io/memql/component/node"
 	nodev1 "github.com/znasllc-io/memql/component/node/gen"
 	workerservice "github.com/znasllc-io/memql/component/worker"
+	"github.com/znasllc-io/memql/component/worker/fleetcatalog"
 	"github.com/znasllc-io/memql/core/id"
 )
 
@@ -285,11 +286,16 @@ func (h *ForwardHandler) HandleForwardedModelCall(
 	callCtx, ccancel := context.WithTimeout(cctx, timeout)
 	defer ccancel()
 
-	if err := w.Acquire(callCtx, workerservice.ModelCapability); err != nil {
-		h.sendModelRefusal(send, requestId, "worker_busy", err.Error())
+	limit := fleetcatalog.ParseModelAttributes(w.LabelsSnapshot()[workerservice.ModelLabel(start.GetModel())]).MaxConcurrent
+	if err := w.AcquireModel(callCtx, start.GetModel(), limit); err != nil {
+		code := "worker_busy"
+		if callCtx.Err() != nil {
+			code = ForwardCallerCancelled
+		}
+		h.sendModelRefusal(send, requestId, code, err.Error())
 		return
 	}
-	defer w.Release(workerservice.ModelCapability)
+	defer w.ReleaseModel(start.GetModel())
 
 	// THE CALLER MAY ALREADY HAVE GONE (see HandleForwardedRequest): nothing
 	// has reached the machine, so it is a refusal before start.

@@ -85,7 +85,7 @@ func TestBackgroundAcknowledgementRepairIsBoundedAndDoesNotReclassify(t *testing
 			require.Equal(t, []string{"goalComplexityTriage", "workAcknowledgement"}, engine.aiCalls)
 			require.Equal(t, 2, out.ModelCalls)
 			require.Equal(t, req.Statement, engine.aiData[1]["goal"])
-			require.WithinDuration(t, time.Now().Add(15*time.Second), engine.deadlines[1], time.Second)
+			require.WithinDuration(t, time.Now().Add(180*time.Second), engine.deadlines[1], time.Second)
 		})
 	}
 }

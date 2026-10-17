@@ -238,7 +238,8 @@ func TestStrictAutomationBoot_EmbeddedTreeIsClean(t *testing.T) {
 // strict loader measured both recovery templates in PR #6091 CI.
 // 173 -> 174: pipelineSARIFDelivery, the scoped report publication recipe;
 // measured by the strict loader in PR #6146 CI.
-const shippedAutomationCount = 174
+// 174 -> 175: pre-file evidence assessment, measured by the strict loader.
+const shippedAutomationCount = 175
 
 //
 // 56 -> 57 in epic memql#5168 (the per-account front door):

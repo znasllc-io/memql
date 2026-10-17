@@ -22,3 +22,8 @@ query groupMembership workViewerMemberships {
 @executor("workViewerContext")
 @args(profile="optionalObject")
 builtin workViewerContext { }
+
+/// Bounded source receipts from this caller's saved conversation, read on the executing replica.
+@executor("workSourceContext")
+@args(profile="object")
+builtin workSourceContext { conversationId string! turnId string }
