@@ -1100,16 +1100,12 @@ function install_binary_with_mode() {
         target_ver="$(resolve_target_version "")"
     fi
 
-    # Same version already installed → no-op (no re-download, no --force).
+    # The numeric version orders releases, but cannot identify a build. Even a
+    # pinned release must be downloaded before deciding whether to keep a local
+    # executable with the same version (which may carry another commit).
     if [[ -n "$installed_ver" && -n "$target_ver" ]]; then
         local cmp
         cmp="$(compare_semver "$installed_ver" "$target_ver")"
-        if [[ "$cmp" == "0" ]] && { [[ -z "$target_exact" ]] || binary_version_matches_selection "$installed_exact" "$target_exact"; }; then
-            echo "INFO: already at v${installed_ver}; skipping binary download"
-            INSTALL_BINARY_ACTION="skip"
-            INSTALL_BINARY_AFTER="$installed_ver"
-            return 0
-        fi
         if [[ "$cmp" == "1" ]]; then
             echo "ERROR: installed memql v${installed_ver} is newer than v${target_ver} about to install." >&2
             echo "       Refusing to downgrade. Install a newer release, or remove the" >&2
@@ -1118,7 +1114,11 @@ function install_binary_with_mode() {
             INSTALL_BINARY_ACTION="refuse"
             return 3
         fi
-        echo "INFO: upgrading memql v${installed_ver} → v${target_ver}"
+        if [[ "$cmp" == "0" ]]; then
+            echo "INFO: installed memql v${installed_ver}; checking downloaded binary version"
+        else
+            echo "INFO: upgrading memql v${installed_ver} → v${target_ver}"
+        fi
         INSTALL_BINARY_ACTION="upgrade"
     elif [[ -n "$installed_ver" && -z "$target_ver" ]]; then
         # Unknown target: download to temp, compare, then decide.
@@ -1155,7 +1155,7 @@ function install_binary_with_mode() {
             if [[ -n "$installed_ver" && -n "$dl_ver" ]]; then
                 local cmp2
                 cmp2="$(compare_semver "$installed_ver" "$dl_ver")"
-                if [[ "$cmp2" == "0" && ( -z "$target_exact" || "$installed_exact" == "$(read_binary_version_exact "$tmp")" ) ]]; then
+                if [[ -n "$installed_exact" && "$installed_exact" == "$(read_binary_version_exact "$tmp")" ]]; then
                     echo "INFO: already at v${installed_ver}; downloaded asset matches — leaving binary in place"
                     rm -f "$tmp"
                     INSTALL_BINARY_ACTION="skip"
@@ -1200,7 +1200,7 @@ function install_binary_with_mode() {
             if [[ -n "$installed_ver" && -n "$dl_ver" ]]; then
                 local cmp2
                 cmp2="$(compare_semver "$installed_ver" "$dl_ver")"
-                if [[ "$cmp2" == "0" && ( -z "$target_exact" || "$installed_exact" == "$(read_binary_version_exact "$tmp")" ) ]]; then
+                if [[ -n "$installed_exact" && "$installed_exact" == "$(read_binary_version_exact "$tmp")" ]]; then
                     echo "INFO: already at v${installed_ver}; downloaded asset matches — leaving binary in place"
                     rm -f "$tmp"
                     INSTALL_BINARY_ACTION="skip"

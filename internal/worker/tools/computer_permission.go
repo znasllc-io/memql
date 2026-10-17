@@ -3,7 +3,6 @@ package tools
 import (
 	"context"
 	"fmt"
-	"io"
 	"path/filepath"
 
 	memqlv1 "github.com/znasllc-io/memql/component/grpc/gen"
@@ -89,21 +88,7 @@ func runScopedRead(ctx context.Context, action, p string, args map[string]any, p
 		if !info.Mode().IsRegular() {
 			return nil, failure("fs_denied", "Scoped file reads require a regular file.")
 		}
-		maxBytes := argInt(args, "maxBytes", 5*1024*1024)
-		if maxBytes < 1 || maxBytes > 5*1024*1024 {
-			return nil, failure("bad_request", "maxBytes must be between 1 and 5242880.")
-		}
-		body, err := io.ReadAll(io.LimitReader(f, int64(maxBytes)))
-		if err != nil {
-			return nil, failure("fs_failed", err.Error())
-		}
-		return successJSON(map[string]any{
-			"path":      p,
-			"content":   string(body),
-			"size":      len(body),
-			"fileSize":  info.Size(),
-			"truncated": info.Size() > int64(len(body)),
-		}, 0, 0, len(body), fileReadPreview(body, info.Size())), nil
+		return readOpenedFile(ctx, p, f, args)
 	case "fs_list":
 		entries, err := f.ReadDir(-1)
 		if err != nil {

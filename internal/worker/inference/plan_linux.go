@@ -70,8 +70,7 @@ func openable(path string) bool {
 	if err != nil {
 		return false
 	}
-	f.Close()
-	return true
+	return f.Close() == nil
 }
 
 func anyOpenable(pattern string) bool {

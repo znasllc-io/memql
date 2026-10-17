@@ -710,8 +710,8 @@ under the same busy and floor guards). The capability descriptor carries
 a present empty list explicitly accepts every repository. The engine filters
 before dispatch; the live policy check here still decides execution. Unknown
 scope metadata is ineligible, so engine and Cockpit upgrade together. The
-implementation also reports `actionContracts["workerHost.pipeline_step"] = 3`;
-the engine must require it before dispatching the native/container contract.
+implementation also reports `actionContracts["workerHost.pipeline_step"] = 4`;
+the engine must require it before dispatching the streamed-artifact contract.
 An operator label cannot substitute for this build-provided metadata.
 
 **THE TOKEN NEVER TOUCHES DISK OR ARGV**: it is an `http.extraheader` in
@@ -765,10 +765,16 @@ leaked such a value in full. The runner ENDS a tool call on
 calls return, so a step left running would keep the machine off the cluster
 for its whole timeout.
 
-**ARTIFACTS FIT ONE MESSAGE OR DO NOT TRAVEL.** 64 MiB of files (the engine's
-limit), and 20 MiB compressed, because the result is one `ToolResult` on a
-stream capped at 32 MiB and base64 costs a third. Over either, the result says
-`artifactsTooLarge` and keeps the step's exit status.
+**ARTIFACTS STREAM BEFORE THE RESULT.** Contract 4 spools a private GNU tar.gz
+inside the owned workspace and emits `ToolStream.data_chunk` frames of at most
+256 KiB. The terminal result names `artifactsArchiveBytes` and
+`artifactsArchiveSHA256` (prefixed `sha256:`). The receiver must verify both
+before extracting or filing anything. No inline Base64 archive remains.
+At most 1024 files, 256 MiB raw and 256 MiB compressed may travel; the engine's
+configured quota can be lower. Over a size/count limit the result says
+`artifactsTooLarge` and keeps the command's exit status. Transfer failure or
+cancellation never returns a success receipt. Both sides spool to disk and
+clean up under the attempt's existing lifecycle.
 
 ## App-session recording (memql-cockpit#440)
 

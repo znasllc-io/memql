@@ -210,7 +210,7 @@ func TestDispatcher_OtherComputerActionsStillGuiUnavailable(t *testing.T) {
 
 func TestPipelineActionContractComesFromTheBuild(t *testing.T) {
 	descriptor := ComputeCapabilities()
-	if got := descriptor.ActionContracts["workerHost.pipeline_step"]; got != 3 {
+	if got := descriptor.ActionContracts["workerHost.pipeline_step"]; got != 4 {
 		t.Fatalf("pipeline contract = %d", got)
 	}
 	raw, err := CapabilityDescriptorJSONFor(nil)
@@ -221,7 +221,7 @@ func TestPipelineActionContractComesFromTheBuild(t *testing.T) {
 	if err = json.Unmarshal([]byte(raw), &decoded); err != nil {
 		t.Fatal(err)
 	}
-	if decoded.ActionContracts["workerHost.pipeline_step"] != 3 {
+	if decoded.ActionContracts["workerHost.pipeline_step"] != 4 {
 		t.Fatal("registration lost the pipeline execution contract")
 	}
 }

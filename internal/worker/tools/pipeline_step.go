@@ -6,6 +6,7 @@ import (
 	"compress/gzip"
 	"context"
 	"crypto/rand"
+	"crypto/sha256"
 	"encoding/base64"
 	"encoding/hex"
 	"errors"
@@ -119,19 +120,10 @@ var (
 	// SIGTERM and SIGKILL. A variable only so a test can shorten it.
 	pipelineStopGrace = 10 * time.Second
 
-	// pipelineArtifactMaxBytes caps a step's artifacts at the cluster's own
-	// limit for a Job's: 64 MiB of files.
-	pipelineArtifactMaxBytes int64 = 64 << 20
-
-	// pipelineArtifactWireBytes caps the COMPRESSED archive at what one result
-	// can carry. The result travels in a single ToolResult on the worker
-	// stream, whose messages are capped at 32 MiB in both directions (the SDK's
-	// DefaultMaxMessageSize, the agent's maxWorkerMessageSize), and base64
-	// costs a third again: 20 MiB of archive is under 27 MiB on the wire, with
-	// room left for the envelope. An archive over it is left out and reported,
-	// never sent -- a message over the cap fails the send, and the result with
-	// it.
-	pipelineArtifactWireBytes int64 = 20 << 20
+	// Contract 4 spools one bounded archive and streams it in 256 KiB frames.
+	// No file or archive is buffered whole or carried in the terminal message.
+	pipelineArtifactMaxBytes  int64 = 256 << 20
+	pipelineArtifactWireBytes int64 = 256 << 20
 
 	// gitBinary is the git a step fetches with. A variable only so a test can
 	// stand a recording wrapper in front of the real one.
@@ -153,6 +145,7 @@ var (
 // outputEmitter receives a running call's output, masked, in order per
 // stream. The dispatcher makes each piece one ToolStream frame.
 type outputEmitter func(stderr bool, data []byte)
+type artifactEmitter func(data []byte) error
 
 // pipelineStepRequest is one decoded and validated pipeline_step.
 type pipelineStepRequest struct {
@@ -179,7 +172,7 @@ type pipelineStepRequest struct {
 
 // runPipelineStep implements workerHost.pipeline_step. agentID is the
 // dispatch envelope's agent_id; emit may be nil, which drops the output.
-func runPipelineStep(ctx context.Context, agentID string, args map[string]any, policy *Policy, emit outputEmitter) (result *memqlv1.Success, failed *memqlv1.Failure) {
+func runPipelineStep(ctx context.Context, agentID string, args map[string]any, policy *Policy, emit outputEmitter, sendArtifact artifactEmitter) (result *memqlv1.Success, failed *memqlv1.Failure) {
 	started := time.Now()
 	if emit == nil {
 		emit = func(bool, []byte) {}
@@ -276,13 +269,35 @@ func runPipelineStep(ctx context.Context, agentID string, args map[string]any, p
 	if fail != nil {
 		return nil, fail
 	}
-	pack := run.artifacts()
+	pack := run.artifacts(stepCtx)
+	if pack.path != "" {
+		defer os.Remove(pack.path)
+	}
+	if pack.err != nil {
+		if stepCtx.Err() != nil {
+			return nil, run.stopped(stepCtx)
+		}
+		return refuse("artifact_failed", pack.err)
+	}
+	var archiveBytes int64
+	var archiveSHA256 string
+	if pack.path != "" && !pack.tooLarge {
+		var err error
+		archiveBytes, archiveSHA256, err = streamPipelineArtifact(stepCtx, pack.path, sendArtifact)
+		if err != nil {
+			if stepCtx.Err() != nil {
+				return nil, run.stopped(stepCtx)
+			}
+			return refuse("artifact_failed", err)
+		}
+	}
 
 	payload := map[string]any{
-		"exitCode":           exitCode,
-		"durationMs":         time.Since(started).Milliseconds(),
-		"artifactsTgzBase64": base64.StdEncoding.EncodeToString(pack.tgz),
-		"artifactsMissing":   pack.missing,
+		"exitCode":               exitCode,
+		"durationMs":             time.Since(started).Milliseconds(),
+		"artifactsArchiveBytes":  archiveBytes,
+		"artifactsArchiveSHA256": archiveSHA256,
+		"artifactsMissing":       pack.missing,
 	}
 	if pack.tooLarge {
 		payload["artifactsTooLarge"] = true
@@ -672,8 +687,8 @@ func (r *pipelineRun) stopped(ctx context.Context) *memqlv1.Failure {
 
 // artifacts packs the declared paths and says in the log when they were left
 // out for their size.
-func (r *pipelineRun) artifacts() artifactPack {
-	pack := packArtifacts(r.dir, r.req.artifacts)
+func (r *pipelineRun) artifacts(ctx context.Context) artifactPack {
+	pack := packArtifacts(ctx, r.dir, r.req.artifacts)
 	for i, m := range pack.missing {
 		pack.missing[i] = r.mask.mask(m)
 	}
@@ -1182,9 +1197,10 @@ func (c *lineChunker) masked(b []byte, complete bool) (string, int) {
 
 // artifactPack is a step's declared artifacts, packed.
 type artifactPack struct {
-	// tgz is a gzipped tar of regular files named relative to the checkout;
-	// nil when there is nothing to send.
-	tgz []byte
+	// path is a private gzip archive inside the owned workspace. Its lifecycle
+	// is covered by the same crash-recovery record as the checkout.
+	path string
+	err  error
 	// missing is every declared path that contributed no file, in the
 	// declared order. Never nil: the result says [] rather than null.
 	missing []string
@@ -1204,7 +1220,7 @@ var errArtifactsTooLarge = errors.New("artifacts over the limit")
 // checkout is not the step's artifact, and a link to / would otherwise walk
 // the disk. Links themselves, devices and the like are left out, as the
 // cluster's extractor leaves them out.
-func packArtifacts(dir string, declared []string) artifactPack {
+func packArtifacts(ctx context.Context, dir string, declared []string) artifactPack {
 	pack := artifactPack{missing: []string{}}
 	if len(declared) == 0 {
 		return pack
@@ -1215,12 +1231,13 @@ func packArtifacts(dir string, declared []string) artifactPack {
 		return pack
 	}
 	type artifactFile struct {
-		name, path string
-		size       int64
-		mode       fs.FileMode
-		mod        time.Time
+		name string
+		size int64
+		mode fs.FileMode
+		mod  time.Time
 	}
 	var files []artifactFile
+	var total int64
 	seen := map[string]bool{}
 	checkout := os.DirFS(dir)
 	for _, pattern := range declared {
@@ -1232,7 +1249,10 @@ func packArtifacts(dir string, declared []string) artifactPack {
 		sort.Strings(matches)
 		contributed := 0
 		for _, match := range matches {
-			_ = filepath.WalkDir(filepath.Join(dir, filepath.FromSlash(match)), func(file string, d fs.DirEntry, err error) error {
+			walkErr := filepath.WalkDir(filepath.Join(dir, filepath.FromSlash(match)), func(file string, d fs.DirEntry, err error) error {
+				if err := ctx.Err(); err != nil {
+					return err
+				}
 				if err != nil || !d.Type().IsRegular() || !insideDir(realDir, file) {
 					return nil
 				}
@@ -1247,11 +1267,24 @@ func packArtifacts(dir string, declared []string) artifactPack {
 				name := filepath.ToSlash(rel)
 				contributed++
 				if !seen[name] {
+					if len(files) >= 1024 || info.Size() < 0 || info.Size() > pipelineArtifactMaxBytes-total {
+						return errArtifactsTooLarge
+					}
+					total += info.Size()
 					seen[name] = true
-					files = append(files, artifactFile{name: name, path: file, size: info.Size(), mode: info.Mode().Perm(), mod: info.ModTime()})
+					files = append(files, artifactFile{name: name, size: info.Size(), mode: info.Mode().Perm(), mod: info.ModTime()})
 				}
 				return nil
 			})
+			if walkErr != nil {
+				if errors.Is(walkErr, errArtifactsTooLarge) {
+					pack.tooLarge = true
+					pack.reason = fmt.Sprintf("artifacts exceed 1024 files or the %d-byte limit", pipelineArtifactMaxBytes)
+				} else {
+					pack.err = walkErr
+				}
+				return pack
+			}
 		}
 		if contributed == 0 {
 			pack.missing = append(pack.missing, pattern)
@@ -1262,33 +1295,50 @@ func packArtifacts(dir string, declared []string) artifactPack {
 	}
 	sort.Slice(files, func(i, j int) bool { return files[i].name < files[j].name })
 
-	var total int64
-	for _, f := range files {
-		total += f.size
-	}
-	if total > pipelineArtifactMaxBytes {
-		pack.tooLarge = true
-		pack.reason = fmt.Sprintf("%d bytes of files is over this machine's %d-byte artifact limit", total, pipelineArtifactMaxBytes)
+	// The inventory precedes creation, so a declaration of "." cannot pack
+	// the archive itself. OpenRoot confines every read even if a path changes
+	// to a symlink after discovery.
+	root, err := os.OpenRoot(dir)
+	if err != nil {
+		pack.err = err
 		return pack
 	}
-
-	var buf bytes.Buffer
-	out := &limitedWriter{w: &buf, left: pipelineArtifactWireBytes}
+	defer root.Close()
+	archive, err := os.CreateTemp(dir, ".memql-pipeline-artifacts-")
+	if err != nil {
+		pack.err = err
+		return pack
+	}
+	pack.path = archive.Name()
+	out := &limitedWriter{w: archive, left: pipelineArtifactWireBytes}
 	gz := gzip.NewWriter(out)
 	tw := tar.NewWriter(gz)
 	err = func() error {
-		for _, f := range files {
-			data, err := readArtifact(f.path, f.size)
+		for _, item := range files {
+			if err := ctx.Err(); err != nil {
+				return err
+			}
+			file, err := root.Open(item.name)
 			if err != nil {
-				// Gone or unreadable since the walk: it is not sent.
-				continue
-			}
-			hdr := &tar.Header{Name: f.name, Mode: int64(f.mode), Size: int64(len(data)), ModTime: f.mod, Typeflag: tar.TypeReg}
-			if err := tw.WriteHeader(hdr); err != nil {
 				return err
 			}
-			if _, err := tw.Write(data); err != nil {
+			info, statErr := file.Stat()
+			if statErr != nil || !info.Mode().IsRegular() || info.Size() != item.size {
+				file.Close()
+				return errors.New("artifact changed after discovery")
+			}
+			header := &tar.Header{Format: tar.FormatGNU, Name: item.name, Mode: int64(item.mode), Size: item.size, ModTime: item.mod, Typeflag: tar.TypeReg}
+			if err := tw.WriteHeader(header); err != nil {
+				file.Close()
 				return err
+			}
+			_, copyErr := io.CopyN(tw, &artifactContextReader{ctx: ctx, reader: file}, item.size)
+			closeErr := file.Close()
+			if copyErr != nil {
+				return copyErr
+			}
+			if closeErr != nil {
+				return closeErr
 			}
 		}
 		if err := tw.Close(); err != nil {
@@ -1296,24 +1346,65 @@ func packArtifacts(dir string, declared []string) artifactPack {
 		}
 		return gz.Close()
 	}()
-	if err != nil || out.exceeded {
+	closeErr := archive.Close()
+	if errors.Is(err, errArtifactsTooLarge) || out.exceeded {
 		pack.tooLarge = true
-		pack.reason = fmt.Sprintf("the archive is over the %d bytes one result can carry", pipelineArtifactWireBytes)
-		return pack
+		pack.reason = fmt.Sprintf("the archive exceeds the %d-byte transfer limit", pipelineArtifactWireBytes)
+	} else if err != nil {
+		pack.err = err
+	} else if closeErr != nil {
+		pack.err = closeErr
 	}
-	pack.tgz = buf.Bytes()
 	return pack
 }
 
-// readArtifact reads at most size bytes of a file -- the size the walk saw,
-// so a file still growing cannot carry the archive past its limit.
-func readArtifact(file string, size int64) ([]byte, error) {
-	f, err := os.Open(file)
-	if err != nil {
-		return nil, err
+type artifactContextReader struct {
+	ctx    context.Context
+	reader io.Reader
+}
+
+func (r *artifactContextReader) Read(p []byte) (int, error) {
+	if err := r.ctx.Err(); err != nil {
+		return 0, err
 	}
-	defer f.Close()
-	return io.ReadAll(io.LimitReader(f, size))
+	return r.reader.Read(p)
+}
+
+func streamPipelineArtifact(ctx context.Context, path string, emit artifactEmitter) (int64, string, error) {
+	if emit == nil {
+		return 0, "", errors.New("artifact streaming is unavailable")
+	}
+	file, err := os.Open(path)
+	if err != nil {
+		return 0, "", err
+	}
+	defer file.Close()
+	hash := sha256.New()
+	buffer := make([]byte, 256<<10)
+	var total int64
+	for {
+		if err := ctx.Err(); err != nil {
+			return 0, "", err
+		}
+		n, err := file.Read(buffer)
+		if n > 0 {
+			if total+int64(n) > pipelineArtifactWireBytes {
+				return 0, "", errArtifactsTooLarge
+			}
+			if sendErr := emit(append([]byte(nil), buffer[:n]...)); sendErr != nil {
+				return 0, "", sendErr
+			}
+			hash.Write(buffer[:n])
+			total += int64(n)
+		}
+		if err == io.EOF {
+			break
+		}
+		if err != nil {
+			return 0, "", err
+		}
+	}
+	return total, "sha256:" + hex.EncodeToString(hash.Sum(nil)), nil
 }
 
 // insideDir reports whether path, every link in it followed, is inside

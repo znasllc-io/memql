@@ -28,7 +28,7 @@ func TestPipelineWorkspaceFailureCannotReportSuccessOrReleaseCapacity(t *testing
 			original := removePipelineWorkspace
 			removePipelineWorkspace = func(string) error { return os.ErrPermission }
 			t.Cleanup(func() { removePipelineWorkspace = original })
-			result, failed := runPipelineStep(context.Background(), "", stepArgs(t, fx, tc.command, tc.extra), policy, nil)
+			result, failed := runPipelineStep(context.Background(), "", stepArgs(t, fx, tc.command, tc.extra), policy, nil, nil)
 			if result != nil || failed.GetErrorCode() != "pipeline_cleanup_uncertain" {
 				t.Fatalf("cleanup failure reported as result=%v failure=%v", result, failed)
 			}

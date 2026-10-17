@@ -45,7 +45,7 @@ printf 'scratch=%s\nscratch-ready\n' "$TMPDIR"
 			case "timeout", "cancel":
 				command += "sleep 30\n"
 			}
-			result, failed := runPipelineStep(ctx, "", stepArgs(t, fx, command, nil), policy, out.emit)
+			result, failed := runPipelineStep(ctx, "", stepArgs(t, fx, command, nil), policy, out.emit, out.artifact)
 			if outcome == "success" || outcome == "failure" {
 				got := decoded(t)(result, failed)
 				want := 0
