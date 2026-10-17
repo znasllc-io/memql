@@ -175,7 +175,10 @@ command-line host tests.
 `scripts/ci/editor-host.sh` builds the shared SDKs and extensions in each
 checkout, stages the language server for VS Code tests, and preserves the
 selected host, runtime, exit status and failure diagnostics. macOS caches and
-browser downloads stay in the attempt checkout. Dependency downloads have
+browser downloads stay in the attempt checkout. A checksum-pinned official
+Node 22 macOS archive is also unpacked there, so a missing or different system
+Node does not require installing software into the owner's environment.
+Dependency downloads have
 bounded retries; test assertions run once. The manifest regression test
 compares all eight cases with the retained workflow and checks changed-source,
 exact merge candidate, release and scheduled-audit selection.
