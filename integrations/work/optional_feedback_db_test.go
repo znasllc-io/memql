@@ -40,12 +40,19 @@ func TestOptionalFeedbackDBTimeoutAndLateAnswerAcrossReplicas(t *testing.T) {
 		peers = append(peers, peer)
 		engines = append(engines, engine)
 	}
-	if err := peers[0].store().updateRun(person, runID, map[string]any{"status": "running", "automationName": "test", "templateFingerprint": "optional-test", "spent": map[string]any{"modelCalls": 2, "tokens": 400}, "permissionMode": "observe"}); err != nil {
+	if err := peers[0].store().updateRun(person, runID, map[string]any{"status": "running", "automationName": "test", "templateFingerprint": "optional-test", "spent": map[string]any{"modelCalls": 2, "tokens": 400}}); err != nil {
 		t.Fatal(err)
 	}
 	before, err := peers[0].store().runForOwner(memql.ContextWithFreshRead(person), runID)
 	if err != nil {
 		t.Fatal(err)
+	}
+	if rowString(rowMap(before, "executionAuthority"), "roleCeiling") != "writer" {
+		t.Fatalf("missing recorded authority: %v", before["executionAuthority"])
+	}
+	goalBefore, err := peers[0].store().goalForOwner(memql.ContextWithFreshRead(person), goalID)
+	if err != nil || rowInt(rowMap(goalBefore, "ceilings"), "maxModelCalls") != 3 {
+		t.Fatalf("missing goal budget: %v %v", goalBefore, err)
 	}
 	rc := common.RunContext{RunId: runID, GoalId: goalID, OwnerUserId: canonicalUser("compile-alice"), StepKey: "reason", Mode: common.RunModeLive, Spine: rowMap(before, "spine")}
 	ctx := common.ContextWithRun(person, rc)
@@ -80,10 +87,14 @@ func TestOptionalFeedbackDBTimeoutAndLateAnswerAcrossReplicas(t *testing.T) {
 	if err != nil || after["status"] != "running" || rowString(after, "humanResumeId") != memql.BareShortId(id) {
 		t.Fatalf("lost continuation: %v %v", after, err)
 	}
-	for _, key := range []string{"ceilings", "spent", "permissionMode", "rerun", "templateFingerprint"} {
+	for _, key := range []string{"spent", "executionAuthority", "routing", "rerun", "templateFingerprint"} {
 		if !reflect.DeepEqual(before[key], after[key]) {
 			t.Fatalf("timeout changed %s: %v => %v", key, before[key], after[key])
 		}
+	}
+	goalAfter, err := peers[1].store().goalForOwner(memql.ContextWithFreshRead(person), goalID)
+	if err != nil || !reflect.DeepEqual(goalBefore["ceilings"], goalAfter["ceilings"]) {
+		t.Fatalf("timeout changed goal budget: %v %v", goalAfter, err)
 	}
 	proof, err := engines[1].PrepareWorkContinuation(ctx, memql.CheckpointResumeRequest{RunID: runID, StepKey: "reason", ApprovalID: id})
 	if err != nil {
@@ -141,10 +152,10 @@ func TestOptionalFeedbackDBTimeoutAndLateAnswerAcrossReplicas(t *testing.T) {
 }
 
 func TestOptionalFeedbackDBRequiredAndCancelledWaitsDoNotContinue(t *testing.T) {
+	_, i, _, _ := compileDB(t)
+	i.SetGateDB(testGates(t))
 	for _, mode := range []string{"required", "cancelled", "missing checkpoint", "changed template"} {
 		t.Run(mode, func(t *testing.T) {
-			_, i, _, _ := compileDB(t)
-			i.SetGateDB(testGates(t))
 			now := time.Now().UTC().Add(-2 * time.Minute)
 			i.SetNow(func() time.Time { return now })
 			person := actorCtx("compile-alice")
