@@ -462,6 +462,12 @@ func TestEngineManifestCompilesForEveryOpening(t *testing.T) {
 					t.Errorf("step %s is a %s step in %q; every step is a command in the toolchain image %q",
 						step.Key, step.Kind, step.Image, spec.Image)
 				}
+				if engineMacEditorHost(step.Name) {
+					if step.Placement != pipelines.PlacementFleet || step.Execution != pipelines.ExecutionNative || step.Platform != "darwin/arm64" || len(step.Caches) != 0 || len(step.Services) != 0 || !slices.Equal(step.Needs, []string{"macos_tooling"}) {
+						t.Errorf("Mac editor host lost its explicit native contract: %+v", step)
+					}
+					continue
+				}
 				if step.Placement != pipelines.PlacementCluster || step.Execution != pipelines.ExecutionContainer || step.Platform != "linux/amd64" {
 					t.Errorf("step %s must use a Linux amd64 Workbench container: %+v", step.Key, step)
 				}
@@ -813,26 +819,42 @@ func engineSetMinus(a, b []string) []string {
 	return out
 }
 
-// Portable checks must work with Cockpit disconnected and without host consent.
-func TestEngineManifestRunsWithoutFleetConsent(t *testing.T) {
+// The three Mac editor cases require the owner's explicit fleet consent.
+// Every portable check stays in its bounded cluster container.
+func TestEngineManifestRequiresConsentForMacEditorHosts(t *testing.T) {
 	spec := engineManifest(t).Pipeline
 	refusal := pipelines.Consent(spec, pipelines.ComputeCluster, nil)
-	if refusal != nil {
-		t.Fatalf("portable checks require native host permission: %v", refusal)
+	if refusal == nil || refusal.Code != pipelines.CodeFleetNotConsented {
+		t.Fatalf("Mac hosts must refuse without fleet consent: %v", refusal)
 	}
+	if refusal := pipelines.Consent(spec, pipelines.ComputeClusterAndFleet, nil); refusal != nil {
+		t.Fatal(refusal)
+	}
+	hosts := 0
 	for _, stage := range spec.Stages {
 		for _, step := range stage.Steps {
+			if engineMacEditorHost(step.Name) {
+				hosts++
+				continue
+			}
 			if pipelines.PlacementOf(step) != pipelines.PlacementCluster {
 				t.Errorf("portable check %s requires a host", step.Name)
 			}
 		}
 	}
+	if hosts != 3 {
+		t.Fatalf("expected three Mac host cases, found %d", hosts)
+	}
+}
+
+func engineMacEditorHost(name string) bool {
+	return slices.Contains([]string{"productivity-web-darwin-stable", "productivity-desktop-darwin-1-91-0", "productivity-desktop-darwin-stable"}, name)
 }
 
 func expectedEngineStepImage(spec *pipelines.Spec, name string) string {
 	declared, _ := engineDeclaredStep(spec, name)
-	if declared.ImageBuild != nil {
-		return "" // the operator selects the fixed rootless builder
+	if declared.ImageBuild != nil || declared.Execution == pipelines.ExecutionNative {
+		return "" // native hosts and the fixed image builder use no step-container image
 	}
 	if declared.Image != "" {
 		return declared.Image

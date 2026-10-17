@@ -106,8 +106,8 @@ authoring-surface parity gap. No scheduled scan may satisfy a required PR check.
 ## Workflow retirement ledger
 
 Inventory uses the engine tree at the source revision above and GitHub's live
-workflow API, including generated workflows. **None of these rows is approved
-for retirement yet.** A replacement needs its trigger, execution, credentials,
+workflow API, including generated workflows. **Active delivery workflows remain
+until their replacement is qualified.** A replacement needs its trigger, execution, credentials,
 outputs, publication and failure evidence, not merely a command in a manifest.
 
 | Engine workflow | Replacement or remaining evidence | Owner |
@@ -136,7 +136,7 @@ outputs, publication and failure evidence, not merely a command in a manifest.
 | `vscode-site.yml` | Static editor-site build and its deployed version proof | #5480 |
 | `ruleset-drift.yml` | Native daily public reads cover both recorded rulesets; installed schedule/failure delivery proof remains | #5507 |
 | `dependabot-tidy.yml` | Trusted dependency-PR maintenance, without exposing write authority to PR code | #5480 |
-| `clustere2e-compile.yml` API entry | File absent at this revision; verify no independent active execution before disabling the stale registration | #5480 |
+| `clustere2e-compile.yml` API entry | Disabled October 17 at 14:05 UTC: file absent at `f8ece576d`, only two historical runs and no active execution. Current CI and native `checks.build-clustere2e` retain compilation. Required `ci-required` and run history preserved | #5480 |
 | Generated `github-code-scanning/codeql` | Reconcile GitHub default setup with advanced scanning and replacement publication | #5480 |
 | Generated `github-code-quality/codeql` | GitHub Code Quality is distinct from security CodeQL; equivalent coverage or an explicit owner decision is required | #5480 |
 | Generated Dependabot updates / graph | Retain useful GitHub dependency services per the design; explicitly resolve their managed Actions execution before claiming zero Actions dependency | #5480 |
@@ -162,6 +162,33 @@ command evidence; it does not qualify the separate desktop/web host matrices.
 The first local harness attempt failed because its bind mount created a
 root-owned parent cache directory; the corrected harness mounts the Go cache
 under `/cache`, like the actual runner.
+
+The package also declares the eight cases from the existing editor host
+matrix: VS Code desktop at 1.91.0 and stable on Linux, plus Productivity web
+at stable and desktop at both versions on Linux and macOS. Linux cases stay
+in bounded cluster containers. The three macOS cases explicitly require a
+native `darwin/arm64` Fleet worker with `macos_tooling`; the pipeline connection
+must authorize cluster and Fleet execution, and the machine's local repository
+allowlist must admit this repository. Accessibility is not needed for these
+command-line host tests.
+
+`scripts/ci/editor-host.sh` builds the shared SDKs and extensions in each
+checkout, stages the language server for VS Code tests, and preserves the
+selected host, runtime, exit status and failure diagnostics. macOS caches and
+browser downloads stay in the attempt checkout. A checksum-pinned official
+Node 22 macOS archive is also unpacked there, so a missing or different system
+Node does not require installing software into the owner's environment.
+Dependency downloads have
+bounded retries; test assertions run once. The manifest regression test
+compares all eight cases with the retained workflow and checks changed-source,
+exact merge candidate, release and scheduled-audit selection.
+
+Both Linux VS Code versions passed locally with 20 host assertions each.
+The twelve credentialed live-cluster cases were skipped, as in the existing
+uncredentialed host lane; this is not live-cluster proof. The Productivity
+Chromium host and both Linux desktop versions passed; the browser lane also
+packaged its VSIX. Each Productivity case ran all 325 unit tests first. Native production execution and macOS host evidence remain
+required before retiring the corresponding Actions lanes.
 
 `os-image` uses the fixed rootless image builder for Dockerfile's `spa-build`
 stage, retaining the OCI archive and metadata. Its path bucket includes the
@@ -230,11 +257,30 @@ download path, preserves earlier caller cancellation, and propagates
 browser keeps its download iframe until the body finishes, then cleans it up.
 These tests pass with the repair and fail against the previous implementation.
 
-The source is prepared as v0.29.23. Deployment and live publication/download
-verification remain outstanding. Preserve the v0.29.22 candidate configuration
-and pending receipts for reconciliation; do not label uncertain writes complete
-or change immutable image tags to work around them. The serving instance remains
-v0.29.20, and Actions retirement is still pending.
+The repair merged through [#6177](https://github.com/znasllc-io/memql/pull/6177)
+at `f8ece576d93efdfb899fb3c4133f895c304f7e60`, tagged v0.29.23. Its required
+CI passed. At 13:56:45 UTC the rebuilt local MemQL controller started native
+release run `517b203755fd72a42c422493c691ad77`, Work run
+`4e28aba0e2460a1a6d482900f6d092f8`, against that exact tag. Compilation uses
+the existing AKS build pool and two-Job quota. A temporary namespace-scoped
+runner grant expires at 21:54 UTC; automatic delivery on this local connection
+remains disconnected. This repairs publication without an Actions image build
+or an operator image push. The bootstrap is not installed-production
+qualification. Its temporary grant and configuration must be removed after
+publication and native Job cleanup.
+
+The v0.29.22 files candidate published all eight GitHub draft assets with
+verified native receipts. Draft release `415819034` remains unpublished.
+Neither failed image publication has a completion receipt. Candidate
+verification binds the controller's engine commit, so upgrading it does not
+by itself make an old pending intent recoverable. Preserve the old candidate,
+configuration and journal; do not rewrite reservations, manufacture receipts
+or relabel uncertainty as success. A reviewed cross-version recovery path is
+still needed to resolve those old intents. The fresh v0.29.23 candidate uses
+its own source, tag and release identities.
+
+Deployment and live publication/download verification remain outstanding.
+The serving instance remains v0.29.20, and active Actions retirement is pending.
 
 ## Native database class isolation, October 17, 2026 UTC
 
@@ -288,6 +334,33 @@ Prepare v0.29.26 with this readback repair and the merged database class
 isolation. Existing pending publication intents remain pending until a
 native operation verifies and records completion; never manufacture receipts
 or reuse their immutable tags for different bytes.
+
+## Native toolchain publication, October 17, 2026 UTC
+
+The v0.29.23 bootstrap published and verified all seven GHCR engine images
+through candidate
+`sha256:184bc0ea33d995d1d82b3feb86d81c106d77fe3ce8744899f5fabf9e9b2990da`.
+Each approved effect has a native completion receipt. Its Azure agent intent
+remains pending; this does not claim a completed cloud release.
+
+Toolchain candidate
+`sha256:27c6c1aaaa081a2f8539f8f9190457ad6f8fb1d1e9bf7b1b159df3ab24d9ffa5`,
+approval `b3ca06b3-dc1c-4889-a62e-2aeaa2cc6043`, completed native publication
+to GHCR with immutable tag `0.29.23` and image digest
+`sha256:a62b53491fbd9cfd4bbfdf9612bfb1776d9fc9d42aab7ceceac3a0a18a17a8bb`.
+The 13-layer manifest is also readable anonymously and matches that digest.
+The pipeline now pins this image, whose downloaded archive passed the full
+matching smoke script. Five Linux editor host commands have passed their
+local execution checks; all eight native host cases still require installed
+pipeline execution, including the three Mac cases. Legacy host checks remain
+until that qualification completes.
+
+The Azure reader repair is merged in #6180. Native v0.29.26 run
+`b4f5c3393109150bf54dc0510141a030`, Work run
+`448238cceda4a8c40d8b8bb2dfe8c3cd`, is executing source
+`279efde5c3dec1c1ab47145423198d226294a4a6` in the existing AKS build pool
+through the local bootstrap controller. Its build, fresh publication receipts
+and production deployment remain outstanding. Production remains v0.29.20.
 
 ## Acceptance and issue closure
 
