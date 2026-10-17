@@ -265,6 +265,7 @@ func init() {
 		automationLoopsStopped,
 		meshEventsTotal,
 		meshCopiesTotal,
+		wsQueryRejected,
 		dslDeprecatedUses,
 	)
 	// Explicit zero so the series exists before the first keyset is

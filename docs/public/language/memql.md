@@ -2378,6 +2378,14 @@ effect before retrying it; a process cannot be resumed at an arbitrary machine
 instruction. The journal retains the last confirmed state and the executor
 returns a `required work journal unavailable` error.
 
+A background event handler may instead declare `@journalOnWrite` when its
+useful effects are engine graph mutations. It holds its run and step records
+until the first graph write, failure, or human wait. Successful handlers that
+only read leave no journal. Manual and adopted runs keep their normal records.
+Do not use this for effects that only call external services or write raw SQL:
+those do not notify the graph-write observer. It cannot be combined with
+`@journalRequired`, before-write hooks, or triggers on work-journal rows.
+
 Resume compares the recorded automation definition with the current one,
 including call arguments, nested bodies, input contracts and execution policy.
 A changed definition is refused. Runs carrying the older, incomplete

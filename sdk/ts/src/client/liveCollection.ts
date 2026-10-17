@@ -386,6 +386,7 @@ export class LiveCollection<T = Row> {
         this.unsubscribe = this.subscriptions.subscribeGraph((event) => this.fold(event), {
           concept: this.spec.concept,
           actions: this.spec.actions ?? ["created", "updated", "deleted"],
+          idOnly: !!(this.spec.rereadEveryEvent && this.spec.reread),
         });
       } catch (err) {
         // A refused subscribe does not break the collection -- ordinary reads

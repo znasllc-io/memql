@@ -22,6 +22,9 @@ type journalRequirement struct {
 type journalRequirementKey struct{}
 
 func prepareJournalContract(a *Automation) error {
+	if a.JournalOnWrite && (a.JournalRequired || a.BeforeWrite != nil || journalSkipsAutomation(a)) {
+		return fmt.Errorf("automation %s: @journalOnWrite cannot be combined with @journalRequired, a before-write hook or a work-journal trigger", a.Name)
+	}
 	if a.JournalRequired && (a.BeforeWrite != nil || journalSkipsAutomation(a)) {
 		return fmt.Errorf("automation %s: @journalRequired cannot be used on a before-write hook or an automation triggered by work-journal rows", a.Name)
 	}

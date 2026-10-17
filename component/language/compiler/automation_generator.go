@@ -318,6 +318,9 @@ func (c *Compiler) compileAutomation(def *parser.FunctionDef) (*AutomationOutput
 	// triggered.
 	output["template"] = attributeFlagPresent(def.Attributes, "template") || attributeFlagPresent(automation.Attributes, "template")
 	output["journalRequired"] = attributeFlagPresent(def.Attributes, "journalRequired") || attributeFlagPresent(automation.Attributes, "journalRequired")
+	if attributeFlagPresent(def.Attributes, "journalOnWrite") || attributeFlagPresent(automation.Attributes, "journalOnWrite") {
+		output["journalOnWrite"] = true
+	}
 
 	return &AutomationOutput{
 		Name:        def.Name,

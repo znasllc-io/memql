@@ -17,6 +17,7 @@ import type { SubscriptionManager } from "../src/client/subscriptions.js";
 import type { Event, GraphAction, Row } from "../src/client/types.js";
 
 interface Sub {
+  idOnly?: boolean;
   concept?: string;
   actions?: GraphAction[];
   handler: (ev: Event) => void;
@@ -27,7 +28,7 @@ class FakeSubscriptions {
   onSubscribe: (() => void) | null = null;
   private deliveryObservers = new Set<(ev: Event) => void>();
 
-  subscribeGraph(handler: (ev: Event) => void, opts: { concept?: string; actions?: GraphAction[] } = {}) {
+  subscribeGraph(handler: (ev: Event) => void, opts: { concept?: string; actions?: GraphAction[]; idOnly?: boolean } = {}) {
     const sub: Sub = { handler, ...opts };
     this.subs.push(sub);
     this.onSubscribe?.();
@@ -1157,6 +1158,7 @@ test("rereadEveryEvent resolves a FULL-payload event through the read too", asyn
   await settle();
   assert.deepEqual(reads, ["r1"]);
   assert.equal(handle.value.snapshot.rows[0]?.["name"], "authoritative");
+  assert.equal(subs.subs[0]?.idOnly, true);
   store.dispose();
 });
 
@@ -1173,6 +1175,7 @@ test("rereadEveryEvent without a reread falls back to trusting the payload", asy
   subs.deliver(event({ kind: "NODE_CREATED", payload: { id: "r1" } }));
   await settle();
   assert.equal(handle.value.snapshot.rows.length, 1);
+  assert.notEqual(subs.subs[0]?.idOnly, true);
   store.dispose();
 });
 

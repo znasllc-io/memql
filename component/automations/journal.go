@@ -44,11 +44,11 @@ package automations
 // the engine reports the run's first graph write (common.NotifyWrite), or until
 // the run fails or parks on a human wait (runStatementAutomation), and are then
 // written in the order they were made. A tick that completes without a write
-// writes nothing at all. holdsScheduledJournal is the rule: a cron tick that is
+// writes nothing at all. holdsBackgroundJournal is the rule: a cron tick that is
 // neither adopted (its row exists already and the adoption advances it) nor
 // @journalRequired (it promises confirmed boundaries, and a boundary that waits
-// for a write is not one). Every other trigger is journaled at open, as it
-// always was.
+// for a write is not one). Event handlers may opt into the same hold with
+// @journalOnWrite. Other triggers retain their normal journal at open.
 //
 // A LATE RUN OPENS LIVE. The work sweep judges a running run by its newest
 // heartbeat, heartbeatAt else startedAt, and hands one that has been silent for
@@ -191,16 +191,17 @@ func journalSkipsAutomation(a *Automation) bool {
 	return workTriggerPattern.MatchString(strings.TrimSpace(a.Trigger.Event))
 }
 
-// holdsScheduledJournal reports whether a run's journal is held until the run
+// holdsBackgroundJournal reports whether a run's journal is held until the run
 // writes (the file comment): a cron tick that is neither adopted nor
-// @journalRequired. "schedule" is the core scheduler's cron firing alone. An
+// @journalRequired, or an event handler declaring @journalOnWrite.
+// "schedule" is the core scheduler's cron firing alone. An
 // authored automation's firing ("authored"), an operator's run of a scheduled
 // automation ("run:client"), a sub-automation and an http trigger each carry
 // their own triggeredBy, and a scheduler recovery re-adopts the row the tick
 // left (adopt.go) -- the case the adopt check is for, since that row says
 // "schedule" too.
-func holdsScheduledJournal(a *Automation, triggeredBy string, adopt *RunAdoption) bool {
-	return a != nil && triggeredBy == "schedule" && adopt == nil && !a.JournalRequired
+func holdsBackgroundJournal(a *Automation, triggeredBy string, adopt *RunAdoption) bool {
+	return a != nil && (triggeredBy == "schedule" || a.JournalOnWrite && strings.HasPrefix(triggeredBy, "event:")) && adopt == nil && !a.JournalRequired
 }
 
 // heldUntilWrite returns a copy of j whose run opens at the firing's first

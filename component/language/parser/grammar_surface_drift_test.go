@@ -81,6 +81,8 @@ var grammarSurfaceCorpus = []struct {
 	accept bool
 	src    string
 }{
+	{"event journal on write", true, `@journalOnWrite @trigger(event="node.created",concept="v1:platform:inboundRequest") automation quietDelivery { return true }`},
+	{"event journal on write takes no arguments", false, `@journalOnWrite(true) @template automation invalid { return true }`},
 	{"tool structured object", true, `@handler(type="function", name="probe") tool probe { operation object { tool enum("workerHost")! args object! { path string! } } }`},
 	{"tool non object properties", false, `tool probe { bad string { child string } }`},
 	{"scheduled node placement", true, `@trigger(schedule="0 * * * * *", node="planner", lease="planner-maintenance")

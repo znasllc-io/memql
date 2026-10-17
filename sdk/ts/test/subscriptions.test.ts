@@ -79,6 +79,15 @@ test("subscribeGraph with no options means all concepts + all actions", () => {
   assert.equal(sub.filter, undefined);
 });
 
+test("compact graph subscription survives reconnect replay", () => {
+  const d = new MockDispatcher();
+  const sm = new SubscriptionManager(d.asDispatcher());
+  sm.subscribeGraph(() => {}, { concept: "v1:work:run", idOnly: true });
+  assert.deepEqual(d.lastSubscribe().config, { idOnly: true });
+  sm.replay();
+  assert.deepEqual(d.lastSubscribe().config, { idOnly: true });
+});
+
 test("subscribe rejects graph_events (default and explicit)", () => {
   const d = new MockDispatcher();
   const sm = new SubscriptionManager(d.asDispatcher());
