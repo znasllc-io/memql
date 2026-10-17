@@ -482,10 +482,6 @@ const CASES: ActsCase[] = [
     what: "Machines -- one machine's detail",
     open: async () => {
       await openMachineDetail(fakeConnection({ myWorkersWithStatus: [MACHINE] }));
-      // The call history is a disclosure and the read runs when it opens. A
-      // sweep that does not click it misses Re-read entirely -- which is how
-      // a real defect survived a twenty-four-route sweep in this repo.
-      await click(screen.getByLabelText(`Recent calls on ${MACHINE_LABEL}`));
       await settle();
     },
     acts: [
@@ -501,9 +497,9 @@ const CASES: ActsCase[] = [
       { name: "Previous labels", count: 1 },
       { name: "Next labels", count: 1 },
       { name: "Remove tier=gold", count: 1 },
-      { name: `Model to pull onto ${MACHINE_LABEL}`, count: 1 },
-      { name: "Pull", count: 1 },
-      { name: `Recent calls on ${MACHINE_LABEL}`, count: 1 },
+      { name: `Model to pull onto ${MACHINE_LABEL}`, count: 0, note: "installation moved into an eligible catalog detail" },
+      { name: "Pull", count: 0 },
+      { name: `Recent calls on ${MACHINE_LABEL}`, count: 0, note: "Activity opens directly; no inline disclosure" },
       { name: "Remove this machine", count: 1, note: "revoke, then the uninstall line (D12)" },
       { name: "Copy the uninstall command", count: 0, note: "offered inside the confirm, not beside the opener" },
 
@@ -516,9 +512,9 @@ const CASES: ActsCase[] = [
       // Two of the four are ZERO, and the zeros are the assertions worth
       // having.
       {
-        name: "Probe this model",
-        count: 1,
-        note: "one per advertised model, and this fixture advertises one",
+        name: "Measure performance",
+        count: 0,
+        note: "installed model details are informational; model testing was removed",
       },
       {
         name: "Share models",
@@ -934,7 +930,7 @@ const CASES: ActsCase[] = [
       { name: "Machines", count: 1, within: "Default section" },
       { name: "Model library", count: 1, within: "Default section" },
       { name: "Routing", count: 1, within: "Default section" },
-      { name: "Workspaces", count: 1, within: "Default section" },
+      { name: "Cloud workbenches", count: 1, within: "Default section" },
       { name: "Activity", count: 1, within: "Default section" },
       { name: "Logs", count: 1, within: "Default section" },
       { name: "Settings", count: 1, within: "Default section" },
@@ -983,7 +979,7 @@ describe("every act the Fleet offers (D5, memql#5159)", () => {
     // visually-hidden `<label for>`, and a button's own text -- so a reading
     // that lost any one of them fails here rather than somewhere it reads as
     // a missing control.
-    expect(names).toContain(`Recent calls on ${MACHINE_LABEL}`);
+    expect(names).toContain("Copy Registration id");
     expect(names).toContain(`Name for ${MACHINE_LABEL}`);
     expect(names).toContain("Rename");
   });

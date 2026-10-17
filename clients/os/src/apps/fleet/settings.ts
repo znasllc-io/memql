@@ -59,7 +59,7 @@ export const FLEET_SECTIONS: OsAppSection[] = [
   // the read reaches -- exactly the reasoning that leaves Machines, Routing
   // and Workbenches ungated.
   { id: "apps", name: "Activity", needs: ["localApps"] },
-  { id: "workbenches", name: "Workspaces", needs: ["workbench"] },
+  { id: "workbenches", name: "Cloud workbenches", needs: ["workbench"] },
   // The app's slice of the cluster's logs (epic memql#4895): the lines it
   // tagged and the lines about the things it owns. Admin-floored because
   // every read on the log store is (spec L3), and this is the ONE section

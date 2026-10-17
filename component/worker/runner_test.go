@@ -164,12 +164,30 @@ func runSpec() RunSpec {
 	}
 }
 
+func TestAppSessionCannotBorrowAnotherOwnersSignedInApp(t *testing.T) {
+	for _, owner := range []string{"another-user", "system:automation:user-1", ""} {
+		t.Run(owner, func(t *testing.T) {
+			runner, session, store, auditor := newRunnerFixture(t, SubscriptionPresent)
+			session.worker.OwnerUserId = owner
+			_, err := runner.Run(context.Background(), session.worker, runSpec(), nil)
+			if err == nil || !strings.Contains(err.Error(), "app_owner_required") {
+				t.Fatalf("foreign or unresolved machine owner reached app execution: %v", err)
+			}
+			if runner.Minter.(*stubMinter).calls != 0 || len(store.created) != 0 || len(auditor.actions()) != 0 {
+				t.Fatal("owner refusal minted a credential or started an app session")
+			}
+		})
+	}
+}
+
 // TestRunnerRecordsSubscriptionBilling is design §9.5: an app that
 // reports its usage on a machine whose subscription is present bills
 // as `subscription`, and the row carries the reported numbers
 // verbatim.
 func TestRunnerRecordsSubscriptionBilling(t *testing.T) {
 	runner, session, store, auditor := newRunnerFixture(t, SubscriptionPresent)
+	// The wire may bare-ify the same owner that the stored registration names.
+	session.worker.OwnerUserId = "v1:identity:user:user-1"
 
 	go func() {
 		waitForSession(t, session, "sess-run")

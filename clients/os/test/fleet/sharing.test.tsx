@@ -361,6 +361,7 @@ describe("the sharing access list", () => {
     expect(sharingActiveCalls({ ...m, sharingActivity: report }, subject, now)).toBe(0);
     expect(sharingActiveCalls({ ...m, sharingActivity: { ...report, nodeId: "old-agent" } }, subject, now)).toBeNull();
     expect(sharingActiveCalls({ ...m, lastSeenAt: new Date(now + 50_000).toISOString(), sharingActivity: report }, subject, now + 50_000)).toBeNull();
-    expect(sharingActiveCalls({ ...m, connectedNodeId: "" }, subject, now)).toBe(0);
+    expect(sharingActiveCalls({ ...m, connectedNodeId: "" }, subject, now)).toBeNull();
+    expect(sharingActiveCalls({ ...m, sharingActivity: { ...report, observedAt: new Date(now + 60_000).toISOString() } }, subject, now)).toBeNull();
   });
 });

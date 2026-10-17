@@ -145,3 +145,37 @@ func TestSharingActivityCoalescesRetriesAndStopsAfterDisconnect(t *testing.T) {
 		}
 	})
 }
+
+func TestBorrowedWorkbenchCountsOnceAndKeepsItsAudienceSeparateFromModels(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		session, _ := newToolStreamTestSession()
+		defer session.cancel()
+		ctx, cancel := context.WithCancel(context.Background())
+		defer cancel()
+		ctx = ContextWithToolSharing(ctx, SharingSubjects{Borrowed: true, UserIds: []string{"borrower"}, GroupIds: []string{"group-a", "group-b"}})
+		done := make(chan error, 1)
+		go func() {
+			_, err := session.dispatch(ctx, &memqlv1.ToolDispatch{CallId: "borrowed-workspace", Tool: "workerWorkbench", Action: "exec", Workbench: &memqlv1.WorkbenchConstraint{CallerUserId: "borrower"}}, nil)
+			done <- err
+		}()
+		synctest.Wait()
+		counts := session.sharingActivity()
+		if counts["sharedCalls"] != 1 || counts["ownerCalls"] != 0 {
+			t.Fatalf("overlapping workbench grants inflated counts: %+v", counts)
+		}
+		if len(counts["users"].([]map[string]any)) != 0 {
+			t.Fatal("workbench work appeared as model inference")
+		}
+		wb := counts["workbench"].(map[string]any)
+		if len(wb["groups"].([]map[string]any)) != 2 || wb["users"].([]map[string]any)[0]["activeCalls"] != 1 {
+			t.Fatal("workbench audience activity was not measured")
+		}
+		cancel()
+		if err := <-done; !errors.Is(err, context.Canceled) {
+			t.Fatal(err)
+		}
+		if session.sharingActivity()["sharedCalls"] != 0 {
+			t.Fatal("cancelled work remained active")
+		}
+	})
+}

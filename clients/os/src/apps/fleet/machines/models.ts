@@ -295,3 +295,18 @@ export function pullStepLabel(pull: ModelPull): string {
   }
   return `${formatBytes(pull.completedBytes)} of ${formatBytes(pull.totalBytes)} in this step`;
 }
+
+export function modelPurposeLabel(model: MachineModel): string {
+  if (canConverse(model)) {
+    if (model.vision) return model.tools ? "Conversation, tools & vision" : "Conversation & vision";
+    return model.tools ? "Conversation & tools" : "Conversation";
+  }
+  if (model.embeddings) return "Embeddings";
+  if (model.imageGen) return "Image generation";
+  if (model.audioIn) return "Transcription";
+  if (model.audioOut) return "Speech";
+  return "Model";
+}
+export function canConverse(model: MachineModel): boolean {
+  return !model.embeddings && (model.structuredOutput || model.tools || model.vision || (!model.imageGen && !model.audioIn && !model.audioOut));
+}

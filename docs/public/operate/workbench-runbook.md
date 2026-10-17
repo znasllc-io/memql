@@ -14,7 +14,7 @@ per-run Linux working environment that is the default first
 choice for any HEADLESS work an agent needs to do (writing files,
 running shell commands, fetching URLs).
 
-Cluster mode is the deployed shape: a dedicated `workbench` node-type binary
+Cloud workbenches use the deployed cluster shape: a dedicated `workbench` node-type binary
 hosts the workspaces and agent nodes route to it over `NodeService.Stream`. The
 in-process path on the agent node survives as the local/no-mesh fallback (see
 section 8). Operational detail lives in
@@ -32,9 +32,47 @@ Computer-use has two slugs (`computer_use_headless` and
 `computer_use_embodied`); the workbench has one (`workbench_use`),
 universal across every role.
 
+### Fleet workbenches
+
+A **Fleet workbench** is an isolated Linux container on an enrolled machine.
+A **Cloud workbench** runs on the cluster. Both use the Workbench destination;
+neither grants access to the machine owner's files, signed-in apps or desktop.
+An eligible owned or explicitly shared Fleet workbench can serve a new goal;
+otherwise the goal uses a Cloud workbench. The first assignment is durable
+across agent replicas. A later failure never silently moves the goal's files or
+replays a command on another machine.
+
+Enable Fleet workbenches in the Add machine flow, or run `memql worker setup
+--workbench` with a running local Docker daemon. Setup downloads a pinned runtime
+image; it requires at least 3 Docker CPUs and 4 GiB of Docker memory. This runtime
+provides Python and shell/file tools. It has no network, host mounts, Docker
+socket, GPU, Node, Go or signed-in credentials. Use `http_fetch` for public web
+requests; those requests stay on the cloud workbench's restricted fetch path.
+Ask permission before using the owner's computer for unavailable capabilities.
+
+Each operating-system account reserves at most **two Fleet workspaces** across
+its Cockpit processes and cluster enrollments. Each has a 1 CPU and 1536 MiB hard
+limit, a 256 MiB workspace, a 64 MiB temporary filesystem and bounded output.
+Admission keeps 20% memory headroom on both the host and Docker VM, in addition
+to the workspace budget. Pipeline builds hold an exclusive reservation against
+these workspaces. Interrupted reservations block reuse until the recorded
+container on the same Docker daemon is cleaned up.
+
+A Fleet workspace ends after five idle minutes or one hour from the goal's
+assignment. A lost, expired or cancelled workspace is not recreated for that
+goal. Save deliverables in the Library and start a new goal when needed.
+Capacity waits are bounded to ten minutes and 32 calls per registration on each
+originating replica. Consent and the goal's destination are checked again before
+execution; only an explicit refusal before execution can be retried.
+
+In Fleet Settings, model sharing and workbench sharing have separate audiences
+and Pause controls. Pause preserves recipients and lets admitted calls finish,
+while refusing new borrowed calls. The owner can continue using the machine.
+Resume rechecks current membership, connection and capacity on the next call.
+
 ## 2. Lifetime model
 
-Two distinct lifetimes inside the workbench:
+Cloud workbenches have these lifetimes:
 
 - **Per-operation process.** Commands run inside a dedicated Workbench pod,
   sharing that pod's CPU and memory limits. They are not individual containers.

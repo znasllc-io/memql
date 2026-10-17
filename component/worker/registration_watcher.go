@@ -57,6 +57,8 @@ type RegistrationEvent struct {
 	RegistrationId  string
 	RevokedAt       time.Time
 	ConnectedNodeId string
+	OwnerFeatures   any
+	Version         time.Time
 }
 
 // RegistrationWatcher ends the streams this replica holds when the graph says
@@ -102,6 +104,11 @@ func (w *RegistrationWatcher) Observe(_ context.Context, ev RegistrationEvent) s
 
 	reason := w.verdict(ev)
 	if reason == "" {
+		if ev.ConnectedNodeId == w.selfNode && !ev.Version.IsZero() {
+			if worker := w.registry.WorkerById(id); worker != nil {
+				worker.ApplyOwnerFeaturePolicy(OwnerFeaturePolicy{Features: OwnerFeaturesFromRow(ev.OwnerFeatures), Version: ev.Version})
+			}
+		}
 		return ""
 	}
 	if !w.registry.Terminate(id, reason) {
@@ -269,6 +276,8 @@ func (s *RegistrationEventSubscriber) handle(ev events.Event) {
 		RegistrationId:  id,
 		RevokedAt:       eventTime(fields, "revokedAt"),
 		ConnectedNodeId: eventString(fields, "connectedNodeId"),
+		OwnerFeatures:   fields["ownerFeatures"],
+		Version:         eventTime(ev.Payload, "createdAt"),
 	})
 	if reason != "" {
 		s.logger.Info("worker stream ended by a registration event",

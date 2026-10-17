@@ -182,7 +182,7 @@ func (h *ForwardHandler) HandleForwardedRequest(
 			return
 		}
 	}
-	if err := h.verifyRegistration(cctx, owner, registrationId); err != nil {
+	if err := h.verifyDispatchRegistration(cctx, owner, registrationId, req.GetPurpose()); err != nil {
 		h.sendRefusal(send, requestId, "registration_refused", err.Error())
 		return
 	}
@@ -195,7 +195,7 @@ func (h *ForwardHandler) HandleForwardedRequest(
 			"this replica no longer holds a stream for that machine")
 		return
 	}
-	if !sameSubject(w.OwnerUserId, owner) {
+	if req.GetPurpose() != PurposeWorkbench && !sameSubject(w.OwnerUserId, owner) {
 		// Belt and braces against a registry entry disagreeing with the row.
 		h.sendRefusal(send, requestId, "owner_mismatch",
 			"the connected machine is owned by a different user than the assertion names")
@@ -227,6 +227,10 @@ func (h *ForwardHandler) HandleForwardedRequest(
 		return
 	}
 
+	if req.GetPurpose() == PurposeWorkbench && req.GetCapability() != WorkbenchCapability {
+		h.sendRefusal(send, requestId, "workbench_admission_refused", "isolated workbench capacity is required")
+		return
+	}
 	capability := req.GetCapability()
 	timeout := time.Duration(req.GetTimeoutSec()) * time.Second
 	if timeout <= 0 {
@@ -234,6 +238,9 @@ func (h *ForwardHandler) HandleForwardedRequest(
 	}
 	dispatchCtx, dcancel := context.WithTimeout(cctx, timeout)
 	defer dcancel()
+
+	activity := beginMachineActivity(dispatchCtx, h.store, h.logger, w.OwnerUserId, req.GetRegistrationId(), "tool", req.GetTool()+"."+req.GetAction(), req.GetCorrelationId(), timeout)
+	defer activity.interrupted(dispatchCtx)
 
 	if err := w.Acquire(dispatchCtx, capability); err != nil {
 		code := "worker_busy"
@@ -273,6 +280,15 @@ func (h *ForwardHandler) HandleForwardedRequest(
 		dispatchRequest.computerConstraint = constraint
 		dispatchRequest.computerOwner = w.OwnerUserId
 	}
+	if req.GetPurpose() == PurposeWorkbench {
+		constraint, err := admitWorkbenchDispatch(dispatchCtx, h.store, w, dispatchRequest)
+		if err != nil {
+			h.sendRefusal(send, requestId, "workbench_admission_refused", err.Error())
+			return
+		}
+		dispatchRequest.workbenchConstraint = constraint.Constraint
+		dispatchCtx = workerservice.ContextWithToolSharing(dispatchCtx, constraint.Subjects)
+	}
 	envelope := buildToolDispatch(dispatchRequest, timeout)
 
 	// THE CALLER MAY ALREADY HAVE GONE: the node layer ends this context when
@@ -287,12 +303,20 @@ func (h *ForwardHandler) HandleForwardedRequest(
 
 	// After dispatch, only the versioned worker contract's explicit admission
 	// refusals prove nothing started. A mid-call disconnect remains uncertain.
+	activity.running()
 	res, err := w.DispatchWithStream(dispatchCtx, envelope, func(chunk *memqlv1.ToolStream) {
 		h.relayChunk(send, requestId, chunk)
 	})
 	out := translateResult(envelope.GetCallId(), res, err)
+	if out.OK {
+		activity.end("succeeded")
+	} else if dispatchCtx.Err() != nil {
+		activity.end("cancelled")
+	} else {
+		activity.end("failed")
+	}
 	h.send(send, &nodev1.WorkerForwardResponse{
-		RefusedBeforeStart: pipelineRefusedBeforeStart(req.GetPurpose(), out, err),
+		RefusedBeforeStart: pipelineRefusedBeforeStart(req.GetPurpose(), out, err) || workbenchRefusedBeforeStart(req.GetPurpose(), out, err),
 		RequestId:          requestId,
 		Ok:                 out.OK,
 		OutputJson:         []byte(out.OutputJSON),
@@ -311,27 +335,32 @@ func (h *ForwardHandler) HandleForwardedRequest(
 // machine lends its GPU, not its shell, so `WorkerForward` stays owner-only
 // and verifySharedRegistration beside it is what the model forward asks.
 func (h *ForwardHandler) verifyRegistration(ctx context.Context, ownerUserId, registrationId string) error {
+	_, err := h.ownedRegistration(ctx, ownerUserId, registrationId)
+	return err
+}
+
+func (h *ForwardHandler) ownedRegistration(ctx context.Context, ownerUserId, registrationId string) (Candidate, error) {
 	if h.store == nil {
 		// No fleet store on this replica. The registry check below still
 		// establishes ownership from the live stream, but revocation would go
 		// unchecked -- so refuse rather than dispatch on a weaker check than
 		// the one this function exists to perform.
-		return errNoFleetStore
+		return Candidate{}, errNoFleetStore
 	}
 	machines, err := h.store.WorkersForOwner(ctx, ownerUserId)
 	if err != nil {
-		return err
+		return Candidate{}, err
 	}
 	for _, m := range machines {
 		if !sameRegistration(m.RegistrationId, registrationId) {
 			continue
 		}
 		if !m.RevokedAt.IsZero() {
-			return errRegistrationRevoked
+			return Candidate{}, errRegistrationRevoked
 		}
-		return nil
+		return m, nil
 	}
-	return errRegistrationNotOwned
+	return Candidate{}, errRegistrationNotOwned
 }
 
 // verifySharedRegistration is verifyRegistration for a MODEL call, and the
@@ -369,27 +398,32 @@ func (h *ForwardHandler) verifySharedRegistration(ctx context.Context, actingUse
 }
 
 func (h *ForwardHandler) admitSharedRegistration(ctx context.Context, actingUserId, registrationId string) (workerservice.SharingSubjects, error) {
+	_, subjects, err := h.admitSharedCandidate(ctx, actingUserId, registrationId)
+	return subjects, err
+}
+
+func (h *ForwardHandler) admitSharedCandidate(ctx context.Context, actingUserId, registrationId string) (Candidate, workerservice.SharingSubjects, error) {
 	ctx = memqlengine.ContextWithFreshRead(ctx)
-	ownErr := h.verifyRegistration(ctx, actingUserId, registrationId)
+	own, ownErr := h.ownedRegistration(ctx, actingUserId, registrationId)
 	switch {
 	case ownErr == nil:
-		return workerservice.SharingSubjects{}, nil
+		return own, workerservice.SharingSubjects{}, nil
 	case errors.Is(ownErr, errRegistrationRevoked):
 		// Their own machine, revoked. The shared arm cannot rescue that, and
 		// saying "not shared with you" about somebody's own revoked machine
 		// would send them to the wrong repair.
-		return workerservice.SharingSubjects{}, ownErr
+		return Candidate{}, workerservice.SharingSubjects{}, ownErr
 	case errors.Is(ownErr, errNoFleetStore):
-		return workerservice.SharingSubjects{}, ownErr
+		return Candidate{}, workerservice.SharingSubjects{}, ownErr
 	}
 
 	shared, ok := h.store.(SharedFleetStore)
 	if !ok {
-		return workerservice.SharingSubjects{}, ownErr
+		return Candidate{}, workerservice.SharingSubjects{}, ownErr
 	}
 	machines, err := shared.SharedInferenceWorkers(ctx)
 	if err != nil {
-		return workerservice.SharingSubjects{}, err
+		return Candidate{}, workerservice.SharingSubjects{}, err
 	}
 	// The groups come from THIS replica's membership cache unless a test set a
 	// resolver: one read per person, reused until a membership or a group
@@ -406,14 +440,14 @@ func (h *ForwardHandler) admitSharedRegistration(ctx context.Context, actingUser
 			continue
 		}
 		if !m.RevokedAt.IsZero() {
-			return workerservice.SharingSubjects{}, errRegistrationRevoked
+			return Candidate{}, workerservice.SharingSubjects{}, errRegistrationRevoked
 		}
 		if !m.ServesPerson(person) {
-			return workerservice.SharingSubjects{}, errRegistrationNotShared
+			return Candidate{}, workerservice.SharingSubjects{}, errRegistrationNotShared
 		}
-		return m.Sharing().SubjectsFor(person), nil
+		return m, m.Sharing().SubjectsFor(person), nil
 	}
-	return workerservice.SharingSubjects{}, ownErr
+	return Candidate{}, workerservice.SharingSubjects{}, ownErr
 }
 
 // ownerOfSharedMachine confirms that the LIVE registry entry for a machine
@@ -562,3 +596,11 @@ var (
 type forwardRefusal string
 
 func (e forwardRefusal) Error() string { return string(e) }
+
+func (h *ForwardHandler) verifyDispatchRegistration(ctx context.Context, owner, registration, purpose string) error {
+	if purpose == PurposeWorkbench {
+		_, err := admittedWorkbench(ctx, h.store, owner, registration)
+		return err
+	}
+	return h.verifyRegistration(ctx, owner, registration)
+}

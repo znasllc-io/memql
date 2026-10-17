@@ -50,3 +50,21 @@ concept workspace {
   @relationship(type="parent", field="runId", target=run, direction="outgoing")
   @relationship(type="parent", field="ownerUserId", target=user, direction="outgoing")
 }
+
+
+// @no-displayCard: immutable routing lease; the parent goal is its human-facing identity.
+/// Server-owned choice of execution resource for a run. It never changes after
+/// admission: a lost machine must not silently give the run an empty workspace.
+@serverWritten
+@rowAuthz(owner="ownerUserId")
+concept executionBinding {
+  runId string!
+  resource enum("cloud", "fleet")!
+  registrationId string!
+  machineId string!
+  machineOwnerUserId string!
+  expiresAt datetime!
+  ownerUserId string! @serverSet
+  @relationship(type="parent", field="runId", target=run, direction="outgoing")
+  @relationship(type="parent", field="ownerUserId", target=user, direction="outgoing")
+}

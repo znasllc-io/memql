@@ -6,6 +6,7 @@ import (
 	"strings"
 	"time"
 
+	memqlengine "github.com/znasllc-io/memql/component/memql"
 	workerservice "github.com/znasllc-io/memql/component/worker"
 )
 
@@ -14,6 +15,7 @@ import (
 // -- a candidate may be held by another replica, in which case this node has
 // no handle for it at all and dispatch goes over the forward.
 type Candidate struct {
+	ModelSetup       memqlengine.ModelSetup
 	HomeDirectory    string
 	NativePlatform   string
 	ActionContracts  workerservice.ActionContracts
@@ -34,7 +36,9 @@ type Candidate struct {
 	// SharingMode is the enrolled owner's decision from registration.sharing.
 	// Never derive it from a worker or operator label: advertisements cannot
 	// volunteer a machine. The owner chooses the audience in Fleet.
-	SharingMode string
+	WorkbenchSharing workerservice.Sharing
+	SharingMode      string
+	SharingPaused    bool
 	// SharedUserIds and SharedGroupIds are who the owner lent the machine to
 	// under SharingModePeople (epic memql#5344), empty in every other mode.
 	// ServesPerson() is the only way to ask whether they include somebody.
@@ -71,17 +75,17 @@ type Candidate struct {
 
 // ServesCluster admits only the owner's legacy cluster-wide share.
 func (c Candidate) ServesCluster() bool {
-	return workerservice.ServesTheCluster(c.SharingMode)
+	return c.Sharing().ServesCluster()
 }
 
 // SharingRefusal explains why the saved audience excludes cluster work.
 func (c Candidate) SharingRefusal() string {
-	return workerservice.SharingRefusal(c.SharingMode)
+	return workerservice.SystemRefusal(c.Sharing())
 }
 
 // Sharing is the owner's decision as component/worker reads it.
 func (c Candidate) Sharing() workerservice.Sharing {
-	return workerservice.Sharing{Mode: c.SharingMode, UserIds: c.SharedUserIds, GroupIds: c.SharedGroupIds, PausedUserIds: c.PausedUserIds, PausedGroupIds: c.PausedGroupIds}
+	return workerservice.Sharing{Mode: c.SharingMode, Paused: c.SharingPaused, UserIds: c.SharedUserIds, GroupIds: c.SharedGroupIds, PausedUserIds: c.PausedUserIds, PausedGroupIds: c.PausedGroupIds}
 }
 
 // ServesPerson applies the saved audience on every routing path.

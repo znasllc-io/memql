@@ -1,7 +1,7 @@
 // models/concepts.memql -- the curated model catalog (epic memql#5137, D1).
 //
 // WHAT THIS IS AND IS NOT. The catalog says what a machine SHOULD pull, by
-// category and by machine class. It gates nothing. Eligibility for a call is
+// category and by machine class. Saved setups also use its capacity estimates. Eligibility for a call is
 // what a machine ADVERTISES on its registration label (`model:<id>` with
 // ctx=, structured=, tools=, vision=, ...), which is a fact about a running
 // process; a profile here is a recommendation about a model, which is a fact
@@ -24,9 +24,10 @@
 @rowAuthz(public, requiresIdentity)
 @displayCard(primary="modelId", secondary="category", tertiary="runtime", status="curated")
 concept modelProfile {
+  reviewedAt datetime @description("Last manual review of the linked primary model source. Memory figures remain planning estimates unless measured provenance is present.")
   modelId          string!  @description("The runtime's own id, byte-identical to what a machine advertises as `model:<id>` -- an Ollama tag (qwen3.5:9b) or hf.co/<owner>/<repo>. A catalog hit is therefore a string equality and never a fuzzy match, which is what stops qwen3.5:9b and qwen3.5:9b-q4 from being read as one model. NOT the row id: a tag carries ':' and '/', and the canonical row id is {concept}:{shortId}, so the row id is a slug of this and this is the field everything compares on.")
   category         enum("text", "reasoning", "omni", "vision", "audioIn", "audioOut", "imageGen", "videoGen", "embeddings")!  @description("What the model is FOR. Streaming is deliberately absent and is a flag instead: it is true of models in every category, and a category for it would put one model in two rows -- the exact shape the vendor provider records are losing in this epic. `vision` is a category for a model whose PURPOSE is seeing; a text model that can also see carries the flag and stays in `text`.")
-  runtime          enum("ollama", "mlx", "whispercpp", "nemo", "kokoro", "mflux", "comfyui")!  @description("Which runtime serves it. A machine lacking the runtime cannot pull the model at all, which is one of the three reasons the Fleet page gives for a profile this fleet cannot serve. The set is closed because each value is a thing the cockpit knows how to install; a runtime nobody installs is not a recommendation.")
+  runtime          enum("ollama", "mlx", "whispercpp", "nemo", "kokoro", "mflux", "comfyui", "openai-compatible", "cloud")!  @description("Which runtime serves it. A machine lacking the runtime cannot pull the model at all, which is one of the three reasons the Fleet page gives for a profile this fleet cannot serve. The set is closed because each value is a thing the cockpit knows how to install; a runtime nobody installs is not a recommendation.")
   family           string   @description("The model family (qwen3.5, gemma4, gpt-oss), for grouping on a page. Not parsed from modelId: the tag's shape is the runtime's business and has changed before.")
   params           int      @description("Parameter count expanded to a number (9B -> 9000000000). Zero means the publisher did not state one -- an ORDERING signal, never a capability gate, the same rule fleetModel.params follows.")
   quant            string   @description("The quantization the recommended tag carries (Q4_K_M, Q8_0, MXFP4). Precision breaks recommendation ties between otherwise equal parameter counts, so larger memory classes can choose the higher-precision tag without inventing a different parameter count.")
@@ -45,4 +46,22 @@ concept modelProfile {
   active           bool  @description("False once an operator removed their entry. A soft delete, because the row is the record that somebody added this id and then took it out again; a hard delete leaves the next operator asking the same question with nothing to read. Separate from `unavailable` on purpose -- that one is about the world (the runtime stopped serving the id), this one is about the operator's list.")
   curated          bool  @description("False for an entry an operator added by id. A curated entry is a release-time act re-seeded on every boot; an operator's entry is theirs and is not re-seeded, which is also why modelProfileRemove refuses a curated row -- removing one is a lie the next restart undoes.")
   unavailable      bool @description("Set when a pull failed because the runtime no longer serves the id. The row STAYS and says so rather than vanishing: curation is a release-time act, and a catalog entry that disappeared answers 'why can I not pull this' with silence.")
+}
+
+/// Installation-wide research is opt-in and ships off. No machine is selected by a seed.
+// @no-displayCard: Singleton schedule configuration has no human-facing title; its state belongs in Models.
+@rowAuthz(clusterOwner)
+concept catalogResearchSettings {
+  enabled bool
+  ownerUserId string
+}
+
+/// Research output is evidence to review, never permission to download or route.
+@displayCard(primary="summary", secondary="reviewedAt")
+@rowAuthz(clusterOwner)
+concept catalogReview {
+  runId string!
+  reviewedAt datetime!
+  summary string!
+  findings []object!
 }

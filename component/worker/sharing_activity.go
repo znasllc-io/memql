@@ -12,6 +12,14 @@ import (
 	memqlengine "github.com/znasllc-io/memql/component/memql"
 )
 
+type toolSharingKey struct{}
+
+// ContextWithToolSharing carries a receiving replica's checked workbench
+// audience to the stream that counts the call. It grants no execution access.
+func ContextWithToolSharing(ctx context.Context, subjects SharingSubjects) context.Context {
+	return context.WithValue(ctx, toolSharingKey{}, subjects)
+}
+
 // SharingActivityStore publishes only counts from the replica holding the stream.
 // The existing registration broadcast carries them to every BFF and open Fleet
 // view; no additional browser subscription or per-recipient query is needed.
@@ -32,7 +40,22 @@ func (s *streamSession) sharingActivity() map[string]any {
 	// Host tools and signed-in app sessions are owner-only. Model calls
 	// carry the admission decision made on this stream's replica, including
 	// forwarded calls and legacy shares with no individual grant rows.
-	ownerCalls, sharedCalls := len(s.pending)+len(s.sessions), 0
+	ownerCalls, sharedCalls := len(s.sessions), 0
+	workbenchUsers, workbenchGroups := map[string]int{}, map[string]int{}
+	for callID := range s.pending {
+		subjects := s.toolSharing[callID]
+		if subjects.Borrowed {
+			sharedCalls++
+		} else {
+			ownerCalls++
+		}
+		for _, subject := range subjects.UserIds {
+			workbenchUsers[bareSubjectId(subject)]++
+		}
+		for _, subject := range subjects.GroupIds {
+			workbenchGroups[bareSubjectId(subject)]++
+		}
+	}
 	for _, call := range s.modelCalls {
 		if call.sharingSubjects.Borrowed {
 			sharedCalls++
@@ -64,6 +87,7 @@ func (s *streamSession) sharingActivity() map[string]any {
 		"observedAt": time.Now().UTC().Format(time.RFC3339Nano),
 		"ownerCalls": ownerCalls, "sharedCalls": sharedCalls,
 		"users": rows(users), "groups": rows(groups),
+		"workbench": map[string]any{"nodeId": s.server.nodeId, "startedAt": s.sharingStartedAt.Format(time.RFC3339Nano), "observedAt": time.Now().UTC().Format(time.RFC3339Nano), "users": rows(workbenchUsers), "groups": rows(workbenchGroups)},
 	}
 }
 

@@ -319,3 +319,9 @@ builtin revokeComputerPermission {
 builtin refreshComputerPermission {
   approvalId string!
 }
+
+/// Start a catalog review through the work harness. Local models only; no paid fallback.
+/// The owner must explicitly enable the catalog research configuration first.
+@sdk
+@executor("integration.work.openModelCatalogResearch")
+builtin openModelCatalogResearch {}

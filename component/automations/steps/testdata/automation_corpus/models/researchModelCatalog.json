@@ -1,0 +1,102 @@
+{
+  "automation": "models/automations.memql researchModelCatalog",
+  "runs": {
+    "invocation | 0 rows": {
+      "input": {
+        "event": {
+          "kind": "unspecified",
+          "payload": {},
+          "topic": "automation.invocation.researchModelCatalog"
+        },
+        "rows": 0
+      },
+      "outcome": {
+        "calls": [
+          {
+            "kind": "query",
+            "name": "modelProfiles"
+          },
+          {
+            "args": {
+              "catalog": []
+            },
+            "kind": "builtin",
+            "name": "modelCatalogResearchTurn"
+          },
+          {
+            "kind": "mutation",
+            "name": "recordModelCatalogReview"
+          }
+        ],
+        "result": {
+          "output": {
+            "candidates": 0,
+            "reviewed": true
+          },
+          "status": "completed"
+        }
+      }
+    },
+    "invocation | 2 rows": {
+      "input": {
+        "event": {
+          "kind": "unspecified",
+          "payload": {},
+          "topic": "automation.invocation.researchModelCatalog"
+        },
+        "rows": 2
+      },
+      "outcome": {
+        "calls": [
+          {
+            "kind": "query",
+            "name": "modelProfiles"
+          },
+          {
+            "args": {
+              "catalog": [
+                {
+                  "concept": "v1:probe:row",
+                  "id": "v1:probe:row:modelProfiles-1",
+                  "payload": {
+                    "deletionScheduledAt": "<ts>",
+                    "name": "modelProfiles-1",
+                    "primaryEmail": "person1@example.test",
+                    "rank": 100,
+                    "status": "provisioned",
+                    "value": "7"
+                  }
+                },
+                {
+                  "concept": "v1:probe:row",
+                  "id": "v1:probe:row:modelProfiles-2",
+                  "payload": {
+                    "deletionScheduledAt": "<ts>",
+                    "name": "modelProfiles-2",
+                    "primaryEmail": "person2@example.test",
+                    "rank": 100,
+                    "status": "provisioned",
+                    "value": "7"
+                  }
+                }
+              ]
+            },
+            "kind": "builtin",
+            "name": "modelCatalogResearchTurn"
+          },
+          {
+            "kind": "mutation",
+            "name": "recordModelCatalogReview"
+          }
+        ],
+        "result": {
+          "output": {
+            "candidates": 0,
+            "reviewed": true
+          },
+          "status": "completed"
+        }
+      }
+    }
+  }
+}

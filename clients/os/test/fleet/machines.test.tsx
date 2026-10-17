@@ -89,7 +89,7 @@ describe("the machines directory", () => {
       capabilityDescriptor: { displayServer: server, computerUseAvailable: build }, permissions,
     })] }));
     await click(await screen.findByText("Desktop status"));
-    expect(screen.getByText("Computer use").nextElementSibling?.textContent).toMatch(answer);
+    expect(within(screen.getByRole("region", { name: "Permissions" })).getByText("Computer use").nextElementSibling?.textContent).toMatch(answer);
   });
 
   it("keeps computer-use availability unknown when the optional desktop descriptor is absent", async () => {
@@ -98,7 +98,7 @@ describe("the machines directory", () => {
       capabilities: ["HEADLESS", "COMPUTERUSE"], platformInfo: { os: "linux" },
     })] }));
     await click(await screen.findByText("Desktop unreported"));
-    const answer = screen.getByText("Computer use").nextElementSibling?.textContent;
+    const answer = within(screen.getByRole("region", { name: "Permissions" })).getByText("Computer use").nextElementSibling?.textContent;
     expect(answer).toMatch(/not reported.*unknown/i);
     expect(answer).not.toContain("Install");
   });
@@ -314,8 +314,8 @@ describe("the machines directory", () => {
     await click(await screen.findByText("Apps box"));
 
     expect(screen.getByText("Ready")).toBeTruthy();
-    await click(screen.getByRole("button", { name: /^Codex/ }));
-    expect(screen.getByText("Not allowed by Cockpit")).toBeTruthy();
+    expect(screen.queryByRole("button", { name: /^Codex/ })).toBeNull();
+    expect(screen.getByText("Not allowed · Signed in")).toBeTruthy();
   });
 
   it("folds a live update into the list without losing the projection", async () => {

@@ -2137,6 +2137,26 @@ func FleetModelPullBuild(args FleetModelPullArgs) string {
 	return b.String()
 }
 
+// FleetModelSetup -- Read the local catalog, capacity and saved model choices for one of your machines. Does not run or download a model.
+type FleetModelSetupArgs struct {
+	RegistrationId string
+}
+
+// FleetModelSetup calls the engine builtin fleetModelSetup.
+func (qc *QueryClient) FleetModelSetup(ctx context.Context, args FleetModelSetupArgs) (*Result, error) {
+	call := FleetModelSetupBuild(args)
+	return qc.executeNamed(ctx, "fleetModelSetup", call)
+}
+
+func FleetModelSetupBuild(args FleetModelSetupArgs) string {
+	var b strings.Builder
+	b.WriteString("builtin fleetModelSetup(")
+	b.WriteString("registrationId: ")
+	b.WriteString(quoteMemQL(args.RegistrationId))
+	b.WriteString(")")
+	return b.String()
+}
+
 // FleetModels -- List every model the caller's fleet can run right now: the model id, its context window and capability flags, and the machines behind it with their online and busy state. Produced from live worker registrations, never persisted -- the answer is which machines are awake, so a stored copy's staleness would be indistinguishable from the condition it describes. Scoped to the caller's own machines plus the machines lent to them: shared with everyone, or with them or one of their groups. A model call carries the caller's prompts and routes only to those machines. Feeds the fleet machine cards.
 type FleetModelsArgs struct {
 }
@@ -2224,10 +2244,91 @@ func FleetRevokeMachineBuild(args FleetRevokeMachineArgs) string {
 	return b.String()
 }
 
-// FleetSetSharing -- Choose who may use the models on one of YOUR OWN machines. owner keeps inference private; people shares with the users and active group members you name. Fleet is the single sharing control: the saved audience applies to subsequent calls without changing a machine configuration file or reconnecting Cockpit. Sharing grants model inference only, never commands, files, apps or computer control. Only the enrolled owner may change it; cluster administration does not grant permission to lend another person's hardware. New subjects must be offered by fleetShareDirectory. A refusal does not distinguish a missing subject from one you may not select. Existing cluster-wide shares remain readable, but new writes must choose owner or people.
+// FleetSetModelSetup -- Save model choices by purpose on your machine after checking installed capabilities and combined memory. Existing calls finish. Later calls use the saved choices, with a 32K context ceiling.
+type FleetSetModelSetupArgs struct {
+	RegistrationId string
+	Revision       string
+	Choices        map[string]any
+}
+
+// FleetSetModelSetup calls the engine builtin fleetSetModelSetup.
+func (qc *QueryClient) FleetSetModelSetup(ctx context.Context, args FleetSetModelSetupArgs) (*Result, error) {
+	call := FleetSetModelSetupBuild(args)
+	return qc.executeNamed(ctx, "fleetSetModelSetup", call)
+}
+
+func FleetSetModelSetupBuild(args FleetSetModelSetupArgs) string {
+	var b strings.Builder
+	b.WriteString("builtin fleetSetModelSetup(")
+	b.WriteString("registrationId: ")
+	b.WriteString(quoteMemQL(args.RegistrationId))
+	if b.Len() > 27 {
+		b.WriteString(", ")
+	}
+	b.WriteString("revision: ")
+	b.WriteString(quoteMemQL(args.Revision))
+	if b.Len() > 27 {
+		b.WriteString(", ")
+	}
+	b.WriteString("choices: ")
+	b.WriteString(renderMemQLValue(args.Choices))
+	b.WriteString(")")
+	return b.String()
+}
+
+// FleetSetOwnerFeatures -- Enable or disable owner-only commands, signed-in CLIs/apps and desktop control on one of your enrolled machines. Disabling blocks new work and cancels active work using that feature; enabling rechecks readiness and never replays canceled work. Sharing never grants these capabilities. The expected timestamp prevents overwriting another settings change.
+type FleetSetOwnerFeaturesArgs struct {
+	RegistrationId    string
+	Headless          bool
+	Apps              bool
+	ComputerUse       bool
+	ExpectedUpdatedAt string
+}
+
+// FleetSetOwnerFeatures calls the engine builtin fleetSetOwnerFeatures.
+func (qc *QueryClient) FleetSetOwnerFeatures(ctx context.Context, args FleetSetOwnerFeaturesArgs) (*Result, error) {
+	call := FleetSetOwnerFeaturesBuild(args)
+	return qc.executeNamed(ctx, "fleetSetOwnerFeatures", call)
+}
+
+func FleetSetOwnerFeaturesBuild(args FleetSetOwnerFeaturesArgs) string {
+	var b strings.Builder
+	b.WriteString("builtin fleetSetOwnerFeatures(")
+	b.WriteString("registrationId: ")
+	b.WriteString(quoteMemQL(args.RegistrationId))
+	if b.Len() > 30 {
+		b.WriteString(", ")
+	}
+	b.WriteString("headless: ")
+	b.WriteString(fmt.Sprintf("%v", args.Headless))
+	if b.Len() > 30 {
+		b.WriteString(", ")
+	}
+	b.WriteString("apps: ")
+	b.WriteString(fmt.Sprintf("%v", args.Apps))
+	if b.Len() > 30 {
+		b.WriteString(", ")
+	}
+	b.WriteString("computerUse: ")
+	b.WriteString(fmt.Sprintf("%v", args.ComputerUse))
+	if b.Len() > 30 {
+		b.WriteString(", ")
+	}
+	b.WriteString("expectedUpdatedAt: ")
+	b.WriteString(quoteMemQL(args.ExpectedUpdatedAt))
+	b.WriteString(")")
+	return b.String()
+}
+
+// FleetSetSharing -- Choose who may use model inference or fleet workbenches on one of YOUR OWN machines. Each resource has independent consent. owner keeps that resource private; people shares with the users and active group members you name. Fleet is the single sharing control: the saved audience applies to subsequent calls without changing a machine configuration file or reconnecting Cockpit. Sharing grants only the selected resource, never host commands, files, apps or computer control. Pausing preserves the audience, blocks new borrowed admissions, and lets running work finish. Only the enrolled owner may change it; cluster administration does not grant permission to lend another person's hardware. New subjects must be offered by fleetShareDirectory. A refusal does not distinguish a missing subject from one you may not select. Existing cluster-wide shares remain readable, but new writes must choose owner or people.
 type FleetSetSharingArgs struct {
 	// v1:worker:registration.id of the machine to set sharing on. It must be one of the caller's own.
 	RegistrationId string
+	// models (default) or workbench. Each has an independent audience and pause state. Neither grants host access.
+	Resource string
+	// Pause new borrowed admissions without removing the audience. Running work finishes; the owner can continue using the resource. Omitted preserves the saved pause.
+	Paused    bool
+	PausedSet bool // set true to send paused; required because zero-value bool is ambiguous
 	// owner or people. Other values, including cluster, are refused.
 	Mode string
 	// Under people: the v1:identity:user ids to lend the machine to. At most 50 subjects across both lists, including paused entries. Your own id is dropped rather than refused -- your own machine is yours already. Ignored under owner.
@@ -2251,6 +2352,20 @@ func FleetSetSharingBuild(args FleetSetSharingArgs) string {
 	b.WriteString("builtin fleetSetSharing(")
 	b.WriteString("registrationId: ")
 	b.WriteString(quoteMemQL(args.RegistrationId))
+	if args.Resource != "" {
+		if b.Len() > 24 {
+			b.WriteString(", ")
+		}
+		b.WriteString("resource: ")
+		b.WriteString(quoteMemQL(args.Resource))
+	}
+	if args.PausedSet {
+		if b.Len() > 24 {
+			b.WriteString(", ")
+		}
+		b.WriteString("paused: ")
+		b.WriteString(fmt.Sprintf("%v", args.Paused))
+	}
 	if b.Len() > 24 {
 		b.WriteString(", ")
 	}
@@ -2292,6 +2407,8 @@ func FleetSetSharingBuild(args FleetSetSharingArgs) string {
 type FleetShareDirectoryArgs struct {
 	// v1:worker:registration.id of the machine being shared. It must be one of the caller's own.
 	RegistrationId string
+	// models (default) or workbench; selects which existing audience to name.
+	Resource string
 }
 
 // FleetShareDirectory calls the engine builtin fleetShareDirectory.
@@ -2305,6 +2422,13 @@ func FleetShareDirectoryBuild(args FleetShareDirectoryArgs) string {
 	b.WriteString("builtin fleetShareDirectory(")
 	b.WriteString("registrationId: ")
 	b.WriteString(quoteMemQL(args.RegistrationId))
+	if args.Resource != "" {
+		if b.Len() > 28 {
+			b.WriteString(", ")
+		}
+		b.WriteString("resource: ")
+		b.WriteString(quoteMemQL(args.Resource))
+	}
 	b.WriteString(")")
 	return b.String()
 }
@@ -4308,6 +4432,21 @@ func MoveRunHeadBuild(args MoveRunHeadArgs) string {
 	b.WriteString(fmt.Sprintf("%v", args.Version))
 	b.WriteString(")")
 	return b.String()
+}
+
+// OpenModelCatalogResearch -- Start a catalog review through the work harness. Local models only; no paid fallback. The owner must explicitly enable the catalog research configuration first.
+type OpenModelCatalogResearchArgs struct {
+}
+
+// OpenModelCatalogResearch calls the engine builtin openModelCatalogResearch.
+func (qc *QueryClient) OpenModelCatalogResearch(ctx context.Context, args OpenModelCatalogResearchArgs) (*Result, error) {
+	call := OpenModelCatalogResearchBuild(args)
+	return qc.executeNamed(ctx, "openModelCatalogResearch", call)
+}
+
+func OpenModelCatalogResearchBuild(args OpenModelCatalogResearchArgs) string {
+	_ = args
+	return "builtin openModelCatalogResearch()"
 }
 
 // PackageAnalyze -- Analyze a package source offline and return the report, deploying nothing (epic memql#4794, D12). Fetches the tracked source, walks the manifest, discovers the DSL domains and runs the SAME Init-grade gates strict boot runs -- so 'this DSL would refuse boot' is an answer produced here, before a pod is ever asked to run it. Returns {report, ok}: the report names every deployable with its build plan (or 'prebuilt output found -- build skipped'), every DSL domain with construct counts, any Go pack as reported-not-deployable, and every problem found. A refusal carries one of the stable codes in component/packages/refusal.go.

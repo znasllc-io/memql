@@ -33,7 +33,10 @@ function useAppSessionsFeed(enabled = true): AppSessionsState {
   const userId = useSessionIfPresent()?.access?.userId ?? "";
   const feed = useLiveCollection<Row>(enabled && userId ? `fleet:appSessions:${userId}` : null, connection => ({
     concept: APP_SESSION_CONCEPT,
-    seed: async (_cursor, signal) => ({ rows: (await connection.query.appSessionsForUser({}, { signal })).rows(), nextCursor: "" }),
+    seed: async (_cursor, signal) => {
+      const reads = await Promise.all([connection.query.appSessionsForUser({}, { signal }), connection.query.liveAppSessionsForUser({}, { signal })]);
+      return { rows: [...new Map(reads.flatMap(result => result.rows()).map(row => [appSessionFromRow(row).id, row])).values()], nextCursor: "" };
+    },
     reread: async (sessionId, signal) => (await connection.query.appSessionById({ sessionId }, { signal })).rows()[0] ?? null,
     inScope: row => appSessionFromRow(row).ownerUserId === userId,
     paged: false,

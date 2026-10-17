@@ -228,6 +228,7 @@ func (i *Integration) Capabilities() []memql.IntegrationCapability {
 				"partition":    "string (optional) - carried into the prompt.",
 			},
 		},
+		{Name: "modelCatalogResearchTurn", Description: "Research catalog candidates with read-only tools in a local-only work run.", Handler: i.handleModelCatalogResearchTurn},
 	}, knowledgeWorkflowCapabilities()...)
 }
 

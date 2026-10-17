@@ -48,7 +48,7 @@ var catalogCategories = map[string]bool{
 
 var catalogRuntimes = map[string]bool{
 	"ollama": true, "mlx": true, "whispercpp": true, "nemo": true,
-	"kokoro": true, "mflux": true, "comfyui": true,
+	"kokoro": true, "mflux": true, "comfyui": true, "openai-compatible": true, "cloud": true,
 }
 
 var catalogFlags = map[string]bool{

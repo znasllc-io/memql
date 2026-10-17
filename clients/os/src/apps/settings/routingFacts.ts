@@ -1,3 +1,4 @@
+import { useGraphRevision } from "../../live/useGraphRevision";
 import { useCallback, useEffect, useState } from "react";
 
 import type { Row } from "@znasllc-io/memql-sdk-core/client";
@@ -543,6 +544,7 @@ export function useInferenceStatus(enabled: boolean): {
   reload: () => void;
 } {
   const connection = useOsConnection();
+  const liveRevision = useGraphRevision(["v1:worker:registration", "v1:worker:delegationPolicy", "v1:worker:routingPolicy", "v1:models:modelProfile"], enabled);
   const [status, setStatus] = useState<InferenceReading>(UNREAD_INFERENCE);
   const [loading, setLoading] = useState(false);
   const [fetchedAt, setFetchedAt] = useState<number | null>(null);
@@ -573,7 +575,7 @@ export function useInferenceStatus(enabled: boolean): {
       stale = true;
       controller.abort();
     };
-  }, [connection, enabled, epoch]);
+  }, [connection, enabled, epoch, liveRevision]);
 
   return { status, loading, fetchedAt, reload };
 }

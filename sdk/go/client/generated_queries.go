@@ -527,6 +527,28 @@ func ActiveEmbedderBindingBuild(args ActiveEmbedderBindingArgs) string {
 	return "query activeEmbedderBinding()"
 }
 
+// ActiveMachineActivity wraps the query named "activeMachineActivity".
+//
+// Bound concept: v1:worker:activity (machine-readable: BoundConcepts["activeMachineActivity"] in generated_concepts.go).
+type ActiveMachineActivityArgs struct {
+	WorkerId string
+}
+
+// ActiveMachineActivity calls the engine query activeMachineActivity.
+func (qc *QueryClient) ActiveMachineActivity(ctx context.Context, args ActiveMachineActivityArgs) (*Result, error) {
+	call := ActiveMachineActivityBuild(args)
+	return qc.executeNamed(ctx, "activeMachineActivity", call)
+}
+
+func ActiveMachineActivityBuild(args ActiveMachineActivityArgs) string {
+	var b strings.Builder
+	b.WriteString("query activeMachineActivity(")
+	b.WriteString("workerId: ")
+	b.WriteString(quoteMemQL(args.WorkerId))
+	b.WriteString(")")
+	return b.String()
+}
+
 // ActiveProjects -- List active v1:forge:project rows.
 //
 // Bound concept: v1:forge:project (machine-readable: BoundConcepts["activeProjects"] in generated_concepts.go).
@@ -3793,6 +3815,28 @@ func FindEventsBuild(args FindEventsArgs) string {
 	return b.String()
 }
 
+// FirstMachineActivity -- The durable transition from completion-only model history to live receipts.
+//
+// Bound concept: v1:worker:activity (machine-readable: BoundConcepts["firstMachineActivity"] in generated_concepts.go).
+type FirstMachineActivityArgs struct {
+	WorkerId string
+}
+
+// FirstMachineActivity calls the engine query firstMachineActivity.
+func (qc *QueryClient) FirstMachineActivity(ctx context.Context, args FirstMachineActivityArgs) (*Result, error) {
+	call := FirstMachineActivityBuild(args)
+	return qc.executeNamed(ctx, "firstMachineActivity", call)
+}
+
+func FirstMachineActivityBuild(args FirstMachineActivityArgs) string {
+	var b strings.Builder
+	b.WriteString("query firstMachineActivity(")
+	b.WriteString("workerId: ")
+	b.WriteString(quoteMemQL(args.WorkerId))
+	b.WriteString(")")
+	return b.String()
+}
+
 // GeneratedOutputById -- Drill-in read: fetch a generated-output's full content (inline body or attachment ref) by id, gated to the caller. Owned: `row.ownerUserId == actor.userId`. Called by the Library viewer when opening a generated_output artifact resolved from its sourceConceptRef.
 //
 // Bound concept: v1:library:generatedOutput (machine-readable: BoundConcepts["generatedOutputById"] in generated_concepts.go).
@@ -4400,6 +4444,23 @@ func (qc *QueryClient) LadderPolicyCurrent(ctx context.Context, args LadderPolic
 func LadderPolicyCurrentBuild(args LadderPolicyCurrentArgs) string {
 	_ = args
 	return "query ladderPolicyCurrent()"
+}
+
+// LatestModelCatalogReview -- The latest completed research evidence.
+//
+// Bound concept: v1:models:catalogReview (machine-readable: BoundConcepts["latestModelCatalogReview"] in generated_concepts.go).
+type LatestModelCatalogReviewArgs struct {
+}
+
+// LatestModelCatalogReview calls the engine query latestModelCatalogReview.
+func (qc *QueryClient) LatestModelCatalogReview(ctx context.Context, args LatestModelCatalogReviewArgs) (*Result, error) {
+	call := LatestModelCatalogReviewBuild(args)
+	return qc.executeNamed(ctx, "latestModelCatalogReview", call)
+}
+
+func LatestModelCatalogReviewBuild(args LatestModelCatalogReviewArgs) string {
+	_ = args
+	return "query latestModelCatalogReview()"
 }
 
 // LearnedProceduresForOwner -- The caller's learned procedures, newest first, on every rung -- retired included, because Nexus shows where each one stands and the ladder's sweeps walk them all, page by page. A learned procedure is a construct the lift wrote into the `procedure` target namespace; nothing authored is ever written there.
@@ -5135,6 +5196,50 @@ func LiveCustomDomainByHostnameBuild(args LiveCustomDomainByHostnameArgs) string
 	return b.String()
 }
 
+// MachineActivity wraps the query named "machineActivity".
+//
+// Bound concept: v1:worker:activity (machine-readable: BoundConcepts["machineActivity"] in generated_concepts.go).
+type MachineActivityArgs struct {
+	WorkerId string
+}
+
+// MachineActivity calls the engine query machineActivity.
+func (qc *QueryClient) MachineActivity(ctx context.Context, args MachineActivityArgs) (*Result, error) {
+	call := MachineActivityBuild(args)
+	return qc.executeNamed(ctx, "machineActivity", call)
+}
+
+func MachineActivityBuild(args MachineActivityArgs) string {
+	var b strings.Builder
+	b.WriteString("query machineActivity(")
+	b.WriteString("workerId: ")
+	b.WriteString(quoteMemQL(args.WorkerId))
+	b.WriteString(")")
+	return b.String()
+}
+
+// MachineActivityById wraps the query named "machineActivityById".
+//
+// Bound concept: v1:worker:activity (machine-readable: BoundConcepts["machineActivityById"] in generated_concepts.go).
+type MachineActivityByIdArgs struct {
+	ActivityId string
+}
+
+// MachineActivityById calls the engine query machineActivityById.
+func (qc *QueryClient) MachineActivityById(ctx context.Context, args MachineActivityByIdArgs) (*Result, error) {
+	call := MachineActivityByIdBuild(args)
+	return qc.executeNamed(ctx, "machineActivityById", call)
+}
+
+func MachineActivityByIdBuild(args MachineActivityByIdArgs) string {
+	var b strings.Builder
+	b.WriteString("query machineActivityById(")
+	b.WriteString("activityId: ")
+	b.WriteString(quoteMemQL(args.ActivityId))
+	b.WriteString(")")
+	return b.String()
+}
+
 // MagicLinkRequestByTokenHash -- Returns the magic-link request whose tokenHash matches the argument. Zero or one result.
 //
 // Bound concept: v1:identity:magicLinkRequest (machine-readable: BoundConcepts["magicLinkRequestByTokenHash"] in generated_concepts.go).
@@ -5325,6 +5430,23 @@ func MissingCapabilityByKindAndNameBuild(args MissingCapabilityByKindAndNameArgs
 	return b.String()
 }
 
+// ModelCatalogResearchSettings -- The installation-wide research opt-in.
+//
+// Bound concept: v1:models:catalogResearchSettings (machine-readable: BoundConcepts["modelCatalogResearchSettings"] in generated_concepts.go).
+type ModelCatalogResearchSettingsArgs struct {
+}
+
+// ModelCatalogResearchSettings calls the engine query modelCatalogResearchSettings.
+func (qc *QueryClient) ModelCatalogResearchSettings(ctx context.Context, args ModelCatalogResearchSettingsArgs) (*Result, error) {
+	call := ModelCatalogResearchSettingsBuild(args)
+	return qc.executeNamed(ctx, "modelCatalogResearchSettings", call)
+}
+
+func ModelCatalogResearchSettingsBuild(args ModelCatalogResearchSettingsArgs) string {
+	_ = args
+	return "query modelCatalogResearchSettings()"
+}
+
 // ModelEvidenceForKey -- One model's evidence at one level for one week -- the row a fold reads before deciding whether it has already proposed, and the row a decline writes back to.
 // THE THREE ARGUMENTS ARE THE KEY. A fold that read only by model would re-propose at every level on the same evidence, and one that read only by week would collapse two models into one row.
 //
@@ -5413,7 +5535,7 @@ type ModelProfilesArgs struct {
 	// Enum: text | reasoning | omni | vision | audioIn | audioOut | imageGen | videoGen | embeddings
 	Category string
 	// Narrow to one runtime.
-	// Enum: ollama | mlx | whispercpp | nemo | kokoro | mflux | comfyui
+	// Enum: ollama | mlx | whispercpp | nemo | kokoro | mflux | comfyui | openai-compatible | cloud
 	Runtime string
 	// Narrow to entries whose declared floor is exactly this machine class. NOT "everything a machine of this class can run" -- that is a comparison across five values, and doing it here would make the answer depend on an ordering the caller cannot see. The Fleet surface holds the machine's class and filters.
 	// Enum: 16 | 24 | 32 | 64 | 128
@@ -5541,6 +5663,28 @@ func (qc *QueryClient) MyDesktop(ctx context.Context, args MyDesktopArgs) (*Resu
 func MyDesktopBuild(args MyDesktopArgs) string {
 	_ = args
 	return "query myDesktop()"
+}
+
+// MyModelCallsOnMachine -- The caller's own earlier model calls on a selected machine. This does not expose other people's prompts or identities on a shared machine.
+//
+// Bound concept: v1:router:call (machine-readable: BoundConcepts["myModelCallsOnMachine"] in generated_concepts.go).
+type MyModelCallsOnMachineArgs struct {
+	WorkerId string
+}
+
+// MyModelCallsOnMachine calls the engine query myModelCallsOnMachine.
+func (qc *QueryClient) MyModelCallsOnMachine(ctx context.Context, args MyModelCallsOnMachineArgs) (*Result, error) {
+	call := MyModelCallsOnMachineBuild(args)
+	return qc.executeNamed(ctx, "myModelCallsOnMachine", call)
+}
+
+func MyModelCallsOnMachineBuild(args MyModelCallsOnMachineArgs) string {
+	var b strings.Builder
+	b.WriteString("query myModelCallsOnMachine(")
+	b.WriteString("workerId: ")
+	b.WriteString(quoteMemQL(args.WorkerId))
+	b.WriteString(")")
+	return b.String()
 }
 
 // MyRequests -- List the caller's own submitted requests, newest-first. Open to any team member.
@@ -14014,6 +14158,28 @@ func WorkViewerOrganizationBuild(args WorkViewerOrganizationArgs) string {
 	return b.String()
 }
 
+// WorkbenchExecutionForRun -- The caller's durable execution choice, shared by every agent replica.
+//
+// Bound concept: v1:workbench:executionBinding (machine-readable: BoundConcepts["workbenchExecutionForRun"] in generated_concepts.go).
+type WorkbenchExecutionForRunArgs struct {
+	RunId string
+}
+
+// WorkbenchExecutionForRun calls the engine query workbenchExecutionForRun.
+func (qc *QueryClient) WorkbenchExecutionForRun(ctx context.Context, args WorkbenchExecutionForRunArgs) (*Result, error) {
+	call := WorkbenchExecutionForRunBuild(args)
+	return qc.executeNamed(ctx, "workbenchExecutionForRun", call)
+}
+
+func WorkbenchExecutionForRunBuild(args WorkbenchExecutionForRunArgs) string {
+	var b strings.Builder
+	b.WriteString("query workbenchExecutionForRun(")
+	b.WriteString("runId: ")
+	b.WriteString(quoteMemQL(args.RunId))
+	b.WriteString(")")
+	return b.String()
+}
+
 // WorkerByIdentityId -- Look up the worker registration owned by an identity row.
 // The `row.ownerUserId == actor.userId` conjunct is not redundant with the concept's tier -- it is what makes this read's result set the SAME before and after enforcement, which TestRowAuthzEnforcementLandGate is the gate for. It is satisfied at runtime because the only caller, component/worker's register handshake, runs under auth.ContextWithUserActor for the owner the worker_token's identity row named. A worker authenticates as worker:<id>, so without that stamp this read returns nothing at all -- which is the failure that reads as "this machine has never registered" and silently creates a duplicate row on every reconnect.
 //
@@ -14033,6 +14199,28 @@ func WorkerByIdentityIdBuild(args WorkerByIdentityIdArgs) string {
 	b.WriteString("query workerByIdentityId(")
 	b.WriteString("identityId: ")
 	b.WriteString(quoteMemQL(args.IdentityId))
+	b.WriteString(")")
+	return b.String()
+}
+
+// WorkerInvocationById wraps the query named "workerInvocationById".
+//
+// Bound concept: v1:worker:invocation (machine-readable: BoundConcepts["workerInvocationById"] in generated_concepts.go).
+type WorkerInvocationByIdArgs struct {
+	InvocationId string
+}
+
+// WorkerInvocationById calls the engine query workerInvocationById.
+func (qc *QueryClient) WorkerInvocationById(ctx context.Context, args WorkerInvocationByIdArgs) (*Result, error) {
+	call := WorkerInvocationByIdBuild(args)
+	return qc.executeNamed(ctx, "workerInvocationById", call)
+}
+
+func WorkerInvocationByIdBuild(args WorkerInvocationByIdArgs) string {
+	var b strings.Builder
+	b.WriteString("query workerInvocationById(")
+	b.WriteString("invocationId: ")
+	b.WriteString(quoteMemQL(args.InvocationId))
 	b.WriteString(")")
 	return b.String()
 }

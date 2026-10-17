@@ -41,6 +41,7 @@ export interface Draft {
   platform: InstallPlatform;
   computerUse: boolean;
   inference: boolean;
+  workbench?: boolean;
   userLocal?: boolean;
 }
 
@@ -152,7 +153,7 @@ export function isSteady(machine: MachineRow | null, beats: number, now: Date): 
 export type CheckState = Extract<StopState, "done" | "current" | "open" | "skipped" | "stopped" | "unknown" | "ahead">;
 
 export interface Check {
-  id: "connection" | "build" | "permissions" | "display" | "runtime" | "models" | "response";
+  id: "connection" | "build" | "permissions" | "display" | "runtime" | "models" | "response" | "workbench" | "headless" | "apps";
   name: string;
   state: CheckState;
   /** The state in words: the answer once settled, what is being waited on
@@ -191,6 +192,11 @@ export function checksFor(
   response: ModelResponse = { state: "waiting" },
 ): Check[] {
   const checks: Check[] = [connectionCheck(machine, beats, now), buildCheck(draft, machine)];
+  checks.push({ id: "headless", name: "Commands and files", state: machine.capabilities.includes("HEADLESS") ? "done" : "unknown", answer: machine.capabilities.includes("HEADLESS") ? "Available to the machine’s owner. Individual operations still need permission." : "Not reported by Cockpit." });
+  checks.push({ id: "apps", name: "CLIs and apps", state: machine.apps.some(app => app.runnable) ? "done" : "skipped", answer: machine.apps.some(app => app.runnable) ? "Available to the machine’s owner." : "No ready apps reported. Install, allow and sign in to an app when needed." });
+  if (draft.workbench) checks.push(machine.capabilities.includes("WORKBENCH") && (machine.workbenchContract ?? 0) >= 1
+    ? { id: "workbench", name: "Fleet workbenches", state: "done", answer: "Isolated workspaces available on this machine. Sharing is managed separately in Settings." }
+    : { id: "workbench", name: "Fleet workbenches", state: "open", answer: "The isolated runtime is not available yet.", repair: "Start Docker with at least 3 CPUs and 4 GiB assigned, then run workbench setup. Model inference and owner-only features are independent.", command: `${draft.userLocal ? "~/.memql/bin/" : ""}memql worker setup --workbench` });
   if (draft.computerUse && draft.platform === "mac") checks.push(permissionsCheck(machine, draft));
   if (draft.computerUse && draft.platform === "linux") checks.push(displayCheck(machine));
   if (draft.inference) {
@@ -424,6 +430,7 @@ export function draftSummary(draft: Draft): string {
   const parts = [INSTALL_PLATFORM_LABEL[draft.platform]];
   if (draft.computerUse) parts.push("computer-use build");
   if (draft.inference) parts.push("local models");
+  if (draft.workbench) parts.push("Fleet workbenches");
   const name = draft.name.trim();
   return name === "" ? parts.join(", ") : `${name} -- ${parts.join(", ")}`;
 }
@@ -654,7 +661,7 @@ export function barFor(facts: FlowFacts, checks: readonly Check[], pulling = fal
   const machine = facts.machine;
   const shown = machine === null ? label : machineName(machine);
   const settled = checksSettled(checks);
-  const pending = checks.find((c) => !checkIsSettled(c) && c.state !== "ahead");
+  const pending = checks.find(c => c.state === "stopped") ?? checks.find((c) => !checkIsSettled(c) && c.state !== "ahead");
   const stopped = checks.some((c) => c.state === "stopped");
   const repair = checks.find((c) => c.act !== undefined)?.act;
   const canRepair = facts.connected && machine !== null && isWorkerOnline(machine, facts.now);
@@ -666,7 +673,7 @@ export function barFor(facts: FlowFacts, checks: readonly Check[], pulling = fal
         ? [{ id: repair, label: repair === "retryResponse" ? "Retry" : "Download models", tone: "primary" }]
         : [];
   return {
-    state: settled ? "Ready" : stopped ? "Connected, with a problem" : "Connected",
+    state: settled ? "Ready" : stopped ? `${pending?.name ?? "Feature setup"} needs attention` : "Connected",
     detail: settled
       ? `${shown} is ready to use.`
       : pending === undefined

@@ -38,17 +38,18 @@ seed modelProfile qwen35_4b {
   family:           "qwen3.5"
   params:           4660000000
   quant:            "Q4_K_M"
-  sizeBytes:        3400000000
-  memoryNeedBytes:  0
+  sizeBytes:        4000000000
+  memoryNeedBytes:  8000000000
   contextWindow:    262144
   flags:            ["structured", "tools", "thinking", "vision", "streaming"]
   dimensions:       0
   license:          "apache-2.0"
   source:           "https://ollama.com/library/qwen3.5:4b"
+  reviewedAt:       "2026-10-15T00:00:00Z"
   recommendedFor:   []
   minMachineClass:  "16"
   offeredOn:        ["macos", "linux"]
-  notes:            "A 3.4 GB download for a smaller working set. Standalone setup chooses it below class 16; the engine class ladder still starts at 16. Residency below that floor depends on available memory and context, so no simultaneous-residency claim is made."
+  notes:            "Compact conversation, tools and vision. Planning allowance: 8 GB at up to 32K context, including runtime and image overhead; not a benchmark. Source lists 3.3–4.0 GB artifacts. Recheck the exact runtime variant before increasing context."
   active:           true
   curated:          true
 }
@@ -69,6 +70,7 @@ seed modelProfile qwen35_9b {
   dimensions:       0
   license:          "apache-2.0"
   source:           "https://ollama.com/library/qwen3.5"
+  reviewedAt:       "2026-10-15T00:00:00Z"
   recommendedFor:   ["fast", "strong", "reasoning"]
   minMachineClass:  "16"
   offeredOn:        ["macos", "linux"]
@@ -93,6 +95,7 @@ seed modelProfile gemma4_12b {
   dimensions:       0
   license:          "gemma"
   source:           "https://ollama.com/library/gemma4"
+  reviewedAt:       "2026-10-15T00:00:00Z"
   recommendedFor:   ["fast"]
   minMachineClass:  "24"
   offeredOn:        ["macos", "linux"]
@@ -117,6 +120,7 @@ seed modelProfile qwen38_27b {
   dimensions:       0
   license:          "apache-2.0"
   source:           "https://ollama.com/library/qwen3.8"
+  reviewedAt:       "2026-10-15T00:00:00Z"
   recommendedFor:   ["fast", "strong", "reasoning"]
   minMachineClass:  "24"
   offeredOn:        ["macos", "linux"]
@@ -165,6 +169,7 @@ seed modelProfile qwen36_35b {
   dimensions:       0
   license:          "apache-2.0"
   source:           "https://ollama.com/library/qwen3.6/tags"
+  reviewedAt:       "2026-10-15T00:00:00Z"
   recommendedFor:   []
   minMachineClass:  "32"
   offeredOn:        ["macos", "linux"]
@@ -241,6 +246,7 @@ seed modelProfile gptoss_20b {
   dimensions:       0
   license:          "apache-2.0"
   source:           "https://ollama.com/library/gpt-oss"
+  reviewedAt:       "2026-10-15T00:00:00Z"
   recommendedFor:   []
   minMachineClass:  "16"
   offeredOn:        ["macos", "linux"]
@@ -265,6 +271,7 @@ seed modelProfile gemma4_26b {
   dimensions:       0
   license:          "gemma"
   source:           "https://ollama.com/library/gemma4"
+  reviewedAt:       "2026-10-15T00:00:00Z"
   recommendedFor:   []
   minMachineClass:  "24"
   offeredOn:        ["macos", "linux"]
@@ -289,6 +296,7 @@ seed modelProfile gptoss_120b {
   dimensions:       0
   license:          "apache-2.0"
   source:           "https://ollama.com/library/gpt-oss"
+  reviewedAt:       "2026-10-15T00:00:00Z"
   recommendedFor:   []
   minMachineClass:  "128"
   offeredOn:        ["macos", "linux"]
@@ -313,6 +321,7 @@ seed modelProfile gemma4_e4b_reasoning {
   dimensions:       0
   license:          "gemma"
   source:           "https://ollama.com/library/gemma4"
+  reviewedAt:       "2026-10-15T00:00:00Z"
   recommendedFor:   []
   minMachineClass:  "24"
   offeredOn:        ["macos", "linux"]
@@ -376,6 +385,7 @@ seed modelProfile gemma4_e4b_audio {
   dimensions:       0
   license:          "gemma"
   source:           "https://ollama.com/library/gemma4"
+  reviewedAt:       "2026-10-15T00:00:00Z"
   recommendedFor:   ["fast"]
   minMachineClass:  "16"
   offeredOn:        ["macos", "linux"]
@@ -400,6 +410,7 @@ seed modelProfile whisper_large_v3_turbo {
   dimensions:       0
   license:          "mit"
   source:           "https://huggingface.co/openai/whisper-large-v3-turbo"
+  reviewedAt:       "2026-10-15T00:00:00Z"
   recommendedFor:   ["fast"]
   minMachineClass:  "16"
   offeredOn:        ["macos", "linux"]
@@ -424,6 +435,7 @@ seed modelProfile parakeet_tdt_06b_v3 {
   dimensions:       0
   license:          "cc-by-4.0"
   source:           "https://huggingface.co/nvidia/parakeet-tdt-0.6b-v3"
+  reviewedAt:       "2026-10-15T00:00:00Z"
   recommendedFor:   ["fast"]
   minMachineClass:  "16"
   offeredOn:        ["macos", "linux"]
@@ -477,6 +489,7 @@ seed modelProfile kokoro_82m {
   dimensions:       0
   license:          "apache-2.0"
   source:           "https://huggingface.co/hexgrad/Kokoro-82M"
+  reviewedAt:       "2026-10-15T00:00:00Z"
   recommendedFor:   ["fast"]
   minMachineClass:  "16"
   offeredOn:        ["macos", "linux"]
@@ -554,6 +567,7 @@ seed modelProfile flux2_klein_4b {
   dimensions:       0
   license:          "apache-2.0"
   source:           "https://ollama.com/x/flux2-klein"
+  reviewedAt:       "2026-10-15T00:00:00Z"
   recommendedFor:   ["fast"]
   minMachineClass:  "24"
   offeredOn:        ["macos"]
@@ -710,6 +724,7 @@ seed modelProfile qwen3_embedding_06b {
   dimensions:       1024
   license:          "apache-2.0"
   source:           "https://ollama.com/library/qwen3-embedding"
+  reviewedAt:       "2026-10-15T00:00:00Z"
   recommendedFor:   ["embeddings"]
   minMachineClass:  "16"
   offeredOn:        ["macos", "linux"]
@@ -734,6 +749,7 @@ seed modelProfile qwen3_embedding_4b {
   dimensions:       2560
   license:          "apache-2.0"
   source:           "https://ollama.com/library/qwen3-embedding"
+  reviewedAt:       "2026-10-15T00:00:00Z"
   recommendedFor:   []
   minMachineClass:  "32"
   offeredOn:        ["macos", "linux"]
@@ -758,6 +774,7 @@ seed modelProfile qwen3_embedding_8b {
   dimensions:       4096
   license:          "apache-2.0"
   source:           "https://ollama.com/library/qwen3-embedding"
+  reviewedAt:       "2026-10-15T00:00:00Z"
   recommendedFor:   []
   minMachineClass:  "64"
   offeredOn:        ["macos", "linux"]
@@ -812,4 +829,58 @@ seed modelProfile bge_m3 {
   notes:            "The same width as the 0.6B Qwen, so a fleet can switch between them without re-embedding into a new table -- two bindings, one width, two tables all the same."
   active:           true
   curated:          true
+}
+
+seed catalogResearchSettings weeklyCatalogResearch {
+  id: "weekly"
+  enabled: false
+  ownerUserId: ""
+}
+
+// Source-reviewed additions for the machine setup baseline, 2026-10-15.
+// The already-advertised Cockpit ID is kept distinct from the Ollama pull ID.
+seed modelProfile fluxKleinCockpit {
+  id: "flux-klein-cockpit"
+  modelId: "flux2-klein-4b"
+  category: "imageGen"
+  runtime: "openai-compatible"
+  family: "flux2-klein"
+  params: 4000000000
+  quant: "Q4"
+  sizeBytes: 0
+  memoryNeedBytes: 13000000000
+  contextWindow: 0
+  flags: ["imageGen"]
+  source: "https://bfl.ai/blog/flux2-klein-towards-interactive-visual-intelligence"
+  reviewedAt: "2026-10-15T00:00:00Z"
+  license: "apache-2.0"
+  recommendedFor: []
+  minMachineClass: "16"
+  offeredOn: ["macos", "linux"]
+  notes: "Image generation through an installed compatible runtime. Uses the publisher's conservative 13 GB planning allowance; exact use varies with resolution and runtime. Download through this catalog is unavailable until an artifact size is verified."
+  active: true
+  curated: true
+}
+
+seed modelProfile cloudEmbeddingReference {
+  id: "openai-text-embedding-3-large"
+  modelId: "text-embedding-3-large"
+  category: "embeddings"
+  runtime: "cloud"
+  family: "openai"
+  params: 0
+  sizeBytes: 0
+  memoryNeedBytes: 0
+  contextWindow: 8192
+  flags: []
+  dimensions: 3072
+  source: "https://developers.openai.com/api/docs/models/text-embedding-3-large"
+  reviewedAt: "2026-10-15T00:00:00Z"
+  license: "proprietary-api"
+  recommendedFor: []
+  minMachineClass: "16"
+  offeredOn: []
+  notes: "Hosted embedding option. Requires a configured provider and sends input to that provider. Kept for comparison; it does not replace a local recommendation or change an existing memory-search binding."
+  active: true
+  curated: true
 }

@@ -1,0 +1,22 @@
+use work.builtins.{ openModelCatalogResearch }
+use knowledge.builtins.{ modelCatalogResearchTurn }
+
+/// Weekly catalog research, shipped OFF through its saved opt-in setting.
+/// A cluster-wide lease admits one scheduler; the work harness owns execution and budgets.
+@trigger(schedule="0 0 9 * * 1", node="planner", lease="model-catalog-research")
+automation weeklyModelCatalogResearch {
+  settings := query modelCatalogResearchSettings()
+  for setting in settings if setting.enabled == true {
+    builtin openModelCatalogResearch()
+  }
+}
+
+/// Every source fetch and model call belongs to this journaled work run.
+/// Findings update the catalog as review candidates; they cannot change defaults.
+@template
+automation researchModelCatalog {
+  current := query modelProfiles()
+  report := builtin modelCatalogResearchTurn(catalog: current)
+  mutation recordModelCatalogReview(runId: report.runId, summary: report.summary, findings: report.findings)
+  return { reviewed: true, candidates: report.findings.count() }
+}

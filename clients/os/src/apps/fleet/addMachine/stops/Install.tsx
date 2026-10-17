@@ -32,6 +32,7 @@ export function InstallStop({
     token,
     computerUse: draft.computerUse,
     inference: draft.inference,
+    workbench: draft.workbench,
     userLocal: draft.userLocal,
     localTest,
   });

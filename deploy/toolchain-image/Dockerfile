@@ -18,6 +18,8 @@
 #   kubectl   1.32.13  the minor of scripts/k3d/up.sh's K3S_VERSION, the deploy
 #                      target's Kubernetes (the patch may differ)
 #   docker    29.8.2   the CLIENT only; there is no daemon (see its stage)
+#   GCC + X11/PNG development libraries for Cockpit's Linux computer-use build;
+#   on AMD64, an ARM64 cross compiler, target libraries and QEMU verification.
 #   git, make, bash, curl, tar, gzip, unzip, jq, python3 (with PyYAML),
 #   coreutils, ca-certificates, and postgresql-client (psql, pg_isready)
 #
@@ -55,11 +57,12 @@
 # `docker run -v "$PWD:/workspace"` from a machine whose uid is not 1000.
 #
 # BUILD
-#   Release (GitHub build server -> GHCR):  .github/workflows/build-toolchain-image.yml
+#   Native release: memql-package.yaml build-tools.toolchain -> verified OCI
+#                   artifact -> reviewed toolchain-release publication to GHCR
 #   Local check:   docker build -t memql-toolchain:local deploy/toolchain-image
 #                  deploy/toolchain-image/smoke-test.sh memql-toolchain:local
 #
-# An image that runs in a cluster is built by the build server, never on an
+# An image that runs in a cluster is built by the isolated build server, never on an
 # operator machine (CLAUDE.md, "Image builds"); the local build proves the
 # Dockerfile and goes nowhere.
 
@@ -156,6 +159,8 @@ RUN set -eux; \
 # ------------------------------------------------------------------------------
 FROM debian:bookworm-slim@sha256:7c7b2c966bc9ee8cedfeef67e0e279108992c77681fa595db4a9d65c06ccc587
 
+ARG TARGETARCH
+
 # bash, coreutils and tar are already in the base; they are named because the
 # step contract depends on them (the step wrapper frames artifacts with
 # `tar -czf - | base64`, hence gzip too). unzip is how scripts/dev/proto-gen.sh
@@ -183,6 +188,8 @@ RUN set -eux; \
         gzip \
         jq \
         fonts-liberation \
+        gcc \
+        g++ \
         libasound2 \
         libatk-bridge2.0-0 \
         libatspi2.0-0 \
@@ -192,7 +199,15 @@ RUN set -eux; \
         libnss3 \
         libsecret-1-0 \
         libxkbfile1 \
+        libx11-dev \
+        libxi-dev \
+        libxtst-dev \
+        libxinerama-dev \
+        libxkbcommon-dev \
+        libxkbcommon-x11-dev \
+        libpng-dev \
         make \
+        pkg-config \
         postgresql-client \
         python3 \
         python3-yaml \
@@ -200,6 +215,15 @@ RUN set -eux; \
         unzip \
         xauth \
         xvfb; \
+    if [ "$TARGETARCH" = amd64 ]; then \
+        dpkg --add-architecture arm64; \
+        apt-get update; \
+        apt-get install -y --no-install-recommends \
+            gcc-aarch64-linux-gnu g++-aarch64-linux-gnu qemu-user \
+            libx11-dev:arm64 libxi-dev:arm64 libxtst-dev:arm64 \
+            libxinerama-dev:arm64 libxkbcommon-dev:arm64 \
+            libxkbcommon-x11-dev:arm64 libpng-dev:arm64; \
+    fi; \
     rm -rf /var/lib/apt/lists/*; \
     groupadd --gid 1000 memql; \
     useradd --uid 1000 --gid 1000 --create-home --home-dir /home/memql --shell /bin/bash memql; \
@@ -239,7 +263,8 @@ USER 1000:1000
 # A broken copy fails the build here; deploy/toolchain-image/smoke-test.sh is
 # the full check, and the release lane runs it before anything is pushed.
 RUN go version && node --version && protoc --version && git --version && psql --version && \
-    kubectl version --client && docker --version
+    kubectl version --client && docker --version && \
+    gcc --version && pkg-config --exists x11 xi xtst xinerama xkbcommon xkbcommon-x11 libpng
 
 LABEL org.opencontainers.image.title="memql-toolchain" \
       org.opencontainers.image.description="The container MemQL pipeline steps run in: Go, Node, protoc, Tailwind, kubectl, the Docker client (no daemon), git, make, jq, python3 and the PostgreSQL client on Debian bookworm, as uid 1000" \
