@@ -3,7 +3,7 @@ import type { StopState } from "../../../kit/Rail";
 import { formatFreshness } from "../../../kit/format";
 import { isWorkerOnline, ONLINE_WINDOW_SECONDS } from "../online";
 import { computerUseStatus, hasRoundTrip, isRevoked, machineName, type MachineRow } from "../rows";
-import { machineModelsFrom, type ModelPull } from "../machines/models";
+import { isChatModel, machineModelsFrom, type ModelPull } from "../machines/models";
 import type { ModelResponse } from "./useModelResponse";
 import {
   INSTALL_PLATFORM_LABEL,
@@ -195,12 +195,12 @@ export function checksFor(
   if (draft.computerUse && draft.platform === "linux") checks.push(displayCheck(machine));
   if (draft.inference) {
     checks.push(...inferenceChecks(machine, pulls, draft));
-    const model = machineModelsFrom(machine.reportedLabels).find(model => !model.embeddings);
+    const model = machineModelsFrom(machine.reportedLabels).find(isChatModel);
     const available = checks.find(check => check.id === "models")?.state === "done";
     checks.push(!available
       ? { id: "response", name: "Model response", state: "ahead", answer: "After the models are available." }
       : !model
-        ? { id: "response", name: "Model response", state: "open", answer: "A text model is needed to verify a response.", repair: "Only embedding models are available. Add a text model to complete this check.", act: "pullRecommended" }
+        ? { id: "response", name: "Model response", state: "open", answer: "A text model is needed to verify a response.", repair: "The available models do not support this text check. Add a text model to complete it.", act: "pullRecommended" }
         : response.state === "passed"
           ? { id: "response", name: "Model response", state: "done", answer: "Response verified on this machine." }
           : response.state === "failed"
