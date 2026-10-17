@@ -105,7 +105,8 @@ export interface LiveCollectionSpec<T = Row> {
   // about to move to the `granted` tier: there, the id-only path is the one
   // most events will take, and having two code paths means the trusted one is
   // the one that stops being exercised and quietly rots. Making the re-read
-  // the ONLY path costs a round trip per event and removes the branch.
+  // the ONLY path removes the branch. Repeated events for a row are coalesced,
+  // and background re-reads share a concurrency limit across the connection.
   //
   // Requires `reread`; without it this is ignored, because dropping every
   // event would be a worse answer than trusting the payload.
@@ -206,6 +207,41 @@ function isDeleteKind(kind: string): boolean {
   return kind === "NODE_DELETED";
 }
 
+// The bridge defaults to four active queries, with a bounded waiting queue.
+// Live refreshes must leave room for page loads and user actions. One queue
+// belongs to the connection's LiveStore, not each pane independently.
+class RereadQueue {
+  private active = 0;
+  private readonly pending = new Set<() => Promise<void>>();
+
+  enqueue(read: () => Promise<void>): () => void {
+    this.pending.add(read);
+    this.drain();
+    return () => { this.pending.delete(read); };
+  }
+
+  private drain(): void {
+    while (this.active < 2) {
+      const read = this.pending.values().next().value;
+      if (!read) return;
+      this.pending.delete(read);
+      this.active++;
+      // Defer invocation so events delivered together can share one read.
+      void Promise.resolve().then(read).catch(() => {}).finally(() => {
+        this.active--;
+        this.drain();
+      });
+    }
+  }
+}
+
+interface PendingReread {
+  abort: AbortController;
+  running: boolean;
+  dirty: boolean;
+  cancel: () => void;
+}
+
 export class LiveCollection<T = Row> {
   private rowsById = new Map<string, T>();
   private order: string[] = [];
@@ -240,11 +276,13 @@ export class LiveCollection<T = Row> {
   private closed = false;
   private refs = 0;
   private lingerTimer: ReturnType<typeof setTimeout> | null = null;
+  private readonly rereads = new Map<string, PendingReread>();
 
   constructor(
     private readonly spec: LiveCollectionSpec<T>,
     private readonly subscriptions: SubscriptionManager | null,
     private readonly lingerMs: number,
+    private readonly rereadQueue = new RereadQueue(),
   ) {}
 
   get snapshot(): LiveSnapshot<T> {
@@ -319,6 +357,7 @@ export class LiveCollection<T = Row> {
   markDisconnected(): void {
     if (this.closed) return;
     this.seedAbort?.abort();
+    this.clearRereads();
     this.setState("disconnected");
   }
 
@@ -326,6 +365,7 @@ export class LiveCollection<T = Row> {
     if (this.closed) return;
     this.closed = true;
     this.seedAbort?.abort();
+    this.clearRereads();
     this.unsubscribe?.();
     this.unsubscribe = null;
     if (this.lingerTimer !== null) {
@@ -346,6 +386,7 @@ export class LiveCollection<T = Row> {
         this.unsubscribe = this.subscriptions.subscribeGraph((event) => this.fold(event), {
           concept: this.spec.concept,
           actions: this.spec.actions ?? ["created", "updated", "deleted"],
+          idOnly: !!(this.spec.rereadEveryEvent && this.spec.reread),
         });
       } catch (err) {
         // A refused subscribe does not break the collection -- ordinary reads
@@ -443,6 +484,7 @@ export class LiveCollection<T = Row> {
     if (id === "") return;
 
     if (isDeleteKind(event.kind)) {
+      this.cancelReread(id);
       // The removal's own time, when it carries one, is what keeps an older
       // copy from bringing the row back (see `gone`).
       this.arrive(id, null, versionTimeOf(event.payload));
@@ -457,23 +499,64 @@ export class LiveCollection<T = Row> {
       // not entitled to the row, and announcing that one changed would leak
       // exactly what the gate withheld.
       if (!reread) return;
-      const abort = new AbortController();
-      void reread(id, abort.signal)
-        .then((row) => {
-          if (this.closed) return;
-          // Arrives when the re-read lands, not when the event did: that is
-          // the moment its answer is known, and a seed reading then keeps it.
-          this.arrive(id, row);
-        })
-        .catch(() => {
-          // Refused, or the stream dropped. Neither is something to render.
-        });
+      this.requestReread(id);
       return;
     }
 
     const payload = event.payload;
     if (!payload) return;
     this.arrive(id, payload as unknown as T);
+  }
+
+  private requestReread(id: string): void {
+    const reread = this.spec.reread;
+    if (!reread || this.closed) return;
+    const pending = this.rereads.get(id);
+    if (pending) {
+      // A queued read has not taken its snapshot yet. An in-flight one may
+      // have, so remember one follow-up to cover changes during that read.
+      if (pending.running) pending.dirty = true;
+      return;
+    }
+    const next: PendingReread = {
+      abort: new AbortController(), running: false, dirty: false, cancel: () => {},
+    };
+    this.rereads.set(id, next);
+    next.cancel = this.rereadQueue.enqueue(async () => {
+      if (this.rereads.get(id) !== next) return;
+      next.running = true;
+      try {
+        const row = await reread(id, next.abort.signal);
+        // A delete, disconnect or teardown can invalidate even an unversioned
+        // answer, and a read is allowed to settle after its signal was aborted.
+        if (this.rereads.get(id) === next) this.arrive(id, row);
+      } catch {
+        // Preserve the authorized-read contract: a refusal is not rendered.
+      } finally {
+        if (this.rereads.get(id) === next) {
+          this.rereads.delete(id);
+          if (next.dirty) this.requestReread(id);
+        }
+      }
+    });
+  }
+
+  private cancelReread(id: string): void {
+    const pending = this.rereads.get(id);
+    if (!pending) return;
+    this.rereads.delete(id);
+    pending.cancel();
+    // Keep an in-flight slot until the read settles. Removing a row alone
+    // must not free capacity while the server is still answering its read.
+  }
+
+  private clearRereads(): void {
+    const pending = [...this.rereads.values()];
+    this.rereads.clear();
+    for (const read of pending) {
+      read.cancel();
+      read.abort.abort();
+    }
   }
 
   // arrive folds one change onto the rows on screen and, while a seed reads,
@@ -725,6 +808,7 @@ export class LiveStore {
   private readonly gapListeners = new Set<() => void>();
   private lastSeq = 0;
   private disposed = false;
+  private readonly rereadQueue = new RereadQueue();
 
   constructor(
     private readonly host: LiveStoreHost,
@@ -776,7 +860,7 @@ export class LiveStore {
       // methods its subject uses. The declared type says "a manager or null";
       // an absent field is neither, and the collection's own guard is what
       // turns that into "no liveness" rather than a call on undefined.
-      existing = new LiveCollection<T>(spec, this.host.subscriptions ?? null, this.lingerMs);
+      existing = new LiveCollection<T>(spec, this.host.subscriptions ?? null, this.lingerMs, this.rereadQueue);
       this.collections.set(key, existing as unknown as LiveCollection<never>);
     }
     existing.retain();

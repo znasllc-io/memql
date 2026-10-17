@@ -19,6 +19,7 @@
 /// and the run key makes a retry open only what the failed attempt did not.
 @trigger(event="node.created", concept="v1:platform:inboundRequest")
 @filter(row => row.source == "github" && row.status == "received")
+@journalOnWrite
 automation triggerPipelinesOnGitHubDelivery {
   args {
     id  any

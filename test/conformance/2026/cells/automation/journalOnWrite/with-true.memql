@@ -1,0 +1,3 @@
+@template
+@journalOnWrite(true)
+automation invalidPolicy { return true }
