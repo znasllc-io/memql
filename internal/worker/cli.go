@@ -539,6 +539,7 @@ var setupNonInteractive bool
 // in a test without a terminal, a machine, or an os.Exit. See
 // TestSetupFlags.
 type setupFlags struct {
+	workbench      bool
 	nonInteractive bool
 	inference      bool
 	configPath     string
@@ -549,6 +550,7 @@ type setupFlags struct {
 func parseSetupFlags(args []string) setupFlags {
 	fs := flag.NewFlagSet("worker setup", flag.ExitOnError)
 	nonInteractive := fs.Bool("non-interactive", false, "never prompt; report what is missing and exit 3 (a question could not be asked), 4 (not granted) or 5 (probe failed)")
+	workbench := fs.Bool("workbench", false, "enable isolated Fleet workbenches with resource limits")
 	inference := fs.Bool("inference", false, "set this machine up to serve local models: runtime, models, models.allow")
 	configPath := fs.String("config", DefaultConfigPath(), "path to worker.yaml (its directory holds policy.yaml)")
 	runtimeFlag := fs.String("runtime", "", "with --inference: docker | native, overriding the runtime this platform would choose. On its own: kokoro | image, to install that runtime")
@@ -556,11 +558,11 @@ func parseSetupFlags(args []string) setupFlags {
 	fs.Var(&modelIDs, "model", "with --inference: a model id to pull; repeatable (default: the recommended set for this machine's class)")
 	_ = fs.Parse(args)
 	return setupFlags{
-		nonInteractive: *nonInteractive,
-		inference:      *inference,
-		configPath:     *configPath,
-		runtimeFlag:    *runtimeFlag,
-		modelIDs:       modelIDs,
+		workbench: *workbench, nonInteractive: *nonInteractive,
+		inference:   *inference,
+		configPath:  *configPath,
+		runtimeFlag: *runtimeFlag,
+		modelIDs:    modelIDs,
 	}
 }
 
@@ -625,6 +627,17 @@ func wrapJoin(text string) string {
 func handleSetup(args []string) {
 	f := parseSetupFlags(args)
 	setupNonInteractive = f.nonInteractive
+	if f.workbench {
+		if f.inference || f.runtimeFlag != "" || len(f.modelIDs) > 0 {
+			fmt.Fprintln(os.Stderr, "Run --workbench separately from model setup.")
+			os.Exit(SetupExitUsage)
+		}
+		if err := setupWorkbench(context.Background(), f.configPath, os.Stdout); err != nil {
+			fmt.Fprintln(os.Stderr, "Fleet workbench setup could not finish:", err)
+			os.Exit(1)
+		}
+		return
+	}
 
 	// --inference IS ITS OWN COMMAND, and the branch is here rather than
 	// inside the wizard so the computer-use pre-flight is UNTOUCHED when

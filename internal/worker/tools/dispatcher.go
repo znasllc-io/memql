@@ -147,6 +147,10 @@ func (d *Dispatcher) DispatchStream(ctx context.Context, dispatch *memqlv1.ToolD
 		return nil, &memqlv1.Failure{ErrorCode: "bad_request", ErrorMessage: err.Error()}
 	}
 
+	if dispatch.GetTool() == "workerWorkbench" || dispatch.GetWorkbench() != nil {
+		return d.dispatchWorkbench(ctx, dispatch, args)
+	}
+
 	// A scoped receipt is a separate, explicit owner decision. Validate it
 	// before choosing its consent gate; directory reads do not expire with
 	// the broader computer-control window. Local revocation still wins.

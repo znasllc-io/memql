@@ -76,6 +76,7 @@ Options:
                               Claude Code and Codex are allowed for this cluster.
     --name <name>             Worker name (default: hostname)
     --computeruse                     Install the computer-use variant (memql-computeruse)
+    --workbench               Enable isolated Fleet workbenches (requires Docker).
     --inference               Also set this machine up to serve local models:
                               install a model runtime, pull the default models,
                               and write models.allow. A runtime install this
@@ -117,6 +118,7 @@ function parse_args() {
     INSTALL_MENU="yes"
     INSTALL_MODE="system"  # default: sudo-gated /usr/local/bin (#66)
     INFERENCE="no"
+    WORKBENCH="no"
     INSTALL_APPS="yes"
     PIN_VERSION=""
     DOWNLOAD_BASE_SET="no"
@@ -129,6 +131,7 @@ function parse_args() {
             --cluster)       CLUSTER_URL="$2"; shift 2 ;;
             --name)          NAME="$2"; shift 2 ;;
             --computeruse)           FLAVOUR="computeruse"; shift ;;
+            --workbench)     WORKBENCH="yes"; shift ;;
             --inference)     INFERENCE="yes"; shift ;;
             --no-apps)       INSTALL_APPS="no"; shift ;;
             --user-local)    INSTALL_MODE="user-local"; shift ;;
@@ -405,6 +408,10 @@ function main() {
     fi
     # Setup signals the running worker to reload its policy, so service first.
     # Runtime approval or model download failures do not undo enrollment.
+    if [[ "$WORKBENCH" == "yes" ]]; then
+        install_ui_stage "Preparing Fleet workbenches" "$INSTALLED_BINARY" worker setup --workbench
+    fi
+
     if [[ "$INFERENCE" == "yes" ]]; then
         install_ui_stage "Preparing local models" setup_inference "$INSTALLED_BINARY"
     fi

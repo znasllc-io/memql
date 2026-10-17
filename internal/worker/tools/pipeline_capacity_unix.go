@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"github.com/znasllc-io/memql-cockpit/internal/worker/workbench"
 	"io"
 	"os"
 	"os/user"
@@ -84,6 +85,10 @@ func acquirePipelineReservation() (*pipelineReservation, error) {
 			return nil, errPipelineBusy
 		}
 		return nil, err
+	}
+	if interrupted, err := workbench.HasInterrupted(root); err != nil || interrupted {
+		file.Close()
+		return nil, errPipelineUnreconciled
 	}
 	stat, err := file.Stat()
 	if err != nil || !stat.Mode().IsRegular() {

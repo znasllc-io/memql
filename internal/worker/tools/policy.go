@@ -28,15 +28,16 @@ import (
 // User policy can extend `Allow` and `Deny`; `Deny` always beats
 // `Allow`.
 type Policy struct {
-	mu         sync.RWMutex
-	shell      ShellPolicy
-	fs         FSPolicy
-	http       HTTPPolicy
-	apps       AppsPolicy
-	models     ModelsPolicy
-	backup     BackupPolicy
-	pipelines  PipelinesPolicy
-	configPath string
+	mu          sync.RWMutex
+	shell       ShellPolicy
+	fs          FSPolicy
+	http        HTTPPolicy
+	apps        AppsPolicy
+	models      ModelsPolicy
+	backup      BackupPolicy
+	pipelines   PipelinesPolicy
+	workbenches WorkbenchesPolicy
+	configPath  string
 }
 
 // ShellPolicy controls workerHost.exec.
@@ -337,13 +338,14 @@ type HTTPPolicy struct {
 
 // rawPolicy is the YAML-unmarshal target.
 type rawPolicy struct {
-	Shell     ShellPolicy     `yaml:"shell"`
-	FS        FSPolicy        `yaml:"fs"`
-	HTTP      HTTPPolicy      `yaml:"http"`
-	Apps      AppsPolicy      `yaml:"apps"`
-	Backup    BackupPolicy    `yaml:"backup"`
-	Models    ModelsPolicy    `yaml:"models"`
-	Pipelines PipelinesPolicy `yaml:"pipelines"`
+	Shell       ShellPolicy       `yaml:"shell"`
+	FS          FSPolicy          `yaml:"fs"`
+	HTTP        HTTPPolicy        `yaml:"http"`
+	Apps        AppsPolicy        `yaml:"apps"`
+	Backup      BackupPolicy      `yaml:"backup"`
+	Models      ModelsPolicy      `yaml:"models"`
+	Pipelines   PipelinesPolicy   `yaml:"pipelines"`
+	Workbenches WorkbenchesPolicy `yaml:"workbenches"`
 }
 
 // DefaultPolicy returns the baseline allow/deny lists shipped with
@@ -510,6 +512,7 @@ func (p *Policy) reload() error {
 	// a narrowed repos list that kept the repository it dropped would admit a
 	// step the file no longer names.
 	p.pipelines = raw.Pipelines
+	p.workbenches = raw.Workbenches
 	return nil
 }
 
@@ -1457,4 +1460,18 @@ func resolveBackupPath(p string) (string, error) {
 		tail = append(tail, filepath.Base(current))
 		current = parent
 	}
+}
+
+// Enabling the isolated runtime grants no host commands, apps or desktop use.
+type WorkbenchesPolicy struct {
+	Allow bool `yaml:"allow"`
+}
+
+func (p *Policy) WorkbenchesAllowed() bool {
+	if p == nil {
+		return false
+	}
+	p.mu.RLock()
+	defer p.mu.RUnlock()
+	return p.workbenches.Allow
 }
