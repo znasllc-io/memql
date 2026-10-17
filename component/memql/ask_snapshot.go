@@ -204,7 +204,10 @@ func (e *MemQLEngine) refreshAskRuns(ctx context.Context, transcript *askTranscr
 		default:
 			turn.State, turn.Error = "done", ""
 		}
-		if turn.State != "waiting" {
+		// A timed optional wait leaves its question answerable while this
+		// same run continues. Only a terminal outcome clears that control.
+		continued := turn.State == "queued" && turn.Question != nil && turn.Question.Optional && turn.Question.Continued
+		if turn.State != "waiting" && !continued {
 			turn.Question = nil
 		}
 		if answer != "" && turn.State == "done" {
