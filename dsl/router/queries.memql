@@ -4,6 +4,7 @@
 // files cover the other construct kinds.
 
 use common.traits.{ isActiveRecord }
+use worker.concepts.{ registration }
 
 // Caching (5.5 / memql#1969): the router budget config is a small bounded set
 // consulted on routing decisions and changes rarely. 5.4 invalidation evicts
@@ -153,7 +154,7 @@ query call routerCallsInWindow {
 @actor
 query call myModelCallsOnMachine {
   args { workerId string! }
-  filter row => row.userId == actor.userId && row.executionSurface == "fleet:" + canonicalId(args.workerId, "v1:worker:registration")
+  filter row => row.userId == actor.userId && row.executionSurface == "fleet:" + canonicalId(args.workerId, registration)
   sort "row.createdAt", "desc"
   paginate 100
   shape routerDecision

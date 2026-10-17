@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import {act, cleanup, fireEvent, render, screen, within} from '@testing-library/react';
+import {act, cleanup, fireEvent, render, screen, within, waitFor} from '@testing-library/react';
 import {afterEach, beforeEach, expect, it, vi} from 'vitest';
 const h=vi.hoisted(()=>({connection:null as any}));
 vi.mock('../../src/live/connection',()=>({useOsConnection:()=>h.connection,osBridgePath:'',bridgePathFor:()=>''}));
@@ -35,8 +35,8 @@ it('updates the owner and shared call breakdown in Equipment from the existing m
  await act(async()=>h.connection.subscriptions.emit(WORKER_REGISTRATION_CONCEPT,{...row,connectedNodeId:'agent-next',sharingActivity:report},'NODE_UPDATED'));
  expect(within(breakdown).getAllByText('—')).toHaveLength(2);
  expect(h.connection.query.myWorkersWithStatus).toHaveBeenCalledTimes(1);
- fireEvent.click(screen.getByRole('button',{name:'Activity'}));
- expect(screen.getByRole('button',{name:'Activity'}).getAttribute('aria-current')).toBeTruthy();
+ fireEvent.click(within(screen.getByLabelText('Machine hardware')).getByRole('button',{name:'Activity'}));
+ expect(within(screen.getByRole('navigation',{name:'Machine views'})).getByRole('button',{name:'Activity'}).getAttribute('aria-current')).toBeTruthy();
 });
 
 it('places Settings after Activity and groups configuration, sharing and reported facts on that page',async()=>{
@@ -66,7 +66,8 @@ it('retains Settings drafts across machine tabs and updates sharing counts from 
  fireEvent.change(screen.getByRole('combobox',{name:'Search users and groups'}),{target:{value:''}});
  expect(screen.getByText('3 active calls')).toBeTruthy();
  expect(h.connection.query.myWorkersWithStatus).toHaveBeenCalledTimes(1);
- expect(h.connection.query.fleetShareDirectory).toHaveBeenCalledTimes(1);
+ // Directory facts invalidate when their machine source changes.
+ await waitFor(() => expect(h.connection.query.fleetShareDirectory).toHaveBeenCalledTimes(2));
 });
 
 it('keeps sharing and general write failures beside their own controls and supports sharing retry',async()=>{
@@ -158,7 +159,7 @@ it('identifies image generation separately from chat in the equipment selector',
  const machine=machineFromRow(machineRow({id:'a',labels:{'model:flux2-klein-4b':'imagegen=1','model:qwen3.5:4b':'ctx=262144,tools=1,vision=1'}}));
  render(<MachineEquipment machine={machine} now={new Date()} onInspect={vi.fn()}/>);
  expect(screen.getByRole('button',{name:'flux2-klein-4b Image generation'})).toBeTruthy();
- expect(screen.getByRole('button',{name:'qwen3.5:4b Chat & tools'})).toBeTruthy();
+ expect(screen.getByRole('button',{name:'qwen3.5:4b Conversation, tools & vision'})).toBeTruthy();
 });
 
 it('gives empty equipment and recent work their own empty states',async()=>{
