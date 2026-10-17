@@ -163,6 +163,30 @@ The first local harness attempt failed because its bind mount created a
 root-owned parent cache directory; the corrected harness mounts the Go cache
 under `/cache`, like the actual runner.
 
+The package also declares the eight cases from the existing editor host
+matrix: VS Code desktop at 1.91.0 and stable on Linux, plus Productivity web
+at stable and desktop at both versions on Linux and macOS. Linux cases stay
+in bounded cluster containers. The three macOS cases explicitly require a
+native `darwin/arm64` Fleet worker with `macos_tooling`; the pipeline connection
+must authorize cluster and Fleet execution, and the machine's local repository
+allowlist must admit this repository. Accessibility is not needed for these
+command-line host tests.
+
+`scripts/ci/editor-host.sh` builds the shared SDKs and extensions in each
+checkout, stages the language server for VS Code tests, and preserves the
+selected host, runtime, exit status and failure diagnostics. macOS caches and
+browser downloads stay in the attempt checkout. Dependency downloads have
+bounded retries; test assertions run once. The manifest regression test
+compares all eight cases with the retained workflow and checks changed-source,
+exact merge candidate, release and scheduled-audit selection.
+
+Both Linux VS Code versions passed locally with 20 host assertions each.
+The twelve credentialed live-cluster cases were skipped, as in the existing
+uncredentialed host lane; this is not live-cluster proof. The Productivity
+Chromium host and both Linux desktop versions passed; the browser lane also
+packaged its VSIX. Each Productivity case ran all 325 unit tests first. Native production execution and macOS host evidence remain
+required before retiring the corresponding Actions lanes.
+
 `os-image` uses the fixed rootless image builder for Dockerfile's `spa-build`
 stage, retaining the OCI archive and metadata. Its path bucket includes the
 Dockerfile and the OS sources. Its production execution remains required.
