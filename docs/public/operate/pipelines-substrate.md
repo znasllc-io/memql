@@ -1147,12 +1147,15 @@ the closed set (`pipeline_need_unknown`) and a need on a `cluster` pipeline
 This repository is a source like any other: its `memql-package.yaml` declares a
 pipeline and no apps, and an owner connects it the way any source's is connected
 ([Connecting a pipeline](pipelines.md#connecting-a-pipeline)); nothing connects
-it by itself. Its steps are lanes of `.github/workflows/ci.yml` and of the scan
-workflows, copied with their commands; the file's header names what is not
-carried here yet (image builds, the installed-cluster lifecycle tests, the
-editor host matrices, SARIF and release publication). Every step is a
-`linux/amd64` container on the cluster, the architecture of the local build
-node and of AKS.
+it by itself. The package declares portable checks, tests, security scans,
+SARIF delivery, release-file packaging and OCI image builds. Its ordinary
+commands run in `linux/amd64` cluster containers; image builds use the fixed
+rootless builder, and SARIF delivery is a driver-owned effect. Image builds
+retain archives and metadata in the Library. Registry publication is a separate
+[verified release-candidate operation](release-candidates.md), which requires
+complete evidence and an approved destination. Installed-cluster lifecycle
+checks and desktop editor-host matrices still require their own execution
+coverage; packaging their binaries does not exercise those hosts.
 
 | Stage | Steps | Runs on |
 |---|---|---|
@@ -1161,12 +1164,23 @@ node and of AKS.
 | `secrets-current` | `gitleaks` over every new commit since the pinned event base | pull requests, merge groups and pushes, after a failure too |
 | `tests` | `go-tests` (affected packages outside the db-gated trees, 4 shards), `db-tests` (the affected db-gated packages, 5 shards, each beside its own Postgres sidecar), `fuzz`, `os-checks` when the change touches the OS bucket, `sdk-ts-typecheck`, `viewkit-checks`, `mcp-conformance`, `proving` and the seven `test-<tag>` passes | every run |
 | `gates` | `gate-inputs` | pull requests and manual runs |
-| `analysis` | Full-history `gitleaks` (6 hours, 3 CPUs), `codeql-go` (3 hours), `codeql-javascript`, `codeql-python` and `sbom` | weekly audits, releases and manual runs, after a failure too |
+| `analysis` | Full-history `gitleaks` (6 hours, 3 CPUs), `codeql-go` (3 hours), `codeql-javascript`, `codeql-python` and `sbom` | weekly audits and manual runs, after a failure too |
+| `security-reports` | Journaled publication of the three retained CodeQL SARIF reports | weekly audits and manual runs |
+| `release-files` | Exact-version documentation bundle, SDK npm archive and five VSIX archives | releases |
+| `build-tools` | Unpublished toolchain OCI archive and digest metadata | releases |
+| `images` | Unpublished OCI archives and digest metadata for all seven engine node types | releases |
 
-No step names a need, so the pipeline runs on the cluster alone and connects
-with `compute: cluster`. Its longest steps outlast the default 2-hour run
-ceiling, so a cluster that runs this package composes
-`components/pipelines-long-runs` (8 hours); the local overlay does.
+No step names a fleet need, so this pipeline connects with `compute: cluster`.
+The daily schedule runs the stages that opt into it; the history and CodeQL
+stages declare a weekly cadence. A release retains ordinary tests and dependency
+vulnerability checks without repeating those weekly scans. PR, merge-group and
+push secret checks still inspect every introduced commit.
+
+The longest audit steps outlast the default 2-hour run ceiling. Operators must
+budget the complete run, including queue time, and configure both agent and
+Workbench consistently. `components/pipelines-long-runs` offers an explicit
+8-hour profile; installation overlays may supply another bounded value. The
+step timeouts and the pool's concurrent-Job limit remain independent limits.
 `memql_package_manifest_test.go` holds three of its copies to their originals
 -- `select.dbGated` to `scripts/ci/db-gated-packages.sh`, the gate packages to
 `ci.yml`'s `GATE_PACKAGES`, the Postgres service's image and credentials to
