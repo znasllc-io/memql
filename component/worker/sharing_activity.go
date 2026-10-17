@@ -29,7 +29,16 @@ func (s *streamSession) markSharingChanged() {
 func (s *streamSession) sharingActivity() map[string]any {
 	users, groups := map[string]int{}, map[string]int{}
 	s.mu.Lock()
+	// Host tools and signed-in app sessions are owner-only. Model calls
+	// carry the admission decision made on this stream's replica, including
+	// forwarded calls and legacy shares with no individual grant rows.
+	ownerCalls, sharedCalls := len(s.pending)+len(s.sessions), 0
 	for _, call := range s.modelCalls {
+		if call.sharingSubjects.Borrowed {
+			sharedCalls++
+		} else {
+			ownerCalls++
+		}
 		for _, subject := range call.sharingSubjects.UserIds {
 			users[bareSubjectId(subject)]++
 		}
@@ -50,7 +59,12 @@ func (s *streamSession) sharingActivity() map[string]any {
 		}
 		return out
 	}
-	return map[string]any{"nodeId": s.server.nodeId, "startedAt": s.sharingStartedAt.Format(time.RFC3339Nano), "observedAt": time.Now().UTC().Format(time.RFC3339Nano), "users": rows(users), "groups": rows(groups)}
+	return map[string]any{
+		"nodeId": s.server.nodeId, "startedAt": s.sharingStartedAt.Format(time.RFC3339Nano),
+		"observedAt": time.Now().UTC().Format(time.RFC3339Nano),
+		"ownerCalls": ownerCalls, "sharedCalls": sharedCalls,
+		"users": rows(users), "groups": rows(groups),
+	}
 }
 
 // Coalesce bursts of starts/ends and periodically repair a missed write. The

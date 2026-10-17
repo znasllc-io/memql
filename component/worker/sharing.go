@@ -337,7 +337,12 @@ func subjectIds(v any) []string {
 
 // SharingSubjects records the grants that admitted a call, so a draining call
 // stays counted under its original grants even after they are paused or removed.
-type SharingSubjects struct{ UserIds, GroupIds []string }
+type SharingSubjects struct {
+	UserIds, GroupIds []string
+	// Borrowed is decided by the receiving replica's admission check, not
+	// inferred from grant counts: a legacy cluster share has no named grants.
+	Borrowed bool
+}
 
 func containsSubject(ids []string, target string) bool {
 	for _, candidate := range ids {
@@ -349,7 +354,7 @@ func containsSubject(ids []string, target string) bool {
 }
 
 func (s Sharing) SubjectsFor(p *Person) SharingSubjects {
-	out := SharingSubjects{}
+	out := SharingSubjects{Borrowed: s.Admits(p)}
 	if p == nil || s.Mode != SharingModePeople || auth.IsSystemActorId(p.UserId) {
 		return out
 	}
