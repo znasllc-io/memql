@@ -84,6 +84,7 @@ func (s *spineScope) operations() map[string]workflowhost.Operation {
 		"spineCandidates":      s.findCandidates,
 		"spineUseCandidate":    s.useCandidate,
 		"spineClassify":        s.classify,
+		"spineSetWorkload":     s.setWorkload,
 		"spineAcknowledge":     s.acknowledge,
 		"spineRefineSections":  s.refineSections,
 		"spineReviewSections":  s.reviewSections,
@@ -268,6 +269,23 @@ func (s *spineScope) classify(ctx context.Context, args map[string]any) (any, er
 	sectionable.Workload = out.Workload
 	s.guidance, s.decision = guidance, sectionable
 	return map[string]any{"complexity": string(complexity), "intent": sectionable.Intent, "sectionable": sectionable.Sectionable, "requiresFile": sectionable.RequiresFile != nil && *sectionable.RequiresFile, "hasEffects": sectionable.hasEffects(), "conversational": conversational, "workload": out.Workload, "acknowledgement": out.Acknowledgement}, nil
+}
+
+// setWorkload records policy selected by the pinned DSL before planning. The
+// durable writer intersects this estimate with the goal's declared ceilings.
+func (s *spineScope) setWorkload(_ context.Context, args map[string]any) (any, error) {
+	if !s.classified || s.prepared || s.designed {
+		return nil, fmt.Errorf("Spine workload requires classification before planning")
+	}
+	workload := getString(args, "workload")
+	switch workload {
+	case "quick", "lookup", "research", "project":
+	default:
+		return nil, fmt.Errorf("invalid Spine workload estimate")
+	}
+	s.out.Workload, s.decision.Workload = workload, workload
+	s.out.Reply = s.conversational && s.decision.quickReply()
+	return true, nil
 }
 
 func (s *spineScope) acknowledge(ctx context.Context, args map[string]any) (any, error) {

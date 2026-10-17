@@ -135,7 +135,7 @@ func TestShortActionsStillReceiveAnAcknowledgement(t *testing.T) {
 		workload string
 	}{
 		{"short action", false, "quick"},
-		{"short file", true, "quick"},
+		{"short file", true, "lookup"},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			engine := &acknowledgementTestEngine{countingCompileEngine: &countingCompileEngine{triage: map[string]any{
