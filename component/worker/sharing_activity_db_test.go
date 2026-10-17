@@ -56,7 +56,7 @@ func TestSharingActivityPersistsAcrossReplicasAndRejectsFormerStreams(t *testing
 	a, b := &EngineStore{Engine: first}, &EngineStore{Engine: second}
 	start := time.Now().UTC()
 	report := func(at time.Time, n int) map[string]any {
-		return map[string]any{"nodeId": "agent-a", "startedAt": at.Format(time.RFC3339Nano), "observedAt": time.Now().UTC().Format(time.RFC3339Nano), "users": []map[string]any{{"id": "ana", "activeCalls": n}}, "groups": []any{}}
+		return map[string]any{"nodeId": "agent-a", "startedAt": at.Format(time.RFC3339Nano), "observedAt": time.Now().UTC().Format(time.RFC3339Nano), "ownerCalls": 1, "sharedCalls": n, "users": []map[string]any{{"id": "ana", "activeCalls": n}}, "groups": []any{}}
 	}
 	if err := a.UpdateSharingActivity(ctx, machine, owner, "agent-a", report(start, 2)); err != nil {
 		t.Fatal(err)
@@ -76,6 +76,9 @@ func TestSharingActivityPersistsAcrossReplicasAndRejectsFormerStreams(t *testing
 	}
 	if fmt.Sprint(read()["users"]) != "[map[activeCalls:2 id:ana]]" {
 		t.Fatalf("the sibling did not see counts: %+v", read())
+	}
+	if fmt.Sprint(read()["ownerCalls"]) != "1" || fmt.Sprint(read()["sharedCalls"]) != "2" {
+		t.Fatalf("the sibling lost the owner/shared breakdown: %+v", read())
 	}
 	newer := start.Add(time.Second)
 	if err := b.UpdateSharingActivity(ctx, machine, owner, "agent-a", report(newer, 0)); err != nil {

@@ -244,7 +244,7 @@ func TestPausingARecipientKeepsItListedAndClosesOnlyThatGrant(t *testing.T) {
 		t.Fatal("another active grant still admits this user")
 	}
 	subjects := s.SubjectsFor(person)
-	if len(subjects.UserIds) != 0 || len(subjects.GroupIds) != 1 {
+	if !subjects.Borrowed || len(subjects.UserIds) != 0 || len(subjects.GroupIds) != 1 {
 		t.Fatalf("only the admitting grant is counted: %+v", subjects)
 	}
 	s.PausedUserIds = nil
@@ -255,5 +255,18 @@ func TestPausingARecipientKeepsItListedAndClosesOnlyThatGrant(t *testing.T) {
 	roundtrip := SharingFromRow(s.Row())
 	if !roundtrip.Admits(person) {
 		t.Fatal("resuming must survive a stored-row roundtrip")
+	}
+}
+
+func TestClusterShareAttributionDoesNotNeedNamedGrants(t *testing.T) {
+	for _, user := range []string{"ana", "system:automation:task"} {
+		p := NewPerson(context.Background(), user, nil)
+		subjects := (Sharing{Mode: SharingModeCluster}).SubjectsFor(p)
+		if !subjects.Borrowed || len(subjects.UserIds)+len(subjects.GroupIds) != 0 {
+			t.Fatalf("cluster share lost borrowed-call attribution: %+v", subjects)
+		}
+	}
+	if (Sharing{Mode: SharingModeOwner}).SubjectsFor(NewPerson(context.Background(), "ana", nil)).Borrowed {
+		t.Fatal("private machine invented a shared call")
 	}
 }
