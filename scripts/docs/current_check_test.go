@@ -131,6 +131,39 @@ func currentFakes() map[string]string {
 	}
 }
 
+func TestCurrentCheckPublicReadsPreserveMissingReleaseFailure(t *testing.T) {
+	for _, missing := range []bool{false, true} {
+		t.Run(map[bool]string{false: "current", true: "missing release"}[missing], func(t *testing.T) {
+			bin := t.TempDir()
+			writeFile(t, filepath.Join(bin, "curl"), fakeCheckCurl, 0o755)
+			writeFile(t, filepath.Join(bin, "python3"), `#!/usr/bin/env bash
+printf 'public %s\n' "$*" >> "$FAKE_LOG"
+case "$2" in
+  tags) printf '%s\n' "$FAKE_TAGS" ;;
+  release-assets)
+    [[ -z "${FAKE_NO_RELEASE:-}" ]] || exit 2
+    printf '%s\n' "$FAKE_ASSETS" ;;
+  *) exit 3 ;;
+esac
+`, 0o755)
+			writeFile(t, filepath.Join(bin, "gh"), "#!/bin/sh\nexit 99\n", 0o755)
+			fakes := currentFakes()
+			if missing {
+				fakes["FAKE_NO_RELEASE"] = "1"
+			}
+			r := execCheck(t, "bash", bin+string(os.PathListSeparator)+os.Getenv("PATH"), bin, fakes, "--public-api", "--repo=acme/widget")
+			if missing {
+				assertNotCurrent(t, r, "no readable GitHub Release")
+			} else if r.code != 0 {
+				t.Fatalf("public read failed: %s", r.stderr)
+			}
+			if !strings.Contains(strings.Join(r.log, "\n"), "public ") {
+				t.Fatal("public reader was not called")
+			}
+		})
+	}
+}
+
 func assertNotCurrent(t *testing.T, r checkRun, mention string) (map[string]any, string) {
 	t.Helper()
 	if r.code != 5 {
