@@ -63,6 +63,7 @@ pipeline:
         docker info >/dev/null
         export MEMQL_TEST_DOCKER_IMAGE=alpine@sha256:5b10f432ef3da1b8d4c7eb6c487f2f5a8f096bc91145e68878dd4a5019afde11
         export MEMQL_TEST_PIPELINE_POSTGRES_IMAGE=postgres@sha256:57c72fd2a128e416c7fcc499958864df5301e940bca0a56f58fddf30ffc07777
+        export MEMQL_FLEET_DOCKER_TEST=1
         go test -race -count=1 -timeout=600s ./...
     - name: fuzz
       placement: cluster
