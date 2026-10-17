@@ -37,13 +37,13 @@ export function MachineModels({ machine, navigation }: { machine: MachineRow; st
   const downloads = useModelPulls(machine.id);
   const installed = useMemo(() => machineModelsFrom(machine.reportedLabels), [machine.reportedLabels]);
   const read = useCallback(async (signal: AbortSignal) => {
-    const result = await connection!.query.fleetModelSetup({ registrationId: machine.id }, { signal });
+    const result = await connection!.query.fleetModelSetup({ registrationId: machine.id }, { signal, priority: "background" });
     const row = result.rows()[0];
     if (!row) throw new Error("The machine did not return its model setup.");
     return modelSetupFromRow(row as Row);
   }, [connection, machine.id]);
   const liveRevision = useGraphRevision(["v1:worker:registration", "v1:models:modelProfile", "v1:models:catalogResearchSettings", "v1:models:catalogReview", "v1:platform:embedderBinding", "v1:worker:modelPull"]);
-  const reading = useReading(`model-setup:${machine.id}:${own}:${liveRevision}`, connection && own ? read : null);
+  const reading = useReading(`model-setup:${machine.id}:${own}`, connection && own ? read : null, liveRevision);
   const view = reading.value;
   const [draft, setDraft] = useState<ModelChoices | null>(null);
   const [editBase, setEditBase] = useState<ModelSetupView | null>(null);

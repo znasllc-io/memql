@@ -10,10 +10,10 @@ import { EMPTY_SET, recommendedSetFrom } from "./recommended";
 export function useMachineRecommendation(workerId: string, enabled = true) {
   const connection = useOsConnection();
   const read = useCallback(async (signal: AbortSignal) => {
-    const result = await connection!.query.fleetRecommended({ registrationId: workerId }, { signal });
+    const result = await connection!.query.fleetRecommended({ registrationId: workerId }, { signal, priority: "background" });
     return recommendedSetFrom(result.rows()[0] as Row | undefined);
   }, [connection, workerId]);
   const liveRevision = useGraphRevision(["v1:worker:registration", "v1:models:modelProfile"], enabled);
-  const reading = useReading(`machine-recommendation:${workerId}:${liveRevision}`, enabled && connection && workerId ? read : null);
+  const reading = useReading(`machine-recommendation:${workerId}`, enabled && connection && workerId ? read : null, liveRevision);
   return { ...reading, recommended: reading.value ?? EMPTY_SET };
 }

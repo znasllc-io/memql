@@ -1,5 +1,6 @@
+import { useReadEffect } from "../../live/useReadEffect";
 import { useGraphRevision } from "../../live/useGraphRevision";
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useState } from "react";
 
 import type { Row } from "@znasllc-io/memql-sdk-core/client";
 
@@ -251,7 +252,7 @@ export function useDecisions(enabled: boolean, filters: DecisionFilters): Decisi
 
   const { since, level, door, rule, outcome } = filters;
 
-  useEffect(() => {
+  useReadEffect((signal) => {
     if (!enabled || connection === null) return;
     const q = connection.query as unknown as Record<string, unknown>;
     const read = q["routerDecisionsRecent"];
@@ -261,8 +262,6 @@ export function useDecisions(enabled: boolean, filters: DecisionFilters): Decisi
       return;
     }
     setSupported(true);
-    const controller = new AbortController();
-    let stale = false;
     setLoading(true);
     setError("");
     // ONLY THE ARGUMENTS THAT ARE SET. The query's `when(args.x)` guards drop
@@ -275,28 +274,24 @@ export function useDecisions(enabled: boolean, filters: DecisionFilters): Decisi
     if (door !== "") args["door"] = door;
     if (rule !== "") args["rule"] = rule;
     if (outcome !== "") args["outcome"] = outcome;
-    void (read as (a: Record<string, unknown>, o?: unknown) => Promise<{ rows: () => Iterable<Row> }>)(
+    return (read as (a: Record<string, unknown>, o?: unknown) => Promise<{ rows: () => Iterable<Row> }>)(
       args,
-      { signal: controller.signal },
+      { signal, priority: "background" },
     )
       .then((result) => {
-        if (stale) return;
+        if (signal.aborted) return;
         setRows([...result.rows()].map(decisionFromRow));
         setFetchedAt(Date.now());
       })
       .catch((err: unknown) => {
-        if (stale) return;
+        if (signal.aborted) return;
         setRows([]);
         setError(err instanceof Error ? err.message : String(err));
       })
       .finally(() => {
-        if (!stale) setLoading(false);
+        if (!signal.aborted) setLoading(false);
       });
-    return () => {
-      stale = true;
-      controller.abort();
-    };
-  }, [connection, enabled, epoch, since, level, door, rule, outcome, liveRevision]);
+  }, [connection, enabled, since, level, door, rule, outcome], `${epoch}:${liveRevision}`);
 
   return { rows, loading, supported, error, fetchedAt, reload };
 }

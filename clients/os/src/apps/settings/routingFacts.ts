@@ -1,3 +1,4 @@
+import { useReadEffect } from "../../live/useReadEffect";
 import { useGraphRevision } from "../../live/useGraphRevision";
 import { useCallback, useEffect, useState } from "react";
 
@@ -551,31 +552,25 @@ export function useInferenceStatus(enabled: boolean): {
   const [epoch, setEpoch] = useState(0);
   const reload = useCallback(() => setEpoch((n) => n + 1), []);
 
-  useEffect(() => {
+  useReadEffect((signal) => {
     if (!enabled || connection === null) return;
-    const controller = new AbortController();
-    let stale = false;
     setLoading(true);
-    void connection.query
-      .inferenceStatus({}, { signal: controller.signal })
+    return connection.query
+      .inferenceStatus({}, { signal, priority: "background" })
       .then((result) => {
-        if (stale) return;
+        if (signal.aborted) return;
         const rows = [...result.rows()];
         setStatus(inferenceFrom(rows[0], ""));
         setFetchedAt(Date.now());
       })
       .catch((err: unknown) => {
-        if (stale) return;
+        if (signal.aborted) return;
         setStatus(inferenceFrom(null, err instanceof Error ? err.message : String(err)));
       })
       .finally(() => {
-        if (!stale) setLoading(false);
+        if (!signal.aborted) setLoading(false);
       });
-    return () => {
-      stale = true;
-      controller.abort();
-    };
-  }, [connection, enabled, epoch, liveRevision]);
+  }, [connection, enabled], `${epoch}:${liveRevision}`);
 
   return { status, loading, fetchedAt, reload };
 }

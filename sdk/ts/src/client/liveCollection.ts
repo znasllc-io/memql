@@ -1,3 +1,4 @@
+import { backgroundReadController } from "./queryPriority.js";
 // LiveCollection -- the one machine every live surface was hand-rolling
 // (memql#4538).
 //
@@ -519,7 +520,7 @@ export class LiveCollection<T = Row> {
       return;
     }
     const next: PendingReread = {
-      abort: new AbortController(), running: false, dirty: false, cancel: () => {},
+      abort: backgroundReadController(), running: false, dirty: false, cancel: () => {},
     };
     this.rereads.set(id, next);
     next.cancel = this.rereadQueue.enqueue(async () => {
