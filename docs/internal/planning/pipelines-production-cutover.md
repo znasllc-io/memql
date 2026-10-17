@@ -193,6 +193,46 @@ published nothing. Future native execution and approved publication are still
 required. Separate SDK/editor tag triggers and registry receipts remain in the
 retirement scope; an engine release's package build is not their replacement.
 
+## Publication qualification, October 17, 2026 UTC
+
+The installed v0.29.20 instance completed the native v0.29.22 release run
+`3f3af7ca78ce6e9529aafa08f4bfa593`, Work run
+`5e3ee9731c745417a39e3b8fef3101ee`, from
+`7801fddd1a29c15f509a66e076362e1f6633b959`. All 46 steps passed between
+07:45:23 and 09:39:58 UTC: **114m35s elapsed**, including capacity waiting.
+The GitHub summary's stage-duration sum is not the wall-clock duration.
+All 46 logs and 66 artifact references were retained. Three logs reached
+their configured size cap; none reported missing artifact paths or storage
+ownership refusal. The Files app returned the DB shard log, including Work's
+130.607-second pass, and the release manifest whose seven file checksums
+match their retained Library rows.
+
+Native candidate assembly and separate approval succeeded. Publication then
+stopped with a durable pending intent at the first Azure and GHCR images.
+Neither has a verified completion receipt. Empty upload-session probes found
+the protocol differences: Azure preserves a `_nouploadcache=false` query
+parameter, and GHCR returns a singular `/blobs/upload/<id>` session path.
+Azure documents its flag in the
+[Start Upload contract](https://learn.microsoft.com/en-us/rest/api/registry-dataplane/container-registry-blob/start-upload).
+The original transport rejects both; regression tests reproduce the same
+uncertain-publication outcome. The fix accepts those exact session forms
+while retaining origin, repository, digest, method and query bounds.
+
+The 578 MiB toolchain archive also exposed a download failure. Both HTTP
+hops use a 15-second default write deadline. Slow-transfer tests reproduce
+truncation at the serving handler and across the Edge proxy. The repair
+uses a 30-second idle write deadline and a 30-minute total ceiling on this
+download path, preserves earlier caller cancellation, and propagates
+`http.ErrAbortHandler` without appending JSON to partial file bytes. The
+browser keeps its download iframe until the body finishes, then cleans it up.
+These tests pass with the repair and fail against the previous implementation.
+
+The source is prepared as v0.29.23. Deployment and live publication/download
+verification remain outstanding. Preserve the v0.29.22 candidate configuration
+and pending receipts for reconciliation; do not label uncertain writes complete
+or change immutable image tags to work around them. The serving instance remains
+v0.29.20, and Actions retirement is still pending.
+
 ## Acceptance and issue closure
 
 The cadence change removes the multi-hour full-history scan from ordinary

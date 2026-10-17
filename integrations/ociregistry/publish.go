@@ -362,10 +362,23 @@ func (s *scopedTransport) permitted(r *http.Request) (int64, error) {
 	if u.Path == uploads && r.Method == http.MethodPost && len(q) == 0 {
 		return 64 << 10, nil
 	}
-	if strings.HasPrefix(u.Path, uploads) && uploadIDPattern.MatchString(strings.TrimPrefix(u.Path, uploads)) && (r.Method == http.MethodPatch || r.Method == http.MethodPut || read) {
+	// GHCR returns a singular /blobs/upload/<id> Location after the standard
+	// POST /blobs/uploads/. Both are sessions inside the approved repository;
+	// neither permits a new upload, cross-repository path or arbitrary URL.
+	session := strings.TrimPrefix(u.Path, uploads)
+	if session == u.Path {
+		session = strings.TrimPrefix(u.Path, prefix+"blobs/upload/")
+	}
+	if session != u.Path && uploadIDPattern.MatchString(session) && (r.Method == http.MethodPatch || r.Method == http.MethodPut || read) {
 		for k, vs := range q {
-			if len(vs) != 1 || (k != "digest" && k != "_state") {
+			if len(vs) != 1 || (k != "digest" && k != "_state" && k != "_nouploadcache") {
 				return 0, errors.New("unsupported upload query")
+			}
+			// ACR includes this boolean in its resumable upload Location.
+			// It changes upload caching, not the approved origin, repository
+			// or digest. Keep unknown flags and ambiguous values refused.
+			if k == "_nouploadcache" && vs[0] != "true" && vs[0] != "false" {
+				return 0, errors.New("invalid upload cache flag")
 			}
 			if k == "digest" {
 				if _, ok := s.blobs[vs[0]]; !ok {
