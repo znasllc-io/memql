@@ -32,7 +32,7 @@ func TestCurrentEvidenceRepliesUseToolsWithLookupBudget(t *testing.T) {
 			if strings.Contains(source, "workQuickReply") || !strings.Contains(source, "runAgentTurn") {
 				t.Fatalf("missing tool-enabled execution: %s", source)
 			}
-			for _, required := range []string{"requires evidence not yet established", "current source", "status=needs_input", "optional=true"} {
+			for _, required := range []string{"First inspect recorded source receipts", "Retrieve only facts still missing", "source observation time", "status=needs_input", "optional=true"} {
 				if !strings.Contains(source, required) {
 					t.Fatalf("research requirement %q was lost before execution: %s", required, source)
 				}
@@ -115,5 +115,26 @@ func TestComplexConversationTaskDoesNotAuthorizeAutomation(t *testing.T) {
 		if out.Reply || out.Route == work.RouteAuthor || len(eng.aiCalls) != 1 {
 			t.Fatalf("one-off task entered authoring: %+v %v", out, eng.aiCalls)
 		}
+	}
+}
+
+func TestVerifiedFollowupCarriesReceiptsThroughClassificationAndQuickReply(t *testing.T) {
+	req := conversationReq("Should I wait before retrying?", "The service is degraded.")
+	conversation := req.Input["conversation"].(map[string]any)
+	conversation["sourceContext"] = map[string]any{"recordedSources": []any{map[string]any{"operation": "readStatus", "checkpointAt": "2026-10-17T04:40:00Z", "value": "status=degraded; observedAt=2026-10-17T04:39:30Z; source=https://status.example.test"}}}
+	eng := &countingCompileEngine{triage: map[string]any{"intent": "reply", "complexity": "trivial", "workload": "quick", "requiresFile": false, "requiresResearch": false}}
+	out, err := (&PlannerAgentLoop{engine: eng}).CompileGoalForRun(context.Background(), req, nil, realSandbox{})
+	if err != nil || !out.Reply || out.Workload != "quick" {
+		t.Fatalf("supported follow-up started research: %+v %v", out, err)
+	}
+	preview := eng.aiData[0]["conversation"].(string)
+	for _, evidence := range []string{"readStatus", "2026-10-17T04:39:30Z", "https://status.example.test"} {
+		if !strings.Contains(preview, evidence) {
+			t.Fatalf("classifier lost source %q", evidence)
+		}
+	}
+	source := strings.Join(eng.queries, "\n")
+	if strings.Contains(source, "runAgentTurn") || !strings.Contains(source, "workQuickReply") || !strings.Contains(source, "toString(args.conversation)") {
+		t.Fatalf("quick reply lost persisted source context or started a tool loop: %s", source)
 	}
 }

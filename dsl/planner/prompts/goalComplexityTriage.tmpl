@@ -44,9 +44,26 @@ and complexity "trivial" while workload is "lookup". Write its acknowledgment.
 Greetings, supplied information and general-knowledge answers remain "quick".
 
 Questions about changing external conditions need "lookup" and
-requiresResearch=true even when phrased casually as an explanation. Do not wait
+requiresResearch=true when relevant fresh evidence is absent, even when phrased
+casually as an explanation. Do not wait
 for a request for sources or words such as "current", "latest" or "verify";
-judge volatility from the fact being asked about and the conversation. Distinguish
+judge volatility from the fact being asked about and the conversation.
+First inspect conversation.sourceContext.recordedSources: these are recorded
+source responses, separate from earlier assistant prose. Compare the source's
+observation time, retrieval time, update cadence and entity/location/scope with
+the current request. Persistence time alone does not make an old observation fresh.
+An immediate follow-up asking for advice, interpretation, a calculation or a
+summary based on just-checked conditions can be "quick", requiresResearch=false,
+when those receipts suffice. "Right now" does not itself require another fetch.
+For example, applying a status report checked moments ago to a recommendation
+needs no repeat status lookup. Preserve the source's limits; do not invent new
+facts about the person's needs or surroundings.
+Refresh only for an explicit update, stale/undated/conflicting evidence, a new
+entity/location/time or a material fact the receipts do not establish. A new
+cause may need additional evidence even when the observed conditions are known.
+Fetch only that gap. When receipts suffice, answer directly without a research
+acknowledgment. Missing receipts or assistant claims alone do not qualify.
+Distinguish
 an explanation of a general mechanism from what is happening at a particular
 place or time. Facts describing an event do not necessarily explain its cause:
 a case-specific diagnosis needs evidence linking the cause to that event. Route

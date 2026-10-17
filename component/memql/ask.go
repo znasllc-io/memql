@@ -234,12 +234,11 @@ func (e *MemQLEngine) RunAsk(ctx context.Context, conversationID, turnID, prompt
 	// Ask is a conversation adapter over the same intake as Nexus/API goals.
 	// Context is persisted with the run before the planner/agent replica sees it.
 	if turn.RunID == "" {
+		conversation := e.askConversationInput(ctx, conversationID, turnID, pageContext, history)
 		call, callErr := parser.RenderCall("work.createGoal", map[string]any{
 			"statement": prompt, "requestedVia": "ask",
 			"ceilings": map[string]any{"wallClockMs": 7200000, "maxModelCalls": 96, "maxRetries": 2},
-			"input": map[string]any{"conversation": map[string]any{
-				"id": conversationID, "turnId": turnID, "messages": history, "pageContext": pageContext,
-			}},
+			"input":    map[string]any{"conversation": conversation},
 		})
 		if callErr != nil {
 			return "", callErr
