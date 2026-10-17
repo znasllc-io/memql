@@ -167,8 +167,11 @@ under `/cache`, like the actual runner.
 stage, retaining the OCI archive and metadata. Its path bucket includes the
 Dockerfile and the OS sources. Its production execution remains required.
 
-The DB step retains the exact package selection and five isolated databases,
-but groups each shard's packages by the CI planner's existing budget classes.
+The DB step retains the exact package selection and five isolated Postgres
+services, and groups each shard's packages by the CI planner's budget classes.
+Each class gets a fresh database within its shard's service, then drops only
+that successfully created database after its tests exit. Fixture rows and
+planner statistics from one class cannot consume another class's test budget.
 All invocations stay serial and uncached; fast suites keep 180 seconds,
 packages 300 seconds, and engine/campaigns 600 seconds. An empty selection,
 missing required-database setting or failing test refuses. The class table
@@ -232,6 +235,29 @@ verification remain outstanding. Preserve the v0.29.22 candidate configuration
 and pending receipts for reconciliation; do not label uncertain writes complete
 or change immutable image tags to work around them. The serving instance remains
 v0.29.20, and Actions retirement is still pending.
+
+## Native database class isolation, October 17, 2026 UTC
+
+Release v0.29.24 run `ab281c223557cd329b72c6aa17b9cf3c`, source
+`b191f80df04033ce47f188edfbb9d7bda08f5b3c`, failed `tests.db-tests#2`.
+The engine suite passed in 515.507 seconds, then Library exceeded its unchanged
+180-second package limit. The native shard reused one database across budget
+classes, unlike the CI planner's separate Library service.
+
+The sequence reproduces locally with two Go threads, `GOMEMLIMIT=512MiB` and
+`GOGC=50`: Library passes in 127.414 seconds, but exceeds 180 seconds after the
+engine suite populates that database. With class isolation, the same Library
+suite passes in 118.806 seconds even when the service's original database
+still contains those engine fixtures. No test selection, assertion, package
+timeout or resource limit changes. Database creation, extension setup, test
+failure and cleanup all fail closed; only databases created by this invocation
+are removed. Connection validation admits the disposable loopback service and
+rejects libpq routing overrides.
+
+Prepare v0.29.25 with this runner repair and the already-merged Ask evidence,
+research reuse and query-pressure fixes. Its full native release, publication
+receipts and production verification remain required. The failed v0.29.24 run
+is diagnostic evidence, not a release candidate.
 
 ## Acceptance and issue closure
 

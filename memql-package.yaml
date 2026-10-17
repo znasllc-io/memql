@@ -329,9 +329,9 @@ pipeline:
             export GOFLAGS=-p=1 GOMEMLIMIT=512MiB GOGC=50
             bash scripts/identity/build-css.sh
             go test -count=1 -timeout=600s $MEMQL_PACKAGES
-        # Each shard keeps its own Postgres. The runner groups its exact
-        # selected packages under the CI planner's original timeout classes;
-        # slow engine tests cannot raise the budget of unrelated DB suites.
+        # Each shard keeps its own Postgres. The runner gives each selected
+        # timeout class a fresh database, preserving CI's suite isolation and
+        # budgets without carrying engine fixture rows into unrelated tests.
         - name: db-tests
           placement: cluster
           packages: affected
@@ -343,12 +343,6 @@ pipeline:
             set -eu
             export GOFLAGS=-p=1 GOMEMLIMIT=512MiB GOGC=50
             bash scripts/identity/build-css.sh
-            PGPASSWORD=memql_dev psql -h localhost -U memql -d memql -v ON_ERROR_STOP=1 <<'SQL'
-            CREATE EXTENSION IF NOT EXISTS timescaledb CASCADE;
-            CREATE EXTENSION IF NOT EXISTS "uuid-ossp";
-            CREATE EXTENSION IF NOT EXISTS "pgcrypto";
-            CREATE EXTENSION IF NOT EXISTS vector;
-            SQL
             export MEMQL_DATABASE_DSN='postgres://memql:memql_dev@localhost:5432/memql?sslmode=disable'
             export MEMQL_REQUIRE_DB=1
             python3 scripts/ci/pipeline-db-tests.py
