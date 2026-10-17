@@ -13289,6 +13289,28 @@ QueryClient.prototype.workSkillSelectionsForOwner = function (this: QueryClient,
   return this.executeNamed("workSkillSelectionsForOwner", buildWorkSkillSelectionsForOwner(args), opts);
 };
 
+/** Bounded checkpoints for source projection; callers expose only paired tool results, never system prompts or model reasoning from the saved exchange. */
+// Bound concept: v1:work:observation (machine-readable: BoundConcepts["workSourceCheckpointsForOwnerRun"] in generated_concepts.ts).
+export interface WorkSourceCheckpointsForOwnerRunArgs {
+  runId: string;
+}
+
+export function buildWorkSourceCheckpointsForOwnerRun(args: WorkSourceCheckpointsForOwnerRunArgs): string {
+  const parts: string[] = [];
+  parts.push("runId: " + renderMemQLValue(args.runId));
+  return "query workSourceCheckpointsForOwnerRun(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    workSourceCheckpointsForOwnerRun(args: WorkSourceCheckpointsForOwnerRunArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.workSourceCheckpointsForOwnerRun = function (this: QueryClient, args: WorkSourceCheckpointsForOwnerRunArgs = {} as WorkSourceCheckpointsForOwnerRunArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("workSourceCheckpointsForOwnerRun", buildWorkSourceCheckpointsForOwnerRun(args), opts);
+};
+
 /** Public source receipts only; generated answers are not source evidence. */
 // Bound concept: v1:work:step (machine-readable: BoundConcepts["workSourceStepsForOwnerRun"] in generated_concepts.ts).
 export interface WorkSourceStepsForOwnerRunArgs {

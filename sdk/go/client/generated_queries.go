@@ -13947,6 +13947,28 @@ func WorkSkillSelectionsForOwnerBuild(args WorkSkillSelectionsForOwnerArgs) stri
 	return "query workSkillSelectionsForOwner()"
 }
 
+// WorkSourceCheckpointsForOwnerRun -- Bounded checkpoints for source projection; callers expose only paired tool results, never system prompts or model reasoning from the saved exchange.
+//
+// Bound concept: v1:work:observation (machine-readable: BoundConcepts["workSourceCheckpointsForOwnerRun"] in generated_concepts.go).
+type WorkSourceCheckpointsForOwnerRunArgs struct {
+	RunId string
+}
+
+// WorkSourceCheckpointsForOwnerRun calls the engine query workSourceCheckpointsForOwnerRun.
+func (qc *QueryClient) WorkSourceCheckpointsForOwnerRun(ctx context.Context, args WorkSourceCheckpointsForOwnerRunArgs) (*Result, error) {
+	call := WorkSourceCheckpointsForOwnerRunBuild(args)
+	return qc.executeNamed(ctx, "workSourceCheckpointsForOwnerRun", call)
+}
+
+func WorkSourceCheckpointsForOwnerRunBuild(args WorkSourceCheckpointsForOwnerRunArgs) string {
+	var b strings.Builder
+	b.WriteString("query workSourceCheckpointsForOwnerRun(")
+	b.WriteString("runId: ")
+	b.WriteString(quoteMemQL(args.RunId))
+	b.WriteString(")")
+	return b.String()
+}
+
 // WorkSourceStepsForOwnerRun -- Public source receipts only; generated answers are not source evidence.
 //
 // Bound concept: v1:work:step (machine-readable: BoundConcepts["workSourceStepsForOwnerRun"] in generated_concepts.go).

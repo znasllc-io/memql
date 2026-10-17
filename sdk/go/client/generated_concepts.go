@@ -1147,6 +1147,7 @@ var BoundConcepts = map[string]string{
 	"workSignedRunsForOwner":                           "v1:work:run",
 	"workSkillSelectionForOwnerRun":                    "v1:work:observation",
 	"workSkillSelectionsForOwner":                      "v1:work:observation",
+	"workSourceCheckpointsForOwnerRun":                 "v1:work:observation",
 	"workSourceStepsForOwnerRun":                       "v1:work:step",
 	"workStepForOwnerRun":                              "v1:work:step",
 	"workStepsForOwnerRun":                             "v1:work:step",
