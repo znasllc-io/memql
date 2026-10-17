@@ -22,6 +22,7 @@ require (
 	github.com/znasllc-io/memql/component/identity v0.0.0
 	github.com/znasllc-io/memql/component/language v0.0.0
 	github.com/znasllc-io/memql/component/memql v0.0.0
+	github.com/znasllc-io/memql/component/metrics v0.0.0
 	github.com/znasllc-io/memql/core v0.0.0
 	google.golang.org/grpc v1.83.2
 	google.golang.org/protobuf v1.36.12
@@ -77,7 +78,6 @@ require (
 	github.com/znasllc-io/memql/component/language/annotations v0.0.0 // indirect
 	github.com/znasllc-io/memql/component/language/ast v0.0.0 // indirect
 	github.com/znasllc-io/memql/component/language/dslclause v0.0.0 // indirect
-	github.com/znasllc-io/memql/component/metrics v0.0.0 // indirect
 	github.com/znasllc-io/memql/component/provenance v0.0.0 // indirect
 	github.com/znasllc-io/memql/component/safety v0.0.0 // indirect
 	github.com/znasllc-io/memql/component/secret v0.0.0 // indirect

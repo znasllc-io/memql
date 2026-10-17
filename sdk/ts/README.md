@@ -125,8 +125,15 @@ conn.subscriptions.subscribeGraph(async (event) => {
 
 Ignoring the flag is safe but useless: you get a row whose fields are all
 `undefined`, so a consumer degrades to rendering blanks rather than to
-leaking anything. It is always `false` on an ordinary event (the wire omits
-a false bool; the SDK normalises it).
+leaking anything. Ordinary full-row notifications carry `false` (the wire
+omits a false bool; the SDK normalises it).
+
+Pass `idOnly: true` to `subscribeGraph` when the consumer always rereads a
+projection and does not need full row bodies on the socket. This uses the
+same identity/version notification and `payloadOmitted` flag; row admission
+still applies. Live collections with both `rereadEveryEvent` and `reread`
+request this automatically. Their background rereads share a limit of two
+active requests per connection and coalesce repeated updates for a row.
 
 #### `seq` and `gapBefore` — continuity
 
