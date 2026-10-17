@@ -848,9 +848,14 @@ alone, and Nexus's re-run and branch refuse it. Re-run a pipeline run with
 
 ## The check run
 
-Each run writes one check run on its commit, named **`MemQL / <name>`** --
-`<name>` being the manifest's `name` when the pipeline was connected -- which is
-the name a ruleset requires. It is `queued` when the run opens, `in_progress`
+Each run writes one check run on its commit. PRs and merge candidates use
+**`MemQL / <name>`**, the context a ruleset requires; `<name>` is the manifest's
+name when the pipeline was connected. Pushes, releases and manual runs append
+`/ push`, `/ release` and `/ manual`, respectively. Scheduled audits append
+`/ daily` or `/ weekly`. These events can select different stages, so a passing
+release or rehearsal cannot satisfy a failed PR check on the same commit.
+
+A check is `queued` when the run opens, `in_progress`
 when an agent starts driving it, and `completed` with the run's conclusion. Its
 `external_id` is the run's id, and its details link is the run's page in MemQL
 OS, `https://os.<domain>/?pipelineRun=<run id>`.

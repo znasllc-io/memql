@@ -210,3 +210,15 @@ func TestWorkspaceLimitIsAQuantityOrTheDefault(t *testing.T) {
 		}
 	}
 }
+
+func TestCacheGCRequiresExplicitFilesystemOptIn(t *testing.T) {
+	for _, tc := range []struct {
+		raw  string
+		want int
+	}{{"", 0}, {"garbage", 0}, {"-1", 0}, {"0", 0}, {"1", 50}, {"70", 70}, {"99", 90}} {
+		got := ConfigFromEnv(envOf(map[string]string{"MEMQL_PIPELINES_CACHE_GC_PERCENT": tc.raw}))
+		if got.CacheGCPercent != tc.want {
+			t.Errorf("%q: got %d, want %d", tc.raw, got.CacheGCPercent, tc.want)
+		}
+	}
+}

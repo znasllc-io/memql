@@ -13,8 +13,8 @@ func RunPageURL(osOrigin, runID string) string {
 	return strings.TrimRight(osOrigin, "/") + "/?pipelineRun=" + url.QueryEscape(runID)
 }
 
-// CheckRunName is the name a pipeline's check run carries on GitHub, and so
-// the name a ruleset requires.
+// CheckRunName is the required PR/merge-candidate context. Other events add
+// a suffix in the check-run composer and cannot satisfy this ruleset check.
 func CheckRunName(pipelineName string) string {
 	return "MemQL / " + pipelineName
 }

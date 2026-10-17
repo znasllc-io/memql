@@ -110,6 +110,11 @@ pipeline:
 	if got.Conclusion != ConclusionSuccess {
 		t.Fatalf("release did not succeed on another replica: %+v", got)
 	}
+	for _, write := range append(dh.github.createdRuns(), dh.github.updatedRuns()...) {
+		if write.Run.Name != "MemQL / shop / release" {
+			t.Fatalf("a release check lost its separate context across the replica hop: %+v", write.Run)
+		}
+	}
 	sent := dh.exec.sent()
 	if len(sent) != 1 || sent[0].Event != pipelines.EventRelease || sent[0].Version != "v1.4.0" || sent[0].SHA != shaA || sent[0].Step.Run != "build-release" {
 		t.Fatalf("release stages did not retain their source/version across the hop: %+v", sent)

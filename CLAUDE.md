@@ -253,25 +253,38 @@ scripts/ci/db-gated-packages.sh --trees
 MEMQL_REQUIRE_DB=1 MEMQL_DATABASE_DSN=... go test -count=1 ./component/memql/...
 ```
 
-### Image builds: LOCAL Docker for dev, BUILD SERVER for deploys (HARD RULE)
+### Image builds: LOCAL Docker for dev, MemQL pipelines for deploys (HARD RULE)
 
-Where a container image is built depends ONLY on where it runs:
+Where a container image is built depends on where it runs:
 
-- **Local development** -- build images in your **local Docker** and import
-  them into k3d via `make dev`. Never pushed to ACR.
-- **Deploys to the CLOUD** -- images MUST be built on the **GitHub build
-  server** (GitHub Actions, OIDC -> ACR `acrmemql`), never on an operator
-  machine: `memql` -> `.github/workflows/build-engine-images.yml` builds every
-  node type as one set of product-agnostic engine images; the product's
-  DSL-bundle repo builds a data-only bundle image mounted via `MEMQL_DSL_PATH`;
-  the product client repo builds its SPA image. Each is `workflow_dispatch` on
-  `main` with a `version` input; tags are immutable.
+- **Local development** -- build images in local Docker and import them into
+  k3d via `make dev`. These validation images are never published for a cloud
+  deployment.
+- **Cloud deployments** -- build release images through the installed MemQL
+  pipeline runner on the bounded cloud build pool. The engine repository's
+  `memql-package.yaml` builds all seven product-agnostic node images from the
+  exact release commit. Product repositories build their data-only DSL bundles
+  and client images through their declared pipelines. Publish retained OCI
+  artifacts through approved release candidates, verify publication receipts,
+  and deploy the resulting immutable digests.
 
-Do NOT hand-build + push release images locally (`az acr build`,
-`make release`, `docker push`) for a cloud deploy. A release is
-`{engine version, bundle digest, client digest}` pinned in **one overlay**
-(`deploy/k8s/overlays/<env>`): build the engine images, pin the three
-digests, merge -> ArgoCD reconciles.
+The owner directed retirement of GitHub Actions for CI/CD (#5480). Do not
+start an Actions image build, release dispatcher or recovery publisher as a
+fallback. A native path that is not yet qualified must be completed or repaired
+before publication; an existing legacy workflow is not authorization to use it.
+Keep required checks enforced while qualifying their native replacements, and
+retire competing publishers before native promotion.
+
+Do not hand-build and push deployment images from an operator machine
+(`az acr build`, `make release`, `docker push`). A release is
+`{engine version, bundle digest, client digest}` pinned in the installation's
+GitOps overlay. Merge the verified pins, then let ArgoCD reconcile. Record the
+native run, exact source, candidate and publication receipts with the pins.
+Coordinate controller upgrades with active release work: replacing the
+pipeline controller can invalidate an in-progress run, and changing the engine
+or assembly configuration requires candidate review again.
+[Release candidates](docs/public/operate/release-candidates.md) describes the
+native assembly and publication contract. Deployment composition remains in
 [deploy-bundle-runbook.md](docs/public/operate/deploy-bundle-runbook.md).
 
 ---

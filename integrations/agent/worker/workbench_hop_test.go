@@ -150,3 +150,46 @@ func TestQueuedWorkbenchRechecksSharingOnReceivingReplica(t *testing.T) {
 		t.Fatal("queued work did not finish")
 	}
 }
+
+func TestWorkbenchHopRecordsTheActualTerminalOutcome(t *testing.T) {
+	for _, tc := range []struct {
+		name, output, errorCode, outcome string
+		ok                               bool
+	}{
+		{"success", `{"stdout":"probe","exitCode":0}`, "", "success", true},
+		{"worker failure", "", "command_failed", "failure", false},
+		{"timeout", "", "timeout", "timeout", false},
+		{"invalid worker response", "{", "", "failure", false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			correlation := ""
+			d, store, _ := newWorkbenchHop(t, func(_ context.Context, dispatch *memqlv1.ToolDispatch, _ func(*memqlv1.ToolStream)) (*memqlv1.ToolResult, error) {
+				correlation = dispatch.GetCorrelationId()
+				if tc.errorCode != "" {
+					return &memqlv1.ToolResult{CallId: dispatch.CallId, Payload: &memqlv1.ToolResult_Failure{Failure: &memqlv1.Failure{ErrorCode: tc.errorCode, ErrorMessage: "fixture failure"}}}, nil
+				}
+				return &memqlv1.ToolResult{CallId: dispatch.CallId, Payload: &memqlv1.ToolResult_Success{Success: &memqlv1.Success{ResultJson: []byte(tc.output), OutputPreview: "probe"}}}, nil
+			})
+			result, handled := d.DispatchFleetWorkbench(authorityCtx(t, sharedHopCaller), workbench.FleetRequest{RunID: "goal-run", Action: "exec", Args: map[string]any{"command": "printf probe"}})
+			if !handled || result.OK != tc.ok {
+				t.Fatalf("terminal result: %+v handled=%v", result, handled)
+			}
+			if len(store.invocations) != 1 {
+				t.Fatalf("got %d invocation receipts, want one", len(store.invocations))
+			}
+			row := store.lastInvocation(t)
+			if row.Outcome != tc.outcome {
+				t.Errorf("outcome=%q want %q; empty outcomes are rejected by the stored invocation schema", row.Outcome, tc.outcome)
+			}
+			if correlation == "" || row.CorrelationId != correlation {
+				t.Errorf("lost correlation across replica: dispatch=%q receipt=%q", correlation, row.CorrelationId)
+			}
+			if row.OwnerUserId != sharedHopCaller || row.RunId != "goal-run" || row.WorkerId != store.candidate.RegistrationId {
+				t.Errorf("receipt lost borrower/run/machine: %+v", row)
+			}
+			if tc.name == "invalid worker response" && row.ErrorCode != "workbench_invalid_result" {
+				t.Errorf("invalid response recorded as success: %+v", row)
+			}
+		})
+	}
+}

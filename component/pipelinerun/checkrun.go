@@ -17,8 +17,9 @@ import (
 // halves: the opening here (queued, or a fork's refusal), and the driver
 // (Task 10b: in_progress, then completed with the stage table).
 //
-// Decision 14 of the plan: the name is `MemQL / <pipeline name>`, the
-// external id is the run's id, the details link is the run's page in MemQL OS.
+// The required PR/merge-candidate name is `MemQL / <pipeline name>`;
+// other events have separate contexts because they select different stages.
+// The external id is the run's id, and details link to its page in MemQL OS.
 // A 403 on a write is an installation predating `checks: write`; it records
 // checkRunState "refused" and the pipeline_check_permission_missing note on
 // the run, and NEVER stops the run.
@@ -64,14 +65,21 @@ func ReportFor(p Pipeline, r Run, steps []pipelines.StepReport) pipelines.RunRep
 func ComposeCheckRun(osOrigin string, p Pipeline, r Run, report pipelines.RunReport) githubapp.CheckRun {
 	title, summary, text := pipelines.CheckOutput(report)
 	name := pipelines.CheckRunName(p.Name)
-	// A periodic audit must never satisfy or overwrite the required PR/queue
-	// check for the same SHA. Daily and weekly audits also report separately.
-	if r.Event == pipelines.EventSchedule {
+	// Event filters make these different proofs even at the same commit.
+	// In particular, release/manual runs may omit introduced-commit scans.
+	// Only PRs and exact merge candidates can report the required context.
+	switch r.Event {
+	case pipelines.EventPullRequest, pipelines.EventMergeGroup:
+	case pipelines.EventPush, pipelines.EventRelease, pipelines.EventManual:
+		name += " / " + string(r.Event)
+	case pipelines.EventSchedule:
 		cadence := "invalid"
 		if slot, ok := pipelines.ScheduledSlotFromRunKey(r.RunKey); ok {
 			cadence, _ = pipelines.ScheduleCadence(slot)
 		}
 		name += " / " + cadence
+	default:
+		name += " / invalid"
 	}
 	run := githubapp.CheckRun{
 		Name:       name,

@@ -11,6 +11,32 @@ import (
 
 // checkrun_test.go -- the one composition of a check run, for both halves.
 
+func TestAuxiliaryRunCannotReplaceFailedPullRequestCheck(t *testing.T) {
+	p := testPipeline(DeliveryWebhook)
+	pr := queuedRun(p, shaA)
+	pr.Status, pr.Conclusion, pr.FinishedAt = StatusCompleted, ConclusionFailure, testNow
+	failed := ComposeCheckRun(testOSOrigin, p, pr, ReportFor(p, pr, nil))
+	for _, event := range []pipelines.Event{pipelines.EventPush, pipelines.EventRelease, pipelines.EventManual, "", "future-event"} {
+		t.Run(string(event), func(t *testing.T) {
+			other := pr
+			other.Event, other.Mode, other.PullRequest = event, pipelines.ModeFull, 0
+			other.Conclusion = ConclusionSuccess
+			passed := ComposeCheckRun(testOSOrigin, p, other, ReportFor(p, other, nil))
+			if failed.Conclusion != "failure" || passed.Conclusion != "success" || failed.HeadSHA != passed.HeadSHA {
+				t.Fatalf("fixture must exercise conflicting verdicts on one commit: failed=%+v passed=%+v", failed, passed)
+			}
+			if passed.Name == failed.Name {
+				t.Fatalf("successful %q run can satisfy the failed PR context %q on the same commit", event, failed.Name)
+			}
+		})
+	}
+	pr.Event, pr.Mode = pipelines.EventMergeGroup, pipelines.ModeFull
+	queued := ComposeCheckRun(testOSOrigin, p, pr, ReportFor(p, pr, nil))
+	if queued.Name != failed.Name {
+		t.Fatalf("merge candidates must retain the required context: %q != %q", queued.Name, failed.Name)
+	}
+}
+
 func TestComposeCheckRunAcrossARunsLife(t *testing.T) {
 	p := testPipeline(DeliveryWebhook)
 	r := queuedRun(p, shaA)

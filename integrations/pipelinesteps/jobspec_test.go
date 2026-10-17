@@ -356,7 +356,7 @@ func TestBuildJob(t *testing.T) {
 		if !reflect.DeepEqual(prep.Command, []string{"/bin/sh", "-c", cachePrepScript}) {
 			t.Errorf("cache-prep command = %q, want /bin/sh -c <cachePrepScript>", prep.Command)
 		}
-		wantEnv := []EnvVar{{Name: "CACHE_DIR", Value: "/cache-root/" + testCache}}
+		wantEnv := []EnvVar{{Name: "CACHE_DIR", Value: "/cache-root/" + testCache}, {Name: "CACHE_GC_PERCENT", Value: "0"}}
 		if !reflect.DeepEqual(prep.Env, wantEnv) {
 			t.Errorf("cache-prep env = %s, want only CACHE_DIR", mustJSON(t, prep.Env))
 		}

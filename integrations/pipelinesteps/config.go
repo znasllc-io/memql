@@ -35,6 +35,10 @@ type Config struct {
 	// may run with a repository token, so an empty value means this node
 	// cannot run pipeline steps, and the runner refuses them.
 	CloneImage string
+	// CacheGCPercent starts quiescent cache reclamation at this percentage of
+	// bytes or inodes used. Zero disables it. Requires a drained migration
+	// and a filesystem with cross-pod flock (not Azure Blob NFS).
+	CacheGCPercent int
 	// CacheClaim is the PersistentVolumeClaim mounted at /cache.
 	CacheClaim string
 	// StepServiceAccount is the identity a step's pod runs as: one holding no
@@ -97,6 +101,7 @@ const (
 	envLogStoreMaxLines = "MEMQL_PIPELINES_LOG_STORE_MAX_LINES"
 	envArtifactMaxBytes = "MEMQL_PIPELINES_ARTIFACT_MAX_BYTES"
 	envNodeID           = "MEMQL_NODE_ID"
+	envCacheGCPercent   = "MEMQL_PIPELINES_CACHE_GC_PERCENT"
 	envWorkspaceLimit   = "MEMQL_PIPELINES_WORKSPACE_LIMIT"
 )
 
@@ -138,6 +143,7 @@ func ConfigFromEnv(getenv func(string) string) Config {
 		NodePool:           text(envNodePool),
 		CloneImage:         text(envCloneImage),
 		CacheClaim:         cacheClaim,
+		CacheGCPercent:     cacheGCPercent(whole(envCacheGCPercent, 0, 0, 90)),
 		StepServiceAccount: stepServiceAccount,
 		RunCeiling:         pl.ParseRunCeiling(text(pl.EnvRunCeiling)),
 		LogStoreMaxLines:   whole(envLogStoreMaxLines, 2000, 100, 100000),
