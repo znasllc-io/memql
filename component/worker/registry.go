@@ -77,11 +77,14 @@ type Worker struct {
 	// anything voluntary.
 	terminateFn func(reason string)
 
-	mu             sync.Mutex
-	activePerCap   map[string]uint32
-	queue          []*slotWaiter
-	activePerModel map[string]uint32
-	disconnected   bool
+	mu                    sync.Mutex
+	activePerCap          map[string]uint32
+	queue                 []*slotWaiter
+	activePerModel        map[string]uint32
+	ownerFeaturePolicy    OwnerFeaturePolicy
+	ownerFeatureLeases    map[uint64]ownerFeatureLease
+	nextOwnerFeatureLease uint64
+	disconnected          bool
 	// apps is the reported local-app inventory. Guarded by mu because
 	// heartbeats rewrite it while selection reads it.
 	apps []AppInfo

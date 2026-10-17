@@ -1,3 +1,4 @@
+import { machineAppAvailability } from "./features";
 import { Terminal, Trash2 } from "lucide-react";
 import { useSession } from "../../../chrome/access";
 import { localCockpitInstall } from "../addMachine/localInstall";
@@ -20,6 +21,7 @@ import { MachineDetailsInfo, MachineDetailsSection } from "./MachineDetailsInfo"
 import { LabelEditor } from "./LabelEditor";
 import { ModelsGroup } from "./ModelsGroup";
 import { SharingGroup } from "./SharingGroup";
+import { OwnerFeaturesGroup } from "./OwnerFeaturesGroup";
 import { AutoRefresh } from "../../../kit/AutoRefresh";
 import { useMachineInference } from "./useMachineInference";
 import type { MachineWrites, RemovalReceipt } from "./useMachineWrites";
@@ -65,15 +67,19 @@ export function MachineDetail({
             <LabelEditor key={machine.id} operatorLabels={machine.operatorLabels} busy={busy} onSave={labels => writes.setOperatorLabels(machine.id, labels)} />
           </div>
           <RemoveControl machine={machine} busy={busy} revoke={writes.revoke} />
-          {writes.actionError && writes.actionErrorScope !== "sharing" ? <Notice tone="error" sentence="The cluster refused that change." next="Nothing was written." detail={writes.actionError} /> : null}
+          {writes.actionError && (!writes.actionErrorScope || writes.actionErrorScope === "machine") ? <Notice tone="error" sentence="The cluster refused that change." next="Nothing was written." detail={writes.actionError} /> : null}
+        </MachineDetailsSection>
+        <MachineDetailsSection title="Owner-only features">
+          <OwnerFeaturesGroup machine={machine} writes={writes} />
         </MachineDetailsSection>
         <MachineDetailsSection title="Sharing">
           <SharingGroup machine={machine} writes={writes} />
+          <SharingGroup machine={machine} writes={writes} resource="workbench" />
         </MachineDetailsSection>
         <MachineDetailsInfo machine={machine} now={now} machineClass={inference.recommended.machineClass} usableBytes={inference.recommended.usableBytes} />
       </div> : null}
 
-      {view === "all" || view === "apps" ? <AppsGroup machine={machine} standalone={view === "apps"} /> : null}
+      {view === "all" || view === "apps" ? <AppsGroup machine={machine} now={now} standalone={view === "apps"} /> : null}
 
       {/* Below Apps, because the two answer the same shape of question about
           this machine -- what it can be asked to do -- and a person scanning
@@ -151,7 +157,7 @@ export function MachineAppsHelp() {
   return <PageHelp title="Apps on this machine"><p>Apps installed on this machine that Cockpit reports to MemQL. Ready apps are supported, allowed by Cockpit and signed in. Subscription status comes from the app.</p></PageHelp>;
 }
 
-function AppsGroup({ machine, standalone }: { machine: MachineRow; standalone: boolean }) {
+function AppsGroup({ machine, standalone, now }: { machine: MachineRow; standalone: boolean; now: Date }) {
   return (
     <div className="os-fleet-apps">
       {!standalone ? <div className="fleet-bank-heading"><Subhead meta={machine.apps.length}>Apps on this machine</Subhead><MachineAppsHelp /></div> : null}
@@ -160,7 +166,7 @@ function AppsGroup({ machine, standalone }: { machine: MachineRow; standalone: b
       ) : (
         <RecordList as="ul" label="Apps on this machine">
           {machine.apps.map((app) => (
-            <MachineAppLine key={app.id} app={app} machine={machine} />
+            <MachineAppLine key={app.id} app={app} machine={machine} now={now} />
           ))}
         </RecordList>
       )}
@@ -168,12 +174,12 @@ function AppsGroup({ machine, standalone }: { machine: MachineRow; standalone: b
   );
 }
 
-function MachineAppLine({ app, machine }: { app: MachineRow["apps"][number]; machine: MachineRow }) {
+function MachineAppLine({ app, machine, now }: { app: MachineRow["apps"][number]; machine: MachineRow; now: Date }) {
   const [open, setOpen] = useState(false);
   return <div><RecordRow name={app.label} secondary={app.version || "Version not reported"}
-    state={app.runnable ? "Ready" : "Needs attention"} tone={app.runnable ? "accent" : "warn"}
+    state={machineAppAvailability(machine, app.runnable, now)} tone={machineAppAvailability(machine, app.runnable, now) === "Ready" ? "accent" : "warn"}
     open={open} onOpen={() => setOpen(value => !value)} />
-    {open ? <><Facts><Fact label="Subscription" value={app.subscription || "Unknown"} /><Fact label="Availability" value={app.runnable ? "Allowed and signed in" : app.why || "Not available to run"} /></Facts><AppPermissionHelp app={app} machine={machine} /></> : null}
+    {open ? <><Facts><Fact label="Subscription" value={app.subscription || "Unknown"} /><Fact label="Availability" value={machine.ownerFeatures?.apps === false ? "Disabled in Settings" : app.runnable ? "Allowed and signed in · owner only" : app.why || "Not available to run"} /></Facts><AppPermissionHelp app={app} machine={machine} /></> : null}
   </div>;
 }
 

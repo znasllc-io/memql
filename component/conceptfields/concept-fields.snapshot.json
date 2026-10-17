@@ -8838,6 +8838,34 @@
       }
     },
     {
+      "concept": "v1:workbench:executionBinding",
+      "file": "workbench/concepts.memql",
+      "fields": [
+        "expiresAt",
+        "machineId",
+        "machineOwnerUserId",
+        "ownerUserId",
+        "registrationId",
+        "resource",
+        "runId"
+      ],
+      "required": [
+        "expiresAt",
+        "machineId",
+        "machineOwnerUserId",
+        "ownerUserId",
+        "registrationId",
+        "resource",
+        "runId"
+      ],
+      "enums": {
+        "resource": [
+          "cloud",
+          "fleet"
+        ]
+      }
+    },
+    {
       "concept": "v1:workbench:workspace",
       "file": "workbench/concepts.memql",
       "fields": [
@@ -9107,6 +9135,7 @@
         "lastSelectedAt",
         "name",
         "operatorLabels",
+        "ownerFeatures",
         "ownerUserId",
         "permissions",
         "platformInfo",
@@ -9118,7 +9147,8 @@
         "rttMs",
         "sharing",
         "sharingActivity",
-        "version"
+        "version",
+        "workbenchSharing"
       ],
       "required": [
         "capabilities",

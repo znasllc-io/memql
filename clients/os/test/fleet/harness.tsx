@@ -105,7 +105,7 @@ export function sharingReceiptRow(args: {
         ? `Lent to ${count}.`
         : args.mode === "cluster"
           ? "Offered to everyone on this cluster, and to the cluster's own work."
-          : "Kept to you. Nobody else's work will run on this machine.",
+          : "This resource is kept to you.",
   };
 }
 
@@ -159,6 +159,7 @@ export interface FakeQuery {
   /** The owner's half of the consent (epic memql#5344). Answers the RECEIPT
    *  row, in the builtin wire shape, built from what was sent. */
   fleetSetSharing: ReturnType<typeof vi.fn>;
+  fleetSetOwnerFeatures: ReturnType<typeof vi.fn>;
   /** Who the owner may lend a machine to. On demand, never live: a virtual
    *  row computed per request, read once each time the share dialog opens. */
   fleetShareDirectory: ReturnType<typeof vi.fn>;
@@ -270,6 +271,7 @@ export function fakeConnection(seed: Partial<Record<keyof FakeQuery, Row[]>> = {
         async (args: { registrationId: string; mode: string; userIds?: string[]; groupIds?: string[] }) =>
           builtinReply("fleetSetSharing", [sharingReceiptRow(args)]),
       ),
+      fleetSetOwnerFeatures: vi.fn(async () => builtinReply("fleetSetOwnerFeatures", [])),
       fleetShareDirectory: vi.fn(async () =>
         builtinReply("fleetShareDirectory", seed.fleetShareDirectory ?? [shareDirectoryRow()]),
       ),

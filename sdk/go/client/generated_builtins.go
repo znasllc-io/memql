@@ -2224,10 +2224,59 @@ func FleetRevokeMachineBuild(args FleetRevokeMachineArgs) string {
 	return b.String()
 }
 
-// FleetSetSharing -- Choose who may use the models on one of YOUR OWN machines. owner keeps inference private; people shares with the users and active group members you name. Fleet is the single sharing control: the saved audience applies to subsequent calls without changing a machine configuration file or reconnecting Cockpit. Sharing grants model inference only, never commands, files, apps or computer control. Only the enrolled owner may change it; cluster administration does not grant permission to lend another person's hardware. New subjects must be offered by fleetShareDirectory. A refusal does not distinguish a missing subject from one you may not select. Existing cluster-wide shares remain readable, but new writes must choose owner or people.
+// FleetSetOwnerFeatures -- Enable or disable owner-only commands, signed-in CLIs/apps and desktop control on one of your enrolled machines. Disabling blocks new work and cancels active work using that feature; enabling rechecks readiness and never replays canceled work. Sharing never grants these capabilities. The expected timestamp prevents overwriting another settings change.
+type FleetSetOwnerFeaturesArgs struct {
+	RegistrationId    string
+	Headless          bool
+	Apps              bool
+	ComputerUse       bool
+	ExpectedUpdatedAt string
+}
+
+// FleetSetOwnerFeatures calls the engine builtin fleetSetOwnerFeatures.
+func (qc *QueryClient) FleetSetOwnerFeatures(ctx context.Context, args FleetSetOwnerFeaturesArgs) (*Result, error) {
+	call := FleetSetOwnerFeaturesBuild(args)
+	return qc.executeNamed(ctx, "fleetSetOwnerFeatures", call)
+}
+
+func FleetSetOwnerFeaturesBuild(args FleetSetOwnerFeaturesArgs) string {
+	var b strings.Builder
+	b.WriteString("builtin fleetSetOwnerFeatures(")
+	b.WriteString("registrationId: ")
+	b.WriteString(quoteMemQL(args.RegistrationId))
+	if b.Len() > 30 {
+		b.WriteString(", ")
+	}
+	b.WriteString("headless: ")
+	b.WriteString(fmt.Sprintf("%v", args.Headless))
+	if b.Len() > 30 {
+		b.WriteString(", ")
+	}
+	b.WriteString("apps: ")
+	b.WriteString(fmt.Sprintf("%v", args.Apps))
+	if b.Len() > 30 {
+		b.WriteString(", ")
+	}
+	b.WriteString("computerUse: ")
+	b.WriteString(fmt.Sprintf("%v", args.ComputerUse))
+	if b.Len() > 30 {
+		b.WriteString(", ")
+	}
+	b.WriteString("expectedUpdatedAt: ")
+	b.WriteString(quoteMemQL(args.ExpectedUpdatedAt))
+	b.WriteString(")")
+	return b.String()
+}
+
+// FleetSetSharing -- Choose who may use model inference or fleet workbenches on one of YOUR OWN machines. Each resource has independent consent. owner keeps that resource private; people shares with the users and active group members you name. Fleet is the single sharing control: the saved audience applies to subsequent calls without changing a machine configuration file or reconnecting Cockpit. Sharing grants only the selected resource, never host commands, files, apps or computer control. Pausing preserves the audience, blocks new borrowed admissions, and lets running work finish. Only the enrolled owner may change it; cluster administration does not grant permission to lend another person's hardware. New subjects must be offered by fleetShareDirectory. A refusal does not distinguish a missing subject from one you may not select. Existing cluster-wide shares remain readable, but new writes must choose owner or people.
 type FleetSetSharingArgs struct {
 	// v1:worker:registration.id of the machine to set sharing on. It must be one of the caller's own.
 	RegistrationId string
+	// models (default) or workbench. Each has an independent audience and pause state. Neither grants host access.
+	Resource string
+	// Pause new borrowed admissions without removing the audience. Running work finishes; the owner can continue using the resource. Omitted preserves the saved pause.
+	Paused    bool
+	PausedSet bool // set true to send paused; required because zero-value bool is ambiguous
 	// owner or people. Other values, including cluster, are refused.
 	Mode string
 	// Under people: the v1:identity:user ids to lend the machine to. At most 50 subjects across both lists, including paused entries. Your own id is dropped rather than refused -- your own machine is yours already. Ignored under owner.
@@ -2251,6 +2300,20 @@ func FleetSetSharingBuild(args FleetSetSharingArgs) string {
 	b.WriteString("builtin fleetSetSharing(")
 	b.WriteString("registrationId: ")
 	b.WriteString(quoteMemQL(args.RegistrationId))
+	if args.Resource != "" {
+		if b.Len() > 24 {
+			b.WriteString(", ")
+		}
+		b.WriteString("resource: ")
+		b.WriteString(quoteMemQL(args.Resource))
+	}
+	if args.PausedSet {
+		if b.Len() > 24 {
+			b.WriteString(", ")
+		}
+		b.WriteString("paused: ")
+		b.WriteString(fmt.Sprintf("%v", args.Paused))
+	}
 	if b.Len() > 24 {
 		b.WriteString(", ")
 	}
@@ -2292,6 +2355,8 @@ func FleetSetSharingBuild(args FleetSetSharingArgs) string {
 type FleetShareDirectoryArgs struct {
 	// v1:worker:registration.id of the machine being shared. It must be one of the caller's own.
 	RegistrationId string
+	// models (default) or workbench; selects which existing audience to name.
+	Resource string
 }
 
 // FleetShareDirectory calls the engine builtin fleetShareDirectory.
@@ -2305,6 +2370,13 @@ func FleetShareDirectoryBuild(args FleetShareDirectoryArgs) string {
 	b.WriteString("builtin fleetShareDirectory(")
 	b.WriteString("registrationId: ")
 	b.WriteString(quoteMemQL(args.RegistrationId))
+	if args.Resource != "" {
+		if b.Len() > 28 {
+			b.WriteString(", ")
+		}
+		b.WriteString("resource: ")
+		b.WriteString(quoteMemQL(args.Resource))
+	}
 	b.WriteString(")")
 	return b.String()
 }

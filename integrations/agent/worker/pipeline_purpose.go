@@ -142,11 +142,18 @@ func machineAllowsPipelines(w *workerservice.Worker, args map[string]any) bool {
 // action and the purpose belong together.
 func purposeBinding(purpose, tool, action, agentId string) (code, msg string) {
 	step := tool == "workerHost" && action == PipelineStepAction
+	if tool == WorkbenchTool && purpose != PurposeWorkbench {
+		return "denied_workbench_purpose", "isolated workbenches require workbench dispatch"
+	}
 	switch purpose {
 	case "":
 		if step {
 			return codeDeniedPipelinePurpose,
 				"workerHost." + PipelineStepAction + " runs only for a pipeline; an agent runs commands with exec"
+		}
+	case PurposeWorkbench:
+		if tool != WorkbenchTool || !workbenchAction(action) {
+			return "denied_workbench_purpose", "workbench dispatch never runs host tools"
 		}
 	case PurposePipeline:
 		if !step {

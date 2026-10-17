@@ -85,6 +85,7 @@ export interface InstallCommandInput {
    * legitimate machine.
    */
   inference: boolean;
+  workbench?: boolean;
   /** Install into this account's ~/.memql/bin instead of /usr/local/bin. */
   userLocal?: boolean;
   localTest?: LocalCockpitInstall | null;
@@ -114,7 +115,7 @@ export function installCommand(input: InstallCommandInput): string {
   if (input.localTest && input.platform === "mac") {
     const source = input.localTest;
     const inference = input.inference ? " --inference" : "";
-    return `curl -fsSL ${source.base}/scripts/install/install-mac.sh | ${localInstallerEnvironment(source)}bash -s -- --token ${input.token} --cluster ${input.clusterUrl || CLUSTER_URL_PLACEHOLDER} --computeruse${inference} --user-local --download-base=${source.base}/releases/download/v${source.version}`;
+    return `curl -fsSL ${source.base}/scripts/install/install-mac.sh | ${localInstallerEnvironment(source)}bash -s -- --token ${input.token} --cluster ${input.clusterUrl || CLUSTER_URL_PLACEHOLDER} --computeruse${inference}${input.workbench ? " --workbench" : ""} --user-local --download-base=${source.base}/releases/download/v${source.version}`;
   }
   const cluster = input.clusterUrl === "" ? CLUSTER_URL_PLACEHOLDER : input.clusterUrl;
   const script = `https://raw.githubusercontent.com/znasllc-io/memql-cockpit/main/scripts/install/install-${input.platform}.sh`;
@@ -125,7 +126,7 @@ export function installCommand(input: InstallCommandInput): string {
   // the runbook prints.
   const inference = input.inference ? " --inference" : "";
   const location = input.userLocal ? " --user-local" : "";
-  return `curl -fsSL ${script} | bash -s -- --token ${input.token} --cluster ${cluster}${computeruse}${inference}${location}`;
+  return `curl -fsSL ${script} | bash -s -- --token ${input.token} --cluster ${cluster}${computeruse}${inference}${input.workbench ? " --workbench" : ""}${location}`;
 }
 
 // uninstallCommand composes the uninstaller's one-liner (design record

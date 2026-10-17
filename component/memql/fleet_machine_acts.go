@@ -238,7 +238,7 @@ func (e *MemQLEngine) revokeWorkerCredential(ctx context.Context, identityId str
 }
 
 // evaluateFleetSetSharingExpression serves the `fleetSetSharing` builtin: the
-// owner's model sharing choice, written through the caller's
+// owner's resource sharing choice, written through the caller's
 // own machines.
 //
 // THREE MODES (epic memql#5344). `owner` keeps it, `cluster` offers it to
@@ -259,16 +259,29 @@ func (e *MemQLEngine) evaluateFleetSetSharingExpression(ctx context.Context, arg
 	// misspelling is safe, and silently doing anything else is not -- but an
 	// owner who typed `clustre` and saw nothing happen would try again, and
 	// eventually conclude the feature is broken.
-	if mode != SharingModeOwner && mode != SharingModePeople {
-		return nil, modelPullRefusal{
-			Code:    "invalid_sharing_mode",
-			Message: "choose specific people and groups, or keep model inference private",
-		}
-	}
 	registrationId := strings.TrimSpace(stringArg(args, "registrationId"))
 	machine, err := e.modelPullMachineFor(ctx, registrationId)
 	if err != nil {
 		return nil, err
+	}
+	resource, err := fleetSharingResource(args)
+	if err != nil {
+		return nil, err
+	}
+	machine = machine.forSharingResource(resource)
+	if mode != SharingModeOwner && mode != SharingModePeople && !(resource == "models" && mode == SharingModeCluster && machine.SharingMode == SharingModeCluster) {
+		return nil, modelPullRefusal{Code: "invalid_sharing_mode", Message: "choose specific people and groups, or keep this resource private"}
+	}
+	paused := machine.SharingPaused
+	if value, exists := args["paused"]; exists {
+		var valid bool
+		paused, valid = value.(bool)
+		if !valid {
+			return nil, modelPullRefusal{Code: "invalid_sharing_pause", Message: "choose pause or resume for this share"}
+		}
+	}
+	if mode == SharingModeOwner {
+		paused = false
 	}
 	if machine.RevokedAt != "" {
 		return nil, modelPullRefusal{
@@ -343,9 +356,14 @@ func (e *MemQLEngine) evaluateFleetSetSharingExpression(ctx context.Context, arg
 			}
 		}
 	}
-	call, err := langparser.RenderCall("setWorkerSharing", map[string]any{
+	mutation := "setWorkerSharing"
+	if resource == "workbench" {
+		mutation = "setWorkerWorkbenchSharing"
+	}
+	call, err := langparser.RenderCall(mutation, map[string]any{
 		"registrationId": registrationId,
 		"mode":           mode,
+		"paused":         paused,
 		"userIds":        userIds,
 		"groupIds":       groupIds,
 		"pausedUserIds":  pausedUsers,
@@ -363,12 +381,18 @@ func (e *MemQLEngine) evaluateFleetSetSharingExpression(ctx context.Context, arg
 		return nil, fmt.Errorf("fleetSetSharing: %w", err)
 	}
 
+	sentence := sharingReceiptSentence(mode, len(userIds), len(groupIds))
+	if paused {
+		sentence = "Sharing paused. Your audience is saved and running work can finish."
+	}
 	return singleVirtualRow(SetSharingConcept, registrationId, map[string]any{
 		"machineId": registrationId,
 		"mode":      mode,
+		"resource":  resource,
+		"paused":    paused,
 		"people":    len(userIds),
 		"groups":    len(groupIds),
-		"sentence":  sharingReceiptSentence(mode, len(userIds), len(groupIds)),
+		"sentence":  sentence,
 	})
 }
 
@@ -384,7 +408,7 @@ func sharingReceiptSentence(mode string, people, groups int) string {
 	case SharingModeCluster:
 		return "Offered to everyone on this cluster, and to the cluster's own work."
 	default:
-		return "Kept to you. Nobody else's work will run on this machine."
+		return "This resource is kept to you."
 	}
 }
 

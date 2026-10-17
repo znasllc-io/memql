@@ -167,7 +167,7 @@ describe("the checks", () => {
   });
 
   it("asks for the macOS permissions only on a computer-use Mac, and names the missing ones", () => {
-    expect(checksFor(MAC, machine(), 0, NOW).map((c) => c.id)).toEqual(["connection", "build"]);
+    expect(checksFor(MAC, machine(), 0, NOW).map((c) => c.id)).toEqual(["connection", "build", "headless", "apps"]);
     const cu = machine({
       buildTag: "computeruse",
       permissions: { accessibility: true, screen_recording: false, x11_display: false, detail: "" },
@@ -335,7 +335,7 @@ describe("the stops", () => {
     });
     const waitingOnHand = stopsFor(facts({ draft: MAC_CU, mint: MINT, machine: cu, beats: 2 }), checksFor(MAC_CU, cu, 2, NOW));
     expect(waitingOnHand[3]!.state).toBe("open");
-    expect(waitingOnHand[3]!.answer).toBe("2 of 3 settled -- macOS permissions next");
+    expect(waitingOnHand[3]!.answer).toBe("4 of 5 settled -- macOS permissions next");
 
     const done = stopsFor(facts({ mint: MINT, machine: machine(), beats: 2 }), checksFor(MAC, machine(), 2, NOW));
     expect(done[3]!.state).toBe("done");
@@ -431,7 +431,7 @@ describe("the action bar follows the state", () => {
   it("names a problem in the state word when a check stopped", () => {
     const silent = machine({ lastSeenAt: ago(200) });
     const bar = barFor(facts({ mint: MINT, machine: silent, beats: 1 }), checksFor(MAC, silent, 1, NOW));
-    expect(bar.state).toBe("Connected, with a problem");
+    expect(bar.state).toBe("Connection needs attention");
     expect(bar.tone).toBe("paused");
   });
 });

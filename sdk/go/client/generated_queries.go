@@ -14014,6 +14014,28 @@ func WorkViewerOrganizationBuild(args WorkViewerOrganizationArgs) string {
 	return b.String()
 }
 
+// WorkbenchExecutionForRun -- The caller's durable execution choice, shared by every agent replica.
+//
+// Bound concept: v1:workbench:executionBinding (machine-readable: BoundConcepts["workbenchExecutionForRun"] in generated_concepts.go).
+type WorkbenchExecutionForRunArgs struct {
+	RunId string
+}
+
+// WorkbenchExecutionForRun calls the engine query workbenchExecutionForRun.
+func (qc *QueryClient) WorkbenchExecutionForRun(ctx context.Context, args WorkbenchExecutionForRunArgs) (*Result, error) {
+	call := WorkbenchExecutionForRunBuild(args)
+	return qc.executeNamed(ctx, "workbenchExecutionForRun", call)
+}
+
+func WorkbenchExecutionForRunBuild(args WorkbenchExecutionForRunArgs) string {
+	var b strings.Builder
+	b.WriteString("query workbenchExecutionForRun(")
+	b.WriteString("runId: ")
+	b.WriteString(quoteMemQL(args.RunId))
+	b.WriteString(")")
+	return b.String()
+}
+
 // WorkerByIdentityId -- Look up the worker registration owned by an identity row.
 // The `row.ownerUserId == actor.userId` conjunct is not redundant with the concept's tier -- it is what makes this read's result set the SAME before and after enforcement, which TestRowAuthzEnforcementLandGate is the gate for. It is satisfied at runtime because the only caller, component/worker's register handshake, runs under auth.ContextWithUserActor for the owner the worker_token's identity row named. A worker authenticates as worker:<id>, so without that stamp this read returns nothing at all -- which is the failure that reads as "this machine has never registered" and silently creates a duplicate row on every reconnect.
 //

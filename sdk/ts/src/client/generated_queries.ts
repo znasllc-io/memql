@@ -13355,6 +13355,28 @@ QueryClient.prototype.workViewerOrganization = function (this: QueryClient, args
   return this.executeNamed("workViewerOrganization", buildWorkViewerOrganization(args), opts);
 };
 
+/** The caller's durable execution choice, shared by every agent replica. */
+// Bound concept: v1:workbench:executionBinding (machine-readable: BoundConcepts["workbenchExecutionForRun"] in generated_concepts.ts).
+export interface WorkbenchExecutionForRunArgs {
+  runId: string;
+}
+
+export function buildWorkbenchExecutionForRun(args: WorkbenchExecutionForRunArgs): string {
+  const parts: string[] = [];
+  parts.push("runId: " + renderMemQLValue(args.runId));
+  return "query workbenchExecutionForRun(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    workbenchExecutionForRun(args: WorkbenchExecutionForRunArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.workbenchExecutionForRun = function (this: QueryClient, args: WorkbenchExecutionForRunArgs = {} as WorkbenchExecutionForRunArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("workbenchExecutionForRun", buildWorkbenchExecutionForRun(args), opts);
+};
+
 /** Look up the worker registration owned by an identity row.
 The `row.ownerUserId == actor.userId` conjunct is not redundant with the concept's tier -- it is what makes this read's result set the SAME before and after enforcement, which TestRowAuthzEnforcementLandGate is the gate for. It is satisfied at runtime because the only caller, component/worker's register handshake, runs under auth.ContextWithUserActor for the owner the worker_token's identity row named. A worker authenticates as worker:<id>, so without that stamp this read returns nothing at all -- which is the failure that reads as "this machine has never registered" and silently creates a duplicate row on every reconnect. */
 // Bound concept: v1:worker:registration (machine-readable: BoundConcepts["workerByIdentityId"] in generated_concepts.ts).

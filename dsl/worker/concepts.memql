@@ -114,6 +114,7 @@ concept registration {
   // generation mid-token would lose work somebody is waiting for and change
   // nothing about the prompt already sent.
   sharing {
+    paused bool @description("Pause all new borrowed model calls while retaining the audience. Admitted calls finish; the owner's own calls remain available.")
     mode      enum("owner", "people", "cluster")  @description("Who else this machine serves. owner -- the default and the absent case -- is its owner only. people is exactly the users in userIds and the ACTIVE members of the ACTIVE groups in groupIds. cluster is everyone signed in to this cluster, plus the cluster's own work (automations and maintenance, which a people share never serves). Every reader maps any other value to owner, so an engine older than a mode reads it as private rather than as open.")
     userIds   []string  @description("Under people: the v1:identity:user ids this machine is lent to, stored as the owner's client sent them and compared bare/canonical tolerantly. Empty under the other two modes -- a list kept beside owner or cluster would be residue a later reader could honour by mistake.")
     groupIds  []string  @description("Under people: the v1:identity:group ids whose ACTIVE members may use this machine, resolved on every call from the membership rows, so removing somebody from a group ends their access on their next call. Empty under the other two modes.")
@@ -121,6 +122,23 @@ concept registration {
     pausedGroupIds []string @description("Listed groups whose sharing grant is paused. In-flight calls finish; other active grants remain independent.")
     sharedAt  datetime  @description("When the owner last changed this consent, stamped from the clock rather than accepted.")
     sharedBy  string    @description("Who changed it, stamped from the actor rather than accepted -- the record of who lent a machine must not be writable by whoever is holding the keyboard.")
+  }
+  workbenchSharing {
+    mode enum("owner", "people") @description("Who may use isolated fleet workbenches on this machine. Absent means owner only. This never grants host commands, files, signed-in apps or computer control.")
+    paused bool @description("Block new borrowed workbench admissions without removing the audience. Admitted work finishes and owner work remains available.")
+    userIds []string
+    groupIds []string
+    pausedUserIds []string
+    pausedGroupIds []string
+    sharedAt datetime
+    sharedBy string
+  }
+  ownerFeatures {
+    headless bool @description("Allow the enrolled owner's host commands and file tools. Absent preserves the existing owner permission. Disabling blocks new work and cancels active calls.")
+    apps bool @description("Allow the enrolled owner's signed-in CLIs and app sessions. Never shareable. Disabling cancels active sessions; enabling never replays canceled work.")
+    computerUse bool @description("Allow the enrolled owner's desktop control, subject to Cockpit consent and measured OS permissions. Never shareable. Disabling cancels active calls.")
+    updatedAt datetime
+    updatedBy string
   }
   hardware       object  @description("What the machine IS, as its cockpit reported it (epic memql#5146, D1): {chip, memoryBytes, gpu:{name, vramBytes, backend}, cpuCores, osVersion, diskFreeBytes, runtimes:[{name, version}], reportedAt}. PRESENCE FACTS ONLY -- no serial numbers, no user names, no paths. Sent on Register and refreshed on every tenth heartbeat, so an installed runtime shows within minutes rather than at the next reconnect. ABSENT MEANS THIS COCKPIT PREDATES THE FIELD, never a machine with no memory: machineClass reads an absent inventory as the EMPTY STRING rather than `unsupported`, because the second one is an accusation and on the day this shipped it would have been levelled at every machine in every fleet. The MACHINE CLASS and the RECOMMENDED SET are computed from this (component/memql/fleet_class.go, fleet_recommend.go) and stored NOWHERE -- a stored copy of a derived value is a second answer that ages while the inventory it came from does not. `gpu.vramBytes` is ZERO on a unified-memory machine, where memoryBytes is the pool; `gpu.backend` is what tells that apart from a card with no memory, and it reports what the machine can RUN rather than what is installed, so a discrete card whose driver does not work says `none`. `runtimes` is stored VERBATIM including names this engine does not drive, the rule `apps` already follows -- only the closed six (ollama, mlx, whispercpp, kokoro, mflux, docker) derive a `runtime:<name>` routing label.")
   permissions    object  @description("TCC / X11 status snapshot at register time: {accessibility, screen_recording, x11_display, detail}. Surfaced in /me/workers; the worker re-registers on reconnect so this stays accurate.")

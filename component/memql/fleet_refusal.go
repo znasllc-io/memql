@@ -187,7 +187,7 @@ func foreignPrivateSummary(n int) string {
 
 func isForeignPrivateShareNoise(why string) bool {
 	why = strings.ToLower(why)
-	return strings.Contains(why, "has not shared") ||
+	return strings.Contains(why, "has not shared") || strings.Contains(why, "has paused sharing") ||
 		// A machine lent to NAMED people (epic memql#5344): "shared it with
 		// specific people, and not with you" and "... not with the cluster's
 		// own work". Somebody else's machine either way, so it is counted and

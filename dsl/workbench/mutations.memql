@@ -72,3 +72,27 @@ mutation workspace releaseWorkspace {
     releasedReason: args.reason
   }
 }
+
+
+/// Native dispatch creates this once with an absence fence across replicas.
+/// The concept also refuses raw/inline writes without internal origin.
+/// actor.userId scoping proves ownership, but cannot let the caller choose an
+/// unconsenting machine or replace a goal’s existing workspace. The native
+/// dispatcher reads consent and takes an absence fence before this write.
+@serverOnly
+@actor
+mutation executionBinding bindWorkbenchExecution {
+  args {
+    bindingId string!
+    runId string!
+    resource enum("cloud", "fleet")!
+    registrationId string!
+    machineId string!
+    machineOwnerUserId string!
+    expiresAt datetime!
+  }
+  insert {
+    accept { runId, resource, registrationId, machineId, machineOwnerUserId, expiresAt }
+    stamp { id: args.bindingId, ownerUserId: actor.userId }
+  }
+}

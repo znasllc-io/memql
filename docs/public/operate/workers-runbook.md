@@ -35,6 +35,21 @@ multi-home.
 Per-user routing means there is no shared pool — agents only ever
 see workers owned by the user whose session they're acting in.
 
+### Independent features and controls
+
+Equipment reports model inference, Fleet workbenches, commands and files,
+CLIs and apps, and computer use independently. Missing macOS Accessibility or
+Screen Recording permission affects computer use, not the other features.
+Your calls and Shared calls show active work attributed by the receiving worker
+replica; stale measurements show as unavailable.
+
+Only model inference and isolated Fleet workbenches can be shared. Settings
+keeps their audiences and pause/resume controls separate. Commands and files,
+signed-in CLIs/apps and computer use always belong to the enrolled owner.
+Turning an owner feature off cancels its active calls and blocks queued/new
+calls; turning it on allows fresh requests without replaying cancelled work.
+The local Cockpit policy and operation approvals still apply.
+
 ### Choosing a computer in Ask
 
 Ask uses the fleet's shared registration records, including machines connected
@@ -91,12 +106,12 @@ answers `Unimplemented: unknown service` and the machine never registers. The
 same rule is on every account's reserved `api.` host, so a cockpit may dial
 either.
 
-Two flags are optional and independent. `--computeruse` installs the build that
+Three flags are optional and independent. `--workbench` enables isolated Fleet
+workbenches using local Docker; see the [workbench runbook](workbench-runbook.md#fleet-workbenches). `--computeruse` installs the build that
 can drive the mouse and keyboard; `--inference` requests local-model setup,
 which checks the hardware floor, sets up a model runtime and pulls the
 recommended models. A fresh runtime needs interactive approval: after the
-piped installer prints SUCCESS, run the setup command it prints. Either,
-both or neither is a legitimate machine, and the pairing panel has a checkbox
+piped installer prints SUCCESS, run the setup command it prints. Each feature can be installed independently, and the pairing panel has a choice
 for each. `--inference` downloads several gigabytes, which is why it is off
 unless asked for -- see
 [Local models on the fleet](local-models.md#door-1--run-a-local-model-the-default).

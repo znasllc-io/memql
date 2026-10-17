@@ -182,7 +182,7 @@ func (h *ForwardHandler) HandleForwardedRequest(
 			return
 		}
 	}
-	if err := h.verifyRegistration(cctx, owner, registrationId); err != nil {
+	if err := h.verifyDispatchRegistration(cctx, owner, registrationId, req.GetPurpose()); err != nil {
 		h.sendRefusal(send, requestId, "registration_refused", err.Error())
 		return
 	}
@@ -195,7 +195,7 @@ func (h *ForwardHandler) HandleForwardedRequest(
 			"this replica no longer holds a stream for that machine")
 		return
 	}
-	if !sameSubject(w.OwnerUserId, owner) {
+	if req.GetPurpose() != PurposeWorkbench && !sameSubject(w.OwnerUserId, owner) {
 		// Belt and braces against a registry entry disagreeing with the row.
 		h.sendRefusal(send, requestId, "owner_mismatch",
 			"the connected machine is owned by a different user than the assertion names")
@@ -227,6 +227,10 @@ func (h *ForwardHandler) HandleForwardedRequest(
 		return
 	}
 
+	if req.GetPurpose() == PurposeWorkbench && req.GetCapability() != WorkbenchCapability {
+		h.sendRefusal(send, requestId, "workbench_admission_refused", "isolated workbench capacity is required")
+		return
+	}
 	capability := req.GetCapability()
 	timeout := time.Duration(req.GetTimeoutSec()) * time.Second
 	if timeout <= 0 {
@@ -273,6 +277,15 @@ func (h *ForwardHandler) HandleForwardedRequest(
 		dispatchRequest.computerConstraint = constraint
 		dispatchRequest.computerOwner = w.OwnerUserId
 	}
+	if req.GetPurpose() == PurposeWorkbench {
+		constraint, err := admitWorkbenchDispatch(dispatchCtx, h.store, w, dispatchRequest)
+		if err != nil {
+			h.sendRefusal(send, requestId, "workbench_admission_refused", err.Error())
+			return
+		}
+		dispatchRequest.workbenchConstraint = constraint.Constraint
+		dispatchCtx = workerservice.ContextWithToolSharing(dispatchCtx, constraint.Subjects)
+	}
 	envelope := buildToolDispatch(dispatchRequest, timeout)
 
 	// THE CALLER MAY ALREADY HAVE GONE: the node layer ends this context when
@@ -292,7 +305,7 @@ func (h *ForwardHandler) HandleForwardedRequest(
 	})
 	out := translateResult(envelope.GetCallId(), res, err)
 	h.send(send, &nodev1.WorkerForwardResponse{
-		RefusedBeforeStart: pipelineRefusedBeforeStart(req.GetPurpose(), out, err),
+		RefusedBeforeStart: pipelineRefusedBeforeStart(req.GetPurpose(), out, err) || workbenchRefusedBeforeStart(req.GetPurpose(), out, err),
 		RequestId:          requestId,
 		Ok:                 out.OK,
 		OutputJson:         []byte(out.OutputJSON),
@@ -562,3 +575,11 @@ var (
 type forwardRefusal string
 
 func (e forwardRefusal) Error() string { return string(e) }
+
+func (h *ForwardHandler) verifyDispatchRegistration(ctx context.Context, owner, registration, purpose string) error {
+	if purpose == PurposeWorkbench {
+		_, err := admittedWorkbench(ctx, h.store, owner, registration)
+		return err
+	}
+	return h.verifyRegistration(ctx, owner, registration)
+}
