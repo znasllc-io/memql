@@ -32,6 +32,11 @@ func TestCurrentEvidenceRepliesUseToolsWithLookupBudget(t *testing.T) {
 			if strings.Contains(source, "workQuickReply") || !strings.Contains(source, "runAgentTurn") {
 				t.Fatalf("missing tool-enabled execution: %s", source)
 			}
+			for _, required := range []string{"requires evidence not yet established", "current source", "status=needs_input", "optional=true"} {
+				if !strings.Contains(source, required) {
+					t.Fatalf("research requirement %q was lost before execution: %s", required, source)
+				}
+			}
 		})
 	}
 }

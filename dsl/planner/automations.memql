@@ -268,7 +268,8 @@ automation workSpineDraftProgram {
    builtin spineDraftAppend(kind: "research", inputHeading: inputHeading, instruction: facts.goal + "\nGather the evidence required for this deliverable using authorized capabilities. Preserve source references, uncertainties and the complete draft. Do not save the final file: the next step renders it from your result.")
   }
   if facts.file && facts.conversational { builtin spineDraftAppend(kind: "fileEvidence", instruction: facts.goal, inputHeading: inputHeading) }
-  return builtin spineDraftAppend(kind: facts.file ? "file" : "answer", instruction: facts.goal, inputHeading: inputHeading)
+  evidence := facts.research && !facts.file ? "\n\nThis request requires evidence not yet established in the supplied context. Retrieve the relevant facts from authorized sources before claiming completion; background knowledge alone does not establish this answer. For changing facts, verify a current source and retain its timestamp and reference. If an input is missing, first check relevant authorized context. Ask through requestUserFeedback or respondToUser status=needs_input, with optional=true when useful work can continue without the answer. Do not replace a structured question with an invitation to tell you later in a completed reply. If a source fails, try a bounded alternative and report the actual unresolved gap." : ""
+  return builtin spineDraftAppend(kind: facts.file ? "file" : "answer", instruction: facts.goal + evidence, inputHeading: inputHeading)
  }
  for section in facts.sections {
   if section.catalog {
