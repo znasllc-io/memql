@@ -11,7 +11,8 @@
 #
 # The command parity gates compare the retained GitHub lanes with this package.
 # Working legacy workflows remain until equivalent local and production evidence
-# and retirement gates are satisfied. Remaining gaps include installed-cluster lifecycle tests, editor host matrices,
+# and retirement gates are satisfied. Remaining gaps include installed-cluster
+# lifecycle tests, native editor host qualification,
 # SARIF publication and release publication. Release image builds are declared
 # below; their cloud publication still requires verified candidate receipts. The daily scan is declared here but still needs a real
 # run from an installed MemQL build. No missing lane is considered passed.
@@ -140,6 +141,7 @@ pipeline:
         - editors/**
         - cmd/memql-lsp/**
         - scripts/vscode/**
+        - scripts/ci/editor-host.sh
         - sdk/ts/**
         - sdk/ts-viewkit/**
         - test/fixtures/**
@@ -414,6 +416,69 @@ pipeline:
             npm --prefix editors/productivity test
             scripts/ci/retry.sh -- bash scripts/vscode/package.sh --out="$PWD/.memql-editor/memql.vsix"
             test -s .memql-editor/memql.vsix
+        # Real Electron/browser hosts cover activation and runtime contracts
+        # that the portable unit/package tests cannot exercise. Mac steps use
+        # an owner-authorized native worker, independently of computer use.
+        - name: vscode-desktop-linux-1-91-0
+          when: { bucket: editors }
+          timeout: 25m
+          placement: cluster
+          artifacts: [.memql-host-reports]
+          run: bash scripts/ci/editor-host.sh vscode-desktop 1.91.0
+        - name: vscode-desktop-linux-stable
+          when: { bucket: editors }
+          timeout: 25m
+          placement: cluster
+          artifacts: [.memql-host-reports]
+          run: bash scripts/ci/editor-host.sh vscode-desktop stable
+        - name: productivity-web-linux-stable
+          when: { bucket: editors }
+          timeout: 25m
+          placement: cluster
+          artifacts: [.memql-host-reports]
+          run: bash scripts/ci/editor-host.sh productivity-web stable
+        - name: productivity-desktop-linux-1-91-0
+          when: { bucket: editors }
+          timeout: 25m
+          placement: cluster
+          artifacts: [.memql-host-reports]
+          run: bash scripts/ci/editor-host.sh productivity-desktop 1.91.0
+        - name: productivity-desktop-linux-stable
+          when: { bucket: editors }
+          timeout: 25m
+          placement: cluster
+          artifacts: [.memql-host-reports]
+          run: bash scripts/ci/editor-host.sh productivity-desktop stable
+        - name: productivity-web-darwin-stable
+          when: { bucket: editors }
+          timeout: 25m
+          placement: fleet
+          execution: native
+          platform: darwin/arm64
+          caches: []
+          needs: { macos_tooling: true }
+          artifacts: [.memql-host-reports]
+          run: bash scripts/ci/editor-host.sh productivity-web stable
+        - name: productivity-desktop-darwin-1-91-0
+          when: { bucket: editors }
+          timeout: 25m
+          placement: fleet
+          execution: native
+          platform: darwin/arm64
+          caches: []
+          needs: { macos_tooling: true }
+          artifacts: [.memql-host-reports]
+          run: bash scripts/ci/editor-host.sh productivity-desktop 1.91.0
+        - name: productivity-desktop-darwin-stable
+          when: { bucket: editors }
+          timeout: 25m
+          placement: fleet
+          execution: native
+          platform: darwin/arm64
+          caches: []
+          needs: { macos_tooling: true }
+          artifacts: [.memql-host-reports]
+          run: bash scripts/ci/editor-host.sh productivity-desktop stable
         - name: sdk-ts-typecheck
           placement: cluster
           run: |
