@@ -25,6 +25,32 @@
 
 ---
 
+## Fleet workbenches
+
+Fleet workbenches are isolated containers on an enrolled machine. They are
+separate from Cloud workbenches and from commands that run on your own computer.
+Enable them during Fleet setup with `--workbench`, or run:
+
+```sh
+memql worker setup --workbench
+```
+
+Docker must be running locally with Linux containers, at least 3 CPUs and 4 GiB
+of memory. Setup downloads a pinned Python runtime and enables `workbenches.allow`
+in the local policy. The runtime provides Python and shell/file tools without
+network access, host mounts, a Docker socket or signed-in apps.
+
+Two workspaces share the operating-system account's capacity across Cockpit
+processes and enrollments. Each is limited to 1 CPU, 1.5 GiB memory and a 256 MiB
+workspace. Admission preserves memory headroom. CI builds and Fleet workspaces
+cannot occupy that capacity together; interrupted work is cleaned up before
+capacity is reused. Workspaces expire after five idle minutes or one hour.
+
+Choose recipients in **Fleet → Machine settings → Sharing**. Model inference
+and Fleet workbenches have independent audiences and Pause controls. Pausing
+keeps your recipients and finishes admitted work, while blocking new borrowed
+calls. Commands/files, signed-in CLIs/apps and computer use stay owner-only.
+
 ## What is MemQL Cockpit?
 
 MemQL Cockpit turns a machine you own into a **worker** in your MemQL fleet:

@@ -140,3 +140,29 @@ func TestPipelineCapacityRefusesCorruptRecordAndSymlink(t *testing.T) {
 		t.Fatal("unrelated file was changed")
 	}
 }
+
+func TestPipelineCapacityWaitsForInterruptedWorkbenchCleanup(t *testing.T) {
+	isolatePipelineCapacity(t)
+	root, _ := pipelineCapacityRoot()
+	path := filepath.Join(root, "workbench-1.lock")
+	if err := os.MkdirAll(root, 0700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(path, []byte("interrupted-workspace"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if reservation, err := acquirePipelineReservation(); !errors.Is(err, errPipelineUnreconciled) {
+		if reservation != nil {
+			reservation.close()
+		}
+		t.Fatalf("build admitted before workspace cleanup: %v", err)
+	}
+	if err := os.Truncate(path, 0); err != nil {
+		t.Fatal(err)
+	}
+	reservation, err := acquirePipelineReservation()
+	if err != nil {
+		t.Fatal(err)
+	}
+	reservation.close()
+}

@@ -290,6 +290,9 @@ func (r *Runner) Run(ctx context.Context) error {
 	if r == nil {
 		return errors.New("worker.runner: not initialized")
 	}
+	if lifecycle, ok := r.tools.(interface{ RunWorkbenchLifecycle(context.Context) func() }); ok {
+		defer lifecycle.RunWorkbenchLifecycle(ctx)()
+	}
 	r.started.Store(true)
 	defer close(r.closed)
 	// The home's series exist from the start, reading "not connected",
@@ -409,7 +412,11 @@ func (r *Runner) connect(ctx context.Context) (*Connection, error) {
 	if err != nil {
 		return nil, err
 	}
-	return handshake(ctx, s, r.cfg, inventory, modelInv, r.hardwareInventory(ctx), pipelines, r.logger)
+	cfg := r.cfg
+	if ready, ok := r.tools.(interface{ WorkbenchReady(context.Context) bool }); ok {
+		cfg.workbenchReady = ready.WorkbenchReady(ctx)
+	}
+	return handshake(ctx, s, cfg, inventory, modelInv, r.hardwareInventory(ctx), pipelines, r.logger)
 }
 
 // Close stops the runner: the loop ends at once, and the stream with it.
@@ -621,7 +628,11 @@ func (r *Runner) maybeReadvertiseModels(ctx context.Context, conn *Connection) b
 	// on a stale grant is refused by the live policy before it runs.
 	pipelines := r.pipelinesPolicy()
 	pipelinesChanged := pipelines.AdvertisementFingerprint() != conn.AdvertisedPipelines
-	if !labelsChanged && !pipelinesChanged {
+	workbenchChanged := false
+	if ready, ok := r.tools.(interface{ WorkbenchReady(context.Context) bool }); ok {
+		workbenchChanged = ready.WorkbenchReady(ctx) != conn.AdvertisedWorkbench
+	}
+	if !labelsChanged && !pipelinesChanged && !workbenchChanged {
 		return false
 	}
 	if r.busy() {
@@ -855,6 +866,10 @@ func (r *Runner) answerPing(conn *Connection, ping *memqlv1.Ping) {
 
 func (r *Runner) runToolDispatch(ctx context.Context, conn *Connection, dispatch *memqlv1.ToolDispatch) {
 	if dispatch == nil {
+		return
+	}
+	if err := validateWorkbenchEnrollment(r.cfg, conn, dispatch, time.Now()); err != nil {
+		_ = conn.SendToolResult(dispatch.GetCallId(), nil, &memqlv1.Failure{ErrorCode: "workbench_constraint_refused", ErrorMessage: err.Error()})
 		return
 	}
 	if c := dispatch.GetComputerPermission(); c != nil {

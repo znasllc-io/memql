@@ -21,14 +21,15 @@ import (
 // Config is the worker run mode configuration. Backed by
 // ~/.memql/worker.yaml; CLI flags / env vars override.
 type Config struct {
-	ClusterURL   string            `yaml:"cluster_url"`
-	Token        string            `yaml:"token"`
-	Name         string            `yaml:"name"`
-	Labels       map[string]string `yaml:"labels"`
-	Concurrency  map[string]uint32 `yaml:"concurrency"`
-	StateDir     string            `yaml:"state_dir"`
-	LogLevel     string            `yaml:"log_level"`
-	Capabilities []string          `yaml:"capabilities"`
+	workbenchReady bool
+	ClusterURL     string            `yaml:"cluster_url"`
+	Token          string            `yaml:"token"`
+	Name           string            `yaml:"name"`
+	Labels         map[string]string `yaml:"labels"`
+	Concurrency    map[string]uint32 `yaml:"concurrency"`
+	StateDir       string            `yaml:"state_dir"`
+	LogLevel       string            `yaml:"log_level"`
+	Capabilities   []string          `yaml:"capabilities"`
 
 	// Home is the id this cluster is enrolled under in workers.yaml (the
 	// cluster's URL host on the single-home path). It names the stream in

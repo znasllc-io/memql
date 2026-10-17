@@ -48,6 +48,7 @@ type Connection struct {
 	// reported by the machine's live policy when this connection registered. Bound at Register like the rest of the
 	// advertisement, so the runner compares the live policy against it.
 	AdvertisedPipelines string
+	AdvertisedWorkbench bool
 
 	// cancel ends the context this connection's stream was opened on (the
 	// runner opens each stream on its own); Close uses it when a graceful
@@ -227,6 +228,7 @@ func buildRegister(cfg Config, inventory []apps.Info, modelInv models.Inventory,
 	if descJSON, err := tools.CapabilityDescriptorJSONFor(pipelines.RepositoryScopes()); err == nil {
 		register.CapabilityDescriptorJson = descJSON
 	}
+	applyWorkbenchAdvertisement(register, cfg.workbenchReady)
 	registerHardware(register, hw)
 	return register
 }
@@ -237,6 +239,7 @@ func (c *Connection) register(ctx context.Context, cfg Config, inventory []apps.
 	c.ModelFingerprint = advertisedFingerprint(modelInv.Labels())
 
 	c.AdvertisedPipelines = pipelines.AdvertisementFingerprint()
+	c.AdvertisedWorkbench = cfg.workbenchReady
 	if err := c.Send(&memqlv1.WorkerClientMessage{
 		Payload: &memqlv1.WorkerClientMessage_Register{Register: register},
 	}); err != nil {
@@ -556,7 +559,7 @@ func SetVersion(v string) {
 // cockpitVersionValue defaults to the VERSION file's contents so a build
 // that never calls SetVersion -- a test, or `go run` -- reports something
 // truthful rather than empty.
-var cockpitVersionValue = "0.19.0"
+var cockpitVersionValue = "0.20.0"
 
 func cockpitVersion() string { return cockpitVersionValue }
 func cockpitBuildTag() string {
