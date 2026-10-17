@@ -1101,6 +1101,9 @@ QueryClient.prototype.composeRunRecipe = function (this: QueryClient, args: Comp
 
 /** Accept a goal and start work on it. Opens a v1:work:goal owned by the caller and its first v1:work:run in `compiling`, then dispatches compile: catalog exact match, then near-match with a gap list, then the cheap triage. Returns {goalId, runId}. A goal that fully matches the catalog reaches no model at all. */
 export interface CreateGoalArgs {
+  /** Where this goal's tools execute. Auto selects by capabilities and capacity. A change from an explicit choice requires recorded permission. Computer access still requires Cockpit and scoped access permission. Child goals inherit this choice. */
+  // Enum: auto | workbench | computer
+  destination?: string;
   /** Human-selected execution ceiling: no federation provider may serve any call of this goal, including embeddings, step overrides and fallback. Child goals inherit it and cannot relax it. */
   noPaidProviders?: boolean;
   /** The human caller's routing choice, using the same source grammar as Ask. A pinned fleet source never falls back to a paid provider. Child/model calls cannot replace their inherited choice. */
@@ -1124,6 +1127,7 @@ export interface CreateGoalArgs {
 
 export function buildCreateGoal(args: CreateGoalArgs): string {
   const parts: string[] = [];
+  if (args.destination !== undefined) parts.push("destination: " + renderMemQLValue(args.destination));
   if (args.noPaidProviders !== undefined) parts.push("noPaidProviders: " + renderMemQLValue(args.noPaidProviders));
   if (args.source !== undefined) parts.push("source: " + renderMemQLValue(args.source));
   if (args.level !== undefined) parts.push("level: " + renderMemQLValue(args.level));
@@ -2739,6 +2743,29 @@ QueryClient.prototype.libraryForkDocumentVersion = function (this: QueryClient, 
   return this.executeNamed("libraryForkDocumentVersion", buildLibraryForkDocumentVersion(args), opts);
 };
 
+/** Explicitly index an already reviewed lesson for future owned work. */
+export interface LibraryIndexTrainingLessonArgs {
+  lessonId: string;
+  expectedReceipt: string;
+}
+
+export function buildLibraryIndexTrainingLesson(args: LibraryIndexTrainingLessonArgs): string {
+  const parts: string[] = [];
+  parts.push("lessonId: " + renderMemQLValue(args.lessonId));
+  parts.push("expectedReceipt: " + renderMemQLValue(args.expectedReceipt));
+  return "builtin libraryIndexTrainingLesson(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    libraryIndexTrainingLesson(args: LibraryIndexTrainingLessonArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.libraryIndexTrainingLesson = function (this: QueryClient, args: LibraryIndexTrainingLessonArgs = {} as LibraryIndexTrainingLessonArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("libraryIndexTrainingLesson", buildLibraryIndexTrainingLesson(args), opts);
+};
+
 /** Revise one proposal item with AI; retain every other item unchanged. */
 export interface LibraryModifyRevisionItemArgs {
   requestId: string;
@@ -2843,6 +2870,44 @@ declare module "./query.js" {
 
 QueryClient.prototype.libraryRequestDocumentRevision = function (this: QueryClient, args: LibraryRequestDocumentRevisionArgs = {} as LibraryRequestDocumentRevisionArgs, opts?: QueryCallOptions): Promise<Result> {
   return this.executeNamed("libraryRequestDocumentRevision", buildLibraryRequestDocumentRevision(args), opts);
+};
+
+/** One manual, version-guarded lesson event. Never invoked by automatic mining. */
+export interface LibrarySaveTrainingLessonArgs {
+  requestId: string;
+  // Enum: propose | edit | review | reject | enable | retire
+  action: string;
+  lessonId?: string;
+  expectedReceipt?: string;
+  conversationId?: string;
+  turnId?: string;
+  draft?: Record<string, unknown>;
+  evaluationIds?: string[];
+  reason?: string;
+}
+
+export function buildLibrarySaveTrainingLesson(args: LibrarySaveTrainingLessonArgs): string {
+  const parts: string[] = [];
+  parts.push("requestId: " + renderMemQLValue(args.requestId));
+  parts.push("action: " + renderMemQLValue(args.action));
+  if (args.lessonId !== undefined) parts.push("lessonId: " + renderMemQLValue(args.lessonId));
+  if (args.expectedReceipt !== undefined) parts.push("expectedReceipt: " + renderMemQLValue(args.expectedReceipt));
+  if (args.conversationId !== undefined) parts.push("conversationId: " + renderMemQLValue(args.conversationId));
+  if (args.turnId !== undefined) parts.push("turnId: " + renderMemQLValue(args.turnId));
+  if (args.draft !== undefined) parts.push("draft: " + renderMemQLValue(args.draft));
+  if (args.evaluationIds !== undefined) parts.push("evaluationIds: " + renderMemQLValue(args.evaluationIds));
+  if (args.reason !== undefined) parts.push("reason: " + renderMemQLValue(args.reason));
+  return "builtin librarySaveTrainingLesson(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    librarySaveTrainingLesson(args: LibrarySaveTrainingLessonArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.librarySaveTrainingLesson = function (this: QueryClient, args: LibrarySaveTrainingLessonArgs = {} as LibrarySaveTrainingLessonArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("librarySaveTrainingLesson", buildLibrarySaveTrainingLesson(args), opts);
 };
 
 /** Search the caller's Library by meaning and get whole artifacts back, best match first. */
@@ -3611,6 +3676,52 @@ QueryClient.prototype.pipelinesPreview = function (this: QueryClient, args: Pipe
   return this.executeNamed("pipelinesPreview", buildPipelinesPreview(args), opts);
 };
 
+/** Publish one retained SARIF artifact from a successful scanner in the caller's native pipeline, including a run that is still active or failed elsewhere. Source/ref/bytes come from verified journal and storage receipts, never from a caller-supplied URL or report. Returns publicationId, state, uploadId and sha256. Only complete proves ingestion; accepted is pending. Calling again observes the same upload. An uncertain or rejected upload is retained for inspection and never silently posted again. Report selection, polling and failure handling belong to the calling automation. */
+export interface PipelinesPublishSARIFArgs {
+  runId: string;
+  stepKey: string;
+  path: string;
+}
+
+export function buildPipelinesPublishSARIF(args: PipelinesPublishSARIFArgs): string {
+  const parts: string[] = [];
+  parts.push("runId: " + renderMemQLValue(args.runId));
+  parts.push("stepKey: " + renderMemQLValue(args.stepKey));
+  parts.push("path: " + renderMemQLValue(args.path));
+  return "builtin pipelinesPublishSARIF(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    pipelinesPublishSARIF(args: PipelinesPublishSARIFArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.pipelinesPublishSARIF = function (this: QueryClient, args: PipelinesPublishSARIFArgs = {} as PipelinesPublishSARIFArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("pipelinesPublishSARIF", buildPipelinesPublishSARIF(args), opts);
+};
+
+/** Read a caller-owned upload receipt, refreshing pending ingestion from GitHub. A terminal receipt survives ordinary artifact retention. This never uploads. */
+export interface PipelinesReadSARIFArgs {
+  publicationId: string;
+}
+
+export function buildPipelinesReadSARIF(args: PipelinesReadSARIFArgs): string {
+  const parts: string[] = [];
+  parts.push("publicationId: " + renderMemQLValue(args.publicationId));
+  return "builtin pipelinesReadSARIF(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    pipelinesReadSARIF(args: PipelinesReadSARIFArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.pipelinesReadSARIF = function (this: QueryClient, args: PipelinesReadSARIFArgs = {} as PipelinesReadSARIFArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("pipelinesReadSARIF", buildPipelinesReadSARIF(args), opts);
+};
+
 /** Re-run one of the caller's pipeline runs: open the next attempt of its run key with the original's mode and event, trigger rerun, rerunOf naming the original, and a new check run. With failedOnly, only what did not pass runs again: every step the original passed, with the same package slice, is carried over as skipped pipeline_passed_earlier, and a run with no failed or cancelled step is refused pipeline_nothing_to_rerun. The original stays exactly as it ended. */
 export interface PipelinesRerunArgs {
   /** The v1:pipelines:run to re-run. Must be the caller's own. */
@@ -3659,6 +3770,31 @@ declare module "./query.js" {
 
 QueryClient.prototype.pipelinesRunLatest = function (this: QueryClient, args: PipelinesRunLatestArgs = {} as PipelinesRunLatestArgs, opts?: QueryCallOptions): Promise<Result> {
   return this.executeNamed("pipelinesRunLatest", buildPipelinesRunLatest(args), opts);
+};
+
+/** Start a full release build at an existing tag of the caller's connected pipeline. Resolves the immutable source commit through the source owner's current GitHub grant and supplies the tag as MEMQL_VERSION. Includes the manifest's release stages. Creates no tag, GitHub release, candidate approval or publication. A repeated request or later release webhook recovers the same attempt; use pipelinesRerun to repeat a completed attempt. A second tag for a commit already recorded under another release version is refused. */
+export interface PipelinesRunReleaseArgs {
+  /** The caller's connected v1:pipelines:pipeline. */
+  pipelineId: string;
+  /** An existing repository tag, such as v1.2.3, without refs/tags/. */
+  tag: string;
+}
+
+export function buildPipelinesRunRelease(args: PipelinesRunReleaseArgs): string {
+  const parts: string[] = [];
+  parts.push("pipelineId: " + renderMemQLValue(args.pipelineId));
+  parts.push("tag: " + renderMemQLValue(args.tag));
+  return "builtin pipelinesRunRelease(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    pipelinesRunRelease(args: PipelinesRunReleaseArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.pipelinesRunRelease = function (this: QueryClient, args: PipelinesRunReleaseArgs = {} as PipelinesRunReleaseArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("pipelinesRunRelease", buildPipelinesRunRelease(args), opts);
 };
 
 /** Read pipeline configuration and each workbench's last runner isolation verdict. This read never starts a build or an isolation probe. Restricted to cluster operators. */

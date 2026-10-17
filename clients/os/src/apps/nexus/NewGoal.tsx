@@ -4,6 +4,7 @@ import { Button, Caption, Notice, Panel, Subhead } from "../../kit";
 import { AccountLabelPicker } from "../accounts/AccountPicker";
 import { useAccountOptions } from "../accounts/tie";
 import type { CreateGoalState } from "./actions";
+import { ExecutionDestinationSelect, type ExecutionDestination } from "../../kit/ExecutionDestination";
 
 // THE ONE INPUT IN THE PRODUCT: a person says what they want done.
 //
@@ -38,11 +39,12 @@ export function NewGoal({
   onCancel: () => void;
 }) {
   const [statement, setStatement] = useState("");
+  const [destination, setDestination] = useState<ExecutionDestination>("auto");
   const [accountIds, setAccountIds] = useState<string[]>([]);
   const accounts = useAccountOptions();
 
   async function submit() {
-    const id = await create.create({ statement, accountIds });
+    const id = await create.create({ statement, accountIds, destination });
     if (id === "") return;
     setStatement("");
     setAccountIds([]);
@@ -83,6 +85,7 @@ export function NewGoal({
         />
       )}
 
+      <ExecutionDestinationSelect value={destination} onChange={setDestination} />
       <Caption>
         It works this out once -- matching what it already knows how to do first, and reaching a
         model only for the parts it has not seen before -- then records the steps so the next run

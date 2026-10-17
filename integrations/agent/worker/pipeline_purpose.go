@@ -67,7 +67,7 @@ const PipelineStepAction = "pipeline_step"
 const (
 	PipelinesLabel       = "pipelines"
 	PipelinesAllowed     = "allowed"
-	PipelineStepContract = 3
+	PipelineStepContract = 4
 )
 
 // The refusal codes this purpose introduces.

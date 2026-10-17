@@ -5,6 +5,7 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"fmt"
 	"io"
 	"os"
 	"path/filepath"
@@ -115,6 +116,47 @@ func TestArtifactSnapshotKeepsMeasuredBytesInPrivateFiles(t *testing.T) {
 	}
 	if _, err := os.Stat(got.directory); !os.IsNotExist(err) {
 		t.Fatal("snapshot was not removed")
+	}
+}
+
+// A verified prefix is not a verified archive. Transport failure, including
+// failure after tar's end marker, must discard the entire private snapshot.
+func TestArtifactSnapshotDiscardsInterruptedTransport(t *testing.T) {
+	for _, complete := range []bool{false, true} {
+		t.Run(fmt.Sprint("complete archive=", complete), func(t *testing.T) {
+			tmp := t.TempDir()
+			t.Setenv("TMPDIR", tmp)
+			body := snapshotTar(t, []tar.Header{{Name: "dist/report.txt", Typeflag: tar.TypeReg, Mode: 0600, Size: 7}})
+			if !complete {
+				body = body[:len(body)/2]
+			}
+			reads := 0
+			got, err := readArtifactSnapshot(t.Context(), []string{"dist"}, 4096, func(_ context.Context, dst io.Writer) error {
+				reads++
+				_, _ = dst.Write(body)
+				return io.ErrUnexpectedEOF
+			})
+			if err == nil || got != nil || reads != 1 {
+				t.Fatalf("snapshot=%v reads=%d err=%v; incomplete transport must not succeed or restart the archive", got, reads, err)
+			}
+			entries, err := os.ReadDir(tmp)
+			if err != nil || len(entries) != 0 {
+				t.Fatalf("failed stream left artifacts behind: %v %v", entries, err)
+			}
+		})
+	}
+}
+
+func TestArtifactSnapshotDoesNotRetryMissingDeclaredFile(t *testing.T) {
+	invalid := snapshotTar(t, []tar.Header{{Name: "other/report.txt", Typeflag: tar.TypeReg, Mode: 0600, Size: 7}})
+	reads := 0
+	_, err := readArtifactSnapshot(t.Context(), []string{"dist"}, 4096, func(_ context.Context, dst io.Writer) error {
+		reads++
+		_, writeErr := dst.Write(invalid)
+		return writeErr
+	})
+	if err == nil || reads != 1 {
+		t.Fatalf("invalid archive err/reads = %v/%d, want one refusal without retry", err, reads)
 	}
 }
 

@@ -26,6 +26,9 @@ import "strings"
 // RouteChoice is the choice itself. The zero value is AUTO: the rules decide
 // every call, at every call's own level.
 type RouteChoice struct {
+	// Destination selects where goal tools execute, independently of inference.
+	// Empty means Auto; explicit choices require approval before changing sides.
+	Destination string
 	// Source is where the run's model calls are served: "" (the rules
 	// decide), a single source the person PINNED -- app:<id>, app:*,
 	// fleet:strongest, fleet:fastest, fleet:<modelId>, federation:cheapest,
@@ -47,7 +50,7 @@ type RouteChoice struct {
 
 // IsZero reports whether the choice changes nothing: Auto source, Auto level.
 func (c RouteChoice) IsZero() bool {
-	return strings.TrimSpace(c.Source) == "" && strings.TrimSpace(c.Level) == "" && !c.NoPaidProviders
+	return strings.TrimSpace(c.Source) == "" && strings.TrimSpace(c.Level) == "" && c.Destination == "" && !c.NoPaidProviders
 }
 
 // Map is the row form written to v1:work:goal.routing and v1:work:run.routing.
@@ -58,6 +61,9 @@ func (c RouteChoice) Map() map[string]any {
 		return nil
 	}
 	out := map[string]any{}
+	if c.Destination != "" {
+		out["destination"] = c.Destination
+	}
 	if c.NoPaidProviders {
 		out["noPaidProviders"] = true
 	}
@@ -86,7 +92,7 @@ func RouteChoiceFrom(v any) RouteChoice {
 		s, _ := m[key].(string)
 		return strings.TrimSpace(s)
 	}
-	c := RouteChoice{Source: text("source"), Level: text("level"), By: text("by"), NoPaidProviders: m["noPaidProviders"] == true}
+	c := RouteChoice{Source: text("source"), Level: text("level"), Destination: text("destination"), By: text("by"), NoPaidProviders: m["noPaidProviders"] == true}
 	if c.IsZero() {
 		return RouteChoice{}
 	}

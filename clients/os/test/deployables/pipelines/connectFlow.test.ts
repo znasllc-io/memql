@@ -382,7 +382,7 @@ describe("the fleet", () => {
       ownerUserId: "v1:identity:user:u-me",
       name: "studio-mac",
       labels: { pipelines: "allowed" },
-      capabilityDescriptor: { actionContracts: { "workerHost.pipeline_step": 3 } },
+      capabilityDescriptor: { actionContracts: { "workerHost.pipeline_step": 4 } },
       operatorLabels: {},
       lastSeenAt: "2026-10-04T11:59:50Z",
       ...over,
@@ -396,10 +396,10 @@ describe("the fleet", () => {
   });
 
   it("does not treat labels or unknown action versions as an execution contract", () => {
-    for (const version of [undefined, 0, 1, 2, 4, "3", 3.5]) {
+    for (const version of [undefined, 0, 1, 2, 3, 5, "4", 4.5]) {
       expect(fleetAvailable([machine({
         capabilityDescriptor: { actionContracts: { "workerHost.pipeline_step": version } },
-        operatorLabels: { "workerHost.pipeline_step": "3" },
+        operatorLabels: { "workerHost.pipeline_step": "4" },
       })], "u-me")).toBe(false);
     }
   });

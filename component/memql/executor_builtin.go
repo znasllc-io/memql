@@ -22,6 +22,7 @@ func (e *MemQLEngine) initBuiltinExecutorHandlers() error {
 		"workSearchConversations":       e.workSearchConversationsBuiltin,
 		"workAcknowledgementCache":      e.workAcknowledgementCacheBuiltin,
 		"workViewerContext":             e.workViewerContextBuiltin,
+		"workSourceContext":             e.workSourceContextBuiltin,
 		"workRecallMemory":              e.workRecallMemoryBuiltin,
 		"indexConversationMemory":       e.indexConversationMemoryBuiltin,
 		"askConversationSnapshot":       e.askConversationSnapshotBuiltin,

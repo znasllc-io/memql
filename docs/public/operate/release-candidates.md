@@ -15,6 +15,16 @@ declared inputs and composes the candidate in MemQL. Preparation then verifies
 the complete evidence, source versions, destinations and retained artifact
 bytes. A ready candidate requires separate owner approval and publication.
 
+To build before publishing a GitHub release, call
+`pipelinesRunRelease(pipelineId: "…", tag: "v1.2.3")` for an existing tag of
+your pipeline. Automatic delivery can stay disconnected for this explicit
+request, so a bootstrap does not subscribe to unrelated changes. MemQL resolves and pins the tag's commit through your
+source connection, runs the full release stages, and supplies the tag as
+`MEMQL_VERSION`. The operation creates no tag or public release and grants no
+publication approval. Retrying, or receiving a later release webhook, recovers
+the same attempt. Use `pipelinesRerun` to repeat a completed attempt. A different
+tag for a commit already recorded under another release version is refused.
+
 ## Declare the assembly
 
 Set the `MEMQL_RELEASE_CANDIDATES` global variable to a JSON object containing
@@ -151,6 +161,16 @@ approved destination with `releasePublishCandidate`. Each repeats verification.
 `releaseCandidatePublications` reports persisted pending or complete effects;
 uncertain publication must reconcile its existing intent and retained bytes.
 Assembly does not install an update, promote a draft or retire GitHub Actions.
+
+An OCI registry target may declare `tag`, for example `"v0.29.7"`. It must
+equal the resolved component version, optionally prefixed with `v`; floating
+names such as `latest` refuse. The tag is part of the destination approval and
+is permanently reserved for that publication intent before a registry write.
+Another candidate cannot claim the same registry/repository/tag, even from
+another replica. A conflicting existing registry tag refuses, and completion
+requires both full digest readback and exact tag readback. Omit `tag` for
+digest-only publication. Keep competing publisher credentials disabled or use
+registry tag immutability; deployment consumers should continue pinning digests.
 
 Related: [Engine, integration and workflow boundaries](../build/integration-boundary.md),
 [Pipelines](pipelines.md) and [Verified OCI publication](../build/verified-oci-publication.md).

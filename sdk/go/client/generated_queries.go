@@ -13947,6 +13947,28 @@ func WorkSkillSelectionsForOwnerBuild(args WorkSkillSelectionsForOwnerArgs) stri
 	return "query workSkillSelectionsForOwner()"
 }
 
+// WorkSourceStepsForOwnerRun -- Public source receipts only; generated answers are not source evidence.
+//
+// Bound concept: v1:work:step (machine-readable: BoundConcepts["workSourceStepsForOwnerRun"] in generated_concepts.go).
+type WorkSourceStepsForOwnerRunArgs struct {
+	RunId string
+}
+
+// WorkSourceStepsForOwnerRun calls the engine query workSourceStepsForOwnerRun.
+func (qc *QueryClient) WorkSourceStepsForOwnerRun(ctx context.Context, args WorkSourceStepsForOwnerRunArgs) (*Result, error) {
+	call := WorkSourceStepsForOwnerRunBuild(args)
+	return qc.executeNamed(ctx, "workSourceStepsForOwnerRun", call)
+}
+
+func WorkSourceStepsForOwnerRunBuild(args WorkSourceStepsForOwnerRunArgs) string {
+	var b strings.Builder
+	b.WriteString("query workSourceStepsForOwnerRun(")
+	b.WriteString("runId: ")
+	b.WriteString(quoteMemQL(args.RunId))
+	b.WriteString(")")
+	return b.String()
+}
+
 // WorkStepForOwnerRun -- One caller-owned execution receipt. A named key avoids reading an entire run when verifying a release artifact or one required check.
 //
 // Bound concept: v1:work:step (machine-readable: BoundConcepts["workStepForOwnerRun"] in generated_concepts.go).
@@ -13995,6 +14017,84 @@ func WorkStepsForOwnerRunBuild(args WorkStepsForOwnerRunArgs) string {
 	b.WriteString(quoteMemQL(args.RunId))
 	b.WriteString(")")
 	return b.String()
+}
+
+// WorkTrainingEvidenceById wraps the query named "workTrainingEvidenceById".
+//
+// Bound concept: v1:work:observation (machine-readable: BoundConcepts["workTrainingEvidenceById"] in generated_concepts.go).
+type WorkTrainingEvidenceByIdArgs struct {
+	ObservationId string
+}
+
+// WorkTrainingEvidenceById calls the engine query workTrainingEvidenceById.
+func (qc *QueryClient) WorkTrainingEvidenceById(ctx context.Context, args WorkTrainingEvidenceByIdArgs) (*Result, error) {
+	call := WorkTrainingEvidenceByIdBuild(args)
+	return qc.executeNamed(ctx, "workTrainingEvidenceById", call)
+}
+
+func WorkTrainingEvidenceByIdBuild(args WorkTrainingEvidenceByIdArgs) string {
+	var b strings.Builder
+	b.WriteString("query workTrainingEvidenceById(")
+	b.WriteString("observationId: ")
+	b.WriteString(quoteMemQL(args.ObservationId))
+	b.WriteString(")")
+	return b.String()
+}
+
+// WorkTrainingLessonEvents -- Manual lesson events share the owned work journal. Highest sequence is the head.
+//
+// Bound concept: v1:work:observation (machine-readable: BoundConcepts["workTrainingLessonEvents"] in generated_concepts.go).
+type WorkTrainingLessonEventsArgs struct {
+	LessonId string
+}
+
+// WorkTrainingLessonEvents calls the engine query workTrainingLessonEvents.
+func (qc *QueryClient) WorkTrainingLessonEvents(ctx context.Context, args WorkTrainingLessonEventsArgs) (*Result, error) {
+	call := WorkTrainingLessonEventsBuild(args)
+	return qc.executeNamed(ctx, "workTrainingLessonEvents", call)
+}
+
+func WorkTrainingLessonEventsBuild(args WorkTrainingLessonEventsArgs) string {
+	var b strings.Builder
+	b.WriteString("query workTrainingLessonEvents(")
+	b.WriteString("lessonId: ")
+	b.WriteString(quoteMemQL(args.LessonId))
+	b.WriteString(")")
+	return b.String()
+}
+
+// WorkTrainingLessonsForOwner wraps the query named "workTrainingLessonsForOwner".
+//
+// Bound concept: v1:work:observation (machine-readable: BoundConcepts["workTrainingLessonsForOwner"] in generated_concepts.go).
+type WorkTrainingLessonsForOwnerArgs struct {
+}
+
+// WorkTrainingLessonsForOwner calls the engine query workTrainingLessonsForOwner.
+func (qc *QueryClient) WorkTrainingLessonsForOwner(ctx context.Context, args WorkTrainingLessonsForOwnerArgs) (*Result, error) {
+	call := WorkTrainingLessonsForOwnerBuild(args)
+	return qc.executeNamed(ctx, "workTrainingLessonsForOwner", call)
+}
+
+func WorkTrainingLessonsForOwnerBuild(args WorkTrainingLessonsForOwnerArgs) string {
+	_ = args
+	return "query workTrainingLessonsForOwner()"
+}
+
+// WorkTrainingUsageForOwner -- Selection and provider-delivery receipts for owned Training inspection.
+//
+// Bound concept: v1:work:observation (machine-readable: BoundConcepts["workTrainingUsageForOwner"] in generated_concepts.go).
+type WorkTrainingUsageForOwnerArgs struct {
+}
+
+// WorkTrainingUsageForOwner calls the engine query workTrainingUsageForOwner.
+func (qc *QueryClient) WorkTrainingUsageForOwner(ctx context.Context, args WorkTrainingUsageForOwnerArgs) (*Result, error) {
+	call := WorkTrainingUsageForOwnerBuild(args)
+	return qc.executeNamed(ctx, "workTrainingUsageForOwner", call)
+}
+
+func WorkTrainingUsageForOwnerBuild(args WorkTrainingUsageForOwnerArgs) string {
+	_ = args
+	return "query workTrainingUsageForOwner()"
 }
 
 // WorkVerdictsForOwnerRun -- Human and validator verdicts only. Other decisions and tool/checkpoint data are not verdicts and must not travel to the feedback controls.

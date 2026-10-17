@@ -15,11 +15,8 @@ package memql
 //   - workbench-use           -- expands into workbenchHost.
 //                                Sandboxed Linux execution per-Plan in the
 //                                cluster. Universal: every agent has it
-//                                by default. No scope-request tool (no
-//                                blast radius to gate against) and no
-//                                status tool (the workbench is a cluster
-//                                service, not a remote process that can
-//                                disconnect).
+//                                by default. requestWorkbenchUse asks before
+//                                moving a Computer-selected goal here.
 //
 // The two computer-use slugs replaced a single legacy `computer-use`
 // slug on 2026-05-17. Splitting by mode lets the headless slice be
@@ -71,14 +68,13 @@ var WorkerEmbodiedCapabilityNames = append(
 // Library; product-specific presentation tools are separate capabilities.
 //
 // Universal capability -- expected to be default-on for every
-// agent. No status tool (the workbench is a cluster service,
-// not a process that can disconnect), no scope-request tool
-// (no host blast radius to gate against; the workspace is
-// torn down with the Plan).
+// agent. requestWorkbenchUse preserves an explicit Computer destination
+// until the person approves hosted execution.
 //
 // Keep in sync with the workbenchHost tool definition.
 var WorkbenchCapabilityNames = []string{
 	"workbenchHost",
+	"requestWorkbenchUse",
 }
 
 func init() {

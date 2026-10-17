@@ -233,7 +233,7 @@ func (i *Integration) released(ctx context.Context, d Deps, p Pipeline, t pipeli
 	if err != nil {
 		return OpenResult{}, "", err
 	}
-	sha, _, err := d.GitHub.CommitForRef(ctx, token, p.Repository, "tags/"+t.ReleaseTag)
+	sha, _, err := d.GitHub.CommitForRef(ctx, token, p.Repository, "refs/tags/"+t.ReleaseTag)
 	if err != nil {
 		return OpenResult{}, "", fmt.Errorf("release %s: resolving its tag: %w", t.ReleaseTag, err)
 	}
@@ -247,7 +247,7 @@ func (i *Integration) released(ctx context.Context, d Deps, p Pipeline, t pipeli
 // rerunOf is the opening of r's next attempt: whole, or -- failedOnly, a
 // person's "Re-run failed" -- running only what r did not pass.
 func rerunOf(r Run, deliveryID string, failedOnly bool) Opening {
-	scheduleSlot, _ := pipelines.ScheduledDayFromRunKey(r.RunKey)
+	scheduleSlot, _ := pipelines.ScheduledSlotFromRunKey(r.RunKey)
 	return Opening{
 		Event: r.Event, Mode: r.Mode, SHA: r.SHA, BaseSHA: r.BaseSHA, Branch: r.HeadBranch,
 		Title: r.Title, PullRequest: r.PullRequest, Version: r.Version,

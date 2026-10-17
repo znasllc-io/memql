@@ -176,6 +176,9 @@ class Contract(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
             fake, calls = root / "codeql", root / "calls"
+            suite = root / "qlpacks/codeql/python-queries/1.0.0/codeql-suites/python-code-quality.qls"
+            suite.parent.mkdir(parents=True)
+            suite.write_text("- queries: .\n")
             fake.write_text('''#!/usr/bin/env python3
 import sys,json,pathlib
 with open(''' + repr(str(calls)) + ''','a') as out: out.write(json.dumps(sys.argv[1:])+'\\n')
@@ -185,6 +188,7 @@ elif sys.argv[1:3]==['database','create']:
  config=next(a.split('=',1)[1] for a in sys.argv if a.startswith('--codescanning-config='))
  obj=yaml.safe_load(pathlib.Path(config).read_text())
  assert obj['queries']==[{'uses':'security-extended'}]
+ assert obj['packs']==['codeql/python-queries@1.0.0:codeql-suites/python-code-quality.qls']
  assert any(f['exclude']['id']=='go/bad-redirect-check' for f in obj['query-filters'])
 elif sys.argv[1:3]==['database','analyze']:
  out=next(a.split('=',1)[1] for a in sys.argv if a.startswith('--output='))
@@ -197,9 +201,28 @@ elif sys.argv[1:3]==['database','analyze']:
             self.assertEqual(result.returncode, 0, result.stderr)
             summary = json.loads((root / "out/summary.json").read_text())
             self.assertEqual(summary["status"], "analyzed")
+            self.assertEqual(summary["querySuites"], ["security-extended", "python-code-quality.qls"])
             self.assertEqual(len(calls.read_text().splitlines()), 3)
             result = subprocess.run(command, capture_output=True, text=True, cwd=ROOT)
             self.assertNotEqual(result.returncode, 0)
+
+    def test_missing_or_ambiguous_quality_suite_is_not_a_security_only_pass(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            for language in ("go", "javascript-typescript", "python"):
+                with self.subTest(language=language):
+                    with self.assertRaises(RuntimeError):
+                        module.quality_suite(root / "codeql", language)
+                    pack = "javascript" if language == "javascript-typescript" else language
+                    suite = root / f"qlpacks/codeql/{pack}-queries/1.0.0/codeql-suites/{pack}-code-quality.qls"
+                    suite.parent.mkdir(parents=True)
+                    suite.write_text("- queries: .\n")
+                    self.assertEqual(module.quality_suite(root / "codeql", language), suite.resolve())
+                    second = root / f"qlpacks/codeql/{pack}-queries/2.0.0/codeql-suites/{pack}-code-quality.qls"
+                    second.parent.mkdir(parents=True)
+                    second.write_text("- queries: .\n")
+                    with self.assertRaises(RuntimeError):
+                        module.quality_suite(root / "codeql", language)
 
 
 if __name__ == "__main__":

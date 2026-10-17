@@ -586,3 +586,9 @@ func (d sectionableDecision) needsReasoningAgent(headline string) bool {
 	}
 	return !nativeFile || d.RequiresResearch
 }
+
+// Only a complete no-action contract can use the direct conversational turn.
+// Workload alone is an estimate: a small file or lookup still needs its tools.
+func (d sectionableDecision) quickReply() bool {
+	return d.Intent == "reply" && d.Workload == "quick" && d.RequiresFile != nil && !*d.RequiresFile && !d.RequiresResearch && !d.Sectionable && len(d.Sections) == 0 && d.Navigation == nil
+}

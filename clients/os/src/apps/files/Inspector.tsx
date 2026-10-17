@@ -103,6 +103,7 @@ export function Inspector({
     [row.kind, row.sourceConceptRef],
   );
   const liveHead = files.find(file => rowString(file, "id") === fileId);
+  const uploadUnavailable = !!liveHead && rowString(liveHead, "status") === "failed" && !rowString(liveHead, "blobUrl").includes("://");
   const liveVersion = liveHead ? fileHeadFromRow(liveHead) : null;
   const headRevision = liveVersion ? `${liveVersion.versionNumber}:${liveVersion.sha256}:${liveVersion.versionUploadedAt}` : "";
   const versions = useFileVersions(fileId, headRevision);
@@ -280,6 +281,8 @@ export function Inspector({
       <div className="os-action-body os-file-detail-body">
       <Head title={name} breadcrumbs={breadcrumbs} back={{label: backLabel, onSelect: onClose}} />
 
+      {uploadUnavailable ? <Notice tone="error" sentence="This upload did not finish." next="Upload the original file again from Files." /> : null}
+
       {/* A summary describes the contents; origin is a fact below. */}
       {row.summary.trim() !== "" ? <p className="os-files-summary">{row.summary}</p> : null}
 
@@ -418,7 +421,7 @@ export function Inspector({
           state={archiveBusy ? (row.archived ? "Restoring" : "Deleting")
             : confirmingArchive ? `Delete "${name}"?`
             : downloadBusy || downloadingVersion > 0 ? "Downloading"
-            : row.archived ? "In Bin" : "In Library"}
+            : row.archived ? "In Bin" : uploadUnavailable ? "Upload failed" : "In Library"}
           detail={confirmingArchive ? "You can restore it from the Bin until it is purged."
             : deskNote || (versions.head ? `Version ${versions.head.versionNumber} · ${formatBytes(versions.head.size)}` : undefined)}
           live
@@ -443,12 +446,12 @@ export function Inspector({
               <Button onClick={sendToDesk} disabled={archiveBusy} ariaLabel="Send to desktop" title="Send to desktop">
                 <CornerUpRight size={16} aria-hidden />
               </Button>
-              <Button onClick={() => void download()} busy={downloadBusy} disabled={archiveBusy}
+              {!uploadUnavailable ? <Button onClick={() => void download()} busy={downloadBusy} disabled={archiveBusy}
                 tone={isZipArtifact(row) ? "primary" : "quiet"}
                 ariaLabel={downloadBusy ? "Downloading" : isZipArtifact(row) ? "Download ZIP" : "Download"} title={isZipArtifact(row) ? "Download ZIP" : "Download"}>
                 <Download size={16} aria-hidden />
-              </Button>
-              {!isZipArtifact(row) ? <Button tone="primary" onClick={openVsCode} disabled={archiveBusy}>Open</Button> : null}
+              </Button> : null}
+              {!uploadUnavailable && !isZipArtifact(row) ? <Button tone="primary" onClick={openVsCode} disabled={archiveBusy}>Open</Button> : null}
             </>
           )}
         </ActionBar>

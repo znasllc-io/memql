@@ -66,26 +66,12 @@ func (k *Kube) CollectArtifacts(ctx context.Context, run StepRun, observed *Pod,
 	if err != nil {
 		return nil, err
 	}
-	read, write := io.Pipe()
-	transferCtx, cancel := context.WithCancel(ctx)
-	defer cancel()
-	done := make(chan error, 1)
-	go func() {
-		_, err := k.api.ReadPodFile(transferCtx, k.ns, before.Metadata.Name, ContainerArtifacts, artifactFile, write, maxBytes)
-		_ = write.CloseWithError(err)
-		done <- err
-	}()
-	snapshot, err := SnapshotArtifacts(ctx, read, run.Artifacts, maxBytes)
-	_ = read.CloseWithError(err)
+	snapshot, err := readArtifactSnapshot(ctx, run.Artifacts, maxBytes, func(readCtx context.Context, dst io.Writer) error {
+		_, readErr := k.api.ReadPodFileResumable(readCtx, k.ns, before.Metadata.Name, ContainerArtifacts, artifactFile, dst, maxBytes)
+		return readErr
+	})
 	if err != nil {
-		cancel()
-	}
-	transferErr := <-done
-	if err != nil || transferErr != nil {
-		if snapshot != nil {
-			_ = snapshot.Close()
-		}
-		return nil, errors.Join(err, transferErr)
+		return nil, err
 	}
 	afterJob, err := k.GetJob(ctx, jobName)
 	if err == nil && (afterJob.Metadata.UID != job.Metadata.UID || !artifactJobOwned(afterJob, run)) {
@@ -101,6 +87,33 @@ func (k *Kube) CollectArtifacts(ctx context.Context, run StepRun, observed *Pod,
 	if err != nil {
 		_ = snapshot.Close()
 		return nil, err
+	}
+	return snapshot, nil
+}
+
+type artifactFileReader func(context.Context, io.Writer) error
+
+func readArtifactSnapshot(ctx context.Context, declared []string, maxBytes int64, readFile artifactFileReader) (*ArtifactSnapshot, error) {
+	read, write := io.Pipe()
+	transferCtx, cancel := context.WithCancel(ctx)
+	defer cancel()
+	done := make(chan error, 1)
+	go func() {
+		err := readFile(transferCtx, write)
+		_ = write.CloseWithError(err)
+		done <- err
+	}()
+	snapshot, snapshotErr := SnapshotArtifacts(ctx, read, declared, maxBytes)
+	_ = read.CloseWithError(snapshotErr)
+	if snapshotErr != nil {
+		cancel()
+	}
+	transferErr := <-done
+	if snapshotErr != nil || transferErr != nil {
+		if snapshot != nil {
+			_ = snapshot.Close()
+		}
+		return nil, errors.Join(snapshotErr, transferErr)
 	}
 	return snapshot, nil
 }

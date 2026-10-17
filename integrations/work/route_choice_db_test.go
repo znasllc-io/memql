@@ -35,7 +35,7 @@ func TestRouteChoiceDB_TheTurnsChoiceReachesThePlannerAndTheAgentFromTheRow(t *t
 
 	// The turn: the choice rides beside the request on the bff, never in the
 	// input the model will read.
-	turn := memql.ContextWithGoalRouteChoice(actorCtx("compile-alice"), common.RouteChoice{Source: "app:claude-code", Level: "strong", By: "compile-alice"})
+	turn := memql.ContextWithGoalRouteChoice(actorCtx("compile-alice"), common.RouteChoice{Source: "app:claude-code", Level: "strong", Destination: "computer", By: "compile-alice"})
 	ctx, cancel := context.WithCancel(turn)
 	nodes, err := bff.handleCreateGoal(ctx, map[string]any{
 		"statement": "hi", "requestedVia": "ask",
@@ -46,7 +46,7 @@ func TestRouteChoiceDB_TheTurnsChoiceReachesThePlannerAndTheAgentFromTheRow(t *t
 		t.Fatal(err)
 	}
 	reply := decodeReply(t, nodes)
-	want := common.RouteChoice{Source: "app:claude-code", Level: "strong", By: "compile-alice"}
+	want := common.RouteChoice{Source: "app:claude-code", Level: "strong", Destination: "computer", By: "compile-alice"}
 
 	// The planner: triage and the compile pass see the choice on the run
 	// context it built from the row it claimed.

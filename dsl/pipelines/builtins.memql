@@ -32,6 +32,42 @@
 // item's (`read app:settings/pipelines`): it asks GitHub about the cluster's
 // own app, which is an owner's question, not a source's.
 
+/// Publish one retained SARIF artifact from a successful scanner in the caller's native
+/// pipeline, including a run that is still active or failed elsewhere. Source/ref/bytes come from verified journal and storage receipts,
+/// never from a caller-supplied URL or report. Returns publicationId, state,
+/// uploadId and sha256. Only complete proves ingestion; accepted is pending.
+/// Calling again observes the same upload. An uncertain or rejected upload is
+/// retained for inspection and never silently posted again. Report selection,
+/// polling and failure handling belong to the calling automation.
+@sdk
+@executor("integration.pipelines.publishSARIF")
+@args(profile="object")
+@requiresCapability("execute", "app:deployables/rerun")
+builtin pipelinesPublishSARIF {
+  runId string!
+  stepKey string!
+  path string!
+}
+
+/// Read a caller-owned upload receipt, refreshing pending ingestion from GitHub.
+/// A terminal receipt survives ordinary artifact retention. This never uploads.
+@sdk
+@executor("integration.pipelines.readSARIF")
+@args(profile="object")
+@requiresCapability("execute", "app:deployables/rerun")
+builtin pipelinesReadSARIF {
+  publicationId string!
+}
+
+/// Available only inside one claimed report step, bound to its compiled artifact.
+@executor("integration.pipelines.reportPublish")
+builtin pipelineReportPublish { }
+
+/// Observe that step's accepted upload after a bounded, cancelable wait.
+@executor("integration.pipelines.reportObserve")
+@args(profile="object")
+builtin pipelineReportObserve { waitSeconds integer! }
+
 /// Read only this claimed run's compiled step states. Unavailable outside a pipeline workflow.
 @executor("integration.pipelines.workflowFacts")
 builtin pipelineWorkflowFacts { }
@@ -125,6 +161,16 @@ builtin pipelinesRerun {
 builtin pipelinesRunLatest {
   pipelineId  string!  @description("The caller's v1:pipelines:pipeline. It must be disconnected.")
   branch      string   @description("A branch of the same repository, named as GitHub shows it (main, feature/login). Absent or empty runs the default branch.")
+}
+
+@sdk
+@executor("integration.pipelines.runRelease")
+@args(profile="object")
+@requiresCapability("execute", "app:deployables/rerun")
+@description("Start a full release build at an existing tag of the caller's connected pipeline. Resolves the immutable source commit through the source owner's current GitHub grant and supplies the tag as MEMQL_VERSION. Includes the manifest's release stages. Creates no tag, GitHub release, candidate approval or publication. A repeated request or later release webhook recovers the same attempt; use pipelinesRerun to repeat a completed attempt. A second tag for a commit already recorded under another release version is refused.")
+builtin pipelinesRunRelease {
+  pipelineId string! @description("The caller's connected v1:pipelines:pipeline.")
+  tag string! @description("An existing repository tag, such as v1.2.3, without refs/tags/.")
 }
 
 @sdk

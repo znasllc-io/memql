@@ -142,10 +142,28 @@ func TestComputerPermissionDBFullApprovalAndForwardedListing(t *testing.T) {
 				require.NoError(t, err)
 				require.True(t, result.OK)
 				require.Equal(t, 3, calls)
+				// An Always command permission does not choose the computer for a
+				// new Auto goal. It must still ask before moving work there.
+				autoRun := id.NewShortId()
+				execute(engines[1], write, "mutation", "createWorkRun", map[string]any{"runId": autoRun, "goalId": goal, "automationName": "permission-test", "templateFingerprint": "fixture", "mode": "live", "status": "running", "startedAt": time.Now().UTC().Format(time.RFC3339Nano)})
+				autoRC := rc
+				autoRC.RunId = autoRun
+				autoCtx := common.ContextWithRun(person, autoRC)
+				pending, err := RequestScopeForTest(integration, autoCtx, requestArgs)
+				require.NoError(t, err)
+				var pendingReply map[string]any
+				require.NoError(t, json.Unmarshal(pending[0].Payload, &pendingReply))
+				require.Equal(t, "awaiting_user", pendingReply["status"])
+				autoRequest := req
+				autoRequest.RunId = autoRun
+				denied, err := h.Origin().Dispatch(autoCtx, autoRequest)
+				require.NoError(t, err)
+				require.False(t, denied.OK)
+				require.Equal(t, 3, calls)
 				// A new run after restart must correct a malformed model call without
 				// writing another approval, then reuse the original Always receipt.
 				freshRun := id.NewShortId()
-				execute(engines[1], write, "mutation", "createWorkRun", map[string]any{"runId": freshRun, "goalId": goal, "automationName": "permission-test", "templateFingerprint": "fixture", "mode": "live", "status": "running", "startedAt": time.Now().UTC().Format(time.RFC3339Nano)})
+				execute(engines[1], write, "mutation", "createWorkRun", map[string]any{"runId": freshRun, "goalId": goal, "routing": map[string]any{"destination": "computer", "by": owner}, "automationName": "permission-test", "templateFingerprint": "fixture", "mode": "live", "status": "running", "startedAt": time.Now().UTC().Format(time.RFC3339Nano)})
 				rc.RunId, req.RunId = freshRun, freshRun
 				// Recovery receives the wire form of the same assistant ID.
 				req.AgentId = memql.BareShortId(req.AgentId)

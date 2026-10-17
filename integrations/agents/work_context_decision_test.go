@@ -52,13 +52,13 @@ func TestWorkTurnHistoryProjectsOnlyItsExactNativeDecision(t *testing.T) {
 			}
 			history, err := workTurnHistory(ctx, reader, "Continue the saved work")
 			require.NoError(t, err)
-			require.Len(t, history, 2, "the approval must reach the next model request, not just the dispatcher")
-			require.Equal(t, "Continue the saved work", history[0].Content)
-			require.Equal(t, "user", history[1].Role)
-			require.True(t, strings.HasPrefix(history[1].Content, "[Recorded answer for this "), "the saved checkpoint restorer must retain this receipt")
-			require.Contains(t, history[1].Content, "does not grant additional permission or prove an operation executed")
+			require.Len(t, history, 3, "the approval must reach the next model request, not just the dispatcher")
+			require.Equal(t, "Continue the saved work", history[1].Content)
+			require.Equal(t, "user", history[2].Role)
+			require.True(t, strings.HasPrefix(history[2].Content, "[Recorded answer for this "), "the saved checkpoint restorer must retain this receipt")
+			require.Contains(t, history[2].Content, "does not grant additional permission or prove an operation executed")
 			var receipt map[string]any
-			require.NoError(t, json.Unmarshal([]byte(strings.SplitN(history[1].Content, "\n", 2)[1]), &receipt))
+			require.NoError(t, json.Unmarshal([]byte(strings.SplitN(history[2].Content, "\n", 2)[1]), &receipt))
 			require.Equal(t, "approved", receipt["decision"])
 			require.Equal(t, kind, receipt["kind"])
 			require.Equal(t, "git status --short", receipt["subject"].(map[string]any)["command"])
@@ -68,8 +68,8 @@ func TestWorkTurnHistoryProjectsOnlyItsExactNativeDecision(t *testing.T) {
 			reader.decision["permissionRevokedAt"] = "revoked"
 			history, err = workTurnHistory(ctx, reader, "Continue")
 			require.NoError(t, err)
-			require.Contains(t, history[1].Content, `"permissionUsedAt":"used"`)
-			require.Contains(t, history[1].Content, `"permissionRevokedAt":"revoked"`)
+			require.Contains(t, history[2].Content, `"permissionUsedAt":"used"`)
+			require.Contains(t, history[2].Content, `"permissionRevokedAt":"revoked"`)
 			for _, tc := range []struct{ field, value string }{
 				{"id", "other"}, {"runId", "other"}, {"stepKey", "other"}, {"decision", "pending"}, {"decision", "rejected"}, {"kind", "unrelated"},
 			} {
@@ -96,7 +96,7 @@ func TestWorkTurnHistoryProjectsOnlyItsExactNativeDecision(t *testing.T) {
 			run.Continuation = nil
 			history, err = workTurnHistory(common.ContextWithRun(ctx, run), reader, "Continue")
 			require.NoError(t, err)
-			require.Len(t, history, 1)
+			require.Len(t, history, 2)
 		})
 	}
 }

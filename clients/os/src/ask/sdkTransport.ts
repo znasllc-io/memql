@@ -114,7 +114,7 @@ export class SdkAskTransport implements AskTransport {
     }
     void (async () => {
       try {
-        const handle = this.stream(dispatcher, [{ role: "user", content: prompt }], { signal: abort.signal, conversationId: options.conversationId, requestId: options.turnId, pageContext: context ?? "", provider: options.routing?.source ?? "", level: options.routing?.level ?? "" });
+        const handle = this.stream(dispatcher, [{ role: "user", content: prompt }], { signal: abort.signal, conversationId: options.conversationId, requestId: options.turnId, pageContext: context ?? "", provider: options.routing?.source ?? "", level: options.routing?.level ?? "", executionDestination: options.routing?.destination ?? "auto" });
         let settled = false;
         let answer = "";
         let backgroundAccepted = false;
@@ -125,7 +125,7 @@ export class SdkAskTransport implements AskTransport {
             if (chunk.textDelta) { answer += chunk.textDelta; on.delta(chunk.textDelta); }
             if (chunk.metadata?.ask) {
               const activity = chunk.metadata.ask as AskActivity;
-              if (activity.kind === "run" && (activity.phase === "queued" || activity.phase === "waiting")) backgroundAccepted = true;
+              if (activity.kind === "run" && (activity.arguments?.background === true || activity.phase === "queued" || activity.phase === "waiting")) backgroundAccepted = true;
               on.activity?.(activity);
             }
           }

@@ -825,8 +825,10 @@ func (s *streamSession) dispatch(ctx context.Context, dispatch *memqlv1.ToolDisp
 		delete(s.pending, dispatch.GetCallId())
 		delete(s.chunkSinks, dispatch.GetCallId())
 		s.mu.Unlock()
+		s.markSharingChanged()
 	}()
 
+	s.markSharingChanged()
 	if err := s.send(&memqlv1.WorkerServerMessage{
 		Payload: &memqlv1.WorkerServerMessage_ToolDispatch{ToolDispatch: dispatch},
 	}); err != nil {
@@ -1135,6 +1137,7 @@ func (s *streamSession) handleToolResult(res *memqlv1.ToolResult) {
 	if !ok {
 		return
 	}
+	s.markSharingChanged()
 	select {
 	case ch <- res:
 	default:
@@ -1555,6 +1558,7 @@ func (s *streamSession) openAppSession(ctx context.Context, req AppSessionReques
 			delete(s.sessions, req.SessionId)
 		}
 		s.mu.Unlock()
+		s.markSharingChanged()
 	}
 
 	s.mu.Lock()
@@ -1568,6 +1572,7 @@ func (s *streamSession) openAppSession(ctx context.Context, req AppSessionReques
 	}
 	s.sessions[req.SessionId] = handle
 	s.mu.Unlock()
+	s.markSharingChanged()
 
 	start := &memqlv1.AppSessionStart{
 		SessionId:     req.SessionId,

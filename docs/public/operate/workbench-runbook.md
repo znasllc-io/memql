@@ -22,15 +22,11 @@ section 8). Operational detail lives in
 
 ## 1. Mental model
 
-Three execution surfaces, in preference order:
-
-1. **In-server MemQL tools** -- exhaust first when the work fits.
-2. **Workbench** (this doc) -- default for any headless task that
-   needs a shell or filesystem. Linux, sandboxed, per-run.
-3. **Computer-use** -- the user's actual machine. Reserved for
-   tasks the workbench cannot do: macOS-only tooling (Xcode,
-   AppleScript), computer-use control / screenshots / mouse + keyboard,
-   files already on the user's computer.
+Goals carry an execution destination: **Auto**, **Workbench** or **Computer**.
+Server-side MemQL capabilities still run on the platform. For shell and filesystem
+work, Auto prefers the Workbench when its capabilities fit; explicit selections
+remain binding until the owner approves an alternative. See
+[where work runs](ask-and-voice.md#where-work-runs) for the controls and consent.
 
 Computer-use has two slugs (`computer_use_headless` and
 `computer_use_embodied`); the workbench has one (`workbench_use`),
@@ -40,14 +36,38 @@ universal across every role.
 
 Two distinct lifetimes inside the workbench:
 
-- **Per-Task container (ephemeral compute).** A fresh process /
-  namespace runs for each Task. Today the "container" is the agent
-  node's own process; in cluster mode it will be a per-Task
-  goroutine on the workbench node.
-- **Per-run workspace (persistent filesystem).** One directory
-  tree per run, mounted into every container that runs under it.
-  Outlasts individual steps. Released when the parent run reaches
-  a terminal status (succeeded / failed / cancelled).
+- **Per-operation process.** Commands run inside a dedicated Workbench pod,
+  sharing that pod's CPU and memory limits. They are not individual containers.
+  Cancellation and completion clean up the command's process group before its
+  capacity slot is released.
+- **Per-run workspace.** One directory per run persists between operations on
+  the serving replica. Terminal runs release it. The pod's workspace volume is
+  ephemeral; losing a replica does not provide durable filesystem continuity.
+- **CI pipeline steps.** These run in separate Kubernetes Jobs with their own
+  namespace admission, limits and dedicated build-pool placement.
+
+### Capacity and queue
+
+Each executor admits at most `MEMQL_WORKBENCH_MAX_ACTIVE` operations (default 2,
+range 1–32), with a FIFO queue bounded by `MEMQL_WORKBENCH_MAX_QUEUED` (default 32,
+range 1–256). Package builds reserve all operation slots on their executor.
+Invalid settings retain the defaults. These are per-replica limits, not a
+cluster-wide pool or a guaranteed number of concurrent people.
+
+The base pod has a one-CPU limit, 1536 MiB memory limit and 8 GiB ephemeral-storage
+limit; its workspace volume is capped at 8 GiB. No new operation is admitted
+while memory usage is at or above 80% of the container limit. This admission
+cushion does not prevent an already-running process from growing; Kubernetes
+still enforces the hard limit. Operators should measure their workload before
+increasing concurrency. The existing serving nodes do not autoscale for this queue.
+
+Queued calls create no workspace or process. Cancellation removes the call from
+the queue, and the serving replica rechecks destination permission after admission.
+The existing work journal records waiting and admission. Queue entries themselves
+live on the serving replica; losing it ends that request rather than proving that
+an operation executed. A full queue returns `workbench_queue_full` before execution.
+Only a known pre-start refusal can offer another destination; an unknown command
+outcome must not be replayed automatically.
 
 Workspace root: `MEMQL_WORKBENCH_ROOT` env var, default
 `/var/lib/memql/workbenches/`. Each run gets a subdirectory keyed
@@ -113,8 +133,10 @@ environment, root reads it out of `/proc/1/environ` and uid 10001 gets
 
 Universal -- `workbench_use` is injected into every role's
 `lockedToolSlugs` (see `dsl/agents/roles/*.memql`) so every agent
-has it. No scope grants, no kill switch, no per-agent gating. The
-blast radius is contained to the per-run directory tree.
+has it. The run owner's saved destination is checked before dispatch and again
+before the first workspace effect. A Computer goal needs an approved
+`requestWorkbenchUse` decision before it can use this surface. Tool availability
+alone does not grant that destination change.
 
 ### 4.1 Exec allowlist
 

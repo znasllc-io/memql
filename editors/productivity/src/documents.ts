@@ -102,6 +102,12 @@ export class Documents {
     if (kind === "file") {
       const file = (await this.api.execute(lease, "libraryFileById", buildLibraryFileById({ fileId: sourceId })))[0];
       if (!file) throw new UserInputError("File not found or unavailable to your account.");
+      // A failed upload retains a row and its intended key, but no readable
+      // object URL. Analysis can also fail AFTER storage, so status alone
+      // must not prevent reading bytes that were successfully saved.
+      if (text(file, "status") === "failed" && !text(file, "blobUrl").includes("://")) {
+        throw new UserInputError("This upload did not finish. Upload the original file again from Files.");
+      }
       mime = text(file, "mimeType") || mime;
       resource.name = text(file, "name") || resource.name;
       version = typeof file.versionNumber === "number" && file.versionNumber > 0 ? file.versionNumber : 1;

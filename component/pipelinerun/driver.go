@@ -53,8 +53,9 @@ const (
 	maxConcurrentSteps = 16
 	// stepGrace is how long past a run's ceiling the driver waits for the
 	// runner to report a step before it stops waiting (pipeline_run_ceiling;
-	// ruling R31b, stepDeadline).
-	stepGrace = 10 * time.Minute
+	// ruling R31b, stepDeadline). This must outlast both the cluster runner's
+	// settling budget and the fleet's clone/packing plus Library transfer.
+	stepGrace = 25 * time.Minute
 	// executorCancelTimeout bounds Executor.Cancel.
 	executorCancelTimeout = 30 * time.Second
 	// githubCallTimeout bounds one call to GitHub the drive waits on: a token
@@ -381,7 +382,8 @@ func (dr *runDriver) steer(ctx context.Context) (verdict, bool) {
 		return refusedWith(pipelines.Refuse(pipelines.CodeDisconnected, "",
 			"This run's pipeline no longer exists, so nothing can run it. Connect the source's pipeline again and re-run.")), true
 	}
-	if !p.Active() && dr.run.Status == StatusQueued && dr.run.Event != pipelines.EventManual {
+	requestedRelease := dr.run.Event == pipelines.EventRelease && dr.run.Trigger == TriggerManual
+	if !p.Active() && dr.run.Status == StatusQueued && dr.run.Event != pipelines.EventManual && !requestedRelease {
 		// A run already started runs to its end; one that has not, does not.
 		return refusedWith(pipelines.Refuse(pipelines.CodeDisconnected, "",
 			"This run's pipeline was disconnected before the run started, so it was not run. Reconnect the pipeline to run this commit again.")), true
@@ -632,6 +634,14 @@ func (dr *runDriver) carryFromOriginal(ctx context.Context) bool {
 // ran in; this attempt has an outcome of its own -- most often, that the
 // pipeline recovered -- and a carried notification would leave it unsaid.
 func carryPassed(tracks []*stepTrack, prior []WorkStep, priorAttempt int) {
+	// Report publications bind the producing run, so a new attempt must produce
+	// its own scanner artifacts instead of carrying a skip from an older run.
+	producers := map[string]bool{}
+	for _, t := range tracks {
+		if t.step.SARIF != nil {
+			producers[t.step.SARIF.Step] = true
+		}
+	}
 	byKey := make(map[string]WorkStep, len(prior))
 	for _, row := range prior {
 		if row.Key != "" {
@@ -640,7 +650,7 @@ func carryPassed(tracks []*stepTrack, prior []WorkStep, priorAttempt int) {
 	}
 	for _, t := range tracks {
 		row, ok := byKey[t.step.Key]
-		if !ok || t.step.Skip != nil || t.step.Kind == pipelines.StepNotify {
+		if !ok || t.step.Skip != nil || t.step.Kind != pipelines.StepCommand || producers[t.step.Key] {
 			continue
 		}
 		passed := row.Status == WorkStepDone
@@ -949,6 +959,9 @@ func (dr *runDriver) runStep(ctx context.Context, t *stepTrack) {
 	case step.Skip != nil:
 		dr.settle(ctx, t, skipReceipt(step.Skip.Code, step.Skip.Reason))
 		return
+	case step.Kind == pipelines.StepSARIF:
+		dr.runSARIFReport(ctx, t)
+		return
 	case step.Kind == pipelines.StepNotify:
 		// The driver delivers a notification itself, over the outbound path
 		// (notify.go): a notify step is never the step runner's.
@@ -1184,7 +1197,7 @@ type requestFacts struct {
 	attempt                             int
 	startedAt                           string
 	repository                          pipelines.Repository
-	sha, version                        string
+	sha, baseSHA, version               string
 	mode                                pipelines.Mode
 	event                               pipelines.Event
 	installation                        int64
@@ -1219,7 +1232,7 @@ func (dr *runDriver) setFacts() {
 		repository: pipelines.Repository{
 			Owner: owner, Name: name, CloneURL: "https://github.com/" + owner + "/" + name + ".git",
 		},
-		sha: dr.run.SHA, version: version, mode: dr.run.Mode, event: dr.run.Event,
+		sha: dr.run.SHA, baseSHA: dr.run.BaseSHA, version: version, mode: dr.run.Mode, event: dr.run.Event,
 		installation: dr.installation, compute: dr.p.Compute,
 		domain: dr.d.Domain(),
 		title:  dr.run.Title, branch: dr.run.HeadBranch, pullRequest: dr.run.PullRequest,
@@ -1243,6 +1256,7 @@ func (dr *runDriver) request(t *stepTrack, secrets map[string]string) pipelines.
 		OwnerUserID:    f.owner,
 		Repository:     f.repository,
 		SHA:            f.sha,
+		BaseSHA:        f.baseSHA,
 		Mode:           f.mode,
 		Event:          f.event,
 		Version:        f.version,

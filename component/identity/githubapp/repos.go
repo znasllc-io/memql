@@ -176,8 +176,8 @@ func (c *Client) Compare(ctx context.Context, bearer, owner, repo, base, head st
 
 // CommitForRef answers the commit a ref names, and its message
 // (GET /repos/{owner}/{repo}/commits/{ref}). The ref is a commit SHA, a branch
-// or tag name, or heads/<branch> and tags/<tag> -- what GitHub's commits
-// endpoint accepts. A tag resolves to the commit it points at.
+// or tag name, or fully qualified refs/heads/<branch> and refs/tags/<tag>.
+// GitHub rejects the abbreviated tags/<tag> form. A tag resolves to its commit.
 func (c *Client) CommitForRef(ctx context.Context, bearer, owner, repo, ref string) (sha, message string, err error) {
 	if strings.TrimSpace(ref) == "" {
 		return "", "", errors.New("a commit lookup needs a ref")

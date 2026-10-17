@@ -53,6 +53,7 @@ import (
 	"github.com/znasllc-io/memql/component/auth"
 	memqlengine "github.com/znasllc-io/memql/component/memql"
 	workerservice "github.com/znasllc-io/memql/component/worker"
+	"github.com/znasllc-io/memql/core/common"
 )
 
 // PreferencesReader is the one read the app gate makes. The dispatcher's Store
@@ -69,7 +70,7 @@ type PreferencesReader interface {
 // child run is opened, so a refused call never reveals which machines the
 // owner has online and never leaves anything behind. The pin is asked first
 // because it needs no read.
-func admitAppSession(ctx context.Context, prefs PreferencesReader, logger *slog.Logger, owner string, pin memqlengine.AppDoorPin) *appGateRefusal {
+func admitAppSession(ctx context.Context, prefs PreferencesReader, logger *slog.Logger, owner string, pin memqlengine.AppDoorPin, runID string) *appGateRefusal {
 	// NOBODY TO ACT FOR, first and with no read: a session runs on a person's
 	// own machine under a credential naming that person, and a system actor
 	// is a non-empty UserId that names no one. Asked here because all three
@@ -80,6 +81,22 @@ func admitAppSession(ctx context.Context, prefs PreferencesReader, logger *slog.
 	}
 	if refusal := appDoorPinRefusal(pin, owner); refusal != nil {
 		return refusal
+	}
+	// A local app can run its own tools. A Workbench-only goal cannot escape
+	// through delegated app execution while the native host tools are gated.
+	if runID == "" {
+		if run, ok := common.RunFromContext(ctx); ok {
+			runID = run.RunId
+		}
+	}
+	if runID != "" {
+		gate, available := prefs.(destinationChecker)
+		if !available {
+			return &appGateRefusal{code: AppGateDestination, message: "This goal cannot open a computer app without destination approval"}
+		}
+		if err := gate.CheckExecutionDestination(ctx, runID, "computer"); err != nil {
+			return &appGateRefusal{code: AppGateDestination, message: err.Error()}
+		}
 	}
 	return appSessionConsent(ctx, prefs, logger, owner)
 }

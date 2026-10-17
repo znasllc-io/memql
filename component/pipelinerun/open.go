@@ -41,7 +41,7 @@ type Opening struct {
 	Fork           bool
 	HeadRepository string
 	ReleaseTag     string
-	// ScheduleSlot is the UTC YYYY-MM-DD slot for EventSchedule. It is part
+	// ScheduleSlot is a UTC date or week:Monday slot for EventSchedule. It is part
 	// of the run key so the same head is rescanned once each day.
 	ScheduleSlot string
 	// Version is MEMQL_VERSION; empty derives it (pipelines.Version). A

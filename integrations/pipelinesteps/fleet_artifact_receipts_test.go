@@ -6,7 +6,9 @@ import (
 	"bytes"
 	"compress/gzip"
 	"context"
-	"encoding/base64"
+	"crypto/sha256"
+	"fmt"
+	nodev1 "github.com/znasllc-io/memql/component/node/gen"
 	"io"
 	"strings"
 	"testing"
@@ -15,9 +17,22 @@ import (
 	worker "github.com/znasllc-io/memql/integrations/agent/worker"
 )
 
-func fleetArtifactAnswer(encoded string) func(context.Context, worker.Request) (worker.Result, error) {
-	return func(context.Context, worker.Request) (worker.Result, error) {
-		return worker.Result{OK: true, WorkerId: "reg-1", NodeId: "agent-b", OutputJSON: `{"exitCode":0,"durationMs":10,"artifactsTgzBase64":"` + encoded + `"}`}, nil
+func fleetArtifactOutput(archive []byte) string {
+	return fmt.Sprintf(`{"exitCode":0,"durationMs":10,"artifactsArchiveBytes":%d,"artifactsArchiveSHA256":"sha256:%x","artifactsMissing":[]}`, len(archive), sha256.Sum256(archive))
+}
+
+func sendFleetArchive(req worker.Request, archive []byte) {
+	for len(archive) > 0 {
+		n := min(len(archive), 256<<10)
+		req.OnStreamChunk(&nodev1.WorkerForwardStream{Payload: &nodev1.WorkerForwardStream_DataChunk{DataChunk: archive[:n]}})
+		archive = archive[n:]
+	}
+}
+
+func fleetArtifactAnswer(archive []byte) func(context.Context, worker.Request) (worker.Result, error) {
+	return func(_ context.Context, req worker.Request) (worker.Result, error) {
+		sendFleetArchive(req, archive)
+		return worker.Result{OK: true, WorkerId: "reg-1", NodeId: "agent-b", OutputJSON: fleetArtifactOutput(archive)}, nil
 	}
 }
 
@@ -44,18 +59,17 @@ func TestFleetValidatesTheEntireArchiveBeforeStoringAnyArtifact(t *testing.T) {
 	if err := zip.Close(); err != nil {
 		t.Fatal(err)
 	}
-	encode := base64.StdEncoding.EncodeToString
-	for name, encoded := range map[string]string{
-		"bad base64 after valid gzip": encode(valid) + "!",
-		"bad gzip checksum":           encode(badCRC),
-		"truncated gzip footer":       encode(valid[:len(valid)-4]),
-		"missing tar end":             encode(noEnd.Bytes()),
-		"missing declared file":       encode(extractTestTgz(t, []extractTestEntry{{name: "coverage.out", body: "proof"}})),
-		"duplicate declared file":     encode(extractTestTgz(t, []extractTestEntry{{name: "coverage.out", body: "proof"}, {name: "coverage.out", body: "replacement"}})),
-		"undeclared trailing file":    encode(extractTestTgz(t, []extractTestEntry{{name: "coverage.out", body: "proof"}, {name: "other.txt", body: "untrusted"}})),
+	for name, archive := range map[string][]byte{
+		"trailing bytes after valid gzip": append(bytes.Clone(valid), '!'),
+		"bad gzip checksum":               badCRC,
+		"truncated gzip footer":           valid[:len(valid)-4],
+		"missing tar end":                 noEnd.Bytes(),
+		"missing declared file":           extractTestTgz(t, []extractTestEntry{{name: "coverage.out", body: "proof"}}),
+		"duplicate declared file":         extractTestTgz(t, []extractTestEntry{{name: "coverage.out", body: "proof"}, {name: "coverage.out", body: "replacement"}}),
+		"undeclared trailing file":        extractTestTgz(t, []extractTestEntry{{name: "coverage.out", body: "proof"}, {name: "other.txt", body: "untrusted"}}),
 	} {
 		t.Run(name, func(t *testing.T) {
-			f, lib, _, _ := newTestFleet(t, &fakeDispatcher{answer: fleetArtifactAnswer(encoded)})
+			f, lib, _, _ := newTestFleet(t, &fakeDispatcher{answer: fleetArtifactAnswer(archive)})
 			res := runFleet(t, f, fleetArtifactReq())
 			if res.Status != pl.OutcomeFailed || res.Failure == nil || res.Failure.Code != pl.CodeArtifactUnavailable || len(res.ArtifactIntentIDs) != 0 || len(res.ArtifactFileIDs) != 0 {
 				t.Fatalf("invalid archive accepted: %+v", res)
@@ -68,7 +82,7 @@ func TestFleetValidatesTheEntireArchiveBeforeStoringAnyArtifact(t *testing.T) {
 }
 
 func TestFleetRequiresVerifiedStorageReceipts(t *testing.T) {
-	archive := base64.StdEncoding.EncodeToString(extractTestTgz(t, []extractTestEntry{{name: "coverage.out", body: "proof"}, {name: "dist/report.json", body: "{}"}}))
+	archive := extractTestTgz(t, []extractTestEntry{{name: "coverage.out", body: "proof"}, {name: "dist/report.json", body: "{}"}})
 	for name, alter := range map[string]func(*StoredFile){
 		"missing":         func(f *StoredFile) { f.Receipt = nil },
 		"owner":           func(f *StoredFile) { f.Receipt.OwnerUserID = "different" },

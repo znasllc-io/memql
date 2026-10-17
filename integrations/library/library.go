@@ -53,6 +53,7 @@ const resultConcept = "integration:library:result"
 // handle so it can re-enter Execute for the read-then-write dance.
 type Integration struct {
 	engine          memql.IntegrationEngineAccess
+	authority       documentAuthority
 	reviewGoals     ReviewGoalOpener
 	revisionFiles   RevisionFileWriter
 	imageAssets     ImageAssetWriter
@@ -84,8 +85,9 @@ type Integration struct {
 	// `status` -- which is exactly how it behaved before epic memql#4970,
 	// so the absence is a downgrade rather than a failure. See
 	// SetWorkJournal in analysis.go.
-	journal  *workjournal.Journal
-	training *trainingReader
+	journal      *workjournal.Journal
+	training     *trainingReader
+	lessonSource func(context.Context, string, string) (map[string]any, error)
 }
 
 // NewIntegration wires the engine handle. The factory is in plugin.go;
@@ -106,7 +108,8 @@ func NewIntegration(engine memql.IntegrationEngineAccess, gateDB ...func() *sql.
 		}
 		return memql.AcquireWriteGate(ctx, db, key)
 	}
-	return &Integration{engine: engine,
+	authority, _ := engine.(documentAuthority)
+	return &Integration{engine: engine, authority: authority,
 		versionGate: func(ctx context.Context, key string) (func(), error) {
 			return gate(ctx, "library-document:"+memql.BareShortId(key))
 		},
@@ -122,6 +125,8 @@ func (i *Integration) IntegrationName() string { return "library" }
 // Capabilities implements memql.IntegrationProvider.
 func (i *Integration) Capabilities() []memql.IntegrationCapability {
 	return append([]memql.IntegrationCapability{
+		{Name: "saveTrainingLesson", Description: "Append one owner-reviewed manual lesson revision or decision.", Handler: i.handleSaveTrainingLesson},
+		{Name: "indexTrainingLesson", Description: "Index an exact enabled manual lesson revision.", Handler: i.handleIndexTrainingLesson},
 		{Name: "workTrainingContext", Description: "Read the current owned work scope for Training retrieval.", Handler: i.handleWorkTrainingContext},
 		{Name: "ownedTrainingLessons", Description: "Read bounded reviewed passages from the current work owner's taught Library files.", Handler: i.handleOwnedTrainingLessons, PreserveOrder: true},
 		{Name: "removeDocumentAnnotation", Description: "Remove your document feedback or personal note.", Handler: i.handleRemoveDocumentAnnotation},
@@ -354,8 +359,7 @@ func (i *Integration) handleEditDocument(ctx context.Context, args map[string]an
 	// the document spine (title / source / format) onto both the new
 	// version's re-insert and -- when no history exists yet -- to seed
 	// version 1's owner. The documentId IS the generatedOutput id.
-	subject, ok := auth.SubjectFromContext(ctx)
-	if !ok || !auth.CapableFor(ctx, subject, auth.VerbCreate, auth.ResourceData) {
+	if !i.canManageDocument(ctx, auth.VerbCreate) {
 		return nil, fmt.Errorf("you do not have permission to edit this document")
 	}
 	release, err := i.versionGate(ctx, documentId)
@@ -484,8 +488,7 @@ func (i *Integration) handleRestoreDocumentVersion(ctx context.Context, args map
 	}
 	authorId := strings.TrimSpace(asString(args["authorId"]))
 
-	subject, ok := auth.SubjectFromContext(ctx)
-	if !ok || !auth.CapableFor(ctx, subject, auth.VerbCreate, auth.ResourceData) {
+	if !i.canManageDocument(ctx, auth.VerbCreate) {
 		return nil, fmt.Errorf("you do not have permission to edit this document")
 	}
 	release, err := i.versionGate(ctx, documentId)

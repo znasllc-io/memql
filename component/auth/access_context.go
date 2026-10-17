@@ -28,6 +28,8 @@ import (
 // a name is presentation, and adding it to the envelope would invite a
 // filter to key on one.
 type AccessContext struct {
+	RoleTestSessionID string
+
 	UserId       string
 	PrimaryEmail string
 	DisplayName  string
@@ -205,6 +207,15 @@ func ContextWithAccess(ctx context.Context, ac *AccessContext) context.Context {
 func ContextWithUserActor(ctx context.Context, userId string) context.Context {
 	if strings.TrimSpace(userId) == "" {
 		return ctx
+	}
+	// A test persona has only its live session's authority. Borrowing its own
+	// identity must retain the real role, grants, expiry and revocation handle;
+	// borrowing anybody else must not erase the bounded credential.
+	if IsRoleTestContext(ctx) {
+		if ac, ok := AccessFromContext(ctx); ok && strings.TrimPrefix(ac.UserId, "v1:identity:user:") == strings.TrimPrefix(userId, "v1:identity:user:") {
+			return ctx
+		}
+		return context.WithValue(ctx, roleTestActorMismatchKey{}, true)
 	}
 	claims := map[string]any{
 		"sub":   userId,

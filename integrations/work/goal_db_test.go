@@ -70,6 +70,7 @@ func openWorkTestEngine(t *testing.T) *memqlengine.MemQLEngine {
 	if err != nil {
 		t.Fatalf("memql.New: %v", err)
 	}
+	eng.SetAskCoordinationPool(testGates(t))
 	eng.Logger = slog.New(slog.NewTextHandler(io.Discard, &slog.HandlerOptions{Level: slog.LevelError}))
 	if err := eng.Init(memorynodes.DefaultRegistry()); err != nil {
 		t.Fatalf("engine Init: %v", err)

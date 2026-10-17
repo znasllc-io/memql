@@ -5,6 +5,7 @@ package worker
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log/slog"
 	"math"
@@ -728,6 +729,20 @@ func (i *Integration) handleRequestScope(ctx context.Context, args map[string]an
 		if err != nil {
 			return nil, err
 		}
+	}
+	var destinationChange *memql.ExecutionDestinationRequired
+	checkDestination := func() error {
+		if i.dispatcher != nil && i.dispatcher.destination != nil {
+			return i.dispatcher.destination.CheckExecutionDestination(ctx, rc.RunId, "computer")
+		}
+		return memql.CheckExecutionDestination(ctx, i.engine, rc.RunId, "computer")
+	}
+	if err := checkDestination(); err != nil {
+		if !errors.As(err, &destinationChange) {
+			return nil, err
+		}
+		subject["executionDestination"] = destinationChange.Subject()
+		approvalID = "" // A saved command does not choose this goal's destination.
 	}
 	if approvalID == "" {
 		approvalID, err = i.ScopeRequester(ctx, ownerUserId, rc.RunId, subject)

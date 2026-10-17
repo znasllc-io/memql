@@ -62,7 +62,7 @@ func TestDocumentEditsOnDifferentReplicasPreserveAuthorityAndVersions(t *testing
 	b, _, _ := open()
 	marker := fmt.Sprintf("editor-%d", time.Now().UnixNano())
 	owner := marker + "-owner"
-	ctx := auth.ContextWithAccess(auth.ContextWithToken(context.Background(), &auth.TokenInfo{Subject: owner}), &auth.AccessContext{UserId: owner, Role: auth.RoleWriter})
+	ctx := auth.ContextWithAccess(auth.ContextWithToken(context.Background(), &auth.TokenInfo{Subject: owner}), &auth.AccessContext{UserId: owner, Role: auth.RoleReader})
 	// Seed one owned document, visible to both independent engine instances.
 	_, err = ea.Execute(ctx, fmt.Sprintf(`mutation createGeneratedOutput(outputId: %s, title: "Original", body: "original", format: "markdown", source: "user_created")`, langparser.QuoteString(marker)))
 	if err != nil {
@@ -114,8 +114,8 @@ func TestDocumentEditsOnDifferentReplicasPreserveAuthorityAndVersions(t *testing
 	if err != nil || doc["body"] != "saved" {
 		t.Fatalf("clock-skew save invisible: %v %#v", err, doc)
 	}
-	// A forged owner argument and a reader role must not lend the document owner's authority.
-	for _, access := range []*auth.AccessContext{{UserId: marker + "-other", Role: auth.RoleWriter}, {UserId: owner, Role: auth.RoleReader}} {
+	// A forged owner argument or an unknown role cannot lend personal authority.
+	for _, access := range []*auth.AccessContext{{UserId: marker + "-other", Role: auth.RoleWriter}, {UserId: owner, Role: "ungranted"}} {
 		forbidden := auth.ContextWithAccess(auth.ContextWithToken(context.Background(), &auth.TokenInfo{Subject: access.UserId}), access)
 		_, err := b.handleEditDocument(forbidden, map[string]any{"documentId": marker, "content": "unauthorized", "ownerUserId": owner, "expectedVersion": 1}, 0)
 		if err == nil {

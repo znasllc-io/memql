@@ -3,6 +3,7 @@ package pipelinerun
 import (
 	"context"
 	"fmt"
+	"slices"
 
 	memorynodes "github.com/znasllc-io/memql/component/database/memory-nodes"
 	"github.com/znasllc-io/memql/component/memql"
@@ -11,9 +12,8 @@ import (
 	"github.com/znasllc-io/memql/core/logger"
 )
 
-// schedule.go -- the daily scheduled pipeline scan. Schedule policy is read
-// from each repository's current default-branch manifest, so changing
-// `schedule: daily` takes effect without reconnecting the source.
+// Schedule policy is read from each repository's current default-branch
+// manifest, so changing cadence takes effect without reconnecting the source.
 
 const scheduledScanPageLimit = 500
 
@@ -31,10 +31,9 @@ func (i *Integration) handleSchedule(ctx context.Context, _ map[string]any, _ in
 	return resultNode(answer), nil
 }
 
-// Schedule opens today's daily scan for active pipelines whose current
-// default-branch manifest opts in. Repeated or delayed invocations on the same
-// UTC day are harmless: ScheduledRunKey makes the open operation idempotent
-// for that day, while the same unchanged SHA is eligible again tomorrow.
+// Schedule opens each due calendar period for active pipelines whose current
+// default-branch manifest opts in. The saved slot makes repeated, delayed and
+// concurrent invocations idempotent; weekly scans retain their first pinned SHA.
 func (i *Integration) Schedule(ctx context.Context) (PollResult, error) {
 	if err := requireInternalOrigin(ctx, "schedule"); err != nil {
 		return PollResult{}, err
@@ -55,7 +54,7 @@ func (i *Integration) Schedule(ctx context.Context) (PollResult, error) {
 			"component", "pipelinerun", "pipelines", len(active))
 	}
 	res := PollResult{Pipelines: len(active)}
-	day := d.now().Format("2006-01-02")
+	now := d.now()
 	for _, listed := range active {
 		p, err := d.Store.PipelineByID(memql.ContextWithFreshRead(ctx), listed.ID)
 		if err != nil {
@@ -93,23 +92,39 @@ func (i *Integration) Schedule(ctx context.Context) (PollResult, error) {
 			scheduledFailure(d, &res, *p, refusal)
 			continue
 		}
-		if manifest.Pipeline.Schedule != "daily" {
-			// Validate currently restricts the vocabulary to daily; keep this
-			// guard explicit so a future cadence cannot run accidentally here.
-			continue
-		}
-		opened, err := i.openWithToken(ctx, d, *p, Opening{
-			Event: pipelines.EventSchedule, SHA: head.sha, Branch: head.branch,
-			Title: firstLine(head.message), Trigger: TriggerSchedule, ScheduleSlot: day,
-		}, token)
-		if err != nil {
-			scheduledFailure(d, &res, *p, err)
-			continue
-		}
-		if opened.Opened {
-			res.Opened = append(res.Opened, opened.Run)
-		} else {
-			res.Existing = append(res.Existing, opened.Run)
+		// The manifest declares cadence; the saved slot is the authority when
+		// the pinned DSL selects stages, including on a later manual retry.
+		seen := map[string]bool{}
+		for _, stage := range manifest.Pipeline.Stages {
+			if !slices.Contains(stage.On, string(pipelines.EventSchedule)) {
+				continue
+			}
+			cadence := stage.Schedule
+			if cadence == "" {
+				cadence = manifest.Pipeline.Schedule
+			}
+			slot, err := pipelines.ScheduleSlot(cadence, now)
+			if err != nil {
+				scheduledFailure(d, &res, *p, err)
+				break
+			}
+			if seen[slot] {
+				continue
+			}
+			seen[slot] = true
+			opened, err := i.openWithToken(ctx, d, *p, Opening{
+				Event: pipelines.EventSchedule, SHA: head.sha, Branch: head.branch,
+				Title: firstLine(head.message), Trigger: TriggerSchedule, ScheduleSlot: slot,
+			}, token)
+			if err != nil {
+				scheduledFailure(d, &res, *p, err)
+				continue
+			}
+			if opened.Opened {
+				res.Opened = append(res.Opened, opened.Run)
+			} else {
+				res.Existing = append(res.Existing, opened.Run)
+			}
 		}
 	}
 	return res, nil

@@ -104,3 +104,94 @@ func mustScheduledRunKey(t *testing.T, repository, sha string, mode pipelines.Mo
 	}
 	return key
 }
+
+func TestWeeklyScheduleCatchesUpAndDeduplicatesAcrossReplicasAndNewHeads(t *testing.T) {
+	h := newHarness(t)
+	h.store.addPipeline(testPipeline(DeliveryWebhook))
+	h.github.heads[repoName+"@main"] = headAnswer{SHA: shaA}
+	manifest := dailyScanManifest + `    - name: deep
+      on: [schedule, manual]
+      schedule: weekly
+      steps:
+        - name: history
+          run: make deep
+`
+	setScheduleManifest(h, shaA, manifest)
+	wednesday := time.Date(2026, 10, 14, 3, 30, 0, 0, time.UTC)
+	h.integ.Configure(func(d *Deps) { d.Now = func() time.Time { return wednesday } })
+	// Two scheduler replicas with no shared integration-local state.
+	d := h.integ.snapshot()
+	d.NodeID = "agent-b"
+	other := New(d)
+	resultCh := make(chan PollResult, 2)
+	errCh := make(chan error, 2)
+	for _, i := range []*Integration{h.integ, other} {
+		go func(i *Integration) { r, e := i.Schedule(automationCtx()); resultCh <- r; errCh <- e }(i)
+	}
+	opened := []Run{}
+	for range 2 {
+		r := <-resultCh
+		if e := <-errCh; e != nil {
+			t.Fatal(e)
+		}
+		if len(r.Failed) > 0 {
+			t.Fatalf("schedule: %+v", r)
+		}
+		opened = append(opened, r.Opened...)
+	}
+	if len(opened) != 2 || len(h.github.createdRuns()) != 2 {
+		t.Fatalf("replicas opened %+v", opened)
+	}
+	var weekly Run
+	for _, r := range opened {
+		if slot, _ := pipelines.ScheduledSlotFromRunKey(r.RunKey); slot == "week:2026-10-12" {
+			weekly = r
+		}
+	}
+	if weekly.ID == "" {
+		t.Fatal("missed Monday did not catch up on Wednesday")
+	}
+	for _, run := range opened {
+		check := ComposeCheckRun("", testPipeline(DeliveryWebhook), run, ReportFor(testPipeline(DeliveryWebhook), run, nil))
+		want := "MemQL / shop / daily"
+		if run.ID == weekly.ID {
+			want = "MemQL / shop / weekly"
+		}
+		if check.Name != want {
+			t.Errorf("periodic check can collide with required CI: %q, want %q", check.Name, want)
+		}
+	}
+	// A failure remains visible and is not automatically rerun on a changed SHA.
+	h.store.mu.Lock()
+	for key, r := range h.store.runs {
+		if r.ID == weekly.ID {
+			r.Status = StatusCompleted
+			r.Conclusion = ConclusionFailure
+			h.store.runs[key] = r
+		}
+	}
+	h.store.mu.Unlock()
+	h.github.mu.Lock()
+	h.github.heads[repoName+"@main"] = headAnswer{SHA: shaB}
+	h.github.mu.Unlock()
+	setScheduleManifest(h, shaB, manifest)
+	thursday := wednesday.Add(24 * time.Hour)
+	other.Configure(func(d *Deps) { d.Now = func() time.Time { return thursday } })
+	r, err := other.Schedule(automationCtx())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(r.Opened) != 1 || len(r.Existing) != 1 || r.Existing[0].ID != weekly.ID || r.Existing[0].SHA != shaA || (r.Existing[0].Status != StatusCompleted || r.Existing[0].Conclusion != ConclusionFailure) {
+		t.Fatalf("new head repeated or hid weekly result: %+v", r)
+	}
+	retry := rerunOf(r.Existing[0], "", false)
+	if retry.ScheduleSlot != "week:2026-10-12" || retry.SHA != shaA {
+		t.Fatalf("retry lost pinned period/source: %+v", retry)
+	}
+	next := wednesday.AddDate(0, 0, 7)
+	other.Configure(func(d *Deps) { d.Now = func() time.Time { return next } })
+	r, err = other.Schedule(automationCtx())
+	if err != nil || len(r.Opened) != 2 {
+		t.Fatalf("next week: %+v %v", r, err)
+	}
+}

@@ -278,7 +278,7 @@ structured stdout contract and send human logs to stderr.
 Fleet's machine Settings page is the reference for displaying an entity's
 configuration and reported facts. Apply this pattern when building or revising
 comparable pages in other apps; keep their existing capabilities and permissions.
-For a machine, Settings is the last tab, after History. General controls and
+For a machine, Settings is the last tab, after Activity. General controls and
 Sharing precede reported facts on that one page. Sharing uses the same section
 grid, with a divider between its switch and users/groups collection; keep write errors
 beside the section that caused them. There is no separate Sharing tab.

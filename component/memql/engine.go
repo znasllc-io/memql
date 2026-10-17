@@ -2,6 +2,7 @@ package memql
 
 import (
 	"context"
+	"database/sql"
 	"encoding/json"
 	"fmt"
 	"github.com/znasllc-io/memql/component/auth"
@@ -59,6 +60,7 @@ type MemQLEngine struct {
 	seedMaterializer        *SeedMaterializer
 	providers               *ProviderRegistry
 	voiceTransport          audio.RoomTransport
+	askCoordinationPool     func() *sql.DB
 	policies                *PolicyRegistry
 	// rules is the routing-rule corpus (epic memql#5127). Unpopulated until
 	// the rule loader lands: every reader is nil-safe, and a nil registry
@@ -698,6 +700,9 @@ func (e *MemQLEngine) Execute(ctx context.Context, query string) (*ExecuteResult
 // pre-rejection; default false everywhere else.
 func (e *MemQLEngine) executeWith(ctx context.Context, query string, fns *FunctionRegistry, specOverlay map[string]*Spec, allowInline bool) (out *ExecuteResult, err error) {
 	startTime := time.Now()
+	if err := auth.ValidateRoleTestContext(ctx); err != nil {
+		return nil, err
+	}
 
 	// `took` MEANS THIS CALL, ON EVERY RETURN PATH (memql#4860).
 	//

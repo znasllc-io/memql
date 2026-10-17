@@ -147,7 +147,7 @@ def scan_batches(source, commits, output, config, binary, batch_size, jobs, dead
                 future.cancel()
 
 
-def fetch_history(source, head, remote, output, deadline):
+def fetch_history(source, head, remote, output, deadline, additional_roots=()):
     """Retry interrupted transfers, retaining evidence before scanning anything.
 
     Run 10 of #6018 lost a GitHub transfer at its last 5303 bytes. A successful
@@ -169,7 +169,7 @@ def fetch_history(source, head, remote, output, deadline):
         command = ["git", "-C", str(source), "fetch", "--tags"]
         if git(source, "rev-parse", "--is-shallow-repository") == "true":
             command.append("--unshallow")
-        command.extend(["--", remote, expected])
+        command.extend(["--", remote, expected, *additional_roots])
         path = output / f"fetch-{attempt}.log"
         timed_out = False
         with path.open("w") as log:
@@ -193,25 +193,39 @@ def fetch_history(source, head, remote, output, deadline):
         time.sleep(min(attempt * 2, max(0, deadline - time.monotonic())))
 
 
-def scan(source, head, output, config, binary, batch_size, timeout, jobs=1, fetch_remote=None):
+def scan(source, head, output, config, binary, batch_size, timeout, jobs=1, fetch_remote=None, base=None):
     summary = {"status": "incomplete", "version": VERSION, "completedCommits": 0,
                "totalCommits": 0, "findings": 0, "batchSize": batch_size,
                "jobs": jobs, "batchArchive": "batches.tar", "batches": []}
+    if base == "" or (base is not None and re.fullmatch(r"0+", base)):
+        # A first branch push has no predecessor. Scan full history rather
+        # than silently omitting security coverage. The receipt names it.
+        base = None
+        summary["coverageReason"] = "no predecessor; full-history fallback"
     deadline = time.monotonic() + timeout
     findings = []
     try:
+        if base is not None and not re.fullmatch(r"[0-9a-f]{40}|[0-9a-f]{64}", base):
+            raise RuntimeError("incremental scanning requires the pinned full base commit identity")
         if fetch_remote is not None:
-            fetch_history(source, head, fetch_remote, output, deadline)
+            fetch_history(source, head, fetch_remote, output, deadline, (base,) if base is not None else ())
         if git(source, "rev-parse", "--is-shallow-repository") != "false":
             raise RuntimeError("full-history scanning requires a complete Git history")
         head = git(source, "rev-parse", "--verify", head + "^{commit}")
         if not re.fullmatch(r"[0-9a-f]{40}|[0-9a-f]{64}", head):
             raise RuntimeError("head is not a full commit identity")
-        tags = git(source, "for-each-ref", "--format=%(refname) %(objectname)", "refs/tags")
+        # PR/queue/push coverage includes every new commit, even a secret
+        # introduced and deleted before HEAD. It excludes unrelated old tags.
+        # An unreadable base fails; it can never turn into an empty green scan.
+        if base is not None:
+            resolved = git(source, "rev-parse", "--verify", base + "^{commit}")
+            if resolved != base:
+                raise RuntimeError("base did not resolve to the pinned commit")
+        tags = git(source, "for-each-ref", "--format=%(refname) %(objectname)", "refs/tags") if base is None else ""
         (output / "tags.txt").write_text(tags + "\n")
-        roots = [head, *(line.split()[1] for line in tags.splitlines())]
+        roots = [head, "--not", base] if base is not None else [head, *(line.split()[1] for line in tags.splitlines())]
         commits = git(source, "rev-list", "--topo-order", *roots).splitlines()
-        if not commits or len(set(commits)) != len(commits):
+        if (not commits and base is None) or len(set(commits)) != len(commits):
             raise RuntimeError("empty or repeated history inventory")
         inventory = "\n".join(commits) + "\n"
         (output / "commits.txt").write_text(inventory)
@@ -226,7 +240,8 @@ def scan(source, head, output, config, binary, batch_size, timeout, jobs=1, fetc
             expected = f"mod\tgithub.com/zricethezav/gitleaks/v8\tv{VERSION}\t"
             if not any(line.strip().startswith(expected) for line in metadata.splitlines()) or "\n\t=>" in metadata:
                 raise RuntimeError(f"expected Gitleaks {VERSION}, got {installed}")
-        summary.update(sourceCommit=head, totalCommits=len(commits),
+        summary.update(sourceCommit=head, baseCommit=base, coverage="new-commits" if base is not None else "full-history",
+                       totalCommits=len(commits),
                        inventorySHA256=hashlib.sha256(inventory.encode()).hexdigest(),
                        configSHA256=hashlib.sha256(frozen_config.read_bytes()).hexdigest())
         write_json(output / "summary.json", summary)
@@ -283,6 +298,7 @@ def main():
     parser = Parser(description=__doc__)
     parser.add_argument("--source", type=Path, default=Path.cwd())
     parser.add_argument("--head", default="HEAD")
+    parser.add_argument("--base", help="scan all commits reachable from head but not this pinned base; omit for full history and tags")
     parser.add_argument("--fetch-remote", help="fetch complete history and tags before inventory, with bounded retries")
     parser.add_argument("--output-dir", type=Path, required=True)
     parser.add_argument("--config", type=Path, default=Path(".gitleaks.toml"))
@@ -303,7 +319,7 @@ def main():
     try:
         summary = scan(args.source.resolve(), args.head, args.output_dir.resolve(),
                        args.config.resolve(), args.gitleaks, args.batch_size, args.timeout,
-                       args.jobs, args.fetch_remote)
+                       args.jobs, args.fetch_remote, args.base)
     except OSError as exc:
         # Evidence persistence can itself fail (for example, a full disk).
         # No final coverage receipt is permission to report success.

@@ -156,6 +156,10 @@ const (
 	// CodeNotifyFailed: the outbound worker gave the delivery up, or it could
 	// not be handed over at all.
 	CodeNotifyFailed = "pipeline_notify_failed"
+	// SARIF delivery fails when publication cannot be established, or when
+	// GitHub has not confirmed ingestion within the report step's deadline.
+	CodeSARIFDeliveryFailed = "pipeline_sarif_delivery_failed"
+	CodeSARIFUndelivered    = "pipeline_sarif_undelivered"
 	// CodeNotifyUndelivered: the delivery had not arrived when the step's
 	// time ran out. It may still: the sentence says where it stood.
 	CodeNotifyUndelivered = "pipeline_notify_undelivered"
@@ -204,6 +208,8 @@ var codeClasses = map[string]Class{
 	CodeChannelNotAllowed:   ClassFailure,
 	CodeChannelInvalid:      ClassFailure,
 	CodeNotifyFailed:        ClassFailure,
+	CodeSARIFDeliveryFailed: ClassFailure,
+	CodeSARIFUndelivered:    ClassFailure,
 	CodeNotifyUndelivered:   ClassFailure,
 	CodeStepDiskExceeded:    ClassFailure,
 

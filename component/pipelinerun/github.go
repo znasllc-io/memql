@@ -152,6 +152,22 @@ func (g *packagesGitHub) Installations(ctx context.Context) ([]githubapp.AppInst
 	return c.Installations(ctx)
 }
 
+func (g *packagesGitHub) UploadSARIF(ctx context.Context, token, repository string, report githubapp.SARIFAnalysis) (githubapp.SARIFUpload, error) {
+	c, owner, name, err := g.target(repository)
+	if err != nil {
+		return githubapp.SARIFUpload{}, err
+	}
+	return c.UploadSARIF(ctx, token, owner, name, report)
+}
+
+func (g *packagesGitHub) SARIFUploadStatus(ctx context.Context, token, repository, id string) (githubapp.SARIFProcessing, error) {
+	c, owner, name, err := g.target(repository)
+	if err != nil {
+		return githubapp.SARIFProcessing{}, err
+	}
+	return c.SARIFUploadStatus(ctx, token, owner, name, id)
+}
+
 func (g *packagesGitHub) target(repository string) (*githubapp.Client, string, string, error) {
 	c, err := g.client()
 	if err != nil {

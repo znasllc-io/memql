@@ -91,8 +91,8 @@ func Validate(spec *Spec) *Refusal {
 	if spec.Workflow != "" && !workflowNameRe.MatchString(spec.Workflow) {
 		return Refuse(CodeStageInvalid, "workflow", "workflow must name an installed MemQL automation (letters, digits or underscores, starting with a letter, at most 128 characters).")
 	}
-	if spec.Schedule != "" && spec.Schedule != "daily" {
-		return Refuse(CodeStageInvalid, "schedule", "schedule must be empty or daily (one UTC run per day).")
+	if spec.Schedule != "" && spec.Schedule != "daily" && spec.Schedule != "weekly" {
+		return Refuse(CodeStageInvalid, "schedule", "schedule must be empty, daily or weekly.")
 	}
 	if len(spec.Stages) == 0 {
 		return Refuse(CodeStageInvalid, "", "The pipeline declares no stages.")
@@ -114,8 +114,8 @@ func Validate(spec *Spec) *Refusal {
 		}
 		earlier[stage.Name] = true
 	}
-	if spec.Schedule == "daily" && !hasScheduledStage(spec) {
-		return Refuse(CodeStageInvalid, "schedule", "schedule is daily but no stage opts in with on: [schedule].")
+	if spec.Schedule != "" && !hasScheduledStage(spec) {
+		return Refuse(CodeStageInvalid, "schedule", "schedule is declared but no stage opts in with on: [schedule].")
 	}
 	return nil
 }
@@ -188,6 +188,11 @@ func validateSelect(sel *Select) *Refusal {
 }
 
 func validateStage(spec *Spec, i int, stage StageSpec, earlier, declared map[string]bool) *Refusal {
+	if stage.Schedule != "" {
+		if (stage.Schedule != "daily" && stage.Schedule != "weekly") || spec.Schedule == "" || !slices.Contains(stage.On, string(EventSchedule)) {
+			return Refuse(CodeStageInvalid, stage.Name, "A stage schedule must be daily or weekly, with a pipeline schedule and on: [schedule].")
+		}
+	}
 	switch {
 	case stage.Name == "":
 		return Refuse(CodeStageInvalid, fmt.Sprintf("stages[%d]", i), "A stage has no name; every stage needs one.")
@@ -216,8 +221,8 @@ func validateStage(spec *Spec, i int, stage StageSpec, earlier, declared map[str
 			return Refuse(CodeEventUnknown, stage.Name, "Stage %q runs on %q, which is neither an event nor a mode; use %s.",
 				stage.Name, on, strings.Join(slices.Sorted(maps.Keys(stageOnValues)), ", "))
 		}
-		if on == string(EventSchedule) && spec.Schedule != "daily" {
-			return Refuse(CodeStageInvalid, stage.Name, "Stage %q opts into schedule, but the pipeline has no daily schedule.", stage.Name)
+		if on == string(EventSchedule) && spec.Schedule == "" {
+			return Refuse(CodeStageInvalid, stage.Name, "Stage %q opts into schedule, but the pipeline has no schedule.", stage.Name)
 		}
 	}
 
@@ -307,6 +312,10 @@ func validateStep(spec *Spec, stage string, j int, step StepSpec, seen map[strin
 			"Stage %q has two steps named %q; a step name must be unique within its stage.", stage, step.Name)
 	}
 	scope := stage + "/" + step.Name
+
+	if step.SARIF != nil {
+		return validateSARIFStep(spec, stage, step)
+	}
 
 	if strings.TrimSpace(step.Run) == "" && step.ImageBuild == nil {
 		return Refuse(CodeStepInvalid, scope, "Step %s has no command to run.", scope)

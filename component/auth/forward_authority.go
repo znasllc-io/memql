@@ -91,7 +91,7 @@ const (
 
 func knownForwardedClass(class string) bool {
 	switch class {
-	case ForwardedClassUser, ForwardedClassBadge, ForwardedClassPat,
+	case ForwardedClassUser, ForwardedClassBadge, ForwardedClassPat, RoleTestClass,
 		ForwardedClassLocalDev, ForwardedClassOperator, ForwardedClassSystem:
 		return true
 	default:
@@ -109,8 +109,11 @@ const canonicalUserIdPrefix = "v1:identity:user:"
 // forward. It carries the producer's ALREADY-RESOLVED, ALREADY-CLAMPED decision
 // -- not the inputs to one. The receiver verifies and binds it verbatim.
 type ForwardedAuthority struct {
-	Version string
-	Kind    ForwardedPrincipalKind
+	// RoleTestSessionID binds a temporary persona to shared, revocable state.
+	// It is an identifier, never the bearer credential.
+	RoleTestSessionID string
+	Version           string
+	Kind              ForwardedPrincipalKind
 
 	// The resolved AccessContext, field for field.
 	Subject      string
@@ -258,6 +261,12 @@ func VerifyForwardedAuthority(a ForwardedAuthority, now time.Time) (*AccessConte
 		return nil, fmt.Errorf("%w: class %q ceiling %q", ErrForwardStrayCeiling, a.CredentialClass, a.RoleCeiling)
 	}
 
+	if IsRoleTestUser(a.Subject) && a.CredentialClass != RoleTestClass {
+		return nil, ErrForwardMissingAuthority
+	}
+	if a.CredentialClass == RoleTestClass && (a.ExpiresAt.IsZero() || a.RoleTestSessionID == "" || !IsRoleTestUser(a.Subject) || a.Role == RoleOwner) {
+		return nil, ErrForwardMissingAuthority
+	}
 	// Expiry, for badge and any future expiring class alike. Same comparison as
 	// the direct path's badgeGate, so the two agree at the same instant.
 	if !a.ExpiresAt.IsZero() && !now.Before(a.ExpiresAt) {
@@ -265,10 +274,11 @@ func VerifyForwardedAuthority(a ForwardedAuthority, now time.Time) (*AccessConte
 	}
 
 	return &AccessContext{
-		UserId:       a.Subject,
-		PrimaryEmail: a.PrimaryEmail,
-		Role:         a.Role,
-		IdentityId:   a.IdentityId,
+		UserId:            a.Subject,
+		RoleTestSessionID: a.RoleTestSessionID,
+		PrimaryEmail:      a.PrimaryEmail,
+		Role:              a.Role,
+		IdentityId:        a.IdentityId,
 	}, nil
 }
 
@@ -349,23 +359,26 @@ func ForwardedAuthorityForUser(ac *AccessContext, class string, ceiling Role, ex
 	if class != ForwardedClassBadge {
 		// Never ship a ceiling the receiver will refuse as stray.
 		ceiling = ""
-		expiresAt = time.Time{}
+		if class != RoleTestClass {
+			expiresAt = time.Time{}
+		}
 	}
 	role := ac.Role
 	if !IsValidRole(role) {
 		role = RoleReader
 	}
 	return ForwardedAuthority{
-		Version:         ForwardedAuthorityVersion,
-		Kind:            ForwardedPrincipalUser,
-		Subject:         ac.UserId,
-		PrimaryEmail:    ac.PrimaryEmail,
-		Role:            role,
-		IdentityId:      ac.IdentityId,
-		CredentialClass: class,
-		RoleCeiling:     ceiling,
-		ExpiresAt:       expiresAt,
-		AssertedAt:      now,
+		Version:           ForwardedAuthorityVersion,
+		Kind:              ForwardedPrincipalUser,
+		Subject:           ac.UserId,
+		PrimaryEmail:      ac.PrimaryEmail,
+		Role:              role,
+		IdentityId:        ac.IdentityId,
+		RoleTestSessionID: ac.RoleTestSessionID,
+		CredentialClass:   class,
+		RoleCeiling:       ceiling,
+		ExpiresAt:         expiresAt,
+		AssertedAt:        now,
 	}, nil
 }
 

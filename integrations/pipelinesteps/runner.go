@@ -71,8 +71,11 @@ const (
 	quickCallTimeout = 10 * time.Second
 	// libraryPhaseTimeout bounds the owner's Library writes of one settled
 	// step -- its log and its artifacts -- under a context a late cancel
-	// cannot end, and that no other phase of settling shares.
-	libraryPhaseTimeout = 2 * time.Minute
+	// cannot end, and that no other phase of settling shares. Build outputs
+	// stream through the Kubernetes API and then to object storage; the former
+	// two-minute window expired on ordinary release artifacts before either
+	// transfer completed.
+	libraryPhaseTimeout = 15 * time.Minute
 	// persistTimeout bounds recording the outcome on the Job, retries
 	// included: a window of its own, so nothing spent before it is taken
 	// from it.
@@ -181,13 +184,13 @@ type Runner struct {
 	statusTrouble apiTrouble
 
 	// The isolation proof (isolation.go): the last verdict and the proof in
-	// flight, if any, guarded by isoMu; probeUpWait, probeEndWait and
-	// probeKubeletWait are probeUpTimeout, probeEndTimeout and
-	// probeKubeletTimeout.
+	// flight, if any, guarded by isoMu. Probe waits default to the bounded
+	// startup, holder readiness, connector and kubelet intervals in isolation.go.
 	isoMu            sync.Mutex
 	isoLast          IsolationVerdict
 	isoProof         *isolationProof
 	probeUpWait      time.Duration
+	probeReadyWait   time.Duration
 	probeEndWait     time.Duration
 	probeKubeletWait time.Duration
 }
@@ -232,6 +235,7 @@ func NewRunner(cfg Config, kube *Kube, sink func() LineSink, library LibraryStor
 		claims:           map[string]*step{},
 		statusTrouble:    apiTrouble{},
 		probeUpWait:      probeUpTimeout,
+		probeReadyWait:   probeReadyTimeout,
 		probeEndWait:     probeEndTimeout,
 		probeKubeletWait: probeKubeletTimeout,
 	}

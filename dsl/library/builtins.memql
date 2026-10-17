@@ -450,3 +450,25 @@ builtin libraryOwnedTrainingLessons {
  minimumSimilarity number!
  maxTokens int!
 }
+
+/// One manual, version-guarded lesson event. Never invoked by automatic mining.
+@sdk
+@args(profile="object")
+@executor("integration.library.saveTrainingLesson")
+builtin librarySaveTrainingLesson {
+ requestId string!
+ action enum("propose", "edit", "review", "reject", "enable", "retire")!
+ lessonId string
+ expectedReceipt string
+ conversationId string
+ turnId string
+ draft object
+ evaluationIds []string
+ reason string
+}
+
+/// Explicitly index an already reviewed lesson for future owned work.
+@sdk
+@args(profile="object")
+@executor("integration.library.indexTrainingLesson")
+builtin libraryIndexTrainingLesson { lessonId string! expectedReceipt string! }

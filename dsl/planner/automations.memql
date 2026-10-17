@@ -174,9 +174,13 @@ automation defaultWorkSpine {
    if candidate.similarity >= 0.82 { return builtin spineUseCandidate(handle: candidate.handle) }
   }
  }
- triage := builtin spineClassify()
- if triage.conversational && triage.workload != "quick" && triage.acknowledgement == "" {
-  builtin spineAcknowledge()
+ triage := builtin spineClassify(timeoutSeconds: 600)
+ // File delivery includes source assessment and composition beyond a direct reply.
+ if triage.conversational && triage.requiresFile && triage.workload == "quick" {
+  builtin spineSetWorkload(workload: "lookup")
+ }
+ if triage.conversational && (triage.workload != "quick" || triage.intent != "reply") && triage.acknowledgement == "" {
+  builtin spineAcknowledge(timeoutSeconds: 180)
  }
  route := logic workSpineRoute(triage: triage)
  if triage.requiresFile && !triage.hasEffects && route == "sectionable" {
@@ -254,10 +258,12 @@ automation workSpineDraftProgram {
  facts := builtin spineDraftFacts()
  inputHeading := "\n\nGoal input (JSON):\n"
  if facts.navigation { return builtin spineDraftAppend(kind: "navigation") }
+ if facts.quickReply { return builtin spineDraftAppend(kind: "quickReply", templateId: "workQuickReply", instruction: facts.goal) }
  if !facts.fanout {
   if facts.file && facts.research {
    builtin spineDraftAppend(kind: "research", inputHeading: inputHeading, instruction: facts.goal + "\nGather the evidence required for this deliverable using authorized capabilities. Preserve source references, uncertainties and the complete draft. Do not save the final file: the next step renders it from your result.")
   }
+  if facts.file && facts.conversational { builtin spineDraftAppend(kind: "fileEvidence", instruction: facts.goal, inputHeading: inputHeading) }
   return builtin spineDraftAppend(kind: facts.file ? "file" : "answer", instruction: facts.goal, inputHeading: inputHeading)
  }
  for section in facts.sections {
@@ -270,9 +276,11 @@ automation workSpineDraftProgram {
  }
  builtin spineDraftAppend(kind: "collect")
  if facts.file && facts.prose && facts.sections.any(section => section.deliver) {
+  if facts.conversational { builtin spineDraftAppend(kind: "fileEvidence", instruction: facts.goal, inputHeading: inputHeading) }
   return builtin spineDraftAppend(kind: "file", instruction: facts.goal, inputHeading: inputHeading, sectionKeys: facts.sections.where(section => section.deliver).select(section => section.name))
  }
  if facts.file || facts.intelligence {
+  if facts.file && facts.conversational { builtin spineDraftAppend(kind: "fileEvidence", instruction: facts.goal, inputHeading: inputHeading) }
   kind := facts.sections.any(section => section.dependent) ? "sections" : "independent sections"
   return builtin spineDraftAppend(kind: facts.file ? "file" : "answer", inputHeading: inputHeading, sectionsHeading: "\n\nCompleted sections:\n", instruction: facts.goal + "\n\nAssemble the completed " + kind + " into the requested deliverable. Verify completeness. " + facts.assembly)
  }

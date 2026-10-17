@@ -1,0 +1,34 @@
+# Fixed profile for a rootless builder inside a Kubernetes pod user namespace.
+# PROFILE_NAME is replaced with a name containing this file's SHA-256.
+# Mounts operate inside the nested user/mount namespace; no host mounts or
+# node capabilities are passed to the builder. Seccomp separately denies
+# ptrace, process_vm_*, BPF and other process-inspection/kernel interfaces.
+profile PROFILE_NAME flags=(attach_disconnected,mediate_deleted) {
+  file,
+  network inet,
+  network inet6,
+  network unix,
+  # runc configures loopback inside the frontend's private network namespace.
+  # This is netlink control traffic, not a grant of raw IP/packet sockets.
+  network netlink raw,
+  capability,
+  userns,
+  mount,
+  umount,
+  pivot_root,
+  signal (receive) peer=unconfined,
+  signal (receive) peer=runc,
+  signal (receive) peer=crun,
+  signal (send,receive) peer=PROFILE_NAME,
+  # runc must read its own child mount namespace while creating the sandbox.
+  # The seccomp policy still denies ptrace and process_vm_* system calls.
+  ptrace (read,readby) peer=PROFILE_NAME,
+  ptrace (readby,tracedby) peer=unconfined,
+  ptrace (readby,tracedby) peer=runc,
+  deny /proc/sys/** w,
+  deny /proc/sysrq-trigger rwklx,
+  deny /proc/kcore rwklx,
+  deny /sys/** wklx,
+  deny /sys/firmware/** r,
+  deny /sys/kernel/security/** r,
+}

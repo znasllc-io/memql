@@ -1519,6 +1519,9 @@ func ComposeRunRecipeBuild(args ComposeRunRecipeArgs) string {
 
 // CreateGoal -- Accept a goal and start work on it. Opens a v1:work:goal owned by the caller and its first v1:work:run in `compiling`, then dispatches compile: catalog exact match, then near-match with a gap list, then the cheap triage. Returns {goalId, runId}. A goal that fully matches the catalog reaches no model at all.
 type CreateGoalArgs struct {
+	// Where this goal's tools execute. Auto selects by capabilities and capacity. A change from an explicit choice requires recorded permission. Computer access still requires Cockpit and scoped access permission. Child goals inherit this choice.
+	// Enum: auto | workbench | computer
+	Destination string
 	// Human-selected execution ceiling: no federation provider may serve any call of this goal, including embeddings, step overrides and fallback. Child goals inherit it and cannot relax it.
 	NoPaidProviders    bool
 	NoPaidProvidersSet bool // set true to send noPaidProviders; required because zero-value bool is ambiguous
@@ -1550,7 +1553,14 @@ func (qc *QueryClient) CreateGoal(ctx context.Context, args CreateGoalArgs) (*Re
 func CreateGoalBuild(args CreateGoalArgs) string {
 	var b strings.Builder
 	b.WriteString("builtin createGoal(")
+	if args.Destination != "" {
+		b.WriteString("destination: ")
+		b.WriteString(quoteMemQL(args.Destination))
+	}
 	if args.NoPaidProvidersSet {
+		if b.Len() > 19 {
+			b.WriteString(", ")
+		}
 		b.WriteString("noPaidProviders: ")
 		b.WriteString(fmt.Sprintf("%v", args.NoPaidProviders))
 	}
@@ -3557,6 +3567,32 @@ func LibraryForkDocumentVersionBuild(args LibraryForkDocumentVersionArgs) string
 	return b.String()
 }
 
+// LibraryIndexTrainingLesson -- Explicitly index an already reviewed lesson for future owned work.
+type LibraryIndexTrainingLessonArgs struct {
+	LessonId        string
+	ExpectedReceipt string
+}
+
+// LibraryIndexTrainingLesson calls the engine builtin libraryIndexTrainingLesson.
+func (qc *QueryClient) LibraryIndexTrainingLesson(ctx context.Context, args LibraryIndexTrainingLessonArgs) (*Result, error) {
+	call := LibraryIndexTrainingLessonBuild(args)
+	return qc.executeNamed(ctx, "libraryIndexTrainingLesson", call)
+}
+
+func LibraryIndexTrainingLessonBuild(args LibraryIndexTrainingLessonArgs) string {
+	var b strings.Builder
+	b.WriteString("builtin libraryIndexTrainingLesson(")
+	b.WriteString("lessonId: ")
+	b.WriteString(quoteMemQL(args.LessonId))
+	if b.Len() > 35 {
+		b.WriteString(", ")
+	}
+	b.WriteString("expectedReceipt: ")
+	b.WriteString(quoteMemQL(args.ExpectedReceipt))
+	b.WriteString(")")
+	return b.String()
+}
+
 // LibraryModifyRevisionItem -- Revise one proposal item with AI; retain every other item unchanged.
 type LibraryModifyRevisionItemArgs struct {
 	RequestId    string
@@ -3699,6 +3735,89 @@ func LibraryRequestDocumentRevisionBuild(args LibraryRequestDocumentRevisionArgs
 	}
 	b.WriteString("requestId: ")
 	b.WriteString(quoteMemQL(args.RequestId))
+	b.WriteString(")")
+	return b.String()
+}
+
+// LibrarySaveTrainingLesson -- One manual, version-guarded lesson event. Never invoked by automatic mining.
+type LibrarySaveTrainingLessonArgs struct {
+	RequestId string
+	// Enum: propose | edit | review | reject | enable | retire
+	Action          string
+	LessonId        string
+	ExpectedReceipt string
+	ConversationId  string
+	TurnId          string
+	Draft           map[string]any
+	EvaluationIds   []string
+	Reason          string
+}
+
+// LibrarySaveTrainingLesson calls the engine builtin librarySaveTrainingLesson.
+func (qc *QueryClient) LibrarySaveTrainingLesson(ctx context.Context, args LibrarySaveTrainingLessonArgs) (*Result, error) {
+	call := LibrarySaveTrainingLessonBuild(args)
+	return qc.executeNamed(ctx, "librarySaveTrainingLesson", call)
+}
+
+func LibrarySaveTrainingLessonBuild(args LibrarySaveTrainingLessonArgs) string {
+	var b strings.Builder
+	b.WriteString("builtin librarySaveTrainingLesson(")
+	b.WriteString("requestId: ")
+	b.WriteString(quoteMemQL(args.RequestId))
+	if b.Len() > 34 {
+		b.WriteString(", ")
+	}
+	b.WriteString("action: ")
+	b.WriteString(quoteMemQL(args.Action))
+	if args.LessonId != "" {
+		if b.Len() > 34 {
+			b.WriteString(", ")
+		}
+		b.WriteString("lessonId: ")
+		b.WriteString(quoteMemQL(args.LessonId))
+	}
+	if args.ExpectedReceipt != "" {
+		if b.Len() > 34 {
+			b.WriteString(", ")
+		}
+		b.WriteString("expectedReceipt: ")
+		b.WriteString(quoteMemQL(args.ExpectedReceipt))
+	}
+	if args.ConversationId != "" {
+		if b.Len() > 34 {
+			b.WriteString(", ")
+		}
+		b.WriteString("conversationId: ")
+		b.WriteString(quoteMemQL(args.ConversationId))
+	}
+	if args.TurnId != "" {
+		if b.Len() > 34 {
+			b.WriteString(", ")
+		}
+		b.WriteString("turnId: ")
+		b.WriteString(quoteMemQL(args.TurnId))
+	}
+	if args.Draft != nil {
+		if b.Len() > 34 {
+			b.WriteString(", ")
+		}
+		b.WriteString("draft: ")
+		b.WriteString(renderMemQLValue(args.Draft))
+	}
+	if args.EvaluationIds != nil {
+		if b.Len() > 34 {
+			b.WriteString(", ")
+		}
+		b.WriteString("evaluationIds: ")
+		b.WriteString(renderMemQLValue(args.EvaluationIds))
+	}
+	if args.Reason != "" {
+		if b.Len() > 34 {
+			b.WriteString(", ")
+		}
+		b.WriteString("reason: ")
+		b.WriteString(quoteMemQL(args.Reason))
+	}
 	b.WriteString(")")
 	return b.String()
 }
@@ -4753,6 +4872,58 @@ func PipelinesPreviewBuild(args PipelinesPreviewArgs) string {
 	return b.String()
 }
 
+// PipelinesPublishSARIF -- Publish one retained SARIF artifact from a successful scanner in the caller's native pipeline, including a run that is still active or failed elsewhere. Source/ref/bytes come from verified journal and storage receipts, never from a caller-supplied URL or report. Returns publicationId, state, uploadId and sha256. Only complete proves ingestion; accepted is pending. Calling again observes the same upload. An uncertain or rejected upload is retained for inspection and never silently posted again. Report selection, polling and failure handling belong to the calling automation.
+type PipelinesPublishSARIFArgs struct {
+	RunId   string
+	StepKey string
+	Path    string
+}
+
+// PipelinesPublishSARIF calls the engine builtin pipelinesPublishSARIF.
+func (qc *QueryClient) PipelinesPublishSARIF(ctx context.Context, args PipelinesPublishSARIFArgs) (*Result, error) {
+	call := PipelinesPublishSARIFBuild(args)
+	return qc.executeNamed(ctx, "pipelinesPublishSARIF", call)
+}
+
+func PipelinesPublishSARIFBuild(args PipelinesPublishSARIFArgs) string {
+	var b strings.Builder
+	b.WriteString("builtin pipelinesPublishSARIF(")
+	b.WriteString("runId: ")
+	b.WriteString(quoteMemQL(args.RunId))
+	if b.Len() > 30 {
+		b.WriteString(", ")
+	}
+	b.WriteString("stepKey: ")
+	b.WriteString(quoteMemQL(args.StepKey))
+	if b.Len() > 30 {
+		b.WriteString(", ")
+	}
+	b.WriteString("path: ")
+	b.WriteString(quoteMemQL(args.Path))
+	b.WriteString(")")
+	return b.String()
+}
+
+// PipelinesReadSARIF -- Read a caller-owned upload receipt, refreshing pending ingestion from GitHub. A terminal receipt survives ordinary artifact retention. This never uploads.
+type PipelinesReadSARIFArgs struct {
+	PublicationId string
+}
+
+// PipelinesReadSARIF calls the engine builtin pipelinesReadSARIF.
+func (qc *QueryClient) PipelinesReadSARIF(ctx context.Context, args PipelinesReadSARIFArgs) (*Result, error) {
+	call := PipelinesReadSARIFBuild(args)
+	return qc.executeNamed(ctx, "pipelinesReadSARIF", call)
+}
+
+func PipelinesReadSARIFBuild(args PipelinesReadSARIFArgs) string {
+	var b strings.Builder
+	b.WriteString("builtin pipelinesReadSARIF(")
+	b.WriteString("publicationId: ")
+	b.WriteString(quoteMemQL(args.PublicationId))
+	b.WriteString(")")
+	return b.String()
+}
+
 // PipelinesRerun -- Re-run one of the caller's pipeline runs: open the next attempt of its run key with the original's mode and event, trigger rerun, rerunOf naming the original, and a new check run. With failedOnly, only what did not pass runs again: every step the original passed, with the same package slice, is carried over as skipped pipeline_passed_earlier, and a run with no failed or cancelled step is refused pipeline_nothing_to_rerun. The original stays exactly as it ended.
 type PipelinesRerunArgs struct {
 	// The v1:pipelines:run to re-run. Must be the caller's own.
@@ -4810,6 +4981,34 @@ func PipelinesRunLatestBuild(args PipelinesRunLatestArgs) string {
 		b.WriteString("branch: ")
 		b.WriteString(quoteMemQL(args.Branch))
 	}
+	b.WriteString(")")
+	return b.String()
+}
+
+// PipelinesRunRelease -- Start a full release build at an existing tag of the caller's connected pipeline. Resolves the immutable source commit through the source owner's current GitHub grant and supplies the tag as MEMQL_VERSION. Includes the manifest's release stages. Creates no tag, GitHub release, candidate approval or publication. A repeated request or later release webhook recovers the same attempt; use pipelinesRerun to repeat a completed attempt. A second tag for a commit already recorded under another release version is refused.
+type PipelinesRunReleaseArgs struct {
+	// The caller's connected v1:pipelines:pipeline.
+	PipelineId string
+	// An existing repository tag, such as v1.2.3, without refs/tags/.
+	Tag string
+}
+
+// PipelinesRunRelease calls the engine builtin pipelinesRunRelease.
+func (qc *QueryClient) PipelinesRunRelease(ctx context.Context, args PipelinesRunReleaseArgs) (*Result, error) {
+	call := PipelinesRunReleaseBuild(args)
+	return qc.executeNamed(ctx, "pipelinesRunRelease", call)
+}
+
+func PipelinesRunReleaseBuild(args PipelinesRunReleaseArgs) string {
+	var b strings.Builder
+	b.WriteString("builtin pipelinesRunRelease(")
+	b.WriteString("pipelineId: ")
+	b.WriteString(quoteMemQL(args.PipelineId))
+	if b.Len() > 28 {
+		b.WriteString(", ")
+	}
+	b.WriteString("tag: ")
+	b.WriteString(quoteMemQL(args.Tag))
 	b.WriteString(")")
 	return b.String()
 }

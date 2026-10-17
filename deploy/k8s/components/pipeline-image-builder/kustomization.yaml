@@ -10,3 +10,4 @@ configMapGenerator:
     files:
       - rootless-buildkit-v1-amd64.json
       - rootless-buildkit-v1-arm64.json
+      - rootless-buildkit-v1.apparmor

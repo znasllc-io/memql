@@ -22,7 +22,7 @@ func testLibraryRevisionFilesUseRealVersionStoreAcrossReplicas(t *testing.T, rep
 		return
 	}
 	owner := fmt.Sprintf("revision-file-%d", time.Now().UnixNano())
-	ctx := auth.ContextWithAccess(auth.ContextWithToken(context.Background(), &auth.TokenInfo{Subject: owner}), &auth.AccessContext{UserId: owner, Role: auth.RoleWriter})
+	ctx := auth.ContextWithAccess(auth.ContextWithToken(context.Background(), &auth.TokenInfo{Subject: owner}), &auth.AccessContext{UserId: owner, Role: auth.RoleReader})
 	stores := make([]*server.EngineLibraryStore, 0, 2)
 	for n := 0; n < 2; n++ {
 		engine, db := replicas.engines[n], replicas.databases[n]
@@ -39,8 +39,8 @@ func testLibraryRevisionFilesUseRealVersionStoreAcrossReplicas(t *testing.T, rep
 	}
 	upload := &revisionFileFixture{}
 	write := library.RevisionFileWrite{FileID: "v1:library:file:" + file, Version: 1, BlobURL: original, OperationID: "approved-run", Content: []byte("Approved bytes")}
-	for _, store := range stores {
-		adapter := &libraryRevisionFiles{store: store, uploader: upload, bucket: "library"}
+	for n, store := range stores {
+		adapter := &libraryRevisionFiles{store: store, uploader: upload, bucket: "library", authority: replicas.engines[n]}
 		if err := adapter.SaveRevision(ctx, write); err != nil {
 			t.Fatal(err)
 		}

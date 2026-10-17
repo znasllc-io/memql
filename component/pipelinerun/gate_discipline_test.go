@@ -140,7 +140,7 @@ func TestEveryGatedPathKeepsTheGateDiscipline(t *testing.T) {
 
 	t.Run("a release resolves its tag and opens", func(t *testing.T) {
 		dh.github.mu.Lock()
-		dh.github.commits[repoName+"@tags/v1.0.0"] = headAnswer{SHA: shaC}
+		dh.github.commits[repoName+"@refs/tags/v1.0.0"] = headAnswer{SHA: shaC}
 		dh.github.mu.Unlock()
 		res := trigger(t, dh.harness, "release", "d-rel", releaseDelivery(t, "v1.0.0", testInstallation))
 		if len(res.Opened) != 1 {

@@ -17,6 +17,7 @@ import (
 	"github.com/znasllc-io/memql/component/auth"
 	"github.com/znasllc-io/memql/component/automations"
 	"github.com/znasllc-io/memql/component/automations/steps"
+	"github.com/znasllc-io/memql/component/database"
 	"github.com/znasllc-io/memql/component/database/dbtest"
 	memorynodes "github.com/znasllc-io/memql/component/database/memory-nodes"
 	"github.com/znasllc-io/memql/component/memql"
@@ -46,6 +47,12 @@ func workTemplateDBEngineAndDB(t *testing.T) (*memql.MemQLEngine, *bun.DB) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	gate, err := database.NewGatePool(dsn, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = gate.Close() })
+	e.SetAskCoordinationPool(func() *sql.DB { return gate })
 	e.Logger = slog.New(slog.NewTextHandler(io.Discard, nil))
 	if err = e.Init(memorynodes.DefaultRegistry()); err != nil {
 		t.Fatal(err)

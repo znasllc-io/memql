@@ -230,3 +230,23 @@ func TestRecoveryPermissionBindsExactOriginalOperation(t *testing.T) {
 		}
 	}
 }
+
+func TestOnlyAProvenQueueRefusalMayOfferTheComputer(t *testing.T) {
+	for _, tc := range []struct {
+		result string
+		want   bool
+	}{
+		{`{"ok":false,"action":"exec","errorCode":"workbench_queue_full"}`, true},
+		{`{"ok":true,"action":"exec","errorCode":"workbench_queue_full"}`, false},
+		{`{"ok":false,"errorCode":"tool_outcome_unknown"}`, false},
+		{`{"ok":false,"errorCode":"timeout"}`, false},
+	} {
+		plan, ok := planWorkbenchReroute(tc.result, hostArgs(), testTurn())
+		if ok != tc.want {
+			t.Fatalf("%s: got %v", tc.result, ok)
+		}
+		if ok && (len(plan.Mismatch.UnmetNeeds) != 1 || plan.Mismatch.UnmetNeeds[0] != "available_capacity") {
+			t.Fatalf("lost capacity reason: %+v", plan)
+		}
+	}
+}

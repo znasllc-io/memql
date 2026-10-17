@@ -11,7 +11,7 @@ import { useNow } from "../../../kit/useNow";
 import { machineFromRow, type MachineRow } from "../rows";
 import { useMachineWrites } from "../machines/useMachineWrites";
 import { useModelPulls } from "../machines/useModelPulls";
-import { machineModelsFrom } from "../machines/models";
+import { isChatModel, machineModelsFrom } from "../machines/models";
 import {
   EMPTY_DRAFT,
   barFor,
@@ -350,7 +350,7 @@ export function useAddMachineFlow(): AddMachineFlow {
     })),
     [draft, machine, beats, now, pulls.live, failedPull, pulls.feedError, pulls.loading],
   );
-  const chatModel = machineModelsFrom(machine?.reportedLabels ?? {}).find(model => !model.embeddings)?.modelId ?? "";
+  const chatModel = machineModelsFrom(machine?.reportedLabels ?? {}).find(isChatModel)?.modelId ?? "";
   const { response, retry: retryResponse } = useModelResponse(
     active && draft.inference ? machine?.id ?? "" : "",
     chatModel,

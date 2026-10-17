@@ -1,3 +1,6 @@
+import { isRoleTestTab } from "../auth/roleTest";
+import { InMemoryResumeStore } from "../items/uploadResume";
+import { RoleTestBanner } from "../auth/RoleTestBanner";
 import { StorageHealthProvider, StorageWarning } from "../cluster/storage/StorageHealth";
 import { AskNavigator } from "../ask/AskNavigator";
 import { SharedExternalConnectionsProvider } from "../modules/connections/useExternalConnections";
@@ -95,10 +98,10 @@ export function Shell({
 
   const [viewport, setViewport] = useState(() => ({
     w: window.innerWidth,
-    h: window.innerHeight,
+    h: window.innerHeight - (isRoleTestTab() ? 64 : 0),
   }));
   useEffect(() => {
-    const onResize = () => setViewport({ w: window.innerWidth, h: window.innerHeight });
+    const onResize = () => setViewport({ w: window.innerWidth, h: window.innerHeight - (isRoleTestTab() ? 64 : 0) });
     window.addEventListener("resize", onResize);
     return () => window.removeEventListener("resize", onResize);
   }, []);
@@ -134,6 +137,7 @@ export function Shell({
           token. */}
       <OsConnectionProvider authSource={source} enabled={!ports.disableConnection}>
         <SessionScope access={access} config={config}>
+          <RoleTestBanner />
         {/* WHAT THIS CLUSTER STILL NEEDS SET UP, read once for the three
             surfaces that ask (epic memql#5118). Above the desk, because the
             gate below renders instead of it and the presence effect inside it
@@ -167,6 +171,7 @@ export function Shell({
                   <div
       className="os-root"
       data-os-root
+      data-role-test={isRoleTestTab() || undefined}
       data-layout={layout}
       onContextMenu={suppressBrowserMenu}
     >
@@ -338,7 +343,7 @@ function ShellTransports({
     };
   }, [ports.askVoice, connection]);
   const uploads = useMemo<UploadProvider>(
-    () => ports.uploads ?? new EdgeUploadProvider(() => source.bearer()),
+    () => ports.uploads ?? new EdgeUploadProvider(() => source.bearer(), undefined, undefined, isRoleTestTab() ? { resume: new InMemoryResumeStore() } : {}),
     [ports.uploads, source],
   );
   // The desktop store, which is the local one until there is a cluster to
@@ -356,8 +361,9 @@ function ShellTransports({
   // does not restart the resolve-then-write sequence.
   const desktopStore = useMemo<DesktopStore>(() => {
     if (ports.store) return ports.store;
-    if (connection === null) return new LocalDesktopStore();
-    return new GraphDesktopStore(new LocalDesktopStore(), new SdkDesktopGateway(connection));
+    const fallback = new LocalDesktopStore(isRoleTestTab() ? null : undefined);
+    if (connection === null) return fallback;
+    return new GraphDesktopStore(fallback, new SdkDesktopGateway(connection));
   }, [ports.store, connection]);
   return (
     <AskProvider transport={askTransport} voice={askVoice} availability={askAvailability}>
@@ -425,6 +431,7 @@ function DesktopChrome({
     <div
       className="os-root"
       data-os-root
+      data-role-test={isRoleTestTab() || undefined}
       data-layout={layout}
       onContextMenu={suppressBrowserMenu}
     >

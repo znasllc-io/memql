@@ -544,6 +544,12 @@ const (
 	CodePipelineNotifyUndelivered = "pipeline_notify_undelivered"
 )
 
+// Security reports fail the pipeline when ingestion cannot be established.
+const (
+	CodePipelineSARIFDeliveryFailed = "pipeline_sarif_delivery_failed"
+	CodePipelineSARIFUndelivered    = "pipeline_sarif_undelivered"
+)
+
 // Refusal is an analysis or pipeline failure carrying a stable Code.
 //
 // It is an error so it can travel the ordinary Go path, and it carries the

@@ -85,7 +85,7 @@ func TestBackgroundAcknowledgementRepairIsBoundedAndDoesNotReclassify(t *testing
 			require.Equal(t, []string{"goalComplexityTriage", "workAcknowledgement"}, engine.aiCalls)
 			require.Equal(t, 2, out.ModelCalls)
 			require.Equal(t, req.Statement, engine.aiData[1]["goal"])
-			require.WithinDuration(t, time.Now().Add(15*time.Second), engine.deadlines[1], time.Second)
+			require.WithinDuration(t, time.Now().Add(180*time.Second), engine.deadlines[1], time.Second)
 		})
 	}
 }
@@ -124,6 +124,31 @@ func TestAcknowledgementFailureNeverLoopsOrManufacturesProse(t *testing.T) {
 			require.NoError(t, err)
 			require.Empty(t, out.Acknowledgement)
 			require.Len(t, engine.aiCalls, test.calls)
+		})
+	}
+}
+
+func TestShortActionsStillReceiveAnAcknowledgement(t *testing.T) {
+	for _, test := range []struct {
+		name     string
+		file     bool
+		workload string
+	}{
+		{"short action", false, "quick"},
+		{"short file", true, "lookup"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			engine := &acknowledgementTestEngine{countingCompileEngine: &countingCompileEngine{triage: map[string]any{
+				"complexity": "trivial", "intent": "task", "requiresFile": test.file, "fileFormat": "markdown", "fileName": "coffee.md", "workload": "quick", "workTitle": "Coffee notes",
+			}}, repair: map[string]any{"acknowledgement": "I’ll prepare the coffee notes you requested."}}
+			req := compileReq()
+			req.Input = map[string]any{"conversation": map[string]any{"messages": []any{}}}
+			out, err := (&PlannerAgentLoop{engine: engine}).CompileGoalForRun(context.Background(), req, nil, realSandbox{})
+			require.NoError(t, err)
+			require.Equal(t, test.workload, out.Workload)
+			require.False(t, out.Reply)
+			require.Equal(t, "I’ll prepare the coffee notes you requested.", out.Acknowledgement)
+			require.Equal(t, []string{"goalComplexityTriage", "workAcknowledgement"}, engine.aiCalls)
 		})
 	}
 }

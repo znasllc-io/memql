@@ -193,13 +193,20 @@ builtin spineUseCandidate {
 /// A bounded operation inside an authorized work.spine/1 planning scope.
 @executor("integration.planner.spineClassify")
 builtin spineClassify {
+ timeoutSeconds int
+}
 
+/// Record the workflow-selected effort estimate; declared run ceilings remain binding.
+@executor("integration.planner.spineSetWorkload")
+@args(profile="object")
+builtin spineSetWorkload {
+ workload enum("quick", "lookup", "research", "project")!
 }
 
 /// A bounded operation inside an authorized work.spine/1 planning scope.
 @executor("integration.planner.spineAcknowledge")
 builtin spineAcknowledge {
-
+ timeoutSeconds int
 }
 
 /// Refine document sections before execution. Native bounds validate each output and preserve the delivery contract.

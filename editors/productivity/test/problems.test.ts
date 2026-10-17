@@ -6,6 +6,15 @@ import { configureProblems, diagnosticText, ProblemReporter, ReportedError, User
 import { setProblemOutput, showProblem } from "../src/problemUI.js";
 import type { EditorConnectionAPI } from "../../vscode/src/connection/api.js";
 
+test("WebKit frame-only stacks retain the failure and its cause with secrets redacted", () => {
+  const error = new Error("Unable to read this file (404).", { cause: new Error("request failed token=private-value") });
+  error.stack = "@";
+  const diagnostic = diagnosticText(error);
+  assert.match(diagnostic, /^Error: Unable to read this file \(404\)\./);
+  assert.match(diagnostic, /Caused by: request failed token=\[redacted\]/);
+  assert.doesNotMatch(diagnostic, /private-value/);
+});
+
 test("unexpected failures give safe messages and searchable, redacted diagnostics", async () => {
   const calls: any[] = [], output: string[] = [];
   const lease = {domain:"example.test",name:"test",generation:1};

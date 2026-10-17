@@ -22,7 +22,11 @@ import (
 // It creates only a disposable namespace on an explicitly selected local k3d
 // context. Neither the current kubectl context nor any mesh workload changes.
 func TestIsolationProofAgainstLocalNetworkPolicy(t *testing.T) {
-	ctx, cluster, ns, kubectl := localPipelineControls(t)
+	isolationProofAgainstNetworkPolicy(t, localPipelineControls)
+}
+
+func isolationProofAgainstNetworkPolicy(t *testing.T, controls pipelineTestControls) {
+	ctx, cluster, ns, kubectl := controls(t)
 	root := filepath.Join("..", "..", "deploy", "k8s", "components", "pipelines")
 	apply := func(file string) {
 		t.Helper()

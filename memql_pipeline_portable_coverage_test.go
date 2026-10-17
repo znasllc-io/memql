@@ -171,17 +171,18 @@ func TestEngineSecurityScansDoNotTurnFindingsIntoSuccess(t *testing.T) {
 		if refusal != nil {
 			t.Fatal(refusal)
 		}
-		wantStage := "secrets-history"
-		// The history helper fetches tags and unshallows with bounded retries;
-		// its real-Git tests prove that incomplete history cannot reach scanning.
-		// Keep the manifest wired to that fetch, not just to a local inventory.
-		wantCommands := []string{`--fetch-remote="https://github.com/${MEMQL_REPOSITORY}.git"`, `--head="$MEMQL_SHA"`, "python3 scripts/ci/gitleaks-history.py", "--jobs=4", "--batch-size=1", "--timeout=20700"}
-		forbidden := "gitleaks dir ."
-		if event == pipelines.EventPullRequest {
-			wantStage = "secrets-current"
-			wantCommands = []string{"--redact=100", "gitleaks dir ."}
-			forbidden = "gitleaks-history.py"
+		if event == pipelines.EventRelease {
+			for _, step := range plan.Steps() {
+				if step.Name == "gitleaks" {
+					t.Fatal("release qualification repeated the deep scan; the same commit is covered by its push scan and full history runs weekly")
+				}
+			}
+			continue
 		}
+		wantStage := "secrets-current"
+		wantCommands := []string{`--fetch-remote="https://github.com/${MEMQL_REPOSITORY}.git"`, `--head="$MEMQL_SHA"`, "python3 scripts/ci/gitleaks-history.py", "--jobs=3", "--batch-size=1"}
+		wantTimeout := 30 * 60
+		wantCommands = append(wantCommands, `--base="$MEMQL_BASE_SHA"`, "--timeout=1500")
 		count := 0
 		for _, step := range plan.Steps() {
 			if step.Name != "gitleaks" {
@@ -191,7 +192,7 @@ func TestEngineSecurityScansDoNotTurnFindingsIntoSuccess(t *testing.T) {
 			if step.Stage != wantStage || !step.RunAfterFailure || step.Skip != nil || len(step.Artifacts) == 0 || strings.Contains(step.Run, "|| true") {
 				t.Fatalf("%s selects the wrong scan, skips it, discards reports or ignores failure: %+v", event, step)
 			}
-			if strings.Contains(step.Run, "MEMQL_EVENT") || strings.Contains(step.Run, forbidden) {
+			if strings.Contains(step.Run, "MEMQL_EVENT") || strings.Contains(step.Run, "gitleaks dir .") {
 				t.Fatalf("%s hides scan selection inside the command", event)
 			}
 			for _, need := range append(wantCommands, "@v8.30.1") {
@@ -199,16 +200,33 @@ func TestEngineSecurityScansDoNotTurnFindingsIntoSuccess(t *testing.T) {
 					t.Errorf("%s scan omits %s", event, need)
 				}
 			}
-			if event != pipelines.EventPullRequest && (step.CPUMilli != 4000 || step.MemoryMiB != 6144) {
+			if step.CPUMilli != 3000 || step.MemoryMiB != 6144 {
 				t.Fatal("history scan allocation differs from its bounded parallel rehearsal")
 			}
-			if event != pipelines.EventPullRequest && step.TimeoutSeconds != 6*60*60 {
+			if step.TimeoutSeconds != wantTimeout {
 				t.Fatal("history scan must declare the measured long-workload budget explicitly")
 			}
 		}
 		if count != 1 {
 			t.Fatalf("%s plans %d secret scans, want exactly one", event, count)
 		}
+	}
+	weekly, refusal := compileEngineCadence(spec, graph, pipelines.EventSchedule, nil, "weekly")
+	if refusal != nil {
+		t.Fatal(refusal)
+	}
+	deepScans := 0
+	for _, step := range weekly.Steps() {
+		if step.Name != "gitleaks" {
+			continue
+		}
+		deepScans++
+		if step.Stage != "analysis" || step.TimeoutSeconds != 6*60*60 || !strings.Contains(step.Run, "--timeout=20700") || !strings.Contains(step.Run, "--batch-size=32") || strings.Contains(step.Run, "--base=") {
+			t.Fatalf("weekly full-history scan has the wrong scope or budget: %+v", step)
+		}
+	}
+	if deepScans != 1 {
+		t.Fatalf("weekly audit plans %d full-history secret scans, want 1", deepScans)
 	}
 	vuln, found := engineDeclaredStep(spec, "go-vulnerabilities")
 	if !found || len(vuln.Artifacts) == 0 || strings.Contains(vuln.Run, "|| true") {

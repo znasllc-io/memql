@@ -6,7 +6,6 @@ import (
 	"bytes"
 	"compress/gzip"
 	"context"
-	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -41,7 +40,7 @@ import (
 // gives it; its output streams back as chunks, which become the step's log
 // through the same Capture the cluster's runner uses -- masked, stored under
 // the run, archived to the Library, tailed -- and its artifacts come back
-// packed in the result, read within the same limits.
+// in bounded data chunks, verified against the terminal size and digest.
 //
 // Agent-tagged: the dispatcher is.
 
@@ -119,9 +118,10 @@ func NewFleet(cfg Config, d FleetDispatcher, library LibraryStore, tokens TokenM
 
 // fleetOutput is the cockpit's pipeline_step result.
 type fleetOutput struct {
-	ExitCode           *int   `json:"exitCode"`
-	DurationMs         int64  `json:"durationMs"`
-	ArtifactsTgzBase64 string `json:"artifactsTgzBase64"`
+	ExitCode               *int   `json:"exitCode"`
+	DurationMs             int64  `json:"durationMs"`
+	ArtifactsArchiveBytes  int64  `json:"artifactsArchiveBytes"`
+	ArtifactsArchiveSHA256 string `json:"artifactsArchiveSHA256"`
 	// ArtifactsMissing is the machine's word on which declared paths
 	// contributed no file; nil when its answer carries none. It is read only
 	// when no archive arrived: from an archive, which declared paths matched
@@ -191,14 +191,24 @@ func (f *Fleet) RunStep(ctx context.Context, req pl.StepRequest, run StepRun) (p
 	// (pl.MaskSecrets: every form of every secret, overlaps as one span).
 	mask := capture.Mask
 	lines := &fleetLines{capture: capture, pending: map[string][]byte{}}
+	maxArtifactBytes := min(f.cfg.ArtifactMaxBytes, fleetArtifactArchiveBytes)
+	artifacts, err := newFleetArtifactStream(filepath.Join(dir, "artifacts.tar.gz"), maxArtifactBytes+maxArtifactBytes/64+extractStreamSlack)
+	if err != nil {
+		return failedResult(pl.CodeArtifactUnavailable, "The artifact stream could not be opened on this node."), nil
+	}
+	defer artifacts.close()
 
 	started := f.now()
-	result, stopped, err := f.dispatchWhenCapacityAvailable(ctx, req, &run, token, capture, lines.chunk)
+	result, stopped, err := f.dispatchWhenCapacityAvailable(ctx, req, &run, token, capture, func(message *nodev1.WorkerForwardStream) {
+		lines.chunk(message)
+		artifacts.chunk(message)
+	})
 	finished := f.now()
 	// The machine's last partial lines are output; a chunk that arrives after
 	// this -- the dispatcher stopped waiting on a timeout or a cancel -- is
 	// dropped rather than racing the archive.
 	lines.close()
+	artifacts.seal()
 	if stopped != nil {
 		return *stopped, nil
 	}
@@ -232,7 +242,7 @@ func (f *Fleet) RunStep(ctx context.Context, req pl.StepRequest, run StepRun) (p
 	if _, archive, read := files.closeLog(capture, &res, notes, completeLogNote(f.cfg.LogStoreMaxLines)); read {
 		files.fileLog(libCtx, archive, &res, notes)
 	}
-	f.storeReturnedArtifacts(libCtx, files, out, &res, notes)
+	f.storeReturnedArtifacts(libCtx, files, out, artifacts, &res, notes)
 	fitOutcome(&res, notes)
 	return res, nil
 }
@@ -500,7 +510,7 @@ func machineTimeout(words string) (time.Duration, bool) {
 // storeReturnedArtifacts snapshots the bounded native-host archive before
 // filing any artifact. Every declaration must be present and every stored file
 // must have the same immutable receipt required of a cluster producer.
-func (f *Fleet) storeReturnedArtifacts(ctx context.Context, files stepFiles, out *fleetOutput, res *pl.StepResult, notes *noteList) {
+func (f *Fleet) storeReturnedArtifacts(ctx context.Context, files stepFiles, out *fleetOutput, stream *fleetArtifactStream, res *pl.StepResult, notes *noteList) {
 	if len(files.run.Artifacts) == 0 {
 		return
 	}
@@ -520,21 +530,17 @@ func (f *Fleet) storeReturnedArtifacts(ctx context.Context, files stepFiles, out
 		fail(pl.CodeArtifactUnavailable, "the machine reported missing required artifacts")
 		return
 	}
-	encoded := strings.TrimSpace(out.ArtifactsTgzBase64)
-	if encoded == "" {
-		fail(pl.CodeArtifactUnavailable, "the machine returned no archive for its required artifacts")
+	maxBytes := min(f.cfg.ArtifactMaxBytes, fleetArtifactArchiveBytes)
+	archive, err := stream.verified(out.ArtifactsArchiveBytes, out.ArtifactsArchiveSHA256)
+	if err != nil {
+		code := pl.CodeArtifactUnavailable
+		if errors.Is(err, ErrArtifactsTooLarge) {
+			code = pl.CodeArtifactTooLarge
+		}
+		fail(code, err.Error())
 		return
 	}
-	// Preserve the native transport's 256 MiB payload ceiling and refuse an
-	// oversized encoded response before decompression. Decode directly into
-	// a bounded private snapshot rather than allocating another full archive.
-	maxBytes := min(f.cfg.ArtifactMaxBytes, int64(256<<20))
-	if int64(base64.StdEncoding.DecodedLen(len(encoded))) > maxBytes+maxBytes/64+extractStreamSlack {
-		fail(pl.CodeArtifactTooLarge, fmt.Sprintf("the machine's archive of them is larger than this cluster keeps (%d bytes)", maxBytes))
-		return
-	}
-	decoded := base64.NewDecoder(base64.StdEncoding, strings.NewReader(encoded))
-	compressed, err := gzip.NewReader(decoded)
+	compressed, err := gzip.NewReader(archive)
 	if err != nil {
 		fail(pl.CodeArtifactUnavailable, "the machine's archive cannot be read: "+err.Error())
 		return

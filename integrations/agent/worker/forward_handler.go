@@ -57,6 +57,7 @@ type ForwardHandler struct {
 	store       FleetStore
 	logger      *slog.Logger
 	permissions permission.Authority
+	destination destinationChecker
 
 	mu       sync.Mutex
 	inflight map[string]context.CancelFunc
@@ -101,7 +102,7 @@ func NewForwardHandler(registry *workerservice.Registry, store FleetStore, logge
 	if logger == nil {
 		logger = slog.Default()
 	}
-	return &ForwardHandler{
+	h := &ForwardHandler{
 		registry:           registry,
 		store:              store,
 		logger:             logger,
@@ -111,6 +112,8 @@ func NewForwardHandler(registry *workerservice.Registry, store FleetStore, logge
 		modelProbeInflight: make(map[string]context.CancelFunc),
 		appInflight:        make(map[string]context.CancelFunc),
 	}
+	h.destination, _ = store.(destinationChecker)
+	return h
 }
 
 // HandleForwardedRequest implements node.WorkerForwardHandler.
@@ -173,6 +176,12 @@ func (h *ForwardHandler) HandleForwardedRequest(
 	}
 
 	registrationId := req.GetRegistrationId()
+	if req.GetPurpose() == "" && req.GetRunId() != "" && h.destination != nil {
+		if err := h.destination.CheckExecutionDestination(cctx, req.GetRunId(), "computer"); err != nil {
+			h.sendRefusal(send, requestId, "execution_destination_requires_permission", err.Error())
+			return
+		}
+	}
 	if err := h.verifyRegistration(cctx, owner, registrationId); err != nil {
 		h.sendRefusal(send, requestId, "registration_refused", err.Error())
 		return
@@ -230,10 +239,21 @@ func (h *ForwardHandler) HandleForwardedRequest(
 	defer activity.interrupted(dispatchCtx)
 
 	if err := w.Acquire(dispatchCtx, capability); err != nil {
-		h.sendRefusal(send, requestId, "worker_busy", err.Error())
+		code := "worker_busy"
+		if dispatchCtx.Err() != nil {
+			code = ForwardCallerCancelled
+		}
+		h.sendRefusal(send, requestId, code, err.Error())
 		return
 	}
 	defer w.Release(capability)
+	// Capacity may have waited while the person revoked or cancelled this goal.
+	if req.GetPurpose() == "" && req.GetRunId() != "" && h.destination != nil {
+		if err := h.destination.CheckExecutionDestination(dispatchCtx, req.GetRunId(), "computer"); err != nil {
+			h.sendRefusal(send, requestId, "execution_destination_requires_permission", err.Error())
+			return
+		}
+	}
 
 	dispatchRequest := Request{
 		Tool:          req.GetTool(),

@@ -211,7 +211,7 @@ func (i *Integration) handleDocumentVersion(ctx context.Context, args map[string
 	return reviewResult(map[string]any{"version": n, "revision": revision, "content": content})
 }
 func (i *Integration) handleForkDocumentVersion(ctx context.Context, args map[string]any, _ int) ([]memorynodes.MemoryNode, error) {
-	if err := revisionWriter(ctx); err != nil {
+	if err := i.revisionWriter(ctx); err != nil {
 		return nil, err
 	}
 	number, ok := intArg(args["versionNumber"])

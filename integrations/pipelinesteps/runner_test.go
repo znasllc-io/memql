@@ -3707,6 +3707,9 @@ func TestOrphanSweepMalformedDeadlineHasBoundedFallback(t *testing.T) {
 // runner's budget, with room past it for the poll that sees the step
 // decided, the Job controller's mark and the reply.
 func TestTheAgentsGraceOutlastsSettling(t *testing.T) {
+	if libraryPhaseTimeout < 15*time.Minute {
+		t.Errorf("Library window %v cannot hold the 2-minute artifact transfer failures seen in release qualification", libraryPhaseTimeout)
+	}
 	if margin := nodeLostGrace - settleBudget; margin < 30*time.Second {
 		t.Errorf("nodeLostGrace %v leaves %v past settleBudget %v, want at least 30s for the poll, the mark and the reply", nodeLostGrace, margin, settleBudget)
 	}

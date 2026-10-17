@@ -8,6 +8,7 @@ logic agentRecoveryUsesDesktop {
 /// Human wording for the bounded recovery consent card.
 logic agentRecoveryExplanation {
  args { needs []string! action string! }
+ if "available_capacity" in args.needs { return "The Workbench queue is full. This command has not started. May it run on your connected computer?" }
  reasons := args.needs.select(need => need == "display" ? "a graphical display" : need == "gpu" ? "a GPU" : need == "macos_tooling" ? "macOS-only tooling" : need == "user_files" ? "files that are on your own machine" : need == "os" ? "a different operating system" : need).reduce("", (text, word) => text == "" ? word : text + ", " + word)
  return "The sandboxed workbench cannot run this " + args.action + " step: it needs " + reasons + "."
 }
@@ -15,7 +16,7 @@ logic agentRecoveryExplanation {
 /// Only a verified consent refusal is a reason to ask for access.
 logic agentRecoveryNeedsConsent {
  args { errorCode string! }
- return args.errorCode == "denied_no_per_task_approval" || args.errorCode == "denied_by_scope"
+ return args.errorCode == "denied_no_per_task_approval" || args.errorCode == "denied_by_scope" || args.errorCode == "execution_destination_requires_permission"
 }
 
 /// Reconsider before spending the last calls, or after repeated discovery/evidence.

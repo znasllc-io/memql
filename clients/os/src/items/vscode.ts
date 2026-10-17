@@ -1,3 +1,4 @@
+import { handoffRoleTestEditor, isRoleTestTab } from "../auth/roleTest";
 // File content opens in the configured VS Code host. Browser is the default;
 // installed VS Code and Cursor use their extension URI handlers.
 
@@ -40,13 +41,20 @@ export const browserHandoffPorts: HandoffPorts = {
   reserve: () => {
     const tab = window.open("about:blank", "_blank");
     if (!tab) throw new Error("Allow this app to open a new tab, then open the file again.");
-    tab.opener = null;
+    if (!isRoleTestTab()) tab.opener = null;
     const referrer = tab.document.createElement("meta");
     referrer.name = "referrer"; referrer.content = "no-referrer";
     tab.document.head.append(referrer);
-    return { navigate: url => tab.location.replace(url), close: () => tab.close() };
+    return { navigate: url => { if (!handoffRoleTestEditor(tab, url)) tab.location.replace(url); }, close: () => tab.close() };
   },
   navigate: (url) => {
+    if (isRoleTestTab()) {
+      const tab = window.open("about:blank", "_blank");
+      if (!tab) throw new Error("Allow a new tab to open the test file.");
+      try { handoffRoleTestEditor(tab, url); }
+      catch (error) { tab.close(); throw error; }
+      return;
+    }
     if (url.startsWith("https://")) {
       window.open(url, "_blank", "noopener,noreferrer");
     } else {

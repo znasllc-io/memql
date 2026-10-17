@@ -31,6 +31,16 @@ BUNDLES = {
 DOWNLOAD_ATTEMPTS = 3
 
 
+def quality_suite(codeql, language):
+    """Use the matching suite shipped in the verified bundle, never main."""
+    language = "javascript" if language == "javascript-typescript" else language
+    suites = list((codeql.parent / "qlpacks" / "codeql" / f"{language}-queries").glob(
+        f"*/codeql-suites/{language}-code-quality.qls"))
+    if len(suites) != 1:
+        raise RuntimeError(f"expected exactly one bundled {language} code-quality suite")
+    return suites[0].resolve()
+
+
 def install_bundle(destination):
     if platform.system() != "Linux" or platform.machine() not in BUNDLES:
         raise RuntimeError("the pinned CodeQL bootstrap requires Linux amd64 or arm64")
@@ -174,7 +184,14 @@ def main():
             if installed.get("version") != VERSION:
                 raise RuntimeError(f"expected CodeQL {VERSION}, got {installed.get('version')}")
             config = yaml.safe_load(Path(".github/codeql/codeql-config.yml").read_text())
+            # One extraction and query union covers security and the deterministic
+            # Code Quality rules. Keep the repository's exclusions on both.
+            suite = quality_suite(codeql, args.language)
             config["queries"] = [{"uses": "security-extended"}]
+            pack_name = suite.parent.parent.parent.name
+            pack_version = suite.parent.parent.name
+            config["packs"] = [f"codeql/{pack_name}@{pack_version}:codeql-suites/{suite.name}"]
+            summary["querySuites"] = ["security-extended", suite.name]
             config_path = scratch / "config.yml"
             config_path.write_text(yaml.safe_dump(config))
             database = scratch / "database"

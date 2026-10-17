@@ -74,6 +74,11 @@ type dataPlaneGateExemption struct {
 // appearing as an untracked `if` somewhere in a handler.
 var dataPlaneGateExemptions = []dataPlaneGateExemption{
 	{
+		Name:     "personal Files/Ask actions",
+		Enforced: true,
+		Reason:   "Exact core personal mutations and owner-checked Library editor/review capabilities admit signed-in app users without shared-data write authority. Creates stamp the verified caller and updates retain owner guards; raw, mixed and server-only writes are excluded.",
+	},
+	{
 		Name:     "CallToolMsg",
 		Enforced: false,
 		Reason: "Not gated at all -- the gate is wired into handleExecuteQuery only. " +
@@ -163,6 +168,9 @@ func (s *streamSession) allowDataPlaneAccess(ctx context.Context, query string) 
 	if s.service == nil || s.service.engine == nil {
 		// No engine to classify against; the execute path reports the real
 		// unavailability. Refusing here would report the wrong cause.
+		return true, ""
+	}
+	if s.service.engine.PersonalDataPlaneEnforced(ctx, query) {
 		return true, ""
 	}
 	if verb := s.service.engine.DataVerbFor(ctx, query); verb != auth.VerbRead {

@@ -49,6 +49,7 @@ type Dispatcher struct {
 	selfNodeId  string
 	remote      RemoteDispatcher
 	permissions permission.Authority
+	destination destinationChecker
 }
 
 // Store is the persistence side of the dispatcher (resolve agent
@@ -268,6 +269,7 @@ func NewDispatcher(opts Options) (*Dispatcher, error) {
 		selfNodeId: strings.TrimSpace(opts.SelfNodeId),
 		remote:     opts.Remote,
 	}
+	d.destination, _ = opts.Store.(destinationChecker)
 	if opts.Store != nil {
 		d.router = NewRouter(opts.Store, opts.Logger, clock)
 	}
@@ -335,6 +337,16 @@ func (d *Dispatcher) Dispatch(ctx context.Context, req Request) (Result, error) 
 		req.CorrelationId = newCallId()
 	}
 	startedAt := d.clock()
+	if req.Purpose == "" && req.RunId != "" && d.destination != nil {
+		if err := d.destination.CheckExecutionDestination(ctx, req.RunId, "computer"); err != nil {
+			code := "execution_destination_unavailable"
+			var required *memqlengine.ExecutionDestinationRequired
+			if errors.As(err, &required) {
+				code = "execution_destination_requires_permission"
+			}
+			return Result{ErrorCode: code, ErrorMessage: err.Error(), RefusedBeforeStart: true, RefusedByGate: true}, nil
+		}
+	}
 
 	if req.Purpose == "" && d.permissions != nil {
 		if rc, ok := common.RunFromContext(ctx); ok && rc.GoalId != "" {
@@ -585,6 +597,11 @@ func (d *Dispatcher) attemptLocal(
 		}, ForwardRefusedBeforeStart
 	}
 	defer w.Release(capability)
+	if req.Purpose == "" && req.RunId != "" && d.destination != nil {
+		if err := d.destination.CheckExecutionDestination(dispatchCtx, req.RunId, "computer"); err != nil {
+			return Result{ErrorCode: "execution_destination_requires_permission", ErrorMessage: err.Error()}, ForwardRefusedBeforeStart
+		}
+	}
 
 	if req.computerPermission != nil {
 		constraint, err := claimComputerPermission(dispatchCtx, d.permissions, req, w)

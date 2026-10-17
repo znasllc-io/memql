@@ -34,6 +34,10 @@ type scopeInputAuthority struct {
 	err   error
 }
 
+func (*scopeInputAuthority) CheckExecutionDestination(context.Context, string, string) error {
+	return nil
+}
+
 func (a *scopeInputAuthority) Find(context.Context, permission.Request) (*permission.Grant, error) {
 	a.finds++
 	return nil, a.err

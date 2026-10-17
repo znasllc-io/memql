@@ -218,6 +218,10 @@ func engineImportGraph(t *testing.T) (*pipelines.Graph, map[string]bool) {
 // The Cockpit trial requires the owner's explicit fleet consent. The separate
 // consent guard below proves a cluster-only connection refuses this manifest.
 func compileEngineOpening(spec *pipelines.Spec, graph *pipelines.Graph, event pipelines.Event, changed []string) (pipelines.Plan, *pipelines.Refusal) {
+	return compileEngineCadence(spec, graph, event, changed, "daily")
+}
+
+func compileEngineCadence(spec *pipelines.Spec, graph *pipelines.Graph, event pipelines.Event, changed []string, cadence string) (pipelines.Plan, *pipelines.Refusal) {
 	if refusal := pipelines.Validate(spec); refusal != nil {
 		return pipelines.Plan{}, refusal
 	}
@@ -232,8 +236,13 @@ func compileEngineOpening(spec *pipelines.Spec, graph *pipelines.Graph, event pi
 		if on == nil {
 			on = []string{}
 		}
+		stageCadence := stage.Schedule
+		if stageCadence == "" {
+			stageCadence = spec.Schedule
+		}
 		value, err := workflowhost.Run(context.Background(), "pipelineStageIncluded", map[string]any{
 			"event": string(event), "mode": string(mode), "on": on,
+			"runSchedule": cadence, "stageSchedule": stageCadence,
 		}, workflowhost.Options{})
 		included, ok := value.(bool)
 		if err != nil || !ok {
@@ -347,8 +356,7 @@ func TestEngineManifestCompilesForEveryOpening(t *testing.T) {
 		t.Fatalf("the pipeline declares no %q service, so the db-gated trees have nothing to test against", manifestPostgresService)
 	}
 
-	fullStages := []string{manifestStageChecks, "vulnerabilities", "secrets-history", manifestStageTests}
-	analysisStages := append(slices.Clone(fullStages), "analysis")
+	fullStages := []string{manifestStageChecks, "vulnerabilities", "secrets-current", manifestStageTests}
 	pullRequestStages := []string{manifestStageChecks, "vulnerabilities", "secrets-current", manifestStageTests, manifestStageGates}
 	every := []string{manifestStepGoChecks, manifestStepPathRouting,
 		manifestStepGoTests, manifestStepDBTests, manifestStepFuzz, manifestStepOSChecks,
@@ -368,16 +376,16 @@ func TestEngineManifestCompilesForEveryOpening(t *testing.T) {
 		// A full run tests every package in go-tests, the gate packages among
 		// them, so the gates stage is absent, as ci.yml runs that step only on a
 		// pull request.
-		{name: "a push to the default branch", event: pipelines.EventPush, stages: analysisStages,
+		{name: "a push to the default branch", event: pipelines.EventPush, stages: fullStages,
 			runs: every, absent: []string{manifestStepGateInputs}},
 		{name: "a merge group", event: pipelines.EventMergeGroup, stages: fullStages,
 			runs: every, absent: []string{manifestStepGateInputs}},
-		{name: "a release", event: pipelines.EventRelease, stages: analysisStages,
+		{name: "a release", event: pipelines.EventRelease, stages: []string{manifestStageChecks, "vulnerabilities", manifestStageTests, "release-files", "build-tools", "images"},
 			runs: every, absent: []string{manifestStepGateInputs}},
 		// A scheduled scan selects only its explicit opt-in stages; default
 		// stages such as checks and history scans are intentionally absent.
 		{name: "a daily scheduled security scan", event: pipelines.EventSchedule,
-			stages: []string{"vulnerabilities", "analysis"}, absent: []string{manifestStepGateInputs}},
+			stages: []string{"vulnerabilities"}, absent: []string{manifestStepGateInputs}},
 		// The compiler of this very manifest: Go source only, and the db-gated
 		// driver (component/pipelinerun) imports it, so the change reaches both
 		// test steps and the filesystem-gates bucket.
@@ -410,6 +418,11 @@ func TestEngineManifestCompilesForEveryOpening(t *testing.T) {
 			runs:  append(slices.Clone(always), manifestStepGateInputs, manifestStepOSChecks),
 			skips: []string{manifestStepDBTests},
 		},
+		{
+			name: "a worker protocol change checks the OS fleet contract", event: pipelines.EventPullRequest,
+			changed: []string{"integrations/agent/worker/pipeline_purpose.go"}, stages: pullRequestStages,
+			runs: append(slices.Clone(always), manifestStepGateInputs, manifestStepOSChecks),
+		},
 	}
 
 	for _, o := range openings {
@@ -436,8 +449,14 @@ func TestEngineManifestCompilesForEveryOpening(t *testing.T) {
 			byName := map[string][]pipelines.Step{}
 			for _, step := range plan.Steps() {
 				byName[step.Name] = append(byName[step.Name], step)
-				if step.RunAfterFailure != (step.Stage == "analysis" || step.Stage == "vulnerabilities" || step.Stage == "secrets-current" || step.Stage == "secrets-history") {
+				if step.RunAfterFailure != (step.Stage == "analysis" || step.Stage == "security-reports" || step.Stage == "vulnerabilities" || step.Stage == "secrets-current" || step.Stage == "secrets-history") {
 					t.Errorf("failure policy was lost or leaked to another stage: %+v", step)
+				}
+				if step.Kind == pipelines.StepSARIF {
+					if step.Stage != "security-reports" || step.SARIF == nil || step.Image != "" || step.Run != "" || step.Execution != "" || len(step.Secrets) != 0 {
+						t.Errorf("report lost its driver-owned artifact contract: %+v", step)
+					}
+					continue
 				}
 				if step.Kind != pipelines.StepCommand || step.Image != expectedEngineStepImage(spec, step.Name) {
 					t.Errorf("step %s is a %s step in %q; every step is a command in the toolchain image %q",
@@ -491,6 +510,24 @@ func TestEngineManifestCompilesForEveryOpening(t *testing.T) {
 				checkEngineTestsPartitionEveryPackage(t, spec, graph, byName)
 			}
 		})
+	}
+}
+
+func TestEngineWeeklyAuditDoesNotRepeatDailyOrOrdinaryFunctionalChecks(t *testing.T) {
+	spec := engineManifest(t).Pipeline
+	graph, _ := engineImportGraph(t)
+	plan, refusal := compileEngineCadence(spec, graph, pipelines.EventSchedule, nil, "weekly")
+	if refusal != nil {
+		t.Fatal(refusal)
+	}
+	var stages []string
+	for _, step := range plan.Steps() {
+		if !slices.Contains(stages, step.Stage) {
+			stages = append(stages, step.Stage)
+		}
+	}
+	if !slices.Equal(stages, []string{"analysis", "security-reports"}) {
+		t.Fatalf("weekly stages = %v", stages)
 	}
 }
 
@@ -794,6 +831,9 @@ func TestEngineManifestRunsWithoutFleetConsent(t *testing.T) {
 
 func expectedEngineStepImage(spec *pipelines.Spec, name string) string {
 	declared, _ := engineDeclaredStep(spec, name)
+	if declared.ImageBuild != nil {
+		return "" // the operator selects the fixed rootless builder
+	}
 	if declared.Image != "" {
 		return declared.Image
 	}

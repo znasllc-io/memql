@@ -3,7 +3,7 @@
 import * as vscode from "vscode";
 import { ConnectionManager, DEFAULT_RECONNECT_DELAYS_MS } from "./connection/managerCore.js";
 import { CredentialResolver } from "./connection/credentials.js";
-import { BrowserRegistry } from "./clusters/browserRegistry.js";
+import { BrowserRegistry, MemoryProfileState } from "./clusters/browserRegistry.js";
 import { EditorConnection, validateEditorDomain } from "./connection/api.js";
 import { persistSignIn, signOut } from "./auth/store.js";
 import { runDeviceCodeFlow, deviceCodeOpenTarget } from "./auth/deviceGrant.js";
@@ -11,7 +11,11 @@ import { revokeRefreshToken, signOutMessage } from "./auth/revoke.js";
 import type { ClusterConfig } from "./clusters/model.js";
 
 export function activate(context: vscode.ExtensionContext) {
-  const registry = new BrowserRegistry(context.globalState, context.secrets);
+  // The dedicated host sets this launch-only manifest value before the worker
+  // starts. Configuration defaults are not transported for undeclared settings
+  // and user settings must never be able to switch an isolated tab's identity.
+  const roleTestMode = context.extension.packageJSON.memqlRoleTest === true;
+  const registry = new BrowserRegistry(roleTestMode ? new MemoryProfileState() : context.globalState, context.secrets);
   const store = { secrets: context.secrets, writeCluster: registry.write };
   let selected: ClusterConfig | undefined;
   let signInAbort: AbortController | undefined;
@@ -55,6 +59,7 @@ export function activate(context: vscode.ExtensionContext) {
     if (!vscode.workspace.isTrusted) throw new Error("Trust this workspace before connecting MemQL.");
   }
   async function select(domain: string): Promise<void> {
+    if (roleTestMode && selected?.domain && selected.domain !== domain) throw new Error("Role tests cannot switch clusters.");
     requireTrust();
     const ticket = ++selection;
     signInAbort?.abort();
@@ -68,18 +73,21 @@ export function activate(context: vscode.ExtensionContext) {
     stateChanged.fire(undefined);
   }
   async function choose(): Promise<void> {
+    if (roleTestMode) throw new Error("This tab is reserved for the role test. Start another test from Users.");
     requireTrust();
     const value = await vscode.window.showQuickPick([...registry.domains(), "Add cluster…"], { title: "Connect to a MemQL cluster" });
     if (value === "Add cluster…") return add();
     if (value) await select(value);
   }
   async function add(): Promise<void> {
+    if (roleTestMode) throw new Error("This tab is reserved for the role test.");
     requireTrust();
     const domain = await vscode.window.showInputBox({ title: "Cluster domain", placeHolder: "memql.example.com",
       validateInput: value => { try { validateEditorDomain(value); return undefined; } catch (e) { return (e as Error).message; } } });
     if (domain) { await select(validateEditorDomain(domain)); await signIn(); }
   }
   async function signIn(): Promise<void> {
+    if (roleTestMode) throw new Error("The role test ended. Start another test from Users.");
     requireTrust();
     if (!selected) { await choose(); if (!selected) return; }
     signInAbort?.abort();
@@ -120,6 +128,14 @@ export function activate(context: vscode.ExtensionContext) {
     void vscode.window.showInformationMessage(signOutMessage(cluster.name, revocation));
     return ticket;
   }
+  if (roleTestMode) context.subscriptions.push(vscode.commands.registerCommand("memql.web.roleTest", async (value: { domain: string; token: string; expiresAt: number }) => {
+    if (selected || !/^mql_test_[0-9a-f]{64}$/.test(value.token) || !Number.isFinite(value.expiresAt) || value.expiresAt * 1000 <= Date.now()) throw new Error("Invalid role-test handoff.");
+    const domain = validateEditorDomain(value.domain);
+    await persistSignIn(store, domain, { accessToken: value.token, refreshToken: "", expiresAtEpochSeconds: value.expiresAt, clientId: "" });
+    await select(domain);
+    const expiry = setTimeout(() => { void disconnect(); }, Math.max(0, value.expiresAt * 1000 - Date.now()));
+    context.subscriptions.push({ dispose: () => clearTimeout(expiry) });
+  }));
   const commands: Record<string, (...args: any[]) => unknown> = {
     "memql.clusters.add": add,
     "memql.clusters.select": choose,

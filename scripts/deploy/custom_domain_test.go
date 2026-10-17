@@ -248,6 +248,29 @@ func TestBindDryRunRendersValidObjects(t *testing.T) {
 	}
 }
 
+func TestBindDryRunDoesNotMistakeAnEarlyReaderExitForMissingDocuments(t *testing.T) {
+	// Model a slow producer finishing after grep -q has already found its
+	// match. Under pipefail that producer's SIGPIPE used to turn a valid
+	// Ingress into an intermittent "no Ingress document" refusal in CI.
+	envFile := filepath.Join(t.TempDir(), "bash-env")
+	hook := `printf() {
+  builtin printf "$@"
+  if [[ "$#" -eq 2 && "$1" == '%s\n' && "$2" == *'kind: Ingress'* ]]; then
+    sleep 0.05
+    builtin printf '\n'
+  fi
+}
+`
+	if err := os.WriteFile(envFile, []byte(hook), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("BASH_ENV", envFile)
+	env, code := envelopeFrom(t, bindScript, "--hostname=www.acme.com", "--domainId=d1", "--issuer=letsencrypt-prod", "--dryRun=true")
+	if code != 0 || !env.OK {
+		t.Fatalf("valid manifest refused after an early reader exit: exit=%d error=%+v", code, env.Error)
+	}
+}
+
 // ===========================================================================
 // The error pages (after the 2026-10-11 outage)
 // ===========================================================================

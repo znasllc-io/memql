@@ -46,27 +46,28 @@ func TestTheManifestIsTheRegistrationTheOperatorGuideDescribes(t *testing.T) {
 	}
 }
 
-// TestTheAskIsReadsAndCheckWritesAndNothingElse is decision C8 of the Connect
+// TestTheAskIsReadsAndReportingWritesAndNothingElse is decision C8 of the Connect
 // design as pipelines widened it (pipelines record, D4), restated where a
 // regression would land: on the manifest. Every permission is read except
-// checks, the one write, which is how a run reports back.
-func TestTheAskIsReadsAndCheckWritesAndNothingElse(t *testing.T) {
+// checks and security_events, which report native checks and scanner results.
+func TestTheAskIsReadsAndReportingWritesAndNothingElse(t *testing.T) {
 	m, err := BuildManifest("lab.example.com", "")
 	if err != nil {
 		t.Fatal(err)
 	}
 	want := map[string]string{
-		"checks":        "write",
-		"contents":      "read",
-		"merge_queues":  "read",
-		"metadata":      "read",
-		"pull_requests": "read",
+		"checks":          "write",
+		"security_events": "write",
+		"contents":        "read",
+		"merge_queues":    "read",
+		"metadata":        "read",
+		"pull_requests":   "read",
 	}
 	if !reflect.DeepEqual(m.DefaultPermissions, want) {
 		t.Fatalf("permissions = %v, want %v", m.DefaultPermissions, want)
 	}
 	for name, level := range m.DefaultPermissions {
-		if level != "read" && name != "checks" {
+		if level != "read" && name != "checks" && name != "security_events" {
 			t.Errorf("%s is asked at %q", name, level)
 		}
 	}

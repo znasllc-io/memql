@@ -79,7 +79,7 @@ func (dr *runDriver) prepareWorkflow(name string) error {
 			switch step.Type {
 			case automations.StepTypeExpression, automations.StepTypeReturn:
 			case automations.StepTypeFunction:
-				if step.Function == nil || (step.Function.Name != "pipelineWorkflowFacts" && step.Function.Name != "pipelineSkipStep") {
+				if step.Function == nil || (step.Function.Name != "pipelineWorkflowFacts" && step.Function.Name != "pipelineSkipStep" && step.Function.Name != "pipelineReportPublish" && step.Function.Name != "pipelineReportObserve") {
 					return fmt.Errorf("pipeline workflow step %q calls a function outside its run-scoped contract", step.ID)
 				}
 			case automations.StepTypeAction:
@@ -182,7 +182,7 @@ func (dr *runDriver) prepareWorkflow(name string) error {
 	// recipes are part of the immutable execution contract as well.
 	for _, helper := range []string{
 		"pipelineStageIncluded", "pipelinePackageSelection", "pipelinePackageStepSelection", "pipelineBucketIncluded",
-		"pipelineNotificationCopy", "pipelineNotificationOutcome",
+		"pipelineNotificationCopy", "pipelineNotificationOutcome", "pipelineSARIFDelivery",
 	} {
 		if err := visit(helper); err != nil {
 			return err
@@ -193,15 +193,35 @@ func (dr *runDriver) prepareWorkflow(name string) error {
 	return nil
 }
 
-func (dr *runDriver) selectStages(ctx context.Context, stages []pipelines.StageSpec, event pipelines.Event, mode pipelines.Mode) (pipelines.StageSelection, error) {
-	selection := pipelines.StageSelection{Included: make([]string, 0, len(stages))}
-	for _, stage := range stages {
+func (dr *runDriver) selectStages(ctx context.Context, spec *pipelines.Spec, event pipelines.Event, mode pipelines.Mode, runKey string) (pipelines.StageSelection, error) {
+	runCadence := ""
+	if event == pipelines.EventSchedule {
+		slot, ok := pipelines.ScheduledSlotFromRunKey(runKey)
+		if !ok {
+			return pipelines.StageSelection{}, fmt.Errorf("scheduled pipeline has no valid saved calendar slot")
+		}
+		var err error
+		runCadence, err = pipelines.ScheduleCadence(slot)
+		if err != nil {
+			return pipelines.StageSelection{}, err
+		}
+	}
+	selection := pipelines.StageSelection{Included: make([]string, 0, len(spec.Stages))}
+	for _, stage := range spec.Stages {
+		stageCadence := stage.Schedule
+		if stageCadence == "" {
+			stageCadence = spec.Schedule
+		}
+		if stageCadence == "" {
+			stageCadence = "daily"
+		}
 		on := stage.On
 		if on == nil {
 			on = []string{}
 		}
 		value, err := dr.runPinnedWorkflow(ctx, "pipelineStageIncluded", map[string]any{
 			"event": string(event), "mode": string(mode), "on": on,
+			"runSchedule": runCadence, "stageSchedule": stageCadence,
 		})
 		if err != nil {
 			return pipelines.StageSelection{}, err

@@ -15,6 +15,47 @@ func registryTargetFixture() candidateRegistryTarget {
 		BlobDownloadOrigins: []string{"https://objects-b.example.com", "https://objects-a.example.com"}}
 }
 
+func TestRegistryVersionTagsAreBoundToCandidateVersion(t *testing.T) {
+	for _, tag := range []string{"", "0.25.0", "v0.25.0", "latest", "v0.26.0", "v0.25.0-other"} {
+		target := registryTargetFixture()
+		target.Tag = tag
+		_, _, digest, err := target.snapshot()
+		if err != nil {
+			t.Fatal(err)
+		}
+		r := candidateTargetReader{targets: map[string]candidateRegistryTarget{"registry": target}}
+		d := pl.ReleaseDestination{TargetID: "registry", TargetDigest: digest, Component: "engine", Artifact: "image", Operation: "publish"}
+		err = r.checkArtifact(ownerCtx(), d, pl.ReleaseComponent{Version: "0.25.0"}, pl.ReleaseArtifact{Kind: "oci"})
+		valid := tag == "" || tag == "0.25.0" || tag == "v0.25.0"
+		if (err == nil) != valid {
+			t.Fatal("incorrect component version binding", tag, err)
+		}
+	}
+}
+
+func TestRegistryTagReservationNormalizesOriginAliases(t *testing.T) {
+	base := registryTargetFixture()
+	base.Tag = "v0.25.0"
+	for _, origin := range []string{"https://registry.example.com/", "https://REGISTRY.example.com", "https://registry.example.com:443/"} {
+		alias := base
+		alias.Origin = origin
+		if registryTagKey(alias) != registryTagKey(base) {
+			t.Fatal("origin alias evaded tag reservation", origin)
+		}
+	}
+	for _, change := range []func(*candidateRegistryTarget){
+		func(t *candidateRegistryTarget) { t.Tag = "v0.25.1" },
+		func(t *candidateRegistryTarget) { t.Repository = "acme/other" },
+		func(t *candidateRegistryTarget) { t.Origin = "https://registry.example.com:444" },
+	} {
+		other := base
+		change(&other)
+		if registryTagKey(other) == registryTagKey(base) {
+			t.Fatal("different destination shares reservation")
+		}
+	}
+}
+
 func TestCandidateRegistryIdentityBindsEveryAuthoritySetting(t *testing.T) {
 	base := registryTargetFixture()
 	_, _, digest, err := base.snapshot()
@@ -27,6 +68,7 @@ func TestCandidateRegistryIdentityBindsEveryAuthoritySetting(t *testing.T) {
 		"artifact":             func(t *candidateRegistryTarget) { t.Artifact = "another" },
 		"origin":               func(t *candidateRegistryTarget) { t.Origin = "https://other.example.com" },
 		"repository":           func(t *candidateRegistryTarget) { t.Repository = "acme/other" },
+		"tag":                  func(t *candidateRegistryTarget) { t.Tag = "v0.29.7" },
 		"username":             func(t *candidateRegistryTarget) { t.Username = "other" },
 		"credential reference": func(t *candidateRegistryTarget) { t.PasswordSecret = "OTHER_PASSWORD" },
 		"token endpoint":       func(t *candidateRegistryTarget) { t.TokenEndpoint = "https://token.example.com/exchange" },

@@ -27,7 +27,7 @@ type recordingExecutor struct {
 
 // admitSession admits: these tests are about what the delegate hands over, and
 // the gate's own tests (app_gate_test.go) drive the real one.
-func (r *recordingExecutor) admitSession(context.Context, string, memqlengine.AppDoorPin) *appGateRefusal {
+func (r *recordingExecutor) admitSession(context.Context, string, memqlengine.AppDoorPin, string) *appGateRefusal {
 	return nil
 }
 

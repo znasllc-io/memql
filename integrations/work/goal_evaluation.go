@@ -113,6 +113,21 @@ func (i *Integration) handleRecordGoalEvaluation(ctx context.Context, args map[s
 	if err != nil {
 		return nil, err
 	}
+	delivered := goaleval.DeliveredLessonBindings(evidence.Observations)
+	for _, binding := range result.Bindings {
+		if !strings.HasPrefix(binding.ID, "lesson-") {
+			continue
+		}
+		found := false
+		for _, actual := range delivered {
+			if actual == binding {
+				found = true
+			}
+		}
+		if !found {
+			return nil, fmt.Errorf("lesson binding lacks a successful provider delivery receipt")
+		}
+	}
 	if err := verifyEvaluationModelReceipts(result, evidence.ModelCalls); err != nil {
 		return nil, err
 	}
@@ -134,7 +149,7 @@ func (i *Integration) handleRecordGoalEvaluation(ctx context.Context, args map[s
 		}
 		return i.resultNode(map[string]any{"receiptId": receipt, "recorded": true}), nil
 	}
-	err = s.writeInternal(ctx, "mutation "+call("createWorkObservation", map[string]any{"observationId": receipt, "runId": result.RunID, "kind": "decision", "content": "External evaluation: artifact verdicts supplied by the owner-operated harness; goal ownership and model receipts verified by MemQL.", "data": map[string]any{"goalEvaluation": normalized, "oracleAuthority": "external-harness", "scenario": scenario}}))
+	err = s.writeInternal(memql.ContextWithGoalEvaluationWrite(ctx), "mutation "+call("createWorkObservation", map[string]any{"observationId": receipt, "runId": result.RunID, "kind": "decision", "content": "External evaluation: artifact verdicts supplied by the owner-operated harness; goal ownership and model receipts verified by MemQL.", "data": map[string]any{"goalEvaluation": normalized, "oracleAuthority": "external-harness", "scenario": scenario}}))
 	if err != nil {
 		return nil, err
 	}

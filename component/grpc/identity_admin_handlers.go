@@ -64,6 +64,9 @@ func (s *streamSession) handleIdentityAdmin(envelope *memqlv1.MemqlClientMessage
 
 	var res adminops.Result
 	switch req := msg.GetRequest().(type) {
+	case *memqlv1.IdentityAdminMsg_RoleTest:
+		s.roleTest(ctx, req.RoleTest, out)
+		return s.replyIdentityAdmin(envelope, out)
 	case *memqlv1.IdentityAdminMsg_UpdateUserProfile:
 		p := req.UpdateUserProfile
 		res = svc.UpdateUserProfile(ctx, adminops.UserProfile{

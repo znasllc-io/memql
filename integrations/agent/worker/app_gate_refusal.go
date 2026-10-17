@@ -35,6 +35,8 @@ const AppGateNotNamedByOwner = "app_not_named_by_owner"
 // so the router's skip line and this refusal read alike.
 const AppGateNoOwner = "app_no_owner"
 
+const AppGateDestination = "execution_destination_requires_permission"
+
 // appGateRefusal is a named refusal from the app gate. Both doors wrap it, so
 // errors.As finds it under whatever a door adds in front.
 type appGateRefusal struct {
@@ -54,7 +56,7 @@ func (r *appGateRefusal) Code() string { return r.code }
 // trying the owner's next machine, which the same gate would refuse.
 func isAppGateCode(code string) bool {
 	switch code {
-	case AppGateKillSwitchEngaged, AppGateKillSwitchUnreadable, AppGateNotNamedByOwner, AppGateNoOwner:
+	case AppGateKillSwitchEngaged, AppGateKillSwitchUnreadable, AppGateNotNamedByOwner, AppGateNoOwner, AppGateDestination:
 		return true
 	}
 	return false

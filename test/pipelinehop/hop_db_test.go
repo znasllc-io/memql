@@ -184,7 +184,7 @@ func TestAGitHubDeliveryIsOpenedOnTheBffAndDrivenOnTheAgent(t *testing.T) {
 			if req.WorkRunID != memql.BareShortId(run.WorkRunID) || req.WorkRunID != memql.BareShortId(req.WorkRunID) {
 				t.Errorf("%s: WorkRunID %q; want the work run's bare id %q", req.StepKey, req.WorkRunID, memql.BareShortId(run.WorkRunID))
 			}
-			if req.Attempt != 1 || req.RunAttempt != 1 || req.SHA != head || req.Mode != pipelines.ModeAffected ||
+			if req.Attempt != 1 || req.RunAttempt != 1 || req.SHA != head || req.BaseSHA != s.base || req.Environment()["MEMQL_BASE_SHA"] != s.base || req.Mode != pipelines.ModeAffected ||
 				req.Event != pipelines.EventPullRequest || req.Version != head || req.InstallationID != s.installation ||
 				req.PipelineID != memql.BareShortId(s.pipeline.ID) || req.Repository.Owner+"/"+req.Repository.Name != s.name {
 				t.Errorf("%s: the request = %+v", req.StepKey, req)
@@ -375,7 +375,7 @@ func TestAGitHubDeliveryIsOpenedOnTheBffAndDrivenOnTheAgent(t *testing.T) {
 		s := c.connect(t, "table", pipelinerun.DeliveryWebhook)
 		pr, queued, landed, tagged := c.commit(s, "pr-31"), c.commit(s, "queue-31"), c.commit(s, "main-31"), c.commit(s, "v1.31.0")
 		const tag = "v1.31.0"
-		c.github.update(s.name, func(r *fakeRepo) { r.tags["tags/"+tag] = tagged })
+		c.github.update(s.name, func(r *fakeRepo) { r.tags["refs/tags/"+tag] = tagged })
 
 		table := []struct {
 			header  string
@@ -413,7 +413,7 @@ func TestAGitHubDeliveryIsOpenedOnTheBffAndDrivenOnTheAgent(t *testing.T) {
 		}
 		// The release named a tag, and its commit was asked of GitHub where
 		// the delivery was handled.
-		if refs := c.github.callsOf(&c.github.refs, s.name); !slices.Equal(refs, []ghCall{{Node: nodeA, Repository: s.name, Arg: "tags/" + tag}}) {
+		if refs := c.github.callsOf(&c.github.refs, s.name); !slices.Equal(refs, []ghCall{{Node: nodeA, Repository: s.name, Arg: "refs/tags/" + tag}}) {
 			t.Errorf("the tag was resolved by %+v; want one ask for tags/%s by %s", refs, tag, nodeA)
 		}
 

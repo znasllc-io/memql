@@ -12,11 +12,11 @@ import (
 )
 
 func TestPipelineContractsCannotBeInventedByLabels(t *testing.T) {
-	for _, version := range []int{0, 1, 2, 4} {
+	for _, version := range []int{0, 1, 2, 3, 5} {
 		t.Run(fmt.Sprint(version), func(t *testing.T) {
 			candidate := machine("ci-box", withLabels(pipelineLabels()))
 			candidate.ActionContracts = workerservice.ActionContracts{"workerHost.pipeline_step": version}
-			candidate.Labels["workerHost.pipeline_step"] = "3"
+			candidate.Labels["workerHost.pipeline_step"] = "4"
 			fleet := newPipelineFleet(t, candidate)
 			result, err := fleet.d.Dispatch(asPipelineExecutor(), pipelineRequest())
 			if err != nil || result.OK || !result.RefusedBeforeStart || fleet.total() != 0 {
@@ -27,7 +27,7 @@ func TestPipelineContractsCannotBeInventedByLabels(t *testing.T) {
 }
 
 func TestPipelineReceivingReplicaRechecksBinaryContract(t *testing.T) {
-	for _, version := range []int{0, 1, 2, 4} {
+	for _, version := range []int{0, 1, 2, 3, 5} {
 		t.Run(fmt.Sprint(version), func(t *testing.T) {
 			h := pipelineHop(t, func(context.Context, *memqlv1.ToolDispatch, func(*memqlv1.ToolStream)) (*memqlv1.ToolResult, error) {
 				t.Fatal("stale database metadata authorized an incompatible live connection")

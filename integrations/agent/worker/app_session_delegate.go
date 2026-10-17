@@ -80,7 +80,7 @@ const (
 // standing up a dispatcher, a router, a registry and a session runner -- four
 // collaborators none of which this file's logic is about.
 type stepExecutor interface {
-	admitSession(ctx context.Context, ownerUserId string, pin memqlengine.AppDoorPin) *appGateRefusal
+	admitSession(ctx context.Context, ownerUserId string, pin memqlengine.AppDoorPin, runID string) *appGateRefusal
 	runAdmitted(ctx context.Context, req planner.ExecutorRequest, progress planner.ProgressCallback) (planner.ExecutorResult, error)
 }
 
@@ -158,7 +158,7 @@ func (d *AppSessionDelegate) RunStep(ctx context.Context, h memqlengine.AppSessi
 	// behind and no childRunId on the parent step, and its refusal keeps its
 	// own code rather than becoming a child run failed as app_session_failed
 	// with the reason in its text.
-	if refusal := d.exec.admitSession(ctx, owner, h.Pin); refusal != nil {
+	if refusal := d.exec.admitSession(ctx, owner, h.Pin, h.RunId); refusal != nil {
 		return memqlengine.AppSessionOutcome{}, fmt.Errorf("app session: %w", refusal)
 	}
 

@@ -248,11 +248,11 @@ func TestNoMethodReturnsAContext(t *testing.T) {
 			if !strings.HasPrefix(trimmed, "func ") {
 				continue
 			}
-			// ownerActor is the one function that returns a context, and it
-			// returns the CALLER's actor -- never internal origin. It is
-			// named here so a NEW context-returning function is a visible
-			// addition rather than a silent one.
-			if strings.HasPrefix(trimmed, "func ownerActor(") {
+			// These helpers return only the caller's authority, never their
+			// fixed service read context. runOwnerActor restores a durable
+			// test grant with client origin; run_authority_db_test proves that
+			// even an internal maintenance parent cannot lend its authority.
+			if strings.HasPrefix(trimmed, "func ownerActor(") || strings.HasPrefix(trimmed, "func (i *Integration) runOwnerActor(") {
 				continue
 			}
 			if strings.Contains(trimmed, ") context.Context {") || strings.Contains(trimmed, "(context.Context, error)") {

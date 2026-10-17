@@ -1,9 +1,12 @@
 package pipelinesteps
 
 import (
+	"context"
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 	"time"
@@ -16,7 +19,11 @@ import (
 // recover the same archive after the producer exited. No installed workload,
 // storage account, shared cache or pipeline connection changes.
 func TestArtifactCollectorAgainstLocalKubernetes(t *testing.T) {
-	ctx, cluster, ns, kubectl := localPipelineControls(t)
+	artifactCollectorAgainstKubernetes(t, localPipelineControls, 16, "linux/"+runtime.GOARCH)
+}
+
+func artifactCollectorAgainstKubernetes(t *testing.T, controls pipelineTestControls, sizeMiB int64, platform string) {
+	ctx, cluster, ns, kubectl := controls(t)
 	kube := localPipelineKubeProxy(t, ctx, cluster, ns, []string{"--reject-paths=^$", "--accept-paths=^/(api/v1|apis/batch/v1)/namespaces/" + ns + "/"})
 	body, err := os.ReadFile(filepath.Join("..", "..", "deploy", "k8s", "components", "pipelines", "config.yaml"))
 	if err != nil {
@@ -42,7 +49,7 @@ func TestArtifactCollectorAgainstLocalKubernetes(t *testing.T) {
 	}
 	kubectl([]byte(strings.ReplaceAll(string(ceiling), "namespace: memql-pipelines", "namespace: "+ns)), "create", "-f", "-")
 	run := rtRun()
-	run.Platform = "linux/arm64"
+	run.Platform = platform
 	run.Caches = nil
 	run.Services = nil
 	run.Secrets = nil
@@ -52,10 +59,10 @@ func TestArtifactCollectorAgainstLocalKubernetes(t *testing.T) {
 	run.Repository.Name = "memql"
 	run.Repository.CloneURL = "https://github.com/znasllc-io/memql.git"
 	run.Image = "docker.io/rancher/mirrored-library-busybox@sha256:101b4afd76732482eff9b95cae5f94bcf295e521fbec4e01b69c5421f3f3f3e5"
-	run.Command = "dd if=/dev/zero of=proof bs=1048576 count=16 2>/dev/null; printf command-complete"
+	run.Command = fmt.Sprintf("dd if=/dev/zero of=proof bs=1048576 count=%d 2>/dev/null; printf command-complete", sizeMiB)
 	run.Artifacts = []string{"proof"}
-	run.TimeoutSeconds = 360
-	run.RunDeadline = time.Now().Add(7 * time.Minute).Format(time.RFC3339Nano)
+	run.TimeoutSeconds = 1200
+	run.RunDeadline = time.Now().Add(22 * time.Minute).Format(time.RFC3339Nano)
 	name := JobName(run.RunID, run.StepKey, run.Attempt)
 	job, err := BuildJob(cfg, run, name)
 	if err != nil {
@@ -67,7 +74,7 @@ func TestArtifactCollectorAgainstLocalKubernetes(t *testing.T) {
 	}
 	kubectl(body, "-n", ns, "create", "-f", "-")
 	var pod *Pod
-	deadline := time.Now().Add(3 * time.Minute)
+	deadline := time.Now().Add(6 * time.Minute)
 	for time.Now().Before(deadline) {
 		pod, err = kube.JobPod(ctx, name)
 		if err != nil {
@@ -89,13 +96,17 @@ func TestArtifactCollectorAgainstLocalKubernetes(t *testing.T) {
 		t.Fatal("fixture command did not finish")
 	}
 	var digest string
+	bound := (sizeMiB + 1) << 20
 	for attempt := 0; attempt < 2; attempt++ {
 		client := NewKube(kube.api, ns)
-		snapshot, err := client.CollectArtifacts(ctx, run, pod, 20<<20)
+		captureCtx, stop := context.WithTimeout(ctx, libraryPhaseTimeout)
+		started := time.Now()
+		snapshot, err := client.CollectArtifacts(captureCtx, run, pod, bound)
+		stop()
 		if err != nil {
 			t.Fatal("collect through independent client", attempt, err)
 		}
-		if len(snapshot.Files) != 1 || snapshot.Files[0].Size != 16<<20 {
+		if len(snapshot.Files) != 1 || snapshot.Files[0].Size != sizeMiB<<20 {
 			t.Fatal("wrong snapshot")
 		}
 		if attempt == 0 {
@@ -106,13 +117,14 @@ func TestArtifactCollectorAgainstLocalKubernetes(t *testing.T) {
 		if err := snapshot.Close(); err != nil {
 			t.Fatal(err)
 		}
+		t.Logf("independent client %d recovered %d MiB in %s", attempt+1, sizeMiB, time.Since(started))
 	}
 	if out := kubectl(nil, "-n", ns, "logs", pod.Metadata.Name, "-c", ContainerStep); strings.TrimSpace(string(out)) != "command-complete" {
 		t.Fatalf("artifact bytes entered logs: %d bytes", len(out))
 	}
 	wrong := *pod
 	wrong.Metadata.UID = "replacement-fixture"
-	if snapshot, err := kube.CollectArtifacts(ctx, run, &wrong, 20<<20); err == nil {
+	if snapshot, err := kube.CollectArtifacts(ctx, run, &wrong, bound); err == nil {
 		snapshot.Close()
 		t.Fatal("stale pod identity was accepted")
 	}
@@ -120,5 +132,5 @@ func TestArtifactCollectorAgainstLocalKubernetes(t *testing.T) {
 	if pods, err := kube.JobPods(ctx, name); err != nil || len(pods) != 0 {
 		t.Fatalf("fixture cleanup: %d pods, %v", len(pods), err)
 	}
-	t.Logf("generated Job exported 16 MiB outside logs, two clients recovered SHA-256 %s, stale UID refused and Job/pods removed", digest)
+	t.Logf("generated Job exported %d MiB outside logs, two clients recovered SHA-256 %s, stale UID refused and Job/pods removed", sizeMiB, digest)
 }

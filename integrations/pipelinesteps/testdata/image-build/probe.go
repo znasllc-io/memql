@@ -6,6 +6,7 @@ import (
 	"net"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"syscall"
 	"time"
@@ -13,11 +14,22 @@ import (
 
 func main() {
 	checks := map[string]bool{}
+	// syscall's frozen amd64 table predates process_vm_*. These are the Linux
+	// syscall ABI numbers for the two platforms admitted by the image builder.
+	var readVM, writeVM uintptr
+	switch runtime.GOARCH {
+	case "amd64":
+		readVM, writeVM = 310, 311
+	case "arm64":
+		readVM, writeVM = 270, 271
+	default:
+		panic("unsupported probe architecture")
+	}
 	_, _, e := syscall.RawSyscall(syscall.SYS_PTRACE, 0, 0, 0)
 	checks["ptrace_denied"] = e == syscall.EPERM
-	_, _, e = syscall.RawSyscall6(syscall.SYS_PROCESS_VM_READV, uintptr(os.Getpid()), 0, 0, 0, 0, 0)
+	_, _, e = syscall.RawSyscall6(readVM, uintptr(os.Getpid()), 0, 0, 0, 0, 0)
 	checks["process_vm_read_denied"] = e == syscall.EPERM
-	_, _, e = syscall.RawSyscall6(syscall.SYS_PROCESS_VM_WRITEV, uintptr(os.Getpid()), 0, 0, 0, 0, 0)
+	_, _, e = syscall.RawSyscall6(writeVM, uintptr(os.Getpid()), 0, 0, 0, 0, 0)
 	checks["process_vm_write_denied"] = e == syscall.EPERM
 	f, err := os.OpenFile("/proc/sys/kernel/hostname", os.O_WRONLY, 0)
 	checks["kernel_settings_not_writable"] = err != nil
@@ -33,6 +45,15 @@ func main() {
 	checks["root_maps_to_unprivileged_user"] = err == nil && len(uidMap) >= 3 && uidMap[0] == "0" && uidMap[1] == "1000"
 	raw, err = os.ReadFile("/proc/self/status")
 	checks["seccomp_filter_active"] = err == nil && strings.Contains(string(raw), "Seccomp:\t2")
+	raw, err = os.ReadFile("/proc/self/attr/current")
+	checks["apparmor_policy_enforced"] = err == nil && strings.HasPrefix(string(raw), "memql-rootless-buildkit-v1-") && strings.HasSuffix(strings.TrimSpace(string(raw)), "(enforce)")
+	if f, err := os.CreateTemp("", "mapped-id-"); err == nil {
+		f.Close()
+		checks["nobody_uid_and_gid_mapped"] = os.Chown(f.Name(), 65534, 65534) == nil
+		os.Remove(f.Name())
+	} else {
+		checks["nobody_uid_and_gid_mapped"] = false
+	}
 	if os.Args[1] != "" {
 		checks["no_other_container_process"] = true
 	}

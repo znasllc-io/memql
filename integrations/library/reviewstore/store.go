@@ -74,12 +74,23 @@ func ApprovedRevisions(ctx context.Context, engine memql.IntegrationEngineAccess
 	if artifact == "" {
 		return nil, fmt.Errorf("review document has no artifact")
 	}
+	if err := auth.ValidateRoleTestContext(ctx); err != nil {
+		return nil, err
+	}
 	call, err := langparser.RenderCall("workDocumentApprovedRevisions", map[string]any{"artifactId": artifact, "versions": versions})
 	if err != nil {
 		return nil, err
 	}
-	ctx = memql.ContextWithCursor(ctx, cursor)
-	return engine.Execute(auth.ContextWithInternalOrigin(auth.ContextWithSystemActor(ctx, "library-review-history")), "query "+call)
+	readCtx := auth.ContextWithForwardedAuthority(ctx, auth.ForwardedAuthority{})
+	readCtx = memql.ContextWithCursor(readCtx, cursor)
+	result, err := engine.Execute(auth.ContextWithInternalOrigin(auth.ContextWithSystemActor(readCtx, "library-review-history")), "query "+call)
+	if err != nil {
+		return nil, err
+	}
+	if err := auth.ValidateRoleTestContext(ctx); err != nil {
+		return nil, err
+	}
+	return result, nil
 }
 
 func VersionReceipt(ctx context.Context, engine memql.IntegrationEngineAccess, owner, source string, version int, file bool) (*memql.ExecuteResult, error) {

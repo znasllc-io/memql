@@ -37,6 +37,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/znasllc-io/memql/component/pipelines"
 	"gopkg.in/yaml.v3"
 )
 
@@ -53,6 +54,18 @@ const osLaneJob = "os-checks"
 // bucket entry would pass. This is the one the repository has, and the list is
 // short enough to state.
 var osFileDependencies = []string{"sdk/ts/**"}
+
+// The shell checks the engine's worker protocol generation when deciding
+// which machines can run a pipeline. A backend-only contract bump must run
+// that parity test before it can merge.
+func TestOsBucketCoversPipelineWorkerContract(t *testing.T) {
+	const changed = "integrations/agent/worker/pipeline_purpose.go"
+	patterns := changesBucketPatterns(t, "osclient")
+	matched, err := pipelines.AnyPathMatches(patterns, []string{changed})
+	if err != nil || !matched {
+		t.Fatalf("a worker contract change must select os-checks: patterns=%v, error=%v", patterns, err)
+	}
+}
 
 // changesBucketPatterns returns the compiled pattern list for one bucket,
 // found via the `changes` job output that names the step supplying it -- the

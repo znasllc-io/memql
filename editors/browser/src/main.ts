@@ -1,6 +1,7 @@
 import { registerDictation } from './dictation';
 import { requestedResource, checkTools } from './handoff.mjs';
-import { BrowserSecrets } from './secrets';
+import { BrowserSecrets, MemorySecrets } from './secrets';
+import { receiveRoleTest, roleTestNonce } from '../../../sdk/ts/src/identityadmin/roleTestHandoff';
 import { appearanceSettings, appearanceTheme, readEditorAppearance } from '../../productivity/src/editorAppearance';
 import { initialize } from '@codingame/monaco-vscode-api';
 import { registerExtension, ExtensionHostKind, type IExtensionManifest } from '@codingame/monaco-vscode-api/extensions';
@@ -14,7 +15,8 @@ import getTextmate from '@codingame/monaco-vscode-textmate-service-override';
 import getTheme from '@codingame/monaco-vscode-theme-service-override';
 import getLanguages from '@codingame/monaco-vscode-languages-service-override';
 import getPreferences from '@codingame/monaco-vscode-preferences-service-override';
-import getStorage from '@codingame/monaco-vscode-storage-service-override';
+import getStorage, { StorageScope } from '@codingame/monaco-vscode-storage-service-override';
+import { InMemoryStorageDatabase } from '@codingame/monaco-vscode-api/vscode/vs/base/parts/storage/common/storage';
 import getSecrets from '@codingame/monaco-vscode-secret-storage-service-override';
 import getLifecycle from '@codingame/monaco-vscode-lifecycle-service-override';
 import getWorkingCopy from '@codingame/monaco-vscode-working-copy-service-override';
@@ -47,10 +49,15 @@ window.MonacoEnvironment = {
   getWorkerOptions: () => ({ type: 'module' }),
 };
 export async function start(isBasic: () => boolean, ready: () => void) {
-  await createIndexedDBProviders();
+  const testMode = Boolean(roleTestNonce());
+  // Resolve before starting extensions: a missing handoff must never connect
+  // the owner profile, even after a reload or an expired popup.
+  const test = testMode ? await receiveRoleTest(`https://os.${location.hostname.replace(/^vscode\./, "")}`) : undefined;
+  if (!testMode) await createIndexedDBProviders();
   registerHTMLFileSystemProvider();
   for (const bundle of (isBasic() ? [] : bundledExtensions)) {
-    const extension = registerExtension(bundle.manifest as unknown as IExtensionManifest, ExtensionHostKind.LocalWebWorker, { system: true });
+    const manifest = { ...bundle.manifest, memqlRoleTest: testMode };
+    const extension = registerExtension(manifest as unknown as IExtensionManifest, ExtensionHostKind.LocalWebWorker, { system: true });
     for (const file of bundle.files) extension.registerFileUrl(file, new URL(`extensions/${bundle.name}/${file}`, document.baseURI).href);
   }
   const host = registerExtension({ name: 'editor-host', publisher: 'znasllc', version: '0.1.0', engines: { vscode: '*' } }, ExtensionHostKind.LocalProcess);
@@ -63,12 +70,12 @@ export async function start(isBasic: () => boolean, ready: () => void) {
     ...getWorkbench(undefined, isolatedOrigin), ...getExtensions({ enableWorkerExtensionHost: true }),
     ...getConfiguration(), ...getDialogs(), ...getModel(), ...getNotifications(),
     ...getTextmate(), ...getTheme(), ...getLanguages(), ...getPreferences(),
-    ...getStorage(), ...getSecrets(), ...getLifecycle(), ...getWorkingCopy(),
+    ...getStorage(testMode ? { databaseFactories: { [StorageScope.APPLICATION]: () => new InMemoryStorageDatabase(), [StorageScope.PROFILE]: () => new InMemoryStorageDatabase(), [StorageScope.WORKSPACE]: () => new InMemoryStorageDatabase() } } : undefined), ...getSecrets(), ...getLifecycle(), ...getWorkingCopy(),
     ...getTrust(), ...getExplorer(), ...getOutput(), ...getGallery({ webOnly: true }),
   }, document.querySelector<HTMLElement>('#workbench')!, {
     workspaceProvider: { workspace: undefined, trusted: true, async open() { return false; } },
     enableWorkspaceTrust: true,
-    secretStorageProvider: new BrowserSecrets(),
+    secretStorageProvider: testMode ? new MemorySecrets() : new BrowserSecrets(),
     configurationDefaults: { ...(themeName ? { 'workbench.colorTheme': themeName } : {}), 'workbench.startupEditor': 'none', 'telemetry.telemetryLevel': 'off', 'window.title': '${dirty}${activeEditorShort}${separator}MemQL Editor' },
     productConfiguration: { nameShort: 'MemQL Editor', nameLong: 'MemQL Editor', enableTelemetry: false },
   });
@@ -88,6 +95,16 @@ export async function start(isBasic: () => boolean, ready: () => void) {
   if (isBasic()) { ready(); return; }
   registerDictation(api);
   await checkTools((command: string) => api.commands.executeCommand(command));
+  if (test) {
+    await api.commands.executeCommand("memql.web.roleTest", test);
+    const testStatus = api.window.createStatusBarItem('memql.editor.roleTest', api.StatusBarAlignment.Left, 1000);
+    const label = ({ reader: 'Viewer', writer: 'Member', developer: 'Developer', admin: 'Admin' } as Record<string,string>)[test.role];
+    testStatus.text = `Testing as ${label}`;
+    testStatus.tooltip = `Ends ${new Date(test.expiresAt * 1000).toLocaleTimeString()}. End the test from MemQL OS.`;
+    testStatus.backgroundColor = new api.ThemeColor('statusBarItem.warningBackground');
+    testStatus.show();
+    setTimeout(() => { testStatus.text = 'Role test ended'; void api.commands.executeCommand('memql.clusters.disconnect'); }, Math.max(0,test.expiresAt * 1000 - Date.now()));
+  }
   if (isBasic()) { ready(); return; }
   api.commands.registerCommand('memql.editor.showTools', () => api.commands.executeCommand('workbench.extensions.search', '@builtin memql'));
   const toolsStatus = api.window.createStatusBarItem('memql.editor.tools', api.StatusBarAlignment.Left, 100);

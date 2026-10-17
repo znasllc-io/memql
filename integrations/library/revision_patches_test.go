@@ -259,3 +259,31 @@ func TestRevisionSectionResearchIncludesBodyAndNestedHeadings(t *testing.T) {
 		}
 	}
 }
+
+func TestDocumentEndExtensionIgnoresRepeatedProvenanceText(t *testing.T) {
+	for _, ending := range []string{"\n", "\r\n"} {
+		source := strings.ReplaceAll("---\nstatement: \"Write: Grind fresh beans before brewing.\"\n---\n# Coffee\n\nGrind fresh beans before brewing.\n", "\n", ending)
+		captured := map[string]any{"content": source, "comments": []any{map[string]any{"id": "note-1", "body": "Append an Enjoy section", "anchor": map[string]any{"kind": "document-end", "quote": "End of document"}}}}
+		proposal, err := buildRevisionProposal(captured, revisionAnswer{Summary: "Add Enjoy", Edits: []revisionReplacement{{Before: "Grind fresh beans before brewing.", After: "Grind fresh beans before brewing.\n\n## Enjoy\n\nServe the coffee warm.", Reason: "Append the requested section", CommentIDs: []string{"note-1"}}}})
+		if err != nil {
+			t.Fatal(err)
+		}
+		want := strings.TrimSuffix(source, ending) + strings.ReplaceAll("\n\n## Enjoy\n\nServe the coffee warm.\n", "\n", ending)
+		if proposal["revisedContent"] != want {
+			t.Fatalf("provenance or body changed: %q", proposal["revisedContent"])
+		}
+		if err := validateRevisionResult(captured, proposal); err != nil {
+			t.Fatal(err)
+		}
+	}
+}
+
+func TestDocumentEndExtensionStillRefusesAmbiguousBodyAndMetadataOnly(t *testing.T) {
+	for _, body := range []string{"Repeated.\n\nRepeated.\n", "Different body.\n"} {
+		captured := map[string]any{"content": "---\nstatement: Repeated.\n---\n" + body, "comments": []any{map[string]any{"id": "note-1", "body": "Append", "anchor": map[string]any{"kind": "document-end", "quote": "End of document"}}}}
+		proposal, err := buildRevisionProposal(captured, revisionAnswer{Summary: "Append", Edits: []revisionReplacement{{Before: "Repeated.", After: "Repeated.\nNew.", Reason: "Append", CommentIDs: []string{"note-1"}}}})
+		if err == nil || proposal != nil {
+			t.Fatalf("unsafe extension accepted: %v", proposal)
+		}
+	}
+}

@@ -194,3 +194,18 @@ func TestGoalWorkflowWaitsForCancellationBeforeOracles(t *testing.T) {
 		t.Fatalf("blocked work: %+v %+v", report, f)
 	}
 }
+
+func TestCandidateLessonIsExplicitEvaluationInputOnly(t *testing.T) {
+	f := &evaluationClient{t: t, fix: true}
+	runner, catalog, matrix := testGoalRunner(t, f)
+	runner.LessonID = "lesson-manual"
+	runner.LessonReceipt = "lesson-event-reviewed"
+	_, err := runner.Run(context.Background(), catalog, matrix)
+	if err != nil {
+		t.Fatal(err)
+	}
+	binding, ok := f.args.Input["lessonEvaluation"].(map[string]any)
+	if !ok || binding["lessonId"] != runner.LessonID || binding["receipt"] != runner.LessonReceipt || binding["scenarioId"] != "implement-and-check" || binding["fixtureVersion"] == "" {
+		t.Fatalf("evaluation lost exact candidate binding: %#v", f.args.Input)
+	}
+}

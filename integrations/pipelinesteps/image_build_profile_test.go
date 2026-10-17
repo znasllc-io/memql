@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -43,6 +44,28 @@ func TestImageBuildProfilesPinTheirExactBytesAndDenyProcessInspection(t *testing
 						}
 					}
 				}
+			}
+		})
+	}
+}
+
+func TestImageBuildAppArmorProfilePinsItsExactBytes(t *testing.T) {
+	body, err := os.ReadFile(filepath.Join("..", "..", "deploy", "k8s", "components", "pipeline-image-builder", ImageBuilderRootlessV1+".apparmor"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if want := fmt.Sprintf("memql-rootless-buildkit-v1-%x", sha256.Sum256(body)); imageBuildAppArmorProfile != want {
+		t.Fatalf("AppArmor profile bytes differ from the runner's pinned name: want %s", want)
+	}
+}
+
+func TestImageBuildProbeCompilesForSupportedArchitectures(t *testing.T) {
+	for _, arch := range []string{"amd64", "arm64"} {
+		t.Run(arch, func(t *testing.T) {
+			cmd := exec.CommandContext(t.Context(), "go", "build", "-o", filepath.Join(t.TempDir(), "probe"), "./testdata/image-build/probe.go")
+			cmd.Env = append(os.Environ(), "CGO_ENABLED=0", "GOOS=linux", "GOARCH="+arch)
+			if out, err := cmd.CombinedOutput(); err != nil {
+				t.Fatalf("probe must compile before cluster qualification: %v\n%s", err, out)
 			}
 		})
 	}

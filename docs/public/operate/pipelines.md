@@ -342,6 +342,20 @@ identities, receipts and the final verdict. See
 mounts is the runner's ([Caches](pipelines-substrate.md#caches)): it knows
 `go` and `npm`, and a step declaring any other fails `pipeline_job_rejected`.
 
+### Scheduled scans
+
+Set `pipeline.schedule` to `daily` or `weekly` and opt each audit stage in with
+`on: [schedule]`. A stage may override the pipeline cadence with its own
+`schedule`. Other declared events remain independent: a weekly audit can also
+run on a release or a manual qualification.
+
+The daily scheduler uses UTC. A weekly period starts Monday; if Monday is
+missed, the next invocation catches up. The first weekly opening pins that
+week's commit, and later main pushes do not repeat it. A failed weekly scan
+remains visible until explicitly rerun; its retry keeps the same commit and
+period. Daily and weekly checks have `/ daily` and `/ weekly` suffixes, so they
+cannot satisfy the required PR or merge-queue check.
+
 ### `select`
 
 | Key | Value | Refused when |
@@ -357,7 +371,8 @@ mounts is the runner's ([Caches](pipelines-substrate.md#caches)): it knows
 |---|---|---|
 | `name` | The stage's name | Missing, breaking the rule, or used twice: `pipeline_stage_invalid` |
 | `needs` | Earlier stages this one depends on. Recorded rather than scheduled on: stages run in the order written whatever it says | A stage that comes later, the stage itself, or no stage at all: `pipeline_stage_invalid` |
-| `on` | The events (`pull_request`, `merge_group`, `push`, `release`, `schedule`, `manual`) and modes (`affected`, `full`) the stage runs for. Absent means every run, including a manual rehearsal | Anything else: `pipeline_event_unknown` |
+| `schedule` | Override the pipeline cadence with `daily` or `weekly` | Requires a pipeline schedule and `on: [schedule]`; otherwise `pipeline_stage_invalid` |
+| `on` | The events (`pull_request`, `merge_group`, `push`, `release`, `schedule`, `manual`) and modes (`affected`, `full`) the stage runs for. Absent means every non-scheduled run, including a manual rehearsal | Anything else: `pipeline_event_unknown` |
 | `runAfterFailure` | Boolean, default `false`. Run this stage even when an earlier stage failed; useful for independent security analysis. Does not erase failures or bypass cancellation | Non-boolean values fail manifest parsing |
 | `steps` | The stage's steps, which run at once | Both `steps` and `channel`, or neither: `pipeline_stage_invalid` |
 | `channel` | Makes the stage a notify stage naming a channel. It carries no steps, and compiles to one step, `<stage>.notify` | A name that breaks the rule: `pipeline_stage_invalid` |
@@ -427,6 +442,7 @@ Every runner exports the same environment to a step's command:
 | `MEMQL_STEP` | The step's key: `<stage>.<step>`, with `#<i>` for a shard |
 | `MEMQL_REPOSITORY` | `owner/name` |
 | `MEMQL_SHA` | The commit under test |
+| `MEMQL_BASE_SHA` | The event's pinned comparison base; empty for an event without a predecessor |
 | `MEMQL_MODE` | `affected` or `full` |
 | `MEMQL_EVENT` | `pull_request`, `merge_group`, `push` or `release` |
 | `MEMQL_VERSION` | The release's tag on a release, the commit otherwise |
@@ -631,6 +647,78 @@ is titled *Refused: \<what\> (\<where\>)*, its summary carrying the sentence and
 what to do. Fix the block and push: the next run reads the fixed manifest.
 
 ---
+
+## Publishing retained security reports
+
+`pipelinesPublishSARIF(runId: ..., stepKey: ..., path: ...)` publishes one
+retained `.sarif` file from a successful scanner in a native pipeline. The caller
+must own the pipeline and still reach its repository through the source's
+GitHub connection. The installed GitHub App needs **Code scanning alerts: Read
+and write** (`security_events: write`); existing installations must accept that
+permission before publication. The App manifest requests it alongside check
+reporting permissions. No installation token reaches a scanner container.
+
+The source commit and full Git ref come from the recorded run. The native
+publisher checks the successful scanner journal, pins the exact artifact,
+and verifies its object version, size and SHA-256 before uploading. The report
+must fit the 32 MiB uncompressed bound and GitHub's compressed upload bound.
+The result identifies the durable `publicationId`, exact `sha256`, and state:
+
+| State | Meaning |
+|---|---|
+| `prepared` | Inputs recorded; no upload claimed yet |
+| `accepted` | GitHub supplied an upload ID; ingestion is still pending |
+| `complete` | GitHub confirmed ingestion |
+| `failed` | GitHub rejected the report during ingestion |
+| `rejected` | The upload was definitively refused |
+| `uncertain` | An uploader is still unresolved, or its reply/receipt was lost |
+
+Use `pipelinesReadSARIF(publicationId: ...)` to observe a pending upload from
+any replica. It never uploads. A repeated publish call for the same evidence
+also observes the existing receipt. A recorded `accepted` state survives a
+status-read failure; a replacement host continues GET requests for that ID.
+An unresolved POST is never silently repeated, including after losing the
+database write that would have recorded its response. Inspect that operation
+before explicitly starting a new scanner run; a timeout is not evidence that
+GitHub accepted nothing.
+
+Terminal receipts release this consumer's artifact pin, so normal retention
+can reclaim the file; the publication journal remains. Uncertain uploads retain
+their evidence for investigation. `complete` proves report delivery, not an
+absence of security findings. A scanner must have succeeded, but its enclosing
+run may still be active or have failed elsewhere. Cancelled runs cannot publish.
+
+Declare a report step after the stage that retains the scanner's artifact:
+
+```yaml
+- name: security-reports
+  runAfterFailure: true
+  steps:
+    - name: codeql-go
+      timeout: 5m
+      sarif:
+        step: analysis.codeql-go
+        path: .memql-security/codeql-go/results.sarif
+```
+
+Give this stage the same event and schedule selection as its producer. The
+producer must be an unsharded command in an earlier stage. The report step
+runs in the driver, with no repository command or credentials sent to a worker.
+It appears in the normal work journal and check result. The installed
+`pipelineSARIFDelivery` recipe publishes once and observes ingestion with
+bounded waits. Missing artifacts, failed producers, rejected or uncertain
+uploads, and ingestion still pending at the deadline fail the step. An
+unrelated failed test does not prevent reports when `runAfterFailure` is set.
+
+A replacement driver recovers the existing publication identity and observes
+its receipt without repeating an uncertain write. A new failed-only attempt
+runs report producers again: an older attempt's skipped scanner is not proof of
+artifact production in the new run. Retrying a delivery therefore differs from
+recovering its interrupted driver. Declaring an artifact alone does not enable
+automatic upload.
+
+GitHub's [SARIF API](https://docs.github.com/en/rest/code-scanning/code-scanning)
+defines the asynchronous ingestion status and required repository permission.
 
 ## Secrets
 
@@ -925,6 +1013,8 @@ says where: `<stage>/<step>`, a stage, or a path into the block.
 | `pipeline_channel_not_allowed` | failure | The channel does not accept deliveries from this pipeline | Allow the pipeline on the channel, then re-run |
 | `pipeline_channel_invalid` | failure | The channel cannot deliver as it is set up: a Discord secret name outside `^[A-Z][A-Z0-9_]{0,63}$` or in `MEMQL_`, a secret that holds no Discord webhook URL, or a recipient that is not a bare email address | Correct the channel, then re-run |
 | `pipeline_notify_failed` | failure | The outbound worker gave the delivery up, or it could not be handed over | Read the worker's error the sentence quotes, then re-run |
+| `pipeline_sarif_delivery_failed` | failure | Scanner evidence, storage, authorization or GitHub's report protocol could not be confirmed | Read the error and inspect the publication receipt before starting another scan |
+| `pipeline_sarif_undelivered` | failure | GitHub has not confirmed ingestion, or the upload is rejected or uncertain | Inspect the retained receipt; pending ingestion can finish later, and an uncertain write is never retried automatically |
 | `pipeline_notify_undelivered` | failure | The delivery had not arrived when the step's time ran out; the sentence says where it stood | Wait for a delivery still being retried, or re-run, which sends another |
 | `pipeline_stage_blocked` | skip | An earlier stage failed | Fix that stage |
 | `pipeline_not_affected` | skip | The change touched nothing the step covers | Nothing |

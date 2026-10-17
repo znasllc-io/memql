@@ -45,6 +45,10 @@ func (i *Integration) IntegrationName() string { return IntegrationName }
 // the readiness evaluator reads it directly by its executor name.
 func (i *Integration) Capabilities() []memql.IntegrationCapability {
 	return []memql.IntegrationCapability{
+		{Name: "reportPublish", Handler: workflowCapability("reportPublish")},
+		{Name: "reportObserve", Handler: workflowCapability("reportObserve")},
+		{Name: "readSARIF", Description: "Observe a caller-owned native SARIF upload without re-uploading. Only complete proves ingestion; uncertain never retries the write.", Handler: i.handleReadSARIF, ArgsSchema: map[string]string{"publicationId": "string (required) -- exact native SARIF publication identity"}},
+		{Name: "publishSARIF", Description: "Publish one successful native scanner artifact through the source owner's current GitHub grant. Journal the upload before observing ingestion; repeated calls never retry an uncertain POST.", Handler: i.handlePublishSARIF, ArgsSchema: map[string]string{"runId": "string (required) -- caller-owned pipeline run", "stepKey": "string (required) -- completed scanner step", "path": "string (required) -- exact retained .sarif path"}},
 		{Name: "workflowFacts", Description: "Read the current claimed workflow's step receipts.", Handler: workflowCapability("workflowFacts")},
 		{Name: "skipStep", Description: "Record a skipped step in the current claimed workflow's journal.", Handler: workflowCapability("skipStep")},
 		{Name: "executeStep", Description: "Execute one compiled step of the current claimed workflow.", Handler: workflowCapability("executeStep")},
@@ -97,6 +101,12 @@ func (i *Integration) Capabilities() []memql.IntegrationCapability {
 			Description: "Open a full, owner-requested rehearsal of the current default-branch head for one of the caller's pipelines. Automatic delivery must be disconnected to prevent duplicate webhook or poll runs. Reads and opens the exact commit through the source owner's GitHub grant; the manual run is deduplicated by repository, SHA, mode and event. Answers {runId, attempt, status, sha, branch}.",
 			Handler:     i.handleRunLatest,
 			ArgsSchema:  map[string]string{"pipelineId": "string (required) -- the caller's v1:pipelines:pipeline; it must be disconnected"},
+		},
+		{
+			Name:        "runRelease",
+			Description: "Open a full release build for an existing tag of the caller's connected pipeline. Resolves and pins the exact commit through the owner's current grant; deduplicates with release webhooks. Creates no tag, public release or publication. Answers {runId, attempt, status, sha, version}.",
+			Handler:     i.handleRunRelease,
+			ArgsSchema:  map[string]string{"pipelineId": "string (required) -- the caller's connected pipeline", "tag": "string (required) -- an existing repository tag"},
 		},
 		{
 			Name:        "rerun",

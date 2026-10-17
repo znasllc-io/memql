@@ -37,14 +37,22 @@ import (
 // collectResponse captures the single WorkbenchForwardResponse a handler sends.
 func collectResponse(t *testing.T) (func(*nodev1.NodeServerMessage) error, func() *nodev1.WorkbenchForwardResponse) {
 	t.Helper()
-	var got *nodev1.WorkbenchForwardResponse
+	responses := make(chan *nodev1.WorkbenchForwardResponse, 1)
 	send := func(m *nodev1.NodeServerMessage) error {
 		if r := m.GetWorkbenchForwardResponse(); r != nil {
-			got = r
+			responses <- r
 		}
 		return nil
 	}
-	return send, func() *nodev1.WorkbenchForwardResponse { return got }
+	return send, func() *nodev1.WorkbenchForwardResponse {
+		select {
+		case response := <-responses:
+			return response
+		case <-time.After(3 * time.Second):
+			t.Fatal("forward response timed out")
+			return nil
+		}
+	}
 }
 
 func silentHandler(t *testing.T) *ForwardHandler {

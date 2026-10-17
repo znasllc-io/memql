@@ -975,6 +975,9 @@ message AiChatMsg {
   // own level and still honour the source. Anything else refuses the turn with
   // metadata code "route_level_invalid", field "level".
   string level = 8;
+  // Ask goal execution destination: auto (or empty), workbench, computer.
+  // This selects tools' execution surface, never the model provider.
+  string execution_destination = 9;
 }
 
 message AiChatMessage {
@@ -3300,7 +3303,21 @@ message IdentityAdminMsg {
     ResetSignInPolicyRequest reset_sign_in_policy = 22;
     SetUserSharedMailboxRequest set_user_shared_mailbox = 23;
     ReviewAccessRequestRequest review_access_request = 24;
+  RoleTestRequest role_test = 25;
   }
+}
+
+// On-demand personas. Credentials are returned once, never in a URL or graph row.
+message RoleTestRequest {
+  string operation = 1; // start | end | list
+  string role = 2; // reader | writer | developer | admin (never owner)
+  string session_id = 3;
+}
+message RoleTestSession {
+  string id = 1;
+  string user_id = 2;
+  string role = 3;
+  int64 expires_at = 4; // Unix seconds
 }
 
 message ReviewAccessRequestRequest {
@@ -3402,6 +3419,8 @@ message IdentityAdminResult {
   // Never carries the link. It is the sender's own error text, which names
   // transport and configuration faults only.
   string invitation_email_error = 12;
+  string role_test_token = 13; // start only; keep in memory
+  repeated RoleTestSession role_test_sessions = 14;
 }
 
 // IssueUserInvitationRequest mints a user-targeted invitation (memql#4270).
@@ -3814,6 +3833,7 @@ message AskVoiceStartMsg {
  string chat_provider = 5;
  string transcription_provider = 6;
  string speech_provider = 7;
+ string execution_destination = 8;
 }
 message AskVoiceStartResult {
  string request_id = 1;

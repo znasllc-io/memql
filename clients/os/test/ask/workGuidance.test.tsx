@@ -29,9 +29,10 @@ function mount(value: ReturnType<typeof setup>, unavailable = false) {
 
 it("targets explicit work and records a human-only receipt without a new goal", async () => {
   const test = setup(); await test.session.select("chat"); test.session.setDraft("Keep the change small."); mount(test);
-  fireEvent.click(screen.getByRole("button", { name: "Guide this work: Review work" }));
+  expect(screen.queryByRole("button", { name: /Guide this work/ })).toBeNull();
+  act(() => { test.session.beginWorkGuidance("work"); });
   const input = screen.getByRole("textbox", { name: "Ask" });
-  expect(document.activeElement).toBe(input); expect(input).toHaveProperty("value", "Keep the change small.");
+  expect(input).toHaveProperty("value", "Keep the change small.");
   expect(screen.getByRole("region", { name: "Guiding work" })).toBeTruthy();
   fireEvent.click(screen.getByRole("button", { name: "Send guidance" }));
   await waitFor(() => expect(test.session.getSnapshot().workGuidanceSending).toBe(false));
@@ -125,12 +126,12 @@ it("does not let a stale poll erase an acknowledged guidance turn", async () => 
   expect(test.session.getSnapshot().turns).toHaveLength(2); test.session.dispose();
 });
 
-it("shows applied only from the refreshed durable receipt", async () => {
+it("shows receipt acknowledgement only from the refreshed durable receipt", async () => {
   const test = setup(); await test.session.select("chat"); test.session.beginWorkGuidance("work"); test.session.send("Guidance", null);
   await waitFor(() => expect(test.session.getSnapshot().workGuidanceSending).toBe(false)); mount(test);
-  expect(screen.queryByText("Used by this work.")).toBeNull();
+  expect(screen.queryByText("Received by this work.")).toBeNull();
   test.setTurns([work(), { ...test.session.getSnapshot().turns[1]!, guidanceStatus: "applied" }]); await act(async () => test.session.reload());
-  expect(screen.getByText("Used by this work.")).toBeTruthy(); test.session.dispose();
+  expect(screen.getByText("Received by this work.")).toBeTruthy(); test.session.dispose();
 });
 
 it("records with models unavailable, bounds Unicode guidance and refuses live voice", async () => {
@@ -141,12 +142,12 @@ it("records with models unavailable, bounds Unicode guidance and refuses live vo
   await waitFor(() => expect(test.session.getSnapshot().workGuidanceSending).toBe(false)); expect(test.transport.guideWork).toHaveBeenCalledOnce(); test.session.dispose();
 });
 
-it("expands many cards for precise guidance while retaining Nexus access", () => {
-  const onGuide = vi.fn(), onOpen = vi.fn(); render(<AskWorkQueue turns={[work("a"), work("b"), work("c"), work("d")]} onGuide={onGuide} onOpen={onOpen} />);
-  const summary = screen.getByRole("button", { name: "4 tasks in progress" }); expect(summary.getAttribute("aria-expanded")).toBe("false");
-  fireEvent.click(summary); fireEvent.click(screen.getByRole("button", { name: "Guide this work: Review c" })); expect(onGuide).toHaveBeenCalledExactlyOnceWith("c"); expect(onOpen).not.toHaveBeenCalled();
-  fireEvent.click(screen.getByRole("button", { name: "Open Nexus" })); expect(onOpen).toHaveBeenCalledExactlyOnceWith();
-  expect(document.querySelector("button button")).toBeNull();
+it("keeps only the Nexus shortcut for many cards, including guidable work", () => {
+  const onOpen = vi.fn(); render(<AskWorkQueue turns={[work("a"), work("b"), work("c"), work("d")]} onOpen={onOpen} />);
+  expect(screen.getAllByRole("button")).toHaveLength(1);
+  expect(screen.queryByRole("button", { name: /Guide this work/ })).toBeNull();
+  fireEvent.click(screen.getByRole("button", { name: "4 tasks in progress" }));
+  expect(onOpen).toHaveBeenCalledExactlyOnceWith();
 });
 
 

@@ -59,6 +59,8 @@ conditional on those observations: do not guess the issue, diagnosis, API,
 file layout or required fix before it has been read. Preserve explicit limits
 on the computer, tools, models and delegation in the section instructions.
 
+A request to explain how a previous answer knew something needs the saved source receipts, not independent verification of the claim in public registries. The file-evidence check reads those receipts before creation; use research only when additional retrieval is needed beyond that source audit.
+
 `requiresResearch` decides whether a file needs an evidence-gathering step BEFORE creation. Set it true only when required source facts must be retrieved, checked or researched beyond the supplied request/context. Set it false for self-contained creation or formatting of supplied content, even when workload is lookup, research or project. A PDF, default style, source ZIP, rendering or packaging does not itself require research: the native Materializer supplies those. This decision is separate from estimated duration and file format. Return a JSON boolean on every answer.
 
 When `requiresFile` is true, `fileName` and `fileFormat` are REQUIRED. Preserve the requested filename and format when specified; otherwise choose a concise descriptive name and the appropriate supported format for the requested deliverable. The only supported formats are markdown, html, txt, csv, json, docx, and pdf. Do not silently substitute a supported format when the user explicitly requests an unsupported one: return that requested format so compilation can refuse it. Omit both fields when `requiresFile` is false. File delivery calls the native Materializer directly with these validated choices; it does not need an agent turn to select a file tool.
@@ -101,10 +103,14 @@ files, sections or workload. When it does not fit, write a fresh acknowledgment.
 Estimate workload separately from intent and from the length of the user's
 message. "quick" means a greeting, supplied information, or an answer already
 supported by the current context/general knowledge, with no retrieval or
-research needed. "lookup" means a short search of saved information or current
+research needed. A greeting such as "hi", "hola", or "how are you?" stays a
+quick reply even if the model takes time to start. Do not invent a task for it.
+Only intent "reply" can be quick. Every requested action or saved file needs a
+work acknowledgement, including a short Markdown file. Its complexity can still
+be trivial. "lookup" means a short search of saved information or current
 state (including personal facts from previous conversations). Missing a personal
 fact in this conversation is a lookup, not a quick denial of knowledge. "research" means
-finding and evaluating multiple sources, or producing a substantive file.
+finding and evaluating multiple sources, or producing any saved file.
 "project" means substantial multi-phase production or a deployable. Never
 classify a question as quick merely because it is short. The quick path replies
 inline; the other workloads can continue in the background while the person

@@ -40,7 +40,7 @@ it("shows time beyond the estimate without counting below zero or inventing anot
 it("keeps a timer while waiting for the first activity update", () => {
  render(<AskWait activity={[]} startedAt={startedAt} hasText={false} />);
  act(() => vi.advanceTimersByTime(4000));
- expect(screen.getByText("Thinking · Step 1 · 56s")).toBeTruthy();
+ expect(screen.getByText("Waiting for your model · 56s")).toBeTruthy();
 });
 
 it("keeps the latest step after it finishes instead of reviving an orphan model timer", () => {

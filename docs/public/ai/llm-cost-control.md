@@ -89,7 +89,7 @@ level: choosing tools and interpreting evidence still require a capable model.
 Routing policies and explicit step overrides continue to decide that route.
 
 A non-quick classifier response with missing or oversized acknowledgment prose
-gets at most one `workAcknowledgement` call at `fast`, bounded to 15 seconds and
+gets at most one `workAcknowledgement` call at `fast`, bounded by the installed recipe to 180 seconds and
 the run’s remaining call ceiling. Valid acknowledgments and quick replies add
 no call. Failure leaves the work visible through its real task status rather
 than manufacturing a reply or retrying indefinitely.
@@ -120,21 +120,52 @@ nobody can audit is an assertion; see
 
 ## Where the chokepoint is (and why it moved)
 
+### Shared local inference
+
+The stream-owning replica admits all local and forwarded model requests through
+one queue. It reserves both the machine-wide slot and the advertised per-model
+slot before waking a waiter. Cancelling a waiter releases any reservation, and
+a disconnected machine refuses queued work. Another capability's completion
+cannot admit a model call. Waiting and inference remain bounded by the original
+run deadline; no retry or replica hop restarts it.
+
+Conversational file requests perform one structured evidence assessment before
+materialization. The check reads bounded owner-authorized source receipts from
+the conversation, distinguishes recorded evidence from current profile context,
+and passes supported findings and references into the file. Missing essential
+evidence returns an explanation to the conversation without an upload. The
+assessment consumes the run's ordinary model-call allowance and does not retry
+itself. The default Spine promotes a quick conversational file request to the
+lookup estimate before execution, reserving room for classification, a possible
+acknowledgment, evidence assessment and composition. Explicit user ceilings and
+already-spent calls remain binding. Self-contained writing does not require
+invented external research.
+
 ### Ask classification and repair limits
 
 Ask classifies the current message with its conversation context. Follow-ups
 do not reuse templates matched only to the latest words. Classification has
-a 15-second deadline; missing, invalid, or failed classification stops with
+a recipe-selected deadline (600 seconds in the shipped Spine, including time
+waiting for a shared local model); missing, invalid, or failed classification stops with
 a retryable error instead of escalating into automation authoring. Only an
 automation intent can send a conversation through that authoring path.
 
 New Ask runs start with a ten-minute allowance, twelve model calls, and one
-automatic retry. A conversational reply tightens those limits to sixty
-seconds and three model calls, preserving stricter existing ceilings. Time
+automatic retry. A conversational reply tightens the call allowance to three while retaining
+the ten-minute admission allowance, preserving stricter existing ceilings.
+A quick workload describes effort, not whether local hardware is cold or busy. Time
 is measured from the stored run start, including classification; a retry or
 move to another replica does not restart the clock. The deadline covers
 in-flight prompt calls and the agent tool loop. Direct agent attempts also
 consume the run's model-call allowance and write attempt receipts.
+
+A classified quick conversational reply uses the `workQuickReply` prompt at
+`fast` through the normal `ai` builtin, with output progress and the durable
+run journal. It reads the authenticated person's profile on the execution
+replica and the conversation from the saved run variables. It does not
+retrieve knowledge or enter the agent tool loop. A request for a
+file, research, navigation or action retains its normal execution recipe;
+`quick` alone never authorizes skipping those requirements.
 
 Automation repairs receive the complete bundle and its diagnostics. They
 may repair failing members or add missing dependencies, but cannot rewrite

@@ -164,9 +164,10 @@ func followWorkRun(ctx context.Context, runID string, read workRowReader, onText
 			return answer, fmt.Errorf("%s", message)
 		}
 		mode, _ := ctx.Value(workFollowModeKey{}).(string)
-		started, hasStart := askTimestamp(run["startedAt"])
-		queuedClassification := run["status"] == "compiling" && hasStart && time.Since(started) >= 15*time.Second
-		if mode == followSnapshot || (mode == followBackground && ((workload != "" && workload != "quick") || queuedClassification)) {
+		// Elapsed time says nothing about intent. A cold classifier must not
+		// turn a greeting into background work. Classification is durable, so
+		// every observing replica makes the same handoff decision.
+		if mode == followSnapshot || (mode == followBackground && ((workload != "" && workload != "quick") || strings.TrimSpace(ack) != "")) {
 			return answer, pending
 		}
 		timer := time.NewTimer(interval)
@@ -180,6 +181,16 @@ func followWorkRun(ctx context.Context, runID string, read workRowReader, onText
 }
 
 func workResultText(run map[string]any, steps []map[string]any, completedResponse string) string {
+	// An explicit workflow answer (for example missing source evidence) wins
+	// over intermediate model assessments and does not claim a file was saved.
+	if outcome, ok := run["outcome"].(map[string]any); ok {
+		if returned, ok := outcome["returned"].(map[string]any); ok {
+			if reply, ok := returned["reply"].(string); ok && strings.TrimSpace(reply) != "" {
+				return reply
+			}
+		}
+	}
+
 	// The query is intentionally unordered. Use the journal's sequence,
 	// not result arrival order or wall clocks, to select the final reply.
 	ordered := append([]map[string]any(nil), steps...)
@@ -192,6 +203,9 @@ func workResultText(run map[string]any, steps []map[string]any, completedRespons
 		}
 		result, _ := ordered[i]["result"].(map[string]any)
 		for _, row := range MaterializeRows(result["value"]) {
+			if row["structured"] != nil {
+				continue
+			}
 			if reply, ok := row["reply"].(string); ok && strings.TrimSpace(reply) != "" {
 				return reply
 			}

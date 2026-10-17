@@ -17,3 +17,9 @@ tool workbenchHost {
  runId string! @autoInjected
  agentId string! @autoInjected
 }
+
+/// Ask permission to use the Workbench when this goal is set to Computer.
+/// Explain the actual limitation. Preserve work while status is awaiting_user.
+@handler(type="function", name="workRequestWorkbenchUse")
+@requiresAgentRole("assistant", "specialist")
+tool requestWorkbenchUse { reason string! }

@@ -5,8 +5,12 @@ import (
 	"database/sql"
 	"encoding/json"
 	"errors"
+	"net"
+	"net/url"
+	"strings"
 
 	pl "github.com/znasllc-io/memql/component/pipelines"
+	"github.com/znasllc-io/memql/core/id"
 )
 
 // The full approved configuration stays private. Historical catalog projection
@@ -67,8 +71,22 @@ func (l *candidateLedger) freezePublicationTarget(ctx context.Context, intent ca
 	if err := target.validate(expected.Target); err != nil {
 		return err
 	}
+	var tagKey any
+	if target.Registry != nil && target.Registry.Tag != "" {
+		matched := false
+		for _, component := range rec.Manifest.Components {
+			if component.Name == expected.Target.Component && (target.Registry.Tag == component.Version || target.Registry.Tag == "v"+component.Version) {
+				matched = true
+			}
+		}
+		if !matched {
+			return errors.New("registry tag differs from approved component version")
+		}
+		tagKey = registryTagKey(*target.Registry)
+	}
 	var body []byte
-	err = tx.QueryRowContext(ctx, `SELECT target_snapshot FROM release_publication_intents WHERE effect_id=$1 AND candidate_id=$2 AND approval_id=$3 AND target_id=$4 AND component_name=$5 AND artifact_name=$6 FOR UPDATE`, intent.EffectID, rec.ID, intent.ApprovalID, expected.Target.TargetID, expected.Target.Component, expected.Target.Artifact).Scan(&body)
+	var storedTagKey sql.NullString
+	err = tx.QueryRowContext(ctx, `SELECT target_snapshot,registry_tag_key FROM release_publication_intents WHERE effect_id=$1 AND candidate_id=$2 AND approval_id=$3 AND target_id=$4 AND component_name=$5 AND artifact_name=$6 FOR UPDATE`, intent.EffectID, rec.ID, intent.ApprovalID, expected.Target.TargetID, expected.Target.Component, expected.Target.Artifact).Scan(&body, &storedTagKey)
 	if err != nil {
 		return err
 	}
@@ -80,17 +98,40 @@ func (l *candidateLedger) freezePublicationTarget(ctx context.Context, intent ca
 		if err := stored.validate(expected.Target); err != nil {
 			return err
 		}
+		if (tagKey == nil && storedTagKey.Valid) || (tagKey != nil && (!storedTagKey.Valid || tagKey != storedTagKey.String)) {
+			return errors.New("stored tag reservation differs from approved destination")
+		}
 		return tx.Commit()
 	}
 	body, err = json.Marshal(target)
 	if err != nil {
 		return err
 	}
-	_, err = tx.ExecContext(ctx, `UPDATE release_publication_intents SET target_snapshot=$2::jsonb WHERE effect_id=$1`, intent.EffectID, string(body))
+	// The unique key permanently reserves a tag for one approved effect, before
+	// any registry write. It serializes different candidates/owners/replicas
+	// without a process-local lock or a transaction held during network I/O.
+	_, err = tx.ExecContext(ctx, `UPDATE release_publication_intents SET target_snapshot=$2::jsonb,registry_tag_key=$3 WHERE effect_id=$1`, intent.EffectID, string(body), tagKey)
 	if err != nil {
-		return err
+		return errors.New("publication target could not be reserved; a version tag may already belong to another release")
 	}
 	return tx.Commit()
+}
+
+func registryTagKey(t candidateRegistryTarget) string {
+	// snapshot() has already validated the URL. Normalize aliases of the same
+	// origin so spelling and the default port cannot evade the shared claim.
+	u, _ := url.Parse(t.Origin)
+	host := strings.ToLower(u.Hostname())
+	port := u.Port()
+	if (u.Scheme == "https" && port == "443") || (u.Scheme == "http" && port == "80") {
+		port = ""
+	}
+	if port != "" {
+		host = net.JoinHostPort(host, port)
+	} else if strings.Contains(host, ":") {
+		host = "[" + host + "]"
+	}
+	return "sha256:" + string(id.NewUntracked().FromString(u.Scheme+"://"+host+"/"+t.Repository+":"+t.Tag))
 }
 
 func readPublicationTarget(ctx context.Context, tx *sql.Tx, candidateID, approvalID string, d pl.ReleaseDestination) (candidatePublicationTarget, candidatePublicationReceipt, error) {

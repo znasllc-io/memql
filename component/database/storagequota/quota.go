@@ -10,6 +10,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"strings"
 	"sync"
 	"time"
 
@@ -46,6 +47,12 @@ type Usage struct {
 	Exempt          bool  `json:"exempt"`
 }
 
+// OwnerID gives accounting one key per person. Only identity:user IDs are
+// aliases; a node in another concept must never become that person's quota.
+func OwnerID(value string) string {
+	return strings.TrimPrefix(value, "v1:identity:user:")
+}
+
 func (s *Store) Database() (*sql.DB, error) {
 	if s == nil || s.DB == nil {
 		return nil, errors.New("storage accounting is unavailable")
@@ -75,6 +82,7 @@ type Guard struct {
 }
 
 func (s *Store) Guard(ctx context.Context, account, key, owner string) (*Guard, error) {
+	owner = OwnerID(owner)
 	if account == "" || key == "" || len(key) > 8192 || len(owner) > 512 {
 		return nil, errors.New("invalid storage identity")
 	}
@@ -191,7 +199,7 @@ ON CONFLICT(scope) DO UPDATE SET used_bytes=storage_capacity_totals.used_bytes+E
 			if size < 0 || size > ClusterBytes {
 				return ErrLimit
 			}
-			batch = append(batch, entry{Key: key, Owner: owner, Size: size})
+			batch = append(batch, entry{Key: key, Owner: OwnerID(owner), Size: size})
 			if len(batch) == cap(batch) {
 				return flush()
 			}
@@ -234,6 +242,7 @@ func (s *Store) transaction(ctx context.Context, f func(*sql.Tx) error) error {
 // staged-data: MUST-NOT-GATE -- hiding a new role revocation would preserve a
 // superseded owner's quota exemption and admit storage after its removal.
 func userLimit(ctx context.Context, tx *sql.Tx, owner string) (int64, bool, error) {
+	owner = OwnerID(owner)
 	if owner == "" {
 		return ClusterBytes, true, nil
 	} // cluster-owned logs/package assets
@@ -247,6 +256,7 @@ AND (id=$1 OR id='v1:identity:user:' || $1) ORDER BY "createdAt" DESC LIMIT 1`, 
 }
 
 func usage(ctx context.Context, tx *sql.Tx, owner string) (Usage, error) {
+	owner = OwnerID(owner)
 	u := Usage{ClusterLimit: ClusterBytes}
 	var err error
 	u.Limit, u.Exempt, err = userLimit(ctx, tx, owner)

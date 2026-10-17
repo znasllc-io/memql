@@ -236,7 +236,7 @@ func (a *AppInference) Call(ctx context.Context, req memqlengine.AppCallRequest)
 	// its next source exactly as it does for a laptop that is asleep, and the
 	// refusal's own code says which it was. A forwarded call meets the gate
 	// again on the holder, which reads the switch at the moment it opens.
-	if refusal := admitAppSession(ctx, a.prefs, a.logger, owner, req.Pin); refusal != nil {
+	if refusal := admitAppSession(ctx, a.prefs, a.logger, owner, req.Pin, req.RunId); refusal != nil {
 		return memqlengine.AppCallResult{}, fmt.Errorf("%w: %w", memqlengine.ErrAppUnavailable, refusal)
 	}
 
@@ -272,7 +272,7 @@ func (a *AppInference) ServeForwardedAppCall(ctx context.Context, registrationId
 			LastError: "a forwarded app call needs an acting user and an app this engine drives",
 		}
 	}
-	if refusal := admitAppSession(ctx, a.prefs, a.logger, owner, req.Pin); refusal != nil {
+	if refusal := admitAppSession(ctx, a.prefs, a.logger, owner, req.Pin, req.RunId); refusal != nil {
 		return memqlengine.AppCallResult{}, true, fmt.Errorf("%w: %w", memqlengine.ErrAppUnavailable, refusal)
 	}
 	var w *workerservice.Worker

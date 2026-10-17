@@ -278,7 +278,9 @@ func EffectiveWorkloadCeilings(c Ceilings, workload string) Ceilings {
 	switch workload {
 	case "lookup":
 	case "quick":
-		wall, calls = 120000, 3
+		// Quick describes the amount of work, not available hardware speed.
+		// Preserve the admission allowance for a shared or cold local model.
+		calls = 3
 	case "research":
 		wall, calls, retries = 2700000, 48, 2
 	case "project":

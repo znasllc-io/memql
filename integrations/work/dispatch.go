@@ -398,28 +398,15 @@ func (i *Integration) DispatchRun(ctx context.Context, runId, ownerUserId string
 
 // dispatchRun claims a run and hands it to the executor.
 //
-// # It decides from the EVENT, and re-checks behind the privileged read
+// The event is a hint for arbitration; the execution seam reloads the journal
+// and checks its current status before running it. A stale event therefore
+// costs one unused claim rather than starting the same work on every replica.
 //
-// Everything the claim needs is on the event: the run id, its status and the
-// automation it names. This package cannot read the run row itself to confirm
-// them -- `workRunById` is @serverOnly AND carries `actor.isClusterOwner`, and
-// the only principals that clear it are the maintenance automations, a list
-// pinned to constructs that live in dsl/ (component/automations'
-// maintenance_actor_gate_test.go asserts exactly that). A Go subscriber is not
-// one, and inventing a synthetic cluster owner here to get past a gate whose
-// membership is deliberately pinned would be the wrong way to win the
-// argument.
-//
-// It does not need to. The seam's implementation loads the run through
-// `automations.LoadRunJournal`, which already reads the run row and its steps
-// under the journal's own cluster actor -- the actor that WROTE those rows --
-// and that is where the status is re-checked against what the event claimed.
-// So the ordering is: claim on the event, verify behind the privileged read,
-// refuse there if the row has moved.
-//
-// The cost of that order is one wasted claim per stale event, held for the
-// lease. That is the right side to be wrong on: a wasted claim delays one run
-// by a lease, while a missed claim runs one run on every replica at once.
+// Reserved test personas first restore their bounded grant through
+// runOwnerActor's fixed service read. That read only bootstraps authority; its
+// service context never reaches the claim, journal loader or dispatcher.
+// The journal is then read under the restored session, including its current
+// validity and ownership checks.
 func (i *Integration) dispatchRun(ctx context.Context, req DispatchRequest) bool {
 	d := i.dispatcherRef()
 	if d == nil {
@@ -434,6 +421,12 @@ func (i *Integration) dispatchRun(ctx context.Context, req DispatchRequest) bool
 		// the sweep's backstop -- goes on to judge the run by its heartbeat and
 		// says what it did. A pipeline's run never reaches the backstop at all
 		// (runnerOwnsRecovery).
+		return false
+	}
+	var err error
+	ctx, err = i.runOwnerActor(ctx, req.RunId, req.OwnerUserId)
+	if err != nil {
+		i.log().Warn("work dispatch: could not restore intake authority", "run", req.RunId, "error", err)
 		return false
 	}
 	claimer := i.runClaimerRef()

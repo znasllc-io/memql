@@ -8,6 +8,7 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"text/template"
 	"time"
 
 	"github.com/uptrace/bun"
@@ -60,6 +61,8 @@ func (e *draftDBCompiler) InvokeAI(_ context.Context, name string, _ map[string]
 	switch name {
 	case "goalComplexityTriage":
 		return e.triage, nil
+	case "workAcknowledgement":
+		return map[string]any{"acknowledgement": "I will prepare the requested file."}, nil
 	case "workDocumentSections":
 		return map[string]any{
 			"assembly": "Join the first and second sections in order.",
@@ -81,6 +84,33 @@ func (e *draftDBCompiler) CompileBundle(cs []memql.SandboxConstruct) memql.Sandb
 	return memql.SandboxCompileBundleWithEngine(cs, e.engine)
 }
 
+type draftPromptEngine struct {
+	*memql.MemQLEngine
+	invoke func(context.Context, string, map[string]any) (any, error)
+}
+
+func (e *draftPromptEngine) InvokeAIProgress(ctx context.Context, name string, data map[string]any) (any, error) {
+	if e.invoke != nil {
+		return e.invoke(ctx, name, data)
+	}
+	return e.MemQLEngine.InvokeAIProgress(ctx, name, data)
+}
+
+func (e *draftPromptEngine) InvokeAIStructured(ctx context.Context, name string, data map[string]any, schemaName string, schema json.RawMessage, strict bool) (string, error) {
+	if e.invoke != nil {
+		value, err := e.invoke(ctx, name, data)
+		if err != nil {
+			return "", err
+		}
+		text, ok := value.(string)
+		if !ok {
+			return "", fmt.Errorf("structured test response is not text")
+		}
+		return text, nil
+	}
+	return e.MemQLEngine.InvokeAIStructured(ctx, name, data, schemaName, schema, strict)
+}
+
 type draftTurnProbe struct {
 	agentId string
 	mu      sync.Mutex
@@ -88,8 +118,9 @@ type draftTurnProbe struct {
 }
 
 type draftComposerProbe struct {
-	requests []composeintegration.ComposeRequest
-	runs     []common.RunContext
+	beforeCompose func(context.Context) error
+	requests      []composeintegration.ComposeRequest
+	runs          []common.RunContext
 }
 
 func (p *draftComposerProbe) Compose(ctx context.Context, req composeintegration.ComposeRequest) (composeintegration.ComposeReply, error) {
@@ -97,6 +128,11 @@ func (p *draftComposerProbe) Compose(ctx context.Context, req composeintegration
 	ac, _ := auth.AccessFromContext(ctx)
 	if !ok || run.RunId == "" || run.GoalId == "" || run.StepKey == "" || ac == nil || ac.UserId != "v1:identity:user:draft-owner" {
 		return composeintegration.ComposeReply{}, fmt.Errorf("native composer lost run/step/owner context")
+	}
+	if p.beforeCompose != nil {
+		if err := p.beforeCompose(ctx); err != nil {
+			return composeintegration.ComposeReply{}, err
+		}
 	}
 	p.requests = append(p.requests, req)
 	p.runs = append(p.runs, run)
@@ -129,7 +165,8 @@ func (p *draftTurnProbe) RunTurn(ctx context.Context, msg *memqlv1.AgentGenerate
 	if p.agentId != "" && msg.AgentId != p.agentId {
 		return "", fmt.Errorf("wrong reasoning agent %q, want %q", msg.AgentId, p.agentId)
 	}
-	prompt := msg.History[0].Content
+	// The current section follows persisted conversation and execution context.
+	prompt := msg.History[len(msg.History)-1].Content
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	p.prompts = append(p.prompts, prompt)
@@ -204,7 +241,8 @@ func TestCompileDraftDB_SeparateReplicaReadsAndRunsValidatedDraft(t *testing.T) 
 	}
 	defer materializer.Stop(context.Background())
 	probe := &draftTurnProbe{agentId: "v1:agents:agent:plannerAgent-draft-owner"}
-	agentIntegration := agents.New(memql.NewAgentRegistry(), receiver)
+	promptEngine := &draftPromptEngine{MemQLEngine: receiver}
+	agentIntegration := agents.New(memql.NewAgentRegistry(), promptEngine)
 	agentIntegration.SetAgentTurnRunner(probe)
 	if err = receiver.RegisterIntegration(agentIntegration); err != nil {
 		t.Fatal(err)
@@ -225,6 +263,107 @@ func TestCompileDraftDB_SeparateReplicaReadsAndRunsValidatedDraft(t *testing.T) 
 		t.Fatal(gerr)
 	}
 	t.Cleanup(func() { _ = gates.Close() })
+
+	t.Run("file call budget across replicas", func(t *testing.T) {
+		testFileCallBudgetAcrossReplica(t, db, plannerEngine, receiver, promptEngine, composerProbe, uploaderProbe, ctx)
+	})
+
+	t.Run("file evidence across replicas", func(t *testing.T) {
+		testFileEvidenceDraftAcrossReplica(t, db, plannerEngine, receiver, promptEngine, composerProbe, uploaderProbe, ctx)
+	})
+
+	t.Run("quick replies keep viewer authority and history across replicas", func(t *testing.T) {
+		prompts := memql.NewPromptRegistry()
+		if _, err := memql.LoadUnifiedPrompts(nil, prompts, template.New("partials")); err != nil {
+			t.Fatal(err)
+		}
+		prompt, ok := prompts.Get("workQuickReply")
+		if !ok || prompt.Level != "fast" {
+			t.Fatal("quick reply lost fast routing")
+		}
+		defer func() { promptEngine.invoke = nil }()
+		for _, role := range []auth.Role{auth.RoleReader, auth.RoleDeveloper, auth.RoleOwner} {
+			for _, message := range []string{"hola hola", "como estas?", "hi"} {
+				t.Run(string(role)+"/"+message, func(t *testing.T) {
+					authority := map[string]any{"roleCeiling": string(role), "credentialClass": "user"}
+					resolver := auth.NewIdentityResolver(auth.QueryRunnerFunc(func(context.Context, string) (any, error) { return map[string]any{"role": string(role)}, nil }), nil)
+					ownerCtx, err := auth.ContextWithPersistedOwner(context.Background(), "v1:identity:user:draft-owner", authority, resolver)
+					if err != nil {
+						t.Fatal(err)
+					}
+					bridge := &draftDBCompiler{engine: plannerEngine, triage: map[string]any{"intent": "reply", "complexity": "trivial", "requiresFile": false, "workload": "quick"}}
+					req := CompileRequest{GoalId: "v1:work:goal:" + id.NewShortId(), RunId: "v1:work:run:" + id.NewShortId(), OwnerUserId: "v1:identity:user:draft-owner", Statement: message, Input: map[string]any{"conversation": map[string]any{"messages": []any{map[string]any{"role": "user", "content": "Me llamo Ana."}, map[string]any{"role": "assistant", "content": "Hola, Ana."}}}}}
+					req.Spine, err = workintegration.CaptureSpine("")
+					if err != nil {
+						t.Fatal(err)
+					}
+					out, err := (&PlannerAgentLoop{engine: bridge, logger: testLogger()}).CompileGoalForRun(ownerCtx, req, nil, bridge)
+					if err != nil {
+						t.Fatal(err)
+					}
+					raw, err := receiver.Execute(ownerCtx, "query authoringConstructById("+encodeArgs(map[string]any{"constructId": out.ConstructId})+")")
+					if err != nil {
+						t.Fatal(err)
+					}
+					source := memql.MaterializeRows(raw)[0]["source"].(string)
+					if strings.Contains(source, "runAgentTurn") || !out.Reply || bridge.calls != 1 {
+						t.Fatalf("greeting entered full agent: %s", source)
+					}
+					auto, err := automations.NewLoader(automations.LoaderOptions{Logger: testLogger()}).CompileSource(source, "")
+					if err != nil {
+						t.Fatal(err)
+					}
+					_, err = receiver.Execute(auth.ContextWithInternalOrigin(ownerCtx), "mutation createWorkRun("+encodeArgs(map[string]any{"spine": req.Spine.Map(), "runId": req.RunId, "goalId": req.GoalId, "automationName": out.AutomationName, "templateFingerprint": out.TemplateFingerprint, "executionAuthority": authority, "status": "running", "input": req.Input, "variables": req.Input, "startedAt": time.Now().UTC().Format(time.RFC3339Nano)})+")")
+					if err != nil {
+						t.Fatal(err)
+					}
+					journal, err := automations.LoadRunJournal(ownerCtx, receiver, req.RunId)
+					if err != nil {
+						t.Fatal(err)
+					}
+					fresh, err := auth.ContextWithPersistedOwner(context.Background(), req.OwnerUserId, journal.ExecutionAuthority, resolver)
+					if err != nil {
+						t.Fatal(err)
+					}
+					fresh = common.ContextWithRun(fresh, common.RunContext{RunId: req.RunId, GoalId: req.GoalId, OwnerUserId: req.OwnerUserId, Spine: req.Spine.Map()})
+					calls := 0
+					promptEngine.invoke = func(callCtx context.Context, name string, data map[string]any) (any, error) {
+						calls++
+						access, _ := auth.AccessFromContext(callCtx)
+						run, _ := common.RunFromContext(callCtx)
+						if name != "workQuickReply" || access == nil || access.Role != role || access.UserId != req.OwnerUserId || run.RunId != req.RunId || run.StepKey == "" {
+							return nil, fmt.Errorf("lost authority or journal context: %s %+v %+v", name, access, run)
+						}
+						if err := prompt.ValidateData(data); err != nil {
+							return nil, err
+						}
+						rendered, err := prompt.Render(data)
+						if err != nil {
+							return nil, err
+						}
+						if !strings.Contains(rendered, message) || !strings.Contains(rendered, "Me llamo Ana.") || !strings.Contains(rendered, "current authenticated profile") {
+							return nil, fmt.Errorf("reply lost message, history or profile: %s", rendered)
+						}
+						return "¡Hola, Ana! ¿En qué te puedo ayudar?", nil
+					}
+					executor := automations.NewExecutor(automations.ExecutorOptions{Engine: receiver, Logger: testLogger(), StepRegistry: steps.NewRegistry()})
+					execution, err := executor.ExecuteAdopted(fresh, auto, automations.RunAdoption{RunId: req.RunId, Variables: journal.Variables, Journal: journal})
+					executor.Close()
+					if err != nil || execution.Status != "completed" || calls != 1 {
+						t.Fatalf("quick reply failed: %v %+v calls=%d", err, execution, calls)
+					}
+					finished, err := automations.LoadRunJournal(ownerCtx, plannerEngine, req.RunId)
+					if err != nil {
+						t.Fatal(err)
+					}
+					receipt, _ := json.Marshal(finished.Steps["reason"])
+					if !strings.Contains(string(receipt), "¡Hola, Ana!") {
+						t.Fatalf("reply absent from durable journal: %s", receipt)
+					}
+				})
+			}
+		}
+	})
 	t.Run("navigation adopts Ask variables on a separate receiver", func(t *testing.T) {
 		bridge := &draftDBCompiler{engine: plannerEngine, triage: map[string]any{"intent": "task", "complexity": "trivial", "requiresFile": false, "workload": "lookup", "acknowledgement": "I’ll open Deployables.", "navigation": map[string]any{"app": "deployables", "section": "deployables"}}}
 		req := CompileRequest{GoalId: "v1:work:goal:nav", RunId: "v1:work:run:" + id.NewShortId(), OwnerUserId: "v1:identity:user:draft-owner", Statement: "Open Deployables", Input: map[string]any{"conversation": []any{map[string]any{"role": "user", "content": "Open Deployables"}}}}

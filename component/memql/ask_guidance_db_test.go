@@ -244,7 +244,7 @@ func TestActiveWorkGuidanceAckCannotCrossConversationWhileWaitingForLock(t *test
 	go func() { done <- b.AcknowledgeWorkGuidance(runtime, []string{items[0].ID}) }()
 	require.Eventually(t, func() bool {
 		var waiting bool
-		err := hold.conn.QueryRowContext(ctx, `SELECT EXISTS (SELECT 1 FROM pg_locks WHERE locktype='advisory' AND NOT granted AND objsubid=1 AND classid::bigint=(($1::bigint >> 32) & 4294967295) AND objid::bigint=($1::bigint & 4294967295))`, hold.key).Scan(&waiting)
+		err := hold.tx.QueryRowContext(ctx, `SELECT EXISTS (SELECT 1 FROM pg_locks WHERE locktype='advisory' AND NOT granted AND objsubid=1 AND classid::bigint=(($1::bigint >> 32) & 4294967295) AND objid::bigint=($1::bigint & 4294967295))`, hold.key).Scan(&waiting)
 		return err == nil && waiting
 	}, 5*time.Second, 10*time.Millisecond)
 	write("updateWorkRun", map[string]any{"runId": child, "parentRunId": secondRun})

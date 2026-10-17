@@ -1368,16 +1368,15 @@ func TestTheReaperNeverJudgesTheProbeSecret(t *testing.T) {
 }
 
 // TestRunnerIsolationDefaults: an hour of trust in a pass, unless the Config
-// says otherwise, and the probe's two bounds -- 90 s for its pods to come
-// up, 60 s for the connector to finish (written out, not read back from the
-// constants).
+// says otherwise, ten minutes for a cold node, then the ordinary readiness
+// and connector bounds (written out, not read back from the constants).
 func TestRunnerIsolationDefaults(t *testing.T) {
 	cfg := rtConfig()
 	cfg.IsolationTTL = 0
 	r := NewRunner(cfg, nil, nil, nil, nil)
-	if r.cfg.IsolationTTL != time.Hour || r.probeUpWait != 90*time.Second || r.probeEndWait != 60*time.Second || r.probeKubeletWait != 5*time.Second {
-		t.Errorf("IsolationTTL %v, bounds %v, %v and %v; want 1h, 1m30s, 1m0s and 5s",
-			r.cfg.IsolationTTL, r.probeUpWait, r.probeEndWait, r.probeKubeletWait)
+	if r.cfg.IsolationTTL != time.Hour || r.probeUpWait != 10*time.Minute || r.probeReadyWait != 90*time.Second || r.probeEndWait != 60*time.Second || r.probeKubeletWait != 5*time.Second {
+		t.Errorf("IsolationTTL %v, bounds %v, %v, %v and %v; want 1h, 10m, 1m30s, 1m0s and 5s",
+			r.cfg.IsolationTTL, r.probeUpWait, r.probeReadyWait, r.probeEndWait, r.probeKubeletWait)
 	}
 	cfg.IsolationTTL = 5 * time.Minute
 	if r := NewRunner(cfg, nil, nil, nil, nil); r.cfg.IsolationTTL != 5*time.Minute {
@@ -1385,6 +1384,37 @@ func TestRunnerIsolationDefaults(t *testing.T) {
 	}
 	if v := NewRunner(cfg, nil, nil, nil, nil).Isolation(); v != (IsolationVerdict{}) {
 		t.Errorf("a new Runner's verdict = %+v, want none", v)
+	}
+}
+
+func TestIsolationAfterColdBuildNodeStillRequiresNetworkProof(t *testing.T) {
+	for _, exit := range []int32{probeExitIsolated, probeExitConnected} {
+		t.Run(strconv.Itoa(int(exit)), func(t *testing.T) {
+			s := isoScript(exit, isoSaid[exit])
+			var started time.Time
+			s.states[0].until = func(*rtCluster) bool {
+				if started.IsZero() {
+					started = time.Now()
+				}
+				return time.Since(started) >= 200*time.Millisecond
+			}
+			h := newIsoHarness(t, s)
+			// Scale the real constructor budget, so this exercises a startup
+			// beyond the former 90-second bound without a minutes-long test.
+			h.r.probeUpWait /= 1000
+			res := h.run(t, isoStep(h, rtRun().StepKey))
+			if exit == probeExitIsolated {
+				if res.Status != pl.OutcomeSucceeded || !h.r.Isolation().Isolated {
+					t.Fatalf("cold startup refused despite isolation proof: %+v, %+v", res, h.r.Isolation())
+				}
+			} else {
+				isoWantRefused(t, h, res)
+				if h.r.Isolation().Inconclusive || h.r.Isolation().Isolated {
+					t.Fatalf("cold startup did not measure the open network: %+v", h.r.Isolation())
+				}
+			}
+			isoLeftNothing(t, h)
+		})
 	}
 }
 

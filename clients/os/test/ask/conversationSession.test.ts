@@ -78,3 +78,59 @@ it("outer tool events do not erase the navigation cue", () => {
  callbacks.activity?.({id:"outer",kind:"action",phase:"completed",at:"now"});
  expect(session.getSnapshot().activity?.id).toBe("navigation");
 });
+
+it("persists an explicit new conversation without asking a model", async () => {
+ const create = vi.fn(async () => ({id:"saved",title:"New conversation"}));
+ const ask = vi.fn(() => ({cancel(){}}));
+ const session = new ConversationSession({ask, conversations:{create,list:async()=>[],read:async()=>[]}});
+ await session.createConversation();
+ expect(create).toHaveBeenCalledOnce(); expect(ask).not.toHaveBeenCalled();
+ expect(session.getSnapshot()).toMatchObject({selectedId:"saved",loading:false,conversations:[{id:"saved"}]});
+ session.dispose();
+});
+it("prevents duplicate New clicks and ignores creation after navigation", async () => {
+ const pending = deferred<{id:string;title:string}>(); const create = vi.fn(() => pending.promise);
+ const session = setup({create});
+ const creating = session.createConversation(); await session.createConversation();
+ expect(create).toHaveBeenCalledOnce();
+ session.newConversation(); pending.resolve({id:"late",title:"New conversation"}); await creating;
+ expect(session.getSnapshot().selectedId).toBeNull();
+ session.dispose();
+});
+it("keeps the current draft when conversation creation fails", async () => {
+ const session = setup({create:async()=>{throw new Error("Permission denied");}});
+ session.setDraft("Keep this"); await session.createConversation();
+ expect(session.getSnapshot()).toMatchObject({draft:"Keep this",error:"Permission denied",loading:false});
+ session.dispose();
+});
+it("returning to the current conversation cancels a pending New selection", async () => {
+ const pending = deferred<{id:string;title:string}>();
+ const session = setup({create:()=>pending.promise});
+ await session.select("current");
+ const creating = session.createConversation();
+ await session.select("current");
+ pending.resolve({id:"late",title:"New conversation"}); await creating;
+ expect(session.getSnapshot()).toMatchObject({selectedId:"current",loading:false});
+ session.dispose();
+});
+
+
+it("keeps the submitted destination while conversation creation is pending", async () => {
+ const created = deferred<{id:string;title:string}>();
+ const ask = vi.fn<AskTransport["ask"]>(() => ({cancel(){}}));
+ const session = new ConversationSession({ask,conversations:{create:()=>created.promise,list:async()=>[],read:async()=>[]}});
+ session.setDestination("workbench");
+ expect(session.send("Build a report",null)).toBe(true);
+ session.setDestination("computer");
+ created.resolve({id:"new",title:"Report"});
+ await Promise.resolve(); await Promise.resolve();
+ expect(ask.mock.calls[0]?.[3]).toMatchObject({routing:{destination:"workbench"}});
+ session.dispose();
+});
+it("passes the destination even when the transport has no conversation store", () => {
+ const ask = vi.fn<AskTransport["ask"]>(()=>({cancel(){}}));
+ const session = new ConversationSession({ask});
+ session.setDestination("computer"); session.send("Use my files",null);
+ expect(ask.mock.calls[0]?.[3]).toMatchObject({routing:{destination:"computer"}});
+ session.dispose();
+});

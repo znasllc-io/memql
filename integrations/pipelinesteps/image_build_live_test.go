@@ -19,6 +19,10 @@ import (
 // authority or shared storage is touched; controls and Job live in one disposable
 // namespace. The real generated clone, builder and collector all execute.
 func TestImageBuildAgainstLocalKubernetes(t *testing.T) {
+	imageBuildAgainstKubernetes(t, localPipelineControls)
+}
+
+func imageBuildAgainstKubernetes(t *testing.T, controls pipelineTestControls) {
 	mode := os.Getenv("MEMQL_PIPELINES_IMAGE_BUILD_TEST_MODE")
 	if mode == "" {
 		mode = "network"
@@ -34,7 +38,7 @@ func TestImageBuildAgainstLocalKubernetes(t *testing.T) {
 	if !shaShape.MatchString(sha) {
 		t.Fatal("fixture requires a full source commit")
 	}
-	ctx, cluster, ns, kubectl := localPipelineControls(t)
+	ctx, cluster, ns, kubectl := controls(t)
 	kubectl(nil, "label", "namespace", ns, "pod-security.kubernetes.io/enforce=baseline")
 	var kube *Kube
 	if networkChecks {
@@ -117,11 +121,19 @@ func TestImageBuildAgainstLocalKubernetes(t *testing.T) {
 	}
 	body, _ = json.Marshal(job)
 	kubectl(body, "-n", ns, "create", "-f", "-")
+	created := time.Now()
 	var pod *Pod
 	for ctx.Err() == nil {
 		pod, err = kube.JobPod(ctx, name)
 		if err != nil {
 			t.Fatal(err)
+		}
+		current, err := kube.GetJob(ctx, name)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if observation := Classify(current, pod, created, time.Now(), cfg, ""); observation.Failure != nil {
+			t.Fatalf("builder cannot run: %s\n%s", observation.Detail, kubectl(nil, "-n", ns, "get", "events", "-o", "wide"))
 		}
 		if state := podContainer(pod, false, ContainerStep); state != nil && state.State.Terminated != nil {
 			if state.State.Terminated.ExitCode != 0 {
@@ -136,6 +148,7 @@ func TestImageBuildAgainstLocalKubernetes(t *testing.T) {
 		}
 	}
 	positive()
+	t.Logf("builder output:\n%s", kubectl(nil, "-n", ns, "logs", pod.Metadata.Name, "-c", ContainerStep))
 	var digest string
 	for attempt := 0; attempt < 2; attempt++ {
 		snapshot, err := NewKube(kube.api, ns).CollectArtifacts(ctx, run, pod, 32<<20)

@@ -200,6 +200,9 @@ func BuildJob(cfg Config, run StepRun, jobName string) (Job, error) {
 	caches := declaredCaches(run.Caches)
 
 	var initContainers []Container
+	if run.ImageBuild != nil {
+		initContainers = append(initContainers, imageBuildIDsContainer(cfg))
+	}
 	if len(caches) > 0 {
 		initContainers = append(initContainers, cachePrepContainer(cfg, run))
 	}
@@ -227,6 +230,7 @@ func BuildJob(cfg Config, run StepRun, jobName string) (Job, error) {
 	if run.ImageBuild != nil {
 		containers[0] = imageBuildContainer(cfg, run, jobName)
 		volumes = append(volumes, Volume{Name: imageBuildStateVolume, EmptyDir: &EmptyDirVolumeSource{SizeLimit: cfg.WorkspaceLimit}})
+		volumes = append(volumes, Volume{Name: imageBuildIDsVolume, EmptyDir: &EmptyDirVolumeSource{SizeLimit: "1Mi"}})
 		podSecurity.FSGroup = ptr(int64(1000))
 	}
 	if len(run.Artifacts) > 0 {
@@ -840,7 +844,7 @@ const (
 	// probeJobDeadline is the probe Job's whole life, past the runner's
 	// bounds on its pods coming up and its connector ending, so a probe whose
 	// runner went ends on its own.
-	probeJobDeadline = 2*probeUpTimeout + probeEndTimeout + 30*time.Second
+	probeJobDeadline = probeUpTimeout + probeReadyTimeout + probeEndTimeout + 30*time.Second
 )
 
 // probeListenerScript is each probe pod's listener: perl, which git depends

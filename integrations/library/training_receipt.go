@@ -6,6 +6,7 @@ import (
 
 	"github.com/znasllc-io/memql/component/auth"
 	"github.com/znasllc-io/memql/component/language/parser"
+	"github.com/znasllc-io/memql/component/memql"
 	"github.com/znasllc-io/memql/core/common"
 	"github.com/znasllc-io/memql/core/id"
 )
@@ -30,11 +31,11 @@ func (i *Integration) saveTrainingSelection(ctx context.Context, run common.RunC
 	if _, _, err := i.ownedTrainingScope(ctx); err != nil {
 		return err
 	}
-	call, err := parser.RenderCall("createWorkObservation", map[string]any{"observationId": receiptID, "runId": run.RunId, "stepKey": run.StepKey, "kind": "decision", "content": "Reviewed lesson selection; delivery and adherence require separate model-call and outcome evidence.", "data": map[string]any{"trainingSelection": receipt, "stage": "selected-for-context"}})
+	call, err := parser.RenderCall("createWorkObservation", map[string]any{"observationId": receiptID, "runId": run.RunId, "stepKey": run.StepKey, "kind": "decision", "content": "Training lesson selection; delivery and adherence require separate model-call and outcome evidence.", "data": map[string]any{"trainingSelection": receipt, "stage": "selected-for-context"}})
 	if err != nil {
 		return err
 	}
-	_, err = i.engine.Execute(auth.ContextWithInternalOrigin(ctx), "mutation "+call)
+	_, err = i.engine.Execute(auth.ContextWithInternalOrigin(memql.ContextWithTrainingEvidenceWrite(ctx)), "mutation "+call)
 	return err
 }
 

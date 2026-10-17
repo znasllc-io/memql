@@ -19,7 +19,7 @@ func TestAskConversationOwnershipAndServerTranscript(t *testing.T) {
 	e, _, _ := sharedReadMergeEngine(t)
 	actor := func(user string) context.Context {
 		ctx := auth.ContextWithToken(context.Background(), &auth.TokenInfo{Subject: user})
-		return auth.ContextWithAccess(ctx, &auth.AccessContext{UserId: user, Role: auth.RoleWriter})
+		return auth.ContextWithAccess(ctx, &auth.AccessContext{UserId: user, Role: auth.RoleReader})
 	}
 	mine := actor("v1:identity:user:" + id.NewShortId())
 	theirs := actor("v1:identity:user:" + id.NewShortId())
@@ -63,7 +63,7 @@ func TestAskConversationCreationSeparatesHistoriesAndPreservesRetries(t *testing
 	actor := func() context.Context {
 		user := "v1:identity:user:" + id.NewShortId()
 		ctx := auth.ContextWithToken(context.Background(), &auth.TokenInfo{Subject: user})
-		return auth.ContextWithAccess(ctx, &auth.AccessContext{UserId: user, Role: auth.RoleWriter})
+		return auth.ContextWithAccess(ctx, &auth.AccessContext{UserId: user, Role: auth.RoleReader})
 	}
 	mine, theirs := actor(), actor()
 	create := func(ctx context.Context, requestID string) string {
@@ -110,7 +110,7 @@ func TestAskUsesWorkIntakeAndPreservesTurnIdentity(t *testing.T) {
 	auth.SetCapabilityCatalog(nil)
 	t.Cleanup(func() { auth.SetCapabilityCatalog(previousCatalog) })
 	user := "v1:identity:user:" + id.NewShortId()
-	ctx := auth.ContextWithAccess(auth.ContextWithToken(context.Background(), &auth.TokenInfo{Subject: user}), &auth.AccessContext{UserId: user, Role: auth.RoleWriter})
+	ctx := auth.ContextWithAccess(auth.ContextWithToken(context.Background(), &auth.TokenInfo{Subject: user}), &auth.AccessContext{UserId: user, Role: auth.RoleReader})
 	calls := 0
 	e.builtinExecutorHandlers["integration.work.createGoal"] = func(callCtx context.Context, args map[string]any, _ int) ([]memorynodes.MemoryNode, error) {
 		calls++
@@ -156,6 +156,31 @@ func TestAskCannotExecuteCapabilityOutsideCallerAuthority(t *testing.T) {
 	require.True(t, e.workCapabilityAllowed(asCaller("developer"), fn))
 	fn.ServerOnly = true
 	require.False(t, e.workCapabilityAllowed(asCaller("owner"), fn), "internal-only is not owner authority")
+}
+
+func TestViewerAskActionsKeepPersonalAndBusinessPermissions(t *testing.T) {
+	e, _, _ := sharedReadMergeEngine(t)
+	user := "v1:identity:user:" + id.NewShortId()
+	ctx := auth.ContextWithAccess(auth.ContextWithToken(context.Background(), &auth.TokenInfo{Subject: user}), &auth.AccessContext{UserId: user, Role: auth.RoleReader})
+	folder := id.NewShortId()
+	_, err := e.workExecuteBuiltin(ctx, map[string]any{"name": "library.createLibraryFolder", "arguments": map[string]any{"folderId": folder, "name": "My notes"}}, 0)
+	require.NoError(t, err)
+	for _, tc := range []struct {
+		name string
+		args map[string]any
+	}{
+		{"agents.createAgent", map[string]any{"agentId": id.NewShortId(), "name": "Forbidden"}},
+		{"campaigns.createAudience", map[string]any{"audienceId": id.NewShortId(), "name": "Forbidden"}},
+		{"campaigns.createCampaign", map[string]any{"campaignId": id.NewShortId(), "name": "Forbidden", "audienceId": "none", "templateId": "none"}},
+		{"os.saveAskConversation", map[string]any{"id": id.NewShortId(), "title": "Forged", "transcript": map[string]any{}}},
+	} {
+		_, err := e.workExecuteBuiltin(ctx, map[string]any{"name": tc.name, "arguments": tc.args}, 0)
+		require.Error(t, err, tc.name)
+		require.Regexp(t, `(?i)permission|organization_|unavailable`, err.Error(), tc.name)
+	}
+	foreign := auth.ContextWithAccess(ctx, &auth.AccessContext{UserId: id.NewShortId(), Role: auth.RoleReader})
+	_, err = e.workExecuteBuiltin(foreign, map[string]any{"name": "library.renameLibraryFolder", "arguments": map[string]any{"folderId": folder, "name": "Stolen"}}, 0)
+	require.Error(t, err)
 }
 
 func TestAskExecutesQualifiedCapabilitiesWithCallerRowScope(t *testing.T) {

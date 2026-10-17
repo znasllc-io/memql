@@ -38,8 +38,9 @@ automation pollPipelines {
 }
 
 /// Once a day: active pipelines are checked at their current default-branch head, and only a
-/// manifest declaring `schedule: daily` opens a full scheduled scan. The opened run is handled by the
-/// ordinary agent driver; this automation executes no pipeline step itself.
+/// manifest declaring a daily or weekly cadence opens the due calendar periods. Weekly scans pin
+/// the first head opened that UTC week, including catch-up after a missed Monday. The ordinary
+/// agent driver handles each run; this automation executes no pipeline step itself.
 @trigger(schedule="0 30 3 * * *", node="agent", lease="pipelines-daily-scan")
 automation schedulePipelines {
   scheduled := builtin pipelinesSchedule()
@@ -77,13 +78,27 @@ automation runPipelineStages {
   }
 }
 
+/// Deliver once, then observe GitHub's asynchronous ingestion. An uncertain
+/// write is never retried. The native host accepts only its actual complete
+/// receipt; leaving this bounded polling window pending fails the report step.
+@template
+automation pipelineSARIFDelivery {
+  upload := builtin pipelineReportPublish()
+  if upload.state != "accepted" { return upload }
+  for delay in [2, 5, 10, 20, 30, 60, 60, 60] {
+    observed := builtin pipelineReportObserve(waitSeconds: delay)
+    if observed.state != "accepted" { return observed }
+  }
+  return upload
+}
+
 /// Stage applicability is pipeline policy: the manifest declares the events
 /// and modes, and the sealed workflow decides which stages a run includes.
 @template
 automation pipelineStageIncluded {
-  args { event string! mode string! on []string! }
+  args { event string! mode string! on []string! runSchedule string! stageSchedule string! }
   if args.event == "schedule" {
-    return args.on.any(value => value == "schedule")
+    return args.on.any(value => value == "schedule") && args.runSchedule == args.stageSchedule
   }
   if args.event == "manual" {
     return args.on.count() == 0 || args.on.any(value => value == "manual")

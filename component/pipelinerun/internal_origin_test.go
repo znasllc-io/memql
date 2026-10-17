@@ -25,9 +25,8 @@ import (
 
 // TestTheStampNeverEscapesItsCall pins the memql#2879 escalation shape: a
 // trusted frame stamps internal, binds it to a variable, and a later frame
-// runs on the inherited context. ContextWithInternalOrigin appears exactly
-// once in this package, inline as the argument to dslStore.executeInternal's
-// one Execute.
+// runs on the inherited context. ContextWithInternalOrigin appears only inline: the DSL store execution and the four
+// SARIF artifact calls, after native source/producer/owner validation.
 func TestTheStampNeverEscapesItsCall(t *testing.T) {
 	entries, err := os.ReadDir(".")
 	if err != nil {
@@ -62,8 +61,8 @@ func TestTheStampNeverEscapesItsCall(t *testing.T) {
 			return true
 		})
 	}
-	if sites != 1 {
-		t.Errorf("want exactly one ContextWithInternalOrigin site in this package (dslStore.executeInternal), found %d", sites)
+	if sites != 5 {
+		t.Errorf("want the DSL-store stamp and four owner-gated SARIF artifact stamps, found %d", sites)
 	}
 }
 
@@ -90,6 +89,7 @@ func TestNoPersonReachesAnotherOwnersRows(t *testing.T) {
 		"disconnect": func() error { _, err := integ.Disconnect(stranger, "p1"); return err },
 		"rerun":      func() error { _, err := integ.Rerun(stranger, "r1", false); return err },
 		"runLatest":  func() error { _, err := integ.RunLatest(stranger, "p1", ""); return err },
+		"runRelease": func() error { _, err := integ.RunRelease(stranger, "p1", "v1.2.3"); return err },
 		"cancel": func() error {
 			_, err := integ.handleCancel(stranger, map[string]any{"runId": "r1"}, 0)
 			return err

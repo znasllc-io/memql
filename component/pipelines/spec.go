@@ -14,8 +14,8 @@ package pipelines
 // is deliberate: a typo in a pipeline must fail that pipeline's run with a
 // typed refusal (D9), not refuse every deploy of the source it sits in.
 type Spec struct {
-	// Schedule opts the pipeline into the sealed periodic schedule. The first
-	// supported cadence is one UTC daily run; stages must also opt in with
+	// Schedule opts the pipeline into a daily or weekly UTC calendar scan. The first
+	// supported cadences are UTC daily and weekly runs; stages also opt in with
 	// `on: [schedule]`.
 	Schedule string `yaml:"schedule,omitempty" json:"schedule,omitempty"`
 	// Workflow selects an installed MemQL automation over the compiled steps.
@@ -54,6 +54,9 @@ type Select struct {
 // StageSpec is one stage. Stages run one after another in the order written;
 // the steps inside a stage run at once (D7).
 type StageSpec struct {
+	// Schedule overrides the pipeline cadence for this scheduled stage.
+	// It affects schedule events only; declared PR/release/manual triggers remain.
+	Schedule string `yaml:"schedule,omitempty" json:"schedule,omitempty"`
 	// RunAfterFailure still runs this stage when an earlier stage failed. It
 	// does not erase failures or bypass cancellation, authorization or leases.
 	RunAfterFailure bool   `yaml:"runAfterFailure,omitempty" json:"runAfterFailure,omitempty"`
@@ -74,10 +77,17 @@ type StageSpec struct {
 	Steps []StepSpec `yaml:"steps,omitempty" json:"steps,omitempty"`
 }
 
-// StepSpec is one step: a shell command in the image's working copy, with
-// the same contract as a deployable's build.command. There is no step
-// language.
+// SARIFReport selects one retained scanner artifact from an earlier step.
+// The source repository/ref and publication authority come from the run.
+type SARIFReport struct {
+	Step string `yaml:"step" json:"step"`
+	Path string `yaml:"path" json:"path"`
+}
+
+// StepSpec declares a command, isolated image build or driver-owned report.
+// Commands have the same shell contract as a deployable's build.command.
 type StepSpec struct {
+	SARIF *SARIFReport `yaml:"sarif,omitempty" json:"sarif,omitempty"`
 	// CPUMilli requests a bounded CPU reservation for the cluster command.
 	// Zero uses the operator's namespace default; 1000 means one CPU.
 	CPUMilli int `yaml:"cpuMilli,omitempty" json:"cpuMilli,omitempty"`

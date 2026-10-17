@@ -20,5 +20,10 @@ query groupMembership workViewerMemberships {
 /// Fresh server-assembled facts about the authenticated person. This does not
 /// select an organization, change authority, or infer a missing job title.
 @executor("workViewerContext")
-@args(profile="object")
+@args(profile="optionalObject")
 builtin workViewerContext { }
+
+/// Bounded source receipts from this caller's saved conversation, read on the executing replica.
+@executor("workSourceContext")
+@args(profile="object")
+builtin workSourceContext { conversationId string! turnId string }

@@ -22,6 +22,23 @@ function sharedMachine() {
  return row;
 }
 
+it('updates the owner and shared call breakdown in Equipment from the existing machine feed', async () => {
+ const row=sharedMachine(); fleet(); await openMachine('Alpha');
+ const breakdown=screen.getByLabelText('Active call breakdown');
+ expect(within(breakdown).getAllByText('—')).toHaveLength(2);
+ const report={nodeId:'agent-test',observedAt:new Date().toISOString(),ownerCalls:2,sharedCalls:3,users:[{id:'ana',activeCalls:3}],groups:[{id:'design',activeCalls:3}]};
+ await act(async()=>h.connection.subscriptions.emit(WORKER_REGISTRATION_CONCEPT,{...row,activeCount:99,sharingActivity:report},'NODE_UPDATED'));
+ expect(within(breakdown).getByText('Your calls').nextElementSibling?.textContent).toBe('2');
+ expect(within(breakdown).getByText('Shared calls').nextElementSibling?.textContent).toBe('3');
+ expect(screen.getByText('5 active calls')).toBeTruthy();
+ expect(screen.queryByText('99 active calls')).toBeNull();
+ await act(async()=>h.connection.subscriptions.emit(WORKER_REGISTRATION_CONCEPT,{...row,connectedNodeId:'agent-next',sharingActivity:report},'NODE_UPDATED'));
+ expect(within(breakdown).getAllByText('—')).toHaveLength(2);
+ expect(h.connection.query.myWorkersWithStatus).toHaveBeenCalledTimes(1);
+ fireEvent.click(screen.getByRole('button',{name:'Activity'}));
+ expect(screen.getByRole('button',{name:'Activity'}).getAttribute('aria-current')).toBeTruthy();
+});
+
 it('places Settings after Activity and groups configuration, sharing and reported facts on that page',async()=>{
  sharedMachine();fleet();await openMachine('Alpha');
  const tabs=screen.getByRole('navigation',{name:'Machine views'});
@@ -135,6 +152,15 @@ it('selects the first model, keeps a chosen model across heartbeats and falls ba
  expect(screen.queryByRole('button',{name:'Personal inference'})).toBeNull();
  expect(screen.queryByText('Tools')).toBeNull();
 });
+it('identifies image generation separately from chat in the equipment selector',async()=>{
+ const {MachineEquipment}=await import('../../src/apps/fleet/FleetWorkspace');
+ const {machineFromRow}=await import('../../src/apps/fleet/rows');
+ const machine=machineFromRow(machineRow({id:'a',labels:{'model:flux2-klein-4b':'imagegen=1','model:qwen3.5:4b':'ctx=262144,tools=1,vision=1'}}));
+ render(<MachineEquipment machine={machine} now={new Date()} onInspect={vi.fn()}/>);
+ expect(screen.getByRole('button',{name:'flux2-klein-4b Image generation'})).toBeTruthy();
+ expect(screen.getByRole('button',{name:'qwen3.5:4b Chat & tools'})).toBeTruthy();
+});
+
 it('gives empty equipment and recent work their own empty states',async()=>{
  h.connection=fakeConnection({myWorkersWithStatus:[machineRow({id:'a',displayName:'Alpha'})]});fleet();
  await openMachine('Alpha');

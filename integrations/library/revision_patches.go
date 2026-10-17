@@ -12,6 +12,7 @@ import (
 	"github.com/yuin/goldmark/ast"
 	"github.com/yuin/goldmark/text"
 	workstate "github.com/znasllc-io/memql/component/work"
+	"github.com/znasllc-io/memql/core/docsmd"
 )
 
 type revisionPassage struct {
@@ -52,7 +53,7 @@ func revisionPassages(captured map[string]any) ([]revisionPassage, error) {
 			return nil, err
 		}
 		if anchor["kind"] == "document-end" {
-			passages = append(passages, revisionPassage{StartLine: len(lines), EndLine: len(lines), Comments: []map[string]any{{"id": comment["id"], "kind": "extend", "quote": "End of document", "feedback": comment["body"], "attachments": comment["attachments"], "prefix": anchor["prefix"], "suffix": anchor["suffix"], "sectionPath": anchor["sectionPath"]}}})
+			passages = append(passages, revisionPassage{StartLine: len(lines), EndLine: len(lines), Comments: []map[string]any{{"id": comment["id"], "kind": "extend", "documentEnd": true, "quote": "End of document", "feedback": comment["body"], "attachments": comment["attachments"], "prefix": anchor["prefix"], "suffix": anchor["suffix"], "sectionPath": anchor["sectionPath"]}}})
 			continue
 		}
 		if anchor["kind"] == "document" {
@@ -164,10 +165,12 @@ func buildRevisionProposal(captured map[string]any, response any) (map[string]an
 	}
 	allowed := map[string]bool{}
 	extensions := map[string]bool{}
+	endNotes := map[string]bool{}
 	for _, p := range passages {
 		for _, c := range p.Comments {
 			allowed[asString(c["id"])] = true
 			extensions[asString(c["id"])] = c["kind"] == "extend"
+			endNotes[asString(c["id"])] = c["documentEnd"] == true
 		}
 	}
 	original := asString(captured["content"])
@@ -181,34 +184,75 @@ func buildRevisionProposal(captured map[string]any, response any) (map[string]an
 	for index, edit := range answer.Edits {
 		edit.Before = strings.ReplaceAll(edit.Before, "\r\n", "\n")
 		edit.After = strings.ReplaceAll(edit.After, "\r\n", "\n")
-		if (edit.Before == "" && (strings.TrimSpace(normalized) != "" || len(answer.Edits) != 1)) || len(edit.Before) > revisionContentLimit || len(edit.After) > revisionContentLimit || strings.TrimSpace(edit.Reason) == "" || len(edit.Reason) > 4000 || len(edit.CommentIDs) == 0 {
+		if len(edit.Before) > revisionContentLimit || len(edit.After) > revisionContentLimit || strings.TrimSpace(edit.Reason) == "" || len(edit.Reason) > 4000 || len(edit.CommentIDs) == 0 {
 			return nil, fmt.Errorf("each proposed edit needs an exact source, feedback reference and explanation")
-		}
-		if edit.Before != "" && (strings.Index(normalized, edit.Before) < 0 || strings.Index(normalized, edit.Before) != strings.LastIndex(normalized, edit.Before)) {
-			return nil, fmt.Errorf("a proposed edit does not identify a unique passage in the saved document")
 		}
 		seen := map[string]bool{}
 		extensionOnly := true
+		endOnly := true
 		for _, id := range edit.CommentIDs {
 			if !allowed[id] || seen[id] {
 				return nil, fmt.Errorf("a proposed edit references unknown or repeated feedback")
 			}
 			seen[id] = true
 			extensionOnly = extensionOnly && extensions[id]
+			endOnly = endOnly && endNotes[id]
 		}
-		start := strings.Index(normalized, edit.Before)
+		// Document-end feedback addresses the visible document body. Generated
+		// provenance repeats the request, often including the very passage the
+		// model anchors to. It is not a second editable occurrence for this scope.
+		search, base := normalized, 0
+		if endOnly {
+			if front, body, ok := docsmd.Split(normalized); ok {
+				search, base = body, len(front)
+			}
+		}
+		at := strings.Index(search, edit.Before)
+		if edit.Before != "" && (at < 0 || at != strings.LastIndex(search, edit.Before)) {
+			return nil, fmt.Errorf("a proposed edit does not identify a unique passage in the saved document")
+		}
+		start := base + at
+		if edit.Before == "" {
+			if strings.TrimSpace(normalized) == "" && len(answer.Edits) == 1 {
+				start = 0
+			} else if endOnly && strings.TrimSpace(normalized) != "" {
+				start = len(normalized)
+			} else {
+				return nil, fmt.Errorf("edit %d has an empty before without an end-of-document feedback anchor; copy a unique exact source passage and include it unchanged around the insertion", index+1)
+			}
+		}
 		prefix, beforeEnd, _ := revisionChangeBounds(edit.Before, edit.After)
 		if extensionOnly && prefix != beforeEnd {
 			return nil, fmt.Errorf("an extension must add content without replacing existing text; use a separate edit for each insertion")
 		}
 		replacements = append(replacements, located{edit, start, start + len(edit.Before), index + 1})
 	}
+	// A model can repeat a rewording as both a standalone edit and the prefix
+	// of its combined rewording + addition. Keep the strict superset only;
+	// competing replacements, deletions and duplicate insertions still refuse.
+	filtered := make([]located, 0, len(replacements))
+	for n, edit := range replacements {
+		subsumed := false
+		for m, other := range replacements {
+			if n != m && revisionReplacementSubsumes(other.revisionReplacement, edit.revisionReplacement) {
+				subsumed = true
+				break
+			}
+		}
+		if !subsumed {
+			filtered = append(filtered, edit)
+		}
+	}
+	replacements = filtered
 	sort.SliceStable(replacements, func(a, b int) bool { return replacements[a].start < replacements[b].start })
 	var result strings.Builder
 	cursor := 0
 	edits := make([]any, 0, len(replacements))
 	for index, edit := range replacements {
 		start, end := offsets[edit.start], offsets[edit.end]
+		if index > 0 && edit.Before == "" && replacements[index-1].Before == "" && edit.start == replacements[index-1].start {
+			return nil, fmt.Errorf("multiple insertions name the same document boundary; combine them into one edit")
+		}
 		if start < cursor {
 			previous := replacements[index-1]
 			relation := "partially overlaps"
@@ -240,6 +284,25 @@ func buildRevisionProposal(captured map[string]any, response any) (map[string]an
 	}
 	proposal["summary"], proposal["edits"], proposal["revisedContent"] = answer.Summary, edits, result.String()
 	return proposal, nil
+}
+
+func revisionReplacementSubsumes(outer, inner revisionReplacement) bool {
+	if inner.Before == "" || outer.Before != inner.Before || inner.After == "" || len(outer.After) <= len(inner.After) || len(outer.CommentIDs) <= len(inner.CommentIDs) {
+		return false
+	}
+	if !strings.HasPrefix(outer.After, inner.After+"\n") && !strings.HasSuffix(outer.After, "\n"+inner.After) {
+		return false
+	}
+	for _, id := range inner.CommentIDs {
+		found := false
+		for _, candidate := range outer.CommentIDs {
+			found = found || candidate == id
+		}
+		if !found {
+			return false
+		}
+	}
+	return true
 }
 
 // Context only disambiguates a replacement. Copy matching context from the

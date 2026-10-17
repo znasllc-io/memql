@@ -457,6 +457,13 @@ feature-gated Kubernetes releases, enable `UserNamespacesSupport` on the API
 server and kubelet, and `UserNamespacesPodSecurityStandards` on the API server
 when baseline Pod Security admission is enforced. Clusters that cannot run this
 pod contract cannot execute typed image builds.
+
+The fixed ID-preparation init container supplies read-only subordinate-ID
+files for the builder. Its nested namespace stays inside Kubernetes' default
+65,536-ID pod range and maps inner IDs 0–65,534; it excludes the outer root and
+the builder's own ID from the subordinate ranges. Images requiring a higher
+numeric owner cannot use this profile. The init container sees only its small
+scratch volume, with no checkout or credentials.
 The runner supplies the pinned commit as `MEMQL_COMMIT` and, for a release
 event, the bare release version as `MEMQL_RELEASE`; both names are reserved and
 cannot be set in the manifest. Other events receive an empty `MEMQL_RELEASE`.
@@ -469,12 +476,22 @@ Operators explicitly install the optional `pipeline-image-builder` Kubernetes
 component, set `MEMQL_PIPELINES_IMAGE_BUILDER=rootless-buildkit-v1`, and choose a
 dedicated `MEMQL_PIPELINES_NODE_POOL`. The component's default pool is `builds`;
 its selector and toleration must match any configured value. It installs
-content-addressed seccomp profiles on those nodes. A missing profile refuses
-container startup; there is no permissive fallback. The fixed installer alone
-mounts its kubelet seccomp directory in `memql-build-system`. That operator
+content-addressed seccomp and AppArmor profiles on those nodes. A missing profile
+refuses container startup; there is no permissive fallback. The fixed installer
+writes its kubelet seccomp directory in `memql-build-system`. Its separate
+AppArmor loader uses the node's `apparmor_parser` through a recursively read-only
+host root and a writable AppArmor policy interface, with only `MAC_ADMIN` and
+`SYS_CHROOT`. It accepts only the fixed ConfigMap profile, never repository code.
+The node must provide an AppArmor parser supporting the `userns` rule. That operator
 namespace admits host paths; the untrusted `memql-pipelines` namespace keeps
 baseline admission and its service accounts have no grants in the operator
 namespace. The installer has no API token or allowed network access.
+
+The ArgoCD project must permit `memql-build-system` as a destination in addition
+to the pipeline namespace. Update an existing project's explicit destination
+list when installing the component; otherwise ArgoCD refuses its namespace
+resources. Keep the installer component pinned to the same engine release as
+the instance. Qualify the profile before enabling image execution.
 
 BuildKit runs as UID/GID 1000 with only SETUID/SETGID for its pinned mapping
 helpers. The local seccomp profile permits rootless namespaces and mounts but
@@ -484,10 +501,22 @@ service-account token, shared cache, service sidecar or forwarded secret.
 Network isolation and CPU, memory, scratch, duration and collection ceilings
 still apply. Clone credentials stay in the separate init container.
 
-Rootless BuildKit uses its native snapshotter and process sandbox for every
+The builder uses a content-pinned `Localhost` AppArmor profile: the runtime's
+default denies the nested mounts required by rootless BuildKit. The dedicated
+profile permits those mounts and user namespaces while denying writes to kernel
+settings and the security interface. The operator's profile loader alone uses
+`Unconfined`; builder Jobs remain admissible under baseline policy. The pinned
+seccomp profile, pod user namespace, Dockerfile process sandbox and network
+isolation remain mandatory. Other containers keep their runtime AppArmor defaults.
+No node-wide AppArmor or user-namespace setting is changed.
+
+Rootless BuildKit uses the kernel's OverlayFS snapshotter and a process sandbox for every
 Dockerfile `RUN`; the untrusted process cannot inspect or signal the builder
 daemon through `/proc`. The disposable container PID boundary and complete Pod
 deletion also contain failures; builds cannot share a daemon across attempts.
+Copy-on-write layers avoid copying the entire accumulated filesystem for each
+Dockerfile instruction. The node must support rootless OverlayFS over its pod
+volumes; there is no silent full-copy or FUSE fallback.
 The profile does not grant BuildKit insecure entitlements. Host user-namespace
 and AppArmor policy must support this profile; qualify the actual node runtime
 and architecture before opting in. Local ARM64 qualification does not certify
@@ -500,6 +529,32 @@ Its default `network` mode proves positive and denied network controls; the
 NetworkPolicy. Both prove process restrictions, pinned checkout, image export,
 two independent artifact readers, OCI verification and
 foreground Job/Pod cleanup. Runtime profile changes require repeating this proof.
+
+### Qualifying another Kubernetes installation
+
+The selected-cluster tests use the same generated Jobs and controls in fresh,
+owned namespaces. They never change existing namespace policies, application
+workloads, credentials or shared storage. The older local tests still refuse
+non-local API servers. Before running the image case, install the fixed profile
+component through the installation's GitOps configuration. These tests may start
+a node in the selected pool; include its cost in the qualification budget.
+
+```bash
+MEMQL_PIPELINES_QUALIFICATION_CONTEXT=<explicit-context> \
+MEMQL_PIPELINES_QUALIFICATION_SERVER=https://<expected-api-server> \
+MEMQL_PIPELINES_TEST_NODE_POOL=builds \
+MEMQL_PIPELINES_IMAGE_BUILD_TEST_SHA=<pushed-fixture-commit> \
+MEMQL_PIPELINES_IMAGE_BUILD_TEST_PLATFORM=linux/amd64 \
+  go test ./integrations/pipelinesteps -run '^TestSelectedCluster' -count=1 -v -timeout=45m
+```
+
+The API server must match the independently selected HTTPS endpoint. Run the
+isolation case from a zero-node pool to measure cold admission; capture the
+node count before it starts. It includes positive connectivity, denied egress,
+and intentionally broken policy controls inside its own namespace. The image
+case requires network controls and verifies process isolation, exact source,
+OCI export/read-back and cleanup. A skipped case is not qualification. Namespace
+cleanup does not remove the operator's profile installer or shared cache.
 
 ## The isolation proof
 
@@ -684,7 +739,7 @@ replica holds is reached over a forward under the owner's authority -- skipped,
 never failed, when it cannot be. With no machine that offers the need and allows pipelines, the step is
 refused `pipeline_no_machine_for_need`, and nothing ran. An otherwise eligible
 worker that is offline can keep admission waiting for its connection; revoked
-workers, withdrawn repository consent and incompatible contracts cannot. Under contract 3, policy rejection, busy build capacity and an unavailable
+workers, withdrawn repository consent and incompatible contracts cannot. Under contract 4, policy rejection, busy build capacity and an unavailable
 runtime are confirmed pre-execution refusals and permit another candidate.
 When the dispatcher confirms that shared build capacity was busy, an eligible
 worker is offline, or its connection disappeared before dispatch, the fleet
@@ -726,7 +781,16 @@ enrollments, repository hosts, architectures, images and runtime users. Pull
 request writes never enter the trusted push/release cache. Cockpit retains up
 to 10 GiB between builds, evicting oldest cache directories; this is not a hard
 disk quota while a command runs. Native steps cannot declare services or these
-managed caches. Upgrade the engine and Cockpit together for contract 3.
+managed caches. Upgrade the engine and Cockpit together for contract 4.
+
+Artifacts use the existing authenticated worker stream, in data frames of at
+most 256 KiB before the terminal result. The receiver spools to a private file
+and checks the terminal byte count and SHA-256 before extraction. Missing,
+truncated, oversized or corrupt transfers cannot receive Library receipts.
+Cockpit admits at most 1024 files, 256 MiB of file contents and 256 MiB of
+compressed archive; the engine's configured artifact quota may be lower.
+Output logs remain separate and secret-masked. Older workers are ineligible
+until upgraded; there is no fallback to an inline archive.
 
 **What the machine does with the step** -- the clone (the cluster Job's own
 clone script, over `https` only), the command in the machine's own environment,
@@ -1094,11 +1158,10 @@ node and of AKS.
 |---|---|---|
 | `checks` | `go-checks` (30 min: build, vet, the env registry, the DSL lint and engine load, and the SDK, concept-snapshot, authoring-surface and proto drift gates), `path-routing`, the five `build-<tag>` passes, `build-clustere2e`, `module-boundaries` and `bash32-smoke` | every run |
 | `vulnerabilities` | `go-vulnerabilities` (govulncheck) and `npm-vulnerabilities` | every event, after a failure too |
-| `secrets-current` | `gitleaks` over the working tree | pull requests and manual runs, after a failure too |
-| `secrets-history` | `gitleaks` over full reachable history (6 hours, 4 CPUs) | push, merge group, release and manual runs, after a failure too |
+| `secrets-current` | `gitleaks` over every new commit since the pinned event base | pull requests, merge groups and pushes, after a failure too |
 | `tests` | `go-tests` (affected packages outside the db-gated trees, 4 shards), `db-tests` (the affected db-gated packages, 5 shards, each beside its own Postgres sidecar), `fuzz`, `os-checks` when the change touches the OS bucket, `sdk-ts-typecheck`, `viewkit-checks`, `mcp-conformance`, `proving` and the seven `test-<tag>` passes | every run |
 | `gates` | `gate-inputs` | pull requests and manual runs |
-| `analysis` | `codeql-go` (3 hours), `codeql-javascript`, `codeql-python` and `sbom` | push, release, scheduled and manual runs, after a failure too |
+| `analysis` | Full-history `gitleaks` (6 hours, 3 CPUs), `codeql-go` (3 hours), `codeql-javascript`, `codeql-python` and `sbom` | weekly audits, releases and manual runs, after a failure too |
 
 No step names a need, so the pipeline runs on the cluster alone and connects
 with `compute: cluster`. Its longest steps outlast the default 2-hour run
@@ -1126,10 +1189,19 @@ What a run of it costs, and where it falls short of `ci.yml`: every step clones
 the commit on its own (10 to 76 seconds a step for this repository, measured on
 a local cluster); every Go step fetches the standalone Tailwind CLI into the
 checkout to build the identity stylesheet, which no declared cache holds; and
-`go-checks`' authoring-surface gate (`scripts/ci/memqlbreaking-base.sh`) has no
-base commit in a run -- a step's checkout is one commit with no remote -- so it
-compares against the committed baseline, which the change under test can edit
-too, and says so: `ci.yml`'s lane stays the gate for it.
+`go-checks`' authoring-surface gate uses `MEMQL_BASE_SHA`, which carries the
+saved event base across executor replicas. It fetches that pinned commit when
+needed instead of trusting a baseline edited by the same PR. An event without
+a predecessor falls back explicitly to the committed baseline.
+
+PR, merge-group and push secret scans inventory every commit reachable from
+the tested head but not the saved base. They therefore detect secrets removed
+before the final commit as well as secrets still present. An unreadable base or
+incomplete fetch fails the scan. With no predecessor, the scan explicitly falls
+back to full history; its ordinary 30-minute budget may then require an operator
+rerun with a suitable budget. Full-history and CodeQL work shares one stage, so admitted Jobs can overlap
+instead of adding their longest durations. It runs weekly and for release
+qualification. Daily dependency vulnerability checks remain enabled.
 
 ### The toolchain image
 

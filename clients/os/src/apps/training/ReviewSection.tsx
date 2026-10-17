@@ -1,3 +1,4 @@
+import { LessonsReview } from "./LessonsReview";
 import { RecordListSkeleton } from "../../kit/RecordListSkeleton";
 import { useMemo } from "react";
 // `Check` is aliased: the kit exports a control by that name, and two
@@ -52,6 +53,9 @@ export function ReviewSection({
         <Button onClick={queue.reload}>Re-read</Button>
       </Head>
 
+      <LessonsReview />
+      <Subhead>Document passages</Subhead>
+
       {domainsError !== "" ? (
         <Notice
           tone="error"
@@ -73,7 +77,7 @@ export function ReviewSection({
       ) : null}
 
       {groups.length === 0 && queue.state === "ready" ? (
-        <Caption>Nothing awaiting review.</Caption>
+        <Caption>No document passages awaiting review.</Caption>
       ) : null}
 
       {queue.state === "loading" && groups.length === 0 ? (

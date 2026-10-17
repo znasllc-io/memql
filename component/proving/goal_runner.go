@@ -31,6 +31,9 @@ type GoalClient interface {
 }
 
 type GoalRunner struct {
+	// Optional, explicitly selected candidate; never applied to ordinary work.
+	LessonID      string
+	LessonReceipt string
 	Client        GoalClient
 	Files         fs.FS
 	CatalogDir    string
@@ -173,6 +176,12 @@ func (g *GoalRunner) runCase(ctx context.Context, s goaleval.Scenario, setup goa
 			}
 			statement := s.Goal + "\n\nEvaluation checkout: " + workspace.Checkout + "\n" + strings.Join(s.Constraints, "\n") + "\nUse only this checkout. Its NOTES.txt contains uncommitted work; operator-untracked.txt must remain untracked. Do not change go.mod or the evaluation marker. Do not call another model or delegate to an external app. Record commands and their outcomes. Preserve a Go test as the reproduction or regression artifact. Run it before changing implementation, and rerun it after any fix. For the recorded package check, use workerHost exec with cmd=go test -count=1 ./... and cwd set to this exact checkout."
 			args := client.CreateGoalArgs{NoPaidProviders: true, Statement: statement, Source: setup.ReasoningModel, Level: "reasoning", RequestedVia: "api", Input: map[string]any{"workspace": workspace.Checkout}, Ceilings: map[string]any{"maxModelCalls": matrix.MaxModelCalls, "wallClockMs": matrix.WallClockMinutes * 60000, "maxRetries": 2}}
+			if g.LessonID != "" || g.LessonReceipt != "" {
+				if g.LessonID == "" || g.LessonReceipt == "" {
+					return nil, fmt.Errorf("candidate evaluation requires both lesson identity and exact receipt")
+				}
+				args.Input["lessonEvaluation"] = map[string]any{"lessonId": g.LessonID, "receipt": g.LessonReceipt, "scenarioId": s.ID, "fixtureVersion": s.Fixture.Version}
+			}
 			if err := writeGoalJSON(filepath.Join(workspace.Root, "submission.json"), args); err != nil {
 				return nil, err
 			}
@@ -381,6 +390,11 @@ func goalReceiptEvidence(calls, observations []client.Row, started time.Time) (u
 		}
 		uses = append(uses, goaleval.ModelUse{Role: role, Level: level, Source: source, Model: model, Calls: 1, Evidence: []string{"modelCall:" + client.RowString(call, "id")}, InputTokens: unknownUsage("see raw journal; usage attribution is not a complete provider total"), OutputTokens: unknownUsage("see raw journal; usage attribution is not a complete provider total"), CostUSD: unknownUsage("no provider billing receipt")})
 	}
+	publicRows := make([]map[string]any, 0, len(observations))
+	for _, o := range observations {
+		publicRows = append(publicRows, map[string]any(o))
+	}
+	bindings = append(bindings, goaleval.DeliveredLessonBindings(publicRows)...)
 	for _, o := range observations {
 		data, _ := o["data"].(map[string]any)
 		if selection, ok := data["skillSelection"].(map[string]any); ok {

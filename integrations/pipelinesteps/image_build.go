@@ -11,13 +11,40 @@ import (
 )
 
 const (
-	ImageBuilderRootlessV1 = "rootless-buildkit-v1"
-	imageBuildImage        = "docker.io/moby/buildkit@sha256:f8a833b2de9d68e27f0815e4a737abdfaf8a2e4c615650557df11025101557b4"
-	imageBuildStateVolume  = "image-build-state"
-	imageBuildStatePath    = "/home/user/.local/share/buildkit"
-	imageBuildProfileAMD64 = "700baaefa1069f7a497a41c40d48ca56d928acef43ff17b8051c01b317b15d4a"
-	imageBuildProfileARM64 = "6be44c311d1681aa336f133a6176cd4d9f48fd8a300891bf032e48dc16127efa"
+	ImageBuilderRootlessV1    = "rootless-buildkit-v1"
+	imageBuildImage           = "docker.io/moby/buildkit@sha256:f8a833b2de9d68e27f0815e4a737abdfaf8a2e4c615650557df11025101557b4"
+	imageBuildStateVolume     = "image-build-state"
+	imageBuildStatePath       = "/home/user/.local/share/buildkit"
+	imageBuildIDsVolume       = "image-build-ids"
+	imageBuildIDsPath         = "/image-build-ids"
+	imageBuildProfileAMD64    = "700baaefa1069f7a497a41c40d48ca56d928acef43ff17b8051c01b317b15d4a"
+	imageBuildProfileARM64    = "6be44c311d1681aa336f133a6176cd4d9f48fd8a300891bf032e48dc16127efa"
+	imageBuildAppArmorProfile = "memql-rootless-buildkit-v1-91e68b456bef5cb6ad7fa88619fd163f9777934b708556f297322488c3bc0ae1"
 )
+
+// Kubernetes assigns 65536 IDs to a pod user namespace by default. The pinned
+// rootless image's host-oriented sub-ID range starts at 100000, outside that
+// namespace. Keep the nested mapping inside 1..65535, excluding the builder's
+// own 1000 (which RootlessKit maps to root). Never map the outer namespace's
+// root. This supplies inner IDs 0..65534, including the conventional nobody.
+const imageBuildSubIDs = "user:1:999\nuser:1001:64535\n"
+
+func imageBuildIDsContainer(cfg Config) Container {
+	return Container{
+		Name: "image-build-ids", Image: cfg.CloneImage,
+		Command: []string{"/bin/sh", "-ec", "printf '%s' '" + imageBuildSubIDs + "' > " + imageBuildIDsPath + "/subuid; cp " + imageBuildIDsPath + "/subuid " + imageBuildIDsPath + "/subgid; chmod 0444 " + imageBuildIDsPath + "/subuid " + imageBuildIDsPath + "/subgid"},
+		SecurityContext: &SecurityContext{
+			RunAsUser: ptr(int64(0)), RunAsGroup: ptr(int64(0)),
+			ReadOnlyRootFilesystem: ptr(true), AllowPrivilegeEscalation: ptr(false),
+			Capabilities: &Capabilities{Drop: []string{capAll}},
+		},
+		Resources: &Resources{
+			Requests: map[string]string{"cpu": "10m", "memory": "16Mi", "ephemeral-storage": "1Mi"},
+			Limits:   map[string]string{"cpu": "100m", "memory": "32Mi", "ephemeral-storage": "1Mi"},
+		},
+		VolumeMounts: []VolumeMount{{Name: imageBuildIDsVolume, MountPath: imageBuildIDsPath}},
+	}
+}
 
 func imageBuildProfile(platform string) string {
 	arch, digest := "arm64", imageBuildProfileARM64
@@ -88,7 +115,7 @@ func imageBuildContainer(cfg Config, run StepRun, jobName string) Container {
 	compiled.Env = nil // arbitrary forwarded variables cannot configure BuildKit
 	c := stepContainer(compiled, jobName, "", nil)
 	c.Env = append(c.Env,
-		plainVar("BUILDKITD_FLAGS", "--oci-worker-snapshotter=native"),
+		plainVar("BUILDKITD_FLAGS", "--oci-worker-snapshotter=overlayfs"),
 		plainVar("BUILDKIT_HOST", ""),
 	)
 	c.SecurityContext = &SecurityContext{
@@ -96,8 +123,14 @@ func imageBuildContainer(cfg Config, run StepRun, jobName string) Container {
 		AllowPrivilegeEscalation: ptr(true), // only the pinned image's newuidmap/newgidmap helpers
 		Capabilities:             &Capabilities{Drop: []string{capAll}, Add: []string{"SETUID", "SETGID"}},
 		SeccompProfile:           &SeccompProfile{Type: "Localhost", LocalhostProfile: imageBuildProfile(run.Platform)},
+		// The runtime default denies nested mounts. The installed profile allows
+		// those while retaining kernel-file and cross-profile process restrictions.
+		AppArmorProfile: &AppArmorProfile{Type: "Localhost", LocalhostProfile: imageBuildAppArmorProfile},
 	}
 	c.VolumeMounts = append(c.VolumeMounts, VolumeMount{Name: imageBuildStateVolume, MountPath: imageBuildStatePath})
+	for _, name := range []string{"subuid", "subgid"} {
+		c.VolumeMounts = append(c.VolumeMounts, VolumeMount{Name: imageBuildIDsVolume, MountPath: "/etc/" + name, SubPath: name, ReadOnly: true})
+	}
 	if run.CPUMilli == 0 {
 		c.Resources.Requests["cpu"] = "1"
 		c.Resources.Limits["cpu"] = "2"

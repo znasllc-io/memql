@@ -57,8 +57,8 @@ func TestBuildIsolationProbe(t *testing.T) {
 
 	t.Run("it ends on its own: a deadline past both of the runner's bounds, and a short TTL", func(t *testing.T) {
 		ads := job.Spec.ActiveDeadlineSeconds
-		if ads == nil || *ads < 90+60 || *ads > 600 {
-			t.Errorf("activeDeadlineSeconds = %v, want past the runner's 90 s and 60 s bounds and within ten minutes", ads)
+		if ads == nil || *ads < 600+90+60 || *ads > 900 {
+			t.Errorf("activeDeadlineSeconds = %v, want cold startup plus readiness and connection checks, within fifteen minutes", ads)
 		}
 		// A probe a crashed runner leaves holds a slot under the ceiling
 		// until it is collected; nothing ever reads it afterwards.

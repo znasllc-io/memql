@@ -178,7 +178,7 @@ func (i *Integration) configuredCandidate(ctx context.Context) (*candidatePrepar
 		}
 		versions.sources[source.Component] = source
 	}
-	targets := &candidateTargetReader{targets: map[string]candidateRegistryTarget{}, files: map[string]candidateFileTarget{}, secret: i.resolver.systemSecret}
+	targets := &candidateTargetReader{targets: map[string]candidateRegistryTarget{}, files: map[string]candidateFileTarget{}, secret: i.resolver.systemSecret, appToken: i.resolver.appToken}
 	for _, target := range cfg.Registries {
 		owned, _, _, err := target.snapshot()
 		if err != nil {
@@ -235,7 +235,7 @@ func (i *Integration) handleCandidateConfiguration(ctx context.Context, _ map[st
 		if err != nil {
 			return nil, err
 		}
-		targets = append(targets, targetView{ReleaseDestination: pl.ReleaseDestination{TargetID: target.ID, TargetDigest: digest, Component: target.Component, Artifact: target.Artifact, Operation: "publish"}, Kind: "oci", Origin: target.Origin, Repository: target.Repository, CredentialConfigured: target.PasswordSecret != "" || target.BearerSecret != ""})
+		targets = append(targets, targetView{ReleaseDestination: pl.ReleaseDestination{TargetID: target.ID, TargetDigest: digest, Component: target.Component, Artifact: target.Artifact, Operation: "publish"}, Kind: "oci", Origin: target.Origin, Repository: target.Repository, Tag: target.Tag, CredentialConfigured: target.PasswordSecret != "" || target.BearerSecret != ""})
 	}
 	for _, target := range p.targetReader.files {
 		_, _, digest, err := target.snapshot()
