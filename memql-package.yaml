@@ -551,6 +551,47 @@ pipeline:
             bash scripts/identity/build-css.sh
             go test -count=1 -timeout=300s ./ ./integrations ./integrations/customdomain ./integrations/compose ./cmd/envscan/... ./component/architecture/... ./component/envregistry/... ./scripts/... ./test/dslconformance/... ./examples/... ./component/auth/... ./deploy/...
 
+    # Public repository facts need no publication token. These audits describe
+    # live configuration, so their results never satisfy a PR or queue check.
+    - name: repository-audit
+      schedule: daily
+      on: [schedule, manual]
+      runAfterFailure: true
+      steps:
+        - name: ruleset-drift
+          placement: cluster
+          caches: []
+          cpuMilli: 250
+          memoryMiB: 256
+          timeout: 5m
+          run: |
+            set -eu
+            RULESET_DRIFT_PUBLIC_API=1 bash scripts/ci/ruleset-drift.sh
+        - name: ruleset-enforcement-copilot
+          placement: cluster
+          caches: []
+          cpuMilli: 250
+          memoryMiB: 256
+          timeout: 5m
+          run: |
+            set -eu
+            RULESET_DRIFT_PUBLIC_API=1 RULESET_DRIFT_ID=19450314 RULESET_DRIFT_EXPECTED=copilot_code_review RULESET_DRIFT_ENFORCEMENT=disabled bash scripts/ci/ruleset-drift.sh
+
+    - name: documentation-audit
+      schedule: weekly
+      on: [schedule, manual]
+      runAfterFailure: true
+      steps:
+        - name: docs-current
+          placement: cluster
+          caches: []
+          cpuMilli: 250
+          memoryMiB: 256
+          timeout: 10m
+          run: |
+            set -eu
+            bash scripts/docs/current-check.sh --public-api --repo="$MEMQL_REPOSITORY"
+
     # Analysis records findings independently of build/test success. The deep
     # history and CodeQL scans run weekly (or on demand), not on every release.
     # The saved UTC week prevents new main heads from repeating the audit.

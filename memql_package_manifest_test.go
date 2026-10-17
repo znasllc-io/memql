@@ -385,7 +385,7 @@ func TestEngineManifestCompilesForEveryOpening(t *testing.T) {
 		// A scheduled scan selects only its explicit opt-in stages; default
 		// stages such as checks and history scans are intentionally absent.
 		{name: "a daily scheduled security scan", event: pipelines.EventSchedule,
-			stages: []string{"vulnerabilities"}, absent: []string{manifestStepGateInputs}},
+			stages: []string{"vulnerabilities", "repository-audit"}, absent: []string{manifestStepGateInputs}},
 		// The compiler of this very manifest: Go source only, and the db-gated
 		// driver (component/pipelinerun) imports it, so the change reaches both
 		// test steps and the filesystem-gates bucket.
@@ -449,7 +449,7 @@ func TestEngineManifestCompilesForEveryOpening(t *testing.T) {
 			byName := map[string][]pipelines.Step{}
 			for _, step := range plan.Steps() {
 				byName[step.Name] = append(byName[step.Name], step)
-				if step.RunAfterFailure != (step.Stage == "analysis" || step.Stage == "security-reports" || step.Stage == "vulnerabilities" || step.Stage == "secrets-current" || step.Stage == "secrets-history") {
+				if step.RunAfterFailure != (step.Stage == "analysis" || step.Stage == "security-reports" || step.Stage == "vulnerabilities" || step.Stage == "secrets-current" || step.Stage == "secrets-history" || step.Stage == "repository-audit" || step.Stage == "documentation-audit") {
 					t.Errorf("failure policy was lost or leaked to another stage: %+v", step)
 				}
 				if step.Kind == pipelines.StepSARIF {
@@ -526,7 +526,7 @@ func TestEngineWeeklyAuditDoesNotRepeatDailyOrOrdinaryFunctionalChecks(t *testin
 			stages = append(stages, step.Stage)
 		}
 	}
-	if !slices.Equal(stages, []string{"analysis", "security-reports"}) {
+	if !slices.Equal(stages, []string{"documentation-audit", "analysis", "security-reports"}) {
 		t.Fatalf("weekly stages = %v", stages)
 	}
 }

@@ -49,6 +49,7 @@ cap_init "docs.currentCheck" \
     "Fail when the newest release tag has no docs bundle asset, or the docs site serves a different memql-docs-version."
 cap_spec_param "repo"    "owner/name of the repository whose releases are checked (default: \$GITHUB_REPOSITORY, else znasllc-io/memql)"
 cap_spec_param "siteUrl" "the docs page whose memql-docs-version meta is compared (default: https://memql.io/docs/)"
+cap_spec_param "public-api" "read public GitHub data without credentials (flag)" ""
 
 REPO=""
 SITE_URL=""
@@ -59,6 +60,7 @@ ASSET_PRESENT="false"
 SITE_VERSION=""
 PROBLEMS=""
 SCRATCH=""
+PUBLIC_API=false
 
 # _current_check_on_exit removes the scratch directory, then hands off to the
 # EXIT trap cap_init installed. Composed rather than replacing it: that trap is
@@ -84,11 +86,31 @@ function problem() {
 }
 
 function check_prerequisites() {
-    command -v gh &>/dev/null \
-        || cap_fail 4 "gh is not installed or not on PATH; it reads the release tags and the release's assets"
+    if [[ "$PUBLIC_API" == true ]]; then
+        command -v python3 &>/dev/null || cap_fail 4 "python3 is required for public GitHub reads"
+    else
+        command -v gh &>/dev/null \
+            || cap_fail 4 "gh is not installed or not on PATH; it reads the release tags and the release's assets"
+    fi
     command -v curl &>/dev/null \
         || cap_fail 4 "curl is not installed or not on PATH; it fetches the docs page"
     return 0
+}
+
+function read_tags() {
+    if [[ "$PUBLIC_API" == true ]]; then
+        python3 "${SCRIPT_DIR}/../lib/github-public-read.py" tags --repo="$REPO"
+    else
+        gh api "repos/${REPO}/tags" --paginate --jq '.[].name'
+    fi
+}
+
+function read_assets() {
+    if [[ "$PUBLIC_API" == true ]]; then
+        python3 "${SCRIPT_DIR}/../lib/github-public-read.py" release-assets --repo="$REPO" --tag="$TAG"
+    else
+        gh release view "$TAG" --repo "$REPO" --json assets --jq '.assets[].name'
+    fi
 }
 
 function make_scratch() {
@@ -105,8 +127,8 @@ function make_scratch() {
 # pre-release suffixes and the bare 0.14.0-era tags are other things.
 function resolve_newest_tag() {
     local tags_file="${SCRATCH}/tags"
-    if ! gh api "repos/${REPO}/tags" --paginate --jq '.[].name' >"$tags_file"; then
-        cap_fail 5 "could not list the tags of ${REPO} (gh's error is above), so there is no newest release to check"
+    if ! read_tags >"$tags_file"; then
+        cap_fail 5 "could not list the tags of ${REPO}, so there is no newest release to check"
     fi
     BARE="$(grep -E '^v[0-9]+\.[0-9]+\.[0-9]+$' "$tags_file" \
         | sed 's/^v//' \
@@ -126,8 +148,8 @@ function resolve_newest_tag() {
 
 function check_asset() {
     local assets_file="${SCRATCH}/assets"
-    if ! gh release view "$TAG" --repo "$REPO" --json assets --jq '.assets[].name' >"$assets_file"; then
-        problem "${TAG} has no readable GitHub Release (gh's error is above). A tag with no Release fired no publish workflow, so it has no ${ASSET}."
+    if ! read_assets >"$assets_file"; then
+        problem "${TAG} has no readable GitHub Release containing ${ASSET}."
         return 0
     fi
     if grep -qxF "$ASSET" "$assets_file"; then
@@ -135,7 +157,7 @@ function check_asset() {
         cap_info "${TAG} carries ${ASSET}"
         return 0
     fi
-    problem "the ${TAG} release has no ${ASSET} asset. publish-docs-bundle.yml attaches it on release: published; read that workflow's run for ${TAG}, or dispatch it with version=${BARE}."
+    problem "the ${TAG} release has no ${ASSET} asset. Check its release publication receipts."
     return 0
 }
 
@@ -169,6 +191,7 @@ function main() {
 
     REPO="$(cap_param repo "${GITHUB_REPOSITORY:-znasllc-io/memql}")"
     SITE_URL="$(cap_param siteUrl "https://memql.io/docs/")"
+    if cap_bool public-api; then PUBLIC_API=true; fi
     [[ "$REPO" =~ ^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$ ]] \
         || cap_fail 2 "--repo must be owner/name, got '${REPO}'"
     [[ "$SITE_URL" =~ ^https?:// ]] \

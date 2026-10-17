@@ -130,11 +130,11 @@ outputs, publication and failure evidence, not merely a command in a manifest.
 | `pipelines-live.yml` | Disposable cluster runtime qualification and retained logs | #5480 |
 | `proving-live.yml` | Credentialed proving run with explicit authorization and evidence | #5480 |
 | `publish-docs-bundle.yml` | Native release-files builds and verifies the exact-version bundle with complete Git history; release attachment and downstream delivery receipt remain | #5508, #5712 |
-| `docs-current-check.yml` | Scheduled public docs freshness check and failure notification | #5508, #5712 |
+| `docs-current-check.yml` | Native weekly public docs check declared; installed schedule/failure delivery proof remains | #5508, #5712 |
 | `publish-sdk-core.yml` | Native release-files retains the compiled, version-checked npm archive; registry publication and immutable receipt remain | #5480 |
 | `publish-vscode-extension.yml` | Native release-files verifies all four native targets plus web; registry publication remains | #5480 |
 | `vscode-site.yml` | Static editor-site build and its deployed version proof | #5480 |
-| `ruleset-drift.yml` | Scheduled policy audit; retain code-owner and required-check enforcement | #5507 |
+| `ruleset-drift.yml` | Native daily public reads cover both recorded rulesets; installed schedule/failure delivery proof remains | #5507 |
 | `dependabot-tidy.yml` | Trusted dependency-PR maintenance, without exposing write authority to PR code | #5480 |
 | `clustere2e-compile.yml` API entry | File absent at this revision; verify no independent active execution before disabling the stale registration | #5480 |
 | Generated `github-code-scanning/codeql` | Reconcile GitHub default setup with advanced scanning and replacement publication | #5480 |
@@ -290,6 +290,17 @@ native operation verifies and records completion; never manufacture receipts
 or reuse their immutable tags for different bytes.
 
 ## Acceptance and issue closure
+
+The public repository audits now have native declarations: both ruleset
+baselines run daily in separate steps, and documentation freshness runs weekly.
+They run after failures and remain absent from PR, merge-group, push and release
+checks. Public reads use no stored token, refuse redirects and incomplete tag
+inventories, and retain the scripts' existing missing-release and stale-site
+failure behavior. Fixture tests cover those failures and the public transport.
+Both live ruleset reads passed on October 17. The live docs audit correctly
+failed: v0.29.26 still had no published docs asset, and memql.io served v0.24.0.
+These are command checks, not installed scheduler or notification qualification;
+the corresponding Actions workflows stay active until those receipts exist.
 
 The cadence change removes the multi-hour full-history scan from ordinary
 merge groups and main pushes. Validate the remaining exact-tree functional
