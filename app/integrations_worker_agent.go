@@ -75,6 +75,9 @@ func (a *App) setupWorkerService() {
 		a.fatal("worker dispatcher: build failed", "error", err)
 	}
 
+	if wb := a.lookupWorkbenchIntegration(); wb != nil {
+		wb.SetFleetDispatcher(dispatcher)
+	}
 	integration := agentworker.NewIntegration(dispatcher, svc.Registry(), a.engine, a.Logger)
 	if work := a.lookupWorkIntegration(); work != nil {
 		integration.ScopeRequester = work.AskComputerScope

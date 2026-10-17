@@ -358,6 +358,20 @@ message ToolDispatch {
   bytes args_json = 8;
   google.protobuf.Duration timeout = 9;
   ComputerPermissionConstraint computer_permission = 10;
+  // Engine-issued authority for an isolated fleet workbench. Never read from
+  // model-supplied args, and never accepted for host or desktop tools.
+  WorkbenchConstraint workbench = 11;
+}
+
+message WorkbenchConstraint {
+  string owner_user_id = 1;
+  string caller_user_id = 2;
+  string registration_id = 3;
+  string machine_id = 4;
+  string run_id = 5;
+  // Admission expires before dispatch; running work keeps its own deadline.
+  int64 expires_unix = 6;
+  int64 workspace_expires_unix = 7;
 }
 
 message ToolCancel {

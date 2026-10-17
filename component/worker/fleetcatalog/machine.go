@@ -34,8 +34,9 @@ type Candidate struct {
 	// SharingMode is the enrolled owner's decision from registration.sharing.
 	// Never derive it from a worker or operator label: advertisements cannot
 	// volunteer a machine. The owner chooses the audience in Fleet.
-	SharingMode   string
-	SharingPaused bool
+	WorkbenchSharing workerservice.Sharing
+	SharingMode      string
+	SharingPaused    bool
 	// SharedUserIds and SharedGroupIds are who the owner lent the machine to
 	// under SharingModePeople (epic memql#5344), empty in every other mode.
 	// ServesPerson() is the only way to ask whether they include somebody.

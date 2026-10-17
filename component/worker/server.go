@@ -437,8 +437,9 @@ type streamSession struct {
 	ctx    context.Context
 	cancel context.CancelFunc
 
-	mu      sync.Mutex
-	pending map[string]chan *memqlv1.ToolResult
+	mu          sync.Mutex
+	pending     map[string]chan *memqlv1.ToolResult
+	toolSharing map[string]SharingSubjects
 	// chunkSinks holds the per-call ToolStream callback, keyed by call id,
 	// under the SAME lock as pending because the two have the same
 	// lifetime: registered when a dispatch goes out, dropped when its
@@ -601,6 +602,7 @@ func (s *streamSession) close(cause error) {
 			close(ch)
 		}
 		s.pending = nil
+		s.toolSharing = nil
 		s.chunkSinks = nil
 		// A disconnect ends every live app session with a NAMED error.
 		// Without this a caller parked in Wait would sit there until its
@@ -821,6 +823,14 @@ func (s *streamSession) dispatch(ctx context.Context, dispatch *memqlv1.ToolDisp
 		return nil, ErrWorkerDisconnected
 	}
 	s.pending[dispatch.GetCallId()] = resCh
+	if dispatch.GetTool() == "workerWorkbench" && dispatch.GetWorkbench() != nil {
+		if s.toolSharing == nil {
+			s.toolSharing = map[string]SharingSubjects{}
+		}
+		if subjects, ok := ctx.Value(toolSharingKey{}).(SharingSubjects); ok {
+			s.toolSharing[dispatch.GetCallId()] = subjects
+		}
+	}
 	if onChunk != nil && s.chunkSinks != nil {
 		s.chunkSinks[dispatch.GetCallId()] = onChunk
 	}
@@ -829,6 +839,7 @@ func (s *streamSession) dispatch(ctx context.Context, dispatch *memqlv1.ToolDisp
 	defer func() {
 		s.mu.Lock()
 		delete(s.pending, dispatch.GetCallId())
+		delete(s.toolSharing, dispatch.GetCallId())
 		delete(s.chunkSinks, dispatch.GetCallId())
 		s.mu.Unlock()
 		s.markSharingChanged()
@@ -1409,7 +1420,7 @@ func validateRegister(r *memqlv1.Register) (*CapabilityDescriptor, error) {
 		if c == CapabilityHeadless {
 			hasHeadless = true
 		}
-		if c != CapabilityHeadless && c != CapabilityComputerUse && c != ModelCapability {
+		if c != CapabilityHeadless && c != CapabilityComputerUse && c != ModelCapability && c != "WORKBENCH" {
 			return nil, fmt.Errorf("register: unknown capability %q", c)
 		}
 	}

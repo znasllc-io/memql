@@ -75,6 +75,7 @@ func (s *EngineStore) WorkersForOwner(ctx context.Context, ownerUserId string) (
 			// merge one line above (epic memql#4676): the cockpit rewrites
 			// `labels` on every reconnect, so an opt-in found there was
 			// granted by the machine rather than by its owner.
+			WorkbenchSharing: workerservice.SharingFromRow(row["workbenchSharing"]),
 			SharingMode:      sharing.Mode,
 			SharingPaused:    sharing.Paused,
 			SharedUserIds:    sharing.UserIds,
@@ -140,6 +141,7 @@ func (s *EngineStore) SharedInferenceWorkers(ctx context.Context) ([]Candidate, 
 			DisplayName:      rowString(row, "displayName"),
 			Capabilities:     rowStringList(row, "capabilities"),
 			Labels:           MergeLabels(rowStringMap(row, "labels"), operator),
+			WorkbenchSharing: workerservice.SharingFromRow(row["workbenchSharing"]),
 			SharingMode:      sharing.Mode,
 			SharingPaused:    sharing.Paused,
 			SharedUserIds:    sharing.UserIds,

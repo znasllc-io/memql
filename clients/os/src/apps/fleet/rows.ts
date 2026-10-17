@@ -63,6 +63,7 @@ export interface MachineRow {
   capabilities: string[];
   /** Binary-reported pipeline semantics; zero means not reported. */
   pipelineContract: number;
+  workbenchContract?: number;
   os: string;
   arch: string;
   hostname: string;
@@ -351,6 +352,7 @@ export function machineFromRow(raw: Row): MachineRow {
     identityId: rowString(row, "identityId"),
     capabilities: stringList(row, "capabilities"),
     pipelineContract: pipelineContractFrom(descriptor),
+    workbenchContract: pipelineContractFrom(descriptor, "workerWorkbench"),
     os,
     arch,
     hostname: nestedString(platformInfo, "hostname"),
@@ -376,7 +378,7 @@ export function machineFromRow(raw: Row): MachineRow {
     sharingMode: sharing.mode,
     sharingPaused: sharing.paused,
     workbenchSharing: sharingFrom(row["workbenchSharing"], false),
-    workbenchSharingActivity: objectAt(row["workbenchSharingActivity"]),
+    workbenchSharingActivity: objectAt(objectAt(row["sharingActivity"])?.["workbench"]),
     ownerFeatures: ownerFeaturesFrom(row["ownerFeatures"]),
     sharedUserIds: sharing.userIds,
     sharedGroupIds: sharing.groupIds,
@@ -1154,9 +1156,9 @@ export function sessionsNewestFirst(rows: readonly AppSessionRow[]): AppSessionR
   );
 }
 
-function pipelineContractFrom(descriptor: Record<string, unknown> | null): number {
+function pipelineContractFrom(descriptor: Record<string, unknown> | null, action = "workerHost.pipeline_step"): number {
   const contracts = descriptor?.["actionContracts"];
   if (contracts === null || typeof contracts !== "object" || Array.isArray(contracts)) return 0;
-  const version = (contracts as Record<string, unknown>)["workerHost.pipeline_step"];
+  const version = (contracts as Record<string, unknown>)[action];
   return typeof version === "number" && Number.isInteger(version) && version > 0 && version <= 65535 ? version : 0;
 }

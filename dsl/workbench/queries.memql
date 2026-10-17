@@ -70,3 +70,13 @@ query workspace allWorkspaces {
   paginate 200
   shape    workspaceFull
 }
+
+
+/// The caller's durable execution choice, shared by every agent replica.
+@actor
+query executionBinding workbenchExecutionForRun {
+  args { runId string! }
+  filter row => row.runId == args.runId && row.ownerUserId == actor.userId
+  paginate 1
+  shape executionBindingFull
+}

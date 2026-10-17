@@ -1852,8 +1852,11 @@ type ToolDispatch struct {
 	ArgsJson           []byte                        `protobuf:"bytes,8,opt,name=args_json,json=argsJson,proto3" json:"args_json,omitempty"`
 	Timeout            *durationpb.Duration          `protobuf:"bytes,9,opt,name=timeout,proto3" json:"timeout,omitempty"`
 	ComputerPermission *ComputerPermissionConstraint `protobuf:"bytes,10,opt,name=computer_permission,json=computerPermission,proto3" json:"computer_permission,omitempty"`
-	unknownFields      protoimpl.UnknownFields
-	sizeCache          protoimpl.SizeCache
+	// Engine-issued authority for an isolated fleet workbench. Never read from
+	// model-supplied args, and never accepted for host or desktop tools.
+	Workbench     *WorkbenchConstraint `protobuf:"bytes,11,opt,name=workbench,proto3" json:"workbench,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
 }
 
 func (x *ToolDispatch) Reset() {
@@ -1956,6 +1959,106 @@ func (x *ToolDispatch) GetComputerPermission() *ComputerPermissionConstraint {
 	return nil
 }
 
+func (x *ToolDispatch) GetWorkbench() *WorkbenchConstraint {
+	if x != nil {
+		return x.Workbench
+	}
+	return nil
+}
+
+type WorkbenchConstraint struct {
+	state          protoimpl.MessageState `protogen:"open.v1"`
+	OwnerUserId    string                 `protobuf:"bytes,1,opt,name=owner_user_id,json=ownerUserId,proto3" json:"owner_user_id,omitempty"`
+	CallerUserId   string                 `protobuf:"bytes,2,opt,name=caller_user_id,json=callerUserId,proto3" json:"caller_user_id,omitempty"`
+	RegistrationId string                 `protobuf:"bytes,3,opt,name=registration_id,json=registrationId,proto3" json:"registration_id,omitempty"`
+	MachineId      string                 `protobuf:"bytes,4,opt,name=machine_id,json=machineId,proto3" json:"machine_id,omitempty"`
+	RunId          string                 `protobuf:"bytes,5,opt,name=run_id,json=runId,proto3" json:"run_id,omitempty"`
+	// Admission expires before dispatch; running work keeps its own deadline.
+	ExpiresUnix          int64 `protobuf:"varint,6,opt,name=expires_unix,json=expiresUnix,proto3" json:"expires_unix,omitempty"`
+	WorkspaceExpiresUnix int64 `protobuf:"varint,7,opt,name=workspace_expires_unix,json=workspaceExpiresUnix,proto3" json:"workspace_expires_unix,omitempty"`
+	unknownFields        protoimpl.UnknownFields
+	sizeCache            protoimpl.SizeCache
+}
+
+func (x *WorkbenchConstraint) Reset() {
+	*x = WorkbenchConstraint{}
+	mi := &file_worker_proto_msgTypes[16]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *WorkbenchConstraint) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*WorkbenchConstraint) ProtoMessage() {}
+
+func (x *WorkbenchConstraint) ProtoReflect() protoreflect.Message {
+	mi := &file_worker_proto_msgTypes[16]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use WorkbenchConstraint.ProtoReflect.Descriptor instead.
+func (*WorkbenchConstraint) Descriptor() ([]byte, []int) {
+	return file_worker_proto_rawDescGZIP(), []int{16}
+}
+
+func (x *WorkbenchConstraint) GetOwnerUserId() string {
+	if x != nil {
+		return x.OwnerUserId
+	}
+	return ""
+}
+
+func (x *WorkbenchConstraint) GetCallerUserId() string {
+	if x != nil {
+		return x.CallerUserId
+	}
+	return ""
+}
+
+func (x *WorkbenchConstraint) GetRegistrationId() string {
+	if x != nil {
+		return x.RegistrationId
+	}
+	return ""
+}
+
+func (x *WorkbenchConstraint) GetMachineId() string {
+	if x != nil {
+		return x.MachineId
+	}
+	return ""
+}
+
+func (x *WorkbenchConstraint) GetRunId() string {
+	if x != nil {
+		return x.RunId
+	}
+	return ""
+}
+
+func (x *WorkbenchConstraint) GetExpiresUnix() int64 {
+	if x != nil {
+		return x.ExpiresUnix
+	}
+	return 0
+}
+
+func (x *WorkbenchConstraint) GetWorkspaceExpiresUnix() int64 {
+	if x != nil {
+		return x.WorkspaceExpiresUnix
+	}
+	return 0
+}
+
 type ToolCancel struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	CallId        string                 `protobuf:"bytes,1,opt,name=call_id,json=callId,proto3" json:"call_id,omitempty"`
@@ -1966,7 +2069,7 @@ type ToolCancel struct {
 
 func (x *ToolCancel) Reset() {
 	*x = ToolCancel{}
-	mi := &file_worker_proto_msgTypes[16]
+	mi := &file_worker_proto_msgTypes[17]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1978,7 +2081,7 @@ func (x *ToolCancel) String() string {
 func (*ToolCancel) ProtoMessage() {}
 
 func (x *ToolCancel) ProtoReflect() protoreflect.Message {
-	mi := &file_worker_proto_msgTypes[16]
+	mi := &file_worker_proto_msgTypes[17]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1991,7 +2094,7 @@ func (x *ToolCancel) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ToolCancel.ProtoReflect.Descriptor instead.
 func (*ToolCancel) Descriptor() ([]byte, []int) {
-	return file_worker_proto_rawDescGZIP(), []int{16}
+	return file_worker_proto_rawDescGZIP(), []int{17}
 }
 
 func (x *ToolCancel) GetCallId() string {
@@ -2018,7 +2121,7 @@ type Drain struct {
 
 func (x *Drain) Reset() {
 	*x = Drain{}
-	mi := &file_worker_proto_msgTypes[17]
+	mi := &file_worker_proto_msgTypes[18]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2030,7 +2133,7 @@ func (x *Drain) String() string {
 func (*Drain) ProtoMessage() {}
 
 func (x *Drain) ProtoReflect() protoreflect.Message {
-	mi := &file_worker_proto_msgTypes[17]
+	mi := &file_worker_proto_msgTypes[18]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2043,7 +2146,7 @@ func (x *Drain) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use Drain.ProtoReflect.Descriptor instead.
 func (*Drain) Descriptor() ([]byte, []int) {
-	return file_worker_proto_rawDescGZIP(), []int{17}
+	return file_worker_proto_rawDescGZIP(), []int{18}
 }
 
 type ToolStream struct {
@@ -2061,7 +2164,7 @@ type ToolStream struct {
 
 func (x *ToolStream) Reset() {
 	*x = ToolStream{}
-	mi := &file_worker_proto_msgTypes[18]
+	mi := &file_worker_proto_msgTypes[19]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2073,7 +2176,7 @@ func (x *ToolStream) String() string {
 func (*ToolStream) ProtoMessage() {}
 
 func (x *ToolStream) ProtoReflect() protoreflect.Message {
-	mi := &file_worker_proto_msgTypes[18]
+	mi := &file_worker_proto_msgTypes[19]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2086,7 +2189,7 @@ func (x *ToolStream) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ToolStream.ProtoReflect.Descriptor instead.
 func (*ToolStream) Descriptor() ([]byte, []int) {
-	return file_worker_proto_rawDescGZIP(), []int{18}
+	return file_worker_proto_rawDescGZIP(), []int{19}
 }
 
 func (x *ToolStream) GetCallId() string {
@@ -2166,7 +2269,7 @@ type ToolResult struct {
 
 func (x *ToolResult) Reset() {
 	*x = ToolResult{}
-	mi := &file_worker_proto_msgTypes[19]
+	mi := &file_worker_proto_msgTypes[20]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2178,7 +2281,7 @@ func (x *ToolResult) String() string {
 func (*ToolResult) ProtoMessage() {}
 
 func (x *ToolResult) ProtoReflect() protoreflect.Message {
-	mi := &file_worker_proto_msgTypes[19]
+	mi := &file_worker_proto_msgTypes[20]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2191,7 +2294,7 @@ func (x *ToolResult) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ToolResult.ProtoReflect.Descriptor instead.
 func (*ToolResult) Descriptor() ([]byte, []int) {
-	return file_worker_proto_rawDescGZIP(), []int{19}
+	return file_worker_proto_rawDescGZIP(), []int{20}
 }
 
 func (x *ToolResult) GetCallId() string {
@@ -2255,7 +2358,7 @@ type Success struct {
 
 func (x *Success) Reset() {
 	*x = Success{}
-	mi := &file_worker_proto_msgTypes[20]
+	mi := &file_worker_proto_msgTypes[21]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2267,7 +2370,7 @@ func (x *Success) String() string {
 func (*Success) ProtoMessage() {}
 
 func (x *Success) ProtoReflect() protoreflect.Message {
-	mi := &file_worker_proto_msgTypes[20]
+	mi := &file_worker_proto_msgTypes[21]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2280,7 +2383,7 @@ func (x *Success) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use Success.ProtoReflect.Descriptor instead.
 func (*Success) Descriptor() ([]byte, []int) {
-	return file_worker_proto_rawDescGZIP(), []int{20}
+	return file_worker_proto_rawDescGZIP(), []int{21}
 }
 
 func (x *Success) GetResultJson() []byte {
@@ -2339,7 +2442,7 @@ type Failure struct {
 
 func (x *Failure) Reset() {
 	*x = Failure{}
-	mi := &file_worker_proto_msgTypes[21]
+	mi := &file_worker_proto_msgTypes[22]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2351,7 +2454,7 @@ func (x *Failure) String() string {
 func (*Failure) ProtoMessage() {}
 
 func (x *Failure) ProtoReflect() protoreflect.Message {
-	mi := &file_worker_proto_msgTypes[21]
+	mi := &file_worker_proto_msgTypes[22]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2364,7 +2467,7 @@ func (x *Failure) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use Failure.ProtoReflect.Descriptor instead.
 func (*Failure) Descriptor() ([]byte, []int) {
-	return file_worker_proto_rawDescGZIP(), []int{21}
+	return file_worker_proto_rawDescGZIP(), []int{22}
 }
 
 func (x *Failure) GetErrorCode() string {
@@ -2390,7 +2493,7 @@ type RotationRequest struct {
 
 func (x *RotationRequest) Reset() {
 	*x = RotationRequest{}
-	mi := &file_worker_proto_msgTypes[22]
+	mi := &file_worker_proto_msgTypes[23]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2402,7 +2505,7 @@ func (x *RotationRequest) String() string {
 func (*RotationRequest) ProtoMessage() {}
 
 func (x *RotationRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_worker_proto_msgTypes[22]
+	mi := &file_worker_proto_msgTypes[23]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2415,7 +2518,7 @@ func (x *RotationRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use RotationRequest.ProtoReflect.Descriptor instead.
 func (*RotationRequest) Descriptor() ([]byte, []int) {
-	return file_worker_proto_rawDescGZIP(), []int{22}
+	return file_worker_proto_rawDescGZIP(), []int{23}
 }
 
 func (x *RotationRequest) GetCurrentTokenExpiresAt() *timestamppb.Timestamp {
@@ -2435,7 +2538,7 @@ type RotationResponse struct {
 
 func (x *RotationResponse) Reset() {
 	*x = RotationResponse{}
-	mi := &file_worker_proto_msgTypes[23]
+	mi := &file_worker_proto_msgTypes[24]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2447,7 +2550,7 @@ func (x *RotationResponse) String() string {
 func (*RotationResponse) ProtoMessage() {}
 
 func (x *RotationResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_worker_proto_msgTypes[23]
+	mi := &file_worker_proto_msgTypes[24]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2460,7 +2563,7 @@ func (x *RotationResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use RotationResponse.ProtoReflect.Descriptor instead.
 func (*RotationResponse) Descriptor() ([]byte, []int) {
-	return file_worker_proto_rawDescGZIP(), []int{23}
+	return file_worker_proto_rawDescGZIP(), []int{24}
 }
 
 func (x *RotationResponse) GetNewToken() string {
@@ -2488,7 +2591,7 @@ type AuditEvent struct {
 
 func (x *AuditEvent) Reset() {
 	*x = AuditEvent{}
-	mi := &file_worker_proto_msgTypes[24]
+	mi := &file_worker_proto_msgTypes[25]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2500,7 +2603,7 @@ func (x *AuditEvent) String() string {
 func (*AuditEvent) ProtoMessage() {}
 
 func (x *AuditEvent) ProtoReflect() protoreflect.Message {
-	mi := &file_worker_proto_msgTypes[24]
+	mi := &file_worker_proto_msgTypes[25]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2513,7 +2616,7 @@ func (x *AuditEvent) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use AuditEvent.ProtoReflect.Descriptor instead.
 func (*AuditEvent) Descriptor() ([]byte, []int) {
-	return file_worker_proto_rawDescGZIP(), []int{24}
+	return file_worker_proto_rawDescGZIP(), []int{25}
 }
 
 func (x *AuditEvent) GetAction() string {
@@ -2624,7 +2727,7 @@ type AppSessionStart struct {
 
 func (x *AppSessionStart) Reset() {
 	*x = AppSessionStart{}
-	mi := &file_worker_proto_msgTypes[25]
+	mi := &file_worker_proto_msgTypes[26]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2636,7 +2739,7 @@ func (x *AppSessionStart) String() string {
 func (*AppSessionStart) ProtoMessage() {}
 
 func (x *AppSessionStart) ProtoReflect() protoreflect.Message {
-	mi := &file_worker_proto_msgTypes[25]
+	mi := &file_worker_proto_msgTypes[26]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2649,7 +2752,7 @@ func (x *AppSessionStart) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use AppSessionStart.ProtoReflect.Descriptor instead.
 func (*AppSessionStart) Descriptor() ([]byte, []int) {
-	return file_worker_proto_rawDescGZIP(), []int{25}
+	return file_worker_proto_rawDescGZIP(), []int{26}
 }
 
 func (x *AppSessionStart) GetSessionId() string {
@@ -2781,7 +2884,7 @@ type AppSessionLimits struct {
 
 func (x *AppSessionLimits) Reset() {
 	*x = AppSessionLimits{}
-	mi := &file_worker_proto_msgTypes[26]
+	mi := &file_worker_proto_msgTypes[27]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2793,7 +2896,7 @@ func (x *AppSessionLimits) String() string {
 func (*AppSessionLimits) ProtoMessage() {}
 
 func (x *AppSessionLimits) ProtoReflect() protoreflect.Message {
-	mi := &file_worker_proto_msgTypes[26]
+	mi := &file_worker_proto_msgTypes[27]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2806,7 +2909,7 @@ func (x *AppSessionLimits) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use AppSessionLimits.ProtoReflect.Descriptor instead.
 func (*AppSessionLimits) Descriptor() ([]byte, []int) {
-	return file_worker_proto_rawDescGZIP(), []int{26}
+	return file_worker_proto_rawDescGZIP(), []int{27}
 }
 
 func (x *AppSessionLimits) GetCredentialLifetimeSeconds() int64 {
@@ -2852,7 +2955,7 @@ type AppSessionControl struct {
 
 func (x *AppSessionControl) Reset() {
 	*x = AppSessionControl{}
-	mi := &file_worker_proto_msgTypes[27]
+	mi := &file_worker_proto_msgTypes[28]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2864,7 +2967,7 @@ func (x *AppSessionControl) String() string {
 func (*AppSessionControl) ProtoMessage() {}
 
 func (x *AppSessionControl) ProtoReflect() protoreflect.Message {
-	mi := &file_worker_proto_msgTypes[27]
+	mi := &file_worker_proto_msgTypes[28]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2877,7 +2980,7 @@ func (x *AppSessionControl) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use AppSessionControl.ProtoReflect.Descriptor instead.
 func (*AppSessionControl) Descriptor() ([]byte, []int) {
-	return file_worker_proto_rawDescGZIP(), []int{27}
+	return file_worker_proto_rawDescGZIP(), []int{28}
 }
 
 func (x *AppSessionControl) GetSessionId() string {
@@ -2932,7 +3035,7 @@ type AppSessionChunk struct {
 
 func (x *AppSessionChunk) Reset() {
 	*x = AppSessionChunk{}
-	mi := &file_worker_proto_msgTypes[28]
+	mi := &file_worker_proto_msgTypes[29]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2944,7 +3047,7 @@ func (x *AppSessionChunk) String() string {
 func (*AppSessionChunk) ProtoMessage() {}
 
 func (x *AppSessionChunk) ProtoReflect() protoreflect.Message {
-	mi := &file_worker_proto_msgTypes[28]
+	mi := &file_worker_proto_msgTypes[29]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2957,7 +3060,7 @@ func (x *AppSessionChunk) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use AppSessionChunk.ProtoReflect.Descriptor instead.
 func (*AppSessionChunk) Descriptor() ([]byte, []int) {
-	return file_worker_proto_rawDescGZIP(), []int{28}
+	return file_worker_proto_rawDescGZIP(), []int{29}
 }
 
 func (x *AppSessionChunk) GetSessionId() string {
@@ -3030,7 +3133,7 @@ type AppSessionEnd struct {
 
 func (x *AppSessionEnd) Reset() {
 	*x = AppSessionEnd{}
-	mi := &file_worker_proto_msgTypes[29]
+	mi := &file_worker_proto_msgTypes[30]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -3042,7 +3145,7 @@ func (x *AppSessionEnd) String() string {
 func (*AppSessionEnd) ProtoMessage() {}
 
 func (x *AppSessionEnd) ProtoReflect() protoreflect.Message {
-	mi := &file_worker_proto_msgTypes[29]
+	mi := &file_worker_proto_msgTypes[30]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -3055,7 +3158,7 @@ func (x *AppSessionEnd) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use AppSessionEnd.ProtoReflect.Descriptor instead.
 func (*AppSessionEnd) Descriptor() ([]byte, []int) {
-	return file_worker_proto_rawDescGZIP(), []int{29}
+	return file_worker_proto_rawDescGZIP(), []int{30}
 }
 
 func (x *AppSessionEnd) GetSessionId() string {
@@ -3137,7 +3240,7 @@ type AppSessionUsage struct {
 
 func (x *AppSessionUsage) Reset() {
 	*x = AppSessionUsage{}
-	mi := &file_worker_proto_msgTypes[30]
+	mi := &file_worker_proto_msgTypes[31]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -3149,7 +3252,7 @@ func (x *AppSessionUsage) String() string {
 func (*AppSessionUsage) ProtoMessage() {}
 
 func (x *AppSessionUsage) ProtoReflect() protoreflect.Message {
-	mi := &file_worker_proto_msgTypes[30]
+	mi := &file_worker_proto_msgTypes[31]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -3162,7 +3265,7 @@ func (x *AppSessionUsage) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use AppSessionUsage.ProtoReflect.Descriptor instead.
 func (*AppSessionUsage) Descriptor() ([]byte, []int) {
-	return file_worker_proto_rawDescGZIP(), []int{30}
+	return file_worker_proto_rawDescGZIP(), []int{31}
 }
 
 func (x *AppSessionUsage) GetInputTokens() int64 {
@@ -3278,7 +3381,7 @@ type ModelCallStart struct {
 
 func (x *ModelCallStart) Reset() {
 	*x = ModelCallStart{}
-	mi := &file_worker_proto_msgTypes[31]
+	mi := &file_worker_proto_msgTypes[32]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -3290,7 +3393,7 @@ func (x *ModelCallStart) String() string {
 func (*ModelCallStart) ProtoMessage() {}
 
 func (x *ModelCallStart) ProtoReflect() protoreflect.Message {
-	mi := &file_worker_proto_msgTypes[31]
+	mi := &file_worker_proto_msgTypes[32]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -3303,7 +3406,7 @@ func (x *ModelCallStart) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ModelCallStart.ProtoReflect.Descriptor instead.
 func (*ModelCallStart) Descriptor() ([]byte, []int) {
-	return file_worker_proto_rawDescGZIP(), []int{31}
+	return file_worker_proto_rawDescGZIP(), []int{32}
 }
 
 func (x *ModelCallStart) GetRequestId() string {
@@ -3445,7 +3548,7 @@ type ModelCallTool struct {
 
 func (x *ModelCallTool) Reset() {
 	*x = ModelCallTool{}
-	mi := &file_worker_proto_msgTypes[32]
+	mi := &file_worker_proto_msgTypes[33]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -3457,7 +3560,7 @@ func (x *ModelCallTool) String() string {
 func (*ModelCallTool) ProtoMessage() {}
 
 func (x *ModelCallTool) ProtoReflect() protoreflect.Message {
-	mi := &file_worker_proto_msgTypes[32]
+	mi := &file_worker_proto_msgTypes[33]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -3470,7 +3573,7 @@ func (x *ModelCallTool) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ModelCallTool.ProtoReflect.Descriptor instead.
 func (*ModelCallTool) Descriptor() ([]byte, []int) {
-	return file_worker_proto_rawDescGZIP(), []int{32}
+	return file_worker_proto_rawDescGZIP(), []int{33}
 }
 
 func (x *ModelCallTool) GetName() string {
@@ -3521,7 +3624,7 @@ type ModelCallToolCall struct {
 
 func (x *ModelCallToolCall) Reset() {
 	*x = ModelCallToolCall{}
-	mi := &file_worker_proto_msgTypes[33]
+	mi := &file_worker_proto_msgTypes[34]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -3533,7 +3636,7 @@ func (x *ModelCallToolCall) String() string {
 func (*ModelCallToolCall) ProtoMessage() {}
 
 func (x *ModelCallToolCall) ProtoReflect() protoreflect.Message {
-	mi := &file_worker_proto_msgTypes[33]
+	mi := &file_worker_proto_msgTypes[34]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -3546,7 +3649,7 @@ func (x *ModelCallToolCall) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ModelCallToolCall.ProtoReflect.Descriptor instead.
 func (*ModelCallToolCall) Descriptor() ([]byte, []int) {
-	return file_worker_proto_rawDescGZIP(), []int{33}
+	return file_worker_proto_rawDescGZIP(), []int{34}
 }
 
 func (x *ModelCallToolCall) GetId() string {
@@ -3613,7 +3716,7 @@ type ModelCallMessage struct {
 
 func (x *ModelCallMessage) Reset() {
 	*x = ModelCallMessage{}
-	mi := &file_worker_proto_msgTypes[34]
+	mi := &file_worker_proto_msgTypes[35]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -3625,7 +3728,7 @@ func (x *ModelCallMessage) String() string {
 func (*ModelCallMessage) ProtoMessage() {}
 
 func (x *ModelCallMessage) ProtoReflect() protoreflect.Message {
-	mi := &file_worker_proto_msgTypes[34]
+	mi := &file_worker_proto_msgTypes[35]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -3638,7 +3741,7 @@ func (x *ModelCallMessage) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ModelCallMessage.ProtoReflect.Descriptor instead.
 func (*ModelCallMessage) Descriptor() ([]byte, []int) {
-	return file_worker_proto_rawDescGZIP(), []int{34}
+	return file_worker_proto_rawDescGZIP(), []int{35}
 }
 
 func (x *ModelCallMessage) GetRole() string {
@@ -3712,7 +3815,7 @@ type ModelCallParams struct {
 
 func (x *ModelCallParams) Reset() {
 	*x = ModelCallParams{}
-	mi := &file_worker_proto_msgTypes[35]
+	mi := &file_worker_proto_msgTypes[36]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -3724,7 +3827,7 @@ func (x *ModelCallParams) String() string {
 func (*ModelCallParams) ProtoMessage() {}
 
 func (x *ModelCallParams) ProtoReflect() protoreflect.Message {
-	mi := &file_worker_proto_msgTypes[35]
+	mi := &file_worker_proto_msgTypes[36]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -3737,7 +3840,7 @@ func (x *ModelCallParams) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ModelCallParams.ProtoReflect.Descriptor instead.
 func (*ModelCallParams) Descriptor() ([]byte, []int) {
-	return file_worker_proto_rawDescGZIP(), []int{35}
+	return file_worker_proto_rawDescGZIP(), []int{36}
 }
 
 func (x *ModelCallParams) GetTemperature() float64 {
@@ -3826,7 +3929,7 @@ type ModelCallLimits struct {
 
 func (x *ModelCallLimits) Reset() {
 	*x = ModelCallLimits{}
-	mi := &file_worker_proto_msgTypes[36]
+	mi := &file_worker_proto_msgTypes[37]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -3838,7 +3941,7 @@ func (x *ModelCallLimits) String() string {
 func (*ModelCallLimits) ProtoMessage() {}
 
 func (x *ModelCallLimits) ProtoReflect() protoreflect.Message {
-	mi := &file_worker_proto_msgTypes[36]
+	mi := &file_worker_proto_msgTypes[37]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -3851,7 +3954,7 @@ func (x *ModelCallLimits) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ModelCallLimits.ProtoReflect.Descriptor instead.
 func (*ModelCallLimits) Descriptor() ([]byte, []int) {
-	return file_worker_proto_rawDescGZIP(), []int{36}
+	return file_worker_proto_rawDescGZIP(), []int{37}
 }
 
 func (x *ModelCallLimits) GetTimeoutSeconds() int64 {
@@ -3914,7 +4017,7 @@ type ModelCallDelta struct {
 
 func (x *ModelCallDelta) Reset() {
 	*x = ModelCallDelta{}
-	mi := &file_worker_proto_msgTypes[37]
+	mi := &file_worker_proto_msgTypes[38]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -3926,7 +4029,7 @@ func (x *ModelCallDelta) String() string {
 func (*ModelCallDelta) ProtoMessage() {}
 
 func (x *ModelCallDelta) ProtoReflect() protoreflect.Message {
-	mi := &file_worker_proto_msgTypes[37]
+	mi := &file_worker_proto_msgTypes[38]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -3939,7 +4042,7 @@ func (x *ModelCallDelta) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ModelCallDelta.ProtoReflect.Descriptor instead.
 func (*ModelCallDelta) Descriptor() ([]byte, []int) {
-	return file_worker_proto_rawDescGZIP(), []int{37}
+	return file_worker_proto_rawDescGZIP(), []int{38}
 }
 
 func (x *ModelCallDelta) GetRequestId() string {
@@ -4033,7 +4136,7 @@ type ModelCallEnd struct {
 
 func (x *ModelCallEnd) Reset() {
 	*x = ModelCallEnd{}
-	mi := &file_worker_proto_msgTypes[38]
+	mi := &file_worker_proto_msgTypes[39]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -4045,7 +4148,7 @@ func (x *ModelCallEnd) String() string {
 func (*ModelCallEnd) ProtoMessage() {}
 
 func (x *ModelCallEnd) ProtoReflect() protoreflect.Message {
-	mi := &file_worker_proto_msgTypes[38]
+	mi := &file_worker_proto_msgTypes[39]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -4058,7 +4161,7 @@ func (x *ModelCallEnd) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ModelCallEnd.ProtoReflect.Descriptor instead.
 func (*ModelCallEnd) Descriptor() ([]byte, []int) {
-	return file_worker_proto_rawDescGZIP(), []int{38}
+	return file_worker_proto_rawDescGZIP(), []int{39}
 }
 
 func (x *ModelCallEnd) GetRequestId() string {
@@ -4148,7 +4251,7 @@ type ModelCallEmbedding struct {
 
 func (x *ModelCallEmbedding) Reset() {
 	*x = ModelCallEmbedding{}
-	mi := &file_worker_proto_msgTypes[39]
+	mi := &file_worker_proto_msgTypes[40]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -4160,7 +4263,7 @@ func (x *ModelCallEmbedding) String() string {
 func (*ModelCallEmbedding) ProtoMessage() {}
 
 func (x *ModelCallEmbedding) ProtoReflect() protoreflect.Message {
-	mi := &file_worker_proto_msgTypes[39]
+	mi := &file_worker_proto_msgTypes[40]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -4173,7 +4276,7 @@ func (x *ModelCallEmbedding) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ModelCallEmbedding.ProtoReflect.Descriptor instead.
 func (*ModelCallEmbedding) Descriptor() ([]byte, []int) {
-	return file_worker_proto_rawDescGZIP(), []int{39}
+	return file_worker_proto_rawDescGZIP(), []int{40}
 }
 
 func (x *ModelCallEmbedding) GetValues() []float32 {
@@ -4200,7 +4303,7 @@ type ModelCallImage struct {
 
 func (x *ModelCallImage) Reset() {
 	*x = ModelCallImage{}
-	mi := &file_worker_proto_msgTypes[40]
+	mi := &file_worker_proto_msgTypes[41]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -4212,7 +4315,7 @@ func (x *ModelCallImage) String() string {
 func (*ModelCallImage) ProtoMessage() {}
 
 func (x *ModelCallImage) ProtoReflect() protoreflect.Message {
-	mi := &file_worker_proto_msgTypes[40]
+	mi := &file_worker_proto_msgTypes[41]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -4225,7 +4328,7 @@ func (x *ModelCallImage) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ModelCallImage.ProtoReflect.Descriptor instead.
 func (*ModelCallImage) Descriptor() ([]byte, []int) {
-	return file_worker_proto_rawDescGZIP(), []int{40}
+	return file_worker_proto_rawDescGZIP(), []int{41}
 }
 
 func (x *ModelCallImage) GetData() []byte {
@@ -4267,7 +4370,7 @@ type ModelCallAudio struct {
 
 func (x *ModelCallAudio) Reset() {
 	*x = ModelCallAudio{}
-	mi := &file_worker_proto_msgTypes[41]
+	mi := &file_worker_proto_msgTypes[42]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -4279,7 +4382,7 @@ func (x *ModelCallAudio) String() string {
 func (*ModelCallAudio) ProtoMessage() {}
 
 func (x *ModelCallAudio) ProtoReflect() protoreflect.Message {
-	mi := &file_worker_proto_msgTypes[41]
+	mi := &file_worker_proto_msgTypes[42]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -4292,7 +4395,7 @@ func (x *ModelCallAudio) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ModelCallAudio.ProtoReflect.Descriptor instead.
 func (*ModelCallAudio) Descriptor() ([]byte, []int) {
-	return file_worker_proto_rawDescGZIP(), []int{41}
+	return file_worker_proto_rawDescGZIP(), []int{42}
 }
 
 func (x *ModelCallAudio) GetData() []byte {
@@ -4328,7 +4431,7 @@ type ModelCallTranscriptSegment struct {
 
 func (x *ModelCallTranscriptSegment) Reset() {
 	*x = ModelCallTranscriptSegment{}
-	mi := &file_worker_proto_msgTypes[42]
+	mi := &file_worker_proto_msgTypes[43]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -4340,7 +4443,7 @@ func (x *ModelCallTranscriptSegment) String() string {
 func (*ModelCallTranscriptSegment) ProtoMessage() {}
 
 func (x *ModelCallTranscriptSegment) ProtoReflect() protoreflect.Message {
-	mi := &file_worker_proto_msgTypes[42]
+	mi := &file_worker_proto_msgTypes[43]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -4353,7 +4456,7 @@ func (x *ModelCallTranscriptSegment) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ModelCallTranscriptSegment.ProtoReflect.Descriptor instead.
 func (*ModelCallTranscriptSegment) Descriptor() ([]byte, []int) {
-	return file_worker_proto_rawDescGZIP(), []int{42}
+	return file_worker_proto_rawDescGZIP(), []int{43}
 }
 
 func (x *ModelCallTranscriptSegment) GetStartSeconds() float64 {
@@ -4396,7 +4499,7 @@ type ModelCallSpeech struct {
 
 func (x *ModelCallSpeech) Reset() {
 	*x = ModelCallSpeech{}
-	mi := &file_worker_proto_msgTypes[43]
+	mi := &file_worker_proto_msgTypes[44]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -4408,7 +4511,7 @@ func (x *ModelCallSpeech) String() string {
 func (*ModelCallSpeech) ProtoMessage() {}
 
 func (x *ModelCallSpeech) ProtoReflect() protoreflect.Message {
-	mi := &file_worker_proto_msgTypes[43]
+	mi := &file_worker_proto_msgTypes[44]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -4421,7 +4524,7 @@ func (x *ModelCallSpeech) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ModelCallSpeech.ProtoReflect.Descriptor instead.
 func (*ModelCallSpeech) Descriptor() ([]byte, []int) {
-	return file_worker_proto_rawDescGZIP(), []int{43}
+	return file_worker_proto_rawDescGZIP(), []int{44}
 }
 
 func (x *ModelCallSpeech) GetVoice() string {
@@ -4468,7 +4571,7 @@ type ModelCallImageRequest struct {
 
 func (x *ModelCallImageRequest) Reset() {
 	*x = ModelCallImageRequest{}
-	mi := &file_worker_proto_msgTypes[44]
+	mi := &file_worker_proto_msgTypes[45]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -4480,7 +4583,7 @@ func (x *ModelCallImageRequest) String() string {
 func (*ModelCallImageRequest) ProtoMessage() {}
 
 func (x *ModelCallImageRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_worker_proto_msgTypes[44]
+	mi := &file_worker_proto_msgTypes[45]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -4493,7 +4596,7 @@ func (x *ModelCallImageRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ModelCallImageRequest.ProtoReflect.Descriptor instead.
 func (*ModelCallImageRequest) Descriptor() ([]byte, []int) {
-	return file_worker_proto_rawDescGZIP(), []int{44}
+	return file_worker_proto_rawDescGZIP(), []int{45}
 }
 
 func (x *ModelCallImageRequest) GetWidth() int32 {
@@ -4559,7 +4662,7 @@ type ModelCallUsage struct {
 
 func (x *ModelCallUsage) Reset() {
 	*x = ModelCallUsage{}
-	mi := &file_worker_proto_msgTypes[45]
+	mi := &file_worker_proto_msgTypes[46]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -4571,7 +4674,7 @@ func (x *ModelCallUsage) String() string {
 func (*ModelCallUsage) ProtoMessage() {}
 
 func (x *ModelCallUsage) ProtoReflect() protoreflect.Message {
-	mi := &file_worker_proto_msgTypes[45]
+	mi := &file_worker_proto_msgTypes[46]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -4584,7 +4687,7 @@ func (x *ModelCallUsage) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ModelCallUsage.ProtoReflect.Descriptor instead.
 func (*ModelCallUsage) Descriptor() ([]byte, []int) {
-	return file_worker_proto_rawDescGZIP(), []int{45}
+	return file_worker_proto_rawDescGZIP(), []int{46}
 }
 
 func (x *ModelCallUsage) GetInputTokens() int64 {
@@ -4633,7 +4736,7 @@ type ModelCallCancel struct {
 
 func (x *ModelCallCancel) Reset() {
 	*x = ModelCallCancel{}
-	mi := &file_worker_proto_msgTypes[46]
+	mi := &file_worker_proto_msgTypes[47]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -4645,7 +4748,7 @@ func (x *ModelCallCancel) String() string {
 func (*ModelCallCancel) ProtoMessage() {}
 
 func (x *ModelCallCancel) ProtoReflect() protoreflect.Message {
-	mi := &file_worker_proto_msgTypes[46]
+	mi := &file_worker_proto_msgTypes[47]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -4658,7 +4761,7 @@ func (x *ModelCallCancel) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ModelCallCancel.ProtoReflect.Descriptor instead.
 func (*ModelCallCancel) Descriptor() ([]byte, []int) {
-	return file_worker_proto_rawDescGZIP(), []int{46}
+	return file_worker_proto_rawDescGZIP(), []int{47}
 }
 
 func (x *ModelCallCancel) GetRequestId() string {
@@ -4703,7 +4806,7 @@ type ModelPullStart struct {
 
 func (x *ModelPullStart) Reset() {
 	*x = ModelPullStart{}
-	mi := &file_worker_proto_msgTypes[47]
+	mi := &file_worker_proto_msgTypes[48]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -4715,7 +4818,7 @@ func (x *ModelPullStart) String() string {
 func (*ModelPullStart) ProtoMessage() {}
 
 func (x *ModelPullStart) ProtoReflect() protoreflect.Message {
-	mi := &file_worker_proto_msgTypes[47]
+	mi := &file_worker_proto_msgTypes[48]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -4728,7 +4831,7 @@ func (x *ModelPullStart) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ModelPullStart.ProtoReflect.Descriptor instead.
 func (*ModelPullStart) Descriptor() ([]byte, []int) {
-	return file_worker_proto_rawDescGZIP(), []int{47}
+	return file_worker_proto_rawDescGZIP(), []int{48}
 }
 
 func (x *ModelPullStart) GetRequestId() string {
@@ -4787,7 +4890,7 @@ type ModelPullProgress struct {
 
 func (x *ModelPullProgress) Reset() {
 	*x = ModelPullProgress{}
-	mi := &file_worker_proto_msgTypes[48]
+	mi := &file_worker_proto_msgTypes[49]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -4799,7 +4902,7 @@ func (x *ModelPullProgress) String() string {
 func (*ModelPullProgress) ProtoMessage() {}
 
 func (x *ModelPullProgress) ProtoReflect() protoreflect.Message {
-	mi := &file_worker_proto_msgTypes[48]
+	mi := &file_worker_proto_msgTypes[49]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -4812,7 +4915,7 @@ func (x *ModelPullProgress) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ModelPullProgress.ProtoReflect.Descriptor instead.
 func (*ModelPullProgress) Descriptor() ([]byte, []int) {
-	return file_worker_proto_rawDescGZIP(), []int{48}
+	return file_worker_proto_rawDescGZIP(), []int{49}
 }
 
 func (x *ModelPullProgress) GetRequestId() string {
@@ -4884,7 +4987,7 @@ type ModelPullEnd struct {
 
 func (x *ModelPullEnd) Reset() {
 	*x = ModelPullEnd{}
-	mi := &file_worker_proto_msgTypes[49]
+	mi := &file_worker_proto_msgTypes[50]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -4896,7 +4999,7 @@ func (x *ModelPullEnd) String() string {
 func (*ModelPullEnd) ProtoMessage() {}
 
 func (x *ModelPullEnd) ProtoReflect() protoreflect.Message {
-	mi := &file_worker_proto_msgTypes[49]
+	mi := &file_worker_proto_msgTypes[50]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -4909,7 +5012,7 @@ func (x *ModelPullEnd) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ModelPullEnd.ProtoReflect.Descriptor instead.
 func (*ModelPullEnd) Descriptor() ([]byte, []int) {
-	return file_worker_proto_rawDescGZIP(), []int{49}
+	return file_worker_proto_rawDescGZIP(), []int{50}
 }
 
 func (x *ModelPullEnd) GetRequestId() string {
@@ -4960,7 +5063,7 @@ type ModelPullCancel struct {
 
 func (x *ModelPullCancel) Reset() {
 	*x = ModelPullCancel{}
-	mi := &file_worker_proto_msgTypes[50]
+	mi := &file_worker_proto_msgTypes[51]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -4972,7 +5075,7 @@ func (x *ModelPullCancel) String() string {
 func (*ModelPullCancel) ProtoMessage() {}
 
 func (x *ModelPullCancel) ProtoReflect() protoreflect.Message {
-	mi := &file_worker_proto_msgTypes[50]
+	mi := &file_worker_proto_msgTypes[51]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -4985,7 +5088,7 @@ func (x *ModelPullCancel) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ModelPullCancel.ProtoReflect.Descriptor instead.
 func (*ModelPullCancel) Descriptor() ([]byte, []int) {
-	return file_worker_proto_rawDescGZIP(), []int{50}
+	return file_worker_proto_rawDescGZIP(), []int{51}
 }
 
 func (x *ModelPullCancel) GetRequestId() string {
@@ -5024,7 +5127,7 @@ type ModelProbeStart struct {
 
 func (x *ModelProbeStart) Reset() {
 	*x = ModelProbeStart{}
-	mi := &file_worker_proto_msgTypes[51]
+	mi := &file_worker_proto_msgTypes[52]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -5036,7 +5139,7 @@ func (x *ModelProbeStart) String() string {
 func (*ModelProbeStart) ProtoMessage() {}
 
 func (x *ModelProbeStart) ProtoReflect() protoreflect.Message {
-	mi := &file_worker_proto_msgTypes[51]
+	mi := &file_worker_proto_msgTypes[52]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -5049,7 +5152,7 @@ func (x *ModelProbeStart) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ModelProbeStart.ProtoReflect.Descriptor instead.
 func (*ModelProbeStart) Descriptor() ([]byte, []int) {
-	return file_worker_proto_rawDescGZIP(), []int{51}
+	return file_worker_proto_rawDescGZIP(), []int{52}
 }
 
 func (x *ModelProbeStart) GetRequestId() string {
@@ -5101,7 +5204,7 @@ type ModelProbeProgress struct {
 
 func (x *ModelProbeProgress) Reset() {
 	*x = ModelProbeProgress{}
-	mi := &file_worker_proto_msgTypes[52]
+	mi := &file_worker_proto_msgTypes[53]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -5113,7 +5216,7 @@ func (x *ModelProbeProgress) String() string {
 func (*ModelProbeProgress) ProtoMessage() {}
 
 func (x *ModelProbeProgress) ProtoReflect() protoreflect.Message {
-	mi := &file_worker_proto_msgTypes[52]
+	mi := &file_worker_proto_msgTypes[53]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -5126,7 +5229,7 @@ func (x *ModelProbeProgress) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ModelProbeProgress.ProtoReflect.Descriptor instead.
 func (*ModelProbeProgress) Descriptor() ([]byte, []int) {
-	return file_worker_proto_rawDescGZIP(), []int{52}
+	return file_worker_proto_rawDescGZIP(), []int{53}
 }
 
 func (x *ModelProbeProgress) GetRequestId() string {
@@ -5208,7 +5311,7 @@ type ModelProbeEnd struct {
 
 func (x *ModelProbeEnd) Reset() {
 	*x = ModelProbeEnd{}
-	mi := &file_worker_proto_msgTypes[53]
+	mi := &file_worker_proto_msgTypes[54]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -5220,7 +5323,7 @@ func (x *ModelProbeEnd) String() string {
 func (*ModelProbeEnd) ProtoMessage() {}
 
 func (x *ModelProbeEnd) ProtoReflect() protoreflect.Message {
-	mi := &file_worker_proto_msgTypes[53]
+	mi := &file_worker_proto_msgTypes[54]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -5233,7 +5336,7 @@ func (x *ModelProbeEnd) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ModelProbeEnd.ProtoReflect.Descriptor instead.
 func (*ModelProbeEnd) Descriptor() ([]byte, []int) {
-	return file_worker_proto_rawDescGZIP(), []int{53}
+	return file_worker_proto_rawDescGZIP(), []int{54}
 }
 
 func (x *ModelProbeEnd) GetRequestId() string {
@@ -5329,7 +5432,7 @@ type ProbeFigure struct {
 
 func (x *ProbeFigure) Reset() {
 	*x = ProbeFigure{}
-	mi := &file_worker_proto_msgTypes[54]
+	mi := &file_worker_proto_msgTypes[55]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -5341,7 +5444,7 @@ func (x *ProbeFigure) String() string {
 func (*ProbeFigure) ProtoMessage() {}
 
 func (x *ProbeFigure) ProtoReflect() protoreflect.Message {
-	mi := &file_worker_proto_msgTypes[54]
+	mi := &file_worker_proto_msgTypes[55]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -5354,7 +5457,7 @@ func (x *ProbeFigure) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ProbeFigure.ProtoReflect.Descriptor instead.
 func (*ProbeFigure) Descriptor() ([]byte, []int) {
-	return file_worker_proto_rawDescGZIP(), []int{54}
+	return file_worker_proto_rawDescGZIP(), []int{55}
 }
 
 func (x *ProbeFigure) GetMeasured() bool {
@@ -5417,7 +5520,7 @@ type ModelProbeCancel struct {
 
 func (x *ModelProbeCancel) Reset() {
 	*x = ModelProbeCancel{}
-	mi := &file_worker_proto_msgTypes[55]
+	mi := &file_worker_proto_msgTypes[56]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -5429,7 +5532,7 @@ func (x *ModelProbeCancel) String() string {
 func (*ModelProbeCancel) ProtoMessage() {}
 
 func (x *ModelProbeCancel) ProtoReflect() protoreflect.Message {
-	mi := &file_worker_proto_msgTypes[55]
+	mi := &file_worker_proto_msgTypes[56]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -5442,7 +5545,7 @@ func (x *ModelProbeCancel) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ModelProbeCancel.ProtoReflect.Descriptor instead.
 func (*ModelProbeCancel) Descriptor() ([]byte, []int) {
-	return file_worker_proto_rawDescGZIP(), []int{55}
+	return file_worker_proto_rawDescGZIP(), []int{56}
 }
 
 func (x *ModelProbeCancel) GetRequestId() string {
@@ -5477,7 +5580,7 @@ type ComputerPermissionConstraint struct {
 
 func (x *ComputerPermissionConstraint) Reset() {
 	*x = ComputerPermissionConstraint{}
-	mi := &file_worker_proto_msgTypes[56]
+	mi := &file_worker_proto_msgTypes[57]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -5489,7 +5592,7 @@ func (x *ComputerPermissionConstraint) String() string {
 func (*ComputerPermissionConstraint) ProtoMessage() {}
 
 func (x *ComputerPermissionConstraint) ProtoReflect() protoreflect.Message {
-	mi := &file_worker_proto_msgTypes[56]
+	mi := &file_worker_proto_msgTypes[57]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -5502,7 +5605,7 @@ func (x *ComputerPermissionConstraint) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ComputerPermissionConstraint.ProtoReflect.Descriptor instead.
 func (*ComputerPermissionConstraint) Descriptor() ([]byte, []int) {
-	return file_worker_proto_rawDescGZIP(), []int{56}
+	return file_worker_proto_rawDescGZIP(), []int{57}
 }
 
 func (x *ComputerPermissionConstraint) GetPermissionId() string {
@@ -5715,7 +5818,7 @@ const file_worker_proto_rawDesc = "" +
 	"request_id\x18\x01 \x01(\tR\trequestId\x123\n" +
 	"\asent_at\x18\x02 \x01(\v2\x1a.google.protobuf.TimestampR\x06sentAt\x12;\n" +
 	"\vreceived_at\x18\x03 \x01(\v2\x1a.google.protobuf.TimestampR\n" +
-	"receivedAt\"\xff\x02\n" +
+	"receivedAt\"\xcb\x03\n" +
 	"\fToolDispatch\x12\x17\n" +
 	"\acall_id\x18\x01 \x01(\tR\x06callId\x12\x15\n" +
 	"\x06run_id\x18\x02 \x01(\tR\x05runId\x12\x17\n" +
@@ -5727,7 +5830,17 @@ const file_worker_proto_rawDesc = "" +
 	"\targs_json\x18\b \x01(\fR\bargsJson\x123\n" +
 	"\atimeout\x18\t \x01(\v2\x19.google.protobuf.DurationR\atimeout\x12f\n" +
 	"\x13computer_permission\x18\n" +
-	" \x01(\v25.znasllc.memql.worker.v1.ComputerPermissionConstraintR\x12computerPermission\"=\n" +
+	" \x01(\v25.znasllc.memql.worker.v1.ComputerPermissionConstraintR\x12computerPermission\x12J\n" +
+	"\tworkbench\x18\v \x01(\v2,.znasllc.memql.worker.v1.WorkbenchConstraintR\tworkbench\"\x97\x02\n" +
+	"\x13WorkbenchConstraint\x12\"\n" +
+	"\rowner_user_id\x18\x01 \x01(\tR\vownerUserId\x12$\n" +
+	"\x0ecaller_user_id\x18\x02 \x01(\tR\fcallerUserId\x12'\n" +
+	"\x0fregistration_id\x18\x03 \x01(\tR\x0eregistrationId\x12\x1d\n" +
+	"\n" +
+	"machine_id\x18\x04 \x01(\tR\tmachineId\x12\x15\n" +
+	"\x06run_id\x18\x05 \x01(\tR\x05runId\x12!\n" +
+	"\fexpires_unix\x18\x06 \x01(\x03R\vexpiresUnix\x124\n" +
+	"\x16workspace_expires_unix\x18\a \x01(\x03R\x14workspaceExpiresUnix\"=\n" +
 	"\n" +
 	"ToolCancel\x12\x17\n" +
 	"\acall_id\x18\x01 \x01(\tR\x06callId\x12\x16\n" +
@@ -6039,7 +6152,7 @@ func file_worker_proto_rawDescGZIP() []byte {
 }
 
 var file_worker_proto_enumTypes = make([]protoimpl.EnumInfo, 1)
-var file_worker_proto_msgTypes = make([]protoimpl.MessageInfo, 62)
+var file_worker_proto_msgTypes = make([]protoimpl.MessageInfo, 63)
 var file_worker_proto_goTypes = []any{
 	(PermissionDecision)(0),              // 0: znasllc.memql.worker.v1.PermissionDecision
 	(*WorkerClientMessage)(nil),          // 1: znasllc.memql.worker.v1.WorkerClientMessage
@@ -6058,90 +6171,91 @@ var file_worker_proto_goTypes = []any{
 	(*Ping)(nil),                         // 14: znasllc.memql.worker.v1.Ping
 	(*Pong)(nil),                         // 15: znasllc.memql.worker.v1.Pong
 	(*ToolDispatch)(nil),                 // 16: znasllc.memql.worker.v1.ToolDispatch
-	(*ToolCancel)(nil),                   // 17: znasllc.memql.worker.v1.ToolCancel
-	(*Drain)(nil),                        // 18: znasllc.memql.worker.v1.Drain
-	(*ToolStream)(nil),                   // 19: znasllc.memql.worker.v1.ToolStream
-	(*ToolResult)(nil),                   // 20: znasllc.memql.worker.v1.ToolResult
-	(*Success)(nil),                      // 21: znasllc.memql.worker.v1.Success
-	(*Failure)(nil),                      // 22: znasllc.memql.worker.v1.Failure
-	(*RotationRequest)(nil),              // 23: znasllc.memql.worker.v1.RotationRequest
-	(*RotationResponse)(nil),             // 24: znasllc.memql.worker.v1.RotationResponse
-	(*AuditEvent)(nil),                   // 25: znasllc.memql.worker.v1.AuditEvent
-	(*AppSessionStart)(nil),              // 26: znasllc.memql.worker.v1.AppSessionStart
-	(*AppSessionLimits)(nil),             // 27: znasllc.memql.worker.v1.AppSessionLimits
-	(*AppSessionControl)(nil),            // 28: znasllc.memql.worker.v1.AppSessionControl
-	(*AppSessionChunk)(nil),              // 29: znasllc.memql.worker.v1.AppSessionChunk
-	(*AppSessionEnd)(nil),                // 30: znasllc.memql.worker.v1.AppSessionEnd
-	(*AppSessionUsage)(nil),              // 31: znasllc.memql.worker.v1.AppSessionUsage
-	(*ModelCallStart)(nil),               // 32: znasllc.memql.worker.v1.ModelCallStart
-	(*ModelCallTool)(nil),                // 33: znasllc.memql.worker.v1.ModelCallTool
-	(*ModelCallToolCall)(nil),            // 34: znasllc.memql.worker.v1.ModelCallToolCall
-	(*ModelCallMessage)(nil),             // 35: znasllc.memql.worker.v1.ModelCallMessage
-	(*ModelCallParams)(nil),              // 36: znasllc.memql.worker.v1.ModelCallParams
-	(*ModelCallLimits)(nil),              // 37: znasllc.memql.worker.v1.ModelCallLimits
-	(*ModelCallDelta)(nil),               // 38: znasllc.memql.worker.v1.ModelCallDelta
-	(*ModelCallEnd)(nil),                 // 39: znasllc.memql.worker.v1.ModelCallEnd
-	(*ModelCallEmbedding)(nil),           // 40: znasllc.memql.worker.v1.ModelCallEmbedding
-	(*ModelCallImage)(nil),               // 41: znasllc.memql.worker.v1.ModelCallImage
-	(*ModelCallAudio)(nil),               // 42: znasllc.memql.worker.v1.ModelCallAudio
-	(*ModelCallTranscriptSegment)(nil),   // 43: znasllc.memql.worker.v1.ModelCallTranscriptSegment
-	(*ModelCallSpeech)(nil),              // 44: znasllc.memql.worker.v1.ModelCallSpeech
-	(*ModelCallImageRequest)(nil),        // 45: znasllc.memql.worker.v1.ModelCallImageRequest
-	(*ModelCallUsage)(nil),               // 46: znasllc.memql.worker.v1.ModelCallUsage
-	(*ModelCallCancel)(nil),              // 47: znasllc.memql.worker.v1.ModelCallCancel
-	(*ModelPullStart)(nil),               // 48: znasllc.memql.worker.v1.ModelPullStart
-	(*ModelPullProgress)(nil),            // 49: znasllc.memql.worker.v1.ModelPullProgress
-	(*ModelPullEnd)(nil),                 // 50: znasllc.memql.worker.v1.ModelPullEnd
-	(*ModelPullCancel)(nil),              // 51: znasllc.memql.worker.v1.ModelPullCancel
-	(*ModelProbeStart)(nil),              // 52: znasllc.memql.worker.v1.ModelProbeStart
-	(*ModelProbeProgress)(nil),           // 53: znasllc.memql.worker.v1.ModelProbeProgress
-	(*ModelProbeEnd)(nil),                // 54: znasllc.memql.worker.v1.ModelProbeEnd
-	(*ProbeFigure)(nil),                  // 55: znasllc.memql.worker.v1.ProbeFigure
-	(*ModelProbeCancel)(nil),             // 56: znasllc.memql.worker.v1.ModelProbeCancel
-	(*ComputerPermissionConstraint)(nil), // 57: znasllc.memql.worker.v1.ComputerPermissionConstraint
-	nil,                                  // 58: znasllc.memql.worker.v1.WorkerClientMessage.MetadataEntry
-	nil,                                  // 59: znasllc.memql.worker.v1.WorkerServerMessage.MetadataEntry
-	nil,                                  // 60: znasllc.memql.worker.v1.Register.LabelsEntry
-	nil,                                  // 61: znasllc.memql.worker.v1.Register.ConcurrencyEntry
-	nil,                                  // 62: znasllc.memql.worker.v1.Heartbeat.ActiveCallsPerCapabilityEntry
-	(*timestamppb.Timestamp)(nil),        // 63: google.protobuf.Timestamp
-	(*durationpb.Duration)(nil),          // 64: google.protobuf.Duration
+	(*WorkbenchConstraint)(nil),          // 17: znasllc.memql.worker.v1.WorkbenchConstraint
+	(*ToolCancel)(nil),                   // 18: znasllc.memql.worker.v1.ToolCancel
+	(*Drain)(nil),                        // 19: znasllc.memql.worker.v1.Drain
+	(*ToolStream)(nil),                   // 20: znasllc.memql.worker.v1.ToolStream
+	(*ToolResult)(nil),                   // 21: znasllc.memql.worker.v1.ToolResult
+	(*Success)(nil),                      // 22: znasllc.memql.worker.v1.Success
+	(*Failure)(nil),                      // 23: znasllc.memql.worker.v1.Failure
+	(*RotationRequest)(nil),              // 24: znasllc.memql.worker.v1.RotationRequest
+	(*RotationResponse)(nil),             // 25: znasllc.memql.worker.v1.RotationResponse
+	(*AuditEvent)(nil),                   // 26: znasllc.memql.worker.v1.AuditEvent
+	(*AppSessionStart)(nil),              // 27: znasllc.memql.worker.v1.AppSessionStart
+	(*AppSessionLimits)(nil),             // 28: znasllc.memql.worker.v1.AppSessionLimits
+	(*AppSessionControl)(nil),            // 29: znasllc.memql.worker.v1.AppSessionControl
+	(*AppSessionChunk)(nil),              // 30: znasllc.memql.worker.v1.AppSessionChunk
+	(*AppSessionEnd)(nil),                // 31: znasllc.memql.worker.v1.AppSessionEnd
+	(*AppSessionUsage)(nil),              // 32: znasllc.memql.worker.v1.AppSessionUsage
+	(*ModelCallStart)(nil),               // 33: znasllc.memql.worker.v1.ModelCallStart
+	(*ModelCallTool)(nil),                // 34: znasllc.memql.worker.v1.ModelCallTool
+	(*ModelCallToolCall)(nil),            // 35: znasllc.memql.worker.v1.ModelCallToolCall
+	(*ModelCallMessage)(nil),             // 36: znasllc.memql.worker.v1.ModelCallMessage
+	(*ModelCallParams)(nil),              // 37: znasllc.memql.worker.v1.ModelCallParams
+	(*ModelCallLimits)(nil),              // 38: znasllc.memql.worker.v1.ModelCallLimits
+	(*ModelCallDelta)(nil),               // 39: znasllc.memql.worker.v1.ModelCallDelta
+	(*ModelCallEnd)(nil),                 // 40: znasllc.memql.worker.v1.ModelCallEnd
+	(*ModelCallEmbedding)(nil),           // 41: znasllc.memql.worker.v1.ModelCallEmbedding
+	(*ModelCallImage)(nil),               // 42: znasllc.memql.worker.v1.ModelCallImage
+	(*ModelCallAudio)(nil),               // 43: znasllc.memql.worker.v1.ModelCallAudio
+	(*ModelCallTranscriptSegment)(nil),   // 44: znasllc.memql.worker.v1.ModelCallTranscriptSegment
+	(*ModelCallSpeech)(nil),              // 45: znasllc.memql.worker.v1.ModelCallSpeech
+	(*ModelCallImageRequest)(nil),        // 46: znasllc.memql.worker.v1.ModelCallImageRequest
+	(*ModelCallUsage)(nil),               // 47: znasllc.memql.worker.v1.ModelCallUsage
+	(*ModelCallCancel)(nil),              // 48: znasllc.memql.worker.v1.ModelCallCancel
+	(*ModelPullStart)(nil),               // 49: znasllc.memql.worker.v1.ModelPullStart
+	(*ModelPullProgress)(nil),            // 50: znasllc.memql.worker.v1.ModelPullProgress
+	(*ModelPullEnd)(nil),                 // 51: znasllc.memql.worker.v1.ModelPullEnd
+	(*ModelPullCancel)(nil),              // 52: znasllc.memql.worker.v1.ModelPullCancel
+	(*ModelProbeStart)(nil),              // 53: znasllc.memql.worker.v1.ModelProbeStart
+	(*ModelProbeProgress)(nil),           // 54: znasllc.memql.worker.v1.ModelProbeProgress
+	(*ModelProbeEnd)(nil),                // 55: znasllc.memql.worker.v1.ModelProbeEnd
+	(*ProbeFigure)(nil),                  // 56: znasllc.memql.worker.v1.ProbeFigure
+	(*ModelProbeCancel)(nil),             // 57: znasllc.memql.worker.v1.ModelProbeCancel
+	(*ComputerPermissionConstraint)(nil), // 58: znasllc.memql.worker.v1.ComputerPermissionConstraint
+	nil,                                  // 59: znasllc.memql.worker.v1.WorkerClientMessage.MetadataEntry
+	nil,                                  // 60: znasllc.memql.worker.v1.WorkerServerMessage.MetadataEntry
+	nil,                                  // 61: znasllc.memql.worker.v1.Register.LabelsEntry
+	nil,                                  // 62: znasllc.memql.worker.v1.Register.ConcurrencyEntry
+	nil,                                  // 63: znasllc.memql.worker.v1.Heartbeat.ActiveCallsPerCapabilityEntry
+	(*timestamppb.Timestamp)(nil),        // 64: google.protobuf.Timestamp
+	(*durationpb.Duration)(nil),          // 65: google.protobuf.Duration
 }
 var file_worker_proto_depIdxs = []int32{
-	58, // 0: znasllc.memql.worker.v1.WorkerClientMessage.metadata:type_name -> znasllc.memql.worker.v1.WorkerClientMessage.MetadataEntry
+	59, // 0: znasllc.memql.worker.v1.WorkerClientMessage.metadata:type_name -> znasllc.memql.worker.v1.WorkerClientMessage.MetadataEntry
 	3,  // 1: znasllc.memql.worker.v1.WorkerClientMessage.register:type_name -> znasllc.memql.worker.v1.Register
 	13, // 2: znasllc.memql.worker.v1.WorkerClientMessage.heartbeat:type_name -> znasllc.memql.worker.v1.Heartbeat
-	20, // 3: znasllc.memql.worker.v1.WorkerClientMessage.tool_result:type_name -> znasllc.memql.worker.v1.ToolResult
-	19, // 4: znasllc.memql.worker.v1.WorkerClientMessage.tool_stream:type_name -> znasllc.memql.worker.v1.ToolStream
-	25, // 5: znasllc.memql.worker.v1.WorkerClientMessage.audit_event:type_name -> znasllc.memql.worker.v1.AuditEvent
-	23, // 6: znasllc.memql.worker.v1.WorkerClientMessage.rotation_request:type_name -> znasllc.memql.worker.v1.RotationRequest
-	29, // 7: znasllc.memql.worker.v1.WorkerClientMessage.app_session_chunk:type_name -> znasllc.memql.worker.v1.AppSessionChunk
-	30, // 8: znasllc.memql.worker.v1.WorkerClientMessage.app_session_end:type_name -> znasllc.memql.worker.v1.AppSessionEnd
-	38, // 9: znasllc.memql.worker.v1.WorkerClientMessage.model_call_delta:type_name -> znasllc.memql.worker.v1.ModelCallDelta
-	39, // 10: znasllc.memql.worker.v1.WorkerClientMessage.model_call_end:type_name -> znasllc.memql.worker.v1.ModelCallEnd
-	49, // 11: znasllc.memql.worker.v1.WorkerClientMessage.model_pull_progress:type_name -> znasllc.memql.worker.v1.ModelPullProgress
-	50, // 12: znasllc.memql.worker.v1.WorkerClientMessage.model_pull_end:type_name -> znasllc.memql.worker.v1.ModelPullEnd
-	53, // 13: znasllc.memql.worker.v1.WorkerClientMessage.model_probe_progress:type_name -> znasllc.memql.worker.v1.ModelProbeProgress
-	54, // 14: znasllc.memql.worker.v1.WorkerClientMessage.model_probe_end:type_name -> znasllc.memql.worker.v1.ModelProbeEnd
+	21, // 3: znasllc.memql.worker.v1.WorkerClientMessage.tool_result:type_name -> znasllc.memql.worker.v1.ToolResult
+	20, // 4: znasllc.memql.worker.v1.WorkerClientMessage.tool_stream:type_name -> znasllc.memql.worker.v1.ToolStream
+	26, // 5: znasllc.memql.worker.v1.WorkerClientMessage.audit_event:type_name -> znasllc.memql.worker.v1.AuditEvent
+	24, // 6: znasllc.memql.worker.v1.WorkerClientMessage.rotation_request:type_name -> znasllc.memql.worker.v1.RotationRequest
+	30, // 7: znasllc.memql.worker.v1.WorkerClientMessage.app_session_chunk:type_name -> znasllc.memql.worker.v1.AppSessionChunk
+	31, // 8: znasllc.memql.worker.v1.WorkerClientMessage.app_session_end:type_name -> znasllc.memql.worker.v1.AppSessionEnd
+	39, // 9: znasllc.memql.worker.v1.WorkerClientMessage.model_call_delta:type_name -> znasllc.memql.worker.v1.ModelCallDelta
+	40, // 10: znasllc.memql.worker.v1.WorkerClientMessage.model_call_end:type_name -> znasllc.memql.worker.v1.ModelCallEnd
+	50, // 11: znasllc.memql.worker.v1.WorkerClientMessage.model_pull_progress:type_name -> znasllc.memql.worker.v1.ModelPullProgress
+	51, // 12: znasllc.memql.worker.v1.WorkerClientMessage.model_pull_end:type_name -> znasllc.memql.worker.v1.ModelPullEnd
+	54, // 13: znasllc.memql.worker.v1.WorkerClientMessage.model_probe_progress:type_name -> znasllc.memql.worker.v1.ModelProbeProgress
+	55, // 14: znasllc.memql.worker.v1.WorkerClientMessage.model_probe_end:type_name -> znasllc.memql.worker.v1.ModelProbeEnd
 	15, // 15: znasllc.memql.worker.v1.WorkerClientMessage.pong:type_name -> znasllc.memql.worker.v1.Pong
-	59, // 16: znasllc.memql.worker.v1.WorkerServerMessage.metadata:type_name -> znasllc.memql.worker.v1.WorkerServerMessage.MetadataEntry
+	60, // 16: znasllc.memql.worker.v1.WorkerServerMessage.metadata:type_name -> znasllc.memql.worker.v1.WorkerServerMessage.MetadataEntry
 	11, // 17: znasllc.memql.worker.v1.WorkerServerMessage.register_ack:type_name -> znasllc.memql.worker.v1.RegisterAck
 	16, // 18: znasllc.memql.worker.v1.WorkerServerMessage.tool_dispatch:type_name -> znasllc.memql.worker.v1.ToolDispatch
-	17, // 19: znasllc.memql.worker.v1.WorkerServerMessage.tool_cancel:type_name -> znasllc.memql.worker.v1.ToolCancel
-	18, // 20: znasllc.memql.worker.v1.WorkerServerMessage.drain:type_name -> znasllc.memql.worker.v1.Drain
-	24, // 21: znasllc.memql.worker.v1.WorkerServerMessage.rotation_response:type_name -> znasllc.memql.worker.v1.RotationResponse
+	18, // 19: znasllc.memql.worker.v1.WorkerServerMessage.tool_cancel:type_name -> znasllc.memql.worker.v1.ToolCancel
+	19, // 20: znasllc.memql.worker.v1.WorkerServerMessage.drain:type_name -> znasllc.memql.worker.v1.Drain
+	25, // 21: znasllc.memql.worker.v1.WorkerServerMessage.rotation_response:type_name -> znasllc.memql.worker.v1.RotationResponse
 	12, // 22: znasllc.memql.worker.v1.WorkerServerMessage.register_error:type_name -> znasllc.memql.worker.v1.RegisterError
-	26, // 23: znasllc.memql.worker.v1.WorkerServerMessage.app_session_start:type_name -> znasllc.memql.worker.v1.AppSessionStart
-	28, // 24: znasllc.memql.worker.v1.WorkerServerMessage.app_session_control:type_name -> znasllc.memql.worker.v1.AppSessionControl
-	32, // 25: znasllc.memql.worker.v1.WorkerServerMessage.model_call_start:type_name -> znasllc.memql.worker.v1.ModelCallStart
-	47, // 26: znasllc.memql.worker.v1.WorkerServerMessage.model_call_cancel:type_name -> znasllc.memql.worker.v1.ModelCallCancel
-	48, // 27: znasllc.memql.worker.v1.WorkerServerMessage.model_pull_start:type_name -> znasllc.memql.worker.v1.ModelPullStart
-	51, // 28: znasllc.memql.worker.v1.WorkerServerMessage.model_pull_cancel:type_name -> znasllc.memql.worker.v1.ModelPullCancel
-	52, // 29: znasllc.memql.worker.v1.WorkerServerMessage.model_probe_start:type_name -> znasllc.memql.worker.v1.ModelProbeStart
-	56, // 30: znasllc.memql.worker.v1.WorkerServerMessage.model_probe_cancel:type_name -> znasllc.memql.worker.v1.ModelProbeCancel
+	27, // 23: znasllc.memql.worker.v1.WorkerServerMessage.app_session_start:type_name -> znasllc.memql.worker.v1.AppSessionStart
+	29, // 24: znasllc.memql.worker.v1.WorkerServerMessage.app_session_control:type_name -> znasllc.memql.worker.v1.AppSessionControl
+	33, // 25: znasllc.memql.worker.v1.WorkerServerMessage.model_call_start:type_name -> znasllc.memql.worker.v1.ModelCallStart
+	48, // 26: znasllc.memql.worker.v1.WorkerServerMessage.model_call_cancel:type_name -> znasllc.memql.worker.v1.ModelCallCancel
+	49, // 27: znasllc.memql.worker.v1.WorkerServerMessage.model_pull_start:type_name -> znasllc.memql.worker.v1.ModelPullStart
+	52, // 28: znasllc.memql.worker.v1.WorkerServerMessage.model_pull_cancel:type_name -> znasllc.memql.worker.v1.ModelPullCancel
+	53, // 29: znasllc.memql.worker.v1.WorkerServerMessage.model_probe_start:type_name -> znasllc.memql.worker.v1.ModelProbeStart
+	57, // 30: znasllc.memql.worker.v1.WorkerServerMessage.model_probe_cancel:type_name -> znasllc.memql.worker.v1.ModelProbeCancel
 	14, // 31: znasllc.memql.worker.v1.WorkerServerMessage.ping:type_name -> znasllc.memql.worker.v1.Ping
-	60, // 32: znasllc.memql.worker.v1.Register.labels:type_name -> znasllc.memql.worker.v1.Register.LabelsEntry
-	61, // 33: znasllc.memql.worker.v1.Register.concurrency:type_name -> znasllc.memql.worker.v1.Register.ConcurrencyEntry
+	61, // 32: znasllc.memql.worker.v1.Register.labels:type_name -> znasllc.memql.worker.v1.Register.LabelsEntry
+	62, // 33: znasllc.memql.worker.v1.Register.concurrency:type_name -> znasllc.memql.worker.v1.Register.ConcurrencyEntry
 	6,  // 34: znasllc.memql.worker.v1.Register.platform:type_name -> znasllc.memql.worker.v1.PlatformInfo
 	7,  // 35: znasllc.memql.worker.v1.Register.permissions:type_name -> znasllc.memql.worker.v1.PermissionStatus
 	5,  // 36: znasllc.memql.worker.v1.Register.apps:type_name -> znasllc.memql.worker.v1.AppInfo
@@ -6150,57 +6264,58 @@ var file_worker_proto_depIdxs = []int32{
 	0,  // 39: znasllc.memql.worker.v1.PermissionStatus.accessibility_state:type_name -> znasllc.memql.worker.v1.PermissionDecision
 	0,  // 40: znasllc.memql.worker.v1.PermissionStatus.screen_recording_state:type_name -> znasllc.memql.worker.v1.PermissionDecision
 	0,  // 41: znasllc.memql.worker.v1.PermissionStatus.x11_display_state:type_name -> znasllc.memql.worker.v1.PermissionDecision
-	63, // 42: znasllc.memql.worker.v1.PermissionStatus.checked_at:type_name -> google.protobuf.Timestamp
+	64, // 42: znasllc.memql.worker.v1.PermissionStatus.checked_at:type_name -> google.protobuf.Timestamp
 	9,  // 43: znasllc.memql.worker.v1.HardwareInventory.gpu:type_name -> znasllc.memql.worker.v1.GpuInfo
 	10, // 44: znasllc.memql.worker.v1.HardwareInventory.runtimes:type_name -> znasllc.memql.worker.v1.RuntimeInfo
-	63, // 45: znasllc.memql.worker.v1.HardwareInventory.reported_at:type_name -> google.protobuf.Timestamp
-	63, // 46: znasllc.memql.worker.v1.RegisterAck.registered_at:type_name -> google.protobuf.Timestamp
-	63, // 47: znasllc.memql.worker.v1.Heartbeat.ts:type_name -> google.protobuf.Timestamp
-	62, // 48: znasllc.memql.worker.v1.Heartbeat.active_calls_per_capability:type_name -> znasllc.memql.worker.v1.Heartbeat.ActiveCallsPerCapabilityEntry
+	64, // 45: znasllc.memql.worker.v1.HardwareInventory.reported_at:type_name -> google.protobuf.Timestamp
+	64, // 46: znasllc.memql.worker.v1.RegisterAck.registered_at:type_name -> google.protobuf.Timestamp
+	64, // 47: znasllc.memql.worker.v1.Heartbeat.ts:type_name -> google.protobuf.Timestamp
+	63, // 48: znasllc.memql.worker.v1.Heartbeat.active_calls_per_capability:type_name -> znasllc.memql.worker.v1.Heartbeat.ActiveCallsPerCapabilityEntry
 	5,  // 49: znasllc.memql.worker.v1.Heartbeat.apps:type_name -> znasllc.memql.worker.v1.AppInfo
 	8,  // 50: znasllc.memql.worker.v1.Heartbeat.hardware:type_name -> znasllc.memql.worker.v1.HardwareInventory
 	7,  // 51: znasllc.memql.worker.v1.Heartbeat.permissions:type_name -> znasllc.memql.worker.v1.PermissionStatus
-	63, // 52: znasllc.memql.worker.v1.Ping.sent_at:type_name -> google.protobuf.Timestamp
-	63, // 53: znasllc.memql.worker.v1.Pong.sent_at:type_name -> google.protobuf.Timestamp
-	63, // 54: znasllc.memql.worker.v1.Pong.received_at:type_name -> google.protobuf.Timestamp
-	64, // 55: znasllc.memql.worker.v1.ToolDispatch.timeout:type_name -> google.protobuf.Duration
-	57, // 56: znasllc.memql.worker.v1.ToolDispatch.computer_permission:type_name -> znasllc.memql.worker.v1.ComputerPermissionConstraint
-	21, // 57: znasllc.memql.worker.v1.ToolResult.success:type_name -> znasllc.memql.worker.v1.Success
-	22, // 58: znasllc.memql.worker.v1.ToolResult.failure:type_name -> znasllc.memql.worker.v1.Failure
-	63, // 59: znasllc.memql.worker.v1.RotationRequest.current_token_expires_at:type_name -> google.protobuf.Timestamp
-	63, // 60: znasllc.memql.worker.v1.RotationResponse.new_token_expires_at:type_name -> google.protobuf.Timestamp
-	63, // 61: znasllc.memql.worker.v1.AuditEvent.ts:type_name -> google.protobuf.Timestamp
-	27, // 62: znasllc.memql.worker.v1.AppSessionStart.limits:type_name -> znasllc.memql.worker.v1.AppSessionLimits
-	31, // 63: znasllc.memql.worker.v1.AppSessionEnd.usage:type_name -> znasllc.memql.worker.v1.AppSessionUsage
-	35, // 64: znasllc.memql.worker.v1.ModelCallStart.messages:type_name -> znasllc.memql.worker.v1.ModelCallMessage
-	36, // 65: znasllc.memql.worker.v1.ModelCallStart.params:type_name -> znasllc.memql.worker.v1.ModelCallParams
-	37, // 66: znasllc.memql.worker.v1.ModelCallStart.limits:type_name -> znasllc.memql.worker.v1.ModelCallLimits
-	33, // 67: znasllc.memql.worker.v1.ModelCallStart.tools:type_name -> znasllc.memql.worker.v1.ModelCallTool
-	42, // 68: znasllc.memql.worker.v1.ModelCallStart.audio:type_name -> znasllc.memql.worker.v1.ModelCallAudio
-	44, // 69: znasllc.memql.worker.v1.ModelCallStart.speech:type_name -> znasllc.memql.worker.v1.ModelCallSpeech
-	45, // 70: znasllc.memql.worker.v1.ModelCallStart.image:type_name -> znasllc.memql.worker.v1.ModelCallImageRequest
-	34, // 71: znasllc.memql.worker.v1.ModelCallMessage.tool_calls:type_name -> znasllc.memql.worker.v1.ModelCallToolCall
-	41, // 72: znasllc.memql.worker.v1.ModelCallMessage.images:type_name -> znasllc.memql.worker.v1.ModelCallImage
-	34, // 73: znasllc.memql.worker.v1.ModelCallDelta.tool_calls:type_name -> znasllc.memql.worker.v1.ModelCallToolCall
-	43, // 74: znasllc.memql.worker.v1.ModelCallDelta.segments:type_name -> znasllc.memql.worker.v1.ModelCallTranscriptSegment
-	42, // 75: znasllc.memql.worker.v1.ModelCallDelta.audio:type_name -> znasllc.memql.worker.v1.ModelCallAudio
-	46, // 76: znasllc.memql.worker.v1.ModelCallEnd.usage:type_name -> znasllc.memql.worker.v1.ModelCallUsage
-	40, // 77: znasllc.memql.worker.v1.ModelCallEnd.embeddings:type_name -> znasllc.memql.worker.v1.ModelCallEmbedding
-	34, // 78: znasllc.memql.worker.v1.ModelCallEnd.tool_calls:type_name -> znasllc.memql.worker.v1.ModelCallToolCall
-	43, // 79: znasllc.memql.worker.v1.ModelCallEnd.segments:type_name -> znasllc.memql.worker.v1.ModelCallTranscriptSegment
-	42, // 80: znasllc.memql.worker.v1.ModelCallEnd.audio:type_name -> znasllc.memql.worker.v1.ModelCallAudio
-	41, // 81: znasllc.memql.worker.v1.ModelCallEnd.images:type_name -> znasllc.memql.worker.v1.ModelCallImage
-	55, // 82: znasllc.memql.worker.v1.ModelProbeEnd.structured_validity:type_name -> znasllc.memql.worker.v1.ProbeFigure
-	55, // 83: znasllc.memql.worker.v1.ModelProbeEnd.tool_call_correctness:type_name -> znasllc.memql.worker.v1.ProbeFigure
-	55, // 84: znasllc.memql.worker.v1.ModelProbeEnd.throughput_tps:type_name -> znasllc.memql.worker.v1.ProbeFigure
-	55, // 85: znasllc.memql.worker.v1.ModelProbeEnd.ttft_ms:type_name -> znasllc.memql.worker.v1.ProbeFigure
-	1,  // 86: znasllc.memql.worker.v1.WorkerService.Stream:input_type -> znasllc.memql.worker.v1.WorkerClientMessage
-	2,  // 87: znasllc.memql.worker.v1.WorkerService.Stream:output_type -> znasllc.memql.worker.v1.WorkerServerMessage
-	87, // [87:88] is the sub-list for method output_type
-	86, // [86:87] is the sub-list for method input_type
-	86, // [86:86] is the sub-list for extension type_name
-	86, // [86:86] is the sub-list for extension extendee
-	0,  // [0:86] is the sub-list for field type_name
+	64, // 52: znasllc.memql.worker.v1.Ping.sent_at:type_name -> google.protobuf.Timestamp
+	64, // 53: znasllc.memql.worker.v1.Pong.sent_at:type_name -> google.protobuf.Timestamp
+	64, // 54: znasllc.memql.worker.v1.Pong.received_at:type_name -> google.protobuf.Timestamp
+	65, // 55: znasllc.memql.worker.v1.ToolDispatch.timeout:type_name -> google.protobuf.Duration
+	58, // 56: znasllc.memql.worker.v1.ToolDispatch.computer_permission:type_name -> znasllc.memql.worker.v1.ComputerPermissionConstraint
+	17, // 57: znasllc.memql.worker.v1.ToolDispatch.workbench:type_name -> znasllc.memql.worker.v1.WorkbenchConstraint
+	22, // 58: znasllc.memql.worker.v1.ToolResult.success:type_name -> znasllc.memql.worker.v1.Success
+	23, // 59: znasllc.memql.worker.v1.ToolResult.failure:type_name -> znasllc.memql.worker.v1.Failure
+	64, // 60: znasllc.memql.worker.v1.RotationRequest.current_token_expires_at:type_name -> google.protobuf.Timestamp
+	64, // 61: znasllc.memql.worker.v1.RotationResponse.new_token_expires_at:type_name -> google.protobuf.Timestamp
+	64, // 62: znasllc.memql.worker.v1.AuditEvent.ts:type_name -> google.protobuf.Timestamp
+	28, // 63: znasllc.memql.worker.v1.AppSessionStart.limits:type_name -> znasllc.memql.worker.v1.AppSessionLimits
+	32, // 64: znasllc.memql.worker.v1.AppSessionEnd.usage:type_name -> znasllc.memql.worker.v1.AppSessionUsage
+	36, // 65: znasllc.memql.worker.v1.ModelCallStart.messages:type_name -> znasllc.memql.worker.v1.ModelCallMessage
+	37, // 66: znasllc.memql.worker.v1.ModelCallStart.params:type_name -> znasllc.memql.worker.v1.ModelCallParams
+	38, // 67: znasllc.memql.worker.v1.ModelCallStart.limits:type_name -> znasllc.memql.worker.v1.ModelCallLimits
+	34, // 68: znasllc.memql.worker.v1.ModelCallStart.tools:type_name -> znasllc.memql.worker.v1.ModelCallTool
+	43, // 69: znasllc.memql.worker.v1.ModelCallStart.audio:type_name -> znasllc.memql.worker.v1.ModelCallAudio
+	45, // 70: znasllc.memql.worker.v1.ModelCallStart.speech:type_name -> znasllc.memql.worker.v1.ModelCallSpeech
+	46, // 71: znasllc.memql.worker.v1.ModelCallStart.image:type_name -> znasllc.memql.worker.v1.ModelCallImageRequest
+	35, // 72: znasllc.memql.worker.v1.ModelCallMessage.tool_calls:type_name -> znasllc.memql.worker.v1.ModelCallToolCall
+	42, // 73: znasllc.memql.worker.v1.ModelCallMessage.images:type_name -> znasllc.memql.worker.v1.ModelCallImage
+	35, // 74: znasllc.memql.worker.v1.ModelCallDelta.tool_calls:type_name -> znasllc.memql.worker.v1.ModelCallToolCall
+	44, // 75: znasllc.memql.worker.v1.ModelCallDelta.segments:type_name -> znasllc.memql.worker.v1.ModelCallTranscriptSegment
+	43, // 76: znasllc.memql.worker.v1.ModelCallDelta.audio:type_name -> znasllc.memql.worker.v1.ModelCallAudio
+	47, // 77: znasllc.memql.worker.v1.ModelCallEnd.usage:type_name -> znasllc.memql.worker.v1.ModelCallUsage
+	41, // 78: znasllc.memql.worker.v1.ModelCallEnd.embeddings:type_name -> znasllc.memql.worker.v1.ModelCallEmbedding
+	35, // 79: znasllc.memql.worker.v1.ModelCallEnd.tool_calls:type_name -> znasllc.memql.worker.v1.ModelCallToolCall
+	44, // 80: znasllc.memql.worker.v1.ModelCallEnd.segments:type_name -> znasllc.memql.worker.v1.ModelCallTranscriptSegment
+	43, // 81: znasllc.memql.worker.v1.ModelCallEnd.audio:type_name -> znasllc.memql.worker.v1.ModelCallAudio
+	42, // 82: znasllc.memql.worker.v1.ModelCallEnd.images:type_name -> znasllc.memql.worker.v1.ModelCallImage
+	56, // 83: znasllc.memql.worker.v1.ModelProbeEnd.structured_validity:type_name -> znasllc.memql.worker.v1.ProbeFigure
+	56, // 84: znasllc.memql.worker.v1.ModelProbeEnd.tool_call_correctness:type_name -> znasllc.memql.worker.v1.ProbeFigure
+	56, // 85: znasllc.memql.worker.v1.ModelProbeEnd.throughput_tps:type_name -> znasllc.memql.worker.v1.ProbeFigure
+	56, // 86: znasllc.memql.worker.v1.ModelProbeEnd.ttft_ms:type_name -> znasllc.memql.worker.v1.ProbeFigure
+	1,  // 87: znasllc.memql.worker.v1.WorkerService.Stream:input_type -> znasllc.memql.worker.v1.WorkerClientMessage
+	2,  // 88: znasllc.memql.worker.v1.WorkerService.Stream:output_type -> znasllc.memql.worker.v1.WorkerServerMessage
+	88, // [88:89] is the sub-list for method output_type
+	87, // [87:88] is the sub-list for method input_type
+	87, // [87:87] is the sub-list for extension type_name
+	87, // [87:87] is the sub-list for extension extendee
+	0,  // [0:87] is the sub-list for field type_name
 }
 
 func init() { file_worker_proto_init() }
@@ -6242,12 +6357,12 @@ func file_worker_proto_init() {
 		(*WorkerServerMessage_ModelProbeCancel)(nil),
 		(*WorkerServerMessage_Ping)(nil),
 	}
-	file_worker_proto_msgTypes[18].OneofWrappers = []any{
+	file_worker_proto_msgTypes[19].OneofWrappers = []any{
 		(*ToolStream_StdoutChunk)(nil),
 		(*ToolStream_StderrChunk)(nil),
 		(*ToolStream_DataChunk)(nil),
 	}
-	file_worker_proto_msgTypes[19].OneofWrappers = []any{
+	file_worker_proto_msgTypes[20].OneofWrappers = []any{
 		(*ToolResult_Success)(nil),
 		(*ToolResult_Failure)(nil),
 	}
@@ -6257,7 +6372,7 @@ func file_worker_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_worker_proto_rawDesc), len(file_worker_proto_rawDesc)),
 			NumEnums:      1,
-			NumMessages:   62,
+			NumMessages:   63,
 			NumExtensions: 0,
 			NumServices:   1,
 		},

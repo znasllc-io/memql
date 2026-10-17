@@ -153,11 +153,12 @@ type Result struct {
 // model cannot name a machine, so it cannot hallucinate one.
 type Request struct {
 	// Native-only receipt and freshly claimed constraint; never read from model args.
-	computerPermission *permission.Grant
-	computerConstraint *permission.Scope
-	computerOwner      string
-	Tool               string
-	Action             string
+	computerPermission  *permission.Grant
+	computerConstraint  *permission.Scope
+	computerOwner       string
+	workbenchConstraint *memqlv1.WorkbenchConstraint
+	Tool                string
+	Action              string
 	// Purpose says WHO is asking, which decides which gates apply. Empty is an
 	// agent's call: per-task approval, the kill switch, standing scope and the
 	// classifier, exactly as before the field existed. PurposePipeline is a
@@ -562,7 +563,7 @@ func (d *Dispatcher) attemptLocal(
 	}
 	// The connected stream must still belong to the caller whose inventory was
 	// planned. Sharing only admits model inference; it never admits host tools.
-	if !sameSubject(w.OwnerUserId, req.OwnerUserId) {
+	if req.Purpose != PurposeWorkbench && !sameSubject(w.OwnerUserId, req.OwnerUserId) {
 		return Result{ErrorCode: "owner_mismatch", ErrorMessage: "the connected machine does not belong to this user"}, ForwardRefusedBeforeStart
 	}
 	if !machineSupportsFileRead(w, req.Tool, req.Action, req.Args) {
@@ -605,6 +606,15 @@ func (d *Dispatcher) attemptLocal(
 		req.computerConstraint = constraint
 		req.computerOwner = w.OwnerUserId
 	}
+	if req.Purpose == PurposeWorkbench {
+		constraint, err := admitWorkbenchDispatch(dispatchCtx, d.store, w, req)
+		if err != nil {
+			return Result{ErrorCode: "workbench_admission_refused", ErrorMessage: err.Error()}, ForwardRefusedBeforeStart
+		}
+		req.workbenchConstraint = constraint.Constraint
+		dispatchCtx = workerservice.ContextWithToolSharing(dispatchCtx, constraint.Subjects)
+	}
+
 	d.stampSelected(ctx, req.OwnerUserId, cand.RegistrationId)
 
 	envelope := buildToolDispatch(req, timeout)
@@ -622,7 +632,7 @@ func (d *Dispatcher) attemptLocal(
 	}
 	res, err := w.DispatchWithStream(dispatchCtx, envelope, onChunk)
 	out := translateResult(envelope.GetCallId(), res, err)
-	if pipelineRefusedBeforeStart(req.Purpose, out, err) {
+	if pipelineRefusedBeforeStart(req.Purpose, out, err) || workbenchRefusedBeforeStart(req.Purpose, out, err) {
 		return out, ForwardRefusedBeforeStart
 	}
 	return out, ForwardCompleted
@@ -952,6 +962,7 @@ func buildToolDispatch(req Request, timeout time.Duration) *memqlv1.ToolDispatch
 		ArgsJson:           args,
 		Timeout:            durationpb.New(timeout),
 		ComputerPermission: permissionConstraint(req),
+		Workbench:          req.workbenchConstraint,
 	}
 }
 
