@@ -183,6 +183,13 @@
       "file": "knowledge/training/research-evidence-v1.txt",
       "sha256": "3092ad8c3c6a65a5a6f9bdcd99735998be7d7ddcfd1fa240207b6dbbd6d543db",
       "lesson": true
+    },
+    {
+      "domainId": "research-methodology",
+      "sourceRef": "training:model-catalog",
+      "file": "knowledge/training/model-catalog-v1.txt",
+      "sha256": "018d26426a57ae2cda089fea8ed9088d8697f50e513f3e61f971fd47a1bb4770",
+      "lesson": true
     }
   ],
   "provenance": [

@@ -438,6 +438,11 @@ func (f *FleetInference) attemptLocal(
 			fmt.Errorf("no live worker stream on this replica for %s; forward or retry required (connectedNodeId=%q)",
 				cand.Label(), cand.ConnectedNodeId)
 	}
+	ctx, cancelActivity := context.WithTimeout(ctx, workerservice.ModelCallTimeoutDefault)
+	defer cancelActivity()
+	activity := beginMachineActivity(ctx, f.store, f.logger, w.OwnerUserId, cand.RegistrationId, "model", start.GetModel()+" · "+start.GetKind(), "", workerservice.ModelCallTimeoutDefault)
+	defer activity.interrupted(ctx)
+
 	limit := fleetcatalog.ParseModelAttributes(w.LabelsSnapshot()[workerservice.ModelLabel(req.ModelId)]).MaxConcurrent
 	if err := w.AcquireModel(ctx, req.ModelId, limit); err != nil {
 		return memqlengine.FleetCallResult{}, ForwardRefusedBeforeStart, err
@@ -448,12 +453,14 @@ func (f *FleetInference) attemptLocal(
 	if f.router != nil {
 		admission.groups = f.router.groups
 	}
-	subjects, err := admission.admitSharedRegistration(ctx, req.ActingUserId, cand.RegistrationId)
+	subjects, releaseSetup, err := admission.admitModelSetup(ctx, w, req.ActingUserId, cand.RegistrationId, start)
 	if err != nil {
 		return memqlengine.FleetCallResult{}, ForwardRefusedBeforeStart, err
 	}
+	defer releaseSetup()
 	localRequest := modelCallRequestFromProto(id.NewShortId(), start, workerservice.ModelCallTimeoutDefault)
 	localRequest.SharingSubjects = subjects
+	activity.running()
 	handle, err := w.StartModelCall(ctx, localRequest)
 	if err != nil {
 		return memqlengine.FleetCallResult{}, ForwardRefusedBeforeStart, err
@@ -476,6 +483,13 @@ func (f *FleetInference) attemptLocal(
 		}
 	}()
 	outcome, waitErr := handle.Wait(ctx)
+	if waitErr == nil && outcome.Error == "" {
+		activity.end("succeeded")
+	} else if ctx.Err() != nil {
+		activity.end("cancelled")
+	} else {
+		activity.end("failed")
+	}
 	wg.Wait()
 	if waitErr != nil {
 		return memqlengine.FleetCallResult{}, ForwardCompleted, waitErr

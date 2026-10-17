@@ -6,6 +6,7 @@ import (
 	"strings"
 	"time"
 
+	memqlengine "github.com/znasllc-io/memql/component/memql"
 	workerservice "github.com/znasllc-io/memql/component/worker"
 )
 
@@ -14,6 +15,7 @@ import (
 // -- a candidate may be held by another replica, in which case this node has
 // no handle for it at all and dispatch goes over the forward.
 type Candidate struct {
+	ModelSetup       memqlengine.ModelSetup
 	HomeDirectory    string
 	NativePlatform   string
 	ActionContracts  workerservice.ActionContracts

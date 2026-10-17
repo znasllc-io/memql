@@ -182,7 +182,6 @@ func TestRecordedExclusionsStayExcluded(t *testing.T) {
 	// matching what it names would show up here rather than pass vacuously.
 	for _, topic := range []string{
 		"graph.node.updated.v1:identity:user",
-		"graph.node.created.v1:worker:invocation",
 		"graph.node.created.v1:campaigns:delivery",
 		"graph.node.created.v1:campaigns:engagementEvent",
 		"graph.node.created.v1:campaigns:recipient",
@@ -372,6 +371,29 @@ func TestTheRecordingsHighVolumeHalfStaysLocalAndSaysSo(t *testing.T) {
 		}
 		if strings.TrimSpace(rec.Reason) == "" {
 			t.Errorf("%s is excluded with no reason", topic)
+		}
+	}
+}
+
+func TestMachineActivityCrossesTwoReplicas(t *testing.T) {
+	replicaA, replicaB, deliver := twoReplicaMesh(t)
+	got := make(chan events.Event, 4)
+	unsub := replicaB.bus.Subscribe("graph.node.*.v1:worker:activity", func(e events.Event) { got <- e }, events.WithSubscriberName("test:fleet"))
+	defer unsub()
+	for _, state := range []string{"queued", "running", "succeeded"} {
+		topic, kind := "graph.node.updated.v1:worker:activity", events.KindNodeUpdated
+		if state == "queued" {
+			topic, kind = "graph.node.created.v1:worker:activity", events.KindNodeCreated
+		}
+		replicaA.bus.Publish(events.NewEvent(topic, kind, map[string]any{"id": "activity-1", "workerId": "machine-1", "ownerUserId": "u1", "status": state}))
+		deliver(t)
+		select {
+		case e := <-got:
+			if e.Payload["status"] != state || e.Payload["id"] != "activity-1" {
+				t.Fatalf("activity payload changed across replicas: %v", e.Payload)
+			}
+		case <-time.After(2 * time.Second):
+			t.Fatalf("machine activity %s on replica A did not reach the browser's replica B", state)
 		}
 	}
 }

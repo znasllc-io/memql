@@ -1445,3 +1445,44 @@ mutation registration updateWorkerSharingActivity {
     args.sharingActivity
   }
 }
+
+/// Save one validated model setup. The engine owns admission and the row version fence.
+/// actor.userId scoping alone cannot enforce hardware capacity, model capabilities, or an expected revision; fleetSetModelSetup performs those checks first.
+@actor
+@serverOnly
+mutation registration setWorkerModelSetup {
+  args {
+    registrationId string!
+    setup object!
+  }
+  update {
+    id: args.registrationId
+    modelSetup: args.setup
+  }
+}
+
+@actor
+mutation activity createMachineActivity {
+  args { activityId string! workerId string! kind string! label string! correlationId string startedAt string! expiresAt string! }
+  insert {
+    id: args.activityId
+    ownerUserId: actor.userId
+    args.workerId
+    args.kind
+    args.label
+    correlationId: args.correlationId ?? ""
+    status: "queued"
+    args.startedAt
+    args.expiresAt
+  }
+}
+
+mutation activity updateMachineActivity {
+  args { activityId string! status string! endedAt string detail string }
+  update {
+    id: args.activityId
+    args.status
+    endedAt: args.endedAt ?? ""
+    detail: args.detail ?? ""
+  }
+}

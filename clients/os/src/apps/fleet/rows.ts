@@ -96,6 +96,7 @@ export interface MachineRow {
   revokeReason: string;
   /** The local apps this machine reported (memql#4359). */
   apps: MachineApp[];
+  appsReported: boolean;
   /** What the machine IS, as its cockpit reported it (epic memql#5146, D1).
    *  `present` false means the cockpit predates the field -- NOT a machine
    *  with no memory. See machines/hardware.ts. */
@@ -374,6 +375,7 @@ export function machineFromRow(raw: Row): MachineRow {
     revokedBy: rowString(row, "revokedBy"),
     revokeReason: rowString(row, "revokeReason"),
     apps: appsFrom(row),
+    appsReported: Array.isArray(row["apps"]),
     hardware: hardwareFrom(row["hardware"]),
     sharingMode: sharing.mode,
     sharingPaused: sharing.paused,
@@ -721,6 +723,12 @@ export interface RoutingRecord {
 export interface InvocationRow {
   id: string;
   createdAt: string;
+  completedAt: string;
+  correlationId: string;
+  runId: string;
+  stepId: string;
+  argsRedacted: string;
+  outputPreview: string;
   startedAt: string;
   tool: string;
   action: string;
@@ -755,6 +763,10 @@ export function invocationFromRow(raw: Row): InvocationRow {
   const row = flatten(raw);
   return {
     id: rowString(row, "id"),
+    completedAt: rowString(row, "completedAt"), correlationId: rowString(row, "correlationId"),
+    runId: rowString(row, "runId"), stepId: rowString(row, "stepId"),
+    argsRedacted: rowObject(row, "argsRedacted") ? JSON.stringify(rowObject(row, "argsRedacted"), null, 2) : "",
+    outputPreview: rowString(row, "outputPreview"),
     createdAt: rowString(row, "createdAt"),
     startedAt: rowString(row, "startedAt"),
     tool: rowString(row, "tool"),

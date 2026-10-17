@@ -83,6 +83,7 @@ concept invocation {
 @rowAuthz(owner="ownerUserId", clusterOwner)
 @displayCard(primary="name", secondary="version", tertiary="lastSeenAt", status="buildTag")
 concept registration {
+  modelSetup object @description("Owner-selected model purposes and revision. Written only by fleetSetModelSetup after capacity validation. Absence means automatic routing; an explicit empty choices map disables model routing on this machine.")
   ownerUserId    string!  @serverSet  @description("v1:identity:user.id who owns this worker. THE ROW-AUTHZ OWNER FIELD, stamped from actor.userId by createWorkerRegistration and never accepted from caller args -- @serverSet makes that a load-time rejection rather than a convention, and TestDeclaredOwnerFieldsAreServerStamped fails the build on a mutation that writes it from args. The worker authenticates as worker:<id>, not as its owner, so component/worker's store runs the create under auth.ContextWithUserActor for the owner the worker_token's identity row named. Dispatch-time access check: caller's session-owner must equal this value.")
   identityId     string!  @description("v1:identity:identity.id of the worker_token credential the worker authenticated with. Lookup target on every reconnect; when a new token arrives for the same physical install (stable labels.machineId), refresh rebinds this field on the existing registration rather than inserting a duplicate row.")
   name           string!  @description("User-chosen display name. Defaults to hostname. Shown in /me/workers and /admin/workers.")
@@ -346,4 +347,22 @@ concept modelProbe {
   @relationship(type="parent", field="ownerUserId", target=user, direction="outgoing")
   @relationship(type="parent", field="workerId", target=registration, direction="outgoing")
   @relationship(type="references", as="measuredAs", field="measurementId", target=modelMeasurement, direction="outgoing")
+}
+
+/// Machine-local execution lifecycle. Written by the replica holding the stream,
+/// before capacity admission, at dispatch, and on completion. No prompts or output.
+/// Shared model calls expose only their model and state to the hardware owner.
+@rowAuthz(owner="ownerUserId", clusterOwner)
+@displayCard(primary="label", secondary="kind", status="status")
+concept activity {
+  ownerUserId string! @serverSet
+  workerId string!
+  kind enum("model", "tool")!
+  label string!
+  status enum("queued", "running", "succeeded", "failed", "cancelled", "interrupted")!
+  correlationId string
+  startedAt datetime!
+  endedAt datetime
+  expiresAt datetime!
+  detail string
 }

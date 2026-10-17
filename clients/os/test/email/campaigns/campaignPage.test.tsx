@@ -528,10 +528,12 @@ describe("a change on its way", () => {
     mountWindow(conn);
     await openCampaign();
     await waitFor(() => expect(barActs()).toEqual(["Edit", "Send a test", "Send now"]));
+    // Use one clock for both confirmation holds and the later landing timeout.
+    // Freezing Date after a real timer can strand the hold just before its boundary.
+    vi.useFakeTimers();
     await readTheBar();
     press("Send now");
     await readTheBar();
-    vi.useFakeTimers();
     press("Send now");
     await act(async () => { await vi.advanceTimersByTimeAsync(0); });
     expect(conn.query.campaignStartSend).toHaveBeenCalledOnce();

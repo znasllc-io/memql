@@ -1,3 +1,4 @@
+import { useGraphRevision } from "../../../live/useGraphRevision";
 import { useCallback, useMemo, useSyncExternalStore } from "react";
 import type { Row } from "@znasllc-io/memql-sdk-core/client";
 
@@ -51,7 +52,8 @@ export function useRoutingFacts(routes: readonly RouteLike[], enabled = true): R
       return row === undefined ? [] : delegationPolicyFromRow(row).appOrder;
     };
   }, [connection, enabled]);
-  const appOrder = useReading<string[]>(`fleet:routing:appOrder:${access?.userId ?? ""}`, readOrder).value;
+  const liveRevision = useGraphRevision(["v1:worker:delegationPolicy"], enabled);
+  const appOrder = useReading<string[]>(`fleet:routing:appOrder:${access?.userId ?? ""}:${liveRevision}`, readOrder).value;
 
   const rows = snapshot?.rows;
   const preference = machineChoice.policy?.modelPreference;

@@ -1,0 +1,14 @@
+Review the model catalog as of {{ .today }} using the attached research knowledge.
+Use the available read-only source tools. The existing catalog is context, not evidence.
+
+Research method:
+{{ .method }}
+
+Current catalog:
+{{ .catalog }}
+
+Return only one JSON object, without Markdown fences:
+{"summary":"What changed, what was actually checked, and remaining evidence gaps.","findings":[{"modelId":"exact runtime or provider model ID","category":"text|reasoning|omni|vision|audioIn|audioOut|imageGen|videoGen|embeddings","runtime":"ollama|mlx|whispercpp|nemo|kokoro|mflux|comfyui|openai-compatible|cloud","summary":"Specific change, supported use, limitations, and why it matters.","sources":["https://exact-primary-source"]}]}
+At most 20 findings, 600 characters per finding, 2000 characters for the summary.
+Include new candidates or material changes. An unchanged or inconclusive review may have no findings.
+Nothing you return activates a model, installs software, changes an embedding binding, or promotes a cloud default.

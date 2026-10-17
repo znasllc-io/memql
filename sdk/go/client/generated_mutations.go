@@ -1082,6 +1082,28 @@ func ConfigureAccountDomainsBuild(args ConfigureAccountDomainsArgs) string {
 	return b.String()
 }
 
+// ConfigureModelCatalogResearch -- Explicitly choose who owns future research. Disabled is the default.
+//
+// Bound concept: v1:models:catalogResearchSettings (machine-readable: BoundConcepts["configureModelCatalogResearch"] in generated_concepts.go).
+type ConfigureModelCatalogResearchArgs struct {
+	Enabled bool
+}
+
+// ConfigureModelCatalogResearch calls the engine mutation configureModelCatalogResearch.
+func (qc *QueryClient) ConfigureModelCatalogResearch(ctx context.Context, args ConfigureModelCatalogResearchArgs) (*Result, error) {
+	call := ConfigureModelCatalogResearchBuild(args)
+	return qc.executeNamed(ctx, "configureModelCatalogResearch", call)
+}
+
+func ConfigureModelCatalogResearchBuild(args ConfigureModelCatalogResearchArgs) string {
+	var b strings.Builder
+	b.WriteString("mutation configureModelCatalogResearch(")
+	b.WriteString("enabled: ")
+	b.WriteString(fmt.Sprintf("%v", args.Enabled))
+	b.WriteString(")")
+	return b.String()
+}
+
 // ConfirmRecord -- Human confirm a data record, updating confirm count and validation state
 //
 // Bound concept: v1:data:record (machine-readable: BoundConcepts["confirmRecord"] in generated_concepts.go).
@@ -4259,6 +4281,23 @@ func CreateLibraryWatchedFolderBuild(args CreateLibraryWatchedFolderArgs) string
 	}
 	b.WriteString(")")
 	return b.String()
+}
+
+// CreateMachineActivity wraps the mutation named "createMachineActivity".
+//
+// Bound concept: v1:worker:activity (machine-readable: BoundConcepts["createMachineActivity"] in generated_concepts.go).
+type CreateMachineActivityArgs struct {
+}
+
+// CreateMachineActivity calls the engine mutation createMachineActivity.
+func (qc *QueryClient) CreateMachineActivity(ctx context.Context, args CreateMachineActivityArgs) (*Result, error) {
+	call := CreateMachineActivityBuild(args)
+	return qc.executeNamed(ctx, "createMachineActivity", call)
+}
+
+func CreateMachineActivityBuild(args CreateMachineActivityArgs) string {
+	_ = args
+	return "mutation createMachineActivity()"
 }
 
 // CreateMagicLinkRequest -- Create a magic-link request row at issuance time.
@@ -7790,7 +7829,7 @@ type ModelProfileAddArgs struct {
 	ModelId   string
 	// Enum: text | reasoning | omni | vision | audioIn | audioOut | imageGen | videoGen | embeddings
 	Category string
-	// Enum: ollama | mlx | whispercpp | nemo | kokoro | mflux | comfyui
+	// Enum: ollama | mlx | whispercpp | nemo | kokoro | mflux | comfyui | openai-compatible | cloud
 	Runtime string
 	// Enum: 16 | 24 | 32 | 64 | 128
 	MinMachineClass string
@@ -13472,6 +13511,23 @@ func UpdateLibraryWatchedFolderBuild(args UpdateLibraryWatchedFolderArgs) string
 	}
 	b.WriteString(")")
 	return b.String()
+}
+
+// UpdateMachineActivity wraps the mutation named "updateMachineActivity".
+//
+// Bound concept: v1:worker:activity (machine-readable: BoundConcepts["updateMachineActivity"] in generated_concepts.go).
+type UpdateMachineActivityArgs struct {
+}
+
+// UpdateMachineActivity calls the engine mutation updateMachineActivity.
+func (qc *QueryClient) UpdateMachineActivity(ctx context.Context, args UpdateMachineActivityArgs) (*Result, error) {
+	call := UpdateMachineActivityBuild(args)
+	return qc.executeNamed(ctx, "updateMachineActivity", call)
+}
+
+func UpdateMachineActivityBuild(args UpdateMachineActivityArgs) string {
+	_ = args
+	return "mutation updateMachineActivity()"
 }
 
 // UpdateMissingCapabilityStatus -- Operator-driven status transition on a missingCapability row. Used by the platform team's backlog tooling to mark a gap as in_progress, resolved (with a note on what shipped), or wontfix.

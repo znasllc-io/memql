@@ -285,16 +285,25 @@ feed only while open because list reads omit recording details.
 Equipment's Recent work shows the latest five matching sessions from the loaded
 recent history. All app sessions opens Activity only when this machine has more
 than five loaded sessions. Both views share one
-feed; a payload event causes no additional list read. Catalogs, recommendations,
-measurements, sharing ledgers, delegation settings and call history have no
-browser broadcast stream: visible views use `AutoRefresh` for those reads.
+feed; a payload event causes no additional list read. Machine Activity retains
+durable queued/running/terminal receipts and completed tool calls, alongside
+app sessions and the earlier model ledger. The holding agent writes activity
+for both local and forwarded calls; model activity contains no prompts or output.
+Computed catalogs, recommendations, inference choices and routing facts use
+`useGraphRevision` to invalidate from their persisted inputs, with reconnect
+and focus recovery. Reads with no broadcast source retain `AutoRefresh` recovery.
 Do not poll healthy graph feeds or automatically repeat probes or writes.
 Failed initial reads also need recovery, even if a collection has no prior rows.
 
-Machine tabs end with **History**, then **Settings**. Settings contains General
+Machine tabs end with **Activity**, then **Settings**. Apps shows the platform's
+supported apps directly, separating installation, sign-in, permission and
+subscription reports. Missing setup starts an owner-scoped work goal for the
+selected machine; only a subsequent Cockpit report changes readiness.
+Settings contains General
 controls, inline Sharing and reported machine information in the same section
-grid. Sharing's live counts use the retained machine feed; directory reads stay
-on demand and use the visible view's refresh lifecycle. There is no separate
+grid. Sharing's live counts use the retained machine feed; directory reads
+invalidate when source records change and recover through the visible view's
+refresh lifecycle. There is no separate
 Sharing tab. Fleet's app-level Settings still contains the app's preferences.
 Routing labels and sharing use `CardCollectionEditor` with `CardCarousel` for
 the same search/add line, editable cards and paging. Sharing searches the
@@ -322,8 +331,7 @@ every app epic after it:
   population grows for every reason but this one. The pure reading
   (`addMachine/flow.ts`) is tested on fixtures; the page through the fake
   connection. The install step presents the install command and, when asked
-  for, a second local-model setup command. `CopyField` copies from anywhere in
-  the row and confirms success in place. The standalone token is available
+  for, a second local-model setup command. `CopyField` copies only from its explicit copy icon and confirms success in place. The standalone token is available
   under “Connection token”; it is still never persisted. Shared `TrailRow`
   provides the single contextual help entry on desktop and phone, with a
   placeholder modal until the walkthrough video and option documentation ship.
@@ -338,9 +346,12 @@ every app epic after it:
   `v1:worker:registration`, `v1:worker:routingPolicy` and
   `v1:workbench:workspace` carry explicit broadcast rules
   (`component/node/routing.go`); `v1:cluster:node` carries one through the
-  `v1:cluster:*` wildcards in the same file. Only `v1:worker:invocation` is
-  excluded, on volume grounds, so only the per-machine call history is an
-  on-demand query that says when it was read. The first cut of Fleet got
+  `v1:cluster:*` wildcards in the same file. Machine activity and invocation
+  receipts now broadcast created/updated events, and `v1:router:call`
+  broadcasts creates. Model profiles, catalog reviews/research settings and
+  embedding bindings also broadcast their changes. Computed reads subscribe
+  to those real inputs rather than inventing a virtual concept stream.
+  The first cut of Fleet got
   `v1:cluster:node` wrong -- reasoning from the absence of a rule with the
   concept's NAME in it, rather than reading the patterns -- and printed the
   mistake on the page as operator-facing copy.

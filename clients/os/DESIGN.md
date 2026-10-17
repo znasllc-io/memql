@@ -278,7 +278,7 @@ structured stdout contract and send human logs to stderr.
 Fleet's machine Settings page is the reference for displaying an entity's
 configuration and reported facts. Apply this pattern when building or revising
 comparable pages in other apps; keep their existing capabilities and permissions.
-For a machine, Settings is the last tab, after History. General controls and
+For a machine, Settings is the last tab, after Activity. General controls and
 Sharing precede reported facts on that one page. Sharing uses the same section
 grid, with a divider between its switch and users/groups collection; keep write errors
 beside the section that caused them. There is no separate Sharing tab.
@@ -299,15 +299,11 @@ beside the section that caused them. There is no separate Sharing tab.
   confirmation hold and restore focus on cancel. Lifecycle actions that belong
   in an `ActionBar` continue to follow rule 12.
 - **Quiet copying.** Use `Fact.copyValue` or `CopyValue presentation="row"`.
-  The value and its copy icon form one target; reserve the icon/receipt space so
-  hover and confirmation never shift the text. Give the target horizontal
-  padding at both ends, inside its width, and a faint theme-derived hover wash
-  with straight edges. Keep non-copyable values aligned with copyable ones.
-  Reveal the icon on hover or keyboard focus, keep it visible on touch, and
-  retain a clear keyboard focus ring. Support Enter/Space and manual selection.
-  Briefly show “Copied” only after success; on failure keep the text selectable
-  and report that nothing was copied. Use the shared control, not per-app copies
-  of its CSS or clipboard behavior.
+  Text stays selectable with its normal cursor. Only the separate copy icon
+  copies; clicking or hovering a value never changes the clipboard. Keep the
+  icon visible, reserve its space, and give it a keyboard focus ring. Confirm
+  success on the icon and report clipboard failures beside the value. Dates
+  copy their exact timestamps.
 - **Readable, truthful data.** Copy exact timestamps behind relative dates;
   copying a key/value entry includes both. Missing measurements remain “Not
   reported” or “Not measured”, never invented zeroes or copyable placeholders.
@@ -322,6 +318,33 @@ surfaces in every built-in theme, in light and dark, at wide and narrow window
 sizes. Include long values, empty reports, hover, keyboard focus, touch,
 clipboard success/refusal and reduced motion. Check actual rendered spacing
 and overflow, not just whether the control exists.
+
+Machine Model setup uses an assignment board: installed models beside task
+targets and a shared memory estimate. Highlight only tasks assigned to the
+selected model. Available tasks use a plain solid border with no accent fill;
+clearing an assignment removes its highlight. Tasks unavailable to the selected
+model use a muted dashed border. A valid drag target may highlight temporarily.
+Tasks that cannot accept the selected model stay visible as read-only tiles,
+without a click action, tab stop, hover treatment or accepted drop. Keep their
+existing assignments and independent clear controls; do not offer an action
+just to explain its predictable refusal afterward. Batch assignment follows
+the same capacity and compatibility checks before its action is offered.
+Clicking a model and task is the keyboard-accessible equivalent of dragging.
+One model serving several tasks counts once. Keep capacity, unavailable-model
+and bound-memory-search checks on every assignment path. The editor replaces
+the Models overview while open and preserves a refused draft. Save setup and
+Discard changes use one plain, right-aligned page action row outside the board;
+there is no nested lifecycle footer or “Choose your setup” status bar.
+Installed model details and the machine catalog extend the same window trail:
+Models → model, or Models → Catalog → model. Back returns one level along
+that path, and the Models crumb returns to the overview. Neither destination
+adds a separate Back button inside its content; catalog filters survive a
+visit to a model and back.
+Task assignments belong exclusively on the Assignment board. Machine model
+details and the Model library show embedding-binding status without offering
+their own assignment buttons. Existing corpus bindings remain protected.
+Installed model details are informational: model facts, source notes and binding
+status. Do not offer a Test section, chat prompts or performance probes here.
 
 Small equipment, label and sharing collections share `kit/CardCarousel`: one or two
 cards according to available width, explicit previous/next arrows and an

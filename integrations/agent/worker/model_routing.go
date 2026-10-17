@@ -41,6 +41,7 @@ import (
 	"strings"
 
 	"github.com/znasllc-io/memql/component/auth"
+	memqlengine "github.com/znasllc-io/memql/component/memql"
 	workerservice "github.com/znasllc-io/memql/component/worker"
 	fleetcatalog "github.com/znasllc-io/memql/component/worker/fleetcatalog"
 )
@@ -259,6 +260,11 @@ func narrowToModel(plan RoutePlan, modelId string, needs ModelNeeds) RoutePlan {
 		plan.Rejected = map[string]string{}
 	}
 	for _, c := range plan.Candidates {
+		purpose := memqlengine.ModelPurpose(needs.StructuredOutput, needs.Tools, needs.Vision, needs.Embeddings, needs.AudioIn, needs.AudioOut, needs.ImageGen)
+		if !c.ModelSetup.Allows(modelId, purpose, needs.MinContextWindow) {
+			plan.Rejected[c.RegistrationId] = "not selected for this purpose, or exceeds the setup context limit"
+			continue
+		}
 		attrs, offered := c.ModelAttributesFor(modelId)
 		if !offered {
 			plan.Rejected[c.RegistrationId] = "does not offer model " + modelId

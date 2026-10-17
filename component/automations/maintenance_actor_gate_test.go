@@ -130,6 +130,9 @@ func TestMaintenanceAutomationsAreArgued(t *testing.T) {
 		// no owner, so it lists owners and borrows each one's actor.
 		"sweepConstructReuse",
 		"sweepWaitingWorkRuns",
+		// Installation-wide catalog maintenance has no machine owner. Read its
+		// owner-only opt-in, then hand off to a bounded run owned by that person.
+		"weeklyModelCatalogResearch",
 		"workJournalRetentionSweep",
 		// workerAppSessionStaleSweep is the fourth worker sweep and the
 		// promise v1:worker:appSession's own status description made before

@@ -235,6 +235,14 @@ func (e *MemQLEngine) evaluateFleetModelPullExpression(ctx context.Context, args
 		return nil, err
 	}
 
+	unlock, err := e.lockModelDownloads(ctx, registrationId)
+	if err != nil {
+		return nil, err
+	}
+	defer unlock()
+	if err := e.validateModelDownload(ctx, registrationId, stringArg(args, "model")); err != nil {
+		return nil, err
+	}
 	plan, err := planModelPull(machine, acting, stringArg(args, "model"), time.Now())
 	if err != nil {
 		return nil, err

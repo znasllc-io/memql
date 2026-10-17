@@ -314,8 +314,8 @@ describe("the machines directory", () => {
     await click(await screen.findByText("Apps box"));
 
     expect(screen.getByText("Ready")).toBeTruthy();
-    await click(screen.getByRole("button", { name: /^Codex/ }));
-    expect(screen.getByText("Not allowed by Cockpit")).toBeTruthy();
+    expect(screen.queryByRole("button", { name: /^Codex/ })).toBeNull();
+    expect(screen.getByText("Not allowed · Signed in")).toBeTruthy();
   });
 
   it("folds a live update into the list without losing the projection", async () => {

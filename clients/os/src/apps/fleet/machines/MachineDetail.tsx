@@ -1,12 +1,12 @@
-import { machineAppAvailability } from "./features";
-import { Terminal, Trash2 } from "lucide-react";
+import { Trash2 } from "lucide-react";
 import { useSession } from "../../../chrome/access";
 import { localCockpitInstall } from "../addMachine/localInstall";
 import { PageHelp } from "../../../kit/pageHelp";
+import type { PageTrail } from "../../../kit/pageNavigation";
 import { useEffect, useRef, useState } from "react";
 
-import { CallHistory } from "../routing/CallHistory";
-import { Button, EmptyState, Caption, CopyField, Fact, Facts, Notice, Panel, Subhead, Switch, RecordList, RecordRow } from "../../../kit";
+import { MachineActivity } from "./MachineActivity";
+import { Button, Caption, CopyField, Notice, Panel, Switch } from "../../../kit";
 import { IconButton } from "../../../kit/IconButton";
 import { formatMoment } from "../../../kit/format";
 import { InPlaceAsk } from "../../../kit/pressHold";
@@ -16,14 +16,15 @@ import {
   type MachineRow,
 } from "../rows";
 import { CredentialHealth } from "./CredentialHealth";
-import { AppPermissionHelp } from "./AppPermissionHelp";
+import { MachineApps } from "./MachineApps";
+export { MachineAppsHelp } from "./MachineApps";
 import { MachineDetailsInfo, MachineDetailsSection } from "./MachineDetailsInfo";
 import { LabelEditor } from "./LabelEditor";
 import { ModelsGroup } from "./ModelsGroup";
 import { SharingGroup } from "./SharingGroup";
 import { OwnerFeaturesGroup } from "./OwnerFeaturesGroup";
 import { AutoRefresh } from "../../../kit/AutoRefresh";
-import { useMachineInference } from "./useMachineInference";
+import { useMachineRecommendation } from "./useMachineRecommendation";
 import type { MachineWrites, RemovalReceipt } from "./useMachineWrites";
 
 // One machine, in full: what it reported, what its owner set, what it can
@@ -34,11 +35,13 @@ export function MachineDetail({
   writes,
   now,
   view = "all",
+  modelNavigation,
 }: {
   machine: MachineRow;
   writes: MachineWrites;
   now: Date;
   view?: "all" | "settings" | "models" | "apps" | "activity";
+  modelNavigation?: Omit<PageTrail, "title">;
 }) {
   const label = machineName(machine);
   const busy = writes.busyId === machine.id;
@@ -46,11 +49,11 @@ export function MachineDetail({
   // nowhere, so they arrive with the recommendation rather than on the row --
   // one read for both, because a page that fetched the class separately could
   // show a class the recommendation disagreed with.
-  const inference = useMachineInference(machine.id, ["all", "settings", "models"].includes(view));
+  const recommendation = useMachineRecommendation(machine.id, ["all", "settings"].includes(view));
 
   return (
     <Panel label={`${label} detail`}>
-      <AutoRefresh enabled={["all", "settings", "models"].includes(view)} busy={inference.loading} onRefresh={inference.refreshMeasurements} />
+      <AutoRefresh enabled={["all", "settings"].includes(view)} busy={recommendation.state === "reading"} onRefresh={recommendation.reread} />
       {view === "all" || view === "settings" ? <div className="fleet-machine-details">
         <CredentialHealth machine={machine} now={now} />
         <MachineDetailsSection title="General">
@@ -76,17 +79,17 @@ export function MachineDetail({
           <SharingGroup machine={machine} writes={writes} />
           <SharingGroup machine={machine} writes={writes} resource="workbench" />
         </MachineDetailsSection>
-        <MachineDetailsInfo machine={machine} now={now} machineClass={inference.recommended.machineClass} usableBytes={inference.recommended.usableBytes} />
+        <MachineDetailsInfo machine={machine} now={now} machineClass={recommendation.recommended.machineClass} usableBytes={recommendation.recommended.usableBytes} />
       </div> : null}
 
-      {view === "all" || view === "apps" ? <AppsGroup machine={machine} now={now} standalone={view === "apps"} /> : null}
+      {view === "all" || view === "apps" ? <MachineApps machine={machine} now={now} /> : null}
 
       {/* Below Apps, because the two answer the same shape of question about
           this machine -- what it can be asked to do -- and a person scanning
           for either reads them together. */}
-      {view === "all" || view === "models" ? <ModelsGroup machine={machine} inference={inference} standalone={view === "models"} /> : null}
+      {view === "all" || view === "models" ? <ModelsGroup key={machine.id} machine={machine} standalone={view === "models"} navigation={modelNavigation} /> : null}
 
-      {view === "all" || view === "activity" ? <CallHistory standalone={view === "activity"} workerId={machine.id} machineLabel={label} /> : null}
+      {view === "all" || view === "activity" ? <MachineActivity key={machine.id} workerId={machine.id} navigation={modelNavigation} /> : null}
 
       {/* Sharing keeps refusals beside its inline draft. */}
       {writes.actionError && !["all", "settings"].includes(view) ? (
@@ -151,36 +154,6 @@ function RenameField({
       </Button>
     </form>
   );
-}
-
-export function MachineAppsHelp() {
-  return <PageHelp title="Apps on this machine"><p>Apps installed on this machine that Cockpit reports to MemQL. Ready apps are supported, allowed by Cockpit and signed in. Subscription status comes from the app.</p></PageHelp>;
-}
-
-function AppsGroup({ machine, standalone, now }: { machine: MachineRow; standalone: boolean; now: Date }) {
-  return (
-    <div className="os-fleet-apps">
-      {!standalone ? <div className="fleet-bank-heading"><Subhead meta={machine.apps.length}>Apps on this machine</Subhead><MachineAppsHelp /></div> : null}
-      {machine.apps.length === 0 ? (
-        <EmptyState icon={Terminal} title="No apps reported">Install and sign in to a supported app on this machine. It will appear here when Cockpit reports it.</EmptyState>
-      ) : (
-        <RecordList as="ul" label="Apps on this machine">
-          {machine.apps.map((app) => (
-            <MachineAppLine key={app.id} app={app} machine={machine} now={now} />
-          ))}
-        </RecordList>
-      )}
-    </div>
-  );
-}
-
-function MachineAppLine({ app, machine, now }: { app: MachineRow["apps"][number]; machine: MachineRow; now: Date }) {
-  const [open, setOpen] = useState(false);
-  return <div><RecordRow name={app.label} secondary={app.version || "Version not reported"}
-    state={machineAppAvailability(machine, app.runnable, now)} tone={machineAppAvailability(machine, app.runnable, now) === "Ready" ? "accent" : "warn"}
-    open={open} onOpen={() => setOpen(value => !value)} />
-    {open ? <><Facts><Fact label="Subscription" value={app.subscription || "Unknown"} /><Fact label="Availability" value={machine.ownerFeatures?.apps === false ? "Disabled in Settings" : app.runnable ? "Allowed and signed in · owner only" : app.why || "Not available to run"} /></Facts><AppPermissionHelp app={app} machine={machine} /></> : null}
-  </div>;
 }
 
 /** The uninstaller the machine's own platform takes. Anything that is not

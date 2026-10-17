@@ -129,3 +129,58 @@ it("reads just Machines when no machine is registered", async () => {
   fleet();
   await waitFor(() => expect(crumbs()).toEqual(["Machines"]));
 });
+
+async function openModelWorkspace() {
+  h.connection = fakeConnection({
+    myWorkersWithStatus: [machineRow({ id: "a", displayName: "Alpha", labels: { "model:chat": "tools=1", "model:embed": "embeddings=1" } })],
+    fleetModelSetup: [{ id: "a", revision: "one", choices: { conversation: "chat", embeddings: "embed" }, usableBytes: 32e9, catalog: [
+      { modelId: "chat", installed: true, purposes: ["conversation", "tools"], memoryBytes: 8e9 },
+      { modelId: "embed", installed: true, purposes: ["embeddings"], memoryBytes: 2e9 },
+    ] }],
+  });
+  fleet();
+  await openMachine("Alpha");
+  fireEvent.click(within(screen.getByRole("navigation", { name: "Machine views" })).getByRole("button", { name: "Models" }));
+  await screen.findByRole("button", { name: "Browse catalog" });
+}
+
+it("extends the window trail for installed model details without content navigation or assignment shortcuts", async () => {
+  await openModelWorkspace();
+  fireEvent.click(within(screen.getByRole("region", { name: "Installed" })).getByRole("button", { name: /^embed / }));
+  await waitFor(() => expect(crumbs()).toEqual(["Machines", "Alpha", "Models", "embed"]));
+  const workspace = within(screen.getByRole("main", { name: "Machine workspace" }));
+  expect(workspace.queryByRole("button", { name: /^(Models|Catalog|Use for memory search|Back)/ })).toBeNull();
+  expect(screen.getAllByRole("navigation", { name: "Breadcrumbs" })).toHaveLength(1);
+  expect(screen.getAllByRole("button", { name: /^Back/ })).toHaveLength(1);
+  // A retained, hidden model page must not take over another view's trail.
+  fireEvent.click(within(screen.getByRole("navigation", { name: "Machine views" })).getByRole("button", { name: "Settings" }));
+  await waitFor(() => expect(crumbs()).toEqual(["Machines", "Alpha", "Settings"]));
+  fireEvent.click(within(screen.getByRole("navigation", { name: "Machine views" })).getByRole("button", { name: "Models" }));
+  await waitFor(() => expect(crumbs().at(-1)).toBe("embed"));
+  fireEvent.click(screen.getByRole("button", { name: "Back to Models" }));
+  await waitFor(() => expect(crumbs()).toEqual(["Machines", "Alpha", "Models"]));
+  expect(screen.getByRole("region", { name: "Installed" })).toBeTruthy();
+});
+
+it("returns through Catalog with filters intact, and lets the Models crumb go directly home", async () => {
+  await openModelWorkspace();
+  fireEvent.click(screen.getByRole("button", { name: "Browse catalog" }));
+  await waitFor(() => expect(crumbs()).toEqual(["Machines", "Alpha", "Models", "Catalog"]));
+  fireEvent.click(screen.getByRole("button", { name: "Refine model catalog" }));
+  fireEvent.click(screen.getByRole("combobox", { name: "Task" }));
+  fireEvent.click(screen.getByRole("option", { name: "Search & memory" }));
+  const openEmbed = () => fireEvent.click(within(screen.getByRole("list", { name: "Model catalog" })).getByRole("button", { name: /embed/ }));
+  openEmbed();
+  await waitFor(() => expect(crumbs()).toEqual(["Machines", "Alpha", "Models", "Catalog", "embed"]));
+  expect(within(screen.getByRole("main", { name: "Machine workspace" })).queryByRole("button", { name: /^(Models|Catalog|Back)/ })).toBeNull();
+  fireEvent.click(screen.getByRole("button", { name: "Back to Catalog" }));
+  await waitFor(() => expect(crumbs().at(-1)).toBe("Catalog"));
+  expect(screen.queryByRole("button", { name: /chat Conversation/ })).toBeNull();
+  openEmbed();
+  fireEvent.click(within(screen.getByRole("navigation", { name: "Breadcrumbs" })).getByRole("button", { name: "Catalog" }));
+  await waitFor(() => expect(crumbs().at(-1)).toBe("Catalog"));
+  openEmbed();
+  fireEvent.click(within(screen.getByRole("navigation", { name: "Breadcrumbs" })).getByRole("button", { name: "Models" }));
+  await waitFor(() => expect(crumbs()).toEqual(["Machines", "Alpha", "Models"]));
+  expect(screen.getByRole("button", { name: "Browse catalog" })).toBeTruthy();
+});

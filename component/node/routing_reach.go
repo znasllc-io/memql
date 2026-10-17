@@ -142,14 +142,6 @@ func RoutingExclusions() []RoutingExclusion {
 				"removal.",
 		},
 		{
-			Pattern: "graph.node.*.v1:worker:invocation",
-			Reason: "One row per tool call. This is the volume exclusion the rest are " +
-				"measured against, and it predates the exclusions table " +
-				"(memql#4349 recorded it as a comment beside the Fleet rules). " +
-				"The Fleet page reads a machine's recent calls on demand rather " +
-				"than tailing them, so nothing is lost.",
-		},
-		{
 			Pattern: "graph.node.*.v1:campaigns:delivery",
 			Reason: "One row per recipient per send. A single campaign to a modest " +
 				"list is a larger burst than everything else in this table put " +

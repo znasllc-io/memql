@@ -9,11 +9,13 @@ function clipboard(writeText = vi.fn().mockResolvedValue(undefined)) {
   return writeText;
 }
 
-it.each(["value", "icon", "row"])("copies the exact timestamp once from the %s and confirms", async target => {
+it.each(["icon", "row"])("copies the exact timestamp once from the %s and confirms", async target => {
   const write = clipboard();
   render(<Facts><Fact label="Last heartbeat" value="just now" copyValue="2026-10-14T21:00:00Z" /></Facts>);
   const button = screen.getByRole("button", { name: "Copy Last heartbeat" });
-  fireEvent.click(target === "value" ? screen.getByText("just now") : target === "icon" ? button.querySelector("svg")! : button);
+  fireEvent.click(screen.getByText("just now"));
+  expect(write).not.toHaveBeenCalled();
+  fireEvent.click(target === "icon" ? button.querySelector("svg")! : button);
   expect(write).toHaveBeenCalledExactlyOnceWith("2026-10-14T21:00:00Z");
   expect(await screen.findByRole("button", { name: "Copied Last heartbeat" })).toBeTruthy();
   expect(screen.getByRole("status").textContent).toBe("Copied Last heartbeat");

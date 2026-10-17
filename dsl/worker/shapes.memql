@@ -36,6 +36,7 @@ shape invocation workerInvocationFull {
 /// online/offline state.
 @row
 shape registration workerRegistrationFull {
+  modelSetup
   row.id
   ownerUserId
   identityId
@@ -205,4 +206,20 @@ shape modelProbe workerModelProbeFull {
   updatedAt
   endedAt
   row.createdAt
+}
+
+@row
+shape activity workerActivityFull {
+  row.id
+  row.createdAt
+  ownerUserId
+  workerId
+  kind
+  label
+  status
+  correlationId
+  startedAt
+  endedAt
+  expiresAt
+  detail
 }
