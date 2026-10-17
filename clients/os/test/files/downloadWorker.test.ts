@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import { downloadWorkerRegistration, pumpToPort } from "../../src/apps/files/actions/downloadWorker";
+import { downloadWorkerRegistration, pumpToPort, runWorkerDownload } from "../../src/apps/files/actions/downloadWorker";
 
 // The page half of the streaming download (design D13): the page fetches with
 // the bearer -- authorization never leaves this side -- and pumps body chunks
@@ -21,6 +21,34 @@ interface Sent {
   type: string;
   chunk?: Uint8Array;
 }
+
+it("keeps a long download navigation alive until its body finishes", async () => {
+  vi.useFakeTimers();
+  const messages: string[] = [];
+  class Channel {
+    port1 = { onmessage: null as ((event: { data: unknown }) => void) | null, postMessage: (message: { type: string }) => messages.push(message.type) };
+    port2 = { postMessage: (data: unknown) => this.port1.onmessage?.({ data }) };
+  }
+  vi.stubGlobal("MessageChannel", Channel);
+  let body!: ReadableStreamDefaultController<Uint8Array>;
+  const stream = new ReadableStream<Uint8Array>({ start(controller) { body = controller; } });
+  const registration = { active: { postMessage: (_data: unknown, ports: Channel["port2"][]) => ports[0]!.postMessage({ type: "ready", url: "/__memql-dl/fixture" }) } } as unknown as ServiceWorkerRegistration;
+  try {
+    const downloading = runWorkerDownload({ artifactId: "owned-file", fileName: "release.tar", sizeBytes: 3, bearer: async () => "fixture", registration, fetchImpl: vi.fn(async () => new Response(stream)) });
+    await vi.advanceTimersByTimeAsync(61_000);
+    expect(document.querySelector('iframe[src="/__memql-dl/fixture"]')).not.toBeNull();
+    body.enqueue(new TextEncoder().encode("end"));
+    body.close();
+    await downloading;
+    expect(messages).toEqual(["chunk", "done"]);
+    await vi.advanceTimersByTimeAsync(60_000);
+    expect(document.querySelector('iframe[src="/__memql-dl/fixture"]')).toBeNull();
+  } finally {
+    document.querySelector('iframe[src="/__memql-dl/fixture"]')?.remove();
+    vi.unstubAllGlobals();
+    vi.useRealTimers();
+  }
+});
 
 function fakePort() {
   const sent: Sent[] = [];

@@ -7,6 +7,8 @@ import (
 	"net/url"
 	"path"
 	"strings"
+
+	"github.com/znasllc-io/memql/core/httpstream"
 )
 
 // serveAPI forwards /_memql/* to the bff so a hosted site is same-origin with
@@ -73,6 +75,18 @@ func (h *Handler) serveAPI(w http.ResponseWriter, r *http.Request, site *Site) {
 	// byte pipe. TestAPIProxyPreservesTheUpgradeHeaders proves it rather than
 	// trusting it, because a plain GET test would pass while every WebSocket
 	// silently died.
+	// Library downloads cross this connection as well as the BFF's. A fixed
+	// 15-second response deadline truncates large files even while bytes flow.
+	parts := strings.Split(strings.TrimPrefix(r.URL.Path, "/_memql/"), "/")
+	if r.Method == http.MethodGet && len(parts) == 3 && parts[0] == "artifacts" && parts[1] != "" && parts[2] == "content" {
+		writer, request, finish, err := httpstream.Download(w, r)
+		if err != nil {
+			http.Error(w, "download unavailable", http.StatusServiceUnavailable)
+			return
+		}
+		defer finish()
+		w, r = writer, request
+	}
 	proxy.ServeHTTP(w, r)
 }
 
