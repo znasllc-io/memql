@@ -15,8 +15,8 @@ import (
 // is not a second approval store or a text heuristic for detecting questions.
 func workResponseToolDefinition() common.ToolDefinition {
 	def := RespondToUserToolDefinition()
-	def.Description = "Report the outcome of the current request. Choose status=complete only when the requested answer or action is established. " +
-		"If a necessary fact or decision is still missing after checking relevant available sources, choose status=needs_input and supply the actual question. " +
+	def.Description = "Report the outcome of the current request. Choose status=complete for a supported answer or confirmed action. An informational answer may explain that bounded evidence does not establish a cause; never invent the missing causal link. " +
+		"If necessary information or a decision must come from the person before useful work can proceed, choose status=needs_input and supply the actual question. " +
 		"An unknown personal preference needs input from that person; it is not a completed lookup. " +
 		"Do not put an invitation to tell you later in a completed response. " +
 		"For a completed answer, write the answer as ordinary assistant text, then call this tool with status=complete and responseFromText=true in the same response. Do not repeat the answer in tool arguments. " +
