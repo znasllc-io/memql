@@ -26,7 +26,7 @@ is not evidence that its host, trigger or publication path has run.
 | `govulncheck.yml` | Exact v1.3.0 scanner, complete module, retained findings | Weekly trigger and installed run; findings and scanner failures remain failures. |
 | `gitleaks.yml` | Exact v8.30.1 scanner; introduced commits on PR/push/merge candidates, full candidate history and tags weekly or on demand, redacted coverage receipts | Installed commit-range and full-history runs. A secret introduced and removed inside a PR remains in the selected commit range. |
 | `codeql.yml` | Go manual build, pinned CodeQL 2.27.1 bundle with verified SHA-256, **security-and-quality**, retained SARIF | Weekly trigger and driver-owned SARIF publication are declared; installed delivery remains unqualified. Local Linux headless scan passed; other build tags and operating systems need their own coverage. |
-| `release.yml` | Headless four-platform build/archives; computer-use builds for darwin/linux × arm64/amd64 using the AMD64 build pool and an Apple Silicon Mac; macOS menu/app archives | Exact release-event/tag qualification, collection of all four computer-use checksums, immutable cross-step artifact aggregation and GitHub release upload. No upload command or credential is introduced here. |
+| `release.yml` | Headless four-platform build/archives; computer-use builds for darwin/linux × arm64/amd64 using the AMD64 build pool and an Apple Silicon Mac; macOS menu/app archives | Exact release-event/tag qualification, collection of all four computer-use checksum sidecars, complete immutable candidate assembly and GitHub release upload. No upload command or credential is introduced here. |
 | `sbom.yml` | CycloneDX v1.10.0 inventories **each built binary**, JSON and XML retained with that build | Cross-step collection and publication of the eight binary inventories; manual release-asset re-inventory trigger. A source dependency list cannot substitute for these binary inventories. |
 | `scorecard.yml` | No equivalent declared | Scorecard's branch-protection event, weekly trigger, identity-token attestation, public result publication and SARIF upload require an installed authorized equivalent. This row cannot be marked passed by another scan. |
 
@@ -113,3 +113,12 @@ AMD64 Go and Swift targets, verifies the archives, and requires Rosetta to
 already be present; no package installation or license acceptance is implicit.
 These recipe changes still require installed qualification with the newly
 published toolchain digest before release.
+
+Each computer-use producer retains a `.sha256` sidecar naming its exact raw
+binary. The native candidate must include all four binaries and sidecars, plus
+the headless archives, Mac app/menu archives and binary SBOMs. This replaces
+the legacy post-upload combined computer-use checksum file; the headless
+archive checksum manifest and Mac archive checksum names stay unchanged.
+Candidate preparation verifies every producer and retained artifact before
+approval, and promotion requires every declared asset to have a verified
+publication receipt. No build step receives publication credentials.

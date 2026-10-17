@@ -305,6 +305,7 @@ pipeline:
           cyclonedx-gomod bin -version "$(cat VERSION)" -json -output "sbom/$name.cdx.json" "$asset"
           cyclonedx-gomod bin -version "$(cat VERSION)" -output "sbom/$name.cdx.xml" "$asset"
         done
+        python3 scripts/ci/release-checksum.py darwin-arm64
     - name: computeruse-darwin-amd64
       placement: fleet
       timeout: 60m
@@ -337,12 +338,14 @@ pipeline:
           cyclonedx-gomod bin -version "$(cat VERSION)" -json -output "sbom/$name.cdx.json" "$asset"
           cyclonedx-gomod bin -version "$(cat VERSION)" -output "sbom/$name.cdx.xml" "$asset"
         done
+        python3 scripts/ci/release-checksum.py darwin-amd64
     - name: computeruse-linux-arm64
       placement: cluster
       timeout: 60m
       caches: [go]
       artifacts:
       - .memql-ci/memql-cockpit/bin
+      - .memql-ci/memql-cockpit/dist
       - .memql-ci/memql-cockpit/sbom
       run: |
         set -eu
@@ -360,12 +363,14 @@ pipeline:
           cyclonedx-gomod bin -version "$(cat VERSION)" -json -output "sbom/$name.cdx.json" "$asset"
           cyclonedx-gomod bin -version "$(cat VERSION)" -output "sbom/$name.cdx.xml" "$asset"
         done
+        python3 scripts/ci/release-checksum.py linux-arm64
     - name: computeruse-linux-amd64
       placement: cluster
       timeout: 60m
       caches: [go]
       artifacts:
       - .memql-ci/memql-cockpit/bin
+      - .memql-ci/memql-cockpit/dist
       - .memql-ci/memql-cockpit/sbom
       run: |
         set -eu
@@ -383,3 +388,4 @@ pipeline:
           cyclonedx-gomod bin -version "$(cat VERSION)" -json -output "sbom/$name.cdx.json" "$asset"
           cyclonedx-gomod bin -version "$(cat VERSION)" -output "sbom/$name.cdx.xml" "$asset"
         done
+        python3 scripts/ci/release-checksum.py linux-amd64
