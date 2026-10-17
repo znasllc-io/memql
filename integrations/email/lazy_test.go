@@ -161,6 +161,7 @@ func TestLazySender_FallsThroughToMemqlSMTPWhenGraphIncomplete(t *testing.T) {
 }
 
 func TestLazySender_FallsBackToLogWhenNothingConfigured(t *testing.T) {
+	clearMailEnv(t)
 	envSender := NewLogSender(nil)
 	lazy := NewLazySender(
 		envSender,
@@ -179,6 +180,7 @@ func TestLazySender_FallsBackToLogWhenNothingConfigured(t *testing.T) {
 }
 
 func TestLazySender_ResolvesOnlyOnce(t *testing.T) {
+	clearMailEnv(t)
 	envSender := NewLogSender(nil)
 	var calls atomic.Int32
 
@@ -212,6 +214,7 @@ func TestLazySender_ResolvesOnlyOnce(t *testing.T) {
 }
 
 func TestLazySender_ResolverErrorTreatedAsMissing(t *testing.T) {
+	clearMailEnv(t)
 	envSender := NewLogSender(nil)
 	lazy := NewLazySender(
 		envSender,
