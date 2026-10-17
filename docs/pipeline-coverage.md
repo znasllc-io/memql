@@ -122,3 +122,22 @@ archive checksum manifest and Mac archive checksum names stay unchanged.
 Candidate preparation verifies every producer and retained artifact before
 approval, and promotion requires every declared asset to have a verified
 publication receipt. No build step receives publication credentials.
+
+## Native toolchain pin
+
+The AMD64 toolchain now pins
+`sha256:a62b53491fbd9cfd4bbfdf9612bfb1776d9fc9d42aab7ceceac3a0a18a17a8bb`.
+Engine native release run `517b203755fd72a42c422493c691ad77` built it in the
+existing AKS pool at source `f8ece576d93efdfb899fb3c4133f895c304f7e60`.
+The downloaded archive matched its retained SHA-256 and passed the full
+matching toolchain smoke script, including its AArch64 compiler and libraries.
+Native candidate
+`sha256:27c6c1aaaa081a2f8539f8f9190457ad6f8fb1d1e9bf7b1b159df3ab24d9ffa5`
+completed reviewed GHCR publication with verified blob and tag readback.
+The same manifest is readable anonymously.
+
+This qualifies the image's build, smoke and publication path. Installed
+Cockpit checks and release aggregation still require their own runs. The Mac
+must explicitly allow this repository in its pipeline policy, and the Intel
+Mac release requires already-installed Rosetta. No policy edit or host
+installation is performed by these recipes.

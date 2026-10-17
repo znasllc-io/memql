@@ -5,7 +5,7 @@ formatVersion: 1
 name: memql-cockpit
 pipeline:
   schedule: daily
-  image: ghcr.io/znasllc-io/memql-toolchain@sha256:ae195dcff54b4f67eac2c5669612ba1a886f789fae1e6325adcfaab9679a7bf9
+  image: ghcr.io/znasllc-io/memql-toolchain@sha256:a62b53491fbd9cfd4bbfdf9612bfb1776d9fc9d42aab7ceceac3a0a18a17a8bb
   platform: linux/amd64
   stages:
   - name: checks
