@@ -3,6 +3,7 @@ package events
 import (
 	"log/slog"
 	"os"
+	"strconv"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -319,5 +320,8 @@ func (b *Bus) deliverEvent(sub *subscription, event Event) {
 // generateId creates a unique subscription ID.
 func (b *Bus) generateId() string {
 	id := atomic.AddUint64(&b.nextId, 1)
-	return string(rune('a'+id%26)) + string(rune('0'+id/26%10)) + string(rune('a'+id/260%26))
+	// Keep the whole counter: a fixed-width encoding wrapped after 6,760
+	// registrations, silently replacing boot-time automation subscriptions
+	// as browser streams subscribed and unsubscribed over the node's lifetime.
+	return strconv.FormatUint(id, 36)
 }
