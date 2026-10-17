@@ -1362,6 +1362,9 @@ mutation registration setWorkerSharing {
 
 /// The owner's independent audience for isolated fleet workbenches. Only the
 /// owning-machine builtin may write this consent; registration never resets it.
+/// Scoping to actor.userId cannot narrow the registration tier’s cluster-owner
+/// escape. fleetSetSharing verifies the enrolled owner and eligible audience
+/// before this server-only write.
 @actor
 @serverOnly
 mutation registration setWorkerWorkbenchSharing {
@@ -1390,6 +1393,9 @@ mutation registration setWorkerWorkbenchSharing {
 }
 
 /// Owner-only host capabilities, independent of model and workbench sharing.
+/// Scoping to actor.userId cannot narrow the registration tier’s cluster-owner
+/// escape or enforce a stale-edit witness. fleetSetOwnerFeatures checks both
+/// before rendering this server-only mutation.
 @actor
 @serverOnly
 mutation registration setWorkerOwnerFeatures {
