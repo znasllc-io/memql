@@ -15,3 +15,16 @@ shape workspace workspaceFull {
   releasedAt
   releasedReason
 }
+
+
+@row
+shape executionBinding executionBindingFull {
+  row.id
+  runId
+  ownerUserId
+  resource
+  registrationId
+  machineId
+  machineOwnerUserId
+  expiresAt
+}

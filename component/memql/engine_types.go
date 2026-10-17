@@ -564,7 +564,8 @@ const (
 	// memql#5327, finding M-2). setWorkerSharing is @serverOnly behind it,
 	// because the concept's cluster-owner escape let an operator lend hardware
 	// they do not own.
-	BuiltinExecutorFleetSetSharing = "fleetSetSharing"
+	BuiltinExecutorFleetSetSharing       = "fleetSetSharing"
+	BuiltinExecutorFleetSetOwnerFeatures = "fleetSetOwnerFeatures"
 	// BuiltinExecutorFleetShareDirectory answers who the caller may lend one
 	// of their own machines to (epic memql#5344, design G2): the people they
 	// share an active group with and those groups, or everyone from admin

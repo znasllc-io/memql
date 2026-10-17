@@ -22,6 +22,7 @@ import { MachineDetailsInfo, MachineDetailsSection } from "./MachineDetailsInfo"
 import { LabelEditor } from "./LabelEditor";
 import { ModelsGroup } from "./ModelsGroup";
 import { SharingGroup } from "./SharingGroup";
+import { OwnerFeaturesGroup } from "./OwnerFeaturesGroup";
 import { AutoRefresh } from "../../../kit/AutoRefresh";
 import { useMachineRecommendation } from "./useMachineRecommendation";
 import type { MachineWrites, RemovalReceipt } from "./useMachineWrites";
@@ -69,10 +70,14 @@ export function MachineDetail({
             <LabelEditor key={machine.id} operatorLabels={machine.operatorLabels} busy={busy} onSave={labels => writes.setOperatorLabels(machine.id, labels)} />
           </div>
           <RemoveControl machine={machine} busy={busy} revoke={writes.revoke} />
-          {writes.actionError && writes.actionErrorScope !== "sharing" ? <Notice tone="error" sentence="The cluster refused that change." next="Nothing was written." detail={writes.actionError} /> : null}
+          {writes.actionError && (!writes.actionErrorScope || writes.actionErrorScope === "machine") ? <Notice tone="error" sentence="The cluster refused that change." next="Nothing was written." detail={writes.actionError} /> : null}
+        </MachineDetailsSection>
+        <MachineDetailsSection title="Owner-only features">
+          <OwnerFeaturesGroup machine={machine} writes={writes} />
         </MachineDetailsSection>
         <MachineDetailsSection title="Sharing">
           <SharingGroup machine={machine} writes={writes} />
+          <SharingGroup machine={machine} writes={writes} resource="workbench" />
         </MachineDetailsSection>
         <MachineDetailsInfo machine={machine} now={now} machineClass={recommendation.recommended.machineClass} usableBytes={recommendation.recommended.usableBytes} />
       </div> : null}

@@ -53,6 +53,8 @@ shape registration workerRegistrationFull {
   platformInfo
   hardware
   sharing
+  workbenchSharing
+  ownerFeatures
   sharingActivity
   permissions
   apps

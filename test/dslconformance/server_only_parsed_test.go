@@ -1422,6 +1422,15 @@ func TestServerOnlyParsedSetMatchesTheTree(t *testing.T) {
 		// caller's OWN machines -- the modelPullMachineFor precedent -- and is
 		// this mutation's only renderer.
 		{Path: "worker/mutations.memql", Name: "setWorkerSharing"}: true,
+		// #6167: same registration-tier escape as model sharing. The native
+		// builtins restrict consent to the enrolled owner; feature writes
+		// additionally compare the settings revision and fence the row.
+		{Path: "worker/mutations.memql", Name: "setWorkerWorkbenchSharing"}: true,
+		{Path: "worker/mutations.memql", Name: "setWorkerOwnerFeatures"}:    true,
+		// #6167: ownership cannot authorize an arbitrary machine or redirect
+		// an established filesystem. Native dispatch reads consent and takes
+		// an absence fence before creating the immutable binding.
+		{Path: "workbench/mutations.memql", Name: "bindWorkbenchExecution"}: true,
 		// Activity is measured by the stream holder. Owner scoping alone would
 		// let a browser forge live counts without holding that stream.
 		{Path: "worker/mutations.memql", Name: "updateWorkerSharingActivity"}: true,

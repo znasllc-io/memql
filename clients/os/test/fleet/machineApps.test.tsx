@@ -43,3 +43,15 @@ it("keeps failed setup retryable and blocks setup on offline or someone else's m
  expect(within(screen.getByRole("region", { name: "Codex" })).getByRole("button", { name: "Set up" }).hasAttribute("disabled")).toBe(false);
  view.rerender(withSession(<MachineApps machine={machine({ ownerUserId: "other" })} now={now} />, { userId: "me" })); expect(screen.queryByRole("button", { name: "Set up" })).toBeNull();
 });
+
+it("keeps reported app facts visible without offering setup when apps are disabled in Settings", () => {
+ const c = fakeConnection(); h.connection = c;
+ const m = machine({ ownerFeatures: { headless: true, apps: false, computerUse: true }, apps: [{ id: "codex", signedIn: true, allowed: true, subscription: "present" }] });
+ render(withSession(<MachineApps machine={m} now={now} />, { userId: "me" }));
+ expect(appStatus(m, m.apps[0], now)).toBe("Disabled in Settings");
+ const codex = within(screen.getByRole("region", { name: "Codex" }));
+ expect(codex.getByText("Active")).toBeTruthy();
+ expect(codex.queryByText("Ready")).toBeNull();
+ expect(screen.queryByRole("button")).toBeNull();
+ expect(c.query.createGoal).not.toHaveBeenCalled();
+});

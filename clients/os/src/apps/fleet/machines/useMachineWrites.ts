@@ -2,7 +2,9 @@ import { useCallback, useState } from "react";
 
 import { useOsConnection } from "../../../live/connection";
 import type { LabelMap } from "../labels";
-import type { SharingMode } from "../rows";
+import type { SharingMode, MachineOwnerFeatures } from "../rows";
+
+export type SharingResource = "models" | "workbench";
 
 // The three writes the Machines directory makes, and the one busy/error pair
 // they share.
@@ -62,6 +64,7 @@ export interface RemovalReceipt {
  */
 export interface ShareChoice {
   mode: "owner" | "people" | "cluster";
+  paused?: boolean;
   userIds: string[];
   groupIds: string[];
   pausedUserIds?: string[];
@@ -115,7 +118,7 @@ export interface MachineWrites {
    *  starts, so it is never read as belonging to the current attempt. */
   actionError: string;
   /** Keep a refusal beside the setting that caused it. */
-  actionErrorScope?: "machine" | "sharing";
+  actionErrorScope?: "machine" | "sharing" | "workbenchSharing" | "features";
   rename: (registrationId: string, displayName: string) => Promise<boolean>;
   setOperatorLabels: (registrationId: string, labels: LabelMap) => Promise<boolean>;
   /** Remove a machine: its registration AND its credential, as one act.
@@ -124,7 +127,8 @@ export interface MachineWrites {
   revoke: (registrationId: string, reason: string) => Promise<RemovalReceipt | null>;
   /** Save the enrolled owner's audience. Resolves to the engine receipt,
    *  or null with the refusal in actionError. */
-  setSharing: (registrationId: string, choice: ShareChoice) => Promise<SharingReceipt | null>;
+  setSharing: (registrationId: string, choice: ShareChoice, resource?: SharingResource) => Promise<SharingReceipt | null>;
+  setOwnerFeatures?: (registrationId: string, choice: MachineOwnerFeatures) => Promise<boolean>;
 }
 
 function describe(err: unknown): string {
@@ -162,7 +166,7 @@ export function useMachineWrites(): MachineWrites {
   const connection = useOsConnection();
   const [busyId, setBusyId] = useState("");
   const [actionError, setActionError] = useState("");
-  const [actionErrorScope, setActionErrorScope] = useState<"machine" | "sharing">("machine");
+  const [actionErrorScope, setActionErrorScope] = useState<NonNullable<MachineWrites["actionErrorScope"]>>("machine");
 
   const run = useCallback(
     async (registrationId: string, write: () => Promise<unknown>): Promise<boolean> => {
@@ -267,8 +271,8 @@ export function useMachineWrites(): MachineWrites {
   // `people`: the engine ignores them there, and a write that left them out
   // would ask the reader to know that.
   const setSharing = useCallback(
-    async (registrationId: string, choice: ShareChoice): Promise<SharingReceipt | null> => {
-      setActionErrorScope("sharing");
+    async (registrationId: string, choice: ShareChoice, resource: SharingResource = "models"): Promise<SharingReceipt | null> => {
+      setActionErrorScope(resource === "models" ? "sharing" : "workbenchSharing");
       if (connection === null) {
         setActionError("Not connected to the cluster, so nothing was written.");
         return null;
@@ -280,7 +284,7 @@ export function useMachineWrites(): MachineWrites {
       setBusyId(registrationId);
       setActionError("");
       try {
-        const result = await connection.query.fleetSetSharing({ registrationId, ...sent });
+        const result = await connection.query.fleetSetSharing({ registrationId, ...sent, paused: choice.paused ?? false, ...(resource === "workbench" ? { resource } : {}) });
         return sharingReceiptFrom(result.rows()[0] ?? null, sent);
       } catch (err: unknown) {
         setActionError(describe(err));
@@ -292,5 +296,16 @@ export function useMachineWrites(): MachineWrites {
     [connection],
   );
 
-  return { busyId, actionError, actionErrorScope, rename, setOperatorLabels, revoke, setSharing };
+  const setOwnerFeatures = useCallback(async (registrationId: string, choice: MachineOwnerFeatures): Promise<boolean> => {
+    setActionErrorScope("features");
+    if (!connection) { setActionError("Not connected to the cluster, so nothing was written."); return false; }
+    setBusyId(registrationId); setActionError("");
+    try {
+      await connection.query.fleetSetOwnerFeatures({ registrationId, headless: choice.headless, apps: choice.apps, computerUse: choice.computerUse, expectedUpdatedAt: choice.updatedAt });
+      return true;
+    } catch (err: unknown) { setActionError(describe(err)); return false; }
+    finally { setBusyId(""); }
+  }, [connection]);
+
+  return { busyId, actionError, actionErrorScope, rename, setOperatorLabels, revoke, setSharing, setOwnerFeatures };
 }

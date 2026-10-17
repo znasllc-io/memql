@@ -75,6 +75,7 @@ export function MachineStop({
           <p>{draft.userLocal ? "No administrator password needed." : "Installation will ask for your administrator password."}</p></div>
         <div><Switch disabled={localTest !== null} checked={draft.computerUse} onChange={(computerUse) => onDraft({ computerUse })}>Computer use</Switch>
           <p>{draft.platform === "mac" ? "Mouse, keyboard and screenshots. Requires Accessibility and Screen Recording access." : "Mouse, keyboard and screenshots require X11. Other tools work on Wayland."}</p></div>
+        <div><Switch checked={draft.workbench ?? false} onChange={workbench => onDraft({ workbench })}>Fleet workbenches</Switch><p>Isolated workspaces on this machine. Requires Docker. Can be shared; cloud workbenches are separate.</p></div>
         <div><Switch checked={draft.inference} onChange={(inference) => onDraft({ inference })}>Run local models</Switch>
           <p>Run models on this machine. Downloads require several gigabytes.</p></div>
       </div>

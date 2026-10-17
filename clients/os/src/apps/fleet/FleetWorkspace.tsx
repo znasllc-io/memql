@@ -1,3 +1,5 @@
+import { Fact, Facts } from "../../kit";
+import { machineFeatureStates, machineAppAvailability } from "./machines/features";
 import { LocalTabs } from "../../kit/LocalTabs";
 import { RecordListSkeleton } from "../../kit/RecordListSkeleton";
 import { AddButton } from "../../kit/AddButton";
@@ -238,13 +240,14 @@ export function MachineEquipment({ machine, now, onInspect, viewerId = "" }: { m
         </dl>
       </div>
       <section className="fleet-equipment-bank" aria-label="App equipment"><div className="fleet-bank-heading"><Terminal size={16} aria-hidden /><h5>Installed apps</h5><span>{machine.apps.length}</span><IconButton label="Inspect apps" onClick={() => onInspect("apps")}><ArrowUpRight size={16} aria-hidden /></IconButton></div>
-        <ul>{machine.apps.map(app => <li key={app.id}><button className="fleet-equipment-slot" type="button" aria-pressed={selectedApp?.id === app.id} onClick={() => choose({ kind: "app", id: app.id })}><span><strong>{app.label}</strong><small>{!online ? "Machine offline" : app.runnable ? "Ready" : "Needs attention"}</small></span></button></li>)}</ul>
+        <ul>{machine.apps.map(app => <li key={app.id}><button className="fleet-equipment-slot" type="button" aria-pressed={selectedApp?.id === app.id} onClick={() => choose({ kind: "app", id: app.id })}><span><strong>{app.label}</strong><small>{machineAppAvailability(machine, app.runnable, now)}</small></span></button></li>)}</ul>
         {machine.apps.length === 0 ? <EmptyState icon={Terminal} title="No installed apps">Apps reported by this machine will appear here.</EmptyState> : null}
       </section>
     </div>
+    <section aria-label="Machine features"><Facts>{machineFeatureStates(machine, now).map(feature => <Fact key={feature.key} label={feature.label} value={feature.answer} title={feature.detail} />)}</Facts></section>
     {selectedModel || selectedApp ? <section className="fleet-equipment-reading" aria-label="Selected equipment" aria-live="polite" data-os-page-context={JSON.stringify({ selectedModel: selectedModel?.modelId, selectedApp: selectedApp?.id })}>
       {selectedModel ? <div><strong>{selectedModel.modelId}</strong><p>{modelSummary(selectedModel)}{!online ? " · Machine offline" : ""}</p></div>
-        : selectedApp ? <div><strong>{selectedApp.label}</strong><p>{selectedApp.why || (selectedApp.runnable ? "Available to run on this machine." : "Not available to run.")}{!online ? " Machine offline." : ""}</p><AppPermissionHelp app={selectedApp} machine={machine} /></div> : null}
+        : selectedApp ? <div><strong>{selectedApp.label}</strong><p>{machineAppAvailability(machine, selectedApp.runnable, now)}{selectedApp.why ? ` · ${selectedApp.why}` : ""}{!online ? " Machine offline." : ""}</p><AppPermissionHelp app={selectedApp} machine={machine} /></div> : null}
     </section> : null}
 
   </ActivityTarget>;

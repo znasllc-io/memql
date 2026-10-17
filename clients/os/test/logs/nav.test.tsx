@@ -27,7 +27,7 @@ describe("the Logs section in a window's nav", () => {
     openFromLauncher("Fleet");
     expect(screen.getByRole("button", { name: "Fleet logs" })).toBeTruthy();
     expect(navNames("Fleet")).toEqual([
-      "Overview", "Machines", "Routing", "Model library", "Activity", "Workspaces",
+      "Overview", "Machines", "Routing", "Model library", "Activity", "Cloud workbenches",
     ]);
   });
 

@@ -333,6 +333,13 @@ func (r *SessionRunner) Run(ctx context.Context, w *Worker, spec RunSpec, progre
 				"would write is owner-tiered and a row written under a blank actor is readable by nobody")
 	}
 
+	// Model or isolated-workbench sharing never lends the host's signed-in
+	// apps. Recheck the enrolled owner at the last boundary before minting an
+	// app credential, including a call forwarded from another agent replica.
+	if !SameSubjectId(w.OwnerUserId, spec.OwnerUserId) {
+		return RunResult{}, fmt.Errorf("worker: app_owner_required: local apps are available only to the user who enrolled this machine")
+	}
+
 	// The router matched on the `app:` label; RunsApp is the same test
 	// asked of this worker directly. Re-checking is not redundant: the
 	// machine may have signed out between the router's read and now, and

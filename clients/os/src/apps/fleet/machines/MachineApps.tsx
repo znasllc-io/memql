@@ -11,6 +11,7 @@ import { MachineDetailsSection } from "./MachineDetailsInfo";
 
 export function appStatus(machine: MachineRow, app: MachineApp | undefined, now: Date): string {
   if (machine.revokedAt) return "Machine removed";
+  if (machine.ownerFeatures?.apps === false) return "Disabled in Settings";
   if (!isWorkerOnline(machine, now)) return "Machine offline";
   if (!machine.appsReported) return "Not reported";
   if (!app) return "Not installed";
@@ -44,8 +45,8 @@ function MachineAppSection({ id, machine, now }: { id: typeof RUNNABLE_APPS[numb
   const [runId, setRunId] = useState("");
   const starting = useRef(false);
   const label = appLabel(id);
-  const available = machine.appsReported ? app ? app.allowed && app.signedIn ? "Allowed and signed in" : [app.allowed ? "Allowed" : "Not allowed", app.signedIn ? "Signed in" : "Signed out"].join(" · ") : "Install to connect" : "Waiting for Cockpit";
-  const canSetup = !machine.revokedAt && isWorkerOnline(machine, now) && machine.ownerUserId === access?.userId;
+  const available = machine.ownerFeatures?.apps === false ? "Disabled in Settings" : machine.appsReported ? app ? app.allowed && app.signedIn ? "Allowed and signed in" : [app.allowed ? "Allowed" : "Not allowed", app.signedIn ? "Signed in" : "Signed out"].join(" · ") : "Install to connect" : "Waiting for Cockpit";
+  const canSetup = machine.ownerFeatures?.apps !== false && !machine.revokedAt && isWorkerOnline(machine, now) && machine.ownerUserId === access?.userId;
   async function setup() {
     if (starting.current || !connection || !canSetup || !openWork) return;
     starting.current = true; setBusy(true); setError("");

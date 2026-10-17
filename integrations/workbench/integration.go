@@ -44,6 +44,7 @@ import (
 //     the old degrade-to-local behaviour for anyone who wants it, as an
 //     explicit choice rather than as the consequence of missing config.
 type Integration struct {
+	fleet        FleetDispatcher
 	capacity     *capacityGate
 	capacityOnce sync.Once
 	manager      *Manager
@@ -282,6 +283,20 @@ func (i *Integration) handleDispatchHost(ctx context.Context, args map[string]an
 	failClosed := safety.FailClosedForSurface(safetyDesc.Surface)
 	if proceed, reason := workbenchGate.EnforceDecision(safetyDesc.Surface, decision, cls, classErr, failClosed); !proceed {
 		return nil, fmt.Errorf("workbench: %s", reason)
+	}
+
+	if i.fleet != nil {
+		result, handled := i.fleet.DispatchFleetWorkbench(ctx, FleetRequest{RunID: runId, AgentID: agentId, Action: action, Args: innerArgs})
+		if handled {
+			if !result.OK {
+				return errorResultNode(runId, action, result.ErrorCode, result.ErrorMessage, started), nil
+			}
+			if action == "fs_write" {
+				i.promoteWorkbenchOutput(ctx, runId, agentId, innerArgs, false)
+			}
+			payload, _ := json.Marshal(dispatchResult{OK: true, Action: action, Payload: result.Payload})
+			return []memorynodes.MemoryNode{{ID: fmt.Sprintf("workbench:dispatch:%s:%d", runId, started.UnixNano()), Concept: "integration:workbench:dispatch", Type: memorynodes.NodeTypeObject, CreatedAt: time.Now().UTC(), Payload: payload}}, nil
+		}
 	}
 
 	// Cluster mode. MEMQL_WORKBENCH_REMOTE is an operator asserting

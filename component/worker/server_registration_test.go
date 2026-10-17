@@ -64,6 +64,10 @@ type fakeRegistrationStore struct {
 	hardwareErr     error
 }
 
+func (s *fakeRegistrationStore) ReadOwnerFeaturePolicy(context.Context, string, string) (OwnerFeaturePolicy, error) {
+	return OwnerFeaturePolicy{Features: OwnerFeaturesFromRow(nil), Version: time.Unix(1, 0)}, nil
+}
+
 // appUpdate records one UpdateApps call WHOLE -- the labels matter as
 // much as the inventory, because they are what routing reads.
 type appUpdate struct {

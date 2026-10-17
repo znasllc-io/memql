@@ -930,7 +930,7 @@ const CASES: ActsCase[] = [
       { name: "Machines", count: 1, within: "Default section" },
       { name: "Model library", count: 1, within: "Default section" },
       { name: "Routing", count: 1, within: "Default section" },
-      { name: "Workspaces", count: 1, within: "Default section" },
+      { name: "Cloud workbenches", count: 1, within: "Default section" },
       { name: "Activity", count: 1, within: "Default section" },
       { name: "Logs", count: 1, within: "Default section" },
       { name: "Settings", count: 1, within: "Default section" },
