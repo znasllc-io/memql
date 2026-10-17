@@ -360,9 +360,14 @@ func TestAvailabilityRedactsRegistryFailure(t *testing.T) {
 }
 
 func TestAvailabilityConfiguredAuthenticationAndDownloads(t *testing.T) {
-	for _, attack := range []string{"none", "challenge", "scope", "manifest-redirect", "blob-origin", "blob-challenge"} {
+	for _, attack := range []string{"none", "empty-path-segment", "challenge", "scope", "manifest-redirect", "blob-origin", "blob-challenge"} {
 		t.Run(attack, func(t *testing.T) {
 			f := availabilityImage(t, false, nil)
+			objectPrefix := "/objects/"
+			if attack == "empty-path-segment" {
+				objectPrefix = "/objects//"
+			}
+			success := attack == "none" || attack == "empty-path-segment"
 			var forbidden, exchanges, downloads atomic.Int64
 			sink := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { forbidden.Add(1); w.WriteHeader(200) }))
 			defer sink.Close()
@@ -376,7 +381,7 @@ func TestAvailabilityConfiguredAuthenticationAndDownloads(t *testing.T) {
 					w.WriteHeader(401)
 					return
 				}
-				b, ok := f.bodies[strings.TrimPrefix(r.URL.Path, "/objects/")]
+				b, ok := f.bodies[strings.TrimPrefix(r.URL.Path, objectPrefix)]
 				if !ok {
 					w.WriteHeader(404)
 					return
@@ -417,7 +422,7 @@ func TestAvailabilityConfiguredAuthenticationAndDownloads(t *testing.T) {
 				}
 				if r.Method == "GET" && strings.Contains(r.URL.Path, "/blobs/") {
 					d := strings.TrimPrefix(r.URL.Path, "/v2/receipts/image/blobs/")
-					destination := storage.URL + "/objects/" + d + "?sig=private-query-fixture"
+					destination := storage.URL + objectPrefix + d + "?sig=private-query-fixture"
 					if attack == "blob-origin" {
 						destination = sink.URL + "/objects/" + d
 					}
@@ -437,7 +442,7 @@ func TestAvailabilityConfiguredAuthenticationAndDownloads(t *testing.T) {
 				t.Fatal(err)
 			}
 			_, err = v.Check(context.Background(), f.root, "linux/arm64", AvailabilityLimits{})
-			if (err == nil) != (attack == "none") {
+			if (err == nil) != success {
 				t.Fatalf("unexpected outcome: %v", err)
 			}
 			if err != nil && strings.Contains(err.Error(), "private-query-fixture") {
@@ -446,7 +451,7 @@ func TestAvailabilityConfiguredAuthenticationAndDownloads(t *testing.T) {
 			if forbidden.Load() != 0 {
 				t.Fatal("unconfigured endpoint received a request")
 			}
-			if attack == "none" && (downloads.Load() != 2 || exchanges.Load() == 0) {
+			if success && (downloads.Load() != 2 || exchanges.Load() == 0) {
 				t.Fatal("credential exchange and complete downloads were not exercised")
 			}
 			if attack == "challenge" && exchanges.Load() != 0 {

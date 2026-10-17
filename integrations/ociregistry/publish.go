@@ -455,7 +455,10 @@ func (s *scopedTransport) download(original *http.Request, resp *http.Response) 
 			}
 		}
 		next = base.ResolveReference(next)
-		if next.Scheme != "https" || !s.publisher.downloads[next.Scheme+"://"+next.Host] || next.Path == "" || path.Clean(next.Path) != next.Path {
+		// Storage object keys are not filesystem paths: Azure can sign a key
+		// containing empty segments. Preserve those segments and the signed
+		// query; dot segments and escaped paths were refused above.
+		if next.Scheme != "https" || !s.publisher.downloads[next.Scheme+"://"+next.Host] || next.Path == "" {
 			return nil, errors.New("blob download left configured origins")
 		}
 		request, err := http.NewRequestWithContext(original.Context(), http.MethodGet, next.String(), nil)
