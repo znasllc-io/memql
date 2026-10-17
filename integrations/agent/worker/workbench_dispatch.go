@@ -90,6 +90,7 @@ func (d *Dispatcher) DispatchFleetWorkbench(ctx context.Context, req workbench.F
 	callCtx, cancel := context.WithTimeout(ctx, 10*time.Minute)
 	defer cancel()
 	started := d.clock()
+	request := Request{Tool: WorkbenchTool, Action: req.Action, Purpose: PurposeWorkbench, Args: req.Args, AgentId: req.AgentID, OwnerUserId: ac.UserId, RunId: req.RunID, CorrelationId: newCallId(), Timeout: 10 * time.Minute}
 	for {
 		cand, err := admittedWorkbench(callCtx, d.store, ac.UserId, binding.RegistrationID)
 		if err != nil {
@@ -98,7 +99,6 @@ func (d *Dispatcher) DispatchFleetWorkbench(ctx context.Context, req workbench.F
 		if cand.MachineId != binding.MachineID || !sameSubject(cand.OwnerUserId, binding.MachineOwner) {
 			return fail("workbench_binding_refused", "The enrolled machine changed. Start a new goal; no work was replayed.")
 		}
-		request := Request{Tool: WorkbenchTool, Action: req.Action, Purpose: PurposeWorkbench, Args: req.Args, AgentId: req.AgentID, OwnerUserId: ac.UserId, RunId: req.RunID, Timeout: 10 * time.Minute}
 		res, outcome := d.attempt(callCtx, request, WorkbenchCapability, cand, 10*time.Minute)
 		if outcome == ForwardRefusedBeforeStart && res.ErrorCode == "workbench_capacity_busy" {
 			timer := time.NewTimer(time.Second)
@@ -110,13 +110,17 @@ func (d *Dispatcher) DispatchFleetWorkbench(ctx context.Context, req workbench.F
 				continue
 			}
 		}
-		d.recordInvocation(ctx, request, cand.RegistrationId, started, d.clock(), res, "", RoutingRecord{Attempts: 1, SelectedBy: SelectedByOnlyCandidate})
+		var payload any
+		if res.OK {
+			if err := json.Unmarshal([]byte(res.OutputJSON), &payload); err != nil {
+				res.OK = false
+				res.ErrorCode = "workbench_invalid_result"
+				res.ErrorMessage = "The machine returned an unreadable result; the operation was not replayed."
+			}
+		}
+		d.recordInvocation(ctx, request, cand.RegistrationId, started, d.clock(), res, res.classifyOutcome(), RoutingRecord{Attempts: 1, SelectedBy: SelectedByOnlyCandidate})
 		if !res.OK {
 			return fail(res.ErrorCode, res.ErrorMessage)
-		}
-		var payload any
-		if err := json.Unmarshal([]byte(res.OutputJSON), &payload); err != nil {
-			return fail("workbench_invalid_result", "The machine returned an unreadable result; the operation was not replayed.")
 		}
 		return workbench.FleetResult{OK: true, Payload: payload}, true
 	}
