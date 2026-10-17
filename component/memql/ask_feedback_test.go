@@ -9,6 +9,7 @@ import (
 	"github.com/stretchr/testify/require"
 	"github.com/znasllc-io/memql/component/auth"
 	"github.com/znasllc-io/memql/component/language/parser"
+	"github.com/znasllc-io/memql/component/work"
 	"github.com/znasllc-io/memql/core/common"
 	"github.com/znasllc-io/memql/core/id"
 )
@@ -173,4 +174,53 @@ func TestAskHumanAnswerReplacesDraftAcrossReplicasAndSavedHistory(t *testing.T) 
 	require.Contains(t, string(memory[0].Payload), reply)
 	_, err = b.askConversationSnapshotBuiltin(askTestActor(), map[string]any{"conversationId": conversation}, 0)
 	require.Error(t, err)
+}
+
+func TestAskSnapshotKeepsContinuedOptionalQuestionAcrossReplicas(t *testing.T) {
+	a, _, _ := readMergeTestEngine(t)
+	b, _, _ := readMergeTestEngine(t)
+	previous := auth.InstalledCapabilityCatalog()
+	auth.SetCapabilityCatalog(nil)
+	t.Cleanup(func() { auth.SetCapabilityCatalog(previous) })
+	ctx := askTestActor()
+	conversation := askTestConversation(t, a, ctx)
+	runID, approvalID := id.NewShortId(), id.NewShortId()
+	write := func(name string, args map[string]any) {
+		t.Helper()
+		call, err := parser.RenderCall(name, args)
+		require.NoError(t, err)
+		_, err = a.Execute(auth.ContextWithInternalOrigin(ctx), "mutation "+call)
+		require.NoError(t, err)
+	}
+	write("createWorkRun", map[string]any{"runId": runID, "goalId": "goal", "automationName": "feedback", "templateFingerprint": "test", "triggeredBy": "manual", "status": "running", "mode": "live", "startedAt": time.Now().UTC().Add(-5 * time.Minute).Format(time.RFC3339Nano)})
+	require.NoError(t, a.askSave(ctx, conversation, "Optional preference", askTranscript{Turns: []AskTurn{{ID: "request", RunID: runID, Prompt: "Explain the result", State: "waiting", Background: true}}}))
+	subject := map[string]any{"kind": "text", "feedbackContinuation": map[string]any{"waitSeconds": 60, "templateFingerprint": "test", "rerunRequestId": "", "overrideKey": ""}}
+	write("createWorkApproval", map[string]any{"approvalId": approvalID, "runId": runID, "stepKey": "reason", "kind": "feedback", "subject": subject, "artifactHash": work.ArtifactHash(subject), "question": "How much detail?", "requestedAt": time.Now().UTC().Add(-3 * time.Minute).Format(time.RFC3339Nano)})
+	write("continueWorkFeedback", map[string]any{"approvalId": approvalID, "continuedAt": time.Now().UTC().Add(-time.Minute).Format(time.RFC3339Nano), "versionTime": time.Now().UTC().Format(time.RFC3339Nano)})
+	read := func() AskTurn {
+		t.Helper()
+		nodes, err := b.askConversationSnapshotBuiltin(ctx, map[string]any{"conversationId": conversation}, 0)
+		require.NoError(t, err)
+		var result struct {
+			Transcript askTranscript `json:"transcript"`
+		}
+		require.NoError(t, json.Unmarshal(nodes[0].Payload, &result))
+		require.Len(t, result.Transcript.Turns, 1, "silence must not create an answer turn")
+		return result.Transcript.Turns[0]
+	}
+	resumed := read()
+	require.Equal(t, "queued", resumed.State)
+	require.NotNil(t, resumed.Question, "running work must keep the late-answer control")
+	require.Equal(t, approvalID, resumed.Question.ID)
+	require.True(t, resumed.Question.Optional)
+	require.True(t, resumed.Question.Continued)
+	requiredID := id.NewShortId()
+	write("createWorkApproval", map[string]any{"approvalId": requiredID, "runId": runID, "stepKey": "reason", "kind": "feedback", "subject": map[string]any{"kind": "text"}, "artifactHash": "required", "question": "Which source?", "requestedAt": time.Now().UTC().Format(time.RFC3339Nano)})
+	write("updateWorkRun", map[string]any{"runId": runID, "status": "waiting", "waitingOn": map[string]any{"kind": "feedback", "subject": requiredID}})
+	waiting := read()
+	require.Equal(t, "waiting", waiting.State)
+	require.NotNil(t, waiting.Question)
+	require.Equal(t, requiredID, waiting.Question.ID, "a required question takes priority")
+	write("updateWorkRun", map[string]any{"runId": runID, "status": "succeeded", "finishedAt": time.Now().UTC().Format(time.RFC3339Nano)})
+	require.Nil(t, read().Question, "completed work must not retain a stale question")
 }

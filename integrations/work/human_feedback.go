@@ -16,6 +16,10 @@ import (
 // used by the answer path. A retry cannot create a second inbox item or park
 // over a decision already made by the person.
 func (i *Integration) AskFeedback(ctx context.Context, owner, runID, question, kind string, options []map[string]any, expires time.Time) (string, error) {
+	return i.AskFeedbackWithPolicy(ctx, owner, runID, question, kind, options, expires, false)
+}
+
+func (i *Integration) AskFeedbackWithPolicy(ctx context.Context, owner, runID, question, kind string, options []map[string]any, expires time.Time, optional bool) (string, error) {
 	if strings.TrimSpace(question) == "" || len(question) > 8000 {
 		return "", fmt.Errorf("feedback needs a concise, nonempty question")
 	}
@@ -34,6 +38,14 @@ func (i *Integration) AskFeedback(ctx context.Context, owner, runID, question, k
 		seen[value] = true
 	}
 	subject := map[string]any{"question": question, "kind": kind, "options": options}
+	if optional {
+		if err := i.optionalFeedbackSubject(ctx, owner, runID, subject); err != nil {
+			return "", err
+		}
+		// The immutable policy duration is relative to the original request,
+		// not a new caller-supplied expiry on every retry.
+		expires = time.Time{}
+	}
 	return i.parkHumanDecision(ctx, owner, runID, "feedback", subject, question, options, expires)
 }
 
@@ -151,7 +163,7 @@ func (i *Integration) parkHumanDecisionWithBudget(ctx context.Context, owner, ru
 		return "", fmt.Errorf("this run is already waiting for another decision")
 	}
 	for _, row := range existing {
-		if rowString(row, "decision") != "" {
+		if rowString(row, "decision") != "" || workstate.OptionalFeedbackContinued(row, i.clock()) {
 			return id, nil
 		}
 	}

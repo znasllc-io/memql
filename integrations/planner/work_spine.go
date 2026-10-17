@@ -261,14 +261,15 @@ func (s *spineScope) classify(ctx context.Context, args map[string]any) (any, er
 		if sectionable.Sectionable || *sectionable.RequiresFile || sectionable.Navigation != nil {
 			return nil, fmt.Errorf("work compile: conflicting reply delivery contract; retry the request")
 		}
-		out.Reply = out.Workload == "quick"
+		sectionable.Workload = out.Workload
+		out.Reply = sectionable.quickReply()
 		if out.Reply {
 			out.Acknowledgement = ""
 		}
 	}
 	sectionable.Workload = out.Workload
 	s.guidance, s.decision = guidance, sectionable
-	return map[string]any{"complexity": string(complexity), "intent": sectionable.Intent, "sectionable": sectionable.Sectionable, "requiresFile": sectionable.RequiresFile != nil && *sectionable.RequiresFile, "hasEffects": sectionable.hasEffects(), "conversational": conversational, "workload": out.Workload, "acknowledgement": out.Acknowledgement}, nil
+	return map[string]any{"complexity": string(complexity), "intent": sectionable.Intent, "sectionable": sectionable.Sectionable, "requiresFile": sectionable.RequiresFile != nil && *sectionable.RequiresFile, "requiresResearch": sectionable.RequiresResearch, "hasEffects": sectionable.hasEffects(), "conversational": conversational, "workload": out.Workload, "acknowledgement": out.Acknowledgement}, nil
 }
 
 // setWorkload records policy selected by the pinned DSL before planning. The

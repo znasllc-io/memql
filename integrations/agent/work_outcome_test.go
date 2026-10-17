@@ -212,6 +212,7 @@ func TestWorkQuestionMatchesTheShippedToolSchema(t *testing.T) {
 		t.Fatal(err)
 	}
 	for _, raw := range []string{
+		`{"status":"needs_input","question":{"text":"Which region?","kind":"text","optional":true}}`,
 		`{"status":"needs_input","question":{"text":"Which supplier?","kind":"text"}}`,
 		`{"status":"needs_input","question":{"text":"Which region?","kind":"choice","options":[{"label":"West","value":"west"}]}}`,
 	} {

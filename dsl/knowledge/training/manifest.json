@@ -131,13 +131,13 @@
       "domainId": "workbench",
       "sourceRef": "workbench:researchApps",
       "catalog": "workbench",
-      "sha256": "72d17e4b990a0bee667a54254c94787dd6411ed9e37bb070dc04d1781d287980"
+      "sha256": "9eafaa83f9f1b2cdbd3abaaceef942a64e850e72da58c24309339dcdec98f1af"
     },
     {
       "domainId": "workbench",
       "sourceRef": "workbench:webResearchFallback",
       "catalog": "workbench",
-      "sha256": "fcefef39d6fa58e80ea5ede6a457321fd537c6138a23324c221d3db65df82c80"
+      "sha256": "4f35c4a493222243d93284ee582361d850195ee9253e94326cb493ce436f28a7"
     },
     {
       "domainId": "workbench",

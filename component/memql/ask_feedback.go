@@ -10,6 +10,7 @@ import (
 	"github.com/znasllc-io/memql/component/auth"
 	memorynodes "github.com/znasllc-io/memql/component/database/memory-nodes"
 	"github.com/znasllc-io/memql/component/language/parser"
+	"github.com/znasllc-io/memql/component/work"
 )
 
 // Only a typed information request becomes an Ask question. Failure recovery
@@ -41,7 +42,8 @@ func askFeedbackProjection(row map[string]any) (*AskQuestion, *AskTurn) {
 		if until, ok := askTimestamp(row["expiresAt"]); ok && !time.Now().Before(until) {
 			return nil, nil
 		}
-		return &AskQuestion{ID: id, Text: text, Kind: kind, Options: options}, nil
+		_, _, optional := work.OptionalFeedback(row)
+		return &AskQuestion{ID: id, Text: text, Kind: kind, Options: options, Optional: optional, Continued: work.OptionalFeedbackContinued(row, time.Now())}, nil
 	}
 	if decision != "answered" {
 		return nil, nil

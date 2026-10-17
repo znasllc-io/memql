@@ -46,6 +46,7 @@ type FeedbackApproval struct {
 	Kind      string
 	Options   []map[string]any
 	ExpiresAt time.Time
+	Optional  bool
 }
 
 // DirectGoal mirrors integrations/work.DirectGoal. It is redeclared rather

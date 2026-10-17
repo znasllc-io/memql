@@ -497,6 +497,26 @@ mutation approval decideWorkApproval {
   }
 }
 
+/// Native timer receipt; never a human answer or access grant.
+/// Scoping by actor.userId alone would let an owner forge elapsed time on their
+/// own question. Only the native continuation handler writes this after checking
+/// the immutable policy, deadline, checkpoint and execution under the decision lock.
+@serverOnly
+mutation approval continueWorkFeedback {
+ args {
+  approvalId string!
+  continuedAt datetime!
+  versionTime datetime!
+ }
+ update {
+  accept { continuedAt }
+  stamp {
+   id: args.approvalId
+   createdAt: args.versionTime
+  }
+ }
+}
+
 /// Create the epic memql#5414 values -- the seed materializer's write for `seed feedbackPolicy
 /// feedbackPolicyPrimary` (dsl/work/seeds.memql), which calls create<Concept> with <concept>Id by convention and
 /// re-asserts the row on every boot.

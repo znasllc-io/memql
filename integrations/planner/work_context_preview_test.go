@@ -2,6 +2,7 @@ package planner
 
 import (
 	"context"
+	"encoding/json"
 	"strings"
 	"testing"
 )
@@ -56,5 +57,26 @@ func TestSelfContainedFilesSkipEvidenceAcquisitionRegardlessOfEstimate(t *testin
 		if d.needsReasoningAgent("supplied note") || strings.Contains(src, "runAgentTurn") || !strings.Contains(src, "composeMaterialize(") {
 			t.Fatalf("%s inserted unnecessary evidence work:\n%s", tier, src)
 		}
+	}
+}
+
+func TestSourceRichLongConversationKeepsCompleteRecentEvidenceBounded(t *testing.T) {
+	source := map[string]any{"value": strings.Repeat("測", 1800), "observationTime": "2026-10-17T04:39:30Z", "entity": "specific-service", "truncated": false}
+	input := map[string]any{"messages": []any{map[string]any{"role": "user", "content": strings.Repeat("古", 20000)}, map[string]any{"role": "user", "content": "Should I retry?"}}, "sourceContext": map[string]any{"recordedSources": []any{source, source, source}}}
+	preview, err := conversationPreview(input)
+	if err != nil || len(preview) > 20000 {
+		t.Fatalf("source preview exceeded budget: %d %v", len(preview), err)
+	}
+	var data map[string]any
+	if err := json.Unmarshal([]byte(preview), &data); err != nil {
+		t.Fatal(err)
+	}
+	evidence := data["sourceContext"].(map[string]any)
+	sources := evidence["recordedSources"].([]any)
+	if len(sources) != 1 || sources[0].(map[string]any)["value"] != source["value"] || !strings.Contains(preview, "Should I retry?") || !strings.Contains(preview, "Some sources omitted") {
+		t.Fatalf("source scope or content was cut: %+v", evidence)
+	}
+	if len(input["sourceContext"].(map[string]any)["recordedSources"].([]any)) != 3 {
+		t.Fatal("preview mutated captured evidence")
 	}
 }

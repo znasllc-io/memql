@@ -2,7 +2,9 @@ package memql
 
 import (
 	"context"
+	"encoding/json"
 	"strings"
+	"time"
 )
 
 // A failed transcription is execution evidence, not a user's utterance.
@@ -42,4 +44,26 @@ func askConversationMessages(turns []AskTurn) []map[string]any {
 // Bring completed results back into history before answering the next turn.
 func (e *MemQLEngine) reconcileAskRuns(ctx context.Context, transcript *askTranscript) {
 	_ = e.refreshAskRuns(ctx, transcript)
+}
+
+// Persist actual receipts beside conversational prose before the planner hop.
+// Only the saved, owner-authorized conversation can select the prior runs.
+func (e *MemQLEngine) askConversationInput(ctx context.Context, conversationID, turnID, pageContext string, history []map[string]any) map[string]any {
+	conversation := map[string]any{"id": conversationID, "turnId": turnID, "messages": history, "pageContext": pageContext, "capturedAt": time.Now().UTC().Format(time.RFC3339Nano)}
+	if len(history) == 0 {
+		return conversation
+	}
+	sources, err := e.workSourceContextBuiltin(ctx, map[string]any{"conversationId": conversationID, "turnId": turnID}, 0)
+	var evidence map[string]any
+	if err == nil && len(sources) == 1 {
+		err = json.Unmarshal(sources[0].Payload, &evidence)
+	}
+	if err != nil || evidence == nil {
+		conversation["sourceContext"] = map[string]any{"limitations": []string{"Earlier source receipts could not be read. Prior answer text alone is not verification."}}
+	} else {
+		// Viewer context has its own fresh read on each receiving replica.
+		delete(evidence, "currentProfile")
+		conversation["sourceContext"] = evidence
+	}
+	return conversation
 }

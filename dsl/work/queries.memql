@@ -681,3 +681,14 @@ query step workSourceStepsForOwnerRun {
  paginate 40
  shape workStepFull
 }
+
+/// Bounded checkpoints for source projection; callers expose only paired tool
+/// results, never system prompts or model reasoning from the saved exchange.
+@actor
+query observation workSourceCheckpointsForOwnerRun {
+ args { runId string! }
+ filter row => row.runId == args.runId && row.ownerUserId == actor.userId && row.?data.continuation == true
+ sort "row.createdAt", "desc"
+ paginate 4
+ shape workObservationFull
+}
