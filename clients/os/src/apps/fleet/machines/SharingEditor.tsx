@@ -31,11 +31,11 @@ function shareChoice(mode: StoredShare["sharingMode"], subjects: Subject[], paus
 
 /** Counts describe the grants at admission, so pausing does not erase draining work. */
 export function sharingActiveCalls(machine: MachineRow, subject: Subject, now = Date.now()): number | null {
-  if (!isWorkerOnline(machine, new Date(now))) return 0;
+  if (!isWorkerOnline(machine, new Date(now))) return null;
   const report = machine.sharingActivity;
   if (!report || report["nodeId"] !== machine.connectedNodeId) return null;
   const at = Date.parse(String(report["observedAt"] ?? ""));
-  if (!Number.isFinite(at) || now - at > 45_000) return null;
+  if (!Number.isFinite(at) || at - now > 5_000 || now - at > 45_000) return null;
   const rows = report[subject.kind === "person" ? "users" : "groups"];
   if (!Array.isArray(rows)) return null;
   const entry = rows.find((v: unknown) => v !== null && typeof v === "object" && sameEntityId(String((v as Record<string, unknown>)["id"] ?? ""), subject.id));
