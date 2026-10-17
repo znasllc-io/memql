@@ -15,59 +15,66 @@ import (
 )
 
 func TestPublishConfiguredBlobDownloadsCarryNoCredentials(t *testing.T) {
-	v, _ := verifiedFixture(t)
-	registry := quietRegistry()
-	var downloads atomic.Int64
-	storage := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.Method != "GET" || r.Header.Get("Authorization") != "" || r.Header.Get("Cookie") != "" || r.Header.Get("Referer") != "" {
-			t.Errorf("download carried registry authority: %s %v", r.Method, r.Header)
-		}
-		if r.URL.Query().Get("sig") != "local-test-only" {
-			t.Error("signed query not preserved")
-		}
-		d := strings.TrimPrefix(r.URL.Path, "/objects/")
-		body, err := os.ReadFile(filepath.Join(v.dir, "layout", blobPath(d)))
-		if err != nil {
-			t.Error(err)
-			w.WriteHeader(404)
-			return
-		}
-		downloads.Add(1)
-		_, _ = w.Write(body)
-	}))
-	defer storage.Close()
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path != "/v2/" && r.Header.Get("Authorization") != "Bearer registry-only-token" {
-			t.Error("registry credential missing")
-		}
-		if r.Method == "GET" && strings.Contains(r.URL.Path, "/blobs/sha256:") {
-			d := strings.TrimPrefix(r.URL.Path, "/v2/receipts/image/blobs/")
-			w.Header().Set("Set-Cookie", "must-not-forward=secret")
-			http.Redirect(w, r, storage.URL+"/objects/"+d+"?sig=local-test-only", 307)
-			return
-		}
-		registry.ServeHTTP(w, r)
-	}))
-	defer server.Close()
-	roots := x509.NewCertPool()
-	roots.AddCert(storage.Certificate())
-	p, err := NewPublisher(Target{Origin: server.URL, Repository: "receipts/image", AllowLoopbackHTTP: true, BearerToken: "registry-only-token", RootCAs: roots, BlobDownloadOrigins: []string{storage.URL}})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if _, err := p.Publish(context.Background(), v); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := p.Publish(context.Background(), v); err != nil {
-		t.Fatal(err)
-	}
-	if downloads.Load() < 4 {
-		t.Fatalf("only %d blob reads", downloads.Load())
+	for _, objectPrefix := range []string{"/objects/", "/objects//"} {
+		t.Run(objectPrefix, func(t *testing.T) {
+			v, _ := verifiedFixture(t)
+			registry := quietRegistry()
+			var downloads atomic.Int64
+			storage := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				if r.Method != "GET" || r.Header.Get("Authorization") != "" || r.Header.Get("Cookie") != "" || r.Header.Get("Referer") != "" {
+					t.Errorf("download carried registry authority: %s %v", r.Method, r.Header)
+				}
+				if r.URL.Query().Get("sig") != "local-test-only" {
+					t.Error("signed query not preserved")
+				}
+				if !strings.HasPrefix(r.URL.Path, objectPrefix) {
+					t.Error("storage object path was normalized")
+				}
+				d := strings.TrimPrefix(r.URL.Path, objectPrefix)
+				body, err := os.ReadFile(filepath.Join(v.dir, "layout", blobPath(d)))
+				if err != nil {
+					t.Error(err)
+					w.WriteHeader(404)
+					return
+				}
+				downloads.Add(1)
+				_, _ = w.Write(body)
+			}))
+			defer storage.Close()
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				if r.URL.Path != "/v2/" && r.Header.Get("Authorization") != "Bearer registry-only-token" {
+					t.Error("registry credential missing")
+				}
+				if r.Method == "GET" && strings.Contains(r.URL.Path, "/blobs/sha256:") {
+					d := strings.TrimPrefix(r.URL.Path, "/v2/receipts/image/blobs/")
+					w.Header().Set("Set-Cookie", "must-not-forward=secret")
+					http.Redirect(w, r, storage.URL+objectPrefix+d+"?sig=local-test-only", 307)
+					return
+				}
+				registry.ServeHTTP(w, r)
+			}))
+			defer server.Close()
+			roots := x509.NewCertPool()
+			roots.AddCert(storage.Certificate())
+			p, err := NewPublisher(Target{Origin: server.URL, Repository: "receipts/image", AllowLoopbackHTTP: true, BearerToken: "registry-only-token", RootCAs: roots, BlobDownloadOrigins: []string{storage.URL}})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if _, err := p.Publish(context.Background(), v); err != nil {
+				t.Fatal(err)
+			}
+			if _, err := p.Publish(context.Background(), v); err != nil {
+				t.Fatal(err)
+			}
+			if downloads.Load() < 4 {
+				t.Fatalf("only %d blob reads", downloads.Load())
+			}
+		})
 	}
 }
 
 func TestDownloadRedirectConfinement(t *testing.T) {
-	for _, attack := range []string{"origin", "port", "scheme", "userinfo", "fragment", "encoded-path", "parent-path", "manifest", "token", "loop", "challenge", "oversized", "corrupt"} {
+	for _, attack := range []string{"origin", "port", "scheme", "userinfo", "fragment", "encoded-path", "parent-path", "current-path", "empty-parent-path", "manifest", "token", "loop", "challenge", "oversized", "corrupt"} {
 		t.Run(attack, func(t *testing.T) {
 			v, _ := verifiedFixture(t)
 			registry := quietRegistry()
@@ -114,6 +121,10 @@ func TestDownloadRedirectConfinement(t *testing.T) {
 				destination = storage.URL + "/a%2fb"
 			case "parent-path":
 				destination = storage.URL + "/a/../blob"
+			case "current-path":
+				destination = storage.URL + "/a/./blob"
+			case "empty-parent-path":
+				destination = storage.URL + "/a//../blob"
 			}
 			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 				if attack == "token" {

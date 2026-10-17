@@ -259,6 +259,36 @@ research reuse and query-pressure fixes. Its full native release, publication
 receipts and production verification remain required. The failed v0.29.24 run
 is diagnostic evidence, not a release candidate.
 
+## Azure publication readback, October 17, 2026 UTC
+
+The v0.29.23 native bootstrap run `517b203755fd72a42c422493c691ad77`,
+Work run `4e28aba0e2460a1a6d482900f6d092f8`, passed all 46 steps from
+source `f8ece576d93efdfb899fb3c4133f895c304f7e60`. Its controller ran in
+local k3d and its build jobs used the existing AKS builds pool. This is
+bootstrap evidence, not qualification on the installed production controller.
+All 46 logs and 66 artifact references were retained without missing paths or
+storage-owner failures. The 606,256,128-byte toolchain archive downloaded
+through the local Files app, matched SHA-256
+`052e2cbf771cc158fd0b660afb0956abdb0f8b15d65656bd11bf48a8bfc2b550`,
+and passed OCI verification and the toolchain's actual-image smoke script.
+Production download verification remains outstanding.
+
+Native GHCR publication completed and verified the agent image. Azure accepted
+that image's immutable manifest, but verification stopped before its version
+tag was written. Azure's signed blob URL contains an empty path segment
+(`//`), which the reader incorrectly rejects as a noncanonical filesystem
+path. Storage object keys must retain those segments and the signed query.
+The repair leaves exact HTTPS origins, credential isolation, rejection of dot
+and escaped path segments, redirect bounds and content hashes enforced.
+Publication/replay and read-only availability tests fail on the old reader
+and pass with this change; the complete registry suite passes with the race
+detector. The repaired native reader also verified all 20 config/layer blobs
+of the actual Azure agent image through its credential-free storage redirects.
+Prepare v0.29.26 with this readback repair and the merged database class
+isolation. Existing pending publication intents remain pending until a
+native operation verifies and records completion; never manufacture receipts
+or reuse their immutable tags for different bytes.
+
 ## Acceptance and issue closure
 
 The cadence change removes the multi-hour full-history scan from ordinary
