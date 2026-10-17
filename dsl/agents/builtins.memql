@@ -201,6 +201,7 @@ builtin requestUserFeedback {
   kind         string!
   options      []object
   timeoutAt    string
+  optional     bool
   agentId      string!
   ownerUserId  string!
   runId        string!

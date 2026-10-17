@@ -47,6 +47,7 @@ import (
 	memorynodes "github.com/znasllc-io/memql/component/database/memory-nodes"
 	"github.com/znasllc-io/memql/component/language/parser"
 	"github.com/znasllc-io/memql/component/memql"
+	"github.com/znasllc-io/memql/component/work"
 )
 
 // Integration owns the AgentRegistry + Engine pointers and implements
@@ -518,6 +519,7 @@ func (i *Integration) handleRequestUserFeedback(ctx context.Context, args map[st
 		Kind:      kind,
 		Options:   options,
 		ExpiresAt: expiresAt,
+		Optional:  args["optional"] == true,
 	})
 	if err != nil {
 		return nil, fmt.Errorf("requestUserFeedback: raise approval: %w", err)
@@ -530,6 +532,10 @@ func (i *Integration) handleRequestUserFeedback(ctx context.Context, args map[st
 		for _, row := range memql.MaterializeRows(result) {
 			if row["decision"] == "answered" {
 				payload, marshalErr := json.Marshal(map[string]any{"status": "answered", "approvalId": approvalId, "answer": row["answer"], "decidedAt": row["decidedAt"]})
+				return []memorynodes.MemoryNode{{ID: approvalId, Payload: payload}}, marshalErr
+			}
+			if work.OptionalFeedbackContinued(row, time.Now()) {
+				payload, marshalErr := json.Marshal(map[string]any{"status": "continued_without_answer", "approvalId": approvalId, "message": "The optional wait ended without an answer. Continue useful authorized work within the same limits; silence grants no permission. Do not repeat this question."})
 				return []memorynodes.MemoryNode{{ID: approvalId, Payload: payload}}, marshalErr
 			}
 		}

@@ -20,7 +20,7 @@ func workResponseToolDefinition() common.ToolDefinition {
 		"An unknown personal preference needs input from that person; it is not a completed lookup. " +
 		"Do not put an invitation to tell you later in a completed response. " +
 		"For a completed answer, write the answer as ordinary assistant text, then call this tool with status=complete and responseFromText=true in the same response. Do not repeat the answer in tool arguments. " +
-		"The runtime presents a needs_input question in Ask and pauses this task until answered. " +
+		"The runtime presents a needs_input question in Ask. Set question.optional=true when useful authorized work can continue after a bounded wait; leave it false for required information or decisions. Silence never grants permission. " +
 		"Use kind=text for an open answer. When offering alternatives or requested suggestions, use choice/multi and supply options; every choice also accepts custom text. Reuse earlier answers and avoid questions about minor preferences. " +
 		"Call this tool alone. Computer-access approval uses requestComputerUseScope instead."
 	schema := def.InputSchema.(map[string]any)
@@ -33,8 +33,9 @@ func workResponseToolDefinition() common.ToolDefinition {
 		"type": "object", "required": []string{"text", "kind"},
 		"description": "Required for needs_input. Explain the missing information briefly and ask a self-contained question.",
 		"properties": map[string]any{
-			"text": map[string]any{"type": "string"},
-			"kind": map[string]any{"type": "string", "enum": []string{"text", "choice", "multi"}},
+			"text":     map[string]any{"type": "string"},
+			"kind":     map[string]any{"type": "string", "enum": []string{"text", "choice", "multi"}},
+			"optional": map[string]any{"type": "boolean", "description": "True for a helpful clarification when useful authorized work can continue without an answer. The Spine bounds the wait. Never consent or a decision required before an effect."},
 			"options": map[string]any{"type": "array", "items": map[string]any{
 				"type": "object", "required": []string{"label", "value"},
 				"properties": map[string]any{"label": map[string]any{"type": "string"}, "value": map[string]any{"type": "string"}},
@@ -87,9 +88,10 @@ func normalizeWorkOutcome(calls []common.ToolCall, turnText string) ([]common.To
 			Response         string `json:"response"`
 			ResponseFromText bool   `json:"responseFromText"`
 			Question         *struct {
-				Text    string `json:"text"`
-				Kind    string `json:"kind"`
-				Options []struct {
+				Text     string `json:"text"`
+				Kind     string `json:"kind"`
+				Optional bool   `json:"optional"`
+				Options  []struct {
 					Label string `json:"label"`
 					Value string `json:"value"`
 				} `json:"options,omitempty"`
@@ -156,6 +158,9 @@ func normalizeWorkOutcome(calls []common.ToolCall, turnText string) ([]common.To
 				return nil, fmt.Errorf("question.kind must be text, choice or multi")
 			}
 			feedback := map[string]any{"question": strings.TrimSpace(q.Text), "kind": q.Kind}
+			if q.Optional {
+				feedback["optional"] = true
+			}
 			if len(q.Options) > 0 {
 				feedback["options"] = q.Options
 			}

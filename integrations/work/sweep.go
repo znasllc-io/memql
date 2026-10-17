@@ -221,6 +221,16 @@ func (i *Integration) SweepWaiting(ctx context.Context, olderThan time.Duration)
 		}
 
 		if status == runStatusWaiting {
+			if waiting := rowMap(run, "waitingOn"); rowString(waiting, "kind") == "approval" && rowString(waiting, "approvalKind") == "feedback" {
+				if resumed, err := i.continueOptionalFeedback(writeCtx, runId, now); err != nil {
+					i.log().Warn("work: optional clarification could not continue", "run", runId, "error", err)
+					continue
+				} else if resumed {
+					res.Resumed++
+					i.DispatchRun(writeCtx, runId, owner)
+					continue
+				}
+			}
 			if closed, err := i.closeOrphanedSystemApprovalWait(ctx, run, now); err != nil {
 				i.log().Warn("work: could not check a system approval wait", "run", runId, "error", err)
 				continue

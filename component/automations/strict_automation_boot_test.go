@@ -239,7 +239,8 @@ func TestStrictAutomationBoot_EmbeddedTreeIsClean(t *testing.T) {
 // 173 -> 174: pipelineSARIFDelivery, the scoped report publication recipe;
 // measured by the strict loader in PR #6146 CI.
 // 174 -> 175: pre-file evidence assessment, measured by the strict loader.
-const shippedAutomationCount = 175
+// 175 -> 176: bounded optional clarification policy pinned with the Spine.
+const shippedAutomationCount = 176
 
 //
 // 56 -> 57 in epic memql#5168 (the per-account front door):

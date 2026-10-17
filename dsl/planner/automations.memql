@@ -179,7 +179,11 @@ automation defaultWorkSpine {
  if triage.conversational && triage.requiresFile && triage.workload == "quick" {
   builtin spineSetWorkload(workload: "lookup")
  }
- if triage.conversational && (triage.workload != "quick" || triage.intent != "reply") && triage.acknowledgement == "" {
+ // Missing evidence still needs tools or a durable clarification, even for a short reply.
+ if triage.conversational && triage.requiresResearch && triage.workload == "quick" {
+  builtin spineSetWorkload(workload: "lookup")
+ }
+ if triage.conversational && (triage.workload != "quick" || triage.intent != "reply" || triage.requiresResearch) && triage.acknowledgement == "" {
   builtin spineAcknowledge(timeoutSeconds: 180)
  }
  route := logic workSpineRoute(triage: triage)

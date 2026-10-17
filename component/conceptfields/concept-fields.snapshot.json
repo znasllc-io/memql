@@ -8511,6 +8511,7 @@
       "fields": [
         "answer",
         "artifactHash",
+        "continuedAt",
         "decidedAt",
         "decidedBy",
         "decision",

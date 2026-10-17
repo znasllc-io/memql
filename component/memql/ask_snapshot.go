@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	memorynodes "github.com/znasllc-io/memql/component/database/memory-nodes"
+	"github.com/znasllc-io/memql/component/work"
 )
 
 // Merge one observer's receipt under a short database lock. Holding a copy of
@@ -145,7 +146,10 @@ func (e *MemQLEngine) refreshAskRuns(ctx context.Context, transcript *askTranscr
 		turn.Question = nil
 		for _, row := range questions {
 			question, answer := askFeedbackProjection(row)
-			if question != nil && run["status"] == "waiting" && BareShortId(fmt.Sprint(waiting["subject"])) == question.ID {
+			contract, _, optional := work.OptionalFeedback(row)
+			rerun, _ := run["rerun"].(map[string]any)
+			currentOptional := optional && contract["templateFingerprint"] == run["templateFingerprint"] && stringArg(contract, "rerunRequestId") == stringArg(rerun, "requestId")
+			if question != nil && ((run["status"] == "waiting" && BareShortId(fmt.Sprint(waiting["subject"])) == question.ID) || (run["status"] == "running" && question.Continued && currentOptional && turn.Question == nil)) {
 				turn.Question = question
 			}
 			if answer != nil && !seen[answer.ID] {

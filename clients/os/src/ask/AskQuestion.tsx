@@ -21,6 +21,7 @@ export function AskQuestion({ question, onAnswer }: { question: Question; onAnsw
   }
   return <form className="os-ask-question" data-ask-question={question.id} onSubmit={submit} aria-label="Question from MemQL">
     <p>{question.text}</p>
+    {question.optional ? <p>{question.continued ? "Work has continued. Your answer can still guide it." : "Optional. Work will continue after a short wait."}</p> : null}
     {options.length ? <div className="os-ask-question-options" role="group" aria-label="Suggested answers">{options.map(option => <button key={option.value} type="button" aria-pressed={selected.includes(option.value)} disabled={busy} onClick={() => {
       setText(""); setSelected(question.kind === "multi" ? selected.includes(option.value) ? selected.filter(value => value !== option.value) : [...selected, option.value] : [option.value]);
     }}>{option.label}</button>)}</div> : null}

@@ -204,6 +204,7 @@ concept approval {
   decision      enum("", "approved", "rejected", "answered")  @description("Empty while pending.")
   answer        object  @description("The person's answer, for kind feedback.")
   expiresAt     datetime  @description("When a pending approval lapses.")
+  continuedAt   datetime  @description("Native receipt that an optional information wait ended without an answer. Grants no permission and leaves late answers available.")
   permissionUsedAt datetime @description("When one exact dispatch consumed a typed one-time computer permission.")
   permissionRevokedAt datetime @description("When the person revoked a saved computer permission.")
 

@@ -45,7 +45,7 @@ export interface AskTurn {
   activity: AskActivity[];
   error?: string;
 }
-export interface AskQuestion { id: string; text: string; kind: "text" | "choice" | "multi"; options: { value: string; label: string }[] }
+export interface AskQuestion { id: string; text: string; kind: "text" | "choice" | "multi"; options: { value: string; label: string }[]; optional?: boolean; continued?: boolean }
 export interface ConversationSummary { id: string; title: string; createdAt?: string }
 export interface ApprovalDiscussion {
   conversationId: string;

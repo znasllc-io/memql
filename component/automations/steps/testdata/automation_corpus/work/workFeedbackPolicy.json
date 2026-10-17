@@ -1,0 +1,47 @@
+{
+  "automation": "work/automations.memql workFeedbackPolicy",
+  "runs": {
+    "invocation | 0 rows": {
+      "input": {
+        "event": {
+          "kind": "unspecified",
+          "payload": {
+            "optional": true
+          },
+          "topic": "automation.invocation.workFeedbackPolicy"
+        },
+        "rows": 0
+      },
+      "outcome": {
+        "calls": null,
+        "result": {
+          "output": {
+            "waitSeconds": 60
+          },
+          "status": "completed"
+        }
+      }
+    },
+    "invocation | 2 rows": {
+      "input": {
+        "event": {
+          "kind": "unspecified",
+          "payload": {
+            "optional": true
+          },
+          "topic": "automation.invocation.workFeedbackPolicy"
+        },
+        "rows": 2
+      },
+      "outcome": {
+        "calls": null,
+        "result": {
+          "output": {
+            "waitSeconds": 60
+          },
+          "status": "completed"
+        }
+      }
+    }
+  }
+}

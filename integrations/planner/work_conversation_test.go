@@ -17,6 +17,25 @@ func conversationReq(statement, previous string) CompileRequest {
 	return req
 }
 
+func TestCurrentEvidenceRepliesUseToolsWithLookupBudget(t *testing.T) {
+	for _, statement := range []string{"Why is it so windy outside?", "¿Por qué hace tanto viento afuera?", "And at my office right now?"} {
+		t.Run(statement, func(t *testing.T) {
+			eng := &countingCompileEngine{triage: map[string]any{"intent": "reply", "complexity": "trivial", "workload": "quick", "requiresFile": false, "requiresResearch": true, "acknowledgement": "I’ll check the available evidence."}}
+			out, err := (&PlannerAgentLoop{engine: eng}).CompileGoalForRun(context.Background(), conversationReq(statement, "We were discussing the current conditions."), nil, realSandbox{})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if out.Reply || out.Workload != "lookup" {
+				t.Fatalf("current evidence entered social reply: %+v", out)
+			}
+			source := strings.Join(eng.queries, "\n")
+			if strings.Contains(source, "workQuickReply") || !strings.Contains(source, "runAgentTurn") {
+				t.Fatalf("missing tool-enabled execution: %s", source)
+			}
+		})
+	}
+}
+
 func TestConversationFollowupUsesHistoryAndNeverTextOnlyReuse(t *testing.T) {
 	req := conversationReq("Jose", "If you'd like me to know your name, feel free to tell me.")
 	eng := &countingCompileEngine{triage: map[string]any{"intent": "reply", "complexity": "trivial", "requiresFile": false}, catalogue: []map[string]any{{"id": "wrong", "name": "dailyReminder", "goalSignature": work.GoalSignature("Jose", []string{"conversation"}), "reliability": 1.0}}}

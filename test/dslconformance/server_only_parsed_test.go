@@ -1613,6 +1613,10 @@ func TestServerOnlyParsedSetMatchesTheTree(t *testing.T) {
 		{Path: "work/mutations.memql", Name: "createWorkObservation"}: true,
 		{Path: "work/mutations.memql", Name: "createWorkApproval"}:    true,
 		{Path: "work/mutations.memql", Name: "decideWorkApproval"}:    true,
+		// Owner scoping cannot prove elapsed time or the saved execution.
+		// This is the native sweep's receipt, after the policy and checkpoint
+		// checks under the same decision lock as an interactive answer.
+		{Path: "work/mutations.memql", Name: "continueWorkFeedback"}: true,
 		// Ownership alone does not establish the pending native checkpoint or
 		// its held decision lease; decideApproval validates both before saving.
 		{Path: "work/mutations.memql", Name: "saveWorkApprovalGuidance"}: true,

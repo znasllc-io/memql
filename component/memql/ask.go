@@ -50,10 +50,12 @@ type AskTurn struct {
 }
 
 type AskQuestion struct {
-	ID      string           `json:"id"`
-	Text    string           `json:"text"`
-	Kind    string           `json:"kind"`
-	Options []map[string]any `json:"options"`
+	Optional  bool             `json:"optional,omitempty"`
+	Continued bool             `json:"continued,omitempty"`
+	ID        string           `json:"id"`
+	Text      string           `json:"text"`
+	Kind      string           `json:"kind"`
+	Options   []map[string]any `json:"options"`
 }
 
 // AskRoute is the conversation's source choice for one turn, as the wire

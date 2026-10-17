@@ -258,6 +258,7 @@ shape approval workApprovalFull {
   decision
   answer
   expiresAt
+  continuedAt
   permissionUsedAt
   permissionRevokedAt
 }
