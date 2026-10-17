@@ -386,7 +386,22 @@ if installed_worker_app fixture-missing-app; then exit 1; fi
 
     def test_real_drivers_grant_detected_apps_after_enrollment_and_retry(self):
         # Same-version repair exercises the real main functions without
-        # network downloads, services or any access to the operator's policy.
+        # external downloads, services or access to the operator's policy.
+        asset_root = str(self.root)
+
+        class Asset(http.server.SimpleHTTPRequestHandler):
+            def __init__(self, *args, **kwargs):
+                super().__init__(*args, directory=asset_root, **kwargs)
+
+            def log_message(self, *_args):
+                pass
+
+        server = http.server.ThreadingHTTPServer(("127.0.0.1", 0), Asset)
+        thread = threading.Thread(target=server.serve_forever, daemon=True)
+        thread.start()
+        self.addCleanup(thread.join)
+        self.addCleanup(server.server_close)
+        self.addCleanup(server.shutdown)
         for driver in ("install-mac.sh", "install-linux.sh"):
             fixture_home = self.root / driver
             binary = fixture_home / ".memql/bin/memql"
@@ -403,15 +418,16 @@ printf '%s\\n' "$@" > "$HOME/apps-args"
             for app in ("claude", "codex"):
                 (app_dir / app).write_text("#!/bin/sh\nexit 0\n")
                 (app_dir / app).chmod(0o755)
-            env = dict(self.env, HOME=str(fixture_home), MEMQL_INSTALL_VERSION="0.17.0")
+            env = dict(self.env, HOME=str(fixture_home), MEMQL_INSTALL_VERSION="0.17.0",
+                       MEMQL_INSTALL_ALLOW_LOOPBACK_HTTP="1")
             command = ["bash", str(HERE / driver), "--token", "mql_wkr_fixture",
                        "--cluster", "https://fixture.example", "--user-local", "--no-service",
-                       "--download-base", "file://" + str(binary.parent)]
-            # Preflight only checks presence; the already-installed version
-            # means the platform asset is not downloaded or executed.
+                       "--download-base", f"http://127.0.0.1:{server.server_port}/{driver}/.memql/bin"]
+            # The installer verifies the full downloaded build even when the
+            # release number matches. Serve the same executable offline.
             for platform in ("darwin", "linux"):
                 for arch in ("amd64", "arm64"):
-                    (binary.parent / f"memql-{platform}-{arch}").write_text("fixture")
+                    (binary.parent / f"memql-{platform}-{arch}").write_bytes(binary.read_bytes())
             for failed in (True, False):
                 with self.subTest(driver=driver, failed=failed):
                     env["FIXTURE_FAIL"] = "yes" if failed else "no"

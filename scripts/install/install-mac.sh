@@ -215,7 +215,7 @@ function write_config() {
 function install_native_app() {
     NATIVE_APP=""; NATIVE_STAGE=""
     [[ "$FLAVOUR" == computeruse ]] || return 0
-    local version release_version base source_app app_version old_requirement new_requirement transition alternate
+    local version release_version base source_app app_version app_worker_version old_requirement new_requirement transition alternate
     version="$(read_binary_version_exact "$INSTALLED_BINARY")"
     release_version="${version%%+*}"
     if [[ -z "$version" || "$(compare_semver "$version" 0.15.0)" == -1 ]]; then
@@ -229,7 +229,12 @@ function install_native_app() {
     fetch_macos_app "$base" "$(detect_arch)" "$NATIVE_STAGE" || return $?
     source_app="$NATIVE_STAGE/unpacked/MemQL.app"
     app_version="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' "$source_app/Contents/Info.plist")"
-    [[ "$app_version" == "$release_version" && "$(read_binary_version_exact "$source_app/Contents/MacOS/MemQL")" == "$version" ]] || { echo "ERROR: app and worker versions differ" >&2; return 3; }
+    app_worker_version="$(read_binary_version_exact "$source_app/Contents/MacOS/MemQL")"
+    if [[ "$app_version" != "$release_version" || "$app_worker_version" != "$version" ]]; then
+        echo "ERROR: app and worker versions differ (app: ${app_version}, bundled worker: ${app_worker_version:-unreadable}, installed worker: ${version})." >&2
+        echo "       Re-run the installer to fetch the selected release; if this persists, include these versions when reporting the failure." >&2
+        return 3
+    fi
     case "$INSTALL_MODE" in system) NATIVE_APP="/Applications/MemQL.app" ;; *) NATIVE_APP="$HOME/Applications/MemQL.app" ;; esac
     if [[ -d "$NATIVE_APP" ]]; then
         old_requirement="$(macos_bundle_requirement "$NATIVE_APP" || true)"

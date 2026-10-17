@@ -98,7 +98,9 @@ main "$@"
         tcc.chmod(0o755)
         seed = user / '.memql/bin/memql'
         seed.parent.mkdir(parents=True)
-        previous = version.split('-')[0] + '-dev.before'
+        # Same release/prerelease, different commit: an installer that skips on
+        # the release number will later reject the matching native app bundle.
+        previous = version + '+gfixtureold'
         seed.write_text('#!/bin/bash\nfunction main() { echo ' + shlex.quote('memql ' + previous + ' (computeruse)') + '; }\nmain "$@"\n')
         seed.chmod(0o755)
         token = 'mql_wkr_fixture_only_not_a_real_enrollment'
