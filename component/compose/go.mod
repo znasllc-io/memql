@@ -13,7 +13,7 @@
 // the Library lives in integrations/compose.
 module github.com/znasllc-io/memql/component/compose
 
-go 1.26.1
+go 1.26.8
 
 toolchain go1.27.2
 

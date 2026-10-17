@@ -9,7 +9,7 @@
 // integration, so anything it grows a dependency on is dragged into both.
 module github.com/znasllc-io/memql/component/skills
 
-go 1.26.1
+go 1.26.8
 
 toolchain go1.27.2
 

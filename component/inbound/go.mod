@@ -2,7 +2,7 @@
 // rationale: docs/internal/ops/ci-design.md, section D3.
 module github.com/znasllc-io/memql/component/inbound
 
-go 1.26.1
+go 1.26.8
 
 toolchain go1.27.2
 
@@ -72,15 +72,15 @@ require (
 	github.com/znasllc-io/memql/component/work v0.0.0 // indirect
 	github.com/znasllc-io/memql/docs v0.0.0 // indirect
 	github.com/znasllc-io/memql/dsl v0.0.0 // indirect
-	go.opentelemetry.io/otel v1.44.0 // indirect
-	go.opentelemetry.io/otel/trace v1.44.0 // indirect
+	go.opentelemetry.io/otel v1.45.0 // indirect
+	go.opentelemetry.io/otel/trace v1.45.0 // indirect
 	go.yaml.in/yaml/v4 v4.0.0-rc.2 // indirect
 	golang.org/x/crypto v0.57.0 // indirect
 	golang.org/x/net v0.60.0 // indirect
 	golang.org/x/sync v0.23.0 // indirect
 	golang.org/x/sys v0.48.0 // indirect
 	golang.org/x/text v0.42.0 // indirect
-	google.golang.org/genproto/googleapis/rpc v0.0.0-20260706201446-f0a921348800 // indirect
+	google.golang.org/genproto/googleapis/rpc v0.0.0-20260803160001-6ac0973c030d // indirect
 	google.golang.org/grpc v1.83.2 // indirect
 	google.golang.org/protobuf v1.36.12 // indirect
 	gopkg.in/yaml.v3 v3.0.1 // indirect
