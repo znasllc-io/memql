@@ -41,7 +41,20 @@ func TestRecoveryPlanReadsOnlyCurrentUnfinishedHeadsAcrossChunks(t *testing.T) {
 	for _, stmt := range []string{
 		`CREATE TABLE "MemoryNodes" (id text, concept text, "createdAt" timestamptz NOT NULL, payload jsonb)`,
 		`SELECT public.create_hypertable('"MemoryNodes"', 'createdAt', chunk_time_interval => interval '1 day')`,
-		`INSERT INTO "MemoryNodes" SELECT 'run-'||n,'v1:work:run',TIMESTAMPTZ '2026-01-01'+v*interval '1 day',jsonb_build_object('status',CASE WHEN v=2 AND n>20 THEN 'succeeded' ELSE 'waiting' END,'detail',repeat('x',400)) FROM generate_series(1,100000) n CROSS JOIN generate_series(0,2) v`,
+	} {
+		if _, err := db.ExecContext(ctx, stmt); err != nil {
+			t.Fatal(err)
+		}
+	}
+	// Keep the same 100,000 three-version histories, but bound each fixture
+	// write below the driver's I/O deadline on a shared development database.
+	// The query under test still reads the complete cross-chunk data set.
+	for first := 1; first <= 100000; first += 2000 {
+		if _, err := db.ExecContext(ctx, `INSERT INTO "MemoryNodes" SELECT 'run-'||n,'v1:work:run',TIMESTAMPTZ '2026-01-01'+v*interval '1 day',jsonb_build_object('status',CASE WHEN v=2 AND n>20 THEN 'succeeded' ELSE 'waiting' END,'detail',repeat('x',400)) FROM generate_series(?,?) n CROSS JOIN generate_series(0,2) v`, first, first+1999); err != nil {
+			t.Fatal(err)
+		}
+	}
+	for _, stmt := range []string{
 		`CREATE INDEX latest_keys ON "MemoryNodes" (concept,id,"createdAt" DESC)`,
 		`CREATE INDEX memory_nodes_work_recovery_idx ON "MemoryNodes" ("createdAt",id) WHERE concept='v1:work:run' AND COALESCE(payload->>'status','') NOT IN ('succeeded','failed','cancelled','abandoned')`,
 	} {
