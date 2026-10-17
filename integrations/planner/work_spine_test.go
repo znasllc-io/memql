@@ -81,6 +81,8 @@ builtin spineClassify() on error continue
 return true`,
 		`builtin spinePersist() on error continue
 return true`,
+		`builtin spineSetWorkload(workload: "lookup") on error continue
+return true`,
 	} {
 		req := compileReq()
 		req.Spine = testSpine(t, "companyUnsafe", "@template\nautomation companyUnsafe {\n"+body+"\n}")

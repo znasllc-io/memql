@@ -175,6 +175,10 @@ automation defaultWorkSpine {
   }
  }
  triage := builtin spineClassify(timeoutSeconds: 600)
+ // File delivery includes source assessment and composition beyond a direct reply.
+ if triage.conversational && triage.requiresFile && triage.workload == "quick" {
+  builtin spineSetWorkload(workload: "lookup")
+ }
  if triage.conversational && (triage.workload != "quick" || triage.intent != "reply") && triage.acknowledgement == "" {
   builtin spineAcknowledge(timeoutSeconds: 180)
  }

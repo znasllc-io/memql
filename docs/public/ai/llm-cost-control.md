@@ -135,7 +135,11 @@ the conversation, distinguishes recorded evidence from current profile context,
 and passes supported findings and references into the file. Missing essential
 evidence returns an explanation to the conversation without an upload. The
 assessment consumes the run's ordinary model-call allowance and does not retry
-itself. Self-contained writing does not require invented external research.
+itself. The default Spine promotes a quick conversational file request to the
+lookup estimate before execution, reserving room for classification, a possible
+acknowledgment, evidence assessment and composition. Explicit user ceilings and
+already-spent calls remain binding. Self-contained writing does not require
+invented external research.
 
 ### Ask classification and repair limits
 
