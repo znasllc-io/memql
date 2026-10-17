@@ -90,6 +90,7 @@ func TestExecutor_ClusterGuardSkipsCrossReplicaDuplicate(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, "skipped", exec.Status)
 	assert.Contains(t, exec.Error, "cluster guard")
+	assert.Empty(t, e.executionTracker.counts, "cross-replica duplicates must not inflate storm warnings")
 
 	assert.Equal(t, 1, guard.calls, "the guard must be consulted exactly once")
 	assert.Equal(t, "ensureDailySpaceOnAuthSession", guard.gotAutomation)

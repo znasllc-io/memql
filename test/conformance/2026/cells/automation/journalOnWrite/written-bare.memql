@@ -1,0 +1,3 @@
+@trigger(event="node.created", concept="v1:platform:inboundRequest")
+@journalOnWrite
+automation quietDelivery { return true }

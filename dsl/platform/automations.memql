@@ -21,6 +21,7 @@ use common.builtins.{ datasyncDispatchInbound, datasyncReconcileDomains }
 /// included -- a mailbox-reader row carries no headersJson, and a row staged before verifiedBy
 /// existed carries no tier.
 @trigger(event="node.created", concept="v1:platform:inboundRequest")
+@journalOnWrite
 automation dispatchInboundToConnector {
   args {
     id  any
@@ -85,6 +86,7 @@ automation reconcileAccountFrontDoors {
 /// and nothing else: the feed reads the source, the body and the signature verdict from the row
 /// itself, so what moves a package's update cue is the delivery the receiver verified.
 @trigger(event="node.created", concept="v1:platform:inboundRequest")
+@journalOnWrite
 automation notePackageUpstreamFromWebhook {
   args {
     id  any

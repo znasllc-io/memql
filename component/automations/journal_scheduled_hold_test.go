@@ -381,7 +381,7 @@ func TestScheduledRunDoesNotHoldTheExecutorsSharedJournal(t *testing.T) {
 	}
 }
 
-// holdsScheduledJournal is the whole of who is held: a cron tick, not adopted,
+// holdsBackgroundJournal is the whole of who is held: a cron tick, not adopted,
 // not @journalRequired. Every other way an automation starts is journaled at
 // open as before.
 func TestHoldsScheduledJournalDecision(t *testing.T) {
@@ -406,8 +406,8 @@ func TestHoldsScheduledJournalDecision(t *testing.T) {
 		{"an unnamed trigger", plain, "", nil, false},
 		{"no automation", nil, "schedule", nil, false},
 	} {
-		if got := holdsScheduledJournal(tc.automation, tc.triggeredBy, tc.adopt); got != tc.want {
-			t.Errorf("%s: holdsScheduledJournal = %v, want %v", tc.name, got, tc.want)
+		if got := holdsBackgroundJournal(tc.automation, tc.triggeredBy, tc.adopt); got != tc.want {
+			t.Errorf("%s: holdsBackgroundJournal = %v, want %v", tc.name, got, tc.want)
 		}
 	}
 }

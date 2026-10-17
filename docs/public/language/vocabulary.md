@@ -15,18 +15,18 @@ Every named thing in the MemQL language -- construct, annotation, keyword, opera
 
 It is the companion to the [grammar](grammar.md): the grammar says what may be written, this says what each written thing does. Together they are what a model is given before it is asked to write MemQL.
 
-Edition `2026`, grammar version `2026.10-tool-object-fields-9d8f76de`.
+Edition `2026`, grammar version `2026.10-event-journal-on-write-bceec6b9`.
 
 | Section | Entries |
 |---|---:|
 | [Constructs](#constructs) | 18 |
-| [Annotations](#annotations) | 79 |
+| [Annotations](#annotations) | 80 |
 | [Keywords](#keywords) | 37 |
 | [Operators](#operators) | 22 |
 | [Field types](#field-types) | 12 |
 | [Functions and methods](#functions-and-methods) | 46 |
 | [Builtins](#builtins) | 10 |
-| **Total** | **224** |
+| **Total** | **225** |
 
 ## Constructs
 
@@ -86,6 +86,7 @@ The `@name` directives a construct or a field carries. WHERE each is legal, and 
 | `@filter` | `@filter(row => row.status == "open")` | Filter for automation triggers: a lambda of one parameter over the triggering row, as in @filter(row => row.status == "open"). Written as an expression; legal on automation. |
 | `@handler` | `@handler(type="function", name="createTodo")` | Tool handler configuration. Format: @handler(type="query", query="...") / @handler(type="function", name="..."). Written as keyword arguments; legal on tool. |
 | `@internal` | `@internal` | On a concept field: server-only (memql#2035) -- never projected by a shape's default projection and never accepted from a mutation's caller args; emitted as x-internal. (On a construct, @internal is retired, #2708.) Written as no arguments; legal on concept field. |
+| `@journalOnWrite` | `@journalOnWrite` | For a background event firing, hold the journal until its first engine graph write, failure or human wait. Successful no-ops leave no run or step rows. Manual runs and adopted runs keep their journal. Do not use for external or raw SQL effects that do not report an engine write. Cannot be combined with journalRequired. Written as no arguments; legal on automation. |
 | `@journalRequired` | `@journalRequired` | Require confirmed work-journal writes before an automation starts work, advances beyond a step or reports completion. A failed write stops the run even inside retry or on error continue. Preview runs remain sandboxed. This does not guarantee exactly-once external effects; reconcile uncertain effects before resuming. Written as no arguments; legal on automation. |
 | `@level` | `@level("fast")` | How much intelligence the call needs: fast, strong, reasoning or embeddings. The router's rules branch on it, so a prompt never names a model (epic memql#5127). Required on every prompt: one without it is refused at load (`prompt_level_missing`), a @disabled prompt included. Written as one string; legal on prompt and rule. |
 | `@locked` | `@locked` | On a rule: evaluate before every unlocked rule regardless of precedence. Accepted only in the embedded tree -- the loader refuses it elsewhere. Written as no arguments; legal on rule. |

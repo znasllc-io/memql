@@ -31,6 +31,13 @@ package pipelinesteps
 // The command's exit code remains its own; missing required artifacts are a
 // separate runner failure. Globs have already passed artifactProblem.
 const stepWrapper = `cd /workspace || exit 70
+if [ "${MEMQL_CACHE_LOCKED:-0}" = 1 ]; then
+  command -v flock >/dev/null 2>&1 || { echo "memql: cached step images must provide flock" >&2; exit 70; }
+  # Parent holds the lease until the command and artifact export finish.
+  # New users cannot overtake a collector waiting for existing users to drain.
+  exec 8</memql-cache-gate 9</memql-cache-users || exit 70
+  flock -x 8 && flock -s 9 && flock -u 8 || exit 70
+fi
 if [ -n "${MEMQL_CACHES:-}" ] && u=$(id -u 2>/dev/null) && [ -n "$u" ]; then
   for c in $MEMQL_CACHES; do
     case "$c" in
@@ -89,16 +96,79 @@ done
 git checkout -q FETCH_HEAD
 echo "memql: checked out $SHA"`
 
-// cachePrepScript is the cache-prep init container's entrypoint (ruling
-// R15b). CACHE_DIR names the step's directory of the cache claim
-// (CacheSubPath), whose root only this container mounts. It creates the
-// directory, and those above it, then makes it world-writable and sticky
-// (1777), or opens up one created narrower before -- kubelet creates a missing
-// subPath root-owned with the claim root's mode -- so the step, which mounts
-// only that directory, can enter it as whatever uid its image runs as and
-// create its own uid's tree, while the sticky bit keeps one uid from renaming
-// or replacing another uid's. Nothing else: no git, no token, no checkout. A
-// directory that cannot be prepared fails the container with a line naming
-// it, which FallbackToLogsOnError carries into terminated.message.
-const cachePrepScript = `umask 0000
-mkdir -p "$CACHE_DIR" && chmod 1777 "$CACHE_DIR" || { echo "memql: cannot prepare the cache directory $CACHE_DIR" >&2; exit 1; }`
+// cachePrepScript is fixed platform code, with no credentials or checkout.
+// It reclaims disposable caches only under an exclusive cross-pod file lock.
+// The lock inodes are never replaced, including during cleanup. The step sees
+// only its own scope plus read-only mounts of those two files.
+const cachePrepScript = `set -eu
+umask 0022
+root=/cache-root
+if [ "${CACHE_GC_PERCENT:-0}" = 0 ]; then
+  umask 0000
+  if ! mkdir -p "$CACHE_DIR" || ! chmod 1777 "$CACHE_DIR"; then
+    echo "memql: cannot prepare the cache directory $CACHE_DIR" >&2
+    exit 1
+  fi
+  exit 0
+fi
+locks="$root/.memql-locks"
+[ ! -L "$locks" ] || { echo "memql: cache lock directory is a symlink" >&2; exit 70; }
+mkdir -p "$locks"
+for name in gate users; do
+  file="$locks/$name"
+  [ ! -L "$file" ] && { [ ! -e "$file" ] || [ -f "$file" ]; } || exit 70
+  # Append opens the same inode; never truncate, rename or unlink a lock.
+  (umask 022; : >>"$file")
+  chmod 0644 "$file"
+done
+exec 8<"$locks/gate" 9<"$locks/users"
+flock -x 8
+pressure() {
+  bytes=$(df -Pk "$root" | awk 'NR==2 {gsub(/%/, "", $5); print $5}')
+  inodes=$(df -Pi "$root" | awk 'NR==2 {gsub(/%/, "", $5); print $5}')
+  for used in "$bytes" "$inodes"; do
+    case "$used" in ""|*[!0-9]*) echo "memql: cannot measure cache capacity" >&2; exit 70;; esac
+  done
+  [ "$bytes" -ge "$CACHE_GC_PERCENT" ] || [ "$inodes" -ge "$CACHE_GC_PERCENT" ]
+}
+# Validate each platform-owned ancestor. Step content is considered only below
+# a scope root. find/rm never follow symlinks there; no writer holds a lease.
+scopes() {
+  for owner in "$root"/owners/*; do
+    [ -d "$owner" ] || continue
+    key=${owner##*/}
+    case "$key" in *[!0-9a-f]*) continue;; esac
+    [ "${#key}" -eq 24 ] || continue
+    for repo in "$owner"/repos/*; do
+      [ -d "$repo" ] || continue
+      key=${repo##*/}
+      case "$key" in *[!0-9a-f]*) continue;; esac
+      [ "${#key}" -eq 24 ] || continue
+      for trust in trusted untrusted; do
+        scope="$repo/$trust"
+        [ -d "$scope" ] || continue
+        [ "$(realpath -e "$scope")" = "$scope" ] || { echo "memql: refusing linked cache scope" >&2; exit 70; }
+        if [ "$1" = build ]; then
+          find "$scope" -mindepth 2 -maxdepth 2 -type d -path "$scope/go-u*/build" -exec rm -rf -- {} +
+        else
+          find "$scope" -mindepth 1 -maxdepth 1 -exec rm -rf -- {} +
+        fi
+      done
+    done
+  done
+}
+if pressure; then
+  echo "memql: cache capacity threshold reached; waiting for active cached steps"
+  flock -x 9
+  # Another initializer may already have reclaimed space while we waited.
+  if pressure; then
+    scopes build
+    if pressure; then scopes all; fi
+    echo "memql: disposable cache reclaimed"
+    if pressure; then echo "memql: cache volume remains above its capacity threshold" >&2; exit 70; fi
+  fi
+fi
+case "$CACHE_DIR" in "$root"/owners/*/repos/*/trusted|"$root"/owners/*/repos/*/untrusted) ;; *) echo "memql: invalid cache directory" >&2; exit 70;; esac
+mkdir -p "$CACHE_DIR"
+[ "$(realpath -e "$CACHE_DIR")" = "$CACHE_DIR" ] || { echo "memql: refusing linked cache directory" >&2; exit 70; }
+chmod 1777 "$CACHE_DIR"`

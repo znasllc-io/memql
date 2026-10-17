@@ -5,6 +5,7 @@ import (
 	"errors"
 	"strings"
 	"testing"
+	"testing/synctest"
 	"time"
 
 	"github.com/znasllc-io/memql/component/events"
@@ -34,30 +35,19 @@ func journalEvent(id, template, triggeredBy string) events.Event {
 	return ev
 }
 
-// settledClaims waits for HandleRunEvent's goroutine and reports the claims.
-func settledClaims(c *stubClaimer, want int) int {
-	deadline := time.Now().Add(2 * time.Second)
-	for time.Now().Before(deadline) {
-		c.mu.Lock()
-		n := len(c.keys)
-		c.mu.Unlock()
-		if n >= want && want > 0 {
-			break
-		}
-		time.Sleep(5 * time.Millisecond)
-	}
-	time.Sleep(50 * time.Millisecond)
-	c.mu.Lock()
-	defer c.mu.Unlock()
-	return len(c.keys)
-}
-
+// A bubble waits for every spawned handler to finish before checking either
+// absence or a duplicate. No wall-clock grace can prove that deterministically.
 func TestHandleRunEventSkipsJournalRuns(t *testing.T) {
 	for _, template := range []string{"appSession", "libraryAnalyzeFile"} {
 		t.Run(template, func(t *testing.T) {
-			i, d, c := newDispatchProbe(t, true)
-			i.HandleRunEvent(journalEvent("v1:work:run:journal-"+template, template, workjournal.TriggeredBy(template)))
-			if got := settledClaims(c, 0); got != 0 || len(d.seen()) != 0 {
+			var d *capturingDispatcher
+			var c *stubClaimer
+			synctest.Test(t, func(t *testing.T) {
+				i, dispatcher, claimer := newDispatchProbe(t, true)
+				d, c = dispatcher, claimer
+				i.HandleRunEvent(journalEvent("v1:work:run:journal-"+template, template, workjournal.TriggeredBy(template)))
+			})
+			if got := len(c.keys); got != 0 || len(d.seen()) != 0 {
 				t.Fatalf("claimed %d and dispatched %+v for a %s journal run; its driver owns it, and the "+
 					"template executor would fail it automation_not_runnable", got, d.seen(), template)
 			}
@@ -66,9 +56,13 @@ func TestHandleRunEventSkipsJournalRuns(t *testing.T) {
 
 	// THE CONTROL is the shape these runs used to have. Without it, a
 	// dispatcher that took nothing would pass.
-	i, _, c := newDispatchProbe(t, true)
-	i.HandleRunEvent(journalEvent("v1:work:run:old-shape", "appSession", "system"))
-	if got := settledClaims(c, 1); got != 1 {
+	var c *stubClaimer
+	synctest.Test(t, func(t *testing.T) {
+		i, _, claimer := newDispatchProbe(t, true)
+		c = claimer
+		i.HandleRunEvent(journalEvent("v1:work:run:old-shape", "appSession", "system"))
+	})
+	if got := len(c.keys); got != 1 {
 		t.Fatalf("the control: a goal-backed running run naming an automation was claimed %d time(s), want 1", got)
 	}
 }

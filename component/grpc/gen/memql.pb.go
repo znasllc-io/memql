@@ -3151,7 +3151,10 @@ type SubscribeMsg struct {
 	// are structured (concept + actions) and the SERVER composes the
 	// bus topic, so the topic grammar never appears on the client wire
 	// (#2460).
-	Filter string           `protobuf:"bytes,3,opt,name=filter,proto3" json:"filter,omitempty"`
+	Filter string `protobuf:"bytes,3,opt,name=filter,proto3" json:"filter,omitempty"`
+	// Graph subscribers may set config.idOnly=true to receive identity/version
+	// notifications and reread through their authorized query. Row admission
+	// still applies, and the notification carries payload_omitted=true.
 	Config *structpb.Struct `protobuf:"bytes,4,opt,name=config,proto3" json:"config,omitempty"`
 	// Structured graph subscription (kind == SUBSCRIPTION_KIND_GRAPH_EVENTS).
 	// The server composes the bus topic(s) from these fields, so a client

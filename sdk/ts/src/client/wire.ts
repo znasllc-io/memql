@@ -47,6 +47,7 @@ export interface SubscribePayload {
   // composes the bus topic from these.
   concept?: string;
   actions?: GraphNodeActionWire[];
+  config?: { idOnly?: boolean };
 }
 
 export interface UnsubscribePayload {

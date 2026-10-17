@@ -20,6 +20,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/stretchr/testify/require"
+	"github.com/znasllc-io/memql/component/metrics"
 	"nhooyr.io/websocket"
 )
 
@@ -108,6 +109,7 @@ func (d *sdkDispatcher) frameCount() int {
 // fills and the requests past it are refused; every request, refused or not, must
 // settle.
 func TestAnOverloadedBridgeAnswersTheRequestItRefused(t *testing.T) {
+	before := metrics.WSQueryRejectedValue()
 	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
 	defer cancel()
 	hold := make(chan struct{})
@@ -167,6 +169,7 @@ func TestAnOverloadedBridgeAnswersTheRequestItRefused(t *testing.T) {
 		require.Equal(t, request.messageID, frame["correlateTo"])
 	}
 	refusedWhileHeld := len(settled)
+	require.GreaterOrEqual(t, metrics.WSQueryRejectedValue()-before, float64(refusedWhileHeld))
 
 	// The server stops holding: everything that was taken is answered, and nothing
 	// is left waiting.

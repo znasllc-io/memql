@@ -22,6 +22,7 @@
 /// unless the row's source is configured as a feedback feed and the delivery was signature-verified;
 /// the builtin decides both, because both are deployment configuration rather than graph state.
 @trigger(event="node.created", concept="v1:platform:inboundRequest")
+@journalOnWrite
 automation ingestCampaignFeedback {
   args {
     id any

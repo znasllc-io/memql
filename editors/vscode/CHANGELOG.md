@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.6.12
+
+- Support `@journalOnWrite` for background event handlers in edition 2026,
+  grammar `2026.10-event-journal-on-write-bceec6b9`.
+
 ## 0.6.11
 
 - Add structured tool object fields for edition 2026, grammar

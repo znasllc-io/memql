@@ -138,6 +138,9 @@ type Automation struct {
 	// JournalRequired stops execution when an intent, receipt or run write
 	// cannot be confirmed. It does not promise exactly-once external effects.
 	JournalRequired bool `json:"journalRequired,omitempty"`
+	// JournalOnWrite holds a background event journal until a graph write,
+	// failure or human wait. Successful no-ops create no work rows.
+	JournalOnWrite bool `json:"journalOnWrite,omitempty"`
 
 	// Loop is @loop(maxDepth=N, until=row => P): this automation closes a
 	// deliberate cycle the load would otherwise refuse, and bounds it (D18,

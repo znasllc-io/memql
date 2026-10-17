@@ -100,7 +100,7 @@ function assert_tools_run() {
 	in_image <<'SCRIPT' || fail "a tool a pipeline step needs is missing or broken (see above)"
 set -euo pipefail
 for probe in "go version" "node --version" "npm --version" "protoc --version" \
-	"git --version" "make --version" "psql --version" "pg_isready --version" \
+	"flock --version" "git --version" "make --version" "psql --version" "pg_isready --version" \
 	"curl --version" "tar --version" "gzip --version" "base64 --version" "unzip -v" \
 	"jq --version" "python3 --version" "kubectl version --client" "docker --version"; do
 	tool="${probe%% *}"

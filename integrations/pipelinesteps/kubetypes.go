@@ -206,8 +206,9 @@ type AppArmorProfile struct {
 }
 
 // Capabilities are the Linux capabilities a container gives up from the
-// container runtime's default set. Only the fixed rootless builder adds
-// SETUID/SETGID back for its pinned mapping helpers after dropping ALL.
+// container runtime's default set. The fixed rootless builder adds SETUID/SETGID
+// for mapping helpers. Opt-in cache reclamation adds DAC_OVERRIDE only to its
+// credential-free initializer. Both drop ALL before the explicit additions.
 type Capabilities struct {
 	Drop []string `json:"drop,omitempty"`
 	Add  []string `json:"add,omitempty"`

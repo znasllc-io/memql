@@ -8,7 +8,6 @@ import (
 	"time"
 
 	"github.com/stretchr/testify/require"
-	"github.com/uptrace/bun"
 	"github.com/znasllc-io/memql/component/memql"
 	workstate "github.com/znasllc-io/memql/component/work"
 	"github.com/znasllc-io/memql/core/common"
@@ -37,27 +36,14 @@ func testComputerPermissionDBRecovery(t *testing.T, a, b actsDB) {
 		{"fresh review", testComputerPermissionDBRenewalRequiresFreshReview},
 	}
 	for _, c := range cases {
-		t.Run(c.name, func(t *testing.T) { first, second := computerPermissionCase(t, a, b); c.run(t, first, second) })
+		t.Run(c.name, func(t *testing.T) { first, second := freshActsDBPair(t, a, b); c.run(t, first, second) })
 	}
-}
-
-func computerPermissionCase(t *testing.T, a, b actsDB) (actsDB, actsDB) {
-	t.Helper()
-	owner := newRowId("v1:identity:user")
-	for _, fixture := range []*actsDB{&a, &b} {
-		fixture.owner = owner
-		fixture.i = New(fixture.eng, testLogger())
-		fixture.i.bunDB = func() *bun.DB { return fixture.db }
-		fixture.i.SetGateDB(testGates(t))
-		fixture.i.admitRow = memql.AdmitSourceRow
-	}
-	return a, b
 }
 
 func testComputerPermissionDBFullSubjectAcrossReplicas(t *testing.T, first, second actsDB) {
 	for _, mode := range []string{"once", "always"} {
 		t.Run(mode, func(t *testing.T) {
-			a, peer := computerPermissionCase(t, first, second)
+			a, peer := freshActsDBPair(t, first, second)
 			run := a.openRun(t, nil)
 			b := peer.i
 			person := actorCtx(a.owner)
@@ -230,7 +216,7 @@ func TestComputerPermissionDecisionStates(t *testing.T) {
 func testComputerPermissionDBRenewalRequiresFreshReview(t *testing.T, first, second actsDB) {
 	for _, scenario := range []string{"expired once", "revoked always", "new enrollment"} {
 		t.Run(scenario, func(t *testing.T) {
-			a, b := computerPermissionCase(t, first, second)
+			a, b := freshActsDBPair(t, first, second)
 			person := actorCtx(a.owner)
 			run := a.openRun(t, nil)
 			a.writeVersion(t, run, run, "read", 0, 1, nil, "", map[string]any{"status": "running"})

@@ -15,6 +15,7 @@ import (
 
 	"github.com/znasllc-io/memql/component/auth"
 	memqlv1 "github.com/znasllc-io/memql/component/grpc/gen"
+	"github.com/znasllc-io/memql/component/metrics"
 	"github.com/znasllc-io/memql/core/grpclimits"
 	"github.com/znasllc-io/memql/core/id"
 	"google.golang.org/grpc"
@@ -750,6 +751,7 @@ func (s *session) forwardClientMessage(msg *memqlv1.MemqlClientMessage) error {
 			return nil
 		default:
 			// Queue is full: reject with a local error (and release pending marker).
+			metrics.WSQueryRejected()
 			s.unmarkPending(requestId)
 			s.maybeLogOverload("memql ws overload: pending queue full", "request_id", requestId, "pending_cap", cap(s.pending))
 			// Queue local errors so we don't spam the socket under a request storm.
@@ -986,7 +988,9 @@ func (s *session) maybeLogOverload(msg string, args ...any) {
 		return
 	}
 	s.lastOverload = now
-	s.logDebug(msg, args...)
+	if s.logger != nil {
+		s.logger.Warn(msg, args...)
+	}
 }
 
 func (s *session) queueLocalError(requestId, correlate string, code codes.Code, message string) {
