@@ -23,12 +23,13 @@ pipeline:
   platform: linux/amd64
   # deploy/toolchain-image: Go 1.27.2, Node 22, protoc 33.4, kubectl 1.32.13, the
   # Docker client (no daemon), git, make, jq, python3 and the PostgreSQL client,
-  # as uid 1000. Pinned by the digest build-toolchain-image.yml's run on main
-  # printed for version 1.2.0-amd64 (run 38146575497); a rebuild takes a new version
-  # and a new pin, and the manifest's test fails on any reference that is not a
-  # digest of this repository. These rehearsal images are public; private
+  # as uid 1000, with the Linux editor-host libraries and Xvfb. Native release
+  # v0.29.23, run 517b203755fd72a42c422493c691ad77, built this exact image in
+  # AKS; its archive passed the actual-image smoke script before reviewed
+  # native publication verified every registry blob. A rebuild needs a new
+  # immutable version and reviewed digest pin. This package is public; private
   # image access must use the Workbench registry credential contract.
-  image: ghcr.io/znasllc-io/memql-toolchain@sha256:ae195dcff54b4f67eac2c5669612ba1a886f789fae1e6325adcfaab9679a7bf9
+  image: ghcr.io/znasllc-io/memql-toolchain@sha256:a62b53491fbd9cfd4bbfdf9612bfb1776d9fc9d42aab7ceceac3a0a18a17a8bb
   services:
     # TimescaleDB + pgvector: the mirror ci.yml's db-tests lane runs, at the same
     # digest and with the same user, password and database (the test holds all

@@ -335,6 +335,30 @@ isolation. Existing pending publication intents remain pending until a
 native operation verifies and records completion; never manufacture receipts
 or reuse their immutable tags for different bytes.
 
+## Native toolchain publication, October 17, 2026 UTC
+
+The v0.29.23 bootstrap published and verified all seven GHCR engine images
+through candidate
+`sha256:184bc0ea33d995d1d82b3feb86d81c106d77fe3ce8744899f5fabf9e9b2990da`.
+Each approved effect has a native completion receipt. Its Azure agent intent
+remains pending; this does not claim a completed cloud release.
+
+Toolchain candidate
+`sha256:27c6c1aaaa081a2f8539f8f9190457ad6f8fb1d1e9bf7b1b159df3ab24d9ffa5`,
+approval `b3ca06b3-dc1c-4889-a62e-2aeaa2cc6043`, completed native publication
+to GHCR with immutable tag `0.29.23` and image digest
+`sha256:a62b53491fbd9cfd4bbfdf9612bfb1776d9fc9d42aab7ceceac3a0a18a17a8bb`.
+The 13-layer manifest is also readable anonymously and matches that digest.
+The pipeline now pins this image, whose downloaded archive passed the full
+matching smoke script. Five Linux editor host commands have passed their
+local execution checks; all eight native host cases still require installed
+pipeline execution, including the three Mac cases. Legacy host checks remain
+until that qualification completes.
+
+The Azure reader repair is merged in #6180. The later v0.29.26 run failed
+artifact capture and did not qualify a release; the subsequent repair and
+qualification are recorded below.
+
 ## Artifact transfer integrity and urgent cutover, October 18, 2026 UTC
 
 Native v0.29.27 run `e60862099a9ba0108681d5be1311b4d2`, source
