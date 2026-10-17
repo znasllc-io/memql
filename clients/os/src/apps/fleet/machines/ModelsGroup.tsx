@@ -12,6 +12,7 @@ import { formatBytes, formatMoment } from "../../../kit/format";
 import { formatContext, formatParams } from "../models/ordering";
 import { machineName, type MachineRow } from "../rows";
 import {
+  isChatModel,
   machineModelsFrom,
   machineRuntimesFrom,
   pullProgressFraction,
@@ -69,7 +70,7 @@ export function ModelsGroup({ machine, standalone = false, inference: supplied }
   const inference = supplied ?? ownInference;
 
   const models = useMemo(() => machineModelsFrom(machine.reportedLabels), [machine.reportedLabels]);
-  const chatModel = models.find((model) => !model.embeddings);
+  const chatModel = models.find(isChatModel);
   // THE INVENTORY WINS OVER THE LABELS, and the screenshot is what showed why.
   // Since epic memql#5146 a machine reports its runtimes in two places -- the
   // hardware inventory, with versions, and the `runtime:` labels derived from
@@ -237,6 +238,10 @@ function ModelRow({
     model.structuredOutput ? "structured output" : "",
     model.tools ? "tool calling" : "",
     model.embeddings ? "embeddings" : "",
+    model.vision ? "vision" : "",
+    model.imageGen ? "image generation" : "",
+    model.audioIn ? "transcription" : "",
+    model.audioOut ? "speech" : "",
   ].filter((c) => c !== "");
 
   return (

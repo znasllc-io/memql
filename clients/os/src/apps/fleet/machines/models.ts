@@ -43,6 +43,10 @@ export interface MachineModel {
   structuredOutput: boolean;
   tools: boolean;
   embeddings: boolean;
+  vision: boolean;
+  audioIn: boolean;
+  audioOut: boolean;
+  imageGen: boolean;
   /** The machine's per-model concurrency ceiling; 0 means it declared none,
    *  which the load ordering reads as unlimited. */
   maxConcurrent: number;
@@ -55,7 +59,7 @@ const RUNTIME_PREFIX = "runtime:";
  * Parse one `model:<id>` label VALUE.
  *
  * The grammar is the engine's own (`ModelAttributes` in
- * integrations/agent/worker/model_routing.go), and the cockpit renders it
+ * component/worker/fleetcatalog/model.go), and the cockpit renders it
  * literally: `ctx=131072,structured=1,tools=1,params=8000000000,quant=Q4_K_M,max=2`.
  *
  * EVERY CAPABILITY DEFAULTS TO FALSE and every number to zero, which is the
@@ -72,6 +76,10 @@ function attributesFrom(value: string): Omit<MachineModel, "modelId"> {
     structuredOutput: false,
     tools: false,
     embeddings: false,
+    vision: false,
+    audioIn: false,
+    audioOut: false,
+    imageGen: false,
     maxConcurrent: 0,
   };
   for (const part of value.split(",")) {
@@ -91,6 +99,18 @@ function attributesFrom(value: string): Omit<MachineModel, "modelId"> {
         break;
       case "embeddings":
         out.embeddings = advertised(raw);
+        break;
+      case "vision":
+        out.vision = advertised(raw);
+        break;
+      case "audioin":
+        out.audioIn = advertised(raw);
+        break;
+      case "audioout":
+        out.audioOut = advertised(raw);
+        break;
+      case "imagegen":
+        out.imageGen = advertised(raw);
         break;
       case "params":
         out.params = positiveInt(raw);
@@ -134,6 +154,23 @@ export function machineModelsFrom(labels: LabelMap): MachineModel[] {
     out.push({ modelId, ...attributesFrom(value) });
   }
   return out.sort((a, b) => (a.modelId < b.modelId ? -1 : a.modelId > b.modelId ? 1 : 0));
+}
+
+/** A text-chat check must not call a specialized image, audio or embedding
+ * endpoint. Vision is an input capability of chat models and remains eligible.
+ * The engine still checks ownership, connectivity and required context. */
+export function isChatModel(model: MachineModel): boolean {
+  return !model.embeddings && !model.imageGen && !model.audioIn && !model.audioOut;
+}
+
+export function modelKindLabel(model: MachineModel): string {
+  const kinds = [
+    model.embeddings ? "Embeddings" : "",
+    model.imageGen ? "Image generation" : "",
+    model.audioIn ? "Transcription" : "",
+    model.audioOut ? "Speech" : "",
+  ].filter(Boolean);
+  return kinds.length > 0 ? kinds.join(" · ") : model.tools ? "Chat & tools" : "Chat";
 }
 
 /**

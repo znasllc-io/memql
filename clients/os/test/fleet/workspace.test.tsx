@@ -135,6 +135,15 @@ it('selects the first model, keeps a chosen model across heartbeats and falls ba
  expect(screen.queryByRole('button',{name:'Personal inference'})).toBeNull();
  expect(screen.queryByText('Tools')).toBeNull();
 });
+it('identifies image generation separately from chat in the equipment selector',async()=>{
+ const {MachineEquipment}=await import('../../src/apps/fleet/FleetWorkspace');
+ const {machineFromRow}=await import('../../src/apps/fleet/rows');
+ const machine=machineFromRow(machineRow({id:'a',labels:{'model:flux2-klein-4b':'imagegen=1','model:qwen3.5:4b':'ctx=262144,tools=1,vision=1'}}));
+ render(<MachineEquipment machine={machine} now={new Date()} onInspect={vi.fn()}/>);
+ expect(screen.getByRole('button',{name:'flux2-klein-4b Image generation'})).toBeTruthy();
+ expect(screen.getByRole('button',{name:'qwen3.5:4b Chat & tools'})).toBeTruthy();
+});
+
 it('gives empty equipment and recent work their own empty states',async()=>{
  h.connection=fakeConnection({myWorkersWithStatus:[machineRow({id:'a',displayName:'Alpha'})]});fleet();
  await openMachine('Alpha');

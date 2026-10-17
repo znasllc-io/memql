@@ -478,9 +478,9 @@ describe("local model readiness", () => {
     expect(barFor(f, checks).acts.some(a => a.label === "Done")).toBe(true);
   });
 
-  it("cannot complete a chat check from embedding-only inventory", () => {
-    const m = machine({ labels: { "model:embed": "embeddings=1" } });
-    const checks = checksFor(MAC_INF, m, STEADY_BEATS, NOW);
+  it.each(["embeddings=1", "imagegen=1", "audioin=1", "audioout=1"])("cannot complete a chat check from %s inventory", (capability) => {
+    const m = machine({ labels: { "model:specialist": capability } });
+    const checks = checksFor(MAC_INF, m, STEADY_BEATS, NOW, { live: null }, { state: "passed" });
     expect(checks.find(c => c.id === "response")).toMatchObject({ state: "open", act: "pullRecommended" });
     expect(checksSettled(checks)).toBe(false);
   });

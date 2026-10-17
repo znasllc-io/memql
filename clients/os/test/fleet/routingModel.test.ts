@@ -47,6 +47,10 @@ const chat = (modelId: string, params = 0) => ({
   structuredOutput: true,
   tools: true,
   embeddings: false,
+  vision: false,
+  audioIn: false,
+  audioOut: false,
+  imageGen: false,
   maxConcurrent: 0,
 });
 const embedder = (modelId: string) => ({ ...chat(modelId), embeddings: true, structuredOutput: false, tools: false });

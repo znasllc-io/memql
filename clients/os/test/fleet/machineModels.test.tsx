@@ -45,7 +45,7 @@ async function mount(
 
 describe("the Models group", () => {
   it.each(["qwen3.5:9b", "qwen3.8:27b", "qwen3.8:27b-q8_0"])("offers the owner a chat check for %s alongside the default embedder", async (modelId) => {
-    await mount({ ["model:" + modelId]: "tools=1,ctx=32768", "model:qwen3-embedding:0.6b": "embeddings=1" });
+    await mount({ ["model:" + modelId]: "tools=1,ctx=32768,vision=1", "model:qwen3-embedding:0.6b": "embeddings=1", "model:flux2-klein-4b": "imagegen=1" });
     expect(screen.getByRole("button", { name: "Ask it something" })).toBeTruthy();
     expect(screen.getByText(new RegExp(`Sends.*to ${modelId.replaceAll(".", "\\.")}`))).toBeTruthy();
   });
@@ -55,6 +55,11 @@ describe("the Models group", () => {
     expect(screen.queryByRole("button", { name: "Ask it something" })).toBeNull();
     cleanup();
     await mount({ "model:qwen3.8:27b": "tools=1" }, { owner: "another-owner" });
+    expect(screen.queryByRole("button", { name: "Ask it something" })).toBeNull();
+  });
+
+  it.each(["imagegen=1", "audioin=1", "audioout=1"])("does not offer a targeted chat check for %s", async capability => {
+    await mount({ "model:specialist": capability });
     expect(screen.queryByRole("button", { name: "Ask it something" })).toBeNull();
   });
 
