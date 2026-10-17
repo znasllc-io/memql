@@ -9107,6 +9107,7 @@
         "lastSelectedAt",
         "name",
         "operatorLabels",
+        "ownerFeatures",
         "ownerUserId",
         "permissions",
         "platformInfo",
@@ -9118,7 +9119,8 @@
         "rttMs",
         "sharing",
         "sharingActivity",
-        "version"
+        "version",
+        "workbenchSharing"
       ],
       "required": [
         "capabilities",

@@ -76,9 +76,13 @@ type modelPullMachine struct {
 	// share directory names the ones that are, so both need what is stored --
 	// read from the row this struct already proved belongs to the caller.
 	// The lists are set only under SharingModePeople (ParseMachineSharing).
-	SharingMode    string
-	SharedUserIds  []string
-	SharedGroupIds []string
+	SharingMode      string
+	SharedUserIds    []string
+	SharedGroupIds   []string
+	SharingPaused    bool
+	WorkbenchSharing map[string]any
+	OwnerFeatures    map[string]any
+	Version          time.Time
 }
 
 // modelPullPlan is what an accepted act will write.
@@ -274,7 +278,7 @@ func (e *MemQLEngine) modelPullMachineFor(ctx context.Context, registrationId st
 	}
 	acting := strings.TrimSpace(actingUserFromContext(ctx))
 	call := "workersForUser(ownerUserId: " + langparser.QuoteString(acting) + ")"
-	res, err := e.Execute(ctx, call)
+	res, err := e.Execute(ContextWithFreshRead(ctx), call)
 	if err != nil {
 		return modelPullMachine{}, fmt.Errorf("fleetModelPull: read your machines: %w", err)
 	}
@@ -303,6 +307,17 @@ func (e *MemQLEngine) modelPullMachineFor(ctx context.Context, registrationId st
 			RevokedAt:       mapString(row, "revokedAt"),
 		}
 		machine.SharingMode, machine.SharedUserIds, machine.SharedGroupIds = ParseMachineSharing(row["sharing"])
+		if sharing, ok := row["sharing"].(map[string]any); ok {
+			if paused, exists := sharing["paused"]; exists {
+				machine.SharingPaused = paused != false
+			}
+		}
+		machine.WorkbenchSharing, _ = row["workbenchSharing"].(map[string]any)
+		machine.OwnerFeatures, _ = row["ownerFeatures"].(map[string]any)
+		machine.Version, _ = row["createdAt"].(time.Time)
+		if machine.Version.IsZero() {
+			machine.Version, _ = time.Parse(time.RFC3339Nano, fmt.Sprint(row["createdAt"]))
+		}
 		return machine, nil
 	}
 	return modelPullMachine{}, notYours

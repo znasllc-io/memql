@@ -326,6 +326,11 @@ func (e *MemQLEngine) evaluateFleetShareDirectoryExpression(ctx context.Context,
 	if err != nil {
 		return nil, err
 	}
+	resource, err := fleetSharingResource(args)
+	if err != nil {
+		return nil, err
+	}
+	machine = machine.forSharingResource(resource)
 	dir, err := e.shareDirectoryFor(ctx)
 	if err != nil {
 		return nil, err

@@ -15,6 +15,27 @@ func TestClusterWorkRequiresTheOwnersClusterShare(t *testing.T) {
 	}
 }
 
+func TestGlobalSharingPausePreservesAudienceAndStopsEveryBorrowedAdmission(t *testing.T) {
+	p := NewPerson(context.Background(), "ana", func(context.Context, string) []string { return []string{"team"} })
+	for _, mode := range []string{SharingModePeople, SharingModeCluster} {
+		s := Sharing{Mode: mode, Paused: true, UserIds: []string{"ana"}, GroupIds: []string{"team"}}
+		if s.Admits(p) || s.ServesCluster() || len(s.SubjectsFor(p).UserIds) > 0 {
+			t.Fatalf("paused %s admitted work", mode)
+		}
+		s = SharingFromRow(s.Row())
+		if !s.Paused {
+			t.Fatal("storage lost pause")
+		}
+		s.Paused = false
+		if !s.Admits(p) {
+			t.Fatal("resume lost the audience")
+		}
+	}
+	if !SharingFromRow(map[string]any{"mode": "cluster", "paused": "false"}).Paused {
+		t.Fatal("malformed pause enabled sharing")
+	}
+}
+
 func TestAnythingThatIsNotClusterIsOwner(t *testing.T) {
 	// A typo, a value from a future engine, a half-written row: all read as NOT
 	// shared, because the failure direction here is a stranger's prompt running

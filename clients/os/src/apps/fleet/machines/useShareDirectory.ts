@@ -3,6 +3,7 @@ import type { Connection } from "@znasllc-io/memql-sdk-core/client";
 
 import { useOsConnection } from "../../../live/connection";
 import { subjectKey } from "./sharing";
+import type { SharingResource } from "./useMachineWrites";
 
 // The virtual directory is read when sharing is first revealed, then reused
 // through edits. No broadcast exists for this computed query; visible refresh
@@ -129,8 +130,9 @@ export async function readShareDirectory(
   connection: Connection,
   registrationId: string,
   signal?: AbortSignal,
+  resource: SharingResource = "models",
 ): Promise<ShareDirectory> {
-  const result = await connection.query.fleetShareDirectory({ registrationId }, { signal });
+  const result = await connection.query.fleetShareDirectory({ registrationId, ...(resource === "workbench" ? { resource } : {}) }, { signal });
   const directory = shareDirectoryFrom(result.rows()[0] ?? null);
   if (directory === null) throw new Error("The cluster answered without saying who you can share with.");
   return directory;
@@ -139,7 +141,7 @@ export async function readShareDirectory(
 /**
  * The directory, read once when enabled, and again when `retry` asks.
  */
-export function useShareDirectory(registrationId: string, enabled = true): { read: DirectoryRead; refreshing: boolean; retry: () => void } {
+export function useShareDirectory(registrationId: string, enabled = true, resource: SharingResource = "models"): { read: DirectoryRead; refreshing: boolean; retry: () => void } {
   const connection = useOsConnection();
   const [read, setRead] = useState<DirectoryRead>({ state: "loading" });
   const [refreshing, setRefreshing] = useState(false);
@@ -156,7 +158,7 @@ export function useShareDirectory(registrationId: string, enabled = true): { rea
     let cancelled = false;
     setRefreshing(true);
     setRead(held => held.state === "ready" ? held : { state: "loading" });
-    readShareDirectory(connection, registrationId, controller.signal).then(
+    readShareDirectory(connection, registrationId, controller.signal, resource).then(
       (directory) => {
         if (!cancelled) { setRead({ state: "ready", directory }); setRefreshing(false); }
       },
@@ -171,7 +173,7 @@ export function useShareDirectory(registrationId: string, enabled = true): { rea
       cancelled = true;
       controller.abort();
     };
-  }, [connection, registrationId, attempt, enabled]);
+  }, [connection, registrationId, attempt, enabled, resource]);
 
   const retry = useCallback(() => setAttempt((n) => n + 1), []);
   return { read, refreshing, retry };

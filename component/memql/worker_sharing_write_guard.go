@@ -46,7 +46,7 @@ import (
 // to workerRegistrationConsentFields, and is not protected until then: there is
 // no annotation that marks a field server-written, and a field on another
 // concept needs a guard of its own, as the construct ladder has.
-var workerRegistrationConsentFields = []string{"sharing"}
+var workerRegistrationConsentFields = []string{"sharing", "workbenchSharing", "ownerFeatures"}
 
 // validateWorkerConsentServerOnly refuses a write to a v1:worker:registration
 // that changes the owner's consent without internal origin. It also refuses

@@ -343,6 +343,24 @@ func TestRecipientPauseAndResumeAreEnforcedByTheReceivingReplica(t *testing.T) {
 	}
 }
 
+func TestGlobalPauseIsRecheckedByTheReceivingReplicaAndResumeKeepsAudience(t *testing.T) {
+	for _, mode := range []string{"people", "cluster"} {
+		h := newPeopleHop(t, []string{sharedHopCaller}, nil, nil)
+		store := h.link.handler.store.(*sharedFleet)
+		store.all[0].SharingMode = mode
+		store.all[0].SharingPaused = true
+		out, err := h.call(t, h.caller)
+		if err == nil && !out.RefusedBeforeStart {
+			t.Fatalf("paused %s share dispatched", mode)
+		}
+		store.all[0].SharingPaused = false
+		out, err = h.call(t, h.caller)
+		if err != nil || out.RefusedBeforeStart || out.ErrorCode != "" {
+			t.Fatalf("resume: %v %+v", err, out)
+		}
+	}
+}
+
 func TestAPauseLetsTheRunningCallFinishButRefusesTheNextCallAcrossTheHop(t *testing.T) {
 	h := newPeopleHop(t, []string{sharedHopCaller}, nil, nil)
 	started, release := make(chan workerservice.SharingSubjects, 1), make(chan struct{})

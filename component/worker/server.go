@@ -514,7 +514,8 @@ type streamSession struct {
 	// window this backstop has, and it is free to close. Touched only from
 	// handleHeartbeat, on the recv goroutine, so like lastPersistedAt it needs
 	// no lock.
-	lastIdentityCheck time.Time
+	lastIdentityCheck     time.Time
+	lastOwnerFeatureCheck time.Time
 	// clockSkewMs is how far the machine's own clock sits from the cluster's,
 	// positive when the machine is ahead (design D6). clockSkewSeen
 	// distinguishes a measured zero -- the clocks agree -- from a cockpit that
@@ -805,6 +806,11 @@ func (s *streamSession) dispatch(ctx context.Context, dispatch *memqlv1.ToolDisp
 	if dispatch == nil {
 		return nil, fmt.Errorf("worker: nil dispatch")
 	}
+	ctx, releaseFeature, err := s.admitOwnerFeature(ctx, ownerFeatureForTool(dispatch))
+	if err != nil {
+		return nil, err
+	}
+	defer releaseFeature()
 	if dispatch.GetCallId() == "" {
 		dispatch.CallId = newCallId()
 	}
@@ -829,6 +835,9 @@ func (s *streamSession) dispatch(ctx context.Context, dispatch *memqlv1.ToolDisp
 	}()
 
 	s.markSharingChanged()
+	if err := ctx.Err(); err != nil {
+		return nil, context.Cause(ctx)
+	}
 	if err := s.send(&memqlv1.WorkerServerMessage{
 		Payload: &memqlv1.WorkerServerMessage_ToolDispatch{ToolDispatch: dispatch},
 	}); err != nil {
@@ -850,7 +859,7 @@ func (s *streamSession) dispatch(ctx context.Context, dispatch *memqlv1.ToolDisp
 				},
 			},
 		})
-		return nil, ctx.Err()
+		return nil, context.Cause(ctx)
 	case <-s.ctx.Done():
 		return nil, ErrWorkerDisconnected
 	}
@@ -921,6 +930,7 @@ func (s *streamSession) handleHeartbeat(hb *memqlv1.Heartbeat, sourceIP string) 
 	at := s.server.clock()
 	s.recordClockSkew(hb, at)
 	s.worker.TouchLastSeen(at, sourceIP)
+	s.recheckOwnerFeatures(at)
 
 	// The token that admitted this stream is re-resolved here, at most once
 	// per IdentityRecheckInterval (design D3). It runs BEFORE any of the
@@ -1544,6 +1554,16 @@ func (s *streamSession) openAppSession(ctx context.Context, req AppSessionReques
 	if req.SessionId == "" {
 		return nil, fmt.Errorf("worker: app session requires a session id")
 	}
+	ctx, releaseFeature, err := s.admitOwnerFeature(ctx, FeatureApps)
+	if err != nil {
+		return nil, err
+	}
+	started := false
+	defer func() {
+		if !started {
+			releaseFeature()
+		}
+	}()
 	handle := &AppSessionHandle{
 		sessionId: req.SessionId,
 		app:       req.App,
@@ -1559,6 +1579,7 @@ func (s *streamSession) openAppSession(ctx context.Context, req AppSessionReques
 		}
 		s.mu.Unlock()
 		s.markSharingChanged()
+		releaseFeature()
 	}
 
 	s.mu.Lock()
@@ -1600,6 +1621,10 @@ func (s *streamSession) openAppSession(ctx context.Context, req AppSessionReques
 		Model:  req.Model,
 		Effort: req.Effort,
 	}
+	if err := ctx.Err(); err != nil {
+		handle.finish(AppSessionOutcome{Error: context.Cause(ctx).Error()}, context.Cause(ctx))
+		return nil, context.Cause(ctx)
+	}
 	if err := s.send(&memqlv1.WorkerServerMessage{
 		Payload: &memqlv1.WorkerServerMessage_AppSessionStart{AppSessionStart: start},
 	}); err != nil {
@@ -1619,6 +1644,7 @@ func (s *streamSession) openAppSession(ctx context.Context, req AppSessionReques
 		}
 	}()
 
+	started = true
 	return handle, nil
 }
 

@@ -76,6 +76,7 @@ func (s *EngineStore) WorkersForOwner(ctx context.Context, ownerUserId string) (
 			// `labels` on every reconnect, so an opt-in found there was
 			// granted by the machine rather than by its owner.
 			SharingMode:      sharing.Mode,
+			SharingPaused:    sharing.Paused,
 			SharedUserIds:    sharing.UserIds,
 			SharedGroupIds:   sharing.GroupIds,
 			PausedUserIds:    sharing.PausedUserIds,
@@ -140,6 +141,7 @@ func (s *EngineStore) SharedInferenceWorkers(ctx context.Context) ([]Candidate, 
 			Capabilities:     rowStringList(row, "capabilities"),
 			Labels:           MergeLabels(rowStringMap(row, "labels"), operator),
 			SharingMode:      sharing.Mode,
+			SharingPaused:    sharing.Paused,
 			SharedUserIds:    sharing.UserIds,
 			SharedGroupIds:   sharing.GroupIds,
 			PausedUserIds:    sharing.PausedUserIds,

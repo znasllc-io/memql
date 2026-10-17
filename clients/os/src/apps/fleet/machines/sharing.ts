@@ -28,18 +28,19 @@ export function ownsMachine(machine: Pick<MachineRow, "ownerUserId">, viewerId: 
 }
 
 /** The owner has said somebody other than them may use it. */
-export function isShared(machine: Pick<MachineRow, "sharingMode">): boolean {
+export function isShared(machine: Pick<MachineRow, "sharingMode" | "sharingPaused">): boolean {
   return machine.sharingMode !== "owner";
 }
 
 /** The owner has shared model inference with other people. */
-export function servesOthers(machine: Pick<MachineRow, "sharingMode">): boolean {
-  return isShared(machine);
+export function servesOthers(machine: Pick<MachineRow, "sharingMode" | "sharingPaused">): boolean {
+  return isShared(machine) && !machine.sharingPaused;
 }
 
 /** The saved audience; model availability is reported separately. */
-export function sharingLinkWords(machine: Pick<MachineRow, "sharingMode">): string {
+export function sharingLinkWords(machine: Pick<MachineRow, "sharingMode" | "sharingPaused">): string {
   if (!isShared(machine)) return "Personal inference";
+  if (machine.sharingPaused) return "Sharing paused";
   return machine.sharingMode === "people" ? "Shared with people" : "Shared with everyone";
 }
 
@@ -115,10 +116,11 @@ export function standInNames(
  * with nothing guessed, where a half-named list or a bare id would not be.
  */
 export function sharingSummary(
-  machine: Pick<MachineRow, "sharingMode" | "sharedUserIds" | "sharedGroupIds" | "pausedUserIds" | "pausedGroupIds">,
+  machine: Pick<MachineRow, "sharingMode" | "sharingPaused" | "sharedUserIds" | "sharedGroupIds" | "pausedUserIds" | "pausedGroupIds">,
   viewerIsOwner: boolean,
   nameOf: (subject: Subject) => string | undefined,
 ): string {
+  if (machine.sharingMode !== "owner" && machine.sharingPaused) return "Sharing paused";
   if (machine.sharingMode === "cluster") return "Everyone in this cluster";
   if (machine.sharingMode !== "people") return viewerIsOwner ? "Only you" : "Only its owner";
   const subjects = storedSubjects(machine);
@@ -136,10 +138,10 @@ export function sharingSummary(
 /** The stored decision as one comparable value: the mode, and who, by kind
  *  and bare id. Heartbeats and renames leave it alone. */
 export function sharingSignature(
-  machine: Pick<MachineRow, "sharingMode" | "sharedUserIds" | "sharedGroupIds" | "pausedUserIds" | "pausedGroupIds">,
+  machine: Pick<MachineRow, "sharingMode" | "sharingPaused" | "sharedUserIds" | "sharedGroupIds" | "pausedUserIds" | "pausedGroupIds">,
 ): string {
   const who = storedSubjects(machine).map((s) => `${subjectKey(s.kind, s.id)}:${s.paused === true}`);
-  return [machine.sharingMode, ...who.sort()].join("|");
+  return [machine.sharingMode, `paused:${machine.sharingPaused === true}`, ...who.sort()].join("|");
 }
 
 /** "2 people and 1 group", with the plurals right -- the engine's own
@@ -160,7 +162,7 @@ export function groupSize(members: number): string {
 }
 
 /** The saved audience and the individual grants that are paused. */
-export type StoredShare = Pick<MachineRow, "sharingMode" | "sharedUserIds" | "sharedGroupIds" | "pausedUserIds" | "pausedGroupIds">;
+export type StoredShare = Pick<MachineRow, "sharingMode" | "sharingPaused" | "sharedUserIds" | "sharedGroupIds" | "pausedUserIds" | "pausedGroupIds">;
 
 // ---------------------------------------------------------------------------
 // Search
