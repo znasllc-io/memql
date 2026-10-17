@@ -106,8 +106,8 @@ authoring-surface parity gap. No scheduled scan may satisfy a required PR check.
 ## Workflow retirement ledger
 
 Inventory uses the engine tree at the source revision above and GitHub's live
-workflow API, including generated workflows. **None of these rows is approved
-for retirement yet.** A replacement needs its trigger, execution, credentials,
+workflow API, including generated workflows. **Active delivery workflows remain
+until their replacement is qualified.** A replacement needs its trigger, execution, credentials,
 outputs, publication and failure evidence, not merely a command in a manifest.
 
 | Engine workflow | Replacement or remaining evidence | Owner |
@@ -136,7 +136,7 @@ outputs, publication and failure evidence, not merely a command in a manifest.
 | `vscode-site.yml` | Static editor-site build and its deployed version proof | #5480 |
 | `ruleset-drift.yml` | Native daily public reads cover both recorded rulesets; installed schedule/failure delivery proof remains | #5507 |
 | `dependabot-tidy.yml` | Trusted dependency-PR maintenance, without exposing write authority to PR code | #5480 |
-| `clustere2e-compile.yml` API entry | File absent at this revision; verify no independent active execution before disabling the stale registration | #5480 |
+| `clustere2e-compile.yml` API entry | Disabled October 17 at 14:05 UTC: file absent at `f8ece576d`, only two historical runs and no active execution. Current CI and native `checks.build-clustere2e` retain compilation. Required `ci-required` and run history preserved | #5480 |
 | Generated `github-code-scanning/codeql` | Reconcile GitHub default setup with advanced scanning and replacement publication | #5480 |
 | Generated `github-code-quality/codeql` | GitHub Code Quality is distinct from security CodeQL; equivalent coverage or an explicit owner decision is required | #5480 |
 | Generated Dependabot updates / graph | Retain useful GitHub dependency services per the design; explicitly resolve their managed Actions execution before claiming zero Actions dependency | #5480 |
@@ -257,11 +257,30 @@ download path, preserves earlier caller cancellation, and propagates
 browser keeps its download iframe until the body finishes, then cleans it up.
 These tests pass with the repair and fail against the previous implementation.
 
-The source is prepared as v0.29.23. Deployment and live publication/download
-verification remain outstanding. Preserve the v0.29.22 candidate configuration
-and pending receipts for reconciliation; do not label uncertain writes complete
-or change immutable image tags to work around them. The serving instance remains
-v0.29.20, and Actions retirement is still pending.
+The repair merged through [#6177](https://github.com/znasllc-io/memql/pull/6177)
+at `f8ece576d93efdfb899fb3c4133f895c304f7e60`, tagged v0.29.23. Its required
+CI passed. At 13:56:45 UTC the rebuilt local MemQL controller started native
+release run `517b203755fd72a42c422493c691ad77`, Work run
+`4e28aba0e2460a1a6d482900f6d092f8`, against that exact tag. Compilation uses
+the existing AKS build pool and two-Job quota. A temporary namespace-scoped
+runner grant expires at 21:54 UTC; automatic delivery on this local connection
+remains disconnected. This repairs publication without an Actions image build
+or an operator image push. The bootstrap is not installed-production
+qualification. Its temporary grant and configuration must be removed after
+publication and native Job cleanup.
+
+The v0.29.22 files candidate published all eight GitHub draft assets with
+verified native receipts. Draft release `415819034` remains unpublished.
+Neither failed image publication has a completion receipt. Candidate
+verification binds the controller's engine commit, so upgrading it does not
+by itself make an old pending intent recoverable. Preserve the old candidate,
+configuration and journal; do not rewrite reservations, manufacture receipts
+or relabel uncertainty as success. A reviewed cross-version recovery path is
+still needed to resolve those old intents. The fresh v0.29.23 candidate uses
+its own source, tag and release identities.
+
+Deployment and live publication/download verification remain outstanding.
+The serving instance remains v0.29.20, and active Actions retirement is pending.
 
 ## Native database class isolation, October 17, 2026 UTC
 
