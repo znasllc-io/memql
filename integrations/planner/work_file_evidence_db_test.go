@@ -19,8 +19,16 @@ import (
 )
 
 func testFileEvidenceDraftAcrossReplica(t *testing.T, db *bun.DB, compiler, receiver *memql.MemQLEngine, prompts *draftPromptEngine, composer *draftComposerProbe, uploader *draftUploaderProbe, ctx context.Context) {
-	for _, ready := range []bool{false, true} {
-		t.Run(fmt.Sprintf("ready=%t", ready), func(t *testing.T) {
+	for _, tc := range []struct {
+		name, evidence                      string
+		receipts, usesReceipts, createsFile bool
+	}{
+		{"missing evidence replies without a file", "missing", true, false, false},
+		{"recorded evidence reaches the writer", "supported", true, true, true},
+		{"truthful no-source draft cannot invent receipts", "supported", false, true, false},
+		{"self-contained writing needs no receipts", "not_required", false, false, true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
 			conversationID := "v1:os:askConversation:" + id.NewShortId()
 			prior := "v1:work:run:" + id.NewShortId()
 			insert := func(concept, record string, payload map[string]any) {
@@ -32,7 +40,9 @@ func testFileEvidenceDraftAcrossReplica(t *testing.T, db *bun.DB, compiler, rece
 			}
 			owner := "v1:identity:user:draft-owner"
 			insert("v1:work:run", prior, map[string]any{"ownerUserId": owner, "status": "succeeded"})
-			insert("v1:work:step", "v1:work:step:"+id.NewShortId(), map[string]any{"ownerUserId": owner, "runId": prior, "key": "viewer", "status": "done", "call": map[string]any{"name": "workViewerContext"}, "result": map[string]any{"value": map[string]any{"person": map[string]any{"primaryRole": "Founder"}, "organizationMemberships": []any{map[string]any{"name": "ZNAS LLC"}}, "source": "recorded profile"}}})
+			if tc.receipts {
+				insert("v1:work:step", "v1:work:step:"+id.NewShortId(), map[string]any{"ownerUserId": owner, "runId": prior, "key": "viewer", "status": "done", "call": map[string]any{"name": "workViewerContext"}, "result": map[string]any{"value": map[string]any{"person": map[string]any{"primaryRole": "Founder"}, "organizationMemberships": []any{map[string]any{"name": "ZNAS LLC"}}, "source": "recorded profile"}}})
+			}
 			turns := []any{map[string]any{"id": "previous", "runId": prior, "prompt": "How can you help?", "answer": "Founder of ZNAS LLC", "state": "done", "startedAt": time.Now().UTC()}, map[string]any{"id": "now", "prompt": "Explain your source in an MD file", "state": "running", "startedAt": time.Now().UTC()}}
 			insert("v1:os:askConversation", conversationID, map[string]any{"ownerUserId": owner, "title": "Source check", "transcript": map[string]any{"turns": turns}})
 			req := CompileRequest{GoalId: "v1:work:goal:" + id.NewShortId(), RunId: "v1:work:run:" + id.NewShortId(), OwnerUserId: owner, Statement: "Explain how you knew my founder role in an MD file", Input: map[string]any{"conversation": map[string]any{"id": memql.BareShortId(conversationID), "turnId": "now", "messages": []any{map[string]any{"role": "assistant", "content": "Founder of ZNAS LLC"}}}}}
@@ -66,9 +76,15 @@ func testFileEvidenceDraftAcrossReplica(t *testing.T, db *bun.DB, compiler, rece
 			calls := 0
 			basis := "The recorded workViewerContext read Founder and ZNAS LLC membership separately; their relationship was an unsupported inference."
 			reply := "I could not identify a source for that claim. I have not created a file."
+			if !tc.receipts && tc.usesReceipts {
+				// This is the approval returned by the production model after
+				// unsuccessful research. Its claimed citations do not exist.
+				basis = "The recorded sources are empty. The draft accurately states no source exists and lists searches yielding no results."
+				reply = "I could not verify a recorded source for that explanation"
+			}
 			prompts.invoke = func(callCtx context.Context, name string, data map[string]any) (any, error) {
 				calls++
-				if name != "workFileEvidence" || !strings.Contains(fmt.Sprint(data["sources"]), "recorded profile") || !strings.Contains(fmt.Sprint(data["sources"]), memql.BareShortId(prior)) || !strings.Contains(fmt.Sprint(data["conversation"]), "Founder of ZNAS LLC") {
+				if name != "workFileEvidence" || (tc.receipts && (!strings.Contains(fmt.Sprint(data["sources"]), "recorded profile") || !strings.Contains(fmt.Sprint(data["sources"]), memql.BareShortId(prior)))) || !strings.Contains(fmt.Sprint(data["conversation"]), "Founder of ZNAS LLC") {
 					return nil, fmt.Errorf("source context lost: %s %+v", name, data)
 				}
 				access, _ := auth.AccessFromContext(callCtx)
@@ -76,11 +92,10 @@ func testFileEvidenceDraftAcrossReplica(t *testing.T, db *bun.DB, compiler, rece
 				if access == nil || access.UserId != owner || run.RunId == "" {
 					return nil, fmt.Errorf("source gate lost owner/run")
 				}
-				response := map[string]any{"ready": ready, "reply": reply, "basis": "", "usesRecordedSources": false}
-				if ready {
+				response := map[string]any{"ready": tc.evidence != "missing", "evidence": tc.evidence, "reply": reply, "basis": "", "usesRecordedSources": tc.usesReceipts}
+				if tc.evidence != "missing" {
 					response["reply"] = ""
 					response["basis"] = basis
-					response["usesRecordedSources"] = true
 				}
 				raw, _ := json.Marshal(response)
 				return string(raw), nil
@@ -102,8 +117,8 @@ func testFileEvidenceDraftAcrossReplica(t *testing.T, db *bun.DB, compiler, rece
 			if err != nil || execution.Status != "completed" || calls != 1 {
 				t.Fatalf("source gate failed: %+v %v calls=%d", execution, err, calls)
 			}
-			if ready {
-				if len(composer.requests) != 1 || !strings.Contains(composer.requests[0].Draft, basis) || len(composer.requests[0].Sources) == 0 || len(uploader.data) == 0 {
+			if tc.createsFile {
+				if len(composer.requests) != 1 || !strings.Contains(composer.requests[0].Draft, basis) || (tc.usesReceipts && len(composer.requests[0].Sources) == 0) || (!tc.usesReceipts && len(composer.requests[0].Sources) != 0) || len(uploader.data) == 0 {
 					t.Fatalf("evidence did not reach file: %+v", composer.requests)
 				}
 			} else {

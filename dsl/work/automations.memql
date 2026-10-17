@@ -87,13 +87,17 @@ automation workPrepareFileEvidence {
  sources := builtin workSourceContext(conversationId: args.conversationId, turnId: args.turnId)
  assessment := builtin ai(templateId: "workFileEvidence", responseSchema: {
   type: "object", additionalProperties: false,
-  required: ["ready", "reply", "basis", "usesRecordedSources"],
-  properties: {ready: {type: "boolean"}, reply: {type: "string"}, basis: {type: "string"}, usesRecordedSources: {type: "boolean"}}
+  required: ["ready", "evidence", "reply", "basis", "usesRecordedSources"],
+  properties: {ready: {type: "boolean"}, evidence: {type: "string", enum: ["supported", "not_required", "missing"]}, reply: {type: "string"}, basis: {type: "string"}, usesRecordedSources: {type: "boolean"}}
  }, data: {statement: args.statement, conversation: args.conversation, sources: toString(sources), draft: args.draft})
  decision := assessment.structured
  explanation := trim(decision.reply ?? "")
  brief := trim(decision.basis ?? "")
- if decision.ready != true {
+ // A model cannot cite receipts that the authorized read did not return.
+ if decision.usesRecordedSources == true && sources.references.count() == 0 {
+  return {ready: false, reply: explanation != "" ? explanation : "I could not verify a recorded source for that explanation, so I have not created a file. Please share the source or the information you want me to use.", basis: "", sources: []}
+ }
+ if decision.ready != true || (decision.evidence != "supported" && decision.evidence != "not_required") {
   if explanation == "" { return error("Source check did not explain the missing evidence.") }
   return {ready: false, reply: decision.reply, basis: "", sources: []}
  }
