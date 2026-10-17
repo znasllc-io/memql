@@ -1,7 +1,10 @@
 package pipelinerun
 
 import (
+	"context"
+	"errors"
 	"strings"
+	"sync/atomic"
 	"testing"
 
 	"github.com/znasllc-io/memql/component/pipelines"
@@ -135,5 +138,90 @@ func TestAutomaticReleaseCannotStartAfterDeliveryIsDisconnected(t *testing.T) {
 	got, _ := dh.store.run(run.ID)
 	if got.Conclusion != ConclusionFailure || got.RefusalCode != pipelines.CodeDisconnected || len(dh.exec.sent()) != 0 {
 		t.Fatalf("automatic release ran after disconnect: %+v; steps %v", got, dh.exec.sentKeys())
+	}
+}
+
+func TestOwnerCanRerunADisconnectedReleaseOnAnotherReplica(t *testing.T) {
+	for _, tc := range []struct {
+		name, trigger string
+		failedOnly    bool
+	}{
+		{"manual-full", TriggerManual, false},
+		{"manual-failed", TriggerManual, true},
+		{"webhook-full", TriggerWebhook, false},
+		{"webhook-failed", TriggerWebhook, true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			dh := newDriveHarness(t, driveManifest)
+			var fail atomic.Bool
+			fail.Store(true)
+			dh.exec.answer = func(_ context.Context, req pipelines.StepRequest) (pipelines.StepResult, error) {
+				result := passed(req)
+				if fail.Load() {
+					result.Status, result.ExitCode = pipelines.OutcomeFailed, 1
+				}
+				return result, nil
+			}
+			p, _ := dh.store.pipeline(dh.p.ID)
+			if tc.trigger == TriggerManual {
+				p.Status = PipelineDisconnected
+				dh.store.addPipeline(p)
+			}
+			first := dh.openRun(t, Opening{Event: pipelines.EventRelease, Mode: pipelines.ModeFull, SHA: shaA, ReleaseTag: "v1.4.0", Trigger: tc.trigger})
+			deliver(t, dh.peer("agent-first"), first)
+			original, _ := dh.store.run(first.ID)
+			if original.Conclusion != ConclusionFailure {
+				t.Fatalf("first release must fail: %+v", original)
+			}
+			p.Status = PipelineDisconnected
+			dh.store.addPipeline(p)
+			if _, err := dh.integ.Rerun(personCtx(otherID), first.ID, false); err == nil {
+				t.Fatal("another person reran the release")
+			}
+			fail.Store(false)
+			next, err := dh.integ.Rerun(personCtx(ownerID), first.ID, tc.failedOnly)
+			if err != nil {
+				t.Fatalf("explicit release rerun: %v", err)
+			}
+			if next.Attempt != 2 || next.RerunOf != first.ID || next.SHA != shaA || next.Version != "v1.4.0" || next.Event != pipelines.EventRelease || next.Mode != pipelines.ModeFull || next.RerunFailedOnly != tc.failedOnly {
+				t.Fatalf("rerun lost the pinned release identity: %+v", next)
+			}
+			if _, err := dh.integ.Rerun(personCtx(ownerID), first.ID, false); !errors.Is(err, ErrRunInProgress) {
+				t.Fatalf("an active attempt must not be duplicated: %v", err)
+			}
+			sentBefore := len(dh.exec.sent())
+			deliver(t, dh.peer("agent-retry"), next)
+			got, _ := dh.store.run(next.ID)
+			if got.Conclusion != ConclusionSuccess || len(dh.exec.sent()) <= sentBefore {
+				t.Fatalf("another replica did not execute the retry: %+v", got)
+			}
+			for _, req := range dh.exec.sent()[sentBefore:] {
+				if req.SHA != shaA || req.Version != "v1.4.0" || req.Event != pipelines.EventRelease {
+					t.Fatalf("runner received a changed release identity: %+v", req)
+				}
+			}
+			p, _ = dh.store.pipeline(dh.p.ID)
+			original, _ = dh.store.run(first.ID)
+			if p.Active() || original.Conclusion != ConclusionFailure {
+				t.Fatal("retry changed automatic delivery or the original outcome")
+			}
+		})
+	}
+}
+
+func TestWebhookReleaseRerequestCannotStartAfterDisconnect(t *testing.T) {
+	dh := newDriveHarness(t, driveManifest)
+	first := dh.openRun(t, Opening{Event: pipelines.EventRelease, Mode: pipelines.ModeFull, SHA: shaA, ReleaseTag: "v1.4.0", Trigger: TriggerManual})
+	deliver(t, dh.integ, first)
+	completed, _ := dh.store.run(first.ID)
+	next := dh.openRun(t, rerunOf(completed, "verified-check-rerequest", false))
+	p, _ := dh.store.pipeline(dh.p.ID)
+	p.Status = PipelineDisconnected
+	dh.store.addPipeline(p)
+	sentBefore := len(dh.exec.sent())
+	deliver(t, dh.peer("agent-retry"), next)
+	got, _ := dh.store.run(next.ID)
+	if got.Conclusion != ConclusionFailure || got.RefusalCode != pipelines.CodeDisconnected || len(dh.exec.sent()) != sentBefore {
+		t.Fatalf("a webhook rerun inherited the original manual consent: %+v", got)
 	}
 }
