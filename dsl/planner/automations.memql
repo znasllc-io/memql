@@ -178,7 +178,8 @@ automation defaultWorkSpine {
  // Capability-created artifacts include generation, storage and verification,
  // not just discovering the operation. Use the existing sustained-work allowance;
  // native admission still intersects it with every explicit goal ceiling.
- if triage.conversational && triage.capabilityFile && (triage.workload == "quick" || triage.workload == "lookup") {
+ sustainedArtifact := logic workSpineSustainedArtifact(triage: triage)
+ if sustainedArtifact {
   builtin spineSetWorkload(workload: "research")
  }
  // File delivery includes source assessment and composition beyond a direct reply.
