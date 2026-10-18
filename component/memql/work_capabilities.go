@@ -335,7 +335,7 @@ func workCapabilityScore(search, name, description string, purpose ...string) in
 		return 0 // A qualified operation lookup is exact, including an absent one.
 	}
 	words := workCapabilityWords(search)
-	for _, word := range strings.Fields("a an the and or to for of in is are with can i you it this that") {
+	for _, word := range strings.Fields("a an the and or to for of in on at by from is are was were be been with without can could would should do does did have has had i me my we our you your it its this that these those what which who how when where") {
 		delete(words, word)
 	}
 	if len(words) == 0 {

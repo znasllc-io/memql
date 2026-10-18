@@ -3634,7 +3634,7 @@ func LibraryDocumentRevisionStatusBuild(args LibraryDocumentRevisionStatusArgs) 
 	return b.String()
 }
 
-// LibraryDocumentVersion -- Read the UTF-8 text content of a saved Library file or generated document, at its current or retained version. Returns content and revision without changing the document; supports text up to 2 MiB, not binary decoding. Resolve a fileId with libraryArtifactForFile, then use libraryDocumentHistory for its currentVersion when unknown.
+// LibraryDocumentVersion -- Read the UTF-8 text content of a saved Library file or generated document, including Markdown, TXT, CSV and JSON. Returns content and revision at its current or retained version without changing the document; supports text up to 2 MiB, not binary decoding. Resolve a fileId with libraryArtifactForFile, then use libraryDocumentHistory for its currentVersion when unknown.
 type LibraryDocumentVersionArgs struct {
 	// The saved artifact id, obtained through libraryArtifactForFile when you have a fileId.
 	ArtifactId string

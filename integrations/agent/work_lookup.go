@@ -36,6 +36,22 @@ func (r *Replier) workLookupContracts(ctx context.Context) string {
 		return ""
 	}
 	title, _ := classification["workTitle"].(string)
+	// A generated display title can mostly be a filename or identifier. Its
+	// words describe the object, not the operation (for example a filename
+	// containing "capability-check" must not select permission checks).
+	// Prefer the owner's bounded request, read on this executing replica.
+	goalCall, goalErr := parser.RenderCall("work.workGoalForOwner", map[string]any{"goalId": run.GoalId})
+	if goalErr == nil {
+		if goalResult, readErr := r.engine.Execute(ctx, "query "+goalCall); readErr == nil {
+			goals := memql.MaterializeRows(goalResult)
+			if len(goals) == 1 {
+				statement, _ := goals[0]["statement"].(string)
+				if statement = strings.TrimSpace(statement); statement != "" && len(statement) <= 300 {
+					title = statement
+				}
+			}
+		}
+	}
 	if strings.TrimSpace(title) == "" || len(title) > 300 {
 		return ""
 	}
