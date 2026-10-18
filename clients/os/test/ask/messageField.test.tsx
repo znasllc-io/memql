@@ -324,4 +324,17 @@ describe("the SDK transport", () => {
     const opts = (stream.mock.calls[1] as unknown as [unknown, unknown, Record<string, unknown>])[2];
     expect(Object.hasOwn(opts, "attachmentArtifactIds")).toBe(false);
   });
+
+  it("reads the routes through the generated routesForActor builtin", async () => {
+    // The cluster answers one virtual row, {routes, revision}, in the builtin node envelope.
+    const payload = { revision: 4, routes: [
+      { id: "auto", name: "Auto", kind: "auto", scope: "cluster", description: "", ready: true, reason: "", customized: false, jobs: [] },
+      { id: "apps", name: "Apps", kind: "apps", scope: "cluster", description: "Claude Code or Codex", ready: false, reason: "No signed-in app on your machines", customized: false, jobs: [] },
+      { id: "r9", name: "Night", kind: "custom", scope: "personal", description: "", ready: true, reason: "", customized: false, jobs: [] },
+    ] };
+    const sendAndWait = vi.fn(async (_request: unknown) => ({ queryResult: { result: { data: [{ routes: { id: "routes", concept: "v1:router:routeCatalog", type: "object", createdAt: "2026-10-18T12:00:00Z", payload } }] } } }));
+    const routes = await new SdkAskTransport(() => ({ sendAndWait } as unknown as Dispatcher)).routes!();
+    expect(sendAndWait).toHaveBeenCalledWith(expect.objectContaining({ executeQuery: expect.objectContaining({ query: "builtin routesForActor()" }) }), undefined);
+    expect(routes.map(route => [route.id, route.ready, route.reason])).toEqual([["auto", true, ""], ["apps", false, "No signed-in app on your machines"], ["r9", true, ""]]);
+  });
 });

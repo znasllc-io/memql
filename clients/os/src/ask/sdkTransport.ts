@@ -47,7 +47,7 @@ export class SdkAskTransport implements AskTransport {
   routes = async (): Promise<AskRouteOption[]> => {
     const dispatcher = this.dispatcher();
     if (!dispatcher) throw new Error("Not connected to the cluster.");
-    const result = await new QueryClient(dispatcher).executeNamed("routesForActor", "builtin routesForActor()");
+    const result = await new QueryClient(dispatcher).routesForActor();
     const row = result.rows()[0];
     return routeOptionsFrom(row ? flatten(row) : null);
   };
