@@ -71,6 +71,7 @@ cap_spec_param "build-node-cpus" "CPUs the build node may use (forwarded to up.s
 cap_spec_param "build-node-memory" "memory the build node may use, such as 40g (forwarded to up.sh)"
 cap_spec_param "clean"           "tear down the cluster first (clean slate, fresh DB) (flag)"
 cap_spec_param "no-secrets"      "skip secret seeding (flag)"
+cap_spec_param "switch"          "stop any OTHER running local k3d cluster first instead of refusing (flag, forwarded to up.sh)"
 cap_spec_param "repo-url"        "git repo URL for the ArgoCD Application (downstream repos pass their own)"
 cap_spec_param "app-name"        "ArgoCD Application name (downstream repos pass their own)"
 cap_spec_param "overlay-path"    "kustomize overlay path within the repo"
@@ -172,6 +173,7 @@ function bringup() {
         ${EXTRA_PORTS:+--extra-ports="${EXTRA_PORTS}"} \
         ${APP_PROJECT:+--app-project="${APP_PROJECT}"} \
         ${PROJECT_MANIFEST:+--project-manifest="${PROJECT_MANIFEST}"} \
+        ${SWITCH:+--switch} \
         ${NO_SECRETS:+--no-secrets} >&2
 }
 
@@ -462,6 +464,7 @@ function main() {
     BUILD_NODE_MEMORY="$(cap_param build-node-memory "$BUILD_NODE_MEMORY")"
     CLEAN="$(cap_flag clean)"
     NO_SECRETS="$(cap_flag no-secrets)"
+    SWITCH="$(cap_flag switch)"
     REPO_URL="$(cap_param repo-url "${MEMQL_K3D_REPO_URL:-}")"
     APP_NAME="$(cap_param app-name "${MEMQL_K3D_APP_NAME:-}")"
     OVERLAY_PATH="$(cap_param overlay-path "${MEMQL_K3D_OVERLAY_PATH:-}")"
