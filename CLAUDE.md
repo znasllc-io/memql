@@ -405,6 +405,40 @@ attribute the machine never claimed.
 The engine parses these model attributes. `TestWireContract` checks the
 shared names against the pinned engine; keep both sides synchronized.
 
+**Residency and slots** (`models.resident`, `models.parallel`; spec
+`docs/superpowers/specs/2026-10-18-fleet-tuning-design.md`, operator doc
+[docs/local-models.md](docs/local-models.md)). Four rules, each of which fails
+silently:
+
+1. **`keep_alive` rides every route that sends a model work** -- chat, vision
+   (a chat turn), embeddings, image generation (`ollamaClient.stampKeepAlive`;
+   `TestOllamaKeepAlive_EveryGenerationRouteCarriesIt` lists the routes). Ollama
+   applies the keep_alive a request STATES, up or down, and what an omission does
+   varies by release. Forever is the JSON number `-1`, never the string `"-1"`,
+   which Ollama refuses. Not to be confused with `keepalive`, the liveness delta
+   a call sends the cluster.
+2. **`keep_alive` alone does not make a model resident; the window does.** Ollama
+   reloads on ANY change of `num_ctx`, and the engine rounds each call up to a
+   power of two (`contextStartForCandidate`). `working_context` is a FLOOR:
+   `ollamaClient.window` never sends less, and never clamps a larger call down.
+3. **The settings ride `models.Info`, never the label.** Only `max=` changes, so
+   `TestWireContract` is untouched. `newDiscoverer` and `modelsRequest` are the
+   only places in package worker that build a `Discoverer` or a `Request`
+   (`TestEveryDiscoveryIsBuiltInOnePlace`); a command that built its own would
+   print a ceiling the worker does not advertise.
+4. **The managed unit is the default source of the slot count.** `max=` is
+   `models.parallel`, else the worker's `OLLAMA_NUM_PARALLEL`, else the unit's
+   (`inference.UnitParallel`, drop-ins included), else 1 -- never 0, which the
+   engine reads as unlimited. Setup writes the unit once and never touches a
+   runtime that is already serving, so an existing unit is edited by hand.
+
+There is no warm-up and no per-level slot reservation, on purpose: a warm-up can
+load a model onto a GPU another process holds, and residency then makes that
+permanent; the slot-wait log lines (`model call waited for a concurrency slot`,
+`model call refused after waiting for a concurrency slot` and
+`model call ended while waiting for a concurrency slot`) are the evidence for
+reserving slots (spec, D4 and D6).
+
 
 ## Setting a machine up to run models (epic memql-cockpit#387)
 
@@ -455,14 +489,15 @@ uninstall reports a partial result and preserves the unit and runtime for
 a retry; it still removes the worker token.
 
 **Working context is explicit.** Chat forwards the engine's
-`ModelCallParams.context_tokens` to Ollama's `options.num_ctx`; an absent
-value preserves the runtime default. Embedding uses 8192 tokens so the
-0.6B embedder's cache can fit beside the class's chat model. The native unit
-sets `OLLAMA_KV_CACHE_TYPE=q8_0`; Ollama enables Flash Attention itself on
-supported devices. The recommended pairs are 4B below class 16, 9B at 16,
-27B Q4 at 24/32, and 27B Q8 at 64/128, always followed by the same 0.6B
-embedder. The 24 GB pair is budgeted at 32K chat context, not every context
-the model supports.
+`ModelCallParams.context_tokens` to Ollama's `options.num_ctx`; an absent value
+preserves the runtime default, unless a `models.resident` entry sets
+`working_context`, which every call then runs at as a floor (Residency and
+slots, rule 2). Embedding uses 8192 tokens so the 0.6B embedder's cache can fit
+beside the class's chat model. The native unit sets `OLLAMA_KV_CACHE_TYPE=q8_0`;
+Ollama enables Flash Attention itself on supported devices. The recommended
+pairs are 4B below class 16, 9B at 16, 27B Q4 at 24/32, and 27B Q8 at 64/128,
+always followed by the same 0.6B embedder. The 24 GB pair is budgeted at 32K
+chat context, not every context the model supports.
 
 **The pull is `POST /api/pull`, NOT `ollama pull`**, and the design
 record's plan naming a subprocess was wrong on the platform its own D1

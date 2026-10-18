@@ -247,8 +247,11 @@ a declared runtime both offer the same id, the **declared** entry wins and
 the file you just edited would change nothing.
 
 `max_concurrent` is the one attribute that is **never** left absent: the engine
-reads a missing ceiling as *unlimited*. `OLLAMA_NUM_PARALLEL` sets it; silence
-gets 1.
+reads a missing ceiling as *unlimited*. It is the first of these that gives a
+usable number: `models.parallel` in `policy.yaml`; `OLLAMA_NUM_PARALLEL` in the
+worker's environment; the `OLLAMA_NUM_PARALLEL` of the `memql-ollama.service`
+unit this cockpit manages, drop-ins included; and otherwise 1. `memql worker
+models` names which one answered. See [Keeping a model loaded](#keeping-a-model-loaded).
 
 ### The four modalities
 
@@ -347,7 +350,7 @@ roughly whenever the lid closed. The cockpit never derives one.
 Model labels are bound at `Register`, and `Heartbeat` carries apps but no
 labels — so a model pulled, removed or newly allowed while the worker is
 connected is invisible to the cluster until it registers again, and registering
-again means reconnecting.
+again means reconnecting. A changed ceiling (`max=`) is a changed label too.
 
 The worker re-checks its offered set every 60 s and reconnects only when the
 **advertised labels actually changed**, only when no tool call, app session or
@@ -559,9 +562,110 @@ Setup leaves an already-serving runtime in place. For an older
 `[Service]` section, then run `systemctl --user daemon-reload` and
 `systemctl --user restart memql-ollama.service` between model calls to apply
 the cache setting. A runtime managed separately keeps its own configuration.
+The same goes for how many requests the unit lets Ollama take at once and for
+keeping models loaded; both are below.
 
 `--model` still overrides, and the closing block still reports what the
 **cluster** will see rather than restating the command line.
+
+---
+
+## Keeping a model loaded
+
+Ollama unloads a model five minutes after its last call and loads it again the
+next time anybody asks: about three seconds from a warm disk cache and up to
+forty from a cold one, for the 27B the 24 GB class serves. Two things cause a
+reload, and a model that is meant to stay has to answer both.
+
+- **The idle timeout.** `keep_alive` moves it.
+- **A changed window.** Ollama also reloads a model whenever the `num_ctx` a
+  call asks for differs from the one it loaded with, larger or smaller, by a
+  single token. The engine rounds each call up to the next power of two, so one
+  model is asked for 8192, 16384 and 32768 in turn. On the reference laptop,
+  107 of the 170 reloads in thirty days were this and not the timeout.
+  `working_context` pins it.
+
+```yaml
+models:
+  allow:
+    - qwen3.8:27b
+    - qwen3-embedding:0.6b
+  parallel: 2                    # requests per model; see below
+  resident:
+    - id: qwen3.8:27b
+      keep_alive: 2h             # 30m, 2h, 3600 (seconds), or -1 / forever
+      working_context: 16384     # every call that fits runs at this window
+    - id: qwen3-embedding:0.6b
+      keep_alive: 2h
+```
+
+A `SIGHUP` applies it; nothing restarts. Delete the block, send another, and
+every model is back on Ollama's defaults. Nothing here changes a machine until
+its owner writes it.
+
+- **`keep_alive`** is sent on every call to that model: chat, vision, embedding
+  and image alike. Ollama applies the value a request states, up or down, and
+  what a request that leaves it out does varies by release, so no route leaves
+  it out. `0` is refused (Ollama reads it as "unload after every call"), and so
+  is anything past 30 days; `-1` keeps the model loaded until Ollama stops. A
+  resident model is not pinned: Ollama still evicts an idle one when another must
+  load and does not fit, so a resident 9B is displaced by a call for the 27B
+  unless the 27B is not in `models.allow`.
+- **`working_context`** is a floor on `num_ctx`: a call that needs no more runs
+  at exactly it, and a call that needs more runs at what it asked for. It is the
+  window per slot, and the model's cache is sized for the slots times it, so it is
+  also the memory knob. Embeddings always run at 8192 and ignore it.
+- Neither is a label attribute. The engine is told nothing about them, and the
+  advertisement changes only in `max=`.
+
+`memql worker models` prints what is configured, then asks Ollama what it holds:
+the size, how much of it is on the GPU, the window it was loaded at, and when it
+goes. A model that is mostly on the CPU is called out, because residency makes
+that permanent: a model loaded while another process held the card stays where
+it was put until it reloads. On a card shared with another Ollama or a GPU
+service, account for the other tenant's memory before making any model resident.
+
+### Requests at once
+
+`parallel` is the ceiling the worker advertises and enforces for each model, and
+Ollama has to be given the same number or the extra calls queue inside it. For
+the unit this cockpit installs, the unit is the source: a fresh install on a 24 or
+32 GB machine writes `Environment=OLLAMA_NUM_PARALLEL=2`, and the worker reads it
+back, drop-ins included. For an existing unit add the line yourself (a drop-in,
+`systemctl --user edit memql-ollama.service`, is the way systemd documents it),
+then `systemctl --user daemon-reload` and `systemctl --user restart
+memql-ollama.service`. The restart cancels what Ollama is generating and unloads
+its models, so do it between calls. `models.parallel` overrides the unit for a
+runtime the cockpit cannot read: Docker, or macOS.
+
+Every slot costs memory: a constant for the model's recurrent state plus its
+cache for the window. For `qwen3.8:27b` (Q4_K_M, q8_0 cache) on a 24 GB RTX 5090
+Laptop, llama-server's own report in `~/.memql/state/ollama.log` gives the first
+slot (`projected to use`) and what each further slot adds: 748 MiB of recurrent
+state plus 38 KiB of cache per token of window. In MiB, with the card's 22,966
+free and the report wanting at least 1,936 left:
+
+| slots x window | 27B | with the embedder | left |
+|---|---|---|---|
+| 1 x 32K | 17,673 | 19,073 | 3,893 |
+| 2 x 8K | 17,963 | 19,863 | 3,103 |
+| 2 x 16K | 18,325 | 20,225 | 2,741 |
+| 2 x 32K | 19,637 | 21,537 | 1,429 |
+| 3 x 16K | 19,681 | 22,081 | 885 |
+
+Only the one-slot figure is read directly; the rest add the per-slot costs above.
+The embedder column is estimated from its architecture (it was never loaded in the
+thirty days measured). The report the runtime prints on every load says whether a
+choice held: `no changes needed`, and `offloaded N/N layers to GPU`.
+
+The two slots setup gives a class 24 or 32 machine are budgeted at a 16K window,
+the `working_context: 16384` above: at 32K two slots leave 1,429 MiB, under the
+1,936 MiB the runtime wants, so a 32K window wants `models.parallel: 1`. The
+ceiling the worker advertises can also differ from what Ollama was started with:
+a stale `OLLAMA_NUM_PARALLEL` in the worker's environment outranks the unit, a
+unit edited by hand takes effect only when Ollama restarts, and another Ollama
+on the port reads none of this. Each is benign: a call waits inside Ollama, or a
+slot sits idle until the next refresh.
 
 ---
 
