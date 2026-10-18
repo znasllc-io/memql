@@ -5,6 +5,7 @@ import { roundTripFigure } from "../addMachine/flow";
 import { isWorkerOnline } from "../online";
 import { computerUseStatus, formatClockOffset, hasRoundTrip, pipelineStepsStatus, type MachineRow } from "../rows";
 import { HardwareGroup } from "./HardwareGroup";
+import { setupNow, setupSummary } from "./setup";
 
 export const MachineDetailsSection = DetailsSection;
 
@@ -17,6 +18,9 @@ export function MachineDetailsInfo({ machine, now, machineClass, usableBytes }: 
   const clock = machine.clockSkewKnown ? formatClockOffset(machine.clockSkewMs) : "Not reported";
   const computerUse = computerUseStatus(machine).answer;
   const pipelines = pipelineStepsStatus(machine).answer;
+  // What the installer is doing, while it is (memql#6229): the same words the
+  // add-machine wizard shows, and nothing once it has finished.
+  const setup = setupSummary(setupNow(machine.setup, now));
   const reportedKeys = Object.keys(machine.reportedLabels).sort();
   return <>
     <PageHelp title="Machine information"><p>Use the copy icon beside a value to copy it. Text can also be selected normally. Relative dates copy their exact timestamps.</p></PageHelp>
@@ -34,6 +38,7 @@ export function MachineDetailsInfo({ machine, now, machineClass, usableBytes }: 
       <PageHelp title="Connection"><p>Online means Cockpit is connected. Active calls reflect the last heartbeat and may trail newly started work. Round trip measures the cluster’s ping to this machine. A missing ping or clock offset means Cockpit has not reported that measurement; it does not mean zero.</p></PageHelp>
       <Facts>
         <Fact label="Status" value={status} copyValue={status} />
+        {setup ? <Fact label="Setup" value={setup} copyValue={setup} /> : null}
         <Fact label="Last heartbeat" value={formatFreshness(machine.lastSeenAt, now)} title={machine.lastSeenAt || undefined} copyValue={machine.lastSeenAt} />
         <Fact label="Round trip" value={roundTrip} title={machine.rttAt || undefined} copyValue={hasRoundTrip(machine) ? roundTrip : undefined} />
         <Fact label="Clock offset" value={clock} copyValue={machine.clockSkewKnown ? clock : undefined} />

@@ -3,6 +3,7 @@ import { RecordList, RecordRow } from "../../../kit/RecordRow";
 import { Subhead } from "../../../kit";
 import { formatBytes, formatMoment } from "../../../kit/format";
 import { pullProgressFraction, pullStepLabel, type ModelPull } from "./models";
+import { setupDownloadFraction, setupDownloadLabel, type SetupStage } from "./setup";
 
 export function LivePull({ pull }: { pull: ModelPull }) {
   const fraction = pullProgressFraction(pull);
@@ -74,6 +75,51 @@ export function PullBar({ pull }: { pull: ModelPull }) {
         </div>
       )}
       <p className="os-fleet-pull-bytes">{label}</p>
+    </div>
+  );
+}
+
+/**
+ * The installer's download on a machine's Models page (memql#6229): the same
+ * place and shape as a pull started from here, so a machine downloading for
+ * its installer reads as downloading, and is not offered the same model again.
+ */
+export function SetupLiveDownload({ stage }: { stage: SetupStage }) {
+  return (
+    <div className="os-fleet-pull" role="status" aria-label={stage.model === "" ? "Downloading the models" : `Downloading ${stage.model}`}>
+      <div className="os-fleet-pull-line">
+        <span className="os-fleet-pull-model os-mono">{stage.model === "" ? "Models" : stage.model}</span>
+        <span className="os-fleet-pull-status">downloading for the installer</span>
+      </div>
+      <SetupDownloadBar stage={stage} />
+    </div>
+  );
+}
+
+/**
+ * The installer's own download as a bar and its bytes (memql#6229), under a
+ * line that already names the model. These figures are the WHOLE model's --
+ * the installer sums every part as it arrives -- so the label says so plainly
+ * where PullBar has to say "in this part". No bar until the size is known: an
+ * empty track would claim nothing had moved.
+ */
+export function SetupDownloadBar({ stage }: { stage: SetupStage }) {
+  const fraction = setupDownloadFraction(stage);
+  return (
+    <div className="os-fleet-pullbar">
+      {fraction === null ? null : (
+        <div
+          className="os-progress-track"
+          role="progressbar"
+          aria-label={stage.model === "" ? "Downloading the models" : `Downloading ${stage.model}`}
+          aria-valuemin={0}
+          aria-valuemax={100}
+          aria-valuenow={Math.round(fraction * 100)}
+        >
+          <div className="os-progress-bar" style={{ width: `${fraction * 100}%` }} />
+        </div>
+      )}
+      <p className="os-fleet-pull-bytes">{setupDownloadLabel(stage)}</p>
     </div>
   );
 }
