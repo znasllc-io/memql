@@ -76,6 +76,12 @@ func (e *MemQLEngine) workReviewReplyBuiltin(ctx context.Context, args map[strin
 			remaining -= len(encoded)
 		}
 	}
+	// A lookup that produced no receipt still needs review: absence of evidence
+	// must not silently grant the draft the self-contained-reply bypass.
+	classification, _ := runs[0]["classification"].(map[string]any)
+	if len(sources) == 0 && (classification["workload"] == "lookup" || classification["workload"] == "research") {
+		limitations = append(limitations, "This request required a lookup, but no successful source receipt was recorded. Current facts, model availability and causal claims have not been verified.")
+	}
 	// A greeting or self-contained composition has no retrieved evidence to
 	// audit and spends no extra model call. Failed reads above never skip.
 	if len(sources) == 0 && len(limitations) == 0 {

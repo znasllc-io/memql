@@ -1392,7 +1392,7 @@ type ComposeMaterializeArgs struct {
 	Name string
 	// What you asked for, in your own words. Becomes the goal's statement, so it is what Nexus shows and what the catalog keys on. A Markdown file asked for with a statement and nothing of its own to compose from (no draft, sectionKeys, templateId, recipeId, outputKind or deployableKind), whose sources, if any, are all Library files the Library can attach to a review comment (a .md file up to 32 KiB, or a PNG, JPEG, GIF or WebP picture up to 8 MiB), is created EMPTY outside a work run, and the statement stays on its composition: the caller hands it, with those files, to the Library's revision workflow, as the person (the SDK's handOffDescription), which writes the document. Any other source (a record, a query, or a Library file the Library cannot attach) keeps the composer, which reads it. Inside a work run the composer still writes the file from the statement.
 	Statement string
-	// markdown, html, txt, csv, json, docx or pdf. Audio and video are named in the brief and deliberately unoffered -- audio wants a compose-then-speak pipeline with a cost ceiling of its own, video a generation provider this cluster has none of.
+	// Document formats: markdown (md), html, txt, csv, json, docx or pdf. Media generation belongs to other discovered capabilities; this document composer does not establish their availability.
 	Format string
 	// email_template writes a .email.json email document into a layout (layoutId); requires format json and one accountIds entry. With no statement, draft or sources it files the layout itself without a model call. The result is a draft, never published or sent.
 	OutputKind string

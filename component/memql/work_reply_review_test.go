@@ -10,6 +10,7 @@ import (
 
 	"github.com/stretchr/testify/require"
 	"github.com/znasllc-io/memql/component/auth"
+	"github.com/znasllc-io/memql/component/language/parser"
 	"github.com/znasllc-io/memql/core/airoute"
 	"github.com/znasllc-io/memql/core/common"
 )
@@ -118,4 +119,23 @@ func TestReplyReviewReadsRecordedEvidenceOnAnotherReplica(t *testing.T) {
 	require.Empty(t, rows, "budget exhaustion must not release the unchecked draft")
 	require.Equal(t, 1, model.calls, "review cannot bypass the existing call ceiling")
 	require.Equal(t, 3, guard.used)
+}
+
+func TestLookupReplyWithNoReceiptCannotBypassEvidenceReview(t *testing.T) {
+	e, _, _ := readMergeTestEngine(t)
+	ctx := contextTestRun(t, e)
+	run, _ := common.RunFromContext(ctx)
+	call, err := parser.RenderCall("updateWorkRun", map[string]any{"runId": run.RunId, "classification": map[string]any{"workload": "lookup"}})
+	require.NoError(t, err)
+	_, err = e.Execute(auth.ContextWithInternalOrigin(ctx), "mutation "+call)
+	require.NoError(t, err)
+	model := &replyReviewModel{}
+	e.SetAIResolver(testAIResolver{fn: func(context.Context, airoute.ResolveRequest) (ResolvedProvider, error) {
+		return ResolvedProvider{Client: model, Resolution: airoute.Resolution{ProviderName: "fleet:review", Model: "test"}}, nil
+	}})
+	_, err = e.workReviewReplyBuiltin(ctx, map[string]any{"draft": map[string]any{"reply": "The live service is definitely unavailable."}}, 0)
+	require.NoError(t, err)
+	require.Equal(t, 1, model.calls)
+	raw, _ := json.Marshal(model.messages)
+	require.Contains(t, string(raw), "no successful source receipt was recorded")
 }

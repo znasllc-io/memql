@@ -242,3 +242,15 @@ func TestCapabilityArtifactsRefuseInvalidExtensionBeforeExecution(t *testing.T) 
 		}
 	}
 }
+
+func TestDocumentFileExtensionKeepsItsNativeComposer(t *testing.T) {
+	decision := parseSectionableDecision(map[string]any{"requiresFile": true, "fileName": "birds.md", "fileFormat": "md", "fileDelivery": "compose"})
+	bundle, err := synthesizeWorkReasoningBundle(compileReq(), "", decision)
+	if err != nil {
+		t.Fatal(err)
+	}
+	source := bundle.Constructs[0].Source
+	if !strings.Contains(source, `format: "markdown"`) || !strings.Contains(source, "composeMaterialize") || strings.Contains(source, "runAgentTurn") {
+		t.Fatalf("Markdown extension lost its document route: %s", source)
+	}
+}
