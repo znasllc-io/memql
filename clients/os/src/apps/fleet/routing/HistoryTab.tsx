@@ -88,7 +88,7 @@ export function HistoryTab({
       {header(
         <>
           <PageHelp title="History">
-            <p>Every routed call: the rule that decided it, the route it took, what served it and what it cost. Open a call to see every source it passed over, and why.</p>
+            <p>Every routed call: the route it was sent on, the rule and chain that decided it, what served it and what it cost. Open a call to see every source it passed over, and why.</p>
           </PageHelp>
           {decisions.supported ? (
             <Refine label="Refine history" search={search} onSearch={setSearch} placeholder="Prompt or model" chips={chips}>
@@ -173,6 +173,13 @@ function clockOf(value: string): string {
  * came out zero, which would make a free call and a mis-priced metered one
  * identical. `costFigure` hands an absent figure carrying the reason.
  */
+/** The route a person chose for a call, as History says it. */
+function routeWords(id: string): string {
+  if (id === "local") return "the Local route";
+  if (id === "apps") return "the Apps route";
+  return "a route of the person's own";
+}
+
 function DecisionLine({ row, byName, open, onOpen }: { row: DecisionRow; byName: ReadonlyMap<string, RuleRow>; open: boolean; onOpen: () => void }) {
   const level = levelWords(row);
   const where = SOURCE_WORD[row.door] ?? row.door;
@@ -195,8 +202,9 @@ function DecisionLine({ row, byName, open, onOpen }: { row: DecisionRow; byName:
       </RecordRow>
       {open ? (
         <div className="os-decision-detail">
+          {row.route === "" ? null : <p className="os-decision-detail-line">Sent on {routeWords(row.route)}.</p>}
           <p className="os-decision-detail-line">
-            {row.rule === "" ? "No rule was recorded for this call." : `Decided by ${ruleWords(row.rule, byName)}, which takes ${row.policy ? routeTitle(row.policy) : "no route"}.`}
+            {row.rule === "" ? "No rule was recorded for this call." : `Decided by ${ruleWords(row.rule, byName)}, which takes ${row.policy ? routeTitle(row.policy) : "no chain"}.`}
           </p>
           <p className="os-decision-detail-line">{consideredSentence(row)}</p>
           {row.considered.length === 0 ? null : (

@@ -22,7 +22,7 @@ export function RuleSentence({
       <span className="fleet-rule-when">{whenWords(rule)}</span>
       <ArrowRight size={14} aria-hidden className="fleet-rule-arrow" />
       <span className="os-sr-only"> takes </span>
-      <span className="fleet-rule-route">{rule.policy ? routeTitle(rule.policy) : "No route"}</span>
+      <span className="fleet-rule-route">{rule.policy ? routeTitle(rule.policy) : "No chain"}</span>
       {extras ? <span className="fleet-rule-extra">{extras}</span> : null}
     </span>
   );

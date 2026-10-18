@@ -22,6 +22,15 @@ export interface RoutingState {
   routes: Row[];
   rules: Row[];
   decisions: Row[];
+  /** Routes as `routesForActor` answers them: Auto, Local, Apps and the person's own. */
+  modes: Row[];
+  balance: Row;
+  /** Null: the person has no budget row yet (the builtin still answers). */
+  budget: Row;
+  /** What each machine can take now, as `fleetCapacity` answers it. */
+  capacity: Row[];
+  /** The bound embedder's model id, "" for none. */
+  embedder: string;
   /** Builtins this cluster does not have: absent methods, not failing ones. */
   missing: Set<string>;
   saveError: Error | null;
@@ -113,6 +122,42 @@ export function studioMachine(over: Row = {}): Row {
   });
 }
 
+/** One route as `routesForActor` answers it. */
+export function routeModeRow(over: Row & { id: string }): Row {
+  const kind = (over.kind as string | undefined) ?? (["auto", "local", "apps"].includes(over.id) ? over.id : "custom");
+  return {
+    name: kind === "custom" ? over.id : kind.charAt(0).toUpperCase() + kind.slice(1),
+    kind,
+    scope: kind === "custom" ? "personal" : "cluster",
+    description: "",
+    ready: true,
+    reason: "",
+    customized: false,
+    jobs: [],
+    ...over,
+  };
+}
+
+/** A route's four jobs on the wire; embeddings is always the bound embedder. */
+export function routeJobs(fast: string[], strong: string[], reasoning: string[], servesNow: Partial<Record<string, string>> = {}): Row[] {
+  const job = (id: string, sources: string[]) => ({ job: id, sources, editable: true, servesNow: servesNow[id] ?? "", ready: (servesNow[id] ?? "") !== "" });
+  return [
+    job("fast", fast),
+    job("strong", strong),
+    job("reasoning", reasoning),
+    { job: "embeddings", sources: ["embedder:active"], editable: false, servesNow: servesNow.embeddings ?? "", ready: true },
+  ];
+}
+
+/** Auto, Local and Apps as shipped, ready on the studio machine. */
+export function shippedRouteModes(): Row[] {
+  return [
+    routeModeRow({ id: "auto", description: "Picks the best balance of speed, cost and quality for every call" }),
+    routeModeRow({ id: "local", description: "Local models for everything", jobs: routeJobs(["fleet:fastest"], ["fleet:strongest"], ["fleet:strongest"]) }),
+    routeModeRow({ id: "apps", description: "Claude Code or Codex, with your embedding model", jobs: routeJobs(["app:*"], ["app:*"], ["app:*"]) }),
+  ];
+}
+
 /** The routing builtins this double answers, as the spies a suite asserts on. */
 export interface RoutingCalls {
   routerListPolicies: Mock;
@@ -124,14 +169,29 @@ export interface RoutingCalls {
   routingRuleRemove: Mock;
   routingRuleDescribe: Mock;
   routerDecisionsRecent: Mock;
+  routesForActor: Mock;
+  routeSave: Mock;
+  routeDelete: Mock;
+  routeReset: Mock;
+  autoBalance: Mock;
+  autoBalanceSave: Mock;
+  autoBalanceReset: Mock;
+  myBudget: Mock;
+  fleetCapacity: Mock;
+  activeEmbedderBinding: Mock;
 }
 
-export function routingConnection(seed: { machines?: Row[]; federationConfigured?: boolean; routes?: Row[]; rules?: Row[]; decisions?: Row[] } = {}) {
+export function routingConnection(seed: { machines?: Row[]; federationConfigured?: boolean; routes?: Row[]; rules?: Row[]; decisions?: Row[]; modes?: Row[]; balance?: Row; budget?: Row; capacity?: Row[]; embedder?: string } = {}) {
   const state: RoutingState = {
     revision: 7,
     routes: seed.routes ?? shippedRoutes(),
     rules: seed.rules ?? shippedRules(),
     decisions: seed.decisions ?? [],
+    modes: seed.modes ?? shippedRouteModes(),
+    balance: seed.balance ?? { speed: 50, cost: 50, quality: 50, recommended: { speed: 50, cost: 50, quality: 50 }, customized: false },
+    budget: seed.budget ?? { monthlyLimitUSD: null, spentThisMonthUSD: 0, resetsAt: "2026-11-01T00:00:00Z" },
+    capacity: seed.capacity ?? [],
+    embedder: seed.embedder ?? "nomic-embed",
     missing: new Set(),
     saveError: null,
     ruleSaveError: null,
@@ -201,6 +261,57 @@ export function routingConnection(seed: { machines?: Row[]; federationConfigured
     }),
     routingRuleDescribe: vi.fn(async () => builtinReply("routingRuleDescribe", [ruleRow({ name: "planningIsLocal", when: { tag: "planning" }, policy: "localOnly", precedence: 20, problem: "" })])),
     routerDecisionsRecent: vi.fn(async () => builtinReply("routerDecisionsRecent", state.decisions)),
+    // ROUTES (design record 2026-10-18-routes-design.md): one object per read,
+    // sharing the routing document's revision with chains and rules.
+    routesForActor: vi.fn(async () => builtinReply("routesForActor", [{ id: "routesForActor", routes: state.modes, revision: state.revision }])),
+    routeSave: vi.fn(async (args: Record<string, unknown>) => {
+      if (state.saveError) throw state.saveError;
+      const id = typeof args.id === "string" ? args.id : "";
+      const jobs = routeJobs(args.fast as string[], args.strong as string[], args.reasoning as string[]);
+      if (id === "local" || id === "apps") {
+        if (args.revision !== state.revision) throw new Error(`routing changed since revision ${String(args.revision)}; refresh and review before saving`);
+        state.revision += 1;
+        state.modes = state.modes.map((m) => (m.id === id ? { ...m, jobs, customized: true } : m));
+      } else if (id !== "") {
+        state.modes = state.modes.map((m) => (m.id === id ? { ...m, jobs, name: (args.name as string | undefined) ?? m.name } : m));
+      } else {
+        const created = routeModeRow({ id: `r${state.modes.length}`, name: args.name as string, jobs });
+        state.modes = [...state.modes, created];
+        return builtinReply("routeSave", [created]);
+      }
+      return builtinReply("routeSave", [state.modes.find((m) => m.id === id)!]);
+    }),
+    routeDelete: vi.fn(async (args: Record<string, unknown>) => {
+      state.modes = state.modes.filter((m) => m.id !== args.id);
+      return builtinReply("routeDelete", []);
+    }),
+    routeReset: vi.fn(async (args: Record<string, unknown>) => {
+      if (args.revision !== state.revision) throw new Error(`routing changed since revision ${String(args.revision)}; refresh and review before saving`);
+      state.revision += 1;
+      const shipped = shippedRouteModes().find((m) => m.id === args.id)!;
+      state.modes = state.modes.map((m) => (m.id === args.id ? { ...m, jobs: shipped.jobs, customized: false } : m));
+      return builtinReply("routeReset", [state.modes.find((m) => m.id === args.id)!]);
+    }),
+    autoBalance: vi.fn(async () => builtinReply("autoBalance", [{ id: "autoBalance", ...state.balance, revision: state.revision }])),
+    autoBalanceSave: vi.fn(async (args: Record<string, unknown>) => {
+      if (args.revision !== state.revision) throw new Error(`routing changed since revision ${String(args.revision)}; refresh and review before saving`);
+      state.revision += 1;
+      const recommended = state.balance.recommended as Row;
+      const next = { speed: args.speed, cost: args.cost, quality: args.quality };
+      state.balance = { ...state.balance, ...next, customized: next.speed !== recommended.speed || next.cost !== recommended.cost || next.quality !== recommended.quality };
+      return builtinReply("autoBalanceSave", [{ id: "autoBalance", ...state.balance, revision: state.revision }]);
+    }),
+    autoBalanceReset: vi.fn(async (args: Record<string, unknown>) => {
+      if (args.revision !== state.revision) throw new Error(`routing changed since revision ${String(args.revision)}; refresh and review before saving`);
+      state.revision += 1;
+      state.balance = { ...state.balance, ...(state.balance.recommended as Row), customized: false };
+      return builtinReply("autoBalanceReset", [{ id: "autoBalance", ...state.balance, revision: state.revision }]);
+    }),
+    myBudget: vi.fn(async () => builtinReply("myBudget", [{ id: "myBudget", ...state.budget }])),
+    fleetCapacity: vi.fn(async () => builtinReply("fleetCapacity", [{ id: "fleetCapacity", machines: state.capacity }])),
+    activeEmbedderBinding: vi.fn(async () =>
+      builtinReply("activeEmbedderBinding", state.embedder === "" ? [] : [{ id: "primary", providerRef: `fleet:${state.embedder}`, activatedAt: "2026-10-18T10:00:00Z" }]),
+    ),
   });
   const query = new Proxy(q, {
     get: (target, prop) => (typeof prop === "string" && state.missing.has(prop) ? undefined : Reflect.get(target, prop)),

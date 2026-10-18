@@ -22,7 +22,7 @@ vi.mock("../../src/live/connection", () => ({
   osBridgePath: "/_memql/ws",
 }));
 
-const { renderRouting, routingConnection, routeRow, ruleRow, settle, shippedRules } = await import("./routingHarness");
+const { renderChains, renderRouting, routingConnection, routeRow, ruleRow, settle, shippedRules } = await import("./routingHarness");
 const { retiredWordsIn } = await import("../../src/apps/fleet/routing/vocabulary");
 
 afterEach(cleanup);
@@ -64,9 +64,18 @@ async function moveTaggedXDown() {
   await settle();
 }
 
-async function backToRoutes() {
-  if (screen.queryByRole("list", { name: "Routes" }) !== null) return;
-  fireEvent.click(screen.getByRole("button", { name: "Back to Routes" }));
+async function toChains() {
+  fireEvent.click(screen.getByRole("button", { name: "Chains" }));
+  await settle();
+}
+
+/** From a chain's page back to the Rules list, through the Chains list. */
+async function backToRules() {
+  if (screen.queryByRole("list", { name: "Chains" }) === null) {
+    fireEvent.click(screen.getByRole("button", { name: "Back to Chains" }));
+    await settle();
+  }
+  fireEvent.click(screen.getByRole("button", { name: "Back to Rules" }));
   await settle();
 }
 
@@ -74,12 +83,12 @@ async function addVendorAndSave() {
   fireEvent.click(await screen.findByRole("button", { name: /^Open Mine,/ }));
   await settle();
   fireEvent.click(tray(/^Cheapest vendor:/));
-  pressBar(bar, "Save route");
+  pressBar(bar, "Save chain");
   await settle();
 }
 
 describe("a write in one Routing tab, then a write in the other", () => {
-  it("reorders a rule, then saves a route at the revision the reorder left", async () => {
+  it("reorders a rule, then saves a chain at the revision the reorder left", async () => {
     const made = use();
     await renderRouting("owner");
     await toTab("Rules");
@@ -87,36 +96,36 @@ describe("a write in one Routing tab, then a write in the other", () => {
     expect(made.calls.routingRuleSave).toHaveBeenCalledTimes(1);
     expect(made.state.revision).toBe(8);
 
-    await toTab("Routes");
+    await toChains();
     await addVendorAndSave();
     expect(made.calls.routingPolicySave).toHaveBeenCalledWith(expect.objectContaining({ expectedRevision: 8 }));
-    expect(screen.queryByText("The route was not saved.")).toBeNull();
+    expect(screen.queryByText("The chain was not saved.")).toBeNull();
     expect(screen.queryByText(/Routing changed since/)).toBeNull();
     expect(made.state.revision).toBe(9);
   });
 
-  it("saves a route, then reorders a rule at the revision the save left", async () => {
+  it("saves a chain, then reorders a rule at the revision the save left", async () => {
     const made = use();
     await renderRouting("owner");
     await toTab("Rules");
-    await toTab("Routes");
+    await toChains();
     await addVendorAndSave();
     expect(made.state.revision).toBe(8);
 
-    await backToRoutes();
-    await toTab("Rules");
+    await backToRules();
     await moveTaggedXDown();
     expect(made.calls.routingRuleSave).toHaveBeenCalledWith(expect.objectContaining({ expectedRevision: 8 }));
     expect(screen.queryByText("That did not go through.")).toBeNull();
     expect(made.state.revision).toBe(9);
   });
 
-  it("adds a rule after a route save without a refusal", async () => {
+  it("adds a rule after a chain save without a refusal", async () => {
     const made = use();
     await renderRouting("owner");
-    await addVendorAndSave();
-    await backToRoutes();
     await toTab("Rules");
+    await toChains();
+    await addVendorAndSave();
+    await backToRules();
     fireEvent.click(screen.getByRole("button", { name: "Add a rule" }));
     fireEvent.click(screen.getByRole("radio", { name: "A tag" }));
     fireEvent.change(screen.getByLabelText("Tag"), { target: { value: "nightly" } });
@@ -130,17 +139,17 @@ describe("a write in one Routing tab, then a write in the other", () => {
   });
 });
 
-describe("a route page whose routing changed elsewhere", () => {
+describe("a chain page whose routing changed elsewhere", () => {
   it("says so in product words, reads again, and a second save goes through", async () => {
     const made = use();
-    await renderRouting("owner");
+    await renderChains("owner");
     fireEvent.click(await screen.findByRole("button", { name: /^Open Mine,/ }));
     await settle();
     // Somebody else wrote since this page read the routes.
     made.state.revision = 12;
     const reads = made.calls.routerListPolicies.mock.calls.length;
     fireEvent.click(tray(/^Cheapest vendor:/));
-    pressBar(bar, "Save route");
+    pressBar(bar, "Save chain");
     await settle();
 
     const notice = screen.getByText("Routing changed since this page read it.").closest(".os-notice") ?? document.body;
@@ -150,22 +159,22 @@ describe("a route page whose routing changed elsewhere", () => {
     expect(made.calls.routerListPolicies.mock.calls.length).toBeGreaterThan(reads);
     expect(within(bar()).getByText("Unsaved")).toBeTruthy();
 
-    pressBar(bar, "Save route");
+    pressBar(bar, "Save chain");
     await settle();
     expect(made.calls.routingPolicySave).toHaveBeenLastCalledWith(expect.objectContaining({ expectedRevision: 12 }));
     expect(made.state.revision).toBe(13);
   });
 
-  it("Cancel after a refusal shows the route as it is saved now", async () => {
+  it("Cancel after a refusal shows the chain as it is saved now", async () => {
     const made = use();
-    await renderRouting("owner");
+    await renderChains("owner");
     fireEvent.click(await screen.findByRole("button", { name: /^Open Mine,/ }));
     await settle();
     // Somebody else changed THIS route.
     made.state.revision = 12;
     made.state.routes = [routeRow("mine", "app:claude-code", [], { shipped: false })];
     fireEvent.click(tray(/^Cheapest vendor:/));
-    pressBar(bar, "Save route");
+    pressBar(bar, "Save chain");
     await settle();
     pressBar(bar, "Cancel");
     await settle();

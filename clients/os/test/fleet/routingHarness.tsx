@@ -22,3 +22,8 @@ export async function renderRouting(role = "owner", props: Partial<Parameters<ty
   await settle();
   return view;
 }
+
+/** Fleet > Routing opened on Rules > Chains, where the chain composer lives. */
+export async function renderChains(role = "owner", props: Partial<Parameters<typeof RoutingSection>[0]> = {}) {
+  return renderRouting(role, { ...props, intent: { id: "to-chains", payload: { routingTab: "chains" } } });
+}

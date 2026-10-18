@@ -253,7 +253,7 @@ export function ruleSentence(rule: RuleRow): string {
         : `When ${conditions.slice(0, -1).join(", ")} and ${conditions[conditions.length - 1]}`;
 
   const raise = rule.level === "" ? "" : ` ask for ${rule.level} and`;
-  const route = rule.policy === "" ? "no route" : `the ${routeTitle(rule.policy)} route`;
+  const route = rule.policy === "" ? "no chain" : `the ${routeTitle(rule.policy)} chain`;
   const tail =
     rule.onUnavailable === "park"
       ? " If nothing there is ready, wait for a person."

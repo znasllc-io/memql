@@ -23,8 +23,8 @@ OS, split by what each thing is:
 |---|---|---|
 | Settings > Vendors | Which vendors can this cluster reach? | Two rows, each with its form |
 | Settings > Levels | What would happen if something asked for this? | Four sentences |
-| Fleet > Routing > Routes | Where does a call look, in what order? | Chains of sources |
-| Fleet > Routing > Rules | Which calls take which route? | An ordered list, first match wins |
+| Fleet > Routing > Routes | Which sources serve my messages, job by job? | Auto, Local, Apps and your own |
+| Fleet > Routing > Rules | Which calls take which chain? | An ordered list, first match wins; Chains one step under |
 | Fleet > Routing > Machines | Which of my machines takes a call sent to them? | One choice per person |
 | Fleet > Routing > History | What actually happened? | A log |
 
@@ -32,13 +32,14 @@ There is no API key field on any of them, or anywhere else in the product.
 
 ## The words
 
-The screens use four nouns, and only four:
+The screens use five nouns, and only five:
 
 | Word | Means | The engine's name |
 |---|---|---|
 | **Source** | Something that can answer a call: a local model, an app (Claude Code, Codex) on a machine, or a vendor | a chain entry (`fleet:`, `app:`, `federation:`) |
-| **Route** | An ordered list of sources, tried in order until one can serve | a policy (`dsl/policies`, `routerListPolicies`) |
-| **Rule** | "When work looks like X, take route Y" | a rule (`dsl/rules/rules.memql`) |
+| **Route** | What a person picks for a message in Ask: which sources serve each job | a route (`routesForActor`) |
+| **Chain** | An ordered list of sources, tried in order until one can serve | a policy (`dsl/policies`, `routerListPolicies`) |
+| **Rule** | "When work looks like X, take chain Y" | a rule (`dsl/rules/rules.memql`) |
 | **Level** | How much intelligence a call needs: Fast, Strong, Reasoning (Embeddings is internal) | a level |
 
 The engine keeps its own names in ids, query names and the DSL; the screens
@@ -103,9 +104,96 @@ and wrong.
 
 ## Fleet > Routing > Routes
 
-Every route, shipped and yours: its name, its chain as a strip of source
-glyphs, and whether it serves right now ("Serves with Claude Code", "Nothing
-ready"). Opening one shows the composer:
+The routes a person picks from for each message in Ask:
+
+- **Auto** -- picks the best balance of speed, cost and quality for every call.
+- **Local** -- local models for every job.
+- **Apps** -- Claude Code or Codex for every job.
+- **Yours** -- routes you make, such as "Out of credits" or "Emergency". Only
+  you see and use them. **New route** is on the section heading.
+
+Each row says whether the route can serve every job for you right now, or why
+not: "Needs an embedding model", "No signed-in app on your machines".
+
+### A route's page
+
+A route decides which source serves each of four jobs:
+
+| Job | What it is for | Level |
+|---|---|---|
+| Quick tasks | Triage, summaries and suggestions | `fast` |
+| Main work | Replies and most real work | `strong` |
+| Deep reasoning | Planning and hard problems | `reasoning` |
+| Search and memory | Finding things in your Library and memory | `embeddings` |
+
+- The page is the machine Model setup board, applied to a route: a **tray** of
+  sources (Models, Apps, Vendors), each saying where it serves from or why it
+  cannot, beside the **jobs**, each listing up to four sources in the order
+  they are tried.
+- Select a source, then **Add** on a job; or drag it into place. Arrow keys
+  move a source within its job, Delete removes it. A job that cannot take the
+  selected source says why: "Already in this job", "A job holds 4 sources at
+  most".
+- Each job says what serves it now ("Serves with qwen3.8:27b") or why nothing
+  does. It is read from the cluster, never simulated.
+- **Search and memory is the cluster's embedding model, the same in every
+  route.** The index holds vectors from one model, and another embedder answers
+  in a different vector space, so no route chooses one. The job names the bound
+  model; when there is none, it links to Fleet > Models.
+- Images and voice follow Auto.
+- The bar carries the acts, each only where it is legal: Discard changes and
+  Save route while there are changes, Restore default on a changed Local or
+  Apps, Delete on a route of yours. Restore default and Delete ask first, in
+  the bar.
+
+**A machine that cannot take a call says why.** Where the cluster measures
+what each machine can take right now, a local source that cannot take a call
+says so in a few words -- "Busy, 2 of 2", "Needs 20 GB, 9 GB free" -- and its
+job moves on to the next source. A cluster that does not measure it shows
+readiness as before.
+
+### New route
+
+**New route** is Name -> Start from -> Jobs. Start from copies Local or Apps as
+they are on this cluster now, or starts empty; a later change to Local or Apps
+does not reach a route made from them. A name is at most 40 characters, is not
+one of yours already, and is not Auto, Local or Apps.
+
+### Auto
+
+- **Balance** -- Speed, Cost and Quality, 0 to 100 each, with MemQL's
+  recommended value marked on each track. An owner or developer saves a change
+  for the whole cluster, or returns it with Reset to recommended. Reliability
+  always counts, so no setting trades it away.
+- **Budget** -- your monthly budget and what you have spent with metered
+  vendors this month; your own machines and app subscriptions never count.
+  Near the budget Auto favours your machines and apps, and once it is reached
+  Auto stops using vendors until the month resets. The budget is set in your
+  profile. A cluster that does not track budgets has no Budget section.
+- **What Auto picks now** -- for each job, the source Auto would take right
+  now, and, when a local model cannot take the call, why.
+
+### Who can do what
+
+| Act | Who |
+|---|---|
+| Open Routes; pick a route in Ask | Everyone who can open Fleet |
+| Make, change and delete a route of your own | Everyone, for their own |
+| Change or restore Local and Apps | Owner or developer (`app:settings/rules`) |
+| Change Auto's balance | Owner or developer (`app:settings/rules`) |
+
+An act a person cannot take is absent, and the page says who can.
+
+**Built-in routes, Auto's balance, chains and rules share one revision.** Every
+write to them names the revision it read; a write elsewhere since then is
+refused, the screen says "Routing changed since this page read it", and the
+page is read again. A route of your own carries no revision: only you change
+it.
+
+### Chains, under Rules
+
+The ordered lists of sources that rules name are **chains**, one step under
+Rules (**Rules > Chains**). Opening one shows the composer:
 
 - **Slots** in a row, in the order they are tried, and a **tray** of every
   source the cluster knows, grouped. A source that cannot serve right now
@@ -114,27 +202,16 @@ ready"). Opening one shows the composer:
   list: an app with its model pinned (`app:claude-code:<model>`), a model no
   machine offers yet (`fleet:<model>`), a vendor or provider by its name.
 - **The line** runs from "Request" up to the first slot that is ready right
-  now -- a machine online, an app signed in, a model offered, a vendor set up
-  -- and that slot says "Serves now". It is read from the cluster, never
-  simulated.
+  now, and that slot says "Serves now".
 - Equip, reorder and remove by click, drag, or keyboard (arrow keys move a
   slot, Delete removes it, Enter chooses it so the next source replaces it).
 - The bar carries the acts: Cancel, Restore shipped (on a changed shipped
-  route, after asking), Save route. A route change is cluster-wide: the bar
-  says how many rules take the route, and "Taken by N rules" opens Rules on
+  chain, after asking), Save chain. A chain change is cluster-wide: the bar
+  says how many rules take the chain, and "Taken by N rules" opens Rules on
   exactly those.
 
-**Routes and rules share one revision.** Every write in either tab names the
-revision it read; a write elsewhere since then is refused, the screen says
-"Routing changed since this page read it", and both are read again.
-
-### Routes a person picks
-
-Ask's route picker offers Auto, Local, Apps and each person's own routes. What
-they do, and the builtins behind them, is in
-[AI routing](ai-routing.md#routes-a-person-picks-in-ask). Auto's balance and
-the Local and Apps job lists are cluster-wide and changed by an owner or a
-developer; a person's own routes and monthly budget are theirs.
+What each route does in the router, and the builtins behind them, is in
+[AI routing](ai-routing.md#routes-a-person-picks-in-ask).
 
 ## Fleet > Routing > Rules
 
@@ -202,7 +279,8 @@ passed over -- the half that separates "there was nothing else to try" from
 |---|---|
 | Settings > Vendors | Owner or developer |
 | Settings > Levels | Owner, developer or admin |
-| Routing > Routes, Rules | Owner or developer (`app:settings/rules`) |
+| Routing > Routes | Everyone who can open Fleet; changing the built-ins and Auto's balance is owner or developer |
+| Routing > Rules, Chains | Owner or developer (`app:settings/rules`) |
 | Routing > History | Owner, developer or admin (`app:settings/decisions`) |
 | Routing > Machines | Everyone who can open Fleet |
 
