@@ -133,7 +133,7 @@ outputs, publication and failure evidence, not merely a command in a manifest.
 | `docs-current-check.yml` | Native weekly public docs check declared; installed schedule/failure delivery proof remains | #5508, #5712 |
 | `publish-sdk-core.yml` | Native release-files retains the compiled, version-checked npm archive; registry publication and immutable receipt remain | #5480 |
 | `publish-vscode-extension.yml` | Native release-files verifies all four native targets plus web; registry publication remains | #5480 |
-| `vscode-site.yml` | Static editor-site build and its deployed version proof | #5480 |
+| `vscode-site.yml` | Native `tests.editor-site` builds and checks the static page, runs the existing Chromium browser suite and retains the page plus screenshots; cloud execution and served-version evidence remain | #5480 |
 | `ruleset-drift.yml` | Native daily public reads cover both recorded rulesets; installed schedule/failure delivery proof remains | #5507 |
 | `dependabot-tidy.yml` | Trusted dependency-PR maintenance, without exposing write authority to PR code | #5480 |
 | `clustere2e-compile.yml` API entry | Disabled October 17 at 14:05 UTC: file absent at `f8ece576d`, only two historical runs and no active execution. Current CI and native `checks.build-clustere2e` retain compilation. Required `ci-required` and run history preserved | #5480 |
@@ -430,6 +430,16 @@ require three consecutive releases. Keep the current production pins available
 for rollback and retire temporary bootstrap grants only after owned work ends.
 
 ## Acceptance and issue closure
+
+The editor landing page now has a native validation declaration covering its
+source, themes, shared brand, canonical research example and runner scripts.
+It uses the native-published browser-capable toolchain and an isolated browser
+download, with two CPUs, 4 GiB and fifteen minutes. The unchanged browser suite
+passes locally in that exact image as uid 1000 with no extra capabilities,
+including five viewport widths, theme persistence, keyboard/clipboard behavior,
+contrast, CSP and the no-JavaScript fallback. The built 19-file page and review
+screenshots are retained. This is local command evidence, not installed cloud
+qualification; keep the existing site workflow until its native run passes.
 
 The public repository audits now have native declarations: both ruleset
 baselines run daily in separate steps, and documentation freshness runs weekly.
