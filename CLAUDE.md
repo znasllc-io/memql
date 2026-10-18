@@ -447,7 +447,7 @@ The set is spelled out in seven places: `app/build_<type>.go`,
 `app/build_default.go`'s deny-list, `component/node/compiled_<type>.go` and
 its deny-list (`compiled_default.go`), `ENGINE_NODE_TYPES` in
 `scripts/lib/engine_build_args.sh` (from which `dev.sh`'s `VALID_NODES`
-DERIVES), the `build-engine-images.yml` release matrix, and the `memql-<type>`
+DERIVES), the `memql-package.yaml` native release image stage, and the `memql-<type>`
 image references under `deploy/k8s/`. Missing one on the way OUT is silent,
 because `build_default.go` is a DENY list: `go build -tags voice .` after
 deleting `app/build_voice.go` produces a BFF under the retired name. Gates:

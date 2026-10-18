@@ -37,7 +37,7 @@
 # trustworthy engine-version pin for a release.
 #
 # PUSHING IS BREAK-GLASS (memql#4116). CLAUDE.md's "Image builds" section
-# is a HARD RULE: local Docker for dev, the GitHub build server for
+# is a HARD RULE: local Docker for dev, the MemQL build server for
 # anything deployed to a cloud cluster. This script used to implement the
 # forbidden path with nothing marking it as such -- `--push --acr=acrmemql`
 # ran a real `docker push` to the shared registry, and neither the help
@@ -99,7 +99,7 @@ Options:
                         Requires a registry AND
                         --confirm=push-from-an-operator-machine.
                         Deployable images are built by the GitHub build
-                        server (OIDC -> ACR), not here -- see below.
+                        server (MemQL native pipelines), not here -- see below.
     --confirm=PHRASE    The confirmation --push requires. The only
                         accepted phrase is
                         push-from-an-operator-machine.
@@ -109,9 +109,9 @@ Options:
     --help              Show this help.
 
 Push is break-glass, not the release path:
-    Deployable images are built by the GitHub build server
-    (.github/workflows/build-engine-images.yml, workflow_dispatch on main,
-    OIDC -> ACR). That is what makes an image reproducible, natively
+    Deployable images are built by the MemQL native build server
+    (memql-package.yaml, a release run pinned to its source commit,
+    with verified publication to ACR). That is what makes an image reproducible, natively
     linux/amd64, and provenanced. A push from an operator machine bypasses
     all three and is indistinguishable from one that did not -- which is
     why it needs the phrase rather than a flag.
@@ -237,12 +237,12 @@ function validate_push() {
         cat >&2 <<ERR
 ERROR: --push is a break-glass path and needs an explicit confirmation.
 
-  Deployable images are built by the GitHub build server, not on an
+  Deployable images are built by the MemQL native build server, not on an
   operator machine (CLAUDE.md, "Image builds: LOCAL Docker for dev,
   BUILD SERVER for deploys"):
 
-      .github/workflows/build-engine-images.yml
-      workflow_dispatch on main, OIDC -> ACR ${DEFAULT_ACR_NAME}
+      memql-package.yaml
+      Native release run, verified publication -> ACR ${DEFAULT_ACR_NAME}
 
   A locally-pushed image is not reproducible, carries no provenance, and
   is indistinguishable in the registry from one that does. If the build

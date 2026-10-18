@@ -194,9 +194,9 @@ outputs, publication and failure evidence, not merely a command in a manifest.
 | `codeql.yml` | Existing Go/JS/Python analysis; journaled SARIF upload and receipt still needed | #5480 |
 | `sbom.yml` | Disabled on October 18; definition removed by this change. Native `inventory.sbom` passed in release `b0643687e51532322e50eb0ff6014ab3`, retained 19 files and log `94d6ed5d-4a52-489c-a39e-f1e7703a4c66`. Summary file `06ffedd8baf50f1ff95b42134bf9a8bcd266addea103092afbe8b291da76266e` reports complete coverage; Go JSON/XML and npm lockfile reports are readable in the Library. Release/main-push/weekly/manual selection and missing-module/package refusal tests pass. The old workflow only retained artifacts; it never attached release assets | #5480 |
 | `scorecard.yml` | Scorecard execution, permissions, branch-rule/scheduled triggers and SARIF publication | #5480 |
-| `build-engine-images.yml` | Disabled: native builds own this path. Current release's verified Azure publication and production rollout remain | #5509 |
-| `dispatch-engine-images-on-release.yml` | Disabled to prevent competing release builders; MemQL owns explicit release requests | #5509 |
-| `recover-engine-image-mirror.yml` | Disabled to prevent a competing registry writer; reconcile immutable digests through native publication | #5509 |
+| `build-engine-images.yml` | Disabled and definition removed. Native release `b0643687e51532322e50eb0ff6014ab3` qualified all seven images; exact source, role, release and registry digests were verified before production rollout. Runtime source/version stamping, immutable publication and per-role build guards remain | #5509 |
+| `dispatch-engine-images-on-release.yml` | Disabled and definition removed. MemQL pins explicit release requests to the tag commit and deduplicates webhook delivery; native release tests cover both paths | #5509 |
+| `recover-engine-image-mirror.yml` | Disabled and definition removed. Reconcile immutable digests through the native publication journal; the Actions-only recovery wrapper is removed; native OCI verification and publication tests retain the provenance, digest and conflict checks | #5509 |
 | `build-toolchain-image.yml` | Build and publish future toolchains without Actions | #5509 |
 | `build-db-image.yml` | Native `tests.database-image` selects the verified operand target for changed inputs and full qualification; live native execution and separate registry publication remain | #5509 |
 | `mirror-fixture-images.yml` | Digest-verified fixture mirroring without Actions | #5509 |
