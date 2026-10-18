@@ -22,6 +22,8 @@ pipeline:
     steps:
     - name: work-suite
       placement: cluster
+      cpuMilli: 3000
+      memoryMiB: 4096
       services:
       - postgres
       timeout: 15m
