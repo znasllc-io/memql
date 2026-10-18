@@ -106,8 +106,8 @@ authoring-surface parity gap. No scheduled scan may satisfy a required PR check.
 ## Workflow retirement ledger
 
 Inventory uses the engine tree at the source revision above and GitHub's live
-workflow API, including generated workflows. **None of these rows is approved
-for retirement yet.** A replacement needs its trigger, execution, credentials,
+workflow API, including generated workflows. The retirement state below was
+rechecked on October 18. A replacement needs its trigger, execution, credentials,
 outputs, publication and failure evidence, not merely a command in a manifest.
 
 | Engine workflow | Replacement or remaining evidence | Owner |
@@ -118,17 +118,17 @@ outputs, publication and failure evidence, not merely a command in a manifest.
 | `codeql.yml` | Existing Go/JS/Python analysis; journaled SARIF upload and receipt still needed | #5480 |
 | `sbom.yml` | Native inventory now runs on release, main push, weekly and manual events; installed retained JSON/XML and complete module/lockfile evidence remain. The old workflow only retained artifacts, never attached release assets | #5480 |
 | `scorecard.yml` | Scorecard execution, permissions, branch-rule/scheduled triggers and SARIF publication | #5480 |
-| `build-engine-images.yml` | Seven native engine builds on the released instance; immutable publication and digest/provenance receipts | #5509 |
-| `dispatch-engine-images-on-release.yml` | MemQL release trigger and publication ownership, including duplicate-event recovery | #5509 |
-| `recover-engine-image-mirror.yml` | Reconcile immutable source/destination digests after interrupted publication | #5509 |
+| `build-engine-images.yml` | Disabled: native builds own this path. Current release's verified Azure publication and production rollout remain | #5509 |
+| `dispatch-engine-images-on-release.yml` | Disabled to prevent competing release builders; MemQL owns explicit release requests | #5509 |
+| `recover-engine-image-mirror.yml` | Disabled to prevent a competing registry writer; reconcile immutable digests through native publication | #5509 |
 | `build-toolchain-image.yml` | Build and publish future toolchains without Actions | #5509 |
 | `build-db-image.yml` | Native `tests.database-image` selects the verified operand target for changed inputs and full qualification; live native execution and separate registry publication remain | #5509 |
 | `mirror-fixture-images.yml` | Digest-verified fixture mirroring without Actions | #5509 |
-| `deploy-gate-image.yml` | Native deploy-gate image validation selects command/workspace changes on PRs and retains an unpublished OCI archive; cloud execution evidence remains | #5509 |
+| `deploy-gate-image.yml` | Disabled after installed-production run `3f3af7ca78ce6e9529aafa08f4bfa593` passed the unchanged build and retained its log, OCI archive and metadata; remove the file in final retirement | #5509 |
 | `install-e2e.yml` | Native host lifecycle matrix and cleanup | #5480 |
 | `install-cluster-e2e.yml` | Installed-cluster lifecycle and cleanup; preserve actual failure evidence | #5480 |
-| `pipelines-live.yml` | Disposable cluster runtime qualification and retained logs | #5480 |
-| `proving-live.yml` | Credentialed proving run with explicit authorization and evidence | #5480 |
+| `pipelines-live.yml` | Disabled unused manual placeholder: zero historical runs, command only refuses missing prerequisites; no runtime coverage lost | #5480 |
+| `proving-live.yml` | Disabled unused manual placeholder: zero historical runs, live provider remains unconfigured; no provider qualification claimed | #5480 |
 | `publish-docs-bundle.yml` | Native release-files builds and verifies the exact-version bundle with complete Git history; release attachment and downstream delivery receipt remain | #5508, #5712 |
 | `docs-current-check.yml` | Native weekly public docs check declared; installed schedule/failure delivery proof remains | #5508, #5712 |
 | `publish-sdk-core.yml` | Native release-files retains the compiled, version-checked npm archive; registry publication and immutable receipt remain | #5480 |
@@ -136,7 +136,7 @@ outputs, publication and failure evidence, not merely a command in a manifest.
 | `vscode-site.yml` | Native `tests.editor-site` builds and checks the static page, runs the existing Chromium browser suite and retains the page plus screenshots; cloud execution and served-version evidence remain | #5480 |
 | `ruleset-drift.yml` | Native daily public reads cover both recorded rulesets; installed schedule/failure delivery proof remains | #5507 |
 | `dependabot-tidy.yml` | Trusted dependency-PR maintenance, without exposing write authority to PR code | #5480 |
-| `clustere2e-compile.yml` API entry | File absent at this revision; verify no independent active execution before disabling the stale registration | #5480 |
+| `clustere2e-compile.yml` API entry | Disabled stale registration; the file is absent and the real compile coverage remains in native and required CI | #5480 |
 | Generated `github-code-scanning/codeql` | Reconcile GitHub default setup with advanced scanning and replacement publication | #5480 |
 | Generated `github-code-quality/codeql` | GitHub Code Quality is distinct from security CodeQL; equivalent coverage or an explicit owner decision is required | #5480 |
 | Generated Dependabot updates / graph | Retain useful GitHub dependency services per the design; explicitly resolve their managed Actions execution before claiming zero Actions dependency | #5480 |

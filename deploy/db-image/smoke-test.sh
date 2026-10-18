@@ -45,17 +45,21 @@
 
 set -euo pipefail
 
-IMAGE="${1:?usage: smoke-test.sh <image-ref> [pg-major] [current] [previous]}"
-PG_MAJOR="${2:-16}"
-TS_CURRENT="${3:-2.29.1}"
-TS_PREVIOUS="${4:-2.28.3}"
-
 function info() { printf 'INFO:  %s\n' "$*" >&2; }
 function fail() { printf 'ERROR: %s\n' "$*" >&2; exit 1; }
 
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-info "smoke-testing ${IMAGE} (pg${PG_MAJOR}, timescaledb ${TS_PREVIOUS} -> ${TS_CURRENT})"
-docker run --rm -i --user 26 --entrypoint bash "$IMAGE" \
-    -s -- "$PG_MAJOR" "$TS_CURRENT" "$TS_PREVIOUS" \
-    < "$SCRIPT_DIR/smoke-in-container.sh" || fail "runtime smoke test failed"
-info "SUCCESS: ${IMAGE} passed every smoke check"
+function main() {
+    IMAGE="${1:?usage: smoke-test.sh <image-ref> [pg-major] [current] [previous]}"
+    PG_MAJOR="${2:-16}"
+    TS_CURRENT="${3:-2.29.1}"
+    TS_PREVIOUS="${4:-2.28.3}"
+
+    SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+    info "smoke-testing ${IMAGE} (pg${PG_MAJOR}, timescaledb ${TS_PREVIOUS} -> ${TS_CURRENT})"
+    docker run --rm -i --user 26 --entrypoint bash "$IMAGE" \
+        -s -- "$PG_MAJOR" "$TS_CURRENT" "$TS_PREVIOUS" \
+        < "$SCRIPT_DIR/smoke-in-container.sh" || fail "runtime smoke test failed"
+    info "SUCCESS: ${IMAGE} passed every smoke check"
+}
+
+main "$@"
