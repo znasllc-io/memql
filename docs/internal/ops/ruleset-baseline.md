@@ -63,9 +63,9 @@ should not be edited to match today.
 
 **Decided 2026-09-27 (memql#5481, epic memql#5476; design record
 `docs/superpowers/specs/2026-09-16-pipelines-program-design.md`, section 1).**
-The `required_status_checks` rule keeps its one context, `ci-required`; only
-its "branch must be up to date" parameter is off. Read the live value rather
-than this line:
+The original change kept `ci-required` and turned off only the "branch must
+be up to date" parameter. The native cutover below adds a second required
+context. Read the live value rather than this line:
 
 ```
 $ gh api repos/znasllc-io/memql/rulesets/16630577 \
@@ -103,6 +103,44 @@ that is a new axis with its own baseline, as enforcement is.
 (see "Why a recorded baseline at all" -- a write that omits a rule deletes it),
 confirm `ruleset-drift.sh` still reports five rules asserted, and edit this
 section.
+
+### Native required check: October 18, 2026
+
+The owner authorized migration to native MemQL CI/CD in
+[memql#5480](https://github.com/znasllc-io/memql/issues/5480). The active ruleset
+now requires both `ci-required` and **`MemQL / memql`**, with the latter bound
+to GitHub App **4822538**, **MemQL for ZNAS LLC**. A status with the same name
+from another integration cannot satisfy it. The legacy context remains during
+the exact merge-candidate qualification; its removal is a separate recorded
+cutover after that proof.
+
+Native PR [#6176](https://github.com/znasllc-io/memql/pull/6176) passed on
+`fa2ce0b8e5277969838d9d026f537a44742f6f2e`, check
+[`117335797383`](https://github.com/znasllc-io/memql/runs/117335797383),
+with 35 passed steps and four expected path skips. The complete native
+v0.29.31 release on `1d087ac973e5fd1e620f99f93ef42dba1f3a3642` subsequently
+passed all 57 steps without skips, retained 57 logs and 136 artifacts, and
+deployed through instance
+[PR #226](https://github.com/znasllc-io/memql-znas/pull/226).
+
+The queue builds **one candidate at a time** (`max_entries_to_build: 1`) and
+allows **180 minutes** for its required checks. This bounds simultaneous
+candidate demand on the existing single-node build pool; it does not add
+compute or change any individual test deadline. The former 60-minute queue
+deadline did not allow for full native validation plus waiting behind other
+bounded jobs. `ALLGREEN`, the five-minute batch window, merge batch size,
+non-fast-forward/deletion protection, code-owner review, admin bypass actors
+and the disabled strict up-to-date parameter are preserved. The entire
+ruleset was re-read and compared after the update.
+
+The daily drift job above checks rule membership and enforcement. It does
+not claim to validate these parameters. Inspect the current bindings and
+queue values directly:
+
+```bash
+gh api repos/znasllc-io/memql/rulesets/16630577 \
+  --jq '.rules[] | select(.type=="required_status_checks" or .type=="merge_queue")'
+```
 
 ---
 
