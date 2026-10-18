@@ -13,6 +13,7 @@ import (
 
 	"github.com/znasllc-io/memql-cockpit/internal/worker/apps"
 	"github.com/znasllc-io/memql-cockpit/internal/worker/appsession"
+	"github.com/znasllc-io/memql-cockpit/internal/worker/capacity"
 	"github.com/znasllc-io/memql-cockpit/internal/worker/hardware"
 	"github.com/znasllc-io/memql-cockpit/internal/worker/modelcall"
 	"github.com/znasllc-io/memql-cockpit/internal/worker/models"
@@ -54,6 +55,7 @@ type Runner struct {
 	tools     ToolDispatcher
 	apps      AppInventory
 	modelsInv ModelInventory
+	capacity  CapacityProbe
 	calls     *modelcall.Manager
 	sessions  *appsession.Manager
 	pulls     *modelPuller
@@ -207,6 +209,16 @@ type Options struct {
 	// and a sentence -- a pull onto a machine that advertises nothing
 	// would fetch gigabytes the cluster is never told about.
 	ModelPull *ModelPullOptions
+	// Capacity measures what the machine can take on now, for every
+	// heartbeat. Nil sends no report, and the engine admits the machine on
+	// its concurrency slots alone.
+	Capacity CapacityProbe
+}
+
+// CapacityProbe takes one capacity measurement, or reports false when there
+// is nothing it can vouch for.
+type CapacityProbe interface {
+	Probe(ctx context.Context) (capacity.Report, bool)
 }
 
 // NewRunner constructs a Runner. The runner is not yet running; call
@@ -229,6 +241,7 @@ func NewRunner(opts Options) (*Runner, error) {
 		tools:     opts.Tools,
 		apps:      opts.Apps,
 		modelsInv: opts.Models,
+		capacity:  opts.Capacity,
 		calls:     opts.Calls,
 		sessions:  opts.Sessions,
 		heartbeat: hb,
@@ -577,12 +590,27 @@ func (r *Runner) heartbeatLoop(ctx context.Context, conn *Connection, beat *atom
 				inv := r.hardwareInventory(ctx)
 				hw = &inv
 			}
-			if err := conn.SendHeartbeat(0, nil, r.inventory(ctx), hw); err != nil {
+			if err := conn.SendHeartbeat(0, nil, r.inventory(ctx), hw, r.capacityReport(ctx)); err != nil {
 				return
 			}
 			beat.Store(true)
 		}
 	}
+}
+
+// capacityReport measures what the machine can take on now, or nil when it
+// cannot vouch for a figure. Measured on every beat: free memory and loaded
+// models move with every call, and the engine stops trusting a report after
+// two minutes.
+func (r *Runner) capacityReport(ctx context.Context) *capacity.Report {
+	if r == nil || r.capacity == nil {
+		return nil
+	}
+	report, ok := r.capacity.Probe(ctx)
+	if !ok {
+		return nil
+	}
+	return &report
 }
 
 // pipelinesPolicy reads the live pipelines consent, defaulting closed.

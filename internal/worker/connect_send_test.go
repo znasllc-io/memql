@@ -147,7 +147,7 @@ func TestEveryWriterKindReachesTheSeamConcurrently(t *testing.T) {
 		{"model pull end", func(i int) error {
 			return conn.SendModelPullEnd(&memqlv1.ModelPullEnd{RequestId: "pull-" + strconv.Itoa(i), Ok: true})
 		}, func(m *memqlv1.WorkerClientMessage) bool { return m.GetModelPullEnd() != nil }},
-		{"heartbeat", func(i int) error { return conn.SendHeartbeat(uint32(i), nil, nil, nil) },
+		{"heartbeat", func(i int) error { return conn.SendHeartbeat(uint32(i), nil, nil, nil, nil) },
 			func(m *memqlv1.WorkerClientMessage) bool { return m.GetHeartbeat() != nil }},
 		{"app session chunk", func(i int) error { return conn.SendAppSessionChunk("sess-1", "stdout", []byte("x"), uint64(i)) },
 			func(m *memqlv1.WorkerClientMessage) bool { return m.GetAppSessionChunk() != nil }},

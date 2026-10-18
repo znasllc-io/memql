@@ -10,6 +10,7 @@ import (
 
 	"github.com/znasllc-io/memql-cockpit/internal/worker/appsession"
 	"github.com/znasllc-io/memql-cockpit/internal/worker/backup"
+	"github.com/znasllc-io/memql-cockpit/internal/worker/capacity"
 	"github.com/znasllc-io/memql-cockpit/internal/worker/modelcall"
 	"github.com/znasllc-io/memql-cockpit/internal/worker/models"
 	"github.com/znasllc-io/memql-cockpit/internal/worker/tools"
@@ -345,6 +346,7 @@ func (f *Fleet) buildHome(home Home, machineID string) (homeRun, error) {
 
 		PipelinesPolicy: f.pipelinesPolicy(),
 		ModelPull:       pull,
+		Capacity:        f.capacityProbe(calls),
 	})
 	if err != nil {
 		return homeRun{}, err
@@ -397,4 +399,14 @@ func (f *Fleet) policyDownloadCheck() func(string) error {
 		return nil
 	}
 	return f.policy.CheckBackupDownloadPath
+}
+
+// capacityProbe measures what this machine can take on, for a machine that
+// serves models. One without a model inventory reports nothing: there is no
+// call the report could admit.
+func (f *Fleet) capacityProbe(calls *modelcall.Manager) CapacityProbe {
+	if f == nil || f.modelsInv == nil || f.discoverer == nil {
+		return nil
+	}
+	return &capacity.Prober{OllamaBase: f.discoverer.ResolvedOllamaBaseURL, InFlight: calls.InFlightByModel}
 }

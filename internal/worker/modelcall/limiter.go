@@ -85,6 +85,24 @@ func (l *Limiter) release(modelID string) {
 	l.freed = make(chan struct{})
 }
 
+// InFlightByModel reports the admitted calls per model id, across every
+// Manager sharing this Limiter -- what the capacity report says each loaded
+// model is busy with.
+func (l *Limiter) InFlightByModel() map[string]int {
+	if l == nil {
+		return nil
+	}
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	out := make(map[string]int, len(l.perModel))
+	for id, n := range l.perModel {
+		if n > 0 {
+			out[id] = n
+		}
+	}
+	return out
+}
+
 // InFlight reports how many admitted calls hold a slot, across every
 // Manager sharing this Limiter.
 func (l *Limiter) InFlight() int {
