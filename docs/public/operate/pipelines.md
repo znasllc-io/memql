@@ -42,7 +42,7 @@ checks to another source, disconnect the pipeline it has first
 |---|---|---|
 | `v1:pipelines:pipeline` | source | The repository, how deliveries arrive, where steps may run, which secrets they may resolve, what the poll has seen, the timing table. Never the manifest: every run reads that at its own commit |
 | `v1:pipelines:run` | attempt of one run key | The event and mode, status and conclusion, the refusal that ended it, the check run's id and state, the stage table, the agent driving it |
-| `v1:pipelines:channel` | notify target | Where a notify stage delivers. Its writers arrive with epic memql#5480 |
+| `v1:pipelines:channel` | notify target | Where a notify stage delivers; managed in Deployables → Settings → Channels |
 
 A run compiles into one `v1:work:goal` with one `v1:work:step` per step, so the
 work spine's journal and the Nexus drawing show it like any other work. Every
@@ -540,6 +540,28 @@ re-stage elsewhere -- so the delivery a step reports is the one the outbound
 worker made. The rows are still readable by any signed-in reader
 (memql#5804), so a message carries nothing the run page does not.
 
+### Configure a notification channel
+
+In **Deployables → Settings → Channels**, add an email or Discord channel.
+Use a stable name such as `releases`; the manifest's notify stage refers to
+that name. For email, enter one bare email address per line (up to 20). For
+Discord, enter the name of the secret holding the webhook URL, not the URL
+itself. The secret name must start with a capital letter, contain only capital
+letters, digits and underscores, and stay outside the reserved `MEMQL_` prefix.
+
+Save the channel, reopen it, and select the pipelines allowed to send to it.
+Both the channel and each selected pipeline must belong to you. Configuration
+changes do not send a test message or start a run. The generated SDK exposes
+these same operations as `pipelinesChannelSave`, `pipelinesChannelArchive` and
+`pipelinesChannelAllow`, under the `app:deployables/channels` capability.
+
+Archiving keeps the channel and its history, while stopping new notification
+admissions. **Save and resume** reactivates the same name. Existing pipeline
+grants survive archival; uncheck a pipeline to revoke its grant. Running
+pipelines re-read grants and channel status before admitting a notification,
+including changes made on another replica. Messages already queued with the
+outbound worker may still arrive.
+
 ### When a step is skipped
 
 A skip is reserved for work that had nothing to do. It is never a refusal in
@@ -972,12 +994,9 @@ deliveries, the poll, run keys, the plan, the work goal, the check run, the
 Runs tab, run page, Checks and connect flow, and every command step run as a
 Kubernetes Job on the cluster, or on one of the owner's machines for a step
 naming a need, with its output in the log store and its full log and artifacts
-in the owner's Library ([Pipelines substrate](pipelines-substrate.md)). One
-thing waits for a later epic:
-
-| Not yet | Arrives with | Until then |
-|---|---|---|
-| Channels a person can create (the channel builtins, and Deployables > Settings > Channels) | epic memql#5480 | A notify stage delivers over the outbound path to a channel of its pipeline's owner; while none exists, it fails `pipeline_channel_missing`, and so does the run |
+in the owner's Library ([Pipelines substrate](pipelines-substrate.md)). Notify
+stages require an active channel and an explicit pipeline grant; a missing or
+revoked channel fails the run instead of implying that delivery succeeded.
 
 **Do not make `MemQL / <name>` a required check until a run has passed on this
 cluster.** A cluster has to be ready for steps before any runs: on one that does

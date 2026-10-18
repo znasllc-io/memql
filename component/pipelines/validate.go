@@ -39,6 +39,9 @@ const reservedSecretPrefix = "MEMQL_"
 
 const manifestNameRule = "use lower-case letters, digits and hyphens, starting with a letter or digit, at most 40 characters"
 
+// ValidName reports whether a configured name can be referenced by a manifest.
+func ValidName(name string) bool { return manifestNameRe.MatchString(name) }
+
 var (
 	// manifestNameRe is every name a pipeline declares: stages, steps,
 	// channels, buckets and services. A name is part of a step key
