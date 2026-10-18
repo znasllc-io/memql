@@ -129,27 +129,33 @@ RUN set -eux; \
     apt-get update; \
     \
     pkg="timescaledb-2-postgresql-${PG_MAJOR}"; \
+    loader="timescaledb-2-loader-postgresql-${PG_MAJOR}"; \
     # Resolve each upstream minor to its FULL Debian version. The packages carry
     # a distro+build suffix (2.29.1~debian12-1614) whose trailing number moves
     # on rebuilds, so pinning the literal string here would rot; resolving it
     # keeps the pin exact for THIS build while surviving upstream rebuilds. An
     # unresolvable version fails the build loudly rather than silently taking
     # whatever is newest.
-    resolve() { apt-cache madison "$pkg" | awk -v p="$1~" 'index($3, p) == 1 { print $3; exit }'; }; \
-    cur="$(resolve "${TIMESCALEDB_VERSION}")"; \
-    prev="$(resolve "${TIMESCALEDB_PREVIOUS_VERSION}")"; \
+    resolve() { apt-cache madison "$1" | awk -v p="$2~" 'index($3, p) == 1 { print $3; exit }'; }; \
+    cur="$(resolve "$pkg" "${TIMESCALEDB_VERSION}")"; \
+    prev="$(resolve "$pkg" "${TIMESCALEDB_PREVIOUS_VERSION}")"; \
+    loaderVersion="$(resolve "$loader" "${TIMESCALEDB_VERSION}")"; \
     if [ -z "$cur" ]; then echo "ERROR: TimescaleDB ${TIMESCALEDB_VERSION} not available for ${codename}/pg${PG_MAJOR}" >&2; exit 1; fi; \
     if [ -z "$prev" ]; then echo "ERROR: TimescaleDB ${TIMESCALEDB_PREVIOUS_VERSION} not available for ${codename}/pg${PG_MAJOR}" >&2; exit 1; fi; \
-    echo "INFO:  current=${cur} previous=${prev}"; \
+    if [ -z "$loaderVersion" ]; then echo "ERROR: TimescaleDB loader ${TIMESCALEDB_VERSION} not available for ${codename}/pg${PG_MAJOR}" >&2; exit 1; fi; \
+    echo "INFO:  current=${cur} previous=${prev} loader=${loaderVersion}"; \
     \
     # Install the PREVIOUS minor first and stash its versioned .so, because
     # installing the current one over it removes the old library as part of the
     # package upgrade. The CURRENT package supplies the N-1 -> N update SQL, so
     # only the .so needs preserving.
-    apt-get install -y --no-install-recommends "${pkg}=${prev}"; \
+    # The loader owns timescaledb.control as well as timescaledb.so. The
+    # extension's dependency accepts newer loaders, so leaving it unpinned
+    # makes CREATE EXTENSION request a version whose SQL is absent here.
+    apt-get install -y --no-install-recommends "${pkg}=${prev}" "${loader}=${loaderVersion}"; \
     cp "/usr/lib/postgresql/${PG_MAJOR}/lib/timescaledb-${TIMESCALEDB_PREVIOUS_VERSION}.so" /tmp/timescaledb-previous.so; \
     \
-    apt-get install -y --no-install-recommends "${pkg}=${cur}"; \
+    apt-get install -y --no-install-recommends "${pkg}=${cur}" "${loader}=${loaderVersion}"; \
     mv /tmp/timescaledb-previous.so "/usr/lib/postgresql/${PG_MAJOR}/lib/timescaledb-${TIMESCALEDB_PREVIOUS_VERSION}.so"; \
     \
     # The acceptance criterion, asserted here rather than hoped for. A missing
@@ -157,6 +163,7 @@ RUN set -eux; \
     test -f "/usr/lib/postgresql/${PG_MAJOR}/lib/timescaledb.so"; \
     test -f "/usr/lib/postgresql/${PG_MAJOR}/lib/timescaledb-${TIMESCALEDB_VERSION}.so"; \
     test -f "/usr/lib/postgresql/${PG_MAJOR}/lib/timescaledb-${TIMESCALEDB_PREVIOUS_VERSION}.so"; \
+    test "$(awk -F"'" '/^default_version[[:space:]]*=/{print $2}' "/usr/share/postgresql/${PG_MAJOR}/extension/timescaledb.control")" = "${TIMESCALEDB_VERSION}"; \
     # pgvector comes from the `standard` base; assert it rather than assume it,
     # so a base-flavor change (standard -> minimal) fails here and not at the
     # first CREATE EXTENSION vector in a live cluster.
