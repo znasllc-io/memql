@@ -84,6 +84,7 @@ func (s *spineScope) operations() map[string]workflowhost.Operation {
 		"spineCandidates":      s.findCandidates,
 		"spineUseCandidate":    s.useCandidate,
 		"spineClassify":        s.classify,
+		"spineSetWorkload":     s.setWorkload,
 		"spineAcknowledge":     s.acknowledge,
 		"spineRefineSections":  s.refineSections,
 		"spineReviewSections":  s.reviewSections,
@@ -198,7 +199,7 @@ func (s *spineScope) useCandidate(_ context.Context, args map[string]any) (any, 
 	return true, nil
 }
 
-func (s *spineScope) classify(ctx context.Context, _ map[string]any) (any, error) {
+func (s *spineScope) classify(ctx context.Context, args map[string]any) (any, error) {
 	if s.classified {
 		return nil, fmt.Errorf("Spine may classify only once")
 	}
@@ -213,8 +214,13 @@ func (s *spineScope) classify(ctx context.Context, _ map[string]any) (any, error
 		ctx = l.withAcknowledgementCandidate(ctx, req)
 	}
 
-	// Tier 3: ONE classifier call answering complexity AND sectionability.
-	triageCtx, cancelTriage := context.WithTimeout(airoute.WithCallPurpose(ctx, "Understanding request", 0), 60*time.Second)
+	// The installed recipe budgets queueing and inference together. The
+	// parent's durable run deadline still bounds the entire operation.
+	timeout, err := spineCallTimeout(args, 60)
+	if err != nil {
+		return nil, err
+	}
+	triageCtx, cancelTriage := context.WithTimeout(airoute.WithCallPurpose(ctx, "Understanding request", 0), timeout)
 	complexity, _, sectionable, cerr := l.classifyGoal(triageCtx, req.Statement, time.Now().UTC().Format(time.RFC3339), guidance, keys, conversation)
 	cancelTriage()
 
@@ -255,17 +261,35 @@ func (s *spineScope) classify(ctx context.Context, _ map[string]any) (any, error
 		if sectionable.Sectionable || *sectionable.RequiresFile || sectionable.Navigation != nil {
 			return nil, fmt.Errorf("work compile: conflicting reply delivery contract; retry the request")
 		}
-		out.Reply = out.Workload == "quick"
+		sectionable.Workload = out.Workload
+		out.Reply = sectionable.quickReply()
 		if out.Reply {
 			out.Acknowledgement = ""
 		}
 	}
 	sectionable.Workload = out.Workload
 	s.guidance, s.decision = guidance, sectionable
-	return map[string]any{"complexity": string(complexity), "intent": sectionable.Intent, "sectionable": sectionable.Sectionable, "requiresFile": sectionable.RequiresFile != nil && *sectionable.RequiresFile, "hasEffects": sectionable.hasEffects(), "conversational": conversational, "workload": out.Workload, "acknowledgement": out.Acknowledgement}, nil
+	return map[string]any{"complexity": string(complexity), "intent": sectionable.Intent, "sectionable": sectionable.Sectionable, "requiresFile": sectionable.RequiresFile != nil && *sectionable.RequiresFile, "requiresResearch": sectionable.RequiresResearch, "hasEffects": sectionable.hasEffects(), "conversational": conversational, "workload": out.Workload, "acknowledgement": out.Acknowledgement}, nil
 }
 
-func (s *spineScope) acknowledge(ctx context.Context, _ map[string]any) (any, error) {
+// setWorkload records policy selected by the pinned DSL before planning. The
+// durable writer intersects this estimate with the goal's declared ceilings.
+func (s *spineScope) setWorkload(_ context.Context, args map[string]any) (any, error) {
+	if !s.classified || s.prepared || s.designed {
+		return nil, fmt.Errorf("Spine workload requires classification before planning")
+	}
+	workload := getString(args, "workload")
+	switch workload {
+	case "quick", "lookup", "research", "project":
+	default:
+		return nil, fmt.Errorf("invalid Spine workload estimate")
+	}
+	s.out.Workload, s.decision.Workload = workload, workload
+	s.out.Reply = s.conversational && s.decision.quickReply()
+	return true, nil
+}
+
+func (s *spineScope) acknowledge(ctx context.Context, args map[string]any) (any, error) {
 	if !s.classified || s.acknowledged {
 		return nil, fmt.Errorf("Spine acknowledgement requires one classification and permits one repair")
 	}
@@ -274,7 +298,11 @@ func (s *spineScope) acknowledge(ctx context.Context, _ map[string]any) (any, er
 		return false, nil
 	}
 	ackOutcome := s.out
-	s.out.Acknowledgement = s.loop.repairAcknowledgement(ctx, s.req, s.conversation, &ackOutcome)
+	timeout, err := spineCallTimeout(args, 15)
+	if err != nil {
+		return nil, err
+	}
+	s.out.Acknowledgement = s.loop.repairAcknowledgement(ctx, s.req, s.conversation, &ackOutcome, timeout)
 	return s.out.Acknowledgement != "", nil
 }
 
@@ -503,4 +531,18 @@ func (e *spineMeteredEngine) InvokeAIStructured(ctx context.Context, name string
 
 func (e *spineMeteredEngine) InvokeAIChatWithFilteredTools(context.Context, string, map[string]any, []string) (string, error) {
 	return "", fmt.Errorf("Spine compilation cannot open an unmetered tool loop")
+}
+
+// Older frozen recipes omit this parameter. New recipes declare their policy;
+// native bounds prevent an authored call from becoming unbounded.
+func spineCallTimeout(args map[string]any, fallback int) (time.Duration, error) {
+	config := struct{ TimeoutSeconds int }{TimeoutSeconds: fallback}
+	raw, err := json.Marshal(args)
+	if err != nil {
+		return 0, err
+	}
+	if err := json.Unmarshal(raw, &config); err != nil || config.TimeoutSeconds < 1 || config.TimeoutSeconds > 600 {
+		return 0, fmt.Errorf("Spine model call requires timeoutSeconds between 1 and 600")
+	}
+	return time.Duration(config.TimeoutSeconds) * time.Second, nil
 }

@@ -25,6 +25,7 @@ automation guarded {
 		{"retry", func(a *Automation) { a.Steps[0].RetryCount++ }},
 		{"error-policy", func(a *Automation) { a.Steps[0].OnError = ErrorStrategyContinue }},
 		{"journal-policy", func(a *Automation) { a.JournalRequired = true }},
+		{"journal-on-write", func(a *Automation) { a.JournalOnWrite = true }},
 		{"nested-body", func(a *Automation) { a.Steps[1].ForEach.Do[0].Function.Name = "changed" }},
 		{"input-contract", func(a *Automation) { a.Args = nil }},
 	} {

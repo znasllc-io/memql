@@ -32,6 +32,7 @@ import (
 // installed feedback tool, work bridge, checkpoint and public decision handler.
 type feedbackAnswerProvider struct {
 	first    bool
+	optional bool
 	requests [][]common.ChatMessage
 }
 
@@ -44,12 +45,12 @@ func (p *feedbackAnswerProvider) CallChatWithTools(_ context.Context, messages [
 		p.first = false
 		return &common.ToolCallingChatResult{ToolCalls: []common.ToolCall{
 			{ID: "completed", Name: "discoverCapabilities", Arguments: `{}`},
-			{ID: "scope-call", Name: "requestUserFeedback", Arguments: `{"kind":"text","question":"Which synthetic input should be used?"}`},
+			{ID: "scope-call", Name: "requestUserFeedback", Arguments: fmt.Sprintf(`{"kind":"text","question":"Which synthetic input should be used?","optional":%v}`, p.optional)},
 			{ID: "unstarted", Name: "discoverCapabilities", Arguments: `{}`},
 		}}, nil
 	}
 	for _, m := range messages {
-		if m.Role == "user" && strings.HasPrefix(m.Content, "[Recorded answer for this ") && strings.Contains(m.Content, feedbackAnswerText) {
+		if m.Role == "user" && strings.HasPrefix(m.Content, "[Recorded answer for this ") && (strings.Contains(m.Content, feedbackAnswerText) || (p.optional && strings.Contains(m.Content, "NO ANSWER"))) {
 			return &common.ToolCallingChatResult{ToolCalls: []common.ToolCall{{ID: "done", Name: "respondToUser", Arguments: `{"status":"complete","response":"Correction received without executing an operation"}`}}}, nil
 		}
 	}
@@ -95,6 +96,14 @@ func (a *feedbackAnswerAdapter) ExecuteToolByName(ctx context.Context, name stri
 const feedbackAnswerText = "Use the already reviewed synthetic input."
 
 func TestWorkDBFeedbackAnswerPreservesExecutionLineage(t *testing.T) {
+	testWorkFeedbackContinuation(t, false)
+}
+
+func TestWorkDBOptionalTimeoutPreservesExecutionLineage(t *testing.T) {
+	testWorkFeedbackContinuation(t, true)
+}
+
+func testWorkFeedbackContinuation(t *testing.T, optional bool) {
 	// One real replica pair serves all sequential cases; each lane owns its rows.
 	writer, db := workTemplateDBEngineAndDB(t)
 	reader := workTemplateDBEngine(t)
@@ -121,7 +130,10 @@ func TestWorkDBFeedbackAnswerPreservesExecutionLineage(t *testing.T) {
 			}
 		}
 		require.NotNil(t, wi)
-		runner := &feedbackAnswerProvider{first: n == 0}
+		if optional {
+			wi.SetNow(func() time.Time { return time.Now().UTC().Add(-2 * time.Minute) })
+		}
+		runner := &feedbackAnswerProvider{first: n == 0, optional: optional}
 		runners = append(runners, runner)
 		ai := agents.New(e.Agents(), e)
 		ai.SetWorkGoals(&agentWorkGoals{work: wi})
@@ -191,7 +203,11 @@ func TestWorkDBFeedbackAnswerPreservesExecutionLineage(t *testing.T) {
 			write("createWorkRun", map[string]any{"runId": runID, "goalId": goalID, "automationName": "parent", "templateFingerprint": triggers[0].template.members["parent"].DefinitionFingerprint(id.New()), "mode": "live", "status": "running", "startedAt": time.Now().UTC().Format(time.RFC3339Nano)})
 			write("updateWorkRun", map[string]any{"runId": runID, "spent": map[string]any{"modelCalls": 3, "retries": 2}})
 			var previousApproval, previousChild string
-			for attempt := 0; attempt < 2; attempt++ {
+			attempts := 2
+			if optional {
+				attempts = 1
+			}
+			for attempt := 0; attempt < attempts; attempt++ {
 				ex := triggers[0].executor()
 				expectedRerun := ""
 				var runErr error
@@ -231,7 +247,15 @@ func TestWorkDBFeedbackAnswerPreservesExecutionLineage(t *testing.T) {
 				require.NotEqual(t, previousChild, childID)
 				previousApproval, previousChild = wait.ApprovalID, childID
 				beforeState := j.StepStates[step]
-				call("decideApproval", map[string]any{"approvalId": wait.ApprovalID, "decision": "answered", "answer": map[string]any{"text": feedbackAnswerText}})
+				if optional {
+					// The work integration's isolated DB suite exercises competing
+					// sweeps. Here replay its exact receipt to exercise the full
+					// nested agent continuation without sweeping other test runs.
+					write("continueWorkFeedback", map[string]any{"approvalId": wait.ApprovalID, "continuedAt": time.Now().UTC().Format(time.RFC3339Nano), "versionTime": time.Now().UTC().Format(time.RFC3339Nano)})
+					write("updateWorkRun", map[string]any{"runId": runID, "status": "running", "waitingOn": map[string]any{}, "humanResumeId": wait.ApprovalID})
+				} else {
+					call("decideApproval", map[string]any{"approvalId": wait.ApprovalID, "decision": "answered", "answer": map[string]any{"text": feedbackAnswerText}})
+				}
 				j = load()
 				require.Equal(t, "running", j.Status)
 				actualRerun := ""
@@ -260,8 +284,13 @@ func TestWorkDBFeedbackAnswerPreservesExecutionLineage(t *testing.T) {
 				require.Equal(t, float64(3), final["spent"].(map[string]any)["modelCalls"])
 				require.Equal(t, float64(2), final["spent"].(map[string]any)["retries"])
 				approval := query("workApprovalForOwner", map[string]any{"approvalId": wait.ApprovalID})[0]
-				require.Equal(t, "answered", approval["decision"])
-				require.Equal(t, feedbackAnswerText, approval["answer"].(map[string]any)["text"])
+				if optional {
+					require.Equal(t, "", approval["decision"])
+					require.NotEmpty(t, approval["continuedAt"])
+				} else {
+					require.Equal(t, "answered", approval["decision"])
+					require.Equal(t, feedbackAnswerText, approval["answer"].(map[string]any)["text"])
+				}
 				child, err := automations.LoadRunJournal(memql.ContextWithFreshRead(person), reader, childID)
 				require.NoError(t, err)
 				require.Equal(t, "succeeded", child.Status)

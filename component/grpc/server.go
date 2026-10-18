@@ -954,6 +954,7 @@ func (s *service) executeQueryAuthored(ctx context.Context, query string, client
 type subscriptionInfo struct {
 	kind     memqlv1.SubscriptionKind
 	patterns []string
+	idOnly   bool
 }
 
 type streamSession struct {
@@ -1196,13 +1197,9 @@ func (s *streamSession) handleBusEvent(event events.Event) {
 		}
 	}
 
-	structPayload, err := structpb.NewStruct(payload)
-	if err != nil {
-		if s.logger != nil {
-			s.logger.Warn("failed to convert event payload", "error", err, "topic", event.Topic)
-		}
-		return
-	}
+	// Build each wire shape only if a matching subscriber needs it. Projected
+	// collections reread through their authorized query and need only identity.
+	var fullPayload, identityPayload *structpb.Struct
 
 	// Find matching subscription IDs for this event
 	matchCount := 0
@@ -1239,12 +1236,32 @@ func (s *streamSession) handleBusEvent(event events.Event) {
 			s.logger.Debug("subscription matched, sending event", "subscriptionId", subscriptionId, "pattern", matched, "topic", event.Topic)
 		}
 
+		omitted := admission == memqlengine.SubscriptionIdOnly ||
+			(info.idOnly && strings.HasPrefix(event.Topic, events.TopicGraphNode+"."))
+		wirePayload := &fullPayload
+		if omitted {
+			wirePayload = &identityPayload
+		}
+		if *wirePayload == nil {
+			fields := payload
+			if omitted {
+				fields = idOnlyEventPayload(payload)
+			}
+			var err error
+			*wirePayload, err = structpb.NewStruct(fields)
+			if err != nil {
+				if s.logger != nil {
+					s.logger.Warn("failed to convert event payload", "error", err, "topic", event.Topic)
+				}
+				return true
+			}
+		}
 		notification := &memqlv1.EventNotification{
 			SubscriptionId: subscriptionId,
 			Kind:           events.ToProtoEventKind(event.Kind),
 			Ts:             timestamppb.New(event.Timestamp),
-			Payload:        structPayload,
-			PayloadOmitted: admission == memqlengine.SubscriptionIdOnly,
+			Payload:        *wirePayload,
+			PayloadOmitted: omitted,
 		}
 
 		_ = s.sendServerMessage("", &memqlv1.MemqlServerMessage{
@@ -2254,6 +2271,7 @@ func (s *streamSession) handleSubscribe(envelope *memqlv1.MemqlClientMessage, ms
 	info := &subscriptionInfo{
 		kind:     msg.GetKind(),
 		patterns: patterns,
+		idOnly:   msg.GetConfig().GetFields()["idOnly"].GetBoolValue(),
 	}
 	s.subscriptions.Store(subscriptionId, info)
 
@@ -2721,6 +2739,7 @@ func (s *streamSession) sendServerMessage(correlate string, msg *memqlv1.MemqlSe
 	if msg == nil {
 		return nil
 	}
+	msg = s.clientAIMetadata(msg)
 	msg.MessageId = id.NewShortId()
 	msg.CorrelateTo = s.safeCorrelate(correlate)
 

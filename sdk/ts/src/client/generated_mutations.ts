@@ -851,6 +851,28 @@ QueryClient.prototype.configureAccountDomains = function (this: QueryClient, arg
   return this.executeNamed("configureAccountDomains", buildConfigureAccountDomains(args), opts);
 };
 
+/** Explicitly choose who owns future research. Disabled is the default. */
+// Bound concept: v1:models:catalogResearchSettings (machine-readable: BoundConcepts["configureModelCatalogResearch"] in generated_concepts.ts).
+export interface ConfigureModelCatalogResearchArgs {
+  enabled: boolean;
+}
+
+export function buildConfigureModelCatalogResearch(args: ConfigureModelCatalogResearchArgs): string {
+  const parts: string[] = [];
+  parts.push("enabled: " + renderMemQLValue(args.enabled));
+  return "mutation configureModelCatalogResearch(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    configureModelCatalogResearch(args: ConfigureModelCatalogResearchArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.configureModelCatalogResearch = function (this: QueryClient, args: ConfigureModelCatalogResearchArgs = {} as ConfigureModelCatalogResearchArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("configureModelCatalogResearch", buildConfigureModelCatalogResearch(args), opts);
+};
+
 /** Human confirm a data record, updating confirm count and validation state */
 // Bound concept: v1:data:record (machine-readable: BoundConcepts["confirmRecord"] in generated_concepts.ts).
 export interface ConfirmRecordArgs {
@@ -2377,6 +2399,26 @@ declare module "./query.js" {
 
 QueryClient.prototype.createLibraryWatchedFolder = function (this: QueryClient, args: CreateLibraryWatchedFolderArgs = {} as CreateLibraryWatchedFolderArgs, opts?: QueryCallOptions): Promise<Result> {
   return this.executeNamed("createLibraryWatchedFolder", buildCreateLibraryWatchedFolder(args), opts);
+};
+
+/** createMachineActivity wraps the mutation named "createMachineActivity". */
+// Bound concept: v1:worker:activity (machine-readable: BoundConcepts["createMachineActivity"] in generated_concepts.ts).
+export interface CreateMachineActivityArgs {
+}
+
+export function buildCreateMachineActivity(args: CreateMachineActivityArgs): string {
+  void args;
+  return "mutation createMachineActivity()";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    createMachineActivity(args?: CreateMachineActivityArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.createMachineActivity = function (this: QueryClient, args: CreateMachineActivityArgs = {} as CreateMachineActivityArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("createMachineActivity", buildCreateMachineActivity(args), opts);
 };
 
 /** Create a magic-link request row at issuance time. */
@@ -4232,7 +4274,7 @@ export interface ModelProfileAddArgs {
   modelId: string;
   // Enum: text | reasoning | omni | vision | audioIn | audioOut | imageGen | videoGen | embeddings
   category: string;
-  // Enum: ollama | mlx | whispercpp | nemo | kokoro | mflux | comfyui
+  // Enum: ollama | mlx | whispercpp | nemo | kokoro | mflux | comfyui | openai-compatible | cloud
   runtime: string;
   // Enum: 16 | 24 | 32 | 64 | 128
   minMachineClass: string;
@@ -7848,6 +7890,26 @@ declare module "./query.js" {
 
 QueryClient.prototype.updateLibraryWatchedFolder = function (this: QueryClient, args: UpdateLibraryWatchedFolderArgs = {} as UpdateLibraryWatchedFolderArgs, opts?: QueryCallOptions): Promise<Result> {
   return this.executeNamed("updateLibraryWatchedFolder", buildUpdateLibraryWatchedFolder(args), opts);
+};
+
+/** updateMachineActivity wraps the mutation named "updateMachineActivity". */
+// Bound concept: v1:worker:activity (machine-readable: BoundConcepts["updateMachineActivity"] in generated_concepts.ts).
+export interface UpdateMachineActivityArgs {
+}
+
+export function buildUpdateMachineActivity(args: UpdateMachineActivityArgs): string {
+  void args;
+  return "mutation updateMachineActivity()";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    updateMachineActivity(args?: UpdateMachineActivityArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.updateMachineActivity = function (this: QueryClient, args: UpdateMachineActivityArgs = {} as UpdateMachineActivityArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("updateMachineActivity", buildUpdateMachineActivity(args), opts);
 };
 
 /** Operator-driven status transition on a missingCapability row. Used by the platform team's backlog tooling to mark a gap as in_progress, resolved (with a note on what shipped), or wontfix. */

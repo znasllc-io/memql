@@ -4755,10 +4755,10 @@ func TestStatusStates(t *testing.T) {
 		want   StatusReply
 	}{
 		{"no Job is absent", nil, StatusReply{State: StateAbsent}},
-		{"a persisted outcome is finished, with it", map[string]string{AnnotRunner: rtStamp(rtOther, rtT0), AnnotOutcome: mustJSON(t, outcome)}, StatusReply{State: StateFinished, Result: &outcome, JobCreatedAt: created}},
-		{"a fresh claim is running, on its node", map[string]string{AnnotRunner: rtStamp(rtOther, rtT0.Add(-10*time.Second))}, StatusReply{State: StateRunning, Runner: rtOther, JobCreatedAt: created}},
-		{"a claim older than HeartbeatStale is stale, naming the node that went quiet", map[string]string{AnnotRunner: rtStamp(rtOther, rtT0.Add(-46*time.Second))}, StatusReply{State: StateStale, Runner: rtOther, JobCreatedAt: created}},
-		{"an unclaimed Job is stale", map[string]string{}, StatusReply{State: StateStale, JobCreatedAt: created}},
+		{"a persisted outcome is finished, with it", map[string]string{AnnotRunner: rtStamp(rtOther, rtT0), AnnotOutcome: mustJSON(t, outcome)}, StatusReply{State: StateFinished, Result: &outcome, ExecutionStartedAt: created}},
+		{"a fresh claim is running, on its node", map[string]string{AnnotRunner: rtStamp(rtOther, rtT0.Add(-10*time.Second))}, StatusReply{State: StateRunning, Runner: rtOther, ExecutionStartedAt: created}},
+		{"a claim older than HeartbeatStale is stale, naming the node that went quiet", map[string]string{AnnotRunner: rtStamp(rtOther, rtT0.Add(-46*time.Second))}, StatusReply{State: StateStale, Runner: rtOther, ExecutionStartedAt: created}},
+		{"an unclaimed Job is stale", map[string]string{}, StatusReply{State: StateStale, ExecutionStartedAt: created}},
 	} {
 		t.Run(c.name, func(t *testing.T) {
 			h := newRunnerHarness(t)
@@ -4787,7 +4787,7 @@ func TestStatusStates(t *testing.T) {
 		if got.State != StateRunning {
 			t.Errorf("Status = %+v, want running: this replica holds the step, waiting for a slot", got)
 		}
-		if got.JobCreatedAt != "" {
+		if got.ExecutionStartedAt != "" {
 			t.Errorf("Status = %+v, want no creation time: a step waiting for a slot has no Job, and the agent "+
 				"waits on it until its run's ceiling rather than its own timeout", got)
 		}

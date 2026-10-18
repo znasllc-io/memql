@@ -440,6 +440,24 @@ func (f stepFiles) quote(text string) string { return strconv.Quote(f.mask(text)
 // Cancelled, failed, refused
 // ---------------------------------------------------------------------------
 
+// A suspended Job has no active deadline yet. Retire its deterministic
+// attempt before deleting it so delayed admission or a forwarded replay
+// cannot execute it after the run has ended. The same guarded cleanup used
+// by cancellation leaves a durable marker for another replica to reconcile.
+func (s *step) stopAtRunCeiling(pod *Pod) pl.StepResult {
+	ctx, cancel := context.WithTimeout(context.WithoutCancel(s.ctx), quickCallTimeout)
+	defer cancel()
+	why := "the run reached its ceiling while waiting for or using background resources"
+	if err := s.r.cleanupReceipt(ctx, s.jobName); err != nil {
+		s.log.Warn("pipelines: run ceiling reached; resource cleanup remains unconfirmed", "error", err)
+		why += "; resource cleanup is pending reconciliation"
+	}
+	res := s.cancelled(pod, why)
+	res.Status = pl.OutcomeFailed
+	res.Failure = &pl.Failure{Code: pl.CodeRunCeiling, Message: why}
+	return res
+}
+
 // abandon answers a Run whose context ended: the agent cancelled the step. A
 // persisted outcome stands -- a cancel after it changes nothing, and nothing
 // rewrites it. Otherwise the Job and its Secret are deleted and the step is

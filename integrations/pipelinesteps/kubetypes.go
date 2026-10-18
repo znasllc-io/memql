@@ -70,6 +70,7 @@ type Job struct {
 // ends failed while its listener has to keep running -- and it is a pointer
 // because absent means something else again: no per-index limit at all.
 type JobSpec struct {
+	Suspend                 *bool           `json:"suspend,omitempty"`
 	BackoffLimit            *int32          `json:"backoffLimit,omitempty"`
 	ActiveDeadlineSeconds   *int64          `json:"activeDeadlineSeconds,omitempty"`
 	TTLSecondsAfterFinished *int32          `json:"ttlSecondsAfterFinished,omitempty"`
@@ -206,8 +207,9 @@ type AppArmorProfile struct {
 }
 
 // Capabilities are the Linux capabilities a container gives up from the
-// container runtime's default set. Only the fixed rootless builder adds
-// SETUID/SETGID back for its pinned mapping helpers after dropping ALL.
+// container runtime's default set. The fixed rootless builder adds SETUID/SETGID
+// for mapping helpers. Opt-in cache reclamation adds DAC_OVERRIDE only to its
+// credential-free initializer. Both drop ALL before the explicit additions.
 type Capabilities struct {
 	Drop []string `json:"drop,omitempty"`
 	Add  []string `json:"add,omitempty"`

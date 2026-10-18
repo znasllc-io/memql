@@ -12,3 +12,11 @@ func TestNativeEditorHostRunnerRetainsFailuresAndCoversHostMatrix(t *testing.T) 
 		t.Fatalf("native editor host runner: %v\n%s", err, out)
 	}
 }
+
+func TestNativeEditorProfilesSupportOwnedDeepScratch(t *testing.T) {
+	cmd := exec.Command("node", "--test", "scripts/vscode/host-profile.test.cjs")
+	cmd.Dir = RepoRoot()
+	if out, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("native editor profile: %v\n%s", err, out)
+	}
+}

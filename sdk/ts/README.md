@@ -125,8 +125,15 @@ conn.subscriptions.subscribeGraph(async (event) => {
 
 Ignoring the flag is safe but useless: you get a row whose fields are all
 `undefined`, so a consumer degrades to rendering blanks rather than to
-leaking anything. It is always `false` on an ordinary event (the wire omits
-a false bool; the SDK normalises it).
+leaking anything. Ordinary full-row notifications carry `false` (the wire
+omits a false bool; the SDK normalises it).
+
+Pass `idOnly: true` to `subscribeGraph` when the consumer always rereads a
+projection and does not need full row bodies on the socket. This uses the
+same identity/version notification and `payloadOmitted` flag; row admission
+still applies. Live collections with both `rereadEveryEvent` and `reread`
+request this automatically. Their background rereads share a limit of two
+active requests per connection and coalesce repeated updates for a row.
 
 #### `seq` and `gapBefore` — continuity
 
@@ -158,6 +165,25 @@ Two things to get right if you fold rows by hand:
   the stream, and re-seed everything when it reports a break.
 
 `LiveCollection` below does all of this for you.
+
+### Query pressure and cancellation
+
+All generated query, builtin, logic, and mutation calls share the connection's
+admission budget: four requests on the wire and at most 64 waiting locally.
+`priority: "background"` allows at most two concurrent refreshes, leaving room
+for interactive calls. Live-collection rereads carry this priority automatically.
+A caller that creates more work than the bounded queue accepts receives an error;
+the SDK never retries or replays a mutation to hide overload.
+
+Abort an obsolete read with its `AbortSignal`. A queued read is removed before
+transmission. A sent query transmits the existing cancellation message and rejects
+the caller promptly, but holds its slot until the server's terminal reply. This
+keeps cancelled-but-still-running work inside the concurrency limit. Disconnect
+rejects both queued and active calls; none are replayed after reconnect.
+
+Live computed views should separate their identity from invalidation: finish the
+current read and remember one follow-up when inputs change while it runs. Abort
+when the identity changes or the view closes, not on every heartbeat.
 
 ### Auto-reconnect
 

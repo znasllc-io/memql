@@ -198,18 +198,18 @@ func (e *MemQLEngine) workGuidanceScope(ctx context.Context) (map[string]any, st
 // Read all guidance for this execution attempt, including acknowledged messages:
 // a restarted or later child loop must recover the human's direction. The loop
 // deduplicates within its own context; receipt state is never a delivery cursor.
-func (e *MemQLEngine) ReadWorkGuidance(ctx context.Context) ([]WorkGuidance, error) {
+func (e *MemQLEngine) readAskWorkGuidance(ctx context.Context) ([]WorkGuidance, map[string]any, error) {
 	run, conversation, err := e.workGuidanceScope(ctx)
 	if err != nil || conversation == "" {
-		return nil, err
+		return nil, run, err
 	}
 	row, err := e.askRead(ContextWithFreshRead(ctx), conversation)
 	if err != nil {
-		return nil, err
+		return nil, run, err
 	}
 	transcript, err := approvalTranscript(row)
 	if err != nil {
-		return nil, err
+		return nil, run, err
 	}
 	var out []WorkGuidance
 	runes := 0
@@ -219,11 +219,11 @@ func (e *MemQLEngine) ReadWorkGuidance(ctx context.Context) ([]WorkGuidance, err
 		}
 		runes += utf8.RuneCountInString(turn.Prompt)
 		if len(out) >= maxWorkGuidanceMessages || runes > maxWorkGuidanceRunes {
-			return nil, fmt.Errorf("saved guidance exceeds its bounded context")
+			return nil, run, fmt.Errorf("saved guidance exceeds its bounded context")
 		}
 		out = append(out, WorkGuidance{ID: turn.ID, Prompt: turn.Prompt})
 	}
-	return out, nil
+	return out, run, nil
 }
 
 // Acknowledgement means a successful model response used this human message;

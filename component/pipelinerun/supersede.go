@@ -84,7 +84,7 @@ import (
 // earlier runs: a new head of a pull request, in affected mode, delivered by
 // a webhook or seen by the poll -- anything but a re-run.
 func supersedes(o Opening, mode pipelines.Mode) bool {
-	return mode == pipelines.ModeAffected && o.PullRequest > 0 && o.Trigger != TriggerRerun
+	return mode == pipelines.ModeAffected && o.PullRequest > 0 && !o.isRerun()
 }
 
 // supersedable is what opening o would supersede, read fresh BEFORE the run
@@ -225,7 +225,7 @@ func stoppedBySupersede(r Run) bool {
 // from this repository (a fork's head runs nothing either way). It is the one
 // case in which the dedup asks GitHub anything (R37).
 func supersededNewest(runs []Run, o Opening) (Run, bool) {
-	if o.Trigger == TriggerRerun || o.Fork || o.PullRequest <= 0 {
+	if o.isRerun() || o.Fork || o.PullRequest <= 0 {
 		return Run{}, false
 	}
 	newest, attempts := newestAttempt(runs)

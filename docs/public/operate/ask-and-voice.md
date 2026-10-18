@@ -26,6 +26,20 @@ Ask routes automatically for each step through the available Fleet models and
 configured policies. The conversation has no source selector. Deliberate model
 or reasoning overrides remain available on individual runs and steps in Nexus.
 
+Ask checks current capabilities before answering questions about what it can do.
+Installed operations and live Fleet model advertisements are separate evidence:
+a model that can understand images may not generate them, and an offline or busy
+model is not a permanent platform limitation. Machines shared with the signed-in
+person are included under the same access rules used for execution. A partial
+catalog or failed read does not establish that a capability is absent.
+
+Generated images use the image model route and verified Files storage. Document
+formats use the document composer. References such as “the first bird in the
+file” require reading that saved source before selecting the subject. Completion
+requires a saved-file receipt; Ask exposes its actual file through an Open action.
+Model-routing failures offer Fleet; unrelated failures keep diagnostic Details
+without directing the person to change model settings.
+
 MemQL discovers named DSL capabilities and executes them with the person's
 original authority. Role, app capability, account scope and row authorization
 remain in force. Assistant identity never grants owner permissions. Internal

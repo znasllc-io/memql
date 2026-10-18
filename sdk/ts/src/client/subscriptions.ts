@@ -46,6 +46,8 @@ export interface SubscribeOptions {
 export interface GraphSubscribeOptions {
   concept?: string;
   actions?: GraphAction[];
+  // Ask for identity/version notifications; resolve rows through an authorized read.
+  idOnly?: boolean;
 }
 
 // SubscribeFields is the wire shape of one registered subscription, RETAINED
@@ -61,6 +63,7 @@ interface SubscribeFields {
   filter?: string;
   concept?: string;
   actions?: ReturnType<typeof graphActionWire>[];
+  config?: { idOnly: boolean };
 }
 
 interface SubscriptionRecord {
@@ -167,6 +170,7 @@ export class SubscriptionManager {
       kind: subscriptionKindWire("graph_events"),
       concept: opts.concept,
       actions: actions.length > 0 ? actions : undefined,
+      ...(opts.idOnly ? { config: { idOnly: true } } : {}),
     });
   }
 

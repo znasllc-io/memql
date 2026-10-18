@@ -74,6 +74,7 @@ builtin runAgentTurn {
   prompt   string
   scopeId  string
   requireFile bool
+  requiredFileExtension string @description("When requiring a file, verify its saved filename has this extension; never satisfy an image request with a document.")
   templateId string @description("Render this named prompt for the turn. Omit prompt when using a template.")
   data object @description("Data validated against the named prompt schema.")
 }
@@ -201,6 +202,7 @@ builtin requestUserFeedback {
   kind         string!
   options      []object
   timeoutAt    string
+  optional     bool
   agentId      string!
   ownerUserId  string!
   runId        string!

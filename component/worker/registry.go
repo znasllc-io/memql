@@ -77,9 +77,15 @@ type Worker struct {
 	// anything voluntary.
 	terminateFn func(reason string)
 
-	mu           sync.Mutex
-	activePerCap map[string]uint32
-	queue        []chan struct{}
+	mu                    sync.Mutex
+	activePerCap          map[string]uint32
+	queue                 []*slotWaiter
+	activePerModel        map[string]uint32
+	ownerFeaturePolicy    OwnerFeaturePolicy
+	ownerFeatureLeases    map[uint64]ownerFeatureLease
+	nextOwnerFeatureLease uint64
+	disconnected          bool
+	modelSetupSlot        chan struct{}
 	// apps is the reported local-app inventory. Guarded by mu because
 	// heartbeats rewrite it while selection reads it.
 	apps []AppInfo
@@ -514,51 +520,115 @@ func (w *Worker) ConcurrencyCap(capability string) uint32 {
 	return w.Concurrency[capability]
 }
 
-// Acquire takes a concurrency slot for the supplied capability. If
-// the cap is reached, the call enqueues FIFO and blocks until either
-// a slot frees, the context cancels, or the worker disconnects.
+// slotWaiter reserves its slot before waking. All requests for a connected
+// machine, including forwarded requests, reach this one owning registry.
+type slotWaiter struct {
+	capability, model string
+	modelLimit        uint32
+	ready             chan struct{}
+	granted           bool
+	err               error
+}
+
+// Acquire queues FIFO within a capability. A different capability's release
+// cannot grant this call a slot, and a new arrival cannot steal a granted slot.
 func (w *Worker) Acquire(ctx context.Context, capability string) error {
+	return w.acquireSlot(ctx, capability, "", 0)
+}
+
+// AcquireModel enforces both the machine-wide and advertised per-model caps.
+// The caller parses the live stream's label, never a caller-supplied limit.
+func (w *Worker) AcquireModel(ctx context.Context, model string, limit uint32) error {
+	return w.acquireSlot(ctx, ModelCapability, model, limit)
+}
+
+func (w *Worker) acquireSlot(ctx context.Context, capability, model string, limit uint32) error {
 	if w == nil {
 		return ErrWorkerDisconnected
 	}
-	cap := w.ConcurrencyCap(capability)
-	w.mu.Lock()
-	if cap == 0 || w.activePerCap[capability] < cap {
-		w.activePerCap[capability]++
-		w.mu.Unlock()
-		return nil
+	if err := ctx.Err(); err != nil {
+		return err
 	}
-	wait := make(chan struct{})
-	w.queue = append(w.queue, wait)
-	w.mu.Unlock()
-
-	select {
-	case <-wait:
-		w.mu.Lock()
-		w.activePerCap[capability]++
+	wait := &slotWaiter{capability: capability, model: model, modelLimit: limit, ready: make(chan struct{})}
+	w.mu.Lock()
+	if w.disconnected {
 		w.mu.Unlock()
-		return nil
+		return ErrWorkerDisconnected
+	}
+	if w.activePerCap == nil {
+		w.activePerCap = map[string]uint32{}
+	}
+	if w.activePerModel == nil {
+		w.activePerModel = map[string]uint32{}
+	}
+	w.queue = append(w.queue, wait)
+	w.grantSlotsLocked()
+	w.mu.Unlock()
+	select {
+	case <-wait.ready:
 	case <-ctx.Done():
-		w.removeFromQueue(wait)
-		return fmt.Errorf("worker: queue wait cancelled: %w", ctx.Err())
+	}
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	if err := ctx.Err(); err != nil {
+		if wait.granted {
+			w.releaseSlotLocked(capability, model)
+		} else {
+			for n, entry := range w.queue {
+				if entry == wait {
+					w.queue = append(w.queue[:n], w.queue[n+1:]...)
+					break
+				}
+			}
+		}
+		w.grantSlotsLocked()
+		return fmt.Errorf("worker: queue wait cancelled: %w", err)
+	}
+	return wait.err
+}
+
+func (w *Worker) grantSlotsLocked() {
+	if w.disconnected {
+		return
+	}
+	pending := w.queue[:0]
+	for _, wait := range w.queue {
+		cap := w.ConcurrencyCap(wait.capability)
+		if (cap > 0 && w.activePerCap[wait.capability] >= cap) ||
+			(wait.modelLimit > 0 && w.activePerModel[wait.model] >= wait.modelLimit) {
+			pending = append(pending, wait)
+			continue
+		}
+		w.activePerCap[wait.capability]++
+		if wait.model != "" {
+			w.activePerModel[wait.model]++
+		}
+		wait.granted = true
+		close(wait.ready)
+	}
+	w.queue = pending
+}
+
+func (w *Worker) releaseSlotLocked(capability, model string) {
+	if w.activePerCap[capability] > 0 {
+		w.activePerCap[capability]--
+	}
+	if model != "" && w.activePerModel[model] > 0 {
+		w.activePerModel[model]--
 	}
 }
 
-// Release frees a concurrency slot taken by Acquire.
-func (w *Worker) Release(capability string) {
+// Release frees a slot taken by Acquire.
+func (w *Worker) Release(capability string) { w.releaseSlot(capability, "") }
+func (w *Worker) ReleaseModel(model string) { w.releaseSlot(ModelCapability, model) }
+func (w *Worker) releaseSlot(capability, model string) {
 	if w == nil {
 		return
 	}
 	w.mu.Lock()
-	if v, ok := w.activePerCap[capability]; ok && v > 0 {
-		w.activePerCap[capability] = v - 1
-	}
-	if len(w.queue) > 0 {
-		next := w.queue[0]
-		w.queue = w.queue[1:]
-		close(next)
-	}
-	w.mu.Unlock()
+	defer w.mu.Unlock()
+	w.releaseSlotLocked(capability, model)
+	w.grantSlotsLocked()
 }
 
 // ActiveCount is this replica's view of how many calls are in flight on the
@@ -668,20 +738,30 @@ func (w *Worker) RoundTrip() (rttMs int, at time.Time) {
 	return w.LastRttMs, w.LastPongAt
 }
 
-func (w *Worker) removeFromQueue(target chan struct{}) {
+func (w *Worker) cancelQueueLocked() {
 	w.mu.Lock()
 	defer w.mu.Unlock()
-	for i, ch := range w.queue {
-		if ch == target {
-			w.queue = append(w.queue[:i], w.queue[i+1:]...)
-			return
-		}
-	}
-}
-
-func (w *Worker) cancelQueueLocked() {
-	for _, ch := range w.queue {
-		close(ch)
+	w.disconnected = true
+	for _, wait := range w.queue {
+		wait.err = ErrWorkerDisconnected
+		close(wait.ready)
 	}
 	w.queue = nil
+}
+
+// AcquireModelSetup serializes configured model work on the stream-holding
+// replica. Forwarded and local calls share this handle, never a BFF-local lock.
+func (w *Worker) AcquireModelSetup(ctx context.Context) (func(), error) {
+	w.mu.Lock()
+	if w.modelSetupSlot == nil {
+		w.modelSetupSlot = make(chan struct{}, 1)
+	}
+	slot := w.modelSetupSlot
+	w.mu.Unlock()
+	select {
+	case slot <- struct{}{}:
+		return func() { <-slot }, nil
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	}
 }

@@ -239,15 +239,18 @@ function apply_objects() {
         # anything.
         local rendered kinds
         rendered="$(render_objects)"
-        kinds="$(printf '%s\n' "$rendered" | grep -c '^kind: ')"
+        kinds="$(grep -c '^kind: ' <<< "$rendered")"
         if [[ "$kinds" != "2" ]]; then
             cap_fail 5 "the rendered objects did not validate: expected 2 documents, found ${kinds}"
         fi
-        printf '%s\n' "$rendered" | grep -q '^kind: Ingress$' \
+        # grep -q may finish before printf. Under pipefail the producer's
+        # SIGPIPE then looks like a missing document. A here-string has no
+        # producer process whose exit can replace grep's actual answer.
+        grep -q '^kind: Ingress$' <<< "$rendered" \
             || cap_fail 5 "the rendered objects did not validate: no Ingress document"
-        printf '%s\n' "$rendered" | grep -q '^kind: Certificate$' \
+        grep -q '^kind: Certificate$' <<< "$rendered" \
             || cap_fail 5 "the rendered objects did not validate: no Certificate document"
-        printf '%s\n' "$rendered" | grep -q -- "- ${HOSTNAME_ARG}$" \
+        grep -q -- "- ${HOSTNAME_ARG}$" <<< "$rendered" \
             || cap_fail 5 "the rendered objects did not validate: ${HOSTNAME_ARG} is in neither document's host list"
         out="parsed 2 document(s): Ingress, Certificate"
         cap_info "dry run: ${out}"
@@ -260,7 +263,7 @@ function apply_objects() {
     # `unchanged` on EVERY line means a no-op run. That is the idempotency
     # signal the caller reads, and it is the one thing distinguishing "this
     # binding was already in place" from "this run created it".
-    if printf '%s' "$out" | grep -qv 'unchanged$'; then
+    if [[ -n "$out" ]] && grep -qv 'unchanged$' <<< "$out"; then
         CHANGED_ANY=true
         cap_changed
     fi

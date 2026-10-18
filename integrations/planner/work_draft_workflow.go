@@ -39,11 +39,22 @@ func synthesizeWorkReasoningBundleInScope(ctx context.Context, req CompileReques
 		if s.fileName == "" {
 			return authoringBundle{}, fmt.Errorf("work compile: a file goal requires an explicit fileName from triage")
 		}
-		format, err := purecompose.ParseFormat(dec.FileFormat)
-		if err != nil {
-			return authoringBundle{}, fmt.Errorf("work compile: triage fileFormat: %w", err)
+		switch dec.FileDelivery {
+		case "", "compose":
+			format, err := purecompose.ParseFormat(dec.FileFormat)
+			if err != nil {
+				return authoringBundle{}, fmt.Errorf("work compile: triage fileFormat: %w", err)
+			}
+			s.fileFormat = string(format)
+		case "capability":
+			format := strings.ToLower(strings.TrimPrefix(strings.TrimSpace(dec.FileFormat), "."))
+			if format == "" || len(format) > 16 || strings.Trim(format, "abcdefghijklmnopqrstuvwxyz0123456789") != "" {
+				return authoringBundle{}, fmt.Errorf("work compile: a capability file requires its requested format")
+			}
+			s.fileFormat = format
+		default:
+			return authoringBundle{}, fmt.Errorf("work compile: unknown file delivery mechanism")
 		}
-		s.fileFormat = string(format)
 	}
 	names, err := workDraftInputNames(req.Input)
 	if err != nil {
@@ -89,6 +100,9 @@ func synthesizeWorkReasoningBundleInScope(ctx context.Context, req CompileReques
 	}
 	if s.hasTurns {
 		imports.WriteString("use agents.builtins.{ runAgentTurn }\n")
+	}
+	if s.seen["fileEvidence"] {
+		imports.WriteString("use work.automations.{ workPrepareFileEvidence }\n")
 	}
 	if s.hasFile {
 		imports.WriteString("use compose.builtins.{ composeMaterialize }\n")
@@ -162,7 +176,8 @@ func (s *draftSourceScope) facts() map[string]any {
 		}
 	}
 	return map[string]any{"goal": s.req.Statement, "file": *s.dec.RequiresFile, "research": s.dec.RequiresResearch,
-		"quickReply": s.dec.quickReply(),
+		"capabilityFile": *s.dec.RequiresFile && s.dec.FileDelivery == "capability",
+		"quickReply":     s.dec.quickReply(), "conversational": s.req.Input["conversation"] != nil,
 		"navigation": s.dec.Navigation != nil && !s.dec.Sectionable && !*s.dec.RequiresFile && strings.TrimSpace(s.dec.Navigation.App) != "",
 		"fanout":     s.dec.Sectionable && len(s.sections) >= minSectionsForFanout, "sections": items,
 		"prose":        s.fileFormat == "markdown" || s.fileFormat == "txt" || s.fileFormat == "html" || s.fileFormat == "pdf" || s.fileFormat == "docx",
@@ -186,7 +201,8 @@ func (s *draftSourceScope) append(args map[string]any) error {
 			conversation = "toString(args.conversation)"
 		}
 		s.body.WriteString("  viewer := builtin workViewerContext()\n")
-		fmt.Fprintf(&s.body, "  reason := builtin ai(templateId: %s, progress: true, data: {statement: %s, conversation: %s, viewerContext: toString(viewer)})\n", langparser.QuoteString(getString(args, "templateId")), langparser.QuoteString(instruction), conversation)
+		fmt.Fprintf(&s.body, "  draft := builtin ai(templateId: %s, data: {statement: %s, conversation: %s, viewerContext: toString(viewer)})\n", langparser.QuoteString(getString(args, "templateId")), langparser.QuoteString(instruction), conversation)
+		s.body.WriteString("  reason := builtin workReviewReply(draft: draft)\n")
 		s.hasQuickReply, s.finished = true, true
 	case "navigation":
 		target := s.dec.Navigation
@@ -258,8 +274,23 @@ func (s *draftSourceScope) append(args map[string]any) error {
 		}
 		s.body.WriteString("  return sections\n")
 		s.finished = true
-	case "answer", "file":
-		if kind == "file" && !*s.dec.RequiresFile || kind == "answer" && *s.dec.RequiresFile {
+	case "fileEvidence":
+		if s.seen[kind] || !*s.dec.RequiresFile || s.req.Input["conversation"] == nil || (s.sectionIndex > 0 && !s.collected) {
+			return fmt.Errorf("file evidence requires a conversational file with completed input")
+		}
+		draft := langparser.QuoteString("")
+		if s.seen["research"] {
+			draft = "toString(research)"
+		}
+		if s.collected {
+			draft = s.x.sections
+		}
+		statement := s.x.join(langparser.QuoteString(instruction+heading), s.x.goalInput)
+		fmt.Fprintf(&s.body, "  fileEvidence := automation workPrepareFileEvidence(statement: %s, conversation: toString(args.conversation), conversationId: args.conversation.id, turnId: args.conversation.turnId, draft: %s)\n", statement, draft)
+		s.body.WriteString("  if fileEvidence.ready != true { return {reply: fileEvidence.reply} }\n")
+		s.seen[kind] = true
+	case "answer", "file", "capabilityFile":
+		if (kind == "file" || kind == "capabilityFile") && !*s.dec.RequiresFile || kind == "answer" && *s.dec.RequiresFile || kind == "capabilityFile" && s.dec.FileDelivery != "capability" || kind == "file" && s.dec.FileDelivery == "capability" {
 			return fmt.Errorf("draft delivery does not satisfy the goal's output contract")
 		}
 		if s.sectionIndex > 0 && !s.collected {
@@ -277,6 +308,10 @@ func (s *draftSourceScope) append(args map[string]any) error {
 		text := s.x.join(langparser.QuoteString(instruction+heading), s.x.goalInput)
 		if kind == "file" {
 			params := fmt.Sprintf("name: %s, format: %s, statement: %s", langparser.QuoteString(s.fileName), langparser.QuoteString(s.fileFormat), text)
+			if s.seen["fileEvidence"] {
+				draft = s.x.join(langparser.QuoteString("Checked source evidence and document brief:\n"), "fileEvidence.basis", langparser.QuoteString("\n\nCompleted draft:\n"), nonemptyDraftExpression(draft))
+				params += ", sources: fileEvidence.sources"
+			}
 			if selected, supplied := args["sectionKeys"]; supplied && selected != nil {
 				encoded, err := json.Marshal(selected)
 				if err != nil {
@@ -312,7 +347,12 @@ func (s *draftSourceScope) append(args map[string]any) error {
 			if s.collected {
 				text = s.x.join(text, langparser.QuoteString(getString(args, "sectionsHeading")), s.x.sections)
 			}
-			fmt.Fprintf(&s.body, "  %s := builtin runAgentTurn(agentId: %s, prompt: %s)\n", id, langparser.QuoteString(s.agentID), text)
+			fileContract := ""
+			if kind == "capabilityFile" {
+				fileContract = ", requireFile: true, requiredFileExtension: " + langparser.QuoteString(s.fileFormat)
+				text = s.x.join(text, langparser.QuoteString("\nRequested filename: "+s.fileName+"; requested format: "+s.fileFormat+"."))
+			}
+			fmt.Fprintf(&s.body, "  %s := builtin runAgentTurn(agentId: %s, prompt: %s%s)\n", id, langparser.QuoteString(s.agentID), text, fileContract)
 			s.hasTurns = true
 		}
 		s.finished = true
@@ -320,4 +360,11 @@ func (s *draftSourceScope) append(args map[string]any) error {
 		return fmt.Errorf("unknown draft encoding operation %q", kind)
 	}
 	return nil
+}
+
+func nonemptyDraftExpression(draft string) string {
+	if draft == "" {
+		return langparser.QuoteString("")
+	}
+	return draft
 }

@@ -86,5 +86,5 @@ func (a *agentWorkGoals) OpenDirectGoal(ctx context.Context, g agents.DirectGoal
 // else, or leaving it empty, would let an answer apply to a question the
 // person never saw.
 func (a *agentWorkGoals) RaiseFeedbackApproval(ctx context.Context, ownerUserId string, f agents.FeedbackApproval) (string, error) {
-	return a.work.AskFeedback(ctx, ownerUserId, f.RunId, f.Question, f.Kind, f.Options, f.ExpiresAt)
+	return a.work.AskFeedbackWithPolicy(ctx, ownerUserId, f.RunId, f.Question, f.Kind, f.Options, f.ExpiresAt, f.Optional)
 }

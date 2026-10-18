@@ -127,9 +127,25 @@ func rowsFromLoose(v any) []map[string]any {
 		// defensively for wire callers / non-query payloads.
 		for _, key := range []string{"output", "rows", "items", "results", "data", "nodes"} {
 			switch sub := x[key].(type) {
+			case map[string]memorynodes.MemoryNode:
+				if len(sub) == 0 {
+					return []map[string]any{}
+				}
+				return nodeSetRows(sub)
+			case []map[string]any:
+				if sub == nil {
+					return []map[string]any{}
+				}
+				return sub
 			case []any:
 				return castRows(sub)
 			case map[string]any:
+				if len(sub) == 0 {
+					return []map[string]any{}
+				}
+				if rows := looseNodeSetRows(sub); rows != nil {
+					return rows
+				}
 				return []map[string]any{sub}
 			}
 		}

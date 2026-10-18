@@ -154,8 +154,7 @@ function main() {
     # ruleset at two different moments, which is a disagreement no reader of
     # the output could resolve.
     local raw
-    if ! raw="$(gh api "repos/${REPO}/rulesets/${RULESET_ID}" \
-        --jq '.enforcement, ([.rules[].type] | sort | join(" "))' 2>&1)"; then
+    if ! raw="$(read_ruleset 2>&1)"; then
         echo "FAIL: could not read ruleset ${RULESET_ID} on ${REPO}: ${raw}" >&2
         echo "  This check needs only READ on rulesets. A failure here is a token or" >&2
         echo "  network problem, NOT a drift result -- it must not be read as 'no drift'." >&2
@@ -230,6 +229,18 @@ function main() {
         echo "ruleset-drift: OK -- no drift from the recorded baseline" >&2
     fi
     exit "$rc"
+}
+
+function read_ruleset() {
+    case "${RULESET_DRIFT_PUBLIC_API:-0}" in
+        1)
+            local script_dir
+            script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+            python3 "${script_dir}/../lib/github-public-read.py" ruleset --repo="$REPO" --id="$RULESET_ID"
+            ;;
+        0) gh api "repos/${REPO}/rulesets/${RULESET_ID}" --jq '.enforcement, ([.rules[].type] | sort | join(" "))' ;;
+        *) echo 'RULESET_DRIFT_PUBLIC_API must be 0 or 1' >&2; return 2 ;;
+    esac
 }
 
 main "$@"

@@ -12,15 +12,16 @@ import { listScrollTop } from "../../../kit/controls";
 import { isWorkerOnline } from "../online";
 import type { MachineRow } from "../rows";
 import { groupSize, matchesQuery, sharingSignature, standInNames, storedSubjects, subjectKey, type StoredShare, type Subject, type SubjectKind } from "./sharing";
-import type { MachineWrites, ShareChoice } from "./useMachineWrites";
+import type { MachineWrites, ShareChoice, SharingResource } from "./useMachineWrites";
 import { useShareDirectory } from "./useShareDirectory";
 
 interface Candidate { kind: SubjectKind; id: string; name: string; detail: string }
 interface ShareDraft { subject: Subject; name: string; paused: boolean; baseline: string }
 
-function choiceFor(mode: StoredShare["sharingMode"], subjects: Subject[]): ShareChoice {
+function shareChoice(mode: StoredShare["sharingMode"], subjects: Subject[], paused: boolean): ShareChoice {
   return {
     mode,
+    paused,
     userIds: subjects.filter((s) => s.kind === "person").map((s) => s.id),
     groupIds: subjects.filter((s) => s.kind === "group").map((s) => s.id),
     pausedUserIds: subjects.filter((s) => s.kind === "person" && s.paused).map((s) => s.id),
@@ -30,11 +31,11 @@ function choiceFor(mode: StoredShare["sharingMode"], subjects: Subject[]): Share
 
 /** Counts describe the grants at admission, so pausing does not erase draining work. */
 export function sharingActiveCalls(machine: MachineRow, subject: Subject, now = Date.now()): number | null {
-  if (!isWorkerOnline(machine, new Date(now))) return 0;
+  if (!isWorkerOnline(machine, new Date(now))) return null;
   const report = machine.sharingActivity;
   if (!report || report["nodeId"] !== machine.connectedNodeId) return null;
   const at = Date.parse(String(report["observedAt"] ?? ""));
-  if (!Number.isFinite(at) || now - at > 45_000) return null;
+  if (!Number.isFinite(at) || at - now > 5_000 || now - at > 45_000) return null;
   const rows = report[subject.kind === "person" ? "users" : "groups"];
   if (!Array.isArray(rows)) return null;
   const entry = rows.find((v: unknown) => v !== null && typeof v === "object" && sameEntityId(String((v as Record<string, unknown>)["id"] ?? ""), subject.id));
@@ -43,7 +44,9 @@ export function sharingActiveCalls(machine: MachineRow, subject: Subject, now = 
   return typeof count === "number" && Number.isSafeInteger(count) && count >= 0 ? count : null;
 }
 
-export function SharingEditor({ machine, writes }: { machine: MachineRow; writes: MachineWrites }) {
+export function SharingEditor({ machine, writes, resource = "models" }: { machine: MachineRow; writes: MachineWrites; resource?: SharingResource }) {
+  const title = resource === "models" ? "Model sharing" : "Fleet workbench sharing";
+  const toggleLabel = resource === "models" ? "Share models" : "Share fleet workbenches";
   const searchId = useId(), listId = useId();
   const root = useRef<HTMLElement>(null), search = useRef<HTMLInputElement>(null);
   const searchArea = useRef<HTMLDivElement>(null), popup = useRef<HTMLDivElement>(null), loadMore = useRef<HTMLButtonElement>(null);
@@ -67,7 +70,7 @@ export function SharingEditor({ machine, writes }: { machine: MachineRow; writes
   const subjects = useMemo(() => storedSubjects(current), [current]);
   const [directoryNeeded, setDirectoryNeeded] = useState(current.sharingMode !== "owner");
   useEffect(() => { if (current.sharingMode !== "owner") setDirectoryNeeded(true); }, [current.sharingMode]);
-  const { read, refreshing, retry } = useShareDirectory(machine.id, directoryNeeded);
+  const { read, refreshing, retry } = useShareDirectory(machine.id, directoryNeeded, resource);
   const directory = read.state === "ready" ? read.directory : null;
   const busy = pending !== "" || writes.busyId === machine.id;
   const candidates: Candidate[] = directory ? [
@@ -94,15 +97,17 @@ export function SharingEditor({ machine, writes }: { machine: MachineRow; writes
     return { name: offered?.name ?? (stored?.known ? stored.name : undefined) ?? (directory ? `Unknown ${subject.kind === "group" ? "group" : "user"}` : standIns.get(subjectKey(subject.kind, subject.id)) ?? ""), stale: !!directory && !offered && !stored?.inDirectory };
   }
 
+  function choiceFor(mode: StoredShare["sharingMode"], selected: Subject[]): ShareChoice { return shareChoice(mode, selected, currentRef.current.sharingPaused === true); }
+
   async function persist(choice: ShareChoice, key: string, focus?: string, finishEdit = false, addedKeys: string[] = []): Promise<boolean> {
     if (inFlight.current) return false;
     const baseline = sharingSignature(currentRef.current);
     const startedHere = root.current?.contains(document.activeElement);
     inFlight.current = true; setPending(key); setFailed(null);
     try {
-      const receipt = await writes.setSharing(machine.id, choice);
+      const receipt = resource === "models" ? await writes.setSharing(machine.id, choice) : await writes.setSharing(machine.id, choice, resource);
       if (!receipt) { setFailed({ choice, baseline, finishEdit, addedKeys }); return false; }
-      const share: StoredShare = { sharingMode: choice.mode, sharedUserIds: choice.mode === "people" ? choice.userIds : [], sharedGroupIds: choice.mode === "people" ? choice.groupIds : [], pausedUserIds: choice.pausedUserIds ?? [], pausedGroupIds: choice.pausedGroupIds ?? [] };
+      const share: StoredShare = { sharingMode: choice.mode, sharingPaused: choice.paused ?? false, sharedUserIds: choice.mode === "people" ? choice.userIds : [], sharedGroupIds: choice.mode === "people" ? choice.groupIds : [], pausedUserIds: choice.pausedUserIds ?? [], pausedGroupIds: choice.pausedGroupIds ?? [] };
       setSaved({ before: liveSignature, share });
       if (finishEdit) setDraft(null);
       if (addedKeys.length) {
@@ -188,12 +193,12 @@ export function SharingEditor({ machine, writes }: { machine: MachineRow; writes
     await persist(choiceFor("people", subjects.map(s => subjectKey(s.kind, s.id) === key ? { ...s, paused: draft.paused } : s)), key, "search", true);
   }
 
-  return <section ref={root} className="fleet-share-editor" aria-label="Model sharing" aria-busy={busy || undefined}>
+  return <section ref={root} className="fleet-share-editor" aria-label={title} aria-busy={busy || undefined}>
     <AutoRefresh enabled={current.sharingMode !== "owner"} busy={busy || refreshing} onRefresh={retry} />
     <div className="fleet-share-body">
       <div className="fleet-share-toggle">
-        <div><span>Share models</span><Caption>{current.sharingMode === "owner" ? "Only you can use this machine’s models." : "Share model inference. Machine control stays with you."}</Caption></div>
-        <Switch checked={current.sharingMode !== "owner"} disabled={locked} onChange={enabled => void persist(choiceFor(enabled ? "people" : "owner", enabled ? subjects : []), "mode")}><span className="os-sr-only">Share models</span></Switch>
+        <div><span>{toggleLabel}</span><Caption>{current.sharingPaused ? "Paused. Your audience is saved; running work can finish." : current.sharingMode === "owner" ? "Only you have access." : resource === "models" ? "Share inference. Machine control stays with you." : "Share isolated workbenches. Host access stays with you."}</Caption></div>
+        <Switch checked={current.sharingMode !== "owner" && !current.sharingPaused} disabled={locked} onChange={enabled => void persist({ ...choiceFor(current.sharingMode === "owner" ? "people" : current.sharingMode, subjects), paused: !enabled }, "mode")}><span className="os-sr-only">{toggleLabel}</span></Switch>
       </div>
       {current.sharingMode === "cluster" ? <Notice tone="info" sentence="Currently shared with everyone in this cluster."><Button disabled={locked} onClick={() => void persist(choiceFor("people", []), "mode")}>Choose users and groups</Button></Notice> : null}
       {current.sharingMode === "people" ? <section className="fleet-machine-setting fleet-share-picker" aria-label="Users and groups">
@@ -255,7 +260,7 @@ export function SharingEditor({ machine, writes }: { machine: MachineRow; writes
         </div>
       </section> : null}
     </div>
-    {failed ? <div className="fleet-share-error"><Notice tone="error" sentence="Sharing could not be updated." detail={writes.actionErrorScope === "machine" ? undefined : writes.actionError}>
+    {failed ? <div className="fleet-share-error"><Notice tone="error" sentence="Sharing could not be updated." detail={writes.actionErrorScope === (resource === "models" ? "sharing" : "workbenchSharing") ? writes.actionError : undefined}>
       {canRetry ? <Button disabled={busy} onClick={() => void persist(failed.choice, "retry", failed.finishEdit || failed.addedKeys.length ? "search" : undefined, failed.finishEdit, failed.addedKeys)}>Try again</Button> : <Caption>{failed.addedKeys.length ? "Selection or access changed. Add the current selection." : "Sharing changed elsewhere. Choose the action again."}</Caption>}
     </Notice></div> : null}
   </section>;

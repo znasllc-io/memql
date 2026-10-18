@@ -173,6 +173,11 @@ func TestServerOnlyParsedSetMatchesTheTree(t *testing.T) {
 			"attribute name changed, which would silently exempt nothing and gate nothing.")
 	}
 	want := map[serverOnlyKey]bool{
+		// Capacity and revision admission cannot be replaced by actor.userId scoping.
+		{Path: "worker/mutations.memql", Name: "setWorkerModelSetup"}: true,
+		// Reports require a bounded harness turn; the singleton is seeded without an actor.
+		{Path: "models/mutations.memql", Name: "recordModelCatalogReview"}:          true,
+		{Path: "models/mutations.memql", Name: "createCatalogResearchSettings"}:     true,
 		{Path: "email/queries.memql", Name: "emailSendOperationByProviderId"}:       true,
 		{Path: "email/queries.memql", Name: "emailUnindexedConnections"}:            true,
 		{Path: "email/queries.memql", Name: "emailReadyFeedbackOrganizations"}:      true,
@@ -1417,6 +1422,15 @@ func TestServerOnlyParsedSetMatchesTheTree(t *testing.T) {
 		// caller's OWN machines -- the modelPullMachineFor precedent -- and is
 		// this mutation's only renderer.
 		{Path: "worker/mutations.memql", Name: "setWorkerSharing"}: true,
+		// #6167: same registration-tier escape as model sharing. The native
+		// builtins restrict consent to the enrolled owner; feature writes
+		// additionally compare the settings revision and fence the row.
+		{Path: "worker/mutations.memql", Name: "setWorkerWorkbenchSharing"}: true,
+		{Path: "worker/mutations.memql", Name: "setWorkerOwnerFeatures"}:    true,
+		// #6167: ownership cannot authorize an arbitrary machine or redirect
+		// an established filesystem. Native dispatch reads consent and takes
+		// an absence fence before creating the immutable binding.
+		{Path: "workbench/mutations.memql", Name: "bindWorkbenchExecution"}: true,
 		// Activity is measured by the stream holder. Owner scoping alone would
 		// let a browser forge live counts without holding that stream.
 		{Path: "worker/mutations.memql", Name: "updateWorkerSharingActivity"}: true,
@@ -1613,6 +1627,10 @@ func TestServerOnlyParsedSetMatchesTheTree(t *testing.T) {
 		{Path: "work/mutations.memql", Name: "createWorkObservation"}: true,
 		{Path: "work/mutations.memql", Name: "createWorkApproval"}:    true,
 		{Path: "work/mutations.memql", Name: "decideWorkApproval"}:    true,
+		// Owner scoping cannot prove elapsed time or the saved execution.
+		// This is the native sweep's receipt, after the policy and checkpoint
+		// checks under the same decision lock as an interactive answer.
+		{Path: "work/mutations.memql", Name: "continueWorkFeedback"}: true,
 		// Ownership alone does not establish the pending native checkpoint or
 		// its held decision lease; decideApproval validates both before saving.
 		{Path: "work/mutations.memql", Name: "saveWorkApprovalGuidance"}: true,

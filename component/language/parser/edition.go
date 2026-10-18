@@ -104,7 +104,7 @@ const EditionStatus = "frozen"
 // own.
 // Concept retention changes the grammar again; its companion editor release
 // is prepared with the engine, and publication is a separate action.
-const EditorRelease = "0.6.11"
+const EditorRelease = "0.6.12"
 
 // FrontEnd is how one edition's source reaches the core parser.
 type FrontEnd struct {

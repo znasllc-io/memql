@@ -47,7 +47,7 @@ func TestPodFileStreamAgainstLocalKubernetes(t *testing.T) {
 	kubectl(nil, "-n", ns, "wait", "pod/file-stream", "--for=condition=Ready", "--timeout=90s")
 	const size = 128 << 20
 	hash := sha256.New()
-	n, err := kube.api.ReadPodFile(ctx, ns, "file-stream", "collector", "/tmp/proof", hash, size)
+	n, err := kube.api.ReadPodFileResumable(ctx, ns, "file-stream", "collector", "/tmp/proof", hash, size)
 	if err != nil || n != size {
 		t.Fatalf("read %d bytes: %v", n, err)
 	}
@@ -59,17 +59,17 @@ func TestPodFileStreamAgainstLocalKubernetes(t *testing.T) {
 	if !bytes.Equal(hash.Sum(nil), want.Sum(nil)) {
 		t.Fatal("streamed file digest mismatch")
 	}
-	if _, err := kube.api.ReadPodFile(ctx, ns, "file-stream", "collector", "/tmp/proof", io.Discard, 1024); err == nil {
+	if _, err := kube.api.ReadPodFileResumable(ctx, ns, "file-stream", "collector", "/tmp/proof", io.Discard, 1024); err == nil {
 		t.Fatal("oversized transfer succeeded")
 	}
-	if _, err := kube.api.ReadPodFile(ctx, ns, "file-stream", "collector", "/tmp/absent", io.Discard, 1024); err == nil {
+	if _, err := kube.api.ReadPodFileResumable(ctx, ns, "file-stream", "collector", "/tmp/absent", io.Discard, 1024); err == nil {
 		t.Fatal("missing file succeeded")
 	}
-	t.Logf("read %d bytes over the authenticated Kubernetes stream with matching digest; overflow and missing-file refusal passed", n)
+	t.Logf("read %d bytes in verified ranges over the authenticated Kubernetes stream with matching digest; overflow and missing-file refusal passed", n)
 	read, write := io.Pipe()
 	transferred := make(chan error, 1)
 	go func() {
-		_, err := kube.api.ReadPodFile(ctx, ns, "file-stream", "collector", "/tmp/proof.tar", write, size+(1<<20))
+		_, err := kube.api.ReadPodFileResumable(ctx, ns, "file-stream", "collector", "/tmp/proof.tar", write, size+(1<<20))
 		_ = write.CloseWithError(err)
 		transferred <- err
 	}()

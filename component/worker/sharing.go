@@ -38,6 +38,7 @@ const (
 // lend a machine its owner had taken back.
 type Sharing struct {
 	Mode           string
+	Paused         bool
 	UserIds        []string
 	GroupIds       []string
 	PausedUserIds  []string
@@ -68,6 +69,11 @@ func SharingFromRow(v any) Sharing {
 	sharedAt, _ := row["sharedAt"].(string)
 	sharedBy, _ := row["sharedBy"].(string)
 	out := Sharing{Mode: mode, SharedAt: sharedAt, SharedBy: sharedBy}
+	// An absent field is an existing active share. A malformed explicit
+	// value cannot grant access; only false resumes a stored pause.
+	if paused, exists := row["paused"]; exists {
+		out.Paused = paused != false
+	}
 	if mode == SharingModePeople {
 		out.UserIds = subjectIds(row["userIds"])
 		out.GroupIds = subjectIds(row["groupIds"])
@@ -104,6 +110,7 @@ func (s Sharing) Row() map[string]any {
 	}
 	return map[string]any{
 		"mode":           mode,
+		"paused":         s.Paused,
 		"userIds":        userIds,
 		"groupIds":       groupIds,
 		"pausedUserIds":  pausedUserIds,
@@ -112,6 +119,10 @@ func (s Sharing) Row() map[string]any {
 		"sharedBy":       s.SharedBy,
 	}
 }
+
+// ServesCluster includes the global pause. Callers admitting work must use
+// the complete saved decision, never just its audience mode.
+func (s Sharing) ServesCluster() bool { return !s.Paused && ServesTheCluster(s.Mode) }
 
 // ServesTheCluster admits system work only to a legacy cluster-wide share.
 func ServesTheCluster(ownerMode string) bool {
@@ -203,7 +214,7 @@ func (p *Person) Groups() []string {
 // failed to resolve who it is acting for cannot reach a machine through the
 // person path by accident.
 func (s Sharing) Admits(p *Person) bool {
-	if p == nil || p.UserId == "" {
+	if s.Paused || p == nil || p.UserId == "" {
 		return false
 	}
 	if auth.IsSystemActorId(p.UserId) {
@@ -253,6 +264,9 @@ func PersonRefusal(s Sharing, p *Person) string {
 	if ServesPerson(s, p) {
 		return ""
 	}
+	if s.Paused {
+		return "Its owner has paused sharing this machine."
+	}
 	if s.Mode == SharingModePeople {
 		return "Its owner has shared it with specific people, and not with you."
 	}
@@ -261,7 +275,10 @@ func PersonRefusal(s Sharing, p *Person) string {
 
 // SystemRefusal keeps a people share closed to the cluster's own work.
 func SystemRefusal(s Sharing) string {
-	if ServesTheCluster(s.Mode) {
+	if s.Paused {
+		return "Its owner has paused sharing this machine."
+	}
+	if s.ServesCluster() {
 		return ""
 	}
 	if s.Mode == SharingModePeople {
@@ -337,7 +354,12 @@ func subjectIds(v any) []string {
 
 // SharingSubjects records the grants that admitted a call, so a draining call
 // stays counted under its original grants even after they are paused or removed.
-type SharingSubjects struct{ UserIds, GroupIds []string }
+type SharingSubjects struct {
+	UserIds, GroupIds []string
+	// Borrowed is decided by the receiving replica's admission check, not
+	// inferred from grant counts: a legacy cluster share has no named grants.
+	Borrowed bool
+}
 
 func containsSubject(ids []string, target string) bool {
 	for _, candidate := range ids {
@@ -349,8 +371,8 @@ func containsSubject(ids []string, target string) bool {
 }
 
 func (s Sharing) SubjectsFor(p *Person) SharingSubjects {
-	out := SharingSubjects{}
-	if p == nil || s.Mode != SharingModePeople || auth.IsSystemActorId(p.UserId) {
+	out := SharingSubjects{Borrowed: s.Admits(p)}
+	if s.Paused || p == nil || s.Mode != SharingModePeople || auth.IsSystemActorId(p.UserId) {
 		return out
 	}
 	for _, user := range s.UserIds {

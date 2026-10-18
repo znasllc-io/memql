@@ -85,7 +85,7 @@ func TestBackgroundAcknowledgementRepairIsBoundedAndDoesNotReclassify(t *testing
 			require.Equal(t, []string{"goalComplexityTriage", "workAcknowledgement"}, engine.aiCalls)
 			require.Equal(t, 2, out.ModelCalls)
 			require.Equal(t, req.Statement, engine.aiData[1]["goal"])
-			require.WithinDuration(t, time.Now().Add(15*time.Second), engine.deadlines[1], time.Second)
+			require.WithinDuration(t, time.Now().Add(180*time.Second), engine.deadlines[1], time.Second)
 		})
 	}
 }
@@ -135,7 +135,7 @@ func TestShortActionsStillReceiveAnAcknowledgement(t *testing.T) {
 		workload string
 	}{
 		{"short action", false, "quick"},
-		{"short file", true, "quick"},
+		{"short file", true, "lookup"},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			engine := &acknowledgementTestEngine{countingCompileEngine: &countingCompileEngine{triage: map[string]any{

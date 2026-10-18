@@ -1,3 +1,4 @@
+import { useReadEffect } from "../live/useReadEffect";
 import { useCallback, useEffect, useRef, useState } from "react";
 
 // An ON-DEMAND read that says when it looked.
@@ -47,6 +48,9 @@ export interface Reading<T> {
  * or a section that switches store shows the previous store's numbers under
  * the new store's name.
  *
+ * Pass live invalidations separately as `revision`: they coalesce while the
+ * current read runs. Only an identity change belongs in `key`.
+ *
  * A null `read` is "not ready to ask yet" (no connection): the reading stays
  * `unread` rather than failing, because a missing connection is not a failed
  * read and must not render as one.
@@ -54,6 +58,7 @@ export interface Reading<T> {
 export function useReading<T>(
   key: string,
   read: ((signal: AbortSignal) => Promise<T>) | null,
+  revision: string | number = 0,
 ): Reading<T> {
   const [state, setState] = useState<ReadingState>("unread");
   const [value, setValue] = useState<T | null>(null);
@@ -72,24 +77,29 @@ export function useReading<T>(
   }, []);
 
   useEffect(() => {
+    setValue(null);
+    setError("");
+    setAt(null);
+  }, [key]);
+
+  useReadEffect((signal) => {
     if (read === null) {
+      running.current = false;
       setState("unread");
       return;
     }
-    const controller = new AbortController();
-    let live = true;
     running.current = true;
     setState("reading");
-    read(controller.signal)
+    return read(signal)
       .then((next) => {
-        if (!live) return;
+        if (signal.aborted) return;
         setValue(next);
         setError("");
         setAt(new Date());
         setState("read");
       })
       .catch((err: unknown) => {
-        if (!live) return;
+        if (signal.aborted) return;
         // The server's own sentence is what a person can act on. A wrapper
         // sentence of ours ("could not load modules") replaces a message
         // naming the actual refusal with one naming the surface.
@@ -98,17 +108,9 @@ export function useReading<T>(
         setState("failed");
       })
       .finally(() => {
-        running.current = false;
+        if (!signal.aborted) running.current = false;
       });
-    return () => {
-      live = false;
-      running.current = false;
-      controller.abort();
-    };
-    // `key` and `attempt` are the whole dependency set by construction: key
-    // encodes what `read` closes over, and attempt is the re-ask.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [key, attempt, read === null]);
+  }, [key, read === null], `${attempt}:${String(revision)}`);
 
   return { state, value, error, at, reread };
 }

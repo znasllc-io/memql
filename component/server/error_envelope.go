@@ -66,6 +66,12 @@ func PanicRecoveryMiddleware(logger *slog.Logger) func(http.Handler) http.Handle
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			defer func() {
 				if rec := recover(); rec != nil {
+					// ReverseProxy uses this sentinel to abort a partial response.
+					// net/http must close/reset it; appending a JSON envelope would
+					// corrupt the download and hide the transport failure.
+					if rec == http.ErrAbortHandler {
+						panic(rec)
+					}
 					eid := newErrorId()
 					if logger != nil {
 						logger.Error("http handler panic recovered",

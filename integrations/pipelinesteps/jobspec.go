@@ -225,7 +225,7 @@ func BuildJob(cfg Config, run StepRun, jobName string) (Job, error) {
 		})
 	}
 
-	containers := []Container{stepContainer(run, jobName, secretName, caches)}
+	containers := []Container{stepContainer(cfg, run, jobName, secretName, caches)}
 	podSecurity := &PodSecurityContext{SeccompProfile: &SeccompProfile{Type: "RuntimeDefault"}}
 	if run.ImageBuild != nil {
 		containers[0] = imageBuildContainer(cfg, run, jobName)
@@ -257,7 +257,7 @@ func BuildJob(cfg Config, run StepRun, jobName string) (Job, error) {
 		// user namespace; never fall back to sharing the daemon's PID namespace.
 		pod.HostUsers = ptr(false)
 	}
-	return Job{
+	job := Job{
 		APIVersion: "batch/v1",
 		Kind:       "Job",
 		Metadata: ObjectMeta{
@@ -275,7 +275,16 @@ func BuildJob(cfg Config, run StepRun, jobName string) (Job, error) {
 				Spec:     pod,
 			},
 		},
-	}, nil
+	}
+	if cfg.QueueName != "" {
+		job.Metadata.Labels[queueLabel] = cfg.QueueName
+		job.Spec.Suspend = ptr(true)
+		// Kueue accounts requests. Explicit container limits must be reserved,
+		// too; namespace defaults are held to the same rule by the component.
+		reserveContainerLimits(job.Spec.Template.Spec.Containers)
+		reserveContainerLimits(job.Spec.Template.Spec.InitContainers)
+	}
+	return job, nil
 }
 
 // checkJob is every refusal, in one place, before anything is built. It
@@ -284,6 +293,20 @@ func checkJob(cfg Config, run StepRun) (int32, *pl.Refusal) {
 	scope := run.StepKey
 	refuse := func(format string, args ...any) (int32, *pl.Refusal) {
 		return 0, pl.Refuse(pl.CodeJobRejected, scope, format, args...)
+	}
+	if cfg.QueueName != "" && (!dnsLabelShape.MatchString(cfg.QueueName) || len(cfg.QueueName) > 63 || cfg.NodePool == "") {
+		return refuse("resource admission requires a named queue and a dedicated build pool")
+	}
+	if cfg.QueueName != "" {
+		if _, err := time.Parse(time.RFC3339Nano, run.RunDeadline); err != nil {
+			return refuse("resource admission requires the run's absolute deadline")
+		}
+	}
+	if err := pl.CheckCheckoutHistory(run.CheckoutHistory, false); err != nil {
+		return refuse("%s", err)
+	}
+	if run.CheckoutHistory == "full" && run.Env["MEMQL_BASE_SHA"] != "" && !shaShape.MatchString(run.Env["MEMQL_BASE_SHA"]) {
+		return refuse("full-history checkout base must be a full commit SHA")
 	}
 	if err := pl.CheckMemoryMiB(run.MemoryMiB, false); err != nil {
 		return refuse("%s", err)
@@ -515,9 +538,11 @@ const (
 // step's directory under it. Root by uid alone: both run a fixed script that
 // needs none of the runtime's default capabilities -- an owner creates and
 // chmods its own directories, and git fetches and checks out as anyone does --
-// so they drop every one (measured on k3s v1.35, under a root-owned claim root
+// so they drop every one when cache reclamation is disabled (measured on k3s v1.35, under a root-owned claim root
 // of 0777 and of 0755). A claim whose root another uid owns and keeps closed
 // fails cache-prep, naming the directory, rather than being forced open.
+// Opt-in reclamation uses cachePrepContext to remove disposable files across
+// image uids; the clone always retains this empty capability set.
 func rootContext() *SecurityContext {
 	return &SecurityContext{
 		RunAsUser:                ptr(int64(0)),
@@ -541,7 +566,7 @@ func imageContext() *SecurityContext {
 	}
 }
 
-// cachePrepContainer opens the step's directory of the cache claim before
+// cachePrepContainer prepares the step's directory of the cache claim before
 // anything else runs (ruling R15b). It mounts the claim's ROOT and nothing
 // else, and runs a fixed script: the container that sees every owner's cache
 // is the one that runs no repository content.
@@ -550,17 +575,40 @@ func cachePrepContainer(cfg Config, run StepRun) Container {
 		Name:                     ContainerCachePrep,
 		Image:                    cfg.CloneImage,
 		Command:                  []string{"/bin/sh", "-c", cachePrepScript},
-		Env:                      []EnvVar{plainVar(cacheDirVar, cacheRootPath+"/"+stepCacheDir(run))},
+		Env:                      []EnvVar{plainVar(cacheDirVar, cacheRootPath+"/"+stepCacheDir(run)), plainVar("CACHE_GC_PERCENT", strconv.Itoa(cacheGCPercent(cfg.CacheGCPercent)))},
 		VolumeMounts:             []VolumeMount{{Name: cacheVolume, MountPath: cacheRootPath}},
-		SecurityContext:          rootContext(),
+		SecurityContext:          cachePrepContext(cfg),
 		TerminationMessagePolicy: failureFromLogs,
 	}
+}
+
+// Only the fixed, credential-free cache initializer may remove cached files
+// owned by step image uids. No checkout or command is mounted here.
+func cachePrepContext(cfg Config) *SecurityContext {
+	c := rootContext()
+	if cacheGCPercent(cfg.CacheGCPercent) > 0 {
+		c.Capabilities.Add = []string{"DAC_OVERRIDE"}
+	}
+	return c
+}
+
+func cacheGCPercent(n int) int {
+	if n <= 0 {
+		return 0
+	}
+	if n < 50 {
+		return 50
+	}
+	if n > 90 {
+		return 90
+	}
+	return n
 }
 
 // cloneContainer fetches the commit into the workspace, as root. It runs git
 // on untrusted repository content, so it never mounts the cache claim.
 func cloneContainer(cfg Config, run StepRun, secretName string) Container {
-	return Container{
+	container := Container{
 		Name:    ContainerClone,
 		Image:   cfg.CloneImage,
 		Command: []string{"/bin/sh", "-c", cloneScript},
@@ -575,6 +623,10 @@ func cloneContainer(cfg Config, run StepRun, secretName string) Container {
 		SecurityContext:          rootContext(),
 		TerminationMessagePolicy: failureFromLogs,
 	}
+	if run.CheckoutHistory == "full" {
+		container.Env = append(container.Env, plainVar("CLONE_HISTORY", "full"), plainVar("BASE_SHA", run.Env["MEMQL_BASE_SHA"]))
+	}
+	return container
 }
 
 // serviceContainers are the native sidecars, in name order: init containers
@@ -612,12 +664,16 @@ func serviceContainers(services map[string]pl.Service) []Container {
 	return out
 }
 
-func stepContainer(run StepRun, jobName, secretName string, caches []string) Container {
+func stepContainer(cfg Config, run StepRun, jobName, secretName string, caches []string) Container {
 	env := make([]EnvVar, 0, len(run.Env)+len(run.Secrets)+8)
 	for _, name := range sortedKeys(run.Env) {
 		env = append(env, plainVar(name, run.Env[name]))
 	}
 	env = append(env, plainVar(stepCommandVar, run.Command))
+	if cfg.QueueName != "" {
+		deadline, _ := time.Parse(time.RFC3339Nano, run.RunDeadline) // checkJob validates it.
+		env = append(env, plainVar("MEMQL_STEP_RUN_DEADLINE", strconv.FormatInt(deadline.Unix(), 10)))
+	}
 	if len(run.Artifacts) > 0 {
 		env = append(env, plainVar(stepArtifactsVar, strings.Join(run.Artifacts, " ")))
 	}
@@ -628,6 +684,9 @@ func stepContainer(run StepRun, jobName, secretName string, caches []string) Con
 	)
 	if len(caches) > 0 {
 		env = append(env, plainVar(stepCachesVar, strings.Join(caches, " ")))
+		if cacheGCPercent(cfg.CacheGCPercent) > 0 {
+			env = append(env, plainVar("MEMQL_CACHE_LOCKED", "1"))
+		}
 	}
 	for _, name := range sortedKeys(run.Secrets) {
 		if name != run.ImagePullSecret {
@@ -642,6 +701,12 @@ func stepContainer(run StepRun, jobName, secretName string, caches []string) Con
 	if len(caches) > 0 {
 		// The step's own directory only, never the claim's root (ruling R15b).
 		mounts = append(mounts, VolumeMount{Name: cacheVolume, MountPath: cachePath, SubPath: stepCacheDir(run)})
+		if cacheGCPercent(cfg.CacheGCPercent) > 0 {
+			mounts = append(mounts,
+				VolumeMount{Name: cacheVolume, MountPath: "/memql-cache-gate", SubPath: ".memql-locks/gate", ReadOnly: true},
+				VolumeMount{Name: cacheVolume, MountPath: "/memql-cache-users", SubPath: ".memql-locks/users", ReadOnly: true},
+			)
+		}
 	}
 	return Container{
 		Name:            ContainerStep,

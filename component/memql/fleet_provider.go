@@ -133,8 +133,16 @@ const (
 // reads, with the machines considered named.
 var ErrFleetUnavailable = errors.New("no eligible fleet machine for this model")
 
+// FleetModelCapabilities describes this model on one machine. A model-level
+// union cannot prove that an online machine supports a particular modality.
+type FleetModelCapabilities struct {
+	Vision, AudioIn, AudioOut, ImageGen, Embeddings, Tools, StructuredOutput bool
+}
+
 // FleetMachine is one machine behind a catalog entry.
 type FleetMachine struct {
+	Capabilities   FleetModelCapabilities
+	ModelSetup     ModelSetup
 	RegistrationId string
 	Name           string
 	DisplayName    string
@@ -735,6 +743,17 @@ func (m FleetModel) eligibleForSelector(selector string, needs FleetNeeds) (bool
 func (m FleetModel) eligibleFor(n FleetNeeds) (bool, string) {
 	if !m.Online() {
 		return false, "no machine offering it is online"
+	}
+	purpose := ModelPurpose(n.StructuredOutput, n.Tools, n.Vision, n.Embeddings, n.AudioIn, n.AudioOut, n.ImageGen)
+	allowed := false
+	for _, machine := range m.Machines {
+		if machine.Online && machine.ModelSetup.Allows(m.ModelId, purpose, n.MinContextWindow) {
+			allowed = true
+			break
+		}
+	}
+	if len(m.Machines) > 0 && !allowed {
+		return false, "not selected for this purpose on an online machine"
 	}
 	if n.StructuredOutput && !m.StructuredOutput {
 		return false, "does not advertise structured output"

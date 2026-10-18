@@ -102,6 +102,10 @@ func (f shareDirFixture) machine(name, owner string) string {
 
 // sharingOf reads the newest stored `sharing` block of a registration.
 func (f shareDirFixture) sharingOf(registrationId string) map[string]any {
+	return f.consentOf(registrationId, "sharing")
+}
+
+func (f shareDirFixture) consentOf(registrationId, field string) map[string]any {
 	f.t.Helper()
 	var node memorynodes.MemoryNode
 	err := f.db.NewSelect().Model(&node).Where("concept = ?", "v1:worker:registration").
@@ -109,8 +113,70 @@ func (f shareDirFixture) sharingOf(registrationId string) map[string]any {
 	require.NoError(f.t, err)
 	var payload map[string]any
 	require.NoError(f.t, json.Unmarshal(node.Payload, &payload))
-	sharing, _ := payload["sharing"].(map[string]any)
+	sharing, _ := payload[field].(map[string]any)
 	return sharing
+}
+
+func TestFleetWorkbenchAndModelSharingHaveIndependentAudiencesAndPauses(t *testing.T) {
+	eng, db, _ := sharedReadMergeEngine(t)
+	f := shareDirFixture{t: t, eng: eng, db: db, prefix: uniqueSuffix("resource-sharing")}
+	owner, user := f.person("owner", true), f.person("user", true)
+	group := f.group("group", "active")
+	f.member(group, owner, "active")
+	f.member(group, user, "active")
+	machine := f.machine("machine", owner)
+	ctx := shareDirActor(context.Background(), owner, auth.RoleDeveloper)
+	models := map[string]any{"registrationId": machine, "resource": "models", "mode": "people", "userIds": []string{user}, "paused": true}
+	_, err := eng.evaluateFleetSetSharingExpression(ctx, models)
+	require.NoError(t, err)
+	workbench := map[string]any{"registrationId": machine, "resource": "workbench", "mode": "people", "groupIds": []string{group}, "paused": false}
+	_, err = eng.evaluateFleetSetSharingExpression(ctx, workbench)
+	require.NoError(t, err)
+	require.Equal(t, true, f.sharingOf(machine)["paused"])
+	require.Equal(t, []any{BareShortId(user)}, f.sharingOf(machine)["userIds"])
+	require.Equal(t, []any{BareShortId(group)}, f.consentOf(machine, "workbenchSharing")["groupIds"])
+	workbench["paused"] = true
+	_, err = eng.evaluateFleetSetSharingExpression(ctx, workbench)
+	require.NoError(t, err)
+	models["paused"] = false
+	_, err = eng.evaluateFleetSetSharingExpression(ctx, models)
+	require.NoError(t, err)
+	require.Equal(t, false, f.sharingOf(machine)["paused"])
+	require.Equal(t, true, f.consentOf(machine, "workbenchSharing")["paused"])
+	delete(workbench, "paused")
+	_, err = eng.evaluateFleetSetSharingExpression(ctx, workbench)
+	require.NoError(t, err)
+	require.Equal(t, true, f.consentOf(machine, "workbenchSharing")["paused"], "an audience edit must not resume a paused share")
+	_, err = eng.evaluateFleetSetSharingExpression(shareDirActor(context.Background(), user, auth.RoleOwner), workbench)
+	require.Equal(t, "not_your_machine", shareRefusalCode(err))
+	workbench["resource"] = "computerUse"
+	_, err = eng.evaluateFleetSetSharingExpression(ctx, workbench)
+	require.Equal(t, "invalid_sharing_resource", shareRefusalCode(err))
+}
+
+func TestFleetOwnerFeaturesRequireOwnershipAndRejectStaleEdits(t *testing.T) {
+	eng, db, _ := sharedReadMergeEngine(t)
+	f := shareDirFixture{t: t, eng: eng, db: db, prefix: uniqueSuffix("owner-features")}
+	owner, other := f.person("owner", true), f.person("other", true)
+	machine := f.machine("machine", owner)
+	ctx := shareDirActor(context.Background(), owner, auth.RoleDeveloper)
+	args := map[string]any{"registrationId": machine, "headless": false, "apps": true, "computerUse": false, "expectedUpdatedAt": ""}
+	_, err := eng.evaluateFleetSetOwnerFeaturesExpression(ctx, args)
+	require.NoError(t, err)
+	stored := f.consentOf(machine, "ownerFeatures")
+	require.Equal(t, false, stored["headless"])
+	require.Equal(t, true, stored["apps"])
+	require.NotEmpty(t, stored["updatedAt"])
+	args["headless"] = true
+	_, err = eng.evaluateFleetSetOwnerFeaturesExpression(ctx, args)
+	require.Equal(t, "features_changed", shareRefusalCode(err))
+	require.Equal(t, false, f.consentOf(machine, "ownerFeatures")["headless"])
+	args["expectedUpdatedAt"] = stored["updatedAt"]
+	_, err = eng.evaluateFleetSetOwnerFeaturesExpression(shareDirActor(context.Background(), other, auth.RoleOwner), args)
+	require.Equal(t, "not_your_machine", shareRefusalCode(err))
+	_, err = eng.evaluateFleetSetOwnerFeaturesExpression(ctx, args)
+	require.NoError(t, err)
+	require.Equal(t, true, f.consentOf(machine, "ownerFeatures")["headless"])
 }
 
 type shareDirectoryAnswer struct {

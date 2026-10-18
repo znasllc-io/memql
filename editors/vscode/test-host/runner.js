@@ -17,8 +17,10 @@ const cp = require("node:child_process");
 const fs = require("node:fs");
 const os = require("node:os");
 const path = require("node:path");
+const { createHostProfile } = require("../../../scripts/vscode/host-profile.cjs");
 
-const { downloadAndUnzipVSCode, runTests } = require("@vscode/test-electron");
+const { runTests } = require("@vscode/test-electron");
+const { downloadVSCode } = require("../../../scripts/vscode/download.cjs");
 
 const EXT_ROOT = path.resolve(__dirname, "..");
 const TESTS_ENTRY = path.join(EXT_ROOT, "dist-host", "test-host", "index.js");
@@ -123,18 +125,21 @@ async function main() {
     process.exit(1);
   }
 
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), "memql-vscode-host-"));
-  const workspace = makeWorkspace(root);
-  const home = path.join(root, "home");
-  const userData = path.join(root, "user-data");
-  const extensions = path.join(root, "extensions");
-  for (const dir of [home, userData, extensions]) {
-    fs.mkdirSync(dir, { recursive: true });
-  }
-
+  const profile = createHostProfile(path.resolve(EXT_ROOT, "../.."));
+  const { userData, extensions } = profile;
+  let root;
   try {
+    // The destructive fixture guard requires HOME below this named temporary
+    // directory. Only Electron's socket-bearing profile needs a short path.
+    root = fs.mkdtempSync(path.join(os.tmpdir(), "memql-vscode-host-"));
+    const workspace = makeWorkspace(root);
+    const home = path.join(root, "home");
+    for (const dir of [home, userData, extensions]) {
+      fs.mkdirSync(dir, { recursive: true });
+    }
+
     const version = process.env.MEMQL_VSCODE_VERSION || "stable";
-    let vscodeExecutablePath = await downloadAndUnzipVSCode({
+    let vscodeExecutablePath = await downloadVSCode({
       version,
       extensionDevelopmentPath: EXT_ROOT,
     });
@@ -186,7 +191,8 @@ async function main() {
       },
     });
   } finally {
-    fs.rmSync(root, { recursive: true, force: true });
+    profile.dispose();
+    if (root) fs.rmSync(root, { recursive: true, force: true });
   }
 }
 

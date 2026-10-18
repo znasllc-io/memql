@@ -38,6 +38,9 @@
             "name": "spineCandidates"
           },
           {
+            "args": {
+              "timeoutSeconds": 600
+            },
             "kind": "builtin",
             "name": "spineClassify"
           },
@@ -91,6 +94,9 @@
             "name": "spineCandidates"
           },
           {
+            "args": {
+              "timeoutSeconds": 600
+            },
             "kind": "builtin",
             "name": "spineClassify"
           },

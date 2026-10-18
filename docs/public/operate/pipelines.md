@@ -383,6 +383,7 @@ cannot satisfy the required PR or merge-queue check.
 |---|---|---|---|
 | `name` | The step's name, unique in its stage | required | Missing, breaking the rule, or used twice in the stage: `pipeline_step_invalid` |
 | `execution` | `container` or `native`; native uses the host toolchain and ignores the pipeline image | `container` | Native steps with services or shared caches: `pipeline_step_invalid` |
+| `checkoutHistory` | Set `full` to fetch complete commit ancestry, tags and the comparison base during the trusted checkout | shallow | Cluster container steps only. The command receives history without the installation token; it should scan that local history without fetching again. The existing run deadline and workspace limits bound checkout |
 | `memoryMiB` | Explicit memory request and limit for the cluster command container, in MiB; zero keeps namespace defaults | `0` | Nonzero values below 128, above 1048576, or on fleet/native steps are invalid. The Workbench separately refuses values above its operator-configured maximum (8192 MiB by default) before creating a Job |
 | `cpuMilli` | Explicit CPU request and limit for the cluster command or image-build container, in millicores; 1000 means one CPU. Zero keeps namespace defaults for commands and the fixed request of one CPU / limit of two CPUs for image builds | `0` | Values below zero, above 256000, or nonzero values on fleet/native steps are invalid. The Workbench separately refuses values above its operator-configured maximum (4000 by default) before creating a Job. Scheduling accounts for the whole request; it does not silently fall back to a smaller allocation |
 | `image` | Container image for this step; pin by digest when reproducibility matters | pipeline image | Explicit image on a native step: `pipeline_step_invalid` |
@@ -848,9 +849,14 @@ alone, and Nexus's re-run and branch refuse it. Re-run a pipeline run with
 
 ## The check run
 
-Each run writes one check run on its commit, named **`MemQL / <name>`** --
-`<name>` being the manifest's `name` when the pipeline was connected -- which is
-the name a ruleset requires. It is `queued` when the run opens, `in_progress`
+Each run writes one check run on its commit. PRs and merge candidates use
+**`MemQL / <name>`**, the context a ruleset requires; `<name>` is the manifest's
+name when the pipeline was connected. Pushes, releases and manual runs append
+`/ push`, `/ release` and `/ manual`, respectively. Scheduled audits append
+`/ daily` or `/ weekly`. These events can select different stages, so a passing
+release or rehearsal cannot satisfy a failed PR check on the same commit.
+
+A check is `queued` when the run opens, `in_progress`
 when an agent starts driving it, and `completed` with the run's conclusion. Its
 `external_id` is the run's id, and its details link is the run's page in MemQL
 OS, `https://os.<domain>/?pipelineRun=<run id>`.

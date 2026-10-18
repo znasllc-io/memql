@@ -530,6 +530,28 @@ QueryClient.prototype.activeEmbedderBinding = function (this: QueryClient, args:
   return this.executeNamed("activeEmbedderBinding", buildActiveEmbedderBinding(args), opts);
 };
 
+/** activeMachineActivity wraps the query named "activeMachineActivity". */
+// Bound concept: v1:worker:activity (machine-readable: BoundConcepts["activeMachineActivity"] in generated_concepts.ts).
+export interface ActiveMachineActivityArgs {
+  workerId: string;
+}
+
+export function buildActiveMachineActivity(args: ActiveMachineActivityArgs): string {
+  const parts: string[] = [];
+  parts.push("workerId: " + renderMemQLValue(args.workerId));
+  return "query activeMachineActivity(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    activeMachineActivity(args: ActiveMachineActivityArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.activeMachineActivity = function (this: QueryClient, args: ActiveMachineActivityArgs = {} as ActiveMachineActivityArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("activeMachineActivity", buildActiveMachineActivity(args), opts);
+};
+
 /** List active v1:forge:project rows. */
 // Bound concept: v1:forge:project (machine-readable: BoundConcepts["activeProjects"] in generated_concepts.ts).
 export interface ActiveProjectsArgs {
@@ -3767,6 +3789,28 @@ QueryClient.prototype.findEvents = function (this: QueryClient, args: FindEvents
   return this.executeNamed("findEvents", buildFindEvents(args), opts);
 };
 
+/** The durable transition from completion-only model history to live receipts. */
+// Bound concept: v1:worker:activity (machine-readable: BoundConcepts["firstMachineActivity"] in generated_concepts.ts).
+export interface FirstMachineActivityArgs {
+  workerId: string;
+}
+
+export function buildFirstMachineActivity(args: FirstMachineActivityArgs): string {
+  const parts: string[] = [];
+  parts.push("workerId: " + renderMemQLValue(args.workerId));
+  return "query firstMachineActivity(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    firstMachineActivity(args: FirstMachineActivityArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.firstMachineActivity = function (this: QueryClient, args: FirstMachineActivityArgs = {} as FirstMachineActivityArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("firstMachineActivity", buildFirstMachineActivity(args), opts);
+};
+
 /** Drill-in read: fetch a generated-output's full content (inline body or attachment ref) by id, gated to the caller. Owned: `row.ownerUserId == actor.userId`. Called by the Library viewer when opening a generated_output artifact resolved from its sourceConceptRef. */
 // Bound concept: v1:library:generatedOutput (machine-readable: BoundConcepts["generatedOutputById"] in generated_concepts.ts).
 export interface GeneratedOutputByIdArgs {
@@ -4349,6 +4393,26 @@ declare module "./query.js" {
 
 QueryClient.prototype.ladderPolicyCurrent = function (this: QueryClient, args: LadderPolicyCurrentArgs = {} as LadderPolicyCurrentArgs, opts?: QueryCallOptions): Promise<Result> {
   return this.executeNamed("ladderPolicyCurrent", buildLadderPolicyCurrent(args), opts);
+};
+
+/** The latest completed research evidence. */
+// Bound concept: v1:models:catalogReview (machine-readable: BoundConcepts["latestModelCatalogReview"] in generated_concepts.ts).
+export interface LatestModelCatalogReviewArgs {
+}
+
+export function buildLatestModelCatalogReview(args: LatestModelCatalogReviewArgs): string {
+  void args;
+  return "query latestModelCatalogReview()";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    latestModelCatalogReview(args?: LatestModelCatalogReviewArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.latestModelCatalogReview = function (this: QueryClient, args: LatestModelCatalogReviewArgs = {} as LatestModelCatalogReviewArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("latestModelCatalogReview", buildLatestModelCatalogReview(args), opts);
 };
 
 /** The caller's learned procedures, newest first, on every rung -- retired included, because Nexus shows where each one stands and the ladder's sweeps walk them all, page by page. A learned procedure is a construct the lift wrote into the `procedure` target namespace; nothing authored is ever written there. */
@@ -5088,6 +5152,50 @@ QueryClient.prototype.liveCustomDomainByHostname = function (this: QueryClient, 
   return this.executeNamed("liveCustomDomainByHostname", buildLiveCustomDomainByHostname(args), opts);
 };
 
+/** machineActivity wraps the query named "machineActivity". */
+// Bound concept: v1:worker:activity (machine-readable: BoundConcepts["machineActivity"] in generated_concepts.ts).
+export interface MachineActivityArgs {
+  workerId: string;
+}
+
+export function buildMachineActivity(args: MachineActivityArgs): string {
+  const parts: string[] = [];
+  parts.push("workerId: " + renderMemQLValue(args.workerId));
+  return "query machineActivity(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    machineActivity(args: MachineActivityArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.machineActivity = function (this: QueryClient, args: MachineActivityArgs = {} as MachineActivityArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("machineActivity", buildMachineActivity(args), opts);
+};
+
+/** machineActivityById wraps the query named "machineActivityById". */
+// Bound concept: v1:worker:activity (machine-readable: BoundConcepts["machineActivityById"] in generated_concepts.ts).
+export interface MachineActivityByIdArgs {
+  activityId: string;
+}
+
+export function buildMachineActivityById(args: MachineActivityByIdArgs): string {
+  const parts: string[] = [];
+  parts.push("activityId: " + renderMemQLValue(args.activityId));
+  return "query machineActivityById(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    machineActivityById(args: MachineActivityByIdArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.machineActivityById = function (this: QueryClient, args: MachineActivityByIdArgs = {} as MachineActivityByIdArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("machineActivityById", buildMachineActivityById(args), opts);
+};
+
 /** Returns the magic-link request whose tokenHash matches the argument. Zero or one result. */
 // Bound concept: v1:identity:magicLinkRequest (machine-readable: BoundConcepts["magicLinkRequestByTokenHash"] in generated_concepts.ts).
 export interface MagicLinkRequestByTokenHashArgs {
@@ -5270,6 +5378,26 @@ QueryClient.prototype.missingCapabilityByKindAndName = function (this: QueryClie
   return this.executeNamed("missingCapabilityByKindAndName", buildMissingCapabilityByKindAndName(args), opts);
 };
 
+/** The installation-wide research opt-in. */
+// Bound concept: v1:models:catalogResearchSettings (machine-readable: BoundConcepts["modelCatalogResearchSettings"] in generated_concepts.ts).
+export interface ModelCatalogResearchSettingsArgs {
+}
+
+export function buildModelCatalogResearchSettings(args: ModelCatalogResearchSettingsArgs): string {
+  void args;
+  return "query modelCatalogResearchSettings()";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    modelCatalogResearchSettings(args?: ModelCatalogResearchSettingsArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.modelCatalogResearchSettings = function (this: QueryClient, args: ModelCatalogResearchSettingsArgs = {} as ModelCatalogResearchSettingsArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("modelCatalogResearchSettings", buildModelCatalogResearchSettings(args), opts);
+};
+
 /** One model's evidence at one level for one week -- the row a fold reads before deciding whether it has already proposed, and the row a decline writes back to.
 THE THREE ARGUMENTS ARE THE KEY. A fold that read only by model would re-propose at every level on the same evidence, and one that read only by week would collapse two models into one row. */
 // Bound concept: v1:platform:modelEvidence (machine-readable: BoundConcepts["modelEvidenceForKey"] in generated_concepts.ts).
@@ -5349,7 +5477,7 @@ export interface ModelProfilesArgs {
   // Enum: text | reasoning | omni | vision | audioIn | audioOut | imageGen | videoGen | embeddings
   category?: string;
   /** Narrow to one runtime. */
-  // Enum: ollama | mlx | whispercpp | nemo | kokoro | mflux | comfyui
+  // Enum: ollama | mlx | whispercpp | nemo | kokoro | mflux | comfyui | openai-compatible | cloud
   runtime?: string;
   /** Narrow to entries whose declared floor is exactly this machine class. NOT "everything a machine of this class can run" -- that is a comparison across five values, and doing it here would make the answer depend on an ordering the caller cannot see. The Fleet surface holds the machine's class and filters. */
   // Enum: 16 | 24 | 32 | 64 | 128
@@ -5476,6 +5604,28 @@ declare module "./query.js" {
 
 QueryClient.prototype.myDesktop = function (this: QueryClient, args: MyDesktopArgs = {} as MyDesktopArgs, opts?: QueryCallOptions): Promise<Result> {
   return this.executeNamed("myDesktop", buildMyDesktop(args), opts);
+};
+
+/** The caller's own earlier model calls on a selected machine. This does not expose other people's prompts or identities on a shared machine. */
+// Bound concept: v1:router:call (machine-readable: BoundConcepts["myModelCallsOnMachine"] in generated_concepts.ts).
+export interface MyModelCallsOnMachineArgs {
+  workerId: string;
+}
+
+export function buildMyModelCallsOnMachine(args: MyModelCallsOnMachineArgs): string {
+  const parts: string[] = [];
+  parts.push("workerId: " + renderMemQLValue(args.workerId));
+  return "query myModelCallsOnMachine(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    myModelCallsOnMachine(args: MyModelCallsOnMachineArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.myModelCallsOnMachine = function (this: QueryClient, args: MyModelCallsOnMachineArgs = {} as MyModelCallsOnMachineArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("myModelCallsOnMachine", buildMyModelCallsOnMachine(args), opts);
 };
 
 /** List the caller's own submitted requests, newest-first. Open to any team member. */
@@ -13139,6 +13289,50 @@ QueryClient.prototype.workSkillSelectionsForOwner = function (this: QueryClient,
   return this.executeNamed("workSkillSelectionsForOwner", buildWorkSkillSelectionsForOwner(args), opts);
 };
 
+/** Bounded checkpoints for source projection; callers expose only paired tool results, never system prompts or model reasoning from the saved exchange. */
+// Bound concept: v1:work:observation (machine-readable: BoundConcepts["workSourceCheckpointsForOwnerRun"] in generated_concepts.ts).
+export interface WorkSourceCheckpointsForOwnerRunArgs {
+  runId: string;
+}
+
+export function buildWorkSourceCheckpointsForOwnerRun(args: WorkSourceCheckpointsForOwnerRunArgs): string {
+  const parts: string[] = [];
+  parts.push("runId: " + renderMemQLValue(args.runId));
+  return "query workSourceCheckpointsForOwnerRun(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    workSourceCheckpointsForOwnerRun(args: WorkSourceCheckpointsForOwnerRunArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.workSourceCheckpointsForOwnerRun = function (this: QueryClient, args: WorkSourceCheckpointsForOwnerRunArgs = {} as WorkSourceCheckpointsForOwnerRunArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("workSourceCheckpointsForOwnerRun", buildWorkSourceCheckpointsForOwnerRun(args), opts);
+};
+
+/** Public source receipts only; generated answers are not source evidence. */
+// Bound concept: v1:work:step (machine-readable: BoundConcepts["workSourceStepsForOwnerRun"] in generated_concepts.ts).
+export interface WorkSourceStepsForOwnerRunArgs {
+  runId: string;
+}
+
+export function buildWorkSourceStepsForOwnerRun(args: WorkSourceStepsForOwnerRunArgs): string {
+  const parts: string[] = [];
+  parts.push("runId: " + renderMemQLValue(args.runId));
+  return "query workSourceStepsForOwnerRun(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    workSourceStepsForOwnerRun(args: WorkSourceStepsForOwnerRunArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.workSourceStepsForOwnerRun = function (this: QueryClient, args: WorkSourceStepsForOwnerRunArgs = {} as WorkSourceStepsForOwnerRunArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("workSourceStepsForOwnerRun", buildWorkSourceStepsForOwnerRun(args), opts);
+};
+
 /** One caller-owned execution receipt. A named key avoids reading an entire run when verifying a release artifact or one required check. */
 // Bound concept: v1:work:step (machine-readable: BoundConcepts["workStepForOwnerRun"] in generated_concepts.ts).
 export interface WorkStepForOwnerRunArgs {
@@ -13333,6 +13527,28 @@ QueryClient.prototype.workViewerOrganization = function (this: QueryClient, args
   return this.executeNamed("workViewerOrganization", buildWorkViewerOrganization(args), opts);
 };
 
+/** The caller's durable execution choice, shared by every agent replica. */
+// Bound concept: v1:workbench:executionBinding (machine-readable: BoundConcepts["workbenchExecutionForRun"] in generated_concepts.ts).
+export interface WorkbenchExecutionForRunArgs {
+  runId: string;
+}
+
+export function buildWorkbenchExecutionForRun(args: WorkbenchExecutionForRunArgs): string {
+  const parts: string[] = [];
+  parts.push("runId: " + renderMemQLValue(args.runId));
+  return "query workbenchExecutionForRun(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    workbenchExecutionForRun(args: WorkbenchExecutionForRunArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.workbenchExecutionForRun = function (this: QueryClient, args: WorkbenchExecutionForRunArgs = {} as WorkbenchExecutionForRunArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("workbenchExecutionForRun", buildWorkbenchExecutionForRun(args), opts);
+};
+
 /** Look up the worker registration owned by an identity row.
 The `row.ownerUserId == actor.userId` conjunct is not redundant with the concept's tier -- it is what makes this read's result set the SAME before and after enforcement, which TestRowAuthzEnforcementLandGate is the gate for. It is satisfied at runtime because the only caller, component/worker's register handshake, runs under auth.ContextWithUserActor for the owner the worker_token's identity row named. A worker authenticates as worker:<id>, so without that stamp this read returns nothing at all -- which is the failure that reads as "this machine has never registered" and silently creates a duplicate row on every reconnect. */
 // Bound concept: v1:worker:registration (machine-readable: BoundConcepts["workerByIdentityId"] in generated_concepts.ts).
@@ -13354,6 +13570,28 @@ declare module "./query.js" {
 
 QueryClient.prototype.workerByIdentityId = function (this: QueryClient, args: WorkerByIdentityIdArgs = {} as WorkerByIdentityIdArgs, opts?: QueryCallOptions): Promise<Result> {
   return this.executeNamed("workerByIdentityId", buildWorkerByIdentityId(args), opts);
+};
+
+/** workerInvocationById wraps the query named "workerInvocationById". */
+// Bound concept: v1:worker:invocation (machine-readable: BoundConcepts["workerInvocationById"] in generated_concepts.ts).
+export interface WorkerInvocationByIdArgs {
+  invocationId: string;
+}
+
+export function buildWorkerInvocationById(args: WorkerInvocationByIdArgs): string {
+  const parts: string[] = [];
+  parts.push("invocationId: " + renderMemQLValue(args.invocationId));
+  return "query workerInvocationById(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    workerInvocationById(args: WorkerInvocationByIdArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.workerInvocationById = function (this: QueryClient, args: WorkerInvocationByIdArgs = {} as WorkerInvocationByIdArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("workerInvocationById", buildWorkerInvocationById(args), opts);
 };
 
 /** Hot-path pairing-code lookup by codeHash for the Pair-aware gRPC interceptor. */

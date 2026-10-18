@@ -672,3 +672,23 @@ query observation workTrainingUsageForOwner {
  sort "row.createdAt", "desc"
  shape workObservationFull
 }
+
+/// Public source receipts only; generated answers are not source evidence.
+@actor
+query step workSourceStepsForOwnerRun {
+ args { runId string! }
+ filter row => row.runId == args.runId && row.ownerUserId == actor.userId && row.status == "done" && row.?call.name != "ai" && row.?call.name != "runAgentTurn"
+ paginate 40
+ shape workStepFull
+}
+
+/// Bounded checkpoints for source projection; callers expose only paired tool
+/// results, never system prompts or model reasoning from the saved exchange.
+@actor
+query observation workSourceCheckpointsForOwnerRun {
+ args { runId string! }
+ filter row => row.runId == args.runId && row.ownerUserId == actor.userId && (row.?data.continuation == true || row.?data.capabilityEvidence == true)
+ sort "row.createdAt", "desc"
+ paginate 4
+ shape workObservationFull
+}

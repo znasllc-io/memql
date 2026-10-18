@@ -14,7 +14,7 @@ const { machineModelsFrom, machineRuntimesFrom, pullFromRow, pullProgressFractio
 describe("a machine's models, from its labels", () => {
   it("reads the attributes off each model label", () => {
     const models = machineModelsFrom({
-      "model:llama3.1:8b": "ctx=131072,structured=1,tools=1,params=8000000000,quant=Q4_K_M,max=2",
+      "model:llama3.1:8b": "ctx=131072,structured=1,tools=1,vision=1,params=8000000000,quant=Q4_K_M,max=2",
       "runtime:ollama": "1",
       "os": "darwin",
     });
@@ -27,6 +27,10 @@ describe("a machine's models, from its labels", () => {
       structuredOutput: true,
       tools: true,
       embeddings: false,
+      vision: true,
+      imageGen: false,
+      audioIn: false,
+      audioOut: false,
       maxConcurrent: 2,
     });
   });
@@ -54,6 +58,10 @@ describe("a machine's models, from its labels", () => {
       structuredOutput: false,
       tools: false,
       embeddings: false,
+      vision: false,
+      imageGen: false,
+      audioIn: false,
+      audioOut: false,
     });
   });
 

@@ -3219,41 +3219,6 @@ button.os-row.os-record-row:focus-visible { outline: 2px solid var(--os-accent);
   margin-top: 3px;
 }
 
-/* The measured line: a third reading under a model, in the same key as the two
- * above it. The figures are tabular so a column of them lines up, and the
- * absent ones draw the em dash `.os-figure-absent` already defines -- the one
- * place on this page where a missing value is deliberately VISIBLE rather than
- * quiet, because somebody scanning for the model nobody has probed has to be
- * able to find the gap. */
-.os-fleet-measured {
-  display: flex;
-  align-items: baseline;
-  gap: 11px;
-  flex-wrap: wrap;
-  font-variant-numeric: tabular-nums;
-}
-.os-fleet-measured[data-unmeasured] {
-  font-variant-numeric: normal;
-  opacity: 0.75;
-}
-.os-fleet-measured-pair {
-  display: inline-flex;
-  align-items: baseline;
-  gap: 4px;
-}
-.os-fleet-measured-label {
-  opacity: 0.75;
-}
-.os-fleet-measured-when {
-  opacity: 0.6;
-}
-/* A probe that ran PARTLY leaves figures AND a sentence. It is a real state
- * rather than a contradiction, so it gets its own line rather than replacing
- * the numbers that did come back. */
-.os-fleet-measured-partial {
-  flex-basis: 100%;
-  color: var(--os-muted);
-}
 .os-fleet-machinemodel-act {
   align-self: flex-start;
   margin-top: 3px;
@@ -4405,51 +4370,15 @@ a.os-button {
   text-overflow: ellipsis;
   white-space: nowrap;
 }
-/* THE BUTTON'S SPACE IS RESERVED AT ALL TIMES AND ONLY ITS INK ARRIVES.
- * Revealing it by putting it into the flow would shift the line out from under
- * the pointer that is reaching for it -- the value would move at the exact
- * moment somebody aims at it. So it is always laid out, and `opacity` is the
- * only thing that changes. */
+/* An explicit, always-visible copy control; the value remains selectable. */
 .os-copyvalue-copy {
-  flex: none;
-  display: grid;
-  place-items: center;
-  width: 18px;
-  height: 18px;
-  padding: 0;
-  border: 0;
-  border-radius: var(--os-radius-xs);
-  background: transparent;
-  color: var(--os-muted);
-  cursor: pointer;
-  opacity: 0;
-  transition: opacity var(--os-duration-fast) var(--os-ease);
+  display: grid; place-items: center; flex: 0 0 28px; width: 28px; height: 28px;
+  padding: 0; border: 0; border-radius: var(--os-radius-xs); background: transparent;
+  color: var(--os-muted); cursor: pointer;
 }
-.os-copyvalue:hover .os-copyvalue-copy,
-.os-copyvalue-copy:focus-visible {
-  opacity: 1;
-}
-.os-copyvalue-copy:hover {
-  color: var(--os-ink);
-}
-/* The confirmation outlives the pointer. It fires on a click, and a hand that
- * has already moved on would otherwise fade the only answer there was. */
-.os-copyvalue-copy[data-copied] {
-  opacity: 1;
-  color: var(--os-accent);
-}
-/* No hover to reveal it with means it simply stands. A touch reader must never
- * be left looking at a truncated value with no way to take it. */
-@media (hover: none) {
-  .os-copyvalue-copy {
-    opacity: 1;
-  }
-}
-@media (prefers-reduced-motion: reduce) {
-  .os-copyvalue-copy {
-    transition: none;
-  }
-}
+.os-copyvalue-copy:hover { color: var(--os-ink); background: var(--os-hover); }
+.os-copyvalue-copy:focus-visible { outline: 2px solid var(--os-accent); outline-offset: 2px; }
+.os-copyvalue-copy[data-copied] { color: var(--os-accent); }
 /* The note is the SURFACE speaking, not data, so it takes the UI face back
  * from the mono `dd` it is nested in. A refusal set in a monospace face reads
  * as part of the value it is about. */
@@ -4459,15 +4388,9 @@ a.os-button {
   color: var(--os-muted);
 }
 
-/* Keep the copy wash quieter than navigation hover, with room around both
- * the value and its receipt. Padding stays inside the available width. */
-.os-copyvalue-row { width: 100%; min-height: 36px; padding: 6px 10px; box-sizing: border-box; border: 0; border-radius: var(--os-selection-radius); background: transparent; color: inherit; font: inherit; text-align: left; cursor: copy; }
-.os-copyvalue-row:hover { background: color-mix(in srgb, var(--os-hover) 35%, transparent); }
-.os-copyvalue-row .os-copyvalue-text { white-space: normal; overflow: visible; overflow-wrap: anywhere; user-select: text; }
-.os-copyvalue-receipt { display: inline-flex; align-items: center; justify-content: flex-end; flex: 0 0 58px; gap: 5px; font-family: var(--os-font); font-size: var(--os-text-xs); color: var(--os-muted); opacity: 0; }
-.os-copyvalue-row:hover .os-copyvalue-receipt, .os-copyvalue-row:focus-visible .os-copyvalue-receipt, .os-copyvalue-receipt[data-copied] { opacity: 1; }
-.os-copyvalue-receipt[data-copied] { color: var(--os-accent); }
-@media (hover: none) { .os-copyvalue-receipt { opacity: 1; } }
+/* Facts keep normal selectable text and a separate, always-visible copy icon. */
+.os-copyvalue-row { width: 100%; min-height: 36px; padding: 4px 10px; box-sizing: border-box; }
+.os-copyvalue-row .os-copyvalue-text { white-space: pre-wrap; overflow: visible; overflow-wrap: anywhere; user-select: text; }
 
 /* Shared card paging: explicit arrows, one or two visible cards, no wheel
  * interception. Off-page cards are inert; reserve room for focus outlines. */
@@ -13770,7 +13693,7 @@ button.os-cluster-mesh-peer:focus-visible {
   border: 1px solid var(--os-line);
   border-radius: var(--os-radius-sm);
   background: var(--os-raised);
-  cursor: pointer;
+  cursor: text;
 }
 .os-copyfield-line:focus-within { outline: 2px solid var(--os-accent); outline-offset: 2px; }
 .os-copyfield-input.os-input {
@@ -13783,7 +13706,7 @@ button.os-cluster-mesh-peer:focus-visible {
   box-shadow: none;
   background: transparent;
   text-overflow: ellipsis;
-  cursor: pointer;
+  cursor: text;
 }
 .os-copyfield-input.os-mono { font-size: var(--os-text-sm); }
 .os-copyfield-copy {
@@ -13874,37 +13797,6 @@ button.os-cluster-mesh-peer:focus-visible {
 }
 .os-fleet-leave .os-caption {
   margin: 0;
-}
-
-/* ---- ask it something (D14) ---- */
-.os-fleet-askit {
-  display: grid;
-  gap: 8px;
-  margin: 4px 0;
-}
-.os-fleet-askit-act {
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-  align-items: flex-start;
-}
-/* THE ANSWER IS CONTENT, not a notice: nothing went wrong and there is
- * nothing to dismiss. It reads at the surface's own size, with the figure
- * beside it in the caption voice. */
-.os-fleet-askit-answer {
-  margin: 0;
-  display: flex;
-  align-items: baseline;
-  gap: 10px;
-  flex-wrap: wrap;
-  font-size: var(--os-text-base);
-  color: var(--os-ink);
-}
-.os-fleet-askit-text {
-  padding: 4px 9px;
-  border: 1px solid var(--os-line);
-  border-radius: var(--os-radius-xs);
-  background: var(--os-raised);
 }
 
 /* ---------------------------------------------------------------------------
@@ -14389,6 +14281,9 @@ button.os-cluster-mesh-peer:focus-visible {
 .fleet-equipment-bank .os-empty-state h4, .fleet-recent-work .os-empty-state h4 { font-size: var(--os-text-sm); }
 .fleet-recent-work .os-empty-state { padding: 22px 0; }
 .fleet-device-work { gap: 2px; flex-wrap: wrap; }
+.fleet-device-call-breakdown { display: flex; justify-content: center; flex-wrap: wrap; gap: 4px 16px; margin: 2px 0 0; color: var(--os-muted); font-size: var(--os-text-xs); }
+.fleet-device-call-breakdown > div { display: flex; gap: 6px; }
+.fleet-device-call-breakdown dd { margin: 0; font-variant-numeric: tabular-nums; }
 
 /* Detail pages share a reading path above the title; navigation sits at right. */
 /* THE TRAIL ROW (kit/TrailRow) -- one per window, drawn by the window frame
@@ -14442,10 +14337,6 @@ button.os-cluster-mesh-peer:focus-visible {
 /* Machine details follow one settings rhythm: section, aligned facts, then
  * the next section. Edits share their own group; all information stays open. */
 .fleet-machine-details { container: machine-details / inline-size; }
-.fleet-details-section { display: grid; grid-template-columns: 170px minmax(0, 1fr); gap: 32px; padding-block: 28px; border-top: 1px solid var(--os-line); }
-.fleet-details-section:first-of-type { border-top: 0; padding-top: 0; }
-.fleet-details-section > .os-subhead { margin: 8px 0 0; font-size: var(--os-text-base); font-weight: 600; }
-.fleet-details-section-body { min-width: 0; }
 .fleet-machine-details .os-facts { grid-template-columns: 160px minmax(0, 1fr); gap: 2px 24px; margin: 0; }
 .fleet-machine-details .os-facts dt, .fleet-machine-details .os-facts dd { font-size: var(--os-text-sm); line-height: 1.6; padding-block: 7px; margin: 0; }
 .fleet-machine-details .os-facts dd:has(> .os-copyvalue) { padding: 0; }
@@ -14497,10 +14388,6 @@ button.os-cluster-mesh-peer:focus-visible {
 .fleet-details-label-value { display: grid; grid-template-columns: 160px minmax(0, 1fr); gap: 24px; font-size: var(--os-text-sm); line-height: 1.6; }
 .fleet-details-label-value > span:first-child { color: var(--os-muted); }
 .fleet-details-label-value small { display: block; margin-top: 4px; color: var(--os-muted); }
-@container machine-details (max-width: 760px) {
-  .fleet-details-section { grid-template-columns: minmax(0, 1fr); gap: 14px; padding-block: 24px; }
-  .fleet-details-section > .os-subhead { margin: 0; }
-}
 @container machine-details (max-width: 480px) {
   .fleet-machine-details .os-facts, .fleet-machine-setting { grid-template-columns: minmax(0, 1fr); gap: 0; }
   .fleet-machine-details .os-facts dt { padding: 10px 0 0; }
@@ -15277,6 +15164,9 @@ button[data-ask-control="running"], [data-ask-control="running"] > button { outl
 /* Keep a refusal beside the sharing controls in the Settings page flow. */
 .fleet-share-error { min-width: 0; }
 
+.fleet-app-status { color: var(--os-muted); }
+.fleet-app-status[data-ready] { color: var(--os-accent); }
+.fleet-section-actions { display: flex; justify-content: flex-end; margin-top: 12px; }
 /* Keep lesson evidence readable within narrow Training panes. */
 .training-lesson-review { container-type: inline-size; }
 @container (max-width: 540px) {

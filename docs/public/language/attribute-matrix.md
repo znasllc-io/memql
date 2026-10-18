@@ -34,6 +34,7 @@ One table per family of constructs, and one for the fields a construct declares.
 | [`@disabled`](#disabled) | flag | flag | flag | flag |
 | [`@eventField`](#eventfield) |  |  | strings |  |
 | [`@filter`](#filter) |  |  |  | expression |
+| [`@journalOnWrite`](#journalonwrite) |  |  |  | flag |
 | [`@journalRequired`](#journalrequired) |  |  |  | flag |
 | [`@loop`](#loop) |  |  |  | keywords |
 | [`@mcp`](#mcp) | flag | flag |  | flag |
@@ -203,6 +204,7 @@ The fields of its `args` block take the annotations under [args field](#args-fie
 | [`@description`](#description) | one string | `@description("On a new ticket, notify its owner.")` |
 | [`@disabled`](#disabled) | no arguments | `@disabled` |
 | [`@filter`](#filter) | an expression | `@filter(row => row.status == "open")` |
+| [`@journalOnWrite`](#journalonwrite) | no arguments | `@journalOnWrite` |
 | [`@journalRequired`](#journalrequired) | no arguments | `@journalRequired` |
 | [`@loop`](#loop) | keyword arguments | `@loop(maxDepth=4, until=row => row.status == "done")` |
 | [`@mcp`](#mcp) | no arguments | `@mcp` |
@@ -727,6 +729,14 @@ Tool handler configuration. Format: @handler(type="query", query="...") / @handl
 | [concept field](#concept-field) | no arguments | `@internal` |
 
 On a concept field: server-only (memql#2035) -- never projected by a shape's default projection and never accepted from a mutation's caller args; emitted as x-internal. (On a construct, @internal is retired, #2708.)
+
+### @journalOnWrite
+
+| On | Written as | Example |
+|---|---|---|
+| [automation](#automation) | no arguments | `@journalOnWrite` |
+
+For a background event firing, hold the journal until its first engine graph write, failure or human wait. Successful no-ops leave no run or step rows. Manual runs and adopted runs keep their journal. Do not use for external or raw SQL effects that do not report an engine write. Cannot be combined with journalRequired.
 
 ### @journalRequired
 

@@ -184,6 +184,27 @@ func TestOwnerShareWorksWithoutMachineConfigurationAcrossTheHop(t *testing.T) {
 	}
 }
 
+func TestReceivingReplicaAttributesOwnerAndClusterSharedCalls(t *testing.T) {
+	h := newSharedHop(t, "cluster", true)
+	attribution := make(chan workerservice.SharingSubjects, 2)
+	h.link.handler.registry.WorkerById("studio").SetModelCallFunc(func(ctx context.Context, req workerservice.ModelCallRequest) (*workerservice.ModelCallHandle, error) {
+		attribution <- req.SharingSubjects
+		handle, _, finish := workerservice.NewModelCallLoopback(req, func(string) {})
+		go finish(workerservice.ModelCallOutcome{FinishReason: workerservice.ModelFinishStop})
+		return handle, nil
+	})
+	for _, user := range []string{h.owner, h.caller} {
+		out, err := h.call(t, user)
+		if err != nil || out.RefusedBeforeStart || out.ErrorCode != "" {
+			t.Fatalf("call: %v %+v", err, out)
+		}
+		got := <-attribution
+		if got.Borrowed != (user == h.caller) || len(got.UserIds)+len(got.GroupIds) != 0 {
+			t.Fatalf("receiver misattributed %s: %+v", user, got)
+		}
+	}
+}
+
 // ---------------------------------------------------------------------------
 // Lent to NAMED people, across the hop (epic memql#5344)
 // ---------------------------------------------------------------------------
@@ -322,6 +343,24 @@ func TestRecipientPauseAndResumeAreEnforcedByTheReceivingReplica(t *testing.T) {
 	}
 }
 
+func TestGlobalPauseIsRecheckedByTheReceivingReplicaAndResumeKeepsAudience(t *testing.T) {
+	for _, mode := range []string{"people", "cluster"} {
+		h := newPeopleHop(t, []string{sharedHopCaller}, nil, nil)
+		store := h.link.handler.store.(*sharedFleet)
+		store.all[0].SharingMode = mode
+		store.all[0].SharingPaused = true
+		out, err := h.call(t, h.caller)
+		if err == nil && !out.RefusedBeforeStart {
+			t.Fatalf("paused %s share dispatched", mode)
+		}
+		store.all[0].SharingPaused = false
+		out, err = h.call(t, h.caller)
+		if err != nil || out.RefusedBeforeStart || out.ErrorCode != "" {
+			t.Fatalf("resume: %v %+v", err, out)
+		}
+	}
+}
+
 func TestAPauseLetsTheRunningCallFinishButRefusesTheNextCallAcrossTheHop(t *testing.T) {
 	h := newPeopleHop(t, []string{sharedHopCaller}, nil, nil)
 	started, release := make(chan workerservice.SharingSubjects, 1), make(chan struct{})
@@ -346,7 +385,7 @@ func TestAPauseLetsTheRunningCallFinishButRefusesTheNextCallAcrossTheHop(t *test
 	case <-time.After(3 * time.Second):
 		t.Fatal("call never reached the receiving machine")
 	}
-	if len(subjects.UserIds) != 1 {
+	if !subjects.Borrowed || len(subjects.UserIds) != 1 {
 		t.Fatalf("the receiving replica lost count attribution: %+v", subjects)
 	}
 	store := h.link.handler.store.(*sharedFleet)

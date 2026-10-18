@@ -36,7 +36,7 @@ func captureSpine(name string, source workflowhost.SourceLoader) (*workflowhost.
 		}
 	}
 	phases := map[string]string{}
-	for _, phase := range []string{"workSpineDraftProgram", "agentWorkbenchRecovery", "workSpineRecovery", "workSpineReplan", "workSpineRepair"} {
+	for _, phase := range []string{"workSpineDraftProgram", "agentWorkbenchRecovery", "workSpineRecovery", "workSpineReplan", "workSpineRepair", "workFeedbackPolicy"} {
 		phases[phase] = phase
 	}
 	var entries []string

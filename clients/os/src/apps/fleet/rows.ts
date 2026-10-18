@@ -63,6 +63,7 @@ export interface MachineRow {
   capabilities: string[];
   /** Binary-reported pipeline semantics; zero means not reported. */
   pipelineContract: number;
+  workbenchContract?: number;
   os: string;
   arch: string;
   hostname: string;
@@ -95,12 +96,17 @@ export interface MachineRow {
   revokeReason: string;
   /** The local apps this machine reported (memql#4359). */
   apps: MachineApp[];
+  appsReported: boolean;
   /** What the machine IS, as its cockpit reported it (epic memql#5146, D1).
    *  `present` false means the cockpit predates the field -- NOT a machine
    *  with no memory. See machines/hardware.ts. */
   hardware: MachineHardware;
   /** The enrolled owner's saved model-sharing audience. */
   sharingMode: SharingMode;
+  sharingPaused?: boolean;
+  workbenchSharing?: MachineSharing;
+  workbenchSharingActivity?: Record<string, unknown> | null;
+  ownerFeatures?: MachineOwnerFeatures;
   /** Under `people`: the users it is lent to, in the spelling stored and in
    *  stored order. EMPTY under the other two modes whatever the row holds --
    *  a list that is not in force is residue, not a share (design G10). */
@@ -347,6 +353,7 @@ export function machineFromRow(raw: Row): MachineRow {
     identityId: rowString(row, "identityId"),
     capabilities: stringList(row, "capabilities"),
     pipelineContract: pipelineContractFrom(descriptor),
+    workbenchContract: pipelineContractFrom(descriptor, "workerWorkbench"),
     os,
     arch,
     hostname: nestedString(platformInfo, "hostname"),
@@ -368,8 +375,13 @@ export function machineFromRow(raw: Row): MachineRow {
     revokedBy: rowString(row, "revokedBy"),
     revokeReason: rowString(row, "revokeReason"),
     apps: appsFrom(row),
+    appsReported: Array.isArray(row["apps"]),
     hardware: hardwareFrom(row["hardware"]),
     sharingMode: sharing.mode,
+    sharingPaused: sharing.paused,
+    workbenchSharing: sharingFrom(row["workbenchSharing"], false),
+    workbenchSharingActivity: objectAt(objectAt(row["sharingActivity"])?.["workbench"]),
+    ownerFeatures: ownerFeaturesFrom(row["ownerFeatures"]),
     sharedUserIds: sharing.userIds,
     sharedGroupIds: sharing.groupIds,
     pausedUserIds: subjectIdsFrom(objectAt(row["sharing"])?.["pausedUserIds"]),
@@ -499,10 +511,26 @@ export function clockSkewMatters(
  *  signed in and to the cluster's own work. */
 export type SharingMode = "owner" | "people" | "cluster";
 
-interface Sharing {
+export interface MachineSharing {
   mode: SharingMode;
+  paused: boolean;
   userIds: string[];
   groupIds: string[];
+  pausedUserIds: string[];
+  pausedGroupIds: string[];
+}
+
+export interface MachineOwnerFeatures {
+  headless: boolean;
+  apps: boolean;
+  computerUse: boolean;
+  updatedAt: string;
+}
+
+export function ownerFeaturesFrom(value: unknown): MachineOwnerFeatures {
+  const block = Array.isArray(value) ? null : objectAt(value);
+  const enabled = (key: string): boolean => value != null && !block ? false : !block || !(key in block) || block[key] === true;
+  return { headless: enabled("headless"), apps: enabled("apps"), computerUse: enabled("computerUse"), updatedAt: nestedString(block, "updatedAt") };
 }
 
 /**
@@ -523,14 +551,17 @@ interface Sharing {
  * under `people` ONLY: residue left under another mode is not in force, and a
  * surface that named it would be naming people the machine does not serve.
  */
-function sharingFrom(v: unknown): Sharing {
+export function sharingFrom(v: unknown, allowCluster = true): MachineSharing {
   const block = objectAt(v);
   const mode = nestedString(block, "mode").trim();
-  if (mode === "cluster") return { mode: "cluster", userIds: [], groupIds: [] };
-  if (mode !== "people") return { mode: "owner", userIds: [], groupIds: [] };
-  const userIds = subjectIdsFrom(block?.["userIds"]);
-  const groupIds = subjectIdsFrom(block?.["groupIds"]);
-  return { mode: "people", userIds, groupIds };
+  return {
+    mode: mode === "people" || (allowCluster && mode === "cluster") ? mode : "owner",
+    paused: !!block && "paused" in block && block["paused"] !== false,
+    userIds: mode === "people" ? subjectIdsFrom(block?.["userIds"]) : [],
+    groupIds: mode === "people" ? subjectIdsFrom(block?.["groupIds"]) : [],
+    pausedUserIds: mode === "people" ? subjectIdsFrom(block?.["pausedUserIds"]) : [],
+    pausedGroupIds: mode === "people" ? subjectIdsFrom(block?.["pausedGroupIds"]) : [],
+  };
 }
 
 /**
@@ -692,6 +723,12 @@ export interface RoutingRecord {
 export interface InvocationRow {
   id: string;
   createdAt: string;
+  completedAt: string;
+  correlationId: string;
+  runId: string;
+  stepId: string;
+  argsRedacted: string;
+  outputPreview: string;
   startedAt: string;
   tool: string;
   action: string;
@@ -726,6 +763,10 @@ export function invocationFromRow(raw: Row): InvocationRow {
   const row = flatten(raw);
   return {
     id: rowString(row, "id"),
+    completedAt: rowString(row, "completedAt"), correlationId: rowString(row, "correlationId"),
+    runId: rowString(row, "runId"), stepId: rowString(row, "stepId"),
+    argsRedacted: rowObject(row, "argsRedacted") ? JSON.stringify(rowObject(row, "argsRedacted"), null, 2) : "",
+    outputPreview: rowString(row, "outputPreview"),
     createdAt: rowString(row, "createdAt"),
     startedAt: rowString(row, "startedAt"),
     tool: rowString(row, "tool"),
@@ -1127,9 +1168,9 @@ export function sessionsNewestFirst(rows: readonly AppSessionRow[]): AppSessionR
   );
 }
 
-function pipelineContractFrom(descriptor: Record<string, unknown> | null): number {
+function pipelineContractFrom(descriptor: Record<string, unknown> | null, action = "workerHost.pipeline_step"): number {
   const contracts = descriptor?.["actionContracts"];
   if (contracts === null || typeof contracts !== "object" || Array.isArray(contracts)) return 0;
-  const version = (contracts as Record<string, unknown>)["workerHost.pipeline_step"];
+  const version = (contracts as Record<string, unknown>)[action];
   return typeof version === "number" && Number.isInteger(version) && version > 0 && version <= 65535 ? version : 0;
 }

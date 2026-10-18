@@ -65,6 +65,22 @@ func openActsDB(t *testing.T) actsDB {
 	return actsDB{i: i, eng: eng, db: db, owner: owner}
 }
 
+// freshActsDBPair reuses two independently initialized replicas within a parent
+// test. Each case gets a new owner, integrations and gate pools; engine caches
+// remain separate, and all rows are unique to the case. Parent cleanup runs last.
+func freshActsDBPair(t *testing.T, a, b actsDB) (actsDB, actsDB) {
+	t.Helper()
+	owner := newRowId("v1:identity:user")
+	for _, fixture := range []*actsDB{&a, &b} {
+		fixture.owner = owner
+		fixture.i = New(fixture.eng, testLogger())
+		fixture.i.bunDB = func() *bun.DB { return fixture.db }
+		fixture.i.SetGateDB(testGates(t))
+		fixture.i.admitRow = memqlengine.AdmitSourceRow
+	}
+	return a, b
+}
+
 func (a actsDB) write(t *testing.T, name string, args map[string]any) {
 	t.Helper()
 	if err := a.i.store().writeInternal(ownerActor(context.Background(), a.owner), "mutation "+call(name, args)); err != nil {
@@ -74,7 +90,11 @@ func (a actsDB) write(t *testing.T, name string, args map[string]any) {
 
 func (a actsDB) query(t *testing.T, userId, q string) []map[string]any {
 	t.Helper()
-	res, err := a.eng.Execute(actorCtx(userId), q)
+	// These fixtures do not connect their independent engines' invalidation
+	// buses. Assertions inspect committed rows, including writes from the other
+	// replica, rather than whichever cached snapshot this engine last served.
+	// Permission handlers still run with their own production read contexts.
+	res, err := a.eng.Execute(memqlengine.ContextWithFreshRead(actorCtx(userId)), q)
 	if err != nil {
 		t.Fatalf("%s as %s: %v", q, userId, err)
 	}

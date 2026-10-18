@@ -47,6 +47,7 @@ import (
 	"github.com/znasllc-io/memql/component/memql"
 	"github.com/znasllc-io/memql/component/server/fileversion"
 	"github.com/znasllc-io/memql/component/server/uploadsession"
+	"github.com/znasllc-io/memql/core/httpstream"
 	"github.com/znasllc-io/memql/core/id"
 )
 
@@ -1020,6 +1021,13 @@ func parseRangeHeader(header string, size int64) (*byteRange, bool) {
 // and single-range 206s through the StreamDownloader, with Content-Length
 // taken from the ROW -- the stream is copied, never buffered or measured.
 func (h *ArtifactHandler) streamFileBytes(w http.ResponseWriter, r *http.Request, row *LibraryFileRow, displayName string) {
+	writer, request, finish, deadlineErr := httpstream.Download(w, r)
+	if deadlineErr != nil {
+		http.Error(w, "download unavailable", http.StatusServiceUnavailable)
+		return
+	}
+	defer finish()
+	w, r = writer, request
 	size := int64(row.Size)
 	mimeType := strings.TrimSpace(row.MimeType)
 	if mimeType == "" {

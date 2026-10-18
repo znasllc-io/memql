@@ -30,6 +30,8 @@ func TestEverySharingRefusalIsCountedNeverNamed(t *testing.T) {
 	shares := []workerservice.Sharing{
 		{Mode: workerservice.SharingModeOwner},
 		{Mode: workerservice.SharingModeCluster},
+		{Mode: workerservice.SharingModeCluster, Paused: true},
+		{Mode: workerservice.SharingModePeople, Paused: true, UserIds: []string{"ana"}},
 		{Mode: workerservice.SharingModePeople, UserIds: []string{"ana"}},
 		{Mode: workerservice.SharingModePeople, GroupIds: []string{"design"}},
 	}

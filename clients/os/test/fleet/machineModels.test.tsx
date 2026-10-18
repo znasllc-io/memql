@@ -1,4 +1,4 @@
-import { act, cleanup, render, screen, within } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { Row } from "@znasllc-io/memql-sdk-core/client";
 
@@ -28,9 +28,9 @@ const OWNER = "v1:identity:user:me";
 
 async function mount(
   labels: Record<string, string>,
-  opts: { owner?: string; viewer?: string; pulls?: Row[] } = {},
+  opts: { owner?: string; viewer?: string; pulls?: Row[]; setup?: Row } = {},
 ) {
-  const connection = fakeConnection({ modelPullsForWorker: opts.pulls ?? [] });
+  const connection = fakeConnection({ modelPullsForWorker: opts.pulls ?? [], fleetModelSetup: [opts.setup ?? { id:"laptop",revision:"",choices:{},usableBytes:48e9,diskFreeBytes:100e9,catalog:[{modelId:"hf.co/TheBloke/Llama-2-70B-GGUF:Q4_K_M",runtime:"ollama",purposes:["conversation"],memoryBytes:40e9,sizeBytes:39e9,installed:false,blocked:"",installBlocked:"",recommended:true}] }] });
   h.connection = connection;
   const machine = machineFromRow(
     machineRow({ id: "laptop", ownerUserId: opts.owner ?? OWNER, labels }),
@@ -44,109 +44,53 @@ async function mount(
 }
 
 describe("the Models group", () => {
-  it.each(["qwen3.5:9b", "qwen3.8:27b", "qwen3.8:27b-q8_0"])("offers the owner a chat check for %s alongside the default embedder", async (modelId) => {
-    await mount({ ["model:" + modelId]: "tools=1,ctx=32768", "model:qwen3-embedding:0.6b": "embeddings=1" });
-    expect(screen.getByRole("button", { name: "Ask it something" })).toBeTruthy();
-    expect(screen.getByText(new RegExp(`Sends.*to ${modelId.replaceAll(".", "\\.")}`))).toBeTruthy();
+  it.each(["qwen3.5:9b","qwen3.8:27b","qwen3.8:27b-q8_0"])("keeps installed model details informational: %s",async modelId=>{
+    const connection = await mount({["model:"+modelId]:"tools=1,ctx=32768","model:embed":"embeddings=1"});
+    expect(screen.queryByRole("button",{name:"Ask it something"})).toBeNull();
+    fireEvent.click(screen.getByRole("button",{name:new RegExp(modelId.replaceAll(".","\\."))}));
+    expect(screen.getByRole("region", {name:"Overview"})).toBeTruthy();
+    expect(screen.queryByRole("region", {name:"Test"})).toBeNull();
+    expect(screen.queryByRole("button",{name:"Ask it something"})).toBeNull();
+    expect(screen.queryByRole("button",{name:"Measure performance"})).toBeNull();
+    expect(connection.query.measurementsForMachine).not.toHaveBeenCalled();
+    expect(connection.query.fleetModelProbe).not.toHaveBeenCalled();
   });
-
-  it("does not offer a targeted chat check for embeddings or someone else's machine", async () => {
-    await mount({ "model:qwen3-embedding:0.6b": "embeddings=1" });
-    expect(screen.queryByRole("button", { name: "Ask it something" })).toBeNull();
-    cleanup();
-    await mount({ "model:qwen3.8:27b": "tools=1" }, { owner: "another-owner" });
-    expect(screen.queryByRole("button", { name: "Ask it something" })).toBeNull();
+  it("never offers a conversation check to image models",async()=>{
+    await mount({"model:flux":"imagegen=1"});
+    fireEvent.click(screen.getByRole("button",{name:/flux/}));
+    expect(screen.queryByRole("button",{name:"Ask it something"})).toBeNull();
   });
-
-  it("lists what the machine advertises, with its size and quantization", async () => {
-    await mount({
-      "runtime:ollama": "1",
-      "model:llama3.1:8b": "ctx=131072,structured=1,tools=1,params=8000000000,quant=Q4_K_M",
-    });
-    // SCOPED TO THE ROW, not to the document. The Pull form's placeholder and
-    // its Hugging Face example legitimately contain a model id and a
-    // quantization, so a document-wide match would pass on the help text while
-    // the row itself rendered nothing.
-    const row = screen.getByRole("listitem");
-    expect(within(row).getByText("llama3.1:8b")).toBeTruthy();
-    expect(within(row).getByText(/8B/)).toBeTruthy();
-    expect(within(row).getByText(/Q4_K_M/)).toBeTruthy();
-    expect(within(row).getByText(/128k context/)).toBeTruthy();
-    expect(within(row).getByText(/structured output/)).toBeTruthy();
+  it("keeps detailed model facts off the overview",async()=>{
+    await mount({"model:chat":"params=8000000000,quant=Q4_K_M,ctx=131072,structured=1"});
+    fireEvent.click(screen.getByRole("button",{name:/chat Conversation/}));
+    expect(screen.getByText("8B")).toBeTruthy();
+    expect(screen.getByText("Q4_K_M")).toBeTruthy();
+    expect(screen.getByText("128k")).toBeTruthy();
   });
-
-  // ===========================================================================
-  // TWO EMPTY STATES, NOT ONE
-  // ===========================================================================
-  // "No runtime" and "a runtime serving nothing" have different fixes, and a
-  // models list alone renders both as the same blank. The second is the state
-  // this whole feature exists for, so it is the one that has to invite the act.
-  it("distinguishes no runtime from a runtime with no models", async () => {
-    await mount({});
-    expect(screen.getByText(/No model runtime on this machine/)).toBeTruthy();
-    cleanup();
-
-    await mount({ "runtime:ollama": "1" });
-    expect(screen.getByText(/Running ollama with no models yet/)).toBeTruthy();
+  it("distinguishes a missing runtime from a runtime waiting for models",async()=>{
+    await mount({}); expect(screen.getByText("No model runtime reported yet.")).toBeTruthy(); cleanup();
+    await mount({"runtime:ollama":"1"}); expect(screen.getByText("No models installed yet.")).toBeTruthy();
   });
-
-  // ===========================================================================
-  // THE PULL ACT IS ABSENT FOR A NON-OWNER, NOT DISABLED
-  // ===========================================================================
-  // Rule 12's reading, and the engine enforces it independently:
-  // fleetModelPull refuses a machine that is not the caller's. A disabled
-  // button would advertise an act nobody on this page can reach.
-  it("offers Pull to the machine's owner", async () => {
-    await mount({ "runtime:ollama": "1" });
-    expect(screen.getByRole("button", { name: "Pull" })).toBeTruthy();
+  it("keeps catalog and setup changes with the machine's owner",async()=>{
+    await mount({"model:chat":"tools=1"},{owner:"alice"});
+    expect(screen.queryByRole("button",{name:"Change model setup"})).toBeNull();
+    expect(screen.queryByRole("button",{name:"Browse catalog"})).toBeNull();
   });
-
-  it("shows no Pull act at all to somebody else", async () => {
-    await mount({ "runtime:ollama": "1" }, { owner: "v1:identity:user:alice", viewer: OWNER });
-    expect(screen.queryByRole("button", { name: "Pull" })).toBeNull();
-    expect(screen.getByText(/Only this machine's owner can pull/)).toBeTruthy();
+  it("installs an eligible catalog model with its exact runtime id",async()=>{
+    const connection=await mount({"runtime:ollama":"1"});
+    fireEvent.click(screen.getByRole("button",{name:"Browse catalog"}));
+    fireEvent.click(screen.getByRole("button",{name:/hf.co/}));
+    await act(async()=>{screen.getByRole("button",{name:"Install model"}).click();});
+    expect(connection.query.fleetModelPull).toHaveBeenCalledWith({registrationId:"laptop",model:"hf.co/TheBloke/Llama-2-70B-GGUF:Q4_K_M"});
   });
-
-  // A canonical id and a bare one name the same subject, and the shell never
-  // composes ids. Comparing them naively would hide the act from the person
-  // whose machine it is -- which reads exactly like a permission bug.
-  it("recognises the owner across id spellings", async () => {
-    await mount({ "runtime:ollama": "1" }, { owner: "v1:identity:user:me", viewer: "me" });
-    expect(screen.getByRole("button", { name: "Pull" })).toBeTruthy();
-  });
-
-  it("starts a pull with the model id untouched", async () => {
-    const connection = await mount({ "runtime:ollama": "1" });
-    const input = screen.getByLabelText(/Model to pull onto/) as HTMLInputElement;
-    await act(async () => {
-      const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")!.set!;
-      setter.call(input, "hf.co/TheBloke/Llama-2-70B-GGUF:Q4_K_M");
-      input.dispatchEvent(new Event("input", { bubbles: true }));
-    });
-    await act(async () => {
-      (screen.getByRole("button", { name: "Pull" }) as HTMLElement).click();
-    });
-    expect(connection.query.fleetModelPull).toHaveBeenCalledWith({
-      registrationId: "laptop",
-      model: "hf.co/TheBloke/Llama-2-70B-GGUF:Q4_K_M",
-    });
-  });
-
-  it("shows the cluster's own refusal rather than a sentence of its own", async () => {
-    const connection = await mount({ "runtime:ollama": "1" });
-    connection.query.fleetModelPull.mockRejectedValueOnce(
-      new Error("Studio is not connected to the cluster right now"),
-    );
-    const input = screen.getByLabelText(/Model to pull onto/) as HTMLInputElement;
-    await act(async () => {
-      const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")!.set!;
-      setter.call(input, "llama3.1:8b");
-      input.dispatchEvent(new Event("input", { bubbles: true }));
-    });
-    await act(async () => {
-      (screen.getByRole("button", { name: "Pull" }) as HTMLElement).click();
-    });
-    expect(screen.getByText(/is not connected to the cluster right now/)).toBeTruthy();
+  it("shows a failed installation without changing the setup",async()=>{
+    const connection=await mount({"runtime:ollama":"1"});
+    connection.query.fleetModelPull.mockRejectedValueOnce(new Error("Waiting for refreshed storage details"));
+    fireEvent.click(screen.getByRole("button",{name:"Browse catalog"}));
+    fireEvent.click(screen.getByRole("button",{name:/hf.co/}));
+    await act(async()=>{screen.getByRole("button",{name:"Install model"}).click();});
+    expect(screen.getByText("Waiting for refreshed storage details")).toBeTruthy();
+    expect(connection.query.fleetSetModelSetup).not.toHaveBeenCalled();
   });
 });
 
@@ -282,7 +226,7 @@ describe("a pull in flight", () => {
     });
     expect(screen.queryByText("pulling on somebody else's machine")).toBeNull();
     // And the act stays available, because nothing is running HERE.
-    expect(screen.getByRole("button", { name: "Pull" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Browse catalog" })).toBeTruthy();
   });
 });
 
@@ -344,4 +288,80 @@ describe("what has been pulled here before", () => {
     );
     expect(screen.getByText(/can route to it now/)).toBeTruthy();
   });
+});
+
+const setupFixture = {
+ id: "laptop", revision: "before", choices: { conversation: "chat", tools: "chat" }, usableBytes: 24e9, diskFreeBytes: 100e9,
+ catalog: [
+  { modelId: "chat", runtime: "ollama", installed: true, purposes: ["conversation", "tools"], memoryBytes: 16e9 },
+  { modelId: "small", runtime: "ollama", installed: true, purposes: ["conversation", "tools"], memoryBytes: 6e9 },
+  { modelId: "large", runtime: "ollama", installed: true, purposes: ["conversation"], memoryBytes: 20e9 },
+  { modelId: "unknown", runtime: "ollama", installed: true, purposes: ["conversation"], memoryBytes: 0, blocked: "Memory estimate unavailable" },
+ ],
+};
+async function chooseTask(label: string, model: string) {
+ fireEvent.click(screen.getByRole("button", { name: `Select ${model}` }));
+ fireEvent.click(screen.getByRole("button", { name: new RegExp(`^${label}:`) }));
+}
+describe("model setup choices", () => {
+ it("saves the expected revision and deduplicates a model serving several tasks", async () => {
+  const connection = await mount({"model:chat":"tools=1", "model:small":"tools=1"}, {setup: setupFixture});
+  expect(screen.getByRole("meter").getAttribute("aria-valuenow")).toBe("16000000000");
+  fireEvent.click(screen.getByRole("button", {name:"Change model setup"}));
+  await chooseTask("Conversation", "small");
+  expect(screen.getByRole("meter").getAttribute("aria-valuenow")).toBe("22000000000");
+  await waitFor(() => expect((screen.getByRole("button", {name:"Save setup"}) as HTMLButtonElement).disabled).toBe(false));
+  await act(async () => { await new Promise(resolve => setTimeout(resolve, 450)); });
+  await act(async () => { fireEvent.click(screen.getByRole("button", {name:"Save setup"})); });
+  expect(connection.query.fleetSetModelSetup).toHaveBeenCalledWith({registrationId:"laptop", revision:"before", choices:{conversation:"small", tools:"chat"}});
+ });
+ it("prevents an over-capacity save and excludes unknown memory profiles", async () => {
+  const connection = await mount({"model:chat":"tools=1", "model:large":"ctx=32768"}, {setup:setupFixture});
+  fireEvent.click(screen.getByRole("button", {name:"Change model setup"}));
+  fireEvent.click(screen.getByRole("button", { name: "Select unknown" }));
+  expect(screen.queryByRole("button", { name: "Conversation: chat" })).toBeNull();
+  expect(screen.getAllByText("Memory estimate unavailable").length).toBeGreaterThan(0);
+  fireEvent.click(screen.getByRole("button", { name: "Select large" }));
+  expect(screen.queryByRole("button", { name: "Conversation: chat" })).toBeNull();
+  fireEvent.click(screen.getByRole("group", { name: "Conversation: chat" }));
+  expect(screen.queryByText(/This would exceed capacity/)).toBeNull();
+  expect(screen.queryByRole("button", {name:"Save setup"})).toBeNull();
+  expect(connection.query.fleetSetModelSetup).not.toHaveBeenCalled();
+ });
+ it("preserves choices after a concurrent-save refusal", async () => {
+  const connection = await mount({"model:chat":"tools=1", "model:small":"tools=1"}, {setup:setupFixture});
+  connection.query.fleetSetModelSetup.mockRejectedValueOnce(new Error("The setup changed. Reload it before saving."));
+  fireEvent.click(screen.getByRole("button", {name:"Change model setup"}));
+  await chooseTask("Conversation", "small");
+  await waitFor(() => expect((screen.getByRole("button", {name:"Save setup"}) as HTMLButtonElement).disabled).toBe(false));
+  await act(async () => { await new Promise(resolve => setTimeout(resolve, 450)); });
+  await act(async () => { fireEvent.click(screen.getByRole("button", {name:"Save setup"})); });
+  expect(screen.getByRole("button", {name:"Conversation: small"})).toBeTruthy();
+  expect(screen.getByText("The setup changed. Reload it before saving.")).toBeTruthy();
+ });
+ it("retains a refused draft when the recovery read also fails", async () => {
+  const connection = await mount({"model:chat":"tools=1", "model:small":"tools=1"}, {setup:setupFixture});
+  fireEvent.click(screen.getByRole("button", {name:"Change model setup"}));
+  await chooseTask("Conversation", "small");
+  connection.query.fleetSetModelSetup.mockRejectedValueOnce(new Error("Connection interrupted"));
+  connection.query.fleetModelSetup.mockRejectedValueOnce(new Error("Still disconnected"));
+  await act(async () => { fireEvent.click(screen.getByRole("button", {name:"Save setup"})); });
+  expect(screen.getByRole("button", {name:"Conversation: small"})).toBeTruthy();
+  expect(screen.queryByRole("button", {name:"Save setup"})).toBeNull();
+  expect(screen.getByRole("button", {name:"Discard changes"})).toBeTruthy();
+ });
+ it("holds choices and prevents a second write while saving", async () => {
+  const connection = await mount({"model:chat":"tools=1", "model:small":"tools=1"}, {setup:setupFixture});
+  let finish!: () => void;
+  connection.query.fleetSetModelSetup.mockImplementationOnce(() => new Promise<void>(resolve => { finish = resolve; }));
+  fireEvent.click(screen.getByRole("button", {name:"Change model setup"}));
+  await chooseTask("Conversation", "small");
+  fireEvent.click(screen.getByRole("button", {name:"Save setup"}));
+  fireEvent.click(screen.getByRole("button", {name:"Saving setup…"}));
+  expect(connection.query.fleetSetModelSetup).toHaveBeenCalledTimes(1);
+  expect((screen.getByRole("button", {name:"Discard changes"}) as HTMLButtonElement).disabled).toBe(true);
+  expect((screen.getByRole("button", {name:"Select chat"}) as HTMLButtonElement).disabled).toBe(true);
+  await act(async () => finish());
+  expect(screen.getByText("Model setup saved.")).toBeTruthy();
+ });
 });

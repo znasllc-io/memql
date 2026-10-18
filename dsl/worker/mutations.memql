@@ -1333,6 +1333,7 @@ mutation modelProbe finishModelProbe {
 mutation registration setWorkerSharing {
   args {
     registrationId  string!
+    paused          bool
     /// owner, people or cluster. Anything else is read as owner by every reader, so
     /// the enum is enforced here rather than left to be misread later.
     mode            enum("owner", "people", "cluster")!
@@ -1348,12 +1349,70 @@ mutation registration setWorkerSharing {
     id: args.registrationId
     sharing: {
       mode: args.mode,
+      paused: args.paused ?? false,
       userIds: args.userIds ?? [],
       groupIds: args.groupIds ?? [],
       pausedUserIds: args.pausedUserIds ?? [],
       pausedGroupIds: args.pausedGroupIds ?? [],
       sharedAt: now,
       sharedBy: actor.userId
+    }
+  }
+}
+
+/// The owner's independent audience for isolated fleet workbenches. Only the
+/// owning-machine builtin may write this consent; registration never resets it.
+/// Scoping to actor.userId cannot narrow the registration tier’s cluster-owner
+/// escape. fleetSetSharing verifies the enrolled owner and eligible audience
+/// before this server-only write.
+@actor
+@serverOnly
+mutation registration setWorkerWorkbenchSharing {
+  args {
+    registrationId string!
+    mode enum("owner", "people")!
+    paused bool!
+    userIds []string
+    groupIds []string
+    pausedUserIds []string
+    pausedGroupIds []string
+  }
+  update {
+    id: args.registrationId
+    workbenchSharing: {
+      mode: args.mode,
+      paused: args.paused,
+      userIds: args.userIds ?? [],
+      groupIds: args.groupIds ?? [],
+      pausedUserIds: args.pausedUserIds ?? [],
+      pausedGroupIds: args.pausedGroupIds ?? [],
+      sharedAt: now,
+      sharedBy: actor.userId
+    }
+  }
+}
+
+/// Owner-only host capabilities, independent of model and workbench sharing.
+/// Scoping to actor.userId cannot narrow the registration tier’s cluster-owner
+/// escape or enforce a stale-edit witness. fleetSetOwnerFeatures checks both
+/// before rendering this server-only mutation.
+@actor
+@serverOnly
+mutation registration setWorkerOwnerFeatures {
+  args {
+    registrationId string!
+    headless bool!
+    apps bool!
+    computerUse bool!
+  }
+  update {
+    id: args.registrationId
+    ownerFeatures: {
+      headless: args.headless,
+      apps: args.apps,
+      computerUse: args.computerUse,
+      updatedAt: now,
+      updatedBy: actor.userId
     }
   }
 }
@@ -1384,5 +1443,46 @@ mutation registration updateWorkerSharingActivity {
   update {
     id: args.registrationId
     args.sharingActivity
+  }
+}
+
+/// Save one validated model setup. The engine owns admission and the row version fence.
+/// actor.userId scoping alone cannot enforce hardware capacity, model capabilities, or an expected revision; fleetSetModelSetup performs those checks first.
+@actor
+@serverOnly
+mutation registration setWorkerModelSetup {
+  args {
+    registrationId string!
+    setup object!
+  }
+  update {
+    id: args.registrationId
+    modelSetup: args.setup
+  }
+}
+
+@actor
+mutation activity createMachineActivity {
+  args { activityId string! workerId string! kind string! label string! correlationId string startedAt string! expiresAt string! }
+  insert {
+    id: args.activityId
+    ownerUserId: actor.userId
+    args.workerId
+    args.kind
+    args.label
+    correlationId: args.correlationId ?? ""
+    status: "queued"
+    args.startedAt
+    args.expiresAt
+  }
+}
+
+mutation activity updateMachineActivity {
+  args { activityId string! status string! endedAt string detail string }
+  update {
+    id: args.activityId
+    args.status
+    endedAt: args.endedAt ?? ""
+    detail: args.detail ?? ""
   }
 }

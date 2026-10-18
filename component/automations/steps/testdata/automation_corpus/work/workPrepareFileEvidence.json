@@ -1,0 +1,163 @@
+{
+  "automation": "work/automations.memql workPrepareFileEvidence",
+  "runs": {
+    "invocation | 0 rows": {
+      "input": {
+        "event": {
+          "kind": "unspecified",
+          "payload": {
+            "conversation": "s-conversation",
+            "conversationId": "s-conversationId",
+            "draft": "s-draft",
+            "statement": "s-statement",
+            "turnId": "s-turnId"
+          },
+          "topic": "automation.invocation.workPrepareFileEvidence"
+        },
+        "rows": 0
+      },
+      "outcome": {
+        "calls": [
+          {
+            "args": {
+              "conversationId": "s-conversationId",
+              "turnId": "s-turnId"
+            },
+            "kind": "builtin",
+            "name": "workSourceContext"
+          },
+          {
+            "args": {
+              "data": {
+                "conversation": "s-conversation",
+                "draft": "s-draft",
+                "sources": "{\"args\":{\"conversationId\":\"s-conversationId\",\"turnId\":\"s-turnId\"},\"builtin\":\"workSourceContext\"}",
+                "statement": "s-statement"
+              },
+              "responseSchema": {
+                "additionalProperties": false,
+                "properties": {
+                  "basis": {
+                    "type": "string"
+                  },
+                  "evidence": {
+                    "enum": [
+                      "supported",
+                      "not_required",
+                      "missing"
+                    ],
+                    "type": "string"
+                  },
+                  "ready": {
+                    "type": "boolean"
+                  },
+                  "reply": {
+                    "type": "string"
+                  },
+                  "usesRecordedSources": {
+                    "type": "boolean"
+                  }
+                },
+                "required": [
+                  "ready",
+                  "evidence",
+                  "reply",
+                  "basis",
+                  "usesRecordedSources"
+                ],
+                "type": "object"
+              },
+              "templateId": "workFileEvidence"
+            },
+            "kind": "builtin",
+            "name": "ai"
+          }
+        ],
+        "refused": true,
+        "result": {
+          "output": null,
+          "status": "failed"
+        }
+      }
+    },
+    "invocation | 2 rows": {
+      "input": {
+        "event": {
+          "kind": "unspecified",
+          "payload": {
+            "conversation": "s-conversation",
+            "conversationId": "s-conversationId",
+            "draft": "s-draft",
+            "statement": "s-statement",
+            "turnId": "s-turnId"
+          },
+          "topic": "automation.invocation.workPrepareFileEvidence"
+        },
+        "rows": 2
+      },
+      "outcome": {
+        "calls": [
+          {
+            "args": {
+              "conversationId": "s-conversationId",
+              "turnId": "s-turnId"
+            },
+            "kind": "builtin",
+            "name": "workSourceContext"
+          },
+          {
+            "args": {
+              "data": {
+                "conversation": "s-conversation",
+                "draft": "s-draft",
+                "sources": "{\"args\":{\"conversationId\":\"s-conversationId\",\"turnId\":\"s-turnId\"},\"builtin\":\"workSourceContext\"}",
+                "statement": "s-statement"
+              },
+              "responseSchema": {
+                "additionalProperties": false,
+                "properties": {
+                  "basis": {
+                    "type": "string"
+                  },
+                  "evidence": {
+                    "enum": [
+                      "supported",
+                      "not_required",
+                      "missing"
+                    ],
+                    "type": "string"
+                  },
+                  "ready": {
+                    "type": "boolean"
+                  },
+                  "reply": {
+                    "type": "string"
+                  },
+                  "usesRecordedSources": {
+                    "type": "boolean"
+                  }
+                },
+                "required": [
+                  "ready",
+                  "evidence",
+                  "reply",
+                  "basis",
+                  "usesRecordedSources"
+                ],
+                "type": "object"
+              },
+              "templateId": "workFileEvidence"
+            },
+            "kind": "builtin",
+            "name": "ai"
+          }
+        ],
+        "refused": true,
+        "result": {
+          "output": null,
+          "status": "failed"
+        }
+      }
+    }
+  }
+}

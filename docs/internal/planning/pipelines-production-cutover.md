@@ -106,8 +106,8 @@ authoring-surface parity gap. No scheduled scan may satisfy a required PR check.
 ## Workflow retirement ledger
 
 Inventory uses the engine tree at the source revision above and GitHub's live
-workflow API, including generated workflows. **None of these rows is approved
-for retirement yet.** A replacement needs its trigger, execution, credentials,
+workflow API, including generated workflows. The retirement state below was
+rechecked on October 18. A replacement needs its trigger, execution, credentials,
 outputs, publication and failure evidence, not merely a command in a manifest.
 
 | Engine workflow | Replacement or remaining evidence | Owner |
@@ -116,27 +116,27 @@ outputs, publication and failure evidence, not merely a command in a manifest.
 | `gitleaks.yml` | Existing current-tree and history scans; production event/cadence evidence | #5506 |
 | `govulncheck.yml` | Existing scan; production merge-group/push/schedule evidence | #5506 |
 | `codeql.yml` | Existing Go/JS/Python analysis; journaled SARIF upload and receipt still needed | #5480 |
-| `sbom.yml` | Existing portable generation; release asset publication and matching event coverage | #5480 |
+| `sbom.yml` | Native inventory now runs on release, main push, weekly and manual events; installed retained JSON/XML and complete module/lockfile evidence remain. The old workflow only retained artifacts, never attached release assets | #5480 |
 | `scorecard.yml` | Scorecard execution, permissions, branch-rule/scheduled triggers and SARIF publication | #5480 |
-| `build-engine-images.yml` | Seven native engine builds on the released instance; immutable publication and digest/provenance receipts | #5509 |
-| `dispatch-engine-images-on-release.yml` | MemQL release trigger and publication ownership, including duplicate-event recovery | #5509 |
-| `recover-engine-image-mirror.yml` | Reconcile immutable source/destination digests after interrupted publication | #5509 |
+| `build-engine-images.yml` | Disabled: native builds own this path. Current release's verified Azure publication and production rollout remain | #5509 |
+| `dispatch-engine-images-on-release.yml` | Disabled to prevent competing release builders; MemQL owns explicit release requests | #5509 |
+| `recover-engine-image-mirror.yml` | Disabled to prevent a competing registry writer; reconcile immutable digests through native publication | #5509 |
 | `build-toolchain-image.yml` | Build and publish future toolchains without Actions | #5509 |
-| `build-db-image.yml` | Build and publish the database image without Actions | #5509 |
+| `build-db-image.yml` | Native `tests.database-image` selects the verified operand target for changed inputs and full qualification; live native execution and separate registry publication remain | #5509 |
 | `mirror-fixture-images.yml` | Digest-verified fixture mirroring without Actions | #5509 |
-| `deploy-gate-image.yml` | Native deploy-gate image validation selects command/workspace changes on PRs and retains an unpublished OCI archive; cloud execution evidence remains | #5509 |
+| `deploy-gate-image.yml` | Removed after installed-production run `3f3af7ca78ce6e9529aafa08f4bfa593` passed the unchanged build and retained its log, OCI archive and metadata | #5509 |
 | `install-e2e.yml` | Native host lifecycle matrix and cleanup | #5480 |
 | `install-cluster-e2e.yml` | Installed-cluster lifecycle and cleanup; preserve actual failure evidence | #5480 |
-| `pipelines-live.yml` | Disposable cluster runtime qualification and retained logs | #5480 |
-| `proving-live.yml` | Credentialed proving run with explicit authorization and evidence | #5480 |
+| `pipelines-live.yml` | Removed unused manual placeholder: zero historical runs, command only refuses missing prerequisites; no runtime coverage lost | #5480 |
+| `proving-live.yml` | Removed unused manual placeholder: zero historical runs, live provider remains unconfigured; no provider qualification claimed | #5480 |
 | `publish-docs-bundle.yml` | Native release-files builds and verifies the exact-version bundle with complete Git history; release attachment and downstream delivery receipt remain | #5508, #5712 |
-| `docs-current-check.yml` | Scheduled public docs freshness check and failure notification | #5508, #5712 |
+| `docs-current-check.yml` | Native weekly public docs check declared; installed schedule/failure delivery proof remains | #5508, #5712 |
 | `publish-sdk-core.yml` | Native release-files retains the compiled, version-checked npm archive; registry publication and immutable receipt remain | #5480 |
 | `publish-vscode-extension.yml` | Native release-files verifies all four native targets plus web; registry publication remains | #5480 |
-| `vscode-site.yml` | Static editor-site build and its deployed version proof | #5480 |
-| `ruleset-drift.yml` | Scheduled policy audit; retain code-owner and required-check enforcement | #5507 |
+| `vscode-site.yml` | Native `tests.editor-site` builds and checks the static page, runs the existing Chromium browser suite and retains the page plus screenshots; cloud execution and served-version evidence remain | #5480 |
+| `ruleset-drift.yml` | Removed after installed daily run `3443e867a582c3ee5053aa23511dcf41` passed both baselines, retained both logs and reported separate check `MemQL / memql / daily`; negative controls pass ([receipt](https://github.com/znasllc-io/memql/issues/5507#issuecomment-6245341749)) | #5507 |
 | `dependabot-tidy.yml` | Trusted dependency-PR maintenance, without exposing write authority to PR code | #5480 |
-| `clustere2e-compile.yml` API entry | File absent at this revision; verify no independent active execution before disabling the stale registration | #5480 |
+| `clustere2e-compile.yml` API entry | Disabled October 17 at 14:05 UTC: file absent at `f8ece576d`, only two historical runs and no active execution. Current CI and native `checks.build-clustere2e` retain compilation. Required `ci-required` and run history preserved | #5480 |
 | Generated `github-code-scanning/codeql` | Reconcile GitHub default setup with advanced scanning and replacement publication | #5480 |
 | Generated `github-code-quality/codeql` | GitHub Code Quality is distinct from security CodeQL; equivalent coverage or an explicit owner decision is required | #5480 |
 | Generated Dependabot updates / graph | Retain useful GitHub dependency services per the design; explicitly resolve their managed Actions execution before claiming zero Actions dependency | #5480 |
@@ -163,12 +163,42 @@ The first local harness attempt failed because its bind mount created a
 root-owned parent cache directory; the corrected harness mounts the Go cache
 under `/cache`, like the actual runner.
 
+The package also declares the eight cases from the existing editor host
+matrix: VS Code desktop at 1.91.0 and stable on Linux, plus Productivity web
+at stable and desktop at both versions on Linux and macOS. Linux cases stay
+in bounded cluster containers. The three macOS cases explicitly require a
+native `darwin/arm64` Fleet worker with `macos_tooling`; the pipeline connection
+must authorize cluster and Fleet execution, and the machine's local repository
+allowlist must admit this repository. Accessibility is not needed for these
+command-line host tests.
+
+`scripts/ci/editor-host.sh` builds the shared SDKs and extensions in each
+checkout, stages the language server for VS Code tests, and preserves the
+selected host, runtime, exit status and failure diagnostics. macOS caches and
+browser downloads stay in the attempt checkout. A checksum-pinned official
+Node 22 macOS archive is also unpacked there, so a missing or different system
+Node does not require installing software into the owner's environment.
+Dependency downloads have
+bounded retries; test assertions run once. The manifest regression test
+compares all eight cases with the retained workflow and checks changed-source,
+exact merge candidate, release and scheduled-audit selection.
+
+Both Linux VS Code versions passed locally with 20 host assertions each.
+The twelve credentialed live-cluster cases were skipped, as in the existing
+uncredentialed host lane; this is not live-cluster proof. The Productivity
+Chromium host and both Linux desktop versions passed; the browser lane also
+packaged its VSIX. Each Productivity case ran all 325 unit tests first. Native production execution and macOS host evidence remain
+required before retiring the corresponding Actions lanes.
+
 `os-image` uses the fixed rootless image builder for Dockerfile's `spa-build`
 stage, retaining the OCI archive and metadata. Its path bucket includes the
 Dockerfile and the OS sources. Its production execution remains required.
 
-The DB step retains the exact package selection and five isolated databases,
-but groups each shard's packages by the CI planner's existing budget classes.
+The DB step retains the exact package selection and five isolated Postgres
+services, and groups each shard's packages by the CI planner's budget classes.
+Each class gets a fresh database within its shard's service, then drops only
+that successfully created database after its tests exit. Fixture rows and
+planner statistics from one class cannot consume another class's test budget.
 All invocations stay serial and uncached; fast suites keep 180 seconds,
 packages 300 seconds, and engine/campaigns 600 seconds. An empty selection,
 missing required-database setting or failing test refuses. The class table
@@ -193,7 +223,246 @@ published nothing. Future native execution and approved publication are still
 required. Separate SDK/editor tag triggers and registry receipts remain in the
 retirement scope; an engine release's package build is not their replacement.
 
+The database operand now has a `verified` Docker target that runs the same
+smoke script used against loaded local images. It starts a disposable Postgres
+as uid 26, verifies TimescaleDB Community, pgvector, continuous aggregates,
+compression, retention and the previous-to-current extension upgrade. The
+script and database are temporary build mounts and do not enter an image
+layer. The default development target remains the operand, preserving the
+existing local smoke-test option. Native `tests.database-image` builds the
+verified target when its inputs change and retains the unpublished OCI archive.
+
+Local validation passed against the existing operand and inside the exact new
+Docker target. A wrong expected current version fails; the resulting verified
+image remains uid 26 and contains no test script or database. Manifest selection,
+version drift, Bash syntax and ShellCheck pass. This is preparation, not native
+cloud or publication evidence. The Actions database publisher stays active
+until independent version selection, verified native execution and registry
+publication receipts replace it. No production database image is changed.
+
+## Publication qualification, October 17, 2026 UTC
+
+The installed v0.29.20 instance completed the native v0.29.22 release run
+`3f3af7ca78ce6e9529aafa08f4bfa593`, Work run
+`5e3ee9731c745417a39e3b8fef3101ee`, from
+`7801fddd1a29c15f509a66e076362e1f6633b959`. All 46 steps passed between
+07:45:23 and 09:39:58 UTC: **114m35s elapsed**, including capacity waiting.
+The GitHub summary's stage-duration sum is not the wall-clock duration.
+All 46 logs and 66 artifact references were retained. Three logs reached
+their configured size cap; none reported missing artifact paths or storage
+ownership refusal. The Files app returned the DB shard log, including Work's
+130.607-second pass, and the release manifest whose seven file checksums
+match their retained Library rows.
+
+Native candidate assembly and separate approval succeeded. Publication then
+stopped with a durable pending intent at the first Azure and GHCR images.
+Neither has a verified completion receipt. Empty upload-session probes found
+the protocol differences: Azure preserves a `_nouploadcache=false` query
+parameter, and GHCR returns a singular `/blobs/upload/<id>` session path.
+Azure documents its flag in the
+[Start Upload contract](https://learn.microsoft.com/en-us/rest/api/registry-dataplane/container-registry-blob/start-upload).
+The original transport rejects both; regression tests reproduce the same
+uncertain-publication outcome. The fix accepts those exact session forms
+while retaining origin, repository, digest, method and query bounds.
+
+The 578 MiB toolchain archive also exposed a download failure. Both HTTP
+hops use a 15-second default write deadline. Slow-transfer tests reproduce
+truncation at the serving handler and across the Edge proxy. The repair
+uses a 30-second idle write deadline and a 30-minute total ceiling on this
+download path, preserves earlier caller cancellation, and propagates
+`http.ErrAbortHandler` without appending JSON to partial file bytes. The
+browser keeps its download iframe until the body finishes, then cleans it up.
+These tests pass with the repair and fail against the previous implementation.
+
+The repair merged through [#6177](https://github.com/znasllc-io/memql/pull/6177)
+at `f8ece576d93efdfb899fb3c4133f895c304f7e60`, tagged v0.29.23. Its required
+CI passed. At 13:56:45 UTC the rebuilt local MemQL controller started native
+release run `517b203755fd72a42c422493c691ad77`, Work run
+`4e28aba0e2460a1a6d482900f6d092f8`, against that exact tag. Compilation uses
+the existing AKS build pool and two-Job quota. A temporary namespace-scoped
+runner grant expires at 21:54 UTC; automatic delivery on this local connection
+remains disconnected. This repairs publication without an Actions image build
+or an operator image push. The bootstrap is not installed-production
+qualification. Its temporary grant and configuration must be removed after
+publication and native Job cleanup.
+
+The v0.29.22 files candidate published all eight GitHub draft assets with
+verified native receipts. Draft release `415819034` remains unpublished.
+Neither failed image publication has a completion receipt. Candidate
+verification binds the controller's engine commit, so upgrading it does not
+by itself make an old pending intent recoverable. Preserve the old candidate,
+configuration and journal; do not rewrite reservations, manufacture receipts
+or relabel uncertainty as success. A reviewed cross-version recovery path is
+still needed to resolve those old intents. The fresh v0.29.23 candidate uses
+its own source, tag and release identities.
+
+Deployment and live publication/download verification remain outstanding.
+The serving instance remains v0.29.20, and active Actions retirement is pending.
+
+## Native database class isolation, October 17, 2026 UTC
+
+Release v0.29.24 run `ab281c223557cd329b72c6aa17b9cf3c`, source
+`b191f80df04033ce47f188edfbb9d7bda08f5b3c`, failed `tests.db-tests#2`.
+The engine suite passed in 515.507 seconds, then Library exceeded its unchanged
+180-second package limit. The native shard reused one database across budget
+classes, unlike the CI planner's separate Library service.
+
+The sequence reproduces locally with two Go threads, `GOMEMLIMIT=512MiB` and
+`GOGC=50`: Library passes in 127.414 seconds, but exceeds 180 seconds after the
+engine suite populates that database. With class isolation, the same Library
+suite passes in 118.806 seconds even when the service's original database
+still contains those engine fixtures. No test selection, assertion, package
+timeout or resource limit changes. Database creation, extension setup, test
+failure and cleanup all fail closed; only databases created by this invocation
+are removed. Connection validation admits the disposable loopback service and
+rejects libpq routing overrides.
+
+Prepare v0.29.25 with this runner repair and the already-merged Ask evidence,
+research reuse and query-pressure fixes. Its full native release, publication
+receipts and production verification remain required. The failed v0.29.24 run
+is diagnostic evidence, not a release candidate.
+
+## Azure publication readback, October 17, 2026 UTC
+
+The v0.29.23 native bootstrap run `517b203755fd72a42c422493c691ad77`,
+Work run `4e28aba0e2460a1a6d482900f6d092f8`, passed all 46 steps from
+source `f8ece576d93efdfb899fb3c4133f895c304f7e60`. Its controller ran in
+local k3d and its build jobs used the existing AKS builds pool. This is
+bootstrap evidence, not qualification on the installed production controller.
+All 46 logs and 66 artifact references were retained without missing paths or
+storage-owner failures. The 606,256,128-byte toolchain archive downloaded
+through the local Files app, matched SHA-256
+`052e2cbf771cc158fd0b660afb0956abdb0f8b15d65656bd11bf48a8bfc2b550`,
+and passed OCI verification and the toolchain's actual-image smoke script.
+Production download verification remains outstanding.
+
+Native GHCR publication completed and verified the agent image. Azure accepted
+that image's immutable manifest, but verification stopped before its version
+tag was written. Azure's signed blob URL contains an empty path segment
+(`//`), which the reader incorrectly rejects as a noncanonical filesystem
+path. Storage object keys must retain those segments and the signed query.
+The repair leaves exact HTTPS origins, credential isolation, rejection of dot
+and escaped path segments, redirect bounds and content hashes enforced.
+Publication/replay and read-only availability tests fail on the old reader
+and pass with this change; the complete registry suite passes with the race
+detector. The repaired native reader also verified all 20 config/layer blobs
+of the actual Azure agent image through its credential-free storage redirects.
+Prepare v0.29.26 with this readback repair and the merged database class
+isolation. Existing pending publication intents remain pending until a
+native operation verifies and records completion; never manufacture receipts
+or reuse their immutable tags for different bytes.
+
+## Native toolchain publication, October 17, 2026 UTC
+
+The v0.29.23 bootstrap published and verified all seven GHCR engine images
+through candidate
+`sha256:184bc0ea33d995d1d82b3feb86d81c106d77fe3ce8744899f5fabf9e9b2990da`.
+Each approved effect has a native completion receipt. Its Azure agent intent
+remains pending; this does not claim a completed cloud release.
+
+Toolchain candidate
+`sha256:27c6c1aaaa081a2f8539f8f9190457ad6f8fb1d1e9bf7b1b159df3ab24d9ffa5`,
+approval `b3ca06b3-dc1c-4889-a62e-2aeaa2cc6043`, completed native publication
+to GHCR with immutable tag `0.29.23` and image digest
+`sha256:a62b53491fbd9cfd4bbfdf9612bfb1776d9fc9d42aab7ceceac3a0a18a17a8bb`.
+The 13-layer manifest is also readable anonymously and matches that digest.
+The pipeline now pins this image, whose downloaded archive passed the full
+matching smoke script. Five Linux editor host commands have passed their
+local execution checks; all eight native host cases still require installed
+pipeline execution, including the three Mac cases. Legacy host checks remain
+until that qualification completes.
+
+The Azure reader repair is merged in #6180. The later v0.29.26 run failed
+artifact capture and did not qualify a release; the subsequent repair and
+qualification are recorded below.
+
+## Artifact transfer integrity and urgent cutover, October 18, 2026 UTC
+
+Native v0.29.27 run `e60862099a9ba0108681d5be1311b4d2`, source
+`90e82d606e7620596a4be83242a4d80ad2f4de74`, ended with 36 successful
+steps, one failure and nine skips. `tests.os-image` exited zero, but its
+required artifact failed with `unexpected EOF`. It is not a release candidate.
+Production remains v0.29.20; the bootstrap controller and AKS jobs are not an
+installed production qualification.
+
+PR #6187 reproduces a reader accepting 1,024 bytes as a complete file when
+exec returned success and closed normally. This does not prove the exact cause
+of the live failure, whose producer has already been cleaned up. Its repair
+measures the immutable source length through a framed, bounded, read-only stat
+command, requires every range's expected length and retries incomplete ranges
+within the existing three-attempt bound. Required artifacts still fail the
+step when capture fails. Tar errors now identify the file and received versus
+expected bytes. Prepare v0.29.28 from this repair and #6185.
+
+The short-success regression fails before the repair and passes after it;
+permanent truncation fails closed. Both complete affected package suites pass.
+The local Kubernetes fixture transfers and hashes 128 MiB through the resumable
+reader, parses its tar snapshot and rejects oversized or missing files. Its
+optional object-storage leg was not configured and skipped. An independent
+integrity investigation reproduced the same truncation defect and passed a real
+16 MiB export through two collectors; its additional checksum changes are
+preserved locally, not part of this release. Reuse #6187 rather than merge two
+competing repairs.
+
+The native #6187 check failed with `no space left on device` in the shared build
+cache, as did unrelated PRs. Its required repository checks passed; neither
+that result nor local transfer tests substitute for a successful native release.
+Recover the disposable build cache without changing serving allocations, then
+verify sufficient bytes and inodes before admitting another release. The
+prepared quiescent cache-GC configuration must ship with queue-aware runners;
+do not delete caches while old Jobs can still use them.
+
+The explicit-release retry repair in #6185 passed native run
+`d1c444b15d6c90120c26f60f0e57d207` (31 successful steps, four expected
+skips) and merged as `59613d576bb71ee40873bc1655076bc0394fbc51`.
+It preserves disconnected automatic delivery while allowing an owner's
+explicit release retry. It is not deployed yet.
+
+Prioritize the native release path: qualify these repairs, build and publish
+one complete native release, pin its verified digests, and verify production
+rollout and large artifact download. In parallel, complete #6181's real Mac
+editor hosts and Cockpit platform qualification. Then qualify the exact merge
+candidate, change required checks to MemQL, retire each proven-replaced Actions
+workflow and close issues with the receipts below. Keep the existing single
+build node maximum and three-Job quota; queue excess builds and preserve user
+workbench headroom. Do not increase serving resources, bypass failed checks or
+require three consecutive releases. Keep the current production pins available
+for rollback and retire temporary bootstrap grants only after owned work ends.
+
 ## Acceptance and issue closure
+
+The owner merge bypass now preserves a required check's configured GitHub App
+binding. It reads every check page for the exact PR head and uses the newest
+attempt from that App; an unavailable read, same-name check from another App,
+wrong commit or cancelled latest attempt cannot authorize a merge. Behavioral
+regressions reproduce the old false acceptance and pass with the repair. The
+whole development-script suite passes. The live native check is `MemQL / memql`,
+reported by App 4822538 (`MemQL for ZNAS LLC`), verified on check run
+117531817586. Bind the eventual required native check to that App through
+[`integration_id`](https://docs.github.com/en/rest/repos/rules), after the
+production and exact-queue qualification below; the ruleset still requires
+`ci-required` at this point.
+
+The editor landing page now has a native validation declaration covering its
+source, themes, shared brand, canonical research example and runner scripts.
+It uses the native-published browser-capable toolchain and an isolated browser
+download, with two CPUs, 4 GiB and fifteen minutes. The unchanged browser suite
+passes locally in that exact image as uid 1000 with no extra capabilities,
+including five viewport widths, theme persistence, keyboard/clipboard behavior,
+contrast, CSP and the no-JavaScript fallback. The built 19-file page and review
+screenshots are retained. This is local command evidence, not installed cloud
+qualification; keep the existing site workflow until its native run passes.
+
+The public repository audits now have native declarations: both ruleset
+baselines run daily in separate steps, and documentation freshness runs weekly.
+They run after failures and remain absent from PR, merge-group, push and release
+checks. Public reads use no stored token, refuse redirects and incomplete tag
+inventories, and retain the scripts' existing missing-release and stale-site
+failure behavior. Fixture tests cover those failures and the public transport.
+Both live ruleset reads passed on October 17. The live docs audit correctly
+failed: v0.29.26 still had no published docs asset, and memql.io served v0.24.0.
+These are command checks, not installed scheduler or notification qualification;
+the corresponding Actions workflows stay active until those receipts exist.
 
 The cadence change removes the multi-hour full-history scan from ordinary
 merge groups and main pushes. Validate the remaining exact-tree functional
@@ -223,3 +492,31 @@ is not a passing production check. Record source SHA, executing release,
 installation, run/check IDs, output checksums, failure/recovery observations
 and rollback version. Re-enable the previous trigger path if a replacement
 fails during the observation period, while preventing competing publishers.
+
+
+## v0.29.29 qualification candidate
+
+The next native release combines the complete editor-host matrix, the verified
+DB-image target, the editor-site browser suite and release/main/weekly SBOM
+inventory. Both core Linux host versions pass with the temporary HOME guard
+preserved; the short profile path has a real Unix-socket regression. Native
+macOS execution must pass before this candidate qualifies.
+
+The failed v0.29.28 release was cancelled without a candidate or publication.
+Its Work package hit the 180-second package alarm. A focused unchanged run on
+the same bounded AKS runner passed all 809 cases in 176.217 seconds, with no
+skips, OOM events or material CPU throttling; its retained report was read back
+and checked by size and SHA-256. Local baseline, source-scan memoization and a
+third CPU measured 93.590, 93.087 and 94.298 seconds respectively. The latter
+two changes are not adopted. Only Work's package ceiling becomes 300 seconds;
+its operation deadlines, every test, fresh database, resource reservations and
+overall lane deadline remain. Passing execution exits immediately.
+
+Four already-disabled Actions definitions are removed here: deploy-gate image
+validation and the two daily ruleset audits have installed native receipts;
+the two live placeholders had no runs and only refused absent prerequisites.
+No live-provider qualification is claimed. Required `ci-required` protection
+remains until the native App's exact PR and merge-candidate evidence qualifies
+its replacement. Consolidate this candidate before one full release pass;
+verify publication receipts, GitOps health and public behavior before closing
+the cutover issues or removing the remaining workflows.

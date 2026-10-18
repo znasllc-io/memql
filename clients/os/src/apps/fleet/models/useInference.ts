@@ -1,3 +1,4 @@
+import { useGraphRevision } from "../../../live/useGraphRevision";
 import { useCallback, useMemo } from "react";
 import type { Row } from "@znasllc-io/memql-sdk-core/client";
 
@@ -183,12 +184,13 @@ export function modelProfileFromRow(row: Row): ModelProfile {
 }
 
 export function useInference() {
+  const liveRevision = useGraphRevision(["v1:worker:registration", "v1:models:modelProfile", "v1:worker:delegationPolicy", "v1:worker:routingPolicy"]);
   const connection = useOsConnection();
 
   const readCatalog = useCallback(
     async (signal: AbortSignal): Promise<CatalogModel[]> => {
       if (connection === null) throw new Error("not connected");
-      const result = await connection.query.fleetModels({}, { signal });
+      const result = await connection.query.fleetModels({}, { signal, priority: "background" });
       return result.rows().map(catalogModelFromRow);
     },
     [connection],
@@ -197,7 +199,7 @@ export function useInference() {
   const readDoors = useCallback(
     async (signal: AbortSignal): Promise<DoorsReading | null> => {
       if (connection === null) throw new Error("not connected");
-      const result = await connection.query.inferenceStatus({}, { signal });
+      const result = await connection.query.inferenceStatus({}, { signal, priority: "background" });
       return doorsFromRow(result.single());
     },
     [connection],
@@ -216,23 +218,26 @@ export function useInference() {
   const readProfiles = useCallback(
     async (signal: AbortSignal): Promise<ModelProfile[]> => {
       if (connection === null) throw new Error("not connected");
-      const result = await connection.query.modelProfiles({}, { signal });
+      const result = await connection.query.modelProfiles({}, { signal, priority: "background" });
       return result.rows().map(modelProfileFromRow);
     },
     [connection],
   );
 
   const catalog = useReading<CatalogModel[]>(
-    "fleet:models:catalog",
+    `fleet:models:catalog`,
     connection === null ? null : readCatalog,
+    liveRevision,
   );
   const profiles = useReading<ModelProfile[]>(
-    "fleet:models:profiles",
+    `fleet:models:profiles`,
     connection === null ? null : readProfiles,
+    liveRevision,
   );
   const doors = useReading<DoorsReading | null>(
-    "fleet:models:doors",
+    `fleet:models:doors`,
     connection === null ? null : readDoors,
+    liveRevision,
   );
 
   // The owner's model preference, off the LIVE routing policy -- so an edit

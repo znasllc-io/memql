@@ -1147,12 +1147,15 @@ the closed set (`pipeline_need_unknown`) and a need on a `cluster` pipeline
 This repository is a source like any other: its `memql-package.yaml` declares a
 pipeline and no apps, and an owner connects it the way any source's is connected
 ([Connecting a pipeline](pipelines.md#connecting-a-pipeline)); nothing connects
-it by itself. Its steps are lanes of `.github/workflows/ci.yml` and of the scan
-workflows, copied with their commands; the file's header names what is not
-carried here yet (image builds, the installed-cluster lifecycle tests, the
-editor host matrices, SARIF and release publication). Every step is a
-`linux/amd64` container on the cluster, the architecture of the local build
-node and of AKS.
+it by itself. The package declares portable checks, tests, security scans,
+SARIF delivery, release-file packaging and OCI image builds. Its ordinary
+commands run in `linux/amd64` cluster containers; image builds use the fixed
+rootless builder, and SARIF delivery is a driver-owned effect. Image builds
+retain archives and metadata in the Library. Registry publication is a separate
+[verified release-candidate operation](release-candidates.md), which requires
+complete evidence and an approved destination. Installed-cluster lifecycle
+checks and desktop editor-host matrices still require their own execution
+coverage; packaging their binaries does not exercise those hosts.
 
 | Stage | Steps | Runs on |
 |---|---|---|
@@ -1161,12 +1164,23 @@ node and of AKS.
 | `secrets-current` | `gitleaks` over every new commit since the pinned event base | pull requests, merge groups and pushes, after a failure too |
 | `tests` | `go-tests` (affected packages outside the db-gated trees, 4 shards), `db-tests` (the affected db-gated packages, 5 shards, each beside its own Postgres sidecar), `fuzz`, `os-checks` when the change touches the OS bucket, `sdk-ts-typecheck`, `viewkit-checks`, `mcp-conformance`, `proving` and the seven `test-<tag>` passes | every run |
 | `gates` | `gate-inputs` | pull requests and manual runs |
-| `analysis` | Full-history `gitleaks` (6 hours, 3 CPUs), `codeql-go` (3 hours), `codeql-javascript`, `codeql-python` and `sbom` | weekly audits, releases and manual runs, after a failure too |
+| `analysis` | Full-history `gitleaks` (6 hours, 3 CPUs), `codeql-go` (3 hours), `codeql-javascript`, `codeql-python` and `sbom` | weekly audits and manual runs, after a failure too |
+| `security-reports` | Journaled publication of the three retained CodeQL SARIF reports | weekly audits and manual runs |
+| `release-files` | Exact-version documentation bundle, SDK npm archive and five VSIX archives | releases |
+| `build-tools` | Unpublished toolchain OCI archive and digest metadata | releases |
+| `images` | Unpublished OCI archives and digest metadata for all seven engine node types | releases |
 
-No step names a need, so the pipeline runs on the cluster alone and connects
-with `compute: cluster`. Its longest steps outlast the default 2-hour run
-ceiling, so a cluster that runs this package composes
-`components/pipelines-long-runs` (8 hours); the local overlay does.
+No step names a fleet need, so this pipeline connects with `compute: cluster`.
+The daily schedule runs the stages that opt into it; the history and CodeQL
+stages declare a weekly cadence. A release retains ordinary tests and dependency
+vulnerability checks without repeating those weekly scans. PR, merge-group and
+push secret checks still inspect every introduced commit.
+
+The longest audit steps outlast the default 2-hour run ceiling. Operators must
+budget the complete run, including queue time, and configure both agent and
+Workbench consistently. `components/pipelines-long-runs` offers an explicit
+8-hour profile; installation overlays may supply another bounded value. The
+step timeouts and the pool's concurrent-Job limit remain independent limits.
 `memql_package_manifest_test.go` holds three of its copies to their originals
 -- `select.dbGated` to `scripts/ci/db-gated-packages.sh`, the gate packages to
 `ci.yml`'s `GATE_PACKAGES`, the Postgres service's image and credentials to
@@ -1311,8 +1325,9 @@ Each of these is understood, and accepted for this release.
   in-process hop tests cover. It runs on that workflow's own triggers --
   nightly, on demand, and on pull requests that change the installer, the local
   cluster scripts, `deploy/k8s` or the workflow -- so a change to the
-  substrate's code alone does not run it. A live lane against GitHub itself,
-  `pipelines-live.yml`, ships disarmed.
+  substrate's code alone does not run it. Live qualification uses real native
+  pipeline runs and retained GitHub check receipts; the unused Actions
+  placeholder has been removed.
 - **Per-workbench readiness has not yet been verified in an installed release.**
   Settings -> Pipelines separates step-dispatcher installation from reports for
   each known workbench. The report path asks each replica for its own runner
@@ -1373,3 +1388,42 @@ missing proof or unknown/dirty engine revision stops recovery. Finished receipts
 are preserved; an explicit new attempt can run a newly reviewed definition.
 A failed-only rerun reuses earlier success only when that definition matches.
 This does not yet pin the transitive definitions of arbitrary DSL automations.
+
+
+## Reclaiming a bounded cache
+
+Compiled Go objects can fill a shared cache long before its downloaded modules
+expire. A full cache is a failed step, even if earlier tests passed. Increasing
+the disk is not necessary for ordinary turnover.
+
+On a filesystem with working file locks across every cache-using pod, set
+`MEMQL_PIPELINES_CACHE_GC_PERCENT=70` in the workbench configuration. Zero, the
+default, leaves reclamation disabled. Do not enable it on Azure Blob NFS, whose
+locking contract does not satisfy this requirement. A single-node managed CSI
+disk with `ReadWriteOnce` is the production installation's supported choice;
+keep its Jobs on the same bounded build pool. A cached command image must
+provide `flock`; the pinned toolchain smoke check verifies it.
+
+Before first enabling this setting, stop new Job admission, allow existing
+cached Jobs to finish, verify there are no old cache users, then roll out every
+workbench replica with the same setting and restore the existing Job limit.
+Changing between enabled and disabled also requires this drain. Old wrappers
+do not participate in the locks. Do not replace the PVC or its lock files
+under running Jobs.
+
+Each cached step holds a shared kernel lease through command execution and
+artifact export. When byte or inode usage reaches the configured threshold,
+the fixed initializer blocks new cache users and waits for current users to
+finish. It removes disposable Go build caches first, retaining downloaded
+modules and npm content where space allows. If usage remains above the
+threshold, it clears the remaining disposable cache contents. It preserves
+scope directories and lock inodes, and does not follow cache symlinks. Only
+this initializer can see all cache scopes; commands retain their owner,
+repository and trust isolation.
+
+Reclamation happens during an already-requested step. It creates no scheduled
+Job and does not wake an idle build node. The existing Job deadline bounds a
+wait for active users. The disk and Job limits remain the hard capacity
+bounds: unusually large concurrent writes can still exhaust the reserve and
+fail explicitly. Retained logs, published artifacts and user workbench files
+are not on this cache volume and are never removed by this operation.

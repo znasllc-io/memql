@@ -68,10 +68,16 @@ func (e *MemQLEngine) evaluateFleetPullRecommendedExpression(ctx context.Context
 		return nil, err
 	}
 
-	hardware, platformOs, err := e.machineHardwareFor(ctx, registrationId)
+	unlock, err := e.lockModelDownloads(ctx, registrationId)
 	if err != nil {
 		return nil, err
 	}
+	defer unlock()
+	current, err := e.modelSetupRow(ctx, registrationId)
+	if err != nil {
+		return nil, err
+	}
+	hardware, platformOs, installed := setupHardware(current)
 	class := MachineClass(hardware)
 	if class == ClassUnknown {
 		return nil, modelPullRefusal{
@@ -90,7 +96,7 @@ func (e *MemQLEngine) evaluateFleetPullRecommendedExpression(ctx context.Context
 		}
 	}
 
-	catalog, err := e.catalogProfiles(ctx)
+	catalog, err := e.catalogProfiles(ContextWithFreshRead(ctx))
 	if err != nil {
 		return nil, err
 	}
@@ -105,6 +111,9 @@ func (e *MemQLEngine) evaluateFleetPullRecommendedExpression(ctx context.Context
 	var blocked []map[string]any
 	now := time.Now()
 	for _, r := range set {
+		if _, exists := installed["model:"+r.Profile.ModelId]; exists {
+			continue
+		}
 		if !r.Pullable() {
 			blocked = append(blocked, map[string]any{
 				"modelId": r.Profile.ModelId,
@@ -127,9 +136,26 @@ func (e *MemQLEngine) evaluateFleetPullRecommendedExpression(ctx context.Context
 			continue
 		}
 		plannedModels[plan.Model] = true
+		if err := e.validateModelDownload(ctx, registrationId, plan.Model); err != nil {
+			return nil, err
+		}
 		plans = append(plans, plan)
 	}
 
+	if hardware.DiskFreeBytes < modelDiskReserve {
+		return nil, fmt.Errorf("The recommended downloads exceed free storage")
+	}
+	remaining := hardware.DiskFreeBytes - modelDiskReserve
+	counted := map[string]bool{}
+	for _, p := range mergeSetupProfiles(catalog) {
+		if plannedModels[p.ModelId] && !counted[p.ModelId] {
+			if p.SizeBytes <= 0 || uint64(p.SizeBytes) > remaining {
+				return nil, fmt.Errorf("The recommended downloads exceed free storage")
+			}
+			remaining -= uint64(p.SizeBytes)
+			counted[p.ModelId] = true
+		}
+	}
 	if len(plans) == 0 {
 		return nil, modelPullRefusal{
 			Code: "nothing_to_pull",
@@ -287,9 +313,12 @@ func catalogProfilesFromRows(rows []map[string]any) []CatalogProfile {
 			// a conversion at a call site. The gate is not wrong, it is
 			// scoped -- worth knowing before trusting it as the whole answer
 			// on numeric narrowing.
-			ContextWindow: num.ClampInt64(int64Field(row, "contextWindow")),
-			SizeBytes:     int64Field(row, "sizeBytes"),
-			Notes:         mapString(row, "notes"),
+			ContextWindow:   num.ClampInt64(int64Field(row, "contextWindow")),
+			SizeBytes:       int64Field(row, "sizeBytes"),
+			MemoryNeedBytes: int64Field(row, "memoryNeedBytes"),
+			Source:          mapString(row, "source"),
+			ReviewedAt:      mapString(row, "reviewedAt"),
+			Notes:           mapString(row, "notes"),
 		})
 	}
 	return out

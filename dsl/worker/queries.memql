@@ -593,3 +593,45 @@ query modelProbe openModelProbes {
               && (row.status == "requested" && row.requestedAt < args.requestedBefore || statusIsRunning(row) && row.updatedAt < args.updatedBefore)
   shape   workerModelProbeFull
 }
+
+@actor
+query activity machineActivity {
+  args { workerId string! }
+  filter row => row.workerId == args.workerId && row.ownerUserId == actor.userId
+  sort "row.createdAt", "desc"
+  paginate 100
+  shape workerActivityFull
+}
+
+@actor
+query activity activeMachineActivity {
+  args { workerId string! }
+  filter row => row.workerId == args.workerId && row.ownerUserId == actor.userId && row.status in ["queued", "running"] && row.expiresAt > now
+  sort "row.createdAt", "desc"
+  paginate 100
+  shape workerActivityFull
+}
+
+@actor
+query activity machineActivityById {
+  args { activityId string! }
+  filter row => row.id == args.activityId && row.ownerUserId == actor.userId
+  shape workerActivityFull
+}
+
+@actor
+query invocation workerInvocationById {
+  args { invocationId string! }
+  filter row => row.id == args.invocationId && row.ownerUserId == actor.userId && isNotDeleted(row)
+  shape workerInvocationFull
+}
+
+/// The durable transition from completion-only model history to live receipts.
+@actor
+query activity firstMachineActivity {
+  args { workerId string! }
+  filter row => row.workerId == args.workerId && row.ownerUserId == actor.userId && row.kind == "model"
+  sort "row.createdAt", "asc"
+  paginate 1
+  shape workerActivityFull
+}

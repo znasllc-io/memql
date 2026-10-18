@@ -1,5 +1,4 @@
-import type { ReactNode } from "react";
-import { CopyValue, Fact, Facts, Subhead } from "../../../kit";
+import { CopyValue, Fact, Facts, DetailsSection } from "../../../kit";
 import { formatFreshness, formatMoment } from "../../../kit/format";
 import { PageHelp } from "../../../kit/pageHelp";
 import { roundTripFigure } from "../addMachine/flow";
@@ -7,12 +6,7 @@ import { isWorkerOnline } from "../online";
 import { computerUseStatus, formatClockOffset, hasRoundTrip, pipelineStepsStatus, type MachineRow } from "../rows";
 import { HardwareGroup } from "./HardwareGroup";
 
-export function MachineDetailsSection({ title, label = title, children }: { title: string; label?: string; children: ReactNode }) {
-  return <section className="fleet-details-section" aria-label={label}>
-    <Subhead>{title}</Subhead>
-    <div className="fleet-details-section-body">{children}</div>
-  </section>;
-}
+export const MachineDetailsSection = DetailsSection;
 
 /** Read-only information stays open, ordered and separate from machine edits. */
 export function MachineDetailsInfo({ machine, now, machineClass, usableBytes }: {
@@ -25,7 +19,7 @@ export function MachineDetailsInfo({ machine, now, machineClass, usableBytes }: 
   const pipelines = pipelineStepsStatus(machine).answer;
   const reportedKeys = Object.keys(machine.reportedLabels).sort();
   return <>
-    <PageHelp title="Machine information"><p>Hover over a value or focus it with the keyboard to reveal Copy. Click the value or press Enter to copy it. Relative dates copy their exact timestamps.</p></PageHelp>
+    <PageHelp title="Machine information"><p>Use the copy icon beside a value to copy it. Text can also be selected normally. Relative dates copy their exact timestamps.</p></PageHelp>
     <MachineDetailsSection title="System">
       <Facts>
         <Fact label="Reported name" value={machine.name} copyValue={machine.name} />

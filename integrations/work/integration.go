@@ -311,6 +311,7 @@ func (i *Integration) IntegrationName() string { return integrationName }
 // the registry lacks is a BOOT failure on every node type.
 func (i *Integration) Capabilities() []memql.IntegrationCapability {
 	return append(workflowhost.ScopedCapabilities(evaluationPorts()), []memql.IntegrationCapability{
+		{Name: "openModelCatalogResearch", Description: "Open a bounded local-only catalog research run.", Handler: i.handleOpenModelCatalogResearch},
 		{Name: "requestWorkbenchUse", Description: "Request permission to use the Workbench for a Computer-selected goal.", Handler: i.handleRequestWorkbenchUse},
 		{Name: "skillCatalog", Description: "Inspect skill content and its verified installed-baseline provenance.", Handler: i.handleSkillCatalog},
 		{Name: "selectSkills", Description: "Bind exact reviewed skill versions to the current owned work step.", Handler: i.handleSelectSkills},

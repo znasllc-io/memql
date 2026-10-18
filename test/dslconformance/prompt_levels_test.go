@@ -47,6 +47,8 @@ var levels = map[string]bool{"fast": true, "strong": true, "reasoning": true, "e
 // confident wrong answer is worse than no answer, which is why the shipped
 // reasoningParks rule parks rather than degrading it.
 var promptLevels = map[string]string{
+	// Evidence synthesis across model cards needs the strong tier; the run route remains local-only.
+	"modelCatalogResearch": "strong",
 	// Named in D3.
 	"goalComplexityTriage": "fast",
 	// Initial document decomposition is bounded data, checked separately before execution.
@@ -57,6 +59,11 @@ var promptLevels = map[string]string{
 	"workDocumentSectionsRepair": "strong",
 	// One bounded repair of acknowledgment wording; never reclassifies work.
 	"workAcknowledgement": "fast",
+	// Source sufficiency and unsupported inferences require the judgment tier before filing.
+	"workFileEvidence": "strong",
+	// Distinguishing supported observations from inferred scope, cause or safety
+	// needs judgment over the recorded receipts before a final answer is delivered.
+	"workReplyReview": "strong",
 	// Quick conversational replies have no research, file or tool obligations.
 	// Fast avoids paying for a strong agent loop after the classifier already
 	// excluded those tasks; the run still carries its ordinary call/time budget.

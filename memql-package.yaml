@@ -11,7 +11,8 @@
 #
 # The command parity gates compare the retained GitHub lanes with this package.
 # Working legacy workflows remain until equivalent local and production evidence
-# and retirement gates are satisfied. Remaining gaps include installed-cluster lifecycle tests, editor host matrices,
+# and retirement gates are satisfied. Remaining gaps include installed-cluster
+# lifecycle tests, native editor host qualification,
 # SARIF publication and release publication. Release image builds are declared
 # below; their cloud publication still requires verified candidate receipts. The daily scan is declared here but still needs a real
 # run from an installed MemQL build. No missing lane is considered passed.
@@ -22,12 +23,13 @@ pipeline:
   platform: linux/amd64
   # deploy/toolchain-image: Go 1.27.2, Node 22, protoc 33.4, kubectl 1.32.13, the
   # Docker client (no daemon), git, make, jq, python3 and the PostgreSQL client,
-  # as uid 1000. Pinned by the digest build-toolchain-image.yml's run on main
-  # printed for version 1.2.0-amd64 (run 38146575497); a rebuild takes a new version
-  # and a new pin, and the manifest's test fails on any reference that is not a
-  # digest of this repository. These rehearsal images are public; private
+  # as uid 1000, with the Linux editor-host libraries and Xvfb. Native release
+  # v0.29.23, run 517b203755fd72a42c422493c691ad77, built this exact image in
+  # AKS; its archive passed the actual-image smoke script before reviewed
+  # native publication verified every registry blob. A rebuild needs a new
+  # immutable version and reviewed digest pin. This package is public; private
   # image access must use the Workbench registry credential contract.
-  image: ghcr.io/znasllc-io/memql-toolchain@sha256:ae195dcff54b4f67eac2c5669612ba1a886f789fae1e6325adcfaab9679a7bf9
+  image: ghcr.io/znasllc-io/memql-toolchain@sha256:a62b53491fbd9cfd4bbfdf9612bfb1776d9fc9d42aab7ceceac3a0a18a17a8bb
   services:
     # TimescaleDB + pgvector: the mirror ci.yml's db-tests lane runs, at the same
     # digest and with the same user, password and database (the test holds all
@@ -121,7 +123,11 @@ pipeline:
         - "**/go.mod"
         - "**/go.sum"
         - memql-package.yaml
-        - .github/workflows/deploy-gate-image.yml
+      database-image:
+        - deploy/db-image/**
+        - scripts/db-image/**
+        - memql-package.yaml
+        - .github/workflows/build-db-image.yml
       # Shell source and the Docker stage that packages it.
       # Keep Dockerfile changes in the same validation path as the shell.
       os:
@@ -134,12 +140,22 @@ pipeline:
         - component/memql/os_navigation.json
         - Makefile
         - memql-package.yaml
+      editor-site:
+        - editors/vscode/site/**
+        - editors/vscode/themes/**
+        - examples/research-desk/**
+        - brand/**
+        - scripts/ci/editor-site.sh
+        - scripts/ci/retry.sh
+        - memql-package.yaml
+        - .github/workflows/vscode-site.yml
       editors:
         - brand/tokens.css
         - brand/editorAppearance.ts
         - editors/**
         - cmd/memql-lsp/**
         - scripts/vscode/**
+        - scripts/ci/editor-host.sh
         - sdk/ts/**
         - sdk/ts-viewkit/**
         - test/fixtures/**
@@ -329,11 +345,15 @@ pipeline:
             export GOFLAGS=-p=1 GOMEMLIMIT=512MiB GOGC=50
             bash scripts/identity/build-css.sh
             go test -count=1 -timeout=600s $MEMQL_PACKAGES
-        # Each shard keeps its own Postgres. The runner groups its exact
-        # selected packages under the CI planner's original timeout classes;
-        # slow engine tests cannot raise the budget of unrelated DB suites.
+        # Each shard keeps its own Postgres. The runner gives each selected
+        # timeout class a fresh database, preserving CI's suite isolation and
+        # budgets without carrying engine fixture rows into unrelated tests.
         - name: db-tests
           placement: cluster
+          # Match the four-core hosted lane behind the package budgets. The
+          # namespace's two-core default exhausted the engine's 600s alarm.
+          # An explicit request reserves this CPU before the Job can start.
+          cpuMilli: 4000
           packages: affected
           only: db-gated
           shards: 5
@@ -343,12 +363,6 @@ pipeline:
             set -eu
             export GOFLAGS=-p=1 GOMEMLIMIT=512MiB GOGC=50
             bash scripts/identity/build-css.sh
-            PGPASSWORD=memql_dev psql -h localhost -U memql -d memql -v ON_ERROR_STOP=1 <<'SQL'
-            CREATE EXTENSION IF NOT EXISTS timescaledb CASCADE;
-            CREATE EXTENSION IF NOT EXISTS "uuid-ossp";
-            CREATE EXTENSION IF NOT EXISTS "pgcrypto";
-            CREATE EXTENSION IF NOT EXISTS vector;
-            SQL
             export MEMQL_DATABASE_DSN='postgres://memql:memql_dev@localhost:5432/memql?sslmode=disable'
             export MEMQL_REQUIRE_DB=1
             python3 scripts/ci/pipeline-db-tests.py
@@ -402,6 +416,31 @@ pipeline:
           imageBuild:
             context: .
             dockerfile: cmd/deploy-gate-check/Dockerfile
+        # The verified target starts a disposable Postgres inside the fixed
+        # rootless build. It checks Community features and the N-1 upgrade
+        # before an OCI archive can be retained; it has no registry credential.
+        - name: database-image
+          placement: cluster
+          when: { bucket: database-image }
+          caches: []
+          cpuMilli: 3000
+          memoryMiB: 4096
+          timeout: 30m
+          imageBuild:
+            context: deploy/db-image
+            dockerfile: deploy/db-image/Dockerfile
+            target: verified
+        - name: editor-site
+          placement: cluster
+          when: { bucket: editor-site }
+          # Native-published toolchain includes Chromium's system libraries.
+          image: ghcr.io/znasllc-io/memql-toolchain@sha256:a62b53491fbd9cfd4bbfdf9612bfb1776d9fc9d42aab7ceceac3a0a18a17a8bb
+          caches: [npm]
+          cpuMilli: 2000
+          memoryMiB: 4096
+          timeout: 15m
+          artifacts: [editors/vscode/site/dist, editors/vscode/site/artifacts]
+          run: bash scripts/ci/editor-site.sh
         - name: editor-packages
           placement: cluster
           when: { bucket: editors }
@@ -420,6 +459,69 @@ pipeline:
             npm --prefix editors/productivity test
             scripts/ci/retry.sh -- bash scripts/vscode/package.sh --out="$PWD/.memql-editor/memql.vsix"
             test -s .memql-editor/memql.vsix
+        # Real Electron/browser hosts cover activation and runtime contracts
+        # that the portable unit/package tests cannot exercise. Mac steps use
+        # an owner-authorized native worker, independently of computer use.
+        - name: vscode-desktop-linux-1-91-0
+          when: { bucket: editors }
+          timeout: 25m
+          placement: cluster
+          artifacts: [.memql-host-reports]
+          run: bash scripts/ci/editor-host.sh vscode-desktop 1.91.0
+        - name: vscode-desktop-linux-stable
+          when: { bucket: editors }
+          timeout: 25m
+          placement: cluster
+          artifacts: [.memql-host-reports]
+          run: bash scripts/ci/editor-host.sh vscode-desktop stable
+        - name: productivity-web-linux-stable
+          when: { bucket: editors }
+          timeout: 25m
+          placement: cluster
+          artifacts: [.memql-host-reports]
+          run: bash scripts/ci/editor-host.sh productivity-web stable
+        - name: productivity-desktop-linux-1-91-0
+          when: { bucket: editors }
+          timeout: 25m
+          placement: cluster
+          artifacts: [.memql-host-reports]
+          run: bash scripts/ci/editor-host.sh productivity-desktop 1.91.0
+        - name: productivity-desktop-linux-stable
+          when: { bucket: editors }
+          timeout: 25m
+          placement: cluster
+          artifacts: [.memql-host-reports]
+          run: bash scripts/ci/editor-host.sh productivity-desktop stable
+        - name: productivity-web-darwin-stable
+          when: { bucket: editors }
+          timeout: 25m
+          placement: fleet
+          execution: native
+          platform: darwin/arm64
+          caches: []
+          needs: { macos_tooling: true }
+          artifacts: [.memql-host-reports]
+          run: bash scripts/ci/editor-host.sh productivity-web stable
+        - name: productivity-desktop-darwin-1-91-0
+          when: { bucket: editors }
+          timeout: 25m
+          placement: fleet
+          execution: native
+          platform: darwin/arm64
+          caches: []
+          needs: { macos_tooling: true }
+          artifacts: [.memql-host-reports]
+          run: bash scripts/ci/editor-host.sh productivity-desktop 1.91.0
+        - name: productivity-desktop-darwin-stable
+          when: { bucket: editors }
+          timeout: 25m
+          placement: fleet
+          execution: native
+          platform: darwin/arm64
+          caches: []
+          needs: { macos_tooling: true }
+          artifacts: [.memql-host-reports]
+          run: bash scripts/ci/editor-host.sh productivity-desktop stable
         - name: sdk-ts-typecheck
           placement: cluster
           run: |
@@ -557,6 +659,47 @@ pipeline:
             bash scripts/identity/build-css.sh
             go test -count=1 -timeout=300s ./ ./integrations ./integrations/customdomain ./integrations/compose ./cmd/envscan/... ./component/architecture/... ./component/envregistry/... ./scripts/... ./test/dslconformance/... ./examples/... ./component/auth/... ./deploy/...
 
+    # Public repository facts need no publication token. These audits describe
+    # live configuration, so their results never satisfy a PR or queue check.
+    - name: repository-audit
+      schedule: daily
+      on: [schedule, manual]
+      runAfterFailure: true
+      steps:
+        - name: ruleset-drift
+          placement: cluster
+          caches: []
+          cpuMilli: 250
+          memoryMiB: 256
+          timeout: 5m
+          run: |
+            set -eu
+            RULESET_DRIFT_PUBLIC_API=1 bash scripts/ci/ruleset-drift.sh
+        - name: ruleset-enforcement-copilot
+          placement: cluster
+          caches: []
+          cpuMilli: 250
+          memoryMiB: 256
+          timeout: 5m
+          run: |
+            set -eu
+            RULESET_DRIFT_PUBLIC_API=1 RULESET_DRIFT_ID=19450314 RULESET_DRIFT_EXPECTED=copilot_code_review RULESET_DRIFT_ENFORCEMENT=disabled bash scripts/ci/ruleset-drift.sh
+
+    - name: documentation-audit
+      schedule: weekly
+      on: [schedule, manual]
+      runAfterFailure: true
+      steps:
+        - name: docs-current
+          placement: cluster
+          caches: []
+          cpuMilli: 250
+          memoryMiB: 256
+          timeout: 10m
+          run: |
+            set -eu
+            bash scripts/docs/current-check.sh --public-api --repo="$MEMQL_REPOSITORY"
+
     # Analysis records findings independently of build/test success. The deep
     # history and CodeQL scans run weekly (or on demand), not on every release.
     # The saved UTC week prevents new main heads from repeating the audit.
@@ -605,6 +748,13 @@ pipeline:
           run: |
             set -eu
             python3 scripts/ci/codeql-scan.py --language=python --ram=3072 --output-dir=.memql-security/codeql-python
+    # Dependency inventory is a release deliverable, not a deep code scan.
+    # Preserve main-push/release coverage without adding it to PR/queue gates.
+    - name: inventory
+      schedule: weekly
+      on: [push, release, schedule, manual]
+      runAfterFailure: true
+      steps:
         - name: sbom
           placement: cluster
           timeout: 60m

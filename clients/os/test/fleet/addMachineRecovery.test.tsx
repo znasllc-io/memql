@@ -97,7 +97,7 @@ it("a live pull failure reaches Checks even with partial inventory, with the run
     expect(check?.answer).not.toContain("No models yet");
   });
   render(withSession(<AddMachinePage flow={view.result.current} onLeave={vi.fn()} />));
-  expect(screen.getByText(/Not enough disk space/)).toBeTruthy();
+  expect(screen.getAllByText(/Not enough disk space/).length).toBeGreaterThan(0);
   fireEvent.click(screen.getByRole("button", { name: "Download models" }));
   await waitFor(() => expect(connection.query.fleetPullRecommended).toHaveBeenCalledWith({ registrationId: "recovery-machine" }));
 });

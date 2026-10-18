@@ -16,6 +16,7 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
 )
 
 // The scripts only ever run inside a pod, where nothing in this package's
@@ -106,6 +107,45 @@ func TestStepWrapperExitsWithTheCommandsOwnStatus(t *testing.T) {
 	}
 	if strings.Contains(res.stdout, testMarker) {
 		t.Errorf("stdout carries an artifact frame with no artifacts declared:\n%s", res.stdout)
+	}
+}
+
+func TestQueuedStepWrapperKeepsTheAbsoluteRunDeadline(t *testing.T) {
+	requireTools(t, "date", "timeout")
+	for _, tc := range []struct {
+		name, command string
+		remaining     time.Duration
+		code          int
+	}{
+		{"expired before admission", "echo should-not-run", -time.Second, 124},
+		{"expires during execution", "sleep 20; echo should-not-run", 2 * time.Second, 124},
+		{"preserves command failure", "exit 7", 10 * time.Second, 7},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			started := time.Now()
+			res := runScript(t, stepWrapper, t.TempDir(), []string{
+				"PATH=" + os.Getenv("PATH"),
+				"MEMQL_STEP_COMMAND=" + tc.command,
+				"MEMQL_STEP_RUN_DEADLINE=" + strconv.FormatInt(started.Add(tc.remaining).Unix(), 10),
+			})
+			if res.code != tc.code || strings.Contains(res.stdout, "should-not-run") {
+				t.Fatalf("deadline was not enforced: %+v", res)
+			}
+			if elapsed := time.Since(started); elapsed > 6*time.Second {
+				t.Fatalf("command outlived its deadline: %s", elapsed)
+			}
+		})
+	}
+}
+
+func TestQueuedStepRefusesImagesWithoutDeadlineUtilities(t *testing.T) {
+	res := runScript(t, stepWrapper, t.TempDir(), []string{
+		"PATH=" + t.TempDir(),
+		"MEMQL_STEP_COMMAND=echo should-not-run",
+		"MEMQL_STEP_RUN_DEADLINE=" + strconv.FormatInt(time.Now().Add(time.Minute).Unix(), 10),
+	})
+	if res.code != 70 || !strings.Contains(res.stderr, "queued steps require date and timeout") || strings.Contains(res.stdout, "should-not-run") {
+		t.Fatalf("unsupported image silently ran without its deadline: %+v", res)
 	}
 }
 

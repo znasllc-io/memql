@@ -88,31 +88,20 @@ func TestDecisionFieldsAreWrittenOnARefusal(t *testing.T) {
 	}
 }
 
-// TestRouterCallHasNoBroadcastRoutingRuleAndHereIsWhy is a NOTE with a
-// failure mode.
-//
-// v1:router:call is deliberately absent from component/node/routing.go, on the
-// same volume grounds that keep v1:worker:invocation out: one row per model
-// call, on every node, forwarded to every replica, is a firehose whose only
-// consumer is a list somebody opens occasionally. routerDecisionsRecent reads
-// them on demand instead.
-//
-// The test exists because "for consistency with the other work rows" is a
-// convincing sentence, and a later session adding the rule would find nothing
-// arguing back. Adding it fails here and reads the reason.
-func TestRouterCallHasNoBroadcastRoutingRuleAndHereIsWhy(t *testing.T) {
+// Fleet's live decisions feed consumes one completion event per call. Only
+// NODE_CREATED is routed: token deltas and repeated updates do not belong on
+// the graph bus. Browser subscriptions enforce the existing row-authority gate.
+func TestRouterCallBroadcastsCompletionForTheLiveDecisionsFeed(t *testing.T) {
 	path := filepath.Join("..", "node", "routing.go")
 	raw, err := os.ReadFile(path)
 	if err != nil {
-		t.Skipf("component/node/routing.go is not readable from this module: %v", err)
+		t.Fatal(err)
 	}
-	if strings.Contains(string(raw), "v1:router:call") {
-		t.Fatal("component/node/routing.go now carries a rule for v1:router:call. " +
-			"That row is one per MODEL CALL on every node -- the same volume argument that " +
-			"excludes v1:worker:invocation -- and broadcasting it forwards a firehose to every " +
-			"replica for a list somebody opens occasionally. Read it on demand through " +
-			"routerDecisionsRecent instead. If a live decisions feed is genuinely wanted, it " +
-			"needs a sampling or filtering decision first, not a broadcast rule.")
+	if !strings.Contains(string(raw), "graph.node.created.v1:router:call") {
+		t.Fatal("live decisions require the completion event to reach the browser's BFF")
+	}
+	if strings.Contains(string(raw), "graph.node.updated.v1:router:call") {
+		t.Fatal("the decisions feed needs only one completion event per call")
 	}
 }
 

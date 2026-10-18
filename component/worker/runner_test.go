@@ -164,12 +164,30 @@ func runSpec() RunSpec {
 	}
 }
 
+func TestAppSessionCannotBorrowAnotherOwnersSignedInApp(t *testing.T) {
+	for _, owner := range []string{"another-user", "system:automation:user-1", ""} {
+		t.Run(owner, func(t *testing.T) {
+			runner, session, store, auditor := newRunnerFixture(t, SubscriptionPresent)
+			session.worker.OwnerUserId = owner
+			_, err := runner.Run(context.Background(), session.worker, runSpec(), nil)
+			if err == nil || !strings.Contains(err.Error(), "app_owner_required") {
+				t.Fatalf("foreign or unresolved machine owner reached app execution: %v", err)
+			}
+			if runner.Minter.(*stubMinter).calls != 0 || len(store.created) != 0 || len(auditor.actions()) != 0 {
+				t.Fatal("owner refusal minted a credential or started an app session")
+			}
+		})
+	}
+}
+
 // TestRunnerRecordsSubscriptionBilling is design §9.5: an app that
 // reports its usage on a machine whose subscription is present bills
 // as `subscription`, and the row carries the reported numbers
 // verbatim.
 func TestRunnerRecordsSubscriptionBilling(t *testing.T) {
 	runner, session, store, auditor := newRunnerFixture(t, SubscriptionPresent)
+	// The wire may bare-ify the same owner that the stored registration names.
+	session.worker.OwnerUserId = "v1:identity:user:user-1"
 
 	go func() {
 		waitForSession(t, session, "sess-run")
@@ -414,19 +432,26 @@ func TestRunnerStreamsProgressLive(t *testing.T) {
 	}
 }
 
-// waitForSession blocks until the runner has registered its session
-// on the stream, so a test can play the worker's half without racing
-// the start.
+// waitForSession waits for Start to reach the fake worker. Registration alone
+// precedes the owner's final feature check: an End injected in that interval
+// releases the feature lease and cancels a session that has not been sent yet.
+// A real worker cannot answer before receiving Start.
 func waitForSession(t *testing.T, s *streamSession, sessionId string) {
 	t.Helper()
+	stream, ok := s.stream.(*fakeCockpitStream)
+	if !ok {
+		t.Fatal("session fixture requires the fake cockpit stream")
+	}
 	deadline := time.Now().Add(3 * time.Second)
 	for time.Now().Before(deadline) {
-		if s.lookupAppSession(sessionId) != nil {
-			return
+		for _, start := range stream.starts() {
+			if start.GetSessionId() == sessionId {
+				return
+			}
 		}
 		time.Sleep(2 * time.Millisecond)
 	}
-	t.Errorf("session %s never opened", sessionId)
+	t.Errorf("session %s never sent Start", sessionId)
 }
 
 // TestRunnerClassifiesCancellation: a caller giving up is a CANCELLED

@@ -108,6 +108,11 @@ func (i *Integration) handleDecideApproval(ctx context.Context, args map[string]
 		}
 	}
 	if approval == nil {
+		if recovered, err := i.recoverOptionalFeedbackAnswer(ctx, approvalId, decision, argMap(args, "answer")); err != nil {
+			return nil, err
+		} else if recovered != nil {
+			return i.resultNode(recovered), nil
+		}
 		if recovered, err := i.recoverComputerDecision(ctx, approvalId, decision, argMap(args, "answer")); err != nil {
 			return nil, err
 		} else if recovered != nil {

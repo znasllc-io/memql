@@ -61,6 +61,8 @@ func (e *draftDBCompiler) InvokeAI(_ context.Context, name string, _ map[string]
 	switch name {
 	case "goalComplexityTriage":
 		return e.triage, nil
+	case "workAcknowledgement":
+		return map[string]any{"acknowledgement": "I will prepare the requested file."}, nil
 	case "workDocumentSections":
 		return map[string]any{
 			"assembly": "Join the first and second sections in order.",
@@ -87,11 +89,33 @@ type draftPromptEngine struct {
 	invoke func(context.Context, string, map[string]any) (any, error)
 }
 
+func (e *draftPromptEngine) InvokeAI(ctx context.Context, name string, data map[string]any) (any, error) {
+	if e.invoke != nil {
+		return e.invoke(ctx, name, data)
+	}
+	return e.MemQLEngine.InvokeAI(ctx, name, data)
+}
+
 func (e *draftPromptEngine) InvokeAIProgress(ctx context.Context, name string, data map[string]any) (any, error) {
 	if e.invoke != nil {
 		return e.invoke(ctx, name, data)
 	}
 	return e.MemQLEngine.InvokeAIProgress(ctx, name, data)
+}
+
+func (e *draftPromptEngine) InvokeAIStructured(ctx context.Context, name string, data map[string]any, schemaName string, schema json.RawMessage, strict bool) (string, error) {
+	if e.invoke != nil {
+		value, err := e.invoke(ctx, name, data)
+		if err != nil {
+			return "", err
+		}
+		text, ok := value.(string)
+		if !ok {
+			return "", fmt.Errorf("structured test response is not text")
+		}
+		return text, nil
+	}
+	return e.MemQLEngine.InvokeAIStructured(ctx, name, data, schemaName, schema, strict)
 }
 
 type draftTurnProbe struct {
@@ -101,8 +125,9 @@ type draftTurnProbe struct {
 }
 
 type draftComposerProbe struct {
-	requests []composeintegration.ComposeRequest
-	runs     []common.RunContext
+	beforeCompose func(context.Context) error
+	requests      []composeintegration.ComposeRequest
+	runs          []common.RunContext
 }
 
 func (p *draftComposerProbe) Compose(ctx context.Context, req composeintegration.ComposeRequest) (composeintegration.ComposeReply, error) {
@@ -110,6 +135,11 @@ func (p *draftComposerProbe) Compose(ctx context.Context, req composeintegration
 	ac, _ := auth.AccessFromContext(ctx)
 	if !ok || run.RunId == "" || run.GoalId == "" || run.StepKey == "" || ac == nil || ac.UserId != "v1:identity:user:draft-owner" {
 		return composeintegration.ComposeReply{}, fmt.Errorf("native composer lost run/step/owner context")
+	}
+	if p.beforeCompose != nil {
+		if err := p.beforeCompose(ctx); err != nil {
+			return composeintegration.ComposeReply{}, err
+		}
 	}
 	p.requests = append(p.requests, req)
 	p.runs = append(p.runs, run)
@@ -240,6 +270,14 @@ func TestCompileDraftDB_SeparateReplicaReadsAndRunsValidatedDraft(t *testing.T) 
 		t.Fatal(gerr)
 	}
 	t.Cleanup(func() { _ = gates.Close() })
+
+	t.Run("file call budget across replicas", func(t *testing.T) {
+		testFileCallBudgetAcrossReplica(t, db, plannerEngine, receiver, promptEngine, composerProbe, uploaderProbe, ctx)
+	})
+
+	t.Run("file evidence across replicas", func(t *testing.T) {
+		testFileEvidenceDraftAcrossReplica(t, db, plannerEngine, receiver, promptEngine, composerProbe, uploaderProbe, ctx)
+	})
 
 	t.Run("quick replies keep viewer authority and history across replicas", func(t *testing.T) {
 		prompts := memql.NewPromptRegistry()

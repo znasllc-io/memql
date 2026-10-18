@@ -86,3 +86,23 @@ prompt workQuickReply {
   conversation string
   viewerContext string
 }
+
+/// One bounded evidence check, without tools or another research run.
+@level("strong")
+@templateFile("prompts/workReplyReview.tmpl")
+prompt workReplyReview {
+ statement string!
+ draft string!
+ sources string!
+ now string!
+}
+
+/// Check evidence before committing a requested file. A missing source returns a conversational answer.
+@level("strong")
+@templateFile("prompts/workFileEvidence.tmpl")
+prompt workFileEvidence {
+ statement string!
+ conversation string
+ sources string!
+ draft string
+}

@@ -134,6 +134,16 @@ func Classify(job Job, pod *Pod, created, now time.Time, cfg Config, deadlineCod
 	if jobCondition(job, "", "Complete") != nil {
 		return Observation{Phase: PhaseSucceeded, ExitCode: 0, Detail: "the step's Job completed"}
 	}
+	if job.Metadata.Labels[queueLabel] != "" {
+		if job.Status.StartTime.IsZero() {
+			if f := unexplainedFailure(job, pod); f != nil {
+				return failed(f.Code, f.Message)
+			}
+			return Observation{Phase: PhasePending, ExitCode: -1, Detail: "waiting for background resources"}
+		}
+		// Admission waiting consumes no scheduling or execution allowance.
+		created = job.Status.StartTime
+	}
 	if pod != nil {
 		if f := podFailure(pod, step, created, now, cfg); f != nil {
 			return failed(f.Code, f.Message)

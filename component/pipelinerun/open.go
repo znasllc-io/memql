@@ -55,6 +55,14 @@ type Opening struct {
 	DeliveryID string
 }
 
+// An explicit release retry keeps its manual origin for admission by another
+// replica, and its RerunOf for attempt/dedup semantics. Ordinary manual starts
+// still recover the existing attempt instead of opening another one.
+func (o Opening) isRerun() bool {
+	return o.Trigger == TriggerRerun ||
+		(o.Trigger == TriggerManual && o.Event == pipelines.EventRelease && strings.TrimSpace(o.RerunOf) != "")
+}
+
 // OpenResult says what an opening did. Run is the run opened, or the newest
 // existing run of the key when nothing was opened.
 type OpenResult struct {
@@ -180,7 +188,7 @@ func (i *Integration) openWithToken(ctx context.Context, d Deps, p Pipeline, o O
 			return nil
 		}
 		newest, attempts := newestAttempt(runs)
-		if o.Trigger == TriggerRerun && attempts > 0 && !newest.Finished() {
+		if o.isRerun() && attempts > 0 && !newest.Finished() {
 			result = OpenResult{Run: newest}
 			return ErrRunInProgress
 		}
@@ -201,7 +209,7 @@ func (i *Integration) openWithToken(ctx context.Context, d Deps, p Pipeline, o O
 			RerunOf:     bareID(o.RerunOf),
 			// Only a re-run can carry anything over: an attempt a delivery
 			// or the poll opened has nothing before it to carry from.
-			RerunFailedOnly: o.FailedOnly && o.Trigger == TriggerRerun,
+			RerunFailedOnly: o.FailedOnly && o.isRerun(),
 			DeliveryID:      strings.TrimSpace(o.DeliveryID),
 			PullRequest:     o.PullRequest,
 			HeadBranch:      strings.TrimSpace(o.Branch),
@@ -282,7 +290,7 @@ func answeredBy(runs []Run, o Opening, headBackFor string) (Run, bool) {
 	if attempts == 0 {
 		return Run{}, false
 	}
-	if o.Trigger != TriggerRerun {
+	if !o.isRerun() {
 		if !o.Fork && onlyForkRefusals(runs) {
 			return Run{}, false
 		}

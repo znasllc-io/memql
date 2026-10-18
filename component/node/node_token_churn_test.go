@@ -309,13 +309,15 @@ func TestBearerTokenForDial_RefreshesOnlyNearExpiry(t *testing.T) {
 // for as long as it ran. A discovered parent that stops answering is now
 // replaced from the topology.
 func TestParentConnector_ReResolvesAnUnreachableDiscoveredParent(t *testing.T) {
-	dead, err := net.Listen("tcp", "127.0.0.1:0")
-	require.NoError(t, err)
-	deadAddr := dead.Addr().String()
-	require.NoError(t, dead.Close())
+	// Keep the unavailable address reserved. Closing a temporary listener
+	// before starting the replacement lets the OS give the replacement that
+	// same port, so the first dial succeeds without exercising discovery.
+	dead := &refusingNodeService{code: codes.Unavailable, msg: "parent no longer accepts streams"}
+	deadAddr := serveNodeService(t, dead)
 
 	live := newKeyRotatingNodeService("edge-live", "")
 	liveAddr := serveNodeService(t, live)
+	require.NotEqual(t, deadAddr, liveAddr)
 
 	var mu sync.Mutex
 	var excluded []string
@@ -334,6 +336,7 @@ func TestParentConnector_ReResolvesAnUnreachableDiscoveredParent(t *testing.T) {
 	t.Cleanup(func() { pc.Stop(context.Background()) })
 
 	waitForCount(t, &live.acceptedHandshakes, 1, 15*time.Second, "handshake with the re-resolved parent")
+	assert.GreaterOrEqual(t, atomic.LoadInt64(&dead.refused), int64(parentUnreachableAttempts))
 	assert.Equal(t, liveAddr, pc.currentParentAddress())
 	mu.Lock()
 	defer mu.Unlock()

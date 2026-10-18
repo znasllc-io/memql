@@ -506,6 +506,7 @@ func TestViewerDocumentManagementAcrossReplicas(t *testing.T) {
 		{"feedback", testDeleteDocumentAnnotationsAcrossReplicas},
 		{"approval", testDocumentRevisionAnalyzesThenApprovesAndAppliesAcrossReplicas},
 		{"end insertion", testViewerEndInsertionAcrossReplicas},
+		{"provenance anchor", testViewerProvenanceAnchorAcrossReplicas},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			personal := f.isolatedCase(t)
@@ -529,6 +530,7 @@ func TestDocumentRevisionWorkflow(t *testing.T) {
 			{"HistoryForkReadsOwnedFileBytes", testHistoryForkReadsOwnedFileBytes},
 			{"PersonalDocumentNotesNeverEnterAIRevision", testPersonalDocumentNotesNeverEnterAIRevision},
 			{"ArtifactForFileResolvesBareReceiptAcrossEngines", testArtifactForFileResolvesBareReceiptAcrossEngines},
+			{"ReadFileFromDeliveryReceiptAcrossEngines", testReadFileFromDeliveryReceiptAcrossEngines},
 			{"ReviewAttachmentsAcrossReplicas", testReviewAttachmentsAcrossReplicas},
 			{"BlankDestinationWithReference", testBlankDestinationWithReference},
 			{"AppliedFeedbackCannotBeDeletedAcrossReplicas", testAppliedFeedbackCannotBeDeletedAcrossReplicas},

@@ -19,6 +19,7 @@ shape modelProfile modelProfileFull {
   dimensions
   license
   source
+  reviewedAt
   recommendedFor
   minMachineClass
   offeredOn
@@ -27,4 +28,20 @@ shape modelProfile modelProfileFull {
   curated
   unavailable
   row.createdAt
+}
+
+@row
+shape catalogResearchSettings catalogResearchSettingsFull {
+ row.id
+ enabled
+ ownerUserId
+}
+
+@row
+shape catalogReview catalogReviewFull {
+ row.id
+ runId
+ reviewedAt
+ summary
+ findings
 }

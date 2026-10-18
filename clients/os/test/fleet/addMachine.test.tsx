@@ -438,6 +438,38 @@ describe("the checks", () => {
     await waitFor(() => expect(screen.getByText("Response verified on this machine.")).toBeTruthy());
     expect(screen.queryByText("hello")).toBeNull();
   });
+
+  it("checks text on the selected Mac when image and embedding models sort first", async () => {
+    h.chat.mockResolvedValue({ message: { role: "assistant", content: "hello" } });
+    const connection = fakeConnection();
+    mount(connection);
+    await describeAndMint("mini", { inference: true });
+    emit(connection, arrival({ labels: {
+      "model:flux2-klein-4b": "max=1,params=4000000000,quant=Q4,imagegen=1",
+      "model:qwen3-embedding:0.6b": "ctx=32768,embeddings=1,tools=1",
+      "model:qwen3.5:4b": "ctx=262144,tools=1,vision=1",
+    } }));
+    await waitFor(() => expect(h.chat).toHaveBeenCalledTimes(1));
+    expect(h.chat.mock.calls[0]?.[2]).toMatchObject({
+      provider: "fleet:qwen3.5:4b", fleetRegistrationId: "v1:worker:registration:mini",
+    });
+    await waitFor(() => expect(screen.getByText("Response verified on this machine.")).toBeTruthy());
+  });
+
+  it("offers a text model download without sending a chat to image or audio models", async () => {
+    const connection = fakeConnection();
+    mount(connection);
+    await describeAndMint("mini", { inference: true });
+    const row = arrival({ labels: {
+      "model:image": "imagegen=1", "model:transcriber": "audioin=1", "model:speaker": "audioout=1",
+    } });
+    emit(connection, row);
+    await beat(connection, row, 15);
+    await beat(connection, row, 30);
+    expect(h.chat).not.toHaveBeenCalled();
+    expect(within(bar()).getByRole("button", { name: "Download models" })).toBeTruthy();
+    expect(within(bar()).queryByRole("button", { name: "Done" })).toBeNull();
+  });
 });
 
 describe("cancel after a mint asks which of two things", () => {

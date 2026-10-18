@@ -135,7 +135,13 @@ func (r *Replier) Handle(ctx context.Context, msg *memqlv1.AgentGenerateTurnMsg,
 	if sink == nil {
 		return nil, fmt.Errorf("nil DeltaSink")
 	}
+	if isOwnedWorkExecution(ctx) {
+		return r.handleReviewedWork(ctx, msg, sink)
+	}
+	return r.handleTurn(ctx, msg, sink)
+}
 
+func (r *Replier) handleTurn(ctx context.Context, msg *memqlv1.AgentGenerateTurnMsg, sink DeltaSink) (*TurnResult, error) {
 	toolsDisabled := strings.EqualFold(msg.Hints["tools_disabled"], "true")
 	if toolsDisabled {
 		return r.handleNonStreaming(ctx, msg, sink)

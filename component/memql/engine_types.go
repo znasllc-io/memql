@@ -544,7 +544,9 @@ const (
 	// implementation -- a second one in the browser would drift, and the drift
 	// presents as a page offering a pull the act then refuses. See
 	// fleet_recommended_read.go.
-	BuiltinExecutorFleetRecommended = "fleetRecommended"
+	BuiltinExecutorFleetRecommended   = "fleetRecommended"
+	BuiltinExecutorFleetModelSetup    = "fleetModelSetup"
+	BuiltinExecutorFleetSetModelSetup = "fleetSetModelSetup"
 	// BuiltinExecutorFleetSharingLedger answers what a shared machine has done
 	// this week, for the person who lent it (epic memql#5146, D6). Counts and
 	// levels, never content -- the narrowing happens in the engine so the
@@ -562,7 +564,8 @@ const (
 	// memql#5327, finding M-2). setWorkerSharing is @serverOnly behind it,
 	// because the concept's cluster-owner escape let an operator lend hardware
 	// they do not own.
-	BuiltinExecutorFleetSetSharing = "fleetSetSharing"
+	BuiltinExecutorFleetSetSharing       = "fleetSetSharing"
+	BuiltinExecutorFleetSetOwnerFeatures = "fleetSetOwnerFeatures"
 	// BuiltinExecutorFleetShareDirectory answers who the caller may lend one
 	// of their own machines to (epic memql#5344, design G2): the people they
 	// share an active group with and those groups, or everyone from admin

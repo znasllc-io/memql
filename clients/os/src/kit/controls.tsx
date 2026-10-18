@@ -1337,11 +1337,8 @@ export function Fact({
  * refusal is a standing fact rather than a phase (the Ask voice rule), and it
  * stands until the next attempt says otherwise.
  *
- * The button holds its space at all times and only its INK arrives, on hover or
- * on focus. Adding it to the flow on hover would shift the line out from under
- * the pointer reaching for it. Where there is no hover to reveal it with
- * (`@media (hover: none)`) it simply stands, so a touch reader is never left
- * with a value they cannot take.
+ * The copy icon stays visible. Text remains selectable and clicking a value
+ * never changes the clipboard; only the icon is a copy target.
  */
 export function CopyValue({
   value,
@@ -1354,7 +1351,7 @@ export function CopyValue({
   label: string;
   /** Static display content; the clipboard always receives `value`. */
   displayValue?: ReactNode;
-  /** Rows wrap and copy from the whole value, keeping the icon quiet. */
+  /** Rows wrap; only the separate copy icon writes to the clipboard. */
   presentation?: "truncate" | "row";
 }) {
   const textId = useId();
@@ -1397,34 +1394,14 @@ export function CopyValue({
   const copied = state === "copied";
   return (
     <span className="os-copyvalue" data-presentation={presentation}>
-      {presentation === "row" ? <button type="button" className="os-copyvalue-line os-copyvalue-row"
-        aria-label={copied ? `Copied ${label}` : `Copy ${label}`} aria-describedby={textId} title={copied ? "Copied" : `Copy ${label}`}
-        onClick={event => {
-          const selection = window.getSelection();
-          if (event.detail > 0 && selection && !selection.isCollapsed && event.currentTarget.contains(selection.anchorNode)) return;
-          void copy();
-        }}>
-        <span className="os-copyvalue-text" id={textId}>{displayValue ?? value}</span>
-        <span className="os-copyvalue-receipt" data-copied={copied || undefined} aria-hidden>
-          {copied ? <><span>Copied</span><CheckGlyph size={14} /></> : <Copy size={14} />}
-        </span>
-      </button> : <span className="os-copyvalue-line">
-        <span className="os-copyvalue-text" title={value}>
-          {displayValue ?? value}
-        </span>
-        <button
-          type="button"
-          className="os-copyvalue-copy"
-          // The confirmation is pinned visible for its whole life: it fires on
-          // a click, and a pointer that has moved on by then would otherwise
-          // fade the only answer the person gets.
-          data-copied={copied || undefined}
-          aria-label={copied ? "Copied" : `Copy ${label}`}
-          onClick={() => void copy()}
-        >
-          {copied ? <CheckGlyph size={12} aria-hidden /> : <Copy size={12} aria-hidden />}
+      <span className={`os-copyvalue-line${presentation === "row" ? " os-copyvalue-row" : ""}`}>
+        <span className="os-copyvalue-text" id={textId} title={value}>{displayValue ?? value}</span>
+        <button type="button" className="os-copyvalue-copy" data-copied={copied || undefined}
+          aria-label={copied ? (presentation === "row" ? `Copied ${label}` : "Copied") : `Copy ${label}`}
+          aria-describedby={textId} title={copied ? "Copied" : `Copy ${label}`} onClick={() => void copy()}>
+          {copied ? <CheckGlyph size={14} aria-hidden /> : <Copy size={14} aria-hidden />}
         </button>
-      </span>}
+      </span>
       {copied ? <span className="os-sr-only" role="status">Copied {label}</span> : null}
       {state === "refused" || state === "unavailable" ? (
         <span className="os-copyvalue-note" role="status">
@@ -1437,9 +1414,9 @@ export function CopyValue({
   );
 }
 
-/** A selectable value whose entire row copies, with a stable visible receipt.
+/** A selectable value with a separate copy icon and stable visible receipt.
  * Keep the native read-only input for keyboard selection and manual copying
- * when clipboard permission is unavailable. Enter/Space also copy from it.
+ * when clipboard permission is unavailable.
  */
 export function CopyField({
   value,
@@ -1487,22 +1464,18 @@ export function CopyField({
   const copied = state === "copied";
   return (
     <span className="os-copyfield">
-      <span className="os-copyfield-line" onClick={() => void copy()}>
+      <span className="os-copyfield-line">
         <input
           id={id}
           className={mono ? "os-input os-copyfield-input os-mono" : "os-input os-copyfield-input"}
           value={value}
           readOnly
           aria-label={label}
-          onKeyDown={(event) => {
-            if (event.key !== "Enter" && event.key !== " ") return;
-            event.preventDefault();
-            void copy();
-          }}
         />
         <button
           type="button"
           className="os-copyfield-copy"
+          onClick={() => void copy()}
           data-copied={copied || undefined}
           aria-label={copied ? "Copied" : `Copy ${label}`}
         >

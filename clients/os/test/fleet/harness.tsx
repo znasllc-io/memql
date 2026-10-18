@@ -105,11 +105,20 @@ export function sharingReceiptRow(args: {
         ? `Lent to ${count}.`
         : args.mode === "cluster"
           ? "Offered to everyone on this cluster, and to the cluster's own work."
-          : "Kept to you. Nobody else's work will run on this machine.",
+          : "This resource is kept to you.",
   };
 }
 
 export interface FakeQuery {
+  firstMachineActivity: ReturnType<typeof vi.fn>;
+  myModelCallsOnMachine: ReturnType<typeof vi.fn>;
+
+  machineActivity: ReturnType<typeof vi.fn>;
+  activeMachineActivity: ReturnType<typeof vi.fn>;
+  machineActivityById: ReturnType<typeof vi.fn>;
+  workerInvocationById: ReturnType<typeof vi.fn>;
+  createGoal: ReturnType<typeof vi.fn>;
+
   myWorkersWithStatus: ReturnType<typeof vi.fn>;
   myRoutingPolicies: ReturnType<typeof vi.fn>;
   myWorkspaces: ReturnType<typeof vi.fn>;
@@ -138,6 +147,7 @@ export interface FakeQuery {
   // so both are on-demand reads rather than seeds behind a subscription.
   delegationPolicyForUser: ReturnType<typeof vi.fn>;
   appSessionsForUser: ReturnType<typeof vi.fn>;
+  liveAppSessionsForUser: ReturnType<typeof vi.fn>;
   appSessionById: ReturnType<typeof vi.fn>;
   renameWorker: ReturnType<typeof vi.fn>;
   setWorkerOperatorLabels: ReturnType<typeof vi.fn>;
@@ -152,6 +162,9 @@ export interface FakeQuery {
   // presses Probe and at no other time -- a fact with a date rather than an
   // event with a duration.
   fleetRecommended: ReturnType<typeof vi.fn>;
+  fleetModelSetup: ReturnType<typeof vi.fn>;
+  fleetSetModelSetup: ReturnType<typeof vi.fn>;
+  activeEmbedderBinding: ReturnType<typeof vi.fn>;
   measurementsForMachine: ReturnType<typeof vi.fn>;
   fleetSharingLedger: ReturnType<typeof vi.fn>;
   fleetPullRecommended: ReturnType<typeof vi.fn>;
@@ -159,6 +172,7 @@ export interface FakeQuery {
   /** The owner's half of the consent (epic memql#5344). Answers the RECEIPT
    *  row, in the builtin wire shape, built from what was sent. */
   fleetSetSharing: ReturnType<typeof vi.fn>;
+  fleetSetOwnerFeatures: ReturnType<typeof vi.fn>;
   /** Who the owner may lend a machine to. On demand, never live: a virtual
    *  row computed per request, read once each time the share dialog opens. */
   fleetShareDirectory: ReturnType<typeof vi.fn>;
@@ -232,11 +246,21 @@ export function fakeConnection(seed: Partial<Record<keyof FakeQuery, Row[]>> = {
       myWorkspaces: read("myWorkspaces"),
       clusterNodes: read("clusterNodes"),
       invocationsForWorker: read("invocationsForWorker"),
+      firstMachineActivity: read("firstMachineActivity"),
+      myModelCallsOnMachine: read("myModelCallsOnMachine"),
+
+      machineActivity: read("machineActivity"),
+      activeMachineActivity: read("activeMachineActivity"),
+      machineActivityById: read("machineActivityById"),
+      workerInvocationById: read("workerInvocationById"),
+      createGoal: read("createGoal"),
+
       modelPullsForWorker: read("modelPullsForWorker"),
       fleetModels: builtin("fleetModels"),
       inferenceStatus: builtin("inferenceStatus"),
       delegationPolicyForUser: read("delegationPolicyForUser"),
       appSessionsForUser: read("appSessionsForUser"),
+      liveAppSessionsForUser: read("liveAppSessionsForUser"),
       appSessionById: read("appSessionById"),
       renameWorker: vi.fn(async () => rowsResult([])),
       setWorkerOperatorLabels: vi.fn(async () => rowsResult([])),
@@ -260,6 +284,9 @@ export function fakeConnection(seed: Partial<Record<keyof FakeQuery, Row[]>> = {
       setDelegationPolicy: vi.fn(async () => rowsResult([])),
       fleetModelPull: vi.fn(async () => builtinReply("fleetModelPull", [])),
       fleetRecommended: builtin("fleetRecommended"),
+      fleetModelSetup: builtin("fleetModelSetup"),
+      activeEmbedderBinding: vi.fn(async () => rowsResult(seed.activeEmbedderBinding ?? [])),
+      fleetSetModelSetup: builtin("fleetSetModelSetup"),
       measurementsForMachine: read("measurementsForMachine"),
       // EVERY BUILTIN HERE ANSWERS IN THE BUILTIN WIRE SHAPE (builtinReply);
       // only the shaped queries and the mutations answer flat rows.
@@ -270,6 +297,7 @@ export function fakeConnection(seed: Partial<Record<keyof FakeQuery, Row[]>> = {
         async (args: { registrationId: string; mode: string; userIds?: string[]; groupIds?: string[] }) =>
           builtinReply("fleetSetSharing", [sharingReceiptRow(args)]),
       ),
+      fleetSetOwnerFeatures: vi.fn(async () => builtinReply("fleetSetOwnerFeatures", [])),
       fleetShareDirectory: vi.fn(async () =>
         builtinReply("fleetShareDirectory", seed.fleetShareDirectory ?? [shareDirectoryRow()]),
       ),

@@ -2,8 +2,9 @@
 """Run a native pipeline shard with the CI planner's per-package budgets.
 
 The pipeline selects packages, owns sharding and provisions the database. This
-command only partitions that exact selection by the shared class table. It
-never discovers additional packages or retries a test. Keeping package budgets
+command partitions that exact selection by the shared class table and gives
+each class its own database in the disposable service, as CI does. It never
+discovers additional packages or retries a test. Keeping package budgets
 prevents the slower engine suite from granting every DB test a ten-minute cap.
 """
 import json
@@ -12,6 +13,8 @@ from pathlib import Path
 import re
 import subprocess
 import sys
+from urllib.parse import parse_qsl, unquote, urlsplit, urlunsplit
+import uuid
 
 import yaml
 
@@ -43,7 +46,14 @@ def read_classes(workflow):
     return classes
 
 
-def commands(packages, classes):
+def read_parallelism(workflow):
+    value = str(workflow["jobs"]["db-tests"]["env"]["MEMQL_DB_TEST_PARALLELISM"])
+    if not re.fullmatch(r"[1-9][0-9]*", value) or int(value) > 32:
+        raise ValueError("DB test parallelism must be an integer from 1 to 32")
+    return int(value)
+
+
+def commands(packages, classes, parallelism):
     if not packages or len(set(packages)) != len(packages):
         raise ValueError("expected a nonempty, unique package selection")
     selected = {name: [] for name, _, _ in classes}
@@ -57,13 +67,70 @@ def commands(packages, classes):
         selected[name].append(package)
     # Every invocation is serial beside this shard's one Postgres, as before.
     # -count=1 also preserves the pipeline's always-uncached execution policy.
-    return [(name, ["go", "test", "-count=1", "-p=1", "-timeout=" + timeout, *selected[name]]) for name, _, timeout in classes if selected[name]]
+    # t.Parallel overlap must not silently halve when GOMAXPROCS follows a
+    # smaller container CPU quota. Preserve the hosted lane's bounded overlap
+    # without changing CPU reservations, package deadlines or test selection.
+    return [(name, ["go", "test", "-count=1", "-p=1", "-parallel=" + str(parallelism), "-timeout=" + timeout, *selected[name]]) for name, _, timeout in classes if selected[name]]
 
 
-def run(packages, classes):
-    for name, command in commands(packages, classes):
+def database_url(dsn, name):
+    parts = urlsplit(dsn)
+    # This command owns databases only inside the step's disposable service.
+    # libpq query parameters can override URI routing, so admit only the
+    # non-routing option used by the declared pipeline service.
+    if (parts.scheme not in ("postgres", "postgresql") or
+            parts.hostname not in ("localhost", "127.0.0.1", "::1") or
+            not parts.username or not parts.path.strip("/") or parts.fragment or
+            any(key != "sslmode" for key, _ in parse_qsl(parts.query, keep_blank_values=True))):
+        raise ValueError("database isolation requires an explicit loopback service URI")
+    return urlunsplit(parts._replace(path="/" + name))
+
+
+def database_environment(dsn):
+    parts = urlsplit(dsn)
+    environment = dict(os.environ, MEMQL_DATABASE_DSN=dsn)
+    # A hostaddr inherited from the operator would override the URI's host.
+    for key in ("PGHOSTADDR", "PGSERVICE", "PGSERVICEFILE", "PGPASSWORD", "PGOPTIONS"):
+        environment.pop(key, None)
+    environment.update(PGHOST=parts.hostname, PGPORT=str(parts.port or 5432),
+                       PGUSER=unquote(parts.username), PGDATABASE=unquote(parts.path[1:]),
+                       PGSSLMODE=dict(parse_qsl(parts.query)).get("sslmode", "prefer"),
+                       PGCONNECT_TIMEOUT="10")
+    if parts.password is not None:
+        environment["PGPASSWORD"] = unquote(parts.password)
+    return environment
+
+
+def sql(dsn, statement):
+    # Keep connection credentials out of arguments and diagnostic output.
+    environment = database_environment(dsn)
+    environment["PGOPTIONS"] = "-c statement_timeout=30000"
+    subprocess.run(["psql", "-X", "--no-password", "--quiet", "--set=ON_ERROR_STOP=1", "--command", statement],
+                   env=environment, check=True, timeout=45)
+
+
+def run(packages, classes, parallelism):
+    selected = commands(packages, classes, parallelism)
+    source = os.environ.get("MEMQL_DATABASE_DSN", "")
+    database_url(source, "validate")
+    for name, command in selected:
         print(json.dumps({"class": name, "command": command}), flush=True)
-        result = subprocess.run(command, check=False)
+        # CI puts these classes in separate service databases. Native shards
+        # may select several classes, but must not carry one suite's fixture
+        # rows and planner statistics into the next suite's timeout budget.
+        database = "memql_pipeline_" + uuid.uuid4().hex
+        isolated = database_url(source, database)
+        sql(source, "CREATE DATABASE " + database)
+        try:
+            sql(isolated, 'CREATE EXTENSION IF NOT EXISTS timescaledb CASCADE; '
+                'CREATE EXTENSION IF NOT EXISTS "uuid-ossp"; '
+                'CREATE EXTENSION IF NOT EXISTS pgcrypto; '
+                'CREATE EXTENSION IF NOT EXISTS vector;')
+            result = subprocess.run(command, env=database_environment(isolated), check=False)
+        finally:
+            # Only a database this invocation successfully created can reach
+            # cleanup. No shared service database or previous run is dropped.
+            sql(source, "DROP DATABASE " + database + " WITH (FORCE)")
         if result.returncode:
             return result.returncode if result.returncode > 0 else 1
     return 0
@@ -73,12 +140,12 @@ def main():
     if os.environ.get("MEMQL_REQUIRE_DB") != "1" or not os.environ.get("MEMQL_DATABASE_DSN"):
         raise ValueError("database-required execution and its DSN must be explicit")
     workflow = yaml.safe_load(Path(".github/workflows/ci.yml").read_text())
-    return run(os.environ.get("MEMQL_PACKAGES", "").split(), read_classes(workflow))
+    return run(os.environ.get("MEMQL_PACKAGES", "").split(), read_classes(workflow), read_parallelism(workflow))
 
 
 if __name__ == "__main__":
     try:
         sys.exit(main())
-    except (ValueError, KeyError, OSError) as error:
+    except (ValueError, KeyError, OSError, subprocess.SubprocessError) as error:
         print("pipeline DB tests: " + str(error), file=sys.stderr)
         sys.exit(1)

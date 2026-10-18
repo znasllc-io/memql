@@ -29,6 +29,17 @@ type AskVoiceEvent struct {
 	Activity *WorkEvent `json:"activity,omitempty"`
 }
 
+// The room is a client wire seam, just like the browser's gRPC stream. Keep
+// the journal's canonical arguments intact while sending public identities.
+func askVoiceActivityEvent(turnID string, event WorkEvent) AskVoiceEvent {
+	event.Arguments = CloneEventPayloadForWire(event.Arguments)
+	BareifyEventPayload(event.Arguments)
+	if WireCanonicalIdPattern().MatchString(event.Name) {
+		event.Name = BareShortId(event.Name)
+	}
+	return AskVoiceEvent{Type: "activity", TurnID: turnID, Activity: &event}
+}
+
 func (e *MemQLEngine) StartAskVoice(ctx context.Context, opts AskVoiceOptions) (audio.RoomCredentials, error) {
 	if _, err := ParseExecutionDestination(opts.ExecutionDestination); err != nil {
 		return audio.RoomCredentials{}, err
@@ -256,7 +267,7 @@ func (e *MemQLEngine) askVoiceTurn(ctx context.Context, room audio.Room, opts As
 		mu.Lock()
 		events = append(events, event)
 		mu.Unlock()
-		_ = room.Event(AskVoiceEvent{Type: "activity", TurnID: turnID, Activity: &event})
+		_ = room.Event(askVoiceActivityEvent(turnID, event))
 	}
 	audioCtx := airoute.WithObserver(ctx, observe)
 	_ = room.Event(AskVoiceEvent{Type: "transcript", TurnID: turnID, Text: input.text})
@@ -307,7 +318,7 @@ func (e *MemQLEngine) askVoiceTurn(ctx context.Context, room audio.Room, opts As
 			queue(sentence)
 		}
 	}, func(event WorkEvent) {
-		_ = room.Event(AskVoiceEvent{Type: "activity", TurnID: turnID, Activity: &event})
+		_ = room.Event(askVoiceActivityEvent(turnID, event))
 	})
 	if err == nil && strings.TrimSpace(pending) != "" {
 		queue(pending)

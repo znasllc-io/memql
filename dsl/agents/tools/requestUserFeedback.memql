@@ -1,5 +1,6 @@
-/// Ask for information or a decision that blocks the current goal. The run
-/// pauses durably and the person answers in Ask; Nexus opens that conversation.
+/// Ask for information or a decision. Required answers pause the run durably;
+/// optional clarification waits briefly before useful authorized work continues.
+/// The person answers in Ask; Nexus opens that conversation.
 /// Use this when a requested personal fact remains unknown after checking
 /// available sources. Do not substitute a final "tell me" invitation.
 /// Reuse earlier answers and
@@ -13,6 +14,7 @@ tool requestUserFeedback {
   kind         enum("choice", "text", "multi")! @description("Response widget. choice = pick exactly one of `options`. multi = pick one or more of `options`. text = free-form (also the path for a file the user drops in Ask). Pick choice/multi whenever the answer space is bounded -- it is faster and less error-prone for the user.")
   options      array   @description("For kind=choice / multi: the selectable answers, each an object {label, value}. label is shown to the user; value is what comes back in the recorded answer. Omit for kind=text.")
   timeoutAt    string  @description("Optional RFC3339 expiry for this question. Omit for the platform default.")
+  optional     bool    @description("True only for information that may help but does not block useful authorized work. The Spine waits briefly, then continues without an answer. Never use for consent, access, spending or a decision required before an effect. A late answer remains guidance for this execution.")
   runId        string  @autoInjected @description("The active run to park. Server-stamped from the agent runtime turn context; the central validator drops any LLM-supplied value before dispatch (memql#107). Was planId until memql#5053 -- the question is now a v1:work:approval of kind feedback, raised against the run.")
   agentId      string  @autoInjected @description("Calling agent id. Server-stamped from the agent runtime; the central validator drops any LLM-supplied value before dispatch.")
   ownerUserId  string  @autoInjected @description("Session-owner user id. Server-stamped; scopes the parked Plan's owner attribution. The central validator drops any LLM-supplied value.")

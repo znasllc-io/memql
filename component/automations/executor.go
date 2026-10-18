@@ -579,19 +579,6 @@ func (e *Executor) executeWithEvent(ctx context.Context, automation *Automation,
 		return nil, ctx.Err()
 	}
 
-	// Track execution count for storm detection
-	if e.executionTracker != nil {
-		executionCount := e.executionTracker.record(automation.Name)
-		if executionCount > 20 && e.logger != nil {
-			e.logger.Warn("automation storm detected",
-				"component", ComponentName,
-				"automation", automation.Name,
-				"executionsInWindow", executionCount,
-				"window", "1m",
-			)
-		}
-	}
-
 	// Inject system actor for automation execution
 	// This allows automations to execute mutations without user authentication
 	ctx = contextWithSystemActor(ctx, automation.Name)
@@ -616,7 +603,7 @@ func (e *Executor) executeWithEvent(ctx context.Context, automation *Automation,
 		exec.ID = adopt.RunId
 	}
 
-	// Global execution budget (memql#1142). The storm WARN above is a
+	// Global execution budget (memql#1142). The storm WARN is a
 	// SIGNAL; this is the STOP. A process-global, cross-executor ceiling
 	// (total + per-automation executions/window) hard-skips the execution
 	// once a storm blows past it, so a misfiring automation can't re-fire
@@ -758,8 +745,17 @@ func (e *Executor) executeWithEvent(ctx context.Context, automation *Automation,
 		}
 	}
 
+	// Count admitted executions, not attempts another replica already claimed.
+	// Warn once when this process crosses the threshold in each fixed window.
+	if e.executionTracker != nil {
+		if count := e.executionTracker.record(automation.Name); count == 21 && e.logger != nil {
+			e.logger.Warn("automation storm detected", "component", ComponentName,
+				"automation", automation.Name, "executionsInWindow", count, "window", "1m")
+		}
+	}
+
 	// Give the run its row before anything is written against it: at open, ahead
-	// of the first step, unless it is a held cron tick (holdsScheduledJournal,
+	// of the first step, unless it is a held background firing (holdsBackgroundJournal,
 	// below), whose row waits for the tick's first graph write, its failure or
 	// its park on a human wait. An adopted run's row exists already. An
 	// automation whose trigger names a v1:work:* concept is NOT journaled: its
@@ -806,8 +802,8 @@ func (e *Executor) executeWithEvent(ctx context.Context, automation *Automation,
 		child.hold = parentJournal.hold
 		journal = &child
 		journal.openRun(ctx, automation, exec, triggeringEvent, parentCause)
-	} else if journal != nil && holdsScheduledJournal(automation, triggeredBy, adopt) {
-		// A CRON TICK'S RUN OPENS AT ITS FIRST WRITE, NOT HERE (journal.go, the
+	} else if journal != nil && journal.required == nil && holdsBackgroundJournal(automation, triggeredBy, adopt) {
+		// A HELD BACKGROUND RUN OPENS AT ITS FIRST WRITE, NOT HERE (journal.go, the
 		// header). An idle instance's ticks mostly change nothing, and a durable
 		// run of three or more versions plus its steps for each was about 35% of the
 		// rows an idle production instance wrote (2026-10-11). The journal this run
@@ -1256,7 +1252,7 @@ func (e *Executor) createCanonicalIdResolver() CanonicalIdResolver {
 }
 
 // executionTracker tracks execution counts per automation for storm detection.
-// It uses a sliding window approach to detect when an automation fires excessively.
+// It uses fixed windows to detect when an automation fires excessively.
 type executionTracker struct {
 	mu         sync.Mutex
 	counts     map[string]*executionCount

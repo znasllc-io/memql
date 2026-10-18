@@ -57,3 +57,16 @@ func TestWorkerConsentGuardJudgesChangesNotSpellings(t *testing.T) {
 		})
 	}
 }
+
+func TestMachineFeatureAndWorkbenchConsentCannotBeWrittenDirectly(t *testing.T) {
+	for _, field := range []string{"ownerFeatures", "workbenchSharing"} {
+		prior := map[string]any{"ownerUserId": "owner"}
+		final := map[string]any{"ownerUserId": "owner", field: map[string]any{"headless": true, "mode": "people"}}
+		if err := validateWorkerConsentServerOnly(context.Background(), prior, final); err == nil {
+			t.Fatalf("direct write of %s admitted", field)
+		}
+		if err := validateWorkerConsentServerOnly(auth.ContextWithInternalOrigin(context.Background()), prior, final); err != nil {
+			t.Fatal(err)
+		}
+	}
+}

@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"strconv"
+	"strings"
 	"time"
 )
 
@@ -19,7 +20,8 @@ const (
 
 // ReadPodFileResumable reads an immutable file in bounded ranges. Each range
 // must finish with a successful command status and normal transport closure
-// before any of its bytes reach dst. An interrupted range is discarded and
+// and contain its full expected length before any bytes reach dst. The file
+// length is obtained with a fixed read-only stat command. An incomplete range is discarded and
 // retried, at most three attempts; earlier verified ranges are never replayed.
 //
 // The caller must establish immutability and bind the pod/container identity
@@ -34,14 +36,38 @@ func (e *ClusterAPI) ReadPodFileResumable(ctx context.Context, namespace, pod, c
 	}
 	ctx, cancel := context.WithTimeout(ctx, 30*time.Minute)
 	defer cancel()
+	// A clean exec status does not prove that stdout contained the entire
+	// requested range. Bind the immutable file's length before transferring;
+	// a short successful stream must be retried, never mistaken for file EOF.
+	var metadata bytes.Buffer
+	metadataCtx, stopMetadata := context.WithTimeout(ctx, podFileRangeTimeout)
+	_, err := e.readPodFileCommand(metadataCtx, namespace, pod, container,
+		[]string{"stat", "-c", "MEMQL_SIZE:%s:END", "--", file}, &metadata, 64)
+	stopMetadata()
+	if err != nil {
+		return 0, fmt.Errorf("pod file size could not be verified: %w", err)
+	}
+	value := metadata.String()
+	if !strings.HasPrefix(value, "MEMQL_SIZE:") || !strings.HasSuffix(value, ":END\n") {
+		return 0, errors.New("pod file size response is incomplete")
+	}
+	digits := strings.TrimSuffix(strings.TrimPrefix(value, "MEMQL_SIZE:"), ":END\n")
+	if strings.Trim(digits, "0123456789") != "" {
+		return 0, errors.New("pod file size is not an unsigned decimal integer")
+	}
+	fileSize, err := strconv.ParseInt(digits, 10, 64)
+	if err != nil || fileSize < 0 || fileSize > maxBytes {
+		return 0, errors.New("pod file size is invalid or exceeds its byte bound")
+	}
 	var total int64
 	var chunk bytes.Buffer
 	chunk.Grow(podFileRangeBytes)
-	for {
+	for total < fileSize {
 		if err := ctx.Err(); err != nil {
 			return total, err
 		}
-		// Full ranges are block-aligned. A short successful range is EOF.
+		// Full ranges are block-aligned; only the final range may be shorter.
+		want := min(int64(podFileRangeBytes), fileSize-total)
 		command := []string{"dd", "if=" + file, "bs=" + strconv.Itoa(podFileBlockBytes),
 			"skip=" + strconv.FormatInt(total/podFileBlockBytes, 10),
 			"count=" + strconv.Itoa(podFileRangeBytes/podFileBlockBytes), "iflag=fullblock"}
@@ -49,8 +75,11 @@ func (e *ClusterAPI) ReadPodFileResumable(ctx context.Context, namespace, pod, c
 		for attempt := 1; attempt <= podFileRangeAttempts; attempt++ {
 			chunk.Reset()
 			rangeCtx, stop := context.WithTimeout(ctx, podFileRangeTimeout)
-			_, err = e.readPodFileCommand(rangeCtx, namespace, pod, container, command, &chunk, min(podFileRangeBytes, maxBytes-total+1))
+			_, err = e.readPodFileCommand(rangeCtx, namespace, pod, container, command, &chunk, want+1)
 			stop()
+			if err == nil && int64(chunk.Len()) != want {
+				err = fmt.Errorf("%w: received %d of %d expected bytes", errPodFileInterrupted, chunk.Len(), want)
+			}
 			if err == nil || ctx.Err() != nil || (!errors.Is(err, errPodFileInterrupted) && !errors.Is(err, context.DeadlineExceeded)) || attempt == podFileRangeAttempts {
 				break
 			}
@@ -71,7 +100,6 @@ func (e *ClusterAPI) ReadPodFileResumable(ctx context.Context, namespace, pod, c
 		if int64(chunk.Len()) > maxBytes-total {
 			return total, errors.New("pod file exceeds its byte bound")
 		}
-		size := chunk.Len()
 		for chunk.Len() > 0 {
 			data := chunk.Next(min(chunk.Len(), podFileBlockBytes))
 			n, err := dst.Write(data)
@@ -83,8 +111,6 @@ func (e *ClusterAPI) ReadPodFileResumable(ctx context.Context, namespace, pod, c
 				return total, io.ErrShortWrite
 			}
 		}
-		if size < podFileRangeBytes {
-			return total, nil
-		}
 	}
+	return total, nil
 }

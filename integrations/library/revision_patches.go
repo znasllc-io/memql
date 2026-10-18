@@ -12,6 +12,7 @@ import (
 	"github.com/yuin/goldmark/ast"
 	"github.com/yuin/goldmark/text"
 	workstate "github.com/znasllc-io/memql/component/work"
+	"github.com/znasllc-io/memql/core/docsmd"
 )
 
 type revisionPassage struct {
@@ -186,9 +187,6 @@ func buildRevisionProposal(captured map[string]any, response any) (map[string]an
 		if len(edit.Before) > revisionContentLimit || len(edit.After) > revisionContentLimit || strings.TrimSpace(edit.Reason) == "" || len(edit.Reason) > 4000 || len(edit.CommentIDs) == 0 {
 			return nil, fmt.Errorf("each proposed edit needs an exact source, feedback reference and explanation")
 		}
-		if edit.Before != "" && (strings.Index(normalized, edit.Before) < 0 || strings.Index(normalized, edit.Before) != strings.LastIndex(normalized, edit.Before)) {
-			return nil, fmt.Errorf("a proposed edit does not identify a unique passage in the saved document")
-		}
 		seen := map[string]bool{}
 		extensionOnly := true
 		endOnly := true
@@ -200,7 +198,20 @@ func buildRevisionProposal(captured map[string]any, response any) (map[string]an
 			extensionOnly = extensionOnly && extensions[id]
 			endOnly = endOnly && endNotes[id]
 		}
-		start := strings.Index(normalized, edit.Before)
+		// Document-end feedback addresses the visible document body. Generated
+		// provenance repeats the request, often including the very passage the
+		// model anchors to. It is not a second editable occurrence for this scope.
+		search, base := normalized, 0
+		if endOnly {
+			if front, body, ok := docsmd.Split(normalized); ok {
+				search, base = body, len(front)
+			}
+		}
+		at := strings.Index(search, edit.Before)
+		if edit.Before != "" && (at < 0 || at != strings.LastIndex(search, edit.Before)) {
+			return nil, fmt.Errorf("a proposed edit does not identify a unique passage in the saved document")
+		}
+		start := base + at
 		if edit.Before == "" {
 			if strings.TrimSpace(normalized) == "" && len(answer.Edits) == 1 {
 				start = 0

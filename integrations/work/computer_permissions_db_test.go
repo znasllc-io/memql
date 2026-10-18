@@ -32,7 +32,7 @@ func TestComputerPermissionDB(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			a, b := computerPermissionCase(t, first, second)
+			a, b := freshActsDBPair(t, first, second)
 			tc.run(t, a, b)
 		})
 	}
@@ -41,7 +41,7 @@ func TestComputerPermissionDB(t *testing.T) {
 func testComputerPermissionDBAgentIDForms(t *testing.T, first, second actsDB) {
 	for _, storedAgent := range []string{"agent", "v1:agents:agent:agent"} {
 		t.Run(storedAgent, func(t *testing.T) {
-			a, b := computerPermissionCase(t, first, second)
+			a, b := freshActsDBPair(t, first, second)
 			run := a.openRun(t, nil)
 			row, req := computerPermissionFixture()
 			req.OwnerID, req.RunID = a.owner, run
@@ -208,7 +208,7 @@ func (e *permissionCommitEngine) Execute(ctx context.Context, q string) (*memql.
 func testComputerPermissionDBCancelledCallerRetainsClaimAndDecisionGate(t *testing.T, first, second actsDB) {
 	for _, mutation := range []string{"useWorkComputerPermission", "decideWorkApproval"} {
 		t.Run(mutation, func(t *testing.T) {
-			a, peer := computerPermissionCase(t, first, second)
+			a, peer := freshActsDBPair(t, first, second)
 			run := a.openRun(t, nil)
 			row, req := computerPermissionFixture()
 			req.OwnerID = a.owner
@@ -293,7 +293,7 @@ func testComputerPermissionDBApprovalContinuesWithoutBlanketRerun(t *testing.T, 
 func testComputerPermissionDBDefaultTimeoutKeepsOneDurableClaim(t *testing.T, first, second actsDB) {
 	for _, explicitApproval := range []bool{false, true} {
 		t.Run(fmt.Sprintf("explicit-approval-%v", explicitApproval), func(t *testing.T) {
-			a, peer := computerPermissionCase(t, first, second)
+			a, peer := freshActsDBPair(t, first, second)
 			runID := a.openRun(t, nil)
 			b := peer.i
 			person := actorCtx(a.owner)

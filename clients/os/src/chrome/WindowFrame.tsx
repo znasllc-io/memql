@@ -1,3 +1,4 @@
+import { LiveReadVisibility } from "../live/useGraphRevision";
 import { visiblePageContext, visiblePageLabel } from "../kit/pageContext";
 import { PageNavigationProvider } from "../kit/pageNavigation";
 import { TrailRow } from "../kit/TrailRow";
@@ -342,7 +343,7 @@ export function WindowFrame({
                focused-window guess does not. Keyed by window so one window's
                fault never carries into another's. */
             <WindowErrorBoundary key={win.id} app={manifest.id} section={current?.id ?? ""}>
-              <WindowSearchContext.Provider value={searchHost}><Body
+              <LiveReadVisibility.Provider value={!hidden}><WindowSearchContext.Provider value={searchHost}><Body
                 sectionId={current?.id ?? ""}
                 reportSetupState={reportSetupState}
                 navigation={win.sectionNavigation}
@@ -352,7 +353,7 @@ export function WindowFrame({
                 askAbout={windowAsk.askAbout}
                 intent={win.intent}
                 consumeIntent={(intentId) => actions.consumeWindowIntent(win.id, intentId)}
-              /></WindowSearchContext.Provider>
+              /></WindowSearchContext.Provider></LiveReadVisibility.Provider>
             </WindowErrorBoundary>
           )}
         </PageContent>

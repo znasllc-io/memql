@@ -15,6 +15,9 @@ import (
 // pipelines component's ConfigMap supplies the namespace and the clone image
 // to the workbench node.
 type Config struct {
+	// QueueName opts Jobs into an installed Kueue LocalQueue. Jobs are born
+	// suspended, so an unavailable admission controller cannot start work.
+	QueueName string
 	// StepCPUMaxMilli bounds a manifest's explicit command CPU reservation.
 	StepCPUMaxMilli int
 
@@ -35,6 +38,10 @@ type Config struct {
 	// may run with a repository token, so an empty value means this node
 	// cannot run pipeline steps, and the runner refuses them.
 	CloneImage string
+	// CacheGCPercent starts quiescent cache reclamation at this percentage of
+	// bytes or inodes used. Zero disables it. Requires a drained migration
+	// and a filesystem with cross-pod flock (not Azure Blob NFS).
+	CacheGCPercent int
 	// CacheClaim is the PersistentVolumeClaim mounted at /cache.
 	CacheClaim string
 	// StepServiceAccount is the identity a step's pod runs as: one holding no
@@ -93,10 +100,12 @@ const (
 	envStepMemoryMax    = "MEMQL_PIPELINES_STEP_MEMORY_MAX_MIB"
 	envNamespace        = "MEMQL_PIPELINES_NAMESPACE"
 	envNodePool         = "MEMQL_PIPELINES_NODE_POOL"
+	envQueueName        = "MEMQL_PIPELINES_QUEUE"
 	envCloneImage       = "MEMQL_PIPELINES_CLONE_IMAGE"
 	envLogStoreMaxLines = "MEMQL_PIPELINES_LOG_STORE_MAX_LINES"
 	envArtifactMaxBytes = "MEMQL_PIPELINES_ARTIFACT_MAX_BYTES"
 	envNodeID           = "MEMQL_NODE_ID"
+	envCacheGCPercent   = "MEMQL_PIPELINES_CACHE_GC_PERCENT"
 	envWorkspaceLimit   = "MEMQL_PIPELINES_WORKSPACE_LIMIT"
 )
 
@@ -130,6 +139,7 @@ func ConfigFromEnv(getenv func(string) string) Config {
 		namespace = defaultNamespace
 	}
 	return Config{
+		QueueName:       text(envQueueName),
 		StepCPUMaxMilli: whole(envStepCPUMax, defaultStepCPUMaxMilli, 1, 256000),
 
 		ImageBuilder:       text(envImageBuilder),
@@ -138,6 +148,7 @@ func ConfigFromEnv(getenv func(string) string) Config {
 		NodePool:           text(envNodePool),
 		CloneImage:         text(envCloneImage),
 		CacheClaim:         cacheClaim,
+		CacheGCPercent:     cacheGCPercent(whole(envCacheGCPercent, 0, 0, 90)),
 		StepServiceAccount: stepServiceAccount,
 		RunCeiling:         pl.ParseRunCeiling(text(pl.EnvRunCeiling)),
 		LogStoreMaxLines:   whole(envLogStoreMaxLines, 2000, 100, 100000),

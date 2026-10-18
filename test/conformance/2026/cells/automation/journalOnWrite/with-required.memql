@@ -1,0 +1,4 @@
+@template
+@journalOnWrite
+@journalRequired
+automation incompatiblePolicy { return true }

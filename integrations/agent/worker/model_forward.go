@@ -33,6 +33,7 @@ import (
 	"github.com/znasllc-io/memql/component/node"
 	nodev1 "github.com/znasllc-io/memql/component/node/gen"
 	workerservice "github.com/znasllc-io/memql/component/worker"
+	"github.com/znasllc-io/memql/component/worker/fleetcatalog"
 	"github.com/znasllc-io/memql/core/id"
 )
 
@@ -285,11 +286,19 @@ func (h *ForwardHandler) HandleForwardedModelCall(
 	callCtx, ccancel := context.WithTimeout(cctx, timeout)
 	defer ccancel()
 
-	if err := w.Acquire(callCtx, workerservice.ModelCapability); err != nil {
-		h.sendModelRefusal(send, requestId, "worker_busy", err.Error())
+	activity := beginMachineActivity(callCtx, h.store, h.logger, w.OwnerUserId, req.GetRegistrationId(), "model", start.GetModel()+" · "+start.GetKind(), "", timeout)
+	defer activity.interrupted(callCtx)
+
+	limit := fleetcatalog.ParseModelAttributes(w.LabelsSnapshot()[workerservice.ModelLabel(start.GetModel())]).MaxConcurrent
+	if err := w.AcquireModel(callCtx, start.GetModel(), limit); err != nil {
+		code := "worker_busy"
+		if callCtx.Err() != nil {
+			code = ForwardCallerCancelled
+		}
+		h.sendModelRefusal(send, requestId, code, err.Error())
 		return
 	}
-	defer w.Release(workerservice.ModelCapability)
+	defer w.ReleaseModel(start.GetModel())
 
 	// THE CALLER MAY ALREADY HAVE GONE (see HandleForwardedRequest): nothing
 	// has reached the machine, so it is a refusal before start.
@@ -304,21 +313,15 @@ func (h *ForwardHandler) HandleForwardedModelCall(
 	// them would make a retry on one side collide with a live call on the
 	// other.
 	localId := id.NewShortId()
-	subjects, err := h.admitSharedRegistration(callCtx, owner, registrationId)
+	subjects, releaseSetup, err := h.admitModelSetup(callCtx, w, owner, registrationId, start)
 	if err != nil {
 		h.sendModelRefusal(send, requestId, "registration_refused", err.Error())
 		return
 	}
-	// Admission is checked AFTER the slot wait, once, on this receiver.
-	// Its live stream must still belong to the owner of the checked row.
-	if w.OwnerUserId != "" && !sameSubject(w.OwnerUserId, owner) {
-		if err := h.ownerOfSharedMachine(callCtx, registrationId, w.OwnerUserId); err != nil {
-			h.sendModelRefusal(send, requestId, "owner_mismatch", err.Error())
-			return
-		}
-	}
+	defer releaseSetup()
 	localRequest := modelCallRequestFromProto(localId, start, timeout)
 	localRequest.SharingSubjects = subjects
+	activity.running()
 	handle, err := w.StartModelCall(callCtx, localRequest)
 	if err != nil {
 		// StartModelCall fails only before anything reached the machine --
@@ -339,6 +342,13 @@ func (h *ForwardHandler) HandleForwardedModelCall(
 	}()
 
 	outcome, waitErr := handle.Wait(callCtx)
+	if waitErr == nil && outcome.Error == "" {
+		activity.end("succeeded")
+	} else if callCtx.Err() != nil {
+		activity.end("cancelled")
+	} else {
+		activity.end("failed")
+	}
 	wg.Wait()
 
 	end := modelOutcomeEnd(requestId, outcome)

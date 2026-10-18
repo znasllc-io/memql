@@ -416,7 +416,9 @@ export class AddClusterPanel {
   ): AddClusterPanel {
     const existing = AddClusterPanel.open_;
     if (existing !== undefined && !existing.disposed) {
-      existing.panel.reveal(vscode.ViewColumn.Beside);
+      // Reveal in its existing group. Beside moves the same panel on every
+      // click and the workbench can transiently report it in both groups.
+      existing.panel.reveal();
       existing.openOn(initialAction);
       return existing;
     }
@@ -527,7 +529,7 @@ export class AddClusterPanel {
     this.releaseSlot = this.slot().hold({
       busy,
       reveal: () => {
-        if (!this.disposed) this.panel.reveal(vscode.ViewColumn.Beside);
+        if (!this.disposed) this.panel.reveal();
       },
     });
   }

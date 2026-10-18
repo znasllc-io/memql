@@ -230,6 +230,15 @@ func (e *MemQLEngine) InvokeAIStructured(
 			cacheKey = buildAICacheKey(templateId, providerName, cacheInput)
 			if cached, ok := e.aiRuntime.cache.get(cacheKey); ok {
 				if s, isString := cached.(string); isString {
+					if err := ctx.Err(); err != nil {
+						return "", err
+					}
+					// A structured cache hit is still an answered model request.
+					// Apply the same run ceiling and zero-cost charge as ai().
+					if err := e.modelSeam.admit(ctx, estimateRequestTokens(common.ModelRequest{Messages: messages, Schema: spec})); err != nil {
+						return "", err
+					}
+					e.modelSeam.charge(ctx, ModelSpend{Served: ServedCache})
 					return s, nil
 				}
 			}

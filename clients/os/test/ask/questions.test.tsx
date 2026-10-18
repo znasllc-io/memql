@@ -7,6 +7,17 @@ import { AskSurface } from "../../src/ask/AskSurface";
 afterEach(cleanup);
 const question = { id: "q", text: "Which format would you like?", kind: "choice" as const, options: [{value:"pdf",label:"PDF"},{value:"txt",label:"Text"}] };
 
+it("keeps an unfinished answer when optional work continues and sends it once", async () => {
+ const answer=vi.fn(async()=>{});
+ const {rerender}=render(<AskQuestion question={{...question,optional:true}} onAnswer={answer}/>);
+ fireEvent.change(screen.getByRole("textbox",{name:"Your answer"}),{target:{value:"Use the saved preference"}});
+ rerender(<AskQuestion question={{...question,optional:true,continued:true}} onAnswer={answer}/>);
+ expect(screen.getByText("Work has continued. Your answer can still guide it.")).toBeTruthy();
+ expect((screen.getByRole("textbox",{name:"Your answer"}) as HTMLTextAreaElement).value).toBe("Use the saved preference");
+ fireEvent.click(screen.getByRole("button",{name:"Send answer"}));
+ await waitFor(()=>expect(answer).toHaveBeenCalledExactlyOnceWith({text:"Use the saved preference"}));
+});
+
 it("accepts free text instead of a suggested option and prevents duplicate submission", async () => {
   let finish!: () => void;
   const answer = vi.fn(() => new Promise<void>(resolve => { finish = resolve; }));

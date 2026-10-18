@@ -157,18 +157,32 @@ func defaultRoutingRules() []RoutingRule {
 		// dsl/workbench/automations.memql on v1:work:run), so there is no
 		// consumer to double-fire.
 		//
-		// v1:worker:invocation is deliberately NOT here. One row per tool
-		// call is a volume the mesh does not need to carry, and the page
-		// reads a machine's recent calls on demand rather than tailing them.
+		// Fleet Activity tails lifecycle and tool receipts across replicas.
+		// This intentionally retires the invocation volume exclusion: the
+		// owner's live Activity view needs every transition. Browser row gates
+		// still scope delivery; only lifecycle transitions (never token deltas)
+		// are recorded for model calls.
+		{Pattern: "graph.node.created.v1:models:modelProfile", TargetType: ""},
+		{Pattern: "graph.node.updated.v1:models:modelProfile", TargetType: ""},
+		{Pattern: "graph.node.created.v1:models:catalogReview", TargetType: ""},
+		{Pattern: "graph.node.updated.v1:models:catalogReview", TargetType: ""},
+		{Pattern: "graph.node.created.v1:models:catalogResearchSettings", TargetType: ""},
+		{Pattern: "graph.node.updated.v1:models:catalogResearchSettings", TargetType: ""},
+		{Pattern: "graph.node.created.v1:platform:embedderBinding", TargetType: ""},
+		{Pattern: "graph.node.updated.v1:platform:embedderBinding", TargetType: ""},
+		{Pattern: "graph.node.created.v1:worker:activity", TargetType: ""},
+		{Pattern: "graph.node.updated.v1:worker:activity", TargetType: ""},
+		{Pattern: "graph.node.created.v1:worker:invocation", TargetType: ""},
+		{Pattern: "graph.node.updated.v1:worker:invocation", TargetType: ""},
+		{Pattern: "graph.node.created.v1:router:call", TargetType: ""},
 		{Pattern: "graph.node.created.v1:worker:registration", TargetType: ""},
 		{Pattern: "graph.node.updated.v1:worker:registration", TargetType: ""},
 		{Pattern: "graph.node.created.v1:worker:routingPolicy", TargetType: ""},
 		{Pattern: "graph.node.updated.v1:worker:routingPolicy", TargetType: ""},
 		{Pattern: "graph.node.created.v1:workbench:workspace", TargetType: ""},
 		{Pattern: "graph.node.updated.v1:workbench:workspace", TargetType: ""},
-		// MODEL PULLS (epic memql#5103) carry the block's argument TWICE
-		// over, which is why they are here rather than beside
-		// v1:worker:invocation.
+		// MODEL PULLS (epic memql#5103) need both live progress and delivery
+		// to the replica holding the machine stream.
 		//
 		// The READ half is the block's own: the row is written on the agent
 		// replica driving the download and read on the machine page the bff
@@ -190,9 +204,7 @@ func defaultRoutingRules() []RoutingRule {
 		// named ignore the event they were sent.
 		//
 		// The volume is a person pressing a button, plus one throttled write
-		// every two seconds while a download runs. That is nowhere near the
-		// ground v1:worker:invocation is excluded on, which is one row per
-		// tool call.
+		// every two seconds while a download runs.
 		{Pattern: "graph.node.created.v1:worker:modelPull", TargetType: ""},
 		{Pattern: "graph.node.updated.v1:worker:modelPull", TargetType: ""},
 		// THE ROLE CATALOG (epic memql#5166). A role is written on whichever
@@ -275,8 +287,8 @@ func defaultRoutingRules() []RoutingRule {
 		//
 		// modelCall and observation are deliberately ABSENT. They are
 		// on-demand reads that say when they were read, and they are
-		// excluded on volume grounds exactly as v1:worker:invocation is: a
-		// busy run writes one observation per tool result, and forwarding
+		// excluded on volume grounds: a busy run writes one observation per
+		// tool result, and forwarding
 		// those to every replica buys nothing any surface subscribes to.
 		// Epic memql#5396 made that volume argument STRONGER rather than
 		// weaker -- an app session now writes one observation per action it
@@ -324,8 +336,8 @@ func defaultRoutingRules() []RoutingRule {
 		// Settings page a bff serves, which is the cross-replica shape every
 		// block here exists for.
 		//
-		// Volume is not the concern it is for v1:work:modelCall or
-		// v1:worker:invocation. A bench run writes tens of rows on a lane
+		// Volume is not the concern it is for v1:work:modelCall.
+		// A bench run writes tens of rows on a lane
 		// that runs once per pull request, not one per tool result on a busy
 		// run.
 		{Pattern: "graph.node.created.v1:bench:run", TargetType: ""},
@@ -338,7 +350,7 @@ func defaultRoutingRules() []RoutingRule {
 		// docs/superpowers/specs/2026-09-05-compose-materializer-design.md,
 		// section I). All three compose concepts broadcast: they are one
 		// row per thing a person authored, so the volume argument that
-		// excludes v1:worker:invocation and v1:campaigns:delivery does
+		// excludes v1:campaigns:delivery does
 		// not apply to any of them.
 		//
 		// The composition rule is the load-bearing one. A materialization
@@ -424,8 +436,7 @@ func defaultRoutingRules() []RoutingRule {
 		//
 		// Volume is one event per state transition per bound hostname -- a
 		// handful over the minutes a domain takes to go live, then nothing --
-		// so this is nowhere near the ground v1:worker:invocation is excluded
-		// on. The sweep's no-change passes write no row at all.
+		// and the sweep's no-change passes write no row at all.
 		{Pattern: "graph.node.created.v1:platform:customDomain", TargetType: ""},
 		{Pattern: "graph.node.updated.v1:platform:customDomain", TargetType: ""},
 		// The store a storefront is BOUND TO (epic memql#5530, issue
@@ -493,8 +504,7 @@ func defaultRoutingRules() []RoutingRule {
 		// the tree triggers on either concept, so there is no consumer to
 		// double-fire. Volume is bounded by human action -- a package is
 		// added by a click and a deployment writes single-digit rows per
-		// attempt -- which is the same ground v1:worker:invocation was
-		// EXCLUDED on, in the other direction.
+		// attempt.
 		{Pattern: "graph.node.created.v1:platform:package", TargetType: ""},
 		{Pattern: "graph.node.updated.v1:platform:package", TargetType: ""},
 		{Pattern: "graph.node.created.v1:platform:packageDeployment", TargetType: ""},

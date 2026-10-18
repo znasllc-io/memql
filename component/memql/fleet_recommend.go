@@ -72,6 +72,9 @@ type CatalogProfile struct {
 	Params          int64
 	ContextWindow   int
 	SizeBytes       int64
+	MemoryNeedBytes int64
+	Source          string
+	ReviewedAt      string
 	Notes           string
 }
 

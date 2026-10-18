@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"strings"
+	"time"
 	"unicode/utf8"
 
 	"github.com/znasllc-io/memql/component/auth"
@@ -227,6 +228,11 @@ func (e *MemQLEngine) PrepareWorkContinuation(ctx context.Context, request Check
 		return nil, fmt.Errorf("the human decision is unavailable")
 	}
 	a := approvals[0]
+	if contract, _, optional := work.OptionalFeedback(a); optional {
+		if contract["templateFingerprint"] != rows[0]["templateFingerprint"] || stringField(contract, "rerunRequestId") != run.RerunRequestId {
+			return nil, fmt.Errorf("optional clarification belongs to another execution")
+		}
+	}
 	decision, kind := stringField(a, "decision"), stringField(a, "kind")
 	subject, _ := a["subject"].(map[string]any)
 	answer, _ := a["answer"].(map[string]any)
@@ -234,7 +240,7 @@ func (e *MemQLEngine) PrepareWorkContinuation(ctx context.Context, request Check
 		BareShortId(stringField(a, "decidedBy")) == BareShortId(run.OwnerUserId) &&
 		WorkPermissionGuidance(kind, subject, answer, stringField(a, "artifactHash"))
 	if BareShortId(stringField(a, "runId")) != BareShortId(run.RunId) || stringField(a, "stepKey") != request.StepKey ||
-		!((kind == "feedback" && decision == "answered") || (kind == "scopeElevation" && decision == "approved") || (kind == "budget" && decision == "approved") || permissionGuidance) {
+		!((kind == "feedback" && (decision == "answered" || (decision == "" && work.OptionalFeedbackContinued(a, time.Now())))) || (kind == "scopeElevation" && decision == "approved") || (kind == "budget" && decision == "approved") || permissionGuidance) {
 		return nil, fmt.Errorf("the human decision does not authorize this continuation")
 	}
 	checkpoints, err := read("workContinuationForOwnerRun", map[string]any{"runId": run.RunId, "stepKey": request.StepKey})

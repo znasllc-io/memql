@@ -16,8 +16,22 @@ import (
 // journal has admitted that step, but the run checkpoint contains only the
 // completed prefix until a receipt lands. A different replica must be able to
 // discuss and resume this real request without inventing or finishing a step.
-func TestGuidanceDBRecoversTheParkedJournalTailAcrossReplicas(t *testing.T) {
-	a, b := openActsDB(t), openActsDB(t)
+func TestGuidanceDBAcrossReplicas(t *testing.T) {
+	first, second := openActsDB(t), openActsDB(t)
+	for _, tc := range []struct {
+		name string
+		run  func(*testing.T, actsDB, actsDB)
+	}{
+		{"GuidanceDBRecoversTheParkedJournalTailAcrossReplicas", testGuidanceDBRecoversTheParkedJournalTailAcrossReplicas},
+		{"GuidanceDBRecoveryKeepsReceiptGateThroughCancelledCommit", testGuidanceDBRecoveryKeepsReceiptGateThroughCancelledCommit},
+		{"GuidanceDBPersistsOnceAcrossReplicasWithoutGrantingAccess", testGuidanceDBPersistsOnceAcrossReplicasWithoutGrantingAccess},
+	} {
+		t.Run(tc.name, func(t *testing.T) { tc.run(t, first, second) })
+	}
+}
+
+func testGuidanceDBRecoversTheParkedJournalTailAcrossReplicas(t *testing.T, first, second actsDB) {
+	a, b := freshActsDBPair(t, first, second)
 	b.owner = a.owner
 	template := installedReplanRun(t)
 	runID := a.openRun(t, map[string]any{"automationName": template["automationName"], "templateFingerprint": template["templateFingerprint"]})
@@ -73,8 +87,8 @@ func TestGuidanceDBRecoversTheParkedJournalTailAcrossReplicas(t *testing.T) {
 	}
 }
 
-func TestGuidanceDBRecoveryKeepsReceiptGateThroughCancelledCommit(t *testing.T) {
-	a, b := openActsDB(t), openActsDB(t)
+func testGuidanceDBRecoveryKeepsReceiptGateThroughCancelledCommit(t *testing.T, first, second actsDB) {
+	a, b := freshActsDBPair(t, first, second)
 	b.owner = a.owner
 	runID := a.openRun(t, nil)
 	a.writeVersion(t, runID, runID, "draft", 0, 1, nil, "", map[string]any{"status": "failed"})
@@ -116,8 +130,8 @@ func TestGuidanceDBRecoveryKeepsReceiptGateThroughCancelledCommit(t *testing.T) 
 // The decision, exact human guidance and replan wait must be visible to a
 // replica that did not create the request. Racing the same answer must record
 // one decision, while preserving completed output and the original budget.
-func TestGuidanceDBPersistsOnceAcrossReplicasWithoutGrantingAccess(t *testing.T) {
-	a, b := openActsDB(t), openActsDB(t)
+func testGuidanceDBPersistsOnceAcrossReplicasWithoutGrantingAccess(t *testing.T, first, second actsDB) {
+	a, b := freshActsDBPair(t, first, second)
 	b.owner = a.owner
 	runID := a.openRun(t, nil)
 	a.writeVersion(t, runID, runID, "fetch", 0, 1, nil, "saved evidence", nil)

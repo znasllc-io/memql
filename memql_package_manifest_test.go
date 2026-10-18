@@ -376,16 +376,16 @@ func TestEngineManifestCompilesForEveryOpening(t *testing.T) {
 		// A full run tests every package in go-tests, the gate packages among
 		// them, so the gates stage is absent, as ci.yml runs that step only on a
 		// pull request.
-		{name: "a push to the default branch", event: pipelines.EventPush, stages: fullStages,
+		{name: "a push to the default branch", event: pipelines.EventPush, stages: append(slices.Clone(fullStages), "inventory"),
 			runs: every, absent: []string{manifestStepGateInputs}},
 		{name: "a merge group", event: pipelines.EventMergeGroup, stages: fullStages,
 			runs: every, absent: []string{manifestStepGateInputs}},
-		{name: "a release", event: pipelines.EventRelease, stages: []string{manifestStageChecks, "vulnerabilities", manifestStageTests, "release-files", "build-tools", "images"},
+		{name: "a release", event: pipelines.EventRelease, stages: []string{manifestStageChecks, "vulnerabilities", manifestStageTests, "inventory", "release-files", "build-tools", "images"},
 			runs: every, absent: []string{manifestStepGateInputs}},
 		// A scheduled scan selects only its explicit opt-in stages; default
 		// stages such as checks and history scans are intentionally absent.
 		{name: "a daily scheduled security scan", event: pipelines.EventSchedule,
-			stages: []string{"vulnerabilities"}, absent: []string{manifestStepGateInputs}},
+			stages: []string{"vulnerabilities", "repository-audit"}, absent: []string{manifestStepGateInputs}},
 		// The compiler of this very manifest: Go source only, and the db-gated
 		// driver (component/pipelinerun) imports it, so the change reaches both
 		// test steps and the filesystem-gates bucket.
@@ -449,7 +449,7 @@ func TestEngineManifestCompilesForEveryOpening(t *testing.T) {
 			byName := map[string][]pipelines.Step{}
 			for _, step := range plan.Steps() {
 				byName[step.Name] = append(byName[step.Name], step)
-				if step.RunAfterFailure != (step.Stage == "analysis" || step.Stage == "security-reports" || step.Stage == "vulnerabilities" || step.Stage == "secrets-current" || step.Stage == "secrets-history") {
+				if step.RunAfterFailure != (step.Stage == "analysis" || step.Stage == "inventory" || step.Stage == "security-reports" || step.Stage == "vulnerabilities" || step.Stage == "secrets-current" || step.Stage == "secrets-history" || step.Stage == "repository-audit" || step.Stage == "documentation-audit") {
 					t.Errorf("failure policy was lost or leaked to another stage: %+v", step)
 				}
 				if step.Kind == pipelines.StepSARIF {
@@ -461,6 +461,12 @@ func TestEngineManifestCompilesForEveryOpening(t *testing.T) {
 				if step.Kind != pipelines.StepCommand || step.Image != expectedEngineStepImage(spec, step.Name) {
 					t.Errorf("step %s is a %s step in %q; every step is a command in the toolchain image %q",
 						step.Key, step.Kind, step.Image, spec.Image)
+				}
+				if engineMacEditorHost(step.Name) {
+					if step.Placement != pipelines.PlacementFleet || step.Execution != pipelines.ExecutionNative || step.Platform != "darwin/arm64" || len(step.Caches) != 0 || len(step.Services) != 0 || !slices.Equal(step.Needs, []string{"macos_tooling"}) {
+						t.Errorf("Mac editor host lost its explicit native contract: %+v", step)
+					}
+					continue
 				}
 				if step.Placement != pipelines.PlacementCluster || step.Execution != pipelines.ExecutionContainer || step.Platform != "linux/amd64" {
 					t.Errorf("step %s must use a Linux amd64 Workbench container: %+v", step.Key, step)
@@ -526,7 +532,7 @@ func TestEngineWeeklyAuditDoesNotRepeatDailyOrOrdinaryFunctionalChecks(t *testin
 			stages = append(stages, step.Stage)
 		}
 	}
-	if !slices.Equal(stages, []string{"analysis", "security-reports"}) {
+	if !slices.Equal(stages, []string{"documentation-audit", "analysis", "inventory", "security-reports"}) {
 		t.Fatalf("weekly stages = %v", stages)
 	}
 }
@@ -813,26 +819,42 @@ func engineSetMinus(a, b []string) []string {
 	return out
 }
 
-// Portable checks must work with Cockpit disconnected and without host consent.
-func TestEngineManifestRunsWithoutFleetConsent(t *testing.T) {
+// The three Mac editor cases require the owner's explicit fleet consent.
+// Every portable check stays in its bounded cluster container.
+func TestEngineManifestRequiresConsentForMacEditorHosts(t *testing.T) {
 	spec := engineManifest(t).Pipeline
 	refusal := pipelines.Consent(spec, pipelines.ComputeCluster, nil)
-	if refusal != nil {
-		t.Fatalf("portable checks require native host permission: %v", refusal)
+	if refusal == nil || refusal.Code != pipelines.CodeFleetNotConsented {
+		t.Fatalf("Mac hosts must refuse without fleet consent: %v", refusal)
 	}
+	if refusal := pipelines.Consent(spec, pipelines.ComputeClusterAndFleet, nil); refusal != nil {
+		t.Fatal(refusal)
+	}
+	hosts := 0
 	for _, stage := range spec.Stages {
 		for _, step := range stage.Steps {
+			if engineMacEditorHost(step.Name) {
+				hosts++
+				continue
+			}
 			if pipelines.PlacementOf(step) != pipelines.PlacementCluster {
 				t.Errorf("portable check %s requires a host", step.Name)
 			}
 		}
 	}
+	if hosts != 3 {
+		t.Fatalf("expected three Mac host cases, found %d", hosts)
+	}
+}
+
+func engineMacEditorHost(name string) bool {
+	return slices.Contains([]string{"productivity-web-darwin-stable", "productivity-desktop-darwin-1-91-0", "productivity-desktop-darwin-stable"}, name)
 }
 
 func expectedEngineStepImage(spec *pipelines.Spec, name string) string {
 	declared, _ := engineDeclaredStep(spec, name)
-	if declared.ImageBuild != nil {
-		return "" // the operator selects the fixed rootless builder
+	if declared.ImageBuild != nil || declared.Execution == pipelines.ExecutionNative {
+		return "" // native hosts and the fixed image builder use no step-container image
 	}
 	if declared.Image != "" {
 		return declared.Image

@@ -91,6 +91,7 @@ import (
 	_ "github.com/znasllc-io/memql/component/filebackups"
 	_ "github.com/znasllc-io/memql/component/logstore"
 	_ "github.com/znasllc-io/memql/component/retention"
+	_ "github.com/znasllc-io/memql/integrations/backgroundcapacity"
 	_ "github.com/znasllc-io/memql/integrations/library"
 	_ "github.com/znasllc-io/memql/integrations/storagehealth"
 	// Procedure learning and its certification ladder (epics memql#5402 and
