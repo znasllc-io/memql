@@ -8,6 +8,8 @@ import (
 	"fmt"
 	"net/http"
 	"strings"
+
+	"github.com/znasllc-io/memql-cockpit/internal/worker/models"
 )
 
 // The Ollama client. Chat streams newline-delimited JSON from /api/chat;
@@ -16,6 +18,48 @@ import (
 type ollamaClient struct {
 	baseURL string
 	http    *http.Client
+
+	// keepAlive and workingContext are this model's residency settings
+	// (policy.yaml models.resident), put on the client by NewClient. The
+	// zero values send nothing and change nothing.
+	keepAlive      models.KeepAlive
+	workingContext int
+}
+
+// stampKeepAlive puts the model's keep_alive on a request body.
+//
+// EVERY ROUTE THAT SENDS THE MODEL WORK CALLS THIS. Ollama applies the
+// keep_alive a request STATES from that moment, in either direction -- a
+// request saying 90s shortens a residency of hours -- and what a request
+// that OMITS it does depends on the release. 0.34.2 leaves the expiry alone
+// (measured 2026-10-18), but a model whose first request omitted it loads
+// with the five-minute default, and an older release may fall back to the
+// default on every omission. A residency that depends on which route
+// touched the model first, or on the Ollama version, is not the one the
+// owner asked for. Chat (and vision, which is a chat turn), embeddings and
+// image generation are the routes today.
+func (c *ollamaClient) stampKeepAlive(body map[string]any) {
+	if wire := c.keepAlive.Wire(); wire != nil {
+		body["keep_alive"] = wire
+	}
+}
+
+// window is the num_ctx to send for a call that needs `requested` tokens
+// (zero when the engine named none).
+//
+// Ollama reloads a model whenever the requested num_ctx differs from the
+// one it loaded with, larger or smaller, even by a token. The engine rounds
+// each call up to a power of two (contextStartForCandidate in
+// integrations/agent/worker/fleet_context_allocation.go), so the same model
+// is asked for 8192, 16384 and 32768 in turn. With a working window set,
+// every call that fits in it runs at exactly the window and finds the
+// runner the last one left. A call that needs MORE runs at what it asked
+// for: clamping it down would truncate a prompt.
+func (c *ollamaClient) window(requested int64) int64 {
+	if w := int64(c.workingContext); w > 0 && requested <= w {
+		return w
+	}
+	return requested
 }
 
 // ollamaChatChunk is one NDJSON line from /api/chat. The same shape
@@ -62,9 +106,12 @@ func (c *ollamaClient) Chat(ctx context.Context, req ChatRequest, emit emitFunc)
 		"truncate": false,
 		"shift":    false,
 	}
-	if opts := ollamaOptions(req.Params); len(opts) > 0 {
+	params := req.Params
+	params.ContextTokens = c.window(params.ContextTokens)
+	if opts := ollamaOptions(params); len(opts) > 0 {
 		body["options"] = opts
 	}
+	c.stampKeepAlive(body)
 	if len(req.Schema) > 0 {
 		// Ollama takes the JSON Schema directly as `format`. It is
 		// passed through verbatim rather than re-marshalled: the engine
@@ -211,12 +258,14 @@ func (c *ollamaClient) Embed(ctx context.Context, req EmbedRequest) (Result, err
 	if req.Model == "qwen3-embedding:0.6b" {
 		options["num_batch"] = 512
 	}
-	resp, err := c.post(ctx, "/api/embed", map[string]any{
+	body := map[string]any{
 		"model":    req.Model,
 		"input":    req.Input,
 		"truncate": false,
 		"options":  options,
-	})
+	}
+	c.stampKeepAlive(body)
+	resp, err := c.post(ctx, "/api/embed", body)
 	if err != nil {
 		return Result{}, err
 	}

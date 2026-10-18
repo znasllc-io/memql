@@ -864,7 +864,10 @@ func NewClient(info models.Info, httpClient *http.Client, getenv func(string) st
 		}
 		return &openAIClient{baseURL: info.BaseURL, apiKey: key, http: httpClient, transcription: info.Transcription, voices: info.Voices}
 	}
-	return &ollamaClient{baseURL: info.BaseURL, http: httpClient}
+	return &ollamaClient{
+		baseURL: info.BaseURL, http: httpClient,
+		keepAlive: info.KeepAlive, workingContext: info.WorkingContext,
+	}
 }
 
 // -----------------------------------------------------------------------------

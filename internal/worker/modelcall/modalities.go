@@ -431,6 +431,7 @@ func (c *ollamaClient) GenerateImage(ctx context.Context, req ImageRequest) (Ima
 	if opts := imageOptions(req); len(opts) > 0 {
 		request["options"] = opts
 	}
+	c.stampKeepAlive(request)
 	resp, err := c.post(ctx, "/api/generate", request)
 	if err != nil {
 		return ImageResult{}, err
