@@ -361,6 +361,18 @@ for rollback and retire temporary bootstrap grants only after owned work ends.
 
 ## Acceptance and issue closure
 
+The owner merge bypass now preserves a required check's configured GitHub App
+binding. It reads every check page for the exact PR head and uses the newest
+attempt from that App; an unavailable read, same-name check from another App,
+wrong commit or cancelled latest attempt cannot authorize a merge. Behavioral
+regressions reproduce the old false acceptance and pass with the repair. The
+whole development-script suite passes. The live native check is `MemQL / memql`,
+reported by App 4822538 (`MemQL for ZNAS LLC`), verified on check run
+117531817586. Bind the eventual required native check to that App through
+[`integration_id`](https://docs.github.com/en/rest/repos/rules), after the
+production and exact-queue qualification below; the ruleset still requires
+`ci-required` at this point.
+
 The editor landing page now has a native validation declaration covering its
 source, themes, shared brand, canonical research example and runner scripts.
 It uses the native-published browser-capable toolchain and an isolated browser
