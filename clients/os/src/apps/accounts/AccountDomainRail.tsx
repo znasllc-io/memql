@@ -76,7 +76,7 @@ export function AccountDomainRail({
       id: "domain",
       name: "Domain",
       state: account.domain.trim() === "" ? "waiting" : "done",
-      sentence: "The client's own domain, as they use it.",
+      sentence: "The client's own domain",
       answer: account.domain,
       body: (
         <p className="os-caption">
@@ -91,9 +91,9 @@ export function AccountDomainRail({
       state: verified ? "done" : account.domainStatus === "verifying" ? "current" : "open",
       sentence: verified
         ? self
-          ? "Verified by this cluster."
-          : "Proven, and not checked again while the domain stands."
-        : "Publish this record, and the cluster will see it.",
+          ? "Verified by this cluster"
+          : "Proven once; not checked again"
+        : "Publish a record to prove it",
       answer: verified
         ? self
           ? "verified by this cluster"
@@ -155,7 +155,7 @@ export function AccountDomainRail({
       // the one sentence a person needs ("prove ownership first") would be
       // behind a stop they cannot open. Reachable-and-not-done is the truth.
       state: account.joinOnDomain ? "done" : verified ? "open" : "waiting",
-      sentence: "Whether somebody arriving on this domain joins this client's group.",
+      sentence: "Who joins this client's group",
       answer: account.joinOnDomain ? `on for @${account.domain}` : verified ? "off" : "",
       body: verified ? (
         <>
@@ -206,7 +206,7 @@ export function AccountDomainRail({
       id: "memql",
       name: "MemQL address",
       state: account.memqlReservedAt === "" ? (verified ? "open" : "waiting") : "done",
-      sentence: "The name this client is reserved under on this cluster.",
+      sentence: "Its reserved name here",
       answer: account.memqlDomain,
       body: self ? (
         // THE CLUSTER'S OWN ACCOUNT SERVES NO DOOR. Its reserved name IS the

@@ -19,6 +19,9 @@ import { knowledgeOf, listKnowledge, useNewsletterWelcomes, type EmailFeeds, typ
 
 const text = (row: Record<string, unknown>, key: string) => typeof row[key] === "string" ? row[key] as string : "";
 const escapeHTML = (value: string) => value.replaceAll("&", "&amp;").replaceAll('"', "&quot;").replaceAll("<", "&lt;").replaceAll(">", "&gt;");
+/** What each step is, under its name on the rail. */
+const SIGNUP_SUBTITLES: Readonly<Record<string, string>> = { deployable: "The site with the form", welcome: "The email new people get", sender: "Who it comes from", consent: "What people agree to", review: "Check, then connect" };
+
 export function newsletterFormHTML(row: Record<string, unknown>): string {
   return `<form method="post" action="/_memql/forms/campaigns/subscribe">\n  <label>Email <input type="email" name="email" required maxlength="320" autocomplete="email"></label>\n  <label>Name <input name="displayName" maxlength="120" autocomplete="name"></label>\n  <label><input type="checkbox" name="consent" value="yes" required> ${escapeHTML(text(row, "consentText"))}</label>\n  <input type="hidden" name="consentRevision" value="${escapeHTML(text(row, "createdAt"))}">\n  <button type="submit">Subscribe</button>\n</form>`;
 }
@@ -110,6 +113,6 @@ export function ConnectSignupFormWizard({ audience, feeds, signupForms, sites, o
   async function connect() { if (working.current) return; working.current = true; try { if (await write.call({ siteId, audienceId: audience.id, templateId: templateId || undefined, senderIdentityId: templateId ? senderIdentityId || undefined : undefined, consentText, enabled: true })) { signupForms.refresh(audience.id); onDone(); } } finally { working.current = false; } }
   const complete = !!siteId && (!templateId || !!senderIdentityId) && consentText.trim().length >= 10;
   const valid = known && (step === "review" ? complete : step === "deployable" ? !!siteId : step === "sender" ? !!senderIdentityId : step === "consent" ? consentText.trim().length >= 10 : true);
-  const steps: Stop[] = order.map((id, i) => ({ id, name: id[0]!.toUpperCase() + id.slice(1), state: id === step ? "open" : i < order.indexOf(step) ? "done" : "ahead", body: bodies[id as keyof typeof bodies] }));
+  const steps: Stop[] = order.map((id, i) => ({ id, name: id[0]!.toUpperCase() + id.slice(1), sentence: SIGNUP_SUBTITLES[id], state: id === step ? "open" : i < order.indexOf(step) ? "done" : "ahead", body: bodies[id as keyof typeof bodies] }));
   return <Wizard title="Connect a signup form" icon={<Globe size={20} aria-hidden />} label="Connecting a signup form" back={{ label: audience.name, onSelect: onBack }} steps={steps} open={step} onOpen={setStep} status={{ word: write.busy ? "Connecting" : "Connect a signup form", tone: write.busy ? "busy" : undefined }} notices={<>{write.error ? <Notice tone="warn" sentence={refusalSentence(write.error)} /> : null}{resources.filter(f => listKnowledge(f) === "refused").map((f, i) => <Notice key={i} tone="warn" sentence={refusalSentence(f.snapshot.error)}><Button onClick={f.reseed}>Try again</Button></Notice>)}</>} acts={write.busy ? [] : [{ label: "Cancel", text: true, onAct: onBack }, ...(valid ? [{ label: step === "review" ? "Connect" : "Next", tone: "primary" as const, onAct: () => { if (step === "review") void connect(); else setStep(order[order.indexOf(step) + 1]!); } }] : [])]} />;
 }

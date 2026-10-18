@@ -3361,6 +3361,14 @@ button.os-row.os-record-row:focus-visible { outline: 2px solid var(--os-accent);
   margin: 0;
 }
 
+/* The add-machine Models check's progress: the bar and its bytes on the text
+ * edge, with no card -- a wizard step's body has no box around it. */
+.os-fleet-pullbar {
+  display: grid;
+  gap: 5px;
+  max-width: 34rem;
+}
+
 /* The act's own block: the control line, then whatever it has to say
  * underneath. */
 .os-fleet-pullform {
@@ -5509,8 +5517,10 @@ a.os-button {
 
 /* `complete` is `done` in the compose reading -- an answered stop and a
  * finished stage are the same picture. One rule, so they cannot drift. */
-.os-rail-stage[data-state="done"] .os-rail-mark,
-.os-rail-stage[data-state="complete"] .os-rail-mark {
+.os-rail-stage[data-state="done"] > .os-rail-mark,
+.os-rail-stage[data-state="done"] > * > .os-rail-mark,
+.os-rail-stage[data-state="complete"] > .os-rail-mark,
+.os-rail-stage[data-state="complete"] > * > .os-rail-mark {
   border-color: var(--os-accent);
   background: var(--os-accent-soft);
   color: var(--os-accent);
@@ -5519,13 +5529,16 @@ a.os-button {
 /* THE RUNNING STAGE IS THE ONE THING MOVING, so it is the only thing that
  * animates. A ring rather than a fill: the mark stays the same size, so the
  * rail does not shift as a deploy advances. */
-.os-rail-stage[data-state="current"] .os-rail-mark {
+.os-rail-stage[data-state="current"] > .os-rail-mark,
+.os-rail-stage[data-state="current"] > * > .os-rail-mark {
   border-color: var(--os-accent);
   background: var(--os-accent);
   box-shadow: 0 0 0 0 var(--os-accent-soft);
   animation: os-rail-pulse 1.8s var(--os-ease) infinite;
 }
-.os-rail-stage[data-state="current"] .os-rail-label {
+.os-rail-stage[data-state="current"] > .os-rail-body > .os-rail-label,
+.os-rail-stage[data-state="current"] > .os-rail-body > .os-rail-line > .os-rail-label,
+.os-rail-stage[data-state="current"] > .os-rail-body > .os-rail-heading > .os-rail-line > .os-rail-label {
   color: var(--os-accent);
 }
 
@@ -5545,7 +5558,8 @@ a.os-button {
  * would leave those readers unable to tell which stage is running, which is a
  * different failure from the one the setting asks about. */
 @media (prefers-reduced-motion: reduce) {
-  .os-rail-stage[data-state="current"] .os-rail-mark {
+  .os-rail-stage[data-state="current"] > .os-rail-mark,
+  .os-rail-stage[data-state="current"] > * > .os-rail-mark {
     animation: none;
     box-shadow: 0 0 0 3px var(--os-accent-soft);
   }
@@ -5557,28 +5571,39 @@ a.os-button {
  * thing that happens is theirs -- so it does not pulse, and reduced motion
  * has nothing here to reduce. The plate ground rather than the accent fill
  * keeps it distinct from a stage that is running. */
-.os-rail-stage[data-state="open"] .os-rail-mark {
+.os-rail-stage[data-state="open"] > .os-rail-mark,
+.os-rail-stage[data-state="open"] > * > .os-rail-mark {
   border-color: var(--os-accent);
   background: var(--os-plate);
   box-shadow: 0 0 0 3px var(--os-accent-soft);
 }
-.os-rail-stage[data-state="open"] .os-rail-label {
+.os-rail-stage[data-state="open"] > .os-rail-body > .os-rail-label,
+.os-rail-stage[data-state="open"] > .os-rail-body > .os-rail-line > .os-rail-label,
+.os-rail-stage[data-state="open"] > .os-rail-body > .os-rail-heading > .os-rail-line > .os-rail-label {
   color: var(--os-accent);
 }
 
-.os-rail-stage[data-state="skipped"] .os-rail-mark {
+.os-rail-stage[data-state="skipped"] > .os-rail-mark,
+
+.os-rail-stage[data-state="skipped"] > * > .os-rail-mark {
   border-style: dashed;
   color: var(--os-muted);
 }
-.os-rail-stage[data-state="skipped"] .os-rail-label {
+.os-rail-stage[data-state="skipped"] > .os-rail-body > .os-rail-label,
+.os-rail-stage[data-state="skipped"] > .os-rail-body > .os-rail-line > .os-rail-label,
+.os-rail-stage[data-state="skipped"] > .os-rail-body > .os-rail-heading > .os-rail-line > .os-rail-label {
   color: var(--os-muted);
 }
 
-.os-rail-stage[data-state="stopped"] .os-rail-mark {
+.os-rail-stage[data-state="stopped"] > .os-rail-mark,
+
+.os-rail-stage[data-state="stopped"] > * > .os-rail-mark {
   border-color: var(--os-warn);
   color: var(--os-warn);
 }
-.os-rail-stage[data-state="stopped"] .os-rail-label {
+.os-rail-stage[data-state="stopped"] > .os-rail-body > .os-rail-label,
+.os-rail-stage[data-state="stopped"] > .os-rail-body > .os-rail-line > .os-rail-label,
+.os-rail-stage[data-state="stopped"] > .os-rail-body > .os-rail-heading > .os-rail-line > .os-rail-label {
   color: var(--os-warn);
 }
 
@@ -5600,12 +5625,15 @@ a.os-button {
  * stage -- which reads as a picture that failed to draw rather than as steps
  * that have not happened yet. The line is the one part that has to stay whole:
  * it is what says these are one sequence. */
-.os-rail-stage[data-state="ahead"] .os-rail-mark,
-.os-rail-stage[data-state="ahead"] .os-rail-body,
-.os-rail-stage[data-state="unknown"] .os-rail-mark,
-.os-rail-stage[data-state="unknown"] .os-rail-body,
-.os-rail-stage[data-state="pending"] .os-rail-mark,
-.os-rail-stage[data-state="pending"] .os-rail-body {
+.os-rail-stage[data-state="ahead"] > .os-rail-mark,
+.os-rail-stage[data-state="ahead"] > * > .os-rail-mark,
+.os-rail-stage[data-state="ahead"] > .os-rail-body,
+.os-rail-stage[data-state="unknown"] > .os-rail-mark,
+.os-rail-stage[data-state="unknown"] > * > .os-rail-mark,
+.os-rail-stage[data-state="unknown"] > .os-rail-body,
+.os-rail-stage[data-state="pending"] > .os-rail-mark,
+.os-rail-stage[data-state="pending"] > * > .os-rail-mark,
+.os-rail-stage[data-state="pending"] > .os-rail-body {
   opacity: 0.45;
 }
 
@@ -8088,13 +8116,6 @@ a.os-button {
   font-weight: 600;
   color: var(--os-ink);
 }
-.os-wizard-stage-lead {
-  margin: -4px 0 0;
-  font-size: var(--os-text-base);
-  color: var(--os-muted);
-  max-width: 72ch;
-  text-wrap: pretty;
-}
 .os-wizard-stage > .os-wizard-body {
   padding: 4px 0 0;
 }
@@ -8117,42 +8138,85 @@ a.os-button {
 .os-wizard-body .fleet-install-options {
   max-width: 46rem;
 }
-/* IN THE ASIDE a step is two short lines -- its name, then its answer -- since
-   a rail's width cannot hold both on one. No chevron: side by side the line
-   does not disclose anything beneath itself, it chooses what the stage shows,
-   and the accent on the open one already says which. */
-.os-wizard[data-layout="split"] .os-rail[data-scale="page"] .os-rail-line {
-  flex-direction: column;
-  align-items: flex-start;
-  gap: 1px;
+/* A WIZARD STEP IS TWO SHORT LINES, in either arrangement: its name, then one
+   muted line beneath it -- what the step is until it is answered, its answer
+   after (memql#6214). The subtitle is written to fit one line; an answer is
+   data and may take two before it is cut. Side by side there is no chevron:
+   the line does not disclose anything beneath itself, it chooses what the
+   stage shows, and the accent on the open one already says which. In one
+   column the chevron stays on the name's line, where the disclosure is.
+
+   EVERY RULE HERE IS THE WIZARD'S OWN STEPS, by child combinator. In one
+   column a step's body sits inside the rail, and a rail drawn in that body
+   -- the add-machine checks -- would otherwise take the wizard's line grid
+   and its "this is the step on the stage" accent on every one of its rows. */
+.os-wizard .os-rail[data-scale="page"] > .os-rail-stage > .os-rail-body > .os-rail-line,
+.os-wizard .os-rail[data-scale="page"] > .os-rail-stage > .os-rail-body > .os-rail-heading > .os-rail-line {
+  display: grid;
+  grid-template-columns: minmax(0, auto) 1fr;
+  grid-template-areas: "label chev" "answer answer";
+  align-items: baseline;
+  column-gap: 8px;
+  row-gap: 1px;
 }
-.os-wizard[data-layout="split"] .os-rail[data-scale="page"] .os-rail-answer {
+.os-wizard .os-rail[data-scale="page"] > .os-rail-stage > .os-rail-body > .os-rail-line > .os-rail-label,
+.os-wizard .os-rail[data-scale="page"] > .os-rail-stage > .os-rail-body > .os-rail-heading > .os-rail-line > .os-rail-label {
+  grid-area: label;
+  min-width: 0;
+}
+.os-wizard .os-rail[data-scale="page"] > .os-rail-stage > .os-rail-body > .os-rail-line > .os-rail-chev,
+.os-wizard .os-rail[data-scale="page"] > .os-rail-stage > .os-rail-body > .os-rail-heading > .os-rail-line > .os-rail-chev {
+  grid-area: chev;
+  justify-self: start;
+}
+/* On a step's line the muted line sits in the line's own grid; on an unreached
+   step with no line it is simply the body's second row. */
+.os-wizard .os-rail[data-scale="page"] > .os-rail-stage > .os-rail-body > .os-rail-line > .os-rail-answer,
+.os-wizard .os-rail[data-scale="page"] > .os-rail-stage > .os-rail-body > .os-rail-heading > .os-rail-line > .os-rail-answer,
+.os-wizard .os-rail[data-scale="page"] > .os-rail-stage > .os-rail-body > .os-rail-line > .os-rail-note,
+.os-wizard .os-rail[data-scale="page"] > .os-rail-stage > .os-rail-body > .os-rail-heading > .os-rail-line > .os-rail-note {
+  grid-area: answer;
+}
+.os-wizard .os-rail[data-scale="page"] > .os-rail-stage > .os-rail-body > .os-rail-line > .os-rail-answer,
+.os-wizard .os-rail[data-scale="page"] > .os-rail-stage > .os-rail-body > .os-rail-heading > .os-rail-line > .os-rail-answer,
+.os-wizard .os-rail[data-scale="page"] > .os-rail-stage > .os-rail-body > .os-rail-line > .os-rail-note,
+.os-wizard .os-rail[data-scale="page"] > .os-rail-stage > .os-rail-body > .os-rail-heading > .os-rail-line > .os-rail-note,
+.os-wizard .os-rail[data-scale="page"] > .os-rail-stage > .os-rail-body > .os-rail-note {
   white-space: normal;
   display: -webkit-box;
   -webkit-box-orient: vertical;
   -webkit-line-clamp: 2;
   line-clamp: 2;
+  overflow: hidden;
   font-size: var(--os-text-sm);
+  color: var(--os-muted);
 }
-.os-wizard[data-layout="split"] .os-rail[data-scale="page"] .os-rail-answer:empty {
+.os-wizard .os-rail[data-scale="page"] > .os-rail-stage > .os-rail-body > .os-rail-line > .os-rail-answer:empty,
+.os-wizard .os-rail[data-scale="page"] > .os-rail-stage > .os-rail-body > .os-rail-heading > .os-rail-line > .os-rail-answer:empty,
+.os-wizard .os-rail[data-scale="page"] > .os-rail-stage > .os-rail-body > .os-rail-line > .os-rail-note:empty,
+.os-wizard .os-rail[data-scale="page"] > .os-rail-stage > .os-rail-body > .os-rail-heading > .os-rail-line > .os-rail-note:empty,
+.os-wizard .os-rail[data-scale="page"] > .os-rail-stage > .os-rail-body > .os-rail-note:empty {
   display: none;
 }
-.os-wizard[data-layout="split"] .os-rail[data-scale="page"] .os-rail-chev {
+.os-wizard[data-layout="split"] .os-rail[data-scale="page"] > .os-rail-stage > .os-rail-body > .os-rail-line > .os-rail-chev,
+.os-wizard[data-layout="split"] .os-rail[data-scale="page"] > .os-rail-stage > .os-rail-body > .os-rail-heading > .os-rail-line > .os-rail-chev {
   display: none;
 }
 /* A wizard's filled mark identifies the displayed step, in both layouts.
    Background work keeps its status in the note and action bar; it must not
    make a different step look selected. Completed steps retain their checks. */
-.os-wizard .os-rail[data-scale="page"] .os-rail-stage:is([data-state="open"], [data-state="current"]):not([data-open="true"]) .os-rail-mark {
+.os-wizard .os-rail[data-scale="page"] > .os-rail-stage:is([data-state="open"], [data-state="current"]):not([data-open="true"]) > .os-rail-mark {
   background: var(--os-plate);
   border-color: var(--os-line);
   box-shadow: none;
   animation: none;
 }
-.os-wizard .os-rail[data-scale="page"] .os-rail-stage:is([data-state="open"], [data-state="current"]):not([data-open="true"]) .os-rail-label {
+.os-wizard .os-rail[data-scale="page"] > .os-rail-stage:is([data-state="open"], [data-state="current"]):not([data-open="true"]) > .os-rail-body > .os-rail-line > .os-rail-label,
+.os-wizard .os-rail[data-scale="page"] > .os-rail-stage:is([data-state="open"], [data-state="current"]):not([data-open="true"]) > .os-rail-body > .os-rail-heading > .os-rail-line > .os-rail-label,
+.os-wizard .os-rail[data-scale="page"] > .os-rail-stage:is([data-state="open"], [data-state="current"]):not([data-open="true"]) > .os-rail-body > .os-rail-label {
   color: var(--os-ink);
 }
-.os-wizard .os-rail[data-scale="page"] .os-rail-stage[data-open="true"] .os-rail-mark {
+.os-wizard .os-rail[data-scale="page"] > .os-rail-stage[data-open="true"] > .os-rail-mark {
   background: var(--os-accent);
   border-color: var(--os-accent);
   color: var(--os-accent-fg);
@@ -8160,7 +8224,9 @@ a.os-button {
   animation: none;
   opacity: 1;
 }
-.os-wizard .os-rail[data-scale="page"] .os-rail-stage[data-open="true"] .os-rail-label {
+.os-wizard .os-rail[data-scale="page"] > .os-rail-stage[data-open="true"] > .os-rail-body > .os-rail-line > .os-rail-label,
+.os-wizard .os-rail[data-scale="page"] > .os-rail-stage[data-open="true"] > .os-rail-body > .os-rail-heading > .os-rail-line > .os-rail-label,
+.os-wizard .os-rail[data-scale="page"] > .os-rail-stage[data-open="true"] > .os-rail-body > .os-rail-label {
   color: var(--os-accent);
 }
 .os-wizard-mark {
@@ -8205,18 +8271,18 @@ a.os-button {
 }
 
 /* ---- the rail at page scale ---- */
-.os-rail[data-scale="page"] .os-rail-stage {
+.os-rail[data-scale="page"] > .os-rail-stage {
   grid-template-columns: 21px 1fr;
   gap: 14px;
   padding: 8px 0;
 }
-.os-rail[data-scale="page"] .os-rail-mark {
+.os-rail[data-scale="page"] > .os-rail-stage > .os-rail-mark {
   width: 21px;
   height: 21px;
 }
 /* The same 4px of air above and below every segment, so the thread reads as
    one line interrupted by marks rather than as dashes between them. */
-.os-rail[data-scale="page"] .os-rail-stage::before {
+.os-rail[data-scale="page"] > .os-rail-stage::before {
   left: 10px;
   top: 33px;
   bottom: -4px;
@@ -8225,54 +8291,64 @@ a.os-button {
    scale the base hairline is enough; at this one a 21px ring drawn in
    `--os-line` and then dimmed all but vanished, and the rail read as a line
    with nothing on it. */
-.os-rail[data-scale="page"] .os-rail-mark {
+.os-rail[data-scale="page"] > .os-rail-stage > .os-rail-mark {
   border-color: color-mix(in oklab, var(--os-line) 65%, var(--os-ink));
 }
-.os-rail[data-scale="page"] .os-rail-stage[data-state="ahead"] .os-rail-mark,
-.os-rail[data-scale="page"] .os-rail-stage[data-state="pending"] .os-rail-mark,
-.os-rail[data-scale="page"] .os-rail-stage[data-state="unknown"] .os-rail-mark {
+.os-rail[data-scale="page"] > .os-rail-stage[data-state="ahead"] > .os-rail-mark,
+.os-rail[data-scale="page"] > .os-rail-stage[data-state="pending"] > .os-rail-mark,
+.os-rail[data-scale="page"] > .os-rail-stage[data-state="unknown"] > .os-rail-mark {
   opacity: 0.6;
 }
-.os-rail[data-scale="page"] .os-rail-stage:is([data-state="done"], [data-state="complete"], [data-state="current"], [data-state="open"]) .os-rail-mark {
+.os-rail[data-scale="page"] > .os-rail-stage:is([data-state="done"], [data-state="complete"], [data-state="current"], [data-state="open"]) > .os-rail-mark {
   border-color: var(--os-accent);
 }
-.os-rail[data-scale="page"] .os-rail-stage[data-state="stopped"] .os-rail-mark {
+.os-rail[data-scale="page"] > .os-rail-stage[data-state="stopped"] > .os-rail-mark {
   border-color: var(--os-warn);
 }
-.os-rail[data-scale="page"] .os-rail-body {
+.os-rail[data-scale="page"] > .os-rail-stage > .os-rail-body {
   gap: 0;
   /* The mark is 21px; the line's text sits on its optical centre. */
   padding-top: 1px;
 }
-.os-rail[data-scale="page"] .os-rail-label {
+.os-rail[data-scale="page"] > .os-rail-stage > .os-rail-body > .os-rail-label,
+.os-rail[data-scale="page"] > .os-rail-stage > .os-rail-body > .os-rail-line > .os-rail-label,
+.os-rail[data-scale="page"] > .os-rail-stage > .os-rail-body > .os-rail-heading > .os-rail-line > .os-rail-label {
   font-size: var(--os-text-base);
   font-weight: 600;
 }
-.os-rail[data-scale="page"] .os-rail-line {
+.os-rail[data-scale="page"] > .os-rail-stage > .os-rail-body > .os-rail-line,
+.os-rail[data-scale="page"] > .os-rail-stage > .os-rail-body > .os-rail-heading > .os-rail-line {
   gap: 12px;
   padding: 0 4px 0 0;
   line-height: 19px;
 }
-.os-rail[data-scale="page"] .os-rail-line .os-rail-label {
+.os-rail[data-scale="page"] > .os-rail-stage > .os-rail-body > .os-rail-line > .os-rail-label,
+.os-rail[data-scale="page"] > .os-rail-stage > .os-rail-body > .os-rail-heading > .os-rail-line > .os-rail-label {
   min-width: 0;
 }
-.os-rail[data-scale="page"] .os-rail-answer,
-.os-rail[data-scale="page"] .os-rail-note {
+.os-rail[data-scale="page"] > .os-rail-stage > .os-rail-body > .os-rail-note,
+.os-rail[data-scale="page"] > .os-rail-stage > .os-rail-body > .os-rail-line > .os-rail-answer,
+.os-rail[data-scale="page"] > .os-rail-stage > .os-rail-body > .os-rail-heading > .os-rail-line > .os-rail-answer,
+.os-rail[data-scale="page"] > .os-rail-stage > .os-rail-body > .os-rail-line > .os-rail-note,
+.os-rail[data-scale="page"] > .os-rail-stage > .os-rail-body > .os-rail-heading > .os-rail-line > .os-rail-note {
   font-size: var(--os-text-base);
 }
 /* THE OPEN STEP'S LINE IS NOT A CONTROL. One step is always open in a wizard,
    so its line does nothing on a click -- and a pointer and a turned chevron
    would both say otherwise. */
-.os-rail[data-scale="page"] .os-rail-line[aria-expanded="true"] {
+.os-rail[data-scale="page"] > .os-rail-stage > .os-rail-body > .os-rail-line[aria-expanded="true"],
+.os-rail[data-scale="page"] > .os-rail-stage > .os-rail-body > .os-rail-heading > .os-rail-line[aria-expanded="true"] {
   cursor: default;
 }
-.os-rail[data-scale="page"] .os-rail-line[aria-expanded="true"] .os-rail-chev {
+.os-rail[data-scale="page"] > .os-rail-stage > .os-rail-body > .os-rail-line[aria-expanded="true"] > .os-rail-chev,
+.os-rail[data-scale="page"] > .os-rail-stage > .os-rail-body > .os-rail-heading > .os-rail-line[aria-expanded="true"] > .os-rail-chev {
   display: none;
 }
 /* THE CHEVRON STAYS WITH WHAT IT IS ABOUT. Pushed to the far edge it is right
    on a widget's 300px line, where the far edge is next to the name; on a page
    it landed 500px away, a ten-pixel speck belonging to nothing. */
-.os-rail[data-scale="page"] .os-rail-chev {
+.os-rail[data-scale="page"] > .os-rail-stage > .os-rail-body > .os-rail-line > .os-rail-chev,
+.os-rail[data-scale="page"] > .os-rail-stage > .os-rail-body > .os-rail-heading > .os-rail-line > .os-rail-chev {
   margin-left: 0;
   font-size: 11px;
 }

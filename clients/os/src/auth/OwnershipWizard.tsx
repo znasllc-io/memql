@@ -7,6 +7,16 @@ import { Wizard } from "../kit/Wizard";
 import { Field } from "../kit/controls";
 import { oauthFields, value, type IdentityData } from "./nativeIdentity";
 
+/** What each ownership step is, under its name on the rail -- the same on every
+ *  page of the setup, the passkey pages included (memql#6214). */
+export const OWNERSHIP_STEP_SUBTITLES: Readonly<Record<string, string>> = {
+  "Organization and owner": "Who owns this cluster",
+  "Your installation": "This cluster's domain",
+  "Joining the cluster": "How others get in",
+  "Verify email": "A link that proves the address",
+  "Register passkey": "How you sign in here",
+};
+
 export function OwnershipWizard({ data, busy, error, submit }: {
   data: IdentityData; busy: boolean; error: string;
   submit: (path: string, form: Record<string, string>) => void;
@@ -52,7 +62,7 @@ export function OwnershipWizard({ data, busy, error, submit }: {
   ];
   return <Wizard leadingIcon={<Mark />} icon={<Fingerprint />} title="Welcome to MemQL OS" lead="Set up this installation and verify cluster ownership."
     label="Ownership setup" open={String(step)} onOpen={id => setStep(Number(id))}
-    steps={["Organization and owner", "Your installation", "Joining the cluster", local ? "Register passkey" : "Verify email", ...(local ? [] : ["Register passkey"])].map((name, i) => ({ id: String(i), name,
+    steps={["Organization and owner", "Your installation", "Joining the cluster", local ? "Register passkey" : "Verify email", ...(local ? [] : ["Register passkey"])].map((name, i) => ({ id: String(i), name, sentence: OWNERSHIP_STEP_SUBTITLES[name],
       state: i < step ? "done" : i === step ? "open" : "ahead", body: bodies[i] }))}
     notices={error ? <p role="alert">{error}</p> : undefined}
     status={{ word: busy ? (local ? "Preparing passkey setup" : "Sending verification") : valid ? "Your turn" : step === 2 ? joining.problem : "Complete the required fields", tone: busy ? "busy" : "none" }}

@@ -110,6 +110,7 @@ export function NewRouteWizard({
     {
       id: "review",
       name: "Review",
+      sentence: "Check, then create.",
       state: stateOf("review"),
       body: (
         <div className="fleet-route-review">

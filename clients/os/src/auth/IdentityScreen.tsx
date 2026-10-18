@@ -4,7 +4,7 @@ import { Fingerprint } from "lucide-react";
 import { useAuth } from "./AuthProvider";
 import { nativeIdentity, oauthFields, value, IdentityRequestError, type IdentityPage } from "./nativeIdentity";
 import { Wizard } from "../kit/Wizard";
-import { OwnershipWizard } from "./OwnershipWizard";
+import { OWNERSHIP_STEP_SUBTITLES, OwnershipWizard } from "./OwnershipWizard";
 import { EntryLayout } from "../kit/EntryLayout";
 import { EntryPending } from "../kit/EntryPending";
 import { loginWithPasskey, onlySecurityKeys, registerPasskey } from "./passkeys";
@@ -132,7 +132,7 @@ export function IdentityScreen({ initialPath, embedded = false }: { initialPath:
     return <EntryLayout><Wizard leadingIcon={<Mark />} icon={<Fingerprint />} title="Register owner passkey"
       lead={LOCAL_OWNER_LEAD}
       label="Ownership setup" open="passkey" onOpen={() => {}}
-      steps={steps.map((name, i) => ({ id: i === steps.length - 1 ? "passkey" : String(i), name, state: i === steps.length - 1 ? "open" : "done",
+      steps={steps.map((name, i) => ({ id: i === steps.length - 1 ? "passkey" : String(i), name, sentence: OWNERSHIP_STEP_SUBTITLES[name], state: i === steps.length - 1 ? "open" : "done",
         body: i === steps.length - 1 ? <form className="os-identity-fields" onSubmit={event => { event.preventDefault(); if (!busy) proceed(); }}><p>Confirm the owner email used during installation.</p>{field("email", "Owner email", "email")}</form> : undefined }))}
       notices={error ? <p role="alert">{error}</p> : undefined}
       status={{ word: busy ? "Checking the owner email" : valid ? "Your turn" : "Enter the owner email", tone: busy ? "busy" : "none" }}
@@ -149,7 +149,7 @@ export function IdentityScreen({ initialPath, embedded = false }: { initialPath:
     return <EntryLayout><Wizard leadingIcon={<Mark />} icon={<Fingerprint />} title={data.Local === true ? "Register owner passkey" : "Finish ownership setup"}
       lead={data.Local === true ? LOCAL_OWNER_LEAD : "Email verified. Register a passkey before you can enter MemQL OS."}
       label="Ownership setup" open="passkey" onOpen={() => {}}
-      steps={steps.map((name, i) => ({ id: i === steps.length - 1 ? "passkey" : String(i), name, state: i === steps.length - 1 ? "open" : "done", body: <>
+      steps={steps.map((name, i) => ({ id: i === steps.length - 1 ? "passkey" : String(i), name, sentence: OWNERSHIP_STEP_SUBTITLES[name], state: i === steps.length - 1 ? "open" : "done", body: <>
         <p>{securityKeyOnly
           ? "This browser can save a passkey only to a security key. Without one, use Chrome, which can save it to your Google account or your phone."
           : "Create a passkey with your device or security key. Your browser will ask you to confirm."}</p>
