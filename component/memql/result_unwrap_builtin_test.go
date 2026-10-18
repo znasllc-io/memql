@@ -1,6 +1,8 @@
 package memql
 
 import (
+	"encoding/json"
+	"reflect"
 	"testing"
 
 	memorynodes "github.com/znasllc-io/memql/component/database/memory-nodes"
@@ -62,6 +64,22 @@ func TestMaterializeRowsReadsATopLevelBuiltinsAnswer(t *testing.T) {
 	if p, ok := rows[1]["payload"].(map[string]any); !ok || p["created"] != true {
 		t.Errorf("the nested payload a []MemoryNode row carries is gone: %#v", rows[1]["payload"])
 	}
+	// CognitionEngineAdapter preserves OutputPayload under data. The same
+	// node set must survive both that in-process wrapper and a JSON hop.
+	wrapped := map[string]any{"data": res.OutputPayload()}
+	raw, err := json.Marshal(wrapped)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var wire map[string]any
+	if err := json.Unmarshal(raw, &wire); err != nil {
+		t.Fatal(err)
+	}
+	for name, value := range map[string]any{"typed adapter": wrapped, "wire adapter": wire} {
+		if got := MaterializeRows(value); !reflect.DeepEqual(rows, got) {
+			t.Errorf("%s lost the builtin payload: got %#v; want %#v", name, got, rows)
+		}
+	}
 
 	// Zero nodes is zero rows, not one empty row.
 	empty := builtinProbeEngine(t, nil)
@@ -71,5 +89,10 @@ func TestMaterializeRowsReadsATopLevelBuiltinsAnswer(t *testing.T) {
 	}
 	if rows := MaterializeRows(res); len(rows) != 0 {
 		t.Fatalf("an empty builtin answer materialized as %d rows: %#v", len(rows), rows)
+	}
+	for _, data := range []any{res.OutputPayload(), map[string]any{}, []map[string]any(nil)} {
+		if rows := MaterializeRows(map[string]any{"data": data}); len(rows) != 0 {
+			t.Fatalf("an empty adapter answer materialized as %d rows: %#v", len(rows), rows)
+		}
 	}
 }

@@ -52,6 +52,10 @@ First inspect conversation.sourceContext.recordedSources: these are recorded
 source responses, separate from earlier assistant prose. Compare the source's
 observation time, retrieval time, update cadence and entity/location/scope with
 the current request. Persistence time alone does not make an old observation fresh.
+conversation.sourceContext.clock supplies server-calculated current clocks for
+explicit source time zones. They represent the same instant across date changes.
+Do not infer that an observation is old from comparing unlike time zones or
+from an unverified relative age in earlier assistant prose.
 An immediate follow-up asking for advice, interpretation, a calculation or a
 summary based on just-checked conditions can be "quick", requiresResearch=false,
 when those receipts suffice. "Right now" does not itself require another fetch.

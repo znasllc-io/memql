@@ -189,7 +189,8 @@ func (s *draftSourceScope) append(args map[string]any) error {
 			conversation = "toString(args.conversation)"
 		}
 		s.body.WriteString("  viewer := builtin workViewerContext()\n")
-		fmt.Fprintf(&s.body, "  reason := builtin ai(templateId: %s, progress: true, data: {statement: %s, conversation: %s, viewerContext: toString(viewer)})\n", langparser.QuoteString(getString(args, "templateId")), langparser.QuoteString(instruction), conversation)
+		fmt.Fprintf(&s.body, "  draft := builtin ai(templateId: %s, data: {statement: %s, conversation: %s, viewerContext: toString(viewer)})\n", langparser.QuoteString(getString(args, "templateId")), langparser.QuoteString(instruction), conversation)
+		s.body.WriteString("  reason := builtin workReviewReply(draft: draft)\n")
 		s.hasQuickReply, s.finished = true, true
 	case "navigation":
 		target := s.dec.Navigation

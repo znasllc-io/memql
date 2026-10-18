@@ -89,6 +89,13 @@ type draftPromptEngine struct {
 	invoke func(context.Context, string, map[string]any) (any, error)
 }
 
+func (e *draftPromptEngine) InvokeAI(ctx context.Context, name string, data map[string]any) (any, error) {
+	if e.invoke != nil {
+		return e.invoke(ctx, name, data)
+	}
+	return e.MemQLEngine.InvokeAI(ctx, name, data)
+}
+
 func (e *draftPromptEngine) InvokeAIProgress(ctx context.Context, name string, data map[string]any) (any, error) {
 	if e.invoke != nil {
 		return e.invoke(ctx, name, data)

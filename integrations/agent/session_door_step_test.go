@@ -3,6 +3,7 @@ package agent
 import (
 	"context"
 	"fmt"
+	"strings"
 	"testing"
 	"text/template"
 	"time"
@@ -100,6 +101,17 @@ func TestAnAskTurnNamesItsStepForTheSessionDoor(t *testing.T) {
 			defer cancel()
 			rtr, delegate := sessionDoorRouter(t)
 			engine := &workPromptEngine{registryEngine: registryEngine{registered: map[string]bool{"composeFile": true}}, prompts: prompts}
+			engine.execute = func(reviewCtx context.Context, query string) (any, error) {
+				if strings.HasPrefix(query, "builtin work.workReviewReply(") {
+					actor, _ := auth.AccessFromContext(reviewCtx)
+					if actor == nil || actor.UserId != owner {
+						return nil, fmt.Errorf("reply review lost the session owner")
+					}
+					// No retrieved sources in this greeting; the engine skips inference.
+					return []map[string]any{{"reply": "Hello from Claude Code", "evidenceReviewed": false}}, nil
+				}
+				return nil, nil
+			}
 			r := newTestReplier(engine)
 			r.router = rtr
 			msg := &memqlv1.AgentGenerateTurnMsg{RequestId: "ask-hello", AgentId: "assistant", ActingAgent: &memqlv1.ActingAgentIdentity{Id: "assistant", Name: "Ada", Role: "assistant"}, History: []*memqlv1.AgentTurnMessage{{Role: "user", Content: "hello"}}}
