@@ -18,16 +18,14 @@ import uuid
 
 import yaml
 
+
 MODULE = "github.com/znasllc-io/memql/"
+BUDGETS_PATH = Path(__file__).with_name("db-test-budgets.yaml")
 
 
-def read_classes(workflow):
-    steps = workflow["jobs"]["plan"]["steps"]
-    tables = [s["env"]["CLASSES"] for s in steps if s.get("id") == "plan"]
-    if len(tables) != 1:
-        raise ValueError("expected one CI planner class table")
+def read_classes(budgets):
     classes = []
-    for line in tables[0].splitlines():
+    for line in budgets["classes"].splitlines():
         words = line.split()
         if not words or words[0].startswith("#"):
             continue
@@ -46,8 +44,8 @@ def read_classes(workflow):
     return classes
 
 
-def read_parallelism(workflow):
-    value = str(workflow["jobs"]["db-tests"]["env"]["MEMQL_DB_TEST_PARALLELISM"])
+def read_parallelism(budgets):
+    value = str(budgets["databaseParallelism"])
     if not re.fullmatch(r"[1-9][0-9]*", value) or int(value) > 32:
         raise ValueError("DB test parallelism must be an integer from 1 to 32")
     return int(value)
@@ -139,8 +137,8 @@ def run(packages, classes, parallelism):
 def main():
     if os.environ.get("MEMQL_REQUIRE_DB") != "1" or not os.environ.get("MEMQL_DATABASE_DSN"):
         raise ValueError("database-required execution and its DSN must be explicit")
-    workflow = yaml.safe_load(Path(".github/workflows/ci.yml").read_text())
-    return run(os.environ.get("MEMQL_PACKAGES", "").split(), read_classes(workflow), read_parallelism(workflow))
+    budgets = yaml.safe_load(BUDGETS_PATH.read_text())
+    return run(os.environ.get("MEMQL_PACKAGES", "").split(), read_classes(budgets), read_parallelism(budgets))
 
 
 if __name__ == "__main__":

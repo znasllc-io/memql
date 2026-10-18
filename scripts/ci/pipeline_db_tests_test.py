@@ -1,4 +1,5 @@
 import importlib.util
+import tempfile
 from pathlib import Path
 import subprocess
 import unittest
@@ -15,12 +16,29 @@ class DatabaseBudgets(unittest.TestCase):
     def setUp(self):
         root = Path(__file__).resolve().parents[2]
         self.workflow = yaml.safe_load((root / ".github/workflows/ci.yml").read_text())
-        self.classes = runner.read_classes(self.workflow)
-        self.parallelism = runner.read_parallelism(self.workflow)
+        self.budgets = yaml.safe_load(runner.BUDGETS_PATH.read_text())
+        self.classes = runner.read_classes(self.budgets)
+        self.parallelism = runner.read_parallelism(self.budgets)
         self.dsn = "postgres://memql:test@localhost:5432/memql?sslmode=disable"
         self.environment = patch.dict(runner.os.environ, MEMQL_DATABASE_DSN=self.dsn, MEMQL_REQUIRE_DB="1")
         self.environment.start()
         self.addCleanup(self.environment.stop)
+
+    def test_retained_legacy_lane_has_identical_budgets_until_retirement(self):
+        # Remove this transition guard with ci.yml. Native execution never
+        # imports the workflow; its checked-in budget file stands alone.
+        table = next(step["env"]["CLASSES"] for step in self.workflow["jobs"]["plan"]["steps"] if step.get("id") == "plan")
+        self.assertEqual(self.classes, runner.read_classes({"classes": table}))
+        self.assertEqual(self.parallelism, int(self.workflow["jobs"]["db-tests"]["env"]["MEMQL_DB_TEST_PARALLELISM"]))
+
+    def test_native_entrypoint_runs_without_a_workflow_directory(self):
+        with tempfile.TemporaryDirectory() as directory:
+            budgets = Path(directory) / "db-test-budgets.yaml"
+            budgets.write_text(yaml.safe_dump(self.budgets))
+            self.assertFalse((Path(directory) / ".github").exists())
+            with patch.object(runner, "BUDGETS_PATH", budgets), patch.dict(runner.os.environ, MEMQL_PACKAGES="./component/memql"), patch.object(runner, "run", return_value=7) as execute:
+                self.assertEqual(runner.main(), 7)
+                execute.assert_called_once_with(["./component/memql"], self.classes, self.parallelism)
 
     def test_real_table_preserves_every_selected_package_and_budget(self):
         packages = ["component/memql", "component/packages", "integrations/work", "integrations/library", "component/campaigns", "component/pipelinerun", "component/memql/sense"]
@@ -34,11 +52,11 @@ class DatabaseBudgets(unittest.TestCase):
     def test_shared_parallelism_is_bounded_and_not_inherited_from_cpu_count(self):
         for value in ("0", "33", "-1", "4 -run=None", "", None):
             with self.subTest(value=value), self.assertRaises(ValueError):
-                self.workflow["jobs"]["db-tests"]["env"]["MEMQL_DB_TEST_PARALLELISM"] = value
-                runner.read_parallelism(self.workflow)
+                self.budgets["databaseParallelism"] = value
+                runner.read_parallelism(self.budgets)
         for value in ("1", "4", "32"):
-            self.workflow["jobs"]["db-tests"]["env"]["MEMQL_DB_TEST_PARALLELISM"] = value
-            self.assertEqual(runner.read_parallelism(self.workflow), int(value))
+            self.budgets["databaseParallelism"] = value
+            self.assertEqual(runner.read_parallelism(self.budgets), int(value))
 
     def test_test_failure_stops_without_retry_or_false_success(self):
         with patch.object(runner, "sql") as sql, patch.object(runner.subprocess, "run", return_value=subprocess.CompletedProcess([], 7)) as execute:
