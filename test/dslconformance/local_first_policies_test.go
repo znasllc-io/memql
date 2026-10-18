@@ -62,6 +62,7 @@ var shippedRules = map[string]string{
 	"documentResearchEvidence": "localOnly",
 	"documentResearchIntent":   "localOnly",
 	"documentImageGeneration":  "localOnly",
+	"savedImageGeneration":     "localOnly",
 	"documentImagePlanning":    "localOnly",
 	"default":                  "localFirst",
 	"fastLane":                 "fastLocalFirst",

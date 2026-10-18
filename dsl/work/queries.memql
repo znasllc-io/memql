@@ -687,7 +687,7 @@ query step workSourceStepsForOwnerRun {
 @actor
 query observation workSourceCheckpointsForOwnerRun {
  args { runId string! }
- filter row => row.runId == args.runId && row.ownerUserId == actor.userId && row.?data.continuation == true
+ filter row => row.runId == args.runId && row.ownerUserId == actor.userId && (row.?data.continuation == true || row.?data.capabilityEvidence == true)
  sort "row.createdAt", "desc"
  paginate 4
  shape workObservationFull

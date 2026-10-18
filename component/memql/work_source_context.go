@@ -170,6 +170,13 @@ func workCheckpointSources(checkpoints []map[string]any, runID string, remaining
 				continue
 			}
 			seen[call.ID] = true
+			// History recall replays conversation text, including prior assistant
+			// claims. It is context, not an independent observation. Promoting it
+			// here launders those claims into sources and recursively duplicates
+			// the transcript. Original paired receipts are projected separately.
+			if call.Name == "recallWorkHistory" {
+				continue
+			}
 			if call.Name == "ai" || call.Name == "runAgentTurn" || call.Name == "workReviewReply" || call.Name == "respondToUser" || call.Name == "requestUserFeedback" || strings.Contains(strings.ToLower(call.Name), "secret") {
 				continue
 			}

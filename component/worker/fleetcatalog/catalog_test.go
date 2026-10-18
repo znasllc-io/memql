@@ -201,3 +201,21 @@ func TestAnOwnMachineTheOwnerReadMissedIsStillInTheCatalog(t *testing.T) {
 		t.Fatalf("catalog = %+v, %v; the person's own machine must be recovered without any sharing consent", got, err)
 	}
 }
+
+func TestProjectionRetainsPerMachineModalities(t *testing.T) {
+	models := Project([]Candidate{
+		{RegistrationId: "offline-image", Labels: map[string]string{"model:same": "imagegen=1"}},
+		{RegistrationId: "online-vision", ConnectedNodeId: "agent-other", Labels: map[string]string{"model:same": "vision=1"}},
+	}, time.Now())
+	if len(models) != 1 || !models[0].ImageGen || !models[0].Vision {
+		t.Fatalf("union lost: %+v", models)
+	}
+	for _, machine := range models[0].Machines {
+		if machine.RegistrationId == "offline-image" && (!machine.Capabilities.ImageGen || machine.Online || machine.Capabilities.Vision) {
+			t.Fatalf("wrong image facts: %+v", machine)
+		}
+		if machine.RegistrationId == "online-vision" && (!machine.Capabilities.Vision || !machine.Online || machine.Capabilities.ImageGen) {
+			t.Fatalf("borrowed image capability: %+v", machine)
+		}
+	}
+}

@@ -285,8 +285,11 @@ using the outputFileId returned by composeFile.
 {{with .turn.lookupContracts}}
 Authorized capability contracts already discovered for this request:
 {{.}}
-These describe callable operations, not stored records or answer evidence.
-When a contract covers the question, call executeCapability with its name and
+The contracts describe callable operations, not their stored records or completed
+effects. For a capability question, these contracts and the timestamped Fleet
+snapshot are current availability evidence; do not perform a side effect merely
+to prove an ability. A training model catalogue is background, not live availability.
+When answering a question about stored records, call executeCapability with its name and
 arguments directly; do not spend another call rediscovering that contract.
 Read its current result before answering. Discover another capability only if
 these contracts are insufficient or explicitly omit arguments. The values
@@ -305,3 +308,13 @@ instead call respondToUser with status=complete and response directly.
 If required information must come from the person before proceeding,
 call respondToUser with status=needs_input and question instead.
 {{end}}
+
+For advice based on sufficiently fresh verified receipts, give the recommendation
+and its material conditions. Do not append a generic instruction to check a
+real-time source again. Recommend another check only for an identified missing
+or stale fact that could materially change this decision; name that fact.
+Current capability claims, including denials, need current operation contracts
+and model availability evidence. A partial search result is not proof of absence;
+a chat model's own modality does not define the harness or Fleet capabilities.
+Do not invent system instructions or repeat a disputed capability denial without
+checking the available evidence. Preserve the actual saved-file reference.

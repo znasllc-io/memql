@@ -13,7 +13,8 @@ Output ONLY a JSON object -- no markdown fences, no prose:
   "requiresFile": true | false,
   "requiresResearch": true | false,
   "fileName": "<filename or descriptive filename stem, required when requiresFile is true>",
-  "fileFormat": "markdown" | "html" | "txt" | "csv" | "json" | "docx" | "pdf",
+  "fileFormat": "<requested file format>",
+  "fileDelivery": "compose" | "capability",
   "sectionable": true | false,
   "assembly": "<one short sentence: how the sections combine into the final deliverable>",
   "sections": [
@@ -42,6 +43,13 @@ who the person is does not establish their other facts. A previous unsuccessful
 lookup is not the missing fact either. Such a request can have intent "reply"
 and complexity "trivial" while workload is "lookup". Write its acknowledgment.
 Greetings, supplied information and general-knowledge answers remain "quick".
+Questions about MemQL's own abilities, tools, file creation or model modalities
+require workload="lookup" and intent="reply" unless a current capability receipt
+answers the exact question. Model training or a text-only chat interface cannot
+establish the harness's abilities. Check installed operations and authorized
+live Fleet models, including machines shared with this person. Never classify
+such a question as general self-description. A request to create an artifact is
+intent="task", not merely a capability question.
 
 Questions about changing external conditions need "lookup" and
 requiresResearch=true when relevant fresh evidence is absent, even when phrased
@@ -103,7 +111,7 @@ A request to explain how a previous answer knew something needs the saved source
 
 `requiresResearch` describes missing evidence for ANY answer or deliverable, including a conversational reply. Set it true when required source facts must be retrieved, checked or researched beyond the supplied request/context, including current weather, news, prices, schedules or service status. For a file it also selects an evidence-gathering step BEFORE creation. Set it false for general knowledge, self-contained creation or formatting of supplied content, even when workload is lookup, research or project. A PDF, default style, source ZIP, rendering or packaging does not itself require research: the native Materializer supplies those. This decision is separate from estimated duration and file format. Return a JSON boolean on every answer. requiresResearch=true cannot be a quick reply.
 
-When `requiresFile` is true, `fileName` and `fileFormat` are REQUIRED. Preserve the requested filename and format when specified; otherwise choose a concise descriptive name and the appropriate supported format for the requested deliverable. The only supported formats are markdown, html, txt, csv, json, docx, and pdf. Do not silently substitute a supported format when the user explicitly requests an unsupported one: return that requested format so compilation can refuse it. Omit both fields when `requiresFile` is false. File delivery calls the native Materializer directly with these validated choices; it does not need an agent turn to select a file tool.
+When `requiresFile` is true, `fileName`, `fileFormat` and `fileDelivery` are REQUIRED. Preserve the requested filename and format. Use fileDelivery="compose" for documents in markdown, html, txt, csv, json, docx or pdf: the native Materializer creates these directly. Use fileDelivery="capability" for other artifacts, including generated images, audio and video, so execution discovers and invokes the appropriate authorized capability. An image request is a saved artifact, requiresFile=true; use png when no image encoding is specified. For capability delivery, fileFormat must be the actual encoding/extension, not a category such as image or audio. For document composition, use its canonical format name, such as markdown for .md. PNG is not a document-composer format. Do not infer that an unlisted format is impossible, silently substitute a document, or claim that a generator is available without checking. The execution route checks actual capabilities and saved output. Omit these fields when requiresFile=false.
 
 For a request whose ENTIRE outcome is opening or focusing an existing MemQL OS
 app, tab or record, return complexity "trivial", requiresFile false, and

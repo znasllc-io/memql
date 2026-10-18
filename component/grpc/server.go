@@ -2739,6 +2739,7 @@ func (s *streamSession) sendServerMessage(correlate string, msg *memqlv1.MemqlSe
 	if msg == nil {
 		return nil
 	}
+	msg = s.clientAIMetadata(msg)
 	msg.MessageId = id.NewShortId()
 	msg.CorrelateTo = s.safeCorrelate(correlate)
 

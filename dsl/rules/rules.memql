@@ -215,3 +215,11 @@ rule documentImageGeneration { }
 @onUnavailable("park")
 @locked
 rule documentImagePlanning { }
+
+/// Standalone generated images use eligible local/shared Fleet models only.
+@when(prompt="libraryImageGeneration")
+@policy("localOnly")
+@precedence(156)
+@onUnavailable("park")
+@locked
+rule savedImageGeneration { }

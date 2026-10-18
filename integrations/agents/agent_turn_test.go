@@ -260,3 +260,16 @@ func TestRunAgentTurnReplayFileReceiptUsesSameGoalAndStep(t *testing.T) {
 		})
 	}
 }
+
+func TestRunAgentTurnRejectsASubstituteDocumentForAnImage(t *testing.T) {
+	ctx := common.ContextWithRun(auth.ContextWithUserActor(context.Background(), "owner"), common.RunContext{RunId: "run", GoalId: "goal", OwnerUserId: "owner", StepKey: "image"})
+	for _, name := range []string{"bird.md", "bird.png"} {
+		engine := &receiptEngine{rows: []map[string]any{{"id": "saved", "ownerUserId": "owner", "producedByRunId": "run", "producedByStepKey": "image", "status": "ready", "blobUrl": "https://files/output", "name": name}}}
+		integration := &Integration{engine: engine}
+		integration.SetAgentTurnRunner(&fakeTurnRunner{reply: "Created"})
+		_, err := integration.handleRunAgentTurn(ctx, map[string]any{"agentId": "agent", "prompt": "Make an image", "requireFile": true, "requiredFileExtension": "png"}, 0)
+		if (err == nil) != (name == "bird.png") {
+			t.Fatalf("receipt %s: %v", name, err)
+		}
+	}
+}

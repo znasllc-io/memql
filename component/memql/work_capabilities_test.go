@@ -64,6 +64,45 @@ func TestCapabilityShortlistIncludesUsableContractsWithoutUnboundedContext(t *te
 	require.Error(t, err)
 }
 
+func TestCapabilitySearchRanksPurposeAboveIncidentalImplementationWords(t *testing.T) {
+	for _, tc := range []struct{ search, name, purpose, incidental string }{
+		{"library file read content", "library.libraryDocumentVersion", "Read the text content of a saved Library file.", "library.libraryFileBySha256"},
+		{"read account records", "accounts.accountRecords", "Read the saved account records.", "accounts.archiveAccountRecords"},
+	} {
+		actual := workCapabilityScore(tc.search, tc.name, tc.purpose, tc.purpose)
+		incidental := workCapabilityScore(tc.search, tc.incidental, "Archive an item. Implementation notes mention "+tc.search, "Archive an item. Implementation notes mention "+tc.search)
+		require.Greater(t, actual, incidental, tc.search)
+	}
+	require.Zero(t, workCapabilityScore("read", "platform.moduleReadiness", "Module readiness status."), "substring matches must not invent a read operation")
+	require.Equal(t, workCapabilityScore("read files", "library.readFile", "Read a file."), workCapabilityScore("read file", "library.readFile", "Read a file."))
+	require.Greater(t, workCapabilityScore("read the file", "library.readFile", "Read a file."), 0)
+	require.Zero(t, workCapabilityScore("library.missingRead", "library.readFile", "Read a library file."))
+}
+
+func TestSavedFileContentAndImageOperationsAreInTheRealCapabilityShortlist(t *testing.T) {
+	e, _, _ := readMergeTestEngine(t)
+	for _, tc := range []struct{ search, name string }{
+		{"library file read content", "library.libraryReadFile"},
+		{"Read file to identify first bird", "library.libraryReadFile"},
+		{"What is the number one bird in the markdown file you just saved? Read that file to identify it.", "library.libraryReadFile"},
+		{"generate image", "library.libraryGenerateImage"},
+	} {
+		rows, err := e.workCapabilitiesBuiltin(askTestActor(), map[string]any{"search": tc.search}, 0)
+		require.NoError(t, err)
+		var result struct {
+			Capabilities []struct {
+				Name string `json:"name"`
+			} `json:"capabilities"`
+		}
+		require.NoError(t, json.Unmarshal(rows[0].Payload, &result))
+		names := []string{}
+		for _, entry := range result.Capabilities {
+			names = append(names, entry.Name)
+		}
+		require.Contains(t, names, tc.name, tc.search)
+	}
+}
+
 // TestWorkCapabilityAppNamesAnAppTheSeedsAndTheOSBothHave pins the namespace to
 // OS-app map workCapabilityApp answers. A capability is offered only to a caller
 // holding `read` on `app:<id>` (workCapabilityAllowed), and the action event it

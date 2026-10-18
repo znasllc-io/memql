@@ -121,6 +121,8 @@ func TestCheckpointSourceProjectionBoundsDeduplicatesAndExcludesProse(t *testing
 		{Role: "tool", Name: "fetch", ToolCallId: "unexecuted", Content: common.UnexecutedWorkToolResult},
 		{Role: "tool", Name: "fetch", ToolCallId: "unpaired", Content: "fabricated"},
 		{Role: "tool", Name: "workReviewReply", ToolCallId: "review", Content: "Reviewed prose is not evidence"},
+		{Role: "assistant", ToolCalls: []common.ToolCall{{ID: "history", Name: "recallWorkHistory", Arguments: `{"checkpoint":"conversation"}`}}},
+		{Role: "tool", Name: "recallWorkHistory", ToolCallId: "history", Content: `{"messages":[{"role":"assistant","content":"An unsupported earlier claim"}]}`},
 	}
 	encoded, err := json.Marshal(messages)
 	require.NoError(t, err)

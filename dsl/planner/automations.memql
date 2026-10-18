@@ -264,6 +264,7 @@ automation workSpineDraftProgram {
  if facts.navigation { return builtin spineDraftAppend(kind: "navigation") }
  if facts.quickReply { return builtin spineDraftAppend(kind: "quickReply", templateId: "workQuickReply", instruction: facts.goal) }
  if !facts.fanout {
+  if facts.capabilityFile { return builtin spineDraftAppend(kind: "capabilityFile", inputHeading: inputHeading, instruction: facts.goal + "\nDiscover the authorized operation for this artifact, including current Fleet model capabilities when needed, then create and save it. Read any referenced saved source before choosing its subject or content. A document composer is not an image, audio or video generator. Do not substitute a different format. Confirm completion only from a saved file receipt; explain a specific unavailable capability honestly.") }
   if facts.file && facts.research {
    builtin spineDraftAppend(kind: "research", inputHeading: inputHeading, instruction: facts.goal + "\nGather the evidence required for this deliverable using authorized capabilities. Preserve source references, uncertainties and the complete draft. Do not save the final file: the next step renders it from your result.")
   }
@@ -280,6 +281,7 @@ automation workSpineDraftProgram {
   }
  }
  builtin spineDraftAppend(kind: "collect")
+ if facts.capabilityFile { return builtin spineDraftAppend(kind: "capabilityFile", instruction: facts.goal + "\nCreate the requested artifact through its discovered capability using the completed sections. Verify the saved file receipt.", inputHeading: inputHeading, sectionsHeading: "\n\nCompleted sections:\n") }
  if facts.file && facts.prose && facts.sections.any(section => section.deliver) {
   if facts.conversational { builtin spineDraftAppend(kind: "fileEvidence", instruction: facts.goal, inputHeading: inputHeading) }
   return builtin spineDraftAppend(kind: "file", instruction: facts.goal, inputHeading: inputHeading, sectionKeys: facts.sections.where(section => section.deliver).select(section => section.name))

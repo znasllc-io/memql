@@ -23,10 +23,13 @@ func TestLookupContractsAreAuthorizedBoundedAndReplicaIndependent(t *testing.T) 
 	owner := "v1:identity:user:lookup-contract-owner"
 	ctx := common.ContextWithRun(auth.ContextWithUserActor(context.Background(), owner), common.RunContext{RunId: "persisted-run", GoalId: "goal", OwnerUserId: owner})
 	for _, tc := range []struct {
-		name, workload, title string
-		fail, large, want     bool
+		name, workload, title, statement string
+		fail, large, want                bool
 	}{
 		{name: "fresh executing replica", workload: "lookup", title: "Count current records", want: true},
+		{name: "owner request beats object title", workload: "lookup", title: "Read capability-check.md", statement: "Read the saved file and identify its first item.", want: true},
+		{name: "owner request needs no generated title", workload: "lookup", statement: "Read the saved file.", want: true},
+		{name: "long request falls back to title", workload: "lookup", title: "Read saved records", statement: strings.Repeat("saved records ", 30), want: true},
 		{name: "quick", workload: "quick", title: "Greeting"},
 		{name: "research", workload: "research", title: "Research records"},
 		{name: "missing title", workload: "lookup"},
@@ -45,7 +48,17 @@ func TestLookupContractsAreAuthorizedBoundedAndReplicaIndependent(t *testing.T) 
 				if strings.HasPrefix(q, "query work.workRunForOwner(") {
 					return []map[string]any{{"classification": map[string]any{"workload": tc.workload, "workTitle": tc.title}}}, nil
 				}
+				if strings.HasPrefix(q, "query work.workGoalForOwner(") {
+					return []map[string]any{{"statement": tc.statement}}, nil
+				}
 				if strings.HasPrefix(q, "query work.workCapabilities(") {
+					search := tc.title
+					if tc.statement != "" && len(tc.statement) <= 300 {
+						search = tc.statement
+					}
+					if !strings.Contains(q, search) {
+						t.Fatalf("discovery lost requested operation: %s", q)
+					}
 					if tc.fail {
 						return nil, fmt.Errorf("unavailable")
 					}
