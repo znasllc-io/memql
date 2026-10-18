@@ -1217,6 +1217,14 @@ jobs:
               --field-selector=status.phase!=Running -o wide
             echo "=== the memql namespace, described ==="
             diagnostic_kubectl describe pods -n memql
+            # A healthy Pod can still have an incomplete schema. Preserve the
+            # migrator's answer before the disposable cluster is torn down;
+            # enrollment's final missing-table error cannot identify its cause.
+            echo "=== identity migration diagnostics ==="
+            diagnostic_kubectl logs -n memql deploy/identity --tail=5000 |
+              jq -Rc 'fromjson? | select(.component == "memoryNodesDB") |
+                select((.msg // "") | test("migrat|lock|hypertable"; "i")) |
+                {time, level, msg, error}'
             # Where pipeline steps run: what a failed `pipelines` leg left, and
             # why its pods did what they did. Empty on the other legs.
             echo "=== the memql-pipelines namespace ==="
