@@ -96,7 +96,7 @@ func TestToolchainBuildIsReleaseOnlyAndRetainsUnpublishedOCI(t *testing.T) {
 				continue
 			}
 			found++
-			if step.Key != "build-tools.toolchain" || step.ImageBuild == nil || step.ImageBuild.Context != "deploy/toolchain-image" || step.ImageBuild.Dockerfile != "deploy/toolchain-image/Dockerfile" || step.ImageBuild.Target != "" || len(step.ImageBuild.Args) != 0 {
+			if step.Key != "build-tools.toolchain" || step.ImageBuild == nil || step.ImageBuild.Context != "." || step.ImageBuild.Dockerfile != "deploy/toolchain-image/Dockerfile" || step.ImageBuild.Target != "verified" || len(step.ImageBuild.Args) != 0 {
 				t.Fatalf("toolchain build lost its committed Dockerfile: %+v", step)
 			}
 			if step.RunAfterFailure || step.Skip != nil || step.RequiresFleet() || len(step.Services) != 0 || len(step.Caches) != 0 || len(step.Secrets) != 0 || step.Run != "" || step.Image != "" {
