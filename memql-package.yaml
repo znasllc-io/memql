@@ -350,10 +350,11 @@ pipeline:
         # budgets without carrying engine fixture rows into unrelated tests.
         - name: db-tests
           placement: cluster
-          # Match the four-core hosted lane behind the package budgets. The
-          # namespace's two-core default exhausted the engine's 600s alarm.
-          # An explicit request reserves this CPU before the Job can start.
-          cpuMilli: 4000
+          # The full engine/campaign suites passed with three Go execution
+          # threads after the heap-budget fix. Two shards plus their database
+          # services then fit a 6.5-core pool. Keep test overlap, selection and
+          # package deadlines unchanged; native qualification must still pass.
+          cpuMilli: 3000
           packages: affected
           only: db-gated
           shards: 5
@@ -364,7 +365,7 @@ pipeline:
             # Engine fixtures repeatedly load the DSL. Leave room for that live
             # heap within the existing 4 GiB container instead of spending CPU
             # collecting at the compiler's conservative 512 MiB setting.
-            export GOFLAGS=-p=1 GOMEMLIMIT=2GiB GOGC=100
+            export GOFLAGS=-p=1 GOMEMLIMIT=2GiB GOGC=100 GOMAXPROCS=3
             bash scripts/identity/build-css.sh
             export MEMQL_DATABASE_DSN='postgres://memql:memql_dev@localhost:5432/memql?sslmode=disable'
             export MEMQL_REQUIRE_DB=1
