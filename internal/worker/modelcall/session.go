@@ -119,7 +119,8 @@ type call struct {
 	// level and purpose are what the engine said about the call. They steer
 	// nothing here -- the router chose the model -- and exist so the line
 	// logged when a call waits for a slot can say which kind of work was
-	// kept waiting.
+	// kept waiting. The level is logged as call_level: "level" is the severity
+	// key of the JSON handler, and a second one hides the severity.
 	level, purpose string
 
 	mu sync.Mutex
@@ -480,7 +481,7 @@ func (m *Manager) admit(ctx context.Context, c *call, info models.Info, inv mode
 			}
 		case <-deadline.C:
 			m.logger.Warn("model call refused after waiting for a concurrency slot",
-				"request_id", c.requestID, "model", info.ID, "level", c.level, "purpose", c.purpose,
+				"request_id", c.requestID, "model", info.ID, "call_level", c.level, "purpose", c.purpose,
 				"waited_ms", time.Since(began).Milliseconds(), "model_max", info.MaxConcurrent,
 				"error_code", CodeConcurrencyExceeded)
 			return refuse(CodeConcurrencyExceeded, concurrencyRefusal(info, ceiling, limits.idle))
@@ -492,7 +493,7 @@ func (m *Manager) admit(ctx context.Context, c *call, info models.Info, inv mode
 			finish, code, detail := m.classify(c, ctx.Err())
 			if waited := time.Since(began); waited >= m.slotWaitFloor {
 				m.logger.Warn("model call ended while waiting for a concurrency slot",
-					"request_id", c.requestID, "model", info.ID, "level", c.level, "purpose", c.purpose,
+					"request_id", c.requestID, "model", info.ID, "call_level", c.level, "purpose", c.purpose,
 					"waited_ms", waited.Milliseconds(), "model_max", info.MaxConcurrent,
 					"error_code", code)
 			}
@@ -516,7 +517,7 @@ func (m *Manager) slotWaited(c *call, info models.Info, waited time.Duration) {
 		return
 	}
 	m.logger.Info("model call waited for a concurrency slot",
-		"request_id", c.requestID, "model", info.ID, "level", c.level, "purpose", c.purpose,
+		"request_id", c.requestID, "model", info.ID, "call_level", c.level, "purpose", c.purpose,
 		"waited_ms", waited.Milliseconds(), "model_max", info.MaxConcurrent)
 }
 
@@ -587,7 +588,7 @@ func (m *Manager) run(ctx context.Context, sender Sender, c *call, info models.I
 	// (ollamaThink).
 	m.logger.Debug("model call running",
 		"request_id", c.requestID, "model", info.ID, "kind", start.GetKind(),
-		"level", start.GetLevel(), "purpose", start.GetPurpose())
+		"call_level", start.GetLevel(), "purpose", start.GetPurpose())
 
 	// The send clock starts after admission. The idle verdict starts only
 	// after actual runtime output: model loading and prompt evaluation can

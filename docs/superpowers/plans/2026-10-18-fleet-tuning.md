@@ -2465,7 +2465,7 @@ git -c user.name=znas -c user.email=znas@znas.io commit \
 
 **Interfaces:**
 - Consumes: nothing from earlier tasks.
-- Produces: `modelcall.Options.SlotWaitLogFloor time.Duration` (zero means one second); info line `model call waited for a concurrency slot` and warn line `model call refused after waiting for a concurrency slot`, each with `request_id`, `model`, `level`, `purpose`, `waited_ms`, `model_max` (the refusal adds `error_code`).
+- Produces: `modelcall.Options.SlotWaitLogFloor time.Duration` (zero means one second); info line `model call waited for a concurrency slot` and warn line `model call refused after waiting for a concurrency slot`, each with `request_id`, `model`, `call_level`, `purpose`, `waited_ms`, `model_max` (the refusal adds `error_code`).
 
 Decision D6. Reserving slots for the fast level is deliberately not built: nothing on the wire says which calls are the pals' (spec 4, D6). This is the evidence that would justify it. Before this task a call that waited ninety seconds and was refused left a debug line, which the default log level never prints.
 
@@ -2545,7 +2545,7 @@ func TestAWaitedSlotIsLoggedWithItsLevelAndPurpose(t *testing.T) {
 	for _, want := range []string{
 		`"msg":"model call waited for a concurrency slot"`,
 		`"request_id":"waiter"`,
-		`"level":"fast"`,
+		`"call_level":"fast"`,
 		`"purpose":"decide"`,
 		`"model":"m"`,
 	} {
@@ -2720,7 +2720,7 @@ Modify `internal/worker/modelcall/session.go`:
  			}
  		case <-deadline.C:
 +			m.logger.Warn("model call refused after waiting for a concurrency slot",
-+				"request_id", c.requestID, "model", info.ID, "level", c.level, "purpose", c.purpose,
++				"request_id", c.requestID, "model", info.ID, "call_level", c.level, "purpose", c.purpose,
 +				"waited_ms", time.Since(began).Milliseconds(), "model_max", info.MaxConcurrent,
 +				"error_code", CodeConcurrencyExceeded)
  			return refuse(CodeConcurrencyExceeded, concurrencyRefusal(info, ceiling, limits.idle))
@@ -2745,7 +2745,7 @@ Modify `internal/worker/modelcall/session.go`:
 +		return
 +	}
 +	m.logger.Info("model call waited for a concurrency slot",
-+		"request_id", c.requestID, "model", info.ID, "level", c.level, "purpose", c.purpose,
++		"request_id", c.requestID, "model", info.ID, "call_level", c.level, "purpose", c.purpose,
 +		"waited_ms", waited.Milliseconds(), "model_max", info.MaxConcurrent)
  }
  

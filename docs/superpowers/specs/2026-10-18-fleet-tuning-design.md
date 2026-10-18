@@ -220,9 +220,10 @@ would be one the engine can neither read nor reject.
 ### D6 -- No per-level slot reservation now; the wait line is the evidence
 
 **Ruling.** Not built. What is built is the evidence: a call that waits a second or more for a slot logs
-`model call waited for a concurrency slot` at info with its model, level, purpose and wait, and a call
+`model call waited for a concurrency slot` at info with its model, `call_level`, purpose and wait, and a call
 that is refused after waiting logs `model call refused after waiting for a concurrency slot` at warn.
-Both were debug lines before.
+Both were debug lines before. `call_level`, not `level`: slog's JSON handler already writes `level` for the
+severity, and a second `level` key made parsers read the call's level as the severity.
 
 **Why.** A reservation needs something to key on, and the wire has `level` and `purpose` but no lane.
 Whether MemPals' decision prompts will arrive as `fast` is S3's choice, and S2 has an open seam for a

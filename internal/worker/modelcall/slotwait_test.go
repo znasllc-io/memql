@@ -3,6 +3,7 @@ package modelcall
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"log/slog"
 	"strings"
 	"sync"
@@ -71,7 +72,7 @@ func TestAWaitedSlotIsLoggedWithItsLevelAndPurpose(t *testing.T) {
 	for _, want := range []string{
 		`"msg":"model call waited for a concurrency slot"`,
 		`"request_id":"waiter"`,
-		`"level":"fast"`,
+		`"call_level":"fast"`,
 		`"purpose":"decide"`,
 		`"model":"m"`,
 	} {
@@ -79,6 +80,7 @@ func TestAWaitedSlotIsLoggedWithItsLevelAndPurpose(t *testing.T) {
 			t.Errorf("the log does not carry %s:\n%s", want, out)
 		}
 	}
+	assertCallLevelSplit(t, logLine(t, out, "model call waited for a concurrency slot", "waiter"), "INFO", "fast")
 	if strings.Contains(out, `"request_id":"holder"`) {
 		t.Errorf("a call that took a free slot must not be logged as having waited:\n%s", out)
 	}
@@ -116,6 +118,7 @@ func TestARefusedWaitIsALoudLine(t *testing.T) {
 			t.Errorf("the log does not carry %s:\n%s", want, out)
 		}
 	}
+	assertCallLevelSplit(t, logLine(t, out, "model call refused after waiting for a concurrency slot", "waiter"), "WARN", "fast")
 }
 
 // TestACallThatDoesNotWaitSaysNothing. Every call logging would bury the
@@ -144,13 +147,70 @@ func assertEndLogged(t *testing.T, out, errorCode string) {
 		`"level":"WARN"`,
 		`"msg":"model call ended while waiting for a concurrency slot"`,
 		`"request_id":"waiter"`,
-		`"level":"fast"`,
+		`"call_level":"fast"`,
 		`"purpose":"decide"`,
 		`"error_code":"` + errorCode + `"`,
 	} {
 		if !strings.Contains(out, want) {
 			t.Errorf("the log does not carry %s:\n%s", want, out)
 		}
+	}
+	assertCallLevelSplit(t, logLine(t, out, "model call ended while waiting for a concurrency slot", "waiter"), "WARN", "fast")
+}
+
+// logLine returns the one JSON line that logs msg for requestID. It fails the
+// test unless exactly one line does.
+func logLine(t *testing.T, out, msg, requestID string) string {
+	t.Helper()
+	var found []string
+	for _, line := range strings.Split(out, "\n") {
+		if strings.Contains(line, `"msg":"`+msg+`"`) && strings.Contains(line, `"request_id":"`+requestID+`"`) {
+			found = append(found, line)
+		}
+	}
+	if len(found) != 1 {
+		t.Fatalf("want one line logging %q for %s, got %d:\n%s", msg, requestID, len(found), out)
+	}
+	return found[0]
+}
+
+// valuesOf returns every value stored under key in one flat JSON object, in
+// order. A map keeps only one of two equal keys, and two equal keys is the
+// defect the callers are looking for.
+func valuesOf(t *testing.T, line, key string) []string {
+	t.Helper()
+	dec := json.NewDecoder(strings.NewReader(line))
+	if _, err := dec.Token(); err != nil {
+		t.Fatalf("not a JSON object: %v\n%s", err, line)
+	}
+	var values []string
+	for dec.More() {
+		k, err := dec.Token()
+		if err != nil {
+			t.Fatalf("reading a key: %v\n%s", err, line)
+		}
+		var v any
+		if err := dec.Decode(&v); err != nil {
+			t.Fatalf("reading a value: %v\n%s", err, line)
+		}
+		if name, _ := k.(string); name == key {
+			s, _ := v.(string)
+			values = append(values, s)
+		}
+	}
+	return values
+}
+
+// assertCallLevelSplit checks the layout every wait line keeps: the record's
+// severity is the only "level" key, and the call's own level is under
+// "call_level". Two "level" keys is the defect that made the rename necessary.
+func assertCallLevelSplit(t *testing.T, line, severity, callLevel string) {
+	t.Helper()
+	if got := valuesOf(t, line, "level"); len(got) != 1 || got[0] != severity {
+		t.Errorf("want one \"level\" key, %q, got %q:\n%s", severity, got, line)
+	}
+	if got := valuesOf(t, line, "call_level"); len(got) != 1 || got[0] != callLevel {
+		t.Errorf("want one \"call_level\" key, %q, got %q:\n%s", callLevel, got, line)
 	}
 }
 
@@ -245,4 +305,35 @@ func TestASlotWaitFloorOfZeroOrLessIsOneSecond(t *testing.T) {
 			t.Errorf("SlotWaitLogFloor %v resolved to %v, want 1s", set, m.slotWaitFloor)
 		}
 	}
+}
+
+// TestAWaitedCallsRunningLineCarriesItsCallLevel. A call that waited and then
+// ran says its level on two lines, the wait and the running line. The running
+// line is Debug, so this logger is at debug to read it.
+func TestAWaitedCallsRunningLineCarriesItsCallLevel(t *testing.T) {
+	srv, arrived, release := heldRuntime(t)
+	var logs lockedBuffer
+	m := NewManager(Options{
+		Inventory:        inventoryWith(ollamaModel(srv.URL, "m", models.Attributes{MaxConcurrent: 1})),
+		Logger:           slog.New(slog.NewJSONHandler(&logs, &slog.HandlerOptions{Level: slog.LevelDebug})),
+		Getenv:           func(string) string { return "" },
+		SlotWaitLogFloor: 20 * time.Millisecond,
+	})
+	m.Start(context.Background(), newRecorder(), startWithIdle("holder", 30))
+	awaitRequest(t, arrived)
+
+	waiter := startWithIdle("waiter", 30)
+	waiter.Level, waiter.Purpose = "fast", "decide"
+	rec := newRecorder()
+	m.Start(context.Background(), rec, waiter)
+	time.Sleep(120 * time.Millisecond) // past the floor, with the holder still holding
+	release()
+	awaitRequest(t, arrived)
+	if end := rec.wait(t); end.GetErrorCode() != "" {
+		t.Fatalf("the waiting call ended %q", end.GetErrorCode())
+	}
+
+	out := logs.String()
+	assertCallLevelSplit(t, logLine(t, out, "model call waited for a concurrency slot", "waiter"), "INFO", "fast")
+	assertCallLevelSplit(t, logLine(t, out, "model call running", "waiter"), "DEBUG", "fast")
 }
