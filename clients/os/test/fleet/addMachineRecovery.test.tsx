@@ -19,6 +19,8 @@ const { AddMachinePage } = await import("../../src/apps/fleet/addMachine/AddMach
 const { ChecksStop } = await import("../../src/apps/fleet/addMachine/stops/Checks");
 const { useAddMachineFlow } = await import("../../src/apps/fleet/addMachine/useAddMachineFlow");
 const { machineFromRow } = await import("../../src/apps/fleet/rows");
+const { EMPTY_DRAFT, checksFor } = await import("../../src/apps/fleet/addMachine/flow");
+const { pullFromRow } = await import("../../src/apps/fleet/machines/models");
 const { MODEL_PULL_CONCEPT } = await import("../../src/apps/fleet/machines/useModelPulls");
 const { fakeConnection, machineRow, modelPullRow, withSession } = await import("./harness");
 
@@ -39,12 +41,16 @@ beforeEach(() => {
 });
 afterEach(cleanup);
 
-it("shows a partial-start refusal while another recommended model is downloading", () => {
-  render(<ChecksStop machine={machineFromRow(machine())}
-    checks={[{ id: "models", name: "Models", state: "current", answer: "Pulling a-embed" }]}
-    pullError="The text download could not start" />);
-  expect(screen.getByText("The text download could not start")).toBeTruthy();
-  expect(screen.getByText(/Some models may already be downloading/)).toBeTruthy();
+it("shows a partial-start refusal on the Models line while another recommended model is downloading", () => {
+  const live = modelPullRow({ id: "pull-embed", workerId: "recovery-machine", model: "a-embed", status: "running" });
+  const checks = checksFor({ ...EMPTY_DRAFT, inference: true }, machineFromRow(machine()), 2, new Date(), {
+    live: pullFromRow(live)!, startError: "The text download could not start",
+  });
+  render(withSession(<ChecksStop checks={checks} />));
+  expect(screen.getByText("Downloading a-embed")).toBeTruthy();
+  expect(screen.getByText("The rest did not start: The text download could not start")).toBeTruthy();
+  // On the line, never a banner over the checks.
+  expect(document.querySelector(".os-notice")).toBeNull();
 });
 
 async function connectedFlow(connection: ReturnType<typeof fakeConnection>) {
@@ -87,7 +93,7 @@ it("a live pull failure reaches Checks even with partial inventory, with the run
   const pull = modelPullRow({ id: "pull-recovery", workerId: "recovery-machine", model: "z-chat", status: "running" });
   const connection = fakeConnection({ myWorkersWithStatus: [machine({ "model:a-embed": "embeddings=1" })], modelPullsForWorker: [pull] });
   const view = await connectedFlow(connection);
-  await waitFor(() => expect(view.result.current.checks.find((c) => c.id === "models")?.answer).toContain("Pulling"));
+  await waitFor(() => expect(view.result.current.checks.find((c) => c.id === "models")?.answer).toContain("Downloading"));
   act(() => connection.subscriptions.emit(MODEL_PULL_CONCEPT,
     { ...pull, status: "failed", errorMessage: "Not enough disk space", endedAt: new Date().toISOString() }, "NODE_UPDATED"));
   await waitFor(() => {

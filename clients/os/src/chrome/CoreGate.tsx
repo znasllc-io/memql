@@ -137,8 +137,7 @@ export function CoreGate({ onSignOut, children, waitForReadiness = true }: {
         </span>
         <h1 className="os-core-gate-head">Set up this cluster</h1>
         <p className="os-core-gate-body">
-          MemQL needs a way to reach a model before anyone can use it. The other steps can wait
-          &mdash; this screen goes as soon as inference is set up.
+          Choose how MemQL reaches a model. The rest can wait; this screen goes once one is set up.
         </p>
         {/* THE ONE THING THE VERDICT CANNOT SAY FOR ITSELF (memql#5259). The
             nodes that voted found no door; a node that could not read the

@@ -121,6 +121,7 @@ const STEP_ASKS: Partial<Record<CampaignStep, string>> = {
   template: "What it says.",
   sender: "Who it comes from.",
   when: "Now, at a set time, or every few weeks.",
+  review: "Check, then send.",
 };
 
 const WEEKS = Array.from({ length: 52 }, (_, n) => n + 1);

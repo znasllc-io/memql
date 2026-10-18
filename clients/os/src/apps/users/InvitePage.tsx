@@ -146,7 +146,7 @@ export function InvitePage({
       id: "who",
       name: "Who",
       state: draft.email.trim() === "" ? "open" : "done",
-      sentence: "The address the invitation goes to.",
+      sentence: "Where the invitation goes",
       answer: draft.email.trim(),
       body: (
         <>
@@ -173,7 +173,7 @@ export function InvitePage({
       id: "groups",
       name: "Groups",
       state: draft.groupIds.length > 0 ? "done" : "waiting",
-      sentence: "The groups they join the moment they accept. None is the ordinary case.",
+      sentence: "Groups they join on accepting",
       answer:
         draft.groupIds.length === 0
           ? ""
@@ -201,7 +201,7 @@ export function InvitePage({
       id: "role",
       name: "Role",
       state: draft.role === "" ? "waiting" : "done",
-      sentence: "What they can do once they are here.",
+      sentence: "What they can do here",
       answer: draft.role,
       body: (
         <>
@@ -244,7 +244,7 @@ export function InvitePage({
       ]
     : [];
 
-  stops.push({ id: "review", name: "Review", state: "ahead", body: <Facts><Fact label="Invite" value={draft.email.trim()} /><Fact label="Role" value={ladder.find(role => role.slug === draft.role)?.name || draft.role} /><Fact label="Groups" value={groups.filter(group => draft.groupIds.includes(group.id)).map(group => group.name).join(", ") || "None"} /></Facts> });
+  stops.push({ id: "review", name: "Review", sentence: "Check, then send", state: "ahead", body: <Facts><Fact label="Invite" value={draft.email.trim()} /><Fact label="Role" value={ladder.find(role => role.slug === draft.role)?.name || draft.role} /><Fact label="Groups" value={groups.filter(group => draft.groupIds.includes(group.id)).map(group => group.name).join(", ") || "None"} /></Facts> });
   const busy = actions.busyKey === `invite:${draft.email.trim()}`;
   const ready = open < 2 ? inviteIsAnswered({ ...draft, role: "chosen" }) : answered;
   const footer: Act[] = busy ? [] : [{ label: "Cancel", text: true, onAct: onBack }];

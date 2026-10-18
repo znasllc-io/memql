@@ -62,7 +62,13 @@ lines so the log tail is judged with a real failure in it), or
 `pipeline-source`, `pipeline-source-none`, `pipeline-map` (a source's checks,
 a source with no pipeline, the Overview map's Checks nodes) and
 `settings-pipelines-unset`, `-partial`, `-done`, `-unreported`
-(Settings -> Pipelines in each reading);
+(Settings -> Pipelines in each reading), or
+`add-machine-describe`, `add-machine-waiting`, `add-machine-runtime`,
+`add-machine-pulling`, `add-machine-failed`, `add-machine-refused`,
+`add-machine-ready`, `add-machine-tools-ready` (Fleet's Add a machine in each
+phase, from a fixture flow: every reading is a function of facts, so a capture
+of a phase is exactly that phase), `setup-ownership` (taking ownership of a
+fresh cluster) and `setup-gate` (the first-run inference choice, memql#6214);
 `mode` is `dark`
 or `light`. **Take at least one narrow capture** (`820,760`): two of
 the first three real defects this harness found were invisible at 1400x900.

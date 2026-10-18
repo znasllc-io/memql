@@ -231,7 +231,7 @@ export function Rail({
                   answer and the note are frequently the SAME string (a
                   settled stop's answer IS its note), and rendering both put
                   the sentence on screen twice. */}
-              {collapsible && reachable && open && answer !== "" && note !== answer ? (
+              {collapsible && reachable && open && answer !== "" && note !== "" && note !== answer ? (
                 <span className="os-rail-note">{note}</span>
               ) : null}
               {open ? stop.body ?? null : null}

@@ -932,6 +932,7 @@ export function ComposePage(props: ComposePageProps) {
         {
           id: "source",
           name: "Method",
+          sentence: STEP_SENTENCES.source,
           state: settled || (chosen && journeyStop !== "source") ? "complete" : "open",
           answer: chosen ? SOURCE_KIND_LABEL[kind] : "",
           // Chosen once something has been read from it: the kind is a fact.
@@ -955,11 +956,11 @@ export function ComposePage(props: ComposePageProps) {
           ),
         },
         ...(kind === "repo" && !fixedSource && !parked ? [
-          { id: "githubAccount", name: "GitHub account", state: accountConfirmed ? "complete" as const : "ahead" as const, answer: chosenGithubAccount ? `@${chosenGithubAccount.login}` : "", openable: !sourceLocked && !busy,
+          { id: "githubAccount", name: "GitHub account", sentence: "Who connects to GitHub", state: accountConfirmed ? "complete" as const : "ahead" as const, answer: chosenGithubAccount ? `@${chosenGithubAccount.login}` : "", openable: !sourceLocked && !busy,
             body: <GitHubAccountStep credentials={githubAccounts} selectedId={githubCredentialId} onSelect={chooseIdentity} feed={props.credentialFeed} disabled={busy} onSettings={props.onSettings} /> },
-          { id: "githubOrganization", name: "Organization", state: selectedConnection ? "complete" as const : "ahead" as const, answer: selectedConnection?.accountLogin ?? "", openable: accountConfirmed && identityReady && !sourceLocked && !busy,
+          { id: "githubOrganization", name: "Organization", sentence: "Where the repository lives", state: selectedConnection ? "complete" as const : "ahead" as const, answer: selectedConnection?.accountLogin ?? "", openable: accountConfirmed && identityReady && !sourceLocked && !busy,
             body: <GitHubOrganizationStep organizations={configuredOrganizations} selectedId={selectedConnectionId} onSelect={chooseOrganization} disabled={busy} feed={connections} onSettings={props.onSettings} /> },
-          { id: "githubRepository", name: "Repository", state: repositoryConfirmed ? "complete" as const : "ahead" as const, answer: shortRepo(draft.repoUrl), openable: Boolean(selectedConnection) && !sourceLocked && !busy,
+          { id: "githubRepository", name: "Repository", sentence: "Which repository to deploy", state: repositoryConfirmed ? "complete" as const : "ahead" as const, answer: shortRepo(draft.repoUrl), openable: Boolean(selectedConnection) && !sourceLocked && !busy,
             body: selectedConnection ? <RepositorySource key={selectedConnection.id} connection={selectedConnection} draft={draft} onSelected={chooseRepository} probe={probe} onConnectionNeed={setConnectionNeed} onSettings={props.onSettings} /> : undefined },
         ] : []),
         {
@@ -967,7 +968,7 @@ export function ComposePage(props: ComposePageProps) {
           // Named by the answer above it, and by nothing until there is one.
           name: kind === "repo" ? "Configuration" : chosen ? SOURCE_DETAIL_NAME[kind]! : "Details",
           state: analysisInConfiguration ? phase === "stopped" ? "stopped" : "current" : kind === "repo" && !sourceLocked && repositoryConfirmed ? "waiting" : !chosen || kind === "repo" && (!selectedConnection || !repositoryConfirmed) && !sourceLocked ? "ahead" : settled ? "complete" : journeyStop === "source" ? "waiting" : state,
-          sentence: kind === "repo" ? "Configure this deployable." : chosen ? DETAIL_SENTENCES[kind] : undefined,
+          sentence: kind === "repo" ? "Configure this deployable" : chosen ? DETAIL_SENTENCES[kind] : "What the method needs",
           // The pipeline's own word on this stage -- what it settled as, or
           // why it stopped ("private, or not there") -- belongs to the step
           // that holds the fields it is about.
@@ -1147,30 +1148,30 @@ type WizardStep = StopId | "githubAccount" | "githubOrganization" | "githubRepos
 
 /** What the step a choice names is for, beside its name. */
 const DETAIL_SENTENCES: Readonly<Record<string, string>> = {
-  repo: "Which repository, and how this cluster reaches it.",
-  zip: "Which zip, and what to call it.",
-  ci: "What to call it, and what kind of app it is.",
+  repo: "The repository, and its access",
+  zip: "Which zip, and its name",
+  ci: "Its name and kind of app",
 };
 
 /** What each step is called on the rail. */
 const STEP_NAMES: Record<StopId, string> = { source: "Source", whatItIs: "Review", whereItLives: "Address", build: "Build", live: "Live" };
 
 /**
- * What an open step is for, beside its name.
+ * What each step is, as its subtitle on the rail (memql#6214).
  *
- * THE WIZARD'S OWN WORDS rather than the stops' shared blurbs, for two
- * reasons the blurbs could not have known about. They were written to stand
- * under a heading, so "Review" read "Review  Review the apps, build steps..."
- * on one line. And Source has none at all: its body IS three named options,
- * and a sentence listing the same three above them was the fourth place on
- * the page the list appeared (rule 7).
+ * THE WIZARD'S OWN WORDS rather than the stops' shared blurbs: those were
+ * written to stand under a heading, so "Review" read "Review  Review the
+ * apps, build steps..." on one line. A few words each, so every one reads as
+ * a single muted line beneath its name. Source's names the question, never
+ * its three options -- listing them above the options themselves would be
+ * the fourth place on the page the list appeared (rule 7).
  */
-const STEP_SENTENCES: Record<StopId, string | undefined> = {
-  source: undefined,
-  whatItIs: "What the source holds, and what deploying it would do.",
-  whereItLives: "Where each app answers, and whose it is.",
-  build: "Turn the source into files and put them in place.",
-  live: "Make it available to visitors.",
+const STEP_SENTENCES: Record<StopId, string> = {
+  source: "Where the app comes from",
+  whatItIs: "What it holds, and what it does",
+  whereItLives: "Where each app answers",
+  build: "Files built and put in place",
+  live: "Open to visitors",
 };
 
 /**

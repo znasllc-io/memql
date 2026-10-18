@@ -591,7 +591,7 @@ surface in the shell that read as a single thought.
   DNS record's value -- wrapped inside it. Given room (`SPLIT_AT`, 760px of
   pane) the wizard is TWO PANES on the list page's own gutters: the steps on
   the left, still a vertical rail and now standing still, and the open step on
-  the right with the rest of the width, headed by its name and what it asks.
+  the right with the rest of the width, headed by its name.
   Without room it is one column with the open step's body beneath its line.
   That is a different place in the tree rather than a different style, so it
   is measured (`kit/useWide`), not left to a container query. **Width is for
@@ -643,11 +643,16 @@ surface in the shell that read as a single thought.
   "was not added".
 - **Steps are the rail, vertical, at page scale** (`Rail` `scale="page"`), with
   the rail's closed state set: a check is done, a held ring is waiting on you,
-  a pulse is the cluster working, a dimmed ring is not reached. Every step is
-  one line -- its name, then its answer -- so a person can read back what they
-  have said. One step is always open, and its body sits on the text edge with
-  the rail's thread down its left side: there are two left edges on the page
-  and no box. A step nobody has reached is its name and nothing else.
+  a pulse is the cluster working, a dimmed ring is not reached. **Every step
+  says what it is** (memql#6214): its name, and one muted line beneath it --
+  a subtitle of a few words, about 40 characters at most, saying what the step
+  does, reached or not. Once the step is answered its answer takes that line,
+  so a person still reads back what they have said; the two are never stacked.
+  A rail of bare names said nothing to somebody deciding whether to begin. The
+  stage is headed by the open step's name alone: what the step is sits on the
+  rail's line beside it and is not said twice. One step is always open, and
+  its body sits on the text edge with the rail's thread down its left side:
+  there are two left edges on the page and no box.
 - **The floor is the action bar, and it says whose turn it is** (rule 12). The
   state in words on the left; on the right the way out, then the ONE forward
   act, primary last. **The forward act lives nowhere else** -- a step's body

@@ -160,7 +160,7 @@ export function NewRolePage({
       id: "base",
       name: "Start from",
       state: baseSlug === "" ? "waiting" : "done",
-      sentence: "A role to copy, and where the new one sits beside it.",
+      sentence: "A role to start from.",
       answer: base === null ? "" : `${base.name}, rank ${rank}`,
       body: (
         <>
@@ -286,7 +286,7 @@ export function NewRolePage({
       ]
     : [];
 
-  stops.push({ id: "review", name: "Review", state: "ahead", body: <Facts><Fact label="Role" value={name.trim()} /><Fact label="Rank" value={rank} /><Fact label="Scope" value={accountNameFrom(accounts, accountId) || "Cluster-wide"} /><Fact label="Permissions" value={grants.length} /></Facts> });
+  stops.push({ id: "review", name: "Review", sentence: "Check, then create.", state: "ahead", body: <Facts><Fact label="Role" value={name.trim()} /><Fact label="Rank" value={rank} /><Fact label="Scope" value={accountNameFrom(accounts, accountId) || "Cluster-wide"} /><Fact label="Permissions" value={grants.length} /></Facts> });
   const busy = actions.busyKey === `role:new:${derived}`;
   const ready = open === 0 ? name.trim() !== "" && derived !== "" : open === 1 ? rank > 0 && !rankTaken && !rankTooHigh : answered;
   const footer: Act[] = busy ? [] : [{ label: "Cancel", text: true, onAct: onBack }];

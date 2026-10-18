@@ -84,7 +84,7 @@ export function DownloadSetup({ source, machines, onCancel, onStarted }: { sourc
     catch (e) { setError(e instanceof Error ? e.message : String(e)); } finally { setBusy(false); }
   };
   return <Wizard icon={<Download />} title="Download backup" label="Download destination" open="destination" onOpen={() => {}} back={{ label: "Backups", onSelect: onCancel }}
-    steps={[{ id: "destination", name: "Save on a machine", state: "open", body: <>
+    steps={[{ id: "destination", name: "Save on a machine", sentence: "Where the copy is saved", state: "open", body: <>
       <Caption>{source.name} · {formatBytes(source.size)}</Caption>
       <Field label="Machine"><Select id={`${ids}-machine`} label="Machine" value={workerId} onChange={setWorkerId}>{machines.map(m => <option key={m.id} value={m.id}>{machineName(m)}</option>)}</Select></Field>
       <Field label="Full destination file path"><Input id={`${ids}-path`} label="Full destination file path" value={path} onChange={setPath} placeholder={`/Users/you/Downloads/${source.name}`} /></Field>

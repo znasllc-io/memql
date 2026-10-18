@@ -19,11 +19,11 @@ describe("measured worker permissions", () => {
     expect(p.checkedAt).toBe("2026-09-15T18:00:00Z");
     expect(p.probeContext).toBe("worker-process");
   });
-  it("checks off individual grants while withholding overall completion", () => {
+  it("names only the grant still unmeasured, while withholding overall completion", () => {
     const machine = machineFromRow(machineRow({ id: "v1:worker:registration:permission-test", permissions: { accessibility_state: "granted", screen_recording_state: "unknown" } }));
     const check = checksFor({ ...EMPTY_DRAFT, platform: "mac", computerUse: true }, machine, 0, new Date()).find(c => c.id === "permissions")!;
     expect(check.state).toBe("unknown");
-    expect(check.details).toMatchObject([{ name: "Accessibility", state: "done" }, { name: "Screen Recording", state: "unknown" }]);
+    expect(check.answer).toBe("Screen Recording not reported yet");
     expect(check.command).toBeUndefined();
   });
 });

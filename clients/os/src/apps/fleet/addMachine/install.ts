@@ -188,6 +188,13 @@ export function setupCommand(userLocal = false, inference = false): string {
   return `${binary} worker setup${inference ? " --inference" : ""}`;
 }
 
+/** Setting a machine up for Fleet workbenches after the install, once Docker
+ *  runs: the same binary path rule as `setupCommand`. */
+export function workbenchSetupCommand(userLocal = false): string {
+  const binary = userLocal ? '"$HOME/.memql/bin/memql"' : "/usr/local/bin/memql";
+  return `${binary} worker setup --workbench`;
+}
+
 /** Explicit recovery for the installer’s automatic, cluster-scoped app grant. */
 export function allowAppsCommand(clusterUrl: string, apps: readonly string[] = ["claude-code", "codex"], userLocal?: boolean): string {
   if (!clusterUrl || apps.length === 0 || apps.some(id => id !== "claude-code" && id !== "codex")) return "";

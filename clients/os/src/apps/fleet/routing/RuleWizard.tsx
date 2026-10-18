@@ -202,6 +202,7 @@ export function RuleWizard({
     {
       id: "review",
       name: "Review",
+      sentence: "Check, then add.",
       state: stateOf("review"),
       body: (
         <div className="fleet-rule-review">

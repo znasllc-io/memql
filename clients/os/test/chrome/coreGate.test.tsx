@@ -200,7 +200,7 @@ describe("the two role variants", () => {
     expect(names[0]).toContain("Your passkey");
     // The inference stop's body is its three doors; their presence is what
     // says it is the open one.
-    expect(await screen.findByText("A machine on your fleet")).toBeTruthy();
+    expect(await screen.findByText("Local")).toBeTruthy();
   });
 
   it("gives every other role one sentence and Sign out, and never names the owner", async () => {

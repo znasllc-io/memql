@@ -21,14 +21,16 @@ describe("Linux installation choices", () => {
     expect(screen.queryByRole("button", { name: /^About / })).toBeNull();
   });
 
+  // The setup command for local models is the Model runtime check's, offered
+  // only when the runtime needs a person's approval -- and it still runs the
+  // binary from where it was installed.
   it.each([false, true])("runs setup from the chosen install location (user local: %s)", (userLocal) => {
     render(<InstallStop draft={{ ...EMPTY_DRAFT, platform: "linux", inference: true, userLocal }} token="test-worker-token" domain="example.com" />);
     const install = (screen.getByLabelText("the install command") as HTMLInputElement).value;
     expect(install.includes(" --user-local")).toBe(userLocal);
-    expect((screen.getByLabelText("the local models setup command") as HTMLInputElement).value).toBe(
-      `${userLocal ? '"$HOME/.memql/bin/memql"' : "/usr/local/bin/memql"} worker setup --inference`,
-    );
-    expect(screen.getByText(/Run after Cockpit is installed/)).toBeTruthy();
+    expect(install).toContain("--inference");
+    const runtime = checksFor({ ...EMPTY_DRAFT, platform: "linux", inference: true, userLocal }, machineFromRow(machineRow({ id: "fresh" })), 2, new Date()).find((c) => c.id === "runtime")!;
+    expect(runtime.command).toBe(`${userLocal ? '"$HOME/.memql/bin/memql"' : "/usr/local/bin/memql"} worker setup --inference`);
   });
 });
 
@@ -37,7 +39,7 @@ describe("concise install instructions", () => {
     const writeText = vi.fn().mockResolvedValue(undefined);
     Object.defineProperty(navigator, "clipboard", { configurable: true, value: { writeText } });
     render(<InstallStop draft={{ ...EMPTY_DRAFT, platform: "linux", userLocal }} token="test-worker-token" domain="example.com" />);
-    expect(screen.getByText(/installer detects Claude Code and Codex/)).toBeTruthy();
+    expect(screen.getByText(/installer allows Claude Code and Codex/)).toBeTruthy();
     const details = screen.getByLabelText("the app permissions command").closest("details")!;
     expect(details.open).toBe(false);
     fireEvent.click(screen.getByText("App permissions"));
@@ -52,16 +54,16 @@ describe("concise install instructions", () => {
     expect(allowAppsCommand("https://api.example.com", ["codex; bad"])).toBe("");
     expect(allowAppsCommand("https://api.example.com", [])).toBe("");
   });
-  it.each([false, true])("shows only the commands needed for local models=%s and reveals the separate token on demand", (inference) => {
+  it.each([false, true])("shows one command for local models=%s and reveals the separate token on demand", (inference) => {
     render(<InstallStop draft={{ ...EMPTY_DRAFT, inference }} token="test-worker-token" domain="example.com" />);
     expect(screen.getByRole("button", { name: "Copy the install command" })).toBeTruthy();
-    expect(screen.queryByRole("button", { name: "Copy the local models setup command" }) !== null).toBe(inference);
+    expect(screen.queryByRole("button", { name: "Copy the local models setup command" })).toBeNull();
     const tokenDetails = screen.getByLabelText("the worker token").closest("details")!;
     expect(tokenDetails.open).toBe(false);
     fireEvent.click(screen.getByText("Connection token"));
     expect(tokenDetails.open).toBe(true);
     expect(screen.getByRole("button", { name: "Copy the worker token" })).toBeTruthy();
-    expect(screen.getByText(/private token shown only during this setup/)).toBeTruthy();
+    expect(screen.getByText(/Shown only here: it carries this machine’s token/)).toBeTruthy();
   });
 
   it("keeps a missing cluster address visible as a required change before running the command", () => {
@@ -92,9 +94,8 @@ describe("a partially downloaded recommended set", () => {
     const checks = checksFor({ ...EMPTY_DRAFT, inference: true, userLocal: true }, machine, 2, new Date(), {
       live: null, failed: { ...pull, status: "failed", errorMessage: "disk full" },
     });
-    expect(checks.find((c) => c.id === "models")).toMatchObject({
-      state: "stopped", act: "pullRecommended", command: '"$HOME/.memql/bin/memql" worker setup --inference',
-    });
+    // Recovery is the footer's Download models; the reason is on the line.
+    expect(checks.find((c) => c.id === "models")).toMatchObject({ state: "stopped", act: "pullRecommended" });
     expect(checks.find((c) => c.id === "models")?.answer).toContain("disk full");
   });
 });
