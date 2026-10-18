@@ -9209,6 +9209,7 @@
         "buildTag",
         "capabilities",
         "capabilityDescriptor",
+        "capacity",
         "clockSkewMs",
         "concurrency",
         "connectedNodeId",

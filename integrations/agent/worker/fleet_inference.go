@@ -47,6 +47,8 @@ type FleetInference struct {
 	selfNodeId string
 	logger     *slog.Logger
 	clock      func() time.Time
+	// capacity caches the evidence fleet admission reads (fleet_admission.go).
+	capacity capacityCache
 }
 
 // NewFleetInference builds the seam implementation from the dispatcher's
@@ -180,6 +182,10 @@ func (f *FleetInference) Call(ctx context.Context, req memqlengine.FleetCallRequ
 	if err != nil {
 		return memqlengine.FleetCallResult{}, fmt.Errorf("%w: %v", memqlengine.ErrFleetUnavailable, err)
 	}
+	// Capacity, under every route: a machine that cannot load the model now is
+	// ruled out with its reason, and a full or degraded one goes behind every
+	// machine that passes (fleet_admission.go).
+	plan = f.admit(ctx, plan, req.ModelId)
 	if len(plan.Candidates) == 0 {
 		return memqlengine.FleetCallResult{}, &memqlengine.FleetUnavailable{
 			ModelId:    req.ModelId,

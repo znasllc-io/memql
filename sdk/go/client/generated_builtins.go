@@ -2219,6 +2219,21 @@ func EmailRenderBuild(args EmailRenderArgs) string {
 	return b.String()
 }
 
+// FleetCapacity -- What each machine you can use can take on right now. One row: {machines, measuredAt}. Each machine says how many calls are in flight against its slots, the memory free for a model and the models already loaded (memory.reported is false when its cockpit does not report capacity, and it is then admitted on its slots alone), how fast it has answered over the last two hours, and whether it is degraded. Every route's fleet door admits machines on these figures before choosing one.
+type FleetCapacityArgs struct {
+}
+
+// FleetCapacity calls the engine builtin fleetCapacity.
+func (qc *QueryClient) FleetCapacity(ctx context.Context, args FleetCapacityArgs) (*Result, error) {
+	call := FleetCapacityBuild(args)
+	return qc.executeNamed(ctx, "fleetCapacity", call)
+}
+
+func FleetCapacityBuild(args FleetCapacityArgs) string {
+	_ = args
+	return "builtin fleetCapacity()"
+}
+
 // FleetModelProbe -- Ask one of YOUR OWN fleet machines to measure a model it already has, and return at once with the id of the record to watch. The suite is pinned by this engine and echoed back by the machine, so figures can never be filed under a suite that was not run. Owner-only, and the machine must be yours, unrevoked and connected right now -- the same refusals a pull makes, reused deliberately, because offline is offline whichever act is asking. Progress lands per case on the v1:worker:modelProbe row this returns the id of; the figures land on a v1:platform:modelMeasurement row keyed by machine, model and suite version. Every figure is a measured statistic OR a named reason there is none: a machine nobody has probed and a model that failed every case are different answers, and a page that renders both as zero would lead to opposite actions.
 type FleetModelProbeArgs struct {
 	// v1:worker:registration.id of the machine to measure on. It must be one of the caller's own; another user's id answers exactly as a made-up one does.

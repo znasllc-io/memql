@@ -58,6 +58,7 @@ func (e *MemQLEngine) initBuiltinExecutorHandlers() error {
 		"autoBalanceReset":              e.autoBalanceResetBuiltin,
 		"myBudget":                      e.myBudgetBuiltin,
 		"myBudgetSave":                  e.myBudgetSaveBuiltin,
+		"fleetCapacity":                 e.fleetCapacityBuiltin,
 		BuiltinExecutorConcepts: func(ctx context.Context, args map[string]any, target int) ([]memorynodes.MemoryNode, error) {
 			return e.evaluateConceptsExpression(ctx, target, args)
 		},

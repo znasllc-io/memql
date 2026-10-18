@@ -241,41 +241,64 @@ that the resources are available to send a request to one of these fleet
 machines". It applies to every route: Auto, Local, Apps (for its embeddings)
 and personal routes.
 
-**Admission, before any fleet machine is chosen for a call.** A machine takes
-a call only when all of these hold:
+**Admission, before any fleet machine is chosen for a call.** It runs once per
+fleet call on the node planning it, after the planner (which already requires
+the machine online) and before any machine is tried, so it covers the person's
+own machines, lent ones, a call pinned to one machine and the cluster's own
+work alike. It reads only the registration row and the decision record, never
+the stream, so a replica that does not hold a machine's stream decides exactly
+as the one that does. Three questions, in order:
 
-- it is online;
-- the model has a free concurrency slot on it (`FleetMachine.Busy()`, as
-  today);
-- it can serve the model without overcommitting memory: the model is already
-  loaded, or free memory is at least the model's `memoryNeedBytes` plus 10%
-  headroom (at least 1 GiB);
-- it is not degraded: over the last 20 decisions it served for this model, the
-  error ratio is under 50% and the median latency is under three times the
-  model's own median across the fleet.
+- **Memory.** The model is already loaded, or the pool has room for the model's
+  catalog `memoryNeedBytes` plus 10% headroom (at least 1 GiB). Room is the
+  reported free memory plus what IDLE loaded models hold, because the runtime
+  unloads an idle model to make room. A machine without room is ruled out:
+  "not enough free memory to load qwen3.8:27b (needs 22 GB with headroom, 9 GB
+  free)", with "N GB more held by idle models" when there are any.
+- **A free slot** for the model (`FleetMachine.Busy()`'s comparison): "every
+  slot is in use (2 of 2 calls running)".
+- **Not degraded.** Over its last 20 decisions within fifteen minutes (at least
+  4), at least half failed; or at this model its median latency is over three
+  times the rest of the fleet's (at least 4 calls each side): "degraded: 4 of
+  its last 6 calls failed".
 
-A machine that fails is passed over with a precise reason in `considered`, for
-example "not enough free memory to load qwen3.8:27b (needs 20 GB, 9 GB free)",
-and the next machine or source in the route is tried. A call is never sent to
-a machine that cannot take it.
+A full or degraded machine is **set aside, not refused**: it goes behind every
+machine that passes, with its reason in `considered`, and is kept when none
+passes (full machines before degraded ones). A full machine queues the call on
+its own slot, which is what every machine did before admission existed;
+refusing would turn two messages in a row on a one-machine fleet into a
+refusal. A degraded machine is the only machine some fleets have, and the
+fifteen-minute window is what lets it recover. When every machine is ruled out
+for memory, the fleet door refuses with every machine's reason, and the route
+moves to its next source.
 
-**Signals.** The cockpit reports live memory (total and free, unified or
-VRAM) and the models its runtime has loaded (Ollama `/api/ps`) on its
-heartbeat. When a machine reports none of these, admission falls back to the
-concurrency check alone and says so in `considered` ("memory not reported;
-admitted on concurrency only").
+**Signals.** The cockpit reports `Capacity` on Register and every Heartbeat:
+the pool total and free, its kind (`unified`, `vram`, `system`) and each loaded
+model with its size, expiry and calls running (Ollama `/api/ps`). The agent
+stamps the report with its own clock and stores it on the registration row
+(`capacity`). A machine that does not report, a report older than two
+minutes, or a model the catalog states no memory need for skips the memory
+question; admission then rests on slots, as before. The evidence the catalog
+and the decision record supply is cached per node for five minutes and thirty
+seconds.
 
-**Measurement.** `fleetCapacity()` (`@sdk`) returns, per machine the caller can
-route to:
+**Measurement.** `fleetCapacity()` (`@sdk`) returns one row `{machines,
+measuredAt}`, one entry per machine behind the caller's catalog:
 
-- memory total and free, and whether it is unified or VRAM;
-- the models loaded now;
-- in-flight calls against slots, per model;
-- recent tokens per second and median latency, per model, from
-  `v1:router:call`.
+```
+{ registrationId, name, displayName, online,
+  slots: { inFlight, max },                 // max 0: no ceiling declared
+  memory: { reported, kind, totalBytes, freeBytes, idleLoadedBytes, reportedAt },
+  loadedModels: [{ model, runtime, sizeBytes, expiresAt, activeCalls }],
+  models: [modelId],
+  performance: { calls, medianLatencyMs, tokensPerSec },  // null: unmeasured
+  degraded, degradedReason }
+```
 
-Auto's ranking reads the same measurement for speed and availability, and the
-routing page's "What Auto picks now" shows the reason.
+Calls in flight per model are `loadedModels[].activeCalls`; performance is per
+machine over two hours of `v1:router:call`. Auto's ranking does not read
+capacity yet: a fleet door that admits no machine refuses, and Auto moves to
+its next source at call time.
 
 ## Readiness
 
