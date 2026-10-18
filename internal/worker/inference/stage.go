@@ -219,7 +219,7 @@ func (s Stage) Lines() []string {
 	}
 	detail := "Ollama as your user, listening on " + s.Listen + ", models in " + s.ModelsDir
 	if s.Parallel > 1 {
-		detail += ", " + strconv.Itoa(s.Parallel) + " requests at a time"
+		detail += ", " + strconv.Itoa(s.Parallel) + " requests at a time per model"
 	}
 	out = append(out, "write "+s.UnitPath+" ("+detail+")")
 	return out

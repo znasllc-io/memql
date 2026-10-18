@@ -56,7 +56,7 @@ func TestStageLinesNameTheParallelSlots(t *testing.T) {
 		t.Errorf("one slot needs no mention:\n%s", got)
 	}
 	s.Parallel = 2
-	if got := strings.Join(s.Lines(), "\n"); !strings.Contains(got, "2 requests at a time") {
+	if got := strings.Join(s.Lines(), "\n"); !strings.Contains(got, "2 requests at a time per model") {
 		t.Errorf("the stage must say how many requests it lets Ollama take:\n%s", got)
 	}
 }
@@ -180,5 +180,40 @@ func TestManagedParallelAtReadsTheUnitAndItsDropIns(t *testing.T) {
 	write(unit+".d/30-notes.txt", "[Service]\nEnvironment=OLLAMA_NUM_PARALLEL=9\n")
 	if got := managedParallelAt(unit); got != 4 {
 		t.Errorf("a non-.conf file in the drop-in directory changed the answer to %d", got)
+	}
+
+	// A home directory is a path, not a pattern. The reader used to glob the
+	// drop-in directory, and brackets, a backslash or a star in the path made
+	// the glob miss the drop-ins without a sound.
+	for _, name := range []string{"h[1]", "h[1", `h\x`, "h*?"} {
+		t.Run("a home directory named "+name, func(t *testing.T) {
+			unit := filepath.Join(t.TempDir(), name, "memql-ollama.service")
+			mustWriteFile(t, unit, "[Service]\nEnvironment=OLLAMA_NUM_PARALLEL=2\n")
+			mustWriteFile(t, unit+".d/10-raise.conf", "[Service]\nEnvironment=OLLAMA_NUM_PARALLEL=4\n")
+			if got := managedParallelAt(unit); got != 4 {
+				t.Errorf("the drop-in under %q was not read: got %d, want 4", name, got)
+			}
+		})
+	}
+	// systemd ignores hidden files in a drop-in directory, so does the cockpit.
+	t.Run("a hidden drop-in is ignored", func(t *testing.T) {
+		unit := filepath.Join(t.TempDir(), "memql-ollama.service")
+		mustWriteFile(t, unit, "[Service]\nEnvironment=OLLAMA_NUM_PARALLEL=2\n")
+		mustWriteFile(t, unit+".d/.disabled.conf", "[Service]\nEnvironment=OLLAMA_NUM_PARALLEL=7\n")
+		if got := managedParallelAt(unit); got != 2 {
+			t.Errorf("a hidden .conf file changed the answer to %d, want the unit's 2", got)
+		}
+	})
+}
+
+// mustWriteFile writes a test fixture and its directories, failing the test
+// on any error.
+func mustWriteFile(t *testing.T, path, text string) {
+	t.Helper()
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(path, []byte(text), 0o644); err != nil {
+		t.Fatal(err)
 	}
 }

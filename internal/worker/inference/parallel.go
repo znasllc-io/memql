@@ -3,7 +3,6 @@ package inference
 import (
 	"os"
 	"path/filepath"
-	"sort"
 	"strconv"
 	"strings"
 )
@@ -17,8 +16,9 @@ import (
 // the two came from different places they drifted: the unit never set it,
 // the worker read it from its OWN environment, and a person who exported it
 // to the wrong process got a ceiling nothing enforced. So the unit is the
-// source, and UnitParallel reads it back. Design record:
-// docs/superpowers/specs/2026-10-18-fleet-tuning-design.md, D3.
+// source of Ollama's slots, unless models.parallel or the worker's own
+// OLLAMA_NUM_PARALLEL says otherwise, and UnitParallel reads it back. Design
+// record: docs/superpowers/specs/2026-10-18-fleet-tuning-design.md, D3.
 
 // DefaultParallel is the number of slots a fresh native install gives
 // Ollama for this machine class. Every slot costs memory, and the measured
@@ -52,7 +52,8 @@ func (s Stage) parallelEnvironment() string {
 	if s.Parallel <= 1 {
 		return ""
 	}
-	return "# Requests a model takes at once. The worker reads this line and advertises the same ceiling.\n" +
+	return "# Requests a model takes at once. The worker advertises this unless " +
+		"models.parallel or the worker's own OLLAMA_NUM_PARALLEL says otherwise.\n" +
 		"Environment=OLLAMA_NUM_PARALLEL=" + strconv.Itoa(s.Parallel) + "\n"
 }
 
@@ -62,6 +63,11 @@ func (s Stage) parallelEnvironment() string {
 // variable wins; and an empty Environment= resets the list. Zero means the
 // unit says nothing usable -- no line, a number below one, or a word, which
 // Ollama ignores the same way.
+//
+// It reads the lines this cockpit writes and an owner's ordinary edits, not
+// all of systemd's syntax: a backslash at the end of a line does not continue
+// it, UnsetEnvironment= is not read, only the user unit and its own .d
+// directory are read, and an unterminated quote runs to the end of its line.
 //
 // Only [Service] counts and comments are skipped. EnvironmentFile= is not
 // followed: this cockpit never writes one for Ollama, and an owner who did
@@ -168,10 +174,21 @@ func managedParallelAt(unitPath string) int {
 		return 0
 	}
 	texts := []string{string(main)}
-	dropIns, _ := filepath.Glob(unitPath + ".d/*.conf")
-	sort.Strings(dropIns)
-	for _, path := range dropIns {
-		if b, err := os.ReadFile(path); err == nil {
+	// The drop-in directory is read as a directory and never matched as a
+	// pattern: the path runs through the owner's home, and a glob reads its
+	// brackets, backslashes and stars as syntax, so it can miss the drop-ins
+	// it means. ReadDir returns the names sorted, which is the order systemd
+	// applies them in. A directory that is missing or cannot be read holds no
+	// drop-ins, and the unit alone decides.
+	dir := unitPath + ".d"
+	entries, _ := os.ReadDir(dir)
+	for _, e := range entries {
+		name := e.Name()
+		// systemd ignores hidden files and anything that is not a .conf.
+		if strings.HasPrefix(name, ".") || !strings.HasSuffix(name, ".conf") {
+			continue
+		}
+		if b, err := os.ReadFile(filepath.Join(dir, name)); err == nil {
 			texts = append(texts, string(b))
 		}
 	}
