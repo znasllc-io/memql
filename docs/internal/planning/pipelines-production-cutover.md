@@ -141,6 +141,25 @@ public docs delivery, installer lifecycle, remaining
 audits and companion workflow retirement still need their own acceptance
 receipts before #5480 is complete.
 
+Native installer migration keeps the cheap no-cluster round trip for installer
+changes and moves the five full cluster cases to weekly or manual execution:
+round trip, repair, upgrade, from-source owner claim and pipelines substrate.
+The candidate scripts retain the existing graph/receipt assertions and use a
+fresh inner Docker daemon on an opted-in Linux fleet machine. The cheap case
+is capped at two CPUs and 4 GiB; the full cases at four CPUs and 16 GiB. No
+host home, Docker socket, directory or network namespace enters the fixture.
+The privileged fixture runs trusted installer test code; it is not a shared
+Workbench or an AKS step. A 64 GiB free-disk preflight is a check, not a disk
+quota. This adds no cloud instance or production capacity.
+
+The local fixture proof reached a real nested container with its cgroup limits
+enforced. A second proof killed the parent process with SIGKILL: a separate
+supervisor, bound by a kernel pidfd and resource ownership labels, retained
+evidence and removed the container, volume and image. Its first attempt found
+a missing recovered container ID; the corrected proof passed. This is fixture
+and cleanup evidence, not successful install/repair/upgrade qualification.
+The existing installer Actions remain until the native lifecycle receipts pass.
+
 The unused VS Code Marketplace/Open VSX publishing workflow is retired while
 native builds and installable downloads remain. Its historical successful run
 was a dry run, and its only publishing attempt failed without a token. Neither

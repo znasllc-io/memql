@@ -108,6 +108,12 @@ pipeline:
       - test/pipelinehop
       - test/clustere2e
     buckets:
+      installer:
+        - scripts/install/**
+        - scripts/lib/capability.sh
+        - editors/vscode/src/install/**
+        - scripts/ci/pipeline_installer_test.go
+        - memql-package.yaml
       # Filesystem gates read Go source as well as manifests and docs. The
       # import graph cannot discover these dependencies, so every PR runs them,
       # using the declared gate packages in scripts/ci/selection.
@@ -657,6 +663,74 @@ pipeline:
             export GOFLAGS=-p=1 GOMEMLIMIT=512MiB GOGC=50
             bash scripts/identity/build-css.sh
             go test -count=1 -timeout=300s ./ ./integrations ./integrations/customdomain ./integrations/compose ./cmd/envscan/... ./component/architecture/... ./component/envregistry/... ./scripts/... ./test/dslconformance/... ./examples/... ./component/auth/... ./deploy/...
+
+    - name: installer-smoke
+      on: [pull_request, merge_group, push, manual]
+      steps:
+        - name: no-cluster
+          when: { bucket: installer }
+          placement: fleet
+          execution: native
+          platform: linux/amd64
+          needs: { docker: true }
+          caches: []
+          timeout: 40m
+          artifacts: [.memql-install-evidence]
+          run: python3 scripts/install/ci/fleet-fixture.py --leg=no-cluster
+
+    # Full installer lifecycle is weekly and operator-triggered. It runs on an
+    # opted-in Linux machine, with a disposable inner daemon and finite limits.
+    # Neither PRs nor merge candidates may start privileged installer fixtures.
+    - name: installer-lifecycle
+      schedule: weekly
+      on: [schedule, manual]
+      runAfterFailure: true
+      steps:
+        - name: round-trip
+          placement: fleet
+          execution: native
+          platform: linux/amd64
+          needs: { docker: true }
+          caches: []
+          timeout: 95m
+          artifacts: [.memql-install-evidence]
+          run: python3 scripts/install/ci/fleet-fixture.py --leg=round-trip
+        - name: repair
+          placement: fleet
+          execution: native
+          platform: linux/amd64
+          needs: { docker: true }
+          caches: []
+          timeout: 95m
+          artifacts: [.memql-install-evidence]
+          run: python3 scripts/install/ci/fleet-fixture.py --leg=repair
+        - name: upgrade
+          placement: fleet
+          execution: native
+          platform: linux/amd64
+          needs: { docker: true }
+          caches: []
+          timeout: 95m
+          artifacts: [.memql-install-evidence]
+          run: python3 scripts/install/ci/fleet-fixture.py --leg=upgrade
+        - name: from-source
+          placement: fleet
+          execution: native
+          platform: linux/amd64
+          needs: { docker: true }
+          caches: []
+          timeout: 135m
+          artifacts: [.memql-install-evidence]
+          run: python3 scripts/install/ci/fleet-fixture.py --leg=from-source
+        - name: pipelines
+          placement: fleet
+          execution: native
+          platform: linux/amd64
+          needs: { docker: true }
+          caches: []
+          timeout: 180m
+          artifacts: [.memql-install-evidence]
+          run: python3 scripts/install/ci/fleet-fixture.py --leg=pipelines
 
     # Public repository facts need no publication token. These audits describe
     # live configuration, so their results never satisfy a PR or queue check.
