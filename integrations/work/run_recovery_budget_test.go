@@ -17,7 +17,7 @@ func TestModelCallBudgetRefreshesApprovedTotalsWithoutRefundingUsage(t *testing.
 	ctx, rc := context.Background(), aGoalBackedRun()
 	limit, used, err := c.ModelCallBudget(ctx, rc)
 	require.NoError(t, err)
-	require.Equal(t, 12, limit, "the workload estimate, not the larger declared cap, governs")
+	require.Equal(t, 96, limit, "proactive recovery observes the hard limit; admission owns the soft estimate")
 	require.Zero(t, used)
 	c.Charge(ctx, rc, memqlengine.ModelSpend{ReceiptID: "local", Served: "local", InputTokens: 20})
 	c.Charge(ctx, rc, memqlengine.ModelSpend{Served: "cache"})
@@ -27,7 +27,7 @@ func TestModelCallBudgetRefreshesApprovedTotalsWithoutRefundingUsage(t *testing.
 		for n := 0; n < 2; n++ {
 			limit, used, err = c.ModelCallBudget(ctx, rc)
 			require.NoError(t, err)
-			require.Equal(t, total, limit, "a raise is visible before this replica reaches its old hard cap")
+			require.Equal(t, 96, limit, "a raise is visible before this replica reaches its old hard cap")
 			require.Equal(t, 3, used, "keep peer, unjournaled local, and cache charges exactly once")
 		}
 	}

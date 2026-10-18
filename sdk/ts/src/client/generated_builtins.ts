@@ -1386,7 +1386,7 @@ export interface DecideApprovalArgs {
   approvalId: string;
   /** approved, rejected, or answered (for a feedback question). */
   decision: string;
-  /** The person's answer. A budget approval may supply {newLimit: number} to raise only its named ceiling above recorded usage before resuming, preserving all other ceilings and spent counters. Count and time limits must be whole numbers. */
+  /** The person's offered choice or feedback. Progress feedback continues saved work within its original limits; it cannot grant permissions or raise those limits. Older budget requests can only be rejected. */
   answer?: Record<string, unknown>;
 }
 

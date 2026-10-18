@@ -62,13 +62,7 @@ func recoveryGuidance(message common.ChatMessage) time.Time {
 	if json.Unmarshal([]byte(raw), &receipt) != nil {
 		return time.Time{}
 	}
-	answer, _ := receipt["answer"].(map[string]any)
-	if receipt["kind"] == "budget" {
-		feedback, _ := answer["feedback"].(string)
-		if strings.TrimSpace(feedback) == "" {
-			return time.Time{}
-		}
-	} else if receipt["kind"] != nil && receipt["decision"] != "answered" {
+	if receipt["kind"] == "budget" || (receipt["kind"] != nil && receipt["decision"] != "answered") {
 		return time.Time{}
 	}
 	if receipt["answer"] == nil {

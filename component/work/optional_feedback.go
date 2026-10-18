@@ -19,7 +19,7 @@ func OptionalFeedback(row map[string]any) (map[string]any, time.Time, bool) {
 	_, overrideOK := contract["overrideKey"].(string)
 	if row["kind"] != "feedback" || (kind != "text" && kind != "choice" && kind != "multi") ||
 		seconds < 1 || seconds > 300 || fingerprint == "" || !rerunOK || !overrideOK ||
-		row["artifactHash"] != ArtifactHash(subject) || IsModelCallCheckpoint(subject) || IsFailureQuestion(row["options"]) {
+		row["artifactHash"] != ArtifactHash(subject) || IsReasoningCheckpoint(subject) || IsFailureQuestion(row["options"]) {
 		return nil, time.Time{}, false
 	}
 	requested, _ := row["requestedAt"].(string)

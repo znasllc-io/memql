@@ -67,7 +67,7 @@ func (i *Integration) parkHumanDecision(ctx context.Context, owner, runID, appro
 }
 
 func (i *Integration) parkHumanDecisionWithBudget(ctx context.Context, owner, runID, approvalKind string, subject map[string]any, question string, options []map[string]any, expires time.Time, budget *memql.RunCeilingError) (string, error) {
-	checkpoint := budget != nil || (approvalKind == "feedback" && workstate.IsModelCallCheckpoint(subject))
+	checkpoint := budget != nil || (approvalKind == "feedback" && workstate.IsReasoningCheckpoint(subject))
 	rc, ok := common.RunFromContext(ctx)
 	if !ok || memql.BareShortId(rc.RunId) != memql.BareShortId(runID) || memql.BareShortId(rc.OwnerUserId) != memql.BareShortId(owner) {
 		return "", fmt.Errorf("human decision requires the current owned work run")
