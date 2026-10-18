@@ -200,6 +200,8 @@ func Project(machines []Candidate, now time.Time) []memqlengine.FleetModel {
 				// than as "has no memory".
 				MemoryGb: memqlengine.UsableGigabytes(memqlengine.HardwareFromRow(m.Hardware.Row())),
 				Platform: memqlengine.NormalizePlatform(m.Labels["os"]),
+				Capacity: m.Capacity,
+				Slots:    m.Concurrency[workerservice.ModelCapability],
 			})
 		}
 	}

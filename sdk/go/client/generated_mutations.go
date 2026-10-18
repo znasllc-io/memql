@@ -14881,6 +14881,8 @@ type UpdateWorkerLastSeenArgs struct {
 	// A non-material inventory refresh riding the heartbeat's own write (epic memql#5146). Free disk moves on every report and decides nothing, so it is not worth a second write to this row; an inventory change that moves the `runtime:` labels does not come through here at all, it goes through updateWorkerHardware and does not wait.
 	// OMITTED, never sent empty. update{} is a read-merge and `??` is blank-coalescing, so an absent key keeps the stored inventory while an empty object would overwrite it with a machine that reports nothing -- turning a cockpit's silence into a statement.
 	Hardware map[string]any
+	// What the machine can take on now: memory free for a model and the models loaded (fleet capacity, routes design record). Re-asserted on every flush and OMITTED when the cockpit sent none, for hardware's `??` reason: an absent key keeps the stored report, which then ages out on its own reportedAt.
+	Capacity map[string]any
 	// The latest Ping round trip in milliseconds (epic memql#5218, D11), riding the heartbeat's write for `hardware`'s reason: it is exactly as fresh as the flush it arrives with and decides nothing, so it is not worth a write of its own.
 	// OMITTED together with rttAt while nothing has been measured, and for the same `??` reason: an absent key keeps the stored figure, while a sent zero would write "0 ms" over a real one and read as a fast machine rather than as an unmeasured one.
 	RttMs int
@@ -14937,6 +14939,13 @@ func UpdateWorkerLastSeenBuild(args UpdateWorkerLastSeenArgs) string {
 		}
 		b.WriteString("hardware: ")
 		b.WriteString(renderMemQLValue(args.Hardware))
+	}
+	if args.Capacity != nil {
+		if b.Len() > 30 {
+			b.WriteString(", ")
+		}
+		b.WriteString("capacity: ")
+		b.WriteString(renderMemQLValue(args.Capacity))
 	}
 	if args.RttMs != 0 {
 		if b.Len() > 30 {

@@ -64,7 +64,12 @@ type Candidate struct {
 	// the machine is RECOMMENDED to pull; eligibility for a call is still the
 	// advertised label, which is a fact about a running process where this is a
 	// fact about hardware.
-	Hardware        workerservice.Inventory
+	Hardware workerservice.Inventory
+	// Capacity is what the machine reported it can take on NOW -- free memory
+	// and loaded models -- the zero value when its cockpit does not report it.
+	// Admission reads it before any machine is chosen (memql's
+	// fleet_capacity.go).
+	Capacity        memqlengine.FleetCapacity
 	Concurrency     map[string]uint32
 	ActiveCount     int
 	ConnectedNodeId string

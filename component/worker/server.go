@@ -185,6 +185,7 @@ func (s *server) admitRegistration(
 	// and the row are the same object by construction. Idempotent against the
 	// label merge upsertRegistration already did.
 	w.SetHardware(InventoryFromRow(registration.Hardware))
+	w.SetCapacity(CapacityFromProto(register.GetCapacity(), now))
 
 	streamCtx, cancel := context.WithCancel(stream.Context())
 	session := newStreamSession(s, stream, w, streamCtx, cancel)
@@ -1020,6 +1021,14 @@ func (s *streamSession) handleHeartbeat(hb *memqlv1.Heartbeat, sourceIP string) 
 		}
 	}
 
+	// Capacity rides every beat and lands with the next flush. A beat without
+	// one leaves the last report in place, and that report ages out on its own
+	// (memql.FleetCapacityStaleAfter), so a cockpit that stops reporting falls
+	// back to slot-only admission rather than being judged on an old figure.
+	if c := hb.GetCapacity(); c != nil {
+		s.worker.SetCapacity(CapacityFromProto(c, at))
+	}
+
 	// Persist lastSeenAt at most once per HeartbeatBatchInterval
 	// (memql#1340). The FIRST heartbeat of a stream always persists
 	// (lastPersistedAt zero value), so a (re)connected worker's row is
@@ -1119,8 +1128,11 @@ func (s *streamSession) handleHeartbeat(hb *memqlv1.Heartbeat, sourceIP string) 
 		ConnectedNodeId: s.server.nodeId,
 		ActiveCount:     active,
 		Hardware:        hardware,
-		RttMs:           s.rttMs,
-		RttAt:           s.rttAt,
+		// Re-asserted on every flush, as the round trip is: the report moves
+		// with every call, and nil (none reported) leaves the stored one.
+		Capacity: s.worker.Capacity().Row(),
+		RttMs:    s.rttMs,
+		RttAt:    s.rttAt,
 		// The two facts about the CONNECTION rather than the machine (epic
 		// memql#5327, designs D6 and D4). Both are re-asserted on every flush
 		// rather than written once: the skew moves with the machine's clock,

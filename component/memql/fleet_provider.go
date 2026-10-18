@@ -165,6 +165,12 @@ type FleetMachine struct {
 	// the machine itself reports Go's GOOS, which says `darwin`. Empty when the
 	// machine has not said, which blocks nothing.
 	Platform string
+	// Capacity is what the machine reported it can take on now, the zero value
+	// when its cockpit does not report it (fleet_capacity.go).
+	Capacity FleetCapacity
+	// Slots is the machine's ceiling on model calls across every model, zero
+	// when it declared none. MaxConcurrent above is this model's.
+	Slots uint32
 }
 
 // Busy reports whether the machine is at its declared ceiling for this model.
