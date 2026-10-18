@@ -39,8 +39,8 @@ import (
 // Nothing waits forever, and a step waits for what it is waiting on (ruling
 // R31b). While its Job does not exist -- its runner waiting for a free slot
 // under the pipelines ceiling -- it is bounded by its run's ceiling alone.
-// Once a status says when its Job was created, by the Job's own deadline: its
-// timeout from that creation, never past the run's ceiling. Past the bound
+// Once a status says when its execution started, by the Job's own deadline: its
+// timeout from execution start, never past the run's ceiling. Past the bound
 // and lostGrace, one last status decides how the step is reported, and its
 // result is returned without deleting its evidence.
 
@@ -84,9 +84,9 @@ type clusterStep struct {
 	servedBy string
 	// runDeadline is when the step's run reaches its ceiling; handedAt is
 	// when this executor first forwarded the step, on its own clock; and
-	// jobCreated is when the step's Job was created, as a status last said --
-	// never before handedAt -- zero while no Job is known to exist.
-	runDeadline, handedAt, jobCreated time.Time
+	// executionStarted is when the step's Job started, as a status last said --
+	// never before handedAt -- zero while execution has not started.
+	runDeadline, handedAt, executionStarted time.Time
 }
 
 func (e *Executor) runCluster(ctx context.Context, run StepRun, timeout time.Duration, runDeadline time.Time) pl.StepResult {
@@ -145,7 +145,7 @@ func (e *Executor) runCluster(ctx context.Context, run StepRun, timeout time.Dur
 			}
 			if at := s.giveUpAt(); !at.Equal(giveUpAt) {
 				// The step's Job exists now, or was made again: its own
-				// deadline from its creation is the bound.
+				// deadline from execution start is the bound.
 				giveUpAt = at
 				giveUp.Reset(at.Sub(e.now()))
 			}
@@ -164,29 +164,29 @@ func (s *clusterStep) giveUpAt() time.Time {
 
 // bound is when the step must have ended, and whether that is its run's
 // ceiling (ruling R31b): its Job's own deadline -- its timeout from its
-// creation -- unless the run's ceiling comes first, or no Job is known to
+// execution start -- unless the run's ceiling comes first, or no Job is known to
 // exist yet, when the step is waiting for a slot and the ceiling alone bounds
 // it.
 func (s *clusterStep) bound() (time.Time, bool) {
-	if !s.jobCreated.IsZero() {
-		if own := s.jobCreated.Add(s.timeout); !s.runDeadline.Before(own) {
+	if !s.executionStarted.IsZero() {
+		if own := s.executionStarted.Add(s.timeout); !s.runDeadline.Before(own) {
 			return own, false
 		}
 	}
 	return s.runDeadline, true
 }
 
-// learn takes the step's Job's creation time from a status that carries one
+// learn takes the step's execution start time from a status that carries one
 // (ruling R31b). A time before the hand-over is the hand-over: a clock that
 // puts the Job before the step reached a runner cannot vouch for it, and
 // believing it could give a running step up early. A Job made again under
 // the step's name moves it.
 func (s *clusterStep) learn(reply StatusReply) {
-	at, err := time.Parse(time.RFC3339, strings.TrimSpace(reply.JobCreatedAt))
+	at, err := time.Parse(time.RFC3339, strings.TrimSpace(reply.ExecutionStartedAt))
 	if err != nil {
 		return
 	}
-	s.jobCreated = maxTime(at, s.handedAt)
+	s.executionStarted = maxTime(at, s.handedAt)
 }
 
 func maxTime(a, b time.Time) time.Time {
@@ -346,9 +346,9 @@ func (s *clusterStep) giveUp(ctx context.Context) pl.StepResult {
 	_, atCeiling := s.bound()
 	code, deadline := pl.CodeRunCeiling, fmt.Sprintf("its run's %s ceiling", s.e.cfg.RunCeiling)
 	if !atCeiling {
-		code, deadline = cmp.Or(s.run.DeadlineCode, pl.CodeStepTimeout), fmt.Sprintf("its %s timeout from its Job's creation", s.timeout)
+		code, deadline = cmp.Or(s.run.DeadlineCode, pl.CodeStepTimeout), fmt.Sprintf("its %s timeout from execution start", s.timeout)
 	}
-	created := !s.jobCreated.IsZero()
+	created := !s.executionStarted.IsZero()
 	switch {
 	case ok && reply.State == StateRunning && created:
 		// The Job's own deadline ended it, so a runner still holding the step

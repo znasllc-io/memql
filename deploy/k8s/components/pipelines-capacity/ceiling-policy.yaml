@@ -1,0 +1,44 @@
+# The API server independently enforces the operator ceiling. The engine
+# account has read-only access to the parameter and cannot alter this policy.
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicy
+metadata:
+  name: memql-background-ceiling
+spec:
+  failurePolicy: Fail
+  paramKind:
+    apiVersion: capacity.memql.io/v1alpha1
+    kind: BackgroundCapacityPolicy
+  matchConstraints:
+    resourceRules:
+      - apiGroups: [kueue.x-k8s.io]
+        apiVersions: [v1beta2]
+        operations: [CREATE, UPDATE]
+        resources: [clusterqueues]
+  matchConditions:
+    - name: background-queue
+      expression: object.metadata.name == 'memql-background'
+  validations:
+    - expression: "has(object.spec.namespaceSelector.matchLabels) && size(object.spec.namespaceSelector.matchLabels) == 1 && object.spec.namespaceSelector.matchLabels['kubernetes.io/metadata.name'] == 'memql-pipelines' && (!has(object.spec.namespaceSelector.matchExpressions) || size(object.spec.namespaceSelector.matchExpressions) == 0)"
+      message: Only pipeline jobs may use this resource budget.
+    - expression: "size(object.spec.resourceGroups) == 1 && size(object.spec.resourceGroups[0].flavors) == 1 && object.spec.resourceGroups[0].flavors[0].name == 'memql-background'"
+      message: Background work must use its dedicated resource pool.
+    - expression: "!has(object.spec.cohortName) || object.spec.cohortName == ''"
+      message: Background work cannot borrow capacity from customer services.
+    - expression: "!has(object.spec.stopPolicy) || object.spec.stopPolicy in ['None', 'Hold']"
+      message: Changing capacity cannot interrupt admitted work.
+    - expression: "object.spec.preemption.withinClusterQueue == 'Never' && object.spec.preemption.reclaimWithinCohort == 'Never' && object.spec.preemption.borrowWithinCohort.policy == 'Never'"
+      message: Background admission cannot preempt running work.
+    - expression: "size(object.spec.resourceGroups[0].flavors[0].resources) == 4 && object.spec.resourceGroups[0].flavors[0].resources.all(r, r.name in ['cpu', 'memory', 'ephemeral-storage', 'pods'] && quantity(string(r.nominalQuota)).isGreaterThan(quantity('0')) && !quantity(string(r.nominalQuota)).isGreaterThan(quantity(r.name == 'cpu' ? string(params.spec.cpuMilli) + 'm' : r.name == 'memory' ? string(params.spec.memoryMiB) + 'Mi' : r.name == 'ephemeral-storage' ? string(params.spec.diskMiB) + 'Mi' : string(params.spec.jobs))))"
+      message: The allocation exceeds the operator's protected background capacity ceiling.
+---
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicyBinding
+metadata:
+  name: memql-background-ceiling
+spec:
+  policyName: memql-background-ceiling
+  validationActions: [Deny]
+  paramRef:
+    name: memql-background-capacity
+    parameterNotFoundAction: Deny

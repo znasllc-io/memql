@@ -198,6 +198,7 @@ var appReadFloors = map[string][]Role{
 	"app:cluster":               {RoleOwner, RoleDeveloper, RoleAdmin},
 	"app:cluster/modules":       {RoleOwner, RoleDeveloper, RoleAdmin},
 	"app:cluster/releases":      {RoleOwner},
+	"app:cluster/capacity":      {RoleOwner},
 	"app:cluster/updates":       {RoleOwner, RoleDeveloper, RoleAdmin},
 	"app:cluster/origins":       {RoleOwner},
 	"app:cluster/audit":         {RoleOwner},
@@ -288,7 +289,8 @@ var appPartGrants = map[string][]Role{
 	// developer holding it flips only a STOREFRONT pack: the other half of
 	// that rule is component/memql's AuthorizeSetPackEnabled, and an owner
 	// flips any pack there without asking this table.
-	"app:cluster/modules": {RoleOwner, RoleDeveloper},
+	"app:cluster/modules":  {RoleOwner, RoleDeveloper},
+	"app:cluster/capacity": {RoleOwner},
 }
 
 // The app tables fold into capabilitySets before anything reads it, so the

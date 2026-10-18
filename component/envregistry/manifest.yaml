@@ -2834,6 +2834,12 @@ variables:
     optional: true
     description: "Operator build pool for step Jobs and isolation probes: select nodes labeled memql.io/pipeline-pool=<value> and tolerate exactly that value's NoSchedule taint. A lowercase DNS label, at most 63 characters; invalid values refuse execution. Unset preserves Linux placement without a pool constraint. No matching node means waiting for capacity, never fallback to serving nodes."
 
+  - name: MEMQL_PIPELINES_QUEUE
+    component: pipelines
+    scope: node
+    optional: true
+    description: "Installed Kueue LocalQueue for resource admission in the pipeline namespace. Requires a dedicated build pool. Jobs are created suspended and consume their execution timeout only after admission. Unset retains the atomic Job-count ceiling. Enable only with the pipelines-capacity component and its qualified controller."
+
   - name: MEMQL_PIPELINES_RUN_MAX_MINUTES
     component: pipelines
     scope: node

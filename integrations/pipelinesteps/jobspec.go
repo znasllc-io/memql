@@ -257,7 +257,7 @@ func BuildJob(cfg Config, run StepRun, jobName string) (Job, error) {
 		// user namespace; never fall back to sharing the daemon's PID namespace.
 		pod.HostUsers = ptr(false)
 	}
-	return Job{
+	job := Job{
 		APIVersion: "batch/v1",
 		Kind:       "Job",
 		Metadata: ObjectMeta{
@@ -275,7 +275,16 @@ func BuildJob(cfg Config, run StepRun, jobName string) (Job, error) {
 				Spec:     pod,
 			},
 		},
-	}, nil
+	}
+	if cfg.QueueName != "" {
+		job.Metadata.Labels[queueLabel] = cfg.QueueName
+		job.Spec.Suspend = ptr(true)
+		// Kueue accounts requests. Explicit container limits must be reserved,
+		// too; namespace defaults are held to the same rule by the component.
+		reserveContainerLimits(job.Spec.Template.Spec.Containers)
+		reserveContainerLimits(job.Spec.Template.Spec.InitContainers)
+	}
+	return job, nil
 }
 
 // checkJob is every refusal, in one place, before anything is built. It
@@ -284,6 +293,14 @@ func checkJob(cfg Config, run StepRun) (int32, *pl.Refusal) {
 	scope := run.StepKey
 	refuse := func(format string, args ...any) (int32, *pl.Refusal) {
 		return 0, pl.Refuse(pl.CodeJobRejected, scope, format, args...)
+	}
+	if cfg.QueueName != "" && (!dnsLabelShape.MatchString(cfg.QueueName) || len(cfg.QueueName) > 63 || cfg.NodePool == "") {
+		return refuse("resource admission requires a named queue and a dedicated build pool")
+	}
+	if cfg.QueueName != "" {
+		if _, err := time.Parse(time.RFC3339Nano, run.RunDeadline); err != nil {
+			return refuse("resource admission requires the run's absolute deadline")
+		}
 	}
 	if err := pl.CheckMemoryMiB(run.MemoryMiB, false); err != nil {
 		return refuse("%s", err)
@@ -643,6 +660,10 @@ func stepContainer(cfg Config, run StepRun, jobName, secretName string, caches [
 		env = append(env, plainVar(name, run.Env[name]))
 	}
 	env = append(env, plainVar(stepCommandVar, run.Command))
+	if cfg.QueueName != "" {
+		deadline, _ := time.Parse(time.RFC3339Nano, run.RunDeadline) // checkJob validates it.
+		env = append(env, plainVar("MEMQL_STEP_RUN_DEADLINE", strconv.FormatInt(deadline.Unix(), 10)))
+	}
 	if len(run.Artifacts) > 0 {
 		env = append(env, plainVar(stepArtifactsVar, strings.Join(run.Artifacts, " ")))
 	}

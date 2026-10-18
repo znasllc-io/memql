@@ -1,5 +1,4 @@
-import type { ReactNode } from "react";
-import { CopyValue, Fact, Facts, Subhead } from "../../../kit";
+import { CopyValue, Fact, Facts, DetailsSection } from "../../../kit";
 import { formatFreshness, formatMoment } from "../../../kit/format";
 import { PageHelp } from "../../../kit/pageHelp";
 import { roundTripFigure } from "../addMachine/flow";
@@ -7,12 +6,7 @@ import { isWorkerOnline } from "../online";
 import { computerUseStatus, formatClockOffset, hasRoundTrip, pipelineStepsStatus, type MachineRow } from "../rows";
 import { HardwareGroup } from "./HardwareGroup";
 
-export function MachineDetailsSection({ title, label = title, children }: { title: string; label?: string; children: ReactNode }) {
-  return <section className="fleet-details-section" aria-label={label}>
-    <Subhead>{title}</Subhead>
-    <div className="fleet-details-section-body">{children}</div>
-  </section>;
-}
+export const MachineDetailsSection = DetailsSection;
 
 /** Read-only information stays open, ordered and separate from machine edits. */
 export function MachineDetailsInfo({ machine, now, machineClass, usableBytes }: {

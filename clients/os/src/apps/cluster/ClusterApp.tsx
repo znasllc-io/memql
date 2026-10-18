@@ -3,7 +3,7 @@ import { Concepts } from "@znasllc-io/memql-sdk-core/client";
 
 import { AppLogsSection } from "../../logs/AppLogsSection";
 import type { OsAppProps } from "../../system/registry";
-import { Head, Panel } from "../../kit";
+import { Details, DetailsSection, Head, Select, SettingRow, Switch } from "../../kit";
 import { AgentsSection } from "./agents/AgentsSection";
 import { AuditSection } from "./audit/AuditSection";
 import { MeshSection } from "./mesh/MeshSection";
@@ -13,9 +13,9 @@ import { OriginsSection } from "./origins/OriginsSection";
 import { ReleasesSection } from "./releases/ReleasesSection";
 import { UpdatesSection } from "./updates/UpdatesSection";
 import { ReadinessSection } from "./readiness/ReadinessSection";
+import { CapacitySection } from "./capacity/CapacitySection";
 import {
   CLUSTER_SECTIONS,
-  DEFAULT_CLUSTER_SETTINGS,
   LocalClusterSettingsStore,
   type ClusterSettings,
   type ClusterSettingsStore,
@@ -115,6 +115,7 @@ export function ClusterApp({
     );
   }
   if (sectionId === "releases") return <ReleasesSection visible={windowVisible} />;
+  if (sectionId === "capacity") return <CapacitySection visible={windowVisible} />;
   if (sectionId === "updates") return <UpdatesSection visible={windowVisible} />;
   if (sectionId === "modules") return <ModulesSection />;
   if (sectionId === "mesh") return <MeshSection intent={intent} consumeIntent={consumeIntent} />;
@@ -133,54 +134,21 @@ function ClusterSettingsSection({
   update: (patch: Partial<ClusterSettings>) => void;
 }) {
   return (
-    <div className="os-settings">
-      <Head title="Cluster settings" />
-      <Panel label="Cluster settings">
-        <fieldset className="os-field-group">
-          <legend>Open Cluster on</legend>
-          <div className="os-choice-row" role="radiogroup" aria-label="Default section">
-            {CLUSTER_SECTIONS.map((section) => (
-              <button
-                key={section.id}
-                type="button"
-                role="radio"
-                aria-checked={settings.defaultSection === section.id}
-                className="os-choice"
-                onClick={() => update({ defaultSection: section.id })}
-              >
-                {section.name}
-              </button>
-            ))}
-          </div>
-          <p className="os-caption">
-            Applies the next time a Cluster window opens. It does not move the window you are
-            looking at, and a section your role cannot reach simply does not appear in the nav.
-          </p>
-        </fieldset>
-
-        <fieldset className="os-field-group">
-          <legend>Inactive agents</legend>
-          <label className="os-check">
-            <input
-              type="checkbox"
-              checked={settings.showInactiveAgents}
-              onChange={(e) => update({ showInactiveAgents: e.target.checked })}
-            />
-            <span>List agents that are not active</span>
-          </label>
-          <p className="os-caption">
-            Off by default. An inactive agent is a template nothing will run, and the standing
-            question the Agents list answers is what this cluster does run. Turning this on reads a
-            different query, so the list restarts.
-          </p>
-        </fieldset>
-
-        <p className="os-caption">
-          These are kept in this browser. They travel with the roaming desktop when epic #4746
-          lands; until then a different browser starts from the defaults ({" "}
-          {DEFAULT_CLUSTER_SETTINGS.defaultSection}, inactive agents hidden).
-        </p>
-      </Panel>
+    <div className="os-cluster">
+      <Head title="Settings" />
+      <Details>
+        <DetailsSection title="General">
+          <SettingRow label="Start page">
+            <Select id="cluster-start-page" label="Open Cluster on" value={settings.defaultSection} onChange={defaultSection => update({ defaultSection })}>
+              {CLUSTER_SECTIONS.map(section => <option key={section.id} value={section.id}>{section.name}</option>)}
+            </Select>
+            <p className="os-caption">Used the next time you open Cluster.</p>
+          </SettingRow>
+          <SettingRow label="Agents">
+            <Switch checked={settings.showInactiveAgents} onChange={showInactiveAgents => update({ showInactiveAgents })}>Show inactive agents</Switch>
+          </SettingRow>
+        </DetailsSection>
+      </Details>
     </div>
   );
 }

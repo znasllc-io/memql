@@ -486,16 +486,19 @@ describe("computer permission choices", () => {
     await waitFor(() => expect(conn.query.decideApproval).toHaveBeenCalledWith({ approvalId: "permission", decision: "approved", answer: { permissionMode: "once", permissionHash: "sha256:abc123" } }));
   });
 
-  it("sends an explicit remembered choice and never attaches it to rejection", async () => {
+  it.each(["approved", "rejected"] as const)("sends the exact remembered-permission payload for %s", async decision => {
     const conn = fakeConnection({ approvals: [approvalRow({ id: "permission", kind: "scopeElevation", question: "Inspect the repository", subject: { computerPermission: scopedComputerRequest() } })] });
     mount(conn);
     fireEvent.click(await screen.findByText("Inspect the repository"));
     fireEvent.click(screen.getByRole("checkbox", { name: "Always allow reading this directory" }));
     await readTheBar();
-    fireEvent.click(screen.getByRole("button", { name: "Always allow" }));
-    await waitFor(() => expect(conn.query.decideApproval).toHaveBeenCalledWith({ approvalId: "permission", decision: "approved", answer: { permissionMode: "always", permissionHash: "sha256:abc123" } }));
-    fireEvent.click(screen.getByRole("button", { name: /^Reject this:/ }));
-    await waitFor(() => expect(conn.query.decideApproval).toHaveBeenCalledWith({ approvalId: "permission", decision: "rejected" }));
+    // These are alternative decisions, not two clicks on the same request.
+    // A second click while the first write is settling is correctly disabled.
+    fireEvent.click(screen.getByRole("button", { name: decision === "approved" ? "Always allow" : /^Reject this:/ }));
+    await waitFor(() => expect(conn.query.decideApproval).toHaveBeenCalledWith(decision === "approved"
+      ? { approvalId: "permission", decision, answer: { permissionMode: "always", permissionHash: "sha256:abc123" } }
+      : { approvalId: "permission", decision }));
+    expect(conn.query.decideApproval).toHaveBeenCalledTimes(1);
   });
 
   it("does not carry a remembered choice into a changed artifact", async () => {

@@ -4,7 +4,7 @@ import type { QueryClient } from "@znasllc-io/memql-sdk-core/client";
 import { useSession } from "../../chrome/access";
 import { useConnectionStatus } from "../../chrome/connection";
 import { useOsConnection } from "../../live/connection";
-import { AutoRefresh, Button, Caption, ContentSkeleton, Fact, Facts, Notice, Panel, Subhead, useAppReach } from "../../kit";
+import { AutoRefresh, Button, Caption, ContentSkeleton, DetailsSection, Fact, Facts, Notice, useAppReach } from "../../kit";
 import { formatMoment } from "../../kit/format";
 import { useNow } from "../../kit/useNow";
 import { percentUsed, readStorageReport, reportFresh, storageWarning, warningSentence, type StorageReport } from "./model";
@@ -84,7 +84,7 @@ export function StoragePanel() {
   const reading = useContext(Ctx);
   if (!reading) return null;
   const report = reading.fresh ? reading.report : null;
-  return <Panel label="Storage"><Subhead>Storage</Subhead>
+  return <DetailsSection title="Storage">
     {report ? <>
       {reading.warning ? <Notice tone="warn" sentence={warningSentence(reading.warning)} next="Increase capacity or review retention before writes run out of space." /> : null}
       <Facts>
@@ -95,5 +95,5 @@ export function StoragePanel() {
       <Caption>Database usage is estimated from database sizes and configured capacity.</Caption>
     </> : reading.busy && !reading.error ? <ContentSkeleton kind="detail" label="Loading storage measurements" /> : <Notice sentence={reading.error || "Storage measurements are out of date."} next="Check the database monitor. Measurements update automatically." />}
     {!report && reading.warning ? <Notice tone="warn" sentence="The last storage report warned that capacity was nearly full." next="Check capacity before resuming heavy writes." /> : null}
-  </Panel>;
+  </DetailsSection>;
 }

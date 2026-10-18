@@ -1,0 +1,31 @@
+# Upstream Kueue v0.20.2, SHA256 1ab14ecd590575ac57f50fa4cbcf529766bc2c32ba974bda1614381281ec52b4.
+# The runner must ship queue support before an overlay enables this component.
+apiVersion: kustomize.config.k8s.io/v1alpha1
+kind: Component
+openapi:
+  path: openapi.json
+resources:
+  - queue.yaml
+  - rbac.yaml
+  - ceiling-policy.yaml
+patches:
+  - target: {kind: ConfigMap, name: memql-pipelines}
+    patch: |-
+      - op: add
+        path: /data/MEMQL_PIPELINES_QUEUE
+        value: memql-background
+replacements:
+  - source:
+      kind: LimitRange
+      name: memql-pipelines-limits
+      fieldPath: spec.limits.[type=Container].default.memory
+    targets:
+      - select: {kind: LimitRange, name: memql-pipelines-limits}
+        fieldPaths: ["spec.limits.[type=Container].defaultRequest.memory"]
+  - source:
+      kind: LimitRange
+      name: memql-pipelines-limits
+      fieldPath: spec.limits.[type=Container].default.ephemeral-storage
+    targets:
+      - select: {kind: LimitRange, name: memql-pipelines-limits}
+        fieldPaths: ["spec.limits.[type=Container].defaultRequest.ephemeral-storage"]

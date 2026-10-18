@@ -369,3 +369,24 @@ builtin releaseDraftUncertain { }
 /// Refuse promotion while any approved publication is absent or incomplete.
 @executor("integration.release.releasePromotionRefuse")
 builtin releasePromotionRefuse { }
+
+/// Read the installation's protected background resource budget. Cluster owner only.
+@sdk
+@executor("integration.backgroundCapacity.read")
+@requiresCapability("read", "app:cluster/capacity")
+builtin clusterBackgroundCapacity { }
+
+/// Adjust admission on existing background machines within the operator ceiling.
+/// Compare both revisions; never resize machines or interrupt admitted work.
+@sdk
+@executor("integration.backgroundCapacity.set")
+@requiresCapability("execute", "app:cluster/capacity")
+@args(profile="object")
+builtin clusterSetBackgroundCapacity {
+  revision       string!
+  policyRevision string!
+  cpuMilli       int!
+  memoryMiB      int!
+  jobs           int!
+  accepting      boolean!
+}

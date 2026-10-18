@@ -22,6 +22,7 @@ export { EmptyState } from "./EmptyState";
 export { RecordListSkeleton } from "./RecordListSkeleton";
 export { AutoRefresh } from "./AutoRefresh";
 export { Switch } from "./Switch";
+export { Details, DetailsSection, SettingRow } from "./DetailsSection";
 export { findRegion, revealRegion } from "./reveal";
 export {
   Rail,
