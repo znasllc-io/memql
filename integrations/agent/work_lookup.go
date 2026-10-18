@@ -76,7 +76,21 @@ func (r *Replier) workLookupContracts(ctx context.Context) string {
 	if len(rows) == 0 {
 		return ""
 	}
-	encoded, err := json.Marshal(rows)
+	// MaterializeRows exposes payload fields at the top level while retaining
+	// the original payload. Supplying both doubles the same contracts and
+	// Fleet snapshot in every lookup prompt. Keep the discovery contract once;
+	// storage envelopes and their duplicate payload are not model evidence.
+	contracts := make([]map[string]any, 0, len(rows))
+	for _, row := range rows {
+		contract := map[string]any{}
+		for _, key := range []string{"capabilities", "concepts", "fleet", "matchedCapabilityCount", "note", "truncated"} {
+			if value, present := row[key]; present {
+				contract[key] = value
+			}
+		}
+		contracts = append(contracts, contract)
+	}
+	encoded, err := json.Marshal(contracts)
 	if err != nil || len(encoded) > 24*1024 {
 		return "" // The ordinary discovery tool remains available.
 	}

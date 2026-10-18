@@ -71,7 +71,7 @@ func TestLookupContractsAreAuthorizedBoundedAndReplicaIndependent(t *testing.T) 
 					if tc.large {
 						contract = strings.Repeat("x", 25*1024)
 					}
-					return map[string]any{"data": map[string]any{"capabilities": map[string]any{"id": "capabilities", "payload": map[string]any{"capabilities": []any{map[string]any{"name": contract, "arguments": []any{}}}}}}}, nil
+					return map[string]any{"data": map[string]any{"capabilities": map[string]any{"id": "capabilities", "payload": map[string]any{"capabilities": []any{map[string]any{"name": contract, "arguments": []any{}}}, "fleet": map[string]any{"checkedAt": "2026-10-18T13:00:00Z", "status": "observed"}, "note": "A shortlist does not establish absence.", "truncated": true}}}}, nil
 				}
 				return nil, nil
 			}
@@ -88,6 +88,12 @@ func TestLookupContractsAreAuthorizedBoundedAndReplicaIndependent(t *testing.T) 
 			}
 			if tc.want && !strings.Contains(prepared.messages[0].Content, "records.currentRecords") {
 				t.Fatal("contract lost through adapter envelope")
+			}
+			if tc.want {
+				text := newTestReplier(engine).workLookupContracts(ctx)
+				if strings.Count(text, "records.currentRecords") != 1 || strings.Count(text, "2026-10-18T13:00:00Z") != 1 || !strings.Contains(text, `"truncated":true`) || !strings.Contains(text, "does not establish absence") || strings.Contains(text, `"payload"`) {
+					t.Fatalf("discovery duplicated its envelope or lost evidence limits: %s", text)
+				}
 			}
 			if prepared.routerReq.Level != airoute.LevelStrong {
 				t.Fatal("discovery downgraded reasoning")

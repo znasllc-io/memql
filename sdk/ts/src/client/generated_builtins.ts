@@ -1038,7 +1038,7 @@ QueryClient.prototype.composeCancel = function (this: QueryClient, args: Compose
   return this.executeNamed("composeCancel", buildComposeCancel(args), opts);
 };
 
-/** Start a Materializer work run using the known materializeFile template. The composition and immutable source snapshot are saved before dispatch. Returns {compositionId, goalId, runId}; progress and the eventual outputFileId arrive on the composition row. */
+/** Create a saved document file in Files from supplied content or a writing request: Markdown, HTML, text, CSV, JSON, DOCX or PDF. Uses the materializeFile template. The composition and immutable source snapshot are saved before dispatch. Returns {compositionId, goalId, runId}; progress and the eventual outputFileId arrive on the composition row. */
 export interface ComposeMaterializeArgs {
   /** What to call it, and the filename stem of the output. A name with a slash is refused (folderId chooses where it is filed), and one trailing extension that already names the format is dropped, because the extension is added when the file is filed: Plan.md is filed as Plan.md, never Plan.md.md. */
   name: string;
