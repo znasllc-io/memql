@@ -54,6 +54,17 @@ with a 180-minute response ceiling. See the exact decision and PR proof in
 Native merge-candidate success and rejection evidence are still pending;
 the legacy context and remaining workflows have not been retired.
 
+Storage PR #6171 passed its native head check at 16:29:23 UTC: 35 completed
+steps, 14 expected path skips, 35 retained logs and 29 artifacts. It entered
+the ordinary merge queue at 16:29:48, without owner bypass. Native full-mode
+merge-group run `edc9f8dee667f4951fe021b9b6a404ae` / Work
+`572f56714d0b952207a526e0b5f952a7` started at 16:30:08 on exact candidate
+`1d2dcc4fde54822e218dcf2def35470afef9ed67`, based on
+`f0af5373d980491c0f215c9a4233100310898808`. Its result remains pending.
+The PR's final gate received a one-time Kueue priority of 1, allowing it to
+run alongside the existing database job. No running job was preempted and
+no quota was increased; all declared commands and assertions ran unchanged.
+
 The owner subsequently authorized the Mac repository permission change.
 One-time native maintenance run `c2d53a13e477da5ffb7755f329f9d285` passed,
 and the live worker re-advertised both `znasllc-io/memql` and
@@ -91,10 +102,16 @@ grants, and full automatic toolchain smoke checks before native artifact export.
 It supersedes [#6202](https://github.com/znasllc-io/memql/pull/6202) and
 [#6203](https://github.com/znasllc-io/memql/pull/6203) to avoid repeated full
 validation of sibling PRs in the bounded build pool. Their local validation is
-recorded on the PRs; an open PR is not a deployed feature. Marketplace and
-SDK publication, public docs delivery, installer lifecycle, remaining
+recorded on the PRs; an open PR is not a deployed feature. SDK publication,
+public docs delivery, installer lifecycle, remaining
 audits and companion workflow retirement still need their own acceptance
 receipts before #5480 is complete.
+
+The unused VS Code Marketplace/Open VSX publishing workflow is retired while
+native builds and installable downloads remain. Its historical successful run
+was a dry run, and its only publishing attempt failed without a token. Neither
+registry listed the extension on October 18. First-time marketplace publishing
+is separate from migrating the working delivery paths.
 
 The retirement branch also adds receipt-bound npm publication to the existing
 release candidate service. Local protocol and real-database tests cover exact
@@ -104,6 +121,9 @@ and dist-tag and preserves separate approval. This is implemented and locally
 tested, not a production npm publication receipt. Component tag triggers,
 registry credentials and a live publication still need qualification before
 the SDK workflow can be removed.
+GitHub Packages already contains SDK 0.8.0, published on July 15. The retirement
+branch prepares 0.9.0 and keeps its workspace lockfiles aligned; its package
+dry run passed. This does not publish or replace an existing registry version.
 
 ## Observed baseline, October 16, 2026 UTC
 
@@ -217,8 +237,8 @@ outputs, publication and failure evidence, not merely a command in a manifest.
 | `publish-docs-bundle.yml` | Native release-files builds and verifies the exact-version bundle with complete Git history; release attachment and downstream delivery receipt remain | #5508, #5712 |
 | `docs-current-check.yml` | Native weekly public docs check declared; installed schedule/failure delivery proof remains | #5508, #5712 |
 | `publish-sdk-core.yml` | Native release-files retains the compiled, version-checked npm archive; registry publication and immutable receipt remain | #5480 |
-| `publish-vscode-extension.yml` | Native release-files verifies all four native targets plus web; registry publication remains | #5480 |
-| `vscode-site.yml` | Native `tests.editor-site` builds and checks the static page, runs the existing Chromium browser suite and retains the page plus screenshots; cloud execution and served-version evidence remain | #5480 |
+| `publish-vscode-extension.yml` | Retired unused Marketplace publishing. Its only successful historical run, `37052150601`, was a dry run; `38112601591` failed every publishing target with an empty `VSCE_PAT`. Neither registry listed `znasllc.memql` on October 18. Native `release-files.packages` retains and verifies Linux x64/ARM64, macOS x64/ARM64 and web VSIX archives. First-time Marketplace/Open VSX account setup and publication are separate; no registry publication is claimed | #5480 |
+| `vscode-site.yml` | Retired after native release `b0643687e51532322e50eb0ff6014ab3` passed `tests.editor-site` in 13 seconds: build, self-check, complete Chromium suite, 25 retained artifacts and readable log `73f4664f-80ab-4a7b-a1c0-9705832da015`. The live page at `vscode.memql.io` matches the native HTML SHA-256 `6d7fd2c949a1c7e8f6ffb6f9fa9895a2991a3f2060387af76e6b0a3503f45c05` after the edge's standard refresh-script injection. Source is the deployed `1d087ac973e5fd1e620f99f93ef42dba1f3a3642` | #5480 |
 | `ruleset-drift.yml` | Removed after installed daily run `3443e867a582c3ee5053aa23511dcf41` passed both baselines, retained both logs and reported separate check `MemQL / memql / daily`; negative controls pass ([receipt](https://github.com/znasllc-io/memql/issues/5507#issuecomment-6245341749)) | #5507 |
 | `dependabot-tidy.yml` | Trusted dependency-PR maintenance, without exposing write authority to PR code | #5480 |
 | `clustere2e-compile.yml` API entry | Disabled October 17 at 14:05 UTC: file absent at `f8ece576d`, only two historical runs and no active execution. Current CI and native `checks.build-clustere2e` retain compilation. Required `ci-required` and run history preserved | #5480 |
