@@ -60,7 +60,22 @@ the ordinary merge queue at 16:29:48, without owner bypass. Native full-mode
 merge-group run `edc9f8dee667f4951fe021b9b6a404ae` / Work
 `572f56714d0b952207a526e0b5f952a7` started at 16:30:08 on exact candidate
 `1d2dcc4fde54822e218dcf2def35470afef9ed67`, based on
-`f0af5373d980491c0f215c9a4233100310898808`. Its result remains pending.
+`f0af5373d980491c0f215c9a4233100310898808`. It did not qualify: the
+campaign signup burst assertion rejected a valid partial write, and a macOS
+editor host timed out while repeatedly downloading VS Code. Its 325 unit tests
+passed; the desktop host never started. Repairs are
+[#6212](https://github.com/znasllc-io/memql/pull/6212) and
+[#6213](https://github.com/znasllc-io/memql/pull/6213). The former adds a
+cross-engine retry regression without changing signup runtime behavior. The
+latter distinguishes progressing downloads from stalls and bounds all transport
+attempts by one twenty-minute ceiling, without retrying tests.
+
+The unsuccessful queue attempt was cancelled at 18:48:58 UTC to release its
+remaining work: 35 completed, two failed and eleven cancelled steps; 35 successful
+logs and 93 artifacts retained. Its conclusion is **cancelled**, not successful
+or a completed failure aggregate. Both repairs have passing local qualification
+and production native checks in progress. Existing required contexts remain.
+A repaired exact normal-queue success and complete rejection proof are pending.
 The PR's final gate received a one-time Kueue priority of 1, allowing it to
 run alongside the existing database job. No running job was preempted and
 no quota was increased; all declared commands and assertions ran unchanged.
@@ -127,7 +142,7 @@ dry run passed. This does not publish or replace an existing registry version.
 
 ## Native infrastructure publication preparation, October 18
 
-A separate follow-up branch prepares OCI index publication and an independent
+PR #6200 includes OCI index publication and an independent
 `deploy/db-image/VERSION` of `16.15.1` (PostgreSQL 16.15, operand revision 1).
 The installed CNPG webhook accepted this tag in a server dry run; the running
 database image was not changed. Native database publication is still pending.
@@ -149,6 +164,42 @@ conflicts, read-only transport bounds and fresh-host replay. Compiled native
 selection and version guards pass. These are local qualification results;
 production execution, approved publication and anonymous pull receipts are
 still required before the database and fixture Actions workflows are removed.
+
+## Remaining native operation support, October 18
+
+PR #6200 adds repository-scoped read credentials for explicitly opted-in cluster
+commands. They have contents/checks/pull-requests read only, required Secret
+references, queue refresh and log redaction. Fleet, image and report-only steps
+refuse the command grant. The full compiler/runner race suites and agent/app
+scope tests pass.
+
+The standalone Scorecard scanner preserves the retiring action's policy and
+analyzes all 18 checks (two are unenforced by that upstream policy). It validates
+source identity, complete coverage and real SARIF output; an upstream zero exit
+without a report is not success. A read-only rehearsal at main `f0af5373` completed
+all 18 with no unscored checks, producing 13 findings and SARIF digest
+`3c322886cf2b1792002a2f6f21565fe81df700c92e9a311dd5f72b035578eaa5`.
+Weekly activation is held in commit `6d56703fb` until the new `githubReadToken`
+manifest field is deployed. Native App-token execution and receipt-bound SARIF
+publication still require qualification; the old workflow remains meanwhile.
+
+Manual maintenance can now be requested without disconnecting automatic CI in
+PR #6200. Existing event keys deduplicate repeated requests across replicas;
+the separate `/ manual` check cannot satisfy PR or merge-candidate requirements.
+Connected pipeline settings offer Run with a default-branch choice. Compiler and
+run-driver race tests, 14 UI behavior tests, typechecking and SDK drift checks
+pass. The browser fixture verified desktop/narrow layouts in light/dark,
+keyboard focus, cancellation, submission and retained connection state. This is
+not yet deployed.
+
+The production disk-packing change is instance PR #233, revision
+`ad95cfcbc6c6457c6245da4b4ae357f26ca27c83`, Healthy/Synced. New command/container
+workspace budgets are 15 GiB; old Jobs retain their declared budgets. The overall
+64 GiB disk quota, CPU/memory/pod ceilings and maximum of one build node remain.
+Instance PR #232 preserves that change while adding docs delivery and declared
+non-preempting priorities. Temporary priority changes for the two migration
+repairs affect only pinned, suspended, owned attempts and admit at free capacity;
+they neither preempt work nor increase quotas.
 
 ## Observed baseline, October 16, 2026 UTC
 
