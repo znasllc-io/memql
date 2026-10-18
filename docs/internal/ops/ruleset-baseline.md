@@ -11,10 +11,10 @@ owner: znas
 
 **Status:** living record. Edit it when a ruleset's intended state changes.
 **Asserted by:** `scripts/ci/ruleset-drift.sh`, run once per ruleset by
-`.github/workflows/ruleset-drift.yml` (daily 07:00 UTC + on demand).
+the native pipeline’s `repository-audit` stage (daily and on manual runs).
 **Origin:** memql#3836 (rule membership), memql#3837 (enforcement).
 
-This file is the *intended* configuration. The workflow is what notices when
+This file is the *intended* configuration. The native audit notices when
 the repository stops matching it. Neither is useful alone: a document nobody
 falsifies drifts into fiction, and a check with no recorded intent can only
 assert that today looks like yesterday.

@@ -123,7 +123,6 @@ pipeline:
         - "**/go.mod"
         - "**/go.sum"
         - memql-package.yaml
-        - .github/workflows/deploy-gate-image.yml
       database-image:
         - deploy/db-image/**
         - scripts/db-image/**

@@ -124,17 +124,17 @@ outputs, publication and failure evidence, not merely a command in a manifest.
 | `build-toolchain-image.yml` | Build and publish future toolchains without Actions | #5509 |
 | `build-db-image.yml` | Native `tests.database-image` selects the verified operand target for changed inputs and full qualification; live native execution and separate registry publication remain | #5509 |
 | `mirror-fixture-images.yml` | Digest-verified fixture mirroring without Actions | #5509 |
-| `deploy-gate-image.yml` | Disabled after installed-production run `3f3af7ca78ce6e9529aafa08f4bfa593` passed the unchanged build and retained its log, OCI archive and metadata; remove the file in final retirement | #5509 |
+| `deploy-gate-image.yml` | Removed after installed-production run `3f3af7ca78ce6e9529aafa08f4bfa593` passed the unchanged build and retained its log, OCI archive and metadata | #5509 |
 | `install-e2e.yml` | Native host lifecycle matrix and cleanup | #5480 |
 | `install-cluster-e2e.yml` | Installed-cluster lifecycle and cleanup; preserve actual failure evidence | #5480 |
-| `pipelines-live.yml` | Disabled unused manual placeholder: zero historical runs, command only refuses missing prerequisites; no runtime coverage lost | #5480 |
-| `proving-live.yml` | Disabled unused manual placeholder: zero historical runs, live provider remains unconfigured; no provider qualification claimed | #5480 |
+| `pipelines-live.yml` | Removed unused manual placeholder: zero historical runs, command only refuses missing prerequisites; no runtime coverage lost | #5480 |
+| `proving-live.yml` | Removed unused manual placeholder: zero historical runs, live provider remains unconfigured; no provider qualification claimed | #5480 |
 | `publish-docs-bundle.yml` | Native release-files builds and verifies the exact-version bundle with complete Git history; release attachment and downstream delivery receipt remain | #5508, #5712 |
 | `docs-current-check.yml` | Native weekly public docs check declared; installed schedule/failure delivery proof remains | #5508, #5712 |
 | `publish-sdk-core.yml` | Native release-files retains the compiled, version-checked npm archive; registry publication and immutable receipt remain | #5480 |
 | `publish-vscode-extension.yml` | Native release-files verifies all four native targets plus web; registry publication remains | #5480 |
 | `vscode-site.yml` | Native `tests.editor-site` builds and checks the static page, runs the existing Chromium browser suite and retains the page plus screenshots; cloud execution and served-version evidence remain | #5480 |
-| `ruleset-drift.yml` | Disabled after installed daily run `3443e867a582c3ee5053aa23511dcf41` passed both baselines, retained both logs and reported separate check `MemQL / memql / daily`; negative controls pass ([receipt](https://github.com/znasllc-io/memql/issues/5507#issuecomment-6245341749)) | #5507 |
+| `ruleset-drift.yml` | Removed after installed daily run `3443e867a582c3ee5053aa23511dcf41` passed both baselines, retained both logs and reported separate check `MemQL / memql / daily`; negative controls pass ([receipt](https://github.com/znasllc-io/memql/issues/5507#issuecomment-6245341749)) | #5507 |
 | `dependabot-tidy.yml` | Trusted dependency-PR maintenance, without exposing write authority to PR code | #5480 |
 | `clustere2e-compile.yml` API entry | Disabled October 17 at 14:05 UTC: file absent at `f8ece576d`, only two historical runs and no active execution. Current CI and native `checks.build-clustere2e` retain compilation. Required `ci-required` and run history preserved | #5480 |
 | Generated `github-code-scanning/codeql` | Reconcile GitHub default setup with advanced scanning and replacement publication | #5480 |

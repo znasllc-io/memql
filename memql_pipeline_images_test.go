@@ -128,7 +128,6 @@ func TestDeployGateImageFollowsBuildInputsAndStaysUnpublished(t *testing.T) {
 		{"go.sum", true},
 		{"go.work", true},
 		{"memql-package.yaml", true},
-		{".github/workflows/deploy-gate-image.yml", true},
 		{"docs/public/overview/quickstart.md", false},
 		{"clients/os/src/main.tsx", false},
 	} {
