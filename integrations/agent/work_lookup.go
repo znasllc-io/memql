@@ -52,6 +52,15 @@ func (r *Replier) workLookupContracts(ctx context.Context) string {
 			}
 		}
 	}
+	// The classifier already understands the current question. Its durable
+	// action/object search avoids ranking a filename or incidental words like
+	// "first" above the operation needed. Missing/invalid hints retain the
+	// ordinary bounded fallback, with no extra inference call.
+	if search, ok := classification["capabilitySearch"].(string); ok {
+		if search = strings.TrimSpace(search); search != "" && len(search) <= 300 {
+			title = search
+		}
+	}
 	if strings.TrimSpace(title) == "" || len(title) > 300 {
 		return ""
 	}

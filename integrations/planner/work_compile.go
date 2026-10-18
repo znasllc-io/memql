@@ -45,10 +45,11 @@ type CompileRequest struct {
 
 // CompileOutcome is what compile decided and what it cost.
 type CompileOutcome struct {
-	Acknowledgement string
-	Reply           bool
-	Workload        string
-	WorkTitle       string
+	Acknowledgement  string
+	Reply            bool
+	Workload         string
+	WorkTitle        string
+	CapabilitySearch string
 	// Route is the tier that answered.
 	Route work.Route
 	// ConstructId identifies the reused catalog template or the stored run draft.

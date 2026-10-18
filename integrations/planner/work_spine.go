@@ -238,6 +238,11 @@ func (s *spineScope) classify(ctx context.Context, args map[string]any) (any, er
 	}
 
 	out.Workload, out.WorkTitle = sectionable.Workload, strings.TrimSpace(sectionable.WorkTitle)
+	// A search hint only selects authorized contracts; it is never executable
+	// code or authority. Keep the same byte bound as capability discovery.
+	if search := strings.TrimSpace(sectionable.CapabilitySearch); len(search) <= 300 {
+		out.CapabilitySearch = search
+	}
 	ack := strings.TrimSpace(sectionable.Acknowledgement)
 	if validAcknowledgement(ack) {
 		out.Acknowledgement = ack
