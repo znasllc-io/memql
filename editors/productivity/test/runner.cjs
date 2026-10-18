@@ -15,9 +15,10 @@ async function main() {
     platform: "browser", format: "cjs", target: "es2022", external: ["vscode"] });
   try {
     if (process.argv.includes("--desktop")) {
-      const { runTests, downloadAndUnzipVSCode } = require(path.join(core, "node_modules/@vscode/test-electron"));
+      const { runTests } = require(path.join(core, "node_modules/@vscode/test-electron"));
+      const { downloadVSCode } = require("../../../scripts/vscode/download.cjs");
       const version = process.env.MEMQL_VSCODE_VERSION || "stable";
-      let executable = process.env.MEMQL_VSCODE_EXECUTABLE || await downloadAndUnzipVSCode({ version });
+      let executable = process.env.MEMQL_VSCODE_EXECUTABLE || await downloadVSCode({ version });
       if (process.platform === "darwin" && !fs.existsSync(executable)) {
         const contents = path.dirname(path.dirname(executable));
         const name = cp.execFileSync("/usr/libexec/PlistBuddy", ["-c", "Print CFBundleExecutable", path.join(contents,"Info.plist")],{encoding:"utf8"}).trim();
