@@ -112,7 +112,7 @@ RUN set -eux; \
 # ------------------------------------------------------------------------------
 # Stage 2 -- the operand image.
 # ------------------------------------------------------------------------------
-FROM ${CNPG_BASE}
+FROM ${CNPG_BASE} AS operand
 
 ARG PG_MAJOR=16
 ARG TIMESCALEDB_VERSION=2.29.1
@@ -182,3 +182,14 @@ LABEL org.opencontainers.image.title="memql-db" \
       io.memql.postgres.major="16" \
       io.memql.timescaledb.version="2.29.1" \
       io.memql.timescaledb.previous="2.28.3"
+
+# A native builder verifies the exact operand without a nested Docker daemon.
+# Neither the mounted script nor the disposable database enters an image layer.
+FROM operand AS verified
+RUN --mount=type=bind,source=smoke-in-container.sh,target=/memql-db-smoke.sh,readonly \
+    --mount=type=tmpfs,target=/tmp \
+    bash /memql-db-smoke.sh "${PG_MAJOR}" "${TIMESCALEDB_VERSION}" "${TIMESCALEDB_PREVIOUS_VERSION}"
+
+# Existing local builds still select the operand by default and exercise the
+# same script through smoke-test.sh. Native build validation selects `verified`.
+FROM operand AS runtime

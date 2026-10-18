@@ -316,9 +316,9 @@ never a best case" is unrepresentable rather than merely discouraged.
 - **Two tiers, and what each may publish is a DECISION** (P1). A CI replay is
   deterministic by construction, so pass-rate variance is trivially perfect and
   wall-clock belongs to the runner: both read `notMeasurableOnReplay` until the
-  live tier fills them. The live lane ships **DISARMED** (P3) --
-  `proving-live.yml` is `workflow_dispatch` with no schedule -- and the
-  scorecard's tier table says so rather than leaving empty columns unexplained.
+  live tier fills them. The live lane remains **DISARMED** (P3); its unused
+  Actions placeholder was removed during native CI migration. The scorecard
+  states that no live provider execution has been configured.
 - **An absent figure names its own reason, and the reason CHANGES rather than
   the number appearing.** `governance.modelCallsJournaled` is absent as
   `notMeasurableOnReplay`: the CI tier plays model responses from a cassette

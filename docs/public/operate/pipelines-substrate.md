@@ -1325,8 +1325,9 @@ Each of these is understood, and accepted for this release.
   in-process hop tests cover. It runs on that workflow's own triggers --
   nightly, on demand, and on pull requests that change the installer, the local
   cluster scripts, `deploy/k8s` or the workflow -- so a change to the
-  substrate's code alone does not run it. A live lane against GitHub itself,
-  `pipelines-live.yml`, ships disarmed.
+  substrate's code alone does not run it. Live qualification uses real native
+  pipeline runs and retained GitHub check receipts; the unused Actions
+  placeholder has been removed.
 - **Per-workbench readiness has not yet been verified in an installed release.**
   Settings -> Pipelines separates step-dispatcher installation from reports for
   each known workbench. The report path asks each replica for its own runner

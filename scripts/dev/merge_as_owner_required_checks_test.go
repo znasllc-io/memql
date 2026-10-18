@@ -83,6 +83,10 @@ case "$sub" in
       *compare/*)  printf '%s\n' "$target" >> ` + shellQuote(compareLog) + `; emit ` + shellQuote(compare) + ` ;;
       *rulesets/*) emit ` + shellQuote(ruleset) + ` ;;
       *rulesets)   emit ` + shellQuote(rulesets) + ` ;;
+      */check-runs*)
+        printf '%s\n' "$target" >> ` + shellQuote(filepath.Join(dir, "check-targets")) + `
+        [ -f ` + shellQuote(filepath.Join(dir, "check-runs.json")) + ` ] || exit 1
+        emit ` + shellQuote(filepath.Join(dir, "check-runs.json")) + ` ;;
       *)           echo '{}' ;;
     esac
     ;;
@@ -574,5 +578,46 @@ func TestReportMarksARequiredCheckThatHasNotReported(t *testing.T) {
 	}
 	if !strings.Contains(out, "NOT REPORTED (REQUIRED): ci-required") {
 		t.Errorf("the report must mark a required context that has not reported; output:\n%s", out)
+	}
+}
+
+// A context's name alone is not evidence from the App the ruleset requires.
+// The owner's bypass must preserve that binding on the exact PR head too.
+func TestGuardHonorsRequiredCheckAppAndHead(t *testing.T) {
+	rules := strings.Replace(requiresCIRequired, `{"context":"ci-required"}`,
+		`{"context":"MemQL / memql","integration_id":4822538}`, 1)
+	const head = "0ddc0de0ddc0de0ddc0de0ddc0de0ddc0de0ddc0"
+	const green = `{"id":10,"name":"MemQL / memql","head_sha":"` + head + `","app":{"id":4822538},"status":"completed","conclusion":"success"}`
+	for _, tc := range []struct {
+		name, runs string
+		want       int
+	}{
+		{"matching app and exact head", `[{"check_runs":[` + green + `]}]`, 0},
+		{"wrong app with same name", `[{"check_runs":[` + strings.Replace(green, "4822538", "15368", 1) + `]}]`, 3},
+		{"wrong head", `[{"check_runs":[` + strings.Replace(green, head, strings.Repeat("a", 40), 1) + `]}]`, 3},
+		{"no bound check", `[{"check_runs":[]}]`, 3},
+		{"malformed response", `{}`, 3},
+		{"API unavailable", "", 3},
+		{"newer cancelled attempt", `[{"check_runs":[` + green + `,` + strings.Replace(strings.Replace(green, `"id":10`, `"id":11`, 1), `"success"`, `"cancelled"`, 1) + `]}]`, 3},
+		{"success on later API page", `[{"check_runs":[]},{"check_runs":[` + green + `]}]`, 0},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			// Deliberately green by name, including when its provenance is wrong.
+			stub := mergeGuardGhStub(t, rulesetsActive, rules,
+				prRollup(`{"name":"MemQL / memql","conclusion":"SUCCESS"}`))
+			if tc.runs != "" {
+				if err := os.WriteFile(filepath.Join(stub, "check-runs.json"), []byte(tc.runs), 0600); err != nil {
+					t.Fatal(err)
+				}
+			}
+			out, code := runMergeAsOwner(t, stub)
+			if code != tc.want || strings.Contains(out, "STUB-MERGE-INVOKED") != (tc.want == 0) {
+				t.Fatalf("exit=%d, want %d\n%s", code, tc.want, out)
+			}
+			asked, err := os.ReadFile(filepath.Join(stub, "check-targets"))
+			if err != nil || !strings.Contains(string(asked), "/commits/"+head+"/check-runs?filter=latest&per_page=100") {
+				t.Fatalf("App evidence must name the reviewed PR head: %s (%v)", asked, err)
+			}
+		})
 	}
 }

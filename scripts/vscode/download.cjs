@@ -41,7 +41,10 @@ function attempt(options, worker, timeoutMs) {
 
 async function downloadVSCode(options, settings = {}) {
   const worker = settings.worker || __filename;
-  const timeoutMs = settings.timeoutMs ?? 180000;
+  // The macOS archive is over 300 MB. A measured, still-progressing download
+  // received only 173 MiB in three minutes; restarting it cannot make progress.
+  // Bound the download separately from the unchanged host-test deadlines.
+  const timeoutMs = settings.timeoutMs ?? 600000;
   for (let number = 1; number <= 3; number++) {
     try {
       return await attempt(options, worker, timeoutMs);

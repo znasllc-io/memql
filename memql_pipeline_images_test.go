@@ -128,7 +128,6 @@ func TestDeployGateImageFollowsBuildInputsAndStaysUnpublished(t *testing.T) {
 		{"go.sum", true},
 		{"go.work", true},
 		{"memql-package.yaml", true},
-		{".github/workflows/deploy-gate-image.yml", true},
 		{"docs/public/overview/quickstart.md", false},
 		{"clients/os/src/main.tsx", false},
 	} {
@@ -154,6 +153,48 @@ func TestDeployGateImageFollowsBuildInputsAndStaysUnpublished(t *testing.T) {
 				return
 			}
 			t.Fatal("deploy-gate image validation is absent")
+		})
+	}
+}
+
+func TestDatabaseImageBuildRunsTheVerifiedOperandTarget(t *testing.T) {
+	spec := engineManifest(t).Pipeline
+	graph, _ := engineImportGraph(t)
+	for _, tc := range []struct {
+		path string
+		runs bool
+	}{
+		{"deploy/db-image/Dockerfile", true},
+		{"deploy/db-image/smoke-in-container.sh", true},
+		{"deploy/db-image/smoke-test.sh", true},
+		{"scripts/db-image/build.sh", true},
+		{".github/workflows/build-db-image.yml", true},
+		{"memql-package.yaml", true},
+		{"docs/public/overview/quickstart.md", false},
+		{"clients/os/src/main.tsx", false},
+	} {
+		t.Run(tc.path, func(t *testing.T) {
+			plan, refusal := compileEngineOpening(spec, graph, pipelines.EventPullRequest, []string{tc.path})
+			if refusal != nil {
+				t.Fatal(refusal)
+			}
+			for _, step := range plan.Steps() {
+				if step.Key != "tests.database-image" {
+					continue
+				}
+				if (step.Skip == nil) != tc.runs {
+					t.Fatalf("database validation selected=%v for %s, want %v", step.Skip == nil, tc.path, tc.runs)
+				}
+				build := step.ImageBuild
+				if build == nil || build.Context != "deploy/db-image" || build.Dockerfile != "deploy/db-image/Dockerfile" || build.Target != "verified" {
+					t.Fatalf("database build does not require the operand smoke target: %+v", build)
+				}
+				if step.RequiresFleet() || len(step.Secrets) != 0 || len(step.Caches) != 0 || step.Run != "" || step.RunAfterFailure || !slices.Equal(step.Artifacts, pipelines.ImageBuildArtifacts()) {
+					t.Fatalf("database build lost its isolated unpublished OCI contract: %+v", step)
+				}
+				return
+			}
+			t.Fatal("native database image validation is absent")
 		})
 	}
 }

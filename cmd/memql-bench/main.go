@@ -178,8 +178,7 @@ func doRun(c *capability.Capability) int {
 		// measured against a provider.
 		return c.Fail(capability.ExitPrerequisite,
 			"the live tier is not armed in this build: it needs a provider credential and a per-run dollar ceiling, "+
-				"and .github/workflows/proving-live.yml is workflow_dispatch with no schedule. "+
-				"Arm it deliberately rather than by running this")
+				"then an explicitly configured live runner. No provider was called")
 	}
 
 	corpus, cassettes, code := loadInputs(c)
@@ -224,7 +223,7 @@ func doRun(c *capability.Capability) int {
 	}
 	result.Scorecard.Tiers[figure.TierLive] = scorecard.TierState{
 		Armed: false,
-		Note:  "dispatched by hand from proving-live.yml; it has not been run, so every live figure reads `tierNotRun`",
+		Note:  "live provider execution is not configured; every live figure reads `tierNotRun`",
 	}
 
 	c.Set("scenarios", len(corpus.Scenarios))
