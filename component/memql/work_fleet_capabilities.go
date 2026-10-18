@@ -2,6 +2,12 @@ package memql
 
 import (
 	"context"
+	"encoding/base64"
+	"encoding/json"
+	"fmt"
+	"github.com/znasllc-io/memql/component/auth"
+	"github.com/znasllc-io/memql/component/language/parser"
+	"github.com/znasllc-io/memql/core/common"
 	"time"
 )
 
@@ -53,4 +59,44 @@ func fleetCapabilityCounts(models []FleetModel) map[string]any {
 		result[name] = map[string]any{"advertised": offered, "online": online, "idle": idle}
 	}
 	return result
+}
+
+// Prefetched discovery is a real read even when the model did not request a
+// tool round trip. Keep its bounded public receipt for review on any replica,
+// separately from resumable agent history so it cannot replace a continuation.
+func (e *MemQLEngine) recordWorkCapabilityEvidence(ctx context.Context, search string, matches []map[string]any, fleet map[string]any, total int) error {
+	run, ok := common.RunFromContext(ctx)
+	if !ok || !run.IsRun() {
+		return nil
+	}
+	actor, _ := auth.AccessFromContext(ctx)
+	if actor == nil || BareShortId(actor.UserId) != BareShortId(run.OwnerUserId) {
+		return fmt.Errorf("capability evidence requires owned work")
+	}
+	contracts := make([]map[string]any, 0, len(matches))
+	for _, match := range matches {
+		contracts = append(contracts, map[string]any{"name": match["name"], "kind": match["kind"], "app": match["app"], "description": boundedMemoryText(fmt.Sprint(match["description"]), 500)})
+	}
+	value, err := json.Marshal(map[string]any{"capabilities": contracts, "fleet": fleet, "matchedCapabilityCount": total, "truncated": total > len(matches), "note": "A current authorized operation discovery and Fleet advertisement snapshot. Contracts establish available operations, not successful effects. Advertisements do not reserve capacity. The shortlist does not establish absence."})
+	if err != nil {
+		return err
+	}
+	args, _ := json.Marshal(map[string]any{"search": search})
+	callID := "capability-discovery-" + workContextHash(search, value)
+	messages, err := json.Marshal([]common.ChatMessage{
+		{Role: "assistant", ToolCalls: []common.ToolCall{{ID: callID, Name: "workCapabilities", Arguments: string(args)}}},
+		{Role: "tool", Name: "workCapabilities", ToolCallId: callID, Content: string(value)},
+	})
+	if err != nil {
+		return err
+	}
+	call, err := parser.RenderCall("createWorkObservation", map[string]any{
+		"observationId": callID + "-" + BareShortId(run.RunId), "runId": run.RunId, "stepKey": run.StepKey, "kind": "note", "content": "Current capability discovery",
+		"data": map[string]any{"capabilityEvidence": true, "messagesEncoding": "json-base64-v1", "messages": base64.StdEncoding.EncodeToString(messages)},
+	})
+	if err != nil {
+		return err
+	}
+	_, err = e.Execute(auth.ContextWithInternalOrigin(ctx), "mutation "+call)
+	return err
 }

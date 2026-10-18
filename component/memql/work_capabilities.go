@@ -202,7 +202,11 @@ func (e *MemQLEngine) workCapabilitiesBuiltin(ctx context.Context, args map[stri
 	if err := e.RecordWorkProgress(ctx, WorkEvent{Kind: "action", Phase: "completed", Name: "Discovered capability contracts", Arguments: map[string]any{"search": search, "matchedCapabilityCount": total, "returnedContracts": len(matches)}}); err != nil {
 		return nil, err
 	}
-	raw, _ := json.Marshal(map[string]any{"capabilities": matches, "fleet": e.workFleetCapabilities(ctx), "concepts": catalog, "matchedCapabilityCount": total, "truncated": total > len(matches), "note": "Counts here describe capability definitions, never stored records. Read contracts describe available data, not proof that rows exist. Returned arguments are complete and ready to use; an empty list means no arguments. Only when argumentsOmitted is true, search that qualified name exactly for its full contract. Use recallMemory for prior conversations and preferences. Empty semantic results do not prove absence."})
+	fleet := e.workFleetCapabilities(ctx)
+	if err := e.recordWorkCapabilityEvidence(ctx, search, matches, fleet, total); err != nil {
+		return nil, err
+	}
+	raw, _ := json.Marshal(map[string]any{"capabilities": matches, "fleet": fleet, "concepts": catalog, "matchedCapabilityCount": total, "truncated": total > len(matches), "note": "Counts here describe capability definitions, never stored records. Read contracts describe available data, not proof that rows exist. Returned arguments are complete and ready to use; an empty list means no arguments. Only when argumentsOmitted is true, search that qualified name exactly for its full contract. Use recallMemory for prior conversations and preferences. Empty semantic results do not prove absence."})
 	return []memorynodes.MemoryNode{{ID: "capabilities", Payload: raw}}, nil
 }
 
