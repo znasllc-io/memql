@@ -165,6 +165,53 @@ message LoadedModel {
   uint32 active_calls = 5;
 }
 
+// SetupProgress is what this machine's installer is doing (memql#6229), as
+// the running worker last heard it over its owner-only control socket.
+//
+// The installer's later stages -- the model runtime, the models, Fleet
+// workbenches -- run in a terminal on the machine AFTER the worker has
+// connected, and nothing they do reaches the cluster any other way: the model
+// pull goes straight to the runtime, not through ModelPullStart. Without this
+// an install that is still downloading 18 GB reads, from the cluster, exactly
+// like a machine with no models, and the OS offers to download them again.
+message SetupProgress {
+  // "running" while the installer works; "finished" once it said so; "stopped"
+  // when it went quiet before finishing -- the terminal was closed, the
+  // process killed -- so the stages hold the last thing it reported and
+  // nothing more is coming. Any other word is read as no report.
+  string state = 1;
+  // The stages the installer was asked to run, in its own order. A stage it
+  // was not asked to run is ABSENT, never "skipped".
+  repeated SetupStage stages = 2;
+  // When the installer last spoke, on the machine's clock.
+  google.protobuf.Timestamp updated_at = 3;
+}
+
+// SetupStage is one stage of the installer.
+message SetupStage {
+  // "runtime" | "models" | "workbench". Any other name is dropped.
+  string name = 1;
+  // "waiting" | "running" | "done" | "failed" | "skipped". "skipped" is a
+  // stage the installer reached and chose not to run, or never reached before
+  // it finished; `detail` says which and why.
+  string state = 2;
+  // The installer's own sentence for this stage, verbatim: what it is doing,
+  // or why it stopped. Empty when it said nothing.
+  string detail = 3;
+  // models only: the model downloading now, in the runtime's own vocabulary.
+  string model = 4;
+  // models only: bytes of `model` on the machine so far, across ALL of its
+  // parts -- unlike ModelPullProgress, whose counters are the current part's.
+  uint64 completed_bytes = 5;
+  // models only: the whole size of `model`, or 0 while the runtime has not
+  // said.
+  uint64 total_bytes = 6;
+  // models only: how many of the stage's models are on the machine, of how
+  // many it is fetching.
+  uint32 models_done = 7;
+  uint32 models_total = 8;
+}
+
 // AppDescriptor is how one app on this machine is DRIVEN.
 //
 // `harness` is the protocol the cockpit will speak to it, and the engine
@@ -354,6 +401,10 @@ message Heartbeat {
   // its absence is its own signal and needs no `_present` twin: a beat that
   // carries none leaves the last report in place until it ages out.
   Capacity capacity = 9;
+  // setup is what this machine's installer is doing, and how it ended
+  // (memql#6229). A message field on capacity's terms: a beat that carries
+  // none leaves the stored report in place.
+  SetupProgress setup = 10;
 }
 
 // Ping is the CLUSTER's half of liveness (epic memql#5218, D11). A heartbeat

@@ -411,8 +411,11 @@ type HeartbeatFlush struct {
 	// Capacity is the machine's latest capacity report as a row, nil when it
 	// sent none.
 	Capacity map[string]any
-	RttMs    int
-	RttAt    time.Time
+	// Setup is the machine's latest installer report as a row (memql#6229),
+	// nil when it sent none.
+	Setup map[string]any
+	RttMs int
+	RttAt time.Time
 	// ClockSkewMs is the machine's own clock minus the cluster's, positive
 	// when the machine is ahead (epic memql#5327, design D6).
 	ClockSkewMs   int

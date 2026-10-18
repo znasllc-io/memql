@@ -103,6 +103,9 @@ type Worker struct {
 	// capacity is what the machine last reported it can take on now, guarded
 	// by mu: every beat rewrites it (capacity.go).
 	capacity Capacity
+	// setup is what the machine's installer last reported doing, guarded by
+	// mu like capacity (setup.go).
+	setup Setup
 	// LastRttMs and LastPongAt are the latest Ping round trip and when it was
 	// measured (epic memql#5218, D11). Guarded by mu like LastSeenAt: the
 	// stream's recv goroutine writes them on each Pong while a fleet read
