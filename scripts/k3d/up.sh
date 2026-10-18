@@ -1106,18 +1106,28 @@ function kustomize_image_overrides() {
     printf '      images:%s\n' "$out"
 }
 
-# kustomize_host_overrides -- the `kustomize.patches` entries that repoint the
-# two front-door Ingresses, or nothing.
+# kustomize_host_overrides -- the `kustomize.patches` entries that repoint every
+# local front door (each Ingress, plus the TURN route) at the domain, or nothing.
 #
 # WHY THE APPLICATION AND NOT A SECOND OVERLAY. The same reasoning as the image
 # overrides above (memql#3572): the two need different hostname VALUES, not a
 # different topology, so it is expressed where a value belongs. One overlay, one
 # sync path, no `if installing` branch in the manifests.
 #
-# WHY ONLY THESE TWO. Everything else the domain touches is process config and
-# reaches the pods through the memql-domain ConfigMap, derived by
+# WHY ONLY THE FRONT DOORS. Everything else the domain touches is process config
+# and reaches the pods through the memql-domain ConfigMap, derived by
 # component/envregistry/domain.go. An Ingress host is a Kubernetes API object, so it
 # has to be in the render.
+#
+# THE LIST IS HAND-KEPT, AND IT DRIFTED (memql#6205). It named api, identity and
+# voice; os, mcp, vscode and the edge sites front door joined the overlay and
+# never joined this list, so a custom-domain cluster derived every issuer and
+# CORS origin from its domain while MemQL OS, MCP, the VS Code page and every
+# hosted site stayed routed at memql.localhost only. A new front door needs its
+# entry here; TestKustomizeHostOverridesCoverEveryLocalFrontDoor reads every host
+# the overlay commits at the default domain and fails on one this leaves behind,
+# or on a replace of a host the overlay does not have (kustomize refuses the
+# whole render on a missing path).
 #
 # ONLY WHEN OVERRIDDEN. The overlay commits OVERLAY_DEFAULT_DOMAIN as its
 # Ingress hostname, so the common case emits no generated YAML at all and a
@@ -1163,6 +1173,52 @@ function kustomize_host_overrides() {
             - op: replace
               path: /spec/routes/0/match
               value: HostSNI(\`turn.${DOMAIN}\`)
+        - target:
+            kind: Ingress
+            name: mcp-front-door
+          patch: |-
+            - op: replace
+              path: /spec/rules/0/host
+              value: mcp.${DOMAIN}
+            - op: replace
+              path: /spec/tls/0/hosts/0
+              value: mcp.${DOMAIN}
+        - target:
+            kind: Ingress
+            name: os-front-door
+          patch: |-
+            - op: replace
+              path: /spec/rules/0/host
+              value: os.${DOMAIN}
+            - op: replace
+              path: /spec/tls/0/hosts/0
+              value: os.${DOMAIN}
+        - target:
+            kind: Ingress
+            name: vscode-front-door
+          patch: |-
+            - op: replace
+              path: /spec/rules/0/host
+              value: vscode.${DOMAIN}
+            - op: replace
+              path: /spec/tls/0/hosts/0
+              value: vscode.${DOMAIN}
+        - target:
+            kind: Ingress
+            name: edge-front-door
+          patch: |-
+            - op: replace
+              path: /spec/tls/0/hosts/0
+              value: "*.${DOMAIN}"
+            - op: replace
+              path: /spec/tls/0/hosts/1
+              value: ${DOMAIN}
+            - op: replace
+              path: /spec/rules/0/host
+              value: "*.${DOMAIN}"
+            - op: replace
+              path: /spec/rules/1/host
+              value: ${DOMAIN}
 EOF
 }
 
