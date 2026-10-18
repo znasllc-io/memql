@@ -131,8 +131,8 @@ var (
 	dnsLabelShape = regexp.MustCompile(`^[a-z0-9]([-a-z0-9]*[a-z0-9])?$`)
 )
 
-// BuildSecret holds the clone token (key GIT_TOKEN, read ONLY by the clone
-// container) and each resolved secret (key = its env name, referenced by the
+// BuildSecret holds the clone token (key GIT_TOKEN, also read by a command or
+// image builder explicitly opting into the repository read grant) and each resolved secret (key = its env name, referenced by the
 // step container one secretKeyRef at a time). It is created before the Job
 // and owned by it once the Job exists, so collecting the Job collects it.
 // An image pull credential uses .dockerconfigjson, referenced by kubelet only.
@@ -308,8 +308,8 @@ func checkJob(cfg Config, run StepRun) (int32, *pl.Refusal) {
 			return refuse("resource admission requires the run's absolute deadline")
 		}
 	}
-	if run.GitHubReadToken && (run.InstallationID <= 0 || run.ImageBuild != nil) {
-		return refuse("githubReadToken requires an installed repository and a cluster container command")
+	if run.GitHubReadToken && run.InstallationID <= 0 {
+		return refuse("githubReadToken requires an installed source repository")
 	}
 	if err := pl.CheckCheckoutHistory(run.CheckoutHistory, false); err != nil {
 		return refuse("%s", err)

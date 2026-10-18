@@ -63,8 +63,8 @@ func CheckExecutionNeeds(execution string, needs []string) error {
 // runs a container step in its image; it cannot reinterpret it as native work.
 func validateStepRuntime(spec *Spec, step StepSpec, scope string) *Refusal {
 	execution, platform := ExecutionOf(step.Execution), PlatformOf(spec, step)
-	if step.GitHubReadToken && (step.ImageBuild != nil || execution != ExecutionContainer || PlacementOf(step) != PlacementCluster) {
-		return Refuse(CodeStepInvalid, scope, "githubReadToken requires a cluster container command.")
+	if step.GitHubReadToken && (execution != ExecutionContainer || PlacementOf(step) != PlacementCluster) {
+		return Refuse(CodeStepInvalid, scope, "githubReadToken requires a cluster container command or image build.")
 	}
 	if step.ImageBuild != nil {
 		if err := CheckImageBuild(step.ImageBuild, platform); err != nil {

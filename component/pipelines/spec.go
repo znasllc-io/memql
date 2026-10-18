@@ -87,7 +87,7 @@ type SARIFReport struct {
 // StepSpec declares a command, isolated image build or driver-owned report.
 // Commands have the same shell contract as a deployable's build.command.
 type StepSpec struct {
-	// GitHubReadToken explicitly grants the cluster command a short-lived,
+	// GitHubReadToken explicitly grants a cluster command or image build a short-lived,
 	// read-only token for this repository. Ordinary commands receive none.
 	GitHubReadToken bool `yaml:"githubReadToken,omitempty" json:"githubReadToken,omitempty"`
 	// CheckoutHistory requests complete history during trusted checkout.
