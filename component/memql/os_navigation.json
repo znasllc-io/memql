@@ -141,6 +141,11 @@
         "name": "Readiness"
       },
       {
+        "id": "capacity",
+        "name": "Capacity",
+        "requires": "app:cluster/capacity"
+      },
+      {
         "id": "releases",
         "name": "Releases",
         "requires": "app:cluster/releases"
