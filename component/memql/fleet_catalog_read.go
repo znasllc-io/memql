@@ -227,8 +227,9 @@ func (e *MemQLEngine) inferenceDoors(ctx context.Context) inferenceDoors {
 			if door.Reachable() {
 				d.AppEligible = true
 				d.RunnableApps = append(d.RunnableApps, door.AppId)
-				// Runnable apps currently answer completed chat only. Do not
-				// promise streaming merely because their sessions are ready.
+				// An app answers a streaming turn whole, as one chunk
+				// (appProvider.CallChatStream), so a reachable app is a
+				// streaming source for Ask.
 				if _, streams := any((*appProvider)(nil)).(common.ChatStreamProvider); streams {
 					d.StreamingChatEligible = true
 				}

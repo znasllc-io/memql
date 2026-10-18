@@ -895,6 +895,29 @@ func (p *appProvider) CallChat(ctx context.Context, messages []common.ChatMessag
 	return res.Content, nil
 }
 
+// CallChatStream implements common.ChatStreamProvider, which is what lets Ask
+// -- a streaming surface -- be answered by an app at all (design record
+// 2026-10-18-routes). Without it the router passed every app door over for a
+// streaming turn, and a person on the Apps route, or on a cluster whose only
+// answering source is a signed-in app, read "unavailable" in Ask.
+//
+// THE ANSWER ARRIVES WHOLE. The app's session reports its result when the turn
+// ends, so the stream carries it as one chunk followed by Done. That is a
+// truthful stream rather than an invented one: nothing is chopped up to look
+// like typing, and a consumer that renders chunks as they come renders it the
+// moment the app has answered.
+func (p *appProvider) CallChatStream(ctx context.Context, messages []common.ChatMessage) (<-chan common.StreamChunk, error) {
+	res, err := p.call(ctx, AppCallRequest{Messages: messages})
+	if err != nil {
+		return nil, err
+	}
+	out := make(chan common.StreamChunk, 2)
+	out <- common.StreamChunk{Content: res.Content}
+	out <- common.StreamChunk{Done: true}
+	close(out)
+	return out, nil
+}
+
 // CallChatStructured implements common.ChatStructuredProvider.
 //
 // The schema is the app's OWN structured-output option (`claude --json-schema`,
@@ -943,6 +966,7 @@ var (
 	_ AIProvider                    = (*appProvider)(nil)
 	_ common.ChatAIProvider         = (*appProvider)(nil)
 	_ common.ChatStructuredProvider = (*appProvider)(nil)
+	_ common.ChatStreamProvider     = (*appProvider)(nil)
 	_ common.VisionAIProvider       = (*appProvider)(nil)
 )
 

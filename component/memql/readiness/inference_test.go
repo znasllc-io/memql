@@ -40,7 +40,7 @@ func TestAQualifyingModelIsConfiguredEvenWhenAsleep(t *testing.T) {
 		Labels:          map[string]string{"model:llama3.1:8b": "ctx=8192,structured=true"},
 		LastSeenAt:      ago(OnlineWindow + time.Minute),
 	}
-	lanes := InferenceLanes(InferenceInput{Registrations: []RegistrationFacts{machine}, Now: fixedNow})
+	lanes := InferenceLanes(InferenceInput{Registrations: []RegistrationFacts{machine}, EmbedderBound: true, Now: fixedNow})
 	local := laneNamed(t, lanes, InferenceLaneLocal)
 	if !local.Complete {
 		t.Fatalf("a machine advertising ctx=8192,structured=true is a configured door: %+v", local)
@@ -49,7 +49,7 @@ func TestAQualifyingModelIsConfiguredEvenWhenAsleep(t *testing.T) {
 		t.Errorf("a lastSeenAt outside the online window must not report live")
 	}
 	if !InferenceConfigured(lanes) {
-		t.Errorf("one complete lane configures the module")
+		t.Errorf("one complete door and an embedding model configure the module")
 	}
 	if InferenceLive(lanes) {
 		t.Errorf("no door is open right now, so InferenceLive must be false")
@@ -192,7 +192,7 @@ func TestTheAppInventoryFallbackNeedsKnownAllowedAndSignedIn(t *testing.T) {
 // Federation is STRUCTURAL PRESENCE (D3), so it is configured and live
 // together: there is no machine to be asleep and no stream to be held.
 func TestFederationIsConfiguredAndLiveTogether(t *testing.T) {
-	lanes := InferenceLanes(InferenceInput{FederationConfigured: true, Now: fixedNow})
+	lanes := InferenceLanes(InferenceInput{FederationConfigured: true, EmbedderBound: true, Now: fixedNow})
 	fed := laneNamed(t, lanes, InferenceLaneFederation)
 	if !fed.Complete {
 		t.Fatalf("federation lane is not complete: %+v", fed)
@@ -201,21 +201,23 @@ func TestFederationIsConfiguredAndLiveTogether(t *testing.T) {
 		t.Errorf("federation is live whenever it is configured")
 	}
 	if !InferenceConfigured(lanes) {
-		t.Errorf("federation alone configures the module")
+		t.Errorf("federation and an embedding model configure the module")
 	}
 }
 
-// Three lanes ALWAYS, in the order the default chain tries them. A client
-// renders this list, so an absent lane and a lane that is not complete are
-// different answers and only the second one is true of a fresh cluster.
-func TestThreeLanesAlwaysInChainOrder(t *testing.T) {
+// Four lanes ALWAYS: the three doors in the order the default chain tries them,
+// then embeddings. A client renders this list, so an absent lane and a lane
+// that is not complete are different answers and only the second one is true
+// of a fresh cluster.
+func TestFourLanesAlwaysInChainOrder(t *testing.T) {
 	lanes := InferenceLanes(InferenceInput{Now: fixedNow})
 	names := make([]string, 0, len(lanes))
 	for _, l := range lanes {
 		names = append(names, l.Name)
 	}
-	if len(names) != 3 || names[0] != InferenceLaneLocal || names[1] != InferenceLaneApp || names[2] != InferenceLaneFederation {
-		t.Fatalf("lanes are %v, want [local app federation]", names)
+	if len(names) != 4 || names[0] != InferenceLaneLocal || names[1] != InferenceLaneApp ||
+		names[2] != InferenceLaneFederation || names[3] != InferenceLaneEmbeddings {
+		t.Fatalf("lanes are %v, want [local app federation embeddings]", names)
 	}
 	for _, l := range lanes {
 		if len(l.Slots) != 1 || l.Slots[0].Name != InferenceLiveSlot {
@@ -329,3 +331,53 @@ func TestConnectedNodeIdWithoutBeatIsLive(t *testing.T) {
 		t.Fatal("connectedNodeId with no lastSeenAt flush yet must still read live")
 	}
 }
+
+// A door alone is not set up (design record 2026-10-18-routes): Apps cannot
+// work without an embedding model, and neither can anything else that searches
+// or remembers. The embeddings lane completes on a bound embedder or on an
+// embedding model a machine advertises -- which the engine binds on its own.
+func TestADoorWithoutAnEmbeddingModelIsNotConfigured(t *testing.T) {
+	apps := RegistrationFacts{ConnectedNodeId: "agent-1", LastSeenAt: ago(time.Second),
+		Labels: map[string]string{"app:claude-code": ""}}
+	lanes := InferenceLanes(InferenceInput{Registrations: []RegistrationFacts{apps}, Now: fixedNow})
+	if !laneNamed(t, lanes, InferenceLaneApp).Complete {
+		t.Fatal("the app door should be complete")
+	}
+	if InferenceConfigured(lanes) {
+		t.Fatal("an app door with no embedding model must not configure the module")
+	}
+
+	apps.Labels["model:qwen3-embedding:0.6b"] = "ctx=32768,embeddings=1"
+	lanes = InferenceLanes(InferenceInput{Registrations: []RegistrationFacts{apps}, Now: fixedNow})
+	emb := laneNamed(t, lanes, InferenceLaneEmbeddings)
+	if !emb.Complete || !liveSlot(t, emb) {
+		t.Fatalf("an online machine advertising an embedding model completes the lane, live: %+v", emb)
+	}
+	if !InferenceConfigured(lanes) {
+		t.Fatal("an app door and an advertised embedding model configure the module")
+	}
+	if laneNamed(t, lanes, InferenceLaneLocal).Complete {
+		t.Fatal("an embedding model is not a door that answers")
+	}
+
+	bound := InferenceLanes(InferenceInput{FederationConfigured: true, EmbedderBound: true, Now: fixedNow})
+	if !laneNamed(t, bound, InferenceLaneEmbeddings).Complete {
+		t.Fatal("a bound embedder completes the lane")
+	}
+}
+
+func TestEmbeddingCandidatesAreTheOnlineEmbeddersInOrder(t *testing.T) {
+	regs := []RegistrationFacts{
+		{OwnerUserId: "bob", ConnectedNodeId: "a", LastSeenAt: ago(time.Second),
+			Labels: map[string]string{"model:qwen3-embedding:0.6b": "embeddings=1", "model:qwen3.5:9b": "ctx=32768,structured=1"}},
+		{OwnerUserId: "alice", ConnectedNodeId: "a", LastSeenAt: ago(time.Second),
+			Labels: map[string]string{"model:bge-m3": "embeddings=true"}},
+		{OwnerUserId: "carol", LastSeenAt: ago(time.Second), // no stream held: not online
+			Labels: map[string]string{"model:aaa-embed": "embeddings=1"}},
+	}
+	got := EmbeddingCandidates(regs, fixedNow)
+	if len(got) != 2 || got[0].ModelId != "bge-m3" || got[0].OwnerUserId != "alice" || got[1].ModelId != "qwen3-embedding:0.6b" {
+		t.Fatalf("candidates %+v, want bge-m3 (alice) then qwen3-embedding:0.6b (bob), and no offline machine", got)
+	}
+}
+

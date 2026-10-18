@@ -218,3 +218,32 @@ func TestAPersonalRouteIsReadForItsOwnerAndWalked(t *testing.T) {
 		t.Fatalf("err = %v, want a plain error saying the route is not the owner's", err)
 	}
 }
+
+// Ask streams, and on the Apps route an app answers the streaming turn: whole,
+// as one chunk, then Done -- never "unavailable" because the source is an app.
+func TestAnAppAnswersAStreamingTurnOnTheAppsRoute(t *testing.T) {
+	r, cloud, apps := routeRouter(t, nil, []memql.AppDoor{openApp("codex")})
+	req := chatRequest(airoute.LevelStrong)
+	req.Modality = airoute.ModalityStreamingChat
+	got, err := r.ResolveFor(routeChoice("route:apps"), req)
+	if err != nil {
+		t.Fatalf("ResolveFor: %v", err)
+	}
+	stream, ok := got.Client.(common.ChatStreamProvider)
+	if !ok {
+		t.Fatalf("client %T does not stream", got.Client)
+	}
+	ch, err := stream.CallChatStream(memql.ContextWithBackgroundLane(context.Background()), []common.ChatMessage{{Role: "user", Content: "hi"}})
+	if err != nil {
+		t.Fatalf("CallChatStream: %v", err)
+	}
+	var text strings.Builder
+	done := false
+	for chunk := range ch {
+		text.WriteString(chunk.Content)
+		done = done || chunk.Done
+	}
+	if text.String() != "app answer" || !done || apps.calls != 1 || cloud.calls != 0 {
+		t.Fatalf("streamed %q done=%v app calls=%d vendor calls=%d", text.String(), done, apps.calls, cloud.calls)
+	}
+}

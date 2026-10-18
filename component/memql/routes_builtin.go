@@ -570,20 +570,28 @@ func appDisplayName(appId string) string {
 // federationEmbedderAvailable reports whether a federated vendor here can
 // produce embeddings -- the third way an embedding model is reachable.
 func (r *ProviderRegistry) federationEmbedderAvailable() bool {
+	return len(r.federationEmbedders()) > 0
+}
+
+// federationEmbedders names the federated vendor records here that can embed,
+// in name order.
+func (r *ProviderRegistry) federationEmbedders() []string {
 	if r == nil {
-		return false
+		return nil
 	}
 	r.mu.RLock()
 	defer r.mu.RUnlock()
-	for _, entry := range r.byName {
+	var out []string
+	for name, entry := range r.byName {
 		if entry == nil || !entry.Available || providerAuthSourceOf(entry) != AuthSourceFederation {
 			continue
 		}
 		if _, ok := entry.Client.(EmbeddingAIProvider); ok {
-			return true
+			out = append(out, name)
 		}
 	}
-	return false
+	sort.Strings(out)
+	return out
 }
 
 // ---- the user budget ----

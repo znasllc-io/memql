@@ -1,6 +1,7 @@
 import { useState } from "react";
 
 import { Button, Caption, ChoiceStack, useAppReach, type ChoiceOption } from "../../kit";
+import { useSessionIfPresent } from "../../chrome/access";
 
 // THE INFERENCE STOP: three doors, and the fleet one first (design record
 // 2026-09-06-first-run-wizard, D4).
@@ -58,16 +59,31 @@ const SAYS: Record<DoorId, string> = {
   openai: "OpenAI serves the model, on their hardware and their bill.",
 };
 
+// AN ANSWERING SOURCE IS NOT ENOUGH (design record 2026-10-18-routes). The
+// verdict holds until there is also an embedding model, because Library search
+// and memory recall need one -- so when a door is open and that lane is not,
+// the stop says the one thing still missing instead of offering the doors
+// again as if nothing were set up.
+export function embeddingModelMissing(lanes: readonly { name: string; complete: boolean }[] | undefined): boolean {
+  if (!lanes || lanes.length === 0) return false;
+  const door = lanes.some((l) => l.name !== "embeddings" && l.complete);
+  const embeddings = lanes.find((l) => l.name === "embeddings");
+  return door && embeddings !== undefined && !embeddings.complete;
+}
+
 export function InferenceStop() {
   const [door, setDoor] = useState<DoorId>("fleet");
   const fleet = useAppReach("fleet");
   const settings = useAppReach("settings");
+  const readiness = useSessionIfPresent()?.readiness;
+  const needsEmbedder = embeddingModelMissing(readiness?.of("ai")?.lanes);
 
   const canPair = fleet.sections.includes("machines") && fleet.canOpenWindows;
   const canOpenProviders = settings.sections.includes("providers") && settings.canOpenWindows;
 
   return (
     <div className="os-setup-stop">
+      {needsEmbedder ? <Caption>Add an embedding model. Search and memory need one; local setup installs it.</Caption> : null}
       <ChoiceStack
         name="setup-inference-door"
         label="How this cluster reaches a model"
