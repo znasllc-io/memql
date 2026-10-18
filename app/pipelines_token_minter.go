@@ -2,6 +2,7 @@ package app
 
 import (
 	"context"
+	"errors"
 	"time"
 
 	"github.com/znasllc-io/memql/component/identity/githubapp"
@@ -56,4 +57,27 @@ func (m pipelinesTokenMinter) CloneToken(ctx context.Context, installationID int
 	// installation's account: "widget", not "acme/widget".
 	token, _, err := m.mint(ctx, installationID, []string{name}, map[string]string{"contents": "read"})
 	return token, err
+}
+
+var _ pipelinesteps.RepositoryReadTokenMinter = pipelinesTokenMinter{}
+
+// RepositoryReadToken grants the opted-in command the fixed read-only scope.
+// The repository list is mandatory: never fall back to an installation token.
+func (m pipelinesTokenMinter) RepositoryReadToken(ctx context.Context, installationID int64, owner, name string) (string, error) {
+	if installationID <= 0 || owner == "" || name == "" {
+		return "", errors.New("repository read credentials require an installed repository")
+	}
+	if m.mint == nil {
+		return "", githubapp.ErrNotConfigured
+	}
+	token, _, err := m.mint(ctx, installationID, []string{name}, map[string]string{
+		"contents": "read", "checks": "read", "pull_requests": "read",
+	})
+	if err != nil {
+		return "", err
+	}
+	if token == "" {
+		return "", errors.New("repository read credential was empty")
+	}
+	return token, nil
 }

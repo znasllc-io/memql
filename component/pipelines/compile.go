@@ -299,6 +299,7 @@ func (c *planCompiler) compileStep(stage string, declared StepSpec, dependsOn []
 	}
 
 	step := Step{
+		GitHubReadToken: declared.GitHubReadToken,
 		CheckoutHistory: declared.CheckoutHistory,
 		ImageBuild:      CloneImageBuild(declared.ImageBuild),
 		Key:             StepKey(stage, declared.Name), Stage: stage, Name: declared.Name, Kind: StepCommand, Run: declared.Run,

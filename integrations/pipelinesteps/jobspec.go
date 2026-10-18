@@ -308,6 +308,9 @@ func checkJob(cfg Config, run StepRun) (int32, *pl.Refusal) {
 			return refuse("resource admission requires the run's absolute deadline")
 		}
 	}
+	if run.GitHubReadToken && (run.InstallationID <= 0 || run.ImageBuild != nil) {
+		return refuse("githubReadToken requires an installed repository and a cluster container command")
+	}
 	if err := pl.CheckCheckoutHistory(run.CheckoutHistory, false); err != nil {
 		return refuse("%s", err)
 	}
@@ -412,6 +415,9 @@ func checkJob(cfg Config, run StepRun) (int32, *pl.Refusal) {
 		}
 	}
 	for _, name := range sortedKeys(run.Env) {
+		if name == repositoryReadTokenVar {
+			return refuse("step variable %q is reserved for repository read credentials", name)
+		}
 		if !envNameShape.MatchString(name) {
 			return refuse("step variable %q is not a name the step's shell can read", name)
 		}
@@ -442,14 +448,15 @@ func checkJob(cfg Config, run StepRun) (int32, *pl.Refusal) {
 // token's key.
 func namesTheJobSets(run StepRun) map[string]bool {
 	taken := map[string]bool{
-		stepCommandVar:    true,
-		stepArtifactsVar:  true,
-		artifactMarkerVar: true,
-		stepCachesVar:     true,
-		gitConfigCountVar: true,
-		gitConfigKeyVar:   true,
-		gitConfigValueVar: true,
-		gitTokenKey:       true,
+		stepCommandVar:         true,
+		stepArtifactsVar:       true,
+		artifactMarkerVar:      true,
+		stepCachesVar:          true,
+		gitConfigCountVar:      true,
+		gitConfigKeyVar:        true,
+		gitConfigValueVar:      true,
+		gitTokenKey:            true,
+		repositoryReadTokenVar: true,
 	}
 	for name := range run.Env {
 		taken[name] = true
@@ -670,10 +677,15 @@ func serviceContainers(services map[string]pl.Service) []Container {
 	return out
 }
 
+const repositoryReadTokenVar = "MEMQL_GITHUB_READ_TOKEN"
+
 func stepContainer(cfg Config, run StepRun, jobName, secretName string, caches []string) Container {
 	env := make([]EnvVar, 0, len(run.Env)+len(run.Secrets)+8)
 	for _, name := range sortedKeys(run.Env) {
 		env = append(env, plainVar(name, run.Env[name]))
+	}
+	if run.GitHubReadToken {
+		env = append(env, secretVar(repositoryReadTokenVar, secretName, gitTokenKey, false))
 	}
 	env = append(env, plainVar(stepCommandVar, run.Command))
 	if cfg.QueueName != "" {

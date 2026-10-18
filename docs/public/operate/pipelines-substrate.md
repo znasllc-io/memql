@@ -106,6 +106,14 @@ A step's pod runs up to four kinds of container, in this order:
 | `svc-<name>` | native sidecar, one per service the step names, in name order | the service's `image`, its own user | its declared `env` only: no checkout, no cache, no secret |
 | `step` | main | the pipeline's `image`, its own user | the checkout at `/workspace`, its repository's cache at `/cache`, the step's environment and its secrets |
 
+An explicit `githubReadToken: true` command also receives a required Secret
+reference as `MEMQL_GITHUB_READ_TOKEN`. The token reads only this repository's
+contents, checks and pull requests; it has no write permission. Ordinary commands,
+services, collectors, image builds and fleet tasks do not receive this grant.
+The runner refreshes it during queue waits and masks every issued value using
+the same lifecycle as checkout credentials. A missing grant refuses execution;
+it never falls back to an installation-wide or anonymous credential.
+
 Every container runs with `allowPrivilegeEscalation: false`, and the pod with
 the `RuntimeDefault` seccomp profile, `restartPolicy: Never` and a 10-second
 termination grace (the step's wrapper is PID 1 and does not forward a SIGTERM).
