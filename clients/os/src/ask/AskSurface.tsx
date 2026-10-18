@@ -334,10 +334,10 @@ export function AskSurface({
         <div><strong>{state.workGuidance.title}</strong><p>Guidance goes to this work at its next safe boundary. It does not grant permission.</p></div>
         <button type="button" className="os-ask-retry" onClick={() => { controls?.cancel(); conversation.leaveWorkGuidance(); inputRef.current?.focus(); }}>Return to conversation</button>
       </section> : null}
-      {state.discussionOpening ? <p className="os-ask-approval-context" role="status">Opening approval discussion.</p> : state.discussion && panel === "conversation" ? <section className="os-ask-approval-context" aria-label="Approval discussion">
-        <div><strong>{state.discussion.approval.question || "Discuss this approval"}</strong>{state.discussion.approval.summary && state.discussion.approval.summary !== state.discussion.approval.question ? <p>{state.discussion.approval.summary}</p> : null}<p>Discussion and advice do not approve the blocked operation.</p></div>
+      {state.discussionOpening ? <p className="os-ask-approval-context" role="status">Opening discussion.</p> : state.discussion && panel === "conversation" ? <section className="os-ask-approval-context" aria-label={state.discussion.approval.kind === "feedback" ? "Work feedback" : "Approval discussion"}>
+        <div><strong>{state.discussion.approval.question || (state.discussion.approval.kind === "feedback" ? "Discuss this work" : "Discuss this approval")}</strong>{state.discussion.approval.summary && state.discussion.approval.summary !== state.discussion.approval.question ? <p>{state.discussion.approval.summary}</p> : null}{state.discussion.approval.kind !== "feedback" ? <p>Discussion and advice do not approve the blocked operation.</p> : null}</div>
         <button type="button" className="os-ask-retry" onClick={conversation.leaveDiscussion}>Return to conversation</button>
-      </section> : state.discussionDraft && panel === "conversation" ? <section className="os-ask-approval-context" aria-label="Approval discussion">
+      </section> : state.discussionDraft && panel === "conversation" ? <section className="os-ask-approval-context" aria-label="Request discussion">
         <p>Reopen this request before sending a discussion message.</p>
         <button type="button" className="os-ask-retry" onClick={conversation.leaveDiscussion}>Return to conversation</button>
       </section> : null}
@@ -441,7 +441,7 @@ export function AskSurface({
           onKeyDown={event => { if (event.key === "Enter" && !event.shiftKey && !event.nativeEvent.isComposing) { event.preventDefault(); if (draft.trim() && send(draft)) setDraft(""); } }}
           ref={inputRef}
           className="os-ask-field"
-          placeholder={live ? "Listening" : state.workGuidance ? "Guide this work" : state.discussion || state.discussionDraft ? "Discuss this approval or write guidance" : "Ask"}
+          placeholder={live ? "Listening" : state.workGuidance ? "Guide this work" : state.discussion || state.discussionDraft ? "Discuss this request or write guidance" : "Ask"}
           aria-label="Ask"
           value={draft}
           // Read-only, never disabled, and only while the mic is writing it:
