@@ -128,6 +128,14 @@ ready"). Opening one shows the composer:
 revision it read; a write elsewhere since then is refused, the screen says
 "Routing changed since this page read it", and both are read again.
 
+### Routes a person picks
+
+Ask's route picker offers Auto, Local, Apps and each person's own routes. What
+they do, and the builtins behind them, is in
+[AI routing](ai-routing.md#routes-a-person-picks-in-ask). Auto's balance and
+the Local and Apps job lists are cluster-wide and changed by an owner or a
+developer; a person's own routes and monthly budget are theirs.
+
 ## Fleet > Routing > Rules
 
 A rule looks at what a call is -- its level, its kind, its prompt, the role
