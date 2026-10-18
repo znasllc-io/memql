@@ -142,4 +142,23 @@ describe("the access facts surface in chrome", () => {
     fireEvent.click(within(menu).getByRole("menuitem", { name: "Sign out" }));
     expect(onSignOut).toHaveBeenCalledTimes(1);
   });
+
+  it("the avatar menu opens your Profile (memql#6220)", () => {
+    resetIdsForTest();
+    render(
+      <Shell
+        layout="desktop"
+        onSignOut={vi.fn()}
+        access={ACCESS}
+        config={CONFIG}
+        ports={{ store: new LocalDesktopStore(memStorage()), disableConnection: true }}
+      />,
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Account menu" }));
+    fireEvent.click(within(screen.getByRole("menu", { name: "Account" })).getByRole("menuitem", { name: "Profile" }));
+    expect(screen.queryByRole("menu", { name: "Account" })).toBeNull();
+    // No connection in this harness, so the page holds its reading state --
+    // which is the Profile section, not the identity service's page.
+    expect(screen.getByText("Reading your profile")).toBeTruthy();
+  });
 });

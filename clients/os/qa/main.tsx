@@ -6,6 +6,7 @@ import { emailScenes, EMAIL_CLICKS } from "./emailScenes";
 import { nexusApprovalScenes, NEXUS_APPROVAL_CLICKS } from "./nexusApprovalScenes";
 import { fleetEquipmentScenes } from "./fleetEquipmentScenes";
 import { setupWizardScenes } from "./setupWizardScenes";
+import { profileScenes } from "./profileScenes";
 import { mapScenes } from "./mapScenes";
 import { MATERIALIZER_VIEWS } from "./materializerScenes";
 import { FilesApp } from "../src/apps/files/FilesApp";
@@ -716,6 +717,8 @@ const VIEWS: Record<
   ...mapScenes(WindowBody),
   ...fleetEquipmentScenes(WindowBody),
   ...setupWizardScenes(WindowBody),
+  // Your profile (memql#6220): `profile`, `profile-photo`, `profile-quiet`.
+  ...profileScenes(WindowBody),
   "users-groups": usersWizardView("groups"),
   "users-roles": usersWizardView("roles"),
   "users-invite": usersWizardView("people"),

@@ -148,6 +148,14 @@ recipient counts, including while paused. Check the divider, keyboard search,
 removing/re-adding the last recipient and refusal/retry at desktop and phone
 widths in every theme and mode.
 
+The `profile`, `profile-photo` and `profile-quiet` views are Identity >
+Profile (memql#6220). `profile` is the control: no photo, a budget and a
+personal storage allowance. `profile-photo` adds a photo, a phone and title,
+storage past 90% and no budget. `profile-quiet` is a cluster that serves no
+budget, an account with no personal limit, passkey-only sign-in and computer
+use switched off. `&click=fill:Last%20name=Byron` shows Save appearing on a
+change.
+
 The `feedback` view shows information, warning and error notices, an actionable
 retry, domain errors and a removed-machine status. Check `theme=graphite`,
 `cobalt` and `vellum`, light/dark modes, and desktop/phone widths. Tone rails

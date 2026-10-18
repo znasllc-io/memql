@@ -767,6 +767,8 @@ button:not(:disabled):active {
   font-size: var(--os-text-sm);
   font-weight: 600;
 }
+/* The person's photo on the same circle (memql#6220). */
+.os-avatar-photo { padding: 0; object-fit: cover; }
 
 /* ---- menus ---- */
 .os-menu {
