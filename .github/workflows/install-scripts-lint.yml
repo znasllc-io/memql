@@ -17,16 +17,20 @@ on:
     branches: [main]
     paths:
       - 'scripts/install/**'
+      - 'scripts/release/**'
       - 'native/macos/mark.svg'
       - 'install.sh'
       - '.github/workflows/install-scripts-lint.yml'
+      - '.github/workflows/release.yml'
   push:
     branches: [main]
     paths:
       - 'scripts/install/**'
+      - 'scripts/release/**'
       - 'native/macos/mark.svg'
       - 'install.sh'
       - '.github/workflows/install-scripts-lint.yml'
+      - '.github/workflows/release.yml'
 
 permissions:
   contents: read
@@ -67,6 +71,10 @@ jobs:
 
       - name: lib_test.sh (helper smoke tests)
         run: bash scripts/install/lib_test.sh
+      - name: release draft-then-publish
+        run: |
+          shellcheck scripts/release/cut-release.sh scripts/release/cut_release_test.sh
+          bash scripts/release/cut_release_test.sh
 
       - name: Menu archive boundary tests
         run: bash scripts/install/menubar_test.sh

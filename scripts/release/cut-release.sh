@@ -4,8 +4,11 @@ set -euo pipefail
 # cut-release.sh -- recommend the next semver from the commits since the last
 # tag (conventional-commit prefixes; NO AI), then optionally cut a tag-driven
 # release. Cutting bumps the VERSION file + the main.go `version` var,
-# commits, tags vX.Y.Z, pushes, and creates a GitHub Release -- which triggers
-# .github/workflows/release.yml to build + upload the per-platform binaries.
+# commits, tags vX.Y.Z, pushes, and creates the GitHub Release as a DRAFT --
+# which triggers .github/workflows/release.yml to build + upload the
+# per-platform binaries -- then publishes it only once every asset the
+# installers download is attached (memql-cockpit#525). `releases/latest`
+# never points at a release whose binaries are still building.
 #
 # Usage:
 #   make release                         recommend only (safe; shows next version + why)
@@ -138,11 +141,74 @@ function perform_cut() {
     log "==> pushing main + $tag"
     git -C "$REPO_ROOT" push origin main
     git -C "$REPO_ROOT" push origin "$tag"
-    log "==> creating GitHub Release $tag (triggers release.yml build+upload)"
-    gh release create "$tag" --repo "$(gh repo view --json nameWithOwner -q .nameWithOwner)" \
+    local repo
+    repo="$(gh repo view --json nameWithOwner -q .nameWithOwner)"
+    log "==> creating GitHub Release $tag as a draft (triggers release.yml build+upload)"
+    gh release create "$tag" --repo "$repo" --draft \
         --title "$tag" --generate-notes --target main
+    publish_when_complete "$repo" "$tag" "$next"
+}
+
+# The assets the installers download. A release missing any of them is not
+# published: a `latest` without its binary is a 404 in the middle of
+# somebody's install.
+function expected_assets() {
+    local ver="$1" platform
+    for platform in darwin-arm64 darwin-amd64 linux-amd64 linux-arm64; do
+        echo "memql-${platform}"
+        echo "memql-computeruse-${platform}"
+        echo "memql-${ver}-${platform}.tar.gz"
+    done
+    echo "memql-SHA256SUMS"
+    echo "memql-computeruse-SHA256SUMS"
+    echo "memql-${ver}-SHA256SUMS"
+    for platform in darwin-arm64 darwin-amd64; do
+        echo "memql-app-${platform}.tar.gz"
+        echo "memql-app-${platform}.tar.gz.sha256"
+        echo "memql-menubar-${platform}.tar.gz"
+        echo "memql-menubar-${platform}.tar.gz.sha256"
+    done
+}
+
+# missing_assets prints the expected assets the draft does not carry yet.
+function missing_assets() {
+    local repo="$1" tag="$2" ver="$3" have asset
+    have="$(gh release view "$tag" --repo "$repo" --json assets --jq '.assets[].name')" || return 1
+    while IFS= read -r asset; do
+        grep -qxF "$asset" <<< "$have" || echo "$asset"
+    done < <(expected_assets "$ver")
+}
+
+# publish_when_complete waits for release.yml on the draft, checks every
+# expected asset is attached, and only then publishes. Anything short of
+# that leaves the draft unpublished and says how to finish.
+function publish_when_complete() {
+    local repo="$1" tag="$2" ver="$3" run="" attempt missing
+    log "==> waiting for release.yml to start for $tag"
+    for ((attempt = 0; attempt < ${RELEASE_RUN_WAIT_ATTEMPTS:-60}; attempt++)); do
+        run="$(gh run list --repo "$repo" --workflow release.yml --branch "$tag" --limit 1 --json databaseId --jq '.[0].databaseId // empty' 2>/dev/null || true)"
+        [[ -z "$run" ]] || break
+        sleep "${RELEASE_POLL_SECONDS:-10}"
+    done
+    if [[ -z "$run" ]]; then
+        err "release.yml never started for $tag; the draft is NOT published."
+        err "Run it with: gh workflow run release.yml --repo $repo -f tag=$tag, then: gh release edit $tag --repo $repo --draft=false --latest"
+        exit 5
+    fi
+    if ! gh run watch "$run" --repo "$repo" --exit-status >&2; then
+        err "release.yml run $run failed for $tag; the draft is NOT published. Fix it, re-run the job, then publish with: gh release edit $tag --repo $repo --draft=false --latest"
+        exit 5
+    fi
+    missing="$(missing_assets "$repo" "$tag" "$ver")" || { err "could not read the assets of $tag; the draft is NOT published."; exit 5; }
+    if [[ -n "$missing" ]]; then
+        err "the draft $tag is missing assets the installers download; it is NOT published:"
+        local asset
+        while IFS= read -r asset; do log "  $asset"; done <<< "$missing"
+        exit 5
+    fi
+    gh release edit "$tag" --repo "$repo" --draft=false --latest
     log ""
-    log "DONE: $tag cut. Watch the binaries build: gh run watch --repo \$(gh repo view --json nameWithOwner -q .nameWithOwner)"
+    log "DONE: $tag published with every installer asset attached."
 }
 
 function main() {

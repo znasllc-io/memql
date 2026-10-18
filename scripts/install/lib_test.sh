@@ -3103,6 +3103,9 @@ function binary_install_fixture() (
         printf '#!/bin/bash\nprintf "memql %%s (computeruse)\\n" %s\n' "$downloaded" > "$2"
         chmod +x "$2"
     }
+    # The release's checksum manifest is the integrity tests' subject
+    # (memql-cockpit#525); these fixtures are about versions.
+    function verify_release_binary() { :; }
     mkdir -p "$fixture/bin"
     printf '#!/bin/bash\nprintf "memql %%s (computeruse)\\n" %s\n' "$before" > "$fixture/bin/worker"
     chmod +x "$fixture/bin/worker"
@@ -3139,6 +3142,134 @@ done
 # ---------------------------------------------------------------
 # Summary
 # ---------------------------------------------------------------
+
+# ---------------------------------------------------------------
+# Integrity and network (memql-cockpit#525)
+# ---------------------------------------------------------------
+#
+# The downloaded binary is verified against its release's manifest BEFORE
+# anything runs it; every fetch carries retries and bounds; and a script
+# whose lib.sh lacks a function it calls refuses up front.
+
+_iv="${_tmp}/integrity"
+mkdir -p "${_iv}/release"
+printf '#!/bin/sh\necho "memql 0.20.0 (computeruse)"\n' > "${_iv}/cu-binary"
+printf '#!/bin/sh\necho "memql 0.19.0 (headless)"\n' > "${_iv}/hl-binary"
+printf '%s  memql-computeruse-darwin-arm64\n' "$(sha256_of "${_iv}/cu-binary")" > "${_iv}/release/memql-computeruse-SHA256SUMS"
+# The headless archive of a release published before memql-SHA256SUMS.
+mkdir -p "${_iv}/archive-src"
+cp "${_iv}/hl-binary" "${_iv}/archive-src/memql"
+(cd "${_iv}/archive-src" && tar -czf "${_iv}/release/memql-0.19.0-darwin-arm64.tar.gz" ./memql)
+printf '%s  memql-0.19.0-darwin-arm64.tar.gz\n' "$(sha256_of "${_iv}/release/memql-0.19.0-darwin-arm64.tar.gz")" > "${_iv}/release/memql-0.19.0-SHA256SUMS"
+
+# The release served from disk: fetch_release_file and download_binary are
+# the two network seams verify_release_binary uses.
+function _iv_run() {
+    IV_RELEASE="${_iv}/release" bash -c '
+        source "$1/lib.sh"
+        function fetch_release_file() { local name="${1##*/}"; [[ -f "$IV_RELEASE/$name" ]] || return 22; cp "$IV_RELEASE/$name" "$2"; }
+        function download_binary() { cp "$IV_RELEASE/${1##*/}" "$2"; }
+        function resolve_latest_version() { printf "0.19.0"; }
+        shift
+        verify_release_binary "$@"
+    ' _ "$_script_dir" "$@"
+}
+
+_out="$(_iv_run "${_iv}/cu-binary" memql-computeruse-darwin-arm64 "https://example.invalid/releases/download/v0.20.0" 2>&1)"; _rc=$?
+if [[ "$_rc" == 0 && "$_out" == *"verified memql-computeruse-darwin-arm64 against memql-computeruse-SHA256SUMS"* ]]; then
+    pass "verify_release_binary accepts a binary its manifest lists"
+else
+    fail "verify_release_binary should accept a listed binary (rc=$_rc): $_out"
+fi
+printf '#!/bin/sh\necho tampered\n' > "${_iv}/tampered"
+_out="$(_iv_run "${_iv}/tampered" memql-computeruse-darwin-arm64 "https://example.invalid/releases/download/v0.20.0" 2>&1)"; _rc=$?
+if [[ "$_rc" == 5 && "$_out" == *"does not match its release checksum"* && "$_out" == *"Nothing was run or installed"* ]]; then
+    pass "verify_release_binary refuses a binary that does not match, before running it"
+else
+    fail "verify_release_binary should refuse a mismatch with 5 (rc=$_rc): $_out"
+fi
+mv "${_iv}/release/memql-computeruse-SHA256SUMS" "${_iv}/release/hidden"
+_out="$(_iv_run "${_iv}/cu-binary" memql-computeruse-darwin-arm64 "https://example.invalid/releases/download/v0.20.0" 2>&1)"; _rc=$?
+mv "${_iv}/release/hidden" "${_iv}/release/memql-computeruse-SHA256SUMS"
+if [[ "$_rc" == 5 && "$_out" == *"does not vouch for memql-computeruse-darwin-arm64"* ]]; then
+    pass "verify_release_binary refuses a computer-use binary no manifest vouches for"
+else
+    fail "verify_release_binary should refuse an unvouched binary (rc=$_rc): $_out"
+fi
+_out="$(_iv_run "${_iv}/hl-binary" memql-darwin-arm64 "https://example.invalid/releases/latest/download" 2>&1)"; _rc=$?
+if [[ "$_rc" == 0 && "$_out" == *"verified memql-darwin-arm64 against memql-0.19.0-darwin-arm64.tar.gz"* ]]; then
+    pass "a headless binary from a release without memql-SHA256SUMS is verified through its release archive"
+else
+    fail "headless archive verification should pass (rc=$_rc): $_out"
+fi
+_out="$(_iv_run "${_iv}/tampered" memql-darwin-arm64 "https://example.invalid/releases/download/v0.19.0" 2>&1)"; _rc=$?
+if [[ "$_rc" == 5 && "$_out" == *"is not the memql in its verified release archive"* ]]; then
+    pass "a headless binary that differs from its verified archive is refused"
+else
+    fail "a tampered headless binary should be refused (rc=$_rc): $_out"
+fi
+
+# The order is the property: verified, then executed. In both install modes
+# the verification sits between the download and the first version probe.
+for _iv_mode in system user-local; do
+    _iv_block="$(awk '/^function install_binary_with_mode\(\)/ { f = 1 } f && /^}/ { exit } f { print }' "${_script_dir}/lib.sh" \
+        | awk -v mode="        ${_iv_mode})" 'index($0, mode) == 1 { on = 1 } on { print } on && /;;$/ { exit }')"
+    # shellcheck disable=SC2016  # literal source text, not expansions
+    _iv_dl="$(grep -n 'download_binary "\$url" "\$tmp"' <<< "$_iv_block" | head -1 | cut -d: -f1)"
+    # shellcheck disable=SC2016
+    _iv_vf="$(grep -n 'verify_release_binary "\$tmp"' <<< "$_iv_block" | head -1 | cut -d: -f1)"
+    # shellcheck disable=SC2016
+    _iv_ex="$(grep -n 'read_binary_version_exact "\$tmp"' <<< "$_iv_block" | head -1 | cut -d: -f1)"
+    if [[ -n "$_iv_dl" && -n "$_iv_vf" && -n "$_iv_ex" && "$_iv_dl" -lt "$_iv_vf" && "$_iv_vf" -lt "$_iv_ex" ]]; then
+        pass "install_binary_with_mode ${_iv_mode} verifies the download before running it"
+    else
+        fail "install_binary_with_mode ${_iv_mode} must verify between download and first run (dl=$_iv_dl verify=$_iv_vf run=$_iv_ex)"
+    fi
+done
+
+# Every curl in the installers retries and is bounded.
+_iv_bad="$(cd "$_script_dir" || exit 1
+    grep -nE '(^|[^_[:alnum:]-])curl ("\$|-)' lib.sh install-mac.sh install-linux.sh uninstall-mac.sh uninstall-linux.sh \
+        | grep -vE '^[^:]+:[0-9]+:[[:space:]]*#' | grep -vE '(printf|echo) ' | grep -vE 'CURL_NET|--retry')"
+if [[ -z "$_iv_bad" ]]; then
+    pass "every curl in the installers retries and is bounded"
+else
+    fail "curl calls without retries/bounds:\n$_iv_bad"
+fi
+
+# REQUIRED_LIB_FUNCTIONS is exactly the lib.sh functions each script calls.
+_iv_libfns="$(sed -n -E 's/^function ([A-Za-z_][A-Za-z0-9_]*)\(\).*/\1/p' "${_script_dir}/lib.sh" | sort -u)"
+[[ -n "$_iv_libfns" ]] || fail "could not read lib.sh's functions"
+for _iv_name in install-mac.sh install-linux.sh uninstall-mac.sh uninstall-linux.sh; do
+    _iv_script="${_script_dir}/${_iv_name}"
+    _iv_own="$(sed -n -E 's/^function ([A-Za-z_][A-Za-z0-9_]*)\(\).*/\1/p' "$_iv_script" | sort -u)"
+    _iv_body="$(sed -E 's/(^|[[:space:]])#.*$//' "$_iv_script" | grep -v '^readonly REQUIRED_LIB_FUNCTIONS=')"
+    _iv_used=""
+    while IFS= read -r _iv_fn; do
+        [[ -n "$_iv_fn" ]] || continue
+        grep -qxF "$_iv_fn" <<< "$_iv_own" && continue
+        grep -qE "(^|[^[:alnum:]_-])${_iv_fn}([^[:alnum:]_-]|$)" <<< "$_iv_body" && _iv_used="${_iv_used} ${_iv_fn}"
+    done <<< "$_iv_libfns"
+    _iv_declared="$(sed -n -E 's/^readonly REQUIRED_LIB_FUNCTIONS="(.*)"$/\1/p' "$_iv_script")"
+    if [[ "$(tr ' ' '\n' <<< "$_iv_used" | grep . | sort)" == "$(tr ' ' '\n' <<< "$_iv_declared" | grep . | sort)" ]]; then
+        pass "$_iv_name declares exactly the lib.sh functions it calls"
+    else
+        fail "$_iv_name REQUIRED_LIB_FUNCTIONS is stale; it calls:${_iv_used}"
+    fi
+done
+
+# A piped run whose lib.sh is older than the script refuses up front, and
+# changes nothing, instead of stopping with exit 127 halfway through.
+mkdir -p "${_iv}/oldraw" "${_iv}/cwd"
+grep -v '^function setup_inference()' "${_script_dir}/lib.sh" > "${_iv}/oldraw/lib.sh"
+_out="$(cd "${_iv}/cwd" && MEMQL_INSTALL_RAW_BASE="file://${_iv}/oldraw" bash -s -- --help < "${_script_dir}/install-mac.sh" 2>&1)"; _rc=$?
+if [[ "$_rc" == 4 && "$_out" == *"lib.sh lacks: setup_inference"* && "$_out" == *"Nothing was changed"* ]]; then
+    pass "a piped installer with a stale lib.sh refuses before running, naming what is missing"
+else
+    fail "a stale lib.sh should be refused with 4 (rc=$_rc): $_out"
+fi
+_out="$(cd "${_iv}/cwd" && MEMQL_INSTALL_RAW_BASE="file://${_script_dir}" bash -s -- --help < "${_script_dir}/install-mac.sh" 2>&1)"; _rc=$?
+expect_eq "a piped installer with a matching lib.sh still works" "$_rc" "0"
 
 echo ""
 echo "===================="

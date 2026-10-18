@@ -1,8 +1,13 @@
 name: Release binaries
 
 on:
+  # `created`, not `published` (memql-cockpit#525): cut-release.sh creates
+  # the release as a DRAFT, this workflow fills it, and the script publishes
+  # it only once every asset is there -- so `releases/latest` never points at
+  # a release whose binaries are still building. A release published
+  # directly, without a draft, fires `created` too.
   release:
-    types: [published]
+    types: [created]
   workflow_dispatch:
     inputs:
       tag:
@@ -62,6 +67,13 @@ jobs:
             bin/memql-linux-amd64 \
             bin/memql-linux-arm64 \
             --clobber
+          # The raw headless binaries' own manifest (memql-cockpit#525): the
+          # installers verify a binary against it BEFORE running it. The
+          # versioned memql-<version>-SHA256SUMS keeps covering exactly the
+          # tar.gz archives.
+          (cd bin && sha256sum memql-darwin-arm64 memql-darwin-amd64 memql-linux-amd64 memql-linux-arm64) > memql-SHA256SUMS
+          cat memql-SHA256SUMS
+          gh release upload "$TAG" memql-SHA256SUMS --clobber
 
       - name: Upload distributable archives + SHA256SUMS to the release
         working-directory: memql-cockpit
