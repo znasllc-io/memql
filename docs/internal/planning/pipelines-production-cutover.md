@@ -51,7 +51,8 @@ The proven native PR check is now required, bound to App 4822538, alongside
 the existing `ci-required` context. The queue builds one candidate at a time
 with a 180-minute response ceiling. See the exact decision and PR proof in
 [the ruleset baseline](../ops/ruleset-baseline.md#native-required-check-october-18-2026).
-Native merge-candidate success and rejection evidence are still pending;
+Native merge-candidate success is still pending. The queue rejected the
+non-successful native candidate described below even after legacy CI passed;
 the legacy context and remaining workflows have not been retired.
 
 Storage PR #6171 passed its native head check at 16:29:23 UTC: 35 completed
@@ -73,10 +74,20 @@ attempts by one twenty-minute ceiling, without retrying tests.
 The unsuccessful queue attempt was cancelled at 18:48:58 UTC to release its
 remaining work: 35 completed, two failed and eleven cancelled steps; 35 successful
 logs and 93 artifacts retained. Its conclusion is **cancelled**, not successful
-or a completed failure aggregate. Both repairs have passing local qualification
-and production native checks in progress. Existing required contexts remain.
-A repaired exact normal-queue success and complete rejection proof are pending.
-The PR's final gate received a one-time Kueue priority of 1, allowing it to
+or a completed failure aggregate. Legacy `ci-required` check 117730646444 had
+passed at 16:43:11. Native App 4822538's check 117727730439 reported cancelled
+at 18:48:58, and `github-merge-queue[bot]` removed #6171 at 18:49:31 without
+merging it. This proves non-success rejection by the actual queue; it does not
+change the run's conclusion to failure. The driver regression suite separately
+covers failed steps, early returns and fabricated skips.
+
+Signup repair #6212 merged as `4f9d6a799c6191fb50491d13a1ead5c10b7099d6`
+at 19:43:09 after native run `9c037d5b6ddacb1fe495d1ae4cd8a427` passed
+all 33 selected steps, with 14 expected path skips, 33 logs, 29 artifacts and
+no retention notes. Mac download repair #6213 still has native qualification
+in progress. Both repairs are included in #6200. The repaired exact ordinary
+merge-queue success remains required before removing the legacy context.
+Storage PR #6171's head gate received a one-time Kueue priority of 1, allowing it to
 run alongside the existing database job. No running job was preempted and
 no quota was increased; all declared commands and assertions ran unchanged.
 
@@ -182,6 +193,14 @@ all 18 with no unscored checks, producing 13 findings and SARIF digest
 Weekly activation is held in commit `6d56703fb` until the new `githubReadToken`
 manifest field is deployed. Native App-token execution and receipt-bound SARIF
 publication still require qualification; the old workflow remains meanwhile.
+
+An append-only publication configuration preview passes the actual candidate
+parser: 11 assembly plans, 38 OCI targets, 49 release files and one npm target.
+It adds independent SDK/database/fixture version sources and 41 Cockpit files,
+including all eight binaries, platform archives, Mac apps, checksums and
+per-binary inventories. No credential was read and no publication occurred.
+The eventual Cockpit tag commit and current configuration must be refreshed
+before application; npm/index settings require the new runtime first.
 
 Manual maintenance can now be requested without disconnecting automatic CI in
 PR #6200. Existing event keys deduplicate repeated requests across replicas;
