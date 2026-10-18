@@ -93,6 +93,10 @@ type Options struct {
 	// builds a private one, which is the whole machine when this Manager
 	// is the only one.
 	Limiter *Limiter
+	// SlotWaitLogFloor is the wait below which a call that had to queue for
+	// a concurrency slot is not logged. Zero is one second: a slot that
+	// frees within a second is the machine doing its job.
+	SlotWaitLogFloor time.Duration
 }
 
 // Manager owns the live model calls on this worker.
@@ -103,6 +107,8 @@ type Manager struct {
 	getenv    func(string) string
 	limiter   *Limiter
 
+	slotWaitFloor time.Duration
+
 	mu   sync.Mutex
 	live map[string]*call
 }
@@ -110,6 +116,11 @@ type Manager struct {
 type call struct {
 	requestID string
 	cancel    context.CancelFunc
+	// level and purpose are what the engine said about the call. They steer
+	// nothing here -- the router chose the model -- and exist so the line
+	// logged when a call waits for a slot can say which kind of work was
+	// kept waiting.
+	level, purpose string
 
 	mu sync.Mutex
 	// modelID is set once the model RESOLVES and its slot is taken in the
@@ -142,13 +153,18 @@ func NewManager(opts Options) *Manager {
 	if limiter == nil {
 		limiter = NewLimiter()
 	}
+	floor := opts.SlotWaitLogFloor
+	if floor <= 0 {
+		floor = time.Second
+	}
 	return &Manager{
-		logger:    opts.Logger,
-		inventory: opts.Inventory,
-		http:      client,
-		getenv:    getenv,
-		limiter:   limiter,
-		live:      make(map[string]*call),
+		logger:        opts.Logger,
+		inventory:     opts.Inventory,
+		http:          client,
+		getenv:        getenv,
+		limiter:       limiter,
+		slotWaitFloor: floor,
+		live:          make(map[string]*call),
 	}
 }
 
@@ -191,7 +207,7 @@ func (m *Manager) Start(ctx context.Context, sender Sender, start *memqlv1.Model
 	// its own timeout -- exactly the outcome cancel exists to prevent.
 	limits := limitsFrom(start.GetLimits())
 	callCtx, cancel := context.WithTimeout(ctx, limits.timeout)
-	c := &call{requestID: requestID, cancel: cancel}
+	c := &call{requestID: requestID, cancel: cancel, level: start.GetLevel(), purpose: start.GetPurpose()}
 
 	m.mu.Lock()
 	_, duplicate := m.live[requestID]
@@ -442,6 +458,7 @@ func (m *Manager) admit(ctx context.Context, c *call, info models.Info, inv mode
 	if m.claim(c, info, ceiling) {
 		return nil
 	}
+	began := time.Now()
 	m.logger.Debug("model call waiting for a concurrency slot", "request_id", c.requestID, "model", info.ID)
 	deadline := time.NewTimer(limits.idle)
 	defer deadline.Stop()
@@ -452,6 +469,7 @@ func (m *Manager) admit(ctx context.Context, c *call, info models.Info, inv mode
 		// Re-checked AFTER taking the channel, so a release between the
 		// failed claim and the wait is never missed.
 		if m.claim(c, info, ceiling) {
+			m.slotWaited(c, info, time.Since(began))
 			return nil
 		}
 		select {
@@ -461,6 +479,10 @@ func (m *Manager) admit(ctx context.Context, c *call, info models.Info, inv mode
 				return refuse(CodeWorkerStopped, "the stream to the cluster went while this call waited for a concurrency slot")
 			}
 		case <-deadline.C:
+			m.logger.Warn("model call refused after waiting for a concurrency slot",
+				"request_id", c.requestID, "model", info.ID, "level", c.level, "purpose", c.purpose,
+				"waited_ms", time.Since(began).Milliseconds(), "model_max", info.MaxConcurrent,
+				"error_code", CodeConcurrencyExceeded)
 			return refuse(CodeConcurrencyExceeded, concurrencyRefusal(info, ceiling, limits.idle))
 		case <-ctx.Done():
 			finish, code, detail := m.classify(c, ctx.Err())
@@ -469,6 +491,23 @@ func (m *Manager) admit(ctx context.Context, c *call, info models.Info, inv mode
 			return end
 		}
 	}
+}
+
+// slotWaited says that a call waited for its slot, and for how long.
+//
+// IT IS THE EVIDENCE for a decision this cockpit deliberately has not
+// made: reserving slots for the fast level (D6 in the fleet-tuning design,
+// docs/superpowers/specs/2026-10-18-fleet-tuning-design.md). Whether
+// background work starves fast work here is a fact about this machine's
+// traffic, and level and purpose are the only things the call says about
+// itself.
+func (m *Manager) slotWaited(c *call, info models.Info, waited time.Duration) {
+	if waited < m.slotWaitFloor {
+		return
+	}
+	m.logger.Info("model call waited for a concurrency slot",
+		"request_id", c.requestID, "model", info.ID, "level", c.level, "purpose", c.purpose,
+		"waited_ms", waited.Milliseconds(), "model_max", info.MaxConcurrent)
 }
 
 // claim takes the slot if one is free. Taking it and recording which one
