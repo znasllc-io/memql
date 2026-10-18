@@ -1714,6 +1714,9 @@ function main() {
     OVERLAY_PATH="$(cap_param overlay-path "${OVERLAY_PATH}")"
     EXTRA_PORTS="$(cap_param extra-ports "${EXTRA_PORTS}")"
     APP_PROJECT="$(cap_param app-project "${APP_PROJECT}")"
+    # Read beside --app-project, which refuses without it (memql#6209: this
+    # line went missing in #3491 and the flag was silently inert since).
+    PROJECT_MANIFEST="$(cap_param project-manifest "${PROJECT_MANIFEST}")"
     # The checkout this run reads deploy/ and its target revision FROM.
     #
     # Defaults to the derived root, so `make up` and every CI lane that calls
