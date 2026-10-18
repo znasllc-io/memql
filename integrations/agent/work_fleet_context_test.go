@@ -102,6 +102,17 @@ func TestOwnedWorkLanesPreserveFleetSelectionContext(t *testing.T) {
 				t.Fatal(err)
 			}
 			engine := &proactiveWorkEngine{workPromptEngine: workPromptEngine{registryEngine: registryEngine{registered: map[string]bool{"composeFile": true}}, prompts: prompts}}
+			engine.execute = func(reviewCtx context.Context, query string) (any, error) {
+				if strings.HasPrefix(query, "builtin work.workReviewReply(") {
+					actor, _ := auth.AccessFromContext(reviewCtx)
+					run, _ := common.RunFromContext(reviewCtx)
+					if actor == nil || actor.UserId != owner || run.RunId != "adopted-run" {
+						return nil, fmt.Errorf("reply review lost the persisted work owner")
+					}
+					return []map[string]any{{"reply": "Completed answer", "evidenceReviewed": false}}, nil
+				}
+				return nil, nil
+			}
 			r := newTestReplier(engine)
 			r.router = router.New(providers, memql.NewPolicyRegistryForTest(map[string][]string{"local": {"fleet:strongest"}}), rules, nil, nil)
 			msg := &memqlv1.AgentGenerateTurnMsg{RequestId: "work-fleet", AgentId: "assistant", ActingAgent: &memqlv1.ActingAgentIdentity{Id: "assistant", Name: "Ada", Role: "assistant"}, History: []*memqlv1.AgentTurnMessage{{Role: "user", Content: document}}}

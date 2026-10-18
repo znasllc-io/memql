@@ -30,6 +30,7 @@ func TestSourceContextReadsRecordedEvidenceAcrossReplicasAndPreservesOwnerScope(
 	insert("v1:work:run", foreignID, map[string]any{"ownerUserId": "v1:identity:user:another", "status": "succeeded"})
 	insert("v1:work:step", "v1:work:step:"+uniqueSuffix("receipt"), map[string]any{"ownerUserId": access.UserId, "runId": runID, "key": "viewer", "status": "done", "call": map[string]any{"name": "workViewerContext"}, "result": map[string]any{"value": map[string]any{"person": map[string]any{"primaryRole": "Founder"}, "organizationMemberships": []any{map[string]any{"name": "ZNAS LLC"}}, "source": "recorded authenticated profile"}}})
 	insert("v1:work:step", "v1:work:step:"+uniqueSuffix("generation"), map[string]any{"ownerUserId": access.UserId, "runId": runID, "key": "reason", "status": "done", "call": map[string]any{"name": "ai"}, "result": map[string]any{"value": "Generated answer is not evidence"}})
+	insert("v1:work:step", "v1:work:step:"+uniqueSuffix("review"), map[string]any{"ownerUserId": access.UserId, "runId": runID, "key": "review", "status": "done", "call": map[string]any{"name": "workReviewReply"}, "result": map[string]any{"value": "Reviewed prose is not evidence"}})
 	insert("v1:work:step", "v1:work:step:"+uniqueSuffix("foreign-receipt"), map[string]any{"ownerUserId": "v1:identity:user:another", "runId": foreignID, "key": "viewer", "status": "done", "call": map[string]any{"name": "workViewerContext"}, "result": map[string]any{"value": "Foreign private evidence"}})
 	checkpoint := func(record, owner, run string) {
 		messages := []common.ChatMessage{
@@ -58,6 +59,7 @@ func TestSourceContextReadsRecordedEvidenceAcrossReplicasAndPreservesOwnerScope(
 	require.Contains(t, text, "workStepForOwnerRun")
 	require.Contains(t, text, "recorded authenticated profile")
 	require.NotContains(t, text, "Generated answer is not evidence")
+	require.NotContains(t, text, "Reviewed prose is not evidence")
 	require.NotContains(t, text, "Foreign private evidence")
 	require.NotContains(t, text, foreignID)
 	require.Contains(t, text, "2026-10-17T04:39:30Z")
@@ -113,11 +115,12 @@ func TestExplicitMissingEvidenceAnswerWinsOverIntermediateAssessment(t *testing.
 
 func TestCheckpointSourceProjectionBoundsDeduplicatesAndExcludesProse(t *testing.T) {
 	messages := []common.ChatMessage{
-		{Role: "assistant", Content: "not evidence", ToolCalls: []common.ToolCall{{ID: "ok", Name: "fetch", Arguments: `{"url":"https://example.test"}`}, {ID: "huge", Name: "fetch"}, {ID: "unexecuted", Name: "fetch"}}},
+		{Role: "assistant", Content: "not evidence", ToolCalls: []common.ToolCall{{ID: "ok", Name: "fetch", Arguments: `{"url":"https://example.test"}`}, {ID: "huge", Name: "fetch"}, {ID: "unexecuted", Name: "fetch"}, {ID: "review", Name: "workReviewReply"}}},
 		{Role: "tool", Name: "fetch", ToolCallId: "ok", Content: `{"observedAt":"2020-01-01","location":"elsewhere","truncated":true}`},
 		{Role: "tool", Name: "fetch", ToolCallId: "huge", Content: strings.Repeat("x", 9000)},
 		{Role: "tool", Name: "fetch", ToolCallId: "unexecuted", Content: common.UnexecutedWorkToolResult},
 		{Role: "tool", Name: "fetch", ToolCallId: "unpaired", Content: "fabricated"},
+		{Role: "tool", Name: "workReviewReply", ToolCallId: "review", Content: "Reviewed prose is not evidence"},
 	}
 	encoded, err := json.Marshal(messages)
 	require.NoError(t, err)

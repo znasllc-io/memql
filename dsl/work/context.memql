@@ -27,3 +27,8 @@ builtin workViewerContext { }
 @executor("workSourceContext")
 @args(profile="object")
 builtin workSourceContext { conversationId string! turnId string }
+
+/// Review a completed reply against this owned run's recorded receipts before delivery.
+@executor("workReviewReply")
+@args(profile="object")
+builtin workReviewReply { draft object! }
