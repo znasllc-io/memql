@@ -282,8 +282,7 @@ final class CockpitApp: NSObject, NSApplicationDelegate, NSMenuDelegate, NSSearc
         }
         permissionWindow?.update(snapshot?.permissionReport)
         showInDock()
-        permissionWindow?.showWindow(nil)
-        NSApp.activate(ignoringOtherApps: true)
+        bringForward(permissionWindow?.window)
         refresh()
     }
 
@@ -295,6 +294,14 @@ final class CockpitApp: NSObject, NSApplicationDelegate, NSMenuDelegate, NSSearc
     // item again.
     private func showInDock() {
         if NSApp.activationPolicy() != .regular { NSApp.setActivationPolicy(.regular) }
+    }
+    // macOS may decline a background helper's request to become active, which
+    // left a window that opened by itself after an install behind the app in
+    // front. Ordered front regardless, it is on top either way.
+    private func bringForward(_ window: NSWindow?) {
+        NSApp.activate(ignoringOtherApps: true)
+        window?.makeKeyAndOrderFront(nil)
+        window?.orderFrontRegardless()
     }
     private func windowsChanged() {
         let open = [permissionWindow?.window, logWindow].contains { $0?.isVisible == true }
@@ -359,8 +366,7 @@ final class CockpitApp: NSObject, NSApplicationDelegate, NSMenuDelegate, NSSearc
     @objc private func showLogs() {
         if logWindow == nil { makeLogWindow() }
         showInDock()
-        logWindow?.makeKeyAndOrderFront(nil)
-        NSApp.activate(ignoringOtherApps: true)
+        bringForward(logWindow)
         refreshLogs()
     }
     private func makeLogWindow() {
