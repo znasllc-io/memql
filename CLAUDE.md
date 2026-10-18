@@ -1119,7 +1119,17 @@ committed with the fix rather than described.
 ## Releases
 
 Tag-driven: `make release` recommends the next semver; `ARGS="--cut"` bumps
-VERSION + `cmd/memql/main.go`, tags, and publishes the GitHub Release, which
-`release.yml` fills with per-platform raw binaries (`memql-<os>-<arch>`),
-tar.gz archives (`memql-<version>-<os>-<arch>.tar.gz`) and a SHA256SUMS
-manifest — the names `install.sh` and `scripts/install/` download.
+VERSION + `cmd/memql/main.go`, tags, and creates the GitHub Release as a
+DRAFT, which `release.yml` (on `release: created`) fills with per-platform raw
+binaries (`memql-<os>-<arch>`, `memql-computeruse-<os>-<arch>`), tar.gz
+archives (`memql-<version>-<os>-<arch>.tar.gz`) and their manifests
+(`memql-SHA256SUMS` for the raw headless binaries, `memql-computeruse-SHA256SUMS`,
+`memql-<version>-SHA256SUMS` for the archives) — the names `install.sh` and
+`scripts/install/` download. The script publishes the draft only once that
+run passed and every installer asset is attached, so `releases/latest` never
+points at a release with missing binaries (memql-cockpit#525). The installers
+verify a downloaded binary against its manifest BEFORE running it; a headless
+binary from a release that predates `memql-SHA256SUMS` is vouched for by its
+verified archive. Each installer script lists the lib.sh functions it calls
+(`REQUIRED_LIB_FUNCTIONS`, kept complete by `lib_test.sh`) and refuses a
+cached lib.sh that lacks one, after one refetch past the cache.

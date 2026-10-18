@@ -38,6 +38,16 @@ readonly STATE_DIR_DEFAULT="${HOME}/.memql/state"
 # default is GitHub, and download_binary still enforces https on it.
 readonly RELEASE_BASE="${MEMQL_INSTALL_RELEASE_BASE:-https://github.com/znasllc-io/memql-cockpit/releases}"
 
+# Network discipline for every fetch (memql-cockpit#525): a transient
+# failure is retried, a connection that never opens is given up on, and
+# every transfer is bounded -- one dropped connection used to fail an
+# install and a stalled one to hang it. A large download also gives up when
+# it crawls below 1 KB/s for a minute, which a half-hour --max-time alone
+# would let run on. Plain arrays, not readonly ones: macOS bash 3.2.
+CURL_NET=(--retry 3 --retry-delay 2 --connect-timeout 15)
+CURL_SMALL=(--max-time 60)
+CURL_LARGE=(--max-time 1800 --speed-limit 1024 --speed-time 60)
+
 # The installed command. ONE name for both build variants (design D4,
 # znasllc-io/memql-cockpit#352): the download artifact carries the variant,
 # the installed file never does. `memql --version` is what answers "which
@@ -926,10 +936,10 @@ function preflight_asset() {
         return 4
     fi
     echo "INFO: checking release asset $url"
-    if curl -fsIL -o /dev/null "$url"; then
+    if curl -fsIL "${CURL_NET[@]}" "${CURL_SMALL[@]}" -o /dev/null "$url"; then
         return 0
     fi
-    if curl -fsL -r 0-0 -o /dev/null "$url"; then
+    if curl -fsL "${CURL_NET[@]}" "${CURL_SMALL[@]}" -r 0-0 -o /dev/null "$url"; then
         return 0
     fi
     local os arch
@@ -958,18 +968,14 @@ function download_binary() {
     fi
     echo "INFO: downloading $url"
     # Progress bar when stdout is a TTY; silent -sS for CI / pipes.
-    local curl_flags=(-fL --proto '=https')
-    # Explicit local recovery testing only. Keep published/default downloads
-    # HTTPS-only, and refuse redirects from a loopback HTTP asset.
-    if [[ "${MEMQL_INSTALL_ALLOW_LOOPBACK_HTTP:-}" == 1 && "$url" =~ ^http://(127\.0\.0\.1|\[::1\])(:[0-9]+)?/ ]]; then
-        curl_flags=(-fL --proto '=http' --max-redirs 0)
-    fi
+    local curl_flags
+    read -r -a curl_flags <<< "$(release_fetch_protocol "$url")"
     if [[ -t 1 ]]; then
         curl_flags+=(--progress-bar)
     else
         curl_flags+=(-sS)
     fi
-    if ! curl "${curl_flags[@]}" "$url" -o "$dest.partial"; then
+    if ! curl "${curl_flags[@]}" "${CURL_NET[@]}" "${CURL_LARGE[@]}" "$url" -o "$dest.partial"; then
         echo "ERROR: download failed for $url" >&2
         echo "       Check network access, or pass --download-base to a release that" >&2
         echo "       publishes this asset. Nothing was installed from this URL." >&2
@@ -983,6 +989,148 @@ function download_binary() {
     fi
     mv "$dest.partial" "$dest"
     chmod +x "$dest"
+}
+
+# release_fetch_protocol prints the curl flags that pin a release fetch's
+# protocol: https, always, for anything published; plain http only for an
+# explicit local test against a literal loopback address, with redirects
+# refused there.
+function release_fetch_protocol() {
+    local url="$1"
+    if [[ "${MEMQL_INSTALL_ALLOW_LOOPBACK_HTTP:-}" == 1 && "$url" =~ ^http://(127\.0\.0\.1|\[::1\])(:[0-9]+)?/ ]]; then
+        printf '%s\n' "-fL --proto =http --max-redirs 0"
+        return 0
+    fi
+    printf '%s\n' "-fL --proto =https"
+}
+
+# fetch_release_file fetches a small release file (a checksum manifest)
+# under the same protocol rule as the binary it vouches for. A function so
+# the installer tests can serve one from disk.
+function fetch_release_file() {
+    local url="$1" dest="$2" flags
+    read -r -a flags <<< "$(release_fetch_protocol "$url")"
+    curl "${flags[@]}" -sS "${CURL_NET[@]}" "${CURL_SMALL[@]}" --max-filesize 65536 "$url" -o "$dest"
+}
+
+# sha256_of prints a file's SHA-256: shasum on macOS, sha256sum on Linux.
+function sha256_of() {
+    if command -v shasum >/dev/null 2>&1; then
+        shasum -a 256 "$1" | awk '{print $1}'
+    else
+        sha256sum "$1" | awk '{print $1}'
+    fi
+}
+
+# manifest_checksum prints the hex a SHA256SUMS file lists for an asset,
+# or nothing. Both spellings: `<hex>  name` and `<hex> *name`.
+function manifest_checksum() {
+    awk -v asset="$2" 'NF >= 2 { name = $2; sub(/^\*/, "", name); sub(/^\.\//, "", name); if (name == asset) { print $1; exit } }' "$1"
+}
+
+# release_checksum_manifest names the manifest that lists a raw binary:
+# memql-computeruse-SHA256SUMS for the computer-use build, memql-SHA256SUMS
+# for the headless one (published from the release after 0.19.0).
+function release_checksum_manifest() {
+    case "$1" in
+        memql-computeruse-*) printf 'memql-computeruse-SHA256SUMS\n' ;;
+        *) printf 'memql-SHA256SUMS\n' ;;
+    esac
+}
+
+# resolve_latest_version prints the version `releases/latest` points at
+# now, read from the redirect (no API call, no rate limit), or nothing.
+function resolve_latest_version() {
+    local effective
+    effective="$(curl -fsSLI "${CURL_NET[@]}" "${CURL_SMALL[@]}" -o /dev/null -w '%{url_effective}' "${RELEASE_BASE}/latest" 2>/dev/null)" || return 0
+    printf '%s' "$effective" | sed -n -E 's#.*/tag/v?([0-9]+(\.[0-9]+){2}([-+][0-9A-Za-z.-]+)?)$#\1#p'
+}
+
+# verify_release_binary checks a downloaded binary against its release's
+# checksum manifest BEFORE anything executes it (memql-cockpit#525) --
+# the version probe that follows runs the file, so an unverified download
+# was code run from the network. A mismatch, or a manifest that cannot
+# vouch for the file, refuses with exit 5 and nothing installed.
+#
+# A headless binary from a release published before memql-SHA256SUMS
+# existed is vouched for by its release archive instead: the archive is
+# listed in memql-<version>-SHA256SUMS, and its `memql` must be the same
+# bytes as the raw download.
+function verify_release_binary() {
+    local file="$1" asset="$2" base="$3" manifest list expected="" actual
+    manifest="$(release_checksum_manifest "$asset")"
+    list="$(mktemp)"
+    if fetch_release_file "${base}/${manifest}" "$list" 2>/dev/null; then
+        expected="$(manifest_checksum "$list" "$asset")"
+    fi
+    rm -f "$list"
+    if [[ -z "$expected" && "$asset" != memql-computeruse-* ]]; then
+        verify_headless_via_archive "$file" "$asset" "$base"
+        return $?
+    fi
+    if [[ ! "$expected" =~ ^[[:xdigit:]]{64}$ ]]; then
+        echo "ERROR: ${base}/${manifest} does not vouch for ${asset}, so the download cannot be verified." >&2
+        echo "       Nothing was run or installed. Retry in a few minutes if the release is still being" >&2
+        echo "       published, or pin one with --version." >&2
+        return 5
+    fi
+    actual="$(sha256_of "$file")"
+    if [[ "$actual" != "$expected" ]]; then
+        echo "ERROR: ${asset} does not match its release checksum (downloaded ${actual}, ${manifest} lists ${expected})." >&2
+        echo "       Nothing was run or installed." >&2
+        return 5
+    fi
+    echo "INFO: verified ${asset} against ${manifest}"
+}
+
+function verify_headless_via_archive() {
+    local file="$1" asset="$2" base="$3" version os_arch archive manifest list expected work actual
+    version="$(printf '%s' "$base" | sed -n -E 's#.*/download/v?([0-9]+(\.[0-9]+){2}([-+][0-9A-Za-z.-]+)?)$#\1#p')"
+    [[ -n "$version" ]] || version="${MEMQL_INSTALL_VERSION:-}"
+    version="${version#v}"
+    [[ -n "$version" ]] || version="$(resolve_latest_version)"
+    os_arch="${asset#memql-}"
+    if [[ -z "$version" || "$os_arch" == "$asset" ]]; then
+        echo "ERROR: ${asset} cannot be verified: its release publishes no memql-SHA256SUMS and its version is unknown." >&2
+        echo "       Nothing was run or installed. Pin a release with --version and run this again." >&2
+        return 5
+    fi
+    [[ "$base" == */download/v* ]] || base="$(release_download_base "$version")"
+    archive="memql-${version}-${os_arch}.tar.gz"
+    manifest="memql-${version}-SHA256SUMS"
+    list="$(mktemp)"
+    expected=""
+    if fetch_release_file "${base}/${manifest}" "$list" 2>/dev/null; then
+        expected="$(manifest_checksum "$list" "$archive")"
+    fi
+    rm -f "$list"
+    if [[ ! "$expected" =~ ^[[:xdigit:]]{64}$ ]]; then
+        echo "ERROR: neither memql-SHA256SUMS nor ${manifest} vouches for ${asset}; nothing was run or installed." >&2
+        return 5
+    fi
+    work="$(mktemp -d)"
+    if ! download_binary "${base}/${archive}" "${work}/${archive}" >/dev/null; then
+        rm -rf "$work"
+        echo "ERROR: ${archive} could not be downloaded to verify ${asset}; nothing was run or installed." >&2
+        return 5
+    fi
+    if [[ "$(sha256_of "${work}/${archive}")" != "$expected" ]]; then
+        rm -rf "$work"
+        echo "ERROR: ${archive} does not match ${manifest}; nothing was run or installed." >&2
+        return 5
+    fi
+    if ! tar -xzf "${work}/${archive}" -C "$work" ./memql 2>/dev/null && ! tar -xzf "${work}/${archive}" -C "$work" memql 2>/dev/null; then
+        rm -rf "$work"
+        echo "ERROR: ${archive} carries no memql to compare ${asset} with; nothing was run or installed." >&2
+        return 5
+    fi
+    actual="$(sha256_of "${work}/memql")"
+    rm -rf "$work"
+    if [[ "$actual" != "$(sha256_of "$file")" ]]; then
+        echo "ERROR: ${asset} is not the memql in its verified release archive ${archive}; nothing was run or installed." >&2
+        return 5
+    fi
+    echo "INFO: verified ${asset} against ${archive} (${manifest})"
 }
 
 # install_mode_dir prints the install destination directory for
@@ -1143,6 +1291,10 @@ function install_binary_with_mode() {
                 rm -f "$tmp"
                 return 1
             fi
+            if ! verify_release_binary "$tmp" "$binary" "${url%/*}"; then
+                rm -f "$tmp"
+                return 5
+            fi
             local dl_ver
             if [[ -n "$target_exact" ]] && ! binary_version_matches_selection "$(read_binary_version_exact "$tmp")" "$target_exact"; then
                 echo "ERROR: downloaded binary does not match the explicitly selected build" >&2
@@ -1187,6 +1339,10 @@ function install_binary_with_mode() {
             if ! download_binary "$url" "$tmp"; then
                 rm -f "$tmp"
                 return 1
+            fi
+            if ! verify_release_binary "$tmp" "$binary" "${url%/*}"; then
+                rm -f "$tmp"
+                return 5
             fi
             local dl_ver
             if [[ -n "$target_exact" ]] && ! binary_version_matches_selection "$(read_binary_version_exact "$tmp")" "$target_exact"; then
@@ -2509,8 +2665,8 @@ function fetch_macos_menu() {
     local asset expected actual entry
     [[ "$arch" == arm64 || "$arch" == amd64 ]] || return 2
     asset="memql-menubar-darwin-${arch}.tar.gz"
-    curl -fsSL --max-filesize 30000000 "${base}/${asset}" -o "$stage/$asset" || return 5
-    curl -fsSL --max-filesize 1024 "${base}/${asset}.sha256" -o "$stage/checksum" || return 5
+    curl -fsSL "${CURL_NET[@]}" "${CURL_LARGE[@]}" --max-filesize 30000000 "${base}/${asset}" -o "$stage/$asset" || return 5
+    curl -fsSL "${CURL_NET[@]}" "${CURL_SMALL[@]}" --max-filesize 1024 "${base}/${asset}.sha256" -o "$stage/checksum" || return 5
     expected="$(awk -v asset="$asset" 'NF == 2 && $2 == asset { print $1 }' "$stage/checksum")"
     [[ "$expected" =~ ^[[:xdigit:]]{64}$ ]] || { echo "ERROR: invalid menu checksum manifest" >&2; return 3; }
     actual="$(shasum -a 256 "$stage/$asset" | awk '{print $1}')"
@@ -2542,8 +2698,8 @@ function fetch_macos_app() {
     local base="$1" arch="$2" stage="$3" asset expected actual entry normalized
     [[ "$arch" == arm64 || "$arch" == amd64 ]] || return 2
     asset="memql-app-darwin-${arch}.tar.gz"
-    curl -fsSL --max-filesize 120000000 "${base}/${asset}" -o "$stage/$asset" || return 5
-    curl -fsSL --max-filesize 1024 "${base}/${asset}.sha256" -o "$stage/checksum" || return 5
+    curl -fsSL "${CURL_NET[@]}" "${CURL_LARGE[@]}" --max-filesize 120000000 "${base}/${asset}" -o "$stage/$asset" || return 5
+    curl -fsSL "${CURL_NET[@]}" "${CURL_SMALL[@]}" --max-filesize 1024 "${base}/${asset}.sha256" -o "$stage/checksum" || return 5
     expected="$(awk -v asset="$asset" 'NF == 2 && $2 == asset { print $1 }' "$stage/checksum")"
     [[ "$expected" =~ ^[[:xdigit:]]{64}$ ]] || return 3
     actual="$(shasum -a 256 "$stage/$asset" | awk '{print $1}')"

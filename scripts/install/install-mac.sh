@@ -32,31 +32,67 @@ set -euo pipefail
 # at a local file:// fixture and stay offline.
 readonly RAW_BASE="${MEMQL_INSTALL_RAW_BASE:-https://raw.githubusercontent.com/znasllc-io/memql-cockpit/main/scripts/install}"
 
+# The lib.sh functions this script calls (memql-cockpit#525). Every piped
+# fetch comes from raw.githubusercontent.com, which caches each file on its
+# own, so a fresh script can arrive with a lib.sh from before a function it
+# calls existed -- and stopped with exit 127 halfway through. source_lib
+# checks these before anything runs, refetches past the cache once, and
+# otherwise refuses in a sentence. lib_test.sh keeps the list complete.
+readonly REQUIRED_LIB_FUNCTIONS="allow_installed_apps binary_name_for compare_semver detect_arch fetch_macos_app fetch_macos_menu install_binary_with_mode install_check_release install_sudo install_ui_binary_result install_ui_finish install_ui_init install_ui_stage macos_bundle_requirement macos_signing_transition parse_version_flag read_binary_version read_binary_version_exact release_download_base repair_changed_macos_permissions resolve_target_version setup_inference write_worker_yaml"
+
+# missing_lib_functions names the required functions a lib.sh file does not
+# define. It reads the TEXT, before anything is sourced: lib.sh declares
+# readonly variables, so a second copy could not be sourced over a first.
+function missing_lib_functions() {
+    local file="$1" fn missing="" text
+    # Bash alone: the uninstallers run with PATH cut to a few tools.
+    text=$'\n'"$(<"$file")"
+    for fn in $REQUIRED_LIB_FUNCTIONS; do
+        [[ "$text" == *$'\n'"function ${fn}()"* ]] || missing="${missing} ${fn}"
+    done
+    printf '%s' "$missing"
+}
+
+# fetch_lib fetches lib.sh into a temp file and prints its path.
+function fetch_lib() {
+    local url="$1" tmp
+    tmp="$(mktemp)"
+    if ! curl -fsSL --retry 3 --retry-delay 2 --connect-timeout 15 --max-time 60 "$url" -o "$tmp" || [[ ! -s "$tmp" ]]; then
+        rm -f "$tmp"
+        echo "ERROR: failed to fetch $url" >&2
+        echo "       Piped execution needs it; check network access or run from a repo clone." >&2
+        exit 4
+    fi
+    printf '%s\n' "$tmp"
+}
+
 # Source the shared helper library. A sibling lib.sh (the cloned-repo
 # case) always wins, so a checkout never gains a network dependency.
 # Only the piped case fetches -- into a temp file, checked non-empty
 # BEFORE sourcing, because under `set -e` a bare `source <(curl ...)`
 # turns a failed fetch into a cryptic bash error naming no URL.
 function source_lib() {
-    local sibling
-    sibling="$(dirname "$0")/lib.sh"
-    if [[ -f "$sibling" ]]; then
-        # shellcheck source=lib.sh
-        source "$sibling"
-        return 0
+    local lib missing
+    lib="$(dirname "$0")/lib.sh"
+    if [[ ! -f "$lib" ]]; then
+        lib="$(fetch_lib "${RAW_BASE}/lib.sh")"
+        missing="$(missing_lib_functions "$lib")"
+        if [[ -n "$missing" && "$RAW_BASE" == http* ]]; then
+            # A cached copy from before this script: once more, past the cache.
+            rm -f "$lib"
+            lib="$(fetch_lib "${RAW_BASE}/lib.sh?refresh=$(date +%s)")"
+        fi
     fi
-    local url="${RAW_BASE}/lib.sh"
-    local tmp
-    tmp="$(mktemp)"
-    if ! curl -fsSL "$url" -o "$tmp" || [[ ! -s "$tmp" ]]; then
-        rm -f "$tmp"
-        echo "ERROR: failed to fetch $url" >&2
-        echo "       Piped execution needs it; check network access or run from a repo clone." >&2
+    missing="$(missing_lib_functions "$lib")"
+    if [[ -n "$missing" ]]; then
+        [[ "$lib" == "$(dirname "$0")/lib.sh" ]] || rm -f "$lib"
+        echo "ERROR: this script and its lib.sh come from different versions (lib.sh lacks:${missing})." >&2
+        echo "       A cached copy is the usual cause. Nothing was changed; wait a minute and run the same command again." >&2
         exit 4
     fi
-    # shellcheck disable=SC1090  # fetched at runtime; the static path is the sibling branch above
-    source "$tmp"
-    rm -f "$tmp"
+    # shellcheck source=lib.sh
+    source "$lib"
+    [[ "$lib" == "$(dirname "$0")/lib.sh" ]] || rm -f "$lib"
 }
 source_lib
 
