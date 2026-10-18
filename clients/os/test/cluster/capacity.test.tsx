@@ -44,7 +44,7 @@ describe("background capacity", () => {
     fireEvent.change(screen.getByRole("textbox", { name: "Maximum concurrent jobs" }), { target: { value: "5" } });
     const save = screen.getByRole("button", { name: "Save changes" });
     fireEvent.click(save); fireEvent.click(save);
-    await screen.findByText("Connection lost after send");
+    await screen.findByText("The change could not be confirmed. Check the current values before saving again.");
     expect(f.write).toHaveBeenCalledTimes(1);
     expect(f.write).toHaveBeenCalledWith(expect.objectContaining({ revision: "q:1", policyRevision: "p:1", jobs: 5 }));
     await waitFor(() => expect(f.read).toHaveBeenCalledTimes(2));

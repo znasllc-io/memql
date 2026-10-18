@@ -26,7 +26,7 @@ export function CapacityPage({ query, connected, visible }: { query: CapacityQue
     <LocalTabs label="Capacity views" value={tab} onChange={setTab} options={[["overview", "Overview"], ["settings", "Settings"]]} />
     <AutoRefresh enabled={connected && visible && query !== null} busy={reading.busy} onRefresh={reading.refresh} intervalMs={20_000} />
     {!connected ? <Notice sentence="Capacity will update when the cluster reconnects." /> : null}
-    {reading.error ? <Notice tone="error" sentence="Capacity could not be refreshed." detail={reading.error} /> : null}
+    {reading.error ? <Notice tone="error" sentence="Capacity could not be refreshed." next="Try refreshing when the cluster is available." /> : null}
     {!report && connected && !reading.error ? <ContentSkeleton kind="detail" label="Loading capacity" /> : null}
     {report && !report.available ? <Notice sentence={report.reason || "Background resource admission is unavailable."} /> : null}
     {report?.available && tab === "overview" ? <Details>
@@ -81,7 +81,7 @@ function CapacitySettings({ query, report, fresh, refresh }: { query: CapacityQu
       const result = readCapacity((await query.clusterSetBackgroundCapacity({ revision: base.revision!, policyRevision: base.policyRevision!, cpuMilli: values[0]!, memoryMiB: values[1]!, jobs: values[2]!, accepting })).single());
       if (!result.available || result.budget?.cpuMilli !== values[0] || result.budget?.memoryMiB !== values[1] || result.budget?.jobs !== values[2] || result.accepting !== accepting) throw new Error("The requested settings could not be verified. Check the current values before saving again.");
       if (alive.current) { setBase(result); setMessage("Capacity settings saved."); }
-    } catch (e) { if (alive.current) setError(e instanceof Error ? e.message : String(e)); }
+    } catch { if (alive.current) setError("The change could not be confirmed. Check the current values before saving again."); }
     finally { inflight.current = false; if (alive.current) { setBusy(false); refresh(); } }
   }
   return <Details>
