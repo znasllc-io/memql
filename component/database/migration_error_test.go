@@ -5,10 +5,12 @@ import (
 	"database/sql"
 	"database/sql/driver"
 	"errors"
+	"log/slog"
 	"testing"
 
 	"github.com/uptrace/bun"
 	"github.com/uptrace/bun/dialect/pgdialect"
+	"github.com/uptrace/bun/migrate"
 
 	"github.com/znasllc-io/memql/core/common"
 )
@@ -90,6 +92,44 @@ func TestRunMigrationsSuccessLeavesNoError(t *testing.T) {
 
 	if got := d.MigrationError(); got != nil {
 		t.Fatalf("MigrationError() = %v, want nil after a successful migration", got)
+	}
+}
+
+// A post-migration hook assumes the entire schema exists. In particular, the
+// Timescale hook must not enable compression while an earlier ID-rewriting
+// migration still needs to run. A failed attempt must remain retryable without
+// applying any post-migration effects to its partial schema.
+func TestRunMigrationsDefersPostHooksUntilTheSchemaSucceeds(t *testing.T) {
+	for _, failure := range []string{"custom migrator", "migration initialization"} {
+		t.Run(failure, func(t *testing.T) {
+			cfg := &Database{}
+			calls := 0
+			d := newMigrationTestDB(t, cfg.WithMigrateOnStart(true),
+				cfg.WithPostMigrationHook(func(context.Context, *bun.DB, *slog.Logger) error {
+					calls++
+					return nil
+				}))
+			if failure == "custom migrator" {
+				d.config.migrator = stubMigrator{err: errors.New("migration refused")}
+			} else {
+				// Init must fail because this connector cannot reach a database.
+				d.config.migrations = migrate.NewMigrations()
+			}
+			db := newStubBun()
+			t.Cleanup(func() { _ = db.Close() })
+			d.runMigrations(context.Background(), db)
+			if calls != 0 || d.MigrationError() == nil || !d.migrationsPending() {
+				t.Fatalf("failed attempt: hooks=%d, error=%v, pending=%v", calls, d.MigrationError(), d.migrationsPending())
+			}
+			// A later successful attempt must run the hook exactly once and
+			// clear the original refusal instead of poisoning recovery.
+			d.config.migrator = stubMigrator{}
+			d.config.migrations = nil
+			d.runMigrations(context.Background(), db)
+			if calls != 1 || d.MigrationError() != nil || d.migrationsPending() {
+				t.Fatalf("successful retry: hooks=%d, error=%v, pending=%v", calls, d.MigrationError(), d.migrationsPending())
+			}
+		})
 	}
 }
 
