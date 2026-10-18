@@ -144,15 +144,37 @@ func TestLookupReplyWithNoReceiptCannotBypassEvidenceReview(t *testing.T) {
 	require.Contains(t, string(raw), "no successful source receipt was recorded")
 	model.answer = `{"reply":"The requested entity has not been checked.","missingEvidence":"Resolve the named entity from a source."}`
 	for _, allowed := range []bool{false, true} {
-		rows, err := e.workReviewReplyBuiltin(ctx, map[string]any{"draft": map[string]any{"reply": "A draft", "continueLookup": allowed}}, 0)
+		// Exercise the same parsed builtin boundary used by the agent, not just
+		// a direct Go call that could conceal losing a nested boolean argument.
+		call, err := parser.RenderCall("work.workReviewReply", map[string]any{"draft": map[string]any{"reply": "A draft", "continueLookup": allowed}})
+		require.NoError(t, err)
+		result, err := e.Execute(ctx, "builtin "+call)
+		require.NoError(t, err)
+		rows := MaterializeRows(result.OutputPayload())
+		require.Len(t, rows, 1)
+		raw, err := json.Marshal(rows[0])
 		require.NoError(t, err)
 		var decision replyReviewDecision
-		require.NoError(t, json.Unmarshal(rows[0].Payload, &decision))
+		require.NoError(t, json.Unmarshal(raw, &decision))
 		if allowed {
 			require.NotEmpty(t, decision.MissingEvidence)
 		} else {
 			require.Empty(t, decision.MissingEvidence)
 		}
+		observations, err := e.workRows(ContextWithFreshRead(ctx), "workObservationsForOwnerRun", run.RunId)
+		require.NoError(t, err)
+		found := false
+		for _, observation := range observations {
+			data, _ := observation["data"].(map[string]any)
+			receipt, _ := data["replyReview"].(map[string]any)
+			if receipt["continuationAvailable"] == allowed && receipt["missingEvidence"] == decision.MissingEvidence {
+				found = true
+			}
+		}
+		require.True(t, found, "the durable decision must distinguish an unavailable continuation from a model choosing not to use it")
+		sources, err := e.workRows(ContextWithFreshRead(ctx), "workSourceCheckpointsForOwnerRun", run.RunId)
+		require.NoError(t, err)
+		require.Empty(t, sources, "a review decision must never become a factual source")
 	}
 
 }

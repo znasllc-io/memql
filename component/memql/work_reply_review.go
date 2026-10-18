@@ -115,6 +115,24 @@ func (e *MemQLEngine) workReviewReplyBuiltin(ctx context.Context, args map[strin
 	if err != nil {
 		return nil, err // Never publish the unchecked draft after a failed review.
 	}
+	decision, err := json.Marshal(map[string]any{"continuationAvailable": canContinue, "missingEvidence": review.MissingEvidence})
+	if err != nil {
+		return nil, err
+	}
+	// Keep the completion decision separate from source receipts. It records
+	// why this run continued or stopped; it never becomes evidence of a fact.
+	call, err = parser.RenderCall("createWorkObservation", map[string]any{
+		"observationId": "reply-review-" + BareShortId(run.RunId) + "-" + workContextHash(run.StepKey, decision),
+		"runId":         run.RunId, "stepKey": run.StepKey, "kind": "decision",
+		"content": "Reply evidence completion decision",
+		"data":    map[string]any{"replyReview": json.RawMessage(decision)},
+	})
+	if err != nil {
+		return nil, err
+	}
+	if _, err = e.Execute(auth.ContextWithInternalOrigin(ctx), "mutation "+call); err != nil {
+		return nil, fmt.Errorf("reply review decision receipt: %w", err)
+	}
 	raw, err := json.Marshal(map[string]any{"reply": review.Reply, "missingEvidence": review.MissingEvidence, "evidenceReviewed": true})
 	if err != nil {
 		return nil, err
@@ -161,7 +179,7 @@ type replyReviewDecision struct {
 // Exactly one routed check under the original run's budget and cancellation.
 // A repair finding is data for the existing task, never authority for an effect.
 func reviewReplyOnce(ctx context.Context, statement, draft, sources string, now time.Time, canContinue bool, invoke replyReviewInvoker) (replyReviewDecision, error) {
-	schema := json.RawMessage(`{"type":"object","additionalProperties":false,"required":["reply","missingEvidence"],"properties":{"reply":{"type":"string","minLength":1,"maxLength":24000},"missingEvidence":{"type":"string","maxLength":1200}}}`)
+	schema := json.RawMessage(`{"type":"object","additionalProperties":false,"required":["missingEvidence","reply"],"properties":{"missingEvidence":{"type":"string","maxLength":1200},"reply":{"type":"string","minLength":1,"maxLength":24000}}}`)
 	raw, err := invoke(ctx, "workReplyReview", map[string]any{"statement": statement, "draft": draft, "sources": sources, "now": now.UTC().Format(time.RFC3339), "canContinue": canContinue}, "work_reply_review", schema, true)
 	if err != nil {
 		return replyReviewDecision{}, fmt.Errorf("reply evidence review: %w", err)
