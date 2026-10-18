@@ -74,9 +74,23 @@ func handleModels(args []string) {
 	// to see that they have three models pulled, because "you have models
 	// but this machine cannot serve them" and "you have no models" send
 	// them to entirely different places.
-	inv := newDiscoverer().Probe(ctx, modelsRequest(policy))
+	d := newDiscoverer()
+	inv := d.Probe(ctx, modelsRequest(policy))
 	printModelInventory(os.Stdout, inv, policyPath)
 
+	// The tuning half answers "did it take". It is printed whenever there is
+	// an Ollama to tune or something to say about the policy; a machine with
+	// neither already got "No model runtime answered" above.
+	tuning := policy.ModelsTuning()
+	problems := policy.ModelsTuningProblems()
+	if inv.RuntimeVersions[models.KindOllama] != "" || len(tuning.Resident) > 0 || len(problems) > 0 {
+		n, source := d.ParallelSource(tuning.Parallel)
+		loaded, loadedErr := d.Loaded(ctx)
+		printModelTuning(os.Stdout, inv, tuningReport{
+			Parallel: n, ParallelSource: source, Problems: problems,
+			Loaded: loaded, LoadedErr: loadedErr, Now: time.Now(),
+		})
+	}
 }
 
 // printModelInventory writes the report. Split out so the shape is
