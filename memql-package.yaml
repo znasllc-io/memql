@@ -361,7 +361,10 @@ pipeline:
           timeout: 40m
           run: |
             set -eu
-            export GOFLAGS=-p=1 GOMEMLIMIT=512MiB GOGC=50
+            # Engine fixtures repeatedly load the DSL. Leave room for that live
+            # heap within the existing 4 GiB container instead of spending CPU
+            # collecting at the compiler's conservative 512 MiB setting.
+            export GOFLAGS=-p=1 GOMEMLIMIT=2GiB GOGC=100
             bash scripts/identity/build-css.sh
             export MEMQL_DATABASE_DSN='postgres://memql:memql_dev@localhost:5432/memql?sslmode=disable'
             export MEMQL_REQUIRE_DB=1
