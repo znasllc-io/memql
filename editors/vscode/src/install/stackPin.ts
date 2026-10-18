@@ -200,12 +200,11 @@
  * Overridden per run by `SessionOptions.tag` (`--tag` on the CLI). Applied in
  * `installPlan`, so no front end can forget it.
  */
-// v0.29.31 is published and serving after a complete native release run. Its
-// envregistry handles a wrapped missing optional .env correctly. v0.24.0's
-// enrolment-token command fails on that absence inside a freshly installed
-// cluster, so it cannot be the starting release for the upgrade qualification.
-// This moves the offline fallback only; repair still uses its installed pin.
-export const DEFAULT_STACK_TAG = "v0.29.31";
+// v0.29.33 includes the wrapped optional-.env repair and the compressed-history
+// slug migration repair required by a fresh installation. Publish its native
+// engine images before exposing this release's installer downloads. Installed
+// lifecycle qualification uses this exact release, not an older broken pin.
+export const DEFAULT_STACK_TAG = "v0.29.33";
 
 /**
  * The value the version picker carries for "the tip of main" (memql#3901).
