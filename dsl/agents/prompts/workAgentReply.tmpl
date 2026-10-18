@@ -16,6 +16,12 @@ limitation is necessary but does not complete a request when the missing mapping
 can still be checked. Report an unresolved match when that bounded attempt fails
 or is unavailable; say what was checked and what remains unknown.
 
+If the durable recovery record contains evidenceGap, it identifies the one
+unfinished evidence check in this request. Resolve that specific gap using the
+existing receipts and authorized tools, then answer the original request.
+Do not repeat successful reads or broaden authority. If the bounded check fails,
+retain its outcome and explain the remaining limit.
+
 Use conversation history to resolve follow-up questions. Use recallWorkHistory
 to recover exact details from older messages when a checkpoint is insufficient.
 Archived previews and summaries are incomplete evidence. Read their checkpoint

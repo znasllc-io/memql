@@ -31,7 +31,7 @@ func TestReplyReviewCallsOnceAndNeverFallsBackToUncheckedDraft(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			ctx := common.ContextWithRun(context.Background(), common.RunContext{RunId: "original-run", OwnerUserId: "owner"})
 			calls := 0
-			reply, err := reviewReplyOnce(ctx, "Why is the service slow?", "It is slow because the provider is down.", `{"status":"degraded","cause":null}`, time.Now(), func(callCtx context.Context, prompt string, data map[string]any, _ string, schema json.RawMessage, strict bool) (string, error) {
+			reply, err := reviewReplyOnce(ctx, "Why is the service slow?", "It is slow because the provider is down.", `{"status":"degraded","cause":null}`, time.Now(), false, func(callCtx context.Context, prompt string, data map[string]any, _ string, schema json.RawMessage, strict bool) (string, error) {
 				calls++
 				run, _ := common.RunFromContext(callCtx)
 				require.Equal(t, "original-run", run.RunId)
@@ -47,13 +47,14 @@ func TestReplyReviewCallsOnceAndNeverFallsBackToUncheckedDraft(t *testing.T) {
 				require.Empty(t, reply)
 			} else {
 				require.NoError(t, err)
-				require.NotContains(t, reply, "provider is down")
+				require.NotContains(t, reply.Reply, "provider is down")
 			}
 		})
 	}
 }
 
 type replyReviewModel struct {
+	answer   string
 	calls    int
 	messages []common.ChatMessage
 	run      common.RunContext
@@ -73,7 +74,10 @@ func (m *replyReviewModel) CallChatStructured(ctx context.Context, messages []co
 	m.calls++
 	m.messages = messages
 	m.run, _ = common.RunFromContext(ctx)
-	return `{"reply":"The source reports degraded service. It does not identify a cause."}`, nil
+	if m.answer != "" {
+		return m.answer, nil
+	}
+	return `{"reply":"The source reports degraded service. It does not identify a cause.","missingEvidence":""}`, nil
 }
 
 func TestReplyReviewReadsRecordedEvidenceOnAnotherReplica(t *testing.T) {
@@ -138,4 +142,37 @@ func TestLookupReplyWithNoReceiptCannotBypassEvidenceReview(t *testing.T) {
 	require.Equal(t, 1, model.calls)
 	raw, _ := json.Marshal(model.messages)
 	require.Contains(t, string(raw), "no successful source receipt was recorded")
+	model.answer = `{"reply":"The requested entity has not been checked.","missingEvidence":"Resolve the named entity from a source."}`
+	for _, allowed := range []bool{false, true} {
+		rows, err := e.workReviewReplyBuiltin(ctx, map[string]any{"draft": map[string]any{"reply": "A draft", "continueLookup": allowed}}, 0)
+		require.NoError(t, err)
+		var decision replyReviewDecision
+		require.NoError(t, json.Unmarshal(rows[0].Payload, &decision))
+		if allowed {
+			require.NotEmpty(t, decision.MissingEvidence)
+		} else {
+			require.Empty(t, decision.MissingEvidence)
+		}
+	}
+
+}
+
+func TestReplyReviewEvidenceGapIsBoundedAndDisabledForDirectAdvice(t *testing.T) {
+	for _, allowed := range []bool{false, true} {
+		decision, err := reviewReplyOnce(context.Background(), "Is item A available?", "Item B is available.", `{"item":"B"}`, time.Now(), allowed, func(_ context.Context, _ string, data map[string]any, _ string, _ json.RawMessage, _ bool) (string, error) {
+			require.Equal(t, allowed, data["canContinue"])
+			return `{"reply":"The receipt describes another item.","missingEvidence":"Resolve item A's source identifier before checking its status."}`, nil
+		})
+		require.NoError(t, err)
+		if allowed {
+			require.Contains(t, decision.MissingEvidence, "item A")
+		} else {
+			require.Empty(t, decision.MissingEvidence, "direct advice must not reopen research")
+		}
+	}
+	_, err := reviewReplyOnce(context.Background(), "Question", "Draft", "{}", time.Now(), true, func(context.Context, string, map[string]any, string, json.RawMessage, bool) (string, error) {
+		raw, _ := json.Marshal(map[string]any{"reply": "A supported limit.", "missingEvidence": strings.Repeat("x", 1201)})
+		return string(raw), nil
+	})
+	require.Error(t, err)
 }

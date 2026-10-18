@@ -51,7 +51,10 @@ func TestOwnedAnswerWaitsForEvidenceReviewBeforeDelivery(t *testing.T) {
 			require.Empty(t, sink.texts)
 			require.Equal(t, []string{"readStatus"}, sink.toolCalls)
 			require.Equal(t, 1, sink.toolResults)
-			result, err := r.reviewWorkResult(ctx, &TurnResult{FinalText: "An invented cause."}, held)
+			result, err := r.runReviewedWork(ctx, sink, func(callCtx context.Context, h *replyReviewSink) (*TurnResult, error) {
+				h.terminalID, h.terminalArguments = held.terminalID, held.terminalArguments
+				return &TurnResult{FinalText: "An invented cause."}, nil
+			})
 			require.Equal(t, 1, engine.calls)
 			if fail {
 				require.Error(t, err)
@@ -66,4 +69,84 @@ func TestOwnedAnswerWaitsForEvidenceReviewBeforeDelivery(t *testing.T) {
 			}
 		})
 	}
+}
+
+type evidenceRepairEngine struct {
+	workPromptEngine
+	reviews  int
+	failSave bool
+}
+
+func (e *evidenceRepairEngine) RestoreWorkContinuation(_ context.Context, _ []common.ChatMessage) ([]common.ChatMessage, error) {
+	return append([]common.ChatMessage(nil), e.savedContinuation...), nil
+}
+func (e *evidenceRepairEngine) SaveWorkContinuation(ctx context.Context, m []common.ChatMessage) error {
+	if e.failSave {
+		return errors.New("checkpoint unavailable")
+	}
+	return e.workPromptEngine.SaveWorkContinuation(ctx, m)
+}
+func (e *evidenceRepairEngine) Execute(ctx context.Context, query string) (any, error) {
+	run, _ := common.RunFromContext(ctx)
+	if run.RunId != "run" || !strings.HasPrefix(query, "builtin work.workReviewReply(") {
+		return nil, errors.New("lost original review scope")
+	}
+	e.reviews++
+	reply, gap := "The exact item has not been identified.", "Resolve the requested item's identifier from a named source; reuse the recorded response."
+	if e.reviews > 1 {
+		reply = "The named source identifies the requested item and its current status."
+		gap = ""
+	}
+	return map[string]any{"data": map[string]any{"review": map[string]any{"id": "review", "payload": map[string]any{"reply": reply, "missingEvidence": gap}}}}, nil
+}
+func TestEvidenceGapContinuesSameTaskOnceWithoutDeliveringPrematureAnswer(t *testing.T) {
+	e := &evidenceRepairEngine{}
+	e.savedContinuation = []common.ChatMessage{{Role: "system", Content: "Current instructions"}, {Role: "user", Content: "Check item A"}, {Role: "assistant", ToolCalls: []common.ToolCall{{ID: "source", Name: "readSource", Arguments: `{}`}}}, {Role: "tool", ToolCallId: "source", Name: "readSource", Content: `{"item":"B","status":"ready"}`}}
+	original := append([]common.ChatMessage(nil), e.savedContinuation...)
+	ctx := common.ContextWithRun(auth.ContextWithUserActor(context.Background(), "owner"), common.RunContext{RunId: "run", GoalId: "goal", StepKey: "reason", OwnerUserId: "owner", Continuation: &common.StepContinuation{StepKey: "reason", ObservationID: "original"}})
+	sink := &captureSink{}
+	productions := 0
+	r := newTestReplier(e)
+	result, err := r.runReviewedWork(ctx, sink, func(callCtx context.Context, h *replyReviewSink) (*TurnResult, error) {
+		productions++
+		current, _ := common.RunFromContext(callCtx)
+		require.Equal(t, "run", current.RunId)
+		require.Equal(t, "reason", current.StepKey)
+		require.Equal(t, "owner", current.OwnerUserId)
+		if productions == 1 {
+			require.NotNil(t, current.Continuation)
+		} else {
+			require.Nil(t, current.Continuation, "a consumed resume proof must not reject the newer checkpoint")
+		}
+		if productions == 2 {
+			require.Empty(t, sink.texts, "incomplete answer escaped before continuation")
+			require.Equal(t, original, e.savedContinuation[:len(original)], "completed source was replayed or lost")
+			state, _, err := recoveryState(e.savedContinuation)
+			require.NoError(t, err)
+			require.Equal(t, 1, state.EvidenceRepairs)
+			require.Contains(t, state.EvidenceGap, "identifier")
+		}
+		h.ToolCall("answer", RespondToUserToolName, `{"status":"complete","response":"Unsupported draft"}`)
+		return &TurnResult{FinalText: "Unsupported draft"}, nil
+	})
+	require.NoError(t, err)
+	require.Equal(t, 2, productions)
+	require.Equal(t, 2, e.reviews)
+	require.Equal(t, []string{result.FinalText}, sink.texts)
+	require.Equal(t, []string{RespondToUserToolName}, sink.toolCalls)
+	// A replacement replier has no local attempt state; the durable watermark
+	// must still refuse another evidence repair even if asked to continue.
+	other := newTestReplier(e)
+	continued, err := other.continueWorkEvidence(ctx, e.savedContinuation, "Try another guessed identifier", true)
+	require.NoError(t, err)
+	require.False(t, continued)
+}
+func TestEvidenceRepairCannotProceedWithoutDurableCheckpoint(t *testing.T) {
+	e := &evidenceRepairEngine{failSave: true}
+	r := newTestReplier(e)
+	ctx := common.ContextWithRun(auth.ContextWithUserActor(context.Background(), "owner"), common.RunContext{RunId: "run", GoalId: "goal", OwnerUserId: "owner"})
+	continued, err := r.continueWorkEvidence(ctx, []common.ChatMessage{{Role: "system"}, {Role: "user", Content: "Check item"}}, "Resolve the item identifier", true)
+	require.Error(t, err)
+	require.False(t, continued)
+	require.Empty(t, e.savedContinuation)
 }
