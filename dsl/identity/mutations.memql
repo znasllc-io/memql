@@ -2719,6 +2719,79 @@ mutation user updateMyPreferences {
   }
 }
 
+// updateMyName / setMyAvatar / clearMyAvatar
+// ==========================================
+//
+// The Profile's three writes (memql#6220). Each is the updateMyPreferences
+// shape: `id: actor.userId`, so the row is the caller's by construction and
+// there is no target argument to point at somebody else. Renaming another
+// person stays an administrative write (updateUser, gated in Go).
+//
+// # The name travels as three fields, and the client keeps them agreeing
+//
+// firstName / lastName become the JWT's given_name / family_name, and
+// displayName is what every surface shows. The concept documents the
+// convention (displayName = firstName + ' ' + lastName); the Profile composes
+// it, and the mutation takes all three rather than inventing a string
+// operator the language does not have. A whitespace-only name is refused by
+// the patterns below, not trimmed into an empty one.
+//
+// # Why the photo is bounded at 40,000 characters
+//
+// The avatar lives on the user row, and that row is read every time an actor
+// is built (userByIdSystem projects userFull). The browser crops and resizes a
+// photo to 160x160 before writing it, which encodes to well under 30 KB, so
+// the bound is a ceiling on what a client can make every sign-in carry rather
+// than a limit a real photo meets. The pattern admits only an inline base64
+// image of the three types the Profile produces: no remote URL can be stored,
+// so a photo can never become a request the reader's browser makes elsewhere.
+
+/// Change the CALLER's own name. The row is stamped from actor.userId: there is no target
+/// argument, so another person's name cannot be written here. firstName and lastName flow to the
+/// JWT as given_name / family_name; displayName is what the UI shows.
+@actor
+mutation user updateMyName {
+  args {
+    /// Given name. Must contain something other than whitespace.
+    firstName    string!  @maxLength(80)   @pattern("[^[:space:]]")
+    /// Family name. Empty clears it.
+    lastName     string   @maxLength(80)
+    /// The name the UI shows, normally firstName + ' ' + lastName.
+    displayName  string!  @maxLength(160)  @pattern("[^[:space:]]")
+  }
+  update {
+    accept { firstName, displayName }
+    stamp {
+      id: actor.userId
+      lastName: args.lastName ?? ""
+    }
+  }
+}
+
+/// Set the CALLER's own photo: an inline base64 data: URL (image/webp, image/jpeg or image/png)
+/// of at most 40,000 characters. The row is stamped from actor.userId.
+@actor
+mutation user setMyAvatar {
+  args {
+    /// The photo, cropped square and resized by the client.
+    avatar  string!  @maxLength(40000)  @pattern("^data:image/(webp|jpeg|png);base64,[A-Za-z0-9+/]+={0,2}$")
+  }
+  update {
+    id: actor.userId
+    avatar: args.avatar
+  }
+}
+
+/// Remove the CALLER's own photo; the initial is shown again. The row is stamped from
+/// actor.userId.
+@actor
+mutation user clearMyAvatar {
+  update {
+    id: actor.userId
+    avatar: ""
+  }
+}
+
 // setAccountEntitlement
 // =============================
 //
