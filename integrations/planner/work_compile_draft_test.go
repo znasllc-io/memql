@@ -5,6 +5,7 @@ import (
 	"strings"
 	"testing"
 
+	purecompose "github.com/znasllc-io/memql/component/compose"
 	langparser "github.com/znasllc-io/memql/component/language/parser"
 	"github.com/znasllc-io/memql/component/work"
 )
@@ -213,32 +214,36 @@ func TestNavigationDraftUsesOneTriageAndNoGeneralAgent(t *testing.T) {
 }
 
 func TestCapabilityArtifactsUseToolsAndRequireASavedFile(t *testing.T) {
-	for _, format := range []string{"png", "wav", "mp4"} {
-		for _, fanout := range []bool{false, true} {
-			decision := parseSectionableDecision(map[string]any{"intent": "task", "requiresFile": true, "fileName": "requested", "fileFormat": format, "fileDelivery": "capability", "sectionable": fanout, "sections": []map[string]any{{"label": "one"}, {"label": "two"}}})
-			if !decision.needsReasoningAgent("artifact") {
-				t.Fatal("capability artifact omitted its executing agent")
-			}
-			bundle, err := synthesizeWorkReasoningBundle(compileReq(), "agent", decision)
-			if err != nil {
-				t.Fatal(err)
-			}
-			source := bundle.Constructs[0].Source
-			if strings.Contains(source, "composeMaterialize") || !strings.Contains(source, "runAgentTurn") || strings.Count(source, "requireFile: true") != 1 || !strings.Contains(source, "requiredFileExtension: "+langparser.QuoteString(format)) {
-				t.Fatalf("wrong delivery for %s (fanout %v): %s", format, fanout, source)
-			}
-			if _, err := langparser.ParseFile(source); err != nil {
-				t.Fatal(err)
+	for _, format := range []string{"png", "wav", "mp4", "xlsx", "glb"} {
+		for _, delivery := range []string{"", "compose", "capability"} {
+			for _, fanout := range []bool{false, true} {
+				decision := parseSectionableDecision(map[string]any{"intent": "task", "requiresFile": true, "fileName": "requested", "fileFormat": format, "fileDelivery": delivery, "sectionable": fanout, "sections": []map[string]any{{"label": "one"}, {"label": "two"}}})
+				if !decision.needsReasoningAgent("artifact") {
+					t.Fatal("capability artifact omitted its executing agent")
+				}
+				bundle, err := synthesizeWorkReasoningBundle(compileReq(), "agent", decision)
+				if err != nil {
+					t.Fatal(err)
+				}
+				source := bundle.Constructs[0].Source
+				if strings.Contains(source, "composeMaterialize") || !strings.Contains(source, "runAgentTurn") || strings.Count(source, "requireFile: true") != 1 || !strings.Contains(source, "requiredFileExtension: "+langparser.QuoteString(format)) {
+					t.Fatalf("wrong delivery for %s (fanout %v): %s", format, fanout, source)
+				}
+				if _, err := langparser.ParseFile(source); err != nil {
+					t.Fatal(err)
+				}
 			}
 		}
 	}
 }
 
 func TestCapabilityArtifactsRefuseInvalidExtensionBeforeExecution(t *testing.T) {
-	for _, format := range []string{"", "../png", "image/png", "png\\file", "extensiontoolongforsafecontract"} {
-		decision := parseSectionableDecision(map[string]any{"requiresFile": true, "fileName": "requested", "fileFormat": format, "fileDelivery": "capability"})
-		if _, err := synthesizeWorkReasoningBundle(compileReq(), "agent", decision); err == nil {
-			t.Fatalf("accepted invalid extension %q", format)
+	for _, delivery := range []string{"", "compose", "capability", "unknown"} {
+		for _, format := range []string{"", "../png", "image/png", "png\\file", "extensiontoolongforsafecontract"} {
+			decision := parseSectionableDecision(map[string]any{"requiresFile": true, "fileName": "requested", "fileFormat": format, "fileDelivery": delivery})
+			if _, err := synthesizeWorkReasoningBundle(compileReq(), "agent", decision); err == nil {
+				t.Fatalf("accepted invalid extension %q", format)
+			}
 		}
 	}
 }
@@ -252,5 +257,39 @@ func TestDocumentFileExtensionKeepsItsNativeComposer(t *testing.T) {
 	source := bundle.Constructs[0].Source
 	if !strings.Contains(source, `format: "markdown"`) || !strings.Contains(source, "composeMaterialize") || strings.Contains(source, "runAgentTurn") {
 		t.Fatalf("Markdown extension lost its document route: %s", source)
+	}
+}
+
+func TestEveryComposerFormatKeepsItsNativeContract(t *testing.T) {
+	yes := true
+	for _, format := range purecompose.Formats() {
+		for _, name := range []string{string(format), "." + format.Extension()} {
+			for _, hint := range []string{"", "compose"} {
+				decision := sectionableDecision{RequiresFile: &yes, FileName: "output", FileFormat: name, FileDelivery: hint}
+				if decision.needsReasoningAgent("artifact") {
+					t.Fatalf("composer encoding %q unexpectedly requires discovery", name)
+				}
+				bundle, err := synthesizeWorkReasoningBundle(compileReq(), "", decision)
+				if err != nil {
+					t.Fatal(err)
+				}
+				source := bundle.Constructs[0].Source
+				if !strings.Contains(source, "composeMaterialize") || !strings.Contains(source, "format: "+langparser.QuoteString(string(format))) {
+					t.Fatalf("lost composer contract for %q: %s", name, source)
+				}
+			}
+		}
+	}
+}
+
+func TestFileContractPreservesExplicitCapabilitiesAndRejectsUnknownMechanism(t *testing.T) {
+	yes := true
+	decision := sectionableDecision{RequiresFile: &yes, FileName: "output", FileFormat: "pdf", FileDelivery: "capability"}
+	if !decision.needsReasoningAgent("artifact") {
+		t.Fatal("lost explicit capability delivery")
+	}
+	decision.FileDelivery = "invented"
+	if _, err := synthesizeWorkReasoningBundle(compileReq(), "agent", decision); err == nil {
+		t.Fatal("unknown mechanism accepted")
 	}
 }
