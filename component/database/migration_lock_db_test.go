@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"log/slog"
 	"os"
 	"strings"
 	"testing"
@@ -78,6 +79,47 @@ func TestMigrationLockBlocksAnotherReplicaAndAllowsRetry(t *testing.T) {
 	runner.runMigrations(ctx, db)
 	if calls != 1 || runner.MigrationError() != nil || runner.migrationsPending() {
 		t.Fatalf("retry failed: calls=%d err=%v", calls, runner.MigrationError())
+	}
+}
+
+func TestFailedMigrationDefersHooksAndAnotherReplicaCanFinish(t *testing.T) {
+	db, _, _ := migrationLockDB(t, time.Second)
+	ctx := context.Background()
+	wantErr := errors.New("schema repair is not ready")
+	migrations := migrate.NewMigrations()
+	migrations.Add(migrate.Migration{Name: "20260925000000", Up: func(ctx context.Context, m *migrate.Migrator, _ *migrate.Migration) error {
+		// Leave a partially installed schema, as a failed SQL migration can.
+		_, err := m.DB().ExecContext(ctx, `CREATE TABLE IF NOT EXISTS partial_schema (id int)`)
+		if err != nil {
+			return err
+		}
+		return wantErr
+	}})
+	calls := 0
+	hook := func(context.Context, *bun.DB, *slog.Logger) error { calls++; return nil }
+	first := lockedMigrationRunner(t, migrations)
+	first.config.postMigrationHooks = []PostMigrationHook{hook}
+	first.runMigrations(ctx, db)
+	if calls != 0 || !errors.Is(first.MigrationError(), wantErr) || !first.migrationsPending() {
+		t.Fatalf("failed schema ran a hook or lost its refusal: hooks=%d error=%v", calls, first.MigrationError())
+	}
+
+	// A different replica has no first-node state. Its repaired migration
+	// must acquire the released lock, finish, and then run its post-hook.
+	repaired := migrate.NewMigrations()
+	repaired.Add(migrate.Migration{Name: "20260925000000", Up: func(ctx context.Context, m *migrate.Migrator, _ *migrate.Migration) error {
+		_, err := m.DB().ExecContext(ctx, `ALTER TABLE partial_schema ADD COLUMN ready bool`)
+		return err
+	}})
+	second := lockedMigrationRunner(t, repaired)
+	second.config.postMigrationHooks = []PostMigrationHook{hook}
+	second.runMigrations(ctx, db)
+	if calls != 1 || second.MigrationError() != nil || second.migrationsPending() {
+		t.Fatalf("second replica did not finish: hooks=%d error=%v", calls, second.MigrationError())
+	}
+	var readyColumns int
+	if err := db.QueryRowContext(ctx, `SELECT count(*) FROM information_schema.columns WHERE table_schema = current_schema() AND table_name = 'partial_schema' AND column_name = 'ready'`).Scan(&readyColumns); err != nil || readyColumns != 1 {
+		t.Fatalf("repair missing: ready columns=%d error=%v", readyColumns, err)
 	}
 }
 
