@@ -40,7 +40,7 @@ import (
 // R31b). While its Job does not exist -- its runner waiting for a free slot
 // under the pipelines ceiling -- it is bounded by its run's ceiling alone.
 // Once a status says when its execution started, by the Job's own deadline: its
-// timeout from that creation, never past the run's ceiling. Past the bound
+// timeout from execution start, never past the run's ceiling. Past the bound
 // and lostGrace, one last status decides how the step is reported, and its
 // result is returned without deleting its evidence.
 
@@ -84,8 +84,8 @@ type clusterStep struct {
 	servedBy string
 	// runDeadline is when the step's run reaches its ceiling; handedAt is
 	// when this executor first forwarded the step, on its own clock; and
-	// executionStarted is when the step's Job was created, as a status last said --
-	// never before handedAt -- zero while no Job is known to exist.
+	// executionStarted is when the step's Job started, as a status last said --
+	// never before handedAt -- zero while execution has not started.
 	runDeadline, handedAt, executionStarted time.Time
 }
 
