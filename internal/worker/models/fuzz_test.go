@@ -3,6 +3,7 @@ package models
 import (
 	"strings"
 	"testing"
+	"time"
 )
 
 // FuzzAttributesRoundTrip. The label value is the ONE string this
@@ -129,6 +130,56 @@ func FuzzParseAttributes(f *testing.F) {
 		// rather than "whatever arrived".
 		if a.Quant != "" && !quantSafe(a.Quant) {
 			t.Fatalf("ParseAttributes(%q) kept an unsafe quant %q", label, a.Quant)
+		}
+	})
+}
+
+// FuzzParseKeepAlive. The text is an owner's, typed by hand into
+// policy.yaml, and the failure it can cause is not a crash: it is Ollama
+// being sent a keep_alive it refuses, or one that means something the owner
+// did not write. Two properties.
+//
+//   - A SETTING THAT STANDS IS ONE OLLAMA READS THE SAME WAY. When the text
+//     parses, Wire() is the JSON number -1 or a duration string that Go's own
+//     parser reads back as the same positive duration, within the cap.
+//     Anything else is a request that fails on somebody's GPU.
+//
+//   - A REFUSAL STANDS FOR NOTHING. When the text is refused the result is
+//     the zero KeepAlive, so a typo can never be mistaken for an owner who
+//     asked for forever.
+func FuzzParseKeepAlive(f *testing.F) {
+	for _, seed := range []string{
+		"", "-1", "forever", "Forever", "30m", "2h", "3600", "0", "00", "0s", "-1m",
+		"9999h", "1.5", "soon", "1h30m", "+5m", " 5m ", "5M", "-0", "1e3",
+		"99999999999999999999", "9223372036854775807", "-9223372036854775808",
+		"720h", "720h1ns", "1ns",
+	} {
+		f.Add(seed)
+	}
+	f.Fuzz(func(t *testing.T, s string) {
+		k, err := ParseKeepAlive(s)
+		if err != nil {
+			if k != (KeepAlive{}) {
+				t.Fatalf("ParseKeepAlive(%q) was refused (%v) but returned %+v", s, err, k)
+			}
+			return
+		}
+		switch w := k.Wire().(type) {
+		case nil:
+			if k.Set {
+				t.Fatalf("ParseKeepAlive(%q) = %+v is set but sends nothing", s, k)
+			}
+		case int:
+			if w != -1 || !k.Forever {
+				t.Fatalf("ParseKeepAlive(%q) = %+v sends the number %d", s, k, w)
+			}
+		case string:
+			d, perr := time.ParseDuration(w)
+			if perr != nil || d <= 0 || d > MaxKeepAlive || d != k.For {
+				t.Fatalf("ParseKeepAlive(%q) = %+v sends %q, which Go reads as %v (%v)", s, k, w, d, perr)
+			}
+		default:
+			t.Fatalf("ParseKeepAlive(%q) sends %T", s, w)
 		}
 	})
 }
