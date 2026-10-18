@@ -342,11 +342,11 @@ describe("run readings", () => {
 
   it("explains local resource limits as well as provider balance failures", () => {
     const meaning = approvalKindMeaning("budget");
-    expect(meaning).toContain("resource limit");
-    expect(meaning).toContain("provider balance");
+    expect(meaning).toContain("work is saved");
+    expect(meaning).not.toContain("raise");
     expect(meaning).not.toContain("paid model calls are no longer available");
     expect(meaning).not.toContain("Approving lets it carry on spending");
-    expect(approvalKindWord("budget")).toBe("Budget");
+    expect(approvalKindWord("budget")).toBe("Saved work");
   });
 });
 

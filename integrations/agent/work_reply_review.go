@@ -66,8 +66,8 @@ func (r *Replier) runReviewedWork(ctx context.Context, sink DeltaSink, produce f
 		review, err := r.checkWorkResult(ctx, result.FinalText, canContinue)
 		if err != nil {
 			// Review is a reasoning boundary after all tool receipts are saved.
-			// A native ceiling must suspend this exact checkpoint; a raw budget
-			// error would leave a failed step that an approved wait cannot resume.
+			// A native ceiling must suspend this exact checkpoint; a raw ceiling
+			// error would leave a failed step that feedback cannot resume.
 			failure, _ := r.workRecoveryReadFailure(ctx, err, messages)
 			return nil, failure
 		}

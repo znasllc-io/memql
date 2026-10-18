@@ -87,7 +87,10 @@ export class SdkAskTransport implements AskTransport {
   answerQuestion = async (approvalId: string, answer: Record<string, unknown>) => {
     const dispatcher = this.dispatcher();
     if (!dispatcher) throw new Error("Not connected to the cluster.");
-    await new QueryClient(dispatcher).decideApproval({ approvalId, decision: "answered", answer });
+    const row = (await new QueryClient(dispatcher).decideApproval({ approvalId, decision: "answered", answer })).rows()[0];
+    if (!row) throw new Error("The cluster did not confirm your answer. Try again to check its saved state.");
+    const receipt = flatten(row);
+    if (typeof receipt.resumeError === "string" && receipt.resumeError) throw new Error(receipt.resumeError);
   };
 
   approvalGuidance = async (approvalId: string, feedback: string) => {
@@ -96,7 +99,7 @@ export class SdkAskTransport implements AskTransport {
     const row = (await new QueryClient(dispatcher).decideApproval({ approvalId, decision: "answered", answer: { feedback } })).rows()[0];
     if (!row) throw new Error("The cluster did not confirm whether guidance was recorded. Reopen this approval to check its state.");
     const receipt = flatten(row);
-    return { runResumed: receipt.runResumed === true, ...(typeof receipt.resumeError === "string" ? { resumeError: receipt.resumeError } : {}), ...(typeof receipt.guidanceSaved === "boolean" ? { guidanceSaved: receipt.guidanceSaved } : {}), ...(typeof receipt.savedGuidance === "string" ? { savedGuidance: receipt.savedGuidance } : {}) };
+    return { runResumed: receipt.runResumed === true, ...(receipt.runStopped === true ? { runStopped: true } : {}), ...(typeof receipt.resumeError === "string" ? { resumeError: receipt.resumeError } : {}) };
   };
 
   startVoice = (options: AskVoiceOptions, signal: AbortSignal) => {

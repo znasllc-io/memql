@@ -46,15 +46,13 @@ export interface AskTurn {
   activity: AskActivity[];
   error?: string;
 }
-export interface AskQuestion { id: string; text: string; kind: "text" | "choice" | "multi"; options: { value: string; label: string }[]; optional?: boolean; continued?: boolean }
+export interface AskQuestion { choiceOnly?: boolean; resumeAnswer?: Record<string, unknown>; id: string; text: string; kind: "text" | "choice" | "multi"; options: { value: string; label: string }[]; optional?: boolean; continued?: boolean }
 export interface ConversationSummary { id: string; title: string; createdAt?: string }
 export interface ApprovalDiscussion {
   conversationId: string;
   approval: { id: string; runId: string; kind: string; question: string; summary?: string; status: string };
   canSendGuidance: boolean;
   canAskAdvisor: boolean;
-  guidanceMode?: "resume" | "deferred";
-  savedGuidance?: string;
   guidanceToResume?: string;
 }
 export interface AskConversationStore {
@@ -220,16 +218,6 @@ export class ConversationSession {
   };
   private guidanceReceipt(discussion: ApprovalDiscussion) {
     const approvalId = discussion.approval.id;
-    if (discussion.guidanceMode === "deferred") {
-      const feedback = discussion.canSendGuidance ? this.uncertainGuidance.get(approvalId) : undefined;
-      // Saving budget guidance leaves the approval pending. A fresh read of
-      // the exact saved text resolves a lost response; it is never a resume.
-      if (!feedback || discussion.savedGuidance === feedback) {
-        this.uncertainGuidance.delete(approvalId);
-        return null;
-      }
-      return { approvalId, feedback };
-    }
     // A saved receipt is authoritative after reopening. An uncertain local
     // send can only retry its original text while the request is still open.
     const feedback = discussion.guidanceToResume || (discussion.canSendGuidance ? this.uncertainGuidance.get(approvalId) : undefined);
@@ -251,7 +239,6 @@ export class ConversationSession {
   private submitGuidance = async (approvalId: string, feedback: string, clearSubmittedDraft: boolean) => {
     if (this.state.guidanceSending || this.state.discussionOpening || this.state.discussionSending) return false;
     const epoch = this.discussionEpoch;
-    const deferred = this.state.discussion?.guidanceMode === "deferred";
     this.guidanceRevision++;
     this.uncertainGuidance.set(approvalId, feedback);
     this.patch({ guidanceSending: true, error: "" });
@@ -259,16 +246,11 @@ export class ConversationSession {
       if (!this.transport.approvalGuidance) throw new Error("Sending guidance is unavailable.");
       // The same approval and exact original answer are the retry identity.
       const receipt = await this.transport.approvalGuidance(approvalId, feedback);
-      if (deferred && (receipt.guidanceSaved !== true || receipt.savedGuidance !== feedback || receipt.runResumed)) {
-        throw new Error("The cluster did not confirm this saved guidance. Retry saving to check the original text.");
-      }
       this.uncertainGuidance.delete(approvalId);
       if (epoch !== this.discussionEpoch || this.disposed) return true;
       this.guidanceRevision++;
-      const discussion = deferred
-        ? { ...this.state.discussion!, savedGuidance: receipt.savedGuidance, guidanceToResume: undefined }
-        : { ...this.state.discussion!, canSendGuidance: false, guidanceToResume: receipt.runResumed ? undefined : feedback };
-      this.patch({ discussion, guidanceRetry: this.guidanceReceipt(discussion), guidanceNotice: deferred ? "" : receipt.runResumed ? "Guidance sent. Work is continuing." : `Guidance was recorded, but the work has not resumed.${receipt.resumeError ? ` ${receipt.resumeError}` : ""}`, ...(clearSubmittedDraft && this.state.draft.trim() === feedback ? { draft: "" } : {}) });
+      const discussion = { ...this.state.discussion!, canSendGuidance: false, guidanceToResume: receipt.runResumed || receipt.runStopped ? undefined : feedback };
+      this.patch({ discussion, guidanceRetry: this.guidanceReceipt(discussion), guidanceNotice: receipt.runStopped ? "Your feedback was saved. This work has stopped at its overall limit." : receipt.runResumed ? "Guidance sent. Work is continuing." : `Guidance was recorded, but the work has not resumed.${receipt.resumeError ? ` ${receipt.resumeError}` : ""}`, ...(clearSubmittedDraft && this.state.draft.trim() === feedback ? { draft: "" } : {}) });
       await this.reload();
       return true;
     } catch (error) {
@@ -518,8 +500,7 @@ export class ConversationSession {
         if (discussion && this.transport.discussApproval) {
           const latest = await this.transport.discussApproval(discussion.approval.id);
           if (current()) {
-            const recoveredSave = latest.guidanceMode === "deferred" && !!this.state.guidanceRetry && this.state.guidanceRetry.feedback === latest.savedGuidance;
-            this.patch({ discussion: latest, guidanceRetry: this.guidanceReceipt(latest), ...(recoveredSave ? { error: "" } : {}) });
+            this.patch({ discussion: latest, guidanceRetry: this.guidanceReceipt(latest) });
           }
         }
       } }
