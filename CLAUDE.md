@@ -594,6 +594,23 @@ command exited zero. That value change, plus the four modality keys,
 costs every machine one reconnect on rollout.
 
 
+## Capacity on every heartbeat (memql-cockpit#539)
+
+The engine admits a model call to this machine only when the model is
+loaded or there is room to load it (engine design record
+2026-10-18-routes, "Fleet capacity"). `internal/worker/capacity` measures
+that on EVERY beat and `SendHeartbeat` carries it as `Heartbeat.capacity`:
+the pool (`unified`: the smaller of `vm_stat`'s free + inactive +
+speculative and the GPU wired limit less what loaded models hold; `vram`:
+nvidia-smi or the amdgpu sysfs nodes; `system`: `/proc/meminfo`
+MemAvailable), and every model Ollama's `/api/ps` holds, with the calls the
+shared `modelcall.Limiter` is running on it.
+
+**Nothing it cannot vouch for is sent.** No runtime list, no memory reading,
+or a probe slower than two seconds sends no report, and the engine admits
+the machine on its slots alone. A report claiming no loaded models would get
+calls refused that this machine could serve, which is worse than silence.
+
 ## Watched-folder backup (memql#4841)
 
 One folder on this machine, kept arriving in a MemQL Library folder. The engine
