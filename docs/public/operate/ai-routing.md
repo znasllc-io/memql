@@ -338,6 +338,20 @@ Builtins: `routesForActor`, `routeSave`, `routeDelete`, `routeReset`,
 `autoBalance`, `autoBalanceSave`, `autoBalanceReset`, `myBudget` and
 `myBudgetSave`.
 
+### Fleet capacity
+
+Under every route, a fleet source admits a machine only when it can take the
+call now. A machine that cannot load the model -- not loaded, and less free
+memory (counting idle loaded models) than the catalog's `memoryNeedBytes` plus
+10%, at least 1 GB -- is ruled out with the figures in `considered`. A machine
+with every slot in use, or one whose recent calls mostly failed or ran over
+three times slower than its peers, goes behind every machine that passes and
+is used only when none does. Memory is judged from the cockpit's capacity
+report (free memory and loaded models, on every heartbeat); a machine that
+does not report is admitted on its slots alone. `fleetCapacity` returns what
+each of your machines can take on: slots in use, memory, loaded models, recent
+latency and tokens per second, and whether it is degraded.
+
 ## Explicit API choices and automatic Ask routing
 
 Ask uses the cluster's routing policies automatically for each step. It has no

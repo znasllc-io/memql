@@ -122,3 +122,15 @@ builtin myBudget { }
 builtin myBudgetSave {
   monthlyLimitUSD number
 }
+
+// ---- Fleet capacity (design record 2026-10-18-routes, "Fleet capacity") ----
+
+/// What each machine you can use can take on right now. One row: {machines, measuredAt}. Each
+/// machine says how many calls are in flight against its slots, the memory free for a model and
+/// the models already loaded (memory.reported is false when its cockpit does not report capacity,
+/// and it is then admitted on its slots alone), how fast it has answered over the last two hours,
+/// and whether it is degraded. Every route's fleet door admits machines on these figures before
+/// choosing one.
+@sdk
+@executor("fleetCapacity")
+builtin fleetCapacity { }
