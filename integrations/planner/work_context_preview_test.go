@@ -62,7 +62,8 @@ func TestSelfContainedFilesSkipEvidenceAcquisitionRegardlessOfEstimate(t *testin
 
 func TestSourceRichLongConversationKeepsCompleteRecentEvidenceBounded(t *testing.T) {
 	source := map[string]any{"value": strings.Repeat("測", 1800), "observationTime": "2026-10-17T04:39:30Z", "entity": "specific-service", "truncated": false}
-	input := map[string]any{"messages": []any{map[string]any{"role": "user", "content": strings.Repeat("古", 20000)}, map[string]any{"role": "user", "content": "Should I retry?"}}, "sourceContext": map[string]any{"recordedSources": []any{source, source, source}}}
+	clock := map[string]any{"currentTimeUTC": "2026-10-18T03:12:00Z", "sourceZoneClocks": map[string]any{"America/Phoenix": "2026-10-17T20:12:00-07:00"}}
+	input := map[string]any{"messages": []any{map[string]any{"role": "user", "content": strings.Repeat("古", 20000)}, map[string]any{"role": "user", "content": "Should I retry?"}}, "sourceContext": map[string]any{"clock": clock, "recordedSources": []any{source, source, source}}}
 	preview, err := conversationPreview(input)
 	if err != nil || len(preview) > 20000 {
 		t.Fatalf("source preview exceeded budget: %d %v", len(preview), err)
@@ -72,6 +73,11 @@ func TestSourceRichLongConversationKeepsCompleteRecentEvidenceBounded(t *testing
 		t.Fatal(err)
 	}
 	evidence := data["sourceContext"].(map[string]any)
+	wantClock, _ := json.Marshal(clock)
+	gotClock, _ := json.Marshal(evidence["clock"])
+	if string(gotClock) != string(wantClock) {
+		t.Fatalf("preview lost server-calculated clocks: %s", gotClock)
+	}
 	sources := evidence["recordedSources"].([]any)
 	if len(sources) != 1 || sources[0].(map[string]any)["value"] != source["value"] || !strings.Contains(preview, "Should I retry?") || !strings.Contains(preview, "Some sources omitted") {
 		t.Fatalf("source scope or content was cut: %+v", evidence)

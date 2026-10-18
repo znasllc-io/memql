@@ -23,7 +23,7 @@ func conversationPreview(conversation any) (string, error) {
 	// Keep complete source responses separate from message excerpts. A cut JSON
 	// receipt could hide its timestamp, location or error/truncation marker.
 	if evidence, ok := value["sourceContext"].(map[string]any); ok {
-		preview := map[string]any{"note": evidence["note"], "limitations": evidence["limitations"]}
+		preview := map[string]any{"clock": evidence["clock"], "note": evidence["note"], "limitations": evidence["limitations"]}
 		sources, _ := evidence["recordedSources"].([]any)
 		keptSources := []any{}
 		for _, source := range sources {

@@ -35,7 +35,7 @@ func TestSourceContextReadsRecordedEvidenceAcrossReplicasAndPreservesOwnerScope(
 		messages := []common.ChatMessage{
 			{Role: "system", Content: "private system content"},
 			{Role: "assistant", Content: "MODEL_REASONING_DO_NOT_EXPORT", ToolCalls: []common.ToolCall{{ID: "source-call", Name: "readStatus", Arguments: `{"entity":"service-A"}`}}},
-			{Role: "tool", Name: "readStatus", ToolCallId: "source-call", Content: `{"status":"degraded","observedAt":"2026-10-17T04:39:30Z","source":"https://status.example.test"}`},
+			{Role: "tool", Name: "readStatus", ToolCallId: "source-call", Content: `{"status":"degraded","observedAt":"2026-10-17T04:39:30Z","timezone":"America/Phoenix","source":"https://status.example.test"}`},
 		}
 		encoded, err := json.Marshal(messages)
 		require.NoError(t, err)
@@ -61,6 +61,18 @@ func TestSourceContextReadsRecordedEvidenceAcrossReplicasAndPreservesOwnerScope(
 	require.NotContains(t, text, "Foreign private evidence")
 	require.NotContains(t, text, foreignID)
 	require.Contains(t, text, "2026-10-17T04:39:30Z")
+	var projected struct {
+		Clock struct {
+			CurrentTimeUTC   string
+			SourceZoneClocks map[string]string
+		}
+	}
+	require.NoError(t, json.Unmarshal(nodes[0].Payload, &projected))
+	current, err := time.Parse(time.RFC3339, projected.Clock.CurrentTimeUTC)
+	require.NoError(t, err)
+	zoned, err := time.Parse(time.RFC3339, projected.Clock.SourceZoneClocks["America/Phoenix"])
+	require.NoError(t, err)
+	require.True(t, current.Equal(zoned), "receiving replica must supply consistent current clocks")
 	require.Contains(t, text, "service-A")
 	require.Equal(t, 1, strings.Count(text, "source-call"))
 	require.NotContains(t, text, "private system content")
@@ -69,6 +81,7 @@ func TestSourceContextReadsRecordedEvidenceAcrossReplicasAndPreservesOwnerScope(
 	carried, err := json.Marshal(input)
 	require.NoError(t, err)
 	require.Contains(t, string(carried), "sourceContext")
+	require.Contains(t, string(carried), "sourceZoneClocks")
 	var decoded map[string]any
 	require.NoError(t, json.Unmarshal(nodes[0].Payload, &decoded))
 	ref := decoded["references"].([]any)[0].(map[string]any)["ref"].(string)

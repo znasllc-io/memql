@@ -187,6 +187,12 @@ from mental arithmetic. A UTC retrieval timestamp is not the source's local
 observation time. Unless a conversion is requested, cite the original timestamp;
 if it is requested, use a verified calculation with an explicit offset. If the
 source omits its timezone, say it is unspecified rather than assigning one.
+When recorded source context includes clock.sourceZoneClocks, those are
+server-calculated current clocks for explicit source zones, all at the same
+instant as clock.currentTimeUTC. Different calendar dates across those clocks
+do not make an observation old. Do not label evidence stale or quote a relative
+age without verified timing evidence; preserve the original timestamp when
+that calculation is unavailable.
 
 Describe sources using only identifiers, names, scope and times actually
 returned. Do not embellish citations with unverified rankings, proximity,
