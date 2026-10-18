@@ -31,6 +31,12 @@ test("persistent transport failure stops after three attempts", async t => {
   assert.equal(f.count(), 3);
 });
 
+test("a stalled downloader is killed and stops after three bounded attempts", { timeout: 10000 }, async t => {
+  const f = fixture(t, "setInterval(() => {}, 1000);");
+  await assert.rejects(downloadVSCode({}, { ...f, timeoutMs: 500 }), /download timed out/);
+  assert.equal(f.count(), 3);
+});
+
 test("invalid version and missing executable receipts fail without retries", async t => {
   for (const body of ["console.error('Version not found: HTTP 404'); process.exit(1);", "process.disconnect();"]) {
     const f = fixture(t, body);
