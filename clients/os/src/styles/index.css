@@ -1017,10 +1017,40 @@ button:not(:disabled):active {
 .os-ask-wait { display: flex; align-items: center; gap: 8px; margin-top: 8px; color: var(--os-muted); font-size: var(--os-text-sm); }
 .os-ask-countdown { width: 24px; height: 3px; background: var(--os-line); overflow: hidden; border-radius: 2px; }
 .os-ask-countdown > span { display: block; width: 100%; height: 100%; background: var(--os-accent); transform: scaleX(var(--ask-remaining)); transform-origin: left; transition: transform .25s linear; }
-.os-ask-input { display: flex; flex: none; align-items: flex-end; gap: 8px; margin: 0 18px 18px; padding: 10px; border: 1px solid var(--os-line); border-radius: 12px; background: var(--os-plate); }
-.os-ask-field { flex: 1; min-width: 0; resize: none; max-height: 160px; min-height: var(--os-control-h); padding: 5px 0; font: inherit; font-size: var(--os-text-base); color: inherit; border: 0; background: transparent; line-height: 1.5; }
+/* ---- the message field (routes design, "Ask's message field") ----
+ * ONE frame: files, the text, then a control row that never moves. The text
+ * starts two rows tall; useGrowingField raises it toward 40% of the surface
+ * and then it scrolls inside. The frame sits at the bottom of the surface's
+ * column, so growing takes rows from the log above -- upward. */
+.os-ask-input { display: flex; flex: none; flex-direction: column; gap: 6px; margin: 0 18px 18px; padding: 10px 10px 6px; border: 1px solid var(--os-line); border-radius: 12px; background: var(--os-plate); }
+.os-ask-field { width: 100%; min-width: 0; resize: none; min-height: calc(var(--os-text-base) * 1.5 * 2 + 10px); padding: 5px 2px; font: inherit; font-size: var(--os-text-base); color: inherit; border: 0; background: transparent; line-height: 1.5; overflow-y: hidden; }
 .os-ask-field:focus { outline: 0; }.os-ask-input:focus-within { border-color: color-mix(in srgb, var(--os-accent) 45%, var(--os-line)); }
-.os-ask-mic, .os-ask-send { display: grid; place-items: center; width: var(--os-control-h); height: var(--os-control-h); flex: none; border: 0; border-radius: var(--os-radius-xs); background: none; color: var(--os-muted); cursor: pointer; }
+.os-ask-controls { display: flex; align-items: center; justify-content: space-between; gap: 8px; min-height: var(--os-control-h); }
+.os-ask-controls-start, .os-ask-controls-end { display: flex; align-items: center; gap: 2px; min-width: 0; }
+.os-ask-controls-start { flex: 1 1 auto; }
+.os-ask-controls-end { flex: none; }
+.os-ask-send-slot { display: inline-flex; width: var(--os-control-h); height: var(--os-control-h); flex: none; }
+.os-ask-mic, .os-ask-send, .os-ask-tool { display: grid; place-items: center; width: var(--os-control-h); height: var(--os-control-h); flex: none; border: 0; border-radius: var(--os-radius-xs); background: none; color: var(--os-muted); cursor: pointer; }
+.os-ask-tool:hover:not(:disabled) { color: var(--os-ink); background: var(--os-raised); }
+.os-ask-tool:disabled { opacity: .4; cursor: default; }
+.os-ask-tool:focus-visible, .os-ask-send:focus-visible, .os-ask-mic:focus-visible { outline: 2px solid var(--os-accent); outline-offset: 1px; }
+.os-ask-route { display: inline-flex; min-width: 0; }
+/* Files attached so far: a chip each, inside the frame above the text. */
+.os-ask-attachments, .os-ask-sent-attachments { display: flex; flex-wrap: wrap; gap: 6px; margin: 0; padding: 0; list-style: none; }
+.os-ask-sent-attachments { margin-top: 6px; }
+.os-ask-attachment { display: inline-flex; align-items: center; gap: 6px; max-width: 260px; height: 26px; padding: 0 4px 0 8px; border: 1px solid var(--os-line); border-radius: var(--os-radius-xs); background: var(--os-raised); color: var(--os-ink); font: inherit; font-size: var(--os-text-sm); }
+.os-ask-sent-attachments .os-ask-attachment { padding-right: 8px; }
+button.os-ask-attachment { cursor: pointer; }
+button.os-ask-attachment:hover { border-color: color-mix(in srgb, var(--os-accent) 45%, var(--os-line)); }
+.os-ask-attachment svg { flex: none; color: var(--os-muted); }
+.os-ask-attachment-name { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.os-ask-attachment[data-state="failed"] { border-color: color-mix(in srgb, var(--os-error) 55%, var(--os-line)); }
+.os-ask-attachment-problem { flex: none; color: var(--os-error); font-size: var(--os-text-xs); }
+.os-ask-attachment-progress { flex: none; width: 36px; height: 3px; overflow: hidden; border-radius: 2px; background: var(--os-line); }
+.os-ask-attachment-progress > span { display: block; height: 100%; background: var(--os-accent); transition: width var(--os-duration-fast) var(--os-ease); }
+.os-ask-attachment-remove { display: grid; place-items: center; width: 20px; height: 20px; flex: none; padding: 0; border: 0; border-radius: var(--os-radius-xs); background: none; color: var(--os-muted); cursor: pointer; }
+.os-ask-attachment-remove:hover { color: var(--os-ink); background: var(--os-plate); }
+.os-ask-attachment-remove:focus-visible { outline: 2px solid var(--os-accent); outline-offset: 0; }
 .os-ask-mic[aria-pressed="true"] { color: var(--os-accent); background: var(--os-accent-soft); }
 .os-ask-send:not(:disabled) { background: var(--os-accent); color: var(--os-accent-fg); }
 .os-ask-send:disabled { opacity: .4; cursor: default; }
@@ -1028,12 +1058,6 @@ button:not(:disabled):active {
 .os-ask > .os-ask-error { margin: 0 20px 12px; }
 .os-ask-micnote { margin: -8px 22px 14px; font-size: var(--os-text-xs); }
 .os-ask-micnote[data-note="problem"] { color: var(--os-warn); }
-/* ---- the conversation's route (design brief "routing in MemQL OS", section 6) ----
- * The pill is the shell's choice pill in the composer's row: the choice in
- * words, neutral, and never wider than a short name and a level. The picker
- * replaces the content, so it is a column on the log's own gutters with
- * option rows at a readable measure -- the measure belongs to the rows, not
- * to the panel (rule 9). No accent beyond the kit's own checked state. */
 
 [data-os-ask="widget"] .os-ask-log { padding: 18px 14px; }
 [data-os-ask="widget"] .os-ask-activity { padding: 12px; }
@@ -2400,6 +2424,68 @@ button.os-row.os-record-row:focus-visible { outline: 2px solid var(--os-accent);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+/* A label with a second line under it: why a disabled option cannot be
+ * chosen, or what an option does. */
+.os-select-option-text {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+.os-select-option-hint {
+  color: var(--os-muted);
+  font-size: var(--os-text-xs);
+  white-space: normal;
+}
+/* A group's name, once, above its first option; a hairline parts it from the
+ * options before it. */
+.os-select-group {
+  margin: 4px 0 0;
+  padding: 8px 10px 4px;
+  border-top: 1px solid var(--os-line);
+  color: var(--os-muted);
+  font-size: var(--os-text-xs);
+}
+.os-select-group:first-child {
+  margin-top: 0;
+  border-top: 0;
+}
+.os-select-separator {
+  height: 1px;
+  margin: 4px 0;
+  background: var(--os-line);
+}
+.os-select-icon {
+  display: inline-flex;
+  flex: none;
+  margin-right: 6px;
+  color: var(--os-muted);
+}
+/* THE QUIET TONE: the value and a chevron, no box, for a select that sits
+ * inside another frame (Ask's message field). The control line height and
+ * focus ring stay; only the field's clothes come off. */
+.os-select-wrap-quiet {
+  flex: none;
+  min-width: 0;
+}
+.os-select-wrap-quiet .os-select {
+  flex: none;
+  width: auto;
+  min-width: 0;
+  max-width: 16rem;
+  padding: 0 24px 0 8px;
+  border-color: transparent;
+  background: transparent;
+  color: var(--os-muted);
+}
+.os-select-wrap-quiet .os-select:hover,
+.os-select-wrap-quiet[data-open] .os-select {
+  border-color: transparent;
+  background: var(--os-raised);
+  color: var(--os-ink);
+}
+.os-select-wrap-quiet .os-select-chevron {
+  right: 7px;
 }
 .os-select-empty {
   margin: 0;
@@ -15179,6 +15265,3 @@ button[data-ask-control="running"], [data-ask-control="running"] > button { outl
 .os-role-test-banner [role="alert"] { grid-column: 1 / -1; }
 .os-root[data-role-test] { top: 64px; }
 
-.os-ask-destination { display: flex; align-items: center; justify-content: flex-end; gap: 8px; margin: 0 18px 8px; }
-.os-ask-destination .os-select-wrap { flex: 0 0 8rem; }
-[data-os-ask="widget"] .os-ask-destination { margin-inline: 10px; }

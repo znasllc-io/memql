@@ -4,6 +4,7 @@ import { QueryClient, type Dispatcher } from "@znasllc-io/memql-sdk-core/client"
 import { flatten } from "../kit/rows";
 import type { AskCallbacks, AskHandle, AskOptions, AskTransport, WorkGuidanceRequest, WorkGuidanceReceipt } from "./askController";
 import type { ApprovalDiscussion, AskActivity, AskConversationStore, AskTurn, ConversationSummary } from "./conversationSession";
+import { routeOptionsFrom, type AskRouteOption } from "./askRoute";
 
 export type AskStreamFn = (dispatcher: Dispatcher, messages: AiChatMessage[], opts: AiChatOptions) => { deltas: AsyncIterable<{ textDelta?: string; metadata?: Record<string, unknown> }>; result: Promise<unknown> };
 
@@ -39,6 +40,17 @@ export class SdkAskTransport implements AskTransport {
       },
     };
   }
+
+  // Called by name rather than through a generated method, so the field works
+  // against any cluster: one without routes refuses the unknown builtin, and
+  // the picker then offers Auto alone.
+  routes = async (): Promise<AskRouteOption[]> => {
+    const dispatcher = this.dispatcher();
+    if (!dispatcher) throw new Error("Not connected to the cluster.");
+    const result = await new QueryClient(dispatcher).executeNamed("routesForActor", "builtin routesForActor()");
+    const row = result.rows()[0];
+    return routeOptionsFrom(row ? flatten(row) : null);
+  };
 
   cancelGoal = async (goalId: string) => {
     const dispatcher = this.dispatcher();
@@ -114,7 +126,7 @@ export class SdkAskTransport implements AskTransport {
     }
     void (async () => {
       try {
-        const handle = this.stream(dispatcher, [{ role: "user", content: prompt }], { signal: abort.signal, conversationId: options.conversationId, requestId: options.turnId, pageContext: context ?? "", provider: options.routing?.source ?? "", level: options.routing?.level ?? "", executionDestination: options.routing?.destination ?? "auto" });
+        const handle = this.stream(dispatcher, [{ role: "user", content: prompt }], { signal: abort.signal, conversationId: options.conversationId, requestId: options.turnId, pageContext: context ?? "", provider: options.routing?.source ?? "", level: options.routing?.level ?? "", executionDestination: options.routing?.destination ?? "auto", ...(options.attachments?.length ? { attachmentArtifactIds: options.attachments } : {}) });
         let settled = false;
         let answer = "";
         let backgroundAccepted = false;

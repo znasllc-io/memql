@@ -144,8 +144,8 @@ describe("reading options out of `<option>` children", () => {
         </>,
       ),
     ).toEqual([
-      { value: "a", label: "Alpha", disabled: false, group: "" },
-      { value: "b", label: "Beta", disabled: false, group: "" },
+      { value: "a", label: "Alpha", disabled: false, group: "", hint: "", separated: false },
+      { value: "b", label: "Beta", disabled: false, group: "", hint: "", separated: false },
     ]);
   });
 
@@ -216,6 +216,8 @@ describe("reading options out of `<option>` children", () => {
       label: "reader",
       disabled: false,
       group: "",
+      hint: "",
+      separated: false,
     });
   });
 
@@ -230,7 +232,17 @@ describe("reading options out of `<option>` children", () => {
           <span>not an option</span>
         </>,
       ),
-    ).toEqual([{ value: "m1", label: "studio-mini", disabled: false, group: "Machines" }]);
+    ).toEqual([{ value: "m1", label: "studio-mini", disabled: false, group: "Machines", hint: "", separated: false }]);
+  });
+
+  it("reads a second line from `data-hint`", () => {
+    expect(
+      selectOptionsFrom(
+        <option value="apps" disabled data-hint="Needs an embedding model">
+          Apps
+        </option>,
+      )[0],
+    ).toEqual({ value: "apps", label: "Apps", disabled: true, group: "", hint: "Needs an embedding model", separated: false });
   });
 });
 
@@ -714,4 +726,64 @@ it("reports explicit confirmation separately from value changes and cancellation
   fireEvent.click(screen.getByRole("option", { name: "Client" }));
   expect(onCommit).toHaveBeenCalledTimes(3);
   expect(onChange).toHaveBeenCalledExactlyOnceWith("client");
+});
+
+// ---------------------------------------------------------------------------
+// Groups, hints and the quiet tone (Ask's route menu was the first to need them)
+// ---------------------------------------------------------------------------
+describe("groups, hints and the quiet tone", () => {
+  const ROUTES = (
+    <>
+      <option value="auto">Auto</option>
+      <option value="apps" disabled data-hint="Needs an embedding model">Apps</option>
+      <optgroup label="Yours">
+        <option value="r1">Emergency</option>
+        <option value="r2">Out of credits</option>
+      </optgroup>
+    </>
+  );
+
+  it("draws a group's name once, above its first option, and keeps options the list's only items", () => {
+    const { trigger } = openIn({ initial: "auto", children: ROUTES });
+    fireEvent.click(trigger);
+    const headings = listbox().querySelectorAll(".os-select-group");
+    expect(Array.from(headings).map((node) => node.textContent)).toEqual(["Yours"]);
+    expect(headings[0]?.getAttribute("role")).toBe("presentation");
+    expect(within(listbox()).getAllByRole("option")).toHaveLength(4);
+    // Arrowing passes over the disabled option and the heading alike.
+    fireEvent.keyDown(trigger, { key: "ArrowDown" });
+    expect(document.getElementById(trigger.getAttribute("aria-activedescendant") ?? "")?.textContent).toBe("Emergency");
+  });
+
+  it("shows a disabled option's reason under its name and does not commit it", () => {
+    const onChange = vi.fn();
+    const { trigger } = openIn({ initial: "auto", children: ROUTES, onChange });
+    fireEvent.click(trigger);
+    const apps = within(listbox()).getByRole("option", { name: /Apps/ });
+    expect(apps.getAttribute("aria-disabled")).toBe("true");
+    expect(apps.querySelector(".os-select-option-hint")?.textContent).toBe("Needs an embedding model");
+    fireEvent.click(apps);
+    expect(onChange).not.toHaveBeenCalled();
+  });
+
+  it("parts a separated entry from the choices before it with a hairline", () => {
+    const { trigger } = openIn({ initial: "a", children: <><option value="a">Alpha</option><option value="manage" data-separated>Manage</option></> });
+    fireEvent.click(trigger);
+    const separator = listbox().querySelector(".os-select-separator");
+    expect(separator?.getAttribute("role")).toBe("presentation");
+    expect(separator?.nextElementSibling?.textContent).toBe("Manage");
+    expect(within(listbox()).getAllByRole("option")).toHaveLength(2);
+  });
+
+  it("shows its glyph and tooltip on the trigger", () => {
+    render(<Select id="route" label="Route" tone="quiet" icon={<svg data-testid="glyph" />} title="Which models answer" value="auto" onChange={() => {}}><option value="auto">Auto</option></Select>);
+    const trigger = screen.getByRole("combobox", { name: "Route" });
+    expect(trigger.getAttribute("title")).toBe("Which models answer");
+    expect(within(trigger).getByTestId("glyph").closest(".os-select-icon")?.getAttribute("aria-hidden")).toBe("true");
+  });
+
+  it("wears no field box in the quiet tone", () => {
+    render(<Select id="where" label="Where" tone="quiet" value="auto" onChange={() => {}}><option value="auto">Auto</option></Select>);
+    expect(screen.getByRole("combobox").closest(".os-select-wrap")?.classList.contains("os-select-wrap-quiet")).toBe(true);
+  });
 });

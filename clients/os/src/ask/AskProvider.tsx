@@ -5,6 +5,7 @@ import { createContext, useEffect, useCallback, useContext, useMemo, useRef, use
 import { CHECKING_ASK, type AskAvailability } from "./useAskReadiness";
 import type { AskTransport } from "./askController";
 import type { VoicePorts } from "./voiceSession";
+import type { UploadProvider } from "../items/upload";
 import {
   LocalAskSettingsStore,
   type AskSettings,
@@ -35,6 +36,9 @@ interface AskContextValue {
   liveVoice: LiveVoiceSession;
   availability: AskAvailability;
   voice: VoicePorts | null;
+  /** Where attached files upload to: the shell's one Library upload path.
+   *  Null in a harness without one; the message field then offers no Attach. */
+  uploads: UploadProvider | null;
   settings: AskSettings;
   updateSettings: (patch: Partial<AskSettings>) => void;
   sheet: AskSheetState;
@@ -74,6 +78,7 @@ export function useDiscussApproval() {
 export function AskProvider({
   transport,
   voice = null,
+  uploads = null,
   availability = CHECKING_ASK,
   settingsStore,
   children,
@@ -81,6 +86,7 @@ export function AskProvider({
   transport: AskTransport;
   availability?: AskAvailability;
   voice?: VoicePorts | null;
+  uploads?: UploadProvider | null;
   settingsStore?: AskSettingsStore;
   children: ReactNode;
 }) {
@@ -107,9 +113,23 @@ export function AskProvider({
     });
   }, []);
 
+  // THE MESSAGE FIELD'S ROUTE AND WHERE: a new conversation starts from the
+  // person's last choice, and every change is remembered for the next one.
+  // The settings document is per viewer and holds no conversation content.
+  const initialRouting = useRef({ route: settings.route ?? "", destination: settings.destination ?? "auto" });
+  useEffect(() => {
+    conversation.setRoutingDefault(initialRouting.current);
+    conversation.onRoutingChoice(choice => {
+      initialRouting.current = choice;
+      conversation.setRoutingDefault(choice);
+      updateSettings({ route: choice.route === "" ? undefined : choice.route, destination: choice.destination === "auto" ? undefined : choice.destination });
+    });
+    return () => conversation.onRoutingChoice(null);
+  }, [conversation, updateSettings]);
+
   const value = useMemo(
-    () => ({ conversation, liveVoice, transport, availability, voice, settings, updateSettings, sheet, openAsk, closeAsk }),
-    [conversation, liveVoice, transport, availability, voice, settings, updateSettings, sheet, openAsk, closeAsk],
+    () => ({ conversation, liveVoice, transport, availability, voice, uploads, settings, updateSettings, sheet, openAsk, closeAsk }),
+    [conversation, liveVoice, transport, availability, voice, uploads, settings, updateSettings, sheet, openAsk, closeAsk],
   );
   return <Ctx.Provider value={value}>{children}</Ctx.Provider>;
 }

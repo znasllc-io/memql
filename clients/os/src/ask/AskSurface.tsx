@@ -10,10 +10,15 @@ import { AccountAvatar } from "../chrome/AccountAvatar";
 import { AskLiveVoice } from "./AskLiveVoice";
 import type { LiveVoiceSession } from "./liveVoiceSession";
 import { useCallback, useEffect, useLayoutEffect, useRef, useState, useSyncExternalStore, type FormEvent } from "react";
-import { ArrowUp, Mic, X, Activity, MessageCircle, MessagesSquare, Maximize2, Minimize2, Square, AudioLines } from "lucide-react";
+import { ArrowUp, Mic, X, Activity, MessageCircle, MessagesSquare, Maximize2, Minimize2, Square, AudioLines, Paperclip, MapPin } from "lucide-react";
+import type { UploadProvider } from "../items/upload";
+import { AskAttachmentChips, AskSentAttachments } from "./AskAttachments";
+import { AskRoutePicker } from "./AskRoutePicker";
+import { useAskRoutes } from "./useAskRoutes";
+import { useGrowingField } from "./useGrowingField";
 
 import { conversationFeed } from "./conversationFeed";
-import { ConversationSession, isConversationalWait, type AskTurn, type ConversationState } from "./conversationSession";
+import { ConversationSession, isConversationalWait, MAX_ASK_ATTACHMENTS, type AskTurn, type ConversationState } from "./conversationSession";
 import { AskWait } from "./AskWait";
 import { AskWorkLink } from "./AskWorkLink";
 import { AskQuestion } from "./AskQuestion";
@@ -28,8 +33,17 @@ import type { VoicePorts, VoiceProblem, VoiceState } from "./voiceSession";
 import { DEFAULT_ASK_SETTINGS, type AskSettings } from "../apps/settings/askSettings";
 
 // THE Ask surface (spec C): one component behind all three entry points.
-// Input row (text, mic toggle, send), streamed answer log, context chip.
-// Errors render here in the surface's own voice -- never a toast.
+// Message field, streamed answer log, context chip. Errors render here in the
+// surface's own voice -- never a toast.
+//
+// ===========================================================================
+// THE MESSAGE FIELD IS ONE CONTROL (routes design, "Ask's message field")
+// ===========================================================================
+// One bordered frame: the files attached so far, then the text, two rows to
+// start and growing upward to a share of the surface before it scrolls, then
+// a control row that never moves -- Attach, Where, Route at the start; the
+// microphones and Send at the end. The two menus are quiet text-and-chevron
+// controls rather than boxed selects, so the frame reads as one thing.
 //
 // ===========================================================================
 // VOICE (epic memql#4747)
@@ -108,6 +122,8 @@ export function AskSurface({
   availability = CHECKING_ASK,
   draft: providedDraft,
   onDraftChange,
+  uploads = null,
+  onManageRoutes,
 }: {
   transport: AskTransport;
   conversation?: ConversationSession;
@@ -128,6 +144,10 @@ export function AskSurface({
   autoFocus?: boolean;
   onOpenFile?: (fileId: string) => void;
   onOpenWork?: (runId?: string, conversationId?: string) => void;
+  /** The shell's Library upload path; absent leaves the field with no Attach. */
+  uploads?: UploadProvider | null;
+  /** Opens Fleet, Routing, Routes: the route menu's last entry. */
+  onManageRoutes?: () => void;
 }) {
   const localConversation = useRef<ConversationSession | null>(null);
   if (!providedConversation && !localConversation.current) localConversation.current = new ConversationSession(transport);
@@ -163,7 +183,13 @@ export function AskSurface({
   const sendReady = state.workGuidance ? availability.state !== "disconnected" : ready;
   const nearBottom = useRef(true);
   const inputRef = useRef<HTMLTextAreaElement | null>(null);
+  const surfaceRef = useRef<HTMLDivElement | null>(null);
+  const fileRef = useRef<HTMLInputElement | null>(null);
   const logRef = useRef<HTMLDivElement | null>(null);
+  const { routes, refresh: refreshRoutes } = useAskRoutes(transport);
+  useGrowingField(inputRef, surfaceRef, draft);
+  const attachments = state.attachments ?? [];
+  const uploading = attachments.some(item => item.state === "uploading");
   const conversationScroll = useRef(0);
   useLayoutEffect(() => {
     const el = logRef.current;
@@ -296,6 +322,7 @@ export function AskSurface({
     if (turn.approvalId && !await conversation.prepareApprovalTurnRetry(turn.id)) return;
     if (edit !== retryEdit.current || revision !== draftRevision.current.revision) return;
     setDraft(turn.prompt);
+    conversation.restoreAttachments(turn.attachments);
     inputRef.current?.focus();
   }
 
@@ -314,10 +341,13 @@ export function AskSurface({
   }
 
   const wired = voicePorts !== null;
+  // Attach, Where and Route belong to an ordinary message. Guidance for running
+  // work and an approval discussion carry no files and choose no route.
+  const plain = !state.workGuidance && !state.discussion && !state.discussionDraft && !state.discussionOpening;
   const note = voiceNote(voice?.state, settings, wired);
 
   return (
-    <div className="os-ask" data-os-ask={variant} onKeyDown={event => { if (event.key === "Escape" && panel !== "conversation") { event.stopPropagation(); closePanel(); } }}>
+    <div ref={surfaceRef} className="os-ask" data-os-ask={variant} onKeyDown={event => { if (event.key === "Escape" && panel !== "conversation") { event.stopPropagation(); closePanel(); } }}>
       <header className="os-window-bar os-ask-header">
         <div className="os-ask-heading"><strong>MemQL</strong><span>{contextLabel || "Ask"}</span></div>
         <div className="os-window-controls os-ask-actions"><div className="os-window-control-group">
@@ -346,7 +376,7 @@ export function AskSurface({
           {state.loading ? <ContentSkeleton kind="conversation" label="Opening conversation" /> : null}
           {exchanges.length === 0 && !state.loading ? <div className="os-ask-empty"><strong>What would you like to do?</strong><p>Ask a question, explore your workspace, or let MemQL help you get something done.</p></div> : null}
           {conversationFeed(exchanges).map(({ turn, completion, key, workState, responseAt, showAssistant }) => <div key={key} className="os-ask-exchange" data-state={turn.state}>
-            {!completion ? <div className="os-ask-message"><AccountAvatar className="os-ask-avatar" /><div><div className="os-ask-byline"><strong>You</strong>{turn.guidanceTargetRunId ? <span>Guidance</span> : null}<time dateTime={turn.startedAt}>{messageTime(turn.startedAt)}</time></div><p>{turn.prompt}</p>{turn.guidanceTargetRunId ? <p className="os-caption">{guidanceReceiptLabel(turn.guidanceStatus)}</p> : null}{turn.guidanceTargetRunId && state.selectedId ? <ProposeLesson conversationId={state.selectedId} turnId={turn.id} text={turn.prompt} /> : null}{turn.approvalId && state.discussion?.approval.id !== turn.approvalId ? <button type="button" className="os-ask-retry" onClick={() => { void conversation.discussApproval(turn.approvalId!); }}>View request</button> : null}</div></div> : null}
+            {!completion ? <div className="os-ask-message"><AccountAvatar className="os-ask-avatar" /><div><div className="os-ask-byline"><strong>You</strong>{turn.guidanceTargetRunId ? <span>Guidance</span> : null}<time dateTime={turn.startedAt}>{messageTime(turn.startedAt)}</time></div><p>{turn.prompt}</p><AskSentAttachments attachments={turn.attachments} onOpenFile={onOpenFile} />{turn.guidanceTargetRunId ? <p className="os-caption">{guidanceReceiptLabel(turn.guidanceStatus)}</p> : null}{turn.guidanceTargetRunId && state.selectedId ? <ProposeLesson conversationId={state.selectedId} turnId={turn.id} text={turn.prompt} /> : null}{turn.approvalId && state.discussion?.approval.id !== turn.approvalId ? <button type="button" className="os-ask-retry" onClick={() => { void conversation.discussApproval(turn.approvalId!); }}>View request</button> : null}</div></div> : null}
             {showAssistant ? <div className="os-ask-message"><span className="os-avatar os-ask-avatar os-ask-avatar-memql" aria-hidden><Mark size={22} /></span><div><div className="os-ask-byline"><strong>{turn.advisor ? "Another agent" : "MemQL"}</strong>{turn.approvalId ? <span>Advice</span> : null}{responseAt ? <time dateTime={responseAt} title={new Date(responseAt).toLocaleString()}>{messageTime(responseAt)}</time> : null}</div>
               {completion ? <p className="os-ask-result-context">{turn.workTitle || turn.prompt}</p> : null}
               {turn.answer ? <AskMessage text={turn.answer} trailing={!turn.approvalId && (!completion || !turn.acknowledgement) && !isConversationalWait(turn) && (turn.background || turn.acknowledgement || turn.state === "queued" || turn.state === "waiting") && turn.runId && onOpenWork ? <AskWorkLink title={turn.workTitle || turn.prompt} state={workState} onOpen={() => onOpenWork(turn.runId, state.selectedId ?? undefined)} /> : undefined} /> : null}
@@ -360,10 +390,6 @@ export function AskSurface({
       </div>
       }
       {error ? <p className="os-ask-error" role="alert">{askErrorSummary(error)}</p> : null}
-      {panel === "conversation" && !state.voiceActive && !state.workGuidance && !state.discussion && !state.discussionDraft && !state.discussionOpening ? <div className="os-ask-destination">
-        <span className="os-caption">Run on</span>
-        <ExecutionDestinationSelect value={state.destination ?? "auto"} onChange={conversation.setDestination} />
-      </div> : null}
       {state.guidanceNotice ? <p className="os-ask-guidance-notice" role="status">{state.guidanceNotice}</p> : null}
       {liveVoice && !state.voiceActive ? <AskLiveVoice session={liveVoice} errorsOnly /> : null}
       {!state.voiceActive && panel === "conversation" ? <AskWorkQueue turns={exchanges.filter(turn => !turn.approvalId)} onOpen={onOpenWork ? runId => onOpenWork(runId, state.selectedId ?? undefined) : undefined} /> : null}
@@ -380,64 +406,9 @@ export function AskSurface({
         {state.discussion.canSendGuidance && Array.from(draft.trim()).length > 4000 ? <span className="os-caption">Keep guidance to 4,000 characters or fewer.</span> : null}
       </div> : null}
       {!state.voiceActive && panel === "conversation" ? <form className="os-ask-input" onSubmit={onSubmit}>
-        <button
-          ref={micRef}
-          type="button"
-          className="os-ask-mic"
-          data-voice={phase}
-          title={live ? "Stop dictation" : "Dictate a message"}
-          aria-label={live ? "Stop listening" : "Dictate a message"}
-          aria-pressed={live}
-          disabled={!wired}
-          onPointerDown={(event) => {
-            if (!controls) return;
-            event.preventDefault();
-            try {
-              event.currentTarget.setPointerCapture(event.pointerId);
-            } catch {
-              // jsdom and some touch stacks have no capture; the gesture
-              // still works, it just does not survive leaving the button.
-            }
-            controls.clearProblem();
-            controls.press();
-          }}
-          onPointerUp={(event) => {
-            if (!controls) return;
-            try {
-              event.currentTarget.releasePointerCapture(event.pointerId);
-            } catch {
-              /* see above */
-            }
-            controls.release();
-          }}
-          // CANCEL, NOT RELEASE. `pointercancel` means the browser took the
-          // gesture over -- on touch, that is a finger sliding off the mic
-          // into a scroll. Treating it as a release would LATCH, leaving a
-          // hot microphone behind a gesture the person abandoned; cancelling
-          // closes the device and sends nothing, which is the reading that
-          // asserts least about what they meant.
-          onPointerCancel={() => controls?.cancel()}
-          onKeyDown={(event) => {
-            if (!controls || (event.key !== " " && event.key !== "Enter")) return;
-            // preventDefault suppresses the synthetic click a button fires on
-            // Space, which would otherwise press the mic a second time.
-            event.preventDefault();
-            if (!event.repeat) {
-              controls.clearProblem();
-              controls.press();
-            }
-          }}
-          onKeyUp={(event) => {
-            if (!controls || (event.key !== " " && event.key !== "Enter")) return;
-            event.preventDefault();
-            controls.release();
-          }}
-        >
-          <Mic size={15} aria-hidden />
-        </button>
-        {liveVoice && !state.workGuidance && !state.discussion && !state.discussionOpening && !state.discussionDraft ? <button type="button" className="os-ask-mic" title="Talk with MemQL" aria-label="Talk with MemQL" disabled={!ready || busy || live} onClick={() => { controls?.cancel(); void liveVoice.start(context, settings.voice ?? "female"); }}><AudioLines size={17} /></button> : null}
+        {plain ? <AskAttachmentChips attachments={attachments} onRemove={conversation.removeAttachment} /> : null}
         <textarea
-          rows={1}
+          rows={2}
           onKeyDown={event => { if (event.key === "Enter" && !event.shiftKey && !event.nativeEvent.isComposing) { event.preventDefault(); if (draft.trim() && send(draft)) setDraft(""); } }}
           ref={inputRef}
           className="os-ask-field"
@@ -451,14 +422,85 @@ export function AskSurface({
           readOnly={live}
           onChange={(event) => setDraft(event.target.value)}
         />
-        {busy ? <button type="button" className="os-ask-send" aria-label="Stop reply" title="Stop this work" onClick={() => conversation.stop()}><Square size={13} /></button> : <button
+        <div className="os-ask-controls">
+          <div className="os-ask-controls-start">
+            {plain && uploads ? <>
+              <button type="button" className="os-ask-tool" aria-label="Attach files" title="Attach files" disabled={attachments.length >= MAX_ASK_ATTACHMENTS} onClick={() => fileRef.current?.click()}><Paperclip size={15} aria-hidden /></button>
+              <input ref={fileRef} type="file" multiple hidden tabIndex={-1} aria-hidden onChange={event => { const files = Array.from(event.target.files ?? []); event.target.value = ""; if (files.length > 0) conversation.attach(files, uploads); }} />
+            </> : null}
+            {plain ? <ExecutionDestinationSelect tone="quiet" label="Where" icon={<MapPin size={13} />} title="Where the work runs" value={state.destination ?? "auto"} onChange={conversation.setDestination} /> : null}
+            {plain ? <AskRoutePicker value={state.route ?? ""} routes={routes} onOpen={refreshRoutes} onManage={onManageRoutes} onChange={route => conversation.setRoute(route.kind === "auto" ? "" : route.id, route.kind === "apps" ? "computer" : undefined)} /> : null}
+          </div>
+          <div className="os-ask-controls-end">
+            <button
+            ref={micRef}
+            type="button"
+            className="os-ask-mic"
+            data-voice={phase}
+            title={live ? "Stop dictation" : "Dictate a message"}
+            aria-label={live ? "Stop listening" : "Dictate a message"}
+            aria-pressed={live}
+            disabled={!wired}
+            onPointerDown={(event) => {
+              if (!controls) return;
+              event.preventDefault();
+              try {
+                event.currentTarget.setPointerCapture(event.pointerId);
+              } catch {
+                // jsdom and some touch stacks have no capture; the gesture
+                // still works, it just does not survive leaving the button.
+              }
+              controls.clearProblem();
+              controls.press();
+            }}
+            onPointerUp={(event) => {
+              if (!controls) return;
+              try {
+                event.currentTarget.releasePointerCapture(event.pointerId);
+              } catch {
+                /* see above */
+              }
+              controls.release();
+            }}
+            // CANCEL, NOT RELEASE. `pointercancel` means the browser took the
+            // gesture over -- on touch, that is a finger sliding off the mic
+            // into a scroll. Treating it as a release would LATCH, leaving a
+            // hot microphone behind a gesture the person abandoned; cancelling
+            // closes the device and sends nothing, which is the reading that
+            // asserts least about what they meant.
+            onPointerCancel={() => controls?.cancel()}
+            onKeyDown={(event) => {
+              if (!controls || (event.key !== " " && event.key !== "Enter")) return;
+              // preventDefault suppresses the synthetic click a button fires on
+              // Space, which would otherwise press the mic a second time.
+              event.preventDefault();
+              if (!event.repeat) {
+                controls.clearProblem();
+                controls.press();
+              }
+            }}
+            onKeyUp={(event) => {
+              if (!controls || (event.key !== " " && event.key !== "Enter")) return;
+              event.preventDefault();
+              controls.release();
+            }}
+          >
+            <Mic size={15} aria-hidden />
+          </button>
+            {liveVoice && !state.workGuidance && !state.discussion && !state.discussionOpening && !state.discussionDraft ? <button type="button" className="os-ask-mic" title="Talk with MemQL" aria-label="Talk with MemQL" disabled={!ready || busy || live} onClick={() => { controls?.cancel(); void liveVoice.start(context, settings.voice ?? "female"); }}><AudioLines size={17} /></button> : null}
+            {/* SEND IS ABSENT WHILE THERE IS NOTHING TO SEND, and its slot
+                stays, so the microphones beside it do not move as typing
+                starts. While a turn runs it is Stop. */}
+            <span className="os-ask-send-slot">{busy ? <button type="button" className="os-ask-send" aria-label="Stop reply" title="Stop this work" onClick={() => conversation.stop()}><Square size={13} /></button> : live || draft.trim() ? <button
           type="submit"
           className="os-ask-send"
           aria-label={live ? "Finish" : state.workGuidance ? "Send guidance" : state.discussionDraft?.advisor ? "Ask another agent" : state.discussion || state.discussionDraft ? "Send discussion message" : "Send"}
-          disabled={!live && (!sendReady || busy || state.workGuidanceSending || !!state.workGuidanceRetry || state.discussionOpening || state.discussionSending || state.guidanceSending || (!!state.discussionDraft && state.discussionDraft.approvalId !== state.discussion?.approval.id) || (state.discussion && (!state.discussion.canAskAdvisor || !!state.discussionRetry)) || !draft.trim())}
+          disabled={!live && (!sendReady || busy || state.workGuidanceSending || !!state.workGuidanceRetry || state.discussionOpening || state.discussionSending || state.guidanceSending || (!!state.discussionDraft && state.discussionDraft.approvalId !== state.discussion?.approval.id) || (state.discussion && (!state.discussion.canAskAdvisor || !!state.discussionRetry)) || uploading || !draft.trim())}
         >
           <ArrowUp size={15} aria-hidden />
-        </button>}
+        </button> : null}</span>
+          </div>
+        </div>
       </form> : null}
       {phase === "transcribing" && !state.voiceActive && panel === "conversation" ? <AskWait activity={state.dictationActivity} startedAt={state.dictationActivity.at(-1)?.at ?? new Date().toISOString()} hasText={false} label="Transcribing" /> : null}
       {note && phase !== "transcribing" && !state.voiceActive && panel === "conversation" ? (

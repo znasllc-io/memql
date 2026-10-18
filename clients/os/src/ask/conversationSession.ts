@@ -1,6 +1,7 @@
 import type { AskHandle, AskTransport, WorkGuidanceRequest } from "./askController";
-import { AUTO_ROUTING } from "./askRoute";
+import { AUTO_ROUTING, routeIdFromSource, routeSource, type AskRouting } from "./askRoute";
 import type { ExecutionDestination } from "../kit/ExecutionDestination";
+import type { UploadHandle, UploadProvider } from "../items/upload";
 
 export interface AskActivity {
   id: string;
@@ -19,7 +20,31 @@ export interface AskActivity {
   call?: { promptName?: string; purpose?: string; attempt?: number; vendor?: string; policy?: string; rule?: string; door?: string; modality?: string; executionSurface?: string; servedModel?: string; cacheKind?: string; inputTokens: number; outputTokens: number; tokensEstimated: boolean; totalCost: number; pricingConfigured: boolean; billing?: string; firstTokenMs: number };
   error?: string;
 }
+/** A Library file attached to a sent message, as the transcript records it. */
+export interface AskTurnAttachment { artifactId: string; fileId?: string; name: string; mimeType?: string; kind?: string }
+/** A file in the message field, before the message is sent. */
+export interface AskAttachmentDraft {
+  /** Local id; never sent. */
+  id: string;
+  name: string;
+  size: number;
+  state: "uploading" | "ready" | "failed";
+  /** 0..1 while uploading, from the upload's own byte count. */
+  progress?: number;
+  artifactId?: string;
+  fileId?: string;
+  /** The upload's refusal, verbatim, when it failed. */
+  error?: string;
+}
+/** A message carries at most this many files; the cluster holds the same bound. */
+export const MAX_ASK_ATTACHMENTS = 10;
+/** The route and Where a message is sent with. "" is Auto. */
+export interface AskRoutingChoice { route: string; destination: ExecutionDestination }
+
 export interface AskTurn {
+  /** What the turn ran with: absent for Auto, recorded by the cluster. */
+  route?: { source?: string; level?: string; destination?: string };
+  attachments?: AskTurnAttachment[];
   canGuideWork?: boolean;
   guidanceEpoch?: string;
   guidanceTargetRunId?: string;
@@ -63,6 +88,10 @@ export interface AskConversationStore {
 }
 export interface ConversationState {
   destination?: ExecutionDestination;
+  /** The message field's route: "" is Auto, otherwise a route id. */
+  route?: string;
+  /** Files in the message field, in the order they were added. */
+  attachments?: AskAttachmentDraft[];
   workGuidance?: { targetEpoch: string; runId: string; conversationId: string; title: string } | null;
   workGuidanceSending?: boolean;
   workGuidanceRetry?: WorkGuidanceRequest | null;
@@ -94,7 +123,8 @@ export interface ConversationState {
 
 /** One session survives closing the overlay and is observed by both surfaces.
  * Transcripts live on the cluster; no private conversation enters localStorage.
- * Model routing stays automatic; deliberate overrides belong to run controls. */
+ * The message field's route and Where ride each turn (Auto sends nothing), and
+ * an open conversation keeps the choice its own last message ran with. */
 export class ConversationSession {
   private state: ConversationState = { conversations: [], dictationActivity: [], historyLoading: false, historyError: "", selectionError: "", openingId: null, selectedId: null, turns: [], draft: "", busy: false, loading: false, error: "", snapshotError: "", activity: null, voiceActive: false };
   private listeners = new Set<() => void>();
@@ -119,12 +149,74 @@ export class ConversationSession {
   private voiceRevision = 0;
   private voiceTurnId: string | null = null;
   private pendingVoiceActivity = new Map<string, AskActivity[]>();
+  private routingDefault: AskRoutingChoice = { route: "", destination: "auto" };
+  private routingListener: ((choice: AskRoutingChoice) => void) | null = null;
+  private uploads = new Map<string, UploadHandle>();
   constructor(private transport: AskTransport) {}
   getSnapshot = () => this.state;
   subscribe = (listener: () => void) => { this.listeners.add(listener); return () => { this.listeners.delete(listener); }; };
   private patch(patch: Partial<ConversationState>) { this.state = { ...this.state, ...patch }; this.listeners.forEach(listener => listener()); }
   setDraft = (draft: string) => this.patch({ draft });
-  setDestination = (destination: ExecutionDestination) => this.patch({ destination });
+  setDestination = (destination: ExecutionDestination) => { this.patch({ destination }); this.emitRouting(); };
+  /** A route choice, and with it the Where it implies (Apps runs on the
+   *  person's own computer). Auto is "". */
+  setRoute = (route: string, destination?: ExecutionDestination) => {
+    this.patch({ route: route === "auto" ? "" : route, ...(destination ? { destination } : {}) });
+    this.emitRouting();
+  };
+  /** What a new conversation starts from: the person's last choice. Applied
+   *  at once while nothing has been said in this session yet. */
+  setRoutingDefault = (choice: AskRoutingChoice) => {
+    this.routingDefault = { route: choice.route === "auto" ? "" : choice.route, destination: choice.destination };
+    if (this.state.turns.length === 0 && this.state.route === undefined) this.patch({ ...this.routingDefault });
+  };
+  /** Told every time the person changes the route or Where, to remember it. */
+  onRoutingChoice = (listener: ((choice: AskRoutingChoice) => void) | null) => { this.routingListener = listener; };
+  private emitRouting() { this.routingListener?.({ route: this.state.route ?? "", destination: this.state.destination ?? "auto" }); }
+  /** A conversation's own choice: what its last ordinary message ran with, or
+   *  the person's default for one with no messages yet. */
+  private routingFor(turns: readonly AskTurn[]): AskRoutingChoice {
+    const last = [...turns].reverse().find(turn => !turn.approvalId && !turn.guidanceTargetRunId);
+    if (!last) return { ...this.routingDefault };
+    const destination = last.route?.destination;
+    return { route: routeIdFromSource(last.route?.source), destination: destination === "workbench" || destination === "computer" ? destination : "auto" };
+  }
+  /** Upload files into the person's Library and hold them in the field. */
+  attach = (files: readonly File[], uploads: UploadProvider) => {
+    const held = this.state.attachments ?? [];
+    const room = Math.max(0, MAX_ASK_ATTACHMENTS - held.length);
+    const accepted = files.slice(0, room);
+    const drafts: AskAttachmentDraft[] = accepted.map(file => ({ id: crypto.randomUUID(), name: file.name, size: file.size, state: "uploading", progress: 0 }));
+    this.patch({ attachments: [...held, ...drafts], ...(files.length > accepted.length ? { error: `A message can carry at most ${MAX_ASK_ATTACHMENTS} files.` } : {}) });
+    drafts.forEach((draft, index) => {
+      const handle = uploads.upload(accepted[index]!);
+      this.uploads.set(draft.id, handle);
+      const stop = handle.onProgress?.(progress => this.patchAttachment(draft.id, { progress: progress.totalBytes > 0 ? Math.min(1, progress.sentBytes / progress.totalBytes) : 0 }));
+      handle.done.then(
+        result => this.patchAttachment(draft.id, { state: "ready", progress: 1, artifactId: result.artifactId, ...(result.fileId ? { fileId: result.fileId } : {}) }),
+        error => this.patchAttachment(draft.id, { state: "failed", error: message(error) }),
+      ).finally(() => { stop?.(); this.uploads.delete(draft.id); });
+    });
+  };
+  /** Take a file out of the message. An upload still running is stopped; a
+   *  file that already landed stays in the Library. */
+  removeAttachment = (id: string) => {
+    this.uploads.get(id)?.abort();
+    this.uploads.delete(id);
+    this.patch({ attachments: (this.state.attachments ?? []).filter(item => item.id !== id) });
+  };
+  /** Put a failed turn's files back in the field for another try. */
+  restoreAttachments = (attachments: readonly AskTurnAttachment[] | undefined) => {
+    if (!attachments?.length) return;
+    const held = this.state.attachments ?? [];
+    const back = attachments.filter(file => !held.some(item => item.artifactId === file.artifactId)).map(file => ({ id: crypto.randomUUID(), name: file.name, size: 0, state: "ready" as const, progress: 1, artifactId: file.artifactId, ...(file.fileId ? { fileId: file.fileId } : {}) }));
+    this.patch({ attachments: [...held, ...back].slice(0, MAX_ASK_ATTACHMENTS) });
+  };
+  private patchAttachment(id: string, patch: Partial<AskAttachmentDraft>) {
+    const held = this.state.attachments ?? [];
+    if (!held.some(item => item.id === id)) return;
+    this.patch({ attachments: held.map(item => item.id === id ? { ...item, ...patch } : item) });
+  }
   questionFocused = () => this.patch({ focusQuestionId: null });
   beginWorkGuidance = (turnId: string): boolean => {
     const turn = this.state.turns.find(item => item.id === turnId);
@@ -347,7 +439,7 @@ export class ConversationSession {
     this.selection++;
     this.leaveDiscussion();
     this.leaveWorkGuidance();
-    this.patch({ selectedId: null, openingId: null, selectionError: "", turns: [], dictationActivity: [], draft: "", error: "", snapshotError: "", loading: false, focusQuestionId: null });
+    this.patch({ selectedId: null, openingId: null, selectionError: "", turns: [], dictationActivity: [], draft: "", error: "", snapshotError: "", loading: false, focusQuestionId: null, ...this.routingFor([]) });
   };
   /** The explicit New action persists even when no inference is available. */
   createConversation = async () => {
@@ -376,7 +468,7 @@ export class ConversationSession {
       if (selection === this.selection) {
         this.leaveWorkGuidance();
         this.patch({ discussion: null });
-        this.patch({ selectedId: id, openingId: null, turns, dictationActivity: [], draft: "", loading: false });
+        this.patch({ selectedId: id, openingId: null, turns, dictationActivity: [], draft: "", loading: false, ...this.routingFor(turns) });
         this.scheduleRefresh();
         return true;
       }
@@ -426,6 +518,8 @@ export class ConversationSession {
   };
   dispose = () => {
     this.disposed = true;
+    for (const upload of this.uploads.values()) upload.abort();
+    this.uploads.clear();
     if (this.refreshTimer) clearTimeout(this.refreshTimer);
     this.refreshTimer = null;
     this.detach();
@@ -543,11 +637,16 @@ export class ConversationSession {
     }
     if (this.state.discussion) return this.sendDiscussion(prompt);
     if (this.state.busy || this.state.voiceActive || this.state.loading || !prompt.trim()) return false;
+    const held = this.state.attachments ?? [];
+    // A file still uploading has no artifact yet; the message waits for it.
+    if (held.some(item => item.state === "uploading")) return false;
+    const attached = held.filter(item => item.state === "ready" && item.artifactId).map(item => ({ artifactId: item.artifactId!, name: item.name, ...(item.fileId ? { fileId: item.fileId } : {}) }));
     const epoch = ++this.epoch;
     this.stopRequested = false; this.requestStarted = false;
-    const turn: AskTurn = { id: crypto.randomUUID(), prompt: prompt.trim(), answer: "", state: "streaming", startedAt: new Date().toISOString(), activity: [] };
-    const routing = this.state.destination && this.state.destination !== "auto" ? { ...AUTO_ROUTING, destination: this.state.destination } : AUTO_ROUTING;
-    this.patch({ busy: true, draft: "", error: "", turns: [...this.state.turns, turn] });
+    const turn: AskTurn = { id: crypto.randomUUID(), prompt: prompt.trim(), answer: "", state: "streaming", startedAt: new Date().toISOString(), activity: [], ...(attached.length ? { attachments: attached } : {}) };
+    const routing = askRouting(this.state.route ?? "", this.state.destination);
+    if (routing !== AUTO_ROUTING) turn.route = { ...(routing.source ? { source: routing.source } : {}), ...(routing.destination ? { destination: routing.destination } : {}) };
+    this.patch({ busy: true, draft: "", error: "", turns: [...this.state.turns, turn], attachments: [] });
     const patchTurn = (patch: Partial<AskTurn>) => {
       if (epoch !== this.epoch) return;
       Object.assign(turn, patch);
@@ -586,7 +685,7 @@ export class ConversationSession {
           },
           done: () => finish(turn.answer.trim() || isBackgroundTurn(turn) ? undefined : "MemQL finished without an answer."),
           error: error => finish(error),
-        }, { conversationId: id ?? "", turnId: turn.id, routing });
+        }, { conversationId: id ?? "", turnId: turn.id, routing, ...(attached.length ? { attachments: attached.map(item => item.artifactId) } : {}) });
         if (epoch === this.epoch) { this.active = handle; this.scheduleRefresh(); }
       } catch (error) { finish(message(error)); }
     })();
@@ -595,6 +694,15 @@ export class ConversationSession {
 }
 
 function message(error: unknown) { return error instanceof Error ? error.message : String(error); }
+
+/** What one message is sent with. Auto for both is the frozen AUTO_ROUTING,
+ *  so an unrouted message sends exactly what it always did. */
+export function askRouting(route: string, destination: ExecutionDestination | undefined): AskRouting {
+  const source = routeSource(route);
+  const where = destination && destination !== "auto" ? destination : undefined;
+  if (!source && !where) return AUTO_ROUTING;
+  return { ...AUTO_ROUTING, source, ...(where ? { destination: where } : {}) };
+}
 
 export function isBackgroundTurn(turn: AskTurn) { return Boolean(turn.runId) && (turn.state === "queued" || turn.state === "waiting" || turn.state === "interrupted"); }
 /** A recovered unclassified/quick request stays inline while observation resumes. */
