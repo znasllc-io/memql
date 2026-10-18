@@ -1025,6 +1025,7 @@ func (s *streamSession) relayForwardedResponses(
 		if msg == nil {
 			continue
 		}
+		msg = s.clientAIMetadata(msg)
 		terminal = terminal || isTerminalServerPayload(msg.Payload)
 		if failure := msg.GetQueryError(); failure != nil {
 			failure.RequestId = requestId

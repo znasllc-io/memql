@@ -97,6 +97,30 @@ it("resumes observation after a Strict Mode effect cleanup and a lost stream", a
  session.dispose(); expect(vi.getTimerCount()).toBe(0);
 });
 
+it("recovers by the accepted request ID when the initial run event was lost", async () => {
+ vi.useFakeTimers(); let callbacks!: AskCallbacks;
+ let stored: AskTurn[] = [];
+ const cancel = vi.fn(), cancelGoal = vi.fn();
+ const ask = vi.fn<AskTransport["ask"]>((_p, _c, on) => { callbacks = on; return { cancel }; });
+ const session = new ConversationSession({ ask, cancelGoal, conversations: { create: async () => ({id:"chat",title:"Chat"}), list: async () => [], read: async () => stored } });
+ session.send("Read the saved file", null); await Promise.resolve();
+ const current = session.getSnapshot().turns[0]!;
+ expect(current.runId).toBeUndefined();
+ stored = [{...current, id:"unrelated-request", runId:"other-run", state:"done", answer:"Unrelated"}];
+ await vi.advanceTimersByTimeAsync(10000);
+ expect(session.getSnapshot().busy).toBe(true);
+ expect(session.getSnapshot().turns.find(t => t.id === current.id)?.state).toBe("streaming");
+ stored = [{...current, runId:"accepted-run", state:"done", answer:"California Condor"}];
+ await vi.advanceTimersByTimeAsync(10000);
+ expect(session.getSnapshot().busy).toBe(false);
+ expect(session.getSnapshot().turns).toEqual(stored);
+ callbacks.delta("Late text"); callbacks.done();
+ expect(session.getSnapshot().turns).toEqual(stored);
+ expect(cancel).toHaveBeenCalledOnce(); expect(cancelGoal).not.toHaveBeenCalled();
+ expect(ask).toHaveBeenCalledOnce(); expect(vi.getTimerCount()).toBe(0);
+ session.dispose();
+});
+
 it("keeps a link and orders the result when classification queued without prose", () => {
  const task = turn("a", {background:true, acknowledgement:"", answer:"Research result", state:"done", endedAt:"2026-10-05T10:03:00Z"});
  const feed = conversationFeed([task]);

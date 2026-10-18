@@ -452,7 +452,7 @@ export class ConversationSession {
   private scheduleRefresh() {
     if (this.refreshTimer) clearTimeout(this.refreshTimer);
     this.refreshTimer = null;
-    if (this.disposed || !this.transport.conversations || !this.state.turns.some(turn => isBackgroundTurn(turn) || (turn.state === "streaming" && turn.runId))) return;
+    if (this.disposed || !this.transport.conversations || !this.state.turns.some(turn => isBackgroundTurn(turn) || turn.state === "streaming")) return;
     this.refreshTimer = setTimeout(() => { this.refreshTimer = null; void this.reload(false); }, this.state.error || this.state.snapshotError ? 10000 : this.state.turns.some(turn => isBackgroundTurn(turn) && turn.state !== "waiting") ? 2500 : 10000);
   }
   reload = (refreshHistory = true): Promise<void> => {
@@ -474,14 +474,14 @@ export class ConversationSession {
     const current = () => !this.disposed && this.state.selectedId === id && selection === this.selection && epoch === this.epoch && discussionEpoch === this.discussionEpoch && revision === this.voiceRevision && guidanceRevision === this.guidanceRevision && workGuidanceRevision === this.workGuidanceRevision;
     request.promise = (async () => {
       try { const turns = await this.transport.conversations!.read(id); if (current()) {
-        // A stream can lose its terminal event without closing. A durable
-        // completion for that same run wins; unrelated or incomplete snapshots
-        // must still preserve the foreground reply and unaccepted turns.
+        // A stream can lose its first run event as well as its terminal event.
+        // The accepted client request ID in this conversation correlates the
+        // receipt even before a run ID arrived. A known run must still match.
         const local = new Map(this.state.turns.filter(turn => turn.state === "streaming").map(turn => [turn.id, turn]));
         let recoveredStream = false;
         const merged = turns.map(turn => {
           const active = local.get(turn.id);
-          if (!this.state.voiceActive && active?.runId && active.runId === turn.runId && (turn.state === "done" || turn.state === "error")) {
+          if (!this.state.voiceActive && active && turn.runId && (!active.runId || active.runId === turn.runId) && (turn.state === "done" || turn.state === "error")) {
             local.delete(turn.id);
             recoveredStream = true;
             return turn;
@@ -587,7 +587,7 @@ export class ConversationSession {
           done: () => finish(turn.answer.trim() || isBackgroundTurn(turn) ? undefined : "MemQL finished without an answer."),
           error: error => finish(error),
         }, { conversationId: id ?? "", turnId: turn.id, routing });
-        if (epoch === this.epoch) this.active = handle;
+        if (epoch === this.epoch) { this.active = handle; this.scheduleRefresh(); }
       } catch (error) { finish(message(error)); }
     })();
     return true;
