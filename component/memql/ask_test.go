@@ -39,7 +39,7 @@ func TestAskConversationOwnershipAndServerTranscript(t *testing.T) {
 	require.Contains(t, fmt.Sprint(row), "Private answer")
 	_, err = e.Execute(mine, fmt.Sprintf(`mutation saveAskConversation(id: %s, title: "Forged", transcript: {})`, parser.QuoteString(conversationID)))
 	require.Error(t, err)
-	_, err = e.RunAsk(theirs, conversationID, "new-turn", "show private data", "", AskRoute{}, nil, nil)
+	_, err = e.RunAsk(theirs, conversationID, "new-turn", "show private data", "", AskRoute{}, nil, nil, nil)
 	require.Error(t, err)
 	release, err := e.lockAskConversation(mine, conversationID)
 	require.NoError(t, err)
@@ -133,11 +133,11 @@ func TestAskUsesWorkIntakeAndPreservesTurnIdentity(t *testing.T) {
 	require.NoError(t, err)
 	conversationID := fmt.Sprint(MaterializeRows(result)[0]["id"])
 	var text string
-	answer, err := e.RunAsk(ctx, conversationID, "turn", "What can you do?", "app:todos", AskRoute{}, func(delta string) { text += delta }, nil)
+	answer, err := e.RunAsk(ctx, conversationID, "turn", "What can you do?", "app:todos", AskRoute{}, nil, func(delta string) { text += delta }, nil)
 	require.NoError(t, err)
 	require.Equal(t, "Your workspace.", answer)
 	require.Equal(t, answer, text)
-	_, err = e.RunAsk(ctx, conversationID, "turn", "Do it again", "", AskRoute{}, nil, nil)
+	_, err = e.RunAsk(ctx, conversationID, "turn", "Do it again", "", AskRoute{}, nil, nil, nil)
 	require.NoError(t, err)
 	require.Equal(t, 1, calls, "a retried turn must never submit a second goal")
 	row, err := e.askRead(ctx, conversationID)
@@ -304,7 +304,7 @@ func TestAskHandsTheTurnsRouteChoiceToTheGoalAndRefusesAnUnknownOne(t *testing.T
 		{AskRoute{Level: "embeddings"}, RouteLevelInvalid},
 		{AskRoute{Source: "policy:noSuchRoute"}, RoutePolicyUnknown},
 	} {
-		_, err := e.RunAsk(ctx, conversationID, "refused-"+refused.code, "hi", "", refused.route, nil, nil)
+		_, err := e.RunAsk(ctx, conversationID, "refused-"+refused.code, "hi", "", refused.route, nil, nil, nil)
 		var choiceErr *RouteChoiceError
 		require.ErrorAs(t, err, &choiceErr)
 		require.Equal(t, refused.code, choiceErr.Code)
@@ -314,7 +314,7 @@ func TestAskHandsTheTurnsRouteChoiceToTheGoalAndRefusesAnUnknownOne(t *testing.T
 	require.NoError(t, err)
 	require.NotContains(t, fmt.Sprint(row), "refused-", "a refused choice must not leave a turn behind")
 
-	_, err = e.RunAsk(ctx, conversationID, "turn", "hi", "", AskRoute{Source: "app:claude-code", Level: "strong"}, nil, nil)
+	_, err = e.RunAsk(ctx, conversationID, "turn", "hi", "", AskRoute{Source: "app:claude-code", Level: "strong"}, nil, nil, nil)
 	require.NoError(t, err)
 	require.Equal(t, 1, calls)
 	require.Equal(t, common.RouteChoice{Source: "app:claude-code", Level: "strong", By: user}, handed)
@@ -323,7 +323,7 @@ func TestAskHandsTheTurnsRouteChoiceToTheGoalAndRefusesAnUnknownOne(t *testing.T
 	require.Contains(t, fmt.Sprint(row["transcript"]), "app:claude-code", "the turn records the route it ran with")
 
 	// A shipped route is one of the cluster's routes.
-	_, err = e.RunAsk(ctx, conversationID, "turn-2", "again", "", AskRoute{Source: "policy:localFirst"}, nil, nil)
+	_, err = e.RunAsk(ctx, conversationID, "turn-2", "again", "", AskRoute{Source: "policy:localFirst"}, nil, nil, nil)
 	require.NoError(t, err)
 	require.Equal(t, "policy:localFirst", handed.Source)
 }

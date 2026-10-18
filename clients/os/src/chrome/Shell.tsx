@@ -366,7 +366,7 @@ function ShellTransports({
     return new GraphDesktopStore(fallback, new SdkDesktopGateway(connection));
   }, [ports.store, connection]);
   return (
-    <AskProvider transport={askTransport} voice={askVoice} availability={askAvailability}>
+    <AskProvider transport={askTransport} voice={askVoice} uploads={uploads} availability={askAvailability}>
       {children(uploads, desktopStore)}
     </AskProvider>
   );

@@ -524,6 +524,8 @@ export interface AiChatPayload {
   fleetRegistrationId?: string;
   conversationId?: string;
   pageContext?: string;
+  /** Ask only: bare Library artifact ids attached to the message. */
+  attachmentArtifactIds?: string[];
 }
 
 export interface AiSuggestPayload {

@@ -95,7 +95,7 @@ func TestAskBackgroundResultReconstructedOnAnotherReplica(t *testing.T) {
 		return []memorynodes.MemoryNode{{ID: "intake", Payload: raw}}, nil
 	}
 	var delivery []string
-	answer, err := a.RunAsk(ctx, conversation, "first", "Research birds", "", AskRoute{}, func(text string) {
+	answer, err := a.RunAsk(ctx, conversation, "first", "Research birds", "", AskRoute{}, nil, func(text string) {
 		delivery = append(delivery, "ack:"+text)
 	}, func(event WorkEvent) {
 		if event.Arguments["background"] == true {
@@ -126,7 +126,7 @@ func TestAskBackgroundResultReconstructedOnAnotherReplica(t *testing.T) {
 	require.WithinDuration(t, ended, *got.EndedAt, time.Microsecond)
 	_, err = b.askConversationSnapshotBuiltin(askTestActor(), map[string]any{"conversationId": conversation}, 0)
 	require.Error(t, err)
-	_, err = a.RunAsk(ctx, conversation, "first", "Duplicate", "", AskRoute{}, nil, nil)
+	_, err = a.RunAsk(ctx, conversation, "first", "Duplicate", "", AskRoute{}, nil, nil, nil)
 	require.NoError(t, err)
 	require.Equal(t, 1, calls)
 }

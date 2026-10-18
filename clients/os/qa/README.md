@@ -373,6 +373,15 @@ an in-flight save, and a retryable save with the original draft retained.
 Saving keeps the request pending; it never raises a limit or resumes work.
 Inspect both modes and a narrow viewport, including the saved-text disclosure.
 
+`/ask-message-field.html` mounts the real Ask surface over a synthetic
+conversation to review the message field. `scene=empty`, `multiline` (the
+field grown upward), `attachments` (one landed upload, one halfway, one over
+quota), `picker` (the Route menu open), `not-ready` (a personal route dim with
+its reason) and `apps` (Apps chosen, Where set to Computer). Add `widget=1`
+for the floating widget's height and `narrow=1` for a narrow column. Nothing
+uploads, routes or calls a model. Inspect both modes at desktop and 820px
+widths.
+
 ## Role testing
 
 Open `/role-testing.html?mode=light` or `mode=dark` for the actual role-testing

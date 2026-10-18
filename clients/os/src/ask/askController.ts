@@ -1,5 +1,5 @@
 import type { ApprovalDiscussion, AskActivity, AskConversationStore, AskTurn } from "./conversationSession";
-import type { AskRouting } from "./askRoute";
+import type { AskRouteOption, AskRouting } from "./askRoute";
 // Shared contract for the cluster transport and injected test transports.
 
 import type { RouteProposal } from "../apps/fleet/routing/routes";
@@ -22,6 +22,9 @@ export interface AskOptions {
   /** The conversation's route: `source` rides AiChatMsg.provider and `level`
    *  AiChatMsg.level. Empty values are Auto -- the cluster's rules decide. */
   routing?: AskRouting;
+  /** Bare Library artifact ids attached to this message; the cluster
+   *  resolves each under the person. Absent or empty when none. */
+  attachments?: string[];
 }
 
 export interface WorkGuidanceRequest { targetEpoch: string; runId: string; conversationId: string; requestId: string; prompt: string }
@@ -37,6 +40,9 @@ export interface AskTransport {
   answerQuestion?: (approvalId: string, answer: Record<string, unknown>) => Promise<void>;
  cancelGoal?: (goalId: string) => Promise<void>;
   conversations?: AskConversationStore;
+  /** The routes this person can pick for a message (`routesForActor`).
+   *  Absent on a transport that cannot ask; the picker then offers Auto alone. */
+  routes?: () => Promise<AskRouteOption[]>;
   startVoice?: (options: import("@znasllc-io/memql-sdk-core/voice").AskVoiceOptions, signal: AbortSignal) => Promise<import("@znasllc-io/memql-sdk-core/voice").AskVoiceCredentials>;
   /**
    * Stream an answer. `context` is the surface's context tag

@@ -43,7 +43,7 @@ func (s *streamSession) handleAskStream(ctx context.Context, requestID, correlat
 	}
 	go func() {
 		defer close(chunks)
-		_, err := s.service.engine.RunAsk(ctx, request.GetConversationId(), requestID, request.GetMessages()[0].GetContent(), request.GetPageContext(), route, func(text string) { send(common.StreamChunk{Content: text}) }, func(event engine.WorkEvent) {
+		_, err := s.service.engine.RunAsk(ctx, request.GetConversationId(), requestID, request.GetMessages()[0].GetContent(), request.GetPageContext(), route, request.GetAttachmentArtifactIds(), func(text string) { send(common.StreamChunk{Content: text}) }, func(event engine.WorkEvent) {
 			encoded, _ := json.Marshal(event)
 			var metadata map[string]any
 			_ = json.Unmarshal(encoded, &metadata)
@@ -96,6 +96,10 @@ func askFailureStatus(err error) (codes.Code, string, map[string]string) {
 	var choice *engine.RouteChoiceError
 	if errors.As(err, &choice) {
 		return codes.InvalidArgument, choice.Error(), map[string]string{"code": choice.Code, "field": choice.Field}
+	}
+	var attachment *engine.AskAttachmentError
+	if errors.As(err, &attachment) {
+		return codes.InvalidArgument, attachment.Error(), map[string]string{"code": attachment.Code, "field": "attachments"}
 	}
 	return codes.Internal, err.Error(), nil
 }

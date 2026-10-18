@@ -47,6 +47,9 @@ type AskTurn struct {
 	// Auto. The run row carries the choice every node honours -- this is the
 	// conversation's own record of it.
 	Route *AskRoute `json:"route,omitempty"`
+	// Attachments are the Library files the person attached to this message,
+	// resolved under them when the turn opened (ask_attachments.go).
+	Attachments []AskAttachment `json:"attachments,omitempty"`
 }
 
 type AskQuestion struct {
@@ -82,7 +85,13 @@ type askTranscript struct {
 // with a *RouteChoiceError before anything is written -- and it reaches the
 // goal beside the request (ContextWithGoalRouteChoice), where createGoal
 // writes it onto the goal and run rows that every executing node reads.
-func (e *MemQLEngine) RunAsk(ctx context.Context, conversationID, turnID, prompt, pageContext string, route AskRoute, onText func(string), onEvent func(WorkEvent)) (answer string, err error) {
+//
+// attachmentIDs are the Library artifacts attached to this message. They are
+// resolved under the caller before anything is written (an id the person
+// cannot read refuses the turn with an *AskAttachmentError), recorded on the
+// transcript turn, and carried to the planner and agent on the goal's
+// conversation input.
+func (e *MemQLEngine) RunAsk(ctx context.Context, conversationID, turnID, prompt, pageContext string, route AskRoute, attachmentIDs []string, onText func(string), onEvent func(WorkEvent)) (answer string, err error) {
 	if subject, ok := auth.SubjectFromContext(ctx); !ok || !auth.CapableFor(ctx, subject, "read", "app:ask") {
 		return "", fmt.Errorf("Ask requires a signed-in person")
 	}
@@ -104,6 +113,10 @@ func (e *MemQLEngine) RunAsk(ctx context.Context, conversationID, turnID, prompt
 		return "", err
 	}
 	if err = e.CheckRouteChoice(ctx, choice); err != nil {
+		return "", err
+	}
+	attachments, err := e.resolveAskAttachments(ctx, attachmentIDs)
+	if err != nil {
 		return "", err
 	}
 	// Who chose is the server's to say: the authenticated caller, the same
@@ -169,6 +182,7 @@ func (e *MemQLEngine) RunAsk(ctx context.Context, conversationID, turnID, prompt
 		if !choice.IsZero() {
 			turn.Route = &AskRoute{Source: choice.Source, Level: choice.Level, Destination: choice.Destination}
 		}
+		turn.Attachments = attachments
 		transcript.Turns = append(transcript.Turns, turn)
 		resumeIndex = len(transcript.Turns) - 1
 	}
@@ -235,6 +249,10 @@ func (e *MemQLEngine) RunAsk(ctx context.Context, conversationID, turnID, prompt
 	// Context is persisted with the run before the planner/agent replica sees it.
 	if turn.RunID == "" {
 		conversation := e.askConversationInput(ctx, conversationID, turnID, pageContext, history)
+		// The turn's own record, so a resumed turn carries what it opened with.
+		if len(turn.Attachments) > 0 {
+			conversation["attachments"] = askAttachmentsInput(turn.Attachments)
+		}
 		call, callErr := parser.RenderCall("work.createGoal", map[string]any{
 			"statement": prompt, "requestedVia": "ask",
 			"ceilings": map[string]any{"wallClockMs": 7200000, "maxModelCalls": 96, "maxRetries": 2},

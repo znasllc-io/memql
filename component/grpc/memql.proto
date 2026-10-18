@@ -981,6 +981,12 @@ message AiChatMsg {
   // Ask goal execution destination: auto (or empty), workbench, computer.
   // This selects tools' execution surface, never the model provider.
   string execution_destination = 9;
+  // Ask only: Library artifacts the person attached to this message, as bare
+  // v1:library:artifact ids (at most 10). Each is resolved under the caller,
+  // so an id the person cannot read refuses the turn before any goal opens.
+  // The files reach the agent through the goal's conversation input, never
+  // through this request's context.
+  repeated string attachment_artifact_ids = 10;
 }
 
 message AiChatMessage {

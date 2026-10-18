@@ -323,14 +323,24 @@ export interface SelectOption {
   /**
    * The `<optgroup label>` it sits under, or "" for none.
    *
-   * GROUPS ARE READ AND NOT DRAWN. The walk keeps a grouped option, in order,
-   * carrying its group name; no group HEADER is rendered. Nothing in this
-   * shell uses `<optgroup>` today, and a heading style invented for zero call
-   * sites is a second vocabulary nobody has looked at -- the field is here so
-   * that the day a surface needs one, the walk is already right and only the
-   * drawing is missing.
+   * A group's name is drawn once, as a quiet heading above its first option
+   * (Ask's route picker was the first surface to need one: the person's own
+   * routes sit under "Yours"). The heading is presentation only; the options
+   * stay the listbox's only items, so arrowing and type-ahead are unchanged.
    */
   group: string;
+  /**
+   * A short second line under the label, from the option's `data-hint`. It
+   * says why a disabled option cannot be chosen ("Needs an embedding model")
+   * or what an option does, and is read with the label.
+   */
+  hint: string;
+  /**
+   * From `data-separated`: a hairline above it, parting it from the options
+   * before it. For an entry that is an act rather than a value -- Ask's
+   * "Manage routes" -- so it does not read as one more choice.
+   */
+  separated: boolean;
 }
 
 /** Everything an `<option>` or `<optgroup>` element can hand the walk. */
@@ -339,6 +349,8 @@ interface OptionLikeProps {
   disabled?: boolean;
   label?: string;
   children?: ReactNode;
+  "data-hint"?: string;
+  "data-separated"?: boolean;
 }
 
 /**
@@ -390,7 +402,8 @@ function walkOptions(node: ReactNode, group: string, into: SelectOption[]): void
     const label = textOf(props.children).trim();
     // HTML's own rule: an option with no `value` is worth its own text.
     const value = props.value === undefined ? label : String(props.value);
-    into.push({ value, label, disabled: props.disabled === true, group });
+    const hint = typeof props["data-hint"] === "string" ? props["data-hint"].trim() : "";
+    into.push({ value, label, disabled: props.disabled === true, group, hint, separated: props["data-separated"] === true });
   }
 }
 
@@ -481,6 +494,9 @@ export function Select({
   id,
   label,
   children,
+  tone = "field",
+  icon,
+  title,
 }: {
   value: string;
   onChange: (next: string) => void;
@@ -491,6 +507,20 @@ export function Select({
   label: string;
   /** `<option>` elements, exactly as a native select takes them. */
   children: ReactNode;
+  /**
+   * "field" (the default) is the boxed control that lines up with an `Input`.
+   * "quiet" is the value and a chevron with no box, for a control that sits
+   * inside another frame -- Ask's message field -- where a second border
+   * would split one control into several.
+   */
+  tone?: "field" | "quiet";
+  /**
+   * A small glyph before the value. Two quiet menus side by side that both
+   * read "Auto" are told apart by it; the label still names each one.
+   */
+  icon?: ReactNode;
+  /** The trigger's tooltip: what the control chooses. */
+  title?: string;
 }) {
   const options = selectOptionsFrom(children);
   const [open, setOpen] = useState(false);
@@ -718,8 +748,9 @@ export function Select({
   useEffect(() => {
     if (!open || active < 0) return;
     const list = listRef.current;
-    const item = list?.children[active];
-    if (list === null || !(item instanceof HTMLElement)) return;
+    // By id rather than by child index: a group heading is a child too.
+    const item = list?.querySelector(`[id="${optionId(active)}"]`);
+    if (list === null || list === undefined || !(item instanceof HTMLElement)) return;
     list.scrollTop = listScrollTop(
       { scrollTop: list.scrollTop, viewHeight: list.clientHeight },
       { top: item.offsetTop, height: item.offsetHeight },
@@ -744,7 +775,7 @@ export function Select({
       <label className="os-sr-only" htmlFor={id}>
         {label}
       </label>
-      <span className="os-select-wrap" data-open={open || undefined}>
+      <span className={tone === "quiet" ? "os-select-wrap os-select-wrap-quiet" : "os-select-wrap"} data-open={open || undefined}>
         <button
           ref={triggerRef}
           id={id}
@@ -768,7 +799,9 @@ export function Select({
           aria-activedescendant={open && active >= 0 ? optionId(active) : undefined}
           onClick={() => (open ? dismiss() : openAt(openingIndex()))}
           onKeyDown={onTriggerKeyDown}
+          title={title}
         >
+          {icon ? <span className="os-select-icon" aria-hidden>{icon}</span> : null}
           <span className="os-select-value" data-placeholder={selected === undefined || undefined}>
             {display}
           </span>
@@ -796,7 +829,14 @@ export function Select({
                   Nothing to choose here yet
                 </p>
               ) : (
-                options.map((option, index) => (
+                options.map((option, index) => [
+                  option.group !== "" && option.group !== options[index - 1]?.group ? (
+                    <p key={`group:${index}:${option.group}`} className="os-select-group" role="presentation">
+                      {option.group}
+                    </p>
+                  ) : option.separated && index > 0 ? (
+                    <div key={`separator:${index}`} className="os-select-separator" role="presentation" />
+                  ) : null,
                   <div
                     key={`${index}:${option.value}`}
                     id={optionId(index)}
@@ -814,9 +854,16 @@ export function Select({
                     <span className="os-select-check" aria-hidden>
                       {option.value === value ? <CheckGlyph size={12} /> : null}
                     </span>
-                    <span className="os-select-option-label">{option.label}</span>
-                  </div>
-                ))
+                    {option.hint === "" ? (
+                      <span className="os-select-option-label">{option.label}</span>
+                    ) : (
+                      <span className="os-select-option-text">
+                        <span className="os-select-option-label">{option.label}</span>
+                        <span className="os-select-option-hint">{option.hint}</span>
+                      </span>
+                    )}
+                  </div>,
+                ])
               )}
             </div>,
             // A modal makes the rest of the document inert. Keep its options
