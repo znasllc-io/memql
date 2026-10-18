@@ -29,12 +29,17 @@ func TestParseKeepAlive(t *testing.T) {
 		{"-1m", KeepAlive{Set: true, Forever: true}, -1, "forever"},
 		{"forever", KeepAlive{Set: true, Forever: true}, -1, "forever"},
 		{"Forever", KeepAlive{Set: true, Forever: true}, -1, "forever"},
+		// Past int64 in the negative direction is still negative, so still forever.
+		{"-99999999999999999999", KeepAlive{Set: true, Forever: true}, -1, "forever"},
 		// A Go duration, as Ollama reads one.
 		{"30m", KeepAlive{Set: true, For: 30 * time.Minute}, "30m0s", "30m0s"},
 		{"2h", KeepAlive{Set: true, For: 2 * time.Hour}, "2h0m0s", "2h0m0s"},
 		{"90s", KeepAlive{Set: true, For: 90 * time.Second}, "1m30s", "1m30s"},
 		// A bare positive integer is SECONDS, as Ollama reads a number.
 		{"3600", KeepAlive{Set: true, For: time.Hour}, "1h0m0s", "1h0m0s"},
+		// The cap is 30 days exactly, and it is accepted in both spellings.
+		{"720h", KeepAlive{Set: true, For: MaxKeepAlive}, "720h0m0s", "720h0m0s"},
+		{"2592000", KeepAlive{Set: true, For: MaxKeepAlive}, "720h0m0s", "720h0m0s"},
 	}
 	for _, tt := range tests {
 		got, err := ParseKeepAlive(tt.in)
@@ -72,6 +77,11 @@ func TestParseKeepAliveRefusesWhatWouldSilentlyDoTheWrongThing(t *testing.T) {
 		// certainly a typo for -1; saying so beats picking one.
 		{"9999h", "longer than 30 days"},
 		{"99999999999", "longer than 30 days"},
+		// One nanosecond or one second past the cap is refused.
+		{"720h1ns", "longer than 30 days"},
+		{"2592001", "longer than 30 days"},
+		// Past int64 in the positive direction is too long, not "not a duration".
+		{"99999999999999999999", "longer than 30 days"},
 	}
 	for _, tt := range tests {
 		got, err := ParseKeepAlive(tt.in)

@@ -59,7 +59,17 @@ func ParseKeepAlive(s string) (KeepAlive, error) {
 		return KeepAlive{Set: true, Forever: true}, nil
 	}
 	// A bare integer is seconds, the way Ollama reads a JSON number.
-	if n, err := strconv.ParseInt(s, 10, 64); err == nil {
+	n, err := strconv.ParseInt(s, 10, 64)
+	// An integer past int64 is still an integer, and it must not reach the
+	// duration parser, which would call it "not a duration". ParseInt clamps
+	// it to the bound of its own sign, so the sign says which way it overflowed.
+	if errors.Is(err, strconv.ErrRange) {
+		if n < 0 {
+			return KeepAlive{Set: true, Forever: true}, nil
+		}
+		return KeepAlive{}, errKeepAliveTooLong(s)
+	}
+	if err == nil {
 		switch {
 		case n < 0:
 			return KeepAlive{Set: true, Forever: true}, nil
