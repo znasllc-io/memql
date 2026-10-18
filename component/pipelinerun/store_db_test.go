@@ -729,8 +729,8 @@ func TestEveryPipelinesBuiltinResolvesToACapability(t *testing.T) {
 	if registerErr != nil {
 		t.Fatalf("register: %v", registerErr)
 	}
-	// The control: the engine has loaded all sixteen shipped pipeline builtins,
-	// including schedule opt-in, connect preview, installations and runner
+	// The control: the engine has loaded all twenty-one shipped pipeline builtins,
+	// including channel configuration, schedule opt-in, connect preview and runner
 	// status, so this audit is about the shipped DSL rather than an empty registry.
 	executors := 0
 	for _, fn := range eng.Functions().Snapshot() {
@@ -738,8 +738,8 @@ func TestEveryPipelinesBuiltinResolvesToACapability(t *testing.T) {
 			executors++
 		}
 	}
-	if executors != 18 {
-		t.Fatalf("dsl/pipelines declares %d integration.pipelines builtins on this engine, want 18", executors)
+	if executors != 21 {
+		t.Fatalf("dsl/pipelines declares %d integration.pipelines builtins on this engine, want 21", executors)
 	}
 	if err := eng.AuditIntegrationExecutors(); err != nil {
 		t.Fatalf("the shipped DSL names a pipelines capability this integration does not offer: %v", err)
