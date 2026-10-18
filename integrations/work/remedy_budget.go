@@ -26,15 +26,18 @@ func (i *Integration) PauseReplanForBudget(ctx context.Context, ownerUserId, run
 	}
 	now := i.clock().UTC()
 	breach := ceiling.Breach
-	req := work.BudgetApproval(runId, stepKey, work.CeilingBreach{
+	req, err := i.progressFeedback(ownerActor(ctx, ownerUserId), runId, stepKey, work.CeilingBreach{
 		Ceiling: breach.Ceiling, Limit: breach.Limit, Actual: breach.Actual, Reason: breach.Reason,
-	}, now, DefaultApprovalTTL)
+	}, work.Spent{Tokens: ceiling.Spent.Tokens, Cost: ceiling.Spent.Cost, ModelCalls: ceiling.Spent.ModelCalls, WallClockMs: ceiling.Spent.WallClockMs})
+	if err != nil {
+		return err
+	}
 	req.Subject["resumeKind"] = waitKindReplan
 	req.Subject["resumeReason"] = rowString(wait, "reason")
 	req.ArtifactHash = work.ArtifactHash(req.Subject)
 	approvalId, err := i.RaiseApproval(ctx, ownerUserId, ApprovalSeed{
 		RunId: runId, StepKey: stepKey, Kind: req.Kind, Subject: req.Subject, ArtifactHash: req.ArtifactHash,
-		Question: "This run needs a higher resource limit to revise its plan. Raise the limit to continue, or stop this run?",
+		Question: req.Question, Options: req.Options,
 		Evidence: evidenceMap(req.Evidence), RequestedAt: now, ExpiresAt: req.ExpiresAt,
 	})
 	if err != nil {

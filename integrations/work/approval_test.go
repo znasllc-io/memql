@@ -265,7 +265,7 @@ func TestDecideApprovalLandsOnAFailurePathQuestion(t *testing.T) {
 		{name: "answered Retry", kind: work.ApprovalKindFeedback, decision: "answered", answer: map[string]any{"value": work.FailureAnswerRetry, "label": "Retry"}, wantStatus: runStatusRunning},
 		{name: "answered Abandon stops the run", kind: work.ApprovalKindFeedback, decision: "answered", answer: map[string]any{"value": work.FailureAnswerAbandon, "label": "Abandon"}, wantStatus: runStatusFailed},
 		{name: "a planReview approved", kind: work.ApprovalKindPlanReview, decision: "approved", wantStatus: runStatusRunning},
-		{name: "a budget question approved", kind: work.ApprovalKindBudget, decision: "approved", wantStatus: runStatusRunning},
+		{name: "a retired budget question rejected", kind: work.ApprovalKindBudget, decision: "rejected", wantStatus: runStatusFailed},
 		{name: "rejected", kind: work.ApprovalKindFeedback, decision: "rejected", wantStatus: runStatusFailed},
 		{name: "the failure changed since -- REFUSED", kind: work.ApprovalKindFeedback, decision: "approved",
 			edit: func(s map[string]any) { s["errorMessage"] = "a different failure" }, wantErrIs: work.ErrArtifactChanged},
@@ -503,7 +503,7 @@ func TestReleasingAnApprovalThatIsNotAFailureQuestionWritesNoRequest(t *testing.
 	i, eng, store := newActsIntegration(t)
 	addVersion(store, actRunId, "fetch", 0, 1, "done", nil, nil)
 	addVersion(store, actRunId, "draft", 1, 1, "running", nil, nil)
-	req := work.BudgetApproval(actRunId, "draft", work.CeilingBreach{Ceiling: "maxTokens", Limit: "10", Actual: "12", Reason: "over"}, testNow, time.Hour)
+	req := work.SideEffectApproval(actRunId, "draft", "effect-hash", work.Evidence{}, map[string]any{"command": "exact effect"}, testNow, time.Hour)
 	raw, err := json.Marshal(map[string]any{
 		"id": "v1:work:approval:a1", "runId": actRunId, "ownerUserId": actOwner, "stepKey": "draft",
 		"kind": req.Kind, "subject": req.Subject, "artifactHash": req.ArtifactHash,

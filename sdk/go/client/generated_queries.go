@@ -13732,6 +13732,28 @@ func WorkObservationsForOwnerRunBuild(args WorkObservationsForOwnerRunArgs) stri
 	return b.String()
 }
 
+// WorkProgressReceiptsForOwnerRun -- Successful execution receipts only; checkpoints and model prose cannot buy more work.
+//
+// Bound concept: v1:work:observation (machine-readable: BoundConcepts["workProgressReceiptsForOwnerRun"] in generated_concepts.go).
+type WorkProgressReceiptsForOwnerRunArgs struct {
+	RunId string
+}
+
+// WorkProgressReceiptsForOwnerRun calls the engine query workProgressReceiptsForOwnerRun.
+func (qc *QueryClient) WorkProgressReceiptsForOwnerRun(ctx context.Context, args WorkProgressReceiptsForOwnerRunArgs) (*Result, error) {
+	call := WorkProgressReceiptsForOwnerRunBuild(args)
+	return qc.executeNamed(ctx, "workProgressReceiptsForOwnerRun", call)
+}
+
+func WorkProgressReceiptsForOwnerRunBuild(args WorkProgressReceiptsForOwnerRunArgs) string {
+	var b strings.Builder
+	b.WriteString("query workProgressReceiptsForOwnerRun(")
+	b.WriteString("runId: ")
+	b.WriteString(quoteMemQL(args.RunId))
+	b.WriteString(")")
+	return b.String()
+}
+
 // WorkQuestionsForOwnerRun -- Questions and decisions on this owner's run, used to resume on any replica.
 //
 // Bound concept: v1:work:approval (machine-readable: BoundConcepts["workQuestionsForOwnerRun"] in generated_concepts.go).

@@ -150,13 +150,14 @@ waiting for a shared local model); missing, invalid, or failed classification st
 a retryable error instead of escalating into automation authoring. Only an
 automation intent can send a conversation through that authoring path.
 
-New Ask runs start with a ten-minute allowance, twelve model calls, and one
+New Ask runs start with a ten-minute estimate, twelve model calls, and one
 automatic retry. A conversational reply tightens the call allowance to three while retaining
 the ten-minute admission allowance, preserving stricter existing ceilings.
 A quick workload describes effort, not whether local hardware is cold or busy. Time
 is measured from the stored run start, including classification; a retry or
-move to another replica does not restart the clock. The deadline covers
-in-flight prompt calls and the agent tool loop. Direct agent attempts also
+move to another replica does not restart the clock. The original declared deadline covers
+in-flight prompt calls and the agent tool loop; smaller workload estimates are
+checked between calls. Direct agent attempts also
 consume the run's model-call allowance and write attempt receipts.
 
 A classified quick conversational reply uses the `workQuickReply` prompt at
@@ -326,12 +327,22 @@ rolling back to an engine whose schema lacks that value is unsafe: its schema
 can reject writes involving those rows. Keep a compatible engine during
 rollback or prepare an explicit data migration first.
 
-### Run time limits and approved continuation
+### Run time limits and progress continuation
 
-A run's wall-clock deadline is a budget boundary, including when it interrupts
-an active model call. It parks the saved run on a budget approval rather than
-retrying an expired allowance as a network timeout. Ordinary provider timeouts
-retain their separate recovery behavior.
+Workload estimates are checkpoints for assessing progress. At the next model
+admission, successful new task-tool receipts can extend a spent time or call
+estimate automatically, up to three additional windows. A slow completed call
+may consume more than one window to catch up. Identical tool arguments, failed
+calls, capability discovery, archived-history reads and user-facing narration
+cannot earn another window. This is a bounded activity signal, not proof that
+the result is correct. The counter and receipt fingerprints persist with the
+run under a shared decision lock, so reconnecting or changing replicas cannot
+restart them.
+
+Every extension remains within the goal's declared model-call, time, token and
+cost limits. A model operation already admitted may finish within the original
+hard deadline rather than being interrupted by a shorter workload estimate.
+Ordinary provider timeouts retain their separate recovery behavior.
 
 Owned agent turns reconsider before exhausting their allowance. The installed
 `agentProgressRecovery` policy requests a review at 75% of a model-call limit
@@ -352,8 +363,8 @@ context summaries and resumed work.
 
 The recovery record is bounded and survives compaction and another replica.
 New accepted human guidance permits reconsideration; old answers replayed from
-history and a raised limit alone do not erase stalled progress. Guidance grants
-neither access nor additional model calls. These initial thresholds are policy
+history and a raised limit alone do not erase stalled progress. Guidance grants no additional access. Progress-limit feedback may continue
+within the existing overall limits, as described below. These initial thresholds are policy
 choices to evaluate against observed tasks, not universal model guarantees.
 
 The same durable recovery record also observes repeated read results across
@@ -374,37 +385,35 @@ rendered context, including fallback attempts. Selection, delivery, adherence
 and successful completion remain separate evidence. Saved receipts never
 replace current source review and ownership checks on a new turn.
 
-Nexus budget approvals accept a new **total** limit. The decision raises only
-that ceiling and preserves spent counters and completed steps. An explicit
-approval also supersedes the smaller workload estimate for that ceiling;
-`ceilings.workloadOverrides` records these approved values. Every replica
-intersects them with the current declared limits, so an older approval cannot
-undo a later tighter limit. Waiting for human input does not consume active
-work time. Continuing a long goal uses durable checkpoints and renewed explicit
-allowances, never an unbounded model call or a reset of prior usage.
+When new progress cannot justify another automatic window, Ask uses its
+ordinary feedback question: **Keep working**, **Stop here**, or a correction
+in the person's own words. An accepted answer can continue the saved work
+within the original limits. It does not reset usage, automatic continuation
+counts, repeated-call evidence, completed steps or permission decisions.
+A run has at most sixteen extra windows in total, including human-requested
+continuation. At an overall limit, the question explains that results are
+saved and offers **Stop here**; it offers no ineffective keep-working action.
+Time spent waiting for human input is excluded from active work time.
 
-A budget discussion in Ask is advisory until the person chooses **Save
-guidance**. For a saved native checkpoint, that action stores the human's
-correction on the pending request without deciding it, making another model
-call, changing limits or resetting usage. The person can revise the saved text
-while the request remains pending. A later explicit **Raise limit** decision
-carries that guidance into the exact suspended execution; earlier accepted
-guidance and completed tool results remain in its saved progress. Other budget
-gates without a native checkpoint keep their own review process.
+The numeric budget-approval controls and deferred **Save guidance** / **Raise
+limit** sequence have been removed. Legacy budget requests remain readable and
+can be closed, but cannot raise a limit or authorize checkpoint replay.
+Historical workload overrides are still read within the current declared caps;
+this workflow writes no new overrides and never rewrites goal limits.
 
-If the decision is saved but releasing the waiting run fails, Nexus offers
-**Resume work** for that approved checkpoint. Retrying uses the recorded total
-and saved guidance; it does not raise the limit again or repeat the decision.
-The latest checkpoint, owner and execution request must still match. A changed
-or cancelled execution is refused instead of being restarted from an old receipt.
+If an answer is saved but releasing the run fails, Ask and Nexus offer to
+continue the exact saved answer. Retrying does not record another answer or
+extend the allowance twice. The owner, latest checkpoint and execution request
+must still match. A changed, cancelled or no-longer-waiting execution cannot be
+restarted from an old receipt.
 
-An agent tool loop saves its exact completed exchanges before publishing a budget
-question. Synchronous parent and child invocations then wait on that same question;
-the saved child links and checkpoint identify the continuation on another replica.
+An agent tool loop saves its completed exchanges before publishing the feedback
+question. Synchronous parent and child invocations wait on that same question;
+the child links and checkpoint identify the continuation on another replica.
 An answer arriving before that unwind finishes is retained until the waiting
-receipts are ready. Raising a limit gives no tool permission and does not replay
-completed effects. A failed legacy step without those links, a missing or changed
-checkpoint, or an uncertain in-flight tool outcome cannot use this continuation.
+receipts are ready. Continuing grants no tool permission and does not replay
+completed effects. A failed legacy step without those links, a missing or
+changed checkpoint, or an uncertain in-flight tool outcome cannot use this path.
 
 The same rule applies after a person chooses **Run again** with unchanged inputs.
 That act starts a new version, but a later native question pauses that version

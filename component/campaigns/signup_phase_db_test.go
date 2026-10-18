@@ -212,11 +212,10 @@ func (e *writeLog) Execute(ctx context.Context, q string) (any, error) {
 // shape -- sixteen signups at once for one audience, on a request pool of four
 // connections, slow under their locks -- with the gate on a pool of its own and a
 // short phase. Half the signups are slow enough to run out of their time under the
-// locks. Whatever each signup ends up with, it is one of three things: taken whole;
-// told to try again with nothing written; or refused for the audience's ceiling. The
-// audience never holds more than its ceiling, the signups that ran out of time wrote
-// nothing, and no two signups' writes interleave -- which a lock lost under a holder
-// that went on writing would be.
+// locks. A signup is taken, told to retry, or refused for the audience's ceiling.
+// Reads that exhaust the phase leave nothing. A write already admitted when the
+// phase ends may commit under its locks; a retry finishes that partial signup.
+// The audience never exceeds its ceiling and no two signups' writes interleave.
 func (f *digestFixture) TestABurstOfSignupsLosesNoLockAndWritesNothingPastItsTime(t *testing.T) {
 	const signups, ceiling = 16, 5
 	const sentence = "Too many signups at once. Try again in a moment."
@@ -282,27 +281,29 @@ func (f *digestFixture) TestABurstOfSignupsLosesNoLockAndWritesNothingPastItsTim
 	if len(roster) > ceiling {
 		t.Errorf("the audience holds %d members after the burst, past its ceiling of %d", len(roster), ceiling)
 	}
-	// A recipient write that started before the deadline can finish under the
-	// locks after it. Consent and membership then exist, but no final signup is
-	// started: the caller is told to retry. Count those safe partial writes too,
-	// while refusing any member from a rejected or expired-before-write request.
+	partial := []int{}
+	seenAddresses := map[string]bool{}
 	for _, member := range roster {
-		who, known := owners[NormalizeEmail(member.Email)]
-		if !known || who%2 == 0 {
-			t.Errorf("audience contains a member that could not have been written: %q", member.Email)
+		address := NormalizeEmail(member.Email)
+		who, known := owners[address]
+		if !known || who%2 == 0 || seenAddresses[address] {
+			t.Fatalf("unexpected or duplicate membership for %q", address)
+		}
+		seenAddresses[address] = true
+		consent, err := n.worker.newsletterRow(n.owner, "newsletterConsentById", "eventId", sha256Hex("newsletter-consent\x00"+newsletterSignupID(n.audience, address)))
+		if err != nil || consent == nil {
+			t.Fatalf("signup %d has no prior consent: %v", who, err)
+		}
+		if errs[who] == nil {
 			continue
 		}
-		if err := errs[who]; err != nil && err.Error() != sentence {
-			t.Errorf("signup %d wrote a member despite being refused: %v", who, err)
+		if errs[who].Error() != sentence {
+			t.Fatalf("refused signup %d left a membership: %v", who, errs[who])
 		}
-		eventID := sha256Hex("newsletter-consent\x00" + newsletterSignupID(n.audience, member.Email))
-		consent, err := n.worker.newsletterRow(n.owner, "newsletterConsentById", "eventId", eventID)
-		if err != nil || consent == nil {
-			t.Errorf("signup %d wrote a member without consent: %v", who, err)
-		}
+		partial = append(partial, who)
 	}
-	if len(roster) < taken {
-		t.Errorf("the audience holds only %d members for %d completed signups", len(roster), taken)
+	if len(roster) != taken+len(partial) {
+		t.Errorf("audience holds %d members, want %d completed and %d resumable signups", len(roster), taken, len(partial))
 	}
 
 	log.mu.Lock()
@@ -324,6 +325,21 @@ func (f *digestFixture) TestABurstOfSignupsLosesNoLockAndWritesNothingPastItsTim
 			break
 		}
 		seen[who] = true
+	}
+	// A fast signup can straddle the deliberately short phase while writing its
+	// member. Verify recovery instead of requiring all writes to fit in 400 ms.
+	n.worker.store.engine = actual
+	signupLockedPhase = limit
+	for _, who := range partial {
+		if _, err := n.worker.handleSubscribe(n.owner, forms[who], 0); err != nil {
+			t.Fatalf("resume signup %d: %v", who, err)
+		}
+		if !n.signedUp(t, forms[who]["email"].(string)) {
+			t.Errorf("signup %d was not completed on retry", who)
+		}
+	}
+	if got := n.roster(t); len(got) != len(roster) {
+		t.Errorf("resuming partial signups changed membership count from %d to %d", len(roster), len(got))
 	}
 }
 
