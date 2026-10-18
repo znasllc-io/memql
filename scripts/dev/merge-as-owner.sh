@@ -126,7 +126,7 @@ function report_policy() {
     printf '%s\n' "$full" | jq -r '
       "  code-owner review required : \((.rules[]|select(.type=="pull_request")|.parameters.require_code_owner_review) // false)",
       "  approvals required         : \((.rules[]|select(.type=="pull_request")|.parameters.required_approving_review_count) // 0)",
-      "  required checks            : \([.rules[]|select(.type=="required_status_checks")|.parameters.required_status_checks[].context]|join(", "))",
+      "  required checks            : \([.rules[]|select(.type=="required_status_checks")|.parameters.required_status_checks[] | .context + (if (.integration_id // 0) > 0 then " (App \(.integration_id))" else "" end)]|join(", "))",
       "  merge queue                : \(if any(.rules[]; .type=="merge_queue") then "yes" else "no" end)"
     ' 2>/dev/null || log_warn "could not summarise the ruleset"
 
@@ -149,6 +149,10 @@ function report_policy() {
         REQUIRED_KNOWN=no
         log_warn "could not read the ruleset's required checks -- every failing check will block"
     fi
+    REQUIRED_APP_CHECKS="$(printf '%s\n' "$full" | jq -c '
+        [.rules[] | select(.type=="required_status_checks")
+         | .parameters.required_status_checks[]
+         | select((.integration_id // 0) > 0)]')"
 
     if printf '%s\n' "$full" | jq -e '[.bypass_actors[]?|select(.actor_type=="RepositoryRole")]|length > 0' >/dev/null 2>&1; then
         HAS_BYPASS=yes
@@ -210,6 +214,29 @@ function report_pr() {
         fi
     else
         printf '  base     : %s (comparison unavailable)\n' "${BASE_REF:-unknown}"
+    fi
+
+    # `gh pr view` omits the reporting App. A same-name SUCCESS therefore
+    # cannot satisfy an App-bound rule. Read all pages for this exact head,
+    # retain the newest attempt from the required App, then apply the same
+    # positive-success guard as every other check. An unavailable/malformed
+    # read supplies no evidence and refuses; it never falls back to names.
+    if [[ "${REQUIRED_APP_CHECKS:-[]}" != "[]" ]]; then
+        local app_pages="" app_runs="[]"
+        if [[ -n "$HEAD_OID" ]] && app_pages="$(gh api "repos/${REPO}/commits/${HEAD_OID}/check-runs?filter=latest&per_page=100" --paginate --slurp 2>/dev/null)" \
+            && printf '%s' "$app_pages" | jq -e 'type=="array" and length>0 and all(.[]; (.check_runs|type)=="array")' >/dev/null 2>&1; then
+            app_runs="$(printf '%s' "$app_pages" | jq -c --arg head "$HEAD_OID" --argjson required "$REQUIRED_APP_CHECKS" '
+                [.[] | .check_runs[] | . as $run
+                 | select(.head_sha == $head)
+                 | select(any($required[]; .context == $run.name and .integration_id == $run.app.id))]
+                | group_by(.name) | map(max_by(.id))
+                | map({name, status:(.status | ascii_upcase), conclusion:(.conclusion // "" | ascii_upcase)})')"
+        else
+            log_warn "cannot verify the required GitHub App check -- retry when GitHub is reachable"
+        fi
+        j="$(printf '%s' "$j" | jq -c --argjson required "$REQUIRED_APP_CHECKS" --argjson checked "$app_runs" '
+            .statusCheckRollup = ([.statusCheckRollup[]? | . as $check
+                | select(all($required[]; .context != ($check.name // $check.context)))] + $checked)')"
     fi
 
     FAILED="$(printf '%s' "$j" | jq '[.statusCheckRollup[]?|select(.conclusion=="FAILURE" or .conclusion=="TIMED_OUT")]|length')"
