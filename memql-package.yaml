@@ -350,11 +350,12 @@ pipeline:
         # budgets without carrying engine fixture rows into unrelated tests.
         - name: db-tests
           placement: cluster
-          # The full engine/campaign suites passed with three Go execution
-          # threads after the heap-budget fix. Two shards plus their database
-          # services then fit a 6.5-core pool. Keep test overlap, selection and
-          # package deadlines unchanged; native qualification must still pass.
-          cpuMilli: 3000
+          # Keep three Go execution threads after the heap-budget fix, with
+          # a quarter-core of admission headroom per shard. Including Postgres,
+          # each shard reserves three cores; two leave room in a 6.5-core pool
+          # for auxiliary containers. Test overlap, selection and deadlines
+          # are unchanged; native qualification must still pass.
+          cpuMilli: 2750
           packages: affected
           only: db-gated
           shards: 5
