@@ -110,7 +110,7 @@ pipeline:
     buckets:
       # Filesystem gates read Go source as well as manifests and docs. The
       # import graph cannot discover these dependencies, so every PR runs them,
-      # matching ci.yml's declared gate packages in scripts/ci/selection.
+      # using the declared gate packages in scripts/ci/selection.
       gates: ["**"]
       deploy-gate:
         - cmd/deploy-gate-check/**
