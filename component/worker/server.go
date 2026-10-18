@@ -1029,6 +1029,13 @@ func (s *streamSession) handleHeartbeat(hb *memqlv1.Heartbeat, sourceIP string) 
 		s.worker.SetCapacity(CapacityFromProto(c, at))
 	}
 
+	// The installer's progress (memql#6229), on the same terms: it lands with
+	// the next flush, and a beat without one -- or with one this engine cannot
+	// read -- leaves the last report in place.
+	if setup := SetupFromProto(hb.GetSetup(), at); setup.Present() {
+		s.worker.SetSetup(setup)
+	}
+
 	// Persist lastSeenAt at most once per HeartbeatBatchInterval
 	// (memql#1340). The FIRST heartbeat of a stream always persists
 	// (lastPersistedAt zero value), so a (re)connected worker's row is
@@ -1131,8 +1138,11 @@ func (s *streamSession) handleHeartbeat(hb *memqlv1.Heartbeat, sourceIP string) 
 		// Re-asserted on every flush, as the round trip is: the report moves
 		// with every call, and nil (none reported) leaves the stored one.
 		Capacity: s.worker.Capacity().Row(),
-		RttMs:    s.rttMs,
-		RttAt:    s.rttAt,
+		// The installer's progress rides every flush too: a download moves
+		// between beats, and nil (none reported) leaves the stored one.
+		Setup: s.worker.Setup().Row(),
+		RttMs: s.rttMs,
+		RttAt: s.rttAt,
 		// The two facts about the CONNECTION rather than the machine (epic
 		// memql#5327, designs D6 and D4). Both are re-asserted on every flush
 		// rather than written once: the skew moves with the machine's clock,

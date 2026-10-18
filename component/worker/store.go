@@ -259,6 +259,10 @@ func (s *EngineStore) UpdateLastSeen(ctx context.Context, flush HeartbeatFlush) 
 	if len(flush.Capacity) > 0 {
 		args["capacity"] = flush.Capacity
 	}
+	// The installer's report, on the same terms: absent keeps the stored one.
+	if len(flush.Setup) > 0 {
+		args["setup"] = flush.Setup
+	}
 	// The same rule for the round trip: a zero rttAt is "not measured", and
 	// sending it would write a 0 ms figure over a real one.
 	if !flush.RttAt.IsZero() {

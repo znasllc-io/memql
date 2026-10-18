@@ -9234,6 +9234,7 @@
         "revokedBy",
         "rttAt",
         "rttMs",
+        "setup",
         "sharing",
         "sharingActivity",
         "version",
