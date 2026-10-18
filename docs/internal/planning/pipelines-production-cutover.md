@@ -87,6 +87,14 @@ all 33 selected steps, with 14 expected path skips, 33 logs, 29 artifacts and
 no retention notes. Mac download repair #6213 still has native qualification
 in progress. Both repairs are included in #6200. The repaired exact ordinary
 merge-queue success remains required before removing the legacy context.
+Its native run exposed an unrelated error-page test-fixture collision: released
+public/probe ports could be reused by the fixture's deliberately occupied TLS
+socket. Reserving all three distinct ports before startup preserves the strict
+listener-cleanup assertion. The original failed eight of 50,000 short iterations;
+the repaired fixture passed all 50,000 and the complete error-page suite with
+the race detector. This repair is also included in #6213 and #6200.
+The cutover branch prepares engine version 0.29.33; 0.29.32 is reserved by the
+independent Ask/install-recovery PR #6199. Neither version is a deployed release.
 Storage PR #6171's head gate received a one-time Kueue priority of 1, allowing it to
 run alongside the existing database job. No running job was preempted and
 no quota was increased; all declared commands and assertions ran unchanged.
