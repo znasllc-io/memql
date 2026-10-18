@@ -1166,6 +1166,7 @@ coverage; packaging their binaries does not exercise those hosts.
 | `gates` | `gate-inputs` | pull requests and manual runs |
 | `analysis` | Full-history `gitleaks` (6 hours, 3 CPUs), `codeql-go` (3 hours), `codeql-javascript`, `codeql-python` and `sbom` | weekly audits and manual runs, after a failure too |
 | `security-reports` | Journaled publication of the three retained CodeQL SARIF reports | weekly audits and manual runs |
+| `fixtures` | Digest-pinned public TimescaleDB snapshot for Linux AMD64 and ARM64, with attached provenance; retains an unpublished OCI index and metadata | manual runs |
 | `release-files` | Exact-version documentation bundle, SDK npm archive and five VSIX archives | releases |
 | `build-tools` | Unpublished toolchain OCI archive and digest metadata | releases |
 | `images` | Unpublished OCI archives and digest metadata for all seven engine node types | releases |

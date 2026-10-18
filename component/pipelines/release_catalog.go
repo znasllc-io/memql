@@ -106,7 +106,7 @@ func CanonicalPublishedRelease(input PublishedRelease) ([]byte, string, error) {
 				return nil, "", errors.New("invalid published artifact")
 			}
 			names[a.Name] = true
-			if (a.Kind == "oci" && (!releaseDigest(a.ImageDigest) || (a.Platform != "linux/amd64" && a.Platform != "linux/arm64"))) || (a.Kind == "file" && (a.ImageDigest != "" || !releaseIdentity(a.Platform))) || (a.Kind != "oci" && a.Kind != "file") {
+			if (a.Kind == "oci" && (!releaseDigest(a.ImageDigest) || (a.Platform != "linux/amd64" && a.Platform != "linux/arm64" && a.Platform != "oci-index"))) || (a.Kind == "file" && (a.ImageDigest != "" || !releaseIdentity(a.Platform))) || (a.Kind != "oci" && a.Kind != "file") {
 				return nil, "", errors.New("invalid published artifact kind")
 			}
 			locations := map[string]bool{}

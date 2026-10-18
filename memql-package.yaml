@@ -786,6 +786,23 @@ pipeline:
             step: analysis.codeql-python
             path: .memql-security/codeql-python/results.sarif
 
+    # Refreshing a public fixture is deliberate maintenance. Keep both supported
+    # native platforms and their provenance, retain exact bytes, and publish through a
+    # separately approved candidate. No registry credential enters this command.
+    - name: fixtures
+      on: [manual]
+      steps:
+        - name: timescaledb
+          placement: cluster
+          cpuMilli: 1000
+          memoryMiB: 2048
+          timeout: 20m
+          artifacts: [.memql-fixture]
+          run: |
+            set -eu
+            export GOFLAGS=-p=2 GOMEMLIMIT=1GiB GOGC=75
+            go run ./cmd/ocisnapshot --pin deploy/ci-fixtures/timescaledb.json --out .memql-fixture
+
     - name: release-files
       on: [release]
       steps:

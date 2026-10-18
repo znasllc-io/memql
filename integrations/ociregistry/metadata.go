@@ -111,7 +111,10 @@ func validPlatform(o object, platform string) bool {
 		return false
 	}
 	v := o.str("variant")
-	if o.has("variant") && string(o["variant"]) != "null" && string(o["variant"]) != `""` && !(p[1] == "arm64" && v == "v8") {
+	if len(p) == 3 && v != p[2] {
+		return false
+	}
+	if o.has("variant") && string(o["variant"]) != "null" && string(o["variant"]) != `""` && !(p[1] == "arm64" && v == "v8") && !(len(p) == 3 && p[1] == "arm" && v == p[2]) {
 		return false
 	}
 	if o.has("os.features") && string(o["os.features"]) != "[]" && string(o["os.features"]) != "null" {
@@ -159,6 +162,10 @@ func (m metadataFiles) verify(ctx context.Context, want Expected, unpackedLimit 
 			return nil, errors.New("index platform differs from expected platform")
 		}
 	}
+	return m.verifyImage(ctx, image, want.Platform, &unpackedLimit)
+}
+
+func (m metadataFiles) verifyImage(ctx context.Context, image blob, platform string, unpackedLimit *int64) ([]blob, error) {
 	manifest, err := m.json(blobPath(image.Digest))
 	if err != nil {
 		return nil, err
@@ -178,7 +185,7 @@ func (m metadataFiles) verify(ctx context.Context, want Expected, unpackedLimit 
 	if err != nil {
 		return nil, err
 	}
-	if !validPlatform(conf, want.Platform) {
+	if !validPlatform(conf, platform) {
 		return nil, errors.New("image platform differs from expected platform")
 	}
 	rootfs, err := conf.child("rootfs")
@@ -214,14 +221,14 @@ func (m metadataFiles) verify(ctx context.Context, want Expected, unpackedLimit 
 		if json.Unmarshal(diffs[i], &diff) != nil || !shaPattern.MatchString(diff) {
 			return nil, errors.New("invalid rootfs DiffID")
 		}
-		h, n, e := verifyLayer(ctx, filepath.Join(m.root, blobPath(b.Digest)), media, unpackedLimit)
+		h, n, e := verifyLayer(ctx, filepath.Join(m.root, blobPath(b.Digest)), media, *unpackedLimit)
 		if e != nil {
 			return nil, e
 		}
 		if h != diff {
 			return nil, errors.New("uncompressed layer differs from rootfs DiffID")
 		}
-		unpackedLimit -= n
+		*unpackedLimit -= n
 		blobs = append(blobs, b)
 	}
 	return blobs, nil

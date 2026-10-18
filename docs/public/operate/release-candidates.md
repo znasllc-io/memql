@@ -75,11 +75,21 @@ Different components can refer to the same run through separate input names.
 
 An artifact names its exact producing step and canonical relative path. Paths
 cannot traverse directories, use backslashes or contain control characters.
-OCI artifacts require `linux/amd64` or `linux/arm64` and a separate metadata path
-from the same successful producer. Its receipt-bound BuildKit JSON must contain
+OCI artifacts require `linux/amd64`, `linux/arm64` or `oci-index` and a separate metadata path
+from the same successful producer. Its receipt-bound producer JSON must contain
 `containerimage.digest`; preparation independently verifies that digest against
 the complete OCI archive. File artifacts use `kind: "file"`, an explicit
 platform and no image metadata path.
+
+`oci-index` preserves a flat OCI index instead of choosing the publishing host's
+architecture. Preparation verifies every referenced image, compressed layer,
+root-filesystem digest and attached provenance document within the same archive
+and byte limits. It rejects missing children, ambiguous platform matches,
+external descriptors and unbound provenance subjects. Publication reads back
+every child manifest and blob as well as the root index. This verifies content
+identity and subject association, not an attestation's claims or signature.
+When a producer deliberately selects a platform subset, its derived index has a
+new digest; its metadata must distinguish that result from the upstream source.
 
 Every target must already be configured and match the declared component,
 artifact and kind. A registry target consumes an OCI artifact. A `releaseAssets`

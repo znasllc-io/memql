@@ -1,6 +1,7 @@
 package main
 
 import (
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"slices"
@@ -9,6 +10,44 @@ import (
 
 	"github.com/znasllc-io/memql/component/pipelines"
 )
+
+func TestFixtureRefreshIsManualAndRetainsBothNativePlatforms(t *testing.T) {
+	spec := engineManifest(t).Pipeline
+	graph, _ := engineImportGraph(t)
+	for _, event := range []pipelines.Event{pipelines.EventRelease, pipelines.EventPullRequest, pipelines.EventPush, pipelines.EventMergeGroup, pipelines.EventManual, pipelines.EventSchedule} {
+		plan, refusal := compileEngineOpening(spec, graph, event, nil)
+		if refusal != nil {
+			t.Fatal(refusal)
+		}
+		found := 0
+		for _, step := range plan.Steps() {
+			if step.Stage != "fixtures" {
+				continue
+			}
+			found++
+			if event != pipelines.EventManual || step.Key != "fixtures.timescaledb" || step.Skip != nil || step.RunAfterFailure || len(step.Secrets) != 0 || step.ImageBuild != nil || step.RequiresFleet() || len(step.Services) != 0 {
+				t.Fatalf("fixture refresh gained automatic execution or publication authority: %+v", step)
+			}
+			if !slices.Equal(step.Artifacts, []string{".memql-fixture"}) || step.TimeoutSeconds != 20*60 || step.CPUMilli != 1000 || step.MemoryMiB != 2048 || !strings.Contains(step.Run, "go run ./cmd/ocisnapshot --pin deploy/ci-fixtures/timescaledb.json --out .memql-fixture") {
+				t.Fatalf("fixture refresh lost its verified output or resource bounds: %+v", step)
+			}
+		}
+		if (found == 1) != (event == pipelines.EventManual) {
+			t.Fatalf("%s selected %d fixture refreshes", event, found)
+		}
+	}
+	pin, err := os.ReadFile("deploy/ci-fixtures/timescaledb.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var source struct {
+		Version, Source string
+		Platforms       []string
+	}
+	if err := json.Unmarshal(pin, &source); err != nil || source.Version == "" || !slices.Equal(source.Platforms, []string{"linux/amd64", "linux/arm64"}) || !strings.Contains(source.Source, "@sha256:") {
+		t.Fatal("fixture pin is missing exact immutable identity", err)
+	}
+}
 
 // Read the actual node build files, so retiring or adding a node cannot leave
 // a successful release with a stale or missing engine image.

@@ -153,7 +153,7 @@ func (p *Publisher) Publish(ctx context.Context, v *VerifiedImage) (Receipt, err
 		return Receipt{}, err
 	}
 	defer func() { <-v.gate }()
-	if v.dir == "" || v.image == nil {
+	if v.dir == "" || (v.image == nil && v.index == nil) {
 		return Receipt{}, errors.New("verified image is closed or uninitialized")
 	}
 	httpTransport := p.httpTransport()
@@ -162,7 +162,11 @@ func (p *Publisher) Publish(ctx context.Context, v *VerifiedImage) (Receipt, err
 	for _, b := range v.blobs {
 		allowed[b.Digest] = b.Size
 	}
-	guard := &scopedTransport{publisher: p, inner: httpTransport, image: v.expected.ImageDigest, blobs: allowed, tag: p.target.Tag}
+	manifests := map[string]int64{}
+	for _, m := range v.manifests {
+		manifests[m.Digest] = m.Size
+	}
+	guard := &scopedTransport{publisher: p, inner: httpTransport, image: v.expected.ImageDigest, blobs: allowed, manifests: manifests, tag: p.target.Tag}
 	opts := []remote.Option{
 		remote.WithContext(ctx), remote.WithTransport(guard), remote.WithJobs(2),
 		remote.WithAuth(authn.FromConfig(authn.AuthConfig{Username: p.target.Username, Password: p.target.Password, RegistryToken: p.target.BearerToken})),
@@ -181,7 +185,12 @@ func (p *Publisher) Publish(ctx context.Context, v *VerifiedImage) (Receipt, err
 	}
 	ready, err := p.readback(ctx, v, opts)
 	if err == nil && !ready {
-		writeErr := remote.Write(ref, v.image, opts...)
+		var writeErr error
+		if v.index != nil {
+			writeErr = remote.WriteIndex(ref, v.index, opts...)
+		} else {
+			writeErr = remote.Write(ref, v.image, opts...)
+		}
 		// Even after a lost final response, immutable digest readback can prove
 		// success. It cannot turn partial blobs into a publication receipt.
 		ready, err = p.readback(ctx, v, opts)
@@ -209,7 +218,11 @@ func (p *Publisher) Publish(ctx context.Context, v *VerifiedImage) (Receipt, err
 			// Tag writes are not blindly retried. After a lost reply, only fresh
 			// readback can prove completion; a later invocation reconciles first.
 			writeOpts := append(append([]remote.Option(nil), opts...), remote.WithRetryBackoff(remote.Backoff{Steps: 1}))
-			_ = remote.Tag(p.repo.Tag(p.target.Tag), v.image, writeOpts...)
+			if v.index != nil {
+				_ = remote.Tag(p.repo.Tag(p.target.Tag), v.index, writeOpts...)
+			} else {
+				_ = remote.Tag(p.repo.Tag(p.target.Tag), v.image, writeOpts...)
+			}
 			ready, err = p.readTag(ctx, v.expected.ImageDigest, opts)
 		}
 		if errors.Is(err, ErrTagConflict) {
@@ -255,6 +268,16 @@ func (p *Publisher) readback(ctx context.Context, v *VerifiedImage, opts []remot
 	if err != nil || h != v.expected.ImageDigest {
 		return false, errors.New("registry manifest bytes differ from digest")
 	}
+	for _, child := range v.manifests {
+		desc, err := remote.Get(p.repo.Digest(child.Digest), opts...)
+		if err != nil {
+			return false, err
+		}
+		h, n, err := hashCopy(ctx, nil, strings.NewReader(string(desc.Manifest)), child.Size)
+		if err != nil || h != child.Digest || n != child.Size {
+			return false, errors.New("registry child manifest differs from reviewed index")
+		}
+	}
 	seen := map[string]bool{}
 	for _, b := range v.blobs {
 		if seen[b.Digest] {
@@ -290,8 +313,8 @@ type scopedTransport struct {
 	image     string
 	tag       string
 	blobs     map[string]int64
-	// Availability admits only reads of descriptors discovered beneath the
-	// requested immutable root. A publisher leaves these fields unset.
+	// Availability discovers child manifests beneath its immutable root.
+	// Publication authorizes only child manifests in the fully verified archive.
 	readOnly  bool
 	manifests map[string]int64
 	wrote     atomic.Bool
@@ -341,7 +364,7 @@ func (s *scopedTransport) permitted(r *http.Request) (int64, error) {
 		return 64 << 10, nil
 	}
 	prefix := "/v2/" + p.target.Repository + "/"
-	if s.readOnly && read && len(q) == 0 {
+	if (read || (!s.readOnly && r.Method == http.MethodPut)) && len(q) == 0 {
 		if limit, ok := s.manifests[strings.TrimPrefix(u.Path, prefix+"manifests/")]; ok && strings.HasPrefix(u.Path, prefix+"manifests/") {
 			return limit, nil
 		}

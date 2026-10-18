@@ -15,6 +15,18 @@ func publishedReleaseFixture() PublishedRelease {
 	return PublishedRelease{FormatVersion: 1, Publisher: "fixture", CandidateID: d, ApprovalID: "approval", WorkflowDigest: d, ProvenanceDigest: d, Compatibility: []ReleaseCompatibility{}, Components: []PublishedComponent{{Name: "engine", Version: "0.25.0", Repository: "acme/engine", Commit: strings.Repeat("b", 40), Artifacts: []PublishedArtifact{{Name: "image", Kind: "oci", Platform: "linux/arm64", Digest: d, Size: 100, ImageDigest: d, Locations: []PublishedLocation{{Kind: "oci", Origin: "https://registry.example", Repository: "acme/engine"}}}}}}}
 }
 
+func TestCatalogPreservesReviewedIndexIdentity(t *testing.T) {
+	c := publishedReleaseFixture()
+	c.Components[0].Artifacts[0].Platform = "oci-index"
+	if _, _, err := CanonicalPublishedRelease(c); err != nil {
+		t.Fatal(err)
+	}
+	c.Components[0].Artifacts[0].ImageDigest = ""
+	if _, _, err := CanonicalPublishedRelease(c); err == nil {
+		t.Fatal("index without its exact digest accepted")
+	}
+}
+
 func TestCatalogNPMBindsExactPackageAndVersion(t *testing.T) {
 	makeRelease := func() PublishedRelease {
 		c := publishedReleaseFixture()

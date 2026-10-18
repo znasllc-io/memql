@@ -125,6 +125,31 @@ GitHub Packages already contains SDK 0.8.0, published on July 15. The retirement
 branch prepares 0.9.0 and keeps its workspace lockfiles aligned; its package
 dry run passed. This does not publish or replace an existing registry version.
 
+## Native infrastructure publication preparation, October 18
+
+A separate follow-up branch prepares OCI index publication and an independent
+`deploy/db-image/VERSION` of `16.15.1` (PostgreSQL 16.15, operand revision 1).
+The installed CNPG webhook accepted this tag in a server dry run; the running
+database image was not changed. Native database publication is still pending.
+
+The existing TimescaleDB fixture index contains five architectures and its
+children total 2,687,287,862 compressed bytes, beyond the unchanged 2 GiB
+artifact limit. The new manual-only `fixtures.timescaledb` step explicitly
+selects Linux AMD64 and ARM64, the native container runner's supported platforms,
+and retains both provenance manifests. The old five-platform mirror and service
+pin remain untouched. Local anonymous download and complete verification passed:
+1,081,885,184-byte archive `sha256:4ffb9bb37e693b0a6371ad9a3c9ba42204bb22c61a9c9ba95324cb0d95d80ca9`,
+derived index `sha256:dea8fe7100c13d6473659b9d4be3fdb83f045e716b165155b9b6de5271fbf11a`.
+The metadata distinguishes that derived index from the pinned upstream index.
+
+The publisher verifies every child and blob and preserves durable intent,
+immutable tags and independent-host readback. Race-enabled protocol tests cover
+missing/corrupted children, unrelated provenance, duplicate platforms, tag
+conflicts, read-only transport bounds and fresh-host replay. Compiled native
+selection and version guards pass. These are local qualification results;
+production execution, approved publication and anonymous pull receipts are
+still required before the database and fixture Actions workflows are removed.
+
 ## Observed baseline, October 16, 2026 UTC
 
 The instance repository is `znasllc-io/memql-znas`, revision

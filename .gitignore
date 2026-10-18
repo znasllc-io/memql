@@ -245,3 +245,6 @@ clients/os/local-cockpit-test.json
 /.memql-host-cache/
 /.memql-host-reports/
 /.host-*/
+# Native public fixture snapshots are retained in the run's Library receipts.
+.memql-fixture/
+.memql-oci-snapshot-*/
