@@ -687,6 +687,41 @@ func ReadUserBudget(ctx context.Context, exec routeExecutor, owner string, now t
 	return out, nil
 }
 
+// ReadUserBudgetState is where one person's budget stands -- "none",
+// "under", "near" or "over" -- reading this month's spend ONLY when a budget
+// is set. Auto asks it for every person it ranks a call for, and a person with
+// no budget should cost that ranking one cached read, not a month of ledger.
+func ReadUserBudgetState(ctx context.Context, exec routeExecutor, owner string, now time.Time) (string, error) {
+	set, err := userBudgetSet(ctx, exec, owner)
+	if err != nil || !set {
+		return "none", err
+	}
+	b, err := ReadUserBudget(ctx, exec, owner, now)
+	if err != nil {
+		return "none", err
+	}
+	return b.State(), nil
+}
+
+func userBudgetSet(ctx context.Context, exec routeExecutor, owner string) (bool, error) {
+	q, err := languageParser.RenderCall("routerBudgets", map[string]any{"scope": "user"})
+	if err != nil {
+		return false, err
+	}
+	res, err := exec.Execute(RouteMaintenanceContext(ctx), "query "+q)
+	if err != nil {
+		return false, fmt.Errorf("read budget: %w", err)
+	}
+	for _, row := range MaterializeRows(res) {
+		scopeId, _ := row["scopeId"].(string)
+		limit, _ := row["limitUSD"].(float64)
+		if sameUserId(scopeId, owner) && limit > 0 {
+			return true, nil
+		}
+	}
+	return false, nil
+}
+
 // writeUserBudget sets (set=true) or removes one person's monthly budget.
 func writeUserBudget(ctx context.Context, exec routeExecutor, owner string, limit float64, set bool, now time.Time) error {
 	_, next := monthWindow(now)

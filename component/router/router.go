@@ -52,6 +52,10 @@ type Router struct {
 	ledger     chan CallRecord
 	ledgerOnce sync.Once
 
+	// auto caches the two reads Auto ranks on: the recent decisions it folds
+	// into signals, and each person's monthly budget state (auto_rank.go).
+	auto autoState
+
 	// ceilingCheck is the cost-ceiling probe the federation hop consults
 	// (epic memql#5096, design D4). It defaults to memql.CostCeilingReached
 	// and is a FIELD so a test can drive the refusal without mutating the
@@ -476,6 +480,16 @@ func (r *Router) resolveChain(ctx context.Context, req ResolveRequest, mod provi
 		if !ok {
 			break
 		}
+		// AUTO ORDERS THE GENERAL CHAINS (auto_rank.go): by measured speed and
+		// reliability, cost and quality, weighed by the cluster's balance and
+		// bent by the person's monthly budget. The walk over a reordered chain
+		// asks the cost ceiling before every vendor hop.
+		walkCtx := ctx
+		if ranked, note := r.autoRankChain(ctx, levelReq, effective, rule.Policy, chain, policies); note != "" {
+			chain = ranked
+			walkCtx = autoRankedContext(ctx)
+			report.noteConsidered("(auto)", "", note)
+		}
 
 		if key := strings.Join(chain, "\x00"); walked[key] {
 			report.noteConsidered("(rule "+rule.Name+")", "",
@@ -488,7 +502,7 @@ func (r *Router) resolveChain(ctx context.Context, req ResolveRequest, mod provi
 			for _, e := range removed {
 				report.noteConsidered(e, doorFor(e), "excluded by rule "+rule.Name)
 			}
-			winner, err := r.walkChain(ctx, levelReq, mod, chain, rule.Excludes, report, rule.Policy)
+			winner, err := r.walkChain(walkCtx, levelReq, mod, chain, rule.Excludes, report, rule.Policy)
 			if err != nil {
 				return nil, Resolved{}, err
 			}
@@ -797,7 +811,7 @@ func (r *Router) walkChain(
 		// NO candidates, so a per-candidate flag would leave sawLocalDoor
 		// false and let the next hop skip the ceiling entirely -- a silent
 		// paid call at exactly the moment the local door was shut.
-		if entryDoor == DoorFederation && sawLocalDoor {
+		if entryDoor == DoorFederation && (sawLocalDoor || isAutoRanked(ctx)) {
 			if reason, reached := r.ceilingReached(ctx); reached {
 				report.note(rawEntry, "the cost ceiling for this process has been reached")
 				return nil, r.refusalWith(report, work.RefusalCeilingReached, policyName, reason, airoute.Decision{

@@ -177,7 +177,7 @@ general shipped policies (`localFirst`, `fastLocalFirst`,
 | Speed | median latency of that source over the last 50 decisions for this level (`v1:router:call`) | neutral (0.5) |
 | Reliability | success ratio of that source over the same window, plus whether it is online and ready now | neutral (0.5); a source not ready now is dropped, as today |
 | Cost | estimated USD for a typical call at this level. Local and subscription apps are 0; vendors are priced from the provider record | a vendor with no price sorts last, as `federation:cheapest` already does |
-| Quality | a fixed capability rank for the level: vendor strongest > app at the level > largest local model, then smaller local models, using the existing `fleet:strongest` size ordering | from the ordering alone |
+| Quality | a fixed, level-aware rank: at quick tasks every source is nearly equal (a strong vendor model slightly ahead); at main work a strong vendor model leads, then an app and the strongest local model together; at reasoning a strong vendor model, then an app, then local models | from the rank alone |
 
 **The score.** Each signal is normalised to 0..1 across the candidates, and the
 score is `wSpeed*speed + wCost*(1-cost) + wReliability*reliability +
@@ -209,8 +209,17 @@ concept already declares the limit; nothing enforced it until now.
   saying the monthly budget is reached and when it resets.
 - **No budget:** recommended balance only.
 
-**Explainable.** The decision record keeps the ranked candidates with their
-scores in `considered`, so History can show why Auto chose what it did.
+**Ties keep the chain's own order**, which is local first: a cluster nobody has
+measured yet routes exactly as it did before Auto.
+
+**The cost ceiling still holds.** The guard asks the ceiling before a vendor
+hop only when a local door came first, because a chain that starts at a vendor
+is a decision an author made. A chain Auto reordered is not, so every vendor
+hop in it asks the ceiling.
+
+**Explainable.** The decision record keeps one `(auto)` entry in `considered`
+with every candidate's score and its four signals, the balance, and the budget
+state, so History can show why Auto chose what it did.
 
 ## Fleet capacity: the layer under every route
 
