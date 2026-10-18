@@ -14,7 +14,7 @@ import (
 )
 
 const queueFixture = `{"metadata":{"uid":"queue-1","resourceVersion":"42","generation":3},"spec":{"namespaceSelector":{"matchLabels":{"kubernetes.io/metadata.name":"memql-pipelines"}},"resourceGroups":[{"coveredResources":["cpu","memory","ephemeral-storage","pods"],"flavors":[{"name":"memql-background","resources":[{"name":"cpu","nominalQuota":"6.5"},{"name":"memory","nominalQuota":"22Gi"},{"name":"ephemeral-storage","nominalQuota":"80Gi"},{"name":"pods","nominalQuota":"6"}]}]}],"stopPolicy":"None","preemption":{"withinClusterQueue":"Never","reclaimWithinCohort":"Never","borrowWithinCohort":{"policy":"Never"}}},"status":{"conditions":[{"type":"Active","status":"True","observedGeneration":3}],"pendingWorkloads":2,"admittedWorkloads":1,"flavorsReservation":[{"name":"memql-background","resources":[{"name":"cpu","total":"260m"},{"name":"memory","total":"4160Mi"},{"name":"ephemeral-storage","total":"20Gi"},{"name":"pods","total":"1"}]}]}}`
-const policyFixture = `{"metadata":{"uid":"policy-1","resourceVersion":"7"},"data":{"cpuMilli":"6500","memoryMiB":"22528","diskMiB":"81920","jobs":"6","nodePool":"builds"}}`
+const policyFixture = `{"metadata":{"uid":"policy-1","resourceVersion":"7"},"spec":{"cpuMilli":6500,"memoryMiB":22528,"diskMiB":81920,"jobs":6,"nodePool":"builds"}}`
 const flavorFixture = `{"spec":{"nodeLabels":{"memql.io/pipeline-pool":"builds"},"nodeTaints":[{"key":"memql.io/pipeline-pool","value":"builds","effect":"NoSchedule"}]}}`
 
 type fakeAPI struct {
@@ -27,7 +27,7 @@ type fakeAPI struct {
 
 func fixture() (*Integration, *fakeAPI) {
 	api := &fakeAPI{queue: []byte(queueFixture), policy: []byte(policyFixture), flavor: []byte(flavorFixture)}
-	return &Integration{api: api, namespace: "memql"}, api
+	return &Integration{api: api}, api
 }
 func (a *fakeAPI) Do(_ context.Context, method, path, contentType string, body []byte) ([]byte, error) {
 	a.calls++
@@ -47,7 +47,7 @@ func (a *fakeAPI) Do(_ context.Context, method, path, contentType string, body [
 		return a.queue, nil
 	case flavorPath:
 		return a.flavor, nil
-	case "api/v1/namespaces/memql/configmaps/" + policyName:
+	case policyPath:
 		return a.policy, nil
 	}
 	return nil, fmt.Errorf("unexpected read %s", path)
@@ -99,6 +99,15 @@ func TestUnavailableOrOldStatusIsUnknownRatherThanZero(t *testing.T) {
 	require.NoError(t, err)
 	require.NoError(t, json.Unmarshal(nodes[0].Payload, &r))
 	require.False(t, r.Available)
+}
+func TestCapacityCannotBorrowFromACohort(t *testing.T) {
+	i, a := fixture()
+	a.queue = []byte(strings.Replace(queueFixture, `"spec":{`, `"spec":{"cohortName":"customer-services",`, 1))
+	_, _, _, err := i.snapshot(owner())
+	require.ErrorContains(t, err, "protected resource budget")
+	_, err = i.set(owner(), map[string]any{}, 0)
+	require.Error(t, err)
+	require.Empty(t, a.patches)
 }
 func TestRevisionIgnoresStatusButTracksSettings(t *testing.T) {
 	i, a := fixture()

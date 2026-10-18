@@ -1,13 +1,13 @@
 # Operator-owned maximum. Runtime edits cannot change this object.
-apiVersion: v1
-kind: ConfigMap
+apiVersion: capacity.memql.io/v1alpha1
+kind: BackgroundCapacityPolicy
 metadata:
   name: memql-background-capacity
-data:
-  cpuMilli: "2000"
-  memoryMiB: "8192"
-  diskMiB: "24576"
-  jobs: "2"
+spec:
+  cpuMilli: 2000
+  memoryMiB: 8192
+  diskMiB: 24576
+  jobs: 2
   nodePool: builds
 ---
 apiVersion: kueue.x-k8s.io/v1beta2

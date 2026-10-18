@@ -9,8 +9,6 @@ import (
 	"fmt"
 	"math/big"
 	"net/http"
-	"net/url"
-	"os"
 	"strconv"
 	"strings"
 	"time"
@@ -24,23 +22,21 @@ import (
 )
 
 const queuePath = "apis/kueue.x-k8s.io/v1beta2/clusterqueues/memql-background"
-const policyName = "memql-background-capacity"
+const policyPath = "apis/capacity.memql.io/v1alpha1/backgroundcapacitypolicies/memql-background-capacity"
 const flavorPath = "apis/kueue.x-k8s.io/v1beta2/resourceflavors/memql-background"
 
 type clusterAPI interface {
 	Do(context.Context, string, string, string, []byte) ([]byte, error)
 }
 type Integration struct {
-	api       clusterAPI
-	namespace string
+	api clusterAPI
 }
 
 func init() {
 	memql.RegisterPlugin("backgroundCapacity", func(memql.PluginContext) (memql.IntegrationProvider, error) {
 		api, err := deploycontrol.NewClusterAPI()
-		ns, readErr := os.ReadFile("/var/run/secrets/kubernetes.io/serviceaccount/namespace")
-		i := &Integration{namespace: strings.TrimSpace(string(ns))}
-		if err == nil && readErr == nil && i.namespace != "" {
+		i := &Integration{}
+		if err == nil {
 			i.api = api
 		}
 		return i, nil
@@ -59,9 +55,12 @@ type metadata struct {
 	Generation           int64
 	Annotations          map[string]string
 }
-type configMap struct {
+type capacityPolicy struct {
 	Metadata metadata
-	Data     map[string]string
+	Spec     struct {
+		Budget
+		NodePool string
+	}
 }
 type resource struct{ Name, NominalQuota string }
 type flavor struct {
@@ -81,7 +80,7 @@ type queue struct {
 		}
 		ResourceGroups []resourceGroup
 		StopPolicy     string
-		Cohort         string
+		CohortName     string
 		Preemption     struct {
 			WithinClusterQueue, ReclaimWithinCohort string
 			BorrowWithinCohort                      struct{ Policy string }
@@ -148,15 +147,15 @@ func (i *Integration) read(ctx context.Context, _ map[string]any, _ int) ([]memo
 	return result(r)
 }
 
-func (i *Integration) snapshot(ctx context.Context) (report, configMap, queue, error) {
-	var c configMap
+func (i *Integration) snapshot(ctx context.Context) (report, capacityPolicy, queue, error) {
+	var c capacityPolicy
 	var q queue
 	r := report{ObservedAt: time.Now().UTC().Format(time.RFC3339)}
-	fail := func(s string) (report, configMap, queue, error) { return r, c, q, fmt.Errorf("%s", s) }
+	fail := func(s string) (report, capacityPolicy, queue, error) { return r, c, q, fmt.Errorf("%s", s) }
 	if i.api == nil {
 		return fail("Background resource admission is not configured on this node.")
 	}
-	raw, err := i.api.Do(ctx, http.MethodGet, "api/v1/namespaces/"+url.PathEscape(i.namespace)+"/configmaps/"+policyName, "", nil)
+	raw, err := i.api.Do(ctx, http.MethodGet, policyPath, "", nil)
 	if err != nil || json.Unmarshal(raw, &c) != nil || c.Metadata.UID == "" || c.Metadata.ResourceVersion == "" {
 		return fail("The operator's background capacity ceiling could not be read.")
 	}
@@ -173,7 +172,7 @@ func (i *Integration) snapshot(ctx context.Context) (report, configMap, queue, e
 		return fail("The background queue does not match its protected resource budget.")
 	}
 	raw, err = i.api.Do(ctx, http.MethodGet, flavorPath, "", nil)
-	if err != nil || !dedicatedPool(raw, c.Data["nodePool"]) {
+	if err != nil || !dedicatedPool(raw, c.Spec.NodePool) {
 		return fail("The queue's dedicated background pool could not be verified.")
 	}
 	reserved := Budget{}
@@ -211,14 +210,12 @@ func (i *Integration) snapshot(ctx context.Context) (report, configMap, queue, e
 	return r, c, q, nil
 }
 
-func policyBudget(c configMap) (Budget, error) {
-	var b Budget
-	for key, target := range map[string]*int64{"cpuMilli": &b.CPUMilli, "memoryMiB": &b.MemoryMiB, "diskMiB": &b.DiskMiB, "jobs": &b.Jobs} {
-		n, err := strconv.ParseInt(c.Data[key], 10, 64)
-		if err != nil || n < 1 || n > 1<<40 {
+func policyBudget(c capacityPolicy) (Budget, error) {
+	b := c.Spec.Budget
+	for _, n := range []int64{b.CPUMilli, b.MemoryMiB, b.DiskMiB, b.Jobs} {
+		if n < 1 || n > 1<<40 {
 			return b, fmt.Errorf("invalid ceiling")
 		}
-		*target = n
 	}
 	return b, nil
 }
@@ -228,7 +225,7 @@ func queueBudget(q queue) (Budget, error) {
 	if len(selector.MatchLabels) != 1 || selector.MatchLabels["kubernetes.io/metadata.name"] != "memql-pipelines" || len(selector.MatchExpressions) != 0 {
 		return b, fmt.Errorf("unexpected queue namespace")
 	}
-	if len(q.Spec.ResourceGroups) != 1 || len(q.Spec.ResourceGroups[0].Flavors) != 1 || q.Spec.ResourceGroups[0].Flavors[0].Name != "memql-background" || q.Spec.Cohort != "" {
+	if len(q.Spec.ResourceGroups) != 1 || len(q.Spec.ResourceGroups[0].Flavors) != 1 || q.Spec.ResourceGroups[0].Flavors[0].Name != "memql-background" || q.Spec.CohortName != "" {
 		return b, fmt.Errorf("unexpected resource pool")
 	}
 	if q.Spec.StopPolicy != "" && q.Spec.StopPolicy != "None" && q.Spec.StopPolicy != "Hold" {

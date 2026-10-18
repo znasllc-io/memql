@@ -5,12 +5,15 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"net/url"
 	"os"
 	"os/exec"
 	"strings"
 	"testing"
 	"time"
+
+	"gopkg.in/yaml.v3"
 )
 
 // This opt-in proof uses the installed controller and its actual namespace-
@@ -98,6 +101,55 @@ func TestLocalQueuePreservesExecutionAllowance(t *testing.T) {
 		}}}}},
 	})
 	create("LocalQueue", name, namespace, object{"clusterQueue": name})
+	// Exercise the shipped independent ceiling policy, under disposable names.
+	// The real queue and its operator configuration remain untouched.
+	parameter := name + "-capacity"
+	run(object{"apiVersion": "capacity.memql.io/v1alpha1", "kind": "BackgroundCapacityPolicy", "metadata": object{"name": parameter}, "spec": object{
+		"cpuMilli": 500, "memoryMiB": 128, "diskMiB": 128, "jobs": 1, "nodePool": "builds",
+	}}, "create", "-f", "-")
+	created = append(created, struct{ kind, name, namespace string }{"BackgroundCapacityPolicy", parameter, ""})
+	policy, err := os.ReadFile("../../k8s/components/pipelines-capacity/ceiling-policy.yaml")
+	if err != nil {
+		t.Fatal(err)
+	}
+	decoder := yaml.NewDecoder(strings.NewReader(strings.ReplaceAll(string(policy), "memql-background", name)))
+	for {
+		var o object
+		if err := decoder.Decode(&o); err == io.EOF {
+			break
+		} else if err != nil {
+			t.Fatal(err)
+		}
+		run(o, "create", "-f", "-")
+		created = append(created, struct{ kind, name, namespace string }{o["kind"].(string), name + "-ceiling", ""})
+	}
+	// Policy publication is asynchronous. Only its specific rejection is proof
+	// of enforcement; an unrelated API failure never counts as a denied edit.
+	denyPatch := `[ {"op":"replace","path":"/spec/resourceGroups/0/flavors/0/resources/0/nominalQuota","value":"501m"} ]`
+	for {
+		out, err := command(nil, "patch", "clusterqueue", name, "--type=json", "--dry-run=server", "-p", denyPatch)
+		if err != nil && strings.Contains(string(out), "protected background capacity ceiling") {
+			break
+		}
+		select {
+		case <-ctx.Done():
+			t.Fatalf("independent ceiling was not enforced: %v: %s", err, out)
+		case <-time.After(time.Second):
+		}
+	}
+	for _, patch := range []string{
+		`[{"op":"replace","path":"/spec/resourceGroups/0/flavors/0/resources/1/nominalQuota","value":"129Mi"}]`,
+		`[{"op":"replace","path":"/spec/resourceGroups/0/flavors/0/resources/2/nominalQuota","value":"129Mi"}]`,
+		`[{"op":"replace","path":"/spec/resourceGroups/0/flavors/0/resources/3/nominalQuota","value":"2"}]`,
+		`[{"op":"replace","path":"/spec/stopPolicy","value":"HoldAndDrain"}]`,
+		`[{"op":"add","path":"/spec/cohortName","value":"customer-services"}]`,
+	} {
+		out, err := command(nil, "patch", "clusterqueue", name, "--type=json", "--dry-run=server", "-p", patch)
+		if err == nil || (!strings.Contains(string(out), "protected background capacity ceiling") && !strings.Contains(string(out), "cannot interrupt admitted work") && !strings.Contains(string(out), "cannot borrow capacity from customer services")) {
+			t.Fatalf("unsafe change was not rejected by the shipped policy: %v: %s", err, out)
+		}
+	}
+	run(nil, "patch", "clusterqueue", name, "--type=merge", "--dry-run=server", "-p", `{"spec":{"stopPolicy":"None"}}`)
 	job := func(seconds, deadline int) object {
 		return object{"suspend": true, "backoffLimit": 0, "activeDeadlineSeconds": deadline, "template": object{"spec": object{
 			"restartPolicy": "Never", "automountServiceAccountToken": false,

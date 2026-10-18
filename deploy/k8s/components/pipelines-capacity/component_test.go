@@ -63,7 +63,7 @@ func TestAdmissionComponentRendersSameBoundariesOnEveryTarget(t *testing.T) {
 					t.Fatal(err)
 				}
 				switch o.Kind + "/" + o.Metadata.Name {
-				case "ClusterQueue/memql-background", "ResourceFlavor/memql-background":
+				case "ClusterQueue/memql-background", "ResourceFlavor/memql-background", "BackgroundCapacityPolicy/memql-background-capacity":
 					if o.Metadata.Namespace != "" {
 						t.Fatalf("cluster-scoped %s rendered in namespace %s", o.Kind, o.Metadata.Namespace)
 					}
@@ -92,7 +92,7 @@ func TestAdmissionComponentRendersSameBoundariesOnEveryTarget(t *testing.T) {
 					}
 				}
 			}
-			if len(found) != 3 {
+			if len(found) != 4 {
 				t.Fatalf("incomplete admission objects: %v", found)
 			}
 		})

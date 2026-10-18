@@ -20,6 +20,16 @@
           "kind": "ResourceFlavor"
         }
       }
+    },
+    "/apis/capacity.memql.io/v1alpha1/backgroundcapacitypolicies": {
+      "get": {
+        "x-kubernetes-action": "list",
+        "x-kubernetes-group-version-kind": {
+          "group": "capacity.memql.io",
+          "version": "v1alpha1",
+          "kind": "BackgroundCapacityPolicy"
+        }
+      }
     }
   }
 }

@@ -2,7 +2,7 @@
 
 Optional resource admission for the existing dedicated build pool. The Cluster
 app exposes reservations and lets a cluster owner change the active budget
-within a separate operator-owned ConfigMap ceiling. Neither control changes
+within a separate operator-owned typed capacity policy. Neither control changes
 machine size, node count or autoscaler limits.
 
 Jobs enter suspended, with their complete memory and temporary-disk
@@ -26,9 +26,8 @@ commands out of their service pods.
    and ensure every LimitRange memory/disk defaultRequest equals its limit.
    Overlay patches run after component patches and must preserve that equality.
 5. Render and verify cluster-scoped queues/flavors have no namespace. The
-   included OpenAPI paths teach Kustomize their scope; the mesh's existing
-   unsetOnly namespace transformer places the ConfigMap and Role in `memql`.
-6. The mesh AppProject must allow the queue/flavor, admission-policy and
+   included OpenAPI paths teach Kustomize their scope; the capacity policy also remains cluster-scoped.
+6. The mesh AppProject must allow the queue/flavor, capacity-policy, admission-policy and
    capacity RBAC kinds. Delegate only this ClusterQueue's four `nominalQuota`
    fields, `/spec/stopPolicy` and the `memql.io/capacity-change` annotation via
    Argo `ignoreDifferences`, with `RespectIgnoreDifferences=true`. Keep pool
@@ -42,7 +41,7 @@ commands out of their service pods.
    locally before enabling production. Check the rendered LimitRange and
    queue against the actual pool, including native sidecars and system Pods.
 
-The ConfigMap ceiling and ValidatingAdmissionPolicy are not writable by the
+The capacity policy and ValidatingAdmissionPolicy are not writable by the
 engine account. Kubernetes independently checks each budget change, including
 a policy change racing the UI. Saves compare the queue UID and resource version
 and are never automatically retried after an uncertain write.
