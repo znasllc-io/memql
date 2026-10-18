@@ -101,6 +101,11 @@ func TestModelsTuningReport_AModelPartlyOnTheCPUIsCalledOut(t *testing.T) {
 		Loaded: []models.Loaded{
 			{ID: "qwen3.8:27b", SizeBytes: 18_400_000_000, VRAMBytes: 6_500_000_000, ContextLength: 16384, ExpiresAt: reportNow.Add(time.Hour)},
 		},
+		// ollama is on PATH, so the bare name is the command that runs. Both
+		// lookups are set so the output does not depend on this machine's PATH
+		// or on whether a managed runtime is installed.
+		LookPath:      func(string) (string, error) { return "/usr/local/bin/ollama", nil },
+		ManagedOllama: func() string { return "" },
 	})
 	for _, want := range []string{
 		"35% on the GPU",
@@ -245,5 +250,72 @@ func TestManagedOllamaBinary_IsWhereTheRuntimeInstallsIt(t *testing.T) {
 	}
 	if got := managedOllamaBinary(); got != bin {
 		t.Errorf("managedOllamaBinary = %q, want %q", got, bin)
+	}
+}
+
+// noneServedLine is the kept section's sentence when models.resident has
+// entries and this machine serves none of them. The reasons are printed above
+// it (the hardware floor, the notes) or below it (the problems line).
+const noneServedLine = "Kept loaded: none of the models.resident entries is served by this machine; the reasons are above and below."
+
+// TestModelsTuningReport_OnlyBlockedEntriesSaysNoneIsServed. An entry for a
+// model models.allow does not list stands in the policy but nothing here
+// serves it. The kept section must not say nothing is configured: the owner
+// wrote an entry, and "add models.resident" would tell them to write one.
+func TestModelsTuningReport_OnlyBlockedEntriesSaysNoneIsServed(t *testing.T) {
+	p := tuningPolicy(t, "models:\n  allow:\n    - qwen3-embedding:0.6b\n  resident:\n    - id: qwen3.8:27b\n      keep_alive: 2h\n")
+	blocked := offeredModel("qwen3.8:27b", models.Attributes{ContextWindow: 262144, MaxConcurrent: 2})
+	blocked.Allowed = false
+	blocked.KeepAlive = models.KeepAlive{Set: true, For: 2 * time.Hour}
+	out := renderTuning(t, servingInventory(blocked), tuningReport{
+		Parallel: 2, ParallelSource: "the default",
+		Problems: p.ModelsTuningProblems(), Resident: p.ModelsTuning().Resident,
+	})
+	if !strings.Contains(out, noneServedLine) {
+		t.Errorf("an entry nothing here serves must be said so:\n%s", out)
+	}
+	if strings.Contains(out, "nothing is configured to stay loaded") || strings.Contains(out, "Add models.resident") {
+		t.Errorf("the owner wrote an entry, so the report must not say nothing is configured:\n%s", out)
+	}
+	if !strings.Contains(out, "models.resident names qwen3.8:27b, which models.allow does not list") {
+		t.Errorf("the problems line must still name the blocked entry:\n%s", out)
+	}
+}
+
+// TestModelsTuningReport_BelowTheFloorAllowedEntryIsNotKept. The hardware floor
+// decides whether this machine serves a model at all (Inventory.Advertised). On
+// a machine below it an allowed entry is inert, so it is not listed as kept.
+func TestModelsTuningReport_BelowTheFloorAllowedEntryIsNotKept(t *testing.T) {
+	p := tuningPolicy(t, "models:\n  allow:\n    - qwen3.8:27b\n  resident:\n    - id: qwen3.8:27b\n      keep_alive: 2h\n")
+	allowed := offeredModel("qwen3.8:27b", models.Attributes{ContextWindow: 262144, MaxConcurrent: 2})
+	allowed.KeepAlive = models.KeepAlive{Set: true, For: 2 * time.Hour}
+	inv := models.Inventory{
+		Floor:  models.FloorVerdict{Reason: "this machine has 8 GB of unified memory; the floor is 16 GB."},
+		Models: []models.Info{allowed},
+	}
+	out := renderTuning(t, inv, tuningReport{
+		Parallel: 2, ParallelSource: "the default", Resident: p.ModelsTuning().Resident,
+	})
+	if strings.Contains(out, "Kept loaded (policy.yaml models.resident):") {
+		t.Errorf("a machine below the hardware floor serves nothing, so nothing is kept:\n%s", out)
+	}
+	if !strings.Contains(out, noneServedLine) {
+		t.Errorf("an allowed entry below the floor must be said to be unserved:\n%s", out)
+	}
+}
+
+// TestModelsTuningReport_TrulyEmptyResidentKeepsTheOldSentence. With no entry in
+// models.resident the kept section says what Ollama does instead and how to add
+// one. The new sentence is for entries that nothing serves, and must not show.
+func TestModelsTuningReport_TrulyEmptyResidentKeepsTheOldSentence(t *testing.T) {
+	inv := servingInventory(offeredModel("llama3.1:8b", models.Attributes{MaxConcurrent: 1}))
+	out := renderTuning(t, inv, tuningReport{Parallel: 1, ParallelSource: "the default"})
+	for _, want := range []string{"nothing is configured to stay loaded", "Add models.resident to policy.yaml to change"} {
+		if !strings.Contains(out, want) {
+			t.Errorf("with models.resident empty the report must say %q:\n%s", want, out)
+		}
+	}
+	if strings.Contains(out, "none of the models.resident entries") {
+		t.Errorf("with no entry written there is none to say is unserved:\n%s", out)
 	}
 }

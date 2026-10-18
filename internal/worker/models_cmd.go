@@ -88,7 +88,7 @@ func handleModels(args []string) {
 		n, source := d.ParallelSource(tuning.Parallel)
 		loaded, loadedErr := d.Loaded(ctx)
 		printModelTuning(os.Stdout, inv, tuningReport{
-			Parallel: n, ParallelSource: source, Problems: problems,
+			Parallel: n, ParallelSource: source, Problems: problems, Resident: tuning.Resident,
 			Loaded: loaded, LoadedErr: loadedErr, Now: time.Now(),
 		})
 	}

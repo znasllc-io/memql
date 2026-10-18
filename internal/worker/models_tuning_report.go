@@ -30,6 +30,9 @@ type tuningReport struct {
 	ParallelSource string
 	// Problems are policy.ModelsTuningProblems.
 	Problems []string
+	// Resident is the entries models.resident stands on (policy.ModelsTuning),
+	// so the kept section can tell an empty setting from one nothing here serves.
+	Resident []models.Resident
 	// Loaded is what Ollama holds now; LoadedErr is why it could not say.
 	Loaded    []models.Loaded
 	LoadedErr error
@@ -86,20 +89,18 @@ func printModelTuning(w io.Writer, inv models.Inventory, r tuningReport) {
 	fmt.Fprintf(w, "  Requests per model: %d, from %s.\n", r.Parallel, r.ParallelSource)
 	fmt.Fprintln(w, "")
 
-	// Only what this machine serves. An entry for a model models.allow does
-	// not list is inert -- no call is served for it, so nothing keeps it
-	// loaded -- and the problems line says so.
+	// Only what this machine serves: Advertised is what it offers, which is
+	// allowed by models.allow and only above the hardware floor. An entry for
+	// any other model is inert -- no call is served for it, so nothing keeps it
+	// loaded.
 	var kept []models.Info
-	for _, m := range inv.Models {
-		if m.Allowed && (m.KeepAlive.Set || m.WorkingContext > 0) {
+	for _, m := range inv.Advertised() {
+		if m.KeepAlive.Set || m.WorkingContext > 0 {
 			kept = append(kept, m)
 		}
 	}
-	if len(kept) == 0 {
-		fmt.Fprintln(w, "  Kept loaded: nothing is configured to stay loaded. Ollama unloads each model")
-		fmt.Fprintln(w, "  five minutes after its last call. Add models.resident to policy.yaml to change")
-		fmt.Fprintln(w, "  that, then send the worker a SIGHUP.")
-	} else {
+	switch {
+	case len(kept) > 0:
 		fmt.Fprintln(w, "  Kept loaded (policy.yaml models.resident):")
 		for _, m := range kept {
 			var parts []string
@@ -111,6 +112,14 @@ func printModelTuning(w io.Writer, inv models.Inventory, r tuningReport) {
 			}
 			fmt.Fprintf(w, "    %-30s %s\n", m.ID, strings.Join(parts, ", "))
 		}
+	case len(r.Resident) > 0:
+		// An entry was written and this machine serves none of them. Its reason
+		// is printed above (the floor, the notes) or below (the problems line).
+		fmt.Fprintln(w, "  Kept loaded: none of the models.resident entries is served by this machine; the reasons are above and below.")
+	default:
+		fmt.Fprintln(w, "  Kept loaded: nothing is configured to stay loaded. Ollama unloads each model")
+		fmt.Fprintln(w, "  five minutes after its last call. Add models.resident to policy.yaml to change")
+		fmt.Fprintln(w, "  that, then send the worker a SIGHUP.")
 	}
 	fmt.Fprintln(w, "")
 
