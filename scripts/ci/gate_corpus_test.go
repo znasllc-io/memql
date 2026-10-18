@@ -53,10 +53,9 @@ import (
 	"testing"
 )
 
-// allowListDeclarationFile declares coverageAllowList. It is excluded from the
-// corpus: every entry names its own pattern, so including it would make every
-// exemption "mentioned" by the act of being written down.
-const allowListDeclarationFile = "scripts/ci/path_bucket_coverage_test.go"
+// The path coverage guard is excluded from its own diagnostic corpus so its
+// remediation and examples cannot count as evidence of another gate reading a file.
+const coverageGuardFile = "scripts/ci/path_bucket_coverage_test.go"
 
 // gateCorpus is the corpus, read once and kept in memory.
 type gateCorpus struct {
@@ -67,7 +66,7 @@ type gateCorpus struct {
 // isGateCorpusMember reports whether a tracked path belongs to the corpus.
 func isGateCorpusMember(path string) bool {
 	switch {
-	case path == "Makefile":
+	case path == "Makefile" || path == "memql-package.yaml":
 		return true
 	case strings.HasPrefix(path, ".github/workflows/"):
 		return true
@@ -84,7 +83,7 @@ func loadGateCorpus(t *testing.T) *gateCorpus {
 	c := &gateCorpus{body: map[string]string{}}
 	sawDeclaration := false
 	for _, f := range trackedFiles(t) {
-		if f == allowListDeclarationFile {
+		if f == coverageGuardFile {
 			sawDeclaration = true
 			continue
 		}
@@ -109,10 +108,10 @@ func loadGateCorpus(t *testing.T) *gateCorpus {
 			"(memql#3451)")
 	}
 	if !sawDeclaration {
-		t.Fatalf("allowListDeclarationFile is %q, which git does not track. The constant has "+
+		t.Fatalf("coverageGuardFile is %q, which git does not track. The constant has "+
 			"gone stale after a rename: until it is updated the allow list is scanned against "+
 			"itself, and every entry appears to be mentioned by its own declaration.",
-			allowListDeclarationFile)
+			coverageGuardFile)
 	}
 	return c
 }
