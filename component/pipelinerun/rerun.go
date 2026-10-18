@@ -68,7 +68,7 @@ func (i *Integration) Rerun(ctx context.Context, runID string, failedOnly bool) 
 	if p == nil {
 		return Run{}, fmt.Errorf("pipelines: run %q names a pipeline that no longer exists", runID)
 	}
-	if !p.Active() && original.Event != pipelines.EventManual {
+	if !p.Active() && original.Event != pipelines.EventManual && original.Event != pipelines.EventRelease {
 		return Run{}, pipelines.Refuse(pipelines.CodeDisconnected, "",
 			"This run's pipeline is disconnected, so it opens no runs. Reconnect it to run this commit again.")
 	}
@@ -77,7 +77,15 @@ func (i *Integration) Rerun(ctx context.Context, runID string, failedOnly bool) 
 			return Run{}, firstErr(err, refusal)
 		}
 	}
-	res, err := i.open(ctx, d, *p, rerunOf(*original, "", failedOnly))
+	opening := rerunOf(*original, "", failedOnly)
+	if original.Event == pipelines.EventRelease {
+		// This owner request authorizes one release attempt, just like
+		// RunRelease. Persist its origin so another driver replica can admit
+		// it while delivery stays disconnected. Webhook rerequests keep
+		// TriggerRerun and cannot inherit the original's manual authorization.
+		opening.Trigger = TriggerManual
+	}
+	res, err := i.open(ctx, d, *p, opening)
 	if err != nil {
 		return Run{}, err
 	}
