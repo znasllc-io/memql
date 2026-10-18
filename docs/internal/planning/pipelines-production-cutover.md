@@ -492,3 +492,31 @@ is not a passing production check. Record source SHA, executing release,
 installation, run/check IDs, output checksums, failure/recovery observations
 and rollback version. Re-enable the previous trigger path if a replacement
 fails during the observation period, while preventing competing publishers.
+
+
+## v0.29.29 qualification candidate
+
+The next native release combines the complete editor-host matrix, the verified
+DB-image target, the editor-site browser suite and release/main/weekly SBOM
+inventory. Both core Linux host versions pass with the temporary HOME guard
+preserved; the short profile path has a real Unix-socket regression. Native
+macOS execution must pass before this candidate qualifies.
+
+The failed v0.29.28 release was cancelled without a candidate or publication.
+Its Work package hit the 180-second package alarm. A focused unchanged run on
+the same bounded AKS runner passed all 809 cases in 176.217 seconds, with no
+skips, OOM events or material CPU throttling; its retained report was read back
+and checked by size and SHA-256. Local baseline, source-scan memoization and a
+third CPU measured 93.590, 93.087 and 94.298 seconds respectively. The latter
+two changes are not adopted. Only Work's package ceiling becomes 300 seconds;
+its operation deadlines, every test, fresh database, resource reservations and
+overall lane deadline remain. Passing execution exits immediately.
+
+Four already-disabled Actions definitions are removed here: deploy-gate image
+validation and the two daily ruleset audits have installed native receipts;
+the two live placeholders had no runs and only refused absent prerequisites.
+No live-provider qualification is claimed. Required `ci-required` protection
+remains until the native App's exact PR and merge-candidate evidence qualifies
+its replacement. Consolidate this candidate before one full release pass;
+verify publication receipts, GitOps health and public behavior before closing
+the cutover issues or removing the remaining workflows.
