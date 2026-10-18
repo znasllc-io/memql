@@ -268,7 +268,7 @@ func TestAFailureApprovalHashesTheSubjectItStores(t *testing.T) {
 		kind    string
 	}{
 		{"feedback, a full context window", "prompt is too long: 216000 tokens > 200000 maximum", nil, work.ApprovalKindFeedback},
-		{"budget, a spent balance", "429 You exceeded your current quota (insufficient_quota)", nil, work.ApprovalKindBudget},
+		{"budget, a spent balance", "429 You exceeded your current quota (insufficient_quota)", nil, work.ApprovalKindFeedback},
 		{"planReview, a precondition miss", "the check did not hold", func(r *AutomationExecution) { r.PreconditionMissed = true }, work.ApprovalKindPlanReview},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
@@ -620,8 +620,8 @@ func TestAnExhaustedBudgetAsksAboutMoneyRatherThanRetrying(t *testing.T) {
 		t.Fatalf("no approval was raised, so nobody was told the money ran out: %v", calls)
 	}
 	_, approval := argsOf(t, lastCallNamed(t, calls, "createWorkApproval"))
-	if approval["kind"] != work.ApprovalKindBudget {
-		t.Fatalf("approval kind = %v, want %q", approval["kind"], work.ApprovalKindBudget)
+	if approval["kind"] != work.ApprovalKindFeedback {
+		t.Fatalf("approval kind = %v, want %q", approval["kind"], work.ApprovalKindFeedback)
 	}
 	_, args := argsOf(t, lastCallNamed(t, calls, "updateWorkRun"))
 	waiting, _ := args["waitingOn"].(map[string]any)

@@ -240,7 +240,7 @@ func (e *MemQLEngine) PrepareWorkContinuation(ctx context.Context, request Check
 		BareShortId(stringField(a, "decidedBy")) == BareShortId(run.OwnerUserId) &&
 		WorkPermissionGuidance(kind, subject, answer, stringField(a, "artifactHash"))
 	if BareShortId(stringField(a, "runId")) != BareShortId(run.RunId) || stringField(a, "stepKey") != request.StepKey ||
-		!((kind == "feedback" && (decision == "answered" || (decision == "" && work.OptionalFeedbackContinued(a, time.Now())))) || (kind == "scopeElevation" && decision == "approved") || (kind == "budget" && decision == "approved") || permissionGuidance) {
+		!((kind == "feedback" && (decision == "answered" || (decision == "" && work.OptionalFeedbackContinued(a, time.Now())))) || (kind == "scopeElevation" && decision == "approved") || permissionGuidance) {
 		return nil, fmt.Errorf("the human decision does not authorize this continuation")
 	}
 	checkpoints, err := read("workContinuationForOwnerRun", map[string]any{"runId": run.RunId, "stepKey": request.StepKey})
@@ -264,7 +264,11 @@ func (e *MemQLEngine) PrepareWorkContinuation(ctx context.Context, request Check
 		return nil, err
 	}
 	checkpointID := BareShortId(stringField(checkpoints[0], "id"))
-	modelCheckpoint := kind == "feedback" && work.IsModelCallCheckpoint(subject)
+	modelCheckpoint := kind == "feedback" && (work.IsModelCallCheckpoint(subject) || work.IsProgressFeedback(subject))
+	if work.IsProgressFeedback(subject) && (subject["continuationAllowed"] == false || work.ArtifactHash(subject) != stringField(a, "artifactHash") || BareShortId(stringField(a, "decidedBy")) != BareShortId(run.OwnerUserId)) {
+		return nil, fmt.Errorf("the progress decision changed or cannot continue work")
+	}
+
 	if modelCheckpoint {
 		answer, _ := a["answer"].(map[string]any)
 		feedback, _ := answer["feedback"].(string)
@@ -273,7 +277,7 @@ func (e *MemQLEngine) PrepareWorkContinuation(ctx context.Context, request Check
 			return nil, fmt.Errorf("the provider checkpoint has no retry or guidance answer")
 		}
 	}
-	if kind == "budget" || modelCheckpoint {
+	if modelCheckpoint {
 		if stringField(subject, "resumeKind") != "checkpoint" || BareShortId(stringField(subject, "continuationId")) != checkpointID {
 			return nil, fmt.Errorf("the decision does not name this saved checkpoint")
 		}

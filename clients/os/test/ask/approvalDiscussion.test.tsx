@@ -344,3 +344,17 @@ it.each(["answered", "different approval"])("refuses an edited retry when reopen
   expect(session.getSnapshot().draft).toBe("Keep this note"); expect(session.send("Do not execute", null)).toBe(false);
   expect(transport.ask).not.toHaveBeenCalled(); expect(transport.approvalMessage).not.toHaveBeenCalled(); session.dispose();
 });
+
+it("does not offer endless continuation after feedback meets an overall limit", async () => {
+  const { transport, session } = setup();
+  await session.discussApproval("approval");
+  transport.approvalGuidance.mockImplementationOnce(async () => {
+    transport.discussApproval.mockResolvedValue({ ...context, canSendGuidance: false });
+    return { runResumed: false, runStopped: true, resumeError: "" };
+  });
+  session.setDraft("Use the saved source.");
+  expect(await session.sendGuidance()).toBe(true);
+  expect(session.getSnapshot().guidanceRetry).toBeNull();
+  expect(session.getSnapshot().guidanceNotice).toBe("Your feedback was saved. This work has stopped at its overall limit.");
+  session.dispose();
+});

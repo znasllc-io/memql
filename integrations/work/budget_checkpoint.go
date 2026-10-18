@@ -18,8 +18,13 @@ func (i *Integration) PauseWorkForBudget(ctx context.Context, ceiling *memql.Run
 		return "", fmt.Errorf("budget checkpoint must belong to this execution")
 	}
 	b := ceiling.Breach
-	req := work.BudgetApproval(run.RunId, run.StepKey, work.CeilingBreach{Ceiling: b.Ceiling, Limit: b.Limit, Actual: b.Actual, Reason: b.Reason}, i.clock(), DefaultApprovalTTL)
+	req, err := i.progressFeedback(ownerActor(ctx, run.OwnerUserId), run.RunId, run.StepKey, work.CeilingBreach{Ceiling: b.Ceiling, Limit: b.Limit, Actual: b.Actual, Reason: b.Reason}, work.Spent{
+		Tokens: ceiling.Spent.Tokens, Cost: ceiling.Spent.Cost, ModelCalls: ceiling.Spent.ModelCalls, WallClockMs: ceiling.Spent.WallClockMs,
+	})
+	if err != nil {
+		return "", err
+	}
 	req.Subject["resumeKind"], req.Subject["continuationId"] = "checkpoint", checkpoint
 	return i.parkHumanDecisionWithBudget(ctx, run.OwnerUserId, run.RunId, req.Kind, req.Subject,
-		"This run reached its "+b.Ceiling+" ceiling. Raise it and carry on, or stop the run?", nil, req.ExpiresAt, ceiling)
+		req.Question, req.Options, req.ExpiresAt, ceiling)
 }

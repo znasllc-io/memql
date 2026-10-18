@@ -103,8 +103,16 @@ func TestWorkDBBudgetCheckpointResumesNestedAgentOnAnotherReplica(t *testing.T) 
 			peers := []*work.Integration{}
 			triggers := []*workTemplateTrigger{}
 			for n, e := range []*memql.MemQLEngine{writer, reader} {
-				wi := work.New(e, e.Logger, func() *bun.DB { return db })
-				wi.SetGateDB(func() *sql.DB { return gates })
+				var wi *work.Integration
+				for _, plugin := range memql.RegisteredPlugins() {
+					if plugin.Name != "work" {
+						continue
+					}
+					provider, err := plugin.Factory(memql.PluginContext{Engine: e, Logger: e.Logger, BunDB: func() *bun.DB { return db }, GateDB: func() *sql.DB { return gates }, AdmitSourceRow: memql.AdmitSourceRow})
+					require.NoError(t, err)
+					wi = provider.(*work.Integration)
+				}
+				require.NotNil(t, wi)
 				require.NoError(t, e.RegisterIntegration(wi))
 				peers = append(peers, wi)
 				ai := agents.New(e.Agents(), e)
@@ -129,9 +137,9 @@ func TestWorkDBBudgetCheckpointResumesNestedAgentOnAnotherReplica(t *testing.T) 
 			write := func(name string, args map[string]any) {
 				templateMutation(t, writer, auth.ContextWithInternalOrigin(person), name, args)
 			}
-			write("createWorkGoal", map[string]any{"goalId": goalID, "statement": "Synthetic budget checkpoint", "origin": "user", "ceilings": map[string]any{"wallClockMs": 600000, "maxModelCalls": 10, "maxRetries": 3}})
+			write("createWorkGoal", map[string]any{"goalId": goalID, "statement": "Synthetic budget checkpoint", "origin": "user", "ceilings": map[string]any{"wallClockMs": 7200000, "maxModelCalls": 96, "maxRetries": 3}})
 			write("createWorkRun", map[string]any{"runId": runID, "goalId": goalID, "automationName": "parent", "templateFingerprint": triggers[0].template.members["parent"].DefinitionFingerprint(id.New()), "mode": "live", "status": "running", "startedAt": time.Now().Add(-10 * time.Minute).UTC().Format(time.RFC3339Nano), "spent": map[string]any{"retries": 2, "events": 7}})
-			write("updateWorkRun", map[string]any{"runId": runID, "spent": map[string]any{"retries": 2, "events": 7}})
+			write("updateWorkRun", map[string]any{"runId": runID, "classification": map[string]any{"workload": "lookup"}, "spent": map[string]any{"retries": 2, "events": 7}})
 			if mode == "checkpoint-write-failure" {
 				name := "budgetfail" + strings.ToLower(key)
 				_, err := db.ExecContext(person, `CREATE FUNCTION `+name+`() RETURNS trigger AS $$ BEGIN IF NEW.concept='v1:work:observation' AND NEW.payload->>'runId'='v1:work:run:`+runID+`' AND NEW.payload->'data'->>'continuation'='true' THEN RAISE EXCEPTION 'synthetic checkpoint write failure'; END IF; RETURN NEW; END $$ LANGUAGE plpgsql`)
@@ -153,11 +161,10 @@ func TestWorkDBBudgetCheckpointResumesNestedAgentOnAnotherReplica(t *testing.T) 
 				runners[0].beforeBudget = func(context.Context) { write("updateWorkGoal", map[string]any{"goalId": goalID, "status": "closed"}) }
 			}
 			var approval string
-			newLimit := 3600000
 			decide := func() {
 				for _, cap := range peers[1].Capabilities() {
 					if cap.Name == "decideApproval" {
-						_, err := cap.Handler(person, map[string]any{"approvalId": approval, "decision": "approved", "answer": map[string]any{"newLimit": newLimit}}, 0)
+						_, err := cap.Handler(person, map[string]any{"approvalId": approval, "decision": "answered", "answer": map[string]any{"value": "retry"}}, 0)
 						require.NoError(t, err)
 						return
 					}
@@ -270,7 +277,6 @@ func TestWorkDBBudgetCheckpointResumesNestedAgentOnAnotherReplica(t *testing.T) 
 				require.NotEqual(t, approval, secondWait.ApprovalID)
 				oldApproval := approval
 				approval = secondWait.ApprovalID
-				newLimit = 7200000
 				decide()
 				j := load(writer, runID)
 				require.Equal(t, approval, j.HumanResumeId)

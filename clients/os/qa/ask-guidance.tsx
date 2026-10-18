@@ -7,30 +7,30 @@ import "../src/styles/index.css";
 
 // Synthetic source-only fixture. No live connection or model call.
 const params = new URLSearchParams(location.search);
-const budget = params.has("budget");
+const progress = params.has("progress");
 document.documentElement.dataset.theme = params.get("mode") === "light" ? "light" : "dark";
 document.documentElement.dataset.osTheme = "graphite";
 applyPackStyles([]);
 let turns: AskTurn[] = Array.from({ length: params.get("many") ? 4 : 1 }, (_, index) => ({
-  id: `turn-${index}`, runId: `run-${index}`, guidanceEpoch: `epoch-${index}`, canGuideWork: !budget,
+  id: `turn-${index}`, runId: `run-${index}`, guidanceEpoch: `epoch-${index}`, canGuideWork: !progress,
   prompt: "Review the service report and prepare the requested changes.", workTitle: ["Review service report", "Check a longer report title with useful context", "Prepare the review", "Verify the result"][index],
-  answer: "I’ll work through the report.", acknowledgement: "I’ll work through the report.", background: true, state: budget ? "waiting" : "queued", workStatus: budget ? "awaiting_approval" : "running", startedAt: new Date().toISOString(), activity: [],
+  answer: "I’ll work through the report.", acknowledgement: "I’ll work through the report.", background: true, state: progress ? "waiting" : "queued", workStatus: progress ? "awaiting_approval" : "running", startedAt: new Date().toISOString(), activity: [],
 }));
 const scene = params.get("scene");
 if (scene === "empty") turns = [];
 if (scene === "pending" || scene === "quick") turns = [{ ...turns[0]!, prompt: "Hola", answer: scene === "quick" ? "¡Hola! ¿Cómo estás?" : "", acknowledgement: undefined, background: false, workload: "quick", state: scene === "quick" ? "done" : "queued", workStatus: scene === "quick" ? "succeeded" : "compiling" }];
 if (scene === "error") turns = [{ ...turns[0]!, state: "error", error: "The model is unavailable. Try again when it is connected.", endedAt: new Date().toISOString() }];
 if (scene === "format-error" || scene === "model-error") turns = [{ ...turns[0]!, prompt: "Create an image of the first bird in my saved list.", answer: "I’ll check the saved list and create its first bird.", acknowledgement: "I’ll check the saved list and create its first bird.", workTitle: "Create the bird image", state: "error", canGuideWork: false, workStatus: "failed", error: scene === "format-error" ? 'automation "workSpineDraft" execution failed: Spine refused: work compile: triage fileFormat: compose: unknown format "png" (offered: markdown, html, txt, csv, json, docx, pdf)' : "every_door_shut: no eligible fleet machine for this model", endedAt: new Date().toISOString() }];
-let discussion: ApprovalDiscussion = { conversationId: "fixture", approval: { id: "budget", runId: "run-0", kind: "budget", question: "This work reached its limit.", status: "pending" }, canSendGuidance: true, canAskAdvisor: true, guidanceMode: "deferred", savedGuidance: params.get("state") === "saved" ? "Use the verified record and check the result before continuing." : "" };
+let discussion: ApprovalDiscussion = { conversationId: "fixture", approval: { id: "progress", runId: "run-0", kind: "feedback", question: "This work reached its limit.", status: "pending" }, canSendGuidance: true, canAskAdvisor: true };
 const transport = {
   ask() { throw new Error("Ordinary Ask is not connected in this fixture."); },
   conversations: { list: async () => [{ id: "fixture", title: "Service report" }], create: async () => ({ id: "new", title: "New" }), read: async () => turns },
   discussApproval: async () => discussion,
-  approvalGuidance: async (_id: string, feedback: string): Promise<ApprovalGuidanceReceipt> => {
+  approvalGuidance: async (_id: string, _feedback: string): Promise<ApprovalGuidanceReceipt> => {
     if (params.get("state") === "pending") return new Promise(() => {});
     if (params.get("state") === "error") throw new Error("The connection closed before guidance was confirmed.");
-    discussion = { ...discussion, savedGuidance: feedback };
-    return { runResumed: false, guidanceSaved: true, savedGuidance: feedback };
+    discussion = { ...discussion, canSendGuidance: false };
+    return { runResumed: true };
   },
   guideWork: async (request: WorkGuidanceRequest): Promise<WorkGuidanceReceipt> => {
     if (params.get("state") === "pending") return new Promise(() => {});
@@ -42,8 +42,8 @@ const transport = {
 };
 const session = new ConversationSession(transport);
 await session.select("fixture");
-if (budget) {
-  await session.discussApproval("budget");
+if (progress) {
+  await session.discussApproval("progress");
   if (params.get("state") !== "saved") session.setDraft("Use the verified record and check the result before continuing.");
   if (["pending", "error"].includes(params.get("state") ?? "")) void session.sendGuidance();
 } else if (params.get("state")) { session.beginWorkGuidance("turn-0"); session.setDraft("Please keep the review focused on the current report."); if (params.get("state") !== "target") session.send(session.getSnapshot().draft, null); }

@@ -20,7 +20,7 @@ func testModelCallBudgetDBSeesPeerRaisesAndReceiptsBeforeHardExhaustion(t *testi
 	for _, g := range []*RunCeilings{ga, gb} {
 		limit, used, err := g.ModelCallBudget(ctx, rc)
 		require.NoError(t, err)
-		require.Equal(t, 12, limit)
+		require.Equal(t, 96, limit)
 		require.Zero(t, used)
 	}
 	// A warm ordinary query on A must not hide B's later approved total or
@@ -39,7 +39,7 @@ func testModelCallBudgetDBSeesPeerRaisesAndReceiptsBeforeHardExhaustion(t *testi
 		for _, g := range []*RunCeilings{ga, gb, NewRunCeilings(b.eng, testLogger())} {
 			limit, used, err := g.ModelCallBudget(ctx, rc)
 			require.NoError(t, err)
-			require.Equal(t, total, limit)
+			require.Equal(t, 96, limit)
 			if g == ga {
 				require.Equal(t, 3, used, "local-only charges survive a fresh read")
 			} else {

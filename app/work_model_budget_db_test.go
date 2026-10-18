@@ -35,10 +35,18 @@ import (
 // journals, approval and peer continuation all execute their installed code.
 type modelBudgetProvider struct {
 	calls     int
+	reviews   int
 	readFirst bool
 	requests  [][]common.ChatMessage
 }
 
+func (p *modelBudgetProvider) CallChatStructured(ctx context.Context, _ []common.ChatMessage, _ common.StructuredSchema) (string, error) {
+	if err := ctx.Err(); err != nil {
+		return "", err
+	}
+	p.reviews++
+	return `{"reply":"Synthetic section complete"}`, nil
+}
 func (p *modelBudgetProvider) Call(context.Context, string) (any, error) {
 	return nil, fmt.Errorf("unexpected text call")
 }
@@ -123,10 +131,49 @@ func (r *installedBudgetTurn) RunTurn(ctx context.Context, msg *memqlv1.AgentGen
 	return answer, err
 }
 
+// These scenarios control the point where an estimate is reached, while the
+// installed guard still accounts for all model receipts and enforces hard caps.
+// Automatic extension policy is covered with real stored estimates in work's
+// cross-replica progress tests. This fixture isolates checkpoint delivery.
+type checkpointEstimateGuard struct {
+	*work.RunCeilings
+	calls *int
+	wall  *int64
+	start *time.Time
+}
+
+func (g *checkpointEstimateGuard) Admit(ctx context.Context, rc common.RunContext, tokens int) *memql.RunCeilingBreach {
+	if breach := g.RunCeilings.Admit(ctx, rc, tokens); breach != nil {
+		return breach
+	}
+	used := g.Spent(ctx, rc)
+	if *g.calls > 0 && used.ModelCalls >= *g.calls {
+		return &memql.RunCeilingBreach{Ceiling: "modelCalls", Limit: fmt.Sprint(*g.calls), Actual: fmt.Sprint(used.ModelCalls), Reason: "synthetic soft call estimate"}
+	}
+	if *g.wall > 0 && used.WallClockMs >= *g.wall {
+		return &memql.RunCeilingBreach{Ceiling: "wallClock", Limit: fmt.Sprint(*g.wall), Actual: fmt.Sprint(used.WallClockMs), Reason: "synthetic soft time estimate"}
+	}
+	return nil
+}
+func (g *checkpointEstimateGuard) Deadline(ctx context.Context, rc common.RunContext) (time.Time, error) {
+	hard, err := g.RunCeilings.Deadline(ctx, rc)
+	if err != nil {
+		return hard, err
+	}
+	soft := g.start.Add(time.Duration(*g.wall) * time.Millisecond)
+	if *g.wall > 0 && (hard.IsZero() || soft.Before(hard)) {
+		return soft, nil
+	}
+	return hard, nil
+}
+func (g *checkpointEstimateGuard) DeclaredDeadline(ctx context.Context, rc common.RunContext) (time.Time, error) {
+	return g.Deadline(ctx, rc)
+}
+
 func TestWorkDBModelAdmissionBudgetKeepsOneNestedCheckpoint(t *testing.T) {
 	testModelBudgetBoundaries(t, []string{"initial", "after-tool", "checkpoint-failure"})
 }
-func TestWorkDBBudgetGuidanceSurvivesRepeatedRaises(t *testing.T) {
+func TestWorkDBProgressGuidanceSurvivesRepeatedCheckpoints(t *testing.T) {
 	testModelBudgetBoundaries(t, []string{"guidance"})
 }
 func TestWorkDBNativeBudgetContinuesTheExplicitRerun(t *testing.T) {
@@ -154,6 +201,8 @@ func testModelBudgetBoundaries(t *testing.T, boundaries []string) {
 				ctx := common.ContextWithRun(person, run)
 				effects := map[string]int{}
 				reads := 0
+				estimatedCalls, estimatedWall := 1, int64(10800000)
+				started := time.Now()
 				providers := []*modelBudgetProvider{{readFirst: boundary != "initial"}, {}}
 				peers := []*work.Integration{}
 				triggers := []*workTemplateTrigger{}
@@ -174,7 +223,7 @@ func testModelBudgetBoundaries(t *testing.T, boundaries []string) {
 					}
 					require.NotNil(t, wi)
 					peers = append(peers, wi)
-					e.SetRunCeilingGuard(work.NewRunCeilings(e, e.Logger))
+					e.SetRunCeilingGuard(&checkpointEstimateGuard{RunCeilings: work.NewRunCeilings(e, e.Logger), calls: &estimatedCalls, wall: &estimatedWall, start: &started})
 					e.SetModelCallJournal(work.NewModelJournal(e))
 					registry := memql.NewProviderRegistryForTest()
 					registry.RegisterWithParamsForTest("fixture", "OpenAI", "fixture", map[string]any{"contextWindow": 200000}, providers[n])
@@ -182,6 +231,7 @@ func testModelBudgetBoundaries(t *testing.T, boundaries []string) {
 					require.NoError(t, rules.Register(&memql.RuleConfig{Name: memql.DefaultRuleName, Policy: "fixture", Locked: true, OnUnavailable: memql.OnUnavailableDegrade, SourceFile: "dsl/rules/rules.memql"}))
 					require.NoError(t, rules.Finalize())
 					rtr := router.New(registry, memql.NewPolicyRegistryForTest(map[string][]string{"fixture": {"fixture"}}), rules, nil, e.Logger)
+					e.SetAIResolver(rtr)
 					adapter := &modelBudgetAdapter{CognitionEngineAdapter: &CognitionEngineAdapter{Engine: e}, reads: &reads, failCheckpoint: (n == 0 && boundary == "checkpoint-failure") || (n == 1 && boundary == "entry-rerun-failure"), legacyFailure: n == 0 && rerun}
 					replier, err := agent.NewReplier(adapter, rtr, e.Logger)
 					require.NoError(t, err)
@@ -208,11 +258,11 @@ func testModelBudgetBoundaries(t *testing.T, boundaries []string) {
 				write := func(name string, args map[string]any) {
 					templateMutation(t, writer, auth.ContextWithInternalOrigin(person), name, args)
 				}
-				started := time.Now()
+				started = time.Now()
 				if entry || tail {
 					started = started.Add(-2 * time.Hour)
 				}
-				write("createWorkGoal", map[string]any{"goalId": goalID, "statement": "Synthetic section boundary", "origin": "user", "ceilings": map[string]any{"maxModelCalls": 1, "wallClockMs": 10800000}})
+				write("createWorkGoal", map[string]any{"goalId": goalID, "statement": "Synthetic section boundary", "origin": "user", "ceilings": map[string]any{"maxModelCalls": 96, "wallClockMs": 10800000}})
 				write("createWorkRun", map[string]any{"runId": runID, "goalId": goalID, "automationName": "parent", "templateFingerprint": triggers[0].template.members["parent"].DefinitionFingerprint(id.New()), "mode": "live", "status": "running", "startedAt": started.UTC().Format(time.RFC3339Nano)})
 				if boundary == "initial" {
 					require.NoError(t, work.NewModelJournal(writer).Record(person, owner, memql.JournaledCall{RunId: runID, StepKey: "prior", RequestHash: "prior-section", PromptRef: "fixture", Served: memql.ServedLocal}))
@@ -266,7 +316,7 @@ func testModelBudgetBoundaries(t *testing.T, boundaries []string) {
 						// Real durable usage is already above the cap, and the declared
 						// deadline is already past before the next turn can prepare.
 						require.NoError(t, work.NewModelJournal(writer).Record(person, owner, memql.JournaledCall{RunId: runID, StepKey: "prior", RequestHash: "another-completed-call", PromptRef: "fixture", Served: memql.ServedLocal}))
-						write("updateWorkGoal", map[string]any{"goalId": goalID, "ceilings": map[string]any{"maxModelCalls": 1, "wallClockMs": 3600000}})
+						estimatedCalls, estimatedWall = 1, 3600000
 					}
 					rerunArgs := map[string]any{"runId": runID, "stepKey": legacy.FailedStep}
 					if boundary == "model-rerun" || boundary == "model-rerun-tail" {
@@ -332,34 +382,25 @@ func testModelBudgetBoundaries(t *testing.T, boundaries []string) {
 				require.Equal(t, expectedReads, providers[0].calls, "refused model admission must never execute another provider")
 				const firstGuidance = "Use the completed evidence; retain the original request and avoid repeating that read."
 				const secondGuidance = "Keep the earlier correction and finish the remaining response now."
-				saveGuidance := func(text string) {
-					before := load(writer, runID)
+				sendGuidance := func(text string) {
 					act("decideApproval", map[string]any{"approvalId": wait.ApprovalID, "decision": "answered", "answer": map[string]any{"feedback": text}})
-					after := load(reader, runID)
-					require.Equal(t, "waiting", after.Status)
-					require.Equal(t, before.WaitingOn, after.WaitingOn)
-					require.Equal(t, before.HumanResumeId, after.HumanResumeId)
-					require.Equal(t, before.StepStates, after.StepStates)
-					require.Equal(t, before.Rerun, after.Rerun)
-					_, ready := (&workRunDispatcher{app: triggers[1].app}).PrepareDispatch(person, work.DispatchRequest{RunId: runID, HumanResumeId: wait.ApprovalID})
-					require.False(t, ready, "saved guidance is not a budget decision")
+					require.Equal(t, "running", load(reader, runID).Status)
 				}
 				limit := 8
 				if boundary == "guidance" {
-					saveGuidance(firstGuidance)
 					limit = 2
 					providers[1].readFirst = true
-					require.Zero(t, providers[1].calls, "saving guidance cannot admit an extra call")
+					require.Zero(t, providers[1].calls, "no provider executes before the feedback decision")
 				}
 				if rerun && !entry {
 					limit = 2
 					providers[1].readFirst = true
 				}
-				for _, cap := range peers[1].Capabilities() {
-					if cap.Name == "decideApproval" {
-						_, err := cap.Handler(person, map[string]any{"approvalId": wait.ApprovalID, "decision": "approved", "answer": map[string]any{"newLimit": limit}}, 0)
-						require.NoError(t, err)
-					}
+				estimatedCalls = limit
+				if boundary == "guidance" {
+					sendGuidance(firstGuidance)
+				} else {
+					act("decideApproval", map[string]any{"approvalId": wait.ApprovalID, "decision": "answered", "answer": map[string]any{"value": "retry"}})
 				}
 				journal = load(reader, runID)
 				require.Equal(t, "running", journal.Status)
@@ -459,9 +500,9 @@ func testModelBudgetBoundaries(t *testing.T, boundaries []string) {
 					require.Equal(t, 2, reads)
 					require.Equal(t, 1, providers[1].calls)
 					wait = again
-					saveGuidance(secondGuidance)
+					estimatedCalls = 3
+					sendGuidance(secondGuidance)
 					require.Equal(t, 1, providers[1].calls)
-					act("decideApproval", map[string]any{"approvalId": again.ApprovalID, "decision": "approved", "answer": map[string]any{"newLimit": 3}})
 					fresh := load(reader, runID)
 					require.Equal(t, suspended.ChildRunId, fresh.StepStates[fresh.FailedStep].ChildRunId)
 					done, err = resume.ResumeFrom(resumeCtx, fresh, triggers[1].template.members["parent"], options)
@@ -488,7 +529,12 @@ func testModelBudgetBoundaries(t *testing.T, boundaries []string) {
 					if entry {
 						nextLimit = 10800000
 					}
-					act("decideApproval", map[string]any{"approvalId": again.ApprovalID, "decision": "approved", "answer": map[string]any{"newLimit": nextLimit}})
+					if entry {
+						estimatedWall = int64(nextLimit)
+					} else {
+						estimatedCalls = nextLimit
+					}
+					act("decideApproval", map[string]any{"approvalId": again.ApprovalID, "decision": "answered", "answer": map[string]any{"value": "retry"}})
 					require.True(t, peers[0].DispatchRun(person, runID, owner))
 					peers[1].DispatchRun(person, runID, owner)
 					req := <-admitted
@@ -507,7 +553,7 @@ func testModelBudgetBoundaries(t *testing.T, boundaries []string) {
 					if tail {
 						// The exact rerun already completed a read and saved its paired
 						// exchange. An expired entry deadline must preserve that full tail.
-						write("updateWorkGoal", map[string]any{"goalId": goalID, "ceilings": map[string]any{"maxModelCalls": 8, "wallClockMs": 3600000}})
+						estimatedCalls, estimatedWall = 8, 3600000
 						_, entryErr := resume.ResumeFrom(freshCtx, fresh, triggers[1].template.members["parent"], nextOptions)
 						var entryWait *workstate.HumanWait
 						require.ErrorAs(t, entryErr, &entryWait)
@@ -517,7 +563,8 @@ func testModelBudgetBoundaries(t *testing.T, boundaries []string) {
 						require.Equal(t, map[string]int{"completed-section": 1, "child-prefix": 2}, effects)
 						_, staleErr := resume.ResumeFrom(freshCtx, fresh, triggers[1].template.members["parent"], nextOptions)
 						require.ErrorIs(t, staleErr, automations.ErrNonRetryableStep)
-						act("decideApproval", map[string]any{"approvalId": entryWait.ApprovalID, "decision": "approved", "answer": map[string]any{"newLimit": 10800000}})
+						estimatedWall = 10800000
+						act("decideApproval", map[string]any{"approvalId": entryWait.ApprovalID, "decision": "answered", "answer": map[string]any{"value": "retry"}})
 						require.True(t, peers[0].DispatchRun(person, runID, owner))
 						peers[1].DispatchRun(person, runID, owner)
 						req := <-admitted
@@ -549,7 +596,7 @@ func testModelBudgetBoundaries(t *testing.T, boundaries []string) {
 				require.Equal(t, expectedCalls, providers[1].calls)
 				raw, err := json.Marshal(providers[1].requests[0])
 				require.NoError(t, err)
-				require.Contains(t, string(raw), "Recorded answer for this suspended step")
+				require.Contains(t, string(raw), "Recorded answer for this run")
 				require.NotEmpty(t, providers[1].requests[0][0].Content, "entry placeholder must be replaced by the installed system prompt")
 				if tail {
 					last, marshalErr := json.Marshal(providers[1].requests[len(providers[1].requests)-1])
@@ -579,6 +626,15 @@ func testModelBudgetBoundaries(t *testing.T, boundaries []string) {
 					expectedSpent = 2
 				}
 				require.Contains(t, spend, fmt.Sprintf(`"modelCalls": %d`, expectedSpent), "resumption must not reset prior spend")
+				freshGuard := work.NewRunCeilings(reader, reader.Logger)
+				_, accounted, accountingErr := freshGuard.ModelCallBudget(person, run)
+				require.NoError(t, accountingErr)
+				totalCalls := providers[0].calls + providers[1].calls + providers[0].reviews + providers[1].reviews
+				if entry || boundary == "initial" {
+					totalCalls++
+				}
+				require.Equal(t, totalCalls, accounted, "a fresh replica must account for every turn and final review")
+
 			})
 		}
 	}

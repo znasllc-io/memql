@@ -43,7 +43,7 @@ func askFeedbackProjection(row map[string]any) (*AskQuestion, *AskTurn) {
 			return nil, nil
 		}
 		_, _, optional := work.OptionalFeedback(row)
-		return &AskQuestion{ID: id, Text: text, Kind: kind, Options: options, Optional: optional, Continued: work.OptionalFeedbackContinued(row, time.Now())}, nil
+		return &AskQuestion{ID: id, Text: text, Kind: kind, Options: options, ChoiceOnly: subject["continuationAllowed"] == false, Optional: optional, Continued: work.OptionalFeedbackContinued(row, time.Now())}, nil
 	}
 	if decision != "answered" {
 		return nil, nil
