@@ -140,6 +140,17 @@ func imageBuildAgainstKubernetes(t *testing.T, controls pipelineTestControls) {
 		if err != nil {
 			t.Fatal(err)
 		}
+		step := podContainer(pod, false, ContainerStep)
+		waitingForReadGrant := readGrant && step != nil && step.State.Waiting != nil &&
+			step.State.Waiting.Reason == "CreateContainerConfigError" &&
+			strings.Contains(step.State.Waiting.Message, SecretName(name)) && strings.Contains(step.State.Waiting.Message, "not found")
+		// Only the intentionally delayed fake Secret is expected. Classify
+		// failed clones and rejected pods before waiting for that handoff.
+		if !waitingForReadGrant {
+			if observation := Classify(current, pod, created, time.Now(), cfg, ""); observation.Failure != nil {
+				t.Fatalf("builder cannot run: %s\n%s", observation.Detail, kubectl(nil, "-n", ns, "get", "events", "-o", "wide"))
+			}
+		}
 		if readGrant && !grantProvided {
 			// Clone public source anonymously, then supply the fake credential
 			// to the builder's required reference. No real credential is used.
@@ -156,22 +167,15 @@ func imageBuildAgainstKubernetes(t *testing.T, controls pipelineTestControls) {
 			}
 			continue
 		}
-		if readGrant {
-			step := podContainer(pod, false, ContainerStep)
-			if step != nil && step.State.Waiting != nil && step.State.Waiting.Reason == "CreateContainerConfigError" &&
-				strings.Contains(step.State.Waiting.Message, SecretName(name)) && strings.Contains(step.State.Waiting.Message, "not found") {
-				// The fake Secret was just created after clone. Let kubelet
-				// observe it within the test's existing deadline.
-				select {
-				case <-ctx.Done():
-					t.Fatal(ctx.Err())
-				case <-time.After(250 * time.Millisecond):
-				}
-				continue
+		if waitingForReadGrant {
+			// The fake Secret was just created after clone. Let kubelet
+			// observe it within the test's existing deadline.
+			select {
+			case <-ctx.Done():
+				t.Fatal(ctx.Err())
+			case <-time.After(250 * time.Millisecond):
 			}
-		}
-		if observation := Classify(current, pod, created, time.Now(), cfg, ""); observation.Failure != nil {
-			t.Fatalf("builder cannot run: %s\n%s", observation.Detail, kubectl(nil, "-n", ns, "get", "events", "-o", "wide"))
+			continue
 		}
 		if state := podContainer(pod, false, ContainerStep); state != nil && state.State.Terminated != nil {
 			if state.State.Terminated.ExitCode != 0 {
