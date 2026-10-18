@@ -212,6 +212,15 @@ type ModelsPolicy struct {
 	// means "the file has no opinion", and the accessor answers that
 	// with the default. Do not "simplify" this to a bool.
 	Pull *bool `yaml:"pull"`
+	// Parallel is the per-model concurrency this machine advertises for its
+	// native Ollama (the `max=` on each model label), for a runtime whose
+	// OLLAMA_NUM_PARALLEL the cockpit cannot read from a unit it wrote. Zero
+	// is "not said". Validated by readModelsTuning.
+	Parallel int `yaml:"parallel"`
+	// Resident lists the models this machine keeps loaded and how
+	// (docs/superpowers/specs/2026-10-18-fleet-tuning-design.md). Absent
+	// changes nothing: no keep_alive is sent and no window is pinned.
+	Resident []models.ResidentModel `yaml:"resident"`
 }
 
 // BackupPolicy controls which folders this machine will back up into the
@@ -508,6 +517,12 @@ func (p *Policy) reload() error {
 	// operator nor this code intended -- an endpoint moved to a new port
 	// would keep answering on the old one until a restart.
 	p.models.Runtimes = raw.Models.Runtimes
+	// parallel and resident REPLACE, for models.pull's reason and one of
+	// their own: each is a setting whose absence is the default, so a merge
+	// would keep a model loaded for hours on the strength of a line the owner
+	// already deleted, and a SIGHUP is how they take the deletion back.
+	p.models.Parallel = raw.Models.Parallel
+	p.models.Resident = raw.Models.Resident
 	// pipelines REPLACES, whole, for the same reason: allow is a consent, and
 	// a narrowed repos list that kept the repository it dropped would admit a
 	// step the file no longer names.
