@@ -3,6 +3,7 @@ package tools
 import (
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -101,6 +102,88 @@ func TestModelsTuning_ReloadReplacesRatherThanMerges(t *testing.T) {
 	}
 	if got := p.ModelsTuning(); got.Parallel != 0 || len(got.Resident) != 0 {
 		t.Errorf("after the block was deleted the policy still tunes %+v", got)
+	}
+}
+
+// TestModelsTuning_AWrongShapeCostsOnlyItsSetting. A shape a typed decode
+// refuses (a word where a number belongs, a list where an entry belongs)
+// must never fail the whole policy.yaml: that leaves the worker on defaults
+// that allow no model, and it costs every other line the owner wrote. The
+// setting is named in one sentence, and the entries beside it stand. The
+// allow list is asserted too, because a failed parse takes that line down
+// with the rest.
+func TestModelsTuning_AWrongShapeCostsOnlyItsSetting(t *testing.T) {
+	tests := []struct {
+		name         string
+		doc          string
+		wantSentence string
+		wantParallel int
+		wantResident int
+	}{
+		{
+			name:         "working_context that is not a number",
+			doc:          "models:\n  allow: [m]\n  resident:\n    - id: m\n      keep_alive: 1h\n      working_context: 16k\n",
+			wantSentence: `models.resident m: working_context belongs here as a whole number of tokens from 1 to 1048576, not the single word "16k"; working_context is ignored`,
+			wantResident: 1,
+		},
+		{
+			name:         "parallel as a quoted number",
+			doc:          "models:\n  allow: [m]\n  parallel: \"2\"\n",
+			wantSentence: `models.parallel belongs here as a whole number from 1 to 64, not the single word "2"; it is ignored`,
+		},
+		{
+			name:         "parallel as a fraction",
+			doc:          "models:\n  allow: [m]\n  parallel: 2.5\n",
+			wantSentence: `models.parallel belongs here as a whole number from 1 to 64, not the single word "2.5"; it is ignored`,
+		},
+		{
+			name:         "resident that is a word, not a list",
+			doc:          "models:\n  allow: [m]\n  resident: m\n",
+			wantSentence: `models.resident: a list of entries belongs here (- id: qwen3.8:27b), not the single word "m", so the block is ignored`,
+		},
+		{
+			name:         "a resident entry that is a word, not a mapping",
+			doc:          "models:\n  allow: [m]\n  resident: [m]\n",
+			wantSentence: `models.resident entry 1: a mapping with an id belongs here (id: qwen3.8:27b, keep_alive: 2h), not the single word "m", so the entry is ignored`,
+		},
+		{
+			name:         "an id that is a list",
+			doc:          "models:\n  allow: [m]\n  resident:\n    - id: [m]\n      keep_alive: 1h\n",
+			wantSentence: `models.resident entry 1: id is the name of a model, and a list is not one, so the entry is ignored`,
+		},
+		{
+			name:         "keep_alive that is a list",
+			doc:          "models:\n  allow: [m]\n  resident:\n    - id: m\n      keep_alive: [1h]\n      working_context: 8192\n",
+			wantSentence: `models.resident m: keep_alive belongs here as a duration like 2h, or -1 for forever, not a list; keep_alive is ignored`,
+			wantResident: 1,
+		},
+		{
+			name:         "an unknown key beside a real setting",
+			doc:          "models:\n  allow: [m]\n  resident:\n    - id: m\n      keep_alive: 1h\n      working_ctx: 8192\n",
+			wantSentence: `models.resident m: takes id, keep_alive and working_context, and "working_ctx" is none of them, so that key is ignored`,
+			wantResident: 1,
+		},
+		{
+			name:         "a key written twice in one entry",
+			doc:          "models:\n  allow: [m]\n  resident:\n    - id: m\n      keep_alive: 1h\n      keep_alive: 2h\n",
+			wantSentence: `models.resident m: keep_alive is written twice, and the first one stands`,
+			wantResident: 1,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			p, _ := policyFromDoc(t, tt.doc)
+			if got := p.ModelsAllow(); len(got) != 1 || got[0] != "m" {
+				t.Errorf("models.allow = %q, want [m]", got)
+			}
+			got := p.ModelsTuning()
+			if got.Parallel != tt.wantParallel || len(got.Resident) != tt.wantResident {
+				t.Errorf("tuning = %+v, want parallel %d and %d resident entries", got, tt.wantParallel, tt.wantResident)
+			}
+			if !slices.Contains(p.ModelsTuningProblems(), tt.wantSentence) {
+				t.Errorf("no problem is exactly %q; got %q", tt.wantSentence, p.ModelsTuningProblems())
+			}
+		})
 	}
 }
 

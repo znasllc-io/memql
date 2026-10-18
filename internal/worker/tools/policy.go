@@ -214,13 +214,17 @@ type ModelsPolicy struct {
 	Pull *bool `yaml:"pull"`
 	// Parallel is the per-model concurrency this machine advertises for its
 	// native Ollama (the `max=` on each model label), for a runtime whose
-	// OLLAMA_NUM_PARALLEL the cockpit cannot read from a unit it wrote. Zero
-	// is "not said". Validated by readModelsTuning.
-	Parallel int `yaml:"parallel"`
+	// OLLAMA_NUM_PARALLEL the cockpit cannot read from a unit it wrote. Absent
+	// is "not said". It is kept as the YAML node it was written as, and read by
+	// readModelsTuning rather than decoded here: a typed decode fails the WHOLE
+	// file on `parallel: "2"`, and reads `parallel: 2.5` as 2 without a word.
+	Parallel yaml.Node `yaml:"parallel"`
 	// Resident lists the models this machine keeps loaded and how
 	// (docs/superpowers/specs/2026-10-18-fleet-tuning-design.md). Absent
-	// changes nothing: no keep_alive is sent and no window is pinned.
-	Resident []models.ResidentModel `yaml:"resident"`
+	// changes nothing: no keep_alive is sent and no window is pinned. It is
+	// kept as a node for the reason Parallel is: `working_context: 16k` would
+	// fail the whole file, and `working_ctx: 8192` would be dropped silently.
+	Resident yaml.Node `yaml:"resident"`
 }
 
 // BackupPolicy controls which folders this machine will back up into the

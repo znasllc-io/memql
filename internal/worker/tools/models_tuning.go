@@ -5,13 +5,16 @@ import (
 	"strings"
 
 	"github.com/znasllc-io/memql-cockpit/internal/worker/models"
+	"gopkg.in/yaml.v3"
 )
 
 // models.parallel and models.resident, read the way apps.levels is read:
 // a pure function of the block as written, run on every read, that never
 // fails. A shape it cannot use becomes a sentence about that entry and
 // the entry is ignored -- the direction that changes nothing -- so a typo
-// costs the one setting and never the machine.
+// costs the one setting and never the machine. Both are walked as YAML
+// nodes for that reason: a typed decode fails the whole policy.yaml on one
+// wrong shape, and reads 2.5 as 2 without a word.
 //
 // Design record: docs/superpowers/specs/2026-10-18-fleet-tuning-design.md.
 
@@ -64,20 +67,17 @@ func (p *Policy) ModelsTuningProblems() []string {
 	return problems
 }
 
+// readModelsTuning validates models.parallel and models.resident: parallel
+// first, then the entries in file order.
 func readModelsTuning(m ModelsPolicy) (ModelsTuning, []string) {
 	var (
 		out      ModelsTuning
 		problems []string
 	)
-	switch {
-	case m.Parallel == 0:
-		// Not said.
-	case m.Parallel < 1 || m.Parallel > MaxModelsParallel:
-		problems = append(problems, fmt.Sprintf(
-			"models.parallel: %d is outside 1 to %d and is ignored; OLLAMA_NUM_PARALLEL, the managed Ollama unit, or 1 applies",
-			m.Parallel, MaxModelsParallel))
-	default:
-		out.Parallel = m.Parallel
+	parallel, problem := readParallel(m.Parallel)
+	out.Parallel = parallel
+	if problem != "" {
+		problems = append(problems, problem)
 	}
 
 	allowed := make(map[string]bool, len(m.Allow))
@@ -85,12 +85,14 @@ func readModelsTuning(m ModelsPolicy) (ModelsTuning, []string) {
 		allowed[strings.TrimSpace(id)] = true
 	}
 
+	entries, walkProblems := readResident(m.Resident)
+	problems = append(problems, walkProblems...)
 	seen := map[string]bool{}
-	for i, raw := range m.Resident {
-		n := i + 1
+	for _, e := range entries {
+		raw := e.model
 		id := strings.TrimSpace(raw.ID)
 		if id == "" {
-			problems = append(problems, fmt.Sprintf("models.resident entry %d has no id and is ignored", n))
+			problems = append(problems, fmt.Sprintf("models.resident entry %d has no id and is ignored", e.n))
 			continue
 		}
 		if seen[id] {
@@ -120,7 +122,7 @@ func readModelsTuning(m ModelsPolicy) (ModelsTuning, []string) {
 			// Nothing stands. Say so only when the entry never tried to say
 			// anything: an entry whose fields were refused already has its
 			// sentences.
-			if strings.TrimSpace(raw.KeepAlive) == "" && raw.WorkingContext == 0 {
+			if !e.refused && strings.TrimSpace(raw.KeepAlive) == "" && raw.WorkingContext == 0 {
 				problems = append(problems, fmt.Sprintf(
 					"models.resident %s sets neither keep_alive nor working_context, so it does nothing", id))
 			}
@@ -133,4 +135,154 @@ func readModelsTuning(m ModelsPolicy) (ModelsTuning, []string) {
 		out.Resident = append(out.Resident, r)
 	}
 	return out, problems
+}
+
+// readParallel reads models.parallel. Absent and null are not said. A value
+// that is not a whole number is refused by its shape, so "2" and 2.5 cannot
+// pass for 2, and a whole number outside 1 to MaxModelsParallel is refused
+// by its size. A refusal returns zero and its sentence.
+func readParallel(node yaml.Node) (int, string) {
+	n := resolveYAML(&node)
+	if yamlAbsent(n) {
+		return 0, ""
+	}
+	var v int
+	if n.Kind != yaml.ScalarNode || n.ShortTag() != "!!int" || n.Decode(&v) != nil {
+		return 0, fmt.Sprintf(
+			"models.parallel belongs here as a whole number from 1 to %d, not %s; it is ignored",
+			MaxModelsParallel, describeYAML(n))
+	}
+	if v < 1 || v > MaxModelsParallel {
+		return 0, fmt.Sprintf(
+			"models.parallel: %d is outside 1 to %d and is ignored; OLLAMA_NUM_PARALLEL, the managed Ollama unit, or 1 applies",
+			v, MaxModelsParallel)
+	}
+	return v, ""
+}
+
+// residentWalk is one models.resident entry as the node walk read it. A
+// field whose shape was refused is left at its zero value and has its own
+// sentence; refused records that, so the "sets neither" sentence is not
+// said on top of it.
+type residentWalk struct {
+	// n is the entry's place in the list, from 1, for its sentences.
+	n     int
+	model models.ResidentModel
+	// refused is set when keep_alive or working_context was refused by its
+	// shape.
+	refused bool
+}
+
+// readResident walks models.resident. A block that is not a list is one
+// sentence and no entries; an item that is not a mapping is one sentence
+// about that item. The entries that remain come back in file order.
+func readResident(node yaml.Node) ([]residentWalk, []string) {
+	list := resolveYAML(&node)
+	if yamlAbsent(list) {
+		return nil, nil
+	}
+	if list.Kind != yaml.SequenceNode {
+		return nil, []string{fmt.Sprintf(
+			"models.resident: a list of entries belongs here (- id: qwen3.8:27b), not %s, so the block is ignored",
+			describeYAML(list))}
+	}
+	var (
+		entries  []residentWalk
+		problems []string
+	)
+	for i, item := range list.Content {
+		n := i + 1
+		entry := resolveYAML(item)
+		switch {
+		case yamlAbsent(entry):
+			// An empty item is an entry with no id, which the caller names.
+			entries = append(entries, residentWalk{n: n})
+		case entry.Kind != yaml.MappingNode:
+			problems = append(problems, fmt.Sprintf(
+				"models.resident entry %d: a mapping with an id belongs here (id: qwen3.8:27b, keep_alive: 2h), not %s, so the entry is ignored",
+				n, describeYAML(entry)))
+		default:
+			w, walkProblems, ok := walkResidentEntry(entry, n)
+			problems = append(problems, walkProblems...)
+			if ok {
+				entries = append(entries, w)
+			}
+		}
+	}
+	return entries, problems
+}
+
+// walkResidentEntry reads one entry's mapping. The id is found first,
+// because it names the entry in every sentence after it. A key the entry
+// does not take is named and ignored. A key written twice keeps its first
+// value: yaml.v3 refuses a duplicate key when it decodes a typed struct but
+// not inside a node, so the walk has to check for it. ok is false when the
+// id is not a name, which leaves the entry nothing to keep.
+func walkResidentEntry(entry *yaml.Node, n int) (residentWalk, []string, bool) {
+	w := residentWalk{n: n}
+	label := fmt.Sprintf("entry %d", n)
+	for i := 0; i+1 < len(entry.Content); i += 2 {
+		if entry.Content[i].Value != "id" {
+			continue
+		}
+		id := resolveYAML(entry.Content[i+1])
+		if yamlAbsent(id) {
+			break
+		}
+		if id.Kind != yaml.ScalarNode {
+			return w, []string{fmt.Sprintf(
+				"models.resident entry %d: id is the name of a model, and %s is not one, so the entry is ignored",
+				n, describeYAML(id))}, false
+		}
+		w.model.ID = strings.TrimSpace(id.Value)
+		if w.model.ID != "" {
+			label = w.model.ID
+		}
+		break
+	}
+	var problems []string
+	seen := map[string]bool{}
+	for i := 0; i+1 < len(entry.Content); i += 2 {
+		key, val := entry.Content[i].Value, resolveYAML(entry.Content[i+1])
+		if key != "id" && key != "keep_alive" && key != "working_context" {
+			problems = append(problems, fmt.Sprintf(
+				"models.resident %s: takes id, keep_alive and working_context, and %q is none of them, so that key is ignored",
+				label, key))
+			continue
+		}
+		if seen[key] {
+			problems = append(problems, fmt.Sprintf(
+				"models.resident %s: %s is written twice, and the first one stands", label, key))
+			continue
+		}
+		seen[key] = true
+		switch key {
+		case "keep_alive":
+			if yamlAbsent(val) {
+				continue
+			}
+			if val.Kind != yaml.ScalarNode {
+				problems = append(problems, fmt.Sprintf(
+					"models.resident %s: keep_alive belongs here as a duration like 2h, or -1 for forever, not %s; keep_alive is ignored",
+					label, describeYAML(val)))
+				w.refused = true
+				continue
+			}
+			w.model.KeepAlive = val.Value
+		case "working_context":
+			if yamlAbsent(val) {
+				continue
+			}
+			var v int
+			if val.Kind != yaml.ScalarNode || val.ShortTag() != "!!int" || val.Decode(&v) != nil {
+				problems = append(problems, fmt.Sprintf(
+					"models.resident %s: working_context belongs here as a whole number of tokens from 1 to %d, not %s; working_context is ignored",
+					label, MaxWorkingContext, describeYAML(val)))
+				w.refused = true
+				continue
+			}
+			w.model.WorkingContext = v
+		}
+	}
+	return w, problems, true
 }
