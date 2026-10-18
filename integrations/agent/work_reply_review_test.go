@@ -6,6 +6,7 @@ import (
 	"errors"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/require"
 	"github.com/znasllc-io/memql/component/auth"
@@ -100,7 +101,7 @@ func (e *evidenceRepairEngine) Execute(ctx context.Context, query string) (any, 
 	return map[string]any{"data": map[string]any{"review": map[string]any{"id": "review", "payload": map[string]any{"reply": reply, "missingEvidence": gap}}}}, nil
 }
 func TestEvidenceGapContinuesSameTaskOnceWithoutDeliveringPrematureAnswer(t *testing.T) {
-	e := &evidenceRepairEngine{}
+	e := &evidenceRepairEngine{workPromptEngine: newProgressRecoveryEngine(t).workPromptEngine}
 	e.savedContinuation = []common.ChatMessage{{Role: "system", Content: "Current instructions"}, {Role: "user", Content: "Check item A"}, {Role: "assistant", ToolCalls: []common.ToolCall{{ID: "source", Name: "readSource", Arguments: `{}`}}}, {Role: "tool", ToolCallId: "source", Name: "readSource", Content: `{"item":"B","status":"ready"}`}}
 	original := append([]common.ChatMessage(nil), e.savedContinuation...)
 	ctx := common.ContextWithRun(auth.ContextWithUserActor(context.Background(), "owner"), common.RunContext{RunId: "run", GoalId: "goal", StepKey: "reason", OwnerUserId: "owner", Continuation: &common.StepContinuation{StepKey: "reason", ObservationID: "original"}})
@@ -142,11 +143,44 @@ func TestEvidenceGapContinuesSameTaskOnceWithoutDeliveringPrematureAnswer(t *tes
 	require.False(t, continued)
 }
 func TestEvidenceRepairCannotProceedWithoutDurableCheckpoint(t *testing.T) {
-	e := &evidenceRepairEngine{failSave: true}
+	e := &evidenceRepairEngine{workPromptEngine: newProgressRecoveryEngine(t).workPromptEngine, failSave: true}
 	r := newTestReplier(e)
 	ctx := common.ContextWithRun(auth.ContextWithUserActor(context.Background(), "owner"), common.RunContext{RunId: "run", GoalId: "goal", OwnerUserId: "owner"})
 	continued, err := r.continueWorkEvidence(ctx, []common.ChatMessage{{Role: "system"}, {Role: "user", Content: "Check item"}}, "Resolve the item identifier", true)
 	require.Error(t, err)
 	require.False(t, continued)
 	require.Empty(t, e.savedContinuation)
+}
+
+func TestEvidenceCompletionReachesBothProviderBoundariesAfterRestore(t *testing.T) {
+	for _, streaming := range []bool{false, true} {
+		t.Run(map[bool]string{false: "nonstreaming", true: "streaming"}[streaming], func(t *testing.T) {
+			e := &evidenceRepairEngine{workPromptEngine: newProgressRecoveryEngine(t).workPromptEngine}
+			r := newTestReplier(e)
+			ctx, turn := progressRecoveryContext()
+			original := []common.ChatMessage{{Role: "system", Content: "Current instructions"}, {Role: "user", Content: "Check item A"}, {Role: "assistant", ToolCalls: []common.ToolCall{{ID: "source", Name: "readSource", Arguments: `{}`}}}, {Role: "tool", ToolCallId: "source", Name: "readSource", Content: `{"item":"B","status":"ready"}`}}
+			continued, err := r.continueWorkEvidence(ctx, original, "Resolve item A's identifier", true)
+			require.NoError(t, err)
+			require.True(t, continued)
+			// Fresh input simulates another host, with none of the correction's
+			// local state. The provider must see the persisted explicit instruction.
+			provider := &outcomeProvider{steps: [][]common.ToolCall{nil}, texts: []string{"Answer"}}
+			fresh := []common.ChatMessage{{Role: "system", Content: "Refreshed instructions"}}
+			if streaming {
+				_, err = r.runStreamingToolLoop(ctx, provider, fresh, nil, &captureSink{}, time.Now(), "completion", turn)
+			} else {
+				_, err = r.runNonStreamingToolLoop(ctx, provider, nil, fresh, nil, &captureSink{}, time.Now(), "completion", turn)
+			}
+			require.NoError(t, err)
+			require.Equal(t, 1, provider.calls)
+			require.Equal(t, original, provider.messages[:len(original)])
+			last := provider.messages[len(provider.messages)-1]
+			require.Equal(t, "user", last.Role)
+			require.Equal(t, "work_evidence_completion", last.Name)
+			require.Contains(t, last.Content, "not a new user request")
+			require.Contains(t, last.Content, "Resolve item A's identifier")
+			require.Contains(t, last.Content, "authorized tool before")
+			require.True(t, recoveryGuidance(last).IsZero(), "runtime correction must not rearm human authorization")
+		})
+	}
 }

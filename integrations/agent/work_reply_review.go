@@ -104,6 +104,10 @@ func (r *Replier) continueWorkEvidence(ctx context.Context, messages []common.Ch
 	if !available || len(messages) < 2 || state.EvidenceRepairs != 0 || strings.TrimSpace(gap) == "" || len(gap) > 1200 {
 		return false, fmt.Errorf("reply evidence continuation is unavailable")
 	}
+	instruction, err := r.engine.RenderPrompt("workEvidenceCompletion", map[string]any{"gap": gap})
+	if err != nil {
+		return false, err
+	}
 	state.EvidenceRepairs, state.EvidenceGap = 1, gap
 	raw, err := json.Marshal(state)
 	if err != nil {
@@ -114,6 +118,10 @@ func (r *Replier) continueWorkEvidence(ctx context.Context, messages []common.Ch
 		out = append(out[:marker], out[marker+1:]...)
 	}
 	out = append(out, common.ChatMessage{Role: "system", Name: workRecoveryMarker, Content: string(raw)})
+	// A new reasoning boundary needs an explicit correction, as with invalid
+	// outcome repair. Metadata alone was carried faithfully yet ignored by the
+	// live model. This is marked runtime input, never a new human authorization.
+	out = append(out, common.ChatMessage{Role: "user", Name: "work_evidence_completion", Content: instruction})
 	// Save before any next call. A different replica sees the same bound and
 	// the same completed source receipts; it cannot restart the repair allowance.
 	if err := r.saveWorkProgress(ctx, out); err != nil {
