@@ -133,6 +133,9 @@ type fleetOutput struct {
 
 // RunStep runs one step on a machine that offers what it needs.
 func (f *Fleet) RunStep(ctx context.Context, req pl.StepRequest, run StepRun) (pl.StepResult, error) {
+	if run.CheckoutHistory != "" || req.Step.CheckoutHistory != "" {
+		return refusedResult(pl.CodeStepInvalid, "checkoutHistory requires cluster container execution."), nil
+	}
 	if run.CPUMilli != 0 || req.Step.CPUMilli != 0 {
 		return refusedResult(pl.CodeStepInvalid, "cpuMilli requires cluster container execution."), nil
 	}

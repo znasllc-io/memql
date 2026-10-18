@@ -302,6 +302,12 @@ func checkJob(cfg Config, run StepRun) (int32, *pl.Refusal) {
 			return refuse("resource admission requires the run's absolute deadline")
 		}
 	}
+	if err := pl.CheckCheckoutHistory(run.CheckoutHistory, false); err != nil {
+		return refuse("%s", err)
+	}
+	if run.CheckoutHistory == "full" && run.Env["MEMQL_BASE_SHA"] != "" && !shaShape.MatchString(run.Env["MEMQL_BASE_SHA"]) {
+		return refuse("full-history checkout base must be a full commit SHA")
+	}
 	if err := pl.CheckMemoryMiB(run.MemoryMiB, false); err != nil {
 		return refuse("%s", err)
 	}
@@ -602,7 +608,7 @@ func cacheGCPercent(n int) int {
 // cloneContainer fetches the commit into the workspace, as root. It runs git
 // on untrusted repository content, so it never mounts the cache claim.
 func cloneContainer(cfg Config, run StepRun, secretName string) Container {
-	return Container{
+	container := Container{
 		Name:    ContainerClone,
 		Image:   cfg.CloneImage,
 		Command: []string{"/bin/sh", "-c", cloneScript},
@@ -617,6 +623,10 @@ func cloneContainer(cfg Config, run StepRun, secretName string) Container {
 		SecurityContext:          rootContext(),
 		TerminationMessagePolicy: failureFromLogs,
 	}
+	if run.CheckoutHistory == "full" {
+		container.Env = append(container.Env, plainVar("CLONE_HISTORY", "full"), plainVar("BASE_SHA", run.Env["MEMQL_BASE_SHA"]))
+	}
+	return container
 }
 
 // serviceContainers are the native sidecars, in name order: init containers
