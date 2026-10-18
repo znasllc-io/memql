@@ -160,8 +160,8 @@ in-flight prompt calls and the agent tool loop. Direct agent attempts also
 consume the run's model-call allowance and write attempt receipts.
 
 A classified quick conversational reply uses the `workQuickReply` prompt at
-`fast` through the normal `ai` builtin, with output progress and the durable
-run journal. It reads the authenticated person's profile on the execution
+`fast` through the normal `ai` builtin and the durable run journal. Its draft
+is held until the evidence check below completes. It reads the authenticated person's profile on the execution
 replica and the conversation from the saved run variables. It does not
 retrieve knowledge or enter the agent tool loop. A request for a
 file, research, navigation or action retains its normal execution recipe;
