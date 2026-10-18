@@ -34,6 +34,19 @@ Output ONLY a JSON object -- no markdown fences, no prose:
 
 `sectionable` / `assembly` / `sections` are OPTIONAL -- include them ONLY when the deliverable decomposes into sections (see SECTIONABLE below). Omit them, or set `sectionable: false` with `sections: []`, otherwise.
 
+For every conversational reply, use this order: identify the decision or question
+being asked now; inspect the recorded sources; name a concrete missing fact only
+if it is necessary to answer that question. When the existing observations support
+useful conditional advice, interpretation or a calculation, set workload="quick",
+requiresResearch=false and acknowledgement="". A limitation already disclosed in
+the previous answer remains a limitation; it does not itself authorize repeating
+the lookup. Do not expand an ordinary recommendation into an exhaustive check of
+all conceivable risks. Preserve the limits in the direct answer. Use a new lookup
+only if a particular absent or changed fact could materially change that answer,
+and name that gap in the short reasoning sentence. The words "right now" alone
+are not that gap. An explicit request to refresh, a changed entity or location,
+or verified stale/conflicting evidence still requires new evidence.
+
 First decide whether the current context actually contains the facts needed to
 answer. An assertion the person asks you to confirm is the claim to test, not
 proof of itself. Confirming or explaining a volatile claim requires fresh
