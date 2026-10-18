@@ -2,12 +2,14 @@ package agent
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/require"
 	"github.com/znasllc-io/memql/component/auth"
+	memorynodes "github.com/znasllc-io/memql/component/database/memory-nodes"
 	"github.com/znasllc-io/memql/core/common"
 )
 
@@ -27,7 +29,11 @@ func (e *replyReviewEngine) Execute(ctx context.Context, query string) (any, err
 	if e.fail {
 		return nil, errors.New("review unavailable")
 	}
-	return []map[string]any{{"reply": "The recorded observation does not establish a cause."}}, nil
+	// The real CognitionEngineAdapter retains the typed builtin node set under
+	// data; a flat fake concealed the production result-wrapper boundary.
+	return map[string]any{"data": map[string]memorynodes.MemoryNode{
+		"work-reviewed-reply": {ID: "work-reviewed-reply", Payload: json.RawMessage(`{"reply":"The recorded observation does not establish a cause."}`)},
+	}}, nil
 }
 
 func TestOwnedAnswerWaitsForEvidenceReviewBeforeDelivery(t *testing.T) {
