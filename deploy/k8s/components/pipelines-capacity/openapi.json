@@ -1,6 +1,26 @@
 {
   "definitions": {},
   "paths": {
+    "/apis/admissionregistration.k8s.io/v1/validatingadmissionpolicies": {
+      "get": {
+        "x-kubernetes-action": "list",
+        "x-kubernetes-group-version-kind": {
+          "group": "admissionregistration.k8s.io",
+          "version": "v1",
+          "kind": "ValidatingAdmissionPolicy"
+        }
+      }
+    },
+    "/apis/admissionregistration.k8s.io/v1/validatingadmissionpolicybindings": {
+      "get": {
+        "x-kubernetes-action": "list",
+        "x-kubernetes-group-version-kind": {
+          "group": "admissionregistration.k8s.io",
+          "version": "v1",
+          "kind": "ValidatingAdmissionPolicyBinding"
+        }
+      }
+    },
     "/apis/kueue.x-k8s.io/v1beta2/clusterqueues": {
       "get": {
         "x-kubernetes-action": "list",

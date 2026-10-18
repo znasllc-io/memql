@@ -63,7 +63,9 @@ func TestAdmissionComponentRendersSameBoundariesOnEveryTarget(t *testing.T) {
 					t.Fatal(err)
 				}
 				switch o.Kind + "/" + o.Metadata.Name {
-				case "ClusterQueue/memql-background", "ResourceFlavor/memql-background", "BackgroundCapacityPolicy/memql-background-capacity":
+				case "ClusterQueue/memql-background", "ResourceFlavor/memql-background", "BackgroundCapacityPolicy/memql-background-capacity",
+					"ValidatingAdmissionPolicy/memql-background-ceiling", "ValidatingAdmissionPolicyBinding/memql-background-ceiling",
+					"ClusterRole/memql-background-capacity", "ClusterRoleBinding/memql-background-capacity":
 					if o.Metadata.Namespace != "" {
 						t.Fatalf("cluster-scoped %s rendered in namespace %s", o.Kind, o.Metadata.Namespace)
 					}
@@ -73,10 +75,6 @@ func TestAdmissionComponentRendersSameBoundariesOnEveryTarget(t *testing.T) {
 						t.Fatal("LocalQueue escaped the batch namespace")
 					}
 					found[o.Kind] = true
-				case "ConfigMap/memql-background-capacity", "Role/memql-background-capacity":
-					if o.Metadata.Namespace != "memql" {
-						t.Fatalf("%s escaped the engine namespace", o.Kind)
-					}
 				case "LimitRange/memql-pipelines-limits":
 					for _, raw := range o.Spec["limits"].([]any) {
 						v := raw.(map[string]any)
@@ -92,7 +90,7 @@ func TestAdmissionComponentRendersSameBoundariesOnEveryTarget(t *testing.T) {
 					}
 				}
 			}
-			if len(found) != 4 {
+			if len(found) != 8 {
 				t.Fatalf("incomplete admission objects: %v", found)
 			}
 		})
