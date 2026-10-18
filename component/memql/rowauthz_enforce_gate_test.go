@@ -135,6 +135,14 @@ func loadedTreeRegistry(t *testing.T) *FunctionRegistry {
 // tier ALREADY decides the whole row set; if the answer needs a paragraph about
 // what a particular caller sees, the answer is no.
 var tierDecidesTheRead = map[string]string{
+	// Routes (design record 2026-10-18-routes). Both are @serverOnly and read
+	// ONLY under the maintenance principal -- the router resolving a call made
+	// under a person's route on whichever replica runs it, and routeSave's name
+	// check -- whom the composite tier's clusterOwner arm admits. The owner is
+	// an argument the server supplies from the caller's identity, so the
+	// injected term leaves the result set exactly as the filter wrote it.
+	"routeForOwner": "Routes: @serverOnly, read under the maintenance principal the composite tier admits; the owner is a server-supplied argument the filter requires.",
+	"routesOfOwner": "Routes: @serverOnly, read under the maintenance principal, as routeForOwner.",
 	// Shopify propagation hydrates an outbox row reference under the named
 	// connector actor. The concepts' @mirroredTo("shopify") declaration is
 	// its authority (memql#4378), not cluster ownership. The connector row

@@ -42,6 +42,9 @@ type readinessResolvers struct {
 	// FederationConfigured reports structural presence of a federated
 	// provider, which every node type can answer from its own registry.
 	FederationConfigured func() bool
+	// EmbedderBound reports whether the cluster's embedder binding is active
+	// -- the embeddings lane's other half beside an advertised model.
+	EmbedderBound func(ctx context.Context) bool
 	// IntegrationState asks integration.<name>.status in-process (see
 	// IntegrationReading).
 	IntegrationState func(ctx context.Context, name string) (IntegrationReading, error)
@@ -183,6 +186,7 @@ func evaluateModule(ctx context.Context, r readinessResolvers, mod envregistry.M
 		out.Lanes = readiness.InferenceLanes(readiness.InferenceInput{
 			Registrations:        regs,
 			FederationConfigured: r.FederationConfigured != nil && r.FederationConfigured(),
+			EmbedderBound:        r.EmbedderBound != nil && r.EmbedderBound(ctx),
 			Now:                  now,
 		})
 		// ONE COMPLETE LANE CONFIGURES THE MODULE, the same rule the default
@@ -307,6 +311,10 @@ func (e *MemQLEngine) readinessResolvers() readinessResolvers {
 		Registrations:        e.readInferenceRegistrations,
 		Logger:               e.safeLogger(),
 		FederationConfigured: func() bool { return e.providers != nil && e.providers.federationConfigured() },
+		EmbedderBound: func(ctx context.Context) bool {
+			b, err := e.ReadEmbedderBinding(ctx)
+			return err == nil && b.Valid()
+		},
 		IntegrationState: func(ctx context.Context, name string) (IntegrationReading, error) {
 			handler, ok := e.builtinExecutorHandlers["integration."+name+".status"]
 			if !ok {

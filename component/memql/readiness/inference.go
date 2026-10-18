@@ -79,6 +79,12 @@ const (
 	InferenceLaneLocal      = "local"
 	InferenceLaneApp        = "app"
 	InferenceLaneFederation = "federation"
+	// InferenceLaneEmbeddings is the fourth lane, and not a door: an embedding
+	// model the cluster can index and search with (design record
+	// 2026-10-18-routes). A source that answers is not enough to use MemQL --
+	// Library search and memory recall need vectors -- so the module is
+	// configured only when one of the three doors AND this lane are.
+	InferenceLaneEmbeddings = "embeddings"
 )
 
 // InferenceLiveSlot is the one slot every inference lane carries.
@@ -90,6 +96,9 @@ const InferenceLiveSlot = "live"
 const (
 	attrContextKey    = "ctx"
 	attrStructuredKey = "structured"
+	// attrEmbeddingsKey marks a model that produces vectors. Pinned to the
+	// fleet catalog's attribute of the same name.
+	attrEmbeddingsKey = "embeddings"
 )
 
 // knownAppIds is the engine's closed runnable set, for the INVENTORY FALLBACK
@@ -190,7 +199,10 @@ type InferenceInput struct {
 	// the safe direction: it can report a configured cluster as unconfigured,
 	// never the reverse.
 	FederationConfigured bool
-	Now                  time.Time
+	// EmbedderBound is true when the cluster's embedder binding is active:
+	// the index has a model, whichever source serves it.
+	EmbedderBound bool
+	Now           time.Time
 }
 
 // InferenceLanes returns the three doors, ALWAYS all three, in chain order.
@@ -201,6 +213,7 @@ type InferenceInput struct {
 func InferenceLanes(in InferenceInput) []LaneReport {
 	localConfigured, localLive := false, false
 	appConfigured, appLive := false, false
+	embedAdvertised, embedLive := false, false
 
 	for _, reg := range in.Registrations {
 		// A REVOKED REGISTRATION IS NO DOOR AT ALL. Revocation is a decision,
@@ -215,6 +228,12 @@ func InferenceLanes(in InferenceInput) []LaneReport {
 				localConfigured = true
 				if live {
 					localLive = true
+				}
+			}
+			if id, ok := modelIdFromLabel(key); ok && id != "" && advertisesEmbeddings(value) {
+				embedAdvertised = true
+				if live {
+					embedLive = true
 				}
 			}
 			if id, ok := appIdFromLabel(key); ok && id != "" {
@@ -254,7 +273,62 @@ func InferenceLanes(in InferenceInput) []LaneReport {
 		// cannot use the door. That disagreement is real and must still fold
 		// to `partial`, which an unmarked lane guarantees.
 		inferenceLane(InferenceLaneFederation, "deployment", "", in.FederationConfigured, in.FederationConfigured),
+		// Search and memory: a bound embedder, or an embedding model a machine
+		// advertises (which the engine binds on its own when none is bound).
+		// Cluster-scoped: the binding and the registrations are rows every
+		// node reads alike.
+		inferenceLane(InferenceLaneEmbeddings, "fleet", LaneScopeCluster, in.EmbedderBound || embedAdvertised, embedLive),
 	}
+}
+
+// EmbeddingCandidate is one embedding model an online machine advertises,
+// with the person whose machine it is: what the engine binds when no embedder
+// is bound yet.
+type EmbeddingCandidate struct {
+	ModelId     string
+	OwnerUserId string
+}
+
+// EmbeddingCandidates are the embedding models online machines advertise, in
+// model-id order so every node proposes the same first one.
+func EmbeddingCandidates(regs []RegistrationFacts, now time.Time) []EmbeddingCandidate {
+	var out []EmbeddingCandidate
+	seen := map[string]bool{}
+	for _, reg := range regs {
+		if !reg.online(now) {
+			continue
+		}
+		for key, value := range reg.labelMerge() {
+			id, ok := modelIdFromLabel(key)
+			if !ok || id == "" || !advertisesEmbeddings(value) || seen[id+"\x00"+reg.OwnerUserId] {
+				continue
+			}
+			seen[id+"\x00"+reg.OwnerUserId] = true
+			out = append(out, EmbeddingCandidate{ModelId: id, OwnerUserId: reg.OwnerUserId})
+		}
+	}
+	sort.Slice(out, func(i, j int) bool {
+		if out[i].ModelId != out[j].ModelId {
+			return out[i].ModelId < out[j].ModelId
+		}
+		return out[i].OwnerUserId < out[j].OwnerUserId
+	})
+	return out
+}
+
+// advertisesEmbeddings reads the `embeddings` attribute of a model label.
+func advertisesEmbeddings(value string) bool {
+	for _, part := range strings.Split(value, ",") {
+		k, v, ok := strings.Cut(strings.TrimSpace(part), "=")
+		if !ok || strings.TrimSpace(k) != attrEmbeddingsKey {
+			continue
+		}
+		switch strings.ToLower(strings.TrimSpace(v)) {
+		case "1", "true", "yes", "y":
+			return true
+		}
+	}
+	return false
 }
 
 // inferenceLane builds one lane. The live slot carries NO SOURCE, and that is
@@ -272,15 +346,25 @@ func inferenceLane(name, from, scope string, configured, live bool) LaneReport {
 	}
 }
 
-// InferenceConfigured is the module's verdict: ONE complete lane configures
-// it, the same rule evaluateModule applies to every lane-driven module.
+// InferenceConfigured is the module's verdict: ONE complete door -- local, app
+// or federation -- AND the embeddings lane (design record 2026-10-18-routes).
+// A cluster that can answer but cannot search or remember is not set up: Apps
+// alone cannot work, and an owner who reached the desk on it would find Library
+// search and memory recall refusing with nothing on the first-run screen having
+// said why.
 func InferenceConfigured(lanes []LaneReport) bool {
+	door, embeddings := false, false
 	for _, l := range lanes {
-		if l.Complete {
-			return true
+		if !l.Complete {
+			continue
+		}
+		if l.Name == InferenceLaneEmbeddings {
+			embeddings = true
+		} else {
+			door = true
 		}
 	}
-	return false
+	return door && embeddings
 }
 
 // InferenceLive reports whether any configured door is open right now. Read by

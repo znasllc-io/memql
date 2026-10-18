@@ -8000,6 +8000,8 @@ type RouterDecisionsRecentArgs struct {
 	Rule string
 	// Only decisions with this outcome. A park is recorded as its refusal code.
 	Outcome string
+	// Only decisions made under this route a person chose: local, apps or one of their own.
+	Route string
 }
 
 // RouterDecisionsRecent calls the engine query routerDecisionsRecent.
@@ -8043,8 +8045,33 @@ func RouterDecisionsRecentBuild(args RouterDecisionsRecentArgs) string {
 		b.WriteString("outcome: ")
 		b.WriteString(quoteMemQL(args.Outcome))
 	}
+	if args.Route != "" {
+		if b.Len() > 28 {
+			b.WriteString(", ")
+		}
+		b.WriteString("route: ")
+		b.WriteString(quoteMemQL(args.Route))
+	}
 	b.WriteString(")")
 	return b.String()
+}
+
+// RoutesForOwner -- The caller's own routes, the ones they can pick in Ask beside Auto, Local and Apps.
+// Filtered on the caller even though the concept's tier would also admit a cluster owner: this is the one wire read of the concept, and a person's route list is theirs whatever their role.
+//
+// Bound concept: v1:router:route (machine-readable: BoundConcepts["routesForOwner"] in generated_concepts.go).
+type RoutesForOwnerArgs struct {
+}
+
+// RoutesForOwner calls the engine query routesForOwner.
+func (qc *QueryClient) RoutesForOwner(ctx context.Context, args RoutesForOwnerArgs) (*Result, error) {
+	call := RoutesForOwnerBuild(args)
+	return qc.executeNamed(ctx, "routesForOwner", call)
+}
+
+func RoutesForOwnerBuild(args RoutesForOwnerArgs) string {
+	_ = args
+	return "query routesForOwner()"
 }
 
 // RoutingPolicyForOwner -- The caller's active routing policy, or nothing when they never set one (the common case -- the router then applies firstFit + nextMatching).

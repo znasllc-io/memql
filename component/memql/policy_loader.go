@@ -15,6 +15,13 @@ type PolicyRegistry struct {
 	byName   map[string]*PolicyConfig
 	defaults map[string]*PolicyConfig
 	store    PolicyStore
+	// routes and auto are the routing document's route half (design record
+	// 2026-10-18-routes): the cluster's overrides of Local and Apps, and
+	// Auto's balance. A per-decision SNAPSHOT carries them from the same
+	// committed revision as its policies, so a route and the policies its
+	// sources read can never come from two different saves.
+	routes map[string]RouteJobs
+	auto   *AutoBalance
 }
 
 func newPolicyRegistry() *PolicyRegistry {

@@ -9056,6 +9056,8 @@ type RecordRouterCallArgs struct {
 	MinContextTokens int
 	// Whose machine served a local call. Empty until shared machines land.
 	MachineOwnerUserId string
+	// The route a person chose for this call in Ask. Empty means Auto.
+	Route string
 }
 
 // RecordRouterCall calls the engine mutation recordRouterCall.
@@ -9340,6 +9342,13 @@ func RecordRouterCallBuild(args RecordRouterCallArgs) string {
 		}
 		b.WriteString("machineOwnerUserId: ")
 		b.WriteString(quoteMemQL(args.MachineOwnerUserId))
+	}
+	if args.Route != "" {
+		if b.Len() > 26 {
+			b.WriteString(", ")
+		}
+		b.WriteString("route: ")
+		b.WriteString(quoteMemQL(args.Route))
 	}
 	b.WriteString(")")
 	return b.String()

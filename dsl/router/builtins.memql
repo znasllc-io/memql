@@ -43,3 +43,82 @@ builtin routingRenderEvidenceProposal {
  form object!
  reason string!
 }
+
+// ---- Routes (design record 2026-10-18-routes) ----
+
+/// The routes this person can pick for a message in Ask -- Auto, Local and Apps, then their own --
+/// each saying whether it can serve every job for them right now, and why not when it cannot. One
+/// row: {routes, revision}. The revision is the routing document's, for routeSave and routeReset.
+@sdk
+@executor("routesForActor")
+builtin routesForActor { }
+
+/// Save a route. Without an id, create one of your own (name required). With your own route's id,
+/// change it. With `local` or `apps`, change that route for the whole cluster: owner or developer,
+/// and the revision from routesForActor. Each job holds one to four sources -- fleet:, app: or
+/// federation: -- in the order they are tried. Search and memory is never a route's: every route
+/// uses the cluster's embedding model.
+@sdk
+@executor("routeSave")
+builtin routeSave {
+  id string
+  name string
+  fast []string!
+  strong []string!
+  reasoning []string!
+  revision integer
+}
+
+/// Delete one of your own routes. Built-in routes cannot be deleted.
+@sdk
+@executor("routeDelete")
+builtin routeDelete {
+  id string!
+}
+
+/// Restore the cluster's Local or Apps route to MemQL's default. Owner or developer, with the
+/// revision from routesForActor.
+@sdk
+@executor("routeReset")
+builtin routeReset {
+  id string!
+  revision integer!
+}
+
+/// Auto's balance for the whole cluster -- Speed, Cost and Quality, 0 to 100 each -- with MemQL's
+/// recommended values and whether they were changed. One row.
+@sdk
+@executor("autoBalance")
+builtin autoBalance { }
+
+/// Change Auto's balance for the whole cluster. Owner or developer, with the revision from
+/// autoBalance. Reliability always weighs the mean of the three, so no setting trades it away.
+@sdk
+@executor("autoBalanceSave")
+builtin autoBalanceSave {
+  speed integer!
+  cost integer!
+  quality integer!
+  revision integer!
+}
+
+/// Return Auto's balance to MemQL's recommended values. Owner or developer.
+@sdk
+@executor("autoBalanceReset")
+builtin autoBalanceReset {
+  revision integer!
+}
+
+/// Your monthly AI budget and what you have spent with metered vendors this month. Your own
+/// machines and app subscriptions never count. One row.
+@sdk
+@executor("myBudget")
+builtin myBudget { }
+
+/// Set your monthly AI budget in US dollars, or remove it by leaving monthlyLimitUSD out. Auto
+/// keeps your calls inside it.
+@sdk
+@executor("myBudgetSave")
+builtin myBudgetSave {
+  monthlyLimitUSD number
+}

@@ -5388,7 +5388,8 @@
         ],
         "scope": [
           "agent",
-          "partition"
+          "partition",
+          "user"
         ]
       }
     },
@@ -5425,6 +5426,7 @@
         "providerName",
         "requestId",
         "requestedLevel",
+        "route",
         "rule",
         "servedEffort",
         "servedLevel",
@@ -5525,6 +5527,23 @@
         "fallbacks",
         "name",
         "primary"
+      ]
+    },
+    {
+      "concept": "v1:router:route",
+      "file": "router/concepts.memql",
+      "fields": [
+        "active",
+        "fast",
+        "name",
+        "ownerUserId",
+        "reasoning",
+        "strong",
+        "updatedAt"
+      ],
+      "required": [
+        "name",
+        "ownerUserId"
       ]
     },
     {

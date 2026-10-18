@@ -380,6 +380,7 @@ func fallbackRecord(req ResolveRequest, failedResolved Resolved, err error) Call
 		Degraded:           failedResolved.Decision.Degraded,
 		Rule:               failedResolved.Decision.Rule,
 		Policy:             failedResolved.Decision.Policy,
+		Route:              failedResolved.Decision.Route,
 		Door:               failedResolved.Decision.Door,
 		Considered:         withFailureNoted(failedResolved.Decision.Considered, failedResolved.ProviderName, failedResolved.Decision.Door, err),
 		Touches:            failedResolved.Decision.Touches,

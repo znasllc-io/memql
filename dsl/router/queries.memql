@@ -61,12 +61,15 @@ query call routerDecisionsRecent {
     rule     string
     /// Only decisions with this outcome. A park is recorded as its refusal code.
     outcome  string
+    /// Only decisions made under this route a person chose: local, apps or one of their own.
+    route    string
   }
   filter   row => (args.since == nil || row.createdAt >= args.since)
                && (args.level == nil || row.level == args.level)
                && (args.door == nil || row.door == args.door)
                && (args.rule == nil || row.rule == args.rule)
                && (args.outcome == nil || row.outcome == args.outcome)
+               && (args.route == nil || row.route == args.route)
   shape    routerDecision
   sort     "row.createdAt", "desc"
   paginate 200
@@ -159,3 +162,92 @@ query call myModelCallsOnMachine {
   paginate 100
   shape routerDecision
 }
+
+// ---- Routes a person makes (design record 2026-10-18-routes) ----
+
+/// The caller's own routes, the ones they can pick in Ask beside Auto, Local and Apps.
+///
+/// Filtered on the caller even though the concept's tier would also admit a cluster owner: this is
+/// the one wire read of the concept, and a person's route list is theirs whatever their role.
+@actor
+@unbounded("one person's own routes -- a handful by construction, each one named by its owner")
+query route routesForOwner {
+  filter  row => row.ownerUserId == actor.userId && isActiveRecord(row)
+  shape   routeFull
+}
+
+/// One person's route by id, for the router resolving a call made under it and for routeSave
+/// updating it.
+///
+/// @serverOnly and read under the maintenance principal: the call it serves may run on a planner or
+/// an agent replica far from the person's own stream, so the owner is an ARGUMENT, and the filter
+/// requires it -- a route id alone never resolves to somebody else's route. actor.userId scoping is
+/// not the fix: on that replica the actor is often the run's system principal, not the person whose
+/// route it is, so a caller-scoped read would find no route and refuse a call the person chose.
+@serverOnly
+@unbounded("at most one live row per route id")
+query route routeForOwner {
+  args {
+    routeId      string!
+    ownerUserId  string!
+  }
+  filter  row => row.id == args.routeId && row.ownerUserId == args.ownerUserId && isActiveRecord(row)
+  shape   routeFull
+}
+
+/// Every live route one person has, for routeSave's name check and the routes list.
+///
+/// @serverOnly because the person is supplied by the server from the caller's identity: the wire
+/// read is routesForOwner, which filters on actor.userId itself. This one exists for the server's
+/// own reads under the maintenance principal, where actor.userId names that principal rather than
+/// the person, so caller scoping would return nothing.
+@serverOnly
+@unbounded("one person's own routes -- a handful by construction")
+query route routesOfOwner {
+  args {
+    ownerUserId  string!
+  }
+  filter  row => row.ownerUserId == args.ownerUserId && isActiveRecord(row)
+  shape   routeFull
+}
+
+/// The recent decisions Auto ranks on: how fast and how reliably each source served each level
+/// lately (design record 2026-10-18-routes, "Auto").
+///
+/// Read under the maintenance principal by the router, which folds them into per-source signals and
+/// keeps the fold for a minute. Nothing here is a person's: the projection carries no prompt, no
+/// user and no error text -- only what served, at which level, how it ended and how long it took.
+/// actor.userId scoping is not the fix: the signal is how a SOURCE behaves across everyone's
+/// calls, and one person's calls alone are too few to rank on.
+@actor
+@serverOnly
+query call routerCallsForSignals {
+  args {
+    /// Inclusive lower bound, RFC3339.
+    since  string!
+  }
+  filter   row => actor.isClusterOwner == true && row.createdAt >= args.since
+  shape    routerCallSignal
+  sort     "row.createdAt", "desc"
+  paginate 500
+}
+
+/// One person's calls in a window, for their monthly budget: what they spent with metered vendors.
+///
+/// @serverOnly and read under the maintenance principal by myBudget and by Auto, with the person as
+/// an argument the server supplies from the caller's identity, never from the wire. actor.userId
+/// scoping is not the fix: v1:router:call declares the public tier, so the filter would be the only
+/// gate, and Auto reads this on replicas where the actor is the run's system principal.
+@actor
+@serverOnly
+@unbounded("one person's calls in one calendar month -- the budget is the sum of all of them, so the read is the window")
+query call routerCallsForBudget {
+  args {
+    userId  string!
+    /// Inclusive lower bound, RFC3339 -- the first of the month, UTC.
+    since   string!
+  }
+  filter  row => actor.isClusterOwner == true && row.userId == args.userId && row.createdAt >= args.since
+  shape   routerCallSpend
+}
+

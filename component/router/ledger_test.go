@@ -352,13 +352,16 @@ func TestRouterDecisionShapeKeepsItsProjectionAndGainsTheTwoNewFields(t *testing
 			t.Errorf("routerDecision no longer projects %q; the existing read changed", field)
 		}
 	}
-	for _, field := range []string{"callerKind", "cacheKind"} {
+	// callerKind and cacheKind (memql#5581), and route -- the route a person
+	// chose, which History filters on (design record 2026-10-18-routes).
+	added := []string{"callerKind", "cacheKind", "route"}
+	for _, field := range added {
 		if !body[field] {
 			t.Errorf("routerDecision does not project %q, so the reader cannot see it", field)
 		}
 	}
-	if len(body) != len(before)+2 {
-		t.Errorf("routerDecision projects %d fields, want the %d it had plus the two new ones", len(body), len(before))
+	if len(body) != len(before)+len(added) {
+		t.Errorf("routerDecision projects %d fields, want the %d it had plus the %d added since", len(body), len(before), len(added))
 	}
 }
 

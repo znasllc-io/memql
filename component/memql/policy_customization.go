@@ -21,6 +21,11 @@ type PolicyDocument struct {
 	Revision  int64                   `json:"revision"`
 	Overrides map[string]PolicyConfig `json:"overrides"`
 	UpdatedBy string                  `json:"updatedBy"`
+	// Routes are the cluster's overrides of the built-in Local and Apps routes,
+	// keyed by route id; an absent key is the shipped default (routes.go).
+	Routes map[string]RouteJobs `json:"routes,omitempty"`
+	// Auto is Auto's balance; nil is MemQL's recommended one.
+	Auto *AutoBalance `json:"auto,omitempty"`
 }
 
 type PolicyStore interface {
@@ -110,6 +115,18 @@ func policySnapshot(defaults map[string]*PolicyConfig, doc PolicyDocument) (*Pol
 	}
 	if err := ExpandPolicyChains(snapshot); err != nil {
 		return nil, err
+	}
+	// The route half rides the same snapshot (routes.go), so a route's
+	// sources and the policies they read come from one committed revision.
+	if len(doc.Routes) > 0 {
+		snapshot.routes = make(map[string]RouteJobs, len(doc.Routes))
+		for id, jobs := range doc.Routes {
+			snapshot.routes[id] = jobs.Clone()
+		}
+	}
+	if doc.Auto != nil {
+		auto := *doc.Auto
+		snapshot.auto = &auto
 	}
 	// The binding remains an invariant even if a reference tries to wrap it.
 	if p, ok := snapshot.Lookup("embeddingsBinding"); ok && (p.Primary != "embedder:active" || len(p.Fallbacks) != 0) {

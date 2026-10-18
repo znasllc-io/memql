@@ -115,12 +115,15 @@ func (*readinessEmbedOnly) Embed(context.Context, string) ([]float32, error) {
 	panic("readiness must not dispatch")
 }
 
-func TestInferenceStatusRunnableAppDoesNotPromiseUnsupportedStreaming(t *testing.T) {
+// A reachable app IS a streaming source for Ask (design record
+// 2026-10-18-routes): it answers a streaming turn whole, as one chunk, so a
+// person whose only answering source is a signed-in app can use Ask.
+func TestInferenceStatusRunnableAppIsAStreamingSource(t *testing.T) {
 	r := newProviderRegistry()
 	apps := &stubApps{doors: []AppDoor{runnableDoor(appIdClaudeCode)}}
 	r.SetAppInference(apps)
-	if streamingReady(t, r, userCtx("alice")) {
-		t.Fatal("appProvider supports completed chat, not plain streaming chat")
+	if !streamingReady(t, r, userCtx("alice")) {
+		t.Fatal("a reachable app answers streaming chat, whole, so Ask can use it")
 	}
 	rows, _ := (&MemQLEngine{providers: r}).evaluateInferenceStatusExpression(userCtx("alice"))
 	if decodePayload(t, rows[0].Payload)["appEligible"] != true || apps.lastActor != "alice" || apps.lastReq.AppId != "" {

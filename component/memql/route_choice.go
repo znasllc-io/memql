@@ -46,6 +46,7 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/znasllc-io/memql/component/auth"
 	"github.com/znasllc-io/memql/core/airoute"
 	"github.com/znasllc-io/memql/core/common"
 )
@@ -62,6 +63,11 @@ const (
 	RouteLevelInvalid = "route_level_invalid"
 	// RoutePolicyUnknown: the source names a route this cluster does not have.
 	RoutePolicyUnknown = "route_policy_unknown"
+	// RouteNotReady: the source names a person's route (route:<id>) that
+	// cannot serve every job for them right now. The reason says what is
+	// missing -- an embedding model, a signed-in app, a local model -- so the
+	// person can pick another route or fix the one they chose.
+	RouteNotReady = "route_not_ready"
 )
 
 // RouteChoiceError is a refused choice. Error() LEADS WITH THE CODE, the
@@ -94,7 +100,7 @@ var federationChoices = map[string]bool{"cheapest": true, "strongest": true}
 //
 //	source: "" | app:claude-code | app:codex | app:* | fleet:strongest |
 //	        fleet:fastest | fleet:<modelId> | federation:cheapest |
-//	        federation:strongest | policy:<name>
+//	        federation:strongest | policy:<name> | route:<id>
 //	level:  "" | fast | strong | reasoning
 //
 // Anything else is a *RouteChoiceError. It does not know which routes a
@@ -104,6 +110,11 @@ func ParseRouteChoice(source, level string) (common.RouteChoice, error) {
 	source, level = strings.TrimSpace(source), strings.TrimSpace(level)
 	if err := routeSourceRefusal(source); err != nil {
 		return common.RouteChoice{}, err
+	}
+	// `route:auto` IS AUTO, and is stored as Auto: an empty source, so a run
+	// that chose Auto reads exactly like one nobody chose for.
+	if id, isRoute := RouteIdFromSource(source); isRoute && id == "" {
+		source = ""
 	}
 	if level != "" {
 		parsed, err := airoute.ParseLevel(level)
@@ -149,8 +160,13 @@ func routeSourceRefusal(source string) error {
 			return refuse("does not name a route: policy:<name>, the name a letter followed by letters and digits")
 		}
 		return nil
+	case strings.HasPrefix(source, RouteSourcePrefix):
+		if id, _ := RouteIdFromSource(source); id != "" && !ValidRouteId(id) {
+			return refuse("does not name a route: route:auto, route:local, route:apps or route:<id> of one of your own")
+		}
+		return nil
 	}
-	return refuse("is not a source: leave it empty for Auto, or choose an app:, fleet:, federation: or policy: source")
+	return refuse("is not a source: leave it empty for Auto, or choose an app:, fleet:, federation:, policy: or route: source")
 }
 
 // routePolicyName returns the route a source names, when it names one.
@@ -165,6 +181,12 @@ func routePolicyName(source string) (string, bool) {
 // keys that changes minute to minute, and is answered when a call is made --
 // by a refusal naming the door, rather than by refusing the turn now.
 func (e *MemQLEngine) CheckRouteChoice(ctx context.Context, choice common.RouteChoice) error {
+	if id, isPersonRoute := RouteIdFromSource(choice.Source); isPersonRoute {
+		if id == "" {
+			return nil
+		}
+		return e.checkPersonRoute(ctx, choice, id)
+	}
 	name, isRoute := routePolicyName(choice.Source)
 	if !isRoute {
 		return nil
@@ -184,6 +206,57 @@ func (e *MemQLEngine) CheckRouteChoice(ctx context.Context, choice common.RouteC
 	}
 	if _, ok := policies.Lookup(name); !ok {
 		return unknown
+	}
+	return nil
+}
+
+// checkPersonRoute refuses a person's route this person does not have, or one
+// that cannot serve every job for them now (design record 2026-10-18-routes).
+//
+// Readiness is checked HERE, at the turn, where the person can still pick
+// another route: refused later, at a call, the same fact would park a run the
+// person is watching start. A route that WAS ready and stops being ready
+// mid-run is the call-time refusal's to report, naming the route.
+func (e *MemQLEngine) checkPersonRoute(ctx context.Context, choice common.RouteChoice, id string) error {
+	unknown := &RouteChoiceError{Code: RoutePolicyUnknown, Field: "source", Value: choice.Source,
+		Reason: fmt.Sprintf("route %q is not one of your routes", id)}
+	if e == nil || e.policies == nil {
+		return unknown
+	}
+	var spec RouteSpec
+	switch {
+	case id == RouteIdAuto:
+		return nil
+	case IsEditableBuiltinRoute(id):
+		doc, err := e.policies.RouteConfiguration(ctx)
+		if err != nil {
+			return fmt.Errorf("the cluster's routes could not be read to check %q: %w", id, err)
+		}
+		var override *RouteJobs
+		if j, ok := doc.Routes[id]; ok {
+			override = &j
+		}
+		spec, _ = BuiltinRouteSpec(id, override)
+	default:
+		owner := strings.TrimSpace(choice.By)
+		if owner == "" {
+			if subject, ok := auth.SubjectFromContext(ctx); ok {
+				owner = subject.UserId
+			}
+		}
+		got, found, err := ReadPersonalRoute(ctx, e, owner, id)
+		if err != nil {
+			return fmt.Errorf("your routes could not be read to check %q: %w", id, err)
+		}
+		if !found {
+			return unknown
+		}
+		spec = got
+	}
+	summary := e.routeReadinessFor(ctx).summarize(spec)
+	if !summary.Ready {
+		return &RouteChoiceError{Code: RouteNotReady, Field: "source", Value: choice.Source,
+			Reason: spec.Name + ": " + summary.Reason}
 	}
 	return nil
 }
@@ -229,7 +302,17 @@ func ApplyRunRouting(ctx context.Context, req airoute.ResolveRequest) (airoute.R
 	}
 	ov := rc.Override
 	if choice.Source != "" && (ov == nil || strings.TrimSpace(ov.Model) == "") {
-		if name, isRoute := routePolicyName(choice.Source); isRoute {
+		if id, isPersonRoute := RouteIdFromSource(choice.Source); isPersonRoute && id != "" {
+			// A PERSON'S ROUTE (design record 2026-10-18-routes): the router
+			// walks the route's own sources for the call's level and never
+			// anything else. It overrules an author's pin the way a policy
+			// route does, and the owner rides along so a personal route is
+			// read for the person who chose it and nobody else.
+			req.PersonRoute = id
+			req.PersonRouteOwner = strings.TrimSpace(rc.Routing.By)
+			req.Route = ""
+			req.ExplicitProvider, req.PinnedBy = "", ""
+		} else if name, isRoute := routePolicyName(choice.Source); isRoute {
 			req.Route = name
 			// The person's route overrules an author's pin, and a cleared pin
 			// is nobody's.
