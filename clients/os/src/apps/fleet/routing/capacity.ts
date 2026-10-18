@@ -73,17 +73,26 @@ function bare(id: string): string {
   return at === -1 ? id : id.slice(at + 1);
 }
 
-function modelFrom(raw: unknown, loaded: readonly string[]): ModelCapacity | null {
-  if (raw === null || typeof raw !== "object") return null;
-  const row = raw as Row;
+function asRow(v: unknown): Row | null {
+  return v !== null && typeof v === "object" && !Array.isArray(v) ? (v as Row) : null;
+}
+
+// One offered model. `fleetCapacity` gives each its own `slots` object
+// ({inFlight, max}), its catalog `needBytes` and whether it is `loaded`; the
+// machine's `performance` stands in when the model carries no figures of its
+// own. A bare id (an older reply) is the model with nothing measured.
+function modelFrom(raw: unknown, loaded: readonly string[], performance: Row | null): ModelCapacity | null {
+  const row = typeof raw === "string" ? { modelId: raw } : asRow(raw);
+  if (row === null) return null;
   const modelId = text(row, "modelId", "model", "id");
   if (modelId === "") return null;
+  const slots = asRow(row["slots"]);
   return {
     modelId,
-    inFlight: num(row, "inFlight", "active", "activeCount"),
-    slots: num(row, "slots", "maxConcurrent", "concurrency"),
-    tokensPerSecond: num(row, "tokensPerSecond", "tps"),
-    medianLatencyMs: num(row, "medianLatencyMs", "latencyMs", "p50LatencyMs"),
+    inFlight: (slots ? num(slots, "inFlight") : null) ?? num(row, "inFlight", "active", "activeCount"),
+    slots: (slots ? num(slots, "max") : null) ?? num(row, "slots", "maxConcurrent", "concurrency"),
+    tokensPerSecond: num(row, "tokensPerSecond", "tps") ?? (performance ? num(performance, "tokensPerSec", "tokensPerSecond") : null),
+    medianLatencyMs: num(row, "medianLatencyMs", "latencyMs", "p50LatencyMs") ?? (performance ? num(performance, "medianLatencyMs") : null),
     needBytes: num(row, "needBytes", "memoryNeedBytes"),
     loaded: row["loaded"] === true || loaded.includes(modelId),
   };
@@ -94,7 +103,12 @@ function machineFrom(raw: Row): MachineCapacity | null {
   const machineId = text(row, "machineId", "registrationId", "workerId", "id");
   if (machineId === "") return null;
   const memory = row["memory"] !== null && typeof row["memory"] === "object" ? (row["memory"] as Row) : row;
-  const loaded = list(row["loaded"] ?? row["loadedModels"]).filter((m): m is string => typeof m === "string");
+  // Loaded models arrive as objects ({model, runtime, sizeBytes, activeCalls});
+  // a plain id is read the same.
+  const loaded = list(row["loaded"] ?? row["loadedModels"])
+    .map((m) => (typeof m === "string" ? m.trim() : asRow(m) ? text(asRow(m)!, "model", "modelId") : ""))
+    .filter((m) => m !== "");
+  const performance = asRow(row["performance"]);
   return {
     machineId: bare(machineId),
     name: text(row, "displayName", "name") || bare(machineId),
@@ -102,7 +116,7 @@ function machineFrom(raw: Row): MachineCapacity | null {
     memoryFreeBytes: num(memory, "freeBytes", "memoryFreeBytes", "memoryFree", "free"),
     memoryKind: text(memory, "kind", "memoryKind", "memoryType"),
     loaded,
-    models: list(row["models"]).map((m) => modelFrom(m, loaded)).filter((m): m is ModelCapacity => m !== null),
+    models: list(row["models"]).map((m) => modelFrom(m, loaded, performance)).filter((m): m is ModelCapacity => m !== null),
   };
 }
 
