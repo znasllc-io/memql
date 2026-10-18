@@ -1,5 +1,5 @@
 import { Caption, CopyField, Rail, type Stop } from "../../../../kit";
-import { PullBar } from "../../machines/ModelDownloads";
+import { PullBar, SetupDownloadBar } from "../../machines/ModelDownloads";
 import type { Check } from "../flow";
 
 // CHECKS: online, steady, and what you asked for (design record D4, D5, D13,
@@ -37,10 +37,11 @@ export function ChecksStop({ checks }: { checks: readonly Check[] }) {
   );
 
   function bodyFor(check: Check) {
-    if (check.pull === undefined && check.repair === undefined && check.command === undefined) return undefined;
+    if (check.pull === undefined && check.download === undefined && check.repair === undefined && check.command === undefined) return undefined;
     return (
       <div className="os-stop-body os-fleet-repair">
         {check.pull === undefined ? null : <PullBar pull={check.pull} />}
+        {check.download === undefined ? null : <SetupDownloadBar stage={check.download} />}
         {check.repair === undefined ? null : <Caption>{check.repair}</Caption>}
         {check.command === undefined ? null : (
           <CopyField value={check.command} label={`the ${check.name.toLowerCase()} command`} />

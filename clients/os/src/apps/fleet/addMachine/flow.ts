@@ -4,6 +4,15 @@ import { formatFreshness } from "../../../kit/format";
 import { isWorkerOnline } from "../online";
 import { computerUseStatus, hasRoundTrip, isRevoked, machineName, type MachineRow } from "../rows";
 import { isChatModel, machineModelsFrom, type ModelPull } from "../machines/models";
+import {
+  setupDownloadLabel,
+  setupNow,
+  setupRunningWords,
+  setupStage,
+  setupWaitingAnswer,
+  type MachineSetup,
+  type SetupStage,
+} from "../machines/setup";
 import type { ModelResponse } from "./useModelResponse";
 import {
   INSTALL_PLATFORM_LABEL,
@@ -170,6 +179,12 @@ export interface Check {
   act?: "pullRecommended" | "retryResponse";
   /** The pull in flight, drawn as progress under the Models line. */
   pull?: ModelPull;
+  /** The installer's own download (memql#6229), drawn as progress under the
+   *  Models line: whole-model bytes, where `pull` counts the part in flight. */
+  download?: SetupStage;
+  /** What the floor says while this check is the one moving: "Downloading
+   *  models" rather than "Checking", and the measure of it. */
+  footer?: { state: string; detail: string };
 }
 
 /** The worker log, read on the machine: where a worker that cannot connect says why. */
@@ -205,15 +220,24 @@ export function checksFor(
   response: ModelResponse = { state: "waiting" },
 ): Check[] {
   const checks: Check[] = [connectionCheck(machine, beats, now)];
+  // The installer's own account (memql#6229), as it stands NOW: a running
+  // report the cluster stopped hearing is an installer that stopped.
+  const setup = setupNow(machine.setup, now);
   if (draft.computerUse) checks.push(buildCheck(machine));
-  if (draft.workbench) checks.push(workbenchCheck(machine, draft));
+  if (draft.workbench) checks.push(workbenchCheck(machine, draft, setup));
   if (draft.computerUse && draft.platform === "mac") checks.push(permissionsCheck(machine));
   if (draft.computerUse && draft.platform === "linux") checks.push(displayCheck(machine));
   if (draft.inference) {
-    checks.push(...inferenceChecks(machine, pulls, draft));
+    checks.push(...inferenceChecks(machine, pulls, draft, setup));
     const model = machineModelsFrom(machine.reportedLabels).find(isChatModel);
-    const available = checks.find(check => check.id === "models")?.state === "done";
-    checks.push(!available
+    const modelsState = checks.find(check => check.id === "models")?.state;
+    const available = modelsState === "done";
+    checks.push(modelsState === "skipped"
+      // A machine that will have no models has nothing to answer with, and
+      // a check held "after the models" forever would keep the wizard from
+      // ever saying the machine is ready.
+      ? { id: "response", name: "Model response", state: "skipped", answer: "No models here" }
+      : !available
       ? { id: "response", name: "Model response", state: "ahead", answer: "After the models" }
       : !model
         ? { id: "response", name: "Model response", state: "open", answer: "No text model", repair: "Download a text model to finish this check.", act: "pullRecommended" }
@@ -267,18 +291,40 @@ function buildCheck(machine: MachineRow): Check {
   return { id: "build", name: "Computer use", state: "unknown", answer: "Build not reported" };
 }
 
-function workbenchCheck(machine: MachineRow, draft: Draft): Check {
+const WORKBENCH_REPAIR = "Start Docker with at least 3 CPUs and 4 GiB, then run this on the machine.";
+
+// THE INSTALLER SAYS WHETHER IT IS THE PERSON'S TURN (memql#6229). The
+// install command sets workbenches up itself, after the models, so while it
+// runs this check waits its turn ("After the models") or says it is being
+// done, and the command is offered only once the installer says it could not
+// do it -- in its own words -- or stopped before it got here.
+function workbenchCheck(machine: MachineRow, draft: Draft, setup: MachineSetup | null): Check {
+  const base = { id: "workbench", name: "Fleet workbenches" } as const;
   if (machine.capabilities.includes("WORKBENCH") && (machine.workbenchContract ?? 0) >= 1) {
-    return { id: "workbench", name: "Fleet workbenches", state: "done", answer: "Ready" };
+    return { ...base, state: "done", answer: "Ready" };
   }
-  return {
-    id: "workbench",
-    name: "Fleet workbenches",
-    state: "open",
-    answer: "Not available yet",
-    repair: "Start Docker with at least 3 CPUs and 4 GiB, then run this on the machine.",
-    command: workbenchSetupCommand(draft.userLocal),
-  };
+  const command = workbenchSetupCommand(draft.userLocal);
+  const stage = setupStage(setup, "workbench");
+  if (setup !== null && stage !== null) {
+    if (setup.state === "running" && stage.state === "waiting") {
+      return { ...base, state: "ahead", answer: setupWaitingAnswer(setup, "workbench") };
+    }
+    if (setup.state === "running" && stage.state === "running") {
+      return { ...base, state: "current", answer: "Setting up", footer: { state: setupRunningWords("workbench"), detail: "" } };
+    }
+    if (stage.state === "done") {
+      // Set up, and not yet reported: the machine names the feature when it
+      // next reconnects, which the installer asks it to do.
+      return { ...base, state: "current", answer: "Waiting for the machine to report it", footer: { state: "Finishing workbenches", detail: "" } };
+    }
+    if ((stage.state === "failed" || stage.state === "skipped") && stage.detail !== "") {
+      return { ...base, state: "open", answer: "Not available yet", repair: stage.detail, command };
+    }
+    if (setup.state === "stopped") {
+      return { ...base, state: "open", answer: "Not set up", repair: `The installer stopped before this. ${WORKBENCH_REPAIR}`, command };
+    }
+  }
+  return { ...base, state: "open", answer: "Not available yet", repair: WORKBENCH_REPAIR, command };
 }
 
 function permissionsCheck(machine: MachineRow): Check {
@@ -318,33 +364,54 @@ function displayCheck(machine: MachineRow): Check {
   };
 }
 
-function inferenceChecks(machine: MachineRow, pulls: PullFacts, draft: Draft): Check[] {
-  const models = machineModelsFrom(machine.reportedLabels);
+function runtimeCheck(machine: MachineRow, draft: Draft, setup: MachineSetup | null, models: number): Check {
+  const base = { id: "runtime", name: "Model runtime" } as const;
   const runtimes = machine.hardware.runtimes.filter((r) => r.name !== "");
-  const runtime: Check =
-    models.length > 0 || runtimes.length > 0
-      ? {
-          id: "runtime",
-          name: "Model runtime",
-          state: "done",
-          answer: runtimes.length > 0 ? runtimes.map((r) => `${r.name} ${r.version}`.trim()).join(", ") : "Serving models",
-        }
-      : {
-          id: "runtime",
-          name: "Model runtime",
-          state: "open",
-          answer: "Not installed",
-          repair: "Run this on the machine to install it and download the models.",
-          command: setupCommand(draft.userLocal, true),
-        };
+  if (models > 0 || runtimes.length > 0) {
+    return { ...base, state: "done", answer: runtimes.length > 0 ? runtimes.map((r) => `${r.name} ${r.version}`.trim()).join(", ") : "Serving models" };
+  }
+  const command = setupCommand(draft.userLocal, true);
+  const stage = setupStage(setup, "runtime");
+  if (setup !== null && stage !== null) {
+    if (setup.state === "running" && stage.state === "running") {
+      return { ...base, state: "current", answer: "Installing", footer: { state: setupRunningWords("runtime"), detail: "" } };
+    }
+    if (setup.state === "running" && stage.state === "waiting") {
+      return { ...base, state: "ahead", answer: setupWaitingAnswer(setup, "runtime") };
+    }
+    // A machine the hardware floor rules out is not a failure: nothing will
+    // fix it short of other hardware, so it is said and settled.
+    if (stage.state === "skipped" && stage.detail !== "") {
+      return { ...base, state: "skipped", answer: "Not available here", repair: stage.detail };
+    }
+    if (stage.state === "failed" && stage.detail !== "") {
+      return { ...base, state: "stopped", answer: "Couldn’t install", repair: stage.detail, command };
+    }
+  }
+  return { ...base, state: "open", answer: "Not installed", repair: "Run this on the machine to install it and download the models.", command };
+}
+
+function inferenceChecks(machine: MachineRow, pulls: PullFacts, draft: Draft, setup: MachineSetup | null): Check[] {
+  const models = machineModelsFrom(machine.reportedLabels);
+  const runtime = runtimeCheck(machine, draft, setup, models.length);
   const startError = (pulls.startError ?? "").trim();
+  const stage = setupStage(setup, "models");
   let modelsCheck: Check;
   if (pulls.live !== null) {
     // A PARTIAL START keeps both facts on the one line: what is downloading,
     // and why the rest of the set did not start.
     modelsCheck = {
       id: "models", name: "Models", state: "current", answer: `Downloading ${pulls.live.model}`, pull: pulls.live,
+      footer: { state: setupRunningWords("models"), detail: pulls.live.model },
       ...(startError === "" ? {} : { repair: `The rest did not start: ${startError}` }),
+    };
+  } else if (setup?.state === "running" && stage?.state === "running") {
+    // THE INSTALLER IS DOWNLOADING THEM (memql#6229): said, measured, and no
+    // Download models -- that would start the same gigabytes a second time.
+    const what = stage.model === "" ? "the models" : stage.model;
+    modelsCheck = {
+      id: "models", name: "Models", state: "current", answer: `Downloading ${what}`, download: stage,
+      footer: { state: setupRunningWords("models"), detail: stage.model === "" ? "" : `${stage.model} · ${setupDownloadLabel(stage)}` },
     };
   } else if (startError !== "") {
     // A REFUSED START IS THE MODELS CHECK'S OWN STATE, never a banner over the
@@ -369,6 +436,27 @@ function inferenceChecks(machine: MachineRow, pulls: PullFacts, draft: Draft): C
     };
   } else if (models.length > 0) {
     modelsCheck = { id: "models", name: "Models", state: "done", answer: models.map((m) => m.modelId).join(", ") };
+  } else if (setup !== null && stage !== null && setup.state === "running" && stage.state === "waiting") {
+    modelsCheck = { id: "models", name: "Models", state: "ahead", answer: setupWaitingAnswer(setup, "models") };
+  } else if (setup?.state === "stopped" && stage?.state === "running" && runtime.state === "done") {
+    // The installer quit mid-download. What it fetched stays on the machine,
+    // and the runtime resumes from it, so the footer's Download models is the
+    // way on rather than a fresh start.
+    modelsCheck = {
+      id: "models", name: "Models", state: "open", answer: "Download stopped",
+      repair: "The installer stopped before the models finished. Download models picks up where it left off.",
+      act: "pullRecommended",
+    };
+  } else if (stage?.state === "failed" && stage.detail !== "") {
+    // The installer's own words for why, and Download models in the footer
+    // to try again from here.
+    modelsCheck = { id: "models", name: "Models", state: "stopped", answer: "Download failed", repair: stage.detail, act: "pullRecommended" };
+  } else if (stage?.state === "skipped" && stage.detail !== "" && runtime.state === "skipped") {
+    modelsCheck = { id: "models", name: "Models", state: "skipped", answer: "Not available here" };
+  } else if (stage?.state === "skipped" && stage.detail !== "" && runtime.state === "done") {
+    // Skipped by this machine's own policy (models.pull is off): the
+    // person's to change, on the machine.
+    modelsCheck = { id: "models", name: "Models", state: "open", answer: "Not downloaded", repair: stage.detail };
   } else if (runtime.state !== "done") {
     modelsCheck = { id: "models", name: "Models", state: "ahead", answer: "After the runtime" };
   } else {
@@ -503,8 +591,10 @@ function connectedAnswer(machine: MachineRow): string {
 function checksAnswer(checks: readonly Check[]): string {
   const settled = checks.filter(checkIsSettled).length;
   if (settled === checks.length) return "All set";
-  const next = checks.find((c) => !checkIsSettled(c) && c.state !== "ahead");
   const count = `${settled} of ${checks.length} done`;
+  const busy = checks.find((c) => c.state === "current" && c.footer !== undefined)?.footer;
+  if (busy) return `${count} · ${busy.state}`;
+  const next = checks.find((c) => !checkIsSettled(c) && c.state !== "ahead");
   return next === undefined ? count : `${count} · ${next.name} next`;
 }
 
@@ -654,6 +744,9 @@ export function barFor(facts: FlowFacts, checks: readonly Check[], pulling = fal
   // cluster working.
   const moving = checks.some((c) => c.state === "current");
   const attention = checks.find((c) => c.state === "stopped") ?? (moving ? undefined : checks.find((c) => c.state === "open"));
+  // THE WORK IN HAND, IN ITS OWN WORDS: "Downloading models", not
+  // "Checking", while the machine is busy with it (memql#6229).
+  const busy = attention ? undefined : checks.find((c) => c.state === "current" && c.footer !== undefined)?.footer;
   const pending = attention ?? checks.find((c) => !checkIsSettled(c) && c.state !== "ahead");
   const repair = checks.find((c) => c.act !== undefined)?.act;
   const canRepair = facts.connected && machine !== null && isWorkerOnline(machine, facts.now);
@@ -665,10 +758,10 @@ export function barFor(facts: FlowFacts, checks: readonly Check[], pulling = fal
         ? [{ id: repair, label: repair === "retryResponse" ? "Retry" : "Download models", tone: "primary" }]
         : [];
   return {
-    state: settled ? "Ready" : attention ? `${attention.name} needs attention` : "Checking",
+    state: settled ? "Ready" : attention ? `${attention.name} needs attention` : busy ? busy.state : "Checking",
     // The detail is the check that is MOVING; one that needs somebody names
     // itself in the state, and says why on its own line in the checks.
-    detail: settled ? `${shown} is ready.` : attention || pending === undefined ? "" : `${pending.name}: ${pending.answer}`,
+    detail: settled ? `${shown} is ready.` : attention || pending === undefined ? "" : busy ? busy.detail : `${pending.name}: ${pending.answer}`,
     tone: settled ? "live" : attention ? "paused" : "busy",
     question: "",
     acts: [

@@ -22,7 +22,8 @@ import { formatParams, formatContext } from "../models/ordering";
 import { EmbeddingStatus } from "../models/EmbeddingStatus";
 import { MachineDetailsSection } from "./MachineDetailsInfo";
 import { machineModelsFrom, modelPurposeLabel } from "./models";
-import { LivePull, PullHistory } from "./ModelDownloads";
+import { LivePull, PullHistory, SetupLiveDownload } from "./ModelDownloads";
+import { setupDownloading, setupNow } from "./setup";
 import { useModelPulls } from "./useModelPulls";
 import { MODEL_PURPOSES, modelSetupFromRow, safeModelSource, sameModelChoices, setupCapacity, type ModelChoices, type ModelSetupView, type SetupModel } from "./modelSetup";
 import { ModelAssignmentBoard } from "./ModelAssignmentBoard";
@@ -35,6 +36,9 @@ export function MachineModels({ machine, navigation }: { machine: MachineRow; st
   const own = !!access?.userId && access.userId === machine.ownerUserId;
   const online = isWorkerOnline(machine, now);
   const downloads = useModelPulls(machine.id);
+  // The installer's own download (memql#6229): shown where a pull from here
+  // would be, and holding Install model back for the same reason.
+  const installerDownload = setupDownloading(setupNow(machine.setup, now));
   const installed = useMemo(() => machineModelsFrom(machine.reportedLabels), [machine.reportedLabels]);
   const read = useCallback(async (signal: AbortSignal) => {
     const result = await connection!.query.fleetModelSetup({ registrationId: machine.id }, { signal, priority: "background" });
@@ -110,7 +114,7 @@ export function MachineModels({ machine, navigation }: { machine: MachineRow; st
     {reading.error ? <Notice tone="error" sentence="The catalog could not be read." next="Your installed models are still shown below." detail={reading.error} /> : null}
     {error && !editing ? <Notice tone="error" sentence="That change could not be completed." detail={error} /> : null}
     {downloads.feedError ? <Notice tone="warn" sentence="Download updates are interrupted." detail={downloads.feedError} /> : null}
-    {downloads.live ? <LivePull pull={downloads.live} /> : null}
+    {downloads.live ? <LivePull pull={downloads.live} /> : installerDownload ? <SetupLiveDownload stage={installerDownload} /> : null}
     {selected ? <>
       <MachineDetailsSection title="Overview"><Facts>
         <Fact label="Available for" value={profile?.purposes.map(p => MODEL_PURPOSES.find(([id]) => id === p)?.[1] ?? p).join(", ") || (localModel ? modelPurposeLabel(localModel) : "Not reported")} />
@@ -125,7 +129,7 @@ export function MachineModels({ machine, navigation }: { machine: MachineRow; st
       {profile?.notes ? <MachineDetailsSection title="About"><p className="os-caption">{profile.notes}</p></MachineDetailsSection> : null}
       {localModel?.embeddings ? <EmbeddingStatus model={localModel.modelId} /> : null}
       {profile && !localModel ? <ActionBar state={profile.installBlocked || (online ? "Ready to install" : "Machine offline")}
-        acts={own && online && !profile.installBlocked && !downloads.live ? [{ label: "Install model", tone: "primary", busy: downloads.starting, onAct: () => { void install(profile); } }] : []} /> : null}
+        acts={own && online && !profile.installBlocked && !downloads.live && !installerDownload ? [{ label: "Install model", tone: "primary", busy: downloads.starting, onAct: () => { void install(profile); } }] : []} /> : null}
     </> : catalogOpen ? <>
       {shown.length ? <RecordList as="ul" label="Model catalog">{shown.map(m => <RecordRow key={m.modelId} name={m.modelId}
         secondary={m.purposes.map(p => MODEL_PURPOSES.find(([id]) => id === p)?.[1]).filter(Boolean).join(" · ")}
