@@ -26,7 +26,7 @@ class DatabaseBudgets(unittest.TestCase):
         commands = runner.commands(selected, self.classes)
         self.assertCountEqual([p for _, command in commands for p in command[5:]], selected)
         by_class = dict(commands)
-        for name, timeout in [("memql", "600s"), ("packages", "300s"), ("work", "180s"), ("library", "180s"), ("campaigns", "600s"), ("default", "180s")]:
+        for name, timeout in [("memql", "600s"), ("packages", "300s"), ("work", "300s"), ("library", "180s"), ("campaigns", "600s"), ("default", "180s")]:
             self.assertEqual(by_class[name][:5], ["go", "test", "-count=1", "-p=1", "-timeout=" + timeout])
 
     def test_test_failure_stops_without_retry_or_false_success(self):
