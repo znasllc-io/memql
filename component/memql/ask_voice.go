@@ -306,7 +306,7 @@ func (e *MemQLEngine) askVoiceTurn(ctx context.Context, room audio.Room, opts As
 		case <-ctx.Done():
 		}
 	}
-	_, err := e.RunAsk(ctx, opts.ConversationID, turnID, input.text, opts.PageContext, AskRoute{Destination: opts.ExecutionDestination}, func(text string) {
+	_, err := e.RunAsk(ctx, opts.ConversationID, turnID, input.text, opts.PageContext, AskRoute{Destination: opts.ExecutionDestination}, nil, func(text string) {
 		_ = room.Event(AskVoiceEvent{Type: "text", TurnID: turnID, Text: text})
 		pending += text
 		for {
