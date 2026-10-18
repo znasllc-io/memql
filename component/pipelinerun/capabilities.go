@@ -45,6 +45,9 @@ func (i *Integration) IntegrationName() string { return IntegrationName }
 // the readiness evaluator reads it directly by its executor name.
 func (i *Integration) Capabilities() []memql.IntegrationCapability {
 	return []memql.IntegrationCapability{
+		{Name: "channelSave", Description: "Save an owner-scoped notification channel without sending a message.", Handler: i.handleChannelSave, ArgsSchema: map[string]string{"name": "string (required) -- stable channel name", "kind": "string (required) -- email or discord", "secretRef": "string -- Discord webhook secret name", "recipients": "[]string -- email addresses"}},
+		{Name: "channelArchive", Description: "Archive an owner-scoped notification channel.", Handler: i.handleChannelArchive, ArgsSchema: map[string]string{"name": "string (required) -- caller-owned channel"}},
+		{Name: "channelAllow", Description: "Allow or revoke one channel on a caller-owned pipeline.", Handler: i.handleChannelAllow, ArgsSchema: map[string]string{"pipelineId": "string (required) -- caller-owned pipeline", "name": "string (required) -- caller-owned channel", "allowed": "boolean (required) -- grant or revoke"}},
 		{Name: "reportPublish", Handler: workflowCapability("reportPublish")},
 		{Name: "reportObserve", Handler: workflowCapability("reportObserve")},
 		{Name: "readSARIF", Description: "Observe a caller-owned native SARIF upload without re-uploading. Only complete proves ingestion; uncertain never retries the write.", Handler: i.handleReadSARIF, ArgsSchema: map[string]string{"publicationId": "string (required) -- exact native SARIF publication identity"}},

@@ -3694,6 +3694,87 @@ QueryClient.prototype.pipelinesCancel = function (this: QueryClient, args: Pipel
   return this.executeNamed("pipelinesCancel", buildPipelinesCancel(args), opts);
 };
 
+/** Allow or revoke one of the caller's channels on one of the caller's pipelines. Preserves every other channel grant and pipeline field. Sends no message. Answers {pipelineId, channelIds}. */
+export interface PipelinesChannelAllowArgs {
+  /** The caller's pipeline. */
+  pipelineId: string;
+  /** The caller's channel name. */
+  name: string;
+  /** True allows notification stages to use this channel; false revokes that permission. */
+  allowed: boolean;
+}
+
+export function buildPipelinesChannelAllow(args: PipelinesChannelAllowArgs): string {
+  const parts: string[] = [];
+  parts.push("pipelineId: " + renderMemQLValue(args.pipelineId));
+  parts.push("name: " + renderMemQLValue(args.name));
+  parts.push("allowed: " + renderMemQLValue(args.allowed));
+  return "builtin pipelinesChannelAllow(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    pipelinesChannelAllow(args: PipelinesChannelAllowArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.pipelinesChannelAllow = function (this: QueryClient, args: PipelinesChannelAllowArgs = {} as PipelinesChannelAllowArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("pipelinesChannelAllow", buildPipelinesChannelAllow(args), opts);
+};
+
+/** Archive the caller's channel by name. Later notification stages refuse it. Messages already staged keep their delivery receipts. The channel row and run history remain; pipelinesChannelSave resumes it. */
+export interface PipelinesChannelArchiveArgs {
+  /** The caller's channel name. */
+  name: string;
+}
+
+export function buildPipelinesChannelArchive(args: PipelinesChannelArchiveArgs): string {
+  const parts: string[] = [];
+  parts.push("name: " + renderMemQLValue(args.name));
+  return "builtin pipelinesChannelArchive(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    pipelinesChannelArchive(args: PipelinesChannelArchiveArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.pipelinesChannelArchive = function (this: QueryClient, args: PipelinesChannelArchiveArgs = {} as PipelinesChannelArchiveArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("pipelinesChannelArchive", buildPipelinesChannelArchive(args), opts);
+};
+
+/** Save configuration only; a channel's stable name is what the manifest uses. Pipeline grants are separate so a partial multi-pipeline update cannot be mistaken for an atomic permission change. */
+export interface PipelinesChannelSaveArgs {
+  /** Lower-case letters, digits and hyphens, starting with a letter or digit; at most 40 characters. */
+  name: string;
+  /** discord or email. */
+  kind: string;
+  /** For Discord: the globalSecret name holding the webhook URL. Never the URL or a name in the MEMQL_ namespace. */
+  secretRef?: string;
+  /** For email: 1 to 20 bare email addresses. Empty for Discord. */
+  recipients?: string[];
+}
+
+export function buildPipelinesChannelSave(args: PipelinesChannelSaveArgs): string {
+  const parts: string[] = [];
+  parts.push("name: " + renderMemQLValue(args.name));
+  parts.push("kind: " + renderMemQLValue(args.kind));
+  if (args.secretRef !== undefined) parts.push("secretRef: " + renderMemQLValue(args.secretRef));
+  if (args.recipients !== undefined) parts.push("recipients: " + renderMemQLValue(args.recipients));
+  return "builtin pipelinesChannelSave(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    pipelinesChannelSave(args: PipelinesChannelSaveArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.pipelinesChannelSave = function (this: QueryClient, args: PipelinesChannelSaveArgs = {} as PipelinesChannelSaveArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("pipelinesChannelSave", buildPipelinesChannelSave(args), opts);
+};
+
 /** Connect a pipeline to one of the caller's sources (D12, D14). The caller must own the package, which must be a GitHub repository source fetched under a grant; the grant must reach the repository, proved by minting an installation token through it. Reads memql-package.yaml at the repository's default-branch head: a source with no `pipeline:` block is refused with pipeline_not_declared; a block that does not validate, or a step whose need or secret this connection's compute and secretNames do not allow, is refused with its own pipeline_* code; and a repository another source already runs is refused with pipeline_already_connected, so a pipeline that could never compile is never connected. Creates the source's one pipeline -- its id derived from the package id -- or reconnects it, which restates the configuration and keeps what the poll has seen. Answers {pipelineId, repository, delivery, compute, schedule, stages}, with schedule daily or empty and stages naming the block's stages in order. */
 export interface PipelinesConnectArgs {
   /** The v1:platform:package source to connect. Must be the caller's own. */

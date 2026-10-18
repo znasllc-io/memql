@@ -181,3 +181,38 @@ builtin pipelinesRunRelease {
 builtin pipelinesCancel {
   runId  string!  @description("The v1:pipelines:run to stop. Must be the caller's own.")
 }
+
+/// Save configuration only; a channel's stable name is what the manifest uses.
+/// Pipeline grants are separate so a partial multi-pipeline update cannot be
+/// mistaken for an atomic permission change.
+@sdk
+@executor("integration.pipelines.channelSave")
+@args(profile="object")
+@requiresCapability("execute", "app:deployables/channels")
+@description("Create or update the caller's notification channel by its stable name. Saving an archived channel resumes it. This saves configuration without resolving a secret or sending a message. Allow each pipeline separately with pipelinesChannelAllow. Answers {channelId, name, kind, status}.")
+builtin pipelinesChannelSave {
+  name        string!   @description("Lower-case letters, digits and hyphens, starting with a letter or digit; at most 40 characters.")
+  kind        string!   @description("discord or email.")
+  secretRef   string    @description("For Discord: the globalSecret name holding the webhook URL. Never the URL or a name in the MEMQL_ namespace.")
+  recipients  []string  @description("For email: 1 to 20 bare email addresses. Empty for Discord.")
+}
+
+@sdk
+@executor("integration.pipelines.channelArchive")
+@args(profile="object")
+@requiresCapability("execute", "app:deployables/channels")
+@description("Archive the caller's channel by name. Later notification stages refuse it. Messages already staged keep their delivery receipts. The channel row and run history remain; pipelinesChannelSave resumes it.")
+builtin pipelinesChannelArchive {
+  name string! @description("The caller's channel name.")
+}
+
+@sdk
+@executor("integration.pipelines.channelAllow")
+@args(profile="object")
+@requiresCapability("execute", "app:deployables/channels")
+@description("Allow or revoke one of the caller's channels on one of the caller's pipelines. Preserves every other channel grant and pipeline field. Sends no message. Answers {pipelineId, channelIds}.")
+builtin pipelinesChannelAllow {
+  pipelineId string! @description("The caller's pipeline.")
+  name       string! @description("The caller's channel name.")
+  allowed    bool!   @description("True allows notification stages to use this channel; false revokes that permission.")
+}

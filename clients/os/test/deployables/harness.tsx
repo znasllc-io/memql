@@ -316,6 +316,8 @@ export interface FakeSeed {
   olderPipelineRuns?: Row[];
   /** Every page of runs, newest first; each names the next by cursor. Overrides the two above. */
   pipelineRunPages?: Row[][];
+  /** v1:pipelines:channel rows for this owner. */
+  pipelineChannels?: Row[];
   /** v1:pipelines:pipeline rows `pipelinesForOwner` answers. */
   pipelines?: Row[];
   /** v1:work:step rows, by the bare work run id `workStepsForOwnerRun` names. */
@@ -409,6 +411,7 @@ export function fakeConnection(seed: FakeSeed = {}): FakeConnection {
         const at = opts?.cursor?.startsWith("runs-page-") ? Number(opts.cursor.slice("runs-page-".length)) : 0;
         return rowsResultWithCursor(pages[at] ?? [], at + 1 < pages.length ? `runs-page-${at + 1}` : "");
       }
+      if (call === "query pipelineChannelsForOwner()") return rowsResult(seed.pipelineChannels ?? []);
       if (call === "query pipelinesForOwner()") return rowsResult(seed.pipelines ?? []);
       if (call.startsWith("query workStepsForOwnerRun(")) {
         const id = /runId: "([^"]*)"/.exec(call)?.[1] ?? "";
