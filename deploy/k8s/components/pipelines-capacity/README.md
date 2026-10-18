@@ -16,7 +16,7 @@ commands out of their service pods.
 ## Installation order
 
 1. Install and qualify the pinned operator in `../../../kueue` through ArgoCD.
-2. Release the matching agent and workbench binaries, with step protocol V9
+2. Release the matching agent and workbench binaries, with step protocol V10
    and status protocol V2. Keep the existing Job quota during the roll.
 3. Keep admission at the initial `Hold` setting while rolling all agents and
    workbenches. The existing Job-count quota stays in place; this component

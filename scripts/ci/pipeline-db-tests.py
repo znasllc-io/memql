@@ -46,7 +46,14 @@ def read_classes(workflow):
     return classes
 
 
-def commands(packages, classes):
+def read_parallelism(workflow):
+    value = str(workflow["jobs"]["db-tests"]["env"]["MEMQL_DB_TEST_PARALLELISM"])
+    if not re.fullmatch(r"[1-9][0-9]*", value) or int(value) > 32:
+        raise ValueError("DB test parallelism must be an integer from 1 to 32")
+    return int(value)
+
+
+def commands(packages, classes, parallelism):
     if not packages or len(set(packages)) != len(packages):
         raise ValueError("expected a nonempty, unique package selection")
     selected = {name: [] for name, _, _ in classes}
@@ -60,7 +67,10 @@ def commands(packages, classes):
         selected[name].append(package)
     # Every invocation is serial beside this shard's one Postgres, as before.
     # -count=1 also preserves the pipeline's always-uncached execution policy.
-    return [(name, ["go", "test", "-count=1", "-p=1", "-timeout=" + timeout, *selected[name]]) for name, _, timeout in classes if selected[name]]
+    # t.Parallel overlap must not silently halve when GOMAXPROCS follows a
+    # smaller container CPU quota. Preserve the hosted lane's bounded overlap
+    # without changing CPU reservations, package deadlines or test selection.
+    return [(name, ["go", "test", "-count=1", "-p=1", "-parallel=" + str(parallelism), "-timeout=" + timeout, *selected[name]]) for name, _, timeout in classes if selected[name]]
 
 
 def database_url(dsn, name):
@@ -99,8 +109,8 @@ def sql(dsn, statement):
                    env=environment, check=True, timeout=45)
 
 
-def run(packages, classes):
-    selected = commands(packages, classes)
+def run(packages, classes, parallelism):
+    selected = commands(packages, classes, parallelism)
     source = os.environ.get("MEMQL_DATABASE_DSN", "")
     database_url(source, "validate")
     for name, command in selected:
@@ -130,7 +140,7 @@ def main():
     if os.environ.get("MEMQL_REQUIRE_DB") != "1" or not os.environ.get("MEMQL_DATABASE_DSN"):
         raise ValueError("database-required execution and its DSN must be explicit")
     workflow = yaml.safe_load(Path(".github/workflows/ci.yml").read_text())
-    return run(os.environ.get("MEMQL_PACKAGES", "").split(), read_classes(workflow))
+    return run(os.environ.get("MEMQL_PACKAGES", "").split(), read_classes(workflow), read_parallelism(workflow))
 
 
 if __name__ == "__main__":
