@@ -62,8 +62,11 @@ cancels the whole process group.
 Desktop profiles use a private, short directory at the checkout root. Cockpit's
 nested temporary directory made VS Code's Unix socket exceed macOS's 103-byte
 path limit after all 325 Productivity unit tests passed. Both desktop runners
-now share the short profile and remove it on completion. Productivity retains
-failed-host logs first. Interrupted files remain within the worker-owned
+now share the short profile and remove it on completion. The core host keeps
+its separate temporary HOME and workspace under the original named scratch
+directory, preserving the destructive fixture guard. Actual Linux host runs
+pass on stable and 1.91.0; their optional credentialed live cases remain
+unconfigured. Productivity retains failed-host logs first. Interrupted files remain within the worker-owned
 checkout for recovery. An overlong checkout refuses before downloading or launching a host. The socket
 regression opens and connects to a real socket with the observed checkout
 length and a deep `TMPDIR`; it does not replace a real macOS host pass.

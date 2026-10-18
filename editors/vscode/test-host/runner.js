@@ -125,8 +125,12 @@ async function main() {
   }
 
   const profile = createHostProfile(path.resolve(EXT_ROOT, "../.."));
-  const { root, userData, extensions } = profile;
+  const { userData, extensions } = profile;
+  let root;
   try {
+    // The destructive fixture guard requires HOME below this named temporary
+    // directory. Only Electron's socket-bearing profile needs a short path.
+    root = fs.mkdtempSync(path.join(os.tmpdir(), "memql-vscode-host-"));
     const workspace = makeWorkspace(root);
     const home = path.join(root, "home");
     for (const dir of [home, userData, extensions]) {
@@ -187,6 +191,7 @@ async function main() {
     });
   } finally {
     profile.dispose();
+    if (root) fs.rmSync(root, { recursive: true, force: true });
   }
 }
 
