@@ -289,6 +289,59 @@ isolation. Existing pending publication intents remain pending until a
 native operation verifies and records completion; never manufacture receipts
 or reuse their immutable tags for different bytes.
 
+## Artifact transfer integrity and urgent cutover, October 18, 2026 UTC
+
+Native v0.29.27 run `e60862099a9ba0108681d5be1311b4d2`, source
+`90e82d606e7620596a4be83242a4d80ad2f4de74`, ended with 36 successful
+steps, one failure and nine skips. `tests.os-image` exited zero, but its
+required artifact failed with `unexpected EOF`. It is not a release candidate.
+Production remains v0.29.20; the bootstrap controller and AKS jobs are not an
+installed production qualification.
+
+PR #6187 reproduces a reader accepting 1,024 bytes as a complete file when
+exec returned success and closed normally. This does not prove the exact cause
+of the live failure, whose producer has already been cleaned up. Its repair
+measures the immutable source length through a framed, bounded, read-only stat
+command, requires every range's expected length and retries incomplete ranges
+within the existing three-attempt bound. Required artifacts still fail the
+step when capture fails. Tar errors now identify the file and received versus
+expected bytes. Prepare v0.29.28 from this repair and #6185.
+
+The short-success regression fails before the repair and passes after it;
+permanent truncation fails closed. Both complete affected package suites pass.
+The local Kubernetes fixture transfers and hashes 128 MiB through the resumable
+reader, parses its tar snapshot and rejects oversized or missing files. Its
+optional object-storage leg was not configured and skipped. An independent
+integrity investigation reproduced the same truncation defect and passed a real
+16 MiB export through two collectors; its additional checksum changes are
+preserved locally, not part of this release. Reuse #6187 rather than merge two
+competing repairs.
+
+The native #6187 check failed with `no space left on device` in the shared build
+cache, as did unrelated PRs. Its required repository checks passed; neither
+that result nor local transfer tests substitute for a successful native release.
+Recover the disposable build cache without changing serving allocations, then
+verify sufficient bytes and inodes before admitting another release. The
+prepared quiescent cache-GC configuration must ship with queue-aware runners;
+do not delete caches while old Jobs can still use them.
+
+The explicit-release retry repair in #6185 passed native run
+`d1c444b15d6c90120c26f60f0e57d207` (31 successful steps, four expected
+skips) and merged as `59613d576bb71ee40873bc1655076bc0394fbc51`.
+It preserves disconnected automatic delivery while allowing an owner's
+explicit release retry. It is not deployed yet.
+
+Prioritize the native release path: qualify these repairs, build and publish
+one complete native release, pin its verified digests, and verify production
+rollout and large artifact download. In parallel, complete #6181's real Mac
+editor hosts and Cockpit platform qualification. Then qualify the exact merge
+candidate, change required checks to MemQL, retire each proven-replaced Actions
+workflow and close issues with the receipts below. Keep the existing single
+build node maximum and three-Job quota; queue excess builds and preserve user
+workbench headroom. Do not increase serving resources, bypass failed checks or
+require three consecutive releases. Keep the current production pins available
+for rollback and retire temporary bootstrap grants only after owned work ends.
+
 ## Acceptance and issue closure
 
 The public repository audits now have native declarations: both ruleset
