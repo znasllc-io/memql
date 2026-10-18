@@ -7,8 +7,16 @@ const source = { base: "http://127.0.0.1:4330", version: "0.15.0-dev.fixture" };
 describe("explicit local Cockpit test build", () => {
   it("requires the local OS, local cluster, literal loopback and a safe dev version", () => {
     expect(resolveLocalCockpit(source, "os.memql.localhost", "memql.localhost")).toEqual(source);
+    // A product stack runs at memql.<product>.localhost (memql#6215).
+    expect(resolveLocalCockpit(source, "os.memql.znas.localhost", "memql.znas.localhost")).toEqual(source);
+    expect(resolveLocalCockpit(source, "os.localhost", "localhost")).toEqual(source);
     for (const [value, host, domain] of [
       [source, "os.example.com", "memql.localhost"], [source, "os.memql.localhost", "example.com"],
+      // The OS must be the cluster's own: another loopback stack's OS, or a
+      // hosted domain that merely ends in "localhost", is not.
+      [source, "os.memql.localhost", "memql.znas.localhost"], [source, "os.memql.znas.localhost", "memql.localhost"],
+      [source, "os.memql.example.com", "memql.example.com"], [source, "os.memqllocalhost", "memqllocalhost"],
+      [source, "os..localhost", ".localhost"],
       [{ ...source, base: "http://example.com:4330" }, "os.memql.localhost", "memql.localhost"],
       [{ ...source, base: "http://127.0.0.1:4330/?run=x" }, "os.memql.localhost", "memql.localhost"],
       [{ ...source, version: "0.15.0-dev.$(whoami)" }, "os.memql.localhost", "memql.localhost"],
