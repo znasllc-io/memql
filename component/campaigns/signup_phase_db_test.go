@@ -282,8 +282,27 @@ func (f *digestFixture) TestABurstOfSignupsLosesNoLockAndWritesNothingPastItsTim
 	if len(roster) > ceiling {
 		t.Errorf("the audience holds %d members after the burst, past its ceiling of %d", len(roster), ceiling)
 	}
-	if len(roster) != taken {
-		t.Errorf("the audience holds %d members, %d signups were taken", len(roster), taken)
+	// A recipient write that started before the deadline can finish under the
+	// locks after it. Consent and membership then exist, but no final signup is
+	// started: the caller is told to retry. Count those safe partial writes too,
+	// while refusing any member from a rejected or expired-before-write request.
+	for _, member := range roster {
+		who, known := owners[NormalizeEmail(member.Email)]
+		if !known || who%2 == 0 {
+			t.Errorf("audience contains a member that could not have been written: %q", member.Email)
+			continue
+		}
+		if err := errs[who]; err != nil && err.Error() != sentence {
+			t.Errorf("signup %d wrote a member despite being refused: %v", who, err)
+		}
+		eventID := sha256Hex("newsletter-consent\x00" + newsletterSignupID(n.audience, member.Email))
+		consent, err := n.worker.newsletterRow(n.owner, "newsletterConsentById", "eventId", eventID)
+		if err != nil || consent == nil {
+			t.Errorf("signup %d wrote a member without consent: %v", who, err)
+		}
+	}
+	if len(roster) < taken {
+		t.Errorf("the audience holds only %d members for %d completed signups", len(roster), taken)
 	}
 
 	log.mu.Lock()
