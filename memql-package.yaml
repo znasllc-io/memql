@@ -350,6 +350,10 @@ pipeline:
         # budgets without carrying engine fixture rows into unrelated tests.
         - name: db-tests
           placement: cluster
+          # Match the four-core hosted lane behind the package budgets. The
+          # namespace's two-core default exhausted the engine's 600s alarm.
+          # An explicit request reserves this CPU before the Job can start.
+          cpuMilli: 4000
           packages: affected
           only: db-gated
           shards: 5
