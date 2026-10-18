@@ -18,7 +18,8 @@ const fs = require("node:fs");
 const os = require("node:os");
 const path = require("node:path");
 
-const { downloadAndUnzipVSCode, runTests } = require("@vscode/test-electron");
+const { runTests } = require("@vscode/test-electron");
+const { downloadVSCode } = require("../../../scripts/vscode/download.cjs");
 
 const EXT_ROOT = path.resolve(__dirname, "..");
 const TESTS_ENTRY = path.join(EXT_ROOT, "dist-host", "test-host", "index.js");
@@ -134,7 +135,7 @@ async function main() {
 
   try {
     const version = process.env.MEMQL_VSCODE_VERSION || "stable";
-    let vscodeExecutablePath = await downloadAndUnzipVSCode({
+    let vscodeExecutablePath = await downloadVSCode({
       version,
       extensionDevelopmentPath: EXT_ROOT,
     });
