@@ -31,7 +31,7 @@ func tuningPolicy(t *testing.T, doc string) *tools.Policy {
 
 // TestModelsRequestCarriesThePolicysTuning. The request is what every
 // discovery in this package is asked, so what the policy says about
-// residency and concurrency has to be in it.
+// runtimes, residency and concurrency has to be in it.
 func TestModelsRequestCarriesThePolicysTuning(t *testing.T) {
 	p := tuningPolicy(t, `models:
   allow:
@@ -41,10 +41,16 @@ func TestModelsRequestCarriesThePolicysTuning(t *testing.T) {
     - id: qwen3.8:27b
       keep_alive: 2h
       working_context: 16384
+  runtimes:
+    - name: lmstudio
+      base_url: http://127.0.0.1:1234/v1
 `)
 	req := modelsRequest(p)
 	if len(req.Allow) != 1 || req.Allow[0] != "qwen3.8:27b" {
 		t.Errorf("allow = %v", req.Allow)
+	}
+	if len(req.Runtimes) != 1 || req.Runtimes[0].Name != "lmstudio" {
+		t.Errorf("runtimes = %+v, want one named lmstudio", req.Runtimes)
 	}
 	if req.Parallel != 2 {
 		t.Errorf("parallel = %d, want 2", req.Parallel)
