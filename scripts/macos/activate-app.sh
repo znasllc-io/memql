@@ -11,9 +11,15 @@ source "$REPO_ROOT/scripts/macos/launchagent.sh"
 cap_init "cockpit.app.activate" "Point the current user's existing worker and menu services at MemQL.app."
 cap_spec_param "app" "Absolute installed MemQL.app path"
 cap_spec_param "menu" "Start the embedded menu helper (true or false, default true)"
+cap_spec_param "ollama-env" "OLLAMA_HOST=<value> or OLLAMA_MODELS=<value> to set in the worker service's environment; repeatable"
 
 function main() {
     cap_handle_meta "$@"
+    OLLAMA_ENV_PAIRS=()
+    local arg
+    for arg in "$@"; do
+        case "$arg" in --ollama-env=*) OLLAMA_ENV_PAIRS+=("${arg#--ollama-env=}") ;; esac
+    done
     cap_parse_flags "$@"
     local app menu plist helper stage uid_value backup legacy identifier fingerprint marker service_path
     app="$(cap_param app)"; menu="$(cap_param menu true)"
@@ -68,6 +74,16 @@ function main() {
         plutil -insert EnvironmentVariables.PATH -string "$service_path" "$stage" >&2
         chmod 600 "$stage"
     fi
+    # The installing shell's Ollama variables, so the worker serves from
+    # where the setup pulled (memql-cockpit#524). Only these two names.
+    local pair key value
+    for pair in "${OLLAMA_ENV_PAIRS[@]+"${OLLAMA_ENV_PAIRS[@]}"}"; do
+        key="${pair%%=*}"; value="${pair#*=}"
+        [[ "$key" == OLLAMA_HOST || "$key" == OLLAMA_MODELS ]] || cap_fail 2 "ollama-env takes OLLAMA_HOST or OLLAMA_MODELS"
+        /usr/libexec/PlistBuddy -c 'Print :EnvironmentVariables' "$stage" >/dev/null 2>&1 \
+            || plutil -insert EnvironmentVariables -dictionary "$stage" >&2
+        plutil -replace "EnvironmentVariables.${key}" -string "$value" "$stage" >&2
+    done
     plutil -remove AssociatedBundleIdentifiers "$stage" >/dev/null 2>&1 || true
     plutil -insert AssociatedBundleIdentifiers -array "$stage" >&2
     plutil -insert AssociatedBundleIdentifiers.0 -string com.znasllc.memql-worker "$stage" >&2

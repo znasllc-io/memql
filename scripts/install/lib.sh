@@ -138,6 +138,8 @@ function install_ui_init() {
     INSTALL_UI_SPINNER=""; INSTALL_UI_LOGGER=""; INSTALL_UI_STAGE=""
     INSTALL_UI_CURSOR_HIDDEN=no
     INSTALL_MODELS_STATE=off; INSTALL_SERVICE_STATE=skipped
+    INSTALL_MODELS_REASON=""; INSTALL_WORKBENCH_STATE=off; INSTALL_WORKBENCH_REASON=""
+    INSTALL_MENU_STATE=off; INSTALL_MENU_REASON=""
     if [[ -t 3 && "${TERM:-dumb}" != dumb && "${INSTALL_PLAIN:-no}" != yes ]]; then
         INSTALL_UI_TTY=yes
         case "${LC_ALL:-${LC_CTYPE:-${LANG:-}}}" in
@@ -338,13 +340,34 @@ function install_ui_finish() {
     else
         printf '  Worker not started. Run:\n\n    %q worker run\n' "$INSTALLED_BINARY" >&3
     fi
+    # One honest line per optional stage that did not finish, with its
+    # retry command when a retry can help (memql-cockpit#524). A machine
+    # that cannot run local models is told so once and never sent to run
+    # the same command again.
     case "$INSTALL_MODELS_STATE" in
-        pending|failed)
-            command='Local models need setup.'
-            [[ "$INSTALL_MODELS_STATE" != failed ]] || command='Local model setup did not finish. See the log for details.'
-            printf '\n  %s When ready, run:\n\n    %q worker setup --inference\n' "$command" "$INSTALLED_BINARY" >&3
+        pending)
+            printf '\n  Local models need your approval to install their runtime. When ready, run:\n\n    %q worker setup --inference\n' "$INSTALLED_BINARY" >&3
+            ;;
+        unavailable)
+            printf '\n  This machine can'"'"'t run local models: %s\n' "${INSTALL_MODELS_REASON:-see the log for the reason.}" >&3
+            ;;
+        failed)
+            printf '\n  Local models could not be set up: %s\n  Retry with:\n\n    %q worker setup --inference\n' \
+                "${INSTALL_MODELS_REASON:-see the log for details.}" "$INSTALLED_BINARY" >&3
             ;;
     esac
+    case "$INSTALL_WORKBENCH_STATE" in
+        unsupported)
+            printf '\n  Fleet workbenches are not in Cockpit v%s. Run this installer again once a newer Cockpit is released.\n' "$version" >&3
+            ;;
+        failed)
+            printf '\n  Fleet workbenches need attention: %s\n  Retry with:\n\n    %q worker setup --workbench\n' \
+                "${INSTALL_WORKBENCH_REASON:-see the log for details.}" "$INSTALLED_BINARY" >&3
+            ;;
+    esac
+    if [[ "${INSTALL_MENU_STATE:-off}" == failed ]]; then
+        printf '\n  The menu companion was not installed: %s. Run this installer again to finish it.\n' "${INSTALL_MENU_REASON:-see the log}" >&3
+    fi
     if [[ -n "${INSTALL_APPS_RECOVERY:-}" ]]; then
         printf '\n  App permissions need attention (Cockpit 0.17.0 or later).\n  See the log, then run:\n\n    %s\n' "$INSTALL_APPS_RECOVERY" >&3
     fi
@@ -1553,12 +1576,119 @@ function allow_installed_apps() {
     fi
 }
 
+# The Ollama variables the worker service must share with the installing
+# shell (memql-cockpit#524). A LaunchAgent or user unit inherits nothing
+# from a shell, so an OLLAMA_HOST or OLLAMA_MODELS set here would reach the
+# setup (which pulls) and not the worker (which serves and advertises): the
+# models land where the worker never looks. The installers copy whichever
+# are set into the service's own environment.
+function ollama_env_names() {
+    local name
+    for name in OLLAMA_HOST OLLAMA_MODELS; do
+        [[ -z "${!name:-}" ]] || printf '%s\n' "$name"
+    done
+}
+
+# xml_escape makes a value safe as plist <string> content.
+function xml_escape() {
+    local v="$1"
+    v="${v//&/&amp;}"; v="${v//</&lt;}"; v="${v//>/&gt;}"
+    printf '%s' "$v"
+}
+
+# ollama_plist_env prints the EnvironmentVariables entries for the Ollama
+# variables set in this shell, indented for the worker plist.
+function ollama_plist_env() {
+    local name
+    while IFS= read -r name; do
+        [[ -n "$name" ]] || continue
+        printf '        <key>%s</key>\n        <string>%s</string>\n' "$name" "$(xml_escape "${!name}")"
+    done < <(ollama_env_names)
+}
+
+# upsert_env_file_var sets KEY=VALUE in a systemd EnvironmentFile, keeping
+# every other line. The value is double-quoted with its quotes and
+# backslashes escaped, which is the file's own syntax.
+function upsert_env_file_var() {
+    local file="$1" key="$2" value="$3" tmp quoted
+    quoted="${value//\\/\\\\}"; quoted="${quoted//\"/\\\"}"
+    tmp="$(mktemp "${file}.XXXXXX")"
+    if [[ -f "$file" ]]; then
+        grep -v "^${key}=" "$file" > "$tmp" || true
+    fi
+    printf '%s="%s"\n' "$key" "$quoted" >> "$tmp"
+    chmod 0600 "$tmp"
+    mv "$tmp" "$file"
+}
+
+# install_terminal prints the terminal a stage may ask a question on, or
+# nothing. The installer arrives through `curl | bash`, so stdin is the
+# script and the person is on /dev/tty -- and only when the screen (fd 3)
+# is a terminal too is somebody there to read the question. A scripted run
+# (CI, a pipe to a file) gets no question and keeps the exit-3 path.
+# MEMQL_INSTALL_TTY names another device; the installer tests use it.
+function install_terminal() {
+    if [[ -n "${MEMQL_INSTALL_TTY:-}" ]]; then
+        printf '%s\n' "$MEMQL_INSTALL_TTY"
+        return 0
+    fi
+    [[ -t 3 ]] || return 0
+    if ( exec </dev/tty ) 2>/dev/null; then
+        printf '%s\n' /dev/tty
+    fi
+}
+
+# read_setup_reason prints the one-line outcome `worker setup` recorded
+# (MEMQL_SETUP_REASON_FILE), or nothing for a release that records none.
+function read_setup_reason() {
+    local file="$1" line=""
+    [[ -s "$file" ]] && IFS= read -r line < "$file"
+    printf '%s' "$line"
+}
+
+# setup_inference runs `worker setup --inference` and records how it ended.
+# It never fails the install: a machine that paired and has no local models
+# is still a working worker.
+#
+# With a person at a terminal (install_terminal), the setup runs in that
+# terminal: it prints the runtime commands, asks once, installs, and pulls
+# -- one session instead of a second command to copy (memql-cockpit#524).
+# Its output reaches the log too. Without one it runs --non-interactive, and
+# a runtime install it may not approve is exit 3, with the command printed.
+#
+# The exit codes are the setup's own (internal/worker/setup_exit.go):
+#   3  approval needed       -> pending, with the command
+#   4  this machine cannot   -> unavailable, with the reason, never "retry"
+#   2  usage error           -> failed, with the reason
+#   5  pull/allow/readiness  -> failed, with the reason and the command
 function setup_inference() {
-    local binary="$1"
+    local binary="$1" rc=0 tty reason_file reason
+    local -a wrap=()
+    INSTALL_MODELS_REASON=""
     echo ""
     echo "INFO: setting this machine up to serve local models"
-    local rc=0
-    "$binary" worker setup --inference --non-interactive || rc=$?
+    reason_file="$(mktemp)"
+    # Models can take many minutes to pull; keep a Mac awake for them.
+    if command -v caffeinate >/dev/null 2>&1; then
+        wrap=(caffeinate -i)
+    fi
+    tty="$(install_terminal)"
+    if [[ -n "$tty" ]]; then
+        install_ui_stop_progress
+        printf '\n' >&3
+        if MEMQL_SETUP_REASON_FILE="$reason_file" "${wrap[@]+"${wrap[@]}"}" \
+            "$binary" worker setup --inference < "$tty" 2>&1 | tee -a /dev/fd/3; then
+            rc=0
+        else
+            rc=$?
+        fi
+        printf '\n' >&3
+    else
+        MEMQL_SETUP_REASON_FILE="$reason_file" "${wrap[@]+"${wrap[@]}"}" \
+            "$binary" worker setup --inference --non-interactive || rc=$?
+    fi
+    reason="$(read_setup_reason "$reason_file")"
+    rm -f "$reason_file"
     case "$rc" in
         0)
             INSTALL_MODELS_STATE=ready
@@ -1570,23 +1700,73 @@ function setup_inference() {
             INSTALL_UI_STAGE_STATE=pending
             INSTALL_UI_RESULT="Local models need your approval"
             echo ""
-            echo "INFO: the model runtime is not installed here, and a scripted run"
-            echo "      is not allowed to approve installing it. Run this yourself,"
-            echo "      in this same terminal:"
+            echo "INFO: the model runtime is not installed or not running here, and"
+            echo "      this run could not ask you to approve it. Run this yourself,"
+            echo "      in a terminal:"
             echo ""
             echo "  ${binary} worker setup --inference"
             echo ""
             ;;
+        4)
+            INSTALL_MODELS_STATE=unavailable
+            INSTALL_UI_STAGE_STATE=pending
+            INSTALL_MODELS_REASON="$reason"
+            INSTALL_UI_RESULT="This machine can't run local models"
+            echo "INFO: '${binary} worker setup --inference' exited 4: this machine cannot serve local models${reason:+: ${reason}}." >&2
+            echo "      It is paired and working; everything else is unaffected." >&2
+            ;;
         *)
             INSTALL_MODELS_STATE=failed
             INSTALL_UI_STAGE_STATE=pending
+            if [[ -z "$reason" ]]; then
+                case "$rc" in
+                    2) reason="the setup command did not accept its arguments (exit 2). See the log: ${INSTALL_LOG:-}" ;;
+                    *) reason="the setup exited ${rc}. See the log: ${INSTALL_LOG:-}" ;;
+                esac
+            fi
+            INSTALL_MODELS_REASON="$reason"
             INSTALL_UI_RESULT="Local model setup needs attention"
-            echo "WARN: '${binary} worker setup --inference' exited ${rc}." >&2
+            echo "WARN: '${binary} worker setup --inference' exited ${rc}: ${reason}" >&2
             echo "      This machine is paired and working; it is not offering local" >&2
-            echo "      models. Run the command above without --non-interactive to" >&2
-            echo "      read why." >&2
+            echo "      models yet." >&2
             ;;
     esac
+    return 0
+}
+
+# setup_workbench enables Fleet workbenches and, like setup_inference, never
+# fails the install (memql-cockpit#524). The installer comes from main and
+# installs the latest release, so the binary may predate --workbench: that
+# is detected and reported, not run into. Docker missing, stopped, too
+# small, or an image pull that times out is one line and a retry command
+# in the summary -- and the stage runs after local models, so they never
+# wait on Docker.
+function setup_workbench() {
+    local binary="$1" usage rc=0 reason_file reason version
+    INSTALL_WORKBENCH_REASON=""
+    usage="$("$binary" worker setup --help 2>&1 || true)"
+    if [[ "$usage" != *"-workbench"* ]]; then
+        version="$(read_binary_version "$binary")"
+        INSTALL_WORKBENCH_STATE=unsupported
+        INSTALL_UI_STAGE_STATE=pending
+        INSTALL_UI_RESULT="Fleet workbenches need a newer Cockpit"
+        echo "INFO: Cockpit ${version:-(unknown version)} has no 'worker setup --workbench'; skipped."
+        return 0
+    fi
+    reason_file="$(mktemp)"
+    MEMQL_SETUP_REASON_FILE="$reason_file" "$binary" worker setup --workbench || rc=$?
+    reason="$(read_setup_reason "$reason_file")"
+    rm -f "$reason_file"
+    if [[ "$rc" == 0 ]]; then
+        INSTALL_WORKBENCH_STATE=ready
+        INSTALL_UI_RESULT="Fleet workbenches ready"
+        return 0
+    fi
+    INSTALL_WORKBENCH_STATE=failed
+    INSTALL_WORKBENCH_REASON="${reason:-the setup exited ${rc}. See the log: ${INSTALL_LOG:-}}"
+    INSTALL_UI_STAGE_STATE=pending
+    INSTALL_UI_RESULT="Fleet workbenches need attention"
+    echo "WARN: '${binary} worker setup --workbench' exited ${rc}: ${INSTALL_WORKBENCH_REASON}" >&2
     return 0
 }
 
@@ -2003,9 +2183,9 @@ function purge_worker_state() {
     remove_path_if_present "${HOME}/.memql/policy.yaml" || true
     remove_tree_if_present "$state_dir" || true
     remove_path_if_present "${HOME}/.memql/worker.sock" || true
-    # The native model runtime and its models (Linux): gigabytes under
-    # the fence, kept without --purge because the models were pulled on
-    # purpose and cost hours to pull again.
+    # The native model runtime and its models (Linux, and a Mac without
+    # Homebrew): gigabytes under the fence, kept without --purge because
+    # the models were pulled on purpose and cost hours to pull again.
     remove_tree_if_present "${HOME}/.memql/ollama" || true
     remove_memql_home_if_empty
 }

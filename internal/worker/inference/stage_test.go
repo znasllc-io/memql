@@ -3,10 +3,12 @@ package inference
 import (
 	"archive/tar"
 	"bytes"
+	"compress/gzip"
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
 	"errors"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -546,6 +548,125 @@ func TestNativeUnitQuotesApostrophePaths(t *testing.T) {
 	for _, want := range []string{`ExecStart=/usr/bin/env "/home/O'Brien/.memql/ollama/runtime/bin/ollama" serve`, `Environment="OLLAMA_MODELS=/mnt/O'Brien/models"`} {
 		if !strings.Contains(unit, want) {
 			t.Errorf("systemd parses apostrophe as quote; missing %s", want)
+		}
+	}
+}
+
+// tarGz is tarZst's gzip twin: Ollama's macOS archive is a .tgz.
+func tarGz(t *testing.T, entries []fakeEntry) []byte {
+	t.Helper()
+	zst := tarZst(t, entries)
+	zr, err := zstd.NewReader(bytes.NewReader(zst))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer zr.Close()
+	raw, err := io.ReadAll(zr)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var out bytes.Buffer
+	gw := gzip.NewWriter(&out)
+	if _, err := gw.Write(raw); err != nil {
+		t.Fatal(err)
+	}
+	if err := gw.Close(); err != nil {
+		t.Fatal(err)
+	}
+	return out.Bytes()
+}
+
+// darwinLayout is the macOS archive: ollama and its libraries at the root.
+func darwinLayout() []fakeEntry {
+	return []fakeEntry{
+		{name: "ollama", typ: tar.TypeReg, mode: 0o755, body: "#!/bin/sh\necho fake ollama\n"},
+		{name: "libggml-base.0.27.0.dylib", typ: tar.TypeReg, mode: 0o755, body: "dylib"},
+		{name: "libggml-base.0.dylib", typ: tar.TypeSymlink, mode: 0o777, link: "libggml-base.0.27.0.dylib"},
+	}
+}
+
+// A Mac without Homebrew (memql-cockpit#524): the release's .tgz,
+// verified, unpacked with ollama at the runtime's root, and a LaunchAgent
+// written and handed to launchd -- the loopback bind, the models directory
+// inside the fence and the log path all in the plist.
+func TestStageRuntimeOnMacWritesAndLoadsTheLaunchAgent(t *testing.T) {
+	archive := tarGz(t, darwinLayout())
+	srv := release(t, "v9.9.9", map[string][]byte{DarwinArchiveName: archive})
+	defer srv.Close()
+	withReleases(t, srv.URL)
+
+	var loaded []string
+	old := launchdLoad
+	launchdLoad = func(_ context.Context, uid int, plist string) error {
+		loaded = append(loaded, fmt.Sprintf("gui/%d %s", uid, plist))
+		return nil
+	}
+	t.Cleanup(func() { launchdLoad = old })
+
+	home := t.TempDir()
+	n := DarwinNativeFacts(home, "")
+	s := Stage{
+		Archives:   []Archive{{Name: DarwinArchiveName, Release: "v9.9.9"}},
+		RuntimeDir: n.RuntimeDir, ModelsDir: n.ModelsDir, LogPath: n.LogPath, UnitPath: n.UnitPath,
+		Listen: nativeListen, Launchd: true, UID: 501,
+	}
+	if err := StageRuntime(context.Background(), s, nil); err != nil {
+		t.Fatalf("StageRuntime: %v", err)
+	}
+	bin := filepath.Join(s.RuntimeDir, "ollama")
+	if fi, err := os.Stat(bin); err != nil || fi.Mode()&0o100 == 0 {
+		t.Fatalf("ollama must be unpacked executable at the runtime root: %v", err)
+	}
+	if target, err := os.Readlink(filepath.Join(s.RuntimeDir, "libggml-base.0.dylib")); err != nil || target != "libggml-base.0.27.0.dylib" {
+		t.Errorf("the dylib version symlink must be kept, got %q, %v", target, err)
+	}
+	plist, err := os.ReadFile(s.UnitPath)
+	if err != nil {
+		t.Fatalf("the LaunchAgent was not written: %v", err)
+	}
+	for _, want := range []string{
+		"<string>com.znasllc.memql-ollama</string>",
+		"<string>" + bin + "</string>",
+		"<string>serve</string>",
+		"<key>OLLAMA_HOST</key>\n        <string>127.0.0.1:11434</string>",
+		"<key>OLLAMA_MODELS</key>\n        <string>" + s.ModelsDir + "</string>",
+		"<key>StandardOutPath</key>\n    <string>" + s.LogPath + "</string>",
+		"<key>KeepAlive</key>\n    <true/>",
+	} {
+		if !strings.Contains(string(plist), want) {
+			t.Errorf("the LaunchAgent must carry %q:\n%s", want, plist)
+		}
+	}
+	if len(loaded) != 1 || loaded[0] != "gui/501 "+s.UnitPath {
+		t.Errorf("the agent must be loaded into gui/501 once, got %q", loaded)
+	}
+	if !strings.HasPrefix(s.UnitPath, filepath.Join(home, "Library", "LaunchAgents")) {
+		t.Errorf("the agent belongs under ~/Library/LaunchAgents, got %s", s.UnitPath)
+	}
+}
+
+// A path with XML in it is data in the plist, never markup.
+func TestLaunchAgentEscapesOperatorPaths(t *testing.T) {
+	s := Stage{RuntimeDir: "/Users/a&b/rt", ModelsDir: "/Volumes/<x>/models", LogPath: "/tmp/o.log", Listen: nativeListen, Launchd: true}
+	plist := s.Plist()
+	if strings.Contains(plist, "a&b") || strings.Contains(plist, "<x>") {
+		t.Fatalf("operator paths must be escaped:\n%s", plist)
+	}
+	if !strings.Contains(plist, "/Users/a&amp;b/rt/ollama") || !strings.Contains(plist, "/Volumes/&lt;x&gt;/models") {
+		t.Fatalf("escaped paths must still name the same directories:\n%s", plist)
+	}
+}
+
+func TestStageLinesOnMacSayLaunchd(t *testing.T) {
+	n := DarwinNativeFacts("/Users/op", "")
+	s := Stage{Archives: []Archive{{Name: DarwinArchiveName}}, RuntimeDir: n.RuntimeDir, ModelsDir: n.ModelsDir, LogPath: n.LogPath, UnitPath: n.UnitPath, Listen: nativeListen, Launchd: true}
+	lines := strings.Join(s.Lines(), "\n")
+	for _, want := range []string{
+		"download ollama-darwin.tgz from https://github.com/ollama/ollama/releases/latest/download and unpack it into /Users/op/.memql/ollama/runtime, checked against the release's sha256sum.txt",
+		"write /Users/op/Library/LaunchAgents/com.znasllc.memql-ollama.plist and load it into launchd (Ollama as your user, listening on 127.0.0.1:11434, models in /Users/op/.memql/ollama/models)",
+	} {
+		if !strings.Contains(lines, want) {
+			t.Errorf("Lines must say %q, got:\n%s", want, lines)
 		}
 	}
 }

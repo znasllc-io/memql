@@ -770,13 +770,220 @@ for _si_code in 4 5 1; do
     _out="$(FAKE_MEMQL_EXIT="$_si_code" setup_inference "$_si_bin" 2>&1)"
     _rc=$?
     expect_eq "setup_inference exit ${_si_code} still returns 0" "$_rc" "0"
-    if [[ "$_out" == *"WARN"* && "$_out" == *"exited ${_si_code}"* \
-        && "$_out" == *"paired and working"* ]]; then
+    if [[ "$_out" == *"exited ${_si_code}"* && "$_out" == *"paired and working"* ]]; then
         pass "setup_inference exit ${_si_code} reports without failing the install"
     else
         fail "setup_inference exit ${_si_code} should report the code and say the machine still works; got: $_out"
     fi
 done
+
+# ---------------------------------------------------------------
+# setup_inference -- each exit code is its own outcome (memql-cockpit#524)
+# ---------------------------------------------------------------
+#
+# The setup writes one line to MEMQL_SETUP_REASON_FILE when it does not
+# finish, and the installer's summary prints it. 4 is permanent (this
+# machine cannot run local models) and is never sent back to the same
+# command; 5 and 2 are failures with a retry; 3 is the approval path.
+
+_sr_bin="${_tmp}/fake-memql-reason"
+cat > "$_sr_bin" << 'STUB'
+#!/usr/bin/env bash
+if [[ -n "${MEMQL_SETUP_REASON_FILE:-}" && -n "${FAKE_REASON:-}" ]]; then
+    printf '%s\n' "$FAKE_REASON" > "$MEMQL_SETUP_REASON_FILE"
+fi
+exit "${FAKE_MEMQL_EXIT:-0}"
+STUB
+chmod +x "$_sr_bin"
+
+FAKE_MEMQL_EXIT=4 FAKE_REASON="This machine has 8 GB of unified memory; the floor is 16 GB." \
+    setup_inference "$_sr_bin" >/dev/null 2>&1
+expect_eq "setup_inference exit 4 is unavailable, with the setup's reason" \
+    "${INSTALL_MODELS_STATE}|${INSTALL_MODELS_REASON}" \
+    "unavailable|This machine has 8 GB of unified memory; the floor is 16 GB."
+FAKE_MEMQL_EXIT=5 FAKE_REASON="Pulling qwen3.5:9b failed: connection reset" \
+    setup_inference "$_sr_bin" >/dev/null 2>&1
+expect_eq "setup_inference exit 5 is failed, with the setup's reason" \
+    "${INSTALL_MODELS_STATE}|${INSTALL_MODELS_REASON}" "failed|Pulling qwen3.5:9b failed: connection reset"
+FAKE_MEMQL_EXIT=2 FAKE_REASON="" setup_inference "$_sr_bin" >/dev/null 2>&1
+if [[ "$INSTALL_MODELS_STATE" == failed && "$INSTALL_MODELS_REASON" == *"did not accept its arguments (exit 2)"* ]]; then
+    pass "setup_inference exit 2 is a usage failure even when the release records no reason"
+else
+    fail "setup_inference exit 2 should be a usage failure; got ${INSTALL_MODELS_STATE}|${INSTALL_MODELS_REASON}"
+fi
+FAKE_MEMQL_EXIT=3 FAKE_REASON="" setup_inference "$_sr_bin" >/dev/null 2>&1
+expect_eq "setup_inference exit 3 is pending approval" "$INSTALL_MODELS_STATE" "pending"
+
+# The summary: the reason once, no retry for a machine that cannot run
+# models, the retry command for one that failed.
+function _si_summary() {
+    local out_file="${_tmp}/summary-$1.txt"
+    (
+        exec 3> "$out_file"
+        INSTALL_UI_ACCENT=""; INSTALL_UI_RESET=""; INSTALL_UI_DIM=""
+        INSTALL_SERVICE_STATE=started; INSTALL_LOG="/fixture/install.log"
+        INSTALLED_BINARY="$_sr_bin"
+        INSTALL_MODELS_STATE="$1"; INSTALL_MODELS_REASON="$2"
+        INSTALL_WORKBENCH_STATE="$3"
+        # shellcheck disable=SC2030  # the summary reads it in this subshell only
+        INSTALL_WORKBENCH_REASON="$4"
+        INSTALL_MENU_STATE="${5:-off}"; INSTALL_MENU_REASON="${6:-}"
+        install_ui_finish
+    )
+    cat "$out_file"
+}
+_out="$(_si_summary unavailable "This machine has 8 GB of unified memory; the floor is 16 GB." off "")"
+if [[ "$_out" == *"This machine can't run local models: This machine has 8 GB of unified memory; the floor is 16 GB."* \
+    && "$_out" != *"worker setup --inference"* ]]; then
+    pass "summary: a machine that cannot run local models is told once, with no retry"
+else
+    fail "summary for unavailable models is wrong: $_out"
+fi
+_out="$(_si_summary failed "Pulling qwen3.5:9b failed: connection reset" off "")"
+if [[ "$_out" == *"Local models could not be set up: Pulling qwen3.5:9b failed: connection reset"* \
+    && "$_out" == *"worker setup --inference"* ]]; then
+    pass "summary: a failed model setup names the reason and the retry"
+else
+    fail "summary for failed models is wrong: $_out"
+fi
+_out="$(_si_summary ready "" failed "Docker needs at least 3 CPUs and 4 GB for two workbenches with headroom; it has 2 CPUs and 3.2 GB")"
+if [[ "$_out" == *"Fleet workbenches need attention: Docker needs at least 3 CPUs"* \
+    && "$_out" == *"worker setup --workbench"* && "$_out" != *"can't run local models"* ]]; then
+    pass "summary: a failed workbench setup names the reason and the retry"
+else
+    fail "summary for failed workbenches is wrong: $_out"
+fi
+_out="$(_si_summary ready "" unsupported "")"
+if [[ "$_out" == *"Fleet workbenches are not in Cockpit v"* && "$_out" != *"--workbench"* ]]; then
+    pass "summary: workbenches missing from the installed release are named, with no command it cannot run"
+else
+    fail "summary for unsupported workbenches is wrong: $_out"
+fi
+_out="$(_si_summary ready "" off "" failed "it could not be downloaded from https://example.invalid")"
+if [[ "$_out" == *"The menu companion was not installed: it could not be downloaded"* ]]; then
+    pass "summary: a menu companion that did not install is reported, not fatal"
+else
+    fail "summary for the menu companion is wrong: $_out"
+fi
+
+# A person at a terminal approves in that terminal: no --non-interactive,
+# stdin is the terminal, and the setup's words reach the screen and the log.
+_tty_in="${_tmp}/fake-tty"
+printf 'y\n' > "$_tty_in"
+_tty_bin="${_tmp}/fake-memql-tty"
+_tty_log="${_tmp}/fake-memql-tty.argv"
+cat > "$_tty_bin" << STUB
+#!/usr/bin/env bash
+printf '%s\n' "\$*" >> "${_tty_log}"
+read -r answer
+printf 'Run them now? [y/N] answered %s\n' "\$answer"
+exit 0
+STUB
+chmod +x "$_tty_bin"
+_screen="${_tmp}/fake-screen"
+(
+    exec 3> "$_screen"
+    INSTALL_UI_SPINNER=""; INSTALL_UI_CURSOR_HIDDEN=no
+    MEMQL_INSTALL_TTY="$_tty_in" setup_inference "$_tty_bin" > "${_tmp}/fake-tty-log" 2>&1
+)
+expect_eq "setup_inference at a terminal runs the interactive setup" "$(tail -1 "$_tty_log")" "worker setup --inference"
+if grep -qF "answered y" "$_screen" && grep -qF "answered y" "${_tmp}/fake-tty-log"; then
+    pass "setup_inference at a terminal reads the answer there and shows it on screen and in the log"
+else
+    fail "setup_inference at a terminal should read the answer from the terminal; screen: $(cat "$_screen")"
+fi
+
+# ---------------------------------------------------------------
+# setup_workbench -- optional, detected, never fatal (memql-cockpit#524)
+# ---------------------------------------------------------------
+
+_wb_old="${_tmp}/fake-memql-0.19"
+cat > "$_wb_old" << STUB
+#!/usr/bin/env bash
+if [[ "\$*" == "worker setup --help" ]]; then
+    echo "Usage of worker setup:" >&2
+    echo "  -inference" >&2
+    exit 0
+fi
+if [[ "\$*" == "--version" ]]; then echo "memql 0.19.0 (computeruse)"; exit 0; fi
+echo "flag provided but not defined: -workbench" >&2
+exit 2
+STUB
+chmod +x "$_wb_old"
+INSTALL_WORKBENCH_STATE=off
+_out="$(setup_workbench "$_wb_old" 2>&1)"; _rc=$?
+setup_workbench "$_wb_old" >/dev/null 2>&1
+expect_eq "setup_workbench on a release without --workbench returns 0" "$_rc" "0"
+expect_eq "setup_workbench on a release without --workbench is unsupported" "$INSTALL_WORKBENCH_STATE" "unsupported"
+if [[ "$_out" != *"flag provided but not defined"* ]]; then
+    pass "setup_workbench never runs a flag the installed release lacks"
+else
+    fail "setup_workbench ran --workbench on a release without it: $_out"
+fi
+
+_wb_new="${_tmp}/fake-memql-0.20"
+cat > "$_wb_new" << 'STUB'
+#!/usr/bin/env bash
+if [[ "$*" == "worker setup --help" ]]; then
+    echo "  -workbench  enable isolated Fleet workbenches" >&2
+    exit 0
+fi
+if [[ "$*" == "worker setup --workbench" ]]; then
+    [[ -z "${MEMQL_SETUP_REASON_FILE:-}" ]] || echo "Start Docker with Linux containers, then retry: Docker is not installed" > "$MEMQL_SETUP_REASON_FILE"
+    exit "${FAKE_WORKBENCH_EXIT:-0}"
+fi
+exit 0
+STUB
+chmod +x "$_wb_new"
+FAKE_WORKBENCH_EXIT=1 setup_workbench "$_wb_new" >/dev/null 2>&1; _rc=$?
+expect_eq "setup_workbench failure returns 0" "$_rc" "0"
+# shellcheck disable=SC2031  # set by setup_workbench in this shell, not the summary's subshell
+expect_eq "setup_workbench failure records the setup's reason" \
+    "${INSTALL_WORKBENCH_STATE}|${INSTALL_WORKBENCH_REASON}" \
+    "failed|Start Docker with Linux containers, then retry: Docker is not installed"
+FAKE_WORKBENCH_EXIT=0 setup_workbench "$_wb_new" >/dev/null 2>&1
+expect_eq "setup_workbench success is ready" "$INSTALL_WORKBENCH_STATE" "ready"
+
+# The installing shell's Ollama variables reach the worker service, so it
+# serves from where the setup pulled (memql-cockpit#524).
+_out="$(OLLAMA_HOST='127.0.0.1:11435' OLLAMA_MODELS='/Volumes/Big & Fast/<models>' ollama_plist_env)"
+if [[ "$_out" == *"<key>OLLAMA_HOST</key>"*"<string>127.0.0.1:11435</string>"* \
+    && "$_out" == *"<string>/Volumes/Big &amp; Fast/&lt;models&gt;</string>"* ]]; then
+    pass "ollama_plist_env carries both variables, escaped for the plist"
+else
+    fail "ollama_plist_env is wrong: $_out"
+fi
+_out="$(unset OLLAMA_HOST OLLAMA_MODELS; ollama_plist_env)"
+expect_eq "ollama_plist_env adds nothing when neither is set" "$_out" ""
+_envf="${_tmp}/worker.env"
+printf 'MEMQL_WORKER_TOKEN=keep\nOLLAMA_HOST=old\n' > "$_envf"
+upsert_env_file_var "$_envf" OLLAMA_HOST '127.0.0.1:"11435"'
+expect_eq "upsert_env_file_var replaces the key and keeps the rest" "$(cat "$_envf")" \
+    $'MEMQL_WORKER_TOKEN=keep\nOLLAMA_HOST="127.0.0.1:\\"11435\\""'
+expect_eq "upsert_env_file_var keeps the file owner-only" "$(stat -f %Lp "$_envf" 2>/dev/null || stat -c %a "$_envf")" "600"
+
+# The whole tail of an install under the installer's own shell options: a
+# release without --workbench, models first, and the summary still printed.
+_flow_home="${_tmp}/flow-home"
+mkdir -p "$_flow_home"
+_flow_out="$(HOME="$_flow_home" bash -c '
+    set -euo pipefail
+    source "$1/lib.sh"
+    INSTALL_PLAIN=yes
+    install_ui_init install
+    INSTALLED_BINARY="$2"; INSTALL_SERVICE_STATE=started
+    install_ui_stage "Preparing local models" setup_inference "$3"
+    install_ui_stage "Preparing Fleet workbenches" setup_workbench "$2"
+    install_ui_finish
+' _ "$_script_dir" "$_wb_old" "$_si_bin" 2>&1)"
+_flow_rc=$?
+expect_eq "an install whose release lacks --workbench still finishes" "$_flow_rc" "0"
+if [[ "$_flow_out" == *"Local models ready"* && "$_flow_out" == *"Fleet workbenches need a newer Cockpit"* \
+    && "$_flow_out" == *"Fleet workbenches are not in Cockpit v0.19.0"* && "$_flow_out" == *"Install log:"* ]]; then
+    pass "models are set up, the workbench stage is reported, and the summary is printed"
+else
+    fail "the install tail did not reach its summary: $_flow_out"
+fi
 
 # ---------------------------------------------------------------
 # Both installers accept --inference and wire it after the service
@@ -811,6 +1018,22 @@ for _installer in install-mac.sh install-linux.sh; do
         pass "$_installer runs setup_inference after worker.yaml is written"
     else
         fail "$_installer should call setup_inference after write_config (cfg=$_line_cfg inf=$_line_inf)"
+    fi
+
+    # Local models before workbenches, and workbenches through the guarded
+    # function, never a bare call that set -e can turn fatal
+    # (memql-cockpit#524).
+    _line_wb="$(grep -nF 'install_ui_stage "Preparing Fleet workbenches" setup_workbench' "${_script_dir}/${_installer}" | head -1 | cut -d: -f1)"
+    if [[ -n "$_line_wb" && -n "$_line_inf" && "$_line_wb" -gt "$_line_inf" ]]; then
+        pass "$_installer prepares workbenches after local models, through setup_workbench"
+    else
+        fail "$_installer should run setup_workbench after setup_inference (inf=$_line_inf wb=$_line_wb)"
+    fi
+    # shellcheck disable=SC2016  # the literal text of a bare call, not an expansion
+    if grep -qE 'install_ui_stage "Preparing Fleet workbenches" "\$INSTALLED_BINARY"' "${_script_dir}/${_installer}"; then
+        fail "$_installer still runs worker setup --workbench bare"
+    else
+        pass "$_installer never runs worker setup --workbench bare"
     fi
 
     # And only when asked: a plain install must not touch the runtime.
@@ -1016,6 +1239,13 @@ function uninstall_fixture() {
         mac)
             mkdir -p "${home}/Library/LaunchAgents"
             printf '<plist/>\n' > "${home}/Library/LaunchAgents/${SERVICE_LABEL_DARWIN}.plist"
+            # A Mac without Homebrew that `worker setup --inference` set up
+            # (memql-cockpit#524): the runtime's agent, its unpacked binary,
+            # and a pulled model.
+            printf '<plist/>\n' > "${home}/Library/LaunchAgents/com.znasllc.memql-ollama.plist"
+            mkdir -p "${home}/.memql/ollama/runtime" "${home}/.memql/ollama/models/blobs"
+            printf '#!/bin/sh\nexit 0\n' > "${home}/.memql/ollama/runtime/ollama"
+            : > "${home}/.memql/ollama/models/blobs/sha256-fixture"
             ;;
         linux)
             mkdir -p "${home}/.config/systemd/user"
@@ -1174,6 +1404,17 @@ for _platform in mac linux; do
         else
             fail "$_un removed ~/.memql/ollama without --purge, or did not name it; got: $_out"
         fi
+    else
+        if [[ ! -e "${_uh}/Library/LaunchAgents/com.znasllc.memql-ollama.plist" ]]; then
+            pass "$_un removes the native model runtime's LaunchAgent"
+        else
+            fail "$_un left com.znasllc.memql-ollama.plist behind"
+        fi
+        if [[ -f "${_uh}/.memql/ollama/runtime/ollama" && "$_out" == *"kept ${_uh}/.memql/ollama"* ]]; then
+            pass "$_un keeps the model runtime and its models without --purge, and says so"
+        else
+            fail "$_un removed ~/.memql/ollama without --purge, or did not name it; got: $_out"
+        fi
     fi
     if [[ -f "${_uh}/.memql/policy.yaml" && -f "${_uh}/.memql/state/worker.log" ]]; then
         pass "$_un keeps policy.yaml and the state dir without --purge"
@@ -1199,12 +1440,10 @@ for _platform in mac linux; do
     else
         fail "$_un --purge left policy.yaml or the state dir: $(ls -laR "${_ph}/.memql" 2>&1)"
     fi
-    if [[ "$_platform" == "linux" ]]; then
-        if [[ ! -e "${_ph}/.memql/ollama" ]]; then
-            pass "$_un --purge removes the model runtime and its models"
-        else
-            fail "$_un --purge left ~/.memql/ollama: $(ls -laR "${_ph}/.memql/ollama" 2>&1)"
-        fi
+    if [[ ! -e "${_ph}/.memql/ollama" ]]; then
+        pass "$_un --purge removes the model runtime and its models"
+    else
+        fail "$_un --purge left ~/.memql/ollama: $(ls -laR "${_ph}/.memql/ollama" 2>&1)"
     fi
     if [[ ! -e "${_ph}/.memql" ]]; then
         pass "$_un --purge removes an emptied ~/.memql"

@@ -79,9 +79,10 @@ Options:
     --workbench               Enable isolated Fleet workbenches (requires Docker).
     --inference               Also set this machine up to serve local models:
                               install a model runtime, pull the default models,
-                              and write models.allow. A runtime install this
-                              cannot approve unattended is reported with the
-                              command for you to run; the install still succeeds.
+                              and write models.allow. At a terminal it asks once
+                              before installing the runtime; unattended, it
+                              reports the command for you to run. Either way
+                              the install still succeeds.
     --user-local              Install under \$HOME/.memql/bin instead of
                               /usr/local/bin. Use when sudo isn't
                               available (CI, restricted environments).
@@ -282,9 +283,21 @@ function install_launch_agent() {
         return 0
     fi
     if [[ -n "${NATIVE_APP:-}" ]]; then
-        local menu=true
+        local menu=true activate name
+        local -a env_args=()
         [[ "$INSTALL_MENU" == yes ]] || menu=false
-        bash "$NATIVE_STAGE/unpacked/scripts/macos/activate-app.sh" --app="$NATIVE_APP" --menu="$menu"
+        activate="$NATIVE_STAGE/unpacked/scripts/macos/activate-app.sh"
+        # The Ollama variables reach the app's worker service too, when the
+        # release's activation script knows the parameters (memql-cockpit#524).
+        while IFS= read -r name; do
+            [[ -n "$name" ]] || continue
+            if grep -qF "cap_spec_param \"ollama-env\"" "$activate"; then
+                env_args+=("--ollama-env=${name}=${!name}")
+            else
+                echo "WARN: ${name} is set in this shell and this Cockpit release cannot pass it to the worker service; the worker uses Ollama's default." >&2
+            fi
+        done < <(ollama_env_names)
+        bash "$activate" --app="$NATIVE_APP" --menu="$menu" "${env_args[@]+"${env_args[@]}"}"
         # Activation is idempotent when the app/plist are unchanged. Enrollment
         # is not: worker run reads workers.yaml only at startup, so an existing
         # process would keep the previous token (or never discover a new home).
@@ -337,7 +350,7 @@ function install_launch_agent() {
         <string>${HOME}</string>
         <key>PATH</key>
         <string>/usr/bin:/bin:/usr/sbin:/sbin:${HOME}/.local/bin:${HOME}/.claude/local:/opt/homebrew/bin:/usr/local/bin</string>
-    </dict>
+$(ollama_plist_env)    </dict>
 </dict>
 </plist>
 PLIST
@@ -374,22 +387,33 @@ function install_menu_companion() {
         base="$(release_download_base "$version")"
     fi
     stage="$(mktemp -d)"
+    rc=0
     if fetch_macos_menu "$base" "$(detect_arch)" "$stage"; then
         menu_version="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' "$stage/unpacked/MemQL Cockpit.app/Contents/Info.plist")"
         if [[ "$menu_version" != "$version" ]]; then
             echo "ERROR: menu version $menu_version differs from installed worker $version" >&2
-            rm -rf "$stage"
-            return 3
+            INSTALL_MENU_REASON="the menu release ($menu_version) does not match the worker ($version)"
+            rc=3
+        else
+            bash "$stage/unpacked/scripts/macos/install-menubar.sh" --app="$stage/unpacked/MemQL Cockpit.app" || rc=$?
+            [[ "$rc" == 0 ]] || INSTALL_MENU_REASON="its installer exited ${rc}"
         fi
-        rc=0
-        bash "$stage/unpacked/scripts/macos/install-menubar.sh" --app="$stage/unpacked/MemQL Cockpit.app" || rc=$?
     else
         rc=$?
+        INSTALL_MENU_REASON="it could not be downloaded from $base"
         echo "ERROR: menu companion could not be prepared from $base; worker installation already completed. Retry this installer to finish the menu installation." >&2
     fi
     rm -rf "$stage"
+    # The worker is installed and running by now; a menu that did not
+    # install is reported in the summary, never a failed install
+    # (memql-cockpit#524).
+    if [[ "$rc" != 0 ]]; then
+        INSTALL_MENU_STATE=failed
+        INSTALL_UI_STAGE_STATE=pending
+        INSTALL_UI_RESULT="Menu companion not installed"
+        return 0
+    fi
     INSTALL_UI_RESULT="Menu companion ready"
-    return "$rc"
 }
 
 function main() {
@@ -408,12 +432,13 @@ function main() {
     fi
     # Setup signals the running worker to reload its policy, so service first.
     # Runtime approval or model download failures do not undo enrollment.
-    if [[ "$WORKBENCH" == "yes" ]]; then
-        install_ui_stage "Preparing Fleet workbenches" "$INSTALLED_BINARY" worker setup --workbench
-    fi
-
+    # Local models before workbenches: models never wait on Docker, and
+    # neither stage can abort the install (memql-cockpit#524).
     if [[ "$INFERENCE" == "yes" ]]; then
         install_ui_stage "Preparing local models" setup_inference "$INSTALLED_BINARY"
+    fi
+    if [[ "$WORKBENCH" == "yes" ]]; then
+        install_ui_stage "Preparing Fleet workbenches" setup_workbench "$INSTALLED_BINARY"
     fi
     if [[ -z "${NATIVE_APP:-}" && "$INSTALL_SERVICE" == yes && "$INSTALL_MENU" == yes ]]; then
         install_ui_stage "Preparing the menu companion" install_menu_companion

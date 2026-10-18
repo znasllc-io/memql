@@ -278,7 +278,10 @@ function stop_agent() {
 function remove_launch_agent() {
     local plist_dir="${HOME}/Library/LaunchAgents"
     local label plist
-    for label in "$SERVICE_LABEL_DARWIN" "$LEGACY_LABEL_DARWIN" "com.visionarys.memql-cockpit-worker" "com.znasllc.memql-cockpit-menubar"; do
+    # com.znasllc.memql-ollama is the native model runtime `worker setup
+    # --inference` installs on a Mac without Homebrew (memql-cockpit#524).
+    # It is stopped before --purge takes ~/.memql/ollama out from under it.
+    for label in "$SERVICE_LABEL_DARWIN" "$LEGACY_LABEL_DARWIN" "com.visionarys.memql-cockpit-worker" "com.znasllc.memql-cockpit-menubar" "com.znasllc.memql-ollama"; do
         plist="${plist_dir}/${label}.plist"
         stop_agent "$label" || return $?
         remove_path_if_present "$plist" || true
@@ -642,7 +645,7 @@ function print_dry_run_plan() {
     else
         echo "  sudo:          not needed"
     fi
-    for label in "$SERVICE_LABEL_DARWIN" "$LEGACY_LABEL_DARWIN" "com.visionarys.memql-cockpit-worker" "com.znasllc.memql-cockpit-menubar"; do
+    for label in "$SERVICE_LABEL_DARWIN" "$LEGACY_LABEL_DARWIN" "com.visionarys.memql-cockpit-worker" "com.znasllc.memql-cockpit-menubar" "com.znasllc.memql-ollama"; do
         plist="${HOME}/Library/LaunchAgents/${label}.plist"
         target="gui/$(id -u)/${label}"
         if command -v launchctl >/dev/null 2>&1 && launchctl print "$target" >/dev/null 2>&1; then

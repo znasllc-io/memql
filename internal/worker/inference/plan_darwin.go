@@ -2,14 +2,19 @@ package inference
 
 import (
 	"context"
+	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
+	"strings"
 
 	"golang.org/x/sys/unix"
 )
 
-// The macOS facts: free disk where native Ollama keeps its models, and
-// deliberately NOTHING about Docker.
+// The macOS facts: where the native runtime would go when Homebrew is not
+// there to install it, free disk where the models live, how an installed
+// runtime that is not answering would be started -- and deliberately
+// NOTHING about Docker.
 //
 // Design D1 rules Docker out here, and this file honours that by not
 // looking rather than by looking and ignoring the answer. A Docker
@@ -19,12 +24,51 @@ import (
 // GPU, serving on the CPU, which is exactly what the hardware floor
 // exists to prevent.
 func gatherPlatform(_ context.Context) platformFacts {
+	home, _ := os.UserHomeDir()
+	n := DarwinNativeFacts(home, os.Getenv("OLLAMA_MODELS"))
+	n.Installed = exists(filepath.Join(n.RuntimeDir, "ollama"))
+	n.FreeDisk = availableBytes(n.RuntimeDir)
+	models := ollamaModelsDir()
+	if n.Installed {
+		// The runtime an earlier native setup unpacked keeps its models
+		// where its LaunchAgent says, not where Homebrew's would.
+		models = n.ModelsDir
+	}
 	return platformFacts{
 		Docker: DockerFacts{
 			Reason: "not probed on macOS: a container has no access to the GPU, so Docker is not a runtime option here",
 		},
-		FreeDisk: availableBytes(ollamaModelsDir()),
+		Native:    n,
+		FreeDisk:  availableBytes(models),
+		ModelsDir: models,
+		stopped:   darwinStopped,
 	}
+}
+
+// darwinStopped is how an installed Ollama that is not answering would be
+// started on this Mac: MemQL's own agent first (loaded or not), then
+// Homebrew's service when the binary on PATH is Homebrew's, then Ollama's
+// own app.
+func darwinStopped(ctx context.Context, h Host) StoppedFacts {
+	var s StoppedFacts
+	if exists(h.Native.UnitPath) {
+		s.Agent = true
+		s.AgentLoaded = exec.CommandContext(ctx, "launchctl", "print",
+			fmt.Sprintf("gui/%d/%s", h.UID, OllamaAgentLabel)).Run() == nil
+	}
+	if path, err := h.LookPath("ollama"); err == nil {
+		if resolved, err := filepath.EvalSymlinks(path); err == nil && strings.Contains(resolved, "/Cellar/ollama/") {
+			s.Brew = true
+		}
+	}
+	home, _ := os.UserHomeDir()
+	s.App = exists("/Applications/Ollama.app") || exists(filepath.Join(home, "Applications", "Ollama.app"))
+	return s
+}
+
+func exists(path string) bool {
+	_, err := os.Stat(path)
+	return err == nil
 }
 
 // ollamaModelsDir is where native Ollama keeps model blobs. OLLAMA_MODELS
@@ -39,7 +83,7 @@ func ollamaModelsDir() string {
 	if err != nil {
 		return ""
 	}
-	return filepath.Join(home, ".ollama")
+	return filepath.Join(home, ".ollama", "models")
 }
 
 // availableBytes is what a non-root process may still write on that

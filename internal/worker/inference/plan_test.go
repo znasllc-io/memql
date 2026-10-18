@@ -78,6 +78,11 @@ func TestDecide(t *testing.T) {
 		// reuses an earlier unpack. Nil and false on every other plan.
 		wantArchives []string
 		wantReuse    bool
+		// An installed runtime that is not answering (memql-cockpit#524):
+		// the commands that start it, or the sentence when nothing here can.
+		wantServing bool
+		wantStart   []string
+		wantStopped string
 	}{
 		{
 			name: "apple silicon with ollama already installed",
@@ -89,6 +94,79 @@ func TestDecide(t *testing.T) {
 			},
 			wantRuntime: RuntimeNative,
 			wantPresent: true,
+			wantServing: true,
+		},
+		{
+			// THE HALF-SET-UP MAC (memql-cockpit#524): Homebrew installed
+			// ollama and its service is stopped. Present used to mean
+			// "nothing to do", and every pull then failed against a closed
+			// port.
+			name: "apple silicon with homebrew's ollama installed and stopped",
+			host: Host{
+				GOOS: "darwin", GOARCH: "arm64", UID: 501,
+				Floor:    metFloor("apple silicon, 32 GB, macOS 15"),
+				Native:   DarwinNativeFacts("/Users/op", ""),
+				Stopped:  StoppedFacts{Brew: true, App: true},
+				LookPath: lookPath("brew", "ollama"),
+			},
+			wantRuntime: RuntimeNative,
+			wantPresent: true,
+			wantStart:   []string{"brew services start ollama"},
+			wantNote:    "Ollama is installed and is not answering, so it has to be started before a model can be pulled.",
+		},
+		{
+			name: "apple silicon with ollama's own app installed and not running",
+			host: Host{
+				GOOS: "darwin", GOARCH: "arm64", UID: 501,
+				Floor:    metFloor("apple silicon, 32 GB, macOS 15"),
+				Native:   DarwinNativeFacts("/Users/op", ""),
+				Stopped:  StoppedFacts{App: true},
+				LookPath: lookPath("ollama"),
+			},
+			wantRuntime: RuntimeNative,
+			wantPresent: true,
+			wantStart:   []string{"open -a Ollama"},
+			wantNote:    "Ollama is installed and is not answering, so it has to be started before a model can be pulled.",
+		},
+		{
+			name: "apple silicon with memql's own agent loaded and the runtime down",
+			host: Host{
+				GOOS: "darwin", GOARCH: "arm64", UID: 501,
+				Floor:    metFloor("apple silicon, 32 GB, macOS 15"),
+				Native:   DarwinNativeFacts("/Users/op", ""),
+				Stopped:  StoppedFacts{Agent: true, AgentLoaded: true, Brew: true},
+				LookPath: lookPath("ollama"),
+			},
+			wantRuntime: RuntimeNative,
+			wantPresent: true,
+			wantStart:   []string{"launchctl kickstart -k gui/501/com.znasllc.memql-ollama"},
+			wantNote:    "Ollama is installed and is not answering, so it has to be started before a model can be pulled.",
+		},
+		{
+			name: "apple silicon with memql's own agent written and not loaded",
+			host: Host{
+				GOOS: "darwin", GOARCH: "arm64", UID: 501,
+				Floor:    metFloor("apple silicon, 32 GB, macOS 15"),
+				Native:   DarwinNativeFacts("/Users/op", ""),
+				Stopped:  StoppedFacts{Agent: true},
+				LookPath: lookPath("ollama"),
+			},
+			wantRuntime: RuntimeNative,
+			wantPresent: true,
+			wantStart:   []string{"launchctl bootstrap gui/501 /Users/op/Library/LaunchAgents/com.znasllc.memql-ollama.plist"},
+			wantNote:    "Ollama is installed and is not answering, so it has to be started before a model can be pulled.",
+		},
+		{
+			name: "apple silicon with an ollama nobody here can identify, not answering",
+			host: Host{
+				GOOS: "darwin", GOARCH: "arm64", UID: 501,
+				Floor:    metFloor("apple silicon, 32 GB, macOS 15"),
+				Native:   DarwinNativeFacts("/Users/op", ""),
+				LookPath: lookPath("ollama"),
+			},
+			wantRuntime: RuntimeNative,
+			wantPresent: true,
+			wantStopped: "Ollama is installed and is not answering, and this command cannot tell how it was installed. Start it (open the Ollama app, or run ollama serve in a terminal) and run this again.",
 		},
 		{
 			name: "apple silicon without ollama",
@@ -102,13 +180,40 @@ func TestDecide(t *testing.T) {
 			wantNote:    "Docker is not offered on macOS: a container has no access to the GPU, so Ollama in a container would serve on the CPU and this machine would not be advertised for inference.",
 		},
 		{
-			name: "apple silicon without homebrew",
+			// No Homebrew is no longer a refusal (memql-cockpit#524):
+			// Ollama's own release archive, checked against its checksum
+			// file, run by a LaunchAgent as the person.
+			name: "apple silicon without homebrew: ollama's own release",
 			host: Host{
-				GOOS: "darwin", GOARCH: "arm64",
+				GOOS: "darwin", GOARCH: "arm64", UID: 501,
 				Floor:    metFloor("apple silicon, 16 GB, macOS 14"),
+				Native:   DarwinNativeFacts("/Users/op", ""),
 				LookPath: lookPath(),
 			},
-			wantRefusal: "Homebrew is not installed, and it is the only macOS path this command can take. Install Homebrew from https://brew.sh and run this again, or install Ollama yourself from https://ollama.com/download.",
+			wantRuntime:  RuntimeNative,
+			wantInstall:  []string{"launchctl kickstart -k gui/501/com.znasllc.memql-ollama"},
+			wantArchives: []string{"ollama-darwin.tgz"},
+			wantNote:     "Homebrew is not installed, so Ollama's own macOS release will run as your user, from ~/.memql, kept running by a LaunchAgent. Nothing here needs an administrator password.",
+		},
+		{
+			// An earlier native run unpacked the runtime and stopped
+			// before it served. It is reused, even where Homebrew has
+			// since appeared, rather than installing a second Ollama.
+			name: "apple silicon with the native runtime already unpacked",
+			host: Host{
+				GOOS: "darwin", GOARCH: "arm64", UID: 501,
+				Floor: metFloor("apple silicon, 16 GB, macOS 14"),
+				Native: func() NativeFacts {
+					n := DarwinNativeFacts("/Users/op", "")
+					n.Installed = true
+					return n
+				}(),
+				LookPath: lookPath("brew"),
+			},
+			wantRuntime: RuntimeNative,
+			wantInstall: []string{"launchctl kickstart -k gui/501/com.znasllc.memql-ollama"},
+			wantReuse:   true,
+			wantNote:    "Homebrew is not installed, so Ollama's own macOS release will run as your user, from ~/.memql, kept running by a LaunchAgent. Nothing here needs an administrator password.",
 		},
 		{
 			// The ollama binary is absent and something is nonetheless
@@ -123,6 +228,7 @@ func TestDecide(t *testing.T) {
 			},
 			wantRuntime: RuntimeNative,
 			wantPresent: true,
+			wantServing: true,
 		},
 		{
 			// THE LINUX DEFAULT (2026-09-08 record, D1): Ollama unpacked
@@ -362,6 +468,7 @@ func TestDecide(t *testing.T) {
 			},
 			wantRuntime: RuntimeNative,
 			wantPresent: true,
+			wantServing: true,
 		},
 		{
 			name: "linux asked for docker while already serving",
@@ -375,6 +482,7 @@ func TestDecide(t *testing.T) {
 			},
 			wantRuntime: RuntimeDocker,
 			wantPresent: true,
+			wantServing: true,
 		},
 		{
 			name: "below the macOS memory floor",
@@ -415,6 +523,7 @@ func TestDecide(t *testing.T) {
 				LookPath: lookPath("brew", "ollama"),
 			},
 			wantPresent: true,
+			wantServing: true,
 			wantRefusal: "an Intel Mac is not supported as an inference machine. It remains a full worker for everything else.",
 		},
 		{
@@ -440,6 +549,50 @@ func TestDecide(t *testing.T) {
 				LookPath: lookPath(),
 			},
 			wantRefusal: "freebsd is not a supported platform for local models. They run on macOS with Apple Silicon and on Linux with a discrete GPU.",
+		},
+		{
+			name: "linux with memql's own unit written and the runtime down",
+			host: Host{
+				GOOS: "linux", GOARCH: "amd64",
+				Floor:    metFloor("NVIDIA GeForce RTX 4090, 24 GB VRAM"),
+				Native:   nativeFacts(GPUVendorNVIDIA),
+				Stopped:  StoppedFacts{Unit: true},
+				LookPath: lookPath("systemctl", "ollama"),
+			},
+			wantRuntime: RuntimeNative,
+			wantPresent: true,
+			wantStart:   []string{"systemctl --user start memql-ollama.service"},
+			wantNote:    "Ollama is installed and is not answering, so it has to be started before a model can be pulled.",
+		},
+		{
+			// Ollama's own install.sh puts a SYSTEM unit on the machine,
+			// and this command never runs sudo: it names the command.
+			name: "linux with ollama's system service stopped",
+			host: Host{
+				GOOS: "linux", GOARCH: "amd64",
+				Floor:    metFloor("NVIDIA GeForce RTX 4090, 24 GB VRAM"),
+				Native:   nativeFacts(GPUVendorNVIDIA),
+				Stopped:  StoppedFacts{SystemUnit: true},
+				LookPath: lookPath("systemctl", "ollama"),
+			},
+			wantRuntime: RuntimeNative,
+			wantPresent: true,
+			wantStopped: "Ollama is installed as a system service and is not running. Start it with sudo systemctl start ollama, then run this again.",
+		},
+		{
+			name: "linux under --runtime docker with the ollama container stopped",
+			host: Host{
+				GOOS: "linux", GOARCH: "amd64",
+				Runtime:  RuntimeDocker,
+				Floor:    metFloor("NVIDIA GeForce RTX 4090, 24 GB VRAM"),
+				Docker:   DockerFacts{CLIPresent: true, Present: true, GPUVendor: GPUVendorNVIDIA, GPUToolkit: true},
+				Stopped:  StoppedFacts{Container: true},
+				LookPath: lookPath("docker", "ollama"),
+			},
+			wantRuntime: RuntimeDocker,
+			wantPresent: true,
+			wantStart:   []string{"docker start ollama"},
+			wantNote:    "Ollama is installed and is not answering, so it has to be started before a model can be pulled.",
 		},
 		{
 			// A Host that names no platform. Gather cannot build one, and
@@ -493,6 +646,15 @@ func TestDecide(t *testing.T) {
 			}
 			if got.Stage != nil && got.Refusal != "" {
 				t.Error("a refusal must not carry a stage")
+			}
+			if got.Serving != tt.wantServing {
+				t.Errorf("Serving = %v, want %v", got.Serving, tt.wantServing)
+			}
+			if strings.Join(got.Start, "\n") != strings.Join(tt.wantStart, "\n") {
+				t.Errorf("Start = %q, want %q", got.Start, tt.wantStart)
+			}
+			if got.Stopped != tt.wantStopped {
+				t.Errorf("Stopped =\n  %q\nwant\n  %q", got.Stopped, tt.wantStopped)
 			}
 			// Every case in this table leaves Host.Hardware zero, so
 			// every one classes `unsupported` and takes the smallest
@@ -575,7 +737,10 @@ func TestDecideAlwaysSaysSomething(t *testing.T) {
 func TestSentencesAreReadableInATerminal(t *testing.T) {
 	sentences := []string{
 		noteDockerNotOfferedOnMac,
-		refusalNoHomebrew,
+		noteNativeOnMac,
+		noteRuntimeStopped,
+		stoppedUnknown,
+		stoppedSystemUnit,
 		refusalNoDocker,
 		refusalDockerDaemonSilent,
 		refusalNoNVIDIAToolkit,
