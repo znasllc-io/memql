@@ -106,13 +106,21 @@ A step's pod runs up to four kinds of container, in this order:
 | `svc-<name>` | native sidecar, one per service the step names, in name order | the service's `image`, its own user | its declared `env` only: no checkout, no cache, no secret |
 | `step` | main | the pipeline's `image`, its own user | the checkout at `/workspace`, its repository's cache at `/cache`, the step's environment and its secrets |
 
-An explicit `githubReadToken: true` command also receives a required Secret
+An explicit `githubReadToken: true` command or image build receives a required Secret
 reference as `MEMQL_GITHUB_READ_TOKEN`. The token reads only this repository's
 contents, checks and pull requests; it has no write permission. Ordinary commands,
-services, collectors, image builds and fleet tasks do not receive this grant.
+services, collectors, image builds without the flag and fleet tasks do not receive this grant.
 The runner refreshes it during queue waits and masks every issued value using
 the same lifecycle as checkout credentials. A missing grant refuses execution;
 it never falls back to an installation-wide or anonymous credential.
+
+For an image build, BuildKit receives the credential through its secret session
+as `github_read_token`. A Dockerfile opts into it for one instruction with
+`RUN --mount=type=secret,id=github_read_token,required=true`. The token is at
+`/run/secrets/github_read_token` for that instruction; it is not a build argument
+or an ordinary environment variable inside a Dockerfile `RUN`. Do not copy the
+mounted file into an image layer. No publication or registry credential reaches
+the builder.
 
 Every container runs with `allowPrivilegeEscalation: false`, and the pod with
 the `RuntimeDefault` seccomp profile, `restartPolicy: Never` and a 10-second

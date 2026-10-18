@@ -33,3 +33,20 @@ func TestRepositoryReadGrantSurvivesCompilationAndWire(t *testing.T) {
 		}
 	}
 }
+
+func TestImageBuildRepositoryReadGrantSurvivesCompilationAndWire(t *testing.T) {
+	spec := imageBuildSpec()
+	spec.Stages[0].Steps[0].GitHubReadToken = true
+	plan, refusal := Compile(spec, CompileInput{Mode: ModeFull, Event: EventRelease, Compute: ComputeCluster})
+	if refusal != nil {
+		t.Fatal(refusal)
+	}
+	raw, err := json.Marshal(plan.Steps()[0])
+	if err != nil {
+		t.Fatal(err)
+	}
+	var received Step
+	if err := json.Unmarshal(raw, &received); err != nil || !received.GitHubReadToken || received.ImageBuild == nil || received.Run != "" {
+		t.Fatalf("image build grant lost at hop: %s / %v", raw, err)
+	}
+}

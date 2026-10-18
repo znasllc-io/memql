@@ -243,7 +243,7 @@ func TestImageBuildArgumentsRemainLiteralShellWords(t *testing.T) {
 	build := imageBuildWithProvenance(&pl.ImageBuild{Context: ".", Dockerfile: "Dockerfile", Args: map[string]string{"VALUE": value}}, testSHA, pl.EventRelease, "v1.2.3")
 	// Move the fixed checkout mount to isolated test scratch; everything else
 	// is the real generated program, executed by the real POSIX shell.
-	program := strings.ReplaceAll(imageBuildCommand(build, "linux/arm64"), workspacePath, root)
+	program := strings.ReplaceAll(imageBuildCommand(build, "linux/arm64", false), workspacePath, root)
 	cmd := exec.Command("/bin/sh", "-ec", program)
 	cmd.Dir, cmd.Env = root, append(os.Environ(), "PATH="+bin+":"+os.Getenv("PATH"))
 	out, err := cmd.CombinedOutput()

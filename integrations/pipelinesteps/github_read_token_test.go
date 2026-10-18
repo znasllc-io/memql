@@ -113,3 +113,63 @@ func TestRepositoryReadGrantNeverFallsBackToCloneOrAnonymousToken(t *testing.T) 
 		}
 	}
 }
+
+func TestImageBuildReadGrantCrossesReplicasAsOneRequiredSecretReference(t *testing.T) {
+	cfg, source := imageBuildRun()
+	source.GitHubReadToken = true
+	raw, err := json.Marshal(source)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var received StepRun
+	if err := json.Unmarshal(raw, &received); err != nil {
+		t.Fatal(err)
+	}
+	job, err := BuildJob(cfg, received, testJobName)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var holders []string
+	for _, c := range allContainers(job) {
+		for _, e := range c.Env {
+			if e.ValueFrom == nil || e.ValueFrom.SecretKeyRef == nil {
+				continue
+			}
+			holders = append(holders, c.Name)
+			ref := e.ValueFrom.SecretKeyRef
+			if ref.Key != gitTokenKey || ref.Name != SecretName(testJobName) ||
+				(c.Name == ContainerStep && (e.Name != repositoryReadTokenVar || e.Value != "" || (ref.Optional != nil && *ref.Optional))) {
+				t.Fatalf("builder received an unintended or optional credential: %+v", e)
+			}
+		}
+	}
+	if strings.Join(holders, ",") != "clone,"+ContainerStep {
+		t.Fatalf("credential reached preparation or artifact collection: %v", holders)
+	}
+	program := ""
+	for _, e := range job.Spec.Template.Spec.Containers[0].Env {
+		if e.Name == stepCommandVar {
+			program = e.Value
+		}
+	}
+	if strings.Count(program, "'--secret'") != 1 || !strings.Contains(program, "'id=github_read_token,env="+repositoryReadTokenVar+"'") {
+		t.Fatalf("build lacks its fixed secret session: %s", program)
+	}
+	if strings.Contains(program, "build-arg:"+repositoryReadTokenVar) {
+		t.Fatal("read credential sent as an image build argument")
+	}
+	received.GitHubReadToken = false
+	ordinary, err := BuildJob(cfg, received, testJobName)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, e := range ordinary.Spec.Template.Spec.Containers[0].Env {
+		if e.ValueFrom != nil || (e.Name == stepCommandVar && strings.Contains(e.Value, "'--secret'")) {
+			t.Fatal("ordinary image builder received the optional grant")
+		}
+	}
+	received.GitHubReadToken, received.InstallationID = true, 0
+	if _, err := BuildJob(cfg, received, testJobName); err == nil {
+		t.Fatal("anonymous repository received an image read grant")
+	}
+}
