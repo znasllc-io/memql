@@ -78,9 +78,10 @@ func handleModels(args []string) {
 	inv := d.Probe(ctx, modelsRequest(policy))
 	printModelInventory(os.Stdout, inv, policyPath)
 
-	// The tuning half answers "did it take". It is printed whenever there is
-	// an Ollama to tune or something to say about the policy; a machine with
-	// neither already got "No model runtime answered" above.
+	// The tuning half answers "did it take". It is printed when Ollama
+	// answered with at least one model (its version is read only then), when
+	// models.resident has an entry, or when the policy has a problem. Otherwise
+	// there is nothing to tune, and the inventory above says why.
 	tuning := policy.ModelsTuning()
 	problems := policy.ModelsTuningProblems()
 	if inv.RuntimeVersions[models.KindOllama] != "" || len(tuning.Resident) > 0 || len(problems) > 0 {

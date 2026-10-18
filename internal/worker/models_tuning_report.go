@@ -3,9 +3,13 @@ package worker
 import (
 	"fmt"
 	"io"
+	"os"
+	"os/exec"
+	"path/filepath"
 	"strings"
 	"time"
 
+	"github.com/znasllc-io/memql-cockpit/internal/worker/inference"
 	"github.com/znasllc-io/memql-cockpit/internal/worker/models"
 )
 
@@ -31,6 +35,48 @@ type tuningReport struct {
 	LoadedErr error
 	// Now is the clock, so the report is assertable.
 	Now time.Time
+	// LookPath and ManagedOllama are the lookups behind the command the CPU
+	// callout prints. Nil means the real ones.
+	LookPath      func(file string) (string, error)
+	ManagedOllama func() string
+}
+
+// managedOllamaBinary is the ollama the managed runtime unpacked, at the path
+// its unit runs it from, or empty when none is on disk. The path comes from the
+// facts the install writes its unit against, so the command the report prints
+// is the binary the unit runs.
+func managedOllamaBinary() string {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return ""
+	}
+	bin := filepath.Join(inference.DefaultNativeFacts(home, "").RuntimeDir, "bin", "ollama")
+	if fi, err := os.Stat(bin); err != nil || !fi.Mode().IsRegular() {
+		return ""
+	}
+	return bin
+}
+
+// stopCommand is the `ollama` a person runs to unload a model: the bare name
+// when ollama is on PATH. Otherwise the managed runtime's binary by its absolute
+// path when it is installed, because the runtime is not put on PATH and its
+// unit runs that binary by path. The bare name when neither is found.
+func stopCommand(r tuningReport) string {
+	lookPath := r.LookPath
+	if lookPath == nil {
+		lookPath = exec.LookPath
+	}
+	if _, err := lookPath("ollama"); err == nil {
+		return "ollama"
+	}
+	managed := r.ManagedOllama
+	if managed == nil {
+		managed = managedOllamaBinary
+	}
+	if bin := managed(); bin != "" {
+		return bin
+	}
+	return "ollama"
 }
 
 func printModelTuning(w io.Writer, inv models.Inventory, r tuningReport) {
@@ -40,9 +86,12 @@ func printModelTuning(w io.Writer, inv models.Inventory, r tuningReport) {
 	fmt.Fprintf(w, "  Requests per model: %d, from %s.\n", r.Parallel, r.ParallelSource)
 	fmt.Fprintln(w, "")
 
+	// Only what this machine serves. An entry for a model models.allow does
+	// not list is inert -- no call is served for it, so nothing keeps it
+	// loaded -- and the problems line says so.
 	var kept []models.Info
 	for _, m := range inv.Models {
-		if m.KeepAlive.Set || m.WorkingContext > 0 {
+		if m.Allowed && (m.KeepAlive.Set || m.WorkingContext > 0) {
 			kept = append(kept, m)
 		}
 	}
@@ -77,7 +126,7 @@ func printModelTuning(w io.Writer, inv models.Inventory, r tuningReport) {
 			fmt.Fprintf(w, "    %-30s %s\n", l.ID, loadedWords(l, r.Now))
 			if l.GPUPercent() < 100 {
 				fmt.Fprintln(w, "      The rest runs on the CPU, which is slow, and stays that way until the model reloads.")
-				fmt.Fprintf(w, "      Free GPU memory, then run: ollama stop %s\n", l.ID)
+				fmt.Fprintf(w, "      Free GPU memory, then run: %s stop %s\n", stopCommand(r), l.ID)
 			}
 		}
 	}

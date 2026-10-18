@@ -2,7 +2,9 @@ package models
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"net/url"
 	"strings"
 	"time"
 )
@@ -68,7 +70,7 @@ func (d *Discoverer) Loaded(ctx context.Context) ([]Loaded, error) {
 	var ps ollamaPSResponse
 	base := d.ollamaBaseURL()
 	if err := d.getJSON(ctx, base+"/api/ps", "", &ps); err != nil {
-		return nil, fmt.Errorf("no answer from Ollama's /api/ps at %s (%v)", base, err)
+		return nil, fmt.Errorf("no answer from Ollama's /api/ps at %s (%v)", base, unwrapURLError(err))
 	}
 	out := make([]Loaded, 0, len(ps.Models))
 	for _, m := range ps.Models {
@@ -88,4 +90,14 @@ func (d *Discoverer) Loaded(ctx context.Context) ([]Loaded, error) {
 		out = append(out, l)
 	}
 	return out, nil
+}
+
+// unwrapURLError is the cause inside a *url.Error. The sentence already names
+// the URL the question went to, and the url.Error's own text repeats it.
+func unwrapURLError(err error) error {
+	var ue *url.Error
+	if errors.As(err, &ue) && ue.Err != nil {
+		return ue.Err
+	}
+	return err
 }

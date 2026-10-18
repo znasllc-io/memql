@@ -4,6 +4,7 @@ import (
 	"context"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 )
@@ -78,19 +79,31 @@ func TestLoadedNothingLoadedIsAnAnswer(t *testing.T) {
 
 // TestLoadedSaysWhyItCouldNotAsk. A runtime that is down, or an Ollama too
 // old to have /api/ps, is a sentence for the report and never a failure of
-// the command that prints it.
+// the command that prints it. The sentence names the URL once, where the
+// question went; the cause after it must not repeat the URL.
 func TestLoadedSaysWhyItCouldNotAsk(t *testing.T) {
+	check := func(name, base string, err error) {
+		t.Helper()
+		if err == nil {
+			t.Errorf("%s: want an error", name)
+			return
+		}
+		if !strings.HasPrefix(err.Error(), "no answer from Ollama's /api/ps at "+base+" (") {
+			t.Errorf("%s: the sentence is %q", name, err)
+		}
+		if n := strings.Count(err.Error(), base); n != 1 {
+			t.Errorf("%s: the URL %s appears %d times in %q, want once", name, base, n, err)
+		}
+	}
 	for name, srv := range map[string]*httptest.Server{
 		"a route Ollama does not have": psStub(t, 404, "not found"),
 		"a body that is not JSON":      psStub(t, 200, "<html>"),
 	} {
-		if _, err := discovererFor(srv.URL, nil).Loaded(context.Background()); err == nil {
-			t.Errorf("%s: want an error", name)
-		}
+		_, err := discovererFor(srv.URL, nil).Loaded(context.Background())
+		check(name, srv.URL, err)
 	}
 	dead := httptest.NewServer(http.NotFoundHandler())
 	dead.Close()
-	if _, err := discovererFor(dead.URL, nil).Loaded(context.Background()); err == nil {
-		t.Error("a runtime that is down: want an error")
-	}
+	_, err := discovererFor(dead.URL, nil).Loaded(context.Background())
+	check("a runtime that is down", dead.URL, err)
 }
