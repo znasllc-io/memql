@@ -301,6 +301,39 @@ describe("fleet capacity", () => {
     expect(read.machines[0]!.models[0]).toMatchObject({ modelId: "m", inFlight: 1, slots: 4, needBytes: 5e9 });
   });
 
+  it("reads the engine's reply: per-model slots, loaded models as objects, machine performance", () => {
+    // The shape component/memql/fleet_capacity.go writes (memql#6226).
+    const engine = capacityFrom([{
+      id: "fleet",
+      measuredAt: "2026-10-18T21:00:00Z",
+      machines: [{
+        registrationId: "studio",
+        name: "studio",
+        displayName: "Studio",
+        online: true,
+        slots: { inFlight: 2, max: 2 },
+        memory: { reported: true, kind: "unified", totalBytes: 36e9, freeBytes: 9e9, idleLoadedBytes: 0 },
+        loadedModels: [{ model: "qwen3.8:27b", runtime: "ollama", sizeBytes: 18e9, activeCalls: 2 }],
+        models: [
+          { modelId: "qwen3-embedding:0.6b", slots: { inFlight: 0, max: 4 }, needBytes: 1e9, loaded: false },
+          { modelId: "qwen3.5:9b", slots: { inFlight: 0, max: 2 }, needBytes: 20e9, loaded: false },
+          { modelId: "qwen3.8:27b", slots: { inFlight: 2, max: 2 }, needBytes: 18e9, loaded: true },
+        ],
+        performance: { calls: 12, medianLatencyMs: 850, tokensPerSec: 28.5 },
+        degraded: false,
+        degradedReason: "",
+      }],
+    }]);
+    expect(engine.machines[0]).toMatchObject({ machineId: "studio", name: "Studio", memoryFreeBytes: 9e9, loaded: ["qwen3.8:27b"] });
+    expect(capacityReason(engine, "studio", "qwen3.8:27b")).toBe("busy, 2 of 2");
+    expect(capacityReason(engine, "studio", "qwen3.5:9b")).toBe("needs 20 GB, 9 GB free");
+    expect(capacityReason(engine, "studio", "qwen3-embedding:0.6b")).toBe("");
+    expect(engine.machines[0]!.models[2]).toMatchObject({ tokensPerSecond: 28.5, medianLatencyMs: 850 });
+    // An older reply listing bare ids still reads, with nothing measured.
+    const bare = capacityFrom([{ registrationId: "studio", models: ["qwen3.5:9b"] }]);
+    expect(bare.machines[0]!.models[0]).toMatchObject({ modelId: "qwen3.5:9b", inFlight: null, slots: null, needBytes: null });
+  });
+
   it("says a model is busy when every slot is in use", () => {
     const capacity = capacityFrom([studio()]);
     expect(capacityReason(capacity, "studio", "qwen3.8:27b")).toBe("busy, 2 of 2");
