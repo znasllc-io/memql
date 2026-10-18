@@ -31,6 +31,22 @@ before the first one.
 
 ## Where a step runs
 
+Operators using Kueue can set `MEMQL_PIPELINES_QUEUE_PRIORITY_CLASSES` to a
+JSON object mapping pipeline events to installed `WorkloadPriorityClass` names.
+For example, `{"merge_group":"merge-gates","schedule":"background-audits"}`
+lets the declared classes order pending merge candidates ahead of scheduled
+audits. Unmapped events retain default admission priority. The mapping is
+operator configuration; repository manifests cannot choose a priority class.
+Create the referenced classes before enabling it. Malformed mappings refuse
+execution, and a missing class leaves the Job suspended until repaired.
+
+This uses [Kueue workload priority](https://kueue.sigs.k8s.io/docs/concepts/workload_priority_class/),
+which is separate from Pod scheduling priority. Resource ceilings, dedicated
+pool placement and the ClusterQueue's preemption policy still apply. With
+preemption disabled, an admitted job finishes before higher-priority waiting
+work can use its resources. Each replica derives the same class from the
+serialized pipeline event; adopted Jobs keep their existing admission state.
+
 The agent node driving a run hands each command step to the substrate's
 executor (`integrations/pipelinesteps`), which decides where it runs:
 

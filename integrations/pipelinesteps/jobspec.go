@@ -278,6 +278,9 @@ func BuildJob(cfg Config, run StepRun, jobName string) (Job, error) {
 	}
 	if cfg.QueueName != "" {
 		job.Metadata.Labels[queueLabel] = cfg.QueueName
+		if class, _ := queuePriorityClass(cfg, run); class != "" {
+			job.Metadata.Labels[queuePriorityLabel] = class
+		}
 		job.Spec.Suspend = ptr(true)
 		// Kueue accounts requests. Explicit container limits must be reserved,
 		// too; namespace defaults are held to the same rule by the component.
@@ -296,6 +299,9 @@ func checkJob(cfg Config, run StepRun) (int32, *pl.Refusal) {
 	}
 	if cfg.QueueName != "" && (!dnsLabelShape.MatchString(cfg.QueueName) || len(cfg.QueueName) > 63 || cfg.NodePool == "") {
 		return refuse("resource admission requires a named queue and a dedicated build pool")
+	}
+	if _, err := queuePriorityClass(cfg, run); err != nil {
+		return refuse("invalid resource admission priority: %s", err)
 	}
 	if cfg.QueueName != "" {
 		if _, err := time.Parse(time.RFC3339Nano, run.RunDeadline); err != nil {
