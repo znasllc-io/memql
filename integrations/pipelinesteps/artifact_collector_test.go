@@ -4,6 +4,7 @@ import (
 	"archive/tar"
 	"bytes"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -60,7 +61,11 @@ func TestArtifactCollectorChecksIdentityAcrossTheStream(t *testing.T) {
 						return
 					}
 					defer c.CloseNow()
-					_ = c.Write(r.Context(), websocket.MessageBinary, append([]byte{1}, archive.Bytes()...))
+					payload := archive.Bytes()
+					if r.URL.Query()["command"][0] == "stat" {
+						payload = []byte(fmt.Sprintf("MEMQL_SIZE:%d:END\n", archive.Len()))
+					}
+					_ = c.Write(r.Context(), websocket.MessageBinary, append([]byte{1}, payload...))
 					mu.Lock()
 					switch fault {
 					case "pod-replaced":
