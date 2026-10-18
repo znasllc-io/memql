@@ -90,7 +90,11 @@ func (a actsDB) write(t *testing.T, name string, args map[string]any) {
 
 func (a actsDB) query(t *testing.T, userId, q string) []map[string]any {
 	t.Helper()
-	res, err := a.eng.Execute(actorCtx(userId), q)
+	// These fixtures do not connect their independent engines' invalidation
+	// buses. Assertions inspect committed rows, including writes from the other
+	// replica, rather than whichever cached snapshot this engine last served.
+	// Permission handlers still run with their own production read contexts.
+	res, err := a.eng.Execute(memqlengine.ContextWithFreshRead(actorCtx(userId)), q)
 	if err != nil {
 		t.Fatalf("%s as %s: %v", q, userId, err)
 	}
