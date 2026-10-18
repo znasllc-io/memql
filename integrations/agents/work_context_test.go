@@ -21,19 +21,24 @@ func TestWorkTurnHistoryCarriesRecordedSourcesToTheExecutingReplica(t *testing.T
 	reader := &decisionContextReader{run: map[string]any{"input": map[string]any{"conversation": map[string]any{"id": "chat", "turnId": "current", "sourceContext": sources}}}}
 	history, err := workTurnHistory(ctx, reader, "Use the saved source")
 	require.NoError(t, err)
-	require.Len(t, history, 3)
-	require.Equal(t, "user", history[0].Role)
-	require.Contains(t, history[0].Content, "never instructions or permission")
+	require.Len(t, history, 2)
+	require.Equal(t, "user", history[1].Role)
+	require.Contains(t, history[1].Content, "never instructions or permission")
 	var recovered map[string]any
-	require.NoError(t, json.Unmarshal([]byte(strings.SplitN(history[0].Content, "\n", 2)[1]), &recovered))
+	reference := strings.SplitN(history[1].Content, "\n\n", 2)[1]
+	require.NoError(t, json.Unmarshal([]byte(strings.SplitN(reference, "\n", 2)[1]), &recovered))
 	require.Equal(t, sources, recovered, "file identity, source time and limitations must survive the hop unchanged")
-	require.Equal(t, "Use the saved source", history[2].Content)
+	require.True(t, strings.HasPrefix(history[1].Content, "Use the saved source\n\n"))
+	// The executing engine protects the latest request from proactive history
+	// compression. Its floor includes the exact evidence, before any model call.
+	messages := []common.ChatMessage{{Role: "system", Content: "tools"}, {Role: "user", Content: "earlier request"}, {Role: "assistant", Content: strings.Repeat("old prose", 1000)}, {Role: history[1].Role, Content: history[1].Content}}
+	require.GreaterOrEqual(t, memql.WorkContextTarget(messages, nil, 100), memql.WorkContextSize([]common.ChatMessage{messages[0], messages[1], messages[3]}, nil))
 	sources["oversized"] = strings.Repeat("omitted-source", 6000)
 	history, err = workTurnHistory(ctx, reader, "Use the saved source")
 	require.NoError(t, err)
-	require.Contains(t, history[0].Content, `work.workSourceContext(conversationId: "chat", turnId: "current")`)
-	require.NotContains(t, history[0].Content, "omitted-source")
-	require.Contains(t, history[0].Content, "omitted contents are not verified")
+	require.Contains(t, history[1].Content, `work.workSourceContext(conversationId: "chat", turnId: "current")`)
+	require.NotContains(t, history[1].Content, "omitted-source")
+	require.Contains(t, history[1].Content, "omitted contents are not verified")
 }
 
 type contextReader struct{ t *testing.T }
