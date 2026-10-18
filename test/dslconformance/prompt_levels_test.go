@@ -106,6 +106,9 @@ var promptLevels = map[string]string{
 	// it creates no critic call or independent routing choice. Its own bounded
 	// evidence summary stays fast; the work turn keeps its existing level.
 	"workProgressRecovery": "fast",
+	// Rendered runtime correction supplies the specific missing-evidence check
+	// to the existing reasoning call; it invokes no model and grants no authority.
+	"workEvidenceCompletion": "fast",
 	// A native fallback renders one short question from measured stall evidence,
 	// without another model call, planning pass or execution authority.
 	"workProgressQuestion": "fast",
