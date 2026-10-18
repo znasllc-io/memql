@@ -14,7 +14,56 @@ async function post(config: OsRuntimeConfig, path: string, body: unknown, author
   return data;
 }
 
-export async function registerPasskey(config: OsRuntimeConfig, authorization: string, label: string): Promise<string | undefined> {
+/**
+ * What this device's own authenticator is called, in the words its owner
+ * knows it by: "Touch ID" on a Mac, "Face ID or Touch ID" on an iPhone or
+ * iPad, "Windows Hello", or "" when the platform is not recognised.
+ */
+export function deviceAuthenticatorName(nav: Pick<Navigator, "userAgent" | "platform" | "maxTouchPoints"> & { userAgentData?: { platform?: string } } = navigator): string {
+  const platform = (nav.userAgentData?.platform || nav.platform || "").toLowerCase();
+  const agent = (nav.userAgent || "").toLowerCase();
+  // iPadOS asks for desktop sites and reports a Mac; touch gives it away.
+  if (/iphone|ipad|ipod/.test(agent) || (platform.startsWith("mac") && nav.maxTouchPoints > 1)) return "Face ID or Touch ID";
+  if (platform.startsWith("mac") || platform === "macos") return "Touch ID";
+  if (platform.startsWith("win")) return "Windows Hello";
+  if (/android/.test(agent) || platform === "android") return "your screen lock";
+  return "";
+}
+
+/**
+ * Whether to offer this device's own authenticator first. True when the
+ * browser says one is available (Touch ID, Face ID, Windows Hello, an Android
+ * screen lock); false when it cannot answer or says no.
+ */
+export async function deviceAuthenticatorAvailable(): Promise<boolean> {
+  try {
+    return typeof PublicKeyCredential !== "undefined"
+      && typeof PublicKeyCredential.isUserVerifyingPlatformAuthenticatorAvailable === "function"
+      && await PublicKeyCredential.isUserVerifyingPlatformAuthenticatorAvailable();
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Where the browser should look first when it asks for the passkey: this
+ * device ("device") goes straight to Touch ID, Face ID or Windows Hello;
+ * "other" offers a phone or a security key. The identity service's options
+ * are otherwise untouched, and verification does not depend on either.
+ */
+export type PasskeyPlace = "device" | "other";
+
+export function placeCreationOptions(publicKey: Record<string, unknown>, place: PasskeyPlace): Record<string, unknown> {
+  const selection = { ...((publicKey.authenticatorSelection as Record<string, unknown> | undefined) ?? {}) };
+  if (place === "device") {
+    selection.authenticatorAttachment = "platform";
+    return { ...publicKey, authenticatorSelection: selection, hints: ["client-device"] };
+  }
+  delete selection.authenticatorAttachment;
+  return { ...publicKey, authenticatorSelection: selection, hints: ["hybrid", "security-key"] };
+}
+
+export async function registerPasskey(config: OsRuntimeConfig, authorization: string, label: string, place?: PasskeyPlace): Promise<string | undefined> {
   if (typeof PublicKeyCredential === "undefined" || !PublicKeyCredential.parseCreationOptionsFromJSON) throw new Error("Use a current browser with passkey support to add a passkey.");
   const begin = await post(config, "/auth/webauthn/register/begin", { label }, authorization);
   if (begin.redirectTo) return begin.redirectTo;
@@ -22,7 +71,11 @@ export async function registerPasskey(config: OsRuntimeConfig, authorization: st
     const finish = await post(config, "/auth/webauthn/register/finish", {}, authorization);
     return finish.redirectTo;
   }
-  const credential = await navigator.credentials.create({ publicKey: PublicKeyCredential.parseCreationOptionsFromJSON(begin.creationOptions.publicKey) }) as PublicKeyCredential | null;
+  // This device first when it has its own authenticator, unless the person
+  // asked for another one; the browser's full choice otherwise.
+  const chosen = place ?? (await deviceAuthenticatorAvailable() ? "device" : undefined);
+  const options = chosen ? placeCreationOptions(begin.creationOptions.publicKey, chosen) : begin.creationOptions.publicKey;
+  const credential = await navigator.credentials.create({ publicKey: PublicKeyCredential.parseCreationOptionsFromJSON(options as PublicKeyCredentialCreationOptionsJSON) }) as PublicKeyCredential | null;
   if (!credential) throw new Error("No passkey was created");
   const finish = await post(config, "/auth/webauthn/register/finish", { challengeId: begin.challengeId, label, credential: credential.toJSON() }, authorization);
   return finish.redirectTo;
