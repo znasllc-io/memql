@@ -452,7 +452,7 @@ export class ConversationSession {
   private scheduleRefresh() {
     if (this.refreshTimer) clearTimeout(this.refreshTimer);
     this.refreshTimer = null;
-    if (this.disposed || !this.state.turns.some(isBackgroundTurn)) return;
+    if (this.disposed || !this.transport.conversations || !this.state.turns.some(turn => isBackgroundTurn(turn) || (turn.state === "streaming" && turn.runId))) return;
     this.refreshTimer = setTimeout(() => { this.refreshTimer = null; void this.reload(false); }, this.state.error || this.state.snapshotError ? 10000 : this.state.turns.some(turn => isBackgroundTurn(turn) && turn.state !== "waiting") ? 2500 : 10000);
   }
   reload = (refreshHistory = true): Promise<void> => {
@@ -474,14 +474,28 @@ export class ConversationSession {
     const current = () => !this.disposed && this.state.selectedId === id && selection === this.selection && epoch === this.epoch && discussionEpoch === this.discussionEpoch && revision === this.voiceRevision && guidanceRevision === this.guidanceRevision && workGuidanceRevision === this.workGuidanceRevision;
     request.promise = (async () => {
       try { const turns = await this.transport.conversations!.read(id); if (current()) {
-        // A background completion may arrive while a newer foreground reply is
-        // streaming. Preserve that local stream and any not-yet-accepted turn.
+        // A stream can lose its terminal event without closing. A durable
+        // completion for that same run wins; unrelated or incomplete snapshots
+        // must still preserve the foreground reply and unaccepted turns.
         const local = new Map(this.state.turns.filter(turn => turn.state === "streaming").map(turn => [turn.id, turn]));
-        const merged = turns.map(turn => local.get(turn.id) ?? turn);
+        let recoveredStream = false;
+        const merged = turns.map(turn => {
+          const active = local.get(turn.id);
+          if (!this.state.voiceActive && active?.runId && active.runId === turn.runId && (turn.state === "done" || turn.state === "error")) {
+            local.delete(turn.id);
+            recoveredStream = true;
+            return turn;
+          }
+          return active ?? turn;
+        });
         for (const turn of local.values()) if (!merged.some(item => item.id === turn.id)) merged.push(turn);
+        if (recoveredStream && !this.state.voiceActive) {
+          this.epoch++; // Late stream callbacks cannot overwrite the receipt.
+          this.active?.cancel(); this.active = null;
+        }
         // Read recovery must not retain an old snapshot error or erase an
         // uncertain guidance/discussion write and its retry receipt.
-        this.patch({ turns: merged, snapshotError: "", ...(this.state.discussion || this.state.workGuidance ? {} : { error: "" }) });
+        this.patch({ turns: merged, snapshotError: "", ...(recoveredStream && !this.state.voiceActive ? { busy: false } : {}), ...(this.state.discussion || this.state.workGuidance ? {} : { error: "" }) });
         const discussion = this.state.discussion;
         if (discussion && this.transport.discussApproval) {
           const latest = await this.transport.discussApproval(discussion.approval.id);
@@ -566,6 +580,7 @@ export class ConversationSession {
           activity: event => {
             if (epoch !== this.epoch) return;
             patchTurn({ activity: [...turn.activity, event], ...runIdentity(event), ...backgroundReceipt(event) });
+            if (turn.runId && !this.refreshTimer) this.scheduleRefresh();
             if (event.kind === "action" && event.navigate) this.patch({ activity: event });
             if (event.kind === "run" && this.stopRequested) void this.cancelCurrentGoal();
           },

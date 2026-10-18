@@ -55,6 +55,33 @@ it("a stale poll cannot replace another conversation", async () => {
  expect(session.getSnapshot().selectedId).toBe("second"); expect(session.getSnapshot().turns).toEqual([]); session.dispose();
 });
 
+it.each(["done", "error"] as const)("recovers a durable %s receipt when the foreground stream never closes", async state => {
+ vi.useFakeTimers(); let callbacks!: AskCallbacks;
+ let stored: AskTurn[] = [];
+ const cancel = vi.fn(), cancelGoal = vi.fn();
+ const read = vi.fn(async () => stored);
+ const ask = vi.fn<AskTransport["ask"]>((_p, _c, on) => { callbacks = on; return { cancel }; });
+ const session = new ConversationSession({ ask, cancelGoal, conversations: { create: async () => ({ id:"chat",title:"Chat" }), list: async () => [], read } });
+ session.send("Create the file", null); await Promise.resolve();
+ callbacks.activity?.({ id:"r",kind:"run",phase:"running",at:"now",arguments:{runId:"r",goalId:"g"} });
+ callbacks.delta("Working");
+ const current = session.getSnapshot().turns[0]!;
+ stored = [{ ...current, runId:"other-run", state, answer:"Unrelated" }];
+ await vi.advanceTimersByTimeAsync(10000);
+ expect(session.getSnapshot().busy).toBe(true);
+ expect(session.getSnapshot().turns[0]?.answer).toBe("Working");
+ stored = [{ ...current, state, answer: state === "done" ? "File saved" : "", error: state === "error" ? "Could not save" : undefined }];
+ await vi.advanceTimersByTimeAsync(10000);
+ expect(read).toHaveBeenCalledTimes(2);
+ expect(session.getSnapshot().busy).toBe(false);
+ expect(session.getSnapshot().turns[0]).toEqual(stored[0]);
+ expect(cancel).toHaveBeenCalledOnce(); expect(cancelGoal).not.toHaveBeenCalled();
+ callbacks.delta("Late text"); callbacks.error("Late error"); callbacks.done();
+ expect(session.getSnapshot().turns[0]).toEqual(stored[0]);
+ expect(ask).toHaveBeenCalledOnce(); expect(vi.getTimerCount()).toBe(0);
+ session.dispose();
+});
+
 it("resumes observation after a Strict Mode effect cleanup and a lost stream", async () => {
  vi.useFakeTimers(); let callbacks!: AskCallbacks;
  const read=vi.fn(async()=>[turn("pending")]);
