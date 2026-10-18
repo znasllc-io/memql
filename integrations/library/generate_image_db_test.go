@@ -48,6 +48,8 @@ func TestGenerateImageOwnedRunRecoveryAcrossReplicas(t *testing.T) {
 	internal := auth.ContextWithInternalOrigin(f.ctx)
 	f.query(f.engine, internal, "mutation", "createWorkGoal", map[string]any{"goalId": goal, "statement": "Generate the requested bird image", "origin": "user"})
 	f.query(f.engine, internal, "mutation", "createWorkRun", map[string]any{"runId": run, "goalId": goal, "automationName": "imageFixture", "templateFingerprint": "imageFixture", "status": "running", "mode": "live", "startedAt": time.Now().UTC().Format(time.RFC3339Nano)})
+	// Native journals advance accepted goals to active before executing work.
+	f.query(f.engine, internal, "mutation", "updateWorkGoal", map[string]any{"goalId": goal, "status": "active"})
 	rc := common.RunContext{RunId: run, GoalId: goal, OwnerUserId: f.owner, StepKey: "generate", Mode: common.RunModeLive}
 	ctx := common.ContextWithRun(internal, rc)
 	first, second := &standaloneImageEngine{MemQLEngine: f.engine}, &standaloneImageEngine{MemQLEngine: f.other}
@@ -72,6 +74,17 @@ func TestGenerateImageOwnedRunRecoveryAcrossReplicas(t *testing.T) {
 	require.Equal(t, "ready", row["status"])
 	require.Equal(t, "image-model", revisionMap(row["imageProvenance"])["model"])
 	require.Equal(t, memql.BareShortId(run), memql.BareShortId(asString(row["producedByRunId"])))
+
+	t.Run("closed goal refuses the saved receipt", func(t *testing.T) {
+		f.query(f.engine, internal, "mutation", "updateWorkGoal", map[string]any{"goalId": goal, "status": "closed"})
+		_, err := f.second.handleGenerateImage(ctx, args, 0)
+		require.Error(t, err)
+		require.Zero(t, second.calls)
+		f.query(f.engine, internal, "mutation", "updateWorkGoal", map[string]any{"goalId": goal, "status": "open"})
+		_, err = f.second.handleGenerateImage(ctx, args, 0)
+		require.NoError(t, err, "accepted goals remain eligible as well as active goals")
+		require.Zero(t, second.calls)
+	})
 
 	t.Run("authority before effects", func(t *testing.T) {
 		wrong := rc

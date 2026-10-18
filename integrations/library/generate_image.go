@@ -42,8 +42,8 @@ func (i *Integration) imageRun(ctx context.Context) (common.RunContext, error) {
 	if err != nil {
 		return rc, err
 	}
-	if memql.BareShortId(asString(goal["ownerUserId"])) != memql.BareShortId(ac.UserId) || goal["status"] != "open" {
-		return rc, fmt.Errorf("the image work goal is no longer open or owned by this person")
+	if memql.BareShortId(asString(goal["ownerUserId"])) != memql.BareShortId(ac.UserId) || (goal["status"] != "open" && goal["status"] != "active") {
+		return rc, fmt.Errorf("the image work goal is no longer live or owned by this person")
 	}
 	return rc, nil
 }
