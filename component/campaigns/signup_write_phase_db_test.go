@@ -15,6 +15,7 @@ import (
 func TestSignupWritePhaseDB(t *testing.T) {
 	f := newDigestFixture(t)
 	f.run(t, "ASignupWriteThatOutlastsItsPhaseCommitsUnderItsLocks", f.TestASignupWriteThatOutlastsItsPhaseCommitsUnderItsLocks)
+	f.run(t, "ARecipientWriteThatOutlastsItsPhaseCanBeRetriedWithoutDuplicates", f.TestARecipientWriteThatOutlastsItsPhaseCanBeRetriedWithoutDuplicates)
 	f.run(t, "ASignupWhoseVisitorLeavesDuringAWriteKeepsItsLocksUntilItCommits", f.TestASignupWhoseVisitorLeavesDuringAWriteKeepsItsLocksUntilItCommits)
 	f.run(t, "AWelcomeWhoseDrainStopsDuringItsVerdictKeepsItsLocksUntilItCommits", f.TestAWelcomeWhoseDrainStopsDuringItsVerdictKeepsItsLocksUntilItCommits)
 }
@@ -132,6 +133,57 @@ func (f *digestFixture) TestASignupWriteThatOutlastsItsPhaseCommitsUnderItsLocks
 	}
 	if n.signupRow(t) != nil || len(n.roster(t)) != 0 {
 		t.Error("the signup wrote after its time was up")
+	}
+}
+
+// The phase can also end during the recipient write: consent and membership
+// have committed under the lock, but the final signup has not. A retry must use
+// those exact rows and finish the signup even when this member filled the cap.
+func (f *digestFixture) TestARecipientWriteThatOutlastsItsPhaseCanBeRetriedWithoutDuplicates(t *testing.T) {
+	n := f.newEmptyNewsletter(t, "recipient-phase-straddle")
+	n.worker.cfg.MaxAudience = 1
+	actual := n.worker.store.engine
+	engine := &straddlingWrite{Engine: actual, prefix: "mutation addRecipient", delay: 3 * time.Second, locked: n.audienceLockHeld(t)}
+	n.worker.store.engine = engine
+	defer func() { n.worker.store.engine = actual }()
+	limit := signupLockedPhase
+	signupLockedPhase = 2 * time.Second
+	defer func() { signupLockedPhase = limit }()
+	n.args["email"] = consentMailbox
+	_, err := n.worker.handleSubscribe(n.owner, n.args, 0)
+	engine.wg.Wait()
+	engine.mu.Lock()
+	held := append([]bool(nil), engine.held...)
+	engine.mu.Unlock()
+	if len(held) != 1 || !held[0] {
+		t.Fatalf("recipient commits held the audience lock: %v, want [true]", held)
+	}
+	if !errors.Is(err, signupsBusy) {
+		t.Fatalf("signup interrupted after membership: %v, want retryable busy", err)
+	}
+	consent := n.consentRow(t)
+	before := n.roster(t)
+	if consent == nil || len(before) != 1 || n.signupRow(t) != nil {
+		t.Fatalf("expected consent and one member, with no final signup: consent=%t members=%d signup=%t", consent != nil, len(before), n.signupRow(t) != nil)
+	}
+	versions, _ := versionsOf(t, n.db, before[0].ID)
+	n.worker.store.engine = actual
+	signupLockedPhase = limit
+	// A retry can reach another replica with its own engine and result cache.
+	replica := n.replica(t)
+	replica.cfg.MaxAudience = 1
+	if _, err := replica.handleSubscribe(n.owner, n.args, 0); err != nil {
+		t.Fatalf("retry of the member that filled the audience: %v", err)
+	}
+	after := n.roster(t)
+	if len(after) != 1 || after[0].ID != before[0].ID || n.signupRow(t) == nil {
+		t.Fatalf("retry did not finish the same membership: members=%d signup=%t", len(after), n.signupRow(t) != nil)
+	}
+	if next, _ := versionsOf(t, n.db, before[0].ID); next != versions {
+		t.Errorf("retry rewrote membership: versions %d -> %d", versions, next)
+	}
+	if next := n.consentRow(t); next == nil || !templateTime(next["occurredAt"]).Equal(templateTime(consent["occurredAt"])) {
+		t.Error("retry replaced the original consent grant")
 	}
 }
 
