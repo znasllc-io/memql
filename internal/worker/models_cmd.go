@@ -74,11 +74,9 @@ func handleModels(args []string) {
 	// to see that they have three models pulled, because "you have models
 	// but this machine cannot serve them" and "you have no models" send
 	// them to entirely different places.
-	inv := (&models.Discoverer{}).Probe(ctx, models.Request{
-		Allow:    policy.ModelsAllow(),
-		Runtimes: policy.ModelRuntimes(),
-	})
+	inv := newDiscoverer().Probe(ctx, modelsRequest(policy))
 	printModelInventory(os.Stdout, inv, policyPath)
+
 }
 
 // printModelInventory writes the report. Split out so the shape is

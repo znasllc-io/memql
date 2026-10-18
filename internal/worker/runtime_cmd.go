@@ -42,7 +42,7 @@ type runtimeSetup struct {
 
 func newRuntimeSetup(configPath, name string, nonInteractive bool) *runtimeSetup {
 	policyPath := filepath.Join(filepath.Dir(configPath), "policy.yaml")
-	discoverer := &models.Discoverer{}
+	discoverer := newDiscoverer()
 	return &runtimeSetup{
 		out:            os.Stdout,
 		in:             os.Stdin,

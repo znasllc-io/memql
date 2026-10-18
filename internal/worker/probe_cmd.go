@@ -56,7 +56,7 @@ type probeRun struct {
 }
 
 func newProbeRun(configPath, modelID string, suite int) *probeRun {
-	discoverer := &models.Discoverer{}
+	discoverer := newDiscoverer()
 	policyPath := filepath.Join(filepath.Dir(configPath), "policy.yaml")
 	return &probeRun{
 		out:        os.Stdout,

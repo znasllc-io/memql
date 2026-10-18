@@ -14,7 +14,6 @@ import (
 	"time"
 
 	"github.com/znasllc-io/memql-cockpit/internal/worker/consent"
-	"github.com/znasllc-io/memql-cockpit/internal/worker/models"
 	"github.com/znasllc-io/memql-cockpit/internal/worker/tools"
 	"github.com/znasllc-io/memql/component/identity/workerpairing"
 )
@@ -232,7 +231,7 @@ func runConfiguredWorker(clusterURL, token, name string, logger *slog.Logger) er
 	// As `worker run` does, before anything resolves a binary.
 	ensureServicePath(logger)
 
-	discoverer := &models.Discoverer{}
+	discoverer := newDiscoverer()
 	modelInventory := NewModelInventory(policy, discoverer)
 	appInventories := NewAppInventories(policy, nil)
 

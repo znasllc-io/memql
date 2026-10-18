@@ -71,6 +71,30 @@ type policyModelInventory struct {
 	now    func() time.Time
 }
 
+// newDiscoverer is the ONE place a models.Discoverer is built. Seven
+// commands and run paths probe this machine, and every one of them has to
+// read the same sources for the same facts -- the worker's environment, the
+// unit it manages -- or `memql worker models` prints a ceiling the worker
+// does not advertise. TestEveryDiscoveryIsBuiltInOnePlace holds the seven
+// to it.
+func newDiscoverer() *models.Discoverer {
+	return &models.Discoverer{}
+}
+
+// modelsRequest is what this machine's policy asks discovery: which models
+// may be offered, which runtimes are declared, and the owner's tuning --
+// the per-model ceiling and the models kept loaded. The ONE place that
+// reads those out of the policy, for newDiscoverer's reason.
+func modelsRequest(policy *tools.Policy) models.Request {
+	tuning := policy.ModelsTuning()
+	return models.Request{
+		Allow:    policy.ModelsAllow(),
+		Runtimes: policy.ModelRuntimes(),
+		Parallel: tuning.Parallel,
+		Resident: tuning.Resident,
+	}
+}
+
 // NewModelInventory builds the reporter the worker runs with.
 //
 // The discoverer is the CALLER's, not built here, because the runner's
@@ -78,7 +102,7 @@ type policyModelInventory struct {
 // one would read OLLAMA_HOST again, and two readings drift.
 func NewModelInventory(policy *tools.Policy, discoverer *models.Discoverer) ModelInventory {
 	if discoverer == nil {
-		discoverer = &models.Discoverer{}
+		discoverer = newDiscoverer()
 	}
 	return &policyModelInventory{
 		discoverer: discoverer,
@@ -103,10 +127,7 @@ func (p *policyModelInventory) Models(ctx context.Context) models.Inventory {
 	if !p.at.IsZero() && p.clock().Sub(p.at) < p.ttl {
 		return p.cached
 	}
-	p.cached = p.discoverer.Discover(ctx, models.Request{
-		Allow:    p.policy.ModelsAllow(),
-		Runtimes: p.policy.ModelRuntimes(),
-	})
+	p.cached = p.discoverer.Discover(ctx, modelsRequest(p.policy))
 	p.at = p.clock()
 	return p.cached
 }

@@ -23,7 +23,6 @@ import (
 	"github.com/znasllc-io/memql-cockpit/internal/worker/consent"
 	"github.com/znasllc-io/memql-cockpit/internal/worker/inference"
 	"github.com/znasllc-io/memql-cockpit/internal/worker/modelcall"
-	"github.com/znasllc-io/memql-cockpit/internal/worker/models"
 	"github.com/znasllc-io/memql-cockpit/internal/worker/tools"
 )
 
@@ -369,7 +368,7 @@ func handleRun(args []string) {
 	// directory an app installer uses (servicepath.go).
 	ensureServicePath(logger)
 
-	discoverer := &models.Discoverer{}
+	discoverer := newDiscoverer()
 	modelInventory := NewModelInventory(policy, discoverer)
 	appInventories := NewAppInventories(policy, nil)
 
@@ -1069,6 +1068,9 @@ func logLevelProblems(logger *slog.Logger, policy *tools.Policy) {
 	}
 	for _, problem := range policy.AppLevelProblems() {
 		logger.Warn("policy.yaml apps.levels has a problem", "problem", problem)
+	}
+	for _, problem := range policy.ModelsTuningProblems() {
+		logger.Warn("policy.yaml models has a problem", "problem", problem)
 	}
 }
 
