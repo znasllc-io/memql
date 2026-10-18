@@ -116,7 +116,7 @@ outputs, publication and failure evidence, not merely a command in a manifest.
 | `gitleaks.yml` | Existing current-tree and history scans; production event/cadence evidence | #5506 |
 | `govulncheck.yml` | Existing scan; production merge-group/push/schedule evidence | #5506 |
 | `codeql.yml` | Existing Go/JS/Python analysis; journaled SARIF upload and receipt still needed | #5480 |
-| `sbom.yml` | Existing portable generation; release asset publication and matching event coverage | #5480 |
+| `sbom.yml` | Native inventory now runs on release, main push, weekly and manual events; installed retained JSON/XML and complete module/lockfile evidence remain. The old workflow only retained artifacts, never attached release assets | #5480 |
 | `scorecard.yml` | Scorecard execution, permissions, branch-rule/scheduled triggers and SARIF publication | #5480 |
 | `build-engine-images.yml` | Seven native engine builds on the released instance; immutable publication and digest/provenance receipts | #5509 |
 | `dispatch-engine-images-on-release.yml` | MemQL release trigger and publication ownership, including duplicate-event recovery | #5509 |

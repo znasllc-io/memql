@@ -376,11 +376,11 @@ func TestEngineManifestCompilesForEveryOpening(t *testing.T) {
 		// A full run tests every package in go-tests, the gate packages among
 		// them, so the gates stage is absent, as ci.yml runs that step only on a
 		// pull request.
-		{name: "a push to the default branch", event: pipelines.EventPush, stages: fullStages,
+		{name: "a push to the default branch", event: pipelines.EventPush, stages: append(slices.Clone(fullStages), "inventory"),
 			runs: every, absent: []string{manifestStepGateInputs}},
 		{name: "a merge group", event: pipelines.EventMergeGroup, stages: fullStages,
 			runs: every, absent: []string{manifestStepGateInputs}},
-		{name: "a release", event: pipelines.EventRelease, stages: []string{manifestStageChecks, "vulnerabilities", manifestStageTests, "release-files", "build-tools", "images"},
+		{name: "a release", event: pipelines.EventRelease, stages: []string{manifestStageChecks, "vulnerabilities", manifestStageTests, "inventory", "release-files", "build-tools", "images"},
 			runs: every, absent: []string{manifestStepGateInputs}},
 		// A scheduled scan selects only its explicit opt-in stages; default
 		// stages such as checks and history scans are intentionally absent.
@@ -449,7 +449,7 @@ func TestEngineManifestCompilesForEveryOpening(t *testing.T) {
 			byName := map[string][]pipelines.Step{}
 			for _, step := range plan.Steps() {
 				byName[step.Name] = append(byName[step.Name], step)
-				if step.RunAfterFailure != (step.Stage == "analysis" || step.Stage == "security-reports" || step.Stage == "vulnerabilities" || step.Stage == "secrets-current" || step.Stage == "secrets-history" || step.Stage == "repository-audit" || step.Stage == "documentation-audit") {
+				if step.RunAfterFailure != (step.Stage == "analysis" || step.Stage == "inventory" || step.Stage == "security-reports" || step.Stage == "vulnerabilities" || step.Stage == "secrets-current" || step.Stage == "secrets-history" || step.Stage == "repository-audit" || step.Stage == "documentation-audit") {
 					t.Errorf("failure policy was lost or leaked to another stage: %+v", step)
 				}
 				if step.Kind == pipelines.StepSARIF {
@@ -532,7 +532,7 @@ func TestEngineWeeklyAuditDoesNotRepeatDailyOrOrdinaryFunctionalChecks(t *testin
 			stages = append(stages, step.Stage)
 		}
 	}
-	if !slices.Equal(stages, []string{"documentation-audit", "analysis", "security-reports"}) {
+	if !slices.Equal(stages, []string{"documentation-audit", "analysis", "inventory", "security-reports"}) {
 		t.Fatalf("weekly stages = %v", stages)
 	}
 }

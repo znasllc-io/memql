@@ -745,6 +745,13 @@ pipeline:
           run: |
             set -eu
             python3 scripts/ci/codeql-scan.py --language=python --ram=3072 --output-dir=.memql-security/codeql-python
+    # Dependency inventory is a release deliverable, not a deep code scan.
+    # Preserve main-push/release coverage without adding it to PR/queue gates.
+    - name: inventory
+      schedule: weekly
+      on: [push, release, schedule, manual]
+      runAfterFailure: true
+      steps:
         - name: sbom
           placement: cluster
           timeout: 60m
