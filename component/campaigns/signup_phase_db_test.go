@@ -286,19 +286,19 @@ func (f *digestFixture) TestABurstOfSignupsLosesNoLockAndWritesNothingPastItsTim
 	for _, member := range roster {
 		address := NormalizeEmail(member.Email)
 		who, known := owners[address]
-		if !known || seenAddresses[address] {
+		if !known || who%2 == 0 || seenAddresses[address] {
 			t.Fatalf("unexpected or duplicate membership for %q", address)
 		}
 		seenAddresses[address] = true
+		consent, err := n.worker.newsletterRow(n.owner, "newsletterConsentById", "eventId", sha256Hex("newsletter-consent\x00"+newsletterSignupID(n.audience, address)))
+		if err != nil || consent == nil {
+			t.Fatalf("signup %d has no prior consent: %v", who, err)
+		}
 		if errs[who] == nil {
 			continue
 		}
-		if who%2 == 0 || errs[who].Error() != sentence {
+		if errs[who].Error() != sentence {
 			t.Fatalf("refused signup %d left a membership: %v", who, errs[who])
-		}
-		consent, err := n.worker.newsletterRow(n.owner, "newsletterConsentById", "eventId", sha256Hex("newsletter-consent\x00"+newsletterSignupID(n.audience, address)))
-		if err != nil || consent == nil {
-			t.Fatalf("partial signup %d has no prior consent: %v", who, err)
 		}
 		partial = append(partial, who)
 	}
