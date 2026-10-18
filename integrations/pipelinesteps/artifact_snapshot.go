@@ -112,7 +112,7 @@ func SnapshotArtifacts(ctx context.Context, source io.Reader, declared []string,
 		size, copyErr := io.CopyBuffer(io.MultiWriter(file, hash), reader, buffer)
 		closeErr := file.Close()
 		if copyErr != nil || closeErr != nil {
-			return nil, errors.Join(copyErr, closeErr)
+			return nil, fmt.Errorf("artifact file %q stopped after %d of %d bytes: %w", name, size, header.Size, errors.Join(copyErr, closeErr))
 		}
 		if size != header.Size {
 			return nil, errors.New("artifact file was truncated")

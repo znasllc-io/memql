@@ -5,6 +5,7 @@ import (
 	"context"
 	"crypto/sha256"
 	"errors"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -28,6 +29,9 @@ func TestPodFileResumesOnlyInterruptedRange(t *testing.T) {
 	var mu sync.Mutex
 	var offsets []int64
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if servePodFileSize(t, w, r, int64(len(data))) {
+			return
+		}
 		command := r.URL.Query()["command"]
 		if len(command) != 6 || !reflect.DeepEqual(command[:3], []string{"dd", "if=/artifacts/a;echo owned", "bs=65536"}) || command[4] != "count=128" || command[5] != "iflag=fullblock" {
 			t.Error("range read was not a fixed literal command", command)
@@ -88,6 +92,13 @@ func TestPodFileRangesRequireVerifiedCompletion(t *testing.T) {
 			var calls int
 			var mu sync.Mutex
 			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				size := int64(2)
+				if mode == "empty" {
+					size = 0
+				}
+				if servePodFileSize(t, w, r, size) {
+					return
+				}
 				mu.Lock()
 				calls++
 				mu.Unlock()
@@ -144,6 +155,9 @@ func TestPodFileRangesRequireVerifiedCompletion(t *testing.T) {
 			if mode == "cancelled" {
 				want = 0
 			}
+			if mode == "empty" || mode == "oversized" {
+				want = 0
+			}
 			if calls != want {
 				t.Fatalf("calls=%d want=%d", calls, want)
 			}
@@ -155,6 +169,9 @@ func TestPodFileRangeWriterFailureIsNeverRetried(t *testing.T) {
 	sentinel := errors.New("destination stopped")
 	var calls atomic.Int32
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if servePodFileSize(t, w, r, 1) {
+			return
+		}
 		calls.Add(1)
 		c, err := websocket.Accept(w, r, &websocket.AcceptOptions{Subprotocols: []string{podFileProtocol}})
 		if err != nil {
@@ -173,9 +190,12 @@ func TestPodFileRangeWriterFailureIsNeverRetried(t *testing.T) {
 	}
 }
 
-func TestPodFileRangesProveEOFAfterAnExactFullRange(t *testing.T) {
+func TestPodFileRangesBindAnExactFullRangeToFileSize(t *testing.T) {
 	var calls atomic.Int32
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if servePodFileSize(t, w, r, podFileRangeBytes) {
+			return
+		}
 		calls.Add(1)
 		c, err := websocket.Accept(w, r, &websocket.AcceptOptions{Subprotocols: []string{podFileProtocol}})
 		if err != nil {
@@ -200,8 +220,107 @@ func TestPodFileRangesProveEOFAfterAnExactFullRange(t *testing.T) {
 	defer srv.Close()
 	writer := &podFileCountingWriter{}
 	n, err := NewClusterAPIWith(srv.URL, "", srv.Client()).ReadPodFileResumable(t.Context(), "builds", "job", "collector", "/artifact", writer, podFileRangeBytes)
-	if err != nil || n != podFileRangeBytes || calls.Load() != 2 || writer.max > podFileBlockBytes {
+	if err != nil || n != podFileRangeBytes || calls.Load() != 1 || writer.max > podFileBlockBytes {
 		t.Fatalf("n=%d err=%v calls=%d maxWrite=%d", n, err, calls.Load(), writer.max)
+	}
+}
+
+func servePodFileSize(t *testing.T, w http.ResponseWriter, r *http.Request, size int64) bool {
+	t.Helper()
+	command := r.URL.Query()["command"]
+	if len(command) == 0 || command[0] != "stat" {
+		return false
+	}
+	if len(command) != 5 || !reflect.DeepEqual(command[:4], []string{"stat", "-c", "MEMQL_SIZE:%s:END", "--"}) {
+		t.Error("size probe was not a fixed literal command", command)
+		http.Error(w, "bad size probe", 400)
+		return true
+	}
+	c, err := websocket.Accept(w, r, &websocket.AcceptOptions{Subprotocols: []string{podFileProtocol}})
+	if err != nil {
+		return true
+	}
+	defer c.CloseNow()
+	_ = c.Write(r.Context(), websocket.MessageBinary, append([]byte{1}, fmt.Sprintf("MEMQL_SIZE:%d:END\n", size)...))
+	_ = c.Write(r.Context(), websocket.MessageBinary, append([]byte{3}, `{"status":"Success"}`...))
+	_ = c.Close(websocket.StatusNormalClosure, "")
+	return true
+}
+
+func TestPodFileDoesNotMistakeSuccessfulShortOutputForEOF(t *testing.T) {
+	for _, permanent := range []bool{false, true} {
+		t.Run(fmt.Sprint("permanent=", permanent), func(t *testing.T) {
+			data := bytes.Repeat([]byte("0123456789abcdef"), (podFileRangeBytes+podFileBlockBytes)/16)
+			var calls atomic.Int32
+			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				if servePodFileSize(t, w, r, int64(len(data))) {
+					return
+				}
+				call := calls.Add(1)
+				command := r.URL.Query()["command"]
+				block, err := strconv.ParseInt(strings.TrimPrefix(command[3], "skip="), 10, 64)
+				if err != nil {
+					t.Error(err)
+					return
+				}
+				offset := block * podFileBlockBytes
+				end := min(offset+podFileRangeBytes, int64(len(data)))
+				if call == 1 || permanent {
+					end = offset + 1024
+				}
+				c, err := websocket.Accept(w, r, &websocket.AcceptOptions{Subprotocols: []string{podFileProtocol}})
+				if err != nil {
+					return
+				}
+				defer c.CloseNow()
+				for start := offset; start < end; start += podFileBlockBytes {
+					if c.Write(r.Context(), websocket.MessageBinary, append([]byte{1}, data[start:min(start+podFileBlockBytes, end)]...)) != nil {
+						return
+					}
+				}
+				_ = c.Write(r.Context(), websocket.MessageBinary, append([]byte{3}, `{"status":"Success"}`...))
+				_ = c.Close(websocket.StatusNormalClosure, "")
+			}))
+			defer srv.Close()
+			var out bytes.Buffer
+			n, err := NewClusterAPIWith(srv.URL, "", srv.Client()).ReadPodFileResumable(t.Context(), "builds", "job", "collector", "/artifact", &out, int64(len(data)))
+			if permanent {
+				if err == nil || n != 0 || out.Len() != 0 || calls.Load() != podFileRangeAttempts {
+					t.Fatalf("short output escaped: n=%d calls=%d err=%v", n, calls.Load(), err)
+				}
+			} else if err != nil || !bytes.Equal(out.Bytes(), data) || n != int64(len(data)) || calls.Load() != 3 {
+				t.Fatalf("short successful range was not recovered: n=%d calls=%d err=%v", n, calls.Load(), err)
+			}
+		})
+	}
+}
+
+func TestPodFileSizeMustBeCompleteBoundedAndSuccessful(t *testing.T) {
+	for _, body := range []string{"", "MEMQL_SIZE:100", "MEMQL_SIZE:1:END", "MEMQL_SIZE:2:END\n", "MEMQL_SIZE:-1:END\n", "MEMQL_SIZE:+1:END\n", "MEMQL_SIZE:999999999999999999999999999999999:END\n", "MEMQL_SIZE::END\n", "MEMQL_SIZE:1:END\nextra"} {
+		t.Run(body, func(t *testing.T) {
+			var calls atomic.Int32
+			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				calls.Add(1)
+				if r.URL.Query()["command"][0] != "stat" {
+					t.Error("unverified size started a file read")
+					return
+				}
+				c, err := websocket.Accept(w, r, &websocket.AcceptOptions{Subprotocols: []string{podFileProtocol}})
+				if err != nil {
+					return
+				}
+				defer c.CloseNow()
+				_ = c.Write(r.Context(), websocket.MessageBinary, append([]byte{1}, body...))
+				_ = c.Write(r.Context(), websocket.MessageBinary, append([]byte{3}, `{"status":"Success"}`...))
+				_ = c.Close(websocket.StatusNormalClosure, "")
+			}))
+			defer srv.Close()
+			var out bytes.Buffer
+			n, err := NewClusterAPIWith(srv.URL, "", srv.Client()).ReadPodFileResumable(t.Context(), "builds", "job", "collector", "/artifact", &out, 1)
+			if err == nil || n != 0 || out.Len() != 0 || calls.Load() != 1 {
+				t.Fatalf("unverified size accepted: n=%d calls=%d err=%v", n, calls.Load(), err)
+			}
+		})
 	}
 }
 
