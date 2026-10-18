@@ -211,3 +211,46 @@ func TestNavigationDraftUsesOneTriageAndNoGeneralAgent(t *testing.T) {
 		t.Fatalf("file goal reduced to navigation: %+v %v", bundle, err)
 	}
 }
+
+func TestCapabilityArtifactsUseToolsAndRequireASavedFile(t *testing.T) {
+	for _, format := range []string{"png", "wav", "mp4"} {
+		for _, fanout := range []bool{false, true} {
+			decision := parseSectionableDecision(map[string]any{"intent": "task", "requiresFile": true, "fileName": "requested", "fileFormat": format, "fileDelivery": "capability", "sectionable": fanout, "sections": []map[string]any{{"label": "one"}, {"label": "two"}}})
+			if !decision.needsReasoningAgent("artifact") {
+				t.Fatal("capability artifact omitted its executing agent")
+			}
+			bundle, err := synthesizeWorkReasoningBundle(compileReq(), "agent", decision)
+			if err != nil {
+				t.Fatal(err)
+			}
+			source := bundle.Constructs[0].Source
+			if strings.Contains(source, "composeMaterialize") || !strings.Contains(source, "runAgentTurn") || strings.Count(source, "requireFile: true") != 1 || !strings.Contains(source, "requiredFileExtension: "+langparser.QuoteString(format)) {
+				t.Fatalf("wrong delivery for %s (fanout %v): %s", format, fanout, source)
+			}
+			if _, err := langparser.ParseFile(source); err != nil {
+				t.Fatal(err)
+			}
+		}
+	}
+}
+
+func TestCapabilityArtifactsRefuseInvalidExtensionBeforeExecution(t *testing.T) {
+	for _, format := range []string{"", "../png", "image/png", "png\\file", "extensiontoolongforsafecontract"} {
+		decision := parseSectionableDecision(map[string]any{"requiresFile": true, "fileName": "requested", "fileFormat": format, "fileDelivery": "capability"})
+		if _, err := synthesizeWorkReasoningBundle(compileReq(), "agent", decision); err == nil {
+			t.Fatalf("accepted invalid extension %q", format)
+		}
+	}
+}
+
+func TestDocumentFileExtensionKeepsItsNativeComposer(t *testing.T) {
+	decision := parseSectionableDecision(map[string]any{"requiresFile": true, "fileName": "birds.md", "fileFormat": "md", "fileDelivery": "compose"})
+	bundle, err := synthesizeWorkReasoningBundle(compileReq(), "", decision)
+	if err != nil {
+		t.Fatal(err)
+	}
+	source := bundle.Constructs[0].Source
+	if !strings.Contains(source, `format: "markdown"`) || !strings.Contains(source, "composeMaterialize") || strings.Contains(source, "runAgentTurn") {
+		t.Fatalf("Markdown extension lost its document route: %s", source)
+	}
+}

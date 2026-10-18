@@ -514,12 +514,23 @@ func (dr *runDriver) openWork(ctx context.Context, plan pipelines.Plan) (*verdic
 			}
 			dr.workRun.Store(w)
 			dr.setFacts()
+			clean := true
 			for _, track := range dr.tracks {
 				if track.finished() && track.step.Kind == pipelines.StepCommand {
-					if !dr.acknowledgeReceipt(ctx, pipelines.CurrentExecutor(), dr.request(track, nil)) {
-						return nil, false
+					if !dr.confirmReceiptCleanup(ctx, pipelines.CurrentExecutor(), dr.request(track, nil)) {
+						clean = false
+						if dr.lease.isLost() {
+							break
+						}
 					}
 				}
+			}
+			if !clean {
+				// One unresolved attempt must not keep every later finished
+				// Job occupying capacity. Reconcile all durable receipts while
+				// we hold the lease, then stop before executing or concluding.
+				dr.lease.lose()
+				return nil, false
 			}
 			return nil, true
 		}
@@ -1027,6 +1038,16 @@ func (dr *runDriver) runStep(ctx context.Context, t *stepTrack) {
 }
 
 func (dr *runDriver) acknowledgeReceipt(ctx context.Context, exec pipelines.Executor, req pipelines.StepRequest) bool {
+	if !dr.confirmReceiptCleanup(ctx, exec, req) {
+		dr.lease.lose()
+		return false
+	}
+	return true
+}
+
+// Recovery can confirm independent recorded receipts before relinquishing its
+// lease. Live execution still stops immediately on an unconfirmed cleanup.
+func (dr *runDriver) confirmReceiptCleanup(ctx context.Context, exec pipelines.Executor, req pipelines.StepRequest) bool {
 	if !dr.stillHolds(ctx) {
 		// A transient ownership-read failure must not let runStep continue to
 		// a successful verdict without having attempted cleanup.
@@ -1051,7 +1072,6 @@ func (dr *runDriver) acknowledgeReceipt(ctx context.Context, exec pipelines.Exec
 	if err != nil {
 		dr.log.Warn("pipelines: resource cleanup remains unconfirmed; keeping the run unfinished for recovery", "step", req.StepKey, "error", dr.mask(err.Error()))
 		dr.cleanupFailed.Store(true)
-		dr.lease.lose()
 		return false
 	}
 	return true

@@ -134,7 +134,7 @@ func TestVerifiedFollowupCarriesReceiptsThroughClassificationAndQuickReply(t *te
 		}
 	}
 	source := strings.Join(eng.queries, "\n")
-	if strings.Contains(source, "runAgentTurn") || !strings.Contains(source, "workQuickReply") || !strings.Contains(source, "toString(args.conversation)") {
+	if strings.Contains(source, "runAgentTurn") || strings.Contains(source, "progress: true") || !strings.Contains(source, "workQuickReply") || !strings.Contains(source, "toString(args.conversation)") || !strings.Contains(source, "reason := builtin workReviewReply(draft: draft)") {
 		t.Fatalf("quick reply lost persisted source context or started a tool loop: %s", source)
 	}
 }

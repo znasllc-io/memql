@@ -22,14 +22,9 @@ import (
 // Format is what a composition produces. The set is exactly what this
 // package can WRITE (design D3).
 //
-// AUDIO AND VIDEO ARE ABSENT ON PURPOSE, and their absence is a
-// statement rather than a gap. The epic's brief names both; audio wants
-// a compose-then-speak pipeline with a provider dependency and a cost
-// ceiling of its own, and video wants a generation provider this cluster
-// has none of. A value here that nothing could write would be a form
-// somebody can fill in and nothing can store -- the reasoning
-// v1:platform:site.kind gives for having no ios/android value -- so the
-// SURFACE names them and says why, and this table does not carry them.
+// This document encoder does not implement media generation. Its format list
+// describes this operation only; discover other operations and model routes
+// before making a statement about the platform's available capabilities.
 type Format string
 
 const (
@@ -55,14 +50,14 @@ func Formats() []Format {
 // markdown would answer "audio" with a text file and call it success,
 // which is the shape of failure this whole package is built to avoid.
 func ParseFormat(s string) (Format, error) {
-	want := Format(strings.ToLower(strings.TrimSpace(s)))
+	want := strings.TrimPrefix(strings.ToLower(strings.TrimSpace(s)), ".")
 	for _, f := range Formats() {
-		if f == want {
+		if string(f) == want || f.Extension() == want {
 			return f, nil
 		}
 	}
 	if want == "audio" || want == "video" {
-		return "", fmt.Errorf("compose: %q is named in the brief and not offered -- audio needs a compose-then-speak pipeline with a cost ceiling of its own, video a generation provider this cluster has none of", want)
+		return "", fmt.Errorf("compose: %q is not offered by this document composer; discover a compatible generation capability", want)
 	}
 	return "", fmt.Errorf("compose: unknown format %q (offered: %s)", s, joinFormats(Formats()))
 }

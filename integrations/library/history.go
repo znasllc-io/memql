@@ -189,7 +189,7 @@ func (i *Integration) historicalContent(ctx context.Context, doc reviewDocument,
 		content = []byte(stringField(row, bodyKey))
 	}
 	if len(content) > limit || !utf8.Valid(content) {
-		return "", "", fmt.Errorf("version preview supports UTF-8 Markdown up to 2 MiB")
+		return "", "", fmt.Errorf("file preview supports UTF-8 text up to 2 MiB")
 	}
 	return string(content), revision, nil
 }

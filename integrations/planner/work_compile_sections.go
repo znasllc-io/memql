@@ -578,6 +578,9 @@ func (l *PlannerAgentLoop) infoCompile(msg string, req CompileRequest, kv ...any
 // on a missing seed it never needed.
 func (d sectionableDecision) needsReasoningAgent(headline string) bool {
 	nativeFile := d.RequiresFile != nil && *d.RequiresFile
+	if nativeFile && d.FileDelivery == "capability" {
+		return true
+	}
 	if d.Navigation != nil && !nativeFile && !d.Sectionable && strings.TrimSpace(d.Navigation.App) != "" {
 		return false
 	}

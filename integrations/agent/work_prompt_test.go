@@ -193,7 +193,7 @@ func TestOwnedWorkPromptKeepsSectionOutputsAndDestinationsDistinct(t *testing.T)
 				"repository, source-code or test-file changes must perform those changes",
 				"All writes and commands remain subject to existing permissions and run limits",
 				"Ordinary generated documents go to the user's Library unless another destination is requested",
-				"For a Library deliverable, use composeFile",
+				"For a Library document deliverable, use composeFile",
 				"Confirm that Library file is saved only after receiving its outputFileId",
 				"Do not use produceArtifact or open another goal",
 				"An answer-only goal needs no file",

@@ -44,6 +44,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"path"
 	"strings"
 	"sync"
 	"time"
@@ -143,6 +144,10 @@ func (i *Integration) handleRunAgentTurn(ctx context.Context, args map[string]an
 		}
 	}
 	requireFile, _ := args["requireFile"].(bool)
+	extension := strings.ToLower(strings.TrimPrefix(strings.TrimSpace(asString(args["requiredFileExtension"])), "."))
+	if extension != "" && (!requireFile || (len(extension) > 16 || strings.Trim(extension, "abcdefghijklmnopqrstuvwxyz0123456789") != "")) {
+		return nil, fmt.Errorf("runAgentTurn: a required extension needs a file contract and a simple extension")
+	}
 	if requireFile {
 		run, ok := common.RunFromContext(ctx)
 		ac, _ := auth.AccessFromContext(ctx)
@@ -191,7 +196,7 @@ func (i *Integration) handleRunAgentTurn(ctx context.Context, args map[string]an
 		"reply":     reply,
 	}
 	if requireFile {
-		fileId, err := i.workFileReceipt(ctx)
+		fileId, err := i.workFileReceipt(ctx, extension)
 		if err != nil {
 			return nil, err
 		}
@@ -214,7 +219,7 @@ func (i *Integration) handleRunAgentTurn(ctx context.Context, args map[string]an
 // A known file-producing template requires a durable file, not just the
 // model's confirmation. The file row is synchronous; its Library index is
 // promoted asynchronously on another replica and cannot serve as this receipt.
-func (i *Integration) workFileReceipt(ctx context.Context) (string, error) {
+func (i *Integration) workFileReceipt(ctx context.Context, extension string) (string, error) {
 	run, _ := common.RunFromContext(ctx)
 	receiptRunId := run.RunId
 	if run.Mode == common.RunModeReplay {
@@ -230,6 +235,9 @@ func (i *Integration) workFileReceipt(ctx context.Context) (string, error) {
 		return "", fmt.Errorf("runAgentTurn: checking the saved file: %w", err)
 	}
 	for _, row := range memql.MaterializeRows(res) {
+		if extension != "" && !strings.EqualFold(path.Ext(asString(row["name"])), "."+extension) {
+			continue
+		}
 		if asString(row["status"]) == "ready" && asString(row["blobUrl"]) != "" &&
 			memql.BareShortId(asString(row["ownerUserId"])) == memql.BareShortId(run.OwnerUserId) &&
 			memql.BareShortId(asString(row["producedByRunId"])) == memql.BareShortId(receiptRunId) &&

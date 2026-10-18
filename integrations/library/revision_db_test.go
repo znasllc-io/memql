@@ -530,6 +530,7 @@ func TestDocumentRevisionWorkflow(t *testing.T) {
 			{"HistoryForkReadsOwnedFileBytes", testHistoryForkReadsOwnedFileBytes},
 			{"PersonalDocumentNotesNeverEnterAIRevision", testPersonalDocumentNotesNeverEnterAIRevision},
 			{"ArtifactForFileResolvesBareReceiptAcrossEngines", testArtifactForFileResolvesBareReceiptAcrossEngines},
+			{"ReadFileFromDeliveryReceiptAcrossEngines", testReadFileFromDeliveryReceiptAcrossEngines},
 			{"ReviewAttachmentsAcrossReplicas", testReviewAttachmentsAcrossReplicas},
 			{"BlankDestinationWithReference", testBlankDestinationWithReference},
 			{"AppliedFeedbackCannotBeDeletedAcrossReplicas", testAppliedFeedbackCannotBeDeletedAcrossReplicas},

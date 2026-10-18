@@ -442,6 +442,22 @@ func TestParseFormatRefusesRatherThanDefaulting(t *testing.T) {
 	}
 }
 
+func TestParseFormatAcceptsEverySupportedFilenameExtension(t *testing.T) {
+	for _, format := range Formats() {
+		for _, spelling := range []string{string(format), format.Extension(), "." + strings.ToUpper(format.Extension())} {
+			got, err := ParseFormat(spelling)
+			if err != nil || got != format {
+				t.Fatalf("%q should identify %s: %s, %v", spelling, format, got, err)
+			}
+		}
+	}
+	for _, unsupported := range []string{"png", "wav", "mp4", "image", "audio", "video"} {
+		if _, err := ParseFormat(unsupported); err == nil {
+			t.Fatalf("document composer accepted %s", unsupported)
+		}
+	}
+}
+
 func TestModelSummaryStatesTheCatalogHitRatherThanBlanking(t *testing.T) {
 	p := fixtureProvenance()
 	p.Models = nil

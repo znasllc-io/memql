@@ -160,12 +160,25 @@ in-flight prompt calls and the agent tool loop. Direct agent attempts also
 consume the run's model-call allowance and write attempt receipts.
 
 A classified quick conversational reply uses the `workQuickReply` prompt at
-`fast` through the normal `ai` builtin, with output progress and the durable
-run journal. It reads the authenticated person's profile on the execution
+`fast` through the normal `ai` builtin and the durable run journal. Its draft
+is held until the evidence check below completes. It reads the authenticated person's profile on the execution
 replica and the conversation from the saved run variables. It does not
 retrieve knowledge or enter the agent tool loop. A request for a
 file, research, navigation or action retains its normal execution recipe;
 `quick` alone never authorizes skipping those requirements.
+
+Before delivering a source-based reply, `workReviewReply` rereads bounded
+owner-authorized receipts on the executing replica and makes one structured
+`workReplyReview` call. The check compares the proposed answer with the actual
+receipts, not previous assistant assertions. It has no tools and cannot start
+another search. The same check serves an agent's completed answer and a quick
+follow-up. Greetings and self-contained replies without retrieved evidence add
+no call. Missing source reads or a failed check never publish the unchecked draft.
+The check uses the original run's remaining allowance, provider restrictions
+and deadline; it neither retries itself nor raises any ceiling. A normal quick
+follow-up uses at most its existing three calls: classification, reply and review.
+This is a model pre-filter, not a guarantee of factual correctness; live checks
+must still compare its output with the retained evidence.
 
 Automation repairs receive the complete bundle and its diagnostics. They
 may repair failing members or add missing dependencies, but cannot rewrite

@@ -101,9 +101,11 @@ type sectionableDecision struct {
 	// RequiresResearch is evidence acquisition, independent of duration or format.
 	RequiresResearch bool `json:"requiresResearch"`
 	// FileName and FileFormat are required semantic output choices when the
-	// goal requests a saved file; the format is validated by the Materializer.
-	FileName   string `json:"fileName"`
-	FileFormat string `json:"fileFormat"`
+	// goal requests a saved file. Delivery selects the document Materializer
+	// or an authorized artifact capability with a saved-file contract.
+	FileName     string `json:"fileName"`
+	FileFormat   string `json:"fileFormat"`
+	FileDelivery string `json:"fileDelivery"`
 	// Sectionable is the model's verdict that the deliverable decomposes into
 	// sections -- independent units, or ordered ones where a later section
 	// reads an earlier one's outputs (epic memql#5414, D24).
@@ -361,6 +363,7 @@ func parseSectionableDecision(resp any) sectionableDecision {
 		RequiresResearch bool                    `json:"requiresResearch"`
 		FileName         string                  `json:"fileName"`
 		FileFormat       string                  `json:"fileFormat"`
+		FileDelivery     string                  `json:"fileDelivery"`
 		Sectionable      bool                    `json:"sectionable"`
 		Sections         []sectionSpec           `json:"sections"`
 		Assembly         string                  `json:"assembly"`
@@ -378,6 +381,7 @@ func parseSectionableDecision(resp any) sectionableDecision {
 		RequiresResearch: env.RequiresResearch,
 		FileName:         env.FileName,
 		FileFormat:       env.FileFormat,
+		FileDelivery:     env.FileDelivery,
 		Sectionable:      env.Sectionable,
 		Sections:         env.Sections,
 		Assembly:         env.Assembly,
