@@ -4,6 +4,7 @@
 // files cover the other construct kinds.
 
 use agents.concepts.{ agent }
+use identity.concepts.{ user }
 
 /// Spend limit for a partition or a specific agent within a partition. The router checks the
 /// current-period spend against this cap before every AI call; over-budget calls are refused with a
@@ -11,8 +12,8 @@ use agents.concepts.{ agent }
 /// boundary (UTC day, week, or month).
 @displayCard(primary="scopeId", secondary="scope", tertiary="periodType", status="active")
 concept budget {
-  scope            enum("partition", "agent")!  @description("Whether this budget caps the whole partition or a single agent.")
-  scopeId          string  @description("When scope=agent, the v1:agents:agent id being capped. Empty when scope=partition.")
+  scope            enum("partition", "agent", "user")!  @description("Whether this budget caps the whole partition, a single agent, or one person's own metered spend. A `user` budget is a person's monthly AI budget (design record 2026-10-18-routes): Auto keeps that person's calls inside it, preferring free sources from 80% and leaving vendors out at 100%. It is written only by myBudgetSave, at an id derived from the person.")
+  scopeId          string  @description("When scope=agent, the v1:agents:agent id being capped; when scope=user, the person's v1:identity:user id. Empty when scope=partition.")
   periodType       enum("daily", "weekly", "monthly")!  @description("Budget window. Resets at UTC midnight / Monday / first-of-month.")
   limitUSD         float!  @description("Maximum USD spend allowed during one period. The router refuses calls once ledger totals reach this figure.")
   alertThresholdPct int    @description("Emit an alert event when spend crosses this percentage of the limit (e.g. 80 for early warning). 0 disables early alerts.")
@@ -134,6 +135,38 @@ concept call {
 
   billing             enum("metered", "subscription", "local", "unknown")  @description("Who PAID for this call (memql#4362, memql#4681). metered = MemQL's own vendor spend, which is what totalCost is about and what the dollar ceiling counts. subscription = the call ran inside an app the user already pays for, so the tokens are real but MemQL was not billed for them. local = the call ran on a model hosted by one of the user's OWN MACHINES, so there is no vendor and no bill at all; it must be STAMPED EXPLICITLY by the fleet path and is never inferred, because inferring it would claim work ran on somebody's hardware when nobody established that. unknown = the surface could not tell, which is recorded AS unknown rather than folded into any of the others -- the number the owner asked for, what they were actually charged for, is only worth having if silence stays visible. An absent value reads as metered, the conservative direction: unattributed spend counts against the ceiling rather than disappearing into a bucket the ceiling cannot see.")
   executionSurface    string  @description("Where the call ran (memql#4362, memql#4681): empty for MemQL's own provider calls, 'cockpit-app:<appId>' for a call made by a local app on a user's machine through a delegated session, 'fleet:<registrationId>' for a model served by a machine in the user's fleet. Lets a cost reader separate 'what we spent' from 'what ran somewhere we do not pay for' without joining to the session or registration row -- and, for the fleet case, answers 'which of my machines did this' from the ledger alone.")
+  route               string  @description("The route a PERSON chose for this call in Ask (design record 2026-10-18-routes): `local`, `apps` or the id of one of their own routes. EMPTY MEANS AUTO -- the rules decided, which is every call nobody chose a route for and every call made before routes existed. It is what History filters on to answer 'what did my Apps route actually do'.")
+}
+
+/// A route a PERSON made and named (design record 2026-10-18-routes, "Your own routes"): which
+/// sources serve each job when they pick it for a message in Ask. The built-in routes -- Auto,
+/// Local and Apps -- are not rows; their cluster-wide overrides live in the routing document beside
+/// the policies and rules, under one revision.
+///
+/// SEARCH AND MEMORY IS NEVER A ROUTE'S, which is why there is no field for it. Every route serves
+/// embeddings from the cluster's bound embedder: the index holds vectors from exactly one model, and
+/// a route that chose another would write vectors into a space they do not belong to.
+///
+/// Each job is an ordered list of one to four chain entries -- `fleet:`, `app:` or `federation:`,
+/// never `policy:` and never `embedder:` -- validated by routeSave before anything is written. A
+/// call under the route tries them in order and NEVER falls through to a source the route does not
+/// name: that is what makes "Apps" mean apps.
+///
+/// The composite tier admits the owner and the cluster's maintenance principal: the router reads a
+/// person's route under that principal on whichever node runs the call, and the only wire read
+/// (routesForOwner) filters on the caller, so nobody reads somebody else's route through it.
+@rowAuthz(owner="ownerUserId", clusterOwner)
+@displayCard(primary="name", secondary="ownerUserId", tertiary="updatedAt", status="active")
+concept route {
+  ownerUserId  string!   @description("The v1:identity:user id of the person whose route this is. Stamped from the caller by the write; never an argument.")
+  name         string!   @description("What the person called it -- 'Emergency', 'Out of credits'. One to forty characters, unique per person ignoring case.")
+  fast         []string  @description("Quick tasks (level fast): the sources tried, in order.")
+  strong       []string  @description("Main work (level strong): the sources tried, in order.")
+  reasoning    []string  @description("Deep reasoning (level reasoning): the sources tried, in order.")
+  active       bool      @description("False once the person deleted it. A deleted route is kept as history and never offered again.")
+  updatedAt    datetime  @description("When the route was last written.")
+
+  @relationship(type="parent", field="ownerUserId", target=user, direction="outgoing")
 }
 
 /// Virtual projection of a registered AI provider entry. Never persisted -- rows are produced at

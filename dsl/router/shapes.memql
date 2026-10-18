@@ -55,6 +55,7 @@ shape call routerDecision {
   outcome
   billing
   executionSurface
+  route
 }
 
 /// What the sharing ledger reads: WHERE a call went, WHO it was for, and how
@@ -103,3 +104,44 @@ shape call routerCallEvidence {
   billing
   row.createdAt
 }
+
+/// Full projection of a v1:router:route row: a person's own route and the sources of each job.
+@row
+shape route routeFull {
+  row.id
+  ownerUserId
+  name
+  fast
+  strong
+  reasoning
+  active
+  updatedAt
+  row.createdAt
+}
+
+/// What Auto's ranking reads off one decision: which source served, at which level, how it ended
+/// and how long it took. No user, no prompt, no error text.
+@row
+shape call routerCallSignal {
+  row.id
+  level
+  servedLevel
+  door
+  providerName
+  model
+  outcome
+  totalDurationMs
+  tokensPerSec
+  executionSurface
+  row.createdAt
+}
+
+/// What a person's monthly budget reads off one call: its cost and who paid for it.
+@row
+shape call routerCallSpend {
+  row.id
+  totalCost
+  billing
+  row.createdAt
+}
+

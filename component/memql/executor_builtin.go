@@ -49,6 +49,15 @@ func (e *MemQLEngine) initBuiltinExecutorHandlers() error {
 		"routingPolicyCatalog":          e.policyCatalogBuiltin,
 		"routingPolicySave":             e.policySaveBuiltin,
 		"routingPolicyReset":            e.policyResetBuiltin,
+		"routesForActor":                e.routesForActorBuiltin,
+		"routeSave":                     e.routeSaveBuiltin,
+		"routeDelete":                   e.routeDeleteBuiltin,
+		"routeReset":                    e.routeResetBuiltin,
+		"autoBalance":                   e.autoBalanceBuiltin,
+		"autoBalanceSave":               e.autoBalanceSaveBuiltin,
+		"autoBalanceReset":              e.autoBalanceResetBuiltin,
+		"myBudget":                      e.myBudgetBuiltin,
+		"myBudgetSave":                  e.myBudgetSaveBuiltin,
 		BuiltinExecutorConcepts: func(ctx context.Context, args map[string]any, target int) ([]memorynodes.MemoryNode, error) {
 			return e.evaluateConceptsExpression(ctx, target, args)
 		},

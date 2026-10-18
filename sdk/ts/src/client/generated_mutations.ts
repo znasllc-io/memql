@@ -5002,6 +5002,8 @@ export interface RecordRouterCallArgs {
   minContextTokens?: number;
   /** Whose machine served a local call. Empty until shared machines land. */
   machineOwnerUserId?: string;
+  /** The route a person chose for this call in Ask. Empty means Auto. */
+  route?: string;
 }
 
 export function buildRecordRouterCall(args: RecordRouterCallArgs): string {
@@ -5049,6 +5051,7 @@ export function buildRecordRouterCall(args: RecordRouterCallArgs): string {
   if (args.touches !== undefined) parts.push("touches: " + renderMemQLValue(args.touches));
   if (args.minContextTokens !== undefined) parts.push("minContextTokens: " + renderMemQLValue(args.minContextTokens));
   if (args.machineOwnerUserId !== undefined) parts.push("machineOwnerUserId: " + renderMemQLValue(args.machineOwnerUserId));
+  if (args.route !== undefined) parts.push("route: " + renderMemQLValue(args.route));
   return "mutation recordRouterCall(" + parts.join(", ") + ")";
 }
 
