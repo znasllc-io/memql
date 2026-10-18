@@ -47,7 +47,7 @@ export function MachineStop({
         />
       )}
 
-      {localTest ? <Notice sentence={`Local Cockpit test · ${localTest.version}`} next="Use this Mac. Account-only installation and computer use are included." /> : null}
+      {localTest ? <Notice sentence={`Local Cockpit test · ${localTest.version}`} next="This Mac only, with computer use, installed for your account." /> : null}
       <Field label="Machine name">
         <Input
           id="fleet-add-name"
@@ -70,14 +70,17 @@ export function MachineStop({
         </div>
       </Field>
 
+      {/* ONE SHORT LINE A CHOICE (memql#6214): what it does and the one
+          consequence that matters -- a download's size, a password, a
+          permission -- and nothing that belongs on the machine's own page. */}
       <div className="fleet-install-options">
-        <div><Switch disabled={localTest !== null} checked={draft.userLocal ?? false} onChange={(userLocal) => onDraft({ userLocal })}>Install for my account only</Switch>
-          <p>{draft.userLocal ? "No administrator password needed." : "Installation will ask for your administrator password."}</p></div>
-        <div><Switch disabled={localTest !== null} checked={draft.computerUse} onChange={(computerUse) => onDraft({ computerUse })}>Computer use</Switch>
-          <p>{draft.platform === "mac" ? "Mouse, keyboard and screenshots. Requires Accessibility and Screen Recording access." : "Mouse, keyboard and screenshots require X11. Other tools work on Wayland."}</p></div>
-        <div><Switch checked={draft.workbench ?? false} onChange={workbench => onDraft({ workbench })}>Fleet workbenches</Switch><p>Isolated workspaces on this machine. Requires Docker. Can be shared; cloud workbenches are separate.</p></div>
         <div><Switch checked={draft.inference} onChange={(inference) => onDraft({ inference })}>Run local models</Switch>
-          <p>Run models on this machine. Downloads require several gigabytes.</p></div>
+          <p>Downloads several gigabytes.</p></div>
+        <div><Switch disabled={localTest !== null} checked={draft.computerUse} onChange={(computerUse) => onDraft({ computerUse })}>Computer use</Switch>
+          <p>{draft.platform === "mac" ? "Needs Accessibility and Screen Recording." : "Needs an X11 session."}</p></div>
+        <div><Switch checked={draft.workbench ?? false} onChange={workbench => onDraft({ workbench })}>Fleet workbenches</Switch><p>Needs Docker.</p></div>
+        <div><Switch disabled={localTest !== null} checked={draft.userLocal ?? false} onChange={(userLocal) => onDraft({ userLocal })}>Install for my account only</Switch>
+          <p>{draft.userLocal ? "No administrator password." : "Asks for your administrator password."}</p></div>
       </div>
 
       {connected ? null : (

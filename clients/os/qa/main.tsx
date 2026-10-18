@@ -5,6 +5,7 @@ import { StorageScene } from "./storageScenes";
 import { emailScenes, EMAIL_CLICKS } from "./emailScenes";
 import { nexusApprovalScenes, NEXUS_APPROVAL_CLICKS } from "./nexusApprovalScenes";
 import { fleetEquipmentScenes } from "./fleetEquipmentScenes";
+import { setupWizardScenes } from "./setupWizardScenes";
 import { mapScenes } from "./mapScenes";
 import { MATERIALIZER_VIEWS } from "./materializerScenes";
 import { FilesApp } from "../src/apps/files/FilesApp";
@@ -714,6 +715,7 @@ const VIEWS: Record<
   ...MATERIALIZER_VIEWS,
   ...mapScenes(WindowBody),
   ...fleetEquipmentScenes(WindowBody),
+  ...setupWizardScenes(WindowBody),
   "users-groups": usersWizardView("groups"),
   "users-roles": usersWizardView("roles"),
   "users-invite": usersWizardView("people"),

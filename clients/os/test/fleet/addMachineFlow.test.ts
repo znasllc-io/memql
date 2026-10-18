@@ -131,50 +131,53 @@ describe("the checks", () => {
   it("draws the connection current until steady, then done", () => {
     const c0 = checksFor(MAC, machine(), 0, NOW)[0]!;
     expect(c0.state).toBe("current");
-    expect(c0.answer).toMatch(/first heartbeat/);
+    expect(c0.answer).toBe("Waiting for a heartbeat");
     const c1 = checksFor(MAC, machine(), 1, NOW)[0]!;
     expect(c1.state).toBe("current");
-    expect(c1.answer).toMatch(/Heartbeat 1 of 2/);
+    expect(c1.answer).toBe("Checking the connection");
     const c2 = checksFor(MAC, machine(), 2, NOW)[0]!;
     expect(c2.state).toBe("done");
-    expect(c2.answer).toMatch(/steady/);
+    expect(c2.answer).toBe("Online");
   });
 
   it("stops the connection check when the machine goes silent past the window, naming the log", () => {
     const c = checksFor(MAC, machine({ lastSeenAt: ago(120) }), 3, NOW)[0]!;
     expect(c.state).toBe("stopped");
-    expect(c.repair).toContain("~/.memql/state/worker.log");
+    expect(c.answer).toMatch(/^Offline · last heard/);
+    expect(c.repair).toMatch(/worker log/);
+    expect(c.command).toContain("~/.memql/state/worker.log");
   });
 
-  it("reads the build against what was asked", () => {
-    expect(checksFor(MAC, machine(), 0, NOW)[1]).toMatchObject({ state: "done", answer: "Headless build (cockpit v2026.9.1)." });
+  it("reads the build only when computer use was asked for", () => {
+    // Not asked for: the build is a fact on the machine's own page, not a check.
+    expect(checksFor(MAC, machine(), 0, NOW).some((c) => c.id === "build")).toBe(false);
     expect(checksFor(MAC_CU, machine({ buildTag: "computeruse", capabilities: ["HEADLESS", "COMPUTERUSE"] }), 0, NOW)[1]).toMatchObject({
+      id: "build",
       state: "done",
-      answer: "Computer-use build (cockpit v2026.9.1).",
+      answer: "Installed",
     });
     // Asked for computer use, got the headless build: the line was run
     // without the flag, and the check says so and how to fix it.
     const wrong = checksFor(MAC_CU, machine(), 0, NOW)[1]!;
     expect(wrong.state).toBe("stopped");
-    expect(wrong.repair).toContain("--computeruse");
-    // More than asked is a fact, not a failure.
-    expect(checksFor(MAC, machine({ buildTag: "computeruse" }), 0, NOW)[1]!.state).toBe("done");
+    expect(wrong.repair).toMatch(/install command again/);
     // A cockpit that did not say is unknown, not wrong.
     expect(checksFor(MAC_CU, machine({ buildTag: "", version: "" }), 0, NOW)[1]).toMatchObject({
       state: "unknown",
-      answer: "The cockpit did not say which build it is.",
+      answer: "Build not reported",
     });
   });
 
   it("asks for the macOS permissions only on a computer-use Mac, and names the missing ones", () => {
-    expect(checksFor(MAC, machine(), 0, NOW).map((c) => c.id)).toEqual(["connection", "build", "headless", "apps"]);
+    // Only what was picked: a plain machine is checked for its connection alone.
+    expect(checksFor(MAC, machine(), 0, NOW).map((c) => c.id)).toEqual(["connection"]);
     const cu = machine({
       buildTag: "computeruse",
       permissions: { accessibility: true, screen_recording: false, x11_display: false, detail: "" },
     });
     const perms = checksFor(MAC_CU, cu, 0, NOW).find((c) => c.id === "permissions")!;
     expect(perms.state).toBe("open");
-    expect(perms.answer).toBe("Screen Recording not granted to the running worker.");
+    expect(perms.answer).toBe("Screen Recording not granted");
     expect(perms.repair).toContain("System Settings → Privacy & Security → Screen Recording");
     expect(perms.command).toBeUndefined();
   });
@@ -186,7 +189,7 @@ describe("the checks", () => {
     });
     expect(checksFor(MAC_CU, granted, 0, NOW).find((c) => c.id === "permissions")).toMatchObject({
       state: "done",
-      answer: "Accessibility and Screen Recording granted.",
+      answer: "Granted",
     });
     const silent = machine({ buildTag: "computeruse" });
     expect(checksFor(MAC_CU, silent, 0, NOW).find((c) => c.id === "permissions")?.state).toBe("unknown");
@@ -249,16 +252,18 @@ describe("the checks", () => {
   it("offers the recommended pull once a runtime is there, draws a live pull as moving, and reads a served model as done", () => {
     const withRuntime = machine({ hardware: { chip: "M2", memoryBytes: 1, runtimes: [{ name: "ollama", version: "0.11" }] } });
     const idle = checksFor(MAC_INF, withRuntime, 0, NOW);
-    expect(idle.find((c) => c.id === "runtime")).toMatchObject({ state: "done", answer: "Found: ollama." });
-    // Nothing on the runtime and nothing in flight: the person's turn, with
-    // the OS's own act beside the command.
-    expect(idle.find((c) => c.id === "models")).toMatchObject({ state: "open", act: "pullRecommended", command: "/usr/local/bin/memql worker setup --inference" });
+    expect(idle.find((c) => c.id === "runtime")).toMatchObject({ state: "done", answer: "ollama 0.11" });
+    // Nothing on the runtime and nothing in flight: the person's turn, and the
+    // OS's own act is the footer's Download models -- no second command.
+    expect(idle.find((c) => c.id === "models")).toMatchObject({ state: "open", act: "pullRecommended", answer: "None yet" });
+    expect(idle.find((c) => c.id === "models")?.command).toBeUndefined();
 
     const pulling = checksFor(MAC_INF, withRuntime, 0, NOW, {
       live: { pullId: "p1", workerId: "m1", model: "llama3.1:8b", status: "running", statusLine: "pulling 8eeb52dfb3bb", layer: "", completedBytes: 1, totalBytes: 2, readvertised: false, errorMessage: "", requestedAt: "", updatedAt: "", endedAt: "" },
     });
-    expect(pulling.find((c) => c.id === "models")).toMatchObject({ state: "current" });
-    expect(pulling.find((c) => c.id === "models")?.answer).toContain("Pulling llama3.1:8b -- pulling 8eeb52dfb3bb");
+    expect(pulling.find((c) => c.id === "models")).toMatchObject({ state: "current", answer: "Downloading llama3.1:8b" });
+    // The pull rides on the check, so the step draws its progress bar.
+    expect(pulling.find((c) => c.id === "models")?.pull?.model).toBe("llama3.1:8b");
 
     const serving = machine({
       hardware: { chip: "M2", memoryBytes: 1, runtimes: [{ name: "ollama", version: "0.11" }] },
@@ -266,15 +271,15 @@ describe("the checks", () => {
     });
     expect(checksFor(MAC_INF, serving, 0, NOW).find((c) => c.id === "models")).toMatchObject({
       state: "done",
-      answer: "Serving one model: llama3.1:8b.",
+      answer: "llama3.1:8b",
     });
   });
 
   it("names the cluster's round trip on the connection once it is measured, and never before", () => {
     const unmeasured = checksFor(MAC, machine(), STEADY_BEATS, NOW)[0]!;
-    expect(unmeasured.answer).not.toContain("round trip");
+    expect(unmeasured.answer).toBe("Online");
     const measured = checksFor(MAC, machine({ rttMs: 12, rttAt: ago(40) }), STEADY_BEATS, NOW)[0]!;
-    expect(measured.answer).toContain("round trip 12 ms, checked 40s ago");
+    expect(measured.answer).toBe("Online · 12 ms");
   });
 
   it("treats an advertised model as proof of a runtime an older cockpit did not describe", () => {
@@ -301,6 +306,18 @@ describe("the checks", () => {
   });
 });
 
+describe("a refused download start", () => {
+  it("puts a refused download start on the Models line, with the footer's retry", () => {
+    const withRuntime = machine({ hardware: { chip: "M2", memoryBytes: 1, runtimes: [{ name: "ollama", version: "0.11" }] } });
+    const refused = checksFor(MAC_INF, withRuntime, STEADY_BEATS, NOW, { live: null, startError: "The recommended downloads exceed free storage" });
+    expect(refused.find((c) => c.id === "models")).toMatchObject({
+      state: "stopped",
+      answer: "Couldn’t start: The recommended downloads exceed free storage",
+      act: "pullRecommended",
+    });
+  });
+});
+
 describe("the stops", () => {
   it("opens This machine and keeps the rest ahead before a mint", () => {
     const stops = stopsFor(facts(), []);
@@ -311,9 +328,9 @@ describe("the stops", () => {
   it("lights two marks while waiting: Install open for the person, Connect current for the cluster", () => {
     const stops = stopsFor(facts({ mint: MINT, mintedAt: NOW }), []);
     expect(stops.map((s) => s.state)).toEqual(["done", "open", "current", "ahead"]);
-    expect(stops[0]!.answer).toBe("studio-mac-mini -- macOS");
-    expect(stops[1]!.answer).toBe("Run the command on the machine");
-    expect(stops[2]!.answer).toBe("Listening for the machine");
+    expect(stops[0]!.answer).toBe("studio-mac-mini · macOS");
+    expect(stops[1]!.answer).toBe("Run the command");
+    expect(stops[2]!.answer).toBe("Listening");
     expect(openStopFor(stops)).toBe("install");
   });
 
@@ -323,7 +340,7 @@ describe("the stops", () => {
     const stops = stopsFor(facts({ mint: MINT, machine: m }), checks);
     expect(stops.map((s) => s.state)).toEqual(["done", "done", "done", "current"]);
     expect(stops[1]!.answer).toBe("Installed on mini.local");
-    expect(stops[2]!.answer).toBe("Connected as mini.local -- darwin/arm64 -- cockpit v2026.9.1");
+    expect(stops[2]!.answer).toBe("Connected as mini.local");
     expect(openStopFor(stops)).toBe("checks");
   });
 
@@ -335,11 +352,11 @@ describe("the stops", () => {
     });
     const waitingOnHand = stopsFor(facts({ draft: MAC_CU, mint: MINT, machine: cu, beats: 2 }), checksFor(MAC_CU, cu, 2, NOW));
     expect(waitingOnHand[3]!.state).toBe("open");
-    expect(waitingOnHand[3]!.answer).toBe("4 of 5 settled -- macOS permissions next");
+    expect(waitingOnHand[3]!.answer).toBe("2 of 3 done · macOS permissions next");
 
     const done = stopsFor(facts({ mint: MINT, machine: machine(), beats: 2 }), checksFor(MAC, machine(), 2, NOW));
     expect(done[3]!.state).toBe("done");
-    expect(done[3]!.answer).toBe("All settled");
+    expect(done[3]!.answer).toBe("All set");
   });
 
   it("marks the checks stopped when the machine went silent", () => {
@@ -351,7 +368,7 @@ describe("the stops", () => {
 
   it("summarises the draft with what was asked for", () => {
     expect(draftSummary({ name: "box", platform: "linux", computerUse: true, inference: true })).toBe(
-      "box -- Linux, computer-use build, local models",
+      "box · Linux · local models · computer use",
     );
     expect(draftSummary(EMPTY_DRAFT)).toBe("macOS");
   });
@@ -385,7 +402,7 @@ describe("the action bar follows the state", () => {
     expect(bar.acts.map((a) => [a.id, a.text === true])).toEqual([["cancel", true], ["leave", false]]);
     const long = facts({ mint: MINT, mintedAt: new Date(NOW.getTime() - LONG_WAIT_MS) });
     expect(waitedLong(long)).toBe(true);
-    expect(barFor(long, []).detail).toMatch(/Taking longer than expected/);
+    expect(barFor(long, []).detail).toMatch(/Taking longer than usual/);
   });
 
   // CANCEL REVOKES A LIVE CREDENTIAL, so it asks -- and it is its OWN question
@@ -395,7 +412,7 @@ describe("the action bar follows the state", () => {
   it("asks before cancelling a minted token, because cancelling revokes it", () => {
     const bar = barFor(facts({ mint: MINT, cancelAsked: true }), []);
     expect(bar.state).toBe("Cancel?");
-    expect(bar.question).toMatch(/revokes the token/);
+    expect(bar.question).toMatch(/install command stops working/);
     expect(bar.acts.map((a) => [a.id, a.text === true])).toEqual([["keepWaiting", true], ["revokeAndLeave", false]]);
     expect(bar.acts.find((a) => a.id === "revokeAndLeave")?.tone).toBe("danger");
   });
@@ -403,7 +420,7 @@ describe("the action bar follows the state", () => {
   it("asks once before leaving, for the one thing leaving costs here: the token is shown only on this page", () => {
     const bar = barFor(facts({ mint: MINT, leaveAsked: true }), []);
     expect(bar.state).toBe("Back to Machines?");
-    expect(bar.question).toMatch(/will appear in Machines when it connects/);
+    expect(bar.question).toMatch(/appears in Machines when it connects/);
     expect(bar.question).toMatch(/won’t be shown again/);
     expect(bar.acts.map((a) => [a.id, a.text === true])).toEqual([["keepWaiting", true], ["leaveKeepToken", false]]);
   });
@@ -419,13 +436,29 @@ describe("the action bar follows the state", () => {
   it("offers only Back while checks run, and Done only when settled", () => {
     const m = machine();
     const pending = barFor(facts({ mint: MINT, machine: m }), checksFor(MAC, m, 0, NOW));
-    expect(pending.state).toBe("Connected");
+    expect(pending.state).toBe("Checking");
     expect(pending.acts).toEqual([{ id: "back", label: "Back", tone: "quiet", text: true }]);
     const settled = barFor(facts({ mint: MINT, machine: m, beats: 2 }), checksFor(MAC, m, 2, NOW));
     expect(settled.state).toBe("Ready");
     expect(settled.tone).toBe("live");
     expect(settled.acts.find((a) => a.id === "done")?.tone).toBe("primary");
     expect(settled.acts.map(a => a.label)).toEqual(["Back", "Done"]);
+  });
+
+  // AN OPEN CHECK IS THE PERSON'S TURN, not the cluster working: a missing
+  // permission, once nothing else is moving, holds the bar rather than
+  // spinning it.
+  it("holds the bar on a check that waits on the person, once nothing else moves", () => {
+    const cu = machine({
+      buildTag: "computeruse",
+      capabilities: ["HEADLESS", "COMPUTERUSE"],
+      permissions: { accessibility: true, screen_recording: false, x11_display: false, detail: "" },
+    });
+    const held = barFor(facts({ draft: MAC_CU, mint: MINT, machine: cu, beats: STEADY_BEATS }), checksFor(MAC_CU, cu, STEADY_BEATS, NOW));
+    expect(held).toMatchObject({ state: "macOS permissions needs attention", tone: "paused", detail: "" });
+    // While the connection is still being checked, the cluster is working.
+    const moving = barFor(facts({ draft: MAC_CU, mint: MINT, machine: cu, beats: 0 }), checksFor(MAC_CU, cu, 0, NOW));
+    expect(moving).toMatchObject({ state: "Checking", tone: "busy" });
   });
 
   it("names a problem in the state word when a check stopped", () => {

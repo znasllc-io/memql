@@ -2,7 +2,7 @@ import { useState } from "react";
 
 import { Button, Caption, ChoiceStack, useAppReach, type ChoiceOption } from "../../kit";
 
-// THE INFERENCE STOP: three doors, and the fleet one first (design record
+// THE INFERENCE STOP: three doors, the local one first (design record
 // 2026-09-06-first-run-wizard, D4).
 //
 // ===========================================================================
@@ -26,7 +26,7 @@ import { Button, Caption, ChoiceStack, useAppReach, type ChoiceOption } from "..
 // the provider gates widen to owner-or-developer, this surface follows with
 // no edit.
 
-type DoorId = "fleet" | "anthropic" | "openai";
+type DoorId = "local" | "anthropic" | "openai";
 
 // THE DOORS CARRY NO DESCRIPTION, AND THE CHOSEN ONE'S SENTENCE SITS UNDER
 // THEM. Three named cards each with two lines of prose is 210px inside a desk
@@ -35,7 +35,7 @@ type DoorId = "fleet" | "anthropic" | "openai";
 // names read at a glance, and a person reads the sentence for the one they
 // are actually considering, which is what a selection is for.
 const DOORS: readonly (ChoiceOption & { value: DoorId })[] = [
-  { value: "fleet", label: "A machine on your fleet" },
+  { value: "local", label: "Local" },
   { value: "anthropic", label: "Anthropic" },
   { value: "openai", label: "OpenAI" },
 ];
@@ -53,13 +53,13 @@ const DOORS: readonly (ChoiceOption & { value: DoorId })[] = [
 // So each sentence states the trade the CHOICE turns on, which does not
 // change when a credential mechanism does.
 const SAYS: Record<DoorId, string> = {
-  fleet: "A computer you already own serves the model. Nothing leaves it, and there is no bill.",
+  local: "A computer you own runs the model, with nothing leaving it and no bill.",
   anthropic: "Anthropic serves the model, on their hardware and their bill.",
   openai: "OpenAI serves the model, on their hardware and their bill.",
 };
 
 export function InferenceStop() {
-  const [door, setDoor] = useState<DoorId>("fleet");
+  const [door, setDoor] = useState<DoorId>("local");
   const fleet = useAppReach("fleet");
   const settings = useAppReach("settings");
 
@@ -82,7 +82,7 @@ export function InferenceStop() {
   );
 
   function act() {
-    if (door === "fleet") {
+    if (door === "local") {
       return canPair ? (
         <Button
           tone="primary"
@@ -90,7 +90,7 @@ export function InferenceStop() {
             // The Add machine panel, opened for them WITH the local-models
             // box already ticked. Fleet's Machines section has no role floor,
             // so this is offered to a developer in full -- which is the whole
-            // reason the fleet door comes first.
+            // reason the local door comes first.
             //
             // The flag is what makes the act complete rather than
             // approximately right: the person pressed a button that says

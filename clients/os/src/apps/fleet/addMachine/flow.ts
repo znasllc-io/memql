@@ -1,13 +1,14 @@
 import { permissionDecision } from "../rows";
 import type { StopState } from "../../../kit/Rail";
 import { formatFreshness } from "../../../kit/format";
-import { isWorkerOnline, ONLINE_WINDOW_SECONDS } from "../online";
+import { isWorkerOnline } from "../online";
 import { computerUseStatus, hasRoundTrip, isRevoked, machineName, type MachineRow } from "../rows";
 import { isChatModel, machineModelsFrom, type ModelPull } from "../machines/models";
 import type { ModelResponse } from "./useModelResponse";
 import {
   INSTALL_PLATFORM_LABEL,
   setupCommand,
+  workbenchSetupCommand,
   type InstallPlatform,
 } from "./install";
 
@@ -153,14 +154,13 @@ export function isSteady(machine: MachineRow | null, beats: number, now: Date): 
 export type CheckState = Extract<StopState, "done" | "current" | "open" | "skipped" | "stopped" | "unknown" | "ahead">;
 
 export interface Check {
-  id: "connection" | "build" | "permissions" | "display" | "runtime" | "models" | "response" | "workbench" | "headless" | "apps";
+  id: "connection" | "build" | "permissions" | "display" | "runtime" | "models" | "response" | "workbench";
   name: string;
   state: CheckState;
-  /** The state in words: the answer once settled, what is being waited on
-   *  otherwise. */
+  /** The state in words, in a few: the answer once settled, what is being
+   *  waited on otherwise. */
   answer: string;
-  details?: { name: string; state: "done" | "open" | "unknown"; answer: string }[];
-  /** What the PERSON does, when the check is `open`. */
+  /** What the PERSON does, when there is something to do: one sentence. */
   repair?: string;
   /** The exact command the repair takes, when it takes one. */
   command?: string;
@@ -168,9 +168,12 @@ export interface Check {
    *  pull the recommended models onto the machine (D13), or ask the
    *  served model something to prove the whole path (D14). */
   act?: "pullRecommended" | "retryResponse";
+  /** The pull in flight, drawn as progress under the Models line. */
+  pull?: ModelPull;
 }
 
-const WORKER_LOG = "~/.memql/state/worker.log";
+/** The worker log, read on the machine: where a worker that cannot connect says why. */
+const WORKER_LOG_COMMAND = "tail -n 40 ~/.memql/state/worker.log";
 
 /** What the flow knows about pulls onto the matched machine: the one still
  *  running, if any. Read from the `modelPullsForWorker` feed by the hook. */
@@ -179,10 +182,20 @@ export interface PullFacts {
   failed?: ModelPull | null;
   feedError?: string;
   loading?: boolean;
+  /** The cluster's refusal to START the recommended pulls, verbatim, or "".
+   *  It belongs on the Models line, not in a banner above the checks. */
+  startError?: string;
 }
 
 const NO_PULLS: PullFacts = { live: null };
 
+// ONLY WHAT WAS ASKED FOR (memql#6214). The checks used to list every
+// capability the machine has -- commands and files, the build, the apps --
+// whatever was chosen, each with a sentence, so a machine added for local
+// models read as ten lines of prose. A check is here when the person picked
+// the feature it checks, and it says its state in a few words; what to do
+// appears only when there is something to do. What else the machine has --
+// its apps among them -- is on its own page.
 export function checksFor(
   draft: Draft,
   machine: MachineRow,
@@ -191,27 +204,24 @@ export function checksFor(
   pulls: PullFacts = NO_PULLS,
   response: ModelResponse = { state: "waiting" },
 ): Check[] {
-  const checks: Check[] = [connectionCheck(machine, beats, now), buildCheck(draft, machine)];
-  checks.push({ id: "headless", name: "Commands and files", state: machine.capabilities.includes("HEADLESS") ? "done" : "unknown", answer: machine.capabilities.includes("HEADLESS") ? "Available to the machine’s owner. Individual operations still need permission." : "Not reported by Cockpit." });
-  checks.push({ id: "apps", name: "CLIs and apps", state: machine.apps.some(app => app.runnable) ? "done" : "skipped", answer: machine.apps.some(app => app.runnable) ? "Available to the machine’s owner." : "No ready apps reported. Install, allow and sign in to an app when needed." });
-  if (draft.workbench) checks.push(machine.capabilities.includes("WORKBENCH") && (machine.workbenchContract ?? 0) >= 1
-    ? { id: "workbench", name: "Fleet workbenches", state: "done", answer: "Isolated workspaces available on this machine. Sharing is managed separately in Settings." }
-    : { id: "workbench", name: "Fleet workbenches", state: "open", answer: "The isolated runtime is not available yet.", repair: "Start Docker with at least 3 CPUs and 4 GiB assigned, then run workbench setup. Model inference and owner-only features are independent.", command: `${draft.userLocal ? "~/.memql/bin/" : ""}memql worker setup --workbench` });
-  if (draft.computerUse && draft.platform === "mac") checks.push(permissionsCheck(machine, draft));
+  const checks: Check[] = [connectionCheck(machine, beats, now)];
+  if (draft.computerUse) checks.push(buildCheck(machine));
+  if (draft.workbench) checks.push(workbenchCheck(machine, draft));
+  if (draft.computerUse && draft.platform === "mac") checks.push(permissionsCheck(machine));
   if (draft.computerUse && draft.platform === "linux") checks.push(displayCheck(machine));
   if (draft.inference) {
     checks.push(...inferenceChecks(machine, pulls, draft));
     const model = machineModelsFrom(machine.reportedLabels).find(isChatModel);
     const available = checks.find(check => check.id === "models")?.state === "done";
     checks.push(!available
-      ? { id: "response", name: "Model response", state: "ahead", answer: "After the models are available." }
+      ? { id: "response", name: "Model response", state: "ahead", answer: "After the models" }
       : !model
-        ? { id: "response", name: "Model response", state: "open", answer: "A text model is needed to verify a response.", repair: "The available models do not support this text check. Add a text model to complete it.", act: "pullRecommended" }
+        ? { id: "response", name: "Model response", state: "open", answer: "No text model", repair: "Download a text model to finish this check.", act: "pullRecommended" }
         : response.state === "passed"
-          ? { id: "response", name: "Model response", state: "done", answer: "Response verified on this machine." }
+          ? { id: "response", name: "Model response", state: "done", answer: "Answered" }
           : response.state === "failed"
-            ? { id: "response", name: "Model response", state: "stopped", answer: "The model did not answer.", repair: response.error, act: "retryResponse" }
-            : { id: "response", name: "Model response", state: "current", answer: response.state === "running" ? "Checking the model’s response… The first response can take longer while it loads." : "Waiting to check the model’s response." });
+            ? { id: "response", name: "Model response", state: "stopped", answer: "No answer", repair: response.error, act: "retryResponse" }
+            : { id: "response", name: "Model response", state: "current", answer: response.state === "running" ? "Asking the model" : "Waiting to ask the model" });
   }
   return checks;
 }
@@ -223,92 +233,78 @@ export function roundTripFigure(machine: MachineRow, now: Date): string {
   return `${machine.rttMs} ms, checked ${formatFreshness(machine.rttAt, now)}`;
 }
 
-/** The same, named, for a sentence that carries other figures too. */
-export function roundTripSentence(machine: MachineRow, now: Date): string {
-  const figure = roundTripFigure(machine, now);
-  return figure === "" ? "" : `round trip ${figure}`;
-}
-
 function connectionCheck(machine: MachineRow, beats: number, now: Date): Check {
-  const online = isWorkerOnline(machine, now);
-  const last = formatFreshness(machine.lastSeenAt, now);
-  if (!online) {
+  if (!isWorkerOnline(machine, now)) {
     return {
       id: "connection",
       name: "Connection",
       state: "stopped",
-      answer: `Nothing heard for more than ${ONLINE_WINDOW_SECONDS} s -- last heartbeat ${last}.`,
-      repair: `On the machine, read the worker log: ${WORKER_LOG}. A worker that cannot reach the cluster says why there.`,
+      answer: `Offline · last heard ${formatFreshness(machine.lastSeenAt, now)}`,
+      repair: "The worker log on the machine says why.",
+      command: WORKER_LOG_COMMAND,
     };
   }
-  const rtt = roundTripSentence(machine, now);
   if (beats >= STEADY_BEATS) {
+    return { id: "connection", name: "Connection", state: "done", answer: hasRoundTrip(machine) ? `Online · ${machine.rttMs} ms` : "Online" };
+  }
+  return { id: "connection", name: "Connection", state: "current", answer: beats === 0 ? "Waiting for a heartbeat" : "Checking the connection" };
+}
+
+function buildCheck(machine: MachineRow): Check {
+  const tag = machine.buildTag.trim();
+  if (tag === "headless") {
     return {
-      id: "connection",
-      name: "Connection",
-      state: "done",
-      answer: `Online and steady -- heartbeats every 15 s, last ${last}${rtt === "" ? "" : `; ${rtt}`}.`,
+      id: "build",
+      name: "Computer use",
+      state: "stopped",
+      answer: "Headless build installed",
+      repair: "Run the install command again; it installs the computer-use build in place.",
     };
+  }
+  if (tag === "computeruse" || machine.capabilities.includes("COMPUTERUSE")) {
+    return { id: "build", name: "Computer use", state: "done", answer: "Installed" };
+  }
+  return { id: "build", name: "Computer use", state: "unknown", answer: "Build not reported" };
+}
+
+function workbenchCheck(machine: MachineRow, draft: Draft): Check {
+  if (machine.capabilities.includes("WORKBENCH") && (machine.workbenchContract ?? 0) >= 1) {
+    return { id: "workbench", name: "Fleet workbenches", state: "done", answer: "Ready" };
   }
   return {
-    id: "connection",
-    name: "Connection",
-    state: "current",
-    answer:
-      beats === 0
-        ? "Listening for its first heartbeat."
-        : `Heartbeat ${beats} of ${STEADY_BEATS} heard, last ${last}.`,
+    id: "workbench",
+    name: "Fleet workbenches",
+    state: "open",
+    answer: "Not available yet",
+    repair: "Start Docker with at least 3 CPUs and 4 GiB, then run this on the machine.",
+    command: workbenchSetupCommand(draft.userLocal),
   };
 }
 
-function buildCheck(draft: Draft, machine: MachineRow): Check {
-  const version = machine.version.trim() === "" ? "" : ` (cockpit ${machine.version.trim()})`;
-  const tag = machine.buildTag.trim();
-  const hasComputerUse = machine.capabilities.includes("COMPUTERUSE") || tag === "computeruse";
-  if (draft.computerUse) {
-    if (tag === "headless") {
-      return {
-        id: "build",
-        name: "Build",
-        state: "stopped",
-        answer: `The headless build registered${version}.`,
-        repair: "The line was run without --computeruse. Run it again with the flag; the installer replaces the binary in place.",
-      };
-    }
-    if (tag === "computeruse" || hasComputerUse) {
-      return { id: "build", name: "Build", state: "done", answer: `Computer-use build${version}.` };
-    }
-    return {
-      id: "build",
-      name: "Build",
-      state: "unknown",
-      answer: `The cockpit did not say which build it is${version}.`,
-    };
-  }
-  if (hasComputerUse) {
-    // Not what was asked, and not wrong: a machine that can do more than the
-    // line asked for is a fact, never a failure.
-    return { id: "build", name: "Build", state: "done", answer: `Computer-use build${version}.` };
-  }
-  return { id: "build", name: "Build", state: "done", answer: `Headless build${version}.` };
-}
-
-function permissionsCheck(machine: MachineRow, _draft: Draft): Check {
+function permissionsCheck(machine: MachineRow): Check {
   const p = machine.permissions;
   const evidence = [
-    { name: "Accessibility", state: permissionDecision(p,"accessibility") },
-    { name: "Screen Recording", state: permissionDecision(p,"screenRecording") },
+    { name: "Accessibility", state: permissionDecision(p, "accessibility") },
+    { name: "Screen Recording", state: permissionDecision(p, "screenRecording") },
   ];
-  const denied = evidence.filter(s => s.state === "denied").map(s => s.name);
-  const unknown = evidence.filter(s => s.state === "unknown").map(s => s.name);
-  const details = evidence.map(s => ({ name: s.name, state: s.state === "granted" ? "done" as const : s.state === "denied" ? "open" as const : "unknown" as const, answer: s.state === "granted" ? "Granted to the running worker." : s.state === "denied" ? "The running worker reports access denied." : "Not verified by the running worker." }));
-  if (denied.length === 0 && unknown.length === 0) return { id: "permissions", name: "macOS permissions", state: "done", answer: "Accessibility and Screen Recording granted.", details };
+  const denied = evidence.filter((s) => s.state === "denied").map((s) => s.name);
+  const unknown = evidence.filter((s) => s.state === "unknown").map((s) => s.name);
+  if (denied.length === 0 && unknown.length === 0) return { id: "permissions", name: "macOS permissions", state: "done", answer: "Granted" };
+  if (denied.length > 0) {
+    return {
+      id: "permissions",
+      name: "macOS permissions",
+      state: "open",
+      answer: `${denied.join(" and ")} not granted`,
+      repair: `Allow MemQL under System Settings → Privacy & Security → ${denied.join(" and ")}.`,
+    };
+  }
   return {
-    id: "permissions", name: "macOS permissions", state: denied.length ? "open" : "unknown", details,
-    answer: denied.length ? `${denied.join(" and ")} not granted to the running worker.` : `${unknown.join(" and ")} not verified by the running worker.`,
-    repair: denied.length
-      ? `Allow the worker itself under System Settings → Privacy & Security → ${denied.join(" and ")}. Terminal's grant is separate. These checks refresh from worker heartbeats; macOS may require restarting the worker after a grant.`
-      : "This worker has not supplied a measured result for every permission. Use a worker build that reports its own status. Running setup in Terminal cannot verify a detached LaunchAgent, so repeating it does not complete this check.",
+    id: "permissions",
+    name: "macOS permissions",
+    state: "unknown",
+    answer: `${unknown.join(" and ")} not reported yet`,
+    repair: "This Cockpit build does not report its permissions; update Cockpit on the machine.",
   };
 }
 
@@ -324,75 +320,66 @@ function displayCheck(machine: MachineRow): Check {
 
 function inferenceChecks(machine: MachineRow, pulls: PullFacts, draft: Draft): Check[] {
   const models = machineModelsFrom(machine.reportedLabels);
-  const runtimes = machine.hardware.runtimes.map((r) => r.name).filter((n) => n !== "");
-  const runtimeNames = runtimes.join(", ");
+  const runtimes = machine.hardware.runtimes.filter((r) => r.name !== "");
   const runtime: Check =
     models.length > 0 || runtimes.length > 0
       ? {
           id: "runtime",
           name: "Model runtime",
           state: "done",
-          answer: runtimes.length > 0 ? `Found: ${runtimeNames}.` : "A runtime is serving models.",
+          answer: runtimes.length > 0 ? runtimes.map((r) => `${r.name} ${r.version}`.trim()).join(", ") : "Serving models",
         }
       : {
           id: "runtime",
           name: "Model runtime",
           state: "open",
-          answer: "No runtime reported.",
-          repair:
-            "Run this in a terminal on the machine. It checks the hardware, shows the runtime installation commands for approval and downloads the recommended models. These checks update automatically.",
+          answer: "Not installed",
+          repair: "Run this on the machine to install it and download the models.",
           command: setupCommand(draft.userLocal, true),
         };
+  const startError = (pulls.startError ?? "").trim();
   let modelsCheck: Check;
   if (pulls.live !== null) {
-    const line = pulls.live.statusLine.trim();
+    // A PARTIAL START keeps both facts on the one line: what is downloading,
+    // and why the rest of the set did not start.
     modelsCheck = {
-      id: "models",
-      name: "Models",
-      state: "current",
-      answer: `Pulling ${pulls.live.model}${line === "" ? "" : ` -- ${line}`}. The machine reports it here when ready.`,
+      id: "models", name: "Models", state: "current", answer: `Downloading ${pulls.live.model}`, pull: pulls.live,
+      ...(startError === "" ? {} : { repair: `The rest did not start: ${startError}` }),
     };
+  } else if (startError !== "") {
+    // A REFUSED START IS THE MODELS CHECK'S OWN STATE, never a banner over the
+    // checks: it is about this line, and Download models in the footer is
+    // the way to try again.
+    modelsCheck = { id: "models", name: "Models", state: "stopped", answer: `Couldn’t start: ${startError}`, act: "pullRecommended" };
   } else if (pulls.feedError) {
     modelsCheck = {
       id: "models", name: "Models", state: "stopped",
-      answer: `Download progress is unavailable: ${pulls.feedError}`,
-      repair: "Check the connection to the cluster. Downloads may still be running; you can check setup on the machine.",
-      command: setupCommand(draft.userLocal, true),
+      answer: "Can’t read download progress",
+      repair: `${pulls.feedError.replace(/[.\s]+$/, "")}. Downloads continue on the machine.`,
     };
   } else if (pulls.loading) {
-    modelsCheck = { id: "models", name: "Models", state: "current", answer: "Checking model downloads…" };
+    modelsCheck = { id: "models", name: "Models", state: "current", answer: "Checking downloads" };
   } else if (pulls.failed && !models.some((model) => model.modelId === pulls.failed?.model)) {
     const latest = pulls.failed;
     const reason = latest.errorMessage.trim() || latest.statusLine.trim();
     modelsCheck = {
       id: "models", name: "Models", state: "stopped",
-      answer: `Download ${latest.status}: ${latest.model}${reason === "" ? "." : ` — ${reason}`}`,
-      repair: "Models already downloaded remain available. Resolve the problem and retry the recommended downloads, or run setup on the machine.",
-      command: setupCommand(draft.userLocal, true),
+      answer: latest.status === "cancelled" ? `Stopped: ${latest.model}` : `Download failed${reason === "" ? "" : `: ${reason}`}`,
       act: "pullRecommended",
     };
   } else if (models.length > 0) {
-    modelsCheck = {
-      id: "models",
-      name: "Models",
-      state: "done",
-      answer: `Serving ${models.length === 1 ? "one model" : `${models.length} models`}: ${models.map((m) => m.modelId).join(", ")}.`,
-    };
+    modelsCheck = { id: "models", name: "Models", state: "done", answer: models.map((m) => m.modelId).join(", ") };
   } else if (runtime.state !== "done") {
-    modelsCheck = { id: "models", name: "Models", state: "ahead", answer: "After the runtime." };
+    modelsCheck = { id: "models", name: "Models", state: "ahead", answer: "After the runtime" };
   } else {
-    // THE RUNTIME IS THERE AND NOTHING IS ON IT. Two ways forward, and both
-    // are offered: the OS can ask the machine to pull the recommended set
-    // (D13), or the person runs the setup command on the machine, which pulls
-    // a starting model itself.
+    // THE RUNTIME IS THERE AND NOTHING IS ON IT: the footer's Download models
+    // pulls the set the catalog recommends for this machine (D13).
     modelsCheck = {
       id: "models",
       name: "Models",
       state: "open",
-      answer: "No models yet.",
-      repair:
-        "Pull the set the catalog recommends for this machine from here, or run the setup command on the machine, which pulls a starting model itself.",
-      command: setupCommand(draft.userLocal, true),
+      answer: "None yet",
+      repair: "The recommended models take several gigabytes.",
       act: "pullRecommended",
     };
   }
@@ -428,11 +415,11 @@ export interface FlowStop {
 
 export function draftSummary(draft: Draft): string {
   const parts = [INSTALL_PLATFORM_LABEL[draft.platform]];
-  if (draft.computerUse) parts.push("computer-use build");
   if (draft.inference) parts.push("local models");
-  if (draft.workbench) parts.push("Fleet workbenches");
+  if (draft.computerUse) parts.push("computer use");
+  if (draft.workbench) parts.push("workbenches");
   const name = draft.name.trim();
-  return name === "" ? parts.join(", ") : `${name} -- ${parts.join(", ")}`;
+  return [name, ...parts].filter((part) => part !== "").join(" · ");
 }
 
 export function stopsFor(facts: FlowFacts, checks: readonly Check[]): FlowStop[] {
@@ -444,7 +431,7 @@ export function stopsFor(facts: FlowFacts, checks: readonly Check[]): FlowStop[]
   const machineStop: FlowStop = {
     id: "machine",
     name: "This machine",
-    sentence: "Choose a name and what this machine can do.",
+    sentence: "Name and features",
     state: phase === "describe" ? "open" : phase === "minting" ? "current" : "done",
     answer: phase === "describe" ? (facts.mintError === "" ? "" : "Couldn’t prepare installation") : draftSummary(facts.draft),
   };
@@ -452,11 +439,11 @@ export function stopsFor(facts: FlowFacts, checks: readonly Check[]): FlowStop[]
   const installStop: FlowStop = {
     id: "install",
     name: "Install",
-    sentence: "Run in Terminal on the machine you’re adding.",
+    sentence: "One command in Terminal",
     state: phase === "describe" || phase === "minting" ? "ahead" : phase === "waiting" ? "open" : "done",
     answer:
       phase === "waiting"
-        ? "Run the command on the machine"
+        ? "Run the command"
         : phase === "connected"
           ? host === ""
             ? "Installed"
@@ -467,11 +454,11 @@ export function stopsFor(facts: FlowFacts, checks: readonly Check[]): FlowStop[]
   const connectStop: FlowStop = {
     id: "connect",
     name: "Connect",
-    sentence: "This step completes when your machine connects.",
+    sentence: "Waiting for it to check in",
     state: phase === "describe" || phase === "minting" ? "ahead" : phase === "waiting" ? "current" : "done",
     answer:
       phase === "waiting"
-        ? "Listening for the machine"
+        ? "Listening"
         : phase === "connected" && machine !== null
           ? connectedAnswer(machine)
           : "",
@@ -486,7 +473,7 @@ export function stopsFor(facts: FlowFacts, checks: readonly Check[]): FlowStop[]
   const checksStop: FlowStop = {
     id: "checks",
     name: "Checks",
-    sentence: "Check that your machine is ready.",
+    sentence: "Making sure it works",
     state:
       phase !== "connected"
         ? "ahead"
@@ -504,10 +491,7 @@ export function stopsFor(facts: FlowFacts, checks: readonly Check[]): FlowStop[]
 }
 
 function connectedAnswer(machine: MachineRow): string {
-  const parts = [`Connected as ${machineName(machine)}`];
-  if (machine.platform.trim() !== "") parts.push(machine.platform);
-  if (machine.version.trim() !== "") parts.push(`cockpit ${machine.version.trim()}`);
-  return parts.join(" -- ");
+  return `Connected as ${machineName(machine)}`;
 }
 
 /**
@@ -518,10 +502,10 @@ function connectedAnswer(machine: MachineRow): string {
  */
 function checksAnswer(checks: readonly Check[]): string {
   const settled = checks.filter(checkIsSettled).length;
-  if (settled === checks.length) return "All settled";
+  if (settled === checks.length) return "All set";
   const next = checks.find((c) => !checkIsSettled(c) && c.state !== "ahead");
-  const count = `${settled} of ${checks.length} settled`;
-  return next === undefined ? count : `${count} -- ${next.name} next`;
+  const count = `${settled} of ${checks.length} done`;
+  return next === undefined ? count : `${count} · ${next.name} next`;
 }
 
 /** The stop the rail opens when nobody has chosen one: the person's own
@@ -563,6 +547,11 @@ export const LONG_WAIT_MS = 10 * 60 * 1000;
 
 export function waitedLong(facts: Pick<FlowFacts, "mintedAt" | "now">): boolean {
   return facts.mintedAt !== null && facts.now.getTime() - facts.mintedAt.getTime() >= LONG_WAIT_MS;
+}
+
+/** A name that starts a sentence: "the machine" is a phrase, "The machine" a subject. */
+function capitalized(words: string): string {
+  return words.charAt(0).toUpperCase() + words.slice(1);
 }
 
 export function barFor(facts: FlowFacts, checks: readonly Check[], pulling = false): FlowBar {
@@ -619,8 +608,8 @@ export function barFor(facts: FlowFacts, checks: readonly Check[], pulling = fal
         tone: "paused",
         question:
           facts.revokeError === ""
-            ? `Cancel adding ${label}? This revokes the token and stops the install command from working.`
-            : `The token was not revoked: ${facts.revokeError}. It is still live; try again, or leave and keep it.`,
+            ? `Cancel adding ${label}? The install command stops working.`
+            : `The token was not revoked: ${facts.revokeError}. It still works; try again, or leave and keep it.`,
         acts: [
           { id: "keepWaiting", label: "Keep setting up", tone: "quiet", text: true },
           // A REFUSED REVOKE MUST NOT TRAP ANYBODY. The token is still live and
@@ -636,7 +625,7 @@ export function barFor(facts: FlowFacts, checks: readonly Check[], pulling = fal
         state: "Back to Machines?",
         detail: "",
         tone: "paused",
-        question: `Copy the install command before leaving; it won’t be shown again. ${label} will appear in Machines when it connects.`,
+        question: `The install command won’t be shown again. ${capitalized(label)} appears in Machines when it connects.`,
         acts: [
           { id: "keepWaiting", label: "Stay", tone: "quiet", text: true },
           { id: "leaveKeepToken", label: "Back to Machines", tone: "primary" },
@@ -645,9 +634,7 @@ export function barFor(facts: FlowFacts, checks: readonly Check[], pulling = fal
     }
     return {
       state: `Waiting for ${label}`,
-      detail: waitedLong(facts)
-        ? "Taking longer than expected. See Connect for help."
-        : "Updates automatically when connected.",
+      detail: waitedLong(facts) ? "Taking longer than usual." : "",
       tone: "busy",
       question: "",
       acts: [
@@ -661,8 +648,13 @@ export function barFor(facts: FlowFacts, checks: readonly Check[], pulling = fal
   const machine = facts.machine;
   const shown = machine === null ? label : machineName(machine);
   const settled = checksSettled(checks);
-  const pending = checks.find(c => c.state === "stopped") ?? checks.find((c) => !checkIsSettled(c) && c.state !== "ahead");
-  const stopped = checks.some((c) => c.state === "stopped");
+  // WHOSE TURN IT IS (rule 12). A stopped check needs somebody whatever else
+  // is moving; an open one -- a permission to grant, an app to sign in to --
+  // is the person's turn once nothing else is, and is not drawn as the
+  // cluster working.
+  const moving = checks.some((c) => c.state === "current");
+  const attention = checks.find((c) => c.state === "stopped") ?? (moving ? undefined : checks.find((c) => c.state === "open"));
+  const pending = attention ?? checks.find((c) => !checkIsSettled(c) && c.state !== "ahead");
   const repair = checks.find((c) => c.act !== undefined)?.act;
   const canRepair = facts.connected && machine !== null && isWorkerOnline(machine, facts.now);
   const forward: FlowAct[] = settled
@@ -673,13 +665,11 @@ export function barFor(facts: FlowFacts, checks: readonly Check[], pulling = fal
         ? [{ id: repair, label: repair === "retryResponse" ? "Retry" : "Download models", tone: "primary" }]
         : [];
   return {
-    state: settled ? "Ready" : stopped ? `${pending?.name ?? "Feature setup"} needs attention` : "Connected",
-    detail: settled
-      ? `${shown} is ready to use.`
-      : pending === undefined
-        ? `${shown} is online`
-        : `${pending.name}: ${pending.answer}`,
-    tone: settled ? "live" : stopped ? "paused" : "busy",
+    state: settled ? "Ready" : attention ? `${attention.name} needs attention` : "Checking",
+    // The detail is the check that is MOVING; one that needs somebody names
+    // itself in the state, and says why on its own line in the checks.
+    detail: settled ? `${shown} is ready.` : attention || pending === undefined ? "" : `${pending.name}: ${pending.answer}`,
+    tone: settled ? "live" : attention ? "paused" : "busy",
     question: "",
     acts: [
       // Back keeps the registration and returns to Machines. Only completed
