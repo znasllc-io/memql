@@ -20,6 +20,61 @@ as the acceptance target, with targeted failure/recovery checks; do not repeat
 three expensive full passes. Close issues only when their actual replacement
 and production evidence are complete.
 
+## Current acceptance evidence: October 18, 2026
+
+Installed production runs **v0.29.31**, built natively from
+`1d087ac973e5fd1e620f99f93ef42dba1f3a3642`. Release run
+`b0643687e51532322e50eb0ff6014ab3` / Work run
+`af5b4ab480781f3df9a1eefc90ecb511` passed **57 of 57 steps**, with no skips
+or missing logs, from 10:23:29 to 12:00:50 UTC. The Library retained 57 logs
+and 136 artifacts. This includes all five database groups, the editor host
+matrix and 5,905 OS tests. Four steps capped their displayed log previews;
+their full logs were retained. The earlier unsuccessful releases below are
+history, not the serving release or a reason to repeat this complete pass.
+
+All seven engine images were independently checked for source, release,
+role and digest before instance
+[PR #226](https://github.com/znasllc-io/memql-znas/pull/226) pinned them.
+ArgoCD reports Healthy/Synced, with all configured serving deployments ready.
+The MCP deployment remains intentionally scaled to zero. Instance PRs
+[#227](https://github.com/znasllc-io/memql-znas/pull/227) and
+[#228](https://github.com/znasllc-io/memql-znas/pull/228) preserve bounded
+background admission and runtime capacity during deployment sync.
+
+The build pool remains one autoscaled Standard_D8s_v6 node, maximum one.
+Kueue bounds background work to 6,500 millicores, 22,528 MiB memory,
+65,536 MiB ephemeral storage and six pods. The namespace's 128-Job object
+quota is queue capacity, not concurrent execution capacity. This cutover
+adds no serving nodes or paid fleet machines.
+
+The proven native PR check is now required, bound to App 4822538, alongside
+the existing `ci-required` context. The queue builds one candidate at a time
+with a 180-minute response ceiling. See the exact decision and PR proof in
+[the ruleset baseline](../ops/ruleset-baseline.md#native-required-check-october-18-2026).
+Native merge-candidate success and rejection evidence are still pending;
+the legacy context and remaining workflows have not been retired.
+
+The owner subsequently authorized the Mac repository permission change.
+One-time native maintenance run `c2d53a13e477da5ffb7755f329f9d285` passed,
+and the live worker re-advertised both `znasllc-io/memql` and
+`znasllc-io/memql-cockpit`. Its retained receipt proves the policy edit and
+reload; it is not application CI qualification. Temporary
+[PR #6204](https://github.com/znasllc-io/memql/pull/6204) was closed without
+merge, and its remote branch, local branch and worktree were removed.
+Cockpit [PR #523](https://github.com/znasllc-io/memql-cockpit/pull/523)
+now has native qualification in progress.
+
+Pending implementation PRs include
+[#6200](https://github.com/znasllc-io/memql/pull/6200) for standalone DB test
+budgets, [#6202](https://github.com/znasllc-io/memql/pull/6202) for channel
+management and fresh notification grants, and
+[#6203](https://github.com/znasllc-io/memql/pull/6203) for full automatic
+toolchain smoke checks before native artifact export. Their validation is
+recorded on the PRs; an open PR is not a deployed feature. Marketplace and
+SDK publication, public docs delivery, installer lifecycle, remaining
+audits and companion workflow retirement still need their own acceptance
+receipts before #5480 is complete.
+
 ## Observed baseline, October 16, 2026 UTC
 
 The instance repository is `znasllc-io/memql-znas`, revision
