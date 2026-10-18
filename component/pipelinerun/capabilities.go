@@ -101,9 +101,9 @@ func (i *Integration) Capabilities() []memql.IntegrationCapability {
 		},
 		{
 			Name:        "runLatest",
-			Description: "Open a full, owner-requested rehearsal of the current default-branch head for one of the caller's pipelines. Automatic delivery must be disconnected to prevent duplicate webhook or poll runs. Reads and opens the exact commit through the source owner's GitHub grant; the manual run is deduplicated by repository, SHA, mode and event. Answers {runId, attempt, status, sha, branch}.",
+			Description: "Open a full, owner-requested rehearsal of the current default-branch head for one of the caller's pipelines. Automatic delivery remains as configured; manual runs report a separate check context. Reads and opens the exact commit through the source owner's GitHub grant; the manual run is deduplicated by repository, SHA, mode and event. Answers {runId, attempt, status, sha, branch}.",
 			Handler:     i.handleRunLatest,
-			ArgsSchema:  map[string]string{"pipelineId": "string (required) -- the caller's v1:pipelines:pipeline; it must be disconnected"},
+			ArgsSchema:  map[string]string{"pipelineId": "string (required) -- the caller's v1:pipelines:pipeline"},
 		},
 		{
 			Name:        "runRelease",
