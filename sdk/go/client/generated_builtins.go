@@ -1083,6 +1083,71 @@ func CancelGoalBuild(args CancelGoalArgs) string {
 	return b.String()
 }
 
+// ClusterBackgroundCapacity -- Read the installation's protected background resource budget. Cluster owner only.
+type ClusterBackgroundCapacityArgs struct {
+}
+
+// ClusterBackgroundCapacity calls the engine builtin clusterBackgroundCapacity.
+func (qc *QueryClient) ClusterBackgroundCapacity(ctx context.Context, args ClusterBackgroundCapacityArgs) (*Result, error) {
+	call := ClusterBackgroundCapacityBuild(args)
+	return qc.executeNamed(ctx, "clusterBackgroundCapacity", call)
+}
+
+func ClusterBackgroundCapacityBuild(args ClusterBackgroundCapacityArgs) string {
+	_ = args
+	return "builtin clusterBackgroundCapacity()"
+}
+
+// ClusterSetBackgroundCapacity -- Adjust admission on existing background machines within the operator ceiling. Compare both revisions; never resize machines or interrupt admitted work.
+type ClusterSetBackgroundCapacityArgs struct {
+	Revision       string
+	PolicyRevision string
+	CpuMilli       int
+	MemoryMiB      int
+	Jobs           int
+	Accepting      bool
+}
+
+// ClusterSetBackgroundCapacity calls the engine builtin clusterSetBackgroundCapacity.
+func (qc *QueryClient) ClusterSetBackgroundCapacity(ctx context.Context, args ClusterSetBackgroundCapacityArgs) (*Result, error) {
+	call := ClusterSetBackgroundCapacityBuild(args)
+	return qc.executeNamed(ctx, "clusterSetBackgroundCapacity", call)
+}
+
+func ClusterSetBackgroundCapacityBuild(args ClusterSetBackgroundCapacityArgs) string {
+	var b strings.Builder
+	b.WriteString("builtin clusterSetBackgroundCapacity(")
+	b.WriteString("revision: ")
+	b.WriteString(quoteMemQL(args.Revision))
+	if b.Len() > 37 {
+		b.WriteString(", ")
+	}
+	b.WriteString("policyRevision: ")
+	b.WriteString(quoteMemQL(args.PolicyRevision))
+	if b.Len() > 37 {
+		b.WriteString(", ")
+	}
+	b.WriteString("cpuMilli: ")
+	b.WriteString(fmt.Sprintf("%v", args.CpuMilli))
+	if b.Len() > 37 {
+		b.WriteString(", ")
+	}
+	b.WriteString("memoryMiB: ")
+	b.WriteString(fmt.Sprintf("%v", args.MemoryMiB))
+	if b.Len() > 37 {
+		b.WriteString(", ")
+	}
+	b.WriteString("jobs: ")
+	b.WriteString(fmt.Sprintf("%v", args.Jobs))
+	if b.Len() > 37 {
+		b.WriteString(", ")
+	}
+	b.WriteString("accepting: ")
+	b.WriteString(fmt.Sprintf("%v", args.Accepting))
+	b.WriteString(")")
+	return b.String()
+}
+
 // ClusterStorageStatus -- Read the current installation's database storage report. Cluster owner only. The monitor owns its alert thresholds; consumers must show the report age.
 type ClusterStorageStatusArgs struct {
 }

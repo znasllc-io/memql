@@ -817,6 +817,56 @@ QueryClient.prototype.cancelGoal = function (this: QueryClient, args: CancelGoal
   return this.executeNamed("cancelGoal", buildCancelGoal(args), opts);
 };
 
+/** Read the installation's protected background resource budget. Cluster owner only. */
+export interface ClusterBackgroundCapacityArgs {
+}
+
+export function buildClusterBackgroundCapacity(args: ClusterBackgroundCapacityArgs): string {
+  void args;
+  return "builtin clusterBackgroundCapacity()";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    clusterBackgroundCapacity(args?: ClusterBackgroundCapacityArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.clusterBackgroundCapacity = function (this: QueryClient, args: ClusterBackgroundCapacityArgs = {} as ClusterBackgroundCapacityArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("clusterBackgroundCapacity", buildClusterBackgroundCapacity(args), opts);
+};
+
+/** Adjust admission on existing background machines within the operator ceiling. Compare both revisions; never resize machines or interrupt admitted work. */
+export interface ClusterSetBackgroundCapacityArgs {
+  revision: string;
+  policyRevision: string;
+  cpuMilli: number;
+  memoryMiB: number;
+  jobs: number;
+  accepting: boolean;
+}
+
+export function buildClusterSetBackgroundCapacity(args: ClusterSetBackgroundCapacityArgs): string {
+  const parts: string[] = [];
+  parts.push("revision: " + renderMemQLValue(args.revision));
+  parts.push("policyRevision: " + renderMemQLValue(args.policyRevision));
+  parts.push("cpuMilli: " + renderMemQLValue(args.cpuMilli));
+  parts.push("memoryMiB: " + renderMemQLValue(args.memoryMiB));
+  parts.push("jobs: " + renderMemQLValue(args.jobs));
+  parts.push("accepting: " + renderMemQLValue(args.accepting));
+  return "builtin clusterSetBackgroundCapacity(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    clusterSetBackgroundCapacity(args: ClusterSetBackgroundCapacityArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.clusterSetBackgroundCapacity = function (this: QueryClient, args: ClusterSetBackgroundCapacityArgs = {} as ClusterSetBackgroundCapacityArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("clusterSetBackgroundCapacity", buildClusterSetBackgroundCapacity(args), opts);
+};
+
 /** Read the current installation's database storage report. Cluster owner only. The monitor owns its alert thresholds; consumers must show the report age. */
 export interface ClusterStorageStatusArgs {
 }

@@ -62,6 +62,7 @@ import type { OsAppSection } from "../../system/registry";
  */
 export const CLUSTER_SECTIONS: OsAppSection[] = [
   { id: "readiness", name: "Readiness" },
+  { id: "capacity", name: "Capacity", requires: "app:cluster/capacity" },
   { id: "releases", name: "Releases", requires: "app:cluster/releases" },
   { id: "updates", name: "Updates", requires: "app:cluster/updates" },
   { id: "modules", name: "Modules", requires: "app:cluster/modules" },

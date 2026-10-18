@@ -14337,10 +14337,6 @@ button.os-cluster-mesh-peer:focus-visible {
 /* Machine details follow one settings rhythm: section, aligned facts, then
  * the next section. Edits share their own group; all information stays open. */
 .fleet-machine-details { container: machine-details / inline-size; }
-.fleet-details-section { display: grid; grid-template-columns: 170px minmax(0, 1fr); gap: 32px; padding-block: 28px; border-top: 1px solid var(--os-line); }
-.fleet-details-section:first-of-type { border-top: 0; padding-top: 0; }
-.fleet-details-section > .os-subhead { margin: 8px 0 0; font-size: var(--os-text-base); font-weight: 600; }
-.fleet-details-section-body { min-width: 0; }
 .fleet-machine-details .os-facts { grid-template-columns: 160px minmax(0, 1fr); gap: 2px 24px; margin: 0; }
 .fleet-machine-details .os-facts dt, .fleet-machine-details .os-facts dd { font-size: var(--os-text-sm); line-height: 1.6; padding-block: 7px; margin: 0; }
 .fleet-machine-details .os-facts dd:has(> .os-copyvalue) { padding: 0; }
@@ -14392,10 +14388,6 @@ button.os-cluster-mesh-peer:focus-visible {
 .fleet-details-label-value { display: grid; grid-template-columns: 160px minmax(0, 1fr); gap: 24px; font-size: var(--os-text-sm); line-height: 1.6; }
 .fleet-details-label-value > span:first-child { color: var(--os-muted); }
 .fleet-details-label-value small { display: block; margin-top: 4px; color: var(--os-muted); }
-@container machine-details (max-width: 760px) {
-  .fleet-details-section { grid-template-columns: minmax(0, 1fr); gap: 14px; padding-block: 24px; }
-  .fleet-details-section > .os-subhead { margin: 0; }
-}
 @container machine-details (max-width: 480px) {
   .fleet-machine-details .os-facts, .fleet-machine-setting { grid-template-columns: minmax(0, 1fr); gap: 0; }
   .fleet-machine-details .os-facts dt { padding: 10px 0 0; }

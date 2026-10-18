@@ -168,13 +168,11 @@ type StatusReply struct {
 	// replica whose runner went quiet, which the agent forwards the step
 	// AWAY from when it forwards it again.
 	Runner string `json:"runner,omitempty"`
-	// JobCreatedAt is when the step's Job was created, RFC 3339, as the API
-	// server stamped it, whenever the Job exists: where the step's own
-	// timeout runs from (ruling R31b). A running state WITHOUT it is a step
-	// whose runner holds it before its Job exists -- waiting for a free slot
-	// under the ceiling -- which the agent waits on until the run's ceiling
-	// rather than the step's own timeout.
-	JobCreatedAt string `json:"jobCreatedAt,omitempty"`
+	// ExecutionStartedAt is the API-stamped start of the execution allowance,
+	// RFC 3339: admission time for queued Jobs, creation for existing Jobs.
+	// Without it, the step is waiting and only its run's wall-clock ceiling
+	// applies. It must survive a forward to a replica with no local request.
+	ExecutionStartedAt string `json:"executionStartedAt,omitempty"`
 }
 
 // AckRequest tells the runner the agent has durably journaled the outcome, so the Job and its

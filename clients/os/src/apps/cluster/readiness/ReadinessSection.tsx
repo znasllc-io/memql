@@ -3,7 +3,7 @@ import { ContentSkeleton } from "../../../kit/ContentSkeleton";
 import { useCallback, useMemo } from "react";
 import type { Row } from "@znasllc-io/memql-sdk-core/client";
 
-import { AutoRefresh, Button, Caption, Head, Notice, Panel, Subhead, boolOr, stringsOf, useAppReach } from "../../../kit";
+import { AutoRefresh, Button, Caption, Head, Notice, Details, DetailsSection, boolOr, stringsOf, useAppReach } from "../../../kit";
 import { useSession } from "../../../chrome/access";
 import { useOsConnection } from "../../../live/connection";
 import { useReading } from "../../../cluster/reading";
@@ -72,7 +72,7 @@ export function ReadinessSection() {
 
   return (
     <div className="os-cluster">
-      <Head title="Readiness" meta="nothing here blocks anything">
+      <Head title="Readiness">
         <AutoRefresh
           busy={inference.state === "reading" || passkeys.state === "reading"}
 
@@ -82,16 +82,11 @@ export function ReadinessSection() {
           }}
          />
       </Head>
-      <Panel label="Readiness">
+      <Details>
         <InferenceLine reading={inference} />
         <PasskeyLine reading={passkeys} identityUrl={session.config.identityUrl} />
-      </Panel>
-      <Caption>
-        These are the two things a cluster needs before anybody can get useful work out of it. They
-        are read once when this section opens, and nothing here stops you using the rest of the
-        product.
-      </Caption>
-      <StoragePanel />
+        <StoragePanel />
+      </Details>
     </div>
   );
 }
@@ -122,8 +117,7 @@ function InferenceLine({
   }, [row]);
 
   return (
-    <div className="os-cluster-line">
-      <Subhead>Inference</Subhead>
+    <DetailsSection title="Inference">
       {reading.state === "failed" ? (
         <Notice
           tone="info"
@@ -187,7 +181,7 @@ function InferenceLine({
           ) : null}
         </Notice>
       )}
-    </div>
+    </DetailsSection>
   );
 }
 
@@ -284,8 +278,7 @@ function PasskeyLine({
   const devicesUrl = identityUrl === "" ? "" : `${identityUrl.replace(/\/$/, "")}/me/devices`;
 
   return (
-    <div className="os-cluster-line">
-      <Subhead>Your passkey</Subhead>
+    <DetailsSection title="Your passkey">
       {reading.state === "failed" ? (
         <Notice
           tone="info"
@@ -329,7 +322,7 @@ function PasskeyLine({
           )}
         </Notice>
       )}
-    </div>
+    </DetailsSection>
   );
 }
 

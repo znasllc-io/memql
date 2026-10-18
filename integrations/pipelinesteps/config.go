@@ -15,6 +15,9 @@ import (
 // pipelines component's ConfigMap supplies the namespace and the clone image
 // to the workbench node.
 type Config struct {
+	// QueueName opts Jobs into an installed Kueue LocalQueue. Jobs are born
+	// suspended, so an unavailable admission controller cannot start work.
+	QueueName string
 	// StepCPUMaxMilli bounds a manifest's explicit command CPU reservation.
 	StepCPUMaxMilli int
 
@@ -97,6 +100,7 @@ const (
 	envStepMemoryMax    = "MEMQL_PIPELINES_STEP_MEMORY_MAX_MIB"
 	envNamespace        = "MEMQL_PIPELINES_NAMESPACE"
 	envNodePool         = "MEMQL_PIPELINES_NODE_POOL"
+	envQueueName        = "MEMQL_PIPELINES_QUEUE"
 	envCloneImage       = "MEMQL_PIPELINES_CLONE_IMAGE"
 	envLogStoreMaxLines = "MEMQL_PIPELINES_LOG_STORE_MAX_LINES"
 	envArtifactMaxBytes = "MEMQL_PIPELINES_ARTIFACT_MAX_BYTES"
@@ -135,6 +139,7 @@ func ConfigFromEnv(getenv func(string) string) Config {
 		namespace = defaultNamespace
 	}
 	return Config{
+		QueueName:       text(envQueueName),
 		StepCPUMaxMilli: whole(envStepCPUMax, defaultStepCPUMaxMilli, 1, 256000),
 
 		ImageBuilder:       text(envImageBuilder),

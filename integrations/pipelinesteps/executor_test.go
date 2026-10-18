@@ -1125,7 +1125,7 @@ func stillWaiting(t *testing.T, polls chan struct{}, done <-chan pl.StepResult, 
 // creation time, or none -- the runner is waiting for a free slot under the
 // ceiling, and no Job exists yet.
 func runningReply(created string) *nodev1.WorkbenchForwardResponse {
-	return &nodev1.WorkbenchForwardResponse{PayloadJson: mustMarshal(StatusReply{State: StateRunning, Runner: "workbench-a", JobCreatedAt: created})}
+	return &nodev1.WorkbenchForwardResponse{PayloadJson: mustMarshal(StatusReply{State: StateRunning, Runner: "workbench-a", ExecutionStartedAt: created})}
 }
 
 // TestExecuteWaitsForAQueuedStepUntilItsRunsCeiling (ruling R31b, Review
@@ -1230,7 +1230,7 @@ func TestExecuteGivesUpPastTheDeadline(t *testing.T) {
 			return nil, "", workbench.ErrNoWorkbenchPeer
 		}, pl.OutcomeFailed, pl.CodeNodeLost, "went away"},
 		{"the Job's runner went quiet", func(int) (*nodev1.WorkbenchForwardResponse, string, error) {
-			return &nodev1.WorkbenchForwardResponse{PayloadJson: mustMarshal(StatusReply{State: StateStale, Runner: "workbench-a", JobCreatedAt: created})}, "workbench-b", nil
+			return &nodev1.WorkbenchForwardResponse{PayloadJson: mustMarshal(StatusReply{State: StateStale, Runner: "workbench-a", ExecutionStartedAt: created})}, "workbench-b", nil
 		}, pl.OutcomeFailed, pl.CodeNodeLost, "went away"},
 		{"the Job's runner still holds it: settling overran", func(int) (*nodev1.WorkbenchForwardResponse, string, error) {
 			return runningReply(created), "workbench-b", nil

@@ -1,0 +1,64 @@
+# Operator-owned maximum. Runtime edits cannot change this object.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: memql-background-capacity
+data:
+  cpuMilli: "2000"
+  memoryMiB: "8192"
+  diskMiB: "24576"
+  jobs: "2"
+  nodePool: builds
+---
+apiVersion: kueue.x-k8s.io/v1beta2
+kind: ResourceFlavor
+metadata:
+  name: memql-background
+spec:
+  nodeLabels:
+    memql.io/pipeline-pool: builds
+  nodeTaints:
+    - key: memql.io/pipeline-pool
+      value: builds
+      effect: NoSchedule
+---
+# Only these four nominalQuota values and stopPolicy are delegated to the
+# Cluster owner. Argo must ignore those exact fields after initial creation.
+apiVersion: kueue.x-k8s.io/v1beta2
+kind: ClusterQueue
+metadata:
+  name: memql-background
+  annotations:
+    memql.io/capacity-change: ""
+spec:
+  queueingStrategy: BestEffortFIFO
+  namespaceSelector:
+    matchLabels:
+      kubernetes.io/metadata.name: memql-pipelines
+  preemption:
+    withinClusterQueue: Never
+    reclaimWithinCohort: Never
+    borrowWithinCohort:
+      policy: Never
+  stopPolicy: Hold
+  resourceGroups:
+    - coveredResources: [cpu, memory, ephemeral-storage, pods]
+      flavors:
+        - name: memql-background
+          resources:
+            - name: cpu
+              nominalQuota: "2000m"
+            - name: memory
+              nominalQuota: "8192Mi"
+            - name: ephemeral-storage
+              nominalQuota: "24576Mi"
+            - name: pods
+              nominalQuota: "2"
+---
+apiVersion: kueue.x-k8s.io/v1beta2
+kind: LocalQueue
+metadata:
+  name: memql-background
+  namespace: memql-pipelines
+spec:
+  clusterQueue: memql-background

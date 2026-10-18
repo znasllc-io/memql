@@ -1,0 +1,49 @@
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: memql-background-capacity
+rules:
+  - apiGroups: [""]
+    resources: [configmaps]
+    resourceNames: [memql-background-capacity]
+    verbs: [get]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: memql-background-capacity
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: memql-background-capacity
+subjects:
+  - kind: ServiceAccount
+    name: memql-engine
+    namespace: memql
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: memql-background-capacity
+rules:
+  - apiGroups: [kueue.x-k8s.io]
+    resources: [clusterqueues]
+    resourceNames: [memql-background]
+    verbs: [get, patch]
+  - apiGroups: [kueue.x-k8s.io]
+    resources: [resourceflavors]
+    resourceNames: [memql-background]
+    verbs: [get]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: memql-background-capacity
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: memql-background-capacity
+subjects:
+  - kind: ServiceAccount
+    name: memql-engine
+    namespace: memql

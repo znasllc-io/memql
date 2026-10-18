@@ -70,6 +70,7 @@ type Job struct {
 // ends failed while its listener has to keep running -- and it is a pointer
 // because absent means something else again: no per-index limit at all.
 type JobSpec struct {
+	Suspend                 *bool           `json:"suspend,omitempty"`
 	BackoffLimit            *int32          `json:"backoffLimit,omitempty"`
 	ActiveDeadlineSeconds   *int64          `json:"activeDeadlineSeconds,omitempty"`
 	TTLSecondsAfterFinished *int32          `json:"ttlSecondsAfterFinished,omitempty"`

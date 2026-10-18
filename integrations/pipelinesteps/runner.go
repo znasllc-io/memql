@@ -295,17 +295,17 @@ func (r *Runner) Status(ctx context.Context, req StatusRequest) StatusReply {
 		return StatusReply{State: StateStale}
 	}
 	var created string
-	if at := job.Metadata.CreationTimestamp; !at.IsZero() {
+	if at := executionStart(job); !at.IsZero() {
 		created = at.UTC().Format(time.RFC3339)
 	}
 	if out, ok := persisted(job); ok {
-		return StatusReply{State: StateFinished, Result: &out, JobCreatedAt: created}
+		return StatusReply{State: StateFinished, Result: &out, ExecutionStartedAt: created}
 	}
 	node, at, claimed := holder(job)
 	if claimed && r.fresh(at) {
-		return StatusReply{State: StateRunning, Runner: node, JobCreatedAt: created}
+		return StatusReply{State: StateRunning, Runner: node, ExecutionStartedAt: created}
 	}
-	return StatusReply{State: StateStale, Runner: node, JobCreatedAt: created}
+	return StatusReply{State: StateStale, Runner: node, ExecutionStartedAt: created}
 }
 
 // Ack deletes a step's resources after its durable receipt and confirms they
@@ -960,6 +960,17 @@ func (s *step) watch(hb *heartbeat) (pl.StepResult, bool) {
 			s.yield()
 			return pl.StepResult{}, false
 		}
+		if job.Metadata.Labels[queueLabel] != "" && job.Spec.Suspend != nil && *job.Spec.Suspend {
+			// A waiting Job can outlive a clone credential. An adopter mints
+			// its own replacement; values never leave the Secret or log mask.
+			if s.token == "" && s.run.InstallationID != 0 {
+				if token, err := s.mintToken(); err == nil {
+					s.maskToken(token)
+					s.token, s.tokenAt, s.tokenWritten = token, s.r.now(), false
+				}
+			}
+			s.freshenToken()
+		}
 		pod, err := s.r.kube.JobPod(s.ctx, s.jobName)
 		if err != nil {
 			if s.ctx.Err() == nil {
@@ -974,6 +985,13 @@ func (s *step) watch(hb *heartbeat) (pl.StepResult, bool) {
 			last = pod
 		}
 		obs := Classify(job, pod, created, s.r.now(), s.r.cfg, s.deadlineCode(job))
+		if job.Metadata.Labels[queueLabel] != "" && (obs.Phase == PhasePending || obs.Phase == PhaseRunning) {
+			if deadline, ok := s.runDeadline(); ok && !s.r.now().Before(deadline) {
+				stopFollowing()
+				hb.stop()
+				return s.stopAtRunCeiling(last), true
+			}
+		}
 		switch obs.Phase {
 		case PhaseRunning:
 			if f == nil {

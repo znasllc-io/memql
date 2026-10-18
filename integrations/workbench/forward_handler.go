@@ -58,15 +58,15 @@ const (
 	// on its own goroutine and never on the stream's receive loop.
 	// The version is part of the action: an older replica must reject the
 	// request, not silently discard execution/recovery fields it cannot enforce.
-	// V8 adds explicit command/build CPU reservations to V7's typed,
-	// operator-approved rootless image-build contract.
+	// V9 distinguishes resource admission from execution start. An older
+	// executor must not spend a queued Job's timeout before it is admitted.
 	// Durable retirement fences the pre-create claim.
 	// Older runners could create an attempt after its receipt was cleaned up.
-	PipelineStepAction = "pipelineStepV8"
+	PipelineStepAction = "pipelineStepV9"
 	// PipelineStatusAction asks after a step's Job: running, finished (with
 	// the outcome), absent or stale. Quick -- the runner bounds it at ten
 	// seconds -- and still answered off the receive loop, as are the next two.
-	PipelineStatusAction = "pipelineStatus"
+	PipelineStatusAction = "pipelineStatusV2"
 	// PipelineAckAction tells the runner its outcome was durably journaled, so the Job
 	// and its Secret can be deleted. Quick.
 	PipelineAckAction = "pipelineReceiptAckV3"

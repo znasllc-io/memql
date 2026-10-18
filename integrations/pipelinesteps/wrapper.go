@@ -46,7 +46,19 @@ if [ -n "${MEMQL_CACHES:-}" ] && u=$(id -u 2>/dev/null) && [ -n "$u" ]; then
     esac
   done
 fi
-/bin/sh -c "$MEMQL_STEP_COMMAND"
+if [ -n "${MEMQL_STEP_RUN_DEADLINE:-}" ]; then
+  # The absolute run ceiling still applies after resource admission waits,
+  # even if every runner disconnects. Refuse images missing these utilities.
+  command -v timeout >/dev/null 2>&1 && command -v date >/dev/null 2>&1 || {
+    echo "memql: queued steps require date and timeout" >&2; exit 70;
+  }
+  now=$(date +%s) || exit 70
+  remaining=$((MEMQL_STEP_RUN_DEADLINE - now))
+  [ "$remaining" -gt 0 ] || { echo "memql: run deadline passed before execution" >&2; exit 124; }
+  timeout -k 10 "$remaining" /bin/sh -c "$MEMQL_STEP_COMMAND"
+else
+  /bin/sh -c "$MEMQL_STEP_COMMAND"
+fi
 rc=$?
 if [ -n "${MEMQL_STEP_ARTIFACTS:-}" ]; then
   # This mask applies only to the exported archive, after the command ended.
