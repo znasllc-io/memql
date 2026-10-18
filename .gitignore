@@ -243,3 +243,4 @@ clients/os/local-cockpit-test.json
 # Disposable native editor-host dependencies and retained test diagnostics.
 /.memql-host-cache/
 /.memql-host-reports/
+/.host-*/

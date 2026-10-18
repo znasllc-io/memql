@@ -66,6 +66,7 @@ func TestNativeEditorHostsCoverExistingMatrixAndChangedSources(t *testing.T) {
 	}{
 		{"editor source", pipelines.EventPullRequest, []string{"editors/productivity/test/host.ts"}, true},
 		{"runner source", pipelines.EventPullRequest, []string{"scripts/ci/editor-host.sh"}, true},
+		{"shared host profile", pipelines.EventPullRequest, []string{"scripts/vscode/host-profile.cjs"}, true},
 		{"manifest", pipelines.EventPullRequest, []string{"memql-package.yaml"}, true},
 		{"documentation", pipelines.EventPullRequest, []string{"docs/public/overview/quickstart.md"}, false},
 		{"exact merge candidate", pipelines.EventMergeGroup, nil, true},
