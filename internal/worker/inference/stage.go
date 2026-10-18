@@ -3,15 +3,18 @@ package inference
 import (
 	"archive/tar"
 	"bufio"
+	"compress/gzip"
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"html"
 	"io"
 	"net/http"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strconv"
 	"strings"
@@ -103,6 +106,20 @@ func DefaultNativeFacts(home string, modelsOverride string) NativeFacts {
 	}
 }
 
+// DarwinNativeFacts is the same layout on a Mac without Homebrew
+// (memql-cockpit#524), except that launchd keeps the runtime up, so the
+// "unit" is a LaunchAgent plist:
+//
+//	~/.memql/ollama/runtime   ollama and its libraries -- replaced on unpack
+//	~/.memql/ollama/models    OLLAMA_MODELS, beside the runtime
+//	~/.memql/state/ollama.log
+//	~/Library/LaunchAgents/com.znasllc.memql-ollama.plist
+func DarwinNativeFacts(home string, modelsOverride string) NativeFacts {
+	n := DefaultNativeFacts(home, modelsOverride)
+	n.UnitPath = filepath.Join(home, "Library", "LaunchAgents", OllamaAgentLabel+".plist")
+	return n
+}
+
 // Stage is what a native install does BESIDE its commands, shown to the
 // person as sentences above them and run after the same yes.
 type Stage struct {
@@ -130,6 +147,10 @@ type Stage struct {
 	// has no authentication and nothing off-box needs the port -- the
 	// cluster reaches this machine over the worker's outbound stream.
 	Listen string
+	// Launchd says UnitPath is a LaunchAgent plist rather than a systemd
+	// unit: the macOS native path. UID names launchd's gui/<uid> domain.
+	Launchd bool
+	UID     int
 }
 
 // Archive is one release asset.
@@ -157,6 +178,16 @@ const (
 	// OllamaUnitName is the user unit that keeps the native runtime up.
 	// The uninstaller stops and removes it by this name.
 	OllamaUnitName = "memql-ollama.service"
+
+	// OllamaAgentLabel is the macOS LaunchAgent that keeps the native
+	// runtime up when Homebrew did not install it. The uninstaller boots it
+	// out and removes it by this label.
+	OllamaAgentLabel = "com.znasllc.memql-ollama"
+
+	// DarwinArchiveName is Ollama's macOS release archive: one universal
+	// `ollama` and its libraries at the archive root, gzip-compressed
+	// (verified 2026-10-18 against v0.40.6, listed in its sha256sum.txt).
+	DarwinArchiveName = "ollama-darwin.tgz"
 
 	// nativeListen is the only address the unit ever binds.
 	nativeListen = "127.0.0.1:11434"
@@ -212,8 +243,60 @@ func (s Stage) Lines() []string {
 		out = append(out, "download "+a.Name+" from "+strings.TrimSuffix(a.URL(), "/"+a.Name)+
 			" and unpack it into "+s.RuntimeDir+", checked against the release's "+ollamaChecksumFile)
 	}
+	if s.Launchd {
+		out = append(out, "write "+s.UnitPath+" and load it into launchd (Ollama as your user, listening on "+s.Listen+", models in "+s.ModelsDir+")")
+		return out
+	}
 	out = append(out, "write "+s.UnitPath+" (Ollama as your user, listening on "+s.Listen+", models in "+s.ModelsDir+")")
 	return out
+}
+
+// binaryRel is where the runtime binary sits inside RuntimeDir once
+// unpacked: the Linux archive carries bin/ollama, the macOS one carries
+// ollama at its root.
+func (s Stage) binaryRel() string {
+	if s.Launchd {
+		return "ollama"
+	}
+	return filepath.Join("bin", "ollama")
+}
+
+// Plist is the LaunchAgent, in full. Pure for the reason Unit is: the
+// test pins the loopback bind, the models directory and the log path.
+// Values are escaped for XML; no shell ever reads this file.
+func (s Stage) Plist() string {
+	x := html.EscapeString
+	return `<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>` + OllamaAgentLabel + `</string>
+    <key>ProgramArguments</key>
+    <array>
+        <string>` + x(filepath.Join(s.RuntimeDir, s.binaryRel())) + `</string>
+        <string>serve</string>
+    </array>
+    <key>EnvironmentVariables</key>
+    <dict>
+        <key>OLLAMA_HOST</key>
+        <string>` + x(s.Listen) + `</string>
+        <key>OLLAMA_MODELS</key>
+        <string>` + x(s.ModelsDir) + `</string>
+        <key>OLLAMA_KV_CACHE_TYPE</key>
+        <string>q8_0</string>
+    </dict>
+    <key>RunAtLoad</key>
+    <true/>
+    <key>KeepAlive</key>
+    <true/>
+    <key>StandardOutPath</key>
+    <string>` + x(s.LogPath) + `</string>
+    <key>StandardErrorPath</key>
+    <string>` + x(s.LogPath) + `</string>
+</dict>
+</plist>
+`
 }
 
 // Unit is the unit file, in full. Pure, so the test can pin every line
@@ -309,9 +392,35 @@ func StageRuntime(ctx context.Context, s Stage, onProgress func(Progress)) error
 			return fmt.Errorf("creating %s: %w", dir, err)
 		}
 	}
+	if s.Launchd {
+		// 0644: a LaunchAgent is not a secret, and launchd reads it as the
+		// user. Loaded here, not by a printed command, because `launchctl
+		// bootstrap` refuses a label that is already loaded: the printed
+		// kickstart that follows is the idempotent half.
+		if err := os.WriteFile(s.UnitPath, []byte(s.Plist()), 0o644); err != nil {
+			return fmt.Errorf("writing %s: %w", s.UnitPath, err)
+		}
+		if err := launchdLoad(ctx, s.UID, s.UnitPath); err != nil {
+			return fmt.Errorf("loading %s: %w", s.UnitPath, err)
+		}
+		return nil
+	}
 	// 0644: a unit is not a secret, and systemd reads it as the user.
 	if err := os.WriteFile(s.UnitPath, []byte(s.Unit()), 0o644); err != nil {
 		return fmt.Errorf("writing %s: %w", s.UnitPath, err)
+	}
+	return nil
+}
+
+// launchdLoad bootstraps the agent into gui/<uid> unless launchd already
+// has it. A variable so the tests stage onto a machine with no launchd.
+var launchdLoad = func(ctx context.Context, uid int, plist string) error {
+	domain := fmt.Sprintf("gui/%d", uid)
+	if exec.CommandContext(ctx, "launchctl", "print", domain+"/"+OllamaAgentLabel).Run() == nil {
+		return nil
+	}
+	if out, err := exec.CommandContext(ctx, "launchctl", "bootstrap", domain, plist).CombinedOutput(); err != nil {
+		return fmt.Errorf("launchctl bootstrap %s %s: %v: %s", domain, plist, err, strings.TrimSpace(string(out)))
 	}
 	return nil
 }
@@ -362,12 +471,12 @@ func fetchAndUnpack(ctx context.Context, s Stage, onProgress func(Progress)) err
 			return err
 		}
 		downloaded = append(downloaded, path)
-		if err := unpackTarZst(path, fresh); err != nil {
+		if err := unpackArchive(a.Name, path, fresh); err != nil {
 			return fmt.Errorf("unpacking %s: %w", a.Name, err)
 		}
 	}
-	if _, err := os.Stat(filepath.Join(fresh, "bin", "ollama")); err != nil {
-		return fmt.Errorf("the archive unpacked without a bin/ollama; the release layout has changed and this cockpit needs updating")
+	if _, err := os.Stat(filepath.Join(fresh, s.binaryRel())); err != nil {
+		return fmt.Errorf("the archive unpacked without a %s; the release layout has changed and this cockpit needs updating", s.binaryRel())
 	}
 	if err := os.RemoveAll(s.RuntimeDir); err != nil {
 		return err
@@ -527,6 +636,15 @@ func parseChecksum(r io.Reader, name string) (string, error) {
 	return "", fmt.Errorf("%s does not list %s, so the download cannot be verified", ollamaChecksumFile, name)
 }
 
+// unpackArchive picks the decompressor by the asset's name: the Linux
+// archives are zstd, the macOS one is gzip.
+func unpackArchive(name, path, dest string) error {
+	if strings.HasSuffix(name, ".tgz") || strings.HasSuffix(name, ".tar.gz") {
+		return unpackTarGz(path, dest)
+	}
+	return unpackTarZst(path, dest)
+}
+
 // unpackTarZst unpacks a zstd-compressed tar into dest, refusing any
 // entry that would land outside it. Symlinks are kept only when their
 // target stays inside dest too -- the release uses them for shared
@@ -542,12 +660,32 @@ func unpackTarZst(path, dest string) error {
 		return err
 	}
 	defer zr.Close()
+	return unpackTar(zr, dest)
+}
+
+// unpackTarGz is the same for a gzip-compressed tar.
+func unpackTarGz(path, dest string) error {
+	f, err := os.Open(path)
+	if err != nil {
+		return err
+	}
+	defer f.Close()
+	zr, err := gzip.NewReader(f)
+	if err != nil {
+		return err
+	}
+	defer zr.Close()
+	return unpackTar(zr, dest)
+}
+
+// unpackTar is the shared, rooted unpack both decompressors feed.
+func unpackTar(r io.Reader, dest string) error {
 	root, err := os.OpenRoot(dest)
 	if err != nil {
 		return err
 	}
 	defer root.Close()
-	tr := tar.NewReader(zr)
+	tr := tar.NewReader(r)
 	var links []string
 	for {
 		hdr, err := tr.Next()
@@ -692,3 +830,8 @@ func WaitReady(ctx context.Context, base string, within time.Duration) error {
 		}
 	}
 }
+
+// FreeBytes is availableBytes for the setup command's disk preflight: what
+// a non-root process may still write on path's volume, zero when it
+// cannot be established.
+func FreeBytes(path string) uint64 { return availableBytes(path) }

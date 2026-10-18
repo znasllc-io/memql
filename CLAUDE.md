@@ -425,7 +425,15 @@ the entire product for a person who is blocked.
 **Native Ollama on both platforms, Docker on Linux only by request, and
 never sudo.** On macOS a container has no GPU access, so Ollama there
 would serve on the CPU -- which is what the hardware floor exists to
-prevent -- and Homebrew installs it natively. On Linux the first design
+prevent -- and Homebrew installs it natively; without Homebrew the same
+stage as Linux fetches Ollama's own `ollama-darwin.tgz`, checks it against
+the release's `sha256sum.txt`, and a LaunchAgent (`com.znasllc.memql-ollama`)
+keeps it up (memql-cockpit#524). **Installed is not serving**: an `ollama` on
+PATH with its service stopped gets a printed, consented start command
+(`withStart`) and a wait for `/api/version`, never a pull against a closed
+port. **The disk is judged before the pull** on the bytes still missing
+(`MissingBytes`), and the mid-pull check counts only what each layer still
+has to write. On Linux the first design
 (2026-09-06 record, D1) was the `ollama/ollama` container, and it stopped
 on every fresh machine at the same place: the NVIDIA container toolkit is a
 root install, Pop!_OS 24.04 has it in no configured repository, and

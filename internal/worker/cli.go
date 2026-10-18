@@ -634,6 +634,7 @@ func handleSetup(args []string) {
 		}
 		if err := setupWorkbench(context.Background(), f.configPath, os.Stdout); err != nil {
 			fmt.Fprintln(os.Stderr, "Fleet workbench setup could not finish:", err)
+			recordSetupReason(capitalise(err.Error()))
 			os.Exit(1)
 		}
 		return

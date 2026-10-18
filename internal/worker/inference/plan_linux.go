@@ -20,7 +20,24 @@ func gatherPlatform(ctx context.Context) platformFacts {
 		Native:         native,
 		FreeDisk:       availableBytes(native.ModelsDir),
 		DockerFreeDisk: availableBytes(dockerModelsDir(ctx, docker)),
+		ModelsDir:      native.ModelsDir,
+		stopped:        linuxStopped,
 	}
+}
+
+// linuxStopped is how an installed Ollama that is not answering would be
+// started on this machine: MemQL's own user unit, a container named ollama
+// under --runtime docker, or -- for Ollama's own install.sh -- a system
+// service only root can start, which is named rather than run.
+func linuxStopped(ctx context.Context, h Host) StoppedFacts {
+	var s StoppedFacts
+	s.Unit = exists(h.Native.UnitPath)
+	s.SystemUnit = exists("/etc/systemd/system/ollama.service") || exists("/usr/lib/systemd/system/ollama.service")
+	if h.Docker.Present {
+		_, err := runProbe(ctx, "docker", "container", "inspect", "--format", "{{.Name}}", "ollama")
+		s.Container = err == nil
+	}
+	return s
 }
 
 // linuxNativeFacts is what running Ollama as this user needs: the

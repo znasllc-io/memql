@@ -65,9 +65,10 @@ Options:
     --workbench               Enable isolated Fleet workbenches (requires Docker).
     --inference               Also set this machine up to serve local models:
                               install a model runtime, pull the default models,
-                              and write models.allow. A runtime install this
-                              cannot approve unattended is reported with the
-                              command for you to run; the install still succeeds.
+                              and write models.allow. At a terminal it asks once
+                              before installing the runtime; unattended, it
+                              reports the command for you to run. Either way
+                              the install still succeeds.
     --user-local              Install under \$HOME/.memql/bin instead of
                               /usr/local/bin. Use when sudo isn't
                               available (CI, restricted environments).
@@ -238,6 +239,14 @@ function install_systemd_unit() {
         umask 077 && touch "$env_file"
     fi
     chmod 0600 "$env_file" 2>/dev/null || true
+    # The Ollama variables set in this shell reach the worker service, so
+    # the worker looks for models where the setup puts them (memql-cockpit#524).
+    local name
+    while IFS= read -r name; do
+        [[ -n "$name" ]] || continue
+        upsert_env_file_var "$env_file" "$name" "${!name}"
+        echo "INFO: passed ${name} to the worker service"
+    done < <(ollama_env_names)
     cat > "$unit" << UNIT
 [Unit]
 Description=memQL Cockpit Worker
@@ -326,12 +335,13 @@ function main() {
     fi
     # Setup signals the running worker to reload its policy, so service first.
     # Runtime approval or model download failures do not undo enrollment.
-    if [[ "$WORKBENCH" == "yes" ]]; then
-        install_ui_stage "Preparing Fleet workbenches" "$INSTALLED_BINARY" worker setup --workbench
-    fi
-
+    # Local models before workbenches: models never wait on Docker, and
+    # neither stage can abort the install (memql-cockpit#524).
     if [[ "$INFERENCE" == "yes" ]]; then
         install_ui_stage "Preparing local models" setup_inference "$INSTALLED_BINARY"
+    fi
+    if [[ "$WORKBENCH" == "yes" ]]; then
+        install_ui_stage "Preparing Fleet workbenches" setup_workbench "$INSTALLED_BINARY"
     fi
     install_ui_finish
 }

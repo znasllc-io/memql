@@ -13,11 +13,14 @@ import (
 )
 
 func setupWorkbench(ctx context.Context, configPath string, out io.Writer) error {
-	ctx, cancel := context.WithTimeout(ctx, 15*time.Minute)
+	ctx, cancel := context.WithTimeout(ctx, workbenchPullWithin)
 	defer cancel()
 	fmt.Fprintln(out, "Preparing Fleet workbenches…")
 	runtime := workbench.Docker{}
 	if err := runtime.Pull(ctx); err != nil {
+		if ctx.Err() == context.DeadlineExceeded {
+			return fmt.Errorf("the workbench image did not finish downloading within %s; check the network and retry", workbenchPullWithin)
+		}
 		return fmt.Errorf("start Docker with Linux containers, then retry: %w", err)
 	}
 	if _, err := runtime.Ready(ctx); err != nil {
@@ -36,6 +39,11 @@ func setupWorkbench(ctx context.Context, configPath string, out io.Writer) error
 	}
 	return nil
 }
+
+// workbenchPullWithin bounds the workbench image pull. An installer waits
+// on it, so a stalled pull ends with a sentence rather than a hang.
+const workbenchPullWithin = 15 * time.Minute
+
 func enableWorkbenchPolicy(body string) (string, bool, error) {
 	// Decode once to reject duplicate keys or malformed YAML without writing.
 	var values map[string]any

@@ -184,6 +184,10 @@ type Host struct {
 	// other fact here is: the class table has to be exercisable on a
 	// runner that is not the machine being classed.
 	Hardware hardware.Inventory
+	// ModelsDir is the models directory (OLLAMA_MODELS) the runtime this
+	// machine has, or would get, keeps its blobs under; "" when the
+	// platform file cannot name it. The disk preflight reads it.
+	ModelsDir string
 	// FreeDisk is bytes available on the volume the runtime keeps models
 	// on. Decide DOES NOT read it, and that is deliberate rather than an
 	// oversight: refusing on disk needs the size of the models actually
@@ -195,6 +199,39 @@ type Host struct {
 	// never depends on what the CI runner has installed; nil falls back
 	// to exec.LookPath, which Gather always overrides.
 	LookPath func(string) (string, error)
+	// UID is this user's id, which names launchd's per-user domain
+	// (gui/<uid>) in the macOS commands.
+	UID int
+	// Stopped is how a runtime that is installed but not answering could
+	// be started again, as the platform files observed it. Read only when
+	// nothing answered the probe.
+	Stopped StoppedFacts
+}
+
+// StoppedFacts is what the platform files saw about an installed runtime
+// that may not be running: which of the ways this command knows to start
+// one applies to this machine (memql-cockpit#524).
+//
+// "Installed" and "serving" used to be one fact. An ollama on PATH with its
+// service stopped counted as present, so nothing was started and every pull
+// that followed failed against a socket nothing listened on.
+type StoppedFacts struct {
+	// Agent reports MemQL's own Ollama LaunchAgent plist (macOS), written
+	// by an earlier native setup; AgentLoaded that launchd has it loaded.
+	Agent, AgentLoaded bool
+	// Brew reports that the ollama on PATH is Homebrew's (macOS), so
+	// `brew services start ollama` is how it runs.
+	Brew bool
+	// App reports Ollama's own macOS app, which runs the server itself.
+	App bool
+	// Unit reports MemQL's own user unit (Linux), written by an earlier
+	// native setup.
+	Unit bool
+	// SystemUnit reports a system-wide ollama.service (Ollama's own
+	// install.sh on Linux), which only root can start.
+	SystemUnit bool
+	// Container reports a container named ollama (Linux, --runtime docker).
+	Container bool
 }
 
 // RuntimePresentFor reports whether a MODEL runtime answered on this
@@ -229,6 +266,16 @@ type Plan struct {
 	// from it" and "install this first" are different messages and the
 	// caller needs to tell them apart.
 	RuntimePresent bool
+	// Serving reports that something ANSWERED the probe. RuntimePresent
+	// without Serving is a runtime that is installed and stopped: Start
+	// says how to start it, or Stopped says why this command cannot.
+	Serving bool
+	// Start is the exact commands that start an installed runtime that is
+	// not answering. Printed and consented to like Install.
+	Start []string
+	// Stopped is the sentence for an installed runtime that is not
+	// answering and that this command does not know how to start.
+	Stopped string
 	// Install is the exact commands that would run, in order, empty when
 	// the runtime is present or the plan refuses. They are printed and
 	// consented to before anything runs (design D2).
@@ -270,7 +317,20 @@ type Plan struct {
 const (
 	noteDockerNotOfferedOnMac = "Docker is not offered on macOS: a container has no access to the GPU, so Ollama in a container would serve on the CPU and this machine would not be advertised for inference."
 
-	refusalNoHomebrew = "Homebrew is not installed, and it is the only macOS path this command can take. Install Homebrew from https://brew.sh and run this again, or install Ollama yourself from https://ollama.com/download."
+	// noteNativeOnMac is the macOS path without Homebrew (memql-cockpit#524):
+	// Ollama's own release archive, checked against the release's checksum
+	// file, run as the person by a LaunchAgent. It used to be a refusal that
+	// sent the person to install Homebrew first.
+	noteNativeOnMac = "Homebrew is not installed, so Ollama's own macOS release will run as your user, from ~/.memql, kept running by a LaunchAgent. Nothing here needs an administrator password."
+
+	// The installed-but-stopped sentences (memql-cockpit#524). An ollama on
+	// PATH used to count as a serving runtime, so nothing was started and
+	// every pull failed against a socket nothing listened on.
+	noteRuntimeStopped = "Ollama is installed and is not answering, so it has to be started before a model can be pulled."
+
+	stoppedUnknown = "Ollama is installed and is not answering, and this command cannot tell how it was installed. Start it (open the Ollama app, or run ollama serve in a terminal) and run this again."
+
+	stoppedSystemUnit = "Ollama is installed as a system service and is not running. Start it with sudo systemctl start ollama, then run this again."
 
 	refusalNoDocker = "Docker is not installed, and this machine runs its model runtime in a container. Install Docker Engine from https://docs.docker.com/engine/install/ and run this again."
 
@@ -392,6 +452,7 @@ func Decide(h Host) Plan {
 	// inventory lists three pulled models would be refuted by the very
 	// field it ignored.
 	p.RuntimePresent = h.RuntimePresentFor()
+	p.Serving = h.OllamaServing || ollamaAnswered(h.Ollama)
 
 	// The floor's own sentence, verbatim.
 	//
@@ -424,23 +485,86 @@ func Decide(h Host) Plan {
 	}
 }
 
-// decideDarwin: native Ollama, never Docker (design D1).
+// decideDarwin: native Ollama, never Docker (design D1). Homebrew's when
+// Homebrew is there; Ollama's own release archive under ~/.memql when it is
+// not, or when an earlier run already unpacked that one.
 func decideDarwin(h Host, p Plan) Plan {
 	p.Runtime = RuntimeNative
 	if p.RuntimePresent {
+		return withStart(h, p)
+	}
+	n := h.Native
+	if h.lookPath("brew") && !n.Installed {
+		p.Install = []string{installBrewOllama, installBrewOllamaStart}
+		// The note rides the install and only the install. "Why not
+		// Docker?" is a question somebody asks when they are being told
+		// to install something else; on a machine that already serves it
+		// is noise in front of an answer they did not ask for.
+		p.Note = noteDockerNotOfferedOnMac
 		return p
 	}
-	if !h.lookPath("brew") {
-		p.Runtime = RuntimeNone
-		p.Refusal = refusalNoHomebrew
+	stage := &Stage{
+		RuntimeDir: n.RuntimeDir,
+		ModelsDir:  n.ModelsDir,
+		LogPath:    n.LogPath,
+		UnitPath:   n.UnitPath,
+		Listen:     nativeListen,
+		Launchd:    true,
+		UID:        h.UID,
+	}
+	if n.Installed {
+		stage.Reuse = true
+	} else {
+		stage.Archives = []Archive{{Name: DarwinArchiveName}}
+	}
+	p.Stage = stage
+	// The stage loads the agent; this restarts it, so a re-run after an
+	// interrupted setup serves from what is on disk now. Idempotent.
+	p.Install = []string{launchdKickstart(h.UID)}
+	p.Note = noteNativeOnMac
+	return p
+}
+
+// launchdKickstart starts (or restarts) MemQL's Ollama LaunchAgent.
+func launchdKickstart(uid int) string {
+	return fmt.Sprintf("launchctl kickstart -k gui/%d/%s", uid, OllamaAgentLabel)
+}
+
+// withStart says how an installed runtime that is not answering gets
+// started, or why this command cannot start it. A serving runtime is
+// returned unchanged.
+//
+// Only the ways this command can tell apply are offered, most specific
+// first: the agent or unit an earlier setup here wrote, then the service
+// manager that installed it. Anything else is a sentence naming what to
+// do, because guessing a start command for a runtime nobody can identify
+// is how a second server ends up racing the first for port 11434.
+func withStart(h Host, p Plan) Plan {
+	if p.Serving {
 		return p
 	}
-	p.Install = []string{installBrewOllama, installBrewOllamaStart}
-	// The note rides the install and only the install. "Why not Docker?"
-	// is a question somebody asks when they are being told to install
-	// something else; on a machine that already serves it is noise in
-	// front of an answer they did not ask for.
-	p.Note = noteDockerNotOfferedOnMac
+	s := h.Stopped
+	switch {
+	case h.GOOS == "darwin" && s.Agent && s.AgentLoaded:
+		p.Start = []string{launchdKickstart(h.UID)}
+	case h.GOOS == "darwin" && s.Agent:
+		p.Start = []string{fmt.Sprintf("launchctl bootstrap gui/%d %s", h.UID, h.Native.UnitPath)}
+	case h.GOOS == "darwin" && s.Brew:
+		p.Start = []string{installBrewOllamaStart}
+	case h.GOOS == "darwin" && s.App:
+		p.Start = []string{"open -a Ollama"}
+	case h.GOOS == "linux" && h.Runtime == RuntimeDocker && s.Container:
+		p.Start = []string{"docker start ollama"}
+	case h.GOOS == "linux" && h.Runtime != RuntimeDocker && s.Unit:
+		p.Start = []string{"systemctl --user start " + OllamaUnitName}
+	case h.GOOS == "linux" && s.SystemUnit:
+		p.Stopped = stoppedSystemUnit
+	default:
+		p.Stopped = stoppedUnknown
+	}
+	if len(p.Start) > 0 {
+		p.Note = noteRuntimeStopped
+	}
 	return p
 }
 
@@ -467,7 +591,7 @@ func decideLinux(h Host, p Plan) Plan {
 func decideLinuxNative(h Host, p Plan) Plan {
 	p.Runtime = RuntimeNative
 	if p.RuntimePresent {
-		return p
+		return withStart(h, p)
 	}
 	n := h.Native
 	if !h.lookPath("systemctl") {
@@ -523,7 +647,7 @@ func decideLinuxNative(h Host, p Plan) Plan {
 func decideLinuxDocker(h Host, p Plan) Plan {
 	p.Runtime = RuntimeDocker
 	if p.RuntimePresent {
-		return p
+		return withStart(h, p)
 	}
 	switch {
 	case !h.Docker.CLIPresent:
@@ -579,12 +703,18 @@ func Gather(ctx context.Context, d *models.Discoverer) (Host, error) {
 		Ollama:        inv,
 		OllamaServing: ollamaAnswered(inv),
 		LookPath:      exec.LookPath,
+		UID:           os.Getuid(),
 	}
 	facts := gatherPlatform(ctx)
 	h.Docker = facts.Docker
 	h.Native = facts.Native
 	h.FreeDisk = facts.FreeDisk
 	h.DockerFreeDisk = facts.DockerFreeDisk
+	h.ModelsDir = facts.ModelsDir
+	// Only worth asking when nothing answered: the probes shell out.
+	if !h.OllamaServing && facts.stopped != nil {
+		h.Stopped = facts.stopped(ctx, h)
+	}
 	h.Hardware = hardware.Local(ctx)
 
 	// Checked again on the way out: the probes above shell out and dial,
@@ -606,6 +736,12 @@ type platformFacts struct {
 	// DockerFreeDisk is the container's volume, Linux only.
 	FreeDisk       uint64
 	DockerFreeDisk uint64
+	// ModelsDir is the models directory (OLLAMA_MODELS) of the runtime
+	// this machine already has or would get, "" when it cannot be named.
+	ModelsDir string
+	// stopped gathers StoppedFacts. A func because it shells out, and it
+	// is asked only when nothing answered the probe.
+	stopped func(ctx context.Context, h Host) StoppedFacts
 }
 
 // ollamaRunningNoModels is the fragment of the models package's probe note

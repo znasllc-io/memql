@@ -64,6 +64,11 @@ const (
 	// seconds covers a first `ollama serve` discovering its GPU on a
 	// slow disk; a runtime silent past that is not coming.
 	runtimeReadyWithin = 30 * time.Second
+
+	// runtimeProbeWithin is the second look at a runtime the inventory
+	// probe found silent, before anything is started: a service that was
+	// itself still starting answers within it.
+	runtimeProbeWithin = 2 * time.Second
 )
 
 // repeatedFlag collects a flag the operator may give more than once
@@ -131,6 +136,20 @@ type inferenceSetup struct {
 	readvertise func(ctx context.Context) error
 	inventory   func(ctx context.Context) models.Inventory
 	pullAllowed func() bool
+
+	// probe asks, briefly, whether the runtime answers now; start runs
+	// the consented commands that start an installed runtime that does
+	// not (memql-cockpit#524).
+	probe func(ctx context.Context, base string) error
+	start func(ctx context.Context, commands []string) error
+	// missing and free are the disk preflight's two readings: bytes of a
+	// model not yet on disk, and free space where the models live now.
+	missing func(ctx context.Context, modelsDir, id string) (uint64, bool)
+	free    func(path string) uint64
+
+	// reason is the outcome in one sentence, for the installers' closing
+	// summary (recordSetupReason). Set where a failure is printed.
+	reason string
 }
 
 // newInferenceSetup wires the real machine in. The policy is read HERE
@@ -164,6 +183,14 @@ func newInferenceSetup(configPath string, ids []string, nonInteractive bool, run
 		readvertise: inference.Readvertise,
 		inventory:   func(ctx context.Context) models.Inventory { return probeWithPolicy(ctx, discoverer, policyPath) },
 		pullAllowed: func() bool { return policyAt(policyPath).ModelsPullAllowed() },
+		probe: func(ctx context.Context, base string) error {
+			return inference.WaitReady(ctx, base, runtimeProbeWithin)
+		},
+		start: func(ctx context.Context, commands []string) error {
+			return inference.RunCommands(ctx, commands, inference.ExecRunner(os.Stdout))
+		},
+		missing: inference.MissingBytes,
+		free:    inference.FreeBytes,
 	}
 }
 
@@ -201,7 +228,11 @@ func runInferenceSetup(ctx context.Context, s *inferenceSetup) int {
 			// all-caps, and the message below is a sentence rather than
 			// a log line.
 			fmt.Fprintln(os.Stderr, msg)
+			if s.reason == "" {
+				s.reason = msg
+			}
 		}
+		recordSetupReason(s.reason)
 	}
 	return SetupExitCode(err)
 }
@@ -244,6 +275,7 @@ func (s *inferenceSetup) run(ctx context.Context) error {
 
 	if plan.Refusal != "" {
 		s.printRefusal(host, plan)
+		s.reason = capitalise(plan.Refusal)
 		return alreadySaid(SetupExitPrereq)
 	}
 	if err := s.ensureRuntime(ctx, plan); err != nil {
@@ -252,14 +284,30 @@ func (s *inferenceSetup) run(ctx context.Context) error {
 	if !s.pullAllowed() {
 		s.paragraph("This machine will not pull a model: models.pull is false in " +
 			s.policyPath + ". Remove that key, or set it to true, and run this again.")
+		s.reason = "models.pull is false in " + s.policyPath
 		return alreadySaid(SetupExitPrereq)
 	}
+	// The disk is judged BEFORE the first byte moves, on what is still
+	// missing and on free space measured now (memql-cockpit#524).
+	modelsDir := host.ModelsDir
+	if plan.Stage != nil {
+		modelsDir = plan.Stage.ModelsDir
+	}
+	if refusal := s.diskPreflight(ctx, modelsDir, host.FreeDisk, wanted); refusal != "" {
+		s.paragraph(refusal)
+		s.line("")
+		s.paragraph("Free some space on that volume, or pass --model with a smaller model, and run this again.")
+		s.reason = refusal
+		return alreadySaid(SetupExitOpFailed)
+	}
 	for _, id := range wanted {
-		if err := s.pullOne(ctx, id, host.FreeDisk); err != nil {
+		// A fresh reading per model: the one before it has just used some.
+		if err := s.pullOne(ctx, id, s.freeAt(modelsDir, host.FreeDisk)); err != nil {
 			return err
 		}
 	}
 	if err := s.allow(s.policyPath, wanted...); err != nil {
+		s.reason = "The models were pulled and could not be allowed: " + err.Error()
 		return setupFailed("the models were pulled and %v", err)
 	}
 	s.printAllowed(wanted)
@@ -457,7 +505,10 @@ func (s *inferenceSetup) printRefusal(h inference.Host, p inference.Plan) {
 // with a binary and no runtime -- which InstallRuntime refuses to allow
 // and this flow must not talk them into.
 func (s *inferenceSetup) ensureRuntime(ctx context.Context, p inference.Plan) error {
-	if p.RuntimePresent || len(p.Install) == 0 {
+	if p.RuntimePresent {
+		return s.ensureServing(ctx, p)
+	}
+	if len(p.Install) == 0 {
 		return nil
 	}
 	if p.Stage != nil {
@@ -532,16 +583,108 @@ func (s *inferenceSetup) ensureRuntime(ctx context.Context, p inference.Plan) er
 		} else {
 			s.line("Nothing was installed.")
 		}
+		s.reason = "Installing " + runtimeName(p.Runtime) + " needs your approval"
 		return alreadySaid(SetupExitRefused)
 
 	case errors.Is(err, inference.ErrRefused):
 		s.line("")
 		s.paragraph(err.Error())
+		s.reason = err.Error()
 		return alreadySaid(SetupExitPrereq)
 
 	default:
 		return setupFailed("%v", err)
 	}
+}
+
+// ensureServing starts an installed runtime that is not answering, after
+// asking, or says why it cannot (memql-cockpit#524).
+//
+// Present used to mean finished: an ollama on PATH with its service
+// stopped skipped this step, and every pull after it failed with
+// connection refused -- reported as a download failure, about a runtime
+// nobody had started.
+func (s *inferenceSetup) ensureServing(ctx context.Context, p inference.Plan) error {
+	if p.Serving {
+		return nil
+	}
+	// The inventory probe may have raced a service that was starting.
+	if s.probe != nil && s.probe(ctx, s.base()) == nil {
+		return nil
+	}
+	if len(p.Start) == 0 {
+		text := p.Stopped
+		if text == "" {
+			text = "Ollama is installed and is not answering at " + s.base() + ". Start it and run this again."
+		}
+		s.paragraph(text)
+		s.reason = text
+		return alreadySaid(SetupExitOpFailed)
+	}
+	s.paragraph(p.Note)
+	s.line("")
+	s.line("This command will run:")
+	for _, cmd := range p.Start {
+		s.line("  " + cmd)
+	}
+	if s.nonInteractive || !s.askToInstall(p.Start) {
+		s.line("")
+		if s.nonInteractive {
+			s.line("Nothing was started: --non-interactive cannot answer that question.")
+			s.line("Run this again without it, or run the command above yourself.")
+		} else {
+			s.line("Nothing was started.")
+		}
+		s.reason = "Ollama is installed and not running, and starting it needs your approval"
+		return alreadySaid(SetupExitRefused)
+	}
+	start := s.start
+	if start == nil {
+		start = func(ctx context.Context, commands []string) error {
+			return inference.RunCommands(ctx, commands, inference.ExecRunner(s.out))
+		}
+	}
+	if err := start(ctx, p.Start); err != nil {
+		s.reason = "Ollama could not be started: " + err.Error()
+		return setupFailed("ollama could not be started: %v", err)
+	}
+	if s.ready != nil {
+		if err := s.ready(ctx, s.base()); err != nil {
+			s.reason = "Ollama was started and " + err.Error()
+			return setupFailed("ollama was started and %v", err)
+		}
+	}
+	s.line("")
+	s.line("The runtime is started.")
+	s.line("")
+	return nil
+}
+
+// freeAt is free space on modelsDir's volume now, or the figure Gather
+// took when no fresh one can be read.
+func (s *inferenceSetup) freeAt(modelsDir string, gathered uint64) uint64 {
+	if s.free != nil && modelsDir != "" {
+		if f := s.free(modelsDir); f > 0 {
+			return f
+		}
+	}
+	return gathered
+}
+
+// diskPreflight is the refusal sentence when the models still missing
+// cannot fit where the runtime keeps them, or "". A model whose size the
+// registry would not state is left to the mid-pull check.
+func (s *inferenceSetup) diskPreflight(ctx context.Context, modelsDir string, gathered uint64, ids []string) string {
+	if s.missing == nil || modelsDir == "" {
+		return ""
+	}
+	var missing uint64
+	for _, id := range ids {
+		if n, ok := s.missing(ctx, modelsDir, id); ok {
+			missing += n
+		}
+	}
+	return inference.DiskShortfall(missing, s.freeAt(modelsDir, gathered), modelsDir)
 }
 
 // askToInstall is the consent question. [y/N] with the capital on the
@@ -582,11 +725,13 @@ func (s *inferenceSetup) pullOne(ctx context.Context, id string, freeDisk uint64
 		s.paragraph(over.Error())
 		s.line("")
 		s.paragraph("Free some space on that volume, or pass --model with a smaller model, and run this again.")
+		s.reason = over.Error()
 		return alreadySaid(SetupExitOpFailed)
 	}
 	if err != nil {
 		s.line("")
 		s.paragraph(err.Error())
+		s.reason = "Pulling " + id + " failed: " + err.Error()
 		return alreadySaid(SetupExitOpFailed)
 	}
 	s.line("")
@@ -761,7 +906,10 @@ type pullDisplay struct {
 	overNeed  uint64
 }
 
-type layerBytes struct{ completed, total uint64 }
+// layerBytes is one blob's counts. first is what the runtime reported
+// already on disk the first time the layer was seen -- a resumed or
+// already-complete layer needs no more room for those bytes.
+type layerBytes struct{ completed, total, first uint64 }
 
 func newPullDisplay(w io.Writer, tty bool, freeDisk uint64, stop func()) *pullDisplay {
 	return &pullDisplay{
@@ -789,7 +937,7 @@ func (d *pullDisplay) handle(p inference.Progress) {
 	if p.Total > 0 || p.Completed > 0 {
 		l := d.layers[p.Status]
 		if l == nil {
-			l = &layerBytes{}
+			l = &layerBytes{first: p.Completed}
 			d.layers[p.Status] = l
 		}
 		if p.Total > l.total {
@@ -818,9 +966,9 @@ func (d *pullDisplay) handle(p inference.Progress) {
 	// statfs behind it fails on a volume this process cannot see, and
 	// refusing on a fact that could not be read would block a machine
 	// with a terabyte free.
-	if d.free > 0 && d.total > d.free && !d.over {
+	if remaining := d.remaining(); d.free > 0 && remaining > d.free && !d.over {
 		d.over = true
-		d.overNeed = d.total
+		d.overNeed = remaining
 		if d.stop != nil {
 			d.stop()
 		}
@@ -832,6 +980,20 @@ func (d *pullDisplay) handle(p inference.Progress) {
 		return
 	}
 	d.drawLog(p.Status)
+}
+
+// remaining is the bytes the layers seen so far still have to write: each
+// layer's total less what was already on disk when it was first reported.
+// Judging the TOTAL refused resumed pulls for room they did not need
+// (memql-cockpit#524).
+func (d *pullDisplay) remaining() uint64 {
+	var n uint64
+	for _, l := range d.layers {
+		if l.total > l.first {
+			n += l.total - l.first
+		}
+	}
+	return n
 }
 
 func (d *pullDisplay) truePercent() int {
