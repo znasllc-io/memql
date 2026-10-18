@@ -63,7 +63,11 @@ function main() {
     node -p 'JSON.stringify({platform:process.platform,arch:process.arch,node:process.version})' > "$report/runtime.json"
 
     bash scripts/ci/retry.sh -- bash scripts/vscode/deps.sh
-    bash scripts/ci/retry.sh -- npm ci --no-audit --no-fund --prefix editors/vscode
+    # @playwright/browser-chromium downloads a browser during npm install.
+    # Desktop cases use Electron; the web case installs Chromium explicitly
+    # below. Keep downloads out of npm's hidden lifecycle scripts, and keep
+    # this setting scoped to installation so the web host still gets tested.
+    PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD=1 bash scripts/ci/retry.sh -- npm ci --foreground-scripts --no-audit --no-fund --prefix editors/vscode
     if [[ "$lane" == vscode-desktop ]]; then
         bash scripts/identity/build-css.sh
         node_platform="$(node -p 'process.platform + "-" + process.arch')"
@@ -71,7 +75,7 @@ function main() {
         CGO_ENABLED=0 go build -o "editors/vscode/bin/$node_platform/memql-lsp" ./cmd/memql-lsp
         bash scripts/vscode/host-test.sh --skip-deps
     else
-        bash scripts/ci/retry.sh -- npm ci --no-audit --no-fund --prefix editors/productivity
+        PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD=1 bash scripts/ci/retry.sh -- npm ci --foreground-scripts --no-audit --no-fund --prefix editors/productivity
         npm --prefix editors/vscode run compile
         npm --prefix editors/productivity run compile
         npm --prefix editors/productivity test
