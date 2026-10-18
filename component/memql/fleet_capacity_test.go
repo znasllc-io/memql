@@ -158,7 +158,7 @@ func TestFleetCapacityBuiltinShape(t *testing.T) {
 		{ModelId: "qwen3.8:27b", Machines: []FleetMachine{reported, silent}},
 		{ModelId: "embed", Machines: []FleetMachine{reported}},
 	}
-	out := FleetCapacityMachines(models, FleetHealthIndex{}, now)
+	out := FleetCapacityMachines(models, FleetHealthIndex{}, now, map[string]uint64{"qwen3.8:27b": 18 * gib})
 	if len(out) != 2 {
 		t.Fatalf("got %d machines, want one entry per machine: %v", len(out), out)
 	}
@@ -173,8 +173,22 @@ func TestFleetCapacityBuiltinShape(t *testing.T) {
 	if loaded := mac["loadedModels"].([]any); len(loaded) != 1 || loaded[0].(map[string]any)["model"] != "qwen3.8:27b" {
 		t.Fatalf("mac loaded models: %v", mac["loadedModels"])
 	}
-	if models := mac["models"].([]any); len(models) != 2 {
-		t.Fatalf("mac models: %v", models)
+	macModels := mac["models"].([]any)
+	if len(macModels) != 2 {
+		t.Fatalf("mac models: %v", macModels)
+	}
+	embed, qwen := macModels[0].(map[string]any), macModels[1].(map[string]any)
+	if qwen["modelId"] != "qwen3.8:27b" || qwen["needBytes"] != 18*gib || qwen["loaded"] != true ||
+		qwen["slots"].(map[string]any)["inFlight"] != 1 || qwen["slots"].(map[string]any)["max"] != 4 {
+		t.Fatalf("a model's own figures: %v", qwen)
+	}
+	if _, has := embed["needBytes"]; has || embed["loaded"] != false {
+		t.Fatalf("a model the catalog gives no figure for has no needBytes, and is not loaded: %v", embed)
+	}
+	if boxModels := box["models"].([]any); len(boxModels) != 1 {
+		t.Fatalf("box models: %v", boxModels)
+	} else if _, has := boxModels[0].(map[string]any)["loaded"]; has {
+		t.Fatalf("a machine without a report says nothing about what is loaded: %v", boxModels[0])
 	}
 	perf := mac["performance"].(map[string]any)
 	if perf["calls"] != 0 || perf["medianLatencyMs"] != nil || perf["tokensPerSec"] != nil {

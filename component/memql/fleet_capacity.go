@@ -517,17 +517,31 @@ func (e *MemQLEngine) fleetCapacityBuiltin(ctx context.Context, _ map[string]any
 		// stand without them, and a machine reads as unmeasured.
 		health = FleetHealthIndex{}
 	}
+	// The catalog's memory figures let a person read why a machine is passed
+	// over ("needs 20 GB, 9 GB free"). Missing figures leave needBytes absent.
+	needs, err := ReadFleetMemoryNeeds(ctx, e)
+	if err != nil {
+		needs = nil
+	}
 	return singleVirtualRow(FleetCapacityConcept, "fleet", map[string]any{
-		"machines":   FleetCapacityMachines(models, health, now),
+		"machines":   FleetCapacityMachines(models, health, now, needs),
 		"measuredAt": now.Format(time.RFC3339),
 	})
 }
 
 // FleetCapacityMachines renders one entry per machine behind the catalog.
-func FleetCapacityMachines(models []FleetModel, health FleetHealthIndex, now time.Time) []any {
+// Each entry's `models` lists what that machine offers, one object per model
+// with the model's own slots, its catalog memory need (absent when the
+// catalog gives none) and whether it is loaded now -- admission is decided
+// per (machine, model), so the figures a person reads are per model too.
+func FleetCapacityMachines(models []FleetModel, health FleetHealthIndex, now time.Time, needs map[string]uint64) []any {
+	type offered struct {
+		id string
+		mm FleetMachine
+	}
 	type machine struct {
 		m      FleetMachine
-		models []string
+		models []offered
 	}
 	byId := map[string]*machine{}
 	var order []string
@@ -539,7 +553,7 @@ func FleetCapacityMachines(models []FleetModel, health FleetHealthIndex, now tim
 				byId[mm.RegistrationId] = entry
 				order = append(order, mm.RegistrationId)
 			}
-			entry.models = append(entry.models, model.ModelId)
+			entry.models = append(entry.models, offered{id: model.ModelId, mm: mm})
 		}
 	}
 	sort.Strings(order)
@@ -547,7 +561,22 @@ func FleetCapacityMachines(models []FleetModel, health FleetHealthIndex, now tim
 	for _, id := range order {
 		entry := byId[id]
 		mm := entry.m
-		sort.Strings(entry.models)
+		sort.Slice(entry.models, func(i, j int) bool { return entry.models[i].id < entry.models[j].id })
+		offeredModels := make([]any, 0, len(entry.models))
+		for _, o := range entry.models {
+			item := map[string]any{
+				"modelId": o.id,
+				"slots":   map[string]any{"inFlight": o.mm.ActiveCount, "max": int(o.mm.Slots)},
+			}
+			if need := MemoryNeedFor(needs, o.id); need > 0 {
+				item["needBytes"] = need
+			}
+			if o.mm.Capacity.Fresh(now) {
+				_, loaded := o.mm.Capacity.LoadedModel(o.id)
+				item["loaded"] = loaded
+			}
+			offeredModels = append(offeredModels, item)
+		}
 		memory := map[string]any{"reported": mm.Capacity.Fresh(now)}
 		var loaded []any
 		if mm.Capacity.Fresh(now) {
@@ -581,7 +610,7 @@ func FleetCapacityMachines(models []FleetModel, health FleetHealthIndex, now tim
 			"slots":          map[string]any{"inFlight": mm.ActiveCount, "max": int(mm.Slots)},
 			"memory":         memory,
 			"loadedModels":   toAnySliceOrEmpty(loaded),
-			"models":         toAnySlice(entry.models),
+			"models":         offeredModels,
 			"performance":    performance,
 			"degraded":       degraded,
 			"degradedReason": why,
