@@ -65,7 +65,11 @@ func (r *Replier) runReviewedWork(ctx context.Context, sink DeltaSink, produce f
 		canContinue := attempt == 0 && len(messages) > 1 && state.EvidenceRepairs == 0
 		review, err := r.checkWorkResult(ctx, result.FinalText, canContinue)
 		if err != nil {
-			return nil, err
+			// Review is a reasoning boundary after all tool receipts are saved.
+			// A native ceiling must suspend this exact checkpoint; a raw budget
+			// error would leave a failed step that an approved wait cannot resume.
+			failure, _ := r.workRecoveryReadFailure(ctx, err, messages)
+			return nil, failure
 		}
 		continued, err := r.continueWorkEvidence(ctx, messages, review.MissingEvidence, canContinue)
 		if err != nil {

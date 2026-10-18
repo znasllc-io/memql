@@ -74,6 +74,23 @@ type modelBudgetAdapter struct {
 	failCheckpoint bool
 	legacyFailure  bool
 	legacyCeiling  *memql.RunCeilingError
+	reviewBudget   bool
+}
+
+// Exercise the final review's real admission guard after the last allowed
+// answer call, while keeping synthetic source content independent of inference.
+func (a *modelBudgetAdapter) Execute(ctx context.Context, query string) (any, error) {
+	if a.reviewBudget && strings.HasPrefix(query, "builtin work.workReviewReply(") {
+		_, cancel, err := a.Engine.ContextWithWorkCallDeadline(ctx)
+		if cancel != nil {
+			cancel()
+		}
+		if err == nil {
+			return nil, fmt.Errorf("review did not reach its native ceiling")
+		}
+		return nil, err
+	}
+	return a.CognitionEngineAdapter.Execute(ctx, query)
 }
 
 func (a *modelBudgetAdapter) ToolDefinitionsForNames(names []string) []common.ToolDefinition {
@@ -125,6 +142,9 @@ func (r *installedBudgetTurn) RunTurn(ctx context.Context, msg *memqlv1.AgentGen
 
 func TestWorkDBModelAdmissionBudgetKeepsOneNestedCheckpoint(t *testing.T) {
 	testModelBudgetBoundaries(t, []string{"initial", "after-tool", "checkpoint-failure"})
+}
+func TestWorkDBFinalReviewBudgetResumesOnAnotherReplica(t *testing.T) {
+	testModelBudgetBoundaries(t, []string{"reply-review"})
 }
 func TestWorkDBBudgetGuidanceSurvivesRepeatedRaises(t *testing.T) {
 	testModelBudgetBoundaries(t, []string{"guidance"})
@@ -182,7 +202,7 @@ func testModelBudgetBoundaries(t *testing.T, boundaries []string) {
 					require.NoError(t, rules.Register(&memql.RuleConfig{Name: memql.DefaultRuleName, Policy: "fixture", Locked: true, OnUnavailable: memql.OnUnavailableDegrade, SourceFile: "dsl/rules/rules.memql"}))
 					require.NoError(t, rules.Finalize())
 					rtr := router.New(registry, memql.NewPolicyRegistryForTest(map[string][]string{"fixture": {"fixture"}}), rules, nil, e.Logger)
-					adapter := &modelBudgetAdapter{CognitionEngineAdapter: &CognitionEngineAdapter{Engine: e}, reads: &reads, failCheckpoint: (n == 0 && boundary == "checkpoint-failure") || (n == 1 && boundary == "entry-rerun-failure"), legacyFailure: n == 0 && rerun}
+					adapter := &modelBudgetAdapter{CognitionEngineAdapter: &CognitionEngineAdapter{Engine: e}, reads: &reads, failCheckpoint: (n == 0 && boundary == "checkpoint-failure") || (n == 1 && boundary == "entry-rerun-failure"), legacyFailure: n == 0 && rerun, reviewBudget: n == 0 && boundary == "reply-review"}
 					replier, err := agent.NewReplier(adapter, rtr, e.Logger)
 					require.NoError(t, err)
 					ai := agents.New(e.Agents(), e)
@@ -212,7 +232,11 @@ func testModelBudgetBoundaries(t *testing.T, boundaries []string) {
 				if entry || tail {
 					started = started.Add(-2 * time.Hour)
 				}
-				write("createWorkGoal", map[string]any{"goalId": goalID, "statement": "Synthetic section boundary", "origin": "user", "ceilings": map[string]any{"maxModelCalls": 1, "wallClockMs": 10800000}})
+				initialCalls := 1
+				if boundary == "reply-review" {
+					initialCalls = 2
+				}
+				write("createWorkGoal", map[string]any{"goalId": goalID, "statement": "Synthetic section boundary", "origin": "user", "ceilings": map[string]any{"maxModelCalls": initialCalls, "wallClockMs": 10800000}})
 				write("createWorkRun", map[string]any{"runId": runID, "goalId": goalID, "automationName": "parent", "templateFingerprint": triggers[0].template.members["parent"].DefinitionFingerprint(id.New()), "mode": "live", "status": "running", "startedAt": started.UTC().Format(time.RFC3339Nano)})
 				if boundary == "initial" {
 					require.NoError(t, work.NewModelJournal(writer).Record(person, owner, memql.JournaledCall{RunId: runID, StepKey: "prior", RequestHash: "prior-section", PromptRef: "fixture", Served: memql.ServedLocal}))
@@ -325,11 +349,15 @@ func testModelBudgetBoundaries(t *testing.T, boundaries []string) {
 				require.Equal(t, "waiting", child.Status)
 				require.Equal(t, wait.ApprovalID, memql.BareShortId(fmt.Sprint(child.WaitingOn["subject"])))
 				expectedReads := 0
-				if boundary == "after-tool" || boundary == "guidance" || rerun {
+				if boundary == "after-tool" || boundary == "guidance" || boundary == "reply-review" || rerun {
 					expectedReads = 1
 				}
 				require.Equal(t, expectedReads, reads)
-				require.Equal(t, expectedReads, providers[0].calls, "refused model admission must never execute another provider")
+				initialProviderCalls := expectedReads
+				if boundary == "reply-review" {
+					initialProviderCalls++
+				}
+				require.Equal(t, initialProviderCalls, providers[0].calls, "refused model admission must never execute another provider")
 				const firstGuidance = "Use the completed evidence; retain the original request and avoid repeating that read."
 				const secondGuidance = "Keep the earlier correction and finish the remaining response now."
 				saveGuidance := func(text string) {
@@ -575,6 +603,9 @@ func testModelBudgetBoundaries(t *testing.T, boundaries []string) {
 				var spend string
 				require.NoError(t, db.NewRaw(`SELECT payload->'spent' FROM "MemoryNodes" WHERE id=? ORDER BY "createdAt" DESC LIMIT 1`, "v1:work:run:"+runID).Scan(person, &spend))
 				expectedSpent := expectedCalls
+				if boundary == "reply-review" {
+					expectedSpent = 2
+				}
 				if entry {
 					expectedSpent = 2
 				}
