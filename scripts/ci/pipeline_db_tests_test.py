@@ -14,8 +14,6 @@ spec.loader.exec_module(runner)
 
 class DatabaseBudgets(unittest.TestCase):
     def setUp(self):
-        root = Path(__file__).resolve().parents[2]
-        self.workflow = yaml.safe_load((root / ".github/workflows/ci.yml").read_text())
         self.budgets = yaml.safe_load(runner.BUDGETS_PATH.read_text())
         self.classes = runner.read_classes(self.budgets)
         self.parallelism = runner.read_parallelism(self.budgets)
@@ -23,13 +21,6 @@ class DatabaseBudgets(unittest.TestCase):
         self.environment = patch.dict(runner.os.environ, MEMQL_DATABASE_DSN=self.dsn, MEMQL_REQUIRE_DB="1")
         self.environment.start()
         self.addCleanup(self.environment.stop)
-
-    def test_retained_legacy_lane_has_identical_budgets_until_retirement(self):
-        # Remove this transition guard with ci.yml. Native execution never
-        # imports the workflow; its checked-in budget file stands alone.
-        table = next(step["env"]["CLASSES"] for step in self.workflow["jobs"]["plan"]["steps"] if step.get("id") == "plan")
-        self.assertEqual(self.classes, runner.read_classes({"classes": table}))
-        self.assertEqual(self.parallelism, int(self.workflow["jobs"]["db-tests"]["env"]["MEMQL_DB_TEST_PARALLELISM"]))
 
     def test_native_entrypoint_runs_without_a_workflow_directory(self):
         with tempfile.TemporaryDirectory() as directory:
