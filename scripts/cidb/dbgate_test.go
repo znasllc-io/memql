@@ -36,9 +36,6 @@ const dbTestsJob = "db-tests"
 // (dbtest.EnsureSchema).
 const dbtestImport = "github.com/znasllc-io/memql/component/database/dbtest"
 
-// ciWorkflow is the PR-critical workflow carrying the lane.
-const ciWorkflow = "ci.yml"
-
 // selfPkg is this gate's own directory, excluded from the scan.
 //
 // It imports dbtest for the RequireDB predicate and its env-var name, not to
@@ -624,25 +621,6 @@ func stringList(v any) []string {
 	return nil
 }
 
-// loadDBTestsJob reads ci.yml from disk and parses the db-tests job out of it.
-func loadDBTestsJob(t *testing.T, root string) laneSpec {
-	t.Helper()
-
-	path := filepath.Join(root, ".github", "workflows", ciWorkflow)
-	data, err := os.ReadFile(path)
-	if err != nil {
-		t.Fatalf("reading %s: %v", path, err)
-	}
-	spec, err := parseDBTestsJob(data)
-	if err != nil {
-		t.Fatalf("%s: %v.\n\n"+
-			"Either the lane was removed -- in which case the db-gated suites run nowhere and "+
-			"this gate should not be quietly deleted with it -- or it was renamed, in which case "+
-			"update dbTestsJob in this file (memql#2886).", path, err)
-	}
-	return spec
-}
-
 // coversOne reports whether a single package argument covers dir, a
 // repo-relative directory such as "component/memql". The root package is ".".
 func coversOne(pkg, dir string) bool {
@@ -1023,66 +1001,45 @@ func testFuncNames(f *ast.File) []string {
 // the gate cannot drift from the parser it is guarding: `MEMQL_REQUIRE_DB: no`
 // is syntactically present and semantically off, and this catches it.
 func TestDBTestsLaneMakesAnUnreachableDatabaseFail(t *testing.T) {
-	root := repoRoot(t)
-	lane := loadDBTestsJob(t, root)
-
-	if _, present := lane.jobEnv[dbtest.RequireDBEnv]; !present {
-		t.Fatalf("the %q job in %s does not set %s.\n\n"+
-			"Every db-gated test self-skips when it cannot reach Postgres, so without this key a "+
-			"slow, unhealthy or unpullable service container degrades the whole DB-gated suite to "+
-			"GREEN SKIPS instead of a red build -- and the PRs resting their only end-to-end "+
-			"evidence on this lane merge on a signal that never fired. Add "+
-			"`%s: '1'` to the job's env block (memql#2886).",
-			dbTestsJob, ciWorkflow, dbtest.RequireDBEnv, dbtest.RequireDBEnv)
-	}
-
-	if len(lane.steps) == 0 {
-		switch {
-		case len(lane.nonPlainRun) > 0:
-			t.Fatalf("the %q job's only `go test` block is not a plain sequence of commands "+
-				"(first offending line: %q), so this gate refused to scan it. See "+
-				"TestDBTestsLaneCannotPassWithoutRunning for why (memql#2886).",
-				dbTestsJob, lane.nonPlainRun[0])
-		case len(lane.unparsedRun) > 0:
-			t.Fatalf("the %q job in %s runs `go test`, but not as the FIRST WORD of its own "+
-				"line, so this gate cannot read which packages it runs:\n\n  %s\n\n"+
-				"Put the invocation on its own line (`set -o pipefail` or an env assignment on "+
-				"a preceding line is fine). The gate deliberately does not parse around `;` or "+
-				"`&&`, because accepting `make install-deps && go test` would also accept "+
-				"`false && go test` (memql#2886).", dbTestsJob, ciWorkflow, lane.unparsedRun[0])
-		default:
-			t.Fatalf("the %q job in %s has no `go test` step, so the env key it sets guards "+
-				"nothing (memql#2886).", dbTestsJob, ciWorkflow)
+	step := nativeDatabaseStep(t, nativeSpec(t)).step
+	directory := t.TempDir()
+	// Execute the declared shell, replacing only its external build/test tools.
+	// The probe sees the effective environment and fails like a failed suite.
+	for name, script := range map[string]string{
+		"bash":    "#!/bin/sh\ntest \"$*\" = scripts/identity/build-css.sh\n",
+		"python3": "#!/bin/sh\ntest \"$*\" = scripts/ci/pipeline-db-tests.py || exit 90\nprintf '%s\\n' \"$MEMQL_REQUIRE_DB\" \"$GOFLAGS\" \"$MEMQL_PACKAGES\" > receipt\nexit 73\n",
+	} {
+		if err := os.WriteFile(filepath.Join(directory, name), []byte(script), 0700); err != nil {
+			t.Fatal(err)
 		}
 	}
-
-	// The EFFECTIVE value per step, not just the job-level one: Actions gives
-	// step-level env precedence, so a step override silently reverts the lane
-	// to green-by-skip while the job env still reads as guarded.
-	for i, s := range lane.steps {
-		raw, present := lane.effectiveEnv(s, dbtest.RequireDBEnv)
-		if !present {
-			t.Fatalf("`go test` step %d of the %q job resolves no %s (memql#2886).",
-				i, dbTestsJob, dbtest.RequireDBEnv)
-		}
-		if !truthy(t, raw) {
-			t.Fatalf("`go test` step %d of the %q job in %s resolves %s=%q, which "+
-				"dbtest.RequireDB treats as OFF.\n\n"+
-				"A present-but-falsy value is worse than an absent one: it reads as though the "+
-				"lane is guarded while every db-gated test still degrades to a green skip. Note "+
-				"that a STEP-level env overrides the job-level one. Use '1' (memql#2886).",
-				i, dbTestsJob, ciWorkflow, dbtest.RequireDBEnv, fmt.Sprintf("%v", raw))
-		}
+	cmd := exec.Command("/bin/sh", "-c", step.Run)
+	cmd.Dir = directory
+	cmd.Env = []string{"PATH=" + directory, "HOME=" + directory, "MEMQL_PACKAGES=./component/memql"}
+	out, err := cmd.CombinedOutput()
+	if exit, ok := err.(*exec.ExitError); !ok || exit.ExitCode() != 73 {
+		t.Fatalf("database step hid the failing test runner or never reached it: %v %s", err, out)
+	}
+	receipt, err := os.ReadFile(filepath.Join(directory, "receipt"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	values := strings.Split(strings.TrimSpace(string(receipt)), "\n")
+	if len(values) != 3 || !truthy(t, values[0]) || values[2] != "./component/memql" {
+		t.Fatalf("database runner received an unguarded or replaced selection: %q", receipt)
+	}
+	if flag := goflagsDisablesTests(values[1]); flag != "" {
+		t.Fatalf("effective GOFLAGS disables tests: %s", flag)
 	}
 }
 
-// TestDBTestsLaneCannotPassWithoutRunning guards the ways the lane can report a
-// non-failure while executing nothing at all. `ci-required` treats a skipped or
-// continue-on-error job as a pass, so each of these is a silent hole rather
-// than a visible one (memql#2886).
+// Exercise the real native runner's failure, isolation, empty-selection and
+// timeout-budget tests. These replace the retired Actions shell/matrix model.
 func TestDBTestsLaneCannotPassWithoutRunning(t *testing.T) {
-	for _, f := range laneRunFindings(loadDBTestsJob(t, repoRoot(t))) {
-		t.Error(f)
+	cmd := exec.Command("python3", "-m", "unittest", "discover", "-s", "scripts/ci", "-p", "pipeline_db_tests_test.py")
+	cmd.Dir = repoRoot(t)
+	if out, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("native database runner: %v\n%s", err, out)
 	}
 }
 
@@ -1203,14 +1160,10 @@ func laneRunFindings(lane laneSpec) []string {
 // catches drift, and it passes on the tree today.
 func TestDBTestsLaneRunsAtLeastOneDBGatedTest(t *testing.T) {
 	root := repoRoot(t)
-	lane := loadDBTestsJob(t, root)
-	pkgs := lane.pkgs()
-	if lane.planned() {
-		// A planned lane runs exactly the canonical set, partitioned: its
-		// selector IS db-gated-packages.sh's patterns. laneRunFindings holds
-		// the wiring that makes that substitution true, and
-		// TestPlannerPlacesEveryProvisionedPackage holds the partition.
-		pkgs = canonicalPatterns(t, root)
+	spec := nativeSpec(t)
+	var pkgs []string
+	for _, tree := range spec.Select.DBGated {
+		pkgs = append(pkgs, "./"+tree+"/...")
 	}
 
 	all := scanDBGatedTests(t, root)

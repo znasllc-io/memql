@@ -2,7 +2,7 @@
 //
 // It has no runtime code. The package exists so an ordinary, untagged test can
 // compare two sources of truth that nothing previously reconciled: what
-// .github/workflows/ci.yml's `db-tests` job actually configures, and what the
+// memql-package.yaml's native `db-tests` step actually configures, and what the
 // db-gated suites in the tree actually require in order to assert anything.
 //
 // The lane it guards is the one several PRs rest their only end-to-end evidence
@@ -16,11 +16,12 @@
 //     lane provisioning a database and then executing zero tests against it --
 //     the same silent-nothing failure one level up.
 //
-// It also guards the ways the lane can report a non-failure while executing
-// nothing at all -- a step-level env override of MEMQL_REQUIRE_DB (Actions
-// gives step env precedence over job env), a `-run` selector that matches
-// nothing, a step-level `if:`, or `continue-on-error` -- because ci-required
-// treats a skipped or continue-on-error job as a pass, so each is silent.
+// The effective shell environment must require a database, preserve the
+// compiler's package selection and propagate a failing runner's exit status.
+// The native runner's behavioral tests reject empty selections, hidden failures
+// and changed timeout budgets. A complete source graph is compiled through the
+// installed selection policy, and every database package must survive sharding
+// and the runner's final timeout-class partition exactly once.
 //
 // Both are now executable assertions rather than prose. The precedent is
 // scripts/citags, which does exactly this job for build-tagged suites, and
