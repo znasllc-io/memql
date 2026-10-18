@@ -74,6 +74,7 @@ function CapacitySettings({ query, report, fresh, refresh }: { query: CapacityQu
   const reset = () => { setBase(report); setCpu(String(report.budget!.cpuMilli / 1000)); setMemory(String(report.budget!.memoryMiB / 1024)); setJobs(String(report.budget!.jobs)); setAccepting(report.accepting); setError(""); setMessage(""); };
   async function save() {
     if (inflight.current || !query || !fresh || stale) return;
+    setMessage(""); setError("");
     const values = [Number(cpu) * 1000, Number(memory) * 1024, Number(jobs)];
     if ([cpu, memory, jobs].some(v => !/^\d+(?:\.\d+)?$/.test(v.trim())) || values.some(v => !Number.isSafeInteger(v) || v < 1) || values[0]! > report.ceiling!.cpuMilli || values[1]! > report.ceiling!.memoryMiB || values[2]! > report.ceiling!.jobs) { setError("Enter positive values within the limits shown below."); return; }
     inflight.current = true; setBusy(true); setError(""); setMessage("");
