@@ -169,9 +169,9 @@ outputs, publication and failure evidence, not merely a command in a manifest.
 |---|---|---|
 | `ci.yml` | Native package adds editor tests/packaging and the rootless OS Docker stage, retains per-package DB budgets and carries PR bases. Editor hosts plus production PR and exact merge-group proof remain | #5506, #5507 |
 | `gitleaks.yml` | Existing current-tree and history scans; production event/cadence evidence | #5506 |
-| `govulncheck.yml` | Existing scan; production merge-group/push/schedule evidence | #5506 |
+| `govulncheck.yml` | Disabled on October 18; definition removed by this change. Native `vulnerabilities.go-vulnerabilities` passed in release `b0643687e51532322e50eb0ff6014ab3` and scheduled run `3443e867a582c3ee5053aa23511dcf41`, retaining a log and all three reports in each. The pinned v1.7.0 scanner still covers every workspace module and fails on findings. Compiled PR/push/queue/release/schedule selection remains tested | #5506 |
 | `codeql.yml` | Existing Go/JS/Python analysis; journaled SARIF upload and receipt still needed | #5480 |
-| `sbom.yml` | Native inventory now runs on release, main push, weekly and manual events; installed retained JSON/XML and complete module/lockfile evidence remain. The old workflow only retained artifacts, never attached release assets | #5480 |
+| `sbom.yml` | Disabled on October 18; definition removed by this change. Native `inventory.sbom` passed in release `b0643687e51532322e50eb0ff6014ab3`, retained 19 files and log `94d6ed5d-4a52-489c-a39e-f1e7703a4c66`. Summary file `06ffedd8baf50f1ff95b42134bf9a8bcd266addea103092afbe8b291da76266e` reports complete coverage; Go JSON/XML and npm lockfile reports are readable in the Library. Release/main-push/weekly/manual selection and missing-module/package refusal tests pass. The old workflow only retained artifacts; it never attached release assets | #5480 |
 | `scorecard.yml` | Scorecard execution, permissions, branch-rule/scheduled triggers and SARIF publication | #5480 |
 | `build-engine-images.yml` | Disabled: native builds own this path. Current release's verified Azure publication and production rollout remain | #5509 |
 | `dispatch-engine-images-on-release.yml` | Disabled to prevent competing release builders; MemQL owns explicit release requests | #5509 |
