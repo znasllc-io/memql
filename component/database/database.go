@@ -1455,6 +1455,14 @@ func (d *Database) runMigrations(ctx context.Context, bunDB *bun.DB) {
 		}
 	}
 
+	// Hooks consume the completed schema. Running them after a failed or
+	// deferred migration can make recovery impossible: the Timescale hook may
+	// compress rows an earlier migration still needs to rewrite. Keep the
+	// attempt pending and let the normal retry finish migrations first.
+	if d.MigrationError() != nil {
+		return
+	}
+
 	if len(d.config.postMigrationHooks) > 0 {
 		for idx, hook := range d.config.postMigrationHooks {
 			if hook == nil {
