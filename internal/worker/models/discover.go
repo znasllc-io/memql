@@ -103,6 +103,11 @@ type Request struct {
 	Allow []string
 	// Runtimes are the declared OpenAI-compatible endpoints.
 	Runtimes []DeclaredRuntime
+	// Parallel is policy.yaml models.parallel, validated. Zero is "not said".
+	Parallel int
+	// Resident is policy.yaml models.resident, validated. Empty changes
+	// nothing about how any model is called.
+	Resident []Resident
 }
 
 // Discoverer probes this machine. Every external fact is a seam, so the
@@ -119,6 +124,13 @@ type Discoverer struct {
 	OllamaBaseURL string
 	// FloorFn defaults to Floor.
 	FloorFn func() FloorVerdict
+	// ManagedParallel reports the OLLAMA_NUM_PARALLEL of a runtime this
+	// cockpit manages -- the unit it wrote, read where it lives -- or zero
+	// when there is none or it says nothing. A seam rather than a file read
+	// here, because this package knows nothing about systemd and the
+	// package that wrote the unit is the one that can read it back. Nil
+	// means there is no such runtime (Docker, a Mac, one started by hand).
+	ManagedParallel func() int
 }
 
 // DefaultOllamaBaseURL is where Ollama listens unless told otherwise.
@@ -177,7 +189,7 @@ func (d *Discoverer) Probe(ctx context.Context, req Request) Inventory {
 		}
 	}
 
-	found, note := d.probeOllama(ctx)
+	found, note := d.probeOllama(ctx, req)
 	if note != "" {
 		inv.ProbeNotes = append(inv.ProbeNotes, note)
 	}
@@ -214,6 +226,7 @@ func (d *Discoverer) Probe(ctx context.Context, req Request) Inventory {
 		return inv.Models[i].Runtime < inv.Models[j].Runtime
 	})
 	inv.Models, inv.ProbeNotes = resolveDuplicates(inv.Models, inv.ProbeNotes)
+	inv.ProbeNotes = append(inv.ProbeNotes, residentNotes(inv.Models, req.Resident)...)
 	return inv
 }
 
@@ -336,20 +349,54 @@ func (d *Discoverer) ollamaBaseURL() string {
 	return strings.TrimRight(host, "/")
 }
 
-// ollamaParallelism is the per-model concurrency this machine will claim.
-//
-// ZERO IS NOT AN OPTION HERE, and this is the one place in the package
-// where absent is the PERMISSIVE direction rather than the safe one: the
-// engine reads a missing `max=` as unlimited. Left unset, a laptop with a
-// single 8B model would be handed as many concurrent generations as the
-// router had work for. So a ceiling is always declared -- OLLAMA_NUM_PARALLEL
-// when the operator set one, and otherwise one, which is what Ollama itself
-// falls back to when it cannot fit more.
-func (d *Discoverer) ollamaParallelism() int {
+// envParallelism is OLLAMA_NUM_PARALLEL as the worker's own environment
+// states it, or zero when it is unset or not a positive number.
+func (d *Discoverer) envParallelism() int {
 	if v := strings.TrimSpace(d.getenv("OLLAMA_NUM_PARALLEL")); v != "" {
 		if n, err := strconv.Atoi(v); err == nil && n > 0 {
 			return n
 		}
 	}
-	return 1
+	return 0
+}
+
+// effectiveParallelism is the per-model concurrency this machine will
+// claim. See ParallelSource for the sources and their order.
+func (d *Discoverer) effectiveParallelism(configured int) int {
+	n, _ := d.ParallelSource(configured)
+	return n
+}
+
+// ParallelSource is the per-model concurrency this machine will claim and
+// the sentence-ready name of where it came from. The sources are read most
+// deliberate first: the owner's models.parallel, the worker's
+// OLLAMA_NUM_PARALLEL (the only knob there was before the policy key, so it
+// keeps its place ahead of the unit), the unit this cockpit wrote for its
+// own Ollama, and one.
+//
+// ZERO IS NOT AN OPTION HERE, and this is the one place in the package
+// where absent is the PERMISSIVE direction rather than the safe one: the
+// engine reads a missing `max=` as unlimited. Left unset, a laptop with a
+// single 8B model would be handed as many concurrent generations as the
+// router had work for. So a ceiling is always declared, and a source that
+// holds a nonsense value is skipped rather than believed.
+//
+// The sources can disagree with the Ollama that is actually running --
+// the unit is edited and Ollama has not restarted yet -- and that is the
+// benign direction either way: a call admitted past the runtime's slots
+// queues inside Ollama, and a ceiling below them wastes a slot until the
+// next refresh.
+func (d *Discoverer) ParallelSource(configured int) (int, string) {
+	if configured > 0 {
+		return configured, "models.parallel in policy.yaml"
+	}
+	if n := d.envParallelism(); n > 0 {
+		return n, "OLLAMA_NUM_PARALLEL in the worker's environment"
+	}
+	if d != nil && d.ManagedParallel != nil {
+		if n := d.ManagedParallel(); n > 0 {
+			return n, "the memql-ollama.service unit"
+		}
+	}
+	return 1, "the default"
 }

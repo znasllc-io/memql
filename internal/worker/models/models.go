@@ -371,6 +371,19 @@ type Info struct {
 	// Allowed mirrors policy.yaml models.allow.
 	Allowed bool
 
+	// KeepAlive and WorkingContext are this machine's instructions to its
+	// own Ollama for THIS model (policy.yaml models.resident). They are not
+	// Attributes, and the difference is the point: Attributes are what the
+	// engine is told, and the engine has no use for either of these. A key
+	// on the label that the engine does not parse is skipped without a
+	// word, which is a setting nobody can see fail.
+	//
+	// Both are the zero value unless the owner wrote an entry, and only an
+	// Ollama model ever carries them -- an OpenAI-compatible runtime has no
+	// keep_alive to send it.
+	KeepAlive      KeepAlive
+	WorkingContext int
+
 	Attributes
 }
 

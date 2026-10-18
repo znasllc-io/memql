@@ -55,7 +55,7 @@ type ollamaShowResponse struct {
 // ordinary case across most of a fleet, and it means "this machine offers
 // no models" -- a fact the worker reports, not a condition it logs at warn
 // level on every registration.
-func (d *Discoverer) probeOllama(ctx context.Context) ([]Info, string) {
+func (d *Discoverer) probeOllama(ctx context.Context, req Request) ([]Info, string) {
 	base := d.ollamaBaseURL()
 
 	var tags ollamaTagsResponse
@@ -66,7 +66,8 @@ func (d *Discoverer) probeOllama(ctx context.Context) ([]Info, string) {
 		return nil, fmt.Sprintf("Ollama is running at %s but has no models pulled", base)
 	}
 
-	parallel := d.ollamaParallelism()
+	parallel := d.effectiveParallelism(req.Parallel)
+	resident := residentByID(req.Resident)
 	out := make([]Info, 0, len(tags.Models))
 	for _, m := range tags.Models {
 		id := strings.TrimSpace(m.Model)
@@ -134,6 +135,9 @@ func (d *Discoverer) probeOllama(ctx context.Context) ([]Info, string) {
 			// declares it under models.runtimes; a bare Ollama offers
 			// neither, which is true.
 		}
+		// AFTER the probe, because the window is capped by the context the
+		// probe read. Settings ride the model, never the label.
+		applyResident(&info, resident[id])
 		out = append(out, info)
 	}
 	return out, ""

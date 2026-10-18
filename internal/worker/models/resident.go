@@ -156,3 +156,74 @@ type Resident struct {
 	// the engine's own window alone.
 	WorkingContext int
 }
+
+// residentByID indexes the validated entries. The first entry for an id
+// wins, matching the policy reader, so a hand-built Request cannot make a
+// later line quietly override an earlier one.
+func residentByID(list []Resident) map[string]Resident {
+	out := make(map[string]Resident, len(list))
+	for _, r := range list {
+		id := strings.TrimSpace(r.ID)
+		if id == "" {
+			continue
+		}
+		if _, dup := out[id]; !dup {
+			out[id] = r
+		}
+	}
+	return out
+}
+
+// applyResident puts an owner's entry on the model it names. Only an
+// Ollama model takes one: an OpenAI-compatible runtime has no keep_alive
+// to send, and sending its model an Ollama-shaped field would be a request
+// the runtime may reject.
+//
+// The window is capped at the context the model itself reported. Asking a
+// runtime for more than a model can hold is a request it cannot honour,
+// and the model's own ceiling is the number that was always going to win.
+func applyResident(info *Info, r Resident) {
+	if info.Kind != KindOllama {
+		return
+	}
+	if !r.KeepAlive.Set && r.WorkingContext <= 0 {
+		return
+	}
+	info.KeepAlive = r.KeepAlive
+	w := r.WorkingContext
+	if w > 0 && info.ContextWindow > 0 && w > info.ContextWindow {
+		w = info.ContextWindow
+	}
+	info.WorkingContext = w
+}
+
+// residentNotes says why an entry is idle, in the channel `memql worker
+// models` already prints (Inventory.ProbeNotes). An entry that names a
+// model the machine does not have is the likeliest mistake -- the bake-off
+// names a winner before anyone has pulled it -- and silence would read as
+// a model that is resident.
+func residentNotes(found []Info, resident []Resident) []string {
+	byModel := make(map[string]Info, len(found))
+	for _, m := range found {
+		byModel[m.ID] = m
+	}
+	var notes []string
+	seen := map[string]bool{}
+	for _, r := range resident {
+		id := strings.TrimSpace(r.ID)
+		if id == "" || seen[id] {
+			continue
+		}
+		seen[id] = true
+		m, ok := byModel[id]
+		switch {
+		case !ok:
+			notes = append(notes, fmt.Sprintf("models.resident: %s is not installed in any runtime this machine probes", id))
+		case m.Kind != KindOllama:
+			notes = append(notes, fmt.Sprintf("models.resident: %s is served by %s, which has no keep_alive; models.resident is ignored for it", id, m.Runtime))
+		case m.Embeddings && r.WorkingContext > 0:
+			notes = append(notes, fmt.Sprintf("models.resident: %s is an embedding model; embeddings run at a fixed window, so working_context is ignored", id))
+		}
+	}
+	return notes
+}
