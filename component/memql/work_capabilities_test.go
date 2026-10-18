@@ -82,9 +82,9 @@ func TestCapabilitySearchRanksPurposeAboveIncidentalImplementationWords(t *testi
 func TestSavedFileContentAndImageOperationsAreInTheRealCapabilityShortlist(t *testing.T) {
 	e, _, _ := readMergeTestEngine(t)
 	for _, tc := range []struct{ search, name string }{
-		{"library file read content", "library.libraryDocumentVersion"},
-		{"Read file to identify first bird", "library.libraryDocumentVersion"},
-		{"What is the number one bird in the markdown file you just saved? Read that file to identify it.", "library.libraryDocumentVersion"},
+		{"library file read content", "library.libraryReadFile"},
+		{"Read file to identify first bird", "library.libraryReadFile"},
+		{"What is the number one bird in the markdown file you just saved? Read that file to identify it.", "library.libraryReadFile"},
 		{"generate image", "library.libraryGenerateImage"},
 	} {
 		rows, err := e.workCapabilitiesBuiltin(askTestActor(), map[string]any{"search": tc.search}, 0)
