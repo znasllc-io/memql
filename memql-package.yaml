@@ -71,7 +71,8 @@ pipeline:
       timeout: 60m
       run: |
         set -eu
-        export GOTOOLCHAIN=go1.26.9 GOWORK=off GOFLAGS=-p=2 GOMAXPROCS=2
+        # Go 1.27 fixes the fuzz-duration shutdown race (golang/go#75804).
+        export GOTOOLCHAIN=go1.27.2 GOWORK=off GOFLAGS=-p=2 GOMAXPROCS=2
         python3 scripts/ci/prepare.py
         cd .memql-ci/memql-cockpit
         bash <<'MEMQL_FUZZ'
