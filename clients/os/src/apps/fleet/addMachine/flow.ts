@@ -224,7 +224,6 @@ export function checksFor(
   // report the cluster stopped hearing is an installer that stopped.
   const setup = setupNow(machine.setup, now);
   if (draft.computerUse) checks.push(buildCheck(machine));
-  if (draft.workbench) checks.push(workbenchCheck(machine, draft, setup));
   if (draft.computerUse && draft.platform === "mac") checks.push(permissionsCheck(machine));
   if (draft.computerUse && draft.platform === "linux") checks.push(displayCheck(machine));
   if (draft.inference) {
@@ -247,6 +246,9 @@ export function checksFor(
             ? { id: "response", name: "Model response", state: "stopped", answer: "No answer", repair: response.error, act: "retryResponse" }
             : { id: "response", name: "Model response", state: "current", answer: response.state === "running" ? "Asking the model" : "Waiting to ask the model" });
   }
+  // LAST, BECAUSE THE INSTALLER DOES IT LAST (memql#6229): read top to bottom,
+  // the list is the order things happen, so "After the models" points up.
+  if (draft.workbench) checks.push(workbenchCheck(machine, draft, setup));
   return checks;
 }
 

@@ -47,7 +47,7 @@ const APPS_REPORTED = [
   { id: "codex", allowed: true, signedIn: true, version: "0.162.1" },
 ];
 
-function machine(labels: Record<string, string>, runtimes: { name: string; version: string }[] = [], apps: Record<string, unknown>[] = APPS_REPORTED) {
+function machine(labels: Record<string, string>, runtimes: { name: string; version: string }[] = [], apps: Record<string, unknown>[] = APPS_REPORTED, extra: Record<string, unknown> = {}) {
   return machineFromRow(machineRow({
     id: "v1:worker:registration:studio",
     identityId: MINT.identityId,
@@ -64,7 +64,16 @@ function machine(labels: Record<string, string>, runtimes: { name: string; versi
     labels,
     apps,
     hardware: { chip: "Apple M4 Max", memoryBytes: 38654705664, cpuCores: 14, diskFreeBytes: 729e9, runtimes, reportedAt: ago(4) },
+    ...extra,
   }));
+}
+
+// THE INSTALLER'S OWN REPORT (memql#6229): the install command keeps working
+// after the machine connects, and these are the states it reports.
+const LOCAL_WB: Draft = { ...LOCAL, workbench: true };
+const GIB = 1024 ** 3;
+function installer(state: string, stages: Record<string, unknown>[]) {
+  return { setup: { state, stages, updatedAt: ago(2), reportedAt: ago(2) } };
 }
 
 const PULL: ModelPull = {
@@ -160,6 +169,21 @@ const SCENES: Record<string, Scene> = {
   "add-machine-refused": { draft: LOCAL, mint: true, machine: machine({ "runtime:ollama": "0.12.6" }, RUNTIME), beats: 2, pulls: { live: null, startError: "The recommended downloads exceed free storage: 31.2 GB needed, 24.0 GB free." } },
   "add-machine-ready": { draft: LOCAL, mint: true, machine: machine(SERVED, RUNTIME), beats: 3, pulls: { live: null }, response: { state: "passed" } },
   "add-machine-tools-ready": { draft: TOOLS, mint: true, machine: machine({}), beats: 3, pulls: { live: null } },
+  "add-machine-installer-runtime": { draft: LOCAL_WB, mint: true, beats: 2, pulls: { live: null }, machine: machine({}, [], APPS_REPORTED, installer("running", [
+    { name: "runtime", state: "running" }, { name: "models", state: "waiting" }, { name: "workbench", state: "waiting" },
+  ])) },
+  "add-machine-installer-downloading": { draft: LOCAL_WB, mint: true, beats: 2, pulls: { live: null }, machine: machine({ "runtime:ollama": "0.12.6" }, RUNTIME, APPS_REPORTED, installer("running", [
+    { name: "runtime", state: "done" },
+    { name: "models", state: "running", model: "qwen3.8:27b", completedBytes: 6.1 * GIB, totalBytes: 18.2 * GIB, modelsDone: 0, modelsTotal: 2 },
+    { name: "workbench", state: "waiting" },
+  ])) },
+  "add-machine-installer-workbench": { draft: LOCAL_WB, mint: true, beats: 2, pulls: { live: null }, machine: machine(SERVED, RUNTIME, APPS_REPORTED, installer("running", [
+    { name: "runtime", state: "done" }, { name: "models", state: "done" }, { name: "workbench", state: "running" },
+  ])) },
+  "add-machine-installer-workbench-failed": { draft: LOCAL_WB, mint: true, beats: 3, pulls: { live: null }, response: { state: "passed" }, machine: machine(SERVED, RUNTIME, APPS_REPORTED, installer("finished", [
+    { name: "runtime", state: "done" }, { name: "models", state: "done" },
+    { name: "workbench", state: "failed", detail: "Start Docker with Linux containers, then retry: Cannot connect to the Docker daemon. Is the docker daemon running?" },
+  ])) },
 };
 
 export function setupWizardScenes(Frame: Frame) {
