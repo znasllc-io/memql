@@ -85,3 +85,52 @@ func TestPipelineDatabaseBudgetsAndFailurePropagation(t *testing.T) {
 		t.Fatal("DB lane does not use the tested budget runner")
 	}
 }
+
+func TestEditorSiteBrowserValidationSelectionAndIsolation(t *testing.T) {
+	spec := engineManifest(t).Pipeline
+	graph, _ := engineImportGraph(t)
+	for _, event := range []pipelines.Event{pipelines.EventPullRequest, pipelines.EventPush, pipelines.EventMergeGroup} {
+		for _, tc := range []struct {
+			path string
+			want bool
+		}{
+			{"editors/vscode/site/test-browser.mjs", true},
+			{"editors/vscode/themes/memql-dark-color-theme.json", true},
+			{"examples/research-desk/research/brief.memql", true},
+			{"brand/tokens.css", true},
+			{"scripts/ci/editor-site.sh", true},
+			{"scripts/ci/retry.sh", true},
+			{"memql-package.yaml", true},
+			{".github/workflows/vscode-site.yml", true},
+			{"docs/public/overview/quickstart.md", false},
+			{"component/grpc/server.go", false},
+		} {
+			plan, refusal := compileEngineOpening(spec, graph, event, []string{tc.path})
+			if refusal != nil {
+				t.Fatal(refusal)
+			}
+			found := false
+			for _, step := range plan.Steps() {
+				if step.Key != "tests.editor-site" {
+					continue
+				}
+				found = true
+				// PRs select affected inputs; push/queue qualification runs the
+				// full functional suite, regardless of the changed path.
+				want := tc.want || event != pipelines.EventPullRequest
+				if (step.Skip == nil) != want {
+					t.Errorf("%s %s: selected=%v, want %v", event, tc.path, step.Skip == nil, want)
+				}
+				if step.RequiresFleet() || len(step.Secrets) != 0 || len(step.Services) != 0 || step.ImageBuild != nil || step.RunAfterFailure || step.Run != "bash scripts/ci/editor-site.sh" || !slices.Equal(step.Artifacts, []string{"editors/vscode/site/dist", "editors/vscode/site/artifacts"}) {
+					t.Fatal("site verification lost isolated browser execution or retained evidence")
+				}
+				if step.CPUMilli != 2000 || step.MemoryMiB != 4096 || step.TimeoutSeconds != 15*60 {
+					t.Fatal("site verification lost its bounded resource request")
+				}
+			}
+			if !found {
+				t.Fatal("site browser check is absent")
+			}
+		}
+	}
+}

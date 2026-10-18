@@ -139,6 +139,15 @@ pipeline:
         - component/memql/os_navigation.json
         - Makefile
         - memql-package.yaml
+      editor-site:
+        - editors/vscode/site/**
+        - editors/vscode/themes/**
+        - examples/research-desk/**
+        - brand/**
+        - scripts/ci/editor-site.sh
+        - scripts/ci/retry.sh
+        - memql-package.yaml
+        - .github/workflows/vscode-site.yml
       editors:
         - brand/tokens.css
         - brand/editorAppearance.ts
@@ -415,6 +424,17 @@ pipeline:
             context: deploy/db-image
             dockerfile: deploy/db-image/Dockerfile
             target: verified
+        - name: editor-site
+          placement: cluster
+          when: { bucket: editor-site }
+          # Native-published toolchain includes Chromium's system libraries.
+          image: ghcr.io/znasllc-io/memql-toolchain@sha256:a62b53491fbd9cfd4bbfdf9612bfb1776d9fc9d42aab7ceceac3a0a18a17a8bb
+          caches: [npm]
+          cpuMilli: 2000
+          memoryMiB: 4096
+          timeout: 15m
+          artifacts: [editors/vscode/site/dist, editors/vscode/site/artifacts]
+          run: bash scripts/ci/editor-site.sh
         - name: editor-packages
           placement: cluster
           when: { bucket: editors }
