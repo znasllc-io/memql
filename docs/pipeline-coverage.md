@@ -21,12 +21,12 @@ is not evidence that its host, trigger or publication path has run.
 
 | Legacy workflow | MemQL command coverage | Remaining qualification / external effect |
 | --- | --- | --- |
-| `ci.yml` | Headless build, race suite, discovered 20-second fuzz targets, gofmt, vet, single engine-pin guard; native Linux/macOS computer-use build and vet; macOS archive and isolated installer checks | Native Linux amd64 with Docker and X11 headers; macOS arm64 with Xcode. Real computer-use tests remain excluded because they operate a display. |
+| `ci.yml` | Headless build, race suite, discovered 20-second fuzz targets, gofmt, vet, single engine-pin guard; container Linux and native macOS computer-use build and vet; macOS archive and isolated installer checks | Native Linux amd64 with Docker for the race suite; the published toolchain supplies Linux X11 headers and compilers; macOS arm64 with Xcode. Real computer-use tests remain excluded because they operate a display. |
 | `install-scripts-lint.yml` | Bash/POSIX syntax, ShellCheck, installer library/menu tests and rendered-mark/UI assertions on Linux amd64 and macOS arm64 | ShellCheck must already be installed on each consenting host. No host package installation is implicit. |
 | `govulncheck.yml` | Exact v1.3.0 scanner, complete module, retained findings | Weekly trigger and installed run; findings and scanner failures remain failures. |
-| `gitleaks.yml` | Exact v8.30.1 scanner; introduced commits on PR/push/merge candidates, full candidate history and tags weekly and on release, redacted coverage receipts | Installed commit-range and full-history runs. A secret introduced and removed inside a PR remains in the selected commit range. |
+| `gitleaks.yml` | Exact v8.30.1 scanner; introduced commits on PR/push/merge candidates, full candidate history and tags weekly or on demand, redacted coverage receipts | Installed commit-range and full-history runs. A secret introduced and removed inside a PR remains in the selected commit range. |
 | `codeql.yml` | Go manual build, pinned CodeQL 2.27.1 bundle with verified SHA-256, **security-and-quality**, retained SARIF | Weekly trigger and driver-owned SARIF publication are declared; installed delivery remains unqualified. Local Linux headless scan passed; other build tags and operating systems need their own coverage. |
-| `release.yml` | Headless four-platform build/archives; native computer-use builds on darwin/linux × arm64/amd64; macOS menu/app archives | Exact release-event/tag qualification, collection of all four computer-use checksums, immutable cross-step artifact aggregation and GitHub release upload. No upload command or credential is introduced here. |
+| `release.yml` | Headless four-platform build/archives; computer-use builds for darwin/linux × arm64/amd64 using the AMD64 build pool and an Apple Silicon Mac; macOS menu/app archives | Exact release-event/tag qualification, collection of all four computer-use checksum sidecars, complete immutable candidate assembly and GitHub release upload. No upload command or credential is introduced here. |
 | `sbom.yml` | CycloneDX v1.10.0 inventories **each built binary**, JSON and XML retained with that build | Cross-step collection and publication of the eight binary inventories; manual release-asset re-inventory trigger. A source dependency list cannot substitute for these binary inventories. |
 | `scorecard.yml` | No equivalent declared | Scorecard's branch-protection event, weekly trigger, identity-token attestation, public result publication and SARIF upload require an installed authorized equivalent. This row cannot be marked passed by another scan. |
 
@@ -36,8 +36,8 @@ release builds after any required failure. The manifest never turns a missing
 platform, missing tool or denied consent into a successful skipped command.
 Linux container commands use the public pinned AMD64 toolchain and explicitly
 select Go 1.26.9. The image matches the bounded AKS build pool. Native commands require the exact
-declared platform; Linux hosts also need CGO's compiler and X11 development
-headers, and macOS hosts need Xcode command-line tools. Release packaging is
+declared host platform. The toolchain carries Linux CGO compilers and X11 development
+headers. macOS hosts need Xcode command-line tools; Intel artifacts are cross-built on Apple Silicon and run under already-installed Rosetta. Release packaging is
 the existing local/ad-hoc signing path; distribution signing credentials and
 notarization are not configured by this change.
 
@@ -95,7 +95,8 @@ inference package tests passed in the same pinned Linux container.
 
 The recipe now selects Linux AMD64 and Go 1.26.9. Native host declarations
 remain explicit. The daily schedule selects only opted-in stages; full-history
-secret checks run weekly and on release/manual qualification. PR, push and
+secret checks and CodeQL run weekly or on manual qualification. Releases retain
+the ordinary checks and vulnerability scan; they do not repeat the weekly scans. PR, push and
 merge-candidate scans cover every introduced commit, including a secret added
 and removed before the final tree. A missing predecessor falls back to full
 history; an unreadable nonempty base fails. The bounded scanner and its
@@ -103,3 +104,40 @@ regressions are copied from the engine, preserving failure and coverage receipts
 These additions require an engine containing memql#6137's stage cadence; the
 Cockpit SARIF delivery step also requires memql#6146. Historical results above
 are not qualification of this rebased source or of installed execution.
+
+The Linux ARM64 computer-use release uses the pinned toolchain's AArch64
+compiler and target libraries on AMD64. Its completed binary must start under
+QEMU before artifact retention. Both Linux architectures use the same bounded
+build pool. The Intel Mac release uses the Apple Silicon host with explicit
+AMD64 Go and Swift targets, verifies the archives, and requires Rosetta to
+already be present; no package installation or license acceptance is implicit.
+These recipe changes still require installed qualification with the newly
+published toolchain digest before release.
+
+Each computer-use producer retains a `.sha256` sidecar naming its exact raw
+binary. The native candidate must include all four binaries and sidecars, plus
+the headless archives, Mac app/menu archives and binary SBOMs. This replaces
+the legacy post-upload combined computer-use checksum file; the headless
+archive checksum manifest and Mac archive checksum names stay unchanged.
+Candidate preparation verifies every producer and retained artifact before
+approval, and promotion requires every declared asset to have a verified
+publication receipt. No build step receives publication credentials.
+
+## Native toolchain pin
+
+The AMD64 toolchain now pins
+`sha256:a62b53491fbd9cfd4bbfdf9612bfb1776d9fc9d42aab7ceceac3a0a18a17a8bb`.
+Engine native release run `517b203755fd72a42c422493c691ad77` built it in the
+existing AKS pool at source `f8ece576d93efdfb899fb3c4133f895c304f7e60`.
+The downloaded archive matched its retained SHA-256 and passed the full
+matching toolchain smoke script, including its AArch64 compiler and libraries.
+Native candidate
+`sha256:27c6c1aaaa081a2f8539f8f9190457ad6f8fb1d1e9bf7b1b159df3ab24d9ffa5`
+completed reviewed GHCR publication with verified blob and tag readback.
+The same manifest is readable anonymously.
+
+This qualifies the image's build, smoke and publication path. Installed
+Cockpit checks and release aggregation still require their own runs. The Mac
+must explicitly allow this repository in its pipeline policy, and the Intel
+Mac release requires already-installed Rosetta. No policy edit or host
+installation is performed by these recipes.

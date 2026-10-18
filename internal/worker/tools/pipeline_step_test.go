@@ -640,25 +640,35 @@ func TestPipelineStepTimeoutDefaultsAndClamps(t *testing.T) {
 	}
 }
 
-// A step stopped for its timeout is asked first -- SIGTERM, the way a pod is
-// -- so a test runner can say what it was doing and clean up after itself.
+// A stopped step is asked first -- SIGTERM, the way a pod is -- so a test
+// runner can say what it was doing and clean up after itself. Cancel after
+// the command installs its trap: a one-second deadline also includes checkout,
+// so on a busy host it can expire before there is a command to signal. The
+// separate timeout test holds the policy deadline to its actual wall clock.
 func TestPipelineStepAsksAStepToStopBeforeKillingIt(t *testing.T) {
 	allowLocalClones(t)
 	fx := newPipelineFixture(t)
-	p, _ := pipelineTestPolicy(t, "  max_timeout_sec: 1\n")
+	p, root := pipelineTestPolicy(t, "")
 	prev := pipelineStopGrace
 	pipelineStopGrace = 5 * time.Second
 	t.Cleanup(func() { pipelineStopGrace = prev })
 
-	out := &recordedOutput{}
-	_, fail := runPipelineStep(context.Background(), "",
+	ctx, cancel := context.WithCancel(context.Background())
+	t.Cleanup(cancel)
+	out := &recordedOutput{onChunk: func(chunk recordedChunk) {
+		if !chunk.stderr && strings.Contains(chunk.data, "started\n") {
+			cancel()
+		}
+	}}
+	_, fail := runPipelineStep(ctx, "",
 		stepArgs(t, fx, "trap 'echo got-term; exit 0' TERM; echo started; sleep 30 & wait", nil), p, out.emit, out.artifact)
-	if fail == nil || fail.GetErrorCode() != "timeout" {
-		t.Fatalf("want timeout, got %+v", fail)
+	if fail == nil || fail.GetErrorCode() != "cancelled" {
+		t.Fatalf("want cancellation after command readiness, got %+v", fail)
 	}
 	if !strings.Contains(out.text(false), "got-term") {
 		t.Errorf("the step was never sent SIGTERM before it was killed:\n%s", out.all())
 	}
+	assertNoStepDirs(t, root)
 }
 
 func TestPipelineStepEscalatesToKillWhenTheStepIgnoresTERM(t *testing.T) {
