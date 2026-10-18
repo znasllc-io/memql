@@ -3,6 +3,7 @@ package pipelinerun
 import (
 	"context"
 	"errors"
+	"slices"
 	"testing"
 	"time"
 
@@ -91,5 +92,62 @@ func TestCleanupFailureLeavesReceiptForAnotherDriverWithoutRepeatingWork(t *test
 	acks := dh.exec.acknowledged()
 	if len(acks) < 2 || acks[0].StepKey != "checks.vet" || acks[1].StepKey != "checks.vet" {
 		t.Fatalf("replacement did not retry cleanup: %+v", acks)
+	}
+}
+
+func TestRecoveryCleansOtherFinishedJobsWhenOneReceiptRemainsUnconfirmed(t *testing.T) {
+	dh := newDriveHarness(t, driveManifest)
+	// All commands and their receipts finish, but the original replica loses
+	// its final write. Recovery must reconcile the complete recorded batch.
+	dh.integ.Configure(func(d *Deps) {
+		d.Store = &flakyStore{Store: dh.store, fail: func(p RunPatch) error {
+			if p.Status != nil && *p.Status == StatusCompleted {
+				return errors.New("final write unavailable")
+			}
+			return nil
+		}}
+	})
+	run := dh.openRun(t, prOpening())
+	deliver(t, dh.integ, run)
+	if len(dh.exec.sentKeys()) != 3 {
+		t.Fatalf("fixture did not execute all three commands: %v", dh.exec.sentKeys())
+	}
+	dh.exec.mu.Lock()
+	dh.exec.ackErrors = map[string]error{"checks.vet": errors.New("creation remains unresolved")}
+	dh.exec.mu.Unlock()
+	before := len(dh.exec.acknowledged())
+	peer := dh.peer("agent-b")
+	peer.Configure(func(d *Deps) { d.Now = func() time.Time { return testNow.Add(leaseStaleAfter + time.Second) } })
+	if err := peer.RecoverRuns(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	waitDrives(t, peer)
+	var keys []string
+	for _, req := range dh.exec.acknowledged()[before:] {
+		keys = append(keys, req.StepKey)
+		if len(req.Secrets) != 0 {
+			t.Fatal("cleanup carried execution secrets")
+		}
+	}
+	slices.Sort(keys)
+	if !slices.Equal(keys, []string{"checks.vet", "tests.lint", "tests.unit"}) {
+		t.Fatalf("one unconfirmed cleanup starved other finished Jobs: %v", keys)
+	}
+	got, _ := dh.store.run(run.ID)
+	if got.Status == StatusCompleted || got.Conclusion != "" || len(dh.exec.sentKeys()) != 3 {
+		t.Fatalf("unconfirmed cleanup completed or repeated work: %+v; sent %v", got, dh.exec.sentKeys())
+	}
+	dh.exec.mu.Lock()
+	dh.exec.ackErrors = nil
+	dh.exec.mu.Unlock()
+	last := dh.peer("agent-c")
+	last.Configure(func(d *Deps) { d.Now = func() time.Time { return testNow.Add(2*leaseStaleAfter + 2*time.Second) } })
+	if err := last.RecoverRuns(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	waitDrives(t, last)
+	got, _ = dh.store.run(run.ID)
+	if got.Status != StatusCompleted || got.Conclusion != ConclusionSuccess || len(dh.exec.sentKeys()) != 3 {
+		t.Fatalf("confirmed cleanup did not finish without replay: %+v; sent %v", got, dh.exec.sentKeys())
 	}
 }

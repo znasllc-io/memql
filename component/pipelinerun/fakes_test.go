@@ -1575,6 +1575,7 @@ type fakeExecutor struct {
 	acks          []pipelines.StepRequest
 	onAcknowledge func(pipelines.StepRequest)
 	ackError      error
+	ackErrors     map[string]error
 	cancelError   error
 	mu            sync.Mutex
 	requests      []pipelines.StepRequest
@@ -1603,6 +1604,9 @@ func (e *fakeExecutor) AcknowledgeReceipt(_ context.Context, req pipelines.StepR
 	e.acks = append(e.acks, req)
 	fn := e.onAcknowledge
 	err := e.ackError
+	if specific, ok := e.ackErrors[req.StepKey]; ok {
+		err = specific
+	}
 	e.mu.Unlock()
 	if fn != nil {
 		fn(req)
