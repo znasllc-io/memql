@@ -44,7 +44,7 @@ it("adds by Enter or plus, deduplicates, removes and submits the existing wire f
   back();
   expect(within(list()).getAllByRole("listitem")).toHaveLength(2);
   next();
-  pressBar("Continue to passkey");
+  pressBar("Create passkey");
   expect(submit).toHaveBeenCalledWith("/setup", expect.objectContaining({ internal_domains: "example.test, team.example.test" }));
 });
 
@@ -82,6 +82,6 @@ it("allows an empty optional list after removing its last domain", () => {
   fireEvent.keyDown(entry(), { key: "Enter" });
   expect(screen.queryByRole("alert")).toBeNull();
   next();
-  pressBar("Continue to passkey");
+  pressBar("Create passkey");
   expect(submit).toHaveBeenCalledWith("/setup", expect.objectContaining({ internal_domains: "" }));
 });

@@ -34,7 +34,7 @@ async function reachSubmission() {
   await screen.findByRole("button", { name: "Continue" });
   for (let i = 0; i < 3; i++) pressBar("Continue");
   readTheBarNow();
-  return screen.getByRole("button", { name: "Continue to passkey" });
+  return screen.getByRole("button", { name: "Create passkey" });
 }
 
 describe("ownership setup through IdentityScreen and native transport", () => {
@@ -47,14 +47,47 @@ describe("ownership setup through IdentityScreen and native transport", () => {
     vi.stubGlobal("fetch", fetcher);
     render(<StrictMode><IdentityScreen initialPath="/setup" /></StrictMode>);
     fireEvent.click(await reachSubmission());
-    expect(await screen.findByRole("button", { name: "Create passkey and finish" })).toBeTruthy();
+    expect(await screen.findByRole("heading", { name: "Register owner passkey" })).toBeTruthy();
     expect(screen.getAllByRole("group", { name: "Color theme" })).toHaveLength(1);
-    expect(screen.queryByRole("button", { name: "Continue to passkey" })).toBeNull();
+    // The wizard's act is gone: the passkey page carries the one act left.
+    expect(screen.getAllByRole("button", { name: "Create passkey" })).toHaveLength(1);
     const posts = fetcher.mock.calls.filter(([, init]) => init?.method === "POST");
     expect(posts).toHaveLength(1);
     expect(posts[0]?.[0].pathname).toBe("/setup");
     expect(posts[0]?.[1]).toMatchObject({ credentials: "include", redirect: "error", headers: { "X-CSRF-Token": "setup-csrf" } });
     expect(Object.fromEntries(posts[0]?.[1]?.body as URLSearchParams)).toMatchObject({ owner_first_name: "Ada", owner_email: "ada@example.test", brand_name: "Example" });
+  });
+
+  it("opens this device's passkey prompt from the wizard's one press, and offers another device after a cancel", async () => {
+    // memql#6214: the owner pressed through the same information three times
+    // before the browser ever asked for a passkey.
+    const create = vi.fn()
+      .mockRejectedValueOnce(new DOMException("The operation was cancelled.", "NotAllowedError"))
+      .mockResolvedValueOnce({ toJSON: () => ({ id: "credential" }) });
+    vi.stubGlobal("PublicKeyCredential", { parseCreationOptionsFromJSON: (x: unknown) => x, isUserVerifyingPlatformAuthenticatorAvailable: async () => true });
+    Object.defineProperty(navigator, "credentials", { configurable: true, value: { create } });
+    const fetcher = vi.fn(async (input: URL, init?: RequestInit) => {
+      if (input.pathname === "/auth/webauthn/register/begin") return json({ challengeId: "one", creationOptions: { publicKey: { challenge: "abc" } } });
+      if (input.pathname === "/auth/webauthn/register/finish") return json({ redirectTo: "https://os.example.test/" });
+      if (init?.method === "POST") return json({ redirect: "/auth/setup/passkey" });
+      if (input.pathname === "/auth/setup/passkey") return json({ page: "setup_passkey", data: { Local: true, EnrollmentToken: "enrollment" } });
+      return json(setup);
+    });
+    vi.stubGlobal("fetch", fetcher);
+    try {
+      render(<IdentityScreen initialPath="/setup" />);
+      fireEvent.click(await reachSubmission());
+      // No second press: the prompt opened on its own, for this device.
+      await waitFor(() => expect(create).toHaveBeenCalledTimes(1));
+      expect(create.mock.calls[0]?.[0].publicKey.authenticatorSelection).toEqual({ authenticatorAttachment: "platform" });
+      // A cancel is the person's answer, said once, with the way forward.
+      expect((await screen.findByRole("alert")).textContent).toBe("No passkey was created. Try again when you are ready.");
+      pressBar("Use another device");
+      await waitFor(() => expect(create).toHaveBeenCalledTimes(2));
+      expect(create.mock.calls[1]?.[0].publicKey.hints).toEqual(["hybrid", "security-key"]);
+    } finally {
+      delete (navigator as unknown as { credentials?: unknown }).credentials;
+    }
   });
 
   it("keeps theme selection through setup steps without losing the owner's draft", async () => {
@@ -91,10 +124,10 @@ describe("ownership setup through IdentityScreen and native transport", () => {
     fireEvent.change(screen.getByLabelText("First name"), { target: { value: "Grace" } });
     fireEvent.click(await reachSubmission());
     expect((await screen.findByRole("alert")).textContent).toBe(message);
-    expect(screen.getByRole("button", { name: "Continue to passkey" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Create passkey" })).toBeTruthy();
     expect(screen.getByText("Grace Owner")).toBeTruthy();
-    pressBar("Continue to passkey");
-    await screen.findByRole("button", { name: "Create passkey and finish" });
+    pressBar("Create passkey");
+    await screen.findByRole("heading", { name: "Register owner passkey" });
     await waitFor(() => expect(screen.queryByRole("alert")).toBeNull());
     expect(attempts).toBe(2);
   });
@@ -110,8 +143,8 @@ it.each([true, false])("recovers a skipped passkey with the original owner email
   vi.stubGlobal("fetch", fetcher);
   render(<IdentityScreen initialPath="/setup" />);
   fireEvent.change(await screen.findByLabelText("Owner email"), { target: { value: "ada@example.test" } });
-  fireEvent.click(screen.getByRole("button", { name: local ? "Continue to passkey" : "Send verification link" }));
-  if (local) await screen.findByRole("button", { name: "Create passkey and finish" });
+  fireEvent.click(screen.getByRole("button", { name: local ? "Create passkey" : "Send verification link" }));
+  if (local) await screen.findByText("Your browser will ask you to confirm the passkey.");
   else await screen.findByRole("heading", { name: "Check your email" });
   const posts = fetcher.mock.calls.filter(([, init]) => init?.method === "POST");
   expect(posts).toHaveLength(1);
@@ -127,7 +160,7 @@ it("opens a local installation's first owner step under the editor's act, with t
   await screen.findByRole("heading", { name: "Register owner passkey" });
   expect((screen.getByLabelText("Owner email") as HTMLInputElement).value).toBe("ada@example.test");
   expect(screen.queryByText("Ownership setup has started but is not complete.")).toBeNull();
-  expect(screen.getByRole("button", { name: "Continue to passkey" })).toBeTruthy();
+  expect(screen.getByRole("button", { name: "Create passkey" })).toBeTruthy();
 });
 
 it("offers the forward act only once there is an owner email to confirm", async () => {
@@ -135,10 +168,10 @@ it("offers the forward act only once there is an owner email to confirm", async 
   vi.stubGlobal("fetch", vi.fn(async () => json({ page: "setup_resume", csrf: "resume-csrf", data: { Local: true, HasProof: false } })));
   render(<IdentityScreen initialPath="/setup" />);
   const input = await screen.findByLabelText("Owner email");
-  expect(screen.queryByRole("button", { name: "Continue to passkey" })).toBeNull();
+  expect(screen.queryByRole("button", { name: "Create passkey" })).toBeNull();
   expect(screen.getByText("Enter the owner email")).toBeTruthy();
   fireEvent.change(input, { target: { value: "ada@example.test" } });
-  expect(screen.getByRole("button", { name: "Continue to passkey" })).toBeTruthy();
+  expect(screen.getByRole("button", { name: "Create passkey" })).toBeTruthy();
 });
 
 it("keeps a local claim with attestation on its existing passkey", async () => {
@@ -146,7 +179,7 @@ it("keeps a local claim with attestation on its existing passkey", async () => {
   render(<IdentityScreen initialPath="/setup" />);
   await screen.findByRole("button", { name: "Resume with your passkey" });
   expect(screen.queryByLabelText("Owner email")).toBeNull();
-  expect(screen.queryByRole("button", { name: "Continue to passkey" })).toBeNull();
+  expect(screen.queryByRole("button", { name: "Create passkey" })).toBeNull();
 });
 
 it("reaches unfinished owner setup from sign-in without losing the editor request", async () => {
@@ -164,7 +197,8 @@ it("reaches unfinished owner setup from sign-in without losing the editor reques
 });
 
 const SECURITY_KEY_ONLY = "This browser can save a passkey only to a security key. Without one, use Chrome, which can save it to your Google account or your phone.";
-const ANY_AUTHENTICATOR = "Create a passkey with your device or security key. Your browser will ask you to confirm.";
+// jsdom names no platform, so the page cannot say "Touch ID" here.
+const ANY_AUTHENTICATOR = "Your browser will ask you to confirm the passkey.";
 
 it.each([
   // What Firefox on Linux reports: a local owner with no security key had no way forward.
@@ -177,7 +211,7 @@ it.each([
   if (capabilities) vi.stubGlobal("PublicKeyCredential", { getClientCapabilities: probe });
   vi.stubGlobal("fetch", vi.fn(async () => json({ page: "setup_passkey", data: { Local: true, EnrollmentToken: "enrollment" } })));
   render(<IdentityScreen initialPath="/auth/setup/passkey" />);
-  await screen.findByRole("button", { name: "Create passkey and finish" });
+  await screen.findByRole("button", { name: "Create passkey" });
   if (capabilities) await waitFor(() => expect(probe).toHaveBeenCalled());
   expect(await screen.findByText(sentence)).toBeTruthy();
   await new Promise(resolve => setTimeout(resolve, 0));
