@@ -148,9 +148,6 @@ function ClusterSettingsSection({
             <Switch checked={settings.showInactiveAgents} onChange={showInactiveAgents => update({ showInactiveAgents })}>Show inactive agents</Switch>
           </SettingRow>
         </DetailsSection>
-        <DetailsSection title="Preferences">
-          <p className="os-caption">These preferences are saved in this browser.</p>
-        </DetailsSection>
       </Details>
     </div>
   );
