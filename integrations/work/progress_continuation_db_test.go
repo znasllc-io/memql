@@ -206,3 +206,39 @@ func testProgressDBInterruptedDecisions(t *testing.T, a, b actsDB) {
 		})
 	}
 }
+
+func TestProgressDBCapabilityReads(t *testing.T) {
+	a, b := freshActsDBPair(t, openActsDB(t), openActsDB(t))
+	for _, peer := range []actsDB{a, b} {
+		require.NoError(t, peer.eng.RegisterIntegration(peer.i))
+	}
+	runID := a.openRun(t, nil)
+	goalID := rowString(a.runRow(t, runID), "goalId")
+	a.write(t, "updateWorkGoal", map[string]any{"goalId": goalID, "ceilings": map[string]any{"maxModelCalls": 96, "wallClockMs": 7200000}})
+	a.write(t, "updateWorkRun", map[string]any{"runId": runID, "classification": map[string]any{"workload": "lookup"}})
+	rc := common.RunContext{RunId: runID, GoalId: goalID, OwnerUserId: a.owner, StepKey: "reason", Mode: common.RunModeLive}
+	ctx := common.ContextWithRun(actorCtx(a.owner), rc)
+	// Use the real native producer. A second replica must read this persisted
+	// capability evidence through the same owner-scoped query as tool results.
+	_, err := a.eng.Execute(ctx, "query "+call("workCapabilities", map[string]any{"search": "library.libraryGenerateImage"}))
+	require.NoError(t, err)
+	rows := b.query(t, a.owner, "query "+call("workProgressReceiptsForOwnerRun", map[string]any{"runId": runID}))
+	require.NotEmpty(t, rows)
+	var keys []string
+	for _, row := range rows {
+		keys = append(keys, progressReceiptKeys(row)...)
+	}
+	require.NotEmpty(t, keys)
+	continued, err := b.i.ContinueWorkProgress(ctx, rc, workstate.Spent{WallClockMs: 650000}, 0)
+	require.NoError(t, err)
+	require.True(t, continued)
+	// Repeating the discovery has a new checkedAt timestamp and observation ID,
+	// but cannot earn another window, even when the engines have separate caches.
+	_, err = a.eng.Execute(ctx, "query "+call("workCapabilities", map[string]any{"search": "library.libraryGenerateImage"}))
+	require.NoError(t, err)
+	continued, err = a.i.ContinueWorkProgress(ctx, rc, workstate.Spent{WallClockMs: 1250000}, 0)
+	require.NoError(t, err)
+	require.False(t, continued)
+	require.Empty(t, b.query(t, "different-owner", "query "+call("workProgressReceiptsForOwnerRun", map[string]any{"runId": runID})))
+	require.Empty(t, b.query(t, a.owner, "query "+call("workApprovalsForOwnedRun", map[string]any{"runId": runID})))
+}

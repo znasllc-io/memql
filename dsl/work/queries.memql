@@ -693,11 +693,11 @@ query observation workSourceCheckpointsForOwnerRun {
  shape workObservationFull
 }
 
-/// Successful execution receipts only; checkpoints and model prose cannot buy more work.
+/// Completed tools and recorded capability reads; checkpoints and model prose cannot buy more work.
 @actor
 query observation workProgressReceiptsForOwnerRun {
  args { runId string! }
- filter row => row.runId == args.runId && row.ownerUserId == actor.userId && row.kind == "tool_result" && row.?data.isError == false
+ filter row => row.runId == args.runId && row.ownerUserId == actor.userId && ((row.kind == "tool_result" && row.?data.isError == false) || (row.kind == "note" && row.?data.capabilityEvidence == true))
  sort "row.createdAt", "desc"
  paginate 100
  shape workObservationFull

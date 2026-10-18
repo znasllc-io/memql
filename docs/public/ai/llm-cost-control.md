@@ -339,10 +339,13 @@ rollback or prepare an explicit data migration first.
 ### Run time limits and progress continuation
 
 Workload estimates are checkpoints for assessing progress. At the next model
-admission, successful new task-tool receipts can extend a spent time or call
-estimate automatically, up to three additional windows. A slow completed call
-may consume more than one window to catch up. Identical tool arguments, failed
-calls, capability discovery, archived-history reads and user-facing narration
+admission, successful new task-tool receipts and verified capability reads can
+extend a spent time or call estimate automatically, up to three additional windows.
+Capability reads count newly discovered operation contracts and advertised
+modalities. Repeating a search, changing its wording or timestamp, and busy/idle
+changes do not count as new progress. A slow completed call may consume more
+than one window to catch up. Identical tool arguments, failed calls, unverified
+discovery calls, archived-history reads and user-facing narration
 cannot earn another window. This is a bounded activity signal, not proof that
 the result is correct. The counter and receipt fingerprints persist with the
 run under a shared decision lock, so reconnecting or changing replicas cannot

@@ -105,10 +105,11 @@ func (i *Integration) ContinueWorkProgress(ctx context.Context, rc common.RunCon
 		if memql.BareShortId(rowString(row, "ownerUserId")) != memql.BareShortId(rc.OwnerUserId) || memql.BareShortId(rowString(row, "runId")) != memql.BareShortId(rc.RunId) {
 			return false, fmt.Errorf("work progress receipt attribution changed")
 		}
-		key := progressReceiptKey(row)
-		if key != "" && !slices.Contains(seen, key) {
-			fresh = true
-			seen = append(seen, key)
+		for _, key := range progressReceiptKeys(row) {
+			if !slices.Contains(seen, key) {
+				fresh = true
+				seen = append(seen, key)
+			}
 		}
 	}
 	if !fresh || len(seen) > 300 {
@@ -132,7 +133,7 @@ func progressReceiptKey(row map[string]any) string {
 	name := rowString(data, "tool")
 	short := name[strings.LastIndex(name, ".")+1:]
 	switch short {
-	case "", "discoverCapabilities", "recallWorkHistory", "requestUserFeedback", "respondToUser":
+	case "", "discoverCapabilities", "workCapabilities", "recallWorkHistory", "requestUserFeedback", "respondToUser":
 		return ""
 	}
 	var args any
