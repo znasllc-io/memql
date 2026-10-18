@@ -42,6 +42,9 @@ export interface AiChatOptions {
   /** Strict pin to one owned machine, using its bare registration id.
    * Requires a concrete fleet:<modelId> provider; never falls back to another machine. */
   fleetRegistrationId?: string;
+  /** Ask only: bare Library artifact ids attached to this message (at most
+   * 10). The cluster resolves each one under the caller. Omitted when empty. */
+  attachmentArtifactIds?: string[];
   signal?: AbortSignal;
 }
 
@@ -87,6 +90,7 @@ export async function aiChat(
         ...(opts.level ? { level: opts.level } : {}),
         ...(opts.executionDestination ? { executionDestination: opts.executionDestination } : {}),
         ...(opts.fleetRegistrationId ? { fleetRegistrationId: opts.fleetRegistrationId } : {}),
+        ...(opts.attachmentArtifactIds?.length ? { attachmentArtifactIds: [...opts.attachmentArtifactIds] } : {}),
         // Always non-streaming on this surface; callers wanting
         // deltas use aiChatStream.
       },
@@ -201,6 +205,7 @@ export function aiChatStream(
           ...(opts.level ? { level: opts.level } : {}),
         ...(opts.executionDestination ? { executionDestination: opts.executionDestination } : {}),
           ...(opts.fleetRegistrationId ? { fleetRegistrationId: opts.fleetRegistrationId } : {}),
+          ...(opts.attachmentArtifactIds?.length ? { attachmentArtifactIds: [...opts.attachmentArtifactIds] } : {}),
         },
       });
     } catch (err) {
