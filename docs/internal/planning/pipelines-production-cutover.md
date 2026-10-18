@@ -64,6 +64,27 @@ merge, and its remote branch, local branch and worktree were removed.
 Cockpit [PR #523](https://github.com/znasllc-io/memql-cockpit/pull/523)
 now has native qualification in progress.
 
+Cockpit candidate `41615a5beb4def7da7f2c3f9597a41b51d0947bd` follows native
+Linux race-suite and macOS computer-use build, vet, app/menu packaging and
+isolated installer successes. Its predecessor's fuzz lane hit the upstream
+[Go duration-shutdown race](https://github.com/golang/go/issues/75804), without
+a failing input or property assertion. Only fuzzing now uses Go 1.27.2; all
+13 discovered targets passed locally at 20 seconds each, without retries or
+suppressed failures. Native run `3c7831256ca179ee9bc672d0e8fac12d` is still
+in progress; this is not a published Cockpit release.
+
+The workflow-retirement branch now reads native configuration for the
+database partition, timeout budgets, tag coverage, node roles, path coverage,
+gate inputs, editor dependencies, OS checks, cache declarations and service
+image pins. Its database guard compiles the real source graph through the
+installed policy, verifies every provisioned package reaches a shard once,
+and passes those shards through the actual budget runner's command builder.
+The obsolete Actions parser, aggregate, token-permission and cache-writer
+guards have been removed. Their replacement failure behavior is covered by
+the native trigger and driver tests, including early-return and fabricated-
+skip rejection. The core Actions workflow itself remains until the exact
+merge-candidate production proof is complete.
+
 Pending implementation [PR #6200](https://github.com/znasllc-io/memql/pull/6200)
 combines standalone DB test budgets, channel management and fresh notification
 grants, and full automatic toolchain smoke checks before native artifact export.

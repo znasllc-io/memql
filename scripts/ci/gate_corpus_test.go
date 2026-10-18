@@ -91,6 +91,9 @@ func loadGateCorpus(t *testing.T) *gateCorpus {
 			continue
 		}
 		raw, err := os.ReadFile(filepath.Join(RepoRoot(), filepath.FromSlash(f)))
+		if os.IsNotExist(err) {
+			continue
+		} // a deletion in the candidate tree
 		if err != nil {
 			t.Fatalf("read corpus file %s: %v", f, err)
 		}

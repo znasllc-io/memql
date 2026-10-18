@@ -108,14 +108,11 @@
 //     failure instead of a green skip. This is the issue's actual fix.
 //   - STRUCTURAL: every package with an EnsureSchema TestMain is in the
 //     selector. Pure Go AST on both sides, no shell involved.
-//   - BEST-EFFORT: that the lane's command actually executes those packages.
-//     This is read off `run:` text, and text cannot prove execution. The gate
-//     narrows the gap by REFUSING anything it cannot read plainly -- shell
-//     control flow, exit-status suppression (`|| true`, backgrounding, an
-//     unguarded pipe), `cd`/`exec`/`alias`, a working-directory, a `./...`
-//     wildcard, a zero-execution flag on the command line or in GOFLAGS -- so
-//     the residual is exotic rather than everyday. It is not a sandbox, and a
-//     determined edit can still defeat it.
+//   - EXECUTABLE: the native shell passes the selected packages and require-DB
+//     environment to its runner and propagates a failed command. The actual
+//     budget runner preserves the compiled partition, refuses empty/invalid
+//     selections, and runs bounded, uncached Go commands. This proves the
+//     runner contract, not that every test in those packages used a database.
 //
 // The authoritative version of the third bullet is a RUNTIME count: pipe `go
 // test -json` through a checker that fails when zero db-gated tests actually
@@ -126,7 +123,6 @@
 // and runs on EVERY pull request, including the many where the db-tests lane
 // itself is skipped.
 //
-// Untagged on purpose: it must run in the default `go test ./...`, which the
-// `ci` path filter reaches on any .github/workflows/** edit -- so a PR that
-// removes the env key it guards is the PR that goes red.
+// Untagged on purpose: the native gate-inputs step runs this package on every
+// PR, including a change confined to the manifest or runner script.
 package cidb
