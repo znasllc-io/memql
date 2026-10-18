@@ -62,6 +62,7 @@ final class CockpitApp: NSObject, NSApplicationDelegate, NSMenuDelegate, NSSearc
     private var trackingMenu = false
     private var pendingHomes: Set<String> = []
     private var timer: Timer?
+    private var fastTimer: Timer?
     private var permissionWindow: PermissionSetupWindow?
     private var restartBusy = false
     private var openPermissionsAfterLaunch = false
@@ -274,12 +275,41 @@ final class CockpitApp: NSObject, NSApplicationDelegate, NSMenuDelegate, NSSearc
             }
             window.reveal = { [weak self] in self?.revealWorker() }
             window.restart = { [weak self] pid in self?.restartWorker(expectedPID: pid) }
+            window.asking = { [weak self] asking in self?.setFastRefresh(asking) }
+            // Asked once the window has gone: it is still visible while it closes.
+            window.closed = { [weak self] in DispatchQueue.main.async { self?.windowsChanged() } }
             permissionWindow = window
         }
         permissionWindow?.update(snapshot?.permissionReport)
+        showInDock()
         permissionWindow?.showWindow(nil)
         NSApp.activate(ignoringOtherApps: true)
         refresh()
+    }
+
+    // A WINDOW OF OURS IS NEVER LOST (memql-cockpit#543). This helper lives in
+    // the menu bar with no Dock icon and no Command-Tab entry, so a window of
+    // it fell behind System Settings, and behind whatever came forward after
+    // Settings quit, with nothing on screen leading back. While one is open
+    // MemQL is an ordinary app; when the last one closes it is a menu bar
+    // item again.
+    private func showInDock() {
+        if NSApp.activationPolicy() != .regular { NSApp.setActivationPolicy(.regular) }
+    }
+    private func windowsChanged() {
+        let open = [permissionWindow?.window, logWindow].contains { $0?.isVisible == true }
+        if !open && NSApp.activationPolicy() != .accessory { NSApp.setActivationPolicy(.accessory) }
+    }
+    func windowWillClose(_ notification: Notification) {
+        // Runs before the window is ordered out, so look again once it is.
+        DispatchQueue.main.async { [weak self] in self?.windowsChanged() }
+    }
+
+    // While the person is in System Settings the worker's report is read
+    // every second, so the switch comes on as soon as macOS grants.
+    private func setFastRefresh(_ on: Bool) {
+        fastTimer?.invalidate(); fastTimer = nil
+        if on { fastTimer = Timer.scheduledTimer(withTimeInterval: 1, repeats: true) { [weak self] _ in self?.refresh() } }
     }
 
     // Only the confirmed button reaches this method. Resolve the installed
@@ -328,6 +358,7 @@ final class CockpitApp: NSObject, NSApplicationDelegate, NSMenuDelegate, NSSearc
 
     @objc private func showLogs() {
         if logWindow == nil { makeLogWindow() }
+        showInDock()
         logWindow?.makeKeyAndOrderFront(nil)
         NSApp.activate(ignoringOtherApps: true)
         refreshLogs()
