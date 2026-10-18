@@ -6,6 +6,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/znasllc-io/memql-cockpit/internal/worker/inference"
 	"github.com/znasllc-io/memql-cockpit/internal/worker/models"
 	"github.com/znasllc-io/memql-cockpit/internal/worker/tools"
 )
@@ -78,7 +79,7 @@ type policyModelInventory struct {
 // does not advertise. TestEveryDiscoveryIsBuiltInOnePlace holds the seven
 // to it.
 func newDiscoverer() *models.Discoverer {
-	return &models.Discoverer{}
+	return &models.Discoverer{ManagedParallel: inference.ManagedParallel}
 }
 
 // modelsRequest is what this machine's policy asks discovery: which models

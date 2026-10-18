@@ -114,3 +114,45 @@ func FuzzSplitCommandRefusalsAreDistinct(f *testing.F) {
 		}
 	})
 }
+
+// FuzzUnitParallel. The text is a unit file an owner may have edited by
+// hand, and the answer becomes the ceiling the whole fleet is told, so the
+// failure that matters is a number the unit does not say. Three properties.
+//
+//   - THE ANSWER IS ZERO OR A POSITIVE COUNT, never a negative one: a
+//     negative ceiling reaching the engine's rationing has no meaning.
+//
+//   - A RESET RESETS. An empty Environment= under [Service], appended after
+//     any text at all, leaves the unit saying nothing: that is what systemd
+//     does with it, and a cockpit that kept the earlier number would
+//     advertise slots the unit no longer gives Ollama.
+//
+//   - A COMMENT IS NOT A SETTING. A comment line appended after any text
+//     never changes the answer, however it mentions the variable.
+func FuzzUnitParallel(f *testing.F) {
+	for _, seed := range []string{
+		"", "[Service]\nEnvironment=OLLAMA_NUM_PARALLEL=2\n",
+		"[Service]\nEnvironment=\"OLLAMA_NUM_PARALLEL=3\"\n",
+		"[Service]\nEnvironment=A=1 OLLAMA_NUM_PARALLEL=4 B=2\n",
+		"[Unit]\nEnvironment=OLLAMA_NUM_PARALLEL=9\n",
+		"[Service]\nEnvironment=OLLAMA_NUM_PARALLEL=-2\n",
+		"[Service]\nEnvironment='OLLAMA_NUM_PARALLEL=\n",
+		"[Service]\nEnvironment=\\\"OLLAMA_NUM_PARALLEL=5\n",
+		"[Service\nEnvironment=OLLAMA_NUM_PARALLEL=2\n",
+		"\x00[Service]\r\nEnvironment=OLLAMA_NUM_PARALLEL=2\r\n",
+	} {
+		f.Add(seed)
+	}
+	f.Fuzz(func(t *testing.T, unit string) {
+		n := UnitParallel(unit)
+		if n < 0 {
+			t.Fatalf("UnitParallel(%q) = %d", unit, n)
+		}
+		if got := UnitParallel(unit, "[Service]\nEnvironment=\n"); got != 0 {
+			t.Fatalf("UnitParallel(%q + a reset) = %d, want 0", unit, got)
+		}
+		if got := UnitParallel(unit + "\n# Environment=OLLAMA_NUM_PARALLEL=7\n"); got != n {
+			t.Fatalf("a trailing comment moved UnitParallel(%q) from %d to %d", unit, n, got)
+		}
+	})
+}

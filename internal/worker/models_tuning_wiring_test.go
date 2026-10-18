@@ -137,3 +137,28 @@ func TestPolicyProblemsAreLoggedAtLoadAndReload(t *testing.T) {
 		}
 	}
 }
+
+// TestNewDiscovererReadsTheManagedUnit. The ceiling a fresh install
+// advertises is the one its unit gives Ollama, with no second place to set
+// it: newDiscoverer is what hands discovery the unit.
+func TestNewDiscovererReadsTheManagedUnit(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	d := newDiscoverer()
+	if d.ManagedParallel == nil {
+		t.Fatal("newDiscoverer leaves discovery without the managed unit")
+	}
+	if got := d.ManagedParallel(); got != 0 {
+		t.Errorf("no unit on this machine -> %d, want 0", got)
+	}
+	unit := filepath.Join(home, ".config", "systemd", "user", "memql-ollama.service")
+	if err := os.MkdirAll(filepath.Dir(unit), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(unit, []byte("[Service]\nEnvironment=OLLAMA_NUM_PARALLEL=3\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if got := d.ManagedParallel(); got != 3 {
+		t.Errorf("a unit declaring 3 slots -> %d, want 3", got)
+	}
+}

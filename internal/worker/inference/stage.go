@@ -130,6 +130,11 @@ type Stage struct {
 	// has no authentication and nothing off-box needs the port -- the
 	// cluster reaches this machine over the worker's outbound stream.
 	Listen string
+	// Parallel is the requests Ollama takes at once per model, written as
+	// OLLAMA_NUM_PARALLEL. Zero and one write nothing: one is Ollama's own
+	// default, and a unit that says it again would only be a second place
+	// for the number to be wrong. See DefaultParallel.
+	Parallel int
 }
 
 // Archive is one release asset.
@@ -212,7 +217,11 @@ func (s Stage) Lines() []string {
 		out = append(out, "download "+a.Name+" from "+strings.TrimSuffix(a.URL(), "/"+a.Name)+
 			" and unpack it into "+s.RuntimeDir+", checked against the release's "+ollamaChecksumFile)
 	}
-	out = append(out, "write "+s.UnitPath+" (Ollama as your user, listening on "+s.Listen+", models in "+s.ModelsDir+")")
+	detail := "Ollama as your user, listening on " + s.Listen + ", models in " + s.ModelsDir
+	if s.Parallel > 1 {
+		detail += ", " + strconv.Itoa(s.Parallel) + " requests at a time"
+	}
+	out = append(out, "write "+s.UnitPath+" ("+detail+")")
 	return out
 }
 
@@ -240,6 +249,7 @@ func (s Stage) Unit() string {
 		// attention, which it needs, is the runtime's default where the
 		// device supports it (2026-09-08 record, D9).
 		"Environment=OLLAMA_KV_CACHE_TYPE=q8_0\n" +
+		s.parallelEnvironment() +
 		"Restart=on-failure\n" +
 		"RestartSec=3\n" +
 		"StandardOutput=append:" + strings.ReplaceAll(s.LogPath, "%", "%%") + "\n" +

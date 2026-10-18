@@ -495,6 +495,7 @@ func decideLinuxNative(h Host, p Plan) Plan {
 		LogPath:    n.LogPath,
 		UnitPath:   n.UnitPath,
 		Listen:     nativeListen,
+		Parallel:   DefaultParallel(p.MachineClass),
 	}
 	switch {
 	case n.Installed:
