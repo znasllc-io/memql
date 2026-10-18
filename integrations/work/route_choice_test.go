@@ -38,6 +38,23 @@ func TestCreateGoalWritesTheRequestsRouteChoiceOnTheGoalAndItsRun(t *testing.T) 
 	}
 }
 
+// A person's route (route:<id>) rides the rows exactly as a pin does: the
+// planner and the agent read it from there (design record 2026-10-18-routes).
+func TestCreateGoalWritesAPersonsRouteOnTheGoalAndItsRun(t *testing.T) {
+	i, eng := newTestIntegration(t)
+	ctx := memql.ContextWithGoalRouteChoice(callerContext("u-alice"),
+		common.RouteChoice{Source: "route:apps", By: "u-alice"})
+	if _, err := i.handleCreateGoal(ctx, map[string]any{"statement": "hi", "requestedVia": "ask"}, 0); err != nil {
+		t.Fatalf("createGoal: %v", err)
+	}
+	want := map[string]any{"source": "route:apps", "by": "u-alice"}
+	for _, name := range []string{"createWorkGoal", "createWorkRun"} {
+		if got := eng.callTo(t, name).Args(t)["routing"]; !reflect.DeepEqual(got, want) {
+			t.Errorf("%s routing = %v, want %v", name, got, want)
+		}
+	}
+}
+
 func TestHumanAPISourcePinsBothRowsAndChildCannotReplaceIt(t *testing.T) {
 	i, eng := newTestIntegration(t)
 	args := map[string]any{"statement": "evaluate fixture", "noPaidProviders": true, "source": "fleet:qwen3.8:27b", "level": "reasoning", "requestedVia": "api"}

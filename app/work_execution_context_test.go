@@ -11,8 +11,10 @@ import (
 
 	"github.com/znasllc-io/memql/component/auth"
 	"github.com/znasllc-io/memql/component/automations"
+	"github.com/znasllc-io/memql/component/memql"
 	"github.com/znasllc-io/memql/component/node"
 	"github.com/znasllc-io/memql/component/work"
+	"github.com/znasllc-io/memql/core/airoute"
 	"github.com/znasllc-io/memql/core/common"
 	workspine "github.com/znasllc-io/memql/integrations/work"
 )
@@ -375,6 +377,44 @@ func TestExecutionHopRestoresTheOwnersRouteChoice(t *testing.T) {
 	run, ok := common.RunFromContext(ctx)
 	if !ok || run.Routing != choice {
 		t.Fatalf("run context routing = %+v, want %+v", run.Routing, choice)
+	}
+}
+
+// A PERSON'S ROUTE crosses the same hop (design record 2026-10-18-routes): the
+// agent running the reply builds its context from the run row alone, and the
+// route the person chose in Ask -- on a bff, possibly another replica -- reaches
+// every model call the step makes, with the person who chose it, so a personal
+// route is read for them and an embedding call is left to the rules.
+func TestExecutionHopCarriesAPersonsRouteToEveryCall(t *testing.T) {
+	choice := common.RouteChoice{Source: "route:apps", By: "u"}
+	j := &automations.RunJournal{RunId: "r", GoalId: "g", OwnerUserId: "u", Mode: "live", Routing: choice}
+	ctx, err := workExecutionContext(context.Background(), j, nil, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	reply := common.ContextWithRun(ctx, func() common.RunContext { rc, _ := common.RunFromContext(ctx); rc.StepKey = "reply"; return rc }())
+	req, err := memql.ApplyRunRouting(reply, airoute.ResolveRequest{Level: airoute.LevelStrong, Modality: airoute.ModalityStreamingChat})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if req.PersonRoute != memql.RouteIdApps || req.PersonRouteOwner != "u" {
+		t.Fatalf("the reply's call carries route %q for %q, want apps for u", req.PersonRoute, req.PersonRouteOwner)
+	}
+	// The planner's compile pass runs outside any step and still goes where
+	// the person said.
+	compile, err := memql.ApplyRunRouting(ctx, airoute.ResolveRequest{Level: airoute.LevelFast, Modality: airoute.ModalityStructured})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if compile.PersonRoute != memql.RouteIdApps {
+		t.Fatalf("the compile pass carries route %q, want apps", compile.PersonRoute)
+	}
+	embed, err := memql.ApplyRunRouting(reply, airoute.ResolveRequest{Level: airoute.LevelEmbeddings, Modality: airoute.ModalityEmbedding})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if embed.PersonRoute != "" {
+		t.Fatalf("an embedding call took route %q; Search and memory is never a route's", embed.PersonRoute)
 	}
 }
 

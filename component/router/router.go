@@ -421,6 +421,14 @@ func (r *Router) resolveChain(ctx context.Context, req ResolveRequest, mod provi
 		return chainAndResolved(resolved)
 	}
 
+	// A PERSON'S ROUTE from the route picker (design record 2026-10-18-routes):
+	// Local, Apps or one of their own. Its sources for the call's level are
+	// walked and NOTHING ELSE -- no rule, no fall-through -- which is what
+	// makes "Apps" mean apps.
+	if id := strings.TrimSpace(req.PersonRoute); id != "" {
+		return r.resolvePersonRoute(ctx, req, mod, policies, id, report)
+	}
+
 	// A PERSON'S ROUTE replaces the rule's chain (ResolveRequest.Route): the
 	// Ask route picker's `policy:<name>`, applied to every call of the run it
 	// was chosen for. No rule is consulted and the level is the call's own --
@@ -585,6 +593,122 @@ func (r *Router) resolveRoute(
 		return nil, Resolved{}, err
 	}
 	return chainAndResolved(resolved)
+}
+
+// resolvePersonRoute walks a route a person chose: Local, Apps or one of their
+// own (design record 2026-10-18-routes).
+//
+// THE ROUTE'S SOURCES AND NOTHING ELSE. The call's level picks the route's
+// list for that job; when the list is exhausted the call DEGRADES INSIDE THE
+// ROUTE -- reasoning to strong to fast, through the route's own lists -- and
+// then refuses, naming the route. It never consults a rule and never reaches
+// cloud consent: both would hand the call to a source the person did not
+// choose, which for Apps is a vendor bill on a subscription the person picked
+// precisely to avoid one.
+//
+// A route that cannot be READ is a plain error rather than a door refusal, as
+// for an unregistered policy route: reported as "every door is shut" it would
+// park the run waiting for a machine, and no machine waking would ever serve
+// a route that is gone.
+func (r *Router) resolvePersonRoute(
+	ctx context.Context,
+	req ResolveRequest,
+	mod providerModality,
+	policies *memql.PolicyRegistry,
+	id string,
+	report *doorReporter,
+) ([]string, Resolved, error) {
+	spec, err := r.personRouteSpec(ctx, policies, id, req.PersonRouteOwner)
+	if err != nil {
+		return nil, Resolved{}, err
+	}
+	label := memql.RouteSourcePrefix + spec.Id
+	asked := req.Level
+	level := req.Level
+	walked := map[string]bool{}
+	seen := map[airoute.Level]bool{}
+	for !seen[level] {
+		seen[level] = true
+		chain := spec.Jobs.For(level)
+		switch key := strings.Join(chain, "\x00"); {
+		case len(chain) == 0:
+			report.noteConsidered("(route "+spec.Name+")", "", "names no source for "+string(level))
+		case walked[key]:
+			report.noteConsidered("(route "+spec.Name+")", "",
+				"lists the same sources at "+string(level)+" as a level already tried, so they are not walked again")
+		default:
+			walked[key] = true
+			levelReq := req
+			levelReq.Level = level
+			winner, err := r.walkChain(ctx, levelReq, mod, chain, nil, report, label)
+			if err != nil {
+				var refusal *InferenceUnavailable
+				if errors.As(err, &refusal) {
+					refusal.Route = spec.Name
+					refusal.Decision.Route = spec.Id
+				}
+				return nil, Resolved{}, err
+			}
+			if winner != nil {
+				return chainAndResolved(r.resolvedFrom(winner, mod, label, report, airoute.Decision{
+					RequestedLevel:   req.Level,
+					Level:            asked,
+					ServedLevel:      level,
+					Degraded:         level != asked,
+					Route:            spec.Id,
+					Touches:          req.Touches,
+					MinContextTokens: req.Needs.MinContextTokens,
+				}))
+			}
+		}
+		next, canDegrade := level.Degrade()
+		if !canDegrade {
+			report.noteConsidered("(level "+string(level)+")", "", degradeFloorReason(level))
+			break
+		}
+		level = next
+	}
+	err = r.refusalWith(report, work.RefusalEveryDoorShut, label, "", airoute.Decision{
+		RequestedLevel:   req.Level,
+		Level:            asked,
+		ServedLevel:      level,
+		Route:            spec.Id,
+		Touches:          req.Touches,
+		MinContextTokens: req.Needs.MinContextTokens,
+	})
+	var refusal *InferenceUnavailable
+	if errors.As(err, &refusal) {
+		refusal.Route = spec.Name
+	}
+	return nil, Resolved{}, err
+}
+
+// personRouteSpec reads the route a person chose: a built-in one from the
+// decision's own routing snapshot, a personal one from its row, read for its
+// owner and nobody else.
+func (r *Router) personRouteSpec(ctx context.Context, policies *memql.PolicyRegistry, id, owner string) (memql.RouteSpec, error) {
+	if memql.IsBuiltinRouteId(id) {
+		if id == memql.RouteIdAuto {
+			return memql.RouteSpec{}, fmt.Errorf("router: Auto is not a route to walk; the rules decide a call made under Auto")
+		}
+		var override *memql.RouteJobs
+		if j, ok := policies.RouteOverride(id); ok {
+			override = &j
+		}
+		spec, _ := memql.BuiltinRouteSpec(id, override)
+		return spec, nil
+	}
+	if r == nil || r.engine == nil {
+		return memql.RouteSpec{}, fmt.Errorf("router: the route %q chosen for this call cannot be read on this node", id)
+	}
+	spec, found, err := memql.ReadPersonalRoute(ctx, r.engine, owner, id)
+	if err != nil {
+		return memql.RouteSpec{}, fmt.Errorf("router: the route %q chosen for this call could not be read: %w", id, err)
+	}
+	if !found {
+		return memql.RouteSpec{}, fmt.Errorf("router: the route %q chosen for this call is not one of its owner's routes any more; choose another route or Auto", id)
+	}
+	return spec, nil
 }
 
 // chainAndResolved is the three-value form resolveChain returns: the concrete
@@ -1074,6 +1198,7 @@ func buildRouterCallArgs(rec CallRecord, callId string) map[string]any {
 		"touches":            touchesArgs(rec.Touches),
 		"minContextTokens":   rec.MinContextTokens,
 		"machineOwnerUserId": rec.MachineOwnerUserId,
+		"route":              rec.Route,
 	}
 
 	// `cacheKind` IS OMITTED RATHER THAN SENT EMPTY, and it has to be: the
