@@ -4,17 +4,18 @@ import { useOs } from "../chrome/state";
 import { useAsk } from "./AskProvider";
 import { AskSurface } from "./AskSurface";
 
-// The Ask sheet: anchored above the dock (a bottom sheet on phones via
-// CSS), or expanded over the same work area as maximized apps. It stays
+// The Ask sheet: anchored above the dock, or filling the phone's content
+// area below its header. It stays
 // outside the desktop's window count (spec D6); resizing never remounts Ask.
 // The desk stays interactive while MemQL works; Escape closes the overlay.
 //
 // Both entry points retain the composer while the shared readiness check runs.
 
-export function AskSheet({ dockReserve = 0 }: { dockReserve?: number }) {
+export function AskSheet({ dockReserve = 0, embedded = false, onOpenApp }: { dockReserve?: number; embedded?: boolean; onOpenApp?: (appId: string, sectionId?: string, payload?: Record<string, unknown>) => void }) {
   const { sheet, closeAsk, transport, voice, settings, availability, conversation, liveVoice } = useAsk();
   const { actions } = useOs();
   const [maximized, setMaximized] = useState(false);
+  const openApp = onOpenApp ?? actions.openApp;
 
   useEffect(() => {
     if (!sheet.open) return;
@@ -49,15 +50,15 @@ export function AskSheet({ dockReserve = 0 }: { dockReserve?: number }) {
           liveVoice={liveVoice}
           onClose={closeAsk}
           maximized={maximized}
-          onToggleMaximize={() => setMaximized(value => !value)}
-          onOpenFleet={() => { actions.openApp("fleet"); closeAsk(); }}
+          onToggleMaximize={embedded ? undefined : () => setMaximized(value => !value)}
+          onOpenFleet={() => { openApp("fleet"); closeAsk(); }}
           voicePorts={voice}
           settings={settings}
           context={sheet.context}
           contextLabel={sheet.contextLabel}
           variant="sheet"
-          onOpenFile={(fileId) => { actions.openApp("files", "browse", { fileId }); }}
-          onOpenWork={(runId, conversationId) => { actions.openApp("nexus", "runs", { runId, conversationId }); closeAsk(); }}
+          onOpenFile={(fileId) => { openApp("files", "browse", { fileId }); if (embedded) closeAsk(); }}
+          onOpenWork={(runId, conversationId) => { openApp("nexus", "runs", { runId, conversationId }); closeAsk(); }}
           autoFocus
         />
       </div>

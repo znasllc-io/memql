@@ -1,6 +1,6 @@
 import { startAskVoice, type AskVoiceOptions } from "@znasllc-io/memql-sdk-core/voice";
 import { aiChatStream, type AiChatOptions, type AiChatMessage } from "@znasllc-io/memql-sdk-core/ai";
-import { QueryClient, type Dispatcher } from "@znasllc-io/memql-sdk-core/client";
+import { QueryClient, isTransportInterruption, type Dispatcher } from "@znasllc-io/memql-sdk-core/client";
 import { flatten } from "../kit/rows";
 import type { AskCallbacks, AskHandle, AskOptions, AskTransport, WorkGuidanceRequest, WorkGuidanceReceipt } from "./askController";
 import type { ApprovalDiscussion, AskActivity, AskConversationStore, AskTurn, ConversationSummary } from "./conversationSession";
@@ -145,7 +145,8 @@ export class SdkAskTransport implements AskTransport {
       } catch (error) {
         if (abort.signal.aborted) return;
         abort.abort();
-        on.error(error instanceof Error ? error.message : String(error));
+        if (isTransportInterruption(error) && on.interrupted) on.interrupted();
+        else on.error(error instanceof Error ? error.message : String(error));
       }
     })();
     return { cancel: () => abort.abort() };

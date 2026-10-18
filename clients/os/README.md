@@ -295,6 +295,17 @@ and focus recovery. Reads with no broadcast source retain `AutoRefresh` recovery
 Do not poll healthy graph feeds or automatically repeat probes or writes.
 Failed initial reads also need recovery, even if a collection has no prior rows.
 
+Browser return uses `live/resume` for coalesced focus, visibility, online and
+page-restoration events. `OsConnectionProvider` wakes the existing connection;
+SDK reconnect attempts are serialized. `ConnectionNotice` owns delayed feedback
+in both desktop and phone chrome; short interruptions never blank an app.
+`useLiveCollection`, `useGraphRevision`, `AutoRefresh` and Ask recover reads from
+this lifecycle. Typed transport loss is distinct from a refused read or an
+uncertain write. Never suppress the latter or automatically resubmit it.
+Mobile Ask occupies all content below the shell header. A recovered waiting
+snapshot replaces a stale streaming counter with its needs-input card and opens
+the matching run in the phone's Nexus view.
+
 Machine tabs end with **Activity**, then **Settings**. Apps shows the platform's
 supported apps directly, separating installation, sign-in, permission and
 subscription reports. Missing setup starts an owner-scoped work goal for the

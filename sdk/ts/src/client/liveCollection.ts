@@ -1,4 +1,5 @@
 import { backgroundReadController } from "./queryPriority.js";
+import { isTransportInterruption } from "./dispatcher.js";
 // LiveCollection -- the one machine every live surface was hand-rolling
 // (memql#4538).
 //
@@ -463,6 +464,11 @@ export class LiveCollection<T = Row> {
       this.setState("live");
     } catch (err) {
       if (abort.signal.aborted) return;
+      if (isTransportInterruption(err)) {
+        this.errorText = "";
+        this.setState("disconnected");
+        return;
+      }
       this.errorText = err instanceof Error ? err.message : String(err);
       // Rows already on screen stay, marked degraded; with nothing to show,
       // "seeding" would be a lie about work in progress.
@@ -734,8 +740,8 @@ export class LiveValue<T> {
       })
       .catch((err: unknown) => {
         if (this.closed) return;
-        this.errorText = err instanceof Error ? err.message : String(err);
-        this.state = this.value === null ? "live" : "degraded";
+        this.errorText = isTransportInterruption(err) ? "" : err instanceof Error ? err.message : String(err);
+        this.state = isTransportInterruption(err) ? "disconnected" : this.value === null ? "live" : "degraded";
         this.bump();
       })
       .finally(() => {
