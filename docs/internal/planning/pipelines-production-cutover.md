@@ -64,12 +64,12 @@ merge, and its remote branch, local branch and worktree were removed.
 Cockpit [PR #523](https://github.com/znasllc-io/memql-cockpit/pull/523)
 now has native qualification in progress.
 
-Pending implementation PRs include
-[#6200](https://github.com/znasllc-io/memql/pull/6200) for standalone DB test
-budgets, [#6202](https://github.com/znasllc-io/memql/pull/6202) for channel
-management and fresh notification grants, and
-[#6203](https://github.com/znasllc-io/memql/pull/6203) for full automatic
-toolchain smoke checks before native artifact export. Their validation is
+Pending implementation [PR #6200](https://github.com/znasllc-io/memql/pull/6200)
+combines standalone DB test budgets, channel management and fresh notification
+grants, and full automatic toolchain smoke checks before native artifact export.
+It supersedes [#6202](https://github.com/znasllc-io/memql/pull/6202) and
+[#6203](https://github.com/znasllc-io/memql/pull/6203) to avoid repeated full
+validation of sibling PRs in the bounded build pool. Their local validation is
 recorded on the PRs; an open PR is not a deployed feature. Marketplace and
 SDK publication, public docs delivery, installer lifecycle, remaining
 audits and companion workflow retirement still need their own acceptance
