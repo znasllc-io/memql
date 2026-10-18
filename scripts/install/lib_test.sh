@@ -944,6 +944,36 @@ expect_eq "setup_workbench failure records the setup's reason" \
 FAKE_WORKBENCH_EXIT=0 setup_workbench "$_wb_new" >/dev/null 2>&1
 expect_eq "setup_workbench success is ready" "$INSTALL_WORKBENCH_STATE" "ready"
 
+# ---------------------------------------------------------------
+# The setup report -- the plan and the end, best-effort (memql-cockpit#541)
+# ---------------------------------------------------------------
+
+expect_eq "setup_report_plan names every stage, in the installer's order" "$(setup_report_plan yes yes)" "runtime,models,workbench"
+expect_eq "setup_report_plan without workbenches" "$(setup_report_plan yes no)" "runtime,models"
+expect_eq "setup_report_plan with workbenches alone" "$(setup_report_plan no yes)" "workbench"
+expect_eq "setup_report_plan with neither is empty" "$(setup_report_plan no no)" ""
+
+_report_log="${_tmp}/setup-report.log"
+_report_bin="${_tmp}/fake-memql-report"
+cat > "$_report_bin" << STUB
+#!/usr/bin/env bash
+echo "\$*" >> "$_report_log"
+exit "\${FAKE_REPORT_EXIT:-0}"
+STUB
+chmod +x "$_report_bin"
+: > "$_report_log"
+report_setup_plan "$_report_bin" yes yes; _rc=$?
+report_setup_finished "$_report_bin" yes yes
+expect_eq "report_setup_plan and report_setup_finished send the plan, then the end" "$(cat "$_report_log")" \
+    "$(printf '%s\n%s' "worker control --action=setup --plan=runtime,models,workbench --wait=20s" "worker control --action=setup --finished --wait=5s")"
+expect_eq "report_setup_plan returns 0" "$_rc" "0"
+: > "$_report_log"
+report_setup_plan "$_report_bin" no no
+report_setup_finished "$_report_bin" no no
+expect_eq "an install with neither stage reports nothing" "$(cat "$_report_log")" ""
+FAKE_REPORT_EXIT=2 report_setup_plan "$_report_bin" yes no; _rc=$?
+expect_eq "a worker that refuses the report never fails the install" "$_rc" "0"
+
 # The installing shell's Ollama variables reach the worker service, so it
 # serves from where the setup pulled (memql-cockpit#524).
 _out="$(OLLAMA_HOST='127.0.0.1:11435' OLLAMA_MODELS='/Volumes/Big & Fast/<models>' ollama_plist_env)"

@@ -66,6 +66,9 @@ type Fleet struct {
 	discoverer  *models.Discoverer
 	metrics     *Metrics
 	limiter     *modelcall.Limiter
+	// setup is the installer's report (setupprogress.go): one per machine,
+	// carried on every home's heartbeat.
+	setup *setupTracker
 
 	mu      sync.Mutex
 	runners []*Runner
@@ -103,6 +106,7 @@ func NewFleet(opts FleetOptions) (*Fleet, error) {
 		discoverer:  opts.Discoverer,
 		metrics:     opts.Metrics,
 		limiter:     limiter,
+		setup:       newSetupTracker(time.Now),
 		newRunner:   NewRunner,
 	}, nil
 }
@@ -347,6 +351,7 @@ func (f *Fleet) buildHome(home Home, machineID string) (homeRun, error) {
 		PipelinesPolicy: f.pipelinesPolicy(),
 		ModelPull:       pull,
 		Capacity:        f.capacityProbe(calls),
+		Setup:           f.setup,
 	})
 	if err != nil {
 		return homeRun{}, err

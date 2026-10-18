@@ -56,6 +56,7 @@ type Runner struct {
 	apps      AppInventory
 	modelsInv ModelInventory
 	capacity  CapacityProbe
+	setup     SetupSource
 	calls     *modelcall.Manager
 	sessions  *appsession.Manager
 	pulls     *modelPuller
@@ -213,6 +214,15 @@ type Options struct {
 	// heartbeat. Nil sends no report, and the engine admits the machine on
 	// its concurrency slots alone.
 	Capacity CapacityProbe
+	// Setup is the installer's report for every heartbeat
+	// (setupprogress.go). Nil, or a nil report, sends none, and the engine
+	// keeps whatever it last stored.
+	Setup SetupSource
+}
+
+// SetupSource is the installer's latest report, or nil when there is none.
+type SetupSource interface {
+	Proto() *memqlv1.SetupProgress
 }
 
 // CapacityProbe takes one capacity measurement, or reports false when there
@@ -242,6 +252,7 @@ func NewRunner(opts Options) (*Runner, error) {
 		apps:      opts.Apps,
 		modelsInv: opts.Models,
 		capacity:  opts.Capacity,
+		setup:     opts.Setup,
 		calls:     opts.Calls,
 		sessions:  opts.Sessions,
 		heartbeat: hb,
@@ -590,7 +601,7 @@ func (r *Runner) heartbeatLoop(ctx context.Context, conn *Connection, beat *atom
 				inv := r.hardwareInventory(ctx)
 				hw = &inv
 			}
-			if err := conn.SendHeartbeat(0, nil, r.inventory(ctx), hw, r.capacityReport(ctx)); err != nil {
+			if err := conn.SendHeartbeat(0, nil, r.inventory(ctx), hw, r.capacityReport(ctx), r.setupReport()); err != nil {
 				return
 			}
 			beat.Store(true)
@@ -611,6 +622,15 @@ func (r *Runner) capacityReport(ctx context.Context) *capacity.Report {
 		return nil
 	}
 	return &report
+}
+
+// setupReport is the installer's report for this beat, or nil when this
+// worker keeps none.
+func (r *Runner) setupReport() *memqlv1.SetupProgress {
+	if r == nil || r.setup == nil {
+		return nil
+	}
+	return r.setup.Proto()
 }
 
 // pipelinesPolicy reads the live pipelines consent, defaulting closed.

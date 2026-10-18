@@ -619,6 +619,26 @@ or a probe slower than two seconds sends no report, and the engine admits
 the machine on its slots alone. A report claiming no loaded models would get
 calls refused that this machine could serve, which is worse than silence.
 
+## The installer's setup report (memql-cockpit#541)
+
+The installer starts the worker and only THEN installs the model runtime,
+pulls the models and sets up workbenches, so MemQL OS can show those stages
+only through the worker (engine half znasllc-io/memql#6229).
+`internal/worker/setupprogress.go` keeps the machine's one report, which
+every home's heartbeat carries as `Heartbeat.setup`. The installer sends the
+PLAN once the worker is up (`worker control --action=setup --plan=...`) and
+FINISHED at its end; `worker setup --inference` and `--workbench` report
+their own stage in between (`setupreport.go`), a download with its
+whole-model bytes rather than the part in flight.
+
+**Reporting never fails a stage.** Every send is best-effort, and no worker,
+or an older one, changes nothing about the install. **Silence is not
+progress**: a running stage is re-sent every thirty seconds, so a report
+quiet for two minutes is carried as `stopped`, an installer that is gone.
+**It lives in memory**: a worker restart loses the plan, the next stage
+report rebuilds what is left, and the earlier stages' results are on the
+registration by then anyway.
+
 ## Watched-folder backup (memql#4841)
 
 One folder on this machine, kept arriving in a MemQL Library folder. The engine

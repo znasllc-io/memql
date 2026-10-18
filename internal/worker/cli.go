@@ -632,11 +632,20 @@ func handleSetup(args []string) {
 			fmt.Fprintln(os.Stderr, "Run --workbench separately from model setup.")
 			os.Exit(SetupExitUsage)
 		}
+		// The running worker carries this stage to the cluster while it
+		// runs (memql-cockpit#541); the reporter re-sends it while the
+		// workbench image downloads, so a long pull never reads as stopped.
+		progress := newSetupReporter(sendSetupControl)
+		progress.Stage("workbench", "running", "")
 		if err := setupWorkbench(context.Background(), f.configPath, os.Stdout); err != nil {
 			fmt.Fprintln(os.Stderr, "Fleet workbench setup could not finish:", err)
 			recordSetupReason(capitalise(err.Error()))
+			progress.Stage("workbench", "failed", capitalise(err.Error()))
+			progress.Close()
 			os.Exit(1)
 		}
+		progress.Stage("workbench", "done", "")
+		progress.Close()
 		return
 	}
 
@@ -667,8 +676,11 @@ func handleSetup(args []string) {
 	}
 
 	if f.inference {
-		os.Exit(runInferenceSetup(context.Background(),
-			newInferenceSetup(f.configPath, f.modelIDs, f.nonInteractive, f.runtimeFlag)))
+		s := newInferenceSetup(f.configPath, f.modelIDs, f.nonInteractive, f.runtimeFlag)
+		s.progress = newSetupReporter(sendSetupControl)
+		code := runInferenceSetup(context.Background(), s)
+		s.progress.Close()
+		os.Exit(code)
 	}
 
 	if err := runSetupWizard(); err != nil {

@@ -23,7 +23,7 @@ readonly RAW_BASE="${MEMQL_INSTALL_RAW_BASE:-https://raw.githubusercontent.com/z
 # calls existed -- and stopped with exit 127 halfway through. source_lib
 # checks these before anything runs, refetches past the cache once, and
 # otherwise refuses in a sentence. lib_test.sh keeps the list complete.
-readonly REQUIRED_LIB_FUNCTIONS="allow_installed_apps binary_name_for install_binary_with_mode install_check_release install_ui_binary_result install_ui_finish install_ui_init install_ui_stage linux_worker_capabilities parse_version_flag release_download_base resolve_target_version setup_inference write_worker_yaml"
+readonly REQUIRED_LIB_FUNCTIONS="allow_installed_apps binary_name_for install_binary_with_mode install_check_release install_ui_binary_result install_ui_finish install_ui_init install_ui_stage linux_worker_capabilities ollama_env_names parse_version_flag release_download_base report_setup_finished report_setup_plan resolve_target_version setup_inference setup_workbench upsert_env_file_var write_worker_yaml"
 
 # missing_lib_functions names the required functions a lib.sh file does not
 # define. It reads the TEXT, before anything is sourced: lib.sh declares
@@ -369,6 +369,11 @@ function main() {
             install_ui_stage "Preparing the desktop menu" install_menu_companion
         fi
     fi
+    # Everything below runs after the worker has connected, so the worker
+    # carries it to the cluster for MemQL OS to show (memql-cockpit#541).
+    if [[ "$INSTALL_SERVICE" == yes ]]; then
+        report_setup_plan "$INSTALLED_BINARY" "$INFERENCE" "$WORKBENCH"
+    fi
     # Setup signals the running worker to reload its policy, so service first.
     # Runtime approval or model download failures do not undo enrollment.
     # Local models before workbenches: models never wait on Docker, and
@@ -378,6 +383,9 @@ function main() {
     fi
     if [[ "$WORKBENCH" == "yes" ]]; then
         install_ui_stage "Preparing Fleet workbenches" setup_workbench "$INSTALLED_BINARY"
+    fi
+    if [[ "$INSTALL_SERVICE" == yes ]]; then
+        report_setup_finished "$INSTALLED_BINARY" "$INFERENCE" "$WORKBENCH"
     fi
     install_ui_finish
 }

@@ -245,6 +245,9 @@ type controlRequest struct {
 	Enabled    *bool  `json:"enabled,omitempty"`
 	Permission string `json:"permission,omitempty"`
 	PID        int    `json:"pid,omitempty"`
+	// Setup is the installer's report for the "setup" action
+	// (setupprogress.go).
+	Setup *SetupControl `json:"setup,omitempty"`
 }
 type controlResponse struct {
 	OK     bool            `json:"ok"`
@@ -356,6 +359,14 @@ func serveControlConnection(conn net.Conn, fleet *Fleet) {
 		} else {
 			response.Logs = logs
 		}
+	case "setup":
+		if request.Setup == nil {
+			response.OK = false
+			response.Error = "a setup report is required"
+		} else if err := fleet.setup.Apply(*request.Setup); err != nil {
+			response.OK = false
+			response.Error = err.Error()
+		}
 	default:
 		response.OK = false
 		response.Error = "unknown control action"
@@ -393,11 +404,14 @@ func callControl(path string, request controlRequest) (controlResponse, error) {
 
 func handleControl(args []string) {
 	fs := flag.NewFlagSet("worker control", flag.ContinueOnError)
-	action := fs.String("action", "status", "status, logs, home, or request-permission (explicit local macOS prompt)")
+	action := fs.String("action", "status", "status, logs, home, setup (the installer's progress), or request-permission (explicit local macOS prompt)")
 	permission := fs.String("permission", "", "accessibility or screen_recording, for request-permission")
 	pid := fs.Int("pid", 0, "expected worker process ID, required for request-permission")
 	home := fs.String("home", "", "configured server ID")
 	enabled := fs.String("enabled", "", "true to allow connecting, false to pause")
+	plan := fs.String("plan", "", "for setup: the stages the installer will run, comma-separated (runtime, models, workbench)")
+	finished := fs.Bool("finished", false, "for setup: the installer has finished")
+	wait := fs.Duration("wait", 0, "for setup: keep trying this long while the worker is still starting")
 	if err := fs.Parse(args); err != nil {
 		if errors.Is(err, flag.ErrHelp) {
 			return
@@ -413,7 +427,17 @@ func handleControl(args []string) {
 		v := *enabled == "true"
 		request.Enabled = &v
 	}
+	if request.Action == "setup" {
+		request.Setup = setupControlFromFlags(*plan, *finished)
+	}
 	response, err := callControl(defaultControlPath(), request)
+	// The installer reports its plan the moment it has started the worker,
+	// which is before the worker has opened this socket. --wait covers that
+	// start rather than making the installer guess a sleep.
+	for deadline := time.Now().Add(*wait); err != nil && request.Action == "setup" && time.Now().Before(deadline); {
+		time.Sleep(250 * time.Millisecond)
+		response, err = callControl(defaultControlPath(), request)
+	}
 	if err != nil && request.Action == "logs" {
 		var logs []LocalLogEntry
 		logs, err = readLocalWorkerLogs(Defaults().StateDir)
@@ -445,4 +469,18 @@ func homeOSURL(home Home) string {
 		return ""
 	}
 	return u.String()
+}
+
+// setupControlFromFlags is `worker control --action=setup`'s report: the
+// plan when --plan names stages, otherwise the end when --finished is set.
+// A report that is neither is sent as such and refused by the worker, which
+// says why.
+func setupControlFromFlags(plan string, finished bool) *SetupControl {
+	c := &SetupControl{Finished: finished && strings.TrimSpace(plan) == ""}
+	for _, name := range strings.Split(plan, ",") {
+		if name = strings.TrimSpace(name); name != "" {
+			c.Plan = append(c.Plan, name)
+		}
+	}
+	return c
 }

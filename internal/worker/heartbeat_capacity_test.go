@@ -15,10 +15,10 @@ func TestHeartbeatCarriesTheCapacityReport(t *testing.T) {
 	conn := &Connection{conn: seam}
 	report := &capacity.Report{MemoryTotalBytes: 64 << 30, MemoryFreeBytes: 20 << 30, MemoryKind: capacity.KindUnified, MeasuredAt: time.Now(),
 		Loaded: []capacity.Loaded{{Model: "qwen3.8:27b", Runtime: "ollama", SizeBytes: 20 << 30, ActiveCalls: 1}}}
-	if err := conn.SendHeartbeat(0, nil, nil, nil, report); err != nil {
+	if err := conn.SendHeartbeat(0, nil, nil, nil, report, nil); err != nil {
 		t.Fatal(err)
 	}
-	if err := conn.SendHeartbeat(0, nil, nil, nil, nil); err != nil {
+	if err := conn.SendHeartbeat(0, nil, nil, nil, nil, nil); err != nil {
 		t.Fatal(err)
 	}
 	if len(seam.frames) != 2 {

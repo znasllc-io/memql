@@ -1927,6 +1927,46 @@ function setup_workbench() {
 }
 
 # ---------------------------------------------------------------
+# The setup report (memql-cockpit#541)
+# ---------------------------------------------------------------
+#
+# The local-model and workbench stages run AFTER the worker has connected,
+# so MemQL OS can show them only if the worker carries them to the cluster.
+# These two tell the worker which stages are coming and when the installer
+# is done; the setup commands report their own progress in between. Both are
+# best-effort: a worker that is not up, or too old to know the action,
+# changes nothing about the install, and neither prints anything.
+
+# setup_report_plan names the stages this install will run, in its order.
+function setup_report_plan() {
+    local inference="$1" workbench="$2" plan=""
+    if [[ "$inference" == yes ]]; then
+        plan="runtime,models"
+    fi
+    if [[ "$workbench" == yes ]]; then
+        plan="${plan:+${plan},}workbench"
+    fi
+    printf '%s' "$plan"
+}
+
+# report_setup_plan tells the worker what is coming. It waits for the
+# worker the installer has just started to open its control socket.
+function report_setup_plan() {
+    local binary="$1" plan
+    plan="$(setup_report_plan "$2" "$3")"
+    [[ -n "$plan" ]] || return 0
+    "$binary" worker control --action=setup --plan="$plan" --wait=20s >/dev/null 2>&1 || true
+}
+
+# report_setup_finished says the installer is done: a stage it never
+# reached is skipped rather than shown as still to come.
+function report_setup_finished() {
+    local binary="$1"
+    [[ -n "$(setup_report_plan "$2" "$3")" ]] || return 0
+    "$binary" worker control --action=setup --finished --wait=5s >/dev/null 2>&1 || true
+}
+
+# ---------------------------------------------------------------
 # Uninstall helpers -- shared by uninstall-mac.sh and uninstall-linux.sh
 # ---------------------------------------------------------------
 #

@@ -150,6 +150,17 @@ type inferenceSetup struct {
 	// reason is the outcome in one sentence, for the installers' closing
 	// summary (recordSetupReason). Set where a failure is printed.
 	reason string
+
+	// progress tells the running worker what this command is doing, so the
+	// cluster can show it while the terminal does (setupreport.go). Nil
+	// reports nothing.
+	progress *setupReporter
+	// stageNow is the setup stage this run is in -- "runtime", then
+	// "models" -- so a failure is reported against the stage it stopped.
+	stageNow string
+	// pulled and pulling count the models stage: how many of the models
+	// this run fetches are on the machine, and how many it fetches.
+	pulled, pulling int
 }
 
 // newInferenceSetup wires the real machine in. The policy is read HERE
@@ -234,7 +245,46 @@ func runInferenceSetup(ctx context.Context, s *inferenceSetup) int {
 		}
 		recordSetupReason(s.reason)
 	}
+	s.reportOutcome(err)
 	return SetupExitCode(err)
+}
+
+// beginStage starts one of this command's two setup stages in the report.
+func (s *inferenceSetup) beginStage(name string) {
+	s.stageNow = name
+	s.progress.Stage(name, "running", "")
+}
+
+// reportOutcome closes this command's stages in the setup report (memql-
+// cockpit#541): the models stage done when the setup finished, otherwise the
+// stage it stopped in, with the same sentence the installer's summary gets.
+//
+// SKIPPED, NOT FAILED, when the machine or its policy rules local models out
+// (SetupExitPrereq): nothing went wrong, and the page should say why there
+// will be no models rather than that something broke. A models stage the run
+// never reached is skipped with it, so it is not shown as still to come.
+func (s *inferenceSetup) reportOutcome(err error) {
+	if s.progress == nil {
+		return
+	}
+	if err == nil {
+		s.progress.Stage("models", "done", "")
+		return
+	}
+	state := "failed"
+	if SetupExitCode(err) == SetupExitPrereq {
+		state = "skipped"
+	}
+	// The installer summary's own sentence, verbatim: it is already written
+	// for a reader, and it can open with a key name (models.pull) that a
+	// capital would misspell.
+	reason := strings.TrimSpace(s.reason)
+	if s.stageNow == "models" {
+		s.progress.Stage("models", state, reason)
+		return
+	}
+	s.progress.Stage("runtime", state, reason)
+	s.progress.Stage("models", "skipped", "Not started: the model runtime is not ready.")
 }
 
 func (s *inferenceSetup) run(ctx context.Context) error {
@@ -278,9 +328,13 @@ func (s *inferenceSetup) run(ctx context.Context) error {
 		s.reason = capitalise(plan.Refusal)
 		return alreadySaid(SetupExitPrereq)
 	}
+	s.beginStage("runtime")
 	if err := s.ensureRuntime(ctx, plan); err != nil {
 		return err
 	}
+	s.progress.Stage("runtime", "done", "")
+	s.beginStage("models")
+	s.pulling = len(wanted)
 	if !s.pullAllowed() {
 		s.paragraph("This machine will not pull a model: models.pull is false in " +
 			s.policyPath + ". Remove that key, or set it to true, and run this again.")
@@ -305,6 +359,7 @@ func (s *inferenceSetup) run(ctx context.Context) error {
 		if err := s.pullOne(ctx, id, s.freeAt(modelsDir, host.FreeDisk)); err != nil {
 			return err
 		}
+		s.pulled++
 	}
 	if err := s.allow(s.policyPath, wanted...); err != nil {
 		s.reason = "The models were pulled and could not be allowed: " + err.Error()
@@ -713,7 +768,14 @@ func (s *inferenceSetup) pullOne(ctx context.Context, id string, freeDisk uint64
 	defer cancel()
 
 	d := newPullDisplay(s.out, s.tty, freeDisk, cancel)
-	err := s.pull(ctx, s.base(), id, d.handle)
+	// The report names the model before its first byte, and then carries
+	// the display's own sums -- every part of the model, not the part in
+	// flight -- which is the figure a person watching from Fleet can read.
+	s.progress.Pull(id, 0, 0, s.pulled, s.pulling)
+	err := s.pull(ctx, s.base(), id, func(p inference.Progress) {
+		d.handle(p)
+		s.progress.Pull(id, d.completed, d.total, s.pulled, s.pulling)
+	})
 	d.finish()
 
 	// The disk refusal wins over the error the cancellation produced.
