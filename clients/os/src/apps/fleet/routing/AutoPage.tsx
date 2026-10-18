@@ -84,8 +84,10 @@ export function AutoPage({
   writes: RouteWrites;
   onBack: () => void;
 }) {
-  const settings = useAppReach("settings");
-  const profileReachable = settings.sections.includes("profile") && settings.canOpenWindows;
+  // The person's Profile is a section of the Identity app (memql#6220), where
+  // the monthly budget is set.
+  const identity = useAppReach("identity");
+  const profileReachable = identity.sections.includes("profile") && identity.canOpenWindows;
   const saved = balance.value;
   const [draft, setDraft] = useState<Balance | null>(null);
   const [busy, setBusy] = useState(false);
@@ -194,7 +196,7 @@ export function AutoPage({
                     ) : null}
                     {profileReachable ? (
                       <div className="os-panel-actions fleet-auto-actions">
-                        <button type="button" className="os-link" onClick={() => settings.open("profile")}>Change in your profile</button>
+                        <button type="button" className="os-link" onClick={() => identity.open("profile")}>Change in your profile</button>
                       </div>
                     ) : null}
                   </>
