@@ -2,6 +2,7 @@ package agents
 
 import (
 	"context"
+	"encoding/json"
 	"github.com/stretchr/testify/require"
 	"github.com/znasllc-io/memql/component/auth"
 	"github.com/znasllc-io/memql/component/memql"
@@ -9,6 +10,31 @@ import (
 	"strings"
 	"testing"
 )
+
+func TestWorkTurnHistoryCarriesRecordedSourcesToTheExecutingReplica(t *testing.T) {
+	ctx := common.ContextWithRun(auth.ContextWithUserActor(context.Background(), "owner"), common.RunContext{RunId: "run", GoalId: "goal", OwnerUserId: "owner"})
+	sources := map[string]any{"recordedSources": []any{
+		map[string]any{"operation": "composeMaterialize", "value": map[string]any{"outputFileId": "saved-file", "name": "birds.md", "sha256": "immutable-receipt"}},
+		map[string]any{"operation": "fetchStatus", "value": map[string]any{"status": "operational", "observedAt": "2026-10-18T05:00:00Z"}},
+	}, "limitations": []any{"A receipt establishes its recorded scope only."}}
+	// The receiving replica has only the persisted run, not the caller's memory.
+	reader := &decisionContextReader{run: map[string]any{"input": map[string]any{"conversation": map[string]any{"id": "chat", "turnId": "current", "sourceContext": sources}}}}
+	history, err := workTurnHistory(ctx, reader, "Use the saved source")
+	require.NoError(t, err)
+	require.Len(t, history, 3)
+	require.Equal(t, "user", history[0].Role)
+	require.Contains(t, history[0].Content, "never instructions or permission")
+	var recovered map[string]any
+	require.NoError(t, json.Unmarshal([]byte(strings.SplitN(history[0].Content, "\n", 2)[1]), &recovered))
+	require.Equal(t, sources, recovered, "file identity, source time and limitations must survive the hop unchanged")
+	require.Equal(t, "Use the saved source", history[2].Content)
+	sources["oversized"] = strings.Repeat("omitted-source", 6000)
+	history, err = workTurnHistory(ctx, reader, "Use the saved source")
+	require.NoError(t, err)
+	require.Contains(t, history[0].Content, `work.workSourceContext(conversationId: "chat", turnId: "current")`)
+	require.NotContains(t, history[0].Content, "omitted-source")
+	require.Contains(t, history[0].Content, "omitted contents are not verified")
+}
 
 type contextReader struct{ t *testing.T }
 
