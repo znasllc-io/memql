@@ -1908,6 +1908,10 @@ jobs:
           --health-timeout 5s
           --health-retries 12
     env:
+      # Test concurrency is separate from CPU scheduling and package sharding.
+      # Keep the same bounded overlap for I/O-heavy replica tests on 2-core
+      # native runners and 4-core hosted runners. The native runner reads this.
+      MEMQL_DB_TEST_PARALLELISM: "4"
       MEMQL_DATABASE_DSN: postgres://memql:memql_dev@localhost:5432/memql?sslmode=disable
       # Without this the whole point of the lane is optional (memql#2886). Every
       # db-gated test self-skips when it cannot reach Postgres, so a service
@@ -1984,7 +1988,7 @@ jobs:
       - name: db-gated -- ${{ matrix.name }} (${{ matrix.timeout }} per package)
         run: |
           start=$SECONDS
-          go test -count=1 -p=${{matrix.parallel}} -timeout=${{matrix.timeout}} ${{matrix.packages}}
+          go test -count=1 -p=${{matrix.parallel}} -parallel=$MEMQL_DB_TEST_PARALLELISM -timeout=${{matrix.timeout}} ${{matrix.packages}}
           echo "::notice::db-tests ${{matrix.name}}: step wall time (compile + test) $((SECONDS - start))s. The ${{matrix.timeout}} budget bounds each package's TEST time; read it off the ok lines above. If one nears it, SPLIT BY CONCERN -- never raise a budget, never partition by -run."
 
   # VS Code extension lane: run every cmd/memql-lsp drift guard over the
