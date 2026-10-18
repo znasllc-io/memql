@@ -54,6 +54,17 @@ with a 180-minute response ceiling. See the exact decision and PR proof in
 Native merge-candidate success and rejection evidence are still pending;
 the legacy context and remaining workflows have not been retired.
 
+Storage PR #6171 passed its native head check at 16:29:23 UTC: 35 completed
+steps, 14 expected path skips, 35 retained logs and 29 artifacts. It entered
+the ordinary merge queue at 16:29:48, without owner bypass. Native full-mode
+merge-group run `edc9f8dee667f4951fe021b9b6a404ae` / Work
+`572f56714d0b952207a526e0b5f952a7` started at 16:30:08 on exact candidate
+`1d2dcc4fde54822e218dcf2def35470afef9ed67`, based on
+`f0af5373d980491c0f215c9a4233100310898808`. Its result remains pending.
+The PR's final gate received a one-time Kueue priority of 1, allowing it to
+run alongside the existing database job. No running job was preempted and
+no quota was increased; all declared commands and assertions ran unchanged.
+
 The owner subsequently authorized the Mac repository permission change.
 One-time native maintenance run `c2d53a13e477da5ffb7755f329f9d285` passed,
 and the live worker re-advertised both `znasllc-io/memql` and
@@ -64,16 +75,55 @@ merge, and its remote branch, local branch and worktree were removed.
 Cockpit [PR #523](https://github.com/znasllc-io/memql-cockpit/pull/523)
 now has native qualification in progress.
 
+Cockpit candidate `41615a5beb4def7da7f2c3f9597a41b51d0947bd` follows native
+Linux race-suite and macOS computer-use build, vet, app/menu packaging and
+isolated installer successes. Its predecessor's fuzz lane hit the upstream
+[Go duration-shutdown race](https://github.com/golang/go/issues/75804), without
+a failing input or property assertion. Only fuzzing now uses Go 1.27.2; all
+13 discovered targets passed locally at 20 seconds each, without retries or
+suppressed failures. Native run `3c7831256ca179ee9bc672d0e8fac12d` is still
+in progress; this is not a published Cockpit release.
+
+The workflow-retirement branch now reads native configuration for the
+database partition, timeout budgets, tag coverage, node roles, path coverage,
+gate inputs, editor dependencies, OS checks, cache declarations and service
+image pins. Its database guard compiles the real source graph through the
+installed policy, verifies every provisioned package reaches a shard once,
+and passes those shards through the actual budget runner's command builder.
+The obsolete Actions parser, aggregate, token-permission and cache-writer
+guards have been removed. Their replacement failure behavior is covered by
+the native trigger and driver tests, including early-return and fabricated-
+skip rejection. The core Actions workflow itself remains until the exact
+merge-candidate production proof is complete.
+
 Pending implementation [PR #6200](https://github.com/znasllc-io/memql/pull/6200)
 combines standalone DB test budgets, channel management and fresh notification
 grants, and full automatic toolchain smoke checks before native artifact export.
 It supersedes [#6202](https://github.com/znasllc-io/memql/pull/6202) and
 [#6203](https://github.com/znasllc-io/memql/pull/6203) to avoid repeated full
 validation of sibling PRs in the bounded build pool. Their local validation is
-recorded on the PRs; an open PR is not a deployed feature. Marketplace and
-SDK publication, public docs delivery, installer lifecycle, remaining
+recorded on the PRs; an open PR is not a deployed feature. SDK publication,
+public docs delivery, installer lifecycle, remaining
 audits and companion workflow retirement still need their own acceptance
 receipts before #5480 is complete.
+
+The unused VS Code Marketplace/Open VSX publishing workflow is retired while
+native builds and installable downloads remain. Its historical successful run
+was a dry run, and its only publishing attempt failed without a token. Neither
+registry listed the extension on October 18. First-time marketplace publishing
+is separate from migrating the working delivery paths.
+
+The retirement branch also adds receipt-bound npm publication to the existing
+release candidate service. Local protocol and real-database tests cover exact
+archive readback, conflicts, uncertain outcomes, durable version reservation
+and recovery on another host. The release review exposes the package version
+and dist-tag and preserves separate approval. This is implemented and locally
+tested, not a production npm publication receipt. Component tag triggers,
+registry credentials and a live publication still need qualification before
+the SDK workflow can be removed.
+GitHub Packages already contains SDK 0.8.0, published on July 15. The retirement
+branch prepares 0.9.0 and keeps its workspace lockfiles aligned; its package
+dry run passed. This does not publish or replace an existing registry version.
 
 ## Observed baseline, October 16, 2026 UTC
 
@@ -169,13 +219,13 @@ outputs, publication and failure evidence, not merely a command in a manifest.
 |---|---|---|
 | `ci.yml` | Native package adds editor tests/packaging and the rootless OS Docker stage, retains per-package DB budgets and carries PR bases. Editor hosts plus production PR and exact merge-group proof remain | #5506, #5507 |
 | `gitleaks.yml` | Existing current-tree and history scans; production event/cadence evidence | #5506 |
-| `govulncheck.yml` | Existing scan; production merge-group/push/schedule evidence | #5506 |
+| `govulncheck.yml` | Disabled on October 18; definition removed by this change. Native `vulnerabilities.go-vulnerabilities` passed in release `b0643687e51532322e50eb0ff6014ab3` and scheduled run `3443e867a582c3ee5053aa23511dcf41`, retaining a log and all three reports in each. The pinned v1.7.0 scanner still covers every workspace module and fails on findings. Compiled PR/push/queue/release/schedule selection remains tested | #5506 |
 | `codeql.yml` | Existing Go/JS/Python analysis; journaled SARIF upload and receipt still needed | #5480 |
-| `sbom.yml` | Native inventory now runs on release, main push, weekly and manual events; installed retained JSON/XML and complete module/lockfile evidence remain. The old workflow only retained artifacts, never attached release assets | #5480 |
+| `sbom.yml` | Disabled on October 18; definition removed by this change. Native `inventory.sbom` passed in release `b0643687e51532322e50eb0ff6014ab3`, retained 19 files and log `94d6ed5d-4a52-489c-a39e-f1e7703a4c66`. Summary file `06ffedd8baf50f1ff95b42134bf9a8bcd266addea103092afbe8b291da76266e` reports complete coverage; Go JSON/XML and npm lockfile reports are readable in the Library. Release/main-push/weekly/manual selection and missing-module/package refusal tests pass. The old workflow only retained artifacts; it never attached release assets | #5480 |
 | `scorecard.yml` | Scorecard execution, permissions, branch-rule/scheduled triggers and SARIF publication | #5480 |
-| `build-engine-images.yml` | Disabled: native builds own this path. Current release's verified Azure publication and production rollout remain | #5509 |
-| `dispatch-engine-images-on-release.yml` | Disabled to prevent competing release builders; MemQL owns explicit release requests | #5509 |
-| `recover-engine-image-mirror.yml` | Disabled to prevent a competing registry writer; reconcile immutable digests through native publication | #5509 |
+| `build-engine-images.yml` | Disabled and definition removed. Native release `b0643687e51532322e50eb0ff6014ab3` qualified all seven images; exact source, role, release and registry digests were verified before production rollout. Runtime source/version stamping, immutable publication and per-role build guards remain | #5509 |
+| `dispatch-engine-images-on-release.yml` | Disabled and definition removed. MemQL pins explicit release requests to the tag commit and deduplicates webhook delivery; native release tests cover both paths | #5509 |
+| `recover-engine-image-mirror.yml` | Disabled and definition removed. Reconcile immutable digests through the native publication journal; the Actions-only recovery wrapper is removed; native OCI verification and publication tests retain the provenance, digest and conflict checks | #5509 |
 | `build-toolchain-image.yml` | Build and publish future toolchains without Actions | #5509 |
 | `build-db-image.yml` | Native `tests.database-image` selects the verified operand target for changed inputs and full qualification; live native execution and separate registry publication remain | #5509 |
 | `mirror-fixture-images.yml` | Digest-verified fixture mirroring without Actions | #5509 |
@@ -187,8 +237,8 @@ outputs, publication and failure evidence, not merely a command in a manifest.
 | `publish-docs-bundle.yml` | Native release-files builds and verifies the exact-version bundle with complete Git history; release attachment and downstream delivery receipt remain | #5508, #5712 |
 | `docs-current-check.yml` | Native weekly public docs check declared; installed schedule/failure delivery proof remains | #5508, #5712 |
 | `publish-sdk-core.yml` | Native release-files retains the compiled, version-checked npm archive; registry publication and immutable receipt remain | #5480 |
-| `publish-vscode-extension.yml` | Native release-files verifies all four native targets plus web; registry publication remains | #5480 |
-| `vscode-site.yml` | Native `tests.editor-site` builds and checks the static page, runs the existing Chromium browser suite and retains the page plus screenshots; cloud execution and served-version evidence remain | #5480 |
+| `publish-vscode-extension.yml` | Retired unused Marketplace publishing. Its only successful historical run, `37052150601`, was a dry run; `38112601591` failed every publishing target with an empty `VSCE_PAT`. Neither registry listed `znasllc.memql` on October 18. Native `release-files.packages` retains and verifies Linux x64/ARM64, macOS x64/ARM64 and web VSIX archives. First-time Marketplace/Open VSX account setup and publication are separate; no registry publication is claimed | #5480 |
+| `vscode-site.yml` | Retired after native release `b0643687e51532322e50eb0ff6014ab3` passed `tests.editor-site` in 13 seconds: build, self-check, complete Chromium suite, 25 retained artifacts and readable log `73f4664f-80ab-4a7b-a1c0-9705832da015`. The live page at `vscode.memql.io` matches the native HTML SHA-256 `6d7fd2c949a1c7e8f6ffb6f9fa9895a2991a3f2060387af76e6b0a3503f45c05` after the edge's standard refresh-script injection. Source is the deployed `1d087ac973e5fd1e620f99f93ef42dba1f3a3642` | #5480 |
 | `ruleset-drift.yml` | Removed after installed daily run `3443e867a582c3ee5053aa23511dcf41` passed both baselines, retained both logs and reported separate check `MemQL / memql / daily`; negative controls pass ([receipt](https://github.com/znasllc-io/memql/issues/5507#issuecomment-6245341749)) | #5507 |
 | `dependabot-tidy.yml` | Trusted dependency-PR maintenance, without exposing write authority to PR code | #5480 |
 | `clustere2e-compile.yml` API entry | Disabled October 17 at 14:05 UTC: file absent at `f8ece576d`, only two historical runs and no active execution. Current CI and native `checks.build-clustere2e` retain compilation. Required `ci-required` and run history preserved | #5480 |

@@ -52,6 +52,13 @@ func publicCandidate(ctx context.Context, tx *sql.Tx, owner string, rec candidat
 			targets.targets[t.ID] = t
 			key := d.Component + "/" + d.Artifact
 			locations[key] = append(locations[key], pl.PublishedLocation{Kind: "oci", Origin: t.Origin, Repository: t.Repository})
+		} else if target.NPM != nil {
+			if pub.Artifact.Kind != "file" {
+				return out, errors.New("npm catalog target differs from artifact")
+			}
+			t := *target.NPM
+			key := d.Component + "/" + d.Artifact
+			locations[key] = append(locations[key], pl.PublishedLocation{Kind: "npm", Origin: t.Origin, Repository: t.PackageName, Tag: t.Version})
 		} else {
 			if pub.Artifact.Kind != "file" {
 				return out, errors.New("catalog target kind differs from artifact")

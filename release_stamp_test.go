@@ -138,20 +138,9 @@ func TestTheReleaseStampTargetExists(t *testing.T) {
 		buildinfoSrcFile, buildinfoVarName)
 }
 
-// TestTheReleaseBuildSuppliesTheRelease checks the one build that actually
-// knows the release passes it. Everything else (a laptop `make dev`, a branch
-// build) deliberately does not, and must keep not doing so.
-func TestTheReleaseBuildSuppliesTheRelease(t *testing.T) {
-	const workflow = ".github/workflows/build-engine-images.yml"
-	body := readRepoFile(t, workflow)
-
-	want := releaseBuildArg + "=${{ inputs.version }}"
-	if !strings.Contains(body, want) {
-		t.Errorf("%s does not pass %q as a build arg.\n"+
-			"It is the only place that knows the release being cut; without this the images "+
-			"carry the right tag and a binary that says %q.", workflow, want, "dev")
-	}
-}
+// Native release/source stamping is exercised by
+// integrations/pipelinesteps.TestImageBuildReceivesPinnedCommitAndReleaseMetadata.
+// Keep the binary/linker and stale-file regression guards here.
 
 // TestNoImageStampsAVersionFile is the regression half. The removed step read
 // `VERSION`, cut everything after the first `-`, and wrote back

@@ -1,6 +1,6 @@
 package selection
 
-// live_test.go -- the loader and the tag-pass gate held to the REAL tree.
+// live_test.go -- the loader held to the real multi-module tree.
 //
 // Everything else in this package is tested on a recorded fixture, which is
 // what keeps the decisions pure. These two tests are the exception on purpose:
@@ -18,8 +18,6 @@ import (
 	"sort"
 	"strings"
 	"testing"
-
-	"gopkg.in/yaml.v3"
 )
 
 const liveModulePath = "github.com/znasllc-io/memql"
@@ -91,87 +89,6 @@ func TestLoadGraphOnTheRealTree(t *testing.T) {
 	}
 }
 
-// TestTagPassPackagesAreReachedThroughTheTagTrees is the soundness half of
-// the tag-pass gate (memql#5483). The planner runs the seven passes when the
-// affected set reaches a package under TAG_TREES. That is only right if every
-// package a pass TESTS is either under one of those trees or imported -- over
-// the union graph, test binaries included -- by a package that is; otherwise a
-// change reaching only that package would skip the pass that tests it.
-func TestTagPassPackagesAreReachedThroughTheTagTrees(t *testing.T) {
-	g, root := liveGraph(t)
-	raw, err := os.ReadFile(filepath.Join(root, ".github", "workflows", "ci.yml"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	var wf struct {
-		Jobs map[string]struct {
-			Strategy struct {
-				Matrix yaml.Node `yaml:"matrix"`
-			} `yaml:"strategy"`
-			Steps []struct {
-				ID  string            `yaml:"id"`
-				Env map[string]string `yaml:"env"`
-			} `yaml:"steps"`
-		} `yaml:"jobs"`
-	}
-	if err := yaml.Unmarshal(raw, &wf); err != nil {
-		t.Fatal(err)
-	}
-	var trees []string
-	for _, s := range wf.Jobs["plan"].Steps {
-		if s.ID == "plan" {
-			trees = strings.Fields(s.Env["TAG_TREES"])
-		}
-	}
-	if len(trees) == 0 {
-		t.Fatal("the plan step carries no TAG_TREES")
-	}
-	var matrix struct {
-		Include []struct {
-			Tag      string `yaml:"tag"`
-			Packages string `yaml:"packages"`
-		} `yaml:"include"`
-	}
-	node := wf.Jobs["go-tests-tags"].Strategy.Matrix
-	if err := node.Decode(&matrix); err != nil || len(matrix.Include) == 0 {
-		t.Fatalf("reading go-tests-tags' matrix: %v (entries %d)", err, len(matrix.Include))
-	}
-	underATree := func(dir string) bool {
-		for _, tr := range trees {
-			if dir == tr || strings.HasPrefix(dir, tr+"/") {
-				return true
-			}
-		}
-		return false
-	}
-	byDir := map[string]string{}
-	for _, ipth := range g.ImportPaths() {
-		p, _ := g.Package(ipth)
-		byDir[p.Dir] = ipth
-	}
-	for _, e := range matrix.Include {
-		for _, arg := range strings.Fields(e.Packages) {
-			dir := strings.TrimSuffix(strings.TrimPrefix(arg, "./"), "/")
-			ipth, ok := byDir[dir]
-			if !ok {
-				t.Errorf("tag %s tests %s, which is not a package", e.Tag, arg)
-				continue
-			}
-			if underATree(dir) {
-				continue
-			}
-			reached := false
-			for _, importer := range g.rdeps[ipth] {
-				if p, _ := g.Package(importer); underATree(p.Dir) {
-					reached = true
-					break
-				}
-			}
-			if !reached {
-				t.Errorf("tag %s tests %s, which is under no TAG_TREES tree %v and imported by no package "+
-					"that is: a change reaching only it would skip the pass that tests it. Add its tree to "+
-					"TAG_TREES in ci.yml's plan step.", e.Tag, dir, trees)
-			}
-		}
-	}
-}
+// Native node-tag commands are unconditional on PRs and merge candidates.
+// scripts/citags now discovers every tagged test and checks actual native
+// command coverage; the former TAG_TREES narrowing rule no longer schedules them.

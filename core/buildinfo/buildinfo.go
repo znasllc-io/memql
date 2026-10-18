@@ -33,7 +33,7 @@
 // release it was not built from -- and a version source that can be overridden
 // at runtime is not a version source, it is a rumour. The image build wires the
 // flag from the release tag it was dispatched with (Dockerfile's MEMQL_RELEASE
-// build arg, fed by .github/workflows/build-engine-images.yml).
+// build arg, fed by the native pipeline image builder).
 //
 // commit is stamped by the same build and follows the same rule; its own
 // comment below states the one difference, which is that the Go toolchain can

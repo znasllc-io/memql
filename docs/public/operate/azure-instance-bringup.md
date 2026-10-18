@@ -163,10 +163,10 @@ scripts/deploy/azure-provision.sh ... | tee /tmp/provision.json | jq .result
 
 The instance pulls engine images from its own registry. Two ways to fill it:
 
-- **Build them** on the GitHub build server (`build-engine-images.yml`,
-  `workflow_dispatch` on `main` with `version` and the release's full
-  `source_sha` inputs). This is the sanctioned
-  path for anything deployed -- see the HARD RULE in `CLAUDE.md`.
+- **Build them** on the MemQL build server by publishing the release for the
+  reviewed source commit. The native pipeline reads the tagged
+  `memql-package.yaml`, builds every engine node and publishes verified digests.
+  See [Cutting a release](release-cutting.md).
 - **Import them** from an existing registry with `az acr import`. This is the
   right tool when the source registry is in a DIFFERENT TENANT, because import
   authenticates with *registry* credentials rather than ARM, so it crosses a

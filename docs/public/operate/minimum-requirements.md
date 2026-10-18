@@ -182,13 +182,14 @@ Every DB-connecting pod mounts the `memql-secrets` Secret via `envFrom`. The
 
 ## 4. Images — built on the build server, never a laptop
 
-Deployable images are built on **GitHub Actions → OIDC → ACR `acrmemql`**, never
+Deployable images are built on the **MemQL build server** and published to the
+configured registries with workload identity, never
 hand-built locally (local Docker is dev-only):
 
 - `memql` (this repo) → **every** node-type image — `identity`, `bff`,
   `agent`, `planner`, `workbench`, `mcp`, `edge` — as a
   **product-agnostic engine image**
-  (`.github/workflows/build-engine-images.yml`). There are no per-product node
+  (`memql-package.yaml`, native release image stage). There are no per-product node
   images: a plain engine node runs a product's DSL at runtime, so it does
   **not** need product code compiled in and does **not** fail on a product
   prompt template — the DSL bundle supplies the prompts (next bullet).

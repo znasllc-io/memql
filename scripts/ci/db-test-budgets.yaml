@@ -1,5 +1,5 @@
 # Native test budgets. Keep operation deadlines and package selections unchanged.
-# The transition test compares these with the retained Actions lane until retirement.
+# The native runner tests pin the effective commands, selections and budgets.
 databaseParallelism: 4
 classes: |
   # lane  class     trees               timeout  mode      shards

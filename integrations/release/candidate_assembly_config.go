@@ -107,6 +107,10 @@ func validateAssemblyPlans(plans []candidateAssemblyPlan, versions *candidateVer
 				if artifacts[file.Component+"/"+file.Artifact] != "file" {
 					return errors.New("assembly file target does not match a declared file artifact")
 				}
+			} else if npm := targets.npm[name]; npm.ID != "" {
+				if artifacts[npm.Component+"/"+npm.Artifact] != "file" {
+					return errors.New("assembly npm target does not match a declared file artifact")
+				}
 			} else {
 				return errors.New("assembly target is not configured")
 			}

@@ -37,7 +37,7 @@ package citags
 // were step `name:` lines: the gate was satisfied by a LABEL, and deleting
 // every `run:` line still passed. It could not tell a lane from its title,
 // which is exactly the failure it exists to catch. This parses the YAML and
-// reads only `jobs.*.steps[].run`.
+// reads only native `pipeline.stages[].steps[].run`.
 //
 // # Why package lists, not just tags
 //
@@ -66,9 +66,9 @@ package citags
 // catches the tags that do not.
 
 import (
-	"fmt"
 	"go/build"
 	"go/build/constraint"
+	"maps"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -79,6 +79,8 @@ import (
 	"testing"
 
 	"gopkg.in/yaml.v3"
+
+	"github.com/znasllc-io/memql/component/pipelines"
 )
 
 // deliberatelyNotRunInCI maps a build tag to WHY no CI lane runs its tests.
@@ -87,7 +89,7 @@ import (
 // that would survive review. A tag that is merely inconvenient belongs in a
 // lane.
 var deliberatelyNotRunInCI = map[string]string{
-	"clustere2e": "needs a provisioned cluster to run (make cluster-e2e for the 2-replica parity suite); ci.yml's build-clustere2e job " +
+	"clustere2e": "needs a provisioned cluster to run (make cluster-e2e for the 2-replica parity suite); the native build-clustere2e step " +
 		"compiles and vets it under the tag so the package cannot rot uncompiled (memql#4212), which is not a run. One test of the " +
 		"package, TestPipelinesSubstrate, does run: install-cluster-e2e.yml's pipelines leg runs it against the cluster that leg " +
 		"installs (memql#5497) -- nightly and on that workflow's own paths, so it gates no pull request and is not a lane here, " +
@@ -95,15 +97,9 @@ var deliberatelyNotRunInCI = map[string]string{
 		"it runs the executor's fleet half, which is agent-only), so the compile lane builds the package under both tag sets",
 }
 
-// prCriticalWorkflows are the workflow files whose lanes actually gate a pull
-// request. A `go test -tags X` in a workflow that only runs on
-// workflow_dispatch or a schedule does NOT protect a PR, so it must not satisfy
-// this gate.
-var prCriticalWorkflows = map[string]bool{"ci.yml": true}
-
 // goTestCmd matches a `go test` invocation. Applied only to the text of a
 // step's `run:` block, never to the whole file.
-var goTestCmd = regexp.MustCompile(`go test\b([^\n]*)`)
+var goTestCmd = regexp.MustCompile(`(?m)^\s*go test\b([^\n]*)`)
 
 // tagsFlag pulls the tag list out of one command's arguments.
 var tagsFlag = regexp.MustCompile(`-tags[= ]["']?([A-Za-z0-9_,]+)["']?`)
@@ -157,219 +153,106 @@ func repoRoot(t *testing.T) string {
 	}
 }
 
-// workflowDoc is the sliver of the GitHub Actions schema this gate reads: each
-// job's `run:` text, and its strategy.matrix so a matrix job's commands can be
-// read per entry (memql#5483).
-type workflowDoc struct {
-	Jobs map[string]struct {
-		Strategy struct {
-			Matrix yaml.Node `yaml:"matrix"`
-		} `yaml:"strategy"`
-		Steps []struct {
-			Run string `yaml:"run"`
-		} `yaml:"steps"`
-	} `yaml:"jobs"`
-}
-
-// matrixRef matches a `${{ matrix.<key> }}` interpolation, spaces optional.
-var matrixRef = regexp.MustCompile(`\$\{\{\s*matrix\.([A-Za-z0-9_-]+)\s*\}\}`)
-
-// matrixCombos expands a job's STATIC strategy.matrix into its combinations:
-// the cross product of its list-valued keys, plus each `include` entry. A
-// matrix computed at run time (`${{ fromJSON(...) }}`) has nothing static to
-// expand and yields none, so its steps are read as written -- and a
-// `-tags ${{ matrix.tag }}` left unexpanded matches no tag, which is the safe
-// direction: it cannot make a tagged file look covered.
-func matrixCombos(m yaml.Node) []map[string]string {
-	if m.Kind != yaml.MappingNode {
-		return nil
-	}
-	var keys []string
-	values := map[string][]string{}
-	var include []map[string]string
-	for i := 0; i+1 < len(m.Content); i += 2 {
-		k, v := m.Content[i].Value, m.Content[i+1]
-		switch {
-		case k == "include" && v.Kind == yaml.SequenceNode:
-			for _, entry := range v.Content {
-				if entry.Kind != yaml.MappingNode {
-					continue
-				}
-				combo := map[string]string{}
-				for j := 0; j+1 < len(entry.Content); j += 2 {
-					if entry.Content[j+1].Kind == yaml.ScalarNode {
-						combo[entry.Content[j].Value] = entry.Content[j+1].Value
-					}
-				}
-				include = append(include, combo)
-			}
-		case k == "exclude":
-			// An excluded combination runs nothing, so dropping the
-			// exclusion can only ADD lanes -- over-reporting coverage the
-			// matrix does not have. No workflow here uses one; refuse to
-			// guess rather than read one wrongly.
-			panic("citags: strategy.matrix.exclude is not modelled -- teach matrixCombos before using it")
-		case v.Kind == yaml.SequenceNode:
-			keys = append(keys, k)
-			for _, item := range v.Content {
-				if item.Kind == yaml.ScalarNode {
-					values[k] = append(values[k], item.Value)
-				}
-			}
-		}
-	}
-	var combos []map[string]string
-	if len(keys) > 0 {
-		combos = []map[string]string{{}}
-		for _, k := range keys {
-			var next []map[string]string
-			for _, base := range combos {
-				for _, v := range values[k] {
-					merged := map[string]string{k: v}
-					for bk, bv := range base {
-						merged[bk] = bv
-					}
-					next = append(next, merged)
-				}
-			}
-			combos = next
-		}
-	}
-	return append(combos, include...)
-}
-
-// renderRuns returns a step's `run:` text once per matrix combination with its
-// `${{ matrix.<key> }}` references substituted, or the text as written when
-// the job has no static matrix or the step names none of it.
-func renderRuns(run string, combos []map[string]string) []string {
-	if len(combos) == 0 || !matrixRef.MatchString(run) {
-		return []string{run}
-	}
-	out := make([]string, 0, len(combos))
-	for _, c := range combos {
-		out = append(out, matrixRef.ReplaceAllStringFunc(run, func(ref string) string {
-			if v, ok := c[matrixRef.FindStringSubmatch(ref)[1]]; ok {
-				return v
-			}
-			return ref
-		}))
-	}
-	return out
-}
-
-// lanesFromWorkflow returns every `go test -tags` invocation in one workflow,
-// reading ONLY steps[].run, once per matrix entry for a matrix job.
-func lanesFromWorkflow(name string, data []byte) ([]lane, error) {
-	var wf workflowDoc
-	if err := yaml.Unmarshal(data, &wf); err != nil {
-		return nil, fmt.Errorf("parsing %s: %w", name, err)
-	}
-	var out []lane
-	for _, job := range wf.Jobs {
-		combos := matrixCombos(job.Strategy.Matrix)
-		for _, step := range job.Steps {
-			for _, run := range renderRuns(step.Run, combos) {
-				for _, cmd := range goTestCmd.FindAllStringSubmatch(run, -1) {
-					args := cmd[1]
-					m := tagsFlag.FindStringSubmatch(args)
-					if m == nil {
-						continue
-					}
-					var pkgs []string
-					compileOnly := false
-					for _, f := range strings.Fields(args) {
-						if strings.HasPrefix(f, "./") || f == "..." {
-							pkgs = append(pkgs, f)
-						}
-						if f == "-c" {
-							compileOnly = true
-						}
-					}
-					out = append(out, lane{tags: strings.Split(m[1], ","), pkgs: pkgs, workflow: name, compileOnly: compileOnly})
-				}
-			}
-		}
-	}
-	return out, nil
-}
-
-// ciLanes parses the PR-critical workflows and returns every `go test -tags`
-// step, reading ONLY steps[].run.
-func ciLanes(t *testing.T, root string) []lane {
-	t.Helper()
-	var out []lane
-	dir := filepath.Join(root, ".github", "workflows")
-
-	entries, err := os.ReadDir(dir)
-	if err != nil {
-		t.Fatalf("reading %s: %v", dir, err)
-	}
-	for _, e := range entries {
-		if e.IsDir() || !prCriticalWorkflows[e.Name()] {
+// mergeSteps reads only unconditional native commands that run on BOTH PRs
+// and merge candidates. A scheduled/release-only command, a path-gated step,
+// or a selected subset of packages cannot establish coverage for every merge.
+func mergeSteps(spec *pipelines.Spec) map[string]pipelines.StepSpec {
+	out := map[string]pipelines.StepSpec{}
+	for _, stage := range spec.Stages {
+		if len(stage.On) > 0 && !(slices.Contains(stage.On, "pull_request") && slices.Contains(stage.On, "merge_group")) {
 			continue
 		}
-		data, readErr := os.ReadFile(filepath.Join(dir, e.Name()))
-		if readErr != nil {
-			t.Fatalf("reading %s: %v", e.Name(), readErr)
+		for _, step := range stage.Steps {
+			if step.When == nil && step.Packages == "" && step.Run != "" {
+				out[pipelines.StepKey(stage.Name, step.Name)] = step
+			}
 		}
-		lanes, err := lanesFromWorkflow(e.Name(), data)
-		if err != nil {
-			t.Fatal(err)
-		}
-		out = append(out, lanes...)
 	}
 	return out
 }
 
-// TestMatrixEntriesAreReadAsLanes pins the expansion memql#5483 depends on: the
-// tag passes are ONE matrix job, so without it every tagged file would read as
-// uncovered -- and, worse, a regression here that expanded nothing would look
-// exactly like that and be "fixed" by deleting the matrix.
-func TestMatrixEntriesAreReadAsLanes(t *testing.T) {
-	wf := []byte(`
-jobs:
-  tagged:
-    strategy:
-      matrix:
-        include:
-          - tag: agent
-            packages: ./app/ ./integrations/agent/
-          - tag: mcp
-            packages: ./component/mcp/
-    steps:
-      - run: go test -tags ${{ matrix.tag }} -timeout=300s ${{ matrix.packages }}
-  crossed:
-    strategy:
-      matrix:
-        tag: [edge, bff]
-    steps:
-      - run: go test -tags ${{matrix.tag}} ./component/server/
-  planned:
-    strategy:
-      matrix: ${{ fromJSON(needs.plan.outputs.go_matrix) }}
-    steps:
-      - run: go test -tags ${{ matrix.tag }} ${{ matrix.packages }}
-`)
-	lanes, err := lanesFromWorkflow("ci.yml", wf)
+func nativeSpec(t *testing.T, root string) *pipelines.Spec {
+	t.Helper()
+	data, err := os.ReadFile(filepath.Join(root, "memql-package.yaml"))
 	if err != nil {
 		t.Fatal(err)
 	}
-	got := map[string]bool{}
-	for _, l := range lanes {
-		got[strings.Join(l.tags, ",")+" "+strings.Join(l.pkgs, " ")] = true
+	var manifest struct {
+		Pipeline *pipelines.Spec `yaml:"pipeline"`
 	}
-	for _, want := range []string{
-		"agent ./app/ ./integrations/agent/",
-		"mcp ./component/mcp/",
-		"edge ./component/server/",
-		"bff ./component/server/",
-	} {
-		if !got[want] {
-			t.Errorf("missing lane %q; got %v", want, got)
+	if err := yaml.Unmarshal(data, &manifest); err != nil {
+		t.Fatal(err)
+	}
+	if refusal := pipelines.Validate(manifest.Pipeline); refusal != nil {
+		t.Fatal(refusal)
+	}
+	return manifest.Pipeline
+}
+
+// lanesFromSteps counts actual commands, never names or comments. Restricted
+// -run/-skip invocations do not establish coverage of every tagged test.
+func lanesFromSteps(steps map[string]pipelines.StepSpec) []lane {
+	var out []lane
+	for name, step := range steps {
+		if !strings.Contains(step.Run, "set -eu") || strings.Contains(step.Run, "||") {
+			continue
+		}
+		for _, cmd := range goTestCmd.FindAllStringSubmatch(step.Run, -1) {
+			args := cmd[1]
+			m := tagsFlag.FindStringSubmatch(args)
+			if m == nil {
+				continue
+			}
+			var pkgs []string
+			compileOnly, filtered := false, false
+			for _, f := range strings.Fields(args) {
+				if strings.HasPrefix(f, "./") || f == "..." {
+					pkgs = append(pkgs, f)
+				}
+				if f == "-c" {
+					compileOnly = true
+				}
+				if f == "-run" || strings.HasPrefix(f, "-run=") || f == "-skip" || strings.HasPrefix(f, "-skip=") {
+					filtered = true
+				}
+			}
+			if !filtered {
+				out = append(out, lane{tags: strings.Split(m[1], ","), pkgs: pkgs, workflow: name, compileOnly: compileOnly})
+			}
 		}
 	}
-	if len(lanes) != 4 {
-		t.Errorf("want exactly the 4 static lanes (a computed matrix expands to none), got %d: %v", len(lanes), got)
+	return out
+}
+
+func ciLanes(t *testing.T, root string) []lane {
+	t.Helper()
+	return lanesFromSteps(mergeSteps(nativeSpec(t, root)))
+}
+
+func TestOnlyMergeGatingNativeCommandsCountAsTagCoverage(t *testing.T) {
+	command := "set -eu\ngo test -tags agent ./app/"
+	spec := &pipelines.Spec{Stages: []pipelines.StageSpec{
+		{Name: "checks", Steps: []pipelines.StepSpec{
+			{Name: "real", Run: command},
+			{Name: "label-go-test-tags-agent", Run: "set -eu\n# go test -tags agent ./app/\necho ok"},
+			{Name: "conditional", Run: command, When: &pipelines.When{Bucket: "go"}},
+			{Name: "selected", Run: command, Packages: "affected"},
+			{Name: "filtered", Run: command + " -run TestOne"},
+			{Name: "swallowed", Run: command + " || true"},
+			{Name: "compile", Run: command + " -c"},
+		}},
+		{Name: "scheduled", On: []string{"schedule"}, Steps: []pipelines.StepSpec{{Name: "hidden", Run: command}}},
+		{Name: "pr-only", On: []string{"pull_request"}, Steps: []pipelines.StepSpec{{Name: "hidden", Run: command}}},
+		{Name: "both", On: []string{"pull_request", "merge_group"}, Steps: []pipelines.StepSpec{{Name: "real", Run: command}}},
+	}}
+	lanes := lanesFromSteps(mergeSteps(spec))
+	got := map[string]bool{}
+	for _, lane := range lanes {
+		got[lane.workflow] = lane.compileOnly
+	}
+	want := map[string]bool{"checks.real": false, "checks.compile": true, "both.real": false}
+	if !maps.Equal(got, want) {
+		t.Fatalf("merge-gating lanes = %v, want %v", got, want)
 	}
 }
 
@@ -501,7 +384,7 @@ func TestEveryTaggedTestFileIsRunSomewhere(t *testing.T) {
 		t.Fatal("found no *_test.go files at all -- the scanner is broken, not the tree")
 	}
 	if len(lanes) == 0 {
-		t.Fatal("parsed no `go test -tags` lanes from the PR-critical workflows. Either the tagged " +
+		t.Fatal("parsed no `go test -tags` lanes from the native PR/merge candidate pipeline. Either the tagged " +
 			"lanes were removed, or this gate's YAML parsing broke -- both are failures")
 	}
 
@@ -540,7 +423,7 @@ func TestEveryTaggedTestFileIsRunSomewhere(t *testing.T) {
 		t.Errorf("%s does not compile in the default build and NO PR-critical CI lane runs it.\n\n"+
 			"A //go:build-tagged test is invisible to the untagged `go test ./...`, so it asserts "+
 			"nothing on any PR. Either add a `go test -tags <tag> ./%s/` step to "+
-			".github/workflows/ci.yml, or add its tag to deliberatelyNotRunInCI with a reason that "+
+			"memql-package.yaml, or add its tag to deliberatelyNotRunInCI with a reason that "+
 			"would survive review (memql#2903).", rel, filepath.Dir(rel))
 	}
 }
@@ -574,22 +457,6 @@ func TestDeliberateExclusionsAreHonest(t *testing.T) {
 				"Remove the entry (memql#2903).", tag)
 		}
 	}
-}
-
-// ciJobDoc is the fuller slice of the workflow schema the compile-lane pin
-// reads: job env + needs, and per-step name / run / if / continue-on-error.
-type ciJobDoc struct {
-	Jobs map[string]struct {
-		If    string            `yaml:"if"`
-		Needs any               `yaml:"needs"`
-		Env   map[string]string `yaml:"env"`
-		Steps []struct {
-			Name            string `yaml:"name"`
-			Run             string `yaml:"run"`
-			If              string `yaml:"if"`
-			ContinueOnError any    `yaml:"continue-on-error"`
-		} `yaml:"steps"`
-	} `yaml:"jobs"`
 }
 
 // laneCovers reports whether a `go vet` / `go test` command line carries the
@@ -628,7 +495,7 @@ func tagSet(cmdArgs string) []string {
 }
 
 var (
-	goVetCmd = regexp.MustCompile(`go vet\b([^\n]*)`)
+	goVetCmd = regexp.MustCompile(`(?m)^\s*go vet\b([^\n]*)`)
 	flagC    = regexp.MustCompile(`(^|\s)-c(\s|$)`)
 )
 
@@ -638,7 +505,7 @@ var (
 // the gate above -- and a compile-only lane is excluded from that gate by
 // design. That leaves the lane itself unguarded: delete the job, drop `-tags`,
 // point it at another package, let it run in workspace mode, or leave it out
-// of ci-required, and every other test in this package stays green while the
+// of the native PR/merge candidate plan, and every other test in this package stays green while the
 // package goes back to rotting. Each of those edits is checked here.
 //
 // So is the one the lane's own discovery cannot see. The job is FOUND by any
@@ -661,51 +528,34 @@ func TestClusterE2ECompileLaneGatesTheMerge(t *testing.T) {
 		dir = "test/clustere2e"
 	)
 	root := repoRoot(t)
-	data, err := os.ReadFile(filepath.Join(root, ".github", "workflows", "ci.yml"))
-	if err != nil {
-		t.Fatalf("read ci.yml: %v", err)
-	}
-	var wf ciJobDoc
-	if err := yaml.Unmarshal(data, &wf); err != nil {
-		t.Fatalf("parse ci.yml: %v", err)
-	}
-
-	// Find the job by what it DOES, not by its name, so a rename is free.
+	steps := mergeSteps(nativeSpec(t, root))
 	var found []string
-	for name, job := range wf.Jobs {
+	for name, step := range steps {
 		vets, compiles := false, false
-		for _, step := range job.Steps {
-			for _, cmd := range goVetCmd.FindAllStringSubmatch(step.Run, -1) {
-				if laneCovers(cmd[1], tag, dir) {
-					vets = true
-				}
+		for _, cmd := range goVetCmd.FindAllStringSubmatch(step.Run, -1) {
+			if laneCovers(cmd[1], tag, dir) {
+				vets = true
 			}
-			for _, cmd := range goTestCmd.FindAllStringSubmatch(step.Run, -1) {
-				if laneCovers(cmd[1], tag, dir) && flagC.MatchString(cmd[1]) {
-					compiles = true
-				}
+		}
+		for _, cmd := range goTestCmd.FindAllStringSubmatch(step.Run, -1) {
+			if laneCovers(cmd[1], tag, dir) && flagC.MatchString(cmd[1]) {
+				compiles = true
 			}
 		}
 		if vets && compiles {
 			found = append(found, name)
 		}
 	}
-	sort.Strings(found)
-	if len(found) == 0 {
-		t.Fatalf("no ci.yml job both `go vet -tags %s ./%s/` and `go test -tags %s -c ... ./%s/`. "+
-			"The tagged package is then compiled by nothing on any PR and rots silently, which is "+
-			"exactly memql#4212.", tag, dir, tag, dir)
-	}
-	if len(found) > 1 {
-		t.Fatalf("%d ci.yml jobs compile %s: %v -- one lane, so there is one place to read", len(found), dir, found)
+	if len(found) != 1 {
+		t.Fatalf("want one unconditional native PR/merge candidate command that compiles and vets %s, got %v", dir, found)
 	}
 	jobName := found[0]
-	job := wf.Jobs[jobName]
+	step := steps[jobName]
 
 	// Every file of the package, compiled and vetted under a tag set the job
 	// itself uses (see the doc comment).
 	var vetSets, compileSets [][]string
-	for _, step := range job.Steps {
+	{
 		for _, cmd := range goVetCmd.FindAllStringSubmatch(step.Run, -1) {
 			if laneCovers(cmd[1], tag, dir) {
 				vetSets = append(vetSets, tagSet(cmd[1]))
@@ -736,7 +586,7 @@ func TestClusterE2ECompileLaneGatesTheMerge(t *testing.T) {
 				}
 			}
 			if !reached {
-				t.Errorf("%s/%s builds under none of the tag sets ci.yml job %q %s the package with (%v), so no pull "+
+				t.Errorf("%s/%s builds under none of the tag sets native step %q %s the package with (%v), so no pull "+
 					"request %s it -- memql#4212's rot. Add a `%s -tags <the tags its build constraint needs>` step "+
 					"for ./%s/ to the job.", dir, f[1], jobName, half.verb, half.sets, half.verb, half.flag, dir)
 			}
@@ -746,47 +596,10 @@ func TestClusterE2ECompileLaneGatesTheMerge(t *testing.T) {
 		t.Fatalf("found no *_test.go in %s: the hold above checked nothing, so it fails closed", dir)
 	}
 
-	if got := strings.TrimSpace(job.Env["GOWORK"]); got != "off" {
-		t.Errorf("ci.yml job %q must set GOWORK: 'off' at job level (got %q): scripts/test/cluster-e2e.sh "+
-			"runs the live suite with GOWORK=off, and a require the root go.mod lacks compiles green "+
-			"under the workspace and fails on the cluster", jobName, got)
+	if !strings.Contains(step.Run, "export GOWORK=off\n") {
+		t.Errorf("native step %q must compile outside the workspace, as the live suite does", jobName)
 	}
-	if !strings.Contains(strings.ReplaceAll(job.If, " ", ""), "needs.changes.outputs.go=='true'") {
-		t.Errorf("ci.yml job %q is gated on `if: %s`, which does not fire on the `go` bucket; a tagged "+
-			"compile can break on any Go change, so the lane must run whenever Go changed "+
-			"(build-node-tags is the model)", jobName, job.If)
-	}
-	for _, step := range job.Steps {
-		if !goVetCmd.MatchString(step.Run) && !goTestCmd.MatchString(step.Run) {
-			continue
-		}
-		if strings.TrimSpace(step.If) != "" {
-			t.Errorf("ci.yml job %q step %q is gated on `if: %s`; a condition that evaluates false compiles "+
-				"nothing and reports green", jobName, step.Name, step.If)
-		}
-		if step.ContinueOnError != nil && step.ContinueOnError != false {
-			t.Errorf("ci.yml job %q step %q sets continue-on-error=%v; a swallowed compile failure is not a gate",
-				jobName, step.Name, step.ContinueOnError)
-		}
-	}
-
-	// In ci-required's needs, or it runs without blocking anything (memql#3019).
-	required, ok := wf.Jobs["ci-required"]
-	if !ok {
-		t.Fatal("no ci-required job in ci.yml; branch protection requires that check by name")
-	}
-	inNeeds := false
-	switch n := required.Needs.(type) {
-	case string:
-		inNeeds = n == jobName
-	case []any:
-		for _, v := range n {
-			if v == jobName {
-				inNeeds = true
-			}
-		}
-	}
-	if !inNeeds {
-		t.Errorf("ci.yml job %q is not in ci-required's `needs`, so a red compile does not block a merge", jobName)
+	if !strings.Contains(step.Run, "set -eu\n") || strings.Contains(step.Run, "||") {
+		t.Errorf("native step %q can swallow a failed compile or vet command", jobName)
 	}
 }

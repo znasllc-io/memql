@@ -88,8 +88,8 @@ function engine_build_commit() {
 # rather than restating it, and `scripts/ci/node_type_lists_test.go` holds it
 # against the six other places the same set is spelled out (the `app/build_*.go`
 # files, `build_default.go`'s deny-list, `component/node/compiled_*.go` and its
-# own `compiled_default.go` deny-list, the `build-engine-images.yml` release
-# matrix, and the Deployments under `deploy/k8s/`).
+# own `compiled_default.go` deny-list, the `memql-package.yaml` native release image
+# stage, and the Deployments under `deploy/k8s/`).
 #
 # IT IS A LIST BECAUSE RETIRING A NODE TYPE IS THE DANGEROUS EDIT, not adding
 # one (memql#5057). `app/build_default.go` claims every tag combination the

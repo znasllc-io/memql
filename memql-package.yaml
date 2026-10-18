@@ -148,7 +148,6 @@ pipeline:
         - scripts/ci/editor-site.sh
         - scripts/ci/retry.sh
         - memql-package.yaml
-        - .github/workflows/vscode-site.yml
       editors:
         - brand/tokens.css
         - brand/editorAppearance.ts

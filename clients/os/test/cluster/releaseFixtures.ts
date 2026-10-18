@@ -63,3 +63,10 @@ export function fileReleaseFixture(initial = "approved") {
   fixture.state.targets = [{ ...releaseTarget, kind: "file", tag: "v0.25.0", sourceCommit: "d".repeat(40), assetName: "MemQL.zip", draft: { name: "MemQL 0.25.0", body: "Verified desktop release.\nIncludes the reviewed fixes.", prerelease: false, latest: true } }];
   return fixture;
 }
+
+export function npmReleaseFixture(initial = "approved") {
+  const fixture = releaseFixture(initial);
+  Object.assign(fixture.state.record.manifest.components[0]!.artifacts[0]!, { kind: "file", imageDigest: "", platform: "npm" });
+  fixture.state.targets = [{ ...releaseTarget, kind: "npm", repository: "@acme/sdk", tag: "0.25.0", distTag: "latest" }];
+  return fixture;
+}

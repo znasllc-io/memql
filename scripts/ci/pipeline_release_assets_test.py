@@ -9,8 +9,6 @@ import unittest
 from unittest.mock import patch
 import zipfile
 
-import yaml
-
 spec = importlib.util.spec_from_file_location("release_assets", Path(__file__).with_name("pipeline-release-assets.py"))
 assets = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(assets)
@@ -24,14 +22,16 @@ class ReleaseAssetsTests(unittest.TestCase):
             with self.assertRaises(ValueError):
                 assets.release_version(tag)
 
-    def test_every_existing_publish_platform_is_built(self):
-        root = Path(__file__).resolve().parents[2]
-        workflow = yaml.safe_load((root / ".github/workflows/publish-vscode-extension.yml").read_text())
-        wanted = {(row["target"], row["goos"], row["goarch"])
-                  for row in workflow["jobs"]["publish"]["strategy"]["matrix"]["include"]}
-        self.assertIn("publish-web", workflow["jobs"])
-        wanted.add(("web", None, None))
-        self.assertEqual(set(assets.TARGETS), wanted)
+    def test_every_supported_install_platform_is_built(self):
+        # The installable release contract survives removal of the unused
+        # Marketplace workflow: all desktop platforms and the browser build.
+        self.assertEqual(set(assets.TARGETS), {
+            ("linux-x64", "linux", "amd64"),
+            ("linux-arm64", "linux", "arm64"),
+            ("darwin-x64", "darwin", "amd64"),
+            ("darwin-arm64", "darwin", "arm64"),
+            ("web", None, None),
+        })
 
     def test_source_refusal_precedes_any_build_or_network(self):
         with tempfile.TemporaryDirectory() as tmp:
