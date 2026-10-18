@@ -96,6 +96,15 @@ SDK publication, public docs delivery, installer lifecycle, remaining
 audits and companion workflow retirement still need their own acceptance
 receipts before #5480 is complete.
 
+The retirement branch also adds receipt-bound npm publication to the existing
+release candidate service. Local protocol and real-database tests cover exact
+archive readback, conflicts, uncertain outcomes, durable version reservation
+and recovery on another host. The release review exposes the package version
+and dist-tag and preserves separate approval. This is implemented and locally
+tested, not a production npm publication receipt. Component tag triggers,
+registry credentials and a live publication still need qualification before
+the SDK workflow can be removed.
+
 ## Observed baseline, October 16, 2026 UTC
 
 The instance repository is `znasllc-io/memql-znas`, revision

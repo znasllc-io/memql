@@ -15,6 +15,34 @@ func publishedReleaseFixture() PublishedRelease {
 	return PublishedRelease{FormatVersion: 1, Publisher: "fixture", CandidateID: d, ApprovalID: "approval", WorkflowDigest: d, ProvenanceDigest: d, Compatibility: []ReleaseCompatibility{}, Components: []PublishedComponent{{Name: "engine", Version: "0.25.0", Repository: "acme/engine", Commit: strings.Repeat("b", 40), Artifacts: []PublishedArtifact{{Name: "image", Kind: "oci", Platform: "linux/arm64", Digest: d, Size: 100, ImageDigest: d, Locations: []PublishedLocation{{Kind: "oci", Origin: "https://registry.example", Repository: "acme/engine"}}}}}}}
 }
 
+func TestCatalogNPMBindsExactPackageAndVersion(t *testing.T) {
+	makeRelease := func() PublishedRelease {
+		c := publishedReleaseFixture()
+		a := &c.Components[0].Artifacts[0]
+		a.Kind, a.ImageDigest, a.Platform = "file", "", "npm"
+		a.Locations = []PublishedLocation{{Kind: "npm", Origin: "https://npm.example", Repository: "@acme/sdk", Tag: c.Components[0].Version}}
+		return c
+	}
+	if _, _, err := CanonicalPublishedRelease(makeRelease()); err != nil {
+		t.Fatal(err)
+	}
+	for _, change := range []func(*PublishedLocation){
+		func(l *PublishedLocation) { l.Tag = "latest" },
+		func(l *PublishedLocation) { l.Tag = "9.9.9" },
+		func(l *PublishedLocation) { l.Repository = "@acme/../secret" },
+		func(l *PublishedLocation) { l.Repository = "acme@evil" },
+		func(l *PublishedLocation) { l.ReleaseID = 73 },
+		func(l *PublishedLocation) { l.AssetID = 91 },
+		func(l *PublishedLocation) { l.AssetName = "sdk.tgz" },
+	} {
+		c := makeRelease()
+		change(&c.Components[0].Artifacts[0].Locations[0])
+		if _, _, err := CanonicalPublishedRelease(c); err == nil {
+			t.Fatal("ambiguous npm location accepted", c.Components[0].Artifacts[0].Locations[0])
+		}
+	}
+}
+
 func TestReleaseCatalogDSSETrustAndOwnedProjection(t *testing.T) {
 	if got := string(releasePAE("http://example.com/HelloWorld", []byte("hello world"))); got != "DSSEv1 29 http://example.com/HelloWorld 11 hello world" {
 		t.Fatal("DSSE reference vector differs", got)
