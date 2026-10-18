@@ -425,9 +425,9 @@ function create_cluster() {
     # "already here", and cleaning up the failed install refused to delete the
     # cluster it had just created.
     cap_result_set cluster "$CLUSTER_NAME"
-    if k3d cluster list 2>/dev/null | grep -q "^${CLUSTER_NAME}[[:space:]]"; then
+    if k3d cluster list 2>/dev/null | grep "^${CLUSTER_NAME}[[:space:]]" >/dev/null; then
         cap_result_set_raw clusterCreated false
-        if running_k3d_clusters | grep -qxF "${CLUSTER_NAME}"; then
+        if running_k3d_clusters | grep -xF "${CLUSTER_NAME}" >/dev/null; then
             info "Cluster '${CLUSTER_NAME}' already exists -- skipping creation."
         else
             # STOPPED, not missing (memql#6207). It holds no port and answers
@@ -631,7 +631,9 @@ function ensure_build_node() {
     local name="${CLUSTER_NAME}-build"
     local node="k3d-${name}-0"
     local context="k3d-${CLUSTER_NAME}"
-    if ! k3d node list 2>/dev/null | grep -q "^${node}[[:space:]]"; then
+    # grep reads the whole listing: an early exit (-q) SIGPIPEs k3d, and
+    # pipefail reads that as "missing" (TestNoPipeIntoQuietGrepUnderPipefail).
+    if ! k3d node list 2>/dev/null | grep "^${node}[[:space:]]" >/dev/null; then
         info "Creating build node ${node} (${BUILD_NODE_CPUS} CPUs, ${BUILD_NODE_MEMORY})..."
         k3d node create "${name}" \
             --cluster "${CLUSTER_NAME}" \
