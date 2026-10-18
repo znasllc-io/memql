@@ -38,7 +38,7 @@ func TestProbeOllama_ResidentSettingsRideTheModelNotTheLabel(t *testing.T) {
 		Parallel: 2,
 		Resident: []Resident{
 			{ID: "chat:27b", KeepAlive: KeepAlive{Set: true, For: 2 * time.Hour}, WorkingContext: 16384},
-			{ID: "embed:0.6b", KeepAlive: KeepAlive{Set: true, Forever: true}},
+			{ID: "embed:0.6b", KeepAlive: KeepAlive{Set: true, Forever: true}, WorkingContext: 8192},
 		},
 	})
 	got := byID(inv)
@@ -170,7 +170,10 @@ func TestEffectiveParallelism(t *testing.T) {
 			}
 		})
 	}
-	// No seam at all is the common case: a Docker runtime, or a Mac.
+	// No seam at all is the common case: a Docker runtime, or a Mac. With no
+	// Getenv seam the process environment answers, so the variable is pinned
+	// here; an exported OLLAMA_NUM_PARALLEL must not change this case.
+	t.Setenv("OLLAMA_NUM_PARALLEL", "")
 	var d Discoverer
 	if got := d.effectiveParallelism(0); got != 1 {
 		t.Errorf("a discoverer with no sources -> %d, want 1", got)

@@ -194,6 +194,11 @@ func applyResident(info *Info, r Resident) {
 	if w > 0 && info.ContextWindow > 0 && w > info.ContextWindow {
 		w = info.ContextWindow
 	}
+	// An embedder runs at a fixed window, so there is no working context to
+	// pin. residentNotes already says so, and the stored value must agree.
+	if info.Embeddings {
+		w = 0
+	}
 	info.WorkingContext = w
 }
 
