@@ -72,6 +72,8 @@ exit $rc`
 
 // cloneScript is the clone init container's entrypoint: a shallow fetch of
 // exactly one commit, by its id, into /workspace, world-writable (see above).
+// Declared full history fetches ancestors, tags and the comparison base here;
+// arbitrary step commands never receive the clone token.
 // Network failures retry the identical fetch at most three times within the
 // existing Job deadline. No checkout or build command is retried.
 //
@@ -86,11 +88,19 @@ set -eu
 cd /workspace
 git init -q .
 fetch_pinned_commit() {
+  case "${CLONE_HISTORY:-}" in
+    "") set -- --depth=1 "$CLONE_URL" "$SHA" ;;
+    full)
+      set -- --tags "$CLONE_URL" "$SHA"
+      if [ -n "${BASE_SHA:-}" ]; then set -- "$@" "$BASE_SHA"; fi
+      ;;
+    *) echo "memql: unsupported checkout history" >&2; return 2 ;;
+  esac
   if [ -n "${GIT_TOKEN:-}" ]; then
     auth="$(printf 'x-access-token:%s' "$GIT_TOKEN" | base64 | tr -d '\n')"
-    git -c "http.extraheader=AUTHORIZATION: basic ${auth}" fetch -q --depth=1 "$CLONE_URL" "$SHA"
+    git -c "http.extraheader=AUTHORIZATION: basic ${auth}" fetch -q "$@"
   else
-    git fetch -q --depth=1 "$CLONE_URL" "$SHA"
+    git fetch -q "$@"
   fi
 }
 for attempt in 1 2 3; do
@@ -105,7 +115,10 @@ for attempt in 1 2 3; do
   echo "memql: pinned commit fetch failed; retrying ($attempt/3)" >&2
   sleep 2
 done
-git checkout -q FETCH_HEAD
+if [ "${CLONE_HISTORY:-}" = full ]; then
+  [ "$(git rev-parse --is-shallow-repository)" = false ] || { echo "memql: full history is incomplete" >&2; exit 1; }
+fi
+git checkout -q "$SHA"
 echo "memql: checked out $SHA"`
 
 // cachePrepScript is fixed platform code, with no credentials or checkout.

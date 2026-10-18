@@ -34,6 +34,7 @@ func stepRunFor(req pl.StepRequest, timeoutSeconds int, deadlineCode string) Ste
 		CPUMilli: req.Step.CPUMilli,
 
 		ImageBuild:      imageBuildWithProvenance(req.Step.ImageBuild, req.SHA, req.Event, req.Version),
+		CheckoutHistory: req.Step.CheckoutHistory,
 		MemoryMiB:       req.Step.MemoryMiB,
 		RecoverOnly:     req.RecoverOnly,
 		Execution:       req.Step.Execution,

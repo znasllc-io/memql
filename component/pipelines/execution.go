@@ -77,6 +77,9 @@ func validateStepRuntime(spec *Spec, step StepSpec, scope string) *Refusal {
 		return Refuse(CodeStepInvalid, scope, "A step image must be a container image reference without whitespace; native steps cannot name an image.")
 	}
 	placement := PlacementOf(step)
+	if err := CheckCheckoutHistory(step.CheckoutHistory, placement == PlacementFleet); err != nil {
+		return Refuse(CodeStepInvalid, scope, "%s", err)
+	}
 	if err := CheckCPUMilli(step.CPUMilli, placement == PlacementFleet); err != nil {
 		return Refuse(CodeStepInvalid, scope, "%s", err)
 	}
@@ -155,4 +158,20 @@ func CheckCPUMilli(cpu int, fleet bool) error {
 		return fmt.Errorf("cpuMilli requires cluster container execution.")
 	}
 	return nil
+}
+
+// CheckCheckoutHistory keeps complete-history acquisition in the credentialed
+// cluster checkout. Fleet runners must refuse until their contract supports it.
+func CheckCheckoutHistory(history string, fleet bool) error {
+	switch history {
+	case "":
+		return nil
+	case "full":
+		if fleet {
+			return fmt.Errorf("checkoutHistory: full requires cluster container execution.")
+		}
+		return nil
+	default:
+		return fmt.Errorf("checkoutHistory must be omitted or full.")
+	}
 }

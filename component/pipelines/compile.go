@@ -299,8 +299,9 @@ func (c *planCompiler) compileStep(stage string, declared StepSpec, dependsOn []
 	}
 
 	step := Step{
-		ImageBuild: CloneImageBuild(declared.ImageBuild),
-		Key:        StepKey(stage, declared.Name), Stage: stage, Name: declared.Name, Kind: StepCommand, Run: declared.Run,
+		CheckoutHistory: declared.CheckoutHistory,
+		ImageBuild:      CloneImageBuild(declared.ImageBuild),
+		Key:             StepKey(stage, declared.Name), Stage: stage, Name: declared.Name, Kind: StepCommand, Run: declared.Run,
 		MemoryMiB:       declared.MemoryMiB,
 		CPUMilli:        declared.CPUMilli,
 		Execution:       ExecutionOf(declared.Execution),
