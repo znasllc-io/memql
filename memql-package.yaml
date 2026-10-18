@@ -124,6 +124,11 @@ pipeline:
         - "**/go.sum"
         - memql-package.yaml
         - .github/workflows/deploy-gate-image.yml
+      database-image:
+        - deploy/db-image/**
+        - scripts/db-image/**
+        - memql-package.yaml
+        - .github/workflows/build-db-image.yml
       # Shell source and the Docker stage that packages it.
       # Keep Dockerfile changes in the same validation path as the shell.
       os:
@@ -399,6 +404,20 @@ pipeline:
           imageBuild:
             context: .
             dockerfile: cmd/deploy-gate-check/Dockerfile
+        # The verified target starts a disposable Postgres inside the fixed
+        # rootless build. It checks Community features and the N-1 upgrade
+        # before an OCI archive can be retained; it has no registry credential.
+        - name: database-image
+          placement: cluster
+          when: { bucket: database-image }
+          caches: []
+          cpuMilli: 3000
+          memoryMiB: 4096
+          timeout: 30m
+          imageBuild:
+            context: deploy/db-image
+            dockerfile: deploy/db-image/Dockerfile
+            target: verified
         - name: editor-packages
           placement: cluster
           when: { bucket: editors }

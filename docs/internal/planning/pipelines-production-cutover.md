@@ -122,7 +122,7 @@ outputs, publication and failure evidence, not merely a command in a manifest.
 | `dispatch-engine-images-on-release.yml` | MemQL release trigger and publication ownership, including duplicate-event recovery | #5509 |
 | `recover-engine-image-mirror.yml` | Reconcile immutable source/destination digests after interrupted publication | #5509 |
 | `build-toolchain-image.yml` | Build and publish future toolchains without Actions | #5509 |
-| `build-db-image.yml` | Build and publish the database image without Actions | #5509 |
+| `build-db-image.yml` | Native `tests.database-image` selects the verified operand target for changed inputs and full qualification; live native execution and separate registry publication remain | #5509 |
 | `mirror-fixture-images.yml` | Digest-verified fixture mirroring without Actions | #5509 |
 | `deploy-gate-image.yml` | Native deploy-gate image validation selects command/workspace changes on PRs and retains an unpublished OCI archive; cloud execution evidence remains | #5509 |
 | `install-e2e.yml` | Native host lifecycle matrix and cleanup | #5480 |
@@ -222,6 +222,23 @@ and all five editor 0.6.11 archives. It held no publication credentials and
 published nothing. Future native execution and approved publication are still
 required. Separate SDK/editor tag triggers and registry receipts remain in the
 retirement scope; an engine release's package build is not their replacement.
+
+The database operand now has a `verified` Docker target that runs the same
+smoke script used against loaded local images. It starts a disposable Postgres
+as uid 26, verifies TimescaleDB Community, pgvector, continuous aggregates,
+compression, retention and the previous-to-current extension upgrade. The
+script and database are temporary build mounts and do not enter an image
+layer. The default development target remains the operand, preserving the
+existing local smoke-test option. Native `tests.database-image` builds the
+verified target when its inputs change and retains the unpublished OCI archive.
+
+Local validation passed against the existing operand and inside the exact new
+Docker target. A wrong expected current version fails; the resulting verified
+image remains uid 26 and contains no test script or database. Manifest selection,
+version drift, Bash syntax and ShellCheck pass. This is preparation, not native
+cloud or publication evidence. The Actions database publisher stays active
+until independent version selection, verified native execution and registry
+publication receipts replace it. No production database image is changed.
 
 ## Publication qualification, October 17, 2026 UTC
 
