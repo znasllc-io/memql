@@ -1,34 +1,44 @@
 import { useCallback, useEffect, useMemo, useState, type ReactNode } from "react";
 import "./routing.css";
 
-import { Head } from "../../../kit";
+import { AutoRefresh, Head } from "../../../kit";
 import { LocalTabs } from "../../../kit/LocalTabs";
 import { useSession } from "../../../chrome/access";
 import { accessAdmits, type OsAppProps } from "../../../system/registry";
 import { useRules } from "../../settings/rulesFacts";
 import { useTaskPolicies } from "../taskPolicies";
 import { DECISIONS_SECTION_RESOURCE, RULES_SECTION_RESOURCE } from "./access";
+import { ChainsTab } from "./ChainsTab";
 import { HistoryTab } from "./HistoryTab";
 import { MachinesTab } from "./MachinesTab";
 import { routesLike } from "./routes";
 import { RoutesTab } from "./RoutesTab";
 import { RulesTab } from "./RulesTab";
+import { useFleetCapacity } from "./useRouteModes";
 import { useRoutingFacts } from "./useRoutingFacts";
 
-// Fleet > Routing (design brief 2026-09-28, sections 2-5): ONE home for how a
-// model call finds something to answer it. It replaces Fleet's "Policies" and
-// "Machine routing" sections and takes in Settings' Rules and Decisions.
+// Fleet > Routing (design brief 2026-09-28, sections 2-5; routes, 2026-10-18):
+// ONE home for how a model call finds something to answer it.
 //
-//   Routes     ordered lists of sources, composed on a route's own page
-//   Rules      "when work looks like X, take route Y", in the order tried
-//   Machines   which of your machines takes a call a route sent to them
+//   Routes     what a person picks for their messages in Ask -- Auto, Local,
+//              Apps and their own -- each job served by its sources in order
+//   Rules      "when work looks like X, take chain Y", for calls on Auto, in
+//              the order tried; one step under it, Chains: the ordered lists
+//              of sources the rules name, composed on a chain's own page
+//   Machines   which of your machines takes a call sent to them
 //   History    what actually served recent calls, and why
 //
-// THE GATES MOVED WITH THE SCREENS. Routes and Rules sit behind
-// `app:settings/rules` (owner or developer) and History behind
-// `app:settings/decisions` (owner, developer, admin) -- the capabilities that
-// gated them in Settings, so nobody's reach changed. A tab a person cannot
-// open is absent, never a tab that refuses. Machines is per person and ungated.
+// THE GATES. Routes is everyone's: anyone may make routes of their own, and
+// the built-ins' acts are present only for an owner or developer. Rules and
+// Chains sit behind `app:settings/rules` (owner or developer) and History
+// behind `app:settings/decisions` (owner, developer, admin) -- the
+// capabilities that gated them in Settings, so nobody's reach changed. A tab a
+// person cannot open is absent, never a tab that refuses. Machines is per
+// person and ungated.
+//
+// CAPACITY IS READ HERE, ONCE, for every tab: whether a machine can take a
+// call right now (`fleetCapacity`) changes with no graph event, so the
+// section's header carries the AutoRefresh that re-reads it while visible.
 //
 // VISITED TABS STAY MOUNTED, hidden, so a draft route or a half-written rule
 // survives a look at History. Each tab draws the section's Head on its list
@@ -54,11 +64,14 @@ const TAB_NAMES: Record<RoutingTab, string> = { routes: "Routes", rules: "Rules"
 
 export function RoutingSection({
   onAddMachine,
+  onOpenModels,
   intent,
   consumeIntent,
 }: {
   /** Opens Fleet's add-a-machine flow; offered in the tray when no machine is connected. */
   onAddMachine?: () => void;
+  /** Opens Fleet's Models section, where an embedding model is pulled and bound. */
+  onOpenModels?: () => void;
   intent?: OsAppProps["intent"];
   consumeIntent?: OsAppProps["consumeIntent"];
 }) {
@@ -67,7 +80,7 @@ export function RoutingSection({
   const canCompose = accessAdmits(RULES_SECTION_RESOURCE);
   const canHistory = accessAdmits(DECISIONS_SECTION_RESOURCE);
   const tabs = (["routes", "rules", "machines", "history"] as const).filter(
-    (id) => (id !== "routes" && id !== "rules") || canCompose,
+    (id) => id !== "rules" || canCompose,
   ).filter((id) => id !== "history" || canHistory);
 
   const [chosen, setChosen] = useState<RoutingTab | null>(null);
@@ -81,11 +94,23 @@ export function RoutingSection({
   // ARRIVING AT A TAB. Settings' Rules and Decisions signposts, and anything
   // else that opens Fleet here, name the tab in the intent.
   const wanted = typeof intent?.payload["routingTab"] === "string" ? (intent.payload["routingTab"] as string) : "";
+  const wantedRoute = typeof intent?.payload["routingRoute"] === "string" ? (intent.payload["routingRoute"] as string) : "";
+  const [modeRequest, setModeRequest] = useState<{ id: string; n: number } | null>(null);
+  const [rulesView, setRulesView] = useState<"rules" | "chains">("rules");
   useEffect(() => {
-    if (!intent || wanted === "") return;
+    if (!intent || (wanted === "" && wantedRoute === "")) return;
     if ((tabs as readonly string[]).includes(wanted)) setChosen(wanted as RoutingTab);
+    // "chains" is a place one step under Rules, not a tab of its own.
+    if (wanted === "chains" && tabs.includes("rules")) {
+      setChosen("rules");
+      setRulesView("chains");
+    } else if (wanted === "rules") setRulesView("rules");
+    if (wantedRoute !== "") {
+      setChosen("routes");
+      setModeRequest((held) => ({ id: wantedRoute, n: (held?.n ?? 0) + 1 }));
+    }
     consumeIntent?.(intent.id);
-  }, [intent?.id, wanted]);
+  }, [intent?.id, wanted, wantedRoute]);
 
   const [epoch, setEpoch] = useState(0);
   const catalog = useTaskPolicies(epoch, canCompose);
@@ -98,22 +123,30 @@ export function RoutingSection({
     reloadRules();
   }, [reloadRules]);
   const like = useMemo(() => routesLike(catalog.policies), [catalog.policies]);
-  const facts = useRoutingFacts(like, canCompose);
+  const capacity = useFleetCapacity(true);
+  const facts = useRoutingFacts(like, true, capacity.available ? capacity.value : null);
 
-  const [routeRequest, setRouteRequest] = useState<{ name: string; n: number } | null>(null);
+  // RULES AND THEIR CHAINS ARE ONE TAB: Chains opens one step under Rules,
+  // and each reaches the other ("Change Fast local first", "Taken by 3 rules").
+  const [chainRequest, setChainRequest] = useState<{ name: string; n: number } | null>(null);
   const [rulesRequest, setRulesRequest] = useState<{ route: string; n: number } | null>(null);
-  const openRoute = useCallback((name: string) => {
-    setRouteRequest((held) => ({ name, n: (held?.n ?? 0) + 1 }));
-    setChosen("routes");
+  const openChain = useCallback((name: string) => {
+    setChainRequest((held) => ({ name, n: (held?.n ?? 0) + 1 }));
+    setRulesView("chains");
+    setChosen("rules");
   }, []);
   const openRulesFor = useCallback((route: string) => {
     setRulesRequest((held) => ({ route, n: (held?.n ?? 0) + 1 }));
+    setRulesView("rules");
     setChosen("rules");
   }, []);
 
   const header = (actions: ReactNode, meta?: ReactNode) => (
     <div className="fleet-routing-header">
-      <Head title="Routing" meta={meta}>{actions}</Head>
+      <Head title="Routing" meta={meta}>
+        {actions}
+        {capacity.available ? <AutoRefresh busy={false} onRefresh={capacity.reread} intervalMs={15_000} /> : null}
+      </Head>
       {tabs.length > 1 ? (
         <LocalTabs label="Routing views" value={tab} onChange={setChosen} options={tabs.map((id) => [id, TAB_NAMES[id]] as const)} />
       ) : null}
@@ -125,18 +158,38 @@ export function RoutingSection({
       {panes.map((id) => (
         <div key={id} className="fleet-routing-tab" data-routing-tab={id} hidden={id !== tab}>
           {id === "routes" ? (
-            <RoutesTab
-              header={header}
-              catalog={catalog}
-              facts={facts}
-              rules={rules}
-              reload={reloadAll}
-              request={routeRequest}
-              onOpenRules={openRulesFor}
-              onAddMachine={onAddMachine}
-            />
+            <RoutesTab header={header} facts={facts} composes={canCompose} request={modeRequest} onAddMachine={onAddMachine} onOpenModels={onOpenModels} />
           ) : id === "rules" ? (
-            <RulesTab header={header} rules={rules} routes={catalog.policies} facts={facts} onChanged={reloadAll} onOpenRoute={openRoute} request={rulesRequest} />
+            rulesView === "chains" ? (
+              <ChainsTab
+                onBack={() => setRulesView("rules")}
+                catalog={catalog}
+                facts={facts}
+                rules={rules}
+                reload={reloadAll}
+                request={chainRequest}
+                onOpenRules={openRulesFor}
+                onAddMachine={onAddMachine}
+              />
+            ) : (
+              <RulesTab
+                header={(actions, meta) =>
+                  header(
+                    <>
+                      <button type="button" className="os-link fleet-rules-chains" onClick={() => setRulesView("chains")}>Chains</button>
+                      {actions}
+                    </>,
+                    meta,
+                  )
+                }
+                rules={rules}
+                routes={catalog.policies}
+                facts={facts}
+                onChanged={reloadAll}
+                onOpenRoute={openChain}
+                request={rulesRequest}
+              />
+            )
           ) : id === "machines" ? (
             <MachinesTab header={header} />
           ) : (

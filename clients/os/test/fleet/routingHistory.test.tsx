@@ -316,6 +316,8 @@ describe("History: what else the call passed over", () => {
     // by their engine ids.
     expect(within(row).getByText("Decided by Agent reply prompt · operator acting, which takes Local first.")).toBeTruthy();
     expect(within(row).getByText("2 earlier sources were tried first.")).toBeTruthy();
+    // No route chosen: Auto, and the rules decided. Nothing more to say.
+    expect(within(row).queryByText(/^Sent on /)).toBeNull();
 
     const walk = within(row).getByRole("list", { name: "Sources the call passed through" });
     const entries = within(walk).getAllByRole("listitem");
@@ -335,6 +337,15 @@ describe("History: what else the call passed over", () => {
 
     // Still a list: the other row is where it was, and unexpanded.
     expect(rowFor("qwen3-coder").querySelector(".os-decision-detail")).toBeNull();
+  });
+
+  it("says which route a person sent the call on, when they chose one", async () => {
+    use([wireDecision({ id: "d-1", model: "qwen3-coder", route: "apps" }), wireDecision({ id: "d-2", model: "gpt-5", route: "r7" })]);
+    await renderHistory();
+    fireEvent.click(within(rowFor("qwen3-coder")).getByRole("button"));
+    expect(within(rowFor("qwen3-coder")).getByText("Sent on the Apps route.")).toBeTruthy();
+    fireEvent.click(within(rowFor("gpt-5")).getByRole("button"));
+    expect(within(rowFor("gpt-5")).getByText("Sent on a route of the person's own.")).toBeTruthy();
   });
 
   it("says a chain of ONE had nowhere else to look", async () => {

@@ -176,7 +176,7 @@ export function RouteComposer({
       case "confirmRestore":
         return { label: "Restore shipped", tone: "primary", onAct: () => void restore() };
       case "save":
-        return { label: "Save route", tone: "primary", onAct: () => void save() };
+        return { label: "Save chain", tone: "primary", onAct: () => void save() };
     }
   });
 
@@ -186,12 +186,12 @@ export function RouteComposer({
         <ActivityTarget target={`fleet:route:${route.name}`}>
           <Head
             title={title}
-            breadcrumbs={[{ label: "Routes", onSelect: onBack }, { label: title }]}
-            back={{ label: "Routes", onSelect: onBack }}
+            breadcrumbs={[{ label: "Chains", onSelect: onBack }, { label: title }]}
+            back={{ label: "Chains", onSelect: onBack }}
           >
-            <PageHelp title="How a route works">
-              <p>A route tries its sources in order and a call takes the first one that can serve. The line runs as far as a call would get right now and stops at the source that would answer it.</p>
-              <p>A source that cannot serve stays in the route and is used again when it can. Vendors bill per call. An app in a route does not grant it permissions on your machine.</p>
+            <PageHelp title="How a chain works">
+              <p>A chain tries its sources in order and a call takes the first one that can serve. The line runs as far as a call would get right now and stops at the source that would answer it.</p>
+              <p>A source that cannot serve stays in the chain and is used again when it can. Vendors bill per call. An app in a chain does not grant it permissions on your machine.</p>
             </PageHelp>
           </Head>
           <Description
@@ -209,9 +209,9 @@ export function RouteComposer({
             <p className="fleet-route-taken">{`Taken by ${rulesTaking} ${rulesTaking === 1 ? "rule" : "rules"}`}</p>
           )}
           {error === null ? null : error.stale ? (
-            <Notice tone="warn" sentence={STALE_SENTENCE} next="It has been read again. Cancel to see the route as it is saved now, or save to replace it." />
+            <Notice tone="warn" sentence={STALE_SENTENCE} next="It has been read again. Cancel to see the chain as it is saved now, or save to replace it." />
           ) : (
-            <Notice tone="error" sentence="The route was not saved." next="Your changes are still here." detail={error.text} />
+            <Notice tone="error" sentence="The chain was not saved." next="Your changes are still here." detail={error.text} />
           )}
           <SourceComposer
             routeName={route.name}

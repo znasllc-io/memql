@@ -135,9 +135,9 @@ describe("the routing surfaces speak Source, Route, Rule and Level", () => {
     expect(retired().map((line) => line.split(":")[0])).toEqual(["policy", "lane", "door"]);
   });
 
-  it("on the route list and a route's page", async () => {
+  it("on the chain list and a chain's page", async () => {
     use();
-    await renderRouting("owner");
+    await renderRouting("owner", { intent: { id: "c", payload: { routingTab: "chains" } } });
     expect(retired()).toEqual([]);
     fireEvent.click(screen.getByRole("button", { name: /^Open Local first,/ }));
     await settle();
@@ -147,12 +147,34 @@ describe("the routing surfaces speak Source, Route, Rule and Level", () => {
     expect(retired()).toEqual([]);
   });
 
-  it("through every step of New route", async () => {
+  it("on the routes list, a route's page, Auto and every step of New route", async () => {
     use();
     await renderRouting("owner");
+    expect(retired()).toEqual([]);
+    fireEvent.click(screen.getByRole("button", { name: /^Open Local,/ }));
+    // A source selected: every job says whether it can take it.
+    fireEvent.click(screen.getByRole("button", { name: /^Cheapest vendor: / }));
+    expect(retired()).toEqual([]);
+    fireEvent.click(screen.getAllByRole("button", { name: "Routes" })[0]!);
+    fireEvent.click(screen.getByRole("button", { name: /^Open Auto,/ }));
+    await settle();
+    expect(retired()).toEqual([]);
+    fireEvent.click(screen.getAllByRole("button", { name: "Routes" })[0]!);
     fireEvent.click(screen.getByRole("button", { name: "New route" }));
     expect(retired()).toEqual([]);
     fireEvent.change(screen.getByLabelText("Route name"), { target: { value: "Night shift" } });
+    pressBar(floorBar, "Continue");
+    expect(retired()).toEqual([]);
+    fireEvent.click(screen.getByRole("radio", { name: /^Apps/ }));
+    expect(retired()).toEqual([]);
+  });
+
+  it("through every step of New chain", async () => {
+    use();
+    await renderRouting("owner", { intent: { id: "c", payload: { routingTab: "chains" } } });
+    fireEvent.click(screen.getByRole("button", { name: "New chain" }));
+    expect(retired()).toEqual([]);
+    fireEvent.change(screen.getByLabelText("Chain name"), { target: { value: "Night shift" } });
     pressBar(floorBar, "Next");
     fireEvent.click(within(screen.getByLabelText("Sources you can add")).getByRole("button", { name: /^Local, then best vendor:/ }));
     expect(retired()).toEqual([]);

@@ -22,6 +22,13 @@ palette with `mode=light` or `mode=dark`. The harness uses the production theme
 registry; Graphite is the default. `view=routing-routes` includes the shared
 local tabs used by Fleet machine views and other app pages.
 
+Fleet > Routing > Routes has a view per state: `routing-routes` (also
+`-member` and `-old-cluster`), `routing-route-local` (also `-member`),
+`routing-route-busy` (capacity reasons), `routing-route-mine`,
+`routing-route-no-embedder`, `routing-auto` (also `-member`) and
+`routing-new-route`, driven with `click=New route|fill:Route name=...|Continue|Local`.
+The chain composer under Rules is `routing-chains`.
+
 Then capture. A one-shot headless screenshot is enough for any view that needs
 no click, and every view here is reachable by URL for that reason:
 

@@ -11,6 +11,7 @@ import { useMachines } from "../../../live/machines";
 import { useInferenceStatus } from "../../settings/routingFacts";
 import { isWorkerOnline } from "../online";
 import { delegationPolicyFromRow, isRevoked, machineFromRow, type MachineRow } from "../rows";
+import type { CapacityFacts } from "./capacity";
 import { factsFrom, type RouteLike, type RoutingFacts } from "./sources";
 import { useRoutingPolicy } from "./useRoutingPolicy";
 
@@ -26,13 +27,16 @@ import { useRoutingPolicy } from "./useRoutingPolicy";
 //                because `fleet:strongest` honours it first
 //   app order    the owner's delegation app order, read once, because
 //                `app:*` takes the first runnable app in it
+//   capacity     what each machine can take right now (`fleetCapacity`),
+//                read by the section and handed in, or null where the
+//                cluster does not measure it
 //
 // NOT `appSessionsInstalled`. That field says whether the NODE ANSWERING can
 // open app sessions, and the node answering an OS read is the BFF -- app
 // sessions open on agent replicas -- so it is false on every healthy cluster
 // and would mark every app idle.
 
-export function useRoutingFacts(routes: readonly RouteLike[], enabled = true): RoutingFacts {
+export function useRoutingFacts(routes: readonly RouteLike[], enabled = true, capacity: CapacityFacts | null = null): RoutingFacts {
   const { collection, settled } = useMachines();
   const view = useLiveView<Row, MachineRow>(collection, "fleet:routing:machines", (rows) =>
     rows.map(machineFromRow).filter((m) => m.id),
@@ -80,7 +84,8 @@ export function useRoutingFacts(routes: readonly RouteLike[], enabled = true): R
         routes,
         preference: preference ?? [],
         appOrder: appOrder ?? [],
+        capacity,
       }),
-    [settled, snapshot?.error, rows, now, inference.status, routes, preference, appOrder],
+    [settled, snapshot?.error, rows, now, inference.status, routes, preference, appOrder, capacity],
   );
 }

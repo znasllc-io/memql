@@ -127,7 +127,8 @@ export function FleetApp({
           : id === "logs" ? <AppLogsSection app="fleet" subjectConcepts={FLEET_LOG_CONCEPTS} intent={active ? intent : undefined} consumeIntent={consumeIntent} />
           : id === "models" ? <ModelsSection onHome={() => navigate("machines", { fromContent: true })} />
           : id === "routing" ? <RoutingSection intent={active ? intent : undefined} consumeIntent={consumeIntent}
-              onAddMachine={() => { if (!addMachine.active) addMachine.start({ inference: true }); navigate("machines", { fromContent: true }); }} />
+              onAddMachine={() => { if (!addMachine.active) addMachine.start({ inference: true }); navigate("machines", { fromContent: true }); }}
+              onOpenModels={() => navigate("models", { fromContent: true })} />
           : id === "workbenches" ? <WorkbenchesSection />
           : id === "apps" ? <AppsSection sessionTarget={sessionTarget} navigation={active ? navigation : undefined} />
           : <FleetWorkspace onAllSessions={() => { setSessionTarget(held => ({ id: "", revision: (held?.revision ?? 0) + 1 })); navigate("apps", { fromContent: true }); }} onOpenSession={id => { setSessionTarget(held => ({ id, revision: (held?.revision ?? 0) + 1 })); navigate("apps", { fromContent: true }); }} selection={selection} select={select} navigate={navigate}

@@ -415,13 +415,13 @@ describe("a rule's own page", () => {
     expect((screen.getByRole("checkbox", { name: "the level asked for" }) as HTMLInputElement).checked).toBe(true);
     expect((screen.getByRole("checkbox", { name: "the call's tag" }) as HTMLInputElement).checked).toBe(false);
     expect((screen.getByLabelText("Value for the level asked for") as HTMLInputElement).value).toBe("reasoning");
-    expect(screen.getByLabelText("Route").textContent).toContain("Local only");
+    expect(screen.getByLabelText("Chain").textContent).toContain("Local only");
   });
 
   it("changes the route through the Route field", async () => {
     await openRules();
     fireEvent.click(customLine(/Tagged nightly/));
-    chooseOption(screen.getByLabelText("Route"), "Fast local first");
+    chooseOption(screen.getByLabelText("Chain"), "Fast local first");
     pressBar(floorBar, "Check it");
     await settle();
     pressBar(floorBar, "Activate");
@@ -467,7 +467,7 @@ describe("a rule a shipped rule already decides", () => {
     expect(within(floorBar()).queryByRole("button", { name: "Add rule" })).toBeNull();
     pressBar(floorBar, "Change Fast local first");
     await settle();
-    // Routes, on that route's own page.
+    // Chains, on that chain's own page.
     expect(screen.getByRole("list", { name: "Sources, in the order they are tried" })).toBeTruthy();
     expect(screen.getAllByText("Fast local first").length).toBeGreaterThan(0);
     expect(calls.routingRuleSave).not.toHaveBeenCalled();
