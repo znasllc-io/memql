@@ -472,3 +472,17 @@ builtin librarySaveTrainingLesson {
 @args(profile="object")
 @executor("integration.library.indexTrainingLesson")
 builtin libraryIndexTrainingLesson { lessonId string! expectedReceipt string! }
+
+/// Generate one PNG through the authorized image model route and save it in Files.
+/// Image understanding alone cannot serve this operation. No paid fallback.
+@description("Generate an image from a prompt and save the PNG in Files. Requires an owned live work run, image-generation model and storage access. Returns outputFileId only after verified storage.")
+@executor("integration.library.generateImage")
+@args(profile="object")
+builtin libraryGenerateImage {
+ name string! @description("Safe filename ending in .png, without a folder path.")
+ prompt string! @description("Complete image description. Read referenced saved source content before resolving its subject.")
+ alt string! @description("Short accessible description of the generated image.")
+ width int! @description("Width in pixels, 256 through 1536.")
+ height int! @description("Height in pixels, 256 through 1536.")
+ level string! @description("Requested inference quality, such as strong.")
+}

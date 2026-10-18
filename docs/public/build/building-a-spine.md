@@ -196,6 +196,21 @@ where relevant, `section`, `instruction`, `inputHeading` and `sectionsHeading`.
 Its source encoder remains native, like the parser and compiler. The resulting
 automation runs through the normal durable executor.
 
+The triage contract separates `requiresFile` from `fileDelivery`. `compose`
+selects the document Materializer; `capability` selects an agent turn that
+discovers the appropriate artifact operation, then requires a ready file from
+that exact run and step with the requested extension. Images, audio and video
+must not be passed as document-composer formats. A registered operation is not
+proof that an eligible model or storage destination is currently available.
+
+Capability discovery includes a fresh caller-scoped Fleet advertisement
+summary. Modality counts are evaluated per model and machine, preserving
+vision versus generation and offline versus busy states. The model-level union
+cannot establish which online machine supports a modality. Execution still
+uses the ordinary router, sharing checks, policy and original run budget.
+The image operation saves verified immutable bytes and provenance before
+returning a file receipt, and reconciles a lost storage reply on another replica.
+
 ## Headless work and computer-use fallback
 
 The shipped fallback is expressed through ordinary actions and logic:

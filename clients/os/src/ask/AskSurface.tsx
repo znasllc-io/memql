@@ -1,3 +1,4 @@
+import { askFailure } from "./askFailure";
 import { ProposeLesson } from "../apps/training/ProposeLesson";
 import { guidanceReceiptLabel } from "../apps/training/lessons";
 import { AddButton } from "../kit/AddButton";
@@ -352,7 +353,7 @@ export function AskSurface({
               {turn.question && !completion ? <AskQuestion key={turn.question.id} question={turn.question} onAnswer={answer => conversation.answerQuestion(turn.question!, answer)} /> : null}
               {onOpenFile ? turn.activity.filter(event => event.kind === "artifact" && event.phase === "completed" && typeof event.arguments?.fileId === "string").map(event => <button key={event.id} type="button" className="os-ask-retry" onClick={() => onOpenFile(event.arguments!.fileId as string)}>Open {event.name || "file"}</button>) : null}
               {turn.state === "streaming" || isConversationalWait(turn) ? <AskWait activity={turn.activity} startedAt={turn.startedAt} hasText={Boolean(turn.answer)} /> : null}
-              {turn.error ? <div className="os-ask-error"><p role="alert">{askErrorSummary(turn.error)}</p>{askErrorSummary(turn.error) !== turn.error ? <details><summary>Details</summary><p>{turn.error}</p></details> : null}{!busy ? <button type="button" className="os-ask-retry" onClick={() => { void editFailedTurn(turn); }}>{turn.approvalId && turn.advisor ? "Edit and ask another agent" : "Edit and try again"}</button> : null}{onOpenFleet ? <button type="button" className="os-ask-retry" onClick={onOpenFleet}>Open Fleet</button> : null}</div> : null}
+              {turn.error ? <div className="os-ask-error"><p role="alert">{askErrorSummary(turn.error)}</p>{askErrorSummary(turn.error) !== turn.error ? <details><summary>Details</summary><p>{turn.error}</p></details> : null}{!busy ? <button type="button" className="os-ask-retry" onClick={() => { void editFailedTurn(turn); }}>{turn.approvalId && turn.advisor ? "Edit and ask another agent" : "Edit and try again"}</button> : null}{onOpenFleet && askFailure(turn.error).fleet ? <button type="button" className="os-ask-retry" onClick={onOpenFleet}>Open Fleet</button> : null}</div> : null}
             </div></div> : null}
           </div>)}
         </div>
@@ -502,10 +503,7 @@ function isTypingTarget(el: Element | null): boolean {
 
 /** Keep diagnostic context available without making the conversation a log viewer. */
 function askErrorSummary(message: string): string {
-  if (message.length > 240 || message.includes("every_door_shut") || message.includes("\n")) {
-    return "The cluster could not complete this reply. Retry, or check the available models in Fleet.";
-  }
-  return message;
+  return askFailure(message).summary;
 }
 
 function approvalDiscussionStatus(state: ConversationState, exchanges: AskTurn[]): string {

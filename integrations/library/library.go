@@ -140,6 +140,7 @@ func (i *Integration) Capabilities() []memql.IntegrationCapability {
 		{Name: "documentRevisionStatus", Description: "Read an owned revision request and its saved draft.", Handler: i.handleDocumentRevisionStatus},
 		{Name: "revisionImagePlan", Handler: i.handleRevisionImagePlan},
 		{Name: "prepareRevisionImage", Handler: i.handlePrepareRevisionImage},
+		{Name: "generateImage", Description: "Generate one image and save its verified file under the current owned work run.", Handler: i.handleGenerateImage},
 		{Name: "revisionPreparedImages", Handler: i.handleRevisionPreparedImages},
 		{Name: "revisionReferences", Description: "Read authorized feedback references and analyze their images.", Handler: i.handleRevisionReferences},
 		{Name: "revisionInput", Description: "Read the current run's immutable document and feedback.", Handler: i.handleRevisionInput},

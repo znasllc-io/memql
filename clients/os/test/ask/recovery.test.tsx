@@ -72,7 +72,7 @@ it("keeps a long diagnostic in details and leaves a readable failure and recover
   const w = wire(); const diagnostic = "every_door_shut " + "internal-provider-decision ".repeat(30);
   render(<AskSurface transport={w.transport} variant="sheet" availability={ready} onOpenFleet={vi.fn()} />);
   typePrompt(); send(); act(() => w.callbacks().error(diagnostic));
-  expect(screen.getByRole("alert").textContent).toBe("The cluster could not complete this reply. Retry, or check the available models in Fleet.");
+  expect(screen.getByRole("alert").textContent).toBe("No eligible model could take this request. Check the available models in Fleet.");
   expect(screen.getByText("Details").closest("details")?.textContent).toContain(diagnostic);
   expect(screen.getByRole("button", { name: "Open Fleet" })).toBeTruthy();
 });
