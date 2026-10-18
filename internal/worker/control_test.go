@@ -144,7 +144,9 @@ func TestLocalControlSocketOwnershipAndNoDuplicateWorker(t *testing.T) {
 	fleet, _ := controlFixture(t)
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	dir, err := os.MkdirTemp("", "mq-control-")
+	// A pipeline's owned TMPDIR can exceed the Unix socket path limit.
+	// MkdirTemp still creates a private directory; cleanup owns only this one.
+	dir, err := os.MkdirTemp("/tmp", "mq-control-")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -182,7 +184,8 @@ func TestLocalControlRejectsInvalidRequests(t *testing.T) {
 	fleet, _ := controlFixture(t)
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	dir, err := os.MkdirTemp("", "mq-control-")
+	// Keep the socket path short even when the native runner's TMPDIR is long.
+	dir, err := os.MkdirTemp("/tmp", "mq-control-")
 	if err != nil {
 		t.Fatal(err)
 	}
