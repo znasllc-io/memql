@@ -3634,9 +3634,11 @@ func LibraryDocumentRevisionStatusBuild(args LibraryDocumentRevisionStatusArgs) 
 	return b.String()
 }
 
-// LibraryDocumentVersion -- Open a retained Markdown snapshot without changing its current document.
+// LibraryDocumentVersion -- Read the UTF-8 text content of a saved Library file or generated document, at its current or retained version. Returns content and revision without changing the document; supports text up to 2 MiB, not binary decoding. Resolve a fileId with libraryArtifactForFile, then use libraryDocumentHistory for its currentVersion when unknown.
 type LibraryDocumentVersionArgs struct {
-	ArtifactId    string
+	// The saved artifact id, obtained through libraryArtifactForFile when you have a fileId.
+	ArtifactId string
+	// The currentVersion from libraryDocumentHistory, or an explicitly selected retained version; do not guess.
 	VersionNumber int
 }
 

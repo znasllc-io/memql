@@ -2779,9 +2779,11 @@ QueryClient.prototype.libraryDocumentRevisionStatus = function (this: QueryClien
   return this.executeNamed("libraryDocumentRevisionStatus", buildLibraryDocumentRevisionStatus(args), opts);
 };
 
-/** Open a retained Markdown snapshot without changing its current document. */
+/** Read the UTF-8 text content of a saved Library file or generated document, at its current or retained version. Returns content and revision without changing the document; supports text up to 2 MiB, not binary decoding. Resolve a fileId with libraryArtifactForFile, then use libraryDocumentHistory for its currentVersion when unknown. */
 export interface LibraryDocumentVersionArgs {
+  /** The saved artifact id, obtained through libraryArtifactForFile when you have a fileId. */
   artifactId: string;
+  /** The currentVersion from libraryDocumentHistory, or an explicitly selected retained version; do not guess. */
   versionNumber: number;
 }
 

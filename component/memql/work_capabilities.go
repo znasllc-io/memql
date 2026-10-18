@@ -7,6 +7,7 @@ import (
 	"sort"
 	"strings"
 	"time"
+	"unicode"
 
 	"github.com/znasllc-io/memql/component/auth"
 	memorynodes "github.com/znasllc-io/memql/component/database/memory-nodes"
@@ -144,7 +145,11 @@ func (e *MemQLEngine) workCapabilitiesBuiltin(ctx context.Context, args map[stri
 		for _, field := range workCapabilityFields(fn) {
 			haystack += " " + strings.ToLower(field.Name+" "+field.Description+" "+fmt.Sprint(field.Enum))
 		}
-		score := workCapabilityScore(search, name, haystack)
+		purpose := fn.Description
+		if purpose == "" {
+			purpose = fn.DocComment
+		}
+		score := workCapabilityScore(search, name, haystack, purpose)
 		if score == 0 {
 			continue
 		}
@@ -321,24 +326,93 @@ func workCapabilityFields(fn *Function) []*FunctionArgsField {
 
 // Natural-language discovery ranks partial term matches. Requiring every word
 // made extra descriptors turn a relevant capability into an empty result.
-func workCapabilityScore(search, name, description string) int {
-	search = strings.ToLower(search)
-	name = strings.ToLower(name)
-	if search == name || strings.HasSuffix(name, "."+search) {
+func workCapabilityScore(search, name, description string, purpose ...string) int {
+	lowerSearch, lowerName := strings.ToLower(search), strings.ToLower(name)
+	if lowerSearch == lowerName || strings.HasSuffix(lowerName, "."+lowerSearch) {
 		return 10000
 	}
-	score, matched := 0, 0
-	for _, word := range strings.Fields(search) {
-		if strings.Contains(description, word) {
+	if strings.Contains(search, ".") && strings.IndexFunc(search, func(r rune) bool { return !unicode.IsLetter(r) && !unicode.IsDigit(r) && r != '.' && r != '_' }) < 0 {
+		return 0 // A qualified operation lookup is exact, including an absent one.
+	}
+	words := workCapabilityWords(search)
+	for _, word := range strings.Fields("a an the and or to for of in is are with can i you it this that") {
+		delete(words, word)
+	}
+	if len(words) == 0 {
+		return 0
+	}
+	intent := ""
+	for _, word := range workCapabilityTokens(search) {
+		if words[word] {
+			intent = word
+			break
+		}
+	}
+	names, body := workCapabilityWords(name), workCapabilityWords(description)
+	lead := map[string]bool{}
+	directPurpose := false
+	if len(purpose) > 0 {
+		// The operation's stated purpose outranks incidental mentions in its
+		// implementation history or argument descriptions. No app-specific verbs.
+		first := strings.FieldsFunc(purpose[0], func(r rune) bool { return r == '.' || r == '\n' })
+		if len(first) > 0 {
+			lead = workCapabilityWords(first[0])
+			firstWords := workCapabilityTokens(first[0])
+			directPurpose = len(firstWords) > 0 && firstWords[0] == intent
+		}
+	}
+	score, matched, purposeMatches := 0, 0, 0
+	for word := range words {
+		if body[word] || names[word] || lead[word] {
 			matched++
 			score++
-			if strings.Contains(name, word) {
+			if names[word] {
 				score += 5
+			}
+			if lead[word] {
+				purposeMatches++
 			}
 		}
 	}
-	if matched == len(strings.Fields(search)) {
+	// Coherent matches in the purpose matter more than several unrelated
+	// words scattered through implementation notes or generic field names.
+	score += 20 * purposeMatches * purposeMatches
+	// A purpose beginning with the requested action is more direct than a
+	// list whose prose happens to mention that action or ordering words.
+	if directPurpose {
+		score += 40
+	}
+	if matched == len(words) {
 		score += 20
 	}
 	return score
+}
+
+func workCapabilityWords(text string) map[string]bool {
+	result := map[string]bool{}
+	for _, word := range workCapabilityTokens(text) {
+		result[word] = true
+	}
+	return result
+}
+
+func workCapabilityTokens(text string) []string {
+	// Names use CamelCase; descriptions use words. Match those words, so
+	// asking to "read" does not select "readiness" and "file" finds "files".
+	runes := []rune(text)
+	var separated strings.Builder
+	for n, r := range runes {
+		if n > 0 && unicode.IsUpper(r) && (unicode.IsLower(runes[n-1]) || (n+1 < len(runes) && unicode.IsLower(runes[n+1]))) {
+			separated.WriteByte(' ')
+		}
+		separated.WriteRune(unicode.ToLower(r))
+	}
+	result := []string{}
+	for _, word := range strings.FieldsFunc(separated.String(), func(r rune) bool { return !unicode.IsLetter(r) && !unicode.IsDigit(r) }) {
+		if len(word) > 3 && strings.HasSuffix(word, "s") && !strings.HasSuffix(word, "ss") {
+			word = strings.TrimSuffix(word, "s")
+		}
+		result = append(result, word)
+	}
+	return result
 }
