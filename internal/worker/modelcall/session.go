@@ -94,8 +94,8 @@ type Options struct {
 	// is the only one.
 	Limiter *Limiter
 	// SlotWaitLogFloor is the wait below which a call that had to queue for
-	// a concurrency slot is not logged. Zero is one second: a slot that
-	// frees within a second is the machine doing its job.
+	// a concurrency slot is not logged. Zero or less is one second: a slot
+	// that frees within a second is the machine doing its job.
 	SlotWaitLogFloor time.Duration
 }
 
@@ -485,7 +485,17 @@ func (m *Manager) admit(ctx context.Context, c *call, info models.Info, inv mode
 				"error_code", CodeConcurrencyExceeded)
 			return refuse(CodeConcurrencyExceeded, concurrencyRefusal(info, ceiling, limits.idle))
 		case <-ctx.Done():
+			// A cancel, or the call's own timeout, ends a wait with neither a
+			// grant nor a refusal, so the refusal above never runs for it. The
+			// Debug line before the loop is the only other record of the wait,
+			// and the default level never prints it.
 			finish, code, detail := m.classify(c, ctx.Err())
+			if waited := time.Since(began); waited >= m.slotWaitFloor {
+				m.logger.Warn("model call ended while waiting for a concurrency slot",
+					"request_id", c.requestID, "model", info.ID, "level", c.level, "purpose", c.purpose,
+					"waited_ms", waited.Milliseconds(), "model_max", info.MaxConcurrent,
+					"error_code", code)
+			}
 			end := refuse(code, detail)
 			end.FinishReason = finish
 			return end
