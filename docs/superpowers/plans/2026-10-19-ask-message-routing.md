@@ -18,7 +18,7 @@
 - The conversation write lock (`holdAskConversation(..,"write")` == `lockAskConversationKind(..,"write")`) is NOT reentrant and must never be held across a model call or a `work.*` builtin call.
 - Guidance caps (unchanged): 4,000 runes per message, 16 messages and 16,000 runes per run. A recorded set over the cap makes `ReadWorkGuidance` fail, so the recorder must refuse first.
 - Routing runs only when: the turn is new (not a resume), the message is at most 4,000 runes, it has no attachments, and at least one goal is active. At most 12 goals, newest first.
-- Route statuses: `queued`, `received`, `answered`, `notApproved`, `saved`, `notDelivered`, `notReceived`. Reasons: `ended`, `review`, `limit`, `refused`. Epoch sentinel: `preparing`.
+- Route statuses: `queued`, `received`, `answered`, `notApproved`, `saved`, `notDelivered`, `notReceived`. Reasons: `ended`, `review`, `limit`, `refused`. Work guidance stays with its run for the run's life (ruling 2026-10-19: no guidance epoch, no `preparing` sentinel).
 - UI label copy: "To {title} · {Queued|Received|Answered|Sent, not approved|Saved|Not delivered|Not received}". Stop row: "Stop this work? It can't be resumed." with Keep then Stop (`tone="danger"`).
 - Activity label for the routing prompt: "Routing message".
 - Tests: `make test` never proves the engine alone; db-gated packages need a real Postgres+TimescaleDB+pgvector and `MEMQL_REQUIRE_DB=1` (Task 0).
@@ -138,7 +138,7 @@
 - [ ] **Step 1: Write the failing unit tests:**
   - `TestRouteDeliveryForEveryState` (table: each row of the spec's delivery table, plus inactive).
   - `TestGuidanceTargetsLockedRefusesPastTheCap` and `TestDeliverRouteRefusesPastTheGuidanceCap` (16 accepted targets already -> `notDelivered`/`limit`; 15,990 runes + a 20-rune message -> `limit`).
-  - `TestGuidanceTargetsLockedUsesThePreparingEpoch`.
+  - `TestGuidanceTargetsLockedCountsWhatTheReaderReads` (the cap counts exactly the targets `workGuidanceTarget` returns for that run, so a reader can never be handed more than 16 messages or 16,000 runes).
 - [ ] **Step 2: Write the failing db tests:**
   - `TestActiveAskGoalsListsOnlyActiveRootRuns` (a cancelled run, a child run and a finished run are left out; handles are `g1` newest first; a waiting run carries its approval).
   - `TestDeliverApprovalTargetsAnswersAQuestion`, `...CorrectsAPermissionWithoutAGrant`, `...SavesBudgetGuidance` (stub `integration.work.decideApproval`, assert the exact args sent and the mapped status).

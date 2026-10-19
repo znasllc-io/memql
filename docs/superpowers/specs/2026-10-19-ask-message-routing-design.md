@@ -163,17 +163,19 @@ Phoenix. Hike plan already finished, so it didn't get this.").
 
 | Goal state | Delivery | Label |
 |---|---|---|
-| Working (`running`) | Work guidance, current epoch; the agent reads it at its next model or tool boundary | Queued, then Received |
-| Preparing (`compiling`) | Work guidance with the epoch sentinel `preparing`, accepted by the run's first execution (no `rerun`) | Queued, then Received |
-| Waiting on something other than you (timer, retry, sub-run, external) | Work guidance, current epoch; read when it resumes | Queued, then Received |
+| Working (`running`) | Work guidance; the agent reads it at its next model or tool boundary | Queued, then Received |
+| Preparing (`compiling`) | Work guidance; read at the first step | Queued, then Received |
+| Waiting on something other than you (timer, retry, repair, re-plan, sub-run, external) | Work guidance; read when it resumes | Queued, then Received |
 | Waiting on your question (`feedback`, or a failure question) | `decideApproval(answered, {feedback: message})` | Answered |
 | Waiting on a permission (`sideEffect`, `scopeElevation`) | The same call: guidance instead of approval; the goal reconsiders, nothing is granted | Sent, not approved |
 | Paused on its budget (native checkpoint) | The same call saves the guidance; it applies when the limit is raised | Saved |
 | Waiting on a request that takes no guidance (plan review and the others `ApprovalAcceptsGuidance` refuses) | Not delivered; the reply says to open the request | Not delivered |
 
 - The existing per-run cap holds: 16 messages, 16,000 characters.
-- A queued delivery whose run ended, was re-run or was re-planned before
-  reading it becomes **Not received**, as today.
+- Work guidance stays with its goal for the rest of the run: automatic
+  retries, repairs, re-plans and a person's own re-run of a step all keep
+  it (2026-10-19 ruling; the per-attempt guidance epoch is gone). A queued
+  delivery whose run ENDED before reading it becomes **Not received**.
 - Guidance never grants permission or raises a limit.
 
 ## Data
@@ -199,7 +201,6 @@ type AskRouteTarget struct {
 	RunID      string `json:"runId"`
 	Title      string `json:"title"`
 	Status     string `json:"status"` // queued | received | answered | notApproved | saved | notDelivered | notReceived
-	Epoch      string `json:"epoch,omitempty"`
 	ApprovalID string `json:"approvalId,omitempty"`
 	Reason     string `json:"reason,omitempty"` // ended | review | limit
 	Text       string `json:"text"`             // exactly what the goal receives
@@ -235,9 +236,9 @@ a new owner-gated builtin `work.workRetitleRun {runId, title}` (executor `integr
 
 ### Reading guidance (agent side)
 
-`readAskWorkGuidance` reads `Routed.Targets` for its run: the current epoch,
-or the `preparing` sentinel while the run has no `rerun`. Acknowledgement marks
-those targets `received`. Ids are the turn id (one target per run per turn).
+`readAskWorkGuidance` reads `Routed.Targets` for its run (no approval id,
+queued or received), for the life of the run. Acknowledgement marks those
+targets `received`. Ids are the turn id (one target per run per turn).
 
 ### Stop decisions
 
