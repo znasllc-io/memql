@@ -5,6 +5,7 @@ pipeline:
   platform: darwin/arm64
   stages:
     - name: maintenance
+      on: [pull_request]
       steps:
         - name: instance-repository-consent
           placement: fleet
@@ -13,7 +14,5 @@ pipeline:
           needs: { macos_tooling: true }
           caches: []
           timeout: 5m
-          env:
-            MEMQL_MAINTENANCE_HOST_SHA256: 66ac1fa5d8c5819c3ec7c86a706154c81bdab61cefc2aaff56834ee6d9f67903
           artifacts: [maintenance-receipt.json]
-          run: python3 scripts/ci/mac-instance-consent-once.py
+          run: MEMQL_MAINTENANCE_HOST_SHA256=66ac1fa5d8c5819c3ec7c86a706154c81bdab61cefc2aaff56834ee6d9f67903 python3 scripts/ci/mac-instance-consent-once.py
