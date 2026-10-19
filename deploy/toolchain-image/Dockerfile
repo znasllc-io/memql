@@ -96,7 +96,7 @@ FROM registry.k8s.io/kubectl:v1.32.13@sha256:fbfd671cd51f0be98174170f2000cbb97d2
 # would overwrite with `docker manifest inspect`: a registry call, not a daemon
 # one. Without it, four scripts/release tests fail. 29.8.2 is the newest 29.x
 # release at the time of pinning; the binary is static.
-FROM docker:29.8.2-cli@sha256:35cfcf893c20f2931f4909151b5407aaaeab711277de7ce8b8f521f095d54c32 AS docker-dist
+FROM docker:29.9.0-cli@sha256:1a4c7cb63513f349bdad01fcc6e0f3f2f67d37b9da86f14dc0d4a0942eecda00 AS docker-dist
 
 # protoc, fetched from its release and checked against a pinned SHA-256 per
 # architecture before it is unpacked. The stage runs on the BUILD platform
