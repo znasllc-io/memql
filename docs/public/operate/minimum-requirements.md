@@ -59,7 +59,7 @@ local k3d and in a cloud cluster; only the numbers and endpoints differ.
 - [ ] The **CNPG operator stack** reconciled by ArgoCD: CloudNativePG + the
       Barman Cloud plugin + cert-manager (`deploy/cnpg`, `deploy/cert-manager`).
 - [ ] The **operand image** built on the build server and pinned by digest in
-      the overlay (`.github/workflows/build-db-image.yml`). The tag must begin
+      the overlay (native `tests.database-image` plus reviewed release publication). The tag must begin
       with the PostgreSQL major — CNPG parses it.
 - [ ] A `Cluster` composed from the `cnpg-db` component with a tier preset
       (`entry` / `mid` / `top`), sized so the **connection budget** fits the

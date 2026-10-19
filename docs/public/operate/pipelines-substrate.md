@@ -1252,11 +1252,12 @@ qualification. Daily dependency vulnerability checks remain enabled.
 
 ### The toolchain image
 
-`ghcr.io/znasllc-io/memql-toolchain` is what the engine's pipeline runs in,
-built from `deploy/toolchain-image/Dockerfile` by `build-toolchain-image.yml`:
-dispatched on main only, smoke-tested before it is pushed, a published tag
-never replaced unless the dispatch says so, one native platform per dispatch
-(`linux/amd64` or `linux/arm64`, each its own version). It carries:
+`ghcr.io/znasllc-io/memql-toolchain` is what the engine's pipeline runs in.
+The native release step `build-tools.toolchain` builds the `verified` target
+in `deploy/toolchain-image/Dockerfile`, which runs the full smoke suite before
+exporting an OCI archive. Reviewed release publication verifies and publishes
+that artifact under an immutable version. The shipped manifest builds
+`linux/amd64`; another platform requires its own native qualification. It carries:
 
 - Go 1.27.2 (`go.work`'s toolchain line), Node 22, protoc 33.4 and kubectl
   1.32.13 (the minor of the local cluster's k3s); a test holds Go, protoc and
@@ -1267,8 +1268,8 @@ never replaced unless the dispatch says so, one native platform per dispatch
   ca-certificates and the PostgreSQL client (`psql`, `pg_isready`);
 - uid 1000 (`memql`), never root, with git trusting `/workspace`.
 
-`memql-package.yaml` names the image by the digest its run's summary printed
-(version `1.2.0-amd64`). A rebuild takes a new version and a new pin: the
+`memql-package.yaml` names the image by its verified publication digest.
+A rebuild takes a new version and a new pin: the
 manifest's test fails on any reference that is not a digest of this
 repository. When `go.work`'s toolchain line moves, the image is rebuilt and
 re-pinned; an image whose Go lags it makes every step download a toolchain.
@@ -1346,7 +1347,7 @@ Each of these is understood, and accepted for this release.
   others can write -- `ssh -F`, `mysql --defaults-file` -- needs `chmod go-w` on
   that file in the step.
 - **The cluster-e2e leg runs the substrate in its test process.**
-  `install-cluster-e2e.yml`'s `pipelines` leg installs the cluster from source
+  The native `installer-lifecycle.pipelines` leg installs the cluster from source
   and runs `TestPipelinesSubstrate` (`test/clustere2e`): the real executor, its
   fleet half and two workbench runners in the test process, talking to the
   cluster's real API server as `memql-engine-workbench`, under the deployed Role, quota,
@@ -1355,10 +1356,9 @@ Each of these is understood, and accepted for this release.
   are held to recorded fixtures, and the fleet's dispatcher is a stand-in with no
   machine. It does not cover the deployed agent and workbench wiring -- the
   app's adapter, the node mesh's streams, the dispatcher -- which unit and
-  in-process hop tests cover. It runs on that workflow's own triggers --
-  nightly, on demand, and on pull requests that change the installer, the local
-  cluster scripts, `deploy/k8s` or the workflow -- so a change to the
-  substrate's code alone does not run it. Live qualification uses real native
+  in-process hop tests cover. The isolated lifecycle fixtures run weekly and
+  on demand, while affected PRs retain the no-cluster installer smoke. A change
+  to substrate code alone does not run the full lifecycle. Live qualification uses real native
   pipeline runs and retained GitHub check receipts; the unused Actions
   placeholder has been removed.
 - **Per-workbench readiness has not yet been verified in an installed release.**

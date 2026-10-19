@@ -8,8 +8,8 @@
 # import it into the local k3d cluster.
 #
 # Epic memql#3842, task memql#3844. This is the LOCAL DEVELOPMENT path only.
-# Deployable images are built on the GitHub build server
-# (.github/workflows/build-db-image.yml), never on an operator machine --
+# Deployable images are built by the native tests.database-image step
+# and published through a reviewed release candidate, never on an operator machine --
 # CLAUDE.md, "Image builds: LOCAL Docker for dev, BUILD SERVER for deploys".
 # Both paths drive the SAME Dockerfile and the SAME smoke test, which is what
 # makes the local image a faithful stand-in rather than a lookalike.

@@ -341,7 +341,7 @@ scale:
 ## instance (epic memql#3842 / #3844).
 ##
 ## LOCAL DEVELOPMENT ONLY. Deployable images are cut on the GitHub build
-## server (.github/workflows/build-db-image.yml), never on an operator
+## server (the native tests.database-image step), never on an operator
 ## machine -- but both paths drive the SAME Dockerfile and the SAME smoke
 ## test, which is what makes this a faithful stand-in rather than a lookalike.
 ##
@@ -651,7 +651,7 @@ docs-grammar-check:
 ## their links rewritten to site routes, the concept catalog, manifest.json,
 ## llms.txt, llms-full.txt and the sitemap fragment. Needs full git history --
 ## every page is dated by its last commit -- so a shallow clone is refused. The
-## release lane (publish-docs-bundle.yml) runs the same script at the tag.
+## native release-files.packages step runs the same script at the tag.
 docs-bundle:
 	bash scripts/docs/build-docs-bundle.sh --version=$(VERSION)
 

@@ -133,7 +133,6 @@ pipeline:
         - deploy/db-image/**
         - scripts/db-image/**
         - memql-package.yaml
-        - .github/workflows/build-db-image.yml
       # Shell source and the Docker stage that packages it.
       # Keep Dockerfile changes in the same validation path as the shell.
       os:

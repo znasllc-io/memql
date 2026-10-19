@@ -161,17 +161,15 @@ Release asset; the site replaces its set with the newest one.
    the public page that covers the subject, or by saying it in prose; do not
    add an entry for a new link. The docs-safety epic adds its rules
    (hostnames, customer names, money) to the same check.
-5. **Release.** When a GitHub Release is published for an `X.Y.Z` or
-   `vX.Y.Z` tag, `.github/workflows/publish-docs-bundle.yml` checks out the
-   tag with full history, runs the check, builds the set **at that tag** and
-   attaches `docs-<X.Y.Z>.tgz` to the release. `workflow_dispatch` rebuilds
-   one release's set, by either tag spelling; a rebuild picks up no later
-   docs fix.
-6. **Site.** This step belongs to the instance repository that hosts
-   memql.io; what follows is its side of the contract. Its docs sync
-   (memql#5716) replaces the instance's docs set with the newest release's
-   asset, on a schedule and, once the token for it is in place, on an
-   `engine-docs-released` repository dispatch from the publish workflow.
+5. **Release.** The native `release-files.packages` step reads the pinned
+   release tag with full history, runs the check and builds the set **at that
+   tag**. It retains `docs-<X.Y.Z>.tgz` in the Library. A reviewed release
+   candidate publishes those exact verified bytes as a release asset. A native
+   rerun uses the same tagged source; it picks up no later documentation fix.
+6. **Site.** This step belongs to the instance repository hosting memql.io.
+   Its native maintenance proposal updates the digest-bound docs lockfile from
+   a published release, and its site build verifies and consumes that lockfile.
+   Review and merge the proposal, then deploy the package through MemQL.
    Its site renders the manifest's version in the docs chrome and as
    `<meta name="memql-docs-version" content="X.Y.Z">` on every docs page
    (memql#5715), and follows the absolute routes the bundle's links carry
