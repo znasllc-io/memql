@@ -33,15 +33,16 @@ type hostResources struct {
 	probe func() (memoryHeadroom, error)
 	// Only models this worker actually invoked may be evicted. Unrelated
 	// applications' runners must not be stopped to make room for Fleet.
-	owned map[string]models.Info
-	poll  time.Duration
+	owned     map[string]models.Info
+	poll      time.Duration
+	leaseRoot func() (string, error)
 }
 
 // NewHostLimiter is the production limiter. NewLimiter remains the pure
 // advertised concurrency limiter for embedders that supply their own budget.
 func NewHostLimiter() *Limiter {
 	l := NewLimiter()
-	l.resources = &hostResources{gate: make(chan struct{}, 1), probe: readMemoryHeadroom, owned: make(map[string]models.Info), poll: time.Second}
+	l.resources = &hostResources{gate: make(chan struct{}, 1), probe: readMemoryHeadroom, owned: make(map[string]models.Info), poll: time.Second, leaseRoot: inferenceCapacityRoot}
 	return l
 }
 
@@ -121,13 +122,39 @@ func (r *hostResources) acquire(ctx context.Context, info models.Info, client *h
 	case <-ctx.Done():
 		return nil, ctx.Err()
 	}
-	release := func() { <-r.gate }
+	var lease *inferenceLease
+	release := func() {
+		if lease != nil {
+			lease.close()
+		}
+		<-r.gate
+	}
 	ok := false
 	defer func() {
 		if !ok {
 			release()
 		}
 	}()
+	if r.leaseRoot != nil {
+		root, err := r.leaseRoot()
+		if err != nil {
+			return nil, err
+		}
+		lease, err = acquireInferenceLease(ctx, root, r.poll)
+		if err != nil {
+			return nil, err
+		}
+		r.owned, err = lease.readOwned()
+		if err != nil {
+			return nil, err
+		}
+	}
+	save := func() error {
+		if lease != nil {
+			return lease.saveOwned(r.owned)
+		}
+		return nil
+	}
 	key := resourceKey(info)
 	// Reclaim idle models before examining free memory, including transitions
 	// between text, embeddings, audio and image runtimes. Same-model calls keep
@@ -151,6 +178,9 @@ func (r *hostResources) acquire(ctx context.Context, info models.Info, client *h
 			return nil, fmt.Errorf("idle model %q did not confirm unloading", old.ID)
 		}
 		delete(r.owned, oldKey)
+		if err := save(); err != nil {
+			return nil, err
+		}
 		logger.Info("released idle inference model", "model", old.ID)
 	}
 	wanted := workingSet(info)
@@ -174,6 +204,9 @@ func (r *hostResources) acquire(ctx context.Context, info models.Info, client *h
 		additional := wanted - min(wanted, resident)
 		if !state.Pressure && state.Available >= reserve && state.Available-reserve >= additional {
 			r.owned[key] = info
+			if err := save(); err != nil {
+				return nil, err
+			}
 			logger.Info("admitted local inference", "model", info.ID, "available_bytes", state.Available, "reserved_bytes", reserve, "estimated_peak_bytes", wanted, "resident_bytes", resident)
 			ok = true
 			return release, nil

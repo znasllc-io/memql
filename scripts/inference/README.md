@@ -1,6 +1,8 @@
 # Memory admission for local inference
 
-The production worker shares one host limiter across cluster connections. Local
+The production worker shares one host limiter across cluster connections and an
+OS file lock across separate worker processes belonging to the same OS user.
+The lock is independent of cluster configuration and `MEMQL_HOME`. Local
 runtime calls serialize before starting GPU work, across model names and
 modalities. Installed model ceilings still apply; their sum is no longer treated
 as permission to start simultaneous loads against the same memory pool. Remote
@@ -8,8 +10,13 @@ endpoints do not consume this machine's inference gate.
 
 Before switching models, the worker asks Ollama to unload idle runners it invoked
 itself. It preserves a warm runner for another call to that same model and never
-enumerates unrelated models to stop them. A fresh worker has no ownership record;
-existing resident models are included in the available-memory measurement.
+enumerates unrelated models to stop them. Ownership persists under the lock, so a replacement worker can reclaim a runner
+started by its predecessor. Only local runtime identities are stored; credentials
+are never recorded. The kernel releases the lock on process exit. Corrupt records
+refuse admission. Models never invoked by Fleet remain included in the
+available-memory measurement. This coordinates workers for one OS user, not
+unrelated applications or other OS users; those are accounted for by live
+headroom and pressure.
 
 On macOS, admission counts free, purgeable and pageable file-backed memory, and
 refuses warning/critical pressure. It keeps 1–4 GiB of additional headroom for the
