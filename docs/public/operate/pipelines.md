@@ -52,6 +52,75 @@ token, a secret value or a log line.
 
 ---
 
+## Repository maintenance
+
+A `repositoryChange` step applies a retained JSON proposal through the pipeline
+source's current GitHub App grant. The command that generates the proposal
+receives no writer token. This supports dependency tidy commits and draft
+upgrade proposals while keeping file and branch authority in operator settings.
+
+```yaml
+- name: prepare
+  on: [schedule, manual]
+  steps:
+    - name: upgrade
+      run: python3 scripts/ci/repository-proposal.py engine-watch --output=.reports/engine-proposal.json
+      artifacts: [.reports/engine-proposal.json]
+- name: propose
+  on: [schedule, manual]
+  steps:
+    - name: upgrade
+      repositoryChange:
+        rule: engine-upgrade
+        step: prepare.upgrade
+        path: .reports/engine-proposal.json
+      timeout: 5m
+```
+
+The operator stores `MEMQL_PIPELINES_REPOSITORY_CHANGE_RULES` as a system
+variable. Its JSON has `schema: 1` and a `rules` list. Each rule names a
+`name`, exact `repository` (`owner/repo`), `mode`, `branchPrefix` ending in
+`/`, and explicit `paths`. There are no wildcard grants. For example:
+
+```json
+{
+  "schema": 1,
+  "rules": [{
+    "name": "engine-upgrade",
+    "repository": "example/product",
+    "mode": "propose",
+    "branchPrefix": "engine-bump/",
+    "paths": ["product.env"]
+  }]
+}
+```
+
+`propose` accepts only scheduled or owner-requested runs of the current default
+branch. It creates a draft pull request and never merges it. An existing branch
+is reconciled only when it identifies the exact prepared commit; a moved branch
+or a deliberately closed proposal is not overwritten or reopened.
+
+`update` also requires `author` and `actor`, such as `dependabot[bot]`. It accepts
+only a same-repository pull request whose original signed webhook has that
+actor, whose current author matches, and whose complete changed-file inventory
+fits the rule. Poll-only runs lack this signed actor evidence and cannot update
+a pull request. An owner retry retains the original delivery identity. Both
+modes recheck the rule, source binding and grant immediately before writing.
+
+The proposal contains `schema: 1`, the exact source `commit`, a short `key`,
+`title`, `body`, and `files`. Each file has `path`, `baseSha256`, and UTF-8
+`content`. An empty base digest requires an absent file. The limit is 4 MiB
+for the proposal, 1 MiB per file and 256 files. Deletion, executable files,
+symlinks and workflow changes are not supported. An empty file list records
+`unchanged` and mints no writer token.
+
+The driver validates the producer's successful journal, object version, size
+and SHA-256 before parsing the proposal. It pins the artifact while an external
+write is unresolved. Branch writes use deterministic commits with the exact
+source parent, refuse force pushes, and require read-back. A replica recovering
+a lost response observes the same commit instead of repeating the branch write.
+An unresolved write fails the step and retains its evidence for reconciliation.
+
 ## Connecting a pipeline
 
 **Who:** the source's owner, holding `execute` on `app:deployables/connect`.

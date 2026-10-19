@@ -201,6 +201,7 @@ pipeline:
             bash scripts/identity/build-css.sh
             go test -count=1 -timeout=300s ./scripts/ci/ ./scripts/dev/
             python3 -m unittest discover -s scripts/ci -p pipeline_db_tests_test.py
+            python3 -m unittest discover -s scripts/ci -p repository_proposal_test.py
         - name: build-identity
           placement: cluster
           timeout: 30m

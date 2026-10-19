@@ -316,6 +316,10 @@ func validateStep(spec *Spec, stage string, j int, step StepSpec, seen map[strin
 	}
 	scope := stage + "/" + step.Name
 
+	if step.RepositoryChange != nil {
+		return validateRepositoryChangeStep(spec, stage, step)
+	}
+
 	if step.SARIF != nil {
 		return validateSARIFStep(spec, stage, step)
 	}

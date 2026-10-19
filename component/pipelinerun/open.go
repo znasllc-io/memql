@@ -51,8 +51,9 @@ type Opening struct {
 	RerunOf string
 	// FailedOnly is a person's "Re-run failed": the new attempt runs only
 	// what RerunOf did not pass.
-	FailedOnly bool
-	DeliveryID string
+	FailedOnly       bool
+	DeliveryID       string
+	InboundRequestID string
 }
 
 // An explicit release retry keeps its manual origin for admission by another
@@ -209,15 +210,16 @@ func (i *Integration) openWithToken(ctx context.Context, d Deps, p Pipeline, o O
 			RerunOf:     bareID(o.RerunOf),
 			// Only a re-run can carry anything over: an attempt a delivery
 			// or the poll opened has nothing before it to carry from.
-			RerunFailedOnly: o.FailedOnly && o.isRerun(),
-			DeliveryID:      strings.TrimSpace(o.DeliveryID),
-			PullRequest:     o.PullRequest,
-			HeadBranch:      strings.TrimSpace(o.Branch),
-			BaseSHA:         strings.ToLower(strings.TrimSpace(o.BaseSHA)),
-			Title:           strings.TrimSpace(o.Title),
-			Version:         version,
-			Status:          StatusQueued,
-			QueuedAt:        now,
+			RerunFailedOnly:  o.FailedOnly && o.isRerun(),
+			DeliveryID:       strings.TrimSpace(o.DeliveryID),
+			InboundRequestID: bareID(o.InboundRequestID),
+			PullRequest:      o.PullRequest,
+			HeadBranch:       strings.TrimSpace(o.Branch),
+			BaseSHA:          strings.ToLower(strings.TrimSpace(o.BaseSHA)),
+			Title:            strings.TrimSpace(o.Title),
+			Version:          version,
+			Status:           StatusQueued,
+			QueuedAt:         now,
 		}
 		if o.Fork {
 			// D6: a stranger's code is refused, never queued -- and the

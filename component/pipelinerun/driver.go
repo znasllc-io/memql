@@ -656,6 +656,9 @@ func carryPassed(tracks []*stepTrack, prior []WorkStep, priorAttempt int) {
 	// its own scanner artifacts instead of carrying a skip from an older run.
 	producers := map[string]bool{}
 	for _, t := range tracks {
+		if t.step.RepositoryChange != nil {
+			producers[t.step.RepositoryChange.Step] = true
+		}
 		if t.step.SARIF != nil {
 			producers[t.step.SARIF.Step] = true
 		}
@@ -976,6 +979,9 @@ func (dr *runDriver) runStep(ctx context.Context, t *stepTrack) {
 	switch {
 	case step.Skip != nil:
 		dr.settle(ctx, t, skipReceipt(step.Skip.Code, step.Skip.Reason))
+		return
+	case step.Kind == pipelines.StepRepositoryChange:
+		dr.runRepositoryChange(ctx, t)
 		return
 	case step.Kind == pipelines.StepSARIF:
 		dr.runSARIFReport(ctx, t)
