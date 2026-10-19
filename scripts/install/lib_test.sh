@@ -945,6 +945,73 @@ FAKE_WORKBENCH_EXIT=0 setup_workbench "$_wb_new" >/dev/null 2>&1
 expect_eq "setup_workbench success is ready" "$INSTALL_WORKBENCH_STATE" "ready"
 
 # ---------------------------------------------------------------
+# setup_permissions -- the person's turn, first, never fatal (memql-cockpit#548)
+# ---------------------------------------------------------------
+
+_pm_old="${_tmp}/fake-memql-perm-old"
+cat > "$_pm_old" << 'STUB'
+#!/usr/bin/env bash
+if [[ "$*" == "worker setup --help" ]]; then echo "  -workbench" >&2; exit 0; fi
+echo "flag provided but not defined: -permissions" >&2
+exit 2
+STUB
+chmod +x "$_pm_old"
+_out="$(setup_permissions "$_pm_old" 2>&1)"; _rc=$?
+setup_permissions "$_pm_old" >/dev/null 2>&1
+expect_eq "setup_permissions on a release without --permissions returns 0" "$_rc" "0"
+expect_eq "setup_permissions on a release without --permissions is not set up" "$INSTALL_PERMISSIONS_STATE" "failed"
+if [[ "$_out" != *"flag provided but not defined"* ]]; then
+    pass "setup_permissions never runs a flag the installed release lacks"
+else
+    fail "setup_permissions ran --permissions on a release without it: $_out"
+fi
+
+_pm_argv="${_tmp}/fake-memql-perm.argv"
+_pm_new="${_tmp}/fake-memql-perm"
+cat > "$_pm_new" << STUB
+#!/usr/bin/env bash
+if [[ "\$*" == "worker setup --help" ]]; then echo "  -permissions  open the Permissions window" >&2; exit 0; fi
+printf '%s\n' "\$*" >> "${_pm_argv}"
+[[ -z "\${MEMQL_SETUP_REASON_FILE:-}" || -z "\${FAKE_PERMISSIONS_REASON:-}" ]] || echo "\$FAKE_PERMISSIONS_REASON" > "\$MEMQL_SETUP_REASON_FILE"
+exit "\${FAKE_PERMISSIONS_EXIT:-0}"
+STUB
+chmod +x "$_pm_new"
+: > "$_pm_argv"
+FAKE_PERMISSIONS_EXIT=0 setup_permissions "$_pm_new" >/dev/null 2>&1
+expect_eq "setup_permissions with both allowed is ready" "$INSTALL_PERMISSIONS_STATE" "ready"
+expect_eq "setup_permissions with nobody at a terminal asks nobody" "$(tail -1 "$_pm_argv")" "worker setup --permissions --non-interactive"
+FAKE_PERMISSIONS_EXIT=4 FAKE_PERMISSIONS_REASON="Continued without Screen Recording." setup_permissions "$_pm_new" >/dev/null 2>&1; _rc=$?
+expect_eq "setup_permissions skipped returns 0" "$_rc" "0"
+expect_eq "setup_permissions skipped keeps what was left off" \
+    "${INSTALL_PERMISSIONS_STATE}|${INSTALL_PERMISSIONS_REASON}|${INSTALL_UI_RESULT}" \
+    "skipped|Continued without Screen Recording.|Permissions: Continued without Screen Recording."
+FAKE_PERMISSIONS_EXIT=3 FAKE_PERMISSIONS_REASON="Not asked: this install ran without a terminal." setup_permissions "$_pm_new" >/dev/null 2>&1
+expect_eq "setup_permissions nobody could answer is not set up" "${INSTALL_PERMISSIONS_STATE}|${INSTALL_PERMISSIONS_REASON}" \
+    "failed|Not asked: this install ran without a terminal."
+INSTALL_MENU=no FAKE_PERMISSIONS_EXIT=0 setup_permissions "$_pm_new" >/dev/null 2>&1
+expect_eq "setup_permissions without the menu companion sends the person to System Settings" "$(tail -1 "$_pm_argv")" \
+    "worker setup --permissions --no-window --non-interactive"
+(
+    exec 3> "${_tmp}/fake-perm-screen"
+    INSTALL_UI_SPINNER=""; INSTALL_UI_CURSOR_HIDDEN=no
+    MEMQL_INSTALL_TTY="$_tty_in" FAKE_PERMISSIONS_EXIT=0 setup_permissions "$_pm_new" > /dev/null 2>&1
+)
+expect_eq "setup_permissions at a terminal waits there for the person" "$(tail -1 "$_pm_argv")" "worker setup --permissions"
+_out="$(
+    exec 3>&1
+    INSTALL_UI_ACCENT=""; INSTALL_UI_RESET=""; INSTALL_UI_DIM=""
+    INSTALL_SERVICE_STATE=started; INSTALL_LOG="/fixture/install.log"; INSTALLED_BINARY="$_sr_bin"
+    INSTALL_MODELS_STATE=off; INSTALL_WORKBENCH_STATE=off; INSTALL_MENU_STATE=off
+    INSTALL_PERMISSIONS_STATE=skipped; INSTALL_PERMISSIONS_REASON="Continued without Screen Recording."
+    install_ui_finish
+)"
+if [[ "$_out" == *"Computer use needs Accessibility and Screen Recording: Continued without Screen Recording."*"Set Up Permissions"* ]]; then
+    pass "summary: a permission left off says where to turn it on"
+else
+    fail "summary for skipped permissions is wrong: $_out"
+fi
+
+# ---------------------------------------------------------------
 # The setup report -- the plan and the end, best-effort (memql-cockpit#541)
 # ---------------------------------------------------------------
 
@@ -952,6 +1019,8 @@ expect_eq "setup_report_plan names every stage, in the installer's order" "$(set
 expect_eq "setup_report_plan without workbenches" "$(setup_report_plan yes no)" "runtime,models"
 expect_eq "setup_report_plan with workbenches alone" "$(setup_report_plan no yes)" "workbench"
 expect_eq "setup_report_plan with neither is empty" "$(setup_report_plan no no)" ""
+expect_eq "setup_report_plan puts the person's turn first (memql-cockpit#548)" "$(setup_report_plan yes yes yes)" "permissions,runtime,models,workbench"
+expect_eq "setup_report_plan with permissions alone" "$(setup_report_plan no no yes)" "permissions"
 
 _report_log="${_tmp}/setup-report.log"
 _report_bin="${_tmp}/fake-memql-report"
@@ -970,7 +1039,13 @@ expect_eq "report_setup_plan returns 0" "$_rc" "0"
 : > "$_report_log"
 report_setup_plan "$_report_bin" no no
 report_setup_finished "$_report_bin" no no
-expect_eq "an install with neither stage reports nothing" "$(cat "$_report_log")" ""
+expect_eq "an install with no stage forgets an earlier install's report, and reports no end" "$(cat "$_report_log")" \
+    "worker control --action=setup --reset --wait=20s"
+: > "$_report_log"
+report_setup_plan "$_report_bin" yes no yes
+report_setup_finished "$_report_bin" yes no yes
+expect_eq "a computer-use Mac's plan starts with the permissions stage" "$(head -1 "$_report_log")" \
+    "worker control --action=setup --plan=permissions,runtime,models --wait=20s"
 FAKE_REPORT_EXIT=2 report_setup_plan "$_report_bin" yes no; _rc=$?
 expect_eq "a worker that refuses the report never fails the install" "$_rc" "0"
 

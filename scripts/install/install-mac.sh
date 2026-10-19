@@ -38,7 +38,7 @@ readonly RAW_BASE="${MEMQL_INSTALL_RAW_BASE:-https://raw.githubusercontent.com/z
 # calls existed -- and stopped with exit 127 halfway through. source_lib
 # checks these before anything runs, refetches past the cache once, and
 # otherwise refuses in a sentence. lib_test.sh keeps the list complete.
-readonly REQUIRED_LIB_FUNCTIONS="allow_installed_apps binary_name_for compare_semver detect_arch fetch_macos_app fetch_macos_menu install_binary_with_mode install_check_release install_sudo install_ui_binary_result install_ui_finish install_ui_init install_ui_stage macos_bundle_requirement macos_signing_transition ollama_env_names ollama_plist_env parse_version_flag read_binary_version read_binary_version_exact release_download_base repair_changed_macos_permissions report_setup_finished report_setup_plan resolve_target_version setup_inference setup_workbench write_worker_yaml"
+readonly REQUIRED_LIB_FUNCTIONS="allow_installed_apps binary_name_for compare_semver detect_arch fetch_macos_app fetch_macos_menu install_binary_with_mode install_check_release install_sudo install_ui_binary_result install_ui_finish install_ui_init install_ui_stage macos_bundle_requirement macos_signing_transition ollama_env_names ollama_plist_env parse_version_flag read_binary_version read_binary_version_exact release_download_base repair_changed_macos_permissions report_setup_finished report_setup_plan resolve_target_version setup_inference setup_permissions setup_workbench write_worker_yaml"
 
 # missing_lib_functions names the required functions a lib.sh file does not
 # define. It reads the TEXT, before anything is sourced: lib.sh declares
@@ -468,8 +468,18 @@ function main() {
     fi
     # Everything below runs after the worker has connected, so the worker
     # carries it to the cluster for MemQL OS to show (memql-cockpit#541).
+    # The person's turn comes first (memql-cockpit#548): the MemQL app holds
+    # the computer-use grants, and nothing downloads until the person has
+    # allowed them or chosen to go on without them.
+    PERMISSIONS=no
+    if [[ "$INSTALL_SERVICE" == yes && -n "${NATIVE_APP:-}" ]]; then
+        PERMISSIONS=yes
+    fi
     if [[ "$INSTALL_SERVICE" == yes ]]; then
-        report_setup_plan "$INSTALLED_BINARY" "$INFERENCE" "$WORKBENCH"
+        report_setup_plan "$INSTALLED_BINARY" "$INFERENCE" "$WORKBENCH" "$PERMISSIONS"
+    fi
+    if [[ "$PERMISSIONS" == yes ]]; then
+        install_ui_stage "Allowing MemQL to use this Mac" setup_permissions "$INSTALLED_BINARY"
     fi
     # Setup signals the running worker to reload its policy, so service first.
     # Runtime approval or model download failures do not undo enrollment.
@@ -485,7 +495,7 @@ function main() {
         install_ui_stage "Preparing the menu companion" install_menu_companion
     fi
     if [[ "$INSTALL_SERVICE" == yes ]]; then
-        report_setup_finished "$INSTALLED_BINARY" "$INFERENCE" "$WORKBENCH"
+        report_setup_finished "$INSTALLED_BINARY" "$INFERENCE" "$WORKBENCH" "$PERMISSIONS"
     fi
     install_ui_finish
 }

@@ -150,6 +150,7 @@ function install_ui_init() {
     INSTALL_MODELS_STATE=off; INSTALL_SERVICE_STATE=skipped
     INSTALL_MODELS_REASON=""; INSTALL_WORKBENCH_STATE=off; INSTALL_WORKBENCH_REASON=""
     INSTALL_MENU_STATE=off; INSTALL_MENU_REASON=""
+    INSTALL_PERMISSIONS_STATE=off; INSTALL_PERMISSIONS_REASON=""
     if [[ -t 3 && "${TERM:-dumb}" != dumb && "${INSTALL_PLAIN:-no}" != yes ]]; then
         INSTALL_UI_TTY=yes
         case "${LC_ALL:-${LC_CTYPE:-${LANG:-}}}" in
@@ -364,6 +365,12 @@ function install_ui_finish() {
         failed)
             printf '\n  Local models could not be set up: %s\n  Retry with:\n\n    %q worker setup --inference\n' \
                 "${INSTALL_MODELS_REASON:-see the log for details.}" "$INSTALLED_BINARY" >&3
+            ;;
+    esac
+    case "${INSTALL_PERMISSIONS_STATE:-off}" in
+        skipped|failed)
+            printf '\n  Computer use needs Accessibility and Screen Recording: %s\n  Turn them on from MemQL in the menu bar, then Set Up Permissions.\n' \
+                "${INSTALL_PERMISSIONS_REASON:-they are not allowed yet.}" >&3
             ;;
     esac
     case "$INSTALL_WORKBENCH_STATE" in
@@ -1890,6 +1897,68 @@ function setup_inference() {
     return 0
 }
 
+# setup_permissions is the first stage on a computer-use Mac
+# (memql-cockpit#548): `worker setup --permissions` opens the Permissions
+# window and waits until Accessibility and Screen Recording are allowed, or
+# until the person chooses to go on without them -- in the window, or by
+# pressing Return in this terminal. Nothing downloads before then. Like the
+# other stages it never fails the install.
+#
+# The exit codes are the setup's own (internal/worker/setup_permissions.go):
+#   0  both allowed
+#   3  nobody to ask (no terminal)   -> failed, with the reason
+#   4  the person went on without    -> skipped, with what was left off
+#   5  the worker could not be read  -> failed, with the reason
+function setup_permissions() {
+    local binary="$1" usage rc=0 tty reason_file reason
+    local -a args=(worker setup --permissions)
+    INSTALL_PERMISSIONS_REASON=""
+    usage="$("$binary" worker setup --help 2>&1 || true)"
+    if [[ "$usage" != *"-permissions"* ]]; then
+        INSTALL_PERMISSIONS_STATE=failed
+        INSTALL_PERMISSIONS_REASON="this Cockpit cannot ask for them during setup."
+        INSTALL_UI_STAGE_STATE=pending
+        INSTALL_UI_RESULT="Permissions not set up"
+        return 0
+    fi
+    [[ "${INSTALL_MENU:-yes}" == yes ]] || args+=(--no-window)
+    reason_file="$(mktemp)"
+    tty="$(install_terminal)"
+    if [[ -n "$tty" ]]; then
+        install_ui_stop_progress
+        printf '\n' >&3
+        if MEMQL_SETUP_REASON_FILE="$reason_file" "$binary" "${args[@]}" < "$tty" 2>&1 | tee -a /dev/fd/3; then
+            rc=0
+        else
+            rc=$?
+        fi
+        printf '\n' >&3
+    else
+        MEMQL_SETUP_REASON_FILE="$reason_file" "$binary" "${args[@]}" --non-interactive || rc=$?
+    fi
+    reason="$(read_setup_reason "$reason_file")"
+    rm -f "$reason_file"
+    case "$rc" in
+        0)
+            INSTALL_PERMISSIONS_STATE=ready
+            INSTALL_UI_RESULT="Accessibility and Screen Recording allowed"
+            ;;
+        4)
+            INSTALL_PERMISSIONS_STATE=skipped
+            INSTALL_PERMISSIONS_REASON="${reason:-skipped for now.}"
+            INSTALL_UI_STAGE_STATE=pending
+            INSTALL_UI_RESULT="Permissions: ${reason:-skipped for now.}"
+            ;;
+        *)
+            INSTALL_PERMISSIONS_STATE=failed
+            INSTALL_PERMISSIONS_REASON="${reason:-the setup exited ${rc}. See the log: ${INSTALL_LOG:-}}"
+            INSTALL_UI_STAGE_STATE=pending
+            INSTALL_UI_RESULT="Permissions not set up"
+            ;;
+    esac
+    return 0
+}
+
 # setup_workbench enables Fleet workbenches and, like setup_inference, never
 # fails the install (memql-cockpit#524). The installer comes from main and
 # installs the latest release, so the binary may predate --workbench: that
@@ -1937,11 +2006,16 @@ function setup_workbench() {
 # best-effort: a worker that is not up, or too old to know the action,
 # changes nothing about the install, and neither prints anything.
 
-# setup_report_plan names the stages this install will run, in its order.
+# setup_report_plan names the stages this install will run, in its order:
+# the person's turn first (a computer-use Mac's permissions), then the
+# downloads, which need nobody.
 function setup_report_plan() {
-    local inference="$1" workbench="$2" plan=""
+    local inference="$1" workbench="$2" permissions="${3:-no}" plan=""
+    if [[ "$permissions" == yes ]]; then
+        plan="permissions"
+    fi
     if [[ "$inference" == yes ]]; then
-        plan="runtime,models"
+        plan="${plan:+${plan},}runtime,models"
     fi
     if [[ "$workbench" == yes ]]; then
         plan="${plan:+${plan},}workbench"
@@ -1950,11 +2024,16 @@ function setup_report_plan() {
 }
 
 # report_setup_plan tells the worker what is coming. It waits for the
-# worker the installer has just started to open its control socket.
+# worker the installer has just started to open its control socket. An
+# install with no stage still says so: the worker keeps its report across
+# restarts, and an earlier install's would otherwise stand for this one.
 function report_setup_plan() {
     local binary="$1" plan
-    plan="$(setup_report_plan "$2" "$3")"
-    [[ -n "$plan" ]] || return 0
+    plan="$(setup_report_plan "$2" "$3" "${4:-no}")"
+    if [[ -z "$plan" ]]; then
+        "$binary" worker control --action=setup --reset --wait=20s >/dev/null 2>&1 || true
+        return 0
+    fi
     "$binary" worker control --action=setup --plan="$plan" --wait=20s >/dev/null 2>&1 || true
 }
 
@@ -1962,7 +2041,7 @@ function report_setup_plan() {
 # reached is skipped rather than shown as still to come.
 function report_setup_finished() {
     local binary="$1"
-    [[ -n "$(setup_report_plan "$2" "$3")" ]] || return 0
+    [[ -n "$(setup_report_plan "$2" "$3" "${4:-no}")" ]] || return 0
     "$binary" worker control --action=setup --finished --wait=5s >/dev/null 2>&1 || true
 }
 
