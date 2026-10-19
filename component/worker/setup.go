@@ -131,6 +131,29 @@ func SetupFromProto(p *memqlv1.SetupProgress, receivedAt time.Time) Setup {
 	return s
 }
 
+// SameSteps reports whether two reports say the same thing about every step:
+// the same state, and each stage in the same state with the same sentence. A
+// download's figures and the timestamps are progress within a step, not a
+// new one.
+func (s Setup) SameSteps(o Setup) bool {
+	if s.State != o.State || len(s.Stages) != len(o.Stages) {
+		return false
+	}
+	for i := range s.Stages {
+		a, b := s.Stages[i], o.Stages[i]
+		if a.Name != b.Name || a.State != b.State || a.Detail != b.Detail {
+			return false
+		}
+	}
+	return true
+}
+
+// setupStepFlushFloor is how soon after one write a changed step may write
+// again ahead of the batch interval (memql#6235). Under the cockpit's own
+// one-second floor between the beats it sends for a step, so jitter on the
+// wire never holds a step back for a whole interval.
+const setupStepFlushFloor = 500 * time.Millisecond
+
 // Present reports whether the machine sent a setup report.
 func (s Setup) Present() bool { return s.State != "" }
 

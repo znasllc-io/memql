@@ -167,3 +167,65 @@ func TestAMachineWithNoInstallerReportFlushesNone(t *testing.T) {
 		t.Fatalf("a cockpit that reports no install must send nothing to the row, got %#v", got)
 	}
 }
+
+// A STEP OF THE INSTALL LANDS NOW (memql#6235). The batch interval held a
+// changed step back for up to fifteen seconds -- long enough for the
+// add-machine wizard to read a machine that was already downloading as one
+// with nothing on it. A step that changes is written at once; the figures of
+// a download in flight stay on the batch; and a cockpit changing steps faster
+// than the floor waits for it rather than writing every beat.
+func TestAChangedInstallStepPersistsInsideTheBatchInterval(t *testing.T) {
+	t0 := time.Date(2026, 10, 18, 15, 30, 0, 0, time.UTC)
+	store := &fakeRegistrationStore{}
+	session := newHeartbeatTestSession(store, func() time.Time { return t0 })
+	defer session.cancel()
+	stageState := func(i int, name string) string {
+		t.Helper()
+		for _, st := range store.lastSeenFlushes[len(store.lastSeenFlushes)-1].Setup["stages"].([]any) {
+			if entry := st.(map[string]any); entry["name"] == name {
+				return entry["state"].(string)
+			}
+		}
+		t.Fatalf("flush %d carries no %s stage", i, name)
+		return ""
+	}
+
+	setupBeat(session, t0, installerReport(
+		&memqlv1.SetupStage{Name: "permissions", State: "running"},
+		&memqlv1.SetupStage{Name: "models", State: "waiting"}))
+	written := len(store.lastSeenFlushes)
+
+	setupBeat(session, t0.Add(time.Second), installerReport(
+		&memqlv1.SetupStage{Name: "permissions", State: "done"},
+		&memqlv1.SetupStage{Name: "models", State: "running", Model: "qwen3.8:27b", CompletedBytes: 1, TotalBytes: 9}))
+	if len(store.lastSeenFlushes) != written+1 || stageState(1, "permissions") != "done" {
+		t.Fatalf("a step that changed must be written inside the batch interval: %d writes", len(store.lastSeenFlushes)-written)
+	}
+
+	setupBeat(session, t0.Add(3*time.Second), installerReport(
+		&memqlv1.SetupStage{Name: "permissions", State: "done"},
+		&memqlv1.SetupStage{Name: "models", State: "running", Model: "qwen3.8:27b", CompletedBytes: 5, TotalBytes: 9}))
+	if len(store.lastSeenFlushes) != written+1 {
+		t.Fatal("a download's figures moving within the same step must stay on the batch")
+	}
+
+	setupBeat(session, t0.Add(3200*time.Millisecond), installerReport(
+		&memqlv1.SetupStage{Name: "permissions", State: "done"},
+		&memqlv1.SetupStage{Name: "models", State: "failed", Detail: "The disk is full."}))
+	if len(store.lastSeenFlushes) != written+2 || stageState(2, "models") != "failed" {
+		t.Fatal("a stage that ended must be written at once")
+	}
+
+	steps := installerReport(
+		&memqlv1.SetupStage{Name: "permissions", State: "done"},
+		&memqlv1.SetupStage{Name: "models", State: "failed", Detail: "The disk is full."},
+		&memqlv1.SetupStage{Name: "workbench", State: "running"})
+	setupBeat(session, t0.Add(3400*time.Millisecond), steps)
+	if len(store.lastSeenFlushes) != written+2 {
+		t.Fatal("a step changed inside the floor must wait for it, not write every beat")
+	}
+	setupBeat(session, t0.Add(4*time.Second), steps)
+	if len(store.lastSeenFlushes) != written+3 || stageState(3, "workbench") != "running" {
+		t.Fatal("a held step must land with the first beat past the floor, though that beat changed nothing")
+	}
+}
