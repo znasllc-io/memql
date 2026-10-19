@@ -292,6 +292,11 @@ jobs:
       # cluster's own memql-domain ConfigMap -- and three of them disagreeing is
       # silent (memql#3590, memql#3593).
       DOMAIN: memql.localhost
+      # A hosted runner is below the one-machine minimum requirements (no GPU,
+      # 16 GB, 4 cores). The install's requirements step and `k3d.up` refuse a
+      # new cluster on such a machine; this lane tests the install, not the
+      # hardware, so it takes the explicit override (scripts/lib/requirements.sh).
+      MEMQL_ALLOW_BELOW_MINIMUM: "1"
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         # No `fetch-depth: 0` here, unlike install-e2e.yml. That workflow TAGS

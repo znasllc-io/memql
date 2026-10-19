@@ -143,6 +143,7 @@ var capabilityScriptAllowlist = map[string]string{
 	// install capability is a two-file change by construction.
 	"install.refreshPins":  "scripts/install/refresh-tool-pins.sh",
 	"install.detect":       "scripts/install/detect.sh",
+	"install.requirements": "scripts/install/requirements.sh",
 	"install.dockerAccess": "scripts/install/docker-access.sh",
 	"install.nssTools":     "scripts/install/nss-tools.sh",
 	"install.binary":       "scripts/install/install-binary.sh",

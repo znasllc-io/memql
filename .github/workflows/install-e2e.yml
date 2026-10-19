@@ -167,6 +167,12 @@ jobs:
     name: install -> uninstall -> diff
     runs-on: ubuntu-latest
     timeout-minutes: 25
+    env:
+      # A hosted runner is below the one-machine minimum requirements (no GPU,
+      # 16 GB, 4 cores), and the install's requirements step refuses such a
+      # machine. This lane tests the install itself, not the hardware, so it
+      # takes the explicit override (scripts/lib/requirements.sh).
+      MEMQL_ALLOW_BELOW_MINIMUM: "1"
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:

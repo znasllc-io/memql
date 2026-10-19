@@ -58,6 +58,8 @@ source "${SCRIPT_DIR}/../lib/capability.sh"
 source "${SCRIPT_DIR}/../lib/localtls.sh"
 # shellcheck source=../lib/ports.sh
 source "${SCRIPT_DIR}/../lib/ports.sh"
+# shellcheck source=../lib/requirements.sh
+source "${SCRIPT_DIR}/../lib/requirements.sh"
 # shellcheck source=../lib/engine_build_args.sh
 # ENGINE_NODE_TYPES + engine_is_node_type: what THIS tree builds. The readiness
 # wait asks it to tell a node type that was retired from one that is simply not
@@ -89,6 +91,7 @@ cap_spec_param "domain"         "front-door apex the cluster is served at (defau
 cap_spec_param "caroot"         "mkcert CAROOT the front-door certificate is issued from, forwarded to secret seeding (default: whatever mkcert reports)"
 cap_spec_param "project-manifest" "path to the AppProject manifest to apply (downstream repos pass their own)"
 cap_spec_param "repo-root"      "the MemQL checkout to read deploy/ and the target revision from (default: this script's own repository)"
+cap_spec_param "allow-below-minimum" "create the cluster even on a machine below the minimum requirements, with a warning (default: \$MEMQL_ALLOW_BELOW_MINIMUM, else false)"
 cap_spec_param "no-secrets"     "skip secret seeding (flag)"                        ""
 
 #=============================================================================
@@ -141,6 +144,8 @@ PROJECT_MANIFEST="${MEMQL_K3D_PROJECT_MANIFEST:-}"
 # fills the sizes from the Docker host when they are not given). Created
 # unless --no-build-node says otherwise.
 SKIP_BUILD_NODE=""
+# Resolved in main() (--allow-below-minimum); see check_requirements.
+ALLOW_BELOW_MINIMUM="false"
 BUILD_NODE_CPUS=""
 BUILD_NODE_MEMORY=""
 # The memory the person asked for, empty when it is the default: only an
@@ -352,6 +357,38 @@ function warn_occupied_ports() {
         cap_warn "  If it succeeds, note that localhost:5432 reaches the OTHER listener, not this cluster."
     fi
     return 0
+}
+
+# check_requirements -- refuse to CREATE a cluster on a machine below the
+# minimum requirements (scripts/lib/requirements.sh, the figures in
+# docs/public/operate/minimum-requirements.md). A cluster that is already here
+# is warned about and kept going, so a repair is never stranded; the explicit
+# override (--allow-below-minimum, MEMQL_ALLOW_BELOW_MINIMUM) is what the CI
+# lanes set, because their runners have no GPU.
+function check_requirements() {
+    local line shortfalls
+    requirements_evaluate "${HOME:-/}"
+    if [[ "$REQ_MEETS_MINIMUM" == "true" ]]; then
+        if [[ "$REQ_MEETS_RECOMMENDED" != "true" ]]; then
+            info "This computer meets the minimum requirements, not the recommended ones."
+        fi
+        return 0
+    fi
+    while IFS= read -r line; do
+        [[ -n "$line" ]] && warn "${line}"
+    done <<< "$REQ_SUMMARY"
+    shortfalls="$(requirements_shortfalls_line)"
+    if k3d cluster list 2>/dev/null | grep -q "^${CLUSTER_NAME}[[:space:]]"; then
+        warn "This computer is below the minimum requirements: ${shortfalls}"
+        warn "Cluster '${CLUSTER_NAME}' is already here, so this run keeps it going."
+        return 0
+    fi
+    if [[ "$ALLOW_BELOW_MINIMUM" == "true" ]]; then
+        warn "This computer is below the minimum requirements: ${shortfalls}"
+        warn "Creating the cluster anyway, because --allow-below-minimum is set."
+        return 0
+    fi
+    cap_fail 3 "This computer does not meet the minimum requirements for MemQL. ${shortfalls} See ${REQ_DOCS_URL} To create the cluster anyway: make up ALLOW_BELOW_MINIMUM=1"
 }
 
 function create_cluster() {
@@ -1705,6 +1742,7 @@ function main() {
     K3D_SERVERS="$(cap_param servers "${MEMQL_K3D_SERVERS:-1}")"
     K3D_AGENTS="$(cap_param agents "${MEMQL_K3D_AGENTS:-0}")"
     SKIP_BUILD_NODE="$(cap_flag no-build-node)"
+    ALLOW_BELOW_MINIMUM="$(cap_bool_str allow-below-minimum "${MEMQL_ALLOW_BELOW_MINIMUM:-false}")"
     BUILD_NODE_CPUS="$(cap_param build-node-cpus "")"
     BUILD_NODE_MEMORY="$(cap_param build-node-memory "")"
     ARGOCD_TIMEOUT="$(cap_param argocd-timeout "${MEMQL_K3D_ARGOCD_TIMEOUT:-300}")"
@@ -1785,6 +1823,9 @@ function main() {
     info "Namespace: ${NAMESPACE}"
 
     check_prerequisites
+    # Before anything exists, like the build-node size below: a machine below
+    # the minimum is refused before `k3d cluster create`, not after.
+    check_requirements
     # Before anything exists: a build-node size the host cannot honour is
     # refused here, not after the cluster is half made.
     resolve_build_node

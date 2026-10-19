@@ -1650,6 +1650,13 @@ export interface LandingFacts {
    * offers Install -- so `unknown` elsewhere means "not asked", not "unsure".
    */
   platform: "supported" | "unsupported" | "unknown";
+  /**
+   * How this computer measures against the minimum requirements, from the same
+   * detect run as `platform`. Absent when detect did not say -- a checkout that
+   * predates the report, or one it could not read -- which offers Install as
+   * it always did; the install's own requirements step still has the last word.
+   */
+  requirements?: { meetsMinimum: boolean };
   /** The editor holds a live session with the listed local cluster. */
   signedIn: boolean;
   /** The server still requires the first owner passkey. */
@@ -1717,7 +1724,11 @@ export function landingView(facts: LandingFacts): LandingView {
       }
       return {
         state: "No local cluster",
-        tone: "idle",
+        // Install stays offered below the minimum: choosing it is where the
+        // page says what falls short, before a password or a download.
+        ...(facts.requirements?.meetsMinimum === false
+          ? { tone: "warn" as const, line: "This computer doesn't meet the minimum requirements for a local MemQL cluster." }
+          : { tone: "idle" as const }),
         choices: [
           { act: "install", label: "Install MemQL on this computer", note: "Runs a local cluster in Docker." },
           CONNECT_ELSEWHERE,

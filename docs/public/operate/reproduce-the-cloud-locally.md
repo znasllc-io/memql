@@ -57,6 +57,11 @@ only after a deploy.
 
 ## Prerequisites
 
+- **The machine** -- the whole cluster and its local models run on it, so it
+  needs the [one-machine minimum requirements](minimum-requirements.md#one-machine-the-entire-cluster).
+  `make up` checks them before `k3d cluster create` and refuses a new cluster
+  below them; `make up ALLOW_BELOW_MINIMUM=1` creates it anyway, with a
+  warning. An existing cluster is never refused.
 - **docker** -- Docker Desktop or Colima (must be running).
 - **k3d** -- `brew install k3d`.
 - **kubectl** -- `brew install kubectl`.

@@ -59,6 +59,8 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "${SCRIPT_DIR}/../lib/capability.sh"
 # shellcheck source=../lib/localtls.sh
 source "${SCRIPT_DIR}/../lib/localtls.sh"
+# shellcheck source=../lib/requirements.sh
+source "${SCRIPT_DIR}/../lib/requirements.sh"
 
 cap_init "k3d.bringup" "Bring the local k3d + ArgoCD cluster fully up: bootstrap, build + import engine images, wait healthy. --clean nukes first."
 cap_spec_param "cluster"         "k3d cluster name"
@@ -70,6 +72,7 @@ cap_spec_param "no-build-node"   "do not create the dedicated pipeline build nod
 cap_spec_param "build-node-cpus" "CPUs the build node may use (forwarded to up.sh)"
 cap_spec_param "build-node-memory" "memory the build node may use, such as 40g (forwarded to up.sh)"
 cap_spec_param "clean"           "tear down the cluster first (clean slate, fresh DB) (flag)"
+cap_spec_param "allow-below-minimum" "create the cluster even on a machine below the minimum requirements (forwarded to up.sh; default: \$MEMQL_ALLOW_BELOW_MINIMUM, else false)"
 cap_spec_param "no-secrets"      "skip secret seeding (flag)"
 cap_spec_param "repo-url"        "git repo URL for the ArgoCD Application (downstream repos pass their own)"
 cap_spec_param "app-name"        "ArgoCD Application name (downstream repos pass their own)"
@@ -95,6 +98,8 @@ BUILD_NODE_MEMORY="${BUILD_NODE_MEMORY:-}"
 REVISION="${REVISION:-}"
 CLEAN=""
 NO_SECRETS=""
+# Non-empty when --allow-below-minimum is set; see refuse_clean_slate_below_minimum.
+ALLOW_BELOW_MINIMUM_FLAG=""
 REPO_URL=""
 APP_NAME=""
 OVERLAY_PATH=""
@@ -172,7 +177,20 @@ function bringup() {
         ${EXTRA_PORTS:+--extra-ports="${EXTRA_PORTS}"} \
         ${APP_PROJECT:+--app-project="${APP_PROJECT}"} \
         ${PROJECT_MANIFEST:+--project-manifest="${PROJECT_MANIFEST}"} \
+        ${ALLOW_BELOW_MINIMUM_FLAG:+--allow-below-minimum} \
         ${NO_SECRETS:+--no-secrets} >&2
+}
+
+# refuse_clean_slate_below_minimum -- a clean slate deletes the cluster and
+# then creates a new one, and up.sh refuses to create one on a machine below
+# the minimum requirements. Asked HERE, before the delete, because asking after
+# it would leave the machine with no cluster at all.
+function refuse_clean_slate_below_minimum() {
+    requirements_evaluate "${HOME:-/}"
+    if [[ "$REQ_MEETS_MINIMUM" == "true" || -n "$ALLOW_BELOW_MINIMUM_FLAG" ]]; then
+        return 0
+    fi
+    cap_fail 3 "This computer does not meet the minimum requirements for MemQL, so the cluster was not deleted: a clean slate would create a new one, which is refused below the minimum. $(requirements_shortfalls_line) See ${REQ_DOCS_URL} To go ahead anyway: make up-refresh ALLOW_BELOW_MINIMUM=1"
 }
 
 #=============================================================================
@@ -461,6 +479,10 @@ function main() {
     BUILD_NODE_CPUS="$(cap_param build-node-cpus "$BUILD_NODE_CPUS")"
     BUILD_NODE_MEMORY="$(cap_param build-node-memory "$BUILD_NODE_MEMORY")"
     CLEAN="$(cap_flag clean)"
+    ALLOW_BELOW_MINIMUM_FLAG=""
+    if cap_bool allow-below-minimum "${MEMQL_ALLOW_BELOW_MINIMUM:-false}"; then
+        ALLOW_BELOW_MINIMUM_FLAG=1
+    fi
     NO_SECRETS="$(cap_flag no-secrets)"
     REPO_URL="$(cap_param repo-url "${MEMQL_K3D_REPO_URL:-}")"
     APP_NAME="$(cap_param app-name "${MEMQL_K3D_APP_NAME:-}")"
@@ -489,6 +511,7 @@ function main() {
     info "Namespace: ${NAMESPACE}"
 
     if [[ -n "$CLEAN" ]]; then
+        refuse_clean_slate_below_minimum
         nuke
     fi
     bringup

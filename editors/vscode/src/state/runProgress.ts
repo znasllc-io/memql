@@ -101,6 +101,7 @@ export interface RunProgress {
  */
 export const DEFAULT_STEP_WEIGHTS: Readonly<Record<string, number>> = {
   detect: 5,
+  requirements: 3,
   dockerAccess: 3,
   providerFederation: 1,
   toolK3d: 15,
