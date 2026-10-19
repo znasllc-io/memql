@@ -391,8 +391,9 @@ ArgoCD. What varies is the deploy TARGET, which carries its own field
 **Key Principle:** the local cluster is completely isolated from any cloud
 install's database -- they are separate installations, not environments of one.
 
-Development happens on macOS and Linux (amd64/arm64); CI runs on
-`ubuntu-latest`, and `scripts/dev/install-deps.sh`, `scripts/dev/proto-gen.sh`
+Development happens on macOS and Linux (amd64/arm64). Native CI runs on Linux
+cloud workbenches and opted-in Linux/macOS fleet machines, as declared in
+`memql-package.yaml`. `scripts/dev/install-deps.sh`, `scripts/dev/proto-gen.sh`
 and `scripts/identity/build-css.sh` all branch on `darwin`/`linux`.
 
 ### System Architecture
