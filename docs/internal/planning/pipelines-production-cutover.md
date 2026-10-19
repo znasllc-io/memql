@@ -42,7 +42,11 @@ Instance #232 and #239 are also deployed. Both Agent and Workbench replicas
 are ready. No CPU, memory, node or quota increase accompanies these changes.
 The independent instance #243 deployment paused pipeline intake again; the
 12:14 UTC whole-run read found no active pipelines, unfinished runs or Jobs.
-Restore intake after coordinating with that deployment's operator.
+All four original webhook connections were restored afterward, confirmed
+through the authenticated production UI at 12:45 UTC. Native #6213 now tests
+head `28b11835429ddaec7c21b630cccbc6e5acc71969` in run
+`a4a8118e140616dd02a4e5b4ee3d9005`; it includes the deployed reconnect fix.
+Keep controllers stable until every whole run, including fleet work, finishes.
 
 The independent instance rollout at 08:31–08:32 UTC restarted Agent and
 Workbench while qualification was active, despite unchanged executor images.
@@ -71,15 +75,28 @@ fail-closed admission when measurement remains unavailable. The complete local
 race suite, including real Docker isolation, passes. Native run
 `3a01154b260a42500e89ccf89e5749b4` passed all 12 steps with retained logs
 and eight artifacts, including the actual Mac tests. Both Cockpit rulesets
-were independently verified before merge. Release build and public download
-verification are still pending. The immutable v0.20.0 tag is not reused.
+were independently verified before merge. The immutable v0.20.0 tag is not
+reused.
+
+Cockpit's second v0.20.1 release attempt,
+`12385a6647a7194e58f0df7214644c96`, passed all 16 steps with 16 retained
+logs, from work run `4f28f2665bc7bb48ee7e002bc15254b5`. It ran at the exact
+merged source above. Independent production readback confirmed this complete
+pass after Chrome access was restored. The redundant third attempt opened
+before that discovery was cancelled; another full Cockpit build is unnecessary.
+Candidate `sha256:8cc989db242c4d16502fa923ceeeb72d675c119596bfa5289ece4093d52b7464`
+is approved, with 18 of 41 file publications complete in draft release
+417220182. It is not public. The engine upgrade changed approval identity;
+#6244 adds an explicitly reviewed renewal of unchanged file drafts. After that
+runtime is deployed, renew under fresh approval, finish the retained release,
+and verify public downloads. Preserve existing assets and publication receipts.
 
 The v0.20.1 release run `a120d1d5b0f32c30f307b06d47bcdc12` ended with
-14 completed steps and two failed Mac builds. The current #6213 run
+14 completed steps and two failed Mac builds. The earlier #6213 run
 `6f39cbd8bd068fba838d148823b7d0aa` ended with 32 completed steps,
 three failed Mac editor steps and seven skips. All five failures were
 `pipeline_node_lost`; neither run qualifies. Completed logs were retained and
-no release candidate was approved. The Linux worker recorded a network timeout
+neither failed run supplied an approved candidate. The Linux worker recorded a network timeout
 and DNS failures at 10:16 UTC; it and the Mac registered new connections around
 10:17. Older streams remained open until 10:32. Agent and Workbench did not
 restart during that interval. The Mac's client-side network cause remains
@@ -96,9 +113,9 @@ failed against the previous implementation; the affected worker race suite
 passes locally. Independent #6243 carried the same runtime repair through
 native run `bf6d6d27baad43e524b7496c0c3560c6`, merged at 11:36 UTC,
 and is deployed in v0.29.35. The final branch adopts that implementation and
-retains the additional real-gRPC cases. Fresh complete engine and Cockpit
-qualifications are still required; deploying this repair does not turn the
-earlier failed runs into passes.
+retains the additional real-gRPC cases. Fresh engine qualification is running;
+Cockpit's separate complete pass is recorded above. Deploying this repair does
+not turn the earlier failed runs into passes.
 
 The final runtime now includes bounded repository maintenance: retained JSON
 proposals, exact operator-owned repository/file grants, fresh signed-actor and
@@ -110,6 +127,11 @@ recovers a simulated journal failure after the write without another commit.
 The complete compiler, driver and GitHub protocol race suites pass. The eight
 proposal-generator tests and generated model/schema/SDK checks pass. Recipe
 activation and production qualification remain separate from this runtime work.
+The production GitHub App, “MemQL for ZNAS LLC” (4822538), now has accepted
+`pull_requests:write` on installation 158882932. The installed permission page
+was verified at 12:51 UTC; existing checks, contents, security-event, metadata
+and merge-queue permissions were preserved. No further GitHub access prompt is
+pending for this repository-maintenance capability.
 
 The repaired full local `make test` passed, including the combined maintenance
 runtime before its final pin-lifecycle refinement; database-backed cases skipped

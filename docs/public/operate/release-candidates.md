@@ -316,6 +316,20 @@ The candidate identity includes both lifecycle recipes whenever reviewed draft
 metadata is configured. Changed engine or workflow identity requires fresh
 review rather than executing changed code under an old approval.
 
+Since 0.29.36, an approved file-only release can resume an existing ready draft
+after an engine or workflow upgrade. Prepare and approve a new candidate, then
+create or verify its draft. All sources, versions,
+artifacts, evidence and destinations must remain identical. The operation keeps
+the original remote release ID and recovery marker, carries forward completed
+publication receipts, and permanently fences the previous candidate from new
+effects. Both approvals and the original receipts remain in the native journal.
+Promotion still verifies every remote asset again before publishing.
+
+Renewal refuses pending uploads, uncertain creation or promotion, already
+published releases, and candidates containing registry publications. Reconcile
+unfinished effects under their original authority before renewing. Uploading or
+promoting alone never transfers authority to a different candidate.
+
 ## Publish portable catalog evidence
 
 After publication, the owner can call
