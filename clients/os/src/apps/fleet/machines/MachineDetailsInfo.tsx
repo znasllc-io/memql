@@ -38,7 +38,7 @@ export function MachineDetailsInfo({ machine, now, machineClass, usableBytes }: 
       <PageHelp title="Connection"><p>Online means Cockpit is connected. Active calls reflect the last heartbeat and may trail newly started work. Round trip measures the cluster’s ping to this machine. A missing ping or clock offset means Cockpit has not reported that measurement; it does not mean zero.</p></PageHelp>
       <Facts>
         <Fact label="Status" value={status} copyValue={status} />
-        {setup ? <Fact label="Setup" value={setup} copyValue={setup} /> : null}
+        {setup ? <Fact label="Setup" value={setup} /> : null}
         <Fact label="Last heartbeat" value={formatFreshness(machine.lastSeenAt, now)} title={machine.lastSeenAt || undefined} copyValue={machine.lastSeenAt} />
         <Fact label="Round trip" value={roundTrip} title={machine.rttAt || undefined} copyValue={hasRoundTrip(machine) ? roundTrip : undefined} />
         <Fact label="Clock offset" value={clock} copyValue={machine.clockSkewKnown ? clock : undefined} />
