@@ -57,12 +57,13 @@ type DeclaredRuntime struct {
 // in both places, whereas `ctx` and `structured` are abbreviations nobody
 // would guess from a policy.yaml.
 type DeclaredModel struct {
-	PeakMemoryBytes  uint64 `yaml:"peak_memory_bytes"`
-	ID               string `yaml:"id"`
-	ContextWindow    int    `yaml:"context_window"`
-	StructuredOutput bool   `yaml:"structured_output"`
-	Embeddings       bool   `yaml:"embeddings"`
-	MaxConcurrent    int    `yaml:"max_concurrent"`
+	PeakMemoryBytes       uint64 `yaml:"peak_memory_bytes"`
+	MemoryReferencePixels uint64 `yaml:"memory_reference_pixels"`
+	ID                    string `yaml:"id"`
+	ContextWindow         int    `yaml:"context_window"`
+	StructuredOutput      bool   `yaml:"structured_output"`
+	Embeddings            bool   `yaml:"embeddings"`
+	MaxConcurrent         int    `yaml:"max_concurrent"`
 	// Params is the parameter COUNT, written out (7620000000), not the
 	// human string a model card prints. It is what the engine ranks on.
 	Params       int64 `yaml:"params"`

@@ -84,9 +84,10 @@ func (d *Discoverer) probeDeclared(ctx context.Context, rt DeclaredRuntime) ([]I
 			maxConcurrent = 1
 		}
 		out = append(out, Info{
-			PeakMemoryBytes: m.PeakMemoryBytes,
-			ID:              id,
-			Transcription:   rt.Transcription, Voices: rt.Voices,
+			PeakMemoryBytes:       m.PeakMemoryBytes,
+			MemoryReferencePixels: m.MemoryReferencePixels,
+			ID:                    id,
+			Transcription:         rt.Transcription, Voices: rt.Voices,
 			Kind:      KindOpenAICompatible,
 			Runtime:   name,
 			BaseURL:   base,

@@ -565,7 +565,7 @@ func (m *Manager) run(ctx context.Context, sender Sender, c *call, info models.I
 
 	ctx = withRuntimeProgress(ctx, stream.runtimeProgress)
 	if resources := m.limiter.resources; resources != nil && localRuntime(info.BaseURL) {
-		release, err := resources.acquire(ctx, info, m.http, m.logger)
+		release, err := resources.acquire(ctx, requestMemory(info, start), m.http, m.logger)
 		if err != nil {
 			stopWatchdog()
 			finish, code, detail := m.classify(c, err)

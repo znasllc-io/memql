@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	memqlv1 "github.com/znasllc-io/memql/component/grpc/gen"
 	"io"
 	"log/slog"
 	"math"
@@ -73,6 +74,45 @@ func workingSet(info models.Info) uint64 {
 		return math.MaxUint64
 	}
 	return info.ModelBytes + info.ModelBytes/4 + 2*gib
+}
+
+func saturatedMultiply(a, b uint64) uint64 {
+	if b != 0 && a > math.MaxUint64/b {
+		return math.MaxUint64
+	}
+	return a * b
+}
+
+// Request shape changes peak memory independently of model size. Scale up
+// declared image peaks by pixel area/batch, never down for smaller requests.
+// Ollama gets extra context headroom above the baseline working window.
+func requestMemory(info models.Info, start *memqlv1.ModelCallStart) models.Info {
+	peak := workingSet(info)
+	if start.GetKind() == KindImage && info.MemoryReferencePixels > 0 {
+		payload, _ := payloadFor(start)
+		pixels := info.MemoryReferencePixels
+		if payload.Image.Width > 0 && payload.Image.Height > 0 {
+			pixels = saturatedMultiply(uint64(payload.Image.Width), uint64(payload.Image.Height))
+		}
+		factor := pixels / info.MemoryReferencePixels
+		if pixels%info.MemoryReferencePixels != 0 {
+			factor++
+		}
+		peak = saturatedMultiply(peak, max(uint64(1), factor))
+		peak = saturatedMultiply(peak, uint64(max(1, payload.Image.Count)))
+	} else if info.Kind == models.KindOllama && info.PeakMemoryBytes == 0 {
+		contextTokens := start.GetParams().GetContextTokens()
+		if contextTokens > 32768 {
+			extra := saturatedMultiply(uint64((contextTokens-1)/32768), 2*gib)
+			if extra > math.MaxUint64-peak {
+				peak = math.MaxUint64
+			} else {
+				peak += extra
+			}
+		}
+	}
+	info.PeakMemoryBytes = peak
+	return info
 }
 
 func (r *hostResources) acquire(ctx context.Context, info models.Info, client *http.Client, logger *slog.Logger) (func(), error) {

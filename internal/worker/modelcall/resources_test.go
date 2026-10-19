@@ -3,7 +3,9 @@ package modelcall
 import (
 	"context"
 	"fmt"
+	memqlv1 "github.com/znasllc-io/memql/component/grpc/gen"
 	"log/slog"
+	"math"
 	"net/http"
 	"net/http/httptest"
 	"sync/atomic"
@@ -162,5 +164,26 @@ func TestLocalRuntimeIsExplicitLoopback(t *testing.T) {
 		if localRuntime(base) {
 			t.Error(base)
 		}
+	}
+}
+
+func TestMemoryReservationScalesWithWorkloadWithoutOverflow(t *testing.T) {
+	image := models.Info{PeakMemoryBytes: 16 * gib, MemoryReferencePixels: 1024 * 1024}
+	for _, tc := range []struct {
+		width, height, count int32
+		want                 uint64
+	}{
+		{0, 0, 0, 16 * gib}, {512, 512, 1, 16 * gib}, {2048, 1024, 1, 32 * gib}, {1024, 1024, 2, 32 * gib}, {math.MaxInt32, math.MaxInt32, math.MaxInt32, math.MaxUint64},
+	} {
+		s := &memqlv1.ModelCallStart{Kind: KindImage, Image: &memqlv1.ModelCallImageRequest{Width: tc.width, Height: tc.height, Count: tc.count}}
+		if got := requestMemory(image, s).PeakMemoryBytes; got != tc.want {
+			t.Errorf("%+v: got %d want %d", tc, got, tc.want)
+		}
+	}
+	chat := models.Info{Kind: models.KindOllama, ModelBytes: 16 * gib}
+	base := requestMemory(chat, &memqlv1.ModelCallStart{}).PeakMemoryBytes
+	large := requestMemory(chat, &memqlv1.ModelCallStart{Params: &memqlv1.ModelCallParams{ContextTokens: 131072}}).PeakMemoryBytes
+	if large != base+6*gib {
+		t.Fatalf("large context reservation %d, baseline %d", large, base)
 	}
 }

@@ -352,8 +352,11 @@ type Info struct {
 	// PeakMemoryBytes is an operator-declared working-set ceiling for runtimes
 	// whose discovery protocol cannot report one. It stays local to admission.
 	PeakMemoryBytes uint64
-	Transcription   string
-	Voices          map[string]string
+	// MemoryReferencePixels scales a declared image working set with output
+	// area. Zero means PeakMemoryBytes covers every accepted request.
+	MemoryReferencePixels uint64
+	Transcription         string
+	Voices                map[string]string
 	// ID is the runtime-facing model id -- the exact string the router
 	// will select on and send back in ModelCallStart.model, so it is
 	// never normalised or prettified here.

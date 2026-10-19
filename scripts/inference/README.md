@@ -18,8 +18,12 @@ for context and temporary buffers. This estimate is not a measured peak and
 particularly large context windows may need a larger declared budget. An
 OpenAI-compatible model should declare `peak_memory_bytes` in its `models` entry
 because `/v1/models` cannot report its working set. The peak must include temporary
-buffers at the service's maximum accepted image size/context/batch, not just
-weights. Unknown peaks still serialize and respect OS pressure but cannot predict
+buffers, not just weights. Image models can also declare `memory_reference_pixels`
+(1048576 for a measured 1024×1024 peak); larger output areas and batches scale the
+reservation up, and smaller images never scale it down. Without a reference area,
+the declared peak must cover the largest request accepted by the runtime. Ollama
+context windows above 32K receive additional context headroom. Unknown peaks still
+serialize and respect OS pressure but cannot predict
 a cold load. Admission waits within the existing call deadline and continues
 sending keepalives; it does not request a larger timeout.
 
