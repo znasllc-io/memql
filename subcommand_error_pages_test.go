@@ -512,10 +512,29 @@ func TestErrorPagesTLSAndHTTPKeepPublicHealthUnavailable(t *testing.T) {
 
 func TestErrorPagesTLSListenFailureClosesOtherListeners(t *testing.T) {
 	hermeticErrorPagesEnv(t)
-	public, probe := freeAddr(t), freeAddr(t)
+	// Reserve both addresses until TLS has occupied its different port. Returning
+	// each port to the allocator immediately let busyAddr reuse public or probe,
+	// so startup failed before TLS and the test mistook its own socket for a leak.
+	reservations := make([]net.Listener, 0, 2)
+	for range 2 {
+		listener, err := net.Listen("tcp", "127.0.0.1:0")
+		if err != nil {
+			t.Fatal(err)
+		}
+		t.Cleanup(func() { listener.Close() })
+		reservations = append(reservations, listener)
+	}
+	public, probe := reservations[0].Addr().String(), reservations[1].Addr().String()
+	secure := busyAddr(t)
+	t.Logf("public=%s probe=%s occupiedTLS=%s", public, probe, secure)
 	t.Setenv("MEMQL_ERROR_PAGES_ADDR", public)
 	t.Setenv("MEMQL_ERROR_PAGES_HEALTH_ADDR", probe)
-	t.Setenv("MEMQL_ERROR_PAGES_TLS_ADDR", busyAddr(t))
+	t.Setenv("MEMQL_ERROR_PAGES_TLS_ADDR", secure)
+	for _, listener := range reservations {
+		if err := listener.Close(); err != nil {
+			t.Fatal(err)
+		}
+	}
 	if code := runErrorPagesSubcommand(nil); code != 1 {
 		t.Fatalf("TLS bind failure exited %d", code)
 	}
