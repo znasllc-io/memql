@@ -383,7 +383,8 @@ worker. The old binary is copied to the fleet-tuning state directory before the 
 
 **Acceptance**, each measurable on the laptop: after Stage B and a play session, `memql worker models`
 shows the 27B and the embedder loaded, 100% on the GPU, expiring about two hours out; the census shows no
-reload for a window change and at most one or two a day for anything else (baseline 5.7 a day, 63% window
+window-change reload at or below 16K (a call the engine sizes at 32K still loads at 2 x 32K; plan Task 13
+Step 8 checks that load) and at most one or two a day for anything else (baseline 5.7 a day, 63% window
 changes); no `model call refused after waiting` line for a fast-level call in a week; and the S1 telemetry's
 addressed-reply p95 stays under three seconds.
 
