@@ -6,6 +6,7 @@ import { resolveThemePack } from "../src/themes/registry";
 import { MachinesProvider } from "../src/live/machines";
 import { fakeConnection, machineRow, appSessionRow, shareDirectoryRow, builtinReply } from "../test/fleet/harness";
 import { withSession } from "../test/deployables/harness";
+import { deviceSample } from "./fleetDeviceScenes";
 
 type Frame = ComponentType<{ fallback: string; children: ReactNode }>;
 export function fleetEquipmentScenes(Frame: Frame) {
@@ -27,6 +28,9 @@ export function fleetEquipmentScenes(Frame: Frame) {
         operatorLabels: { tier: "production" },
         hardware: { chip: "Apple M4 Pro", memoryBytes: 51539607552, cpuCores: 12, gpu: { name: "Apple M4 Pro", backend: "metal", vramBytes: 0 }, osVersion: "macOS", diskFreeBytes: 264140488704, reportedAt: new Date().toISOString(), runtimes: [{ name: "ollama", version: "0.12.0" }] },
       };
+      // `&device=<kind>` draws the machine as that kind (fleetDeviceScenes).
+      const sample = deviceSample(new URLSearchParams(window.location.search).get("device"));
+      if (sample) currentMachine = { ...currentMachine, hardware: sample.hardware };
       if (state === "labels") currentMachine.operatorLabels = { region: "us-west", room: "Studio", tier: "production", team: "Design", gpu: "metal", purpose: "Model inference", availability: "Office hours" };
       if (state === "labels-empty") currentMachine.operatorLabels = {};
       if (state === "details-empty") currentMachine = { ...currentMachine, labels: {}, hardware: {} };

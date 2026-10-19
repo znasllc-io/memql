@@ -8,7 +8,7 @@ import type { Row } from "@znasllc-io/memql-sdk-core/client";
 import { ActivityTarget } from "../../kit/SemanticActivity";
 import { ArrowUpRight, ChevronRight, Cpu, Monitor, SlidersHorizontal, Terminal, Wrench } from "lucide-react";
 import type { OsAppProps } from "../../system/registry";
-import { Button, EmptyState, Refine, Head, Notice, ProvenanceDot, formatBytes, formatFreshness, useNow } from "../../kit";
+import { Button, EmptyState, Refine, Head, Notice, ProvenanceDot, formatFreshness, useNow } from "../../kit";
 import { IconButton } from "../../kit/IconButton";
 import { PageHelp } from "../../kit/pageHelp";
 import type { PageTrail } from "../../kit/pageNavigation";
@@ -20,6 +20,7 @@ import type { AddMachineFlow } from "./addMachine/useAddMachineFlow";
 import { MachineDetail, MachineAppsHelp } from "./machines/MachineDetail";
 import { machineModelsFrom } from "./machines/models";
 import { EquipmentModelCarousel } from "./EquipmentModelCarousel";
+import { MachineDeviceArt } from "./machines/DeviceArt";
 import { useSession } from "../../chrome/access";
 import { machineActivity } from "./machines/activity";
 import { ownsMachine } from "./machines/sharing";
@@ -229,7 +230,7 @@ export function MachineEquipment({ machine, now, onInspect, viewerId = "" }: { m
         {models.length === 0 ? <EmptyState icon={Cpu} title="No local models">Find a model that fits this machine in Models.</EmptyState> : null}
       </section>
       <div className="fleet-device" aria-label="Machine hardware">
-        <div className="fleet-device-screen"><Monitor size={35} strokeWidth={1.2} aria-hidden /><strong>{hw.chip || machine.platform || "Hardware not reported"}</strong><dl><div><dt>Memory</dt><dd>{hw.memoryBytes > 0 ? formatBytes(hw.memoryBytes) : "Unknown"}</dd></div><div><dt>CPU cores</dt><dd>{hw.cpuCores || "Unknown"}</dd></div></dl></div><div className="fleet-device-base" aria-hidden />
+        <MachineDeviceArt hardware={hw} platform={machine.platform} />
         <div className="fleet-device-work"><span>{total} active {total === 1 ? "call" : "calls"}</span><PageHelp title="Active work"><p>Calls dispatched by this cluster: models, commands and app sessions. The breakdown separates the machine owner’s work from work admitted through sharing. Each shared call counts once, even when several sharing grants apply.</p><p>Counts update automatically and can take a few seconds to appear. A dash means the breakdown is unavailable or out of date; the total then shows the last heartbeat report. Downloads are not calls.</p></PageHelp><IconButton label="Activity" onClick={() => onInspect("activity")}><ArrowUpRight size={16} aria-hidden /></IconButton></div>
         <dl className="fleet-device-call-breakdown" aria-label="Active call breakdown">
           <div><dt>{ownerLabel}</dt><dd>{activity?.owner ?? "—"}</dd></div>

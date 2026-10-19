@@ -169,6 +169,14 @@ The `fleet-equipment-*` views open the whole Fleet app on Machines; add
 another Fleet section instead, for checks that span the app (such as the space
 under each page title).
 
+`fleet-devices` draws every machine kind side by side, each with the hardware a
+machine of that kind reports; the caption under a drawing is the kind
+`machines/device.ts` chose from that report, so a wrong choice shows as a caption
+that does not match its picture. Add `device=<kind>` (`macbook`, `imac`,
+`macMini`, `macStudio`, `macPro`, `gamingLaptop`, `laptop`, `tower`,
+`workstation`, `server`, `desktop`) to a `fleet-equipment-*` view, with
+`click=Studio%20Mac`, to see one on the Equipment page at desktop and phone widths.
+
 The `feedback` view shows information, warning and error notices, an actionable
 retry, domain errors and a removed-machine status. Check `theme=graphite`,
 `cobalt` and `vellum`, light/dark modes, and desktop/phone widths. Tone rails
