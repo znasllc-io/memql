@@ -484,6 +484,11 @@ type streamSession struct {
 	// the nine beats that carry no inventory and only reach the row at the
 	// tenth. The flag makes the very next flush carry it.
 	hardwarePending bool
+	// setupPending is a STEP of the install (memql#6235) that has reached the
+	// registry and not yet the row: a beat inside setupStepFlushFloor of the
+	// last write held it back, and the beats after it carry the same steps,
+	// so without the flag it would wait for the batch interval after all.
+	setupPending bool
 
 	// pingMu guards the ONE outstanding Ping (epic memql#5218, D11). Two
 	// goroutines meet here -- runPinger writes a fresh id on its own timer,
@@ -1033,6 +1038,9 @@ func (s *streamSession) handleHeartbeat(hb *memqlv1.Heartbeat, sourceIP string) 
 	// the next flush, and a beat without one -- or with one this engine cannot
 	// read -- leaves the last report in place.
 	if setup := SetupFromProto(hb.GetSetup(), at); setup.Present() {
+		if !setup.SameSteps(s.worker.Setup()) {
+			s.setupPending = true
+		}
 		s.worker.SetSetup(setup)
 	}
 
@@ -1098,7 +1106,15 @@ func (s *streamSession) handleHeartbeat(hb *memqlv1.Heartbeat, sourceIP string) 
 		s.lastPersistedAt = at
 		return
 	}
-	if !s.lastPersistedAt.IsZero() && at.Sub(s.lastPersistedAt) < HeartbeatBatchInterval {
+	// A STEP OF THE INSTALL LANDS NOW (memql#6235): a stage starting,
+	// ending, or waiting on the person is what the add-machine wizard is
+	// reading, and a step that sat out the batch interval left a machine
+	// that was already downloading reading as one with nothing on it --
+	// long enough for somebody to start the same download again. Download
+	// figures stay on the batch. The floor keeps a cockpit that changes its
+	// steps on every beat from turning into a write per beat.
+	stepDue := s.setupPending && at.Sub(s.lastPersistedAt) >= setupStepFlushFloor
+	if !s.lastPersistedAt.IsZero() && at.Sub(s.lastPersistedAt) < HeartbeatBatchInterval && !stepDue {
 		return
 	}
 	// activeCount is the WORKER's own report (Heartbeat.active_calls_total),
@@ -1160,6 +1176,7 @@ func (s *streamSession) handleHeartbeat(hb *memqlv1.Heartbeat, sourceIP string) 
 		return
 	}
 	s.lastPersistedAt = at
+	s.setupPending = false
 }
 
 func (s *streamSession) handleToolResult(res *memqlv1.ToolResult) {

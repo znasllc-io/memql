@@ -189,7 +189,9 @@ message SetupProgress {
 
 // SetupStage is one stage of the installer.
 message SetupStage {
-  // "runtime" | "models" | "workbench". Any other name is dropped.
+  // "permissions" | "runtime" | "models" | "workbench". Any other name is
+  // dropped. "permissions" waits for the person on a computer-use Mac, and
+  // runs first.
   string name = 1;
   // "waiting" | "running" | "done" | "failed" | "skipped". "skipped" is a
   // stage the installer reached and chose not to run, or never reached before
