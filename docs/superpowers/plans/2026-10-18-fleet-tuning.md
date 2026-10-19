@@ -4571,11 +4571,13 @@ for row in loads:
 for blob, rows in sorted(by_model.items(), key=lambda kv: -len(kv[1])):
     print()
     print("%s  (blob %s): %d loads" % (names.get(blob, "unknown model"), blob, len(rows)))
-    windows = Counter(r[2] for r in rows)
-    print("  windows (num_ctx x slots): %s" % ", ".join("%d x%d: %d" % (c, rows[0][3], n) for c, n in sorted(windows.items())))
+    # llama-server's -c is the window of every slot together (num_ctx x slots), so
+    # the window one call asked for is -c divided by -np.
+    windows = Counter((r[2] // max(r[3], 1), r[3]) for r in rows)
+    print("  windows (num_ctx x slots): %s" % ", ".join("%d x%d: %d" % (w, np, n) for (w, np), n in sorted(windows.items())))
     cause = Counter()
     for prev, cur in zip(rows, rows[1:]):
-        cause["window changed" if prev[2] != cur[2] else "same window"] += 1
+        cause["window changed" if prev[2] // max(prev[3], 1) != cur[2] // max(cur[3], 1) else "same window"] += 1
     if cause:
         print("  after the first load: %s" % ", ".join("%s %d" % (k, v) for k, v in sorted(cause.items())))
     secs = sorted(r[4] for r in rows if r[4] is not None)
