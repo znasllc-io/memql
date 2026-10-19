@@ -10,6 +10,12 @@ import type { MachineHardware } from "./hardware";
 // console drawer between its units. Every body is line art in the OS tokens, so
 // the drawings follow the theme and the light and dark modes like the rest of
 // the page, and only the screen carries text.
+//
+// A Mac stands beside an Apple display (rounded, on a slim neck and foot). A PC
+// stands beside a PC monitor: squarer, with a chin carrying a power light, on a
+// V stand. PC laptops take the squarer screen too.
+
+const PC_KINDS: ReadonlySet<DeviceKind> = new Set<DeviceKind>(["laptop", "gamingLaptop", "tower", "workstation", "desktop"]);
 
 /** A Mac mini, Mac Studio, Mac Pro, PC tower, workstation or generic box. */
 function Box({ kind }: { kind: DeviceKind }) {
@@ -42,15 +48,17 @@ function Box({ kind }: { kind: DeviceKind }) {
         <rect x="5" y="10" width="44" height="85" rx="2" fill={`url(#${lattice})`} />
       </svg>;
     case "tower":
-      return <svg className="fleet-device-box" viewBox="0 0 54 100" aria-hidden>
-        <rect className="dv-body" x="0.5" y="0.5" width="53" height="99" rx="3" />
-        <rect className="dv-window" x="6" y="8" width="36" height="84" rx="2" />
-        <circle className="dv-line" cx="24" cy="30" r="10" />
-        <circle className="dv-line" cx="24" cy="30" r="3" />
-        <circle className="dv-line" cx="24" cy="62" r="10" />
-        <circle className="dv-line" cx="24" cy="62" r="3" />
-        <path className="dv-strip" d="M46.5 12v76" />
-        <circle className="dv-glow" cx="47" cy="5" r="1.4" />
+      // A slab with an inset face, intake slits down its edges, a crest and a
+      // light along the foot of the face: a boutique tower, not its insides.
+      return <svg className="fleet-device-box" viewBox="0 0 56 112" aria-hidden>
+        <rect className="dv-foot" x="6" y="106" width="10" height="5" rx="1.5" />
+        <rect className="dv-foot" x="40" y="106" width="10" height="5" rx="1.5" />
+        <rect className="dv-body" x="0.5" y="0.5" width="55" height="107" rx="5" />
+        <rect className="dv-panel" x="5.5" y="5.5" width="45" height="97" rx="3" />
+        <path className="dv-slits" d="M10.5 14v78M45.5 14v78" />
+        <path className="dv-crest" d="M22.5 18.5l5.5 4.5 5.5-4.5" />
+        <circle className="dv-glow" cx="43.5" cy="10" r="1.3" />
+        <path className="dv-strip" d="M21 96.5h14" />
       </svg>;
     case "workstation":
       return <svg className="fleet-device-box" viewBox="0 0 58 104" aria-hidden>
@@ -80,18 +88,27 @@ function RackUnit({ bays }: { bays: number }) {
   </svg>;
 }
 
+/** A PC monitor's V stand: a short neck and two legs splayed to the sides. */
+function PcStand() {
+  return <svg className="fleet-device-pcstand" viewBox="0 0 120 24" aria-hidden>
+    <rect className="dv-body" x="55" y="0.5" width="10" height="15" rx="1" />
+    <path className="dv-deck" d="M60 14 L12 21.5 L15 23.5 L60 17.5 L105 23.5 L108 21.5 Z" />
+  </svg>;
+}
+
 export function DeviceArt({ kind, children }: { kind: DeviceKind; children: ReactNode }) {
   const label = DEVICE_LABELS[kind];
+  const pc = PC_KINDS.has(kind) ? " is-pc" : "";
   const screen = <div className="fleet-device-screen">{children}</div>;
   switch (kind) {
     case "macbook":
     case "laptop":
-      return <figure className={`fleet-device-art is-laptop is-${kind}`} aria-label={label}>
+      return <figure className={`fleet-device-art is-laptop is-${kind}${pc}`} aria-label={label}>
         {screen}
         <div className="fleet-device-base" aria-hidden />
       </figure>;
     case "gamingLaptop":
-      return <figure className="fleet-device-art is-laptop is-gamingLaptop" aria-label={label}>
+      return <figure className={`fleet-device-art is-laptop is-gamingLaptop${pc}`} aria-label={label}>
         {screen}
         <svg className="fleet-device-deck" viewBox="0 0 240 16" preserveAspectRatio="none" aria-hidden>
           <path className="dv-deck" d="M0.5 0.5h239l-7 15H7.5z" />
@@ -112,10 +129,10 @@ export function DeviceArt({ kind, children }: { kind: DeviceKind; children: Reac
         <RackUnit bays={12} />
       </figure>;
     default:
-      return <figure className={`fleet-device-art is-desk is-${kind}`} aria-label={label}>
+      return <figure className={`fleet-device-art is-desk is-${kind}${pc}`} aria-label={label}>
         <div className="fleet-device-monitor">
           {screen}
-          <div className="fleet-device-stand" aria-hidden />
+          {pc ? <PcStand /> : <div className="fleet-device-stand" aria-hidden />}
         </div>
         <Box kind={kind} />
       </figure>;

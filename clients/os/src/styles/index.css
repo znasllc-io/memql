@@ -13934,6 +13934,10 @@ button.os-cluster-mesh-peer:focus-visible {
 .fleet-device-art .dv-hole { fill: var(--device-line); }
 .fleet-device-art .dv-glow { fill: var(--os-accent); }
 .fleet-device-art .dv-dim { fill: var(--device-line); }
+.fleet-device-art .dv-panel { fill: color-mix(in srgb, var(--os-ink) 10%, var(--os-plate)); stroke: var(--device-line); stroke-width: 1; vector-effect: non-scaling-stroke; }
+.fleet-device-art .dv-slits { fill: none; stroke: var(--device-strong); stroke-width: 1.5; stroke-dasharray: 3 2.5; vector-effect: non-scaling-stroke; }
+.fleet-device-art .dv-crest { fill: none; stroke: var(--os-accent); stroke-width: 1.5; stroke-linecap: round; stroke-linejoin: round; vector-effect: non-scaling-stroke; }
+.fleet-device-art .dv-foot { fill: var(--device-shade); }
 .fleet-device-screen > small { margin-top: -10px; color: var(--os-muted); font-size: var(--os-text-xs); overflow-wrap: anywhere; }
 
 /* MacBook: the camera housing at the top of the display, the lip on the deck. */
@@ -13953,6 +13957,15 @@ button.os-cluster-mesh-peer:focus-visible {
 .fleet-device-stand::after { content: ""; position: absolute; bottom: 0; left: 50%; width: 76px; height: 5px; transform: translateX(-50%); border: 1px solid var(--device-line); border-radius: 3px; background: var(--device-shade); }
 .fleet-device-art.is-imac .fleet-device-stand::before { width: 46px; clip-path: polygon(8% 0, 92% 0, 100% 100%, 0 100%); border: 0; background: var(--device-line); }
 
+/* A PC's screen is squarer than a Mac's. Its monitor has a thin top and sides,
+   a chin with a power light, and stands on a V stand. */
+.fleet-device-art.is-pc .fleet-device-screen { border-radius: 5px; }
+.fleet-device-art.is-laptop.is-pc .fleet-device-base { border-radius: 2px 2px 4px 4px; }
+.fleet-device-art.is-desk.is-pc .fleet-device-screen { position: relative; padding-bottom: 30px; box-shadow: inset 0 0 0 4px var(--os-ground), inset 0 -16px 0 0 var(--os-ground); }
+.fleet-device-art.is-desk.is-pc .fleet-device-screen::before { content: ""; position: absolute; bottom: 7px; left: 50%; width: 16px; height: 2px; transform: translateX(-50%); border-radius: 1px; background: var(--device-line); }
+.fleet-device-art.is-desk.is-pc .fleet-device-screen::after { content: ""; position: absolute; right: 12px; bottom: 6px; width: 4px; height: 4px; border-radius: 50%; background: var(--os-accent); }
+.fleet-device-pcstand { width: 120px; max-width: 70%; height: 24px; margin: 0 auto 12px; }
+
 /* Desktops stand beside a monitor, on one desk line. */
 .fleet-device-art.is-desk { display: grid; grid-template-columns: minmax(0,1fr) auto; align-items: end; column-gap: 10px; }
 .fleet-device-art.is-desk .fleet-device-monitor { min-width: 0; }
@@ -13962,7 +13975,7 @@ button.os-cluster-mesh-peer:focus-visible {
 .fleet-device-art.is-macMini .fleet-device-box { width: 74px; height: 25px; }
 .fleet-device-art.is-macStudio .fleet-device-box { width: 70px; height: 48px; }
 .fleet-device-art.is-macPro .fleet-device-box { width: 70px; height: 130px; }
-.fleet-device-art.is-tower .fleet-device-box { width: 68px; height: 126px; }
+.fleet-device-art.is-tower .fleet-device-box { width: 64px; height: 128px; }
 .fleet-device-art.is-workstation .fleet-device-box { width: 72px; height: 129px; }
 .fleet-device-art.is-desktop .fleet-device-box { width: 52px; height: 87px; }
 
