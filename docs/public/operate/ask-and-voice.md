@@ -190,10 +190,11 @@ chooses what the message does:
   new request, stated on its own, with its own answer or goal.
 - **Asks which goal you mean.** The reply is a question and nothing is
   delivered. Your answer settles it, and both messages go to the goal you chose.
-- **Offers to stop a goal.** "Never mind the Tucson one" puts a question on that
-  goal's card: "Stop this work? It can't be resumed." with Keep and Stop.
-  Nothing stops until you press Stop. A live call has no cards, so a clear yes
-  to the spoken question confirms.
+- **Offers to stop a goal.** "Never mind the Tucson one" gets a reply that asks,
+  such as "Stop the weather check?", and puts the question on that goal's card:
+  "Stop this work? It can't be resumed." with Keep and Stop. Nothing stops until
+  you press Stop or answer yes. A live call has no cards, so a clear yes to the
+  spoken question confirms.
 
 With no active work, nothing changes and no routing call is made. Messages with
 attachments and messages over 4,000 characters are not routed. A message about
@@ -217,10 +218,13 @@ depends on what the goal is doing and where it started:
 Under your message, Ask shows one line for each goal it went to, such as "To
 Weather in Phoenix · Received". Received means a successful model call used the
 message, not that the goal followed it. MemQL replies in one line, and a split
-message shows that line before the new request's own answer. If a delivery
-failed, a plain account replaces the line, such as "Sent to Weather in Phoenix.
-Hike plan already finished, so it didn't get this." When a message changes what
-a goal is about, the goal takes a new title on its card and in Nexus.
+message shows that line before the new request's own answer. If a delivery or a
+stop you confirmed failed, a plain account replaces the line, such as "Sent to
+Weather in Phoenix. Hike plan already finished, so it didn't get this." The
+account then covers each stop: "Stopped Tucson report." or "Tucson report
+couldn't be stopped. Try again." for a stop you confirmed, and "Stop Tucson
+report?" for one the message asked about. When a message changes what a goal is
+about, the goal takes a new title on its card and in Nexus.
 
 If every goal a message was meant for had finished, and nothing else was
 decided, the message goes through normal intake. A late "actually, Phoenix"

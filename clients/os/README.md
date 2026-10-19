@@ -1754,16 +1754,19 @@ What the person sees:
   delivered or Not received. The byline keeps its Guidance tag.
 - **One line of reply,** a normal MemQL message. A split message shows the reply
   first, then the new request's own answer or acknowledgment with its usual work
-  link. When a delivery failed, the cluster replaces the model's line with a
-  plain account.
+  link. When a delivery or a confirmed stop failed, the cluster replaces the
+  model's line with a plain account: where the message went, then each
+  confirmed stop ("Stopped {title}." or "{title} couldn't be stopped. Try
+  again."), then each stop question the message asked ("Stop {title}?").
 - **A new title** on the goal when the message changed what it is about. Every
   snapshot re-projects each caption's title from the run, and the card and Nexus
   prefer the run's `title` over intake's `classification.workTitle`.
 - **A stop question** on the goal's card: "Stop this work? It can't be
   resumed." with Keep and Stop. The question sits beside the card's open
   control, not inside it, in the kit's `InPlaceAsk`, so presses are held for a
-  moment after it appears (`DESIGN.md` rule 12). Nothing stops until the person
-  presses Stop (`askStopDecision`), and a card with an unanswered question is
+  moment after it appears (`DESIGN.md` rule 12). The reply asks it too ("Stop
+  the weather check?"). Nothing stops until the person presses Stop
+  (`askStopDecision`) or answers yes, and a card with an unanswered question is
   never folded into the count. A live call has no cards: it speaks the reply,
   and a clear yes confirms.
 - **A question about which goal is meant,** when that is unclear. Nothing is
