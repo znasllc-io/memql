@@ -162,6 +162,21 @@ struct PermissionFlow {
     }
 }
 
+/// macOS's own "would like to control this computer" alert, which the
+/// worker's Accessibility request raises. It stays up after the person grants
+/// Accessibility in System Settings, and its Open System Settings button then
+/// sends Settings back to Accessibility -- in the middle of the Screen
+/// Recording step (memql-cockpit#543). MemQL is in macOS's list by then, so
+/// the alert has nothing left to do and is closed.
+enum MacAccessibilityAlert {
+    static let bundleID = "com.apple.accessibility.universalAccessAuthWarn"
+    static func close() {
+        for app in NSRunningApplication.runningApplications(withBundleIdentifier: bundleID) {
+            kill(app.processIdentifier, SIGTERM)
+        }
+    }
+}
+
 enum PermissionPlacement {
     /// Where a window of `size` goes beside System Settings: to its right when
     /// the screen has room, otherwise to its left, otherwise over the screen's
@@ -212,6 +227,9 @@ final class PermissionSetupWindow: NSWindowController, NSWindowDelegate {
     private var flow = PermissionFlow()
     private var message = ""
     private var settingsObserver: NSObjectProtocol?
+    /// This window asked for Accessibility, so macOS's own alert for it may
+    /// still be on screen; only an alert this window raised is ever closed.
+    private var raisedAccessibilityAlert = false
     /// System Settings is open for an ask: the window floats beside it, and
     /// the worker is read every second.
     private var inSettings = false {
@@ -347,6 +365,10 @@ final class PermissionSetupWindow: NSWindowController, NSWindowDelegate {
             if !flow.asking { inSettings = false }
             land()
         }
+        if raisedAccessibilityAlert, let report, report.fresh(), PermissionKind.accessibility.granted(in: report) {
+            raisedAccessibilityAlert = false
+            MacAccessibilityAlert.close()
+        }
         for kind in PermissionKind.allCases {
             let view = flow.row(kind, report, restarting: restarting)
             switches[kind]?.isOn = view.on
@@ -395,6 +417,11 @@ final class PermissionSetupWindow: NSWindowController, NSWindowDelegate {
         // finds a switch there rather than a "+" button; the first time,
         // macOS also shows its own dialog, which leads to the same page.
         if on { request?(kind.rawValue, report.pid) }
+        if kind == .accessibility && on { raisedAccessibilityAlert = true }
+        if kind == .screenRecording && raisedAccessibilityAlert {
+            raisedAccessibilityAlert = false
+            MacAccessibilityAlert.close()
+        }
         NSWorkspace.shared.open(kind.settingsURL)
         inSettings = true
         update(report)
