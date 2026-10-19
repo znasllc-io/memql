@@ -142,6 +142,11 @@ recipient counts, including while paused. Check the divider, keyboard search,
 removing/re-adding the last recipient and refusal/retry at desktop and phone
 widths in every theme and mode.
 
+The `fleet-equipment-*` views open the whole Fleet app on Machines; add
+`section=models`, `routing`, `apps`, `workbenches`, `logs` or `settings` to open
+another Fleet section instead, for checks that span the app (such as the space
+under each page title).
+
 The `feedback` view shows information, warning and error notices, an actionable
 retry, domain errors and a removed-machine status. Check `theme=graphite`,
 `cobalt` and `vellum`, light/dark modes, and desktop/phone widths. Tone rails
