@@ -9,7 +9,7 @@ import { withSession } from "../test/deployables/harness";
 
 type Frame = ComponentType<{ fallback: string; children: ReactNode }>;
 export function fleetEquipmentScenes(Frame: Frame) {
-  return Object.fromEntries(["populated", "apps", "apps-missing", "apps-offline", "activity", "activity-empty", "activity-error", "models", "models-empty", "models-error", "models-save-error", "models-pending", "models-bound", "details", "details-empty", "labels", "labels-empty", "at-limit", "empty", "error", "sharing", "sharing-people", "sharing-picker", "sharing-empty", "sharing-error", "sharing-pending"].map(state => [`fleet-equipment-${state}`, {
+  return Object.fromEntries(["populated", "apps", "apps-missing", "apps-offline", "activity", "activity-empty", "activity-error", "models", "models-automatic", "models-empty", "models-error", "models-save-error", "models-pending", "models-bound", "details", "details-empty", "labels", "labels-empty", "at-limit", "empty", "error", "sharing", "sharing-people", "sharing-picker", "sharing-empty", "sharing-error", "sharing-pending"].map(state => [`fleet-equipment-${state}`, {
     connect: () => {
       const shareDirectory = shareDirectoryRow({ id: "studio", people: state === "sharing-empty" ? [] : [{ id: "ana", name: "Ana Ruiz", detail: "" }, { id: "bo", name: "Bo Chen", detail: "" }], groups: state === "sharing-empty" ? [] : [{ id: "design", name: "Design", members: 4 }, { id: "ops", name: "Operations", members: 7 }] });
       if (state === "sharing-picker") {
@@ -56,6 +56,8 @@ export function fleetEquipmentScenes(Frame: Frame) {
         { modelId: "qwen3.5:122b", purposes: ["conversation", "structured", "tools", "vision"], memoryBytes: 90e9, sizeBytes: 81e9, blocked: "Needs more model memory", installBlocked: "Needs more model memory" },
       ].map(m => ({ runtime: "ollama", blocked: "", installBlocked: "", installed: state !== "models-empty" && m.modelId !== "qwen3.5:122b", source: "https://ollama.com/library/" + m.modelId, reviewedAt: "2026-10-15T00:00:00Z", ...m })) };
       Object.assign(setup, { suggestedChoices: setup.choices });
+      // Nothing saved yet: the engine still suggests a pick for each task.
+      if (state === "models-automatic") Object.assign(setup, { revision: "", choices: {} });
       if (state === "models-bound") Object.assign(setup, { boundEmbeddingModel: "qwen3-embedding:0.6b" });
       connection.query.fleetModelSetup = vi.fn(async () => {
         if (state === "models-error") throw new Error("Connection interrupted");
