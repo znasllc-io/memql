@@ -141,19 +141,27 @@ func TestVerifiedFollowupCarriesReceiptsThroughClassificationAndQuickReply(t *te
 
 func TestCapabilityArtifactWorkloadIncludesGenerationAndKeepsExplicitCeilings(t *testing.T) {
 	for _, format := range []string{"png", "wav", "mp4", "xlsx", "glb"} {
-		for _, tier := range []string{"quick", "lookup"} {
+		for _, tier := range []string{"quick", "lookup", "research", "project"} {
 			t.Run(format+"/"+tier, func(t *testing.T) {
-				eng := &countingCompileEngine{triage: map[string]any{"intent": "task", "complexity": "trivial", "workload": tier, "requiresFile": true, "fileFormat": format, "fileName": "output", "acknowledgement": "I’ll create and save the requested artifact."}}
+				search := "generate " + format + " artifact"
+				eng := &countingCompileEngine{triage: map[string]any{"intent": "task", "complexity": "trivial", "workload": tier, "capabilitySearch": search, "requiresFile": true, "fileFormat": format, "fileName": "output", "acknowledgement": "I’ll create and save the requested artifact."}}
 				req := conversationReq("Create the requested artifact", "")
 				out, err := (&PlannerAgentLoop{engine: eng}).CompileGoalForRun(context.Background(), req, nil, realSandbox{})
 				if err != nil {
 					t.Fatal(err)
 				}
-				if out.Workload != "research" {
+				wantWorkload := "research"
+				if tier == "project" {
+					wantWorkload = tier
+				}
+				if out.Workload != wantWorkload {
 					t.Fatalf("generation was treated as a short lookup: %s", out.Workload)
 				}
+				if out.CapabilitySearch != search || len(eng.aiCalls) != 1 {
+					t.Fatalf("artifact compilation lost discovery intent or added inference: search=%q calls=%v", out.CapabilitySearch, eng.aiCalls)
+				}
 				limit := work.EffectiveWorkloadCeilings(work.Ceilings{}, out.Workload)
-				if limit.WallClockMs != 45*60*1000 {
+				if tier != "project" && limit.WallClockMs != 45*60*1000 {
 					t.Fatalf("unexpected sustained-work allowance: %+v", limit)
 				}
 				explicit := work.Ceilings{WallClockMs: 60000, MaxModelCalls: 2, CostCeiling: 0.25}
