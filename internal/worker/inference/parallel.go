@@ -1,6 +1,7 @@
 package inference
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -169,7 +170,7 @@ func ManagedParallel() int {
 }
 
 func managedParallelAt(unitPath string) int {
-	main, err := os.ReadFile(unitPath)
+	main, err := readRegularFile(unitPath)
 	if err != nil {
 		return 0
 	}
@@ -188,9 +189,28 @@ func managedParallelAt(unitPath string) int {
 		if strings.HasPrefix(name, ".") || !strings.HasSuffix(name, ".conf") {
 			continue
 		}
-		if b, err := os.ReadFile(filepath.Join(dir, name)); err == nil {
+		if b, err := readRegularFile(filepath.Join(dir, name)); err == nil {
 			texts = append(texts, string(b))
 		}
 	}
 	return UnitParallel(texts...)
+}
+
+// readRegularFile reads path if it is a regular file, or a link to one, and
+// says so as an error otherwise. A unit and its drop-ins are files, and the
+// reader runs under the model inventory's lock on the path every model call
+// and registration takes: opening a pipe for reading blocks until something
+// writes to it, so one stray FIFO named *.conf would hold the whole worker
+// behind it. systemd skips anything that is not a regular file too. os.Stat
+// follows a link, so a drop-in that is a link to a file still counts, and a
+// link to a pipe or to nothing does not.
+func readRegularFile(path string) ([]byte, error) {
+	fi, err := os.Stat(path)
+	if err != nil {
+		return nil, err
+	}
+	if !fi.Mode().IsRegular() {
+		return nil, fmt.Errorf("%s is not a regular file", path)
+	}
+	return os.ReadFile(path)
 }
