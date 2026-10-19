@@ -381,6 +381,12 @@ describe("the checks", () => {
     });
     emit(connection, row);
     await settle();
+    // The installer has not spoken yet: the line waits for it rather than
+    // asking the person for something the installer is about to ask.
+    expect(within(screen.getByRole("list", { name: "Checks on this machine" })).getByText("Waiting for the installer")).toBeTruthy();
+    // Two heartbeats and still no report: an older cockpit, read as before.
+    await beat(connection, row, 15);
+    await beat(connection, row, 30);
     expect(screen.getByText("Screen Recording not granted")).toBeTruthy();
     expect(screen.getByText(/System Settings → Privacy & Security → Screen Recording/)).toBeTruthy();
     expect(screen.queryByLabelText("the macos permissions command")).toBeNull();
@@ -407,8 +413,16 @@ describe("the checks", () => {
     connection.query.fleetPullRecommended.mockRejectedValueOnce(new Error("machine is under the floor for local models"));
     mount(connection);
     await describeAndMint("mini", { inference: true });
-    emit(connection, arrival({ hardware: { chip: "M2", memoryBytes: 1, runtimes: [{ name: "ollama", version: "0.11" }] } }));
+    const row = arrival({ hardware: { chip: "M2", memoryBytes: 1, runtimes: [{ name: "ollama", version: "0.11" }] } });
+    emit(connection, row);
     await settle();
+    // THE RACE THIS GUARDS (memql#6235): connected, a runtime already there,
+    // no model yet, and the installer's first report one heartbeat away. No
+    // Download models until the installer has had its two heartbeats.
+    expect(screen.queryByText("None yet")).toBeNull();
+    expect(within(bar()).queryByRole("button", { name: "Download models" })).toBeNull();
+    await beat(connection, row, 15);
+    await beat(connection, row, 30);
     expect(screen.getByText("None yet")).toBeTruthy();
     expect(within(screen.getByRole("list", { name: "Checks on this machine" })).queryByRole("button", { name: "Download models" })).toBeNull();
     await readTheBar();

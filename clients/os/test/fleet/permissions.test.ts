@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { permissionsFrom, permissionDecision, machineFromRow } from "../../src/apps/fleet/rows";
-import { checksFor, EMPTY_DRAFT } from "../../src/apps/fleet/addMachine/flow";
+import { checksFor, EMPTY_DRAFT, STEADY_BEATS } from "../../src/apps/fleet/addMachine/flow";
 import { machineRow } from "./harness";
 
 describe("measured worker permissions", () => {
@@ -21,7 +21,7 @@ describe("measured worker permissions", () => {
   });
   it("names only the grant still unmeasured, while withholding overall completion", () => {
     const machine = machineFromRow(machineRow({ id: "v1:worker:registration:permission-test", permissions: { accessibility_state: "granted", screen_recording_state: "unknown" } }));
-    const check = checksFor({ ...EMPTY_DRAFT, platform: "mac", computerUse: true }, machine, 0, new Date()).find(c => c.id === "permissions")!;
+    const check = checksFor({ ...EMPTY_DRAFT, platform: "mac", computerUse: true }, machine, STEADY_BEATS, new Date()).find(c => c.id === "permissions")!;
     expect(check.state).toBe("unknown");
     expect(check.answer).toBe("Screen Recording not reported yet");
     expect(check.command).toBeUndefined();

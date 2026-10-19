@@ -16,6 +16,7 @@ import {
   type MachineRow,
 } from "../rows";
 import { CredentialHealth } from "./CredentialHealth";
+import { SetupHealth } from "./SetupHealth";
 import { MachineApps } from "./MachineApps";
 export { MachineAppsHelp } from "./MachineApps";
 import { MachineDetailsInfo, MachineDetailsSection } from "./MachineDetailsInfo";
@@ -56,6 +57,7 @@ export function MachineDetail({
       <AutoRefresh enabled={["all", "settings"].includes(view)} busy={recommendation.state === "reading"} onRefresh={recommendation.reread} />
       {view === "all" || view === "settings" ? <div className="fleet-machine-details">
         <CredentialHealth machine={machine} now={now} />
+        <SetupHealth machine={machine} now={now} />
         <MachineDetailsSection title="General">
           <div className="fleet-machine-setting">
             <span className="fleet-machine-setting-name">Name</span>

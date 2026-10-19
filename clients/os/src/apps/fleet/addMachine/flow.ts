@@ -8,6 +8,7 @@ import {
   setupDownloadLabel,
   setupNow,
   setupRunningWords,
+  setupSpokeWithin,
   setupStage,
   setupWaitingAnswer,
   type MachineSetup,
@@ -223,11 +224,19 @@ export function checksFor(
   // The installer's own account (memql#6229), as it stands NOW: a running
   // report the cluster stopped hearing is an installer that stopped.
   const setup = setupNow(machine.setup, now);
+  // THE INSTALLER HAS NOT SPOKEN YET (memql#6235). The registration lands
+  // before the first heartbeat that carries the installer's report, so for
+  // those seconds a machine being set up for local models read as a runtime
+  // with nothing on it -- and Download models was offered, and pressed, for
+  // the download the installer was about to start. Until two heartbeats have
+  // gone by with no report, a line the installer is about to answer waits
+  // for it. A cockpit that never reports (an older one) is read as before.
+  const awaiting = setup === null && beats < STEADY_BEATS;
   if (draft.computerUse) checks.push(buildCheck(machine));
-  if (draft.computerUse && draft.platform === "mac") checks.push(permissionsCheck(machine));
+  if (draft.computerUse && draft.platform === "mac") checks.push(permissionsCheck(machine, setup, awaiting));
   if (draft.computerUse && draft.platform === "linux") checks.push(displayCheck(machine));
   if (draft.inference) {
-    checks.push(...inferenceChecks(machine, pulls, draft, setup));
+    checks.push(...inferenceChecks(machine, pulls, draft, setup, awaiting, now));
     const model = machineModelsFrom(machine.reportedLabels).find(isChatModel);
     const modelsState = checks.find(check => check.id === "models")?.state;
     const available = modelsState === "done";
@@ -248,9 +257,12 @@ export function checksFor(
   }
   // LAST, BECAUSE THE INSTALLER DOES IT LAST (memql#6229): read top to bottom,
   // the list is the order things happen, so "After the models" points up.
-  if (draft.workbench) checks.push(workbenchCheck(machine, draft, setup));
+  if (draft.workbench) checks.push(workbenchCheck(machine, draft, setup, awaiting));
   return checks;
 }
+
+/** A line the installer will answer, before its first report has arrived. */
+const AWAITING_INSTALLER = { state: "current", answer: "Waiting for the installer" } as const;
 
 /** The cluster's own round trip as a figure -- "11 ms, checked 40s ago" --
  *  or "" when never measured. */
@@ -300,11 +312,12 @@ const WORKBENCH_REPAIR = "Start Docker with at least 3 CPUs and 4 GiB, then run 
 // runs this check waits its turn ("After the models") or says it is being
 // done, and the command is offered only once the installer says it could not
 // do it -- in its own words -- or stopped before it got here.
-function workbenchCheck(machine: MachineRow, draft: Draft, setup: MachineSetup | null): Check {
+function workbenchCheck(machine: MachineRow, draft: Draft, setup: MachineSetup | null, awaiting: boolean): Check {
   const base = { id: "workbench", name: "Fleet workbenches" } as const;
   if (machine.capabilities.includes("WORKBENCH") && (machine.workbenchContract ?? 0) >= 1) {
     return { ...base, state: "done", answer: "Ready" };
   }
+  if (awaiting) return { ...base, ...AWAITING_INSTALLER };
   const command = workbenchSetupCommand(draft.userLocal);
   const stage = setupStage(setup, "workbench");
   if (setup !== null && stage !== null) {
@@ -329,7 +342,23 @@ function workbenchCheck(machine: MachineRow, draft: Draft, setup: MachineSetup |
   return { ...base, state: "open", answer: "Not available yet", repair: WORKBENCH_REPAIR, command };
 }
 
-function permissionsCheck(machine: MachineRow): Check {
+/** Where a person turns the permissions on, on the Mac, whenever they like. */
+export const PERMISSIONS_MENU = "MemQL in the menu bar → macOS permissions → Set Up Permissions…";
+
+function turnOnFromMenu(names: readonly string[]): string {
+  return `Turn ${names.length > 1 ? "them" : "it"} on from ${PERMISSIONS_MENU}`;
+}
+
+// THE PERSON'S STEP, IN THE INSTALLER'S ORDER (memql#6235). On a computer-use
+// Mac the installer asks for the permissions FIRST and waits: the person
+// allows both in MemQL's Permissions window, or says there -- or in Terminal
+// -- that setup should go on without them. Only then do the long unattended
+// stages start. So while the installer waits this line is the person's turn,
+// a skip is theirs to make and settles the line rather than failing it, and
+// what is missing always comes from the worker's own probe, never from the
+// installer's sentence. Nothing else in the sequence can be skipped.
+function permissionsCheck(machine: MachineRow, setup: MachineSetup | null, awaiting: boolean): Check {
+  const base = { id: "permissions", name: "macOS permissions" } as const;
   const p = machine.permissions;
   const evidence = [
     { name: "Accessibility", state: permissionDecision(p, "accessibility") },
@@ -337,19 +366,42 @@ function permissionsCheck(machine: MachineRow): Check {
   ];
   const denied = evidence.filter((s) => s.state === "denied").map((s) => s.name);
   const unknown = evidence.filter((s) => s.state === "unknown").map((s) => s.name);
-  if (denied.length === 0 && unknown.length === 0) return { id: "permissions", name: "macOS permissions", state: "done", answer: "Granted" };
+  if (denied.length === 0 && unknown.length === 0) return { ...base, state: "done", answer: "Granted" };
+  const missing = evidence.filter((s) => s.state !== "granted").map((s) => s.name);
+  const stage = setupStage(setup, "permissions");
+  if (setup?.state === "running" && stage?.state === "running") {
+    const label = machineName(machine);
+    // The window's own words for the way on: "Skip for now" while neither is
+    // allowed, "Continue without Screen Recording" once one is.
+    const choice = missing.length > 1 ? "Skip for now" : `Continue without ${missing[0]}`;
+    return {
+      ...base,
+      state: "open",
+      answer: missing.length > 1 ? "Waiting for you" : `Waiting for ${missing[0]}`,
+      repair: `Allow MemQL in the Permissions window on ${label}, or choose ${choice} there.`,
+      footer: { state: `Waiting for you on ${label}`, detail: "" },
+    };
+  }
+  if (awaiting) return { ...base, ...AWAITING_INSTALLER };
+  if (stage?.state === "skipped") {
+    return { ...base, state: "skipped", answer: `${missing.join(" and ")} skipped`, repair: turnOnFromMenu(missing) };
+  }
+  if (setup?.state === "running" && stage?.state === "waiting") {
+    return { ...base, state: "ahead", answer: setupWaitingAnswer(setup, "permissions") };
+  }
+  if (stage?.state === "failed" && stage.detail !== "") {
+    return { ...base, state: "open", answer: `${missing.join(" and ")} not granted`, repair: stage.detail };
+  }
   if (denied.length > 0) {
     return {
-      id: "permissions",
-      name: "macOS permissions",
+      ...base,
       state: "open",
       answer: `${denied.join(" and ")} not granted`,
-      repair: `Allow MemQL under System Settings → Privacy & Security → ${denied.join(" and ")}.`,
+      repair: `${turnOnFromMenu(denied)}, or allow MemQL under System Settings → Privacy & Security → ${denied.join(" and ")}.`,
     };
   }
   return {
-    id: "permissions",
-    name: "macOS permissions",
+    ...base,
     state: "unknown",
     answer: `${unknown.join(" and ")} not reported yet`,
     repair: "This Cockpit build does not report its permissions; update Cockpit on the machine.",
@@ -366,12 +418,13 @@ function displayCheck(machine: MachineRow): Check {
   };
 }
 
-function runtimeCheck(machine: MachineRow, draft: Draft, setup: MachineSetup | null, models: number): Check {
+function runtimeCheck(machine: MachineRow, draft: Draft, setup: MachineSetup | null, models: number, awaiting: boolean): Check {
   const base = { id: "runtime", name: "Model runtime" } as const;
   const runtimes = machine.hardware.runtimes.filter((r) => r.name !== "");
   if (models > 0 || runtimes.length > 0) {
     return { ...base, state: "done", answer: runtimes.length > 0 ? runtimes.map((r) => `${r.name} ${r.version}`.trim()).join(", ") : "Serving models" };
   }
+  if (awaiting) return { ...base, ...AWAITING_INSTALLER };
   const command = setupCommand(draft.userLocal, true);
   const stage = setupStage(setup, "runtime");
   if (setup !== null && stage !== null) {
@@ -393,9 +446,9 @@ function runtimeCheck(machine: MachineRow, draft: Draft, setup: MachineSetup | n
   return { ...base, state: "open", answer: "Not installed", repair: "Run this on the machine to install it and download the models.", command };
 }
 
-function inferenceChecks(machine: MachineRow, pulls: PullFacts, draft: Draft, setup: MachineSetup | null): Check[] {
+function inferenceChecks(machine: MachineRow, pulls: PullFacts, draft: Draft, setup: MachineSetup | null, awaiting: boolean, now: Date): Check[] {
   const models = machineModelsFrom(machine.reportedLabels);
-  const runtime = runtimeCheck(machine, draft, setup, models.length);
+  const runtime = runtimeCheck(machine, draft, setup, models.length, awaiting);
   const startError = (pulls.startError ?? "").trim();
   const stage = setupStage(setup, "models");
   let modelsCheck: Check;
@@ -438,6 +491,13 @@ function inferenceChecks(machine: MachineRow, pulls: PullFacts, draft: Draft, se
     };
   } else if (models.length > 0) {
     modelsCheck = { id: "models", name: "Models", state: "done", answer: models.map((m) => m.modelId).join(", ") };
+  } else if (awaiting) {
+    modelsCheck = { id: "models", name: "Models", ...AWAITING_INSTALLER };
+  } else if (stage?.state === "done" && setupSpokeWithin(setup, now)) {
+    // Downloaded, and not reported yet: the machine names its models when it
+    // next reconnects, which the installer asks it to do. Download models
+    // here would fetch what is already on the disk.
+    modelsCheck = { id: "models", name: "Models", state: "current", answer: "Waiting for the machine to report them", footer: { state: "Finishing models", detail: "" } };
   } else if (setup !== null && stage !== null && setup.state === "running" && stage.state === "waiting") {
     modelsCheck = { id: "models", name: "Models", state: "ahead", answer: setupWaitingAnswer(setup, "models") };
   } else if (setup?.state === "stopped" && stage?.state === "running" && runtime.state === "done") {
@@ -479,7 +539,8 @@ function inferenceChecks(machine: MachineRow, pulls: PullFacts, draft: Draft, se
 /** Missing optional diagnostics may settle, but requested macOS permissions
  * must be measured. An unknown grant cannot make setup ready. */
 export function checkIsSettled(check: Check): boolean {
-  if (check.id === "permissions") return check.state === "done";
+  // Skipped only ever by the person, during setup: their choice settles it.
+  if (check.id === "permissions") return check.state === "done" || check.state === "skipped";
   return check.state === "done" || check.state === "skipped" || check.state === "unknown";
 }
 
@@ -760,7 +821,9 @@ export function barFor(facts: FlowFacts, checks: readonly Check[], pulling = fal
         ? [{ id: repair, label: repair === "retryResponse" ? "Retry" : "Download models", tone: "primary" }]
         : [];
   return {
-    state: settled ? "Ready" : attention ? `${attention.name} needs attention` : busy ? busy.state : "Checking",
+    // A line waiting on the person's hand on the machine says so in its own
+    // words ("Waiting for you on studio") rather than as a fault.
+    state: settled ? "Ready" : attention ? (attention.state === "open" && attention.footer ? attention.footer.state : `${attention.name} needs attention`) : busy ? busy.state : "Checking",
     // The detail is the check that is MOVING; one that needs somebody names
     // itself in the state, and says why on its own line in the checks.
     detail: settled ? `${shown} is ready.` : attention || pending === undefined ? "" : busy ? busy.detail : `${pending.name}: ${pending.answer}`,

@@ -175,9 +175,12 @@ describe("the checks", () => {
       buildTag: "computeruse",
       permissions: { accessibility: true, screen_recording: false, x11_display: false, detail: "" },
     });
-    const perms = checksFor(MAC_CU, cu, 0, NOW).find((c) => c.id === "permissions")!;
+    // Past the first two heartbeats with no installer report: an older
+    // cockpit, read from the worker's own probe alone.
+    const perms = checksFor(MAC_CU, cu, STEADY_BEATS, NOW).find((c) => c.id === "permissions")!;
     expect(perms.state).toBe("open");
     expect(perms.answer).toBe("Screen Recording not granted");
+    expect(perms.repair).toMatch(/^Turn it on from MemQL in the menu bar → macOS permissions → Set Up Permissions…, or /);
     expect(perms.repair).toContain("System Settings → Privacy & Security → Screen Recording");
     expect(perms.command).toBeUndefined();
   });
@@ -192,7 +195,7 @@ describe("the checks", () => {
       answer: "Granted",
     });
     const silent = machine({ buildTag: "computeruse" });
-    expect(checksFor(MAC_CU, silent, 0, NOW).find((c) => c.id === "permissions")?.state).toBe("unknown");
+    expect(checksFor(MAC_CU, silent, STEADY_BEATS, NOW).find((c) => c.id === "permissions")?.state).toBe("unknown");
   });
 
   it("skips the display check on Wayland with the installer's own sentence, never failing it", () => {
@@ -241,7 +244,7 @@ describe("the checks", () => {
   });
 
   it("asks for the runtime repair when local models were asked for and none is reported", () => {
-    const checks = checksFor(MAC_INF, machine(), 0, NOW);
+    const checks = checksFor(MAC_INF, machine(), STEADY_BEATS, NOW);
     const runtime = checks.find((c) => c.id === "runtime")!;
     expect(runtime.state).toBe("open");
     expect(runtime.command).toBe("/usr/local/bin/memql worker setup --inference");
@@ -251,7 +254,7 @@ describe("the checks", () => {
 
   it("offers the recommended pull once a runtime is there, draws a live pull as moving, and reads a served model as done", () => {
     const withRuntime = machine({ hardware: { chip: "M2", memoryBytes: 1, runtimes: [{ name: "ollama", version: "0.11" }] } });
-    const idle = checksFor(MAC_INF, withRuntime, 0, NOW);
+    const idle = checksFor(MAC_INF, withRuntime, STEADY_BEATS, NOW);
     expect(idle.find((c) => c.id === "runtime")).toMatchObject({ state: "done", answer: "ollama 0.11" });
     // Nothing on the runtime and nothing in flight: the person's turn, and the
     // OS's own act is the footer's Download models -- no second command.
