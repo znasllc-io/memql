@@ -14339,7 +14339,11 @@ button.os-cluster-mesh-peer:focus-visible {
 .os-page-breadcrumbs button { appearance: none; border: 0; padding: 3px 0; background: transparent; font: inherit; color: inherit; cursor: pointer; }
 .os-page-breadcrumbs button:hover { color: var(--os-ink); text-decoration: underline; text-underline-offset: 3px; }
 .os-page-breadcrumbs button:focus-visible { outline: 2px solid var(--os-accent); outline-offset: 3px; border-radius: 2px; }
-.fleet-inspector > .os-head { margin-bottom: 20px; }
+/* EVERY PAGE TITLE IN A MACHINE TAB keeps the same space above what follows
+ * it -- not only the title the workspace draws, but the ones the Models and
+ * Activity tabs draw inside their own content (a model's page, the catalog,
+ * an activity entry), which otherwise sat on their first section. */
+.fleet-inspector .os-head { margin-bottom: 20px; }
 .fleet-inspector > .os-head > .os-head-actions { width: auto; margin-left: auto; }
 /* Empty and populated machine subpages keep one content edge and header rhythm. */
 .fleet-inspector > .os-panel { padding: 0; }
