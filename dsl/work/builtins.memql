@@ -92,6 +92,21 @@ builtin cancelGoal {
   reason  string   @description("Why it closed, in words a person can read.")
 }
 
+/// Give one of the caller's runs a new title because a person's later message changed what the work
+/// is about ("actually, I'm in Phoenix" retitles the weather goal). The title is written to
+/// v1:work:run.title and never to classification, so a late compile cannot erase it; the intake
+/// title stays as it was and a reader prefers this one. The run must be the caller's, a running job
+/// may not call it (a title change needs a person's message), and the title is 1 to 80 characters
+/// once trimmed. Returns {runId, title}.
+///
+/// NOT @sdk: its one caller is the Ask engine, in Go, after it has delivered the person's message.
+@executor("integration.work.retitleRun")
+@args(profile="object")
+builtin workRetitleRun {
+  runId  string!  @description("The caller's v1:work:run to retitle.")
+  title  string!  @description("The new title, 1 to 80 characters once trimmed.")
+}
+
 /// Fork one of the caller's runs at a step: a NEW run that serves the shared prefix from the
 /// journal and runs live from the fork step on. The source run is untouched. Returns {runId}.
 @sdk
