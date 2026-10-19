@@ -166,7 +166,6 @@ pipeline:
         - component/compose/emaildoc/**
         - Makefile
         - memql-package.yaml
-        - .github/workflows/**
   stages:
     # Stages run in the order written, and a failed stage skips every later one:
     # a change that does not build, vet or pass its drift gates starts no test.
