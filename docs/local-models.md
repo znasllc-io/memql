@@ -548,14 +548,14 @@ machine with a general model rather than with only an embedder.
 | 64, 128 | `qwen3.8:27b-q8_0`, `qwen3-embedding:0.6b` |
 
 One text model per class plus the cluster's embedder keeps the working set
-within the class budget. A bigger class buys a stronger model or the same
-one at higher precision. Fast-level calls choose the fastest eligible fleet
-model after a quality floor; strong and reasoning calls choose the strongest.
-The embedder uses an 8K working context. Chat calls pass the engine's required
-context window to Ollama instead of relying on its hardware-tier default.
-The 24 GB pair is budgeted at 32K chat context; larger contexts can require
-CPU offload or model eviction. The native Linux unit uses `q8_0` KV cache,
-with Flash Attention selected automatically by Ollama on supported devices.
+within the class budget. A bigger class buys a stronger model or the same one at
+higher precision. Fast-level calls choose the fastest eligible fleet model after
+a quality floor; strong and reasoning calls choose the strongest. The embedder
+uses an 8K working context. Chat calls pass the engine's required context window
+to Ollama instead of relying on its hardware-tier default. The 24 GB pair is
+budgeted at 32K chat context with one slot; larger contexts can require CPU
+offload or model eviction. The native Linux unit uses `q8_0` KV cache, with
+Flash Attention selected automatically by Ollama on supported devices.
 
 Setup leaves an already-serving runtime in place. For an older
 `memql-ollama.service`, add `Environment=OLLAMA_KV_CACHE_TYPE=q8_0` in its
@@ -600,8 +600,9 @@ models:
 ```
 
 A `SIGHUP` applies it; nothing restarts. Delete the block, send another, and
-every model is back on Ollama's defaults. Nothing here changes a machine until
-its owner writes it.
+every model is back on Ollama's defaults, though a model already loaded keeps
+its last expiry until it is stopped, evicted, or reloaded. Nothing here changes
+a machine until its owner writes it.
 
 - **`keep_alive`** is sent on every call to that model: chat, vision, embedding
   and image alike. Ollama applies the value a request states, up or down, and
@@ -620,7 +621,7 @@ its owner writes it.
 
 `memql worker models` prints what is configured, then asks Ollama what it holds:
 the size, how much of it is on the GPU, the window it was loaded at, and when it
-goes. A model that is mostly on the CPU is called out, because residency makes
+goes. A model that is partly on the CPU is called out, because residency makes
 that permanent: a model loaded while another process held the card stays where
 it was put until it reloads. On a card shared with another Ollama or a GPU
 service, account for the other tenant's memory before making any model resident.
@@ -629,14 +630,16 @@ service, account for the other tenant's memory before making any model resident.
 
 `parallel` is the ceiling the worker advertises and enforces for each model, and
 Ollama has to be given the same number or the extra calls queue inside it. For
-the unit this cockpit installs, the unit is the source: a fresh install on a 24 or
-32 GB machine writes `Environment=OLLAMA_NUM_PARALLEL=2`, and the worker reads it
-back, drop-ins included. For an existing unit add the line yourself (a drop-in,
-`systemctl --user edit memql-ollama.service`, is the way systemd documents it),
-then `systemctl --user daemon-reload` and `systemctl --user restart
-memql-ollama.service`. The restart cancels what Ollama is generating and unloads
-its models, so do it between calls. `models.parallel` overrides the unit for a
-runtime the cockpit cannot read: Docker, or macOS.
+the unit this cockpit installs, the unit is the source: a fresh install on a 24
+or 32 GB machine writes `Environment=OLLAMA_NUM_PARALLEL=2`, and the worker
+reads it back, drop-ins included. For an existing unit add
+`Environment=OLLAMA_NUM_PARALLEL=2` under `[Service]` yourself (a drop-in,
+`systemctl --user edit memql-ollama.service`, is the way systemd documents it,
+and its editor opens without the `[Service]` header, so write that too), then
+`systemctl --user daemon-reload` and
+`systemctl --user restart memql-ollama.service`. The restart cancels what Ollama
+is generating and unloads its models, so do it between calls. `models.parallel`
+overrides the unit for a runtime the cockpit cannot read: Docker, or macOS.
 
 Every slot costs memory: a constant for the model's recurrent state plus its
 cache for the window. For `qwen3.8:27b` (Q4_K_M, q8_0 cache) on a 24 GB RTX 5090
@@ -653,19 +656,24 @@ free and the report wanting at least 1,936 left:
 | 2 x 32K | 19,637 | 21,537 | 1,429 |
 | 3 x 16K | 19,681 | 22,081 | 885 |
 
-Only the one-slot figure is read directly; the rest add the per-slot costs above.
-The embedder column is estimated from its architecture (it was never loaded in the
-thirty days measured). The report the runtime prints on every load says whether a
-choice held: `no changes needed`, and `offloaded N/N layers to GPU`.
+The one-slot figures at 8K, 16K and 32K (16,911, 16,969 and 17,673 MiB) are read
+directly; the other rows add the per-slot costs above to the one-slot figure at
+the same window. The embedder column is estimated from its architecture (it was
+never loaded in the thirty days measured). The report the runtime prints on
+every load says whether a choice held: `no changes needed`, and
+`offloaded N/N layers to GPU`.
 
 The two slots setup gives a class 24 or 32 machine are budgeted at a 16K window,
 the `working_context: 16384` above: at 32K two slots leave 1,429 MiB, under the
-1,936 MiB the runtime wants, so a 32K window wants `models.parallel: 1`. The
-ceiling the worker advertises can also differ from what Ollama was started with:
-a stale `OLLAMA_NUM_PARALLEL` in the worker's environment outranks the unit, a
-unit edited by hand takes effect only when Ollama restarts, and another Ollama
-on the port reads none of this. Each is benign: a call waits inside Ollama, or a
-slot sits idle until the next refresh.
+1,936 MiB the runtime wants, so a 32K window wants one slot:
+`OLLAMA_NUM_PARALLEL=1` under `[Service]` in the unit, then restart Ollama (the
+worker follows the unit). `models.parallel: 1` alone only lowers what the worker
+advertises; it is for a runtime the cockpit cannot read. The ceiling the worker
+advertises can also differ from what Ollama was started with: a stale
+`OLLAMA_NUM_PARALLEL` in the worker's environment outranks the unit, a unit
+edited by hand takes effect only when Ollama restarts, and another Ollama on the
+port reads none of this. Each is benign: a call waits inside Ollama, or a slot
+sits idle until the next refresh.
 
 ---
 

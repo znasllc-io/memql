@@ -367,9 +367,10 @@ Five rules here are load-bearing, and each fails silently:
    naming nothing here. Ollama has no structured-output capability of its
    own, so `tools` is the proxy; an operator who disagrees declares the
    model under an OpenAI-compatible runtime instead.
-2. **`max_concurrent` is the exception, and it is never absent.** It is the
-   one attribute whose absence is PERMISSIVE -- the engine reads a missing
-   ceiling as unlimited. `OLLAMA_NUM_PARALLEL` when set, otherwise 1.
+2. **`max_concurrent` is the exception, and it is never absent.** It is the one
+   attribute whose absence is PERMISSIVE -- the engine reads a missing ceiling
+   as unlimited. `models.parallel`, else the worker's `OLLAMA_NUM_PARALLEL`,
+   else the managed unit's, else 1 (Residency and slots, rule 4).
 3. **The floor GATES the inventory; it does not annotate it.** Below it a
    machine advertises nothing at all, and `Discover` does not even probe.
    `memql worker models` uses `Probe` instead, so an operator can still see
@@ -417,10 +418,11 @@ silently:
    varies by release. Forever is the JSON number `-1`, never the string `"-1"`,
    which Ollama refuses. Not to be confused with `keepalive`, the liveness delta
    a call sends the cluster.
-2. **`keep_alive` alone does not make a model resident; the window does.** Ollama
-   reloads on ANY change of `num_ctx`, and the engine rounds each call up to a
-   power of two (`contextStartForCandidate`). `working_context` is a FLOOR:
-   `ollamaClient.window` never sends less, and never clamps a larger call down.
+2. **`keep_alive` alone does not make a model resident; the window does.**
+   Ollama reloads on ANY change of `num_ctx`, and the engine rounds each call up
+   to a power of two (the engine's `contextStartForCandidate`).
+   `working_context` is a FLOOR: `ollamaClient.window` never sends less, and
+   never clamps a larger call down.
 3. **The settings ride `models.Info`, never the label.** Only `max=` changes, so
    `TestWireContract` is untouched. `newDiscoverer` and `modelsRequest` are the
    only places in package worker that build a `Discoverer` or a `Request`
@@ -497,7 +499,7 @@ beside the class's chat model. The native unit sets `OLLAMA_KV_CACHE_TYPE=q8_0`;
 Ollama enables Flash Attention itself on supported devices. The recommended
 pairs are 4B below class 16, 9B at 16, 27B Q4 at 24/32, and 27B Q8 at 64/128,
 always followed by the same 0.6B embedder. The 24 GB pair is budgeted at 32K
-chat context, not every context the model supports.
+chat context with one slot, not every context the model supports.
 
 **The pull is `POST /api/pull`, NOT `ollama pull`**, and the design
 record's plan naming a subprocess was wrong on the platform its own D1
