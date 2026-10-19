@@ -45,7 +45,9 @@ def updated_policy(body):
                 continue
             match = re.fullmatch(r"    - ([A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+)\s*(?:#.*)?\n?", candidate)
             if not match:
-                break
+                if re.match(r"  [A-Za-z_][A-Za-z0-9_]*:", candidate):
+                    break
+                raise ValueError("unsupported repository allowlist item")
             repositories.append(match[1])
             cursor += 1
         replacement = lambda: lines.insert(index + 1, "    - " + REPOSITORY + "\n")
