@@ -121,16 +121,49 @@ func (s *server) Stream(stream memqlv1.WorkerService_StreamServer) error {
 	// machine for the life of the stream (epic memql#5218, D11).
 	session.startPinger()
 
+	// Recv uses gRPC's transport context, not the derived session context.
+	// A revoke, reconnect or drain must return from this handler even when
+	// the old transport is silent; returning closes it and releases Recv.
+	// Keep one reader for the stream and process messages serially here.
+	type received struct {
+		message *memqlv1.WorkerClientMessage
+		err     error
+	}
+	incoming := make(chan received)
+	go func() {
+		for {
+			msg, err := stream.Recv()
+			select {
+			case incoming <- received{message: msg, err: err}:
+			case <-session.ctx.Done():
+				return
+			}
+			if err != nil {
+				return
+			}
+		}
+	}()
 	for {
-		msg, err := stream.Recv()
-		if err != nil {
+		var next received
+		select {
+		case <-session.ctx.Done():
+			streamErr = session.ctx.Err()
+			return status.FromContextError(streamErr).Err()
+		case next = <-incoming:
+		}
+		// Cancellation wins over an inbound message delivered at the same time.
+		if err := session.ctx.Err(); err != nil {
 			streamErr = err
-			if errors.Is(err, io.EOF) {
+			return status.FromContextError(err).Err()
+		}
+		if next.err != nil {
+			streamErr = next.err
+			if errors.Is(next.err, io.EOF) {
 				return nil
 			}
-			return err
+			return next.err
 		}
-		if err := session.handle(ctx, msg, sourceIP); err != nil {
+		if err := session.handle(session.ctx, next.message, sourceIP); err != nil {
 			s.logger.Warn("worker stream message error",
 				"registration_id", session.worker.RegistrationId,
 				"error", err,
