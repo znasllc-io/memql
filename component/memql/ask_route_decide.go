@@ -33,6 +33,7 @@ import (
 	"unicode/utf8"
 
 	memorynodes "github.com/znasllc-io/memql/component/database/memory-nodes"
+	"github.com/znasllc-io/memql/core/num"
 )
 
 // The routing recipe, its structured answer, and what the recipe returns.
@@ -53,6 +54,14 @@ const (
 	askRouteReplyRunes   = 280  // the reply line
 	askRouteMessageRunes = 4000 // a message routing takes, a split-off request, and one message a goal receives (the guidance limit)
 	askRouteDecisions    = 2    // one decision and one retry
+)
+
+// How long one routing decision may take, in seconds. The recipe chooses
+// (askRouteDecide's timeoutSeconds); Go holds the choice to 1 to the longest,
+// and takes the default when the recipe chooses nothing.
+const (
+	askRouteDecideSeconds = 30
+	askRouteDecideLongest = 60
 )
 
 // askRouteDecision is a validated routing answer, its handles resolved to the
@@ -399,8 +408,8 @@ func askRouteClip(text string, limit int) string {
 // which, when it acts on nothing, is the model's own judgement that the
 // message is a new request. "intake" means no valid decision was made after
 // the one retry, and the message goes to intake as written. An error is a
-// routing failure -- no model, a timeout, a recipe that would not run -- and
-// decides nothing.
+// routing failure -- no model, a decision that ran past the deadline the
+// recipe gave it, a recipe that would not run -- and decides nothing.
 //
 // The model is called for the person on ctx, under whatever route ctx
 // carries (ApplyRunRouting). Nothing here writes: the caller applies the
@@ -423,8 +432,19 @@ func (e *MemQLEngine) decideAskRoute(ctx context.Context, data map[string]any, g
 			if refused := stringArg(args, "previousError"); refused != "" {
 				input["previousError"] = refused
 			}
-			raw, err := e.InvokeAIStructured(ctx, stringArg(args, "prompt"), input, askRouteSchemaName, askRouteSchema, true)
+			// The recipe chooses how long this decision may take and Go holds
+			// it to its bounds: the person's message waits on routing, so a
+			// routing door that does not answer in time is a routing failure,
+			// never a wait. Running out of time is said as such; the person
+			// leaving is left as the cancellation it is.
+			timeout := askRouteDecideTimeout(args)
+			attempt, cancel := context.WithTimeout(ctx, timeout)
+			defer cancel()
+			raw, err := e.InvokeAIStructured(attempt, stringArg(args, "prompt"), input, askRouteSchemaName, askRouteSchema, true)
 			if err != nil {
+				if ctx.Err() == nil && errors.Is(attempt.Err(), context.DeadlineExceeded) {
+					return nil, fmt.Errorf("no routing decision within %s: %w", timeout, err)
+				}
 				return nil, err
 			}
 			valid, err := validateAskRoute(raw, goals, pendingStops, clarification)
@@ -445,6 +465,22 @@ func (e *MemQLEngine) decideAskRoute(ctx context.Context, data map[string]any, g
 		return *decided, outcome, nil
 	}
 	return askRouteDecision{}, "", fmt.Errorf("the routing recipe returned %v without a valid decision", result)
+}
+
+// askRouteDecideTimeout is how long one routing decision may take: what the
+// recipe gives it (timeoutSeconds), held to 1 to askRouteDecideLongest
+// seconds; askRouteDecideSeconds when the recipe says nothing a number can.
+func askRouteDecideTimeout(args map[string]any) time.Duration {
+	seconds := askRouteDecideSeconds
+	switch given := args["timeoutSeconds"].(type) {
+	case int, int32, int64, float64:
+		seconds = intFromAny(given)
+	case json.Number:
+		if value, err := given.Float64(); err == nil {
+			seconds = num.ClampFloat64(value)
+		}
+	}
+	return time.Duration(min(max(seconds, 1), askRouteDecideLongest)) * time.Second
 }
 
 // scopedAskRouteOperation answers a direct call of askRouteGoals or

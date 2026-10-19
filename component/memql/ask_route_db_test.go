@@ -14,6 +14,7 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -180,6 +181,20 @@ func (f *routeFixture) checkCaller(ctx context.Context, name string) {
 	if !GoalRouteChoice(ctx, f.user).IsZero() {
 		f.stamped = append(f.stamped, name)
 	}
+}
+
+// stallRouting makes every routing call hang the way a routing door that does
+// not answer does, and gives each decision timeoutSeconds, as the recipe
+// does. letGo releases a stalled call, so a failing test never leaves one
+// behind.
+func (f *routeFixture) stallRouting(timeoutSeconds int) (letGo func()) {
+	release := make(chan struct{})
+	var once sync.Once
+	letGo = func() { once.Do(func() { close(release) }) }
+	f.t.Cleanup(letGo)
+	f.model.stall = release
+	f.e.SetScopedWorkflowRunner(askRoutingRecipeWithin(timeoutSeconds))
+	return letGo
 }
 
 // reconcile is what another turn starting in the conversation does first:
@@ -585,6 +600,69 @@ func TestRunAskFallsBackWhenRoutingIsUnavailable(t *testing.T) {
 	require.Len(t, skipped, 1)
 	require.Contains(t, skipped[0].Error, "no model is available")
 	require.Empty(t, f.guidance(goal, run))
+}
+
+// A routing call takes as long as its recipe allows and no longer. A routing
+// door that does not answer -- a person's own model that hangs -- is a routing
+// failure: the message is not held behind it, it goes to intake as written,
+// and Activity says routing was skipped because it ran out of time.
+func TestRunAskTakesTheMessageToIntakeWhenRoutingTimesOut(t *testing.T) {
+	f := newRouteFixture(t)
+	letGo := f.stallRouting(1)
+	goal, run := f.goal("weather", "What's the weather in Tucson?", "Weather in Tucson", "running")
+	var chunks []string
+	var answer string
+	var err error
+	started := time.Now()
+	finished := make(chan struct{})
+	go func() {
+		defer close(finished)
+		chunks, answer, err = f.ask("phoenix", "Actually I'm in Phoenix", AskRoute{})
+	}()
+	select {
+	case <-finished:
+	case <-time.After(15 * time.Second):
+		letGo()
+		<-finished
+		t.Fatal("the message waited on its routing call for more than 15 seconds")
+	}
+	elapsed := time.Since(started)
+	require.NoError(t, err)
+	require.GreaterOrEqual(t, elapsed, time.Second, "the routing call had its second")
+	require.Less(t, elapsed, 10*time.Second, "and no more")
+	require.Equal(t, []string{"Actually I'm in Phoenix"}, f.intake, "intake takes the message as written")
+	require.Equal(t, f.intakeAnswer, answer)
+	require.Equal(t, []string{f.intakeAnswer}, chunks)
+	turn := f.turn("phoenix")
+	require.Equal(t, "done", turn.State)
+	require.NotEmpty(t, turn.RunID)
+	require.Equal(t, &AskRouting{Skipped: "unavailable"}, turn.Routed)
+	skipped := fallbacks(turn)
+	require.Len(t, skipped, 1)
+	require.Contains(t, skipped[0].Error, "no routing decision within 1s")
+	require.Empty(t, f.guidance(goal, run), "nothing was delivered")
+}
+
+// A person who leaves while routing decides decided nothing: the turn ends
+// interrupted, as any abandoned turn does, with no skip recorded and no goal
+// opened. Leaving is not a routing call running out of time.
+func TestRunAskLeftWhileRoutingEndsInterrupted(t *testing.T) {
+	f := newRouteFixture(t)
+	f.stallRouting(30)
+	f.goal("weather", "What's the weather in Tucson?", "Weather in Tucson", "running")
+	ctx, cancel := context.WithCancel(f.ctx)
+	defer cancel()
+	// The person's stream drops while the routing model is asked.
+	f.beforeModel = cancel
+	started := time.Now()
+	_, err := f.e.RunAsk(ctx, f.conversation, "phoenix", "Actually I'm in Phoenix", "", AskRoute{}, nil, nil, nil)
+	require.ErrorIs(t, err, context.Canceled)
+	require.Less(t, time.Since(started), 10*time.Second)
+	turn := f.turn("phoenix")
+	require.Equal(t, "interrupted", turn.State)
+	require.Nil(t, turn.Routed, "leaving is not a routing failure")
+	require.Empty(t, fallbacks(turn))
+	require.Empty(t, f.intake, "no goal is opened for a message nobody waits on")
 }
 
 // Resending a turn after a dropped stream returns what was saved: the model

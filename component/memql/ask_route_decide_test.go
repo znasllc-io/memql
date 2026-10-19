@@ -12,6 +12,7 @@ import (
 	"fmt"
 	"sort"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 	"unicode/utf8"
@@ -373,11 +374,23 @@ func TestAskRouteDataRendersTheRoutingPrompt(t *testing.T) {
 type askRouteModel struct {
 	answers []string
 	err     error
+	// stall, when set, makes every call answer nothing, the way a routing
+	// door that hangs does: it waits until its context ends, or until the
+	// test closes stall to let it go.
+	stall   <-chan struct{}
 	prompts []string
 	schemas []common.StructuredSchema
 }
 
-func (m *askRouteModel) CallChatStructured(_ context.Context, messages []common.ChatMessage, schema common.StructuredSchema) (string, error) {
+func (m *askRouteModel) CallChatStructured(ctx context.Context, messages []common.ChatMessage, schema common.StructuredSchema) (string, error) {
+	if m.stall != nil {
+		select {
+		case <-ctx.Done():
+			return "", ctx.Err()
+		case <-m.stall:
+			return "", errors.New("the test let a stalled routing call go")
+		}
+	}
 	if m.err != nil {
 		return "", m.err
 	}
@@ -398,32 +411,68 @@ func (m *askRouteModel) CallChatStructured(_ context.Context, messages []common.
 // interpreter does. component/memql cannot import the interpreter
 // (workflowhost imports this package), so the installed recipe itself runs in
 // app/.
-func askRoutingRecipe(ctx context.Context, name string, _ map[string]any, ops map[string]WorkflowOperation) (any, error) {
-	if name != "askMessageRouting" {
-		return nil, fmt.Errorf("workflow %q is not the routing recipe", name)
-	}
-	goals, err := ops["askRouteGoals"](ctx, map[string]any{})
-	if err != nil {
-		return nil, err
-	}
-	if goals.(map[string]any)["count"] == 0 {
+//
+// It gives each decision the 30 seconds the installed recipe does.
+var askRoutingRecipe = askRoutingRecipeWithin(30)
+
+// askRoutingRecipeWithin is the routing recipe giving each decision
+// timeoutSeconds, as the installed one passes it.
+func askRoutingRecipeWithin(timeoutSeconds int) ScopedWorkflowRunner {
+	return func(ctx context.Context, name string, _ map[string]any, ops map[string]WorkflowOperation) (any, error) {
+		if name != "askMessageRouting" {
+			return nil, fmt.Errorf("workflow %q is not the routing recipe", name)
+		}
+		goals, err := ops["askRouteGoals"](ctx, map[string]any{})
+		if err != nil {
+			return nil, err
+		}
+		if goals.(map[string]any)["count"] == 0 {
+			return "intake", nil
+		}
+		first, err := ops["askRouteDecide"](ctx, map[string]any{"prompt": "askMessageRouting", "previousError": "", "timeoutSeconds": timeoutSeconds})
+		if err != nil {
+			return nil, err
+		}
+		if first.(map[string]any)["valid"] == true {
+			return "routed", nil
+		}
+		second, err := ops["askRouteDecide"](ctx, map[string]any{"prompt": "askMessageRouting", "previousError": first.(map[string]any)["error"], "timeoutSeconds": timeoutSeconds})
+		if err != nil {
+			return nil, err
+		}
+		if second.(map[string]any)["valid"] == true {
+			return "routed", nil
+		}
 		return "intake", nil
 	}
-	first, err := ops["askRouteDecide"](ctx, map[string]any{"prompt": "askMessageRouting", "previousError": ""})
-	if err != nil {
-		return nil, err
+}
+
+// The recipe chooses how long one routing decision may take, and Go holds it
+// to 1 to 60 seconds: 30 when the recipe says nothing a number can.
+func TestAskRouteDecideTimeout(t *testing.T) {
+	for _, c := range []struct {
+		name string
+		args map[string]any
+		want time.Duration
+	}{
+		{"what the recipe asks for", map[string]any{"timeoutSeconds": 30}, 30 * time.Second},
+		{"a decoded JSON number", map[string]any{"timeoutSeconds": float64(12)}, 12 * time.Second},
+		{"a 64-bit integer", map[string]any{"timeoutSeconds": int64(45)}, 45 * time.Second},
+		{"a number literal kept as written", map[string]any{"timeoutSeconds": json.Number("20")}, 20 * time.Second},
+		{"nothing asked", map[string]any{}, 30 * time.Second},
+		{"null", map[string]any{"timeoutSeconds": nil}, 30 * time.Second},
+		{"not a number", map[string]any{"timeoutSeconds": "soon"}, 30 * time.Second},
+		{"the least", map[string]any{"timeoutSeconds": 1}, time.Second},
+		{"zero", map[string]any{"timeoutSeconds": 0}, time.Second},
+		{"less than nothing", map[string]any{"timeoutSeconds": -5}, time.Second},
+		{"the most", map[string]any{"timeoutSeconds": 60}, time.Minute},
+		{"more than the most", map[string]any{"timeoutSeconds": 600}, time.Minute},
+		{"more than any int holds", map[string]any{"timeoutSeconds": 1e300}, time.Minute},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			require.Equal(t, c.want, askRouteDecideTimeout(c.args))
+		})
 	}
-	if first.(map[string]any)["valid"] == true {
-		return "routed", nil
-	}
-	second, err := ops["askRouteDecide"](ctx, map[string]any{"prompt": "askMessageRouting", "previousError": first.(map[string]any)["error"]})
-	if err != nil {
-		return nil, err
-	}
-	if second.(map[string]any)["valid"] == true {
-		return "routed", nil
-	}
-	return "intake", nil
 }
 
 // askRouteDecideEngine is an engine with the installed prompts, a resolver
@@ -491,6 +540,36 @@ func TestDecideAskRouteRetriesOnceThenIntake(t *testing.T) {
 		require.Equal(t, "routed", outcome)
 		require.Equal(t, routed, decision)
 		require.Len(t, model.prompts, 1)
+	})
+
+	// A decision takes as long as the recipe allows and no longer: a routing
+	// door that does not answer is a routing failure, never a wait the
+	// person's message is held behind. The failure says it ran out of time.
+	t.Run("a decision past its deadline is a routing failure", func(t *testing.T) {
+		release := make(chan struct{})
+		var letGo sync.Once
+		t.Cleanup(func() { letGo.Do(func() { close(release) }) })
+		e, _ := askRouteDecideEngine(t, &askRouteModel{stall: release})
+		e.SetScopedWorkflowRunner(askRoutingRecipeWithin(1))
+		started := time.Now()
+		done := make(chan error, 1)
+		go func() {
+			decision, outcome, err := e.decideAskRoute(userCtx("alice"), data, goals, pending, false)
+			if err == nil {
+				err = fmt.Errorf("routing decided %q: %+v", outcome, decision)
+			}
+			done <- err
+		}()
+		select {
+		case err := <-done:
+			require.ErrorIs(t, err, context.DeadlineExceeded)
+			require.ErrorContains(t, err, "no routing decision within 1s")
+			require.Less(t, time.Since(started), 10*time.Second)
+		case <-time.After(15 * time.Second):
+			letGo.Do(func() { close(release) })
+			<-done
+			t.Fatal("the routing decision outlived its deadline")
+		}
 	})
 
 	t.Run("a routing failure is an error, not a decision", func(t *testing.T) {
