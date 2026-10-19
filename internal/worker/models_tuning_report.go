@@ -1,6 +1,7 @@
 package worker
 
 import (
+	"context"
 	"fmt"
 	"io"
 	"os"
@@ -11,6 +12,7 @@ import (
 
 	"github.com/znasllc-io/memql-cockpit/internal/worker/inference"
 	"github.com/znasllc-io/memql-cockpit/internal/worker/models"
+	"github.com/znasllc-io/memql-cockpit/internal/worker/tools"
 )
 
 // The tuning half of `memql worker models`: what this machine will tell
@@ -42,6 +44,55 @@ type tuningReport struct {
 	// callout prints. Nil means the real ones.
 	LookPath      func(file string) (string, error)
 	ManagedOllama func() string
+}
+
+// tuningRuntime is what the tuning section asks the machine: the per-model
+// ceiling and where it came from, and what Ollama holds in memory now.
+// *models.Discoverer is the real one.
+type tuningRuntime interface {
+	ParallelSource(configured int) (int, string)
+	Loaded(ctx context.Context) ([]models.Loaded, error)
+}
+
+// tuningHost is everything about the machine the section reads, so the section
+// is a function of its inputs and assertable without one.
+type tuningHost struct {
+	Runtime tuningRuntime
+	// Now is the clock the expiries are measured against.
+	Now time.Time
+	// LookPath and ManagedOllama are the lookups behind the command the CPU
+	// callout prints; nil means the real ones (tuningReport).
+	LookPath      func(file string) (string, error)
+	ManagedOllama func() string
+}
+
+// printModelsTuning writes the tuning half of `memql worker models`, after the
+// inventory, and reports whether it wrote anything.
+//
+// It answers "did it take". It is printed when Ollama answered with at least
+// one model (its version is read only then), when models.resident has an entry,
+// or when the policy has a problem. Otherwise there is nothing to tune, and the
+// inventory above says why. A closed gate asks the machine nothing: a command
+// with no Ollama pays no second round trip for a section it will not print.
+//
+// This is the one place the section's inputs are gathered. Each is handed to
+// the printer by name, and TestModelsTuningSection_EveryInputReachesThePrinter
+// holds them to it: a dropped one leaves every test of the printer green and
+// gives an owner who configured something the report of one who did not.
+func printModelsTuning(ctx context.Context, w io.Writer, host tuningHost, inv models.Inventory, policy *tools.Policy) bool {
+	tuning := policy.ModelsTuning()
+	problems := policy.ModelsTuningProblems()
+	if inv.RuntimeVersions[models.KindOllama] == "" && len(tuning.Resident) == 0 && len(problems) == 0 {
+		return false
+	}
+	n, source := host.Runtime.ParallelSource(tuning.Parallel)
+	loaded, loadedErr := host.Runtime.Loaded(ctx)
+	printModelTuning(w, inv, tuningReport{
+		Parallel: n, ParallelSource: source, Problems: problems, Resident: tuning.Resident,
+		Loaded: loaded, LoadedErr: loadedErr, Now: host.Now,
+		LookPath: host.LookPath, ManagedOllama: host.ManagedOllama,
+	})
+	return true
 }
 
 // managedOllamaBinary is the ollama the managed runtime unpacked, at the path

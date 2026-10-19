@@ -80,21 +80,7 @@ func handleModels(args []string) {
 	followWorkerEnvironment(d, *configPath)
 	inv := d.Probe(ctx, modelsRequest(policy))
 	printModelInventory(os.Stdout, inv, policyPath)
-
-	// The tuning half answers "did it take". It is printed when Ollama
-	// answered with at least one model (its version is read only then), when
-	// models.resident has an entry, or when the policy has a problem. Otherwise
-	// there is nothing to tune, and the inventory above says why.
-	tuning := policy.ModelsTuning()
-	problems := policy.ModelsTuningProblems()
-	if inv.RuntimeVersions[models.KindOllama] != "" || len(tuning.Resident) > 0 || len(problems) > 0 {
-		n, source := d.ParallelSource(tuning.Parallel)
-		loaded, loadedErr := d.Loaded(ctx)
-		printModelTuning(os.Stdout, inv, tuningReport{
-			Parallel: n, ParallelSource: source, Problems: problems, Resident: tuning.Resident,
-			Loaded: loaded, LoadedErr: loadedErr, Now: time.Now(),
-		})
-	}
+	printModelsTuning(ctx, os.Stdout, tuningHost{Runtime: d, Now: time.Now()}, inv, policy)
 }
 
 // printModelInventory writes the report. Split out so the shape is
