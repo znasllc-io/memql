@@ -1049,19 +1049,26 @@ func printUsage() {
 	fmt.Println("                       is refused with exit 3 and nothing is installed.")
 }
 
-// logLevelProblems says, each time policy.yaml is read, what is wrong with
-// its apps.levels block (memql-cockpit#438).
+// logLevelProblems logs, each time policy.yaml is read -- at start, and on
+// every SIGHUP through reloadPolicy -- what is wrong with the blocks whose
+// mistakes would otherwise do nothing and say nothing. Three lists, each a
+// sentence an owner can act on:
 //
-// A refused entry also says so on every session it refuses, on the End the
-// person who asked will read. An entry for an app or a level no session
-// names says so NOWHERE else -- and an owner's entry that silently did
-// nothing reads exactly like one that worked. `memql worker apps` prints the
-// same list for an owner who is not reading this log.
-// logLevelProblems logs every problem policy.yaml's apps block has, when
-// the file is read and on every SIGHUP: the consent entries that allow
-// nothing (including the retired machine-wide apps.allow) and the levels
-// the app would misread. A consent that silently did nothing looks, from
-// the cluster, exactly like a machine with no app.
+//   - the apps consent entries that allow nothing, including the retired
+//     machine-wide apps.allow. A consent that silently did nothing looks,
+//     from the cluster, exactly like a machine with no app;
+//   - the apps.levels entries the app would misread (memql-cockpit#438). A
+//     refused entry also says so on every session it refuses, on the End the
+//     person who asked will read, but an entry for an app or a level no
+//     session names says so NOWHERE else. `memql worker apps` prints the same
+//     list for an owner who is not reading this log;
+//   - the models.parallel and models.resident entries that cannot stand, and
+//     any key under models: that nothing reads (docs/local-models.md, "Keeping
+//     a model loaded"). `memql worker models` prints this list too.
+//
+// An owner's entry that silently did nothing reads exactly like one that
+// worked, which is why every list is logged and not only the one that fails
+// loudest.
 func logLevelProblems(logger *slog.Logger, policy *tools.Policy) {
 	for _, problem := range policy.AppConsentProblems() {
 		logger.Warn("policy.yaml app consent has a problem", "problem", problem)
