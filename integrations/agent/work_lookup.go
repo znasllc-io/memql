@@ -32,7 +32,14 @@ func (r *Replier) workLookupContracts(ctx context.Context) string {
 		return ""
 	}
 	classification, _ := rows[0]["classification"].(map[string]any)
-	if classification["workload"] != "lookup" {
+	search, _ := classification["capabilitySearch"].(string)
+	search = strings.TrimSpace(search)
+	validSearch := search != "" && len(search) <= 300
+	// The compiler's action/object hint applies to every kind of owned
+	// work. Restrict only the legacy title fallback to lookup requests;
+	// otherwise artifact and research tasks pay for rediscovery despite
+	// already carrying the same authorized search intent on their run.
+	if !validSearch && classification["workload"] != "lookup" {
 		return ""
 	}
 	title, _ := classification["workTitle"].(string)
@@ -56,10 +63,8 @@ func (r *Replier) workLookupContracts(ctx context.Context) string {
 	// action/object search avoids ranking a filename or incidental words like
 	// "first" above the operation needed. Missing/invalid hints retain the
 	// ordinary bounded fallback, with no extra inference call.
-	if search, ok := classification["capabilitySearch"].(string); ok {
-		if search = strings.TrimSpace(search); search != "" && len(search) <= 300 {
-			title = search
-		}
+	if validSearch {
+		title = search
 	}
 	if strings.TrimSpace(title) == "" || len(title) > 300 {
 		return ""
