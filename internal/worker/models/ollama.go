@@ -110,13 +110,14 @@ func (d *Discoverer) probeOllama(ctx context.Context) ([]Info, string) {
 			info.ActiveParams = ollamaActiveParams(show)
 			info.ContextWindow = ollamaContextLength(show.ModelInfo)
 			info.Embeddings = hasCapability(show.Capabilities, "embedding")
-			info.Tools = hasCapability(show.Capabilities, "tools")
+			info.Tools = ollamaTools(show.Capabilities)
 			info.StructuredOutput = ollamaStructuredOutput(show.Capabilities)
 			// Vision is the ONE modality Ollama answers directly:
 			// `vision` is a capability in /api/show, beside `tools` and
 			// `embedding`. So this flag is a real probe, and it is the
-			// only one of the four that can be true on a bare Ollama.
-			info.Vision = hasCapability(show.Capabilities, "vision")
+			// only one of the four that can be true on a bare Ollama --
+			// for a model that generates text at all (ollamaGenerates).
+			info.Vision = ollamaGenerates(show.Capabilities) && hasCapability(show.Capabilities, "vision")
 			// And image generation, IF this runtime reports it. Read
 			// from the capability list rather than from anything about
 			// the model's name or the host's platform: which platforms
@@ -163,8 +164,35 @@ func (d *Discoverer) probeOllama(ctx context.Context) ([]Info, string) {
 // declared runtime they are two independent claims by the operator. A
 // single field would make the engine's tool-turn gate (D11) and its
 // schema gate the same question, which no source actually answers.
+//
+// ONLY FOR A MODEL THAT GENERATES TEXT (memql-cockpit#551). Ollama 0.40.6
+// reports qwen3-embedding:0.6b as [tools thinking embedding] -- `tools`
+// read off its template -- and the proxy turned that into tools=1 and
+// structured=1 on an embedder, so the engine sent it chat and structured
+// calls that it answered with "does not support chat". `completion` is
+// Ollama's own word for a model that can answer at all.
+//
+// And the claim is about what this MACHINE returns, not about the
+// runtime's `format` switch: a runner that does not implement `format`
+// answers 501, and modelcall then asks for the JSON in the prompt and
+// returns it only when it validates against the schema
+// (modelcall/ollama_schema.go). So a structured call this machine
+// accepts still gets schema-valid JSON or a failure, never prose.
 func ollamaStructuredOutput(capabilities []string) bool {
-	return hasCapability(capabilities, "tools")
+	return ollamaTools(capabilities)
+}
+
+// ollamaTools reports a model that can take a tool turn: one that
+// generates text and whose runtime reports `tools`.
+func ollamaTools(capabilities []string) bool {
+	return ollamaGenerates(capabilities) && hasCapability(capabilities, "tools")
+}
+
+// ollamaGenerates reports a model that can answer a chat at all: Ollama
+// lists `completion` for it. An embedding model does not, whatever else
+// its template makes the runtime report.
+func ollamaGenerates(capabilities []string) bool {
+	return hasCapability(capabilities, "completion")
 }
 
 func hasCapability(list []string, want string) bool {

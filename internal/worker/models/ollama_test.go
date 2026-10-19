@@ -297,13 +297,20 @@ func TestProbeOllama_SizeSurvivesAFailedShow(t *testing.T) {
 // no structured-output capability, so a model that reports `tools`
 // gets both claims and a model that does not gets neither. An operator
 // who disagrees declares the model under an OpenAI-compatible runtime.
+//
+// And only for a model that generates text (memql-cockpit#551): Ollama
+// 0.40.6 reports qwen3-embedding:0.6b as [tools thinking embedding], and
+// an embedder claiming tools and structured output was sent chat calls.
 func TestOllamaStructuredOutput_ToolsIsTheProxy(t *testing.T) {
 	for _, tt := range []struct {
 		caps []string
 		want bool
 	}{
 		{[]string{"completion", "tools"}, true},
-		{[]string{"TOOLS"}, true},
+		{[]string{"COMPLETION", "TOOLS"}, true},
+		{[]string{"completion", "vision", "tools", "thinking"}, true},
+		{[]string{"TOOLS"}, false},
+		{[]string{"tools", "thinking", "embedding"}, false},
 		{[]string{"completion"}, false},
 		{[]string{"embedding"}, false},
 		{nil, false},
@@ -311,9 +318,26 @@ func TestOllamaStructuredOutput_ToolsIsTheProxy(t *testing.T) {
 		if got := ollamaStructuredOutput(tt.caps); got != tt.want {
 			t.Errorf("ollamaStructuredOutput(%v) = %t, want %t", tt.caps, got, tt.want)
 		}
-		if got := hasCapability(tt.caps, "tools"); got != tt.want {
+		if got := ollamaTools(tt.caps); got != tt.want {
 			t.Errorf("tools from %v = %t, want %t -- the two must move together", tt.caps, got, tt.want)
 		}
+	}
+}
+
+// TestOllamaEmbedderClaimsNothingButEmbeddings is the probe as Ollama 0.40.6
+// answered it for the two recommended models on a Mac (memql-cockpit#551).
+func TestOllamaEmbedderClaimsNothingButEmbeddings(t *testing.T) {
+	srv := modalityStub(t, map[string][]string{
+		"qwen3.8:27b":          {"completion", "vision", "tools", "thinking"},
+		"qwen3-embedding:0.6b": {"tools", "thinking", "embedding"},
+	})
+	got := probeAll(t, srv.URL)
+	chat, embed := got["qwen3.8:27b"], got["qwen3-embedding:0.6b"]
+	if !chat.Tools || !chat.StructuredOutput || !chat.Vision || chat.Embeddings {
+		t.Errorf("the chat model must keep its claims: %+v", chat.Attributes)
+	}
+	if !embed.Embeddings || embed.Tools || embed.StructuredOutput || embed.Vision {
+		t.Errorf("an embedder must claim embeddings and nothing a chat needs: %+v", embed.Attributes)
 	}
 }
 
