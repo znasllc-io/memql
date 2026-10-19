@@ -143,6 +143,6 @@ export function fleetEquipmentScenes(Frame: Frame) {
 function EquipmentScene() {
   const { actions } = useOs();
   useEffect(() => { actions.setThemePack(resolveThemePack(new URLSearchParams(window.location.search).get("theme") ?? "graphite").id); }, [actions]);
-  const [section, setSection] = useState("machines");
+  const [section, setSection] = useState(new URLSearchParams(window.location.search).get("section") ?? "machines");
   return <FleetApp sectionId={section} navigate={setSection} askContext={() => {}} store={{ load: () => ({ version: 1, defaultSection: "machines", showRevoked: false }), save: () => {} }} />;
 }

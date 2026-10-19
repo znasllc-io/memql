@@ -164,6 +164,11 @@ budget, an account with no personal limit, passkey-only sign-in and computer
 use switched off. `&click=fill:Last%20name=Byron` shows Save appearing on a
 change.
 
+The `fleet-equipment-*` views open the whole Fleet app on Machines; add
+`section=models`, `routing`, `apps`, `workbenches`, `logs` or `settings` to open
+another Fleet section instead, for checks that span the app (such as the space
+under each page title).
+
 The `feedback` view shows information, warning and error notices, an actionable
 retry, domain errors and a removed-machine status. Check `theme=graphite`,
 `cobalt` and `vellum`, light/dark modes, and desktop/phone widths. Tone rails
