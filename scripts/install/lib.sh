@@ -369,7 +369,7 @@ function install_ui_finish() {
     esac
     case "${INSTALL_PERMISSIONS_STATE:-off}" in
         skipped|failed)
-            printf '\n  Computer use needs Accessibility and Screen Recording: %s\n  Turn them on from MemQL in the menu bar, then Set Up Permissions.\n' \
+            printf '\n  Computer use needs Accessibility and Screen Recording: %s\n  Turn them on from MemQL in the menu bar → macOS permissions → Set Up Permissions…\n' \
                 "${INSTALL_PERMISSIONS_REASON:-they are not allowed yet.}" >&3
             ;;
     esac
