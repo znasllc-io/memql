@@ -58,7 +58,11 @@ export function MachineModels({ machine, navigation }: { machine: MachineRow; st
   const [purpose, setPurpose] = useState("");
   const [availability, setAvailability] = useState("all");
   const choices = draft ?? view?.choices ?? {};
-  const capacity = setupCapacity(choices, view?.catalog ?? [], view?.usableBytes ?? 0);
+  // AN AUTOMATIC SETUP SAVES NO CHOICES, yet MemQL still loads a model for each
+  // task: the picks the engine suggests, which Edit starts from. Measuring the
+  // empty saved choices instead drew an empty bar until someone saved a setup.
+  const automatic = !!view && !view.revision && draft === null;
+  const capacity = setupCapacity(automatic ? view.suggestedChoices : choices, view?.catalog ?? [], view?.usableBytes ?? 0);
   const profile = view?.catalog.find(m => m.modelId === selected);
   const localModel = installed.find(m => m.modelId === selected);
   const editing = draft !== null;
@@ -102,7 +106,7 @@ export function MachineModels({ machine, navigation }: { machine: MachineRow; st
     <AutoRefresh enabled={feedIsBehind(downloads.state, downloads.feedError)} busy={downloads.loading} onRefresh={downloads.reseed} />
     <PageHelp title="Models on this machine">
       <p>Installed models occupy storage. Your setup chooses which model serves each task. One model can serve several tasks; its memory counts once. Automatic means MemQL chooses among the models this machine offers.</p>
-      <p>Memory is a planning estimate at up to 32K context, with room left for the operating system. It is not a live measurement. Saved setups limit subsequent calls to that context and run one model call at a time. Other applications and larger images can change actual use.</p>
+      <p>Memory is a planning estimate at up to 32K context, with room left for the operating system. It is not a live measurement. With Automatic, it counts the model MemQL picks for each task. Saved setups limit subsequent calls to that context and run one model call at a time. Other applications and larger images can change actual use.</p>
       <p>Catalog recommendations favor local models that fit. Installing does not change your setup. Existing memory search keeps its bound model; switching it requires a separate reindex.</p>
       <p>In Model setup, select an installed model and click a task, or drag the model onto it. Highlighted tasks use the selected model. Plain solid borders mark available assignments; dashed borders mark unavailable ones. Use matching tasks to share one model across them. Save setup applies the choices to new calls; existing work finishes.</p>
       <p>Catalog research can review primary sources weekly using a local model. It starts off and must be enabled separately. It cannot install models or change your choices.</p>
@@ -143,13 +147,13 @@ export function MachineModels({ machine, navigation }: { machine: MachineRow; st
       {view ? <>
         <MachineDetailsSection title="Capacity">
           <div className="fleet-models-capacity" aria-label="Model memory estimate">
-            <div><strong>{view.revision || editing ? capacity.known ? formatBytes(capacity.used) : "Unverified" : "Automatic"}</strong><span>{view.revision || editing ? `of ${formatBytes(view.usableBytes)} for models` : `${formatBytes(view.usableBytes)} available for models`}</span></div>
+            <div><strong>{capacity.known ? formatBytes(capacity.used) : "Unverified"}</strong><span>{`of ${formatBytes(view.usableBytes)} for models`}</span></div>
             <div><strong>{view.diskFreeBytes ? formatBytes(view.diskFreeBytes) : "Not reported"}</strong><span>free storage</span></div>
           </div>
-          <div className="fleet-models-capacity-track" role="meter" aria-label="Planned model memory" aria-valuemin={0} aria-valuemax={view.usableBytes || 1} aria-valuenow={Math.min(capacity.used,view.usableBytes)} aria-valuetext={!view.revision && !editing ? "Automatic setup; no memory reservation" : `${formatBytes(capacity.used)} planned`} data-over={!capacity.fits}>
+          <div className="fleet-models-capacity-track" role="meter" aria-label="Planned model memory" aria-valuemin={0} aria-valuemax={view.usableBytes || 1} aria-valuenow={Math.min(capacity.used,view.usableBytes)} aria-valuetext={`${formatBytes(capacity.used)} planned${automatic ? " automatically" : ""}`} data-over={!capacity.fits}>
             {capacity.selected.map(id => { const m = view.catalog.find(item => item.modelId === id); return <span key={id} title={`${id}: ${m?.memoryBytes ? formatBytes(m.memoryBytes) : "unverified"}`} style={{ width: `${view.usableBytes ? Math.min(100,(m?.memoryBytes ?? 0)/view.usableBytes*100) : 0}%` }} />; })}
           </div>
-          <p className="os-caption">{editing && !capacity.fits ? "Choose smaller models or reuse one across tasks." : "Memory estimate · room left for your system"}</p>
+          <p className="os-caption">{editing && !capacity.fits ? "Choose smaller models or reuse one across tasks." : automatic ? "Memory estimate for MemQL’s automatic picks · room left for your system" : "Memory estimate · room left for your system"}</p>
         </MachineDetailsSection>
         {installed.length > 0 || view.revision ? <MachineDetailsSection title="Model setup">
           <div className="fleet-models-setup-title"><span className="os-caption">{view.revision ? "Your choices" : "MemQL chooses automatically"}</span>
