@@ -58,6 +58,9 @@ func (l *candidateLedger) beginPublication(ctx context.Context, key, approvalID,
 	if approvalID == "" || approvalID != storedApproval || approvedBy != owner {
 		return candidatePublication{}, errors.New("publication approval does not match this candidate")
 	}
+	if err := requireCurrentCandidate(ctx, tx, key); err != nil {
+		return candidatePublication{}, err
+	}
 	intent, err := candidatePublicationFor(rec, target, component, artifact)
 	if err != nil {
 		return candidatePublication{}, err
@@ -131,6 +134,9 @@ func (l *candidateLedger) finishPublication(ctx context.Context, intent candidat
 	}
 	if rec.State != "approved" {
 		return errors.New("publication candidate is no longer approved")
+	}
+	if err := requireCurrentCandidate(ctx, tx, rec.ID); err != nil {
+		return err
 	}
 	expected, err := candidatePublicationFor(rec, intent.Target.TargetID, intent.Target.Component, intent.Target.Artifact)
 	if err != nil {
