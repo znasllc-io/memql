@@ -24,7 +24,7 @@ and production evidence are complete.
 
 Production currently serves **v0.29.33**, through instance commit
 `a10f5ce4ec82bfb23dd1d5ed96844c2790763592`. Engine main is
-`37f6bcc700b58b6f9799fe46c4be3842c8189834`. The v0.29.31 full native pass
+`66488da438051fc326c7114f21910eb954946bd3` (v0.29.34). The v0.29.31 full native pass
 below remains valid historical acceptance evidence; it is no longer the serving
 release. Engine **v0.30.0** is prepared in #6200 and is not deployed. The
 independent v0.29.33 rollout at 06:56 UTC replaced Agent while the editor
@@ -38,7 +38,10 @@ Its Agent artifact receiver fix is now deployed with the already configured
 Instance #232 and #239 are also deployed. All three Argo applications report
 Healthy/Synced, with both Agent and Workbench replicas ready. No CPU, memory,
 node or quota increase accompanies these changes. All four pipeline connections
-are active again with their original webhook delivery after poll catch-up.
+were restored with their original webhook delivery at 09:10 UTC after poll
+catch-up. Another session disconnected them at 09:25–09:27 UTC; the restart
+is being coordinated with that session. At 09:54 UTC no unfinished native
+runs, execution Jobs or Argo operations remained.
 
 The independent instance rollout at 08:31–08:32 UTC restarted Agent and
 Workbench while qualification was active, despite unchanged executor images.
@@ -61,11 +64,14 @@ without merge and their branches and worktrees removed. Instance execution
 now permits cluster and fleet work.
 
 Cockpit v0.20.0 remains unpublished after a full release attempt encountered
-Docker's temporarily unavailable memory statistics. Cockpit #554 prepares
-v0.20.1: three bounded sample attempts, fresh daemon identity checks and
+Docker's temporarily unavailable memory statistics. Cockpit #554 merged as `babaf7752cbb4cbe315ecea1be7ad89c1104c180`
+at 09:51 UTC and prepares v0.20.1: three bounded sample attempts, fresh daemon identity checks and
 fail-closed admission when measurement remains unavailable. The complete local
-race suite, including real Docker isolation, passes; native qualification is
-still pending. The immutable v0.20.0 tag is not reused.
+race suite, including real Docker isolation, passes. Native run
+`3a01154b260a42500e89ccf89e5749b4` passed all 12 steps with retained logs
+and eight artifacts, including the actual Mac tests. Both Cockpit rulesets
+were independently verified before merge. Release build and public download
+verification are still pending. The immutable v0.20.0 tag is not reused.
 
 The final runtime now includes bounded repository maintenance: retained JSON
 proposals, exact operator-owned repository/file grants, fresh signed-actor and
