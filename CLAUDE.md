@@ -635,9 +635,27 @@ whole-model bytes rather than the part in flight.
 or an older one, changes nothing about the install. **Silence is not
 progress**: a running stage is re-sent every thirty seconds, so a report
 quiet for two minutes is carried as `stopped`, an installer that is gone.
-**It lives in memory**: a worker restart loses the plan, the next stage
-report rebuilds what is left, and the earlier stages' results are on the
-registration by then anyway.
+
+**The person's turn comes first** (memql-cockpit#548). On a computer-use Mac
+the plan starts with `permissions`: `worker setup --permissions`
+(`setup_permissions.go`) opens the Permissions window and waits until both
+grants are reported by the WORKER (MemQL.app holds them, never the setup
+process) or the person chooses to go on without them -- **Skip for now** /
+**Continue without X** in the window, or Return in the terminal. No timeout
+decides for them; with no terminal it does not ask at all (exit 3, stage
+failed "Not asked"). The window's choice is an ANSWER on the control socket
+(`--stage=permissions --answer=skip`), never a stage report, so the setup
+command's keepalive cannot overwrite it; the setup command reads the answer
+back from `worker control --action=status` and reports how the stage ended.
+**It survives a restart**: Screen Recording needs one mid-install, so the
+report (with answers) is kept in `setup.json` at the machine's state root and
+read back at start; an install with no stage sends `--reset`, so an earlier
+install's report does not stand for it. **A step reaches the cluster at
+once**: a report that changes a step (plan, a stage's state or sentence, an
+answer, the end) asks every home for a heartbeat now, at most one a second,
+and a stream that opens while an install runs beats immediately (Register
+carries no report). These beats do not prove the stream; only the cadence
+does. The engine writes a changed step ahead of its batch interval too.
 
 ## Watched-folder backup (memql#4841)
 

@@ -92,7 +92,7 @@ func NewFleet(opts FleetOptions) (*Fleet, error) {
 	if limiter == nil {
 		limiter = modelcall.NewLimiter()
 	}
-	return &Fleet{
+	f := &Fleet{
 		logger:      opts.Logger,
 		workers:     opts.Workers,
 		workersPath: opts.WorkersPath,
@@ -106,9 +106,26 @@ func NewFleet(opts FleetOptions) (*Fleet, error) {
 		discoverer:  opts.Discoverer,
 		metrics:     opts.Metrics,
 		limiter:     limiter,
-		setup:       newSetupTracker(time.Now),
+		setup:       loadSetupTracker(time.Now, setupReportPath(opts.Workers.StateDir)),
 		newRunner:   NewRunner,
-	}, nil
+	}
+	f.setup.onStep = f.requestSetupBeat
+	return f, nil
+}
+
+// requestSetupBeat asks every home for a heartbeat now: the installer's
+// report changed a step (setupprogress.go), and each cluster should hear it
+// at once rather than at its next tick.
+func (f *Fleet) requestSetupBeat() {
+	if f == nil {
+		return
+	}
+	f.mu.Lock()
+	runners := append([]*Runner(nil), f.runners...)
+	f.mu.Unlock()
+	for _, r := range runners {
+		r.RequestBeat()
+	}
 }
 
 // RequestImmediateReadvertise fans out to every home stream so a

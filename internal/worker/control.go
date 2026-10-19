@@ -53,6 +53,10 @@ type LocalStatus struct {
 	BundlePath               string            `json:"bundle_path,omitempty"`
 	PermissionRequests       bool              `json:"permission_requests"`
 	PermissionRequestPending bool              `json:"permission_request_pending"`
+	// Setup is the installer's report (setupprogress.go), with the person's
+	// answers: what the Permissions window reads to know that setup is
+	// waiting on it, and what `worker setup --permissions` reads back.
+	Setup *LocalSetup `json:"setup,omitempty"`
 }
 
 func permissionLabel(d permissionDecision) string {
@@ -73,6 +77,7 @@ func (f *Fleet) LocalStatus() LocalStatus {
 	status.BundleID, status.BundlePath = currentWorkerBundle()
 	status.PermissionRequests = permissionRequestsSupported()
 	status.PermissionRequestPending = localPermissionRequests.pending.Load()
+	status.Setup = f.setup.Local()
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	for _, home := range f.workers.Homes {
@@ -409,8 +414,11 @@ func handleControl(args []string) {
 	pid := fs.Int("pid", 0, "expected worker process ID, required for request-permission")
 	home := fs.String("home", "", "configured server ID")
 	enabled := fs.String("enabled", "", "true to allow connecting, false to pause")
-	plan := fs.String("plan", "", "for setup: the stages the installer will run, comma-separated (runtime, models, workbench)")
+	plan := fs.String("plan", "", "for setup: the stages the installer will run, comma-separated (permissions, runtime, models, workbench)")
 	finished := fs.Bool("finished", false, "for setup: the installer has finished")
+	reset := fs.Bool("reset", false, "for setup: this install runs no stage; forget what an earlier one reported")
+	stage := fs.String("stage", "", "for setup with --answer: the stage waiting on the person (permissions)")
+	answer := fs.String("answer", "", "for setup: the person's choice for --stage (skip: go on without what is not allowed yet)")
 	wait := fs.Duration("wait", 0, "for setup: keep trying this long while the worker is still starting")
 	if err := fs.Parse(args); err != nil {
 		if errors.Is(err, flag.ErrHelp) {
@@ -428,7 +436,7 @@ func handleControl(args []string) {
 		request.Enabled = &v
 	}
 	if request.Action == "setup" {
-		request.Setup = setupControlFromFlags(*plan, *finished)
+		request.Setup = setupControlFromFlags(*plan, *finished, *reset, *stage, *answer)
 	}
 	response, err := callControl(defaultControlPath(), request)
 	// The installer reports its plan the moment it has started the worker,
@@ -472,15 +480,21 @@ func homeOSURL(home Home) string {
 }
 
 // setupControlFromFlags is `worker control --action=setup`'s report: the
-// plan when --plan names stages, otherwise the end when --finished is set.
-// A report that is neither is sent as such and refused by the worker, which
-// says why.
-func setupControlFromFlags(plan string, finished bool) *SetupControl {
-	c := &SetupControl{Finished: finished && strings.TrimSpace(plan) == ""}
+// plan when --plan names stages, otherwise the person's answer when --answer
+// is set, otherwise the end or a reset. A report that is none of them, or
+// more than one, is sent as such and refused by the worker, which says why.
+func setupControlFromFlags(plan string, finished, reset bool, stage, answer string) *SetupControl {
+	c := &SetupControl{}
 	for _, name := range strings.Split(plan, ",") {
 		if name = strings.TrimSpace(name); name != "" {
 			c.Plan = append(c.Plan, name)
 		}
+	}
+	if strings.TrimSpace(answer) != "" {
+		c.Answer = &SetupAnswer{Stage: strings.TrimSpace(stage), Choice: strings.TrimSpace(answer)}
+	}
+	if len(c.Plan) == 0 && c.Answer == nil {
+		c.Finished, c.Reset = finished, reset
 	}
 	return c
 }

@@ -540,6 +540,8 @@ var setupNonInteractive bool
 // TestSetupFlags.
 type setupFlags struct {
 	workbench      bool
+	permissions    bool
+	noWindow       bool
 	nonInteractive bool
 	inference      bool
 	configPath     string
@@ -551,6 +553,8 @@ func parseSetupFlags(args []string) setupFlags {
 	fs := flag.NewFlagSet("worker setup", flag.ExitOnError)
 	nonInteractive := fs.Bool("non-interactive", false, "never prompt; report what is missing and exit 3 (a question could not be asked), 4 (not granted) or 5 (probe failed)")
 	workbench := fs.Bool("workbench", false, "enable isolated Fleet workbenches with resource limits")
+	permissions := fs.Bool("permissions", false, "macOS: open the Permissions window and wait until Accessibility and Screen Recording are allowed, or the person chooses to go on without them")
+	noWindow := fs.Bool("no-window", false, "with --permissions: send the person to System Settings instead of the Permissions window")
 	inference := fs.Bool("inference", false, "set this machine up to serve local models: runtime, models, models.allow")
 	configPath := fs.String("config", DefaultConfigPath(), "path to worker.yaml (its directory holds policy.yaml)")
 	runtimeFlag := fs.String("runtime", "", "with --inference: docker | native, overriding the runtime this platform would choose. On its own: kokoro | image, to install that runtime")
@@ -559,6 +563,7 @@ func parseSetupFlags(args []string) setupFlags {
 	_ = fs.Parse(args)
 	return setupFlags{
 		workbench: *workbench, nonInteractive: *nonInteractive,
+		permissions: *permissions, noWindow: *noWindow,
 		inference:   *inference,
 		configPath:  *configPath,
 		runtimeFlag: *runtimeFlag,
@@ -627,6 +632,16 @@ func wrapJoin(text string) string {
 func handleSetup(args []string) {
 	f := parseSetupFlags(args)
 	setupNonInteractive = f.nonInteractive
+	if f.permissions {
+		if f.workbench || f.inference || f.runtimeFlag != "" || len(f.modelIDs) > 0 {
+			fmt.Fprintln(os.Stderr, "Run --permissions separately from the other setup stages.")
+			os.Exit(SetupExitUsage)
+		}
+		// The installer's first stage on a computer-use Mac
+		// (memql-cockpit#548): it waits for the person before anything
+		// downloads, and reports itself while it does.
+		os.Exit(runPermissionsSetup(f.noWindow, f.nonInteractive))
+	}
 	if f.workbench {
 		if f.inference || f.runtimeFlag != "" || len(f.modelIDs) > 0 {
 			fmt.Fprintln(os.Stderr, "Run --workbench separately from model setup.")
