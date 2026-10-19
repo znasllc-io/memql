@@ -270,7 +270,7 @@ review rather than executing changed code under an old approval.
 
 Since 0.29.36, an approved file-only release can resume an existing ready draft
 after an engine or workflow upgrade. Prepare and approve a new candidate, then
-use **Create or verify draft** for that candidate. All sources, versions,
+create or verify its draft. All sources, versions,
 artifacts, evidence and destinations must remain identical. The operation keeps
 the original remote release ID and recovery marker, carries forward completed
 publication receipts, and permanently fences the previous candidate from new
