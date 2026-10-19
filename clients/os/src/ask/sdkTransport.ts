@@ -2,7 +2,7 @@ import { startAskVoice, type AskVoiceOptions } from "@znasllc-io/memql-sdk-core/
 import { aiChatStream, type AiChatOptions, type AiChatMessage } from "@znasllc-io/memql-sdk-core/ai";
 import { QueryClient, type Dispatcher } from "@znasllc-io/memql-sdk-core/client";
 import { flatten } from "../kit/rows";
-import type { AskCallbacks, AskHandle, AskOptions, AskTransport, WorkGuidanceRequest, WorkGuidanceReceipt } from "./askController";
+import type { AskCallbacks, AskHandle, AskOptions, AskTransport } from "./askController";
 import type { ApprovalDiscussion, AskActivity, AskConversationStore, AskTurn, ConversationSummary } from "./conversationSession";
 import { routeOptionsFrom, type AskRouteOption } from "./askRoute";
 
@@ -80,12 +80,14 @@ export class SdkAskTransport implements AskTransport {
     return flatten(row) as unknown as ApprovalDiscussion;
   };
 
-  guideWork = async (request: WorkGuidanceRequest): Promise<WorkGuidanceReceipt> => {
+  // The cluster answers with the decision it saved. The same answer again
+  // returns it, so trying again after a lost reply is safe.
+  decideStop = async (request: { conversationId: string; turnId: string; runId: string; decision: "stop" | "keep" }) => {
     const dispatcher = this.dispatcher();
     if (!dispatcher) throw new Error("Not connected to the cluster.");
-    const row = (await new QueryClient(dispatcher).askGuideWork(request)).rows()[0];
-    if (!row) throw new Error("The cluster did not confirm this guidance. Retry to check the original message.");
-    return flatten(row) as unknown as WorkGuidanceReceipt;
+    const row = (await new QueryClient(dispatcher).askStopDecision(request)).rows()[0];
+    const receipt = row ? flatten(row) : null;
+    if (receipt?.decision !== (request.decision === "stop" ? "stopped" : "kept")) throw new Error("The cluster did not confirm this decision. Try again.");
   };
 
   approvalMessage = async (request: { approvalId: string; conversationId: string; requestId: string; prompt: string; advisor?: boolean }) => {

@@ -34,7 +34,7 @@ export function AskActivityLog({ turns, dictation = [], onClose, onStop }: { tur
 
 function activityName(event: AskActivity): string {
   if (event.kind === "run") return "Request";
-  const purpose = event.call?.purpose || event.name || ({ goalComplexityTriage: "Understanding request", authoringDesign: "Designing automation", authoringEmit: "Writing automation", authoringRepair: "Repairing automation" } as Record<string, string>)[event.call?.promptName ?? ""];
+  const purpose = event.call?.purpose || event.name || ({ goalComplexityTriage: "Understanding request", askMessageRouting: "Routing message", authoringDesign: "Designing automation", authoringEmit: "Writing automation", authoringRepair: "Repairing automation" } as Record<string, string>)[event.call?.promptName ?? ""];
   if (purpose) return event.call?.attempt ? `${purpose} · attempt ${event.call.attempt}` : purpose;
   return event.kind === "model" ? "Generating response" : "Action";
 }

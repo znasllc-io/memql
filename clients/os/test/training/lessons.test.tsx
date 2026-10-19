@@ -37,7 +37,7 @@ const candidate: Lesson = {
     turnId: "guidance",
     runId: "run",
     quote: "Check which gate refused the action.",
-    status: "applied",
+    status: "received",
     at: "2026-10-15T00:00:00Z",
   },
   review: "candidate",
@@ -57,8 +57,20 @@ describe("manual lesson review", () => {
         candidate,
       ]),
     ).toEqual([rejected]);
-    expect(guidanceReceiptLabel("applied")).toBe("Received by this work.");
-    expect(guidanceReceiptLabel("not-received")).toContain("Not received");
+  });
+  it("says what the work did with the guidance a lesson came from", () => {
+    expect(
+      ["queued", "received", "answered", "notApproved", "saved", "notDelivered", "notReceived", "applied"].map(guidanceReceiptLabel),
+    ).toEqual([
+      "Queued for the next safe boundary.",
+      "Received by this work.",
+      "Answered.",
+      "Sent as a correction; nothing was approved.",
+      "Saved until the limit is raised.",
+      "Not delivered.",
+      "Not received. This work ended or changed.",
+      "Queued for the next safe boundary.",
+    ]);
   });
   it("preserves an edited draft when a decision fails, without claiming success", async () => {
     const save = vi.fn().mockRejectedValue(new Error("lesson changed"));

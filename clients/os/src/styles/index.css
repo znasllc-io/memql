@@ -15194,15 +15194,33 @@ button[data-ask-control="running"], [data-ask-control="running"] > button { outl
 .os-ask-discussion-actions > div { display: flex; flex-wrap: wrap; gap: 8px; }
 .os-ask-guidance-notice { margin: 0 18px 10px; font-size: var(--os-text-sm); color: var(--os-muted); }
 .os-ask-work-queue { display: grid; gap: 6px; margin: 0 18px 10px; max-height: 32vh; overflow-y: auto; }
-.os-ask-work-card { display: flex; align-items: center; gap: 10px; width: 100%; padding: 10px 12px; border: 1px solid var(--os-line); border-radius: var(--os-radius-sm); color: var(--os-ink); background: var(--os-plate); text-align: left; font: inherit; cursor: pointer; }
-.os-ask-work-card:hover { background: var(--os-hover); }
-.os-ask-work-card:focus-visible { outline: 2px solid var(--os-accent); outline-offset: -2px; }
+/* A card holds the control that opens its work and, when a message asked to
+ * drop that work, the question that stops it: siblings, never one inside the
+ * other. */
+.os-ask-work-card { display: grid; border: 1px solid var(--os-line); border-radius: var(--os-radius-sm); background: var(--os-plate); overflow: hidden; }
+.os-ask-work-open { display: flex; align-items: center; gap: 10px; width: 100%; padding: 10px 12px; border: 0; color: var(--os-ink); background: transparent; text-align: left; font: inherit; cursor: pointer; }
+.os-ask-work-open:hover { background: var(--os-hover); }
+.os-ask-work-open:focus-visible { outline: 2px solid var(--os-accent); outline-offset: -2px; }
 .os-ask-work-body { flex: 1; min-width: 0; display: grid; gap: 4px; }
 .os-ask-work-body > strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: var(--os-text-sm); font-weight: 500; }
-.os-ask-work-card > svg:last-child { margin-left: auto; flex: none; color: var(--os-muted); }
+.os-ask-work-open > svg:last-child { margin-left: auto; flex: none; color: var(--os-muted); }
+/* The stop question: its sentence, then Keep and Stop on the card's right edge
+ * (DESIGN.md rule 8), wrapping beneath the sentence when the card is narrow. */
+.os-ask-work-stop { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px 14px; padding: 8px 12px; border-top: 1px solid var(--os-line); }
+.os-ask-work-stop > .os-caption { flex: 1 1 auto; }
+.os-ask-work-stop-acts { display: flex; gap: 8px; margin-left: auto; }
 
 
 .os-ask-message .os-ask-result-context { color: var(--os-muted); font-size: var(--os-text-sm); font-weight: 500; line-height: 1.5; margin: 0 0 8px; }
+/* Where a message went: one quiet line per goal beneath it, in the result
+ * context's size. A split message's reply is its own paragraph before the new
+ * request's answer. */
+.os-ask-message p.os-ask-route-label { color: var(--os-muted); font-size: var(--os-text-sm); line-height: 1.5; }
+.os-ask-message p:not(.os-ask-route-label) + .os-ask-route-label { margin-top: 4px; }
+.os-ask-message .os-ask-route-reply + * { margin-top: .65em; }
+/* Propose lesson under a message: an action at its own width, not a bar. */
+.os-ask-message .os-app-stack { margin-top: 8px; }
+.os-ask-message .os-app-stack > .os-button { align-self: flex-start; }
 
 .os-ask-answer-with-link > p:nth-last-child(2) { display: inline; }
 .os-ask-work-link { display: inline-flex; align-items: center; justify-content: center; width: 24px; height: 24px; margin-inline-start: 4px; padding: 0; vertical-align: text-bottom; border: 0; border-radius: var(--os-radius-sm); background: transparent; color: var(--os-muted); cursor: pointer; }

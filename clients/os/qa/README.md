@@ -353,11 +353,25 @@ with **Retry continuing** using the saved answer. The history scene shows
 These scenes use synthetic conversation and permission receipts; they never
 approve production work, run commands, or call a model.
 
-`/ask-guidance.html?budget=1` shows a resumable budget discussion. Use
+`/ask-routing.html` mounts the real Ask surface over a synthetic conversation
+whose messages went to goals already running. `scene=labels` shows one
+"To <goal> · <status>" line per goal under each message, across every status;
+`split` says the reply before a split request's own answer (`state=quick`
+answers it inline); `stop` puts "Stop this work? It can't be resumed." with
+Keep and Stop on the goal's card (`state=pending` holds an answer in flight,
+`state=error` shows a refusal that stays while the question waits); `many`
+keeps a card that asks out of the "N tasks in progress" fold. Nothing is
+routed, stopped or sent to a model. Inspect both modes at desktop and 820px
+widths and with `narrow=1`, where Keep and Stop wrap beneath the question on
+the card's right edge.
+
+`/ask-routing.html?budget=1` shows a resumable budget discussion. Use
 `state=saved`, `state=pending`, or `state=error` to review saved guidance,
 an in-flight save, and a retryable save with the original draft retained.
 Saving keeps the request pending; it never raises a limit or resumes work.
 Inspect both modes and a narrow viewport, including the saved-text disclosure.
+The same page keeps the general Ask states: `scene=empty`, `pending`, `quick`,
+`error`, `format-error` and `model-error`.
 
 `/ask-message-field.html` mounts the real Ask surface over a synthetic
 conversation to review the message field. `scene=empty`, `multiline` (the
