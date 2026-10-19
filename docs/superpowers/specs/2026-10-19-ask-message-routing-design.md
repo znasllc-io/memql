@@ -83,9 +83,9 @@ on one replica and execution on another needs no in-memory state.
 automation askMessageRouting {
  goals := builtin askRouteGoals()
  if goals.count == 0 { return "intake" }
- first := builtin askRouteDecide(prompt: "askMessageRouting", previousError: "", timeoutSeconds: 30)
+ first := builtin askRouteDecide(prompt: "askMessageRouting", previousError: "", timeoutSeconds: 600)
  if first.valid { return "routed" }
- second := builtin askRouteDecide(prompt: "askMessageRouting", previousError: first.error, timeoutSeconds: 30)
+ second := builtin askRouteDecide(prompt: "askMessageRouting", previousError: first.error, timeoutSeconds: 600)
  if second.valid { return "routed" }
  return "intake"
 }
@@ -93,9 +93,12 @@ automation askMessageRouting {
 
 `askRouteGoals` and `askRouteDecide` are scoped operations: declared as
 builtins, refused outside their workflow scope (like `routingProposalCatalog`).
-The recipe sets each attempt's deadline (`timeoutSeconds`, clamped by Go to
-1..60, 30 when absent); a timeout is a routing failure and the message goes to
-intake.
+The recipe sets each attempt's deadline (`timeoutSeconds`, waiting for a model
+included, clamped by Go to 1..600, 600 when absent: the Spine classification's
+budget); a timeout is a routing failure and the message goes to intake. A
+shorter deadline was tried first and failed in local testing (2026-10-19): on
+one local model the running goal held the model for longer than 30 s, routing
+gave up, and intake opened a second goal behind the same model.
 
 ### The routing prompt
 

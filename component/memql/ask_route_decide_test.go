@@ -474,19 +474,21 @@ func TestAskRouteDecideTimeout(t *testing.T) {
 		args map[string]any
 		want time.Duration
 	}{
-		{"what the recipe asks for", map[string]any{"timeoutSeconds": 30}, 30 * time.Second},
+		// A routing call waits for a shared local model as long as the Spine's
+		// classification does: the goal being corrected may hold that model.
+		{"what the recipe asks for", map[string]any{"timeoutSeconds": 600}, 10 * time.Minute},
 		{"a decoded JSON number", map[string]any{"timeoutSeconds": float64(12)}, 12 * time.Second},
 		{"a 64-bit integer", map[string]any{"timeoutSeconds": int64(45)}, 45 * time.Second},
 		{"a number literal kept as written", map[string]any{"timeoutSeconds": json.Number("20")}, 20 * time.Second},
-		{"nothing asked", map[string]any{}, 30 * time.Second},
-		{"null", map[string]any{"timeoutSeconds": nil}, 30 * time.Second},
-		{"not a number", map[string]any{"timeoutSeconds": "soon"}, 30 * time.Second},
+		{"nothing asked", map[string]any{}, 10 * time.Minute},
+		{"null", map[string]any{"timeoutSeconds": nil}, 10 * time.Minute},
+		{"not a number", map[string]any{"timeoutSeconds": "soon"}, 10 * time.Minute},
 		{"the least", map[string]any{"timeoutSeconds": 1}, time.Second},
 		{"zero", map[string]any{"timeoutSeconds": 0}, time.Second},
 		{"less than nothing", map[string]any{"timeoutSeconds": -5}, time.Second},
-		{"the most", map[string]any{"timeoutSeconds": 60}, time.Minute},
-		{"more than the most", map[string]any{"timeoutSeconds": 600}, time.Minute},
-		{"more than any int holds", map[string]any{"timeoutSeconds": 1e300}, time.Minute},
+		{"the most", map[string]any{"timeoutSeconds": 600}, 10 * time.Minute},
+		{"more than the most", map[string]any{"timeoutSeconds": 3600}, 10 * time.Minute},
+		{"more than any int holds", map[string]any{"timeoutSeconds": 1e300}, 10 * time.Minute},
 	} {
 		t.Run(c.name, func(t *testing.T) {
 			require.Equal(t, c.want, askRouteDecideTimeout(c.args))

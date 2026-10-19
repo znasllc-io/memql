@@ -20,7 +20,7 @@
             "args": {
               "previousError": "",
               "prompt": "askMessageRouting",
-              "timeoutSeconds": 30
+              "timeoutSeconds": 600
             },
             "kind": "builtin",
             "name": "askRouteDecide"
@@ -28,7 +28,7 @@
           {
             "args": {
               "prompt": "askMessageRouting",
-              "timeoutSeconds": 30
+              "timeoutSeconds": 600
             },
             "kind": "builtin",
             "name": "askRouteDecide"
@@ -59,7 +59,7 @@
             "args": {
               "previousError": "",
               "prompt": "askMessageRouting",
-              "timeoutSeconds": 30
+              "timeoutSeconds": 600
             },
             "kind": "builtin",
             "name": "askRouteDecide"
@@ -67,7 +67,7 @@
           {
             "args": {
               "prompt": "askMessageRouting",
-              "timeoutSeconds": 30
+              "timeoutSeconds": 600
             },
             "kind": "builtin",
             "name": "askRouteDecide"

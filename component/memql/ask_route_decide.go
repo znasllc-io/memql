@@ -56,12 +56,16 @@ const (
 	askRouteDecisions    = 2    // one decision and one retry
 )
 
-// How long one routing decision may take, in seconds. The recipe chooses
-// (askRouteDecide's timeoutSeconds); Go holds the choice to 1 to the longest,
-// and takes the default when the recipe chooses nothing.
+// How long one routing decision may take, in seconds, waiting for a model
+// included. The recipe chooses (askRouteDecide's timeoutSeconds); Go holds the
+// choice to 1 to the longest, and takes the default when the recipe chooses
+// nothing. Both are the Spine classification's budget (spineClassify,
+// timeoutSeconds 600): on one local model the goal being corrected is the
+// likeliest holder of that model, and giving up earlier only sends the message
+// to intake, which queues a second goal behind the same model.
 const (
-	askRouteDecideSeconds = 30
-	askRouteDecideLongest = 60
+	askRouteDecideSeconds = 600
+	askRouteDecideLongest = 600
 )
 
 // askRouteDecision is a validated routing answer, its handles resolved to the
