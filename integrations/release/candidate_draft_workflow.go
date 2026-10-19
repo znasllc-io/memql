@@ -152,7 +152,11 @@ func (s *candidateDraftScope) begin(ctx context.Context, _ map[string]any) (any,
 	if !s.checked {
 		return nil, errors.New("release intent requires fresh candidate verification")
 	}
-	rec, err := s.p.ledger.beginDraft(ctx, s.record.ID, s.request.ApprovalID, s.plan)
+	begin := s.p.ledger.beginDraft
+	if !s.promote {
+		begin = s.p.ledger.beginReviewedDraft
+	}
+	rec, err := begin(ctx, s.record.ID, s.request.ApprovalID, s.plan)
 	if err != nil {
 		return nil, err
 	}
