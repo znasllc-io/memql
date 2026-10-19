@@ -61,30 +61,41 @@ func testAgentRuntimeAdapterReceivesGuidanceFromAnotherReplica(t *testing.T, a, 
 	require.NoError(t, err)
 	_, err = a.Execute(auth.ContextWithInternalOrigin(ctx), "mutation "+call)
 	require.NoError(t, err)
-	transcript := map[string]any{"turns": []any{map[string]any{"id": "origin", "runId": run, "prompt": "Synthetic work", "state": "queued", "startedAt": time.Now().UTC().Format(time.RFC3339Nano)}}}
-	call, err = parser.RenderCall("saveAskConversation", map[string]any{"id": conversation, "title": "Fixture", "transcript": transcript, "versionTime": time.Now().UTC().Add(time.Millisecond).Format(time.RFC3339Nano)})
-	require.NoError(t, err)
-	_, err = a.Execute(auth.ContextWithInternalOrigin(ctx), "mutation "+call)
-	require.NoError(t, err)
-	snapshot := execute(a, "builtin", "askConversationSnapshot", map[string]any{"conversationId": conversation})[0]
-	encoded, err := json.Marshal(snapshot["transcript"])
-	require.NoError(t, err)
-	var saved struct {
-		Turns []memql.AskTurn `json:"turns"`
+	origin := map[string]any{"id": "origin", "runId": run, "prompt": "Synthetic work", "state": "queued", "startedAt": time.Now().UTC().Format(time.RFC3339Nano)}
+	version := time.Now().UTC()
+	save := func(turns ...any) {
+		t.Helper()
+		version = version.Add(time.Millisecond)
+		call, err := parser.RenderCall("saveAskConversation", map[string]any{"id": conversation, "title": "Fixture", "transcript": map[string]any{"turns": turns}, "versionTime": version.Format(time.RFC3339Nano)})
+		require.NoError(t, err)
+		_, err = a.Execute(auth.ContextWithInternalOrigin(ctx), "mutation "+call)
+		require.NoError(t, err)
 	}
-	require.NoError(t, json.Unmarshal(encoded, &saved))
-	require.True(t, saved.Turns[0].CanGuideWork)
+	save(origin)
 	runtime := &CognitionEngineAdapter{Engine: b}
 	execution := common.ContextWithRun(ctx, common.RunContext{RunId: run, GoalId: "adapter-goal", OwnerUserId: owner, StepKey: "nested/agent"})
 	prior, err := runtime.ReadWorkGuidance(execution)
 	require.NoError(t, err)
 	require.Empty(t, prior)
-	result := execute(a, "builtin", "askGuideWork", map[string]any{"runId": run, "conversationId": conversation, "targetEpoch": saved.Turns[0].GuidanceEpoch, "requestId": "note", "prompt": "Use the completed evidence."})
-	require.Equal(t, "queued", result[0]["status"])
+	// A routed message, in its wire form: a turn with no goal of its own whose
+	// target names this run. The run was never re-run, so its execution takes a
+	// message recorded while the goal was still preparing.
+	save(origin, map[string]any{"id": "note", "prompt": "Use the completed evidence.", "state": "done", "startedAt": time.Now().UTC().Format(time.RFC3339Nano), "routed": map[string]any{"targets": []any{
+		map[string]any{"goalId": "adapter-goal", "runId": run, "title": "Synthetic work", "status": "queued", "epoch": "preparing", "text": "Use the completed evidence."},
+	}}})
 	received, err := runtime.ReadWorkGuidance(execution)
 	require.NoError(t, err)
-	require.Len(t, received, 1)
+	require.Equal(t, []memql.WorkGuidance{{ID: "note", Prompt: "Use the completed evidence."}}, received)
 	require.NoError(t, runtime.AcknowledgeWorkGuidance(execution, []string{received[0].ID}))
+	snapshot := execute(a, "builtin", "askConversationSnapshot", map[string]any{"conversationId": conversation})[0]
+	encoded, err := json.Marshal(snapshot["transcript"])
+	require.NoError(t, err)
+	var projected struct {
+		Turns []memql.AskTurn `json:"turns"`
+	}
+	require.NoError(t, json.Unmarshal(encoded, &projected))
+	require.Len(t, projected.Turns, 2)
+	require.Equal(t, "received", projected.Turns[1].Routed.Targets[0].Status, "the writing replica sees the receipt")
 	restored, err := (&CognitionEngineAdapter{Engine: a}).ReadWorkGuidance(execution)
 	require.NoError(t, err)
 	require.Equal(t, received, restored)

@@ -42,194 +42,157 @@ func guidanceRunContext(ctx context.Context, run string) context.Context {
 	return common.ContextWithRun(ctx, common.RunContext{RunId: run, GoalId: "fixture-goal", OwnerUserId: ac.UserId, StepKey: "section"})
 }
 
-func TestActiveWorkGuidanceDurableAcrossReplicasAndNestedLoops(t *testing.T) {
+// guidanceRootRun opens another root run of a goal in a conversation.
+func guidanceRootRun(write func(string, map[string]any), conversation, goal, plan, status string) string {
+	run := id.NewShortId()
+	write("createWorkRun", map[string]any{"runId": run, "goalId": goal, "automationName": "fixture", "templateFingerprint": plan, "triggeredBy": "manual", "status": status, "mode": "live", "input": map[string]any{"conversation": map[string]any{"id": conversation}}, "startedAt": time.Now().UTC().Format(time.RFC3339Nano)})
+	return run
+}
+
+// guidanceRun is one fresh read of a run: the row a delivery takes its epoch from.
+func guidanceRun(t *testing.T, e *MemQLEngine, ctx context.Context, run string) map[string]any {
+	t.Helper()
+	rows, err := e.workRows(ContextWithFreshRead(ctx), "workRunForOwner", run)
+	require.NoError(t, err)
+	require.Len(t, rows, 1)
+	return rows[0]
+}
+
+// routeTurn records a routed message the way delivery does: a turn with no
+// goal of its own whose targets and stop questions name the goals it reached.
+func routeTurn(t *testing.T, e *MemQLEngine, ctx context.Context, conversation string, turn AskTurn) {
+	t.Helper()
+	row, err := e.askRead(ContextWithFreshRead(ctx), conversation)
+	require.NoError(t, err)
+	transcript, err := approvalTranscript(row)
+	require.NoError(t, err)
+	turn.State, turn.StartedAt, turn.Activity = "done", time.Now().UTC(), []WorkEvent{}
+	transcript.Turns = append(transcript.Turns, turn)
+	require.NoError(t, e.askSave(ctx, conversation, stringArg(row, "title"), transcript))
+}
+
+// storedTurn reads one turn as it is saved, with no snapshot projection.
+func storedTurn(t *testing.T, e *MemQLEngine, ctx context.Context, conversation, turnID string) AskTurn {
+	t.Helper()
+	row, err := e.askRead(ContextWithFreshRead(ctx), conversation)
+	require.NoError(t, err)
+	transcript, err := approvalTranscript(row)
+	require.NoError(t, err)
+	for _, turn := range transcript.Turns {
+		if turn.ID == turnID {
+			return turn
+		}
+	}
+	t.Fatalf("turn %q is not in the transcript", turnID)
+	return AskTurn{}
+}
+
+// The executing replica holds none of the recording replica's state. It reads
+// the routed turn's target for its own root run, under the turn's id.
+func TestReadWorkGuidanceReadsRoutedTargets(t *testing.T) {
 	a, b, ctx, conversation, run, write := guidanceFixture(t)
 	runtime := guidanceRunContext(ctx, run)
 	// Warm the receiving peer before the independent human write.
 	before, err := b.ReadWorkGuidance(runtime)
 	require.NoError(t, err)
 	require.Empty(t, before)
-	args := map[string]any{"targetEpoch": workGuidanceEpoch(map[string]any{"templateFingerprint": "original-plan"}), "conversationId": conversation, "runId": run, "requestId": "human-note", "prompt": "Use the saved evidence before another read."}
-	reply, err := a.askGuideWorkBuiltin(ctx, args, 0)
-	require.NoError(t, err)
-	require.Contains(t, string(reply[0].Payload), `"status":"queued"`)
+	// A settled clarification: the goal receives exactly what was delivered,
+	// both of the person's messages, not the last prompt alone.
+	text := "Actually, I'm in Phoenix.\n\nThe weather one."
+	routeTurn(t, a, ctx, conversation, AskTurn{ID: "phoenix", Prompt: "The weather one.", Routed: &AskRouting{
+		Targets: []AskRouteTarget{{GoalID: "fixture-goal", RunID: run, Title: "Weather in Tucson", Status: routeQueued, Epoch: guidanceEpochFor(guidanceRun(t, a, ctx, run)), Text: text}},
+		Reply:   "Switching the weather check to Phoenix.",
+	}})
 	messages, err := b.ReadWorkGuidance(runtime)
 	require.NoError(t, err)
-	require.Len(t, messages, 1)
-	require.Equal(t, args["prompt"], messages[0].Prompt)
-	require.NoError(t, b.AcknowledgeWorkGuidance(runtime, []string{messages[0].ID}))
-	// Reload and uncertain delivery retry recover the same single receipt.
-	reply, err = a.askGuideWorkBuiltin(ctx, args, 0)
-	require.NoError(t, err)
-	require.Contains(t, string(reply[0].Payload), `"status":"applied"`)
-	row, err := a.askRead(ContextWithFreshRead(ctx), conversation)
-	require.NoError(t, err)
-	transcript, err := approvalTranscript(row)
-	require.NoError(t, err)
-	require.Len(t, transcript.Turns, 2)
-	require.Empty(t, transcript.Turns[1].RunID)
-	require.Empty(t, transcript.Turns[1].GoalID)
-	require.True(t, transcript.Turns[1].AnswerOnly)
-	// An ordinary typed permission answer resumes the saved checkpoint; it is
-	// not a new execution attempt and must retain previously accepted guidance.
-	write("updateWorkRun", map[string]any{"runId": run, "status": "waiting", "waitingOn": map[string]any{"kind": "approval", "subject": "typed-scope"}})
-	write("updateWorkRun", map[string]any{"runId": run, "status": "running", "humanResumeId": "typed-scope", "waitingOn": map[string]any{}})
-	afterAnswer, err := b.ReadWorkGuidance(runtime)
-	require.NoError(t, err)
-	require.Equal(t, messages, afterAnswer)
-	// Applied is a receipt, not a destructive queue cursor. A later nested
-	// child on a peer must reconstruct the same human direction after a hop.
+	require.Equal(t, []WorkGuidance{{ID: "phoenix", Prompt: text}}, messages)
+	// A delegated child on the other replica reads its root's guidance.
 	child := id.NewShortId()
 	write("createWorkRun", map[string]any{"runId": child, "goalId": "fixture-goal", "parentRunId": run, "input": map[string]any{"conversation": map[string]any{"id": conversation}}, "automationName": "child", "templateFingerprint": "child-plan", "triggeredBy": "automation", "status": "running", "mode": "live", "startedAt": time.Now().UTC().Format(time.RFC3339Nano)})
 	recovered, err := a.ReadWorkGuidance(guidanceRunContext(ctx, child))
 	require.NoError(t, err)
 	require.Equal(t, messages, recovered)
-	// Moving to another plan never applies an old queued correction to it.
-	write("updateWorkRun", map[string]any{"runId": run, "templateFingerprint": "replacement"})
-	moved, err := b.ReadWorkGuidance(runtime)
-	require.NoError(t, err)
-	require.Empty(t, moved)
-	replay, err := b.askGuideWorkBuiltin(ctx, args, 0)
-	require.NoError(t, err)
-	require.Contains(t, string(replay[0].Payload), `"status":"applied"`)
-	args["requestId"] = "stale-attempt"
-	_, err = b.askGuideWorkBuiltin(ctx, args, 0)
-	require.ErrorContains(t, err, "this work changed")
-}
-
-func TestActiveWorkGuidanceRefusesForgedStaleAndUnboundedRequests(t *testing.T) {
-	a, b, ctx, conversation, run, write := guidanceFixture(t)
-	args := map[string]any{"targetEpoch": workGuidanceEpoch(map[string]any{"templateFingerprint": "original-plan"}), "conversationId": conversation, "runId": run, "requestId": "note", "prompt": "A bounded correction"}
-	for _, actor := range []context.Context{askTestActor(), guidanceRunContext(ctx, run)} {
-		_, err := a.askGuideWorkBuiltin(actor, args, 0)
-		require.Error(t, err)
-	}
-	wrong := askTestConversation(t, a, ctx)
-	args["conversationId"] = wrong
-	_, err := a.askGuideWorkBuiltin(ctx, args, 0)
-	require.ErrorContains(t, err, "another conversation")
-	args["conversationId"] = conversation
-	args["prompt"] = strings.Repeat("x", 4001)
-	_, err = a.askGuideWorkBuiltin(ctx, args, 0)
-	require.Error(t, err)
-	args["prompt"] = "A bounded correction"
-	_, err = a.askGuideWorkBuiltin(ctx, args, 0)
-	require.NoError(t, err)
-	args["prompt"] = "Changed on retry"
-	_, err = b.askGuideWorkBuiltin(ctx, args, 0)
-	require.ErrorContains(t, err, "request id")
-	args["requestId"] = "fresh"
-	for _, status := range []string{"waiting", "succeeded", "failed", "cancelled"} {
-		write("updateWorkRun", map[string]any{"runId": run, "status": status})
-		_, err = b.askGuideWorkBuiltin(ctx, args, 0)
-		require.ErrorContains(t, err, "no longer running")
-	}
-	write("updateWorkRun", map[string]any{"runId": run, "status": "running", "cancelRequested": true})
-	_, err = b.askGuideWorkBuiltin(ctx, args, 0)
-	require.ErrorContains(t, err, "no longer running")
+	// Guidance is read only under the run's own owner and goal.
 	actor, _ := auth.AccessFromContext(ctx)
 	forged := common.ContextWithRun(ctx, common.RunContext{RunId: run, GoalId: "another-goal", OwnerUserId: actor.UserId, StepKey: "section"})
 	_, err = b.ReadWorkGuidance(forged)
 	require.ErrorContains(t, err, "owner or goal")
 }
 
-func TestActiveWorkGuidanceConcurrentWritesKeepLockThroughCancellation(t *testing.T) {
-	a, b, ctx, conversation, run, _ := guidanceFixture(t)
-	request, cancel := context.WithCancel(ctx)
-	defer cancel()
-	entered, release := make(chan struct{}), make(chan struct{})
-	var once sync.Once
-	t.Cleanup(func() { once.Do(func() { close(release) }) })
-	a.SetBeforeWriteHookSource("guidance-test", map[string][]BeforeWriteHook{"v1:os:askConversation": {{Name: "pauseCommit", On: "write", Apply: func(commit context.Context, _ map[string]any) error {
-		cancel()
-		close(entered)
-		<-release
-		return commit.Err()
-	}}}})
-	send := func(e *MemQLEngine, ctx context.Context, key string) error {
-		_, err := e.askGuideWorkBuiltin(ctx, map[string]any{"targetEpoch": workGuidanceEpoch(map[string]any{"templateFingerprint": "original-plan"}), "conversationId": conversation, "runId": run, "requestId": key, "prompt": "Note " + key}, 0)
-		return err
+// A message delivered through a request (decideApproval) belongs to that
+// request and never reaches the agent loop a second time. Neither does one
+// recorded for another plan, one the cap refused, or another goal's.
+func TestReadWorkGuidanceSkipsApprovalTargetsAndOtherEpochs(t *testing.T) {
+	a, b, ctx, conversation, run, write := guidanceFixture(t)
+	epoch := guidanceEpochFor(guidanceRun(t, a, ctx, run))
+	other := guidanceRootRun(write, conversation, "other-goal", "other-plan", "running")
+	for _, turn := range []AskTurn{
+		{ID: "answered", Prompt: "Use Phoenix.", Routed: &AskRouting{Targets: []AskRouteTarget{{GoalID: "fixture-goal", RunID: run, Status: routeAnswered, ApprovalID: "question", Text: "Use Phoenix."}}}},
+		// The approval id alone excludes it, whatever its status reads.
+		{ID: "through-a-request", Prompt: "Not this way.", Routed: &AskRouting{Targets: []AskRouteTarget{{GoalID: "fixture-goal", RunID: run, Status: routeQueued, Epoch: epoch, ApprovalID: "permission", Text: "Not this way."}}}},
+		{ID: "earlier-plan", Prompt: "For the old plan.", Routed: &AskRouting{Targets: []AskRouteTarget{{GoalID: "fixture-goal", RunID: run, Status: routeQueued, Epoch: workGuidanceEpoch(map[string]any{"templateFingerprint": "earlier-plan"}), Text: "For the old plan."}}}},
+		{ID: "capped", Prompt: "Over the cap.", Routed: &AskRouting{Targets: []AskRouteTarget{{GoalID: "fixture-goal", RunID: run, Status: routeNotDelivered, Reason: routeReasonLimit, Epoch: epoch, Text: "Over the cap."}}}},
+		{ID: "both-goals", Prompt: "Both of them.", Routed: &AskRouting{Targets: []AskRouteTarget{
+			{GoalID: "other-goal", RunID: other, Status: routeQueued, Epoch: guidanceEpochFor(guidanceRun(t, a, ctx, other)), Text: "Both of them."},
+			{GoalID: "fixture-goal", RunID: run, Status: routeQueued, Epoch: epoch, Text: "Both of them."},
+		}}},
+	} {
+		routeTurn(t, a, ctx, conversation, turn)
 	}
-	first, second := make(chan error, 1), make(chan error, 1)
-	go func() { first <- send(a, request, "one") }()
-	select {
-	case <-entered:
-	case err := <-first:
-		t.Fatalf("early failure: %v", err)
-	case <-time.After(5 * time.Second):
-		t.Fatal("no commit")
-	}
-	go func() { second <- send(b, ctx, "two") }()
-	select {
-	case err := <-second:
-		t.Fatalf("crossed retained hold: %v", err)
-	case <-time.After(50 * time.Millisecond):
-	}
-	once.Do(func() { close(release) })
-	require.NoError(t, <-first)
-	require.NoError(t, <-second)
 	messages, err := b.ReadWorkGuidance(guidanceRunContext(ctx, run))
 	require.NoError(t, err)
-	require.Len(t, messages, 2)
-	require.Contains(t, fmt.Sprint(messages), "Note one")
-	require.Contains(t, fmt.Sprint(messages), "Note two")
+	require.Equal(t, []WorkGuidance{{ID: "both-goals", Prompt: "Both of them."}}, messages)
+	actor, _ := auth.AccessFromContext(ctx)
+	elsewhere, err := b.ReadWorkGuidance(common.ContextWithRun(ctx, common.RunContext{RunId: other, GoalId: "other-goal", OwnerUserId: actor.UserId, StepKey: "section"}))
+	require.NoError(t, err)
+	require.Equal(t, []WorkGuidance{{ID: "both-goals", Prompt: "Both of them."}}, elsewhere, "one message reaches each goal it names")
 }
 
-func TestActiveWorkGuidanceProjectsUnreceivedAndBoundsWithoutChangingRun(t *testing.T) {
+// Acknowledgement is this run's receipt. Received is not a delivery cursor:
+// a later loop of the same execution still reads the person's direction.
+func TestAcknowledgeWorkGuidanceMarksTargetsReceived(t *testing.T) {
 	a, b, ctx, conversation, run, write := guidanceFixture(t)
-	before, err := a.workRows(ContextWithFreshRead(ctx), "workRunForOwner", run)
+	other := guidanceRootRun(write, conversation, "other-goal", "other-plan", "running")
+	routeTurn(t, a, ctx, conversation, AskTurn{ID: "phoenix", Prompt: "Actually Phoenix.", Routed: &AskRouting{Targets: []AskRouteTarget{
+		{GoalID: "other-goal", RunID: other, Status: routeQueued, Epoch: guidanceEpochFor(guidanceRun(t, a, ctx, other)), Text: "Actually Phoenix."},
+		{GoalID: "fixture-goal", RunID: run, Status: routeQueued, Epoch: guidanceEpochFor(guidanceRun(t, a, ctx, run)), Text: "Actually Phoenix."},
+	}}})
+	runtime := guidanceRunContext(ctx, run)
+	messages, err := b.ReadWorkGuidance(runtime)
 	require.NoError(t, err)
-	epoch := workGuidanceEpoch(before[0])
-	send := func(key, prompt string) error {
-		call, err := parser.RenderCall("askGuideWork", map[string]any{"targetEpoch": epoch, "conversationId": conversation, "runId": run, "requestId": key, "prompt": prompt})
-		require.NoError(t, err)
-		_, err = a.Execute(ctx, "builtin "+call)
-		return err
-	}
-	// Real public DSL ingress, not a test-only writer. A model cannot discover
-	// it or invoke the same path under inherited run credentials.
-	require.NoError(t, send("first", strings.Repeat("a", 4000)))
-	require.False(t, a.workCapabilityAllowed(ctx, &Function{Name: "askGuideWork", Enabled: true, FunctionKind: "builtin", Origin: "os/ask.memql"}))
-	for n := 1; n < 4; n++ {
-		require.NoError(t, send(fmt.Sprint(n), strings.Repeat("b", 4000)))
-	}
-	require.ErrorContains(t, send("overflow", "x"), "guidance limit")
-	after, err := b.workRows(ContextWithFreshRead(ctx), "workRunForOwner", run)
+	require.Len(t, messages, 1)
+	require.NoError(t, b.AcknowledgeWorkGuidance(runtime, []string{messages[0].ID, "optional-answer-elsewhere"}))
+	targets := storedTurn(t, a, ctx, conversation, "phoenix").Routed.Targets
+	require.Equal(t, routeQueued, targets[0].Status, "another goal's delivery is not this run's receipt")
+	require.Equal(t, routeReceived, targets[1].Status)
+	again, err := a.ReadWorkGuidance(runtime)
 	require.NoError(t, err)
-	require.Equal(t, before, after, "no run, budget, prefix or permission state may change")
-	projection := func() string {
-		t.Helper()
-		row, err := b.askRead(ContextWithFreshRead(ctx), conversation)
-		require.NoError(t, err)
-		transcript, err := approvalTranscript(row)
-		require.NoError(t, err)
-		require.NoError(t, b.refreshAskRuns(ctx, &transcript))
-		return transcript.Turns[1].GuidanceStatus
-	}
-	write("updateWorkRun", map[string]any{"runId": run, "status": "waiting"})
-	require.Equal(t, "queued", projection())
-	write("updateWorkRun", map[string]any{"runId": run, "status": "succeeded"})
-	require.Equal(t, "not-received", projection())
-	require.NoError(t, send("first", strings.Repeat("a", 4000)), "uncertain retry recovers the original receipt after completion")
+	require.Equal(t, messages, again)
+	// An answered permission resumes the same execution and keeps its guidance.
+	write("updateWorkRun", map[string]any{"runId": run, "status": "waiting", "waitingOn": map[string]any{"kind": "approval", "subject": "typed-scope"}})
+	write("updateWorkRun", map[string]any{"runId": run, "status": "running", "humanResumeId": "typed-scope", "waitingOn": map[string]any{}})
+	resumed, err := b.ReadWorkGuidance(runtime)
+	require.NoError(t, err)
+	require.Equal(t, messages, resumed)
+	// A new plan is another attempt; earlier guidance never applies to it.
+	write("updateWorkRun", map[string]any{"runId": run, "templateFingerprint": "replacement"})
+	moved, err := b.ReadWorkGuidance(runtime)
+	require.NoError(t, err)
+	require.Empty(t, moved)
 }
 
-func TestActiveWorkGuidanceAckCannotCrossConversationWhileWaitingForLock(t *testing.T) {
+// The acknowledgement re-reads its scope under the conversation lock: a child
+// moved to another conversation's run while it waited acknowledges nothing.
+func TestAcknowledgeWorkGuidanceCannotCrossConversationWhileWaitingForLock(t *testing.T) {
 	a, b, ctx, conversation, run, write := guidanceFixture(t)
 	secondConversation := askTestConversation(t, a, ctx)
-	secondRun := id.NewShortId()
+	secondRun := guidanceRootRun(write, secondConversation, "fixture-goal", "original-plan", "running")
 	child := id.NewShortId()
-	base := map[string]any{"goalId": "fixture-goal", "automationName": "fixture", "templateFingerprint": "original-plan", "triggeredBy": "manual", "status": "running", "mode": "live", "startedAt": time.Now().UTC().Format(time.RFC3339Nano)}
-	base["runId"] = secondRun
-	base["input"] = map[string]any{"conversation": map[string]any{"id": secondConversation}}
-	write("createWorkRun", base)
-	delete(base, "input")
-	base["runId"] = child
-	base["parentRunId"] = run
-	write("createWorkRun", base)
-	epoch := workGuidanceEpoch(map[string]any{"templateFingerprint": "original-plan"})
+	write("createWorkRun", map[string]any{"runId": child, "goalId": "fixture-goal", "parentRunId": run, "automationName": "fixture", "templateFingerprint": "original-plan", "triggeredBy": "manual", "status": "running", "mode": "live", "startedAt": time.Now().UTC().Format(time.RFC3339Nano)})
 	for _, target := range []struct{ run, conversation string }{{run, conversation}, {secondRun, secondConversation}} {
-		_, err := a.askGuideWorkBuiltin(ctx, map[string]any{"runId": target.run, "conversationId": target.conversation, "targetEpoch": epoch, "requestId": "same-key", "prompt": "Direction for this conversation."}, 0)
-		require.NoError(t, err)
+		routeTurn(t, a, ctx, target.conversation, AskTurn{ID: "same-key", Prompt: "Direction for this conversation.", Routed: &AskRouting{Targets: []AskRouteTarget{
+			{GoalID: "fixture-goal", RunID: target.run, Status: routeQueued, Epoch: guidanceEpochFor(guidanceRun(t, a, ctx, target.run)), Text: "Direction for this conversation."},
+		}}})
 	}
 	runtime := guidanceRunContext(ctx, child)
 	items, err := b.ReadWorkGuidance(runtime)
@@ -251,14 +214,125 @@ func TestActiveWorkGuidanceAckCannotCrossConversationWhileWaitingForLock(t *test
 	release()
 	require.NoError(t, <-done)
 	for _, id := range []string{conversation, secondConversation} {
-		row, err := a.askRead(ContextWithFreshRead(ctx), id)
-		require.NoError(t, err)
-		transcript, err := approvalTranscript(row)
-		require.NoError(t, err)
-		for _, turn := range transcript.Turns {
-			if turn.GuidanceTargetRunID != "" {
-				require.Equal(t, "queued", turn.GuidanceStatus)
-			}
-		}
+		require.Equal(t, routeQueued, storedTurn(t, a, ctx, id, "same-key").Routed.Targets[0].Status)
 	}
+}
+
+// The recorder refuses past the cap. A transcript already over it fails loudly
+// instead of silently dropping part of a person's direction.
+func TestReadWorkGuidanceKeepsItsBounds(t *testing.T) {
+	a, b, ctx, conversation, run, write := guidanceFixture(t)
+	queue := func(run, turnID, text string) {
+		routeTurn(t, a, ctx, conversation, AskTurn{ID: turnID, Prompt: text, Routed: &AskRouting{Targets: []AskRouteTarget{
+			{GoalID: "fixture-goal", RunID: run, Status: routeQueued, Epoch: guidanceEpochFor(guidanceRun(t, a, ctx, run)), Text: text},
+		}}})
+	}
+	for n := range 4 {
+		queue(run, fmt.Sprintf("long-%d", n), strings.Repeat("a", 4000))
+	}
+	runtime := guidanceRunContext(ctx, run)
+	full, err := b.ReadWorkGuidance(runtime)
+	require.NoError(t, err)
+	require.Len(t, full, 4)
+	queue(run, "one-more", "x")
+	_, err = b.ReadWorkGuidance(runtime)
+	require.ErrorContains(t, err, "saved guidance exceeds its bounded context")
+
+	counted := guidanceRootRun(write, conversation, "fixture-goal", "counted-plan", "running")
+	for n := range maxWorkGuidanceMessages {
+		queue(counted, fmt.Sprintf("short-%d", n), "Note.")
+	}
+	sixteen, err := b.ReadWorkGuidance(guidanceRunContext(ctx, counted))
+	require.NoError(t, err)
+	require.Len(t, sixteen, maxWorkGuidanceMessages)
+	queue(counted, "seventeenth", "Note.")
+	_, err = b.ReadWorkGuidance(guidanceRunContext(ctx, counted))
+	require.ErrorContains(t, err, "saved guidance exceeds its bounded context")
+}
+
+// A message sent while the goal was still compiling has no plan to name. The
+// run's first execution takes it; a re-run, being another attempt, does not.
+func TestPreparingTargetReachesTheFirstExecution(t *testing.T) {
+	a, b, ctx, conversation, _, write := guidanceFixture(t)
+	// Intake opens the run before compile has chosen a plan.
+	run := id.NewShortId()
+	write("createWorkRun", map[string]any{"runId": run, "goalId": "fixture-goal", "automationName": "work.compile", "templateFingerprint": "", "triggeredBy": "manual", "status": "compiling", "mode": "live", "input": map[string]any{"conversation": map[string]any{"id": conversation}}, "startedAt": time.Now().UTC().Format(time.RFC3339Nano)})
+	compiling := guidanceRun(t, a, ctx, run)
+	require.Equal(t, guidanceEpochPreparing, guidanceEpochFor(compiling))
+	routeTurn(t, a, ctx, conversation, AskTurn{ID: "while-compiling", Prompt: "Actually Phoenix.", Routed: &AskRouting{Targets: []AskRouteTarget{
+		{GoalID: "fixture-goal", RunID: run, Title: "Weather in Tucson", Status: routeQueued, Epoch: guidanceEpochFor(compiling), Text: "Actually Phoenix."},
+	}}})
+	runtime := guidanceRunContext(ctx, run)
+	idle, err := b.ReadWorkGuidance(runtime)
+	require.NoError(t, err)
+	require.Empty(t, idle, "nothing executes while the goal compiles")
+	// Compile finishes on another replica: the run gains its plan and starts.
+	write("updateWorkRun", map[string]any{"runId": run, "status": "running", "automationName": "weather", "templateFingerprint": "weather-plan"})
+	messages, err := b.ReadWorkGuidance(runtime)
+	require.NoError(t, err)
+	require.Equal(t, []WorkGuidance{{ID: "while-compiling", Prompt: "Actually Phoenix."}}, messages)
+	require.NoError(t, b.AcknowledgeWorkGuidance(runtime, []string{messages[0].ID}))
+	require.Equal(t, routeReceived, storedTurn(t, a, ctx, conversation, "while-compiling").Routed.Targets[0].Status)
+	// A re-run is a different execution attempt.
+	write("updateWorkRun", map[string]any{"runId": run, "rerun": map[string]any{"requestId": "again", "reason": "rerun"}})
+	actor, _ := auth.AccessFromContext(ctx)
+	rerun, err := b.ReadWorkGuidance(common.ContextWithRun(ctx, common.RunContext{RunId: run, RerunRequestId: "again", GoalId: "fixture-goal", OwnerUserId: actor.UserId, StepKey: "section"}))
+	require.NoError(t, err)
+	require.Empty(t, rerun)
+}
+
+// The snapshot is a read projection over the runs as they are now. A queued
+// message whose goal ended, or whose execution moved on, reads Not received;
+// an unanswered stop question whose goal ended reads ended; labels follow the
+// goal's current title. Nothing it projects is written back.
+func TestSnapshotProjectsTargetsStopsAndTitles(t *testing.T) {
+	a, b, ctx, conversation, run, write := guidanceFixture(t)
+	hike := guidanceRootRun(write, conversation, "hike-goal", "hike-plan", "running")
+	report := guidanceRootRun(write, conversation, "report-goal", "report-plan", "running")
+	routeTurn(t, a, ctx, conversation, AskTurn{ID: "earlier", Prompt: "Start with the trail.", Routed: &AskRouting{Targets: []AskRouteTarget{
+		{GoalID: "fixture-goal", RunID: run, Title: "Weather in Tucson", Status: routeQueued, Epoch: workGuidanceEpoch(map[string]any{"templateFingerprint": "earlier-plan"}), Text: "Start with the trail."},
+		{GoalID: "hike-goal", RunID: hike, Title: "Hike near Tucson", Status: routeReceived, Epoch: guidanceEpochFor(guidanceRun(t, a, ctx, hike)), Text: "Start with the trail."},
+	}}})
+	routeTurn(t, a, ctx, conversation, AskTurn{ID: "phoenix", Prompt: "Actually Phoenix.", Routed: &AskRouting{
+		Targets: []AskRouteTarget{
+			{GoalID: "fixture-goal", RunID: run, Title: "Weather in Tucson", Status: routeQueued, Epoch: guidanceEpochFor(guidanceRun(t, a, ctx, run)), Text: "Actually Phoenix."},
+			{GoalID: "hike-goal", RunID: hike, Title: "Hike near Tucson", Status: routeQueued, Epoch: guidanceEpochFor(guidanceRun(t, a, ctx, hike)), Text: "Actually Phoenix."},
+		},
+		Reply: "Switching both to Phoenix.",
+	}})
+	routeTurn(t, a, ctx, conversation, AskTurn{ID: "drop", Prompt: "Never mind the report or the weather.", Routed: &AskRouting{
+		Stops: []AskStopQuestion{{GoalID: "report-goal", RunID: report, Title: "Tucson report"}, {GoalID: "fixture-goal", RunID: run, Title: "Weather in Tucson"}},
+	}})
+	write("updateWorkRun", map[string]any{"runId": run, "title": "Weather in Phoenix", "classification": map[string]any{"workTitle": "Weather in Tucson"}})
+	write("updateWorkRun", map[string]any{"runId": hike, "status": "cancelled"})
+	write("updateWorkRun", map[string]any{"runId": report, "status": "succeeded"})
+
+	call, err := parser.RenderCall("askConversationSnapshot", map[string]any{"conversationId": conversation})
+	require.NoError(t, err)
+	result, err := b.Execute(ctx, "builtin "+call)
+	require.NoError(t, err)
+	rows := MaterializeRows(result.OutputPayload())
+	require.Len(t, rows, 1)
+	snapshot, err := approvalTranscript(rows[0])
+	require.NoError(t, err)
+	turns := map[string]AskTurn{}
+	for _, turn := range snapshot.Turns {
+		turns[turn.ID] = turn
+	}
+	require.Equal(t, "Weather in Phoenix", turns["original"].WorkTitle, "the run's own title wins over the intake title")
+	earlier, phoenix, drop := turns["earlier"].Routed, turns["phoenix"].Routed, turns["drop"].Routed
+	require.Equal(t, routeNotReceived, earlier.Targets[0].Status, "the execution moved on before reading it")
+	require.Equal(t, routeReceived, earlier.Targets[1].Status, "a receipt stays a receipt after the goal ends")
+	require.Equal(t, routeQueued, phoenix.Targets[0].Status)
+	require.Equal(t, "Weather in Phoenix", phoenix.Targets[0].Title)
+	require.Equal(t, routeNotReceived, phoenix.Targets[1].Status, "the goal ended before reading it")
+	require.Equal(t, "Hike near Tucson", phoenix.Targets[1].Title)
+	require.Equal(t, stopDecisionEnded, drop.Stops[0].Decision)
+	require.Empty(t, drop.Stops[1].Decision, "a running goal's stop question still waits for the person")
+	require.Equal(t, "Weather in Phoenix", drop.Stops[1].Title)
+
+	saved := storedTurn(t, a, ctx, conversation, "phoenix").Routed
+	require.Equal(t, routeQueued, saved.Targets[1].Status)
+	require.Equal(t, "Weather in Tucson", saved.Targets[0].Title)
+	require.Empty(t, storedTurn(t, a, ctx, conversation, "drop").Routed.Stops[0].Decision)
 }

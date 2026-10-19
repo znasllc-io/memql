@@ -98,33 +98,32 @@ QueryClient.prototype.askConversationSnapshot = function (this: QueryClient, arg
   return this.executeNamed("askConversationSnapshot", buildAskConversationSnapshot(args), opts);
 };
 
-/** Record guidance for owned running work in its existing conversation. This starts no goal and grants no permission; the existing agent receives the message at its next safe reasoning boundary. Retries reuse requestId. */
-export interface AskGuideWorkArgs {
-  targetEpoch: string;
-  runId: string;
+/** Answer the stop question Ask asked on one of this person's goals ("Stop this work? It can't be resumed."). stop closes the goal and asks its runs to stop, then records stopped; keep records kept and changes nothing else. Sending the same answer again returns the saved one; the other answer is refused once one is saved. A running job cannot answer: this is a person's decision. */
+export interface AskStopDecisionArgs {
   conversationId: string;
-  requestId: string;
-  prompt: string;
+  turnId: string;
+  runId: string;
+  // Enum: stop | keep
+  decision: string;
 }
 
-export function buildAskGuideWork(args: AskGuideWorkArgs): string {
+export function buildAskStopDecision(args: AskStopDecisionArgs): string {
   const parts: string[] = [];
-  parts.push("targetEpoch: " + renderMemQLValue(args.targetEpoch));
-  parts.push("runId: " + renderMemQLValue(args.runId));
   parts.push("conversationId: " + renderMemQLValue(args.conversationId));
-  parts.push("requestId: " + renderMemQLValue(args.requestId));
-  parts.push("prompt: " + renderMemQLValue(args.prompt));
-  return "builtin askGuideWork(" + parts.join(", ") + ")";
+  parts.push("turnId: " + renderMemQLValue(args.turnId));
+  parts.push("runId: " + renderMemQLValue(args.runId));
+  parts.push("decision: " + renderMemQLValue(args.decision));
+  return "builtin askStopDecision(" + parts.join(", ") + ")";
 }
 
 declare module "./query.js" {
   interface QueryClient {
-    askGuideWork(args: AskGuideWorkArgs, opts?: QueryCallOptions): Promise<Result>;
+    askStopDecision(args: AskStopDecisionArgs, opts?: QueryCallOptions): Promise<Result>;
   }
 }
 
-QueryClient.prototype.askGuideWork = function (this: QueryClient, args: AskGuideWorkArgs = {} as AskGuideWorkArgs, opts?: QueryCallOptions): Promise<Result> {
-  return this.executeNamed("askGuideWork", buildAskGuideWork(args), opts);
+QueryClient.prototype.askStopDecision = function (this: QueryClient, args: AskStopDecisionArgs = {} as AskStopDecisionArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("askStopDecision", buildAskStopDecision(args), opts);
 };
 
 /** Open this owner's existing work in its Ask conversation, creating a private conversation for Nexus-originated work without starting another run. */

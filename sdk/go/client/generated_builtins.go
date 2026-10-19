@@ -122,46 +122,41 @@ func AskConversationSnapshotBuild(args AskConversationSnapshotArgs) string {
 	return b.String()
 }
 
-// AskGuideWork -- Record guidance for owned running work in its existing conversation. This starts no goal and grants no permission; the existing agent receives the message at its next safe reasoning boundary. Retries reuse requestId.
-type AskGuideWorkArgs struct {
-	TargetEpoch    string
-	RunId          string
+// AskStopDecision -- Answer the stop question Ask asked on one of this person's goals ("Stop this work? It can't be resumed."). stop closes the goal and asks its runs to stop, then records stopped; keep records kept and changes nothing else. Sending the same answer again returns the saved one; the other answer is refused once one is saved. A running job cannot answer: this is a person's decision.
+type AskStopDecisionArgs struct {
 	ConversationId string
-	RequestId      string
-	Prompt         string
+	TurnId         string
+	RunId          string
+	// Enum: stop | keep
+	Decision string
 }
 
-// AskGuideWork calls the engine builtin askGuideWork.
-func (qc *QueryClient) AskGuideWork(ctx context.Context, args AskGuideWorkArgs) (*Result, error) {
-	call := AskGuideWorkBuild(args)
-	return qc.executeNamed(ctx, "askGuideWork", call)
+// AskStopDecision calls the engine builtin askStopDecision.
+func (qc *QueryClient) AskStopDecision(ctx context.Context, args AskStopDecisionArgs) (*Result, error) {
+	call := AskStopDecisionBuild(args)
+	return qc.executeNamed(ctx, "askStopDecision", call)
 }
 
-func AskGuideWorkBuild(args AskGuideWorkArgs) string {
+func AskStopDecisionBuild(args AskStopDecisionArgs) string {
 	var b strings.Builder
-	b.WriteString("builtin askGuideWork(")
-	b.WriteString("targetEpoch: ")
-	b.WriteString(quoteMemQL(args.TargetEpoch))
-	if b.Len() > 21 {
+	b.WriteString("builtin askStopDecision(")
+	b.WriteString("conversationId: ")
+	b.WriteString(quoteMemQL(args.ConversationId))
+	if b.Len() > 24 {
+		b.WriteString(", ")
+	}
+	b.WriteString("turnId: ")
+	b.WriteString(quoteMemQL(args.TurnId))
+	if b.Len() > 24 {
 		b.WriteString(", ")
 	}
 	b.WriteString("runId: ")
 	b.WriteString(quoteMemQL(args.RunId))
-	if b.Len() > 21 {
+	if b.Len() > 24 {
 		b.WriteString(", ")
 	}
-	b.WriteString("conversationId: ")
-	b.WriteString(quoteMemQL(args.ConversationId))
-	if b.Len() > 21 {
-		b.WriteString(", ")
-	}
-	b.WriteString("requestId: ")
-	b.WriteString(quoteMemQL(args.RequestId))
-	if b.Len() > 21 {
-		b.WriteString(", ")
-	}
-	b.WriteString("prompt: ")
-	b.WriteString(quoteMemQL(args.Prompt))
+	b.WriteString("decision: ")
+	b.WriteString(quoteMemQL(args.Decision))
 	b.WriteString(")")
 	return b.String()
 }

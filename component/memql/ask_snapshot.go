@@ -99,43 +99,44 @@ func (e *MemQLEngine) refreshAskRuns(ctx context.Context, transcript *askTranscr
 			seen[answer.ID] = true
 		}
 	}
-	guidanceRuns := map[string]map[string]any{}
+	// One fresh read per run, shared by every turn, target and stop question
+	// that names it. A run the caller cannot read is nil.
+	runs := map[string]map[string]any{}
+	readRun := func(runID string) (map[string]any, error) {
+		key := BareShortId(runID)
+		if key == "" {
+			return nil, nil
+		}
+		if run, cached := runs[key]; cached {
+			return run, nil
+		}
+		rows, err := e.workRows(ctx, "workRunForOwner", runID)
+		if err != nil {
+			return nil, err
+		}
+		var run map[string]any
+		if len(rows) == 1 {
+			run = rows[0]
+		}
+		runs[key] = run
+		return run, nil
+	}
 	for n := range transcript.Turns {
-		turn := &transcript.Turns[n]
-		target := turn.GuidanceTargetRunID
-		if target == "" || turn.GuidanceStatus != "queued" {
-			continue
+		if err := projectAskRouting(transcript.Turns[n].Routed, readRun); err != nil {
+			return err
 		}
-		run, seen := guidanceRuns[target]
-		if !seen {
-			rows, err := e.workRows(ctx, "workRunForOwner", target)
-			if err != nil {
-				return err
-			}
-			if len(rows) == 1 {
-				run = rows[0]
-			}
-			guidanceRuns[target] = run
-		}
-		projectWorkGuidance(turn, run)
 	}
 	for n := range transcript.Turns {
 		turn := &transcript.Turns[n]
 		if turn.RunID == "" {
 			continue
 		}
-		runs, err := e.workRows(ctx, "workRunForOwner", turn.RunID)
+		run, err := readRun(turn.RunID)
 		if err != nil {
 			return err
 		}
-		if len(runs) != 1 {
+		if run == nil {
 			return fmt.Errorf("conversation work is unavailable")
-		}
-		run := runs[0]
-		turn.CanGuideWork = runningGuidanceTarget(run) && guidanceConversation(run) != ""
-		turn.GuidanceEpoch = ""
-		if turn.CanGuideWork {
-			turn.GuidanceEpoch = workGuidanceEpoch(run)
 		}
 		turn.WorkStatus, _ = run["status"].(string)
 		waiting, _ := run["waitingOn"].(map[string]any)
@@ -172,7 +173,7 @@ func (e *MemQLEngine) refreshAskRuns(ctx context.Context, transcript *askTranscr
 				turn.AcknowledgedAt = &at
 			}
 		}
-		if title, _ := outcome["workTitle"].(string); title != "" {
+		if title := runTitle(run); title != "" {
 			turn.WorkTitle = title
 		}
 		if workload, _ := outcome["workload"].(string); workload != "" {

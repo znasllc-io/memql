@@ -17,32 +17,28 @@ import (
 )
 
 type AskTurn struct {
-	CanGuideWork        bool         `json:"canGuideWork,omitempty"`
-	GuidanceTargetRunID string       `json:"guidanceTargetRunId,omitempty"`
-	GuidanceStatus      string       `json:"guidanceStatus,omitempty"`
-	GuidanceEpoch       string       `json:"guidanceEpoch,omitempty"`
-	ApprovalID          string       `json:"approvalId,omitempty"`
-	Advisor             bool         `json:"advisor,omitempty"`
-	VoiceInterrupted    bool         `json:"voiceInterrupted,omitempty"`
-	ID                  string       `json:"id"`
-	Prompt              string       `json:"prompt"`
-	Answer              string       `json:"answer"`
-	Context             string       `json:"context,omitempty"`
-	State               string       `json:"state"`
-	StartedAt           time.Time    `json:"startedAt"`
-	EndedAt             *time.Time   `json:"endedAt,omitempty"`
-	Activity            []WorkEvent  `json:"activity"`
-	Error               string       `json:"error,omitempty"`
-	GoalID              string       `json:"goalId,omitempty"`
-	RunID               string       `json:"runId,omitempty"`
-	Workload            string       `json:"workload,omitempty"`
-	Background          bool         `json:"background,omitempty"`
-	Acknowledgement     string       `json:"acknowledgement,omitempty"`
-	AcknowledgedAt      *time.Time   `json:"acknowledgedAt,omitempty"`
-	WorkStatus          string       `json:"workStatus,omitempty"`
-	WorkTitle           string       `json:"workTitle,omitempty"`
-	Question            *AskQuestion `json:"question,omitempty"`
-	AnswerOnly          bool         `json:"answerOnly,omitempty"`
+	ApprovalID       string       `json:"approvalId,omitempty"`
+	Advisor          bool         `json:"advisor,omitempty"`
+	VoiceInterrupted bool         `json:"voiceInterrupted,omitempty"`
+	ID               string       `json:"id"`
+	Prompt           string       `json:"prompt"`
+	Answer           string       `json:"answer"`
+	Context          string       `json:"context,omitempty"`
+	State            string       `json:"state"`
+	StartedAt        time.Time    `json:"startedAt"`
+	EndedAt          *time.Time   `json:"endedAt,omitempty"`
+	Activity         []WorkEvent  `json:"activity"`
+	Error            string       `json:"error,omitempty"`
+	GoalID           string       `json:"goalId,omitempty"`
+	RunID            string       `json:"runId,omitempty"`
+	Workload         string       `json:"workload,omitempty"`
+	Background       bool         `json:"background,omitempty"`
+	Acknowledgement  string       `json:"acknowledgement,omitempty"`
+	AcknowledgedAt   *time.Time   `json:"acknowledgedAt,omitempty"`
+	WorkStatus       string       `json:"workStatus,omitempty"`
+	WorkTitle        string       `json:"workTitle,omitempty"`
+	Question         *AskQuestion `json:"question,omitempty"`
+	AnswerOnly       bool         `json:"answerOnly,omitempty"`
 	// Route is the source choice the turn's goal was opened with; absent for
 	// Auto. The run row carries the choice every node honours -- this is the
 	// conversation's own record of it.
@@ -50,6 +46,10 @@ type AskTurn struct {
 	// Attachments are the Library files the person attached to this message,
 	// resolved under them when the turn opened (ask_attachments.go).
 	Attachments []AskAttachment `json:"attachments,omitempty"`
+	// Routed is where this message went when it reached goals already running
+	// in the conversation (ask_route_turn.go); absent for a turn that only
+	// opened its own goal.
+	Routed *AskRouting `json:"routed,omitempty"`
 }
 
 type AskQuestion struct {
