@@ -48,6 +48,22 @@ head `d46962e79f7c148f2731f5cbf84cd36828eec00b` in run
 `88d6b0e12539b876d1ca0c886fd9b9c4`; it includes the deployed reconnect fix.
 Keep controllers stable until every whole run, including fleet work, finishes.
 
+Instance #240's current head `36a635936d6eda0359dd53572ee9f91bdf85a344`
+passed all ten native steps in run `e7cb192d9779fc8de3b8eb3f3ccf16ba`,
+with ten retained logs, sixteen Library file records and no artifact notes.
+Its public documentation acceptance remains pending #6171 and website
+publication. Four clean, merged instance worktrees and their exact matching
+remote/local branches were removed after ancestry and process checks
+(#224, #232, #237 and #239); active work and shared caches were preserved.
+
+At 13:59 UTC, the remaining competing publisher triggers were disabled:
+engine SDK, docs, database, fixture mirror and toolchain publication; template
+and instance image publication; and the instance's hourly docs sync. None had
+an active run. This prevents a legacy writer racing the native candidate;
+it does not claim the remaining native publication paths are qualified.
+Required checks and their App binding were unchanged. Workflow definitions
+remain until their replacement acceptance is complete.
+
 The preceding `a4a8118e140616dd02a4e5b4ee3d9005` run finished with 34
 completed steps, one failure and seven skips. All eight Linux/macOS editor-host
 cases passed. Packaging stopped after 2,839 of 2,840 unit cases passed: the log
