@@ -76,6 +76,7 @@ func TestValidateAskRoute(t *testing.T) {
 		{"an action with no reply", routeAnswer(map[string]any{"updates": []any{routeUpdate("g1", "")}}), false, "reply"},
 		{"a question with no reply", routeAnswer(map[string]any{"clarify": "The weather or the hike?"}), false, "reply"},
 		{"a reply over 280 characters", routeAnswer(map[string]any{"updates": []any{routeUpdate("g1", "")}, "reply": strings.Repeat("é", 281)}), false, "280"},
+		{"a question over 280 characters", routeAnswer(map[string]any{"clarify": strings.Repeat("é", 281), "reply": "Which one do you mean?"}), false, "clarify is 281 characters"},
 		{"a title over 80 characters", routeAnswer(map[string]any{"updates": []any{routeUpdate("g1", strings.Repeat("é", 81))}, "reply": "Sent."}), false, "80"},
 		{"a split request over 4000 characters", routeAnswer(map[string]any{"updates": []any{routeUpdate("g1", "")}, "newRequest": strings.Repeat("é", 4001), "reply": "Sent."}), false, "4000"},
 		{"prose", "Sure! The message is about the weather.", false, "JSON"},
@@ -108,6 +109,8 @@ func TestValidateAskRoute(t *testing.T) {
 			askRouteDecision{ConfirmStops: []askRouteGoal{goals[2]}, Reply: "Stopping the report."}},
 		{"a clarifying question", routeAnswer(map[string]any{"clarify": "The weather or the hike?", "reply": "The weather or the hike?"}), false,
 			askRouteDecision{Clarify: "The weather or the hike?", Reply: "The weather or the hike?"}},
+		{"a question at its limit", routeAnswer(map[string]any{"clarify": strings.Repeat("é", 280), "reply": "Which one do you mean?"}), false,
+			askRouteDecision{Clarify: strings.Repeat("é", 280), Reply: "Which one do you mean?"}},
 		{"an answer to the question", routeAnswer(map[string]any{"updates": []any{routeUpdate("g2", "")}, "resolvesClarification": true, "reply": "Sent to the hike plan."}), true,
 			askRouteDecision{Updates: []askRouteUpdate{{Goal: goals[1]}}, ResolvesClarification: true, Reply: "Sent to the hike plan."}},
 		{"empty keys left out", `{"updates":[{"goal":"g1","title":""}],"reply":"Sent."}`, false,
@@ -225,6 +228,19 @@ func TestAskRouteDataIsBounded(t *testing.T) {
 		require.NotContains(t, string(raw), id, "the model is shown handles, never ids")
 	}
 	require.Equal(t, "2026-10-19T17:04:05Z", data["now"])
+}
+
+// The conversation routing is shown is what the person and MemQL said. A
+// projected answer turn -- guidance sent to a request, a reply to a goal's
+// question -- is neither, and is never shown as the person speaking.
+func TestAskRouteConversationSkipsProjectedAnswers(t *testing.T) {
+	turns := []AskTurn{
+		{ID: "report", Prompt: "Write the quarterly report.", Answer: "I'll draft it.", State: "queued"},
+		{ID: "guidance-a1", ApprovalID: "a1", Prompt: "Guidance sent:\nUse Celsius.", State: "done", AnswerOnly: true},
+		{ID: "feedback-q1", Prompt: "In reply to “Which quarter?”:\nQ3", State: "done", AnswerOnly: true},
+		{ID: "shorter", Prompt: "Make it shorter", Answer: "The report or the hike plan?", State: "done"},
+	}
+	require.Equal(t, "Person: Write the quarterly report.\nMemQL: I'll draft it.\n\nPerson: Make it shorter\nMemQL: The report or the hike plan?", askRouteConversation(turns))
 }
 
 // askRouteStateCase is one goal as routing lists it -- its run and the request
@@ -355,6 +371,9 @@ func TestAskRouteDataRendersTheRoutingPrompt(t *testing.T) {
 	require.NotContains(t, plain, "STOP QUESTIONS WAITING")
 	require.NotContains(t, plain, "YOUR QUESTION WAITING")
 	require.NotContains(t, plain, "YOUR LAST ANSWER WAS REFUSED")
+	// A live call has no cards: the reply itself asks the stop question.
+	require.Contains(t, plain, `Nothing is stopped yet: the reply asks the person to confirm, for example "Stop the weather check?"`)
+	require.NotContains(t, plain, "card")
 
 	clarification := &AskTurn{ID: "t2", Prompt: "Make it shorter", Answer: "The report or the hike plan?", State: "done", Routed: &AskRouting{Clarify: true}}
 	goals := routeGoals()

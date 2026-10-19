@@ -2,6 +2,7 @@ package memql
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"time"
 
@@ -10,6 +11,13 @@ import (
 	"github.com/znasllc-io/memql/component/language/parser"
 	"github.com/znasllc-io/memql/core/common"
 )
+
+// errAskStopFailed is a stop that did not go through, as the OS shows it.
+var errAskStopFailed = errors.New("This work could not be stopped. Try again.")
+
+// errAskStopEnded refuses a stop question whose goal no longer runs: there is
+// nothing left to stop or keep, and the snapshot already says it ended.
+var errAskStopEnded = errors.New("That work already ended.")
 
 // stopAskGoal closes one of the caller's goals and asks every run of it to
 // stop, as the person. Cancellation is requested, not done: a run notices at
@@ -27,12 +35,31 @@ func (e *MemQLEngine) stopAskGoal(ctx context.Context, goalID string) error {
 	}
 	rows := MaterializeRows(result.OutputPayload())
 	if len(rows) != 1 || rows[0]["goalClosed"] != true {
-		return fmt.Errorf("this work could not be stopped; try again")
+		return errAskStopFailed
 	}
 	if refused, _ := rows[0]["runsRefused"].([]any); len(refused) > 0 {
-		return fmt.Errorf("this work could not be stopped; try again")
+		return errAskStopFailed
 	}
 	return nil
+}
+
+// answerAskStopQuestions records decision on every question in turns still
+// asking whether to stop runID's goal. A stop question is about the goal, not
+// the message that asked it, so one answer settles them all and an older
+// question never comes back once a newer one is answered. A question already
+// answered keeps its answer.
+func answerAskStopQuestions(turns []AskTurn, runID, decision string) {
+	for n := range turns {
+		if turns[n].Routed == nil {
+			continue
+		}
+		for s := range turns[n].Routed.Stops {
+			stop := &turns[n].Routed.Stops[s]
+			if stop.Decision == "" && BareShortId(stop.RunID) == BareShortId(runID) {
+				stop.Decision = decision
+			}
+		}
+	}
 }
 
 // askStopQuestion finds the stop question turnID asked about runID.
@@ -53,8 +80,10 @@ func askStopQuestion(transcript *askTranscript, turnID, runID string) *AskStopQu
 
 // askStopDecisionBuiltin records a person's answer to a stop question Ask
 // asked on one of their goals. stop closes the goal first and then records
-// stopped; keep records kept and changes nothing else. The same answer again
-// returns the saved one; the other answer, once one is saved, is refused.
+// stopped; keep records kept and changes nothing else. The answer is recorded
+// on every question still asking about that goal. The same answer again
+// returns the saved one; the other answer, once one is saved, is refused; and
+// a question whose goal no longer runs is refused with nothing done.
 func (e *MemQLEngine) askStopDecisionBuiltin(ctx context.Context, args map[string]any, _ int) ([]memorynodes.MemoryNode, error) {
 	if rc, ok := common.RunFromContext(ctx); ok && rc.RunId != "" {
 		return nil, fmt.Errorf("stopping work needs a person's decision")
@@ -89,6 +118,15 @@ func (e *MemQLEngine) askStopDecisionBuiltin(ctx context.Context, args map[strin
 	case "":
 	default:
 		return nil, fmt.Errorf("this stop question is already decided")
+	}
+	// A goal that ended has nothing to stop or keep. Its question is not
+	// answered here, ended included: the snapshot says ended by itself.
+	runs, err := e.workRows(ContextWithFreshRead(ctx), "workRunForOwner", question.RunID)
+	if err != nil {
+		return nil, err
+	}
+	if len(runs) != 1 || !activeWorkRun(runs[0]) {
+		return nil, errAskStopEnded
 	}
 	// Cancelling is a work builtin and the conversation lock is not reentrant,
 	// so the goal is stopped before the lock is taken.
@@ -125,6 +163,7 @@ func (e *MemQLEngine) askStopDecisionBuiltin(ctx context.Context, args map[strin
 		return nil, fmt.Errorf("this stop question is already decided")
 	}
 	question.Decision = decision
+	answerAskStopQuestions(transcript.Turns, question.RunID, decision)
 	if err := hold.verify(ctx); err != nil {
 		return nil, err
 	}

@@ -42,8 +42,10 @@ func askConversationMessages(turns []AskTurn) []map[string]any {
 
 // A voice interruption stops delivery while the shared run keeps its receipts.
 // Bring completed results back into history before answering the next turn.
+// RunAsk saves this transcript, so routed turns keep what routing recorded:
+// their projection over the runs is the snapshot's to show.
 func (e *MemQLEngine) reconcileAskRuns(ctx context.Context, transcript *askTranscript) {
-	_ = e.refreshAskRuns(ctx, transcript)
+	_ = e.refreshAskTranscript(ctx, transcript, false)
 }
 
 // Persist actual receipts beside conversational prose before the planner hop.

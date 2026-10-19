@@ -48,14 +48,13 @@ export interface AskRouteTarget {
   /** The goal's current title; the cluster re-reads it on every snapshot. */
   title: string;
   status: "queued" | "received" | "answered" | "notApproved" | "saved" | "notDelivered" | "notReceived";
-  epoch?: string;
   /** Present when the message answered one of the goal's requests rather than guiding its work. */
   approvalId?: string;
   reason?: "ended" | "review" | "limit" | "refused";
   /** Exactly what the goal received. */
   text: string;
 }
-/** The person asked to drop a goal; nothing stops until they answer on its card. */
+/** The person asked to drop a goal; nothing stops until they confirm, on its card or by answering the reply's question. */
 export interface AskStopQuestion {
   goalId: string;
   runId: string;
@@ -69,7 +68,8 @@ export interface AskRouted {
   stops?: AskStopQuestion[];
   /** Said before a split request's own answer. */
   reply?: string;
-  /** What intake received when the message was split. */
+  /** What intake received when it was not the message as written: a split
+   *  message's new request, or a settled question's two messages. */
   statement?: string;
   clarify?: boolean;
   resolved?: boolean;
@@ -272,8 +272,10 @@ export class ConversationSession {
       // Recorded: the question is answered even if the read that follows fails,
       // and a read that left while it was being recorded answers too early.
       this.stopRevision++;
+      // The answer is about the goal, so it settles every question still
+      // asking about it, as the cluster records it: none comes back.
       const answered = decision === "stop" ? "stopped" : "kept";
-      this.patch({ turns: this.state.turns.map(turn => turn.id !== turnId || !turn.routed?.stops ? turn : { ...turn, routed: { ...turn.routed, stops: turn.routed.stops.map(stop => stop.runId === runId && !stop.decision ? { ...stop, decision: answered } : stop) } }) });
+      this.patch({ turns: this.state.turns.map(turn => !turn.routed?.stops?.some(stop => stop.runId === runId && !stop.decision) ? turn : { ...turn, routed: { ...turn.routed, stops: turn.routed.stops.map(stop => stop.runId === runId && !stop.decision ? { ...stop, decision: answered } : stop) } }) });
       await this.reload();
       return true;
     } catch (error) {
@@ -683,6 +685,11 @@ export class ConversationSession {
       this.patch({ busy: false });
       this.scheduleRefresh();
       void this.refresh();
+      // A message that went only to work already running opens no run of its
+      // own. The cluster saved where it went before it said done, so read it
+      // now: its labels and any stop question arrive with the reply, not a
+      // poll later.
+      if (!error && !turn.runId) void this.reload(false);
     };
     void (async () => {
       try {

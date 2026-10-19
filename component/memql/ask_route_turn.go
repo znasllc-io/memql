@@ -7,9 +7,10 @@ package memql
 // so routing on one replica and execution on another share no memory.
 
 // AskRouting is what a routed turn did. Reply is shown before a split
-// request's own answer; Statement is what intake received when the message
-// was split; Resolved marks a clarification a later message settled; Skipped
-// says why routing fell back to intake.
+// request's own answer; Statement is what intake received when that was not
+// the message as written (a split message's new request, or a settled
+// question's two messages); Resolved marks a clarification a later message
+// settled; Skipped says why routing fell back to intake.
 type AskRouting struct {
 	Targets   []AskRouteTarget  `json:"targets,omitempty"`
 	Stops     []AskStopQuestion `json:"stops,omitempty"`
@@ -132,7 +133,8 @@ func workGuidanceTarget(turn *AskTurn, run map[string]any) *AskRouteTarget {
 // A queued message is Not received only when its run ended (or was asked to
 // stop) before reading it; a retry, repair, re-plan or re-run is the same run.
 // An unanswered stop question whose goal ended is ended; every label takes the
-// goal's current title. It reads only.
+// goal's current title. It reads only, and what it projects is a reader's
+// view that no save path stores (refreshAskTranscript).
 func projectAskRouting(routed *AskRouting, readRun func(string) (map[string]any, error)) error {
 	if routed == nil {
 		return nil

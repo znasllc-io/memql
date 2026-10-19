@@ -13,9 +13,12 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// The model's reply is a proposal. It stands when every target was delivered;
-// otherwise Go says plainly what happened, one sentence per goal in the order
-// the message went to them.
+// The model's reply is a proposal. It stands when every target was delivered
+// and every stop the person confirmed went through; otherwise Go says plainly
+// what happened, in words a live call can say as well as a screen can show:
+// one sentence per goal in the order the message went to them, then each
+// confirmed stop as it went, then each new stop question, so the reply ends on
+// the question the person answers.
 func TestHonestRouteReply(t *testing.T) {
 	model := "Switching the weather check to Phoenix."
 	sent := func(title, status string) AskRouteTarget {
@@ -26,35 +29,39 @@ func TestHonestRouteReply(t *testing.T) {
 		target.Reason = reason
 		return target
 	}
+	goal := func(title string) askRouteGoal {
+		return askRouteGoal{Handle: "g-" + title, GoalID: "goal-" + title, RunID: "run-" + title, Title: title}
+	}
 	for _, c := range []struct {
-		name    string
-		targets []AskRouteTarget
-		want    string
+		name                      string
+		targets                   []AskRouteTarget
+		asked, stopped, unstopped []askRouteGoal
+		want                      string
 	}{
-		{"every target delivered keeps the model's reply", []AskRouteTarget{sent("A", routeQueued), sent("B", routeReceived), sent("C", routeAnswered), sent("D", routeNotApproved), sent("E", routeSaved)}, model},
-		{"nothing delivered to anyone keeps the model's reply", nil, model},
-		{"one goal ended", []AskRouteTarget{sent("A", routeQueued), missed("B", routeNotReceived, routeReasonEnded)}, "Sent to A. B already finished, so it didn't get this."},
-		{"a review", []AskRouteTarget{missed("A", routeNotDelivered, routeReasonReview)}, "A is waiting on a review that doesn't take messages. Open it to decide."},
-		{"the guidance limit", []AskRouteTarget{missed("A", routeNotDelivered, routeReasonLimit)}, "A can't take more messages."},
-		{"a refusal", []AskRouteTarget{missed("A", routeNotDelivered, routeReasonRefused)}, "A couldn't take this message."},
-		{"every delivered status reads Sent", []AskRouteTarget{sent("A", routeAnswered), sent("B", routeNotApproved), sent("C", routeSaved), sent("D", routeReceived), missed("E", routeNotDelivered, routeReasonRefused)},
+		{"every target delivered keeps the model's reply", []AskRouteTarget{sent("A", routeQueued), sent("B", routeReceived), sent("C", routeAnswered), sent("D", routeNotApproved), sent("E", routeSaved)}, nil, nil, nil, model},
+		{"nothing delivered to anyone keeps the model's reply", nil, nil, nil, nil, model},
+		{"one goal ended", []AskRouteTarget{sent("A", routeQueued), missed("B", routeNotReceived, routeReasonEnded)}, nil, nil, nil, "Sent to A. B already finished, so it didn't get this."},
+		{"a review", []AskRouteTarget{missed("A", routeNotDelivered, routeReasonReview)}, nil, nil, nil, "A is waiting on a review that doesn't take messages. Open it to decide."},
+		{"the guidance limit", []AskRouteTarget{missed("A", routeNotDelivered, routeReasonLimit)}, nil, nil, nil, "A can't take more messages."},
+		{"a refusal", []AskRouteTarget{missed("A", routeNotDelivered, routeReasonRefused)}, nil, nil, nil, "A couldn't take this message."},
+		{"every delivered status reads Sent", []AskRouteTarget{sent("A", routeAnswered), sent("B", routeNotApproved), sent("C", routeSaved), sent("D", routeReceived), missed("E", routeNotDelivered, routeReasonRefused)}, nil, nil, nil,
 			"Sent to A. Sent to B. Sent to C. Sent to D. E couldn't take this message."},
+		// Stops that went as decided leave the model's line standing.
+		{"delivered, a stop asked about and a stop that went through", []AskRouteTarget{sent("A", routeQueued)}, []askRouteGoal{goal("B")}, []askRouteGoal{goal("C")}, nil, model},
+		// A failed delivery says every stop too: the question asked, a stop done.
+		{"a failed delivery asks the stop question", []AskRouteTarget{missed("A", routeNotReceived, routeReasonEnded)}, []askRouteGoal{goal("Hike plan")}, nil, nil,
+			"A already finished, so it didn't get this. Stop Hike plan?"},
+		{"a failed delivery says a confirmed stop went through", []AskRouteTarget{sent("A", routeQueued), missed("B", routeNotDelivered, routeReasonLimit)}, nil, []askRouteGoal{goal("Tucson report")}, nil,
+			"Sent to A. B can't take more messages. Stopped Tucson report."},
+		// A confirmed stop that failed is never claimed.
+		{"a confirmed stop that failed", nil, nil, nil, []askRouteGoal{goal("Weather in Tucson")}, "Weather in Tucson couldn't be stopped. Try again."},
+		{"every kind of sentence, in order", []AskRouteTarget{sent("Hike plan", routeQueued)}, []askRouteGoal{goal("Trail map"), goal("")}, []askRouteGoal{goal("Tucson report")}, []askRouteGoal{goal("Weather in Tucson")},
+			"Sent to Hike plan. Stopped Tucson report. Weather in Tucson couldn't be stopped. Try again. Stop Trail map? Stop this work?"},
 	} {
 		t.Run(c.name, func(t *testing.T) {
-			require.Equal(t, c.want, honestRouteReply(model, c.targets))
+			require.Equal(t, c.want, honestRouteReply(model, c.targets, c.asked, c.stopped, c.unstopped))
 		})
 	}
-}
-
-// When a confirmed stop does not go through, the reply cannot claim it did:
-// it says where the message went and how each stop went.
-func TestHonestStopReply(t *testing.T) {
-	weather := askRouteGoal{Handle: "g1", GoalID: "weather-goal", RunID: "weather", Title: "Weather in Tucson"}
-	report := askRouteGoal{Handle: "g2", GoalID: "report-goal", RunID: "report", Title: "Tucson report"}
-	targets := []AskRouteTarget{{GoalID: "hike-goal", RunID: "hike", Title: "Hike plan", Status: routeQueued, Text: "Skip the report."}}
-	require.Equal(t, "Sent to Hike plan. Stopping Tucson report. Weather in Tucson couldn't be stopped. Use Stop on its card.",
-		honestStopReply(targets, []askRouteGoal{report}, []askRouteGoal{weather}))
-	require.Equal(t, "Weather in Tucson couldn't be stopped. Use Stop on its card.", honestStopReply(nil, nil, []askRouteGoal{weather}))
 }
 
 // Only a new message of at most 4,000 characters (the guidance limit) and no

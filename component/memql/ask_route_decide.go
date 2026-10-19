@@ -51,7 +51,7 @@ const (
 	askRouteUpdates      = 3    // messages a goal was already sent
 	askRouteUpdateRunes  = 300  // one of those messages; what a goal waits on
 	askRouteTitleRunes   = 80   // a goal's title, shown or proposed
-	askRouteReplyRunes   = 280  // the reply line
+	askRouteReplyRunes   = 280  // the reply line, and a clarifying question, which becomes the turn's whole answer
 	askRouteMessageRunes = 4000 // a message routing takes, a split-off request, and one message a goal receives (the guidance limit)
 	askRouteDecisions    = 2    // one decision and one retry
 )
@@ -193,6 +193,9 @@ func validateAskRoute(raw string, goals []askRouteGoal, pendingStops map[string]
 	}
 	if n := utf8.RuneCountInString(reply); n > askRouteReplyRunes {
 		return askRouteDecision{}, fmt.Errorf("the reply is %d characters; a reply is at most %d", n, askRouteReplyRunes)
+	}
+	if n := utf8.RuneCountInString(clarify); n > askRouteReplyRunes {
+		return askRouteDecision{}, fmt.Errorf("clarify is %d characters; ask one short question of at most %d", n, askRouteReplyRunes)
 	}
 	if n := utf8.RuneCountInString(newRequest); n > askRouteMessageRunes {
 		return askRouteDecision{}, fmt.Errorf("newRequest is %d characters; it is at most %d", n, askRouteMessageRunes)
@@ -352,8 +355,9 @@ func askRouteConversation(turns []AskTurn) string {
 	var kept []AskTurn
 	for _, turn := range turns {
 		// As askConversationMessages: a failed transcription is not something
-		// the person said.
-		if strings.TrimSpace(turn.Prompt) == "" || (turn.Prompt == "Voice message" && turn.State == "error") {
+		// the person said. Nor is a projected answer turn ("Guidance sent:",
+		// "In reply to"), as askPendingClarification reads it.
+		if turn.AnswerOnly || strings.TrimSpace(turn.Prompt) == "" || (turn.Prompt == "Voice message" && turn.State == "error") {
 			continue
 		}
 		kept = append(kept, turn)

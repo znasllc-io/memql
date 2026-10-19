@@ -226,29 +226,18 @@ func (e *MemQLEngine) recordAskRoute(ctx context.Context, hold *askConversationH
 	for _, goal := range decision.Stops {
 		routed.Stops = append(routed.Stops, AskStopQuestion{GoalID: goal.GoalID, RunID: goal.RunID, Title: goal.Title})
 	}
-	reply := honestRouteReply(decision.Reply, targets)
-	if len(record.unstopped) > 0 {
-		reply = honestStopReply(targets, record.stopped, record.unstopped)
-	}
+	reply := honestRouteReply(decision.Reply, targets, decision.Stops, record.stopped, record.unstopped)
 	if decision.Clarify != "" {
 		routed.Clarify, reply = true, decision.Clarify
 	}
-	for n := range transcript.Turns[:index] {
-		earlier := transcript.Turns[n].Routed
-		if earlier == nil {
-			continue
-		}
-		// A stop the person confirmed answers every question still asking
-		// about that goal. One a snapshot saved as ended while the stop went
-		// through was asked before it, and records the stop too.
-		for s := range earlier.Stops {
-			stop := &earlier.Stops[s]
-			if askGoalNamed(record.stopped, stop.RunID) && (stop.Decision == "" || stop.Decision == stopDecisionEnded) {
-				stop.Decision = stopDecisionStopped
-			}
-		}
-		if decision.ResolvesClarification && record.clarification != nil && transcript.Turns[n].ID == record.clarification.ID {
-			earlier.Resolved = true
+	// A stop the person confirmed answers every question still asking about
+	// that goal.
+	for _, goal := range record.stopped {
+		answerAskStopQuestions(transcript.Turns[:index], goal.RunID, stopDecisionStopped)
+	}
+	if decision.ResolvesClarification && record.clarification != nil {
+		if asked := askTurnIndex(transcript.Turns[:index], record.clarification.ID); asked >= 0 && transcript.Turns[asked].Routed != nil {
+			transcript.Turns[asked].Routed.Resolved = true
 		}
 	}
 	// Intake still takes the message when it was split, or when every goal it
@@ -261,11 +250,19 @@ func (e *MemQLEngine) recordAskRoute(ctx context.Context, hold *askConversationH
 	outcome := askRouteOutcome{Routed: routed}
 	turn := &transcript.Turns[index]
 	if decision.NewRequest != "" || (ended && len(decision.Stops) == 0 && len(decision.ConfirmStops) == 0) {
-		routed.Reply, routed.Statement = reply, decision.NewRequest
-		outcome.Intake, outcome.Statement = true, record.prompt
+		// Intake takes the split-off request, or else the message as its goals
+		// would have: with routing's question settled, both of the person's
+		// messages. The turn records what intake took when it is not the
+		// message as written.
+		statement := record.text
 		if decision.NewRequest != "" {
-			outcome.Statement = decision.NewRequest
+			statement = decision.NewRequest
 		}
+		routed.Reply = reply
+		if statement != record.prompt {
+			routed.Statement = statement
+		}
+		outcome.Intake, outcome.Statement = true, statement
 	} else {
 		// The answer is saved with what routing did, so a resent turn is
 		// answered from the record.
@@ -325,35 +322,31 @@ func (e *MemQLEngine) retitleAskGoal(ctx context.Context, runID, title string) {
 }
 
 // honestRouteReply is the reply a routed message gets. The model's line is a
-// proposal: it stands when every target was delivered, and otherwise Go says
-// plainly what happened, one sentence per goal in the order the message went
-// to them.
-func honestRouteReply(modelReply string, targets []AskRouteTarget) string {
-	sentences := make([]string, 0, len(targets))
-	delivered := true
+// proposal: it stands when every target was delivered and every stop the
+// person confirmed went through, which the model's line cannot know. Otherwise
+// Go says plainly what happened: one sentence per goal in the order the
+// message went to them, then each confirmed stop as it went, then each stop
+// question the message raised (asked), so the reply ends on the question the
+// person answers. The words work spoken as well as shown: a live call has no
+// cards, and its reply is the only place a stop is asked or reported.
+func honestRouteReply(modelReply string, targets []AskRouteTarget, asked, stopped, unstopped []askRouteGoal) string {
+	honest := len(unstopped) == 0
+	sentences := make([]string, 0, len(targets)+len(asked)+len(stopped)+len(unstopped))
 	for _, target := range targets {
-		delivered = delivered && routeDelivered(target.Status)
+		honest = honest && routeDelivered(target.Status)
 		sentences = append(sentences, routeTargetSentence(target))
 	}
-	if delivered {
+	if honest {
 		return modelReply
 	}
-	return strings.Join(sentences, " ")
-}
-
-// honestStopReply is the reply when a stop the person confirmed did not go
-// through, which the model's line cannot know: where the message went, then
-// each stop as it went.
-func honestStopReply(targets []AskRouteTarget, stopped, unstopped []askRouteGoal) string {
-	sentences := make([]string, 0, len(targets)+len(stopped)+len(unstopped))
-	for _, target := range targets {
-		sentences = append(sentences, routeTargetSentence(target))
-	}
 	for _, goal := range stopped {
-		sentences = append(sentences, "Stopping "+routeGoalName(goal.Title, false)+".")
+		sentences = append(sentences, "Stopped "+routeGoalName(goal.Title, false)+".")
 	}
 	for _, goal := range unstopped {
-		sentences = append(sentences, routeGoalName(goal.Title, true)+" couldn't be stopped. Use Stop on its card.")
+		sentences = append(sentences, routeGoalName(goal.Title, true)+" couldn't be stopped. Try again.")
+	}
+	for _, goal := range asked {
+		sentences = append(sentences, "Stop "+routeGoalName(goal.Title, false)+"?")
 	}
 	return strings.Join(sentences, " ")
 }
@@ -453,14 +446,4 @@ func askTurnIndex(turns []AskTurn, turnID string) int {
 		}
 	}
 	return -1
-}
-
-// askGoalNamed reports whether runID is the run of one of goals.
-func askGoalNamed(goals []askRouteGoal, runID string) bool {
-	for _, goal := range goals {
-		if BareShortId(goal.RunID) == BareShortId(runID) {
-			return true
-		}
-	}
-	return false
 }

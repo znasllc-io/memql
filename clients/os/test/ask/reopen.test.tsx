@@ -67,6 +67,9 @@ it("ignores a delayed reopen snapshot after a new stream finishes", async () => 
   const test = await setup(); const pending = deferred<AskTurn[]>();
   test.store.read.mockReturnValueOnce(pending.promise); await open();
   await act(async () => { test.controls.conversation.send("A new request", null); });
+  // As the cluster does, the finished turn is saved before the stream says done.
+  const sent = test.controls.conversation.getSnapshot().turns.at(-1)!;
+  test.setStored([lost, { ...sent, answer: "Fresh reply", state: "done", endedAt: "2026-10-13T10:05:00Z" }]);
   act(() => { test.callbacks().delta("Fresh reply"); test.callbacks().done(); });
   await act(async () => { pending.resolve([lost]); });
   expect(screen.getByText("Fresh reply")).toBeTruthy();
