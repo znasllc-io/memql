@@ -1135,7 +1135,9 @@ func (x *SetupProgress) GetUpdatedAt() *timestamppb.Timestamp {
 // SetupStage is one stage of the installer.
 type SetupStage struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
-	// "runtime" | "models" | "workbench". Any other name is dropped.
+	// "permissions" | "runtime" | "models" | "workbench". Any other name is
+	// dropped. "permissions" waits for the person on a computer-use Mac, and
+	// runs first.
 	Name string `protobuf:"bytes,1,opt,name=name,proto3" json:"name,omitempty"`
 	// "waiting" | "running" | "done" | "failed" | "skipped". "skipped" is a
 	// stage the installer reached and chose not to run, or never reached before

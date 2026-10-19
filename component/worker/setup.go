@@ -42,7 +42,10 @@ type Setup struct {
 
 // SetupStage is one stage of the installer.
 type SetupStage struct {
-	// Name is "runtime", "models" or "workbench".
+	// Name is "permissions", "runtime", "models" or "workbench".
+	// "permissions" is the person's turn on a computer-use Mac: the installer
+	// waits for them to allow MemQL, or to go on without it, before anything
+	// downloads (memql#6235).
 	Name string
 	// State is "waiting", "running", "done", "failed" or "skipped".
 	State string
@@ -63,7 +66,7 @@ type SetupStage struct {
 // front of somebody watching an install.
 var (
 	setupStates      = map[string]bool{"running": true, "finished": true, "stopped": true}
-	setupStageNames  = map[string]bool{"runtime": true, "models": true, "workbench": true}
+	setupStageNames  = map[string]bool{"permissions": true, "runtime": true, "models": true, "workbench": true}
 	setupStageStates = map[string]bool{"waiting": true, "running": true, "done": true, "failed": true, "skipped": true}
 )
 

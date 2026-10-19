@@ -54,6 +54,32 @@ func TestSetupFromProtoKeepsOnlyWhatItCanSay(t *testing.T) {
 	}
 }
 
+// THE PERSON'S TURN IS A STAGE (memql#6235). On a computer-use Mac the
+// installer waits for the person to allow MemQL, or to go on without it,
+// before anything downloads; the stage arrives first and must survive the
+// closed vocabulary like the others.
+func TestSetupFromProtoKeepsThePermissionsStageInTheInstallersOrder(t *testing.T) {
+	s := SetupFromProto(installerReport(
+		&memqlv1.SetupStage{Name: "permissions", State: "skipped", Detail: "Continued without Screen Recording.", Model: "not a model", TotalBytes: 9},
+		&memqlv1.SetupStage{Name: "runtime", State: "waiting"},
+		&memqlv1.SetupStage{Name: "models", State: "waiting"},
+	), time.Now())
+	if len(s.Stages) != 3 || s.Stages[0].Name != "permissions" || s.Stages[1].Name != "runtime" {
+		t.Fatalf("the permissions stage must be kept, first, in the installer's order: %+v", s.Stages)
+	}
+	permissions := s.Stages[0]
+	if permissions.State != "skipped" || permissions.Detail != "Continued without Screen Recording." {
+		t.Fatalf("the person's choice and the cockpit's sentence for it must be kept: %+v", permissions)
+	}
+	if permissions.Model != "" || permissions.TotalBytes != 0 {
+		t.Fatalf("download figures belong to the models stage alone: %+v", permissions)
+	}
+	row := s.Row()["stages"].([]any)[0].(map[string]any)
+	if _, ok := row["totalBytes"]; ok || row["name"] != "permissions" {
+		t.Fatalf("the stored permissions stage carries its name, state and sentence only: %#v", row)
+	}
+}
+
 func TestSetupFromProtoBoundsTheInstallersWords(t *testing.T) {
 	long := strings.Repeat("é", maxSetupDetailLen)
 	s := SetupFromProto(installerReport(
