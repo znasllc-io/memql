@@ -225,6 +225,12 @@ type ModelsPolicy struct {
 	// kept as a node for the reason Parallel is: `working_context: 16k` would
 	// fail the whole file, and `working_ctx: 8192` would be dropped silently.
 	Resident yaml.Node `yaml:"resident"`
+	// Unknown is every key directly under models: that none of the fields above
+	// takes. A typed decode drops such a key without a word, so `residnet:` read
+	// exactly like an owner who never asked for anything; readModelsTuning names
+	// each one. The values are nodes only so that any shape decodes: nothing
+	// reads them.
+	Unknown map[string]yaml.Node `yaml:",inline"`
 }
 
 // BackupPolicy controls which folders this machine will back up into the
@@ -527,6 +533,7 @@ func (p *Policy) reload() error {
 	// already deleted, and a SIGHUP is how they take the deletion back.
 	p.models.Parallel = raw.Models.Parallel
 	p.models.Resident = raw.Models.Resident
+	p.models.Unknown = raw.Models.Unknown
 	// pipelines REPLACES, whole, for the same reason: allow is a consent, and
 	// a narrowed repos list that kept the repository it dropped would admit a
 	// step the file no longer names.

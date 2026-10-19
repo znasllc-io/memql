@@ -288,3 +288,97 @@ func TestModelsTuning_AnEntryThatCannotStandIsReportedAndIgnored(t *testing.T) {
 		})
 	}
 }
+
+// TestModelsTuning_AnUnknownKeyUnderModelsIsNamed. A typed decode drops a key
+// it has no field for, without a word, so `residnet:` read exactly like an
+// owner who never asked to keep a model loaded: nothing changed and nothing
+// said why. A key directly under models: that nothing reads is named in one
+// sentence, and everything the block does say still stands.
+func TestModelsTuning_AnUnknownKeyUnderModelsIsNamed(t *testing.T) {
+	const prefix = "models: takes allow, runtimes, pull, parallel and resident, and "
+	const suffix = " is none of them, so that key is ignored"
+
+	t.Run("resident mistyped", func(t *testing.T) {
+		p, _ := policyFromDoc(t, "models:\n  allow: [m]\n  residnet:\n    - id: m\n      keep_alive: 2h\n")
+		if got := p.ModelsTuning(); got.Parallel != 0 || len(got.Resident) != 0 {
+			t.Errorf("a mistyped key tuned something: %+v", got)
+		}
+		if got := p.ModelsAllow(); len(got) != 1 || got[0] != "m" {
+			t.Errorf("models.allow = %q, want [m]: one mistyped key must not cost the others", got)
+		}
+		want := prefix + `"residnet"` + suffix
+		if got := p.ModelsTuningProblems(); len(got) != 1 || got[0] != want {
+			t.Errorf("problems = %q, want exactly [%q]", got, want)
+		}
+	})
+
+	t.Run("parallel mistyped", func(t *testing.T) {
+		p, _ := policyFromDoc(t, "models:\n  allow: [m]\n  paralel: 2\n")
+		if got := p.ModelsTuning(); got.Parallel != 0 {
+			t.Errorf("a mistyped key set parallel to %d", got.Parallel)
+		}
+		want := prefix + `"paralel"` + suffix
+		if got := p.ModelsTuningProblems(); len(got) != 1 || got[0] != want {
+			t.Errorf("problems = %q, want exactly [%q]", got, want)
+		}
+	})
+
+	t.Run("a misspelling beside a real setting costs only itself", func(t *testing.T) {
+		p, _ := policyFromDoc(t, "models:\n  allow: [m]\n  parallel: 3\n  residnet:\n    - id: m\n      keep_alive: 2h\n")
+		if got := p.ModelsTuning(); got.Parallel != 3 {
+			t.Errorf("parallel = %d, want 3: the real key beside the typo must stand", got.Parallel)
+		}
+		want := prefix + `"residnet"` + suffix
+		if got := p.ModelsTuningProblems(); len(got) != 1 || got[0] != want {
+			t.Errorf("problems = %q, want exactly [%q]", got, want)
+		}
+	})
+
+	t.Run("several are named in a fixed order", func(t *testing.T) {
+		p, _ := policyFromDoc(t, "models:\n  residnet: []\n  alow: [m]\n  paralel: 2\n")
+		want := []string{
+			prefix + `"alow"` + suffix,
+			prefix + `"paralel"` + suffix,
+			prefix + `"residnet"` + suffix,
+		}
+		if got := p.ModelsTuningProblems(); !slices.Equal(got, want) {
+			t.Errorf("problems = %q, want %q", got, want)
+		}
+	})
+
+	t.Run("every key the block takes is known", func(t *testing.T) {
+		p, _ := policyFromDoc(t, `models:
+  allow: [m]
+  pull: false
+  parallel: 2
+  resident:
+    - id: m
+      keep_alive: 2h
+  runtimes:
+    - name: lmstudio
+      base_url: http://127.0.0.1:1234/v1
+`)
+		if got := p.ModelsTuningProblems(); len(got) != 0 {
+			t.Errorf("a block of known keys reported problems: %q", got)
+		}
+	})
+
+	t.Run("a reload that fixes the typo clears it", func(t *testing.T) {
+		p, path := policyFromDoc(t, "models:\n  allow: [m]\n  paralel: 2\n")
+		if len(p.ModelsTuningProblems()) != 1 {
+			t.Fatalf("before the fix: %q", p.ModelsTuningProblems())
+		}
+		if err := os.WriteFile(path, []byte("models:\n  allow: [m]\n  parallel: 2\n"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		if err := p.Reload(); err != nil {
+			t.Fatalf("Reload: %v", err)
+		}
+		if got := p.ModelsTuningProblems(); len(got) != 0 {
+			t.Errorf("after the fix: %q, want none", got)
+		}
+		if got := p.ModelsTuning(); got.Parallel != 2 {
+			t.Errorf("after the fix parallel = %d, want 2", got.Parallel)
+		}
+	})
+}

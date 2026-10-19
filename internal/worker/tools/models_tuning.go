@@ -2,6 +2,7 @@ package tools
 
 import (
 	"fmt"
+	"sort"
 	"strings"
 
 	"github.com/znasllc-io/memql-cockpit/internal/worker/models"
@@ -53,10 +54,11 @@ func (p *Policy) ModelsTuning() ModelsTuning {
 }
 
 // ModelsTuningProblems is every problem with models.parallel and
-// models.resident, as sentences an owner can act on. The worker logs them
-// when the file is read and `memql worker models` prints them, because a
-// setting that silently did nothing is indistinguishable from one that
-// worked.
+// models.resident, and every key under models: that nothing reads (the usual
+// way either of them is mistyped), as sentences an owner can act on. The
+// worker logs them when the file is read and `memql worker models` prints
+// them, because a setting that silently did nothing is indistinguishable
+// from one that worked.
 func (p *Policy) ModelsTuningProblems() []string {
 	if p == nil {
 		return nil
@@ -67,13 +69,15 @@ func (p *Policy) ModelsTuningProblems() []string {
 	return problems
 }
 
-// readModelsTuning validates models.parallel and models.resident: parallel
-// first, then the entries in file order.
+// readModelsTuning validates models.parallel and models.resident: a key under
+// models: that nothing reads first, then parallel, then the entries in file
+// order.
 func readModelsTuning(m ModelsPolicy) (ModelsTuning, []string) {
 	var (
 		out      ModelsTuning
 		problems []string
 	)
+	problems = append(problems, unknownModelsKeys(m.Unknown)...)
 	parallel, problem := readParallel(m.Parallel)
 	out.Parallel = parallel
 	if problem != "" {
@@ -135,6 +139,27 @@ func readModelsTuning(m ModelsPolicy) (ModelsTuning, []string) {
 		out.Resident = append(out.Resident, r)
 	}
 	return out, problems
+}
+
+// unknownModelsKeys names each key directly under models: that the block does
+// not take, sorted so the sentences come out in the same order every time (a
+// map keeps no file order). The block takes five keys, and a mistyped one is
+// the likeliest way an owner's tuning does nothing.
+func unknownModelsKeys(unknown map[string]yaml.Node) []string {
+	if len(unknown) == 0 {
+		return nil
+	}
+	keys := make([]string, 0, len(unknown))
+	for k := range unknown {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+	problems := make([]string, 0, len(keys))
+	for _, k := range keys {
+		problems = append(problems, fmt.Sprintf(
+			"models: takes allow, runtimes, pull, parallel and resident, and %q is none of them, so that key is ignored", k))
+	}
+	return problems
 }
 
 // readParallel reads models.parallel. Absent and null are not said. A value
