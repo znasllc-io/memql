@@ -33,6 +33,8 @@ func (e *MemQLEngine) initBuiltinExecutorHandlers() error {
 		"askApprovalMessage":            e.askApprovalMessageBuiltin,
 		"askRunApprovalMessage":         e.askRunApprovalMessageBuiltin,
 		"askApprovalEvidence":           e.askApprovalEvidenceBuiltin,
+		"askRouteGoals":                 scopedAskRouteOperation,
+		"askRouteDecide":                scopedAskRouteOperation,
 		"bindEmbedder":                  e.bindEmbedderBuiltin,
 		"workNavigate":                  e.workNavigateBuiltin,
 		"workCapabilities":              e.workCapabilitiesBuiltin,

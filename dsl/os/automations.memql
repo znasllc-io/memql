@@ -5,3 +5,19 @@ automation askApprovalAnalysis {
  reply := builtin askRunApprovalMessage()
  return reply
 }
+
+/// Decide what a person's message does to the goals already running in its
+/// conversation: one fast routing decision, and one retry told why the first
+/// was refused. "routed" means a valid decision was made; "intake" takes the
+/// message as a new request. Ask runs it through its scoped workflow seam,
+/// which binds askRouteGoals and askRouteDecide to that one message.
+@template
+automation askMessageRouting {
+ goals := builtin askRouteGoals()
+ if goals.count == 0 { return "intake" }
+ first := builtin askRouteDecide(prompt: "askMessageRouting", previousError: "")
+ if first.valid { return "routed" }
+ second := builtin askRouteDecide(prompt: "askMessageRouting", previousError: first.error)
+ if second.valid { return "routed" }
+ return "intake"
+}

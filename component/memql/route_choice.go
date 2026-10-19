@@ -17,7 +17,9 @@ package memql
 //     request that reaches it, from the RunContext the executing node built
 //     off the run row. That is the only way the choice reaches a planner
 //     compile and an agent reply alike: neither shares memory with the node
-//     that took the turn.
+//     that took the turn. A call made outside any run -- Ask deciding where a
+//     message goes before a goal exists -- reads the turn's own choice off
+//     the context instead, for the person who made it.
 //
 // # What a choice does to one call
 //
@@ -277,26 +279,42 @@ func routedByChoice(req airoute.ResolveRequest) bool {
 
 // ApplyRunRouting applies the run's route choice to one router request. The
 // router calls it for EVERY request that reaches it (router.ResolveFor), so a
-// call site cannot forget it; a context that is not a run's, or a run nobody
-// chose for, changes nothing.
+// call site cannot forget it; a run nobody chose for changes nothing.
+//
+// A call made OUTSIDE any run is made for a person on their own turn -- Ask
+// deciding where their message goes, before any goal exists -- and goes where
+// that turn said: the choice ContextWithGoalRouteChoice stamped for the goal
+// the turn opens, applied exactly as a run's would be, and only when the call
+// is that person's own. With a run on the context, the run's choice wins, an
+// Auto run's included. The level binds only a run's steps, so it never binds a
+// call outside a run.
 //
 // It is idempotent, and it leaves alone whatever the executing step's own
 // override names (see the file comment for why that one wins).
 func ApplyRunRouting(ctx context.Context, req airoute.ResolveRequest) (airoute.ResolveRequest, error) {
-	rc, ok := common.RunFromContext(ctx)
-	if ok && rc.Routing.NoPaidProviders {
+	rc, inRun := common.RunFromContext(ctx)
+	routing := rc.Routing
+	if !inRun {
+		routing = GoalRouteChoice(ctx, actingUserFromContext(ctx))
+	}
+	if routing.NoPaidProviders {
 		req.NoPaidProviders = true
 	}
-	if !ok || rc.Routing.IsZero() || !routedByChoice(req) {
+	if routing.IsZero() || !routedByChoice(req) {
 		return req, nil
 	}
-	// Re-parsed, not trusted: the value came off a row, and a row that no
+	// Re-parsed, not trusted: a run's value came off a row, and a row that no
 	// longer parses is refused rather than served under a choice nobody made.
-	choice, err := ParseRouteChoice(rc.Routing.Source, rc.Routing.Level)
+	// A turn's stamp is an exported seam, held to the same grammar.
+	choice, err := ParseRouteChoice(routing.Source, routing.Level)
 	if err != nil {
 		var refusal *RouteChoiceError
 		if errors.As(err, &refusal) {
-			refusal.Reason = "run " + rc.RunId + " carries a routing choice that no longer parses: " + refusal.Reason
+			if inRun {
+				refusal.Reason = "run " + rc.RunId + " carries a routing choice that no longer parses: " + refusal.Reason
+			} else {
+				refusal.Reason = "the turn's routing choice does not parse: " + refusal.Reason
+			}
 		}
 		return req, err
 	}
@@ -309,7 +327,7 @@ func ApplyRunRouting(ctx context.Context, req airoute.ResolveRequest) (airoute.R
 			// route does, and the owner rides along so a personal route is
 			// read for the person who chose it and nobody else.
 			req.PersonRoute = id
-			req.PersonRouteOwner = strings.TrimSpace(rc.Routing.By)
+			req.PersonRouteOwner = strings.TrimSpace(routing.By)
 			req.Route = ""
 			req.ExplicitProvider, req.PinnedBy = "", ""
 		} else if name, isRoute := routePolicyName(choice.Source); isRoute {
@@ -319,7 +337,7 @@ func ApplyRunRouting(ctx context.Context, req airoute.ResolveRequest) (airoute.R
 			req.ExplicitProvider, req.PinnedBy = "", ""
 		} else {
 			req.ExplicitProvider = choice.Source
-			req.PinnedBy = strings.TrimSpace(rc.Routing.By)
+			req.PinnedBy = strings.TrimSpace(routing.By)
 			req.Route = ""
 		}
 	}

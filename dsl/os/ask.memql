@@ -60,6 +60,18 @@ builtin askRunApprovalMessage {}
 @args(profile="object")
 builtin askApprovalEvidence {}
 
+/// Count the active goals of the conversation a message is being routed in,
+/// as {count}. Available only inside Ask's routing call, which supplies them.
+@executor("askRouteGoals")
+builtin askRouteGoals { }
+
+/// Make one routing decision for the message being routed: one structured call
+/// to prompt, told previousError on the retry, validated before it counts.
+/// Returns {valid, error}. Available only inside Ask's routing call.
+@executor("askRouteDecide")
+@args(profile="object")
+builtin askRouteDecide { prompt string! previousError string }
+
 /// A private conversation with MemQL. The transcript is written by the agent
 /// service; ownership is always taken from the authenticated caller.
 // @no-displayCard: contains a private transcript object; Ask renders named message rows and a separate conversation list, not a generic concept card.
