@@ -8,11 +8,16 @@ import type { OsRuntimeConfig } from "../cluster/config";
 // request. Safari leaves the check to Apple's AuthenticationServices, which
 // never fetches identity's /.well-known/webauthn on a *.localhost cluster, and
 // a password manager that intercepts WebAuthn may not implement related
-// origins at all. The same request then runs in a small window on identity's
-// own origin, where the RP ID is the page's own host: begin, the prompt and
-// finish all happen there, and MemQL OS hands over the request and takes the
-// result back by postMessage, each side checking the other's origin. No
-// credential travels in a URL.
+// origins at all. The browser's prompt then runs in a small window on
+// identity's own origin, where the RP ID is the page's own host.
+//
+// ONLY THE PROMPT MOVES. Begin and finish stay here, through this origin as
+// always: identity's host-only session and CSRF cookies live on it (edge's
+// identity proxy), and identity accepts a credential minted on its own origin
+// as readily as one minted here. So the window gets the public creation or
+// request options and hands back the credential, by postMessage, each side
+// checking the other's origin -- it never sees a token, and nothing travels in
+// a URL.
 //
 // A window opens only from the person's press, and the press that met the
 // refusal is spent by then. So the refusal surfaces as PasskeyWindowNeeded for
@@ -33,7 +38,7 @@ export function relatedOriginRefused(error: unknown): boolean {
   return error.name === "SecurityError" || /\bRP ID\b|relying party/i.test(error.message);
 }
 
-/** Whether this session's passkey requests go to identity's window. */
+/** Whether this session's passkey prompts go to identity's window. */
 export function passkeyWindowRemembered(): boolean {
   try { return sessionStorage.getItem(PASSKEY_WINDOW) === "1"; } catch { return false; }
 }
@@ -44,34 +49,70 @@ function refused(error: unknown): unknown {
   return new PasskeyWindowNeeded();
 }
 
-export type PasskeyWindowRequest =
-  | { kind: "register"; authorization: string; label: string; place?: PasskeyPlace }
-  | { kind: "login"; begin: Record<string, unknown> };
+/** Where the browser's prompt runs: this page, or identity's window. */
+export interface PasskeyPrompt {
+  /** The new credential, as JSON for finish. */
+  create(options: Record<string, unknown>): Promise<unknown>;
+  /** The asserted credential, as JSON for finish. */
+  get(options: Record<string, unknown>): Promise<unknown>;
+  close(): void;
+}
+
+function promptHere(): PasskeyPrompt {
+  return {
+    create: async options => {
+      const credential = await navigator.credentials.create({ publicKey: PublicKeyCredential.parseCreationOptionsFromJSON(options as unknown as PublicKeyCredentialCreationOptionsJSON) })
+        .catch(error => { throw refused(error); }) as PublicKeyCredential | null;
+      if (!credential) throw new Error("No passkey was created");
+      return credential.toJSON();
+    },
+    get: async options => {
+      const credential = await navigator.credentials.get({ publicKey: PublicKeyCredential.parseRequestOptionsFromJSON(options as unknown as PublicKeyCredentialRequestOptionsJSON) })
+        .catch(error => { throw refused(error); }) as PublicKeyCredential | null;
+      if (!credential) throw new Error("No passkey was selected");
+      return credential.toJSON();
+    },
+    close: () => undefined,
+  };
+}
 
 /**
- * Runs one passkey request in identity's window and resolves with where to go
- * next, as the in-page request would. Call it synchronously from the press
- * that asked for it, or the browser blocks the window.
+ * Opens identity's passkey window. Call it synchronously from the press that
+ * asked for the passkey, or the browser blocks the window; begin can follow,
+ * since the window waits for its options.
  */
-export function passkeyInWindow(config: OsRuntimeConfig, request: PasskeyWindowRequest): Promise<string | undefined> {
-  const origin = new URL(config.identityApiBaseUrl || window.location.origin).origin;
+export function openPasskeyWindow(config: OsRuntimeConfig): PasskeyPrompt {
+  const origin = new URL(config.identityUrl || config.identityApiBaseUrl || window.location.origin).origin;
   const popup = window.open(new URL("/passkey", origin).toString(), "memql-passkey", "popup,width=520,height=640");
-  if (!popup) return Promise.reject(new Error("Allow pop-up windows for MemQL OS, then try again."));
-  return new Promise((resolve, reject) => {
-    const settle = (done: () => void) => { clearInterval(watch); window.removeEventListener("message", receive); done(); };
-    const receive = (event: MessageEvent) => {
-      if (event.origin !== origin || event.source !== popup) return;
-      const message = event.data as { type?: string; redirectTo?: string; error?: string } | null;
-      if (message?.type === "memql-passkey:ready") popup.postMessage({ type: "memql-passkey:request", ...request }, origin);
-      else if (message?.type === "memql-passkey:done") settle(() => resolve(message.redirectTo || undefined));
-      else if (message?.type === "memql-passkey:failed") settle(() => reject(new Error(message.error || "The passkey operation failed")));
+  let markReady: () => void = () => undefined;
+  const ready = new Promise<void>(resolve => { markReady = resolve; });
+  const waiting = new Set<(message: { type?: string; credential?: unknown; name?: string; error?: string }) => void>();
+  const receive = (event: MessageEvent) => {
+    if (!popup || event.origin !== origin || event.source !== popup) return;
+    const message = event.data as { type?: string } | null;
+    if (message?.type === "memql-passkey:ready") markReady();
+    else if (message) waiting.forEach(answer => answer(message));
+  };
+  window.addEventListener("message", receive);
+  const ask = (kind: "create" | "get", options: Record<string, unknown>) => new Promise<unknown>((resolve, reject) => {
+    if (!popup) { reject(new Error("Allow pop-up windows for MemQL OS, then try again.")); return; }
+    const settle = (done: () => void) => { clearInterval(watch); waiting.delete(answer); done(); };
+    const answer = (message: { type?: string; credential?: unknown; name?: string; error?: string }) => {
+      if (message.type === "memql-passkey:credential") settle(() => resolve(message.credential));
+      else if (message.type === "memql-passkey:failed") settle(() => reject(new DOMException(message.error || "The passkey operation failed", message.name || "NotAllowedError")));
     };
     // Closing the window is the person's answer, as cancelling a prompt is.
     const watch = setInterval(() => {
       if (popup.closed) settle(() => reject(new DOMException("The passkey window was closed.", "NotAllowedError")));
     }, 400);
-    window.addEventListener("message", receive);
+    waiting.add(answer);
+    void ready.then(() => popup.postMessage({ type: "memql-passkey:request", kind, publicKey: options }, origin));
   });
+  return {
+    create: options => ask("create", options),
+    get: options => ask("get", options),
+    close: () => { window.removeEventListener("message", receive); waiting.clear(); if (popup && !popup.closed) popup.close(); },
+  };
 }
 
 async function post(config: OsRuntimeConfig, path: string, body: unknown, authorization?: string) {
@@ -136,43 +177,43 @@ export function placeCreationOptions(publicKey: Record<string, unknown>, place: 
 
 export async function registerPasskey(config: OsRuntimeConfig, authorization: string, label: string, place?: PasskeyPlace): Promise<string | undefined> {
   if (typeof PublicKeyCredential === "undefined" || !PublicKeyCredential.parseCreationOptionsFromJSON) throw new Error("Use a current browser with passkey support to add a passkey.");
-  if (passkeyWindowRemembered()) return passkeyInWindow(config, { kind: "register", authorization, label, place });
-  const begin = await post(config, "/auth/webauthn/register/begin", { label }, authorization);
-  if (begin.redirectTo) return begin.redirectTo;
-  if (begin.resume) {
-    const finish = await post(config, "/auth/webauthn/register/finish", {}, authorization);
+  // Opened before anything is awaited: the window needs this press.
+  const prompt = passkeyWindowRemembered() ? openPasskeyWindow(config) : promptHere();
+  try {
+    const begin = await post(config, "/auth/webauthn/register/begin", { label }, authorization);
+    if (begin.redirectTo) return begin.redirectTo;
+    if (begin.resume) {
+      const finish = await post(config, "/auth/webauthn/register/finish", {}, authorization);
+      return finish.redirectTo;
+    }
+    // This device first when it has its own authenticator, unless the person
+    // asked for another one; the browser's full choice otherwise.
+    const chosen = place ?? (await deviceAuthenticatorAvailable() ? "device" : undefined);
+    const options = chosen ? placeCreationOptions(begin.creationOptions.publicKey, chosen) : begin.creationOptions.publicKey;
+    const credential = await prompt.create(options);
+    const finish = await post(config, "/auth/webauthn/register/finish", { challengeId: begin.challengeId, label, credential }, authorization);
     return finish.redirectTo;
+  } finally {
+    prompt.close();
   }
-  // This device first when it has its own authenticator, unless the person
-  // asked for another one; the browser's full choice otherwise.
-  const chosen = place ?? (await deviceAuthenticatorAvailable() ? "device" : undefined);
-  const options = chosen ? placeCreationOptions(begin.creationOptions.publicKey, chosen) : begin.creationOptions.publicKey;
-  const credential = await navigator.credentials.create({ publicKey: PublicKeyCredential.parseCreationOptionsFromJSON(options as PublicKeyCredentialCreationOptionsJSON) })
-    .catch(error => { throw refused(error); }) as PublicKeyCredential | null;
-  if (!credential) throw new Error("No passkey was created");
-  const finish = await post(config, "/auth/webauthn/register/finish", { challengeId: begin.challengeId, label, credential: credential.toJSON() }, authorization);
-  return finish.redirectTo;
 }
 
 export async function loginWithPasskey(config: OsRuntimeConfig, context: Record<string, string>): Promise<string> {
   if (typeof PublicKeyCredential === "undefined" || !PublicKeyCredential.parseRequestOptionsFromJSON) throw new Error("Use a current browser with passkey support to sign in.");
-  const request = {
-    firstParty: !context.client_id && !context.redirect_uri,
-    clientId: context.client_id, redirectUri: context.redirect_uri, state: context.state,
-    codeChallenge: context.code_challenge, codeChallengeMethod: context.code_challenge_method,
-  };
-  if (passkeyWindowRemembered()) {
-    const destination = await passkeyInWindow(config, { kind: "login", begin: request });
-    if (!destination) throw new Error("Sign-in did not return a destination");
-    return destination;
+  const prompt = passkeyWindowRemembered() ? openPasskeyWindow(config) : promptHere();
+  try {
+    const begin = await post(config, "/auth/webauthn/login/begin", {
+      firstParty: !context.client_id && !context.redirect_uri,
+      clientId: context.client_id, redirectUri: context.redirect_uri, state: context.state,
+      codeChallenge: context.code_challenge, codeChallengeMethod: context.code_challenge_method,
+    });
+    const credential = await prompt.get(begin.requestOptions.publicKey);
+    const finish = await post(config, "/auth/webauthn/login/finish", { challengeId: begin.challengeId, credential });
+    if (!finish.redirectTo) throw new Error("Sign-in did not return a destination");
+    return finish.redirectTo;
+  } finally {
+    prompt.close();
   }
-  const begin = await post(config, "/auth/webauthn/login/begin", request);
-  const credential = await navigator.credentials.get({ publicKey: PublicKeyCredential.parseRequestOptionsFromJSON(begin.requestOptions.publicKey) })
-    .catch(error => { throw refused(error); }) as PublicKeyCredential | null;
-  if (!credential) throw new Error("No passkey was selected");
-  const finish = await post(config, "/auth/webauthn/login/finish", { challengeId: begin.challengeId, credential: credential.toJSON() });
-  if (!finish.redirectTo) throw new Error("Sign-in did not return a destination");
-  return finish.redirectTo;
 }
 
 /**
