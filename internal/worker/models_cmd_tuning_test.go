@@ -40,7 +40,7 @@ func tunedInventory() models.Inventory {
 func TestModelsTuningReport_SaysWhatIsConfigured(t *testing.T) {
 	out := renderTuning(t, tunedInventory(), tuningReport{Parallel: 2, ParallelSource: "the memql-ollama.service unit"})
 	for _, want := range []string{
-		"Requests per model: 2, from the memql-ollama.service unit.",
+		"Requests per Ollama model: 2, from the memql-ollama.service unit.",
 		"qwen3.8:27b",
 		"kept loaded for 2h0m0s, at a working context of 16384",
 		"qwen3-embedding:0.6b",
@@ -59,14 +59,15 @@ func TestModelsTuningReport_SaysWhatIsConfigured(t *testing.T) {
 func TestModelsTuningReport_NothingConfiguredSaysWhatOllamaDoesInstead(t *testing.T) {
 	inv := servingInventory(offeredModel("llama3.1:8b", models.Attributes{MaxConcurrent: 1}))
 	out := renderTuning(t, inv, tuningReport{Parallel: 1, ParallelSource: "the default"})
-	for _, want := range []string{
-		"nothing is configured to stay loaded",
-		"five minutes after its last call",
-		"models.resident",
-	} {
-		if !strings.Contains(out, want) {
-			t.Errorf("the report does not say %q:\n%s", want, out)
-		}
+	// BY DEFAULT: the five minutes is Ollama's own default, and a drop-in that
+	// sets OLLAMA_KEEP_ALIVE changes it, so the report must not state it flat.
+	const want = "Kept loaded: nothing is configured to stay loaded. By default, Ollama unloads each model " +
+		"five minutes after its last call. Add models.resident to policy.yaml to change that, then send the worker a SIGHUP."
+	if !strings.Contains(flat(out), want) {
+		t.Errorf("the report does not say %q:\n%s", want, out)
+	}
+	if strings.Contains(flat(out), ". Ollama unloads each model") {
+		t.Errorf("the five minutes is stated as if it were not a default:\n%s", out)
 	}
 }
 
@@ -132,7 +133,7 @@ func TestModelsTuningReport_NothingLoadedAndNothingReadable(t *testing.T) {
 	if !strings.Contains(out, "Could not read what Ollama has loaded: no answer from Ollama's /api/ps") {
 		t.Errorf("the reason must be printed:\n%s", out)
 	}
-	if !strings.Contains(out, "Requests per model: 2") {
+	if !strings.Contains(out, "Requests per Ollama model: 2") {
 		t.Errorf("the rest of the report must survive an unreadable runtime:\n%s", out)
 	}
 }
@@ -311,11 +312,84 @@ func TestModelsTuningReport_TrulyEmptyResidentKeepsTheOldSentence(t *testing.T) 
 	inv := servingInventory(offeredModel("llama3.1:8b", models.Attributes{MaxConcurrent: 1}))
 	out := renderTuning(t, inv, tuningReport{Parallel: 1, ParallelSource: "the default"})
 	for _, want := range []string{"nothing is configured to stay loaded", "Add models.resident to policy.yaml to change"} {
-		if !strings.Contains(out, want) {
+		if !strings.Contains(flat(out), want) {
 			t.Errorf("with models.resident empty the report must say %q:\n%s", want, out)
 		}
 	}
 	if strings.Contains(out, "none of the models.resident entries") {
 		t.Errorf("with no entry written there is none to say is unserved:\n%s", out)
+	}
+}
+
+// TestLoadedWords pins the one line Ollama's state is printed as, branch by
+// branch. An expiry at or before now is "unloads now": it used to print
+// "unloads in now".
+func TestLoadedWords(t *testing.T) {
+	const gb = 1_000_000_000
+	full := func(expires time.Time) models.Loaded {
+		return models.Loaded{ID: "m", SizeBytes: 18 * gb, VRAMBytes: 18 * gb, ContextLength: 16384, ExpiresAt: expires}
+	}
+	tests := []struct {
+		name string
+		l    models.Loaded
+		want string
+	}{
+		{"hours and minutes", full(reportNow.Add(118 * time.Minute)), "18.0 GB, 100% on the GPU, window 16384, unloads in 1h58m"},
+		{"whole hours", full(reportNow.Add(2 * time.Hour)), "18.0 GB, 100% on the GPU, window 16384, unloads in 2h0m"},
+		{"minutes", full(reportNow.Add(17*time.Minute + 30*time.Second)), "18.0 GB, 100% on the GPU, window 16384, unloads in 17m"},
+		{"one minute", full(reportNow.Add(time.Minute)), "18.0 GB, 100% on the GPU, window 16384, unloads in 1m"},
+		{"seconds", full(reportNow.Add(45 * time.Second)), "18.0 GB, 100% on the GPU, window 16384, unloads in 45s"},
+		{"this instant", full(reportNow), "18.0 GB, 100% on the GPU, window 16384, unloads now"},
+		{"already past", full(reportNow.Add(-5 * time.Second)), "18.0 GB, 100% on the GPU, window 16384, unloads now"},
+		{"forever", full(reportNow.AddDate(300, 0, 0)), "18.0 GB, 100% on the GPU, window 16384, stays loaded"},
+		{"no expiry stated", full(time.Time{}), "18.0 GB, 100% on the GPU, window 16384"},
+		{"no window stated", models.Loaded{ID: "m", SizeBytes: 18 * gb, VRAMBytes: 18 * gb, ExpiresAt: reportNow.Add(time.Hour)}, "18.0 GB, 100% on the GPU, unloads in 1h0m"},
+		{"partly on the CPU", models.Loaded{ID: "m", SizeBytes: 20 * gb, VRAMBytes: 7 * gb, ContextLength: 8192, ExpiresAt: reportNow.Add(time.Hour)}, "20.0 GB, 35% on the GPU, window 8192, unloads in 1h0m"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := loadedWords(tt.l, reportNow)
+			if got != tt.want {
+				t.Errorf("loadedWords = %q, want %q", got, tt.want)
+			}
+			if strings.Contains(got, "in now") {
+				t.Errorf("%q reads \"in now\"", got)
+			}
+		})
+	}
+}
+
+// TestModelsTuningReport_AWindowOnlyEntryIsNotKeptLoaded. An entry that sets a
+// working_context and no keep_alive pins the window the model loads at, and
+// does nothing about when it unloads: Ollama still drops it after its default
+// five minutes. It stands under the kept-loaded heading with its sentence, and
+// the sentence must not read as though the model stays.
+func TestModelsTuningReport_AWindowOnlyEntryIsNotKeptLoaded(t *testing.T) {
+	chat := offeredModel("qwen3.8:27b", models.Attributes{ContextWindow: 262144, MaxConcurrent: 2})
+	chat.WorkingContext = 16384
+	embed := offeredModel("qwen3-embedding:0.6b", models.Attributes{Embeddings: true, MaxConcurrent: 2})
+	embed.KeepAlive = models.KeepAlive{Set: true, For: 2 * time.Hour}
+	out := renderTuning(t, servingInventory(embed, chat), tuningReport{Parallel: 2, ParallelSource: "the default"})
+	kept := keptSection(out)
+
+	const windowOnly = "at a working context of 16384, but not kept loaded: with no keep_alive, by default Ollama unloads it five minutes after its last call"
+	var chatLine, embedLine string
+	for _, line := range strings.Split(kept, "\n") {
+		switch {
+		case strings.Contains(line, "qwen3.8:27b"):
+			chatLine = flat(line)
+		case strings.Contains(line, "qwen3-embedding:0.6b"):
+			embedLine = flat(line)
+		}
+	}
+	if want := "qwen3.8:27b " + windowOnly; chatLine != want {
+		t.Errorf("the window-only line is %q, want %q", chatLine, want)
+	}
+	if strings.Contains(chatLine, "kept loaded for") || strings.Contains(chatLine, "kept loaded forever") {
+		t.Errorf("a model with no keep_alive reads as kept loaded: %q", chatLine)
+	}
+	// And an entry that does set keep_alive is unchanged.
+	if want := "qwen3-embedding:0.6b kept loaded for 2h0m0s"; embedLine != want {
+		t.Errorf("the keep_alive line is %q, want %q", embedLine, want)
 	}
 }

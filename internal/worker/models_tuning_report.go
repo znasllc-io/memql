@@ -86,7 +86,9 @@ func printModelTuning(w io.Writer, inv models.Inventory, r tuningReport) {
 	fmt.Fprintln(w, "")
 	fmt.Fprintln(w, "Residency and concurrency")
 	fmt.Fprintln(w, "")
-	fmt.Fprintf(w, "  Requests per model: %d, from %s.\n", r.Parallel, r.ParallelSource)
+	// Ollama models only: a model on a runtime declared under models.runtimes
+	// takes the max_concurrent its declaration states, not this figure.
+	fmt.Fprintf(w, "  Requests per Ollama model: %d, from %s.\n", r.Parallel, r.ParallelSource)
 	fmt.Fprintln(w, "")
 
 	// Only what this machine serves: Advertised is what it offers, which is
@@ -110,6 +112,13 @@ func printModelTuning(w io.Writer, inv models.Inventory, r tuningReport) {
 			if m.WorkingContext > 0 {
 				parts = append(parts, fmt.Sprintf("at a working context of %d", m.WorkingContext))
 			}
+			if !m.KeepAlive.Set {
+				// The window is held and the model is not: with no keep_alive it
+				// still unloads when Ollama's own timeout says (five minutes unless
+				// OLLAMA_KEEP_ALIVE changed it). Under a heading that says "kept
+				// loaded" the line has to say so, or it reads as a promise.
+				parts = append(parts, "but not kept loaded: with no keep_alive, by default Ollama unloads it five minutes after its last call")
+			}
 			fmt.Fprintf(w, "    %-30s %s\n", m.ID, strings.Join(parts, ", "))
 		}
 	case len(r.Resident) > 0:
@@ -117,9 +126,11 @@ func printModelTuning(w io.Writer, inv models.Inventory, r tuningReport) {
 		// is printed above (the floor, the notes) or below (the problems line).
 		fmt.Fprintln(w, "  Kept loaded: none of the models.resident entries is served by this machine; the reasons are above and below.")
 	default:
-		fmt.Fprintln(w, "  Kept loaded: nothing is configured to stay loaded. Ollama unloads each model")
-		fmt.Fprintln(w, "  five minutes after its last call. Add models.resident to policy.yaml to change")
-		fmt.Fprintln(w, "  that, then send the worker a SIGHUP.")
+		// "By default": five minutes is Ollama's own timeout, and a drop-in that
+		// sets OLLAMA_KEEP_ALIVE changes it.
+		fmt.Fprintln(w, "  Kept loaded: nothing is configured to stay loaded. By default, Ollama unloads")
+		fmt.Fprintln(w, "  each model five minutes after its last call. Add models.resident to")
+		fmt.Fprintln(w, "  policy.yaml to change that, then send the worker a SIGHUP.")
 	}
 	fmt.Fprintln(w, "")
 
@@ -170,6 +181,9 @@ func loadedWords(l models.Loaded, now time.Time) string {
 	case l.ExpiresAt.IsZero():
 	case l.Forever(now):
 		parts = append(parts, "stays loaded")
+	case !l.ExpiresAt.After(now):
+		// At or before now: it is going, or Ollama has not got round to it.
+		parts = append(parts, "unloads now")
 	default:
 		parts = append(parts, "unloads in "+untilWords(l.ExpiresAt.Sub(now)))
 	}
@@ -180,11 +194,10 @@ func loadedWords(l models.Loaded, now time.Time) string {
 }
 
 // untilWords renders a wait the way an owner thinks of one: hours and
-// minutes, or seconds when it is nearly up.
+// minutes, or seconds when it is nearly up. d is positive: a wait that has run
+// out is not a wait, and the caller says "now" for it.
 func untilWords(d time.Duration) string {
 	switch {
-	case d <= 0:
-		return "now"
 	case d < time.Minute:
 		return fmt.Sprintf("%ds", int(d.Seconds()))
 	case d < time.Hour:
