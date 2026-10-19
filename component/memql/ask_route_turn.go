@@ -21,15 +21,15 @@ type AskRouting struct {
 }
 
 // AskRouteTarget is one goal a message was delivered to. With no ApprovalID
-// it is WORK GUIDANCE, read by the agent loop of the run's execution that
-// Epoch names. With an ApprovalID it went through decideApproval and is never
-// read as guidance. Text is exactly what the goal receives.
+// it is WORK GUIDANCE, read by the run's agent loop for the rest of the run's
+// life: retries, repairs, re-plans and a person's re-run of a step keep it.
+// With an ApprovalID it went through decideApproval and is never read as
+// guidance. Text is exactly what the goal receives.
 type AskRouteTarget struct {
 	GoalID     string `json:"goalId"`
 	RunID      string `json:"runId"`
 	Title      string `json:"title"`
 	Status     string `json:"status"`
-	Epoch      string `json:"epoch,omitempty"`
 	ApprovalID string `json:"approvalId,omitempty"`
 	Reason     string `json:"reason,omitempty"`
 	Text       string `json:"text"`
@@ -71,40 +71,12 @@ const (
 	stopDecisionEnded   = "ended"
 )
 
-// guidanceEpochPreparing is the epoch of a message sent while its goal was
-// still compiling. Such a run has no plan to hash yet; the sentinel is taken
-// by the run's first execution and by no re-run.
-const guidanceEpochPreparing = "preparing"
-
 // askRouteGoal is one active goal of a conversation as routing sees it. The
 // Handle (g1, g2, ...) is the only name a model ever sees; ids stay in Go.
 type askRouteGoal struct {
 	Handle, TurnID, GoalID, RunID, Title, Request string
 	Run, Approval                                 map[string]any
 	Updates                                       []string
-}
-
-// guidanceEpochFor is the epoch a message delivered to run now is recorded
-// under.
-func guidanceEpochFor(run map[string]any) string {
-	if stringArg(run, "status") == "compiling" {
-		return guidanceEpochPreparing
-	}
-	return workGuidanceEpoch(run)
-}
-
-// targetAccepts reports whether run's current execution takes target: its
-// epoch is the run's current one, or it was sent while the goal was preparing
-// and the run is still on its first execution (no re-run requested).
-func targetAccepts(target AskRouteTarget, run map[string]any) bool {
-	if run == nil || target.Epoch == "" {
-		return false
-	}
-	if target.Epoch == guidanceEpochPreparing {
-		rerun, _ := run["rerun"].(map[string]any)
-		return len(rerun) == 0
-	}
-	return target.Epoch == workGuidanceEpoch(run)
 }
 
 // activeWorkRun reports whether run is a goal's root execution that a message
@@ -128,9 +100,10 @@ func runTitle(run map[string]any) string {
 	return stringArg(classification, "workTitle")
 }
 
-// workGuidanceTarget is turn's work guidance for run's current execution: its
-// target for that run with no approval, queued or already received, that the
-// execution still accepts. A turn reaches a run at most once.
+// workGuidanceTarget is turn's work guidance for run: its target for that run
+// with no approval, queued or already received. Routed guidance is about the
+// goal, so it holds for the run's whole life, whatever attempt is executing
+// (2026-10-19 ruling). A turn reaches a run at most once.
 func workGuidanceTarget(turn *AskTurn, run map[string]any) *AskRouteTarget {
 	runID := BareShortId(stringArg(run, "id"))
 	if turn.Routed == nil || runID == "" {
@@ -138,10 +111,7 @@ func workGuidanceTarget(turn *AskTurn, run map[string]any) *AskRouteTarget {
 	}
 	for n := range turn.Routed.Targets {
 		target := &turn.Routed.Targets[n]
-		if BareShortId(target.RunID) != runID || target.ApprovalID != "" {
-			continue
-		}
-		if (target.Status == routeQueued || target.Status == routeReceived) && targetAccepts(*target, run) {
+		if BareShortId(target.RunID) == runID && target.ApprovalID == "" && (target.Status == routeQueued || target.Status == routeReceived) {
 			return target
 		}
 	}
@@ -149,9 +119,10 @@ func workGuidanceTarget(turn *AskTurn, run map[string]any) *AskRouteTarget {
 }
 
 // projectAskRouting re-projects a routed turn over its goals' current runs.
-// A queued message whose goal ended, or whose execution moved on before
-// reading it, is Not received; an unanswered stop question whose goal ended
-// is ended; every label takes the goal's current title. It reads only.
+// A queued message is Not received only when its run ended (or was asked to
+// stop) before reading it; a retry, repair, re-plan or re-run is the same run.
+// An unanswered stop question whose goal ended is ended; every label takes the
+// goal's current title. It reads only.
 func projectAskRouting(routed *AskRouting, readRun func(string) (map[string]any, error)) error {
 	if routed == nil {
 		return nil
@@ -165,7 +136,7 @@ func projectAskRouting(routed *AskRouting, readRun func(string) (map[string]any,
 		if title := runTitle(run); title != "" {
 			target.Title = title
 		}
-		if target.Status == routeQueued && (!activeWorkRun(run) || !targetAccepts(*target, run)) {
+		if target.Status == routeQueued && !activeWorkRun(run) {
 			target.Status = routeNotReceived
 		}
 	}

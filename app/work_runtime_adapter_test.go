@@ -78,10 +78,9 @@ func testAgentRuntimeAdapterReceivesGuidanceFromAnotherReplica(t *testing.T, a, 
 	require.NoError(t, err)
 	require.Empty(t, prior)
 	// A routed message, in its wire form: a turn with no goal of its own whose
-	// target names this run. The run was never re-run, so its execution takes a
-	// message recorded while the goal was still preparing.
+	// target names this run.
 	save(origin, map[string]any{"id": "note", "prompt": "Use the completed evidence.", "state": "done", "startedAt": time.Now().UTC().Format(time.RFC3339Nano), "routed": map[string]any{"targets": []any{
-		map[string]any{"goalId": "adapter-goal", "runId": run, "title": "Synthetic work", "status": "queued", "epoch": "preparing", "text": "Use the completed evidence."},
+		map[string]any{"goalId": "adapter-goal", "runId": run, "title": "Synthetic work", "status": "queued", "text": "Use the completed evidence."},
 	}}})
 	received, err := runtime.ReadWorkGuidance(execution)
 	require.NoError(t, err)

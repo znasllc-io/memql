@@ -2,7 +2,6 @@ package memql
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"time"
 	"unicode/utf8"
@@ -23,14 +22,6 @@ type WorkGuidance struct {
 
 func runningGuidanceTarget(run map[string]any) bool {
 	return run["status"] == "running" && run["cancelRequested"] != true && stringArg(run, "goalId") != "" && stringArg(run, "parentRunId") == ""
-}
-
-func workGuidanceEpoch(run map[string]any) string {
-	// Permission answers and ordinary step progress retain the target. A replan
-	// or explicit rerun moves it. Never carry old queued advice
-	// silently into a different execution attempt.
-	raw, _ := json.Marshal([]any{run["templateFingerprint"], run["rerun"]})
-	return workContextHash("guidance-epoch", raw)
 }
 
 func guidanceConversation(run map[string]any) string {
@@ -87,9 +78,10 @@ func (e *MemQLEngine) workGuidanceScope(ctx context.Context) (map[string]any, st
 	return run, guidanceConversation(run), nil
 }
 
-// Read all guidance for this execution attempt, including acknowledged messages:
-// a restarted or later child loop must recover the human's direction. The loop
-// deduplicates within its own context; receipt state is never a delivery cursor.
+// Read all guidance for this run, including acknowledged messages: a restarted
+// or later child loop, a retry, a repair, a re-plan or a re-run must recover the
+// human's direction. The loop deduplicates within its own context; receipt
+// state is never a delivery cursor.
 func (e *MemQLEngine) readAskWorkGuidance(ctx context.Context) ([]WorkGuidance, map[string]any, error) {
 	run, conversation, err := e.workGuidanceScope(ctx)
 	if err != nil || conversation == "" {
@@ -132,7 +124,7 @@ func (e *MemQLEngine) AcknowledgeWorkGuidance(ctx context.Context, ids []string)
 	if err != nil || conversation == "" {
 		return err
 	}
-	expectedRun, expectedConversation, expectedEpoch := BareShortId(stringArg(run, "id")), BareShortId(conversation), workGuidanceEpoch(run)
+	expectedRun, expectedConversation := BareShortId(stringArg(run, "id")), BareShortId(conversation)
 	hold, err := e.holdAskConversation(ctx, conversation, "write")
 	if err != nil {
 		return err
@@ -145,7 +137,7 @@ func (e *MemQLEngine) AcknowledgeWorkGuidance(ctx context.Context, ids []string)
 	if err != nil || conversation == "" {
 		return err
 	}
-	if BareShortId(stringArg(run, "id")) != expectedRun || BareShortId(conversation) != expectedConversation || workGuidanceEpoch(run) != expectedEpoch {
+	if BareShortId(stringArg(run, "id")) != expectedRun || BareShortId(conversation) != expectedConversation {
 		return nil
 	}
 	row, err := e.askRead(ContextWithFreshRead(ctx), conversation)

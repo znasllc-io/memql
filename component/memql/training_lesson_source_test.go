@@ -32,7 +32,7 @@ func TestManualLessonSourceReadsSavedGuidanceAcrossReplicas(t *testing.T) {
 	quote := "Distinguish worker policy from task permission."
 	routeTurn(t, a, ctx, conversation, AskTurn{ID: "lesson-feedback", Prompt: quote, Routed: &AskRouting{Targets: []AskRouteTarget{
 		{GoalID: "waiting-goal", RunID: waiting, ApprovalID: "scope-question", Status: routeNotApproved, Text: quote},
-		{GoalID: "fixture-goal", RunID: run, Status: routeQueued, Epoch: guidanceEpochFor(guidanceRun(t, a, ctx, run)), Text: quote},
+		{GoalID: "fixture-goal", RunID: run, Status: routeQueued, Text: quote},
 	}}})
 	routeTurn(t, a, ctx, conversation, AskTurn{ID: "request-answer", Prompt: "Use the saved one.", Routed: &AskRouting{Targets: []AskRouteTarget{
 		{GoalID: "waiting-goal", RunID: waiting, ApprovalID: "feedback-question", Status: routeAnswered, Text: "Use the saved one."},
