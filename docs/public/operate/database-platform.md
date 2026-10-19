@@ -21,7 +21,7 @@ Epic memql#3842.
 | Layer | Where | What it is |
 |---|---|---|
 | Operator stack | [`deploy/cnpg/`](../../../deploy/cnpg/README.md) | CloudNativePG + the Barman Cloud plugin + cert-manager, reconciled by ArgoCD |
-| Operand image | [`deploy/db-image/`](../../../deploy/db-image/README.md) | PG16 + TimescaleDB Community + pgvector, built on the GitHub build server |
+| Operand image | [`deploy/db-image/`](../../../deploy/db-image/README.md) | PG16 + TimescaleDB Community + pgvector, built by the MemQL native pipeline |
 | The database itself | [`deploy/k8s/components/cnpg-db/`](../../../deploy/k8s/components/cnpg-db/README.md) | a kustomize component: Cluster + Database + ObjectStore + ScheduledBackup |
 | Monitoring | [`deploy/k8s/monitoring/`](../../../deploy/k8s/monitoring/README.md) | PodMonitor on :9187 + the alerts below |
 

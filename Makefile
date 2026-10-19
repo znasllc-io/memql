@@ -42,7 +42,7 @@ ALL_PKGS    := $(MODULE)/...
 # ---------------------------------------------------------------------------
 
 ##@ Build
-##> Deployable images are built on the GitHub build server, not here (see CLAUDE.md).
+##> Deployable images are built on the MemQL native build server, not here (see CLAUDE.md).
 .PHONY: all build build-all bff agent planner workbench mcp edge identity identity-templ identity-tailwind identity-assets identity-build healthcheck
 
 ## Build all binaries (standalone + healthcheck)
@@ -897,7 +897,7 @@ proto-gen-check:
 ## Implementation lives in scripts/release/release.sh per the function-based
 ## shell-script convention (CLAUDE.md).
 ## PUSH=1 is BREAK-GLASS, not the release path (memql#4116). Deployable
-## images are built by the GitHub build server (OIDC -> ACR), so a push from
+## images are built by the MemQL native build server (verified candidate publication), so a push from
 ## an operator machine needs CONFIRM=push-from-an-operator-machine and is
 ## refused (exit 3) without it. Building locally is unaffected.
 ##   make release                                   # local image, VERSION semver prefix
