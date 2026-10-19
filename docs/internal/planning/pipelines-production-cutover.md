@@ -20,6 +20,11 @@ as the acceptance target, with targeted failure/recovery checks; do not repeat
 three expensive full passes. Close issues only when their actual replacement
 and production evidence are complete.
 
+The owner explicitly retained Dependabot dependency-update proposals and the
+dependency graph on October 19. Their GitHub-managed Actions execution is an
+intentional exception. All build, test, audit and deployment work migrates to
+MemQL; completion does not mean eliminating these dependency services.
+
 ## Active cutover, October 19, 2026
 
 Production currently serves **v0.29.35**, through instance commit
@@ -27,7 +32,8 @@ Production currently serves **v0.29.35**, through instance commit
 Healthy/Synced at 12:13 UTC. No native runs remained active during the rollout.
 An independent public check verified the API, Identity and OS against the
 pinned edge image; website documentation remains a separate pending check.
-Engine main is `771c15a01` (v0.29.35). The v0.29.31 full native pass
+Engine main is `4d61cfe692` (v0.29.36). Its release and push runs were cancelled
+before deployment; production remains v0.29.35. The v0.29.31 full native pass
 below remains valid historical acceptance evidence; it is no longer the serving
 release. Engine **v0.30.0** is prepared in #6200 and is not deployed. The
 independent v0.29.33 rollout at 06:56 UTC replaced Agent while the editor
@@ -44,8 +50,11 @@ The independent instance #243 deployment paused pipeline intake again; the
 12:14 UTC whole-run read found no active pipelines, unfinished runs or Jobs.
 All four original webhook connections were restored afterward, confirmed
 through the authenticated production UI at 12:45 UTC. Native #6213 now tests
-head `d46962e79f7c148f2731f5cbf84cd36828eec00b` in run
-`88d6b0e12539b876d1ca0c886fd9b9c4`; it includes the deployed reconnect fix.
+head `f2f150d799006c4e784dd75b59173e20ab5aaa06` in run
+`4b8f795ba23917c43c2a320c2ea49b79`; it incorporates current main and the
+deployed reconnect fix. The superseded `88d6b0e12539b876d1ca0c886fd9b9c4`
+run was cancelled after 34 steps completed; it is not a full-pass receipt.
+The owner paused the other session to prevent further concurrent deployments.
 Keep controllers stable until every whole run, including fleet work, finishes.
 
 Instance #240's current head `36a635936d6eda0359dd53572ee9f91bdf85a344`
@@ -506,7 +515,7 @@ outputs, publication and failure evidence, not merely a command in a manifest.
 | `clustere2e-compile.yml` API entry | Disabled October 17 at 14:05 UTC: file absent at `f8ece576d`, only two historical runs and no active execution. Current CI and native `checks.build-clustere2e` retain compilation. Required `ci-required` and run history preserved | #5480 |
 | Generated `github-code-scanning/codeql` | Reconcile GitHub default setup with advanced scanning and replacement publication | #5480 |
 | Generated `github-code-quality/codeql` | GitHub Code Quality is distinct from security CodeQL; equivalent coverage or an explicit owner decision is required | #5480 |
-| Generated Dependabot updates / graph | Retain useful GitHub dependency services per the design; explicitly resolve their managed Actions execution before claiming zero Actions dependency | #5480 |
+| Generated Dependabot updates / graph | Retained by explicit owner decision on October 19. Their managed Actions execution is an intentional exception; all build/test/deploy work moves to MemQL | #5480 |
 
 Companion inventories are part of the cutover, rather than an implicit engine
 success. The live API reports nine instance workflows, ten Cockpit workflows
