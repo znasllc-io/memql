@@ -67,10 +67,10 @@ builtin askRouteGoals { }
 
 /// Make one routing decision for the message being routed: one structured call
 /// to prompt, told previousError on the retry, validated before it counts.
-/// timeoutSeconds is how long the call may take (held to 1 to 60; 30 when
-/// absent); a call that runs past it is a routing failure, so the message goes
-/// to intake rather than waiting. Returns {valid, error}. Available only inside
-/// Ask's routing call.
+/// timeoutSeconds is how long the call may take, waiting for a model included
+/// (held to 1 to 600; 600 when absent); a call that runs past it is a routing
+/// failure, so the message goes to intake. Returns {valid, error}. Available
+/// only inside Ask's routing call.
 @executor("askRouteDecide")
 @args(profile="object")
 builtin askRouteDecide { prompt string! previousError string timeoutSeconds int }

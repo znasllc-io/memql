@@ -8,17 +8,19 @@ automation askApprovalAnalysis {
 
 /// Decide what a person's message does to the goals already running in its
 /// conversation: one fast routing decision, and one retry told why the first
-/// was refused, each given 30 seconds, since the person's message waits on
-/// them. "routed" means a valid decision was made; "intake" takes the message
+/// was refused, each given as long as the Spine's classification (600 seconds,
+/// waiting for a model included): on one local model the goal being corrected
+/// may hold that model, and intake would only queue a second goal behind it.
+/// "routed" means a valid decision was made; "intake" takes the message
 /// as a new request. Ask runs it through its scoped workflow seam, which binds
 /// askRouteGoals and askRouteDecide to that one message.
 @template
 automation askMessageRouting {
  goals := builtin askRouteGoals()
  if goals.count == 0 { return "intake" }
- first := builtin askRouteDecide(prompt: "askMessageRouting", previousError: "", timeoutSeconds: 30)
+ first := builtin askRouteDecide(prompt: "askMessageRouting", previousError: "", timeoutSeconds: 600)
  if first.valid { return "routed" }
- second := builtin askRouteDecide(prompt: "askMessageRouting", previousError: first.error, timeoutSeconds: 30)
+ second := builtin askRouteDecide(prompt: "askMessageRouting", previousError: first.error, timeoutSeconds: 600)
  if second.valid { return "routed" }
  return "intake"
 }
