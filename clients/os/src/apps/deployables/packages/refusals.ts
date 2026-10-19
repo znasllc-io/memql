@@ -640,10 +640,6 @@ const COPY: Record<string, RefusalCopy> = {
     title: "This pipeline is disconnected",
     next: "The run did not go ahead. Connect the pipeline again, and the next push runs it.",
   },
-  pipeline_manual_requires_disconnected: {
-    title: "Automatic checks are still connected",
-    next: "Disconnect automatic delivery, then retry the manual rehearsal.",
-  },
   pipeline_branch_invalid: {
     // A mistyped branch is caught before GitHub is asked, so the answer
     // names the rule and the way to write it.
@@ -932,7 +928,6 @@ const NOT_A_FAULT: ReadonlySet<string> = new Set([
   "pipeline_fleet_not_consented",
   "pipeline_fleet_disabled",
   "pipeline_disconnected",
-	"pipeline_manual_requires_disconnected",
   "pipeline_already_connected",
   "pipeline_nothing_to_rerun",
   "pipeline_step_cancelled",
