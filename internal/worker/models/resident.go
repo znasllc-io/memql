@@ -18,7 +18,7 @@ import (
 // the requested working context, which the working window pins. See
 // docs/superpowers/specs/2026-10-18-fleet-tuning-design.md.
 
-// MaxKeepAlive is the longest finite keep-alive accepted. Past it the
+// MaxKeepAlive is the longest finite keep_alive accepted. Past it the
 // owner almost certainly meant -1, and a value that is nearly forever but
 // not quite is the kind of setting that is found a month later.
 const MaxKeepAlive = 30 * 24 * time.Hour
