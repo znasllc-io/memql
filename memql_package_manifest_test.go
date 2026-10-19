@@ -355,7 +355,7 @@ func TestEngineManifestCompilesForEveryOpening(t *testing.T) {
 	}
 
 	fullStages := []string{manifestStageChecks, "vulnerabilities", "secrets-current", manifestStageTests}
-	pullRequestStages := []string{manifestStageChecks, "vulnerabilities", "secrets-current", manifestStageTests, manifestStageGates}
+	pullRequestStages := []string{manifestStageChecks, "vulnerabilities", "secrets-current", manifestStageTests, manifestStageGates, "dependency-proposal", "dependency-proposal-write"}
 	every := []string{manifestStepGoChecks, manifestStepPathRouting,
 		manifestStepGoTests, manifestStepDBTests, manifestStepFuzz, manifestStepOSChecks,
 		"sdk-ts-typecheck", "viewkit-checks", "mcp-conformance", "proving"}
@@ -447,8 +447,15 @@ func TestEngineManifestCompilesForEveryOpening(t *testing.T) {
 			byName := map[string][]pipelines.Step{}
 			for _, step := range plan.Steps() {
 				byName[step.Name] = append(byName[step.Name], step)
-				if step.RunAfterFailure != (step.Stage == "analysis" || step.Stage == "inventory" || step.Stage == "security-reports" || step.Stage == "vulnerabilities" || step.Stage == "secrets-current" || step.Stage == "secrets-history" || step.Stage == "repository-audit" || step.Stage == "documentation-audit") {
+				if step.RunAfterFailure != (step.Stage == "analysis" || step.Stage == "inventory" || step.Stage == "security-reports" || step.Stage == "vulnerabilities" || step.Stage == "secrets-current" || step.Stage == "secrets-history" || step.Stage == "repository-audit" || step.Stage == "documentation-audit" || step.Stage == "dependency-proposal" || step.Stage == "dependency-proposal-write") {
 					t.Errorf("failure policy was lost or leaked to another stage: %+v", step)
+				}
+				if step.Kind == pipelines.StepRepositoryChange {
+					change := step.RepositoryChange
+					if o.event != pipelines.EventPullRequest || step.Stage != "dependency-proposal-write" || change == nil || change.Rule != "dependabot-go-tidy" || change.Step != "dependency-proposal.tidy" || change.Path != ".reports/dependency-proposal.json" || step.Image != "" || step.Run != "" || step.Execution != "" || len(step.Secrets) != 0 || step.GitHubReadToken {
+						t.Errorf("dependency update lost its driver-owned proposal contract: %+v", step)
+					}
+					continue
 				}
 				if step.Kind == pipelines.StepSARIF {
 					if step.Stage != "security-reports" || step.SARIF == nil || step.Image != "" || step.Run != "" || step.Execution != "" || len(step.Secrets) != 0 {

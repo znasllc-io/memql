@@ -802,6 +802,16 @@ pipeline:
             go install github.com/zricethezav/gitleaks/v8@v8.30.1
             export GOMAXPROCS=1 GOMEMLIMIT=1GiB GOGC=100
             python3 scripts/ci/gitleaks-history.py --head="$MEMQL_SHA" --fetch-remote="https://github.com/${MEMQL_REPOSITORY}.git" --gitleaks="$(command -v gitleaks)" --output-dir=.memql-security/gitleaks --jobs=3 --batch-size=32 --timeout=20700
+        - name: scorecard
+          placement: cluster
+          githubReadToken: true
+          cpuMilli: 1000
+          memoryMiB: 2048
+          timeout: 25m
+          artifacts: [.memql-security/scorecard]
+          run: |
+            set -eu
+            python3 scripts/ci/scorecard-scan.py --output-dir=.memql-security/scorecard
         - name: codeql-go
           placement: cluster
           memoryMiB: 6144
@@ -850,6 +860,11 @@ pipeline:
       on: [schedule, manual]
       runAfterFailure: true
       steps:
+        - name: scorecard
+          timeout: 5m
+          sarif:
+            step: analysis.scorecard
+            path: .memql-security/scorecard/results.sarif
         - name: codeql-go
           timeout: 5m
           sarif:
@@ -1034,3 +1049,26 @@ pipeline:
               GOFLAGS: -p=2
               GOMEMLIMIT: 1GiB
               GOGC: "75"
+
+    - name: dependency-proposal
+      on: [pull_request]
+      runAfterFailure: true
+      steps:
+      - name: tidy
+        placement: cluster
+        githubReadToken: true
+        timeout: 25m
+        cpuMilli: 2000
+        memoryMiB: 4096
+        artifacts: [.reports/dependency-proposal.json]
+        run: python3 scripts/ci/repository-proposal.py dependabot-tidy --output=.reports/dependency-proposal.json
+    - name: dependency-proposal-write
+      on: [pull_request]
+      runAfterFailure: true
+      steps:
+      - name: apply
+        timeout: 5m
+        repositoryChange:
+          rule: dependabot-go-tidy
+          step: dependency-proposal.tidy
+          path: .reports/dependency-proposal.json
