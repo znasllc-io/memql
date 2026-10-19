@@ -374,9 +374,13 @@ function beginInstall(h: Harness): void {
  * caller has, and the bound turns "this hangs" into a named failure.
  */
 async function until(condition: () => boolean, what: string): Promise<void> {
-  for (let i = 0; i < 3_000; i += 1) {
+  // Completing the real run recorder drains atomic filesystem writes. That
+  // can outlast three seconds on a bounded worker even when the fake scripts
+  // and the assertions have finished. Bound elapsed time, not timer turns.
+  const deadline = performance.now() + 10_000;
+  while (performance.now() < deadline) {
     if (condition()) return;
-    await new Promise((resolve) => setTimeout(resolve, 1));
+    await new Promise((resolve) => setTimeout(resolve, 10));
   }
   throw new Error(`timed out waiting for ${what}`);
 }
