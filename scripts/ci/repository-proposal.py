@@ -22,9 +22,14 @@ class NoRedirect(urllib.request.HTTPRedirectHandler):
 def github(endpoint, missing=False):
     if not endpoint.startswith('/repos/') or any(c in endpoint for c in '\r\n'):
         raise ValueError('expected a repository API path')
-    request = urllib.request.Request('https://api.github.com' + endpoint, headers={
+    headers = {
         'Accept': 'application/vnd.github+json', 'X-GitHub-Api-Version': '2022-11-28',
-        'User-Agent': 'MemQL-repository-proposal'})
+        'User-Agent': 'MemQL-repository-proposal'}
+    repository = os.environ.get('MEMQL_REPOSITORY', '')
+    token = os.environ.get('MEMQL_GITHUB_READ_TOKEN', '')
+    if token and re.fullmatch(r'[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+', repository) and endpoint.startswith('/repos/' + repository + '/'):
+        headers['Authorization'] = 'Bearer ' + token
+    request = urllib.request.Request('https://api.github.com' + endpoint, headers=headers)
     try:
         with urllib.request.build_opener(NoRedirect()).open(request, timeout=30) as response:
             body = response.read(2 * 1024 * 1024 + 1)
@@ -132,6 +137,7 @@ def content_digest(snapshot):
 
 def converge(root, modules, paths, run=subprocess.run):
     env = dict(os.environ, GOTOOLCHAIN='local', GOWORK='off')
+    env.pop('MEMQL_GITHUB_READ_TOKEN', None)
     deadline = time.monotonic() + 20 * 60
     for _round in range(5):
         before = {name: regular_bytes(root, name) for name in paths}

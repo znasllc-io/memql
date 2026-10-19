@@ -6,7 +6,6 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
-	"fmt"
 	"strings"
 	"testing"
 	"time"
@@ -119,8 +118,8 @@ func TestRepositoryChangeLostResponseRecoversOnAnotherReplica(t *testing.T) {
 	if err != nil || result["repositoryChangeState"] != "applied" || h.g.writes != 1 {
 		t.Fatalf("recovery=%v err=%v writes=%d", result, err, h.g.writes)
 	}
-	if h.l.releases.Load() != 1 {
-		t.Fatal("completed write retained its pin")
+	if h.l.releases.Load() != 0 {
+		t.Fatal("write released evidence before its durable work receipt")
 	}
 }
 
@@ -198,8 +197,9 @@ pipeline:
         - name: change
           repositoryChange: {rule: tidy, step: analysis.go, path: proposal.json}
 `
-	for _, revoked := range []bool{false, true} {
-		t.Run(fmt.Sprint(revoked), func(t *testing.T) {
+	for _, scenario := range []string{"success", "revoked", "lost journal"} {
+		t.Run(scenario, func(t *testing.T) {
+			revoked := scenario == "revoked"
 			h := newRepositoryHarness(t)
 			dh := newDriveHarness(t, manifest)
 			h.g.fakeGitHub = dh.github
@@ -214,6 +214,13 @@ pipeline:
 			h.g.heads[repoName+"@main"] = headAnswer{SHA: shaA}
 			if revoked {
 				h.g.beforeWrite = func() { h.config = `{"schema":1,"rules":[]}` }
+			}
+			if scenario == "lost journal" {
+				h.g.beforeWrite = func() {
+					dh.work.mu.Lock()
+					dh.work.refuseCall, dh.work.refuseErr = "updateWorkStep", errors.New("journal unavailable after Git write")
+					dh.work.mu.Unlock()
+				}
 			}
 			dh.integ.Configure(func(d *Deps) {
 				d.GitHub = h.g
@@ -235,6 +242,23 @@ pipeline:
 			run := dh.openRun(t, opening)
 			deliver(t, dh.integ, run)
 			got, _ := dh.store.run(run.ID)
+			if scenario == "lost journal" {
+				if got.Status == StatusCompleted || h.l.releases.Load() != 0 || h.g.writes != 1 {
+					t.Fatal("unrecorded external write lost recoverability", got.Status, h.l.releases.Load(), h.g.writes)
+				}
+				h.g.beforeWrite = nil
+				dh.work.mu.Lock()
+				dh.work.refuseCall, dh.work.refuseErr = "", nil
+				dh.work.mu.Unlock()
+				peer := New(dh.integ.snapshot())
+				dh.configureDriver(peer, "agent-b")
+				peer.Configure(func(d *Deps) { d.Now = func() time.Time { return testNow.Add(3 * time.Minute) } })
+				if err := peer.RecoverRuns(context.Background()); err != nil {
+					t.Fatal(err)
+				}
+				waitDrives(t, peer)
+				got, _ = dh.store.run(run.ID)
+			}
 			want := ConclusionSuccess
 			if revoked {
 				want = ConclusionFailure
@@ -249,7 +273,10 @@ pipeline:
 			if len(receipts) != 1 {
 				t.Fatal("effect has no durable receipt", len(receipts))
 			}
-			if !revoked && (h.g.writes != 1 || h.g.prs != 1) {
+			if !revoked && h.l.releases.Load() != 1 {
+				t.Fatal("durably completed change retained its evidence pin")
+			}
+			if !revoked && (h.g.writes != 1 || h.g.prs < 1) {
 				t.Fatal("proposal was not written and opened")
 			}
 			if revoked && h.g.writes != 0 {

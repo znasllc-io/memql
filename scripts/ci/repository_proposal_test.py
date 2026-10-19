@@ -19,6 +19,17 @@ class Proposals(unittest.TestCase):
         self.addCleanup(self.temp.cleanup)
         self.root = Path(self.temp.name)
 
+    @patch.dict(os.environ, {'MEMQL_REPOSITORY': 'acme/project', 'MEMQL_GITHUB_READ_TOKEN': 'scoped-reader'})
+    def test_reader_credential_stays_on_its_exact_repository(self):
+        with patch.object(p.urllib.request, 'build_opener') as opener:
+            opener.return_value.open.return_value.__enter__.return_value.read.return_value = b'{}'
+            for endpoint, expected in [('/repos/acme/project/pulls', 'Bearer scoped-reader'),
+                                       ('/repos/acme/project-other/pulls', None),
+                                       ('/repos/znasllc-io/memql/releases/latest', None)]:
+                p.github(endpoint)
+                request = opener.return_value.open.call_args.args[0]
+                self.assertEqual(request.get_header('Authorization'), expected)
+
     def release(self, tag='v0.30.0', exists=False):
         return lambda path, **_: ({'draft': False, 'prerelease': False, 'tag_name': tag}
                                  if path.endswith('/latest') else ({} if exists else None))
@@ -54,6 +65,7 @@ class Proposals(unittest.TestCase):
         calls = []
         def run(command, **kwargs):
             self.assertEqual(kwargs['env']['GOTOOLCHAIN'], 'local')
+            self.assertNotIn('MEMQL_GITHUB_READ_TOKEN', kwargs['env'])
             if command == ['go', 'mod', 'tidy']:
                 calls.append(command)
                 file.write_text('second' if len(calls) == 1 else 'third')

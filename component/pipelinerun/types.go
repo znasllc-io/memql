@@ -105,7 +105,9 @@ const (
 // re-send the one that was running. The journal writes these rows; this
 // package only reads them.
 type WorkStep struct {
-	Key string
+	PipelineKind pipelines.StepKind
+	Result       map[string]any
+	Key          string
 	// DefinitionFingerprint binds the complete execution definition recorded
 	// before admission. Older receipts without it cannot authorize recovery.
 	DefinitionFingerprint string

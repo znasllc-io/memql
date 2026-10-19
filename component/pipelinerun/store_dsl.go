@@ -1089,6 +1089,7 @@ func workStepFromRow(row map[string]any) WorkStep {
 		ArtifactFileIDs: rowStrings(row, "artifactFileIds"),
 	}
 	if call, ok := row["call"].(map[string]any); ok {
+		s.PipelineKind = pipelines.StepKind(rowString(call, "pipelineKind"))
 		s.DefinitionFingerprint = rowString(call, "definitionFingerprint")
 		s.Stage = rowString(call, "stage")
 		s.Name = rowString(call, "name")
@@ -1098,6 +1099,7 @@ func workStepFromRow(row map[string]any) WorkStep {
 		}
 	}
 	if result, ok := row["result"].(map[string]any); ok {
+		s.Result = result
 		s.Reason = rowString(result, "reason")
 	}
 	return s

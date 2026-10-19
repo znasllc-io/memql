@@ -149,22 +149,6 @@ func (i *Integration) repositoryChange(ctx context.Context, runID string, change
 	hash := sha256.Sum256(identity)
 	operation := hex.EncodeToString(hash[:])
 	reference := pipelinesteps.RunFileReference{Scope: scope, ReferenceID: "repository-change:" + operation, IntentIDs: []string{artifact.IntentID}}
-	pinned, err := d.SARIF.Library.PinRunFileReceipts(auth.ContextWithInternalOrigin(ctx), reference)
-	if err != nil {
-		return nil, err
-	}
-	retain := false
-	defer func() {
-		if retain {
-			return
-		} // an uncertain external effect keeps its evidence
-		cleanup, cancel := context.WithTimeout(context.WithoutCancel(ctx), 10*time.Second)
-		defer cancel()
-		retErr = errors.Join(retErr, d.SARIF.Library.ReleaseRunFileReference(auth.ContextWithInternalOrigin(cleanup), reference))
-	}()
-	if len(pinned) != 1 || pinned[0] != artifact {
-		return nil, errors.New("repository proposal changed while pinning")
-	}
 	raw, err := readRetainedArtifactBytes(ctx, d.SARIF.Library, scope, artifact)
 	if err != nil {
 		return nil, err
@@ -251,7 +235,16 @@ func (i *Integration) repositoryChange(ctx context.Context, runID string, change
 	if err := holds(); err != nil {
 		return nil, err
 	}
-	retain = true
+	// Keep this evidence pinned until the successful effect has a durable work
+	// receipt. Releasing here would fence a replacement driver out if the
+	// process stopped after GitHub accepted the write but before Finish.
+	pinned, err := d.SARIF.Library.PinRunFileReceipts(auth.ContextWithInternalOrigin(ctx), reference)
+	if err != nil {
+		return nil, err
+	}
+	if len(pinned) != 1 || pinned[0] != artifact {
+		return nil, errors.New("repository proposal changed while pinning")
+	}
 	commit, err := remote.ApplyBranchChange(ctx, token, p.Repository, edit)
 	if err != nil {
 		return nil, err
@@ -267,8 +260,8 @@ func (i *Integration) repositoryChange(ctx context.Context, runID string, change
 			return nil, err
 		}
 	}
-	retain = false
-	return map[string]any{"status": string(pipelines.OutcomeSucceeded), "repositoryChangeState": "applied", "operationId": operation, "sha256": artifact.SHA256, "commit": commit, "pullRequestUrl": pr}, nil
+	return map[string]any{"status": string(pipelines.OutcomeSucceeded), "repositoryChangeState": "applied", "operationId": operation, "sha256": artifact.SHA256, "commit": commit, "pullRequestUrl": pr,
+		"proposalStep": change.Step, "proposalPath": change.Path, "proposalAttempt": scope.Attempt, "proposalIntentId": artifact.IntentID}, nil
 }
 
 func (dr *runDriver) runRepositoryChange(ctx context.Context, t *stepTrack) {

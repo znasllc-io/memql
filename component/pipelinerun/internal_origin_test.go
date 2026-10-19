@@ -35,7 +35,7 @@ func TestTheStampNeverEscapesItsCall(t *testing.T) {
 	}
 	fset := token.NewFileSet()
 	sites := 0
-	want := map[string]int{"store_dsl.go": 1, "sarif.go": 4, "repository_change.go": 3}
+	want := map[string]int{"store_dsl.go": 1, "sarif.go": 4, "repository_change.go": 2, "repository_cleanup.go": 1}
 	for _, entry := range entries {
 		name := entry.Name()
 		if entry.IsDir() || !strings.HasSuffix(name, ".go") || strings.HasSuffix(name, "_test.go") {

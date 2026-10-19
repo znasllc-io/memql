@@ -20,9 +20,46 @@ as the acceptance target, with targeted failure/recovery checks; do not repeat
 three expensive full passes. Close issues only when their actual replacement
 and production evidence are complete.
 
-## Current acceptance evidence: October 18, 2026
+## Active cutover, October 19, 2026
 
-Installed production runs **v0.29.31**, built natively from
+Production currently serves **v0.29.32**, through instance commit
+`0d9c7d1eef7e4223c94ca67b2da536a899677e81`. Engine main is
+`6213401ae5f8d4d6890db1faccb1078eac8dcf0f`. The v0.29.31 full native pass
+below remains valid historical acceptance evidence; it is no longer the serving
+release. Engine v0.29.33 is prepared in #6200 and is not deployed.
+
+Instance #237 passed all nine native steps with retained logs and artifacts.
+It makes the Agent's fleet artifact receiver use the already configured 2 GiB
+operator bound; the fleet transport still enforces its separate 256 MiB limit.
+No CPU, memory, node or quota increase accompanies this fix. Its rollout waits
+for existing native runs to drain, together with the documentation delivery in
+instance #232. Four connections were switched to poll, their head baselines
+captured, and then disconnected at approximately 06:12 UTC. Existing work
+continues. After the rollout, reconnect using poll, verify missed-head catch-up,
+then restore webhook delivery. Reconcile any missed merge-group or release
+events explicitly. A disconnected pipeline is not a completed migration.
+
+The final runtime now includes bounded repository maintenance: retained JSON
+proposals, exact operator-owned repository/file grants, fresh signed-actor and
+PR-author checks for dependency updates, and deterministic Git write/readback
+recovery. Commands receive no writer credentials. Successful Git writes retain
+their evidence until the work receipt is durable; conclusion releases the
+matching pins and repeats cleanup after a process loss. A second agent replica
+recovers a simulated journal failure after the write without another commit.
+The complete compiler, driver and GitHub protocol race suites pass. The eight
+proposal-generator tests and generated model/schema/SDK checks pass. Recipe
+activation and production qualification remain separate from this runtime work.
+
+The repaired full local `make test` passed, including the combined maintenance
+runtime before its final pin-lifecycle refinement; database-backed cases skipped
+without PostgreSQL. The final lifecycle changes pass the complete affected race
+suites. These local results do not replace fresh native qualification. The old
+#6200 head's native run was cancelled after local conformance failures were
+found; it is not a passing release.
+
+## Historical acceptance evidence: October 18, 2026
+
+At this checkpoint, installed production ran **v0.29.31**, built natively from
 `1d087ac973e5fd1e620f99f93ef42dba1f3a3642`. Release run
 `b0643687e51532322e50eb0ff6014ab3` / Work run
 `af5b4ab480781f3df9a1eefc90ecb511` passed **57 of 57 steps**, with no skips
@@ -94,7 +131,7 @@ listener-cleanup assertion. The original failed eight of 50,000 short iterations
 the repaired fixture passed all 50,000 and the complete error-page suite with
 the race detector. This repair is also included in #6213 and #6200.
 The cutover branch prepares engine version 0.29.33; 0.29.32 is reserved by the
-independent Ask/install-recovery PR #6199. Neither version is a deployed release.
+independent Ask/install-recovery PR #6199. Neither version was deployed at this checkpoint; the active status above supersedes it.
 Storage PR #6171's head gate received a one-time Kueue priority of 1, allowing it to
 run alongside the existing database job. No running job was preempted and
 no quota was increased; all declared commands and assertions ran unchanged.

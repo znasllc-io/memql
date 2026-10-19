@@ -1537,6 +1537,10 @@ func (dr *runDriver) conclude(ctx context.Context, v verdict) bool {
 		}
 	}
 
+	if err := dr.releaseRepositoryChangeEvidence(ctx); err != nil {
+		dr.log.Warn("pipelines: completed repository change evidence awaits cleanup", "error", dr.mask(err.Error()))
+		return false
+	}
 	now := dr.d.now()
 	stages := dr.stageSummaries()
 	final := dr.run
