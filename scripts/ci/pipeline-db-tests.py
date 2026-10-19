@@ -5,7 +5,7 @@ The pipeline selects packages, owns sharding and provisions the database. This
 command partitions that exact selection by the shared class table and gives
 each class its own database in the disposable service, as CI does. It never
 discovers additional packages or retries a test. Keeping package budgets
-prevents the slower engine suite from granting every DB test a ten-minute cap.
+prevents the slower engine suite from granting every DB test the same cap.
 """
 import json
 import os

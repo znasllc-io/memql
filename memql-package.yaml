@@ -358,8 +358,8 @@ pipeline:
           # Keep three Go execution threads after the heap-budget fix, with
           # a quarter-core of admission headroom per shard. Including Postgres,
           # each shard reserves three cores; two leave room in a 6.5-core pool
-          # for auxiliary containers. Test overlap, selection and deadlines
-          # are unchanged; native qualification must still pass.
+          # for auxiliary containers. Test overlap, selection and operation
+          # deadlines are unchanged; native qualification must still pass.
           cpuMilli: 2750
           packages: affected
           only: db-gated

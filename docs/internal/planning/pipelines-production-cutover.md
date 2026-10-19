@@ -32,7 +32,7 @@ Production currently serves **v0.29.35**, through instance commit
 Healthy/Synced at 12:13 UTC. No native runs remained active during the rollout.
 An independent public check verified the API, Identity and OS against the
 pinned edge image; website documentation remains a separate pending check.
-Engine main is `c1667adb4928d8fd120bf52cf4fea22db111b04f`, still declaring
+Engine main is `46cfeade6fea0c874b45952b6b6539f7a8f6532b`, still declaring
 v0.29.36. The separate v0.29.36 release and push runs were cancelled before
 deployment; production remains v0.29.35. The v0.29.31 full native pass
 below remains valid historical acceptance evidence; it is no longer the serving
@@ -64,10 +64,17 @@ Keep controllers stable until every whole run, including fleet work, finishes.
 Storage #6171 entered the ordinary merge queue at 14:48 UTC. Full-mode native
 run `67491bba23d2ec5113b7a7264d3aad4e` tests exact candidate
 `46cfeade6fea0c874b45952b6b6539f7a8f6532b`, based on the merged editor fix.
-Its App-bound check is `118127603094`. Success and an ordinary queue merge
-remain prerequisites for removing the legacy required context. The redundant
-main-push attempt on the included base was cancelled after ancestry verification.
-The queue run retains the same build quota and cannot preempt running work.
+Its App-bound check `118127603094` passed at 15:52 UTC: all 48 steps completed,
+with no skips or failures, 48 retained logs and 100 artifacts. Three capped
+live previews retained their complete Library logs. The ordinary queue merged
+the exact candidate as `46cfeade6fea0c874b45952b6b6539f7a8f6532b`.
+Independent Git tree and check-App comparisons verified the landed result.
+The live engine ruleset now requires only `MemQL / memql`, bound to App 4822538;
+reviews, bypass, merge queue and branch protections were preserved and read back.
+The ruleset baseline and core CI definition removal travel together in #6200.
+The redundant main-push attempt on the included base was cancelled after
+ancestry verification. The queue retained the same build quota and never
+preempted running work. Final #6200 qualification remains required.
 
 The owner approved native deployment notifications in the existing Discord
 `#znas-instance` channel, including a qualification message. The existing
@@ -181,8 +188,9 @@ failed against the previous implementation; the affected worker race suite
 passes locally. Independent #6243 carried the same runtime repair through
 native run `bf6d6d27baad43e524b7496c0c3560c6`, merged at 11:36 UTC,
 and is deployed in v0.29.35. The final branch adopts that implementation and
-retains the additional real-gRPC cases. The storage merge-candidate qualification is running; final #6200 qualification
-follows its merge. Cockpit's separate complete pass is recorded above. Deploying this repair does
+retains the additional real-gRPC cases. Storage passed the complete native
+merge-candidate suite and landed through the ordinary queue; final #6200
+qualification follows. Cockpit's separate complete pass is recorded above. Deploying this repair does
 not turn the earlier failed runs into passes.
 
 The final runtime now includes bounded repository maintenance: retained JSON

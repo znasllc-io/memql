@@ -64,8 +64,8 @@ should not be edited to match today.
 **Decided 2026-09-27 (memql#5481, epic memql#5476; design record
 `docs/superpowers/specs/2026-09-16-pipelines-program-design.md`, section 1).**
 The original change kept `ci-required` and turned off only the "branch must
-be up to date" parameter. The native cutover below adds a second required
-context. Read the live value rather than this line:
+be up to date" parameter. The native cutover below replaces that context with
+the App-bound native check. Read the live value rather than this line:
 
 ```
 $ gh api repos/znasllc-io/memql/rulesets/16630577 \
@@ -75,8 +75,8 @@ false
 
 **Why it can be off.** The merge queue builds every candidate on
 `gh-readonly-queue/*` -- the base plus the pull request, exactly the tree that
-lands -- and runs the full suite on it before anything merges (`ci.yml`'s
-`merge_group` trigger). The strict rule enforced the same property a second
+lands -- and runs the native full-mode suite on it before anything merges
+(the pipeline's `merge_group` event). The strict rule enforced the same property a second
 time, from the pull request's side, and charged for it on every sibling
 merge: each merge to `main` flipped every open pull request to `BEHIND`, which
 meant `update-branch` and a fresh full run -- the "two or three runs per
@@ -108,11 +108,20 @@ section.
 
 The owner authorized migration to native MemQL CI/CD in
 [memql#5480](https://github.com/znasllc-io/memql/issues/5480). The active ruleset
-now requires both `ci-required` and **`MemQL / memql`**, with the latter bound
-to GitHub App **4822538**, **MemQL for ZNAS LLC**. A status with the same name
-from another integration cannot satisfy it. The legacy context remains during
-the exact merge-candidate qualification; its removal is a separate recorded
-cutover after that proof.
+initially required both `ci-required` and **`MemQL / memql`**. After the
+October 19 full merge-candidate qualification, it requires only **`MemQL / memql`**,
+bound to GitHub App **4822538**, **MemQL for ZNAS LLC**. A status with the same
+name from another integration cannot satisfy it.
+
+Native run `67491bba23d2ec5113b7a7264d3aad4e`
+passed all **48 steps**, with 48 retained logs and no skips, on candidate
+`46cfeade6fea0c874b45952b6b6539f7a8f6532b`. Storage
+[PR #6171](https://github.com/znasllc-io/memql/pull/6171) then landed through
+the ordinary merge queue as `46cfeade6fea0c874b45952b6b6539f7a8f6532b`. The qualified and landed Git tree
+identities match. Check `118127603094` was independently verified as a
+successful result from App 4822538 for that exact native attempt. The ruleset
+was compared before the write and read back afterward; only the legacy
+required context was removed.
 
 Native PR [#6176](https://github.com/znasllc-io/memql/pull/6176) passed on
 `fa2ce0b8e5277969838d9d026f537a44742f6f2e`, check
