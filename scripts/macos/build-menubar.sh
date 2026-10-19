@@ -32,11 +32,11 @@ function main() {
     create_build_scratch memql-menubar
     stage="$COCKPIT_BUILD_SCRATCH/MemQL Cockpit.app"
     mkdir -p "$stage/Contents/MacOS" "$stage/Contents/Resources"
-    swiftc -target "$(uname -m)-apple-macosx13.0" -framework AppKit "$REPO_ROOT/native/macos/Mark.swift" "$REPO_ROOT/native/macos/PermissionSetup.swift" "$REPO_ROOT/native/macos/tests/PermissionSetupTests.swift" -o "$(dirname "$stage")/permission-tests" >&2 || cap_fail 5 "permission tests failed to compile"
+    swiftc -target "$(uname -m)-apple-macosx13.0" -framework AppKit "$REPO_ROOT/native/macos/Mark.swift" "$REPO_ROOT/native/macos/MemQLSwitch.swift" "$REPO_ROOT/native/macos/PermissionSetup.swift" "$REPO_ROOT/native/macos/tests/PermissionSetupTests.swift" -o "$(dirname "$stage")/permission-tests" >&2 || cap_fail 5 "permission tests failed to compile"
     "$(dirname "$stage")/permission-tests" >&2 || cap_fail 5 "permission behavior checks failed"
     swiftc -target "$(uname -m)-apple-macosx13.0" -framework AppKit "$REPO_ROOT/native/macos/Mark.swift" "$REPO_ROOT/native/macos/tests/AppIconTests.swift" -o "$(dirname "$stage")/icon-tests" >&2 || cap_fail 5 "app icon tests failed to compile"
     "$(dirname "$stage")/icon-tests" --resource="$REPO_ROOT/native/macos/mark.svg" >&2 || cap_fail 5 "app icon contrast checks failed"
-    swiftc -O -target "$target_arch-apple-macosx13.0" -framework AppKit "$REPO_ROOT/native/macos/Mark.swift" "$REPO_ROOT/native/macos/PermissionSetup.swift" "$REPO_ROOT/native/macos/main.swift" -o "$stage/Contents/MacOS/MemQLCockpit" >&2 || cap_fail 5 "native menu build failed"
+    swiftc -O -target "$target_arch-apple-macosx13.0" -framework AppKit "$REPO_ROOT/native/macos/Mark.swift" "$REPO_ROOT/native/macos/MemQLSwitch.swift" "$REPO_ROOT/native/macos/PermissionSetup.swift" "$REPO_ROOT/native/macos/main.swift" -o "$stage/Contents/MacOS/MemQLCockpit" >&2 || cap_fail 5 "native menu build failed"
     cp "$REPO_ROOT/native/macos/Info.plist" "$stage/Contents/Info.plist"
     cp "$REPO_ROOT/native/macos/mark.svg" "$stage/Contents/Resources/mark.svg"
     "$stage/Contents/MacOS/MemQLCockpit" --write-iconset="$(dirname "$stage")/MemQL.iconset" >&2 || cap_fail 5 "app icon generation failed"

@@ -7,8 +7,8 @@ the Go worker**, with bundle identifier `com.znasllc.memql-worker`, display name
 `MemQL`, and a native `.icns` generated from the canonical nine-node mark.
 The Swift menu helper is embedded at
 `Contents/Library/LoginItems/MemQL Menu.app`. Both appearances use the same mark;
-the permission window groups the two grants and hides PID/path/build details
-behind **Show technical details**.
+the permission window shows one switch per grant and keeps PID/path/build
+details under **Troubleshooting**.
 
 The worker LaunchAgent targets `MemQL.app/Contents/MacOS/MemQL` directly, and
 the installed `memql` CLI symlink points to that same executable. Status reports
@@ -133,8 +133,8 @@ For the current installed app, the supported user-run recovery is:
 /usr/bin/tccutil reset ScreenCapture com.znasllc.memql-worker
 ```
 
-Then use MemQL’s Request access buttons, approve the current app, and restart
-once if needed for a fresh process. The GUI alternative is to remove MemQL’s
+Then turn on each switch in MemQL’s permission window, approve the current app
+in System Settings, and restart once for Screen Recording. The GUI alternative is to remove MemQL’s
 old row in each category and add the exact current app from Show MemQL in Finder.
 These actions revoke/reset old approvals; they do not grant access themselves.
 See Apple’s [app-scoped reset documentation](https://developer.apple.com/documentation/xcode/resetting-access-to-protected-resources-in-macos).
@@ -227,22 +227,37 @@ Linux semantics have fixture tests; live Linux validation is separate.
 
 ## Guided permission setup (development; not in 0.14.0)
 
-**Set Up Permissions…** opens a native window with separate Accessibility and
-Screen Recording requests. It opens once automatically when a supported worker
-first reports missing access; opening the window does not request any grant.
-The user's explicit request invokes `AXIsProcessTrustedWithOptions` or
-`CGRequestScreenCaptureAccess` **inside the running worker** through its private
-control socket. Acknowledgment means the request was queued, not approved.
-Only one OS request may be pending at a time.
+**Set Up Permissions…** opens a native window with one switch for Accessibility
+and one for Screen Recording, drawn like MemQL OS's switch. It opens once
+automatically when a supported worker first reports missing access; opening the
+window does not request any grant. Turning a switch on invokes
+`AXIsProcessTrustedWithOptions` or `CGRequestScreenCaptureAccess` **inside the
+running worker** through its private control socket, which puts MemQL in
+macOS's list, and opens that Privacy & Security page. Acknowledgment means the
+request was queued, not approved. Only one OS request may be pending at a time.
+No app can approve these grants itself: the password or Touch ID prompt
+belongs to System Settings.
 
-**Open Settings** opens the relevant Privacy & Security pane. **Show Worker in
-Finder** reveals the installed executable with symlinks resolved. macOS can
-retain an entry for an older binary after an upgrade; inspect the file instead
-of trusting its display name. Recovery changes to existing grants remain
-explicit actions in System Settings. During installation, a verified signing
-identity change resets only the obsolete worker approvals through tccutil.
+While System Settings is open for an ask, the window floats beside it, the menu
+reads the worker every second, and the switch shows the position asked for
+under a line saying what to do there. Accessibility lands live: the switch
+comes on and the window returns to the front as soon as the worker reports it.
+Screen Recording reaches only a process started after the change, so its ask
+offers **Restart MemQL** at once and stays open, past System Settings quitting
+and the window closing, until a different worker process reports. Otherwise a
+switch shows only the worker's report. While any of its windows is open the
+menu is a regular app with a Dock icon, so a window behind System Settings can
+always be found; it returns to the menu bar when the last one closes.
 
-**Restart Worker…** asks for confirmation because it interrupts active work
+**Troubleshooting** holds **Show MemQL in Finder**, which reveals the installed
+executable with symlinks resolved, **Restart MemQL…**, and the worker's
+version, PID and executable. macOS can retain an entry for an older binary
+after an upgrade; inspect the file instead of trusting its display name.
+Recovery changes to existing grants remain explicit actions in System Settings.
+During installation, a verified signing identity change resets only the
+obsolete worker approvals through tccutil.
+
+**Restart MemQL** asks for confirmation because it interrupts active work
 and every server connection. It checks the service's loaded PID and program,
 then uses `launchctl kickstart -k` for the current user's worker label. It does
 not rewrite enrollments or connection policy. The window waits for a fresh
