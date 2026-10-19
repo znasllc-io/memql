@@ -139,7 +139,7 @@ func registrationKey(registrationId string) string {
 }
 
 // Add inserts a worker into the registry. Replaces any existing
-// entry with the same registration id (a reconnect) and ends its old stream.
+// entry with the same registration id (a reconnect).
 func (r *Registry) Add(w *Worker) {
 	if r == nil || w == nil {
 		return
@@ -149,29 +149,29 @@ func (r *Registry) Add(w *Worker) {
 		r.mu.Unlock()
 		return
 	}
+	key := registrationKey(w.RegistrationId)
+	previous := r.byId[key]
+	if previous == w {
+		r.mu.Unlock()
+		return
+	}
 	w.registry = r
 	if w.activePerCap == nil {
 		w.activePerCap = make(map[string]uint32, len(w.Capabilities))
 	}
-	key := registrationKey(w.RegistrationId)
-	existing := r.byId[key]
-	if existing == w {
-		r.mu.Unlock()
-		return
-	}
-	if existing != nil {
-		r.removeLocked(existing)
+	if previous != nil {
+		r.removeLocked(previous)
 	}
 	r.byId[key] = w
 	r.byOwner[w.OwnerUserId] = append(r.byOwner[w.OwnerUserId], w)
 	r.mu.Unlock()
-	// The registration watcher handles a successor on another replica. On
-	// this replica the holder id is unchanged, so only the pointer swap can
-	// retire the predecessor. Its pending calls must fail now, not wait for
-	// the old network connection to time out. Publish the successor first and
-	// invoke the callback outside the lock so old-session cleanup can read it.
-	if existing != nil {
-		existing.terminate(DisconnectReasonSuperseded)
+	// A same-replica reconnect does not change connectedNodeId, so the
+	// registration watcher cannot detect it. End the old session explicitly:
+	// removing its index only wakes queued calls, not calls already in flight.
+	// Publish the successor first and invoke the hook outside the lock because
+	// teardown uses this registry to preserve the successor's connection.
+	if previous != nil {
+		previous.terminate(DisconnectReasonSuperseded)
 	}
 }
 
