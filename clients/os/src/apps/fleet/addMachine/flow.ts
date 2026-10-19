@@ -371,11 +371,14 @@ function permissionsCheck(machine: MachineRow, setup: MachineSetup | null, await
   const stage = setupStage(setup, "permissions");
   if (setup?.state === "running" && stage?.state === "running") {
     const label = machineName(machine);
+    // The window's own words for the way on: "Skip for now" while neither is
+    // allowed, "Continue without Screen Recording" once one is.
+    const choice = missing.length > 1 ? "Skip for now" : `Continue without ${missing[0]}`;
     return {
       ...base,
       state: "open",
       answer: missing.length > 1 ? "Waiting for you" : `Waiting for ${missing[0]}`,
-      repair: `Allow MemQL in the Permissions window on ${label}, or choose Skip for now there.`,
+      repair: `Allow MemQL in the Permissions window on ${label}, or choose ${choice} there.`,
       footer: { state: `Waiting for you on ${label}`, detail: "" },
     };
   }

@@ -92,7 +92,7 @@ describe("what needs a person", () => {
       setup: report("running", [{ name: "permissions", state: "running" }, { name: "runtime", state: "waiting" }]),
     });
     expect(screen.getByText("Setup is waiting for you.")).toBeTruthy();
-    expect(screen.getByText("Allow MemQL in the Permissions window on studio, or choose Skip for now there.")).toBeTruthy();
+    expect(screen.getByText("Allow MemQL in the Permissions window on studio, or choose Continue without Screen Recording there.")).toBeTruthy();
     expect(document.querySelector(".os-notice")?.getAttribute("data-tone")).toBe("info");
     expect(setupNeedsAttention(machine({ ...MAC_CU, permissions: ONE, setup: report("running", [{ name: "permissions", state: "running" }]) }), NOW)).toBe(false);
   });

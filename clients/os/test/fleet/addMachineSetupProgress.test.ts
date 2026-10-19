@@ -251,9 +251,12 @@ describe("the permissions step", () => {
     expect(stopsFor(f, checks).find((s) => s.id === "checks")).toMatchObject({ state: "open", answer: "2 of 7 done · macOS permissions next" });
   });
 
-  it("names the one that is left once the other is allowed", () => {
+  it("names the one that is left once the other is allowed, and the window's way on without it", () => {
     const m = machine({ ...CU, permissions: ONE, setup: asking });
-    expect(find(checksFor(CU_DRAFT, m, STEADY_BEATS, NOW), "permissions")?.answer).toBe("Waiting for Screen Recording");
+    expect(find(checksFor(CU_DRAFT, m, STEADY_BEATS, NOW), "permissions")).toMatchObject({
+      answer: "Waiting for Screen Recording",
+      repair: "Allow MemQL in the Permissions window on studio, or choose Continue without Screen Recording there.",
+    });
   });
 
   it("settles a skip as the person's choice, names what is missing from the probe, and the installer moves on", () => {
