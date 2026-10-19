@@ -603,7 +603,7 @@ models:
   allow:
     - qwen3.8:27b
     - qwen3-embedding:0.6b
-  parallel: 2                    # Docker/macOS only; outranks a managed unit
+  parallel: 2                    # Docker, macOS, system Ollama; outranks a unit
   resident:
     - id: qwen3.8:27b
       keep_alive: 2h             # 30m, 2h, 3600 (seconds), or -1 / forever
@@ -641,18 +641,21 @@ service, account for the other tenant's memory before making any model resident.
 
 ### Requests at once
 
-`parallel` is the ceiling the worker advertises and enforces for each model, and
-Ollama has to be given the same number or the extra calls queue inside it. For
-the unit this cockpit installs, the unit is the source: a fresh install on a 24
-or 32 GB machine writes `Environment=OLLAMA_NUM_PARALLEL=2`, and the worker
-reads it back, drop-ins included. For an existing unit add
-`Environment=OLLAMA_NUM_PARALLEL=2` under `[Service]` yourself (a drop-in,
-`systemctl --user edit memql-ollama.service`, is the way systemd documents it,
-and its editor opens without the `[Service]` header, so write that too), then
-`systemctl --user daemon-reload` and
+`parallel` is the ceiling the worker advertises and enforces for each Ollama
+model (a model on a runtime declared under `models.runtimes` takes the
+`max_concurrent` its declaration states), and Ollama has to be given the same
+number or the extra calls queue inside it. For the unit this cockpit installs,
+the unit is the source: a fresh install on a 24 or 32 GB machine writes
+`Environment=OLLAMA_NUM_PARALLEL=2`, and the worker reads it back, drop-ins
+included. For an existing unit add `Environment=OLLAMA_NUM_PARALLEL=2` under
+`[Service]` yourself (a drop-in, `systemctl --user edit memql-ollama.service`,
+is the way systemd documents it, and its editor opens without the `[Service]`
+header, so write that too), then `systemctl --user daemon-reload` and
 `systemctl --user restart memql-ollama.service`. The restart cancels what Ollama
 is generating and unloads its models, so do it between calls. `models.parallel`
-overrides the unit for a runtime the cockpit cannot read: Docker, or macOS.
+overrides the unit for a runtime the cockpit cannot read: Docker, macOS, or a
+system-wide Ollama (`/etc/systemd/system/ollama.service`), which the cockpit
+does not manage either.
 
 Every slot costs memory: a constant for the model's recurrent state plus its
 cache for the window. For `qwen3.8:27b` (Q4_K_M, q8_0 cache) on a 24 GB RTX 5090

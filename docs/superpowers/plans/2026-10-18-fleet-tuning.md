@@ -4447,7 +4447,7 @@ The runbook tasks that follow (12 and 13) are local operations on the owner's la
 
 **Interfaces:**
 - Consumes: a green, committed branch (Task 11); the pinned environment (Task 1).
-- Produces: the owner's worker running the branch build with nothing configured. It behaves exactly as before: `memql worker models` says `Requests per model: 1, from the default.` and `nothing is configured to stay loaded`.
+- Produces: the owner's worker running the branch build with nothing configured. It behaves exactly as before: `memql worker models` says `Requests per Ollama model: 1, from the default.` and `nothing is configured to stay loaded`.
 
 The owner granted permission to run branch builds locally. Steps marked **DISRUPTIVE** interrupt the owner's other memQL work; each says what and how to check first. **What this machine runs today**, read on 2026-10-18: `memql-worker.service` runs `~/.memql/bin/memql worker run`, a symlink to `memql-computeruse-linux-amd64`, version `0.20.0+g58ad26323197 (computeruse)`, connected to two homes (`api.memql.znas.io` and `api.memql.localhost`) and allowed to run CI pipeline steps (`pipelines.allow: true`); `memql-ollama.service` runs Ollama 0.34.2 (written by `Stage.Unit()`, no `NUM_PARALLEL`, no `KEEP_ALIVE`); `memql-menu.service` is the tray companion. The worker has no drain: a restart cancels everything in flight on both homes.
 
@@ -4628,11 +4628,11 @@ memql 0.20.0+g<REV> (headless)
 
 Residency and concurrency
 
-  Requests per model: 1, from the default.
+  Requests per Ollama model: 1, from the default.
 
-  Kept loaded: nothing is configured to stay loaded. Ollama unloads each model
-  five minutes after its last call. Add models.resident to policy.yaml to change
-  that, then send the worker a SIGHUP.
+  Kept loaded: nothing is configured to stay loaded. By default, Ollama unloads
+  each model five minutes after its last call. Add models.resident to
+  policy.yaml to change that, then send the worker a SIGHUP.
 
   Ollama has nothing loaded now. The next call loads a model, which takes a few
   seconds from a warm disk cache and up to forty from a cold one.
@@ -4667,14 +4667,14 @@ REV=$(git rev-parse --short=12 HEAD)
 DIRTY=$(test -z "$(git status --porcelain --untracked-files=normal)" || echo true)
 CGO_ENABLED=1 go build -tags computeruse -ldflags "-X main.version=$(cat VERSION) -X main.revision=$REV -X main.dirty=$DIRTY" -o "$FT/memql-computeruse-linux-amd64" ./cmd/memql
 "$FT/memql-computeruse-linux-amd64" --version
-"$FT/memql-computeruse-linux-amd64" worker models | sed -n '/Requests per model/p'
+"$FT/memql-computeruse-linux-amd64" worker models | sed -n '/Requests per Ollama model/p'
 ```
 
 Expected (a `.dirty` suffix means uncommitted changes: commit first):
 
 ```text
 memql 0.20.0+g<REV> (computeruse)
-  Requests per model: 1, from the default.
+  Requests per Ollama model: 1, from the default.
 ```
 
 - [ ] **Step 6: DISRUPTIVE pre-flight: is the worker idle? Anything in its cgroup besides the main process is work in flight (an app session, a pipeline step, a shell command)**
@@ -4822,7 +4822,7 @@ Environment=OLLAMA_NUM_PARALLEL=2
 EOF
 systemctl --user daemon-reload
 systemctl --user cat memql-ollama.service | tail -6
-~/.memql/bin/memql worker models | grep -E 'Requests per model|model:qwen3.8:27b='
+~/.memql/bin/memql worker models | grep -E 'Requests per Ollama model|model:qwen3.8:27b='
 ```
 
 Expected (the worker re-registers both homes once, when idle):
@@ -4834,7 +4834,7 @@ Expected (the worker re-registers both homes once, when idle):
 Environment=OLLAMA_NUM_PARALLEL=2
 # Optional safety net: a client that does not state keep_alive gets this instead of five minutes.
 # Environment=OLLAMA_KEEP_ALIVE=2h
-  Requests per model: 2, from the memql-ollama.service unit.
+  Requests per Ollama model: 2, from the memql-ollama.service unit.
   model:qwen3.8:27b=ctx=262144,structured=1,max=2,params=27320697856,quant=Q4_K_M,tools=1,vision=1
 ```
 
@@ -4986,4 +4986,4 @@ systemctl --user restart memql-ollama.service
 git -C /home/znas/memql-projects/memql worktree remove --force /home/znas/memql-projects/memql-pin-fleet
 ```
 
-Nothing is printed except, from `ollama stop`, an error for a model that was not loaded, which is harmless. Afterwards `memql worker models` reads `Requests per model: 1, from the default.` and `nothing is configured to stay loaded`.
+Nothing is printed except, from `ollama stop`, an error for a model that was not loaded, which is harmless. Afterwards `memql worker models` reads `Requests per Ollama model: 1, from the default.` and `nothing is configured to stay loaded`.
