@@ -1736,7 +1736,10 @@ What the goal does with it depends on its state:
   Saved.
 - **Waiting on a request that takes no messages,** such as a plan review: the
   message is not delivered. Not delivered also covers a goal at its guidance
-  limit and a request that refused the message.
+  limit, a request that refused the message, and a goal whose run belongs to
+  another conversation, such as a Nexus run shown in a private Ask conversation.
+  Work guidance recorded here is never read there; a request that goal waits on
+  can still take the message.
 
 A routed message is at most 4,000 characters. Routed guidance and late answers
 to optional questions each hold at most 16 messages and 16,000 characters per

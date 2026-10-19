@@ -82,17 +82,20 @@ sufficient route within its remaining budget, avoid repeating unchanged failed
 attempts, and explain any unresolved input or access requirement. A preference
 such as “find it for me” does not grant access or override an explicit restriction.
 
-A message you send in a conversation while one of its goals is running or
-waiting updates that goal instead of starting a second one. You do not choose
-the goal or switch modes: Ask checks the message against the conversation's
-active goals first, and a message about none of them is handled as a new
-request. The message is saved with the goal and read at the next safe boundary:
-an operation already in flight can finish, but unstarted calls from an older
-model response wait for reasoning with the new guidance. A goal that is still
-preparing reads it at its first step. Completed effects and their results remain
-intact. Received means a successful model call used the message, not that the
-task is finished or that the model followed the advice. How Ask shows where each
-message went is described in
+A message you send in a conversation while one of its goals is preparing,
+running or waiting can update that goal instead of starting a second one, when
+the goal began in that conversation. You do not choose the goal: Ask checks the
+message against the conversation's active goals first, and a message about none
+of them is handled as a new request. The message is saved with the goal and read
+at the next safe boundary: an operation already in flight can finish, but
+unstarted calls from an older model response wait for reasoning with the new
+guidance. A goal that is still preparing reads it at its first step. Completed
+effects and their results remain intact. Received means a successful model call
+used the message, not that the task is finished or that the model followed the
+advice. Work started elsewhere, such as a goal begun in Nexus, can appear in a
+private linked conversation but never reads guidance sent there; Ask shows that
+message as not delivered, unless the work is waiting on a request, which can
+still take it. How Ask shows where each message went is described in
 [Messages while work runs](../operate/ask-and-voice.md#messages-while-work-runs).
 
 Guidance stays with its goal for the rest of the run. Automatic retries,

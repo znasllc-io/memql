@@ -201,7 +201,7 @@ none of the active goals is handled as before.
 
 The goal gets your message word for word. The routing call only chooses where it
 goes; it never rewrites your words for a goal. How the goal takes the message
-depends on what the goal is doing:
+depends on what the goal is doing and where it started:
 
 | The goal is | Your message | Label |
 | --- | --- | --- |
@@ -211,6 +211,7 @@ depends on what the goal is doing:
 | Waiting on a permission | Is a correction. Nothing is approved. | Sent, not approved |
 | Paused on its budget | Is saved for when you raise the limit | Saved |
 | Waiting on a review that takes no messages | Is not delivered. Open the request to answer it. | Not delivered |
+| Started outside this conversation (for example in Nexus) | Work guidance is not delivered. A request the goal waits on can still take the message. | Not delivered, unless a request takes it |
 | Ended before reading the message | Is not received | Not received |
 
 Under your message, Ask shows one line for each goal it went to, such as "To
