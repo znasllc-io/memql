@@ -50,8 +50,8 @@ func TestARunThatReachedItsCeilingParksOnABudgetApproval(t *testing.T) {
 	if name != "createWorkApproval" {
 		t.Fatalf("the approval must be written FIRST -- a run parked on an approval id that does not exist waits on nothing; got %s", name)
 	}
-	if approval["kind"] != work.ApprovalKindBudget {
-		t.Errorf("kind = %v, want %q: an exhausted ceiling and a shut door are different questions", approval["kind"], work.ApprovalKindBudget)
+	if approval["kind"] != work.ApprovalKindFeedback {
+		t.Errorf("kind = %v, want %q: an exhausted ceiling and a shut door are different questions", approval["kind"], work.ApprovalKindFeedback)
 	}
 	subject, _ := approval["subject"].(map[string]any)
 	if subject["ceiling"] != work.CeilingModelCalls {
@@ -91,7 +91,7 @@ func TestTheParkedRunRecordsTheCeilingAndTheSpend(t *testing.T) {
 		t.Error("a parked run has not finished; writing finishedAt makes every terminal-run reader treat it as done")
 	}
 	waiting, _ := args["waitingOn"].(map[string]any)
-	if waiting["approvalKind"] != work.ApprovalKindBudget {
+	if waiting["approvalKind"] != work.ApprovalKindFeedback {
 		t.Errorf("the wait must carry the kind: %v", waiting)
 	}
 	if waiting["ceiling"] != work.CeilingModelCalls {
@@ -160,7 +160,7 @@ func TestAnOrdinaryFailureIsNotACeilingPark(t *testing.T) {
 	for _, call := range exec.calls {
 		if strings.HasPrefix(call, "createWorkApproval") {
 			_, approval := argsOf(t, call)
-			if approval["kind"] == work.ApprovalKindBudget {
+			if approval["kind"] == work.ApprovalKindFeedback {
 				t.Fatal("an ordinary failure parked on a budget approval")
 			}
 		}

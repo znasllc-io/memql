@@ -91,6 +91,7 @@ prompt workQuickReply {
 @level("strong")
 @templateFile("prompts/workReplyReview.tmpl")
 prompt workReplyReview {
+ canContinue bool!
  statement string!
  draft string!
  sources string!

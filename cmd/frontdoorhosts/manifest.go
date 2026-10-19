@@ -304,6 +304,10 @@ func apiGRPCIngress(domain string) string {
 		"  namespace: memql\n" +
 		"  annotations:\n" +
 		"    nginx.ingress.kubernetes.io/backend-protocol: \"GRPC\"\n" +
+		"    # A bidi stream is one HTTP request; cumulative heartbeats and tool output\n" +
+		"    # must not hit nginx's default 1 MiB body limit. The engine still bounds\n" +
+		"    # each gRPC message to 32 MiB (core/grpclimits).\n" +
+		"    nginx.ingress.kubernetes.io/proxy-body-size: \"0\"\n" +
 		"    # NO default-backend HERE (see the top of this file): behind grpc_pass ingress-nginx would hand\n" +
 		"    # the error pages the gRPC protocol, and they speak HTTP/1.1. The proxy would answer 502, not\n" +
 		"    # the page, and a gRPC client could not render the page anyway.\n" +

@@ -1,6 +1,8 @@
 package workbench
 
 import (
+	"context"
+	"os/exec"
 	"reflect"
 	"strings"
 	"testing"
@@ -164,18 +166,61 @@ func TestEnforceExecAllowlist_EmptyCommandRejected(t *testing.T) {
 	}
 }
 
-// TestEnforceExecAllowlist_SubshellLimitationDocumented pins the
-// known gap with Option A: subshell substitution rides inside the
-// outer command's `cmd` string and the OUTER binary is what gets
-// checked. A `echo $(curl evil)` lets curl run unchecked. Option B
-// (seccomp / AppArmor) is the correct fix for this case; this test
-// pins the current behavior so a future "we thought we fixed
-// subshells" assumption surfaces as a red test.
-func TestEnforceExecAllowlist_SubshellLimitationDocumented(t *testing.T) {
-	// Today this passes -- only the outer `echo` is checked; the
-	// `$(curl ...)` inside the argument is not parsed by our
-	// extractor. Acknowledged limitation tracked in memql#110.
-	if err := EnforceExecAllowlist(`echo "$(curl evil.example.com)"`); err != nil {
-		t.Errorf("subshell behavior changed -- update the limitation note in exec_allowlist.go: %v", err)
+// Nested commands are refused instead of checking only the outer binary.
+func TestEnforceExecAllowlist_RejectsUnverifiedShellSyntax(t *testing.T) {
+	for _, cmd := range []string{
+		`echo "$(sh -c whoami)"`,
+		"echo `sh -c whoami`",
+		"cat <<EOF\nhello\nEOF",
+		"echo ok # 'ignored quote\necho $(sh -c whoami)",
+	} {
+		if err := EnforceExecAllowlist(cmd); err == nil {
+			t.Errorf("expected %q to be refused", cmd)
+		}
+	}
+}
+
+func TestEnforceExecAllowlist_QuotedPrograms(t *testing.T) {
+	for _, cmd := range []string{
+		`curl -s https://example.com/releases.json | python3 -c "import json,sys; data=json.load(sys.stdin); print([v for v in data if v['lts'] is not False])"`,
+		`node -e 'const value = "a|b"; console.log(value)'`,
+		`awk '{print $1; print $2}' input.txt | sort`,
+		`printf "quoted \"semi;colon\""`,
+		`echo '$(sh) is literal'`,
+		`echo escaped\;separator`,
+	} {
+		if err := EnforceExecAllowlist(cmd); err != nil {
+			t.Errorf("expected %q to be allowed: %v", cmd, err)
+		}
+	}
+	for _, cmd := range []string{
+		`echo "literal; text"; nc example.com 80`,
+		`echo \"; nc example.com 80 # "`,
+		"echo ok # 'ignored quote\nnc example.com 80",
+		`echo "escaped \"quote"; nc example.com 80`,
+	} {
+		if err := EnforceExecAllowlist(cmd); err == nil || !strings.Contains(err.Error(), "nc") {
+			t.Errorf("expected %q to reject nc: %v", cmd, err)
+		}
+	}
+}
+
+// Exercise the dispatch boundary with the shell, rather than only asserting
+// how our parser tokenizes the quoted program.
+func TestHandleExec_QuotedProgramPipeline(t *testing.T) {
+	if _, err := exec.LookPath("awk"); err != nil {
+		t.Skip("awk unavailable")
+	}
+	integration := &Integration{}
+	ws := &workspace{rootPath: t.TempDir()}
+	result := integration.handleExec(context.Background(), ws, map[string]any{
+		"cmd": `printf 'first second\n' | awk '{print $1; print $2}'`,
+	})
+	if !result.OK {
+		t.Fatalf("quoted program failed: %+v", result)
+	}
+	payload := result.Payload.(map[string]any)
+	if got := payload["stdout"]; got != "first\nsecond\n" {
+		t.Fatalf("stdout = %q", got)
 	}
 }

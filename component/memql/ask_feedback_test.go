@@ -224,3 +224,37 @@ func TestAskSnapshotKeepsContinuedOptionalQuestionAcrossReplicas(t *testing.T) {
 	write("updateWorkRun", map[string]any{"runId": runID, "status": "succeeded", "finishedAt": time.Now().UTC().Format(time.RFC3339Nano)})
 	require.Nil(t, read().Question, "completed work must not retain a stale question")
 }
+
+func TestAskProgressFeedbackAndSavedAnswers(t *testing.T) {
+	request := work.ProgressFeedback("run", "reason", work.CeilingBreach{Ceiling: "modelCalls"}, time.Now(), time.Hour)
+	row := map[string]any{"id": "question", "kind": "feedback", "subject": request.Subject, "options": request.Options, "question": request.Question}
+	question, _ := askFeedbackProjection(row)
+	require.NotNil(t, question)
+	require.False(t, question.ChoiceOnly)
+	work.StopProgressFeedback(&request)
+	row["subject"], row["options"], row["question"] = request.Subject, request.Options, request.Question
+	question, _ = askFeedbackProjection(row)
+	require.True(t, question.ChoiceOnly)
+	require.Len(t, question.Options, 1)
+	row["decision"] = "answered"
+	run := map[string]any{"status": "waiting", "waitingOn": map[string]any{"kind": "approval", "subject": "question"}}
+	for _, answer := range []map[string]any{{"value": "retry"}, {"value": "abandon"}, {"feedback": "Focus on the saved results."}} {
+		row["answer"] = answer
+		question = askProgressRecoveryQuestion(row, run)
+		require.NotNil(t, question)
+		require.True(t, question.ChoiceOnly)
+		require.Equal(t, answer, question.ResumeAnswer)
+	}
+	row["answer"] = map[string]any{"value": "retry", "newLimit": 100}
+	require.Nil(t, askProgressRecoveryQuestion(row, run))
+	row["answer"] = map[string]any{"value": "retry"}
+	for _, status := range []string{"running", "succeeded", "failed"} {
+		run["status"] = status
+		require.Nil(t, askProgressRecoveryQuestion(row, run))
+	}
+	run["status"], run["cancelRequested"] = "waiting", true
+	require.Nil(t, askProgressRecoveryQuestion(row, run))
+	run["cancelRequested"] = false
+	run["waitingOn"] = map[string]any{"kind": "approval", "subject": "other"}
+	require.Nil(t, askProgressRecoveryQuestion(row, run))
+}

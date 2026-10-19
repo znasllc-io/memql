@@ -621,20 +621,6 @@ function NexusSettingsSection({
           </p>
         </fieldset>
 
-        {/* THE ABSENT CONTROL, WITH AN ACCOUNT OF ITSELF. Somebody who opens
-            settings in an app about spend looks for a budget field. There is
-            none, and an absent control with nothing said about it reads as
-            something nobody got round to building. */}
-        <fieldset className="os-field-group">
-          <legend>Ceilings and budgets</legend>
-          <p className="os-caption">
-            Not set here. A run's ceilings -- tokens, cost, wall clock, retries, model calls --
-            are the goal's, inherited by every run of it, and they are set when the goal is
-            accepted. A run that reaches one parks and asks you rather than stopping, and that
-            question arrives in Approvals like any other.
-          </p>
-        </fieldset>
-
         <fieldset className="os-field-group">
           <legend>The journal</legend>
           <p className="os-caption">

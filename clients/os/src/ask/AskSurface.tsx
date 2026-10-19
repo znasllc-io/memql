@@ -334,10 +334,10 @@ export function AskSurface({
         <div><strong>{state.workGuidance.title}</strong><p>Guidance goes to this work at its next safe boundary. It does not grant permission.</p></div>
         <button type="button" className="os-ask-retry" onClick={() => { controls?.cancel(); conversation.leaveWorkGuidance(); inputRef.current?.focus(); }}>Return to conversation</button>
       </section> : null}
-      {state.discussionOpening ? <p className="os-ask-approval-context" role="status">Opening approval discussion.</p> : state.discussion && panel === "conversation" ? <section className="os-ask-approval-context" aria-label="Approval discussion">
-        <div><strong>{state.discussion.approval.question || "Discuss this approval"}</strong>{state.discussion.approval.summary && state.discussion.approval.summary !== state.discussion.approval.question ? <p>{state.discussion.approval.summary}</p> : null}<p>Discussion and advice do not approve the blocked operation.</p>{state.discussion.savedGuidance ? <details><summary>Saved guidance</summary><p className="os-ask-saved-guidance">{state.discussion.savedGuidance}</p></details> : null}</div>
+      {state.discussionOpening ? <p className="os-ask-approval-context" role="status">Opening discussion.</p> : state.discussion && panel === "conversation" ? <section className="os-ask-approval-context" aria-label={state.discussion.approval.kind === "feedback" ? "Work feedback" : "Approval discussion"}>
+        <div><strong>{state.discussion.approval.question || (state.discussion.approval.kind === "feedback" ? "Discuss this work" : "Discuss this approval")}</strong>{state.discussion.approval.summary && state.discussion.approval.summary !== state.discussion.approval.question ? <p>{state.discussion.approval.summary}</p> : null}{state.discussion.approval.kind !== "feedback" ? <p>Discussion and advice do not approve the blocked operation.</p> : null}</div>
         <button type="button" className="os-ask-retry" onClick={conversation.leaveDiscussion}>Return to conversation</button>
-      </section> : state.discussionDraft && panel === "conversation" ? <section className="os-ask-approval-context" aria-label="Approval discussion">
+      </section> : state.discussionDraft && panel === "conversation" ? <section className="os-ask-approval-context" aria-label="Request discussion">
         <p>Reopen this request before sending a discussion message.</p>
         <button type="button" className="os-ask-retry" onClick={conversation.leaveDiscussion}>Return to conversation</button>
       </section> : null}
@@ -375,8 +375,8 @@ export function AskSurface({
         <span className="os-caption" role="status">{approvalDiscussionStatus(state, exchanges)}</span>
         <div>{state.discussionRetry && !state.discussionSending && !state.guidanceSending ? <Button tone="quiet" onClick={() => conversation.retryDiscussion()}>{state.discussionRetry.advisor ? "Retry investigation" : "Retry message"}</Button> : null}
         {!state.discussionDraft?.advisor && !state.discussionRetry && state.discussion.canAskAdvisor && !state.discussionSending && !state.guidanceSending ? <Button tone="quiet" onClick={() => conversation.sendDiscussion(draft.trim() || "Investigate why this work is blocked and suggest a safe next step.", true)}>Ask another agent</Button> : null}
-        {state.guidanceRetry && !state.discussionSending ? <Button tone="quiet" busy={state.guidanceSending} onClick={() => { void conversation.retryGuidance(); }}>{state.discussion.guidanceMode === "deferred" ? "Retry saving" : "Retry continuing"}</Button> : null}
-        {!state.guidanceRetry && state.discussion.canSendGuidance && draft.trim() && Array.from(draft.trim()).length <= 4000 && !state.discussionSending ? <Button tone="quiet" busy={state.guidanceSending} onClick={() => { void conversation.sendGuidance(); }}>{state.discussion.guidanceMode === "deferred" ? "Save guidance" : "Send guidance"}</Button> : null}</div>
+        {state.guidanceRetry && !state.discussionSending ? <Button tone="quiet" busy={state.guidanceSending} onClick={() => { void conversation.retryGuidance(); }}>Retry continuing</Button> : null}
+        {!state.guidanceRetry && state.discussion.canSendGuidance && draft.trim() && Array.from(draft.trim()).length <= 4000 && !state.discussionSending ? <Button tone="quiet" busy={state.guidanceSending} onClick={() => { void conversation.sendGuidance(); }}>Send guidance</Button> : null}</div>
         {state.discussion.canSendGuidance && Array.from(draft.trim()).length > 4000 ? <span className="os-caption">Keep guidance to 4,000 characters or fewer.</span> : null}
       </div> : null}
       {!state.voiceActive && panel === "conversation" ? <form className="os-ask-input" onSubmit={onSubmit}>
@@ -441,7 +441,7 @@ export function AskSurface({
           onKeyDown={event => { if (event.key === "Enter" && !event.shiftKey && !event.nativeEvent.isComposing) { event.preventDefault(); if (draft.trim() && send(draft)) setDraft(""); } }}
           ref={inputRef}
           className="os-ask-field"
-          placeholder={live ? "Listening" : state.workGuidance ? "Guide this work" : state.discussion || state.discussionDraft ? "Discuss this approval or write guidance" : "Ask"}
+          placeholder={live ? "Listening" : state.workGuidance ? "Guide this work" : state.discussion || state.discussionDraft ? "Discuss this request or write guidance" : "Ask"}
           aria-label="Ask"
           value={draft}
           // Read-only, never disabled, and only while the mic is writing it:
@@ -508,14 +508,11 @@ function askErrorSummary(message: string): string {
 
 function approvalDiscussionStatus(state: ConversationState, exchanges: AskTurn[]): string {
   const discussion = state.discussion!;
-  const deferred = discussion.guidanceMode === "deferred";
   if (state.discussionSending) return "Sending discussion message.";
   if (state.discussionRetry) return "Retry resends your original message. Your new text stays in the composer.";
-  if (deferred && state.guidanceSending) return "Saving guidance. Work remains paused.";
-  if (state.guidanceRetry) return deferred ? "Retry saving checks your original guidance. Your new text stays in the composer." : "Retry continuing resends your saved guidance. Your new message stays in the composer.";
+  if (state.guidanceRetry) return "Retry continuing resends your saved guidance. Your new message stays in the composer.";
   if (exchanges.some(turn => turn.approvalId === discussion.approval.id && ["queued", "waiting", "streaming"].includes(turn.state))) return "Advice is being prepared. You can keep writing.";
   if (discussion.canSendGuidance) {
-    if (deferred) return discussion.savedGuidance ? "Guidance saved. Work stays paused until you raise the limit." : "Discuss here, or save guidance to use after you raise the limit.";
     if (!discussion.canAskAdvisor) return "Send guidance to the waiting work. This does not grant access.";
     return "Send a message to discuss, or send your guidance to the waiting work.";
   }

@@ -505,7 +505,7 @@ export function approvalKindWord(kind: string): string {
     case "scopeElevation":
       return "More access";
     case "budget":
-      return "Budget";
+      return "Saved work";
     case "skillMint":
       return "New skill";
     case "feedback":
@@ -573,7 +573,7 @@ export function approvalKindMeaning(kind: string): string {
     case "budget":
       // A local time or call limit needs no paid provider. Provider balance
       // failures use this same approval kind, but require replenishing funds.
-      return "Work is paused at a resource limit. Review the reason and adjust the limit or provider balance before continuing.";
+      return "The work is saved. Close this older request and use its results in a new request.";
     case "skillMint":
       return "The run wants to keep what it learned as a skill it can reuse.";
     case "feedback":

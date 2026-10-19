@@ -37,10 +37,12 @@ it("recovers computed readings after reconnect and focus, and can be disabled", 
   status = "reconnecting"; rerender({ enabled: true });
   status = "connected"; rerender({ enabled: true });
   expect(result.current).toBe(initial + 1);
-  act(() => { window.dispatchEvent(new Event("focus")); vi.advanceTimersByTime(150); });
+  act(() => { window.dispatchEvent(new Event("focus")); vi.advanceTimersByTime(400); });
+  expect(result.current).toBe(initial + 1); // same recovery burst, one read
+  act(() => { vi.advanceTimersByTime(1000); window.dispatchEvent(new Event("focus")); vi.advanceTimersByTime(400); });
   expect(result.current).toBe(initial + 2);
   rerender({ enabled: false });
-  act(() => { window.dispatchEvent(new Event("online")); vi.advanceTimersByTime(150); });
+  act(() => { window.dispatchEvent(new Event("online")); vi.advanceTimersByTime(400); });
   expect(result.current).toBe(initial + 2);
 });
 it("bounds continuous invalidation and pauses a parked window until it becomes visible", async () => {

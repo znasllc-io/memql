@@ -22,10 +22,12 @@ func TestReplanBudgetApprovalResumesTheRemedyAcrossReplicas(t *testing.T) {
 	run := actRunRow(runStatusWaiting, "fetch", "draft", "publish")
 	run["waitingOn"] = map[string]any{"kind": waitKindReplan, "subject": "draft", "reason": "divide unfinished work", "since": rfc(testNow)}
 	run["spent"] = map[string]any{"retries": 2, "events": 7, "modelCalls": 26}
+	run["classification"] = map[string]any{"workload": "research"}
+	eng.reply("workGoalForOwner", map[string]any{"id": actGoalId, "ownerUserId": actOwner, "ceilings": map[string]any{"maxModelCalls": 96, "maxRetries": 2, "wallClockMs": 10800000}})
 	eng.reply("workRunForOwner", run)
 	require.NoError(t, i.PauseReplanForBudget(context.Background(), actOwner, actRunId, "draft", remedyCeiling(actRunId)))
 	approval := eng.callTo(t, "createWorkApproval").Args(t)
-	require.Equal(t, work.ApprovalKindBudget, approval["kind"])
+	require.Equal(t, work.ApprovalKindFeedback, approval["kind"])
 	require.Equal(t, work.ArtifactHash(rowMap(approval, "subject")), approval["artifactHash"])
 	require.Equal(t, "draft", approval["stepKey"])
 	park := eng.callTo(t, "updateWorkRun").Args(t)
@@ -44,10 +46,11 @@ func TestReplanBudgetApprovalResumesTheRemedyAcrossReplicas(t *testing.T) {
 	approval["ownerUserId"] = actOwner
 	peerEng.reply("workApprovalsForOwner", approval)
 	peerEng.reply("workRunForOwner", run)
-	peerEng.reply("workGoalForOwner", map[string]any{"id": actGoalId, "ownerUserId": actOwner, "ceilings": map[string]any{"maxModelCalls": 48, "maxRetries": 2}})
-	_, err := peer.handleDecideApproval(callerContext(actOwner), map[string]any{"approvalId": approval["id"], "decision": "approved", "answer": map[string]any{"newLimit": 96}}, 0)
+	peerEng.reply("workGoalForOwner", map[string]any{"id": actGoalId, "ownerUserId": actOwner, "ceilings": map[string]any{"maxModelCalls": 96, "maxRetries": 2, "wallClockMs": 10800000}})
+	_, err := peer.handleDecideApproval(callerContext(actOwner), map[string]any{"approvalId": approval["id"], "decision": "answered", "answer": map[string]any{"value": "retry"}}, 0)
 	require.NoError(t, err)
-	resume := peerEng.callTo(t, "updateWorkRun").Args(t)
+	updates := peerEng.callsTo("updateWorkRun")
+	resume := updates[len(updates)-1].Args(t)
 	require.Equal(t, runStatusWaiting, resume["status"])
 	require.Equal(t, map[string]any{"kind": waitKindReplan, "subject": "draft", "reason": "divide unfinished work", "since": rfc(testNow)}, rowMap(resume, "waitingOn"))
 	for _, key := range []string{"spent", "rerun", "staleSteps", "stepOrder", "head"} {
@@ -88,6 +91,7 @@ func TestReplanBudgetRefusesStaleWaitsAndUnsavedApprovals(t *testing.T) {
 			case "write failed":
 				eng.refuse("createWorkApproval", errors.New("storage unavailable"))
 			}
+			run["classification"] = map[string]any{"workload": "research"}
 			eng.reply("workRunForOwner", run)
 			require.Error(t, i.PauseReplanForBudget(context.Background(), actOwner, actRunId, "draft", ceiling))
 			require.Empty(t, eng.callsTo("updateWorkRun"))

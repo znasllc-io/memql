@@ -23,13 +23,15 @@ func TestLookupContractsAreAuthorizedBoundedAndReplicaIndependent(t *testing.T) 
 	owner := "v1:identity:user:lookup-contract-owner"
 	ctx := common.ContextWithRun(auth.ContextWithUserActor(context.Background(), owner), common.RunContext{RunId: "persisted-run", GoalId: "goal", OwnerUserId: owner})
 	for _, tc := range []struct {
-		name, workload, title, statement string
-		fail, large, want                bool
+		name, workload, title, statement, search string
+		fail, large, want                        bool
 	}{
 		{name: "fresh executing replica", workload: "lookup", title: "Count current records", want: true},
 		{name: "owner request beats object title", workload: "lookup", title: "Read capability-check.md", statement: "Read the saved file and identify its first item.", want: true},
 		{name: "owner request needs no generated title", workload: "lookup", statement: "Read the saved file.", want: true},
 		{name: "long request falls back to title", workload: "lookup", title: "Read saved records", statement: strings.Repeat("saved records ", 30), want: true},
+		{name: "semantic action survives replica hop", workload: "lookup", title: "Identify first item", statement: "What is the first item in the file you just created?", search: "read file content", want: true},
+		{name: "invalid semantic action falls back", workload: "lookup", title: "Read file", statement: "Read the saved file", search: strings.Repeat("x", 301), want: true},
 		{name: "quick", workload: "quick", title: "Greeting"},
 		{name: "research", workload: "research", title: "Research records"},
 		{name: "missing title", workload: "lookup"},
@@ -46,7 +48,7 @@ func TestLookupContractsAreAuthorizedBoundedAndReplicaIndependent(t *testing.T) 
 				}
 				calls = append(calls, q)
 				if strings.HasPrefix(q, "query work.workRunForOwner(") {
-					return []map[string]any{{"classification": map[string]any{"workload": tc.workload, "workTitle": tc.title}}}, nil
+					return []map[string]any{{"classification": map[string]any{"workload": tc.workload, "workTitle": tc.title, "capabilitySearch": tc.search}}}, nil
 				}
 				if strings.HasPrefix(q, "query work.workGoalForOwner(") {
 					return []map[string]any{{"statement": tc.statement}}, nil
@@ -55,6 +57,9 @@ func TestLookupContractsAreAuthorizedBoundedAndReplicaIndependent(t *testing.T) 
 					search := tc.title
 					if tc.statement != "" && len(tc.statement) <= 300 {
 						search = tc.statement
+					}
+					if tc.search != "" && len(tc.search) <= 300 {
+						search = tc.search
 					}
 					if !strings.Contains(q, search) {
 						t.Fatalf("discovery lost requested operation: %s", q)
@@ -66,7 +71,7 @@ func TestLookupContractsAreAuthorizedBoundedAndReplicaIndependent(t *testing.T) 
 					if tc.large {
 						contract = strings.Repeat("x", 25*1024)
 					}
-					return map[string]any{"data": map[string]any{"capabilities": map[string]any{"id": "capabilities", "payload": map[string]any{"capabilities": []any{map[string]any{"name": contract, "arguments": []any{}}}}}}}, nil
+					return map[string]any{"data": map[string]any{"capabilities": map[string]any{"id": "capabilities", "payload": map[string]any{"capabilities": []any{map[string]any{"name": contract, "arguments": []any{}}}, "fleet": map[string]any{"checkedAt": "2026-10-18T13:00:00Z", "status": "observed"}, "note": "A shortlist does not establish absence.", "truncated": true}}}}, nil
 				}
 				return nil, nil
 			}
@@ -83,6 +88,12 @@ func TestLookupContractsAreAuthorizedBoundedAndReplicaIndependent(t *testing.T) 
 			}
 			if tc.want && !strings.Contains(prepared.messages[0].Content, "records.currentRecords") {
 				t.Fatal("contract lost through adapter envelope")
+			}
+			if tc.want {
+				text := newTestReplier(engine).workLookupContracts(ctx)
+				if strings.Count(text, "records.currentRecords") != 1 || strings.Count(text, "2026-10-18T13:00:00Z") != 1 || !strings.Contains(text, `"truncated":true`) || !strings.Contains(text, "does not establish absence") || strings.Contains(text, `"payload"`) {
+					t.Fatalf("discovery duplicated its envelope or lost evidence limits: %s", text)
+				}
 			}
 			if prepared.routerReq.Level != airoute.LevelStrong {
 				t.Fatal("discovery downgraded reasoning")

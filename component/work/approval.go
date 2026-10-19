@@ -125,18 +125,6 @@ func newApproval(kind, runId, stepKey string, subject map[string]any, ev Evidenc
 	return a
 }
 
-// BudgetApproval parks a run that reached a ceiling. The subject carries
-// the figures because "over budget" with no numbers is not a decision
-// anyone can make.
-func BudgetApproval(runId, stepKey string, b CeilingBreach, now time.Time, ttl time.Duration) ApprovalRequest {
-	return newApproval(ApprovalKindBudget, runId, stepKey, map[string]any{
-		"ceiling": b.Ceiling,
-		"limit":   b.Limit,
-		"actual":  b.Actual,
-		"reason":  b.Reason,
-	}, Evidence{Tier: "budget", Reason: b.Reason, RuleId: "ceiling." + b.Ceiling, Source: EvidenceSourceRules}, now, ttl)
-}
-
 // SideEffectApproval is the safety gate's ask, as a row. artifactHash is
 // supplied rather than derived because the gate already computes a
 // correlation key over the redacted payload, and the two must agree.

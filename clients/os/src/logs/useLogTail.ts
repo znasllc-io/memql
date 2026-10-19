@@ -1,7 +1,8 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import type { LogsTailArgs } from "@znasllc-io/memql-sdk-core/client";
+import { isTransportInterruption, type LogsTailArgs } from "@znasllc-io/memql-sdk-core/client";
 
 import { useOsConnection } from "../live/connection";
+import { onAppResume } from "../live/resume";
 import { errorSentence } from "./errors";
 import { logRowFromRow, type LogRow } from "./rows";
 
@@ -136,6 +137,7 @@ export function useLogTail(options: LogTailOptions): LogTail {
         setSeeded(true);
       } catch (err) {
         if (!live || controller.signal.aborted) return;
+        if (isTransportInterruption(err)) { setError(""); return; }
         setError(errorSentence(err));
         setSeeded(true);
       } finally {
@@ -152,15 +154,12 @@ export function useLogTail(options: LogTailOptions): LogTail {
       void read(cursor === null);
     };
     const timer = setInterval(tick, pollMs);
-    const onVisibility = (): void => {
-      if (visible()) tick();
-    };
-    if (typeof document !== "undefined") document.addEventListener("visibilitychange", onVisibility);
+    const stopResume = onAppResume(tick);
     return () => {
       live = false;
       controller.abort();
       clearInterval(timer);
-      if (typeof document !== "undefined") document.removeEventListener("visibilitychange", onVisibility);
+      stopResume();
     };
     // `options.viewKey` is the reading; `generation` is a manual re-baseline.
   }, [connection, options.viewKey, generation, pollMs, maxRows]);
