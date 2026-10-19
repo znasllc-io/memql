@@ -265,6 +265,20 @@ report **`tools`** — which covers the operational class (`llama3.1:8b`,
 OpenAI-compatible runtime pointed at Ollama's own `/v1` surface with
 `structured_output: true`. Your machine, your claim.
 
+Tools, structured output and vision are claimed only for a model Ollama lists
+as **`completion`**, one that can answer a chat at all. Ollama 0.40.6 reports
+`qwen3-embedding:0.6b` as `tools, thinking, embedding`; without this rule the
+embedder advertised `tools=1,structured=1` and was sent chat calls it refused.
+
+Some Ollama runners do not implement `format` at all: Ollama 0.40.6 answers
+every request carrying it for `qwen3.8:27b` (NVFP4) with
+`501 structured output is unavailable`. On that 501 the cockpit asks again with
+the schema in the system prompt, holds the answer back, and sends it only when
+one JSON value in it validates against the request's schema; anything else
+fails the call, as the 501 would have (`modelcall/ollama_schema.go`). A
+structured call to this machine still gets schema-valid JSON or a failure,
+never prose.
+
 That escape hatch relies on one rule worth knowing: **a model id can be
 advertised once**, because the id is the label key. When the native probe and
 a declared runtime both offer the same id, the **declared** entry wins and

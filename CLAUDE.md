@@ -366,7 +366,11 @@ Five rules here are load-bearing, and each fails silently:
    nothing -- an over-claim surfaces as a parse failure three layers away,
    naming nothing here. Ollama has no structured-output capability of its
    own, so `tools` is the proxy; an operator who disagrees declares the
-   model under an OpenAI-compatible runtime instead.
+   model under an OpenAI-compatible runtime instead. Tools, structured and
+   vision are claimed only for a model Ollama lists as `completion` (an
+   embedder reported `tools` once and was sent chat calls), and a runner
+   that answers `format` with 501 gets the schema in the prompt and passes
+   on only an answer that validates (`modelcall/ollama_schema.go`).
 2. **`max_concurrent` is the exception, and it is never absent.** It is the
    one attribute whose absence is PERMISSIVE -- the engine reads a missing
    ceiling as unlimited. `OLLAMA_NUM_PARALLEL` when set, otherwise 1.
