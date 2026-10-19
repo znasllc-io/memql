@@ -80,6 +80,9 @@ type Runner struct {
 	// ONE: a burst of pulls is one evaluation, not one reconnect each.
 	pendingReadvertise atomic.Bool
 	readvertiseNow     chan struct{}
+	// beatNow asks the heartbeat loop for a beat ahead of its tick: the
+	// installer's report changed a step (RequestBeat). Room for one.
+	beatNow chan struct{}
 
 	// refused is the runner's standing with a cluster that has refused it
 	// (refusal.go). Touched only by the goroutine in Run.
@@ -265,6 +268,9 @@ func NewRunner(opts Options) (*Runner, error) {
 		// wait for the refresh ticker, which is the wait this exists to
 		// remove.
 		readvertiseNow: make(chan struct{}, 1),
+		// Room for one, for the same reason: a beat already asked for
+		// covers every request made before it goes out.
+		beatNow: make(chan struct{}, 1),
 	}
 	pull := opts.ModelPull
 	if opts.Models == nil {
@@ -568,10 +574,44 @@ func (r *Runner) heartbeatLoop(ctx context.Context, conn *Connection, beat *atom
 	refresh := time.NewTicker(modelRefreshInterval)
 	defer refresh.Stop()
 	beats := 0
+	var lastBeat time.Time
+	// held is a step's beat waiting out setupBeatSpacing; nil when none is.
+	var held <-chan time.Time
+	send := func(hw *hardware.Inventory) bool {
+		if err := conn.SendHeartbeat(0, nil, r.inventory(ctx), hw, r.capacityReport(ctx), r.setupReport()); err != nil {
+			return false
+		}
+		lastBeat = time.Now()
+		return true
+	}
+	// Register carries no setup report, so a stream that opens while an
+	// install is under way beats at once: until it does, the cluster reads
+	// a machine whose installer is downloading as one with nothing on it.
+	if r.setupReport() != nil {
+		r.RequestBeat()
+	}
 	for {
 		select {
 		case <-ctx.Done():
 			return
+		case <-r.beatNow:
+			// The installer's report changed a step (setupprogress.go).
+			// Not a tick: it neither counts toward the hardware refresh nor
+			// proves the stream -- only the cadence does that (see Run).
+			if wait := setupBeatSpacing - time.Since(lastBeat); !lastBeat.IsZero() && wait > 0 {
+				if held == nil {
+					held = time.After(wait)
+				}
+				continue
+			}
+			if !send(nil) {
+				return
+			}
+		case <-held:
+			held = nil
+			if !send(nil) {
+				return
+			}
 		case <-refresh.C:
 			r.maybeReadvertiseModels(ctx, conn)
 		case <-r.readvertiseNow:
@@ -601,11 +641,31 @@ func (r *Runner) heartbeatLoop(ctx context.Context, conn *Connection, beat *atom
 				inv := r.hardwareInventory(ctx)
 				hw = &inv
 			}
-			if err := conn.SendHeartbeat(0, nil, r.inventory(ctx), hw, r.capacityReport(ctx), r.setupReport()); err != nil {
+			if !send(hw) {
 				return
 			}
 			beat.Store(true)
 		}
+	}
+}
+
+// setupBeatSpacing is the least time between two beats sent for a step of
+// the install: a burst of steps -- the plan, then the first stage starting --
+// goes out as two beats a second apart rather than as many as were reported.
+// Above the engine's floor for writing a step ahead of its batch (half a
+// second), so jitter on the wire never holds a step back for a whole
+// interval.
+const setupBeatSpacing = time.Second
+
+// RequestBeat asks for a heartbeat now. It never blocks: a beat already
+// asked for covers this one.
+func (r *Runner) RequestBeat() {
+	if r == nil || r.beatNow == nil {
+		return
+	}
+	select {
+	case r.beatNow <- struct{}{}:
+	default:
 	}
 }
 

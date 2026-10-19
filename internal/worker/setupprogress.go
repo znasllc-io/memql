@@ -1,8 +1,11 @@
 package worker
 
 import (
+	"encoding/json"
 	"errors"
 	"fmt"
+	"os"
+	"path/filepath"
 	"strings"
 	"sync"
 	"time"
@@ -39,10 +42,29 @@ import (
 // process killed -- and is carried as "stopped" rather than as work in
 // flight.
 //
-// It lives in memory only. A worker restart mid-install loses the plan, and
-// the next stage report rebuilds what is left; by then the earlier stages'
-// results are on the registration anyway (an installed runtime, pulled
-// models), which is what the OS reads them from.
+// THE PERSON'S TURN IS A STAGE (memql-cockpit#548). On a computer-use Mac
+// the installer's first stage is `permissions`: it opens the Permissions
+// window and waits until both permissions are allowed or the person chooses
+// to go on without them -- in that window, or at the terminal -- before
+// anything downloads. The choice arrives as an ANSWER, a report of its own
+// that the waiting setup command reads back; the setup command then reports
+// how the stage ended. An answer never rides a stage report, so the
+// command's keepalive, re-sending "running", can never overwrite it.
+//
+// IT SURVIVES A RESTART. Turning Screen Recording on needs the worker to
+// restart, mid-install, and the report used to live in memory only: the
+// plan was lost, and the stages still to come vanished from the page until
+// each one started. It is now kept in setup.json at the machine's state
+// root, written on every report and read when the worker starts. A report
+// read back from an installer that has since gone quiet is carried as
+// "stopped" by the same rule as one that went quiet while this worker ran.
+//
+// THE CLUSTER HEARS A STEP AT ONCE. A report that changes a step -- the
+// plan, a stage's state or sentence, an answer, the end -- asks every home
+// for a heartbeat now (onStep) instead of at its next tick: fifteen seconds
+// of the old step was long enough for a person to press Download models on
+// a download already under way. A download's figures moving within a step
+// keep the ordinary cadence.
 
 // SetupControl is one report on the control socket. Exactly one of its
 // parts is set.
@@ -54,11 +76,25 @@ type SetupControl struct {
 	Stage *SetupStageReport `json:"stage,omitempty"`
 	// Finished is the installer saying it is done.
 	Finished bool `json:"finished,omitempty"`
+	// Answer is the person's choice for a stage waiting on them.
+	Answer *SetupAnswer `json:"answer,omitempty"`
+	// Reset is an install with no stage to run: what an earlier install
+	// reported is no longer this machine's setup.
+	Reset bool `json:"reset,omitempty"`
+}
+
+// SetupAnswer is the person's choice for a stage that waits on them. Only the
+// permissions stage does, and its one choice is "skip": go on without what
+// is not allowed yet. Allowing everything needs no answer -- the setup
+// command sees the grant itself.
+type SetupAnswer struct {
+	Stage  string `json:"stage"`
+	Choice string `json:"choice"`
 }
 
 // SetupStageReport is one stage's latest state.
 type SetupStageReport struct {
-	// Name is "runtime", "models" or "workbench".
+	// Name is "permissions", "runtime", "models" or "workbench".
 	Name string `json:"name"`
 	// State is "waiting", "running", "done", "failed" or "skipped".
 	State string `json:"state"`
@@ -80,9 +116,15 @@ type SetupStageReport struct {
 // word outside them is dropped there, so it is refused here, where the
 // command that sent it can still be told.
 var (
-	setupStageNames  = map[string]bool{"runtime": true, "models": true, "workbench": true}
+	setupStageNames  = map[string]bool{"permissions": true, "runtime": true, "models": true, "workbench": true}
 	setupStageStates = map[string]bool{"waiting": true, "running": true, "done": true, "failed": true, "skipped": true}
+	// setupAnswers is the stages that wait on the person, and the choices
+	// each one takes. This machine's own vocabulary: answers never leave it.
+	setupAnswers = map[string]map[string]bool{"permissions": {"skip": true}}
 )
+
+// setupReportFile is the report's file at the machine's state root.
+const setupReportFile = "setup.json"
 
 const (
 	// setupQuietAfter is how long a running report may go unrefreshed
@@ -111,8 +153,14 @@ func (c SetupControl) validate() error {
 	if c.Finished {
 		parts++
 	}
+	if c.Answer != nil {
+		parts++
+	}
+	if c.Reset {
+		parts++
+	}
 	if parts != 1 {
-		return errors.New("a setup report carries exactly one of plan, stage or finished")
+		return errors.New("a setup report carries exactly one of plan, stage, finished, answer or reset")
 	}
 	seen := map[string]bool{}
 	for _, name := range c.Plan {
@@ -132,6 +180,15 @@ func (c SetupControl) validate() error {
 			return fmt.Errorf("unknown setup stage state %q", c.Stage.State)
 		}
 	}
+	if c.Answer != nil {
+		choices, ok := setupAnswers[c.Answer.Stage]
+		if !ok {
+			return fmt.Errorf("setup stage %q does not wait for an answer", c.Answer.Stage)
+		}
+		if !choices[c.Answer.Choice] {
+			return fmt.Errorf("unknown answer %q for setup stage %q", c.Answer.Choice, c.Answer.Stage)
+		}
+	}
 	return nil
 }
 
@@ -139,11 +196,17 @@ func (c SetupControl) validate() error {
 // carries the same one: an install sets up the machine, not a cluster.
 type setupTracker struct {
 	now func() time.Time
+	// path is where the report is kept across restarts; "" keeps it in
+	// memory only.
+	path string
+	// onStep is told, outside the lock, when a report changes a step.
+	onStep func()
 
 	mu       sync.Mutex
 	present  bool
 	finished bool
 	stages   []SetupStageReport
+	answers  map[string]SetupAnswer
 	updated  time.Time
 }
 
@@ -152,6 +215,54 @@ func newSetupTracker(now func() time.Time) *setupTracker {
 		now = time.Now
 	}
 	return &setupTracker{now: now}
+}
+
+// loadSetupTracker is a tracker kept at path, starting from what an earlier
+// worker saved there. A file it cannot read is a report it does not have:
+// the next one from the installer replaces it.
+func loadSetupTracker(now func() time.Time, path string) *setupTracker {
+	t := newSetupTracker(now)
+	t.path = path
+	body, err := os.ReadFile(path)
+	if err != nil {
+		return t
+	}
+	var saved setupFile
+	if json.Unmarshal(body, &saved) != nil {
+		return t
+	}
+	for _, st := range saved.Stages {
+		if setupStageNames[st.Name] && setupStageStates[st.State] {
+			t.stages = append(t.stages, boundedStage(st))
+		}
+	}
+	for stage, answer := range saved.Answers {
+		if setupAnswers[stage][answer.Choice] && answer.Stage == stage {
+			if t.answers == nil {
+				t.answers = map[string]SetupAnswer{}
+			}
+			t.answers[stage] = answer
+		}
+	}
+	t.present, t.finished, t.updated = true, saved.Finished, saved.Updated
+	return t
+}
+
+// setupReportPath is the report's file for a worker whose state lives at
+// stateDir, or "" when it has none.
+func setupReportPath(stateDir string) string {
+	if strings.TrimSpace(stateDir) == "" {
+		return ""
+	}
+	return filepath.Join(machineStateRoot(stateDir), setupReportFile)
+}
+
+// setupFile is the report as setup.json keeps it.
+type setupFile struct {
+	Finished bool                   `json:"finished"`
+	Stages   []SetupStageReport     `json:"stages"`
+	Answers  map[string]SetupAnswer `json:"answers,omitempty"`
+	Updated  time.Time              `json:"updated"`
 }
 
 // Apply records one report from the control socket.
@@ -163,16 +274,63 @@ func (t *setupTracker) Apply(c SetupControl) error {
 		return err
 	}
 	t.mu.Lock()
-	defer t.mu.Unlock()
+	step, err := t.applyLocked(c)
+	if err == nil {
+		t.saveLocked()
+	}
+	onStep := t.onStep
+	t.mu.Unlock()
+	if err == nil && step && onStep != nil {
+		onStep()
+	}
+	return err
+}
+
+// applyLocked records the report and says whether it changed a step: the
+// plan, a stage's state or sentence, an answer, or the end. A download's
+// figures moving, and a running stage re-sent to say its command is alive,
+// change none.
+func (t *setupTracker) applyLocked(c SetupControl) (bool, error) {
+	switch {
+	case c.Answer != nil:
+		// An answer is for a stage that is waiting on the person NOW. One
+		// for a stage that has since ended -- allowed in the moment the
+		// person chose to skip -- has nobody left to read it.
+		waiting := false
+		for _, st := range t.stages {
+			if st.Name == c.Answer.Stage && st.State == "running" {
+				waiting = true
+			}
+		}
+		if !t.present || t.finished || !waiting {
+			return false, errors.New("setup is not waiting for that answer")
+		}
+		if t.answers == nil {
+			t.answers = map[string]SetupAnswer{}
+		}
+		t.answers[c.Answer.Stage] = *c.Answer
+		return true, nil
+	case c.Reset:
+		if !t.present {
+			return false, nil
+		}
+		// Finished with nothing in it, rather than no report at all: the
+		// engine keeps the last report it stored until a beat replaces it,
+		// and only a report replaces a report.
+		t.finished, t.stages, t.answers, t.updated = true, nil, nil, t.now()
+		return true, nil
+	}
 	t.present = true
 	t.updated = t.now()
 	switch {
 	case len(c.Plan) > 0:
 		t.finished = false
+		t.answers = nil
 		t.stages = make([]SetupStageReport, 0, len(c.Plan))
 		for _, name := range c.Plan {
 			t.stages = append(t.stages, SetupStageReport{Name: name, State: "waiting"})
 		}
+		return true, nil
 	case c.Stage != nil:
 		stage := boundedStage(*c.Stage)
 		// A stage starting again after the installer finished -- somebody
@@ -182,13 +340,24 @@ func (t *setupTracker) Apply(c SetupControl) error {
 			t.finished = false
 		}
 		for i := range t.stages {
-			if t.stages[i].Name == stage.Name {
-				t.stages[i] = stage
-				return nil
+			if t.stages[i].Name != stage.Name {
+				continue
 			}
+			before := t.stages[i]
+			// A stage STARTING asks its question again; the keepalive of
+			// one already running keeps the answer it was given.
+			if stage.State == "running" && before.State != "running" {
+				delete(t.answers, stage.Name)
+			}
+			t.stages[i] = stage
+			return before.State != stage.State || before.Detail != stage.Detail, nil
+		}
+		if stage.State == "running" {
+			delete(t.answers, stage.Name)
 		}
 		t.stages = append(t.stages, stage)
-	case c.Finished:
+		return true, nil
+	default: // finished
 		t.finished = true
 		for i := range t.stages {
 			switch t.stages[i].State {
@@ -199,8 +368,66 @@ func (t *setupTracker) Apply(c SetupControl) error {
 				t.stages[i].Detail = setupEndedWithoutResult
 			}
 		}
+		return true, nil
 	}
-	return nil
+}
+
+// saveLocked keeps the report for the next worker. Best-effort, like every
+// other part of the report: a disk that refuses costs the report its
+// survival of a restart, never the report.
+func (t *setupTracker) saveLocked() {
+	if t.path == "" || !t.present {
+		return
+	}
+	body, err := json.Marshal(setupFile{Finished: t.finished, Stages: t.stages, Answers: t.answers, Updated: t.updated})
+	if err != nil {
+		return
+	}
+	dir := filepath.Dir(t.path)
+	if os.MkdirAll(dir, 0o700) != nil {
+		return
+	}
+	tmp, err := os.CreateTemp(dir, ".setup-*")
+	if err != nil {
+		return
+	}
+	defer os.Remove(tmp.Name())
+	if _, err := tmp.Write(body); err != nil {
+		tmp.Close()
+		return
+	}
+	if tmp.Close() != nil {
+		return
+	}
+	_ = os.Rename(tmp.Name(), t.path)
+}
+
+// LocalSetup is the report as the control socket shows it: what the cluster
+// is told, and the person's answers, which only this machine needs.
+type LocalSetup struct {
+	State   string                 `json:"state"`
+	Stages  []SetupStageReport     `json:"stages"`
+	Answers map[string]SetupAnswer `json:"answers,omitempty"`
+}
+
+// Local is the report for the control socket, or nil when there is none.
+func (t *setupTracker) Local() *LocalSetup {
+	if t == nil {
+		return nil
+	}
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	if !t.present {
+		return nil
+	}
+	local := &LocalSetup{State: t.stateLocked(), Stages: append([]SetupStageReport{}, t.stages...)}
+	if len(t.answers) > 0 {
+		local.Answers = make(map[string]SetupAnswer, len(t.answers))
+		for stage, answer := range t.answers {
+			local.Answers[stage] = answer
+		}
+	}
+	return local
 }
 
 // Proto is the report for the next heartbeat, or nil when there is none.
