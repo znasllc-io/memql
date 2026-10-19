@@ -303,6 +303,12 @@ func (s *candidateAssemblyScope) readTarget(_ context.Context, args map[string]a
 			return nil, err
 		}
 		target = pl.ReleaseDestination{TargetID: name, TargetDigest: digest, Component: file.Component, Artifact: file.Artifact, Operation: "publish"}
+	} else if npm, ok := s.p.targetReader.npm[name]; ok {
+		_, _, digest, err := npm.snapshot()
+		if err != nil {
+			return nil, err
+		}
+		target = pl.ReleaseDestination{TargetID: name, TargetDigest: digest, Component: npm.Component, Artifact: npm.Artifact, Operation: "publish"}
 	} else {
 		return nil, errors.New("assembly target is unavailable")
 	}

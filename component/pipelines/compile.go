@@ -234,6 +234,9 @@ func Compile(spec *Spec, in CompileInput) (Plan, *Refusal) {
 	// A report cannot claim success for an excluded producer stage.
 	planned := map[string]bool{}
 	for _, s := range plan.Steps() {
+		if s.RepositoryChange != nil && !planned[s.RepositoryChange.Step] {
+			return Plan{}, Refuse(CodeStepInvalid, s.Key, "Repository proposal producer %q is not an earlier step in this run.", s.RepositoryChange.Step)
+		}
 		if s.SARIF != nil && !planned[s.SARIF.Step] {
 			return Plan{}, Refuse(CodeStepInvalid, s.Key, "SARIF producer %q is not an earlier step in this run.", s.SARIF.Step)
 		}
@@ -258,6 +261,14 @@ type planCompiler struct {
 
 func (c *planCompiler) compileStep(stage string, declared StepSpec, dependsOn []string) ([]Step, *Refusal) {
 	scope := stage + "/" + declared.Name
+	if declared.RepositoryChange != nil {
+		change := *declared.RepositoryChange
+		timeout := 5 * 60
+		if declared.Timeout != "" {
+			timeout = stepTimeoutSeconds(declared.Timeout)
+		}
+		return []Step{{Key: StepKey(stage, declared.Name), Stage: stage, Name: declared.Name, Kind: StepRepositoryChange, RepositoryChange: &change, TimeoutSeconds: timeout, DependsOn: compiledCopy(dependsOn)}}, nil
+	}
 	if declared.SARIF != nil {
 		report := *declared.SARIF
 		timeout := 5 * 60
@@ -299,6 +310,7 @@ func (c *planCompiler) compileStep(stage string, declared StepSpec, dependsOn []
 	}
 
 	step := Step{
+		GitHubReadToken: declared.GitHubReadToken,
 		CheckoutHistory: declared.CheckoutHistory,
 		ImageBuild:      CloneImageBuild(declared.ImageBuild),
 		Key:             StepKey(stage, declared.Name), Stage: stage, Name: declared.Name, Kind: StepCommand, Run: declared.Run,
@@ -484,6 +496,10 @@ func compiledLinks(links []Link) []Link {
 // cloneCompiledStep copies a step so that no slice or map is shared with the
 // step it came from: each shard of a step is a value of its own.
 func cloneCompiledStep(s Step) Step {
+	if s.RepositoryChange != nil {
+		change := *s.RepositoryChange
+		s.RepositoryChange = &change
+	}
 	if s.SARIF != nil {
 		report := *s.SARIF
 		s.SARIF = &report

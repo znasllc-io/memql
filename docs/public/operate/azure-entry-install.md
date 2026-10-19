@@ -551,13 +551,12 @@ repo-credential writes, and the Argo source switch are owner-gated.
   `os-front-door` Ingress; with that fix in the engine tag the instance
   composes, it becomes generated content and the cluster copy is
   overwritten on sync.
-- **Pins today are a human loop:** tag `vX.Y.Z` on `main`, dispatch
-  `build-engine-images.yml` with `version=X.Y.Z` (it pushes the same image
-  to ACR and to `ghcr.io/znasllc-io/memql-<node>:X.Y.Z`), edit
-  `overlays/cloud-entry/kustomization.yaml`, land the PR through the merge
-  queue, retarget the Application to the new `main` SHA, sync.
-  `dispatch-engine-images-on-release.yml` fires only on a PUBLISHED GitHub
-  Release, and tags are not published as releases, so it never fires today.
+- **Release pins are reviewed:** publish the GitHub Release for the reviewed
+  `vX.Y.Z` source commit, wait for the native MemQL release pipeline to build
+  and publish every engine image, then pin the verified digests in the
+  instance overlay. Land the PR through the merge queue and let ArgoCD sync.
+  A bare tag does not start a build; use **Run release** in MemQL Pipelines
+  to recover a missing release delivery.
 
 ### The target shape
 
@@ -746,8 +745,7 @@ means "within 12 hours of a cut":
 "Never auto-apply top" is structural, not a policy: the workflow edits one
 file in the instance repo and has no path to `overlays/cloud`. The
 engine-side process fix is the owner's: publish a GitHub Release for each
-tag, so `dispatch-engine-images-on-release.yml` builds images without a
-manual dispatch.
+tag, so the native release pipeline builds the pinned source.
 
 ## What is not this page
 

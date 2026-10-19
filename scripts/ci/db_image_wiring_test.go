@@ -237,3 +237,13 @@ func TestDatabaseImageSmokeTestGatesThePush(t *testing.T) {
 		t.Error("the pre-smoke-test build does not explicitly set `push: false`; the smoke test is then gating nothing")
 	}
 }
+
+// CNPG derives the PostgreSQL major from the tag. An engine version here would
+// publish a valid image which the production admission webhook cannot accept.
+func TestNativeDatabaseVersionNamesTheBasePostgres(t *testing.T) {
+	version := strings.TrimSpace(dbImageRead(t, "deploy/db-image/VERSION"))
+	base := dbImageFirst(regexp.MustCompile(`(?m)^ARG CNPG_BASE=[^\n:]+:([0-9]+\.[0-9]+)-`), dbImageRead(t, "deploy/db-image/Dockerfile"))
+	if !regexp.MustCompile(`^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.[1-9][0-9]*$`).MatchString(version) || base == "" || !strings.HasPrefix(version, base+".") {
+		t.Fatalf("native operand version %q must name base PostgreSQL %q plus a positive operand revision", version, base)
+	}
+}

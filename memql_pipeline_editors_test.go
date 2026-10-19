@@ -101,7 +101,6 @@ func TestEditorSiteBrowserValidationSelectionAndIsolation(t *testing.T) {
 			{"scripts/ci/editor-site.sh", true},
 			{"scripts/ci/retry.sh", true},
 			{"memql-package.yaml", true},
-			{".github/workflows/vscode-site.yml", true},
 			{"docs/public/overview/quickstart.md", false},
 			{"component/grpc/server.go", false},
 		} {

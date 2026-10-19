@@ -2,7 +2,7 @@
 // (memql#4116).
 //
 // CLAUDE.md's "Image builds" section is a HARD RULE: local Docker for dev,
-// the GitHub build server for anything deployed to a cloud cluster, and
+// the MemQL native build server for anything deployed to a cloud cluster, and
 // explicitly "Do NOT hand-build + push release images locally (az acr build,
 // make release, docker push) for a cloud deploy". release.sh nonetheless
 // implemented that path with nothing marking it -- `--push --acr=acrmemql`
@@ -60,7 +60,7 @@ func TestPushWithoutConfirmationIsRefused(t *testing.T) {
 	}
 	// The refusal has to say where images actually come from, or the next
 	// operator just adds the phrase and carries on.
-	for _, want := range []string{"break-glass", "build-engine-images.yml", pushPhrase} {
+	for _, want := range []string{"break-glass", "memql-package.yaml", pushPhrase} {
 		if !strings.Contains(out, want) {
 			t.Errorf("refusal does not mention %q\n%s", want, out)
 		}

@@ -33,6 +33,7 @@ func TestReleaseCandidateBindsEveryReviewedInput(t *testing.T) {
 		"artifact size":        func(c *ReleaseCandidate) { c.Components[0].Artifacts[0].Size++ },
 		"image":                func(c *ReleaseCandidate) { c.Components[0].Artifacts[0].ImageDigest = other },
 		"platform":             func(c *ReleaseCandidate) { c.Components[0].Artifacts[0].Platform = "linux/amd64" },
+		"complete index":       func(c *ReleaseCandidate) { c.Components[0].Artifacts[0].Platform = "oci-index" },
 		"producer":             func(c *ReleaseCandidate) { c.Components[0].Artifacts[0].Receipt.WorkRunID = "other" },
 		"attempt":              func(c *ReleaseCandidate) { c.Components[0].Artifacts[0].Receipt.Attempt++ },
 		"storage receipt":      func(c *ReleaseCandidate) { c.Components[0].Artifacts[0].Receipt.IntentID = strings.Repeat("f", 64) },

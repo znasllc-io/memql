@@ -110,7 +110,7 @@ pipeline:
     buckets:
       # Filesystem gates read Go source as well as manifests and docs. The
       # import graph cannot discover these dependencies, so every PR runs them,
-      # matching ci.yml's declared gate packages in scripts/ci/selection.
+      # using the declared gate packages in scripts/ci/selection.
       gates: ["**"]
       deploy-gate:
         - cmd/deploy-gate-check/**
@@ -148,7 +148,6 @@ pipeline:
         - scripts/ci/editor-site.sh
         - scripts/ci/retry.sh
         - memql-package.yaml
-        - .github/workflows/vscode-site.yml
       editors:
         - brand/tokens.css
         - brand/editorAppearance.ts
@@ -202,6 +201,7 @@ pipeline:
             bash scripts/identity/build-css.sh
             go test -count=1 -timeout=300s ./scripts/ci/ ./scripts/dev/
             python3 -m unittest discover -s scripts/ci -p pipeline_db_tests_test.py
+            python3 -m unittest discover -s scripts/ci -p repository_proposal_test.py
         - name: build-identity
           placement: cluster
           timeout: 30m
@@ -353,8 +353,8 @@ pipeline:
           # Keep three Go execution threads after the heap-budget fix, with
           # a quarter-core of admission headroom per shard. Including Postgres,
           # each shard reserves three cores; two leave room in a 6.5-core pool
-          # for auxiliary containers. Test overlap, selection and deadlines
-          # are unchanged; native qualification must still pass.
+          # for auxiliary containers. Test overlap, selection and operation
+          # deadlines are unchanged; native qualification must still pass.
           cpuMilli: 2750
           packages: affected
           only: db-gated
@@ -792,6 +792,23 @@ pipeline:
             step: analysis.codeql-python
             path: .memql-security/codeql-python/results.sarif
 
+    # Refreshing a public fixture is deliberate maintenance. Keep both supported
+    # native platforms and their provenance, retain exact bytes, and publish through a
+    # separately approved candidate. No registry credential enters this command.
+    - name: fixtures
+      on: [manual]
+      steps:
+        - name: timescaledb
+          placement: cluster
+          cpuMilli: 1000
+          memoryMiB: 2048
+          timeout: 20m
+          artifacts: [.memql-fixture]
+          run: |
+            set -eu
+            export GOFLAGS=-p=2 GOMEMLIMIT=1GiB GOGC=75
+            go run ./cmd/ocisnapshot --pin deploy/ci-fixtures/timescaledb.json --out .memql-fixture
+
     - name: release-files
       on: [release]
       steps:
@@ -812,7 +829,8 @@ pipeline:
     # credentials belong only to the separate verified publication service.
     # Bootstrap the next pinned toolchain using the currently installed one.
     # The isolated builder retains an OCI archive; publication is a separate
-    # reviewed release effect after smoke-testing that exact cloud-built image.
+    # reviewed release effect. The verified target runs the full smoke suite
+    # offline before the builder can export that exact cloud-built image.
     - name: build-tools
       on: [release]
       steps:
@@ -823,8 +841,9 @@ pipeline:
           memoryMiB: 8192
           timeout: 45m
           imageBuild:
-            context: deploy/toolchain-image
+            context: .
             dockerfile: deploy/toolchain-image/Dockerfile
+            target: verified
 
     - name: images
       on: [release]

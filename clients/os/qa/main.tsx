@@ -857,6 +857,8 @@ const VIEWS: Record<
   "github-owner": { seed: NO_APP_OWNER, framed: true, render: () => <Lists section="deployables" /> },
   "github-member": { seed: NO_APP_MEMBER, role: "developer", framed: true, render: () => <Lists section="deployables" /> },
   // Pipelines (epic memql#5479): the Runs tab and a run page in each state.
+  "pipeline-channels": { seed: { ...PIPELINES_SEED, pipelineChannels: [{ id: "channel-releases", ownerUserId: "u-me", name: "releases", kind: "email", recipients: ["ops@example.test"], secretRef: "", status: "active" }] }, framed: true, render: () => <DeployablesWindow section="settings" fallback="Deployables" /> },
+  "pipeline-channels-empty": { seed: {}, framed: true, render: () => <DeployablesWindow section="settings" fallback="Deployables" /> },
   "pipeline-runs": { seed: PIPELINES_SEED, framed: true, render: () => <RunsWindow /> },
   "pipeline-runs-empty": { seed: PIPELINES_NO_RUNS_SEED, framed: true, render: () => <RunsWindow /> },
   "pipeline-runs-none": { seed: {}, framed: true, render: () => <RunsWindow /> },

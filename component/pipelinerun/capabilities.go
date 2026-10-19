@@ -29,7 +29,7 @@ func init() {
 		// (app/integrations_pipelines.go): only app/ can see the packages
 		// integration and the direct database. Until it does, every act
 		// that needs one refuses by name rather than half-working.
-		d := Deps{Logger: pctx.Logger, Secrets: pctx.ResolveSystemSecret}
+		d := Deps{Logger: pctx.Logger, Secrets: pctx.ResolveSystemSecret, SystemVariable: pctx.ResolveSystemVariable}
 		if pctx.Engine != nil {
 			d.Store = NewDSLStore(pctx.Engine)
 		}
@@ -45,6 +45,9 @@ func (i *Integration) IntegrationName() string { return IntegrationName }
 // the readiness evaluator reads it directly by its executor name.
 func (i *Integration) Capabilities() []memql.IntegrationCapability {
 	return []memql.IntegrationCapability{
+		{Name: "channelSave", Description: "Save an owner-scoped notification channel without sending a message.", Handler: i.handleChannelSave, ArgsSchema: map[string]string{"name": "string (required) -- stable channel name", "kind": "string (required) -- email or discord", "secretRef": "string -- Discord webhook secret name", "recipients": "[]string -- email addresses"}},
+		{Name: "channelArchive", Description: "Archive an owner-scoped notification channel.", Handler: i.handleChannelArchive, ArgsSchema: map[string]string{"name": "string (required) -- caller-owned channel"}},
+		{Name: "channelAllow", Description: "Allow or revoke one channel on a caller-owned pipeline.", Handler: i.handleChannelAllow, ArgsSchema: map[string]string{"pipelineId": "string (required) -- caller-owned pipeline", "name": "string (required) -- caller-owned channel", "allowed": "boolean (required) -- grant or revoke"}},
 		{Name: "reportPublish", Handler: workflowCapability("reportPublish")},
 		{Name: "reportObserve", Handler: workflowCapability("reportObserve")},
 		{Name: "readSARIF", Description: "Observe a caller-owned native SARIF upload without re-uploading. Only complete proves ingestion; uncertain never retries the write.", Handler: i.handleReadSARIF, ArgsSchema: map[string]string{"publicationId": "string (required) -- exact native SARIF publication identity"}},
@@ -98,9 +101,9 @@ func (i *Integration) Capabilities() []memql.IntegrationCapability {
 		},
 		{
 			Name:        "runLatest",
-			Description: "Open a full, owner-requested rehearsal of the current default-branch head for one of the caller's pipelines. Automatic delivery must be disconnected to prevent duplicate webhook or poll runs. Reads and opens the exact commit through the source owner's GitHub grant; the manual run is deduplicated by repository, SHA, mode and event. Answers {runId, attempt, status, sha, branch}.",
+			Description: "Open a full, owner-requested rehearsal of the current default-branch head for one of the caller's pipelines. Automatic delivery remains as configured; manual runs report a separate check context. Reads and opens the exact commit through the source owner's GitHub grant; the manual run is deduplicated by repository, SHA, mode and event. Answers {runId, attempt, status, sha, branch}.",
 			Handler:     i.handleRunLatest,
-			ArgsSchema:  map[string]string{"pipelineId": "string (required) -- the caller's v1:pipelines:pipeline; it must be disconnected"},
+			ArgsSchema:  map[string]string{"pipelineId": "string (required) -- the caller's v1:pipelines:pipeline"},
 		},
 		{
 			Name:        "runRelease",

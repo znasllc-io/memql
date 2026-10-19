@@ -64,8 +64,8 @@ func (v version) tag() string { return fmt.Sprintf("v%d.%d.%d", v.major, v.minor
 // bare renders the form container image tags carry -- no leading v.
 //
 // The two conventions are memql#4061's rule and they are load-bearing in
-// opposite directions: dispatch-engine-images-on-release.yml strips the v
-// before dispatching, so an image tagged with the v would be an image the
+// opposite directions: the native release builder strips the v for image
+// tags, so an image tagged with the v would be an image the
 // installer cannot pull, and a tag without it is a tag the installer cannot
 // check out.
 func (v version) bare() string { return fmt.Sprintf("%d.%d.%d", v.major, v.minor, v.patch) }

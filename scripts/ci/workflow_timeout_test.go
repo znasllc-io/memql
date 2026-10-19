@@ -1,141 +1,67 @@
-// Static guard: every CI job declares a `timeout-minutes`
-// (znasllc-io/memql#3158).
-//
-// # What this bounds, and what it does not
-//
-// Before this guard, exactly ONE `timeout-minutes` existed in the entire
-// .github/workflows tree (publish-docs-bundle.yml). Every CI job inherited
-// GitHub's 360-minute default, so a hung job held a runner slot for six hours.
-//
-// Be precise about the benefit: this bounds a HANG. It does NOT address the
-// starvation measured in the 2026-08-06 audit, where 27 of 60 jobs (45%) were
-// cancelled at exactly 15m00s having never been assigned a runner. A job with
-// no runner is not yet timing against its own budget, so no value here would
-// have changed that outcome. Nor does it touch dispatch failure, where no run
-// is created at all. Do not cite this guard as incident mitigation.
-//
-// # Why a guard rather than just the values
-//
-// The values are the easy half and the half that stays correct on its own. The
-// failure mode is the NEXT job: someone adds a lane, forgets the timeout, and
-// it silently inherits 360 minutes. That is invisible in review precisely
-// because it is an absence, which is the same shape as the ci-required
-// needs-completeness gap (memql#3019) -- absences are what static guards are
-// for.
-//
-// # Why the bound is asserted as a floor, not an equality
-//
-// TestCITimeoutsAreNotAbsurdlyTight checks each job's timeout against the
-// audit's measured median for that lane, requiring at least 2x headroom. A
-// timeout tight enough to cancel a healthy run converts a slow day into a red
-// gate, which is strictly worse than the 360-minute default it replaced. The
-// medians are the audit's, recorded inline so a future tightening has to
-// argue with a number rather than a vibe.
 package ci
 
+// Bound native commands, including a newly added step that omits its timeout.
+// Queue wait time is separate from this execution budget.
 import (
-	"os"
-	"path/filepath"
-	"runtime"
+	"github.com/znasllc-io/memql/component/pipelines"
 	"testing"
-
-	"gopkg.in/yaml.v3"
+	"time"
 )
 
-// timeoutWorkflow is the subset of ci.yml this guard reads.
-type timeoutWorkflow struct {
-	Jobs map[string]struct {
-		Name           string `yaml:"name"`
-		TimeoutMinutes *int   `yaml:"timeout-minutes"`
-	} `yaml:"jobs"`
-}
-
-// timeoutRepoRoot resolves the repository root from this file's location.
-//
-// Deliberately file-prefixed and unexported. scripts/ci also hosts
-// workflow_gate_test.go (memql#3159); the two land as independent tasks
-// touching no common file, and a shared helper would turn that independence
-// into a compile-level conflict.
-func timeoutRepoRoot(t *testing.T) string {
-	t.Helper()
-	_, thisFile, _, ok := runtime.Caller(0)
-	if !ok {
-		t.Fatal("runtime.Caller failed")
+func TestEveryNativeStepHasABoundedTimeout(t *testing.T) {
+	if pipelines.DefaultStepTimeout <= 0 || pipelines.DefaultStepTimeout > 30*time.Minute {
+		t.Fatalf("unbounded or excessive default: %s", pipelines.DefaultStepTimeout)
 	}
-	// scripts/ci/ -> repo root is two directories up.
-	return filepath.Join(filepath.Dir(thisFile), "..", "..")
-}
-
-func timeoutLoadCI(t *testing.T) timeoutWorkflow {
-	t.Helper()
-	path := filepath.Join(timeoutRepoRoot(t), ".github", "workflows", "ci.yml")
-	raw, err := os.ReadFile(path)
-	if err != nil {
-		t.Fatalf("read %s: %v", path, err)
-	}
-	var wf timeoutWorkflow
-	if err := yaml.Unmarshal(raw, &wf); err != nil {
-		t.Fatalf("parse %s: %v", path, err)
-	}
-	return wf
-}
-
-// TestEveryCIJobHasATimeout is the guard.
-func TestEveryCIJobHasATimeout(t *testing.T) {
-	wf := timeoutLoadCI(t)
-	if len(wf.Jobs) == 0 {
-		t.Fatal("ci.yml: parsed no jobs at all -- the guard cannot verify what it " +
-			"was written to verify, so it fails closed")
-	}
-	for job, spec := range wf.Jobs {
-		if spec.TimeoutMinutes == nil {
-			t.Errorf("ci.yml job %q has no `timeout-minutes`.\n"+
-				"It therefore inherits GitHub's 360-minute default, so a hang holds a "+
-				"runner slot for six hours. Add one: 20 for the heavy lanes "+
-				"(go-checks / db-tests / conformance), 10 for the rest (design D4.1).", job)
-			continue
-		}
-		if *spec.TimeoutMinutes <= 0 {
-			t.Errorf("ci.yml job %q has a non-positive `timeout-minutes` (%d)",
-				job, *spec.TimeoutMinutes)
+	count := 0
+	for _, stage := range nativePipeline(t).Stages {
+		for _, step := range stage.Steps {
+			count++
+			timeout := pipelines.DefaultStepTimeout
+			if step.Timeout != "" {
+				var err error
+				timeout, err = time.ParseDuration(step.Timeout)
+				if err != nil {
+					t.Fatal(err)
+				}
+			}
+			if timeout <= 0 || timeout > pipelines.MaxStepTimeout {
+				t.Errorf("%s.%s has invalid timeout %s", stage.Name, step.Name, timeout)
+			}
 		}
 	}
+	if count == 0 {
+		t.Fatal("no native steps checked")
+	}
 }
 
-// timeoutMedianMinutes are the per-lane medians measured in the 2026-08-06
-// audit (section 1.3), except where a lane has been re-measured since. Keys
-// are job ids; a job absent from this map is not checked for headroom, only
-// for presence.
-var timeoutMedianMinutes = map[string]float64{
-	"changes":   0.1,
-	"go-checks": 6.3,
-	// Re-measured 2026-10-11 from the sharded lane: the median, over the M0
-	// window's 212 Go-touching pull-request runs, of each run's slowest
-	// db-tests shard (scripts/ci/prtiming, memql#5697); the maximum was 12.0.
-	// The 19.4 it replaces was the unsharded lane's.
-	"db-tests":         7.4,
-	"vscode-extension": 4.0,
-	"build-node-tags":  1.9,
-	"conformance":      1.6,
-	"sdk-ts-typecheck": 0.3,
-	"ci-required":      0.1,
-}
-
-// TestCITimeoutsAreNotAbsurdlyTight keeps the values honest in the other
-// direction: a timeout below 2x a lane's measured median turns a slow-but-
-// healthy run into a red required check.
-func TestCITimeoutsAreNotAbsurdlyTight(t *testing.T) {
-	wf := timeoutLoadCI(t)
-	for job, spec := range wf.Jobs {
-		median, known := timeoutMedianMinutes[job]
-		if !known || spec.TimeoutMinutes == nil {
-			continue
+// Historical measured medians remain a conservative floor while native timing
+// observations accumulate. These are retained suite contracts, not job names.
+func TestNativeSuiteTimeoutsRetainHeadroom(t *testing.T) {
+	medians := map[string]float64{"go-checks": 6.3, "db-tests": 7.4, "editor-packages": 4.0, "build-identity": 1.9, "mcp-conformance": 1.6, "sdk-ts-typecheck": 0.3}
+	seen := map[string]bool{}
+	for _, stage := range nativePipeline(t).Stages {
+		for _, step := range stage.Steps {
+			median, ok := medians[step.Name]
+			if !ok {
+				continue
+			}
+			seen[step.Name] = true
+			timeout := pipelines.DefaultStepTimeout
+			if step.Timeout != "" {
+				var err error
+				timeout, err = time.ParseDuration(step.Timeout)
+				if err != nil {
+					t.Fatal(err)
+				}
+			}
+			if timeout.Minutes() < 2*median {
+				t.Errorf("%s timeout %s is below twice its %.1fm measured median", step.Name, timeout, median)
+			}
 		}
-		if float64(*spec.TimeoutMinutes) < 2*median {
-			t.Errorf("ci.yml job %q: timeout-minutes=%d is under 2x its measured "+
-				"median of %.1fm (audit 1.3). A timeout that can cancel a healthy run "+
-				"converts a slow day into a red gate, which is worse than the default "+
-				"it replaced.", job, *spec.TimeoutMinutes, median)
+	}
+	for name := range medians {
+		if !seen[name] {
+			t.Errorf("timed suite %s disappeared", name)
 		}
 	}
 }

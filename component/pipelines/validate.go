@@ -39,6 +39,9 @@ const reservedSecretPrefix = "MEMQL_"
 
 const manifestNameRule = "use lower-case letters, digits and hyphens, starting with a letter or digit, at most 40 characters"
 
+// ValidName reports whether a configured name can be referenced by a manifest.
+func ValidName(name string) bool { return manifestNameRe.MatchString(name) }
+
 var (
 	// manifestNameRe is every name a pipeline declares: stages, steps,
 	// channels, buckets and services. A name is part of a step key
@@ -312,6 +315,10 @@ func validateStep(spec *Spec, stage string, j int, step StepSpec, seen map[strin
 			"Stage %q has two steps named %q; a step name must be unique within its stage.", stage, step.Name)
 	}
 	scope := stage + "/" + step.Name
+
+	if step.RepositoryChange != nil {
+		return validateRepositoryChangeStep(spec, stage, step)
+	}
 
 	if step.SARIF != nil {
 		return validateSARIFStep(spec, stage, step)

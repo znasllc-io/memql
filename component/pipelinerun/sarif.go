@@ -72,7 +72,7 @@ func (i *Integration) PublishSARIF(ctx context.Context, runID, stepKey, filePath
 	if err != nil {
 		return SARIFPublication{}, err
 	}
-	proof, err := readSARIFEvidence(ctx, d.SARIF.Engine, owner, r, stepKey)
+	proof, err := readProducerEvidence(ctx, d.SARIF.Engine, owner, r, stepKey)
 	if err != nil {
 		return SARIFPublication{}, err
 	}
@@ -142,7 +142,7 @@ func (i *Integration) PublishSARIF(ctx context.Context, runID, stepKey, filePath
 	if len(refs) != 1 || refs[0] != artifact {
 		return rec, errors.New("SARIF artifact changed while pinning")
 	}
-	body, err := readSARIFBytes(ctx, d.SARIF.Library, scope, artifact)
+	body, err := readRetainedArtifactBytes(ctx, d.SARIF.Library, scope, artifact)
 	if err != nil {
 		return rec, err
 	}
@@ -305,7 +305,7 @@ func sarifRef(r Run) (string, error) {
 	return "", errors.New("SARIF run has no verified full Git ref")
 }
 
-func readSARIFBytes(ctx context.Context, l SARIFLibrary, scope pipelinesteps.RunFileReceiptScope, want pipelinesteps.StoredFileReceipt) ([]byte, error) {
+func readRetainedArtifactBytes(ctx context.Context, l SARIFLibrary, scope pipelinesteps.RunFileReceiptScope, want pipelinesteps.StoredFileReceipt) ([]byte, error) {
 	got, body, err := l.OpenRunFileReceipt(auth.ContextWithInternalOrigin(ctx), scope, want.IntentID)
 	if err != nil {
 		return nil, err

@@ -10,6 +10,7 @@ import (
 	"github.com/znasllc-io/memql/component/automations/workflowhost"
 	"github.com/znasllc-io/memql/component/memql"
 	"github.com/znasllc-io/memql/integrations/githubrelease"
+	"github.com/znasllc-io/memql/integrations/npmregistry"
 	"github.com/znasllc-io/memql/integrations/ociregistry"
 	"github.com/znasllc-io/memql/integrations/pipelinesteps"
 )
@@ -121,6 +122,7 @@ type candidatePublishScope struct {
 	intent, out candidatePublication
 	image       *ociregistry.VerifiedImage
 	file        *githubrelease.VerifiedFile
+	npm         *npmregistry.VerifiedPackage
 	proof       *candidatePublicationReceipt
 }
 
@@ -169,7 +171,7 @@ func (s *candidatePublishScope) begin(ctx context.Context, _ map[string]any) (an
 	if err := s.p.ledger.freezePublicationTarget(ctx, intent, target); err != nil {
 		return nil, err
 	}
-	if intent.Artifact.Kind == "file" {
+	if _, file := s.p.targetReader.files[intent.Target.TargetID]; file {
 		plan, err := s.p.targetReader.draftPlan(ctx, s.record, intent.Target.TargetID)
 		if err != nil {
 			return nil, err

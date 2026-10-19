@@ -43,8 +43,6 @@ import (
 	"regexp"
 	"strings"
 	"testing"
-
-	"gopkg.in/yaml.v3"
 )
 
 // theScript, and the two files it extracts from the base commit.
@@ -53,45 +51,14 @@ const (
 	toolConstantsGo = "cmd/memqlbreaking/reserved.go"
 )
 
-// TestCIHoldsTheAuthoringSurfaceToTheBaseCommit asserts the go-checks step
-// runs the script with a base commit, and not the make target.
-//
-// The BASE_SHA expression names one field per event this workflow declares --
-// pull_request, merge_group and push -- because a missing arm is not an error
-// anywhere: the expression evaluates to the empty string, the script announces
-// the committed-baseline fallback on stderr, and the step goes green over
-// exactly the change it exists to catch.
+// The webhook/poll and executor hop tests hold MEMQL_BASE_SHA to the original
+// event's base. This gate holds the native command to that saved value, rather
+// than comparing against a baseline the same change can edit.
 func TestCIHoldsTheAuthoringSurfaceToTheBaseCommit(t *testing.T) {
-	root := repoRootForBreakingBase(t)
-	step := memqlbreakingStep(t, root)
-
-	if !strings.Contains(step.Run, baseScriptRel) {
-		t.Errorf("the memqlbreaking CI step runs %q; it must run %s, which holds this tree to the BASE\n"+
-			"COMMIT's baseline. `make memqlbreaking` reads the baseline out of the tree it is judging, so a\n"+
-			"change that deletes a name from the source AND from component/language/surface/2026.json passes it.",
-			strings.TrimSpace(step.Run), baseScriptRel)
-	}
-	if strings.Contains(step.Run, "make memqlbreaking") {
-		t.Errorf("the memqlbreaking CI step is back on `make memqlbreaking`: %q. That target compares this\n"+
-			"tree against its OWN committed baseline, which the change under test may edit in the same commit.",
-			strings.TrimSpace(step.Run))
-	}
-
-	baseSHA, ok := step.Env["BASE_SHA"]
-	if !ok {
-		t.Fatalf("the memqlbreaking CI step sets no BASE_SHA. Without it the script falls back to the committed\n"+
-			"baseline on every build -- green, loud on stderr, and exactly the comparison this step replaced.\n"+
-			"step env: %v", step.Env)
-	}
-	for _, field := range []string{
-		"github.event.pull_request.base.sha",
-		"github.event.merge_group.base_sha",
-		"github.event.before",
-	} {
-		if !strings.Contains(baseSHA, field) {
-			t.Errorf("BASE_SHA does not name %s: %q.\nEvery event this workflow runs on needs its own arm; a\n"+
-				"missing one is an empty string, which is the silent fallback rather than a failure.", field, baseSHA)
-		}
+	step := nativeRequiredStep(t, "go-checks")
+	command := `BASE_SHA="$MEMQL_BASE_SHA" bash scripts/ci/memqlbreaking-base.sh`
+	if !strings.Contains(step.Run, "\n"+command+"\n") || strings.Contains(step.Run, "make memqlbreaking") {
+		t.Fatalf("native authoring-surface gate must use its saved event base: missing %s", command)
 	}
 }
 
@@ -240,49 +207,6 @@ func TestTheFirstBaselineFallbackSaysWhatItComparedAgainst(t *testing.T) {
 }
 
 // --- helpers ---------------------------------------------------------------
-
-// workflowStep is one step of the go-checks job, as far as these tests read it.
-type workflowStep struct {
-	Name string            `yaml:"name"`
-	Run  string            `yaml:"run"`
-	Env  map[string]string `yaml:"env"`
-}
-
-// memqlbreakingStep finds the one go-checks step whose name says memqlbreaking.
-func memqlbreakingStep(t *testing.T, root string) workflowStep {
-	t.Helper()
-	raw, err := os.ReadFile(filepath.Join(root, ".github/workflows/ci.yml"))
-	if err != nil {
-		t.Fatalf("reading ci.yml: %v", err)
-	}
-	var wf struct {
-		Jobs map[string]struct {
-			Steps []workflowStep `yaml:"steps"`
-		} `yaml:"jobs"`
-	}
-	if err := yaml.Unmarshal(raw, &wf); err != nil {
-		t.Fatalf("parsing ci.yml: %v", err)
-	}
-	job, ok := wf.Jobs["go-checks"]
-	if !ok {
-		t.Fatal("ci.yml has no go-checks job; the memqlbreaking step lives there")
-	}
-	var found []workflowStep
-	for _, step := range job.Steps {
-		if strings.Contains(strings.ToLower(step.Name), "memqlbreaking") {
-			found = append(found, step)
-		}
-	}
-	switch len(found) {
-	case 1:
-		return found[0]
-	case 0:
-		t.Fatal("go-checks has no memqlbreaking step. The authoring-surface gate is not running at all, which\n" +
-			"is a larger hole than the one this file exists to close.")
-	}
-	t.Fatalf("go-checks has %d memqlbreaking steps; this test cannot tell which one is the gate", len(found))
-	return workflowStep{}
-}
 
 // fabricateBaseCommit writes files as one commit in a throwaway repository and
 // returns its sha plus that repository's object directory.

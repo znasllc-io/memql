@@ -227,12 +227,15 @@ func TestTheDeployablesPartsAreDeclaredOnTheirConstructs(t *testing.T) {
 		"customDomainAdd":    "app:deployables/domains",
 		"removeCustomDomain": "app:deployables/domains",
 		// pipelines (task memql#5498): one part per consequence
-		"pipelinesPreview":    "app:deployables/connect",
-		"pipelinesConnect":    "app:deployables/connect",
-		"pipelinesDisconnect": "app:deployables/connect",
-		"pipelinesRerun":      "app:deployables/rerun",
-		"pipelinesRunLatest":  "app:deployables/rerun",
-		"pipelinesCancel":     "app:deployables/cancel",
+		"pipelinesPreview":        "app:deployables/connect",
+		"pipelinesConnect":        "app:deployables/connect",
+		"pipelinesChannelSave":    "app:deployables/channels",
+		"pipelinesChannelArchive": "app:deployables/channels",
+		"pipelinesChannelAllow":   "app:deployables/channels",
+		"pipelinesDisconnect":     "app:deployables/connect",
+		"pipelinesRerun":          "app:deployables/rerun",
+		"pipelinesRunLatest":      "app:deployables/rerun",
+		"pipelinesCancel":         "app:deployables/cancel",
 	}
 	// The reads a section opens, declared on the construct that serves it: the
 	// installations read asks GitHub about the cluster's own app, which is the

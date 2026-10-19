@@ -75,11 +75,21 @@ Different components can refer to the same run through separate input names.
 
 An artifact names its exact producing step and canonical relative path. Paths
 cannot traverse directories, use backslashes or contain control characters.
-OCI artifacts require `linux/amd64` or `linux/arm64` and a separate metadata path
-from the same successful producer. Its receipt-bound BuildKit JSON must contain
+OCI artifacts require `linux/amd64`, `linux/arm64` or `oci-index` and a separate metadata path
+from the same successful producer. Its receipt-bound producer JSON must contain
 `containerimage.digest`; preparation independently verifies that digest against
 the complete OCI archive. File artifacts use `kind: "file"`, an explicit
 platform and no image metadata path.
+
+`oci-index` preserves a flat OCI index instead of choosing the publishing host's
+architecture. Preparation verifies every referenced image, compressed layer,
+root-filesystem digest and attached provenance document within the same archive
+and byte limits. It rejects missing children, ambiguous platform matches,
+external descriptors and unbound provenance subjects. Publication reads back
+every child manifest and blob as well as the root index. This verifies content
+identity and subject association, not an attestation's claims or signature.
+When a producer deliberately selects a platform subset, its derived index has a
+new digest; its metadata must distinguish that result from the upstream source.
 
 Every target must already be configured and match the declared component,
 artifact and kind. A registry target consumes an OCI artifact. A `releaseAssets`
@@ -87,6 +97,44 @@ target consumes a file and binds an existing draft or a reviewed draft-creation
 intent, tag and source commit using
 the [verified release asset contract](../build/verified-release-assets.md).
 Assembly does not create a draft, tag or destination.
+
+An `npmRegistries` target publishes a retained npm archive through the same
+candidate approval and publication journal:
+
+```json
+{
+  "id": "sdk-npm", "component": "sdk", "artifact": "archive",
+  "origin": "https://npm.pkg.github.com",
+  "packageName": "@acme/sdk", "version": "1.2.3", "distTag": "latest",
+  "credentialSecret": "SDK_NPM_PUBLISH_TOKEN"
+}
+```
+
+Declare `sdk` in `sources`, for example with `path: "sdk/ts/package.json"`
+and `jsonField: "version"`. Its assembly artifact uses `kind: "file"` and
+`platform: "npm"`. The configured package version must equal the component's
+source version. The archive's own `package/package.json` must name that exact
+package and version. Preparation and approval retain the normal complete-run
+requirements; selecting a package does not narrow the qualification evidence.
+
+Publication accepts at most 64 MiB compressed and 256 MiB expanded. It verifies
+the original Library receipt, checks the archive structure, and publishes
+without executing package scripts or consulting `.npmrc`. Registry credentials
+stay in the native publisher. HTTPS is required; additional download origins,
+when necessary, must be explicitly configured and never receive the registry
+credential. GitHub's npm registry requires an appropriate publishing token;
+the pipeline's GitHub App installation token is not substituted automatically.
+
+The package name, version, registry, dist-tag, credential reference and download
+trust are bound into approval. A durable version reservation prevents another
+candidate from claiming the same package version across replicas. An existing
+version succeeds only after its downloaded bytes match the approved digest;
+recovery does not move dist-tags. A new publication selects the declared
+dist-tag, then reads the archive back before recording completion. Conflicts
+never overwrite or delete a version. An uncertain response retains its intent
+and artifacts for explicit reconciliation on the same destination. Successful
+publication can enter the signed catalog with an `npm` location naming the
+exact package and version; no GitHub draft or promotion is involved.
 
 Compatibility entries name two declared components and an inclusive minimum
 and exclusive maximum version:

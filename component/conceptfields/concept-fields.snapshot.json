@@ -4051,6 +4051,7 @@
         "event",
         "finishedAt",
         "headBranch",
+        "inboundRequestId",
         "mode",
         "notes",
         "ownerUserId",

@@ -381,7 +381,8 @@ const artifactsNotStored = "the step's artifacts were not stored: "
 // artifactFact records what became of the artifacts by the class of its
 // code: a note changes nothing; a failure-class code fails the step even when its command
 // succeeded: the command's exit code stays as it was, and an earlier typed
-// failure keeps its place. A CANCELLED step stays cancelled whatever the
+// failure keeps its place. If the command already failed, collection is a
+// secondary note rather than a replacement for that failure. A CANCELLED step stays cancelled whatever the
 // fact: the run's cancel is its answer (Executor.Cancel's contract), so the
 // fact is a note beside it, and a note's code is note-class
 // (pl.StepResult.Notes) -- the artifacts are missing, too large to keep. Only
@@ -392,6 +393,10 @@ func (f stepFiles) artifactFact(res *pl.StepResult, notes *noteList, fact pl.Fai
 	switch {
 	case class != pl.ClassFailure:
 		notes.add(fact.Code, fact.Message)
+	case res.Status == pl.OutcomeFailed && res.ExitCode > 0:
+		// A failed command may never reach its packaging command. Preserve its
+		// exit code and any earlier failure; collection is a secondary fact.
+		notes.add(pl.CodeArtifactMissing, fact.Message)
 	case res.Status == pl.OutcomeCancelled:
 		message := fact.Message
 		if fact.Code == pl.CodeArtifactTooLarge {
