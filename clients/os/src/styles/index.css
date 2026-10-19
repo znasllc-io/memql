@@ -13918,6 +13918,61 @@ button.os-cluster-mesh-peer:focus-visible {
 .fleet-empty-equipment { text-align: center; max-width: 680px; margin: 6px auto 24px; padding: 24px 12px 0; }
 .fleet-empty-device { display: inline-flex; position: relative; padding: 0 28px 10px; color: var(--os-muted); }
 .fleet-device-port { position: absolute; width: 6px; height: 6px; border-radius: 100%; background: var(--os-accent); right: 29px; top: 7px; }
+
+/* Machine drawings (apps/fleet/machines/DeviceArt.tsx): line art in the OS
+   tokens. Only the screen carries text; every body is drawn, so a drawing
+   follows the theme and both modes without an image of its own. */
+.fleet-device-art { --device-line: color-mix(in srgb, var(--os-ink) 32%, var(--os-ground)); --device-strong: color-mix(in srgb, var(--os-ink) 45%, var(--os-ground)); --device-body: color-mix(in srgb, var(--os-ink) 6%, var(--os-plate)); --device-shade: color-mix(in srgb, var(--os-ink) 28%, var(--os-raised)); margin: 0; }
+.fleet-device-art svg { display: block; overflow: visible; }
+.fleet-device-art .dv-body { fill: var(--device-body); stroke: var(--device-line); stroke-width: 1; vector-effect: non-scaling-stroke; }
+.fleet-device-art .dv-deck { fill: var(--device-shade); stroke: var(--device-strong); stroke-width: 1; vector-effect: non-scaling-stroke; }
+.fleet-device-art .dv-window { fill: color-mix(in srgb, var(--os-ink) 3%, var(--os-ground)); stroke: var(--device-line); stroke-width: 1; vector-effect: non-scaling-stroke; }
+.fleet-device-art .dv-line { fill: none; stroke: var(--device-line); stroke-width: 1; vector-effect: non-scaling-stroke; }
+.fleet-device-art .dv-vent { fill: none; stroke: var(--device-strong); stroke-width: 1.5; stroke-linecap: round; vector-effect: non-scaling-stroke; }
+.fleet-device-art .dv-strip { fill: none; stroke: var(--os-accent); stroke-width: 2; stroke-linecap: round; vector-effect: non-scaling-stroke; }
+.fleet-device-art .dv-slot { fill: var(--device-shade); }
+.fleet-device-art .dv-hole { fill: var(--device-line); }
+.fleet-device-art .dv-glow { fill: var(--os-accent); }
+.fleet-device-art .dv-dim { fill: var(--device-line); }
+.fleet-device-screen > small { margin-top: -10px; color: var(--os-muted); font-size: var(--os-text-xs); overflow-wrap: anywhere; }
+
+/* MacBook: the camera housing at the top of the display, the lip on the deck. */
+.fleet-device-art.is-macbook .fleet-device-screen { position: relative; }
+.fleet-device-art.is-macbook .fleet-device-screen::before { content: ""; position: absolute; top: 5px; left: 50%; width: 30px; height: 6px; transform: translateX(-50%); border-radius: 0 0 5px 5px; background: var(--device-line); }
+.fleet-device-art.is-laptop .fleet-device-base { position: relative; }
+.fleet-device-art.is-macbook .fleet-device-base::after { content: ""; position: absolute; top: -1px; left: 50%; width: 38px; height: 3px; transform: translateX(-50%); border-radius: 0 0 4px 4px; background: var(--device-line); }
+
+/* A laptop with a graphics card: a deeper chin, a thicker deck with vents and a light bar. */
+.fleet-device-art.is-gamingLaptop .fleet-device-screen { padding-bottom: 30px; box-shadow: inset 0 0 0 5px var(--os-ground), inset 0 -16px 0 0 var(--os-ground); }
+.fleet-device-art.is-gamingLaptop .fleet-device-deck { width: calc(100% + 18px); height: 15px; margin: 6px -9px 12px; }
+
+/* iMac: one piece, a coloured chin below the panel, on a flat stand. */
+.fleet-device-art.is-imac .fleet-device-screen { padding-bottom: 46px; box-shadow: inset 0 0 0 5px var(--os-ground), inset 0 -34px 0 0 color-mix(in srgb, var(--os-accent) 16%, var(--os-plate)); }
+.fleet-device-stand { position: relative; height: 24px; margin-bottom: 12px; }
+.fleet-device-stand::before { content: ""; position: absolute; top: 0; left: 50%; width: 30px; height: 20px; transform: translateX(-50%); border-inline: 1px solid var(--device-line); background: var(--device-body); }
+.fleet-device-stand::after { content: ""; position: absolute; bottom: 0; left: 50%; width: 76px; height: 5px; transform: translateX(-50%); border: 1px solid var(--device-line); border-radius: 3px; background: var(--device-shade); }
+.fleet-device-art.is-imac .fleet-device-stand::before { width: 46px; clip-path: polygon(8% 0, 92% 0, 100% 100%, 0 100%); border: 0; background: var(--device-line); }
+
+/* Desktops stand beside a monitor, on one desk line. */
+.fleet-device-art.is-desk { display: grid; grid-template-columns: minmax(0,1fr) auto; align-items: end; column-gap: 10px; }
+.fleet-device-art.is-desk .fleet-device-monitor { min-width: 0; }
+.fleet-device-art.is-desk .fleet-device-box { margin-bottom: 12px; }
+/* Sized against the monitor the way the machines are: a Mac mini and a Mac
+   Studio sit low beside it, a Mac Pro or a tower stands most of its height. */
+.fleet-device-art.is-macMini .fleet-device-box { width: 74px; height: 25px; }
+.fleet-device-art.is-macStudio .fleet-device-box { width: 70px; height: 48px; }
+.fleet-device-art.is-macPro .fleet-device-box { width: 70px; height: 130px; }
+.fleet-device-art.is-tower .fleet-device-box { width: 68px; height: 126px; }
+.fleet-device-art.is-workstation .fleet-device-box { width: 72px; height: 129px; }
+.fleet-device-art.is-desktop .fleet-device-box { width: 52px; height: 87px; }
+
+/* A rack server: rails either side, a console drawer between its units. */
+.fleet-device-art.is-server { position: relative; display: grid; gap: 5px; margin-bottom: 12px; padding: 5px 14px; }
+.fleet-device-art.is-server::before, .fleet-device-art.is-server::after { content: ""; position: absolute; top: 0; bottom: 0; width: 8px; border: 1px solid var(--device-line); border-radius: 2px; background: radial-gradient(circle, var(--device-line) 1.2px, transparent 1.7px) center top / 8px 9px repeat-y, var(--device-body); }
+.fleet-device-art.is-server::before { left: 0; }
+.fleet-device-art.is-server::after { right: 0; }
+.fleet-device-art.is-server .fleet-device-unit { width: 100%; height: 22px; }
+.fleet-device-art.is-server .fleet-device-screen { min-height: 150px; border-radius: 6px; }
 .fleet-empty-equipment h4 { font: 500 28px/1.2 var(--os-font); letter-spacing: -.035em; margin: 8px 0 12px; }
 .fleet-empty-equipment > p:not(.fleet-empty-footnote) { max-width: 390px; margin: 0 auto 20px; line-height: 1.6; color: var(--os-muted); }
 .fleet-empty-capabilities { display: grid; grid-template-columns: repeat(3,minmax(0,1fr)); gap: 30px; margin: 34px 0 22px; }
