@@ -28,7 +28,7 @@ is not evidence that its host, trigger or publication path has run.
 | `codeql.yml` | Go manual build, pinned CodeQL 2.27.1 bundle with verified SHA-256, **security-and-quality**, retained SARIF | Weekly trigger and driver-owned SARIF publication are declared; installed delivery remains unqualified. Local Linux headless scan passed; other build tags and operating systems need their own coverage. |
 | `release.yml` | Headless four-platform build/archives; computer-use builds for darwin/linux × arm64/amd64 using the AMD64 build pool and an Apple Silicon Mac; macOS menu/app archives | Exact release-event/tag qualification, collection of all four computer-use checksum sidecars, complete immutable candidate assembly and GitHub release upload. No upload command or credential is introduced here. |
 | `sbom.yml` | CycloneDX v1.10.0 inventories **each built binary**, JSON and XML retained with that build | Cross-step collection and publication of the eight binary inventories; manual release-asset re-inventory trigger. A source dependency list cannot substitute for these binary inventories. |
-| `scorecard.yml` | No equivalent declared | Scorecard's branch-protection event, weekly trigger, identity-token attestation, public result publication and SARIF upload require an installed authorized equivalent. This row cannot be marked passed by another scan. |
+| `scorecard.yml` | Full 18-check Scorecard 5.5.0 audit, the retiring action's policy, bounded source-verified JSON/SARIF, repository-scoped read grant | Weekly/manual execution and driver-owned SARIF ingestion require engine v0.30.0 and installed qualification. Native reports replace the Actions-only OIDC public-result upload; no GitHub-runner attestation is claimed. |
 
 PR, merge-candidate, push and release selection use the pipeline event contract.
 The core workflow retains a failure while running the security stage, and blocks
@@ -141,3 +141,19 @@ Cockpit checks and release aggregation still require their own runs. The Mac
 must explicitly allow this repository in its pipeline policy, and the Intel
 Mac release requires already-installed Rosetta. No policy edit or host
 installation is performed by these recipes.
+
+## Native repository audit
+
+The weekly/manual Scorecard command audits the current default-branch head and
+refuses if it differs from the queued source. Historical-commit mode omits checks
+and is not accepted as full coverage. The driver supplies a repository-scoped
+read token; the command retains JSON, SARIF, bounded logs, and a source/policy
+receipt. It never uploads results or receives writer credentials. The separate
+SARIF step publishes retained results through the installed GitHub App.
+
+This replaces the repository audit and code-scanning delivery. The legacy
+Scorecard Action's GitHub OIDC attestation and public Scorecard-service upload
+are retired with Actions; results remain available in MemQL Library and GitHub
+code scanning. A ruleset change can request a manual audit, and weekly scanning
+provides the regular cadence. Keep the existing workflow until the native audit
+and SARIF ingestion have passed in production.

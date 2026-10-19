@@ -221,6 +221,16 @@ pipeline:
         go install github.com/zricethezav/gitleaks/v8@v8.30.1
         export PATH="$(go env GOPATH)/bin:$PATH"
         python3 scripts/ci/gitleaks-history.py --head="$MEMQL_SHA" --fetch-remote="https://github.com/${MEMQL_REPOSITORY}.git" --gitleaks="$(command -v gitleaks)" --output-dir=.memql-security/gitleaks --jobs=2 --batch-size=8 --timeout=2400
+    - name: scorecard
+      placement: cluster
+      githubReadToken: true
+      cpuMilli: 1000
+      memoryMiB: 2048
+      timeout: 25m
+      artifacts: [.memql-security/scorecard]
+      run: |
+        set -eu
+        python3 scripts/ci/scorecard-scan.py --output-dir=.memql-security/scorecard
     - name: codeql-go
       placement: cluster
       caches: [go]
@@ -245,6 +255,11 @@ pipeline:
     on: [schedule, manual]
     runAfterFailure: true
     steps:
+    - name: scorecard
+      timeout: 5m
+      sarif:
+        step: security.scorecard
+        path: .memql-security/scorecard/results.sarif
     - name: codeql-go
       timeout: 5m
       sarif:
