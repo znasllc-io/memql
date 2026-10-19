@@ -65,6 +65,15 @@ export function MachineModels({ machine, navigation }: { machine: MachineRow; st
   const capacity = setupCapacity(choices, view?.catalog ?? [], view?.usableBytes ?? 0);
   const profile = view?.catalog.find(m => m.modelId === selected);
   const localModel = installed.find(m => m.modelId === selected);
+  // What the model's facts report; an empty answer reads as a placeholder
+  // and copies nothing.
+  const purposes = profile?.purposes.map(p => MODEL_PURPOSES.find(([id]) => id === p)?.[1] ?? p).join(", ") || (localModel ? modelPurposeLabel(localModel) : "");
+  const params = localModel ? formatParams(localModel.params) : "";
+  const contextLimit = localModel ? formatContext(localModel.contextWindow) : "";
+  const placement = localModel ? "Installed" : profile?.blocked || "Fits this machine";
+  const memory = profile?.memoryBytes ? formatBytes(profile.memoryBytes) : "";
+  const download = profile?.sizeBytes ? formatBytes(profile.sizeBytes) : "";
+  const source = safeModelSource(profile?.source ?? "");
   const editing = draft !== null;
   const dirty = editing && !sameModelChoices(draft, editBase?.choices ?? {});
   const editView = view ?? editBase;
@@ -117,14 +126,14 @@ export function MachineModels({ machine, navigation }: { machine: MachineRow; st
     {downloads.live ? <LivePull pull={downloads.live} /> : installerDownload ? <SetupLiveDownload stage={installerDownload} /> : null}
     {selected ? <>
       <MachineDetailsSection title="Overview"><Facts>
-        <Fact label="Available for" value={profile?.purposes.map(p => MODEL_PURPOSES.find(([id]) => id === p)?.[1] ?? p).join(", ") || (localModel ? modelPurposeLabel(localModel) : "Not reported")} />
-        {localModel ? <><Fact label="Parameters" value={formatParams(localModel.params) || "Not reported"} /><Fact label="Quantization" value={localModel.quant || "Not reported"} /><Fact label="Maximum context" value={formatContext(localModel.contextWindow) || "Not reported"} /></> : null}
-        <Fact label="On this machine" value={localModel ? "Installed" : profile?.blocked || "Fits this machine"} />
-        <Fact label="Estimated memory" value={profile?.memoryBytes ? formatBytes(profile.memoryBytes) : "Not verified"} />
-        <Fact label="Download" value={profile?.sizeBytes ? formatBytes(profile.sizeBytes) : "Not verified"} />
-        {profile?.reviewedAt ? <Fact label="Source reviewed" value={new Date(profile.reviewedAt).toLocaleDateString(undefined, { timeZone: "UTC", year: "numeric", month: "short", day: "numeric" })} /> : null}
-        {profile ? <Fact label="Runtime" value={profile.runtime} /> : null}
-        {safeModelSource(profile?.source ?? "") ? <Fact label="Source" value={<a href={safeModelSource(profile!.source)} target="_blank" rel="noreferrer">Model card</a>} /> : null}
+        <Fact label="Available for" value={purposes || "Not reported"} copyValue={purposes || undefined} />
+        {localModel ? <><Fact label="Parameters" value={params || "Not reported"} copyValue={params || undefined} /><Fact label="Quantization" value={localModel.quant || "Not reported"} copyValue={localModel.quant || undefined} /><Fact label="Maximum context" value={contextLimit || "Not reported"} copyValue={contextLimit || undefined} /></> : null}
+        <Fact label="On this machine" value={placement} copyValue={placement} />
+        <Fact label="Estimated memory" value={memory || "Not verified"} copyValue={memory || undefined} />
+        <Fact label="Download" value={download || "Not verified"} copyValue={download || undefined} />
+        {profile?.reviewedAt ? <Fact label="Source reviewed" value={new Date(profile.reviewedAt).toLocaleDateString(undefined, { timeZone: "UTC", year: "numeric", month: "short", day: "numeric" })} copyValue={profile.reviewedAt} /> : null}
+        {profile ? <Fact label="Runtime" value={profile.runtime} copyValue={profile.runtime} /> : null}
+        {source ? <Fact label="Source" value={<a href={source} target="_blank" rel="noreferrer">Model card</a>} copyValue={source} /> : null}
       </Facts></MachineDetailsSection>
       {profile?.notes ? <MachineDetailsSection title="About"><p className="os-caption">{profile.notes}</p></MachineDetailsSection> : null}
       {localModel?.embeddings ? <EmbeddingStatus model={localModel.modelId} /> : null}

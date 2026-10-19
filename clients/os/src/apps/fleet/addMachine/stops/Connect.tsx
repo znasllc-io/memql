@@ -44,11 +44,11 @@ export function ConnectStop({
   return (
     <div className="os-stop-body os-fleet-addstop">
       <Facts>
-        <Fact label="Name" value={machineName(machine)} />
-        <Fact label="Hostname" value={machine.hostname} mono />
-        <Fact label="Platform" value={machine.platform} mono />
-        <Fact label="Cockpit" value={machine.version} mono />
-        <Fact label="Registered" value={formatFreshness(machine.registeredAt, now)} title={machine.registeredAt || undefined} />
+        <Fact label="Name" value={machineName(machine)} copyValue={machineName(machine)} />
+        <Fact label="Hostname" value={machine.hostname} mono copyValue={machine.hostname} />
+        <Fact label="Platform" value={machine.platform} mono copyValue={machine.platform} />
+        <Fact label="Cockpit" value={machine.version} mono copyValue={machine.version} />
+        <Fact label="Registered" value={formatFreshness(machine.registeredAt, now)} title={machine.registeredAt || undefined} copyValue={machine.registeredAt || undefined} />
       </Facts>
       {renameError === "" ? null : <Caption>{renameError}</Caption>}
     </div>

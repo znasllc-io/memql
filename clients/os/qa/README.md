@@ -50,7 +50,8 @@ what says the page has not become a wall of advisories), or `overview`,
 `origins-silent`, `origins-mixed`, `origins-reporting` (Data origins), or
 `mesh-healthy`, `mesh-island`, `mesh-empty`, `mesh-node-bff`, `mesh-node-edge`,
 `mesh-node-identity`, `mesh-node-unreported` (Cluster > Mesh), or
-`sharing-owner`, `sharing-people`, `sharing-legacy-descriptor`, `sharing-everyone`,
+`sharing-owner`, `sharing-people`, `sharing-paused`, `sharing-both`,
+`sharing-legacy-descriptor`, `sharing-everyone`,
 `sharing-viewer`, `share-dialog`, `share-dialog-admin`, `share-dialog-empty`,
 `share-dialog-refused` (a machine's Sharing view and its dialog), or
 `nexus-procedure-evidence`, `nexus-procedure-overridden`,

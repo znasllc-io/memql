@@ -225,7 +225,7 @@ function ReplicaLine({ node, tick, now, empty }: { node: WorkbenchNodeRow; tick:
       open={open} onOpen={() => setOpen(value => !value)} stateExtra={tick === "added" ? <span className="os-livelist-tick">new</span> : null}>
       <span>Seen {formatFreshness(node.lastSeen, now)}</span>
     </RecordRow>
-    {open ? <Facts><Fact label="Address" value={node.address || "Not reported"} mono /><Fact label="First seen" value={formatMoment(node.createdAt)} /><Fact label="Last seen" value={formatMoment(node.lastSeen)} /><Fact label="Your workspaces" value={empty ? "None in this view" : "Listed in Workspaces"} /></Facts> : null}
+    {open ? <Facts><Fact label="Address" value={node.address || "Not reported"} mono copyValue={node.address || undefined} /><Fact label="First seen" value={formatMoment(node.createdAt)} copyValue={node.createdAt || undefined} /><Fact label="Last seen" value={formatMoment(node.lastSeen)} copyValue={node.lastSeen || undefined} /><Fact label="Your workspaces" value={empty ? "None in this view" : "Listed in Workspaces"} /></Facts> : null}
   </div>;
 }
 
@@ -259,18 +259,19 @@ function WorkspaceLine({
       </RecordRow>
       {open ? <div className="os-fleet-workspace-body">
         <Facts>
-          <Fact label="Run" value={workspace.runId} mono />
-          <Fact label="Status" value={workspace.status} mono />
-          <Fact label="Directory" value={workspace.storageRoot} mono />
-          <Fact label="Provisioned" value={formatMoment(workspace.createdAt)} />
+          <Fact label="Run" value={workspace.runId} mono copyValue={workspace.runId} />
+          <Fact label="Status" value={workspace.status} mono copyValue={workspace.status} />
+          <Fact label="Directory" value={workspace.storageRoot} mono copyValue={workspace.storageRoot} />
+          <Fact label="Provisioned" value={formatMoment(workspace.createdAt)} copyValue={workspace.createdAt || undefined} />
           <Fact
             label="Last used"
             value={formatFreshness(workspace.lastUsedAt, now)}
             title={workspace.lastUsedAt || undefined}
+            copyValue={workspace.lastUsedAt || undefined}
           />
-          {released ? <Fact label="Released" value={formatMoment(workspace.releasedAt)} /> : null}
+          {released ? <Fact label="Released" value={formatMoment(workspace.releasedAt)} copyValue={workspace.releasedAt || undefined} /> : null}
           {released ? (
-            <Fact label="Reason" value={reason === "" ? "not recorded" : reason} mono />
+            <Fact label="Reason" value={reason === "" ? "not recorded" : reason} mono copyValue={reason || undefined} />
           ) : null}
         </Facts>
         {/* node_lost gets the explicit copy: the files are gone with the

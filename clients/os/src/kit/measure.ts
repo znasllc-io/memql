@@ -144,6 +144,13 @@ export function figureValue(figure: Figure): number | null {
   return figure.kind === "measured" ? figure.value : null;
 }
 
+/** What `Measure` writes for a measured figure, for a copy control. An absent
+ *  figure has nothing to copy, so it answers undefined rather than a dash. */
+export function figureText(figure: Figure, format?: (value: number) => string, suffix = ""): string | undefined {
+  if (figure.kind === "absent") return undefined;
+  return `${format ? format(figure.value) : String(figure.value)}${suffix}${figure.atLeast ? " or more" : ""}`;
+}
+
 /**
  * Whether a figure is a measured value above zero -- the one question a
  * surface asks often enough to be worth a name, because `> 0` on a

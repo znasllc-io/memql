@@ -1342,7 +1342,11 @@ export function Facts({ children }: { children: ReactNode }) {
 }
 
 /** One labelled value. An absent value is an em dash, never blank: a blank
- *  cell is indistinguishable from a cell that failed to render. */
+ *  cell is indistinguishable from a cell that failed to render.
+ *
+ *  The label and value share one row element (a `div` is the grouping a `dl`
+ *  allows), so a row holding a copy control is one hover surface and shows
+ *  its copy icon only while hovered or focused. */
 export function Fact({
   label,
   value,
@@ -1359,12 +1363,12 @@ export function Fact({
 }) {
   const empty = value === "" || value === null || value === undefined;
   return (
-    <>
+    <div className="os-fact">
       <dt>{label}</dt>
       <dd className={mono ? "os-mono" : undefined} title={title}>
         {empty ? "--" : copyValue ? <CopyValue value={copyValue} displayValue={value} label={label} presentation="row" /> : value}
       </dd>
-    </>
+    </div>
   );
 }
 
@@ -1384,8 +1388,11 @@ export function Fact({
  * refusal is a standing fact rather than a phase (the Ask voice rule), and it
  * stands until the next attempt says otherwise.
  *
- * The copy icon stays visible. Text remains selectable and clicking a value
- * never changes the clipboard; only the icon is a copy target.
+ * In a row -- a `Fact`, or `presentation="row"` -- the copy icon keeps its
+ * space but shows only while that row is hovered or the icon has keyboard
+ * focus, and always on touch screens; a lone value keeps its icon visible.
+ * Text remains selectable and clicking a value never changes the clipboard;
+ * only the icon is a copy target.
  */
 export function CopyValue({
   value,

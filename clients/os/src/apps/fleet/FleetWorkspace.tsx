@@ -244,7 +244,7 @@ export function MachineEquipment({ machine, now, onInspect, viewerId = "" }: { m
         {machine.apps.length === 0 ? <EmptyState icon={Terminal} title="No installed apps">Apps reported by this machine will appear here.</EmptyState> : null}
       </section>
     </div>
-    <section aria-label="Machine features"><Facts>{machineFeatureStates(machine, now).map(feature => <Fact key={feature.key} label={feature.label} value={feature.answer} title={feature.detail} />)}</Facts></section>
+    <section aria-label="Machine features"><Facts>{machineFeatureStates(machine, now).map(feature => <Fact key={feature.key} label={feature.label} value={feature.answer} title={feature.detail} copyValue={feature.answer} />)}</Facts></section>
     {selectedModel || selectedApp ? <section className="fleet-equipment-reading" aria-label="Selected equipment" aria-live="polite" data-os-page-context={JSON.stringify({ selectedModel: selectedModel?.modelId, selectedApp: selectedApp?.id })}>
       {selectedModel ? <div><strong>{selectedModel.modelId}</strong><p>{modelSummary(selectedModel)}{!online ? " · Machine offline" : ""}</p></div>
         : selectedApp ? <div><strong>{selectedApp.label}</strong><p>{machineAppAvailability(machine, selectedApp.runnable, now)}{selectedApp.why ? ` · ${selectedApp.why}` : ""}{!online ? " Machine offline." : ""}</p><AppPermissionHelp app={selectedApp} machine={machine} /></div> : null}

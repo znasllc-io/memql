@@ -997,6 +997,19 @@ const VIEWS: Record<
     wrap: (el) => fleetSession(<MachinesProvider>{el}</MachinesProvider>),
     render: () => <SharingPane over={{ sharing: SHARED_WITH_PEOPLE, capabilityDescriptor: { inferenceServe: "cluster" } }} />,
   },
+  // Sharing turned off after choosing an audience: each switch alone, the
+  // audience saved out of sight, one divider between the two groups.
+  "sharing-paused": {
+    connect: () => fleetConnection({ fleetShareDirectory: [SHARE_DIRECTORY] }),
+    wrap: (el) => fleetSession(<MachinesProvider>{el}</MachinesProvider>),
+    render: () => <SharingPane over={{ sharing: { ...SHARED_WITH_PEOPLE, paused: true }, workbenchSharing: { ...SHARED_WITH_PEOPLE, paused: true }, capabilityDescriptor: { inferenceServe: "cluster" } }} />,
+  },
+  // Both shared: each group keeps its collection beneath its own switch.
+  "sharing-both": {
+    connect: () => fleetConnection({ fleetShareDirectory: [SHARE_DIRECTORY] }),
+    wrap: (el) => fleetSession(<MachinesProvider>{el}</MachinesProvider>),
+    render: () => <SharingPane over={{ sharing: SHARED_WITH_PEOPLE, workbenchSharing: SHARED_WITH_PEOPLE, capabilityDescriptor: { inferenceServe: "cluster" } }} />,
+  },
   // A stored machine descriptor from an earlier Cockpit cannot block sharing.
   "sharing-legacy-descriptor": {
     connect: () => fleetConnection({ fleetShareDirectory: [SHARE_DIRECTORY] }),
@@ -1228,9 +1241,9 @@ function MachinePane({ over }: { over: Record<string, unknown> }) {
     setSharing: async () => null,
   };
   return (
-    <div className="os-window-content">
+    <WindowBody fallback="Studio mini">
       <MachineDetail machine={machine} writes={writes} now={FLEET_NOW} view="settings" />
-    </div>
+    </WindowBody>
   );
 }
 
@@ -1602,9 +1615,9 @@ function qaWrites(refuse = false): MachineWrites {
 function SharingPane({ over }: { over: Record<string, unknown> }) {
   const machine = fleetMachine({ ownerUserId: "v1:identity:user:me", ...over });
   return (
-    <div className="os-window-content">
+    <WindowBody fallback="Studio mini">
       <MachineDetail machine={machine} writes={qaWrites()} now={FLEET_NOW} view="settings" />
-    </div>
+    </WindowBody>
   );
 }
 
