@@ -22,11 +22,15 @@ and production evidence are complete.
 
 ## Active cutover, October 19, 2026
 
-Production currently serves **v0.29.32**, through instance commit
-`0d9c7d1eef7e4223c94ca67b2da536a899677e81`. Engine main is
-`6213401ae5f8d4d6890db1faccb1078eac8dcf0f`. The v0.29.31 full native pass
+Production currently serves **v0.29.33**, through instance commit
+`7945bf486ad46609930cb242e02399bc330986db`. Engine main is
+`37f6bcc700b58b6f9799fe46c4be3842c8189834`. The v0.29.31 full native pass
 below remains valid historical acceptance evidence; it is no longer the serving
-release. Engine v0.29.33 is prepared in #6200 and is not deployed.
+release. Engine **v0.30.0** is prepared in #6200 and is not deployed. The
+independent v0.29.33 rollout at 06:56 UTC replaced Agent while the editor
+qualification still had two steps unfinished. Its resulting
+`pipeline_node_lost` failures are not a successful qualification. The cutover
+branches incorporate that release and require fresh checks on their new heads.
 
 Instance #237 passed all nine native steps with retained logs and artifacts.
 It makes the Agent's fleet artifact receiver use the already configured 2 GiB

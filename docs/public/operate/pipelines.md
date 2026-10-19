@@ -59,6 +59,13 @@ source's current GitHub App grant. The command that generates the proposal
 receives no writer token. This supports dependency tidy commits and draft
 upgrade proposals while keeping file and branch authority in operator settings.
 
+Enable this optional writer only when the source's installed GitHub App grants
+**Contents: Read and write** and **Pull requests: Read and write**. The default
+App connection does not request repository-maintenance write access. An existing
+App needs its permissions updated and the installation owner must accept the
+change before a proposal can be applied. These permissions belong to the
+driver; proposal commands still receive only an explicitly requested read token.
+
 ```yaml
 - name: prepare
   on: [schedule, manual]
