@@ -20,6 +20,20 @@ pipeline:
         python3 scripts/ci/prepare.py
         cd .memql-ci/memql-cockpit
         CGO_ENABLED=0 go build ./...
+    - name: linux-desktop-menu
+      placement: fleet
+      timeout: 30m
+      execution: native
+      platform: linux/amd64
+      run: |
+        set -eu
+        . ./scripts/ci/native-env.sh
+        command -v dbus-run-session >/dev/null
+        /usr/bin/python3 -c 'import dbus; import gi'
+        python3 scripts/ci/prepare.py
+        cd .memql-ci/memql-cockpit
+        go build -o bin/memql-menu-smoke ./cmd/memql
+        dbus-run-session -- /usr/bin/python3 scripts/install/linux_menu_smoke.py --binary=bin/memql-menu-smoke
     - name: vet
       placement: cluster
       caches: [go]

@@ -21,7 +21,7 @@ is not evidence that its host, trigger or publication path has run.
 
 | Legacy workflow | MemQL command coverage | Remaining qualification / external effect |
 | --- | --- | --- |
-| `ci.yml` | Headless build, race suite, discovered 20-second fuzz targets, gofmt, vet, single engine-pin guard; container Linux and native macOS computer-use build and vet; macOS archive and isolated installer checks | Native Linux amd64 with Docker for the race suite; the published toolchain supplies Linux X11 headers and compilers; macOS arm64 with Xcode. Real computer-use tests remain excluded because they operate a display. |
+| `ci.yml` | Headless build, Linux tray protocol on a private session bus, race suite, discovered 20-second fuzz targets, gofmt, vet, single engine-pin guard; container Linux and native macOS computer-use build and vet; macOS archive and isolated installer checks | Native Linux amd64 with Docker for the race suite and the existing `dbus-run-session`, system Python `dbus` and `gi` modules for tray assertions; the published toolchain supplies Linux X11 headers and compilers; macOS arm64 with Xcode. Real computer-use tests remain excluded because they operate a display. |
 | `install-scripts-lint.yml` | Bash/POSIX syntax, ShellCheck, installer library/menu tests and rendered-mark/UI assertions on Linux amd64 and macOS arm64 | ShellCheck must already be installed on each consenting host. No host package installation is implicit. |
 | `govulncheck.yml` | Exact v1.3.0 scanner, complete module, retained findings | Weekly trigger and installed run; findings and scanner failures remain failures. |
 | `gitleaks.yml` | Exact v8.30.1 scanner; introduced commits on PR/push/merge candidates, full candidate history and tags weekly or on demand, redacted coverage receipts | Installed commit-range and full-history runs. A secret introduced and removed inside a PR remains in the selected commit range. |
@@ -157,3 +157,10 @@ are retired with Actions; results remain available in MemQL Library and GitHub
 code scanning. A ruleset change can request a manual audit, and weekly scanning
 provides the regular cadence. Keep the existing workflow until the native audit
 and SARIF ingestion have passed in production.
+
+The Linux tray check runs the same protocol fixture as the retiring workflow:
+registration, icon bytes, menu structure, unavailable-worker state, singleton,
+watcher restart and graceful exit. It uses an isolated session bus and the
+pipeline workspace's private home. Host dependencies are checked before the
+build; an unavailable dependency fails, rather than skipping the test or
+installing packages on the user's machine.
