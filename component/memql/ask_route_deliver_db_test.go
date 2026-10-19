@@ -10,6 +10,7 @@ import (
 	"github.com/stretchr/testify/require"
 	"github.com/znasllc-io/memql/component/auth"
 	memorynodes "github.com/znasllc-io/memql/component/database/memory-nodes"
+	"github.com/znasllc-io/memql/component/work"
 	"github.com/znasllc-io/memql/core/common"
 	"github.com/znasllc-io/memql/core/id"
 )
@@ -18,14 +19,24 @@ import (
 // pending request, the way the work spine does: the request first, then the
 // run's wait on it.
 func parkedGoal(write func(string, map[string]any), conversation, goal, title, kind string, subject map[string]any, options []any) (run, approval string) {
-	run = guidanceRootRun(write, conversation, goal, goal+"-plan", "running")
-	approval = id.NewShortId()
-	request := map[string]any{"approvalId": approval, "runId": run, "stepKey": "plan", "kind": kind, "subject": subject, "artifactHash": "request", "question": "Which trail?", "requestedAt": time.Now().UTC().Format(time.RFC3339Nano)}
+	request := map[string]any{"kind": kind, "subject": subject, "artifactHash": "request"}
 	if options != nil {
 		request["options"] = options
 	}
-	write("createWorkApproval", request)
-	wait := map[string]any{"runId": run, "status": "waiting", "waitingOn": map[string]any{"kind": "approval", "subject": approval, "approvalKind": kind}}
+	return parkedGoalOn(write, conversation, goal, title, request)
+}
+
+// parkedGoalOn is parkedGoal with the request's fields set by the caller: its
+// kind, subject and artifact hash, and anything else createWorkApproval takes.
+func parkedGoalOn(write func(string, map[string]any), conversation, goal, title string, request map[string]any) (run, approval string) {
+	run = guidanceRootRun(write, conversation, goal, goal+"-plan", "running")
+	approval = id.NewShortId()
+	row := map[string]any{"approvalId": approval, "runId": run, "stepKey": "plan", "question": "Which trail?", "requestedAt": time.Now().UTC().Format(time.RFC3339Nano)}
+	for key, value := range request {
+		row[key] = value
+	}
+	write("createWorkApproval", row)
+	wait := map[string]any{"runId": run, "status": "waiting", "waitingOn": map[string]any{"kind": "approval", "subject": approval, "approvalKind": request["kind"]}}
 	if title != "" {
 		wait["title"] = title
 	}
@@ -222,6 +233,29 @@ func TestDeliverApprovalTargetsCorrectsAPermissionWithoutAGrant(t *testing.T) {
 	}
 }
 
+// A native computer-access request expires after an hour, yet still takes a
+// correction: the message goes to it as guidance, never a grant, and the goal
+// reconsiders. An expired question takes no answer that way, so its goal is
+// left to the locked phase.
+func TestDeliverApprovalTargetsCorrectsAnExpiredComputerAccessRequest(t *testing.T) {
+	a, _, ctx, conversation, _, write := guidanceFixture(t)
+	actor, _ := auth.AccessFromContext(ctx)
+	expired := time.Now().UTC().Add(-time.Minute).Format(time.RFC3339Nano)
+	scope := map[string]any{"agentId": "agent", "scope": "observe", "summary": "Read the Downloads folder?",
+		"nativeScopeCheckpoint": map[string]any{"version": 1, "continuationId": "continuation", "toolCallId": "call", "requestHash": "request"}}
+	files, access := parkedGoalOn(write, conversation, "files-goal", "Tidy the downloads", map[string]any{"kind": "scopeElevation", "subject": scope, "artifactHash": work.ArtifactHash(scope), "expiresAt": expired})
+	trail, _ := parkedGoalOn(write, conversation, "trail-goal", "Trail report", map[string]any{"kind": "feedback", "subject": map[string]any{"kind": "text"}, "artifactHash": "question", "expiresAt": expired})
+	goals := listGoals(t, a, ctx, AskTurn{ID: "trail", RunID: trail, Prompt: "Write a trail report."}, AskTurn{ID: "files", RunID: files, Prompt: "Tidy my downloads."})
+	require.Equal(t, []string{files, trail}, []string{goals[0].RunID, goals[1].RunID})
+	require.Equal(t, access, BareShortId(stringArg(goals[0].Approval, "id")), "the expired computer-access request still takes the message")
+	require.Nil(t, goals[1].Approval, "an expired question does not")
+	calls := stubDecideApproval(a, resumedReply(files))
+	delivered, rest := a.deliverApprovalTargets(ctx, goals, "Only look at the PDFs.")
+	require.Equal(t, []decideApprovalCall{{caller: actor.UserId, args: guidanceAnswer(access, "Only look at the PDFs.")}}, *calls)
+	require.Equal(t, []AskRouteTarget{{GoalID: "files-goal", RunID: files, Title: "Tidy the downloads", Status: routeNotApproved, ApprovalID: access, Text: "Only look at the PDFs."}}, delivered)
+	require.Equal(t, goals[1:], rest)
+}
+
 // A budget pause saves the message for when the limit is raised. The work
 // integration's answer is what says it was saved.
 func TestDeliverApprovalTargetsSavesBudgetGuidance(t *testing.T) {
@@ -339,7 +373,7 @@ func TestDeliverRouteAtTheCapLeavesTheAgentsReadWorking(t *testing.T) {
 	runs, err := a.workRows(ContextWithFreshRead(ctx), "workRunForOwner", run)
 	require.NoError(t, err)
 	require.Len(t, runs, 1)
-	targets := guidanceTargetsLocked(transcript, rest, map[string]map[string]any{BareShortId(run): runs[0]}, "Use Celsius.")
+	targets := guidanceTargetsLocked(conversation, transcript, rest, map[string]map[string]any{BareShortId(run): runs[0]}, "Use Celsius.")
 	require.Equal(t, []AskRouteTarget{{GoalID: "fixture-goal", RunID: BareShortId(run), Title: "Synthetic work", Status: routeNotDelivered, Reason: routeReasonLimit, Text: "Use Celsius."}}, targets)
 	routeTurn(t, a, ctx, conversation, AskTurn{ID: "celsius", Prompt: "Use Celsius.", Routed: &AskRouting{Targets: targets}})
 

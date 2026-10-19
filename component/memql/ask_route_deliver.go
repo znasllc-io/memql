@@ -110,9 +110,11 @@ func (e *MemQLEngine) activeAskGoals(ctx context.Context, transcript askTranscri
 	return goals, nil
 }
 
-// pendingRunApproval is the request run is parked on while it is still
-// pending. Any other wait, or a request that cannot be read, was decided or
-// has expired, carries none.
+// pendingRunApproval is the request run is parked on while it can still take
+// the person's message (approvalDiscussionGuidancePending): undecided and
+// unexpired, or a native computer-access request past its expiry, which still
+// takes a correction. Any other wait, or a request that cannot be read, was
+// decided or has otherwise expired, carries none.
 func (e *MemQLEngine) pendingRunApproval(ctx context.Context, run map[string]any) map[string]any {
 	waiting, _ := run["waitingOn"].(map[string]any)
 	subject := BareShortId(stringArg(waiting, "subject"))
@@ -120,7 +122,7 @@ func (e *MemQLEngine) pendingRunApproval(ctx context.Context, run map[string]any
 		return nil
 	}
 	approval, _, err := e.approvalRows(ctx, subject)
-	if err != nil || !approvalPending(approval) {
+	if err != nil || !approvalDiscussionGuidancePending(approval, run) {
 		return nil
 	}
 	return approval
@@ -169,8 +171,9 @@ func waitsOnApproval(run, approval map[string]any) bool {
 }
 
 // routeDeliveryFor is how a message reaches a goal in this state, and the
-// status and reason its target starts with. approval is the pending request
-// the run is parked on, or nil when it has none or it could not be read.
+// status and reason its target starts with. approval is the request the run
+// is parked on while it can still take a message (pendingRunApproval), or nil
+// when there is none.
 func routeDeliveryFor(run, approval map[string]any) (routeDelivery, string, string) {
 	if !activeWorkRun(run) {
 		return deliverNone, routeNotReceived, routeReasonEnded
@@ -222,7 +225,7 @@ func (e *MemQLEngine) deliverApprovalTargets(ctx context.Context, goals []askRou
 			rest = append(rest, goal)
 			continue
 		}
-		if !approvalPending(approval) {
+		if !approvalDiscussionGuidancePending(approval, run) {
 			approval = nil
 		}
 		kind, status, _ := routeDeliveryFor(run, approval)
@@ -262,14 +265,16 @@ func (e *MemQLEngine) answerApprovalWithGuidance(ctx context.Context, approvalID
 }
 
 // guidanceTargetsLocked records the message as work guidance for each goal
-// the request phase left, judged by its run as read under the conversation
-// lock (freshRuns, keyed by bare run id). It reads and writes nothing. A goal
-// whose run ended did not receive it. A goal still parked on the request it
-// was listed with is not given guidance: a review that takes none is Not
-// delivered, and an answerable request the request phase did not answer was
-// refused. Every other active goal takes it as queued work guidance, unless
-// that would hand its agent more than the read accepts.
-func guidanceTargetsLocked(transcript askTranscript, goals []askRouteGoal, freshRuns map[string]map[string]any, text string) []AskRouteTarget {
+// the request phase left, judged by its run as read under the lock on
+// conversationID (freshRuns, keyed by bare run id). It reads and writes
+// nothing. A goal whose run ended did not receive it. A goal still parked on
+// the request it was listed with is not given guidance: a review that takes
+// none is Not delivered, and an answerable request the request phase did not
+// answer was refused. Guidance reaches only a run whose own conversation is
+// this one, so any other run refuses it. Every other active goal takes it as
+// queued work guidance, unless that would hand its agent more than the read
+// accepts.
+func guidanceTargetsLocked(conversationID string, transcript askTranscript, goals []askRouteGoal, freshRuns map[string]map[string]any, text string) []AskRouteTarget {
 	targets := make([]AskRouteTarget, 0, len(goals))
 	for _, goal := range goals {
 		target := AskRouteTarget{GoalID: goal.GoalID, RunID: goal.RunID, Title: goal.Title, Text: text}
@@ -283,6 +288,8 @@ func guidanceTargetsLocked(transcript askTranscript, goals []askRouteGoal, fresh
 			target.ApprovalID, target.Status, target.Reason = BareShortId(stringArg(goal.Approval, "id")), status, reason
 		case parked && kind == deliverApproval:
 			target.ApprovalID, target.Status, target.Reason = BareShortId(stringArg(goal.Approval, "id")), routeNotDelivered, routeReasonRefused
+		case !guidanceReaches(run, conversationID):
+			target.Status, target.Reason = routeNotDelivered, routeReasonRefused
 		case guidanceFits(transcript, run, text):
 			target.Status = routeQueued
 		default:
@@ -291,6 +298,15 @@ func guidanceTargetsLocked(transcript askTranscript, goals []askRouteGoal, fresh
 		targets = append(targets, target)
 	}
 	return targets
+}
+
+// guidanceReaches reports whether work guidance recorded in conversationID can
+// reach run. The agent reads a run's guidance only from the conversation on
+// the run's own input; a run started outside Ask has none, even when it
+// appears in a private conversation opened for it.
+func guidanceReaches(run map[string]any, conversationID string) bool {
+	own := BareShortId(guidanceConversation(run))
+	return own != "" && own == BareShortId(conversationID)
 }
 
 // guidanceFits reports whether one more message stays within what the agent's

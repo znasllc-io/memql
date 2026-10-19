@@ -11,6 +11,7 @@ import (
 	"github.com/stretchr/testify/require"
 	"github.com/znasllc-io/memql/component/auth"
 	"github.com/znasllc-io/memql/component/language/parser"
+	"github.com/znasllc-io/memql/component/work"
 	"github.com/znasllc-io/memql/core/common"
 	"github.com/znasllc-io/memql/core/id"
 )
@@ -280,6 +281,61 @@ func TestReadWorkGuidanceKeepsItsBounds(t *testing.T) {
 	require.Len(t, sixteen, maxWorkGuidanceMessages)
 	queue(counted, "seventeenth", "Note.")
 	_, err = b.ReadWorkGuidance(guidanceRunContext(ctx, counted))
+	require.ErrorContains(t, err, "saved guidance exceeds its bounded context")
+}
+
+// lateOptionalAnswer records the person's late answer to an optional question
+// the run asked and then continued past: the question, the continuation
+// receipt, then the answer.
+func lateOptionalAnswer(write func(string, map[string]any), owner, run, plan string, n int) string {
+	approval := id.NewShortId()
+	subject := map[string]any{"kind": "text", "feedbackContinuation": map[string]any{"waitSeconds": 60, "templateFingerprint": plan, "rerunRequestId": "", "overrideKey": ""}}
+	now := time.Now().UTC()
+	write("createWorkApproval", map[string]any{"approvalId": approval, "runId": run, "stepKey": "section", "kind": "feedback", "subject": subject, "artifactHash": work.ArtifactHash(subject), "question": fmt.Sprintf("How much detail for part %d?", n), "requestedAt": now.Add(-3 * time.Minute).Format(time.RFC3339Nano)})
+	write("continueWorkFeedback", map[string]any{"approvalId": approval, "continuedAt": now.Add(-time.Minute).Format(time.RFC3339Nano), "versionTime": time.Now().UTC().Format(time.RFC3339Nano)})
+	write("decideWorkApproval", map[string]any{"approvalId": approval, "decision": "answered", "decidedBy": owner, "decidedAt": time.Now().UTC().Format(time.RFC3339Nano), "answer": map[string]any{"text": "Brief."}})
+	return approval
+}
+
+func guidanceIDs(read []WorkGuidance) []string {
+	ids := make([]string, len(read))
+	for n, item := range read {
+		ids[n] = item.ID
+	}
+	return ids
+}
+
+// Routed guidance and the run's late optional answers are bounded each on
+// their own, so neither makes the other's read fail: with routed guidance at
+// its cap a late answer is still read, and the agent can acknowledge all it
+// was handed. Past its own bound, each source still fails the read loudly.
+func TestReadWorkGuidanceBoundsLateAnswersOnTheirOwn(t *testing.T) {
+	a, b, ctx, conversation, run, write := guidanceFixture(t)
+	actor, _ := auth.AccessFromContext(ctx)
+	for n := range 16 {
+		routeTurn(t, a, ctx, conversation, AskTurn{ID: fmt.Sprintf("note-%d", n), Prompt: "Note.", Routed: &AskRouting{Targets: []AskRouteTarget{
+			{GoalID: "fixture-goal", RunID: run, Status: routeQueued, Text: "Note."},
+		}}})
+	}
+	runtime := guidanceRunContext(ctx, run)
+	first := lateOptionalAnswer(write, actor.UserId, run, "original-plan", 0)
+	read, err := b.ReadWorkGuidance(runtime)
+	require.NoError(t, err)
+	require.Len(t, read, 17)
+	require.Equal(t, "optional-answer-"+BareShortId(first), read[16].ID)
+	require.Contains(t, read[16].Prompt, "Late answer to an optional question")
+	require.NoError(t, b.AcknowledgeWorkGuidance(runtime, guidanceIDs(read)), "the agent acknowledges everything one read handed it")
+	require.Equal(t, routeReceived, storedTurn(t, a, ctx, conversation, "note-15").Routed.Targets[0].Status)
+
+	for n := 1; n < 16; n++ {
+		lateOptionalAnswer(write, actor.UserId, run, "original-plan", n)
+	}
+	read, err = b.ReadWorkGuidance(runtime)
+	require.NoError(t, err)
+	require.Len(t, read, 32, "sixteen routed messages and sixteen late answers")
+	require.NoError(t, b.AcknowledgeWorkGuidance(runtime, guidanceIDs(read)))
+	lateOptionalAnswer(write, actor.UserId, run, "original-plan", 16)
+	_, err = b.ReadWorkGuidance(runtime)
 	require.ErrorContains(t, err, "saved guidance exceeds its bounded context")
 }
 

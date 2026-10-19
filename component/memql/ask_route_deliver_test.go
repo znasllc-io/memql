@@ -30,6 +30,19 @@ func repeatedText(text string, n int) []string {
 	return texts
 }
 
+// thisConversation is the conversation these tests route a message in.
+const thisConversation = "conversation"
+
+// conversationRun is a run started from thisConversation: it names the
+// conversation on its input, which is where the agent's read finds it.
+func conversationRun(fields map[string]any) map[string]any {
+	run := map[string]any{"input": map[string]any{"conversation": map[string]any{"id": thisConversation}}}
+	for key, value := range fields {
+		run[key] = value
+	}
+	return run
+}
+
 // readerLoad is what the agent's read hands it for run: every turn's work
 // guidance for that run, counted the way ReadWorkGuidance bounds it.
 func readerLoad(transcript askTranscript, run map[string]any) (messages, runes int) {
@@ -109,12 +122,12 @@ func TestRouteDeliveryForEveryState(t *testing.T) {
 // message is at most 4,000 runes. One more message past either bound is Not
 // delivered (limit); a message that fits exactly is queued.
 func TestGuidanceTargetsLockedRefusesPastTheCap(t *testing.T) {
-	run := map[string]any{"id": "run", "goalId": "goal", "status": "running"}
+	run := conversationRun(map[string]any{"id": "run", "goalId": "goal", "status": "running"})
 	goals := []askRouteGoal{{Handle: "g1", TurnID: "weather", GoalID: "goal", RunID: "run", Title: "Weather in Tucson", Run: run}}
 	fresh := map[string]map[string]any{"run": run}
 	deliver := func(earlier []AskTurn, text string) AskRouteTarget {
 		t.Helper()
-		targets := guidanceTargetsLocked(askTranscript{Turns: earlier}, goals, fresh, text)
+		targets := guidanceTargetsLocked(thisConversation, askTranscript{Turns: earlier}, goals, fresh, text)
 		require.Len(t, targets, 1)
 		return targets[0]
 	}
@@ -144,7 +157,7 @@ func TestGuidanceTargetsLockedRefusesPastTheCap(t *testing.T) {
 // reader can never be handed more than 16 messages or 16,000 runes, and
 // nothing it never reads can refuse a message it would accept.
 func TestGuidanceTargetsLockedCountsWhatTheReaderReads(t *testing.T) {
-	run := map[string]any{"id": "run", "goalId": "goal", "status": "running"}
+	run := conversationRun(map[string]any{"id": "run", "goalId": "goal", "status": "running"})
 	goals := []askRouteGoal{{Handle: "g1", TurnID: "weather", GoalID: "goal", RunID: "run", Title: "Weather in Tucson", Run: run}}
 	fresh := map[string]map[string]any{"run": run}
 	long := strings.Repeat("a", 4000)
@@ -168,13 +181,13 @@ func TestGuidanceTargetsLockedCountsWhatTheReaderReads(t *testing.T) {
 	messages, runes := readerLoad(transcript, run)
 	require.Equal(t, []int{15, 75}, []int{messages, runes})
 
-	first := guidanceTargetsLocked(transcript, goals, fresh, "Use Celsius.")
+	first := guidanceTargetsLocked(thisConversation, transcript, goals, fresh, "Use Celsius.")
 	require.Equal(t, []AskRouteTarget{{GoalID: "goal", RunID: "run", Title: "Weather in Tucson", Status: routeQueued, Text: "Use Celsius."}}, first)
 	transcript.Turns = append(transcript.Turns, AskTurn{ID: "celsius", Prompt: "Use Celsius.", Routed: &AskRouting{Targets: first}})
 	messages, runes = readerLoad(transcript, run)
 	require.Equal(t, []int{16, 87}, []int{messages, runes})
 
-	second := guidanceTargetsLocked(transcript, goals, fresh, "Use Fahrenheit.")
+	second := guidanceTargetsLocked(thisConversation, transcript, goals, fresh, "Use Fahrenheit.")
 	require.Equal(t, []AskRouteTarget{{GoalID: "goal", RunID: "run", Title: "Weather in Tucson", Status: routeNotDelivered, Reason: routeReasonLimit, Text: "Use Fahrenheit."}}, second)
 
 	// However messages arrive, what is recorded never takes the reader past
@@ -182,7 +195,7 @@ func TestGuidanceTargetsLockedCountsWhatTheReaderReads(t *testing.T) {
 	var arriving askTranscript
 	refused := 0
 	for n := range 40 {
-		target := guidanceTargetsLocked(arriving, goals, fresh, strings.Repeat("é", 1+(n*1777)%4000))
+		target := guidanceTargetsLocked(thisConversation, arriving, goals, fresh, strings.Repeat("é", 1+(n*1777)%4000))
 		require.Len(t, target, 1)
 		if target[0].Status != routeQueued {
 			refused++
@@ -200,7 +213,7 @@ func TestGuidanceTargetsLockedCountsWhatTheReaderReads(t *testing.T) {
 // and the locked phase refuses it. Recording the refusal leaves the agent's
 // read exactly as it was, so nothing written can make that read fail.
 func TestDeliverRouteRefusesPastTheGuidanceCap(t *testing.T) {
-	run := map[string]any{"id": "run", "goalId": "goal", "status": "running"}
+	run := conversationRun(map[string]any{"id": "run", "goalId": "goal", "status": "running"})
 	goals := []askRouteGoal{{Handle: "g1", TurnID: "weather", GoalID: "goal", RunID: "run", Title: "Weather in Tucson", Request: "What's the weather in Tucson?", Run: run}}
 	for _, c := range []struct {
 		name    string
@@ -220,7 +233,7 @@ func TestDeliverRouteRefusesPastTheGuidanceCap(t *testing.T) {
 			delivered, rest := (&MemQLEngine{}).deliverApprovalTargets(context.Background(), goals, c.text)
 			require.Empty(t, delivered)
 			require.Equal(t, goals, rest)
-			targets := guidanceTargetsLocked(transcript, rest, map[string]map[string]any{"run": run}, c.text)
+			targets := guidanceTargetsLocked(thisConversation, transcript, rest, map[string]map[string]any{"run": run}, c.text)
 			require.Equal(t, []AskRouteTarget{{GoalID: "goal", RunID: "run", Title: "Weather in Tucson", Status: routeNotDelivered, Reason: routeReasonLimit, Text: c.text}}, targets)
 			transcript.Turns = append(transcript.Turns, AskTurn{ID: "over", Prompt: c.text, Routed: &AskRouting{Targets: targets}})
 			messages, runes := readerLoad(transcript, run)
@@ -237,7 +250,7 @@ func TestDeliverRouteRefusesPastTheGuidanceCap(t *testing.T) {
 // routing never saw -- takes work guidance.
 func TestGuidanceTargetsLockedJudgesTheFreshRun(t *testing.T) {
 	parked := func(id, approvalKind string) map[string]any {
-		return map[string]any{"id": id, "goalId": "goal-" + id, "status": "waiting", "waitingOn": map[string]any{"kind": "approval", "subject": "request-" + id, "approvalKind": approvalKind}}
+		return conversationRun(map[string]any{"id": id, "goalId": "goal-" + id, "status": "waiting", "waitingOn": map[string]any{"kind": "approval", "subject": "request-" + id, "approvalKind": approvalKind}})
 	}
 	request := func(id, kind string, subject map[string]any) map[string]any {
 		return map[string]any{"id": "v1:work:approval:request-" + id, "kind": kind, "subject": subject, "decision": ""}
@@ -251,15 +264,15 @@ func TestGuidanceTargetsLockedJudgesTheFreshRun(t *testing.T) {
 	resumed := request("resumed", "feedback", map[string]any{"kind": "text"})
 	moved := request("moved", "feedback", map[string]any{"kind": "text"})
 	fresh := map[string]map[string]any{
-		"finished":  {"id": "finished", "goalId": "goal-finished", "status": "succeeded"},
-		"stopping":  {"id": "stopping", "goalId": "goal-stopping", "status": "running", "cancelRequested": true},
+		"finished":  conversationRun(map[string]any{"id": "finished", "goalId": "goal-finished", "status": "succeeded"}),
+		"stopping":  conversationRun(map[string]any{"id": "stopping", "goalId": "goal-stopping", "status": "running", "cancelRequested": true}),
 		"review":    parked("review", "planReview"),
 		"question":  parked("question", "feedback"),
 		"door":      parked("door", "inferenceUnavailable"),
-		"resumed":   {"id": "resumed", "goalId": "goal-resumed", "status": "running", "waitingOn": map[string]any{}},
+		"resumed":   conversationRun(map[string]any{"id": "resumed", "goalId": "goal-resumed", "status": "running", "waitingOn": map[string]any{}}),
 		"moved":     parked("elsewhere", "feedback"),
 		"new-wait":  parked("new-wait", "planReview"),
-		"compiling": {"id": "compiling", "goalId": "goal-compiling", "status": "compiling"},
+		"compiling": conversationRun(map[string]any{"id": "compiling", "goalId": "goal-compiling", "status": "compiling"}),
 	}
 	fresh["moved"]["id"] = "moved"
 	goals := []askRouteGoal{
@@ -267,7 +280,7 @@ func TestGuidanceTargetsLockedJudgesTheFreshRun(t *testing.T) {
 		goal("review", review), goal("question", question), goal("door", door),
 		goal("resumed", resumed), goal("moved", moved), goal("new-wait", nil), goal("compiling", nil),
 	}
-	targets := guidanceTargetsLocked(askTranscript{}, goals, fresh, "Actually Phoenix.")
+	targets := guidanceTargetsLocked(thisConversation, askTranscript{}, goals, fresh, "Actually Phoenix.")
 	target := func(id, status, reason, approval string) AskRouteTarget {
 		return AskRouteTarget{GoalID: "goal-" + id, RunID: id, Title: "Goal " + id, Status: status, Reason: reason, ApprovalID: approval, Text: "Actually Phoenix."}
 	}
@@ -283,4 +296,52 @@ func TestGuidanceTargetsLockedJudgesTheFreshRun(t *testing.T) {
 		target("new-wait", routeQueued, "", ""),
 		target("compiling", routeQueued, "", ""),
 	}, targets)
+}
+
+// The agent reads a run's work guidance only through the conversation on the
+// run's own input. A run whose own conversation is another one -- or that has
+// none, because it was started outside Ask and appears only in a private
+// conversation opened for it -- would never read a message recorded here, so
+// it is refused. A goal that ended, or one still parked on the request it was
+// listed with, is judged by that first.
+func TestGuidanceTargetsLockedReachesOnlyThisConversationsRuns(t *testing.T) {
+	run := func(id, conversation string, fields map[string]any) map[string]any {
+		run := map[string]any{"id": id, "goalId": "goal-" + id, "status": "running"}
+		if conversation != "" {
+			run["input"] = map[string]any{"conversation": map[string]any{"id": conversation}}
+		}
+		for key, value := range fields {
+			run[key] = value
+		}
+		return run
+	}
+	review := map[string]any{"id": "v1:work:approval:request-review", "kind": "planReview", "subject": map[string]any{"plan": "draft"}, "decision": ""}
+	fresh := map[string]map[string]any{
+		"here":      run("here", thisConversation, nil),
+		"canonical": run("canonical", "v1:os:askConversation:"+thisConversation, nil),
+		"elsewhere": run("elsewhere", "another-conversation", nil),
+		"outside":   run("outside", "", nil),
+		"ended":     run("ended", "another-conversation", map[string]any{"status": "succeeded"}),
+		"review":    run("review", "another-conversation", map[string]any{"status": "waiting", "waitingOn": map[string]any{"kind": "approval", "subject": "request-review", "approvalKind": "planReview"}}),
+	}
+	goal := func(id string, approval map[string]any) askRouteGoal {
+		return askRouteGoal{Handle: "g-" + id, TurnID: "turn-" + id, GoalID: "goal-" + id, RunID: id, Title: "Goal " + id, Approval: approval}
+	}
+	goals := []askRouteGoal{goal("here", nil), goal("canonical", nil), goal("elsewhere", nil), goal("outside", nil), goal("ended", nil), goal("review", review)}
+	target := func(id, status, reason, approval string) AskRouteTarget {
+		return AskRouteTarget{GoalID: "goal-" + id, RunID: id, Title: "Goal " + id, Status: status, Reason: reason, ApprovalID: approval, Text: "Actually Phoenix."}
+	}
+	want := []AskRouteTarget{
+		target("here", routeQueued, "", ""),
+		target("canonical", routeQueued, "", ""),
+		target("elsewhere", routeNotDelivered, routeReasonRefused, ""),
+		target("outside", routeNotDelivered, routeReasonRefused, ""),
+		target("ended", routeNotReceived, routeReasonEnded, ""),
+		target("review", routeNotDelivered, routeReasonReview, "request-review"),
+	}
+	require.Equal(t, want, guidanceTargetsLocked(thisConversation, askTranscript{}, goals, fresh, "Actually Phoenix."))
+	require.Equal(t, want, guidanceTargetsLocked("v1:os:askConversation:"+thisConversation, askTranscript{}, goals, fresh, "Actually Phoenix."))
+	for _, routed := range guidanceTargetsLocked("", askTranscript{}, goals[:4], fresh, "Actually Phoenix.") {
+		require.Equal(t, routeNotDelivered, routed.Status, "no conversation is a run's own conversation: %s", routed.RunID)
+	}
 }

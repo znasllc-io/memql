@@ -11,9 +11,17 @@ import (
 )
 
 // Guidance is a durable human message, not a new goal, permission or rerun.
-// Bound the lifetime transcript contribution instead of silently truncating it.
+// Bound each source instead of silently truncating it: a run's routed
+// guidance, and apart from it the run's late optional answers, each hold at
+// most maxWorkGuidanceMessages messages and maxWorkGuidanceRunes runes, so
+// neither can make the other's read fail.
 const maxWorkGuidanceMessages = 16
 const maxWorkGuidanceRunes = 16000
+
+// MaxWorkGuidanceReceipts is the most messages one ReadWorkGuidance returns,
+// its routed guidance and its late optional answers together: what an agent
+// may acknowledge at once, and the guidance ids it keeps while recovering.
+const MaxWorkGuidanceReceipts = 2 * maxWorkGuidanceMessages
 
 type WorkGuidance struct {
 	ID     string
@@ -117,7 +125,7 @@ func (e *MemQLEngine) AcknowledgeWorkGuidance(ctx context.Context, ids []string)
 	if len(ids) == 0 {
 		return nil
 	}
-	if len(ids) > maxWorkGuidanceMessages {
+	if len(ids) > MaxWorkGuidanceReceipts {
 		return fmt.Errorf("too many guidance receipts")
 	}
 	run, conversation, err := e.workGuidanceScope(ctx)
