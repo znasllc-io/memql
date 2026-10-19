@@ -161,17 +161,23 @@ Release asset; the site replaces its set with the newest one.
    the public page that covers the subject, or by saying it in prose; do not
    add an entry for a new link. The docs-safety epic adds its rules
    (hostnames, customer names, money) to the same check.
-5. **Release.** When a GitHub Release is published for an `X.Y.Z` or
-   `vX.Y.Z` tag, `.github/workflows/publish-docs-bundle.yml` checks out the
-   tag with full history, runs the check, builds the set **at that tag** and
-   attaches `docs-<X.Y.Z>.tgz` to the release. `workflow_dispatch` rebuilds
-   one release's set, by either tag spelling; a rebuild picks up no later
-   docs fix.
+5. **Release.** The native `release-files.packages` step builds the set from
+   the exact tagged commit with full history and retains
+   `.memql-release/docs/docs-<X.Y.Z>.tgz`. Start the release build in MemQL
+   Pipelines at its existing immutable tag, then assemble and approve the
+   release candidate. Native publication verifies the retained archive and
+   its GitHub asset readback before recording completion. When using a draft,
+   publish every declared file before promoting it. A later release webhook
+   recovers the existing build instead of starting another. See
+   [Release candidates](public/operate/release-candidates.md).
 6. **Site.** This step belongs to the instance repository that hosts
-   memql.io; what follows is its side of the contract. Its docs sync
-   (memql#5716) replaces the instance's docs set with the newest release's
-   asset, on a schedule and, once the token for it is in place, on an
-   `engine-docs-released` repository dispatch from the publish workflow.
+   memql.io; what follows is its side of the contract. The reviewed engine
+   release PR updates `clients/memql-website/docs-release.json` with the
+   version, source commit, archive SHA-256 and size. The native website build
+   verifies that asset before replacing its generated documentation. Native
+   publication and the external rollout check verify the resulting public
+   site. The engine and documentation pins move together; an hourly writer
+   does not independently choose another release.
    Its site renders the manifest's version in the docs chrome and as
    `<meta name="memql-docs-version" content="X.Y.Z">` on every docs page
    (memql#5715), and follows the absolute routes the bundle's links carry
