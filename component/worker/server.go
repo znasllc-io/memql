@@ -121,20 +121,20 @@ func (s *server) Stream(stream memqlv1.WorkerService_StreamServer) error {
 	// machine for the life of the stream (epic memql#5218, D11).
 	session.startPinger()
 
-	// Recv observes the gRPC stream's context, not session's derived context.
-	// Keep one bounded reader so a revoke or superseding registration can end
-	// an idle RPC immediately. Returning from this handler makes gRPC cancel
-	// the blocked Recv; joining the reader before returning would deadlock.
-	type receivedMessage struct {
+	// Recv uses gRPC's transport context, not the derived session context.
+	// A revoke, reconnect or drain must return from this handler even when
+	// the old transport is silent; returning closes it and releases Recv.
+	// Keep one reader for the stream and process messages serially here.
+	type received struct {
 		message *memqlv1.WorkerClientMessage
 		err     error
 	}
-	received := make(chan receivedMessage)
+	incoming := make(chan received)
 	go func() {
 		for {
-			message, err := stream.Recv()
+			msg, err := stream.Recv()
 			select {
-			case received <- receivedMessage{message: message, err: err}:
+			case incoming <- received{message: msg, err: err}:
 			case <-session.ctx.Done():
 				return
 			}
@@ -143,14 +143,18 @@ func (s *server) Stream(stream memqlv1.WorkerService_StreamServer) error {
 			}
 		}
 	}()
-
 	for {
-		var next receivedMessage
+		var next received
 		select {
 		case <-session.ctx.Done():
 			streamErr = session.ctx.Err()
 			return status.FromContextError(streamErr).Err()
-		case next = <-received:
+		case next = <-incoming:
+		}
+		// Cancellation wins over an inbound message delivered at the same time.
+		if err := session.ctx.Err(); err != nil {
+			streamErr = err
+			return status.FromContextError(err).Err()
 		}
 		if next.err != nil {
 			streamErr = next.err
@@ -158,10 +162,6 @@ func (s *server) Stream(stream memqlv1.WorkerService_StreamServer) error {
 				return nil
 			}
 			return next.err
-		}
-		if err := session.ctx.Err(); err != nil {
-			streamErr = err
-			return status.FromContextError(err).Err()
 		}
 		if err := session.handle(session.ctx, next.message, sourceIP); err != nil {
 			s.logger.Warn("worker stream message error",

@@ -22,10 +22,12 @@ and production evidence are complete.
 
 ## Active cutover, October 19, 2026
 
-Production currently serves **v0.29.34**, through instance commit
-`56a905f51a6682edebbdeb9dde3fe9ba0f625af1`. Its Argo operation completed
-Healthy/Synced at 10:43 UTC, after all native runs had finished. Engine main is
-`66488da438051fc326c7114f21910eb954946bd3` (v0.29.34). The v0.29.31 full native pass
+Production currently serves **v0.29.35**, through instance commit
+`ccd6a45d9f8ba5dc82eedda585aa7ce6b86f60f9`. Its Argo operation completed
+Healthy/Synced at 12:13 UTC. No native runs remained active during the rollout.
+An independent public check verified the API, Identity and OS against the
+pinned edge image; website documentation remains a separate pending check.
+Engine main is `771c15a01` (v0.29.35). The v0.29.31 full native pass
 below remains valid historical acceptance evidence; it is no longer the serving
 release. Engine **v0.30.0** is prepared in #6200 and is not deployed. The
 independent v0.29.33 rollout at 06:56 UTC replaced Agent while the editor
@@ -36,12 +38,11 @@ branches incorporate that release and require fresh checks on their new heads.
 Instance #237 passed all nine native steps with retained logs and artifacts.
 Its Agent artifact receiver fix is now deployed with the already configured
 2 GiB operator bound; the fleet transport retains its separate 256 MiB limit.
-Instance #232 and #239 are also deployed. All three Argo applications report
-Healthy/Synced, with both Agent and Workbench replicas ready. No CPU, memory,
-node or quota increase accompanies these changes. All four pipeline connections
-were restored with their original webhook delivery after poll catch-up. The
-independent instance #242 deployment paused them again; restoration follows
-its completed rollout and a fresh read of whole-run readiness.
+Instance #232 and #239 are also deployed. Both Agent and Workbench replicas
+are ready. No CPU, memory, node or quota increase accompanies these changes.
+The independent instance #243 deployment paused pipeline intake again; the
+12:14 UTC whole-run read found no active pipelines, unfinished runs or Jobs.
+Restore intake after coordinating with that deployment's operator.
 
 The independent instance rollout at 08:31–08:32 UTC restarted Agent and
 Workbench while qualification was active, despite unchanged executor images.
@@ -92,7 +93,12 @@ same-replica replacement, remote-holder events and revocation while idle. The
 successor remains usable. This reports interrupted work promptly; it does not
 replay a command whose execution is uncertain. Both transport regressions
 failed against the previous implementation; the affected worker race suite
-passes locally. Native qualification and deployment remain required.
+passes locally. Independent #6243 carried the same runtime repair through
+native run `bf6d6d27baad43e524b7496c0c3560c6`, merged at 11:36 UTC,
+and is deployed in v0.29.35. The final branch adopts that implementation and
+retains the additional real-gRPC cases. Fresh complete engine and Cockpit
+qualifications are still required; deploying this repair does not turn the
+earlier failed runs into passes.
 
 The final runtime now includes bounded repository maintenance: retained JSON
 proposals, exact operator-owned repository/file grants, fresh signed-actor and
