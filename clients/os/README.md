@@ -295,6 +295,17 @@ and focus recovery. Reads with no broadcast source retain `AutoRefresh` recovery
 Do not poll healthy graph feeds or automatically repeat probes or writes.
 Failed initial reads also need recovery, even if a collection has no prior rows.
 
+Browser return uses `live/resume` for coalesced focus, visibility, online and
+page-restoration events. `OsConnectionProvider` wakes the existing connection;
+SDK reconnect attempts are serialized. `ConnectionNotice` owns delayed feedback
+in both desktop and phone chrome; short interruptions never blank an app.
+`useLiveCollection`, `useGraphRevision`, `AutoRefresh` and Ask recover reads from
+this lifecycle. Typed transport loss is distinct from a refused read or an
+uncertain write. Never suppress the latter or automatically resubmit it.
+Mobile Ask occupies all content below the shell header. A recovered waiting
+snapshot replaces a stale streaming counter with its needs-input card and opens
+the matching run in the phone's Nexus view.
+
 Machine tabs end with **Activity**, then **Settings**. Apps shows the platform's
 supported apps directly, separating installation, sign-in, permission and
 subscription reports. Missing setup starts an owner-scoped work goal for the
@@ -1913,11 +1924,13 @@ three came with epic memql#5414 (versions, verdicts and the reuse ratio).
   voice and never paraphrased: the rule id is where somebody goes to change the
   policy.
 
-  Budget approvals require a new total allowance before **Raise limit** is
-  available. Time is entered in minutes and sent as milliseconds; count limits
-  stay whole numbers. The backend validates usage, preserves all other limits
-  and counters, and resumes the saved run. A human-approved allowance overrides
-  the workload estimate only for that named limit, across replicas.
+  Progress-limit questions use ordinary feedback: **Keep working**, **Stop
+  here**, or the person's own words in Ask. Work can earn three automatic
+  continuation windows from new completed task operations, within its original
+  overall limits. Numeric budget controls have been removed. Legacy budget
+  requests can only be closed. A saved answer whose release failed remains
+  recoverable after reload, without changing that answer or granting another
+  window.
 
   Approvals open in place with Back to the list. Failure questions offer
   Retry and Abandon even when a historical row says `planReview`; their offered
@@ -1942,11 +1955,7 @@ three came with epic memql#5414 (versions, verdicts and the reuse ratio).
   waiting work can accept it. A recorded answer that did not resume offers
   **Retry continuing**, using the exact stored guidance, including after a
   reload via **View request** on the persisted guidance message. Retrying never substitutes a newer composer draft or grants access.
-  A resumable budget request instead offers **Save guidance**. It keeps the
-  request pending and shows the saved text; **Raise limit** later applies that
-  guidance while continuing the saved work. Saving again replaces the pending
-  guidance. An uncertain save offers **Retry saving** with its original text,
-  never **Retry continuing**. Discussion alone remains advisory.
+
 
 - **THE JOURNAL IS NOT LIVE AND SAYS SO; THE STEPS FEED BELONGS TO THE PAGE.**
   `v1:work:goal`, `run`, `step` and `approval` broadcast; `modelCall` and

@@ -184,7 +184,8 @@ func builtinDeclToFunction(decl *languageParser.BuiltinDecl, origin string) (*Fu
 
 	return &Function{
 		Name:           decl.Name,
-		Description:    description,
+		Description:    languageParser.EffectiveDescription(decl.DocComment, description),
+		DocComment:     decl.DocComment,
 		Type:           FunctionTypeBuiltin,
 		FunctionKind:   FunctionTypeBuiltin,
 		Executor:       executor,

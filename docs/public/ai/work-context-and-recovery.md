@@ -412,9 +412,9 @@ recovery sweep can deliver the saved answer later under the same claim identity.
 The existing stale-executor abandonment policy still applies after a claimant
 stops responding.
 
-On resumption, the model receives the exact recorded permission or budget
-decision alongside its saved exchanges. This includes the approved scope and
-any recorded use or revocation. The receipt is context, not authorization:
+On resumption, the model receives the recorded permission decision or feedback
+alongside its saved exchanges. Permission context includes the approved scope
+and any recorded use or revocation. The receipt is context, not authorization:
 dispatch still checks the current permission and budget before an operation
 can execute. It does not claim that an approved operation has already run.
 
@@ -425,12 +425,14 @@ recovery attempts retain finite time and resource budgets. A long-lived goal
 must make progress through checkpointed steps and waits; it does not require
 one unbounded model call or an open client connection.
 
-A person can approve a budget pause with `decideApproval` and
-`answer: {newLimit: 64}` (for example, a model-call limit). This raises only
-the ceiling named by that approval; all other limits and accumulated usage
-remain intact. The limit must be finite, above recorded usage, and cannot
-lower a newer limit. Concurrent decisions on the same goal are serialized
-across replicas. Omitting `newLimit` retains the separate-update workflow.
+Work can extend an estimate up to three times when successful tool receipts
+show new activity and the original overall limits still allow it. When that
+allowance is spent, ordinary feedback offers **Keep working**, **Stop here**,
+or a change of direction. A continuation preserves the saved execution,
+accumulated usage and extension count across replicas. It never raises the
+original limits. At an overall limit, the results remain saved and the work
+stops. Numeric budget approvals are no longer accepted. See
+[LLM cost control](llm-cost-control.md) for the bounded continuation policy.
 
 The regression suite exercises parallel tool groups, pending calls, repeated
 context pressure, exact Unicode/source reconstruction, cross-replica reads,

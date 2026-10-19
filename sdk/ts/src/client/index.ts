@@ -13,7 +13,7 @@ export {
   type ConnectionStatusEvent,
   type ReconnectOptions,
 } from "./connection.js";
-export { Dispatcher, type DispatcherOptions } from "./dispatcher.js";
+export { Dispatcher, isTransportInterruption, type DispatcherOptions } from "./dispatcher.js";
 export { QueryClient, refusalSentence, type QueryCallOptions, type ConceptRegistryFollow } from "./query.js";
 export {
   ModulesClient,

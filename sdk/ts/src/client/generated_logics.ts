@@ -858,6 +858,27 @@ QueryClient.prototype.workSpineSectionInstruction = function (this: QueryClient,
   return this.executeNamed("workSpineSectionInstruction", buildWorkSpineSectionInstruction(args), opts);
 };
 
+/** Capability artifacts need generation, storage and verification within the owner's ceilings. */
+export interface WorkSpineSustainedArtifactArgs {
+  triage: Record<string, unknown>;
+}
+
+export function buildWorkSpineSustainedArtifact(args: WorkSpineSustainedArtifactArgs): string {
+  const parts: string[] = [];
+  parts.push("triage: " + renderMemQLValue(args.triage));
+  return "logic workSpineSustainedArtifact(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    workSpineSustainedArtifact(args: WorkSpineSustainedArtifactArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.workSpineSustainedArtifact = function (this: QueryClient, args: WorkSpineSustainedArtifactArgs = {} as WorkSpineSustainedArtifactArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("workSpineSustainedArtifact", buildWorkSpineSustainedArtifact(args), opts);
+};
+
 /** Every app session nobody is holding, judged by TWO cutoffs.
 The STALL grace is against heartbeatAt, which the holder re-writes every two seconds (component/worker's recordingPublishInterval) from the session's start until its recording closes; the default of 90s is some forty missed flushes, so a replica that is merely slow is never taken for a dead one. The MAX AGE is against startedAt, and it defaults to the four-hour session ceiling (integrations/agent/worker's defaultAppSessionMaxDuration) plus half an hour: nothing legitimately runs that long, and it is the only judgment available for a row written before heartbeatAt existed. Both defaults are hand copies of Go values, so each is pinned against its value by a Go test beside it.
 Both are read from globalVariables so an operator can widen them on a slow cluster without a release, and both default generously: failing a session that is merely slow is worse than leaving a dead one on screen for another minute. */

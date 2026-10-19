@@ -20,8 +20,8 @@ type fakeFleet struct {
 	machines []Candidate
 	policy   *Policy
 	touched  []string
-	// owner scopes the read the way workersForOwnerWithStatus's
-	// `filter ownerUserId==args.ownerUserId` does. Empty means "any owner",
+	// owner scopes the read the way myWorkersWithStatus's
+	// `filter row => row.ownerUserId == actor.userId` does. Empty means "any owner",
 	// which most tests want; the hop tests set it, because a fake that
 	// returned every machine to every caller would let a receiver-side
 	// ownership check pass for the wrong reason.
@@ -131,7 +131,7 @@ func mustPlan(t *testing.T, r *Router, require, prefer map[string]string) RouteP
 
 func TestStrategyOrdering(t *testing.T) {
 	// The fixture arrives in REGISTRATION order (a, b, c), which is what
-	// workersForOwnerWithStatus's `sort "row.createdAt", "asc"` guarantees.
+	// myWorkersWithStatus's `sort "registeredAt", "asc"` guarantees.
 	// Every strategy's answer is stated against that order so a stable-sort
 	// regression is visible as a changed expectation rather than as flake.
 	fixture := func() []Candidate {

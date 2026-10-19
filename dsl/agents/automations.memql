@@ -169,3 +169,11 @@ automation agentWorkTrainingContext {
 automation agentWorkContextRecovery {
   return 3
 }
+
+/// Finish one identified evidence gap within the existing task and allowance.
+/// Follow-up quick replies never enter the tool-enabled completion path.
+@template
+automation agentWorkReplyCompletion {
+ args { facts object! }
+ return args.facts.continuationAvailable && args.facts.missingEvidence != "" && args.facts.repairs < 1
+}

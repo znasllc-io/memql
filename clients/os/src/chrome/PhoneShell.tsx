@@ -3,6 +3,8 @@ import { useRef, useState } from "react";
 import { ArrowLeft, LayoutGrid } from "lucide-react";
 
 import { useAsk } from "../ask/AskProvider";
+import { AskSheet } from "../ask/AskSheet";
+import { ConnectionNotice } from "../kit/ConnectionNotice";
 import { ProvenanceDot } from "../kit";
 import { PageNavigationProvider } from "../kit/pageNavigation";
 import { TrailRow } from "../kit/TrailRow";
@@ -30,14 +32,14 @@ import { useWindowAsk } from "./windowAsk";
 
 // Phone chrome (spec D13): no desks, no windows, no pins. The Launcher
 // grid is home; an app opens full screen, one at a time, with its section
-// nav as a top strip; Ask is a sheet; sign out lives in the top bar.
+// nav as a top strip; Ask fills the content area; sign out stays in the top bar.
 
 export function PhoneShell({ onSignOut }: { onSignOut: () => void }) {
   const { registry, actorRole } = useOs();
-  const { openAsk } = useAsk();
+  const { openAsk, sheet } = useAsk();
   const [currentAppId, setCurrentAppId] = useState<string | null>(null);
   const [sectionId, setSectionId] = useState("");
-  const [storageIntent, setStorageIntent] = useState<{ id: string; payload: Record<string, unknown> }>();
+  const [intent, setIntent] = useState<{ id: string; payload: Record<string, unknown> }>();
   const pageRoot = useRef<HTMLElement>(null);
 
   const apps = appsFor(registry);
@@ -65,10 +67,11 @@ export function PhoneShell({ onSignOut }: { onSignOut: () => void }) {
   const settingsStatePhrase = settingsTone === "needsSetup" ? "not set up" : "partly set up";
   const unmetIsSectionOnly = gate.unmet.some((id) => !(current?.needs ?? []).includes(id));
 
-  function open(appId: string) {
+  function open(appId: string, section = "", payload?: Record<string, unknown>) {
     if (!canOpen(registry, appId)) return;
     setCurrentAppId(appId);
-    setSectionId("");
+    setSectionId(section);
+    setIntent(payload ? { id: crypto.randomUUID(), payload } : undefined);
   }
 
   return (
@@ -90,8 +93,11 @@ export function PhoneShell({ onSignOut }: { onSignOut: () => void }) {
         <button type="button" className="os-link" onClick={onSignOut}>
           Sign out
         </button>
+        <ConnectionNotice className="os-phone-connection" />
       </header>
-      {!(current?.id === "cluster" && activeSection?.id === "readiness") ? <StorageWarning inline onReview={apps.some((app) => app.id === "cluster") ? () => { setStorageIntent({ id: "storage-warning", payload: { storageWarning: true } }); setCurrentAppId("cluster"); setSectionId("readiness"); } : undefined} /> : null}
+      <div className="os-phone-content">
+      <div className="os-phone-page" inert={sheet.open}>
+      {!(current?.id === "cluster" && activeSection?.id === "readiness") ? <StorageWarning inline onReview={apps.some((app) => app.id === "cluster") ? () => open("cluster", "readiness", { storageWarning: true }) : undefined} /> : null}
       {current ? (
         <PageContent as="main" className="os-phone-app" ref={pageRoot}>
           <PageNavigationProvider key={current.id} root={pageRoot} trail={[]}>
@@ -134,8 +140,8 @@ export function PhoneShell({ onSignOut }: { onSignOut: () => void }) {
               <WindowErrorBoundary key={current.id} app={current.id} section={activeSection?.id ?? ""}>
                 <current.component
                   sectionId={activeSection?.id ?? ""}
-                  intent={current.id === "cluster" ? storageIntent : undefined}
-                  consumeIntent={() => setStorageIntent(undefined)}
+                  intent={intent}
+                  consumeIntent={id => setIntent(current => current?.id === id ? undefined : current)}
                   reportSetupState={reportSetupState}
                   navigate={setSectionId}
                   askContext={appAsk.askContext}
@@ -172,6 +178,9 @@ export function PhoneShell({ onSignOut }: { onSignOut: () => void }) {
           <Mark className="os-ask-mark" />
         </button>
       </footer>
+      </div>
+      <AskSheet embedded onOpenApp={open} />
+      </div>
     </div>
   );
 }

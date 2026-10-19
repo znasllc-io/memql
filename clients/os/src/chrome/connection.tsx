@@ -8,6 +8,9 @@ import { createContext, useContext } from "react";
 export type ShellConnectionStatus = "connected" | "reconnecting" | "disconnected";
 
 export const ConnectionStatusContext = createContext<ShellConnectionStatus>("disconnected");
+export const ConnectionRecoveryContext = createContext<{ managed: boolean; retry: () => void }>({ managed: false, retry: () => {} });
+
+export function useConnectionRecovery() { return useContext(ConnectionRecoveryContext); }
 
 export function useConnectionStatus(): ShellConnectionStatus {
   return useContext(ConnectionStatusContext);

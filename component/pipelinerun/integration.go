@@ -50,6 +50,8 @@ type Deps struct {
 	// SARIF holds native publication storage and owner-scoped journal reads.
 	// It never gives a command step the GitHub installation bearer.
 	SARIF *SARIFDependencies
+	// SystemVariable reads operator configuration under system-variable ACLs.
+	SystemVariable func(context.Context, string) (string, error)
 	// RunnerReadiness reads remote workbench evidence on front-door nodes too.
 	// Reporting does not register a step executor or make this node a driver.
 	RunnerReadiness pipelines.ReadinessReporter

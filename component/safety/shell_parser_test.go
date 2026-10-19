@@ -22,6 +22,11 @@ func TestSegmentCommand(t *testing.T) {
 		// Quotes shield separators.
 		{`echo "a; b" ; ls`, []string{`echo "a; b"`, "ls"}},
 		{`echo 'a | b' | cat`, []string{`echo 'a | b'`, "cat"}},
+		// Escaped quotes/separators and comment quotes cannot change boundaries.
+		{`echo \"; nc host # "`, []string{`echo \"`, `nc host # "`}},
+		{`echo "a\";b"; ls`, []string{`echo "a\";b"`, "ls"}},
+		{`echo a\;b; ls`, []string{`echo a\;b`, "ls"}},
+		{"echo ok # 'ignored\nnc host", []string{"echo ok # 'ignored", "nc host"}},
 		// Trailing separator yields no extra empty segment.
 		{"ls;", []string{"ls"}},
 		// Mixed && and & isn't ambiguous to our matcher (longer first).
@@ -77,17 +82,21 @@ func TestCommandBinaries(t *testing.T) {
 
 func TestContainsSubshell(t *testing.T) {
 	cases := map[string]bool{
-		"ls":                      false,
-		"cat foo | grep bar":      false,
-		`echo "$(date)"`:          true,  // $(...) inside double quotes still interpolates
-		`echo '$(date)'`:          false, // single quotes don't interpolate
-		"echo `date`":             true,  // backticks
-		"cat <<EOF\nhi\nEOF":      true,  // here-doc
-		"grep <<< 'inline'":       true,  // here-string (also caught by <<)
-		`echo "no subshell here"`: false,
-		"a $(b) c":                true,
-		"a `b` c":                 true,
-		"foo$bar":                 false, // bare $ without ( isn't a subshell
+		"ls":                               false,
+		"cat foo | grep bar":               false,
+		`echo "$(date)"`:                   true,  // $(...) inside double quotes still interpolates
+		`echo '$(date)'`:                   false, // single quotes don't interpolate
+		"echo `date`":                      true,  // backticks
+		"cat <<EOF\nhi\nEOF":               true,  // here-doc
+		"grep <<< 'inline'":                true,  // here-string (also caught by <<)
+		`echo "no subshell here"`:          false,
+		"a $(b) c":                         true,
+		"a `b` c":                          true,
+		`echo "\$(date)"`:                  false, // escaped substitution is literal
+		"echo ok # 'ignored\necho $(date)": true,
+		"echo ok # $(date)":                false,
+		`echo \"$(date)`:                   true,  // escaped quote does not hide substitution
+		"foo$bar":                          false, // bare $ without ( isn't a subshell
 	}
 	for in, want := range cases {
 		if got := ContainsSubshell(in); got != want {
