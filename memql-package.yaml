@@ -960,3 +960,26 @@ pipeline:
               GOFLAGS: -p=2
               GOMEMLIMIT: 1GiB
               GOGC: "75"
+
+    - name: dependency-proposal
+      on: [pull_request]
+      runAfterFailure: true
+      steps:
+      - name: tidy
+        placement: cluster
+        githubReadToken: true
+        timeout: 25m
+        cpuMilli: 2000
+        memoryMiB: 4096
+        artifacts: [.reports/dependency-proposal.json]
+        run: python3 scripts/ci/repository-proposal.py dependabot-tidy --output=.reports/dependency-proposal.json
+    - name: dependency-proposal-write
+      on: [pull_request]
+      runAfterFailure: true
+      steps:
+      - name: apply
+        timeout: 5m
+        repositoryChange:
+          rule: dependabot-go-tidy
+          step: dependency-proposal.tidy
+          path: .reports/dependency-proposal.json
