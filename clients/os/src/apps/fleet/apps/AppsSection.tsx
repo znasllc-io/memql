@@ -38,11 +38,10 @@ import { useDelegationPolicy, type DelegationPolicyDraft } from "./useDelegation
 // a quiet back-Head, exactly as DeployablePage does. One Head per view; two
 // Heads in one scroller is the tell that neither happened.
 
-export function AppsSection({ sessionTarget, navigation }: { sessionTarget?: { id: string; revision: number }; navigation?: { origin: "peer" | "content" | "back"; revision: number } } = {}) {
+export function AppsSection({ navigation }: { navigation?: { origin: "peer" | "content" | "back"; revision: number } } = {}) {
   const policy = useDelegationPolicy();
   const sessions = useAppSessions();
   const [openSessionId, setOpenSessionId] = useState("");
-  useEffect(() => { if (sessionTarget) { setOpenSessionId(sessionTarget.id); setView("sessions"); } }, [sessionTarget?.revision]);
   useEffect(() => { if (navigation?.origin === "peer") { setOpenSessionId(""); setView("sessions"); } }, [navigation?.revision]);
   const now = useNow(30_000);
 

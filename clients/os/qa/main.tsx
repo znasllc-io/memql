@@ -1217,7 +1217,7 @@ function MachinePane({ over }: { over: Record<string, unknown> }) {
   };
   return (
     <WindowBody fallback="Studio mini">
-      <MachineDetail machine={machine} writes={writes} now={FLEET_NOW} view="settings" />
+      <MachineDetail machine={machine} writes={writes} now={FLEET_NOW} view="details" />
     </WindowBody>
   );
 }

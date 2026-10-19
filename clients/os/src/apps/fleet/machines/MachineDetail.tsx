@@ -36,12 +36,17 @@ export function MachineDetail({
   now,
   view = "all",
   modelNavigation,
+  openActivity,
+  onActivityOpened,
 }: {
   machine: MachineRow;
   writes: MachineWrites;
   now: Date;
-  view?: "all" | "settings" | "models" | "apps" | "activity";
+  view?: "all" | "details" | "settings" | "models" | "apps" | "activity";
   modelNavigation?: Omit<PageTrail, "title">;
+  /** An Activity entry to open, from Equipment's Recent activity. */
+  openActivity?: string;
+  onActivityOpened?: () => void;
 }) {
   const label = machineName(machine);
   const busy = writes.busyId === machine.id;
@@ -49,13 +54,20 @@ export function MachineDetail({
   // nowhere, so they arrive with the recommendation rather than on the row --
   // one read for both, because a page that fetched the class separately could
   // show a class the recommendation disagreed with.
-  const recommendation = useMachineRecommendation(machine.id, ["all", "settings"].includes(view));
+  const recommendation = useMachineRecommendation(machine.id, ["all", "details"].includes(view));
 
   return (
     <Panel label={`${label} detail`}>
-      <AutoRefresh enabled={["all", "settings"].includes(view)} busy={recommendation.state === "reading"} onRefresh={recommendation.reread} />
-      {view === "all" || view === "settings" ? <div className="fleet-machine-details">
+      <AutoRefresh enabled={["all", "details"].includes(view)} busy={recommendation.state === "reading"} onRefresh={recommendation.reread} />
+      {/* DETAILS is what the machine reported and how it is connected; SETTINGS
+          is only what its owner can change. The advisories explain the
+          connection facts, so they open the Details page. */}
+      {view === "all" || view === "details" ? <div className="fleet-machine-details">
         <CredentialHealth machine={machine} now={now} />
+        <MachineDetailsInfo machine={machine} now={now} machineClass={recommendation.recommended.machineClass} usableBytes={recommendation.recommended.usableBytes} />
+      </div> : null}
+
+      {view === "all" || view === "settings" ? <div className="fleet-machine-details">
         <MachineDetailsSection title="General">
           <div className="fleet-machine-setting">
             <span className="fleet-machine-setting-name">Name</span>
@@ -79,7 +91,6 @@ export function MachineDetail({
           <SharingGroup machine={machine} writes={writes} />
           <SharingGroup machine={machine} writes={writes} resource="workbench" />
         </MachineDetailsSection>
-        <MachineDetailsInfo machine={machine} now={now} machineClass={recommendation.recommended.machineClass} usableBytes={recommendation.recommended.usableBytes} />
       </div> : null}
 
       {view === "all" || view === "apps" ? <MachineApps machine={machine} now={now} /> : null}
@@ -89,7 +100,7 @@ export function MachineDetail({
           for either reads them together. */}
       {view === "all" || view === "models" ? <ModelsGroup key={machine.id} machine={machine} standalone={view === "models"} navigation={modelNavigation} /> : null}
 
-      {view === "all" || view === "activity" ? <MachineActivity key={machine.id} workerId={machine.id} navigation={modelNavigation} /> : null}
+      {view === "all" || view === "activity" ? <MachineActivity key={machine.id} workerId={machine.id} navigation={modelNavigation} openId={openActivity} onOpened={onActivityOpened} /> : null}
 
       {/* Sharing keeps refusals beside its inline draft. */}
       {writes.actionError && !["all", "settings"].includes(view) ? (

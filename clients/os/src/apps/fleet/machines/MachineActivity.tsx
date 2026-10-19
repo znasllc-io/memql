@@ -1,4 +1,4 @@
-import { useCallback, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import type { Row } from "@znasllc-io/memql-sdk-core/client";
 import { AutoRefresh, EmptyState, Fact, Facts, Head, Notice, RecordList, RecordListSkeleton, RecordRow, useNow } from "../../../kit";
 import { formatDuration, formatMoment } from "../../../kit/format";
@@ -14,7 +14,9 @@ import { useInvocations } from "../routing/useInvocations";
 import { appLabel, type InvocationRow, type AppSessionRow } from "../rows";
 import { MachineDetailsSection } from "./MachineDetailsInfo";
 
-interface ActivityItem { id: string; kind: string; label: string; status: string; startedAt: string; endedAt: string; correlationId: string; facts: [string, string][]; sessionId?: string }
+/** `facts` are label, value and whether the value is worth copying: records
+ *  and identifiers are, a billing category is not. */
+export interface ActivityItem { id: string; kind: string; label: string; status: string; startedAt: string; endedAt: string; correlationId: string; facts: [string, string, boolean?][]; sessionId?: string }
 const str = (row: Row, key: string) => typeof row[key] === "string" ? row[key] as string : "";
 const LIVE = new Set(["queued", "starting", "running", "pending", "requested"]);
 export const activityStatus = (status: string) => ({ queued: "Queued", pending: "Queued", requested: "Queued", starting: "Starting", running: "Running", succeeded: "Completed", success: "Completed", ended: "Completed", failed: "Failed", failure: "Failed", cancelled: "Cancelled", timeout: "Timed out", interrupted: "Interrupted" })[status] ?? status.replaceAll("_", " ");
@@ -27,16 +29,18 @@ function invocation(call: InvocationRow): ActivityItem {
     facts: [["Call id", call.id], ["Run", call.runId], ["Step", call.stepId], ["Duration", formatDuration(call.durationMs)], ["Error", [call.errorCode, call.errorMessage].filter(Boolean).join(": ")], ["Arguments", call.argsRedacted], ["Output preview", call.outputPreview], ["Routing", call.routing.present ? JSON.stringify(call.routing, null, 2) : ""]] };
 }
 function session(row: AppSessionRow): ActivityItem {
-  return { id: `app:${row.id}`, sessionId: row.id, kind: "App session", label: appLabel(row.app), status: row.status, startedAt: row.startedAt, endedAt: row.endedAt, correlationId: "", facts: [["Session id", row.id], ["Run", row.runId], ["Billing", row.billing]] };
+  return { id: `app:${row.id}`, sessionId: row.id, kind: "App session", label: appLabel(row.app), status: row.status, startedAt: row.startedAt, endedAt: row.endedAt, correlationId: "", facts: [["Session id", row.id], ["Run", row.runId], ["Billing", row.billing, false]] };
 }
 
-export function MachineActivity({ workerId, navigation }: { workerId: string; navigation?: Omit<PageTrail, "title"> }) {
+/** The machine's activity, newest first with queued and running work on top:
+ *  model calls, tool calls and app sessions. The Activity tab lists all of it;
+ *  Equipment's Recent activity shows the first few. */
+export function useMachineActivity(workerId: string) {
   const userId = useSessionIfPresent()?.access?.userId ?? "";
   const connection = useOsConnection();
   const readEarlier = useCallback(async (signal: AbortSignal) => (await connection!.query.myModelCallsOnMachine({ workerId }, { signal })).rows(), [connection, workerId]);
   const earlier = useReading(`fleet:earlier-models:${userId}:${workerId}`, connection && userId ? readEarlier : null);
   const now = useNow(15_000);
-  const [selected, setSelected] = useState<ActivityItem | null>(null);
   const calls = useInvocations(workerId, true);
   const apps = useAppSessions();
   const feed = useLiveCollection<Row>(workerId && userId ? `fleet:activity:${userId}:${workerId}` : null, connection => ({
@@ -57,39 +61,61 @@ export function MachineActivity({ workerId, navigation }: { workerId: string; na
   const historical: ActivityItem[] = (earlier.value ?? []).map(flatten).filter(row => str(row, "createdAt") < cutover).map(row => ({
     id: `earlier:${str(row, "id")}`, kind: "Model call", label: str(row, "servedModel") || str(row, "model"), status: str(row, "outcome") === "ok" ? "succeeded" : str(row, "outcome") === "cancelled" ? "cancelled" : "failed",
     startedAt: str(row, "createdAt"), endedAt: "", correlationId: "",
-    facts: [["Call id", str(row, "id")], ["Request id", str(row, "requestId")], ["Task", str(row, "promptName")], ["Billing", str(row, "billing")], ["Duration", typeof row["totalDurationMs"] === "number" ? formatDuration(row["totalDurationMs"]) : "Not reported"]],
+    facts: [["Call id", str(row, "id")], ["Request id", str(row, "requestId")], ["Task", str(row, "promptName")], ["Billing", str(row, "billing"), false], typeof row["totalDurationMs"] === "number" ? ["Duration", formatDuration(row["totalDurationMs"])] : ["Duration", "Not reported", false]],
   }));
   const items = [...historical, ...feed.snapshot.rows.map(row => lifecycle(row, now)).filter(row => !row.correlationId || !completed.has(row.correlationId)), ...receipts, ...apps.sessions.filter(row => row.workerId === workerId).map(session)]
     .sort((a, b) => Number(LIVE.has(b.status)) - Number(LIVE.has(a.status)) || b.startedAt.localeCompare(a.startedAt));
-  const item = selected ? items.find(row => row.id === selected.id || row.correlationId && row.correlationId === selected.correlationId) ?? selected : null;
   const loading = feed.snapshot.state === "seeding" || calls.loading || apps.loading || earlier.state === "reading";
   const error = [feed.snapshot.error, calls.error, apps.error, earlier.error].filter(Boolean).join(" · ");
   const behind = feedIsBehind(feed.snapshot.state, error) || feedIsBehind(calls.state) || feedIsBehind(apps.state);
+  const refresh = () => { feed.reseed(); calls.refresh(); apps.reread(); earlier.reread(); };
+  return { items, loading, error, behind, refresh };
+}
+
+/** One activity entry as a list row; `onOpen` shows its details. */
+export function ActivityRow({ item, onOpen }: { item: ActivityItem; onOpen: () => void }) {
+  return <RecordRow name={item.label} secondary={`${item.kind} · ${formatMoment(item.startedAt)}`} state={activityStatus(item.status)} tone={LIVE.has(item.status) ? "accent" : ["failed", "failure", "interrupted", "timeout"].includes(item.status) ? "warn" : "muted"} onOpen={onOpen} />;
+}
+
+/** `openId` opens one entry's details, as when Equipment's Recent activity
+ *  sends a row here, and an empty `openId` returns to the list; `onOpened`
+ *  hands the request back once it is handled. */
+export function MachineActivity({ workerId, navigation, openId, onOpened }: { workerId: string; navigation?: Omit<PageTrail, "title">; openId?: string; onOpened?: () => void }) {
+  const { items, loading, error, behind, refresh } = useMachineActivity(workerId);
+  const [selected, setSelected] = useState<ActivityItem | null>(null);
+  useEffect(() => {
+    if (openId === undefined) return;
+    if (openId === "") { setSelected(null); onOpened?.(); return; }
+    const requested = items.find(row => row.id === openId);
+    if (requested) setSelected(requested);
+    if (requested || !loading) onOpened?.();
+  }, [openId, items, loading]);
+  const item = selected ? items.find(row => row.id === selected.id || row.correlationId && row.correlationId === selected.correlationId) ?? selected : null;
   const back = () => setSelected(null);
   return <div className="fleet-machine-activity">
     <Head title={item ? item.label : "Activity"} meta={!item && !loading && !behind ? items.length : undefined}
       breadcrumbs={[...(navigation?.breadcrumbs ?? []), { label: "Activity", ...(item ? { onSelect: back } : {}) }, ...(item ? [{ label: item.label }] : [])]}
       back={item ? { label: "Activity", onSelect: back } : navigation?.back}>
       <PageHelp title="Activity"><p>Model calls, app sessions and tool calls for this machine. Queued and active work appears first; completed work follows. Updates arrive automatically.</p><p>Older model calls, tool calls and app sessions remain available. Queue and running transitions are recorded from this update onward. Copy a detail using its copy icon.</p></PageHelp>
-      <AutoRefresh enabled={behind} busy={loading} onRefresh={() => { feed.reseed(); calls.refresh(); apps.reread(); earlier.reread(); }} />
+      <AutoRefresh enabled={behind} busy={loading} onRefresh={refresh} />
     </Head>
     {behind ? <Notice tone="warn" sentence="Activity updates are interrupted." next="Showing the last available records." detail={error || undefined} /> : null}
     {item ? <ActivityDetails item={item} /> : <>
       {loading && !items.length ? <RecordListSkeleton label="Loading activity" /> : null}
       {!loading && !behind && !items.length ? <EmptyState title="No activity yet">Work assigned to this machine will appear here.</EmptyState> : null}
-      {items.length ? <RecordList as="ul" label="Machine activity">{items.map(row => <RecordRow key={row.id} name={row.label} secondary={`${row.kind} · ${formatMoment(row.startedAt)}`} state={activityStatus(row.status)} tone={LIVE.has(row.status) ? "accent" : ["failed", "failure", "interrupted", "timeout"].includes(row.status) ? "warn" : "muted"} onOpen={() => setSelected(row)} />)}</RecordList> : null}
+      {items.length ? <RecordList as="ul" label="Machine activity">{items.map(row => <ActivityRow key={row.id} item={row} onOpen={() => setSelected(row)} />)}</RecordList> : null}
     </>}
   </div>;
 }
 function ActivityDetails({ item }: { item: ActivityItem }) {
   return <div className="fleet-machine-details">
     <MachineDetailsSection title="Overview"><Facts>
-      <Fact label="Status" value={activityStatus(item.status)} copyValue={activityStatus(item.status)} />
-      <Fact label="Type" value={item.kind} copyValue={item.kind} />
+      <Fact label="Status" value={activityStatus(item.status)} />
+      <Fact label="Type" value={item.kind} />
       <Fact label={item.id.startsWith("earlier:") ? "Recorded" : "Started"} value={formatMoment(item.startedAt)} copyValue={item.startedAt} />
       {item.endedAt ? <Fact label="Ended" value={formatMoment(item.endedAt)} copyValue={item.endedAt} /> : null}
     </Facts></MachineDetailsSection>
-    <MachineDetailsSection title="Details"><Facts>{item.facts.filter(([, value]) => value).map(([label, value]) => <Fact key={label} label={label} value={value} copyValue={value} />)}</Facts></MachineDetailsSection>
+    <MachineDetailsSection title="Details"><Facts>{item.facts.filter(([, value]) => value).map(([label, value, copy]) => <Fact key={label} label={label} value={value} copyValue={copy === false ? undefined : value} />)}</Facts></MachineDetailsSection>
     {item.sessionId ? <SessionDetails id={item.sessionId} /> : null}
   </div>;
 }

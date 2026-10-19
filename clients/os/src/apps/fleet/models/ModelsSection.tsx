@@ -490,11 +490,7 @@ function ModelLine({
         />
         <Fact label="Context" value={window === "" ? "not reported" : `${window} tokens`} copyValue={window === "" ? undefined : `${window} tokens`} />
         {model.quant === "" ? null : <Fact label="Quantization" value={model.quant} mono copyValue={model.quant} />}
-        <Fact
-          label="Machines"
-          value={machines}
-          copyValue={machines}
-        />
+        <Fact label="Machines" value={machines} />
         {/* MEASURED, and only once something on this fleet has been. An
             unmeasured row here draws `Measure`'s absence mark rather than a
             zero -- the gap is visible on purpose, because somebody scanning

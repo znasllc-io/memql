@@ -18,16 +18,14 @@ it("keeps both supported apps visible with all facts and no disclosures", () => 
  expect(codex.getByText("Ready")).toBeTruthy(); expect(codex.getByText("Active")).toBeTruthy(); expect(codex.getByText("Allowed and signed in")).toBeTruthy();
  expect(acts(codex)).toEqual([]);
 });
-it("copies each reported app fact and never a placeholder", () => {
- h.connection = fakeConnection(); render(withSession(<MachineApps machine={machine({ apps: [{ id: "codex", signedIn: true, allowed: true, subscription: "present" }] })} now={now} />, { userId: "me" }));
+it("reads as a status page with no copy, and offers the allow command for an app that needs it", () => {
+ h.connection = fakeConnection(); render(withSession(<MachineApps machine={machine({ apps: [{ id: "codex", signedIn: true, allowed: true, subscription: "present", version: "2.1.0" }, { id: "claude-code", signedIn: true, allowed: false }] })} now={now} />, { userId: "me" }));
  const codex = within(screen.getByRole("region", { name: "Codex" }));
- for (const label of ["Status", "Installed", "Availability", "Subscription"]) expect(codex.getByRole("button", { name: `Copy ${label}` })).toBeTruthy();
- cleanup();
- render(withSession(<MachineApps machine={{ ...machine(), appsReported: false }} now={now} />, { userId: "me" }));
- const waiting = within(screen.getByRole("region", { name: "Codex" }));
- expect(waiting.getByText("Waiting for Cockpit")).toBeTruthy();
- expect(waiting.getAllByText("Not reported").length).toBeGreaterThan(0);
- for (const label of ["Status", "Installed", "Availability", "Subscription"]) expect(waiting.queryByRole("button", { name: `Copy ${label}` })).toBeNull();
+ expect(codex.getByText("2.1.0")).toBeTruthy();
+ expect(codex.queryAllByRole("button", { name: /^Copy / })).toEqual([]);
+ const claude = within(screen.getByRole("region", { name: "Claude Code" }));
+ expect(claude.getByText("Allow Claude Code")).toBeTruthy();
+ expect(claude.queryAllByRole("button", { name: /^Copy (Status|Installed|Availability|Subscription|Version)$/ })).toEqual([]);
 });
 it("distinguishes permission, sign-in, missing inventory, offline and removed states", () => {
  const m = machine({ apps: [{ id: "codex", signedIn: true, allowed: false }] }); const app = m.apps[0]!;

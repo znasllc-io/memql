@@ -260,7 +260,7 @@ function WorkspaceLine({
       {open ? <div className="os-fleet-workspace-body">
         <Facts>
           <Fact label="Run" value={workspace.runId} mono copyValue={workspace.runId} />
-          <Fact label="Status" value={workspace.status} mono copyValue={workspace.status} />
+          <Fact label="Status" value={workspace.status} mono />
           <Fact label="Directory" value={workspace.storageRoot} mono copyValue={workspace.storageRoot} />
           <Fact label="Provisioned" value={formatMoment(workspace.createdAt)} copyValue={workspace.createdAt || undefined} />
           <Fact

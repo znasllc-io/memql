@@ -112,9 +112,8 @@ function SessionBody({
                 </span>
               </>
             }
-            copyValue={session.status}
           />
-          <Fact label="Billing" value={<Chip tone={session.billing === "subscription" ? "accent" : "muted"}>{session.billing}</Chip>} copyValue={session.billing} />
+          <Fact label="Billing" value={<Chip tone={session.billing === "subscription" ? "accent" : "muted"}>{session.billing}</Chip>} />
           {/* TOKENS THE APP DID NOT REPORT ARE ABSENT, NOT ZERO. An app that
               said nothing did not say it spent nothing, and the two lead to
               opposite conclusions about a run. */}

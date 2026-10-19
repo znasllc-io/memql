@@ -250,21 +250,22 @@ function CatalogEntry({ row }: { row: CatalogRow }) {
       {open ? <div className="fleet-catalog-profile">
         <p className="os-caption">{note}</p>
         <Facts>{([
-          ["Runtime", profile.runtime, ""],
-          ["Family", profile.family, "Not reported"],
-          ["Parameters", profile.params, "Not reported"],
-          ["Context", profile.contextWindow, "Not reported"],
-          ["Quantization", profile.quant, "Not reported"],
-          ["Capabilities", profile.flags.join(", "), "None reported"],
-          ["Dimensions", profile.dimensions, "Not applicable"],
-          ["License", profile.license, "Not reported"],
-          ["Recommended for", profile.recommendedFor.join(", "), "Not specified"],
-          ["Machine class", profile.minMachineClass, "Not specified"],
-          ["Platforms", profile.offeredOn.join(", "), "Not specified"],
-        ] as const).map(([label, value, missing]) => {
-          // A reported value copies; the placeholder for a missing one does not.
+          ["Runtime", profile.runtime, "", true],
+          ["Family", profile.family, "Not reported", true],
+          ["Parameters", profile.params, "Not reported", true],
+          ["Context", profile.contextWindow, "Not reported", true],
+          ["Quantization", profile.quant, "Not reported", true],
+          ["Capabilities", profile.flags.join(", "), "None reported", false],
+          ["Dimensions", profile.dimensions, "Not applicable", true],
+          ["License", profile.license, "Not reported", true],
+          ["Recommended for", profile.recommendedFor.join(", "), "Not specified", false],
+          ["Machine class", profile.minMachineClass, "Not specified", false],
+          ["Platforms", profile.offeredOn.join(", "), "Not specified", false],
+        ] as const).map(([label, value, missing, copyable]) => {
+          // The model's own specification copies; descriptive lists and the
+          // placeholder for a missing value do not.
           const text = value ? String(value) : "";
-          return <Fact key={label} label={label} value={text || missing} copyValue={text || undefined} />;
+          return <Fact key={label} label={label} value={text || missing} copyValue={copyable && text ? text : undefined} />;
         })}</Facts>
       </div> : null}
     </div>
