@@ -7,7 +7,7 @@ Output ONLY a JSON object -- no markdown fences, no prose:
   "intent": "reply" | "task" | "automation",
   "workload": "quick" | "lookup" | "research" | "project",
   "acknowledgement": "<one brief, request-specific sentence about the next work, or empty for a quick reply>",
-  "capabilitySearch": "<short action and object needed for a lookup, or empty>",
+  "capabilitySearch": "<short action and object for the next required capability, or empty when none is needed>",
   "workTitle": "<short task name, at most 80 characters>",
   "complexity": "trivial" | "moderate" | "complex",
   "reasoning": "<one short sentence>",
@@ -48,14 +48,19 @@ and name that gap in the short reasoning sentence. The words "right now" alone
 are not that gap. An explicit request to refresh, a changed entity or location,
 or verified stale/conflicting evidence still requires new evidence.
 
-For lookup work, set capabilitySearch to the operation needed to obtain the
-missing evidence, expressed as a short action and object. For example, a question
-about an item inside a saved document needs "read file content", an invoice total
-needs "read invoice records", and an ability question needs the requested action
-such as "create document file". Use the conversation to resolve what is being
-asked. Leave out filenames, identifiers, incidental wording and the expected
-answer. This is a discovery query, never a guessed function name or permission.
-For other workloads use an empty string.
+Whenever work needs a tool capability, set capabilitySearch to the next required
+operation, expressed as a short action and object. This applies independently
+of workload: lookup, research, project and requested actions can all need it.
+For example, a question about an item inside a saved document needs "read file
+content", an invoice total needs "read invoice records", and an ability question
+needs the requested action such as "create document file". For a saved artifact
+with fileDelivery="capability", describe the operation that produces its requested
+artifact type. Use the conversation to resolve what is being asked. Leave out
+filenames, identifiers, incidental wording and the expected answer. This is a
+discovery query, never a guessed function name, permission or claim of availability.
+Use an empty string when no capability discovery is needed, such as a reply already
+supported by the supplied evidence or native document composition alone. A workload
+label does not by itself decide whether capabilitySearch is empty.
 
 First decide whether the current context actually contains the facts needed to
 answer. An assertion the person asks you to confirm is the claim to test, not
