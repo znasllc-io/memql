@@ -17,32 +17,28 @@ import (
 )
 
 type AskTurn struct {
-	CanGuideWork        bool         `json:"canGuideWork,omitempty"`
-	GuidanceTargetRunID string       `json:"guidanceTargetRunId,omitempty"`
-	GuidanceStatus      string       `json:"guidanceStatus,omitempty"`
-	GuidanceEpoch       string       `json:"guidanceEpoch,omitempty"`
-	ApprovalID          string       `json:"approvalId,omitempty"`
-	Advisor             bool         `json:"advisor,omitempty"`
-	VoiceInterrupted    bool         `json:"voiceInterrupted,omitempty"`
-	ID                  string       `json:"id"`
-	Prompt              string       `json:"prompt"`
-	Answer              string       `json:"answer"`
-	Context             string       `json:"context,omitempty"`
-	State               string       `json:"state"`
-	StartedAt           time.Time    `json:"startedAt"`
-	EndedAt             *time.Time   `json:"endedAt,omitempty"`
-	Activity            []WorkEvent  `json:"activity"`
-	Error               string       `json:"error,omitempty"`
-	GoalID              string       `json:"goalId,omitempty"`
-	RunID               string       `json:"runId,omitempty"`
-	Workload            string       `json:"workload,omitempty"`
-	Background          bool         `json:"background,omitempty"`
-	Acknowledgement     string       `json:"acknowledgement,omitempty"`
-	AcknowledgedAt      *time.Time   `json:"acknowledgedAt,omitempty"`
-	WorkStatus          string       `json:"workStatus,omitempty"`
-	WorkTitle           string       `json:"workTitle,omitempty"`
-	Question            *AskQuestion `json:"question,omitempty"`
-	AnswerOnly          bool         `json:"answerOnly,omitempty"`
+	ApprovalID       string       `json:"approvalId,omitempty"`
+	Advisor          bool         `json:"advisor,omitempty"`
+	VoiceInterrupted bool         `json:"voiceInterrupted,omitempty"`
+	ID               string       `json:"id"`
+	Prompt           string       `json:"prompt"`
+	Answer           string       `json:"answer"`
+	Context          string       `json:"context,omitempty"`
+	State            string       `json:"state"`
+	StartedAt        time.Time    `json:"startedAt"`
+	EndedAt          *time.Time   `json:"endedAt,omitempty"`
+	Activity         []WorkEvent  `json:"activity"`
+	Error            string       `json:"error,omitempty"`
+	GoalID           string       `json:"goalId,omitempty"`
+	RunID            string       `json:"runId,omitempty"`
+	Workload         string       `json:"workload,omitempty"`
+	Background       bool         `json:"background,omitempty"`
+	Acknowledgement  string       `json:"acknowledgement,omitempty"`
+	AcknowledgedAt   *time.Time   `json:"acknowledgedAt,omitempty"`
+	WorkStatus       string       `json:"workStatus,omitempty"`
+	WorkTitle        string       `json:"workTitle,omitempty"`
+	Question         *AskQuestion `json:"question,omitempty"`
+	AnswerOnly       bool         `json:"answerOnly,omitempty"`
 	// Route is the source choice the turn's goal was opened with; absent for
 	// Auto. The run row carries the choice every node honours -- this is the
 	// conversation's own record of it.
@@ -50,6 +46,10 @@ type AskTurn struct {
 	// Attachments are the Library files the person attached to this message,
 	// resolved under them when the turn opened (ask_attachments.go).
 	Attachments []AskAttachment `json:"attachments,omitempty"`
+	// Routed is where this message went when it reached goals already running
+	// in the conversation (ask_route_turn.go); absent for a turn that only
+	// opened its own goal.
+	Routed *AskRouting `json:"routed,omitempty"`
 }
 
 type AskQuestion struct {
@@ -91,6 +91,13 @@ type askTranscript struct {
 // cannot read refuses the turn with an *AskAttachmentError), recorded on the
 // transcript turn, and carried to the planner and agent on the goal's
 // conversation input.
+//
+// A new message the goals already running in the conversation may be about is
+// ROUTED before intake (ask_route_apply.go): it may update those goals, stop
+// them, ask which one was meant, or split off a new request. Routing runs with
+// the conversation's write lock released; a message that still needs a goal
+// of its own takes the lock again for intake. Whatever it says goes out
+// through onText, a reply before a split request's own answer.
 func (e *MemQLEngine) RunAsk(ctx context.Context, conversationID, turnID, prompt, pageContext string, route AskRoute, attachmentIDs []string, onText func(string), onEvent func(WorkEvent)) (answer string, err error) {
 	if subject, ok := auth.SubjectFromContext(ctx); !ok || !auth.CapableFor(ctx, subject, "read", "app:ask") {
 		return "", fmt.Errorf("Ask requires a signed-in person")
@@ -177,7 +184,8 @@ func (e *MemQLEngine) RunAsk(ctx context.Context, conversationID, turnID, prompt
 		title = string(runes[:min(80, len(runes))])
 	}
 	history := askConversationMessages(transcript.Turns)
-	if resumeIndex < 0 {
+	fresh := resumeIndex < 0
+	if fresh {
 		turn := AskTurn{ID: turnID, Prompt: prompt, Context: pageContext, State: "streaming", StartedAt: time.Now().UTC(), Activity: []WorkEvent{}}
 		if !choice.IsZero() {
 			turn.Route = &AskRoute{Source: choice.Source, Level: choice.Level, Destination: choice.Destination}
@@ -245,6 +253,70 @@ func (e *MemQLEngine) RunAsk(ctx context.Context, conversationID, turnID, prompt
 		}
 	}()
 
+	// A new message may be about the goals already running here: route it
+	// first. With no goal active, or a message routing cannot carry, this is
+	// today's path untouched and the lock is never released for it.
+	statement := prompt
+	if fresh && askRouteEligible(prompt, turn.Attachments) {
+		if goals, listErr := e.activeAskGoals(ctx, transcript); listErr != nil || len(goals) > 0 {
+			// Routing makes a model call and calls work builtins: never under
+			// this lock, which is not reentrant.
+			release()
+			locked = false
+			outcome, routeErr := e.routeAskTurn(ctx, conversationID, turnID, prompt, choice, emit)
+			if routeErr != nil {
+				return "", routeErr
+			}
+			mu.Lock()
+			turn.Routed = outcome.Routed
+			if !outcome.Intake {
+				turn.Answer = outcome.Answer
+			}
+			mu.Unlock()
+			if !outcome.Intake {
+				// The client needs the text of a turn that opened no goal.
+				if onText != nil && outcome.Answer != "" {
+					onText(outcome.Answer)
+				}
+				return outcome.Answer, nil
+			}
+			// A split message's reply comes first; it is never part of the
+			// new request's own answer.
+			if onText != nil && outcome.Routed != nil && outcome.Routed.Reply != "" {
+				onText(outcome.Routed.Reply + "\n\n")
+			}
+			statement = outcome.Statement
+			// Intake takes the lock again and works on the conversation as it
+			// is now: other turns were written while routing ran, and what
+			// routing recorded on this one is the record.
+			if release, err = e.lockAskConversationKind(ctx, conversationID, "write"); err != nil {
+				return "", err
+			}
+			locked = true
+			row, err = e.askRead(ctx, conversationID)
+			if err != nil {
+				return "", err
+			}
+			latest, readErr := approvalTranscript(row)
+			if readErr != nil {
+				return "", readErr
+			}
+			index := askTurnIndex(latest.Turns, turnID)
+			if index < 0 {
+				return "", fmt.Errorf("the accepted conversation turn is unavailable")
+			}
+			mu.Lock()
+			current := *turn
+			if saved := latest.Turns[index].Routed; saved != nil {
+				current.Routed = saved
+			}
+			latest.Turns[index] = current
+			transcript, title = latest, stringArg(row, "title")
+			turn = &transcript.Turns[index]
+			mu.Unlock()
+		}
+	}
+
 	// Ask is a conversation adapter over the same intake as Nexus/API goals.
 	// Context is persisted with the run before the planner/agent replica sees it.
 	if turn.RunID == "" {
@@ -254,7 +326,7 @@ func (e *MemQLEngine) RunAsk(ctx context.Context, conversationID, turnID, prompt
 			conversation["attachments"] = askAttachmentsInput(turn.Attachments)
 		}
 		call, callErr := parser.RenderCall("work.createGoal", map[string]any{
-			"statement": prompt, "requestedVia": "ask",
+			"statement": statement, "requestedVia": "ask",
 			"ceilings": map[string]any{"wallClockMs": 7200000, "maxModelCalls": 96, "maxRetries": 2},
 			"input":    map[string]any{"conversation": conversation},
 		})

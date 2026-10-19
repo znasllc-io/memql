@@ -8,3 +8,18 @@ prompt askApprovalReply { question string! evidence string! }
 @templateFile("prompts/approvalSecondOpinion.tmpl")
 prompt askApprovalSecondOpinion { question string! evidence string! }
 
+/// Decide what one new Ask message does to the goals already running in its
+/// conversation: update some, ask to stop some, confirm a stop, split off a new
+/// request, or ask which goal is meant. The answer is validated in Go before
+/// anything is delivered; goals appear only as handles, never as ids.
+@level("fast")
+@templateFile("prompts/askMessageRouting.tmpl")
+prompt askMessageRouting {
+  message              string!   @description("The person's new message, verbatim.")
+  conversation         string    @description("The conversation's most recent turns, at most 8, each side cut to 600 characters.")
+  goals                []object! @description("The conversation's active goals, newest first, as {handle, title, request, state, waitingOn, updates}. The handle (g1 to g12) is the only name a goal has here.")
+  pendingStops         []string  @description("Handles of the goals whose stop question the person has not answered.")
+  pendingClarification object    @description("The previous message and the question routing asked about it, as {message, question}, while it is unanswered.")
+  previousError        string    @description("Why the previous answer was refused, on the one retry.")
+  now                  string    @description("The current time, RFC 3339.")
+}

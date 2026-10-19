@@ -1,4 +1,4 @@
-import type { AskHandle, AskTransport, WorkGuidanceRequest } from "./askController";
+import type { AskHandle, AskTransport } from "./askController";
 import { AUTO_ROUTING, routeIdFromSource, routeSource, type AskRouting } from "./askRoute";
 import type { ExecutionDestination } from "../kit/ExecutionDestination";
 import type { UploadHandle, UploadProvider } from "../items/upload";
@@ -41,14 +41,47 @@ export const MAX_ASK_ATTACHMENTS = 10;
 /** The route and Where a message is sent with. "" is Auto. */
 export interface AskRoutingChoice { route: string; destination: ExecutionDestination }
 
+/** One goal a message went to, and what became of it there (`routeLabel`). */
+export interface AskRouteTarget {
+  goalId: string;
+  runId: string;
+  /** The goal's current title; the cluster re-reads it on every snapshot. */
+  title: string;
+  status: "queued" | "received" | "answered" | "notApproved" | "saved" | "notDelivered" | "notReceived";
+  epoch?: string;
+  /** Present when the message answered one of the goal's requests rather than guiding its work. */
+  approvalId?: string;
+  reason?: "ended" | "review" | "limit" | "refused";
+  /** Exactly what the goal received. */
+  text: string;
+}
+/** The person asked to drop a goal; nothing stops until they answer on its card. */
+export interface AskStopQuestion {
+  goalId: string;
+  runId: string;
+  title: string;
+  /** "" while it waits on the person; "ended" when the goal ended unanswered. */
+  decision?: "" | "stopped" | "kept" | "ended";
+}
+/** Where a message went when it reached goals already running in the conversation. */
+export interface AskRouted {
+  targets?: AskRouteTarget[];
+  stops?: AskStopQuestion[];
+  /** Said before a split request's own answer. */
+  reply?: string;
+  /** What intake received when the message was split. */
+  statement?: string;
+  clarify?: boolean;
+  resolved?: boolean;
+  skipped?: string;
+}
+
 export interface AskTurn {
   /** What the turn ran with: absent for Auto, recorded by the cluster. */
   route?: { source?: string; level?: string; destination?: string };
   attachments?: AskTurnAttachment[];
-  canGuideWork?: boolean;
-  guidanceEpoch?: string;
-  guidanceTargetRunId?: string;
-  guidanceStatus?: "queued" | "applied" | "not-received";
+  /** Absent for a message that only opened its own goal. */
+  routed?: AskRouted;
   approvalId?: string;
   advisor?: boolean;
   question?: AskQuestion;
@@ -92,9 +125,8 @@ export interface ConversationState {
   route?: string;
   /** Files in the message field, in the order they were added. */
   attachments?: AskAttachmentDraft[];
-  workGuidance?: { targetEpoch: string; runId: string; conversationId: string; title: string } | null;
-  workGuidanceSending?: boolean;
-  workGuidanceRetry?: WorkGuidanceRequest | null;
+  /** Stop questions being answered now, by `stopKey`. */
+  stopDecisions?: Readonly<Record<string, "stop" | "keep">>;
   discussion?: ApprovalDiscussion | null;
   discussionOpening?: boolean;
   discussionSending?: boolean;
@@ -142,9 +174,11 @@ export class ConversationSession {
   private guidanceRevision = 0;
   private uncertainGuidance = new Map<string, string>();
   private pendingDiscussionRequest: { key: string; id: string } | null = null;
-  private workGuidanceEpoch = 0;
-  private workGuidanceRevision = 0;
-  private pendingWorkGuidance = new Map<string, WorkGuidanceRequest>();
+  /** A refused stop decision, still said while its question waits on the person. */
+  private stopRefusal: { key: string; error: string } | null = null;
+  /** Moves when a stop decision is sent and when it is recorded, so a read that
+   *  left before either cannot put back a question the person answered. */
+  private stopRevision = 0;
   private voiceEpoch = 0;
   private voiceRevision = 0;
   private voiceTurnId: string | null = null;
@@ -176,7 +210,7 @@ export class ConversationSession {
   /** A conversation's own choice: what its last ordinary message ran with, or
    *  the person's default for one with no messages yet. */
   private routingFor(turns: readonly AskTurn[]): AskRoutingChoice {
-    const last = [...turns].reverse().find(turn => !turn.approvalId && !turn.guidanceTargetRunId);
+    const last = [...turns].reverse().find(turn => !turn.approvalId);
     if (!last) return { ...this.routingDefault };
     const destination = last.route?.destination;
     return { route: routeIdFromSource(last.route?.source), destination: destination === "workbench" || destination === "computer" ? destination : "auto" };
@@ -218,58 +252,45 @@ export class ConversationSession {
     this.patch({ attachments: held.map(item => item.id === id ? { ...item, ...patch } : item) });
   }
   questionFocused = () => this.patch({ focusQuestionId: null });
-  beginWorkGuidance = (turnId: string): boolean => {
-    const turn = this.state.turns.find(item => item.id === turnId);
-    if (!turn || !canGuideTurn(turn) || !this.state.selectedId || !this.transport.guideWork || this.disposed || this.state.busy || this.state.loading || this.state.voiceActive || this.state.discussion || this.state.discussionDraft || this.state.discussionOpening || this.state.workGuidanceSending) return false;
-    this.workGuidanceEpoch++;
-    const target = { targetEpoch: turn.guidanceEpoch!, runId: turn.runId!, conversationId: this.state.selectedId, title: turn.workTitle || turn.prompt };
-    const retry = this.pendingWorkGuidance.get(JSON.stringify([target.conversationId, target.runId]));
-    this.patch({ workGuidance: target, workGuidanceSending: false, workGuidanceRetry: retry ?? null, error: "" });
-    return true;
-  };
-  leaveWorkGuidance = () => {
-    this.workGuidanceEpoch++;
-    this.patch({ workGuidance: null, workGuidanceSending: false, workGuidanceRetry: null, error: "" });
-  };
-  retryWorkGuidance = () => {
-    const retry = this.state.workGuidanceRetry;
-    if (!retry || retry.runId !== this.state.workGuidance?.runId || retry.conversationId !== this.state.selectedId) return false;
-    return this.submitWorkGuidance(retry, false);
-  };
-  private sendWorkGuidance = (prompt: string): boolean => {
-    const target = this.state.workGuidance;
-    if (!target || target.conversationId !== this.state.selectedId || this.state.workGuidanceRetry || !prompt.trim()) return false;
-    if (!this.state.turns.some(turn => turn.runId === target.runId && turn.guidanceEpoch === target.targetEpoch && canGuideTurn(turn))) {
-      this.patch({ error: "This work changed or is no longer available for guidance. Select it again, or return to conversation to start a new request." }); return false;
-    }
-    if (Array.from(prompt.trim()).length > 4000) { this.patch({ error: "Keep guidance to 4,000 characters or fewer." }); return false; }
-    return this.submitWorkGuidance({ targetEpoch: target.targetEpoch, runId: target.runId, conversationId: target.conversationId, requestId: crypto.randomUUID(), prompt: prompt.trim() }, true);
-  };
-  private submitWorkGuidance = (request: WorkGuidanceRequest, clearDraft: boolean): boolean => {
-    if (!this.transport.guideWork || this.disposed || this.state.workGuidanceSending || this.state.loading || this.state.busy || this.state.voiceActive) return false;
-    const epoch = this.workGuidanceEpoch;
-    const key = JSON.stringify([request.conversationId, request.runId]);
-    this.pendingWorkGuidance.set(key, request);
-    this.workGuidanceRevision++;
-    this.patch({ workGuidanceSending: true, workGuidanceRetry: null, error: "", ...(clearDraft ? { draft: "" } : {}) });
-    void this.transport.guideWork(request).then(async receipt => {
-      if (receipt.runId !== request.runId || receipt.conversationId !== request.conversationId || receipt.requestId !== request.requestId || !receipt.turn?.id || receipt.turn.guidanceTargetRunId !== request.runId || receipt.turn.prompt !== request.prompt || receipt.turn.answerOnly !== true || receipt.turn.runId || receipt.turn.goalId || receipt.turn.guidanceStatus !== receipt.status || !["queued", "applied", "not-received"].includes(receipt.status)) throw new Error("The cluster did not confirm this guidance. Retry to check the original message.");
-      const pending = this.pendingWorkGuidance.get(key);
-      if (pending?.requestId === request.requestId && pending.targetEpoch === request.targetEpoch) this.pendingWorkGuidance.delete(key);
-      if (epoch !== this.workGuidanceEpoch || this.disposed) return;
-      this.workGuidanceRevision++;
-      const turn = receipt.turn;
-      this.patch({ turns: this.state.turns.some(item => item.id === turn.id) ? this.state.turns : [...this.state.turns, turn] });
+  /** Answer the stop question one message asked about a goal (`AskStopQuestion`).
+   *  Stop closes the goal; Keep only records the answer. The card's question
+   *  goes once the cluster has recorded it, and a refusal is said in the
+   *  surface's error line with the question still there to answer again. */
+  decideStop = async (turnId: string, runId: string, decision: "stop" | "keep"): Promise<boolean> => {
+    const conversationId = this.state.selectedId;
+    const key = stopKey(turnId, runId);
+    if (!conversationId || this.disposed || this.state.stopDecisions?.[key]) return false;
+    if (!this.transport.decideStop) { this.patch({ error: "Stopping work is unavailable." }); return false; }
+    const selection = this.selection;
+    const current = () => !this.disposed && selection === this.selection && this.state.selectedId === conversationId;
+    this.stopRefusal = null;
+    this.stopRevision++;
+    this.patch({ stopDecisions: { ...this.state.stopDecisions, [key]: decision }, error: "" });
+    try {
+      await this.transport.decideStop({ conversationId, turnId, runId, decision });
+      if (!current()) return true;
+      // Recorded: the question is answered even if the read that follows fails,
+      // and a read that left while it was being recorded answers too early.
+      this.stopRevision++;
+      const answered = decision === "stop" ? "stopped" : "kept";
+      this.patch({ turns: this.state.turns.map(turn => turn.id !== turnId || !turn.routed?.stops ? turn : { ...turn, routed: { ...turn.routed, stops: turn.routed.stops.map(stop => stop.runId === runId && !stop.decision ? { ...stop, decision: answered } : stop) } }) });
       await this.reload();
-    }).catch((error: unknown) => {
-      if (epoch === this.workGuidanceEpoch && !this.disposed) this.patch({ error: message(error), workGuidanceRetry: request, ...(clearDraft && this.state.draft === "" ? { draft: request.prompt } : {}) });
-    }).finally(() => {
-      if (epoch === this.workGuidanceEpoch && !this.disposed) this.patch({ workGuidanceSending: false });
-    });
-    return true;
+      return true;
+    } catch (error) {
+      if (current()) {
+        this.stopRefusal = { key, error: message(error) };
+        this.patch({ error: this.stopRefusal.error });
+      }
+      return false;
+    } finally {
+      if (this.state.stopDecisions?.[key]) {
+        const rest = { ...this.state.stopDecisions };
+        delete rest[key];
+        this.patch({ stopDecisions: rest });
+      }
+    }
   };
   discussApproval = async (approvalId: string) => {
-    if (this.state.workGuidance) { this.patch({ error: "Return to conversation before opening an approval discussion." }); return false; }
     if (this.state.discussionSending || this.state.guidanceSending) { this.patch({ error: "Wait for the current message to be recorded before opening another approval." }); return false; }
     if (this.state.busy || this.state.voiceActive) { this.patch({ error: "Finish the current reply before opening an approval discussion." }); return false; }
     const epoch = ++this.discussionEpoch;
@@ -295,7 +316,7 @@ export class ConversationSession {
   };
   prepareApprovalTurnRetry = async (turnId: string): Promise<boolean> => {
     const turn = this.state.turns.find(item => item.id === turnId);
-    if (!turn?.approvalId || !turn.error || this.state.workGuidance || this.state.busy || this.state.voiceActive || this.state.loading || this.state.discussionSending || this.state.guidanceSending) return false;
+    if (!turn?.approvalId || !turn.error || this.state.busy || this.state.voiceActive || this.state.loading || this.state.discussionSending || this.state.guidanceSending) return false;
     const selected = this.state.selectedId;
     const intent = { approvalId: turn.approvalId, advisor: turn.advisor === true };
     // Keep the read-only intent even if reopening fails. Only deliberately
@@ -438,7 +459,6 @@ export class ConversationSession {
     if (this.state.busy || this.state.voiceActive) return;
     this.selection++;
     this.leaveDiscussion();
-    this.leaveWorkGuidance();
     this.patch({ selectedId: null, openingId: null, selectionError: "", turns: [], dictationActivity: [], draft: "", error: "", snapshotError: "", loading: false, focusQuestionId: null, ...this.routingFor([]) });
   };
   /** The explicit New action persists even when no inference is available. */
@@ -466,7 +486,6 @@ export class ConversationSession {
     try {
       const turns = await this.transport.conversations.read(id);
       if (selection === this.selection) {
-        this.leaveWorkGuidance();
         this.patch({ discussion: null });
         this.patch({ selectedId: id, openingId: null, turns, dictationActivity: [], draft: "", loading: false, ...this.routingFor(turns) });
         this.scheduleRefresh();
@@ -512,8 +531,6 @@ export class ConversationSession {
   }
   activate = () => {
     this.disposed = false;
-    const target = this.state.workGuidance;
-    if (target && this.state.workGuidanceSending) this.patch({ workGuidanceSending: false, workGuidanceRetry: this.pendingWorkGuidance.get(JSON.stringify([target.conversationId, target.runId])) ?? null });
     this.scheduleRefresh();
   };
   dispose = () => {
@@ -524,11 +541,9 @@ export class ConversationSession {
     this.refreshTimer = null;
     this.detach();
     this.selection++; this.historyEpoch++; this.voiceEpoch++; this.discussionEpoch++;
-    this.workGuidanceEpoch++;
     this.listeners.clear();
   };
   beginVoice = async (): Promise<string> => {
-    if (this.state.workGuidance) throw new Error("Use typing or dictation while guiding work.");
     if (this.state.discussion || this.state.discussionOpening || this.state.discussionDraft) throw new Error("Use typing or dictation while discussing an approval.");
     if (this.state.busy || this.state.loading || this.state.voiceActive) throw new Error("Finish the current turn first.");
     const epoch = ++this.voiceEpoch;
@@ -556,26 +571,29 @@ export class ConversationSession {
     const discussionEpoch = this.discussionEpoch;
     const revision = this.voiceRevision;
     const guidanceRevision = this.guidanceRevision;
-    const workGuidanceRevision = this.workGuidanceRevision;
+    const stopRevision = this.stopRevision;
     if (!id || !this.transport.conversations || this.disposed || this.state.loading || this.state.discussionOpening) return Promise.resolve();
-    const key = JSON.stringify([id, selection, epoch, discussionEpoch, revision, guidanceRevision, workGuidanceRevision]);
+    const key = JSON.stringify([id, selection, epoch, discussionEpoch, revision, guidanceRevision, stopRevision]);
     if (this.reloadRequest?.key === key) {
       this.reloadRequest.refreshHistory ||= refreshHistory;
       return this.reloadRequest.promise;
     }
     const request = { key, refreshHistory, promise: Promise.resolve() };
     this.reloadRequest = request;
-    const current = () => !this.disposed && this.state.selectedId === id && selection === this.selection && epoch === this.epoch && discussionEpoch === this.discussionEpoch && revision === this.voiceRevision && guidanceRevision === this.guidanceRevision && workGuidanceRevision === this.workGuidanceRevision;
+    const current = () => !this.disposed && this.state.selectedId === id && selection === this.selection && epoch === this.epoch && discussionEpoch === this.discussionEpoch && revision === this.voiceRevision && guidanceRevision === this.guidanceRevision && stopRevision === this.stopRevision;
     request.promise = (async () => {
       try { const turns = await this.transport.conversations!.read(id); if (current()) {
         // A stream can lose its first run event as well as its terminal event.
         // The accepted client request ID in this conversation correlates the
         // receipt even before a run ID arrived. A known run must still match.
+        // A message that only went to goals already running opens no run of
+        // its own: its finished copy says where it went (`routed`) instead.
         const local = new Map(this.state.turns.filter(turn => turn.state === "streaming").map(turn => [turn.id, turn]));
         let recoveredStream = false;
         const merged = turns.map(turn => {
           const active = local.get(turn.id);
-          if (!this.state.voiceActive && active && turn.runId && (!active.runId || active.runId === turn.runId) && (turn.state === "done" || turn.state === "error")) {
+          const correlated = turn.runId ? !active?.runId || active.runId === turn.runId : Boolean(turn.routed) && !active?.runId;
+          if (!this.state.voiceActive && active && correlated && (turn.state === "done" || turn.state === "error")) {
             local.delete(turn.id);
             recoveredStream = true;
             return turn;
@@ -588,8 +606,12 @@ export class ConversationSession {
           this.active?.cancel(); this.active = null;
         }
         // Read recovery must not retain an old snapshot error or erase an
-        // uncertain guidance/discussion write and its retry receipt.
-        this.patch({ turns: merged, snapshotError: "", ...(recoveredStream && !this.state.voiceActive ? { busy: false } : {}), ...(this.state.discussion || this.state.workGuidance ? {} : { error: "" }) });
+        // uncertain guidance/discussion write and its retry receipt, nor a
+        // refused stop while its question still waits on the person.
+        const refusal = this.stopRefusal;
+        const refused = refusal !== null && this.state.error === refusal.error && [...pendingStops(merged)].some(([runId, stop]) => stopKey(stop.turnId, runId) === refusal.key);
+        if (!refused) this.stopRefusal = null;
+        this.patch({ turns: merged, snapshotError: "", ...(recoveredStream && !this.state.voiceActive ? { busy: false } : {}), ...(this.state.discussion || refused ? {} : { error: "" }) });
         const discussion = this.state.discussion;
         if (discussion && this.transport.discussApproval) {
           const latest = await this.transport.discussApproval(discussion.approval.id);
@@ -629,7 +651,6 @@ export class ConversationSession {
     }
   };
   send = (prompt: string, context: string | null): boolean => {
-    if (this.state.workGuidance) return this.sendWorkGuidance(prompt);
     if (this.state.discussionOpening) return false;
     if (this.state.discussionDraft) {
       if (this.state.discussionDraft.approvalId !== this.state.discussion?.approval.id) return false;
@@ -708,7 +729,20 @@ export function isBackgroundTurn(turn: AskTurn) { return Boolean(turn.runId) && 
 /** A recovered unclassified/quick request stays inline while observation resumes. */
 export function isConversationalWait(turn: AskTurn) { return isBackgroundTurn(turn) && turn.state !== "waiting" && !turn.background && !turn.acknowledgement && (!turn.workload || turn.workload === "quick"); }
 
-export function canGuideTurn(turn: AskTurn) { return turn.canGuideWork === true && !!turn.guidanceEpoch && !turn.approvalId && !turn.answerOnly && isBackgroundTurn(turn); }
+/** One stop question's identity: the message that asked it and the goal's run. */
+export function stopKey(turnId: string, runId: string) { return JSON.stringify([turnId, runId]); }
+
+/** The stop question still waiting on the person for each goal, by the goal's
+ *  run. A later message's question about the same goal is the one asked. */
+export function pendingStops(turns: readonly AskTurn[]): Map<string, { turnId: string; question: AskStopQuestion }> {
+  const pending = new Map<string, { turnId: string; question: AskStopQuestion }>();
+  for (const turn of turns) {
+    for (const question of turn.routed?.stops ?? []) {
+      if (question.runId && !question.decision) pending.set(question.runId, { turnId: turn.id, question });
+    }
+  }
+  return pending;
+}
 
 function runIdentity(event: AskActivity): Partial<AskTurn> {
   if (event.kind !== "run") return {};

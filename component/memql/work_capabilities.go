@@ -17,7 +17,7 @@ import (
 )
 
 func (e *MemQLEngine) workCapabilityAllowed(ctx context.Context, fn *Function) bool {
-	if fn == nil || !fn.Enabled || fn.ServerOnly || (strings.HasPrefix(fn.Name, "ask") && fn.Name != "askConversationById") || fn.Name == "workAcknowledgementCache" || fn.Name == "indexConversationMemory" || fn.Name == "workCapabilities" || fn.Name == "workExecute" || fn.Name == "createGoal" || fn.Name == "runAgentTurn" || strings.HasSuffix(fn.Name, "AskConversation") {
+	if fn == nil || !fn.Enabled || fn.ServerOnly || (strings.HasPrefix(fn.Name, "ask") && fn.Name != "askConversationById") || fn.Name == "workAcknowledgementCache" || fn.Name == "indexConversationMemory" || fn.Name == "workCapabilities" || fn.Name == "workExecute" || fn.Name == "createGoal" || fn.Name == "workRetitleRun" || fn.Name == "runAgentTurn" || strings.HasSuffix(fn.Name, "AskConversation") {
 		return false
 	}
 	// Human gates must use their dedicated tools so the agent loop persists

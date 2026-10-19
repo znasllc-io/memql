@@ -350,7 +350,8 @@ export function runFromRow(row: Row): RunRow {
     id: rowString(flat, "id"),
     goalId: rowString(flat, "goalId"),
     automationName: rowString(flat, "automationName"),
-    workTitle: rowString(flat, "workTitle") || rowString(objectField(flat, "classification") ?? {}, "workTitle"),
+    // A later message's title (run.title) outranks the one intake chose.
+    workTitle: rowString(flat, "title") || rowString(flat, "workTitle") || rowString(objectField(flat, "classification") ?? {}, "workTitle"),
     mode: rowString(flat, "mode"),
     replayPolicy: rowString(flat, "replayPolicy"),
     status: rowString(flat, "status"),

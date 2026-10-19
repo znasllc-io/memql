@@ -8771,6 +8771,7 @@
         "templateConstructId",
         "templateFingerprint",
         "templateVersion",
+        "title",
         "triggerEvent",
         "triggeredBy",
         "validation",

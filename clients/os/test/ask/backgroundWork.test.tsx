@@ -172,7 +172,7 @@ it.each([undefined, "quick"])("keeps a recovered %s conversation inline without 
  session.dispose();
 });
 it("places the work shortcut after acknowledgement text and keeps only navigation on the card", async () => {
- const stored = turn("task", { workload: "quick", acknowledgement: "I’ll compare the **reports**.", answer: "I’ll compare the **reports**.", canGuideWork: true, guidanceEpoch: "current" });
+ const stored = turn("task", { workload: "quick", acknowledgement: "I’ll compare the **reports**.", answer: "I’ll compare the **reports**." });
  const transport = { ask: vi.fn(() => ({cancel(){}})), conversations: { list: async()=>[], create:async()=>({id:"chat",title:"Chat"}), read:async()=>[stored] } };
  const session = new ConversationSession(transport); await session.select("chat"); const onOpen = vi.fn();
  const view = render(<AskSurface conversation={session} transport={transport} variant="sheet" availability={{state:"ready",message:"",refresh(){}}} onOpenWork={onOpen} />);
@@ -181,7 +181,6 @@ it("places the work shortcut after acknowledgement text and keeps only navigatio
  expect(shortcut.previousElementSibling?.textContent).toBe("I’ll compare the reports.");
  fireEvent.click(shortcut); expect(onOpen).toHaveBeenLastCalledWith("run-task", "chat");
  expect(view.container.querySelectorAll(".os-ask-work-queue button")).toHaveLength(1);
- expect(screen.queryByRole("button", {name:/Guide this work/})).toBeNull();
  session.dispose();
 });
 

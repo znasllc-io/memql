@@ -145,6 +145,13 @@ var promptLevels = map[string]string{
 	// An explicitly requested independent opinion weighs alternatives for the
 	// person to review. It cannot approve or run those alternatives.
 	"askApprovalSecondOpinion": "strong",
+	// askMessageRouting picks which running goals a message is about, from
+	// handles, titles and a few bounded turns, while the person waits for an
+	// answer. Short, structured and checked in Go: a refused answer is retried
+	// once, then the message goes to intake as written. It grants nothing (a
+	// permission request only gets the message as a correction), and each
+	// routed message is labeled with the goal it reached.
+	"askMessageRouting": "fast",
 	// deriveProcedureHole: proposes how ONE argument of a learned procedure is
 	// derived from an earlier step's result (epic memql#5402, D6's single
 	// bounded call). Reasoning rather than fast, and the reason is the shape

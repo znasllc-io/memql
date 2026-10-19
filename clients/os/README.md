@@ -1702,27 +1702,95 @@ permission-scoped MemQL agent; test transports live under `test/ask`.
 
 Quick replies stay inline. Longer requests return a durable queue receipt, free
 the composer, and continue as independent Nexus runs. `AskWorkQueue` shows up to
-three cards above the composer. With more cards, the count expands when work can
-receive guidance; Open Nexus still opens the conversation's runs. A card opens
-its run. Guide this work explicitly scopes the existing composer to a server-
-advertised active run and its opaque guidance epoch; Return to conversation exits guidance mode without
-losing the draft or retracting a message already sent. No new task is submitted by navigation,
-polling or guidance. `askGuideWork` records a human-only conversation receipt:
-queued until a reasoning call uses it, applied after use, or not received if the
-work ended or changed first. It never grants permission. Unknown write outcomes
-retry the original request ID, target epoch and text while preserving newer
-writing. Waiting approvals retain their separate approval discussion path.
+three cards above the composer. With more cards, they fold into one "N tasks in
+progress" card that opens the conversation's runs in Nexus. A card opens its
+run. Navigation and polling submit no task.
+
+Ask routes a message to the work already running. While the conversation has an
+active goal (preparing, working or waiting), `RunAsk` routes each new message
+before intake with one fast model call, the `askMessageRouting` recipe in
+`dsl/os/automations.memql`. The person never names the goal. The call can update
+one goal or several, split off a new request, ask which goal is meant, or offer
+to stop a goal. With no active
+goal there is no call and intake runs as before. A message with attachments, or
+over 4,000 characters, goes to intake too. The call runs under the person's own
+route (Auto, Local, Apps or theirs) and appears in Activity as "Routing
+message". If routing is unavailable, or its answer is invalid twice, the
+message goes to intake and Activity records the fallback. Retrying a turn id
+returns its saved outcome and never routes or delivers a second time.
+
+The goal receives the message word for word; the model only picks destinations.
+What the goal does with it depends on its state:
+
+- **Preparing or working:** work guidance, read at the goal's next step. It
+  stays with the goal for the run's whole life, so retries, repairs, re-plans
+  and a person's re-run keep it. Queued, then Received once a model call has
+  used it. Not received only if the goal ends before reading it.
+- **Waiting on something other than the person** (a timer, a retry, a repair, a
+  re-plan, a sub-run, an outside event): the same guidance, read when the goal
+  resumes.
+- **Waiting on the person's question:** the message is the answer. Answered.
+- **Waiting on a permission:** `work.decideApproval` takes the message as a
+  correction, and nothing is approved. Sent, not approved.
+- **Paused on its budget:** the message is saved for when the limit is raised.
+  Saved.
+- **Waiting on a request that takes no messages,** such as a plan review: the
+  message is not delivered. Not delivered also covers a goal at its guidance
+  limit, a request that refused the message, and a goal whose run belongs to
+  another conversation, such as a Nexus run shown in a private Ask conversation.
+  Work guidance recorded here is never read there; a request that goal waits on
+  can still take the message.
+
+A routed message is at most 4,000 characters. Routed guidance and late answers
+to optional questions each hold at most 16 messages and 16,000 characters per
+run.
+Guidance never grants permission or raises a limit; see
+[Work context and recovery](../../docs/public/ai/work-context-and-recovery.md).
+
+What the person sees:
+
+- **One caption per goal** under the message, "To {title} · {label}"
+  (`routeLabel`): Queued, Received, Answered, Sent, not approved, Saved, Not
+  delivered or Not received. The byline keeps its Guidance tag.
+- **One line of reply,** a normal MemQL message. A split message shows the reply
+  first, then the new request's own answer or acknowledgment with its usual work
+  link. When a delivery failed, the cluster replaces the model's line with a
+  plain account.
+- **A new title** on the goal when the message changed what it is about. Every
+  snapshot re-projects each caption's title from the run, and the card and Nexus
+  prefer the run's `title` over intake's `classification.workTitle`.
+- **A stop question** on the goal's card: "Stop this work? It can't be
+  resumed." with Keep and Stop. The question sits beside the card's open
+  control, not inside it, in the kit's `InPlaceAsk`, so presses are held for a
+  moment after it appears (`DESIGN.md` rule 12). Nothing stops until the person
+  presses Stop (`askStopDecision`), and a card with an unanswered question is
+  never folded into the count. A live call has no cards: it speaks the reply,
+  and a clear yes confirms.
+- **A question about which goal is meant,** when that is unclear. Nothing is
+  delivered. The next message settles it, and both messages go to the goal
+  chosen.
+
 `askConversationSnapshot` projects progress from persisted runs on any replica.
 `conversationFeed` keeps the acceptance in place and places a completed result
-at its completion time with the original request's title. Polling must preserve
-a newer local stream and reject stale reads after conversation selection changes.
-Ask uses automatic per-step model routing. The small **Run work on** selector
-beside the composer independently chooses Auto, Workbench or Computer for the
-next submitted goal. Text and voice capture it before asynchronous conversation
-creation; changing the control never rewrites accepted work. Nexus uses the same
-kit selector for a new goal. The saved run carries the choice through background
-execution and child goals. Moving between execution destinations requires the
-owner's recorded approval; selecting Computer does not grant filesystem access.
+at its completion time with the goal's title. Polling must preserve a newer
+local stream and reject stale reads after conversation selection changes.
+Waiting approvals keep their separate approval discussion path: Discuss in Ask,
+Send guidance, Save guidance and Raise limit are unchanged.
+
+The message field's control row holds Attach, **Where** and **Route**. Where
+independently chooses Auto, Workbench or Computer for the next submitted goal.
+Route chooses which models serve the message. Auto, the default, routes each
+step automatically; Local uses local models, Apps uses Claude Code or Codex, and
+the person's own routes sit under Yours. A route that is not ready is shown with
+its reason and cannot be chosen, and Manage routes opens Fleet. Choosing Apps
+sets Where to Computer. Text captures both choices when the message is sent, and
+live voice captures Where when the call starts, in both cases before
+asynchronous conversation creation; changing a control never rewrites accepted
+work. Nexus uses the same kit selector, labelled **Run work on**, for a new
+goal. The saved run carries the Where choice through background execution and
+child goals. Moving between execution destinations requires the owner's
+recorded approval; selecting Computer does not grant filesystem access.
+
 Background acknowledgments carry a persisted `acknowledgedAt`, independently of
 the final result's `endedAt`. The queue reads the durable `workStatus`; accepting
 background work does not mean it is still queued. If acknowledgment generation

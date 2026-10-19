@@ -345,6 +345,15 @@ func (i *Integration) Capabilities() []memql.IntegrationCapability {
 			},
 		},
 		{
+			Name:        "retitleRun",
+			Description: "Give one of the caller's runs a new title because a person's later message changed what the work is about. Written to v1:work:run.title, never to classification, so a late compile cannot erase it. Refused for a running job, a synthetic actor and a run that is not the caller's; the title is 1 to 80 characters once trimmed. Returns {runId, title}.",
+			Handler:     i.handleRetitleRun,
+			ArgsSchema: map[string]string{
+				"runId": "string (required) -- the caller's v1:work:run to retitle",
+				"title": "string (required) -- the new title, 1 to 80 characters once trimmed",
+			},
+		},
+		{
 			Name:        "forkRun",
 			Description: "Fork one of the caller's runs at a step: a NEW run that serves the shared prefix from the journal and runs live from the fork step on. The source run is untouched. Returns {runId, forkedFromRunId, atStepKey}.",
 			Handler:     i.handleForkRun,

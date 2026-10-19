@@ -19,7 +19,6 @@ async function setup() {
   const transport: AskTransport = {
     conversations: store,
     ask: vi.fn((_prompt, _context, on) => { callbacks = on; return { cancel: vi.fn() }; }),
-    guideWork: vi.fn(),
     discussApproval: vi.fn(async () => discussion),
   };
   function Harness() {
@@ -32,7 +31,7 @@ async function setup() {
 }
 async function open() { await act(async () => { fireEvent.click(screen.getByRole("button", { name: "Open Ask" })); }); }
 
-it("refreshes a terminal linked run on ordinary reopen while retaining its draft and server guidance eligibility", async () => {
+it("refreshes a terminal linked run on ordinary reopen while retaining its draft", async () => {
   const test = await setup(); await open();
   fireEvent.change(screen.getByRole("textbox", { name: "Ask" }), { target: { value: "My unsent review" } });
   act(() => test.controls.closeAsk());
@@ -44,13 +43,10 @@ it("refreshes a terminal linked run on ordinary reopen while retaining its draft
   expect(test.controls.conversation.getSnapshot().turns[0]).toMatchObject({ runId: "same-run", state: "waiting" });
   expect(screen.queryByText("Lost")).toBeNull();
   expect(screen.getByRole("textbox", { name: "Ask" })).toHaveProperty("value", "My unsent review");
-  expect(screen.queryByRole("button", { name: "Guide this work: Verify change" })).toBeNull();
   act(() => test.controls.closeAsk());
-  test.setStored([{ ...lost, error: undefined, state: "queued", workStatus: "running", canGuideWork: true, guidanceEpoch: "rerun" }]);
+  test.setStored([{ ...lost, error: undefined, state: "queued", workStatus: "running" }]);
   await open();
-  expect(screen.queryByRole("button", { name: /Guide this work/ })).toBeNull();
-  act(() => { test.controls.conversation.beginWorkGuidance(lost.id); });
-  expect(test.controls.conversation.getSnapshot().workGuidance).toMatchObject({ runId: "same-run", targetEpoch: "rerun" });
+  expect(test.controls.conversation.getSnapshot().turns[0]).toMatchObject({ runId: "same-run", state: "queued", workStatus: "running" });
   expect(screen.getByRole("textbox", { name: "Ask" })).toHaveProperty("value", "My unsent review");
   expect(test.store.list).toHaveBeenCalledTimes(histories);
   expect(test.transport.ask).not.toHaveBeenCalled();

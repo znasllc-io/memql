@@ -89,7 +89,7 @@ func recoveryState(messages []common.ChatMessage) (workRecoveryState, int, error
 		if marker >= 0 || len(message.Content) > 8192 {
 			return s, -1, fmt.Errorf("invalid recovery checkpoint")
 		}
-		if err := json.Unmarshal([]byte(message.Content), &s); err != nil || s.Version != 1 || len(s.RecentEvidence) > 8 || len(s.GuidanceIDs) > 16 || len(s.ReadEvidence.Recent) > 8 {
+		if err := json.Unmarshal([]byte(message.Content), &s); err != nil || s.Version != 1 || len(s.RecentEvidence) > 8 || len(s.GuidanceIDs) > memql.MaxWorkGuidanceReceipts || len(s.ReadEvidence.Recent) > 8 {
 			return s, -1, fmt.Errorf("unreadable recovery checkpoint")
 		}
 		marker = i
@@ -216,8 +216,9 @@ func (r *Replier) recoverWorkProgress(ctx context.Context, messages []common.Cha
 		return nil, err
 	}
 	state.observe(messages[marker+1:])
-	// Active guidance has a bounded lifetime set of server IDs. Unlike its
-	// rendered text, regrouping old messages on another replica is not new input.
+	// Active guidance has a bounded lifetime set of server IDs: at most what one
+	// read of work guidance returns. Unlike its rendered text, regrouping old
+	// messages on another replica is not new input.
 	if guidance != nil {
 		for id := range guidance.seen {
 			if !slices.Contains(state.GuidanceIDs, id) {
@@ -225,7 +226,7 @@ func (r *Replier) recoverWorkProgress(ctx context.Context, messages []common.Cha
 				state.rearm()
 			}
 		}
-		if len(state.GuidanceIDs) > 16 {
+		if len(state.GuidanceIDs) > memql.MaxWorkGuidanceReceipts {
 			return nil, fmt.Errorf("recovery guidance exceeds its bounded context")
 		}
 		slices.Sort(state.GuidanceIDs)
