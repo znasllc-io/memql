@@ -94,6 +94,8 @@ func dispatchHandleCommand(args []string) {
 		handleControl(args[1:])
 	case "consent":
 		handleConsentCmd(args[1:])
+	case "service":
+		handleService(args[1:])
 	case "-h", "--help", "help":
 		printUsage()
 	default:
@@ -195,6 +197,8 @@ func resolveActiveClusterIdentityURL(name string) (string, error) {
 }
 
 func handleRun(args []string) {
+	// Before anything reads HOME, the environment or writes a log line.
+	prepareAppService()
 	fs := flag.NewFlagSet("worker run", flag.ExitOnError)
 	configPath := fs.String("config", DefaultConfigPath(), "path to legacy worker.yaml (workers.yaml is preferred beside it)")
 	workersPath := fs.String("workers", DefaultWorkersPath(), "path to workers.yaml multi-home registry")
@@ -1032,6 +1036,9 @@ func printUsage() {
 	fmt.Println("  memql worker control       Local status/logs and per-server pause/resume (current OS user).")
 	fmt.Println("  memql worker consent <op>  Manage the consent gate, one window per cluster")
 	fmt.Println("                                     (grant/revoke/status/watch; --cluster <id>).")
+	fmt.Println("  memql worker service <op>  MemQL.app only: register, unregister or show the")
+	fmt.Println("                                     worker and menu services macOS lists under")
+	fmt.Println("                                     MemQL in Login Items (register --menu=on|off).")
 	fmt.Println("")
 	fmt.Println("PAIR FLAGS")
 	fmt.Println("  --cluster <name>     Cluster NAME from clusters.yaml (identity lookup).")

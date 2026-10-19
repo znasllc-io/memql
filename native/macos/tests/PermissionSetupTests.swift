@@ -37,6 +37,13 @@ enum PermissionSetupTests {
         precondition(PermissionBridge.serviceMatches(service, pid: 100, executable: "/fixture/memql"))
         precondition(!PermissionBridge.serviceMatches(service, pid: 10, executable: "/fixture/memql"))
         precondition(!PermissionBridge.serviceMatches(service, pid: 100, executable: "/other/memql"))
+        // Registered by MemQL.app through SMAppService, launchd names the program inside the bundle.
+        let bundled = "service = {\n\tprogram identifier = Contents/MacOS/MemQL (mode: 2)\n\tparent bundle identifier = com.znasllc.memql-worker\n\tpid = 100\n}"
+        precondition(PermissionBridge.serviceMatches(bundled, pid: 100, executable: "/Users/example/Applications/MemQL.app/Contents/MacOS/MemQL"))
+        precondition(!PermissionBridge.serviceMatches(bundled, pid: 101, executable: "/Users/example/Applications/MemQL.app/Contents/MacOS/MemQL"))
+        precondition(!PermissionBridge.serviceMatches(bundled, pid: 100, executable: "/Users/example/.memql/bin/memql"), "A raw binary is never the bundle's program")
+        precondition(!PermissionBridge.serviceMatches(bundled.replacingOccurrences(of: "com.znasllc.memql-worker", with: "com.example.other"), pid: 100,
+                                                      executable: "/Users/example/Applications/MemQL.app/Contents/MacOS/MemQL"))
         if let output = CommandLine.arguments.first(where: { $0.hasPrefix("--render=") }) {
             // Offscreen fixture only: no worker connection, OS permission
             // request, deep-link registration or service action.

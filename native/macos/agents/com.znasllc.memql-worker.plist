@@ -1,0 +1,35 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!--
+  MemQL.app registers this agent through SMAppService (memql-cockpit#545), so
+  Login Items lists it under MemQL with the app's icon. It is the same for
+  every account: MEMQL_SERVICE=app tells the worker to supply HOME, its log
+  and ~/.memql/state/service.env itself (internal/worker/app_service.go).
+-->
+<plist version="1.0">
+<dict>
+	<key>Label</key>
+	<string>com.znasllc.memql-worker</string>
+	<key>BundleProgram</key>
+	<string>Contents/MacOS/MemQL</string>
+	<key>ProgramArguments</key>
+	<array>
+		<string>Contents/MacOS/MemQL</string>
+		<string>worker</string>
+		<string>run</string>
+	</array>
+	<key>EnvironmentVariables</key>
+	<dict>
+		<key>MEMQL_SERVICE</key>
+		<string>app</string>
+	</dict>
+	<key>RunAtLoad</key>
+	<true/>
+	<key>KeepAlive</key>
+	<true/>
+	<key>AssociatedBundleIdentifiers</key>
+	<array>
+		<string>com.znasllc.memql-worker</string>
+	</array>
+</dict>
+</plist>

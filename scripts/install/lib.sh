@@ -2935,6 +2935,7 @@ function fetch_macos_app() {
         esac
         case "$normalized" in
             app/|app/Contents/|app/Contents/MacOS/|app/Contents/Resources/|app/Contents/Library/|app/Contents/Library/LoginItems/|\
+            app/Contents/Library/LaunchAgents/|app/Contents/Library/LaunchAgents/com.znasllc.memql-worker.plist|app/Contents/Library/LaunchAgents/com.znasllc.memql-cockpit-menubar.plist|\
             app/Contents/Info.plist|app/Contents/MacOS/MemQL|app/Contents/Resources/MemQL.icns|app/Contents/_CodeSignature/|app/Contents/_CodeSignature/CodeResources|\
             menu/|menu/Contents/|menu/Contents/MacOS/|menu/Contents/Resources/|menu/Contents/Info.plist|menu/Contents/MacOS/MemQLCockpit|\
             menu/Contents/Resources/mark.svg|menu/Contents/Resources/MemQL.icns|menu/Contents/_CodeSignature/|menu/Contents/_CodeSignature/CodeResources|\

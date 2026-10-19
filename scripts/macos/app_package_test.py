@@ -12,6 +12,28 @@ import tarfile
 import io
 
 
+# Stands in for MemQL.app's executable: `worker service` is recorded and
+# answered without SMAppService, and everything else runs the real worker.
+SERVICE_FIXTURE = '''#!/bin/bash
+function main() {
+    if [[ "$1" == worker && "$2" == service ]]; then
+        printf '%s\\n' "$*" >> '@CALLS@'
+        [[ "${MEMQL_TEST_SERVICE_FAIL:-}" != 1 ]] || return 1
+        case "$3" in
+            register)
+                touch "$MEMQL_TEST_STATE/com.znasllc.memql-worker"
+                [[ "$4" != --menu=on ]] || touch "$MEMQL_TEST_STATE/com.znasllc.memql-cockpit-menubar" ;;
+            unregister) rm -f "$MEMQL_TEST_STATE/com.znasllc.memql-worker" "$MEMQL_TEST_STATE/com.znasllc.memql-cockpit-menubar" ;;
+        esac
+        echo '{"menu":"enabled","worker":"enabled"}'
+        return 0
+    fi
+    exec '@REAL@' "$@"
+}
+main "$@"
+'''
+
+
 def run(command, env, ok=True):
     result = subprocess.run(command, env=env, text=True, capture_output=True)
     if ok and result.returncode:
@@ -55,6 +77,17 @@ def main():
                             str(repo / 'scripts/install/lib.sh'), malicious.as_uri(),
                             'arm64' if 'arm64' in archive.name else 'amd64', str(stage)], env, ok=False)
             assert rejected.returncode == 3 and not (stage / 'unpacked').exists()
+        # MemQL.app registers its own services through SMAppService
+        # (memql-cockpit#545), and a test must never reach the real one: the
+        # fixture app's executable records `worker service` and hands every
+        # other command to the real worker, and the app is signed again.
+        real_worker = root / 'real-memql'
+        shutil.move(source / 'MemQL.app/Contents/MacOS/MemQL', real_worker)
+        service_calls = root / 'service-calls'
+        wrapper = source / 'MemQL.app/Contents/MacOS/MemQL'
+        wrapper.write_text(SERVICE_FIXTURE.replace('@CALLS@', str(service_calls)).replace('@REAL@', str(real_worker)))
+        wrapper.chmod(0o755)
+        run(['codesign', '--force', '--sign', '-', str(source / 'MemQL.app')], env)
         user = root / 'user & space'
         user.mkdir()
         shim = root / 'shim'
@@ -157,75 +190,59 @@ main "$@"
         assert info['CFBundleIdentifier'] == 'com.znasllc.memql-worker'
         assert info['CFBundleExecutable'] == info['CFBundleDisplayName'] == info['CFBundleName'] == 'MemQL'
         assert (destination / 'Contents/Resources' / info['CFBundleIconFile']).stat().st_size > 1000
+        # The earlier install's worker is loaded from its per-user plist.
         (state / 'com.znasllc.memql-worker').touch()
-        (state / 'com.znasllc.memql-worker.retry').touch()
         activate = ['bash', str(source / 'scripts/macos/activate-app.sh'), '--app=' + str(destination)]
-        service_path = ':'.join(['/usr/bin', '/bin', '/usr/sbin', '/sbin', str(user / '.local/bin'),
-                                 str(user / '.claude/local'), '/opt/homebrew/bin', '/usr/local/bin'])
-        assert json.loads(run(activate, env).stdout)['changed'] is True
-        after = plistlib.loads(worker_plist.read_bytes())
-        expected = dict(before)
-        expected['ProgramArguments'] = [str(destination / 'Contents/MacOS/MemQL'), *before['ProgramArguments'][1:]]
-        expected['AssociatedBundleIdentifiers'] = ['com.znasllc.memql-worker']
-        # A plist from before the service carried a PATH gains one -- the
-        # system directories first, then where the app installers put claude
-        # and codex -- and nothing else in its environment moves.
-        expected['EnvironmentVariables'] = dict(before['EnvironmentVariables'], PATH=service_path)
-        assert after == expected, (after, expected)
-        menu = plistlib.loads((agents / 'com.znasllc.memql-cockpit-menubar.plist').read_bytes())
-        assert menu['ProgramArguments'] == [str(destination / 'Contents/Library/LoginItems/MemQL Menu.app/Contents/MacOS/MemQLCockpit')]
-        assert not legacy_menu.exists()
-        assert list(user.glob('Applications/.memql-legacy-menu.*/previous.app'))
+        assert json.loads(run(activate + ['--ollama-env=OLLAMA_MODELS=/Volumes/Models'], env).stdout)['changed'] is True
+        # Its plists leave, each kept under backups, and the app registers
+        # the worker and the menu itself.
+        assert not worker_plist.exists() and not (agents / 'com.znasllc.memql-cockpit-menubar.plist').exists()
+        kept = list((private / 'backups').glob('legacy-agent.*/com.znasllc.memql-worker.plist'))
+        assert len(kept) == 1 and plistlib.loads(kept[0].read_bytes()) == before
         for label in ['com.znasllc.memql-cockpit-worker', 'com.visionarys.memql-cockpit-worker']:
             assert not (agents / (label + '.plist')).exists()
             assert not (state / label).exists()
-        count = calls.read_text().count('bootout')
+        assert service_calls.read_text().splitlines() == ['worker service register --menu=on']
+        assert (private / 'state/service.env').read_text() == 'OLLAMA_MODELS=/Volumes/Models\n'
+        assert 'kickstart -k' in calls.read_text(), 'a new app must restart the services onto its files'
+        assert not legacy_menu.exists()
+        assert list(user.glob('Applications/.memql-legacy-menu.*/previous.app'))
+        kicks = calls.read_text().count('kickstart')
         assert json.loads(run(activate, env).stdout)['changed'] is False
-        assert calls.read_text().count('bootout') == count, 'idempotent activation restarted a service'
+        assert calls.read_text().count('kickstart') == kicks, 'idempotent activation restarted a service'
+        assert (private / 'state/service.env').read_text() == 'OLLAMA_MODELS=/Volumes/Models\n', 'no Ollama variables keeps the saved ones'
+        run(activate + ['--ollama-env=OLLAMA_HOST=127.0.0.1:11500', '--ollama-env=OLLAMA_MODELS=/Volumes/Other'], env)
+        assert (private / 'state/service.env').read_text() == 'OLLAMA_HOST=127.0.0.1:11500\nOLLAMA_MODELS=/Volumes/Other\n'
+        assert run(activate + ['--ollama-env=DYLD_INSERT_LIBRARIES=/tmp/x.dylib'], env, ok=False).returncode == 2
         assert all(path.read_bytes() == data for path, data in protected.items())
-        # A PATH the owner set is theirs: activation keeps it as written.
-        custom = plistlib.loads(worker_plist.read_bytes())
-        custom['EnvironmentVariables']['PATH'] = '/Users/someone/bin:/usr/bin:/bin'
-        worker_plist.write_bytes(plistlib.dumps(custom))
-        run(activate, env)
-        assert plistlib.loads(worker_plist.read_bytes())['EnvironmentVariables']['PATH'] == '/Users/someone/bin:/usr/bin:/bin'
-        # Matching files/marker must recover an unloaded service, not kickstart it.
-        (state / 'com.znasllc.memql-worker').unlink()
-        assert json.loads(run(activate, env).stdout)['changed'] is True
-        marker = private / 'state/app-activation.sha256'
-        original_plist = worker_plist.read_bytes()
-        marker.write_text('old build')
-        stubborn = dict(env, MEMQL_TEST_STUBBORN='1')
-        refused = run(activate, stubborn, ok=False)
+        run(activate + ['--menu=false'], env)
+        assert service_calls.read_text().splitlines()[-1] == 'worker service register --menu=off'
+        refused = run(activate, dict(env, MEMQL_TEST_SERVICE_FAIL='1'), ok=False)
         assert refused.returncode == 5 and not json.loads(refused.stdout)['ok']
-        assert not marker.exists() and worker_plist.read_bytes() == original_plist
-        assert all(path.read_bytes() == data for path, data in protected.items())
-        failed = run(activate, dict(env, MEMQL_TEST_BOOTSTRAP_FAIL='1'), ok=False)
-        assert failed.returncode == 5 and not json.loads(failed.stdout)['ok']
-        assert not marker.exists()
-        assert json.loads(run(activate, env).stdout)['ok']
+        # A loaded per-user job that will not stop keeps its plist, and
+        # nothing is registered over it.
+        worker_plist.write_bytes(plistlib.dumps(before))
+        (state / 'com.znasllc.memql-worker').touch()
+        registered = len(service_calls.read_text().splitlines())
+        stubborn = run(activate, dict(env, MEMQL_TEST_STUBBORN='1'), ok=False)
+        assert stubborn.returncode == 5 and worker_plist.exists()
+        assert len(service_calls.read_text().splitlines()) == registered
+        assert json.loads(run(activate, env).stdout)['ok'] and not worker_plist.exists()
         # A valid source does not authorize replacing an unrelated app.
         bad = root / 'unrelated/MemQL.app'
         (bad / 'Contents').mkdir(parents=True)
         (bad / 'Contents/Info.plist').write_bytes(plistlib.dumps({'CFBundleIdentifier': 'other.app'}))
         refused = run(files[:-2] + ['--destination=' + str(bad), '--cli-path=' + str(cli)], env, ok=False)
         assert refused.returncode == 3
-        # Fresh service creation uses the same bundled executable, no raw CLI.
-        worker_plist.unlink()
-        (private / 'state/app-activation.sha256').unlink()
-        assert json.loads(run(activate, env).stdout)['changed'] is True
-        fresh = plistlib.loads(worker_plist.read_bytes())
-        assert fresh['ProgramArguments'] == [str(destination / 'Contents/MacOS/MemQL'), 'worker', 'run']
-        assert fresh['EnvironmentVariables'] == {'HOME': str(user), 'PATH': service_path}
-        assert fresh['AssociatedBundleIdentifiers'] == ['com.znasllc.memql-worker']
         # Full uninstall is tested only in this disposable fixture home.
         run(['bash', str(repo / 'scripts/install/uninstall-mac.sh'), '--user-local', '--all-homes'], env)
+        assert service_calls.read_text().splitlines()[-1] == 'worker service unregister', 'only the app takes its services out of Login Items'
         assert not destination.exists() and not cli.exists()
         assert not (private / 'worker.yaml').exists() and not (private / 'workers.yaml').exists()
         assert (private / 'policy.yaml').read_bytes() == protected[private / 'policy.yaml']
         assert (private / 'credentials/token').read_bytes() == protected[private / 'credentials/token']
         assert backups[0].exists()
-        print('PASS: app identity/icon, archive traversal/link refusal, CLI rollback, preserved service arguments/config/credentials, embedded menu, legacy cleanup, idempotence, fresh service, scoped uninstall; service calls stubbed.')
+        print('PASS: app identity/icon, archive traversal/link refusal, CLI rollback, app-registered services, retired per-user plists, service.env, idempotence, preserved config/credentials, legacy cleanup, scoped uninstall; service calls stubbed.')
 
 
 if __name__ == '__main__':
