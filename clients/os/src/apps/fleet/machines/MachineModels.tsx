@@ -126,9 +126,9 @@ export function MachineModels({ machine, navigation }: { machine: MachineRow; st
     {downloads.live ? <LivePull pull={downloads.live} /> : installerDownload ? <SetupLiveDownload stage={installerDownload} /> : null}
     {selected ? <>
       <MachineDetailsSection title="Overview"><Facts>
-        <Fact label="Available for" value={purposes || "Not reported"} copyValue={purposes || undefined} />
+        <Fact label="Available for" value={purposes || "Not reported"} />
         {localModel ? <><Fact label="Parameters" value={params || "Not reported"} copyValue={params || undefined} /><Fact label="Quantization" value={localModel.quant || "Not reported"} copyValue={localModel.quant || undefined} /><Fact label="Maximum context" value={contextLimit || "Not reported"} copyValue={contextLimit || undefined} /></> : null}
-        <Fact label="On this machine" value={placement} copyValue={placement} />
+        <Fact label="On this machine" value={placement} />
         <Fact label="Estimated memory" value={memory || "Not verified"} copyValue={memory || undefined} />
         <Fact label="Download" value={download || "Not verified"} copyValue={download || undefined} />
         {profile?.reviewedAt ? <Fact label="Source reviewed" value={new Date(profile.reviewedAt).toLocaleDateString(undefined, { timeZone: "UTC", year: "numeric", month: "short", day: "numeric" })} copyValue={profile.reviewedAt} /> : null}

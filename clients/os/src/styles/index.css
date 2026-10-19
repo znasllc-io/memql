@@ -14073,13 +14073,16 @@ button.os-cluster-mesh-peer:focus-visible {
 .fleet-workspace-body[data-has-machines] { grid-template-columns: 158px minmax(0,1fr); gap: 26px; }
 .fleet-machine-picker { border-right: 1px solid var(--os-line); padding-right: 16px; }
 .fleet-machine-picker ul { margin: 0; padding: 0; list-style: none; }
-.fleet-machine-choice, .fleet-equipment-slot { appearance: none; width: 100%; background: transparent; color: var(--os-ink); border: 1px solid transparent; border-radius: var(--os-selection-radius); font: inherit; text-align: left; cursor: pointer; }
+.fleet-machine-choice, .fleet-equipment-slot { appearance: none; width: 100%; background: transparent; color: var(--os-ink); border: 1px solid transparent; border-radius: var(--os-selection-radius); font: inherit; text-align: left; }
+/* Only a slot that is a button answers the pointer; Equipment's slots are
+ * display tiles and stay still under it. */
+.fleet-machine-choice, button.fleet-equipment-slot { cursor: pointer; }
 .fleet-machine-choice { display: flex; align-items: center; gap: 10px; padding: 12px 8px; margin-bottom: 6px; }
 .fleet-machine-choice span, .fleet-equipment-slot span { min-width: 0; }
 .fleet-machine-choice strong, .fleet-machine-choice small, .fleet-equipment-slot strong, .fleet-equipment-slot small { display: block; overflow-wrap: anywhere; }
 .fleet-machine-choice small, .fleet-equipment-slot small { color: var(--os-muted); font-size: var(--os-text-xs); margin-top: 4px; }
 .fleet-machine-choice[aria-pressed="true"] { background: var(--os-accent-soft); border-color: var(--os-accent); }
-.fleet-machine-choice:hover, .fleet-equipment-slot:hover { background: var(--os-hover); }
+.fleet-machine-choice:hover, button.fleet-equipment-slot:hover { background: var(--os-hover); }
 .fleet-equipment-area { min-width: 0; }
 .fleet-machine-heading { display: flex; justify-content: space-between; align-items: start; gap: 18px; margin-bottom: 30px; }
 .fleet-machine-heading h4 { font-family: var(--os-font); font-size: 25px; font-weight: 550; margin: 0 0 8px; letter-spacing: -.035em; overflow-wrap: anywhere; }
@@ -14103,9 +14106,6 @@ button.os-cluster-mesh-peer:focus-visible {
 .fleet-device-screen dd { margin: 4px 0 0; font-size: var(--os-text-sm); }
 .fleet-device-base { height: 9px; margin: 6px -5px 12px; border: 1px solid color-mix(in srgb, var(--os-ink) 45%, var(--os-ground)); border-radius: 2px 2px 10px 10px; background: color-mix(in srgb, var(--os-ink) 28%, var(--os-raised)); }
 .fleet-device-work { display: flex; justify-content: center; align-items: center; font-size: var(--os-text-sm); }
-.fleet-equipment-reading { display: flex; justify-content: space-between; gap: 16px; align-items: center; margin-top: 20px; padding: 14px 16px; background: var(--os-plate); border-left: 2px solid var(--os-accent); border-radius: var(--os-selection-radius); }
-.fleet-equipment-reading strong { overflow-wrap: anywhere; }
-.fleet-equipment-reading p { color: var(--os-muted); font-size: var(--os-text-sm); margin: 6px 0 0; }
 .fleet-selection-hint { text-align: center; margin-block: 22px; }
 .fleet-breadcrumb { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; color: var(--os-muted); font-size: var(--os-text-sm); margin-bottom: 16px; }
 .fleet-drilldown { padding: 16px 24px; }
@@ -14236,7 +14236,7 @@ button.os-cluster-mesh-peer:focus-visible {
 @container (max-width: 490px) {
   .fleet-equipment-rig { grid-template-columns: minmax(0,1fr); }
   .fleet-device { grid-row: 1; max-width: 240px; justify-self: center; width: 100%; }
-  .fleet-machine-heading, .fleet-equipment-reading { flex-wrap: wrap; }
+  .fleet-machine-heading { flex-wrap: wrap; }
   .fleet-connections-grid { grid-template-columns: 1fr; }
   .fleet-empty-capabilities { gap: 12px; }
 }
@@ -14389,7 +14389,7 @@ button.os-cluster-mesh-peer:focus-visible {
 @container os-window (max-width:430px) { .os-window-bar { flex-wrap:wrap; height:auto; min-height:40px; padding-block:4px; } .os-window-controls { margin-left:auto; } .os-window-app-selector { max-width:100px; } }
 
 .fleet-session-link { display:flex; justify-content:space-between; width:100%; gap:12px; border:0; border-bottom:1px solid var(--os-line); background:transparent; padding:12px 0; color:var(--os-ink); text-align:left; overflow-wrap:anywhere; }
-.fleet-recent-work { margin-top:24px; }
+.fleet-recent-activity { margin-top:24px; }
 
 .fleet-machine-facts { padding-block:12px; border-bottom:1px solid var(--os-line); }
 .fleet-machine-facts > summary { cursor:pointer; font-weight:600; }
@@ -14486,8 +14486,8 @@ button.os-cluster-mesh-peer:focus-visible {
 .fleet-reading-link:hover { color: var(--os-accent); text-decoration: underline; text-underline-offset: 4px; }
 .fleet-reading-link:focus-visible { outline: 2px solid var(--os-accent); outline-offset: 4px; border-radius: 3px; }
 .fleet-equipment-bank .os-empty-state { padding: 20px 0; gap: 12px; text-align: left; }
-.fleet-equipment-bank .os-empty-state h4, .fleet-recent-work .os-empty-state h4 { font-size: var(--os-text-sm); }
-.fleet-recent-work .os-empty-state { padding: 22px 0; }
+.fleet-equipment-bank .os-empty-state h4, .fleet-recent-activity .os-empty-state h4 { font-size: var(--os-text-sm); }
+.fleet-recent-activity .os-empty-state { padding: 22px 0; }
 .fleet-device-work { gap: 2px; flex-wrap: wrap; }
 .fleet-device-call-breakdown { display: flex; justify-content: center; flex-wrap: wrap; gap: 4px 16px; margin: 2px 0 0; color: var(--os-muted); font-size: var(--os-text-xs); }
 .fleet-device-call-breakdown > div { display: flex; gap: 6px; }

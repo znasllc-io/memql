@@ -278,17 +278,23 @@ structured stdout contract and send human logs to stderr.
 
 ## Details and settings content
 
-Fleet's machine Settings page is the reference for displaying an entity's
-configuration and reported facts. Apply this pattern when building or revising
-comparable pages in other apps; keep their existing capabilities and permissions.
-Use the shared `Details`, `DetailsSection` and `SettingRow` kit components for
-this layout. They own the spacing and responsive alignment used by Fleet and
-Cluster; avoid app-specific copies of the same grid.
-For a machine, Settings is the last tab, after Activity. General controls and
-Sharing precede reported facts on that one page. Sharing uses the same section
-grid, with a divider between the models and fleet workbench groups and each
-users/groups collection shown only while its sharing is on; keep write errors
-beside the section that caused them. There is no separate Sharing tab.
+Fleet's machine Details and Settings tabs are the reference for displaying an
+entity's reported facts and its configuration. Apply this pattern when building
+or revising comparable pages in other apps; keep their existing capabilities
+and permissions. Use the shared `Details`, `DetailsSection` and `SettingRow` kit
+components for this layout. They own the spacing and responsive alignment used
+by Fleet and Cluster; avoid app-specific copies of the same grid.
+For a machine, Details follows Equipment and holds what the machine reported:
+connection advisories, System, Hardware, Connection, Features, Registration and
+Reported labels. Settings is the last tab, after Activity, and holds only what
+its owner can change: General, Owner-only features and Sharing. Sharing uses
+the same section grid, with a divider between the models and fleet workbench
+groups and each users/groups collection shown only while its sharing is on; keep
+write errors beside the section that caused them. There is no separate Sharing
+tab. Equipment, the first tab, is a display-only overview: its model carousel
+and app tiles are shown, not selected, and its arrows open Models, Apps and
+Activity. Recent activity there lists the newest five Activity entries; its
+arrow opens Activity and a row opens that entry's details.
 
 - **Open, named sections.** Group related information under a `Subhead`, with
   generous vertical spacing and a single hairline between groups. Keep ordinary
@@ -305,14 +311,19 @@ beside the section that caused them. There is no separate Sharing tab.
   Keep its consequences and confirmation beside the action, preserve the shared
   confirmation hold and restore focus on cancel. Lifecycle actions that belong
   in an `ActionBar` continue to follow rule 12.
-- **Quiet copying.** Every fact row that shows a real value is copyable: use
-  `Fact.copyValue` or `CopyValue presentation="row"`. Text stays selectable with
-  its normal cursor. Only the separate copy icon copies; clicking or hovering a
-  value never changes the clipboard. Hovering a copyable row gives the whole
-  row a subtle wash and shows its copy icon; other rows show none. Reserve the
-  icon's space, reveal it with a focus ring on keyboard focus, and keep it
-  visible on screens without hover. Confirm success on the icon and report
-  clipboard failures beside the value. Dates copy their exact timestamps.
+- **Quiet copying.** Offer copy where it helps: on values someone may need to
+  paste elsewhere and would rather not retype, such as names, addresses,
+  identifiers, versions, specifications, measured figures, labels and exact
+  timestamps. Statuses, availability, yes/no answers, live counts and
+  explanations are read, not copied, so a status page such as a machine's Apps
+  offers no copy at all. Use `Fact.copyValue` or `CopyValue presentation="row"`.
+  Text stays selectable with its normal cursor. Only the separate copy icon
+  copies; clicking or hovering a value never changes the clipboard. Hovering a
+  copyable row gives the whole row a subtle wash and shows its copy icon; other
+  rows show none. Reserve the icon's space, reveal it with a focus ring on
+  keyboard focus, and keep it visible on screens without hover. Confirm success
+  on the icon and report clipboard failures beside the value. Dates copy their
+  exact timestamps.
 - **Readable, truthful data.** Copy exact timestamps behind relative dates;
   copying a key/value entry includes both. Missing measurements remain “Not
   reported” or “Not measured”, never invented zeroes or copyable placeholders.

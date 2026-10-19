@@ -65,7 +65,6 @@ export function FleetApp({
   // clicks Routing while a download runs on their machine and comes back
   // finds the token still on screen and the cluster still listening.
   const addMachine = useAddMachineFlow();
-  const [sessionTarget, setSessionTarget] = useState<{ id: string; revision: number }>();
   const [selection, select] = useState<FleetSelection>({ machineId: "", view: "equipment" });
 
   useEffect(() => {
@@ -130,8 +129,8 @@ export function FleetApp({
               onAddMachine={() => { if (!addMachine.active) addMachine.start({ inference: true }); navigate("machines", { fromContent: true }); }}
               onOpenModels={() => navigate("models", { fromContent: true })} />
           : id === "workbenches" ? <WorkbenchesSection />
-          : id === "apps" ? <AppsSection sessionTarget={sessionTarget} navigation={active ? navigation : undefined} />
-          : <FleetWorkspace onAllSessions={() => { setSessionTarget(held => ({ id: "", revision: (held?.revision ?? 0) + 1 })); navigate("apps", { fromContent: true }); }} onOpenSession={id => { setSessionTarget(held => ({ id, revision: (held?.revision ?? 0) + 1 })); navigate("apps", { fromContent: true }); }} selection={selection} select={select} navigate={navigate}
+          : id === "apps" ? <AppsSection navigation={active ? navigation : undefined} />
+          : <FleetWorkspace selection={selection} select={select} navigate={navigate}
               showRevoked={settings.showRevoked} flow={addMachine}
               intent={active ? intent : undefined} consumeIntent={consumeIntent} />}
       </PageContent>;
