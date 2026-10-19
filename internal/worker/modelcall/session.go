@@ -564,6 +564,16 @@ func (m *Manager) run(ctx context.Context, sender Sender, c *call, info models.I
 	go m.watchdog(ctx, c, stream, limits, observeIdle, watchdogDone)
 
 	ctx = withRuntimeProgress(ctx, stream.runtimeProgress)
+	if resources := m.limiter.resources; resources != nil && localRuntime(info.BaseURL) {
+		release, err := resources.acquire(ctx, info, m.http, m.logger)
+		if err != nil {
+			stopWatchdog()
+			finish, code, detail := m.classify(c, err)
+			_ = sender.SendModelCallEnd(&memqlv1.ModelCallEnd{RequestId: c.requestID, FinishReason: finish, ErrorCode: code, Error: detail})
+			return
+		}
+		defer release()
+	}
 	var (
 		res   Result
 		modal modalityResult

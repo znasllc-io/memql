@@ -409,6 +409,7 @@ func handleRun(args []string) {
 		calls := modelcall.NewManager(modelcall.Options{
 			Logger:    logger,
 			Inventory: modelInventory,
+			Limiter:   modelcall.NewHostLimiter(),
 		})
 		backups := backup.New(backup.Options{
 			Logger:            logger,

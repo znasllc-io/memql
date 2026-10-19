@@ -57,6 +57,7 @@ type DeclaredRuntime struct {
 // in both places, whereas `ctx` and `structured` are abbreviations nobody
 // would guess from a policy.yaml.
 type DeclaredModel struct {
+	PeakMemoryBytes  uint64 `yaml:"peak_memory_bytes"`
 	ID               string `yaml:"id"`
 	ContextWindow    int    `yaml:"context_window"`
 	StructuredOutput bool   `yaml:"structured_output"`
