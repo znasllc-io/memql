@@ -55,7 +55,8 @@ one goal, or update several.
    is `compiling`, `running` or `waiting`, not `cancelRequested`, with no
    `parentRunId`. At most 12, newest first.
 3. **No active goals: today's path, unchanged.** No routing call.
-4. **Messages over 4,000 characters are not routed** (the guidance limit):
+4. **Messages over 4,000 characters are not routed** (the guidance limit),
+   and neither are messages with attachments (guidance carries text only):
    today's path.
 5. Otherwise run the **routing recipe** `askMessageRouting`
    (`dsl/os/automations.memql`) through `runScopedWorkflow`, the seam
@@ -64,6 +65,11 @@ one goal, or update several.
 6. **Apply** a valid decision (below). An invalid decision after the retry,
    or a routing failure (no model, timeout), falls back to today's path and
    records an Activity entry saying routing was skipped.
+
+The routing call is made for the person and under THEIR route: a model call
+outside a run reads no run routing, so `ApplyRunRouting` falls back to the
+turn's choice that `ContextWithGoalRouteChoice` already stamps for
+`createGoal`. A person on Local is routed by a local model.
 
 The routing call runs OUTSIDE the conversation write lock. Delivery re-reads
 each goal under the lock (`ContextWithFreshRead`) before recording anything.
@@ -107,15 +113,21 @@ Output (strict JSON schema):
   "confirmStops": ["g3"],
   "newRequest":   "What time is it in Phoenix right now?",
   "reply":        "Switching the weather check to Phoenix.",
-  "clarify":      ""
+  "clarify":      "",
+  "resolvesClarification": false
 }
 ```
+
+`resolvesClarification` is true only when the message answers the router's
+own pending question; the earlier message then travels with this one.
 
 ### Validation (Go)
 
 - Every handle is one of this call's handles; no duplicates within a list.
 - A goal is not both updated and stopped.
 - `confirmStops` only names goals with an unanswered stop question.
+- `resolvesClarification` only when the previous turn is an unresolved
+  clarification, and only alongside updates.
 - `clarify` excludes every other action.
 - `reply` is required (at most 280 characters) when anything is acted on or a
   question is asked; `title` at most 80; `newRequest` at most 4,000.
@@ -201,6 +213,11 @@ type AskStopQuestion struct {
 }
 ```
 
+A target with no `approvalId` is WORK GUIDANCE (read by the agent loop); one
+with an `approvalId` was delivered through `decideApproval` and is never read
+as guidance. Every snapshot re-projects a target's `title` from its run's
+current title, so a retitle shows on the label without rewriting the turn.
+
 `AskTurn.Routed *AskRouting` (`json:"routed,omitempty"`). The transcript is
 a free `object` on `v1:os:askConversation`, so no concept field changes.
 For a turn with no new goal, `Answer` holds the reply; for a split turn,
@@ -212,7 +229,7 @@ snapshot's run projection never overwrites it.
 A new optional field `title` on `v1:work:run` holds a title set after intake.
 Ask (`ask_snapshot.go`) and Nexus (`apps/nexus/rows.ts`) prefer it over
 `classification.workTitle`, which stays the intake decision. It is written by
-a new owner-gated builtin `workRetitleRun {runId, title}` in
+a new owner-gated builtin `work.workRetitleRun {runId, title}` (executor `integration.work.retitleRun`) in
 `integrations/work`. A separate field, because a late compile writing
 `classification` must not erase a retitle.
 
