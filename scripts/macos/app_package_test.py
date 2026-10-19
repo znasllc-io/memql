@@ -202,14 +202,14 @@ main "$@"
         for label in ['com.znasllc.memql-cockpit-worker', 'com.visionarys.memql-cockpit-worker']:
             assert not (agents / (label + '.plist')).exists()
             assert not (state / label).exists()
-        assert service_calls.read_text().splitlines() == ['worker service register --menu=on']
+        # A new app registers afresh: launchd refuses an executable whose
+        # signature no longer matches the one recorded at registration.
+        assert service_calls.read_text().splitlines() == ['worker service unregister', 'worker service register --menu=on']
         assert (private / 'state/service.env').read_text() == 'OLLAMA_MODELS=/Volumes/Models\n'
-        assert 'kickstart -k' in calls.read_text(), 'a new app must restart the services onto its files'
         assert not legacy_menu.exists()
         assert list(user.glob('Applications/.memql-legacy-menu.*/previous.app'))
-        kicks = calls.read_text().count('kickstart')
         assert json.loads(run(activate, env).stdout)['changed'] is False
-        assert calls.read_text().count('kickstart') == kicks, 'idempotent activation restarted a service'
+        assert service_calls.read_text().splitlines()[2:] == ['worker service register --menu=on'], 'idempotent activation released a service'
         assert (private / 'state/service.env').read_text() == 'OLLAMA_MODELS=/Volumes/Models\n', 'no Ollama variables keeps the saved ones'
         run(activate + ['--ollama-env=OLLAMA_HOST=127.0.0.1:11500', '--ollama-env=OLLAMA_MODELS=/Volumes/Other'], env)
         assert (private / 'state/service.env').read_text() == 'OLLAMA_HOST=127.0.0.1:11500\nOLLAMA_MODELS=/Volumes/Other\n'
@@ -219,6 +219,13 @@ main "$@"
         assert service_calls.read_text().splitlines()[-1] == 'worker service register --menu=off'
         refused = run(activate, dict(env, MEMQL_TEST_SERVICE_FAIL='1'), ok=False)
         assert refused.returncode == 5 and not json.loads(refused.stdout)['ok']
+        # A changed app whose services could not be released is not marked
+        # current, so the next activation tries again.
+        marker = private / 'state/app-activation.sha256'
+        marker.write_text('old build')
+        assert run(activate, dict(env, MEMQL_TEST_SERVICE_FAIL='1'), ok=False).returncode == 5 and not marker.exists()
+        assert json.loads(run(activate, env).stdout)['changed'] is True
+        assert service_calls.read_text().splitlines()[-2:] == ['worker service unregister', 'worker service register --menu=on']
         # A loaded per-user job that will not stop keeps its plist, and
         # nothing is registered over it.
         worker_plist.write_bytes(plistlib.dumps(before))

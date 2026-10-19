@@ -87,18 +87,18 @@ function main() {
         cap_changed
     done
     [[ "$menu" == false ]] || menu_flag=on
-    "$app/Contents/MacOS/MemQL" worker service register --menu="$menu_flag" >&2 || cap_fail 5 "macOS did not register MemQL's services"
-    # A replaced app keeps its registration, and the jobs keep running the
-    # files they started from until they restart.
     marker="$HOME/.memql/state/app-activation.sha256"
     fingerprint="$(shasum -a 256 "$app/Contents/MacOS/MemQL" "$helper/Contents/MacOS/MemQLCockpit") menu=$menu"
     if [[ ! -f "$marker" || "$(cat "$marker")" != "$fingerprint" ]]; then
-        launchctl kickstart -k "gui/$uid_value/com.znasllc.memql-worker" >&2 || cap_fail 5 "could not restart the worker"
-        if [[ "$menu" == true ]]; then
-            launchctl kickstart -k "gui/$uid_value/com.znasllc.memql-cockpit-menubar" >&2 || cap_fail 5 "could not restart the menu"
-        fi
+        # SMAppService records each program's signature when it registers,
+        # and launchd refuses a replaced executable that no longer matches
+        # ("Launch Constraint Violation"). A changed app registers afresh;
+        # registering again alone answers "already registered".
+        rm -f "$marker"
+        "$app/Contents/MacOS/MemQL" worker service unregister >&2 || cap_fail 5 "macOS did not release MemQL's previous services"
         cap_changed
     fi
+    "$app/Contents/MacOS/MemQL" worker service register --menu="$menu_flag" >&2 || cap_fail 5 "macOS did not register MemQL's services"
     printf '%s\n' "$fingerprint" > "$marker"
     chmod 600 "$marker"
     # Retire only known old helper bundles; keep the copy for rollback.
