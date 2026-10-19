@@ -45,9 +45,12 @@ describe("independent machine feature controls", () => {
     await toggle("Share models");
     expect(conn.query.fleetSetSharing).toHaveBeenLastCalledWith(expect.objectContaining({ mode: "people", paused: true, userIds: ["ana"], groupIds: ["design"], pausedUserIds: ["ana"] }));
     expect((screen.getByRole("switch", { name: "Share fleet workbenches" }) as HTMLInputElement).checked).toBe(true);
-    expect(within(screen.getByRole("region", { name: "Models" })).getByText("Ana")).toBeTruthy();
+    // Off hides the models audience; the workbench audience is its own.
+    expect(within(screen.getByRole("region", { name: "Models" })).queryByText("Ana")).toBeNull();
+    expect(within(screen.getByRole("region", { name: "Workbenches" })).getByText("Bo")).toBeTruthy();
     await toggle("Share models");
     expect(conn.query.fleetSetSharing).toHaveBeenLastCalledWith(expect.objectContaining({ paused: false, userIds: ["ana"], pausedUserIds: ["ana"] }));
+    expect(within(screen.getByRole("region", { name: "Models" })).getByText("Ana")).toBeTruthy();
     expect(conn.query.fleetSetOwnerFeatures).not.toHaveBeenCalled();
   });
   it("uses a separate workbench audience and resource for directory reads and writes", async () => {

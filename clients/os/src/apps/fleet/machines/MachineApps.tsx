@@ -46,6 +46,8 @@ function MachineAppSection({ id, machine, now }: { id: typeof RUNNABLE_APPS[numb
   const starting = useRef(false);
   const label = appLabel(id);
   const available = machine.ownerFeatures?.apps === false ? "Disabled in Settings" : machine.appsReported ? app ? app.allowed && app.signedIn ? "Allowed and signed in" : [app.allowed ? "Allowed" : "Not allowed", app.signedIn ? "Signed in" : "Signed out"].join(" · ") : "Install to connect" : "Waiting for Cockpit";
+  const installed = machine.appsReported ? app ? "Yes" : "No" : "";
+  const subscription = app?.subscription === "present" || app?.subscription === "none" ? subscriptionLabel(app.subscription) : "";
   const canSetup = machine.ownerFeatures?.apps !== false && !machine.revokedAt && isWorkerOnline(machine, now) && machine.ownerUserId === access?.userId;
   async function setup() {
     if (starting.current || !connection || !canSetup || !openWork) return;
@@ -65,10 +67,10 @@ function MachineAppSection({ id, machine, now }: { id: typeof RUNNABLE_APPS[numb
   }
   return <MachineDetailsSection title={label}>
     <Facts>
-      <Fact label="Status" value={<span className="fleet-app-status" data-ready={status === "Ready" || undefined}>{status}</span>} />
-      <Fact label="Installed" value={machine.appsReported ? app ? "Yes" : "No" : "Not reported"} />
-      <Fact label="Availability" value={available} />
-      <Fact label="Subscription" value={subscriptionLabel(app?.subscription)} />
+      <Fact label="Status" value={<span className="fleet-app-status" data-ready={status === "Ready" || undefined}>{status}</span>} copyValue={status === "Not reported" ? undefined : status} />
+      <Fact label="Installed" value={installed || "Not reported"} copyValue={installed || undefined} />
+      <Fact label="Availability" value={available} copyValue={machine.appsReported || machine.ownerFeatures?.apps === false ? available : undefined} />
+      <Fact label="Subscription" value={subscription || subscriptionLabel(app?.subscription)} copyValue={subscription || undefined} />
       {app?.version ? <Fact label="Version" value={app.version} copyValue={app.version} /> : null}
     </Facts>
     {runId ? <div className="fleet-section-actions"><Button onClick={() => openWork?.(runId)}>View setup</Button></div>

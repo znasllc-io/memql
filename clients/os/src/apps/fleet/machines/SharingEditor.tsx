@@ -178,6 +178,10 @@ export function SharingEditor({ machine, writes, resource = "models" }: { machin
   const canRetry = failed !== null && sharingSignature(current) === failed.baseline && (!failed.addedKeys.length || (failed.addedKeys.length === selection.length && failed.addedKeys.every(key => selection.includes(key))));
   const conflict = draft !== null && sharingSignature(current) !== draft.baseline;
   const locked = busy || draft !== null;
+  // The audience is managed only while sharing is on. A paused share keeps it
+  // saved, out of sight until the switch turns sharing back on.
+  const sharing = current.sharingMode !== "owner" && !current.sharingPaused;
+  useEffect(() => { if (!sharing) closeSearch(); }, [sharing]);
 
   function beginEdit(subject: Subject) {
     if (locked) return;
@@ -194,14 +198,14 @@ export function SharingEditor({ machine, writes, resource = "models" }: { machin
   }
 
   return <section ref={root} className="fleet-share-editor" aria-label={title} aria-busy={busy || undefined}>
-    <AutoRefresh enabled={current.sharingMode !== "owner"} busy={busy || refreshing} onRefresh={retry} />
+    <AutoRefresh enabled={sharing} busy={busy || refreshing} onRefresh={retry} />
     <div className="fleet-share-body">
       <div className="fleet-share-toggle">
         <div><span>{toggleLabel}</span><Caption>{current.sharingPaused ? "Paused. Your audience is saved; running work can finish." : current.sharingMode === "owner" ? "Only you have access." : resource === "models" ? "Share inference. Machine control stays with you." : "Share isolated workbenches. Host access stays with you."}</Caption></div>
-        <Switch checked={current.sharingMode !== "owner" && !current.sharingPaused} disabled={locked} onChange={enabled => void persist({ ...choiceFor(current.sharingMode === "owner" ? "people" : current.sharingMode, subjects), paused: !enabled }, "mode")}><span className="os-sr-only">{toggleLabel}</span></Switch>
+        <Switch checked={sharing} disabled={locked} onChange={enabled => void persist({ ...choiceFor(current.sharingMode === "owner" ? "people" : current.sharingMode, subjects), paused: !enabled }, "mode")}><span className="os-sr-only">{toggleLabel}</span></Switch>
       </div>
-      {current.sharingMode === "cluster" ? <Notice tone="info" sentence="Currently shared with everyone in this cluster."><Button disabled={locked} onClick={() => void persist(choiceFor("people", []), "mode")}>Choose users and groups</Button></Notice> : null}
-      {current.sharingMode === "people" ? <section className="fleet-machine-setting fleet-share-picker" aria-label="Users and groups">
+      {sharing && current.sharingMode === "cluster" ? <Notice tone="info" sentence="Currently shared with everyone in this cluster."><Button disabled={locked} onClick={() => void persist(choiceFor("people", []), "mode")}>Choose users and groups</Button></Notice> : null}
+      {sharing && current.sharingMode === "people" ? <section className="fleet-machine-setting fleet-share-picker" aria-label="Users and groups">
         <span className="fleet-machine-setting-name">Users and groups</span>
         <div className="fleet-share-collection">
           <div ref={searchArea} className="fleet-share-search-area">

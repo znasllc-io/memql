@@ -23,7 +23,7 @@ import {
   RecordList,
   RecordRow,
 } from "../../../kit";
-import { figureFrom, type Figure } from "../../../kit/measure";
+import { figureFrom, figureText, type Figure } from "../../../kit/measure";
 import { CatalogSection } from "./CatalogSection";
 import { EmbeddingStatus } from "./EmbeddingStatus";
 import { eligibleFor, formatContext, formatParams, orderModels, type ModelNeeds } from "./ordering";
@@ -465,6 +465,7 @@ function ModelLine({
   const [open, setOpen] = useState(false);
   const size = formatParams(model.params);
   const window = formatContext(model.contextWindow);
+  const machines = model.machineCount === 0 ? "none" : `${model.onlineCount} of ${model.machineCount} online`;
 
   return (
     <div>
@@ -485,23 +486,21 @@ function ModelLine({
           label="Size"
           value={size === "" ? "not reported — sorts last" : size}
           mono={size !== ""}
+          copyValue={size || undefined}
         />
-        <Fact label="Context" value={window === "" ? "not reported" : `${window} tokens`} />
-        {model.quant === "" ? null : <Fact label="Quantization" value={model.quant} mono />}
+        <Fact label="Context" value={window === "" ? "not reported" : `${window} tokens`} copyValue={window === "" ? undefined : `${window} tokens`} />
+        {model.quant === "" ? null : <Fact label="Quantization" value={model.quant} mono copyValue={model.quant} />}
         <Fact
           label="Machines"
-          value={
-            model.machineCount === 0
-              ? "none"
-              : `${model.onlineCount} of ${model.machineCount} online`
-          }
+          value={machines}
+          copyValue={machines}
         />
         {/* MEASURED, and only once something on this fleet has been. An
             unmeasured row here draws `Measure`'s absence mark rather than a
             zero -- the gap is visible on purpose, because somebody scanning
             the column for what is missing has to be able to see it. */}
         {showMeasured ? (
-          <Fact label="Measured" value={<Measure figure={measured} suffix=" tok/s" />} />
+          <Fact label="Measured" value={<Measure figure={measured} suffix=" tok/s" />} copyValue={figureText(measured, undefined, " tok/s")} />
         ) : null}
       </Facts>
 

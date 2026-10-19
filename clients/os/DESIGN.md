@@ -239,8 +239,11 @@ and wallpaper values only (see `src/themes/`), so nothing here is themeable.
   and individually removable entries with validation and keyboard support.
   Do not require comma-separated input to manage a visible list. Explain the
   consequence of the collection once, and show it only for modes that use it.
-- Sharing uses a toggle and one divider before the Users and groups collection.
-  Its search picker keeps checked choices until the plus action adds them
+- Sharing gives each shared resource (models, fleet workbenches) its own toggle
+  in one section, with one divider between the two groups whatever their state.
+  A group's Users and groups collection appears beneath its toggle only while
+  that sharing is on; turning it off hides the collection and keeps the saved
+  audience. Its search picker keeps checked choices until the plus action adds them
   together. Each recipient card has a live call count and named, icon-only
   pause/resume and remove controls. These actions save directly, show pending
   state and retain the saved value on failure with an explicit retry. Keep routine success
@@ -283,7 +286,8 @@ this layout. They own the spacing and responsive alignment used by Fleet and
 Cluster; avoid app-specific copies of the same grid.
 For a machine, Settings is the last tab, after Activity. General controls and
 Sharing precede reported facts on that one page. Sharing uses the same section
-grid, with a divider between its switch and users/groups collection; keep write errors
+grid, with a divider between the models and fleet workbench groups and each
+users/groups collection shown only while its sharing is on; keep write errors
 beside the section that caused them. There is no separate Sharing tab.
 
 - **Open, named sections.** Group related information under a `Subhead`, with
@@ -301,12 +305,14 @@ beside the section that caused them. There is no separate Sharing tab.
   Keep its consequences and confirmation beside the action, preserve the shared
   confirmation hold and restore focus on cancel. Lifecycle actions that belong
   in an `ActionBar` continue to follow rule 12.
-- **Quiet copying.** Use `Fact.copyValue` or `CopyValue presentation="row"`.
-  Text stays selectable with its normal cursor. Only the separate copy icon
-  copies; clicking or hovering a value never changes the clipboard. Keep the
-  icon visible, reserve its space, and give it a keyboard focus ring. Confirm
-  success on the icon and report clipboard failures beside the value. Dates
-  copy their exact timestamps.
+- **Quiet copying.** Every fact row that shows a real value is copyable: use
+  `Fact.copyValue` or `CopyValue presentation="row"`. Text stays selectable with
+  its normal cursor. Only the separate copy icon copies; clicking or hovering a
+  value never changes the clipboard. Hovering a copyable row gives the whole
+  row a subtle wash and shows its copy icon; other rows show none. Reserve the
+  icon's space, reveal it with a focus ring on keyboard focus, and keep it
+  visible on screens without hover. Confirm success on the icon and report
+  clipboard failures beside the value. Dates copy their exact timestamps.
 - **Readable, truthful data.** Copy exact timestamps behind relative dates;
   copying a key/value entry includes both. Missing measurements remain “Not
   reported” or “Not measured”, never invented zeroes or copyable placeholders.

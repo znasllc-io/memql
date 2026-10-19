@@ -19,7 +19,7 @@ export function MachineDetailsInfo({ machine, now, machineClass, usableBytes }: 
   const pipelines = pipelineStepsStatus(machine).answer;
   const reportedKeys = Object.keys(machine.reportedLabels).sort();
   return <>
-    <PageHelp title="Machine information"><p>Use the copy icon beside a value to copy it. Text can also be selected normally. Relative dates copy their exact timestamps.</p></PageHelp>
+    <PageHelp title="Machine information"><p>Point to a row, or tab to it, to show its copy icon; touch screens always show it. Text can also be selected normally. Relative dates copy their exact timestamps.</p></PageHelp>
     <MachineDetailsSection title="System">
       <Facts>
         <Fact label="Reported name" value={machine.name} copyValue={machine.name} />
@@ -58,7 +58,7 @@ export function MachineDetailsInfo({ machine, now, machineClass, usableBytes }: 
         <Fact label="Registered" value={formatMoment(machine.registeredAt)} copyValue={machine.registeredAt} />
         <Fact label="Cockpit version" value={machine.version} copyValue={machine.version} />
         <Fact label="Build" value={machine.buildTag} copyValue={machine.buildTag} mono />
-        <Fact label="Credential expires" value={machine.credentialExpiresAt ? formatMoment(machine.credentialExpiresAt) : "Does not expire"} title={machine.credentialExpiresAt || undefined} copyValue={machine.credentialExpiresAt} />
+        <Fact label="Credential expires" value={machine.credentialExpiresAt ? formatMoment(machine.credentialExpiresAt) : "Does not expire"} title={machine.credentialExpiresAt || undefined} copyValue={machine.credentialExpiresAt || "Does not expire"} />
       </Facts>
     </MachineDetailsSection>
     <MachineDetailsSection title="Reported labels" label="Machine-reported data">

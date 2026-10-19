@@ -249,7 +249,23 @@ function CatalogEntry({ row }: { row: CatalogRow }) {
         stateTitle={blocked?.detail} open={open} onOpen={() => setOpen(value => !value)} />
       {open ? <div className="fleet-catalog-profile">
         <p className="os-caption">{note}</p>
-        <Facts><Fact label="Runtime" value={profile.runtime} /><Fact label="Family" value={profile.family || "Not reported"} /><Fact label="Parameters" value={profile.params || "Not reported"} /><Fact label="Context" value={profile.contextWindow || "Not reported"} /><Fact label="Quantization" value={profile.quant || "Not reported"} /><Fact label="Capabilities" value={profile.flags.join(", ") || "None reported"} /><Fact label="Dimensions" value={profile.dimensions || "Not applicable"} /><Fact label="License" value={profile.license || "Not reported"} /><Fact label="Recommended for" value={profile.recommendedFor.join(", ") || "Not specified"} /><Fact label="Machine class" value={profile.minMachineClass || "Not specified"} /><Fact label="Platforms" value={profile.offeredOn.join(", ") || "Not specified"} /></Facts>
+        <Facts>{([
+          ["Runtime", profile.runtime, ""],
+          ["Family", profile.family, "Not reported"],
+          ["Parameters", profile.params, "Not reported"],
+          ["Context", profile.contextWindow, "Not reported"],
+          ["Quantization", profile.quant, "Not reported"],
+          ["Capabilities", profile.flags.join(", "), "None reported"],
+          ["Dimensions", profile.dimensions, "Not applicable"],
+          ["License", profile.license, "Not reported"],
+          ["Recommended for", profile.recommendedFor.join(", "), "Not specified"],
+          ["Machine class", profile.minMachineClass, "Not specified"],
+          ["Platforms", profile.offeredOn.join(", "), "Not specified"],
+        ] as const).map(([label, value, missing]) => {
+          // A reported value copies; the placeholder for a missing one does not.
+          const text = value ? String(value) : "";
+          return <Fact key={label} label={label} value={text || missing} copyValue={text || undefined} />;
+        })}</Facts>
       </div> : null}
     </div>
   );

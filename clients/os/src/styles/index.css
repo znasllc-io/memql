@@ -1224,6 +1224,22 @@ button:not(:disabled):active {
   overflow-wrap: anywhere;
   font-size: var(--os-text-base);
 }
+/* One fact is one row on the facts grid's own columns, so rows still align
+ * with each other, and a row holding a copy control is a single hover surface
+ * (`.os-copyvalue*` below). The row reaches 10px before its label so a wash
+ * never sits flush against the text; the matching padding is applied to the
+ * subgrid's edge items, which leaves the label exactly where it was.
+ * `row-gap: inherit` keeps the label-to-value spacing where a narrow layout
+ * stacks the two. */
+.os-fact {
+  display: grid;
+  grid-column: 1 / -1;
+  grid-template-columns: subgrid;
+  row-gap: inherit;
+  margin-inline-start: -10px;
+  padding-inline-start: 10px;
+  border-radius: var(--os-selection-radius);
+}
 
 /* Settings groups (DESIGN.md rule 8). The fieldset SEMANTICS stay -- a
  * legend names its group to assistive tech better than any div -- but the
@@ -4382,7 +4398,8 @@ a.os-button {
   text-overflow: ellipsis;
   white-space: nowrap;
 }
-/* An explicit, always-visible copy control; the value remains selectable. */
+/* An explicit copy control; the value remains selectable. A lone value keeps
+ * it visible; in a row it waits for the row (below). */
 .os-copyvalue-copy {
   display: grid; place-items: center; flex: 0 0 28px; width: 28px; height: 28px;
   padding: 0; border: 0; border-radius: var(--os-radius-xs); background: transparent;
@@ -4400,9 +4417,31 @@ a.os-button {
   color: var(--os-muted);
 }
 
-/* Facts keep normal selectable text and a separate, always-visible copy icon. */
+/* Facts keep normal selectable text and a separate copy icon. */
 .os-copyvalue-row { width: 100%; min-height: 36px; padding: 4px 10px; box-sizing: border-box; }
 .os-copyvalue-row .os-copyvalue-text { white-space: pre-wrap; overflow: visible; overflow-wrap: anywhere; user-select: text; }
+/* A COPYABLE ROW SHOWS ITS ICON ONLY WHILE IT IS THE ROW IN HAND. Hovering
+ * washes the whole row -- a `Fact`, or a standalone row value -- and reveals
+ * its icon, whose space stays reserved so nothing shifts. The cursor is left
+ * alone because the row does not copy; only the icon does. Keyboard focus
+ * and a fresh "Copied" keep the icon shown, and screens without hover show
+ * it always. A row with nothing to copy gets no wash. */
+.os-fact:has(.os-copyvalue-copy):hover,
+.os-fact:has(.os-copyvalue-copy:focus-visible),
+.os-copyvalue-row:not(.os-fact *):hover,
+.os-copyvalue-row:not(.os-fact *):has(.os-copyvalue-copy:focus-visible) {
+  background: color-mix(in srgb, var(--os-hover) 50%, transparent);
+}
+:is(.os-fact, .os-copyvalue-row) .os-copyvalue-copy { opacity: 0; }
+:is(.os-fact:hover, .os-copyvalue-row:hover) .os-copyvalue-copy,
+:is(.os-fact, .os-copyvalue-row) .os-copyvalue-copy:is(:focus-visible, [data-copied]) { opacity: 1; }
+@media (hover: none) {
+  :is(.os-fact, .os-copyvalue-row) .os-copyvalue-copy { opacity: 1; }
+}
+@media (prefers-reduced-motion: no-preference) {
+  .os-fact, .os-copyvalue-row { transition: background var(--os-duration-fast) var(--os-ease); }
+  .os-copyvalue-copy { transition: opacity var(--os-duration-fast) var(--os-ease), background var(--os-duration-fast) var(--os-ease), color var(--os-duration-fast) var(--os-ease); }
+}
 
 /* Shared card paging: explicit arrows, one or two visible cards, no wheel
  * interception. Off-page cards are inert; reserve room for focus outlines. */
@@ -14397,7 +14436,11 @@ button.os-cluster-mesh-peer:focus-visible {
 .fleet-machine-details .os-fleet-confirm .os-caption, .fleet-machine-details .os-fleet-confirm-line { max-width: 80ch; }
 .fleet-details-labels { padding: 0; margin: 0; list-style: none; }
 .fleet-details-labels li + li { margin-top: 4px; }
-.fleet-details-label-value { display: grid; grid-template-columns: 160px minmax(0, 1fr); gap: 24px; font-size: var(--os-text-sm); line-height: 1.6; }
+/* A reported label is a copy row on the facts' columns: its wash starts 10px
+ * before the key, as a fact row's starts before its label, and the key column
+ * takes back the 10px of row padding so each value lines up with the facts. */
+.fleet-details-labels .os-copyvalue-row { margin-inline-start: -10px; width: calc(100% + 10px); }
+.fleet-details-label-value { display: grid; grid-template-columns: 170px minmax(0, 1fr); gap: 24px; font-size: var(--os-text-sm); line-height: 1.6; }
 .fleet-details-label-value > span:first-child { color: var(--os-muted); }
 .fleet-details-label-value small { display: block; margin-top: 4px; color: var(--os-muted); }
 @container machine-details (max-width: 480px) {
@@ -14407,6 +14450,7 @@ button.os-cluster-mesh-peer:focus-visible {
   .fleet-machine-setting { gap: 8px; }
   .fleet-machine-setting-name { padding-top: 0; }
   .fleet-details-label-value { grid-template-columns: minmax(0, 1fr); gap: 3px; }
+  .fleet-details-label-value > span:last-child { padding-inline-start: 10px; }
   .fleet-machine-details .os-fleet-confirm { padding: 14px; }
 }
 .os-fleet-history > .fleet-bank-heading { margin-bottom: 0; }
@@ -15169,8 +15213,11 @@ button[data-ask-control="running"], [data-ask-control="running"] > button { outl
 .os-backup-schedule { display: flex; align-items: end; gap: 12px; flex-wrap: wrap; }
 .os-backup-schedule .os-field { flex: 1; min-width: 120px; }
 
-/* One setting, then its access list. Row actions save directly. */
-.fleet-share-picker { border-top: 1px solid var(--os-line); padding-top: 20px; padding-bottom: 0; }
+/* One setting, then its access list while sharing is on. Row actions save
+ * directly. One divider separates the models and workbench groups whether
+ * either is on, so the switches never sit together or move apart on toggle. */
+.os-fleet-sharing + .os-fleet-sharing { margin-top: 20px; padding-top: 12px; border-top: 1px solid var(--os-line); }
+.fleet-share-picker { padding-bottom: 0; }
 .fleet-share-search-area { position: relative; min-width: 0; max-width: 34rem; }
 .fleet-share-calls { font-variant-numeric: tabular-nums; }
 /* Keep a refusal beside the sharing controls in the Settings page flow. */
