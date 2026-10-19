@@ -145,4 +145,3 @@ set -euo pipefail
 ./scripts/install/e2e-baseline.sh --mode=compare \
   --baseline="$MEMQL_INSTALL_EVIDENCE_DIR/before.txt" --out="$MEMQL_INSTALL_EVIDENCE_DIR/after.txt"
 )
-
