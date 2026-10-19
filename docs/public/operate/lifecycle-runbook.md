@@ -228,6 +228,6 @@ See [pipeline substrate](pipelines-substrate.md) for placement and limits.
 5. Restore pipeline delivery, reconcile missed candidates, and check native
    verification receipts. Remove only temporary resources owned by the rollout.
 
-Follow [deploy-bundle-runbook.md](deploy-bundle-runbook.md) for the artifact and
+Follow [release candidates](release-candidates.md) for the artifact and
 GitOps contract. Credentials for native jobs and publication are scoped through
 MemQL; the rollout does not require repository Actions secrets.
