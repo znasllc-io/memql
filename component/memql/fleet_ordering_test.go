@@ -371,6 +371,28 @@ func TestEligibilityAsksTheSameQuestionsSatisfiesDoes(t *testing.T) {
 		}
 	}
 
+	// An embedding model answers nothing but embeddings (memql#6238): what
+	// an embedder advertises -- embeddings, a window, nothing that answers a
+	// chat -- never makes it a candidate for a conversation or a review.
+	embedder := onlineModel("qwen3-embedding:0.6b", false)
+	embedder.Embeddings = true
+	embedder.ContextWindow = 32768
+	for _, tt := range []struct {
+		name  string
+		needs FleetNeeds
+		ok    bool
+		why   string
+	}{
+		{"conversation", FleetNeeds{}, false, "an embedding model answers embedding calls only"},
+		{"structured", FleetNeeds{StructuredOutput: true}, false, "an embedding model answers embedding calls only"},
+		{"embeddings", FleetNeeds{Embeddings: true}, true, ""},
+	} {
+		ok, why := embedder.eligibleFor(tt.needs)
+		if ok != tt.ok || (!ok && why != tt.why) {
+			t.Errorf("embedder %s: ok=%v why=%q, want ok=%v why=%q", tt.name, ok, why, tt.ok, tt.why)
+		}
+	}
+
 	offline := m
 	offline.Machines = []FleetMachine{{RegistrationId: "laptop", Online: false}}
 	if ok, why := offline.eligibleFor(FleetNeeds{}); ok || why != "no machine offering it is online" {

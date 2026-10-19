@@ -73,6 +73,26 @@ func TestUnadvertisedCapabilitiesAreNotAssumed(t *testing.T) {
 	}
 }
 
+// An embedding model answers nothing but embeddings (memql#6238): a review
+// fell back to qwen3-embedding:0.6b, which answered "does not support chat".
+// A model that ALSO advertises an answering capability still answers.
+func TestAnEmbeddingModelAnswersEmbeddingCallsOnly(t *testing.T) {
+	embedder := ParseModelAttributes("ctx=32768,embeddings=1,max=1")
+	if ok, why := embedder.Satisfies(ModelNeeds{}); ok || !strings.Contains(why, "embedding model") {
+		t.Fatalf("an embedder must not take a conversation: ok=%v why=%q", ok, why)
+	}
+	if ok, _ := embedder.Satisfies(ModelNeeds{StructuredOutput: true}); ok {
+		t.Fatal("an embedder must not take a structured call")
+	}
+	if ok, why := embedder.Satisfies(ModelNeeds{Embeddings: true}); !ok {
+		t.Fatalf("an embedder takes an embedding call: %q", why)
+	}
+	both := ParseModelAttributes("ctx=8192,embeddings=1,structured=1,tools=1")
+	if ok, why := both.Satisfies(ModelNeeds{}); !ok {
+		t.Fatalf("a model that also advertises an answering capability still answers: %q", why)
+	}
+}
+
 // A garbled value must cost eligibility, never grant it -- and must not take
 // the machine out of the fleet entirely for a cosmetic reason.
 func TestGarbledAttributesFailClosedWithoutLosingTheMachine(t *testing.T) {
