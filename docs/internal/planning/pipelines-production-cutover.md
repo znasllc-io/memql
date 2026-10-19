@@ -32,8 +32,9 @@ Production currently serves **v0.29.35**, through instance commit
 Healthy/Synced at 12:13 UTC. No native runs remained active during the rollout.
 An independent public check verified the API, Identity and OS against the
 pinned edge image; website documentation remains a separate pending check.
-Engine main is `4d61cfe692` (v0.29.36). Its release and push runs were cancelled
-before deployment; production remains v0.29.35. The v0.29.31 full native pass
+Engine main is `c1667adb4928d8fd120bf52cf4fea22db111b04f`, still declaring
+v0.29.36. The separate v0.29.36 release and push runs were cancelled before
+deployment; production remains v0.29.35. The v0.29.31 full native pass
 below remains valid historical acceptance evidence; it is no longer the serving
 release. Engine **v0.30.0** is prepared in #6200 and is not deployed. The
 independent v0.29.33 rollout at 06:56 UTC replaced Agent while the editor
@@ -49,13 +50,32 @@ are ready. No CPU, memory, node or quota increase accompanies these changes.
 The independent instance #243 deployment paused pipeline intake again; the
 12:14 UTC whole-run read found no active pipelines, unfinished runs or Jobs.
 All four original webhook connections were restored afterward, confirmed
-through the authenticated production UI at 12:45 UTC. Native #6213 now tests
-head `f2f150d799006c4e784dd75b59173e20ab5aaa06` in run
-`4b8f795ba23917c43c2a320c2ea49b79`; it incorporates current main and the
-deployed reconnect fix. The superseded `88d6b0e12539b876d1ca0c886fd9b9c4`
+through the authenticated production UI at 12:45 UTC. Native #6213 passed at
+14:46 UTC on head `f2f150d799006c4e784dd75b59173e20ab5aaa06`, run
+`4b8f795ba23917c43c2a320c2ea49b79`: 36 completed steps, six expected path
+skips, all eight Linux/macOS editor hosts, 36 retained logs and 54 artifacts.
+Two capped live previews retained their full Library logs. It merged as
+`c1667adb4928d8fd120bf52cf4fea22db111b04f` at 14:47 UTC. Its clean worktree
+and merged branch references were removed after ownership and ancestry checks. The superseded `88d6b0e12539b876d1ca0c886fd9b9c4`
 run was cancelled after 34 steps completed; it is not a full-pass receipt.
 The owner paused the other session to prevent further concurrent deployments.
 Keep controllers stable until every whole run, including fleet work, finishes.
+
+Storage #6171 entered the ordinary merge queue at 14:48 UTC. Full-mode native
+run `67491bba23d2ec5113b7a7264d3aad4e` tests exact candidate
+`46cfeade6fea0c874b45952b6b6539f7a8f6532b`, based on the merged editor fix.
+Its App-bound check is `118127603094`. Success and an ordinary queue merge
+remain prerequisites for removing the legacy required context. The redundant
+main-push attempt on the included base was cancelled after ancestry verification.
+The queue run retains the same build quota and cannot preempt running work.
+
+The owner approved native deployment notifications in the existing Discord
+`#znas-instance` channel, including a qualification message. The existing
+webhook destination was independently verified, sealed as
+`ZNAS_DEPLOYMENT_DISCORD_WEBHOOK` through the signed-in SDK, and read back as
+active. No message has been sent by this preparation. The instance notification
+manifest is held locally until v0.30.0 provides channel configuration and grants;
+the existing observer stays active until native delivery is proved.
 
 Instance #240's current head `36a635936d6eda0359dd53572ee9f91bdf85a344`
 passed all ten native steps in run `e7cb192d9779fc8de3b8eb3f3ccf16ba`,
@@ -81,7 +101,7 @@ writes. Log `beb4936a-6484-4ad7-a6c0-8852a73c5b10` was retained and read back.
 A four-second delayed terminal receipt reproduces that false timeout. The
 repair uses a ten-second elapsed deadline and ten-millisecond polling; both
 the delayed case and all 2,840 unit tests pass in the pinned toolchain with two
-CPUs and 4 GiB, without skips. Fresh native qualification remains required.
+CPUs and 4 GiB, without skips. The successful native #6213 qualification above includes this repair.
 
 The final runtime also preserves a failed command's exit code when packaging
 never produces its outputs. Cluster and Fleet report artifact collection as a
@@ -161,8 +181,8 @@ failed against the previous implementation; the affected worker race suite
 passes locally. Independent #6243 carried the same runtime repair through
 native run `bf6d6d27baad43e524b7496c0c3560c6`, merged at 11:36 UTC,
 and is deployed in v0.29.35. The final branch adopts that implementation and
-retains the additional real-gRPC cases. Fresh engine qualification is running;
-Cockpit's separate complete pass is recorded above. Deploying this repair does
+retains the additional real-gRPC cases. The storage merge-candidate qualification is running; final #6200 qualification
+follows its merge. Cockpit's separate complete pass is recorded above. Deploying this repair does
 not turn the earlier failed runs into passes.
 
 The final runtime now includes bounded repository maintenance: retained JSON
