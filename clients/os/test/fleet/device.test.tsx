@@ -1,5 +1,6 @@
 import { cleanup, render, screen, within } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { DeviceArt } from "../../src/apps/fleet/machines/DeviceArt";
 import { deviceKind, type DeviceKind } from "../../src/apps/fleet/machines/device";
 import { hardwareFrom } from "../../src/apps/fleet/machines/hardware";
 
@@ -84,5 +85,30 @@ describe("the Equipment drawing", () => {
     const machine = machineFromRow(machineRow({ id: "mac", hardware: { chip: "Apple M4 Max", memoryBytes: 36 * GiB, cpuCores: 14 } }));
     render(<MachineEquipment machine={machine} now={new Date()} onInspect={vi.fn()} />);
     expect(within(screen.getByLabelText("Machine hardware")).getByRole("figure", { name: "MacBook" })).toBeTruthy();
+  });
+});
+
+describe("the monitor beside a desktop", () => {
+  it("is an Apple display beside a Mac and a PC monitor on a V stand beside a PC", () => {
+    const { container } = render(<>
+      <DeviceArt kind="macMini"><span>mac</span></DeviceArt>
+      <DeviceArt kind="tower"><span>pc</span></DeviceArt>
+    </>);
+    const [mac, pc] = Array.from(container.querySelectorAll("figure"));
+    expect(mac!.classList.contains("is-pc")).toBe(false);
+    expect(mac!.querySelector(".fleet-device-stand")).not.toBeNull();
+    expect(mac!.querySelector(".fleet-device-pcstand")).toBeNull();
+    expect(pc!.classList.contains("is-pc")).toBe(true);
+    expect(pc!.querySelector(".fleet-device-pcstand")).not.toBeNull();
+    expect(pc!.querySelector(".fleet-device-stand")).toBeNull();
+  });
+
+  it("gives PC laptops the squarer PC screen and keeps the MacBook's", () => {
+    const { container } = render(<>
+      <DeviceArt kind="macbook"><span>mac</span></DeviceArt>
+      <DeviceArt kind="gamingLaptop"><span>pc</span></DeviceArt>
+      <DeviceArt kind="laptop"><span>pc</span></DeviceArt>
+    </>);
+    expect(Array.from(container.querySelectorAll("figure")).map(f => f.classList.contains("is-pc"))).toEqual([false, true, true]);
   });
 });
