@@ -92,5 +92,7 @@ describe("native OS sign-in", () => {
   });
   it("explains unsupported browsers without exposing protocol diagnostics", () => {
     expect(signInProblem(new Error("Use a current browser with passkey support to sign in.")).message).toBe("This browser can’t use passkeys here.");
+    // memql#6233: a browser that refuses the related origin gets identity's window.
+    expect(signInProblem(Object.assign(new Error("refused"), { name: "PasskeyWindowNeeded" }))).toMatchObject({ message: "This browser asks for the passkey in a separate window.", action: "Open window" });
   });
 });

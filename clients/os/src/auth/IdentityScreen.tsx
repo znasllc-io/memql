@@ -7,7 +7,7 @@ import { Wizard } from "../kit/Wizard";
 import { OWNERSHIP_STEP_SUBTITLES, OwnershipWizard } from "./OwnershipWizard";
 import { EntryLayout } from "../kit/EntryLayout";
 import { EntryPending } from "../kit/EntryPending";
-import { deviceAuthenticatorName, loginWithPasskey, onlySecurityKeys, registerPasskey, type PasskeyPlace } from "./passkeys";
+import { deviceAuthenticatorName, loginWithPasskey, onlySecurityKeys, passkeyWindowRemembered, registerPasskey, type PasskeyPlace } from "./passkeys";
 import { Field, Button, Head } from "../kit/controls";
 import { IdentityAccount } from "../apps/identity/IdentityAccount";
 import { SignInPage, signInProblem, type SignInProblem } from "./SignInPage";
@@ -111,7 +111,8 @@ export function IdentityScreen({ initialPath, embedded = false }: { initialPath:
   useEffect(() => {
     if (page?.page !== "setup_passkey" || busy || !autoPasskey.current) return;
     autoPasskey.current = false;
-    if (typeof PublicKeyCredential === "undefined") return;
+    // A passkey window opens only from a press, so it waits for the button.
+    if (typeof PublicKeyCredential === "undefined" || passkeyWindowRemembered()) return;
     completeOwnerPasskey();
     // Once per arrival from the wizard's press; completeOwnerPasskey is
     // rebuilt every render and must not re-arm it.
@@ -186,7 +187,7 @@ export function IdentityScreen({ initialPath, embedded = false }: { initialPath:
       acts={busy ? [] : [
         ...(error ? [{ label: "Reload setup", text: true, onAct: () => window.location.assign("/") }] : []),
         ...(securityKeyOnly || data.HasProof ? [] : [{ label: "Use another device", text: true, onAct: () => complete("other") }]),
-        { label: data.HasProof ? "Finish setup" : "Create passkey", tone: "primary", onAct: () => complete() },
+        { label: passkeyWindowRemembered() ? "Open window" : data.HasProof ? "Finish setup" : "Create passkey", tone: "primary", onAct: () => complete() },
       ]} /></EntryLayout>;
   }
 

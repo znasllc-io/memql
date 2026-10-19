@@ -25,7 +25,7 @@ const json = (body: unknown, status = 200) => new Response(JSON.stringify(body),
 // has just changed takes no press for a moment (kit ActionBar): each step is
 // read before the next press, on a fake Date so reading costs nothing.
 beforeEach(() => { vi.useFakeTimers({ toFake: ["Date"] }); });
-afterEach(() => { cleanup(); vi.useRealTimers(); vi.unstubAllGlobals(); localStorage.removeItem("memql-os-theme"); document.documentElement.removeAttribute("data-theme"); });
+afterEach(() => { cleanup(); vi.useRealTimers(); vi.unstubAllGlobals(); vi.restoreAllMocks(); sessionStorage.clear(); localStorage.removeItem("memql-os-theme"); document.documentElement.removeAttribute("data-theme"); });
 
 /** Presses an act of the wizard's bar once it has been read. */
 const pressBar = (name: string) => { readTheBarNow(); fireEvent.click(screen.getByRole("button", { name })); };
@@ -87,6 +87,39 @@ describe("ownership setup through IdentityScreen and native transport", () => {
       expect(create.mock.calls[1]?.[0].publicKey.hints).toEqual(["hybrid", "security-key"]);
     } finally {
       delete (navigator as unknown as { credentials?: unknown }).credentials;
+    }
+  });
+
+  it("offers identity's passkey window when the browser refuses the related origin, and opens it from the press", async () => {
+    // memql#6233: Safari on a *.localhost cluster refuses OS's request for
+    // identity's RP ID; the owner continues in a window on identity's origin.
+    const create = vi.fn().mockRejectedValue(new DOMException("The origin of the document is not authorized for the provided RP ID.", "NotAllowedError"));
+    vi.stubGlobal("PublicKeyCredential", { parseCreationOptionsFromJSON: (x: unknown) => x, isUserVerifyingPlatformAuthenticatorAvailable: async () => true });
+    Object.defineProperty(navigator, "credentials", { configurable: true, value: { create } });
+    vi.stubGlobal("fetch", vi.fn(async (input: URL, init?: RequestInit) => {
+      if (input.pathname === "/auth/webauthn/register/begin") return json({ challengeId: "one", creationOptions: { publicKey: { challenge: "abc" } } });
+      if (init?.method === "POST") return json({ redirect: "/auth/setup/passkey" });
+      if (input.pathname === "/auth/setup/passkey") return json({ page: "setup_passkey", data: { Local: true, EnrollmentToken: "enrollment" } });
+      return json(setup);
+    }));
+    const frame = document.createElement("iframe");
+    document.body.appendChild(frame);
+    const popup = frame.contentWindow!;
+    const handOver = vi.spyOn(popup, "postMessage").mockImplementation(() => undefined);
+    const open = vi.spyOn(window, "open").mockReturnValue(popup);
+    try {
+      render(<IdentityScreen initialPath="/setup" />);
+      fireEvent.click(await reachSubmission());
+      expect((await screen.findByRole("alert")).textContent).toBe("This browser asks for the passkey in a separate window.");
+      expect(open).not.toHaveBeenCalled();
+      pressBar("Open window");
+      expect(open).toHaveBeenCalledWith(expect.stringMatching(/\/passkey$/), "memql-passkey", expect.any(String));
+      window.dispatchEvent(new MessageEvent("message", { origin: window.location.origin, source: popup, data: { type: "memql-passkey:ready" } }));
+      expect(handOver).toHaveBeenCalledWith(expect.objectContaining({ type: "memql-passkey:request", kind: "register", authorization: "Bootstrap enrollment" }), window.location.origin);
+      expect(create).toHaveBeenCalledTimes(1);
+    } finally {
+      delete (navigator as unknown as { credentials?: unknown }).credentials;
+      frame.remove();
     }
   });
 

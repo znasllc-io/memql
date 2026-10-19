@@ -492,6 +492,11 @@ func (s *Server) Mount(mux *http.ServeMux) {
 	// component/server it would route to the bff. No preAuth: a signed-in
 	// browser is exactly who opens it, and the state is what admits it.
 	mux.HandleFunc("GET "+githubconnect.AppSetupStartPath, wrap(s.handleGitHubAppSetupStart))
+	// THE PASSKEY WINDOW (memql#6233; owner-approved HTTP exception, CLAUDE.md).
+	// A page for the same reason as the GitHub one above: it must run on
+	// identity's own origin, so nativeUI leaves it here instead of sending the
+	// browser to OS. No preAuth: it carries no state and writes nothing itself.
+	mux.HandleFunc("GET "+PasskeyWindowPath, wrap(s.handlePasskeyWindow))
 	mux.HandleFunc("GET /check-email", wrap(s.handleCheckEmail))
 
 	// The device-bound magic-link flow (memql#4302, design D8). Four routes,

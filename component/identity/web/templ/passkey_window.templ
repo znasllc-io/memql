@@ -1,0 +1,30 @@
+package webtempl
+
+// PasskeyWindowData drives identity's passkey window (memql#6233): the one
+// page where a passkey request runs on identity's OWN origin, for MemQL OS,
+// when the browser refuses OS's related-origin request (Safari on a
+// *.localhost cluster; a password manager without related origins).
+//
+// The page carries no request. passkey-window.js takes it from the window
+// that opened it, by postMessage, and only from OpenerOrigins; begin, the
+// prompt and finish then run here, against the RP ID that is this page's own
+// host, and the result goes back to the opener the same way.
+type PasskeyWindowData struct {
+	Layout LayoutData
+	// OpenerOrigins are the origins allowed to hand this window a request,
+	// space separated: MemQL OS's, from the installed configuration and never
+	// from the request.
+	OpenerOrigins string
+}
+
+templ PasskeyWindow(data PasskeyWindowData) {
+	@Layout(data.Layout) {
+		<div class="card text-center" data-passkey-window data-opener-origins={ data.OpenerOrigins }>
+			<h1 class="card-title" data-passkey-heading>Use your passkey</h1>
+			<p class="text-muted" data-passkey-status aria-live="polite">Return to { data.Layout.BrandName } to continue.</p>
+			<div class="btn-row justify-center">
+				<button type="button" class="btn btn-primary" data-passkey-act hidden>Continue</button>
+			</div>
+		</div>
+	}
+}
