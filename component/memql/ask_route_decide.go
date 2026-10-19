@@ -33,7 +33,6 @@ import (
 	"unicode/utf8"
 
 	memorynodes "github.com/znasllc-io/memql/component/database/memory-nodes"
-	"github.com/znasllc-io/memql/component/work"
 )
 
 // The routing recipe, its structured answer, and what the recipe returns.
@@ -52,7 +51,7 @@ const (
 	askRouteUpdateRunes  = 300  // one of those messages; what a goal waits on
 	askRouteTitleRunes   = 80   // a goal's title, shown or proposed
 	askRouteReplyRunes   = 280  // the reply line
-	askRouteMessageRunes = 4000 // a message routing takes, and a split-off request
+	askRouteMessageRunes = 4000 // a message routing takes, a split-off request, and one message a goal receives (the guidance limit)
 	askRouteDecisions    = 2    // one decision and one retry
 )
 
@@ -267,7 +266,7 @@ func askRouteData(message string, turns []AskTurn, goals []askRouteGoal, pending
 	}
 	if clarification != nil {
 		data["pendingClarification"] = map[string]any{
-			"message":  askRouteClip(strings.TrimSpace(clarification.Prompt), askRouteMessageRunes),
+			"message":  askRouteClip(clarification.Prompt, askRouteMessageRunes),
 			"question": askRouteClip(askRouteSaid(*clarification), askRouteSideRunes),
 		}
 	}
@@ -281,8 +280,8 @@ func askRouteGoalData(goal askRouteGoal) map[string]any {
 	state, waitingOn := askRouteGoalState(goal.Run, goal.Approval)
 	shown := map[string]any{
 		"handle":  goal.Handle,
-		"title":   askRouteClip(strings.TrimSpace(goal.Title), askRouteTitleRunes),
-		"request": askRouteClip(strings.TrimSpace(goal.Request), askRouteSideRunes),
+		"title":   askRouteClip(goal.Title, askRouteTitleRunes),
+		"request": askRouteClip(goal.Request, askRouteSideRunes),
 		"state":   state,
 	}
 	if waitingOn != "" {
@@ -295,7 +294,7 @@ func askRouteGoalData(goal askRouteGoal) map[string]any {
 	if len(updates) > 0 {
 		sent := make([]any, 0, len(updates))
 		for _, text := range updates {
-			sent = append(sent, askRouteClip(strings.TrimSpace(text), askRouteUpdateRunes))
+			sent = append(sent, askRouteClip(text, askRouteUpdateRunes))
 		}
 		shown["updates"] = sent
 	}
@@ -303,42 +302,39 @@ func askRouteGoalData(goal askRouteGoal) map[string]any {
 }
 
 // askRouteGoalState is what a goal is doing, in the routing prompt's words,
-// and what it waits on when it waits on the person. It reads a waiting goal
-// the way the design record's delivery table does: a request that takes the
-// person's guidance is a question, a permission or a budget pause; any other
-// request is a review that takes no message; any other wait -- a retry, a
-// timer, a model to become available -- resumes on its own.
+// and what it waits on when it waits on the person. The words are the
+// delivery the goal gets (routeGoalDelivery), so the model is never told a
+// goal will read a message that delivery records Not delivered: a goal shown
+// waiting for an answer, a permission or its budget takes the message through
+// its request; one shown waiting on a review takes none; every other goal
+// reads it as work guidance, now or when it resumes.
 func askRouteGoalState(run, approval map[string]any) (state, waitingOn string) {
+	kind, status, _ := routeGoalDelivery(run, approval)
+	asked := stringArg(approval, "question")
+	switch {
+	case kind == deliverApproval && status == routeSaved:
+		return "paused on its budget", ""
+	case kind == deliverApproval && status == routeAnswered:
+		return "waiting for your answer", askRouteClip(asked, askRouteUpdateRunes)
+	case kind == deliverApproval:
+		if strings.TrimSpace(asked) == "" {
+			evidence, _ := approval["evidence"].(map[string]any)
+			asked = stringArg(evidence, "reason")
+		}
+		return "waiting for your permission", askRouteClip(asked, askRouteUpdateRunes)
+	case kind == deliverNone && status == routeNotDelivered:
+		return "waiting on a review", askRouteClip(asked, askRouteUpdateRunes)
+	case kind == deliverNone:
+		// Listing shows only active goals: a run that is not one has ended.
+		return "finished", ""
+	}
 	switch stringArg(run, "status") {
 	case "compiling":
 		return "preparing", ""
 	case "waiting":
-	default:
-		return "working", ""
-	}
-	waiting, _ := run["waitingOn"].(map[string]any)
-	kind := stringArg(approval, "kind")
-	if stringArg(waiting, "kind") != "approval" || approval == nil || kind == work.ApprovalKindInferenceUnavailable {
 		return "waiting to resume", ""
 	}
-	subject, _ := approval["subject"].(map[string]any)
-	options := approval["options"]
-	asked := strings.TrimSpace(stringArg(approval, "question"))
-	switch {
-	case !work.ApprovalAcceptsGuidance(kind, subject, options):
-		state = "waiting on a review"
-	case kind == work.ApprovalKindBudget:
-		return "paused on its budget", ""
-	case kind == work.ApprovalKindFeedback || work.IsFailureQuestion(options):
-		state = "waiting for your answer"
-	default:
-		state = "waiting for your permission"
-		if asked == "" {
-			evidence, _ := approval["evidence"].(map[string]any)
-			asked = strings.TrimSpace(stringArg(evidence, "reason"))
-		}
-	}
-	return state, askRouteClip(asked, askRouteUpdateRunes)
+	return "working", ""
 }
 
 // askRouteConversation is the conversation's last turns as the prompt shows
@@ -361,7 +357,7 @@ func askRouteConversation(turns []AskTurn) string {
 		if b.Len() > 0 {
 			b.WriteString("\n\n")
 		}
-		b.WriteString("Person: " + askRouteClip(strings.TrimSpace(turn.Prompt), askRouteSideRunes))
+		b.WriteString("Person: " + askRouteClip(turn.Prompt, askRouteSideRunes))
 		if said := askRouteSaid(turn); said != "" {
 			b.WriteString("\nMemQL: " + askRouteClip(said, askRouteSideRunes))
 		}
@@ -384,9 +380,11 @@ func askRouteSaid(turn AskTurn) string {
 	return said
 }
 
-// askRouteClip keeps text within limit characters, marking a cut with an
-// ellipsis inside the limit.
+// askRouteClip is text without surrounding space, kept within limit
+// characters; a cut ends in an ellipsis inside the limit. It is the one clip
+// for everything routing shows and lists.
 func askRouteClip(text string, limit int) string {
+	text = strings.TrimSpace(text)
 	if utf8.RuneCountInString(text) <= limit {
 		return text
 	}

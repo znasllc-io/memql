@@ -25,19 +25,10 @@ import (
 // guidanceTargetsLocked records work guidance under it, judging each goal by
 // its run as read under that lock.
 
-const (
-	// maxActiveAskGoals bounds the goals one message is checked against.
-	maxActiveAskGoals = 12
-	// What routing is shown of each goal, in runes.
-	activeGoalTitleRunes   = 80
-	activeGoalRequestRunes = 600
-	activeGoalUpdateRunes  = 300
-	// maxActiveGoalUpdates is how many earlier messages routing is shown per goal.
-	maxActiveGoalUpdates = 3
-	// maxRoutedMessageRunes is one routed message: the guidance limit, which
-	// decideApproval holds a request's feedback to as well.
-	maxRoutedMessageRunes = 4000
-)
+// maxActiveAskGoals bounds the goals one message is checked against. What
+// routing is shown of each goal is bounded by the askRoute* limits
+// (ask_route_decide.go), the one routed message by askRouteMessageRunes.
+const maxActiveAskGoals = 12
 
 // routeDelivery is how a message reaches a goal.
 type routeDelivery int
@@ -59,7 +50,9 @@ var nonPersonWaits = map[string]bool{"retry": true, "replan": true, "repair": tr
 // activeAskGoals lists the goals still running in a conversation, newest
 // first: one per root run that is preparing, working or waiting and not asked
 // to stop, at most twelve, read fresh. Handles g1, g2, ... are the only names
-// a routing model sees. A goal parked on a pending request carries it.
+// a routing model sees. A goal parked on a pending request carries it. A
+// goal's request is what the turn that opened it asked of it: for a split
+// message, the part intake received.
 func (e *MemQLEngine) activeAskGoals(ctx context.Context, transcript askTranscript) ([]askRouteGoal, error) {
 	ctx = ContextWithFreshRead(ctx)
 	turns := transcript.Turns
@@ -88,20 +81,21 @@ func (e *MemQLEngine) activeAskGoals(ctx context.Context, transcript askTranscri
 			continue
 		}
 		run, opened := rows[0], turns[opening[key]]
+		request := askTurnRequest(opened)
 		title := runTitle(run)
 		if strings.TrimSpace(title) == "" {
 			title = opened.WorkTitle
 		}
 		if strings.TrimSpace(title) == "" {
-			title = opened.Prompt
+			title = request
 		}
 		goals = append(goals, askRouteGoal{
 			Handle:   "g" + strconv.Itoa(len(goals)+1),
 			TurnID:   opened.ID,
 			GoalID:   BareShortId(stringArg(run, "goalId")),
 			RunID:    key,
-			Title:    activeGoalText(title, activeGoalTitleRunes),
-			Request:  activeGoalText(opened.Prompt, activeGoalRequestRunes),
+			Title:    askRouteClip(title, askRouteTitleRunes),
+			Request:  askRouteClip(request, askRouteSideRunes),
 			Run:      run,
 			Approval: e.pendingRunApproval(ctx, run),
 			Updates:  activeGoalUpdates(turns, key),
@@ -137,29 +131,15 @@ func activeGoalUpdates(turns []AskTurn, runID string) []string {
 			continue
 		}
 		for _, target := range turns[n].Routed.Targets {
-			if BareShortId(target.RunID) != runID {
-				continue
-			}
-			switch target.Status {
-			case routeQueued, routeReceived, routeAnswered, routeNotApproved, routeSaved:
-				updates = append(updates, activeGoalText(target.Text, activeGoalUpdateRunes))
+			if BareShortId(target.RunID) == runID && routeDelivered(target.Status) {
+				updates = append(updates, askRouteClip(target.Text, askRouteUpdateRunes))
 			}
 		}
 	}
-	if len(updates) > maxActiveGoalUpdates {
-		updates = updates[len(updates)-maxActiveGoalUpdates:]
+	if len(updates) > askRouteUpdates {
+		updates = updates[len(updates)-askRouteUpdates:]
 	}
 	return updates
-}
-
-// activeGoalText trims text to at most limit runes; a cut one ends in an
-// ellipsis.
-func activeGoalText(text string, limit int) string {
-	text = strings.TrimSpace(text)
-	if utf8.RuneCountInString(text) <= limit {
-		return text
-	}
-	return string([]rune(text)[:limit-1]) + "…"
 }
 
 // waitsOnApproval reports whether run is parked on approval.
@@ -204,6 +184,21 @@ func routeDeliveryFor(run, approval map[string]any) (routeDelivery, string, stri
 		// sideEffect and scopeElevation: guidance instead of approval.
 		return deliverApproval, routeNotApproved, ""
 	}
+}
+
+// routeGoalDelivery is how a message reaches a goal as delivery judges it:
+// routeDeliveryFor, except that a run waiting on something the request phase
+// cannot judge -- a request that could not be read, one it is no longer
+// parked on, a wait of another kind -- takes work guidance, read when it
+// resumes (guidanceTargetsLocked). What a routing call is told a goal is
+// doing comes from it too (askRouteGoalState), so the model is never told a
+// goal will read a message that delivery then records Not delivered.
+func routeGoalDelivery(run, approval map[string]any) (routeDelivery, string, string) {
+	kind, status, reason := routeDeliveryFor(run, approval)
+	if kind == deliverNone && activeWorkRun(run) && !waitsOnApproval(run, approval) {
+		return deliverGuidance, routeQueued, ""
+	}
+	return kind, status, reason
 }
 
 // deliverApprovalTargets answers, as the person, each request a goal is
@@ -279,14 +274,16 @@ func guidanceTargetsLocked(conversationID string, transcript askTranscript, goal
 	for _, goal := range goals {
 		target := AskRouteTarget{GoalID: goal.GoalID, RunID: goal.RunID, Title: goal.Title, Text: text}
 		run := freshRuns[BareShortId(goal.RunID)]
-		kind, status, reason := routeDeliveryFor(run, goal.Approval)
-		parked := waitsOnApproval(run, goal.Approval)
+		kind, status, reason := routeGoalDelivery(run, goal.Approval)
 		switch {
 		case !activeWorkRun(run):
 			target.Status, target.Reason = routeNotReceived, routeReasonEnded
-		case parked && kind == deliverNone:
+		case kind == deliverNone:
+			// Still parked on the review it was listed with.
 			target.ApprovalID, target.Status, target.Reason = BareShortId(stringArg(goal.Approval, "id")), status, reason
-		case parked && kind == deliverApproval:
+		case kind == deliverApproval:
+			// Still parked on an answerable request the request phase did not
+			// answer.
 			target.ApprovalID, target.Status, target.Reason = BareShortId(stringArg(goal.Approval, "id")), routeNotDelivered, routeReasonRefused
 		case !guidanceReaches(run, conversationID):
 			target.Status, target.Reason = routeNotDelivered, routeReasonRefused
@@ -314,7 +311,7 @@ func guidanceReaches(run map[string]any, conversationID string) bool {
 // sixteen messages and 16,000 runes, and the message itself at most 4,000.
 func guidanceFits(transcript askTranscript, run map[string]any, text string) bool {
 	runes := utf8.RuneCountInString(text)
-	if runes > maxRoutedMessageRunes {
+	if runes > askRouteMessageRunes {
 		return false
 	}
 	messages := 1

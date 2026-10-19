@@ -55,6 +55,16 @@ const (
 	routeNotReceived  = "notReceived"
 )
 
+// routeDelivered reports whether a message reached its goal: queued for or
+// read by its agent as work guidance, or taken by the request it waits on.
+func routeDelivered(status string) bool {
+	switch status {
+	case routeQueued, routeReceived, routeAnswered, routeNotApproved, routeSaved:
+		return true
+	}
+	return false
+}
+
 // Why a message did not reach a goal.
 const (
 	routeReasonEnded   = "ended"

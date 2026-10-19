@@ -27,10 +27,10 @@ import (
 // text with anything a model is shown, so a leaked id is visible.
 func routeGoals() []askRouteGoal {
 	return []askRouteGoal{
-		{Handle: "g1", TurnID: "turn-0c42", GoalID: "v1:work:goal:5d1e", RunID: "v1:work:run:81aa", Title: "Weather in Tucson", Request: "What's the weather in Tucson?", Run: map[string]any{"status": "running"}},
-		{Handle: "g2", TurnID: "turn-7f3b", GoalID: "v1:work:goal:2c9d", RunID: "v1:work:run:4e60", Title: "Hike near Tucson", Request: "Plan a hike near Tucson", Run: map[string]any{"status": "compiling"}},
+		{Handle: "g1", TurnID: "turn-0c42", GoalID: "v1:work:goal:5d1e", RunID: "v1:work:run:81aa", Title: "Weather in Tucson", Request: "What's the weather in Tucson?", Run: map[string]any{"id": "v1:work:run:81aa", "goalId": "v1:work:goal:5d1e", "status": "running"}},
+		{Handle: "g2", TurnID: "turn-7f3b", GoalID: "v1:work:goal:2c9d", RunID: "v1:work:run:4e60", Title: "Hike near Tucson", Request: "Plan a hike near Tucson", Run: map[string]any{"id": "v1:work:run:4e60", "goalId": "v1:work:goal:2c9d", "status": "compiling"}},
 		{Handle: "g3", TurnID: "turn-a51c", GoalID: "v1:work:goal:93b7", RunID: "v1:work:run:d204", Title: "Quarterly report", Request: "Write the quarterly report",
-			Run:      map[string]any{"status": "waiting", "waitingOn": map[string]any{"kind": "approval", "subject": "v1:work:approval:6e1f"}},
+			Run:      map[string]any{"id": "v1:work:run:d204", "goalId": "v1:work:goal:93b7", "status": "waiting", "waitingOn": map[string]any{"kind": "approval", "subject": "v1:work:approval:6e1f", "approvalKind": "feedback"}},
 			Approval: map[string]any{"id": "v1:work:approval:6e1f", "kind": "feedback", "question": "Which quarter?", "subject": map[string]any{"question": "Which quarter?"}}},
 	}
 }
@@ -226,39 +226,102 @@ func TestAskRouteDataIsBounded(t *testing.T) {
 	require.Equal(t, "2026-10-19T17:04:05Z", data["now"])
 }
 
+// askRouteStateCase is one goal as routing lists it -- its run and the request
+// it is parked on, if any -- and the words the prompt says it in.
+type askRouteStateCase struct {
+	name             string
+	run, approval    map[string]any
+	state, waitingOn string
+}
+
+// askRouteStateCases are the goal states routing tells apart. Each run is an
+// active root run of this conversation, as listing returns it; each request
+// is the one listing read for it.
+func askRouteStateCases() []askRouteStateCase {
+	run := func(status string, wait map[string]any) map[string]any {
+		row := map[string]any{"id": "v1:work:run:r1", "goalId": "v1:work:goal:g1", "status": status, "input": map[string]any{"conversation": map[string]any{"id": "conversation"}}}
+		if wait != nil {
+			row["waitingOn"] = wait
+		}
+		return row
+	}
+	waiting := func(kind string) map[string]any {
+		return run("waiting", map[string]any{"kind": kind, "subject": "v1:work:approval:a1"})
+	}
+	// parked is the run waiting on request a1, the way the work spine parks it.
+	parked := func(kind string) map[string]any {
+		return run("waiting", map[string]any{"kind": "approval", "subject": "v1:work:approval:a1", "approvalKind": kind})
+	}
+	request := func(fields map[string]any) map[string]any {
+		fields["id"] = "v1:work:approval:a1"
+		return fields
+	}
+	retryAbandon := []any{map[string]any{"label": "Retry", "value": "retry"}, map[string]any{"label": "Abandon", "value": "abandon"}}
+	return []askRouteStateCase{
+		{"preparing", run("compiling", nil), nil, "preparing", ""},
+		{"working", run("running", nil), nil, "working", ""},
+		{"a retry", waiting("retry"), nil, "waiting to resume", ""},
+		{"a timer", waiting("timer"), nil, "waiting to resume", ""},
+		{"no model available", parked("inferenceUnavailable"), request(map[string]any{"kind": "inferenceUnavailable"}), "waiting to resume", ""},
+		{"a question", parked("feedback"), request(map[string]any{"kind": "feedback", "question": "Which city?", "subject": map[string]any{"question": "Which city?"}}), "waiting for your answer", "Which city?"},
+		{"a failure question", parked("planReview"), request(map[string]any{"kind": "planReview", "question": "The search failed. Retry?", "options": retryAbandon, "subject": map[string]any{"symptom": "plan"}}), "waiting for your answer", "The search failed. Retry?"},
+		{"a permission", parked("sideEffect"), request(map[string]any{"kind": "sideEffect", "evidence": map[string]any{"reason": "Sends an email outside your organization"}}), "waiting for your permission", "Sends an email outside your organization"},
+		{"a scope elevation", parked("scopeElevation"), request(map[string]any{"kind": "scopeElevation", "question": "Use your browser?"}), "waiting for your permission", "Use your browser?"},
+		{"a budget checkpoint", parked("budget"), request(map[string]any{"kind": "budget", "subject": map[string]any{"resumeKind": "checkpoint", "continuationId": "c1"}}), "paused on its budget", ""},
+		{"a budget review", parked("budget"), request(map[string]any{"kind": "budget", "subject": map[string]any{"ceiling": "maxModelCalls"}}), "waiting on a review", ""},
+		{"a plan review", parked("planReview"), request(map[string]any{"kind": "planReview", "subject": map[string]any{"patches": []any{}}}), "waiting on a review", ""},
+		{"a document review", parked("feedback"), request(map[string]any{"kind": "feedback", "question": "Accept the edits?", "subject": map[string]any{"reviewType": "document"}}), "waiting on a review", "Accept the edits?"},
+		// Where the prompt and delivery used to disagree: a wait the request
+		// phase cannot judge takes work guidance, read when the run resumes.
+		{"a request that could not be read", parked("feedback"), nil, "waiting to resume", ""},
+		{"a request it no longer waits on", parked("feedback"), map[string]any{"id": "v1:work:approval:b2", "kind": "feedback", "question": "Which city?", "subject": map[string]any{"question": "Which city?"}}, "waiting to resume", ""},
+		{"a wait of another kind", waiting("feedback"), nil, "waiting to resume", ""},
+		{"no model available, said only on the request", parked(""), request(map[string]any{"kind": "inferenceUnavailable"}), "waiting on a review", ""},
+	}
+}
+
 // The words the prompt uses for what each goal is doing, and what it waits on
 // when it waits on the person.
 func TestAskRouteDataNamesEachGoalState(t *testing.T) {
-	waiting := func(kind string) map[string]any {
-		return map[string]any{"status": "waiting", "waitingOn": map[string]any{"kind": kind, "subject": "v1:work:approval:a1"}}
-	}
-	retryAbandon := []any{map[string]any{"label": "Retry", "value": "retry"}, map[string]any{"label": "Abandon", "value": "abandon"}}
-	cases := []struct {
-		name             string
-		run, approval    map[string]any
-		state, waitingOn string
-	}{
-		{"preparing", map[string]any{"status": "compiling"}, nil, "preparing", ""},
-		{"working", map[string]any{"status": "running"}, nil, "working", ""},
-		{"a retry", waiting("retry"), nil, "waiting to resume", ""},
-		{"a timer", waiting("timer"), nil, "waiting to resume", ""},
-		{"no model available", waiting("approval"), map[string]any{"kind": "inferenceUnavailable"}, "waiting to resume", ""},
-		{"a question", waiting("approval"), map[string]any{"kind": "feedback", "question": "Which city?", "subject": map[string]any{"question": "Which city?"}}, "waiting for your answer", "Which city?"},
-		{"a failure question", waiting("approval"), map[string]any{"kind": "planReview", "question": "The search failed. Retry?", "options": retryAbandon, "subject": map[string]any{"symptom": "plan"}}, "waiting for your answer", "The search failed. Retry?"},
-		{"a permission", waiting("approval"), map[string]any{"kind": "sideEffect", "evidence": map[string]any{"reason": "Sends an email outside your organization"}}, "waiting for your permission", "Sends an email outside your organization"},
-		{"a scope elevation", waiting("approval"), map[string]any{"kind": "scopeElevation", "question": "Use your browser?"}, "waiting for your permission", "Use your browser?"},
-		{"a budget checkpoint", waiting("approval"), map[string]any{"kind": "budget", "subject": map[string]any{"resumeKind": "checkpoint", "continuationId": "c1"}}, "paused on its budget", ""},
-		{"a budget review", waiting("approval"), map[string]any{"kind": "budget", "subject": map[string]any{"ceiling": "maxModelCalls"}}, "waiting on a review", ""},
-		{"a plan review", waiting("approval"), map[string]any{"kind": "planReview", "subject": map[string]any{"patches": []any{}}}, "waiting on a review", ""},
-		{"a document review", waiting("approval"), map[string]any{"kind": "feedback", "question": "Accept the edits?", "subject": map[string]any{"reviewType": "document"}}, "waiting on a review", "Accept the edits?"},
-	}
-	for _, tc := range cases {
+	for _, tc := range askRouteStateCases() {
 		t.Run(tc.name, func(t *testing.T) {
 			data := askRouteData("Actually, Phoenix", nil, []askRouteGoal{{Handle: "g1", Title: "Weather", Request: "Weather?", Run: tc.run, Approval: tc.approval}}, nil, nil, time.Now())
 			goal := data["goals"].([]any)[0].(map[string]any)
 			require.Equal(t, tc.state, goal["state"])
 			waitingOn, _ := goal["waitingOn"].(string)
 			require.Equal(t, tc.waitingOn, waitingOn)
+		})
+	}
+}
+
+// What a routing call is told a goal is doing is the delivery it then gets: a
+// goal shown waiting for an answer, a permission or its budget is answered
+// through its request, one shown waiting on a review is Not delivered, and
+// every other one takes the message as work guidance. The model is never told
+// a goal will read a message that delivery records Not delivered.
+func TestAskRouteGoalStateIsTheDeliveryItGets(t *testing.T) {
+	promised := map[string]string{
+		"preparing": routeQueued, "working": routeQueued, "waiting to resume": routeQueued,
+		"waiting for your answer": "request", "waiting for your permission": "request", "paused on its budget": "request",
+		"waiting on a review": routeNotDelivered + "/" + routeReasonReview,
+	}
+	for _, tc := range askRouteStateCases() {
+		t.Run(tc.name, func(t *testing.T) {
+			state, _ := askRouteGoalState(tc.run, tc.approval)
+			want, known := promised[state]
+			require.True(t, known, "state %q promises nothing", state)
+			goal := askRouteGoal{Handle: "g1", GoalID: "g1", RunID: "r1", Title: "Weather", Run: tc.run, Approval: tc.approval}
+			got := "request"
+			// The request phase answers what it can; the locked phase records
+			// the rest by the run as it reads it, here unchanged since listing.
+			if kind, _, _ := routeDeliveryFor(tc.run, tc.approval); kind != deliverApproval {
+				target := guidanceTargetsLocked("conversation", askTranscript{}, []askRouteGoal{goal}, map[string]map[string]any{"r1": tc.run}, "Actually, Phoenix.")[0]
+				got = target.Status
+				if target.Reason != "" {
+					got += "/" + target.Reason
+				}
+			}
+			require.Equal(t, want, got, "shown as %q", state)
 		})
 	}
 }
