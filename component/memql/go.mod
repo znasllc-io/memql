@@ -9,6 +9,7 @@ toolchain go1.27.2
 require (
 	github.com/anthropics/anthropic-sdk-go v1.79.1
 	github.com/dgraph-io/ristretto v0.2.0
+	github.com/kljensen/snowball v0.10.0
 	github.com/lib/pq v1.12.3
 	github.com/openai/openai-go/v3 v3.71.1
 	github.com/santhosh-tekuri/jsonschema/v5 v5.3.1
