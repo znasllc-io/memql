@@ -37,3 +37,14 @@ func TestRemoveByIdStillClearsCurrent(t *testing.T) {
 		t.Fatal("Remove(id) must still clear the current entry (drain / admin paths)")
 	}
 }
+
+func TestReadmittingTheSameWorkerDoesNotTerminateIt(t *testing.T) {
+	reg := NewRegistry(nil, time.Now)
+	w := &Worker{RegistrationId: "reg-1", OwnerUserId: "owner"}
+	w.SetTerminateFunc(func(reason string) { t.Fatalf("readmitting the live pointer terminated it: %s", reason) })
+	reg.Add(w)
+	reg.Add(w)
+	if reg.WorkerById("reg-1") != w || len(reg.WorkersForUser("owner")) != 1 {
+		t.Fatal("readmitting the live pointer must preserve one registry entry")
+	}
+}
