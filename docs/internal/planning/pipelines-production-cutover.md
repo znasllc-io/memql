@@ -22,8 +22,9 @@ and production evidence are complete.
 
 ## Active cutover, October 19, 2026
 
-Production currently serves **v0.29.33**, through instance commit
-`a10f5ce4ec82bfb23dd1d5ed96844c2790763592`. Engine main is
+Production currently serves **v0.29.34**, through instance commit
+`56a905f51a6682edebbdeb9dde3fe9ba0f625af1`. Its Argo operation completed
+Healthy/Synced at 10:43 UTC, after all native runs had finished. Engine main is
 `66488da438051fc326c7114f21910eb954946bd3` (v0.29.34). The v0.29.31 full native pass
 below remains valid historical acceptance evidence; it is no longer the serving
 release. Engine **v0.30.0** is prepared in #6200 and is not deployed. The
@@ -38,10 +39,9 @@ Its Agent artifact receiver fix is now deployed with the already configured
 Instance #232 and #239 are also deployed. All three Argo applications report
 Healthy/Synced, with both Agent and Workbench replicas ready. No CPU, memory,
 node or quota increase accompanies these changes. All four pipeline connections
-were restored with their original webhook delivery at 09:10 UTC after poll
-catch-up. Another session disconnected them at 09:25–09:27 UTC; the restart
-is being coordinated with that session. At 09:54 UTC no unfinished native
-runs, execution Jobs or Argo operations remained.
+were restored with their original webhook delivery after poll catch-up. The
+independent instance #242 deployment paused them again; restoration follows
+its completed rollout and a fresh read of whole-run readiness.
 
 The independent instance rollout at 08:31–08:32 UTC restarted Agent and
 Workbench while qualification was active, despite unchanged executor images.
@@ -72,6 +72,27 @@ race suite, including real Docker isolation, passes. Native run
 and eight artifacts, including the actual Mac tests. Both Cockpit rulesets
 were independently verified before merge. Release build and public download
 verification are still pending. The immutable v0.20.0 tag is not reused.
+
+The v0.20.1 release run `a120d1d5b0f32c30f307b06d47bcdc12` ended with
+14 completed steps and two failed Mac builds. The current #6213 run
+`6f39cbd8bd068fba838d148823b7d0aa` ended with 32 completed steps,
+three failed Mac editor steps and seven skips. All five failures were
+`pipeline_node_lost`; neither run qualifies. Completed logs were retained and
+no release candidate was approved. The Linux worker recorded a network timeout
+and DNS failures at 10:16 UTC; it and the Mac registered new connections around
+10:17. Older streams remained open until 10:32. Agent and Workbench did not
+restart during that interval. The Mac's client-side network cause remains
+unconfirmed, so a shared network interruption is an inference.
+
+Same-replica registration replacement now terminates the predecessor, matching
+the existing cross-replica supersede policy. The RPC receive loop also observes
+session cancellation: cancelling its derived context alone did not interrupt
+gRPC's blocked receive. Real gRPC regression cases exercise pending work,
+same-replica replacement, remote-holder events and revocation while idle. The
+successor remains usable. This reports interrupted work promptly; it does not
+replay a command whose execution is uncertain. Both transport regressions
+failed against the previous implementation; the affected worker race suite
+passes locally. Native qualification and deployment remain required.
 
 The final runtime now includes bounded repository maintenance: retained JSON
 proposals, exact operator-owned repository/file grants, fresh signed-actor and
