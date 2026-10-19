@@ -75,6 +75,9 @@ func handleModels(args []string) {
 	// but this machine cannot serve them" and "you have no models" send
 	// them to entirely different places.
 	d := newDiscoverer()
+	// This runs in the owner's shell and the worker does not: the ceiling it
+	// prints is the one the worker's own environment gives, not the shell's.
+	followWorkerEnvironment(d, *configPath)
 	inv := d.Probe(ctx, modelsRequest(policy))
 	printModelInventory(os.Stdout, inv, policyPath)
 

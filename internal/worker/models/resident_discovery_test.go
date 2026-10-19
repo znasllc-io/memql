@@ -226,3 +226,54 @@ func TestParallelSource(t *testing.T) {
 		})
 	}
 }
+
+// TestParallelEnvIsWhereTheWorkersVariableIsRead. A command that is not the
+// worker runs in the owner's shell, and the shell's OLLAMA_NUM_PARALLEL is not
+// the one the worker has: the worker's comes from its unit. ParallelEnv is how
+// that command says where the worker's value is, and the sentence says so.
+func TestParallelEnvIsWhereTheWorkersVariableIsRead(t *testing.T) {
+	shell := func(k string) string {
+		if k == "OLLAMA_NUM_PARALLEL" {
+			return "2"
+		}
+		return ""
+	}
+	const file = "the worker's environment file (~/.memql/worker.env)"
+
+	t.Run("it replaces the process environment", func(t *testing.T) {
+		d := &Discoverer{Getenv: shell, ParallelEnv: func() (string, string) { return "4", file }}
+		n, source := d.ParallelSource(0)
+		if n != 4 || source != "OLLAMA_NUM_PARALLEL in "+file {
+			t.Errorf("ParallelSource = %d from %q, want 4 from OLLAMA_NUM_PARALLEL in %s", n, source, file)
+		}
+		if got := d.effectiveParallelism(0); got != 4 {
+			t.Errorf("effectiveParallelism = %d, want 4: discovery and the report must agree", got)
+		}
+	})
+
+	t.Run("silence there is silence, whatever the shell holds", func(t *testing.T) {
+		d := &Discoverer{
+			Getenv:          shell,
+			ParallelEnv:     func() (string, string) { return "", file },
+			ManagedParallel: func() int { return 3 },
+		}
+		n, source := d.ParallelSource(0)
+		if n != 3 || source != "the memql-ollama.service unit" {
+			t.Errorf("ParallelSource = %d from %q, want 3 from the unit: the shell's 2 is not the worker's", n, source)
+		}
+	})
+
+	t.Run("the policy still outranks it", func(t *testing.T) {
+		d := &Discoverer{ParallelEnv: func() (string, string) { return "4", file }}
+		if n, source := d.ParallelSource(2); n != 2 || source != "models.parallel in policy.yaml" {
+			t.Errorf("ParallelSource = %d from %q, want 2 from the policy", n, source)
+		}
+	})
+
+	t.Run("what it says that is not a count is skipped", func(t *testing.T) {
+		d := &Discoverer{ParallelEnv: func() (string, string) { return "+4", file }}
+		if n, source := d.ParallelSource(0); n != 1 || source != "the default" {
+			t.Errorf("ParallelSource = %d from %q, want 1 from the default", n, source)
+		}
+	})
+}

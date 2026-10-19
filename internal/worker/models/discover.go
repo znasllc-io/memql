@@ -131,6 +131,18 @@ type Discoverer struct {
 	// package that wrote the unit is the one that can read it back. Nil
 	// means there is no such runtime (Docker, a Mac, one started by hand).
 	ManagedParallel func() int
+	// ParallelEnv answers "what OLLAMA_NUM_PARALLEL does the WORKER have", for a
+	// process that is not the worker. It returns the variable's text and the
+	// name of the place it was read, as the tail of a sentence ("the worker's
+	// environment file (~/.memql/worker.env)").
+	//
+	// Nil means this process IS the worker, and Getenv is its environment. A
+	// command that runs in the owner's shell is not: the worker takes its
+	// environment from its unit, so the shell's value is the shell's, and
+	// reading it names a ceiling the worker does not advertise. When set, this
+	// replaces Getenv for the ceiling and for nothing else (OLLAMA_HOST is
+	// still Getenv's).
+	ParallelEnv func() (value, from string)
 }
 
 // DefaultOllamaBaseURL is where Ollama listens unless told otherwise.
@@ -350,9 +362,14 @@ func (d *Discoverer) ollamaBaseURL() string {
 }
 
 // envParallelism is OLLAMA_NUM_PARALLEL as the worker's own environment
-// states it, or zero when it is unset or not a positive number.
-func (d *Discoverer) envParallelism() int {
-	return ParseOllamaCount(d.getenv("OLLAMA_NUM_PARALLEL"))
+// states it, or zero when it is unset or not a positive number, and the name of
+// the place it was read.
+func (d *Discoverer) envParallelism() (int, string) {
+	value, from := d.getenv("OLLAMA_NUM_PARALLEL"), "the worker's environment"
+	if d != nil && d.ParallelEnv != nil {
+		value, from = d.ParallelEnv()
+	}
+	return ParseOllamaCount(value), from
 }
 
 // ParseOllamaCount reads a count out of the text of an environment variable
@@ -391,8 +408,9 @@ func (d *Discoverer) effectiveParallelism(configured int) int {
 // the sentence-ready name of where it came from. The sources are read most
 // deliberate first: the owner's models.parallel, the worker's
 // OLLAMA_NUM_PARALLEL (the only knob there was before the policy key, so it
-// keeps its place ahead of the unit), the unit this cockpit wrote for its
-// own Ollama, and one.
+// keeps its place ahead of the unit; a command that is not the worker reads it
+// through ParallelEnv), the unit this cockpit wrote for its own Ollama, and
+// one.
 //
 // ZERO IS NOT AN OPTION HERE, and this is the one place in the package
 // where absent is the PERMISSIVE direction rather than the safe one: the
@@ -410,8 +428,8 @@ func (d *Discoverer) ParallelSource(configured int) (int, string) {
 	if configured > 0 {
 		return configured, "models.parallel in policy.yaml"
 	}
-	if n := d.envParallelism(); n > 0 {
-		return n, "OLLAMA_NUM_PARALLEL in the worker's environment"
+	if n, from := d.envParallelism(); n > 0 {
+		return n, "OLLAMA_NUM_PARALLEL in " + from
 	}
 	if d != nil && d.ManagedParallel != nil {
 		if n := d.ManagedParallel(); n > 0 {

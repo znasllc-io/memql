@@ -140,6 +140,9 @@ type inferenceSetup struct {
 func newInferenceSetup(configPath string, ids []string, nonInteractive bool, runtimeFlag string) *inferenceSetup {
 	policyPath := filepath.Join(filepath.Dir(configPath), "policy.yaml")
 	discoverer := newDiscoverer()
+	// The closing block prints the `max` the cluster will see, and this runs
+	// in the owner's shell: it reads the worker's environment, not its own.
+	followWorkerEnvironment(discoverer, configPath)
 	return &inferenceSetup{
 		out:            os.Stdout,
 		in:             os.Stdin,
