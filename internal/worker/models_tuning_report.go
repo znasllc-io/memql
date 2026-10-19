@@ -60,10 +60,12 @@ func managedOllamaBinary() string {
 	return bin
 }
 
-// stopCommand is the `ollama` a person runs to unload a model: the bare name
-// when ollama is on PATH. Otherwise the managed runtime's binary by its absolute
-// path when it is installed, because the runtime is not put on PATH and its
-// unit runs that binary by path. The bare name when neither is found.
+// stopCommand is the `ollama` a person runs to unload a model, written as one
+// word for their shell: the bare name when ollama is on PATH. Otherwise the
+// managed runtime's binary by its absolute path when it is installed, because
+// the runtime is not put on PATH and its unit runs that binary by path. The path
+// runs through the owner's home, so it is quoted when it holds a space or a
+// character the shell reads (shellWord). The bare name when neither is found.
 func stopCommand(r tuningReport) string {
 	lookPath := r.LookPath
 	if lookPath == nil {
@@ -77,9 +79,32 @@ func stopCommand(r tuningReport) string {
 		managed = managedOllamaBinary
 	}
 	if bin := managed(); bin != "" {
-		return bin
+		return shellWord(bin)
 	}
 	return "ollama"
+}
+
+// shellWord is s written as one word to a POSIX shell: bare when every
+// character is one the shell leaves alone, otherwise inside single quotes, with
+// each single quote in it closed out, escaped with a backslash and reopened.
+// The report prints commands to paste, and a path with a space or a
+// metacharacter in it is otherwise two words, or a command.
+func shellWord(s string) string {
+	if s != "" && strings.IndexFunc(s, func(r rune) bool { return !shellSafe(r) }) < 0 {
+		return s
+	}
+	return "'" + strings.ReplaceAll(s, "'", `'\''`) + "'"
+}
+
+// shellSafe is a character that needs no quoting anywhere in a word: letters,
+// digits and _ @ % + : , . / -  (not = or ~, which a shell reads at the start of
+// a word).
+func shellSafe(r rune) bool {
+	switch {
+	case r >= 'a' && r <= 'z', r >= 'A' && r <= 'Z', r >= '0' && r <= '9':
+		return true
+	}
+	return strings.ContainsRune("_@%+:,./-", r)
 }
 
 func printModelTuning(w io.Writer, inv models.Inventory, r tuningReport) {
@@ -144,9 +169,17 @@ func printModelTuning(w io.Writer, inv models.Inventory, r tuningReport) {
 		fmt.Fprintln(w, "  Ollama has loaded now:")
 		for _, l := range r.Loaded {
 			fmt.Fprintf(w, "    %-30s %s\n", l.ID, loadedWords(l, r.Now))
-			if l.GPUPercent() < 100 {
+			// Only a size Ollama stated can say how much of the model is on the
+			// GPU. Without one the share reads zero, and "the rest runs on the
+			// CPU" would be said of a model nobody measured.
+			//
+			// KNOWN GAP: a machine with no GPU at all reads 0% on every model, and
+			// this has no structured way to know there is none -- the hardware
+			// floor's verdict carries it only in a sentence. Such a machine is
+			// below the floor and serves nothing.
+			if l.SizeBytes > 0 && l.GPUPercent() < 100 {
 				fmt.Fprintln(w, "      The rest runs on the CPU, which is slow, and stays that way until the model reloads.")
-				fmt.Fprintf(w, "      Free GPU memory, then run: %s stop %s\n", stopCommand(r), l.ID)
+				fmt.Fprintf(w, "      Free GPU memory, then run: %s stop %s\n", stopCommand(r), shellWord(l.ID))
 			}
 		}
 	}
@@ -170,9 +203,12 @@ func keepAliveWords(k models.KeepAlive) string {
 // loadedWords is one line of what Ollama holds: size, how much of it is on
 // the GPU, the window it was loaded at, and when it goes.
 func loadedWords(l models.Loaded, now time.Time) string {
-	parts := []string{
-		fmt.Sprintf("%.1f GB", float64(l.SizeBytes)/1e9),
-		fmt.Sprintf("%d%% on the GPU", l.GPUPercent()),
+	parts := []string{"size not reported"}
+	if l.SizeBytes > 0 {
+		parts = []string{
+			fmt.Sprintf("%.1f GB", float64(l.SizeBytes)/1e9),
+			fmt.Sprintf("%d%% on the GPU", l.GPUPercent()),
+		}
 	}
 	if l.ContextLength > 0 {
 		parts = append(parts, fmt.Sprintf("window %d", l.ContextLength))

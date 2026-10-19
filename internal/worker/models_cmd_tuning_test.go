@@ -393,3 +393,103 @@ func TestModelsTuningReport_AWindowOnlyEntryIsNotKeptLoaded(t *testing.T) {
 		t.Errorf("the keep_alive line is %q, want %q", embedLine, want)
 	}
 }
+
+// TestShellWord. The report prints a command for a person to paste, and a path
+// with a space or a shell metacharacter in it is not one word to their shell:
+// it runs the wrong thing, or nothing. A word of plain characters stays bare,
+// so the common case reads as it always did.
+func TestShellWord(t *testing.T) {
+	tests := []struct{ in, want string }{
+		{"ollama", "ollama"},
+		{"/home/op/.memql/ollama/runtime/bin/ollama", "/home/op/.memql/ollama/runtime/bin/ollama"},
+		{"qwen3.8:27b", "qwen3.8:27b"},
+		{"hf.co/org/model:Q4_K_M", "hf.co/org/model:Q4_K_M"},
+		{"/home/Jane Doe/.memql/ollama/runtime/bin/ollama", "'/home/Jane Doe/.memql/ollama/runtime/bin/ollama'"},
+		{"/home/o'brien/bin/ollama", `'/home/o'\''brien/bin/ollama'`},
+		{"/home/$USER/bin/ollama", "'/home/$USER/bin/ollama'"},
+		{"/home/a;b/ollama", "'/home/a;b/ollama'"},
+		{"/home/a&b/ollama", "'/home/a&b/ollama'"},
+		{"/home/a*b/ollama", "'/home/a*b/ollama'"},
+		{"/home/a`b/ollama", "'/home/a`b/ollama'"},
+		{`/home/a\b/ollama`, `'/home/a\b/ollama'`},
+		{"/home/(a)/ollama", "'/home/(a)/ollama'"},
+		{"~/bin/ollama", "'~/bin/ollama'"},
+		{"a=b", "'a=b'"},
+		{"two\nlines", "'two\nlines'"},
+		{"'", `''\'''`},
+		{"", "''"},
+	}
+	for _, tt := range tests {
+		if got := shellWord(tt.in); got != tt.want {
+			t.Errorf("shellWord(%q) = %s, want %s", tt.in, got, tt.want)
+		}
+	}
+}
+
+// TestModelsTuningReport_CPUCalloutQuotesAPathWithASpace. The managed runtime
+// lives under the owner's home, and a home with a space in it (a Linux account
+// named for a person, or a Mac) must not turn the printed command into two
+// words.
+func TestModelsTuningReport_CPUCalloutQuotesAPathWithASpace(t *testing.T) {
+	home := filepath.Join(t.TempDir(), "Jane Doe")
+	t.Setenv("HOME", home)
+	bin := filepath.Join(inference.DefaultNativeFacts(home, "").RuntimeDir, "bin", "ollama")
+	if err := os.MkdirAll(filepath.Dir(bin), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(bin, []byte("#!/bin/sh\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	partly := []models.Loaded{{ID: "qwen3.8:27b", SizeBytes: 18_400_000_000, VRAMBytes: 6_500_000_000, ContextLength: 16384, ExpiresAt: reportNow.Add(time.Hour)}}
+	// Not on PATH, so the managed binary is the command; the real lookup of it
+	// (a nil ManagedOllama) is what reads HOME.
+	out := renderTuning(t, tunedInventory(), tuningReport{
+		Parallel: 2, ParallelSource: "the default", Loaded: partly,
+		LookPath: func(string) (string, error) { return "", errors.New("not found") },
+	})
+	if want := "Free GPU memory, then run: '" + bin + "' stop qwen3.8:27b"; calloutLine(out) != want {
+		t.Errorf("the callout says %q, want %q", calloutLine(out), want)
+	}
+
+	// And an apostrophe in the path is escaped the POSIX way.
+	out = renderTuning(t, tunedInventory(), tuningReport{
+		Parallel: 2, ParallelSource: "the default", Loaded: partly,
+		LookPath:      func(string) (string, error) { return "", errors.New("not found") },
+		ManagedOllama: func() string { return "/home/o'brien/.memql/ollama/runtime/bin/ollama" },
+	})
+	if want := `Free GPU memory, then run: '/home/o'\''brien/.memql/ollama/runtime/bin/ollama' stop qwen3.8:27b`; calloutLine(out) != want {
+		t.Errorf("the callout says %q, want %q", calloutLine(out), want)
+	}
+}
+
+// TestModelsTuningReport_NoCPUCalloutWithoutASize. A size Ollama did not state
+// is not a share on the GPU of zero: "0% on the GPU" and a fault to fix would
+// be said of a model nobody measured. The line says the size is not reported
+// and nothing is called out; a model whose size IS known and whose GPU share is
+// low still is.
+//
+// What this does not cover: a machine with no GPU at all reads 0% on every
+// model, and the report has no structured way to know the machine has none
+// (the hardware floor's verdict carries it only in a sentence). Such a machine
+// is below the floor and serves nothing, so its report is the "none served"
+// one; the callout there is a known gap.
+func TestModelsTuningReport_NoCPUCalloutWithoutASize(t *testing.T) {
+	look := func(string) (string, error) { return "/usr/local/bin/ollama", nil }
+	unknown := []models.Loaded{{ID: "qwen3.8:27b", ContextLength: 16384, ExpiresAt: reportNow.Add(time.Hour)}}
+	out := renderTuning(t, tunedInventory(), tuningReport{Parallel: 2, ParallelSource: "the default", Loaded: unknown, LookPath: look})
+	if strings.Contains(out, "The rest runs on the CPU") || calloutLine(out) != "" {
+		t.Errorf("a model of unknown size was called out as running on the CPU:\n%s", out)
+	}
+	if want := "qwen3.8:27b                    size not reported, window 16384, unloads in 1h0m"; !strings.Contains(out, want) {
+		t.Errorf("the report does not say %q:\n%s", want, out)
+	}
+	if strings.Contains(out, "0% on the GPU") || strings.Contains(out, "0.0 GB") {
+		t.Errorf("a size nobody stated was printed as a measurement:\n%s", out)
+	}
+
+	known := []models.Loaded{{ID: "qwen3.8:27b", SizeBytes: 18_400_000_000, VRAMBytes: 0, ContextLength: 16384, ExpiresAt: reportNow.Add(time.Hour)}}
+	out = renderTuning(t, tunedInventory(), tuningReport{Parallel: 2, ParallelSource: "the default", Loaded: known, LookPath: look})
+	if !strings.Contains(out, "18.4 GB, 0% on the GPU") || calloutLine(out) == "" {
+		t.Errorf("a model of known size with nothing on the GPU must still be called out:\n%s", out)
+	}
+}
