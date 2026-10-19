@@ -96,6 +96,7 @@ export function AutoPage({
   const shown: Balance | null = draft ?? saved;
   const dirty = draft !== null && saved !== null && !sameBalance(draft, saved);
   const canEdit = editable && saved !== null && balance.available && writes.balanceSupported;
+  const limit = budget.value === null ? "" : budget.value.monthlyLimitUSD === null ? "No budget" : usd(budget.value.monthlyLimitUSD);
 
   // A draft that came back equal to the saved balance is no draft at all.
   useEffect(() => {
@@ -185,9 +186,9 @@ export function AutoPage({
                 ) : (
                   <>
                     <Facts>
-                      <Fact label="Monthly budget" value={budget.value.monthlyLimitUSD === null ? "No budget" : usd(budget.value.monthlyLimitUSD)} />
-                      <Fact label="Spent this month" value={usd(budget.value.spentThisMonthUSD)} />
-                      {budget.value.resetsAt ? <Fact label="Resets" value={resetsOn(budget.value.resetsAt)} /> : null}
+                      <Fact label="Monthly budget" value={limit} copyValue={limit} />
+                      <Fact label="Spent this month" value={usd(budget.value.spentThisMonthUSD)} copyValue={usd(budget.value.spentThisMonthUSD)} />
+                      {budget.value.resetsAt ? <Fact label="Resets" value={resetsOn(budget.value.resetsAt)} copyValue={budget.value.resetsAt} /> : null}
                     </Facts>
                     {budget.value.state === "over" ? (
                       <p className="os-caption fleet-auto-budget" data-state="over">Budget reached. Auto uses only your machines and apps until it resets.</p>
@@ -209,6 +210,7 @@ export function AutoPage({
                   <Fact
                     key={pick.job}
                     label={JOB_TITLES[pick.job]}
+                    copyValue={pick.serves || pick.reason || undefined}
                     value={
                       pick.serves !== "" ? (
                         <>
@@ -225,6 +227,7 @@ export function AutoPage({
                 ))}
                 <Fact
                   label={JOB_TITLES.embeddings}
+                  copyValue={embedder.state === "bound" ? embedder.name : embedder.state === "none" ? "No embedding model yet" : undefined}
                   value={
                     embedder.state === "loading" ? (
                       <InlineSkeleton label="Checking" />
