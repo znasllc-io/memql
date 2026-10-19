@@ -755,6 +755,15 @@ func (m FleetModel) eligibleFor(n FleetNeeds) (bool, string) {
 	if len(m.Machines) > 0 && !allowed {
 		return false, "not selected for this purpose on an online machine"
 	}
+	// AN EMBEDDING MODEL ANSWERS NOTHING BUT EMBEDDINGS (memql#6238). A
+	// model that advertises embeddings and nothing a conversation needs can
+	// only embed: the fallback chain once handed a structured review to
+	// qwen3-embedding:0.6b, which answered "does not support chat". The
+	// label grammar has no chat attribute, so the absence of every answering
+	// capability is what says it.
+	if !n.Embeddings && m.Embeddings && !m.Tools && !m.StructuredOutput && !m.Vision {
+		return false, "an embedding model answers embedding calls only"
+	}
 	if n.StructuredOutput && !m.StructuredOutput {
 		return false, "does not advertise structured output"
 	}
