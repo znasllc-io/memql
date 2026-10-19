@@ -4718,7 +4718,8 @@ Expected:
 ~/.memql/bin/memql --version
 grep '"msg":"worker registered with cluster"' ~/.memql/state/worker.log | tail -2 | cut -c1-230
 curl -s http://127.0.0.1:9100/metrics | grep '^worker_home_connected'
-~/.memql/bin/memql worker models | grep -E 'machine concurrency|Requests per model'
+~/.memql/bin/memql worker models | grep -E 'machine concurrency|Requests per Ollama model'
+grep '"msg":"model concurrency ceiling"' ~/.memql/state/worker.log | tail -2 | cut -c1-230
 ```
 
 Expected:
@@ -4730,8 +4731,12 @@ memql 0.20.0+g<REV> (computeruse)
 worker_home_connected{home="api.memql.localhost"} 1
 worker_home_connected{home="api.memql.znas.io"} 1
   capability MODEL, machine concurrency 2
-  Requests per model: 1, from the default.
+  Requests per Ollama model: 1, from the default.
+{"time":"...","level":"INFO","msg":"model concurrency ceiling","model":"qwen3-embedding:0.6b","model_max":1,"source":"the default"}
+{"time":"...","level":"INFO","msg":"model concurrency ceiling","model":"qwen3.8:27b","model_max":1,"source":"the default"}
 ```
+
+The last two lines are the worker's own record of the ceiling it advertises, written at start and again after every `SIGHUP`. `memql worker models` is run from a shell, so it reads the worker's environment file (`~/.memql/worker.env`, as it is now) rather than the worker's own environment; these lines are what the worker really used.
 
 - [ ] **Step 9: Optional: restart the tray companion so it runs the new binary too (it only shows status)**
 
@@ -4864,14 +4869,17 @@ Add under the existing `models:` block of `~/.memql/policy.yaml`, keeping `allow
 
 ```bash
 kill -HUP "$(systemctl --user show memql-worker.service -p MainPID --value)"
-grep -E '"msg":"policy reloaded"|policy.yaml models has a problem' ~/.memql/state/worker.log | tail -3 | cut -c1-200
+sleep 3   # the worker looks at Ollama again after the reload, and logs the ceilings a moment later
+grep -E '"msg":"policy reloaded"|policy.yaml models has a problem|"msg":"model concurrency ceiling"' ~/.memql/state/worker.log | tail -3 | cut -c1-230
 ~/.memql/bin/memql worker models | sed -n '/Kept loaded/,/^$/p'
 ```
 
-Expected: the reload line, no `has a problem` line, and the two entries:
+Expected: the reload line, the two ceiling lines the reload writes (`model_max` 2 from the unit, or from `models.parallel` if the policy sets it; the worker looks again after the reload), no `has a problem` line, and the two entries:
 
 ```text
 {"time":"...","level":"INFO","msg":"policy reloaded"}
+{"time":"...","level":"INFO","msg":"model concurrency ceiling","model":"qwen3-embedding:0.6b","model_max":2,"source":"the memql-ollama.service unit"}
+{"time":"...","level":"INFO","msg":"model concurrency ceiling","model":"qwen3.8:27b","model_max":2,"source":"the memql-ollama.service unit"}
   Kept loaded (policy.yaml models.resident):
     qwen3.8:27b                    kept loaded for 2h0m0s, at a working context of 16384
     qwen3-embedding:0.6b           kept loaded for 2h0m0s

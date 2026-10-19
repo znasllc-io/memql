@@ -249,9 +249,19 @@ the file you just edited would change nothing.
 `max_concurrent` is the one attribute that is **never** left absent: the engine
 reads a missing ceiling as *unlimited*. It is the first of these that gives a
 usable number: `models.parallel` in `policy.yaml`; `OLLAMA_NUM_PARALLEL` in the
-worker's environment; the `OLLAMA_NUM_PARALLEL` of the `memql-ollama.service`
-unit this cockpit manages, drop-ins included; and otherwise 1. `memql worker
-models` names which one answered. See [Keeping a model loaded](#keeping-a-model-loaded).
+worker's environment (on Linux, the `~/.memql/worker.env` its unit loads); the
+`OLLAMA_NUM_PARALLEL` of the `memql-ollama.service` unit this cockpit manages,
+drop-ins included; and otherwise 1. `memql worker models` names which one
+answered. It runs in your shell and the worker does not, so it reads the
+worker's environment file rather than its own environment; where there is no
+such file (macOS, whose LaunchAgent loads none, or a machine the installer never
+touched) it reports its own environment and says "this command's environment
+(the worker's own may differ)". It reads the file as it is now, and the worker
+took its environment when it started, so restart the worker after editing it.
+The worker's log carries the number it really advertises: one `model
+concurrency ceiling` line per model it serves, with `model_max` and `source`, at
+start and after every `SIGHUP`.
+See [Keeping a model loaded](#keeping-a-model-loaded).
 
 ### The four modalities
 
@@ -680,11 +690,14 @@ If 32K calls are common on this machine, give Ollama one slot:
 and restart Ollama as above (the worker follows the unit unless
 `models.parallel` or its own `OLLAMA_NUM_PARALLEL` is set). `models.parallel: 1`
 alone only lowers what the worker advertises; it is for a runtime the cockpit
-cannot read. The ceiling the worker advertises can also differ from what Ollama
-was started with: a stale `OLLAMA_NUM_PARALLEL` in the worker's environment
-outranks the unit, a unit edited by hand takes effect only when Ollama restarts,
-and another Ollama on the port reads none of this. Each is benign: a call waits
-inside Ollama, or a slot sits idle until the next refresh.
+cannot read.
+
+The ceiling the worker advertises can also differ from what Ollama was started
+with: a stale `OLLAMA_NUM_PARALLEL` in the worker's environment outranks the
+unit, a `worker.env` edited since the worker started shows in `memql worker
+models` before it applies, a unit edited by hand takes effect only when Ollama
+restarts, and another Ollama on the port reads none of this. Each is benign: a
+call waits inside Ollama, or a slot sits idle until the next refresh.
 
 ---
 

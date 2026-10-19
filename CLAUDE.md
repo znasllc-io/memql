@@ -432,7 +432,16 @@ silently:
    `models.parallel`, else the worker's `OLLAMA_NUM_PARALLEL`, else the unit's
    (`inference.UnitParallel`, drop-ins included), else 1 -- never 0, which the
    engine reads as unlimited. Setup writes the unit once and never touches a
-   runtime that is already serving, so an existing unit is edited by hand.
+   runtime that is already serving, so an existing unit is edited by hand. The
+   number is read the way Ollama reads it (`models.ParseOllamaCount`: spaces,
+   then quotes, then `ParseUint`, so `+2` is no count). `memql worker models`
+   and the closing block of `setup --inference` run in the owner's shell, not
+   the worker, so they read the worker's `OLLAMA_NUM_PARALLEL` from `worker.env`
+   beside `worker.yaml` (what the Linux unit's `EnvironmentFile=` loads; a
+   LaunchAgent loads none) through `followWorkerEnvironment`, and say "this
+   command's environment" when there is no file. The worker's own `model
+   concurrency ceiling` log lines, at start and on every SIGHUP, are the record
+   that cannot differ.
 
 There is no warm-up and no per-level slot reservation, on purpose: a warm-up can
 load a model onto a GPU another process holds, and residency then makes that
