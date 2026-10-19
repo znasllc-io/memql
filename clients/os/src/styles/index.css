@@ -3415,20 +3415,23 @@ button.os-row.os-record-row:focus-visible { outline: 2px solid var(--os-accent);
 /* An already-revoked machine states the fact quietly. It is history rather
  * than a warning -- the credential stopped working when it was revoked, and
  * an alarm-toned banner would say something is wrong now. */
-/* The connection warnings, above the facts (epic memql#5327).
+/* The connection warnings, above the facts (epic memql#5327), and setup's
+ * beside them (memql#6235).
  *
  * A STACK AND NOTHING ELSE. Every child is an .os-notice, which already
  * carries its own tone, border and padding; giving this wrapper a surface of
  * its own would box a box, and the three tones would then read as three
  * variations on one panel rather than as three separate things being said.
  * It exists to space them and to keep them off the block above. */
-.os-fleet-credential-health {
+.os-fleet-credential-health,
+.os-fleet-setup-health {
   display: flex;
   flex-direction: column;
   gap: 7px;
   margin-block-end: 11px;
 }
-.os-fleet-credential-health:empty {
+.os-fleet-credential-health:empty,
+.os-fleet-setup-health:empty {
   display: none;
 }
 /* A MEASURE, because these are sentences rather than fields.
@@ -3440,7 +3443,9 @@ button.os-row.os-record-row:focus-visible { outline: 2px solid var(--os-accent);
  * read. Capping the measure is the only thing here that is about reading
  * rather than about state. */
 .os-fleet-credential-health .os-notice-line,
-.os-fleet-credential-health .os-caption {
+.os-fleet-credential-health .os-caption,
+.os-fleet-setup-health .os-notice-line,
+.os-fleet-setup-health .os-caption {
   max-inline-size: 74ch;
 }
 

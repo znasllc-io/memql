@@ -20,7 +20,7 @@ import { formatBytes } from "../../../kit/format";
 // not do it.
 
 export type SetupState = "running" | "finished" | "stopped";
-export type SetupStageName = "runtime" | "models" | "workbench";
+export type SetupStageName = "permissions" | "runtime" | "models" | "workbench";
 export type SetupStageState = "waiting" | "running" | "done" | "failed" | "skipped";
 
 export interface SetupStage {
@@ -49,7 +49,7 @@ export interface MachineSetup {
 }
 
 const STATES: readonly SetupState[] = ["running", "finished", "stopped"];
-const STAGE_NAMES: readonly SetupStageName[] = ["runtime", "models", "workbench"];
+const STAGE_NAMES: readonly SetupStageName[] = ["permissions", "runtime", "models", "workbench"];
 const STAGE_STATES: readonly SetupStageState[] = ["waiting", "running", "done", "failed", "skipped"];
 
 /**
@@ -112,6 +112,16 @@ export function setupNow(setup: MachineSetup | null, now: Date): MachineSetup | 
   return { ...setup, state: "stopped" };
 }
 
+/** Whether the installer itself spoke within `ms` of `now`, by its own
+ *  clock (`updatedAt`). A stage it has just finished is not on the machine's
+ *  registration yet -- models appear when it next reconnects -- and a
+ *  surface that read the registration alone would offer to do it again. */
+export function setupSpokeWithin(setup: MachineSetup | null, now: Date, ms = SETUP_QUIET_MS): boolean {
+  if (setup === null) return false;
+  const spoke = Date.parse(setup.updatedAt);
+  return !Number.isNaN(spoke) && now.getTime() - spoke <= ms;
+}
+
 /** One stage of the report, or null when the installer was not asked to run it. */
 export function setupStage(setup: MachineSetup | null, name: SetupStageName): SetupStage | null {
   return setup?.stages.find((stage) => stage.name === name) ?? null;
@@ -124,6 +134,7 @@ export function setupRunningStage(setup: MachineSetup | null): SetupStage | null
 }
 
 const STAGE_LABEL: Record<SetupStageName, string> = {
+  permissions: "the permissions",
   runtime: "the model runtime",
   models: "the models",
   workbench: "the workbenches",
@@ -167,6 +178,8 @@ export function setupDownloadLabel(stage: SetupStage): string {
 // the machines list say the same thing about the same install, so the words
 // live here rather than in each.
 const RUNNING_WORDS: Record<SetupStageName, string> = {
+  // Not the installer working: it waits for the person, on the machine.
+  permissions: "Waiting for permissions",
   runtime: "Installing the model runtime",
   models: "Downloading models",
   workbench: "Setting up workbenches",
