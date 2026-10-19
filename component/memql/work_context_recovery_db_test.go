@@ -41,7 +41,7 @@ func contextReserveTrace() []common.ChatMessage {
 			common.ChatMessage{Role: "tool", Name: "readSource", ToolCallId: key, Content: strings.Repeat(key+" exact evidence; ", 60)})
 	}
 	// The watermark is a positional system message, not summarizable history.
-	return append(messages, common.ChatMessage{Role: "system", Name: "work_recovery_checkpoint", Content: `{"version":1,"reviewActive":true,"reviewedLimit":12,"instruction":"Reconsider within existing authority."}`})
+	return append(messages, common.ChatMessage{Role: "system", Name: "work_recovery_checkpoint", Content: `{"version":1,"reviewActive":true,"reviewedLimit":12,"evidenceRepairs":1,"evidenceGap":"Resolve the requested item identifier from a named source.","instruction":"Reconsider within existing authority."}`})
 }
 
 func TestWorkContextRecoveryReserveArchivesExactSourcesAcrossReplicasWithoutInference(t *testing.T) {

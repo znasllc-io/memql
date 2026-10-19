@@ -81,11 +81,17 @@ func TestCapabilitySearchRanksPurposeAboveIncidentalImplementationWords(t *testi
 
 func TestSavedFileContentAndImageOperationsAreInTheRealCapabilityShortlist(t *testing.T) {
 	e, _, _ := readMergeTestEngine(t)
+	fn, lookupErr := e.functions.Get("compose.composeMaterialize")
+	require.NoError(t, lookupErr)
+	require.Contains(t, fn.Description, "Create a saved document file")
+	require.True(t, e.workCapabilityAllowed(askTestActor(), fn))
 	for _, tc := range []struct{ search, name string }{
 		{"library file read content", "library.libraryReadFile"},
 		{"Read file to identify first bird", "library.libraryReadFile"},
 		{"What is the number one bird in the markdown file you just saved? Read that file to identify it.", "library.libraryReadFile"},
 		{"generate image", "library.libraryGenerateImage"},
+		{"create files", "compose.composeMaterialize"},
+		{"Can you create files and generate images using the capabilities available in this MemQL system?", "compose.composeMaterialize"},
 	} {
 		rows, err := e.workCapabilitiesBuiltin(askTestActor(), map[string]any{"search": tc.search}, 0)
 		require.NoError(t, err)

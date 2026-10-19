@@ -168,6 +168,7 @@ export class Connection {
   private attemptCount = 0;
   private lastError = "";
   private reconnectTimer: ReturnType<typeof setTimeout> | null = null;
+  private reconnectInFlight = false;
   private stableTimer: ReturnType<typeof setTimeout> | null = null;
   private cycleCount = 0;
   private readonly statusListeners = new Set<(ev: ConnectionStatusEvent) => void>();
@@ -258,7 +259,6 @@ export class Connection {
     if (this.reconnectCfg === null || this.finished) return;
     if (this.statusValue !== "reconnecting") return;
     this.clearReconnectTimer();
-    this.attemptCount = 0;
     void this.attemptReconnect();
   }
 
@@ -450,6 +450,15 @@ export class Connection {
   }
 
   private async attemptReconnect(): Promise<void> {
+    // Focus, online, Retry and the backoff timer can all arrive together.
+    // One owner dials and replays; overlapping handshakes can orphan streams.
+    if (this.reconnectInFlight) return;
+    this.reconnectInFlight = true;
+    try { await this.reconnectOnce(); }
+    finally { this.reconnectInFlight = false; }
+  }
+
+  private async reconnectOnce(): Promise<void> {
     const cfg = this.reconnectCfg;
     if (cfg === null || this.closed || this.finished) return;
     this.attemptCount++;
@@ -487,6 +496,7 @@ export class Connection {
     // out, or the re-seed reintroduces the read-then-subscribe hole the
     // ordering contract closes (memql#4536).
     this.subscriptions.replay();
+    this.clearReconnectTimer();
     this.lastError = "";
     this.armStableTimer();
     this.startAutoRotate();

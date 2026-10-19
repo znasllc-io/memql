@@ -102,7 +102,7 @@ func TestProgressReceiptRejectsFailuresDiscoveryAndEquivalentRepeats(t *testing.
 		rowMap(v, "data")[key] = true
 		require.Empty(t, progressReceiptKey(v))
 	}
-	for _, name := range []string{"", "discoverCapabilities", "recallWorkHistory", "requestUserFeedback", "respondToUser"} {
+	for _, name := range []string{"", "discoverCapabilities", "workCapabilities", "recallWorkHistory", "requestUserFeedback", "respondToUser"} {
 		v := progressReceipt("one")
 		rowMap(v, "data")["tool"] = "scope." + name
 		require.Empty(t, progressReceiptKey(v))

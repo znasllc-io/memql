@@ -24,6 +24,7 @@ describe("automatic background reads", () => {
     }
     const view = render(<FocusOnCommit busy={beforeBusy} enabled={beforeEnabled} onRefresh={first} />);
     await act(async () => { view.rerender(<FocusOnCommit busy={afterBusy} enabled={afterEnabled} onRefresh={next} />); });
+    await advance(250);
     expect(first).not.toHaveBeenCalled();
     expect(next).toHaveBeenCalledTimes(calls);
   });
@@ -50,6 +51,7 @@ describe("automatic background reads", () => {
     online.mockReturnValue(false); await advance(); expect(read).not.toHaveBeenCalled();
     online.mockReturnValue(true);
     await act(async () => { fireEvent.online(window); fireEvent.focus(window); });
+    await advance(250);
     expect(read).toHaveBeenCalledOnce();
   });
   it("never overlaps a slow read, retries rejection, and respects disabled terminal records", async () => {

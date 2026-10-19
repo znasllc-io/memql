@@ -1,4 +1,5 @@
 import type { AskHandle, AskTransport, WorkGuidanceRequest } from "./askController";
+import { isTransportInterruption } from "@znasllc-io/memql-sdk-core/client";
 import { AUTO_ROUTING } from "./askRoute";
 import type { ExecutionDestination } from "../kit/ExecutionDestination";
 
@@ -103,6 +104,7 @@ export class ConversationSession {
   private stopRequested = false;
   private cancelling = false;
   private requestStarted = false;
+  private interruptedRequests = new Map<string, number>();
   private epoch = 0;
   private selection = 0;
   private historyEpoch = 0;
@@ -322,10 +324,11 @@ export class ConversationSession {
     try {
       const conversations = await this.transport.conversations.list();
       if (epoch === this.historyEpoch) this.patch({ conversations, historyLoading: false });
-    } catch (error) { if (epoch === this.historyEpoch) this.patch({ historyLoading: false, historyError: message(error) }); }
+    } catch (error) { if (epoch === this.historyEpoch) this.patch({ historyLoading: false, historyError: isTransportInterruption(error) ? "" : message(error) }); }
   };
   newConversation = () => {
     if (this.state.busy || this.state.voiceActive) return;
+    this.interruptedRequests.clear();
     this.selection++;
     this.leaveDiscussion();
     this.leaveWorkGuidance();
@@ -408,6 +411,7 @@ export class ConversationSession {
   };
   dispose = () => {
     this.disposed = true;
+    this.interruptedRequests.clear();
     if (this.refreshTimer) clearTimeout(this.refreshTimer);
     this.refreshTimer = null;
     this.detach();
@@ -434,7 +438,8 @@ export class ConversationSession {
   private scheduleRefresh() {
     if (this.refreshTimer) clearTimeout(this.refreshTimer);
     this.refreshTimer = null;
-    if (this.disposed || !this.transport.conversations || !this.state.turns.some(turn => isBackgroundTurn(turn) || turn.state === "streaming")) return;
+    if (typeof document !== "undefined" && document.visibilityState === "hidden") return;
+    if (this.disposed || !this.transport.conversations || !this.state.turns.some(turn => isBackgroundTurn(turn) || turn.state === "streaming" || (this.interruptedRequests.has(turn.id) && turn.state !== "error"))) return;
     this.refreshTimer = setTimeout(() => { this.refreshTimer = null; void this.reload(false); }, this.state.error || this.state.snapshotError ? 10000 : this.state.turns.some(turn => isBackgroundTurn(turn) && turn.state !== "waiting") ? 2500 : 10000);
   }
   reload = (refreshHistory = true): Promise<void> => {
@@ -459,18 +464,31 @@ export class ConversationSession {
         // A stream can lose its first run event as well as its terminal event.
         // The accepted client request ID in this conversation correlates the
         // receipt even before a run ID arrived. A known run must still match.
-        const local = new Map(this.state.turns.filter(turn => turn.state === "streaming").map(turn => [turn.id, turn]));
+        const local = new Map(this.state.turns.filter(turn => turn.state === "streaming" || this.interruptedRequests.has(turn.id)).map(turn => [turn.id, turn]));
         let recoveredStream = false;
         const merged = turns.map(turn => {
           const active = local.get(turn.id);
-          if (!this.state.voiceActive && active && turn.runId && (!active.runId || active.runId === turn.runId) && (turn.state === "done" || turn.state === "error")) {
+          // Mobile can suspend the foreground stream before its acceptance
+          // or approval event. The matching durable handoff is authoritative
+          // too; retaining local streaming state hides its needs-input card.
+          const handedOff = turn.state === "waiting" || (turn.state === "queued" && turn.background === true);
+          if (!this.state.voiceActive && active && turn.runId && (!active.runId || active.runId === turn.runId) && (turn.state === "done" || turn.state === "error" || handedOff || this.interruptedRequests.has(turn.id))) {
             local.delete(turn.id);
-            recoveredStream = true;
+            this.interruptedRequests.delete(turn.id);
+            recoveredStream ||= active.state === "streaming";
             return turn;
           }
           return active ?? turn;
         });
-        for (const turn of local.values()) if (!merged.some(item => item.id === turn.id)) merged.push(turn);
+        for (const turn of local.values()) {
+          const since = this.interruptedRequests.get(turn.id);
+          const unresolved: AskTurn = since !== undefined && Date.now() - since >= 30_000
+            ? { ...turn, state: "error", error: "The connection returned, but this request could not be confirmed. Check its status before trying again." }
+            : turn;
+          const index = merged.findIndex(item => item.id === turn.id);
+          if (index < 0) merged.push(unresolved);
+          else merged[index] = unresolved;
+        }
         if (recoveredStream && !this.state.voiceActive) {
           this.epoch++; // Late stream callbacks cannot overwrite the receipt.
           this.active?.cancel(); this.active = null;
@@ -486,7 +504,7 @@ export class ConversationSession {
           }
         }
       } }
-      catch (error) { if (current()) this.patch({ snapshotError: message(error) }); }
+      catch (error) { if (current()) this.patch({ snapshotError: isTransportInterruption(error) ? "" : message(error) }); }
       if (request.refreshHistory && current()) void this.refresh();
       this.scheduleRefresh();
     })().finally(() => { if (this.reloadRequest === request) this.reloadRequest = null; });
@@ -534,11 +552,12 @@ export class ConversationSession {
       Object.assign(turn, patch);
       this.patch({ turns: this.state.turns.map(item => item.id === turn.id ? { ...turn } : item) });
     };
-    const finish = (error?: string) => {
+    const finish = (error?: string, interrupted = false) => {
       if (epoch !== this.epoch) return;
       const background = isBackgroundTurn(turn);
-      const observing = background || Boolean(error && turn.runId);
-      patchTurn({ state: error ? turn.runId ? "interrupted" : "error" : background ? turn.state : "done", error, endedAt: observing ? undefined : new Date().toISOString(), ...(background && !error ? { acknowledgement: turn.answer } : {}) });
+      const observing = interrupted || background || Boolean(error && turn.runId);
+      if (interrupted) this.interruptedRequests.set(turn.id, Date.now());
+      patchTurn({ state: interrupted ? "interrupted" : error ? turn.runId ? "interrupted" : "error" : background ? turn.state : "done", error, endedAt: observing ? undefined : new Date().toISOString(), ...(background && !error ? { acknowledgement: turn.answer } : {}) });
       this.epoch++;
       this.active = null;
       this.patch({ busy: false });
@@ -567,6 +586,7 @@ export class ConversationSession {
           },
           done: () => finish(turn.answer.trim() || isBackgroundTurn(turn) ? undefined : "MemQL finished without an answer."),
           error: error => finish(error),
+          interrupted: () => finish(undefined, true),
         }, { conversationId: id ?? "", turnId: turn.id, routing });
         if (epoch === this.epoch) { this.active = handle; this.scheduleRefresh(); }
       } catch (error) { finish(message(error)); }

@@ -4,6 +4,12 @@ logic plannerTriggerOpensGoal {
  return args.trigger == "reactive" || args.trigger == "recurring"
 }
 
+/// Capability artifacts need generation, storage and verification within the owner's ceilings.
+logic workSpineSustainedArtifact {
+ args { triage object! }
+ return args.triage.conversational && args.triage.capabilityFile && (args.triage.workload == "quick" || args.triage.workload == "lookup")
+}
+
 /// Value-only routing; classification and effects remain in the enclosing Spine.
 logic workSpineRoute {
  args { triage object! }

@@ -56,16 +56,25 @@ $$ LANGUAGE SQL IMMUTABLE;
 
 --bun:split
 
-UPDATE "MemoryNodes" SET
-  id = snake_slug(id),
-  payload = snake_set_array(
+-- Replacing the complete row in one statement also supports compressed
+-- history: Timescale rejects UPDATE of id when it is an ordering column.
+-- RETURNING * preserves every stored column, and a failed insert rolls the
+-- deletion back. No whole-table decompression or changed retention policy.
+WITH moved AS (
+  DELETE FROM "MemoryNodes"
+  WHERE concept = 'v1:agents:agentRole'
+  RETURNING *
+)
+INSERT INTO "MemoryNodes"
+SELECT (jsonb_populate_record(NULL::"MemoryNodes", to_jsonb(moved) ||
+  jsonb_build_object('id', snake_slug(id), 'payload', snake_set_array(
               snake_set_array(
                 snake_set_array(
                   snake_set_scalar(payload, 'slug'),
                   '{lockedDomainIds}'),
                 '{defaultDomainIds}'),
-              '{lockedToolSlugs}')
-WHERE concept = 'v1:agents:agentRole';
+              '{lockedToolSlugs}')))).*
+FROM moved;
 
 --bun:split
 
@@ -79,17 +88,26 @@ WHERE concept = 'v1:agents:agent';
 
 --bun:split
 
-UPDATE "MemoryNodes" SET
-  id = regexp_replace(id, '^(.*:v1:common:knowledgeDomain:)(.*)$',
-                      '\1' || snake_slug(substring(id from '[^:]+$'))),
-  payload = snake_set_array(
+-- Replacing the complete row in one statement also supports compressed
+-- history: Timescale rejects UPDATE of id when it is an ordering column.
+-- RETURNING * preserves every stored column, and a failed insert rolls the
+-- deletion back. No whole-table decompression or changed retention policy.
+WITH moved AS (
+  DELETE FROM "MemoryNodes"
+  WHERE concept = 'v1:common:knowledgeDomain'
+  RETURNING *
+)
+INSERT INTO "MemoryNodes"
+SELECT (jsonb_populate_record(NULL::"MemoryNodes", to_jsonb(moved) ||
+  jsonb_build_object('id', regexp_replace(id, '^(.*:v1:common:knowledgeDomain:)(.*)$',
+                      '\1' || snake_slug(substring(id from '[^:]+$'))), 'payload', snake_set_array(
               snake_set_array(
                 snake_set_array(
                   snake_set_scalar(payload, 'id'),
                   '{relevantForRoles}'),
                 '{requiredByToolSlugs}'),
-              '{lockedForRoles}')
-WHERE concept = 'v1:common:knowledgeDomain';
+              '{lockedForRoles}')))).*
+FROM moved;
 
 --bun:split
 

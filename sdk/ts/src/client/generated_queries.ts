@@ -13056,7 +13056,7 @@ QueryClient.prototype.workObservationsForOwnerRun = function (this: QueryClient,
   return this.executeNamed("workObservationsForOwnerRun", buildWorkObservationsForOwnerRun(args), opts);
 };
 
-/** Successful execution receipts only; checkpoints and model prose cannot buy more work. */
+/** Completed tools and recorded capability reads; checkpoints and model prose cannot buy more work. */
 // Bound concept: v1:work:observation (machine-readable: BoundConcepts["workProgressReceiptsForOwnerRun"] in generated_concepts.ts).
 export interface WorkProgressReceiptsForOwnerRunArgs {
   runId: string;

@@ -10,6 +10,8 @@ export interface AskCallbacks {
   delta: (text: string) => void;
   done: () => void;
   error: (message: string) => void;
+  /** Observation was lost; reconcile the accepted request, never resubmit. */
+  interrupted?: () => void;
 }
 
 export interface AskHandle {
