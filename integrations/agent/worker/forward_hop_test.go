@@ -22,6 +22,7 @@ import (
 	"fmt"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -397,6 +398,56 @@ func TestAfterTheMachineReconnectsHereTheDispatchIsLocal(t *testing.T) {
 	}
 	if !localRan {
 		t.Fatal("want the local stream used")
+	}
+}
+
+func TestReconnectOnHoldingReplicaReleasesRemoteCallerWithoutReplaying(t *testing.T) {
+	oldContext, endOldStream := context.WithCancel(context.Background())
+	defer endOldStream()
+	started := make(chan struct{})
+	h := newHop(t, func(ctx context.Context, _ *memqlv1.ToolDispatch, _ func(*memqlv1.ToolStream)) (*memqlv1.ToolResult, error) {
+		close(started)
+		select {
+		case <-oldContext.Done():
+			return nil, workerservice.ErrWorkerDisconnected
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		}
+	}, nil)
+	old := h.registry.WorkerById("laptop")
+	old.SetTerminateFunc(func(string) { endOldStream() })
+	ctx, cancel := context.WithCancel(authorityCtx(t, h.owner))
+	defer cancel()
+	done := make(chan Result, 1)
+	go func() { result, _ := h.dispatch.Dispatch(ctx, h.request()); done <- result }()
+	select {
+	case <-started:
+	case <-time.After(time.Second):
+		t.Fatal("remote dispatch did not start")
+	}
+	var replayed atomic.Bool
+	next := &workerservice.Worker{RegistrationId: "laptop", OwnerUserId: h.owner,
+		Capabilities: []string{workerservice.CapabilityHeadless},
+		Concurrency:  map[string]uint32{workerservice.CapabilityHeadless: 2}}
+	next.SetDispatchFunc(func(_ context.Context, d *memqlv1.ToolDispatch, _ func(*memqlv1.ToolStream)) (*memqlv1.ToolResult, error) {
+		replayed.Store(true)
+		return okResult(d.GetCallId()), nil
+	}, func() {})
+	h.registry.Add(next)
+	select {
+	case result := <-done:
+		if result.OK || result.ErrorCode != "worker_disconnected" {
+			t.Fatalf("remote result = %+v, want worker_disconnected", result)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("remote caller remained parked on the previous stream")
+	}
+	h.link.wg.Wait()
+	if replayed.Load() || h.registry.WorkerById("laptop") != next {
+		t.Fatal("uncertain work was replayed or the live successor was lost")
+	}
+	if attempts := h.store.lastInvocation(t).Routing["attempts"]; attempts != 1 {
+		t.Fatalf("attempts = %v, want exactly one dispatch", attempts)
 	}
 }
 
