@@ -46,7 +46,8 @@ const (
 	// StepNotify is a stage that names a channel instead of steps (D16).
 	StepNotify StepKind = "notify"
 	// StepSARIF publishes an immutable scanner artifact through the driver.
-	StepSARIF StepKind = "sarif"
+	StepSARIF            StepKind = "sarif"
+	StepRepositoryChange StepKind = "repositoryChange"
 )
 
 // WorkTriggerPrefix marks a v1:work:run the pipelines runner opened: its
@@ -105,12 +106,13 @@ type Skip struct {
 
 // Step is one compiled step: one v1:work:step row and one Execute call.
 type Step struct {
-	GitHubReadToken bool         `json:"githubReadToken,omitempty"`
-	CheckoutHistory string       `json:"checkoutHistory,omitempty"`
-	SARIF           *SARIFReport `json:"sarif,omitempty"`
-	CPUMilli        int          `json:"cpuMilli,omitempty"`
-	ImageBuild      *ImageBuild  `json:"imageBuild,omitempty"`
-	MemoryMiB       int          `json:"memoryMiB,omitempty"`
+	GitHubReadToken  bool              `json:"githubReadToken,omitempty"`
+	CheckoutHistory  string            `json:"checkoutHistory,omitempty"`
+	RepositoryChange *RepositoryChange `json:"repositoryChange,omitempty"`
+	SARIF            *SARIFReport      `json:"sarif,omitempty"`
+	CPUMilli         int               `json:"cpuMilli,omitempty"`
+	ImageBuild       *ImageBuild       `json:"imageBuild,omitempty"`
+	MemoryMiB        int               `json:"memoryMiB,omitempty"`
 	// RunAfterFailure is inherited from the stage and bound into the durable
 	// execution fingerprint, so recovery cannot change failure behavior.
 	RunAfterFailure bool   `json:"runAfterFailure,omitempty"`

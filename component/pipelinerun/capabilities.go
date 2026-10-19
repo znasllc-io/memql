@@ -29,7 +29,7 @@ func init() {
 		// (app/integrations_pipelines.go): only app/ can see the packages
 		// integration and the direct database. Until it does, every act
 		// that needs one refuses by name rather than half-working.
-		d := Deps{Logger: pctx.Logger, Secrets: pctx.ResolveSystemSecret}
+		d := Deps{Logger: pctx.Logger, Secrets: pctx.ResolveSystemSecret, SystemVariable: pctx.ResolveSystemVariable}
 		if pctx.Engine != nil {
 			d.Store = NewDSLStore(pctx.Engine)
 		}

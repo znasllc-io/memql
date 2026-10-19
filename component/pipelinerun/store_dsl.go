@@ -581,6 +581,7 @@ func (s *dslStore) CreateRun(ctx context.Context, r Run) error {
 		args["rerunFailedOnly"] = true
 	}
 	setIfSet(args, "deliveryId", r.DeliveryID)
+	setIfSet(args, "inboundRequestId", bareID(r.InboundRequestID))
 	setIfSet(args, "headBranch", r.HeadBranch)
 	setIfSet(args, "baseSha", strings.ToLower(strings.TrimSpace(r.BaseSHA)))
 	setIfSet(args, "title", r.Title)
@@ -1003,6 +1004,7 @@ func runFromRow(row map[string]any) Run {
 		RerunOf:           bareID(rowString(row, "rerunOf")),
 		RerunFailedOnly:   rowBool(row, "rerunFailedOnly"),
 		DeliveryID:        rowString(row, "deliveryId"),
+		InboundRequestID:  bareID(rowString(row, "inboundRequestId")),
 		PullRequest:       rowInt(row, "pullRequest"),
 		HeadBranch:        rowString(row, "headBranch"),
 		BaseSHA:           strings.ToLower(rowString(row, "baseSha")),

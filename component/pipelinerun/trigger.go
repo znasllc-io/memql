@@ -159,7 +159,7 @@ func (i *Integration) Trigger(ctx context.Context, inboundRequestID string) (Tri
 			opened, oerr = i.open(ctx, d, p, Opening{
 				Event: t.Event, SHA: t.SHA, BaseSHA: t.BaseSHA, Branch: t.Branch, Title: t.Title,
 				PullRequest: t.PullRequest, Fork: t.Fork, HeadRepository: t.HeadRepository,
-				Trigger: TriggerWebhook, DeliveryID: deliveryID,
+				Trigger: TriggerWebhook, DeliveryID: deliveryID, InboundRequestID: inboundRequestID,
 			})
 		}
 		switch {
@@ -251,7 +251,7 @@ func rerunOf(r Run, deliveryID string, failedOnly bool) Opening {
 	return Opening{
 		Event: r.Event, Mode: r.Mode, SHA: r.SHA, BaseSHA: r.BaseSHA, Branch: r.HeadBranch,
 		Title: r.Title, PullRequest: r.PullRequest, Version: r.Version,
-		ScheduleSlot: scheduleSlot, Trigger: TriggerRerun, RerunOf: r.ID, DeliveryID: deliveryID, FailedOnly: failedOnly,
+		ScheduleSlot: scheduleSlot, Trigger: TriggerRerun, RerunOf: r.ID, DeliveryID: deliveryID, FailedOnly: failedOnly, InboundRequestID: r.InboundRequestID,
 	}
 }
 

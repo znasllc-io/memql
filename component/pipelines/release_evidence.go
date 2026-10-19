@@ -80,6 +80,7 @@ func inspectPipelineStepReceipt(owner, runID, stepKey string, run, step map[stri
 			Status, Code, Reason, Channel, Kind, NotificationStatus string
 			RequestIDs                                              []string
 			PublicationID, UploadID, SHA256, IngestionStatus        string
+			RepositoryChangeState, OperationID, Commit              string
 			Metadata                                                struct {
 				ExitCode          *int
 				ArtifactIntentIDs []string
@@ -112,7 +113,7 @@ func inspectPipelineStepReceipt(owner, runID, stepKey string, run, step map[stri
 		!strings.HasPrefix(r.TemplateFingerprint, "work-definition-v2:") || !releaseDigest("sha256:"+strings.TrimPrefix(r.TemplateFingerprint, "work-definition-v2:")) ||
 		(s.Status != "done" && s.Status != "skipped") || s.StepType != "exec" || s.Kind != "deterministic" || s.Call.Construct != "pipeline" ||
 		!strings.HasPrefix(s.Call.DefinitionFingerprint, "work-definition-v2:") || !releaseDigest(definition) ||
-		(s.Call.PipelineKind != string(StepCommand) && s.Call.PipelineKind != string(StepNotify) && s.Call.PipelineKind != string(StepSARIF)) ||
+		(s.Call.PipelineKind != string(StepCommand) && s.Call.PipelineKind != string(StepNotify) && s.Call.PipelineKind != string(StepSARIF) && s.Call.PipelineKind != string(StepRepositoryChange)) ||
 		!ValidArtifactIntentIDs(s.Result.Metadata.ArtifactIntentIDs) || !releaseSource.MatchString(r.Input.Repository) || !releaseCommit.MatchString(r.Input.SHA) {
 		return out, errors.New("release evidence requires a successful live pipeline and exact successful execution receipt")
 	}
@@ -126,6 +127,14 @@ func inspectPipelineStepReceipt(owner, runID, stepKey string, run, step map[stri
 			return out, errors.New("release step lacks an actual successful outcome")
 		}
 		switch StepKind(s.Call.PipelineKind) {
+		case StepRepositoryChange:
+			if !releaseDigest("sha256:"+s.Result.OperationID) || !releaseDigest("sha256:"+s.Result.SHA256) ||
+				(s.Result.RepositoryChangeState != "unchanged" && s.Result.RepositoryChangeState != "applied") ||
+				(s.Result.RepositoryChangeState == "applied" && !releaseCommit.MatchString(s.Result.Commit)) ||
+				(s.Result.RepositoryChangeState == "unchanged" && s.Result.Commit != "") ||
+				s.Result.Metadata.ExitCode != nil || len(s.Result.Metadata.ArtifactIntentIDs) != 0 {
+				return out, errors.New("repository change requires an exact confirmed write or unchanged proposal receipt")
+			}
 		case StepCommand:
 			if s.Result.Metadata.ExitCode == nil || *s.Result.Metadata.ExitCode != 0 {
 				return out, errors.New("release command requires explicit exit zero")
