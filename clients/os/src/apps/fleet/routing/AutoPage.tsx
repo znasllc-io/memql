@@ -186,7 +186,7 @@ export function AutoPage({
                 ) : (
                   <>
                     <Facts>
-                      <Fact label="Monthly budget" value={limit} copyValue={limit} />
+                      <Fact label="Monthly budget" value={limit} copyValue={budget.value.monthlyLimitUSD === null ? undefined : limit} />
                       <Fact label="Spent this month" value={usd(budget.value.spentThisMonthUSD)} copyValue={usd(budget.value.spentThisMonthUSD)} />
                       {budget.value.resetsAt ? <Fact label="Resets" value={resetsOn(budget.value.resetsAt)} copyValue={budget.value.resetsAt} /> : null}
                     </Facts>
@@ -210,7 +210,7 @@ export function AutoPage({
                   <Fact
                     key={pick.job}
                     label={JOB_TITLES[pick.job]}
-                    copyValue={pick.serves || pick.reason || undefined}
+                    copyValue={pick.serves || undefined}
                     value={
                       pick.serves !== "" ? (
                         <>
@@ -227,7 +227,7 @@ export function AutoPage({
                 ))}
                 <Fact
                   label={JOB_TITLES.embeddings}
-                  copyValue={embedder.state === "bound" ? embedder.name : embedder.state === "none" ? "No embedding model yet" : undefined}
+                  copyValue={embedder.state === "bound" ? embedder.name : undefined}
                   value={
                     embedder.state === "loading" ? (
                       <InlineSkeleton label="Checking" />
