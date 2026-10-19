@@ -498,8 +498,15 @@ slots, rule 2). Embedding uses 8192 tokens so the 0.6B embedder's cache can fit
 beside the class's chat model. The native unit sets `OLLAMA_KV_CACHE_TYPE=q8_0`;
 Ollama enables Flash Attention itself on supported devices. The recommended
 pairs are 4B below class 16, 9B at 16, 27B Q4 at 24/32, and 27B Q8 at 64/128,
-always followed by the same 0.6B embedder. The 24 GB pair is budgeted at 32K
-chat context with one slot, not every context the model supports.
+always followed by the same 0.6B embedder. One slot of the 24 GB pair is
+budgeted at 32K chat context, not every context the model supports. Setup gives
+class 24 and 32 two slots, which fit the 27B and the embedder at windows up to
+16K; a call the engine sizes at 32K loads at 2 x 32K, which with the embedder
+loaded leaves 1,429 MiB, under the 1,936 MiB the runtime wants, and
+`working_context`, a floor, cannot prevent it. A machine that sees 32K calls
+often sets `Environment=OLLAMA_NUM_PARALLEL=1` under `[Service]` in the unit and
+restarts Ollama (`models.parallel` alone only lowers what the worker advertises;
+docs/local-models.md, "Requests at once").
 
 **The pull is `POST /api/pull`, NOT `ollama pull`**, and the design
 record's plan naming a subprocess was wrong on the platform its own D1

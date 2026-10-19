@@ -4763,7 +4763,7 @@ memql 0.20.0+g58ad26323197 (computeruse)
 
 **Interfaces:**
 - Consumes: Stage A installed (Task 12); S1 Task 22's recorded winner; a card with room (Step 1).
-- Produces: the winner and the embedder resident, `max=` equal to Ollama's slots, and measurements showing it took.
+- Produces: the winner and the embedder resident, `max=` equal to Ollama's slots, measurements showing it took, and the 2 x 32K load checked against the runtime's own margin (Step 8).
 
 Do not start before the **spec section 6** question is answered: which Ollama owns the card in this phase. Today `rmf-ollama` holds `qwen2.5:14b-instruct` (15.7 GB, `OLLAMA_KEEP_ALIVE=-1`) and `rmf-whisper` holds about 1.5 GB; the fleet's Ollama has nothing loaded and 6,496 MiB free. A warm-up now would load most of the 27B onto the CPU and `keep_alive` would keep it there.
 
@@ -4922,7 +4922,7 @@ grep -c 'waited for a concurrency slot' ~/.memql/state/worker.log
 grep -c 'refused after waiting for a concurrency slot' ~/.memql/state/worker.log
 ```
 
-Acceptance (spec section 8): no reload for a window change; anything else at most one or two a day (baseline 5.7 a day, 63% window changes); no refusal after waiting for a fast-level call. The wait counts are the evidence for spec D6 (per-level reservation); record them.
+Acceptance (spec section 8, restated by the final review): no window-change reload at or below 16K; anything else at most one or two a day (baseline 5.7 a day, 63% window changes); no refusal after waiting for a fast-level call. A call the engine sizes at 32K is a different window and reloads the 27B once, and the next call at 16K reloads it back: that is by design with `working_context: 16384`, and Step 8 checks what it costs with two slots. The wait counts are the evidence for spec D6 (per-level reservation); record them.
 
 ```text
 qwen3.8:27b  (blob f5f1dd89): <few> loads
@@ -4932,7 +4932,32 @@ qwen3.8:27b  (blob f5f1dd89): <few> loads
 0                                                <- refusals after waiting
 ```
 
-- [ ] **Step 8: ROLLBACK, in order of how much each disturbs**
+- [ ] **Step 8: Check the 2 x 32K case with the embedder resident. The profile is two slots at a 16K window, but a call the engine sizes at 32K loads the 27B at 2 x 32K, which the budget puts under the runtime's margin (1,429 MiB left, 1,936 MiB wanted; spec section 5). That is derived from the runtime's own target and has not been observed on this card, so observe it once**
+
+A load at 2 x 32K is a runner started with `-c 65536 -np 2` (`-c` is the window of every slot together; the census prints it per slot as `32768 x2`). If a real call has needed 32K since Step 5, the log already holds that load and the first command below finds it; if none has, make one. **THIS RELOADS THE 27B AT 32K (a few seconds) with the embedder resident, and the next call at 16K reloads it back, so the census shows two extra window-change loads that day.**
+
+```bash
+curl -s http://127.0.0.1:11434/api/generate -d '{"model":"qwen3.8:27b","keep_alive":"2h","options":{"num_ctx":32768}}'
+echo
+LINE=$(grep -n 'starting llama-server.* -c 65536 -np 2' ~/.memql/state/ollama.log | tail -1 | cut -d: -f1)
+tail -n +"$LINE" ~/.memql/state/ollama.log | grep -E 'projected to use|will leave|offloaded' | head -3 | cut -c1-170
+curl -s http://127.0.0.1:11434/api/ps | python3 -I -c 'import sys,json; [print(m["model"], m["size_vram"]*100//m["size"], "% on the GPU, context", m["context_length"]) for m in json.load(sys.stdin)["models"]]'
+```
+
+Expected if the budget holds: the margin line with `>=` and `no changes needed`, `offloaded N/N layers to GPU` with N equal to the model's layer count (66 for this model, as every load in the thirty days showed), and both models loaded, each 100% on the GPU:
+
+```text
+{"model":"qwen3.8:27b","created_at":"...","response":"","done":true,"done_reason":"load"}
+... common_params_fit_impl: projected to use <N> MiB of device memory vs. <M> MiB of free device memory
+... common_params_fit_impl: will leave <K> >= 1936 MiB of free device memory, no changes needed
+... load_tensors: offloaded 66/66 layers to GPU
+qwen3.8:27b 100 % on the GPU, context 32768
+qwen3-embedding:0.6b 100 % on the GPU, context 8192
+```
+
+If any of it does not hold (`will leave` below 1936, fewer layers on the GPU than the model has, a model under 100%, or the embedder gone from `/api/ps`), give Ollama one slot, the way Step 2 gave it two: set `Environment=OLLAMA_NUM_PARALLEL=1` in the drop-in, `systemctl --user daemon-reload`, then `systemctl --user restart memql-ollama.service` (DISRUPTIVE, as Step 3), then warm both models again (Step 5). The worker follows the unit within a refresh, and `memql worker models` then reads `Requests per Ollama model: 1, from the memql-ollama.service unit.` With one slot the 32K window leaves 3,893 MiB.
+
+- [ ] **Step 9: ROLLBACK, in order of how much each disturbs**
 
 ```bash
 # 1. Residency off. Instant, nothing restarts: delete the resident: block from ~/.memql/policy.yaml, then

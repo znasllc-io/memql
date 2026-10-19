@@ -552,10 +552,13 @@ within the class budget. A bigger class buys a stronger model or the same one at
 higher precision. Fast-level calls choose the fastest eligible fleet model after
 a quality floor; strong and reasoning calls choose the strongest. The embedder
 uses an 8K working context. Chat calls pass the engine's required context window
-to Ollama instead of relying on its hardware-tier default. The 24 GB pair is
-budgeted at 32K chat context with one slot; larger contexts can require CPU
-offload or model eviction. The native Linux unit uses `q8_0` KV cache, with
-Flash Attention selected automatically by Ollama on supported devices.
+to Ollama instead of relying on its hardware-tier default. One slot of the 24 GB
+pair is budgeted at 32K chat context, and larger contexts can require CPU
+offload or model eviction. Setup gives a class 24 or 32 machine two slots, which
+fit the pair at windows up to 16K; what a call the engine sizes at 32K costs
+with two is under [Requests at once](#requests-at-once). The native Linux unit
+uses `q8_0` KV cache, with Flash Attention selected automatically by Ollama on
+supported devices.
 
 Setup leaves an already-serving runtime in place. For an older
 `memql-ollama.service`, add `Environment=OLLAMA_KV_CACHE_TYPE=q8_0` in its
@@ -663,9 +666,16 @@ never loaded in the thirty days measured). The report the runtime prints on
 every load says whether a choice held: `no changes needed`, and
 `offloaded N/N layers to GPU`.
 
-The two slots setup gives a class 24 or 32 machine are budgeted at a 16K window,
-the `working_context: 16384` above: at 32K two slots leave 1,429 MiB, under the
-1,936 MiB the runtime wants, so a 32K window wants one slot:
+One slot is budgeted at 32K. The two slots setup gives a class 24 or 32 machine
+fit the 27B and its embedder at windows up to 16K, the `working_context: 16384`
+above, and leave 2,741 MiB. A call the engine sizes at 32K loads the 27B at
+2 x 32K, and with the embedder loaded that leaves 1,429 MiB, under the 1,936 MiB
+the runtime wants. The runtime may then move layers to the CPU, or Ollama may
+evict the embedder to make room; both follow from the runtime's own target, and
+neither has been observed on this card. `working_context` cannot prevent it: it
+is a floor, and a call that needs more runs at what it asked for.
+
+If 32K calls are common on this machine, give Ollama one slot:
 `Environment=OLLAMA_NUM_PARALLEL=1` under `[Service]` in the unit, then reload
 and restart Ollama as above (the worker follows the unit unless
 `models.parallel` or its own `OLLAMA_NUM_PARALLEL` is set). `models.parallel: 1`
