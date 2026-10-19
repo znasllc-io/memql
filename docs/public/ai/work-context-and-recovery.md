@@ -82,24 +82,39 @@ sufficient route within its remaining budget, avoid repeating unchanged failed
 attempts, and explain any unresolved input or access requirement. A preference
 such as “find it for me” does not grant access or override an explicit restriction.
 
-**Guide this work** adds a human message to the selected running work in its
-existing Ask conversation. It creates no second goal. The message is durably
-queued for the next safe boundary: an operation already in flight can finish,
-but unstarted calls from an older model response wait for reasoning with the
-new guidance. Completed effects and their results remain intact. A received
-receipt means a successful model call used the message, not that the task is
-finished or that the model followed the advice. If work ends or changes attempt before another
-boundary, its message is shown as not received. Waiting for a permission
-answer keeps it queued for the resumed work.
+A message you send in a conversation while one of its goals is running or
+waiting updates that goal instead of starting a second one. You do not choose
+the goal or switch modes: Ask checks the message against the conversation's
+active goals first, and a message about none of them is handled as a new
+request. The message is saved with the goal and read at the next safe boundary:
+an operation already in flight can finish, but unstarted calls from an older
+model response wait for reasoning with the new guidance. A goal that is still
+preparing reads it at its first step. Completed effects and their results remain
+intact. Received means a successful model call used the message, not that the
+task is finished or that the model followed the advice. How Ask shows where each
+message went is described in
+[Messages while work runs](../operate/ask-and-voice.md#messages-while-work-runs).
 
-The selected run and execution attempt are checked again when the message is
-saved. Replanning or an explicit rerun requires selecting the current work;
-ordinary steps and permission answers retain the selection. An uncertain send
-retries the same message identity and recovers its original receipt, even if
-work has since moved. Messages are limited to 4,000 characters each, with at
-most 16 messages and 16,000 characters per run. They do not grant permissions,
-raise budgets, reset retries, or approve a waiting request. A waiting request
-uses its own discussion and decision controls instead.
+Guidance stays with its goal for the rest of the run. Automatic retries,
+repairs, re-plans and your own re-run of a step all keep it, and a message is
+shown as not received only if its goal ends before reading it. Guidance still
+queued when the goal pauses (for a permission, a limit or other work) stays
+queued and is read when the work resumes.
+
+A goal that is waiting on you takes the message through its request instead. A
+question you were asked takes it as the answer. A permission request takes it as
+a correction, and nothing is approved. A budget pause saves it until you raise
+the limit. A request that takes no messages, such as a plan review, does not
+receive it; open the request to answer it.
+
+Each message is at most 4,000 characters. A longer message, or one with
+attachments, goes through normal intake instead. Routed guidance has its own
+budget of 16 messages and 16,000 characters per run, and the late answers to
+optional questions described above have a separate budget of the same size. A
+message past its budget is not delivered. Guidance does not grant permissions,
+raise budgets, reset retries, or approve a waiting request; those stay with the
+request's own decision controls. If a send is uncertain, retrying it recovers
+the original outcome and delivers nothing twice.
 
 **Discuss in Ask** opens the conversation that originated an approval. Work
 delegated to a child run follows its owned parent records back to that
