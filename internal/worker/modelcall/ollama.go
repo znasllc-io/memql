@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"runtime"
 	"strings"
 )
 
@@ -62,7 +63,7 @@ func (c *ollamaClient) Chat(ctx context.Context, req ChatRequest, emit emitFunc)
 		"truncate": false,
 		"shift":    false,
 	}
-	if opts := ollamaOptions(req.Params); len(opts) > 0 {
+	if opts := ollamaChatOptions(req.Params, c.baseURL, runtime.GOOS); len(opts) > 0 {
 		body["options"] = opts
 	}
 	if len(req.Schema) > 0 {
@@ -343,6 +344,19 @@ func ollamaTools(in []Tool) []map[string]any {
 			fn["parameters"] = json.RawMessage(params)
 		}
 		out = append(out, map[string]any{"type": "function", "function": fn})
+	}
+	return out
+}
+
+func ollamaChatOptions(p Params, baseURL, hostOS string) map[string]any {
+	out := ollamaOptions(p)
+	// Ollama's Metal MTP path adds a second decoding pass and resident draft
+	// tensors. Measurements on the same weights show lower throughput, not
+	// acceleration (ollama/ollama#17776, #18186). Use ordinary target-model
+	// decoding on local Macs; a remote runtime owns its hardware policy.
+	// This changes neither the selected model nor its reasoning budget.
+	if hostOS == "darwin" && localRuntime(baseURL) {
+		out["draft_num_predict"] = 0
 	}
 	return out
 }

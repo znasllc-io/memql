@@ -63,3 +63,20 @@ the service to apply its environment.
 Regression checks run through `go test ./...`; the bootstrap tests use a fake MLX
 allocator and do not load a model. Live validation must measure end-to-end time,
 provider time, peak pressure, and delivery of the resulting file.
+
+## Local Ollama decoding on macOS
+
+Local Mac chat calls explicitly use ordinary decoding (`draft_num_predict: 0`).
+Ollama's Metal speculative MTP path can add resident draft tensors and slow each
+token instead of accelerating it. On an M4 Max with Ollama 0.33.3, the same 27B
+weights, prompt, 32K context, greedy sampling and 96 output tokens gave 18.4–19.2
+tokens/second without MTP versus 10.9 with it (two cold-load runs per mode;
+throughput excludes loading and prompt processing). This is a measured decoding
+comparison, not an end-to-end latency guarantee: long cold prompts still cost
+time, and Fleet must preserve stable routing to reuse their caches.
+
+The selected model, context, tools and reasoning settings are unchanged. The
+policy applies across model names and tasks, only to loopback Ollama on macOS;
+remote endpoints and other platforms retain their own runtime defaults.
+Upstream investigations: [Metal decoding overhead](https://github.com/ollama/ollama/issues/17776)
+and [additional draft memory](https://github.com/ollama/ollama/issues/18186).
