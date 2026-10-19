@@ -44,9 +44,26 @@ The independent instance #243 deployment paused pipeline intake again; the
 12:14 UTC whole-run read found no active pipelines, unfinished runs or Jobs.
 All four original webhook connections were restored afterward, confirmed
 through the authenticated production UI at 12:45 UTC. Native #6213 now tests
-head `28b11835429ddaec7c21b630cccbc6e5acc71969` in run
-`a4a8118e140616dd02a4e5b4ee3d9005`; it includes the deployed reconnect fix.
+head `d46962e79f7c148f2731f5cbf84cd36828eec00b` in run
+`88d6b0e12539b876d1ca0c886fd9b9c4`; it includes the deployed reconnect fix.
 Keep controllers stable until every whole run, including fleet work, finishes.
+
+The preceding `a4a8118e140616dd02a4e5b4ee3d9005` run finished with 34
+completed steps, one failure and seven skips. All eight Linux/macOS editor-host
+cases passed. Packaging stopped after 2,839 of 2,840 unit cases passed: the log
+redaction case timed out waiting for its real run recorder to finish filesystem
+writes. Log `beb4936a-6484-4ad7-a6c0-8852a73c5b10` was retained and read back.
+A four-second delayed terminal receipt reproduces that false timeout. The
+repair uses a ten-second elapsed deadline and ten-millisecond polling; both
+the delayed case and all 2,840 unit tests pass in the pinned toolchain with two
+CPUs and 4 GiB, without skips. Fresh native qualification remains required.
+
+The final runtime also preserves a failed command's exit code when packaging
+never produces its outputs. Cluster and Fleet report artifact collection as a
+secondary note, retain the command log and reject unverified files. A successful
+command still fails when a required artifact is missing or cannot be verified.
+The reproducing cluster regression fails before the repair; the complete
+pipeline executor race suite, including Fleet and false-green controls, passes.
 
 The independent instance rollout at 08:31–08:32 UTC restarted Agent and
 Workbench while qualification was active, despite unchanged executor images.
@@ -90,6 +107,12 @@ is approved, with 18 of 41 file publications complete in draft release
 #6244 adds an explicitly reviewed renewal of unchanged file drafts. After that
 runtime is deployed, renew under fresh approval, finish the retained release,
 and verify public downloads. Preserve existing assets and publication receipts.
+The renewal and its private test-engine cache cleanup are integrated into the
+held v0.30.0 branch. Combined release, npm and OCI race suites pass against a
+required real database; documentation and embedded-file inventory checks pass.
+The temporary database and editor test containers were removed. The redundant
+image-read-grant worktree was removed after both patches were verified in the
+final branch; its branch references remain until that branch merges.
 
 The v0.20.1 release run `a120d1d5b0f32c30f307b06d47bcdc12` ended with
 14 completed steps and two failed Mac builds. The earlier #6213 run
