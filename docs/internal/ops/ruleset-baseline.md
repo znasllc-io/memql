@@ -113,7 +113,7 @@ October 19 full merge-candidate qualification, it requires only **`MemQL / memql
 bound to GitHub App **4822538**, **MemQL for ZNAS LLC**. A status with the same
 name from another integration cannot satisfy it.
 
-Native [run `67491bba23d2ec5113b7a7264d3aad4e`](https://os.memql.znas.io/?pipelineRun=67491bba23d2ec5113b7a7264d3aad4e)
+Native run `67491bba23d2ec5113b7a7264d3aad4e`
 passed all **48 steps**, with 48 retained logs and no skips, on candidate
 `46cfeade6fea0c874b45952b6b6539f7a8f6532b`. Storage
 [PR #6171](https://github.com/znasllc-io/memql/pull/6171) then landed through
