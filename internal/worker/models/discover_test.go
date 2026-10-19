@@ -195,7 +195,7 @@ func TestOllamaParallelism_NeverZero(t *testing.T) {
 			}
 			return ""
 		}}
-		if got := d.effectiveParallelism(0); got != want {
+		if got := ceilingOf(d, 0); got != want {
 			t.Errorf("OLLAMA_NUM_PARALLEL=%q -> %d, want %d", env, got, want)
 		}
 	}

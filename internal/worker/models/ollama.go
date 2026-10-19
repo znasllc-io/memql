@@ -66,7 +66,7 @@ func (d *Discoverer) probeOllama(ctx context.Context, req Request) ([]Info, stri
 		return nil, fmt.Sprintf("Ollama is running at %s but has no models pulled", base)
 	}
 
-	parallel := d.effectiveParallelism(req.Parallel)
+	parallel, parallelFrom := d.ParallelSource(req.Parallel)
 	resident := residentByID(req.Resident)
 	out := make([]Info, 0, len(tags.Models))
 	for _, m := range tags.Models {
@@ -78,10 +78,11 @@ func (d *Discoverer) probeOllama(ctx context.Context, req Request) ([]Info, stri
 			continue
 		}
 		info := Info{
-			ID:      id,
-			Kind:    KindOllama,
-			Runtime: KindOllama,
-			BaseURL: base,
+			ID:            id,
+			Kind:          KindOllama,
+			Runtime:       KindOllama,
+			BaseURL:       base,
+			CeilingSource: parallelFrom,
 			Attributes: Attributes{
 				MaxConcurrent: parallel,
 				// Otherwise verbatim: quantLevel folds only Ollama's own

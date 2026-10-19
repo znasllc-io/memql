@@ -79,17 +79,18 @@ func (d *Discoverer) probeDeclared(ctx context.Context, rt DeclaredRuntime) ([]I
 		// permissive rather than safe. An operator who wants more than
 		// one concurrent generation on this endpoint says so; silence
 		// gets the number that cannot overcommit somebody's hardware.
-		maxConcurrent := m.MaxConcurrent
+		maxConcurrent, ceilingFrom := m.MaxConcurrent, "max_concurrent under models.runtimes in policy.yaml"
 		if maxConcurrent <= 0 {
-			maxConcurrent = 1
+			maxConcurrent, ceilingFrom = 1, "the default (models.runtimes declares no max_concurrent for it)"
 		}
 		out = append(out, Info{
 			ID:            id,
 			Transcription: rt.Transcription, Voices: rt.Voices,
-			Kind:      KindOpenAICompatible,
-			Runtime:   name,
-			BaseURL:   base,
-			APIKeyEnv: strings.TrimSpace(rt.APIKeyEnv),
+			Kind:          KindOpenAICompatible,
+			Runtime:       name,
+			BaseURL:       base,
+			APIKeyEnv:     strings.TrimSpace(rt.APIKeyEnv),
+			CeilingSource: ceilingFrom,
 			Attributes: Attributes{
 				ContextWindow:    m.ContextWindow,
 				StructuredOutput: m.StructuredOutput,

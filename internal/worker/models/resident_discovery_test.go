@@ -131,6 +131,13 @@ func TestProbeOllama_ResidentNotesNameWhatCannotWork(t *testing.T) {
 	}
 }
 
+// ceilingOf is the per-model ceiling alone, for the tests that care about the
+// number and not where it came from.
+func ceilingOf(d *Discoverer, configured int) int {
+	n, _ := d.ParallelSource(configured)
+	return n
+}
+
 // TestEffectiveParallelism. Whatever the sources say, the answer is never
 // zero: the engine reads a missing max as unlimited.
 func TestEffectiveParallelism(t *testing.T) {
@@ -169,9 +176,9 @@ func TestEffectiveParallelism(t *testing.T) {
 				},
 				ManagedParallel: func() int { return tt.managed },
 			}
-			got := d.effectiveParallelism(tt.configured)
+			got := ceilingOf(d, tt.configured)
 			if got != tt.want {
-				t.Errorf("effectiveParallelism(%d) env=%q unit=%d -> %d, want %d", tt.configured, tt.env, tt.managed, got, tt.want)
+				t.Errorf("ceiling(%d) env=%q unit=%d -> %d, want %d", tt.configured, tt.env, tt.managed, got, tt.want)
 			}
 			if got < 1 {
 				t.Errorf("the ceiling must never be below 1, got %d", got)
@@ -183,7 +190,7 @@ func TestEffectiveParallelism(t *testing.T) {
 	// here; an exported OLLAMA_NUM_PARALLEL must not change this case.
 	t.Setenv("OLLAMA_NUM_PARALLEL", "")
 	var d Discoverer
-	if got := d.effectiveParallelism(0); got != 1 {
+	if got := ceilingOf(&d, 0); got != 1 {
 		t.Errorf("a discoverer with no sources -> %d, want 1", got)
 	}
 }
@@ -220,9 +227,6 @@ func TestParallelSource(t *testing.T) {
 			if n != tt.want || source != tt.source {
 				t.Errorf("ParallelSource = %d from %q, want %d from %q", n, source, tt.want, tt.source)
 			}
-			if n != d.effectiveParallelism(tt.configured) {
-				t.Errorf("ParallelSource and effectiveParallelism disagree")
-			}
 		})
 	}
 }
@@ -246,8 +250,8 @@ func TestParallelEnvIsWhereTheWorkersVariableIsRead(t *testing.T) {
 		if n != 4 || source != "OLLAMA_NUM_PARALLEL in "+file {
 			t.Errorf("ParallelSource = %d from %q, want 4 from OLLAMA_NUM_PARALLEL in %s", n, source, file)
 		}
-		if got := d.effectiveParallelism(0); got != 4 {
-			t.Errorf("effectiveParallelism = %d, want 4: discovery and the report must agree", got)
+		if got := ceilingOf(d, 0); got != 4 {
+			t.Errorf("ceiling = %d, want 4: discovery and the report must agree", got)
 		}
 	})
 
@@ -274,6 +278,67 @@ func TestParallelEnvIsWhereTheWorkersVariableIsRead(t *testing.T) {
 		d := &Discoverer{ParallelEnv: func() (string, string) { return "+4", file }}
 		if n, source := d.ParallelSource(0); n != 1 || source != "the default" {
 			t.Errorf("ParallelSource = %d from %q, want 1 from the default", n, source)
+		}
+	})
+}
+
+// TestProbeRecordsWhereEachCeilingCameFrom. The worker logs every served
+// model's ceiling and where it came from at start and on SIGHUP, and the line
+// must say what discovery USED -- not what a second look at the sources would
+// say a moment later. So the answer rides the model it describes.
+func TestProbeRecordsWhereEachCeilingCameFrom(t *testing.T) {
+	url := residentFixture(t)
+	oa := openAIStub(t, []string{"remote:7b", "undeclared:3b"})
+	runtimes := []DeclaredRuntime{{
+		Name: "lmstudio", BaseURL: oa.URL,
+		Models: []DeclaredModel{
+			{ID: "remote:7b", MaxConcurrent: 4},
+			{ID: "undeclared:3b"},
+		},
+	}}
+	allow := []string{"chat:27b", "embed:0.6b", "remote:7b", "undeclared:3b"}
+
+	t.Run("an Ollama model carries the source the discoverer named", func(t *testing.T) {
+		d := discovererFor(url, map[string]string{"OLLAMA_NUM_PARALLEL": "3"})
+		got := byID(d.Probe(context.Background(), Request{Allow: allow, Runtimes: runtimes}))
+		for _, id := range []string{"chat:27b", "embed:0.6b"} {
+			if m := got[id]; m.MaxConcurrent != 3 || m.CeilingSource != "OLLAMA_NUM_PARALLEL in the worker's environment" {
+				t.Errorf("%s: max %d from %q, want 3 from the worker's environment", id, m.MaxConcurrent, m.CeilingSource)
+			}
+		}
+	})
+
+	t.Run("the policy outranks it, for Ollama models only", func(t *testing.T) {
+		d := discovererFor(url, map[string]string{"OLLAMA_NUM_PARALLEL": "3"})
+		got := byID(d.Probe(context.Background(), Request{Allow: allow, Runtimes: runtimes, Parallel: 2}))
+		if m := got["chat:27b"]; m.MaxConcurrent != 2 || m.CeilingSource != "models.parallel in policy.yaml" {
+			t.Errorf("chat:27b: max %d from %q, want 2 from the policy", m.MaxConcurrent, m.CeilingSource)
+		}
+		if m := got["remote:7b"]; m.MaxConcurrent != 4 {
+			t.Errorf("remote:7b: max %d, want its own declared 4: models.parallel is for Ollama", m.MaxConcurrent)
+		}
+	})
+
+	t.Run("a declared runtime's model says its own", func(t *testing.T) {
+		d := discovererFor(url, nil)
+		got := byID(d.Probe(context.Background(), Request{Allow: allow, Runtimes: runtimes}))
+		if m := got["remote:7b"]; m.MaxConcurrent != 4 || m.CeilingSource != "max_concurrent under models.runtimes in policy.yaml" {
+			t.Errorf("remote:7b: max %d from %q", m.MaxConcurrent, m.CeilingSource)
+		}
+		if m := got["undeclared:3b"]; m.MaxConcurrent != 1 || m.CeilingSource != "the default (models.runtimes declares no max_concurrent for it)" {
+			t.Errorf("undeclared:3b: max %d from %q", m.MaxConcurrent, m.CeilingSource)
+		}
+	})
+
+	t.Run("the unit and the default are named too", func(t *testing.T) {
+		d := discovererFor(url, nil)
+		d.ManagedParallel = func() int { return 2 }
+		if m := byID(d.Probe(context.Background(), Request{Allow: allow}))["chat:27b"]; m.CeilingSource != "the memql-ollama.service unit" {
+			t.Errorf("source = %q, want the unit", m.CeilingSource)
+		}
+		d.ManagedParallel = nil
+		if m := byID(d.Probe(context.Background(), Request{Allow: allow}))["chat:27b"]; m.CeilingSource != "the default" {
+			t.Errorf("source = %q, want the default", m.CeilingSource)
 		}
 	})
 }

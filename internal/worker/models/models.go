@@ -384,6 +384,12 @@ type Info struct {
 	KeepAlive      KeepAlive
 	WorkingContext int
 
+	// CeilingSource is where Attributes.MaxConcurrent came from, as the tail of
+	// a sentence ("the memql-ollama.service unit"). Discovery fills it when it
+	// fills the ceiling, so the worker's log says what discovery USED. It is
+	// not a label attribute: the engine is told the number, never why.
+	CeilingSource string
+
 	Attributes
 }
 

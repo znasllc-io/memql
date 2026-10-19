@@ -397,13 +397,6 @@ func ParseOllamaCount(s string) int {
 	return int(n)
 }
 
-// effectiveParallelism is the per-model concurrency this machine will
-// claim. See ParallelSource for the sources and their order.
-func (d *Discoverer) effectiveParallelism(configured int) int {
-	n, _ := d.ParallelSource(configured)
-	return n
-}
-
 // ParallelSource is the per-model concurrency this machine will claim and
 // the sentence-ready name of where it came from. The sources are read most
 // deliberate first: the owner's models.parallel, the worker's

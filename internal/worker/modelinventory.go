@@ -2,6 +2,7 @@ package worker
 
 import (
 	"context"
+	"log/slog"
 	"sort"
 	"sync"
 	"time"
@@ -80,6 +81,38 @@ type policyModelInventory struct {
 // to it.
 func newDiscoverer() *models.Discoverer {
 	return &models.Discoverer{ManagedParallel: inference.ManagedParallel}
+}
+
+// logModelCeilings says, for every model this machine serves, how many
+// requests the worker takes at once and where that number came from: one Info
+// line per model. It is the worker's own record, and the only one that cannot
+// differ from what it advertises. `memql worker models` runs in the owner's
+// shell and can only read the worker's environment file, as it is now, while
+// this line is written by the process that took its environment when it
+// started, from the sources discovery actually used.
+//
+// Only the models the machine serves are logged (Advertised): a blocked model,
+// or any model below the hardware floor, is offered no ceiling at all.
+func logModelCeilings(logger *slog.Logger, inv models.Inventory) {
+	for _, m := range inv.Advertised() {
+		logger.Info("model concurrency ceiling",
+			"model", m.ID, "model_max", m.MaxConcurrent, "source", m.CeilingSource)
+	}
+}
+
+// announceModelCeilings logs the ceilings from the shared inventory. It is
+// called when the worker starts and after every SIGHUP reload, and by `go`:
+// it asks the inventory, which probes Ollama when its cache is cold, and neither
+// the worker's start nor the goroutine that also handles SIGTERM may wait on
+// that. The inventory is cached for 90 seconds, so the registration that
+// follows reuses this probe. After a reload it must be called AFTER
+// RequestImmediateReadvertise, which drops the cache: otherwise it would log the
+// ceiling the old policy gave.
+func announceModelCeilings(ctx context.Context, logger *slog.Logger, inventory ModelInventory) {
+	if inventory == nil {
+		return
+	}
+	logModelCeilings(logger, inventory.Models(ctx))
 }
 
 // modelsRequest is what this machine's policy asks discovery: which models

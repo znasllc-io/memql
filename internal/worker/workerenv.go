@@ -18,7 +18,9 @@ import (
 // does not advertise, and the report exists to say what the worker advertises.
 //
 // So a command reads the worker's file instead, and when there is none it says
-// the figure is its own.
+// the figure is its own. The worker's own log carries what it actually
+// advertises -- announceModelCeilings, one line per served model, at start and
+// after every reload -- and that is the record that cannot differ.
 
 // workerEnvFileName is the file beside worker.yaml that the Linux installer
 // creates and the unit loads (scripts/install/install-linux.sh and
