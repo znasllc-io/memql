@@ -43,7 +43,7 @@ const hike = goal("hike", "Saturday hike near Phoenix", "Plan a short hike for S
 const deploy = goal("deploy", "Deploy storefront update", "Deploy the storefront update to production.", "I’ll prepare the deploy and ask before publishing.", 12, waitingOnYou);
 const report = goal("report", "Quarterly report", "Draft the quarterly report from the shared numbers.", "I’ll draft the report from the shared numbers.", 11, waitingOnYou);
 const dinner = goal("dinner", "Dinner downtown Phoenix", "Find a dinner spot downtown for Saturday.", "I’ll find a few dinner options downtown.", 9);
-const neverMind = routed("never", "Never mind the Tucson one.", 1, { reply: "Should I stop the Tucson weather check? Confirm on its card.", stops: [{ goalId: "goal-weather", runId: "run-weather", title: "Weather in Tucson", decision: "" }] });
+const neverMind = routed("never", "Never mind the Tucson one.", 1, { reply: "Stop the Tucson weather check?", stops: [{ goalId: "goal-weather", runId: "run-weather", title: "Weather in Tucson", decision: "" }] });
 
 const routing: Record<string, AskTurn[]> = {
   labels: [
@@ -98,7 +98,7 @@ const transport = {
   // until its run notices the request at its next step.
   decideStop: async (request: { turnId: string; runId: string; decision: "stop" | "keep" }): Promise<void> => {
     if (state === "pending") return new Promise(() => {});
-    if (state === "error") throw new Error("this work could not be stopped; try again");
+    if (state === "error") throw new Error("This work could not be stopped. Try again.");
     turns = turns.map(turn => turn.id !== request.turnId || !turn.routed?.stops ? turn : { ...turn, routed: { ...turn.routed, stops: turn.routed.stops.map(stop => stop.runId === request.runId ? { ...stop, decision: request.decision === "stop" ? "stopped" : "kept" } : stop) } });
   },
 };

@@ -4,7 +4,7 @@ import { AskActivityLog } from "../../src/ask/AskActivityLog";
 import { AskSurface } from "../../src/ask/AskSurface";
 import { AskWorkQueue } from "../../src/ask/AskWorkQueue";
 import type { AskCallbacks, AskTransport } from "../../src/ask/askController";
-import { ConversationSession, type AskRouted, type AskRouteTarget, type AskStopQuestion, type AskTurn } from "../../src/ask/conversationSession";
+import { ConversationSession, pendingStops, type AskRouted, type AskRouteTarget, type AskStopQuestion, type AskTurn } from "../../src/ask/conversationSession";
 import { routeLabel } from "../../src/ask/routeLabels";
 import { READY_ASK } from "../../src/ask/useAskReadiness";
 import { runFromRow, runTitle } from "../../src/apps/nexus/rows";
@@ -129,7 +129,7 @@ describe("a stop question on the goal's card", () => {
   useFakeDate();
   const question: AskStopQuestion = { goalId: "goal-tucson", runId: "run-tucson", title: "Weather in Tucson", decision: "" };
   const tucson = goal("tucson", "Weather in Tucson");
-  const asked = routedTurn("never", { stops: [question], reply: "Stop the Tucson weather check? Confirm on its card." }, { prompt: "Never mind the Tucson one." });
+  const asked = routedTurn("never", { stops: [question], reply: "Stop the Tucson weather check?" }, { prompt: "Never mind the Tucson one." });
   const decided = (decision: AskStopQuestion["decision"]) => ({ ...asked, routed: { ...asked.routed, stops: [{ ...question, decision }] } });
   const ask = "Stop this work? It can't be resumed.";
 
@@ -178,8 +178,8 @@ describe("a stop question on the goal's card", () => {
     await act(async () => { fireEvent.click(screen.getByRole("button", { name: "Stop" })); });
     expect(screen.getByRole("button", { name: "Stop" })).toHaveProperty("disabled", true);
     expect(screen.getByRole("button", { name: "Keep" })).toHaveProperty("disabled", true);
-    await act(async () => { pending.reject(new Error("this work could not be stopped; try again")); });
-    expect(screen.getByRole("alert").textContent).toBe("this work could not be stopped; try again");
+    await act(async () => { pending.reject(new Error("This work could not be stopped. Try again.")); });
+    expect(screen.getByRole("alert").textContent).toBe("This work could not be stopped. Try again.");
     expect(screen.getByRole("button", { name: "Stop" })).toHaveProperty("disabled", false);
     expect(screen.getByText(ask)).toBeTruthy();
   });
@@ -237,13 +237,25 @@ describe("a stop question on the goal's card", () => {
   it("keeps a refusal said through later reads while its question still waits", async () => {
     const test = setup([tucson, asked]);
     await test.session.select("chat");
-    test.decideStop.mockRejectedValueOnce(new Error("this work could not be stopped; try again"));
+    test.decideStop.mockRejectedValueOnce(new Error("This work could not be stopped. Try again."));
     expect(await test.session.decideStop("never", "run-tucson", "stop")).toBe(false);
     await test.session.reload(false);
-    expect(test.session.getSnapshot().error).toBe("this work could not be stopped; try again");
+    expect(test.session.getSnapshot().error).toBe("This work could not be stopped. Try again.");
     test.setStored([tucson, decided("ended")]);
     await test.session.reload(false);
     expect(test.session.getSnapshot().error).toBe("");
+  });
+
+  it("answers every question about the goal, not only the one pressed", async () => {
+    const again = routedTurn("again", { stops: [question], reply: "Stop the Tucson weather check?" }, { prompt: "Really, drop the Tucson one.", startedAt: "2026-10-19T10:02:00Z" });
+    const test = setup([tucson, asked, again]);
+    await test.session.select("chat");
+    // The read after the answer fails: what shows is what this session knows.
+    test.read.mockRejectedValueOnce(new Error("Connection lost."));
+    expect(await test.session.decideStop("again", "run-tucson", "keep")).toBe(true);
+    expect(test.session.getSnapshot().snapshotError).toBe("Connection lost.");
+    expect([...pendingStops(test.session.getSnapshot().turns).keys()]).toEqual([]);
+    expect(test.session.getSnapshot().turns.flatMap(turn => turn.routed?.stops ?? []).map(stop => stop.decision)).toEqual(["kept", "kept"]);
   });
 
   it("records a decision, reloads, and keeps a refusal in the error line", async () => {
@@ -281,6 +293,34 @@ it("a routed turn without a run recovers from the snapshot", async () => {
   callbacks.delta("Late text"); callbacks.done();
   expect(session.getSnapshot().turns).toEqual(stored);
   expect(ask).toHaveBeenCalledOnce();
+});
+
+it("shows where a routed message went as soon as its reply ends", async () => {
+  vi.useFakeTimers();
+  let callbacks!: AskCallbacks;
+  const tucson = goal("weather", "Weather in Tucson");
+  const hike = goal("hike", "Hike near Tucson");
+  let stored: AskTurn[] = [tucson, hike];
+  const ask = vi.fn<AskTransport["ask"]>((_prompt, _context, on) => { callbacks = on; return { cancel: vi.fn() }; });
+  const read = vi.fn(async (id: string) => id === "chat" ? stored : []);
+  const session = new ConversationSession({ ask, conversations: { create: async () => ({ id: "chat", title: "Chat" }), list: async () => [], read } });
+  sessions.push(session);
+  await session.select("chat");
+  session.send("Actually, I’m in Phoenix. And drop the hike?", null);
+  callbacks.delta("Switching the weather check to Phoenix. Stop Hike near Tucson?");
+  const sent = session.getSnapshot().turns.at(-1)!;
+  expect(sent.runId).toBeUndefined();
+  // The cluster saved where the message went before it said done.
+  stored = [tucson, hike, { ...sent, state: "done", endedAt: "2026-10-19T10:01:02Z", routed: {
+    targets: [target("weather", "Weather in Phoenix", "queued")],
+    stops: [{ goalId: "goal-hike", runId: "run-hike", title: "Hike near Tucson", decision: "" }],
+  } }];
+  callbacks.done();
+  // No poll has come due: the labels and the stop question are there at once.
+  await vi.advanceTimersByTimeAsync(0);
+  expect(session.getSnapshot().turns).toEqual(stored);
+  expect([...pendingStops(session.getSnapshot().turns).keys()]).toEqual(["run-hike"]);
+  expect(read).toHaveBeenCalledTimes(2);
 });
 
 it("Activity names the routing call", () => {
