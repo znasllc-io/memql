@@ -13,10 +13,12 @@ import templruntime "github.com/a-h/templ/runtime"
 // when the browser refuses OS's related-origin request (Safari on a
 // *.localhost cluster; a password manager without related origins).
 //
-// The page carries no request. passkey-window.js takes it from the window
-// that opened it, by postMessage, and only from OpenerOrigins; begin, the
-// prompt and finish then run here, against the RP ID that is this page's own
-// host, and the result goes back to the opener the same way.
+// The page carries no request and makes none. passkey-window.js takes the
+// public creation or request options from the window that opened it, by
+// postMessage and only from OpenerOrigins, runs the browser's prompt here --
+// against the RP ID that is this page's own host -- and hands the credential
+// back the same way. Begin and finish stay with MemQL OS, on its origin,
+// where identity's host-only cookies live.
 type PasskeyWindowData struct {
 	Layout LayoutData
 	// OpenerOrigins are the origins allowed to hand this window a request,
@@ -65,7 +67,7 @@ func PasskeyWindow(data PasskeyWindowData) templ.Component {
 			var templ_7745c5c3_Var3 string
 			templ_7745c5c3_Var3, templ_7745c5c3_Err = templ.ResolveAttributeValue(data.OpenerOrigins)
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `passkey_window.templ`, Line: 22, Col: 92}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `passkey_window.templ`, Line: 24, Col: 92}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var3)
 			if templ_7745c5c3_Err != nil {
@@ -78,7 +80,7 @@ func PasskeyWindow(data PasskeyWindowData) templ.Component {
 			var templ_7745c5c3_Var4 string
 			templ_7745c5c3_Var4, templ_7745c5c3_Err = templ.JoinStringErrs(data.Layout.BrandName)
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `passkey_window.templ`, Line: 24, Col: 97}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `passkey_window.templ`, Line: 26, Col: 97}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var4))
 			if templ_7745c5c3_Err != nil {

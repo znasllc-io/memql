@@ -5,10 +5,12 @@ package webtempl
 // when the browser refuses OS's related-origin request (Safari on a
 // *.localhost cluster; a password manager without related origins).
 //
-// The page carries no request. passkey-window.js takes it from the window
-// that opened it, by postMessage, and only from OpenerOrigins; begin, the
-// prompt and finish then run here, against the RP ID that is this page's own
-// host, and the result goes back to the opener the same way.
+// The page carries no request and makes none. passkey-window.js takes the
+// public creation or request options from the window that opened it, by
+// postMessage and only from OpenerOrigins, runs the browser's prompt here --
+// against the RP ID that is this page's own host -- and hands the credential
+// back the same way. Begin and finish stay with MemQL OS, on its origin,
+// where identity's host-only cookies live.
 type PasskeyWindowData struct {
 	Layout LayoutData
 	// OpenerOrigins are the origins allowed to hand this window a request,

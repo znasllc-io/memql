@@ -14,7 +14,9 @@ import (
 // AuthenticationServices, which never fetches /.well-known/webauthn on a
 // *.localhost cluster, and a password manager that intercepts WebAuthn may not
 // implement related origins at all. OS then opens this page, where the RP ID
-// is the page's own host and no browser has anything to refuse.
+// is the page's own host and no browser has anything to refuse. Only the
+// prompt runs here; OS keeps begin and finish on its own origin, where
+// identity's host-only cookies live (edge's identity proxy).
 //
 // It renders HERE rather than redirecting to OS like every other identity page
 // (nativeUI): being on identity's origin is its whole job.

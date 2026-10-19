@@ -3,21 +3,21 @@
  * =================
  *
  * Identity's passkey window (memql#6233). MemQL OS opens this page when the
- * browser refuses its related-origin passkey request, hands it the request by
- * postMessage, and gets back where to go next. Here, on identity's own
- * origin, the RP ID is the page's own host, so begin, the prompt and finish
- * need nothing from the browser that it could refuse.
+ * browser refuses its related-origin passkey request. Here, on identity's own
+ * origin, the RP ID is the page's own host, so the browser's prompt has
+ * nothing to refuse.
+ *
+ * ONLY THE PROMPT RUNS HERE. MemQL OS keeps begin and finish on its own
+ * origin, where identity's host-only cookies live, and hands this window the
+ * public creation or request options; the window answers with the credential.
+ * It makes no request of its own and never sees a token.
  *
  * A request is accepted only from the window that opened this one, and only
  * from an origin the server rendered into data-opener-origins (the installed
- * MemQL OS); the result goes back to that origin alone. The request carries
- * the same authorization OS would have sent itself -- by message, never in a
- * URL, so nothing lands in history or a log.
+ * MemQL OS); the answer goes back to that origin alone.
  *
  * The prompt waits for a press here: a browser grants passkey prompts to a
- * person's gesture, and the press that opened this window happened in OS. The
- * options are fetched as soon as the request arrives, so nothing stands
- * between that press and the prompt.
+ * person's gesture, and the press that opened this window happened in OS.
  *
  * Obeys the strict CSP (csp.go): no inline handlers, no eval, no remote
  * sources.
@@ -33,118 +33,54 @@
   var button = root.querySelector("[data-passkey-act]");
   var openers = (root.getAttribute("data-opener-origins") || "").split(" ").filter(Boolean);
   var opener = window.opener;
-  if (!heading || !status || !button || !opener || !openers.length) return;
+  if (!heading || !status || !button || !opener || !openers.length || !window.PublicKeyCredential) return;
 
-  var request = null; // what OS asked for
-  var origin = "";    // the OS origin it came from
-  var begun = null;   // the identity's begin answer, ready for the press
+  var origin = "";  // the OS origin the request came from
+  var kind = "";    // "create" or "get"
+  var options = null;
 
   function say(text) { status.textContent = text; }
 
-  function tell(message) { opener.postMessage(message, origin); }
-
-  function post(path, body) {
-    var headers = { "Content-Type": "application/json" };
-    if (request.authorization) headers.Authorization = request.authorization;
-    return fetch(path, { method: "POST", credentials: "same-origin", headers: headers, body: JSON.stringify(body) })
-      .then(function (res) {
-        return res.json().catch(function () { return {}; }).then(function (data) {
-          if (!res.ok) throw new Error(data.error || "The passkey request failed.");
-          return data;
-        });
-      });
-  }
-
-  // Where the browser looks first, as OS would have asked
-  // (placeCreationOptions in clients/os/src/auth/passkeys.ts).
-  function place(publicKey, where) {
-    var selection = Object.assign({}, publicKey.authenticatorSelection || {});
-    if (where === "device") {
-      selection.authenticatorAttachment = "platform";
-      return Object.assign({}, publicKey, { authenticatorSelection: selection, hints: ["client-device"] });
-    }
-    delete selection.authenticatorAttachment;
-    return Object.assign({}, publicKey, { authenticatorSelection: selection, hints: ["hybrid", "security-key"] });
-  }
-
-  function deviceFirst() {
-    var check = window.PublicKeyCredential && PublicKeyCredential.isUserVerifyingPlatformAuthenticatorAvailable;
-    if (typeof check !== "function") return Promise.resolve(false);
-    return check.call(PublicKeyCredential).catch(function () { return false; });
-  }
-
-  function done(redirectTo) {
-    say("Done. You can close this window.");
-    button.hidden = true;
-    tell({ type: "memql-passkey:done", redirectTo: redirectTo || "" });
-    window.close();
-  }
-
-  function refuse(error) {
-    tell({ type: "memql-passkey:failed", error: error && error.message ? error.message : "The passkey request failed." });
-    window.close();
-  }
-
-  // Begin, ahead of the press. A register that needs no prompt (already
-  // resumed or redirected by identity) finishes here.
-  function prepare() {
-    begun = null;
+  function press() {
+    if (!options) return;
     button.disabled = true;
-    var path = request.kind === "register" ? "/auth/webauthn/register/begin" : "/auth/webauthn/login/begin";
-    var body = request.kind === "register" ? { label: request.label } : request.begin;
-    return post(path, body).then(function (begin) {
-      if (request.kind === "register" && begin.redirectTo) return done(begin.redirectTo);
-      if (request.kind === "register" && begin.resume) {
-        return post("/auth/webauthn/register/finish", {}).then(function (finish) { done(finish.redirectTo); });
-      }
-      if (request.kind === "login") {
-        begun = { challengeId: begin.challengeId, publicKey: PublicKeyCredential.parseRequestOptionsFromJSON(begin.requestOptions.publicKey) };
+    var asked = kind === "create" ? navigator.credentials.create({ publicKey: options }) : navigator.credentials.get({ publicKey: options });
+    asked.then(function (credential) {
+      if (!credential) throw new DOMException(kind === "create" ? "No passkey was created." : "No passkey was selected.", "NotAllowedError");
+      say("Finishing in MemQL...");
+      button.hidden = true;
+      opener.postMessage({ type: "memql-passkey:credential", credential: credential.toJSON() }, origin);
+    }).catch(function (error) {
+      if (error && error.name === "NotAllowedError") {
+        // A cancelled prompt is the person's answer: they may press again.
+        say("No passkey was used. Press the button to try again.");
         button.disabled = false;
         return;
       }
-      var chosen = request.place ? Promise.resolve(request.place) : deviceFirst().then(function (yes) { return yes ? "device" : ""; });
-      return chosen.then(function (where) {
-        var publicKey = where ? place(begin.creationOptions.publicKey, where) : begin.creationOptions.publicKey;
-        begun = { challengeId: begin.challengeId, publicKey: PublicKeyCredential.parseCreationOptionsFromJSON(publicKey) };
-        button.disabled = false;
-      });
-    }).catch(refuse);
-  }
-
-  function press() {
-    if (!begun) return;
-    button.disabled = true;
-    var registering = request.kind === "register";
-    var challengeId = begun.challengeId;
-    var asked = registering ? navigator.credentials.create({ publicKey: begun.publicKey }) : navigator.credentials.get({ publicKey: begun.publicKey });
-    asked.then(function (credential) {
-      if (!credential) throw new Error(registering ? "No passkey was created." : "No passkey was selected.");
-      say("Finishing...");
-      return registering
-        ? post("/auth/webauthn/register/finish", { challengeId: challengeId, label: request.label, credential: credential.toJSON() })
-        : post("/auth/webauthn/login/finish", { challengeId: challengeId, credential: credential.toJSON() });
-    }).then(function (finish) {
-      done(finish.redirectTo);
-    }).catch(function (error) {
-      // A cancelled prompt is the person's answer: they may press again.
-      say(error && error.name === "NotAllowedError" ? "No passkey was used. Press the button to try again." : (error && error.message) || "The passkey request failed.");
-      prepare();
+      opener.postMessage({ type: "memql-passkey:failed", name: (error && error.name) || "Error", error: (error && error.message) || "The passkey request failed." }, origin);
     });
   }
 
   window.addEventListener("message", function (event) {
     if (event.source !== opener || openers.indexOf(event.origin) < 0) return;
     var message = event.data;
-    if (!message || message.type !== "memql-passkey:request" || request) return;
-    if (message.kind !== "register" && message.kind !== "login") return;
-    request = message;
+    if (!message || message.type !== "memql-passkey:request" || options) return;
+    if (message.kind !== "create" && message.kind !== "get") return;
+    try {
+      options = message.kind === "create"
+        ? PublicKeyCredential.parseCreationOptionsFromJSON(message.publicKey)
+        : PublicKeyCredential.parseRequestOptionsFromJSON(message.publicKey);
+    } catch (error) {
+      opener.postMessage({ type: "memql-passkey:failed", name: "NotSupportedError", error: "This browser could not read the passkey request." }, event.origin);
+      return;
+    }
     origin = event.origin;
-    var registering = request.kind === "register";
-    heading.textContent = registering ? "Create your passkey" : "Sign in with your passkey";
-    button.textContent = registering ? "Create passkey" : "Sign in";
+    kind = message.kind;
+    heading.textContent = kind === "create" ? "Create your passkey" : "Sign in with your passkey";
+    button.textContent = kind === "create" ? "Create passkey" : "Sign in";
     button.hidden = false;
+    button.disabled = false;
     say("Your browser will ask you to confirm.");
-    prepare();
   });
   button.addEventListener("click", press);
 
