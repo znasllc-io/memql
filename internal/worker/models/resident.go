@@ -58,27 +58,34 @@ func ParseKeepAlive(s string) (KeepAlive, error) {
 	if strings.EqualFold(s, "forever") {
 		return KeepAlive{Set: true, Forever: true}, nil
 	}
-	// A bare integer is seconds, the way Ollama reads a JSON number.
-	n, err := strconv.ParseInt(s, 10, 64)
-	// An integer past int64 is still an integer, and it must not reach the
-	// duration parser, which would call it "not a duration". ParseInt clamps
-	// it to the bound of its own sign, so the sign says which way it overflowed.
-	if errors.Is(err, strconv.ErrRange) {
-		if n < 0 {
-			return KeepAlive{Set: true, Forever: true}, nil
-		}
-		return KeepAlive{}, errKeepAliveTooLong(s)
-	}
-	if err == nil {
-		switch {
-		case n < 0:
-			return KeepAlive{Set: true, Forever: true}, nil
-		case n == 0:
-			return KeepAlive{}, errKeepAliveZero
-		case n > int64(MaxKeepAlive/time.Second):
+	// A bare integer is seconds, the way Ollama reads a JSON number. Only text
+	// that is ENTIRELY digits, after one optional sign, is an integer: ParseInt
+	// reports a range error the moment the digits overflow, before it reaches a
+	// letter that follows them, so "-99999999999999999999h" would otherwise come
+	// back as an integer below zero -- forever, from a typo.
+	if integerText(s) {
+		n, err := strconv.ParseInt(s, 10, 64)
+		// An integer past int64 is still an integer, and it must not reach the
+		// duration parser, which would call it "not a duration". ParseInt clamps
+		// it to the bound of its own sign, so the sign says which way it
+		// overflowed.
+		if errors.Is(err, strconv.ErrRange) {
+			if n < 0 {
+				return KeepAlive{Set: true, Forever: true}, nil
+			}
 			return KeepAlive{}, errKeepAliveTooLong(s)
 		}
-		return KeepAlive{Set: true, For: time.Duration(n) * time.Second}, nil
+		if err == nil {
+			switch {
+			case n < 0:
+				return KeepAlive{Set: true, Forever: true}, nil
+			case n == 0:
+				return KeepAlive{}, errKeepAliveZero
+			case n > int64(MaxKeepAlive/time.Second):
+				return KeepAlive{}, errKeepAliveTooLong(s)
+			}
+			return KeepAlive{Set: true, For: time.Duration(n) * time.Second}, nil
+		}
 	}
 	d, err := time.ParseDuration(s)
 	if err != nil {
@@ -93,6 +100,23 @@ func ParseKeepAlive(s string) (KeepAlive, error) {
 		return KeepAlive{}, errKeepAliveTooLong(s)
 	}
 	return KeepAlive{Set: true, For: d}, nil
+}
+
+// integerText reports whether s is one optional sign and then digits, and
+// nothing else: the only text ParseKeepAlive reads as a whole number.
+func integerText(s string) bool {
+	if s != "" && (s[0] == '-' || s[0] == '+') {
+		s = s[1:]
+	}
+	if s == "" {
+		return false
+	}
+	for i := 0; i < len(s); i++ {
+		if s[i] < '0' || s[i] > '9' {
+			return false
+		}
+	}
+	return true
 }
 
 func errKeepAliveTooLong(s string) error {
