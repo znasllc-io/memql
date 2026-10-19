@@ -176,6 +176,9 @@ export class ConversationSession {
   private pendingDiscussionRequest: { key: string; id: string } | null = null;
   /** A refused stop decision, still said while its question waits on the person. */
   private stopRefusal: { key: string; error: string } | null = null;
+  /** Moves when a stop decision is sent and when it is recorded, so a read that
+   *  left before either cannot put back a question the person answered. */
+  private stopRevision = 0;
   private voiceEpoch = 0;
   private voiceRevision = 0;
   private voiceTurnId: string | null = null;
@@ -261,11 +264,14 @@ export class ConversationSession {
     const selection = this.selection;
     const current = () => !this.disposed && selection === this.selection && this.state.selectedId === conversationId;
     this.stopRefusal = null;
+    this.stopRevision++;
     this.patch({ stopDecisions: { ...this.state.stopDecisions, [key]: decision }, error: "" });
     try {
       await this.transport.decideStop({ conversationId, turnId, runId, decision });
       if (!current()) return true;
-      // Recorded: the question is answered even if the read that follows fails.
+      // Recorded: the question is answered even if the read that follows fails,
+      // and a read that left while it was being recorded answers too early.
+      this.stopRevision++;
       const answered = decision === "stop" ? "stopped" : "kept";
       this.patch({ turns: this.state.turns.map(turn => turn.id !== turnId || !turn.routed?.stops ? turn : { ...turn, routed: { ...turn.routed, stops: turn.routed.stops.map(stop => stop.runId === runId && !stop.decision ? { ...stop, decision: answered } : stop) } }) });
       await this.reload();
@@ -565,15 +571,16 @@ export class ConversationSession {
     const discussionEpoch = this.discussionEpoch;
     const revision = this.voiceRevision;
     const guidanceRevision = this.guidanceRevision;
+    const stopRevision = this.stopRevision;
     if (!id || !this.transport.conversations || this.disposed || this.state.loading || this.state.discussionOpening) return Promise.resolve();
-    const key = JSON.stringify([id, selection, epoch, discussionEpoch, revision, guidanceRevision]);
+    const key = JSON.stringify([id, selection, epoch, discussionEpoch, revision, guidanceRevision, stopRevision]);
     if (this.reloadRequest?.key === key) {
       this.reloadRequest.refreshHistory ||= refreshHistory;
       return this.reloadRequest.promise;
     }
     const request = { key, refreshHistory, promise: Promise.resolve() };
     this.reloadRequest = request;
-    const current = () => !this.disposed && this.state.selectedId === id && selection === this.selection && epoch === this.epoch && discussionEpoch === this.discussionEpoch && revision === this.voiceRevision && guidanceRevision === this.guidanceRevision;
+    const current = () => !this.disposed && this.state.selectedId === id && selection === this.selection && epoch === this.epoch && discussionEpoch === this.discussionEpoch && revision === this.voiceRevision && guidanceRevision === this.guidanceRevision && stopRevision === this.stopRevision;
     request.promise = (async () => {
       try { const turns = await this.transport.conversations!.read(id); if (current()) {
         // A stream can lose its first run event as well as its terminal event.

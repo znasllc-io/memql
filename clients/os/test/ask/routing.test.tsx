@@ -184,6 +184,27 @@ describe("a stop question on the goal's card", () => {
     expect(screen.getByText(ask)).toBeTruthy();
   });
 
+  it("does not let a poll that left before the answer was recorded ask again", async () => {
+    const test = await mount([tucson, asked]);
+    const write = deferred<void>();
+    const stale = deferred<AskTurn[]>();
+    test.decideStop.mockReturnValueOnce(write.promise);
+    readTheBarNow();
+    await act(async () => { fireEvent.click(screen.getByRole("button", { name: "Stop" })); });
+    // The refresh poll reads while Stop is being recorded and answers late
+    // with the snapshot from before it.
+    test.read.mockReturnValueOnce(stale.promise);
+    const poll = test.session.reload(false);
+    test.setStored([tucson, decided("stopped")]);
+    await act(async () => { write.resolve(); });
+    await act(async () => { stale.resolve([tucson, asked]); await poll; });
+    await waitFor(() => expect(test.session.getSnapshot().stopDecisions).toEqual({}));
+    expect(screen.queryByText(ask)).toBeNull();
+    expect(screen.queryByRole("button", { name: "Stop" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Keep" })).toBeNull();
+    expect(test.session.getSnapshot().turns).toEqual([tucson, decided("stopped")]);
+  });
+
   it("is not offered by a connection that cannot answer it", async () => {
     await mount([tucson, asked], { canDecide: false });
     expect(screen.queryByText(ask)).toBeNull();
