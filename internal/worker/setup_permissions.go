@@ -70,14 +70,15 @@ const (
 	permissionsPollEvery = time.Second
 	// permissionsStage is the stage's name on the report.
 	permissionsStage = "permissions"
-	// permissionsLater is where a permission left off is turned on later.
-	permissionsLater = "MemQL in the menu bar, then Set Up Permissions…"
+	// permissionsLater is where a permission left off is turned on later,
+	// in the words MemQL OS uses for the same place. It ends a sentence.
+	permissionsLater = "MemQL in the menu bar → macOS permissions → Set Up Permissions…"
 )
 
 func (w permissionsWait) run(ctx context.Context) int {
 	st, err := w.status()
 	if err != nil {
-		w.say("The MemQL worker is not answering, so its permissions cannot be checked now. Set them up later from " + permissionsLater + ".")
+		w.say("The MemQL worker is not answering, so its permissions cannot be checked now. Set them up later from " + permissionsLater)
 		recordSetupReason("Permissions not checked: the MemQL worker is not answering.")
 		return SetupExitOpFailed
 	}
@@ -87,12 +88,12 @@ func (w permissionsWait) run(ctx context.Context) int {
 	if !st.PermissionRequests {
 		detail := "This Cockpit build cannot ask macOS for permissions."
 		w.progress.Stage(permissionsStage, "failed", detail)
-		w.say(detail + " Update Cockpit, then set them up from " + permissionsLater + ".")
+		w.say(detail + " Update Cockpit, then set them up from " + permissionsLater)
 		recordSetupReason(detail)
 		return SetupExitOpFailed
 	}
 	if !w.interactive {
-		detail := "Not asked: this install ran without a terminal. Set them up from " + permissionsLater + "."
+		detail := "Not asked: this install ran without a terminal. Set them up from " + permissionsLater
 		w.progress.Stage(permissionsStage, "failed", detail)
 		w.say(detail)
 		recordSetupReason(detail)
@@ -104,7 +105,7 @@ func (w permissionsWait) run(ctx context.Context) int {
 	if w.open == nil {
 		w.say("Turn MemQL on under System Settings, Privacy & Security, in Accessibility and in Screen Recording, then restart MemQL: launchctl kickstart -k gui/$(id -u)/com.znasllc.memql-worker")
 	} else if err := w.open(); err != nil {
-		w.say(fmt.Sprintf("The Permissions window did not open (%v). Open it from %s.", err, permissionsLater))
+		w.say(fmt.Sprintf("The Permissions window did not open (%v). Open it from %s", err, permissionsLater))
 	} else {
 		w.say("In the Permissions window, turn on " + missingPermissions(st) + ".")
 	}
@@ -152,7 +153,7 @@ func (w permissionsWait) allowed() int {
 func (w permissionsWait) skipped(st LocalStatus) int {
 	detail := permissionsSkippedSentence(st)
 	w.progress.Stage(permissionsStage, "skipped", detail)
-	w.say(detail + " Turn it on later from " + permissionsLater + ".")
+	w.say(detail + " Turn it on later from " + permissionsLater)
 	recordSetupReason(detail)
 	return SetupExitPrereq
 }
