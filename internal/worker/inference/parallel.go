@@ -5,6 +5,8 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+
+	"github.com/znasllc-io/memql-cockpit/internal/worker/models"
 )
 
 // parallel.go: how many requests a model takes at once, written in one
@@ -61,8 +63,10 @@ func (s Stage) parallelEnvironment() string {
 // systemd merges a unit with its drop-ins: texts are the main unit first
 // and then each drop-in in lexical order; the last assignment of the
 // variable wins; and an empty Environment= resets the list. Zero means the
-// unit says nothing usable -- no line, a number below one, or a word, which
-// Ollama ignores the same way.
+// unit says nothing usable -- no line, a number below one, or text Ollama
+// would not read as a count either (a word, "+2", "2.0"). The value is read
+// the way Ollama reads it, models.ParseOllamaCount, so the cockpit never
+// advertises slots Ollama will not give.
 //
 // It reads the lines this cockpit writes and an owner's ordinary edits, not
 // all of systemd's syntax: a backslash at the end of a line does not continue
@@ -99,16 +103,12 @@ func UnitParallel(texts ...string) int {
 			}
 			for _, word := range unitWords(rest) {
 				if name, v, ok := strings.Cut(word, "="); ok && name == "OLLAMA_NUM_PARALLEL" {
-					value = strings.TrimSpace(v)
+					value = v
 				}
 			}
 		}
 	}
-	n, err := strconv.Atoi(value)
-	if err != nil || n < 1 {
-		return 0
-	}
-	return n
+	return models.ParseOllamaCount(value)
 }
 
 // unitWords splits the right-hand side of an Environment= line the way

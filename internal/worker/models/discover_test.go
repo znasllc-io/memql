@@ -188,7 +188,7 @@ func TestOllamaBaseURL(t *testing.T) {
 // TestOllamaParallelism_NeverZero. This is the one attribute whose
 // absence is PERMISSIVE on the engine side, so it is never left absent.
 func TestOllamaParallelism_NeverZero(t *testing.T) {
-	for env, want := range map[string]int{"": 1, "0": 1, "-3": 1, "nonsense": 1, "4": 4} {
+	for env, want := range map[string]int{"": 1, "0": 1, "-3": 1, "+2": 1, "nonsense": 1, "4": 4, " 4 ": 4, `"4"`: 4} {
 		d := &Discoverer{Getenv: func(k string) string {
 			if k == "OLLAMA_NUM_PARALLEL" {
 				return env
@@ -197,6 +197,54 @@ func TestOllamaParallelism_NeverZero(t *testing.T) {
 		}}
 		if got := d.effectiveParallelism(0); got != want {
 			t.Errorf("OLLAMA_NUM_PARALLEL=%q -> %d, want %d", env, got, want)
+		}
+	}
+}
+
+// TestParseOllamaCount. The ceiling this machine advertises has to be the
+// number Ollama itself will run, and Ollama reads OLLAMA_NUM_PARALLEL by
+// trimming spaces, then quotes, then strconv.ParseUint. Anything that parse
+// refuses is "invalid, use the default" to Ollama, so it says nothing here
+// either.
+func TestParseOllamaCount(t *testing.T) {
+	tests := []struct {
+		in   string
+		want int
+	}{
+		{"", 0},
+		{"   ", 0},
+		{"1", 1},
+		{"2", 2},
+		{"64", 64},
+		{"007", 7},
+		// Spaces, then quotes, as Ollama's Var trims them.
+		{" 2 ", 2},
+		{`"2"`, 2},
+		{`'2'`, 2},
+		{` "2" `, 2},
+		{`''2''`, 2},
+		// Spaces INSIDE the quotes are not trimmed again, so ParseUint refuses.
+		{`" 2 "`, 0},
+		// ParseUint takes digits and nothing else.
+		{"+2", 0},
+		{"-2", 0},
+		{"2.0", 0},
+		{"0x2", 0},
+		{"1_0", 0},
+		{"2 3", 0},
+		{"two", 0},
+		// Zero is Ollama's "decide for me", not a count.
+		{"0", 0},
+		{"00", 0},
+		// The largest count that cannot wrap an int when the machine total is
+		// summed; one more is not a count anything here can use.
+		{"2147483647", 2147483647},
+		{"2147483648", 0},
+		{"99999999999999999999", 0},
+	}
+	for _, tt := range tests {
+		if got := ParseOllamaCount(tt.in); got != tt.want {
+			t.Errorf("ParseOllamaCount(%q) = %d, want %d", tt.in, got, tt.want)
 		}
 	}
 }

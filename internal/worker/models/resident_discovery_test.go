@@ -147,6 +147,14 @@ func TestEffectiveParallelism(t *testing.T) {
 		{"nothing said", 0, "", 0, 1},
 		{"a garbage environment is not a source", 0, "nonsense", 0, 1},
 		{"a garbage environment falls through to the unit", 0, "-3", 5, 5},
+		// Ollama reads the number with ParseUint, which takes no sign: it logs
+		// "+2" as invalid and runs one slot. Advertising two would claim a slot
+		// that does not exist.
+		{"a signed environment is not a source", 0, "+2", 5, 5},
+		{"a signed environment with no unit is the default", 0, "+2", 0, 1},
+		// A count past what the ceiling can hold would wrap when the machine
+		// total is built, and a ceiling of zero is the engine's "unlimited".
+		{"a count too big to hold is not a source", 0, "4294967296", 3, 3},
 		{"a negative policy value is not a source", -1, "", 0, 1},
 		{"a negative unit value is not a source", 0, "", -2, 1},
 	}

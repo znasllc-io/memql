@@ -352,12 +352,32 @@ func (d *Discoverer) ollamaBaseURL() string {
 // envParallelism is OLLAMA_NUM_PARALLEL as the worker's own environment
 // states it, or zero when it is unset or not a positive number.
 func (d *Discoverer) envParallelism() int {
-	if v := strings.TrimSpace(d.getenv("OLLAMA_NUM_PARALLEL")); v != "" {
-		if n, err := strconv.Atoi(v); err == nil && n > 0 {
-			return n
-		}
+	return ParseOllamaCount(d.getenv("OLLAMA_NUM_PARALLEL"))
+}
+
+// ParseOllamaCount reads a count out of the text of an environment variable
+// the way Ollama's own envconfig reads OLLAMA_NUM_PARALLEL: spaces are
+// trimmed, then any quotes around what is left, then strconv.ParseUint in
+// base ten. So "+2", "2.0", "0x2" and "1_0" are not counts -- Ollama logs them
+// as invalid and runs its default of one slot, and a ceiling read more
+// generously here would advertise slots that do not exist. Spaces INSIDE the
+// quotes are part of the text, as they are to Ollama.
+//
+// It returns zero for text that says no usable count: empty, invalid, zero
+// (Ollama's "decide for me"), or past what an int holds on every platform,
+// which would wrap when the machine ceiling is summed -- and a ceiling of
+// zero is the engine's "unlimited". A caller treats zero as "this source says
+// nothing" and moves on to the next.
+func ParseOllamaCount(s string) int {
+	s = strings.TrimSpace(s)
+	if s == "" {
+		return 0
 	}
-	return 0
+	n, err := strconv.ParseUint(strings.Trim(s, "\"'"), 10, 31)
+	if err != nil {
+		return 0
+	}
+	return int(n)
 }
 
 // effectiveParallelism is the per-model concurrency this machine will

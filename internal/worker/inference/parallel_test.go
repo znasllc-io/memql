@@ -124,6 +124,14 @@ func TestUnitParallel(t *testing.T) {
 		{"a word is not a number", []string{"[Service]\nEnvironment=OLLAMA_NUM_PARALLEL=two\n"}, 0},
 		{"zero is not a ceiling", []string{"[Service]\nEnvironment=OLLAMA_NUM_PARALLEL=0\n"}, 0},
 		{"negative is not a ceiling", []string{"[Service]\nEnvironment=OLLAMA_NUM_PARALLEL=-2\n"}, 0},
+		// Ollama reads the number with strconv.ParseUint after trimming spaces
+		// and quotes. It logs anything else as invalid and runs one slot, so the
+		// unit must not claim more than that.
+		{"a plus sign is not a number to Ollama", []string{"[Service]\nEnvironment=OLLAMA_NUM_PARALLEL=+2\n"}, 0},
+		{"a decimal is not a number to Ollama", []string{"[Service]\nEnvironment=OLLAMA_NUM_PARALLEL=2.0\n"}, 0},
+		{"a hex prefix is not a number to Ollama", []string{"[Service]\nEnvironment=OLLAMA_NUM_PARALLEL=0x2\n"}, 0},
+		{"spaces inside the quoted word are trimmed as Ollama trims them", []string{"[Service]\nEnvironment=\"OLLAMA_NUM_PARALLEL= 3 \"\n"}, 3},
+		{"a count too big to hold is not a ceiling", []string{"[Service]\nEnvironment=OLLAMA_NUM_PARALLEL=4294967296\n"}, 0},
 		{"an unusable later value does not keep the earlier one", []string{"[Service]\nEnvironment=OLLAMA_NUM_PARALLEL=2\nEnvironment=OLLAMA_NUM_PARALLEL=lots\n"}, 0},
 		{"no unit at all", nil, 0},
 		{"a unit that says nothing", []string{"[Service]\nExecStart=/usr/bin/env ollama serve\n"}, 0},

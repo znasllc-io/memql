@@ -140,6 +140,9 @@ func FuzzUnitParallel(f *testing.F) {
 		"[Service]\nEnvironment=\\\"OLLAMA_NUM_PARALLEL=5\n",
 		"[Service\nEnvironment=OLLAMA_NUM_PARALLEL=2\n",
 		"\x00[Service]\r\nEnvironment=OLLAMA_NUM_PARALLEL=2\r\n",
+		"[Service]\nEnvironment=OLLAMA_NUM_PARALLEL=+2\n",
+		"[Service]\nEnvironment=\"OLLAMA_NUM_PARALLEL= 3 \"\n",
+		"[Service]\nEnvironment=OLLAMA_NUM_PARALLEL=4294967296\n",
 	} {
 		f.Add(seed)
 	}
