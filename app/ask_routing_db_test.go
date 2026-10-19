@@ -61,14 +61,21 @@ func (m *askRoutingModel) CallChatStructured(_ context.Context, messages []commo
 }
 
 // askRoutingResolver hands the routing call to the model and keeps what the
-// engine asked the router for. Routing makes one call; any other is refused.
+// engine asked the router for, and that request as the router serves it: with
+// the route the call's context carries applied (memql.ApplyRunRouting).
+// Routing makes one call; any other is refused.
 type askRoutingResolver struct {
-	model    *askRoutingModel
-	requests *[]airoute.ResolveRequest
+	model            *askRoutingModel
+	requests, served *[]airoute.ResolveRequest
 }
 
-func (r askRoutingResolver) ResolveFor(_ context.Context, req airoute.ResolveRequest) (memql.ResolvedProvider, error) {
+func (r askRoutingResolver) ResolveFor(ctx context.Context, req airoute.ResolveRequest) (memql.ResolvedProvider, error) {
 	*r.requests = append(*r.requests, req)
+	served, err := memql.ApplyRunRouting(ctx, req)
+	if err != nil {
+		return memql.ResolvedProvider{}, err
+	}
+	*r.served = append(*r.served, served)
 	if req.PromptName != "askMessageRouting" {
 		return memql.ResolvedProvider{}, fmt.Errorf("this test serves no model for %q", req.PromptName)
 	}
@@ -109,12 +116,21 @@ func (w *askRoutingWork) retitleRun(ctx context.Context, args map[string]any, _ 
 	return []memorynodes.MemoryNode{{ID: run, Payload: raw}}, err
 }
 
-// The owner's example through the installed recipe: a conversation's Tucson
-// weather goal is running, and "Actually I'm in Phoenix" goes to that goal as
-// queued work guidance, word for word, instead of opening a second goal. The
-// one routing call used the shipped prompt at its declared level with the
-// routing answer schema, and the reply is the turn's whole streamed text.
-func TestAskRoutingRecipeRunsInstalledDSL(t *testing.T) {
+// askRoutingInstalled is one person's conversation with its Tucson weather
+// goal working, on an engine that runs the installed recipe through the real
+// workflow host, wired as app/engine.go wires it.
+type askRoutingInstalled struct {
+	e                       *memql.MemQLEngine
+	person                  context.Context
+	conversation, goal, run string
+	model                   *askRoutingModel
+	requests, served        []airoute.ResolveRequest
+	work                    *askRoutingWork
+	execute                 func(ctx context.Context, kind, name string, args map[string]any) []map[string]any
+}
+
+func newAskRoutingInstalled(t *testing.T) *askRoutingInstalled {
+	t.Helper()
 	previous := auth.InstalledCapabilityCatalog()
 	auth.SetCapabilityCatalog(nil)
 	t.Cleanup(func() { auth.SetCapabilityCatalog(previous) })
@@ -122,15 +138,13 @@ func TestAskRoutingRecipeRunsInstalledDSL(t *testing.T) {
 	e.SetScopedWorkflowRunner(func(ctx context.Context, name string, args map[string]any, operations map[string]memql.WorkflowOperation) (any, error) {
 		return workflowhost.Run(ctx, name, args, workflowhost.Options{Logger: e.Logger, AmbientEngine: e, Operations: operations})
 	})
-	model := &askRoutingModel{}
-	var requests []airoute.ResolveRequest
-	e.SetAIResolver(askRoutingResolver{model: model, requests: &requests})
-	work := &askRoutingWork{engine: e}
-	require.NoError(t, e.RegisterIntegration(work))
+	f := &askRoutingInstalled{e: e, model: &askRoutingModel{}, work: &askRoutingWork{engine: e}}
+	e.SetAIResolver(askRoutingResolver{model: f.model, requests: &f.requests, served: &f.served})
+	require.NoError(t, e.RegisterIntegration(f.work))
 
 	user := "v1:identity:user:" + id.NewShortId()
-	person := auth.ContextWithAccess(auth.ContextWithToken(context.Background(), &auth.TokenInfo{Subject: user}), &auth.AccessContext{UserId: user, Role: auth.RoleWriter})
-	execute := func(ctx context.Context, kind, name string, args map[string]any) []map[string]any {
+	f.person = auth.ContextWithAccess(auth.ContextWithToken(context.Background(), &auth.TokenInfo{Subject: user}), &auth.AccessContext{UserId: user, Role: auth.RoleWriter})
+	f.execute = func(ctx context.Context, kind, name string, args map[string]any) []map[string]any {
 		t.Helper()
 		call, err := parser.RenderCall(name, args)
 		require.NoError(t, err)
@@ -138,22 +152,31 @@ func TestAskRoutingRecipeRunsInstalledDSL(t *testing.T) {
 		require.NoError(t, err)
 		return memql.MaterializeRows(result.OutputPayload())
 	}
-	conversation := fmt.Sprint(execute(person, "mutation", "createAskConversation", map[string]any{"requestId": id.NewShortId(), "title": "Weather"})[0]["id"])
+	f.conversation = fmt.Sprint(f.execute(f.person, "mutation", "createAskConversation", map[string]any{"requestId": id.NewShortId(), "title": "Weather"})[0]["id"])
 	// The Tucson goal, opened from this conversation and working.
-	goal, run := id.NewShortId(), id.NewShortId()
-	internal := auth.ContextWithInternalOrigin(person)
-	execute(internal, "mutation", "createWorkRun", map[string]any{"runId": run, "goalId": goal, "automationName": "weatherReport", "templateFingerprint": "weather-report-v1", "triggeredBy": "manual", "status": "running", "mode": "live",
-		"input": map[string]any{"conversation": map[string]any{"id": conversation}}, "startedAt": time.Now().UTC().Format(time.RFC3339Nano)})
-	execute(internal, "mutation", "updateWorkRun", map[string]any{"runId": run, "classification": map[string]any{"workload": "research", "workTitle": "Weather in Tucson", "acknowledgement": "I'll check the weather in Tucson."}})
-	opened, err := json.Marshal(memql.AskTurn{ID: "weather", Prompt: "What's the weather in Tucson?", Answer: "I'll check the weather in Tucson.", GoalID: goal, RunID: run, State: "queued", Background: true, WorkTitle: "Weather in Tucson", StartedAt: time.Now().UTC(), Activity: []memql.WorkEvent{}})
+	f.goal, f.run = id.NewShortId(), id.NewShortId()
+	internal := auth.ContextWithInternalOrigin(f.person)
+	f.execute(internal, "mutation", "createWorkRun", map[string]any{"runId": f.run, "goalId": f.goal, "automationName": "weatherReport", "templateFingerprint": "weather-report-v1", "triggeredBy": "manual", "status": "running", "mode": "live",
+		"input": map[string]any{"conversation": map[string]any{"id": f.conversation}}, "startedAt": time.Now().UTC().Format(time.RFC3339Nano)})
+	f.execute(internal, "mutation", "updateWorkRun", map[string]any{"runId": f.run, "classification": map[string]any{"workload": "research", "workTitle": "Weather in Tucson", "acknowledgement": "I'll check the weather in Tucson."}})
+	opened, err := json.Marshal(memql.AskTurn{ID: "weather", Prompt: "What's the weather in Tucson?", Answer: "I'll check the weather in Tucson.", GoalID: f.goal, RunID: f.run, State: "queued", Background: true, WorkTitle: "Weather in Tucson", StartedAt: time.Now().UTC(), Activity: []memql.WorkEvent{}})
 	require.NoError(t, err)
 	var turn map[string]any
 	require.NoError(t, json.Unmarshal(opened, &turn))
-	execute(internal, "mutation", "saveAskConversation", map[string]any{"id": conversation, "title": "Weather", "transcript": map[string]any{"turns": []any{turn}}, "versionTime": time.Now().UTC().Format(time.RFC3339Nano)})
+	f.execute(internal, "mutation", "saveAskConversation", map[string]any{"id": f.conversation, "title": "Weather", "transcript": map[string]any{"turns": []any{turn}}, "versionTime": time.Now().UTC().Format(time.RFC3339Nano)})
+	return f
+}
 
+// The owner's example through the installed recipe: a conversation's Tucson
+// weather goal is running, and "Actually I'm in Phoenix" goes to that goal as
+// queued work guidance, word for word, instead of opening a second goal. The
+// one routing call used the shipped prompt at its declared level with the
+// routing answer schema, and the reply is the turn's whole streamed text.
+func TestAskRoutingRecipeRunsInstalledDSL(t *testing.T) {
+	f := newAskRoutingInstalled(t)
 	var chunks []string
-	answer, err := e.RunAsk(person, conversation, "phoenix", "Actually I'm in Phoenix", "", memql.AskRoute{}, nil, func(text string) { chunks = append(chunks, text) }, nil)
-	snapshot := execute(person, "builtin", "askConversationSnapshot", map[string]any{"conversationId": conversation})
+	answer, err := f.e.RunAsk(f.person, f.conversation, "phoenix", "Actually I'm in Phoenix", "", memql.AskRoute{}, nil, func(text string) { chunks = append(chunks, text) }, nil)
+	snapshot := f.execute(f.person, "builtin", "askConversationSnapshot", map[string]any{"conversationId": f.conversation})
 	require.Len(t, snapshot, 1)
 	raw, marshalErr := json.Marshal(snapshot[0]["transcript"])
 	require.NoError(t, marshalErr)
@@ -163,7 +186,7 @@ func TestAskRoutingRecipeRunsInstalledDSL(t *testing.T) {
 	require.NoError(t, json.Unmarshal(raw, &transcript))
 	require.Len(t, transcript.Turns, 2)
 	routed := transcript.Turns[1]
-	require.Empty(t, work.goals, "the message went to intake; its routing %+v and activity %+v", routed.Routed, routed.Activity)
+	require.Empty(t, f.work.goals, "the message went to intake; its routing %+v and activity %+v", routed.Routed, routed.Activity)
 	require.NoError(t, err)
 
 	reply := "Switching the weather check to Phoenix."
@@ -174,24 +197,41 @@ func TestAskRoutingRecipeRunsInstalledDSL(t *testing.T) {
 	require.Equal(t, reply, routed.Answer)
 	require.Empty(t, routed.RunID, "a routed message opens no goal of its own")
 	require.NotNil(t, routed.Routed)
-	require.Equal(t, []memql.AskRouteTarget{{GoalID: goal, RunID: run, Title: "Weather in Phoenix", Status: "queued", Text: "Actually I'm in Phoenix"}}, routed.Routed.Targets)
-	require.Equal(t, []map[string]any{{"runId": run, "title": "Weather in Phoenix"}}, work.retitled)
+	require.Equal(t, []memql.AskRouteTarget{{GoalID: f.goal, RunID: f.run, Title: "Weather in Phoenix", Status: "queued", Text: "Actually I'm in Phoenix"}}, routed.Routed.Targets)
+	require.Equal(t, []map[string]any{{"runId": f.run, "title": "Weather in Phoenix"}}, f.work.retitled)
 
 	// One decision, no retry: the installed prompt at its declared level,
 	// rendered with this conversation's goals by handle and answered in the
 	// strict routing schema.
-	require.Len(t, requests, 1)
-	require.Equal(t, "askMessageRouting", requests[0].PromptName)
-	require.Equal(t, airoute.LevelFast, requests[0].Level)
-	require.Equal(t, airoute.ModalityStructured, requests[0].Modality)
-	require.Len(t, model.prompts, 1)
-	require.Contains(t, model.prompts[0], "## THE NEW MESSAGE\n\"Actually I'm in Phoenix\"")
-	require.Contains(t, model.prompts[0], "Asked: \"What's the weather in Tucson?\"\n  State: working")
-	require.Equal(t, "ask_message_route", model.schemas[0].Name)
-	require.True(t, model.schemas[0].Strict)
+	require.Len(t, f.requests, 1)
+	require.Equal(t, "askMessageRouting", f.requests[0].PromptName)
+	require.Equal(t, airoute.LevelFast, f.requests[0].Level)
+	require.Equal(t, airoute.ModalityStructured, f.requests[0].Modality)
+	require.Len(t, f.model.prompts, 1)
+	require.Contains(t, f.model.prompts[0], "## THE NEW MESSAGE\n\"Actually I'm in Phoenix\"")
+	require.Contains(t, f.model.prompts[0], "Asked: \"What's the weather in Tucson?\"\n  State: working")
+	require.Equal(t, "ask_message_route", f.model.schemas[0].Name)
+	require.True(t, f.model.schemas[0].Strict)
 	var schema struct {
 		Required []string `json:"required"`
 	}
-	require.NoError(t, json.Unmarshal(model.schemas[0].Schema, &schema))
+	require.NoError(t, json.Unmarshal(f.model.schemas[0].Schema, &schema))
 	require.ElementsMatch(t, []string{"updates", "stops", "confirmStops", "newRequest", "reply", "clarify", "resolvesClarification"}, schema.Required)
+}
+
+// The routing call is the person's, made under the route their turn chose, on
+// the installed recipe as well: the workflow host hands each operation the
+// context the routing call was made with. A host that derived a context of its
+// own would serve the call under the cluster's rules instead, and a person on
+// Local would be routed by a model they did not choose.
+func TestAskRoutingRecipeRoutesUnderThePersonsRoute(t *testing.T) {
+	f := newAskRoutingInstalled(t)
+	answer, err := f.e.RunAsk(f.person, f.conversation, "phoenix", "Actually I'm in Phoenix", "", memql.AskRoute{Source: "policy:localFirst"}, nil, nil, nil)
+	require.NoError(t, err)
+	require.Empty(t, f.work.goals, "the message went to intake")
+	require.Equal(t, "Switching the weather check to Phoenix.", answer)
+	require.Len(t, f.served, 1)
+	require.Equal(t, "askMessageRouting", f.served[0].PromptName)
+	require.Equal(t, "localFirst", f.served[0].Route, "the routing call goes where the person's turn said")
+	require.Empty(t, f.served[0].ExplicitProvider, "and no author's pin overrules it")
 }

@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/require"
 	"github.com/znasllc-io/memql/component/auth"
@@ -28,7 +29,7 @@ func stopFixture(t *testing.T) *stopFixtureState {
 	f := &stopFixtureState{a: a, b: b, ctx: ctx, conversation: conversation, run: run, write: write}
 	routeTurn(t, a, ctx, conversation, AskTurn{ID: "drop", Prompt: "Never mind the weather one.", Routed: &AskRouting{
 		Stops: []AskStopQuestion{{GoalID: "fixture-goal", RunID: run, Title: "Weather in Tucson"}},
-		Reply: "Stop Weather in Tucson? Confirm on its card.",
+		Reply: "Stop Weather in Tucson?",
 	}})
 	a.builtinExecutorHandlers["integration.work.cancelGoal"] = func(_ context.Context, args map[string]any, _ int) ([]memorynodes.MemoryNode, error) {
 		f.cancelled = append(f.cancelled, args)
@@ -78,6 +79,7 @@ func TestAskStopDecisionStopsTheGoal(t *testing.T) {
 }
 
 // Stop is recorded only once the goal is closed and every run took the request.
+// The refusal is the sentence the OS shows the person, as it is.
 func TestAskStopDecisionRecordsNothingWhenTheGoalDoesNotStop(t *testing.T) {
 	f := stopFixture(t)
 	for _, reply := range []map[string]any{
@@ -88,7 +90,8 @@ func TestAskStopDecisionRecordsNothingWhenTheGoalDoesNotStop(t *testing.T) {
 			return askValue(reply)
 		}
 		_, err := f.decide(f.a, f.ctx, "drop", f.run, "stop")
-		require.Error(t, err, "%v", reply)
+		require.ErrorContains(t, err, "This work could not be stopped. Try again.", "%v", reply)
+		require.EqualError(t, f.a.stopAskGoal(f.ctx, "fixture-goal"), "This work could not be stopped. Try again.", "%v", reply)
 		require.Empty(t, f.savedDecision(t, "drop", 0))
 	}
 	f.a.builtinExecutorHandlers["integration.work.cancelGoal"] = func(context.Context, map[string]any, int) ([]memorynodes.MemoryNode, error) {
@@ -134,6 +137,89 @@ func TestAskStopDecisionIsIdempotentAndRefusesAChange(t *testing.T) {
 	require.ErrorContains(t, err, "already decided")
 	require.Len(t, f.cancelled, 1)
 	require.Equal(t, stopDecisionKept, f.savedDecision(t, "drop-hike", 0))
+}
+
+// A stop question is about its goal, not the message that asked it. Answering
+// the newest question about a goal answers every earlier one still waiting, so
+// none comes back once the person has answered; a question already answered
+// keeps its answer, and a question about another goal still waits.
+func TestAskStopDecisionAnswersEveryQuestionAboutTheGoal(t *testing.T) {
+	for _, c := range []struct {
+		decision, saved string
+		cancelled       int
+	}{
+		{"keep", stopDecisionKept, 0},
+		{"stop", stopDecisionStopped, 1},
+	} {
+		t.Run(c.decision, func(t *testing.T) {
+			f := stopFixture(t)
+			hike := guidanceRootRun(f.write, f.conversation, "hike-goal", "hike-plan", "running")
+			routeTurn(t, f.a, f.ctx, f.conversation, AskTurn{ID: "drop-hike", Prompt: "Drop the hike?", Routed: &AskRouting{
+				Stops: []AskStopQuestion{{GoalID: "hike-goal", RunID: hike, Title: "Hike near Tucson"}},
+			}})
+			routeTurn(t, f.a, f.ctx, f.conversation, AskTurn{ID: "drop-again", Prompt: "Really, drop the weather one.", Routed: &AskRouting{
+				Stops: []AskStopQuestion{{GoalID: "fixture-goal", RunID: f.run, Title: "Weather in Tucson"}},
+			}})
+			row, err := f.decide(f.a, f.ctx, "drop-again", f.run, c.decision)
+			require.NoError(t, err)
+			require.Equal(t, c.saved, row["decision"])
+			require.Equal(t, c.saved, f.savedDecision(t, "drop-again", 0))
+			require.Equal(t, c.saved, f.savedDecision(t, "drop", 0), "the earlier question about the goal is answered too")
+			require.Empty(t, f.savedDecision(t, "drop-hike", 0), "a question about another goal still waits")
+			require.Len(t, f.cancelled, c.cancelled)
+		})
+	}
+
+	f := stopFixture(t)
+	_, err := f.decide(f.a, f.ctx, "drop", f.run, "keep")
+	require.NoError(t, err)
+	routeTurn(t, f.a, f.ctx, f.conversation, AskTurn{ID: "drop-again", Prompt: "Actually, drop the weather one.", Routed: &AskRouting{
+		Stops: []AskStopQuestion{{GoalID: "fixture-goal", RunID: f.run, Title: "Weather in Tucson"}},
+	}})
+	_, err = f.decide(f.a, f.ctx, "drop-again", f.run, "stop")
+	require.NoError(t, err)
+	require.Equal(t, stopDecisionStopped, f.savedDecision(t, "drop-again", 0))
+	require.Equal(t, stopDecisionKept, f.savedDecision(t, "drop", 0), "an answered question keeps its answer")
+}
+
+// A goal that ended has nothing left to stop or keep. Its question is refused
+// as it stands: no goal is asked to stop and nothing is recorded, an ended
+// answer included, because the snapshot says ended by itself. An answer saved
+// before the goal ended still comes back for a retry.
+func TestAskStopDecisionRefusesWorkThatEnded(t *testing.T) {
+	for name, end := range map[string]map[string]any{
+		"finished":                {"status": "succeeded", "finishedAt": time.Now().UTC().Format(time.RFC3339Nano)},
+		"asked to stop elsewhere": {"cancelRequested": true},
+	} {
+		t.Run(name, func(t *testing.T) {
+			f := stopFixture(t)
+			update := map[string]any{"runId": f.run}
+			for key, value := range end {
+				update[key] = value
+			}
+			f.write("updateWorkRun", update)
+			for _, decision := range []string{"stop", "keep"} {
+				_, err := f.decide(f.a, f.ctx, "drop", f.run, decision)
+				require.ErrorContains(t, err, "That work already ended.", decision)
+				_, err = f.a.askStopDecisionBuiltin(f.ctx, map[string]any{"conversationId": f.conversation, "turnId": "drop", "runId": f.run, "decision": decision}, 0)
+				require.EqualError(t, err, "That work already ended.", decision)
+			}
+			require.Empty(t, f.cancelled, "no goal is asked to stop")
+			require.Empty(t, f.savedDecision(t, "drop", 0), "nothing is recorded")
+		})
+	}
+
+	f := stopFixture(t)
+	first, err := f.decide(f.a, f.ctx, "drop", f.run, "stop")
+	require.NoError(t, err)
+	// As the work integration does once the goal is stopped.
+	f.write("updateWorkRun", map[string]any{"runId": f.run, "cancelRequested": true})
+	again, err := f.decide(f.a, f.ctx, "drop", f.run, "stop")
+	require.NoError(t, err, "the saved answer comes back")
+	require.Equal(t, first, again)
+	require.Len(t, f.cancelled, 1)
+	_, err = f.decide(f.a, f.ctx, "drop", f.run, "keep")
+	require.ErrorContains(t, err, "already decided")
 }
 
 func TestAskStopDecisionRefusesInsideARun(t *testing.T) {

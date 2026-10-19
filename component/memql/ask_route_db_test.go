@@ -198,8 +198,8 @@ func (f *routeFixture) stallRouting(timeoutSeconds int) (letGo func()) {
 }
 
 // reconcile is what another turn starting in the conversation does first:
-// under the write lock, it projects every turn over the runs as they are now
-// and saves the projection.
+// under the write lock, it brings every turn's work up to date and saves the
+// conversation.
 func (f *routeFixture) reconcile() {
 	f.t.Helper()
 	release, err := f.e.lockAskConversationKind(f.ctx, f.conversation, "write")
@@ -465,17 +465,82 @@ func TestRunAskAsksWhenUnclearThenDeliversBoth(t *testing.T) {
 	require.Empty(t, f.intake)
 }
 
+// A message that settles routing's own question delivers both of the person's
+// messages. When every goal it was for ended meanwhile, intake takes it
+// instead, and takes both, as the goal would have: "The report" alone asks
+// for nothing. The turn records what intake received.
+func TestRunAskSettledQuestionGoesToIntakeWholeWhenItsGoalEnded(t *testing.T) {
+	f := newRouteFixture(t,
+		routeAnswer(map[string]any{"clarify": "The weather check or the report?", "reply": "Which one do you mean?"}),
+		routeAnswer(map[string]any{"updates": []any{routeUpdate("g1", "")}, "resolvesClarification": true, "reply": "Making the report shorter."}),
+	)
+	f.goal("weather", "What's the weather in Tucson?", "Weather in Tucson", "running")
+	reportGoal, report := f.goal("report", "Write the Tucson report.", "Tucson report", "running")
+	_, _, err := f.ask("shorter", "Make it shorter", AskRoute{})
+	require.NoError(t, err)
+	// The report finishes while routing decides on the answer.
+	f.beforeModel = func() {
+		f.write("updateWorkRun", map[string]any{"runId": report, "status": "succeeded", "finishedAt": time.Now().UTC().Format(time.RFC3339Nano)})
+	}
+	chunks, answer, err := f.ask("which", "The report", AskRoute{})
+	require.NoError(t, err)
+	both := "Make it shorter\n\nThe report"
+	require.Equal(t, []string{both}, f.intake, "intake takes both messages")
+	reply := "Tucson report already finished, so it didn't get this."
+	require.Equal(t, []string{reply + "\n\n", f.intakeAnswer}, chunks)
+	require.Equal(t, f.intakeAnswer, answer)
+	require.Equal(t, &AskRouting{
+		Targets:   []AskRouteTarget{{GoalID: reportGoal, RunID: report, Title: "Tucson report", Status: routeNotReceived, Reason: routeReasonEnded, Text: both}},
+		Reply:     reply,
+		Statement: both,
+	}, f.turn("which").Routed)
+	require.True(t, f.turn("shorter").Routed.Resolved, "the question is settled")
+}
+
+// What routing recorded is the record. A later message's save keeps it as it
+// was written -- a queued message stays queued, an unanswered stop question
+// stays unanswered, a label keeps the title it was sent under -- while the
+// snapshot shows the runs as they are now: the goal that finished did not
+// receive the message, the stopped goal's question has ended, and the label
+// follows the goal's new title.
+func TestRunAskKeepsWhatRoutingRecorded(t *testing.T) {
+	f := newRouteFixture(t)
+	weatherGoal, weather := f.goal("weather", "What's the weather in Tucson?", "Weather in Tucson", "running")
+	hikeGoal, hike := f.goal("hike", "Plan a hike near Tucson.", "Hike near Tucson", "running")
+	recorded := &AskRouting{
+		Targets: []AskRouteTarget{{GoalID: weatherGoal, RunID: weather, Title: "Weather in Tucson", Status: routeQueued, Text: "Actually I'm in Phoenix."}},
+		Stops:   []AskStopQuestion{{GoalID: hikeGoal, RunID: hike, Title: "Hike near Tucson"}},
+	}
+	f.record(AskTurn{ID: "phoenix", Prompt: "Actually I'm in Phoenix. And drop the hike?", Answer: "Switching to Phoenix. Stop the hike plan?", State: "done", Routed: recorded})
+	// The weather goal takes a new title and finishes before reading the
+	// message; the hike is stopped from Nexus.
+	finished := time.Now().UTC().Format(time.RFC3339Nano)
+	f.write("updateWorkRun", map[string]any{"runId": weather, "title": "Weather in Phoenix"})
+	f.write("updateWorkRun", map[string]any{"runId": weather, "status": "succeeded", "finishedAt": finished})
+	f.write("updateWorkRun", map[string]any{"runId": hike, "status": "cancelled", "finishedAt": finished})
+
+	_, _, err := f.ask("later", "What's the weather in Phoenix?", AskRoute{})
+	require.NoError(t, err)
+	require.Equal(t, []string{"What's the weather in Phoenix?"}, f.intake, "no goal is active, so the message goes to intake")
+	require.Equal(t, recorded, f.turn("phoenix").Routed, "the save keeps the record as routing wrote it")
+
+	shown := f.snapshot()["phoenix"].Routed
+	require.Equal(t, routeNotReceived, shown.Targets[0].Status)
+	require.Equal(t, "Weather in Phoenix", shown.Targets[0].Title)
+	require.Equal(t, stopDecisionEnded, shown.Stops[0].Decision)
+}
+
 // "Never mind the weather one" asks before stopping anything; a later clear
 // yes stops the goal, as the person, and the question records it.
 func TestRunAskStopAsksThenConfirms(t *testing.T) {
 	f := newRouteFixture(t,
-		routeAnswer(map[string]any{"stops": []any{"g1"}, "reply": "Stop the weather check? Confirm on its card."}),
+		routeAnswer(map[string]any{"stops": []any{"g1"}, "reply": "Stop the weather check?"}),
 		routeAnswer(map[string]any{"confirmStops": []any{"g1"}, "reply": "Stopping the weather check."}),
 	)
 	goal, run := f.goal("weather", "What's the weather in Tucson?", "Weather in Tucson", "running")
 	_, answer, err := f.ask("drop", "Never mind the weather one", AskRoute{})
 	require.NoError(t, err)
-	require.Equal(t, "Stop the weather check? Confirm on its card.", answer)
+	require.Equal(t, "Stop the weather check?", answer)
 	require.Empty(t, f.stopped, "nothing is stopped until the person confirms")
 	require.Equal(t, []AskStopQuestion{{GoalID: goal, RunID: run, Title: "Weather in Tucson"}}, f.turn("drop").Routed.Stops)
 	require.Equal(t, "done", f.turn("drop").State)
@@ -496,9 +561,9 @@ func TestRunAskStopAsksThenConfirms(t *testing.T) {
 }
 
 // The stop went through, so its question says stopped, even when another turn
-// starting meanwhile saw the goal asked to stop and saved the question as
-// ended before routing recorded the answer.
-func TestRunAskRecordsAConfirmedStopASnapshotEndedMeanwhile(t *testing.T) {
+// starting meanwhile saw the goal asked to stop and saved the conversation
+// before routing recorded the answer: that save keeps the question as asked.
+func TestRunAskRecordsAConfirmedStopAnotherTurnSavedMeanwhile(t *testing.T) {
 	f := newRouteFixture(t, routeAnswer(map[string]any{"confirmStops": []any{"g1"}, "reply": "Stopping the weather check."}))
 	goal, run := f.goal("weather", "What's the weather in Tucson?", "Weather in Tucson", "running")
 	f.record(AskTurn{ID: "drop", Prompt: "Never mind the weather one", Answer: "Stop the weather check?", State: "done",
@@ -507,7 +572,8 @@ func TestRunAskRecordsAConfirmedStopASnapshotEndedMeanwhile(t *testing.T) {
 	f.e.builtinExecutorHandlers["integration.work.cancelGoal"] = func(callCtx context.Context, args map[string]any, target int) ([]memorynodes.MemoryNode, error) {
 		rows, err := stop(callCtx, args, target)
 		f.reconcile()
-		require.Equal(t, stopDecisionEnded, f.turn("drop").Routed.Stops[0].Decision, "the other turn saved the question as ended")
+		require.Equal(t, stopDecisionEnded, f.snapshot()["drop"].Routed.Stops[0].Decision, "the goal no longer runs, so the snapshot says ended")
+		require.Empty(t, f.turn("drop").Routed.Stops[0].Decision, "the other turn's save keeps the question as asked")
 		return rows, err
 	}
 	_, answer, err := f.ask("yes", "Yes", AskRoute{})
@@ -518,7 +584,7 @@ func TestRunAskRecordsAConfirmedStopASnapshotEndedMeanwhile(t *testing.T) {
 }
 
 // A confirmed stop that does not go through is never claimed: the question
-// stays open on the goal's card and the reply says what happened.
+// stays open and the reply says what happened, in words a live call can say.
 func TestRunAskSaysWhenAConfirmedStopFails(t *testing.T) {
 	f := newRouteFixture(t, routeAnswer(map[string]any{"confirmStops": []any{"g1"}, "reply": "Stopping the weather check."}))
 	goal, run := f.goal("weather", "What's the weather in Tucson?", "Weather in Tucson", "running")
@@ -527,9 +593,34 @@ func TestRunAskSaysWhenAConfirmedStopFails(t *testing.T) {
 	f.stopReply = map[string]any{"goalId": goal, "runsAsked": 1, "goalClosed": true, "runsRefused": []any{run}}
 	_, answer, err := f.ask("yes", "Yes, stop it", AskRoute{})
 	require.NoError(t, err)
-	require.Equal(t, "Weather in Tucson couldn't be stopped. Use Stop on its card.", answer)
+	require.Equal(t, "Weather in Tucson couldn't be stopped. Try again.", answer)
 	require.Empty(t, f.turn("drop").Routed.Stops[0].Decision, "the question stays open")
 	require.Equal(t, answer, f.turn("yes").Answer)
+}
+
+// When a delivery fails, the plain account Go says instead of the model's line
+// still asks the stop question the message raised: in a live call the reply is
+// the only place the question is asked. The message asked something, so it is
+// answered and goes to no intake.
+func TestRunAskHonestReplyAsksItsStopQuestion(t *testing.T) {
+	f := newRouteFixture(t, routeAnswer(map[string]any{"updates": []any{routeUpdate("g2", "")}, "stops": []any{"g1"}, "reply": "Switching the weather check to Phoenix. Stop the hike plan?"}))
+	weatherGoal, weather := f.goal("weather", "What's the weather in Tucson?", "Weather in Tucson", "running")
+	hikeGoal, hike := f.goal("hike", "Plan a hike near Tucson.", "Hike near Tucson", "running")
+	// The weather goal finishes while routing decides.
+	f.beforeModel = func() {
+		f.write("updateWorkRun", map[string]any{"runId": weather, "status": "succeeded", "finishedAt": time.Now().UTC().Format(time.RFC3339Nano)})
+	}
+	chunks, answer, err := f.ask("phoenix", "Actually I'm in Phoenix, and forget the hike.", AskRoute{})
+	require.NoError(t, err)
+	reply := "Weather in Tucson already finished, so it didn't get this. Stop Hike near Tucson?"
+	require.Equal(t, reply, answer)
+	require.Equal(t, []string{reply}, chunks)
+	require.Empty(t, f.intake)
+	require.Empty(t, f.stopped, "nothing is stopped until the person confirms")
+	require.Equal(t, &AskRouting{
+		Targets: []AskRouteTarget{{GoalID: weatherGoal, RunID: weather, Title: "Weather in Tucson", Status: routeNotReceived, Reason: routeReasonEnded, Text: "Actually I'm in Phoenix, and forget the hike."}},
+		Stops:   []AskStopQuestion{{GoalID: hikeGoal, RunID: hike, Title: "Hike near Tucson"}},
+	}, f.turn("phoenix").Routed)
 }
 
 // A goal that ends between listing and delivery does not get the message,

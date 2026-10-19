@@ -77,7 +77,20 @@ func (e *MemQLEngine) askConversationSnapshotBuiltin(ctx context.Context, args m
 	return []memorynodes.MemoryNode{{ID: fmt.Sprint(row["id"]), Payload: raw}}, nil
 }
 
+// refreshAskRuns brings every turn's work up to date for a reader, routed
+// turns included: each target and stop question as its run is now
+// (projectAskRouting).
 func (e *MemQLEngine) refreshAskRuns(ctx context.Context, transcript *askTranscript) error {
+	return e.refreshAskTranscript(ctx, transcript, true)
+}
+
+// refreshAskTranscript brings every turn's work up to date from its run. With
+// routing, a routed turn's targets and stop questions are projected over
+// their runs too. That projection is a reader's view and never a record: a
+// transcript that is saved again is refreshed without it, so what routing
+// recorded -- a queued message, an unanswered stop question, the title a
+// message was sent under -- stays as it was written.
+func (e *MemQLEngine) refreshAskTranscript(ctx context.Context, transcript *askTranscript, routing bool) error {
 	ctx = ContextWithFreshRead(ctx)
 	// A request a routed message answered already says so on that message
 	// ("To {goal} · Answered"). Its projected "Guidance sent" turn would say it
@@ -138,9 +151,11 @@ func (e *MemQLEngine) refreshAskRuns(ctx context.Context, transcript *askTranscr
 		runs[key] = run
 		return run, nil
 	}
-	for n := range transcript.Turns {
-		if err := projectAskRouting(transcript.Turns[n].Routed, readRun); err != nil {
-			return err
+	if routing {
+		for n := range transcript.Turns {
+			if err := projectAskRouting(transcript.Turns[n].Routed, readRun); err != nil {
+				return err
+			}
 		}
 	}
 	for n := range transcript.Turns {
