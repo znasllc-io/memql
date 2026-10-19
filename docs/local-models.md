@@ -590,7 +590,7 @@ models:
   allow:
     - qwen3.8:27b
     - qwen3-embedding:0.6b
-  parallel: 2                    # requests per model; see below
+  parallel: 2                    # Docker/macOS only; outranks a managed unit
   resident:
     - id: qwen3.8:27b
       keep_alive: 2h             # 30m, 2h, 3600 (seconds), or -1 / forever
@@ -600,9 +600,9 @@ models:
 ```
 
 A `SIGHUP` applies it; nothing restarts. Delete the block, send another, and
-every model is back on Ollama's defaults, though a model already loaded keeps
-its last expiry until it is stopped, evicted, or reloaded. Nothing here changes
-a machine until its owner writes it.
+every model is back on Ollama's defaults, though on current releases a model
+already loaded keeps its last expiry until it is stopped, evicted, or reloaded.
+Nothing here changes a machine until its owner writes it.
 
 - **`keep_alive`** is sent on every call to that model: chat, vision, embedding
   and image alike. Ollama applies the value a request states, up or down, and
@@ -666,14 +666,15 @@ every load says whether a choice held: `no changes needed`, and
 The two slots setup gives a class 24 or 32 machine are budgeted at a 16K window,
 the `working_context: 16384` above: at 32K two slots leave 1,429 MiB, under the
 1,936 MiB the runtime wants, so a 32K window wants one slot:
-`OLLAMA_NUM_PARALLEL=1` under `[Service]` in the unit, then restart Ollama (the
-worker follows the unit). `models.parallel: 1` alone only lowers what the worker
-advertises; it is for a runtime the cockpit cannot read. The ceiling the worker
-advertises can also differ from what Ollama was started with: a stale
-`OLLAMA_NUM_PARALLEL` in the worker's environment outranks the unit, a unit
-edited by hand takes effect only when Ollama restarts, and another Ollama on the
-port reads none of this. Each is benign: a call waits inside Ollama, or a slot
-sits idle until the next refresh.
+`Environment=OLLAMA_NUM_PARALLEL=1` under `[Service]` in the unit, then reload
+and restart Ollama as above (the worker follows the unit unless
+`models.parallel` or its own `OLLAMA_NUM_PARALLEL` is set). `models.parallel: 1`
+alone only lowers what the worker advertises; it is for a runtime the cockpit
+cannot read. The ceiling the worker advertises can also differ from what Ollama
+was started with: a stale `OLLAMA_NUM_PARALLEL` in the worker's environment
+outranks the unit, a unit edited by hand takes effect only when Ollama restarts,
+and another Ollama on the port reads none of this. Each is benign: a call waits
+inside Ollama, or a slot sits idle until the next refresh.
 
 ---
 
