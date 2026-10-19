@@ -15,9 +15,10 @@ pins. Neither selecting this manifest nor compiling it grants fleet access.
 
 ## Coverage inventory
 
-All legacy workflows remain enabled until installed qualification, observation
-and the repository's required-check transition are complete. A compiled command
-is not evidence that its host, trigger or publication path has run.
+The native manifest declares the repository execution paths. Installed
+qualification and the required-check transition must precede retirement of the
+live Actions workflows. Historical evidence below applies only to its recorded
+source; a compiled command is not proof that its host or publication path ran.
 
 | Legacy workflow | MemQL command coverage | Remaining qualification / external effect |
 | --- | --- | --- |
@@ -155,8 +156,8 @@ This replaces the repository audit and code-scanning delivery. The legacy
 Scorecard Action's GitHub OIDC attestation and public Scorecard-service upload
 are retired with Actions; results remain available in MemQL Library and GitHub
 code scanning. A ruleset change can request a manual audit, and weekly scanning
-provides the regular cadence. Keep the existing workflow until the native audit
-and SARIF ingestion have passed in production.
+provides the regular cadence. The native audit and SARIF ingestion must pass in production before this
+workflow retirement is merged.
 
 The Linux tray check runs the same protocol fixture as the retiring workflow:
 registration, icon bytes, menu structure, unavailable-worker state, singleton,
@@ -164,3 +165,12 @@ watcher restart and graceful exit. It uses an isolated session bus and the
 pipeline workspace's private home. Host dependencies are checked before the
 build; an unavailable dependency fails, rather than skipping the test or
 installing packages on the user's machine.
+
+## Release preparation
+
+`make release ARGS="--prepare"` opens a version PR from a clean, current main
+checkout. It refuses existing tags and release branches, stamps both worker
+version fallbacks, and pushes only the version branch. The release-preparation
+fixtures use a local bare Git remote and a fake GitHub CLI to prove those
+boundaries; they create no real PR or release. After merge, an operator tags the
+reviewed commit and starts **Run release** in MemQL. See [Versioning](../VERSIONING.md).

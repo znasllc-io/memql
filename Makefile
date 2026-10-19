@@ -121,7 +121,7 @@ forward: ## Port-forward the local k3d svc/bff to localhost:$(BFF_PORT) (low-lev
 # versioned tar.gz per platform (binary renamed to plain `memql` +
 # LICENSE + README) plus a SHA256SUMS manifest. Headless only -- the computeruse
 # variant needs CGO + native tooling, so it is never in these tarballs;
-# release.yml's computeruse matrix builds it per-host (cockpit-computeruse-host
+# memql-package.yaml's native release stages build it per-host (cockpit-computeruse-host
 # above) and ships it as raw memql-computeruse-<os>-<arch> release assets.
 
 DIST_DIR := dist
@@ -151,13 +151,12 @@ dist-checksums: ## Write a SHA256SUMS manifest over the packaged archives in dis
 ##@ Release
 # ---------------------------------------------------------------------------
 # Tag-driven: `make release` recommends the next semver from the commits since
-# the last tag (conventional-commit prefixes, no AI). Add ARGS="--cut" to bump
-# VERSION + main.go, tag vX.Y.Z, push, and create the GitHub Release (which
-# triggers release.yml to build + upload the per-platform binaries).
+# the last tag (conventional-commit prefixes, no AI). Add ARGS="--prepare"
+# to open a version PR. After merge, build and publish its tag through MemQL.
 
 .PHONY: release
 
-release: ## Recommend the next version from commits; ARGS="--cut" to tag + release (see --help)
+release: ## Recommend the next version; ARGS="--prepare" to open its version PR
 	@bash scripts/release/cut-release.sh $(ARGS)
 
 # ---------------------------------------------------------------------------

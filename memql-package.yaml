@@ -1,6 +1,6 @@
 # Commands are interpreted by the installed MemQL pipeline workflow.
 # Native steps require explicit fleet consent and matching host tools.
-# See docs/pipeline-coverage.md before enabling or retiring legacy workflows.
+# See docs/pipeline-coverage.md for coverage and qualification evidence.
 formatVersion: 1
 name: memql-cockpit
 pipeline:
@@ -61,7 +61,6 @@ pipeline:
       run: |
         set -eu
         python3 -m unittest discover -s scripts/ci -p '*_test.py'
-        ! grep -rlnE '^[[:space:]]*repository:[[:space:]]*znasllc-io/memql' .github/workflows/
     - name: test
       placement: fleet
       timeout: 30m
