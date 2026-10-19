@@ -9,6 +9,9 @@ struct PermissionReport {
     let requestsSupported: Bool
     let requestPending: Bool
     let checkedAt: Date?
+    /// Setup on this Mac is waiting for the person here (memql-cockpit#548):
+    /// the installer's permissions stage is running and nobody has answered.
+    var setupWaiting = false
 
     func fresh(at now: Date = Date()) -> Bool {
         guard let checkedAt else { return false }
@@ -16,6 +19,27 @@ struct PermissionReport {
     }
     func granted(at now: Date = Date()) -> Bool {
         fresh(at: now) && accessibility == "Granted" && screenRecording == "Granted"
+    }
+}
+
+/// The installer's report as the worker's status carries it (memql-cockpit#548).
+struct SetupStageStatus: Decodable {
+    let name: String
+    let state: String
+}
+struct SetupAnswerStatus: Decodable {
+    let stage: String
+    let choice: String
+}
+struct SetupStatus: Decodable {
+    let state: String
+    let stages: [SetupStageStatus]?
+    let answers: [String: SetupAnswerStatus]?
+
+    /// The installer is waiting for the person in the Permissions window.
+    var waitingForPermissions: Bool {
+        state == "running" && answers?["permissions"] == nil &&
+        (stages ?? []).contains { $0.name == "permissions" && $0.state == "running" }
     }
 }
 
@@ -146,6 +170,16 @@ struct PermissionFlow {
         return PermissionRow(on: on, enabled: true, note: on ? "Turn on MemQL in System Settings" : "Turn off MemQL in System Settings")
     }
 
+    /// While setup waits on this window (memql-cockpit#548): the one choice
+    /// that lets it go on without what is not allowed yet, or nil. Allowing
+    /// everything needs no choice -- the installer sees the grant itself.
+    func setupChoice(_ report: PermissionReport?, restarting: Bool, now: Date = Date()) -> String? {
+        guard let report, report.fresh(at: now), report.setupWaiting, !restarting else { return nil }
+        let missing = PermissionKind.allCases.filter { !$0.granted(in: report) }
+        if missing.isEmpty { return nil }
+        return missing.count == PermissionKind.allCases.count ? "Skip for now" : "Continue without \(missing[0].title)"
+    }
+
     func floor(_ report: PermissionReport?, restarting: Bool, now: Date = Date()) -> PermissionFloor {
         if restarting { return PermissionFloor(state: "Restarting MemQL…", busy: true, act: nil) }
         guard let report, report.fresh(at: now) else { return PermissionFloor(state: "Waiting for the worker", busy: true, act: nil) }
@@ -217,6 +251,8 @@ final class PermissionSetupWindow: NSWindowController, NSWindowDelegate {
     var request: ((String, Int) -> Void)?
     var restart: ((Int) -> Void)?
     var reveal: (() -> Void)?
+    /// The person chose to let setup go on without what is not allowed yet.
+    var skip: (() -> Void)?
     /// True while the person is in System Settings, so the app can read the
     /// worker's report every second instead of every three.
     var asking: ((Bool) -> Void)?
@@ -244,6 +280,10 @@ final class PermissionSetupWindow: NSWindowController, NSWindowDelegate {
     private let state = NSTextField(labelWithString: "")
     private let spinner = NSProgressIndicator()
     private let feedback = NSTextField(wrappingLabelWithString: "")
+    /// Shown only while setup waits on this window: why it matters now, and
+    /// the way on without what is not allowed yet.
+    private var setupRow: NSStackView!
+    private var setupSkip: NSButton!
     private let identity = NSTextField(wrappingLabelWithString: "")
     private var act: NSButton!
     private var troubleshootingButton: NSButton!
@@ -284,6 +324,10 @@ final class PermissionSetupWindow: NSWindowController, NSWindowDelegate {
         act.bezelStyle = .rounded; act.keyEquivalent = "\r"
         let floor = NSStackView(views: [spinner, state, NSView(), act]); floor.spacing = 8; floor.alignment = .centerY
         feedback.font = .systemFont(ofSize: 11); feedback.textColor = .secondaryLabelColor
+        let setupNote = label("Setup is waiting for you.", size: 11, color: .secondaryLabelColor)
+        setupSkip = link("Skip for now", #selector(skipForNow))
+        setupRow = NSStackView(views: [setupNote, NSView(), setupSkip]); setupRow.spacing = 8; setupRow.alignment = .centerY
+        setupRow.isHidden = true
 
         troubleshootingButton = NSButton(title: "Troubleshooting", target: self, action: #selector(toggleTroubleshooting))
         troubleshootingButton.bezelStyle = .disclosure; troubleshootingButton.setButtonType(.pushOnPushOff); troubleshootingButton.title = ""
@@ -301,10 +345,11 @@ final class PermissionSetupWindow: NSWindowController, NSWindowDelegate {
         troubleshooting.orientation = .vertical; troubleshooting.alignment = .leading; troubleshooting.spacing = 8
         troubleshooting.isHidden = true
 
-        stack = NSStackView(views: [header, rows, floor, feedback, disclosure, troubleshooting])
+        stack = NSStackView(views: [header, rows, floor, setupRow, feedback, disclosure, troubleshooting])
         stack.orientation = .vertical; stack.alignment = .leading; stack.spacing = 18
         stack.setCustomSpacing(22, after: header)
         stack.setCustomSpacing(6, after: floor)
+        stack.setCustomSpacing(6, after: setupRow)
         stack.setCustomSpacing(8, after: disclosure)
         stack.translatesAutoresizingMaskIntoConstraints = false
         window.contentView!.addSubview(stack)
@@ -314,7 +359,7 @@ final class PermissionSetupWindow: NSWindowController, NSWindowDelegate {
             stack.topAnchor.constraint(equalTo: window.contentView!.topAnchor, constant: 36),
             stack.widthAnchor.constraint(equalToConstant: Self.width - 48),
         ])
-        for view in [rows, floor, feedback, troubleshooting, tip, identity] as [NSView] {
+        for view in [rows, floor, setupRow, feedback, troubleshooting, tip, identity] as [NSView] {
             view.widthAnchor.constraint(equalTo: stack.widthAnchor).isActive = true
         }
         for row in rows.arrangedSubviews { row.widthAnchor.constraint(equalTo: rows.widthAnchor).isActive = true }
@@ -385,6 +430,9 @@ final class PermissionSetupWindow: NSWindowController, NSWindowDelegate {
         if floor.busy { spinner.startAnimation(nil) } else { spinner.stopAnimation(nil) }
         act.isHidden = floor.act == nil
         act.title = floor.act == .restart ? "Restart MemQL" : "Done"
+        let choice = flow.setupChoice(report, restarting: restarting)
+        setupRow.isHidden = choice == nil
+        if let choice { setupSkip.title = choice }
         feedback.stringValue = message
         feedback.isHidden = message.isEmpty
         identity.stringValue = report.map { "Worker \($0.version) · PID \($0.pid)\n\($0.executable ?? "Executable path not reported")" } ?? "Worker unavailable"
@@ -486,6 +534,11 @@ final class PermissionSetupWindow: NSWindowController, NSWindowDelegate {
         if flow.floor(report, restarting: progress.pid != nil).act == .restart { confirmRestart() } else { close() }
     }
     @objc private func showWorker() { reveal?() }
+    @objc private func skipForNow() {
+        guard flow.setupChoice(report, restarting: progress.pid != nil) != nil else { return }
+        message = ""
+        skip?()
+    }
     @objc private func toggleTroubleshooting() {
         troubleshooting.isHidden.toggle()
         troubleshootingButton.state = troubleshooting.isHidden ? .off : .on

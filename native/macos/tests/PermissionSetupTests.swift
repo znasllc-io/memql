@@ -87,6 +87,29 @@ enum PermissionSetupTests {
         precondition(!flow.row(.screenRecording, headless, restarting: false, now: now).enabled)
         precondition(flow.floor(headless, restarting: false, now: now) == PermissionFloor(state: "Update Cockpit to set these up", busy: false, act: nil))
 
+        // Setup waits on this window (memql-cockpit#548): the way on without
+        // what is not allowed yet, offered only while it waits.
+        func waiting(ax: String, screen: String) -> PermissionReport {
+            var waiting = report(ax: ax, screen: screen); waiting.setupWaiting = true; return waiting
+        }
+        precondition(flow.setupChoice(neither, restarting: false, now: now) == nil, "No setup waiting, no choice")
+        precondition(flow.setupChoice(waiting(ax: "Not granted", screen: "Not granted"), restarting: false, now: now) == "Skip for now")
+        precondition(flow.setupChoice(waiting(ax: "Granted", screen: "Not granted"), restarting: false, now: now) == "Continue without Screen Recording")
+        precondition(flow.setupChoice(waiting(ax: "Not granted", screen: "Granted"), restarting: false, now: now) == "Continue without Accessibility")
+        precondition(flow.setupChoice(waiting(ax: "Granted", screen: "Granted"), restarting: false, now: now) == nil, "Both allowed: setup goes on by itself")
+        precondition(flow.setupChoice(waiting(ax: "Not granted", screen: "Not granted"), restarting: true, now: now) == nil, "Nothing is chosen while MemQL restarts")
+        var stale = waiting(ax: "Not granted", screen: "Not granted"); stale = PermissionReport(pid: stale.pid, version: stale.version, executable: stale.executable,
+            accessibility: stale.accessibility, screenRecording: stale.screenRecording, requestsSupported: true, requestPending: false,
+            checkedAt: now.addingTimeInterval(-16), setupWaiting: true)
+        precondition(flow.setupChoice(stale, restarting: false, now: now) == nil, "No choice without a fresh report")
+        let decoder = JSONDecoder()
+        let running = try! decoder.decode(SetupStatus.self, from: Data(#"{"state":"running","stages":[{"name":"permissions","state":"running","detail":""},{"name":"models","state":"waiting","completed_bytes":0}]}"#.utf8))
+        precondition(running.waitingForPermissions)
+        let answered = try! decoder.decode(SetupStatus.self, from: Data(#"{"state":"running","stages":[{"name":"permissions","state":"running"}],"answers":{"permissions":{"stage":"permissions","choice":"skip"}}}"#.utf8))
+        precondition(!answered.waitingForPermissions, "An answered wait is no longer waiting")
+        let downloading = try! decoder.decode(SetupStatus.self, from: Data(#"{"state":"running","stages":[{"name":"permissions","state":"skipped"},{"name":"models","state":"running"}]}"#.utf8))
+        precondition(!downloading.waitingForPermissions, "Setup past the permissions waits on nobody here")
+
         // Beside System Settings: right of it with room, else left of it,
         // else over the screen's left edge (its sidebar, not its switches).
         let size = NSSize(width: 400, height: 300)
@@ -111,8 +134,8 @@ enum PermissionSetupTests {
             let state = CommandLine.arguments.first(where: { $0.hasPrefix("--state=") }).map { String($0.dropFirst("--state=".count)) } ?? "idle"
             let granted = state == "ready"
             setup.update(PermissionReport(pid: 57495, version: "preview", executable: "/Users/example/Applications/MemQL.app/Contents/MacOS/MemQL",
-                accessibility: granted || state == "screen" ? "Granted" : "Not granted", screenRecording: granted ? "Granted" : "Not granted",
-                requestsSupported: true, requestPending: false, checkedAt: Date()))
+                accessibility: granted || state == "screen" || state == "setup-partial" ? "Granted" : "Not granted", screenRecording: granted ? "Granted" : "Not granted",
+                requestsSupported: true, requestPending: false, checkedAt: Date(), setupWaiting: state.hasPrefix("setup")))
             switch state {
             case "asking": setup.preview(asks: [.accessibility: true])
             case "screen", "screen-first": setup.preview(asks: [.screenRecording: true])
@@ -129,6 +152,6 @@ enum PermissionSetupTests {
             appearance.performAsCurrentDrawingAppearance { view.cacheDisplay(in: view.bounds, to: bitmap) }
             try! bitmap.representation(using: .png, properties: [:])!.write(to: URL(fileURLWithPath: String(output.dropFirst("--render=".count))))
         }
-        print("Permission setup: freshness, denials, restart/new PID, timeout, URL, service identity, switch flow and placement checks passed.")
+        print("Permission setup: freshness, denials, restart/new PID, timeout, URL, service identity, switch flow, setup choice and placement checks passed.")
     }
 }

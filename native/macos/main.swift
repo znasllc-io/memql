@@ -28,6 +28,7 @@ struct WorkerStatus: Decodable {
     let bundle_path: String?
     let permission_requests: Bool?
     let permission_request_pending: Bool?
+    let setup: SetupStatus?
 
     var permissionReport: PermissionReport {
         let parser = ISO8601DateFormatter()
@@ -37,7 +38,8 @@ struct WorkerStatus: Decodable {
         return PermissionReport(pid: pid, version: version, executable: executable,
                                 accessibility: accessibility, screenRecording: screen_recording,
                                 requestsSupported: permission_requests == true,
-                                requestPending: permission_request_pending == true, checkedAt: checked)
+                                requestPending: permission_request_pending == true, checkedAt: checked,
+                                setupWaiting: setup?.waitingForPermissions == true)
     }
 }
 struct LogEntry: Decodable {
@@ -66,6 +68,10 @@ final class CockpitApp: NSObject, NSApplicationDelegate, NSMenuDelegate, NSSearc
     private var permissionWindow: PermissionSetupWindow?
     private var restartBusy = false
     private var openPermissionsAfterLaunch = false
+    /// Setup was already waiting on the Permissions window at the last
+    /// refresh: the window opens itself once when a wait begins, and a person
+    /// who then closes it is not followed.
+    private var setupWasWaiting = false
     private var logWindow: NSWindow?
     private var logText: NSTextView!
     private var search: NSSearchField!
@@ -178,6 +184,12 @@ final class CockpitApp: NSObject, NSApplicationDelegate, NSMenuDelegate, NSSearc
             self.item.button?.toolTip = self.snapshot.map { "MemQL · \($0.homes.filter { $0.state == "Connected" }.count) connected" } ?? "MemQL · worker unavailable"
             if !self.trackingMenu { self.rebuildMenu() }
             self.permissionWindow?.update(self.snapshot?.permissionReport)
+            // Setup waits on the person here (memql-cockpit#548): the window
+            // comes forward when a wait begins, even if the installer could
+            // not open it.
+            let setupWaiting = self.snapshot?.setup?.waitingForPermissions == true
+            if setupWaiting && !self.setupWasWaiting && self.permissionWindow?.window?.isVisible != true { self.showPermissions() }
+            self.setupWasWaiting = setupWaiting
             let setupKey = "permissionSetupShown.\(self.snapshot?.bundle_id ?? "standalone").\(self.snapshot?.version ?? "unknown")"
             if let report = self.snapshot?.permissionReport, report.fresh(), report.requestsSupported,
                !report.granted(), !UserDefaults.standard.bool(forKey: setupKey) {
@@ -274,6 +286,16 @@ final class CockpitApp: NSObject, NSApplicationDelegate, NSMenuDelegate, NSSearc
                 }
             }
             window.reveal = { [weak self] in self?.revealWorker() }
+            // The person's choice goes to the worker as an answer; the
+            // installer's own setup command reports how the stage ended.
+            window.skip = { [weak self] in
+                self?.request(["--action=setup", "--stage=permissions", "--answer=skip"]) { reply, error in
+                    if reply?.ok == true { self?.permissionWindow?.close() } else {
+                        self?.permissionWindow?.actionFinished(error ?? "Setup did not take that choice. Try again.")
+                    }
+                    self?.refresh()
+                }
+            }
             window.restart = { [weak self] pid in self?.restartWorker(expectedPID: pid) }
             window.asking = { [weak self] asking in self?.setFastRefresh(asking) }
             // Asked once the window has gone: it is still visible while it closes.

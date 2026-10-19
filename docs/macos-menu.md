@@ -249,6 +249,24 @@ switch shows only the worker's report. While any of its windows is open the
 menu is a regular app with a Dock icon, so a window behind System Settings can
 always be found; it returns to the menu bar when the last one closes.
 
+### During setup (memql-cockpit#548)
+
+On a computer-use Mac the installer's first stage is the permissions:
+`memql worker setup --permissions` opens this window and waits until both
+switches are on, or until the person chooses to go on without them. Nothing
+downloads before then. While setup waits, the window comes forward by itself
+once (when the menu sees the wait begin, even if the installer could not open
+it) and shows **Setup is waiting for you.** with one quiet choice:
+**Skip for now** when neither is on, **Continue without Screen Recording** (or
+Accessibility) when one is. The choice is sent as an answer,
+`memql worker control --action=setup --stage=permissions --answer=skip`; the
+setup command reads it back from the worker's status, reports the stage as
+skipped in its own words, and the window closes. Pressing Return in the
+installer's terminal is the same choice. Both permissions on needs no choice:
+the setup command sees the grant and goes on. Turning Screen Recording on
+still needs **Restart MemQL**, and the wait continues through the restart,
+because the installer's report is kept in `setup.json` at the state root.
+
 **Troubleshooting** holds **Show MemQL in Finder**, which reveals the installed
 executable with symlinks resolved, **Restart MemQL…**, and the worker's
 version, PID and executable. macOS can retain an entry for an older binary
@@ -272,8 +290,9 @@ and offer **Install or update Cockpit** if the handler is unavailable. Opening
 the URL is never evidence of installation or granted permissions. There is no
 HTTP bridge and no remote grant/restart endpoint.
 
-Local status adds `executable`, `bundle_id`, `bundle_path`, `permission_requests` and
-`permission_request_pending`. The explicit CLI equivalent is:
+Local status adds `executable`, `bundle_id`, `bundle_path`, `permission_requests`,
+`permission_request_pending`, and `setup` (the installer's report with the
+person's answers). The explicit CLI equivalent is:
 
 ```sh
 # Read PID from the actual service status first; substitute that PID below.
