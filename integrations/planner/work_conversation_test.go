@@ -18,7 +18,7 @@ func conversationReq(statement, previous string) CompileRequest {
 }
 
 func TestCurrentEvidenceRepliesUseToolsWithLookupBudget(t *testing.T) {
-	for _, statement := range []string{"Why is it so windy outside?", "¿Por qué hace tanto viento afuera?", "And at my office right now?"} {
+	for _, statement := range []string{"Why is it so windy outside?", "¿Por qué hace tanto viento afuera?", "And at my office right now?", "The service outage was caused by a cyberattack, right?", "Is my account balance unchanged today?"} {
 		t.Run(statement, func(t *testing.T) {
 			eng := &countingCompileEngine{triage: map[string]any{"intent": "reply", "complexity": "trivial", "workload": "quick", "requiresFile": false, "requiresResearch": true, "acknowledgement": "I’ll check the available evidence."}}
 			out, err := (&PlannerAgentLoop{engine: eng}).CompileGoalForRun(context.Background(), conversationReq(statement, "We were discussing the current conditions."), nil, realSandbox{})
@@ -32,7 +32,7 @@ func TestCurrentEvidenceRepliesUseToolsWithLookupBudget(t *testing.T) {
 			if strings.Contains(source, "workQuickReply") || !strings.Contains(source, "runAgentTurn") {
 				t.Fatalf("missing tool-enabled execution: %s", source)
 			}
-			for _, required := range []string{"First inspect recorded source receipts", "Retrieve only facts still missing", "source observation time", "status=needs_input", "optional=true"} {
+			for _, required := range []string{"First inspect recorded source receipts", "Retrieve only facts still missing", "source observation time", "required identifier from a named record", "different or unverified entity", "status=needs_input", "optional=true"} {
 				if !strings.Contains(source, required) {
 					t.Fatalf("research requirement %q was lost before execution: %s", required, source)
 				}
@@ -136,5 +136,31 @@ func TestVerifiedFollowupCarriesReceiptsThroughClassificationAndQuickReply(t *te
 	source := strings.Join(eng.queries, "\n")
 	if strings.Contains(source, "runAgentTurn") || strings.Contains(source, "progress: true") || !strings.Contains(source, "workQuickReply") || !strings.Contains(source, "toString(args.conversation)") || !strings.Contains(source, "reason := builtin workReviewReply(draft: draft)") {
 		t.Fatalf("quick reply lost persisted source context or started a tool loop: %s", source)
+	}
+}
+
+func TestCapabilityArtifactWorkloadIncludesGenerationAndKeepsExplicitCeilings(t *testing.T) {
+	for _, format := range []string{"png", "wav", "mp4", "xlsx", "glb"} {
+		for _, tier := range []string{"quick", "lookup"} {
+			t.Run(format+"/"+tier, func(t *testing.T) {
+				eng := &countingCompileEngine{triage: map[string]any{"intent": "task", "complexity": "trivial", "workload": tier, "requiresFile": true, "fileFormat": format, "fileName": "output", "acknowledgement": "I’ll create and save the requested artifact."}}
+				req := conversationReq("Create the requested artifact", "")
+				out, err := (&PlannerAgentLoop{engine: eng}).CompileGoalForRun(context.Background(), req, nil, realSandbox{})
+				if err != nil {
+					t.Fatal(err)
+				}
+				if out.Workload != "research" {
+					t.Fatalf("generation was treated as a short lookup: %s", out.Workload)
+				}
+				limit := work.EffectiveWorkloadCeilings(work.Ceilings{}, out.Workload)
+				if limit.WallClockMs != 45*60*1000 {
+					t.Fatalf("unexpected sustained-work allowance: %+v", limit)
+				}
+				explicit := work.Ceilings{WallClockMs: 60000, MaxModelCalls: 2, CostCeiling: 0.25}
+				if got := work.EffectiveWorkloadCeilings(explicit, out.Workload); got.WallClockMs != explicit.WallClockMs || got.MaxModelCalls != explicit.MaxModelCalls || got.CostCeiling != explicit.CostCeiling {
+					t.Fatalf("explicit ceiling relaxed: %+v", got)
+				}
+			})
+		}
 	}
 }

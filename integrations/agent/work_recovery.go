@@ -26,6 +26,8 @@ type workRecoveryEngine interface {
 // system prompt which is refreshed at resume. Its position is the evidence
 // watermark: only completed batches AFTER it have not yet been observed.
 type workRecoveryState struct {
+	EvidenceRepairs    int              `json:"evidenceRepairs,omitempty"`
+	EvidenceGap        string           `json:"evidenceGap,omitempty"`
 	Version            int              `json:"version"`
 	ReadEvidence       workReadEvidence `json:"readEvidence,omitempty"`
 	DiscoveryRounds    int              `json:"discoveryRounds"`
@@ -83,7 +85,7 @@ func recoveryState(messages []common.ChatMessage) (workRecoveryState, int, error
 		if marker >= 0 || len(message.Content) > 8192 {
 			return s, -1, fmt.Errorf("invalid recovery checkpoint")
 		}
-		if err := json.Unmarshal([]byte(message.Content), &s); err != nil || s.Version != 1 || len(s.RecentEvidence) > 8 || len(s.GuidanceIDs) > 16 || len(s.ReadEvidence.Recent) > 8 {
+		if err := json.Unmarshal([]byte(message.Content), &s); err != nil || s.Version != 1 || s.EvidenceRepairs < 0 || s.EvidenceRepairs > 1 || len(s.EvidenceGap) > 1200 || len(s.RecentEvidence) > 8 || len(s.GuidanceIDs) > 16 || len(s.ReadEvidence.Recent) > 8 {
 			return s, -1, fmt.Errorf("unreadable recovery checkpoint")
 		}
 		marker = i

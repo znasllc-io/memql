@@ -18,6 +18,7 @@ import (
 var criticalTables = []string{
 	`"MemoryNodes"`,               // core time-series node store
 	"automation_execution_claims", // single-flight automation claims (#624 regression)
+	"memory_liveness",             // every current-row read joins this authoritative liveness index
 }
 
 // AssertCriticalSchema returns a non-nil error if any required table is absent

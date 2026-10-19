@@ -88,6 +88,15 @@ A lookup classification does not automatically lower the execution reasoning
 level: choosing tools and interpreting evidence still require a capable model.
 Routing policies and explicit step overrides continue to decide that route.
 
+A reply's existing evidence check can identify an unfinished lookup instead of
+only replacing unsupported claims with a disclaimer. The installed completion
+recipe permits one continuation for a specific unresolved source or capability
+match. The runtime records that attempt with the exact source checkpoint before
+continuing, so another replica cannot restart its allowance. The continuation
+and its final review spend the original run's remaining calls and deadline;
+they grant no new permission or budget. A supported answer, a bounded failed
+check, and an ordinary quick follow-up do not take this path.
+
 A non-quick classifier response with missing or oversized acknowledgment prose
 gets at most one `workAcknowledgement` call at `fast`, bounded by the installed recipe to 180 seconds and
 the run’s remaining call ceiling. Valid acknowledgments and quick replies add
@@ -330,10 +339,13 @@ rollback or prepare an explicit data migration first.
 ### Run time limits and progress continuation
 
 Workload estimates are checkpoints for assessing progress. At the next model
-admission, successful new task-tool receipts can extend a spent time or call
-estimate automatically, up to three additional windows. A slow completed call
-may consume more than one window to catch up. Identical tool arguments, failed
-calls, capability discovery, archived-history reads and user-facing narration
+admission, successful new task-tool receipts and verified capability reads can
+extend a spent time or call estimate automatically, up to three additional windows.
+Capability reads count newly discovered operation contracts and advertised
+modalities. Repeating a search, changing its wording or timestamp, and busy/idle
+changes do not count as new progress. A slow completed call may consume more
+than one window to catch up. Identical tool arguments, failed calls, unverified
+discovery calls, archived-history reads and user-facing narration
 cannot earn another window. This is a bounded activity signal, not proof that
 the result is correct. The counter and receipt fingerprints persist with the
 run under a shared decision lock, so reconnecting or changing replicas cannot

@@ -56,13 +56,14 @@ func (e *acknowledgementTestEngine) Execute(ctx context.Context, q string) (any,
 }
 func TestAcknowledgementCandidateDoesNotDecideClassificationOrAddModelCalls(t *testing.T) {
 	engine := &acknowledgementTestEngine{countingCompileEngine: &countingCompileEngine{triage: map[string]any{
-		"complexity": "trivial", "intent": "reply", "requiresFile": false, "workload": "lookup", "workTitle": "Report preference", "acknowledgement": "I’ll check the formatting preference you shared.",
+		"complexity": "trivial", "intent": "reply", "requiresFile": false, "workload": "lookup", "workTitle": "Report preference", "capabilitySearch": "read saved preferences", "acknowledgement": "I’ll check the formatting preference you shared.",
 	}}, candidate: map[string]any{"request": "Create a report", "workload": "research", "acknowledgement": "I’ll prepare your report."}}
 	req := compileReq()
 	req.Input = map[string]any{"conversation": map[string]any{"messages": []any{}}}
 	out, err := (&PlannerAgentLoop{engine: engine}).CompileGoalForRun(context.Background(), req, nil, realSandbox{})
 	require.NoError(t, err)
 	require.Equal(t, "lookup", out.Workload)
+	require.Equal(t, "read saved preferences", out.CapabilitySearch)
 	require.Equal(t, "I’ll check the formatting preference you shared.", out.Acknowledgement)
 	require.Len(t, engine.aiCalls, 1)
 	require.Contains(t, engine.aiData[0]["acknowledgementCandidate"], "Create a report")

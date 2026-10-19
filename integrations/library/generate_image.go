@@ -19,10 +19,13 @@ type imageWorkRecorder interface {
 
 // Bind the effect to the current owned live run on this replica. Neither tool
 // arguments nor an old receipt may nominate a different owner, goal or run.
+// The executor deliberately retains client origin for model-selected tools:
+// granting internal origin would also admit unrelated server-only operations.
+// The server-installed RunContext and fresh owned rows establish this scope.
 func (i *Integration) imageRun(ctx context.Context) (common.RunContext, error) {
 	rc, ok := common.RunFromContext(ctx)
 	ac, _ := auth.AccessFromContext(ctx)
-	if auth.OriginFromContext(ctx) != auth.OriginInternal || !ok || !rc.IsRun() || rc.GoalId == "" || rc.StepKey == "" || rc.Mode == common.RunModeReplay || ac == nil || ac.UserId == "" || memql.BareShortId(ac.UserId) != memql.BareShortId(rc.OwnerUserId) {
+	if !ok || !rc.IsRun() || rc.GoalId == "" || rc.StepKey == "" || rc.Mode == common.RunModeReplay || ac == nil || ac.UserId == "" || memql.BareShortId(ac.UserId) != memql.BareShortId(rc.OwnerUserId) {
 		return rc, fmt.Errorf("image generation requires the current owned live work run")
 	}
 	if err := ctx.Err(); err != nil {

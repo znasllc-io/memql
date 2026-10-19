@@ -173,6 +173,9 @@ func (g *checkpointEstimateGuard) DeclaredDeadline(ctx context.Context, rc commo
 func TestWorkDBModelAdmissionBudgetKeepsOneNestedCheckpoint(t *testing.T) {
 	testModelBudgetBoundaries(t, []string{"initial", "after-tool", "checkpoint-failure"})
 }
+func TestWorkDBFinalReviewBudgetResumesOnAnotherReplica(t *testing.T) {
+	testModelBudgetBoundaries(t, []string{"reply-review"})
+}
 func TestWorkDBProgressGuidanceSurvivesRepeatedCheckpoints(t *testing.T) {
 	testModelBudgetBoundaries(t, []string{"guidance"})
 }
@@ -202,6 +205,9 @@ func testModelBudgetBoundaries(t *testing.T, boundaries []string) {
 				effects := map[string]int{}
 				reads := 0
 				estimatedCalls, estimatedWall := 1, int64(10800000)
+				if boundary == "reply-review" {
+					estimatedCalls = 2
+				}
 				started := time.Now()
 				providers := []*modelBudgetProvider{{readFirst: boundary != "initial"}, {}}
 				peers := []*work.Integration{}
@@ -375,11 +381,15 @@ func testModelBudgetBoundaries(t *testing.T, boundaries []string) {
 				require.Equal(t, "waiting", child.Status)
 				require.Equal(t, wait.ApprovalID, memql.BareShortId(fmt.Sprint(child.WaitingOn["subject"])))
 				expectedReads := 0
-				if boundary == "after-tool" || boundary == "guidance" || rerun {
+				if boundary == "after-tool" || boundary == "guidance" || boundary == "reply-review" || rerun {
 					expectedReads = 1
 				}
 				require.Equal(t, expectedReads, reads)
-				require.Equal(t, expectedReads, providers[0].calls, "refused model admission must never execute another provider")
+				initialProviderCalls := expectedReads
+				if boundary == "reply-review" {
+					initialProviderCalls++
+				}
+				require.Equal(t, initialProviderCalls, providers[0].calls, "refused model admission must never execute another provider")
 				const firstGuidance = "Use the completed evidence; retain the original request and avoid repeating that read."
 				const secondGuidance = "Keep the earlier correction and finish the remaining response now."
 				sendGuidance := func(text string) {
@@ -500,7 +510,8 @@ func testModelBudgetBoundaries(t *testing.T, boundaries []string) {
 					require.Equal(t, 2, reads)
 					require.Equal(t, 1, providers[1].calls)
 					wait = again
-					estimatedCalls = 3
+					// Admit the final answer and its evidence review. Both remain charged.
+					estimatedCalls = 4
 					sendGuidance(secondGuidance)
 					require.Equal(t, 1, providers[1].calls)
 					fresh := load(reader, runID)
@@ -603,7 +614,7 @@ func testModelBudgetBoundaries(t *testing.T, boundaries []string) {
 					require.NoError(t, marshalErr)
 					require.Contains(t, string(last), "read completed once", "entry checkpoint must retain the prior paired result")
 				}
-				if boundary == "after-tool" {
+				if boundary == "after-tool" || boundary == "reply-review" {
 					require.Contains(t, string(raw), "read completed once")
 				}
 				if boundary == "guidance" {
@@ -617,11 +628,15 @@ func testModelBudgetBoundaries(t *testing.T, boundaries []string) {
 					require.Equal(t, 3, providers[0].calls+providers[1].calls, "usage accumulates across both explicit raises")
 					var receipts int
 					require.NoError(t, db.NewRaw(`SELECT count(DISTINCT id) FROM "MemoryNodes" WHERE concept='v1:work:modelCall' AND payload->>'runId' IN (?,?)`, runID, "v1:work:run:"+runID).Scan(person, &receipts))
-					require.Equal(t, 3, receipts, "both replicas persist every charged answer across both raises")
+					require.Equal(t, 1, providers[0].reviews+providers[1].reviews, "the final evidence review must execute once")
+					require.Equal(t, 4, receipts, "both replicas persist every answer and its final review across feedback checkpoints")
 				}
 				var spend string
 				require.NoError(t, db.NewRaw(`SELECT payload->'spent' FROM "MemoryNodes" WHERE id=? ORDER BY "createdAt" DESC LIMIT 1`, "v1:work:run:"+runID).Scan(person, &spend))
 				expectedSpent := expectedCalls
+				if boundary == "reply-review" {
+					expectedSpent = 2
+				}
 				if entry {
 					expectedSpent = 2
 				}

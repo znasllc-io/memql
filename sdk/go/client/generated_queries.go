@@ -13732,7 +13732,7 @@ func WorkObservationsForOwnerRunBuild(args WorkObservationsForOwnerRunArgs) stri
 	return b.String()
 }
 
-// WorkProgressReceiptsForOwnerRun -- Successful execution receipts only; checkpoints and model prose cannot buy more work.
+// WorkProgressReceiptsForOwnerRun -- Completed tools and recorded capability reads; checkpoints and model prose cannot buy more work.
 //
 // Bound concept: v1:work:observation (machine-readable: BoundConcepts["workProgressReceiptsForOwnerRun"] in generated_concepts.go).
 type WorkProgressReceiptsForOwnerRunArgs struct {
