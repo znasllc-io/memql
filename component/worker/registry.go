@@ -139,14 +139,14 @@ func registrationKey(registrationId string) string {
 }
 
 // Add inserts a worker into the registry. Replaces any existing
-// entry with the same registration id (a reconnect).
+// entry with the same registration id (a reconnect) and ends its old stream.
 func (r *Registry) Add(w *Worker) {
 	if r == nil || w == nil {
 		return
 	}
 	r.mu.Lock()
-	defer r.mu.Unlock()
 	if r.draining {
+		r.mu.Unlock()
 		return
 	}
 	w.registry = r
@@ -154,11 +154,25 @@ func (r *Registry) Add(w *Worker) {
 		w.activePerCap = make(map[string]uint32, len(w.Capabilities))
 	}
 	key := registrationKey(w.RegistrationId)
-	if existing, ok := r.byId[key]; ok {
+	existing := r.byId[key]
+	if existing == w {
+		r.mu.Unlock()
+		return
+	}
+	if existing != nil {
 		r.removeLocked(existing)
 	}
 	r.byId[key] = w
 	r.byOwner[w.OwnerUserId] = append(r.byOwner[w.OwnerUserId], w)
+	r.mu.Unlock()
+	// The registration watcher handles a successor on another replica. On
+	// this replica the holder id is unchanged, so only the pointer swap can
+	// retire the predecessor. Its pending calls must fail now, not wait for
+	// the old network connection to time out. Publish the successor first and
+	// invoke the callback outside the lock so old-session cleanup can read it.
+	if existing != nil {
+		existing.terminate(DisconnectReasonSuperseded)
+	}
 }
 
 // Remove removes a worker from the registry by registration id.
