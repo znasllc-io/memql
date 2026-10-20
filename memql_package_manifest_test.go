@@ -479,6 +479,12 @@ func TestEngineManifestCompilesForEveryOpening(t *testing.T) {
 					}
 					continue
 				}
+				if step.Stage == "documentation-audit" {
+					if step.Name != "docs-current" || step.Placement != pipelines.PlacementFleet || step.Execution != pipelines.ExecutionContainer || step.Platform != "linux/amd64" || len(step.Caches) != 0 || len(step.Services) != 0 || len(step.Secrets) != 0 || step.GitHubReadToken || len(step.Needs) != 0 {
+						t.Errorf("public documentation audit must use an isolated external Fleet container without credentials: %+v", step)
+					}
+					continue
+				}
 				if step.Placement != pipelines.PlacementCluster || step.Execution != pipelines.ExecutionContainer || step.Platform != "linux/amd64" {
 					t.Errorf("step %s must use a Linux amd64 Workbench container: %+v", step.Key, step)
 				}
@@ -783,8 +789,8 @@ func engineSetMinus(a, b []string) []string {
 	return out
 }
 
-// Mac editor hosts and isolated Linux installer fixtures require fleet consent.
-// Every portable check stays in its bounded cluster container.
+// Mac editor hosts, Linux installer fixtures and the external public-site
+// probe require fleet consent. Other portable checks stay in cluster containers.
 func TestEngineManifestRequiresConsentForMacEditorHosts(t *testing.T) {
 	spec := engineManifest(t).Pipeline
 	refusal := pipelines.Consent(spec, pipelines.ComputeCluster, nil)
@@ -803,6 +809,12 @@ func TestEngineManifestRequiresConsentForMacEditorHosts(t *testing.T) {
 			}
 			if engineInstallerHost(stage.Name, step.Name) {
 				continue // exact fixture contracts are compiled above and in scripts/ci
+			}
+			if stage.Name == "documentation-audit" && step.Name == "docs-current" {
+				if pipelines.PlacementOf(step) != pipelines.PlacementFleet || step.Execution != pipelines.ExecutionContainer {
+					t.Errorf("public documentation probe must use a Fleet container: %+v", step)
+				}
+				continue
 			}
 			if pipelines.PlacementOf(step) != pipelines.PlacementCluster {
 				t.Errorf("portable check %s requires a host", step.Name)

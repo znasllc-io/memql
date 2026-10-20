@@ -768,10 +768,13 @@ pipeline:
       runAfterFailure: true
       steps:
         - name: docs-current
-          placement: cluster
+          # Observe the public site from outside its hosting cluster. The
+          # isolated cloud runner cannot hairpin through that cluster's load
+          # balancer; an opted-in Fleet container keeps private ingress closed.
+          placement: fleet
+          execution: container
+          platform: linux/amd64
           caches: []
-          cpuMilli: 250
-          memoryMiB: 256
           timeout: 10m
           run: |
             set -eu
