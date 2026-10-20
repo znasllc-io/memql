@@ -68,7 +68,24 @@ running it in VS Code or Cursor. Saving a file does not deploy it.
 
 - **Try the language:** [build and install the Visual Studio Code and Cursor extension](docs/public/language/vscode.md#get-the-extension), then open the [example](examples/reading-list/reading.memql). Editing works without a cluster.
 - **Use an existing cluster:** add it in the extension, sign in, and inspect a query before running it.
-- **Run MemQL locally:** follow the [quickstart](docs/public/overview/quickstart.md). The supported local stack uses Docker, k3d, and ArgoCD. An initial image build can take time.
+- **Run MemQL locally:** check the [minimum requirements](#minimum-requirements) below, then follow the [quickstart](docs/public/overview/quickstart.md). The supported local stack uses Docker, k3d, and ArgoCD. An initial image build can take time.
+
+## Minimum requirements
+
+A local install runs the whole of MemQL on your machine: every engine node,
+Postgres, Ask voice, and the local models that answer chat, embeddings, speech
+recognition and speech.
+
+| | Minimum | Recommended |
+|---|---|---|
+| **Apple silicon Mac** | 32 GB unified memory, 8 CPU cores, 100 GB free disk | 48 GB or more on an M-series Pro, Max or Ultra chip, 200 GB free |
+| **Linux PC (x86_64)** | 32 GB RAM, an NVIDIA or AMD GPU with 16 GB VRAM, 8 CPU cores, 100 GB free disk | 64 GB RAM, a GPU with 32 GB VRAM, 200 GB free |
+
+You also need macOS 13 or newer with Docker Desktop (at least 8 GB of memory
+allocated to it), or Debian/Ubuntu or Fedora/RHEL with Docker Engine. Windows,
+Intel Macs and arm64 Linux (such as NVIDIA DGX Spark) are not supported yet.
+[Minimum requirements](docs/public/operate/minimum-requirements.md#one-machine-the-entire-cluster)
+explains each figure.
 
 ## A visual workspace for the cluster
 
