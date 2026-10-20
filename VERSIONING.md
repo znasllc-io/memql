@@ -69,9 +69,23 @@ changes, update that matrix in the hub repo and reference it here.
 
 ## Releasing
 
-1. Land all changes for the release on `main` via PR.
-2. Bump [`VERSION`](VERSION) to the new semver and merge.
-3. Tag `main`: `git tag -a vX.Y.Z -m "vX.Y.Z" && git push origin vX.Y.Z`.
+1. Land the release changes on `main` through PRs and update a clean main checkout.
+2. Run `make release` to inspect the recommendation, then
+   `make release ARGS="--prepare"` to open the version PR. An explicit version
+   uses `ARGS="--version=X.Y.Z --prepare"`. This stamps `VERSION`,
+   `cmd/memql/main.go`, and `internal/worker/connect.go` together.
+3. After native checks pass and that PR merges, update main, record its full
+   commit SHA, and create an immutable annotated tag at that exact commit:
+   `git tag -a vX.Y.Z <reviewed-sha> -m "vX.Y.Z"` followed by
+   `git push origin refs/tags/vX.Y.Z`. Never move a published tag.
+4. In MemQL Pipelines, open the connected Cockpit source, choose **Run release**,
+   and supply `vX.Y.Z`. A tag push alone does not start a release build.
+5. Wait for the complete native release run. Prepare its release candidate,
+   review every platform asset and checksum, and publish through MemQL's
+   approved release flow. The configured publication target uses this exact
+   source SHA and version. Verify the completed receipts and installer downloads
+   before marking the GitHub release ready for users.
 
-The tag is the release; the `VERSION` file and `main.version` constant
-simply reflect it.
+The release helper opens a PR; it does not push main or publish a partially built
+release. Native build steps receive no release publication credentials. Retrying
+publication reuses the verified retained artifacts and durable receipts.

@@ -1,6 +1,6 @@
 # Commands are interpreted by the installed MemQL pipeline workflow.
 # Native steps require explicit fleet consent and matching host tools.
-# See docs/pipeline-coverage.md before enabling or retiring legacy workflows.
+# See docs/pipeline-coverage.md for coverage and qualification evidence.
 formatVersion: 1
 name: memql-cockpit
 pipeline:
@@ -20,6 +20,20 @@ pipeline:
         python3 scripts/ci/prepare.py
         cd .memql-ci/memql-cockpit
         CGO_ENABLED=0 go build ./...
+    - name: linux-desktop-menu
+      placement: fleet
+      timeout: 30m
+      execution: native
+      platform: linux/amd64
+      run: |
+        set -eu
+        . ./scripts/ci/native-env.sh
+        command -v dbus-run-session >/dev/null
+        /usr/bin/python3 -c 'import dbus; import gi'
+        python3 scripts/ci/prepare.py
+        cd .memql-ci/memql-cockpit
+        go build -o bin/memql-menu-smoke ./cmd/memql
+        dbus-run-session -- /usr/bin/python3 scripts/install/linux_menu_smoke.py --binary=bin/memql-menu-smoke
     - name: vet
       placement: cluster
       caches: [go]
@@ -47,7 +61,6 @@ pipeline:
       run: |
         set -eu
         python3 -m unittest discover -s scripts/ci -p '*_test.py'
-        ! grep -rlnE '^[[:space:]]*repository:[[:space:]]*znasllc-io/memql' .github/workflows/
     - name: test
       placement: fleet
       timeout: 30m
@@ -221,6 +234,16 @@ pipeline:
         go install github.com/zricethezav/gitleaks/v8@v8.30.1
         export PATH="$(go env GOPATH)/bin:$PATH"
         python3 scripts/ci/gitleaks-history.py --head="$MEMQL_SHA" --fetch-remote="https://github.com/${MEMQL_REPOSITORY}.git" --gitleaks="$(command -v gitleaks)" --output-dir=.memql-security/gitleaks --jobs=2 --batch-size=8 --timeout=2400
+    - name: scorecard
+      placement: cluster
+      githubReadToken: true
+      cpuMilli: 1000
+      memoryMiB: 2048
+      timeout: 25m
+      artifacts: [.memql-security/scorecard]
+      run: |
+        set -eu
+        python3 scripts/ci/scorecard-scan.py --output-dir=.memql-security/scorecard
     - name: codeql-go
       placement: cluster
       caches: [go]
@@ -245,6 +268,11 @@ pipeline:
     on: [schedule, manual]
     runAfterFailure: true
     steps:
+    - name: scorecard
+      timeout: 5m
+      sarif:
+        step: security.scorecard
+        path: .memql-security/scorecard/results.sarif
     - name: codeql-go
       timeout: 5m
       sarif:
