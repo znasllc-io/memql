@@ -1,3 +1,50 @@
+/// Enroll a pre-receipt log in retention after verifying its bytes. The owned
+/// completed step supplies the file; this accepts no object path or file ID.
+@executor("integration.pipelines.adoptLegacyLog")
+@args(profile="object")
+@requiresCapability("execute", "app:deployables/rerun")
+builtin pipelinesAdoptLegacyLog { runId string! stepKey string! }
+
+/// Internal cron entry; the handler refuses external origin before any read.
+@executor("integration.pipelines.sweepArtifacts")
+builtin pipelinesSweepArtifacts { }
+
+/// Call-local operation bound to the maintenance pass's owner and producer.
+@executor("integration.pipelines.pipelineRetentionSweepPage")
+builtin pipelineRetentionSweepPage { }
+
+/// Retire one bounded page of the caller's completed pipeline artifacts.
+/// Active producers, publication pins and deliberately kept Library files are
+/// protected. The cursor pages immutable intents; dryRun changes nothing.
+/// Native receipts and provider fences remain after Library rows are removed.
+@executor("integration.pipelines.retireArtifacts")
+@args(profile="object")
+@requiresCapability("execute", "app:deployables/rerun")
+builtin pipelinesRetireArtifacts {
+  runId string!
+  afterId string
+  dryRun bool
+}
+
+/// Private operations of one authorized cleanup page; direct calls refuse.
+@executor("integration.pipelines.pipelineRetentionItems")
+builtin pipelineRetentionItems { }
+
+@executor("integration.pipelines.pipelineRetentionFence")
+@args(profile="object")
+builtin pipelineRetentionFence { intentId string! }
+
+@executor("integration.pipelines.pipelineRetentionRetire")
+@args(profile="object")
+builtin pipelineRetentionRetire { intentId string! }
+
+@executor("integration.pipelines.pipelineRetentionPurge")
+@args(profile="object")
+builtin pipelineRetentionPurge { intentId string! }
+
+@executor("integration.pipelines.pipelineRetentionReport")
+builtin pipelineRetentionReport { }
+
 // pipelines domain -- the Go-backed capabilities behind a pipeline (epic
 // memql#5477). Every executor is integration.pipelines.*, the plug-in in
 // component/pipelinerun.

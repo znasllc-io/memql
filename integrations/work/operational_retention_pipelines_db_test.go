@@ -706,6 +706,59 @@ func TestRetireVerifiedKeepsARunWhoseChildIsNotItsOwn(t *testing.T) {
 	}
 }
 
+func TestPipelineArtifactCleanupKeepsItsAuthorizingJournals(t *testing.T) {
+	db, i := sweepDB(t)
+	now := time.Now().UTC().Truncate(time.Second)
+	old := now.AddDate(0, 0, -40)
+	cutoff := now.AddDate(0, 0, -30)
+	work := seedPipelineWorkRun(t, db, "artifact-authority", pipelineOwner, runStatusSucceeded, old)
+	run := seedPipelinesRun(t, db, "artifact-authority", pipelineOwner, "completed", old)
+	if _, err := db.Exec(`UPDATE "MemoryNodes" SET payload=payload||jsonb_build_object('workRunId',?::text) WHERE id=?`, work, run); err != nil {
+		t.Fatal(err)
+	}
+	before := storedKeys(t, db, work, run)
+	if _, err := db.Exec(`INSERT INTO pipeline_artifact_uploads
+(intent_id,owner_user_id,identity,file_id,object_key,size_bytes,generation,state)
+VALUES(?,'pipeline-owner','{"WorkRunID":"artifact-authority"}'::jsonb,'legacy-authority','library/pipeline-owner/legacy-authority/test',11,1,'ready')`, strings.Repeat("a", 64)); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv(EnvArchiveContainer, "test-retention")
+	i.SetArchiver(&verifyingArchive{})
+	for _, state := range []string{"ready", "retired"} {
+		if _, err := db.Exec(`UPDATE pipeline_artifact_uploads SET state=?`, state); err != nil {
+			t.Fatal(err)
+		}
+		for _, record := range []struct{ concept, id string }{{runConcept, work}, {pipelinesRunConcept, run}} {
+			// Exercise both prefilter and the final transactional guard. Even a
+			// candidate read before the upload existed cannot delete its authority.
+			p := operationalPolicy{concept: record.concept, predicate: "TRUE"}
+			q, args := retentionCandidateRead(p, cutoff, old.Add(-24*time.Hour), cutoff, nil)
+			var candidates []map[string]any
+			if err := db.NewRaw(q, args...).Scan(t.Context(), &candidates); err != nil {
+				t.Fatal(err)
+			}
+			if len(candidates) != 0 {
+				t.Fatal("artifact authority admitted to history retention", candidates)
+			}
+			_, deleted, _, err := i.retireVerified(retentionOwner(), record.concept, []map[string]any{{"id": record.id, "createdAt": rfc(old)}}, record.concept == runConcept, cutoff, false)
+			if err != nil || deleted != 0 {
+				t.Fatalf("deleted authority: %d %v", deleted, err)
+			}
+		}
+		assertStillStored(t, db, before)
+	}
+	if _, err := db.Exec(`UPDATE pipeline_artifact_uploads SET library_purged_at=clock_timestamp()`); err != nil {
+		t.Fatal(err)
+	}
+	for _, record := range []struct{ concept, id string }{{runConcept, work}, {pipelinesRunConcept, run}} {
+		_, deleted, _, err := i.retireVerified(retentionOwner(), record.concept, []map[string]any{{"id": record.id, "createdAt": rfc(old)}}, record.concept == runConcept, cutoff, false)
+		if err != nil || deleted == 0 {
+			t.Fatalf("confirmed cleanup held history: %d %v", deleted, err)
+		}
+	}
+	assertRetired(t, db, work, run)
+}
+
 // TestRetentionPoliciesSharingTheWorkRunConceptUseTheirOwnWindows: two
 // policies read v1:work:run -- the system run's and the pipeline's -- and
 // never the same run. Each is measured against its OWN window, in both

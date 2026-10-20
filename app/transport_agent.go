@@ -59,6 +59,7 @@ func (a *App) transportAgent() {
 	a.wireLibraryIntegration(uploader, blobContainer)
 	a.wireReleaseCandidates(uploader, blobContainer)
 	a.wirePipelineSARIF(uploader, blobContainer)
+	a.wirePipelineArtifactRetention(uploader, blobContainer)
 
 	// memql#733/#801: hand the workbench integration the Azure Blob uploader so a
 	// successful LOCAL fs_write uploads its bytes to v1:common:attachment

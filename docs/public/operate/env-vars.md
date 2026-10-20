@@ -1082,7 +1082,7 @@ exception, on their own window.
 | Variable | Default | Records |
 | --- | --- | --- |
 | `MEMQL_WORK_SYSTEM_RUN_RETENTION_DAYS` | `30` | Terminal, unowned scheduled runs, their steps and closed approvals |
-| `MEMQL_PIPELINES_RUN_RETENTION_DAYS` | `30` | Finished pipeline runs: the `v1:pipelines:run` row and the work run it compiled into, with that run's steps and closed approvals, then the pipeline's goal once no run of it remains. The Library files a run's steps archived (logs, artifacts) are the owner's and are kept |
+| `MEMQL_PIPELINES_RUN_RETENTION_DAYS` | `30` | Finished pipeline runs and their work journals, steps and closed approvals, then the pipeline's goal once no run remains. Native artifact receipts keep their authorizing journals until byte and Library cleanup completes. Generated files use [separate retention](pipelines-substrate.md#retention) |
 | `MEMQL_WORKER_INVOCATION_RETENTION_DAYS` | `90` | Completed worker invocation history |
 | `MEMQL_SAFETY_CLASSIFICATION_RETENTION_DAYS` | `90` | Safety classification evidence |
 | `MEMQL_SAFETY_OUTPUT_SCREENING_RETENTION_DAYS` | `90` | Safety output-screening evidence |
@@ -1110,5 +1110,6 @@ that ran out of their share with `budgetExhausted`.
 Archives use `retention/<UTC-day>/<sha256>.ndjson.gz`, with the original node
 identity, timestamps, schema, metadata, provenance and payload. Archive lifecycle
 is managed separately from database retention. No default age-based deletion
-applies to other concepts, including catalogs, files, goals other than a
-pipeline's, and customer records.
+applies to other concepts, including catalogs, user files, goals other than a
+pipeline's, and customer records. Generated pipeline files have the separate
+storage-fenced policy described in [Pipeline retention](pipelines-substrate.md#retention).

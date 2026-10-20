@@ -3,6 +3,8 @@ package pipelinesteps
 import (
 	"bytes"
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -418,10 +420,19 @@ func (f stepFiles) store(ctx context.Context, name, mimeType string, body []byte
 		notes.add(pl.CodeArtifactMissing, what+" was not stored: this "+f.node+" has no Library to store it in")
 		return ""
 	}
-	got, err := f.library.StoreRunFile(ctx, RunFile{
+	store, ok := f.library.(StreamLibraryStore)
+	if !ok {
+		notes.add(pl.CodeArtifactMissing, what+" was not stored: verified streaming storage is unavailable")
+		return ""
+	}
+	sum := sha256.Sum256(body)
+	input := StreamRunFile{
 		OwnerUserID: f.run.OwnerUserID, WorkRunID: f.run.WorkRunID, StepKey: f.run.StepKey,
-		Name: name, MimeType: mimeType, Bytes: body,
-	})
+		Attempt: f.run.Attempt, Path: ".memql-step-log/" + name,
+		Name: name, MimeType: mimeType, Body: bytes.NewReader(body),
+		Size: int64(len(body)), SHA256: hex.EncodeToString(sum[:]),
+	}
+	got, err := store.StoreRunFileStream(ctx, input)
 	switch {
 	case err != nil:
 		// The name is the step's, and the Library's error may quote it: the
@@ -430,8 +441,8 @@ func (f stepFiles) store(ctx context.Context, name, mimeType string, body []byte
 		notes.add(pl.CodeArtifactMissing, what+" was not stored in the Library: "+err.Error())
 	case got.Omitted != "":
 		notes.add(pl.CodeArtifactMissing, what+" was not stored in the Library: "+got.Omitted)
-	case got.FileID == "":
-		notes.add(pl.CodeArtifactMissing, what+" was not stored in the Library: it answered no file id")
+	case !matchingStoredFileReceipt(got, input):
+		notes.add(pl.CodeArtifactMissing, what+" was not stored in the Library: it answered no matching verified receipt")
 	default:
 		return got.FileID
 	}

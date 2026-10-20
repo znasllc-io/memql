@@ -1071,6 +1071,43 @@ Nothing waits forever, and each party waits longer than the one inside it:
 
 ## Retention
 
+Generated files have their own byte-retention policy, authored in
+`pipelineArtifactRetentionPolicy` in `dsl/pipelines/automations.memql`:
+
+| Completed run | Keep generated logs and artifacts for |
+| --- | --- |
+| Successful run other than a release | 48 hours |
+| Failed or cancelled run other than a release | 7 days |
+| Release | 14 days |
+
+Age starts when the run finishes. Active publication references override these
+windows. Filing or labelling a Library entry, changing its title or contents,
+retaining another version, or training the file into a knowledge domain also
+keeps it. An active or unconfirmed producer never qualifies.
+
+`sweepPipelineArtifacts` runs on the agent cron leader once a minute. Each pass
+handles at most 32 files from one producer, with a four-minute time bound. A
+durable lease and cursor rotate fairly across producers and allow a replacement
+replica to resume. Each file is fenced against late uploads, its storage bytes
+are replaced by a permanently leased zero-byte tombstone, and only then are its
+Library entries removed. Native receipts and storage fences remain. A provider
+failure preserves the journal for retry; it cannot produce a successful cleanup
+receipt. Never delete these tombstones or break their leases with a storage
+lifecycle rule.
+
+`pipelinesRetireArtifacts(runId, afterId, dryRun)` applies the same safeguards to
+one owner-selected completed run. `dryRun: true` reads a page without changing
+anything; the page count is not a promise that every file will qualify. Continue
+with the returned `afterId` while `hasMore` is true. A file kept by a publication
+or Library edit is reported as retained. Files uploaded before logs received
+native receipts can be enrolled with `pipelinesAdoptLegacyLog(runId, stepKey)`:
+the owned completed step supplies its log identity, and the existing bytes are
+verified before adoption. This operation uploads and deletes nothing.
+
+DSL record TTL is not a substitute for this process: expiring a record alone
+does not delete the blob bytes. New logs use the same durable upload journal as
+artifacts. Existing logs require the explicit verified adoption above.
+
 `MEMQL_PIPELINES_RUN_RETENTION_DAYS` (30 by default) is how many days after a
 finished run's latest version its records are kept. The nightly operational
 retention sweep -- `workJournalRetentionSweep`, 03:40 UTC on the cron leader --
@@ -1089,15 +1126,14 @@ this order:
 
 A work run with model-call or observation detail, a pending approval, a recent
 child, or a child with no owner or someone else's, is kept until that clears,
-and its goal with it. Nothing is deleted without an archive the sweep has read
+and its goal with it. Pipeline and work journals also remain while their native
+artifact receipts still own bytes or await Library cleanup. Nothing is deleted without an archive the sweep has read
 back: a cluster with no archive container (`MEMQL_WORK_ARCHIVE_CONTAINER`, else
 `MEMQL_AZURE_BLOB_CONTAINER`) deletes nothing.
 
 Not retired by it:
 
-- **The Library files** a run's steps archived. A step's log and its artifacts
-  are the owner's, and stay until the owner deletes them; once the run is
-  retired, a file's `producedByRunId` names a run that is gone.
+- **The Library files**, which use the separate byte-retention process above.
 - **The log store's lines**, which follow the log store's own window,
   `MEMQL_LOGS_RETENTION_DAYS` ([Logs](logs.md)).
 

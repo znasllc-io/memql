@@ -445,6 +445,8 @@ func TestPipelineLibraryDB(t *testing.T) {
 	}
 	t.Run("TestPipelineStreamDB", func(t *testing.T) { testPipelineStreamDB(t, replicas) })
 	t.Run("TestPipelineLifecycleDB", func(t *testing.T) { testPipelineLifecycleDB(t, replicas) })
+	t.Run("TestPipelineRetentionLibraryDB", func(t *testing.T) { testPipelineRetentionLibraryDB(t, replicas) })
+	t.Run("TestPipelineLegacyLogDB", func(t *testing.T) { testPipelineLegacyLogDB(t, replicas) })
 	t.Run("TestPipelineReceiptDBReadIsScopedOrderedAndIndependentOfLibrary", func(t *testing.T) {
 		testPipelineReceiptDBReadIsScopedOrderedAndIndependentOfLibrary(t, replicas.caseFactory())
 	})
