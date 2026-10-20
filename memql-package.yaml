@@ -792,6 +792,8 @@ pipeline:
           placement: cluster
           # Full history runs on the weekly audit or on demand. Three CPUs
           # leave room for another Job and its services on the bounded pool.
+          # Restart scanners after each commit: large historical patches
+          # accumulate beyond the soft Go memory limit in multi-commit batches.
           timeout: 6h
           cpuMilli: 3000
           memoryMiB: 6144
@@ -802,7 +804,7 @@ pipeline:
             mkdir -p .memql-security/gitleaks
             go install github.com/zricethezav/gitleaks/v8@v8.30.1
             export GOMAXPROCS=1 GOMEMLIMIT=1GiB GOGC=100
-            python3 scripts/ci/gitleaks-history.py --head="$MEMQL_SHA" --fetch-remote="https://github.com/${MEMQL_REPOSITORY}.git" --gitleaks="$(command -v gitleaks)" --output-dir=.memql-security/gitleaks --jobs=3 --batch-size=32 --timeout=20700
+            python3 scripts/ci/gitleaks-history.py --head="$MEMQL_SHA" --fetch-remote="https://github.com/${MEMQL_REPOSITORY}.git" --gitleaks="$(command -v gitleaks)" --output-dir=.memql-security/gitleaks --jobs=3 --batch-size=1 --timeout=20700
         - name: scorecard
           placement: cluster
           githubReadToken: true

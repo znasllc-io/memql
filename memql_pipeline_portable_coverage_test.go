@@ -172,7 +172,7 @@ func TestEngineSecurityScansDoNotTurnFindingsIntoSuccess(t *testing.T) {
 			continue
 		}
 		deepScans++
-		if step.Stage != "analysis" || step.TimeoutSeconds != 6*60*60 || !strings.Contains(step.Run, "--timeout=20700") || !strings.Contains(step.Run, "--batch-size=32") || strings.Contains(step.Run, "--base=") {
+		if step.Stage != "analysis" || step.TimeoutSeconds != 6*60*60 || !strings.Contains(step.Run, "--timeout=20700") || !strings.Contains(step.Run, "--batch-size=1") || strings.Contains(step.Run, "--base=") {
 			t.Fatalf("weekly full-history scan has the wrong scope or budget: %+v", step)
 		}
 	}
