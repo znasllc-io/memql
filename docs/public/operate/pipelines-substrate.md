@@ -1104,6 +1104,13 @@ native receipts can be enrolled with `pipelinesAdoptLegacyLog(runId, stepKey)`:
 the owned completed step supplies its log identity, and the existing bytes are
 verified before adoption. This operation uploads and deletes nothing.
 
+The run detail keeps the original execution result after cleanup. It labels a
+log or artifact as expired only when `pipelinesExpiredArtifacts(runId, fileIds)`
+finds both provider retirement and Library removal receipts for that owner and
+run. An absent file or failed availability read is not proof of expiry. Expired
+files have no download action; the compact retirement journal remains readable
+after the producing work journal is swept.
+
 DSL record TTL is not a substitute for this process: expiring a record alone
 does not delete the blob bytes. New logs use the same durable upload journal as
 artifacts. Existing logs require the explicit verified adoption above.
