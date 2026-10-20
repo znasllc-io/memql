@@ -105,6 +105,11 @@ const (
 	// probeKubeletTimeout bounds the re-read's one round trip through the
 	// listener's kubelet (R42b).
 	probeKubeletTimeout = 5 * time.Second
+	// Foreground deletion includes kubelet termination and asynchronous Job
+	// and pod collection. It can outlast one quick API call even with the
+	// probe's two-second termination grace. Keep admission closed until all
+	// three resource reads confirm removal, with a separate bounded budget.
+	probeCleanupTimeout = time.Minute
 	// probeSaidMaxBytes bounds the connector's own line in a verdict.
 	probeSaidMaxBytes = 1 << 10
 )
@@ -676,7 +681,7 @@ func (p *prober) kubeletAnswers(pod *Pod) (bool, string, error) {
 // same name or quota slot can be reused. Its independent context also gives
 // an abandoned proof a bounded opportunity to clean up.
 func (p *prober) remove() error {
-	ctx, cancel := context.WithTimeout(context.WithoutCancel(p.ctx), quickCallTimeout)
+	ctx, cancel := context.WithTimeout(context.WithoutCancel(p.ctx), p.r.probeCleanupWait)
 	defer cancel()
 	jobErr := p.r.kube.DeleteJob(ctx, p.name)
 	secretErr := p.r.kube.DeleteSecret(ctx, p.target)

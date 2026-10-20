@@ -1241,6 +1241,67 @@ func TestAdoptionNeverWaitsOnTheProof(t *testing.T) {
 // What the proof leaves behind: nothing
 // ---------------------------------------------------------------------------
 
+// A successful DELETE is only acceptance by the API server. The kubelet and
+// foreground garbage collector can still retain pods beyond a quick API-call
+// timeout. The cleanup must wait for them, including after its caller leaves.
+func TestIsolationCleanupWaitsForPodCollectionAfterAPIDelete(t *testing.T) {
+	h := newIsoHarness(t, nil)
+	answer := kubeOK(200, map[string]any{"items": []Pod{*isoPod(0, isoListenerIP, isoStarting, isoWaiting())}})
+	h.c.with(func(c *rtCluster) { c.podsAnswer = &answer })
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	p := &prober{r: h.r, ctx: ctx, name: isoName(), target: isoTarget()}
+	done := make(chan error, 1)
+	go func() { done <- p.remove() }()
+	// Release the retained pod before test cleanup even if the old budget
+	// makes the regression fail early.
+	t.Cleanup(func() { h.c.with(func(c *rtCluster) { c.podsAnswer = nil }) })
+	select {
+	case err := <-done:
+		t.Fatalf("cleanup ended before the retained pod disappeared: %v", err)
+	case <-time.After(quickCallTimeout + 200*time.Millisecond):
+	}
+	h.c.with(func(c *rtCluster) { c.podsAnswer = nil })
+	select {
+	case err := <-done:
+		if err != nil {
+			t.Fatalf("confirmed cleanup failed: %v", err)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("cleanup did not observe the pod's removal")
+	}
+}
+
+func TestIsolationCleanupDeadlineRefusesLingeringResources(t *testing.T) {
+	for _, resource := range []string{"job", "secret", "pods"} {
+		t.Run(resource, func(t *testing.T) {
+			answers := map[string]kubeAnswer{
+				"DELETE " + kubeJobs + "/" + isoName():      kubeOK(200, map[string]any{}),
+				"DELETE " + kubeSecrets + "/" + isoTarget(): kubeOK(200, map[string]any{}),
+				"GET " + kubeJobs + "/" + isoName():         kubeStatus(404, "NotFound", "gone"),
+				"GET " + kubeSecrets + "/" + isoTarget():    kubeStatus(404, "NotFound", "gone"),
+				"GET " + kubePods:                           kubeOK(200, map[string]any{"items": []Pod{}}),
+			}
+			switch resource {
+			case "job":
+				answers["GET "+kubeJobs+"/"+isoName()] = kubeOK(200, Job{})
+			case "secret":
+				answers["GET "+kubeSecrets+"/"+isoTarget()] = kubeOK(200, Secret{})
+			case "pods":
+				answers["GET "+kubePods] = kubeOK(200, map[string]any{"items": []Pod{{}}})
+			}
+			kube, _ := newKubeFake(t, answers)
+			r := NewRunner(testConfig(), kube, nil, nil, nil)
+			r.cfg.PollInterval = time.Millisecond
+			r.probeCleanupWait = 30 * time.Millisecond
+			p := &prober{r: r, ctx: context.Background(), name: isoName(), target: isoTarget()}
+			if err := p.remove(); !errors.Is(err, context.DeadlineExceeded) || !strings.Contains(err.Error(), "cleanup remains unconfirmed") {
+				t.Fatalf("cleanup trusted a lingering %s: %v", resource, err)
+			}
+		})
+	}
+}
+
 func TestIsolationProbeRefusesToReuseUnconfirmedCleanup(t *testing.T) {
 	h := newIsoHarness(t, isoScript(probeExitIsolated, isoSaid[probeExitIsolated]))
 	h.c.with(func(c *rtCluster) { c.podsAnswer = &rtUnavailable })
