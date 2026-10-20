@@ -1,0 +1,53 @@
+{
+  "automation": "pipelines/automations.memql pipelineArtifactRetentionPolicy",
+  "runs": {
+    "invocation | 0 rows": {
+      "input": {
+        "event": {
+          "kind": "unspecified",
+          "payload": {
+            "ageSeconds": 3,
+            "conclusion": "s-conclusion",
+            "eventName": "s-eventName",
+            "terminal": true
+          },
+          "topic": "automation.invocation.pipelineArtifactRetentionPolicy"
+        },
+        "rows": 0
+      },
+      "outcome": {
+        "calls": null,
+        "result": {
+          "output": {
+            "retained": true
+          },
+          "status": "completed"
+        }
+      }
+    },
+    "invocation | 2 rows": {
+      "input": {
+        "event": {
+          "kind": "unspecified",
+          "payload": {
+            "ageSeconds": 3,
+            "conclusion": "s-conclusion",
+            "eventName": "s-eventName",
+            "terminal": true
+          },
+          "topic": "automation.invocation.pipelineArtifactRetentionPolicy"
+        },
+        "rows": 2
+      },
+      "outcome": {
+        "calls": null,
+        "result": {
+          "output": {
+            "retained": true
+          },
+          "status": "completed"
+        }
+      }
+    }
+  }
+}
