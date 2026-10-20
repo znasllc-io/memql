@@ -17,6 +17,7 @@ import (
 	memorynodes "github.com/znasllc-io/memql/component/database/memory-nodes"
 	"github.com/znasllc-io/memql/component/language/parser"
 	"github.com/znasllc-io/memql/component/memql"
+	workerservice "github.com/znasllc-io/memql/component/worker"
 	"github.com/znasllc-io/memql/core/id"
 )
 
@@ -85,4 +86,23 @@ func TestMachineActivityPersistedAcrossEngines(t *testing.T) {
 	require.Empty(t, read(other, "myModelCallsOnMachine", map[string]any{"workerId": machine}))
 	require.Empty(t, read(other, "machineActivity", map[string]any{"workerId": machine}))
 	require.Empty(t, read(other, "machineActivityById", map[string]any{"activityId": activity.id}))
+
+	// The isolated Fleet command succeeds before its receipt is persisted.
+	// Persist the real writer's payload, then read it on the other engine to
+	// cover the schema and owner boundary that in-memory dispatcher tests miss.
+	runID := id.NewShortId()
+	invocation := workerservice.InvocationRow{
+		ID: id.NewShortId(), OwnerUserId: owner, WorkerId: machine,
+		AgentId: id.NewShortId(), RunId: runID, CorrelationId: id.NewShortId(),
+		Tool: WorkbenchTool, Action: "exec", Outcome: "success",
+		StartedAt: time.Now().UTC(), CompletedAt: time.Now().UTC(),
+		OutputPreview: "fleet activity smoke\n65532\n",
+	}
+	require.NoError(t, (&EngineStore{Engine: engines[0]}).WriteInvocation(ctx, invocation))
+	receipts := read(ctx, "invocationsForRun", map[string]any{"runId": runID})
+	require.Len(t, receipts, 1)
+	require.Equal(t, WorkbenchTool, receipts[0]["tool"])
+	require.Equal(t, "success", receipts[0]["outcome"])
+	require.Equal(t, invocation.OutputPreview, receipts[0]["outputPreview"])
+	require.Empty(t, read(other, "invocationsForRun", map[string]any{"runId": runID}))
 }

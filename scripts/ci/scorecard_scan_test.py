@@ -93,6 +93,54 @@ class ScorecardTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "different analyzer"):
             SCAN.validate_sarif(data)
 
+    def test_sarif_normalization_preserves_findings_and_existing_escapes(self):
+        uris = ["no file associated with this alert", "src/already%20escaped.go",
+                "src/100% complete.go", "src/caf\u00e9.go"]
+        findings = [{"ruleId": "CodeReviewID", "level": "warning",
+                     "message": {"text": "Keep this finding unchanged."},
+                     "locations": [{"physicalLocation": {
+                         "artifactLocation": {"uri": uri, "uriBaseId": "%SRCROOT%"},
+                         "region": {"startLine": 1}}}]} for uri in uris]
+        data = {"version": "2.1.0", "runs": [{
+            "automationDetails": {"id": "supply-chain/online-scm/run"},
+            "tool": {"driver": {"name": "Scorecard", "semanticVersion": "v5.5.0",
+                                 "rules": [{"id": "CodeReviewID"}]}},
+            "results": findings}]}
+        expected = copy.deepcopy(data)
+        expected["runs"][0]["tool"]["driver"]["semanticVersion"] = "5.5.0"
+        encoded = ["no%20file%20associated%20with%20this%20alert", "src/already%20escaped.go",
+                   "src/100%25%20complete.go", "src/caf%C3%A9.go"]
+        for finding, uri in zip(expected["runs"][0]["results"], encoded):
+            finding["locations"][0]["physicalLocation"]["artifactLocation"]["uri"] = uri
+        self.assertEqual(SCAN.normalize_sarif(data), {"artifactURIs": 3, "semanticVersions": 1})
+        self.assertEqual(data, expected)
+
+    def test_success_retains_raw_report_and_hashes_both_renditions(self):
+        raw = {"version": "2.1.0", "runs": [{
+            "tool": {"driver": {"name": "Scorecard", "semanticVersion": "v5.5.0"}},
+            "results": [{"ruleId": "BranchProtectionID", "locations": [{
+                "physicalLocation": {"artifactLocation": {
+                    "uri": "no file associated with this alert", "uriBaseId": "%SRCROOT%"}}}]}]}]}
+        raw_bytes = json.dumps(raw).encode()
+        with tempfile.TemporaryDirectory() as temporary:
+            output = Path(temporary) / "output"
+            with mock.patch.dict(os.environ, {"MEMQL_REPOSITORY": "acme/widget", "MEMQL_SHA": SHA,
+                                              "MEMQL_GITHUB_READ_TOKEN": "fixture-read-only-token"}), \
+                 mock.patch.object(sys, "argv", ["scorecard-scan", "--output-dir", str(output), "--scorecard", "/unused"]), \
+                 mock.patch.object(SCAN, "head", return_value=SHA), \
+                 mock.patch.object(SCAN, "run_bounded", side_effect=[
+                     (0, json.dumps(report()).encode(), b""), (0, raw_bytes, b"")]):
+                self.assertEqual(SCAN.main(), 0)
+            summary = json.loads((output / "summary.json").read_text())
+            self.assertEqual(summary["findings"], 1)
+            self.assertEqual(summary["checkCount"], 18)
+            self.assertEqual((output / "results.raw.sarif").read_bytes(), raw_bytes)
+            self.assertEqual(summary["rawSarifSHA256"], hashlib.sha256(raw_bytes).hexdigest())
+            self.assertEqual(summary["sarifSHA256"], hashlib.sha256((output / "results.sarif").read_bytes()).hexdigest())
+            self.assertNotEqual(summary["rawSarifSHA256"], summary["sarifSHA256"])
+            normalized = json.loads((output / "results.sarif").read_text())
+            self.assertEqual(normalized["runs"][0]["tool"]["driver"]["semanticVersion"], "5.5.0")
+
     def test_bootstrap_refuses_changed_bytes(self):
         with tempfile.TemporaryDirectory() as temporary, \
              mock.patch.object(SCAN.platform, "system", return_value="Linux"), \

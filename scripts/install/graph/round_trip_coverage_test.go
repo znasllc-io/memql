@@ -31,7 +31,7 @@
 //
 // WHAT THIS GATE CANNOT SEE, said rather than implied:
 //
-//   - It reads the workflow SOURCE, not a run. A lane behind an `if:` that never
+//   - It reads the fixture SOURCE, not a run. A lane behind an `if:` that never
 //     fires still counts as coverage here.
 //   - It says nothing about whether the diff those lanes take is WIDE enough. A
 //     step exercised by a lane whose snapshot does not cover the surface it
@@ -51,10 +51,8 @@ import (
 	"testing"
 )
 
-// laneGlob matches the round-trip workflow files. Both shipped lanes -- the
-// cheap no-cluster one and the full cluster one -- are named this way, and a
-// third would be too.
-const laneGlob = ".github/workflows/install*e2e*.yml"
+// laneGlob selects the actual shell fixtures executed by native installer legs.
+const laneGlob = "scripts/install/ci/*.sh"
 
 var (
 	// installInvocationRe finds the start of one `cli.js install` command.

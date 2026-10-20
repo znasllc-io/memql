@@ -108,6 +108,12 @@ pipeline:
       - test/pipelinehop
       - test/clustere2e
     buckets:
+      installer:
+        - scripts/install/**
+        - scripts/lib/capability.sh
+        - editors/vscode/src/install/**
+        - scripts/ci/pipeline_installer_test.go
+        - memql-package.yaml
       # Filesystem gates read Go source as well as manifests and docs. The
       # import graph cannot discover these dependencies, so every PR runs them,
       # using the declared gate packages in scripts/ci/selection.
@@ -127,7 +133,6 @@ pipeline:
         - deploy/db-image/**
         - scripts/db-image/**
         - memql-package.yaml
-        - .github/workflows/build-db-image.yml
       # Shell source and the Docker stage that packages it.
       # Keep Dockerfile changes in the same validation path as the shell.
       os:
@@ -161,7 +166,6 @@ pipeline:
         - component/compose/emaildoc/**
         - Makefile
         - memql-package.yaml
-        - .github/workflows/**
   stages:
     # Stages run in the order written, and a failed stage skips every later one:
     # a change that does not build, vet or pass its drift gates starts no test.
@@ -664,6 +668,74 @@ pipeline:
             bash scripts/identity/build-css.sh
             go test -count=1 -timeout=300s ./ ./integrations ./integrations/customdomain ./integrations/compose ./cmd/envscan/... ./component/architecture/... ./component/envregistry/... ./scripts/... ./test/dslconformance/... ./examples/... ./component/auth/... ./deploy/...
 
+    - name: installer-smoke
+      on: [pull_request, merge_group, push, manual]
+      steps:
+        - name: no-cluster
+          when: { bucket: installer }
+          placement: fleet
+          execution: native
+          platform: linux/amd64
+          needs: { docker: true }
+          caches: []
+          timeout: 40m
+          artifacts: [.memql-install-evidence]
+          run: python3 scripts/install/ci/fleet-fixture.py --leg=no-cluster
+
+    # Full installer lifecycle is weekly and operator-triggered. It runs on an
+    # opted-in Linux machine, with a disposable inner daemon and finite limits.
+    # Neither PRs nor merge candidates may start privileged installer fixtures.
+    - name: installer-lifecycle
+      schedule: weekly
+      on: [schedule, manual]
+      runAfterFailure: true
+      steps:
+        - name: round-trip
+          placement: fleet
+          execution: native
+          platform: linux/amd64
+          needs: { docker: true }
+          caches: []
+          timeout: 95m
+          artifacts: [.memql-install-evidence]
+          run: python3 scripts/install/ci/fleet-fixture.py --leg=round-trip
+        - name: repair
+          placement: fleet
+          execution: native
+          platform: linux/amd64
+          needs: { docker: true }
+          caches: []
+          timeout: 95m
+          artifacts: [.memql-install-evidence]
+          run: python3 scripts/install/ci/fleet-fixture.py --leg=repair
+        - name: upgrade
+          placement: fleet
+          execution: native
+          platform: linux/amd64
+          needs: { docker: true }
+          caches: []
+          timeout: 95m
+          artifacts: [.memql-install-evidence]
+          run: python3 scripts/install/ci/fleet-fixture.py --leg=upgrade
+        - name: from-source
+          placement: fleet
+          execution: native
+          platform: linux/amd64
+          needs: { docker: true }
+          caches: []
+          timeout: 135m
+          artifacts: [.memql-install-evidence]
+          run: python3 scripts/install/ci/fleet-fixture.py --leg=from-source
+        - name: pipelines
+          placement: fleet
+          execution: native
+          platform: linux/amd64
+          needs: { docker: true }
+          caches: []
+          timeout: 180m
+          artifacts: [.memql-install-evidence]
+          run: python3 scripts/install/ci/fleet-fixture.py --leg=pipelines
+
     # Public repository facts need no publication token. These audits describe
     # live configuration, so their results never satisfy a PR or queue check.
     - name: repository-audit
@@ -728,6 +800,16 @@ pipeline:
             go install github.com/zricethezav/gitleaks/v8@v8.30.1
             export GOMAXPROCS=1 GOMEMLIMIT=1GiB GOGC=100
             python3 scripts/ci/gitleaks-history.py --head="$MEMQL_SHA" --fetch-remote="https://github.com/${MEMQL_REPOSITORY}.git" --gitleaks="$(command -v gitleaks)" --output-dir=.memql-security/gitleaks --jobs=3 --batch-size=32 --timeout=20700
+        - name: scorecard
+          placement: cluster
+          githubReadToken: true
+          cpuMilli: 1000
+          memoryMiB: 2048
+          timeout: 25m
+          artifacts: [.memql-security/scorecard]
+          run: |
+            set -eu
+            python3 scripts/ci/scorecard-scan.py --output-dir=.memql-security/scorecard
         - name: codeql-go
           placement: cluster
           memoryMiB: 6144
@@ -776,6 +858,11 @@ pipeline:
       on: [schedule, manual]
       runAfterFailure: true
       steps:
+        - name: scorecard
+          timeout: 5m
+          sarif:
+            step: analysis.scorecard
+            path: .memql-security/scorecard/results.sarif
         - name: codeql-go
           timeout: 5m
           sarif:
@@ -960,3 +1047,26 @@ pipeline:
               GOFLAGS: -p=2
               GOMEMLIMIT: 1GiB
               GOGC: "75"
+
+    - name: dependency-proposal
+      on: [pull_request]
+      runAfterFailure: true
+      steps:
+      - name: tidy
+        placement: cluster
+        githubReadToken: true
+        timeout: 25m
+        cpuMilli: 2000
+        memoryMiB: 4096
+        artifacts: [.reports/dependency-proposal.json]
+        run: python3 scripts/ci/repository-proposal.py dependabot-tidy --output=.reports/dependency-proposal.json
+    - name: dependency-proposal-write
+      on: [pull_request]
+      runAfterFailure: true
+      steps:
+      - name: apply
+        timeout: 5m
+        repositoryChange:
+          rule: dependabot-go-tidy
+          step: dependency-proposal.tidy
+          path: .reports/dependency-proposal.json

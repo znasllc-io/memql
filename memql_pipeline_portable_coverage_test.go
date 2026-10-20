@@ -195,3 +195,45 @@ func TestEngineSecurityScansDoNotTurnFindingsIntoSuccess(t *testing.T) {
 		t.Fatalf("Go vulnerability check reserves %d MiB; it was OOM-killed at the 4 GiB default", vuln.MemoryMiB)
 	}
 }
+
+func TestEngineScorecardUsesWeeklyReadOnlyAuditAndNativeReport(t *testing.T) {
+	spec := engineManifest(t).Pipeline
+	graph, _ := engineImportGraph(t)
+	for _, tc := range []struct {
+		event   pipelines.Event
+		cadence string
+		want    bool
+	}{
+		{pipelines.EventPullRequest, "", false}, {pipelines.EventMergeGroup, "", false},
+		{pipelines.EventPush, "", false}, {pipelines.EventRelease, "", false},
+		{pipelines.EventSchedule, "daily", false}, {pipelines.EventSchedule, "weekly", true},
+		{pipelines.EventManual, "", true},
+	} {
+		plan, refusal := compileEngineCadence(spec, graph, tc.event, nil, tc.cadence)
+		if refusal != nil {
+			t.Fatal(refusal)
+		}
+		scans, reports := 0, 0
+		for _, step := range plan.Steps() {
+			if step.Key == "analysis.scorecard" {
+				scans++
+				if !step.GitHubReadToken || step.RequiresFleet() || step.TimeoutSeconds != 25*60 || step.CPUMilli != 1000 || step.MemoryMiB != 2048 || !strings.Contains(step.Run, "python3 scripts/ci/scorecard-scan.py") || !slices.Contains(step.Artifacts, ".memql-security/scorecard") || strings.Contains(step.Run, "||") {
+					t.Fatalf("audit lost scope, bounded resources or evidence: %+v", step)
+				}
+			}
+			if step.Key == "security-reports.scorecard" {
+				reports++
+				if step.SARIF == nil || step.SARIF.Step != "analysis.scorecard" || step.SARIF.Path != ".memql-security/scorecard/results.sarif" || step.GitHubReadToken {
+					t.Fatalf("publication lost verified producer: %+v", step)
+				}
+			}
+		}
+		want := 0
+		if tc.want {
+			want = 1
+		}
+		if scans != want || reports != want {
+			t.Fatalf("%s/%s: %d audits %d reports, want %d", tc.event, tc.cadence, scans, reports, want)
+		}
+	}
+}

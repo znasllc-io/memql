@@ -354,8 +354,8 @@ func TestEngineManifestCompilesForEveryOpening(t *testing.T) {
 		t.Fatalf("the pipeline declares no %q service, so the db-gated trees have nothing to test against", manifestPostgresService)
 	}
 
-	fullStages := []string{manifestStageChecks, "vulnerabilities", "secrets-current", manifestStageTests}
-	pullRequestStages := []string{manifestStageChecks, "vulnerabilities", "secrets-current", manifestStageTests, manifestStageGates}
+	fullStages := []string{manifestStageChecks, "vulnerabilities", "secrets-current", manifestStageTests, "installer-smoke"}
+	pullRequestStages := []string{manifestStageChecks, "vulnerabilities", "secrets-current", manifestStageTests, manifestStageGates, "installer-smoke", "dependency-proposal", "dependency-proposal-write"}
 	every := []string{manifestStepGoChecks, manifestStepPathRouting,
 		manifestStepGoTests, manifestStepDBTests, manifestStepFuzz, manifestStepOSChecks,
 		"sdk-ts-typecheck", "viewkit-checks", "mcp-conformance", "proving"}
@@ -447,8 +447,15 @@ func TestEngineManifestCompilesForEveryOpening(t *testing.T) {
 			byName := map[string][]pipelines.Step{}
 			for _, step := range plan.Steps() {
 				byName[step.Name] = append(byName[step.Name], step)
-				if step.RunAfterFailure != (step.Stage == "analysis" || step.Stage == "inventory" || step.Stage == "security-reports" || step.Stage == "vulnerabilities" || step.Stage == "secrets-current" || step.Stage == "secrets-history" || step.Stage == "repository-audit" || step.Stage == "documentation-audit") {
+				if step.RunAfterFailure != (step.Stage == "analysis" || step.Stage == "inventory" || step.Stage == "security-reports" || step.Stage == "vulnerabilities" || step.Stage == "secrets-current" || step.Stage == "secrets-history" || step.Stage == "repository-audit" || step.Stage == "documentation-audit" || step.Stage == "dependency-proposal" || step.Stage == "dependency-proposal-write") {
 					t.Errorf("failure policy was lost or leaked to another stage: %+v", step)
+				}
+				if step.Kind == pipelines.StepRepositoryChange {
+					change := step.RepositoryChange
+					if o.event != pipelines.EventPullRequest || step.Stage != "dependency-proposal-write" || change == nil || change.Rule != "dependabot-go-tidy" || change.Step != "dependency-proposal.tidy" || change.Path != ".reports/dependency-proposal.json" || step.Image != "" || step.Run != "" || step.Execution != "" || len(step.Secrets) != 0 || step.GitHubReadToken {
+						t.Errorf("dependency update lost its driver-owned proposal contract: %+v", step)
+					}
+					continue
 				}
 				if step.Kind == pipelines.StepSARIF {
 					if step.Stage != "security-reports" || step.SARIF == nil || step.Image != "" || step.Run != "" || step.Execution != "" || len(step.Secrets) != 0 {
@@ -463,6 +470,12 @@ func TestEngineManifestCompilesForEveryOpening(t *testing.T) {
 				if engineMacEditorHost(step.Name) {
 					if step.Placement != pipelines.PlacementFleet || step.Execution != pipelines.ExecutionNative || step.Platform != "darwin/arm64" || len(step.Caches) != 0 || len(step.Services) != 0 || !slices.Equal(step.Needs, []string{"macos_tooling"}) {
 						t.Errorf("Mac editor host lost its explicit native contract: %+v", step)
+					}
+					continue
+				}
+				if engineInstallerHost(step.Stage, step.Name) {
+					if step.Placement != pipelines.PlacementFleet || step.Execution != pipelines.ExecutionNative || step.Platform != "linux/amd64" || len(step.Caches) != 0 || len(step.Services) != 0 || !slices.Equal(step.Needs, []string{"docker"}) || !slices.Equal(step.Artifacts, []string{".memql-install-evidence"}) {
+						t.Errorf("installer fixture lost its explicit host and evidence contract: %+v", step)
 					}
 					continue
 				}
@@ -517,7 +530,7 @@ func TestEngineManifestCompilesForEveryOpening(t *testing.T) {
 	}
 }
 
-func TestEngineWeeklyAuditDoesNotRepeatDailyOrOrdinaryFunctionalChecks(t *testing.T) {
+func TestEngineWeeklyAuditContainsOnlyScheduledExpensiveWork(t *testing.T) {
 	spec := engineManifest(t).Pipeline
 	graph, _ := engineImportGraph(t)
 	plan, refusal := compileEngineCadence(spec, graph, pipelines.EventSchedule, nil, "weekly")
@@ -530,7 +543,7 @@ func TestEngineWeeklyAuditDoesNotRepeatDailyOrOrdinaryFunctionalChecks(t *testin
 			stages = append(stages, step.Stage)
 		}
 	}
-	if !slices.Equal(stages, []string{"documentation-audit", "analysis", "inventory", "security-reports"}) {
+	if !slices.Equal(stages, []string{"installer-lifecycle", "documentation-audit", "analysis", "inventory", "security-reports"}) {
 		t.Fatalf("weekly stages = %v", stages)
 	}
 }
@@ -770,7 +783,7 @@ func engineSetMinus(a, b []string) []string {
 	return out
 }
 
-// The three Mac editor cases require the owner's explicit fleet consent.
+// Mac editor hosts and isolated Linux installer fixtures require fleet consent.
 // Every portable check stays in its bounded cluster container.
 func TestEngineManifestRequiresConsentForMacEditorHosts(t *testing.T) {
 	spec := engineManifest(t).Pipeline
@@ -787,6 +800,9 @@ func TestEngineManifestRequiresConsentForMacEditorHosts(t *testing.T) {
 			if engineMacEditorHost(step.Name) {
 				hosts++
 				continue
+			}
+			if engineInstallerHost(stage.Name, step.Name) {
+				continue // exact fixture contracts are compiled above and in scripts/ci
 			}
 			if pipelines.PlacementOf(step) != pipelines.PlacementCluster {
 				t.Errorf("portable check %s requires a host", step.Name)
@@ -832,4 +848,9 @@ func TestEngineSecurityAnalysisKeepsLanguagesAndInventories(t *testing.T) {
 			t.Fatalf("%s lost its analysis or retained reports: %+v", name, step)
 		}
 	}
+}
+
+func engineInstallerHost(stage, name string) bool {
+	return stage == "installer-smoke" && name == "no-cluster" ||
+		stage == "installer-lifecycle" && slices.Contains([]string{"round-trip", "repair", "upgrade", "from-source", "pipelines"}, name)
 }

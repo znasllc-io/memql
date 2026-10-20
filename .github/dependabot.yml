@@ -88,20 +88,3 @@ updates:
       # together, never a Dependabot PR. Patch releases are still proposed.
       - dependency-name: "registry.k8s.io/kubectl"
         update-types: ["version-update:semver-major", "version-update:semver-minor"]
-
-  - package-ecosystem: "github-actions"
-    directory: "/"
-    schedule:
-      interval: "weekly"
-    open-pull-requests-limit: 5
-    labels:
-      - "dependencies"
-      - "github-actions"
-    groups:
-      # codeql.yml pins init/autobuild/analyze to ONE SHA; a per-step bump
-      # always fails the required Analyze (go) gate with a config/runtime
-      # version mismatch (#2545), so the sub-actions must arrive as a single
-      # lockstep PR. See #2553.
-      codeql-action:
-        patterns:
-          - "github/codeql-action/*"

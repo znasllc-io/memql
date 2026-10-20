@@ -401,10 +401,10 @@ plausible local reason to break it:
 - `TestMinimalEnvelopeIsWhatTheDocSays` pins the per-node-type set, so a node
   type gaining a required variable fails a test and has to be justified rather
   than discovered by an operator.
-- The **install-e2e lane runs keyless by default**
-  (`.github/workflows/install-e2e.yml`), with the keyed round trip kept beside
-  it for the verify path. A future step that quietly demands a key breaks CI
-  rather than an operator.
+- The **native installer smoke runs keyless by default**
+  (`scripts/install/ci/no-cluster.sh`). The isolated full lifecycle fixtures
+  run weekly and on demand. A future step that quietly demands a provider
+  key breaks qualification rather than an operator.
 
 The two requiredness axes are easy to conflate and the manifest's own comment
 spells them out: `required:` drives BOOT VALIDATION (which node types refuse

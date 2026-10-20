@@ -1,28 +1,6 @@
-// Static guards for the database operand image lane (epic memql#3842, task
-// memql#3844).
-//
-// # What these are for
-//
-// The TimescaleDB version pair -- current and N-1 -- is written down in THREE
-// places: the Dockerfile's ARG defaults, the release workflow's dispatch-input
-// defaults, and the local build script's cap_param defaults. That is one fact
-// with three copies, which is the shape of drift that no compiler and no
-// reviewer reliably catches (a bump lands in two of the three and the third
-// keeps quietly building something else).
-//
-// The consequence is not cosmetic. The whole reason the image carries TWO
-// versioned `.so` files is so a rolling restart can land BEFORE
-// `ALTER EXTENSION` runs; if the local build and the release build disagree
-// about which pair that is, the local cluster stops being a rehearsal for the
-// upgrade the release will actually perform.
-//
-// # Why the push-ordering guard
-//
-// The workflow builds, smoke-tests, and only then pushes. That ordering is the
-// difference between a broken database image staying on the runner and one
-// sitting in ACR where an overlay can pin it. It is also invisible: reordering
-// two steps in a YAML file looks like tidying, and the resulting workflow is
-// still green on every run where the image happens to be fine.
+// Database operand version parity between the native build's unmodified
+// Dockerfile defaults, local development and smoke validation. Native image
+// selection and the verified target are guarded in memql_pipeline_images_test.go.
 package ci
 
 import (
@@ -71,7 +49,6 @@ func dbImageFirst(re *regexp.Regexp, body string) string {
 // that is written down three times.
 func TestDatabaseImageVersionsAgreeEverywhere(t *testing.T) {
 	dockerfile := dbImageRead(t, "deploy/db-image/Dockerfile")
-	workflow := dbImageRead(t, ".github/workflows/build-db-image.yml")
 	buildScript := dbImageRead(t, "scripts/db-image/build.sh")
 	smokeTest := dbImageRead(t, "deploy/db-image/smoke-test.sh")
 
@@ -87,11 +64,6 @@ func TestDatabaseImageVersionsAgreeEverywhere(t *testing.T) {
 			what:     "deploy/db-image/Dockerfile (ARG defaults)",
 			current:  dbImageFirst(regexp.MustCompile(`(?m)^ARG TIMESCALEDB_VERSION=([0-9.]+)`), dockerfile),
 			previous: dbImageFirst(regexp.MustCompile(`(?m)^ARG TIMESCALEDB_PREVIOUS_VERSION=([0-9.]+)`), dockerfile),
-		},
-		{
-			what:     ".github/workflows/build-db-image.yml (dispatch-input defaults)",
-			current:  dbImageFirst(regexp.MustCompile(`(?s)timescaledb_version:.*?default:\s*"([0-9.]+)"`), workflow),
-			previous: dbImageFirst(regexp.MustCompile(`(?s)timescaledb_previous_version:.*?default:\s*"([0-9.]+)"`), workflow),
 		},
 		{
 			what:     "scripts/db-image/build.sh (cap_param defaults)",
@@ -185,11 +157,10 @@ func TestDatabaseImageDockerfileAssertsBothLibraries(t *testing.T) {
 // with a message about a version tag.
 func TestLocalDatabaseImageTagStartsWithThePostgresMajor(t *testing.T) {
 	buildScript := dbImageRead(t, "scripts/db-image/build.sh")
-	workflow := dbImageRead(t, ".github/workflows/build-db-image.yml")
 
-	major := dbImageFirst(regexp.MustCompile(`(?m)^\s*PG_MAJOR:\s*"([0-9]+)"`), workflow)
+	major := dbImageFirst(regexp.MustCompile(`(?m)^ARG PG_MAJOR=([0-9]+)$`), dbImageRead(t, "deploy/db-image/Dockerfile"))
 	if major == "" {
-		t.Fatal("could not read PG_MAJOR out of the build workflow; this guard is no longer reading what it claims to")
+		t.Fatal("could not read PG_MAJOR out of the operand Dockerfile; this guard is no longer reading what it claims to")
 	}
 
 	tag := dbImageFirst(regexp.MustCompile(`cap_param tag "([^"]+)"`), buildScript)
@@ -201,40 +172,6 @@ func TestLocalDatabaseImageTagStartsWithThePostgresMajor(t *testing.T) {
 			"CloudNativePG parses the tag on Cluster.spec.imageName and rejects what it cannot read, so this "+
 			"builds an image no Cluster can reference -- and the failure lands at `kubectl apply` in a bring-up, "+
 			"not in the build or the smoke test.", tag, major)
-	}
-}
-
-// TestDatabaseImageSmokeTestGatesThePush is the ordering guard.
-//
-// A database image that reached ACR broken is pinnable by an overlay, and the
-// symptom of an Apache-build regression is not a failed pull -- it is a
-// migration failing much later with an error naming a missing function.
-func TestDatabaseImageSmokeTestGatesThePush(t *testing.T) {
-	workflow := dbImageRead(t, ".github/workflows/build-db-image.yml")
-
-	smokeAt := strings.Index(workflow, "deploy/db-image/smoke-test.sh")
-	if smokeAt < 0 {
-		t.Fatal("the build-db-image workflow does not run deploy/db-image/smoke-test.sh at all")
-	}
-	pushAt := strings.Index(workflow, "- name: Push memql-db")
-	if pushAt < 0 {
-		t.Fatal("the build-db-image workflow has no `Push memql-db` step; this guard can no longer find what it is ordering against")
-	}
-	if smokeAt > pushAt {
-		t.Error("the smoke test runs AFTER the push step. The push must be gated on the smoke test: " +
-			"an image that reaches ACR broken can be pinned by an overlay, and an Apache-build " +
-			"regression does not show up as a failed pull -- it shows up as a migration failing later.")
-	}
-
-	// The pre-push build must not push. `push: true` on the first build would
-	// defeat the ordering above while leaving both steps present and the guard
-	// above satisfied.
-	firstBuild := workflow[:smokeAt]
-	if !strings.Contains(firstBuild, "load: true") {
-		t.Error("the pre-smoke-test build does not `load: true`, so there is no local image for the smoke test to exercise")
-	}
-	if !strings.Contains(firstBuild, "push: false") {
-		t.Error("the pre-smoke-test build does not explicitly set `push: false`; the smoke test is then gating nothing")
 	}
 }
 

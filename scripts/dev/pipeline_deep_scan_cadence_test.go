@@ -1,6 +1,9 @@
 package dev
 
 import (
+	"os"
+	"path/filepath"
+	"runtime"
 	"slices"
 	"testing"
 
@@ -37,4 +40,19 @@ func TestDeepSecurityScansRunWeeklyOrOnDemand(t *testing.T) {
 			t.Fatalf("stage %q is missing", name)
 		})
 	}
+}
+
+func repoFile(t *testing.T, rel ...string) string {
+	t.Helper()
+	_, thisFile, _, ok := runtime.Caller(0)
+	if !ok {
+		t.Fatal("runtime.Caller failed")
+	}
+	// scripts/dev/ -> repo root is two directories up.
+	parts := append([]string{filepath.Dir(thisFile), "..", ".."}, rel...)
+	raw, err := os.ReadFile(filepath.Join(parts...))
+	if err != nil {
+		t.Fatalf("read %s: %v", filepath.Join(rel...), err)
+	}
+	return string(raw)
 }

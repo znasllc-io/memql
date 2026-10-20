@@ -468,14 +468,13 @@ long as the page exists. The full pipeline is
 - **The source** is `docs/public/`: the pages git tracks there whose
   front matter says `audience: public`, `status: stable` and
   `exposure: engine` (a page with no `exposure` reads as engine).
-- **One set per release, as a Release asset.** When a GitHub Release is
-  published, `.github/workflows/publish-docs-bundle.yml` checks out the
-  release tag with full history and builds the set there with
-  `scripts/docs/build-docs-bundle.sh` (over `cmd/docs-gen bundle`), then
-  attaches it as `docs-<X.Y.Z>.tgz`. The build refuses a `--version`
-  that differs from `VERSION`, which equals the tag (above), so the set
-  carries the version of the release it was built from, and nothing
-  else.
+- **One set per release, as a Release asset.** The native
+  `release-files.packages` step builds the exact release tag with full history,
+  using `scripts/docs/build-docs-bundle.sh` over `cmd/docs-gen bundle`. It
+  retains `docs-<X.Y.Z>.tgz` in the Library; reviewed release publication
+  attaches those verified bytes to the release. The build refuses a version
+  that differs from `VERSION`, which equals the tag, so the set carries the
+  version of its source release.
 - **The site replaces its set.** That is the instance repository's side
   of the contract: the instance that hosts memql.io replaces its docs
   with the newest release's asset and keeps no older set (its docs sync,

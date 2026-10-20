@@ -207,7 +207,6 @@ func TestDatabaseImageBuildRunsTheVerifiedOperandTarget(t *testing.T) {
 		{"deploy/db-image/smoke-in-container.sh", true},
 		{"deploy/db-image/smoke-test.sh", true},
 		{"scripts/db-image/build.sh", true},
-		{".github/workflows/build-db-image.yml", true},
 		{"memql-package.yaml", true},
 		{"docs/public/overview/quickstart.md", false},
 		{"clients/os/src/main.tsx", false},
@@ -225,7 +224,7 @@ func TestDatabaseImageBuildRunsTheVerifiedOperandTarget(t *testing.T) {
 					t.Fatalf("database validation selected=%v for %s, want %v", step.Skip == nil, tc.path, tc.runs)
 				}
 				build := step.ImageBuild
-				if build == nil || build.Context != "deploy/db-image" || build.Dockerfile != "deploy/db-image/Dockerfile" || build.Target != "verified" {
+				if build == nil || build.Context != "deploy/db-image" || build.Dockerfile != "deploy/db-image/Dockerfile" || build.Target != "verified" || len(build.Args) != 0 {
 					t.Fatalf("database build does not require the operand smoke target: %+v", build)
 				}
 				if step.RequiresFleet() || len(step.Secrets) != 0 || len(step.Caches) != 0 || step.Run != "" || step.RunAfterFailure || !slices.Equal(step.Artifacts, pipelines.ImageBuildArtifacts()) {

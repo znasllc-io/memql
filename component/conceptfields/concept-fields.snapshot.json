@@ -9103,7 +9103,8 @@
         ],
         "tool": [
           "workerComputer",
-          "workerHost"
+          "workerHost",
+          "workerWorkbench"
         ]
       }
     },
