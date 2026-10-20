@@ -150,7 +150,7 @@ func CanonicalReleaseCandidate(input ReleaseCandidate) ([]byte, string, error) {
 			}
 			switch artifact.Kind {
 			case "oci":
-				if !releaseDigest(artifact.ImageDigest) || (artifact.Platform != "linux/amd64" && artifact.Platform != "linux/arm64") {
+				if !releaseDigest(artifact.ImageDigest) || (artifact.Platform != "linux/amd64" && artifact.Platform != "linux/arm64" && artifact.Platform != "oci-index") {
 					return nil, "", errors.New("OCI candidate requires verified image digest and platform")
 				}
 			case "file":

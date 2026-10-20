@@ -171,14 +171,13 @@ func TestBothLocalBuildPathsPassASourceDirectory(t *testing.T) {
 	}
 }
 
-// TestTheReleaseBuildSuppliesTheCommit -- the release workflow and the
-// break-glass release script both know the revision they are cutting, and both
-// must pass it. The workflow half already did; release.sh passed the release
-// and not the revision, which is the same half-answer in the other direction.
-func TestTheReleaseBuildSuppliesTheCommit(t *testing.T) {
+// Native image builds receive their exact source through the runner contract,
+// tested by integrations/pipelinesteps. The explicit emergency script must
+// preserve the commit too.
+func TestBreakGlassBuildSuppliesTheCommit(t *testing.T) {
 	for path, want := range map[string]string{
-		".github/workflows/build-engine-images.yml": commitBuildArg + "=${{ steps.source.outputs.sha }}",
-		"scripts/release/release.sh":                `--build-arg "` + commitBuildArg + `=${FULL_SHA}"`,
+
+		"scripts/release/release.sh": `--build-arg "` + commitBuildArg + `=${FULL_SHA}"`,
 	} {
 		t.Run(path, func(t *testing.T) {
 			if !strings.Contains(readRepoFile(t, path), want) {

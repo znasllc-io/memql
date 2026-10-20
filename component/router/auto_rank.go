@@ -39,7 +39,6 @@ import (
 	"sync"
 	"time"
 
-	"github.com/znasllc-io/memql/component/language/parser"
 	"github.com/znasllc-io/memql/component/memql"
 	"github.com/znasllc-io/memql/core/airoute"
 )
@@ -252,11 +251,7 @@ func (r *Router) autoSignals(ctx context.Context) map[autoSignalKey]autoSignal {
 	}
 	r.auto.mu.Unlock()
 
-	q, err := parser.RenderCall("routerCallsForSignals", map[string]any{"since": time.Now().Add(-autoSignalWindow).UTC().Format(time.RFC3339)})
-	if err != nil {
-		return nil
-	}
-	res, err := r.engine.Execute(memql.RouteMaintenanceContext(ctx), "query "+q)
+	rows, err := memql.ReadRouterCallSignals(ctx, r.engine, time.Now().Add(-autoSignalWindow))
 	if err != nil {
 		// A read that fails ranks on the neutral signals: the chain's own
 		// order decides, which is what the cluster did before Auto. Kept for
@@ -265,7 +260,7 @@ func (r *Router) autoSignals(ctx context.Context) map[autoSignalKey]autoSignal {
 		r.storeSignals(map[autoSignalKey]autoSignal{})
 		return nil
 	}
-	folded := foldAutoSignals(memql.MaterializeRows(res))
+	folded := foldAutoSignals(rows)
 	r.storeSignals(folded)
 	return folded
 }

@@ -39,7 +39,7 @@ one goal, or update several.
 |---|---|---|
 | D1 | Which goals is a message checked against? | Active goals in THIS conversation: preparing, working, or waiting on you. Not finished goals, not other conversations. |
 | D2 | One message both corrects a goal and asks something new | Split it. The correction goes to the goal; the new part gets its own answer or goal. |
-| D3 | A goal waiting on you | Answer, never approve. A question is answered; a permission request gets the message as a correction, never a yes; a budget pause saves it for when the limit is raised. |
+| D3 | A goal waiting on you | Answer, never approve. A question is answered; a permission request gets the message as a correction, never a yes; a progress checkpoint takes it as feedback without raising any limit. |
 | D4 | "Never mind the Tucson one" | Stop after a confirm: Stop / Keep on that goal's card. In a live call (no cards), a clear yes to the stop question is the confirm. |
 | D5 | What the person sees | A label per goal on their message ("To Weather in Phoenix · Received"), a one-line reply, and the goal's card retitled. |
 | D6 | Where the decision is made | Route first: a routing step before intake, only when the conversation has active goals. |
@@ -174,7 +174,8 @@ Phoenix. Hike plan already finished, so it didn't get this.").
 | Waiting on something other than you (timer, retry, repair, re-plan, sub-run, external) | Work guidance; read when it resumes | Queued, then Received |
 | Waiting on your question (`feedback`, or a failure question) | `decideApproval(answered, {feedback: message})` | Answered |
 | Waiting on a permission (`sideEffect`, `scopeElevation`) | The same call: guidance instead of approval; the goal reconsiders, nothing is granted | Sent, not approved |
-| Paused on its budget (native checkpoint) | The same call saves the guidance; it applies when the limit is raised | Saved |
+| Waiting for progress direction (native checkpoint) | The same call answers the feedback request without raising any limit | Answered |
+| At its overall limit, or a retired budget request | The request takes no guidance | Not delivered |
 | Waiting on a request that takes no guidance (plan review and the others `ApprovalAcceptsGuidance` refuses) | Not delivered; the reply says to open the request | Not delivered |
 
 - The existing per-run cap holds: 16 messages, 16,000 characters.
@@ -295,7 +296,7 @@ Red first (test-driven development):
   idempotent retry; the clarification lifecycle.
 - **Database-gated, stub model:** Tucson to Phoenix (no new goal, guidance
   recorded, retitled); a split message; two related goals; question answered;
-  permission corrected without a grant; budget saved; plan review not
+  permission corrected without a grant; progress checkpoint answered; retired budget refused; plan review not
   delivered; a goal finishing mid-route becomes a new request; no active goals
   makes no routing call; stop then confirm; stop then keep.
 - **Cross-node:** a target recorded on one replica is read and acknowledged by

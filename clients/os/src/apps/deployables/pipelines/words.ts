@@ -299,3 +299,13 @@ export function timeOfDay(iso: string): string {
   if (Number.isNaN(at.getTime())) return "";
   return at.toLocaleTimeString(undefined, { hour: "2-digit", minute: "2-digit" });
 }
+
+/** Channel lifecycle words shared by its records and action bar. */
+export const channelWords = {
+  active: "Active", archived: "Archived", newChannel: "New channel", saving: "Saving",
+  save: "Save", resume: "Save and resume", archive: "Archive", cancel: "Cancel", keep: "Keep",
+  archiveQuestion: "Archive this channel?",
+  archiveDetail: "Messages already queued may still be delivered.",
+  delivery: "Delivery", disconnected: "The cluster is disconnected.",
+  unavailable: "Channel updates are unavailable. Try again to read their current state.",
+} as const;

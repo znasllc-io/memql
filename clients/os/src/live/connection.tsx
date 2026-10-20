@@ -21,7 +21,8 @@ import {
 } from "@znasllc-io/memql-sdk-core/client";
 
 import type { OsAuthSource } from "../auth/source";
-import { ConnectionStatusContext, type ShellConnectionStatus } from "../chrome/connection";
+import { ConnectionRecoveryContext, ConnectionStatusContext, type ShellConnectionStatus } from "../chrome/connection";
+import { onAppResume } from "./resume";
 import { setCaptureTransport } from "../logs/capture";
 
 /** The edge's same-origin API marker, resolved against document.location. */
@@ -62,6 +63,7 @@ export function OsConnectionProvider({
   const [connection, setConnection] = useState<Connection | null>(null);
   const [status, setStatus] = useState<ShellConnectionStatus>("disconnected");
   const generation = useRef(0);
+  const retryRef = useRef<() => void>(() => {});
 
   useEffect(() => {
     if (!enabled) {
@@ -75,8 +77,12 @@ export function OsConnectionProvider({
     let unsubscribe: (() => void) | null = null;
     let redial: ReturnType<typeof setTimeout> | null = null;
     let disposed = false;
+    let opening = false;
 
     const open = async () => {
+      if (disposed || opening) return;
+      opening = true;
+      if (redial) clearTimeout(redial);
       setStatus("reconnecting");
       try {
         const auth = await toAuth(authSource);
@@ -104,12 +110,22 @@ export function OsConnectionProvider({
         // did): report honestly and retry on a quiet cadence.
         setStatus("disconnected");
         redial = setTimeout(() => void open(), REDIAL_DELAY_MS);
-      }
+      } finally { opening = false; }
     };
+
+    const retry = () => {
+      if (disposed) return;
+      if (conn) conn.retryNow();
+      else void open();
+    };
+    retryRef.current = retry;
+    const stopResume = onAppResume(retry);
 
     void open();
     return () => {
       disposed = true;
+      stopResume();
+      retryRef.current = () => {};
       if (redial) clearTimeout(redial);
       unsubscribe?.();
       conn?.close();
@@ -132,9 +148,12 @@ export function OsConnectionProvider({
   }, [connection]);
 
   const value = useMemo(() => ({ connection }), [connection]);
+  const recovery = useMemo(() => ({ managed: enabled, retry: () => retryRef.current() }), [enabled]);
   return (
     <Ctx.Provider value={value}>
-      <ConnectionStatusContext.Provider value={status}>{children}</ConnectionStatusContext.Provider>
+      <ConnectionRecoveryContext.Provider value={recovery}>
+        <ConnectionStatusContext.Provider value={status}>{children}</ConnectionStatusContext.Provider>
+      </ConnectionRecoveryContext.Provider>
     </Ctx.Provider>
   );
 }

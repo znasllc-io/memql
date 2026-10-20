@@ -131,8 +131,8 @@ var (
 	dnsLabelShape = regexp.MustCompile(`^[a-z0-9]([-a-z0-9]*[a-z0-9])?$`)
 )
 
-// BuildSecret holds the clone token (key GIT_TOKEN, read ONLY by the clone
-// container) and each resolved secret (key = its env name, referenced by the
+// BuildSecret holds the clone token (key GIT_TOKEN, also read by a command or
+// image builder explicitly opting into the repository read grant) and each resolved secret (key = its env name, referenced by the
 // step container one secretKeyRef at a time). It is created before the Job
 // and owned by it once the Job exists, so collecting the Job collects it.
 // An image pull credential uses .dockerconfigjson, referenced by kubelet only.
@@ -278,6 +278,9 @@ func BuildJob(cfg Config, run StepRun, jobName string) (Job, error) {
 	}
 	if cfg.QueueName != "" {
 		job.Metadata.Labels[queueLabel] = cfg.QueueName
+		if class, _ := queuePriorityClass(cfg, run); class != "" {
+			job.Metadata.Labels[queuePriorityLabel] = class
+		}
 		job.Spec.Suspend = ptr(true)
 		// Kueue accounts requests. Explicit container limits must be reserved,
 		// too; namespace defaults are held to the same rule by the component.
@@ -297,10 +300,16 @@ func checkJob(cfg Config, run StepRun) (int32, *pl.Refusal) {
 	if cfg.QueueName != "" && (!dnsLabelShape.MatchString(cfg.QueueName) || len(cfg.QueueName) > 63 || cfg.NodePool == "") {
 		return refuse("resource admission requires a named queue and a dedicated build pool")
 	}
+	if _, err := queuePriorityClass(cfg, run); err != nil {
+		return refuse("invalid resource admission priority: %s", err)
+	}
 	if cfg.QueueName != "" {
 		if _, err := time.Parse(time.RFC3339Nano, run.RunDeadline); err != nil {
 			return refuse("resource admission requires the run's absolute deadline")
 		}
+	}
+	if run.GitHubReadToken && run.InstallationID <= 0 {
+		return refuse("githubReadToken requires an installed source repository")
 	}
 	if err := pl.CheckCheckoutHistory(run.CheckoutHistory, false); err != nil {
 		return refuse("%s", err)
@@ -406,6 +415,9 @@ func checkJob(cfg Config, run StepRun) (int32, *pl.Refusal) {
 		}
 	}
 	for _, name := range sortedKeys(run.Env) {
+		if name == repositoryReadTokenVar {
+			return refuse("step variable %q is reserved for repository read credentials", name)
+		}
 		if !envNameShape.MatchString(name) {
 			return refuse("step variable %q is not a name the step's shell can read", name)
 		}
@@ -436,14 +448,15 @@ func checkJob(cfg Config, run StepRun) (int32, *pl.Refusal) {
 // token's key.
 func namesTheJobSets(run StepRun) map[string]bool {
 	taken := map[string]bool{
-		stepCommandVar:    true,
-		stepArtifactsVar:  true,
-		artifactMarkerVar: true,
-		stepCachesVar:     true,
-		gitConfigCountVar: true,
-		gitConfigKeyVar:   true,
-		gitConfigValueVar: true,
-		gitTokenKey:       true,
+		stepCommandVar:         true,
+		stepArtifactsVar:       true,
+		artifactMarkerVar:      true,
+		stepCachesVar:          true,
+		gitConfigCountVar:      true,
+		gitConfigKeyVar:        true,
+		gitConfigValueVar:      true,
+		gitTokenKey:            true,
+		repositoryReadTokenVar: true,
 	}
 	for name := range run.Env {
 		taken[name] = true
@@ -664,10 +677,15 @@ func serviceContainers(services map[string]pl.Service) []Container {
 	return out
 }
 
+const repositoryReadTokenVar = "MEMQL_GITHUB_READ_TOKEN"
+
 func stepContainer(cfg Config, run StepRun, jobName, secretName string, caches []string) Container {
 	env := make([]EnvVar, 0, len(run.Env)+len(run.Secrets)+8)
 	for _, name := range sortedKeys(run.Env) {
 		env = append(env, plainVar(name, run.Env[name]))
+	}
+	if run.GitHubReadToken {
+		env = append(env, secretVar(repositoryReadTokenVar, secretName, gitTokenKey, false))
 	}
 	env = append(env, plainVar(stepCommandVar, run.Command))
 	if cfg.QueueName != "" {

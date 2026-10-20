@@ -1,5 +1,7 @@
 import { LiveVoiceSession } from "./liveVoiceSession";
 import { ConversationSession } from "./conversationSession";
+import { onAppResume } from "../live/resume";
+import { useOsConnection } from "../live/connection";
 import { createContext, useEffect, useCallback, useContext, useMemo, useRef, useState, useSyncExternalStore, type ReactNode } from "react";
 
 import { CHECKING_ASK, type AskAvailability } from "./useAskReadiness";
@@ -93,10 +95,18 @@ export function AskProvider({
   const storeRef = useRef<AskSettingsStore | null>(null);
   if (!storeRef.current) storeRef.current = settingsStore ?? new LocalAskSettingsStore();
   const conversation = useMemo(() => new ConversationSession(transport), [transport]);
+  const connection = useOsConnection();
   useEffect(() => { conversation.activate(); void conversation.refresh(); return () => conversation.dispose(); }, [conversation]);
   const liveVoice = useMemo(() => new LiveVoiceSession(transport, conversation), [transport, conversation]);
   useEffect(() => () => liveVoice.dispose(), [liveVoice]);
   useEffect(() => { if (availability.state === "ready") { void conversation.refresh(); void conversation.reload(false); } }, [availability.state, conversation]);
+  useEffect(() => {
+    let recoveredAt = -Infinity;
+    const recover = () => { recoveredAt = Date.now(); void conversation.refresh(); void conversation.reload(false); };
+    const stopCycle = connection?.onConnectionCycle?.(recover);
+    const stopResume = onAppResume(() => { if ((!connection || connection.status === "connected") && Date.now() - recoveredAt >= 1_000) recover(); });
+    return () => { stopCycle?.(); stopResume(); };
+  }, [connection, conversation]);
   const [sheet, setSheet] = useState<AskSheetState>({ open: false, context: null });
   // Work can be rerun from Nexus after its terminal snapshot stopped polling.
   // Reopen the viewer with one fresh snapshot, retaining this session's draft.

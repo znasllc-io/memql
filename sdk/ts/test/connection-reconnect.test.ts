@@ -119,6 +119,22 @@ function subscribeFrames(socket: FakeWebSocket): Array<{ subscriptionId: string;
     .filter((s): s is { subscriptionId: string; concept?: string } => s !== undefined);
 }
 
+test("concurrent Retry and browser-return requests share one reconnect handshake", async () => {
+  const {sockets, factory} = scriptedDialer();
+  const connection = await Connection.dial({endpoint:"ws://fixture/memql/ws",webSocketFactory:factory,reconnect:{enabled:true,initialDelayMs:30000}});
+  let cycles = 0;
+  connection.onConnectionCycle(() => cycles++);
+  connection.subscriptions.subscribeGraph(() => {}, {concept:"approval"});
+  try {
+    sockets[0]!.drop();
+    for (let i=0; i<10; i++) connection.retryNow();
+    await waitFor(() => connection.status === "connected", "single recovery");
+    assert.equal(sockets.length, 2);
+    assert.equal(cycles, 1);
+    assert.equal(subscribeFrames(sockets[1]!).length, 1);
+  } finally { connection.close(); }
+});
+
 // ---------------------------------------------------------------------
 // backoff -- pure, so it is pinned without a clock
 // ---------------------------------------------------------------------

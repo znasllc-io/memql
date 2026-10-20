@@ -329,18 +329,15 @@ MemQL uses a single long-lived branch: `main`.
    scripts/dev/merge-as-owner.sh --pr=<n>           # merge
    ```
 
-   The script refuses on a red or pending check the RULESET REQUIRES
-   (`ci-required`, an `if: always()` aggregate), and on a required check that
-   has NOT REPORTED: `ci-required` gets no check run until every lane it
-   `needs:` finishes, so for most of a CI run it is absent, which is neither
-   red nor pending (memql#5709 merged through that). Every required context
-   must be present with a SUCCESS. The rest are reported as
-   `failed (not required)` (memql#5016). `install-cluster-e2e` is not required
-   and can be red on pristine `main`, but it DOES test the branch, so a red
-   there is a log to read. (CodeQL's `Analyze` jobs left the pull-request path
-   in memql#5482 and now analyse every push to main.) If the required-check
-   list cannot be read it refuses on everything. Do not "fix" this by lowering
-   `require_code_owner_review`.
+   The script requires a successful check from every context the live ruleset
+   requires, including **`MemQL / memql` bound to GitHub App 4822538**. It
+   refuses a red, pending, cancelled, skipped or absent required check; absence
+   is not success (the historical `ci-required` gap allowed memql#5709 to merge
+   while its tests were still pending). The App binding and newest matching
+   attempt are verified independently. Non-required failures remain visible
+   as `failed (not required)` and their logs still deserve review. If the
+   required-check list cannot be read, the script refuses on every failed or
+   running check. Do not "fix" this by lowering `require_code_owner_review`.
 3. **Pre-release -- no backwards-compat shims or deprecation windows, EXCEPT in
    the DSL.** For Go seams, wire contracts, gRPC messages and env vars: fix
    MemQL and the consumer at once and delete what is no longer needed. The
@@ -447,7 +444,7 @@ The set is spelled out in seven places: `app/build_<type>.go`,
 `app/build_default.go`'s deny-list, `component/node/compiled_<type>.go` and
 its deny-list (`compiled_default.go`), `ENGINE_NODE_TYPES` in
 `scripts/lib/engine_build_args.sh` (from which `dev.sh`'s `VALID_NODES`
-DERIVES), the `build-engine-images.yml` release matrix, and the `memql-<type>`
+DERIVES), the `memql-package.yaml` native release image stage, and the `memql-<type>`
 image references under `deploy/k8s/`. Missing one on the way OUT is silent,
 because `build_default.go` is a DENY list: `go build -tags voice .` after
 deleting `app/build_voice.go` produces a BFF under the retired name. Gates:

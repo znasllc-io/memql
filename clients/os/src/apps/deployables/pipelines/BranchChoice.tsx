@@ -7,8 +7,8 @@ import { Field, InlineSkeleton, Input, Select } from "../../../kit";
  * reads "Run a branch". A list when the repository answers with its branches,
  * the way the deploy flow's "Branch or tag" does; a text field when it answers
  * none (a pasted-token source, a probe that failed), so the act is never
- * blocked on a read. The default branch is left out: Run latest is that act,
- * one press away.
+ * blocked on a read. Disconnected pipelines leave the default branch out:
+ * Run latest is that act. Connected pipelines include it in this choice.
  *
  * Focus moves to the control once it is drawn, because the act that opened it
  * has left the bar. Escape takes the question back unless an open list claims
@@ -17,6 +17,7 @@ import { Field, InlineSkeleton, Input, Select } from "../../../kit";
 export function BranchChoice({
   branches,
   defaultBranch,
+  includeDefault = false,
   loading,
   value,
   onChange,
@@ -25,6 +26,7 @@ export function BranchChoice({
 }: {
   branches: readonly string[];
   defaultBranch: string;
+  includeDefault?: boolean;
   /** The repository's branches are still being read. */
   loading: boolean;
   value: string;
@@ -33,7 +35,7 @@ export function BranchChoice({
   onCancel: () => void;
 }) {
   const box = useRef<HTMLDivElement | null>(null);
-  const others = branches.filter((name) => name !== defaultBranch);
+  const others = branches.filter((name) => includeDefault || name !== defaultBranch);
   const listed = others.length > 0;
 
   useEffect(() => {

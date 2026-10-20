@@ -2,7 +2,7 @@ import { act, fireEvent, render, screen, waitFor } from "@testing-library/react"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { readTheBar } from "../readTheBar";
 import { ReleaseBrowser } from "../../src/apps/cluster/releases/ReleasesSection";
-import { fileReleaseFixture, releaseFixture, releaseId, releaseResult, candidateRecord } from "./releaseFixtures";
+import { fileReleaseFixture, npmReleaseFixture, releaseFixture, releaseId, releaseResult, candidateRecord } from "./releaseFixtures";
 
 async function open() { fireEvent.click(await screen.findByRole("button", { name: "Review engine 0.25.0" })); await screen.findByText("Versions"); }
 async function destination() { fireEvent.click(await screen.findByRole("button", { name: "Review destination rehearsal" })); await screen.findByText("Artifact digest"); }
@@ -16,6 +16,29 @@ beforeEach(() => { vi.useFakeTimers({ toFake: ["Date"] }); });
 afterEach(() => { vi.useRealTimers(); });
 
 describe("release review", () => {
+  it("reviews the exact npm package, version and tag before publication without a draft", async () => {
+    const f = npmReleaseFixture();
+    render(<ReleaseBrowser query={f.query} connected />);
+    await open(); await destination();
+    expect(screen.getByText("Package version")).toBeTruthy();
+    expect(screen.getByText("Publish as")).toBeTruthy();
+    await pressBar("Publish package");
+    expect(screen.getByText(/Publish @acme\/sdk@0.25.0 to https:\/\/registry.example.test as latest/)).toBeTruthy();
+    expect(f.state.calls.some((c) => c.kind === "publish")).toBe(false);
+    await pressBar("Publish package");
+    await screen.findByText("Published and verified");
+    expect(screen.queryByText("File uploaded and verified")).toBeNull();
+    expect(f.state.calls.some((c) => c.kind === "draft" || c.kind === "promote")).toBe(false);
+    expect(f.state.calls.filter((c) => c.kind === "publish")).toEqual([{kind:"publish", args:{candidateId:releaseId,approvalId:"approval-exact",targetId:"rehearsal",component:"engine",artifact:"bff"}}]);
+  });
+  it("refuses npm publication when the dist-tag cannot be reviewed", async () => {
+    const f = npmReleaseFixture(); delete f.state.targets[0]!.distTag;
+    render(<ReleaseBrowser query={f.query} connected />);
+    await open(); await destination();
+    await screen.findByText("The cluster returned an incomplete release record.");
+    expect(screen.queryByRole("button", {name:"Publish package"})).toBeNull();
+    expect(f.state.calls.some((c) => c.kind === "publish")).toBe(false);
+  });
   it("explains that a file upload remains in an existing draft release", async () => {
     const f = releaseFixture("approved");
     Object.assign(f.state.record.manifest.components[0]!.artifacts[0]!, { kind: "file", imageDigest: "", platform: "darwin/arm64" });

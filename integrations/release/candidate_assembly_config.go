@@ -76,7 +76,7 @@ func validateAssemblyPlans(plans []candidateAssemblyPlan, versions *candidateVer
 				}
 				switch artifact.Kind {
 				case "oci":
-					if (artifact.Platform != "linux/amd64" && artifact.Platform != "linux/arm64") || !assemblyArtifactPath(artifact.ImageMetadataPath) || artifact.ImageMetadataPath == artifact.Path {
+					if (artifact.Platform != "linux/amd64" && artifact.Platform != "linux/arm64" && artifact.Platform != "oci-index") || !assemblyArtifactPath(artifact.ImageMetadataPath) || artifact.ImageMetadataPath == artifact.Path {
 						return errors.New("assembly OCI artifact requires a supported platform and separate producer metadata path")
 					}
 				case "file":
@@ -106,6 +106,10 @@ func validateAssemblyPlans(plans []candidateAssemblyPlan, versions *candidateVer
 			} else if file.ID != "" {
 				if artifacts[file.Component+"/"+file.Artifact] != "file" {
 					return errors.New("assembly file target does not match a declared file artifact")
+				}
+			} else if npm := targets.npm[name]; npm.ID != "" {
+				if artifacts[npm.Component+"/"+npm.Artifact] != "file" {
+					return errors.New("assembly npm target does not match a declared file artifact")
 				}
 			} else {
 				return errors.New("assembly target is not configured")

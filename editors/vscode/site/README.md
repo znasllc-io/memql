@@ -58,9 +58,10 @@ To use an existing browser binary without downloading Chromium, set
 new headless process and never attaches to an existing browser. Screenshots go
 to the ignored `artifacts/` directory, outside the deployable bundle.
 
-The [CI workflow](../../../.github/workflows/vscode-site.yml) builds and tests
-the page and keeps the built page and screenshots for review. It is a check,
-not a publish.
+The native `tests.editor-site` step in
+[`memql-package.yaml`](../../../memql-package.yaml) builds and tests the page.
+Its complete log, built page and review screenshots are retained in the
+pipeline run's Library artifacts. Deployment follows the edge image below.
 
 ## Hosting: a built-in platform site
 

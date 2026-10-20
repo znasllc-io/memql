@@ -13080,6 +13080,28 @@ QueryClient.prototype.workObservationsForOwnerRun = function (this: QueryClient,
   return this.executeNamed("workObservationsForOwnerRun", buildWorkObservationsForOwnerRun(args), opts);
 };
 
+/** Completed tools and recorded capability reads; checkpoints and model prose cannot buy more work. */
+// Bound concept: v1:work:observation (machine-readable: BoundConcepts["workProgressReceiptsForOwnerRun"] in generated_concepts.ts).
+export interface WorkProgressReceiptsForOwnerRunArgs {
+  runId: string;
+}
+
+export function buildWorkProgressReceiptsForOwnerRun(args: WorkProgressReceiptsForOwnerRunArgs): string {
+  const parts: string[] = [];
+  parts.push("runId: " + renderMemQLValue(args.runId));
+  return "query workProgressReceiptsForOwnerRun(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    workProgressReceiptsForOwnerRun(args: WorkProgressReceiptsForOwnerRunArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.workProgressReceiptsForOwnerRun = function (this: QueryClient, args: WorkProgressReceiptsForOwnerRunArgs = {} as WorkProgressReceiptsForOwnerRunArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("workProgressReceiptsForOwnerRun", buildWorkProgressReceiptsForOwnerRun(args), opts);
+};
+
 /** Questions and decisions on this owner's run, used to resume on any replica. */
 // Bound concept: v1:work:approval (machine-readable: BoundConcepts["workQuestionsForOwnerRun"] in generated_concepts.ts).
 export interface WorkQuestionsForOwnerRunArgs {

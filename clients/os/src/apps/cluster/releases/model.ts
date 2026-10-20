@@ -16,7 +16,7 @@ export interface Candidate {
 }
 export interface Publication { candidateId: string; approvalId: string; effectId: string; state: "pending" | "complete"; target: Destination; artifactKind: "oci" | "file" }
 export interface DraftMetadata { name: string; body: string; prerelease: boolean; latest: boolean }
-export interface Target extends Destination { origin: string; repository: string; kind: "oci" | "file"; tag?: string; sourceCommit?: string; assetName?: string; releaseId?: number; draft?: DraftMetadata }
+export interface Target extends Destination { origin: string; repository: string; kind: "oci" | "file" | "npm"; tag?: string; distTag?: string; sourceCommit?: string; assetName?: string; releaseId?: number; draft?: DraftMetadata }
 export interface Draft {
   intentId: string; candidateId: string; approvalId: string; state: "prepared" | "creating" | "ready" | "promoting" | "published";
   releaseId?: number; targets: string[];
@@ -97,7 +97,7 @@ export function readPublications(result: Result, expected: string): Publication[
 export function readTargets(result: Result): Target[] {
   return array(body(result).targets).map((entry) => {
     const t = object(entry);
-    if (t.kind !== "oci" && t.kind !== "file") throw new Error("This publication destination is not supported.");
+    if (t.kind !== "oci" && t.kind !== "file" && t.kind !== "npm") throw new Error("This publication destination is not supported.");
     let draft: DraftMetadata | undefined;
     if (t.draft !== undefined) {
       const d = object(t.draft);
@@ -107,7 +107,8 @@ export function readTargets(result: Result): Target[] {
     if (t.releaseId !== undefined && (typeof t.releaseId !== "number" || !Number.isSafeInteger(t.releaseId) || t.releaseId < 0)) throw new Error("The draft release identity is unavailable.");
     const releaseId = typeof t.releaseId === "number" && t.releaseId > 0 ? t.releaseId : undefined;
     if (t.kind === "file" && !releaseId && !draft) throw new Error("The draft release identity is unavailable.");
-    return { ...destination(t), kind: t.kind, origin: string(t.origin), repository: string(t.repository), tag: t.kind === "file" ? string(t.tag) : undefined, assetName: t.kind === "file" ? string(t.assetName) : undefined, sourceCommit: typeof t.sourceCommit === "string" ? t.sourceCommit : undefined, releaseId, draft };
+    if (t.kind === "npm" && (draft || releaseId || t.assetName)) throw new Error("The package destination contains conflicting release details.");
+    return { ...destination(t), kind: t.kind, origin: string(t.origin), repository: string(t.repository), tag: t.kind !== "oci" ? string(t.tag) : undefined, distTag: t.kind === "npm" ? string(t.distTag) : undefined, assetName: t.kind === "file" ? string(t.assetName) : undefined, sourceCommit: typeof t.sourceCommit === "string" ? t.sourceCommit : undefined, releaseId, draft };
   });
 }
 export function readDrafts(result: Result, expected: string): Draft[] {

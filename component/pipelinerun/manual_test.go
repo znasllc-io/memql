@@ -46,7 +46,7 @@ func TestRunLatestPinsTheDisconnectedPipelinesCurrentDefaultHead(t *testing.T) {
 	}
 }
 
-func TestRunLatestRequiresOwnerAndDisconnectedPipeline(t *testing.T) {
+func TestRunLatestRequiresOwner(t *testing.T) {
 	t.Run("another owner", func(t *testing.T) {
 		h := newHarness(t)
 		p := testPipeline(DeliveryWebhook)
@@ -60,17 +60,6 @@ func TestRunLatestRequiresOwnerAndDisconnectedPipeline(t *testing.T) {
 		}
 	})
 
-	t.Run("automatic delivery active", func(t *testing.T) {
-		h := newHarness(t)
-		p := testPipeline(DeliveryWebhook)
-		h.store.addPipeline(p)
-		if _, err := h.integ.RunLatest(personCtx(ownerID), p.ID, ""); refusalCode(err) != pipelines.CodeManualRequiresDisconnected {
-			t.Fatalf("active pipeline refusal = %v", err)
-		}
-		if len(h.github.tokenMints) != 0 || len(h.github.created) != 0 {
-			t.Fatalf("active pipeline reached GitHub: tokens %d checks %d", len(h.github.tokenMints), len(h.github.created))
-		}
-	})
 }
 
 func TestRunLatestRefusesUnpinnedOrChangedInstallation(t *testing.T) {
@@ -169,5 +158,39 @@ func TestRunLatestReportsABranchGitHubDoesNotHave(t *testing.T) {
 	}
 	if len(h.github.created) != 0 {
 		t.Fatalf("a missing branch wrote %d check runs", len(h.github.created))
+	}
+}
+
+func TestRunLatestKeepsAutomaticDeliveryAndDeduplicatesAcrossReplicas(t *testing.T) {
+	for _, delivery := range []string{DeliveryWebhook, DeliveryPoll} {
+		t.Run(delivery, func(t *testing.T) {
+			h := newHarness(t)
+			p := testPipeline(delivery)
+			h.store.addPipeline(p)
+			h.github.repos[repoName] = githubapp.RepositoryInfo{DefaultBranch: "main"}
+			h.github.heads[repoName+"@main"] = headAnswer{SHA: shaA, Message: "Manual maintenance"}
+			automatic, err := h.integ.open(personCtx(ownerID), h.integ.snapshot(), p, Opening{Event: pipelines.EventPullRequest, SHA: shaA, PullRequest: 42})
+			if err != nil {
+				t.Fatal(err)
+			}
+			manual, err := h.integ.RunLatest(personCtx(ownerID), p.ID, "")
+			if err != nil {
+				t.Fatal(err)
+			}
+			d := h.integ.snapshot()
+			d.NodeID = "agent-b"
+			second := New(d)
+			replay, err := second.RunLatest(personCtx(ownerID), p.ID, "")
+			if err != nil || replay.ID != manual.ID || len(h.github.created) != 2 {
+				t.Fatalf("replica duplicated manual run: %+v %v", replay, err)
+			}
+			if manual.ID == automatic.Run.ID || h.github.created[0].Run.Name != "MemQL / shop" || h.github.created[1].Run.Name != "MemQL / shop / manual" {
+				t.Fatalf("manual run overwrote required evidence: %+v", h.github.created)
+			}
+			current, err := h.store.PipelineForOwner(personCtx(ownerID), p.ID)
+			if err != nil || !current.Active() || current.Delivery != delivery {
+				t.Fatalf("manual run changed automatic delivery: %+v %v", current, err)
+			}
+		})
 	}
 }

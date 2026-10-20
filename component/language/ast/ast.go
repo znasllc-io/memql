@@ -1487,6 +1487,7 @@ func (*ConceptDecl) node() {}
 // The converter (builtinDeclToFunction in the memql package) walks
 // Fields + Attributes to produce a Function with Type=builtin.
 type BuiltinDecl struct {
+	DocComment string          // attached /// documentation, used for capability discovery
 	Name       string          // builtin name
 	Attributes []*Attribute    // builtin-level annotations
 	Fields     []*BuiltinField // body field declarations

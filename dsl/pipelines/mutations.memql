@@ -132,6 +132,7 @@ mutation run createPipelineRun {
     rerunOf         string
     rerunFailedOnly bool
     deliveryId      string
+    inboundRequestId string
     pullRequest     int
     headBranch      string
     baseSha         string
@@ -150,7 +151,7 @@ mutation run createPipelineRun {
     durationMs      int
   }
   insert {
-    accept { pipelineId, accountId, repository, sha, mode, event, runKey, attempt, trigger, rerunOf, deliveryId, pullRequest, headBranch, baseSha, title, version, status, refusalCode, refusalMessage, refusalScope, checkRunId, notes, queuedAt, finishedAt, durationMs }
+    accept { pipelineId, accountId, repository, sha, mode, event, runKey, attempt, trigger, rerunOf, deliveryId, inboundRequestId, pullRequest, headBranch, baseSha, title, version, status, refusalCode, refusalMessage, refusalScope, checkRunId, notes, queuedAt, finishedAt, durationMs }
     stamp {
       id: args.runId
       ownerUserId: actor.userId

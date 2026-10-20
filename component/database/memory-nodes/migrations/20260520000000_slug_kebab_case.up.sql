@@ -103,21 +103,30 @@ $$ LANGUAGE SQL IMMUTABLE;
 
 -- v1:agents:agentRole: id is the slug; payload.slug, lockedDomainIds,
 -- defaultDomainIds, lockedToolSlugs are all kebab targets.
-UPDATE "MemoryNodes" SET
-  id = kebab_slug(id),
-  payload = kebab_set_array(
+-- Replacing the complete row in one statement also supports compressed
+-- history: Timescale rejects UPDATE of id when it is an ordering column.
+-- RETURNING * preserves every stored column, and a failed insert rolls the
+-- deletion back. No whole-table decompression or changed retention policy.
+WITH moved AS (
+  DELETE FROM "MemoryNodes"
+  WHERE concept = 'v1:agents:agentRole'
+  AND (
+    id LIKE '%\_%' ESCAPE '\'
+    OR payload->>'slug' LIKE '%\_%' ESCAPE '\'
+    OR payload::text LIKE '%\_%' ESCAPE '\'
+  )
+  RETURNING *
+)
+INSERT INTO "MemoryNodes"
+SELECT (jsonb_populate_record(NULL::"MemoryNodes", to_jsonb(moved) ||
+  jsonb_build_object('id', kebab_slug(id), 'payload', kebab_set_array(
               kebab_set_array(
                 kebab_set_array(
                   kebab_set_scalar(payload, 'slug'),
                   '{lockedDomainIds}'),
                 '{defaultDomainIds}'),
-              '{lockedToolSlugs}')
-WHERE concept = 'v1:agents:agentRole'
-  AND (
-    id LIKE '%\_%' ESCAPE '\'
-    OR payload->>'slug' LIKE '%\_%' ESCAPE '\'
-    OR payload::text LIKE '%\_%' ESCAPE '\'
-  );
+              '{lockedToolSlugs}')))).*
+FROM moved;
 
 --bun:split
 
@@ -139,21 +148,30 @@ WHERE concept = 'v1:agents:agent'
 
 -- v1:common:knowledgeDomain: id (after the concept prefix), payload.id,
 -- relevantForRoles, requiredByToolSlugs, lockedForRoles.
-UPDATE "MemoryNodes" SET
-  id = regexp_replace(id, '^(.*:v1:common:knowledgeDomain:)(.*)$',
-                      '\1' || kebab_slug(substring(id from '[^:]+$'))),
-  payload = kebab_set_array(
+-- Replacing the complete row in one statement also supports compressed
+-- history: Timescale rejects UPDATE of id when it is an ordering column.
+-- RETURNING * preserves every stored column, and a failed insert rolls the
+-- deletion back. No whole-table decompression or changed retention policy.
+WITH moved AS (
+  DELETE FROM "MemoryNodes"
+  WHERE concept = 'v1:common:knowledgeDomain'
+  AND (
+    id LIKE '%\_%' ESCAPE '\'
+    OR payload::text LIKE '%\_%' ESCAPE '\'
+  )
+  RETURNING *
+)
+INSERT INTO "MemoryNodes"
+SELECT (jsonb_populate_record(NULL::"MemoryNodes", to_jsonb(moved) ||
+  jsonb_build_object('id', regexp_replace(id, '^(.*:v1:common:knowledgeDomain:)(.*)$',
+                      '\1' || kebab_slug(substring(id from '[^:]+$'))), 'payload', kebab_set_array(
               kebab_set_array(
                 kebab_set_array(
                   kebab_set_scalar(payload, 'id'),
                   '{relevantForRoles}'),
                 '{requiredByToolSlugs}'),
-              '{lockedForRoles}')
-WHERE concept = 'v1:common:knowledgeDomain'
-  AND (
-    id LIKE '%\_%' ESCAPE '\'
-    OR payload::text LIKE '%\_%' ESCAPE '\'
-  );
+              '{lockedForRoles}')))).*
+FROM moved;
 
 --bun:split
 

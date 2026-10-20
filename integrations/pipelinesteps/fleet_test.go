@@ -685,8 +685,6 @@ func TestFleetStepStoresItsArtifactsAndNotes(t *testing.T) {
 	}{
 		{"no archive: the paths the machine says matched nothing",
 			`{"exitCode":0,"durationMs":10,"artifactsMissing":["missing.txt"]}`, []string{"missing.txt"}},
-		{"no archive from a failed command that packed nothing and names nothing",
-			`{"exitCode":2,"durationMs":10,"artifactsMissing":[]}`, nil},
 		{"no archive and no word from the machine: every declared path",
 			`{"exitCode":0,"durationMs":10}`, nil},
 	} {
@@ -708,16 +706,22 @@ func TestFleetStepStoresItsArtifactsAndNotes(t *testing.T) {
 		})
 	}
 
-	t.Run("a command that failed keeps its exit code beside the failure", func(t *testing.T) {
-		// As on the cluster: the artifacts' failure-class code is the step's
-		// failure, and the command's exit status stays as it chose.
-		d := &fakeDispatcher{answer: answer(`{"exitCode":2,"durationMs":10,"artifactsTooLarge":true,"artifactsMissing":[]}`)}
-		f, _, _, _ := newTestFleet(t, d)
-		res := runFleet(t, f, fleetArtifactReq())
-		if res.Status != pl.OutcomeFailed || res.ExitCode != 2 || res.Failure == nil || res.Failure.Code != pl.CodeArtifactTooLarge {
-			t.Fatalf("result = %+v (failure %+v), want failed %s with the command's exit 2", res, res.Failure, pl.CodeArtifactTooLarge)
-		}
-	})
+	for _, c := range []struct{ name, out, note string }{
+		{"failed command with no archive", `{"exitCode":2,"durationMs":10,"artifactsMissing":[]}`, "stream does not match"},
+		{"failed command with an oversized archive", `{"exitCode":2,"durationMs":10,"artifactsTooLarge":true,"artifactsMissing":[]}`, "larger than it sends back"},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			d := &fakeDispatcher{answer: answer(c.out)}
+			f, lib, _, _ := newTestFleet(t, d)
+			res := runFleet(t, f, fleetArtifactReq())
+			if res.Status != pl.OutcomeFailed || res.ExitCode != 2 || res.Failure != nil || len(lib.files) != 1 || res.LogFileID == "" {
+				t.Fatalf("result = %+v, want the command's exit 2 and retained log", res)
+			}
+			if len(res.Notes) != 1 || res.Notes[0].Code != pl.CodeArtifactMissing || !strings.Contains(res.Notes[0].Message, c.note) {
+				t.Fatalf("secondary artifact failure was lost: %+v", res.Notes)
+			}
+		})
+	}
 
 	t.Run("an archive past the cap is refused before it is decoded", func(t *testing.T) {
 		// No gzip at all: the stream size check must refuse it before extraction.

@@ -256,29 +256,24 @@ func TestDeliverApprovalTargetsCorrectsAnExpiredComputerAccessRequest(t *testing
 	require.Equal(t, goals[1:], rest)
 }
 
-// A budget pause saves the message for when the limit is raised. The work
-// integration's answer is what says it was saved.
-func TestDeliverApprovalTargetsSavesBudgetGuidance(t *testing.T) {
+// Progress checkpoints take a correction through the ordinary feedback path.
+// Retired numeric budget approvals cannot grant resources or take guidance.
+func TestDeliverApprovalTargetsAnswersProgressAndRefusesRetiredBudget(t *testing.T) {
 	a, _, ctx, conversation, _, write := guidanceFixture(t)
 	actor, _ := auth.AccessFromContext(ctx)
-	hike, budget := parkedGoal(write, conversation, "hike-goal", "Hike near Tucson", "budget", map[string]any{"resumeKind": "checkpoint", "continuationId": "continuation"}, nil)
-	trail, question := parkedGoal(write, conversation, "trail-goal", "Trail report", "feedback", map[string]any{"kind": "text"}, nil)
+	hike, _ := parkedGoal(write, conversation, "hike-goal", "Hike near Tucson", "budget", map[string]any{"resumeKind": "checkpoint", "continuationId": "old"}, nil)
+	trail, question := parkedGoal(write, conversation, "trail-goal", "Trail report", "feedback", map[string]any{"progressLimit": true, "resumeKind": "checkpoint", "continuationId": "continuation"}, nil)
 	goals := listGoals(t, a, ctx, AskTurn{ID: "hike", RunID: hike, Prompt: "Plan a hike."}, AskTurn{ID: "trail", RunID: trail, Prompt: "Write a trail report."})
-	runs := map[string]string{budget: hike, question: trail}
-	calls := stubDecideApproval(a, func(args map[string]any) (map[string]any, error) {
-		approval := BareShortId(fmt.Sprint(args["approvalId"]))
-		return map[string]any{"approvalId": approval, "runId": runs[approval], "decision": "", "runResumed": false, "guidanceSaved": true, "savedGuidance": "Keep it cheap."}, nil
-	})
-	delivered, rest := a.deliverApprovalTargets(ctx, goals, "Keep it cheap.")
-	require.Empty(t, rest)
-	require.Equal(t, []decideApprovalCall{
-		{caller: actor.UserId, args: guidanceAnswer(question, "Keep it cheap.")},
-		{caller: actor.UserId, args: guidanceAnswer(budget, "Keep it cheap.")},
-	}, *calls)
-	require.Equal(t, []AskRouteTarget{
-		{GoalID: "trail-goal", RunID: trail, Title: "Trail report", Status: routeSaved, ApprovalID: question, Text: "Keep it cheap."},
-		{GoalID: "hike-goal", RunID: hike, Title: "Hike near Tucson", Status: routeSaved, ApprovalID: budget, Text: "Keep it cheap."},
-	}, delivered, "whatever the request, a saved message reads Saved")
+	calls := stubDecideApproval(a, resumedReply(trail))
+	delivered, rest := a.deliverApprovalTargets(ctx, goals, "Use the saved work and focus on the shorter trail.")
+	require.Len(t, rest, 1)
+	require.Equal(t, hike, rest[0].RunID)
+	require.Equal(t, []decideApprovalCall{{caller: actor.UserId, args: guidanceAnswer(question, "Use the saved work and focus on the shorter trail.")}}, *calls)
+	require.Equal(t, []AskRouteTarget{{GoalID: "trail-goal", RunID: trail, Title: "Trail report", Status: routeAnswered, ApprovalID: question, Text: "Use the saved work and focus on the shorter trail."}}, delivered)
+	kind, status, reason := routeGoalDelivery(rest[0].Run, rest[0].Approval)
+	require.Equal(t, deliverNone, kind)
+	require.Equal(t, routeNotDelivered, status)
+	require.Equal(t, routeReasonReview, reason)
 }
 
 // A request that refuses the message, or answers nothing, leaves it Not

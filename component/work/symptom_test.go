@@ -333,8 +333,8 @@ func TestApprovalKindForVerdict_MoneyAsksAboutMoney(t *testing.T) {
 	if !ok {
 		t.Fatal("the budget rule did not fire")
 	}
-	if got := ApprovalKindForVerdict(ActAsk, budgetEvidence); got != ApprovalKindBudget {
-		t.Fatalf("kind = %q, want %q", got, ApprovalKindBudget)
+	if got := ApprovalKindForVerdict(ActAsk, budgetEvidence); got != ApprovalKindFeedback {
+		t.Fatalf("kind = %q, want %q", got, ApprovalKindFeedback)
 	}
 
 	// Everything else is unchanged, including the other escalating rules --

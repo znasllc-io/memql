@@ -361,7 +361,8 @@ func TestRenderCarriesTheLaneScope(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if strings.Count(call, `"scope":"cluster"`) != 2 {
-		t.Fatalf("the two fleet lanes did not render their scope: %s", call)
+	// The two fleet doors and the embeddings lane are cluster-scoped.
+	if strings.Count(call, `"scope":"cluster"`) != 3 {
+		t.Fatalf("the three cluster lanes did not render their scope: %s", call)
 	}
 }

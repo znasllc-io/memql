@@ -1,50 +1,31 @@
 package main
 
 import (
-	"os"
 	"slices"
 	"strings"
 	"testing"
 
 	"github.com/znasllc-io/memql/component/pipelines"
-	"gopkg.in/yaml.v3"
 )
 
 // These are independent lanes, not packages already included in go-tests.
-// Hold their actual commands to the hosted lanes while both paths exist.
-func TestEnginePortableLanesKeepHostedCommands(t *testing.T) {
+// Hold their actual commands to the supported suites and failure contracts.
+func TestEnginePortableLanesKeepRequiredCommands(t *testing.T) {
 	spec := engineManifest(t).Pipeline
-	workflow := readManifestCIWorkflow(t)
-	for _, name := range []string{"sdk-ts-typecheck", "viewkit-checks"} {
+	for name, want := range map[string][]string{
+		"sdk-ts-typecheck": {"scripts/ci/retry.sh -- make sdk-ts-install", "make sdk-ts-typecheck", "make sdk-ts-test"},
+		"viewkit-checks":   {"scripts/ci/retry.sh -- make viewkit-install", "make viewkit-typecheck", "make viewkit-test"},
+	} {
 		step, ok := engineDeclaredStep(spec, name)
-		if !ok {
-			t.Fatalf("missing portable lane %s", name)
-		}
-		var want []string
-		for _, command := range workflow.Jobs[name].Steps {
-			if strings.TrimSpace(command.Run) != "" {
-				want = append(want, strings.TrimSpace(command.Run))
-			}
-		}
-		got := portableCommands(step.Run)
-		if len(want) < 3 || !slices.Equal(got, want) {
-			t.Errorf("%s no longer runs the hosted checks in order: got %q want %q", name, got, want)
+		if !ok || !slices.Equal(portableCommands(step.Run), want) {
+			t.Errorf("%s must install, typecheck and test in order", name)
 		}
 	}
 	conformance, ok := engineDeclaredStep(spec, "mcp-conformance")
-	if !ok {
-		t.Fatal("MCP conformance missing")
+	if !ok || !slices.Contains(portableCommands(conformance.Run), "go test -count=1 -timeout=600s -v ./test/conformance/...") {
+		t.Fatal("conformance no longer runs its real database suite")
 	}
-	var hosted string
-	for _, step := range workflow.Jobs["conformance"].Steps {
-		if strings.Contains(step.Run, "./test/conformance/...") {
-			hosted = strings.TrimSpace(step.Run)
-		}
-	}
-	if hosted == "" || !slices.Contains(portableCommands(conformance.Run), hosted) {
-		t.Fatalf("conformance does not run its real database suite: %q", hosted)
-	}
-	if value, found := engineStepExports(conformance.Run, "MEMQL_DIFFERENTIAL_REQUIRED"); !found || value != workflow.Jobs["conformance"].Env["MEMQL_DIFFERENTIAL_REQUIRED"] || value != "1" {
+	if value, found := engineStepExports(conformance.Run, "MEMQL_DIFFERENTIAL_REQUIRED"); !found || value != "1" {
 		t.Error("conformance can report a language differential as a passing warning")
 	}
 	for _, name := range []string{"mcp-conformance", "proving"} {
@@ -55,11 +36,7 @@ func TestEnginePortableLanesKeepHostedCommands(t *testing.T) {
 		if value, found := engineStepExports(step.Run, "MEMQL_REQUIRE_DB"); !found || value != "1" {
 			t.Errorf("%s can silently skip database cases", name)
 		}
-		hostedJob := name
-		if name == "mcp-conformance" {
-			hostedJob = "conformance"
-		}
-		if value, found := engineStepExports(step.Run, "MEMQL_DATABASE_DSN"); !found || value == "" || value != workflow.Jobs[hostedJob].Env["MEMQL_DATABASE_DSN"] {
+		if value, found := engineStepExports(step.Run, "MEMQL_DATABASE_DSN"); !found || value != "postgres://memql:memql_dev@localhost:5432/memql?sslmode=disable" {
 			t.Errorf("%s does not reach its isolated database", name)
 		}
 		for _, extension := range []string{"timescaledb CASCADE", `"uuid-ossp"`, `"pgcrypto"`, "vector"} {
@@ -100,28 +77,6 @@ func portableCommands(script string) []string {
 
 func TestEnginePortableTagAndIsolationCoverage(t *testing.T) {
 	spec := engineManifest(t).Pipeline
-	data, err := os.ReadFile(".github/workflows/ci.yml")
-	if err != nil {
-		t.Fatal(err)
-	}
-	var workflow struct {
-		Jobs map[string]struct {
-			Strategy struct {
-				Matrix yaml.Node `yaml:"matrix"`
-			} `yaml:"strategy"`
-		} `yaml:"jobs"`
-	}
-	type tagMatrix struct {
-		Tag     []string `yaml:"tag"`
-		Include []struct {
-			Tag      string `yaml:"tag"`
-			Packages string `yaml:"packages"`
-		} `yaml:"include"`
-	}
-
-	if err := yaml.Unmarshal(data, &workflow); err != nil {
-		t.Fatal(err)
-	}
 	assertCommand := func(name, command string) {
 		t.Helper()
 		step, found := engineDeclaredStep(spec, name)
@@ -129,36 +84,32 @@ func TestEnginePortableTagAndIsolationCoverage(t *testing.T) {
 			t.Errorf("%s lost required command %q", name, command)
 		}
 	}
-	var build, tests tagMatrix
-	buildNode := workflow.Jobs["build-node-tags"].Strategy.Matrix
-	testNode := workflow.Jobs["go-tests-tags"].Strategy.Matrix
-	if err := buildNode.Decode(&build); err != nil {
-		t.Fatal(err)
-	}
-	if err := testNode.Decode(&tests); err != nil {
-		t.Fatal(err)
-	}
-	tags, suites := build.Tag, tests.Include
-	if len(tags) != 5 || len(suites) != 7 {
-		t.Fatal("hosted coverage inventory changed; review parity")
-	}
-	for _, tag := range tags {
+	for _, tag := range []string{"identity", "mcp", "agent", "planner", "workbench"} {
 		assertCommand("build-"+tag, "go build -tags "+tag+" github.com/znasllc-io/memql/...")
 		assertCommand("build-"+tag, "go vet -tags "+tag+" github.com/znasllc-io/memql/...")
 	}
-	for _, suite := range suites {
-		assertCommand("test-"+suite.Tag, "go test -tags "+suite.Tag+" -timeout=300s "+suite.Packages)
+	// scripts/citags additionally walks every tagged test file and checks that
+	// these commands cover its real package and build constraint.
+	for tag, packages := range map[string]string{
+		"agent":     "./app/ ./integrations/agent/ ./integrations/agent/worker/ ./integrations/pipelinesteps/ ./component/node/",
+		"bff":       "./app/ ./component/server/ ./component/node/",
+		"edge":      "./app/ ./component/server/ ./component/node/",
+		"identity":  "./app/ ./component/node/",
+		"mcp":       "./app/ ./component/mcp/ ./component/node/",
+		"planner":   "./app/ ./component/node/",
+		"workbench": "./app/ ./component/node/",
+	} {
+		assertCommand("test-"+tag, "go test -tags "+tag+" -timeout=300s "+packages)
 	}
-	for _, step := range readManifestCIWorkflow(t).Jobs["build-clustere2e"].Steps {
-		if step.Run != "" {
-			assertCommand("build-clustere2e", step.Run)
-		}
+	for _, tag := range []string{"clustere2e", "clustere2e,agent"} {
+		assertCommand("build-clustere2e", "go vet -tags "+tag+" ./test/clustere2e/")
+		assertCommand("build-clustere2e", "go test -tags "+tag+" -c -o /dev/null ./test/clustere2e/")
 	}
 	assertCommand("build-clustere2e", "export GOWORK=off")
 	assertCommand("module-boundaries", "bash scripts/ci/module-integrity.sh")
 	bashStep, found := engineDeclaredStep(spec, "bash32-smoke")
-	if !found || !strings.Contains(string(data), strings.TrimPrefix(bashStep.Image, "docker.io/library/")) || !strings.HasPrefix(bashStep.Image, "docker.io/library/bash@sha256:") {
-		t.Fatal("Bash compatibility does not use the hosted lane's pinned interpreter")
+	if !found || !strings.HasPrefix(bashStep.Image, "docker.io/library/bash@sha256:") {
+		t.Fatal("Bash compatibility does not use a pinned interpreter")
 	}
 	assertCommand("bash32-smoke", "bash ./scripts/ci/bash32-smoke.sh")
 }

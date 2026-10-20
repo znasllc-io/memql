@@ -92,7 +92,7 @@ type CheckResult struct {
 //
 // THE BARE VERSION, not the tag: memql#4061's two-conventions rule says git
 // tags carry the leading v and image tags do not, and
-// dispatch-engine-images-on-release.yml strips it before dispatching. Passing
+// the native release builder strips it for image tags. Passing
 // the tag form here asks for an image tag nothing ever pushed, which would
 // report every release as unbuilt.
 func (r *RegistryChecker) Check(ctx context.Context, repo repoRef, v version) CheckResult {

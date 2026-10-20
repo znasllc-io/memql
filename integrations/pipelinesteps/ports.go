@@ -140,3 +140,10 @@ type TokenMinter interface {
 	// and no error.
 	CloneToken(ctx context.Context, installationID int64, owner, name string) (string, error)
 }
+
+// RepositoryReadTokenMinter is an optional, explicitly requested command grant.
+// It reads contents, checks and pull requests of ONE repository, never writes.
+// It shares the clone token's queue refresh and redaction lifecycle.
+type RepositoryReadTokenMinter interface {
+	RepositoryReadToken(ctx context.Context, installationID int64, owner, name string) (string, error)
+}

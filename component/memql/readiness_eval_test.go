@@ -36,6 +36,10 @@ func fakeResolvers(env map[string]string, vars map[string]string, secrets map[st
 		},
 		IsSecret: func(name string) bool { return strings.HasSuffix(name, "_SECRET") },
 		Hosted:   func(envregistry.Module) bool { return true },
+		// An embedder is bound, so a case about DOORS reads as one: the
+		// embeddings half of the verdict has its own tests
+		// (TestADoorWithoutAnEmbeddingModelDoesNotConfigureAI).
+		EmbedderBound: func(context.Context) bool { return true },
 		// No machines and no federation: the fresh-cluster answer, which is
 		// what every case here that is not about inference wants underneath it.
 		Registrations:        func(context.Context) ([]readiness.RegistrationFacts, error) { return nil, nil },
@@ -166,10 +170,11 @@ func TestInferenceEvaluator(t *testing.T) {
 	if got.State != readiness.Configured {
 		t.Fatalf("a door open must be configured, got %s", got.State)
 	}
-	// The three lanes ride on the row, so the wizard and the Set up group can
-	// say WHICH door is open without a second read.
-	if len(got.Lanes) != 3 {
-		t.Fatalf("the ai report carries %d lanes, want the three doors: %+v", len(got.Lanes), got.Lanes)
+	// The four lanes ride on the row -- the three doors and embeddings -- so
+	// the wizard and the Set up group can say WHICH is open without a second
+	// read.
+	if len(got.Lanes) != 4 {
+		t.Fatalf("the ai report carries %d lanes, want the three doors and embeddings: %+v", len(got.Lanes), got.Lanes)
 	}
 }
 

@@ -33,11 +33,9 @@ it("replays only the exact guidance answer and treats resume false as an incompl
   expect(request.executeQuery.query).not.toContain("permissionMode");
 });
 
-it("preserves a budget guidance save receipt without interpreting it as a resume", async () => {
-  const receipt = { decision: "", runResumed: false, guidanceSaved: true, savedGuidance: "Use the verified record." };
-  const { transport, sendAndWait } = setup(receipt);
-  expect(await transport.approvalGuidance("budget", receipt.savedGuidance)).toEqual({ runResumed: false, guidanceSaved: true, savedGuidance: receipt.savedGuidance });
-  expect(sendAndWait).toHaveBeenCalledWith(expect.objectContaining({ executeQuery: expect.objectContaining({ query: 'builtin decideApproval(approvalId: "budget", decision: "answered", answer: {feedback: "Use the verified record."})' }) }), undefined);
+it("reports a saved-answer resume failure instead of clearing the question",async()=>{
+ const {transport}=setup({runResumed:false,resumeError:"Saved work could not resume"});
+ await expect(transport.answerQuestion("progress",{value:"retry"})).rejects.toThrow("Saved work could not resume");
 });
 
 it("answers a stop question through the generated builtin and trusts only the decision the cluster saved", async () => {

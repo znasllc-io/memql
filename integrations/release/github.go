@@ -343,7 +343,7 @@ type Release struct {
 // CreateRelease publishes a Release for an existing tag.
 //
 // PUBLISHED, NOT A DRAFT, and that is the entire point of the call: only
-// `release: published` fires dispatch-engine-images-on-release.yml, so a draft
+// `release: published` delivers the native pipeline release event, so a draft
 // would create a Release that builds nothing while looking exactly like
 // success.
 //

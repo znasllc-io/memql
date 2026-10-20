@@ -210,7 +210,8 @@ depends on what the goal is doing and where it started:
 | Waiting on a timer, a retry, a repair, a re-plan, other work or an outside event | Is read when the goal resumes | Queued, then Received |
 | Waiting on a question for you | Becomes the answer | Answered |
 | Waiting on a permission | Is a correction. Nothing is approved. | Sent, not approved |
-| Paused on its budget | Is saved for when you raise the limit | Saved |
+| Waiting for progress direction | Answers the saved-work checkpoint | Answered |
+| At its overall limit | Cannot provide more guidance; open the saved result | Not delivered |
 | Waiting on a review that takes no messages | Is not delivered. Open the request to answer it. | Not delivered |
 | Started outside this conversation (for example in Nexus) | Work guidance is not delivered. A request the goal waits on can still take the message. | Not delivered, unless a request takes it |
 | Ended before reading the message | Is not received | Not received |

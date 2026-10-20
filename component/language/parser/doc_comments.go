@@ -119,7 +119,7 @@ func JoinDocComment(lines []string) string {
 
 // attachDocComment stores the joined doc on the definition node's DocComment
 // slot -- one attach site, one type switch, every describable kind from the
-// design's ruling-1 target set. For kinds outside the set (seed, builtin)
+// supported target set, including discoverable builtins. For seeds
 // the block was already consumed by takeDocFor and is simply discarded --
 // observably identical to the detached-block behavior: ignored.
 func attachDocComment(def Node, doc string) {
@@ -139,6 +139,8 @@ func attachDocComment(def Node, doc string) {
 	case *ShapeDecl:
 		d.DocComment = doc
 	case *ToolDecl:
+		d.DocComment = doc
+	case *BuiltinDecl:
 		d.DocComment = doc
 	case *PromptDecl:
 		d.DocComment = doc

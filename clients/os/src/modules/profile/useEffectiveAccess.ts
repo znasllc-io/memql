@@ -1,6 +1,8 @@
 import { useEffect, useState } from "react";
 
 import { useOsConnection } from "../../live/connection";
+import { onAppResume } from "../../live/resume";
+import { useConnectionRecovery, useConnectionStatus } from "../../chrome/connection";
 import { boolOr, flatten } from "../../kit/rows";
 import {
   effectiveAccessEpoch,
@@ -47,6 +49,8 @@ import {
  */
 export function useEffectiveAccess(): number {
   const connection = useOsConnection();
+  const status = useConnectionStatus();
+  const { managed } = useConnectionRecovery();
   const [epoch, setEpoch] = useState(() => effectiveAccessEpoch());
   const [nonce, setNonce] = useState(0);
 
@@ -54,16 +58,15 @@ export function useEffectiveAccess(): number {
   useEffect(() => {
     const again = () => setNonce((n) => n + 1);
     const offGrant = onGrantWritten(again);
-    const onFocus = () => again();
-    window.addEventListener("focus", onFocus);
+    const stopResume = onAppResume(again);
     return () => {
       offGrant();
-      window.removeEventListener("focus", onFocus);
+      stopResume();
     };
   }, []);
 
   useEffect(() => {
-    if (connection === null) return;
+    if (connection === null || (managed && status !== "connected") || document.visibilityState === "hidden") return;
     const controller = new AbortController();
     let live = true;
     void (async () => {
@@ -89,7 +92,7 @@ export function useEffectiveAccess(): number {
       live = false;
       controller.abort();
     };
-  }, [connection, nonce]);
+  }, [connection, nonce, status, managed]);
 
   return epoch;
 }

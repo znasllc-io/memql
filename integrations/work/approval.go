@@ -40,6 +40,9 @@ func (i *Integration) handleDecideApproval(ctx context.Context, args map[string]
 	if run, running := common.RunFromContext(ctx); ac.Synthetic || ac.Unranked || (running && run.RunId != "") {
 		return nil, fmt.Errorf("work: an approval requires a person's interactive decision, not a running job")
 	}
+	if _, oldLimit := argMap(args, "answer")["newLimit"]; oldLimit {
+		return nil, fmt.Errorf("work: numeric budget approvals are no longer supported; give feedback on the saved work instead")
+	}
 	approvalId := argString(args, "approvalId")
 	if approvalId == "" {
 		return nil, fmt.Errorf("work: decideApproval needs an approvalId")
@@ -58,19 +61,23 @@ func (i *Integration) handleDecideApproval(ctx context.Context, args map[string]
 	var verifyPermissionDecision func(context.Context) error
 	_, typedPermission := argMap(args, "answer")["permissionMode"]
 	_, typedGuidance := argMap(args, "answer")["feedback"]
-	_, budgetLimit := argMap(args, "answer")["newLimit"]
 	_, choiceAnswer := argMap(args, "answer")["value"]
+	textAnswer, hasText := argMap(args, "answer")["text"]
 	modelCheckpointAnswer := false
-	if choiceAnswer && decision == "answered" {
+	if (choiceAnswer || hasText) && decision == "answered" {
 		// This read selects lock lifetime only. Ownership and the exact pending
 		// decision are checked again under that lock below.
 		rows, readErr := i.store().query(memql.ContextWithFreshRead(ctx), "query "+call("workApprovalForOwner", map[string]any{"approvalId": approvalId}))
 		if readErr != nil {
 			return nil, readErr
 		}
-		modelCheckpointAnswer = len(rows) == 1 && rowString(rows[0], "kind") == "feedback" && work.IsModelCallCheckpoint(rowMap(rows[0], "subject"))
+		modelCheckpointAnswer = len(rows) == 1 && rowString(rows[0], "kind") == "feedback" && (work.IsReasoningCheckpoint(rowMap(rows[0], "subject")) || work.IsProgressFeedback(rowMap(rows[0], "subject")))
+		if hasText && len(argMap(args, "answer")) == 1 && len(rows) == 1 && work.IsProgressFeedback(rowMap(rows[0], "subject")) {
+			args["answer"] = map[string]any{"feedback": textAnswer}
+			typedGuidance = true
+		}
 	}
-	if ((typedPermission || budgetLimit) && decision == "approved") || ((typedGuidance || modelCheckpointAnswer) && decision == "answered") {
+	if (typedPermission && decision == "approved") || ((typedGuidance || modelCheckpointAnswer) && decision == "answered") {
 		release, verifyPermissionDecision, err = i.computerPermissionDecisionGate(ctx, approvalId)
 	} else {
 		release, err = i.decisionGate(ctx, approvalId)
@@ -119,7 +126,7 @@ func (i *Integration) handleDecideApproval(ctx context.Context, args map[string]
 			return i.resultNode(recovered), nil
 		}
 
-		if recovered, err := i.recoverBudgetDecision(ctx, approvalId, decision, argMap(args, "answer")); err != nil {
+		if recovered, err := i.recoverProgressDecision(ctx, approvalId, decision, argMap(args, "answer")); err != nil {
 			return nil, err
 		} else if recovered != nil {
 			return i.resultNode(recovered), nil
@@ -162,8 +169,8 @@ func (i *Integration) handleDecideApproval(ctx context.Context, args map[string]
 	if kind == "scopeElevation" && decision == "answered" && guidance == "" {
 		return nil, fmt.Errorf("work: computer access requires approval or rejection")
 	}
-	if kind == work.ApprovalKindBudget && decision == "answered" && guidance == "" {
-		return nil, fmt.Errorf("work: a budget request needs approval, rejection, or explicit guidance saved for its checkpoint")
+	if kind == work.ApprovalKindBudget && decision != "rejected" {
+		return nil, fmt.Errorf("work: this older limit request can only be closed; start a new request using the saved results")
 	}
 	if kind == work.ApprovalKindProcedurePromotion && decision == "answered" {
 		return nil, fmt.Errorf("work: a procedure promotion is decided approved (the procedure moves from shadow to canary) or rejected (it stays in shadow); it takes no answer")
@@ -238,9 +245,9 @@ func (i *Integration) handleDecideApproval(ctx context.Context, args map[string]
 			return nil, err
 		}
 	}
-	if kind == "feedback" && work.IsModelCallCheckpoint(rowMap(approval, "subject")) && decision != "rejected" && guidance == "" {
+	if kind == "feedback" && work.IsReasoningCheckpoint(rowMap(approval, "subject")) && decision != "rejected" && guidance == "" {
 		if !modelCheckpointAnswer || verifyPermissionDecision == nil || decision != "answered" || len(answer) != 1 || (answer["value"] != "retry" && answer["value"] != "abandon") {
-			return nil, fmt.Errorf("work: choose Retry or Abandon for this saved model checkpoint")
+			return nil, fmt.Errorf("work: choose one of the offered options for this saved work")
 		}
 	}
 	if kind == "feedback" && decision != "rejected" && guidance == "" {
@@ -258,15 +265,11 @@ func (i *Integration) handleDecideApproval(ctx context.Context, args map[string]
 	// actor.
 	writeCtx := ownerActor(ctx, owner)
 
-	if kind == work.ApprovalKindBudget && guidance != "" {
-		return i.saveBudgetGuidance(writeCtx, approval, guidance, now)
-	}
-	if decision == "approved" && kind == work.ApprovalKindBudget {
-		answer, err = budgetAnswerWithSavedGuidance(approval, answer)
-		if err != nil {
-			return nil, err
-		}
-		if err := i.raiseApprovedBudget(writeCtx, approval, answer, now); err != nil {
+	progressStopped := false
+	if kind == "feedback" && work.IsProgressFeedback(rowMap(approval, "subject")) && decision == "answered" && !work.AnswerAbandons(approval["options"], answer) {
+		if err := i.continueFromProgressFeedback(ctx, approval); errors.Is(err, errProgressLimit) {
+			progressStopped = true
+		} else if err != nil {
 			return nil, err
 		}
 	}
@@ -322,15 +325,18 @@ func (i *Integration) handleDecideApproval(ctx context.Context, args map[string]
 	if decision == "answered" && work.AnswerAbandons(approval["options"], answer) {
 		runDecision = decisionAbandoned
 	}
+	if progressStopped {
+		runDecision = "progress_limit"
+	}
 	var retry *failureRetry
-	if kind == work.ApprovalKindBudget && rowString(rowMap(approval, "subject"), "resumeKind") == waitKindReplan {
+	if work.IsProgressFeedback(rowMap(approval, "subject")) && rowString(rowMap(approval, "subject"), "resumeKind") == waitKindReplan {
 		retry = &failureRetry{stepKey: rowString(approval, "stepKey"), symptom: work.SymptomPlan,
 			reason: rowString(rowMap(approval, "subject"), "resumeReason")}
 	}
 	// An ordinary question pauses the current execution. Its answer must keep
 	// that lineage: the saved tool checkpoint is bound to it, including inside
 	// an explicit rerun. Answering it is not a failure retry.
-	if !(kind == "feedback" && work.IsModelCallCheckpoint(rowMap(approval, "subject"))) && (work.IsFailureQuestion(approval["options"]) || (kind == "scopeElevation" && !typedPermission)) {
+	if retry == nil && !(kind == "feedback" && work.IsReasoningCheckpoint(rowMap(approval, "subject"))) && (work.IsFailureQuestion(approval["options"]) || (kind == "scopeElevation" && !typedPermission)) {
 		retry = &failureRetry{stepKey: rowString(approval, "stepKey"), decidedBy: strings.TrimSpace(ac.UserId)}
 		if work.IsFailureQuestion(approval["options"]) {
 			retry.symptom = work.Symptom(rowString(rowMap(approval, "subject"), "symptom"))
@@ -369,7 +375,8 @@ func (i *Integration) handleDecideApproval(ctx context.Context, args map[string]
 		"approvalId": approvalId,
 		"runId":      runId,
 		"decision":   decision,
-		"runResumed": resumed,
+		"runResumed": resumed && !(work.IsProgressFeedback(rowMap(approval, "subject")) && (progressStopped || runDecision == decisionAbandoned || decision == "rejected")),
+		"runStopped": resumed && (progressStopped || runDecision == decisionAbandoned || decision == "rejected"),
 	}, trainingGoalId, trainingRunId, trainingEscalated, i), nil
 }
 
@@ -483,12 +490,15 @@ func (i *Integration) resumeParkedRun(ctx context.Context, runId, approvalId, de
 		"versionTime": rfc(workRowVersionAfter(run["createdAt"], now)),
 	}
 	switch decision {
-	case "rejected", decisionAbandoned:
+	case "rejected", decisionAbandoned, "progress_limit":
 		fields["status"] = runStatusFailed
 		fields["errorCode"] = "approval_rejected"
 		fields["errorMessage"] = "a person rejected the approval this run was parked on"
 		if decision == decisionAbandoned {
 			fields["errorMessage"] = "a person chose to abandon this run when asked about its failure"
+		}
+		if decision == "progress_limit" {
+			fields["errorCode"], fields["errorMessage"] = "work_limit", errProgressLimit.Error()
 		}
 		fields["finishedAt"] = rfc(now)
 	default:

@@ -9,6 +9,7 @@ import (
 	"time"
 	"unicode"
 
+	"github.com/kljensen/snowball/english"
 	"github.com/znasllc-io/memql/component/auth"
 	memorynodes "github.com/znasllc-io/memql/component/database/memory-nodes"
 	"github.com/znasllc-io/memql/component/language/parser"
@@ -335,7 +336,7 @@ func workCapabilityScore(search, name, description string, purpose ...string) in
 		return 0 // A qualified operation lookup is exact, including an absent one.
 	}
 	words := workCapabilityWords(search)
-	for _, word := range strings.Fields("a an the and or to for of in on at by from is are was were be been with without can could would should do does did have has had i me my we our you your it its this that these those what which who how when where") {
+	for _, word := range workCapabilityTokens("a an the and or to for of in on at by from is are was were be been with without can could would should do does did have has had i me my we our you your it its this that these those what which who how when where") {
 		delete(words, word)
 	}
 	if len(words) == 0 {
@@ -397,8 +398,10 @@ func workCapabilityWords(text string) map[string]bool {
 }
 
 func workCapabilityTokens(text string) []string {
-	// Names use CamelCase; descriptions use words. Match those words, so
-	// asking to "read" does not select "readiness" and "file" finds "files".
+	// Normalize both the search and the declared English contracts with the
+	// same word stemmer: generation/generate and archived/archive must match
+	// across every domain, without per-operation aliases or substring matches.
+	// Qualified names bypass this normalization in workCapabilityScore.
 	runes := []rune(text)
 	var separated strings.Builder
 	for n, r := range runes {
@@ -409,10 +412,7 @@ func workCapabilityTokens(text string) []string {
 	}
 	result := []string{}
 	for _, word := range strings.FieldsFunc(separated.String(), func(r rune) bool { return !unicode.IsLetter(r) && !unicode.IsDigit(r) }) {
-		if len(word) > 3 && strings.HasSuffix(word, "s") && !strings.HasSuffix(word, "ss") {
-			word = strings.TrimSuffix(word, "s")
-		}
-		result = append(result, word)
+		result = append(result, english.Stem(word, false))
 	}
 	return result
 }

@@ -18,6 +18,9 @@ type Config struct {
 	// QueueName opts Jobs into an installed Kueue LocalQueue. Jobs are born
 	// suspended, so an unavailable admission controller cannot start work.
 	QueueName string
+	// QueuePriorityClasses maps trusted pipeline events to installed Kueue
+	// WorkloadPriorityClass names. Repository manifests cannot choose classes.
+	QueuePriorityClasses string
 	// StepCPUMaxMilli bounds a manifest's explicit command CPU reservation.
 	StepCPUMaxMilli int
 
@@ -139,8 +142,9 @@ func ConfigFromEnv(getenv func(string) string) Config {
 		namespace = defaultNamespace
 	}
 	return Config{
-		QueueName:       text(envQueueName),
-		StepCPUMaxMilli: whole(envStepCPUMax, defaultStepCPUMaxMilli, 1, 256000),
+		QueueName:            text(envQueueName),
+		QueuePriorityClasses: text("MEMQL_PIPELINES_QUEUE_PRIORITY_CLASSES"),
+		StepCPUMaxMilli:      whole(envStepCPUMax, defaultStepCPUMaxMilli, 1, 256000),
 
 		ImageBuilder:       text(envImageBuilder),
 		StepMemoryMaxMiB:   whole(envStepMemoryMax, defaultStepMemoryMaxMiB, 128, 1048576),

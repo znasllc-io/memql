@@ -1,0 +1,23 @@
+# Native test budgets. Keep operation deadlines and package selections unchanged.
+# The native runner tests pin the effective commands, selections and budgets.
+databaseParallelism: 4
+classes: |
+  # lane  class     trees               timeout  mode      shards
+  go      root      .                   300s     uncached  1
+  go      default   -                   600s     -         3
+  # The full engine shard passed in 582s on the bounded AKS runner, then
+  # exhausted its 600s package alarm while a new test was only 1s old.
+  # Allow aggregate suite headroom; retain every test, its operation
+  # deadlines, the isolated database and the same execution resources.
+  db      memql     component/memql     900s     serial    2
+  db      packages  component/packages  300s     -         1
+  # All 809 Work cases pass in 176.217s on the bounded AKS runner.
+  # Give this whole package headroom over the old 180s alarm; keep
+  # its operation deadlines, uncached native pass and isolated DB.
+  db      work      integrations/work  300s     serial    1
+  # Revision workflows exercise two engines and must not compete with other DB suites.
+  db      library   integrations/library 180s   serial    1
+  # Campaigns now covers 498 cases, including independent two-engine hops.
+  # Keep each lock/write deadline assertion; give the full suite its own budget.
+  db      campaigns component/campaigns 600s     serial,uncached 1
+  db      default   -                   180s     -         2

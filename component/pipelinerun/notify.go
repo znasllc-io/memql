@@ -305,6 +305,17 @@ func (dr *runDriver) targetOf(ctx context.Context, step pipelines.Step) (notifyT
 		return notifyTarget{}, notifyFailure(pipelines.CodeChannelMissing,
 			"No channel named %s belongs to this pipeline's owner. Create it in Deployables > Settings > Channels, then re-run.", name)
 	}
+	// Permission may have been revoked on another replica since this run was
+	// claimed. The run's frozen execution plan is not a lasting channel grant.
+	current, err := dr.d.Store.PipelineByID(memql.ContextWithFreshRead(ctx), dr.p.ID)
+	if err != nil {
+		return notifyTarget{}, notifyFailure(pipelines.CodeNotifyFailed,
+			"Nothing was sent to %s: current channel permission could not be read.", name)
+	}
+	if current == nil || !sameID(current.OwnerUserID, owner) {
+		return notifyTarget{}, notifyFailure(pipelines.CodeChannelNotAllowed,
+			"Nothing was sent to %s: this pipeline's channel permission is unavailable.", name)
+	}
 	switch {
 	case ch.Status == channelArchived:
 		return notifyTarget{}, notifyFailure(pipelines.CodeChannelArchived,
@@ -312,7 +323,7 @@ func (dr *runDriver) targetOf(ctx context.Context, step pipelines.Step) (notifyT
 	case ch.Status != channelActive:
 		return notifyTarget{}, notifyFailure(pipelines.CodeChannelInvalid,
 			"Channel %s is neither active nor archived, so nothing was sent. Save it again in Deployables > Settings > Channels, then re-run.", name)
-	case !slices.ContainsFunc(dr.p.ChannelIDs, func(id string) bool { return sameID(id, ch.ID) }):
+	case !slices.ContainsFunc(current.ChannelIDs, func(id string) bool { return sameID(id, ch.ID) }):
 		return notifyTarget{}, notifyFailure(pipelines.CodeChannelNotAllowed,
 			"Channel %s exists, but pipeline %s is not one it accepts. Allow the pipeline on the channel in Deployables > Settings > Channels, then re-run.", name, dr.p.Name)
 	}

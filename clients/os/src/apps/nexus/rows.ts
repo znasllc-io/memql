@@ -824,6 +824,7 @@ export function approvalIsPending(approval: ApprovalRow): boolean {
  * detail panel in the data voice, where somebody can read it deliberately.
  */
 export function approvalSubjectLine(approval: ApprovalRow): string {
+  if (approval.kind === "budget") return "This older request is paused. Its results are saved; close it and start a new request using that work.";
   const question = approval.question.trim();
   if (question !== "") return question;
   for (const key of ["summary", "title", "description", "command", "message", "name"]) {
