@@ -8,28 +8,23 @@
 #
 # Two facts are checked, and either one failing fails the run:
 #
-#   1. THE NEWEST RELEASE TAG CARRIES A DOCS BUNDLE. The newest vX.Y.Z tag
-#      (numeric maximum, the same rule integrations/release/version.go uses to
-#      compute the next cut) must have a GitHub Release with a
-#      docs-<X.Y.Z>.tgz asset. publish-docs-bundle.yml attaches it on
-#      `release: published`; a release with no asset is a docs publish that
-#      failed or never ran. A tag with no Release at all fails too: it fired no
-#      workflow, so it has no asset and no images either.
+#   1. THE NEWEST PUBLISHED STABLE RELEASE CARRIES A DOCS BUNDLE. Choose
+#      the numeric maximum vX.Y.Z among non-draft, non-prerelease GitHub
+#      Releases, then require its docs-<X.Y.Z>.tgz asset. Native release builds
+#      reserve immutable tags before approval and publication; an unpublished
+#      or retired candidate is not a release the docs site should serve.
 #   2. THE SITE SERVES THAT VERSION. The docs page (default
 #      https://memql.io/docs/) must carry
 #      <meta name="memql-docs-version" content="X.Y.Z"> equal to the newest
-#      tag's bare version. An absent meta is a failure, not a skip: a site that
+#      release's bare version. An absent meta is a failure, not a skip: a site that
 #      does not say which release it documents cannot be shown current.
 #
-# WHY A SCHEDULED CHECK (docs-current-check.yml, weekly). Every hop from a cut
-# to the site is event-driven, and an event handler that silently does not fire
-# looks exactly like one that has not fired yet. From v0.20.22 to v0.23.5 every
-# release went out with no docs asset, and the site went on serving an old
-# bundle, while every workflow stayed green. This check reads the two ends of
-# the pipeline and says whether they agree; it fixes nothing.
+# This weekly native documentation-audit step checks both ends of publication.
+# From v0.20.22 to v0.23.5 releases had no docs asset while workflows stayed
+# green. A published release with no bundle still fails; the check fixes nothing.
 #
 # Both checks always run and both results are reported, so one failure never
-# hides the other. The tag listing and the release's asset list are captured to
+# hides the other. The release listing and the release's asset list are captured to
 # files and searched there, never piped into `grep -q`: under pipefail an early
 # grep exit can SIGPIPE the writer and fail a check that matched.
 #
@@ -46,7 +41,7 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "${SCRIPT_DIR}/../lib/capability.sh"
 
 cap_init "docs.currentCheck" \
-    "Fail when the newest release tag has no docs bundle asset, or the docs site serves a different memql-docs-version."
+    "Check that docs for the newest published release are available and served by the site."
 cap_spec_param "repo"    "owner/name of the repository whose releases are checked (default: \$GITHUB_REPOSITORY, else znasllc-io/memql)"
 cap_spec_param "siteUrl" "the docs page whose memql-docs-version meta is compared (default: https://memql.io/docs/)"
 cap_spec_param "public-api" "read public GitHub data without credentials (flag)" ""
@@ -90,18 +85,18 @@ function check_prerequisites() {
         command -v python3 &>/dev/null || cap_fail 4 "python3 is required for public GitHub reads"
     else
         command -v gh &>/dev/null \
-            || cap_fail 4 "gh is not installed or not on PATH; it reads the release tags and the release's assets"
+            || cap_fail 4 "gh is not installed or not on PATH; it reads published releases and their assets"
     fi
     command -v curl &>/dev/null \
         || cap_fail 4 "curl is not installed or not on PATH; it fetches the docs page"
     return 0
 }
 
-function read_tags() {
+function read_releases() {
     if [[ "$PUBLIC_API" == true ]]; then
-        python3 "${SCRIPT_DIR}/../lib/github-public-read.py" tags --repo="$REPO"
+        python3 "${SCRIPT_DIR}/../lib/github-public-read.py" published-releases --repo="$REPO"
     else
-        gh api "repos/${REPO}/tags" --paginate --jq '.[].name'
+        gh api "repos/${REPO}/releases" --paginate --jq '.[] | select(.draft == false and .prerelease == false and .published_at != null) | .tag_name'
     fi
 }
 
@@ -109,7 +104,8 @@ function read_assets() {
     if [[ "$PUBLIC_API" == true ]]; then
         python3 "${SCRIPT_DIR}/../lib/github-public-read.py" release-assets --repo="$REPO" --tag="$TAG"
     else
-        gh release view "$TAG" --repo "$REPO" --json assets --jq '.assets[].name'
+        gh release view "$TAG" --repo "$REPO" --json assets,isDraft,isPrerelease,publishedAt \
+            --jq 'if .isDraft == false and .isPrerelease == false and .publishedAt != null then .assets[].name else error("Release is not published and stable") end'
     fi
 }
 
@@ -120,29 +116,29 @@ function make_scratch() {
     return 0
 }
 
-# resolve_newest_tag sets TAG and BARE to the numerically newest vX.Y.Z tag.
+# resolve_newest_release selects the numerically newest published stable release.
 #
 # NUMERIC, not lexicographic: v0.9.2 sorts after v0.17.0 as a string. And only
 # tags that are exactly vX.Y.Z count -- memql-sdk-core-v*, component/*/gen/v*,
 # pre-release suffixes and the bare 0.14.0-era tags are other things.
-function resolve_newest_tag() {
-    local tags_file="${SCRATCH}/tags"
-    if ! read_tags >"$tags_file"; then
-        cap_fail 5 "could not list the tags of ${REPO}, so there is no newest release to check"
+function resolve_newest_release() {
+    local releases_file="${SCRATCH}/releases"
+    if ! read_releases >"$releases_file"; then
+        cap_fail 5 "could not list the published releases of ${REPO}, so there is no newest release to check"
     fi
-    BARE="$(grep -E '^v[0-9]+\.[0-9]+\.[0-9]+$' "$tags_file" \
+    BARE="$(grep -E '^v[0-9]+\.[0-9]+\.[0-9]+$' "$releases_file" \
         | sed 's/^v//' \
         | sort -t. -k1,1n -k2,2n -k3,3n \
         | tail -n 1 || true)"
     if [[ -z "$BARE" ]]; then
-        cap_fail 5 "${REPO} has no vX.Y.Z tag, so there is no release whose docs could be current"
+        cap_fail 5 "${REPO} has no published stable vX.Y.Z release, so there are no release docs to check"
     fi
     TAG="v${BARE}"
     ASSET="docs-${BARE}.tgz"
     cap_result_set "tag" "$TAG"
     cap_result_set "version" "$BARE"
     cap_result_set "asset" "$ASSET"
-    cap_info "newest release tag in ${REPO}: ${TAG}"
+    cap_info "newest published release in ${REPO}: ${TAG}"
     return 0
 }
 
@@ -201,7 +197,7 @@ function main() {
 
     check_prerequisites
     make_scratch
-    resolve_newest_tag
+    resolve_newest_release
     check_asset
     read_site_version
 
