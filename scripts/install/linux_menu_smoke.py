@@ -1,5 +1,6 @@
 """Exercise the built Linux tray on a private session bus, without a desktop."""
 import argparse
+import json
 import pathlib
 import select
 import subprocess
@@ -47,6 +48,29 @@ def stop(process):
             process.wait(timeout=5)
 
 
+def worker_heading(binary):
+    # A native fleet check runs beside the owner's installed worker. Read only
+    # its status; never pause or replace it to manufacture an unavailable state.
+    response = subprocess.run(
+        [binary, "worker", "control", "--action=status"],
+        capture_output=True, text=True, timeout=10,
+    )
+    try:
+        reply = json.loads(response.stdout)
+    except json.JSONDecodeError:
+        return "Background worker unavailable"
+    if response.returncode or not reply.get("ok"):
+        return "Background worker unavailable"
+    status = reply.get("status")
+    if status is None:
+        return "Background worker unavailable"
+    servers = status.get("homes", [])
+    if not servers:
+        return "No servers configured"
+    connected = sum(server.get("state") == "Connected" for server in servers)
+    return f"{connected} of {len(servers)} servers connected"
+
+
 def inspect(binary):
     bus = dbus.SessionBus()
     processes = []
@@ -75,9 +99,10 @@ def inspect(binary):
         while True:
             _, layout = desktop_menu.GetLayout(0, -1, [])
             rendered = str(layout)
-            if "Background worker unavailable" in rendered:
+            expected = worker_heading(binary)
+            if expected in rendered:
                 break
-            assert time.monotonic() < deadline, rendered
+            assert time.monotonic() < deadline, f"expected {expected!r} in {rendered}"
             time.sleep(0.1)
         assert "Open worker logs" in rendered and "Quit menu" in rendered
         # A second launch must exit, rather than adding a duplicate icon.
@@ -89,7 +114,7 @@ def inspect(binary):
         assert line(host).split() == [sender, path]
         menu.terminate()
         assert menu.wait(timeout=5) == 0
-        print("PASS: tray registration, icon, menu, missing-worker state, singleton, watcher restart and graceful quit")
+        print("PASS: tray registration, icon, menu, reported worker state, singleton, watcher restart and graceful quit")
     finally:
         for process in reversed(processes):
             stop(process)
