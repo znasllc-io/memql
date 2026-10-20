@@ -27,9 +27,10 @@ import "sync"
 // counting it would make two calls that arrive together against a ceiling
 // of one each see the other and both wait for a slot neither holds.
 type Limiter struct {
-	mu       sync.Mutex
-	perModel map[string]int
-	total    int
+	resources *hostResources
+	mu        sync.Mutex
+	perModel  map[string]int
+	total     int
 	// freed is closed and replaced on every release: a waiter takes the
 	// current channel, re-checks, and wakes when it closes. A broadcast
 	// rather than a sync.Cond so a waiter can also select on its own
