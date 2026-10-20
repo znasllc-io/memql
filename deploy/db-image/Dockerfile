@@ -80,7 +80,7 @@
 # `kubectl apply` during a bring-up rather than at build time.
 #
 # BUILD
-#   Release (GitHub build server -> ACR):  .github/workflows/build-db-image.yml
+#   Native release:                       memql-package.yaml (tests.database-image)
 #   Local dev (k3d):                       make db-image   [ -> scripts/db-image/build.sh ]
 #
 # Deployable images are built on the build server, never an operator laptop
@@ -190,6 +190,6 @@ RUN --mount=type=bind,source=smoke-in-container.sh,target=/memql-db-smoke.sh,rea
     --mount=type=tmpfs,target=/tmp \
     bash /memql-db-smoke.sh "${PG_MAJOR}" "${TIMESCALEDB_VERSION}" "${TIMESCALEDB_PREVIOUS_VERSION}"
 
-# Existing local builds still select the operand by default and exercise the
+# Local builds explicitly select operand and exercise the
 # same script through smoke-test.sh. Native build validation selects `verified`.
 FROM operand AS runtime

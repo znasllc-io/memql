@@ -53,7 +53,11 @@ function ensure_docker() {
 function build_image() {
     local image="$1" pg="$2" ts="$3" tsPrev="$4"
     cap_info "Building ${image} (pg${pg}, timescaledb ${tsPrev} -> ${ts})..."
+    # The legacy builder visits later stages even when the final stage does
+    # not depend on them. Stop before the native verified stage's RUN --mount;
+    # local smoke validation remains the separate smoke_test_image call below.
     docker build \
+        --target operand \
         -f "${REPO_ROOT}/deploy/db-image/Dockerfile" \
         --build-arg "PG_MAJOR=${pg}" \
         --build-arg "TIMESCALEDB_VERSION=${ts}" \

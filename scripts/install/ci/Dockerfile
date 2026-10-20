@@ -19,5 +19,12 @@ COPY --from=daemon /usr/local/bin/runc /usr/local/bin/runc
 COPY --from=daemon /usr/local/bin/docker-init /usr/local/bin/docker-init
 COPY --from=daemon /usr/local/bin/docker-proxy /usr/local/bin/docker-proxy
 COPY --from=daemon /usr/local/bin/dind /usr/local/bin/dind
+# The toolchain deliberately ships only the Docker CLI. Source installs build
+# the engine's cache-mount stages, so this daemon-owning fixture also needs the
+# matching pinned Buildx plugin. Refuse a missing plugin instead of silently
+# falling back to the legacy builder.
+COPY --from=daemon /usr/local/libexec/docker/cli-plugins/docker-buildx /usr/local/libexec/docker/cli-plugins/docker-buildx
+ENV DOCKER_BUILDKIT=1
+RUN runuser -u memql -- docker buildx version
 COPY entrypoint.sh /usr/local/bin/memql-install-fixture
 ENTRYPOINT ["/usr/local/bin/memql-install-fixture"]
