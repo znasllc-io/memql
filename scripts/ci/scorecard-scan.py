@@ -19,6 +19,7 @@ import sys
 import tarfile
 import tempfile
 import time
+import urllib.parse
 import urllib.request
 
 VERSION = "5.5.0"  # The version used by the retiring scorecard-action v2.4.4.
@@ -81,6 +82,41 @@ def validate_sarif(report):
         if not isinstance(run.get("results"), list):
             raise ValueError("SARIF omitted its findings")
     return sum(len(run["results"]) for run in report["runs"])
+
+
+def normalize_sarif(report):
+    """Correct upstream wire formatting without changing rules or findings.
+
+    Scorecard 5.5 emits a non-URI placeholder for repository-level findings
+    and a leading 'v' in semanticVersion. GitHub's strict ingestion validates
+    URI references and SemVer. Keep the original report beside this rendition.
+    """
+    validate_sarif(report)
+    corrections = {"artifactURIs": 0, "semanticVersions": 0}
+
+    def visit(value):
+        if isinstance(value, list):
+            for item in value:
+                visit(item)
+        elif isinstance(value, dict):
+            location = value.get("artifactLocation")
+            if isinstance(location, dict) and isinstance(location.get("uri"), str):
+                uri = location["uri"]
+                # Preserve already escaped paths; escape literal percent signs
+                # as well as spaces/Unicode. uriBaseId is an identifier, not a URI.
+                encoded = urllib.parse.quote(uri, safe=":/?#[]@!$&'()*+,;=-._~%")
+                encoded = re.sub(r"%(?![0-9a-fA-F]{2})", "%25", encoded)
+                if encoded != uri:
+                    location["uri"] = encoded
+                    corrections["artifactURIs"] += 1
+            for item in value.values():
+                visit(item)
+
+    for run in report["runs"]:
+        run["tool"]["driver"]["semanticVersion"] = VERSION
+        corrections["semanticVersions"] += 1
+        visit(run)
+    return corrections
 
 
 def install_binary(directory):
@@ -205,7 +241,15 @@ def main():
                 if head(repo, token) != sha:
                     raise ValueError("repository HEAD changed during analysis; request a fresh audit")
         report = args.output_dir / "results.sarif"
-        summary.update(status="analyzed", checkCount=len(CHECKS), findings=validate_sarif(bounded_json(report)),
+        raw = report.read_bytes()
+        data = bounded_json(report)
+        findings = validate_sarif(data)
+        corrections = normalize_sarif(data)
+        (args.output_dir / "results.raw.sarif").write_bytes(raw)
+        report.write_text(json.dumps(data, indent=2) + "\n")
+        summary.update(status="analyzed", checkCount=len(CHECKS), findings=findings,
+                       sarifNormalization=corrections,
+                       rawSarifSHA256=hashlib.sha256(raw).hexdigest(),
                        sarifSHA256=hashlib.sha256(report.read_bytes()).hexdigest())
     except (OSError, ValueError, subprocess.SubprocessError, tarfile.TarError) as exc:
         summary["error"] = str(exc).replace(token, "[redacted]") if token else str(exc)
