@@ -36,7 +36,7 @@ make tidy                # go mod tidy
 make help                # every target, auto-generated from target comments
 
 make dist                # versioned tar.gz archives + SHA256SUMS into dist/
-make release             # recommend the next version; ARGS="--cut" tags + releases
+make release             # recommend the next version; ARGS="--prepare" opens a version PR
 ```
 
 `./...` really does mean everything here. **This is a single Go module** with no
@@ -53,10 +53,10 @@ directives pointing at a sibling checkout at `../memql`**. Local builds
 therefore resolve against whatever your memql working copy happens to be; CI
 resolves against a **pinned commit**.
 
-- **The pin lives in exactly one file: `.github/memql-pin`.** Every workflow
-  reaches the sibling through `.github/actions/checkout-memql`, which reads it.
-  The `memql-pin-guard` job in `ci.yml` fails if any workflow checks out
-  `znasllc-io/memql` directly.
+- **The pin lives in exactly one file: `.github/memql-pin`.** Native commands
+  use `scripts/ci/prepare.py` to read it from the exact candidate commit and
+  materialize two owned sibling checkouts. The preparation tests refuse
+  ambiguous pins and prevent uncommitted operator changes from entering CI.
 - **The `require` pseudo-version in `go.mod` is NOT the pin.** It is an
   epoch-zero placeholder that exists only because Go must validate a require
   against a real remote or a local `replace`. Reading it as the pin gives you
@@ -1154,7 +1154,7 @@ does not describe, a label attribute forged through `quant`, two tool
 calls whose arguments merge. Seeds run in the ordinary suite; the `fuzz`
 CI job walks every target for 20s. It DISCOVERS them (one grep pass for
 package and name together) rather than listing them, so a target added
-without touching the workflow still runs.
+without touching the pipeline recipe still runs.
 
 Adding one: put it in `fuzz_test.go` beside the code, and write down the
 property in the doc comment. A crasher is written to
@@ -1163,18 +1163,16 @@ committed with the fix rather than described.
 
 ## Releases
 
-Tag-driven: `make release` recommends the next semver; `ARGS="--cut"` bumps
-VERSION + `cmd/memql/main.go`, tags, and creates the GitHub Release as a
-DRAFT, which `release.yml` (on `release: created`) fills with per-platform raw
-binaries (`memql-<os>-<arch>`, `memql-computeruse-<os>-<arch>`), tar.gz
-archives (`memql-<version>-<os>-<arch>.tar.gz`) and their manifests
-(`memql-SHA256SUMS` for the raw headless binaries, `memql-computeruse-SHA256SUMS`,
-`memql-<version>-SHA256SUMS` for the archives) — the names `install.sh` and
-`scripts/install/` download. The script publishes the draft only once that
-run passed and every installer asset is attached, so `releases/latest` never
-points at a release with missing binaries (memql-cockpit#525). The installers
-verify a downloaded binary against its manifest BEFORE running it; a headless
-binary from a release that predates `memql-SHA256SUMS` is vouched for by its
-verified archive. Each installer script lists the lib.sh functions it calls
-(`REQUIRED_LIB_FUNCTIONS`, kept complete by `lib_test.sh`) and refuses a
-cached lib.sh that lacks one, after one refetch past the cache.
+`make release` recommends the next semver; `ARGS="--prepare"` opens a PR that
+bumps VERSION and both binary version fallbacks. After native checks and merge,
+tag the reviewed main commit and start its release build in MemQL Pipelines.
+The native run retains per-platform raw binaries (`memql-<os>-<arch>`), tar.gz
+archives (`memql-<version>-<os>-<arch>.tar.gz`), Mac app/menu archives, checksums
+and binary SBOMs. MemQL verifies and publishes the approved retained candidate
+to the GitHub Release consumed by the installers. See VERSIONING.md.
+
+The installers verify each downloaded binary against its manifest before running it;
+a headless binary from an older release is vouched for by its verified archive.
+Each installer lists the lib.sh functions it calls (`REQUIRED_LIB_FUNCTIONS`,
+kept complete by `lib_test.sh`) and refuses an incomplete cached library after
+one refetch past the cache.

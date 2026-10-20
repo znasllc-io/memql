@@ -15,20 +15,21 @@ pins. Neither selecting this manifest nor compiling it grants fleet access.
 
 ## Coverage inventory
 
-All legacy workflows remain enabled until installed qualification, observation
-and the repository's required-check transition are complete. A compiled command
-is not evidence that its host, trigger or publication path has run.
+The native manifest declares the repository execution paths. Installed
+qualification and the required-check transition must precede retirement of the
+live Actions workflows. Historical evidence below applies only to its recorded
+source; a compiled command is not proof that its host or publication path ran.
 
 | Legacy workflow | MemQL command coverage | Remaining qualification / external effect |
 | --- | --- | --- |
-| `ci.yml` | Headless build, race suite, discovered 20-second fuzz targets, gofmt, vet, single engine-pin guard; container Linux and native macOS computer-use build and vet; macOS archive and isolated installer checks | Native Linux amd64 with Docker for the race suite; the published toolchain supplies Linux X11 headers and compilers; macOS arm64 with Xcode. Real computer-use tests remain excluded because they operate a display. |
+| `ci.yml` | Headless build, Linux tray protocol on a private session bus, race suite, discovered 20-second fuzz targets, gofmt, vet, single engine-pin guard; container Linux and native macOS computer-use build and vet; macOS archive and isolated installer checks | Native Linux amd64 with Docker for the race suite and the existing `dbus-run-session`, system Python `dbus` and `gi` modules for tray assertions; the published toolchain supplies Linux X11 headers and compilers; macOS arm64 with Xcode. Real computer-use tests remain excluded because they operate a display. |
 | `install-scripts-lint.yml` | Bash/POSIX syntax, ShellCheck, installer library/menu tests and rendered-mark/UI assertions on Linux amd64 and macOS arm64 | ShellCheck must already be installed on each consenting host. No host package installation is implicit. |
 | `govulncheck.yml` | Exact v1.3.0 scanner, complete module, retained findings | Weekly trigger and installed run; findings and scanner failures remain failures. |
 | `gitleaks.yml` | Exact v8.30.1 scanner; introduced commits on PR/push/merge candidates, full candidate history and tags weekly or on demand, redacted coverage receipts | Installed commit-range and full-history runs. A secret introduced and removed inside a PR remains in the selected commit range. |
 | `codeql.yml` | Go manual build, pinned CodeQL 2.27.1 bundle with verified SHA-256, **security-and-quality**, retained SARIF | Weekly trigger and driver-owned SARIF publication are declared; installed delivery remains unqualified. Local Linux headless scan passed; other build tags and operating systems need their own coverage. |
 | `release.yml` | Headless four-platform build/archives; computer-use builds for darwin/linux × arm64/amd64 using the AMD64 build pool and an Apple Silicon Mac; macOS menu/app archives | Exact release-event/tag qualification, collection of all four computer-use checksum sidecars, complete immutable candidate assembly and GitHub release upload. No upload command or credential is introduced here. |
 | `sbom.yml` | CycloneDX v1.10.0 inventories **each built binary**, JSON and XML retained with that build | Cross-step collection and publication of the eight binary inventories; manual release-asset re-inventory trigger. A source dependency list cannot substitute for these binary inventories. |
-| `scorecard.yml` | No equivalent declared | Scorecard's branch-protection event, weekly trigger, identity-token attestation, public result publication and SARIF upload require an installed authorized equivalent. This row cannot be marked passed by another scan. |
+| `scorecard.yml` | Full 18-check Scorecard 5.5.0 audit, the retiring action's policy, bounded source-verified JSON/SARIF, repository-scoped read grant | Weekly/manual execution and driver-owned SARIF ingestion require engine v0.30.0 and installed qualification. Native reports replace the Actions-only OIDC public-result upload; no GitHub-runner attestation is claimed. |
 
 PR, merge-candidate, push and release selection use the pipeline event contract.
 The core workflow retains a failure while running the security stage, and blocks
@@ -141,3 +142,35 @@ Cockpit checks and release aggregation still require their own runs. The Mac
 must explicitly allow this repository in its pipeline policy, and the Intel
 Mac release requires already-installed Rosetta. No policy edit or host
 installation is performed by these recipes.
+
+## Native repository audit
+
+The weekly/manual Scorecard command audits the current default-branch head and
+refuses if it differs from the queued source. Historical-commit mode omits checks
+and is not accepted as full coverage. The driver supplies a repository-scoped
+read token; the command retains JSON, SARIF, bounded logs, and a source/policy
+receipt. It never uploads results or receives writer credentials. The separate
+SARIF step publishes retained results through the installed GitHub App.
+
+This replaces the repository audit and code-scanning delivery. The legacy
+Scorecard Action's GitHub OIDC attestation and public Scorecard-service upload
+are retired with Actions; results remain available in MemQL Library and GitHub
+code scanning. A ruleset change can request a manual audit, and weekly scanning
+provides the regular cadence. The native audit and SARIF ingestion must pass in production before this
+workflow retirement is merged.
+
+The Linux tray check runs the same protocol fixture as the retiring workflow:
+registration, icon bytes, menu structure, unavailable-worker state, singleton,
+watcher restart and graceful exit. It uses an isolated session bus and the
+pipeline workspace's private home. Host dependencies are checked before the
+build; an unavailable dependency fails, rather than skipping the test or
+installing packages on the user's machine.
+
+## Release preparation
+
+`make release ARGS="--prepare"` opens a version PR from a clean, current main
+checkout. It refuses existing tags and release branches, stamps both worker
+version fallbacks, and pushes only the version branch. The release-preparation
+fixtures use a local bare Git remote and a fake GitHub CLI to prove those
+boundaries; they create no real PR or release. After merge, an operator tags the
+reviewed commit and starts **Run release** in MemQL. See [Versioning](../VERSIONING.md).

@@ -90,7 +90,7 @@ func NewFleet(opts FleetOptions) (*Fleet, error) {
 	}
 	limiter := opts.Limiter
 	if limiter == nil {
-		limiter = modelcall.NewLimiter()
+		limiter = modelcall.NewHostLimiter()
 	}
 	return &Fleet{
 		logger:      opts.Logger,
