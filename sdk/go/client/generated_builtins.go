@@ -5098,6 +5098,32 @@ func PipelinesDisconnectBuild(args PipelinesDisconnectArgs) string {
 	return b.String()
 }
 
+// PipelinesExpiredArtifacts -- Read confirmed expiry for selected files from the caller's pipeline run. Only provider retirement AND Library cleanup receipts establish expiry. Missing files, failed uploads and unavailable reads do not imply expiry.
+type PipelinesExpiredArtifactsArgs struct {
+	RunId   string
+	FileIds []string
+}
+
+// PipelinesExpiredArtifacts calls the engine builtin pipelinesExpiredArtifacts.
+func (qc *QueryClient) PipelinesExpiredArtifacts(ctx context.Context, args PipelinesExpiredArtifactsArgs) (*Result, error) {
+	call := PipelinesExpiredArtifactsBuild(args)
+	return qc.executeNamed(ctx, "pipelinesExpiredArtifacts", call)
+}
+
+func PipelinesExpiredArtifactsBuild(args PipelinesExpiredArtifactsArgs) string {
+	var b strings.Builder
+	b.WriteString("builtin pipelinesExpiredArtifacts(")
+	b.WriteString("runId: ")
+	b.WriteString(quoteMemQL(args.RunId))
+	if b.Len() > 34 {
+		b.WriteString(", ")
+	}
+	b.WriteString("fileIds: ")
+	b.WriteString(renderMemQLValue(args.FileIds))
+	b.WriteString(")")
+	return b.String()
+}
+
 // PipelinesInstallations -- The installations of this cluster's GitHub App whose accepted permissions lag what the app asks for (epic memql#5479, D15): when an app's permissions grow -- pipelines added checks write -- every existing installation keeps the old set until the account that installed it approves the change on GitHub, and until then every check-run write there answers 403. Asked of GitHub as the app itself. Answers one row, {installations [{installationId, account, accountType, htmlUrl, missingPermissions, suspended}]}: htmlUrl is the installation's settings page, where the change waits. A cluster with no GitHub App answers none; a GitHub that could not be asked is an error, never an empty list.
 type PipelinesInstallationsArgs struct {
 }

@@ -1,3 +1,15 @@
+/// Read confirmed expiry for selected files from the caller's pipeline run.
+/// Only provider retirement AND Library cleanup receipts establish expiry.
+/// Missing files, failed uploads and unavailable reads do not imply expiry.
+@sdk
+@executor("integration.pipelines.expiredArtifacts")
+@args(profile="object")
+@requiresCapability("read", "app:deployables")
+builtin pipelinesExpiredArtifacts {
+  runId string!
+  fileIds []string!
+}
+
 /// Enroll a pre-receipt log in retention after verifying its bytes. The owned
 /// completed step supplies the file; this accepts no object path or file ID.
 @executor("integration.pipelines.adoptLegacyLog")

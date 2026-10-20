@@ -291,6 +291,8 @@ func (s *artifactRetentionScope) operations() map[string]workflowhost.Operation 
 func retentionCapabilities(i *Integration) []memql.IntegrationCapability {
 	s := &artifactRetentionScope{}
 	caps := workflowhost.ScopedCapabilities(s.operations())
+	caps = append(caps, memql.IntegrationCapability{Name: "expiredArtifacts", Description: "Read confirmed expired files from the caller's exact pipeline run; absence alone never proves expiry.", Handler: i.handleExpiredArtifacts,
+		ArgsSchema: map[string]string{"runId": "string (required)", "fileIds": "[]string (required) -- at most 128 bare file identities"}})
 	caps = append(caps, workflowhost.ScopedCapabilities(map[string]workflowhost.Operation{"pipelineRetentionSweepPage": nil})...)
 	caps = append(caps, memql.IntegrationCapability{Name: "sweepArtifacts", Description: "Internal scheduled artifact retention over one leased producer page.", Handler: i.handleSweepArtifacts})
 	caps = append(caps, memql.IntegrationCapability{Name: "adoptLegacyLog", Description: "Verify the selected completed step's existing log before enrolling its bytes in native retention.", Handler: i.handleAdoptLegacyLog,

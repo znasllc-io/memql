@@ -3828,6 +3828,29 @@ QueryClient.prototype.pipelinesDisconnect = function (this: QueryClient, args: P
   return this.executeNamed("pipelinesDisconnect", buildPipelinesDisconnect(args), opts);
 };
 
+/** Read confirmed expiry for selected files from the caller's pipeline run. Only provider retirement AND Library cleanup receipts establish expiry. Missing files, failed uploads and unavailable reads do not imply expiry. */
+export interface PipelinesExpiredArtifactsArgs {
+  runId: string;
+  fileIds: string[];
+}
+
+export function buildPipelinesExpiredArtifacts(args: PipelinesExpiredArtifactsArgs): string {
+  const parts: string[] = [];
+  parts.push("runId: " + renderMemQLValue(args.runId));
+  parts.push("fileIds: " + renderMemQLValue(args.fileIds));
+  return "builtin pipelinesExpiredArtifacts(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    pipelinesExpiredArtifacts(args: PipelinesExpiredArtifactsArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.pipelinesExpiredArtifacts = function (this: QueryClient, args: PipelinesExpiredArtifactsArgs = {} as PipelinesExpiredArtifactsArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("pipelinesExpiredArtifacts", buildPipelinesExpiredArtifacts(args), opts);
+};
+
 /** The installations of this cluster's GitHub App whose accepted permissions lag what the app asks for (epic memql#5479, D15): when an app's permissions grow -- pipelines added checks write -- every existing installation keeps the old set until the account that installed it approves the change on GitHub, and until then every check-run write there answers 403. Asked of GitHub as the app itself. Answers one row, {installations [{installationId, account, accountType, htmlUrl, missingPermissions, suspended}]}: htmlUrl is the installation's settings page, where the change waits. A cluster with no GitHub App answers none; a GitHub that could not be asked is an error, never an empty list. */
 export interface PipelinesInstallationsArgs {
 }
