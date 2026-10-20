@@ -121,12 +121,12 @@ func TestFleetRequiresVerifiedStorageReceipts(t *testing.T) {
 			}
 		})
 	}
-	t.Run("byte-only port cannot store artifacts", func(t *testing.T) {
+	t.Run("byte-only port cannot store logs or artifacts", func(t *testing.T) {
 		f, lib, _, _ := newTestFleet(t, &fakeDispatcher{answer: fleetArtifactAnswer(archive)})
 		f.library = struct{ LibraryStore }{lib}
 		res := runFleet(t, f, fleetArtifactReq())
-		if res.Status != pl.OutcomeFailed || len(res.ArtifactIntentIDs) != 0 || len(lib.files) != 1 {
-			t.Fatalf("artifact fell back to editable byte storage: %+v, files=%d", res, len(lib.files))
+		if res.Status != pl.OutcomeFailed || res.Failure == nil || res.Failure.Code != pl.CodeArtifactUnavailable || len(res.ArtifactIntentIDs) != 0 || len(res.ArtifactFileIDs) != 0 || res.LogFileID != "" || len(lib.files) != 0 {
+			t.Fatalf("log or artifact fell back to editable byte storage: %+v, files=%d", res, len(lib.files))
 		}
 	})
 }
