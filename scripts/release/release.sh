@@ -98,8 +98,8 @@ Options:
     --push              BREAK-GLASS. Push the built tag to the registry.
                         Requires a registry AND
                         --confirm=push-from-an-operator-machine.
-                        Deployable images are built by the GitHub build
-                        server (MemQL native pipelines), not here -- see below.
+                        Deployable images are built by MemQL native pipelines
+                        on the cloud build pool -- see below.
     --confirm=PHRASE    The confirmation --push requires. The only
                         accepted phrase is
                         push-from-an-operator-machine.
