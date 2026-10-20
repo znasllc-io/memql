@@ -76,7 +76,9 @@ func TestProbeCountsVRAMHeldOnACard(t *testing.T) {
 
 // Nothing it can vouch for, nothing sent: the engine then admits on slots.
 func TestProbeSendsNothingItCannotVouchFor(t *testing.T) {
-	memory := func(context.Context) (Memory, bool) { return Memory{Kind: KindSystem, Total: 32 * gib, Available: 8 * gib}, true }
+	memory := func(context.Context) (Memory, bool) {
+		return Memory{Kind: KindSystem, Total: 32 * gib, Available: 8 * gib}, true
+	}
 	down := psServer(t, http.StatusInternalServerError, "")
 	cases := map[string]*Prober{
 		"no runtime address": {OllamaBase: func() string { return "" }, Memory: memory},
