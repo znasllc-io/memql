@@ -63,7 +63,7 @@
 # sibling-remaining unpair ends in the PARTIAL summary, exit 5.
 #
 # Run: bash scripts/install/lib_test.sh
-# Wired into CI by .github/workflows/install-scripts-lint.yml.
+# Wired into native CI by memql-package.yaml.
 
 set -uo pipefail
 

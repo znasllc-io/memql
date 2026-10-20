@@ -4,10 +4,12 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"math"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/shirou/gopsutil/v4/mem"
 )
@@ -16,6 +18,12 @@ import (
 // machine and its other work. The Docker VM and the host are separate limits
 // on macOS; both must have room before creating another workspace.
 func (d Docker) Headroom(ctx context.Context, runtime Runtime) error {
+	other, err := d.memoryUsage(ctx, runtime)
+	if err != nil {
+		return err
+	}
+	// Measure the host after Docker's bounded sampling, so a delayed sample
+	// cannot admit against an older host-memory observation.
 	host, err := mem.VirtualMemoryWithContext(ctx)
 	if err != nil || host.Total == 0 {
 		return fmt.Errorf("cannot measure machine memory headroom")
@@ -24,14 +32,49 @@ func (d Docker) Headroom(ctx context.Context, runtime Runtime) error {
 	if host.Available < budget+host.Total/5 {
 		return ErrBusy
 	}
+	if runtime.MemoryBytes <= 0 {
+		return ErrBusy
+	}
+	usable := uint64(runtime.MemoryBytes) - uint64(runtime.MemoryBytes)/5
+	if other > usable || budget > usable-other {
+		return ErrBusy
+	}
+	return nil
+}
+
+var errDockerStatsUnavailable = errors.New("Docker memory measurement is unavailable")
+
+// Docker can report "-- / --" when a container's statistics sample is not
+// ready. Retry only that observation, never a workbench command or container
+// creation. A persistent missing sample still refuses admission.
+func (d Docker) memoryUsage(ctx context.Context, runtime Runtime) (uint64, error) {
+	ctx, cancel := context.WithTimeout(ctx, 10*time.Second)
+	defer cancel()
 	d.endpoint = runtime.Endpoint
-	if err := d.verifyDaemon(ctx, runtime); err != nil {
-		return err
+	for attempt := 0; attempt < 3; attempt++ {
+		if err := d.verifyDaemon(ctx, runtime); err != nil {
+			return 0, err
+		}
+		out, err := d.command(ctx, nil, "stats", "--no-stream", "--format", "{{json .}}")
+		if err != nil {
+			return 0, fmt.Errorf("cannot measure Docker memory headroom: %w", err)
+		}
+		used, err := dockerMemoryUsage(out)
+		if !errors.Is(err, errDockerStatsUnavailable) || attempt == 2 {
+			return used, err
+		}
+		timer := time.NewTimer(250 * time.Millisecond)
+		select {
+		case <-ctx.Done():
+			timer.Stop()
+			return 0, ctx.Err()
+		case <-timer.C:
+		}
 	}
-	out, err := d.command(ctx, nil, "stats", "--no-stream", "--format", "{{json .}}")
-	if err != nil {
-		return fmt.Errorf("cannot measure Docker memory headroom")
-	}
+	return 0, errDockerStatsUnavailable
+}
+
+func dockerMemoryUsage(out []byte) (uint64, error) {
 	var other uint64
 	for _, line := range bytes.Split(out, []byte{'\n'}) {
 		if len(bytes.TrimSpace(line)) == 0 {
@@ -39,21 +82,24 @@ func (d Docker) Headroom(ctx context.Context, runtime Runtime) error {
 		}
 		var row struct{ MemUsage string }
 		if json.Unmarshal(line, &row) != nil {
-			return fmt.Errorf("Docker returned unreadable memory usage")
+			return 0, fmt.Errorf("Docker returned unreadable memory usage")
+		}
+		if strings.TrimSpace(row.MemUsage) == "-- / --" {
+			return 0, errDockerStatsUnavailable
 		}
 		used, err := memoryQuantity(strings.TrimSpace(strings.SplitN(row.MemUsage, "/", 2)[0]))
 		if err != nil {
-			return err
+			return 0, err
 		}
 		// Count all existing containers, including workbenches from another OS
 		// account on the same daemon. Reserving the full budget again is
 		// conservative and avoids trusting a forgeable container name prefix.
+		if used > math.MaxUint64-other {
+			return 0, fmt.Errorf("Docker memory usage exceeds its numeric bound")
+		}
 		other += used
 	}
-	if runtime.MemoryBytes <= 0 || other+budget > uint64(runtime.MemoryBytes)-uint64(runtime.MemoryBytes)/5 {
-		return ErrBusy
-	}
-	return nil
+	return other, nil
 }
 func memoryQuantity(text string) (uint64, error) {
 	for _, unit := range []struct {

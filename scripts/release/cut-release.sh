@@ -2,20 +2,16 @@
 set -euo pipefail
 
 # cut-release.sh -- recommend the next semver from the commits since the last
-# tag (conventional-commit prefixes; NO AI), then optionally cut a tag-driven
-# release. Cutting bumps the VERSION file + the main.go `version` var,
-# commits, tags vX.Y.Z, pushes, and creates the GitHub Release as a DRAFT --
-# which triggers .github/workflows/release.yml to build + upload the
-# per-platform binaries -- then publishes it only once every asset the
-# installers download is attached (memql-cockpit#525). `releases/latest`
-# never points at a release whose binaries are still building.
+# tag (conventional-commit prefixes; NO AI), then optionally prepare a version
+# pull request. After it merges, tag the reviewed main commit and start its
+# release build in MemQL. Publication uses the retained native candidate.
 #
 # Usage:
 #   make release                         recommend only (safe; shows next version + why)
-#   make release ARGS="--cut"            cut the RECOMMENDED version (asks to confirm)
-#   make release ARGS="--cut --yes"      cut it non-interactively
-#   make release ARGS="--bump=minor --cut"      force a minor bump
-#   make release ARGS="--version=1.2.3 --cut"   force an explicit version
+#   make release ARGS="--prepare"            prepare the recommended version PR
+#   make release ARGS="--prepare --yes"      prepare it non-interactively
+#   make release ARGS="--bump=minor --prepare"      force a minor bump
+#   make release ARGS="--version=1.2.3 --prepare"   force an explicit version
 #
 # Recommendation rules (highest wins across the range):
 #   major  <- a commit subject like `feat!:` / `fix(x)!:`, or `BREAKING CHANGE` in a body
@@ -40,17 +36,31 @@ CONNECT_GO="$REPO_ROOT/internal/worker/connect.go"
 
 function log() { echo "$*" >&2; }
 function err() { echo "ERROR: $*" >&2; }
+function show_help() {
+    cat <<'HELP'
+Prepare a MemQL Cockpit release version.
+
+make release                              Show the recommended next version
+make release ARGS="--prepare"             Open its version PR after confirmation
+make release ARGS="--prepare --yes"       Open it without prompting
+
+Options: --bump=major|minor|patch, --version=X.Y.Z, --dry-run, --help
+After the PR merges, tag the reviewed commit and build it in MemQL Pipelines.
+See VERSIONING.md for candidate publication and download verification.
+HELP
+}
 
 function parse_arguments() {
-    DO_CUT=false; ASSUME_YES=false; FORCE_BUMP=""; FORCE_VERSION=""
+    DO_PREPARE=false; ASSUME_YES=false; FORCE_BUMP=""; FORCE_VERSION=""
     while [[ $# -gt 0 ]]; do
         case "$1" in
-            --cut)        DO_CUT=true; shift ;;
+            --prepare)    DO_PREPARE=true; shift ;;
+            --cut)        err "use --prepare to open a version PR, then build its merged tag in MemQL"; exit 2 ;;
             --yes|-y)     ASSUME_YES=true; shift ;;
             --bump=*)     FORCE_BUMP="${1#*=}"; shift ;;
             --version=*)  FORCE_VERSION="${1#*=}"; shift ;;
-            --dry-run)    DO_CUT=false; shift ;;
-            -h|--help)    grep '^#' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'; exit 0 ;;
+            --dry-run)    DO_PREPARE=false; shift ;;
+            -h|--help)    show_help; exit 0 ;;
             *)            err "unknown arg: $1"; exit 2 ;;
         esac
     done
@@ -105,21 +115,46 @@ function show_range() {
 
 function check_cut_preconditions() {
     if [ -n "$(git -C "$REPO_ROOT" status --porcelain)" ]; then
-        err "working tree is dirty -- commit or stash before cutting a release"; exit 3
+        err "working tree is dirty; commit your changes before preparing a release"; exit 3
     fi
     local br; br="$(git -C "$REPO_ROOT" rev-parse --abbrev-ref HEAD)"
     if [ "$br" != "main" ]; then
-        err "on branch '$br', not 'main' -- releases are cut from main"; exit 3
+        err "on branch '$br'; prepare the version PR from an up-to-date main checkout"; exit 3
     fi
-    command -v gh >/dev/null 2>&1 || { err "gh CLI required to create the release"; exit 4; }
+    command -v gh >/dev/null 2>&1 || { err "gh CLI is required to open the version PR"; exit 4; }
+    local remote_head local_head
+    remote_head="$(git -C "$REPO_ROOT" ls-remote --exit-code origin refs/heads/main)"
+    remote_head="${remote_head%%[[:space:]]*}"
+    local_head="$(git -C "$REPO_ROOT" rev-parse HEAD)"
+    if [ "$local_head" != "$remote_head" ]; then
+        err "main differs from origin; update the checkout before preparing the version PR"; exit 3
+    fi
+    REPOSITORY="$(cd "$REPO_ROOT" && gh repo view --json nameWithOwner -q .nameWithOwner)"
+    [[ "$REPOSITORY" =~ ^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$ ]] || { err "could not resolve the GitHub repository"; exit 4; }
 }
 
 function perform_cut() {
-    local next="$1" tag="v$1"
-    if git -C "$REPO_ROOT" rev-parse "$tag" >/dev/null 2>&1; then
+    local next="$1" tag="v$1" branch="release/v$1" tag_status
+    if git -C "$REPO_ROOT" show-ref --verify --quiet "refs/tags/$tag"; then
         err "tag $tag already exists"; exit 3
     fi
-    log "==> bumping VERSION + main.go to $next"
+    if git -C "$REPO_ROOT" ls-remote --exit-code --tags origin "refs/tags/$tag" >/dev/null; then
+        err "remote tag $tag already exists"; exit 3
+    else
+        tag_status=$?
+        [ "$tag_status" -eq 2 ] || { err "could not check the remote tag"; exit 4; }
+    fi
+    if git -C "$REPO_ROOT" ls-remote --exit-code origin "refs/heads/$branch" >/dev/null; then
+        err "release branch $branch already exists; resume its PR"; exit 3
+    else
+        tag_status=$?
+        [ "$tag_status" -eq 2 ] || { err "could not check the remote release branch"; exit 4; }
+    fi
+    # Check both anchors before modifying any file or creating a branch.
+    grep -q '^var version = "[^"]*"$' "$MAIN_GO" || { err "main.go version declaration is missing"; exit 3; }
+    grep -q '^var cockpitVersionValue = "[^"]*"$' "$CONNECT_GO" || { err "worker version declaration is missing"; exit 3; }
+    git -C "$REPO_ROOT" switch -c "$branch"
+    log "Preparing version $next"
     echo "$next" > "$VERSION_FILE"
     # `var`, not `const`: -ldflags -X can only set a var, so that is what
     # main.go declares. Matching the wrong keyword substitutes NOTHING and
@@ -137,78 +172,15 @@ function perform_cut() {
     fi
     git -C "$REPO_ROOT" add "$VERSION_FILE" "$MAIN_GO" "$CONNECT_GO"
     git -C "$REPO_ROOT" commit -q -m "release: $tag"
-    git -C "$REPO_ROOT" tag -a "$tag" -m "$tag"
-    log "==> pushing main + $tag"
-    git -C "$REPO_ROOT" push origin main
-    git -C "$REPO_ROOT" push origin "$tag"
-    local repo
-    repo="$(gh repo view --json nameWithOwner -q .nameWithOwner)"
-    log "==> creating GitHub Release $tag as a draft (triggers release.yml build+upload)"
-    gh release create "$tag" --repo "$repo" --draft \
-        --title "$tag" --generate-notes --target main
-    publish_when_complete "$repo" "$tag" "$next"
-}
-
-# The assets the installers download. A release missing any of them is not
-# published: a `latest` without its binary is a 404 in the middle of
-# somebody's install.
-function expected_assets() {
-    local ver="$1" platform
-    for platform in darwin-arm64 darwin-amd64 linux-amd64 linux-arm64; do
-        echo "memql-${platform}"
-        echo "memql-computeruse-${platform}"
-        echo "memql-${ver}-${platform}.tar.gz"
-    done
-    echo "memql-SHA256SUMS"
-    echo "memql-computeruse-SHA256SUMS"
-    echo "memql-${ver}-SHA256SUMS"
-    for platform in darwin-arm64 darwin-amd64; do
-        echo "memql-app-${platform}.tar.gz"
-        echo "memql-app-${platform}.tar.gz.sha256"
-        echo "memql-menubar-${platform}.tar.gz"
-        echo "memql-menubar-${platform}.tar.gz.sha256"
-    done
-}
-
-# missing_assets prints the expected assets the draft does not carry yet.
-function missing_assets() {
-    local repo="$1" tag="$2" ver="$3" have asset
-    have="$(gh release view "$tag" --repo "$repo" --json assets --jq '.assets[].name')" || return 1
-    while IFS= read -r asset; do
-        grep -qxF "$asset" <<< "$have" || echo "$asset"
-    done < <(expected_assets "$ver")
-}
-
-# publish_when_complete waits for release.yml on the draft, checks every
-# expected asset is attached, and only then publishes. Anything short of
-# that leaves the draft unpublished and says how to finish.
-function publish_when_complete() {
-    local repo="$1" tag="$2" ver="$3" run="" attempt missing
-    log "==> waiting for release.yml to start for $tag"
-    for ((attempt = 0; attempt < ${RELEASE_RUN_WAIT_ATTEMPTS:-60}; attempt++)); do
-        run="$(gh run list --repo "$repo" --workflow release.yml --branch "$tag" --limit 1 --json databaseId --jq '.[0].databaseId // empty' 2>/dev/null || true)"
-        [[ -z "$run" ]] || break
-        sleep "${RELEASE_POLL_SECONDS:-10}"
-    done
-    if [[ -z "$run" ]]; then
-        err "release.yml never started for $tag; the draft is NOT published."
-        err "Run it with: gh workflow run release.yml --repo $repo -f tag=$tag, then: gh release edit $tag --repo $repo --draft=false --latest"
-        exit 5
-    fi
-    if ! gh run watch "$run" --repo "$repo" --exit-status >&2; then
-        err "release.yml run $run failed for $tag; the draft is NOT published. Fix it, re-run the job, then publish with: gh release edit $tag --repo $repo --draft=false --latest"
-        exit 5
-    fi
-    missing="$(missing_assets "$repo" "$tag" "$ver")" || { err "could not read the assets of $tag; the draft is NOT published."; exit 5; }
-    if [[ -n "$missing" ]]; then
-        err "the draft $tag is missing assets the installers download; it is NOT published:"
-        local asset
-        while IFS= read -r asset; do log "  $asset"; done <<< "$missing"
-        exit 5
-    fi
-    gh release edit "$tag" --repo "$repo" --draft=false --latest
-    log ""
-    log "DONE: $tag published with every installer asset attached."
+    git -C "$REPO_ROOT" push -u origin "HEAD:refs/heads/$branch"
+    release_pr_body="$(mktemp)"
+    trap 'rm -f -- "$release_pr_body"' EXIT
+    printf 'Stamp Cockpit %s in VERSION and both binary version fallbacks.\n\nAfter native checks pass and this PR merges, tag the reviewed main commit and run the tag through MemQL Pipelines. Publish the verified retained candidate through MemQL.\n' "$next" > "$release_pr_body"
+    gh pr create --repo "$REPOSITORY" --base main --head "$branch" \
+        --title "release: $tag" --body-file "$release_pr_body"
+    rm -f -- "$release_pr_body"
+    trap - EXIT
+    log "Version PR prepared. After merge, follow VERSIONING.md to build and publish $tag in MemQL."
 }
 
 function main() {
@@ -224,22 +196,23 @@ function main() {
         level="${FORCE_BUMP:-$(classify_commits "$base")}"
         next="$(bump "$CUR" "$level")"
     fi
+    [[ "$next" =~ ^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$ ]] || { err "version must be MAJOR.MINOR.PATCH"; exit 2; }
 
     show_range "$base"
     log ""
     log "Current:     v${CUR}"
     log "Recommended: v${next}   (${level} bump)"
 
-    if [ "$DO_CUT" != true ]; then
+    if [ "$DO_PREPARE" != true ]; then
         log ""
-        log "(recommend-only) To cut it:  make release ARGS=\"--cut\""
-        log "  override:  make release ARGS=\"--bump=minor --cut\"  |  ARGS=\"--version=X.Y.Z --cut\""
+        log "To prepare its PR: make release ARGS=\"--prepare\""
+        log "Override with --bump=minor or --version=X.Y.Z."
         exit 0
     fi
 
     check_cut_preconditions
     if [ "$ASSUME_YES" != true ]; then
-        printf 'Cut release v%s now? [y/N] ' "$next" >&2
+        printf 'Prepare the version PR for v%s? [y/N] ' "$next" >&2
         read -r reply </dev/tty || reply=""
         case "$reply" in y|Y|yes) ;; *) log "aborted."; exit 0 ;; esac
     fi

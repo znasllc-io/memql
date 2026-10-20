@@ -567,7 +567,7 @@ func SetVersion(v string) {
 // cockpitVersionValue defaults to the VERSION file's contents so a build
 // that never calls SetVersion -- a test, or `go run` -- reports something
 // truthful rather than empty.
-var cockpitVersionValue = "0.20.0"
+var cockpitVersionValue = "0.20.1"
 
 func cockpitVersion() string { return cockpitVersionValue }
 func cockpitBuildTag() string {
