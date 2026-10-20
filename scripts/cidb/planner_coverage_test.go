@@ -1,160 +1,235 @@
 package cidb
 
-// planner_coverage_test.go -- the runtime half of this gate for the planned
-// db-tests lane (memql#5485).
-//
-// The static assertions in dbgate_test.go read `run:` text. Once the lane is a
-// matrix of shards chosen at run time, the text says `${{matrix.packages}}` and
-// nothing more, so the question "does every provisioned package actually run"
-// moves to the planner. This file asks it directly: it runs the REAL planner,
-// in full mode, over the REAL tree, with the class table ci.yml itself carries,
-// and checks every provisioned package lands in a db shard. A planner that
-// dropped one -- a class table that cannot place it, a partition that loses it
-// -- reds this test on every pull request, including the ones where the lane
-// itself is skipped.
+// Read the same manifest, source graph, policy and compiler that production
+// uses. A database package must survive selection, sharding AND the real
+// command builder; checking a retired Actions matrix cannot establish that.
 
 import (
 	"context"
+	"encoding/json"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
+	"testing/fstest"
 
-	"gopkg.in/yaml.v3"
-
-	"github.com/znasllc-io/memql/scripts/ci/selection"
+	"github.com/znasllc-io/memql/component/automations/workflowhost"
+	"github.com/znasllc-io/memql/component/packages"
+	"github.com/znasllc-io/memql/component/pipelines"
 )
 
-const modulePath = "github.com/znasllc-io/memql"
-
-// planJob is the part of ci.yml's plan job this test reads.
-type planJob struct {
-	Outputs map[string]string `yaml:"outputs"`
-	Steps   []struct {
-		ID  string            `yaml:"id"`
-		Run string            `yaml:"run"`
-		Env map[string]string `yaml:"env"`
-	} `yaml:"steps"`
-}
-
-func loadPlanJob(t *testing.T, root string) planJob {
+func nativeSpec(t *testing.T) *pipelines.Spec {
 	t.Helper()
-	data, err := os.ReadFile(filepath.Join(root, ".github", "workflows", ciWorkflow))
+	manifest, err := packages.ReadManifest(os.DirFS(repoRoot(t)))
 	if err != nil {
 		t.Fatal(err)
 	}
-	var wf struct {
-		Jobs map[string]planJob `yaml:"jobs"`
+	if refusal := pipelines.Validate(manifest.Pipeline); refusal != nil {
+		t.Fatal(refusal)
 	}
-	if err := yaml.Unmarshal(data, &wf); err != nil {
-		t.Fatal(err)
-	}
-	job, ok := wf.Jobs["plan"]
-	if !ok {
-		t.Fatal("ci.yml has no `plan` job, yet db-tests reads its matrix (memql#5485)")
-	}
-	return job
+	return manifest.Pipeline
 }
 
-// TestThePlannerFeedsTheDBTestsMatrix holds the wiring between the two jobs:
-// the output db-tests reads is the planner step's, and that step runs the
-// planner.
-func TestThePlannerFeedsTheDBTestsMatrix(t *testing.T) {
-	job := loadPlanJob(t, repoRoot(t))
-	if got := strings.Join(strings.Fields(job.Outputs["db_matrix"]), ""); got != "${{steps.plan.outputs.db_matrix}}" {
-		t.Errorf("plan.outputs.db_matrix = %q; it must be the planner step's own output", job.Outputs["db_matrix"])
-	}
-	found := false
-	for _, s := range job.Steps {
-		if s.ID == "plan" {
-			found = strings.Contains(s.Run, "go run ./scripts/ci/affected plan")
+type databaseStep struct {
+	stage string
+	step  pipelines.StepSpec
+}
+
+func nativeDatabaseStep(t *testing.T, spec *pipelines.Spec) databaseStep {
+	t.Helper()
+	for _, stage := range spec.Stages {
+		for _, step := range stage.Steps {
+			if step.Name != dbTestsJob {
+				continue
+			}
+			if len(stage.On) > 0 && !(slices.Contains(stage.On, "pull_request") && slices.Contains(stage.On, "merge_group")) {
+				t.Fatalf("database coverage does not gate both PRs and merge candidates: %v", stage.On)
+			}
+			if step.Packages != pipelines.PackagesAffected || step.Only != pipelines.OnlyDBGated || step.Shards < 1 || step.When != nil || !slices.Contains(step.Services, "postgres") {
+				t.Fatalf("database step lost its selected partition or database: %+v", step)
+			}
+			return databaseStep{stage.Name, step}
 		}
 	}
-	if !found {
-		t.Error("no step `id: plan` runs `go run ./scripts/ci/affected plan`; db-tests would read a matrix nothing computed")
-	}
+	t.Fatal("native pipeline has no database step")
+	return databaseStep{}
 }
 
-// TestPlannerPlacesEveryProvisionedPackage runs the planner in full mode --
-// what every push and merge_group run gets -- and asserts every package that
-// earned an EnsureSchema TestMain, and every package holding a db-gated test,
-// lands in a db-tests shard.
-func TestPlannerPlacesEveryProvisionedPackage(t *testing.T) {
+func nativeGraph(t *testing.T) *pipelines.Graph {
+	t.Helper()
 	root := repoRoot(t)
-	job := loadPlanJob(t, root)
-	var classesText string
-	for _, s := range job.Steps {
-		if s.ID == "plan" {
-			classesText = s.Env["CLASSES"]
+	cmd := exec.Command("git", "ls-files", "-z", "--cached", "--others", "--exclude-standard")
+	cmd.Dir = root
+	raw, err := cmd.Output()
+	if err != nil {
+		t.Fatal(err)
+	}
+	tree := fstest.MapFS{}
+	for _, name := range strings.Split(string(raw), "\x00") {
+		if filepath.Base(name) != "go.mod" && !strings.HasSuffix(name, ".go") {
+			continue
+		}
+		data, err := os.ReadFile(filepath.Join(root, name))
+		if os.IsNotExist(err) {
+			continue
+		}
+		if err != nil {
+			t.Fatal(err)
+		}
+		tree[name] = &fstest.MapFile{Data: data}
+	}
+	graph, err := pipelines.ScanGoTree(tree)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(graph.Packages()) < 100 || len(graph.Incomplete()) != 0 {
+		t.Fatalf("incomplete repository graph: %v", graph.Incomplete())
+	}
+	return graph
+}
+
+func fullNativePlan(t *testing.T, spec *pipelines.Spec, graph *pipelines.Graph) pipelines.Plan {
+	t.Helper()
+	in := pipelines.CompileInput{
+		Mode: pipelines.ModeFull, Event: pipelines.EventMergeGroup, Compute: pipelines.ComputeClusterAndFleet,
+		Selector:       pipelines.GraphSelector(graph, pipelines.Selection{Full: true}),
+		StageSelection: &pipelines.StageSelection{}, BucketSelection: &pipelines.BucketSelection{},
+		PackagePolicies: map[string]pipelines.PackagePolicy{},
+	}
+	for bucket := range spec.Select.Buckets {
+		in.BucketSelection.Included = append(in.BucketSelection.Included, bucket)
+	}
+	for _, stage := range spec.Stages {
+		on := stage.On
+		if on == nil {
+			on = []string{}
+		}
+		value, err := workflowhost.Run(context.Background(), "pipelineStageIncluded", map[string]any{
+			"event": "merge_group", "mode": "full", "on": on, "runSchedule": "", "stageSchedule": stage.Schedule,
+		}, workflowhost.Options{})
+		included, ok := value.(bool)
+		if err != nil || !ok {
+			t.Fatalf("stage policy: %v %v", value, err)
+		}
+		if included {
+			in.StageSelection.Included = append(in.StageSelection.Included, stage.Name)
+		}
+		for _, step := range stage.Steps {
+			if step.Packages == "" {
+				continue
+			}
+			value, err := workflowhost.Run(context.Background(), "pipelinePackageStepSelection", map[string]any{
+				"mode": "full", "packages": step.Packages, "selectionFull": true, "only": step.Only,
+			}, workflowhost.Options{})
+			policy, ok := value.(map[string]any)
+			if err != nil || !ok {
+				t.Fatalf("package policy: %v %v", value, err)
+			}
+			coverage, coverageOK := policy["coverage"].(string)
+			filter, filterOK := policy["filter"].(string)
+			if !coverageOK || !filterOK {
+				t.Fatal("malformed package policy")
+			}
+			in.PackagePolicies[pipelines.StepKey(stage.Name, step.Name)] = pipelines.PackagePolicy{Coverage: coverage, Filter: filter}
 		}
 	}
-	classes, err := selection.ParseClasses(classesText)
-	if err != nil {
-		t.Fatalf("the plan step's CLASSES table: %v", err)
+	plan, refusal := pipelines.Compile(spec, in)
+	if refusal != nil {
+		t.Fatal(refusal)
 	}
-	tags, err := selection.NodeTags(root)
-	if err != nil {
-		t.Fatal(err)
+	return plan
+}
+
+func TestNativeSelectionUsesTheCanonicalDatabaseTrees(t *testing.T) {
+	spec := nativeSpec(t)
+	nativeDatabaseStep(t, spec)
+	var patterns []string
+	for _, tree := range spec.Select.DBGated {
+		patterns = append(patterns, "./"+tree+"/...")
 	}
-	g, err := selection.LoadGraph(context.Background(), root, modulePath, tags, selection.GoList(root, modulePath+"/..."))
-	if err != nil {
-		t.Fatalf("loading the package graph: %v", err)
+	canonical := canonicalPatterns(t, repoRoot(t))
+	slices.Sort(patterns)
+	slices.Sort(canonical)
+	if !slices.Equal(patterns, canonical) {
+		t.Fatalf("native DB trees %v differ from canonical %v", patterns, canonical)
 	}
-	trees := scriptLines(t, root, "--trees")
-	complement := scriptLines(t, root, "--complement")
-	f, err := os.Open(filepath.Join(root, "scripts", "ci", "shard-timings.tsv"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	timings, err := selection.ReadTimings(f)
-	f.Close()
-	if err != nil {
-		t.Fatal(err)
-	}
-	plan, err := selection.MakePlan(selection.PlanInput{
-		Event: "push", Graph: g, DBTrees: trees, Complement: complement,
-		Classes: classes, Timings: timings, CPUs: 4,
-		GatePatterns: []string{"./"}, TagTrees: []string{"app"},
-	})
-	if err != nil {
-		t.Fatalf("the planner refused a full plan of the real tree: %v", err)
-	}
-	placed := map[string]bool{}
-	for _, s := range plan.DBShards {
-		for _, d := range s.Dirs {
-			placed[d] = true
+}
+
+func TestPlannerPlacesEveryProvisionedPackage(t *testing.T) {
+	spec, graph := nativeSpec(t), nativeGraph(t)
+	declared := nativeDatabaseStep(t, spec)
+	plan := fullNativePlan(t, spec, graph)
+	placed := map[string]int{}
+	var shards [][]string
+	selector := pipelines.GraphSelector(graph, pipelines.Selection{Full: true})
+	for _, step := range plan.Steps() {
+		if step.Stage != declared.stage || !strings.HasPrefix(step.Key, declared.stage+"."+dbTestsJob+"#") && step.Key != declared.stage+"."+dbTestsJob {
+			continue
+		}
+		if step.Skip != nil || len(step.Packages) == 0 || step.Services["postgres"].Image == "" {
+			t.Fatalf("empty or unprovisioned DB shard: %+v", step)
+		}
+		shards = append(shards, step.Packages)
+		for _, pkg := range step.Packages {
+			placed[selector.DirOf(pkg)]++
 		}
 	}
+	if len(shards) == 0 {
+		t.Fatal("compiler produced no database shards")
+	}
+	for dir, n := range placed {
+		if n != 1 {
+			t.Errorf("%s executes %d times", dir, n)
+		}
+	}
+	root := repoRoot(t)
 	for _, dir := range provisionedPkgs(t, root) {
-		if !placed[dir] {
-			t.Errorf("%s has an EnsureSchema TestMain but the planner put it in no db-tests shard: its DB assertions would run nowhere", dir)
+		if placed[dir] != 1 {
+			t.Errorf("%s has an EnsureSchema TestMain but reaches %d database shards", dir, placed[dir])
 		}
 	}
 	for _, dbt := range scanDBGatedTests(t, root) {
-		if !placed[dbt.dir] {
-			t.Errorf("%s (%s) holds db-gated tests but the planner put it in no db-tests shard", dbt.dir, dbt.name)
+		if placed[dbt.dir] != 1 {
+			t.Errorf("%s (%s) has DB tests but reaches %d database shards", dbt.dir, dbt.name, placed[dbt.dir])
 			break
 		}
 	}
-	if len(placed) == 0 {
-		t.Fatal("the planner placed no package in a db shard; every assertion above would pass vacuously")
-	}
-}
 
-func scriptLines(t *testing.T, root, mode string) []string {
-	t.Helper()
-	cmd := exec.Command("bash", filepath.Join(root, "scripts", "ci", "db-gated-packages.sh"), mode)
-	cmd.Dir = root
-	out, err := cmd.Output()
-	if err != nil {
-		t.Fatalf("db-gated-packages.sh %s: %v", mode, err)
-	}
-	var lines []string
-	for _, l := range strings.Split(string(out), "\n") {
-		if l = strings.TrimSpace(l); l != "" {
-			lines = append(lines, l)
+	// Ask the real native budget runner to construct every shard's commands.
+	// Assert package preservation after the final partition, not just before it.
+	for _, shard := range shards {
+		input, _ := json.Marshal(shard)
+		cmd := exec.Command("python3", "-c", `import importlib.util,json,sys,yaml
+from pathlib import Path
+p=Path('scripts/ci/pipeline-db-tests.py')
+s=importlib.util.spec_from_file_location('runner',p)
+m=importlib.util.module_from_spec(s);s.loader.exec_module(m)
+b=yaml.safe_load(m.BUDGETS_PATH.read_text())
+print(json.dumps([command for _,command in m.commands(json.load(sys.stdin),m.read_classes(b),m.read_parallelism(b))]))`)
+		cmd.Dir = root
+		cmd.Stdin = strings.NewReader(string(input))
+		output, err := cmd.Output()
+		if err != nil {
+			t.Fatal(err)
+		}
+		var commands [][]string
+		if err := json.Unmarshal(output, &commands); err != nil {
+			t.Fatal(err)
+		}
+		var actual []string
+		for _, command := range commands {
+			if len(command) < 7 || !slices.Equal(command[:4], []string{"go", "test", "-count=1", "-p=1"}) || !strings.HasPrefix(command[4], "-parallel=") || !strings.HasPrefix(command[5], "-timeout=") {
+				t.Fatalf("native runner stopped running uncached bounded tests: %v", command)
+			}
+			actual = append(actual, command[6:]...)
+		}
+		slices.Sort(actual)
+		expected := slices.Clone(shard)
+		slices.Sort(expected)
+		if !slices.Equal(actual, expected) {
+			t.Fatalf("native commands changed the compiler's packages: got %v want %v", actual, expected)
 		}
 	}
-	return lines
 }

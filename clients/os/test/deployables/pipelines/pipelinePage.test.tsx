@@ -99,13 +99,13 @@ describe("pipeline settings", () => {
     expect(fact(page, "Allowed secrets").textContent).toBe("None");
   });
 
-  it("reads Checks on in the bar, with Disconnect beside Change, Change the one button", async () => {
+  it("offers a manual run beside existing connection controls", async () => {
     mount(fakeConnection(seed()));
     await openSettings();
     expect(bar().word).toBe("Checks on");
     expect(bar().detail).toBe("webhook, cluster");
-    expect(bar().acts).toEqual(["Disconnect", "Change"]);
-    expect(bar().buttons).toEqual(["Change"]);
+    expect(bar().acts).toEqual(["Disconnect", "Change", "Run"]);
+    expect(bar().buttons).toEqual(["Run"]);
   });
 
   it("asks before disconnecting, in the bar, and Keep takes the question back", async () => {
@@ -157,7 +157,7 @@ describe("pipeline settings", () => {
     expect(await within(page).findByText("This needs a part of Deployables you have not been granted")).toBeTruthy();
     expect(within(page).getByText("the caller does not hold execute on app:deployables/connect")).toBeTruthy();
     expect(bar().word).toBe("Checks on");
-    expect(bar().acts).toEqual(["Disconnect", "Change"]);
+    expect(bar().acts).toEqual(["Disconnect", "Change", "Run"]);
   });
 
   it("opens Runs refined to this source from All runs", async () => {
@@ -168,7 +168,7 @@ describe("pipeline settings", () => {
     expect(navigate).toHaveBeenCalledWith("runs", { fromContent: true });
   });
 
-  it("opens a manual rehearsal only for a disconnected pipeline and follows its run row", async () => {
+  it("opens a manual rehearsal for a disconnected pipeline and follows its run row", async () => {
     const connection = fakeConnection(seed({ pipelines: [pipelineRow({ status: "disconnected" })] }));
     mount(connection);
     const page = await openSettings();
@@ -182,6 +182,24 @@ describe("pipeline settings", () => {
     // The live collection applies the owner's read scope to graph events too.
     await emit(connection, RUN_CONCEPT, runRow({ id: "run-manual", ownerUserId: VIEWER, event: "manual", trigger: "manual", headBranch: "main", status: "queued" }), "NODE_CREATED");
     await waitFor(() => expect(screen.getByRole("region", { name: "Run Show the cart" })).toBeTruthy());
+  });
+
+  it("runs the connected pipeline without disconnecting and offers its default branch", async () => {
+    const connection = fakeConnection(seed({sourceProbe: {"cred-1": {reachable:true,defaultBranch:"main",branches:["main","feature/cart"]} as unknown as Row}}));
+    mount(connection);
+    await openSettings();
+    await click(screen.getByRole("button", {name:"Run"}));
+    expect(bar().word).toBe("Run a branch");
+    expect(bar().detail).toContain("Automatic checks stay on");
+    const trigger=await screen.findByLabelText("Branch to run");
+    expect(within(openSelect(trigger)).getByRole("option",{name:"main"})).toBeTruthy();
+    chooseOption(trigger,"main");
+    await readTheBar();
+    await click(screen.getByRole("button",{name:"Run"}));
+    await waitFor(()=>expect(bar().word).toBe("Manual run queued"));
+    expect(connection.callsNamed("pipelinesRunLatest")).toEqual(['builtin pipelinesRunLatest(pipelineId: "pl-shop", branch: "main")']);
+    expect(connection.callsNamed("pipelinesDisconnect")).toEqual([]);
+    expect(screen.queryByRole("button",{name:"Connect again"})).toBeNull();
   });
 
   it("runs another branch, chosen from the repository's branches", async () => {

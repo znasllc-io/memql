@@ -87,10 +87,13 @@ type SARIFReport struct {
 // StepSpec declares a command, isolated image build or driver-owned report.
 // Commands have the same shell contract as a deployable's build.command.
 type StepSpec struct {
-	// CheckoutHistory requests complete history while clone credentials are scoped
-	// to the trusted checkout container. Empty keeps a shallow checkout.
-	CheckoutHistory string       `yaml:"checkoutHistory,omitempty" json:"checkoutHistory,omitempty"`
-	SARIF           *SARIFReport `yaml:"sarif,omitempty" json:"sarif,omitempty"`
+	// GitHubReadToken explicitly grants a cluster command or image build a short-lived,
+	// read-only token for this repository. Ordinary commands receive none.
+	GitHubReadToken bool `yaml:"githubReadToken,omitempty" json:"githubReadToken,omitempty"`
+	// CheckoutHistory requests complete history during trusted checkout.
+	CheckoutHistory  string            `yaml:"checkoutHistory,omitempty" json:"checkoutHistory,omitempty"`
+	RepositoryChange *RepositoryChange `yaml:"repositoryChange,omitempty" json:"repositoryChange,omitempty"`
+	SARIF            *SARIFReport      `yaml:"sarif,omitempty" json:"sarif,omitempty"`
 	// CPUMilli requests a bounded CPU reservation for the cluster command.
 	// Zero uses the operator's namespace default; 1000 means one CPU.
 	CPUMilli int `yaml:"cpuMilli,omitempty" json:"cpuMilli,omitempty"`

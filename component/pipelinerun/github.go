@@ -292,3 +292,31 @@ func cleanMember(raw string) (string, error) {
 	}
 	return cleaned, nil
 }
+
+func (g *packagesGitHub) RepositoryWriterToken(ctx context.Context, credential, user, repository string) (string, int64, error) {
+	_, installation, err := g.InstallationToken(ctx, credential, user, repository)
+	if err != nil {
+		return "", 0, err
+	}
+	c, _, name, err := g.target(repository)
+	if err != nil {
+		return "", 0, err
+	}
+	token, _, err := c.ScopedInstallationToken(ctx, installation, []string{name}, map[string]string{"contents": "write", "pull_requests": "write"})
+	return token, installation, err
+}
+
+func (g *packagesGitHub) ApplyBranchChange(ctx context.Context, token, repository string, edit githubapp.BranchChange) (string, error) {
+	c, owner, name, err := g.target(repository)
+	if err != nil {
+		return "", err
+	}
+	return c.ApplyBranchChange(ctx, token, owner, name, edit)
+}
+func (g *packagesGitHub) EnsureChangePullRequest(ctx context.Context, token, repository, head, base, title, body string) (string, error) {
+	c, owner, name, err := g.target(repository)
+	if err != nil {
+		return "", err
+	}
+	return c.EnsureChangePullRequest(ctx, token, owner, name, head, base, title, body)
+}

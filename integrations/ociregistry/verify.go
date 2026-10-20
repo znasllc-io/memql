@@ -51,11 +51,13 @@ type Limits struct{ ArchiveBytes, UnpackedBytes int64 }
 // VerifiedImage owns a private snapshot. Only Verify can construct a usable
 // handle. Close removes it and waits for any in-flight publication to finish.
 type VerifiedImage struct {
-	gate     chan struct{}
-	dir      string
-	expected Expected
-	image    v1.Image
-	blobs    []blob
+	gate      chan struct{}
+	dir       string
+	expected  Expected
+	image     v1.Image
+	index     v1.ImageIndex
+	manifests []blob
+	blobs     []blob
 }
 
 type blob struct {
@@ -72,7 +74,7 @@ func (v *VerifiedImage) Close() error {
 	if err := os.RemoveAll(v.dir); err != nil {
 		return err
 	}
-	v.dir, v.image, v.blobs = "", nil, nil
+	v.dir, v.image, v.index, v.manifests, v.blobs = "", nil, nil, nil, nil
 	return nil
 }
 
@@ -95,7 +97,7 @@ func (v *VerifiedImage) acquire(ctx context.Context) error {
 // all referenced compressed/uncompressed content, and performs no network I/O.
 // The caller owns the reader and must make blocked reads respect ctx.
 func Verify(ctx context.Context, source io.Reader, want Expected, limits Limits) (_ *VerifiedImage, err error) {
-	if source == nil || !shaPattern.MatchString(want.ArchiveSHA256) || !shaPattern.MatchString(want.ImageDigest) || want.ArchiveSize <= 0 || (want.Platform != "linux/amd64" && want.Platform != "linux/arm64") {
+	if source == nil || !shaPattern.MatchString(want.ArchiveSHA256) || !shaPattern.MatchString(want.ImageDigest) || want.ArchiveSize <= 0 || (want.Platform != "linux/amd64" && want.Platform != "linux/arm64" && want.Platform != "oci-index") {
 		return nil, errors.New("exact archive receipt, image digest and supported platform are required")
 	}
 	if limits.ArchiveBytes == 0 {
@@ -188,7 +190,12 @@ func Verify(ctx context.Context, source io.Reader, want Expected, limits Limits)
 		sizes[name] = n
 	}
 	files := metadataFiles{root: root, sizes: sizes}
-	blobs, err := files.verify(ctx, want, limits.UnpackedBytes)
+	var blobs, manifests []blob
+	if want.Platform == "oci-index" {
+		blobs, manifests, err = files.verifyIndex(ctx, want, limits.UnpackedBytes)
+	} else {
+		blobs, err = files.verify(ctx, want, limits.UnpackedBytes)
+	}
 	if err != nil {
 		return nil, err
 	}
@@ -200,7 +207,17 @@ func Verify(ctx context.Context, source io.Reader, want Expected, limits Limits)
 	if err != nil {
 		return nil, err
 	}
-	img, err := p.Image(hash)
+	var img v1.Image
+	var idx v1.ImageIndex
+	if want.Platform == "oci-index" {
+		var outer v1.ImageIndex
+		outer, err = p.ImageIndex()
+		if err == nil {
+			idx, err = outer.ImageIndex(hash)
+		}
+	} else {
+		img, err = p.Image(hash)
+	}
 	if err != nil {
 		return nil, err
 	}
@@ -212,7 +229,7 @@ func Verify(ctx context.Context, source io.Reader, want Expected, limits Limits)
 	if err = os.Remove(filepath.Join(dir, "archive")); err != nil {
 		return nil, err
 	}
-	return &VerifiedImage{gate: make(chan struct{}, 1), dir: dir, expected: want, image: img, blobs: blobs}, nil
+	return &VerifiedImage{gate: make(chan struct{}, 1), dir: dir, expected: want, image: img, index: idx, manifests: manifests, blobs: blobs}, nil
 }
 
 type contextReader struct {

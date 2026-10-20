@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useSyncExternalStore } from "react";
+import { useCallback, useContext, useEffect, useLayoutEffect, useMemo, useRef, useSyncExternalStore } from "react";
 import {
   LiveCollection,
   type Connection,
@@ -8,6 +8,8 @@ import {
 } from "@znasllc-io/memql-sdk-core/client";
 
 import { useOsConnection } from "./connection";
+import { onAppResume } from "./resume";
+import { LiveReadVisibility } from "./useGraphRevision";
 import type { LiveListSource } from "./LiveList";
 
 // One live collection, retained for the life of the component.
@@ -74,6 +76,9 @@ export function useLiveCollection<T>(
   spec: (connection: Connection) => LiveCollectionSpec<T>,
 ): LiveCollectionHandle<T> {
   const connection = useOsConnection();
+  const visible = useContext(LiveReadVisibility);
+  const visibleRef = useRef(visible);
+  useLayoutEffect(() => { visibleRef.current = visible; }, [visible]);
 
   // The spec is read once per (connection, key) and never again: it closes
   // over the caller's props, and re-reading it on every render would rebuild
@@ -95,13 +100,20 @@ export function useLiveCollection<T>(
     // replay alone cannot repair a failed seed or recover missed rows.
     // The cycle fires AFTER subscriptions are restored, avoiding a gap
     // between the fresh read and the stream that keeps it current.
-    const stopCycle = connection?.onConnectionCycle?.(() => collection.reseed());
+    let recoveredAt = -Infinity;
+    const stopCycle = connection?.onConnectionCycle?.(() => { recoveredAt = Date.now(); collection.reseed(); });
     const stopStatus = connection?.onStatusChange?.(({ status }) => {
       if (status !== "connected") collection.markDisconnected();
+    });
+    const stopResume = onAppResume(() => {
+      if (visibleRef.current && connection?.status === "connected" && Date.now() - recoveredAt >= 1_000) {
+        recoveredAt = Date.now(); collection.reseed();
+      }
     });
     return () => {
       stopCycle?.();
       stopStatus?.();
+      stopResume();
       collection.release(() => {});
     };
   }, [collection, connection]);

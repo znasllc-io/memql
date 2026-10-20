@@ -445,7 +445,7 @@ func toolchainPushOrderProblems(wf toolchainWorkflow) []string {
 	}
 	// The smoke test vouches for the image the first build produced; a push
 	// built from another context, file or platform publishes something it never saw.
-	for _, key := range []string{"context", "file", "platforms"} {
+	for _, key := range []string{"context", "file", "platforms", "target"} {
 		if build.with(key) != push.with(key) {
 			out = append(out, fmt.Sprintf("the smoke-tested build and the push differ in `%s` (%q vs %q); "+
 				"the push would publish an image the smoke test never exercised", key, build.with(key), push.with(key)))
@@ -1042,6 +1042,14 @@ func toolchainWorkflowMutations(t *testing.T) {
 			check: toolchainPushOrderProblems,
 			mutate: func(t *testing.T, job *toolchainJob) {
 				job.Steps[stepAt(t, *job, isPush)].With["context"] = "./deploy/db-image"
+			},
+		},
+		{
+			name:  "the push skips the verified target",
+			want:  "differ in `target`",
+			check: toolchainPushOrderProblems,
+			mutate: func(t *testing.T, job *toolchainJob) {
+				job.Steps[stepAt(t, *job, isPush)].With["target"] = "runtime"
 			},
 		},
 		{

@@ -36,6 +36,25 @@ func fleetArtifactAnswer(archive []byte) func(context.Context, worker.Request) (
 	}
 }
 
+func TestFleetKeepsCommandFailureWhenItsPackageWasNotProduced(t *testing.T) {
+	dispatcher := &fakeDispatcher{answer: func(context.Context, worker.Request) (worker.Result, error) {
+		return worker.Result{OK: true, WorkerId: "reg-1", NodeId: "agent-b",
+			OutputJSON: `{"exitCode":7,"durationMs":10,"artifactsMissing":["dist/report.json","coverage.out"]}`}, nil
+	}}
+	f, _, _, _ := newTestFleet(t, dispatcher)
+	res := runFleet(t, f, fleetArtifactReq())
+	if res.Status != pl.OutcomeFailed || res.ExitCode != 7 || res.Failure != nil || res.LogFileID == "" {
+		t.Fatalf("remote command failure was displaced or its log lost: %+v", res)
+	}
+	found := false
+	for _, note := range res.Notes {
+		found = found || note.Code == pl.CodeArtifactMissing && strings.Contains(note.Message, "missing required artifacts")
+	}
+	if !found || len(res.ArtifactFileIDs) != 0 {
+		t.Fatalf("remote missing artifacts were not reported accurately: %+v", res)
+	}
+}
+
 func TestFleetValidatesTheEntireArchiveBeforeStoringAnyArtifact(t *testing.T) {
 	valid := extractTestTgz(t, []extractTestEntry{{name: "coverage.out", body: "proof"}, {name: "dist/report.json", body: "{}"}})
 	badCRC := bytes.Clone(valid)

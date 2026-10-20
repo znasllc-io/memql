@@ -42,22 +42,20 @@ about to tag -- and refuses unless the file reads the version it computed.
 2. **A GitHub Release is published** for that tag -- published, never a draft.
    Only `release: published` fires the cascade, so a draft would create a
    Release that builds nothing while looking exactly like success.
-3. **The cascade runs.** `.github/workflows/dispatch-engine-images-on-release.yml`
-   (#2519) fires on the published Release and re-dispatches
-   `build-engine-images.yml` with the **bare** version -- it strips the leading
-   `v`, because git tags carry it and image tags do not (memql#4061). That
-   workflow builds every node type as a product-agnostic image. The bridge also
-   forwards the release event's exact commit as `source_sha`. The build checks
-   out that commit and verifies its tag and `VERSION` before registry login;
-   advancing `main` after publication cannot change the release's source.
+3. **The native release pipeline runs.** The GitHub App delivers the published
+   release event to MemQL. The pipeline resolves the tag to its exact commit
+   and reads that commit's `memql-package.yaml`. Its image stage builds every
+   node type on the MemQL build server, stamps the source commit and bare
+   release version into each binary, and publishes immutable registry digests.
+   Advancing `main` cannot change a release run's pinned source.
 
-For a manual image-build dispatch, select `main` for the workflow and supply
-both the bare `version` and the full 40-character `source_sha` named by
-`v<version>`. The workflow stays on `main` for Azure OIDC; its source checkout
-and the commit stamped into every binary are the verified release commit.
+To recover a missing release delivery, open the connected repository in
+MemQL Pipelines and use **Run release** with `vX.Y.Z`. This resolves the tag
+again and uses the native release path; it does not dispatch GitHub Actions.
 
-MemQL does step 1 and 2. CI does step 3. The platform records what it did on a
-`v1:cluster:releaseCut` row and writes a `release_cut` audit event beside it.
+The platform records the cut on a `v1:cluster:releaseCut` row and writes a
+`release_cut` audit event beside it. The pipeline records the build and its
+publication evidence separately.
 
 **It cannot tell you the images exist.** Publishing a Release means the build
 was *asked for*. Whether it finished is a question only the container registry
@@ -65,26 +63,13 @@ answers, which is what `releaseCutStatus` is for -- see section 6.
 
 ### Recover a partial registry publication
 
-If an engine build published a node's version tag in ACR but failed before
-publishing it in GHCR, use the manual `recover-engine-image-mirror.yml`
-workflow on `main`. Supply the bare `version`, the release's full
-`source_sha`, the `node`, and the exact ACR manifest `digest` recorded by the
-build. This repairs the existing release; it does not require another version.
+Open the failed native release run in MemQL Pipelines and inspect its
+publication steps. Re-run failed steps after correcting the reported failure;
+retain the original tag, source commit and verified build artifacts.
 
-The recovery verifies the published release, its tag and `VERSION`, the ACR
-version tag and manifest/config hashes, and the image's Linux/amd64 platform.
-It extracts `/app/memql` from a stopped container and reads Go build metadata
-to verify the linked release, source commit and node without executing the
-image. Existing images need no revision label for this check.
-
-Only a successful GHCR tag listing establishes that the destination is
-missing. An identical existing digest is a verified no-op; a different digest
-is refused. Recovery shares the original builder's per-version concurrency
-group, uses `skopeo copy --all --preserve-digests`, and hashes the destination's
-raw manifest after copying. It never rebuilds an image or replaces an existing
-version tag. Registry failures stop the run; retry the same inputs after
-resolving the failure. The run summary records both image references and the
-verified digest. Deploy only after every required node image is available.
+Registry publication verifies existing tags. An identical digest is a no-op;
+a different digest is refused. Do not overwrite a version tag to make a retry
+pass. Confirm every required node image and registry digest before deploying.
 
 ---
 
@@ -404,21 +389,17 @@ The `releaseCut` builtin above is one path. `releaseEngine`
 other: the deploy pack's action, for a lifecycle that cuts a version as a step
 rather than a person making the call.
 
-It exists because of a failure the builtin cannot have and a script can:
+The capability publishes a release, then waits for the native release run to
+start on the tagged commit. Before publishing, it reads the repository's
+effective branch rules and requires one MemQL check bound to a GitHub App.
+The evidence must come from that App's release-event context, carry the exact
+tagged commit and begin after publication. PR checks, push checks, older runs
+and checks from another App do not count.
 
-> A pushed git tag builds **nothing**. `build-engine-images` is
-> `workflow_dispatch`-only and its single automatic trigger is a
-> `release: [published]` event.
-
-Thirteen tags between `v0.16.0` and `v0.19.7` carry no release, so every 0.19.x
-image came from a dispatch somebody remembered to run. A tag nobody dispatched
-for is a version that looks cut and cannot be deployed.
-
-So the capability publishes a **release**, then waits for a build-engine-images
-run that postdates it, and **fails when none appears**. That second step is the
-point: the bridge is an event handler, and one that silently does not fire is
-indistinguishable from one that has not fired yet -- until the version is
-deployed and every pod lands in `ImagePullBackOff`.
+A missing run fails the call with a link to the recovery path in MemQL
+Pipelines. A run that has already failed also fails the call. A running build
+only proves that execution started; wait for success and verify registry
+publication before deploying.
 
 Five behaviours worth knowing before using it:
 
@@ -428,7 +409,7 @@ Five behaviours worth knowing before using it:
 | the release exists as a **draft** | **refused**. A draft emits no `release: [published]` event, so it builds no images while looking like a release in the UI |
 | `VERSION` at the commit to be tagged is missing or names another version | **refused** (exit 3, `result.reason` `version_file_stale`), dry run included, before anything is created -- the same rule as `version_file_stale` above. The commit checked is the existing tag, else `targetSha`, else the default branch's head read once and passed as `--target`, so the commit checked is the commit tagged. For a tag not yet created, a prepare pull request setting `VERSION` resolves it. For a tag that **already exists** it cannot: no merge moves a tag. Delete the tag and re-run at a commit whose `VERSION` reads the version (passed as `targetSha`, or the default branch's head once a prepare pull request has merged). A tag cut before `VERSION` had to equal the tag -- the unreleased `v0.16.0` to `v0.19.7` tags among them -- cannot pass where it stands |
 | `version` carries a pre-release or build suffix | **refused** as a bad parameter (exit 2). `VERSION` is never suffixed and must equal the tag, so a suffixed release could pass only by breaking that rule; the console cut and the docs bundle accept bare `X.Y.Z` alone too |
-| the build ran and **failed** | reported (`buildRunConclusion`), not swallowed. The bridge fired, which is what this checks; a failed build is a different problem with a different fix |
+| the build ran and **failed** | the call fails (exit 5), retaining `buildRunId`, `buildRunUrl` and `buildRunConclusion` so the native run can be inspected |
 
 ```bash
 scripts/release/release-engine.sh --version=0.24.0 --dryRun=true   # verify credential + state, create nothing
@@ -439,7 +420,7 @@ The result reports the **GHCR** prefix as well as the tag. That half of the
 build is public and tenant-independent, and it is what made a full cloud
 bring-up possible without ever authenticating to the retired subscription -- an
 instance lifecycle should pull from there by digest and `az acr import` into its
-own registry, rather than assuming access to whichever ACR the build workflow
+own registry, rather than assuming access to whichever ACR the native pipeline
 targets.
 
 ---

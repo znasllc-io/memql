@@ -29,8 +29,8 @@ import "./checks.css";
 // manifest's, read at each commit -- and its runs are one click away, on Runs.
 //
 // THE ACTS FOLLOW THE STATE, IN THE BAR (DESIGN.md rule 12). A pipeline that
-// runs offers Disconnect and Change; a disconnected one, Connect again and a
-// manual run -- of the default branch (Run latest) or of another (Other
+// runs offers Disconnect, Change and Run; a disconnected one, Connect again
+// and a manual run -- of the default branch (Run latest) or of another (Other
 // branch, which asks for the branch under the facts). Change and Connect again
 // open the connect rail over this source, prefilled, and nothing is written
 // until it is confirmed there. Disconnect asks first, in the bar, because it
@@ -128,7 +128,7 @@ export function PipelinePage({ pkg, pipeline, runs, can, backLabel, onBack, brea
 
   function chooseBranch() {
     setProblem(null);
-    setBranch("");
+    setBranch(active ? pipeline.defaultBranch : "");
     setChoosing(true);
     void probe.probe(pkg.repoUrl, pkg.credentialId, pkg.sourceConnectionId ?? "");
   }
@@ -151,40 +151,40 @@ export function PipelinePage({ pkg, pipeline, runs, can, backLabel, onBack, brea
       }
     : waiting
       ? { state: "Disconnecting", detail: "Waiting for the cluster to confirm.", tone: "busy", acts: [] }
-      : active
-        ? {
-            state: "Checks on",
-            detail: `${deliveryShort(pipeline.delivery)}, ${computeShort(pipeline.compute)}`,
-            tone: "live",
-            acts: can.connect
-              ? [
-                  { label: "Disconnect", text: true, onAct: () => { setProblem(null); setAsking(true); } },
-                  { label: "Change", tone: "primary", onAct: onChange },
-                ]
-              : [],
-          }
       : manualRun !== null
         ? {
             state: "Manual run queued",
             detail: `${manualRun.branch} · ${manualRun.sha.slice(0, 7)}`,
             tone: "busy",
             acts: [
-              ...(can.connect ? [{ label: "Connect again", text: true, onAct: onChange }] : []),
+              ...(!active && can.connect ? [{ label: "Connect again", text: true, onAct: onChange }] : []),
               ...(runs.some((run) => run.id === manualRun.runId) && onOpenRun ? [{ label: "Open run", tone: "primary" as const, onAct: () => onOpenRun(manualRun.runId) }] : []),
             ],
           }
         : choosing && can.rerun
           ? {
-              // The pipeline is still disconnected while it is asked; the dot
-              // speaks for the pipeline, not for the question.
+              // Automatic delivery stays as configured while a manual run is chosen.
               state: "Run a branch",
-              detail: "Runs its newest commit.",
-              tone: "none",
+              detail: active ? "Runs its newest commit. Automatic checks stay on." : "Runs its newest commit.",
+              tone: active ? "live" : "none",
               acts: [
                 { label: "Cancel", text: true, onAct: stopChoosing },
                 ...(branch.trim() !== "" ? [{ label: "Run", tone: "primary" as const, busy, onAct: () => void runLatest(branch) }] : []),
               ],
             }
+          : active
+            ? {
+                state: "Checks on",
+                detail: `${deliveryShort(pipeline.delivery)}, ${computeShort(pipeline.compute)}`,
+                tone: "live",
+                acts: [
+                  ...(can.connect ? [
+                    { label: "Disconnect", text: true, onAct: () => { setProblem(null); setAsking(true); } },
+                    { label: "Change", text: true, onAct: onChange },
+                  ] : []),
+                  ...(can.rerun ? [{ label: "Run", tone: "primary" as const, onAct: chooseBranch }] : []),
+                ],
+              }
           : {
               state: "Disconnected",
               detail: "",
@@ -200,7 +200,7 @@ export function PipelinePage({ pkg, pipeline, runs, can, backLabel, onBack, brea
               ],
             };
   // The field is drawn exactly when the bar asks for it.
-  const asked = choosing && can.rerun && !active && manualRun === null;
+  const asked = choosing && can.rerun && manualRun === null;
 
   const label = sourceName(pkg);
   return (
@@ -231,6 +231,7 @@ export function PipelinePage({ pkg, pipeline, runs, can, backLabel, onBack, brea
             <BranchChoice
               branches={probe.reply?.branches ?? []}
               defaultBranch={pipeline.defaultBranch}
+              includeDefault={active}
               loading={probe.busy}
               value={branch}
               onChange={setBranch}

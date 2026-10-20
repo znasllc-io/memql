@@ -1,7 +1,9 @@
 import { useCallback, useEffect, useState } from "react";
-import type { Row } from "@znasllc-io/memql-sdk-core/client";
+import { isTransportInterruption, type Row } from "@znasllc-io/memql-sdk-core/client";
 
 import { useOsConnection } from "../../live/connection";
+import { onAppResume } from "../../live/resume";
+import { useConnectionRecovery, useConnectionStatus } from "../../chrome/connection";
 import { domainMetaFromRow, rollupDomains, type DomainMeta, type DomainRollup } from "./rows";
 
 // What MemQL knows, by domain -- read on demand, and honest about it.
@@ -66,6 +68,8 @@ export interface DomainsFeed {
 
 export function useDomains(): DomainsFeed {
   const connection = useOsConnection();
+  const status = useConnectionStatus();
+  const { managed } = useConnectionRecovery();
   const [rollups, setRollups] = useState<DomainRollup[]>([]);
   const [domains, setDomains] = useState<Map<string, DomainMeta>>(() => new Map());
   const [state, setState] = useState<"loading" | "ready" | "error">("loading");
@@ -80,6 +84,7 @@ export function useDomains(): DomainsFeed {
       setState("loading");
       return;
     }
+    if ((managed && status !== "connected") || document.visibilityState === "hidden") return;
     const controller = new AbortController();
     let live = true;
     setState((held) => (held === "ready" ? held : "loading"));
@@ -111,12 +116,14 @@ export function useDomains(): DomainsFeed {
             if (meta.id !== "") next.set(meta.id, meta);
           }
           setDomains(next);
-        } catch {
+        } catch (err) {
           if (!live) return;
+          if (isTransportInterruption(err)) return;
           setDomains(new Map());
         }
       } catch (err: unknown) {
         if (!live) return;
+        if (isTransportInterruption(err)) { setError(""); return; }
         setError(err instanceof Error ? err.message : String(err));
         setState("error");
       }
@@ -125,28 +132,15 @@ export function useDomains(): DomainsFeed {
       live = false;
       controller.abort();
     };
-  }, [connection, attempt]);
+  }, [connection, attempt, status, managed]);
 
   // Re-read when somebody comes back to the window. A person who uploaded a
   // file, went away while it was analyzed and came back is the case this
   // exists for -- and it is a re-read rather than a subscription because there
   // is no subscription to have (see the header).
   //
-  // BOTH EVENTS, because they answer different questions: `focus` fires when
-  // this window is picked out of several, `visibilitychange` when the tab
-  // comes back from a background it was never focused out of.
-  useEffect(() => {
-    const onWake = () => {
-      if (document.visibilityState === "hidden") return;
-      reload();
-    };
-    window.addEventListener("focus", onWake);
-    document.addEventListener("visibilitychange", onWake);
-    return () => {
-      window.removeEventListener("focus", onWake);
-      document.removeEventListener("visibilitychange", onWake);
-    };
-  }, [reload]);
+  // The shared signal also covers restored pages and network return.
+  useEffect(() => onAppResume(reload), [reload]);
 
   return { rollups, domains, state, error, readAt, reload };
 }

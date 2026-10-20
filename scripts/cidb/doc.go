@@ -2,7 +2,7 @@
 //
 // It has no runtime code. The package exists so an ordinary, untagged test can
 // compare two sources of truth that nothing previously reconciled: what
-// .github/workflows/ci.yml's `db-tests` job actually configures, and what the
+// memql-package.yaml's native `db-tests` step actually configures, and what the
 // db-gated suites in the tree actually require in order to assert anything.
 //
 // The lane it guards is the one several PRs rest their only end-to-end evidence
@@ -16,11 +16,12 @@
 //     lane provisioning a database and then executing zero tests against it --
 //     the same silent-nothing failure one level up.
 //
-// It also guards the ways the lane can report a non-failure while executing
-// nothing at all -- a step-level env override of MEMQL_REQUIRE_DB (Actions
-// gives step env precedence over job env), a `-run` selector that matches
-// nothing, a step-level `if:`, or `continue-on-error` -- because ci-required
-// treats a skipped or continue-on-error job as a pass, so each is silent.
+// The effective shell environment must require a database, preserve the
+// compiler's package selection and propagate a failing runner's exit status.
+// The native runner's behavioral tests reject empty selections, hidden failures
+// and changed timeout budgets. A complete source graph is compiled through the
+// installed selection policy, and every database package must survive sharding
+// and the runner's final timeout-class partition exactly once.
 //
 // Both are now executable assertions rather than prose. The precedent is
 // scripts/citags, which does exactly this job for build-tagged suites, and
@@ -107,14 +108,11 @@
 //     failure instead of a green skip. This is the issue's actual fix.
 //   - STRUCTURAL: every package with an EnsureSchema TestMain is in the
 //     selector. Pure Go AST on both sides, no shell involved.
-//   - BEST-EFFORT: that the lane's command actually executes those packages.
-//     This is read off `run:` text, and text cannot prove execution. The gate
-//     narrows the gap by REFUSING anything it cannot read plainly -- shell
-//     control flow, exit-status suppression (`|| true`, backgrounding, an
-//     unguarded pipe), `cd`/`exec`/`alias`, a working-directory, a `./...`
-//     wildcard, a zero-execution flag on the command line or in GOFLAGS -- so
-//     the residual is exotic rather than everyday. It is not a sandbox, and a
-//     determined edit can still defeat it.
+//   - EXECUTABLE: the native shell passes the selected packages and require-DB
+//     environment to its runner and propagates a failed command. The actual
+//     budget runner preserves the compiled partition, refuses empty/invalid
+//     selections, and runs bounded, uncached Go commands. This proves the
+//     runner contract, not that every test in those packages used a database.
 //
 // The authoritative version of the third bullet is a RUNTIME count: pipe `go
 // test -json` through a checker that fails when zero db-gated tests actually
@@ -125,7 +123,6 @@
 // and runs on EVERY pull request, including the many where the db-tests lane
 // itself is skipped.
 //
-// Untagged on purpose: it must run in the default `go test ./...`, which the
-// `ci` path filter reaches on any .github/workflows/** edit -- so a PR that
-// removes the env key it guards is the PR that goes red.
+// Untagged on purpose: the native gate-inputs step runs this package on every
+// PR, including a change confined to the manifest or runner script.
 package cidb

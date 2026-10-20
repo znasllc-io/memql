@@ -119,7 +119,7 @@ func TestPullRequestReadsOneHeadByItsNumber(t *testing.T) {
 	if err != nil {
 		t.Fatalf("pull request: %v", err)
 	}
-	if want := (PullRequestHead{Number: 7, Title: "Add widgets", HeadSHA: "head7", HeadRef: "feature", HeadRepository: "acme/widget", BaseSHA: "base7"}); got != want {
+	if want := (PullRequestHead{Number: 7, State: "open", Title: "Add widgets", HeadSHA: "head7", HeadRef: "feature", HeadRepository: "acme/widget", BaseSHA: "base7"}); got != want {
 		t.Fatalf("got %+v, want %+v", got, want)
 	}
 	if auth := hub.seen()[0].Header.Get("Authorization"); auth != "Bearer "+installToken {

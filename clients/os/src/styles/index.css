@@ -1844,7 +1844,9 @@ button.os-row.os-record-row:focus-visible { outline: 2px solid var(--os-accent);
 }
 
 .os-phone-bar {
+  flex: none;
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
   gap: 10px;
   padding: 12px 14px;
@@ -1854,6 +1856,14 @@ button.os-row.os-record-row:focus-visible { outline: 2px solid var(--os-accent);
   width: 20px;
   height: 20px;
 }
+.os-connection-notice { display: flex; align-items: center; gap: 12px; color: var(--os-muted); font-size: var(--os-text-sm); }
+.os-connection-notice [role="status"] { display: inline-flex; align-items: center; gap: 8px; }
+.os-phone-connection { flex-basis: 100%; justify-content: center; }
+.os-connection-floating { position: fixed; top: max(12px, env(safe-area-inset-top)); right: max(16px, env(safe-area-inset-right)); z-index: 1500; padding: 8px 12px; background: var(--os-plate); border: 1px solid var(--os-line); border-radius: var(--os-radius-sm); }
+.os-connection-spinner { width: 12px; height: 12px; border: 1.5px solid var(--os-line); border-top-color: currentColor; border-radius: 50%; animation: os-wizard-spin .8s linear infinite; }
+@media (prefers-reduced-motion: reduce) { .os-connection-spinner { animation: none; } }
+.os-phone-content, .os-phone-page { display: flex; flex: 1; flex-direction: column; min-height: 0; }
+.os-phone-content { position: relative; }
 .os-phone-title {
   flex: 1;
   font-weight: 600;
@@ -1906,16 +1916,18 @@ button.os-row.os-record-row:focus-visible { outline: 2px solid var(--os-accent);
   border-top: 1px solid var(--os-line);
 }
 
-/* Phone gets the sheet as a true bottom sheet. */
+/* Ask fills the phone's page, leaving its real header and sign-out reachable. */
+.os-root[data-layout="phone"] .os-ask-backdrop { position: absolute; }
 .os-root[data-layout="phone"] .os-ask-sheet {
   left: 0;
   right: 0;
   bottom: 0;
+  top: 0;
   transform: none;
   width: auto;
-  border-radius: var(--os-radius) var(--os-radius) 0 0;
+  height: auto;
+  border-radius: 0;
 }
-.os-root[data-layout="phone"] .os-ask-sheet[data-maximized] { border-radius: 0; }
 
 /* ---- the rail: the OS's one scrollbar ----
  *

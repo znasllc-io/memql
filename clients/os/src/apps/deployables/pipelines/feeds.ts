@@ -146,3 +146,17 @@ export function useRunFiles(workRunId: string): RunFilesFeed {
   }, [snapshot.rows]);
   return { byFileId, state: snapshot.state };
 }
+
+/** Owner-scoped channel configuration; retain and reapply owner scope to events. */
+export function usePipelineChannels(enabled = true): LiveCollectionHandle<Row> {
+  const { viewer, ready } = useViewer();
+  return useLiveCollection<Row>(enabled && ready ? `deployables:pipelineChannels:${viewer}` : null, connection => ({
+    concept: "v1:pipelines:channel",
+    seed: async (cursor, signal) => {
+      const result = await connection.query.pipelineChannelsForOwner({}, { signal, ...(cursor ? { cursor } : {}) });
+      return { rows: result.rows(), nextCursor: result.meta()?.cursor ?? "" };
+    },
+    inScope: row => viewer === "" || sameId(rowString(flatten(row), "ownerUserId"), viewer),
+    reread: async (rowId, signal) => (await getRowByConceptAndId(connection.query, "v1:pipelines:channel", rowId, { signal })) as Row ?? null,
+  }));
+}

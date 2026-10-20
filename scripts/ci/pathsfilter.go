@@ -60,14 +60,11 @@ package ci
 
 import (
 	"fmt"
-	"os"
 	"path/filepath"
 	"regexp"
 	"runtime"
 	"sort"
 	"strings"
-
-	"gopkg.in/yaml.v3"
 )
 
 // unsupportedMeta are the glob metacharacters CompilePattern refuses. They are
@@ -261,81 +258,6 @@ func RepoRoot() string {
 	return filepath.Clean(filepath.Join(filepath.Dir(thisFile), "..", ".."))
 }
 
-// CIWorkflowPath is the workflow the guards read.
-func CIWorkflowPath() string {
-	return filepath.Join(RepoRoot(), ".github", "workflows", "ci.yml")
-}
-
-// ParseChangesFilters returns the `changes` job's filter buckets, in
-// declaration order-independent map form.
-//
-// It fails rather than returning an empty map when the block cannot be found:
-// a guard that silently verifies nothing is the failure mode this whole
-// package exists to prevent.
-func ParseChangesFilters(workflowYAML []byte) (map[string][]string, error) {
-	var wf struct {
-		Jobs map[string]struct {
-			Steps []struct {
-				With struct {
-					Filters string `yaml:"filters"`
-				} `yaml:"with"`
-			} `yaml:"steps"`
-		} `yaml:"jobs"`
-	}
-	if err := yaml.Unmarshal(workflowYAML, &wf); err != nil {
-		return nil, fmt.Errorf("parse ci.yml: %w", err)
-	}
-
-	var filtersYAML string
-	for _, s := range wf.Jobs["changes"].Steps {
-		if s.With.Filters != "" {
-			filtersYAML = s.With.Filters
-			break
-		}
-	}
-	if filtersYAML == "" {
-		return nil, fmt.Errorf(
-			"no `filters:` block found on the `changes` job -- this guard cannot verify what it " +
-				"was written to verify, so it fails closed rather than reporting a clean tree")
-	}
-
-	var buckets map[string][]string
-	if err := yaml.Unmarshal([]byte(filtersYAML), &buckets); err != nil {
-		return nil, fmt.Errorf("parse the changes job's filters block: %w", err)
-	}
-	if len(buckets) == 0 {
-		return nil, fmt.Errorf("parsed zero filter buckets from the `changes` job")
-	}
-	return buckets, nil
-}
-
-// consumedRef matches the two spellings a lane can use to read a bucket:
-// `needs.changes.outputs.go` and `needs.changes.outputs['server-grpc']` (the
-// bracket form is required for names containing a hyphen).
-var consumedRef = regexp.MustCompile(`needs\.changes\.outputs(?:\.([A-Za-z0-9_-]+)|\['([^']+)'\])`)
-
-// ConsumedBuckets returns the buckets some lane's `if:` or `env:` actually
-// reads.
-//
-// This distinction is the point. A bucket that is declared but wired to
-// nothing routes NOTHING, so it cannot count as coverage for any file --
-// scoring it as coverage is how a file with no real CI looks verified
-// (memql#3222, memql#3223). The target-module buckets from memql#3163 are
-// deliberately in that state today.
-func ConsumedBuckets(workflowYAML []byte) map[string]bool {
-	consumed := map[string]bool{}
-	for _, m := range consumedRef.FindAllStringSubmatch(string(workflowYAML), -1) {
-		name := m[1]
-		if name == "" {
-			name = m[2]
-		}
-		// The `changes` job's own `outputs:` block references every bucket by
-		// definition; only a DOWNSTREAM lane reading it counts as consumption.
-		consumed[name] = true
-	}
-	return consumed
-}
-
 // SortedKeys is a small helper so failure messages are deterministic.
 func SortedKeys[V any](m map[string]V) []string {
 	out := make([]string, 0, len(m))
@@ -344,9 +266,4 @@ func SortedKeys[V any](m map[string]V) []string {
 	}
 	sort.Strings(out)
 	return out
-}
-
-// ReadCIWorkflow reads ci.yml from disk.
-func ReadCIWorkflow() ([]byte, error) {
-	return os.ReadFile(CIWorkflowPath())
 }

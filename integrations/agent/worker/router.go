@@ -10,8 +10,8 @@ package worker
 //   - connection order is per-replica. Two agent replicas holding two streams
 //     each, in whatever order the laptops woke up, would order the same fleet
 //     differently and route the same work to different machines. Candidate
-//     order now comes from the ROW (registration order, `sort "row.createdAt"`
-//     in workersForOwnerWithStatus), so every replica agrees.
+//     order now comes from the ROW (registration order, `sort "registeredAt"`
+//     in myWorkersWithStatus), so every replica agrees.
 //   - the registry is one replica's stream table, so "online" meant "connected
 //     to ME". A machine held by the other replica was invisible. Online is now
 //     derived from the row -- lastSeenAt within component/worker.OnlineWindow

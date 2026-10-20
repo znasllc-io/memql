@@ -17,7 +17,7 @@ import (
 
 // internal_origin_test.go -- the three halves of this package's place on the
 // internal-origin allowlist (call_origin_conformance_test.go): the stamp is
-// applied in ONE place, inline, so it never escapes its call; everything a
+// applied only at audited storage boundaries, inline, so it never escapes its call; everything a
 // person reaches is downstream of an owner-scoped read under their own actor;
 // and the runner's own capabilities -- the trigger and the poll, builtins any
 // client's query can name -- refuse every call that did not arrive with
@@ -25,8 +25,9 @@ import (
 
 // TestTheStampNeverEscapesItsCall pins the memql#2879 escalation shape: a
 // trusted frame stamps internal, binds it to a variable, and a later frame
-// runs on the inherited context. ContextWithInternalOrigin appears only inline: the DSL store execution and the four
-// SARIF artifact calls, after native source/producer/owner validation.
+// runs on the inherited context. The inline stamps are the DSL store, retained
+// artifacts after source/producer/owner checks. Signed delivery reads use
+// the existing DSL store boundary after the rule is bound to that owner/run.
 func TestTheStampNeverEscapesItsCall(t *testing.T) {
 	entries, err := os.ReadDir(".")
 	if err != nil {
@@ -34,6 +35,7 @@ func TestTheStampNeverEscapesItsCall(t *testing.T) {
 	}
 	fset := token.NewFileSet()
 	sites := 0
+	want := map[string]int{"store_dsl.go": 1, "sarif.go": 4, "repository_change.go": 2, "repository_cleanup.go": 1}
 	for _, entry := range entries {
 		name := entry.Name()
 		if entry.IsDir() || !strings.HasSuffix(name, ".go") || strings.HasSuffix(name, "_test.go") {
@@ -43,11 +45,13 @@ func TestTheStampNeverEscapesItsCall(t *testing.T) {
 		if perr != nil {
 			t.Fatalf("%s: %v", name, perr)
 		}
+		fileSites := 0
 		ast.Inspect(file, func(n ast.Node) bool {
 			switch node := n.(type) {
 			case *ast.SelectorExpr:
 				if node.Sel.Name == "ContextWithInternalOrigin" {
 					sites++
+					fileSites++
 				}
 			case *ast.AssignStmt:
 				for _, rhs := range node.Rhs {
@@ -60,9 +64,12 @@ func TestTheStampNeverEscapesItsCall(t *testing.T) {
 			}
 			return true
 		})
+		if fileSites != want[name] {
+			t.Errorf("%s has %d internal-origin stamps, want %d audited storage calls", name, fileSites, want[name])
+		}
 	}
-	if sites != 5 {
-		t.Errorf("want the DSL-store stamp and four owner-gated SARIF artifact stamps, found %d", sites)
+	if sites != 8 {
+		t.Errorf("want the eight audited inline storage stamps, found %d", sites)
 	}
 }
 

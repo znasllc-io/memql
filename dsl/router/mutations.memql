@@ -122,15 +122,15 @@ mutation budget setBudget {
 /// @serverOnly: routeSave and routeDelete are the only writers. They take the owner from the
 /// caller's identity, validate every source against the router's grammar and the name against the
 /// person's other routes, and only then call this under internal origin -- so a route that the
-/// router could not walk, or one attributed to somebody else, is never written. Stamping
-/// ownerUserId from actor.userId would fix the attribution but not the validation: a route whose
-/// sources the router cannot walk would still reach the table, and a call made under it would
-/// refuse naming a configuration nobody could have saved through the page.
+/// router could not walk is never written. The owner is stamped from actor.userId, which fixes the
+/// attribution; actor.userId scoping alone would not fix the validation -- a route whose sources the
+/// router cannot walk would still reach the table, and a call made under it would refuse naming a
+/// configuration nobody could have saved through the page.
+@actor
 @serverOnly
 mutation route routeWrite {
   args {
     routeId      string!
-    ownerUserId  string!
     name         string!
     fast         []string!
     strong       []string!
@@ -139,9 +139,12 @@ mutation route routeWrite {
     updatedAt    string!
   }
   insert {
-    accept { ownerUserId, name, fast, strong, reasoning, active, updatedAt }
+    accept { name, fast, strong, reasoning, active, updatedAt }
     stamp {
       id: args.routeId
+      // Stamped, never accepted: the route is the caller's, whoever wrote
+      // the arguments.
+      ownerUserId: actor.userId
     }
   }
 }

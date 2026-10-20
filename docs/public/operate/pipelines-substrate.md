@@ -31,6 +31,22 @@ before the first one.
 
 ## Where a step runs
 
+Operators using Kueue can set `MEMQL_PIPELINES_QUEUE_PRIORITY_CLASSES` to a
+JSON object mapping pipeline events to installed `WorkloadPriorityClass` names.
+For example, `{"merge_group":"merge-gates","schedule":"background-audits"}`
+lets the declared classes order pending merge candidates ahead of scheduled
+audits. Unmapped events retain default admission priority. The mapping is
+operator configuration; repository manifests cannot choose a priority class.
+Create the referenced classes before enabling it. Malformed mappings refuse
+execution, and a missing class leaves the Job suspended until repaired.
+
+This uses [Kueue workload priority](https://kueue.sigs.k8s.io/docs/concepts/workload_priority_class/),
+which is separate from Pod scheduling priority. Resource ceilings, dedicated
+pool placement and the ClusterQueue's preemption policy still apply. With
+preemption disabled, an admitted job finishes before higher-priority waiting
+work can use its resources. Each replica derives the same class from the
+serialized pipeline event; adopted Jobs keep their existing admission state.
+
 The agent node driving a run hands each command step to the substrate's
 executor (`integrations/pipelinesteps`), which decides where it runs:
 
@@ -89,6 +105,22 @@ A step's pod runs up to four kinds of container, in this order:
 | `clone` | init | the clone image, root | the checkout volume and the clone token; never the cache |
 | `svc-<name>` | native sidecar, one per service the step names, in name order | the service's `image`, its own user | its declared `env` only: no checkout, no cache, no secret |
 | `step` | main | the pipeline's `image`, its own user | the checkout at `/workspace`, its repository's cache at `/cache`, the step's environment and its secrets |
+
+An explicit `githubReadToken: true` command or image build receives a required Secret
+reference as `MEMQL_GITHUB_READ_TOKEN`. The token reads only this repository's
+contents, checks and pull requests; it has no write permission. Ordinary commands,
+services, collectors, image builds without the flag and fleet tasks do not receive this grant.
+The runner refreshes it during queue waits and masks every issued value using
+the same lifecycle as checkout credentials. A missing grant refuses execution;
+it never falls back to an installation-wide or anonymous credential.
+
+For an image build, BuildKit receives the credential through its secret session
+as `github_read_token`. A Dockerfile opts into it for one instruction with
+`RUN --mount=type=secret,id=github_read_token,required=true`. The token is at
+`/run/secrets/github_read_token` for that instruction; it is not a build argument
+or an ordinary environment variable inside a Dockerfile `RUN`. Do not copy the
+mounted file into an image layer. No publication or registry credential reaches
+the builder.
 
 Every container runs with `allowPrivilegeEscalation: false`, and the pod with
 the `RuntimeDefault` seccomp profile, `restartPolicy: Never` and a 10-second
@@ -1166,6 +1198,7 @@ coverage; packaging their binaries does not exercise those hosts.
 | `gates` | `gate-inputs` | pull requests and manual runs |
 | `analysis` | Full-history `gitleaks` (6 hours, 3 CPUs), `codeql-go` (3 hours), `codeql-javascript`, `codeql-python` and `sbom` | weekly audits and manual runs, after a failure too |
 | `security-reports` | Journaled publication of the three retained CodeQL SARIF reports | weekly audits and manual runs |
+| `fixtures` | Digest-pinned public TimescaleDB snapshot for Linux AMD64 and ARM64, with attached provenance; retains an unpublished OCI index and metadata | manual runs |
 | `release-files` | Exact-version documentation bundle, SDK npm archive and five VSIX archives | releases |
 | `build-tools` | Unpublished toolchain OCI archive and digest metadata | releases |
 | `images` | Unpublished OCI archives and digest metadata for all seven engine node types | releases |

@@ -348,7 +348,7 @@ func TestStatusAcceptsEitherSpellingOfTheVersion(t *testing.T) {
 // checked at the one seam where getting it wrong is invisible.
 //
 // Git tags carry the leading v and image tags do not --
-// dispatch-engine-images-on-release.yml strips it before dispatching. Asking
+// the native release builder strips it for image tags. Asking
 // the registry for "v1.2.3" requests an image tag nothing ever pushed, so
 // EVERY release would report as unbuilt, forever, with no error anywhere.
 func TestTheRegistryIsAskedForTheBAREVersion(t *testing.T) {

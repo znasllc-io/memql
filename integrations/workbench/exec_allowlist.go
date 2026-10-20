@@ -24,59 +24,21 @@ import (
 // Closes memql#110 (Option A: per-command allowlist).
 var allowedBinaries = safety.WorkbenchExecAllowlist
 
-// segmentSeparators are the shell operators that introduce a new
-// command segment in a compound command. The allowlist walker
-// splits on these to identify each segment's leading binary.
-//
-// Conservative on purpose: we DO match `&` to catch background-job
-// sequencing too. We do NOT attempt to parse subshells (`$( ... )`,
-// backticks) or here-docs -- those would require a real shell
-// parser. Use of those constructs surfaces as the OUTER command
-// failing the allowlist (e.g. `echo $(curl evil)` would parse as
-// segment "echo" only, leaving `$(curl ...)` to /bin/sh which then
-// runs curl unchecked). That's a known limitation of the Option A
-// approach; the issue's Option B (seccomp / AppArmor) is the
-// correct fix for the subshell case.
-var segmentSeparators = []string{"|", ";", "&&", "||", "&", "\n"}
-
-// extractCommandBinaries tokenizes cmd on segmentSeparators and
-// returns the first word of each non-empty segment -- the binary
-// the segment will invoke. Leading whitespace + comments are
-// skipped. Returns an error only when cmd is empty after trimming.
-//
-// Quoting: the first word is anything up to the first ASCII
-// whitespace OR the start of a quoted string. We don't unwrap
-// quotes; commands like `'/usr/bin/python3' file.py` get matched
-// against the literal `'/usr/bin/python3'` rather than `python3`.
-// That's a Documented Limitation (file a follow-up if it bites).
+// extractCommandBinaries uses the shared shell segmentation rules so quoted
+// program text is never mistaken for another command. Leading binary tokens
+// retain the existing restrictions: no quote unwrapping or assignment skipping.
 func extractCommandBinaries(cmd string) ([]string, error) {
-	trimmed := strings.TrimSpace(cmd)
-	if trimmed == "" {
+	if strings.TrimSpace(cmd) == "" {
 		return nil, fmt.Errorf("command is empty")
 	}
-
-	// Replace multi-char separators with a single rune marker so a
-	// single Fields-style split works. \x00 is safe because shell
-	// strings can't contain NUL.
-	work := trimmed
-	for _, sep := range segmentSeparators {
-		work = strings.ReplaceAll(work, sep, "\x00")
+	if safety.ContainsSubshell(cmd) {
+		return nil, fmt.Errorf("command_not_allowed: subshells and heredocs cannot be verified by the workbench exec allowlist")
 	}
-
 	var out []string
-	for _, seg := range strings.Split(work, "\x00") {
-		seg = strings.TrimSpace(seg)
-		if seg == "" {
-			continue
+	for _, seg := range safety.SegmentCommand(cmd) {
+		if first := firstToken(seg); first != "" {
+			out = append(out, first)
 		}
-		// Skip a leading `env VAR=value` prefix that some commands
-		// use to set vars without subshell. The bare binary is the
-		// token after the env+assignments.
-		first := firstToken(seg)
-		if first == "" {
-			continue
-		}
-		out = append(out, first)
 	}
 	if len(out) == 0 {
 		return nil, fmt.Errorf("command parsed to zero segments: %q", cmd)

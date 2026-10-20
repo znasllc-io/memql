@@ -1180,6 +1180,17 @@ func (s *step) mintToken() (string, error) {
 	if s.r.tokens == nil {
 		return "", errors.New("this workbench node has no token minter")
 	}
+	if s.run.GitHubReadToken {
+		minter, ok := s.r.tokens.(RepositoryReadTokenMinter)
+		if !ok {
+			return "", errors.New("this workbench node cannot mint repository read credentials")
+		}
+		token, err := minter.RepositoryReadToken(s.ctx, s.run.InstallationID, s.run.Repository.Owner, s.run.Repository.Name)
+		if err == nil && token == "" {
+			return "", errors.New("repository read credential was empty")
+		}
+		return token, err
+	}
 	return s.r.tokens.CloneToken(s.ctx, s.run.InstallationID, s.run.Repository.Owner, s.run.Repository.Name)
 }
 

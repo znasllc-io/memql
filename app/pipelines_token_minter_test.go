@@ -54,3 +54,40 @@ func TestPipelinesCloneTokenIsNarrowedToTheRepository(t *testing.T) {
 		t.Errorf("a node with no packages integration = %v, want ErrNotConfigured", err)
 	}
 }
+
+func TestPipelinesRepositoryReadTokenIsNarrowedAndCannotWrite(t *testing.T) {
+	calls := 0
+	m := pipelinesTokenMinter{mint: func(_ context.Context, installation int64, repos []string, perms map[string]string) (string, time.Time, error) {
+		calls++
+		if installation != 42 || !slices.Equal(repos, []string{"widget"}) || !maps.Equal(perms, map[string]string{"contents": "read", "checks": "read", "pull_requests": "read"}) {
+			t.Fatalf("overbroad read grant: %d %v %v", installation, repos, perms)
+		}
+		return "fixture-read-token", time.Now().Add(time.Hour), nil
+	}}
+	token, err := m.RepositoryReadToken(context.Background(), 42, "acme", "widget")
+	if err != nil || token != "fixture-read-token" || calls != 1 {
+		t.Fatalf("read grant: %q %v", token, err)
+	}
+	for _, invalid := range []struct {
+		id          int64
+		owner, repo string
+	}{{0, "acme", "widget"}, {42, "", "widget"}, {42, "acme", ""}} {
+		if _, err := m.RepositoryReadToken(context.Background(), invalid.id, invalid.owner, invalid.repo); err == nil {
+			t.Fatal("unscoped grant accepted")
+		}
+	}
+	if calls != 1 {
+		t.Fatal("invalid scope reached GitHub")
+	}
+	if _, err := (pipelinesTokenMinter{}).RepositoryReadToken(context.Background(), 42, "acme", "widget"); !errors.Is(err, githubapp.ErrNotConfigured) {
+		t.Fatalf("missing client: %v", err)
+	}
+	for _, mintErr := range []error{nil, githubapp.ErrNotInstalled} {
+		m.mint = func(context.Context, int64, []string, map[string]string) (string, time.Time, error) {
+			return "", time.Time{}, mintErr
+		}
+		if _, err := m.RepositoryReadToken(context.Background(), 42, "acme", "widget"); err == nil {
+			t.Fatal("empty or refused credential accepted")
+		}
+	}
+}

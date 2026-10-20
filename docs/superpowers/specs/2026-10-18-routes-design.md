@@ -123,11 +123,22 @@ concept route {
   fast         []string  // 1..4 chain entries
   strong       []string  // 1..4 chain entries
   reasoning    []string  // 1..4 chain entries
-  createdAt    datetime
+  active       bool      // false once deleted; reads skip it
   updatedAt    datetime
 }
-@rowAuthz(owner="ownerUserId")
+@rowAuthz(owner="ownerUserId", clusterOwner)
 ```
+
+- **Why the composite tier.** A call made under a person's route may resolve on
+  a planner or agent replica that holds nothing of the person's, so the router
+  reads the route under the cluster's maintenance principal, which the
+  `clusterOwner` arm admits. The read always names the owner, so it never
+  returns somebody else's route. A plain owner tier would hide the row from the
+  replica that needs it.
+- **One write, stamped.** Every write is the `@serverOnly` mutation
+  `routeWrite`, reached only through `routeSave` and `routeDelete`, which
+  validate first. It stamps `ownerUserId` from `actor.userId` and accepts no
+  owner argument.
 
 - **Validation.** Every entry must parse as a source the router accepts: a
   `fleet:`, `app:` or `federation:` entry, never `policy:` and never

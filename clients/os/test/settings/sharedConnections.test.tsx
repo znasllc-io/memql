@@ -1,8 +1,9 @@
-import { render, screen, within } from "@testing-library/react";
+import { fireEvent, render, screen, within } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 const h = vi.hoisted(() => ({ connection: null as unknown }));
 vi.mock("../../src/live/connection", () => ({ useOsConnection: () => h.connection }));
 import { ConnectionsPanel } from "../../src/modules/connections/ConnectionsPanel";
+import { PipelineChannelsSettings } from "../../src/apps/deployables/pipelines/ChannelsSettings";
 import { SourceConnectionsProvider } from "../../src/modules/connections/connections";
 import { SharedCredentialsProvider } from "../../src/modules/connections/useSourceCredentials";
 import { SharedPackagesProvider } from "../../src/apps/deployables/packages/usePackages";
@@ -11,6 +12,19 @@ import { correlateConnectReturn, readConnectReturn, rememberConnectAttempt, retu
 import { emit, fakeConnection, githubGrantRow, withSession } from "../deployables/harness";
 
 describe("connections shared across apps", () => {
+  it("retains an unfinished channel destination when switching settings providers", async () => {
+    h.connection = fakeConnection({ pipelineChannels: [{ id: "channel-1", ownerUserId: "u-me", name: "releases", kind: "email", recipients: ["ops@example.test"], status: "active" }] });
+    render(withSession(<SharedPackagesProvider><SharedCredentialsProvider><SourceConnectionsProvider>
+      <ConnectionsPanel appId="deployables" additionalSections={[{ id: "channels", name: "Channels", render: (active, header) => <PipelineChannelsSettings active={active} header={header} pipelines={[]} pipelinesReady refreshPipelines={() => {}} /> }]} />
+    </SourceConnectionsProvider></SharedCredentialsProvider></SharedPackagesProvider>, { userId: "u-me" }));
+    fireEvent.click(screen.getByRole("button", { name: "Channels" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Manage channel releases" }));
+    fireEvent.change(screen.getByLabelText("Recipients, one address per line"), { target: { value: "unsaved@example.test" } });
+    fireEvent.click(screen.getByRole("button", { name: "GitHub" }));
+    expect(screen.queryByRole("textbox", { name: "Recipients, one address per line" })).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "Channels" }));
+    expect((screen.getByRole("textbox", { name: "Recipients, one address per line" }) as HTMLTextAreaElement).value).toBe("unsaved@example.test");
+  });
   it("uses one credential subscription and updates both settings surfaces from the same record", async () => {
     const grant = githubGrantRow({ id: "shared", login: "shared-user" });
     const connection = fakeConnection({ credentials: [grant] }); h.connection = connection;

@@ -106,7 +106,7 @@ func guidanceRetry(approval map[string]any, text, decidedBy string) *failureRetr
 	// A model failure or a checkpoint-bound computer question suspended a native turn.
 	// Its exact checkpoint can take the correction without rewriting a workflow.
 	// The execution replica revalidates that checkpoint; feedback grants no scope.
-	if (rowString(approval, "kind") == "feedback" && workstate.IsModelCallCheckpoint(rowMap(approval, "subject"))) ||
+	if (rowString(approval, "kind") == "feedback" && workstate.IsReasoningCheckpoint(rowMap(approval, "subject"))) ||
 		memql.WorkPermissionGuidance(rowString(approval, "kind"), rowMap(approval, "subject"), map[string]any{"feedback": text}, rowString(approval, "artifactHash")) {
 		return nil
 	}

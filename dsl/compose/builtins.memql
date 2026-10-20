@@ -20,7 +20,8 @@
 // sources into their own Library, and the row tier is what decides which
 // those are.
 
-/// Start a Materializer work run using the known materializeFile template. The composition and
+/// Create a saved document file in Files from supplied content or a writing request: Markdown, HTML,
+/// text, CSV, JSON, DOCX or PDF. Uses the materializeFile template. The composition and
 /// immutable source snapshot are saved before dispatch. Returns {compositionId, goalId, runId};
 /// progress and the eventual outputFileId arrive on the composition row.
 @sdk

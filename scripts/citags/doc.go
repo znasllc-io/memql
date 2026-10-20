@@ -4,7 +4,7 @@
 // It has no runtime code. The package exists so an UNTAGGED test can walk the
 // repository and compare two sources of truth that used to be reconciled by
 // hand in a ci.yml comment: the build constraints actually on *_test.go files,
-// and the `go test -tags ...` steps actually in .github/workflows/.
+// and the `go test -tags ...` steps actually in memql-package.yaml.
 //
 // It lives under scripts/ rather than cmd/ because cmd/ means "a binary" --
 // every other cmd/* has a main package. The precedent is

@@ -1,5 +1,5 @@
 ---
-title: Minimum Requirements (running beyond local)
+title: Minimum Requirements
 audience: public
 status: stable
 area: operate
@@ -7,19 +7,15 @@ sinceVersion: 0.9.88
 owner: znas
 ---
 
-# Minimum Requirements — running MemQL beyond local
+# Minimum Requirements
 
-This page is the short answer to *"what do I actually need to stand MemQL up
-somewhere real?"* — i.e. anything past the local dev cluster. It states the
-minimums and links the deep runbooks for each piece. The biggest non-obvious
-requirement is the **database**, so that section is first and most detailed.
-
-There are two run modes:
+This page is the short answer to *"what do I actually need to run MemQL?"*
+There is one answer per run mode:
 
 | Mode | What it is | How |
 |------|-----------|-----|
-| **Local dev** | k3d + ArgoCD cluster on one machine — Postgres and the mesh. Throwaway. | `make up` (primary local path, memql#2061). See [Reproduce the cloud locally](reproduce-the-cloud-locally.md). |
-| **Real deployment** (any installation) | A Kubernetes mesh against **self-hosted CloudNativePG** (PostgreSQL + TimescaleDB Community + pgvector), in-cluster. | The rest of this page. |
+| **One machine** | The entire cluster on your own Mac or Linux PC: every engine node, Postgres, Argo CD and Ask voice in k3d, with local models answering chat, embeddings, speech recognition and speech. | The install wizard, or `make up` from a checkout. See [One machine](#one-machine-the-entire-cluster) below, [Before you install a local cluster](install-prerequisites.md) and [Reproduce the cloud locally](reproduce-the-cloud-locally.md). |
+| **Beyond one machine** (any installation) | A Kubernetes mesh against **self-hosted CloudNativePG** (PostgreSQL + TimescaleDB Community + pgvector), in-cluster. | [Beyond one machine](#beyond-one-machine), below. |
 
 Everything below is **target-agnostic by design**: the architecture is
 identical from a local k3d cluster to a cloud one; only the *config values*
@@ -31,6 +27,101 @@ staging-versus-production dimension inside the product. An operator who wants a
 second environment installs a second instance, with its own domain and its own
 database. What varies is the deploy TARGET (`provider`: `docker-local` |
 `azure`).
+
+---
+
+## One machine: the entire cluster
+
+Today MemQL runs as a whole on the machine you install it on. A local cluster
+cannot reach a model vendor (its OIDC issuer is not publicly reachable, so no
+vendor can verify what it mints), so **every model call is answered on that
+machine too**: chat and embeddings, and for Ask voice, speech recognition and
+speech. The minimum is what holds the cluster, those models and the operating
+system at the same time.
+
+### Hardware
+
+| | Apple silicon Mac | Linux PC (x86_64) | Models held at once |
+|---|---|---|---|
+| **Minimum** | 32 GB unified memory, 8 CPU cores, 100 GB free on an SSD | 32 GB RAM and an NVIDIA or AMD GPU with 16 GB VRAM, 8 CPU cores, 100 GB free on an SSD | `qwen3.5:9b`, `qwen3-embedding:0.6b`, whisper-large-v3-turbo and Kokoro |
+| **Recommended** | 48 GB or more on an M-series Pro, Max or Ultra chip, 200 GB free | 64 GB RAM and a GPU with 32 GB VRAM, 200 GB free | `qwen3.8:27b` in place of `qwen3.5:9b` |
+
+### Why these numbers
+
+On Apple silicon the GPU and the cluster share one pool of memory, so all of
+this has to fit in it at once:
+
+| What | Memory | Where the figure comes from |
+|---|---|---|
+| The cluster in Docker | 8 GB | Docker Desktop's allocation. 4.8 GiB was in use across 37 pods at idle, measured |
+| macOS, Cockpit and a browser | 8 GB | Allowance |
+| Chat and embeddings, minimum set | 11.4 GB | Catalog estimate at 32K chat and 8K embedding context ([by machine class](local-models.md#what-to-pull-by-machine-class)) |
+| Chat and embeddings, recommended set | 22.7 GB | The same estimate for `qwen3.8:27b` |
+| Speech recognition and speech | about 3 GB | Allowance. whisper-large-v3-turbo is a 1.5 GiB whisper.cpp file and Kokoro is under 0.4 GB; the catalog has not measured either |
+
+The minimum set comes to about 30 GB and the recommended set to about 42 GB,
+which is why the floor is 32 GB and the recommendation 48 GB.
+
+Measured on 2026-10-19 on a 36 GB MacBook Pro (M4 Max) with the cluster
+running: loading the recommended set (`qwen3.8:27b` at 32K context and
+`qwen3-embedding:0.6b` at 8K) took free memory from 82% to 23% and swap in use
+from 2.4 GB to 5.3 GB, before any speech model, browser tab or image build was
+added. Replies still arrived at 22.6 tokens per second, but the machine was
+swapping. Below 48 GB, use the minimum set.
+
+**Fleet's automatic model choice does not count the cluster yet**
+([memql#6254](https://github.com/znasllc-io/memql/issues/6254)). It sizes a
+Mac from three quarters of its memory, so a 32 GB or 36 GB Mac that also runs
+the cluster is offered `qwen3.8:27b`. On such a machine, choose `qwen3.5:9b`
+on the machine's Models tab instead of Automatic.
+
+On Linux the cluster uses system memory and the models use the GPU's, so the
+two budgets are separate. The minimum set and the speech models take about
+14 GB of a 16 GB card. The recommended set with them takes about 26 GB, which
+fits a 32 GB card but not a 24 GB one. The cluster takes about 5 GB of RAM at
+idle; image builds take more, and the desktop, browser and model runtime need
+the rest.
+
+Eight cores is a working floor, not a measured limit: the cluster idles at
+about a quarter of a core, and image builds use two thirds of Docker's CPUs by
+default. For disk, the measured machine held 13.9 GB of Docker images and
+27.9 GB of volumes, and building the images left a 25 GB build cache. The
+minimum model set downloads 7.2 GB and the recommended one 18.6 GB. The
+database, object storage and pipeline cache grow with use.
+
+### What qualifies
+
+| Machine | Runs the whole cluster |
+|---|---|
+| MacBook Pro, Mac mini, iMac, Mac Studio or Mac Pro with Apple silicon | Yes, from 32 GB; 48 GB or more recommended |
+| MacBook Air | Not recommended. Until the M4 it stopped at 24 GB. The 32 GB configurations meet the memory minimum, but the Air has no fan, so sustained inference beside the cluster slows it down |
+| Linux laptop, desktop, workstation or server on x86_64 with an NVIDIA or AMD GPU of 16 GB or more | Yes |
+| Linux PC with no discrete GPU, or less than 16 GB VRAM | No. CPU-only inference is not supported |
+| Linux on arm64: NVIDIA DGX Spark, the Grace-based DGX Station, Jetson | Not yet. The installer supports Linux only on x86_64, and Cockpit offers models only on x86_64 Linux |
+| Intel Mac | No. The installer supports Apple silicon only, and Cockpit does not run models on an Intel Mac |
+| Windows PC | No. Neither the installer nor Cockpit runs on Windows |
+
+### Software
+
+- **macOS 13 or newer** for Cockpit, on a release Docker Desktop still
+  supports: Docker covers the current and two previous major macOS releases.
+- **Docker Desktop** with at least 8 GB of memory allocated (12 GB
+  recommended).
+- **Linux**: Debian/Ubuntu or Fedora/RHEL with Docker Engine, set up as
+  [Before you install a local cluster](install-prerequisites.md) describes,
+  and the GPU's driver: NVIDIA's (with `nvidia-smi`) or AMD's `amdgpu`.
+
+Ask voice is the only realtime voice surface in the cluster: two LiveKit
+replicas and a Redis. There is no telephony (SIP) component.
+
+---
+
+## Beyond one machine
+
+The rest of this page is what an installation outside one machine needs: the
+minimums, with a link to the deep runbook for each piece. The biggest
+non-obvious requirement is the **database**, so that section is first and most
+detailed.
 
 ---
 
@@ -182,13 +273,14 @@ Every DB-connecting pod mounts the `memql-secrets` Secret via `envFrom`. The
 
 ## 4. Images — built on the build server, never a laptop
 
-Deployable images are built on **GitHub Actions → OIDC → ACR `acrmemql`**, never
+Deployable images are built on the **MemQL build server** and published to the
+configured registries with workload identity, never
 hand-built locally (local Docker is dev-only):
 
 - `memql` (this repo) → **every** node-type image — `identity`, `bff`,
   `agent`, `planner`, `workbench`, `mcp`, `edge` — as a
   **product-agnostic engine image**
-  (`.github/workflows/build-engine-images.yml`). There are no per-product node
+  (`memql-package.yaml`, native release image stage). There are no per-product node
   images: a plain engine node runs a product's DSL at runtime, so it does
   **not** need product code compiled in and does **not** fail on a product
   prompt template — the DSL bundle supplies the prompts (next bullet).

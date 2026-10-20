@@ -105,7 +105,9 @@ const (
 // re-send the one that was running. The journal writes these rows; this
 // package only reads them.
 type WorkStep struct {
-	Key string
+	PipelineKind pipelines.StepKind
+	Result       map[string]any
+	Key          string
 	// DefinitionFingerprint binds the complete execution definition recorded
 	// before admission. Older receipts without it cannot authorize recovery.
 	DefinitionFingerprint string
@@ -205,13 +207,14 @@ type Run struct {
 	// RerunFailedOnly: this attempt runs only what RerunOf did not pass
 	// (epic memql#5479); the driver carries the rest over as skipped
 	// pipeline_passed_earlier.
-	RerunFailedOnly bool
-	DeliveryID      string
-	PullRequest     int
-	HeadBranch      string
-	BaseSHA         string
-	Title           string
-	Version         string
+	RerunFailedOnly  bool
+	DeliveryID       string
+	InboundRequestID string
+	PullRequest      int
+	HeadBranch       string
+	BaseSHA          string
+	Title            string
+	Version          string
 
 	Status         string
 	Conclusion     string

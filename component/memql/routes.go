@@ -530,6 +530,25 @@ func RouteMaintenanceContext(ctx context.Context) context.Context {
 	return auth.ContextWithInternalOrigin(ctx)
 }
 
+// ReadRouterCallSignals reads the decisions made since a time, newest first, in
+// the shape Auto ranks on. It is read under the maintenance principal because
+// the signals are the cluster's, not the caller's: every replica ranks on the
+// same evidence whoever's call it is resolving.
+func ReadRouterCallSignals(ctx context.Context, exec routeExecutor, since time.Time) ([]map[string]any, error) {
+	if exec == nil {
+		return nil, nil
+	}
+	q, err := languageParser.RenderCall("routerCallsForSignals", map[string]any{"since": since.UTC().Format(time.RFC3339)})
+	if err != nil {
+		return nil, err
+	}
+	res, err := exec.Execute(RouteMaintenanceContext(ctx), "query "+q)
+	if err != nil {
+		return nil, fmt.Errorf("read recent decisions: %w", err)
+	}
+	return MaterializeRows(res), nil
+}
+
 // canonicalRouteId turns a bare route id into the row's canonical id.
 func canonicalRouteId(id string) string {
 	id = strings.TrimSpace(id)
@@ -611,17 +630,18 @@ func personalRouteFromRow(row map[string]any) RouteSpec {
 	}
 }
 
-// writePersonalRoute writes one person's route whole, under internal origin.
+// writePersonalRoute writes one person's route whole, under internal origin
+// and the CALLER'S actor: the mutation stamps the owner from actor.userId, so
+// ctx must be the person whose route it is.
 func writePersonalRoute(ctx context.Context, exec routeExecutor, spec RouteSpec, active bool) error {
 	q, err := languageParser.RenderCall("routeWrite", map[string]any{
-		"routeId":     canonicalRouteId(spec.Id),
-		"ownerUserId": spec.OwnerUserId,
-		"name":        spec.Name,
-		"fast":        spec.Jobs.Fast,
-		"strong":      spec.Jobs.Strong,
-		"reasoning":   spec.Jobs.Reasoning,
-		"active":      active,
-		"updatedAt":   time.Now().UTC().Format(time.RFC3339Nano),
+		"routeId":   canonicalRouteId(spec.Id),
+		"name":      spec.Name,
+		"fast":      spec.Jobs.Fast,
+		"strong":    spec.Jobs.Strong,
+		"reasoning": spec.Jobs.Reasoning,
+		"active":    active,
+		"updatedAt": time.Now().UTC().Format(time.RFC3339Nano),
 	})
 	if err != nil {
 		return err

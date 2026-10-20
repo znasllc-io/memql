@@ -5,14 +5,14 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/znasllc-io/memql/component/memql"
 	workstate "github.com/znasllc-io/memql/component/work"
 	"github.com/znasllc-io/memql/core/common"
 )
 
-// ModelCallBudget observes the same effective allowance and receipt union as
-// Admit, without admitting or charging a call. Recovery can consult it before
-// the hard limit is reached. A fresh goal read makes an explicit increase on
-// another replica visible even while this replica is still below its old cap.
+// ModelCallBudget observes the hard model-call cap and reconciled receipt union
+// without admitting or charging a call. Soft workload windows are considered at
+// admission; an early recovery review must not preempt productive continuation.
 // A zero limit means no model-call ceiling; an unreadable budget is an error.
 func (c *RunCeilings) ModelCallBudget(ctx context.Context, rc common.RunContext) (limit, used int, err error) {
 	if c == nil || !rc.IsRun() || strings.TrimSpace(rc.GoalId) == "" {
@@ -33,5 +33,17 @@ func (c *RunCeilings) ModelCallBudget(ctx context.Context, rc common.RunContext)
 	}
 	b.ceilings = enforceableHere(declared)
 	b.unbounded = b.ceilings == (workstate.Ceilings{})
-	return b.ceilings.MaxModelCalls, b.spent.ModelCalls, nil
+	goal, err := c.store.goalForOwner(ownerActor(memql.ContextWithFreshRead(ctx), rc.OwnerUserId), rc.GoalId)
+	if err != nil || goal == nil {
+		return 0, 0, fmt.Errorf("recovery goal unavailable: %v", err)
+	}
+	hard, err := ceilingsOf(goal)
+	if err != nil {
+		return 0, 0, err
+	}
+	limit = hard.MaxModelCalls
+	if limit == 0 {
+		limit = b.ceilings.MaxModelCalls
+	}
+	return limit, b.spent.ModelCalls, nil
 }

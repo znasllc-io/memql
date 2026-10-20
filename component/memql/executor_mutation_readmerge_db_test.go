@@ -125,6 +125,10 @@ func readMergeTestEngine(t *testing.T) (*MemQLEngine, *bun.DB, context.Context) 
 	registry := concept.DefaultRegistry()
 	eng, err := New(db)
 	require.NoError(t, err)
+	// These fixtures call Init without starting the component lifecycle, so
+	// onStop never runs. Retain the original cache even if a test disables it;
+	// its workers and retained results must not survive the private engine.
+	t.Cleanup(eng.cache.close)
 	gate, err := database.NewGatePool(dsn, 4)
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = gate.Close() })

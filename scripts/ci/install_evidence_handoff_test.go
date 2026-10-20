@@ -23,7 +23,7 @@ func TestInstallClusterEvidenceHandoffIsNarrowAndBounded(t *testing.T) {
 		} `yaml:"jobs"`
 	}
 
-	path := filepath.Join(gateRepoRoot(t), ".github", "workflows", "install-cluster-e2e.yml")
+	path := filepath.Join(RepoRoot(), ".github", "workflows", "install-cluster-e2e.yml")
 	raw, err := os.ReadFile(path)
 	if err != nil {
 		t.Fatalf("read %s: %v", path, err)

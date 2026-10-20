@@ -86,7 +86,7 @@ func (r candidateTargetReader) resolveFile(ctx context.Context, d pl.ReleaseDest
 		return candidateFileTarget{}, githubrelease.Target{}, err
 	}
 	t, ok := r.files[d.TargetID]
-	if !ok || t.ID != d.TargetID || t.Component != d.Component || t.Artifact != d.Artifact || d.Operation != "publish" || d.DesiredStateDigest != "" || d.RollbackCandidateID != "" || r.targets[d.TargetID].ID != "" {
+	if !ok || t.ID != d.TargetID || t.Component != d.Component || t.Artifact != d.Artifact || d.Operation != "publish" || d.DesiredStateDigest != "" || d.RollbackCandidateID != "" || r.targets[d.TargetID].ID != "" || r.npm[d.TargetID].ID != "" {
 		return t, githubrelease.Target{}, errors.New("candidate has no unique matching release asset target")
 	}
 	t, target, digest, err := t.snapshot()
@@ -102,6 +102,16 @@ func (r candidateTargetReader) resolveFile(ctx context.Context, d pl.ReleaseDest
 // The artifact format and source must fit the chosen destination. Choosing the
 // destination and publication order remains the installed recipe's concern.
 func (r candidateTargetReader) checkArtifact(ctx context.Context, d pl.ReleaseDestination, c pl.ReleaseComponent, a pl.ReleaseArtifact) error {
+	if _, ok := r.npm[d.TargetID]; ok {
+		t, _, err := r.resolveNPM(ctx, d)
+		if err != nil {
+			return err
+		}
+		if a.Kind != "file" || a.Size <= 0 || a.Size > 64<<20 || t.Version != c.Version {
+			return errors.New("npm destination requires a bounded file at the approved component version")
+		}
+		return nil
+	}
 	if _, ok := r.files[d.TargetID]; ok {
 		_, target, err := r.resolveFile(ctx, d)
 		if err != nil {

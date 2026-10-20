@@ -119,6 +119,8 @@ func TestSectionProgressPromptsPreserveScopeAndMissingEvidence(t *testing.T) {
 			"Assign every requested acceptance criterion to a section",
 			"Earlier outputs reach a section only through named inputs",
 			"creating required verification and running existing checks are different obligations",
+			"lookup, research, project and requested actions can all need it",
+			"A workload\nlabel does not by itself decide whether capabilitySearch is empty",
 		}},
 		{"workContextCheckpoint", map[string]any{
 			"task":   "Section: Gather requirements. Return the requirements ledger. Later work: apply and verify the repair.",

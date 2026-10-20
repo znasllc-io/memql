@@ -11,6 +11,7 @@ import (
 	"fmt"
 	"io"
 	"net/url"
+	"regexp"
 	"slices"
 	"strconv"
 	"strings"
@@ -50,7 +51,7 @@ type PublishedArtifact struct {
 }
 
 type PublishedLocation struct {
-	Kind       string `json:"kind"` // oci or github-release
+	Kind       string `json:"kind"` // oci, github-release or npm
 	Origin     string `json:"origin"`
 	Repository string `json:"repository"`
 	ReleaseID  int64  `json:"releaseId,omitempty"`
@@ -61,6 +62,8 @@ type PublishedLocation struct {
 
 const ReleaseCatalogPayloadType = "application/vnd.memql.published-release.v1+json"
 const maxReleaseCatalogBytes = 1 << 20
+
+var publishedNPMName = regexp.MustCompile(`^(?:@[a-z0-9][a-z0-9._-]*/)?[a-z0-9][a-z0-9._-]*$`)
 
 // ReleaseProvenanceDigest binds the private, already verified evidence without
 // publishing its owner or work/Library references. The signature attests to the
@@ -103,14 +106,14 @@ func CanonicalPublishedRelease(input PublishedRelease) ([]byte, string, error) {
 				return nil, "", errors.New("invalid published artifact")
 			}
 			names[a.Name] = true
-			if (a.Kind == "oci" && (!releaseDigest(a.ImageDigest) || (a.Platform != "linux/amd64" && a.Platform != "linux/arm64"))) || (a.Kind == "file" && (a.ImageDigest != "" || !releaseIdentity(a.Platform))) || (a.Kind != "oci" && a.Kind != "file") {
+			if (a.Kind == "oci" && (!releaseDigest(a.ImageDigest) || (a.Platform != "linux/amd64" && a.Platform != "linux/arm64" && a.Platform != "oci-index"))) || (a.Kind == "file" && (a.ImageDigest != "" || !releaseIdentity(a.Platform))) || (a.Kind != "oci" && a.Kind != "file") {
 				return nil, "", errors.New("invalid published artifact kind")
 			}
 			locations := map[string]bool{}
 			for _, loc := range a.Locations {
 				locationCount++
 				u, e := url.Parse(loc.Origin)
-				if e != nil || len(loc.Origin) > 2048 || u.Host == "" || u.User != nil || u.RawQuery != "" || u.Fragment != "" || u.Opaque != "" || (u.Path != "" && u.Path != "/") || (u.Scheme != "https" && u.Scheme != "http") || !releaseIdentity(loc.Repository) || strings.ContainsAny(loc.Repository, "?#@%\\") || strings.HasPrefix(loc.Repository, "/") || strings.HasSuffix(loc.Repository, "/") {
+				if e != nil || len(loc.Origin) > 2048 || u.Host == "" || u.User != nil || u.RawQuery != "" || u.Fragment != "" || u.Opaque != "" || (u.Path != "" && u.Path != "/") || (u.Scheme != "https" && u.Scheme != "http") || !releaseIdentity(loc.Repository) || strings.ContainsAny(loc.Repository, "?#%\\") || (loc.Kind != "npm" && strings.Contains(loc.Repository, "@")) || strings.HasPrefix(loc.Repository, "/") || strings.HasSuffix(loc.Repository, "/") {
 					return nil, "", errors.New("invalid published location")
 				}
 				for _, part := range strings.Split(loc.Repository, "/") {
@@ -121,6 +124,10 @@ func CanonicalPublishedRelease(input PublishedRelease) ([]byte, string, error) {
 				if a.Kind == "oci" {
 					if loc.Kind != "oci" || loc.ReleaseID != 0 || loc.AssetID != 0 || loc.AssetName != "" || loc.Tag != "" {
 						return nil, "", errors.New("OCI location cannot contain release fields")
+					}
+				} else if loc.Kind == "npm" {
+					if !publishedNPMName.MatchString(loc.Repository) || len(loc.Repository) > 214 || loc.Tag != component.Version || loc.ReleaseID != 0 || loc.AssetID != 0 || loc.AssetName != "" {
+						return nil, "", errors.New("npm location requires its exact package name and component version")
 					}
 				} else if loc.Kind != "github-release" || loc.ReleaseID <= 0 || loc.AssetID <= 0 || !releaseIdentity(loc.AssetName) || strings.ContainsAny(loc.AssetName, "/\\") || !releaseIdentity(loc.Tag) || loc.Repository != component.Repository {
 					return nil, "", errors.New("file location requires immutable release and asset identities")

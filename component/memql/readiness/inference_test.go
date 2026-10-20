@@ -380,4 +380,3 @@ func TestEmbeddingCandidatesAreTheOnlineEmbeddersInOrder(t *testing.T) {
 		t.Fatalf("candidates %+v, want bge-m3 (alice) then qwen3-embedding:0.6b (bob), and no offline machine", got)
 	}
 }
-

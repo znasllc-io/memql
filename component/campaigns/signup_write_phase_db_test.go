@@ -17,6 +17,7 @@ func TestSignupWritePhaseDB(t *testing.T) {
 	f.run(t, "ASignupWriteThatOutlastsItsPhaseCommitsUnderItsLocks", f.TestASignupWriteThatOutlastsItsPhaseCommitsUnderItsLocks)
 	f.run(t, "ARecipientWriteThatOutlastsItsPhaseCanBeRetriedWithoutDuplicates", f.TestARecipientWriteThatOutlastsItsPhaseCanBeRetriedWithoutDuplicates)
 	f.run(t, "ASignupWhoseVisitorLeavesDuringAWriteKeepsItsLocksUntilItCommits", f.TestASignupWhoseVisitorLeavesDuringAWriteKeepsItsLocksUntilItCommits)
+	f.run(t, "ASignupInterruptedDuringEnrollmentResumesOnAnotherReplica", f.TestASignupInterruptedDuringEnrollmentResumesOnAnotherReplica)
 	f.run(t, "AWelcomeWhoseDrainStopsDuringItsVerdictKeepsItsLocksUntilItCommits", f.TestAWelcomeWhoseDrainStopsDuringItsVerdictKeepsItsLocksUntilItCommits)
 }
 
@@ -221,9 +222,54 @@ func (f *digestFixture) TestASignupWhoseVisitorLeavesDuringAWriteKeepsItsLocksUn
 	}
 }
 
-// TestAWelcomeWhoseDrainStopsDuringItsVerdictKeepsItsLocksUntilItCommits: the
-// same for a welcome. The worker stops while the welcome's verdict is being
-// written; the locks stay held until it commits, and the welcome is sent.
+// A membership admitted before cancellation may commit without the final signup
+// row. Consent precedes it; a retry must finish from those durable rows without
+// adding a second member or renewing consent, even on a different replica.
+func (f *digestFixture) TestASignupInterruptedDuringEnrollmentResumesOnAnotherReplica(t *testing.T) {
+	n := f.newEmptyNewsletter(t, "enrollment-interrupted")
+	request, leave := context.WithCancel(n.owner)
+	defer leave()
+	actual := n.worker.store.engine
+	engine := &straddlingWrite{Engine: actual, prefix: "mutation addRecipient", locked: n.audienceLockHeld(t), during: leave}
+	n.worker.store.engine = engine
+	defer func() { n.worker.store.engine = actual }()
+	n.args["email"] = consentMailbox
+	_, err := n.worker.handleSubscribe(request, n.args, 0)
+	engine.wg.Wait()
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("interrupted enrollment returned %v, want cancellation", err)
+	}
+	if len(engine.held) != 1 || !engine.held[0] {
+		t.Fatal("the admitted membership write did not commit under its lock")
+	}
+	consent, roster := n.consentRow(t), n.roster(t)
+	if consent == nil || len(roster) != 1 || n.signupRow(t) != nil {
+		t.Fatalf("want consent and one member, with signup still unfinished: consent=%v members=%d signup=%v", consent != nil, len(roster), n.signupRow(t) != nil)
+	}
+
+	// The next request has a different engine/cache and only the durable rows.
+	replica, _ := digestDBEngine(t)
+	worker := NewWorker(deliveryDBEngine{replica}, nil, n.worker.resolve, quietLogger(), gatePoolFor(t))
+	worker.cfg = n.worker.cfg
+	if _, err := worker.handleSubscribe(n.owner, n.args, 0); err != nil {
+		t.Fatalf("resume on another replica: %v", err)
+	}
+	if _, err := worker.handleSubscribe(n.owner, n.args, 0); err != nil {
+		t.Fatalf("replay completed signup: %v", err)
+	}
+	if got := n.roster(t); len(got) != 1 || got[0].ID != roster[0].ID {
+		t.Fatalf("resume changed membership: %+v", got)
+	}
+	if n.signupRow(t) == nil {
+		t.Fatal("resume did not complete the signup")
+	}
+	if got := n.consentRow(t); !templateTime(got["occurredAt"]).Equal(templateTime(consent["occurredAt"])) {
+		t.Fatal("resume replaced the original consent grant")
+	}
+}
+
+// The worker stops while the welcome's verdict is being written; the locks stay
+// held until it commits, and the welcome is sent.
 func (f *digestFixture) TestAWelcomeWhoseDrainStopsDuringItsVerdictKeepsItsLocksUntilItCommits(t *testing.T) {
 	n := f.newEmptyNewsletter(t, "welcome-stopped")
 	signup := pendingWelcome(t, n)

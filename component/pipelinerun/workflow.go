@@ -464,7 +464,7 @@ func (h *pipelineWorkflowHost) facts() map[string]any {
 			states = append(states, map[string]any{"key": t.step.Key, "stage": stage.name, "stageIndex": index, "status": string(s.Status), "kind": string(t.step.Kind), "runAfterFailure": t.step.RunAfterFailure})
 		}
 	}
-	return map[string]any{"stopped": h.dr.lease.isLost() || h.dr.lease.isCancelled(), "steps": states}
+	return map[string]any{"stopped": h.dr.lease.isLost() || h.dr.lease.isCancelled() || h.dr.cleanupFailed.Load(), "steps": states}
 }
 
 func (h *pipelineWorkflowHost) skip(ctx context.Context, args map[string]any) (any, error) {
@@ -479,7 +479,7 @@ func (h *pipelineWorkflowHost) skip(ctx context.Context, args map[string]any) (a
 	}
 	h.locks[key].Lock()
 	defer h.locks[key].Unlock()
-	if !t.finished() && !h.dr.lease.isLost() && !h.dr.lease.isCancelled() {
+	if !t.finished() && !h.dr.lease.isLost() && !h.dr.lease.isCancelled() && !h.dr.cleanupFailed.Load() {
 		if !h.dr.settle(ctx, t, skipReceipt(code, reason)) {
 			return nil, fmt.Errorf("pipeline skip receipt could not be confirmed")
 		}
@@ -488,7 +488,7 @@ func (h *pipelineWorkflowHost) skip(ctx context.Context, args map[string]any) (a
 }
 
 func (h *pipelineWorkflowHost) Invoke(ctx context.Context, capability string, args map[string]any) (any, error) {
-	if h.dr.lease.isLost() || h.dr.lease.isCancelled() {
+	if h.dr.lease.isLost() || h.dr.lease.isCancelled() || h.dr.cleanupFailed.Load() {
 		return nil, nil
 	}
 	switch capability {
@@ -517,9 +517,12 @@ func (h *pipelineWorkflowHost) Invoke(ctx context.Context, capability string, ar
 		}
 		defer func() { <-h.slots }()
 		h.dr.runStep(ctx, t)
-		if h.dr.journalFailed.Load() || h.dr.cleanupFailed.Load() {
-			return nil, fmt.Errorf("pipeline operation did not confirm its receipt or cleanup")
+		if h.dr.journalFailed.Load() {
+			return nil, fmt.Errorf("pipeline operation did not confirm its receipt")
 		}
+		// A cleanup failure stops admission but must not cancel the workflow's
+		// sibling contexts: their completed receipts still need to be saved.
+		// steer refuses a verdict once every active branch has drained.
 		return map[string]any{"status": string(t.snapshot().Status)}, nil
 	default:
 		return nil, fmt.Errorf("capability %q is outside this pipeline run", capability)

@@ -15,6 +15,11 @@ deliberately does not, and this page is that list plus the reasoning.
 The wizard supports **Linux x64 and Apple Silicon macOS**. Other packaged
 extension platforms do not imply local-cluster installer support.
 
+**The machine holds the whole cluster and its models.** That takes at least
+32 GB of memory on an Apple silicon Mac, or 32 GB of RAM and a GPU with 16 GB
+of VRAM on Linux. [Minimum requirements](minimum-requirements.md#one-machine-the-entire-cluster)
+explains the figures and the recommended sizes.
+
 ## What you do first
 
 **Docker, installed and running.**
