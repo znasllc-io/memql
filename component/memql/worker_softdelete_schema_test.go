@@ -141,3 +141,25 @@ func TestWorkerInvocationSchemaAllowsDeletedField(t *testing.T) {
 	require.Contains(t, err.Error(), "totallyNotAField",
 		"rejection must name the offending additionalProperty")
 }
+
+// The Fleet dispatcher emits workerWorkbench, not workerHost: treating the
+// isolated workspace as a host command would misrepresent its authority.
+// Exercise the shipped schema that rejected these successful calls in production.
+func TestWorkerInvocationSchemaAcceptsFleetWorkbenchReceipt(t *testing.T) {
+	schema := compileWorkerInvocationSchema(t)
+	row := map[string]any{
+		"ownerUserId":   "user-owner",
+		"workerId":      "v1:worker:registration:machine",
+		"agentId":       "v1:agents:agent:assistant",
+		"runId":         "v1:work:run:goal",
+		"tool":          "workerWorkbench",
+		"action":        "exec",
+		"startedAt":     "2026-10-20T00:20:35Z",
+		"outcome":       "success",
+		"exitCode":      0,
+		"outputPreview": "fleet activity smoke\n65532\n",
+	}
+	require.NoError(t, schema.Validate(row))
+	row["tool"] = "unknownWorkerTool"
+	require.Error(t, schema.Validate(row), "unknown tool types must remain rejected")
+}
