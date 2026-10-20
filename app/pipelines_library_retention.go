@@ -23,6 +23,9 @@ func pipelineLibraryArtifactID(fileID string) string {
 	return "v1:library:artifact:artifact-" + hex.EncodeToString(hash[:])
 }
 
+// staged-data: MUST-NOT-GATE -- hiding a staged Library edit or version would
+// make the retirement guard mistake retained bytes for an unmodified file.
+// The caller validates the exact receipt's owner and identity before effects.
 func pipelineLibraryRow(ctx context.Context, tx *sql.Tx, concept, id string) (map[string]any, error) {
 	var raw []byte
 	err := tx.QueryRowContext(ctx, `SELECT payload || jsonb_build_object('id',id) FROM "MemoryNodes"
@@ -54,6 +57,9 @@ func emptyPipelineLibraryList(value any) bool {
 // A user's filing/edit wins before retirement, or the permanent
 // retirement fence wins and the delayed edit is refused. No stale cache or
 // process-local state decides which bytes may disappear.
+// staged-data: MUST-NOT-GATE -- every historical owner/source and retained
+// version must participate in the preservation decision. Hiding staged history
+// could permit byte retirement or expose a differently owned older head.
 func checkPipelineLibraryRetirement(ctx context.Context, tx *sql.Tx, intent pipelineUploadIntent) error {
 	key := sha256.Sum256([]byte("pipeline-artifact-library:" + intent.FileID))
 	if _, err := tx.ExecContext(ctx, "SELECT pg_advisory_xact_lock($1)", int64(binary.BigEndian.Uint64(key[:8]))); err != nil {
@@ -125,6 +131,9 @@ AND (regexp_replace(payload->>'ownerUserId','^v1:identity:user:','') IS DISTINCT
 // PurgeRetiredRunFile does not decide age, release policy or producer state.
 // Its authority is the exact scoped journal plus confirmed permanent storage
 // retirement. Presentation deletion never substitutes for that byte receipt.
+// staged-data: MUST-NOT-GATE -- after confirmed byte retirement, leaving a
+// staged presentation behind would let it publish a link to retired bytes.
+// The permanent native receipt limits deletion to its exact owner and file.
 func (s *pipelinesLibraryStore) PurgeRetiredRunFile(ctx context.Context, scope pipelinesteps.RunFileReceiptScope, intentID string) error {
 	var err error
 	if scope, err = validatePipelineReceiptScope(ctx, scope, []string{intentID}); err != nil {
