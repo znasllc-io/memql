@@ -145,20 +145,34 @@ func (r *Registry) Add(w *Worker) {
 		return
 	}
 	r.mu.Lock()
-	defer r.mu.Unlock()
 	if r.draining {
+		r.mu.Unlock()
+		return
+	}
+	key := registrationKey(w.RegistrationId)
+	previous := r.byId[key]
+	if previous == w {
+		r.mu.Unlock()
 		return
 	}
 	w.registry = r
 	if w.activePerCap == nil {
 		w.activePerCap = make(map[string]uint32, len(w.Capabilities))
 	}
-	key := registrationKey(w.RegistrationId)
-	if existing, ok := r.byId[key]; ok {
-		r.removeLocked(existing)
+	if previous != nil {
+		r.removeLocked(previous)
 	}
 	r.byId[key] = w
 	r.byOwner[w.OwnerUserId] = append(r.byOwner[w.OwnerUserId], w)
+	r.mu.Unlock()
+	// A same-replica reconnect does not change connectedNodeId, so the
+	// registration watcher cannot detect it. End the old session explicitly:
+	// removing its index only wakes queued calls, not calls already in flight.
+	// Publish the successor first and invoke the hook outside the lock because
+	// teardown uses this registry to preserve the successor's connection.
+	if previous != nil {
+		previous.terminate(DisconnectReasonSuperseded)
+	}
 }
 
 // Remove removes a worker from the registry by registration id.

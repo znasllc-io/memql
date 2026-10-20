@@ -10,6 +10,8 @@ export interface AskCallbacks {
   delta: (text: string) => void;
   done: () => void;
   error: (message: string) => void;
+  /** Observation was lost; reconcile the accepted request, never resubmit. */
+  interrupted?: () => void;
 }
 
 export interface AskHandle {
@@ -26,7 +28,7 @@ export interface AskOptions {
 
 export interface WorkGuidanceRequest { targetEpoch: string; runId: string; conversationId: string; requestId: string; prompt: string }
 export interface WorkGuidanceReceipt { runId: string; conversationId: string; requestId: string; turn: AskTurn; status: "queued" | "applied" | "not-received" }
-export interface ApprovalGuidanceReceipt { runResumed: boolean; resumeError?: string; guidanceSaved?: boolean; savedGuidance?: string }
+export interface ApprovalGuidanceReceipt { runResumed: boolean; runStopped?: boolean; resumeError?: string }
 
 export interface AskTransport {
   guideWork?: (request: WorkGuidanceRequest) => Promise<WorkGuidanceReceipt>;

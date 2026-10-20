@@ -20,6 +20,13 @@ prompt workProgressRecovery {
   facts object!
 }
 
+/// Rendered continuation instruction; no separate model invocation.
+@level("fast")
+@templateFile("prompts/workEvidenceCompletion.tmpl")
+prompt workEvidenceCompletion {
+  gap string!
+}
+
 /// Native fallback when reconsideration still repeats the same stalled approach.
 @level("fast")
 @templateFile("prompts/workProgressQuestion.tmpl")

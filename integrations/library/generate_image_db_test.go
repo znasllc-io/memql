@@ -2,13 +2,13 @@ package library
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"testing"
 	"time"
 
 	"github.com/stretchr/testify/require"
 	"github.com/znasllc-io/memql/component/auth"
+	"github.com/znasllc-io/memql/component/language/parser"
 	"github.com/znasllc-io/memql/component/memql"
 	"github.com/znasllc-io/memql/core/airoute"
 	"github.com/znasllc-io/memql/core/common"
@@ -51,24 +51,35 @@ func TestGenerateImageOwnedRunRecoveryAcrossReplicas(t *testing.T) {
 	// Native journals advance accepted goals to active before executing work.
 	f.query(f.engine, internal, "mutation", "updateWorkGoal", map[string]any{"goalId": goal, "status": "active"})
 	rc := common.RunContext{RunId: run, GoalId: goal, OwnerUserId: f.owner, StepKey: "generate", Mode: common.RunModeLive}
-	ctx := common.ContextWithRun(internal, rc)
+	// The real tool loop uses the person's restricted origin, not the
+	// server-only origin used to write the native run journal above.
+	ctx := common.ContextWithRun(auth.ContextWithClientOrigin(f.ctx), rc)
 	first, second := &standaloneImageEngine{MemQLEngine: f.engine}, &standaloneImageEngine{MemQLEngine: f.other}
 	f.first.engine, f.second.engine = first, second
 	storage := &preparedImageStore{f: f, loseReply: true}
 	f.first.SetImageAssets(storage)
 	f.second.SetImageAssets(storage)
 	args := map[string]any{"name": "bird.png", "alt": "Illustration of a bird", "prompt": "A bird illustration", "width": 512, "height": 512, "level": "strong"}
-	_, err := f.first.handleGenerateImage(ctx, args, 0)
+	invoke := func(engine *memql.MemQLEngine, callCtx context.Context) (*memql.ExecuteResult, error) {
+		call, err := parser.RenderCall("workExecute", map[string]any{"name": "library.libraryGenerateImage", "arguments": args})
+		require.NoError(t, err)
+		return engine.Execute(callCtx, "query "+call)
+	}
+	_, err := invoke(f.engine, ctx)
 	require.ErrorContains(t, err, "reply lost")
-	nodes, err := f.second.handleGenerateImage(ctx, args, 0)
+	result, err := invoke(f.other, ctx)
 	require.NoError(t, err)
 	require.Equal(t, 1, first.calls)
 	require.Zero(t, second.calls)
 	require.Equal(t, 1, storage.writes)
-	var receipt map[string]any
-	require.NoError(t, json.Unmarshal(nodes[0].Payload, &receipt))
+	receipts := memql.MaterializeRows(result.OutputPayload())
+	require.Len(t, receipts, 1)
+	// workExecute carries the capability's result envelope inside its own.
+	receipts = memql.MaterializeRows(receipts[0]["payload"])
+	require.Len(t, receipts, 1)
+	receipt := receipts[0]
 	fileID := asString(receipt["outputFileId"])
-	require.NotEmpty(t, fileID)
+	require.NotEmpty(t, fileID, "receipt: %#v", receipt)
 	row, err := f.first.revisionRow(ctx, "libraryFileById", map[string]any{"fileId": fileID})
 	require.NoError(t, err)
 	require.Equal(t, "ready", row["status"])
@@ -91,7 +102,7 @@ func TestGenerateImageOwnedRunRecoveryAcrossReplicas(t *testing.T) {
 		wrong.OwnerUserId = "someone-else"
 		replay := rc
 		replay.Mode = common.RunModeReplay
-		for _, rejected := range []context.Context{context.Background(), auth.ContextWithClientOrigin(ctx), common.ContextWithRun(internal, wrong), common.ContextWithRun(internal, replay)} {
+		for _, rejected := range []context.Context{context.Background(), f.ctx, common.ContextWithRun(f.ctx, wrong), common.ContextWithRun(f.ctx, replay)} {
 			_, err := f.second.handleGenerateImage(rejected, args, 0)
 			require.Error(t, err)
 		}

@@ -26,6 +26,8 @@ type workRecoveryEngine interface {
 // system prompt which is refreshed at resume. Its position is the evidence
 // watermark: only completed batches AFTER it have not yet been observed.
 type workRecoveryState struct {
+	EvidenceRepairs    int              `json:"evidenceRepairs,omitempty"`
+	EvidenceGap        string           `json:"evidenceGap,omitempty"`
 	Version            int              `json:"version"`
 	ReadEvidence       workReadEvidence `json:"readEvidence,omitempty"`
 	DiscoveryRounds    int              `json:"discoveryRounds"`
@@ -62,13 +64,7 @@ func recoveryGuidance(message common.ChatMessage) time.Time {
 	if json.Unmarshal([]byte(raw), &receipt) != nil {
 		return time.Time{}
 	}
-	answer, _ := receipt["answer"].(map[string]any)
-	if receipt["kind"] == "budget" {
-		feedback, _ := answer["feedback"].(string)
-		if strings.TrimSpace(feedback) == "" {
-			return time.Time{}
-		}
-	} else if receipt["kind"] != nil && receipt["decision"] != "answered" {
+	if receipt["kind"] == "budget" || (receipt["kind"] != nil && receipt["decision"] != "answered") {
 		return time.Time{}
 	}
 	if receipt["answer"] == nil {
@@ -89,7 +85,7 @@ func recoveryState(messages []common.ChatMessage) (workRecoveryState, int, error
 		if marker >= 0 || len(message.Content) > 8192 {
 			return s, -1, fmt.Errorf("invalid recovery checkpoint")
 		}
-		if err := json.Unmarshal([]byte(message.Content), &s); err != nil || s.Version != 1 || len(s.RecentEvidence) > 8 || len(s.GuidanceIDs) > 16 || len(s.ReadEvidence.Recent) > 8 {
+		if err := json.Unmarshal([]byte(message.Content), &s); err != nil || s.Version != 1 || s.EvidenceRepairs < 0 || s.EvidenceRepairs > 1 || len(s.EvidenceGap) > 1200 || len(s.RecentEvidence) > 8 || len(s.GuidanceIDs) > 16 || len(s.ReadEvidence.Recent) > 8 {
 			return s, -1, fmt.Errorf("unreadable recovery checkpoint")
 		}
 		marker = i

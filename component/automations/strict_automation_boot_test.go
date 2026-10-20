@@ -241,7 +241,8 @@ func TestStrictAutomationBoot_EmbeddedTreeIsClean(t *testing.T) {
 // 174 -> 175: pre-file evidence assessment, measured by the strict loader.
 // 175 -> 177: two catalog research automations, measured after merging main.
 // 177 -> 178: bounded optional clarification policy pinned with the Spine.
-const shippedAutomationCount = 178
+// 178 -> 179: agentWorkReplyCompletion, the bounded missing-evidence policy.
+const shippedAutomationCount = 179
 
 //
 // 56 -> 57 in epic memql#5168 (the per-account front door):

@@ -104,16 +104,19 @@ func imageBuildWithProvenance(build *pl.ImageBuild, sha string, event pl.Event, 
 	return out
 }
 
-// This container contains neither clone credentials nor publication authority.
+// This container receives repository read credentials only with explicit
+// githubReadToken opt-in. BuildKit supplies them through its secret session,
+// never a build argument or a Dockerfile's ordinary environment. It receives no
+// publication authority.
 // BuildKit gives each RUN a process namespace separate from its daemon; no
 // service or shared cache is admitted. The collector has its own PID namespace
 // and reads the export only after this producer has terminated.
 func imageBuildContainer(cfg Config, run StepRun, jobName string) Container {
 	compiled := run
 	compiled.Image = imageBuildImage
-	compiled.Command = imageBuildCommand(run.ImageBuild, run.Platform)
+	compiled.Command = imageBuildCommand(run.ImageBuild, run.Platform, run.GitHubReadToken)
 	compiled.Env = nil // arbitrary forwarded variables cannot configure BuildKit
-	c := stepContainer(cfg, compiled, jobName, "", nil)
+	c := stepContainer(cfg, compiled, jobName, SecretName(jobName), nil)
 	c.Env = append(c.Env,
 		plainVar("BUILDKITD_FLAGS", "--oci-worker-snapshotter=overlayfs"),
 		plainVar("BUILDKIT_HOST", ""),
@@ -142,8 +145,9 @@ func imageBuildContainer(cfg Config, run StepRun, jobName string) Container {
 
 // Arguments remain individual shell words; a Dockerfile or build argument can
 // contain punctuation without becoming a shell program. BuildKit receives no
-// entitlement, socket, remote cache, secret, SSH, push or registry-auth option.
-func imageBuildCommand(build *pl.ImageBuild, platform string) string {
+// entitlement, socket, remote cache, SSH, push or registry-auth option. The sole
+// optional secret is the explicitly requested, repository-scoped read grant.
+func imageBuildCommand(build *pl.ImageBuild, platform string, githubReadToken bool) string {
 	quote := func(value string) string { return "'" + strings.ReplaceAll(value, "'", "'\"'\"'") + "'" }
 	words := []string{"buildctl-daemonless.sh", "build", "--frontend=dockerfile.v0",
 		"--local", "context=" + workspacePath + "/" + build.Context,
@@ -153,6 +157,9 @@ func imageBuildCommand(build *pl.ImageBuild, platform string) string {
 		"--metadata-file", workspacePath + "/" + pl.ImageBuildDirectory + "/metadata.json"}
 	if build.Target != "" {
 		words = append(words, "--opt", "target="+build.Target)
+	}
+	if githubReadToken {
+		words = append(words, "--secret", "id=github_read_token,env="+repositoryReadTokenVar)
 	}
 	for _, key := range sortedKeys(build.Args) {
 		words = append(words, "--opt", "build-arg:"+key+"="+build.Args[key])

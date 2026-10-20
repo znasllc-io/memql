@@ -1,0 +1,5 @@
+{
+  "version": "16.0.1",
+  "platforms": ["linux/amd64", "linux/arm64"],
+  "source": "index.docker.io/timescale/timescaledb@sha256:d8336a5c9cc49bdbf1e935234e8c87ab64b6d6d195fd2ecedff7b00185557631"
+}

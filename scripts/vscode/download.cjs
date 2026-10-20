@@ -1,39 +1,62 @@
-// Keep download failures outside the extension-test process. test-electron can
-// reject a second stream promise after ECONNRESET and abort Node before its own
-// retry completes. Only download transport failures are retried, never tests.
+// Keep transport retries outside the extension-test process. A slow download
+// must keep its progress; only a stalled transfer or transport failure retries.
 const { fork } = require("node:child_process");
 const path = require("node:path");
 const { setTimeout: delay } = require("node:timers/promises");
 
 const TRANSIENT = /\b(?:ECONNRESET|ETIMEDOUT|ECONNREFUSED|EAI_AGAIN|ENETUNREACH|EHOSTUNREACH)\b/;
 
-function attempt(options, worker, timeoutMs) {
+function attempt(options, worker, idleMs, remainingMs) {
   return new Promise((resolve, reject) => {
     const child = fork(worker, [JSON.stringify(options)], {
       stdio: ["ignore", "inherit", "pipe", "ipc"],
     });
     let receipt;
     let tail = "";
-    let timedOut = false;
-    const timer = setTimeout(() => {
-      timedOut = true;
-      child.kill("SIGKILL");
-    }, timeoutMs);
+    let timeoutReason = "";
+    let bytes = 0;
+    let internalRetries = 0;
+    const stages = new Set();
+    const stop = reason => { timeoutReason = reason; child.kill("SIGKILL"); };
+    const idle = setTimeout(() => stop("VS Code download stalled"), idleMs);
+    const deadline = setTimeout(() => stop("VS Code download exceeded its total time limit"), remainingMs);
+    const clearTimers = () => { clearTimeout(idle); clearTimeout(deadline); };
     child.stderr.on("data", chunk => {
       process.stderr.write(chunk);
       tail = (tail + chunk.toString()).slice(-8192);
     });
-    child.on("message", message => { receipt = message; });
-    child.once("error", error => { clearTimeout(timer); reject(error); });
+    child.on("message", message => {
+      if (message?.progress) {
+        const progress = message.progress;
+        // A heartbeat or repeated byte count is not forward progress. Each
+        // non-transfer stage can extend the idle watchdog only once.
+        if (progress.stage === "retrying" && internalRetries < 2) {
+          // The pinned upstream downloader has three internal attempts. A new
+          // transfer starts its counter over, under the same absolute budget.
+          internalRetries++;
+          bytes = 0;
+          idle.refresh();
+        } else if (Number.isSafeInteger(progress.bytes) && progress.bytes > bytes) {
+          bytes = progress.bytes;
+          idle.refresh();
+        } else if (["resolvedVersion", "extractingSynchonrously", "newInstallComplete", "foundMatchingInstall"].includes(progress.stage) && !stages.has(progress.stage)) {
+          stages.add(progress.stage);
+          idle.refresh();
+        }
+      } else if (typeof message?.executable === "string") {
+        receipt = message;
+      }
+    });
+    child.once("error", error => { clearTimers(); reject(error); });
     child.once("close", (code, signal) => {
-      clearTimeout(timer);
-      if (code === 0 && typeof receipt?.executable === "string" && receipt.executable) {
+      clearTimers();
+      if (!timeoutReason && code === 0 && typeof receipt?.executable === "string" && receipt.executable) {
         resolve(receipt.executable);
         return;
       }
-      const error = new Error(timedOut ? "VS Code download timed out" :
-        `VS Code download failed (${signal || code}): ${receipt?.error || tail || "no executable receipt"}`);
-      error.retryable = timedOut || TRANSIENT.test(tail + (receipt?.error || ""));
+      const error = new Error(timeoutReason ||
+        `VS Code download failed (${signal || code}): ${tail || "no executable receipt"}`);
+      error.retryable = timeoutReason === "VS Code download stalled" || TRANSIENT.test(tail);
       reject(error);
     });
   });
@@ -41,29 +64,52 @@ function attempt(options, worker, timeoutMs) {
 
 async function downloadVSCode(options, settings = {}) {
   const worker = settings.worker || __filename;
-  // The macOS archive is over 300 MB. A measured, still-progressing download
-  // received only 173 MiB in three minutes; restarting it cannot make progress.
-  // Bound the download separately from the unchanged host-test deadlines.
-  const timeoutMs = settings.timeoutMs ?? 600000;
+  // The 302 MB macOS archive can make progress for over ten minutes. Give all
+  // attempts one shared 20-minute budget, leaving time for the real host test.
+  const idleMs = settings.timeoutMs ?? 120000;
+  const deadline = performance.now() + (settings.totalTimeoutMs ?? 1200000);
   for (let number = 1; number <= 3; number++) {
+    const remainingMs = deadline - performance.now();
+    if (remainingMs <= 0) throw new Error("VS Code download exceeded its total time limit");
     try {
-      return await attempt(options, worker, timeoutMs);
+      return await attempt(options, worker, idleMs, remainingMs);
     } catch (error) {
-      if (!error.retryable || number === 3) throw error;
+      const retryDelayMs = settings.retryDelayMs ?? number * 1000;
+      if (!error.retryable || number === 3 || performance.now() + retryDelayMs >= deadline) throw error;
       console.error(`VS Code download interrupted; retrying download (${number + 1}/3).`);
-      await delay(settings.retryDelayMs ?? number * 1000);
+      await delay(retryDelayMs);
     }
   }
+}
+
+function safeError(error) {
+  return `${error?.code || ""} ${error?.message || String(error)}`.trim().replace(/https?:\/\/\S+/g, "[download URL]");
 }
 
 if (require.main === module) {
   const { downloadAndUnzipVSCode } = require(path.resolve(__dirname,
     "../../editors/vscode/node_modules/@vscode/test-electron"));
-  downloadAndUnzipVSCode(JSON.parse(process.argv[2])).then(executable => {
+  let lastSent = 0;
+  let lastReported = 0;
+  const reporter = {
+    report(progress) {
+      const now = performance.now();
+      if (progress.stage !== "downloading" || now - lastSent >= 1000 || progress.bytesSoFar === progress.totalBytes) {
+        lastSent = now;
+        if (process.connected) process.send({ progress: { stage: progress.stage, bytes: progress.bytesSoFar } });
+      }
+      if (progress.stage === "downloading" && (now - lastReported >= 30000 || progress.bytesSoFar === progress.totalBytes)) {
+        lastReported = now;
+        console.error(`Downloading VS Code: ${(progress.bytesSoFar / 1048576).toFixed(1)} of ${(progress.totalBytes / 1048576).toFixed(1)} MiB`);
+      }
+    },
+    error(error) { console.error(safeError(error)); },
+  };
+  downloadAndUnzipVSCode({ ...JSON.parse(process.argv[2]), reporter }).then(executable => {
     process.send({ executable }, () => process.disconnect());
   }).catch(error => {
-    console.error(error);
-    process.send({ error: `${error.code || ""} ${error.message}` }, () => process.exit(1));
+    console.error(safeError(error));
+    process.exit(1);
   });
 }
 

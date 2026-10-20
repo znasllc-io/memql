@@ -66,7 +66,7 @@ path, or use this detailed reference index. Layout + rules:
 ### Operate (`operate/`)
 
 - [Supervised Visual Composition](docs/public/operate/supervised-visual-composition.md) — approved OS design direction and rollout boundaries.
-- **[Minimum Requirements (running beyond local)](docs/public/operate/minimum-requirements.md)** — what you need to run MemQL outside the local dev cluster: self-hosted CloudNativePG (the only supported DB provider), the pooler/connection model, k8s, secrets, images, GitOps. Start here.
+- **[Minimum Requirements](docs/public/operate/minimum-requirements.md)** — what you need to run MemQL: the hardware for the entire cluster and its local models on one machine (Apple silicon with 32 GB, or x86_64 Linux with a 16 GB GPU), and beyond one machine self-hosted CloudNativePG (the only supported DB provider), the pooler/connection model, k8s, secrets, images, GitOps. Start here.
 - [Before you install a local cluster](docs/public/operate/install-prerequisites.md) — the short list of things the install wizard deliberately does not place for you, and why.
 - [Reproduce the cloud locally (k3d + ArgoCD)](docs/public/operate/reproduce-the-cloud-locally.md) — the blessed local dev topology: same Kustomize base, same ArgoCD-reconciled manifests as the cloud cluster.
 - [Environment parity — one topology everywhere](docs/public/operate/environment-parity.md) — the non-negotiable standard: every installation runs the same topology, deploy process, and connection model; only configuration values and hardware resources vary.

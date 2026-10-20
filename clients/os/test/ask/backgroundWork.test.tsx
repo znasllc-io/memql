@@ -1,5 +1,5 @@
 import { afterEach, expect, it, vi } from "vitest";
-import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { AskSurface } from "../../src/ask/AskSurface";
 import { AskWorkLink } from "../../src/ask/AskWorkLink";
 import { AskWorkQueue } from "../../src/ask/AskWorkQueue";
@@ -191,4 +191,34 @@ it("does not repeat an acknowledgement as the result of failed work", () => {
  expect(feed[1]?.turn.answer).toBe("");
  expect(feed[1]?.turn.error).toBe("Provider unavailable");
  expect(feed[1]?.showAssistant).toBe(true);
+});
+
+it.each(["waiting", "queued"] as const)("recovers a durable %s handoff after mobile loses the stream event", async state => {
+ vi.useFakeTimers(); let callbacks!: AskCallbacks;
+ let stored: AskTurn[] = [];
+ const cancel = vi.fn(), cancelGoal = vi.fn(), onOpenWork = vi.fn();
+ const ask = vi.fn<AskTransport["ask"]>((_p, _c, on) => { callbacks = on; return { cancel }; });
+ const transport = { ask, cancelGoal, conversations: { create: async () => ({id:"chat",title:"Chat"}), list: async () => [], read: async () => stored } };
+ const session = new ConversationSession(transport);
+ session.send("Create the dog image", null); await Promise.resolve();
+ const original = session.getSnapshot().turns[0]!;
+ render(<AskSurface conversation={session} transport={transport} variant="sheet" availability={{state:"ready",message:"",refresh(){}}} onOpenWork={onOpenWork} />);
+ expect(screen.getByLabelText("Waiting for your model")).toBeTruthy();
+ stored = [{...original, runId:"accepted-run", goalId:"goal", state, background:true, workTitle:"Create the dog image", workStatus:state === "waiting" ? "waiting" : "running", answer:"I’ll create the image.", acknowledgement:"I’ll create the image."}];
+ await act(async () => { await vi.advanceTimersByTimeAsync(10000); });
+ expect(session.getSnapshot().busy).toBe(false);
+ expect(session.getSnapshot().turns).toEqual(stored);
+ expect(cancel).toHaveBeenCalledOnce(); expect(cancelGoal).not.toHaveBeenCalled();
+ if (state === "waiting") {
+   expect(screen.getByText("Needs your input")).toBeTruthy();
+   expect(document.querySelector(".os-ask-wait")).toBeNull();
+   fireEvent.click(screen.getByRole("button", {name:"Create the dog image Needs your input"}));
+   expect(onOpenWork).toHaveBeenCalledWith("accepted-run", "chat");
+ }
+ act(() => { callbacks.delta("Late text"); callbacks.error("Late error"); callbacks.done(); });
+ expect(session.getSnapshot().turns).toEqual(stored);
+ await act(async () => { await vi.advanceTimersByTimeAsync(20000); });
+ expect(ask).toHaveBeenCalledOnce();
+ if (state === "waiting") expect(document.querySelector(".os-ask-wait")).toBeNull();
+ session.dispose();
 });

@@ -56,11 +56,10 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"slices"
 	"sort"
 	"strings"
 	"testing"
-
-	"gopkg.in/yaml.v3"
 
 	"github.com/znasllc-io/memql/core/repowalk"
 )
@@ -194,64 +193,52 @@ func bashArray(t *testing.T, rel, varName string) nodeTypeSet {
 	return newNodeTypeSet(rel+" "+varName, strings.Fields(m[1]))
 }
 
-var matrixNodeRe = regexp.MustCompile(`(?m)^\s*-\s+node:\s*([a-z0-9-]+)\s*$`)
-
-// releaseMatrix: the node types the build server cuts images for. The one list
-// no pull-request lane exercises, which is why a gate is the only thing that
-// reads it.
-// tagPassMatrix reads the node tags ci.yml's go-tests-tags job tests under
-// (memql#5483): one matrix entry per node type. A node type added without an
-// entry has its tagged suites run nowhere; one retired but left here runs a
-// pass under a tag that now means the default build.
+// Read executable tag tests and native release image arguments, not job names
+// or a retired build-server matrix. Missing/retired roles must fail both sets.
 func tagPassMatrix(t *testing.T) nodeTypeSet {
 	t.Helper()
-	rel := filepath.Join(".github", "workflows", "ci.yml")
-	// Other jobs' matrices are computed expressions, so decode the one job's
-	// matrix on its own rather than one struct for all of them.
-	var wf struct {
-		Jobs map[string]struct {
-			Strategy struct {
-				Matrix yaml.Node `yaml:"matrix"`
-			} `yaml:"strategy"`
-		} `yaml:"jobs"`
-	}
-	if err := yaml.Unmarshal([]byte(mustReadRepoFile(t, rel)), &wf); err != nil {
-		t.Fatalf("parse %s: %v", rel, err)
-	}
-	job, ok := wf.Jobs["go-tests-tags"]
-	if !ok {
-		t.Fatalf("%s has no go-tests-tags job: the node-tag passes run nowhere", rel)
-	}
-	var matrix struct {
-		Include []struct {
-			Tag string `yaml:"tag"`
-		} `yaml:"include"`
-	}
-	if err := job.Strategy.Matrix.Decode(&matrix); err != nil {
-		t.Fatalf("%s: go-tests-tags' matrix is not a static include list: %v", rel, err)
-	}
 	var names []string
-	for _, e := range matrix.Include {
-		names = append(names, e.Tag)
+	pattern := regexp.MustCompile(`(?m)^go test -tags ([a-z]+) `)
+	for _, stage := range nativePipeline(t).Stages {
+		for _, step := range stage.Steps {
+			if !strings.HasPrefix(step.Name, "test-") {
+				continue
+			}
+			required := nativeRequiredStep(t, step.Name)
+			for _, m := range pattern.FindAllStringSubmatch(required.Run, -1) {
+				names = append(names, m[1])
+			}
+		}
 	}
 	if len(names) == 0 {
-		t.Fatalf("%s: go-tests-tags has no `include` entries", rel)
+		t.Fatal("native pipeline has no executable node-tag tests")
 	}
-	return newNodeTypeSet(rel+" go-tests-tags matrix", names)
+	return newNodeTypeSet("memql-package.yaml node-tag tests", names)
 }
 
 func releaseMatrix(t *testing.T) nodeTypeSet {
 	t.Helper()
-	rel := filepath.Join(".github", "workflows", "build-engine-images.yml")
-	src := mustReadRepoFile(t, rel)
 	var names []string
-	for _, m := range matrixNodeRe.FindAllStringSubmatch(src, -1) {
-		names = append(names, m[1])
+	for _, stage := range nativePipeline(t).Stages {
+		if len(stage.On) > 0 && !slices.Contains(stage.On, "release") {
+			continue
+		}
+		for _, step := range stage.Steps {
+			image := step.ImageBuild
+			if image == nil || image.Dockerfile != "Dockerfile" || (image.Target != "runtime" && image.Target != "workbench-runtime") {
+				continue
+			}
+			tag, ok := image.Args["BUILD_TAGS"]
+			if !ok || tag == "" {
+				t.Fatal("native engine release image must name its role explicitly")
+			}
+			names = append(names, tag)
+		}
 	}
 	if len(names) == 0 {
-		t.Fatalf("%s: no `- node: <type>` matrix entries found", rel)
+		t.Fatal("native pipeline has no engine release images")
 	}
-	return newNodeTypeSet(rel+" matrix", names)
+	return newNodeTypeSet("memql-package.yaml release image BUILD_TAGS", names)
 }
 
 // An `image:` VALUE only. Matching the bare name anywhere in the file picked up

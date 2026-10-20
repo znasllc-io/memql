@@ -26,11 +26,13 @@ func assemblyTestPlan() candidateAssemblyPlan {
 func TestCandidateAssemblyDeclarationIsBoundedAndClosed(t *testing.T) {
 	versions := &candidateVersionReader{sources: map[string]candidateVersionSource{"engine": {Component: "engine"}}}
 	targets := &candidateTargetReader{targets: map[string]candidateRegistryTarget{"registry": {ID: "registry", Component: "engine", Artifact: "image"}}}
-	for _, failure := range []string{"valid", "duplicate plans", "unconfigured component", "duplicate aliases", "case-folded aliases", "undeclared run", "duplicate artifacts", "unknown kind", "metadata missing", "metadata same path", "unsupported platform", "traversal", "duplicate targets", "unknown target", "unknown compatibility", "too many plans"} {
+	for _, failure := range []string{"valid", "complete index", "duplicate plans", "unconfigured component", "duplicate aliases", "case-folded aliases", "undeclared run", "duplicate artifacts", "unknown kind", "metadata missing", "metadata same path", "unsupported platform", "traversal", "duplicate targets", "unknown target", "unknown compatibility", "too many plans"} {
 		t.Run(failure, func(t *testing.T) {
 			p := assemblyTestPlan()
 			plans := []candidateAssemblyPlan{p}
 			switch failure {
+			case "complete index":
+				p.Components[0].Artifacts[0].Platform = "oci-index"
 			case "duplicate plans":
 				plans = append(plans, p)
 			case "unconfigured component":
@@ -64,7 +66,7 @@ func TestCandidateAssemblyDeclarationIsBoundedAndClosed(t *testing.T) {
 			}
 			plans[0] = p
 			err := validateAssemblyPlans(plans, versions, targets)
-			if (err == nil) != (failure == "valid") {
+			if (err == nil) != (failure == "valid" || failure == "complete index") {
 				t.Fatal("declaration result", failure, err)
 			}
 		})

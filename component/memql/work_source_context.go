@@ -70,7 +70,7 @@ func (e *MemQLEngine) workSourceContextBuiltin(ctx context.Context, args map[str
 			if readErr != nil {
 				unavailable = append(unavailable, "Previous tool source receipts could not be read.")
 			} else {
-				toolSources, omitted := workCheckpointSources(checkpoints, runID, &remaining)
+				toolSources, omitted := e.workCheckpointSources(ctx, checkpoints, runID, &remaining)
 				for _, source := range toolSources {
 					evidence = append(evidence, source)
 				}
@@ -140,8 +140,13 @@ func (e *MemQLEngine) workSourceContextBuiltin(ctx context.Context, args map[str
 // Project complete, paired tool results only. Checkpoints may overlap; public
 // call IDs deduplicate them. Never copy system/assistant text or reasoning.
 func workCheckpointSources(checkpoints []map[string]any, runID string, remaining *int) ([]map[string]any, bool) {
+	return projectWorkCheckpointSources(checkpoints, runID, remaining, nil)
+}
+
+func projectWorkCheckpointSources(checkpoints []map[string]any, runID string, remaining *int, restore func(common.ChatMessage) (common.ChatMessage, bool)) ([]map[string]any, bool) {
 	sources := []map[string]any{}
 	seen := map[string]bool{}
+	missing := map[string]bool{}
 	omitted := false
 	for _, checkpoint := range checkpoints {
 		data, _ := checkpoint["data"].(map[string]any)
@@ -169,26 +174,41 @@ func workCheckpointSources(checkpoints []map[string]any, runID string, remaining
 			if message.Role != "tool" || !paired || call.ID == "" || call.Name != message.Name || seen[call.ID] || message.Content == common.UnexecutedWorkToolResult {
 				continue
 			}
-			seen[call.ID] = true
 			// History recall replays conversation text, including prior assistant
 			// claims. It is context, not an independent observation. Promoting it
 			// here launders those claims into sources and recursively duplicates
 			// the transcript. Original paired receipts are projected separately.
-			if call.Name == "recallWorkHistory" {
+			if call.Name == "recallWorkHistory" || call.Name == "recallMemory" {
 				continue
 			}
 			if call.Name == "ai" || call.Name == "runAgentTurn" || call.Name == "workReviewReply" || call.Name == "respondToUser" || call.Name == "requestUserFeedback" || strings.Contains(strings.ToLower(call.Name), "secret") {
 				continue
 			}
-			source := map[string]any{"runId": BareShortId(runID), "checkpointId": checkpoint["id"], "checkpointAt": checkpoint["createdAt"], "operation": call.Name, "callId": call.ID, "arguments": call.Arguments, "value": message.Content}
-			encoded, err := json.Marshal(source)
-			if err != nil || len(encoded) > 8000 || len(encoded) > *remaining || len(sources) >= 8 || strings.ContainsRune(message.Content+call.Arguments, 0) {
-				omitted = true
+			if len(sources) >= 8 || *remaining <= 0 {
+				missing[call.ID] = true
 				continue
 			}
+			if strings.HasPrefix(message.Content, "[Archived tool result ") {
+				var restored bool
+				if restore != nil {
+					message, restored = restore(message)
+				}
+				if !restored || message.Role != "tool" || message.Name != call.Name || message.ToolCallId != call.ID || strings.HasPrefix(message.Content, "[Archived tool result ") || message.Content == common.UnexecutedWorkToolResult {
+					missing[call.ID] = true
+					continue
+				}
+			}
+			source := map[string]any{"runId": BareShortId(runID), "checkpointId": checkpoint["id"], "checkpointAt": checkpoint["createdAt"], "operation": call.Name, "callId": call.ID, "arguments": call.Arguments, "value": message.Content}
+			encoded, err := json.Marshal(source)
+			if err != nil || len(encoded) > *remaining || strings.ContainsRune(message.Content+call.Arguments, 0) {
+				missing[call.ID] = true
+				continue
+			}
+			seen[call.ID] = true
+			delete(missing, call.ID)
 			*remaining -= len(encoded)
 			sources = append(sources, source)
 		}
 	}
-	return sources, omitted
+	return sources, omitted || len(missing) > 0
 }

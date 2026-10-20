@@ -51,6 +51,10 @@ func TestWorkTurnHistoryProjectsOnlyItsExactNativeDecision(t *testing.T) {
 					"answer": map[string]any{"permissionMode": "once"}, "decidedAt": "2026-10-13T08:26:00Z"},
 			}
 			history, err := workTurnHistory(ctx, reader, "Continue the saved work")
+			if kind == "budget" {
+				require.Error(t, err)
+				return
+			}
 			require.NoError(t, err)
 			require.Len(t, history, 3, "the approval must reach the next model request, not just the dispatcher")
 			require.Equal(t, "Continue the saved work", history[1].Content)

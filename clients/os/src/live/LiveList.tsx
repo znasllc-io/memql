@@ -5,6 +5,7 @@ import { Caption } from "../kit/Caption";
 import { RecordListSkeleton } from "../kit/RecordListSkeleton";
 import type { ArrivalKind } from "./arrival";
 import { useArrivals } from "./useArrivals";
+import { useConnectionRecovery, useConnectionStatus } from "../chrome/connection";
 
 // THE live list primitive (spec D7): every live surface in the OS renders
 // through this, so arrival behavior reads identically everywhere -- a new
@@ -67,9 +68,11 @@ export function LiveList<T>({
   // identically. A list and a map that disagreed about what counts as news
   // would be one app contradicting itself.
   const ticks = useArrivals(snapshot, rowId, fingerprint);
+  const connection = useConnectionStatus();
+  const { managed } = useConnectionRecovery();
 
   const stateLine =
-    snapshot.state === "seeding"
+    (managed && connection !== "connected") || snapshot.state === "seeding"
       ? null
       : snapshot.state === "degraded"
         ? "Live updates degraded -- showing the last known rows"

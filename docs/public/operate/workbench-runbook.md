@@ -159,13 +159,11 @@ only engine image carrying a Node toolchain and `git`, plus the build uid.
 Building the workbench node with any other stage produces a node whose builds
 fail with `npm: not found` on a cluster that looks correctly configured.
 
-Note that **no CI lane builds this image**: `build-engine-images.yml` is
-`workflow_dispatch`, so a mistake in the stage surfaces at an image build rather
-than on a pull request. It was verified by hand at the time it landed --
-`node --version`, `npm --version` and `git --version` inside the stage, and the
-uid claim measured rather than assumed: with a secret in the container's
-environment, root reads it out of `/proc/1/environ` and uid 10001 gets
-`Permission denied`. Re-check the same way after touching the stage.
+The native release image stage in `memql-package.yaml` selects
+`workbench-runtime` explicitly. Pull-request guards check the declared target;
+the release run builds and verifies the image. After changing this stage,
+check `node --version`, `npm --version` and `git --version` inside it, and
+verify that uid 10001 cannot read secrets from the root process environment.
 
 ## 4. Authorization
 

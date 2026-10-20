@@ -42,6 +42,12 @@ export interface PendingError extends Error {
   reason: "closed" | "transport" | "overloaded";
 }
 
+/** Transport loss is recoverable observation, not a server refusal. Callers
+ * may retry reads; a write's outcome must be reconciled before any retry. */
+export function isTransportInterruption(error: unknown): error is PendingError {
+  return error instanceof Error && "reason" in error && error.reason === "transport";
+}
+
 function pendingError(message: string, reason: PendingError["reason"]): PendingError {
   const err = new Error(message) as PendingError;
   err.reason = reason;

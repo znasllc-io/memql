@@ -15,70 +15,87 @@ import (
 // prefixes (`&` / `|`) so we don't split `&&` as `& &`.
 var shellSeparators = []string{"&&", "||", "|", ";", "&", "\n"}
 
-// SegmentCommand splits cmd into command segments along the shell
-// separators (`&& || | ; & \n`), while respecting single- and
-// double-quoted strings (separators inside quotes don't split). It
-// does NOT decode subshells, backticks, here-docs, or escapes -- use
-// ContainsSubshell to detect those before relying on segment-level
-// rules.
-//
-// Empty input or a command with no non-whitespace content returns a
-// nil slice. Leading/trailing whitespace is trimmed from each
-// segment; empty segments (e.g. trailing `;`) are dropped.
+// SegmentCommand splits cmd at shell separators outside quotes, escapes and
+// comments. It preserves the original segment text; it does not evaluate shell
+// expansions. Call ContainsSubshell before trusting segment-level allowlists.
 func SegmentCommand(cmd string) []string {
-	if strings.TrimSpace(cmd) == "" {
-		return nil
-	}
-	var segs []string
+	segments, _ := scanShellCommand(cmd)
+	return segments
+}
+
+// scanShellCommand shares quote/escape/comment handling between segmentation
+// and detection of constructs that cannot be verified by the binary allowlist.
+func scanShellCommand(cmd string) ([]string, bool) {
+	var segments []string
 	var cur strings.Builder
 	flush := func() {
-		s := strings.TrimSpace(cur.String())
-		cur.Reset()
-		if s != "" {
-			segs = append(segs, s)
+		if segment := strings.TrimSpace(cur.String()); segment != "" {
+			segments = append(segments, segment)
 		}
+		cur.Reset()
 	}
-	inSingle, inDouble := false, false
-	i := 0
-	for i < len(cmd) {
+	inSingle, inDouble, wordStart, complex := false, false, true, false
+	for i := 0; i < len(cmd); {
 		c := cmd[i]
-		// Quote handling first -- separators inside quotes are
-		// literal characters, not segmentation points.
+		// Backslash is literal in single quotes. Elsewhere it protects the
+		// following quote/separator; preserve both bytes for the real shell.
+		if !inSingle && c == '\\' && i+1 < len(cmd) {
+			cur.WriteString(cmd[i : i+2])
+			if cmd[i+1] != '\n' {
+				wordStart = false
+			}
+			i += 2
+			continue
+		}
+		// A quote in a shell comment must not hide commands on later lines.
+		if !inSingle && !inDouble && wordStart && c == '#' {
+			end := i
+			for end < len(cmd) && cmd[end] != '\n' {
+				end++
+			}
+			cur.WriteString(cmd[i:end])
+			i = end
+			continue
+		}
 		if !inDouble && c == '\'' {
 			inSingle = !inSingle
+			wordStart = false
 			cur.WriteByte(c)
 			i++
 			continue
 		}
 		if !inSingle && c == '"' {
 			inDouble = !inDouble
+			wordStart = false
 			cur.WriteByte(c)
 			i++
 			continue
 		}
-		if inSingle || inDouble {
-			cur.WriteByte(c)
-			i++
-			continue
+		if !inSingle && (c == '`' || c == '$' && i+1 < len(cmd) && cmd[i+1] == '(' ||
+			!inDouble && c == '<' && i+1 < len(cmd) && cmd[i+1] == '<') {
+			complex = true
 		}
-		// Match separators (longest first).
-		matched := false
-		for _, sep := range shellSeparators {
-			if strings.HasPrefix(cmd[i:], sep) {
-				flush()
-				i += len(sep)
-				matched = true
-				break
+		if !inSingle && !inDouble {
+			matched := false
+			for _, sep := range shellSeparators {
+				if strings.HasPrefix(cmd[i:], sep) {
+					flush()
+					i += len(sep)
+					wordStart = true
+					matched = true
+					break
+				}
 			}
-		}
-		if matched {
-			continue
+			if matched {
+				continue
+			}
+			wordStart = c == ' ' || c == '\t'
 		}
 		cur.WriteByte(c)
 		i++
 	}
 	flush()
-	return segs
+	return segments, complex
 }
 
 // ExtractCommandBinary returns the leading binary name of one
@@ -137,48 +154,12 @@ func CommandBinaries(cmd string) []string {
 	return out
 }
 
-// ContainsSubshell reports whether cmd contains shell metaprogramming
-// that the simple segment-based rules can't safely decode:
-//
-//   - `$( ... )` command substitution
-//   - “ ` ... ` “ backtick command substitution
-//   - `<<` here-doc / `<<<` here-string redirects
-//
-// Detection is conservative: a single `$(` outside of quotes is
-// enough. Rules that depend on accurate segmentation (notably the
-// workbench-allowlist rule, which checks the leading binary) treat
-// `true` as "cannot verify -- deny" rather than letting subshells
-// smuggle disallowed binaries past the outer-only check.
+// ContainsSubshell reports command substitutions and heredocs that the simple
+// segment-based rules cannot verify. Single-quoted and escaped literals do not
+// execute; substitutions inside double quotes do. Comments are not executed.
 func ContainsSubshell(cmd string) bool {
-	inSingle, inDouble := false, false
-	for i := 0; i < len(cmd); i++ {
-		c := cmd[i]
-		if !inDouble && c == '\'' {
-			inSingle = !inSingle
-			continue
-		}
-		if !inSingle && c == '"' {
-			inDouble = !inDouble
-			continue
-		}
-		if inSingle {
-			// Inside single quotes nothing interpolates.
-			continue
-		}
-		// Inside double quotes, `$(`/backticks DO interpolate, so
-		// they still count.
-		if c == '`' {
-			return true
-		}
-		if c == '$' && i+1 < len(cmd) && cmd[i+1] == '(' {
-			return true
-		}
-		if !inDouble && c == '<' && i+1 < len(cmd) && cmd[i+1] == '<' {
-			// `<<` here-doc (also matches `<<<` here-string).
-			return true
-		}
-	}
-	return false
+	_, complex := scanShellCommand(cmd)
+	return complex
 }
 
 // firstToken returns cmd's first whitespace-delimited token,

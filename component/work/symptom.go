@@ -470,7 +470,7 @@ func ApprovalKindFor(a Act) string {
 // reach the person deciding.
 func ApprovalKindForVerdict(a Act, ev Evidence) string {
 	if a == ActAsk && ev.RuleId == RuleIdBudgetExhausted {
-		return ApprovalKindBudget
+		return ApprovalKindFeedback
 	}
 	return ApprovalKindFor(a)
 }

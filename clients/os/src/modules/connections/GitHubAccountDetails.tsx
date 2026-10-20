@@ -9,6 +9,7 @@ import { createSourceConnection, removeSourceConnection, useSourceConnections, u
 import { InstallLink } from "../../apps/deployables/sources/RepositoryPicker";
 import { useGithubApp } from "../../apps/deployables/sources/useGithubApp";
 import { GitHubOrganizationDetails } from "./GitHubOrganizationDetails";
+import { onAppResume } from "../../live/resume";
 import type { CredentialRow } from "../../apps/deployables/sources/rows";
 
 type Page = { kind: "account" } | { kind: "add" } | { kind: "organization"; installation: SourceInstallation; connection?: SourceConnectionRow; from: "account" | "add" };
@@ -31,9 +32,7 @@ export function GitHubAccountDetails({ account, sourceNames, onBack, busy, refus
       followedInstall.current = false;
       void readAccess.current();
     };
-    window.addEventListener("focus", returned);
-    document.addEventListener("visibilitychange", returned);
-    return () => { window.removeEventListener("focus", returned); document.removeEventListener("visibilitychange", returned); };
+    return onAppResume(returned);
   }, []);
   const name = `@${account.login || account.label}`;
   const linked = connections.rows.filter(row => row.credentialId === account.id);

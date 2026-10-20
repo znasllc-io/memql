@@ -446,6 +446,13 @@ func (dr *runDriver) steer(ctx context.Context) (verdict, bool) {
 	dr.publish(ctx)
 
 	workflowErr := dr.execute(ctx)
+	if dr.cleanupFailed.Load() && !dr.lease.isCancelled() {
+		// The workflow waits for its active branches. Keep renewing ownership
+		// until their results are journaled, particularly Fleet commands whose
+		// outcome cannot be recovered from a cluster Job. No new work is
+		// admitted while draining, and recovery must still confirm cleanup.
+		dr.lease.lose()
+	}
 	if dr.lease.isLost() {
 		return verdict{}, false
 	}
@@ -649,6 +656,9 @@ func carryPassed(tracks []*stepTrack, prior []WorkStep, priorAttempt int) {
 	// its own scanner artifacts instead of carrying a skip from an older run.
 	producers := map[string]bool{}
 	for _, t := range tracks {
+		if t.step.RepositoryChange != nil {
+			producers[t.step.RepositoryChange.Step] = true
+		}
 		if t.step.SARIF != nil {
 			producers[t.step.SARIF.Step] = true
 		}
@@ -962,13 +972,16 @@ func (dr *runDriver) buildTracks(plan pipelines.Plan) {
 
 // runStep takes one step from pending to its receipt.
 func (dr *runDriver) runStep(ctx context.Context, t *stepTrack) {
-	if dr.lease.isLost() || dr.lease.isCancelled() {
+	if dr.lease.isLost() || dr.lease.isCancelled() || dr.cleanupFailed.Load() {
 		return
 	}
 	step := t.step
 	switch {
 	case step.Skip != nil:
 		dr.settle(ctx, t, skipReceipt(step.Skip.Code, step.Skip.Reason))
+		return
+	case step.Kind == pipelines.StepRepositoryChange:
+		dr.runRepositoryChange(ctx, t)
 		return
 	case step.Kind == pipelines.StepSARIF:
 		dr.runSARIFReport(ctx, t)
@@ -1038,15 +1051,11 @@ func (dr *runDriver) runStep(ctx context.Context, t *stepTrack) {
 }
 
 func (dr *runDriver) acknowledgeReceipt(ctx context.Context, exec pipelines.Executor, req pipelines.StepRequest) bool {
-	if !dr.confirmReceiptCleanup(ctx, exec, req) {
-		dr.lease.lose()
-		return false
-	}
-	return true
+	return dr.confirmReceiptCleanup(ctx, exec, req)
 }
 
 // Recovery can confirm independent recorded receipts before relinquishing its
-// lease. Live execution still stops immediately on an unconfirmed cleanup.
+// lease. Live execution drains active commands first, admitting no new work.
 func (dr *runDriver) confirmReceiptCleanup(ctx context.Context, exec pipelines.Executor, req pipelines.StepRequest) bool {
 	if !dr.stillHolds(ctx) {
 		// A transient ownership-read failure must not let runStep continue to
@@ -1528,6 +1537,10 @@ func (dr *runDriver) conclude(ctx context.Context, v verdict) bool {
 		}
 	}
 
+	if err := dr.releaseRepositoryChangeEvidence(ctx); err != nil {
+		dr.log.Warn("pipelines: completed repository change evidence awaits cleanup", "error", dr.mask(err.Error()))
+		return false
+	}
 	now := dr.d.now()
 	stages := dr.stageSummaries()
 	final := dr.run

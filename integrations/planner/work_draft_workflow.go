@@ -29,6 +29,13 @@ func synthesizeWorkReasoningBundleInScope(ctx context.Context, req CompileReques
 	if dec.RequiresFile == nil {
 		return authoringBundle{}, fmt.Errorf("work compile: triage must explicitly answer requiresFile with a boolean before dispatching a reasoning draft")
 	}
+	if *dec.RequiresFile {
+		var err error
+		dec.FileDelivery, dec.FileFormat, err = dec.fileContract()
+		if err != nil {
+			return authoringBundle{}, err
+		}
+	}
 	s := &draftSourceScope{req: req, dec: dec, agentID: agentID, headline: workDraftHeadline(req), producers: map[string]string{}, seen: map[string]bool{}}
 	s.sections = dec.usableSections(s.headline)
 	if dec.Sectionable && len(dec.Sections) > maxSectionFanout {
@@ -39,22 +46,7 @@ func synthesizeWorkReasoningBundleInScope(ctx context.Context, req CompileReques
 		if s.fileName == "" {
 			return authoringBundle{}, fmt.Errorf("work compile: a file goal requires an explicit fileName from triage")
 		}
-		switch dec.FileDelivery {
-		case "", "compose":
-			format, err := purecompose.ParseFormat(dec.FileFormat)
-			if err != nil {
-				return authoringBundle{}, fmt.Errorf("work compile: triage fileFormat: %w", err)
-			}
-			s.fileFormat = string(format)
-		case "capability":
-			format := strings.ToLower(strings.TrimPrefix(strings.TrimSpace(dec.FileFormat), "."))
-			if format == "" || len(format) > 16 || strings.Trim(format, "abcdefghijklmnopqrstuvwxyz0123456789") != "" {
-				return authoringBundle{}, fmt.Errorf("work compile: a capability file requires its requested format")
-			}
-			s.fileFormat = format
-		default:
-			return authoringBundle{}, fmt.Errorf("work compile: unknown file delivery mechanism")
-		}
+		s.fileFormat = dec.FileFormat
 	}
 	names, err := workDraftInputNames(req.Input)
 	if err != nil {
@@ -114,6 +106,28 @@ func synthesizeWorkReasoningBundleInScope(ctx context.Context, req CompileReques
 	bundle.Constructs = append(bundle.Constructs, s.children...)
 	carryCatalogSections(&bundle, dec, s.sections)
 	return bundle, nil
+}
+
+// fileContract checks the requested encoding against the composer's real
+// contract. A model's delivery hint cannot make that codec accept another
+// format. Other valid encodings require capability discovery; this does not
+// assert that a producer exists. The DSL still owns the execution recipe.
+func (d sectionableDecision) fileContract() (delivery, format string, err error) {
+	switch d.FileDelivery {
+	case "", "compose":
+		if parsed, parseErr := purecompose.ParseFormat(d.FileFormat); parseErr == nil {
+			return "compose", string(parsed), nil
+		}
+	case "capability":
+		// Preserve an explicit tool requirement even for a composer format.
+	default:
+		return "", "", fmt.Errorf("work compile: unknown file delivery mechanism")
+	}
+	format = strings.ToLower(strings.TrimPrefix(strings.TrimSpace(d.FileFormat), "."))
+	if format == "" || len(format) > 16 || strings.Trim(format, "abcdefghijklmnopqrstuvwxyz0123456789") != "" {
+		return "", "", fmt.Errorf("work compile: a capability file requires its requested format")
+	}
+	return "capability", format, nil
 }
 
 // pathSeparators are the characters the Materializer refuses in a file name.

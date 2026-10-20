@@ -12,6 +12,7 @@ import (
 	"github.com/stretchr/testify/require"
 	"github.com/znasllc-io/memql/component/auth"
 	"github.com/znasllc-io/memql/component/memql"
+	workstate "github.com/znasllc-io/memql/component/work"
 	"github.com/znasllc-io/memql/core/common"
 )
 
@@ -21,13 +22,13 @@ type budgetResumeFailureEngine struct {
 }
 
 func (e *budgetResumeFailureEngine) Execute(ctx context.Context, query string) (*memql.ExecuteResult, error) {
-	if strings.HasPrefix(query, "mutation updateWorkRun(") && e.fail.CompareAndSwap(true, false) {
-		return nil, fmt.Errorf("synthetic run release failure after budget decision")
+	if strings.HasPrefix(query, "mutation updateWorkRun(") && (strings.Contains(query, "humanResumeId") || strings.Contains(query, "finishedAt")) && e.fail.CompareAndSwap(true, false) {
+		return nil, fmt.Errorf("synthetic run release failure after saved answer")
 	}
 	return e.Engine.Execute(ctx, query)
 }
 
-func testBudgetGuidanceDBRecoversApprovedCheckpointAfterRunReleaseFailure(t *testing.T, a, b actsDB) {
+func testProgressDBRecoversCheckpointAfterRunReleaseFailure(t *testing.T, a, b actsDB) {
 	previous := auth.InstalledCapabilityCatalog()
 	auth.SetCapabilityCatalog(nil)
 	t.Cleanup(func() { auth.SetCapabilityCatalog(previous) })
@@ -36,8 +37,8 @@ func testBudgetGuidanceDBRecoversApprovedCheckpointAfterRunReleaseFailure(t *tes
 	goalID := rowString(a.runRow(t, runID), "goalId")
 	a.writeVersion(t, runID, runID, "fetch", 0, 1, nil, "completed evidence", nil)
 	a.writeVersion(t, runID, runID, "draft", 1, 1, nil, "", map[string]any{"status": "waiting"})
-	a.write(t, "updateWorkGoal", map[string]any{"goalId": goalID, "ceilings": map[string]any{"maxModelCalls": 12, "maxRetries": 2}})
-	a.write(t, "updateWorkRun", map[string]any{"runId": runID, "stepOrder": []string{"fetch", "draft"}, "spent": map[string]any{"modelCalls": 12, "retries": 1}, "rerun": map[string]any{"requestId": "existing-generation"}})
+	a.write(t, "updateWorkGoal", map[string]any{"goalId": goalID, "ceilings": map[string]any{"maxModelCalls": 96, "maxRetries": 2}})
+	a.write(t, "updateWorkRun", map[string]any{"runId": runID, "classification": map[string]any{"workload": "lookup"}, "stepOrder": []string{"fetch", "draft"}, "spent": map[string]any{"modelCalls": 12, "retries": 1}, "rerun": map[string]any{"requestId": "existing-generation"}})
 	rc := common.RunContext{RunId: runID, GoalId: goalID, OwnerUserId: a.owner, StepKey: "draft", Mode: common.RunModeLive, RerunRequestId: "existing-generation"}
 	runCtx := common.ContextWithRun(person, rc)
 	messages := []common.ChatMessage{{Role: "system", Content: "Existing authority"}, {Role: "user", Content: "Original request"},
@@ -45,17 +46,24 @@ func testBudgetGuidanceDBRecoversApprovedCheckpointAfterRunReleaseFailure(t *tes
 		{Role: "tool", ToolCallId: "read-once", Name: "readSource", Content: "Completed evidence"}}
 	require.NoError(t, a.eng.SaveWorkContinuation(runCtx, messages))
 	checkpoint := a.query(t, a.owner, "query "+call("workContinuationForOwnerRun", map[string]any{"runId": runID, "stepKey": "draft"}))[0]
-	subject := map[string]any{"ceiling": "modelCalls", "limit": "12", "actual": "12", "resumeKind": "checkpoint", "continuationId": rowString(checkpoint, "id")}
+	request := workstate.ProgressFeedback(runID, "draft", workstate.CeilingBreach{Ceiling: "modelCalls", Limit: "12", Actual: "12"}, time.Now(), time.Hour)
+	subject := request.Subject
+	subject["resumeKind"], subject["continuationId"] = "checkpoint", rowString(checkpoint, "id")
 	approvalID := newRowId(approvalConcept)
-	a.write(t, "createWorkApproval", map[string]any{"approvalId": approvalID, "runId": runID, "kind": "budget", "stepKey": "draft", "subject": subject, "artifactHash": artifactHashOf(subject), "requestedAt": rfc(time.Now())})
+	a.write(t, "createWorkApproval", map[string]any{"approvalId": approvalID, "runId": runID, "kind": "feedback", "options": request.Options, "question": request.Question, "stepKey": "draft", "subject": subject, "artifactHash": artifactHashOf(subject), "requestedAt": rfc(time.Now())})
 	a.write(t, "updateWorkRun", map[string]any{"runId": runID, "status": "waiting", "waitingOn": map[string]any{"kind": "approval", "subject": approvalID}})
+	// Refuse before consuming either the pending answer or an extension when
+	// the latest checkpoint no longer matches the question.
+	require.NoError(t, a.eng.SaveWorkContinuation(runCtx, append(messages, common.ChatMessage{Role: "user", Content: "Changed before answer"})))
+	_, err := b.i.handleDecideApproval(person, map[string]any{"approvalId": approvalID, "decision": "answered", "answer": map[string]any{"value": "retry"}}, 0)
+	require.Error(t, err)
+	require.Empty(t, rowMap(rowMap(a.runRow(t, runID), "classification"), "progressContinuation"))
+	require.NoError(t, a.eng.SaveWorkContinuation(runCtx, messages))
 	before := a.runRow(t, runID)
-	_, err := a.i.handleDecideApproval(person, map[string]any{"approvalId": approvalID, "decision": "answered", "answer": map[string]any{"feedback": "Use the completed evidence without repeating it."}}, 0)
-	require.NoError(t, err)
 	wrapper := &budgetResumeFailureEngine{Engine: a.eng}
 	wrapper.fail.Store(true)
 	a.i.engine = wrapper
-	args := map[string]any{"approvalId": approvalID, "decision": "approved", "answer": map[string]any{"newLimit": 15}}
+	args := map[string]any{"approvalId": approvalID, "decision": "answered", "answer": map[string]any{"value": "retry"}}
 	nodes, err := a.i.handleDecideApproval(person, args, 0)
 	require.NoError(t, err)
 	require.Equal(t, false, decodeReply(t, nodes)["runResumed"])
@@ -69,11 +77,11 @@ func testBudgetGuidanceDBRecoversApprovedCheckpointAfterRunReleaseFailure(t *tes
 		return rows[0]
 	}
 	accepted := readApproval()
-	require.Equal(t, "approved", rowString(accepted, "decision"))
-	require.Equal(t, "Use the completed evidence without repeating it.", rowString(rowMap(accepted, "answer"), "feedback"))
+	require.Equal(t, "answered", rowString(accepted, "decision"))
+	require.Equal(t, "retry", rowString(rowMap(accepted, "answer"), "value"))
 	goal, err := b.i.store().goalForOwner(memql.ContextWithFreshRead(person), goalID)
 	require.NoError(t, err)
-	require.Equal(t, 15, rowInt(rowMap(goal, "ceilings"), "maxModelCalls"))
+	require.Equal(t, 96, rowInt(rowMap(goal, "ceilings"), "maxModelCalls"))
 	rowCount := func(id string) int {
 		t.Helper()
 		var count int

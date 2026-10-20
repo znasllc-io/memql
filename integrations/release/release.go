@@ -1,7 +1,6 @@
 // Package release cuts a version of MemQL itself: it creates the git tag and
-// publishes the GitHub Release, which is what fires the image-build cascade
-// (dispatch-engine-images-on-release.yml, #2519 -> build-engine-images.yml with
-// the bare version).
+// publishes the GitHub Release, which delivers the native pipeline release
+// event. Its image stage builds the tagged source with the bare version.
 //
 // IT DOES NOT BUILD OR PUSH IMAGES, and does not go near
 // scripts/release/release.sh, whose --push path stays break-glass. Cutting is
