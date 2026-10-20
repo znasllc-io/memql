@@ -98,6 +98,7 @@ func (i *Integration) Capabilities() []memql.IntegrationCapability {
 		{Name: "publishCandidate", Description: "Publish one exact approved candidate artifact and record verified readback. Owner only.", Handler: i.handleCandidatePublish},
 		{Name: "getCandidate", Description: "Read one caller-owned immutable candidate from its authority journal.", Handler: i.handleCandidateGet},
 		{Name: "retireCandidate", Description: "Fence an unpublished candidate and release its artifact references.", Handler: i.handleCandidateRetire},
+		{Name: "archiveCandidate", Description: "Verify published copies, permanently fence a sealed candidate and release duplicate build-input references. Owner only.", Handler: i.handleCandidateArchive},
 		{
 			Name: "releaseCut",
 			Description: "Cut a new release: compute the next version from the repository's vX.Y.Z tags, " +

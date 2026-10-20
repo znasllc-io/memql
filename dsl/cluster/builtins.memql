@@ -145,6 +145,15 @@ builtin releaseRetireCandidate {
   candidateId string!
 }
 
+/// Release duplicate build inputs only after fresh verification of every
+/// canonical published artifact. Publication history and downloads survive;
+/// the archived candidate can never publish or prepare again. Owner only.
+@sdk
+@executor("integration.release.archiveCandidate")
+builtin releaseArchiveCandidate {
+  candidateId string!
+}
+
 /// Scoped release operation; available only inside an owner-authorized release cut.
 @executor("integration.release.releaseReadSnapshot")
 builtin releaseReadSnapshot { }

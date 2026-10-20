@@ -5611,6 +5611,26 @@ func ReleaseApproveCandidateBuild(args ReleaseApproveCandidateArgs) string {
 	return b.String()
 }
 
+// ReleaseArchiveCandidate -- Release duplicate build inputs only after fresh verification of every canonical published artifact. Publication history and downloads survive; the archived candidate can never publish or prepare again. Owner only.
+type ReleaseArchiveCandidateArgs struct {
+	CandidateId string
+}
+
+// ReleaseArchiveCandidate calls the engine builtin releaseArchiveCandidate.
+func (qc *QueryClient) ReleaseArchiveCandidate(ctx context.Context, args ReleaseArchiveCandidateArgs) (*Result, error) {
+	call := ReleaseArchiveCandidateBuild(args)
+	return qc.executeNamed(ctx, "releaseArchiveCandidate", call)
+}
+
+func ReleaseArchiveCandidateBuild(args ReleaseArchiveCandidateArgs) string {
+	var b strings.Builder
+	b.WriteString("builtin releaseArchiveCandidate(")
+	b.WriteString("candidateId: ")
+	b.WriteString(quoteMemQL(args.CandidateId))
+	b.WriteString(")")
+	return b.String()
+}
+
 // ReleaseAssembleCandidate -- Resolve completed work runs through a declared assembly plan, then verify and retain the candidate. Run aliases select actual executions; versions, receipt identities and digests are read natively.
 type ReleaseAssembleCandidateArgs struct {
 	PlanName string

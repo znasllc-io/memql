@@ -4245,6 +4245,27 @@ QueryClient.prototype.releaseApproveCandidate = function (this: QueryClient, arg
   return this.executeNamed("releaseApproveCandidate", buildReleaseApproveCandidate(args), opts);
 };
 
+/** Release duplicate build inputs only after fresh verification of every canonical published artifact. Publication history and downloads survive; the archived candidate can never publish or prepare again. Owner only. */
+export interface ReleaseArchiveCandidateArgs {
+  candidateId: string;
+}
+
+export function buildReleaseArchiveCandidate(args: ReleaseArchiveCandidateArgs): string {
+  const parts: string[] = [];
+  parts.push("candidateId: " + renderMemQLValue(args.candidateId));
+  return "builtin releaseArchiveCandidate(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    releaseArchiveCandidate(args: ReleaseArchiveCandidateArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.releaseArchiveCandidate = function (this: QueryClient, args: ReleaseArchiveCandidateArgs = {} as ReleaseArchiveCandidateArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("releaseArchiveCandidate", buildReleaseArchiveCandidate(args), opts);
+};
+
 /** Resolve completed work runs through a declared assembly plan, then verify and retain the candidate. Run aliases select actual executions; versions, receipt identities and digests are read natively. */
 export interface ReleaseAssembleCandidateArgs {
   planName: string;

@@ -305,6 +305,23 @@ prevents retirement. If readback cannot prove completion, resolve the remote
 state explicitly; there is no automatic fence reset. A crash between claiming
 and sending an effect is also uncertain.
 
+An owner can call `releaseArchiveCandidate(candidateId)` to release a published
+candidate's duplicate build inputs. Every destination must have a complete
+native publication receipt and the candidate must have a signed catalog. The
+operation freshly reads and verifies the canonical registry images, release
+assets or npm archive before recording a permanent `archived` state. Missing
+or changed bytes, unfinished publication and an inconsistent catalog refuse
+archival. Historical GitHub releases need not remain selected as latest.
+
+Archival releases only that candidate's Library retention references. Other
+candidate references and deliberately kept Library files still protect shared
+inputs. Ordinary pipeline retention removes eligible duplicate files later;
+published downloads, tags, images, approvals, signed catalogs and compact
+publication receipts remain. An interrupted reference release resumes on a
+different node, but an archived candidate can never prepare or publish again.
+Archival does not prune canonical release versions or select which versions
+an installation needs for rollback.
+
 Native row locks and pending publication receipts coordinate this system's
 uploads and promotion across replicas. GitHub has no atomic operation binding
 draft visibility, its tag and all assets together. Before/after checks detect
