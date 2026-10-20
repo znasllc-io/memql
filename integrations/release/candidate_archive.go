@@ -48,6 +48,9 @@ func (p *candidatePreparer) archive(ctx context.Context, key, publisher string, 
 	for _, ref := range candidateArtifactReferences(record.Manifest, record.ID) {
 		releaseErr = errors.Join(releaseErr, p.library.ReleaseRunFileReference(auth.ContextWithInternalOrigin(ctx), ref))
 	}
+	if releaseErr == nil {
+		releaseErr = p.ledger.recordArchiveInputsReleased(ctx, record.ID)
+	}
 	return record, releaseErr
 }
 

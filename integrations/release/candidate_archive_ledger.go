@@ -224,3 +224,25 @@ VALUES($1,$2,$3,$4,$5,$6::jsonb)`, rec.ID, owner, rec.ApprovalID, digest, proof.
 	rec.State = "archived"
 	return rec, tx.Commit()
 }
+
+func (l *candidateLedger) recordArchiveInputsReleased(ctx context.Context, key string) error {
+	owner, err := candidateOwner(ctx)
+	if err != nil {
+		return err
+	}
+	db, err := l.database()
+	if err != nil {
+		return err
+	}
+	result, err := db.ExecContext(ctx, `UPDATE release_candidate_archives a
+SET inputs_released_at=COALESCE(inputs_released_at,clock_timestamp())
+WHERE a.candidate_id=$1 AND a.owner_user_id=$2
+AND EXISTS(SELECT 1 FROM release_candidates c WHERE c.candidate_id=a.candidate_id AND c.owner_user_id=$2 AND c.state='archived')`, key, owner)
+	if err != nil {
+		return err
+	}
+	if n, err := result.RowsAffected(); err != nil || n != 1 {
+		return errors.New("archive reference completion requires its permanent owner-scoped fence")
+	}
+	return nil
+}

@@ -4695,6 +4695,27 @@ QueryClient.prototype.releaseSealPublishedCandidate = function (this: QueryClien
   return this.executeNamed("releaseSealPublishedCandidate", buildReleaseSealPublishedCandidate(args), opts);
 };
 
+/** Enroll or pause your published-input cleanup. The schedule resolves your current owner role and retains credential ceilings; maintenance cannot lend authority. Pausing prevents another pass; an admitted pass may finish. */
+export interface ReleaseSetInputArchiveScheduleArgs {
+  enabled: boolean;
+}
+
+export function buildReleaseSetInputArchiveSchedule(args: ReleaseSetInputArchiveScheduleArgs): string {
+  const parts: string[] = [];
+  parts.push("enabled: " + renderMemQLValue(args.enabled));
+  return "builtin releaseSetInputArchiveSchedule(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    releaseSetInputArchiveSchedule(args: ReleaseSetInputArchiveScheduleArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.releaseSetInputArchiveSchedule = function (this: QueryClient, args: ReleaseSetInputArchiveScheduleArgs = {} as ReleaseSetInputArchiveScheduleArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("releaseSetInputArchiveSchedule", buildReleaseSetInputArchiveSchedule(args), opts);
+};
+
 /** Read configured update publishers without endpoints, keys or credentials. */
 export interface ReleaseSourcesArgs {
 }

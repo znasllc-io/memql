@@ -322,6 +322,21 @@ different node, but an archived candidate can never prepare or publish again.
 Archival does not prune canonical release versions or select which versions
 an installation needs for rollback.
 
+Owners can enable automatic duplicate-input archival with
+`releaseSetInputArchiveSchedule(enabled: true)`. The installed
+`releasePublishedInputRetentionPolicy` waits two weeks after catalog sealing.
+An agent schedule admits at most one candidate per pass, using a durable lease
+and cursor shared by all replicas. It includes existing and future sealed
+candidates belonging to the enrolled owner. An interrupted pass resumes, and
+completed input releases leave the scan without deleting publication history.
+
+Enrollment captures the caller's authority ceiling, never a credential. Each
+pass resolves the owner's current role and preserves restricted-grant expiry;
+revocation or expiry leaves the inputs retained. Disable with
+`releaseSetInputArchiveSchedule(enabled: false)` to prevent another pass. An
+already admitted pass may finish. This enrollment authorizes duplicate-input
+archival only; it cannot remove canonical release downloads or registry images.
+
 Native row locks and pending publication receipts coordinate this system's
 uploads and promotion across replicas. GitHub has no atomic operation binding
 draft visibility, its tag and all assets together. Before/after checks detect

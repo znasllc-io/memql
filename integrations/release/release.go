@@ -99,6 +99,8 @@ func (i *Integration) Capabilities() []memql.IntegrationCapability {
 		{Name: "getCandidate", Description: "Read one caller-owned immutable candidate from its authority journal.", Handler: i.handleCandidateGet},
 		{Name: "retireCandidate", Description: "Fence an unpublished candidate and release its artifact references.", Handler: i.handleCandidateRetire},
 		{Name: "archiveCandidate", Description: "Verify published copies, permanently fence a sealed candidate and release duplicate build-input references. Owner only.", Handler: i.handleCandidateArchive},
+		{Name: "setInputArchiveSchedule", Description: "Enable or pause this owner's scheduled duplicate publication-input archival using captured owner authority.", Handler: i.handleArchiveSchedule},
+		{Name: "sweepPublishedInputs", Description: "Internal leased maintenance of one enrolled owner's published candidate inputs.", Handler: i.handleSweepPublishedInputs},
 		{
 			Name: "releaseCut",
 			Description: "Cut a new release: compute the next version from the repository's vX.Y.Z tags, " +
@@ -130,6 +132,7 @@ func (i *Integration) Capabilities() []memql.IntegrationCapability {
 	out = append(out, workflowhost.ScopedCapabilities((&candidatePrepareScope{}).operations())...)
 	out = append(out, workflowhost.ScopedCapabilities((&candidateAssemblyScope{}).operations())...)
 	out = append(out, workflowhost.ScopedCapabilities((&candidateDraftScope{}).operations())...)
+	out = append(out, workflowhost.ScopedCapabilities(map[string]workflowhost.Operation{"releaseRetentionArchiveInputs": nil})...)
 	return append(out, workflowhost.ScopedCapabilities((&candidatePublishScope{}).operations())...)
 }
 

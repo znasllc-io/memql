@@ -6153,6 +6153,26 @@ func ReleaseSealPublishedCandidateBuild(args ReleaseSealPublishedCandidateArgs) 
 	return b.String()
 }
 
+// ReleaseSetInputArchiveSchedule -- Enroll or pause your published-input cleanup. The schedule resolves your current owner role and retains credential ceilings; maintenance cannot lend authority. Pausing prevents another pass; an admitted pass may finish.
+type ReleaseSetInputArchiveScheduleArgs struct {
+	Enabled bool
+}
+
+// ReleaseSetInputArchiveSchedule calls the engine builtin releaseSetInputArchiveSchedule.
+func (qc *QueryClient) ReleaseSetInputArchiveSchedule(ctx context.Context, args ReleaseSetInputArchiveScheduleArgs) (*Result, error) {
+	call := ReleaseSetInputArchiveScheduleBuild(args)
+	return qc.executeNamed(ctx, "releaseSetInputArchiveSchedule", call)
+}
+
+func ReleaseSetInputArchiveScheduleBuild(args ReleaseSetInputArchiveScheduleArgs) string {
+	var b strings.Builder
+	b.WriteString("builtin releaseSetInputArchiveSchedule(")
+	b.WriteString("enabled: ")
+	b.WriteString(fmt.Sprintf("%v", args.Enabled))
+	b.WriteString(")")
+	return b.String()
+}
+
 // ReleaseSources -- Read configured update publishers without endpoints, keys or credentials.
 type ReleaseSourcesArgs struct {
 }
