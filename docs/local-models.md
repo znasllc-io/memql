@@ -552,8 +552,11 @@ retry command in the summary.
 Each Fleet Workbench has a 1.5 GiB hard memory limit, with at most two active
 workspaces. Before creating one, Cockpit reserves its allowance plus the unused
 allowance of existing workspaces recorded in its local reservation journal.
-Current container usage is counted once, and both the Mac/Linux host and Docker
-retain a 20% safety cushion. An unused slot reserves no memory. Admission and
+Current container usage is counted once. The Mac/Linux host retains a 20% safety
+cushion, bounded between 1 and 4 GiB; Docker retains 20% of its capacity. On a
+36 GiB host, the first workspace therefore needs 5.5 GiB available: its 1.5 GiB
+allowance plus the 4 GiB cushion. A second also reserves any remaining growth
+of the first. An unused slot reserves no memory. Admission and
 creation are serialized across worker processes, so concurrent starts cannot
 spend the same headroom. Other containers are always included in measured usage;
 a container name or label cannot exempt one from accounting.

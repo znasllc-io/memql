@@ -13,8 +13,8 @@ import (
 )
 
 // Charge one new workspace and the unused allowance of existing reservations.
-// Their current usage is already in the host/Docker measurements. Keep twenty
-// percent free in both pools; a configured but empty slot consumes no budget.
+// Their current usage is already in the host/Docker measurements. Keep a bounded
+// host cushion and twenty percent of Docker free; empty slots consume no budget.
 // The caller holds the cross-process admission lock through Create.
 func (d Docker) Headroom(ctx context.Context, runtime Runtime, active []record) error {
 	d.endpoint = runtime.Endpoint
@@ -74,7 +74,8 @@ func checkHeadroom(total, available uint64, runtime Runtime, active []record, us
 		hostGrowth += growth
 		dockerGrowth += growth
 	}
-	if available < total/5 || hostGrowth > available-total/5 {
+	cushion := hostMemoryCushion(total)
+	if available < cushion || hostGrowth > available-cushion {
 		return ErrBusy
 	}
 	remaining := uint64(runtime.MemoryBytes) - uint64(runtime.MemoryBytes)/5
@@ -89,6 +90,15 @@ func checkHeadroom(total, available uint64, runtime Runtime, active []record, us
 	}
 	return nil
 }
+
+// Leave room for the OS and unrelated applications after every bounded workspace
+// reaches its limit. Scaling this reserve without a ceiling unnecessarily blocks
+// a 1.5 GiB task on larger hosts; the workspaces' own growth is charged separately.
+func hostMemoryCushion(total uint64) uint64 {
+	const gib = uint64(1 << 30)
+	return min(4*gib, max(gib, total/5))
+}
+
 func memoryQuantity(text string) (uint64, error) {
 	for _, unit := range []struct {
 		name  string
