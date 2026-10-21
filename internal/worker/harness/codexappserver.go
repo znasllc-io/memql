@@ -7,6 +7,8 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"os/exec"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"sync"
@@ -633,6 +635,14 @@ func (h *codexAppServer) Start(ctx context.Context, spec Spec) error {
 	knobs, err := spec.knobs(HarnessCodexAppServer)
 	if err != nil {
 		return fmt.Errorf("codex app-server: %w", err)
+	}
+	// Launch the resolved executable: Codex re-execs itself for sandboxed
+	// filesystem helpers. A symlink outside the read grant is not traversable,
+	// even when the binary it points to is granted explicitly.
+	if path, lookupErr := exec.LookPath(spec.Binary); lookupErr == nil {
+		if resolved, resolveErr := filepath.EvalSymlinks(path); resolveErr == nil {
+			spec.Binary = resolved
+		}
 	}
 	h.spec = spec
 	h.knobs = knobs

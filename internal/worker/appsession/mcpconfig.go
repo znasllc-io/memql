@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"sync"
@@ -67,8 +68,9 @@ const (
 // arrives on the stream while the run is in flight, and cleanup can be
 // driven by either the run finishing or the stream dying.
 type sessionMCPSettings struct {
-	Tools     []string
-	DenyPaths []string
+	Tools        []string
+	DenyPaths    []string
+	RuntimePaths []string
 }
 
 type mcpConfig struct {
@@ -152,6 +154,11 @@ func writeMCPConfig(app, workspace, endpoint, credential, sessionID, stateDir st
 	case apps.IDClaudeCode:
 		err = m.layoutClaudeCode()
 	case apps.IDCodex:
+		// Codex starts sandboxed filesystem helpers with its own executable.
+		// User-installed binaries need an exact read grant beyond :minimal.
+		if binary, lookupErr := exec.LookPath("codex"); lookupErr == nil {
+			m.settings.RuntimePaths = append(m.settings.RuntimePaths, pathForms(binary)...)
+		}
 		err = m.layoutCodex()
 	default:
 		return nil, fmt.Errorf("mcp config: no writer for app %q", app)
@@ -475,6 +482,9 @@ extends = ":workspace"
 [permissions.memql_session.filesystem]
 ":root" = "deny"
 ":minimal" = "read"`)
+	for _, path := range settings.RuntimePaths {
+		fmt.Fprintf(&b, "%q = \"read\"\n", path)
+	}
 	for _, path := range settings.DenyPaths {
 		fmt.Fprintf(&b, "%q = \"deny\"\n", path)
 	}

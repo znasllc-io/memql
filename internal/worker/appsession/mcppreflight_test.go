@@ -76,7 +76,7 @@ func TestMCPPreflightFailureDoesNotLaunchTheApp(t *testing.T) {
 }
 
 func TestCodexSessionGrantsAndBoundsSurviveRenewal(t *testing.T) {
-	settings := sessionMCPSettings{Tools: []string{"next_task", "submit", "executeCapability"}, DenyPaths: []string{"/private/worker-state"}}
+	settings := sessionMCPSettings{Tools: []string{"next_task", "submit", "executeCapability"}, DenyPaths: []string{"/private/worker-state"}, RuntimePaths: []string{"/opt/codex/bin/codex"}}
 	config, err := writeMCPConfig(apps.IDCodex, t.TempDir(), "http://127.0.0.1/mcp", testBearer, "scoped", t.TempDir(), settings)
 	if err != nil {
 		t.Fatal(err)
@@ -92,7 +92,7 @@ func TestCodexSessionGrantsAndBoundsSurviveRenewal(t *testing.T) {
 			t.Fatal(err)
 		}
 		body := string(raw)
-		for _, fragment := range []string{`default_permissions = "memql_session"`, `required = true`, `enabled_tools = ["next_task","submit","executeCapability"]`, `[mcp_servers.memql.tools."executeCapability"]`, `approval_mode = "approve"`, `":root" = "deny"`, `":minimal" = "read"`, `"/private/worker-state" = "deny"`, `".memql-session" = "deny"`, `enabled = false`, "Bearer " + credential} {
+		for _, fragment := range []string{`default_permissions = "memql_session"`, `required = true`, `enabled_tools = ["next_task","submit","executeCapability"]`, `[mcp_servers.memql.tools."executeCapability"]`, `approval_mode = "approve"`, `":root" = "deny"`, `"/opt/codex/bin/codex" = "read"`, `":minimal" = "read"`, `"/private/worker-state" = "deny"`, `".memql-session" = "deny"`, `enabled = false`, "Bearer " + credential} {
 			if !strings.Contains(body, fragment) {
 				t.Fatalf("missing config fragment %s", fragment)
 			}
