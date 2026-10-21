@@ -79,22 +79,10 @@ struct PermissionRestartProgress {
     }
 }
 
-// ===========================================================================
-// ONE SWITCH PER PERMISSION, AND A WINDOW THAT STAYS WITH YOU
-// ===========================================================================
-// macOS lets no app grant itself Accessibility or Screen Recording, and the
-// password or Touch ID prompt that approves one belongs to System Settings.
-// So the most this window can do is the whole of the rest: one switch that
-// puts MemQL in macOS's list and opens the exact page in System Settings, a
-// line saying what to do there, the window floating beside Settings while the
-// person does it, and the switch coming on -- with the window back in front --
-// the moment the worker sees the grant (memql-cockpit#543).
-//
-// THE SWITCH SAYS WHAT THE WORKER REPORTS, never what was clicked, except
-// while an ask is open: then it shows the position asked for, under a line
-// saying where to finish. Accessibility lands live. Screen Recording macOS
-// shows only to a process started after the change, so that ask offers the
-// restart from the start and stays open until a new worker process reports.
+// Switches always show fresh worker observations. Asking macOS is not a
+// grant. Enabling uses the system prompt alone; disabling must be done in
+// Settings. Explicit Settings links also cover a previously denied prompt.
+// Never open Settings alongside a system prompt or dismiss Apple's dialogs.
 
 enum PermissionKind: String, CaseIterable {
     case accessibility
@@ -119,6 +107,7 @@ struct PermissionRow: Equatable {
 }
 
 enum PermissionAct: Equatable { case done, restart }
+enum PermissionRequestAction: Equatable { case prompt, settings }
 
 /// The window's floor: the state in words, and at most one act.
 struct PermissionFloor: Equatable {
@@ -131,11 +120,19 @@ struct PermissionFlow {
     /// The position the person asked System Settings for, by permission,
     /// until the worker reports it.
     private(set) var asks: [PermissionKind: Bool] = [:]
-    /// The worker process running when Screen Recording was asked for; it
-    /// cannot see that change, and any other process's report settles it.
+    /// A screen permission request can require a restart. A fresh report
+    /// from the replacement worker settles it even when still denied.
     private var screenPID: Int?
 
     var asking: Bool { !asks.isEmpty }
+
+    // One effect per gesture, shared by both permission switches. A pending
+    // OS request must be answered before another can be sent.
+    static func action(on: Bool, report: PermissionReport?, restarting: Bool, now: Date = Date()) -> PermissionRequestAction? {
+        guard let report, report.fresh(at: now), report.requestsSupported,
+              !report.requestPending, !restarting else { return nil }
+        return on ? .prompt : .settings
+    }
 
     mutating func begin(_ kind: PermissionKind, on: Bool, pid: Int) {
         asks[kind] = on
@@ -165,9 +162,9 @@ struct PermissionFlow {
     func row(_ kind: PermissionKind, _ report: PermissionReport?, restarting: Bool, now: Date = Date()) -> PermissionRow {
         guard let report, report.fresh(at: now) else { return PermissionRow(on: false, enabled: false, note: "") }
         let granted = kind.granted(in: report)
-        guard report.requestsSupported, !restarting else { return PermissionRow(on: granted, enabled: false, note: "") }
+        guard report.requestsSupported, !restarting, !report.requestPending else { return PermissionRow(on: granted, enabled: false, note: "") }
         guard let on = asks[kind] else { return PermissionRow(on: granted, enabled: true, note: "") }
-        return PermissionRow(on: on, enabled: true, note: on ? "Turn on MemQL in System Settings" : "Turn off MemQL in System Settings")
+        return PermissionRow(on: granted, enabled: true, note: on ? "Awaiting macOS approval" : "Turn off MemQL in System Settings")
     }
 
     /// While setup waits on this window (memql-cockpit#548): the one choice
@@ -184,65 +181,15 @@ struct PermissionFlow {
         if restarting { return PermissionFloor(state: "Restarting MemQL…", busy: true, act: nil) }
         guard let report, report.fresh(at: now) else { return PermissionFloor(state: "Waiting for the worker", busy: true, act: nil) }
         guard report.requestsSupported else { return PermissionFloor(state: "Update Cockpit to set these up", busy: false, act: nil) }
-        if asks[.accessibility] != nil { return PermissionFloor(state: "Waiting for System Settings", busy: true, act: nil) }
+        if report.requestPending { return PermissionFloor(state: "Waiting for macOS", busy: true, act: nil) }
         if asks[.screenRecording] != nil {
-            let words = PermissionKind.accessibility.granted(in: report) ? "Then restart to finish" : "Turn on Accessibility, then restart"
-            return PermissionFloor(state: words, busy: false, act: .restart)
+            return PermissionFloor(state: "Restart after changing access in macOS", busy: false, act: .restart)
         }
         if report.granted(at: now) { return PermissionFloor(state: "Ready", busy: false, act: .done) }
         let missing = PermissionKind.allCases.filter { !$0.granted(in: report) }
         return PermissionFloor(state: missing.count > 1 ? "Turn on both to finish" : "Turn on \(missing[0].title) to finish",
                                busy: false, act: nil)
     }
-}
-
-/// macOS's own "would like to control this computer" alert, which the
-/// worker's Accessibility request raises. It stays up after the person grants
-/// Accessibility in System Settings, and its Open System Settings button then
-/// sends Settings back to Accessibility -- in the middle of the Screen
-/// Recording step (memql-cockpit#543). MemQL is in macOS's list by then, so
-/// the alert has nothing left to do and is closed.
-enum MacAccessibilityAlert {
-    static let bundleID = "com.apple.accessibility.universalAccessAuthWarn"
-    static func close() {
-        for app in NSRunningApplication.runningApplications(withBundleIdentifier: bundleID) {
-            kill(app.processIdentifier, SIGTERM)
-        }
-    }
-}
-
-enum PermissionPlacement {
-    /// Where a window of `size` goes beside System Settings: to its right when
-    /// the screen has room, otherwise to its left, otherwise over the screen's
-    /// left edge -- covering Settings' sidebar, never the switches on its right.
-    static func origin(for size: NSSize, beside settings: NSRect?, in visible: NSRect, gap: CGFloat = 12) -> NSPoint {
-        guard let settings, settings.intersects(visible) else {
-            return NSPoint(x: visible.minX + 24, y: visible.midY - size.height / 2)
-        }
-        let y = max(visible.minY + gap, min(settings.maxY, visible.maxY) - size.height)
-        if visible.maxX - settings.maxX >= size.width + gap * 2 { return NSPoint(x: settings.maxX + gap, y: y) }
-        if settings.minX - visible.minX >= size.width + gap * 2 { return NSPoint(x: settings.minX - gap - size.width, y: y) }
-        return NSPoint(x: visible.minX + gap, y: y)
-    }
-
-    /// System Settings' frontmost window in AppKit screen coordinates, or nil
-    /// when it has none on screen. Window bounds need no permission to read.
-    static func systemSettingsFrame() -> NSRect? {
-        let pids = NSRunningApplication.runningApplications(withBundleIdentifier: systemSettings).map(\.processIdentifier)
-        guard !pids.isEmpty,
-              let windows = CGWindowListCopyWindowInfo([.optionOnScreenOnly, .excludeDesktopElements], kCGNullWindowID) as? [[String: Any]] else { return nil }
-        let top = NSScreen.screens.first?.frame.maxY ?? 0
-        for info in windows {
-            guard let pid = info[kCGWindowOwnerPID as String] as? pid_t, pids.contains(pid),
-                  (info[kCGWindowLayer as String] as? Int) == 0,
-                  let raw = info[kCGWindowBounds as String] as? NSDictionary,
-                  let bounds = CGRect(dictionaryRepresentation: raw), bounds.width > 200, bounds.height > 200 else { continue }
-            return NSRect(x: bounds.minX, y: top - bounds.maxY, width: bounds.width, height: bounds.height)
-        }
-        return nil
-    }
-
-    static let systemSettings = "com.apple.systempreferences"
 }
 
 // The window only reflects observations. A request or a restart is never
@@ -253,8 +200,7 @@ final class PermissionSetupWindow: NSWindowController, NSWindowDelegate {
     var reveal: (() -> Void)?
     /// The person chose to let setup go on without what is not allowed yet.
     var skip: (() -> Void)?
-    /// True while the person is in System Settings, so the app can read the
-    /// worker's report every second instead of every three.
+    /// Poll faster while a request is awaiting an observation.
     var asking: ((Bool) -> Void)?
     var closed: (() -> Void)?
 
@@ -263,15 +209,11 @@ final class PermissionSetupWindow: NSWindowController, NSWindowDelegate {
     private var flow = PermissionFlow()
     private var message = ""
     private var settingsObserver: NSObjectProtocol?
-    /// This window asked for Accessibility, so macOS's own alert for it may
-    /// still be on screen; only an alert this window raised is ever closed.
-    private var raisedAccessibilityAlert = false
-    /// System Settings is open for an ask: the window floats beside it, and
-    /// the worker is read every second.
+    private var requestingPermission: PermissionKind?
+    /// Settings was opened explicitly from this window.
     private var inSettings = false {
         didSet {
             guard inSettings != oldValue else { return }
-            window?.level = inSettings ? .floating : .normal
             asking?(inSettings)
         }
     }
@@ -300,8 +242,7 @@ final class PermissionSetupWindow: NSWindowController, NSWindowDelegate {
         window.titlebarAppearsTransparent = true
         window.isMovableByWindowBackground = true
         window.isReleasedWhenClosed = false
-        // It floats beside System Settings while the person is there, and
-        // must not vanish when they click into Settings to do it.
+        // Stay available when the person follows the native dialog to Settings.
         window.hidesOnDeactivate = false
         super.init(window: window)
         window.delegate = self
@@ -334,18 +275,21 @@ final class PermissionSetupWindow: NSWindowController, NSWindowDelegate {
         let disclosureLabel = NSButton(title: "Troubleshooting", target: self, action: #selector(toggleTroubleshooting))
         disclosureLabel.isBordered = false; disclosureLabel.font = .systemFont(ofSize: 11); disclosureLabel.contentTintColor = .secondaryLabelColor
         let disclosure = NSStackView(views: [troubleshootingButton, disclosureLabel]); disclosure.spacing = 2
-        let tip = NSTextField(wrappingLabelWithString: "Still off after you turned it on? Remove MemQL from that list in System Settings, then turn it on here again.")
+        let tip = NSTextField(wrappingLabelWithString: "Switches confirm access for the running MemQL worker. If Settings shows an older build enabled, remove that MemQL entry and add the current app shown in Finder. A local development build may need approval again after an update.")
         tip.font = .systemFont(ofSize: 11); tip.textColor = .secondaryLabelColor
         let finder = link("Show MemQL in Finder", #selector(showWorker))
         let restartLink = link("Restart MemQL…", #selector(confirmRestart))
         let links = NSStackView(views: [finder, restartLink]); links.spacing = 14
+        let settingsLinks = NSStackView(views: [link("Accessibility Settings…", #selector(openAccessibilitySettings)),
+                                               link("Screen Recording Settings…", #selector(openScreenRecordingSettings))])
+        settingsLinks.spacing = 14
         identity.font = .monospacedSystemFont(ofSize: 10, weight: .regular); identity.textColor = .tertiaryLabelColor
         identity.isSelectable = true
-        troubleshooting = NSStackView(views: [tip, links, identity])
+        troubleshooting = NSStackView(views: [tip, settingsLinks, links, feedback, identity])
         troubleshooting.orientation = .vertical; troubleshooting.alignment = .leading; troubleshooting.spacing = 8
         troubleshooting.isHidden = true
 
-        stack = NSStackView(views: [header, rows, floor, setupRow, feedback, disclosure, troubleshooting])
+        stack = NSStackView(views: [header, rows, floor, setupRow, disclosure, troubleshooting])
         stack.orientation = .vertical; stack.alignment = .leading; stack.spacing = 18
         stack.setCustomSpacing(22, after: header)
         stack.setCustomSpacing(6, after: floor)
@@ -368,7 +312,7 @@ final class PermissionSetupWindow: NSWindowController, NSWindowDelegate {
             forName: NSWorkspace.didTerminateApplicationNotification, object: nil, queue: .main
         ) { [weak self] note in
             let app = note.userInfo?[NSWorkspace.applicationUserInfoKey] as? NSRunningApplication
-            if app?.bundleIdentifier == PermissionPlacement.systemSettings { self?.systemSettingsClosed() }
+            if app?.bundleIdentifier == "com.apple.systempreferences" { self?.systemSettingsClosed() }
         }
         update(nil)
         window.center()
@@ -408,14 +352,10 @@ final class PermissionSetupWindow: NSWindowController, NSWindowDelegate {
         let restarting = progress.pid != nil
         if flow.observe(report) {
             if !flow.asking { inSettings = false }
-            land()
         }
-        if raisedAccessibilityAlert, let report, report.fresh(), PermissionKind.accessibility.granted(in: report) {
-            raisedAccessibilityAlert = false
-            MacAccessibilityAlert.close()
-        }
+        asking?(inSettings || flow.asking || report?.requestPending == true)
         for kind in PermissionKind.allCases {
-            let view = flow.row(kind, report, restarting: restarting)
+            let view = flow.row(kind, report, restarting: restarting || requestingPermission != nil)
             switches[kind]?.isOn = view.on
             switches[kind]?.isEnabled = view.enabled
             notes[kind]?.stringValue = view.note
@@ -439,9 +379,11 @@ final class PermissionSetupWindow: NSWindowController, NSWindowDelegate {
         fit()
     }
 
-    /// A request the worker refused says so under the floor; one it accepted
-    /// says nothing -- only the next fresh report can show a grant.
+    /// Request errors belong in Troubleshooting. Only a fresh worker report
+    /// can establish a grant; accepting the request cannot.
     func actionFinished(_ error: String?) {
+        if error != nil, let kind = requestingPermission { flow.cancel(kind) }
+        requestingPermission = nil
         message = error ?? ""
         update(report)
     }
@@ -451,7 +393,9 @@ final class PermissionSetupWindow: NSWindowController, NSWindowDelegate {
     }
 
     private func toggled(_ kind: PermissionKind, on: Bool) {
-        guard let report, report.fresh(), report.requestsSupported else { update(report); return }
+        guard requestingPermission == nil,
+              let action = PermissionFlow.action(on: on, report: report, restarting: progress.pid != nil),
+              let report else { update(report); return }
         message = ""
         // Back to what the worker reports: the person took back an open ask.
         if on == kind.granted(in: report) {
@@ -461,51 +405,31 @@ final class PermissionSetupWindow: NSWindowController, NSWindowDelegate {
             return
         }
         flow.begin(kind, on: on, pid: report.pid)
-        // Asking the worker first puts MemQL in macOS's list, so the person
-        // finds a switch there rather than a "+" button; the first time,
-        // macOS also shows its own dialog, which leads to the same page.
-        if on { request?(kind.rawValue, report.pid) }
-        if kind == .accessibility && on { raisedAccessibilityAlert = true }
-        if kind == .screenRecording && raisedAccessibilityAlert {
-            raisedAccessibilityAlert = false
-            MacAccessibilityAlert.close()
+        switch action {
+        case .prompt:
+            requestingPermission = kind
+            update(report)
+            request?(kind.rawValue, report.pid)
+        case .settings:
+            openSettings(kind)
         }
+    }
+
+    // Only a direct Settings gesture reaches this path. Enabling a switch
+    // leaves navigation to the native dialog's Open System Settings button.
+    private func openSettings(_ kind: PermissionKind) {
         NSWorkspace.shared.open(kind.settingsURL)
         inSettings = true
         update(report)
-        floatBesideSettings()
     }
 
-    /// Keeps the window above System Settings, beside it, while the person
-    /// works there. Settings takes a moment to open its window, so its frame
-    /// is looked for a few times before settling on the screen's edge.
-    private func floatBesideSettings(attempt: Int = 0) {
-        guard let window, inSettings else { return }
-        let settings = PermissionPlacement.systemSettingsFrame()
-        if settings == nil && attempt < 20 {
-            DispatchQueue.main.asyncAfter(deadline: .now() + 0.15) { [weak self] in self?.floatBesideSettings(attempt: attempt + 1) }
-            return
-        }
-        let screen = settings.flatMap { frame in NSScreen.screens.first { $0.frame.intersects(frame) } } ?? window.screen ?? NSScreen.main
-        guard let visible = screen?.visibleFrame else { return }
-        window.setFrameOrigin(PermissionPlacement.origin(for: window.frame.size, beside: settings, in: visible))
-        window.orderFrontRegardless()
-    }
-
-    /// An ask landed or System Settings quit: the window comes to the front,
-    /// so the next step is where the person is looking.
-    private func land() {
-        guard let window, window.isVisible else { return }
-        NSApp.activate(ignoringOtherApps: true)
-        window.makeKeyAndOrderFront(nil)
-        window.orderFrontRegardless()
-    }
+    @objc private func openAccessibilitySettings() { openSettings(.accessibility) }
+    @objc private func openScreenRecordingSettings() { openSettings(.screenRecording) }
 
     private func systemSettingsClosed() {
         guard inSettings else { return }
         flow.settingsClosed()
         inSettings = false
-        land()
         update(report)
     }
 

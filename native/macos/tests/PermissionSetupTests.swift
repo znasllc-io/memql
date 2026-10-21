@@ -5,9 +5,9 @@ import AppKit
 enum PermissionSetupTests {
     static func main() {
         let now = Date()
-        func report(pid: Int = 100, ax: String = "Granted", screen: String = "Granted", age: TimeInterval = 0) -> PermissionReport {
+        func report(pid: Int = 100, ax: String = "Granted", screen: String = "Granted", age: TimeInterval = 0, pending: Bool = false) -> PermissionReport {
             PermissionReport(pid: pid, version: "fixture", executable: "/fixture/memql", accessibility: ax,
-                             screenRecording: screen, requestsSupported: true, requestPending: false,
+                             screenRecording: screen, requestsSupported: true, requestPending: pending,
                              checkedAt: now.addingTimeInterval(-age))
         }
         precondition(report().granted(at: now))
@@ -41,9 +41,9 @@ enum PermissionSetupTests {
         precondition(flow.row(.accessibility, neither, restarting: false, now: now) == PermissionRow(on: false, enabled: true, note: ""))
         precondition(flow.floor(neither, restarting: false, now: now) == PermissionFloor(state: "Turn on both to finish", busy: false, act: nil))
         flow.begin(.accessibility, on: true, pid: 100)
-        precondition(flow.row(.accessibility, neither, restarting: false, now: now) == PermissionRow(on: true, enabled: true, note: "Turn on MemQL in System Settings"),
-                     "While an ask is open the switch shows what was asked for, and where to finish")
-        precondition(flow.floor(neither, restarting: false, now: now) == PermissionFloor(state: "Waiting for System Settings", busy: true, act: nil))
+        precondition(flow.row(.accessibility, neither, restarting: false, now: now) == PermissionRow(on: false, enabled: true, note: "Awaiting macOS approval"),
+                     "Requesting access must never make an ungranted permission look enabled")
+        precondition(flow.floor(neither, restarting: false, now: now) == PermissionFloor(state: "Turn on both to finish", busy: false, act: nil))
         precondition(!flow.observe(neither, now: now), "An ask ends only when the worker sees it")
         precondition(!flow.observe(report(age: 16), now: now), "A stale report ends nothing")
         precondition(flow.observe(axOnly, now: now) && !flow.asking)
@@ -52,17 +52,17 @@ enum PermissionSetupTests {
         flow.settingsClosed()
         precondition(!flow.asking, "Accessibility lands live; closing Settings ends its ask")
 
-        // Screen Recording reaches only a new worker process: the restart is
-        // offered with the ask, and the ask outlives Settings and a second ask.
+        // Screen Recording may need a new worker process. A request stays off
+        // until observed, and a restart cannot manufacture a grant.
         flow.begin(.screenRecording, on: true, pid: 100)
-        precondition(flow.row(.screenRecording, neither, restarting: false, now: now) == PermissionRow(on: true, enabled: true, note: "Turn on MemQL in System Settings"))
-        precondition(flow.floor(neither, restarting: false, now: now) == PermissionFloor(state: "Turn on Accessibility, then restart", busy: false, act: .restart))
+        precondition(flow.row(.screenRecording, neither, restarting: false, now: now) == PermissionRow(on: false, enabled: true, note: "Awaiting macOS approval"))
+        precondition(flow.floor(neither, restarting: false, now: now) == PermissionFloor(state: "Restart after changing access in macOS", busy: false, act: .restart))
         flow.begin(.accessibility, on: true, pid: 100)
-        precondition(flow.floor(neither, restarting: false, now: now) == PermissionFloor(state: "Waiting for System Settings", busy: true, act: nil))
+        precondition(flow.floor(neither, restarting: false, now: now) == PermissionFloor(state: "Restart after changing access in macOS", busy: false, act: .restart))
         precondition(flow.observe(axOnly, now: now) && flow.asks == [.screenRecording: true], "Accessibility landing leaves the Screen Recording ask open")
         flow.settingsClosed()
-        precondition(!flow.observe(axOnly, now: now) && flow.asks == [.screenRecording: true], "The same worker can never see it")
-        precondition(flow.floor(axOnly, restarting: false, now: now) == PermissionFloor(state: "Then restart to finish", busy: false, act: .restart))
+        precondition(!flow.observe(axOnly, now: now) && flow.asks == [.screenRecording: true], "A denied report does not complete an outstanding request")
+        precondition(flow.floor(axOnly, restarting: false, now: now) == PermissionFloor(state: "Restart after changing access in macOS", busy: false, act: .restart))
         precondition(flow.floor(axOnly, restarting: true, now: now) == PermissionFloor(state: "Restarting MemQL…", busy: true, act: nil))
         precondition(!flow.row(.screenRecording, axOnly, restarting: true, now: now).enabled, "Nothing is asked while MemQL restarts")
         precondition(flow.observe(report(pid: 101, screen: "Not granted"), now: now) && !flow.asking,
@@ -87,6 +87,28 @@ enum PermissionSetupTests {
         precondition(!flow.row(.screenRecording, headless, restarting: false, now: now).enabled)
         precondition(flow.floor(headless, restarting: false, now: now) == PermissionFloor(state: "Update Cockpit to set these up", busy: false, act: nil))
 
+        // Enabling requests only the native prompt; Settings is a separate
+        // direct action (also used to revoke access). Both controls share this.
+        precondition(PermissionFlow.action(on: true, report: neither, restarting: false, now: now) == .prompt)
+        precondition(PermissionFlow.action(on: false, report: report(), restarting: false, now: now) == .settings)
+        for blocked in [nil, report(age: 16), headless, report(pending: true)] as [PermissionReport?] {
+            precondition(PermissionFlow.action(on: true, report: blocked, restarting: false, now: now) == nil)
+        }
+        precondition(PermissionFlow.action(on: true, report: neither, restarting: true, now: now) == nil)
+        let pending = report(ax: "Not granted", screen: "Not granted", pending: true)
+        for kind in PermissionKind.allCases {
+            precondition(!flow.row(kind, pending, restarting: false, now: now).enabled,
+                         "No second request while macOS holds a dialog open")
+            precondition(!flow.row(kind, pending, restarting: false, now: now).on)
+        }
+        flow.begin(.screenRecording, on: true, pid: 100)
+        precondition(flow.floor(pending, restarting: false, now: now) == PermissionFloor(state: "Waiting for macOS", busy: true, act: nil),
+                     "Do not offer a restart while macOS is still processing the request")
+        precondition(flow.row(.accessibility, report(), restarting: false, now: now).on,
+                     "A pending revoke must keep showing actual access until the worker observes it revoked")
+        flow.cancel(.accessibility)
+        flow.cancel(.screenRecording)
+
         // Setup waits on this window (memql-cockpit#548): the way on without
         // what is not allowed yet, offered only while it waits.
         func waiting(ax: String, screen: String) -> PermissionReport {
@@ -109,16 +131,6 @@ enum PermissionSetupTests {
         precondition(!answered.waitingForPermissions, "An answered wait is no longer waiting")
         let downloading = try! decoder.decode(SetupStatus.self, from: Data(#"{"state":"running","stages":[{"name":"permissions","state":"skipped"},{"name":"models","state":"running"}]}"#.utf8))
         precondition(!downloading.waitingForPermissions, "Setup past the permissions waits on nobody here")
-
-        // Beside System Settings: right of it with room, else left of it,
-        // else over the screen's left edge (its sidebar, not its switches).
-        let size = NSSize(width: 400, height: 300)
-        let wide = NSRect(x: 0, y: 0, width: 2560, height: 1400)
-        precondition(PermissionPlacement.origin(for: size, beside: NSRect(x: 900, y: 300, width: 715, height: 600), in: wide) == NSPoint(x: 1627, y: 600))
-        precondition(PermissionPlacement.origin(for: size, beside: NSRect(x: 1800, y: 300, width: 715, height: 600), in: wide) == NSPoint(x: 1388, y: 600))
-        let laptop = NSRect(x: 0, y: 0, width: 1512, height: 944)
-        precondition(PermissionPlacement.origin(for: size, beside: NSRect(x: 400, y: 200, width: 715, height: 600), in: laptop).x == 12)
-        precondition(PermissionPlacement.origin(for: size, beside: nil, in: laptop) == NSPoint(x: 24, y: 322))
 
         let service = "service = {\n\tprogram = /fixture/memql\n\tpid = 100\n}"
         precondition(PermissionBridge.serviceMatches(service, pid: 100, executable: "/fixture/memql"))
@@ -152,6 +164,6 @@ enum PermissionSetupTests {
             appearance.performAsCurrentDrawingAppearance { view.cacheDisplay(in: view.bounds, to: bitmap) }
             try! bitmap.representation(using: .png, properties: [:])!.write(to: URL(fileURLWithPath: String(output.dropFirst("--render=".count))))
         }
-        print("Permission setup: freshness, denials, restart/new PID, timeout, URL, service identity, switch flow, setup choice and placement checks passed.")
+        print("Permission setup: freshness, denials, restart/new PID, timeout, URL, service identity, switch flow, setup choice and single-action checks passed.")
     }
 }

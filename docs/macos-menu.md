@@ -233,21 +233,21 @@ automatically when a supported worker first reports missing access; opening the
 window does not request any grant. Turning a switch on invokes
 `AXIsProcessTrustedWithOptions` or `CGRequestScreenCaptureAccess` **inside the
 running worker** through its private control socket, which puts MemQL in
-macOS's list, and opens that Privacy & Security page. Acknowledgment means the
-request was queued, not approved. Only one OS request may be pending at a time.
-No app can approve these grants itself: the password or Touch ID prompt
-belongs to System Settings.
+macOS's list. Enabling opens only the native permission prompt; its **Open
+System Settings** button controls whether Settings opens. Disabling opens the
+relevant Settings page because the app cannot revoke its own grant. Previously
+denied prompts can be managed using explicit Settings links under
+**Troubleshooting**. Cockpit never closes Apple's permission alerts or raises
+itself over the user's current work when a grant arrives.
 
-While System Settings is open for an ask, the window floats beside it, the menu
-reads the worker every second, and the switch shows the position asked for
-under a line saying what to do there. Accessibility lands live: the switch
-comes on and the window returns to the front as soon as the worker reports it.
-Screen Recording reaches only a process started after the change, so its ask
-offers **Restart MemQL** at once and stays open, past System Settings quitting
-and the window closing, until a different worker process reports. Otherwise a
-switch shows only the worker's report. While any of its windows is open the
-menu is a regular app with a Dock icon, so a window behind System Settings can
-always be found; it returns to the menu bar when the last one closes.
+Acknowledgment means the request was queued, not approved. A switch always shows
+the fresh running worker's observation, including while a request is pending.
+The controls are disabled while the worker is processing an OS permission
+request. The menu reads the worker every second while waiting for approval.
+Screen Recording may require a worker restart after approval; that action is
+available after the request returns, and never establishes a grant by itself.
+The next process's actual observations settle the request. While any window is
+open the menu is a regular app with a Dock icon so it remains easy to find.
 
 ### During setup (memql-cockpit#548)
 

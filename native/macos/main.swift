@@ -337,6 +337,7 @@ final class CockpitApp: NSObject, NSApplicationDelegate, NSMenuDelegate, NSSearc
     // While the person is in System Settings the worker's report is read
     // every second, so the switch comes on as soon as macOS grants.
     private func setFastRefresh(_ on: Bool) {
+        guard on != (fastTimer != nil) else { return }
         fastTimer?.invalidate(); fastTimer = nil
         if on { fastTimer = Timer.scheduledTimer(withTimeInterval: 1, repeats: true) { [weak self] _ in self?.refresh() } }
     }
