@@ -117,6 +117,11 @@ func (m *Manager) create(ctx context.Context, w *workspace) error {
 	if err != nil {
 		return err
 	}
+	active, release, err := w.reservation.admission()
+	if err != nil {
+		return err
+	}
+	defer release()
 	previous, err := w.reservation.previous()
 	if err != nil {
 		return err
@@ -141,9 +146,9 @@ func (m *Manager) create(ctx context.Context, w *workspace) error {
 		return ErrInterrupted
 	}
 	if capacity, ok := m.engine.(interface {
-		Headroom(context.Context, Runtime) error
+		Headroom(context.Context, Runtime, []record) error
 	}); ok {
-		if err := capacity.Headroom(ctx, runtime); err != nil {
+		if err := capacity.Headroom(ctx, runtime, active); err != nil {
 			return err
 		}
 	}

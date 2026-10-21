@@ -18,7 +18,10 @@ import (
 var ErrBusy = errors.New("fleet workbench capacity is occupied")
 var ErrInterrupted = errors.New("an interrupted workbench must be reconciled before starting more work")
 
-type reservation struct{ slot, pipeline *os.File }
+type reservation struct {
+	slot, pipeline *os.File
+	root           string
+}
 type record struct{ Name, Key, DockerID string }
 
 func capacityRoot() (string, error) {
@@ -80,7 +83,40 @@ func reserveAt(root string, slotIndex int) (*reservation, error) {
 		pipeline.Close()
 		return nil, err
 	}
-	return &reservation{slot: slot, pipeline: pipeline}, nil
+	return &reservation{slot: slot, pipeline: pipeline, root: root}, nil
+}
+
+// Serialize the memory snapshot through container creation across worker
+// processes. Slot locks still bound lifetimes; this short lock prevents two
+// pending creations from both spending the same measured headroom.
+func (r *reservation) admission() ([]record, func(), error) {
+	lock, err := lockFile(filepath.Join(r.root, "workbench-admission.lock"), false)
+	if err != nil {
+		return nil, nil, err
+	}
+	release := func() { lock.Close() }
+	var active []record
+	for i := 0; i < Slots; i++ {
+		fd, err := syscall.Open(filepath.Join(r.root, fmt.Sprintf("workbench-%d.lock", i)), syscall.O_RDONLY|syscall.O_CLOEXEC|syscall.O_NOFOLLOW|syscall.O_NONBLOCK, 0)
+		if errors.Is(err, os.ErrNotExist) {
+			continue
+		}
+		if err != nil {
+			release()
+			return nil, nil, err
+		}
+		file := os.NewFile(uintptr(fd), "workbench record")
+		v, err := readRecord(file)
+		file.Close()
+		if err != nil {
+			release()
+			return nil, nil, err
+		}
+		if v.Name != "" {
+			active = append(active, v)
+		}
+	}
+	return active, release, nil
 }
 
 // HasInterrupted is checked under the pipeline's EXCLUSIVE capacity lock.
@@ -102,18 +138,24 @@ func HasInterrupted(root string) (bool, error) {
 	return false, nil
 }
 func (r *reservation) previous() (record, error) {
+	return readRecord(r.slot)
+}
+func readRecord(file *os.File) (record, error) {
 	var v record
-	stat, err := r.slot.Stat()
+	stat, err := file.Stat()
 	if err != nil {
 		return v, err
+	}
+	if !stat.Mode().IsRegular() || stat.Size() > 4096 {
+		return v, ErrInterrupted
 	}
 	if stat.Size() == 0 {
 		return v, nil
 	}
-	if _, err = r.slot.Seek(0, io.SeekStart); err != nil {
+	if _, err = file.Seek(0, io.SeekStart); err != nil {
 		return v, err
 	}
-	if err = json.NewDecoder(io.LimitReader(r.slot, 4096)).Decode(&v); err != nil {
+	if err = json.NewDecoder(io.LimitReader(file, 4096)).Decode(&v); err != nil {
 		return v, ErrInterrupted
 	}
 	nonce, nonceErr := hex.DecodeString(strings.TrimPrefix(v.Name, "memql-workbench-"))

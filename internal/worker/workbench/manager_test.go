@@ -43,6 +43,49 @@ func identity(run string) Identity {
 	return Identity{Home: "home", Owner: "owner", Caller: "caller", Registration: "reg", Machine: "machine", Run: run, ExpiresAt: time.Now().Add(Lifetime)}
 }
 func request() Request { return Request{Action: "exec", Args: map[string]any{"cmd": "true"}} }
+
+type admissionEngine struct {
+	*fakeEngine
+	started, proceed chan struct{}
+	observed         [][]record
+}
+
+func (f *admissionEngine) Headroom(_ context.Context, _ Runtime, active []record) error {
+	f.observed = append(f.observed, append([]record(nil), active...))
+	return nil
+}
+func (f *admissionEngine) Create(ctx context.Context, runtime Runtime, name, key string) error {
+	if len(f.observed) == 1 {
+		close(f.started)
+		<-f.proceed
+	}
+	return f.fakeEngine.Create(ctx, runtime, name, key)
+}
+
+func TestConcurrentManagersCannotSpendTheSameHeadroom(t *testing.T) {
+	f := &admissionEngine{fakeEngine: &fakeEngine{}, started: make(chan struct{}), proceed: make(chan struct{})}
+	root := t.TempDir()
+	a, b := New(f, root), New(f, root)
+	done := make(chan error, 1)
+	go func() { _, err := a.Execute(context.Background(), identity("one"), request()); done <- err }()
+	<-f.started
+	_, err := b.Execute(context.Background(), identity("two"), request())
+	close(f.proceed)
+	if firstErr := <-done; firstErr != nil {
+		t.Fatal(firstErr)
+	}
+	defer a.CloseHome("home")
+	defer b.CloseHome("home")
+	if !errors.Is(err, ErrBusy) || len(f.observed) != 1 {
+		t.Fatal("a pending creation spent the same headroom", err, f.observed)
+	}
+	if _, err := b.Execute(context.Background(), identity("two"), request()); err != nil {
+		t.Fatal("admission lock was not released", err)
+	}
+	if len(f.observed[0]) != 0 || len(f.observed[1]) != 1 || f.observed[1][0].Name != f.created[0] {
+		t.Fatal("admission did not include the existing exact reservation", f.observed)
+	}
+}
 func TestWorkspacesSeparateBorrowersAndKeepCapacityAcrossHomes(t *testing.T) {
 	f := &fakeEngine{}
 	root := t.TempDir()

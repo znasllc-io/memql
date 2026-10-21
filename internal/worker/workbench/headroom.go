@@ -12,18 +12,11 @@ import (
 	"github.com/shirou/gopsutil/v4/mem"
 )
 
-// Reserve the full two-workspace memory budget plus twenty percent for the
-// machine and its other work. The Docker VM and the host are separate limits
-// on macOS; both must have room before creating another workspace.
-func (d Docker) Headroom(ctx context.Context, runtime Runtime) error {
-	host, err := mem.VirtualMemoryWithContext(ctx)
-	if err != nil || host.Total == 0 {
-		return fmt.Errorf("cannot measure machine memory headroom")
-	}
-	budget := uint64(Slots*MemoryMiB) << 20
-	if host.Available < budget+host.Total/5 {
-		return ErrBusy
-	}
+// Charge one new workspace and the unused allowance of existing reservations.
+// Their current usage is already in the host/Docker measurements. Keep twenty
+// percent free in both pools; a configured but empty slot consumes no budget.
+// The caller holds the cross-process admission lock through Create.
+func (d Docker) Headroom(ctx context.Context, runtime Runtime, active []record) error {
 	d.endpoint = runtime.Endpoint
 	if err := d.verifyDaemon(ctx, runtime); err != nil {
 		return err
@@ -32,25 +25,66 @@ func (d Docker) Headroom(ctx context.Context, runtime Runtime) error {
 	if err != nil {
 		return fmt.Errorf("cannot measure Docker memory headroom")
 	}
-	var other uint64
+	usage := map[string]uint64{}
 	for _, line := range bytes.Split(out, []byte{'\n'}) {
 		if len(bytes.TrimSpace(line)) == 0 {
 			continue
 		}
-		var row struct{ MemUsage string }
-		if json.Unmarshal(line, &row) != nil {
+		var row struct{ Name, MemUsage string }
+		if json.Unmarshal(line, &row) != nil || row.Name == "" {
 			return fmt.Errorf("Docker returned unreadable memory usage")
 		}
 		used, err := memoryQuantity(strings.TrimSpace(strings.SplitN(row.MemUsage, "/", 2)[0]))
 		if err != nil {
 			return err
 		}
-		// Count all existing containers, including workbenches from another OS
-		// account on the same daemon. Reserving the full budget again is
-		// conservative and avoids trusting a forgeable container name prefix.
-		other += used
+		if _, duplicate := usage[row.Name]; duplicate {
+			return fmt.Errorf("Docker returned duplicate memory usage")
+		}
+		usage[row.Name] = used
 	}
-	if runtime.MemoryBytes <= 0 || other+budget > uint64(runtime.MemoryBytes)-uint64(runtime.MemoryBytes)/5 {
+	host, err := mem.VirtualMemoryWithContext(ctx)
+	if err != nil || host.Total == 0 {
+		return fmt.Errorf("cannot measure machine memory headroom")
+	}
+	return checkHeadroom(host.Total, host.Available, runtime, active, usage)
+}
+
+func checkHeadroom(total, available uint64, runtime Runtime, active []record, usage map[string]uint64) error {
+	if total == 0 || available > total || runtime.MemoryBytes <= 0 {
+		return fmt.Errorf("memory headroom is unavailable")
+	}
+	const workspaceBytes = uint64(MemoryMiB) << 20
+	hostGrowth, dockerGrowth := workspaceBytes, workspaceBytes
+	seen := map[string]bool{}
+	for _, existing := range active {
+		key := existing.DockerID + "/" + existing.Name
+		if seen[key] || existing.Name == "" || existing.DockerID == "" || len(active) >= Slots {
+			return ErrInterrupted
+		}
+		seen[key] = true
+		if existing.DockerID != runtime.ID {
+			// Its host memory can still grow, but it does not consume this daemon.
+			hostGrowth += workspaceBytes
+			continue
+		}
+		// Only exact names from the local reservation journal get usage credit.
+		// Unknown containers are counted below, never excluded by name/label.
+		growth := workspaceBytes - min(workspaceBytes, usage[existing.Name])
+		hostGrowth += growth
+		dockerGrowth += growth
+	}
+	if available < total/5 || hostGrowth > available-total/5 {
+		return ErrBusy
+	}
+	remaining := uint64(runtime.MemoryBytes) - uint64(runtime.MemoryBytes)/5
+	for _, used := range usage {
+		if used > remaining {
+			return ErrBusy
+		}
+		remaining -= used
+	}
+	if dockerGrowth > remaining {
 		return ErrBusy
 	}
 	return nil

@@ -79,11 +79,11 @@ func (d Docker) command(ctx context.Context, input io.Reader, args ...string) ([
 	return out.Bytes(), nil
 }
 
-// The workbench headroom: two one-CPU, 1.5 GiB workspaces with a fifth
-// of the VM left free.
+// Readiness requires room for one workspace. Admission accounts for existing
+// workloads before each creation; the maximum slot count is not an allocation.
 const (
 	minCPUs        = 3
-	minMemoryBytes = int64(MemoryMiB) * 2 * 1024 * 1024 * 5 / 4
+	minMemoryBytes = int64(MemoryMiB) * 1024 * 1024 * 5 / 4
 )
 
 // firstLine keeps one line of a command's stderr for an error message.
@@ -119,13 +119,10 @@ func (d Docker) Ready(ctx context.Context) (Runtime, error) {
 	if json.Unmarshal(out, &info) != nil || info.ID == "" || info.OSType != "linux" {
 		return Runtime{}, fmt.Errorf("fleet workbenches require Docker running Linux containers")
 	}
-	// Two one-CPU workspaces must leave at least 20 percent of the VM's
-	// reported resources free. No emulation or daemon reconfiguration is done.
-	// Memory is judged on that need, 2 x 1.5 GiB / 0.8 = 3.75 GiB, not on a
-	// round 4 GiB: a VM configured with 4 GB reports a little less than
-	// that after its kernel's share, and was refused (memql-cockpit#524).
+	// Use reported memory, allowing the kernel's share of the configured VM.
+	// No emulation or daemon reconfiguration is done.
 	if info.NCPU < minCPUs || info.MemTotal < minMemoryBytes {
-		return Runtime{}, fmt.Errorf("Docker needs at least 3 CPUs and 4 GB for two workbenches with headroom; it has %d CPUs and %.1f GB", info.NCPU, float64(info.MemTotal)/1e9)
+		return Runtime{}, fmt.Errorf("Docker needs at least 3 CPUs and 2 GB for a workbench with headroom; it has %d CPUs and %.1f GB", info.NCPU, float64(info.MemTotal)/1e9)
 	}
 	if _, err = d.command(probe, nil, "image", "inspect", Image); err != nil {
 		return Runtime{}, fmt.Errorf("workbench runtime is not installed; run Cockpit workbench setup")

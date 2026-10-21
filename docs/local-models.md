@@ -545,9 +545,18 @@ install. The script on `main` installs the latest release, which may predate
 a stage the script knows: the workbench stage asks the installed binary
 whether it has `worker setup --workbench` and reports "not in this release"
 when it does not, instead of running into it. A workbench setup that fails --
-Docker missing or stopped, under 3 CPUs or 4 GB, not on a local socket, or an
+Docker missing or stopped, under 3 CPUs or 2 GB, not on a local socket, or an
 image pull past 15 minutes -- is one line with Docker's own words and the
 retry command in the summary.
+
+Each Fleet Workbench has a 1.5 GiB hard memory limit, with at most two active
+workspaces. Before creating one, Cockpit reserves its allowance plus the unused
+allowance of existing workspaces recorded in its local reservation journal.
+Current container usage is counted once, and both the Mac/Linux host and Docker
+retain a 20% safety cushion. An unused slot reserves no memory. Admission and
+creation are serialized across worker processes, so concurrent starts cannot
+spend the same headroom. Other containers are always included in measured usage;
+a container name or label cannot exempt one from accounting.
 
 **The service sees what the shell saw.** A LaunchAgent or user unit inherits
 nothing from a shell, so an `OLLAMA_HOST` or `OLLAMA_MODELS` set where the

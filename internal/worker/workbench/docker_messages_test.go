@@ -43,20 +43,19 @@ func TestDockerFailureCarriesDockersOwnWords(t *testing.T) {
 	}
 }
 
-// A VM configured with 4 GB reports a little less once its kernel takes a
-// share; that is enough for two 1.5 GiB workspaces with a fifth free.
-func TestDockerReadyAcceptsAFourGigabyteVM(t *testing.T) {
+// Readiness does not reserve an unused second slot. Admission separately
+// measures other containers before allowing either workspace to start.
+func TestDockerReadyAcceptsOneWorkspaceWithCushion(t *testing.T) {
 	t.Setenv("DOCKER_HOST", "")
 	t.Setenv("DOCKER_CONTEXT", "")
-	// 3.83 GiB, what Docker Desktop reports for its "4 GB" setting.
-	d := Docker{Binary: fakeDocker(t, `{"ID":"x","OSType":"linux","NCPU":4,"MemTotal":4112797696}`, "")}
+	d := Docker{Binary: fakeDocker(t, `{"ID":"x","OSType":"linux","NCPU":4,"MemTotal":2056398848}`, "")}
 	if _, err := d.Ready(context.Background()); err != nil {
-		t.Fatalf("a 4 GB VM must pass, got %v", err)
+		t.Fatalf("a VM with room for one workspace must pass, got %v", err)
 	}
-	small := Docker{Binary: fakeDocker(t, `{"ID":"x","OSType":"linux","NCPU":4,"MemTotal":3221225472}`, "")}
+	small := Docker{Binary: fakeDocker(t, `{"ID":"x","OSType":"linux","NCPU":4,"MemTotal":1610612736}`, "")}
 	_, err := small.Ready(context.Background())
-	if err == nil || !strings.Contains(err.Error(), "it has 4 CPUs and 3.2 GB") {
-		t.Fatalf("a 3 GiB VM must be refused with what it has, got %v", err)
+	if err == nil || !strings.Contains(err.Error(), "it has 4 CPUs and 1.6 GB") {
+		t.Fatalf("a VM without room for the cushion must be refused with what it has, got %v", err)
 	}
 }
 
