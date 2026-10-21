@@ -10,7 +10,7 @@ import (
 	"github.com/znasllc-io/memql/component/pipelines"
 )
 
-// handleRunLatest is the owner-facing entry for an on-demand local rehearsal.
+// handleRunLatest is the owner-facing entry for an on-demand manual run.
 func (i *Integration) handleRunLatest(ctx context.Context, args map[string]any, _ int) ([]memorynodes.MemoryNode, error) {
 	run, err := i.RunLatest(handlerContext(ctx), stringArg(args, "pipelineId"), stringArg(args, "branch"))
 	if err != nil {
@@ -27,8 +27,8 @@ func (i *Integration) handleRunLatest(ctx context.Context, args map[string]any, 
 
 // RunLatest opens a full manual rehearsal of a branch head: the named branch
 // of the pipeline's repository, or its default branch when branch is empty.
-// Automatic delivery must already be disconnected, so a local run cannot
-// duplicate a webhook or poll run. A name GitHub would not accept is refused
+// Manual runs have their own deduplicated event key and check context; they
+// do not change automatic delivery. A name GitHub would not accept is refused
 // before any request leaves the cluster. The source's owner's GitHub grant is
 // used to read and check the exact commit; the commit is pinned in the run row.
 func (i *Integration) RunLatest(ctx context.Context, pipelineID, branch string) (Run, error) {
@@ -57,10 +57,7 @@ func (i *Integration) RunLatest(ctx context.Context, pipelineID, branch string) 
 	if p == nil {
 		return Run{}, fmt.Errorf("pipelines: you have no pipeline %q", pipelineID)
 	}
-	if p.Active() {
-		return Run{}, pipelines.Refuse(pipelines.CodeManualRequiresDisconnected, "",
-			"Disconnect automatic delivery before starting a manual rehearsal, so both paths do not run the same change.")
-	}
+
 	if strings.TrimSpace(p.CredentialID) == "" {
 		return Run{}, fmt.Errorf("pipelines: this source has no GitHub connection; reconnect it before running a rehearsal")
 	}

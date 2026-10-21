@@ -18,6 +18,7 @@ import { openMicrophone } from "../ask/micCapture";
 import { SdkTranscriber } from "../ask/sdkVoice";
 import type { VoicePorts } from "../ask/voiceSession";
 import { AskSheet } from "../ask/AskSheet";
+import { ConnectionNotice } from "../kit/ConnectionNotice";
 import { SdkAskTransport } from "../ask/sdkTransport";
 import { type AskTransport } from "../ask/askController";
 import { OS_REGISTRY } from "../apps/registry";
@@ -177,7 +178,6 @@ export function Shell({
     >
                     <PhoneShell onSignOut={onSignOut} />
                     <AskNavigator />
-      <AskSheet />
                   </div>
                 ) : (
                   <DesktopChrome
@@ -444,6 +444,7 @@ function DesktopChrome({
         <Desktop viewport={viewport} placement={placement} uploads={uploads} hidePager={fullscreen} />
         <Dock hidden={fullscreen} onOpenLauncher={() => setLauncherOpen(true)} onSignOut={onSignOut} />
       </ShellDragScope>
+      <ConnectionNotice className="os-connection-floating" />
       <LauncherOverlay
         open={launcherOpen}
         onClose={() => setLauncherOpen(false)}

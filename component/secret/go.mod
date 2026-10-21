@@ -2,10 +2,10 @@
 // rationale: docs/internal/ops/ci-design.md, section D3.
 module github.com/znasllc-io/memql/component/secret
 
-go 1.26.1
+go 1.26.8
 
-toolchain go1.27.2
+toolchain go1.27.3
 
-require golang.org/x/crypto v0.57.0
+require golang.org/x/crypto v0.58.0
 
-require golang.org/x/sys v0.48.0 // indirect
+require golang.org/x/sys v0.49.0 // indirect

@@ -8,6 +8,6 @@
 // that derives a domain.
 module github.com/znasllc-io/memql/component/frontdoor
 
-go 1.26.1
+go 1.26.8
 
-toolchain go1.27.2
+toolchain go1.27.3

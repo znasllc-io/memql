@@ -10,7 +10,8 @@ import (
 
 // ImageBuild describes one bounded, single-platform Dockerfile build. Source
 // selection, stage ordering and publication remain the caller's workflow.
-// No registry push, daemon arguments, mounts or credential channels are exposed.
+// No registry push, daemon arguments or arbitrary mounts are exposed. The
+// step's githubReadToken flag opts into the fixed repository read secret only.
 type ImageBuild struct {
 	Context    string            `yaml:"context" json:"context"`
 	Dockerfile string            `yaml:"dockerfile" json:"dockerfile"`

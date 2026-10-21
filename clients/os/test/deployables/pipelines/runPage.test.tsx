@@ -10,7 +10,7 @@ vi.mock("../../../src/live/connection", () => ({
 
 import { DeployablesApp } from "../../../src/apps/deployables/DeployablesApp";
 import { LocalDeployablesSettingsStore } from "../../../src/apps/deployables/settings";
-import { WORK_STEP_CONCEPT } from "../../../src/apps/deployables/pipelines/rows";
+import { LIBRARY_ARTIFACT_CONCEPT, WORK_STEP_CONCEPT } from "../../../src/apps/deployables/pipelines/rows";
 import { click, emit, fakeConnection, withSession, type FakeConnection, type FakeSeed } from "../harness";
 import { VIEWER, minutesAgo, packageRow, pipelineRow, runRow, stepRow } from "./fixtures";
 
@@ -102,6 +102,39 @@ describe("the run page", () => {
     await screen.findByLabelText("The last lines of tests.unit's log");
     expect(screen.getByText("No change under bucket os.")).toBeTruthy();
     expect(within(screen.getByRole("region", { name: "Artifacts" })).getByText("dist/coverage.html")).toBeTruthy();
+  });
+
+  it("shows confirmed expiry without changing the failed verdict or offering a dead download", async () => {
+    mount(fakeConnection(seed({ runArtifacts: { "wr-1": [] }, expiredRunFiles: { "r-1": [
+      { fileId: "file-log-unit", name: "tests.unit.log" }, { fileId: "file-cov", name: "dist__coverage.html" },
+    ] } })));
+    expect(await screen.findByText("Log expired.")).toBeTruthy();
+    const artifacts = within(screen.getByRole("region", { name: "Artifacts" }));
+    expect(artifacts.getByText("Expired")).toBeTruthy();
+    expect(artifacts.getByText("dist/coverage.html")).toBeTruthy();
+    expect(artifacts.queryByRole("button")).toBeNull();
+    expect(screen.queryByRole("button", { name: "Open the full log" })).toBeNull();
+    expect(screen.getByText("The step's command exited with status 1.")).toBeTruthy();
+    expect(document.querySelector(".pipeline-log")).toBeNull();
+  });
+
+  it.each([undefined, "receipt read failed"])("does not infer expiry from missing files when receipts are %s", async error => {
+    mount(fakeConnection(seed({ runArtifacts: { "wr-1": [] }, expiredRunFilesError: error })));
+    expect(await screen.findByText("Unavailable")).toBeTruthy();
+    expect(screen.queryByText("Expired")).toBeNull();
+    expect(screen.queryByText("Log expired.")).toBeNull();
+    if (error) expect(screen.getByText("Artifact availability could not be checked.")).toBeTruthy();
+  });
+
+  it("removes an already displayed log tail when a confirmed cleanup arrives on the live feed", async () => {
+    const connection = fakeConnection(seed({ expiredRunFiles: { "r-1": [{ fileId: "file-log-unit", name: "tests.unit.log" }] } }));
+    mount(connection);
+    await screen.findByLabelText("The last lines of tests.unit's log");
+    await emit(connection, LIBRARY_ARTIFACT_CONCEPT, FILES[0]!, "NODE_DELETED");
+    expect(await screen.findByText("Log expired.")).toBeTruthy();
+    expect(screen.queryByLabelText("The last lines of tests.unit's log")).toBeNull();
+    expect(screen.queryByRole("button", { name: "Open the full log" })).toBeNull();
+    expect(screen.getByText("dist/coverage.html")).toBeTruthy();
   });
 
   it.each(["done", "failed"] as const)("explains a %s step's unsaved log without inventing a manifest error", async (status) => {

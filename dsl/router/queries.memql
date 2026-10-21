@@ -250,4 +250,3 @@ query call routerCallsForBudget {
   filter  row => actor.isClusterOwner == true && row.userId == args.userId && row.createdAt >= args.since
   shape   routerCallSpend
 }
-

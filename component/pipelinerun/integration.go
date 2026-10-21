@@ -42,6 +42,9 @@ import (
 // Deps are the integration's ports. New takes them, and Configure sets the
 // ones only app/ can build after every plug-in has materialized.
 type Deps struct {
+	// ArtifactRetention supplies the same durable artifact journal and provider
+	// fences used by producers and publication consumers on every replica.
+	ArtifactRetention *ArtifactRetentionDependencies
 	// LoadWorkflow resolves installed definitions. Nil uses the boot-time DSL tree.
 	LoadWorkflow func(string) (*automations.Automation, error)
 	Store        Store
@@ -50,6 +53,8 @@ type Deps struct {
 	// SARIF holds native publication storage and owner-scoped journal reads.
 	// It never gives a command step the GitHub installation bearer.
 	SARIF *SARIFDependencies
+	// SystemVariable reads operator configuration under system-variable ACLs.
+	SystemVariable func(context.Context, string) (string, error)
 	// RunnerReadiness reads remote workbench evidence on front-door nodes too.
 	// Reporting does not register a step executor or make this node a driver.
 	RunnerReadiness pipelines.ReadinessReporter

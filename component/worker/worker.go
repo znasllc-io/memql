@@ -100,8 +100,8 @@ const (
 	// DisconnectReasonTokenExpired is a worker token that reached its
 	// expiresAt while connected (D3/D4).
 	DisconnectReasonTokenExpired = "token_expired"
-	// DisconnectReasonSuperseded is another replica taking over this
-	// machine's registration (D1, the supersede half of M-4).
+	// DisconnectReasonSuperseded is another stream taking over this machine's
+	// registration, on this replica or another one.
 	DisconnectReasonSuperseded = "superseded"
 )
 

@@ -132,7 +132,7 @@ func TestWorkDBNativeContinuationProjectsExactDecisionOnAnotherReplica(t *testin
 			if mode != "pending" {
 				templateMutation(t, writer, auth.ContextWithInternalOrigin(approvalPerson), "decideWorkApproval", map[string]any{"approvalId": approvalID, "decision": decisionKind, "decidedBy": owner, "decidedAt": time.Now().UTC().Format(time.RFC3339Nano), "answer": answer})
 			}
-			valid := mode == "exact-command" || mode == "permission-guidance" || mode == "budget"
+			valid := mode == "exact-command" || mode == "permission-guidance"
 			prepared, err := reader.PrepareWorkContinuation(ctx, memql.CheckpointResumeRequest{RunID: runID, StepKey: stepKey, ApprovalID: approvalID})
 			if valid {
 				require.NoError(t, err)

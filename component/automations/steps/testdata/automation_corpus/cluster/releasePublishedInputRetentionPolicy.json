@@ -1,0 +1,47 @@
+{
+  "automation": "cluster/automations.memql releasePublishedInputRetentionPolicy",
+  "runs": {
+    "invocation | 0 rows": {
+      "input": {
+        "event": {
+          "kind": "unspecified",
+          "payload": {
+            "ageSeconds": 3
+          },
+          "topic": "automation.invocation.releasePublishedInputRetentionPolicy"
+        },
+        "rows": 0
+      },
+      "outcome": {
+        "calls": null,
+        "result": {
+          "output": {
+            "retained": true
+          },
+          "status": "completed"
+        }
+      }
+    },
+    "invocation | 2 rows": {
+      "input": {
+        "event": {
+          "kind": "unspecified",
+          "payload": {
+            "ageSeconds": 3
+          },
+          "topic": "automation.invocation.releasePublishedInputRetentionPolicy"
+        },
+        "rows": 2
+      },
+      "outcome": {
+        "calls": null,
+        "result": {
+          "output": {
+            "retained": true
+          },
+          "status": "completed"
+        }
+      }
+    }
+  }
+}

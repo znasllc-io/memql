@@ -316,12 +316,16 @@ export interface FakeSeed {
   olderPipelineRuns?: Row[];
   /** Every page of runs, newest first; each names the next by cursor. Overrides the two above. */
   pipelineRunPages?: Row[][];
+  /** v1:pipelines:channel rows for this owner. */
+  pipelineChannels?: Row[];
   /** v1:pipelines:pipeline rows `pipelinesForOwner` answers. */
   pipelines?: Row[];
   /** v1:work:step rows, by the bare work run id `workStepsForOwnerRun` names. */
   workSteps?: Record<string, Row[]>;
   /** v1:library:artifact rows, by the work run id `artifactsForRun` names. */
   runArtifacts?: Record<string, Row[]>;
+  expiredRunFiles?: Record<string, { fileId: string; name: string }[]>;
+  expiredRunFilesError?: string;
   /** What `pipelinesPreview` answers (one row). Absent answers no row. */
   pipelinePreview?: Row;
   pipelinePreviewError?: string;
@@ -409,6 +413,7 @@ export function fakeConnection(seed: FakeSeed = {}): FakeConnection {
         const at = opts?.cursor?.startsWith("runs-page-") ? Number(opts.cursor.slice("runs-page-".length)) : 0;
         return rowsResultWithCursor(pages[at] ?? [], at + 1 < pages.length ? `runs-page-${at + 1}` : "");
       }
+      if (call === "query pipelineChannelsForOwner()") return rowsResult(seed.pipelineChannels ?? []);
       if (call === "query pipelinesForOwner()") return rowsResult(seed.pipelines ?? []);
       if (call.startsWith("query workStepsForOwnerRun(")) {
         const id = /runId: "([^"]*)"/.exec(call)?.[1] ?? "";
@@ -417,6 +422,14 @@ export function fakeConnection(seed: FakeSeed = {}): FakeConnection {
       if (call.startsWith("query artifactsForRun(")) {
         const id = /runId: "([^"]*)"/.exec(call)?.[1] ?? "";
         return rowsResult(seed.runArtifacts?.[id] ?? []);
+      }
+      if (call.startsWith("builtin pipelinesExpiredArtifacts(")) {
+        if (seed.expiredRunFilesError) throw Error(seed.expiredRunFilesError);
+        const id = /runId: "([^"]*)"/.exec(call)?.[1] ?? "";
+        const selection = /fileIds: (\[[^\]]*\])/.exec(call)?.[1] ?? "[]";
+        const selected = JSON.parse(selection) as string[];
+        const files = (seed.expiredRunFiles?.[id] ?? []).filter(file => selected.includes(file.fileId));
+        return builtinReply("pipelinesExpiredArtifacts", [{ files } as unknown as Row]);
       }
       if (call.startsWith("builtin pipelinesPreview(")) {
         if (seed.pipelinePreviewError !== undefined) throw new Error(seed.pipelinePreviewError);

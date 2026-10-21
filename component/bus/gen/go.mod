@@ -7,8 +7,8 @@
 // so this one needs protobuf but not grpc.
 module github.com/znasllc-io/memql/component/bus/gen
 
-go 1.26.1
+go 1.26.8
 
-toolchain go1.27.2
+toolchain go1.27.3
 
 require google.golang.org/protobuf v1.36.12

@@ -13,6 +13,6 @@
 // GOWORK=off. The wiring that reaches the engine lives in component/pipelinerun.
 module github.com/znasllc-io/memql/component/pipelines
 
-go 1.26.1
+go 1.26.8
 
-toolchain go1.27.2
+toolchain go1.27.3

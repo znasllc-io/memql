@@ -10,7 +10,6 @@ import {
   CopyValue,
   Fact,
   Facts,
-  Field,
   Head,
   Input,
   LiveList,
@@ -114,7 +113,7 @@ const EMPTY_APPROVALS: LiveSnapshot<Row> = { rows: [], state: "disconnected", er
 // Mirrors work.IsFailureQuestion: these offered values identify a recovery
 // decision even when an older approval carries the planReview kind.
 export function isFailureQuestion(approval: ApprovalRow): boolean {
-  return approval.options.some(option => option.value === "retry")
+  return approval.subject?.progressLimit !== true && approval.kind !== "budget" && approval.options.some(option => option.value === "retry")
     && approval.options.some(option => option.value === "abandon");
 }
 
@@ -220,7 +219,9 @@ export function ApprovalsSection({
         const approval = approvalFromRow(row);
         return idTail(approval.id) === idTail(id) && approvalIsPending(approval);
       })),
-    ...(selectedApprovalId && (!selected || (["budget", "scopeElevation"].includes(selected.kind) && selected.decision === "approved")) ? [selectedApprovalId] : []),
+    ...(selectedApprovalId && (!selected
+      || (selected.kind === "scopeElevation" && selected.decision === "approved")
+      || (selected.kind === "feedback" && selected.subject?.progressLimit === true && selected.decision === "answered")) ? [selectedApprovalId] : []),
   ])].sort().join("\n") : "";
   useEffect(() => {
     if (!recoveryIds) return;
@@ -259,11 +260,9 @@ export function ApprovalsSection({
   const destination = selected?.kind === "scopeElevation" ? executionDestinationChange(selected.subject) : null;
   const invalidPermission = !failure && selected?.kind === "scopeElevation" && ((selected.subject?.executionDestination !== undefined && !destination) || (selected.subject?.computerPermission !== undefined && permission === null) || computerSessionAccess(selected.subject) === null);
   const permissionMode = rememberPermission && permission?.allowedModes.includes("always") ? "always" : "once";
-  const budget = failure ? null : budgetControl(selected);
-  const budgetAnswer = budgetApprovalAnswer(selected, freeText);
   const answerInAsk = !failure && isFeedback && ["text", "choice", "multi"].includes(String(selected?.subject?.kind)) && onAnswerInAsk;
   const hasOptions = (selected?.options.length ?? 0) > 0;
-  const answerReady = budget !== null ? budgetAnswer !== undefined : isFeedback
+  const answerReady = isFeedback
     ? hasOptions
       ? selected?.subject?.kind === "multi" ? choices.length > 0 : choice !== ""
       : freeText.trim() !== ""
@@ -283,14 +282,16 @@ export function ApprovalsSection({
     acts.push({ label: "Review again", tone: "primary", busy: decide.deciding === idTail(approvalResume.approvalId),
       onAct: () => { void decide.refreshPermission(approvalResume.approvalId); } });
   } else if (approvalResume) {
-    acts.push({ label: "Resume work", tone: "primary", busy: decide.deciding === idTail(approvalResume.approvalId),
-      onAct: () => { void decide.decide(approvalResume.approvalId, "approved", approvalResume.permissionAnswer ?? { newLimit: approvalResume.newLimit }, undefined, !approvalResume.permissionAnswer); } });
+    acts.push({ label: approvalResume.feedbackAnswer?.value === "abandon" ? "Stop saved work" : "Resume work", tone: "primary", busy: decide.deciding === idTail(approvalResume.approvalId),
+      onAct: () => { void decide.decide(approvalResume.approvalId, approvalResume.feedbackAnswer ? "answered" : "approved", approvalResume.feedbackAnswer ?? approvalResume.permissionAnswer, undefined, !!approvalResume.feedbackAnswer); } });
   } else if (selected && permission && selected.decision === "" && selectedRun && runWaitsForApproval(selectedRun, selected.id) && (lapsed || permissionReview)) {
-    if (onDiscussInAsk) acts.push({ label: "Discuss in Ask", text: true, onAct: () => onDiscussInAsk(selected.id) });
+    if (onDiscussInAsk && selected.kind !== "budget") acts.push({ label: "Discuss in Ask", text: true, onAct: () => onDiscussInAsk(selected.id) });
     if (lapsed || permissionReview === "review" || permissionReview === "expired") acts.push({ label: "Review again", tone: "primary", busy: decide.deciding === idTail(selected.id), onAct: () => { void decide.refreshPermission(selected.id); } });
   } else if (selected !== null && canDecide) {
-    if (onDiscussInAsk) acts.push({ label: "Discuss in Ask", text: true, onAct: () => onDiscussInAsk(selected.id) });
-    if (failure) {
+    if (onDiscussInAsk && selected.kind !== "budget") acts.push({ label: "Discuss in Ask", text: true, onAct: () => onDiscussInAsk(selected.id) });
+    if (selected.kind === "budget") {
+      acts.push({ label: "Stop here", onAct: () => { void decide.decide(selected.id, "rejected"); } });
+    } else if (failure) {
       for (const value of ["abandon", "retry"]) {
         acts.push({
           label: value === "retry" ? selected.options.find(option => option.value === value)!.label : "Abandon",
@@ -308,7 +309,7 @@ export function ApprovalsSection({
           tone: "primary",
           busy: decide.deciding === idTail(selected.id),
           onAct: () => {
-            void decide.decide(selected.id, "answered", answerPayload(selected, choice, freeText, choices));
+            void decide.decide(selected.id, "answered", answerPayload(selected, choice, freeText, choices), undefined, selected.subject?.progressLimit === true);
           },
         });
       }
@@ -318,8 +319,7 @@ export function ApprovalsSection({
       // feed, so its page and its row follow the answer without a re-read.
       const documentReview = selected.subject?.reviewType === "library-document"
         ? { requestId: String(selected.subject.requestId), proposalHash: selected.artifactHash } : undefined;
-      const nativeBudget = selected.kind === "budget" && selected.subject?.resumeKind === "checkpoint" && typeof selected.subject.continuationId === "string" && selected.subject.continuationId !== "";
-      const decideIt = (decision: "approved" | "rejected") => void decide.decide(selected.id, decision, decision === "approved" ? permission ? { permissionMode, permissionHash: selected.artifactHash } : budgetAnswer : undefined, documentReview, nativeBudget);
+      const decideIt = (decision: "approved" | "rejected") => void decide.decide(selected.id, decision, decision === "approved" ? permission ? { permissionMode, permissionHash: selected.artifactHash } : undefined : undefined, documentReview);
       acts.push({
         label: labels.reject,
         busy: decide.deciding === idTail(selected.id),
@@ -327,7 +327,7 @@ export function ApprovalsSection({
         onAct: () => decideIt("rejected"),
       });
       if (answerReady && !invalidPermission) acts.push({
-        label: permission ? permissionMode === "always" ? "Always allow" : "Allow once" : budget !== null ? "Raise limit" : labels.approve,
+        label: permission ? permissionMode === "always" ? "Always allow" : "Allow once" : labels.approve,
         tone: "primary",
         busy: decide.deciding === idTail(selected.id),
         onAct: () => decideIt("approved"),
@@ -415,7 +415,6 @@ export function ApprovalsSection({
             : destination?.to === "workbench" ? "Allows this goal to use the Workbench until the request expires."
             : permission ? permissionMode === "always" ? "Saves this permission until you revoke it." : "Allows one use of the requested operation."
             : selected.kind === "scopeElevation" ? "Allows access for this work until the request expires."
-            : budget !== null && !answerReady ? "Enter a new total limit above the recorded usage."
             : answerInAsk ? undefined
             : isFeedback && !answerReady ? hasOptions ? "Pick an answer above to send it." : "Write an answer above to send it."
             : selected.kind === PROCEDURE_PROMOTION ? undefined : approvalKindMeaning(selected.kind)}
@@ -464,25 +463,6 @@ export function answerPayload(
   // blank answer to a question somebody did answer.
   if (choice !== "") return { value: choice };
   return { text: freeText.trim() };
-}
-
-const budgetControls: Record<string, { label: string; scale: number; whole: boolean }> = {
-  wallClock: { label: "New total time (minutes)", scale: 60_000, whole: true },
-  modelCalls: { label: "New total model calls", scale: 1, whole: true },
-  tokens: { label: "New total paid tokens", scale: 1, whole: true },
-  cost: { label: "New total cost (USD)", scale: 1, whole: false },
-  retries: { label: "New total retries", scale: 1, whole: true },
-  events: { label: "New total events", scale: 1, whole: true },
-};
-function budgetControl(approval: ApprovalRow | null) {
-  return approval?.kind === "budget" ? budgetControls[String(approval.subject?.ceiling)] ?? null : null;
-}
-export function budgetApprovalAnswer(approval: ApprovalRow | null, value: string): { newLimit: number } | undefined {
-  const control = budgetControl(approval);
-  if (control === null || value.trim() === "") return undefined;
-  const newLimit = Number(value) * control.scale;
-  if (!Number.isFinite(newLimit) || newLimit <= 0 || newLimit > Number.MAX_SAFE_INTEGER || (control.whole && !Number.isInteger(newLimit))) return undefined;
-  return { newLimit };
 }
 
 function ApprovalLine({
@@ -554,7 +534,6 @@ function ApprovalDetail({
   const permission = !failure && approval.kind === "scopeElevation" ? computerPermission(approval.subject) : null;
   const destination = approval.kind === "scopeElevation" ? executionDestinationChange(approval.subject) : null;
   const isFeedback = !failure && approval.kind === "feedback";
-  const budget = failure ? null : budgetControl(approval);
   const shutDoors = doorsFromSubject(approval);
   const promotion = promotionSubject(approval);
   // The procedure a promotion names, once the catalog holds it -- which is
@@ -571,7 +550,7 @@ function ApprovalDetail({
   // technically present. A promotion's subject is the same case: it has a
   // panel of its own, so none of it is dumped here.
   const subjectEntries =
-    promotion !== null || isFeedback || failure || approval.kind === "scopeElevation"
+    promotion !== null || isFeedback || failure || approval.kind === "scopeElevation" || approval.kind === "budget"
       ? []
       : Object.entries(approval.subject ?? {}).filter(
           ([key]) => (shutDoors === null || (key !== "doors" && key !== "code"))
@@ -586,12 +565,6 @@ function ApprovalDetail({
         {approval.kind === PROCEDURE_PROMOTION || isFeedback || failure || approval.kind === "scopeElevation" ? null : <Caption>{approvalKindMeaning(approval.kind)}</Caption>}
         {failure && typeof approval.subject?.errorMessage === "string" ? <p className="os-nexus-approval-failure">{approval.subject.errorMessage}</p> : null}
 
-        {budget === null || !canDecide ? null : <>
-          <Field label={budget.label}>
-            <Input id="work-approval-budget" label={budget.label} value={freeText} onChange={onFreeText} />
-          </Field>
-          <Caption>Total allowance, including work already completed. Resumes from saved progress.</Caption>
-        </>}
         {isFeedback && canDecide ? (
           approval.subject?.kind === "multi" ? (
             <div role="group" aria-label="Your answers">{approval.options.map(option => <Check key={option.value} checked={choices.includes(option.value)} onChange={checked => onChoices(checked ? [...choices, option.value] : choices.filter(value => value !== option.value))}>{option.label}</Check>)}</div>
@@ -766,7 +739,7 @@ function ApprovalDetail({
             comparing two approvals of the same command needs the value. A
             promotion carries it in its own panel, beside the version it pins,
             so it is said there once. */}
-        {promotion !== null || isFeedback || failure || approval.kind === "scopeElevation" ? null : (
+        {promotion !== null || isFeedback || failure || approval.kind === "scopeElevation" || approval.kind === "budget" ? null : (
           <>
             <Subhead>The exact thing you are deciding</Subhead>
             <CopyValue value={approval.artifactHash} label="artifact hash" />

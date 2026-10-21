@@ -33,6 +33,8 @@ exit 0
 			script := `set -euo pipefail
 source "$TRAEFIK_DRIVER"
 check_prerequisites(){ :; }
+check_requirements(){ :; }
+refuse_another_running_stack(){ :; }
 create_cluster(){ :; }
 ensure_build_node(){ :; }
 install_argocd(){ exit 0; }

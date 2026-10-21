@@ -46,6 +46,7 @@ func sweepDB(t *testing.T) (*bun.DB, *Integration) {
 		`CREATE TABLE memory_liveness (LIKE public.memory_liveness INCLUDING ALL)`,
 		`CREATE TABLE node_vectors (LIKE public.node_vectors INCLUDING ALL)`,
 		`CREATE TABLE work_retention_progress (LIKE public.work_retention_progress INCLUDING ALL)`,
+		`CREATE TABLE pipeline_artifact_uploads (LIKE public.pipeline_artifact_uploads INCLUDING ALL)`,
 	} {
 		if _, err := db.ExecContext(context.Background(), q); err != nil {
 			t.Fatal(err)

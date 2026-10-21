@@ -6,18 +6,17 @@
 # Epic memql#5478, issue memql#5496. A pipeline step is a Kubernetes Job whose
 # main container runs the manifest's `pipeline.image`, with the step's shell
 # command, in a fresh checkout at /workspace. For this repository's own
-# pipeline that image is THIS one, named in memql-package.yaml -- by its first
-# tag until build-toolchain-image.yml has run on main, then by the digest that
-# run prints, pinned in a follow-up after the epic merges -- so it carries what
+# pipeline that image is THIS one, pinned in memql-package.yaml by its
+# published digest after its native build and verified publication. It carries what
 # this repository's CI steps reach for:
 #
-#   Go        1.27.2   go.work's `toolchain` line, which overrides every go.mod
+#   Go        1.27.3   go.work's `toolchain` line, which overrides every go.mod
 #   Node      22 LTS   node:22-bookworm-slim
 #   protoc    33.4     scripts/dev/proto-gen.sh's PROTOC_VERSION
 #   Tailwind  4.1.11   scripts/identity/build-css.sh's TAILWIND_VERSION
 #   kubectl   1.32.13  the minor of scripts/k3d/up.sh's K3S_VERSION, the deploy
 #                      target's Kubernetes (the patch may differ)
-#   docker    29.8.2   the CLIENT only; there is no daemon (see its stage)
+#   docker    29.9.1   the CLIENT only; there is no daemon (see its stage)
 #   GCC + X11/PNG development libraries for Cockpit's Linux computer-use build;
 #   on AMD64, an ARM64 cross compiler, target libraries and QEMU verification.
 #   git, make, bash, curl, tar, gzip, unzip, jq, python3 (with PyYAML),
@@ -59,17 +58,17 @@
 # BUILD
 #   Native release: memql-package.yaml build-tools.toolchain -> verified OCI
 #                   artifact -> reviewed toolchain-release publication to GHCR
-#   Local check:   docker build -t memql-toolchain:local deploy/toolchain-image
+#   Local check:   docker build -f deploy/toolchain-image/Dockerfile --target verified -t memql-toolchain:local .
 #                  deploy/toolchain-image/smoke-test.sh memql-toolchain:local
 #
 # An image that runs in a cluster is built by the isolated build server, never on an
 # operator machine (CLAUDE.md, "Image builds"); the local build proves the
 # Dockerfile and goes nowhere.
 
-# Go: the official 1.27.2 distribution. Only /usr/local/go is taken; its
+# Go: the official 1.27.3 distribution. Only /usr/local/go is taken; its
 # binaries are statically linked, so they run on the bookworm base below
 # whatever Debian release the golang image itself is built on.
-FROM golang:1.27.2@sha256:5bc7f572bbaa98885a3a1fd9c0aa76b59e3e14e8628bfc316bbfd0c701e4818c AS go-dist
+FROM golang:1.27.3@sha256:957861185dbf29d93668ace41e011d091c6e779953d47f0316ef2cc58e28fe2b AS go-dist
 
 # Node 22 on bookworm, like the base below, so the copied binaries run against
 # the C library they were built against.
@@ -95,9 +94,9 @@ FROM registry.k8s.io/kubectl:v1.32.13@sha256:fbfd671cd51f0be98174170f2000cbb97d2
 # scripts/release/release.sh, which checks `command -v docker` before every run,
 # dry runs included, and whose push dry run probes the registry for the tag it
 # would overwrite with `docker manifest inspect`: a registry call, not a daemon
-# one. Without it, four scripts/release tests fail. 29.8.2 is the newest 29.x
-# release at the time of pinning; the binary is static.
-FROM docker:29.8.2-cli@sha256:35cfcf893c20f2931f4909151b5407aaaeab711277de7ce8b8f521f095d54c32 AS docker-dist
+# one. Without it, four scripts/release tests fail. The pinned client binary is
+# static.
+FROM docker:29.9.1-cli@sha256:6fae2214c3121a28d5aa639d09032f61310b7c9c75ffbad1025f261a1b621800 AS docker-dist
 
 # protoc, fetched from its release and checked against a pinned SHA-256 per
 # architecture before it is unpacked. The stage runs on the BUILD platform
@@ -157,7 +156,7 @@ RUN set -eux; \
 # ------------------------------------------------------------------------------
 # The image.
 # ------------------------------------------------------------------------------
-FROM debian:bookworm-slim@sha256:7c7b2c966bc9ee8cedfeef67e0e279108992c77681fa595db4a9d65c06ccc587
+FROM debian:bookworm-slim@sha256:7c7b2c966bc9ee8cedfeef67e0e279108992c77681fa595db4a9d65c06ccc587 AS runtime
 
 ARG TARGETARCH
 
@@ -260,8 +259,8 @@ WORKDIR /workspace
 
 USER 1000:1000
 
-# A broken copy fails the build here; deploy/toolchain-image/smoke-test.sh is
-# the full check, and the release lane runs it before anything is pushed.
+# A broken copy fails early. The verified target below runs the full suite
+# before the native builder exports an artifact for publication.
 RUN go version && node --version && protoc --version && git --version && psql --version && \
     kubectl version --client && docker --version && \
     gcc --version && pkg-config --exists x11 xi xtst xinerama xkbcommon xkbcommon-x11 libpng
@@ -269,3 +268,21 @@ RUN go version && node --version && protoc --version && git --version && psql --
 LABEL org.opencontainers.image.title="memql-toolchain" \
       org.opencontainers.image.description="The container MemQL pipeline steps run in: Go, Node, protoc, Tailwind, kubectl, the Docker client (no daemon), git, make, jq, python3 and the PostgreSQL client on Debian bookworm, as uid 1000" \
       org.opencontainers.image.source="https://github.com/znasllc-io/memql"
+
+# Export is gated by the same full smoke suite used for local checks. The
+# repository is read-only, all compilation is offline, and the probes run as
+# the step user. Root only creates the foreign-owned clone fixture. Temporary
+# mounts keep source, compiled probes and caches out of the published image.
+FROM runtime AS verified
+USER 0:0
+RUN --network=none \
+    --mount=type=bind,target=/source,readonly \
+    --mount=type=tmpfs,target=/workspace \
+    --mount=type=tmpfs,target=/tmp \
+    set -eu; \
+    chmod 0777 /workspace; \
+    git init -q /workspace; \
+    git -C /workspace -c user.name=smoke -c user.email=smoke@example.invalid commit -q --allow-empty -m "foreign checkout"; \
+    runuser -u memql -- env GOCACHE=/tmp/go-build GOMODCACHE=/tmp/go-mod \
+        bash /source/deploy/toolchain-image/smoke-test.sh --in-image
+USER 1000:1000

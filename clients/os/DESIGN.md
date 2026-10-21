@@ -451,6 +451,24 @@ quiet empty shapes in the places the content will occupy. Do not paint
 
 Audit inventory: [loading and navigation coverage](qa/loading-and-navigation.md).
 
+### Returning to the app and connection recovery
+
+Use the same recovery behavior on desktop, tablet and phone. A short transport
+interruption is normal lifecycle recovery: preserve mounted content, drafts,
+selection, scroll and focus. Do not show raw transport errors or replace the app
+with a logo, modal or loading screen. After two visible seconds disconnected,
+the shell's shared `ConnectionNotice` shows a quiet spinner and “Reconnecting…”.
+After thirty seconds it offers “Can’t reconnect” and **Retry connection**;
+automatic recovery continues. Hidden time does not consume the visible grace
+period, and reduced motion keeps the cue without spinning it.
+
+Recover reads after subscriptions return and on the shared `onAppResume` signal
+(visibility, focus, network return and restored pages). Coalesce event bursts;
+do not poll healthy subscriptions or replay user actions. Reconcile Ask by its
+original request and run identity, including missed needs-input handoffs.
+Real refusals and uncertain saves still need an actionable local error and their
+original retry receipt. Connection recovery never means a save succeeded.
+
 ## App overviews
 
 Overview is the shared summary destination. Use `kit/Overview` for the header

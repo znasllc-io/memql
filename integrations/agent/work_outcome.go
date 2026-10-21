@@ -16,6 +16,7 @@ import (
 func workResponseToolDefinition() common.ToolDefinition {
 	def := RespondToUserToolDefinition()
 	def.Description = "Report the outcome of the current request. Choose status=complete for a supported answer or confirmed action. An informational answer may explain that bounded evidence does not establish a cause; never invent the missing causal link. " +
+		"A successful fetch about a different or unverified entity does not complete a factual lookup. Resolve the requested entity with a bounded relevant source check before finishing; report a limit only when that check fails or no permitted route remains. " +
 		"If necessary information or a decision must come from the person before useful work can proceed, choose status=needs_input and supply the actual question. " +
 		"An unknown personal preference needs input from that person; it is not a completed lookup. " +
 		"Do not put an invitation to tell you later in a completed response. " +

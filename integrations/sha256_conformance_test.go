@@ -46,6 +46,7 @@ func TestNoSHA256InIntegrations(t *testing.T) {
 	// -- specifically to remove the unguarded coupling a duplicated hash
 	// expression created, so the entry is gone rather than kept.)
 	allow := map[string]string{
+		"pipelinesteps/settle.go":                "pins pipeline log bytes to the verified streaming Library receipt's standard SHA-256; core/id composition is not the storage checksum",
 		"azureblob/direct.go":                    "Azure SharedKey authorization requires HMAC-SHA256 over the canonical HTTP request; core/id does not implement that wire signature",
 		"knowledge/seeddata/manifest.go":         "verifies standard SHA-256 of checked-in source and provenance bytes independently against manifest.sha256; row identities remain on core/id, whose composition is not the manifest byte checksum",
 		"library/revision_images_db_test.go":     "independently computes the immutable image's standard SHA-256 file receipt to test byte pins across replicas; core/id is not the storage checksum",
@@ -62,6 +63,10 @@ func TestNoSHA256InIntegrations(t *testing.T) {
 		"ociregistry/verify_test.go":             "independently computes OCI fixture digests and artifact receipt SHA-256 values",
 		"githubrelease/verify.go":                "GitHub asset digests and immutable file receipts require standard SHA-256 of exact bytes, not MemQL identifiers",
 		"githubrelease/verify_test.go":           "independently computes standard SHA-256 release asset fixture receipts",
+		"npmregistry/verify.go":                  "verifies npm archive bytes against the immutable Library receipt's standard SHA-256, not a MemQL identifier",
+		"npmregistry/publish.go":                 "checks registry tarball readback against the immutable source receipt's standard SHA-256 before confirming publication",
+		"npmregistry/publish_test.go":            "independently computes standard SHA-256 npm archive receipts for publication and readback integrity tests",
+		"release/candidate_npm_db_test.go":       "constructs immutable Library SHA-256 receipts for the real npm release preparation and publication path",
 		// Release artifact digests are standard SHA-256 over the exact blob
 		// bytes, independently verifiable with sha256sum and OCI tooling.
 		// core/id's content address is a different algorithm/representation.

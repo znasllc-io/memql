@@ -244,6 +244,12 @@ func TestOnlyATrainingSubjectStartsTraining(t *testing.T) {
 			nodes, err := i.handleDecideApproval(callerContext("u-alice"), map[string]any{
 				"approvalId": "v1:work:approval:a1", "decision": "approved",
 			}, 0)
+			if tc.kind == work.ApprovalKindBudget {
+				if err == nil {
+					t.Fatal("retired budget resumed")
+				}
+				return
+			}
 			if err != nil {
 				t.Fatalf("decideApproval: %v", err)
 			}

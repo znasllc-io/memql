@@ -7,8 +7,9 @@
 #
 # Answers, in one read-only pass: what OS/arch is this, which tools in the
 # installer's graph already exist (and at what version), is the docker DAEMON
-# actually answering, are the ingress ports free, and how much disk is left.
-# Every later capability plans against this answer.
+# actually answering, are the ingress ports free, how much disk is left, and
+# how this machine measures against the minimum requirements. Every later
+# capability plans against this answer.
 #
 # READ-ONLY BY CONSTRUCTION. detect never installs, writes, starts or stops
 # anything, so its envelope always reports changed=false. That is not a detail:
@@ -54,6 +55,8 @@ source "${SCRIPT_DIR}/../lib/docker.sh"
 source "${SCRIPT_DIR}/../lib/platform.sh"
 # shellcheck source=../lib/ports.sh
 source "${SCRIPT_DIR}/../lib/ports.sh"
+# shellcheck source=../lib/requirements.sh
+source "${SCRIPT_DIR}/../lib/requirements.sh"
 
 cap_init "install.detect" "Inventory the local machine's installer dependencies (read-only)."
 cap_spec_param "ports" "comma-separated TCP ports to probe (default: 80,443,5432)"
@@ -136,20 +139,23 @@ function k3d_clusters() {
 # DISK
 #=============================================================================
 
-# free_mb <path> -- available MiB, or -1 when it cannot be determined.
+# free_mb <path> -- available MiB, or -1 when it cannot be determined. The df
+# reading is scripts/lib/requirements.sh's, so the figure reported here and the
+# one the requirements are judged on cannot disagree.
 function free_mb() {
-    local path="$1" line avail="" fields
-    command -v df &>/dev/null || { printf '%s' "-1"; return; }
-    while IFS= read -r line; do
-        # shellcheck disable=SC2206
-        fields=($line)
-        if [[ ${#fields[@]} -ge 4 && "${fields[3]}" =~ ^[0-9]+$ ]]; then
-            avail="${fields[3]}"
-        fi
-    done < <(df -Pk "$path" 2>/dev/null || true)
-    if [[ -z "$avail" ]]; then printf '%s' "-1"; return; fi
-    printf '%s' "$(( avail / 1024 ))"
+    local bytes
+    bytes="$(req_disk_free_bytes "$1")"
+    if [[ -z "$bytes" ]]; then printf '%s' "-1"; return; fi
+    printf '%s' "$(( bytes / 1048576 ))"
 }
+
+#=============================================================================
+# REQUIREMENTS -- REPORTED here, REFUSED on by install.requirements
+#=============================================================================
+
+# The verdict is DATA in this step, like a missing tool: detect never refuses
+# over it. install.requirements is the step that refuses, and the VS Code
+# wizard reads this report to say so before an install starts.
 
 #=============================================================================
 # ENTRY POINT
@@ -230,6 +236,13 @@ function main() {
     mb="$(free_mb "$path")"
     cap_info "free disk at ${path}: ${mb} MiB"
 
+    # --- requirements ---------------------------------------------------
+    local line
+    requirements_evaluate "$path"
+    while IFS= read -r line; do
+        [[ -n "$line" ]] && cap_info "requirement: ${line}"
+    done <<< "$REQ_SUMMARY"
+
     cap_result_set     os           "$os"
     cap_result_set     arch         "$arch"
     cap_result_set_raw supported    true
@@ -238,6 +251,7 @@ function main() {
     cap_result_set_raw ports        "{${ports_json}}"
     cap_result_set_raw clusters     "[${clusters_json}]"
     cap_result_set_raw disk         "{\"path\":\"$(cap_json_escape "$path")\",\"freeMb\":${mb}}"
+    cap_result_set_raw requirements "$(requirements_json)"
     # No cap_changed: detection is read-only, so changed stays false. Always.
     cap_ok
 }

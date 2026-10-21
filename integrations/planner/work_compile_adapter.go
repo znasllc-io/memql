@@ -146,7 +146,7 @@ func (c *WorkCompiler) Compile(ctx context.Context, req workintegration.CompileR
 		"goalSignature":  out.Signature,
 		"status":         "running",
 		"automationName": out.AutomationName,
-		"classification": map[string]any{"workload": out.Workload, "workTitle": out.WorkTitle, "acknowledgement": out.Acknowledgement},
+		"classification": map[string]any{"workload": out.Workload, "workTitle": out.WorkTitle, "acknowledgement": out.Acknowledgement, "capabilitySearch": out.CapabilitySearch},
 	}
 	if out.Acknowledgement != "" {
 		args["classification"].(map[string]any)["acknowledgedAt"] = time.Now().UTC().Format(time.RFC3339Nano)

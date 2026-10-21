@@ -172,6 +172,13 @@ func (l hopLibrary) StoreRunFile(ctx context.Context, f RunFile) (StoredFile, er
 	return l.library.StoreRunFile(ctx, f)
 }
 
+func (l hopLibrary) StoreRunFileStream(ctx context.Context, f StreamRunFile) (StoredFile, error) {
+	if l.life.Err() != nil {
+		return StoredFile{}, errProcessGone
+	}
+	return l.library.(StreamLibraryStore).StoreRunFileStream(ctx, f)
+}
+
 // hopSink is the log store as a process reaches it.
 type hopSink struct {
 	life context.Context

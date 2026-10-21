@@ -154,6 +154,39 @@ describe("the message field", () => {
     expect(screen.queryByText("draft.txt")).toBeNull();
   });
 
+  it.each(["new", "select", "dispose"] as const)("clears files and stops uploads when leaving the draft through %s", async action => {
+    const { t, sent } = transport();
+    t.conversations = { list: async () => [], create: async () => ({ id: "new", title: "New" }), read: async () => [] };
+    const session = new ConversationSession(t);
+    const { provider, pending } = uploads();
+    session.restoreAttachments([{ artifactId: "private-file", name: "private.md" }]);
+    session.attach([new File(["x"], "uploading.txt")], provider);
+    if (action === "new") session.newConversation();
+    else if (action === "select") await session.select("other");
+    else session.dispose();
+    await Promise.resolve();
+    expect(pending[0]!.aborted).toBe(true);
+    pending[0]!.progress?.({ sentBytes: 1, totalBytes: 1 });
+    expect(session.getSnapshot().attachments).toEqual([]);
+    session.activate();
+    expect(session.send("A different request", null)).toBe(true);
+    await Promise.resolve();
+    expect(sent[0]?.options?.attachments).toBeUndefined();
+    session.dispose();
+  });
+
+  it("keeps the draft's files if opening another conversation fails", async () => {
+    const { t } = transport();
+    t.conversations = { list: async () => [], create: async () => ({ id: "new", title: "New" }), read: async () => { throw new Error("offline"); } };
+    const session = new ConversationSession(t);
+    const { provider, pending } = uploads();
+    session.attach([new File(["x"], "uploading.txt")], provider);
+    expect(await session.select("other")).toBe(false);
+    expect(pending[0]!.aborted).toBe(false);
+    expect(session.getSnapshot().attachments).toHaveLength(1);
+    session.dispose();
+  });
+
   it("holds at most the files a message can carry", () => {
     const { provider, pending } = uploads();
     render(<AskSurface transport={transport().t} variant="sheet" availability={READY} uploads={provider} />);

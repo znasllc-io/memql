@@ -3,10 +3,9 @@
 # Smoke test for the pipeline toolchain image (epic memql#5478, issue
 # memql#5496).
 #
-# Run against a BUILT image, before it is pushed anywhere. The release lane
-# (.github/workflows/build-toolchain-image.yml) runs it between the local build
-# and the push, so an image that fails it never reaches the registry; the same
-# script checks a local build (see the Dockerfile header).
+# The native image build runs these probes in its verified Dockerfile target,
+# before it can export an OCI artifact. The same probes also check a locally
+# built image through Docker; neither mode publishes anything.
 #
 # WHAT IT ASSERTS, AND WHY EACH ONE EARNS ITS PLACE
 #
@@ -44,10 +43,11 @@
 #
 # Usage:
 #   deploy/toolchain-image/smoke-test.sh <image-ref>
+#   deploy/toolchain-image/smoke-test.sh --in-image  # verified target only
 
 set -euo pipefail
 
-IMAGE="${1:?usage: smoke-test.sh <image-ref>}"
+IMAGE="${1:?usage: smoke-test.sh <image-ref>|--in-image}"
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 SMOKE_VOLUME=""
 
@@ -61,10 +61,27 @@ function cleanup() {
 }
 
 # in_image runs the bash script on stdin in a fresh container of the image,
-# as the image's own user unless a flag says otherwise. Extra arguments are
-# `docker run` flags.
+# as the image's own user unless a flag says otherwise. The verified build
+# supplies the read-only source and foreign-owned checkout itself, with the
+# entire RUN disconnected from the network. Only the flags below have an
+# equivalent there; an unfamiliar flag must fail rather than weaken a probe.
 function in_image() {
-	docker run --rm -i "$@" --entrypoint bash "$IMAGE" -s
+	if [[ "$IMAGE" != --in-image ]]; then
+		docker run --rm -i "$@" --entrypoint bash "$IMAGE" -s
+		return
+	fi
+	local -a probe_env=()
+	while (($#)); do
+		case "$1" in
+			-e) [[ $# -ge 2 ]] || fail "missing probe environment"; probe_env+=("$2"); shift 2 ;;
+			--network=none) shift ;; # enforced by the Dockerfile's RUN
+			-v)
+				[[ $# -ge 2 && "$2" == /source:/source:ro ]] || fail "unsupported probe mount"
+				shift 2 ;;
+			*) fail "unsupported in-image probe flag: $1" ;;
+		esac
+	done
+	env "${probe_env[@]}" bash -s
 }
 
 function pinned_go() {
@@ -274,20 +291,24 @@ SCRIPT
 
 function assert_git_reads_a_foreign_checkout() {
 	info "(6) git reads a checkout another uid made at /workspace..."
-	SMOKE_VOLUME="memql-toolchain-smoke-$$"
-	docker volume create "$SMOKE_VOLUME" >/dev/null
+	local -a checkout_mount=()
+	if [[ "$IMAGE" != --in-image ]]; then
+		SMOKE_VOLUME="memql-toolchain-smoke-$$"
+		docker volume create "$SMOKE_VOLUME" >/dev/null
+		checkout_mount=(-v "${SMOKE_VOLUME}:/workspace")
 
-	# What a Job's clone container leaves: a repository written as root into a
-	# volume whose root is root-owned and world-writable, like an emptyDir.
-	in_image --user 0:0 -v "${SMOKE_VOLUME}:/workspace" <<'SCRIPT' || fail "could not prepare a root-owned checkout"
+		# What a Job's clone container leaves: a repository written as root into a
+		# volume whose root is root-owned and world-writable, like an emptyDir.
+		in_image --user 0:0 -v "${SMOKE_VOLUME}:/workspace" <<'SCRIPT' || fail "could not prepare a root-owned checkout"
 set -euo pipefail
 chown 0:0 /workspace
 chmod 0777 /workspace
 git init -q /workspace
 git -C /workspace -c user.name=smoke -c user.email=smoke@example.invalid commit -q --allow-empty -m "foreign checkout"
 SCRIPT
+	fi
 
-	in_image -v "${SMOKE_VOLUME}:/workspace" <<'SCRIPT' || fail "git, as uid 1000, cannot use a checkout another uid made at /workspace"
+	in_image "${checkout_mount[@]}" <<'SCRIPT' || fail "git, as uid 1000, cannot use a checkout another uid made at /workspace"
 set -euo pipefail
 if [[ "$(stat -c %u /workspace/.git)" != "0" ]]; then
 	echo "ERROR: the probe's checkout is not root-owned, so it cannot exercise git's ownership check" >&2
@@ -336,8 +357,13 @@ SCRIPT
 
 function main() {
 	trap cleanup EXIT
-	command -v docker >/dev/null || fail "docker is required"
-	docker image inspect "$IMAGE" >/dev/null 2>&1 || fail "no local image ${IMAGE}; build it first"
+	[[ $# -eq 1 ]] || fail "usage: smoke-test.sh <image-ref>|--in-image"
+	if [[ "$IMAGE" == --in-image ]]; then
+		[[ "$REPO_ROOT" == /source ]] || fail "in-image probes require the read-only source at /source"
+	else
+		command -v docker >/dev/null || fail "docker is required"
+		docker image inspect "$IMAGE" >/dev/null 2>&1 || fail "no local image ${IMAGE}; build it first"
+	fi
 	info "smoke-testing ${IMAGE}"
 	assert_tools_run
 	assert_pinned_versions

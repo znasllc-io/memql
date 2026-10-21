@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from "react";
-import type { QueryClient } from "@znasllc-io/memql-sdk-core/client";
+import { isTransportInterruption, type QueryClient } from "@znasllc-io/memql-sdk-core/client";
 import { readCapacity, type Capacity } from "./model";
 
 export type CapacityQueries = Pick<QueryClient, "clusterBackgroundCapacity" | "clusterSetBackgroundCapacity">;
@@ -28,7 +28,7 @@ export function useCapacity(query: CapacityQueries | null, enabled: boolean) {
       }
       setSnapshot({ source: query, value: readCapacity(result.single()), error: "", busy: false, fresh: true });
     }).catch((e: unknown) => {
-      if (current) setSnapshot(old => ({ ...old, busy: false, fresh: false, error: controller.signal.aborted ? "Capacity could not be refreshed." : e instanceof Error ? e.message : String(e) }));
+      if (current) setSnapshot(old => ({ ...old, busy: false, fresh: false, error: isTransportInterruption(e) || document.visibilityState === "hidden" || navigator.onLine === false ? "" : controller.signal.aborted ? "Capacity could not be refreshed." : e instanceof Error ? e.message : String(e) }));
     }).finally(() => { clearTimeout(timeout); });
     return () => { current = false; clearTimeout(timeout); controller.abort(); document.removeEventListener("visibilitychange", abortHidden); window.removeEventListener("offline", abortHidden); };
   }, [query, enabled, revision]);

@@ -343,7 +343,9 @@ query delegationPolicy delegationPolicyForUser {
 @actor
 query registration myWorkersWithStatus {
   filter   row => row.ownerUserId == actor.userId
-  sort     "row.createdAt", "asc"
+  // createdAt is the latest row VERSION, rewritten by heartbeats and dispatch.
+  // Routing needs stable registration order so repeated calls reuse warm models.
+  sort     "registeredAt", "asc", "row.id", "asc"
   paginate 200
   shape    workerRegistrationFull
 }
@@ -359,7 +361,7 @@ query registration allWorkersWithStatus {
   }
   filter   row => actor.isClusterOwner == true
                && (args.ownerUserId == nil || row.ownerUserId == args.ownerUserId)
-  sort     "row.createdAt", "asc"
+  sort     "registeredAt", "asc", "row.id", "asc"
   paginate 200
   shape    workerRegistrationFull
 }

@@ -21,7 +21,7 @@ Epic memql#3842.
 | Layer | Where | What it is |
 |---|---|---|
 | Operator stack | [`deploy/cnpg/`](../../../deploy/cnpg/README.md) | CloudNativePG + the Barman Cloud plugin + cert-manager, reconciled by ArgoCD |
-| Operand image | [`deploy/db-image/`](../../../deploy/db-image/README.md) | PG16 + TimescaleDB Community + pgvector, built on the GitHub build server |
+| Operand image | [`deploy/db-image/`](../../../deploy/db-image/README.md) | PG16 + TimescaleDB Community + pgvector, built by the MemQL native pipeline |
 | The database itself | [`deploy/k8s/components/cnpg-db/`](../../../deploy/k8s/components/cnpg-db/README.md) | a kustomize component: Cluster + Database + ObjectStore + ScheduledBackup |
 | Monitoring | [`deploy/k8s/monitoring/`](../../../deploy/k8s/monitoring/README.md) | PodMonitor on :9187 + the alerts below |
 
@@ -86,18 +86,17 @@ both currently carry a `REPLACE-WITH-…` placeholder.
 
 ### 4. The operand image, built and pinned
 
-The overlays pin the database image by **tag**, not digest, because the image
-has never been cut on the build server. Before the first deploy:
+Build the operand through the native `tests.database-image` step, which selects
+`deploy/db-image/Dockerfile`'s `verified` target and runs its smoke checks before
+exporting an unpublished OCI archive. Prepare and approve a release candidate,
+publish the exact archive, then pin the verified tag and digest in the instance
+overlay. The tag must begin with the PostgreSQL major; the independent operand
+version comes from `deploy/db-image/VERSION`.
 
-1. run `.github/workflows/build-db-image.yml` (`workflow_dispatch`);
-2. replace the tag with the `@sha256:` its run summary prints —
-   `scripts/deploy/pin-overlay-digests.sh` does it mechanically.
-
-Until then `scripts/deploy/drift-check.sh --rendered ` **fails**,
-which is the correct answer to *"is this deployable?"* — and it can only give
-that answer because memql#3847 taught the checker to read `imageName:` as well
-as `image:`. Before that, the database image was the one image in the estate
-outside the digest gate.
+`scripts/deploy/pin-overlay-digests.sh` resolves the image pins, and
+`scripts/deploy/drift-check.sh --rendered` rejects unpinned database images as
+well as service images. Publication does not roll the database or upgrade its
+extensions: those remain reviewed instance changes.
 
 ---
 

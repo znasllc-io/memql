@@ -115,19 +115,19 @@ function CandidatePage({ candidateId, query, connected, visible, back }: { candi
       if (mounted.current) { setBusy(""); reread(); }
     }
   };
-  const publishLabel = target?.kind === "file" ? "Upload file" : "Publish artifact";
+  const publishLabel = target?.kind === "file" ? "Upload file" : target?.kind === "npm" ? "Publish package" : "Publish artifact";
   const acts: Act[] = [];
   let footer = busy || (record ? stateLabel[record.state] : "Release unavailable");
   let detail: string | undefined;
   if (!busy && settled && record) {
     if (selected) {
-      footer = publication?.state === "complete" ? (publication.artifactKind === "file" ? "File uploaded and verified" : "Published and verified") : publication ? "Publication unresolved" : "No publication recorded";
+      footer = publication?.state === "complete" ? (publication.artifactKind === "file" && target?.kind !== "npm" ? "File uploaded and verified" : "Published and verified") : publication ? "Publication unresolved" : "No publication recorded";
       if (publication?.state === "complete") detail = "Verified when published; remote availability has not been checked again.";
       if (draft?.state === "published") { footer = "Release public and verified"; detail = "Verified when published; remote availability has not been checked again."; }
       else if (record.state === "approved" && selected.operation === "publish" && target && targets.fresh) {
         let action: "publish" | "draft" | "promote" | undefined;
         let label = publication ? "Reconcile publication" : publishLabel;
-        let consequence = target.kind === "file" ? `Upload ${target.assetName} to draft ${target.repository} ${target.tag} (#${draft?.releaseId ?? target.releaseId}). This does not make the release public.` : `Publish ${selected.component}/${selected.artifact} to ${target.origin}/${target.repository}.`;
+        let consequence = target.kind === "file" ? `Upload ${target.assetName} to draft ${target.repository} ${target.tag} (#${draft?.releaseId ?? target.releaseId}). This does not make the release public.` : target.kind === "npm" ? `Publish ${target.repository}@${target.tag} to ${target.origin} as ${target.distTag}. A matching existing version is verified without changing tags.` : `Publish ${selected.component}/${selected.artifact} to ${target.origin}/${target.repository}.`;
         if (target.draft && (!draft || draft.state === "prepared" || draft.state === "creating")) {
           action = "draft";
           label = draft?.state === "creating" ? "Reconcile draft" : target.releaseId ? "Verify draft" : "Create draft";
@@ -217,7 +217,8 @@ function PublicationDetails({ record, selected, target, publication, draft, targ
       <Fact label="Name" value={selected.targetId} />
       <Fact label="Address" value={target ? `${target.origin}/${target.repository}` : "Unavailable"} />
       {draft?.releaseId || target?.releaseId ? <Fact label="Release" value={`${draft?.state === "published" || draft?.state === "promoting" ? "Release" : "Draft"} #${draft?.releaseId ?? target?.releaseId}`} /> : null}
-      {target?.tag ? <Fact label="Release tag" value={target.tag} /> : null}
+      {target?.tag ? <Fact label={target.kind === "npm" ? "Package version" : "Release tag"} value={target.tag} /> : null}
+      {target?.distTag ? <Fact label="Publish as" value={target.distTag} /> : null}
       {target?.assetName ? <Fact label="File" value={target.assetName} /> : null}
       <Fact label="Approved configuration" value={<Identity value={selected.targetDigest} />} />
     </Facts>

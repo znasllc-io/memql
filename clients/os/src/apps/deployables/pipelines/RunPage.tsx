@@ -4,7 +4,7 @@ import type { Row } from "@znasllc-io/memql-sdk-core/client";
 
 import { useAuthSource } from "../../../auth/context";
 import { useOsIfPresent } from "../../../chrome/state";
-import { Caption, ContentSkeleton, Head, Notice, Panel, RecordListSkeleton, Subhead } from "../../../kit";
+import { AutoRefresh, Caption, ContentSkeleton, Head, Notice, Panel, RecordListSkeleton, Subhead } from "../../../kit";
 import { ActionBar, type Act } from "../../../kit/ActionBar";
 import type { Breadcrumb } from "../../../kit/Breadcrumbs";
 import { RecordList, RecordRow } from "../../../kit/RecordRow";
@@ -17,6 +17,7 @@ import type { PartsHeld } from "../parts";
 import { runBarFor, type RunActName } from "./acts";
 import { cancelRun, problemFrom, rerunRun, type Problem } from "./calls";
 import { useRunFiles, useRunSteps } from "./feeds";
+import { useExpiredRunFiles } from "./expiry";
 import { runGithubUrl } from "./github";
 import { fetchLogTail, type LogTail } from "./logTail";
 import { artifactDisplayName, isFinished, type PipelineRow, type RunFileRow, type RunRow, type StepRow } from "./rows";
@@ -107,6 +108,7 @@ function RunPageFor({ run, runs, pipeline, sourceName, breadcrumbs, back, can, o
   const machineName = useMachineNames();
   const { steps, state: stepsState } = useRunSteps(run.workRunId);
   const files = useRunFiles(run.workRunId);
+  const expiry = useExpiredRunFiles(run.id, steps, files.byFileId, files.state === "live" && stepsState === "live");
   const stops = useMemo(() => stopsForRun(run, steps), [run, steps]);
 
   // THE OPEN STOP FOLLOWS THE RUN until somebody picks one, and a pick holds
@@ -167,13 +169,13 @@ function RunPageFor({ run, runs, pipeline, sourceName, breadcrumbs, back, can, o
       }));
 
   const refused = stops.length === 0 && run.refusalCode !== "";
-  const artifacts = steps.flatMap((s) => s.artifactFileIds.map((id) => ({ step: s, file: files.byFileId.get(id) ?? null })))
-    .filter((a): a is { step: StepRow; file: RunFileRow } => a.file !== null);
+  const artifacts = steps.flatMap((step) => step.artifactFileIds.map((id) => ({ step, id, file: files.byFileId.get(id) ?? null })));
   const panelId = `pipeline-run-${run.id}-stage`;
   const title = runTitle(run);
 
   return (
     <div className="os-deploy-pane pipeline-run-page" data-os-page-context={JSON.stringify({ page: "Pipeline run", runId: run.id, source: sourceName, sha: run.sha, attempt: run.attempt })}>
+      <AutoRefresh enabled={expiry.needsRefresh} busy={expiry.loading} onRefresh={expiry.refresh} />
       <div className="os-deploy-scroll">
         <Panel label={`Run ${title}`}>
           <Head navigationKey={`run:${run.id}`} title={title} breadcrumbs={breadcrumbs} back={back} />
@@ -208,7 +210,7 @@ function RunPageFor({ run, runs, pipeline, sourceName, breadcrumbs, back, can, o
                 {openStop === null ? null : openStop.steps.length === 0 ? (
                   stepsState === "seeding" || run.workRunId === "" && !isFinished(run) ? <RecordListSkeleton label="Loading the steps" rows={2} /> : <Caption>{stageSummary(openStop)}</Caption>
                 ) : (
-                  <StageSteps stop={openStop} files={files.byFileId} machineName={machineName} onOpenFile={os ? (ref) => os.actions.openApp("files", "browse", { fileId: ref }) : null} />
+                  <StageSteps stop={openStop} files={files.byFileId} expired={expiry.files} machineName={machineName} onOpenFile={os ? (ref) => os.actions.openApp("files", "browse", { fileId: ref }) : null} />
                 )}
               </section>
             </>
@@ -218,19 +220,20 @@ function RunPageFor({ run, runs, pipeline, sourceName, breadcrumbs, back, can, o
             <section className="os-report-part pipeline-artifacts" aria-label="Artifacts">
               <Subhead meta={artifacts.length}>Artifacts</Subhead>
               <RecordList as="ul" density="compact">
-                {artifacts.map(({ step, file }) => (
+                {artifacts.map(({ step, id, file }) => (
                   <RecordRow
-                    key={file.artifactId}
+                    key={`${step.key}:${id}`}
                     icon={<FileText size={16} aria-hidden />}
-                    name={artifactDisplayName(file.name)}
+                    name={artifactDisplayName(file?.name || expiry.files.get(id) || "Artifact")}
                     secondary={step.key}
-                    label={`Open ${artifactDisplayName(file.name)} in Files`}
-                    {...(os ? { onOpen: () => os.actions.openApp("files", "browse", { fileId: file.sourceRef }) } : {})}
+                    state={file ? undefined : expiry.files.has(id) ? "Expired" : files.state === "seeding" || expiry.loading ? "Checking availability" : "Unavailable"}
+                    {...(file && os ? { label: `Open ${artifactDisplayName(file.name)} in Files`, onOpen: () => os.actions.openApp("files", "browse", { fileId: file.sourceRef }) } : {})}
                   />
                 ))}
               </RecordList>
             </section>
           ) : null}
+          {expiry.error ? <Caption>{expiry.error}</Caption> : null}
 
           {problem !== null ? (
             problem.code !== "" ? <ProblemNotice problem={problem} tone={toneFor(problem.code)} /> : <Notice tone="error" sentence="The cluster refused." detail={problem.message} />
@@ -250,9 +253,10 @@ function stageSummary(stop: RunStop): string {
   return stop.word + (stop.took ? `, ${stop.took}` : "") + ".";
 }
 
-function StageSteps({ stop, files, machineName, onOpenFile }: {
+function StageSteps({ stop, files, expired, machineName, onOpenFile }: {
   stop: RunStop;
   files: ReadonlyMap<string, RunFileRow>;
+  expired: ReadonlyMap<string, string>;
   machineName: (workerId: string) => string;
   onOpenFile: ((sourceRef: string) => void) | null;
 }) {
@@ -279,6 +283,7 @@ function StageSteps({ stop, files, machineName, onOpenFile }: {
               <FailedStep step={step} log={log} onOpenFile={onOpenFile} />
             ) : null}
             {step.notes.map((note) => <ProblemNotice key={note.code} problem={{ code: note.code, message: note.message }} tone="warn" />)}
+            {expired.has(step.logFileId) ? <Caption>Log expired.</Caption> : null}
           </li>
         );
       })}
@@ -311,10 +316,10 @@ function FailedStep({ step, log, onOpenFile }: { step: StepRow; log: RunFileRow 
     if (el) el.scrollTop = el.scrollHeight;
   }, [tail]);
   useEffect(() => {
-    if (artifactId === "") return;
-    const abort = new AbortController();
     setTail(null);
     setTailError("");
+    if (artifactId === "") return;
+    const abort = new AbortController();
     fetchLogTail({ artifactId, bearer: () => auth.bearer(), signal: abort.signal })
       .then((t) => { if (!abort.signal.aborted) setTail(t); })
       .catch((err) => { if (!abort.signal.aborted) setTailError(err instanceof Error ? err.message : String(err)); });

@@ -72,7 +72,7 @@ func (e *MemQLEngine) workSourceContextBuiltin(ctx context.Context, args map[str
 			if readErr != nil {
 				unavailable = append(unavailable, "Previous tool source receipts could not be read.")
 			} else {
-				toolSources, omitted := workCheckpointSources(checkpoints, runID, &remaining)
+				toolSources, omitted := e.workCheckpointSources(ctx, checkpoints, runID, &remaining)
 				for _, source := range toolSources {
 					evidence = append(evidence, source)
 				}
@@ -195,7 +195,7 @@ func workCheckpointPairsWithSourceReads(checkpoint map[string]any, sourceReads b
 			continue
 		}
 		seen[call.ID] = true
-		if (call.Name == "recallWorkHistory" && !sourceReads) || call.Name == "ai" || call.Name == "runAgentTurn" || call.Name == "workReviewReply" || call.Name == "respondToUser" || call.Name == "requestUserFeedback" || strings.Contains(strings.ToLower(call.Name), "secret") {
+		if (call.Name == "recallWorkHistory" && !sourceReads) || call.Name == "recallMemory" || call.Name == "ai" || call.Name == "runAgentTurn" || call.Name == "workReviewReply" || call.Name == "respondToUser" || call.Name == "requestUserFeedback" || strings.Contains(strings.ToLower(call.Name), "secret") {
 			continue
 		}
 		if strings.ContainsRune(message.Content+call.Arguments, 0) {
@@ -210,38 +210,55 @@ func workCheckpointPairsWithSourceReads(checkpoint map[string]any, sourceReads b
 }
 
 func workCheckpointSources(checkpoints []map[string]any, runID string, remaining *int) ([]map[string]any, bool) {
+	return projectWorkCheckpointSources(checkpoints, runID, remaining, nil)
+}
+
+func projectWorkCheckpointSources(checkpoints []map[string]any, runID string, remaining *int, restore func(common.ChatMessage) (common.ChatMessage, bool)) ([]map[string]any, bool) {
 	sources := []map[string]any{}
 	seen := map[string]bool{}
+	missing := map[string]bool{}
 	omitted := false
 	for _, checkpoint := range checkpoints {
-		pairs, missing := workCheckpointPairs(checkpoint)
-		omitted = omitted || missing
+		pairs, pairsOmitted := workCheckpointPairs(checkpoint)
+		omitted = omitted || pairsOmitted
 		for _, pair := range pairs {
 			call, message := pair.call, pair.result
 			if seen[call.ID] {
 				continue
 			}
-			seen[call.ID] = true
-			value := workSourcePreviewValue(message.Content)
-			source := map[string]any{"runId": BareShortId(runID), "checkpointId": checkpoint["id"], "checkpointAt": checkpoint["createdAt"], "operation": call.Name, "callId": call.ID, "arguments": call.Arguments, "value": value}
+			if len(sources) >= 8 || *remaining <= 0 {
+				missing[call.ID] = true
+				continue
+			}
+			if strings.HasPrefix(message.Content, "[Archived tool result ") {
+				var restored bool
+				if restore != nil {
+					message, restored = restore(message)
+				}
+				if !restored || message.Role != "tool" || message.Name != call.Name || message.ToolCallId != call.ID || strings.HasPrefix(message.Content, "[Archived tool result ") || message.Content == common.UnexecutedWorkToolResult {
+					missing[call.ID] = true
+					continue
+				}
+			}
+			source := map[string]any{"runId": BareShortId(runID), "checkpointId": checkpoint["id"], "checkpointAt": checkpoint["createdAt"], "operation": call.Name, "callId": call.ID, "arguments": call.Arguments, "value": workSourcePreviewValue(message.Content)}
 			encoded, err := json.Marshal(source)
 			if err == nil && len(encoded) > 8000 && call.Arguments != "" {
-				// A large input (for example a coding script) must not hide a
-				// small execution result. Preserve the result exactly and mark
-				// the absent arguments; they are not evidence in this preview.
+				// Large command inputs must not hide their small execution results.
 				delete(source, "arguments")
 				source["argumentsOmitted"] = true
 				encoded, err = json.Marshal(source)
 			}
-			if err != nil || len(encoded) > 8000 || len(encoded) > *remaining || len(sources) >= 8 {
-				omitted = true
+			if err != nil || len(encoded) > *remaining || strings.ContainsRune(message.Content+call.Arguments, 0) {
+				missing[call.ID] = true
 				continue
 			}
+			seen[call.ID] = true
+			delete(missing, call.ID)
 			*remaining -= len(encoded)
 			sources = append(sources, source)
 		}
 	}
-	return sources, omitted
+	return sources, omitted || len(missing) > 0
 }
 
 // Decode JSON transport layers losslessly, not arbitrary nested data strings.

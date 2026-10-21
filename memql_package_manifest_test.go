@@ -16,8 +16,6 @@ import (
 	"testing"
 	"testing/fstest"
 
-	"gopkg.in/yaml.v3"
-
 	"github.com/znasllc-io/memql/component/packages"
 	"github.com/znasllc-io/memql/component/pipelines"
 )
@@ -356,8 +354,8 @@ func TestEngineManifestCompilesForEveryOpening(t *testing.T) {
 		t.Fatalf("the pipeline declares no %q service, so the db-gated trees have nothing to test against", manifestPostgresService)
 	}
 
-	fullStages := []string{manifestStageChecks, "vulnerabilities", "secrets-current", manifestStageTests}
-	pullRequestStages := []string{manifestStageChecks, "vulnerabilities", "secrets-current", manifestStageTests, manifestStageGates}
+	fullStages := []string{manifestStageChecks, "vulnerabilities", "secrets-current", manifestStageTests, "installer-smoke"}
+	pullRequestStages := []string{manifestStageChecks, "vulnerabilities", "secrets-current", manifestStageTests, manifestStageGates, "installer-smoke", "dependency-proposal", "dependency-proposal-write"}
 	every := []string{manifestStepGoChecks, manifestStepPathRouting,
 		manifestStepGoTests, manifestStepDBTests, manifestStepFuzz, manifestStepOSChecks,
 		"sdk-ts-typecheck", "viewkit-checks", "mcp-conformance", "proving"}
@@ -449,8 +447,15 @@ func TestEngineManifestCompilesForEveryOpening(t *testing.T) {
 			byName := map[string][]pipelines.Step{}
 			for _, step := range plan.Steps() {
 				byName[step.Name] = append(byName[step.Name], step)
-				if step.RunAfterFailure != (step.Stage == "analysis" || step.Stage == "inventory" || step.Stage == "security-reports" || step.Stage == "vulnerabilities" || step.Stage == "secrets-current" || step.Stage == "secrets-history" || step.Stage == "repository-audit" || step.Stage == "documentation-audit") {
+				if step.RunAfterFailure != (step.Stage == "analysis" || step.Stage == "inventory" || step.Stage == "security-reports" || step.Stage == "vulnerabilities" || step.Stage == "secrets-current" || step.Stage == "secrets-history" || step.Stage == "repository-audit" || step.Stage == "documentation-audit" || step.Stage == "dependency-proposal" || step.Stage == "dependency-proposal-write") {
 					t.Errorf("failure policy was lost or leaked to another stage: %+v", step)
+				}
+				if step.Kind == pipelines.StepRepositoryChange {
+					change := step.RepositoryChange
+					if o.event != pipelines.EventPullRequest || step.Stage != "dependency-proposal-write" || change == nil || change.Rule != "dependabot-go-tidy" || change.Step != "dependency-proposal.tidy" || change.Path != ".reports/dependency-proposal.json" || step.Image != "" || step.Run != "" || step.Execution != "" || len(step.Secrets) != 0 || step.GitHubReadToken {
+						t.Errorf("dependency update lost its driver-owned proposal contract: %+v", step)
+					}
+					continue
 				}
 				if step.Kind == pipelines.StepSARIF {
 					if step.Stage != "security-reports" || step.SARIF == nil || step.Image != "" || step.Run != "" || step.Execution != "" || len(step.Secrets) != 0 {
@@ -465,6 +470,18 @@ func TestEngineManifestCompilesForEveryOpening(t *testing.T) {
 				if engineMacEditorHost(step.Name) {
 					if step.Placement != pipelines.PlacementFleet || step.Execution != pipelines.ExecutionNative || step.Platform != "darwin/arm64" || len(step.Caches) != 0 || len(step.Services) != 0 || !slices.Equal(step.Needs, []string{"macos_tooling"}) {
 						t.Errorf("Mac editor host lost its explicit native contract: %+v", step)
+					}
+					continue
+				}
+				if engineInstallerHost(step.Stage, step.Name) {
+					if step.Placement != pipelines.PlacementFleet || step.Execution != pipelines.ExecutionNative || step.Platform != "linux/amd64" || len(step.Caches) != 0 || len(step.Services) != 0 || !slices.Equal(step.Needs, []string{"docker"}) || !slices.Equal(step.Artifacts, []string{".memql-install-evidence"}) {
+						t.Errorf("installer fixture lost its explicit host and evidence contract: %+v", step)
+					}
+					continue
+				}
+				if step.Stage == "documentation-audit" {
+					if step.Name != "docs-current" || step.Placement != pipelines.PlacementFleet || step.Execution != pipelines.ExecutionContainer || step.Platform != "linux/amd64" || len(step.Caches) != 0 || len(step.Services) != 0 || len(step.Secrets) != 0 || step.GitHubReadToken || len(step.Needs) != 0 {
+						t.Errorf("public documentation audit must use an isolated external Fleet container without credentials: %+v", step)
 					}
 					continue
 				}
@@ -519,7 +536,7 @@ func TestEngineManifestCompilesForEveryOpening(t *testing.T) {
 	}
 }
 
-func TestEngineWeeklyAuditDoesNotRepeatDailyOrOrdinaryFunctionalChecks(t *testing.T) {
+func TestEngineWeeklyAuditContainsOnlyScheduledExpensiveWork(t *testing.T) {
 	spec := engineManifest(t).Pipeline
 	graph, _ := engineImportGraph(t)
 	plan, refusal := compileEngineCadence(spec, graph, pipelines.EventSchedule, nil, "weekly")
@@ -532,7 +549,7 @@ func TestEngineWeeklyAuditDoesNotRepeatDailyOrOrdinaryFunctionalChecks(t *testin
 			stages = append(stages, step.Stage)
 		}
 	}
-	if !slices.Equal(stages, []string{"documentation-audit", "analysis", "inventory", "security-reports"}) {
+	if !slices.Equal(stages, []string{"installer-lifecycle", "documentation-audit", "analysis", "inventory", "security-reports"}) {
 		t.Fatalf("weekly stages = %v", stages)
 	}
 }
@@ -569,9 +586,8 @@ func checkEngineTestsPartitionEveryPackage(t *testing.T, spec *pipelines.Spec, g
 	}
 }
 
-// The Postgres sidecar is pinned by digest, always, and is the very image, user,
-// password and database ci.yml's db-tests lane runs: the pipeline and the GitHub
-// lane test against one image until ci.yml retires.
+// Pin the disposable Postgres service and require the local credentials that
+// every database suite uses. A movable tag cannot identify a qualified fixture.
 func TestEngineManifestPostgresServiceIsPinnedByDigest(t *testing.T) {
 	spec := engineManifest(t).Pipeline
 	postgres, ok := spec.Services[manifestPostgresService]
@@ -587,19 +603,15 @@ func TestEngineManifestPostgresServiceIsPinnedByDigest(t *testing.T) {
 		t.Errorf("services.%s declares no ready probe, so a step could start before its database accepts a connection", manifestPostgresService)
 	}
 
-	lane, ok := readManifestCIWorkflow(t).Jobs["db-tests"].Services["postgres"]
-	if !ok {
-		t.Fatal("ci.yml's db-tests job declares no postgres service; if the lane moved, point this test at it rather than deleting it")
-	}
-	if postgres.Image != lane.Image {
-		t.Errorf("the pipeline's Postgres is %s and ci.yml's db-tests lane runs %s; bump both in one change, or the two test against different databases",
-			postgres.Image, lane.Image)
-	}
-	for _, key := range []string{"POSTGRES_USER", "POSTGRES_PASSWORD", "POSTGRES_DB"} {
-		if postgres.Env[key] == "" || postgres.Env[key] != lane.Env[key] {
-			t.Errorf("services.%s.env.%s is %q and ci.yml's db-tests lane sets %q", manifestPostgresService, key, postgres.Env[key], lane.Env[key])
+	for key, want := range map[string]string{"POSTGRES_USER": "memql", "POSTGRES_PASSWORD": "memql_dev", "POSTGRES_DB": "memql"} {
+		if postgres.Env[key] != want {
+			t.Errorf("services.%s.env.%s = %q, want %q", manifestPostgresService, key, postgres.Env[key], want)
 		}
 	}
+	if !strings.Contains(postgres.Ready, "-h localhost") || !strings.Contains(postgres.Ready, "-U memql") {
+		t.Error("Postgres readiness must test the same TCP endpoint and user the suites use")
+	}
+
 }
 
 // The step's Postgres is a throwaway, so it never waits on the disk. A build
@@ -662,11 +674,9 @@ func TestEngineManifestDBGatedTreesAreTheScriptsTrees(t *testing.T) {
 	}
 }
 
-// The gate-inputs step runs the packages ci.yml's planner adds for every change
-// (the plan step's GATE_PACKAGES, held to go-checks' own
-// gate-inputs step by scripts/dev/gate_inputs_lane_scope_test.go): their tests
-// read repository files by path, which no import graph can see.
-func TestEngineManifestGateStepRunsThePlannersGatePackages(t *testing.T) {
+// These gates read repository files by path, outside the Go import graph.
+// Preserve their package coverage for documentation and manifest-only PRs.
+func TestEngineManifestGateStepRunsRepositoryGatePackages(t *testing.T) {
 	spec := engineManifest(t).Pipeline
 	step, ok := engineDeclaredStep(spec, manifestStepGateInputs)
 	if !ok {
@@ -684,23 +694,14 @@ func TestEngineManifestGateStepRunsThePlannersGatePackages(t *testing.T) {
 			}
 		}
 	}
-	var want []string
-	for _, s := range readManifestCIWorkflow(t).Jobs["plan"].Steps {
-		if s.ID == "plan" {
-			want = strings.Fields(s.Env["GATE_PACKAGES"])
-		}
-	}
-	if len(want) == 0 || len(got) == 0 {
-		t.Fatalf("could not read both lists (ci.yml's GATE_PACKAGES %v, the %s step's %v); this comparison cannot pass over nothing",
-			want, manifestStepGateInputs, got)
-	}
+	want := strings.Fields("./ ./integrations ./integrations/customdomain ./integrations/compose ./cmd/envscan/... ./component/architecture/... ./component/envregistry/... ./scripts/... ./test/dslconformance/... ./examples/... ./component/auth/... ./deploy/...")
 	if !slices.Contains(got, "./integrations") {
 		t.Error("gate-inputs must run ./integrations: its SHA-256 contract reads child Go source by path, outside the import graph")
 	}
 	slices.Sort(want)
 	slices.Sort(got)
 	if !slices.Equal(got, want) {
-		t.Errorf("the %s step runs %v and ci.yml's planner adds %v; make them one list, or a gate runs on a pull request in one and not the other",
+		t.Errorf("the %s step runs %v; required repository-reading gate packages are %v",
 			manifestStepGateInputs, got, want)
 	}
 }
@@ -777,37 +778,6 @@ func TestEngineStepExportsSeesOnlyWhatGoTestReceives(t *testing.T) {
 	}
 }
 
-// manifestCIWorkflow is the slice of .github/workflows/ci.yml the manifest
-// copies: the db-tests lane's service and the plan step's environment.
-type manifestCIWorkflow struct {
-	Jobs map[string]struct {
-		Env      map[string]string `yaml:"env"`
-		Services map[string]struct {
-			Image string            `yaml:"image"`
-			Env   map[string]string `yaml:"env"`
-		} `yaml:"services"`
-		Steps []struct {
-			ID   string            `yaml:"id"`
-			Name string            `yaml:"name"`
-			Run  string            `yaml:"run"`
-			Env  map[string]string `yaml:"env"`
-		} `yaml:"steps"`
-	} `yaml:"jobs"`
-}
-
-func readManifestCIWorkflow(t *testing.T) manifestCIWorkflow {
-	t.Helper()
-	raw, err := os.ReadFile(path.Join(".github", "workflows", "ci.yml"))
-	if err != nil {
-		t.Fatalf("read ci.yml: %v", err)
-	}
-	var wf manifestCIWorkflow
-	if err := yaml.Unmarshal(raw, &wf); err != nil {
-		t.Fatalf("parse ci.yml: %v", err)
-	}
-	return wf
-}
-
 // engineSetMinus is a's entries that b lacks.
 func engineSetMinus(a, b []string) []string {
 	var out []string
@@ -819,8 +789,8 @@ func engineSetMinus(a, b []string) []string {
 	return out
 }
 
-// The three Mac editor cases require the owner's explicit fleet consent.
-// Every portable check stays in its bounded cluster container.
+// Mac editor hosts, Linux installer fixtures and the external public-site
+// probe require fleet consent. Other portable checks stay in cluster containers.
 func TestEngineManifestRequiresConsentForMacEditorHosts(t *testing.T) {
 	spec := engineManifest(t).Pipeline
 	refusal := pipelines.Consent(spec, pipelines.ComputeCluster, nil)
@@ -835,6 +805,15 @@ func TestEngineManifestRequiresConsentForMacEditorHosts(t *testing.T) {
 		for _, step := range stage.Steps {
 			if engineMacEditorHost(step.Name) {
 				hosts++
+				continue
+			}
+			if engineInstallerHost(stage.Name, step.Name) {
+				continue // exact fixture contracts are compiled above and in scripts/ci
+			}
+			if stage.Name == "documentation-audit" && step.Name == "docs-current" {
+				if pipelines.PlacementOf(step) != pipelines.PlacementFleet || step.Execution != pipelines.ExecutionContainer {
+					t.Errorf("public documentation probe must use a Fleet container: %+v", step)
+				}
 				continue
 			}
 			if pipelines.PlacementOf(step) != pipelines.PlacementCluster {
@@ -881,4 +860,9 @@ func TestEngineSecurityAnalysisKeepsLanguagesAndInventories(t *testing.T) {
 			t.Fatalf("%s lost its analysis or retained reports: %+v", name, step)
 		}
 	}
+}
+
+func engineInstallerHost(stage, name string) bool {
+	return stage == "installer-smoke" && name == "no-cluster" ||
+		stage == "installer-lifecycle" && slices.Contains([]string{"round-trip", "repair", "upgrade", "from-source", "pipelines"}, name)
 }

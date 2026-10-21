@@ -32,7 +32,14 @@ func (r *Replier) workLookupContracts(ctx context.Context) string {
 		return ""
 	}
 	classification, _ := rows[0]["classification"].(map[string]any)
-	if classification["workload"] != "lookup" {
+	search, _ := classification["capabilitySearch"].(string)
+	search = strings.TrimSpace(search)
+	validSearch := search != "" && len(search) <= 300
+	// The compiler's action/object hint applies to every kind of owned
+	// work. Restrict only the legacy title fallback to lookup requests;
+	// otherwise artifact and research tasks pay for rediscovery despite
+	// already carrying the same authorized search intent on their run.
+	if !validSearch && classification["workload"] != "lookup" {
 		return ""
 	}
 	title, _ := classification["workTitle"].(string)
@@ -52,6 +59,13 @@ func (r *Replier) workLookupContracts(ctx context.Context) string {
 			}
 		}
 	}
+	// The classifier already understands the current question. Its durable
+	// action/object search avoids ranking a filename or incidental words like
+	// "first" above the operation needed. Missing/invalid hints retain the
+	// ordinary bounded fallback, with no extra inference call.
+	if validSearch {
+		title = search
+	}
 	if strings.TrimSpace(title) == "" || len(title) > 300 {
 		return ""
 	}
@@ -67,7 +81,21 @@ func (r *Replier) workLookupContracts(ctx context.Context) string {
 	if len(rows) == 0 {
 		return ""
 	}
-	encoded, err := json.Marshal(rows)
+	// MaterializeRows exposes payload fields at the top level while retaining
+	// the original payload. Supplying both doubles the same contracts and
+	// Fleet snapshot in every lookup prompt. Keep the discovery contract once;
+	// storage envelopes and their duplicate payload are not model evidence.
+	contracts := make([]map[string]any, 0, len(rows))
+	for _, row := range rows {
+		contract := map[string]any{}
+		for _, key := range []string{"capabilities", "concepts", "fleet", "matchedCapabilityCount", "note", "truncated"} {
+			if value, present := row[key]; present {
+				contract[key] = value
+			}
+		}
+		contracts = append(contracts, contract)
+	}
+	encoded, err := json.Marshal(contracts)
 	if err != nil || len(encoded) > 24*1024 {
 		return "" // The ordinary discovery tool remains available.
 	}

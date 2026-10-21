@@ -867,6 +867,8 @@ const VIEWS: Record<
   "github-owner": { seed: NO_APP_OWNER, framed: true, render: () => <Lists section="deployables" /> },
   "github-member": { seed: NO_APP_MEMBER, role: "developer", framed: true, render: () => <Lists section="deployables" /> },
   // Pipelines (epic memql#5479): the Runs tab and a run page in each state.
+  "pipeline-channels": { seed: { ...PIPELINES_SEED, pipelineChannels: [{ id: "channel-releases", ownerUserId: "u-me", name: "releases", kind: "email", recipients: ["ops@example.test"], secretRef: "", status: "active" }] }, framed: true, render: () => <DeployablesWindow section="settings" fallback="Deployables" /> },
+  "pipeline-channels-empty": { seed: {}, framed: true, render: () => <DeployablesWindow section="settings" fallback="Deployables" /> },
   "pipeline-runs": { seed: PIPELINES_SEED, framed: true, render: () => <RunsWindow /> },
   "pipeline-runs-empty": { seed: PIPELINES_NO_RUNS_SEED, framed: true, render: () => <RunsWindow /> },
   "pipeline-runs-none": { seed: {}, framed: true, render: () => <RunsWindow /> },
@@ -879,6 +881,17 @@ const VIEWS: Record<
     render: () => <RunsWindow runId="r-7" />,
   },
   "pipeline-run-running": { seed: PIPELINES_SEED, framed: true, render: () => <RunsWindow runId="r-8" /> },
+  "pipeline-run-expired": {
+    seed: { ...PIPELINES_SEED, runArtifacts: {}, expiredRunFiles: { "r-7": [
+      { fileId: "file-log-go2", name: "tests.go-tests#2.log" },
+      { fileId: "file-cov", name: "dist__coverage.html" },
+    ] } },
+    framed: true, render: () => <RunsWindow runId="r-7" />,
+  },
+  "pipeline-run-files-unavailable": {
+    seed: { ...PIPELINES_SEED, runArtifacts: {}, expiredRunFilesError: "Unavailable" },
+    framed: true, render: () => <RunsWindow runId="r-7" />,
+  },
   "pipeline-run-queued": { seed: PIPELINES_SEED, framed: true, render: () => <RunsWindow runId="r-9" /> },
   "pipeline-run-passed": { seed: PIPELINES_SEED, framed: true, render: () => <RunsWindow runId="r-6" /> },
   "pipeline-run-refused": { seed: PIPELINES_SEED, framed: true, render: () => <RunsWindow runId="r-5" /> },

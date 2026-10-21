@@ -144,4 +144,3 @@ shape call routerCallSpend {
   billing
   row.createdAt
 }
-

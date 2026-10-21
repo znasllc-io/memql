@@ -42,6 +42,12 @@ func candidateTestManifest() pl.ReleaseCandidate {
 func cleanupCandidate(t *testing.T, db *sql.DB, key string) {
 	t.Helper()
 	t.Cleanup(func() {
+		if _, err := db.Exec(`DELETE FROM release_candidate_archives WHERE candidate_id=$1`, key); err != nil {
+			t.Error(err)
+		}
+		if _, err := db.Exec(`DELETE FROM release_candidate_successions WHERE previous_candidate_id=$1 OR candidate_id=$1`, key); err != nil {
+			t.Error(err)
+		}
 		if _, err := db.Exec(`DELETE FROM release_catalog WHERE candidate_id=$1`, key); err != nil {
 			t.Error(err)
 		}

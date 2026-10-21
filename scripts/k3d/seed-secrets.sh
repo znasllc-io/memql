@@ -856,7 +856,7 @@ function ensure_front_door_pair() {
 # `"certIssued":true`. The caller has already refused an envelope that does not
 # carry the key at all, so a false from this function means false, not absent.
 function child_reports_true() {
-    printf '%s' "$1" | grep -qE "\"$2\"[[:space:]]*:[[:space:]]*true"
+    grep -qE "\"$2\"[[:space:]]*:[[:space:]]*true" <<< "$1"
 }
 
 # resolve_domain_default -- the default for --domain: what this cluster is

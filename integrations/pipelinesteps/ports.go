@@ -2,8 +2,13 @@ package pipelinesteps
 
 import (
 	"context"
+	"errors"
 	"io"
 )
+
+// ErrArtifactRetained is a refusal to retire bytes needed by a durable
+// consumer or deliberately kept in the Library. Other errors are not skips.
+var ErrArtifactRetained = errors.New("artifact is retained")
 
 // ports.go -- what the runner needs from the rest of the engine, as
 // interfaces: implemented in app/ on the workbench node (Task 8 of epic
@@ -114,6 +119,19 @@ type RetiredFileReceipt struct {
 	IntentID, FileID, TombstoneETag string
 }
 
+// LibraryArtifactPresentationRetirement removes only the unchanged generated
+// Library rows of an already retired intent. The native journal and provider
+// tombstone remain permanently. A missing row is an idempotent success.
+type LibraryArtifactPresentationRetirement interface {
+	PurgeRetiredRunFile(context.Context, RunFileReceiptScope, string) error
+}
+
+// LibraryLegacyLogAdoption verifies an existing generated log in its original
+// owner-bound storage location before giving it a durable cleanup receipt.
+type LibraryLegacyLogAdoption interface {
+	AdoptLegacyRunLog(context.Context, RunFileReceiptScope, string) (StoredFileReceipt, error)
+}
+
 // LibraryArtifactScopeRetirement closes a producer before inventorying even
 // its unacknowledged uploads. Calls require internal origin and the owner's
 // actor. Fence is permanent and idempotent, including before the first upload.
@@ -139,4 +157,11 @@ type TokenMinter interface {
 	// an anonymous clone of a public repository, for which the answer is ""
 	// and no error.
 	CloneToken(ctx context.Context, installationID int64, owner, name string) (string, error)
+}
+
+// RepositoryReadTokenMinter is an optional, explicitly requested command grant.
+// It reads contents, checks and pull requests of ONE repository, never writes.
+// It shares the clone token's queue refresh and redaction lifecycle.
+type RepositoryReadTokenMinter interface {
+	RepositoryReadToken(ctx context.Context, installationID int64, owner, name string) (string, error)
 }

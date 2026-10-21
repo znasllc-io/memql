@@ -30,6 +30,23 @@ func draftRecordTargets(plan candidateDraftPlan) []string {
 }
 
 func (l *candidateLedger) draftTransaction(ctx context.Context, candidateID, approvalID string) (*sql.Tx, string, error) {
+	tx, owner, err := l.draftHistoryTransaction(ctx, candidateID, approvalID)
+	if err != nil {
+		return nil, "", err
+	}
+	rec, err := readCandidate(ctx, tx, owner, candidateID)
+	if err != nil || rec.State != "approved" {
+		_ = tx.Rollback()
+		return nil, "", errors.New("release effects require an active approved candidate")
+	}
+	if err := requireCurrentCandidate(ctx, tx, candidateID); err != nil {
+		_ = tx.Rollback()
+		return nil, "", err
+	}
+	return tx, owner, nil
+}
+
+func (l *candidateLedger) draftHistoryTransaction(ctx context.Context, candidateID, approvalID string) (*sql.Tx, string, error) {
 	owner, err := candidateOwner(ctx)
 	if err != nil {
 		return nil, "", err
@@ -46,7 +63,7 @@ func (l *candidateLedger) draftTransaction(ctx context.Context, candidateID, app
 	if err == nil {
 		rec, err = readCandidateApproval(ctx, tx, owner, rec)
 	}
-	if err != nil || rec.State != "approved" || approvalID == "" || rec.ApprovalID != approvalID {
+	if err != nil || (rec.State != "approved" && rec.State != "archived") || approvalID == "" || rec.ApprovalID != approvalID {
 		_ = tx.Rollback()
 		return nil, "", errors.New("release effect requires its exact owner-approved candidate")
 	}

@@ -1,7 +1,6 @@
 // Package release cuts a version of MemQL itself: it creates the git tag and
-// publishes the GitHub Release, which is what fires the image-build cascade
-// (dispatch-engine-images-on-release.yml, #2519 -> build-engine-images.yml with
-// the bare version).
+// publishes the GitHub Release, which delivers the native pipeline release
+// event. Its image stage builds the tagged source with the bare version.
 //
 // IT DOES NOT BUILD OR PUSH IMAGES, and does not go near
 // scripts/release/release.sh, whose --push path stays break-glass. Cutting is
@@ -99,6 +98,9 @@ func (i *Integration) Capabilities() []memql.IntegrationCapability {
 		{Name: "publishCandidate", Description: "Publish one exact approved candidate artifact and record verified readback. Owner only.", Handler: i.handleCandidatePublish},
 		{Name: "getCandidate", Description: "Read one caller-owned immutable candidate from its authority journal.", Handler: i.handleCandidateGet},
 		{Name: "retireCandidate", Description: "Fence an unpublished candidate and release its artifact references.", Handler: i.handleCandidateRetire},
+		{Name: "archiveCandidate", Description: "Verify published copies, permanently fence a sealed candidate and release duplicate build-input references. Owner only.", Handler: i.handleCandidateArchive},
+		{Name: "setInputArchiveSchedule", Description: "Enable or pause this owner's scheduled duplicate publication-input archival using captured owner authority.", Handler: i.handleArchiveSchedule},
+		{Name: "sweepPublishedInputs", Description: "Internal leased maintenance of one enrolled owner's published candidate inputs.", Handler: i.handleSweepPublishedInputs},
 		{
 			Name: "releaseCut",
 			Description: "Cut a new release: compute the next version from the repository's vX.Y.Z tags, " +
@@ -130,6 +132,7 @@ func (i *Integration) Capabilities() []memql.IntegrationCapability {
 	out = append(out, workflowhost.ScopedCapabilities((&candidatePrepareScope{}).operations())...)
 	out = append(out, workflowhost.ScopedCapabilities((&candidateAssemblyScope{}).operations())...)
 	out = append(out, workflowhost.ScopedCapabilities((&candidateDraftScope{}).operations())...)
+	out = append(out, workflowhost.ScopedCapabilities(map[string]workflowhost.Operation{"releaseRetentionArchiveInputs": nil})...)
 	return append(out, workflowhost.ScopedCapabilities((&candidatePublishScope{}).operations())...)
 }
 

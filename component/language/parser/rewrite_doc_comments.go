@@ -67,11 +67,9 @@ func rewriteDocCommentDescriptionsUnverified(src []byte) ([]byte, error) {
 			out = append(out, line)
 			continue
 		}
-		// Kind guard: seed and builtin are outside the design's ruling-1
-		// target set -- they have no DocComment resolution path (BuiltinDecl
-		// carries no slot; the seed loader reads only the attribute), so
-		// converting them would blank their resolved descriptions. Their
-		// @description stays.
+		// Keep this historical codemod's target set unchanged. Builtins now
+		// support attached documentation, but expanding an automatic corpus
+		// rewrite is separate from preserving descriptions at runtime.
 		if k := constructKeywordAhead(lines, i); k == "seed" || k == "builtin" {
 			out = append(out, line)
 			continue
@@ -452,7 +450,7 @@ func resolvedConstructDescs(source string) map[string]string {
 			// makes the verifier itself catch a kind-guard regression.
 			put("seed", d.Name, "", d.Description)
 		case *BuiltinDecl:
-			put("builtin", d.Name, "", attrDesc(d.Attributes))
+			put("builtin", d.Name, d.DocComment, attrDesc(d.Attributes))
 		case *FunctionDef:
 			put(string(d.Type), d.Name, d.DocComment, d.Description)
 		case *ConceptDecl:

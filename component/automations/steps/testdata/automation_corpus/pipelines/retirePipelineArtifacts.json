@@ -1,0 +1,67 @@
+{
+  "automation": "pipelines/automations.memql retirePipelineArtifacts",
+  "runs": {
+    "invocation | 0 rows": {
+      "input": {
+        "event": {
+          "kind": "unspecified",
+          "payload": {
+            "dryRun": true
+          },
+          "topic": "automation.invocation.retirePipelineArtifacts"
+        },
+        "rows": 0
+      },
+      "outcome": {
+        "calls": [
+          {
+            "kind": "builtin",
+            "name": "pipelineRetentionItems"
+          },
+          {
+            "kind": "builtin",
+            "name": "pipelineRetentionReport"
+          }
+        ],
+        "result": {
+          "output": {
+            "args": {},
+            "builtin": "pipelineRetentionReport"
+          },
+          "status": "completed"
+        }
+      }
+    },
+    "invocation | 2 rows": {
+      "input": {
+        "event": {
+          "kind": "unspecified",
+          "payload": {
+            "dryRun": true
+          },
+          "topic": "automation.invocation.retirePipelineArtifacts"
+        },
+        "rows": 2
+      },
+      "outcome": {
+        "calls": [
+          {
+            "kind": "builtin",
+            "name": "pipelineRetentionItems"
+          },
+          {
+            "kind": "builtin",
+            "name": "pipelineRetentionReport"
+          }
+        ],
+        "result": {
+          "output": {
+            "args": {},
+            "builtin": "pipelineRetentionReport"
+          },
+          "status": "completed"
+        }
+      }
+    }
+  }
+}

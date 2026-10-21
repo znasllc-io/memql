@@ -13,16 +13,16 @@
 // the Library lives in integrations/compose.
 module github.com/znasllc-io/memql/component/compose
 
-go 1.26.1
+go 1.26.8
 
-toolchain go1.27.2
+toolchain go1.27.3
 
 require (
 	github.com/go-pdf/fpdf v0.9.0
 	github.com/microcosm-cc/bluemonday v1.0.27
 	github.com/yuin/goldmark v1.8.6
 	github.com/znasllc-io/memql/core v0.0.0
-	golang.org/x/net v0.60.0
+	golang.org/x/net v0.61.0
 )
 
 require (

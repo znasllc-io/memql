@@ -2,12 +2,66 @@ package pipelinesteps
 
 import (
 	"context"
+	"encoding/json"
 	"testing"
 	"time"
 
 	"github.com/stretchr/testify/require"
 	pl "github.com/znasllc-io/memql/component/pipelines"
 )
+
+func TestAdmissionPriorityUsesOperatorPolicyAcrossSerializedHop(t *testing.T) {
+	cfg, run := testConfig(), testRun()
+	cfg.QueueName, cfg.NodePool = "background", "builds"
+	cfg.QueuePriorityClasses = `{"merge_group":"merge-gates","pull_request":"pull-requests","schedule":"audits"}`
+	run.RunDeadline = time.Now().Add(time.Hour).UTC().Format(time.RFC3339)
+	for event, want := range map[string]string{"merge_group": "merge-gates", "pull_request": "pull-requests", "schedule": "audits", "manual": ""} {
+		run.Env = map[string]string{eventVar: event}
+		wire, err := json.Marshal(run)
+		require.NoError(t, err)
+		var forwarded StepRun
+		require.NoError(t, json.Unmarshal(wire, &forwarded))
+		job, err := BuildJob(cfg, forwarded, testJobName)
+		require.NoError(t, err)
+		require.Equal(t, want, job.Metadata.Labels[queuePriorityLabel])
+		require.Empty(t, job.Spec.Template.Metadata.Labels[queuePriorityLabel], "admission class must not become Pod priority")
+		require.True(t, *job.Spec.Suspend)
+	}
+	// The reserved event cannot be overridden by a repository's secret name.
+	req := pl.StepRequest{Event: pl.EventPullRequest, Secrets: map[string]string{eventVar: "merge_group"}}
+	forwarded := stepRunFor(req, 60, "")
+	require.Equal(t, "pull_request", forwarded.Env[eventVar])
+	got, err := queuePriorityClass(cfg, forwarded)
+	require.NoError(t, err)
+	require.Equal(t, "pull-requests", got)
+}
+
+func TestAdmissionPriorityRefusesAmbiguousOperatorConfiguration(t *testing.T) {
+	cfg, run := testConfig(), testRun()
+	cfg.QueueName, cfg.NodePool = "background", "builds"
+	run.RunDeadline = time.Now().Add(time.Hour).UTC().Format(time.RFC3339)
+	run.Env = map[string]string{eventVar: "merge_group"}
+	for _, raw := range []string{`null`, `[]`, `{"unknown":"gates"}`, `{"merge_group":"a","merge_group":"b"}`, `{"merge_group":""}`, `{"merge_group":"../other"}`, `{"merge_group":12}`, `{} {}`} {
+		cfg.QueuePriorityClasses = raw
+		_, err := BuildJob(cfg, run, testJobName)
+		require.ErrorContains(t, err, "admission priority")
+	}
+	cfg.QueuePriorityClasses = `{"merge_group":"gates"}`
+	cfg.QueueName = ""
+	_, err := BuildJob(cfg, run, testJobName)
+	require.ErrorContains(t, err, "require a queue")
+	cfg.QueueName = "background"
+	run.Env = nil
+	_, err = BuildJob(cfg, run, testJobName)
+	require.ErrorContains(t, err, "trusted pipeline event")
+	got := ConfigFromEnv(func(key string) string {
+		if key == "MEMQL_PIPELINES_QUEUE_PRIORITY_CLASSES" {
+			return cfg.QueuePriorityClasses
+		}
+		return ""
+	})
+	require.Equal(t, cfg.QueuePriorityClasses, got.QueuePriorityClasses)
+}
 
 func TestResourceQueueCreatesSuspendedJobAndReservesSidecars(t *testing.T) {
 	cfg, run := testConfig(), testRun()

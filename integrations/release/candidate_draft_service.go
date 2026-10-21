@@ -32,10 +32,10 @@ func (l *candidateLedger) drafts(ctx context.Context, key string) ([]candidateDr
 	if err != nil {
 		return nil, err
 	}
-	if rec.State != "approved" {
+	if rec.State != "approved" && rec.State != "archived" {
 		return []candidateDraftRecord{}, nil
 	}
-	tx, owner, err := l.draftTransaction(ctx, key, rec.ApprovalID)
+	tx, owner, err := l.draftHistoryTransaction(ctx, key, rec.ApprovalID)
 	if err != nil {
 		return nil, err
 	}

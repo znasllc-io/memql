@@ -5,7 +5,6 @@ import tempfile
 import unittest
 from unittest.mock import patch
 
-import yaml
 
 spec = importlib.util.spec_from_file_location("pipeline_editor_hosts", Path(__file__).with_name("pipeline-editor-hosts.py"))
 runner = importlib.util.module_from_spec(spec)
@@ -13,18 +12,20 @@ spec.loader.exec_module(runner)
 
 
 class EditorHosts(unittest.TestCase):
-    def test_covers_the_retained_workflow_host_matrix(self):
-        workflow = yaml.safe_load((Path(__file__).resolve().parents[2] / ".github/workflows/ci.yml").read_text())
-        jobs = workflow["jobs"]
+    def test_covers_the_supported_host_matrix(self):
         core = runner.lanes("core", "linux/amd64")
-        self.assertCountEqual([lane[1] for lane in core], jobs["vscode-extension-host"]["strategy"]["matrix"]["vscode"])
+        self.assertCountEqual([lane[1] for lane in core], ["1.91.0", "stable"])
         observed = []
         for platform, os in (("linux/amd64", "ubuntu-latest"), ("darwin/arm64", "macos-latest")):
             for _, version, _, command in runner.lanes("productivity", platform):
                 host = "desktop" if "--desktop" in command else "web"
                 observed.append({"os": os, "host": host, "version": version})
                 self.assertEqual(command[0] == "xvfb-run", host == "desktop" and platform.startswith("linux/"))
-        self.assertCountEqual(observed, jobs["productivity-extension-host"]["strategy"]["matrix"]["include"])
+        self.assertCountEqual(observed, [
+            {"os": os, "host": host, "version": version}
+            for os in ("ubuntu-latest", "macos-latest")
+            for host, version in (("desktop", "1.91.0"), ("desktop", "stable"), ("web", "stable"))
+        ])
 
     def run_fixture(self, result):
         with tempfile.TemporaryDirectory() as temporary:

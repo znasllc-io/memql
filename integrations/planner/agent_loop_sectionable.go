@@ -90,11 +90,12 @@ type workNavigationDecision struct {
 }
 
 type sectionableDecision struct {
-	Acknowledgement string                  `json:"acknowledgement"`
-	Workload        string                  `json:"workload"`
-	WorkTitle       string                  `json:"workTitle"`
-	Intent          string                  `json:"intent"`
-	Navigation      *workNavigationDecision `json:"navigation"`
+	Acknowledgement  string                  `json:"acknowledgement"`
+	Workload         string                  `json:"workload"`
+	WorkTitle        string                  `json:"workTitle"`
+	CapabilitySearch string                  `json:"capabilitySearch"`
+	Intent           string                  `json:"intent"`
+	Navigation       *workNavigationDecision `json:"navigation"`
 	// RequiresFile is the goal's semantic delivery contract, independent of
 	// sectionability. Nil is a malformed/omitted answer, never false.
 	RequiresFile *bool `json:"requiresFile"`
@@ -357,6 +358,7 @@ func parseSectionableDecision(resp any) sectionableDecision {
 		Acknowledgement  string                  `json:"acknowledgement"`
 		Workload         string                  `json:"workload"`
 		WorkTitle        string                  `json:"workTitle"`
+		CapabilitySearch string                  `json:"capabilitySearch"`
 		Intent           string                  `json:"intent"`
 		Navigation       *workNavigationDecision `json:"navigation"`
 		RequiresFile     *bool                   `json:"requiresFile"`
@@ -375,6 +377,7 @@ func parseSectionableDecision(resp any) sectionableDecision {
 		Acknowledgement:  env.Acknowledgement,
 		Workload:         env.Workload,
 		WorkTitle:        env.WorkTitle,
+		CapabilitySearch: env.CapabilitySearch,
 		Intent:           env.Intent,
 		Navigation:       env.Navigation,
 		RequiresFile:     env.RequiresFile,

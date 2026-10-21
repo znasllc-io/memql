@@ -57,6 +57,11 @@ only after a deploy.
 
 ## Prerequisites
 
+- **The machine** -- the whole cluster and its local models run on it, so it
+  needs the [one-machine minimum requirements](minimum-requirements.md#one-machine-the-entire-cluster).
+  `make up` checks them before `k3d cluster create` and refuses a new cluster
+  below them; `make up ALLOW_BELOW_MINIMUM=1` creates it anyway, with a
+  warning. An existing cluster is never refused.
 - **docker** -- Docker Desktop or Colima (must be running).
 - **k3d** -- `brew install k3d`.
 - **kubectl** -- `brew install kubectl`.
@@ -186,7 +191,8 @@ make up-refresh
 `make up` is the full fresh bring-up (`scripts/k3d/bringup.sh`); it does the
 following in order:
 
-1. Creates a k3d cluster (default name `memql`).
+1. Creates the k3d cluster (default name `memql`), or starts it when it
+   exists but is stopped.
 2. Installs ArgoCD v2.13.3 (same version as the cloud) via
    `kubectl apply -k deploy/argocd/bootstrap`.
 3. Seeds k8s Secrets (`memql-secrets`, `memql-db-app-creds`) via
@@ -202,6 +208,21 @@ following in order:
 (`make down PURGE=1`), so the in-cluster Postgres is wiped and the
 environment repaves from scratch. It is idempotent and honors the same
 `SERVERS`/`AGENTS`/`REVISION` overrides as `make up`.
+
+### One local stack at a time
+
+Every local cluster publishes the same host ports (443, 80, 5432, and a
+downstream stack's extra ports), so only one runs at a time. `make up` checks
+before it creates or starts anything: when another k3d cluster's load balancer
+is running, it refuses and names that cluster and the domain it serves. Stop
+the other one first with `k3d cluster stop <name>` (it keeps its state) or
+`make down` in its repo, or pass `SWITCH=1` to have `make up` stop it for you.
+A downstream repo's `make up SWITCH=1` reaches the engine bring-up unchanged.
+
+A cluster that exists but is stopped is started again rather than skipped, and
+`make up` points kubectl at the cluster it is bringing up whether it created,
+started or found it, so a re-run never applies into whichever cluster kubectl
+was pointed at before.
 
 ### The pipeline build node
 
@@ -246,9 +267,11 @@ cluster as the single `MEMQL_DOMAIN` key of the `memql-domain` ConfigMap, and
 every node derives its identity base URL, expected issuer, discovery endpoint,
 CORS origins and OAuth redirect URIs from it at boot
 (`component/envregistry/domain.go`). When the domain differs from the overlay's
-committed default, `k3d.up` also emits two `spec.source.kustomize.patches`
-entries on the ArgoCD Application to repoint the two front-door Ingress hosts.
-No file under `deploy/` names a domain.
+committed default, `k3d.up` also emits `spec.source.kustomize.patches` entries
+on the ArgoCD Application that repoint every front door the overlay commits:
+`api`, `identity`, `mcp`, `os`, `vscode` and `voice`, the TURN route, and the
+sites front door's wildcard and apex, so MemQL OS and every hosted site follow
+the domain too. No file under `deploy/` names a domain.
 
 ### The hosts file is only written when it is needed
 

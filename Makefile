@@ -42,7 +42,7 @@ ALL_PKGS    := $(MODULE)/...
 # ---------------------------------------------------------------------------
 
 ##@ Build
-##> Deployable images are built on the GitHub build server, not here (see CLAUDE.md).
+##> Deployable images are built on the MemQL native build server, not here (see CLAUDE.md).
 .PHONY: all build build-all bff agent planner workbench mcp edge identity identity-templ identity-tailwind identity-assets identity-build healthcheck
 
 ## Build all binaries (standalone + healthcheck)
@@ -230,6 +230,7 @@ db:
 ##   make up REVISION=main         # pin to main
 ##   make up SERVERS=2 AGENTS=1   # multi-node (see E0.5 / #2067)
 ##   make up BUILD_NODE_CPUS=16 BUILD_NODE_MEMORY=40g   # size the pipeline build node (default: two thirds of the Docker host)
+##   make up ALLOW_BELOW_MINIMUM=1   # create the cluster on a machine below the minimum requirements (warns)
 up:
 	@bash scripts/k3d/bringup.sh \
 		$${CLUSTER:+--cluster=$${CLUSTER}} \
@@ -240,6 +241,7 @@ up:
 		$${NO_BUILD_NODE:+--no-build-node} \
 		$${BUILD_NODE_CPUS:+--build-node-cpus=$${BUILD_NODE_CPUS}} \
 		$${BUILD_NODE_MEMORY:+--build-node-memory=$${BUILD_NODE_MEMORY}} \
+		$${ALLOW_BELOW_MINIMUM:+--allow-below-minimum} \
 		$${REPO_URL:+--repo-url="$${REPO_URL}"} \
 		$${APP_NAME:+--app-name="$${APP_NAME}"} \
 		$${OVERLAY_PATH:+--overlay-path="$${OVERLAY_PATH}"} \
@@ -250,7 +252,8 @@ up:
 		$${CARRIER_REPO:+--carrier-repo="$${CARRIER_REPO}"} \
 		$${CARRIER_NODES:+--carrier-nodes="$${CARRIER_NODES}"} \
 		$${CARRIER_CONTEXT:+--carrier-context="$${CARRIER_CONTEXT}"} \
-		$${NO_SECRETS:+--no-secrets}
+		$${NO_SECRETS:+--no-secrets} \
+		$${SWITCH:+--switch}
 
 ## Clean-slate local environment: nuke + repave. Tears down the cluster
 ## (wiping the in-cluster DB by construction), then runs the same bring-up
@@ -268,6 +271,7 @@ up-refresh:
 		$${NO_BUILD_NODE:+--no-build-node} \
 		$${BUILD_NODE_CPUS:+--build-node-cpus=$${BUILD_NODE_CPUS}} \
 		$${BUILD_NODE_MEMORY:+--build-node-memory=$${BUILD_NODE_MEMORY}} \
+		$${ALLOW_BELOW_MINIMUM:+--allow-below-minimum} \
 		$${REPO_URL:+--repo-url="$${REPO_URL}"} \
 		$${APP_NAME:+--app-name="$${APP_NAME}"} \
 		$${OVERLAY_PATH:+--overlay-path="$${OVERLAY_PATH}"} \
@@ -277,7 +281,8 @@ up-refresh:
 		$${PROJECT_MANIFEST:+--project-manifest="$${PROJECT_MANIFEST}"} \
 		$${CARRIER_REPO:+--carrier-repo="$${CARRIER_REPO}"} \
 		$${CARRIER_NODES:+--carrier-nodes="$${CARRIER_NODES}"} \
-		$${CARRIER_CONTEXT:+--carrier-context="$${CARRIER_CONTEXT}"}
+		$${CARRIER_CONTEXT:+--carrier-context="$${CARRIER_CONTEXT}"} \
+		$${SWITCH:+--switch}
 
 ## Tear down the local k3d cluster (PURGE=1 also removes the kubeconfig context)
 ## Pass PURGE=1 to also remove the kubeconfig context.
@@ -341,7 +346,7 @@ scale:
 ## instance (epic memql#3842 / #3844).
 ##
 ## LOCAL DEVELOPMENT ONLY. Deployable images are cut on the GitHub build
-## server (.github/workflows/build-db-image.yml), never on an operator
+## server (the native tests.database-image step), never on an operator
 ## machine -- but both paths drive the SAME Dockerfile and the SAME smoke
 ## test, which is what makes this a faithful stand-in rather than a lookalike.
 ##
@@ -651,7 +656,7 @@ docs-grammar-check:
 ## their links rewritten to site routes, the concept catalog, manifest.json,
 ## llms.txt, llms-full.txt and the sitemap fragment. Needs full git history --
 ## every page is dated by its last commit -- so a shallow clone is refused. The
-## release lane (publish-docs-bundle.yml) runs the same script at the tag.
+## native release-files.packages step runs the same script at the tag.
 docs-bundle:
 	bash scripts/docs/build-docs-bundle.sh --version=$(VERSION)
 
@@ -897,7 +902,7 @@ proto-gen-check:
 ## Implementation lives in scripts/release/release.sh per the function-based
 ## shell-script convention (CLAUDE.md).
 ## PUSH=1 is BREAK-GLASS, not the release path (memql#4116). Deployable
-## images are built by the GitHub build server (OIDC -> ACR), so a push from
+## images are built by the MemQL native build server (verified candidate publication), so a push from
 ## an operator machine needs CONFIRM=push-from-an-operator-machine and is
 ## refused (exit 3) without it. Building locally is unaffected.
 ##   make release                                   # local image, VERSION semver prefix

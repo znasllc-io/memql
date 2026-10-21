@@ -352,7 +352,7 @@ function BudgetFields({ limit, spent, resetsAt, save }: { limit: number | null; 
         </form>
         {changed && !cleared && parsed === null ? <p className="os-profile-refusal">Enter an amount in dollars, at least $1.</p> : null}
         {refusal ? <p className="os-profile-refusal" role="alert">The budget was not changed: {refusal}</p> : null}
-        <Caption>Auto keeps your paid vendor spend under this each month.</Caption>
+        <Caption>Auto uses this to guide paid model spending.</Caption>
       </SettingRow>
       <Facts>
         <Fact label="Spent this month" value={USD.format(spent)} />

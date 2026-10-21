@@ -38,6 +38,7 @@ import type { ExtensionContext } from "vscode";
 import { ClusterPresence, type AddClusterAction, type PresenceOptions } from "../src/clusters/presence.js";
 import type { Receipt } from "../src/install/receipt.js";
 import { graphDocumentPath, loadGraphFile, type Verify } from "../src/install/graph.js";
+import type { RequirementsReport } from "../src/install/platform.js";
 import type { ScriptOutcome, ScriptRun } from "../src/install/runner.js";
 import {
   AddClusterPanel,
@@ -269,6 +270,7 @@ interface OpenOptions {
   /** Seeded clusters.yaml, for the cases that read it back. */
   clustersYaml?: string;
   confirmDestructive?: (prompt: DestructiveConfirmation) => Promise<boolean>;
+  showRequirementsShortfall?: (report: RequirementsReport) => Promise<void>;
   /** Defaults to "sudo runs without asking": no case may spawn the real sudo. */
   sudoIsFree?: () => Promise<boolean>;
   listLocalClusters?: () => Promise<string[]>;
@@ -302,6 +304,7 @@ async function open(options: OpenOptions = {}): Promise<Harness> {
     sudoIsFree: options.sudoIsFree ?? (async () => true),
     sudoAccepts: async () => true,
     ...(options.confirmDestructive ? { confirmDestructive: options.confirmDestructive } : {}),
+    ...(options.showRequirementsShortfall ? { showRequirementsShortfall: options.showRequirementsShortfall } : {}),
     ...(options.listLocalClusters ? { listLocalClusters: options.listLocalClusters } : {}),
     ...(options.isSignedIn ? { isSignedIn: options.isSignedIn } : {}),
     ...(options.ownerSetupPending ? { ownerSetupPending: options.ownerSetupPending } : {}),
@@ -374,9 +377,13 @@ function beginInstall(h: Harness): void {
  * caller has, and the bound turns "this hangs" into a named failure.
  */
 async function until(condition: () => boolean, what: string): Promise<void> {
-  for (let i = 0; i < 3_000; i += 1) {
+  // Completing the real run recorder drains atomic filesystem writes. That
+  // can outlast three seconds on a bounded worker even when the fake scripts
+  // and the assertions have finished. Bound elapsed time, not timer turns.
+  const deadline = performance.now() + 10_000;
+  while (performance.now() < deadline) {
     if (condition()) return;
-    await new Promise((resolve) => setTimeout(resolve, 1));
+    await new Promise((resolve) => setTimeout(resolve, 10));
   }
   throw new Error(`timed out waiting for ${what}`);
 }
@@ -588,6 +595,57 @@ test("an unsupported computer gets one sentence and Connect, and runs nothing bu
     assert.doesNotMatch(html, /data-value="install"|data-field="version"/, "no form for a run that cannot happen");
     assert.equal(h.panel.title, "Add a cluster", "the tab says what the page is doing");
     assert.ok(runner.calls.every((c) => c.capability === "install.detect"), "only detect may run");
+  } finally {
+    h.close();
+  }
+});
+
+test("a computer below the minimum requirements: Install says why, in a modal, and opens nothing", async () => {
+  const below = {
+    meetsMinimum: false,
+    meetsRecommended: false,
+    checks: [{ id: "memory", label: "Memory", observed: "24 GB", minimum: "32 GB", recommended: "48 GB", status: "below" }],
+    shortfalls: ["Memory: 24 GB. The minimum is 32 GB."],
+    docs: "https://example.test/minimum-requirements",
+  };
+  const runner = await fakeRunner({}, { "install.detect": { requirements: below } });
+  const shown: RequirementsReport[] = [];
+  const h = await open({
+    runner,
+    showRequirementsShortfall: async (report) => {
+      shown.push(report);
+    },
+  });
+  try {
+    await until(() => /doesn't meet the minimum requirements/.test(h.html()), "the landing's warning");
+    assert.match(h.html(), /data-value="install"/, "Install stays offered: choosing it is where the page says why");
+    h.post({ type: "choose", value: "install" });
+    await until(() => shown.length === 1, "the minimum-requirements modal");
+    assert.deepEqual(shown[0]!.shortfalls, below.shortfalls);
+    assert.equal(shown[0]!.docs, below.docs);
+    assert.doesNotMatch(h.html(), /data-field="version"/, "no install form below the minimum");
+    assert.ok(runner.calls.every((c) => c.capability === "install.detect"), "only detect may run");
+  } finally {
+    h.close();
+  }
+});
+
+test("a computer that meets the minimum opens the install form as before", async () => {
+  const meets = { meetsMinimum: true, meetsRecommended: false, checks: [], shortfalls: [], docs: "" };
+  const runner = await fakeRunner({}, { "install.detect": { requirements: meets } });
+  const shown: RequirementsReport[] = [];
+  const h = await open({
+    runner,
+    showRequirementsShortfall: async (report) => {
+      shown.push(report);
+    },
+  });
+  try {
+    await until(() => /data-value="install"/.test(h.html()), "the landing");
+    assert.doesNotMatch(h.html(), /doesn't meet the minimum requirements/);
+    h.post({ type: "choose", value: "install" });
+    await until(() => /data-field="version"|data-field="email"|data-field="name"/.test(h.html()), "the install form");
+    assert.equal(shown.length, 0, "no modal for a computer that meets the minimum");
   } finally {
     h.close();
   }
@@ -844,11 +902,12 @@ test("the run's status and step count come from the state machine, while it runs
   const h = await open({ runner });
   try {
     beginInstall(h);
-    await until(gate.reached, "the second step to be in flight");
+    // Third: the computer, then its hardware against the minimum, then Docker.
+    await until(gate.reached, "the third step to be in flight");
     await until(() => /Checking Docker/.test(h.html()), "the status line");
     const html = h.html();
     assert.match(html, /Installing MemQL/);
-    assert.match(html, /Step 2 of 1[0-9]/);
+    assert.match(html, /Step 3 of 1[0-9]/);
     assert.deepEqual(barActs(html), ["cancel"], "Cancel, as a text act, and nothing else");
     gate.release();
     await until(() => INSTALLED.test(h.html()), "the run to settle");

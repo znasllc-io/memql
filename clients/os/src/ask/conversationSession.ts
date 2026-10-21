@@ -1,5 +1,6 @@
 import type { AskHandle, AskTransport } from "./askController";
 import { AUTO_ROUTING, routeIdFromSource, routeSource, routeSupportsDestination, type AskRouting } from "./askRoute";
+import { isTransportInterruption } from "@znasllc-io/memql-sdk-core/client";
 import type { ExecutionDestination } from "../kit/ExecutionDestination";
 import type { UploadHandle, UploadProvider } from "../items/upload";
 
@@ -103,15 +104,13 @@ export interface AskTurn {
   activity: AskActivity[];
   error?: string;
 }
-export interface AskQuestion { id: string; text: string; kind: "text" | "choice" | "multi"; options: { value: string; label: string }[]; optional?: boolean; continued?: boolean }
+export interface AskQuestion { choiceOnly?: boolean; resumeAnswer?: Record<string, unknown>; id: string; text: string; kind: "text" | "choice" | "multi"; options: { value: string; label: string }[]; optional?: boolean; continued?: boolean }
 export interface ConversationSummary { id: string; title: string; createdAt?: string }
 export interface ApprovalDiscussion {
   conversationId: string;
   approval: { id: string; runId: string; kind: string; question: string; summary?: string; status: string };
   canSendGuidance: boolean;
   canAskAdvisor: boolean;
-  guidanceMode?: "resume" | "deferred";
-  savedGuidance?: string;
   guidanceToResume?: string;
 }
 export interface AskConversationStore {
@@ -167,6 +166,7 @@ export class ConversationSession {
   private stopRequested = false;
   private cancelling = false;
   private requestStarted = false;
+  private interruptedRequests = new Map<string, number>();
   private epoch = 0;
   private selection = 0;
   private historyEpoch = 0;
@@ -242,6 +242,12 @@ export class ConversationSession {
     this.uploads.delete(id);
     this.patch({ attachments: (this.state.attachments ?? []).filter(item => item.id !== id) });
   };
+  /** Files belong to the draft being left. Uploaded Library files stay saved. */
+  private clearAttachments() {
+    for (const upload of this.uploads.values()) upload.abort();
+    this.uploads.clear();
+    this.patch({ attachments: [] });
+  }
   /** Put a failed turn's files back in the field for another try. */
   restoreAttachments = (attachments: readonly AskTurnAttachment[] | undefined) => {
     if (!attachments?.length) return;
@@ -336,16 +342,6 @@ export class ConversationSession {
   };
   private guidanceReceipt(discussion: ApprovalDiscussion) {
     const approvalId = discussion.approval.id;
-    if (discussion.guidanceMode === "deferred") {
-      const feedback = discussion.canSendGuidance ? this.uncertainGuidance.get(approvalId) : undefined;
-      // Saving budget guidance leaves the approval pending. A fresh read of
-      // the exact saved text resolves a lost response; it is never a resume.
-      if (!feedback || discussion.savedGuidance === feedback) {
-        this.uncertainGuidance.delete(approvalId);
-        return null;
-      }
-      return { approvalId, feedback };
-    }
     // A saved receipt is authoritative after reopening. An uncertain local
     // send can only retry its original text while the request is still open.
     const feedback = discussion.guidanceToResume || (discussion.canSendGuidance ? this.uncertainGuidance.get(approvalId) : undefined);
@@ -367,7 +363,6 @@ export class ConversationSession {
   private submitGuidance = async (approvalId: string, feedback: string, clearSubmittedDraft: boolean) => {
     if (this.state.guidanceSending || this.state.discussionOpening || this.state.discussionSending) return false;
     const epoch = this.discussionEpoch;
-    const deferred = this.state.discussion?.guidanceMode === "deferred";
     this.guidanceRevision++;
     this.uncertainGuidance.set(approvalId, feedback);
     this.patch({ guidanceSending: true, error: "" });
@@ -375,16 +370,11 @@ export class ConversationSession {
       if (!this.transport.approvalGuidance) throw new Error("Sending guidance is unavailable.");
       // The same approval and exact original answer are the retry identity.
       const receipt = await this.transport.approvalGuidance(approvalId, feedback);
-      if (deferred && (receipt.guidanceSaved !== true || receipt.savedGuidance !== feedback || receipt.runResumed)) {
-        throw new Error("The cluster did not confirm this saved guidance. Retry saving to check the original text.");
-      }
       this.uncertainGuidance.delete(approvalId);
       if (epoch !== this.discussionEpoch || this.disposed) return true;
       this.guidanceRevision++;
-      const discussion = deferred
-        ? { ...this.state.discussion!, savedGuidance: receipt.savedGuidance, guidanceToResume: undefined }
-        : { ...this.state.discussion!, canSendGuidance: false, guidanceToResume: receipt.runResumed ? undefined : feedback };
-      this.patch({ discussion, guidanceRetry: this.guidanceReceipt(discussion), guidanceNotice: deferred ? "" : receipt.runResumed ? "Guidance sent. Work is continuing." : `Guidance was recorded, but the work has not resumed.${receipt.resumeError ? ` ${receipt.resumeError}` : ""}`, ...(clearSubmittedDraft && this.state.draft.trim() === feedback ? { draft: "" } : {}) });
+      const discussion = { ...this.state.discussion!, canSendGuidance: false, guidanceToResume: receipt.runResumed || receipt.runStopped ? undefined : feedback };
+      this.patch({ discussion, guidanceRetry: this.guidanceReceipt(discussion), guidanceNotice: receipt.runStopped ? "Your feedback was saved. This work has stopped at its overall limit." : receipt.runResumed ? "Guidance sent. Work is continuing." : `Guidance was recorded, but the work has not resumed.${receipt.resumeError ? ` ${receipt.resumeError}` : ""}`, ...(clearSubmittedDraft && this.state.draft.trim() === feedback ? { draft: "" } : {}) });
       await this.reload();
       return true;
     } catch (error) {
@@ -458,12 +448,14 @@ export class ConversationSession {
     try {
       const conversations = await this.transport.conversations.list();
       if (epoch === this.historyEpoch) this.patch({ conversations, historyLoading: false });
-    } catch (error) { if (epoch === this.historyEpoch) this.patch({ historyLoading: false, historyError: message(error) }); }
+    } catch (error) { if (epoch === this.historyEpoch) this.patch({ historyLoading: false, historyError: isTransportInterruption(error) ? "" : message(error) }); }
   };
   newConversation = () => {
     if (this.state.busy || this.state.voiceActive) return;
+    this.interruptedRequests.clear();
     this.selection++;
     this.leaveDiscussion();
+    this.clearAttachments();
     this.patch({ selectedId: null, openingId: null, selectionError: "", turns: [], dictationActivity: [], draft: "", error: "", snapshotError: "", loading: false, focusQuestionId: null, ...this.routingFor([]) });
   };
   /** The explicit New action persists even when no inference is available. */
@@ -491,6 +483,7 @@ export class ConversationSession {
     try {
       const turns = await this.transport.conversations.read(id);
       if (selection === this.selection) {
+        this.clearAttachments();
         this.patch({ discussion: null });
         this.patch({ selectedId: id, openingId: null, turns, dictationActivity: [], draft: "", loading: false, ...this.routingFor(turns) });
         this.scheduleRefresh();
@@ -540,8 +533,8 @@ export class ConversationSession {
   };
   dispose = () => {
     this.disposed = true;
-    for (const upload of this.uploads.values()) upload.abort();
-    this.uploads.clear();
+    this.interruptedRequests.clear();
+    this.clearAttachments();
     if (this.refreshTimer) clearTimeout(this.refreshTimer);
     this.refreshTimer = null;
     this.detach();
@@ -566,7 +559,8 @@ export class ConversationSession {
   private scheduleRefresh() {
     if (this.refreshTimer) clearTimeout(this.refreshTimer);
     this.refreshTimer = null;
-    if (this.disposed || !this.transport.conversations || !this.state.turns.some(turn => isBackgroundTurn(turn) || turn.state === "streaming")) return;
+    if (typeof document !== "undefined" && document.visibilityState === "hidden") return;
+    if (this.disposed || !this.transport.conversations || !this.state.turns.some(turn => isBackgroundTurn(turn) || turn.state === "streaming" || (this.interruptedRequests.has(turn.id) && turn.state !== "error"))) return;
     this.refreshTimer = setTimeout(() => { this.refreshTimer = null; void this.reload(false); }, this.state.error || this.state.snapshotError ? 10000 : this.state.turns.some(turn => isBackgroundTurn(turn) && turn.state !== "waiting") ? 2500 : 10000);
   }
   reload = (refreshHistory = true): Promise<void> => {
@@ -591,21 +585,33 @@ export class ConversationSession {
         // A stream can lose its first run event as well as its terminal event.
         // The accepted client request ID in this conversation correlates the
         // receipt even before a run ID arrived. A known run must still match.
-        // A message that only went to goals already running opens no run of
-        // its own: its finished copy says where it went (`routed`) instead.
-        const local = new Map(this.state.turns.filter(turn => turn.state === "streaming").map(turn => [turn.id, turn]));
+        const local = new Map(this.state.turns.filter(turn => turn.state === "streaming" || this.interruptedRequests.has(turn.id)).map(turn => [turn.id, turn]));
         let recoveredStream = false;
         const merged = turns.map(turn => {
           const active = local.get(turn.id);
+          // Mobile can suspend the foreground stream before its acceptance
+          // or approval event. The matching durable handoff is authoritative
+          // too; retaining local streaming state hides its needs-input card.
+          const handedOff = turn.state === "waiting" || (turn.state === "queued" && turn.background === true);
+          // Routed messages may finish without opening a new run.
           const correlated = turn.runId ? !active?.runId || active.runId === turn.runId : Boolean(turn.routed) && !active?.runId;
-          if (!this.state.voiceActive && active && correlated && (turn.state === "done" || turn.state === "error")) {
+          if (!this.state.voiceActive && active && correlated && (turn.state === "done" || turn.state === "error" || handedOff || this.interruptedRequests.has(turn.id))) {
             local.delete(turn.id);
-            recoveredStream = true;
+            this.interruptedRequests.delete(turn.id);
+            recoveredStream ||= active.state === "streaming";
             return turn;
           }
           return active ?? turn;
         });
-        for (const turn of local.values()) if (!merged.some(item => item.id === turn.id)) merged.push(turn);
+        for (const turn of local.values()) {
+          const since = this.interruptedRequests.get(turn.id);
+          const unresolved: AskTurn = since !== undefined && Date.now() - since >= 30_000
+            ? { ...turn, state: "error", error: "The connection returned, but this request could not be confirmed. Check its status before trying again." }
+            : turn;
+          const index = merged.findIndex(item => item.id === turn.id);
+          if (index < 0) merged.push(unresolved);
+          else merged[index] = unresolved;
+        }
         if (recoveredStream && !this.state.voiceActive) {
           this.epoch++; // Late stream callbacks cannot overwrite the receipt.
           this.active?.cancel(); this.active = null;
@@ -621,12 +627,11 @@ export class ConversationSession {
         if (discussion && this.transport.discussApproval) {
           const latest = await this.transport.discussApproval(discussion.approval.id);
           if (current()) {
-            const recoveredSave = latest.guidanceMode === "deferred" && !!this.state.guidanceRetry && this.state.guidanceRetry.feedback === latest.savedGuidance;
-            this.patch({ discussion: latest, guidanceRetry: this.guidanceReceipt(latest), ...(recoveredSave ? { error: "" } : {}) });
+            this.patch({ discussion: latest, guidanceRetry: this.guidanceReceipt(latest) });
           }
         }
       } }
-      catch (error) { if (current()) this.patch({ snapshotError: message(error) }); }
+      catch (error) { if (current()) this.patch({ snapshotError: isTransportInterruption(error) ? "" : message(error) }); }
       if (request.refreshHistory && current()) void this.refresh();
       this.scheduleRefresh();
     })().finally(() => { if (this.reloadRequest === request) this.reloadRequest = null; });
@@ -682,11 +687,12 @@ export class ConversationSession {
       Object.assign(turn, patch);
       this.patch({ turns: this.state.turns.map(item => item.id === turn.id ? { ...turn } : item) });
     };
-    const finish = (error?: string) => {
+    const finish = (error?: string, interrupted = false) => {
       if (epoch !== this.epoch) return;
       const background = isBackgroundTurn(turn);
-      const observing = background || Boolean(error && turn.runId);
-      patchTurn({ state: error ? turn.runId ? "interrupted" : "error" : background ? turn.state : "done", error, endedAt: observing ? undefined : new Date().toISOString(), ...(background && !error ? { acknowledgement: turn.answer } : {}) });
+      const observing = interrupted || background || Boolean(error && turn.runId);
+      if (interrupted) this.interruptedRequests.set(turn.id, Date.now());
+      patchTurn({ state: interrupted ? "interrupted" : error ? turn.runId ? "interrupted" : "error" : background ? turn.state : "done", error, endedAt: observing ? undefined : new Date().toISOString(), ...(background && !error ? { acknowledgement: turn.answer } : {}) });
       this.epoch++;
       this.active = null;
       this.patch({ busy: false });
@@ -720,6 +726,7 @@ export class ConversationSession {
           },
           done: () => finish(turn.answer.trim() || isBackgroundTurn(turn) ? undefined : "MemQL finished without an answer."),
           error: error => finish(error),
+          interrupted: () => finish(undefined, true),
         }, { conversationId: id ?? "", turnId: turn.id, routing, ...(attached.length ? { attachments: attached.map(item => item.artifactId) } : {}) });
         if (epoch === this.epoch) { this.active = handle; this.scheduleRefresh(); }
       } catch (error) { finish(message(error)); }

@@ -26,9 +26,9 @@
 // from this list is verified by the lane but absent from the workspace, so the
 // two are checking different trees and the difference is silent.
 
-go 1.26.1
+go 1.26.8
 
-toolchain go1.27.2
+toolchain go1.27.3
 
 use (
 	.

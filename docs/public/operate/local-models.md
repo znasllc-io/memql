@@ -38,6 +38,10 @@ The floor is checked by the cockpit's model discovery, on the machine itself.
 That placement is deliberate: only the machine can see its own GPU, and a
 central check would be guessing from a hostname.
 
+This floor is for a machine that serves models. A machine that also runs the
+whole cluster needs more memory; see
+[Minimum requirements](minimum-requirements.md#one-machine-the-entire-cluster).
+
 **How the runtime gets there.** `memql worker setup --inference` installs it
 without anything from root on either platform. On macOS that is Homebrew's
 Ollama. On Linux it is Ollama **as the person's own user**: the vendor's

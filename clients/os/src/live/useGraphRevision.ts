@@ -1,6 +1,7 @@
 import { createContext, useContext, useEffect, useRef, useState } from "react";
 import { useConnectionStatus } from "../chrome/connection";
 import { useOsConnection } from "./connection";
+import { onAppResume } from "./resume";
 
 // The shell keeps parked windows mounted so drafts survive. Their computed
 // reads must not keep generating background load while no one can see them.
@@ -22,11 +23,13 @@ export function useGraphRevision(concepts: readonly string[], enabled = true) {
   const key = concepts.join(",");
   const status = useConnectionStatus();
   const previous = useRef({ active, status });
+  const lastRecovery = useRef(-Infinity);
   useEffect(() => {
     const before = previous.current;
     previous.current = { active, status };
     // Mount already starts its read. Only recovery needs another snapshot.
     if (active && status === "connected" && (!before.active || before.status !== "connected")) {
+      lastRecovery.current = Date.now();
       setRevision(value => value + 1);
     }
   }, [active, status]);
@@ -48,9 +51,12 @@ export function useGraphRevision(concepts: readonly string[], enabled = true) {
     const remove = key.split(",").filter(Boolean).map(concept => connection.subscriptions.subscribeGraph(changed, { concept }));
     // Resubscriptions recover delivery; a focused/reconnected surface also
     // rereads inputs to cover events missed while its stream was down.
-    window.addEventListener("online", changed);
-    window.addEventListener("focus", changed);
-    return () => { remove.forEach(stop => stop()); clearTimeout(timer); window.removeEventListener("online", changed); window.removeEventListener("focus", changed); };
+    const stopResume = onAppResume(() => {
+      if (Date.now() - lastRecovery.current < 1_000) return;
+      lastRecovery.current = Date.now();
+      changed();
+    });
+    return () => { remove.forEach(stop => stop()); clearTimeout(timer); stopResume(); };
   }, [connection, key, active]);
   return revision;
 }

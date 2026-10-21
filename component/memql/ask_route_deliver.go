@@ -176,8 +176,6 @@ func routeDeliveryFor(run, approval map[string]any) (routeDelivery, string, stri
 	switch {
 	case !work.ApprovalAcceptsGuidance(kind, subject, options):
 		return deliverNone, routeNotDelivered, routeReasonReview
-	case kind == work.ApprovalKindBudget:
-		return deliverApproval, routeSaved, ""
 	case kind == work.ApprovalKindFeedback || work.IsFailureQuestion(options):
 		return deliverApproval, routeAnswered, ""
 	default:

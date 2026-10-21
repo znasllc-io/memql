@@ -73,7 +73,14 @@ and **rejects a tag it cannot parse**. Measured against the v1.30.0 webhook:
 | `0.1.0` | rejected — *"Unsupported PostgreSQL version"* (parsed as major 0) |
 
 So the tag **must begin with the PostgreSQL major**. The local build tags
-`16-dev`; a release tag reads like `16.15-timescaledb-2.29.1`.
+`16-dev`. Native release candidates read `deploy/db-image/VERSION`, currently
+`16.15.1`: PostgreSQL major, PostgreSQL minor, then our operand revision.
+Increment the final number for a changed operand at the same PostgreSQL version;
+reset it to 1 when the PostgreSQL minor changes. TimescaleDB versions remain
+explicit Dockerfile inputs and are verified by the smoke test. Publication
+uses this exact version without a leading `v`, then deployment pins its digest.
+A server dry run against the installed CNPG webhook accepted `16.15.1`; this
+does not change the running database image.
 
 A tag naming only the product version builds an image no `Cluster` can
 reference — and nothing in this repository catches it: the build succeeds, the
@@ -83,11 +90,13 @@ failure appears at `kubectl apply` during a bring-up.
 
 ## Building
 
-**Release** — GitHub build server only
-(`.github/workflows/build-db-image.yml`, `workflow_dispatch`). OIDC → ACR, with
-a GHCR mirror so a local install can pull without Azure credentials. The smoke
-test **gates the push**: the image is built, loaded, exercised, and only then
-pushed. An image that reached ACR broken is pinnable by an overlay, and an
+**Native release** — `tests.database-image` builds the `verified` Docker
+target on the isolated cluster builder and retains the OCI archive plus
+metadata. A `database` candidate resolves its version from this directory’s
+`VERSION`, selects those exact retained receipts and publishes through separately
+approved ACR/GHCR targets. The smoke test runs inside the build before the image
+can be exported. The legacy workflow remains during qualification; remove it
+after the native publication and registry readback receipts are recorded. An image that reached ACR broken is pinnable by an overlay, and an
 Apache-build regression does not present as a failed pull — it presents as a
 migration failing much later with an error naming a missing function.
 

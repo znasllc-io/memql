@@ -48,9 +48,6 @@ case "$1" in
         printf 'https://github.test/releases/%s\n' "$3"
         exit 0 ;;
     esac ;;
-  run)
-    printf '[{"databaseId":7,"url":"https://github.test/run/7","event":"workflow_dispatch","status":"queued","conclusion":null,"createdAt":"2026-01-01T00:00:05Z"}]\n'
-    exit 0 ;;
   api)
     shift
     path=""
@@ -61,6 +58,16 @@ case "$1" in
       esac
     done
     case "$path" in
+      */rules/branches/*)
+        if [[ -n "${FAKE_NATIVE_RULES:-}" ]]; then printf '%s\n' "$FAKE_NATIVE_RULES"; else
+          printf '[{"type":"required_status_checks","parameters":{"required_status_checks":[{"context":"MemQL / widget","integration_id":123}]}}]\n'
+        fi
+        exit 0 ;;
+      */check-runs*)
+        if [[ -n "${FAKE_NATIVE_CHECKS:-}" ]]; then printf '%s\n' "$FAKE_NATIVE_CHECKS"; else
+          printf '[{"check_runs":[{"id":7,"name":"MemQL / widget / release","app":{"id":123},"head_sha":"%s","external_id":"native-run","details_url":"https://os.example.test/pipelines/run/native-run","status":"in_progress","conclusion":null,"started_at":"2026-01-01T00:00:05Z"}]}]\n' "${FAKE_HEAD_SHA:-headsha}"
+        fi
+        exit 0 ;;
       */git/matching-refs/tags/*)
         if [[ -n "${FAKE_TAG_EXISTS:-}" ]]; then printf 'refs/tags/%s\n' "${path##*/}"; fi
         exit 0 ;;
@@ -306,7 +313,7 @@ func TestReleaseEngineChecksAGivenTargetSha(t *testing.T) {
 	if reads := r.calls("contents/VERSION?ref=cafe123"); len(reads) != 1 {
 		t.Fatalf("VERSION was not read at the given targetSha: %v", r.ghLog)
 	}
-	if heads := r.calls("/commits/"); len(heads) != 0 {
+	if heads := r.calls("/commits/main"); len(heads) != 0 {
 		t.Errorf("the default branch was read although a targetSha was given: %v", heads)
 	}
 	created := r.calls("release create v1.2.3")

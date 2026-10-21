@@ -152,7 +152,11 @@ func (s *candidateDraftScope) begin(ctx context.Context, _ map[string]any) (any,
 	if !s.checked {
 		return nil, errors.New("release intent requires fresh candidate verification")
 	}
-	rec, err := s.p.ledger.beginDraft(ctx, s.record.ID, s.request.ApprovalID, s.plan)
+	begin := s.p.ledger.beginDraft
+	if !s.promote {
+		begin = s.p.ledger.beginReviewedDraft
+	}
+	rec, err := begin(ctx, s.record.ID, s.request.ApprovalID, s.plan)
 	if err != nil {
 		return nil, err
 	}
@@ -182,10 +186,7 @@ func (s *candidateDraftScope) client(ctx context.Context) (*githubrelease.Lifecy
 	return s.p.targetReader.fileLifecycle(ctx, s.plan.Assets[0].Destination)
 }
 func (s *candidateDraftScope) marker() string {
-	if s.plan.Target.ReleaseID == 0 {
-		return s.binding.IntentID
-	}
-	return ""
+	return s.plan.marker(s.binding)
 }
 
 func (s *candidateDraftScope) ensureTag(ctx context.Context, _ map[string]any) (any, error) {

@@ -77,6 +77,7 @@ func (t candidateRegistryTarget) snapshot() (candidateRegistryTarget, ociregistr
 type candidateTargetReader struct {
 	targets  map[string]candidateRegistryTarget
 	files    map[string]candidateFileTarget
+	npm      map[string]candidateNPMTarget
 	secret   func(context.Context, string) (string, error)
 	appToken func(context.Context, repoRef) (string, error)
 }
@@ -93,7 +94,7 @@ func (r candidateTargetReader) resolve(ctx context.Context, d pl.ReleaseDestinat
 		return candidateRegistryTarget{}, ociregistry.Target{}, err
 	}
 	t, ok := r.targets[d.TargetID]
-	if !ok || t.ID != d.TargetID || t.Component != d.Component || t.Artifact != d.Artifact || d.Operation != "publish" || d.DesiredStateDigest != "" || d.RollbackCandidateID != "" || r.files[d.TargetID].ID != "" {
+	if !ok || t.ID != d.TargetID || t.Component != d.Component || t.Artifact != d.Artifact || d.Operation != "publish" || d.DesiredStateDigest != "" || d.RollbackCandidateID != "" || r.files[d.TargetID].ID != "" || r.npm[d.TargetID].ID != "" {
 		return t, ociregistry.Target{}, errors.New("candidate has no matching operator registry target")
 	}
 	t, target, digest, err := t.snapshot()
@@ -110,9 +111,17 @@ func (r candidateTargetReader) resolve(ctx context.Context, d pl.ReleaseDestinat
 // approval and effect identity. Resolving configuration here repeats the drift
 // check on the publishing node; the resulting publisher owns its snapshot.
 func (r candidateTargetReader) publisher(ctx context.Context, d pl.ReleaseDestination) (*ociregistry.Publisher, error) {
-	t, target, err := r.resolve(ctx, d)
+	target, err := r.authenticatedRegistry(ctx, d)
 	if err != nil {
 		return nil, err
+	}
+	return ociregistry.NewPublisher(target)
+}
+
+func (r candidateTargetReader) authenticatedRegistry(ctx context.Context, d pl.ReleaseDestination) (ociregistry.Target, error) {
+	t, target, err := r.resolve(ctx, d)
+	if err != nil {
+		return target, err
 	}
 	name := t.BearerSecret
 	if t.PasswordSecret != "" {
@@ -120,11 +129,11 @@ func (r candidateTargetReader) publisher(ctx context.Context, d pl.ReleaseDestin
 	}
 	if name != "" {
 		if r.secret == nil {
-			return nil, errors.New("registry credential resolver is unavailable")
+			return target, errors.New("registry credential resolver is unavailable")
 		}
 		value, err := r.secret(ctx, name)
 		if err != nil || value == "" || len(value) > 16<<10 {
-			return nil, errors.New("registry credential is unavailable")
+			return target, errors.New("registry credential is unavailable")
 		}
 		if t.PasswordSecret != "" {
 			target.Username, target.Password = t.Username, value
@@ -132,5 +141,5 @@ func (r candidateTargetReader) publisher(ctx context.Context, d pl.ReleaseDestin
 			target.BearerToken = value
 		}
 	}
-	return ociregistry.NewPublisher(target)
+	return target, nil
 }

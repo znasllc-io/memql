@@ -13,7 +13,7 @@ import (
 
 // Ordinary owner-scoped queries, never system authority. The native inspection
 // also binds the journal's exact source/run to the authorized pipeline row.
-func readSARIFEvidence(ctx context.Context, engine Engine, owner string, r Run, key string) (pipelines.ReleaseWorkReceipt, error) {
+func readProducerEvidence(ctx context.Context, engine Engine, owner string, r Run, key string) (pipelines.ReleaseWorkReceipt, error) {
 	one := func(query string) (map[string]any, error) {
 		res, err := engine.Execute(memql.ContextWithFreshRead(ctx), query)
 		if err != nil {

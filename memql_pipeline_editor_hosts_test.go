@@ -2,59 +2,24 @@ package main
 
 import (
 	"maps"
-	"os"
 	"strings"
 	"testing"
 
 	"github.com/znasllc-io/memql/component/pipelines"
-	"gopkg.in/yaml.v3"
 )
 
-// Compare with the existing host matrix while both paths remain enabled. A
-// portable unit/package lane cannot replace a desktop or browser host case.
-func TestNativeEditorHostsCoverExistingMatrixAndChangedSources(t *testing.T) {
-	raw, err := os.ReadFile(".github/workflows/ci.yml")
-	if err != nil {
-		t.Fatal(err)
-	}
-	var legacy struct {
-		Jobs map[string]yaml.Node `yaml:"jobs"`
-	}
-	if err := yaml.Unmarshal(raw, &legacy); err != nil {
-		t.Fatal(err)
-	}
-	type matrix struct {
-		VSCode  []string                             `yaml:"vscode"`
-		Include []struct{ OS, Host, Version string } `yaml:"include"`
-	}
-	readMatrix := func(name string) matrix {
-		node, ok := legacy.Jobs[name]
-		if !ok {
-			t.Fatalf("legacy host job %q is missing", name)
-		}
-		var job struct {
-			Strategy struct {
-				Matrix matrix `yaml:"matrix"`
-			} `yaml:"strategy"`
-		}
-		if err := node.Decode(&job); err != nil {
-			t.Fatal(err)
-		}
-		return job.Strategy.Matrix
-	}
+// Keep both supported desktop versions and both host types on their real
+// platforms. A portable unit/package lane cannot replace a host case.
+func TestNativeEditorHostsCoverSupportedMatrixAndChangedSources(t *testing.T) {
 	want := map[string]bool{}
-	for _, version := range readMatrix("vscode-extension-host").VSCode {
+	for _, version := range []string{"1.91.0", "stable"} {
 		want["vscode-desktop/linux/amd64/"+version] = true
-	}
-	for _, item := range readMatrix("productivity-extension-host").Include {
-		platform := map[string]string{"ubuntu-latest": "linux/amd64", "macos-latest": "darwin/arm64"}[item.OS]
-		if platform == "" {
-			t.Fatalf("unported legacy host platform %q", item.OS)
+		for _, platform := range []string{"linux/amd64", "darwin/arm64"} {
+			want["productivity-desktop/"+platform+"/"+version] = true
 		}
-		want["productivity-"+item.Host+"/"+platform+"/"+item.Version] = true
 	}
-	if len(want) != 8 {
-		t.Fatalf("legacy host matrix changed: %v", want)
+	for _, platform := range []string{"linux/amd64", "darwin/arm64"} {
+		want["productivity-web/"+platform+"/stable"] = true
 	}
 	spec := engineManifest(t).Pipeline
 	graph, _ := engineImportGraph(t)

@@ -60,20 +60,18 @@ The version of a MemQL build is the **git tag** it was cut from
   `org.opencontainers.image.revision=<short-sha>` on every image, and
   flags a dirty tree). There is nothing to strip and nothing to
   reconcile.
-- A release is cut by tagging `main` (`git tag vX.Y.Z`) once the
-  prepare pull request has set `VERSION` to `X.Y.Z`; see
-  [docs/public/operate/release-cutting.md](docs/public/operate/release-cutting.md).
-  `make release VERSION=X.Y.Z` builds an immutable `memql:X.Y.Z` image **locally** from
-  that commit -- useful for inspecting what a release image contains, but
-  it is not the cloud-release path: per CLAUDE.md's image-build rule, a
-  deployable release image is built on the GitHub build server, not an
-  operator machine. The cloud-release mechanism is the git tag plus a
-  manual `workflow_dispatch` of
-  [`.github/workflows/build-engine-images.yml`](.github/workflows/build-engine-images.yml)
-  with the version as input; see
-  [docs/public/operate/deploy-bundle-runbook.md](docs/public/operate/deploy-bundle-runbook.md)
-  for the full deploy path (image build -> digest pin in the cloud overlay ->
-  ArgoCD reconcile).
+- A release is cut from the reviewed commit on `main` after the prepare pull
+  request sets `VERSION` to `X.Y.Z`; see
+  [Cutting a release](docs/public/operate/release-cutting.md).
+  Publishing the GitHub Release delivers the native pipeline's release event.
+  The MemQL build server builds the tagged source using
+  [`memql-package.yaml`](memql-package.yaml) and publishes verified image
+  digests. A tag alone does not start a build. To recover a missing delivery,
+  use **Run release** with that tag in MemQL Pipelines.
+  `make release VERSION=X.Y.Z` remains a local image inspection command.
+  Cloud deployment uses the native build's digests, a reviewed overlay pin,
+  and ArgoCD reconciliation; see the
+  [deploy runbook](docs/public/operate/deploy-bundle-runbook.md).
 - **`PUSH=1` is break-glass, and the script now says so** (memql#4116).
   `make release VERSION=X.Y.Z ACR=acrmemql PUSH=1` runs a real `docker push`
   to the shared registry -- precisely the path CLAUDE.md's image-build rule
@@ -470,14 +468,13 @@ long as the page exists. The full pipeline is
 - **The source** is `docs/public/`: the pages git tracks there whose
   front matter says `audience: public`, `status: stable` and
   `exposure: engine` (a page with no `exposure` reads as engine).
-- **One set per release, as a Release asset.** When a GitHub Release is
-  published, `.github/workflows/publish-docs-bundle.yml` checks out the
-  release tag with full history and builds the set there with
-  `scripts/docs/build-docs-bundle.sh` (over `cmd/docs-gen bundle`), then
-  attaches it as `docs-<X.Y.Z>.tgz`. The build refuses a `--version`
-  that differs from `VERSION`, which equals the tag (above), so the set
-  carries the version of the release it was built from, and nothing
-  else.
+- **One set per release, as a Release asset.** The native
+  `release-files.packages` step builds the exact release tag with full history,
+  using `scripts/docs/build-docs-bundle.sh` over `cmd/docs-gen bundle`. It
+  retains `docs-<X.Y.Z>.tgz` in the Library; reviewed release publication
+  attaches those verified bytes to the release. The build refuses a version
+  that differs from `VERSION`, which equals the tag, so the set carries the
+  version of its source release.
 - **The site replaces its set.** That is the instance repository's side
   of the contract: the instance that hosts memql.io replaces its docs
   with the newest release's asset and keeps no older set (its docs sync,

@@ -400,11 +400,11 @@ routed, stopped or sent to a model. Inspect both modes at desktop and 820px
 widths and with `narrow=1`, where Keep and Stop wrap beneath the question on
 the card's right edge.
 
-`/ask-routing.html?budget=1` shows a resumable budget discussion. Use
-`state=saved`, `state=pending`, or `state=error` to review saved guidance,
-an in-flight save, and a retryable save with the original draft retained.
-Saving keeps the request pending; it never raises a limit or resumes work.
-Inspect both modes and a narrow viewport, including the saved-text disclosure.
+`/ask-routing.html?progress=1` shows a saved-work feedback discussion. Use
+`state=sent`, `state=pending`, `state=error`, or `state=stopped` to review a
+continued run, an in-flight answer, a retryable failure with the original draft
+retained, and a run stopped at its overall limit. Inspect both modes and a
+narrow viewport. These synthetic receipts never change a real run.
 The same page keeps the general Ask states: `scene=empty`, `pending`, `quick`,
 `error`, `format-error` and `model-error`.
 

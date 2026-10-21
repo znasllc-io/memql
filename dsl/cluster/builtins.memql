@@ -145,6 +145,34 @@ builtin releaseRetireCandidate {
   candidateId string!
 }
 
+/// Release duplicate build inputs only after fresh verification of every
+/// canonical published artifact. Publication history and downloads survive;
+/// the archived candidate can never publish or prepare again. Owner only.
+@sdk
+@executor("integration.release.archiveCandidate")
+builtin releaseArchiveCandidate {
+  candidateId string!
+}
+
+/// Enroll or pause your published-input cleanup. The schedule resolves your
+/// current owner role and retains credential ceilings; maintenance cannot lend
+/// authority. Pausing prevents another pass; an admitted pass may finish.
+@sdk
+@executor("integration.release.setInputArchiveSchedule")
+builtin releaseSetInputArchiveSchedule {
+  enabled bool!
+}
+
+/// Internal scheduled entry. It admits one explicitly enrolled owner's sealed
+/// candidate, and delegates its age policy to installed DSL.
+@executor("integration.release.sweepPublishedInputs")
+builtin releaseSweepPublishedInputs { }
+
+/// Scoped native operation; callable only for the leased candidate selected
+/// by releaseSweepPublishedInputs. Canonical availability is always verified.
+@executor("integration.release.releaseRetentionArchiveInputs")
+builtin releaseRetentionArchiveInputs { }
+
 /// Scoped release operation; available only inside an owner-authorized release cut.
 @executor("integration.release.releaseReadSnapshot")
 builtin releaseReadSnapshot { }

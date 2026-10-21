@@ -1104,7 +1104,7 @@ QueryClient.prototype.composeCancel = function (this: QueryClient, args: Compose
   return this.executeNamed("composeCancel", buildComposeCancel(args), opts);
 };
 
-/** Start a Materializer work run using the known materializeFile template. The composition and immutable source snapshot are saved before dispatch. Returns {compositionId, goalId, runId}; progress and the eventual outputFileId arrive on the composition row. */
+/** Create a saved document file in Files from supplied content or a writing request: Markdown, HTML, text, CSV, JSON, DOCX or PDF. Uses the materializeFile template. The composition and immutable source snapshot are saved before dispatch. Returns {compositionId, goalId, runId}; progress and the eventual outputFileId arrive on the composition row. */
 export interface ComposeMaterializeArgs {
   /** What to call it, and the filename stem of the output. A name with a slash is refused (folderId chooses where it is filed), and one trailing extension that already names the format is dropped, because the extension is added when the file is filed: Plan.md is filed as Plan.md, never Plan.md.md. */
   name: string;
@@ -1452,7 +1452,7 @@ export interface DecideApprovalArgs {
   approvalId: string;
   /** approved, rejected, or answered (for a feedback question). */
   decision: string;
-  /** The person's answer. A budget approval may supply {newLimit: number} to raise only its named ceiling above recorded usage before resuming, preserving all other ceilings and spent counters. Count and time limits must be whole numbers. */
+  /** The person's offered choice or feedback. Progress feedback continues saved work within its original limits; it cannot grant permissions or raise those limits. Older budget requests can only be rejected. */
   answer?: Record<string, unknown>;
 }
 
@@ -3874,6 +3874,87 @@ QueryClient.prototype.pipelinesCancel = function (this: QueryClient, args: Pipel
   return this.executeNamed("pipelinesCancel", buildPipelinesCancel(args), opts);
 };
 
+/** Allow or revoke one of the caller's channels on one of the caller's pipelines. Preserves every other channel grant and pipeline field. Sends no message. Answers {pipelineId, channelIds}. */
+export interface PipelinesChannelAllowArgs {
+  /** The caller's pipeline. */
+  pipelineId: string;
+  /** The caller's channel name. */
+  name: string;
+  /** True allows notification stages to use this channel; false revokes that permission. */
+  allowed: boolean;
+}
+
+export function buildPipelinesChannelAllow(args: PipelinesChannelAllowArgs): string {
+  const parts: string[] = [];
+  parts.push("pipelineId: " + renderMemQLValue(args.pipelineId));
+  parts.push("name: " + renderMemQLValue(args.name));
+  parts.push("allowed: " + renderMemQLValue(args.allowed));
+  return "builtin pipelinesChannelAllow(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    pipelinesChannelAllow(args: PipelinesChannelAllowArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.pipelinesChannelAllow = function (this: QueryClient, args: PipelinesChannelAllowArgs = {} as PipelinesChannelAllowArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("pipelinesChannelAllow", buildPipelinesChannelAllow(args), opts);
+};
+
+/** Archive the caller's channel by name. Later notification stages refuse it. Messages already staged keep their delivery receipts. The channel row and run history remain; pipelinesChannelSave resumes it. */
+export interface PipelinesChannelArchiveArgs {
+  /** The caller's channel name. */
+  name: string;
+}
+
+export function buildPipelinesChannelArchive(args: PipelinesChannelArchiveArgs): string {
+  const parts: string[] = [];
+  parts.push("name: " + renderMemQLValue(args.name));
+  return "builtin pipelinesChannelArchive(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    pipelinesChannelArchive(args: PipelinesChannelArchiveArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.pipelinesChannelArchive = function (this: QueryClient, args: PipelinesChannelArchiveArgs = {} as PipelinesChannelArchiveArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("pipelinesChannelArchive", buildPipelinesChannelArchive(args), opts);
+};
+
+/** Save configuration only; a channel's stable name is what the manifest uses. Pipeline grants are separate so a partial multi-pipeline update cannot be mistaken for an atomic permission change. */
+export interface PipelinesChannelSaveArgs {
+  /** Lower-case letters, digits and hyphens, starting with a letter or digit; at most 40 characters. */
+  name: string;
+  /** discord or email. */
+  kind: string;
+  /** For Discord: the globalSecret name holding the webhook URL. Never the URL or a name in the MEMQL_ namespace. */
+  secretRef?: string;
+  /** For email: 1 to 20 bare email addresses. Empty for Discord. */
+  recipients?: string[];
+}
+
+export function buildPipelinesChannelSave(args: PipelinesChannelSaveArgs): string {
+  const parts: string[] = [];
+  parts.push("name: " + renderMemQLValue(args.name));
+  parts.push("kind: " + renderMemQLValue(args.kind));
+  if (args.secretRef !== undefined) parts.push("secretRef: " + renderMemQLValue(args.secretRef));
+  if (args.recipients !== undefined) parts.push("recipients: " + renderMemQLValue(args.recipients));
+  return "builtin pipelinesChannelSave(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    pipelinesChannelSave(args: PipelinesChannelSaveArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.pipelinesChannelSave = function (this: QueryClient, args: PipelinesChannelSaveArgs = {} as PipelinesChannelSaveArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("pipelinesChannelSave", buildPipelinesChannelSave(args), opts);
+};
+
 /** Connect a pipeline to one of the caller's sources (D12, D14). The caller must own the package, which must be a GitHub repository source fetched under a grant; the grant must reach the repository, proved by minting an installation token through it. Reads memql-package.yaml at the repository's default-branch head: a source with no `pipeline:` block is refused with pipeline_not_declared; a block that does not validate, or a step whose need or secret this connection's compute and secretNames do not allow, is refused with its own pipeline_* code; and a repository another source already runs is refused with pipeline_already_connected, so a pipeline that could never compile is never connected. Creates the source's one pipeline -- its id derived from the package id -- or reconnects it, which restates the configuration and keeps what the poll has seen. Answers {pipelineId, repository, delivery, compute, schedule, stages}, with schedule daily or empty and stages naming the block's stages in order. */
 export interface PipelinesConnectArgs {
   /** The v1:platform:package source to connect. Must be the caller's own. */
@@ -3925,6 +4006,29 @@ declare module "./query.js" {
 
 QueryClient.prototype.pipelinesDisconnect = function (this: QueryClient, args: PipelinesDisconnectArgs = {} as PipelinesDisconnectArgs, opts?: QueryCallOptions): Promise<Result> {
   return this.executeNamed("pipelinesDisconnect", buildPipelinesDisconnect(args), opts);
+};
+
+/** Read confirmed expiry for selected files from the caller's pipeline run. Only provider retirement AND Library cleanup receipts establish expiry. Missing files, failed uploads and unavailable reads do not imply expiry. */
+export interface PipelinesExpiredArtifactsArgs {
+  runId: string;
+  fileIds: string[];
+}
+
+export function buildPipelinesExpiredArtifacts(args: PipelinesExpiredArtifactsArgs): string {
+  const parts: string[] = [];
+  parts.push("runId: " + renderMemQLValue(args.runId));
+  parts.push("fileIds: " + renderMemQLValue(args.fileIds));
+  return "builtin pipelinesExpiredArtifacts(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    pipelinesExpiredArtifacts(args: PipelinesExpiredArtifactsArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.pipelinesExpiredArtifacts = function (this: QueryClient, args: PipelinesExpiredArtifactsArgs = {} as PipelinesExpiredArtifactsArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("pipelinesExpiredArtifacts", buildPipelinesExpiredArtifacts(args), opts);
 };
 
 /** The installations of this cluster's GitHub App whose accepted permissions lag what the app asks for (epic memql#5479, D15): when an app's permissions grow -- pipelines added checks write -- every existing installation keeps the old set until the account that installed it approves the change on GitHub, and until then every check-run write there answers 403. Asked of GitHub as the app itself. Answers one row, {installations [{installationId, account, accountType, htmlUrl, missingPermissions, suspended}]}: htmlUrl is the installation's settings page, where the change waits. A cluster with no GitHub App answers none; a GitHub that could not be asked is an error, never an empty list. */
@@ -4039,9 +4143,9 @@ QueryClient.prototype.pipelinesRerun = function (this: QueryClient, args: Pipeli
   return this.executeNamed("pipelinesRerun", buildPipelinesRerun(args), opts);
 };
 
-/** Start a full manual rehearsal of a branch head for one of the caller's disconnected pipelines: the branch named, or the repository's default branch when none is. Automatic delivery must be disconnected so this run cannot duplicate a webhook or poll. The source owner's GitHub grant reads the branch, the exact SHA is pinned in the run, and the run writes its check run on that commit. A name GitHub would not accept is refused pipeline_branch_invalid before GitHub is asked. The sealed workflow includes stages with no `on` list and stages explicitly marked `on: [manual]`; it does not treat manual as push or release, so future publication steps remain opted out. Repeated requests for the same head resolve to the existing attempt, whichever branch named it; re-run that attempt to start another. */
+/** Start a full manual rehearsal of a branch head for one of the caller's pipelines: the branch named, or the repository's default branch when none is. Automatic delivery remains as configured. The manual run has its own deduplicated event key and a separate check context that cannot satisfy a required PR or merge-candidate check. The source owner's GitHub grant reads the branch, the exact SHA is pinned in the run, and the run writes its check run on that commit. A name GitHub would not accept is refused pipeline_branch_invalid before GitHub is asked. The sealed workflow includes stages with no `on` list and stages explicitly marked `on: [manual]`; it does not treat manual as push or release, so future publication steps remain opted out. Repeated requests for the same head resolve to the existing attempt, whichever branch named it; re-run that attempt to start another. */
 export interface PipelinesRunLatestArgs {
-  /** The caller's v1:pipelines:pipeline. It must be disconnected. */
+  /** The caller's v1:pipelines:pipeline. */
   pipelineId: string;
   /** A branch of the same repository, named as GitHub shows it (main, feature/login). Absent or empty runs the default branch. */
   branch?: string;
@@ -4319,6 +4423,27 @@ declare module "./query.js" {
 
 QueryClient.prototype.releaseApproveCandidate = function (this: QueryClient, args: ReleaseApproveCandidateArgs = {} as ReleaseApproveCandidateArgs, opts?: QueryCallOptions): Promise<Result> {
   return this.executeNamed("releaseApproveCandidate", buildReleaseApproveCandidate(args), opts);
+};
+
+/** Release duplicate build inputs only after fresh verification of every canonical published artifact. Publication history and downloads survive; the archived candidate can never publish or prepare again. Owner only. */
+export interface ReleaseArchiveCandidateArgs {
+  candidateId: string;
+}
+
+export function buildReleaseArchiveCandidate(args: ReleaseArchiveCandidateArgs): string {
+  const parts: string[] = [];
+  parts.push("candidateId: " + renderMemQLValue(args.candidateId));
+  return "builtin releaseArchiveCandidate(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    releaseArchiveCandidate(args: ReleaseArchiveCandidateArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.releaseArchiveCandidate = function (this: QueryClient, args: ReleaseArchiveCandidateArgs = {} as ReleaseArchiveCandidateArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("releaseArchiveCandidate", buildReleaseArchiveCandidate(args), opts);
 };
 
 /** Resolve completed work runs through a declared assembly plan, then verify and retain the candidate. Run aliases select actual executions; versions, receipt identities and digests are read natively. */
@@ -4748,6 +4873,27 @@ declare module "./query.js" {
 
 QueryClient.prototype.releaseSealPublishedCandidate = function (this: QueryClient, args: ReleaseSealPublishedCandidateArgs = {} as ReleaseSealPublishedCandidateArgs, opts?: QueryCallOptions): Promise<Result> {
   return this.executeNamed("releaseSealPublishedCandidate", buildReleaseSealPublishedCandidate(args), opts);
+};
+
+/** Enroll or pause your published-input cleanup. The schedule resolves your current owner role and retains credential ceilings; maintenance cannot lend authority. Pausing prevents another pass; an admitted pass may finish. */
+export interface ReleaseSetInputArchiveScheduleArgs {
+  enabled: boolean;
+}
+
+export function buildReleaseSetInputArchiveSchedule(args: ReleaseSetInputArchiveScheduleArgs): string {
+  const parts: string[] = [];
+  parts.push("enabled: " + renderMemQLValue(args.enabled));
+  return "builtin releaseSetInputArchiveSchedule(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    releaseSetInputArchiveSchedule(args: ReleaseSetInputArchiveScheduleArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.releaseSetInputArchiveSchedule = function (this: QueryClient, args: ReleaseSetInputArchiveScheduleArgs = {} as ReleaseSetInputArchiveScheduleArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("releaseSetInputArchiveSchedule", buildReleaseSetInputArchiveSchedule(args), opts);
 };
 
 /** Read configured update publishers without endpoints, keys or credentials. */

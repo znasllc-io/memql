@@ -105,7 +105,7 @@ function localtls_sans_oneline() {
 
 # A DNS SAN is a complete comma-delimited entry, never a hostname prefix.
 function localtls_has_dns_name() {
-    printf '%s\n' "$1" | tr ',' '\n' | sed 's/^[[:space:]]*//; s/[[:space:]]*$//' | grep -Fxq "DNS:$2"
+    printf '%s\n' "$1" | tr ',' '\n' | sed 's/^[[:space:]]*//; s/[[:space:]]*$//' | grep -Fx "DNS:$2" >/dev/null
 }
 
 # A matching hostname alone does not make a reusable TLS pair: a previous

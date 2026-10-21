@@ -51,6 +51,7 @@ shape run pipelineRunFull {
   rerunOf
   rerunFailedOnly
   deliveryId
+  inboundRequestId
   pullRequest
   headBranch
   baseSha

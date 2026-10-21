@@ -19,17 +19,21 @@ import (
 type candidatePublicationTarget struct {
 	Registry *candidateRegistryTarget `json:"registry,omitempty"`
 	File     *candidateFileTarget     `json:"file,omitempty"`
+	NPM      *candidateNPMTarget      `json:"npm,omitempty"`
 }
 
 func (t candidatePublicationTarget) validate(d pl.ReleaseDestination) error {
 	var key, component, artifact, digest string
 	var err error
-	if t.Registry != nil && t.File == nil {
+	if t.Registry != nil && t.File == nil && t.NPM == nil {
 		key, component, artifact = t.Registry.ID, t.Registry.Component, t.Registry.Artifact
 		_, _, digest, err = t.Registry.snapshot()
-	} else if t.File != nil && t.Registry == nil {
+	} else if t.File != nil && t.Registry == nil && t.NPM == nil {
 		key, component, artifact = t.File.ID, t.File.Component, t.File.Artifact
 		_, _, digest, err = t.File.snapshot()
+	} else if t.NPM != nil && t.Registry == nil && t.File == nil {
+		key, component, artifact = t.NPM.ID, t.NPM.Component, t.NPM.Artifact
+		_, _, digest, err = t.NPM.snapshot()
 	} else {
 		return errors.New("publication must freeze exactly one target")
 	}
@@ -43,6 +47,10 @@ func (t candidatePublicationTarget) validate(d pl.ReleaseDestination) error {
 }
 
 func (r candidateTargetReader) publicationTarget(ctx context.Context, d pl.ReleaseDestination) (candidatePublicationTarget, error) {
+	if _, ok := r.npm[d.TargetID]; ok {
+		t, _, err := r.resolveNPM(ctx, d)
+		return candidatePublicationTarget{NPM: &t}, err
+	}
 	if _, ok := r.files[d.TargetID]; ok {
 		t, _, err := r.resolveFile(ctx, d)
 		return candidatePublicationTarget{File: &t}, err
@@ -83,6 +91,18 @@ func (l *candidateLedger) freezePublicationTarget(ctx context.Context, intent ca
 			return errors.New("registry tag differs from approved component version")
 		}
 		tagKey = registryTagKey(*target.Registry)
+	}
+	if target.NPM != nil {
+		matched := false
+		for _, component := range rec.Manifest.Components {
+			if component.Name == expected.Target.Component && component.Version == target.NPM.Version {
+				matched = true
+			}
+		}
+		if !matched {
+			return errors.New("npm version differs from approved component version")
+		}
+		tagKey = npmVersionKey(*target.NPM)
 	}
 	var body []byte
 	var storedTagKey sql.NullString

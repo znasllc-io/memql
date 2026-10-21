@@ -39,22 +39,30 @@ def facts(kind, repo, tag="", ruleset=""):
     if not re.fullmatch(r"[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+", repo) or any(part in (".", "..") for part in repo.split("/")):
         raise ValueError("repository must be owner/name")
     root = "repos/" + repo
-    if kind == "tags":
+    if kind == "published-releases":
         result = []
         for page in range(1, 101):
-            rows = read(f"{root}/tags?per_page=100&page={page}")
+            rows = read(f"{root}/releases?per_page=100&page={page}")
             if not isinstance(rows, list) or len(rows) > 100:
-                raise ValueError("GitHub public tag response is not a bounded list")
-            result.extend(name(row["name"]) for row in rows)
+                raise ValueError("GitHub public release response is not a bounded list")
+            for row in rows:
+                if type(row["draft"]) is not bool or type(row["prerelease"]) is not bool:
+                    raise ValueError("GitHub release publication state is invalid")
+                if row["draft"] or row["prerelease"] or row["published_at"] is None:
+                    continue
+                name(row["published_at"])
+                result.append(name(row["tag_name"]))
             if len(rows) < 100:
                 return result
-        raise ValueError("GitHub public tag inventory exceeds 10,000 tags")
+        raise ValueError("GitHub public release inventory exceeds 10,000 releases")
     if kind == "release-assets":
         if not re.fullmatch(r"v[0-9]+\.[0-9]+\.[0-9]+", tag):
             raise ValueError("release tag must be vX.Y.Z")
         release = read(f"{root}/releases/tags/{tag}")
-        if release["tag_name"] != tag or release["draft"] is not False:
+        if (release["tag_name"] != tag or release["draft"] is not False
+                or release["prerelease"] is not False or release["published_at"] is None):
             raise ValueError("GitHub returned a different or unpublished release")
+        name(release["published_at"])
         if not isinstance(release["assets"], list):
             raise ValueError("GitHub release assets are not a list")
         return [name(asset["name"]) for asset in release["assets"]]
@@ -72,7 +80,7 @@ def facts(kind, repo, tag="", ruleset=""):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("kind", choices=("tags", "release-assets", "ruleset"))
+    parser.add_argument("kind", choices=("published-releases", "release-assets", "ruleset"))
     parser.add_argument("--repo", required=True)
     parser.add_argument("--tag", default="")
     parser.add_argument("--id", default="")

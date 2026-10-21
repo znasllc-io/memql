@@ -2,6 +2,7 @@ package pipelinerun
 
 import (
 	"context"
+	"database/sql"
 	"errors"
 	"go/ast"
 	"go/parser"
@@ -17,7 +18,7 @@ import (
 
 // internal_origin_test.go -- the three halves of this package's place on the
 // internal-origin allowlist (call_origin_conformance_test.go): the stamp is
-// applied in ONE place, inline, so it never escapes its call; everything a
+// applied only at audited storage boundaries, inline, so it never escapes its call; everything a
 // person reaches is downstream of an owner-scoped read under their own actor;
 // and the runner's own capabilities -- the trigger and the poll, builtins any
 // client's query can name -- refuse every call that did not arrive with
@@ -25,8 +26,9 @@ import (
 
 // TestTheStampNeverEscapesItsCall pins the memql#2879 escalation shape: a
 // trusted frame stamps internal, binds it to a variable, and a later frame
-// runs on the inherited context. ContextWithInternalOrigin appears only inline: the DSL store execution and the four
-// SARIF artifact calls, after native source/producer/owner validation.
+// runs on the inherited context. The inline stamps are the DSL store, retained
+// artifacts after source/producer/owner checks. Signed delivery reads use
+// the existing DSL store boundary after the rule is bound to that owner/run.
 func TestTheStampNeverEscapesItsCall(t *testing.T) {
 	entries, err := os.ReadDir(".")
 	if err != nil {
@@ -34,6 +36,10 @@ func TestTheStampNeverEscapesItsCall(t *testing.T) {
 	}
 	fset := token.NewFileSet()
 	sites := 0
+	// Retention stamps only the owner-bound storage recipe; legacy adoption
+	// stamps only its verified log operation, after the completed work/step read.
+	want := map[string]int{"store_dsl.go": 1, "sarif.go": 4, "repository_change.go": 2, "repository_cleanup.go": 1,
+		"artifact_retention.go": 1, "artifact_retention_legacy.go": 1}
 	for _, entry := range entries {
 		name := entry.Name()
 		if entry.IsDir() || !strings.HasSuffix(name, ".go") || strings.HasSuffix(name, "_test.go") {
@@ -43,11 +49,13 @@ func TestTheStampNeverEscapesItsCall(t *testing.T) {
 		if perr != nil {
 			t.Fatalf("%s: %v", name, perr)
 		}
+		fileSites := 0
 		ast.Inspect(file, func(n ast.Node) bool {
 			switch node := n.(type) {
 			case *ast.SelectorExpr:
 				if node.Sel.Name == "ContextWithInternalOrigin" {
 					sites++
+					fileSites++
 				}
 			case *ast.AssignStmt:
 				for _, rhs := range node.Rhs {
@@ -60,9 +68,12 @@ func TestTheStampNeverEscapesItsCall(t *testing.T) {
 			}
 			return true
 		})
+		if fileSites != want[name] {
+			t.Errorf("%s has %d internal-origin stamps, want %d audited storage calls", name, fileSites, want[name])
+		}
 	}
-	if sites != 5 {
-		t.Errorf("want the DSL-store stamp and four owner-gated SARIF artifact stamps, found %d", sites)
+	if sites != 10 {
+		t.Errorf("want the ten audited inline storage stamps, found %d", sites)
 	}
 }
 
@@ -75,13 +86,16 @@ func TestTheStampNeverEscapesItsCall(t *testing.T) {
 func TestNoPersonReachesAnotherOwnersRows(t *testing.T) {
 	engine := newRecordingEngine()
 	integ := New(Deps{
-		Store:  NewDSLStore(engine),
-		GitHub: newFakeGitHub(t),
-		Gate:   newKeyedGate(t).run,
-		Now:    func() time.Time { return testNow },
+		ArtifactRetention: &ArtifactRetentionDependencies{Engine: engine, Library: &artifactRetentionLibraryFixture{}, Database: func() *sql.DB { return nil }},
+		Store:             NewDSLStore(engine),
+		GitHub:            newFakeGitHub(t),
+		Gate:              newKeyedGate(t).run,
+		Now:               func() time.Time { return testNow },
 	})
 	stranger := personCtx(otherID)
 	acts := map[string]func() error{
+		"retireArtifacts": func() error { _, err := integ.RetireArtifacts(stranger, "r1", "", false); return err },
+		"adoptLegacyLog":  func() error { _, err := integ.AdoptLegacyLog(stranger, "r1", "tests.unit"); return err },
 		"connect": func() error {
 			_, err := integ.Connect(stranger, ConnectRequest{PackageID: packageID, Delivery: DeliveryWebhook})
 			return err
@@ -186,6 +200,9 @@ func TestTheRunnersEntryPointsRefuseAClientAndReadAsTheSystemActor(t *testing.T)
 	}
 	if _, err := integ.Schedule(caller); !errors.Is(err, ErrClientOrigin) {
 		t.Errorf("a person's scheduled scan: %v, want ErrClientOrigin", err)
+	}
+	if _, err := integ.SweepArtifacts(caller); !errors.Is(err, ErrClientOrigin) {
+		t.Errorf("a person's artifact sweep: %v, want ErrClientOrigin", err)
 	}
 	if _, err := integ.handlePoll(caller, nil, 0); !errors.Is(err, ErrClientOrigin) {
 		t.Errorf("a person's poll capability: %v, want ErrClientOrigin", err)

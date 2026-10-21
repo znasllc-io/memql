@@ -33,7 +33,7 @@ func TestReplyReviewCallsOnceAndNeverFallsBackToUncheckedDraft(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			ctx := common.ContextWithRun(context.Background(), common.RunContext{RunId: "original-run", OwnerUserId: "owner"})
 			calls := 0
-			reply, err := reviewReplyOnce(ctx, "Why is the service slow?", "It is slow because the provider is down.", `{"status":"degraded","cause":null}`, time.Now(), func(callCtx context.Context, prompt string, data map[string]any, _ string, schema json.RawMessage, strict bool) (string, error) {
+			reply, err := reviewReplyOnce(ctx, "Why is the service slow?", "It is slow because the provider is down.", `{"status":"degraded","cause":null}`, time.Now(), false, func(callCtx context.Context, prompt string, data map[string]any, _ string, schema json.RawMessage, strict bool) (string, error) {
 				calls++
 				run, _ := common.RunFromContext(callCtx)
 				require.Equal(t, "original-run", run.RunId)
@@ -49,13 +49,14 @@ func TestReplyReviewCallsOnceAndNeverFallsBackToUncheckedDraft(t *testing.T) {
 				require.Empty(t, reply)
 			} else {
 				require.NoError(t, err)
-				require.NotContains(t, reply, "provider is down")
+				require.NotContains(t, reply.Reply, "provider is down")
 			}
 		})
 	}
 }
 
 type replyReviewModel struct {
+	answer   string
 	calls    int
 	messages []common.ChatMessage
 	run      common.RunContext
@@ -75,7 +76,10 @@ func (m *replyReviewModel) CallChatStructured(ctx context.Context, messages []co
 	m.calls++
 	m.messages = messages
 	m.run, _ = common.RunFromContext(ctx)
-	return `{"reply":"The source reports degraded service. It does not identify a cause."}`, nil
+	if m.answer != "" {
+		return m.answer, nil
+	}
+	return `{"reply":"The source reports degraded service. It does not identify a cause.","missingEvidence":""}`, nil
 }
 
 func TestReplyReviewReadsRecordedEvidenceOnAnotherReplica(t *testing.T) {
@@ -145,6 +149,61 @@ func TestLookupReplyWithNoReceiptCannotBypassEvidenceReview(t *testing.T) {
 	require.Equal(t, 1, model.calls)
 	raw, _ := json.Marshal(model.messages)
 	require.Contains(t, string(raw), "no successful source receipt was recorded")
+	model.answer = `{"reply":"The requested entity has not been checked.","missingEvidence":"Resolve the named entity from a source."}`
+	for _, allowed := range []bool{false, true} {
+		// Exercise the same parsed builtin boundary used by the agent, not just
+		// a direct Go call that could conceal losing a nested boolean argument.
+		call, err := parser.RenderCall("work.workReviewReply", map[string]any{"draft": map[string]any{"reply": "A draft", "continueLookup": allowed}})
+		require.NoError(t, err)
+		result, err := e.Execute(ctx, "builtin "+call)
+		require.NoError(t, err)
+		rows := MaterializeRows(result.OutputPayload())
+		require.Len(t, rows, 1)
+		raw, err := json.Marshal(rows[0])
+		require.NoError(t, err)
+		var decision replyReviewDecision
+		require.NoError(t, json.Unmarshal(raw, &decision))
+		if allowed {
+			require.NotEmpty(t, decision.MissingEvidence)
+		} else {
+			require.Empty(t, decision.MissingEvidence)
+		}
+		observations, err := e.workRows(ContextWithFreshRead(ctx), "workObservationsForOwnerRun", run.RunId)
+		require.NoError(t, err)
+		found := false
+		for _, observation := range observations {
+			data, _ := observation["data"].(map[string]any)
+			receipt, _ := data["replyReview"].(map[string]any)
+			if receipt["continuationAvailable"] == allowed && receipt["missingEvidence"] == decision.MissingEvidence {
+				found = true
+			}
+		}
+		require.True(t, found, "the durable decision must distinguish an unavailable continuation from a model choosing not to use it")
+		sources, err := e.workRows(ContextWithFreshRead(ctx), "workSourceCheckpointsForOwnerRun", run.RunId)
+		require.NoError(t, err)
+		require.Empty(t, sources, "a review decision must never become a factual source")
+	}
+
+}
+
+func TestReplyReviewEvidenceGapIsBoundedAndDisabledForDirectAdvice(t *testing.T) {
+	for _, allowed := range []bool{false, true} {
+		decision, err := reviewReplyOnce(context.Background(), "Is item A available?", "Item B is available.", `{"item":"B"}`, time.Now(), allowed, func(_ context.Context, _ string, data map[string]any, _ string, _ json.RawMessage, _ bool) (string, error) {
+			require.Equal(t, allowed, data["canContinue"])
+			return `{"reply":"The receipt describes another item.","missingEvidence":"Resolve item A's source identifier before checking its status."}`, nil
+		})
+		require.NoError(t, err)
+		if allowed {
+			require.Contains(t, decision.MissingEvidence, "item A")
+		} else {
+			require.Empty(t, decision.MissingEvidence, "direct advice must not reopen research")
+		}
+	}
+	_, err := reviewReplyOnce(context.Background(), "Question", "Draft", "{}", time.Now(), true, func(context.Context, string, map[string]any, string, json.RawMessage, bool) (string, error) {
+		raw, _ := json.Marshal(map[string]any{"reply": "A supported limit.", "missingEvidence": strings.Repeat("x", 1201)})
+		return string(raw), nil
+	})
+	require.Error(t, err)
 }
 
 func TestReplyReviewKeepsRecoveryUnderFilePreviewPressure(t *testing.T) {

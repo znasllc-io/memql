@@ -70,6 +70,8 @@ func (c *Client) BranchHead(ctx context.Context, bearer, owner, repo, branch str
 type PullRequestHead struct {
 	Number         int
 	Title          string
+	Author         string
+	State          string
 	HeadSHA        string
 	HeadRef        string
 	HeadRepository string
@@ -82,7 +84,11 @@ type PullRequestHead struct {
 type pullRequestPayload struct {
 	Number int    `json:"number"`
 	Title  string `json:"title"`
-	Head   struct {
+	State  string `json:"state"`
+	User   struct {
+		Login string `json:"login"`
+	} `json:"user"`
+	Head struct {
 		SHA  string `json:"sha"`
 		Ref  string `json:"ref"`
 		Repo *struct {
@@ -99,7 +105,7 @@ type pullRequestPayload struct {
 // repository deleted -- the caller cannot tell such a head from a fork's, and
 // must not read it as this repository's.
 func (pr pullRequestPayload) head() PullRequestHead {
-	head := PullRequestHead{Number: pr.Number, Title: pr.Title, HeadSHA: pr.Head.SHA, HeadRef: pr.Head.Ref, BaseSHA: pr.Base.SHA}
+	head := PullRequestHead{Number: pr.Number, Title: pr.Title, Author: pr.User.Login, State: pr.State, HeadSHA: pr.Head.SHA, HeadRef: pr.Head.Ref, BaseSHA: pr.Base.SHA}
 	if pr.Head.Repo != nil {
 		head.HeadRepository = pr.Head.Repo.FullName
 	}

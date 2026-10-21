@@ -193,7 +193,7 @@ func workContinuationAnswer(ctx context.Context, engine interface {
 	permissionGuidance := a["decision"] == "answered" &&
 		memql.BareShortId(asString(a["decidedBy"])) == memql.BareShortId(run.OwnerUserId) &&
 		memql.WorkPermissionGuidance(asString(a["kind"]), subject, answer, asString(a["artifactHash"]))
-	if !permissionGuidance && (a["decision"] != "approved" || (a["kind"] != "scopeElevation" && a["kind"] != "budget")) {
+	if !permissionGuidance && (a["decision"] != "approved" || a["kind"] != "scopeElevation") {
 		return nil, fmt.Errorf("work context: the continuation has no approval or typed-scope correction")
 	}
 	raw, err := json.Marshal(map[string]any{

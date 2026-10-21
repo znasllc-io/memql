@@ -179,6 +179,9 @@ func (e *MemQLEngine) refreshAskTranscript(ctx context.Context, transcript *askT
 		turn.Question = nil
 		for _, row := range questions {
 			question, answer := askFeedbackProjection(row)
+			if recovery := askProgressRecoveryQuestion(row, run); recovery != nil {
+				question = recovery
+			}
 			contract, _, optional := work.OptionalFeedback(row)
 			rerun, _ := run["rerun"].(map[string]any)
 			currentOptional := optional && contract["templateFingerprint"] == run["templateFingerprint"] && stringArg(contract, "rerunRequestId") == stringArg(rerun, "requestId")
@@ -254,6 +257,27 @@ func (e *MemQLEngine) refreshAskTranscript(ctx context.Context, transcript *askT
 	}
 	transcript.Turns = append(transcript.Turns, answers...)
 	return nil
+}
+
+// Project the durable answer after an interrupted release, never a new draft.
+func askProgressRecoveryQuestion(approval, run map[string]any) *AskQuestion {
+	subject, _ := approval["subject"].(map[string]any)
+	answer, _ := approval["answer"].(map[string]any)
+	waiting, _ := run["waitingOn"].(map[string]any)
+	if approval["kind"] != "feedback" || approval["decision"] != "answered" || !work.IsProgressFeedback(subject) || len(answer) != 1 ||
+		run["status"] != "waiting" || run["cancelRequested"] == true || waiting["kind"] != "approval" ||
+		BareShortId(stringArg(waiting, "subject")) != BareShortId(stringArg(approval, "id")) {
+		return nil
+	}
+	stop := answer["value"] == "abandon"
+	if !stop && answer["value"] != "retry" && strings.TrimSpace(stringArg(answer, "feedback")) == "" {
+		return nil
+	}
+	text := "Your answer was saved, but work has not resumed."
+	if stop {
+		text = "Your answer was saved, but work has not stopped."
+	}
+	return &AskQuestion{ID: BareShortId(stringArg(approval, "id")), Text: text, Kind: "choice", ChoiceOnly: true, ResumeAnswer: answer, Options: []map[string]any{}}
 }
 
 // askRoutedApprovals are the requests routed messages delivered to: each one

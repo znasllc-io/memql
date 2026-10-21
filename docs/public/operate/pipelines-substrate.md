@@ -31,6 +31,22 @@ before the first one.
 
 ## Where a step runs
 
+Operators using Kueue can set `MEMQL_PIPELINES_QUEUE_PRIORITY_CLASSES` to a
+JSON object mapping pipeline events to installed `WorkloadPriorityClass` names.
+For example, `{"merge_group":"merge-gates","schedule":"background-audits"}`
+lets the declared classes order pending merge candidates ahead of scheduled
+audits. Unmapped events retain default admission priority. The mapping is
+operator configuration; repository manifests cannot choose a priority class.
+Create the referenced classes before enabling it. Malformed mappings refuse
+execution, and a missing class leaves the Job suspended until repaired.
+
+This uses [Kueue workload priority](https://kueue.sigs.k8s.io/docs/concepts/workload_priority_class/),
+which is separate from Pod scheduling priority. Resource ceilings, dedicated
+pool placement and the ClusterQueue's preemption policy still apply. With
+preemption disabled, an admitted job finishes before higher-priority waiting
+work can use its resources. Each replica derives the same class from the
+serialized pipeline event; adopted Jobs keep their existing admission state.
+
 The agent node driving a run hands each command step to the substrate's
 executor (`integrations/pipelinesteps`), which decides where it runs:
 
@@ -89,6 +105,22 @@ A step's pod runs up to four kinds of container, in this order:
 | `clone` | init | the clone image, root | the checkout volume and the clone token; never the cache |
 | `svc-<name>` | native sidecar, one per service the step names, in name order | the service's `image`, its own user | its declared `env` only: no checkout, no cache, no secret |
 | `step` | main | the pipeline's `image`, its own user | the checkout at `/workspace`, its repository's cache at `/cache`, the step's environment and its secrets |
+
+An explicit `githubReadToken: true` command or image build receives a required Secret
+reference as `MEMQL_GITHUB_READ_TOKEN`. The token reads only this repository's
+contents, checks and pull requests; it has no write permission. Ordinary commands,
+services, collectors, image builds without the flag and fleet tasks do not receive this grant.
+The runner refreshes it during queue waits and masks every issued value using
+the same lifecycle as checkout credentials. A missing grant refuses execution;
+it never falls back to an installation-wide or anonymous credential.
+
+For an image build, BuildKit receives the credential through its secret session
+as `github_read_token`. A Dockerfile opts into it for one instruction with
+`RUN --mount=type=secret,id=github_read_token,required=true`. The token is at
+`/run/secrets/github_read_token` for that instruction; it is not a build argument
+or an ordinary environment variable inside a Dockerfile `RUN`. Do not copy the
+mounted file into an image layer. No publication or registry credential reaches
+the builder.
 
 Every container runs with `allowPrivilegeEscalation: false`, and the pod with
 the `RuntimeDefault` seccomp profile, `restartPolicy: Never` and a 10-second
@@ -1039,6 +1071,50 @@ Nothing waits forever, and each party waits longer than the one inside it:
 
 ## Retention
 
+Generated files have their own byte-retention policy, authored in
+`pipelineArtifactRetentionPolicy` in `dsl/pipelines/automations.memql`:
+
+| Completed run | Keep generated logs and artifacts for |
+| --- | --- |
+| Successful run other than a release | 48 hours |
+| Failed or cancelled run other than a release | 7 days |
+| Release | 14 days |
+
+Age starts when the run finishes. Active publication references override these
+windows. Filing or labelling a Library entry, changing its title or contents,
+retaining another version, or training the file into a knowledge domain also
+keeps it. An active or unconfirmed producer never qualifies.
+
+`sweepPipelineArtifacts` runs on the agent cron leader once a minute. Each pass
+handles at most 32 files from one producer, with a four-minute time bound. A
+durable lease and cursor rotate fairly across producers and allow a replacement
+replica to resume. Each file is fenced against late uploads, its storage bytes
+are replaced by a permanently leased zero-byte tombstone, and only then are its
+Library entries removed. Native receipts and storage fences remain. A provider
+failure preserves the journal for retry; it cannot produce a successful cleanup
+receipt. Never delete these tombstones or break their leases with a storage
+lifecycle rule.
+
+`pipelinesRetireArtifacts(runId, afterId, dryRun)` applies the same safeguards to
+one owner-selected completed run. `dryRun: true` reads a page without changing
+anything; the page count is not a promise that every file will qualify. Continue
+with the returned `afterId` while `hasMore` is true. A file kept by a publication
+or Library edit is reported as retained. Files uploaded before logs received
+native receipts can be enrolled with `pipelinesAdoptLegacyLog(runId, stepKey)`:
+the owned completed step supplies its log identity, and the existing bytes are
+verified before adoption. This operation uploads and deletes nothing.
+
+The run detail keeps the original execution result after cleanup. It labels a
+log or artifact as expired only when `pipelinesExpiredArtifacts(runId, fileIds)`
+finds both provider retirement and Library removal receipts for that owner and
+run. An absent file or failed availability read is not proof of expiry. Expired
+files have no download action; the compact retirement journal remains readable
+after the producing work journal is swept.
+
+DSL record TTL is not a substitute for this process: expiring a record alone
+does not delete the blob bytes. New logs use the same durable upload journal as
+artifacts. Existing logs require the explicit verified adoption above.
+
 `MEMQL_PIPELINES_RUN_RETENTION_DAYS` (30 by default) is how many days after a
 finished run's latest version its records are kept. The nightly operational
 retention sweep -- `workJournalRetentionSweep`, 03:40 UTC on the cron leader --
@@ -1057,15 +1133,14 @@ this order:
 
 A work run with model-call or observation detail, a pending approval, a recent
 child, or a child with no owner or someone else's, is kept until that clears,
-and its goal with it. Nothing is deleted without an archive the sweep has read
+and its goal with it. Pipeline and work journals also remain while their native
+artifact receipts still own bytes or await Library cleanup. Nothing is deleted without an archive the sweep has read
 back: a cluster with no archive container (`MEMQL_WORK_ARCHIVE_CONTAINER`, else
 `MEMQL_AZURE_BLOB_CONTAINER`) deletes nothing.
 
 Not retired by it:
 
-- **The Library files** a run's steps archived. A step's log and its artifacts
-  are the owner's, and stay until the owner deletes them; once the run is
-  retired, a file's `producedByRunId` names a run that is gone.
+- **The Library files**, which use the separate byte-retention process above.
 - **The log store's lines**, which follow the log store's own window,
   `MEMQL_LOGS_RETENTION_DAYS` ([Logs](logs.md)).
 
@@ -1166,6 +1241,7 @@ coverage; packaging their binaries does not exercise those hosts.
 | `gates` | `gate-inputs` | pull requests and manual runs |
 | `analysis` | Full-history `gitleaks` (6 hours, 3 CPUs), `codeql-go` (3 hours), `codeql-javascript`, `codeql-python` and `sbom` | weekly audits and manual runs, after a failure too |
 | `security-reports` | Journaled publication of the three retained CodeQL SARIF reports | weekly audits and manual runs |
+| `fixtures` | Digest-pinned public TimescaleDB snapshot for Linux AMD64 and ARM64, with attached provenance; retains an unpublished OCI index and metadata | manual runs |
 | `release-files` | Exact-version documentation bundle, SDK npm archive and five VSIX archives | releases |
 | `build-tools` | Unpublished toolchain OCI archive and digest metadata | releases |
 | `images` | Unpublished OCI archives and digest metadata for all seven engine node types | releases |
@@ -1219,13 +1295,14 @@ qualification. Daily dependency vulnerability checks remain enabled.
 
 ### The toolchain image
 
-`ghcr.io/znasllc-io/memql-toolchain` is what the engine's pipeline runs in,
-built from `deploy/toolchain-image/Dockerfile` by `build-toolchain-image.yml`:
-dispatched on main only, smoke-tested before it is pushed, a published tag
-never replaced unless the dispatch says so, one native platform per dispatch
-(`linux/amd64` or `linux/arm64`, each its own version). It carries:
+`ghcr.io/znasllc-io/memql-toolchain` is what the engine's pipeline runs in.
+The native release step `build-tools.toolchain` builds the `verified` target
+in `deploy/toolchain-image/Dockerfile`, which runs the full smoke suite before
+exporting an OCI archive. Reviewed release publication verifies and publishes
+that artifact under an immutable version. The shipped manifest builds
+`linux/amd64`; another platform requires its own native qualification. It carries:
 
-- Go 1.27.2 (`go.work`'s toolchain line), Node 22, protoc 33.4 and kubectl
+- Go 1.27.3 (`go.work`'s toolchain line), Node 22, protoc 33.4 and kubectl
   1.32.13 (the minor of the local cluster's k3s); a test holds Go, protoc and
   kubectl's minor to the repository's own pins;
 - the Docker client 29.8.2, and no daemon -- here or anywhere in a step's pod --
@@ -1234,8 +1311,8 @@ never replaced unless the dispatch says so, one native platform per dispatch
   ca-certificates and the PostgreSQL client (`psql`, `pg_isready`);
 - uid 1000 (`memql`), never root, with git trusting `/workspace`.
 
-`memql-package.yaml` names the image by the digest its run's summary printed
-(version `1.2.0-amd64`). A rebuild takes a new version and a new pin: the
+`memql-package.yaml` names the image by its verified publication digest.
+A rebuild takes a new version and a new pin: the
 manifest's test fails on any reference that is not a digest of this
 repository. When `go.work`'s toolchain line moves, the image is rebuilt and
 re-pinned; an image whose Go lags it makes every step download a toolchain.
@@ -1313,7 +1390,7 @@ Each of these is understood, and accepted for this release.
   others can write -- `ssh -F`, `mysql --defaults-file` -- needs `chmod go-w` on
   that file in the step.
 - **The cluster-e2e leg runs the substrate in its test process.**
-  `install-cluster-e2e.yml`'s `pipelines` leg installs the cluster from source
+  The native `installer-lifecycle.pipelines` leg installs the cluster from source
   and runs `TestPipelinesSubstrate` (`test/clustere2e`): the real executor, its
   fleet half and two workbench runners in the test process, talking to the
   cluster's real API server as `memql-engine-workbench`, under the deployed Role, quota,
@@ -1322,10 +1399,9 @@ Each of these is understood, and accepted for this release.
   are held to recorded fixtures, and the fleet's dispatcher is a stand-in with no
   machine. It does not cover the deployed agent and workbench wiring -- the
   app's adapter, the node mesh's streams, the dispatcher -- which unit and
-  in-process hop tests cover. It runs on that workflow's own triggers --
-  nightly, on demand, and on pull requests that change the installer, the local
-  cluster scripts, `deploy/k8s` or the workflow -- so a change to the
-  substrate's code alone does not run it. Live qualification uses real native
+  in-process hop tests cover. The isolated lifecycle fixtures run weekly and
+  on demand, while affected PRs retain the no-cluster installer smoke. A change
+  to substrate code alone does not run the full lifecycle. Live qualification uses real native
   pipeline runs and retained GitHub check receipts; the unused Actions
   placeholder has been removed.
 - **Per-workbench readiness has not yet been verified in an installed release.**

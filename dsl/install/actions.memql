@@ -60,6 +60,19 @@ action detectMachine {
   capability script(script: "install.detect", ports: args.ports, path: args.path)
 }
 
+// Backend: scripts/install/requirements.sh. Read-only: it measures this machine
+// against the minimum requirements (scripts/lib/requirements.sh) and refuses
+// before anything is installed when a NEW cluster would be created below them.
+/// Check this machine against the minimum requirements for running the whole cluster, refusing
+/// before any step changes the machine when it falls short and no cluster is here yet.
+action requirements {
+  args {
+    cluster string
+    path    string
+  }
+  capability script(script: "install.requirements", cluster: args.cluster, path: args.path)
+}
+
 // Backend: scripts/install/docker-access.sh. Read-only: it never installs
 // Docker, starts the daemon or edits a group -- the remedy for two of its three
 // failure states needs root, and it names the command instead of acquiring any

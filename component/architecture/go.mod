@@ -2,9 +2,9 @@
 // rationale: docs/internal/ops/ci-design.md, section D3.
 module github.com/znasllc-io/memql/component/architecture
 
-go 1.26.1
+go 1.26.8
 
-toolchain go1.27.2
+toolchain go1.27.3
 
 require (
 	golang.org/x/tools v0.51.0
@@ -16,6 +16,6 @@ require (
 	github.com/kr/pretty v0.3.1 // indirect
 	github.com/rogpeppe/go-internal v1.15.0 // indirect
 	golang.org/x/mod v0.41.0 // indirect
-	golang.org/x/sync v0.23.0 // indirect
+	golang.org/x/sync v0.24.0 // indirect
 	gopkg.in/check.v1 v1.0.0-20201130134442-10cb98267c6c // indirect
 )

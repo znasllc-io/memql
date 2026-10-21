@@ -2,9 +2,9 @@
 // rationale: docs/internal/ops/ci-design.md, section D3.
 module github.com/znasllc-io/memql/component/database
 
-go 1.26.1
+go 1.26.8
 
-toolchain go1.27.2
+toolchain go1.27.3
 
 require (
 	github.com/lib/pq v1.12.3
@@ -29,11 +29,11 @@ require (
 	github.com/tmthrgd/go-hex v0.0.0-20190904060850-447a3041c3bc // indirect
 	github.com/vmihailenco/msgpack/v5 v5.4.1 // indirect
 	github.com/vmihailenco/tagparser/v2 v2.0.0 // indirect
-	go.opentelemetry.io/otel v1.44.0 // indirect
-	go.opentelemetry.io/otel/trace v1.44.0 // indirect
+	go.opentelemetry.io/otel v1.45.0 // indirect
+	go.opentelemetry.io/otel/trace v1.45.0 // indirect
 	go.yaml.in/yaml/v3 v3.0.5 // indirect
-	golang.org/x/crypto v0.57.0 // indirect
-	golang.org/x/sys v0.48.0 // indirect
+	golang.org/x/crypto v0.58.0 // indirect
+	golang.org/x/sys v0.49.0 // indirect
 	mellium.im/sasl v0.3.2 // indirect
 )
 

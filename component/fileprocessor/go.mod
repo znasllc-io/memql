@@ -2,9 +2,9 @@
 // rationale: docs/internal/ops/ci-design.md, section D3.
 module github.com/znasllc-io/memql/component/fileprocessor
 
-go 1.26.1
+go 1.26.8
 
-toolchain go1.27.2
+toolchain go1.27.3
 
 require (
 	github.com/ledongthuc/pdf v0.0.0-20250511090121-5959a4027728
