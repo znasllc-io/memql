@@ -2,8 +2,9 @@ import { readdirSync, readFileSync, statSync } from "node:fs";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 
-// The capture module has exactly four importers, and they are the seams the
-// design names (spec L14).
+// The capture module's shell seams (spec L14) and authenticated download seam
+// are pinned below. Download failures need a Files subject so the toast can
+// open the corresponding logs without relying on the currently focused app.
 //
 // THIS FILE WAS portalIsolation.test.ts, and its other half is gone with its
 // subject. It used to walk the PORTAL's source for an import of this module
@@ -18,7 +19,7 @@ import { describe, expect, it } from "vitest";
 // that was no longer there. That is the whole reason it was written that way,
 // and it is worth recording that the design paid out.
 //
-// What survives is the positive: the four seams, pinned exactly. A fifth
+// What survives is the positive: the explicit seams, pinned exactly. Another
 // importer is a decision about what the shell records, and it should be one
 // somebody makes rather than one that arrives.
 
@@ -49,6 +50,7 @@ describe("the capture module's importers", () => {
       "chrome/CaptureContext.tsx",
       "chrome/Shell.tsx",
       "chrome/WindowErrorBoundary.tsx",
+      "items/FileDownloadLink.tsx",
       "live/connection.tsx",
     ]);
   });
