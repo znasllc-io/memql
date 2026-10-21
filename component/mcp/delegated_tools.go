@@ -49,7 +49,7 @@ func delegatedScope(ctx context.Context, eng Engine, sessionID string) (context.
 	}
 	if scope.AgentID == "" || scope.AgentRole == "" || scope.Run.RunId == "" ||
 		memql.BareShortId(scope.Run.OwnerUserId) != memql.BareShortId(ac.UserId) ||
-		memql.BareShortId(scope.Run.RunId) != memql.BareShortId(stringValue(row["runId"])) || scope.Run.StepKey != stringValue(row["stepId"]) {
+		memql.BareShortId(scope.Run.RunId) != memql.BareShortId(stringValue(row["runId"])) || memql.BareShortId(scope.Run.StepKey) != memql.BareShortId(stringValue(row["stepId"])) {
 		return ctx, nil, fmt.Errorf("app session: tool contract does not match its owned run")
 	}
 	call, err = namedCallQuery("workRunForOwner", map[string]any{"runId": scope.Run.RunId})

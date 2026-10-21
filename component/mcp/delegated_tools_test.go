@@ -30,7 +30,7 @@ func delegatedFixture() *delegatedEngine {
 	raw, _ := json.Marshal(scope)
 	var stored map[string]any
 	_ = json.Unmarshal(raw, &stored)
-	return &delegatedEngine{fakeEngine: newFakeEngine(), runStatus: "running", row: map[string]any{"ownerUserId": "v1:identity:user:mcp-person", "runId": "run-1", "stepId": "step-1", "status": "running", "toolScope": stored, "prompt": "original input"}}
+	return &delegatedEngine{fakeEngine: newFakeEngine(), runStatus: "running", row: map[string]any{"ownerUserId": "v1:identity:user:mcp-person", "runId": "run-1", "stepId": "v1:work:step:step-1", "status": "running", "toolScope": stored, "prompt": "original input"}}
 }
 
 func (e *delegatedEngine) Execute(ctx context.Context, query string) (*memql.ExecuteResult, error) {
