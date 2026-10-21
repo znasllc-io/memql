@@ -319,6 +319,37 @@ func TestTheDSLStoreOverRealRows(t *testing.T) {
 	}
 
 	// ---- a cancel request, then the conclusion, clearing what it clears ----
+	// A long budget hold can leave more than a page of older queued rows.
+	// Recovery must order started work ahead of that backlog, before paging.
+	waiting := run
+	waiting.ID, waiting.SHA, waiting.RunKey = "admission-wait-"+suffix, shaBase, key+"-waiting"
+	waiting.QueuedAt = queued.Add(-31 * 24 * time.Hour)
+	waiting.PullRequest = 99
+	if err := store.CreateRun(ctx, waiting); err != nil {
+		t.Fatalf("create older budget-held run: %v", err)
+	}
+	open, err := store.RunsUnfinished(memqlengine.ContextWithFreshRead(ctx))
+	if err != nil {
+		t.Fatal(err)
+	}
+	startedIndex, queuedIndex := -1, -1
+	for index, candidate := range open {
+		if candidate.ID == run.ID {
+			startedIndex = index
+		}
+		if candidate.ID == waiting.ID {
+			queuedIndex = index
+		}
+	}
+	if startedIndex < 0 || queuedIndex < 0 || startedIndex >= queuedIndex {
+		t.Fatalf("started recovery must precede the older held backlog: started=%d queued=%d", startedIndex, queuedIndex)
+	}
+	if err := store.UpdateRun(ctx, waiting.OwnerUserID, waiting.ID, RunPatch{
+		Status: ptr(StatusCompleted), Conclusion: ptr(ConclusionCancelled), FinishedAt: ptr(started),
+	}); err != nil {
+		t.Fatal(err)
+	}
+
 	if err := store.UpdateRun(ctx, r.OwnerUserID, run.ID, RunPatch{CancelRequested: ptr(true), CancelledBy: ptr(owner)}); err != nil {
 		t.Fatalf("cancel request: %v", err)
 	}

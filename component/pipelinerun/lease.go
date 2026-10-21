@@ -3,6 +3,7 @@ package pipelinerun
 import (
 	"context"
 	"errors"
+	"fmt"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -258,6 +259,15 @@ func (i *Integration) claim(ctx context.Context, d Deps, runID string) (Run, boo
 		now := d.now()
 		if !claimable(*r, d.NodeID, now) {
 			return nil
+		}
+		if r.Status == StatusQueued && r.StartedAt.IsZero() && !r.CancelRequested && d.AdmitRun != nil {
+			allowed, err := d.AdmitRun(now)
+			if err != nil {
+				return fmt.Errorf("pipelines: new run admission is unavailable; run remains queued: %w", err)
+			}
+			if !allowed {
+				return nil
+			}
 		}
 		claimID := id.NewShortId()
 		wctx := memql.ContextWithRowVersionFence(gctx, RunConcept, r.ID, r.CreatedAt)
