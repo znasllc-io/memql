@@ -64,7 +64,6 @@ require (
 	github.com/opencontainers/go-digest v1.0.0 // indirect
 	github.com/opencontainers/image-spec v1.1.1 // indirect
 	github.com/sirupsen/logrus v1.10.1 // indirect
-	golang.org/x/tools v0.51.0 // indirect
 	gotest.tools/v3 v3.5.2 // indirect
 )
 

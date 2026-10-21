@@ -246,7 +246,9 @@ func TestStrictAutomationBoot_EmbeddedTreeIsClean(t *testing.T) {
 // sweepPipelineArtifacts; measured by the strict loader in PR #6270 CI.
 // 182 -> 184: releasePublishedInputRetentionPolicy and sweepPublishedReleaseInputs;
 // measured by the strict loader in the native retention release.
-const shippedAutomationCount = 184
+// +1 askMessageRouting from the consolidated Ask routing PRs; measured by
+// TestStrictAutomationBoot_EmbeddedTreeIsClean on 2026-10-21.
+const shippedAutomationCount = 185
 
 //
 // 56 -> 57 in epic memql#5168 (the per-account front door):

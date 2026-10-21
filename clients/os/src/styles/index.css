@@ -15399,7 +15399,6 @@ button[data-ask-control="running"], [data-ask-control="running"] > button { outl
 .os-ask-approval-context strong { display: block; font-weight: 500; overflow-wrap: anywhere; }
 .os-ask-approval-context p { margin: 5px 0 0; color: var(--os-muted); }
 .os-ask-approval-context > button { flex: none; margin: 0; }
-.os-ask-saved-guidance { max-height: 10em; overflow: auto; white-space: pre-wrap; overflow-wrap: anywhere; }
 .os-ask-discussion-actions { display: flex; flex: none; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px 14px; margin: 0 18px 10px; }
 .os-ask-discussion-actions > .os-caption { flex: 1 1 20ch; }
 .os-ask-discussion-actions > div { display: flex; flex-wrap: wrap; gap: 8px; }

@@ -29,7 +29,7 @@ export interface AskOptions {
   attachments?: string[];
 }
 
-export interface ApprovalGuidanceReceipt { runResumed: boolean; runStopped?: boolean; resumeError?: string; guidanceSaved?: boolean; savedGuidance?: string }
+export interface ApprovalGuidanceReceipt { runResumed: boolean; runStopped?: boolean; resumeError?: string }
 
 export interface AskTransport {
   discussApproval?: (approvalId: string) => Promise<ApprovalDiscussion>;
