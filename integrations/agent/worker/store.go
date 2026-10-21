@@ -25,6 +25,13 @@ type EngineStore struct {
 	Engine *memqlengine.MemQLEngine
 }
 
+func (s *EngineStore) CheckAppExecutionDestination(ctx context.Context, runID string) error {
+	if s == nil || s.Engine == nil {
+		return fmt.Errorf("app destination verification is unavailable")
+	}
+	return memqlengine.CheckAppExecutionDestination(ctx, s.Engine, runID)
+}
+
 func (s *EngineStore) CheckExecutionDestination(ctx context.Context, runID, target string) error {
 	if s == nil || s.Engine == nil {
 		return fmt.Errorf("execution destination verification is unavailable")

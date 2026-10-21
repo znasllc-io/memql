@@ -635,3 +635,12 @@ query activity firstMachineActivity {
   paginate 1
   shape workerActivityFull
 }
+
+/// Recent owner-scoped observations for automatic app selection.
+@actor
+query appSession appRoutingEvidence {
+  filter row => row.ownerUserId == actor.userId
+  sort "row.createdAt", "desc"
+  paginate 200
+  shape workerAppRoutingEvidence
+}

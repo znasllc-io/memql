@@ -8,6 +8,7 @@ import { appLabel, machineName, RUNNABLE_APPS, type MachineApp, type MachineRow 
 import { isWorkerOnline } from "../online";
 import { workerClusterUrl } from "../addMachine/install";
 import { MachineDetailsSection } from "./MachineDetailsInfo";
+import { MachineAppRouting } from "./MachineAppRouting";
 import { AppPermissionHelp } from "./AppPermissionHelp";
 
 export function appStatus(machine: MachineRow, app: MachineApp | undefined, now: Date): string {
@@ -30,7 +31,7 @@ export function MachineAppsHelp() {
 }
 
 export function MachineApps({ machine, now }: { machine: MachineRow; now: Date }) {
-  return <div className="fleet-machine-details fleet-machine-apps">{RUNNABLE_APPS.map(id =>
+  return <div className="fleet-machine-details fleet-machine-apps"><MachineAppRouting key={machine.id} machine={machine} />{RUNNABLE_APPS.map(id =>
     <MachineAppSection key={`${machine.id}:${id}`} id={id} machine={machine} now={now} />
   )}</div>;
 }

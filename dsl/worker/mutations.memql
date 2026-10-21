@@ -1496,3 +1496,23 @@ mutation activity updateMachineActivity {
     detail: args.detail ?? ""
   }
 }
+
+@actor
+@serverOnly
+mutation registration setWorkerAppRouting {
+  args { registrationId string! settings object! }
+  update {
+    id: args.registrationId
+    appRouting: args.settings
+  }
+}
+
+@actor
+@serverOnly
+mutation registration recordWorkerAppSelection {
+  args { registrationId string! app string! }
+  update {
+    id: args.registrationId
+    appSelection: {lastApp: args.app, selectedAt: now}
+  }
+}

@@ -1808,6 +1808,37 @@ QueryClient.prototype.fleetRevokeMachine = function (this: QueryClient, args: Fl
   return this.executeNamed("fleetRevokeMachine", buildFleetRevokeMachine(args), opts);
 };
 
+/** Save the owner's app strategy on one machine, with a revision check. */
+export interface FleetSetAppRoutingArgs {
+  registrationId: string;
+  revision: string;
+  mode: string;
+  usageWeight: number;
+  speedWeight: number;
+  reliabilityWeight: number;
+}
+
+export function buildFleetSetAppRouting(args: FleetSetAppRoutingArgs): string {
+  const parts: string[] = [];
+  parts.push("registrationId: " + renderMemQLValue(args.registrationId));
+  parts.push("revision: " + renderMemQLValue(args.revision));
+  parts.push("mode: " + renderMemQLValue(args.mode));
+  parts.push("usageWeight: " + renderMemQLValue(args.usageWeight));
+  parts.push("speedWeight: " + renderMemQLValue(args.speedWeight));
+  parts.push("reliabilityWeight: " + renderMemQLValue(args.reliabilityWeight));
+  return "builtin fleetSetAppRouting(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    fleetSetAppRouting(args: FleetSetAppRoutingArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.fleetSetAppRouting = function (this: QueryClient, args: FleetSetAppRoutingArgs = {} as FleetSetAppRoutingArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("fleetSetAppRouting", buildFleetSetAppRouting(args), opts);
+};
+
 /** Save model choices by purpose on your machine after checking installed capabilities and combined memory. Existing calls finish. Later calls use the saved choices, with a 32K context ceiling. */
 export interface FleetSetModelSetupArgs {
   registrationId: string;

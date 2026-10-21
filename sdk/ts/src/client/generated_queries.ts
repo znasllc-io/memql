@@ -925,6 +925,26 @@ QueryClient.prototype.allWorkspaces = function (this: QueryClient, args: AllWork
   return this.executeNamed("allWorkspaces", buildAllWorkspaces(args), opts);
 };
 
+/** Recent owner-scoped observations for automatic app selection. */
+// Bound concept: v1:worker:appSession (machine-readable: BoundConcepts["appRoutingEvidence"] in generated_concepts.ts).
+export interface AppRoutingEvidenceArgs {
+}
+
+export function buildAppRoutingEvidence(args: AppRoutingEvidenceArgs): string {
+  void args;
+  return "query appRoutingEvidence()";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    appRoutingEvidence(args?: AppRoutingEvidenceArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.appRoutingEvidence = function (this: QueryClient, args: AppRoutingEvidenceArgs = {} as AppRoutingEvidenceArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("appRoutingEvidence", buildAppRoutingEvidence(args), opts);
+};
+
 /** appSessionById wraps the query named "appSessionById". */
 // Bound concept: v1:worker:appSession (machine-readable: BoundConcepts["appSessionById"] in generated_concepts.ts).
 export interface AppSessionByIdArgs {

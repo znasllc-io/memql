@@ -168,8 +168,11 @@ concept route {
   Choosing Apps keeps Auto or an explicit Computer choice. Apps with Workbench
   is disabled in either menu, without changing the other selection. Stable
   option descriptions explain the constraint; selecting does not insert a
-  warning or open a popup. Auto retains destination-consent checks before a
-  computer app session; no access gate is relaxed. An older incompatible pair
+  warning or open a popup. An owner-selected Apps route with Auto permits an
+  enabled app session on that owner's machine. Ownership, app permission,
+  kill-switch and active-run checks still apply. General computer tools still
+  require destination approval; an explicit Workbench choice remains binding.
+  An older incompatible pair
   stays visible with the draft and cannot be sent until either choice changes.
 - **Background work keeps Auto.** System work and calls with no person behind
   them (sweeps, scheduled automations) always use Auto. A route is a person's

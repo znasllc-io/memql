@@ -42,6 +42,21 @@ func (e *ExecutionDestinationRequired) Subject() map[string]any {
 func CheckExecutionDestination(ctx context.Context, engine interface {
 	Execute(context.Context, string) (*ExecuteResult, error)
 }, runID, target string) error {
+	return checkExecutionDestination(ctx, engine, runID, target, false)
+}
+
+// CheckAppExecutionDestination recognizes the owner's explicit Apps route as
+// consent to use their enabled apps under Auto. It grants no native computer
+// tools; those still call CheckExecutionDestination and their scope gate.
+func CheckAppExecutionDestination(ctx context.Context, engine interface {
+	Execute(context.Context, string) (*ExecuteResult, error)
+}, runID string) error {
+	return checkExecutionDestination(ctx, engine, runID, "computer", true)
+}
+
+func checkExecutionDestination(ctx context.Context, engine interface {
+	Execute(context.Context, string) (*ExecuteResult, error)
+}, runID, target string, appSession bool) error {
 	if target != "workbench" && target != "computer" {
 		return fmt.Errorf("invalid execution destination")
 	}
@@ -76,14 +91,18 @@ func CheckExecutionDestination(ctx context.Context, engine interface {
 	if destination == target || (destination == "" && target == "workbench") {
 		return nil
 	}
+	subject, ok := auth.SubjectFromContext(ctx)
+	owner, _ := run["ownerUserId"].(string)
+	if appSession && destination == "" && choice.Source == "route:apps" &&
+		ok && sameUserId(subject.UserId, owner) && sameUserId(choice.By, owner) {
+		return nil
+	}
 	// Auto can use the hosted sandbox directly, but choosing someone's own
 	// computer still needs this goal's permission, even with a saved command
 	// grant. Destination consent and access scope answer different questions.
 	if destination == "" {
 		destination = "auto"
 	}
-	subject, ok := auth.SubjectFromContext(ctx)
-	owner, _ := run["ownerUserId"].(string)
 	if !ok || !sameUserId(subject.UserId, owner) {
 		return fmt.Errorf("execution destination requires the work's owner")
 	}

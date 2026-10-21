@@ -309,6 +309,38 @@ one whose route cannot serve every job for you right now is refused with
 `route_not_ready` and the reason ("Needs an embedding model", "No signed-in app
 on your machines"), before any goal exists.
 
+### App selection on a machine
+
+Fleet > Machines > your machine > Apps owns the app strategy. Ask keeps its
+Route and Where controls; it does not carry an app-strategy override.
+
+- **Auto** (default) balances observed token usage, response time and successful
+  calls. Usage balance, Speed and Reliability weights are separate from the
+  general routing Auto balance below.
+- **Round robin** alternates available apps for new calls.
+- **Claude Code only** and **Codex only** use that app exclusively, including
+  when it is unavailable.
+
+The selector uses up to 200 recent owner-scoped app sessions from the last two
+hours. Unknown usage stays unknown. Subscription balances and reset times are
+not reported by the current app protocol; token counts are not estimates of
+remaining credits. A confirmed quota refusal temporarily excludes that app
+for fifteen minutes before another availability check. Auto and Round robin
+can use another enabled app; an Only strategy cannot.
+
+Each active session stays with its app. New calls receive their full supplied
+conversation and contract, and delegated steps receive their inputs and
+workspace context. A fallback repeats that same handover only after a confirmed
+quota refusal with known zero usage, no served model, no result, and no recorded
+or dropped actions. An uncertain interruption is never automatically replayed.
+The existing per-level model mapping remains in the app harness, and records
+name the model actually reported by the app.
+
+Selecting Apps with Where Auto permits an enabled app session on the owner's
+machine. It does not authorize general computer tools or override an explicit
+Workbench destination. Ownership, app permissions, kill switches and active-run
+checks remain mandatory.
+
 ### Auto
 
 Auto keeps the rules. What it adds is the order inside the three general

@@ -59,7 +59,8 @@ type AppSessionHandover struct {
 	ActingUserId string
 	AgentId      string
 	// AppId is the door that was resolved: one of the engine's closed set.
-	AppId string
+	AppId          string
+	RegistrationId string
 	// Model is the model a policy PINNED with `app:<id>:<model>`. EMPTY IS NO
 	// PIN, and the app runs at whatever its own default is.
 	Model string
@@ -243,22 +244,58 @@ func (p *sessionProvider) run(
 		return AppSessionOutcome{}, &AppUnavailable{AppId: p.appId, NoOwner: true}
 	}
 
-	out, err := d.RunStep(ctx, AppSessionHandover{
-		ActingUserId:   actingUser,
-		AgentId:        p.req.AgentId,
-		AppId:          p.appId,
-		Model:          p.model,
-		Level:          p.req.Level,
-		Effort:         p.req.Effort,
-		RunId:          p.req.RunId,
-		StepId:         p.req.StepId,
-		Prompt:         flattenForSession(messages),
-		Tools:          tools,
-		ResponseSchema: schema,
-		Pin:            p.req.Pin,
-	})
-	if err != nil {
-		return out, err
+	var out AppSessionOutcome
+	var err error
+	var excluded []string
+	for {
+		selected := AppSelection{AppId: p.appId}
+		p.registry.mu.RLock()
+		a := p.registry.apps
+		p.registry.mu.RUnlock()
+		request := AppCallRequest{ActingUserId: actingUser, AppId: p.appId, Level: p.req.Level, Effort: p.req.Effort, RunId: p.req.RunId, StepId: p.req.StepId, Schema: schema}
+		if selector, ok := a.(AppSelector); ok {
+			selected, err = selector.SelectApp(ctx, request, true, excluded)
+			if err != nil {
+				return out, err
+			}
+		} else if p.appId == AppWildcardId {
+			if a == nil {
+				return out, fmt.Errorf("app selection is unavailable")
+			}
+			selected.AppId, err = (&appProvider{registry: p.registry}).resolveWildcard(ctx, a, request)
+			if err != nil {
+				return out, err
+			}
+		}
+		out, err = d.RunStep(ctx, AppSessionHandover{
+			ActingUserId:   actingUser,
+			AgentId:        p.req.AgentId,
+			AppId:          selected.AppId,
+			RegistrationId: selected.RegistrationId,
+			Model:          p.model,
+			Level:          p.req.Level,
+			Effort:         p.req.Effort,
+			RunId:          p.req.RunId,
+			StepId:         p.req.StepId,
+			Prompt:         flattenForSession(messages),
+			Tools:          tools,
+			ResponseSchema: schema,
+			Pin:            p.req.Pin,
+		})
+		if err == nil {
+			break
+		}
+		var quota *AppQuotaRefused
+		if p.appId != AppWildcardId || !errors.As(err, &quota) || ctx.Err() != nil {
+			return out, err
+		}
+		if _, ok := a.(AppSelector); !ok {
+			return out, err
+		}
+		excluded = append(excluded, selected.AppId)
+		if len(excluded) >= 16 {
+			return out, err
+		}
 	}
 	p.lastMu.Lock()
 	p.lastResult = out

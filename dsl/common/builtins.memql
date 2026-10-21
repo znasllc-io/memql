@@ -1036,3 +1036,15 @@ builtin fleetSetModelSetup {
   revision string!
   choices object!
 }
+
+@sdk
+@executor("fleetSetAppRouting")
+@description("Save the owner's app strategy on one machine, with a revision check.")
+builtin fleetSetAppRouting {
+    registrationId string!
+    revision string!
+    mode string!
+    usageWeight int!
+    speedWeight int!
+    reliabilityWeight int!
+}

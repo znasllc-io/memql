@@ -747,6 +747,9 @@ func forwardAppCall(
 				fmt.Errorf("%w: %s on %s: %w", memqlengine.ErrAppUnavailable, req.AppId, c.Label(), ctxErr)
 		}
 		reason := appForwardReason(out, err, holder)
+		if out.ErrorCode == "app_quota_refused" {
+			return out.Result, &memqlengine.AppQuotaRefused{Reason: out.ErrorMessage}
+		}
 		if isAppGateCode(out.ErrorCode) {
 			return memqlengine.AppCallResult{}, fmt.Errorf("%w: %w", memqlengine.ErrAppUnavailable,
 				&appGateRefusal{code: out.ErrorCode, message: out.ErrorMessage})
@@ -858,9 +861,9 @@ func (a *RemoteAppInference) Doors(ctx context.Context, actingUserId string) ([]
 	if err != nil {
 		return nil, err
 	}
-	return projectAppDoors(machines, a.clock(), func(c Candidate) (bool, bool) {
+	return filterAppDoors(ctx, a.store, projectAppDoors(machines, a.clock(), func(c Candidate) (bool, bool) {
 		return false, canForwardTo(c, a.forward, a.selfNodeId)
-	}), nil
+	}))
 }
 
 // AppOrder reads the owner's preferred app order off their delegation policy,
@@ -919,6 +922,9 @@ func (a *RemoteAppInference) Call(ctx context.Context, req memqlengine.AppCallRe
 	considered := map[string]string{}
 	var remote []Candidate
 	for _, c := range plan.Candidates {
+		if req.RegistrationId != "" && c.RegistrationId != req.RegistrationId {
+			continue
+		}
 		if why := appCandidateRefusal(c, owner, req, now); why != "" {
 			considered[c.RegistrationId] = why
 			continue

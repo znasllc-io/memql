@@ -2392,6 +2392,56 @@ func FleetRevokeMachineBuild(args FleetRevokeMachineArgs) string {
 	return b.String()
 }
 
+// FleetSetAppRouting -- Save the owner's app strategy on one machine, with a revision check.
+type FleetSetAppRoutingArgs struct {
+	RegistrationId    string
+	Revision          string
+	Mode              string
+	UsageWeight       int
+	SpeedWeight       int
+	ReliabilityWeight int
+}
+
+// FleetSetAppRouting calls the engine builtin fleetSetAppRouting.
+func (qc *QueryClient) FleetSetAppRouting(ctx context.Context, args FleetSetAppRoutingArgs) (*Result, error) {
+	call := FleetSetAppRoutingBuild(args)
+	return qc.executeNamed(ctx, "fleetSetAppRouting", call)
+}
+
+func FleetSetAppRoutingBuild(args FleetSetAppRoutingArgs) string {
+	var b strings.Builder
+	b.WriteString("builtin fleetSetAppRouting(")
+	b.WriteString("registrationId: ")
+	b.WriteString(quoteMemQL(args.RegistrationId))
+	if b.Len() > 27 {
+		b.WriteString(", ")
+	}
+	b.WriteString("revision: ")
+	b.WriteString(quoteMemQL(args.Revision))
+	if b.Len() > 27 {
+		b.WriteString(", ")
+	}
+	b.WriteString("mode: ")
+	b.WriteString(quoteMemQL(args.Mode))
+	if b.Len() > 27 {
+		b.WriteString(", ")
+	}
+	b.WriteString("usageWeight: ")
+	b.WriteString(fmt.Sprintf("%v", args.UsageWeight))
+	if b.Len() > 27 {
+		b.WriteString(", ")
+	}
+	b.WriteString("speedWeight: ")
+	b.WriteString(fmt.Sprintf("%v", args.SpeedWeight))
+	if b.Len() > 27 {
+		b.WriteString(", ")
+	}
+	b.WriteString("reliabilityWeight: ")
+	b.WriteString(fmt.Sprintf("%v", args.ReliabilityWeight))
+	b.WriteString(")")
+	return b.String()
+}
+
 // FleetSetModelSetup -- Save model choices by purpose on your machine after checking installed capabilities and combined memory. Existing calls finish. Later calls use the saved choices, with a 32K context ceiling.
 type FleetSetModelSetupArgs struct {
 	RegistrationId string

@@ -63,6 +63,6 @@ it("keeps reported app facts visible without offering setup when apps are disabl
  const codex = within(screen.getByRole("region", { name: "Codex" }));
  expect(codex.getByText("Active")).toBeTruthy();
  expect(codex.queryByText("Ready")).toBeNull();
- expect(acts(screen)).toEqual([]);
+ expect(acts(codex)).toEqual([]);
  expect(c.query.createGoal).not.toHaveBeenCalled();
 });

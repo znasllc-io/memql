@@ -134,6 +134,8 @@ concept registration {
     sharedAt datetime
     sharedBy string
   }
+  appRouting object @description("Owner-selected app strategy and Auto weights. Absent means Auto. Saved only by fleetSetAppRouting.")
+  appSelection object @description("Server-owned last selection cursor, shared by all replicas. Never changes a running session.")
   ownerFeatures {
     headless bool @description("Allow the enrolled owner's host commands and file tools. Absent preserves the existing owner permission. Disabling blocks new work and cancels active calls.")
     apps bool @description("Allow the enrolled owner's signed-in CLIs and app sessions. Never shareable. Disabling cancels active sessions; enabling never replays canceled work.")

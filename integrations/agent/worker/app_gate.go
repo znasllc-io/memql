@@ -90,11 +90,13 @@ func admitAppSession(ctx context.Context, prefs PreferencesReader, logger *slog.
 		}
 	}
 	if runID != "" {
-		gate, available := prefs.(destinationChecker)
+		gate, available := prefs.(interface {
+			CheckAppExecutionDestination(context.Context, string) error
+		})
 		if !available {
 			return &appGateRefusal{code: AppGateDestination, message: "This goal cannot open a computer app without destination approval"}
 		}
-		if err := gate.CheckExecutionDestination(ctx, runID, "computer"); err != nil {
+		if err := gate.CheckAppExecutionDestination(ctx, runID); err != nil {
 			return &appGateRefusal{code: AppGateDestination, message: err.Error()}
 		}
 	}

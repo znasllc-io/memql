@@ -151,6 +151,9 @@ func (e *MemQLEngine) initBuiltinExecutorHandlers() error {
 		BuiltinExecutorFleetSetSharing: func(ctx context.Context, args map[string]any, _ int) ([]memorynodes.MemoryNode, error) {
 			return e.evaluateFleetSetSharingExpression(ctx, args)
 		},
+		"fleetSetAppRouting": func(ctx context.Context, args map[string]any, _ int) ([]memorynodes.MemoryNode, error) {
+			return e.evaluateFleetSetAppRouting(ctx, args)
+		},
 		BuiltinExecutorFleetSetOwnerFeatures: func(ctx context.Context, args map[string]any, _ int) ([]memorynodes.MemoryNode, error) {
 			return e.evaluateFleetSetOwnerFeaturesExpression(ctx, args)
 		},

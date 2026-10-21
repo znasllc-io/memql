@@ -890,6 +890,23 @@ func AllWorkspacesBuild(args AllWorkspacesArgs) string {
 	return b.String()
 }
 
+// AppRoutingEvidence -- Recent owner-scoped observations for automatic app selection.
+//
+// Bound concept: v1:worker:appSession (machine-readable: BoundConcepts["appRoutingEvidence"] in generated_concepts.go).
+type AppRoutingEvidenceArgs struct {
+}
+
+// AppRoutingEvidence calls the engine query appRoutingEvidence.
+func (qc *QueryClient) AppRoutingEvidence(ctx context.Context, args AppRoutingEvidenceArgs) (*Result, error) {
+	call := AppRoutingEvidenceBuild(args)
+	return qc.executeNamed(ctx, "appRoutingEvidence", call)
+}
+
+func AppRoutingEvidenceBuild(args AppRoutingEvidenceArgs) string {
+	_ = args
+	return "query appRoutingEvidence()"
+}
+
 // AppSessionById wraps the query named "appSessionById".
 //
 // Bound concept: v1:worker:appSession (machine-readable: BoundConcepts["appSessionById"] in generated_concepts.go).

@@ -1,0 +1,34 @@
+import { act, cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { afterEach, expect, it, vi } from "vitest";
+const h = vi.hoisted(() => ({ connection: null as any }));
+vi.mock("../../src/live/connection", () => ({ useOsConnection: () => h.connection }));
+const { MachineAppRouting } = await import("../../src/apps/fleet/machines/MachineAppRouting");
+const { machineFromRow } = await import("../../src/apps/fleet/rows");
+const { withSession, machineRow, builtinReply } = await import("./harness");
+afterEach(() => { cleanup(); vi.restoreAllMocks(); });
+const machine = machineFromRow(machineRow({ id: "machine", ownerUserId: "me" }));
+it("defaults to Auto, saves a machine-only strategy and keeps the confirmed choice until the live row arrives", async () => {
+ const save = vi.fn().mockResolvedValue(builtinReply("fleetSetAppRouting", [{ revision: "saved" }]));
+ h.connection = { query: { fleetSetAppRouting: save } };
+ render(withSession(<MachineAppRouting machine={machine} />, { userId: "me" }));
+ expect(screen.getByRole("combobox", { name: "App strategy" }).textContent).toContain("Auto");
+ fireEvent.click(screen.getByRole("combobox", { name: "App strategy" }));
+ fireEvent.click(screen.getByRole("option", { name: /Round robin/ }));
+ expect(screen.getByRole("slider", { name: "App usage balance" }).hasAttribute("disabled")).toBe(true);
+ await act(async () => { fireEvent.click(screen.getByRole("button", { name: "Save app routing" })); });
+ expect(save).toHaveBeenCalledWith({ registrationId: "machine", revision: "", mode: "roundRobin", usageWeight: 50, speedWeight: 50, reliabilityWeight: 50 });
+ expect(screen.getByRole("combobox", { name: "App strategy" }).textContent).toContain("Round robin");
+ expect(screen.getByRole("button", { name: "Save app routing" }).hasAttribute("disabled")).toBe(true);
+});
+it("keeps a rejected draft and reports failure outside the active settings surface", async () => {
+ vi.spyOn(console, "error").mockImplementation(() => {});
+ h.connection = { query: { fleetSetAppRouting: vi.fn().mockRejectedValue(new Error("stale revision")) } };
+ render(withSession(<MachineAppRouting machine={machine} />, { userId: "me" }));
+ fireEvent.click(screen.getByRole("combobox", { name: "App strategy" }));
+ fireEvent.click(screen.getByRole("option", { name: /Codex only/ }));
+ await act(async () => { fireEvent.click(screen.getByRole("button", { name: "Save app routing" })); });
+ const notice = screen.getByText("App settings could not be saved. Your changes are kept.");
+ expect(screen.getByRole("region", { name: "App routing" }).contains(notice)).toBe(false);
+ expect(screen.getByRole("combobox", { name: "App strategy" }).textContent).toContain("Codex only");
+ expect(screen.getByRole("button", { name: "Save app routing" }).hasAttribute("disabled")).toBe(false);
+});

@@ -315,6 +315,7 @@ export const BoundConcepts = {
   allSafetyClassifications: "v1:safety:classification",
   allWorkersWithStatus: "v1:worker:registration",
   allWorkspaces: "v1:workbench:workspace",
+  appRoutingEvidence: "v1:worker:appSession",
   appSessionById: "v1:worker:appSession",
   appSessionsForStep: "v1:worker:appSession",
   appSessionsForUser: "v1:worker:appSession",
