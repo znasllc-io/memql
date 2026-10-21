@@ -25,8 +25,11 @@ import (
 	"github.com/znasllc-io/memql/component/auth"
 	"github.com/znasllc-io/memql/component/database/dbtest"
 	memorynodes "github.com/znasllc-io/memql/component/database/memory-nodes"
+	memqlv1 "github.com/znasllc-io/memql/component/grpc/gen"
 	"github.com/znasllc-io/memql/component/memql"
 	"github.com/znasllc-io/memql/component/server"
+	"github.com/znasllc-io/memql/core/common"
+	"github.com/znasllc-io/memql/integrations/agents"
 	"github.com/znasllc-io/memql/integrations/azureblob"
 )
 
@@ -108,6 +111,15 @@ func (f *exportTestFleet) DispatchFleetWorkbench(ctx context.Context, req FleetR
 	return FleetResult{OK: r.OK, Payload: r.Payload, ErrorCode: r.ErrorCode, ErrorMessage: r.ErrorMsg}, true
 }
 
+type exportReceiptRunner struct{}
+
+func (exportReceiptRunner) ResolveOwnerAgent(context.Context, string) (string, error) {
+	return "test-agent", nil
+}
+func (exportReceiptRunner) RunTurn(context.Context, *memqlv1.AgentGenerateTurnMsg) (string, error) {
+	return "Saved the file", nil
+}
+
 func TestExportDBReplicaRecoveryAndOwnerAdmission(t *testing.T) {
 	producer, indexer := exportDBEngine(t), exportDBEngine(t)
 	suffix := fmt.Sprint(time.Now().UnixNano())
@@ -118,6 +130,8 @@ func TestExportDBReplicaRecoveryAndOwnerAdmission(t *testing.T) {
 	if _, err := producer.Execute(seed, fmt.Sprintf(`insert("v1:work:run", id=%q, payload=%s)`, run, payload)); err != nil {
 		t.Fatal(err)
 	}
+	rc := common.RunContext{RunId: run, GoalId: "export-goal-" + suffix, StepKey: "assemble", OwnerUserId: owner}
+	ctx = common.ContextWithRun(ctx, rc)
 	fleet := &exportTestFleet{ws: &workspace{rootPath: t.TempDir()}}
 	data := bytes.Repeat([]byte{0, 255, 13, 10, 128}, 150000)
 	if err := os.WriteFile(filepath.Join(fleet.ws.rootPath, "test.tar.gz"), data, 0600); err != nil {
@@ -181,6 +195,24 @@ func TestExportDBReplicaRecoveryAndOwnerAdmission(t *testing.T) {
 			t.Fatal("export changed bytes")
 		}
 	}
+	// The real completion gate on a different engine must recognize the export
+	// as this step's ready file, rather than repeatedly asking the app to package it.
+	turns := agents.New(memql.NewAgentRegistry(), indexer)
+	turns.SetAgentTurnRunner(exportReceiptRunner{})
+	for _, capability := range turns.Capabilities() {
+		if capability.Name != "runAgentTurn" {
+			continue
+		}
+		args := map[string]any{"agentId": "test-agent", "prompt": "Deliver the generated file", "requireFile": true}
+		if _, err := capability.Handler(ctx, args, 0); err != nil {
+			t.Fatalf("export did not satisfy real step completion: %v", err)
+		}
+		other := rc
+		other.StepKey = "different-step"
+		if _, err := capability.Handler(common.ContextWithRun(ctx, other), args, 0); err == nil {
+			t.Fatal("another step borrowed the exported file")
+		}
+	}
 	// Exercise the actual byte route on another engine, not just index
 	// visibility: a raw object key is not a URL the storage reader can open.
 	handler := server.NewArtifactHandler(server.ArtifactHandlerOptions{
@@ -201,6 +233,11 @@ func TestExportDBReplicaRecoveryAndOwnerAdmission(t *testing.T) {
 		}
 	}
 	reads := fleet.reads
+	wrongRun := rc
+	wrongRun.RunId = "another-run"
+	if _, err = i.exportFile(common.ContextWithRun(ctx, wrongRun), args); err == nil {
+		t.Fatal("export borrowed another run's step attribution")
+	}
 	if _, err = i.exportFile(auth.ContextWithUserActor(context.Background(), owner+"-stranger"), args); err == nil {
 		t.Fatal("export accepted another owner")
 	}

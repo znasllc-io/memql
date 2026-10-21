@@ -27,6 +27,8 @@ verifies the saved bytes before returning a Library file ID, SHA-256, size and
 download URL. It preserves all file types and extensions, including archives.
 Ask uses the returned link to download through the same authenticated path as
 Files. The saved file remains available after the workspace is released.
+Verified exports carry the executing run and step and become ready before the
+tool returns, so the work completion check recognizes the delivered file.
 Exports use the storage service's 2 GiB ceiling and require the MCP/agent node's
 Library storage configuration. Older Cockpit runtimes without binary reads
 refuse export rather than delivering a corrupted or truncated file.
