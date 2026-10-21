@@ -60,6 +60,15 @@ type delegatedEngine struct {
 	runStatus    string
 	runSeen      common.RunContext
 	defaultsSeen map[string]any
+	sourceRun    common.RunContext
+	sourceArgs   map[string]any
+	sourceResult string
+}
+
+func (e *delegatedEngine) RecordDelegatedToolSource(ctx context.Context, _ string, args map[string]any, result string) error {
+	e.sourceRun, _ = common.RunFromContext(ctx)
+	e.sourceArgs, e.sourceResult = args, result
+	return nil
 }
 
 func delegatedFixture() *delegatedEngine {
@@ -121,6 +130,9 @@ func TestDelegatedMCPUsesStoredScopeAcrossServers(t *testing.T) {
 		}
 		if eng.roleSeen != "assistant" || eng.runSeen.RunId != "run-1" || eng.runSeen.Routing.Source != "app:*" || eng.toolArgs["runId"] != "run-1" {
 			t.Fatalf("lost context: %+v %+v", eng.runSeen, eng.toolArgs)
+		}
+		if eng.sourceRun.RunId != "run-1" || eng.sourceArgs["runId"] != "run-1" || eng.sourceResult == "" {
+			t.Fatal("executed result did not reach its original owned run's evidence")
 		}
 		data := eng.toolArgs["data"].(map[string]any)
 		if data["text"] != "keep" || data["producedByPlanId"] != "run-1" {

@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"log/slog"
 	"strings"
 	"time"
 
@@ -168,9 +169,22 @@ func callDelegatedTool(ctx context.Context, eng Engine, sessionID, name string, 
 	ctx = common.ContextWithToolDefaults(ctx, scope.Defaults[name])
 	raw, err := eng.ExecuteToolByName(ctx, name, args)
 	if err != nil {
-		return errorResult(fmt.Sprintf("tool %q failed: %v", name, err))
+		result = errorResult(fmt.Sprintf("tool %q failed: %v", name, err))
+		encoded, _ := json.Marshal(result)
+		raw = string(encoded)
+	} else {
+		result = toolResultFromJSON(raw)
 	}
-	return toolResultFromJSON(raw)
+	if recorder, ok := eng.(interface {
+		RecordDelegatedToolSource(context.Context, string, map[string]any, string) error
+	}); ok {
+		if err := recorder.RecordDelegatedToolSource(context.WithoutCancel(ctx), name, args, raw); err != nil {
+			// The action already happened. Do not disguise a receipt failure as
+			// an execution failure that the app might replay.
+			slog.Warn("delegated tool source could not be saved", "tool", name, "session_id", sessionID, "error", err)
+		}
+	}
+	return result
 }
 
 func overlayToolDefaults(args, defaults map[string]any) map[string]any {

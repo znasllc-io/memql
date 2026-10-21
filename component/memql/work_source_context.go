@@ -66,7 +66,7 @@ func (e *MemQLEngine) workSourceContextBuiltin(ctx context.Context, args map[str
 				continue
 			}
 			// Agent tool results live in durable exchanges, not step result prose.
-			checkpoints, readErr := e.workRows(ctx, "workSourceCheckpointsForOwnerRun", runID)
+			checkpoints, readErr := e.workSourceReceipts(ctx, runID)
 			if readErr != nil {
 				unavailable = append(unavailable, "Previous tool source receipts could not be read.")
 			} else {
@@ -137,6 +137,18 @@ func (e *MemQLEngine) workSourceContextBuiltin(ctx context.Context, args map[str
 	return []memorynodes.MemoryNode{{ID: "work-source-context", Payload: raw}}, nil
 }
 
+func (e *MemQLEngine) workSourceReceipts(ctx context.Context, runID string) ([]map[string]any, error) {
+	delegated, err := e.workRows(ctx, "workDelegatedSourcesForOwnerRun", runID)
+	if err != nil {
+		return nil, err
+	}
+	checkpoints, err := e.workRows(ctx, "workSourceCheckpointsForOwnerRun", runID)
+	if err != nil {
+		return nil, err
+	}
+	return append(delegated, checkpoints...), nil
+}
+
 // Project complete, paired tool results only. Checkpoints may overlap; public
 // call IDs deduplicate them. Never copy system/assistant text or reasoning.
 func workCheckpointSources(checkpoints []map[string]any, runID string, remaining *int) ([]map[string]any, bool) {
@@ -145,6 +157,10 @@ func workCheckpointSources(checkpoints []map[string]any, runID string, remaining
 	omitted := false
 	for _, checkpoint := range checkpoints {
 		data, _ := checkpoint["data"].(map[string]any)
+		if data["sourceOmitted"] == true {
+			omitted = true
+			continue
+		}
 		raw, err := json.Marshal(data)
 		if err != nil || len(raw) > 2*1024*1024 {
 			omitted = true

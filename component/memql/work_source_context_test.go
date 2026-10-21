@@ -44,6 +44,8 @@ func TestSourceContextReadsRecordedEvidenceAcrossReplicasAndPreservesOwnerScope(
 	}
 	checkpoint(uniqueSuffix("tools"), access.UserId, runID)
 	checkpoint(uniqueSuffix("foreign-tools"), "v1:identity:user:another", runID)
+	delegatedCtx := WithActingAgentId(common.ContextWithRun(ctx, common.RunContext{RunId: runID, OwnerUserId: access.UserId, StepKey: "coding"}), "coding-agent")
+	require.NoError(t, a.RecordDelegatedToolSource(delegatedCtx, "workbenchHost", map[string]any{"action": "exec"}, `{"stdout":"Ran 12 tests: OK; LEDGER-CONTEXT-42","exitCode":0}`))
 	require.NoError(t, a.askSave(ctx, conversation, "Source explanation", askTranscript{Turns: []AskTurn{
 		{ID: "prior", Prompt: "How can you help?", Answer: "Founder of ZNAS LLC", State: "done", RunID: runID, StartedAt: time.Now()},
 		{ID: "unowned", Prompt: "Forged run", RunID: foreignID, State: "done", StartedAt: time.Now()},
@@ -76,6 +78,7 @@ func TestSourceContextReadsRecordedEvidenceAcrossReplicasAndPreservesOwnerScope(
 	require.NoError(t, err)
 	require.True(t, current.Equal(zoned), "receiving replica must supply consistent current clocks")
 	require.Contains(t, text, "service-A")
+	require.Contains(t, text, "Ran 12 tests: OK; LEDGER-CONTEXT-42")
 	require.Equal(t, 1, strings.Count(text, "source-call"))
 	require.NotContains(t, text, "private system content")
 	require.NotContains(t, text, "MODEL_REASONING_DO_NOT_EXPORT")
@@ -104,6 +107,30 @@ func TestSourceContextReadsRecordedEvidenceAcrossReplicasAndPreservesOwnerScope(
 	require.Error(t, err)
 	_, err = b.workSourceContextBuiltin(ctx, map[string]any{"conversationId": conversation, "turnId": "missing"}, 0)
 	require.Error(t, err)
+}
+
+func TestDelegatedSourceReceiptsDoNotReplaceContinuationAndRequireOwnedRun(t *testing.T) {
+	e, _, _ := readMergeTestEngine(t)
+	ctx := WithActingAgentId(contextTestRun(t, e), "coding-agent")
+	run, _ := common.RunFromContext(ctx)
+	original := []common.ChatMessage{{Role: "user", Content: "Preserve the complete original request"}}
+	require.NoError(t, e.RecordDelegatedToolSource(ctx, "workbenchHost", map[string]any{"action": "exec"}, `{"exitCode":0}`))
+	restored, err := e.RestoreWorkContinuation(ctx, original)
+	require.NoError(t, err)
+	require.Equal(t, original, restored, "a source receipt must never replace resumable agent state")
+	foreign := common.ContextWithRun(askTestActor(), run)
+	foreign = WithActingAgentId(foreign, "coding-agent")
+	require.Error(t, e.RecordDelegatedToolSource(foreign, "workbenchHost", nil, "private"))
+	rows, err := e.workSourceReceipts(foreign, run.RunId)
+	require.NoError(t, err)
+	require.Empty(t, rows)
+	require.NoError(t, e.RecordDelegatedToolSource(ctx, "workbenchHost", nil, strings.Repeat("x", 1024*1024+1)))
+	rows, err = e.workSourceReceipts(ctx, run.RunId)
+	require.NoError(t, err)
+	remaining := replyReviewMaxBytes
+	sources, omitted := workCheckpointSources(rows, run.RunId, &remaining)
+	require.True(t, omitted, "oversized evidence must be explicitly unavailable")
+	require.Len(t, sources, 1)
 }
 
 func TestExplicitMissingEvidenceAnswerWinsOverIntermediateAssessment(t *testing.T) {

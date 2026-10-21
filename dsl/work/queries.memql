@@ -692,3 +692,13 @@ query observation workSourceCheckpointsForOwnerRun {
  paginate 4
  shape workObservationFull
 }
+
+/// Executed app/MCP receipts are source evidence, never resumable agent state.
+@actor
+query observation workDelegatedSourcesForOwnerRun {
+ args { runId string! }
+ filter row => row.runId == args.runId && row.ownerUserId == actor.userId && row.?data.delegatedEvidence == true
+ sort "row.createdAt", "desc"
+ paginate 16
+ shape workObservationFull
+}

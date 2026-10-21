@@ -34,7 +34,7 @@ func (e *MemQLEngine) workReviewReplyBuiltin(ctx context.Context, args map[strin
 		return nil, fmt.Errorf("reply review run is unavailable")
 	}
 	remaining := replyReviewMaxBytes
-	checkpoints, err := e.workRows(ctx, "workSourceCheckpointsForOwnerRun", run.RunId)
+	checkpoints, err := e.workSourceReceipts(ctx, run.RunId)
 	if err != nil {
 		return nil, fmt.Errorf("reply review sources: %w", err)
 	}
