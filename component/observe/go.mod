@@ -21,7 +21,7 @@ require (
 	github.com/znasllc-io/memql/component/bus v0.0.0 // indirect
 	github.com/znasllc-io/memql/component/bus/gen v0.0.0 // indirect
 	github.com/znasllc-io/memql/component/grpc/gen v0.0.0 // indirect
-	golang.org/x/net v0.60.0 // indirect
+	golang.org/x/net v0.61.0 // indirect
 	golang.org/x/sys v0.49.0 // indirect
 	golang.org/x/text v0.43.0 // indirect
 	google.golang.org/genproto/googleapis/rpc v0.0.0-20260706201446-f0a921348800 // indirect
