@@ -11,12 +11,12 @@ import "../src/styles/index.css";
 // message went), split (the reply before a split request's own answer;
 // state=quick answers it inline), stop (the stop question on a goal's card;
 // state=pending holds an answer in flight, state=error refuses it) and many
-// (a card that asks is never folded). budget=1 is the budget approval
-// discussion (state=saved|pending|error). scene=empty|pending|quick|error|
+// (a card that asks is never folded). progress=1 is the progress feedback
+// discussion (state=sent|pending|error|stopped). scene=empty|pending|quick|error|
 // format-error|model-error are the general Ask states. mode=light|dark;
 // narrow=1 for a narrow column.
 const params = new URLSearchParams(location.search);
-const budget = params.has("budget");
+const progress = params.has("progress");
 const scene = params.get("scene");
 const state = params.get("state");
 document.documentElement.dataset.theme = params.get("mode") === "light" ? "light" : "dark";
@@ -52,9 +52,9 @@ const routing: Record<string, AskTurn[]> = {
       target("weather", "Weather in Phoenix", "received", "Actually, I’m in Phoenix, not Tucson."),
       target("hike", "Saturday hike near Phoenix", "answered", "Actually, I’m in Phoenix, not Tucson.", { approvalId: "hike-question" }),
     ] }),
-    routed("staging", "Use the staging bucket, and leave the appendix out of the report.", 4, { reply: "Sent to the deploy as a correction; publishing still needs your approval. The report keeps your note until its limit is raised.", targets: [
+    routed("staging", "Use the staging bucket, and leave the appendix out of the report.", 4, { reply: "Sent to the deploy as a correction; publishing still needs your approval. The report received your feedback and is continuing.", targets: [
       target("deploy", "Deploy storefront update", "notApproved", "Use the staging bucket, and leave the appendix out of the report.", { approvalId: "deploy-permission" }),
-      target("report", "Quarterly report", "saved", "Use the staging bucket, and leave the appendix out of the report.", { approvalId: "report-budget" }),
+      target("report", "Quarterly report", "answered", "Use the staging bucket, and leave the appendix out of the report.", { approvalId: "report-progress" }),
     ] }),
     routed("sunset", "Add a sunset viewpoint to the plans.", 2, { reply: "Added to the hike. The trip recap had already finished, and the event plan is waiting on your review, so neither got it.", targets: [
       target("hike", "Saturday hike near Phoenix", "queued", "Add a sunset viewpoint to the plans."),
@@ -72,27 +72,28 @@ const routing: Record<string, AskTurn[]> = {
   many: [tucson, hike, dinner, deploy, report, neverMind],
 };
 
-// The budget discussion and the general states share one piece of work.
+// The progress discussion and the general states share one piece of work.
 let turns: AskTurn[] = Array.from({ length: params.get("many") ? 4 : 1 }, (_, index) => ({
   id: `turn-${index}`, runId: `run-${index}`,
   prompt: "Review the service report and prepare the requested changes.", workTitle: ["Review service report", "Check a longer report title with useful context", "Prepare the review", "Verify the result"][index],
-  answer: "I’ll work through the report.", acknowledgement: "I’ll work through the report.", background: true, state: budget ? "waiting" : "queued", workStatus: budget ? "awaiting_approval" : "running", startedAt: new Date().toISOString(), activity: [],
+  answer: "I’ll work through the report.", acknowledgement: "I’ll work through the report.", background: true, state: progress ? "waiting" : "queued", workStatus: progress ? "awaiting_approval" : "running", startedAt: new Date().toISOString(), activity: [],
 }));
 if (scene && routing[scene]) turns = routing[scene];
 if (scene === "empty") turns = [];
 if (scene === "pending" || scene === "quick") turns = [{ ...turns[0]!, prompt: "Hola", answer: scene === "quick" ? "¡Hola! ¿Cómo estás?" : "", acknowledgement: undefined, background: false, workload: "quick", state: scene === "quick" ? "done" : "queued", workStatus: scene === "quick" ? "succeeded" : "compiling" }];
 if (scene === "error") turns = [{ ...turns[0]!, state: "error", error: "The model is unavailable. Try again when it is connected.", endedAt: new Date().toISOString() }];
 if (scene === "format-error" || scene === "model-error") turns = [{ ...turns[0]!, prompt: "Create an image of the first bird in my saved list.", answer: "I’ll check the saved list and create its first bird.", acknowledgement: "I’ll check the saved list and create its first bird.", workTitle: "Create the bird image", state: "error", workStatus: "failed", error: scene === "format-error" ? 'automation "workSpineDraft" execution failed: Spine refused: work compile: triage fileFormat: compose: unknown format "png" (offered: markdown, html, txt, csv, json, docx, pdf)' : "every_door_shut: no eligible fleet machine for this model", endedAt: new Date().toISOString() }];
-let discussion: ApprovalDiscussion = { conversationId: "fixture", approval: { id: "budget", runId: "run-0", kind: "budget", question: "This work reached its limit.", status: "pending" }, canSendGuidance: true, canAskAdvisor: true, guidanceMode: "deferred", savedGuidance: state === "saved" ? "Use the verified record and check the result before continuing." : "" };
+let discussion: ApprovalDiscussion = { conversationId: "fixture", approval: { id: "progress", runId: "run-0", kind: "feedback", question: "Review the progress so far and tell me what to change.", status: "pending" }, canSendGuidance: true, canAskAdvisor: true };
 const transport = {
   ask() { throw new Error("Ordinary Ask is not connected in this fixture."); },
   conversations: { list: async () => [{ id: "fixture", title: "Weekend in Phoenix" }], create: async () => ({ id: "new", title: "New" }), read: async () => turns },
   discussApproval: async () => discussion,
-  approvalGuidance: async (_id: string, feedback: string): Promise<ApprovalGuidanceReceipt> => {
+  approvalGuidance: async (_id: string, _feedback: string): Promise<ApprovalGuidanceReceipt> => {
     if (state === "pending") return new Promise(() => {});
     if (state === "error") throw new Error("The connection closed before guidance was confirmed.");
-    discussion = { ...discussion, savedGuidance: feedback };
-    return { runResumed: false, guidanceSaved: true, savedGuidance: feedback };
+    discussion = { ...discussion, canSendGuidance: false };
+    turns = turns.map(turn => turn.runId !== "run-0" ? turn : { ...turn, state: state === "stopped" ? "done" : "queued", workStatus: state === "stopped" ? "cancelled" : "running" });
+    return state === "stopped" ? { runResumed: false, runStopped: true } : { runResumed: true };
   },
   // Records the answer the way the cluster does; a stopped goal's card stays
   // until its run notices the request at its next step.
@@ -104,10 +105,10 @@ const transport = {
 };
 const session = new ConversationSession(transport);
 await session.select("fixture");
-if (budget) {
-  await session.discussApproval("budget");
-  if (state !== "saved") session.setDraft("Use the verified record and check the result before continuing.");
-  if (["pending", "error"].includes(state ?? "")) void session.sendGuidance();
+if (progress) {
+  await session.discussApproval("progress");
+  session.setDraft("Use the verified record and check the result before continuing.");
+  if (["sent", "pending", "error", "stopped"].includes(state ?? "")) void session.sendGuidance();
 } else if ((scene === "stop" || scene === "many") && (state === "pending" || state === "error")) {
   void session.decideStop("never", "run-weather", "stop");
 }

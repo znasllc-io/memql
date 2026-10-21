@@ -1749,8 +1749,9 @@ What the goal does with it depends on its state:
 - **Waiting on the person's question:** the message is the answer. Answered.
 - **Waiting on a permission:** `work.decideApproval` takes the message as a
   correction, and nothing is approved. Sent, not approved.
-- **Paused on its budget:** the message is saved for when the limit is raised.
-  Saved.
+- **Waiting for progress direction:** the message answers the saved-work
+  checkpoint. Answered. At the overall limit, the request cannot take further
+  guidance and the message is Not delivered.
 - **Waiting on a request that takes no messages,** such as a plan review: the
   message is not delivered. Not delivered also covers a goal at its guidance
   limit, a request that refused the message, and a goal whose run belongs to
@@ -1795,7 +1796,7 @@ What the person sees:
 at its completion time with the goal's title. Polling must preserve a newer
 local stream and reject stale reads after conversation selection changes.
 Waiting approvals keep their separate approval discussion path: Discuss in Ask,
-Send guidance, Save guidance and Raise limit are unchanged.
+Send guidance and the saved-work continuation controls are unchanged.
 
 The message field's control row holds Attach, **Where** and **Route**. Where
 independently chooses Auto, Workbench or Computer for the next submitted goal.

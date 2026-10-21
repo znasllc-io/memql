@@ -284,7 +284,7 @@ func askRouteStateCases() []askRouteStateCase {
 		{"a failure question", parked("planReview"), request(map[string]any{"kind": "planReview", "question": "The search failed. Retry?", "options": retryAbandon, "subject": map[string]any{"symptom": "plan"}}), "waiting for your answer", "The search failed. Retry?"},
 		{"a permission", parked("sideEffect"), request(map[string]any{"kind": "sideEffect", "evidence": map[string]any{"reason": "Sends an email outside your organization"}}), "waiting for your permission", "Sends an email outside your organization"},
 		{"a scope elevation", parked("scopeElevation"), request(map[string]any{"kind": "scopeElevation", "question": "Use your browser?"}), "waiting for your permission", "Use your browser?"},
-		{"a budget checkpoint", parked("budget"), request(map[string]any{"kind": "budget", "subject": map[string]any{"resumeKind": "checkpoint", "continuationId": "c1"}}), "paused on its budget", ""},
+		{"a retired budget checkpoint", parked("budget"), request(map[string]any{"kind": "budget", "subject": map[string]any{"resumeKind": "checkpoint", "continuationId": "c1"}}), "waiting on a review", ""},
 		{"a budget review", parked("budget"), request(map[string]any{"kind": "budget", "subject": map[string]any{"ceiling": "maxModelCalls"}}), "waiting on a review", ""},
 		{"a plan review", parked("planReview"), request(map[string]any{"kind": "planReview", "subject": map[string]any{"patches": []any{}}}), "waiting on a review", ""},
 		{"a document review", parked("feedback"), request(map[string]any{"kind": "feedback", "question": "Accept the edits?", "subject": map[string]any{"reviewType": "document"}}), "waiting on a review", "Accept the edits?"},
