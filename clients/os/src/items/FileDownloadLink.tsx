@@ -46,7 +46,8 @@ export function FileDownloadLink({ artifactId, fileId, name, children }: {
           return file ? { sizeBytes: rowNumber(file, "size"), name: rowString(file, "name") } : null;
         }, bearer: () => auth.bearer() });
     } catch (error) {
-      report({ level: "error", app: "files", component: "download", message: "File download failed", error, subject: artifactId || fileId });
+      report({ level: "error", app: "files", component: "download", message: "File download failed", error,
+        attributes: { reason: error instanceof Error ? error.message : String(error) }, subject: artifactId || fileId });
       setFailed(true);
     } finally { active.current = false; setBusy(false); }
   };
