@@ -4,6 +4,7 @@ package workbench
 
 import (
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"os"
@@ -47,6 +48,44 @@ func TestDockerWorkbenchIsolationAndBoundedOperations(t *testing.T) {
 	}
 	if r := call(run, "fs_read", map[string]any{"path": "kept.txt"}); !r.OK || r.Payload.(map[string]any)["content"] != "isolated" {
 		t.Fatal("workspace lost content", r)
+	}
+	if r := call(run, "exec", map[string]any{"cmd": "python3 -c 'open(\"binary.zip\",\"wb\").write(bytes(range(256))*5000)'"}); !r.OK {
+		t.Fatal(r)
+	}
+	var binary []byte
+	version := ""
+	for offset := 0; ; {
+		args := map[string]any{"path": "binary.zip", "encoding": "base64", "offset": offset, "maxBytes": 256 << 10}
+		if version != "" {
+			args["version"] = version
+		}
+		r := call(run, "fs_read", args)
+		if !r.OK {
+			t.Fatal(r)
+		}
+		p := r.Payload.(map[string]any)
+		chunk, err := base64.StdEncoding.DecodeString(p["content"].(string))
+		if err != nil || len(chunk) > 256<<10 {
+			t.Fatal("invalid binary chunk", err)
+		}
+		binary = append(binary, chunk...)
+		offset += len(chunk)
+		version = p["version"].(string)
+		if p["eof"] == true {
+			break
+		}
+	}
+	if len(binary) != 256*5000 {
+		t.Fatal("truncated binary", len(binary))
+	}
+	for index, value := range binary {
+		if value != byte(index%256) {
+			t.Fatal("altered binary", index)
+		}
+	}
+	call(run, "fs_write", map[string]any{"path": "binary.zip", "content": "changed"})
+	if r := call(run, "fs_read", map[string]any{"path": "binary.zip", "encoding": "base64", "version": version}); r.OK {
+		t.Fatal("export joined changed bytes")
 	}
 	borrower := run
 	borrower.Caller = "other-person"
