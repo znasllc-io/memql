@@ -13482,6 +13482,28 @@ func WorkContinuationForOwnerRunBuild(args WorkContinuationForOwnerRunArgs) stri
 	return "query workContinuationForOwnerRun()"
 }
 
+// WorkDelegatedSourcesForOwnerRun -- Executed app/MCP receipts are source evidence, never resumable agent state.
+//
+// Bound concept: v1:work:observation (machine-readable: BoundConcepts["workDelegatedSourcesForOwnerRun"] in generated_concepts.go).
+type WorkDelegatedSourcesForOwnerRunArgs struct {
+	RunId string
+}
+
+// WorkDelegatedSourcesForOwnerRun calls the engine query workDelegatedSourcesForOwnerRun.
+func (qc *QueryClient) WorkDelegatedSourcesForOwnerRun(ctx context.Context, args WorkDelegatedSourcesForOwnerRunArgs) (*Result, error) {
+	call := WorkDelegatedSourcesForOwnerRunBuild(args)
+	return qc.executeNamed(ctx, "workDelegatedSourcesForOwnerRun", call)
+}
+
+func WorkDelegatedSourcesForOwnerRunBuild(args WorkDelegatedSourcesForOwnerRunArgs) string {
+	var b strings.Builder
+	b.WriteString("query workDelegatedSourcesForOwnerRun(")
+	b.WriteString("runId: ")
+	b.WriteString(quoteMemQL(args.RunId))
+	b.WriteString(")")
+	return b.String()
+}
+
 // WorkDescriptionGuidance -- The DESCRIPTION GUIDANCE a goal shape has accumulated (epic memql#5414, design D23): the caller's own dislikes whose run served this goal signature, newest first, each carrying the axes and the reason the person gave. It is read only when a MODEL is about to be used for that goal again -- an agent turn of a live run, compile's triage and design calls, the app a learned procedure hands the goal back to -- and never by a replay, a fork's shared prefix or a construct-served goal, because a replay reads rows and text is not a row it can act on. Owned: guidance mined from somebody else's dislikes would steer a person's goal by another person's taste. Bounded at 20, the most recent, because the reader keeps five.
 //
 // Bound concept: v1:work:observation (machine-readable: BoundConcepts["workDescriptionGuidance"] in generated_concepts.go).
@@ -14083,6 +14105,23 @@ func WorkStepsForOwnerRunBuild(args WorkStepsForOwnerRunArgs) string {
 	b.WriteString(quoteMemQL(args.RunId))
 	b.WriteString(")")
 	return b.String()
+}
+
+// WorkToolSourcesForOwnerRun -- Page recorded tool exchanges for safe projection, including exact receipts that exceed the short source-context preview. Never expose these raw rows.
+//
+// Bound concept: v1:work:observation (machine-readable: BoundConcepts["workToolSourcesForOwnerRun"] in generated_concepts.go).
+type WorkToolSourcesForOwnerRunArgs struct {
+}
+
+// WorkToolSourcesForOwnerRun calls the engine query workToolSourcesForOwnerRun.
+func (qc *QueryClient) WorkToolSourcesForOwnerRun(ctx context.Context, args WorkToolSourcesForOwnerRunArgs) (*Result, error) {
+	call := WorkToolSourcesForOwnerRunBuild(args)
+	return qc.executeNamed(ctx, "workToolSourcesForOwnerRun", call)
+}
+
+func WorkToolSourcesForOwnerRunBuild(args WorkToolSourcesForOwnerRunArgs) string {
+	_ = args
+	return "query workToolSourcesForOwnerRun()"
 }
 
 // WorkTrainingEvidenceById wraps the query named "workTrainingEvidenceById".
