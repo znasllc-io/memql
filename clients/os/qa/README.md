@@ -412,7 +412,10 @@ The same page keeps the general Ask states: `scene=empty`, `pending`, `quick`,
 conversation to review the message field. `scene=empty`, `multiline` (the
 field grown upward), `attachments` (one landed upload, one halfway, one over
 quota), `picker` (the Route menu open), `not-ready` (a personal route dim with
-its reason) and `apps` (Apps chosen, Where set to Computer). Add `widget=1`
+its reason), `apps` (Apps chosen, Where remains Auto), and `workbench`
+(Workbench chosen, Apps disabled). Add `menu=where` or `menu=route` to open
+either menu. Check disabled options by pointer and keyboard, unchanged choices
+and draft, and stable descriptions before and after disabling. Add `widget=1`
 for the floating widget's height and `narrow=1` for a narrow column. Nothing
 uploads, routes or calls a model. Inspect both modes at desktop and 820px
 widths.

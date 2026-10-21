@@ -164,10 +164,13 @@ concept route {
   to the rules.
 - **Scope.** The choice binds every model call of the turn's goal on every node,
   as `RouteChoice.Source` does today, including compile-time calls.
-- **Picking Apps implies Computer.** In Ask, choosing Apps sets **Where** to
-  Computer, visibly. Apps run on the person's own machine, so their sessions
-  need the Computer destination. The person can change Where afterwards. No
-  gate is relaxed.
+- **Route preserves Where (owner revision, 2026-10-20).** Both default to Auto.
+  Choosing Apps keeps Auto or an explicit Computer choice. Apps with Workbench
+  is disabled in either menu, without changing the other selection. Stable
+  option descriptions explain the constraint; selecting does not insert a
+  warning or open a popup. Auto retains destination-consent checks before a
+  computer app session; no access gate is relaxed. An older incompatible pair
+  stays visible with the draft and cannot be sent until either choice changes.
 - **Background work keeps Auto.** System work and calls with no person behind
   them (sweeps, scheduled automations) always use Auto. A route is a person's
   choice for their own messages.
@@ -409,7 +412,7 @@ One control, drawn as one bordered surface:
     - a route that is not ready is shown dim, with its reason, and cannot be
       chosen;
     - "Manage routes" opens Fleet, Routing, Routes;
-    - choosing Apps sets Where to Computer, as above.
+    - choosing Apps preserves Where; incompatible choices are disabled, as above.
   - **Send**, at the right end. It is absent while there is nothing to send and
     becomes Stop while a turn runs, as today.
 - **Persistence.** The route and Where choices are kept per conversation and
@@ -482,7 +485,7 @@ The Routes tab is rebuilt around routes. Rules, History and Machines stay.
   rides the run row, as `RouteChoice` does today.
 - **OS:**
   - vitest for the message field: growth, a fixed control row, attach chips,
-    picker readiness, and Apps setting Where;
+    picker readiness, independent Route/Where choices, and disabled combinations;
   - vitest for the Routes list, route page assignment, the add wizard and the
     Auto page;
   - QA harness views and screenshots in light and dark, at 1400x900 and

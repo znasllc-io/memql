@@ -24,6 +24,12 @@ export const AUTO_ROUTING: AskRouting = Object.freeze({ source: "", level: "" })
 
 export const ROUTE_SOURCE_PREFIX = "route:";
 
+/** Apps open sessions on the person's computer, outside a Workbench. Auto
+ * leaves destination consent to the engine; it is not a grant of access. */
+export function routeSupportsDestination(routeId = "", destination: ExecutionDestination = "auto"): boolean {
+  return routeId !== "apps" || destination !== "workbench";
+}
+
 /** The source a route id travels as. Auto ("" or "auto") travels as "". */
 export function routeSource(routeId: string): string {
   const id = routeId.trim();

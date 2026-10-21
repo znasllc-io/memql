@@ -50,7 +50,12 @@ function uploads() {
 function field() { return screen.getByRole("textbox", { name: "Ask" }) as HTMLTextAreaElement; }
 function choose(label: string, option: string | RegExp) {
   fireEvent.click(screen.getByRole("combobox", { name: label }));
-  fireEvent.click(within(screen.getByRole("listbox", { name: label })).getByRole("option", { name: option }));
+  const row = within(screen.getByRole("listbox", { name: label })).getAllByRole("option").find(row => {
+    const name = row.querySelector(".os-select-option-label")?.textContent ?? "";
+    return typeof option === "string" ? name === option : option.test(name);
+  });
+  expect(row).toBeDefined();
+  fireEvent.click(row!);
 }
 
 describe("the message field", () => {
@@ -213,18 +218,108 @@ describe("the route and Where menus", () => {
     expect(sent[0]?.options?.routing).toEqual({ source: "", level: "" });
   });
 
-  it("sets Where to Computer when Apps is chosen, and the person can change it back", async () => {
+  it.each(["sheet", "widget"] as const)("keeps Auto as the default when Apps is chosen in the %s", async variant => {
     const ready = ROUTES.map(route => route.id === "apps" ? { ...route, ready: true, reason: "" } : route);
     const { t, sent } = transport(ready);
-    render(<AskSurface transport={t} variant="sheet" availability={READY} />);
+    render(<AskSurface transport={t} variant={variant} availability={READY} />);
     await act(async () => {});
     choose("Route", "Apps");
-    expect(screen.getByRole("combobox", { name: "Where" }).textContent).toBe("Computer");
-    choose("Where", "Auto");
+    expect(screen.getByRole("combobox", { name: "Where" }).textContent).toBe("Auto");
     fireEvent.change(field(), { target: { value: "go" } });
     fireEvent.click(screen.getByRole("button", { name: "Send" }));
     await act(async () => {});
     expect(sent[0]?.options?.routing).toEqual({ source: "route:apps", level: "" });
+  });
+
+  it("preserves an explicit Computer choice when changing routes", async () => {
+    const { t, sent } = transport(ROUTES.map(route => ({ ...route, ready: true, reason: "" })));
+    render(<AskSurface transport={t} variant="sheet" availability={READY} />);
+    await act(async () => {});
+    choose("Where", "Computer");
+    for (const route of ["Apps", "Local", "Auto", "Apps"]) {
+      choose("Route", route);
+      expect(screen.getByRole("combobox", { name: "Where" }).textContent).toBe("Computer");
+    }
+    fireEvent.change(field(), { target: { value: "go" } });
+    fireEvent.click(screen.getByRole("button", { name: "Send" }));
+    await act(async () => {});
+    expect(sent[0]?.options?.routing).toEqual({ source: "route:apps", level: "", destination: "computer" });
+  });
+
+  it("disables Apps with Workbench, preserves the draft, and keeps its description stable", async () => {
+    const { t, sent } = transport(ROUTES.map(route => ({ ...route, ready: true, reason: "" })));
+    render(<AskSurface transport={t} variant="sheet" availability={READY} />);
+    await act(async () => {});
+    const routeMenu = screen.getByRole("combobox", { name: "Route" });
+    fireEvent.click(routeMenu);
+    const description = screen.getByRole("option", { name: /^Apps / }).textContent;
+    fireEvent.keyDown(routeMenu, { key: "Escape" });
+    choose("Where", "Workbench");
+    fireEvent.change(field(), { target: { value: "keep this draft" } });
+    fireEvent.click(routeMenu);
+    const apps = screen.getByRole("option", { name: /^Apps / });
+    expect(apps.textContent).toBe(description);
+    expect(apps.getAttribute("aria-disabled")).toBe("true");
+    fireEvent.click(apps);
+    expect(routeMenu.textContent).toBe("Auto");
+    expect(screen.getByRole("combobox", { name: "Where" }).textContent).toBe("Workbench");
+    expect(field().value).toBe("keep this draft");
+    expect(screen.queryByRole("alert")).toBeNull();
+    // Keyboard navigation skips the disabled Apps row, too.
+    fireEvent.keyDown(routeMenu, { key: "ArrowDown" });
+    fireEvent.keyDown(routeMenu, { key: "ArrowDown" });
+    fireEvent.keyDown(routeMenu, { key: "Enter" });
+    expect(routeMenu.textContent).toBe("Emergency");
+    expect(document.activeElement).toBe(routeMenu);
+    fireEvent.click(screen.getByRole("button", { name: "Send" }));
+    await act(async () => {});
+    expect(sent[0]?.options?.routing).toEqual({ source: "route:r1", level: "", destination: "workbench" });
+  });
+
+  it("disables Workbench with Apps while leaving Auto and Computer selectable", async () => {
+    render(<AskSurface transport={transport(ROUTES.map(route => ({ ...route, ready: true, reason: "" }))).t} variant="widget" availability={READY} />);
+    await act(async () => {});
+    const where = screen.getByRole("combobox", { name: "Where" });
+    fireEvent.click(where);
+    const description = screen.getByRole("option", { name: /^Workbench / }).textContent;
+    fireEvent.keyDown(where, { key: "Escape" });
+    choose("Route", "Apps");
+    fireEvent.click(where);
+    const workbench = screen.getByRole("option", { name: /^Workbench / });
+    expect(workbench.textContent).toBe(description);
+    expect(workbench.getAttribute("aria-disabled")).toBe("true");
+    fireEvent.click(workbench);
+    expect(where.textContent).toBe("Auto");
+    fireEvent.keyDown(where, { key: "ArrowDown" });
+    fireEvent.keyDown(where, { key: "Enter" });
+    expect(where.textContent).toBe("Computer");
+    choose("Where", "Auto");
+    expect(screen.getByRole("combobox", { name: "Route" }).textContent).toBe("Apps");
+    choose("Route", "Local");
+    choose("Where", "Workbench");
+    expect(where.textContent).toBe("Workbench");
+  });
+
+  it("keeps an older incompatible choice visible and blocks submission until a control changes", async () => {
+    const { t, sent } = transport(ROUTES.map(route => ({ ...route, ready: true, reason: "" })));
+    const session = new ConversationSession(t);
+    session.setRoutingDefault({ route: "apps", destination: "workbench" });
+    session.setDraft("keep this draft");
+    render(<AskSurface conversation={session} transport={t} variant="sheet" availability={READY} />);
+    await act(async () => {});
+    expect(screen.getByRole("combobox", { name: "Where" }).textContent).toBe("Workbench");
+    expect(screen.getByRole("combobox", { name: "Route" }).textContent).toBe("Apps");
+    expect((screen.getByRole("button", { name: "Send" }) as HTMLButtonElement).disabled).toBe(true);
+    fireEvent.keyDown(field(), { key: "Enter" });
+    expect(session.send("also blocked", null)).toBe(false);
+    expect(sent).toHaveLength(0);
+    expect(field().value).toBe("keep this draft");
+    expect(session.getSnapshot().error).toBe("");
+    choose("Route", "Auto");
+    expect(screen.getByRole("combobox", { name: "Where" }).textContent).toBe("Workbench");
+    fireEvent.keyDown(field(), { key: "Enter" });
+    await act(async () => {});
+    expect(sent[0]?.options?.routing).toEqual({ source: "", level: "", destination: "workbench" });
   });
 
   it("opens Fleet's routes from Manage routes without changing the choice", async () => {
@@ -241,7 +336,7 @@ describe("the route and Where menus", () => {
     render(<AskSurface transport={t} variant="sheet" availability={READY} />);
     await act(async () => {});
     fireEvent.click(screen.getByRole("combobox", { name: "Route" }));
-    expect(within(screen.getByRole("listbox", { name: "Route" })).getAllByRole("option").map(option => option.textContent)).toEqual(["Auto"]);
+    expect(within(screen.getByRole("listbox", { name: "Route" })).getAllByRole("option").map(option => option.querySelector(".os-select-option-label")?.textContent)).toEqual(["Auto"]);
   });
 });
 
@@ -253,6 +348,19 @@ describe("keeping the choice", () => {
       conversations: { list: vi.fn(async () => []), create: vi.fn(async () => ({ id: "new", title: "New conversation" })), read: vi.fn(async () => turns) },
     });
   }
+
+  it("rejects incompatible edits at the shared session boundary without replacing either choice", () => {
+    const session = sessionWith([]);
+    session.setDestination("workbench");
+    session.setRoute("apps");
+    expect(session.getSnapshot().destination).toBe("workbench");
+    expect(session.getSnapshot().route ?? "").toBe("");
+    session.setDestination("auto");
+    session.setRoute("apps");
+    session.setDestination("workbench");
+    expect(session.getSnapshot().destination).toBe("auto");
+    expect(session.getSnapshot().route).toBe("apps");
+  });
 
   it("opens a conversation on what its last message ran with", async () => {
     const session = sessionWith([turn(), turn({ source: "route:local", destination: "workbench" })]);

@@ -3,16 +3,16 @@ import { ProposeLesson } from "../apps/training/ProposeLesson";
 import { AddButton } from "../kit/AddButton";
 import { ContentSkeleton } from "../kit/ContentSkeleton";
 import { Button } from "../kit";
-import { ExecutionDestinationSelect } from "../kit/ExecutionDestination";
 import { Mark } from "../chrome/Mark";
 import { AccountAvatar } from "../chrome/AccountAvatar";
 import { AskLiveVoice } from "./AskLiveVoice";
 import type { LiveVoiceSession } from "./liveVoiceSession";
 import { useCallback, useEffect, useLayoutEffect, useRef, useState, useSyncExternalStore, type FormEvent } from "react";
-import { ArrowUp, Mic, X, Activity, MessageCircle, MessagesSquare, Maximize2, Minimize2, Square, AudioLines, Paperclip, MapPin } from "lucide-react";
+import { ArrowUp, Mic, X, Activity, MessageCircle, MessagesSquare, Maximize2, Minimize2, Square, AudioLines, Paperclip } from "lucide-react";
 import type { UploadProvider } from "../items/upload";
 import { AskAttachmentChips, AskSentAttachments } from "./AskAttachments";
-import { AskRoutePicker } from "./AskRoutePicker";
+import { AskRoutingControls } from "./AskRoutingControls";
+import { routeSupportsDestination } from "./askRoute";
 import { useAskRoutes } from "./useAskRoutes";
 import { useGrowingField } from "./useGrowingField";
 
@@ -419,8 +419,7 @@ export function AskSurface({
               <button type="button" className="os-ask-tool" aria-label="Attach files" title="Attach files" disabled={attachments.length >= MAX_ASK_ATTACHMENTS} onClick={() => fileRef.current?.click()}><Paperclip size={15} aria-hidden /></button>
               <input ref={fileRef} type="file" multiple hidden tabIndex={-1} aria-hidden onChange={event => { const files = Array.from(event.target.files ?? []); event.target.value = ""; if (files.length > 0) conversation.attach(files, uploads); }} />
             </> : null}
-            {plain ? <ExecutionDestinationSelect tone="quiet" label="Where" icon={<MapPin size={13} />} title="Where the work runs" value={state.destination ?? "auto"} onChange={conversation.setDestination} /> : null}
-            {plain ? <AskRoutePicker value={state.route ?? ""} routes={routes} onOpen={refreshRoutes} onManage={onManageRoutes} onChange={route => conversation.setRoute(route.kind === "auto" ? "" : route.id, route.kind === "apps" ? "computer" : undefined)} /> : null}
+            {plain ? <AskRoutingControls route={state.route} destination={state.destination} routes={routes} onOpen={refreshRoutes} onManage={onManageRoutes} onRoute={conversation.setRoute} onDestination={conversation.setDestination} /> : null}
           </div>
           <div className="os-ask-controls-end">
             <button
@@ -486,7 +485,7 @@ export function AskSurface({
           type="submit"
           className="os-ask-send"
           aria-label={live ? "Finish" : state.discussionDraft?.advisor ? "Ask another agent" : state.discussion || state.discussionDraft ? "Send discussion message" : "Send"}
-          disabled={!live && (!ready || busy || state.discussionOpening || state.discussionSending || state.guidanceSending || (!!state.discussionDraft && state.discussionDraft.approvalId !== state.discussion?.approval.id) || (state.discussion && (!state.discussion.canAskAdvisor || !!state.discussionRetry)) || uploading || !draft.trim())}
+          disabled={!live && (!ready || busy || state.discussionOpening || state.discussionSending || state.guidanceSending || (!!state.discussionDraft && state.discussionDraft.approvalId !== state.discussion?.approval.id) || (state.discussion && (!state.discussion.canAskAdvisor || !!state.discussionRetry)) || (plain && !routeSupportsDestination(state.route, state.destination)) || uploading || !draft.trim())}
         >
           <ArrowUp size={15} aria-hidden />
         </button> : null}</span>

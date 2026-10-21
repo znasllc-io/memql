@@ -9,7 +9,7 @@ import "../src/styles/index.css";
 // Synthetic source-only fixture for Ask's message field (routes design, "Ask's
 // message field"). No live connection, upload or model call.
 //
-//   ?scene=empty | multiline | attachments | picker | not-ready | apps
+//   ?scene=empty | multiline | attachments | picker | not-ready | apps | workbench
 //   &mode=light|dark  &narrow=1  &widget=1
 const params = new URLSearchParams(location.search);
 const scene = params.get("scene") ?? "empty";
@@ -17,7 +17,7 @@ document.documentElement.dataset.theme = params.get("mode") === "light" ? "light
 document.documentElement.dataset.osTheme = params.get("theme") ?? "graphite";
 applyPackStyles([]);
 
-const appsReady = scene === "apps";
+const appsReady = scene === "apps" || scene === "workbench";
 const routes = routeOptionsFrom({ routes: [
   { id: "auto", name: "Auto", kind: "auto", scope: "cluster", ready: true },
   { id: "local", name: "Local", kind: "local", scope: "cluster", ready: true },
@@ -59,7 +59,8 @@ if (scene === "attachments") {
   session.attach([new File(["x"], "ready-q3-plan.md"), new File(["x"], "uploading-board-notes.pdf"), new File(["x"], "failed-recording.mov")], uploads);
   session.setDraft("Summarize these and flag anything that disagrees with the deck.");
 }
-if (scene === "apps") { session.setRoute("apps", "computer"); session.setDraft("Refactor the billing module and run its tests."); }
+if (scene === "apps") { session.setRoute("apps"); session.setDraft("Refactor the billing module and run its tests."); }
+if (scene === "workbench") { session.setDestination("workbench"); session.setDraft("Compare these two spreadsheets."); }
 
 createRoot(document.getElementById("root")!).render(
   <main style={{ margin: "20px auto", width: params.has("narrow") ? "min(100% - 24px, 360px)" : "min(100% - 24px, 720px)", height: params.has("widget") ? "420px" : "calc(100dvh - 40px)", border: "1px solid var(--os-line)", borderRadius: "var(--os-radius)", overflow: "hidden", background: "var(--os-glass-solid)" }}>
@@ -68,9 +69,9 @@ createRoot(document.getElementById("root")!).render(
 );
 
 // A one-shot capture cannot click, so the menu scenes open their menu here.
-if (scene === "picker" || scene === "not-ready") {
+if (scene === "picker" || scene === "not-ready" || params.has("menu")) {
   setTimeout(() => {
-    const route = Array.from(document.querySelectorAll<HTMLButtonElement>('[role="combobox"]')).find(button => document.querySelector(`label[for="${CSS.escape(button.id)}"]`)?.textContent === "Route");
+    const route = Array.from(document.querySelectorAll<HTMLButtonElement>('[role="combobox"]')).find(button => document.querySelector(`label[for="${CSS.escape(button.id)}"]`)?.textContent === (params.get("menu") === "where" ? "Where" : "Route"));
     route?.click();
   }, 300);
 }

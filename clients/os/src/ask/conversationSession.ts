@@ -1,5 +1,5 @@
 import type { AskHandle, AskTransport } from "./askController";
-import { AUTO_ROUTING, routeIdFromSource, routeSource, type AskRouting } from "./askRoute";
+import { AUTO_ROUTING, routeIdFromSource, routeSource, routeSupportsDestination, type AskRouting } from "./askRoute";
 import type { ExecutionDestination } from "../kit/ExecutionDestination";
 import type { UploadHandle, UploadProvider } from "../items/upload";
 
@@ -191,11 +191,14 @@ export class ConversationSession {
   subscribe = (listener: () => void) => { this.listeners.add(listener); return () => { this.listeners.delete(listener); }; };
   private patch(patch: Partial<ConversationState>) { this.state = { ...this.state, ...patch }; this.listeners.forEach(listener => listener()); }
   setDraft = (draft: string) => this.patch({ draft });
-  setDestination = (destination: ExecutionDestination) => { this.patch({ destination }); this.emitRouting(); };
-  /** A route choice, and with it the Where it implies (Apps runs on the
-   *  person's own computer). Auto is "". */
-  setRoute = (route: string, destination?: ExecutionDestination) => {
-    this.patch({ route: route === "auto" ? "" : route, ...(destination ? { destination } : {}) });
+  setDestination = (destination: ExecutionDestination) => {
+    if (!routeSupportsDestination(this.state.route, destination)) return;
+    this.patch({ destination }); this.emitRouting();
+  };
+  /** Choosing a route never replaces the person's destination. Auto is "". */
+  setRoute = (route: string) => {
+    if (!routeSupportsDestination(route, this.state.destination)) return;
+    this.patch({ route: route === "auto" ? "" : route });
     this.emitRouting();
   };
   /** What a new conversation starts from: the person's last choice. Applied
@@ -660,6 +663,10 @@ export class ConversationSession {
     }
     if (this.state.discussion) return this.sendDiscussion(prompt);
     if (this.state.busy || this.state.voiceActive || this.state.loading || !prompt.trim()) return false;
+    // Older transcripts/preferences may hold a combination the picker no
+    // longer offers. Keep both choices and the draft until the person edits
+    // either control; never send the invalid pair or silently replace it.
+    if (!routeSupportsDestination(this.state.route, this.state.destination)) return false;
     const held = this.state.attachments ?? [];
     // A file still uploading has no artifact yet; the message waits for it.
     if (held.some(item => item.state === "uploading")) return false;

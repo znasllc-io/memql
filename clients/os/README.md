@@ -1791,8 +1791,15 @@ independently chooses Auto, Workbench or Computer for the next submitted goal.
 Route chooses which models serve the message. Auto, the default, routes each
 step automatically; Local uses local models, Apps uses Claude Code or Codex, and
 the person's own routes sit under Yours. A route that is not ready is shown with
-its reason and cannot be chosen, and Manage routes opens Fleet. Choosing Apps
-sets Where to Computer. Text captures both choices when the message is sent, and
+its reason and cannot be chosen, and Manage routes opens Fleet. Both controls
+default to Auto and changing Route preserves Where. Apps with Workbench is
+disabled in either selection order; Auto and Computer remain available with
+Apps. Descriptions stay inside the menus in enabled and disabled states, with
+no selection-triggered warnings. A saved incompatible pair remains visible
+with its draft, but cannot be sent until the person changes either control.
+Auto retains the engine's destination-consent rules; it grants no computer
+access and does not introduce a new resource scheduler. Text captures both
+choices when the message is sent, and
 live voice captures Where when the call starts, in both cases before
 asynchronous conversation creation; changing a control never rewrites accepted
 work. Nexus uses the same kit selector, labelled **Run work on**, for a new

@@ -78,6 +78,14 @@ and wallpaper values only (see `src/themes/`), so nothing here is themeable.
    text size. Forms use `Field` --
    label above, control on the line; nothing invents a third field size.
 
+   Dependent selection menus keep unsupported combinations visible and disabled.
+   Put short, neutral descriptions in the options themselves, present whether
+   enabled or disabled. Changing a selection never opens a warning, inserts an
+   inline validation message, shifts the focused interface, or silently changes
+   another control. Ask's Route and Where follow this rule: Auto is the default,
+   explicit choices remain explicit, and Apps cannot combine with Workbench.
+   This is selection guidance, not a new error-reporting surface.
+
 6. **Actions are verbs, nouns are nouns.** An action is never styled as a
    data node it might sit beside -- and the strongest form of that is not to
    seat it among them at all. The Files rail is nouns (places and folders),
