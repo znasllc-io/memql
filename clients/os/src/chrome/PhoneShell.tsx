@@ -102,6 +102,7 @@ export function PhoneShell({ onSignOut }: { onSignOut: () => void }) {
                     key={section.id}
                     type="button"
                     className="os-phone-section"
+                    data-os-scroll-navigation="reset"
                     data-os-setup={
                       settingsTone && section.id === current.settingsSection ? "" : undefined
                     }

@@ -274,6 +274,7 @@ export function WindowFrame({
                 key={section.id}
                 type="button"
                 className={`os-window-nav-item${index > 1 ? " os-window-secondary-nav" : ""}`}
+                data-os-scroll-navigation="reset"
                 data-ask-control={askActivity && section.id === (current?.parent ?? current?.id) ? "running" : undefined}
                 data-os-setup={
                   settingsTone && section.id === manifest.settingsSection ? "" : undefined
@@ -292,7 +293,7 @@ export function WindowFrame({
                 ) : null}
               </button>
             ))}
-            {destinations.length > 2 ? <select className="os-window-more-nav" aria-label={`More ${manifest.name} sections`} value={destinations.slice(2).some(s => s.id === (current?.parent ?? current?.id)) ? current?.parent ?? current?.id : ""} onChange={event => { if (event.target.value) actions.navigateSection(win.id, event.target.value); }}><option value="">More…</option>{destinations.slice(2).map(s => <option key={s.id} value={s.id}>{s.name}</option>)}</select> : null}
+            {destinations.length > 2 ? <select data-os-scroll-navigation="reset" className="os-window-more-nav" aria-label={`More ${manifest.name} sections`} value={destinations.slice(2).some(s => s.id === (current?.parent ?? current?.id)) ? current?.parent ?? current?.id : ""} onChange={event => { if (event.target.value) actions.navigateSection(win.id, event.target.value); }}><option value="">More…</option>{destinations.slice(2).map(s => <option key={s.id} value={s.id}>{s.name}</option>)}</select> : null}
           </nav>
         ) : null}
         <TrailRow fallback={current?.name ?? manifest.name} />

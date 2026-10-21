@@ -593,8 +593,11 @@ own cancellation and completion callbacks through the shared back prop.
 
 ### Returning to the same position
 
-Back, breadcrumbs and section navigation restore the position last read in that
-window, including independently scrolling panes. A first visit starts at the top.
+Back and breadcrumbs restore the position last read in that window, including
+independently scrolling panes. Tabs and ordinary links start at the top, even
+when revisiting a page or clicking its already-selected tab. This starts a new
+visit: a later return restores the position read since that reset. Merely showing
+a retained window preserves its position.
 The shared `PageNavigationProvider` owns this behavior on desktop and phone;
 apps must not implement scroll restoration in effect cleanup or reset scrolling
 on return. Capture happens while the outgoing content is still visible, before
@@ -609,6 +612,9 @@ identity through `usePageScroll`. Plain pages use their section and local trail.
 Independently reordered scrolling panes may declare `data-os-scroll-id`; dialogs,
 inputs and surfaces with `data-os-scroll-ignore` retain their own scrolling rules.
 Positions are isolated per window, bounded in memory and discarded on close.
+Shared return controls declare `data-os-scroll-navigation="restore"`; shared
+tabs declare `"reset"`, including the desktop and phone section selectors.
+Apps use these controls rather than managing offsets themselves.
 
 ### One wizard for adding
 

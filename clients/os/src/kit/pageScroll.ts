@@ -15,6 +15,7 @@ export function createPageScroll(root: HTMLElement, page: () => string | null) {
     && !root.contains(node.closest(excluded));
   const history = new Map<string, Map<string, Position>>();
   let current: string | null = null;
+  let navigation: "reset" | "restore" | null = null;
   let containers = new Map<HTMLElement, string>();
   let pending = new Map<string, Position>();
   const applied = new WeakMap<HTMLElement, Position>();
@@ -65,21 +66,27 @@ export function createPageScroll(root: HTMLElement, page: () => string | null) {
     scheduled = false;
     if (stopped) return;
     const next = page();
+    const intent = navigation;
+    navigation = null;
     if (!next || !shown(root)) { current = null; pending.clear(); resize?.disconnect(); return; }
     const changed = next !== current;
+    // Only the return trail reuses a visited page's position. Tabs and fresh
+    // navigation start at the top; showing a retained window is not navigation.
+    const reset = intent === "reset" || (changed && current !== null && intent !== "restore");
     current = next;
     if (!history.has(next)) history.set(next, new Map());
     // Bounded, per-window memory. Closing the window drops it altogether.
     const saved = history.get(next)!;
+    if (reset) saved.clear();
     history.delete(next); history.set(next, saved);
     if (history.size > 100) history.delete(history.keys().next().value!);
-    if (!changed && !dirty) { restore(); return; }
+    if (!changed && !reset && !dirty) { restore(); return; }
     dirty = false;
     const previous = containers;
     containers = findContainers();
-    if (changed) pending = new Map(saved);
+    if (changed || reset) pending = new Map(saved);
     for (const [node, key] of containers) {
-      if (changed || !previous.has(node)) {
+      if (changed || reset || !previous.has(node)) {
         const target = saved.get(key) ?? { top: 0, left: 0 };
         saved.set(key, target);
         pending.set(key, target);
@@ -99,6 +106,21 @@ export function createPageScroll(root: HTMLElement, page: () => string | null) {
     // Let all headings publish and retained panes settle in this React commit.
     // A transient missing heading must not become another navigation entry.
     queueMicrotask(update);
+  }
+  function onNavigate(event: Event) {
+    capture();
+    const control = event.target instanceof Element ? event.target.closest("[data-os-scroll-navigation]") : null;
+    if (control instanceof HTMLElement && !shown(control)) return;
+    // Opening a native select is not a navigation; its change event is.
+    if (event.type === "click" && control?.matches("select")) return;
+    const intent = control?.getAttribute("data-os-scroll-navigation");
+    navigation = intent === "reset" || intent === "restore" ? intent : null;
+    if (navigation) {
+      // A native capture listener's microtasks can run BEFORE React's handler.
+      // Navigation normally schedules from its heading's layout publication;
+      // this task also handles an active tab whose click changes no React state.
+      setTimeout(schedule, 0);
+    }
   }
   function onScroll(event: Event) {
     const node = event.target;
@@ -122,7 +144,8 @@ export function createPageScroll(root: HTMLElement, page: () => string | null) {
   }
   // The frame includes its tabs and trail, which sit outside the scroller.
   const frame = root.parentElement ?? root;
-  frame.addEventListener("click", capture, true);
+  frame.addEventListener("click", onNavigate, true);
+  frame.addEventListener("change", onNavigate, true);
   frame.addEventListener("pointerdown", capture, true);
   root.addEventListener("scroll", onScroll, true);
   root.addEventListener("wheel", interrupt, { passive: true, capture: true });
@@ -137,7 +160,8 @@ export function createPageScroll(root: HTMLElement, page: () => string | null) {
   return { schedule, dispose() {
     stopped = true;
     mutations.disconnect(); resize?.disconnect();
-    frame.removeEventListener("click", capture, true);
+    frame.removeEventListener("click", onNavigate, true);
+    frame.removeEventListener("change", onNavigate, true);
     frame.removeEventListener("pointerdown", capture, true);
     frame.removeEventListener("keydown", onKey, true);
     root.removeEventListener("scroll", onScroll, true);

@@ -26,7 +26,7 @@ function Preview({ id }: { id: string }) {
     <header style={{ padding: "14px 20px" }}><strong>Fleet</strong></header>
     <PageNavigationProvider root={root} scope={section} trail={[]}>
       <nav className="os-window-nav" aria-label="Fleet sections">
-        {["machines", "settings"].map(item => <button className="os-window-nav-item" key={item} aria-current={section === item ? "page" : undefined} onClick={() => setSection(item)}>{item === "machines" ? "Machines" : "Settings"}</button>)}
+        {["machines", "settings"].map(item => <button data-os-scroll-navigation="reset" className="os-window-nav-item" key={item} aria-current={section === item ? "page" : undefined} onClick={() => setSection(item)}>{item === "machines" ? "Machines" : "Settings"}</button>)}
       </nav>
       <TrailRow fallback="Fleet" />
       <PageContent ref={root} className="os-window-content" data-testid="scroll" style={{ height: 380 }}>
@@ -65,7 +65,13 @@ if (params.has("check")) {
       click(first.querySelector('[aria-label="Fleet sections"]')!, "Settings"); await wait();
       checks.newSectionStartsAtTop = root.scrollTop === 0;
       click(first.querySelector('[aria-label="Fleet sections"]')!, "Machines"); await wait();
-      checks.sectionRestores = Math.abs(root.scrollTop - 980) < 1;
+      checks.visitedTabStartsAtTop = root.scrollTop === 0;
+      root.scrollTop = 980; await wait();
+      click(first.querySelector('[aria-label="Fleet sections"]')!, "Machines"); await wait();
+      checks.activeTabStartsAtTop = root.scrollTop === 0;
+      root.scrollTop = 760; await wait();
+      click(root, "Machine 22"); await wait(); click(first, "Back to Machines"); await wait(450);
+      checks.backUsesPositionAfterTabReset = Math.abs(root.scrollTop - 760) < 1;
       click(root, "Machine 22"); await wait(); click(first, "Back to Machines"); await wait();
       root.dispatchEvent(new WheelEvent("wheel", { deltaY: 100, bubbles: true }));
       await wait(450); checks.userCancelsPendingRestore = root.scrollTop === 0;

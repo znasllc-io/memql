@@ -87,6 +87,7 @@ export function TrailRow({ fallback }: {
       <button
         type="button"
         className="os-trail-back"
+        data-os-scroll-navigation="restore"
         aria-label={target ? `Back to ${target}` : "Back"}
         title={target ? `Back to ${target}` : "Nothing to go back to"}
         disabled={!target}
@@ -109,7 +110,7 @@ export function TrailRow({ fallback }: {
               <li key={`${index}:${item.label}`}>
                 {index > 0 ? <ChevronRight className="os-trail-sep" size={12} aria-hidden /> : null}
                 {!last && item.onSelect ? (
-                  <button type="button" title={item.label} onClick={() => read().items[index]?.onSelect?.()}>{item.label}</button>
+                  <button type="button" data-os-scroll-navigation="restore" title={item.label} onClick={() => read().items[index]?.onSelect?.()}>{item.label}</button>
                 ) : (
                   <span title={item.label} aria-current={last ? "page" : undefined}>{item.label}</span>
                 )}
