@@ -702,3 +702,14 @@ query observation workDelegatedSourcesForOwnerRun {
  paginate 16
  shape workObservationFull
 }
+
+/// Page recorded tool exchanges for safe projection, including exact receipts
+/// that exceed the short source-context preview. Never expose these raw rows.
+@actor
+query observation workToolSourcesForOwnerRun {
+ args { runId string! checkpointId string! }
+ filter row => row.runId == args.runId && row.ownerUserId == actor.userId && (row.?data.delegatedEvidence == true || row.?data.continuation == true || row.?data.capabilityEvidence == true) && (args.checkpointId == "" || row.id == args.checkpointId)
+ sort "row.createdAt", "desc"
+ paginate 4
+ shape workObservationFull
+}

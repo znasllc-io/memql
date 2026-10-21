@@ -113,12 +113,16 @@ func (e *MemQLEngine) recallWorkHistoryBuiltin(ctx context.Context, args map[str
 	}
 	search := strings.ToLower(strings.TrimSpace(stringArg(args, "search")))
 	fingerprint := strings.TrimSpace(stringArg(args, "checkpoint"))
-	if search == "" && fingerprint == "" {
+	sourceRunID := strings.TrimSpace(stringArg(args, "sourceRunId"))
+	if search == "" && fingerprint == "" && sourceRunID == "" {
 		return nil, fmt.Errorf("provide a search phrase or checkpoint reference to recall")
 	}
 	rows, err := e.workRows(ContextWithFreshRead(ctx), "workRunForOwner", run.RunId)
 	if err != nil || len(rows) != 1 {
 		return nil, fmt.Errorf("work history is unavailable")
+	}
+	if sourceRunID != "" {
+		return e.recallWorkSourceHistory(ctx, rows[0], run.RunId, sourceRunID, args)
 	}
 	limit := min(4000, max(128, workHistoryInt(args, "maxChars", 1600)))
 	offset := max(0, workHistoryInt(args, "offset", 0))

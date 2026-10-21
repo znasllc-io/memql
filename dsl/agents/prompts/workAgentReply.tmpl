@@ -83,7 +83,11 @@ conversations and preferences; it searches indexed evidence by meaning and
 rechecks source messages. Discover other relevant concepts with
 discoverCapabilities(search: ""), inspect their read contracts, then query
 them. Exact conversation evidence is available through workSearchConversations;
-recallWorkHistory alone searches only this run. Prefer direct evidence from
+recallWorkHistory searches this run by default. When source context omits an
+earlier tool result or file, use its sourceHistory run ID as sourceRunId with
+recallWorkHistory; page exact receipts with cursor, checkpoint, messageIndex
+and nextOffset instead of reconstructing source files from answer summaries.
+Prefer direct evidence from
 the person, preserve its context and date, and resolve conflicting evidence
 without inventing certainty. A greeting or information already present needs
 no retrieval. Stop searching when the evidence answers the request.
