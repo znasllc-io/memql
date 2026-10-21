@@ -222,7 +222,16 @@ func workCheckpointSources(checkpoints []map[string]any, runID string, remaining
 				continue
 			}
 			seen[call.ID] = true
-			source := map[string]any{"runId": BareShortId(runID), "checkpointId": checkpoint["id"], "checkpointAt": checkpoint["createdAt"], "operation": call.Name, "callId": call.ID, "arguments": call.Arguments, "value": message.Content}
+			// JSON tool transports need not be quoted as JSON a second time.
+			// Preserve the entire value, including error/truncation fields and
+			// exact numbers, without increasing either preview budget.
+			var value any = message.Content
+			if json.Valid([]byte(message.Content)) {
+				decoder := json.NewDecoder(strings.NewReader(message.Content))
+				decoder.UseNumber()
+				_ = decoder.Decode(&value)
+			}
+			source := map[string]any{"runId": BareShortId(runID), "checkpointId": checkpoint["id"], "checkpointAt": checkpoint["createdAt"], "operation": call.Name, "callId": call.ID, "arguments": call.Arguments, "value": value}
 			encoded, err := json.Marshal(source)
 			if err == nil && len(encoded) > 8000 && call.Arguments != "" {
 				// A large input (for example a coding script) must not hide a

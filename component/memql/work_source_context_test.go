@@ -158,7 +158,48 @@ func TestCheckpointSourceProjectionBoundsDeduplicatesAndExcludesProse(t *testing
 	sources, omitted := workCheckpointSources([]map[string]any{checkpoint, checkpoint}, "run", &remaining)
 	require.True(t, omitted)
 	require.Len(t, sources, 1)
-	require.Equal(t, messages[1].Content, sources[0]["value"], "preserve old observation time, different scope and truncation; persistence must not make them fresh")
+	value, err := json.Marshal(sources[0]["value"])
+	require.NoError(t, err)
+	require.JSONEq(t, messages[1].Content, string(value), "preserve old observation time, different scope and truncation; persistence must not make them fresh")
 	require.Equal(t, "2026-10-17", sources[0]["checkpointAt"])
 	require.Positive(t, remaining)
+}
+
+func TestCheckpointSourceProjectionRetainsJSONWithoutDoubleEscaping(t *testing.T) {
+	inner, err := json.Marshal(map[string]any{
+		"exitCode": 0, "stderr": "",
+		"stdout": strings.Repeat("{\"id\":\"e06\",\"cents\":8000}\n", 130) + "Ran 10 tests: OK",
+	})
+	require.NoError(t, err)
+	result, err := json.Marshal(map[string]any{
+		"content":  []any{map[string]any{"type": "text", "text": string(inner)}},
+		"sequence": int64(9007199254740993), "isError": false,
+	})
+	require.NoError(t, err)
+	messages := []common.ChatMessage{
+		{Role: "assistant", Content: "PRIVATE_REASONING", ToolCalls: []common.ToolCall{{ID: "exec", Name: "workbenchHost", Arguments: strings.Repeat("large script", 1000)}}},
+		{Role: "tool", Name: "workbenchHost", ToolCallId: "exec", Content: string(result)},
+	}
+	encoded, err := json.Marshal(messages)
+	require.NoError(t, err)
+	checkpoint := map[string]any{"id": "receipt", "data": map[string]any{"messagesEncoding": "json-base64-v1", "messages": base64.StdEncoding.EncodeToString(encoded)}}
+	remaining := replyReviewMaxBytes
+	sources, omitted := workCheckpointSources([]map[string]any{checkpoint}, "run", &remaining)
+	require.False(t, omitted, "JSON escaping overhead must not hide an execution receipt that fits the preview")
+	require.Len(t, sources, 1)
+	require.Equal(t, true, sources[0]["argumentsOmitted"])
+	projected, err := json.Marshal(sources[0]["value"])
+	require.NoError(t, err)
+	require.JSONEq(t, string(result), string(projected))
+	require.Contains(t, string(projected), "9007199254740993", "do not round source numbers")
+	require.Contains(t, string(projected), "Ran 10 tests: OK")
+	require.NotContains(t, string(projected), "PRIVATE_REASONING")
+	raw, err := json.Marshal(sources[0])
+	require.NoError(t, err)
+	require.LessOrEqual(t, len(raw), 8000)
+	require.Equal(t, replyReviewMaxBytes-len(raw), remaining)
+	remaining = len(raw) - 1
+	sources, omitted = workCheckpointSources([]map[string]any{checkpoint}, "run", &remaining)
+	require.True(t, omitted)
+	require.Empty(t, sources, "the existing total preview budget still applies")
 }
