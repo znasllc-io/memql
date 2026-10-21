@@ -1499,6 +1499,9 @@ mutation activity updateMachineActivity {
   }
 }
 
+/// Internal commit after fleetSetAppRouting validates mode/weights, checks the
+/// owner's expected revision and fences the row. Scoping to actor.userId would let
+/// that same owner bypass validation and overwrite a concurrent settings edit.
 @actor
 @serverOnly
 mutation registration setWorkerAppRouting {
@@ -1509,6 +1512,9 @@ mutation registration setWorkerAppRouting {
   }
 }
 
+/// The selector's fenced cursor update after rechecking live policy and usage.
+/// A public write scoped to actor.userId could fabricate selection history and bypass
+/// the serialization that keeps concurrent round-robin choices consistent.
 @actor
 @serverOnly
 mutation registration recordWorkerAppSelection {
