@@ -222,15 +222,7 @@ func workCheckpointSources(checkpoints []map[string]any, runID string, remaining
 				continue
 			}
 			seen[call.ID] = true
-			// JSON tool transports need not be quoted as JSON a second time.
-			// Preserve the entire value, including error/truncation fields and
-			// exact numbers, without increasing either preview budget.
-			var value any = message.Content
-			if json.Valid([]byte(message.Content)) {
-				decoder := json.NewDecoder(strings.NewReader(message.Content))
-				decoder.UseNumber()
-				_ = decoder.Decode(&value)
-			}
+			value := workSourcePreviewValue(message.Content)
 			source := map[string]any{"runId": BareShortId(runID), "checkpointId": checkpoint["id"], "checkpointAt": checkpoint["createdAt"], "operation": call.Name, "callId": call.ID, "arguments": call.Arguments, "value": value}
 			encoded, err := json.Marshal(source)
 			if err == nil && len(encoded) > 8000 && call.Arguments != "" {
@@ -250,4 +242,43 @@ func workCheckpointSources(checkpoints []map[string]any, runID string, remaining
 		}
 	}
 	return sources, omitted
+}
+
+// Decode JSON transport layers losslessly, not arbitrary nested data strings.
+// textJSON is the parsed text of an MCP text block; all other envelope fields,
+// errors, truncation flags and numeric values remain intact. Exact history pages
+// continue to expose the original serialized message, not this compact preview.
+func workSourcePreviewValue(text string) any {
+	decode := func(text string) (any, bool) {
+		if !json.Valid([]byte(text)) {
+			return nil, false
+		}
+		decoder := json.NewDecoder(strings.NewReader(text))
+		decoder.UseNumber()
+		var value any
+		err := decoder.Decode(&value)
+		return value, err == nil
+	}
+	value, ok := decode(text)
+	if !ok {
+		return text
+	}
+	if envelope, ok := value.(map[string]any); ok {
+		content, _ := envelope["content"].([]any)
+		for _, item := range content {
+			block, _ := item.(map[string]any)
+			text, isText := block["text"].(string)
+			if block["type"] != "text" || !isText {
+				continue
+			}
+			if _, exists := block["textJSON"]; exists {
+				continue
+			}
+			if parsed, valid := decode(text); valid {
+				block["textJSON"] = parsed
+				delete(block, "text")
+			}
+		}
+	}
+	return value
 }

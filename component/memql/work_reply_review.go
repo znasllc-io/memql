@@ -38,8 +38,8 @@ func (e *MemQLEngine) workReviewReplyBuiltin(ctx context.Context, args map[strin
 	if err != nil {
 		return nil, fmt.Errorf("reply review sources: %w", err)
 	}
-	current, omitted := workCheckpointSources(checkpoints, run.RunId, &remaining)
 	recovered, recoveryOmitted := workRecoveredSources(checkpoints, &remaining)
+	current, omitted := workCheckpointSources(checkpoints, run.RunId, &remaining)
 	sources := make([]any, 0, len(current))
 	for _, source := range current {
 		sources = append(sources, source)

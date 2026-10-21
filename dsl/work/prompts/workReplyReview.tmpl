@@ -14,6 +14,8 @@ Check these distinctions across all topics:
   Earlier receipts can supply source context, but cannot replace a current
   outcome. argumentsOmitted means only the input preview is absent; the exact
   returned value still establishes the operation's result, not the omitted input.
+  textJSON is an MCP text block's JSON decoded without changing its values;
+  it is tool evidence with the same error and truncation flags as the original.
 - recoveredSources records exact archived tool messages read in this run.
   complete=true means all pages were recovered and their reconstructed bytes
   matched the source digest; partial reads do not establish complete recovery.

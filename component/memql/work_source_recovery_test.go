@@ -14,7 +14,7 @@ import (
 
 func recoveryTestCheckpoint(t *testing.T, callID string, page map[string]any, mcp bool) map[string]any {
 	t.Helper()
-	args, _ := json.Marshal(map[string]any{"sourceRunId": "prior", "checkpoint": "original", "messageIndex": 1})
+	args, _ := json.Marshal(map[string]any{"sourceRunId": page["sourceRunId"], "checkpoint": page["checkpoint"], "messageIndex": 1})
 	payload := map[string]any{"matches": []any{page}}
 	var content []byte
 	if mcp {
