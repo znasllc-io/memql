@@ -49,7 +49,10 @@ func workHistoryPage(message any, search string, offset, limit int, explicitOffs
 	}
 	offset = min(max(0, offset), len(runes))
 	end := offset + min(limit, len(runes)-offset)
-	page := map[string]any{"source": string(runes[offset:end]), "offset": offset, "totalCharacters": len(runes), "truncated": offset > 0 || end < len(runes)}
+	// Continuation ends when there are no characters after this page. A page
+	// starting after zero omits a prefix, but that must not advertise more pages
+	// forever once the caller reaches the end of the archived message.
+	page := map[string]any{"source": string(runes[offset:end]), "offset": offset, "totalCharacters": len(runes), "truncated": end < len(runes), "prefixOmitted": offset > 0}
 	if end < len(runes) {
 		page["nextOffset"] = end
 	}

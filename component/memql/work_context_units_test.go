@@ -128,3 +128,34 @@ func TestWorkHistoryPagesReconstructExactUnicodeAndToolArguments(t *testing.T) {
 	_, ok = workHistoryPage(message, "nonexistent fact", 0, 333, false)
 	require.False(t, ok)
 }
+
+func TestWorkHistoryPagingStopsAtEndEvenWhenFollowingTruncated(t *testing.T) {
+	message := common.ChatMessage{Role: "tool", Content: strings.Repeat("文献🧪 café ", 100)}
+	want, err := json.Marshal(message)
+	require.NoError(t, err)
+	var recovered strings.Builder
+	offset := 0
+	for attempts := 0; ; attempts++ {
+		require.Less(t, attempts, 20, "a completed source must not advertise an endless continuation")
+		page, ok := workHistoryPage(message, "", offset, 128, true)
+		require.True(t, ok)
+		part := page["source"].(string)
+		recovered.WriteString(part)
+		require.Equal(t, offset > 0, page["prefixOmitted"])
+		offset += utf8.RuneCountInString(part)
+		if page["truncated"] == false {
+			require.NotContains(t, page, "nextOffset")
+			break
+		}
+		require.Equal(t, offset, page["nextOffset"])
+	}
+	require.Equal(t, string(want), recovered.String())
+	for _, beyond := range []int{offset, offset + 100} {
+		page, ok := workHistoryPage(message, "", beyond, 128, true)
+		require.True(t, ok)
+		require.Equal(t, "", page["source"])
+		require.Equal(t, false, page["truncated"])
+		require.Equal(t, true, page["prefixOmitted"])
+		require.NotContains(t, page, "nextOffset")
+	}
+}
