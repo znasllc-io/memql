@@ -9,6 +9,6 @@
 // The wiring that reaches the engine lives in integrations/work.
 module github.com/znasllc-io/memql/component/work
 
-go 1.26.1
+go 1.26.8
 
 toolchain go1.27.3
