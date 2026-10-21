@@ -582,6 +582,69 @@ func TestIsolationProofRefusedConnectionPassesOnlyWhileTheListenerHeld(t *testin
 	}
 }
 
+// Container startup may outlast the network-test budget. Both the restricted
+// and positive-control container must start before that budget begins.
+func TestIsolationConnectorsStartBeforeNetworkDeadline(t *testing.T) {
+	for _, delayed := range []int{1, 2} {
+		for _, exit := range []int32{probeExitIsolated, probeExitConnected} {
+			t.Run(fmt.Sprintf("delayed-index-%d-exit-%d", delayed, exit), func(t *testing.T) {
+				script := isoScript(exit, isoSaid[exit])
+				up := isoListener(true, 0)
+				pods := []*Pod{
+					isoPod(0, isoListenerIP, up, isoHolding),
+					isoPod(1, isoOtherIP, up, isoEnded(exit, isoSaid[exit])),
+					isoPod(2, "10.42.1.4", up, isoEnded(probeExitControlPassed, "positive control connected every round")),
+				}
+				pods[delayed].Status.ContainerStatuses = []ContainerStatus{isoWaiting()}
+				var releasedAt time.Time
+				waiting := rtState{pods: pods, until: func(c *rtCluster) bool {
+					if c.probeRoles["uid-pod-1"].Labels[LabelProbeRole] != "restricted" ||
+						c.probeRoles["uid-pod-2"].Labels[LabelProbeRole] != "control" {
+						return false
+					}
+					if releasedAt.IsZero() {
+						releasedAt = time.Now()
+					}
+					return time.Since(releasedAt) >= 250*time.Millisecond
+				}}
+				script.states = append(append([]rtState{}, script.states[:2]...), append([]rtState{waiting}, script.states[2:]...)...)
+				h := newIsoHarness(t, script)
+				h.r.probeReadyWait = 2 * time.Second
+				h.r.probeEndWait = 100 * time.Millisecond
+				run := rtRun()
+				name := JobName(run.RunID, run.StepKey, run.Attempt)
+				h.c.script(name, rtFinishingScript(name, 0, captureKubeLine(rtAt(1100), "ok")))
+				res := h.run(t, rtRun())
+				if exit == probeExitIsolated {
+					if res.Status != pl.OutcomeSucceeded || !h.r.Isolation().Isolated {
+						t.Fatalf("delayed connector did not complete its network proof: result=%+v verdict=%+v", res, h.r.Isolation())
+					}
+				} else {
+					isoWantRefused(t, h, res)
+					if v := h.r.Isolation(); v.Inconclusive || v.Isolated {
+						t.Fatalf("delayed connector must still detect an open namespace: %+v", v)
+					}
+				}
+				isoLeftNothing(t, h)
+			})
+		}
+	}
+}
+
+func TestIsolationConnectorThatNeverStartsIsRefused(t *testing.T) {
+	script := isoScript(probeExitIsolated, isoSaid[probeExitIsolated])
+	script.states = script.states[:3]
+	script.states[2].pods[2].Status.ContainerStatuses = []ContainerStatus{isoWaiting()}
+	h := newIsoHarness(t, script)
+	h.r.probeReadyWait = 100 * time.Millisecond
+	res := h.run(t, rtRun())
+	isoWantRefused(t, h, res)
+	if v := h.r.Isolation(); !v.Inconclusive || !strings.Contains(v.Detail, "did not become ready") {
+		t.Fatalf("unstarted connector must refuse after its startup deadline: %+v", v)
+	}
+	isoLeftNothing(t, h)
+}
+
 // TestIsolationProofWithoutDNSIsInconclusive: the connector could not reach
 // the cluster's DNS, which the policy allows, so its failure to reach the
 // listener proves nothing about the policy -- the network itself may be
