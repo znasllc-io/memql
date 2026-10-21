@@ -12,6 +12,7 @@ import (
 
 	"github.com/znasllc-io/memql/component/auth"
 	"github.com/znasllc-io/memql/component/automations"
+	langparser "github.com/znasllc-io/memql/component/language/parser"
 	memqlengine "github.com/znasllc-io/memql/component/memql"
 	"github.com/znasllc-io/memql/component/planner"
 	"github.com/znasllc-io/memql/component/workjournal"
@@ -279,7 +280,18 @@ func TestTheRecordingRunIsTheSubrunTheStepPointsAt(t *testing.T) {
 		Output: map[string]any{"sessionId": "v1:worker:appSession:s1"},
 	}}
 	stamper := &recordingStamper{}
+	var goalWritten bool
 	journal := workjournal.New(workjournal.ExecutorFunc(func(_ context.Context, q string) (any, error) {
+		if strings.HasPrefix(q, "mutation createWorkGoal(") {
+			expr, err := langparser.ParseExpression(strings.TrimPrefix(q, "mutation "))
+			if err != nil {
+				t.Fatal(err)
+			}
+			if via := expr.(*langparser.FunctionCallExpr).Args["requestedVia"]; via != "agent" {
+				t.Fatalf("delegated work must use the schema's agent origin, got %v", via)
+			}
+			goalWritten = true
+		}
 		return nil, nil
 	}), nil, "node-a")
 	d := newAppSessionDelegateFor(ex, journal, stamper, nil)
@@ -293,6 +305,9 @@ func TestTheRecordingRunIsTheSubrunTheStepPointsAt(t *testing.T) {
 	}
 	if out.ChildRunId == "" {
 		t.Fatal("the delegate opened no child run, so this test measures nothing")
+	}
+	if !goalWritten {
+		t.Fatal("the child run needs a durable goal")
 	}
 	if got := ex.got.Input["recordingRunId"]; got != out.ChildRunId {
 		t.Fatalf("Input[recordingRunId] = %v, want the child run %q the step now points at",

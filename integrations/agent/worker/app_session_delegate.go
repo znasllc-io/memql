@@ -300,7 +300,7 @@ func (d *AppSessionDelegate) beginChildRun(ctx context.Context, h memqlengine.Ap
 		// its own decisions, which is the definition the journal's two kinds
 		// draw the line on.
 		Steps:         []workjournal.StepDecl{{Key: appSessionStepKey, Kind: workjournal.KindReasoning}},
-		RequestedVia:  "router",
+		RequestedVia:  "agent",
 		GoalSignature: signature,
 		ParentRunID:   strings.TrimSpace(h.RunId),
 		Variables:     variables,
