@@ -30,7 +30,7 @@ function Window({ name = "window" }: { name?: string }) {
   const [page, setPage] = useState("Machines");
   useLayoutEffect(() => { size.current = geometry(root.current!); }, []);
   useLayoutEffect(() => { size.current(page === "Machines" ? 1600 : 200); }, [page]);
-  return <section aria-label={name}>
+  return <section role="dialog" aria-label={name}>
     <PageNavigationProvider root={root} trail={[]}>
       <TrailRow fallback="Fleet" />
       <div ref={root} data-testid={`${name}-scroll`}>
@@ -57,9 +57,9 @@ describe("window scroll restoration", () => {
     const view = render(<><Window name="first" /><Window name="second" /></>); await settle();
     for (const [name, top] of [["first", 380], ["second", 920]] as const) {
       const root = screen.getByTestId(`${name}-scroll`); root.scrollTop = top;
-      fireEvent.click(within(screen.getByRole("region", { name })).getByText("Inspect machine"));
+      fireEvent.click(within(screen.getByRole("dialog", { name })).getByText("Inspect machine"));
       await settle();
-      fireEvent.click(within(screen.getByRole("region", { name })).getByRole("button", { name: "Back to Machines" }));
+      fireEvent.click(within(screen.getByRole("dialog", { name })).getByRole("button", { name: "Back to Machines" }));
       await settle(); expect(root.scrollTop).toBe(top);
     }
     view.unmount(); render(<Window name="first" />); await settle();
@@ -86,11 +86,12 @@ describe("window scroll restoration", () => {
 });
 
 function memory() {
-  const root = document.createElement("div"); document.body.append(root);
+  const frame = document.createElement("section"); frame.setAttribute("role", "dialog");
+  const root = document.createElement("div"); frame.append(root); document.body.append(frame);
   const size = geometry(root);
   let key: string | null = "list";
   const host = createPageScroll(root, () => key);
-  return { root, size, host, go(next: string | null) { key = next; host.schedule(); }, dispose() { host.dispose(); root.remove(); } };
+  return { root, size, host, go(next: string | null) { key = next; host.schedule(); }, dispose() { host.dispose(); frame.remove(); } };
 }
 
 it("waits through short loading content, restores both axes, and leaves rerenders alone", async () => {
@@ -176,11 +177,14 @@ it("leaves log followers and dialog scrolling under their own control", async ()
   const test = memory();
   const log = document.createElement("div"); log.dataset.osScrollIgnore = "";
   const dialog = document.createElement("div"); dialog.setAttribute("role", "dialog");
-  for (const node of [log, dialog]) {
+  const nativeDialog = document.createElement("dialog"); nativeDialog.open = true;
+  const popover = document.createElement("div"); popover.setAttribute("popover", "");
+  const independent = [log, dialog, nativeDialog, popover];
+  for (const node of independent) {
     node.style.overflowY = "auto"; geometry(node); node.scrollTop = 760; test.root.append(node);
   }
   try {
-    await settle(); expect(log.scrollTop).toBe(760); expect(dialog.scrollTop).toBe(760);
-    test.go("detail"); await settle(); expect(log.scrollTop).toBe(760); expect(dialog.scrollTop).toBe(760);
+    await settle(); independent.forEach(node => expect(node.scrollTop).toBe(760));
+    test.go("detail"); await settle(); independent.forEach(node => expect(node.scrollTop).toBe(760));
   } finally { test.dispose(); }
 });

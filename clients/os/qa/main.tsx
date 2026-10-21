@@ -390,7 +390,7 @@ function settingsStore() {
 function WindowBody({ fallback, children, width }: { fallback: string; children: ReactNode; width?: number }) {
   const content = useRef<HTMLDivElement>(null);
   return (
-    <div className="os-window" style={{ position: "fixed", inset: 0, maxWidth: width, display: "flex", flexDirection: "column" }}>
+    <div className="os-window" role="dialog" aria-label={fallback} data-os-window={fallback === "Fleet" ? "fleet" : undefined} style={{ position: "fixed", inset: 0, maxWidth: width, display: "flex", flexDirection: "column" }}>
       <div className="os-window-body">
         <PageNavigationProvider root={content} trail={[]}>
           <TrailRow fallback={fallback} />

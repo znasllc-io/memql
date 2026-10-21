@@ -10,7 +10,7 @@ import { deviceSample } from "./fleetDeviceScenes";
 
 type Frame = ComponentType<{ fallback: string; children: ReactNode }>;
 export function fleetEquipmentScenes(Frame: Frame) {
-  return Object.fromEntries(["populated", "apps", "apps-missing", "apps-offline", "activity", "activity-empty", "activity-error", "models", "models-automatic", "models-empty", "models-error", "models-save-error", "models-pending", "models-bound", "details", "details-empty", "labels", "labels-empty", "at-limit", "empty", "error", "sharing", "sharing-people", "sharing-picker", "sharing-empty", "sharing-error", "sharing-pending"].map(state => [`fleet-equipment-${state}`, {
+  return Object.fromEntries(["populated", "apps", "apps-missing", "apps-offline", "activity", "activity-scroll", "activity-empty", "activity-error", "models", "models-automatic", "models-empty", "models-error", "models-save-error", "models-pending", "models-bound", "details", "details-empty", "labels", "labels-empty", "at-limit", "empty", "error", "sharing", "sharing-people", "sharing-picker", "sharing-empty", "sharing-error", "sharing-pending"].map(state => [`fleet-equipment-${state}`, {
     connect: () => {
       const shareDirectory = shareDirectoryRow({ id: "studio", people: state === "sharing-empty" ? [] : [{ id: "ana", name: "Ana Ruiz", detail: "" }, { id: "bo", name: "Bo Chen", detail: "" }], groups: state === "sharing-empty" ? [] : [{ id: "design", name: "Design", members: 4 }, { id: "ops", name: "Operations", members: 7 }] });
       if (state === "sharing-picker") {
@@ -38,7 +38,7 @@ export function fleetEquipmentScenes(Frame: Frame) {
         apps: state === "apps-missing" ? [{ id: "claude-code", label: "Claude Code", allowed: false, signedIn: false, subscription: "unknown", version: "2.1.0" }] : [{ id: "claude-code", label: "Claude Code", allowed: true, signedIn: true, subscription: "unknown", version: "2.1.0" }, { id: "codex", label: "Codex", allowed: true, signedIn: true, subscription: "present", version: "0.118.0" }],
         ...(state === "apps-offline" ? { connectedNodeId: "", lastSeenAt: "2026-01-01T00:00:00Z" } : {}),
       };
-      const activityRows = state === "activity-empty" ? [] : [
+      const activityRows = state === "activity-scroll" ? Array.from({ length: 40 }, (_, i) => ({ id: `scroll-${i}`, kind: "model", label: `Activity ${i + 1}`, status: "succeeded", ownerUserId: "me", workerId: "studio", startedAt: new Date(Date.UTC(2026, 9, 18, 22, 0) - i * 60_000).toISOString() })) : state === "activity-empty" ? [] : [
         { id: "call-a", kind: "model", label: "qwen3.8:27b · chat", status: "running" },
         { id: "call-b", kind: "model", label: "qwen3-embedding:0.6b · embedding", status: "queued" },
         { id: "call-c", kind: "tool", label: "fs.read", status: "succeeded" },

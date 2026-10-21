@@ -2,12 +2,17 @@
  * Record before navigation mutates the DOM: layout-effect cleanup is too late
  * when replacing a long page with a short one has already clamped its scroll. */
 type Position = { top: number; left: number };
-const excluded = '[hidden], [inert], [aria-hidden="true"], dialog, [role="dialog"], [popover], [data-os-scroll-ignore]';
-const shown = (node: HTMLElement) => node.isConnected && !node.closest(excluded);
+const hidden = '[hidden], [inert], [aria-hidden="true"]';
+const excluded = 'dialog, [role="dialog"], [popover], [data-os-scroll-ignore]';
 const position = (node: HTMLElement): Position => ({ top: node.scrollTop, left: node.scrollLeft });
 const same = (a: Position, b: Position) => Math.abs(a.top - b.top) < 1 && Math.abs(a.left - b.left) < 1;
 
 export function createPageScroll(root: HTMLElement, page: () => string | null) {
+  // The desktop window itself has role="dialog". Exclude overlays and scroll
+  // owners inside this page, not its enclosing window. Hidden ancestors still
+  // matter: a retained page in a hidden window must not overwrite its memory.
+  const shown = (node: HTMLElement) => node.isConnected && !node.closest(hidden)
+    && !root.contains(node.closest(excluded));
   const history = new Map<string, Map<string, Position>>();
   let current: string | null = null;
   let containers = new Map<HTMLElement, string>();

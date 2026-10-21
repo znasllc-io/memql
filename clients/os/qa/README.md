@@ -427,8 +427,17 @@ creates no identities, credentials or network writes. Check 390px and desktop
 widths before live acceptance.
 
 Navigation scroll: `/navigation-scroll.html?mode=light|dark&check=1` exercises
-the shared provider in two independent windows with real browser layout. It
+the shared provider in two independent windows with real browser layout and
+the same `role="dialog"` boundary as the desktop window frame. It
 checks short detail pages, Back, breadcrumbs, section changes, delayed loading,
 and user cancellation of pending restoration. The document title reports the
 result and `#scroll-checks` contains each assertion. Run at desktop/narrow widths
 and with reduced motion. The fixture uses synthetic data and no cluster calls.
+
+Fleet Activity scroll: `/?view=fleet-equipment-activity-scroll&mode=light|dark`
+uses the actual Fleet workspace and its nested scroller with 40 synthetic
+activity records. Open Studio Mac, choose Activity, scroll to Activity 40,
+open it, then return through Back or the Activity breadcrumb. Both must return
+to the same position. Also switch to Details and back to Activity. The QA
+window carries Fleet's app identity and dialog role so its overflow and scroll
+boundary match the desktop. Run in Safari as well as Chromium.

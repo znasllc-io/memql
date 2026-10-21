@@ -22,7 +22,7 @@ function Preview({ id }: { id: string }) {
     setRecord(null); setLoading(true);
     setTimeout(() => setLoading(false), 300);
   };
-  return <section data-preview={id} aria-label={`Fleet ${id}`} style={{ minWidth: 0, background: "var(--os-glass-solid)", border: "1px solid var(--os-line)", borderRadius: "var(--os-radius)", overflow: "hidden" }}>
+  return <section role="dialog" data-preview={id} aria-label={`Fleet ${id}`} style={{ minWidth: 0, background: "var(--os-glass-solid)", border: "1px solid var(--os-line)", borderRadius: "var(--os-radius)", overflow: "hidden" }}>
     <header style={{ padding: "14px 20px" }}><strong>Fleet</strong></header>
     <PageNavigationProvider root={root} scope={section} trail={[]}>
       <nav className="os-window-nav" aria-label="Fleet sections">
