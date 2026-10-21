@@ -302,6 +302,13 @@ func (s *Server) route(ctx context.Context, req *rpcRequest) *rpcResponse {
 	case "initialize":
 		return successResponse(req.ID, s.initializeResult(req.Params))
 	case "tools/list":
+		if s.cfg.AppSessionId != "" {
+			tools, err := delegatedMCPTools(ctx, asEngine(s.engine), s.cfg.AppSessionId)
+			if err != nil {
+				return errorResponse(req.ID, codeInvalidReq, err.Error())
+			}
+			return successResponse(req.ID, map[string]any{"tools": tools})
+		}
 		// Reflect the engine's DSL tools (role-gated) + the generic dispatchers
 		// + @mcp-promoted query/mutation (Phase 4 #1534). @mcp-promoted
 		// automations come from the runner (the engine does not own automations).
@@ -363,6 +370,9 @@ func (s *Server) withActorEnvelope(ctx context.Context) context.Context {
 // applied here -- a gated-out-but-real tool is "known" and its handler reports
 // the permission denial in-band; only a genuinely nonexistent name is rejected.
 func (s *Server) isDispatchableTool(name string) bool {
+	if isAppSessionTool(name) {
+		return true
+	}
 	switch name {
 	case toolRunQuery, toolRunMutation, toolRunAutomation,
 		toolDefine, toolPromote, toolQuery, toolRunInlineAutomation:
@@ -405,7 +415,7 @@ func (s *Server) handleToolsCall(ctx context.Context, id json.RawMessage, params
 	// successful-looking response masks the mistake. (A tool that EXISTS but
 	// fails -- including a meta-tool like run_query whose named construct is
 	// missing -- still reports in-band via isError, per the MCP convention.)
-	if !s.isDispatchableTool(p.Name) {
+	if s.cfg.AppSessionId == "" && !s.isDispatchableTool(p.Name) {
 		return errorResponse(id, codeMethodNotFnd,
 			fmt.Sprintf("unknown tool %q: not an available tool on this MCP server", p.Name))
 	}

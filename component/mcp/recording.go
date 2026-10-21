@@ -47,6 +47,7 @@ import (
 	"encoding/json"
 	"strings"
 
+	"github.com/znasllc-io/memql/core/common"
 	"github.com/znasllc-io/memql/core/id"
 )
 
@@ -117,7 +118,7 @@ func recordAppSessionToolCall(ctx context.Context, appSessionId, name string, ar
 		// somebody else's run.
 		return
 	}
-	if isAppSessionTool(name) {
+	if isAppSessionTool(name) || name == common.DelegatedResponseTool {
 		return
 	}
 

@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"github.com/znasllc-io/memql/core/common"
 	"log/slog"
 	"strings"
 	"sync"
@@ -190,6 +191,7 @@ func (r *SessionRunner) holdThroughEnd(ctx context.Context, hold *sessionHold) (
 
 // RunSpec is one delegated run.
 type RunSpec struct {
+	ToolScope   *common.DelegatedTools
 	SessionId   string
 	OwnerUserId string
 	App         string
@@ -377,6 +379,7 @@ func (r *SessionRunner) Run(ctx context.Context, w *Worker, spec RunSpec, progre
 
 	startedAt := r.now()
 	row := AppSessionRow{
+		ToolScope:           spec.ToolScope,
 		ID:                  spec.SessionId,
 		SessionRunId:        recording.RunId(),
 		OwnerUserId:         spec.OwnerUserId,

@@ -81,6 +81,7 @@ shape registration workerRegistrationFull {
 /// machine card's recent-sessions list and the accounting rollup.
 @row
 shape appSession workerAppSessionFull {
+  toolScope
   row.id
   ownerUserId
   workerId

@@ -46,7 +46,7 @@ func TestOnlyAnAppSessionCredentialNamesASession(t *testing.T) {
 // do, so offering `submit` to a browser session offers an action that can only
 // fail -- and a model shown a tool it cannot use spends turns discovering that.
 func TestTheBackChannelToolsAreListedOnlyForAnAppSession(t *testing.T) {
-	eng := newFakeEngine()
+	eng := delegatedFixture()
 
 	browser := toolNames(listMCPTools(asPerson("owner"), eng, "owner", TierInline, ""))
 	for _, name := range []string{toolSubmit, toolNextTask} {
@@ -82,7 +82,7 @@ func TestTheBackChannelToolsAreListedOnlyForAnAppSession(t *testing.T) {
 // session reaching here is a gating bug, and the message is what tells the
 // reader that.
 func TestTheBackChannelHandlersRefuseANonAppCaller(t *testing.T) {
-	eng := newFakeEngine()
+	eng := delegatedFixture()
 	for _, name := range []string{toolSubmit, toolNextTask} {
 		res := callMCPTool(context.Background(), eng, "owner", TierInline, "", name,
 			map[string]any{"result": map[string]any{"ok": true}})
@@ -96,8 +96,8 @@ func TestTheBackChannelHandlersRefuseANonAppCaller(t *testing.T) {
 }
 
 func TestSubmitWritesTheResultOntoTheCallersOwnSession(t *testing.T) {
-	eng := newFakeEngine()
-	res := callMCPTool(context.Background(), eng, "owner", TierInline, "s1", toolSubmit,
+	eng := delegatedFixture()
+	res := callMCPTool(asPerson("owner"), eng, "owner", TierInline, "s1", toolSubmit,
 		map[string]any{"result": map[string]any{"summary": "done", "files": 2}})
 	if isError(res) {
 		t.Fatalf("submit: %v", resultText(res))
@@ -124,26 +124,26 @@ func TestSubmitWritesTheResultOntoTheCallersOwnSession(t *testing.T) {
 }
 
 func TestSubmitRefusesAnEmptyResult(t *testing.T) {
-	eng := newFakeEngine()
+	eng := delegatedFixture()
 	for _, args := range []map[string]any{
 		{},
 		{"result": map[string]any{}},
 		{"result": "not an object"},
 	} {
-		res := callMCPTool(context.Background(), eng, "owner", TierInline, "s1", toolSubmit, args)
+		res := callMCPTool(asPerson("owner"), eng, "owner", TierInline, "s1", toolSubmit, args)
 		if !isError(res) {
 			t.Errorf("submit(%v) must be refused: an empty answer recorded as an answer is worse "+
 				"than none, because the run then reads as having produced one", args)
 		}
 	}
-	if eng.query != "" {
+	if strings.HasPrefix(eng.query, "submitAppSessionResult(") {
 		t.Errorf("a refused submit must write nothing, got %q", eng.query)
 	}
 }
 
 func TestNextTaskReadsTheCallersOwnSession(t *testing.T) {
-	eng := newFakeEngine()
-	res := callMCPTool(context.Background(), eng, "owner", TierInline, "s1", toolNextTask, nil)
+	eng := delegatedFixture()
+	res := callMCPTool(asPerson("owner"), eng, "owner", TierInline, "s1", toolNextTask, nil)
 	if isError(res) {
 		t.Fatalf("next_task: %v", resultText(res))
 	}

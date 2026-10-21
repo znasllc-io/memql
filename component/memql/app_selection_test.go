@@ -116,7 +116,7 @@ func TestSessionProviderQuotaFallbackKeepsStepContract(t *testing.T) {
 		r.SetAppInference(&selectingApps{})
 		p := r.SessionProvider("*", "", SessionRequest{ActingUserId: "alice", RunId: "run", StepId: "step", Level: "reasoning"}).(*sessionProvider)
 		messages := []common.ChatMessage{{Role: "system", Content: "Keep constraints"}, {Role: "user", Content: "Initial task"}, {Role: "assistant", Content: "Earlier result"}, {Role: "user", Content: "Correction: use cents"}}
-		_, err := p.run(context.Background(), messages, []common.ToolDefinition{{Name: "tool"}}, &common.StructuredSchema{Name: "answer"})
+		_, err := p.run(delegatedProviderTestContext("alice", "run", "step"), messages, []common.ToolDefinition{{Name: "tool"}}, &common.StructuredSchema{Name: "answer"})
 		if uncertain {
 			if err == nil || len(d.calls) != 1 {
 				t.Fatalf("replayed uncertain step: %v", err)

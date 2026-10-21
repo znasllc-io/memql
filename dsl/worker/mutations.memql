@@ -780,6 +780,7 @@ mutation registration updateWorkerApps {
 @serverOnly
 mutation appSession createAppSession {
   args {
+    toolScope object
     sessionId      string!
     workerId       string!
     app            enum("claude-code", "codex")!
@@ -822,6 +823,7 @@ mutation appSession createAppSession {
     prompt: args.prompt ?? ""
     inputArtifactIds: args.inputArtifactIds ?? []
     responseSchema: args.responseSchema ?? ""
+    toolScope: args.toolScope ?? {}
     result: {}
     transcriptFileId: ""
     transcriptTruncated: false

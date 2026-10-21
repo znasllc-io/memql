@@ -209,6 +209,7 @@ func (d *AppSessionDelegate) RunStep(ctx context.Context, h memqlengine.AppSessi
 			// own directory when no fresh one was asked for.
 			"freshWorkspace": plan.workspace,
 			"responseSchema": schemaJSON(h.ResponseSchema),
+			"toolScope":      h.ToolScope,
 			// THE SUBRUN OPENED ABOVE IS WHERE THE SESSION IS RECORDED (epic
 			// memql#5396). It is the run childRunId now points at, so the
 			// actions have to land in THAT one: a recording in a second run

@@ -253,6 +253,7 @@ func (r *Replier) runNonStreamingToolLoop(
 		return nil, resumeErr
 	}
 	messages = resumed
+	ctx = delegatedToolContext(ctx, tools, turnCtx)
 	// NOTHING IS INSTALLED HERE ANY MORE (memql#5050). This used to stamp a
 	// taskstamp.PlanContext so every tool call wrote a v1:planner:task row,
 	// minting a synthetic ad-hoc Plan when turnCtx.RunId was empty -- which

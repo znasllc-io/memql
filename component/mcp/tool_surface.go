@@ -171,6 +171,10 @@ func (s mcpSession) available() bool { return s.registry != nil && s.owner != ""
 // @requiresRank is listed only at the person's rank, and the deprecated
 // @allowedRoles is compared with role exactly as it always was.
 func listMCPTools(ctx context.Context, eng Engine, role string, tier Tier, appSessionId string) []map[string]any {
+	if appSessionId != "" {
+		tools, _ := delegatedMCPTools(ctx, eng, appSessionId)
+		return tools
+	}
 	ctx = memql.WithMCPHumanCaller(ctx, role)
 	out := make([]map[string]any, 0)
 	if eng != nil {
@@ -332,6 +336,9 @@ func metaToolDefs() []map[string]any {
 // PERSON over MCP (memql#5438): role is their cluster role, never stamped as an
 // acting agent's.
 func callMCPTool(ctx context.Context, eng Engine, role string, tier Tier, appSessionId, name string, args map[string]any) map[string]any {
+	if appSessionId != "" {
+		return callDelegatedTool(ctx, eng, appSessionId, name, args)
+	}
 	if eng == nil {
 		return errorResult("mcp tool surface unavailable: engine not connected")
 	}

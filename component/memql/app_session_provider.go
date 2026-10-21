@@ -14,9 +14,9 @@ package memql
 // router passed the door over and Ask stayed dark. The right answer is that the
 // app does not serve the TURN; it takes the whole STEP. The step goes over
 // intact -- prompt, inputs, workspace, MCP endpoint, limits, response schema --
-// the app drives its own loop, and what comes back is ONE assistant turn with
-// NO tool calls, which is exactly what ends MemQL's loop without a second
-// iteration.
+// the app drives its own loop. Operational tool calls execute there; only its
+// terminal respondToUser signal returns for the parent's existing completion
+// and question validation, without executing those operational calls again.
 //
 // A SESSION IS OPENED FROM A STEP, which is why a call carrying none is refused
 // rather than served. A bare Go model call with tools has no step to hand over,
@@ -34,6 +34,7 @@ package memql
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"strings"
@@ -82,7 +83,8 @@ type AppSessionHandover struct {
 	// Tools are the tools the turn offered, carried so the delegate can tell
 	// the app what MemQL can do. They never become a tool loop on this side --
 	// the app reaches these over MCP, in the other direction.
-	Tools []common.ToolDefinition
+	Tools     []common.ToolDefinition
+	ToolScope *common.DelegatedTools
 	// ResponseSchema is the output contract the call declared, when it
 	// declared one. Nil means none was asked for, which is not the same state
 	// as asking and getting nothing back.
@@ -244,6 +246,11 @@ func (p *sessionProvider) run(
 		return AppSessionOutcome{}, &AppUnavailable{AppId: p.appId, NoOwner: true}
 	}
 
+	run, _ := common.RunFromContext(ctx)
+	scope := &common.DelegatedTools{Tools: tools, AgentID: ActingAgentIdFromContext(ctx), AgentRole: ActingAgentRoleFromContext(ctx), Run: run, Defaults: common.DelegatedToolDefaultsFromContext(ctx)}
+	if len(tools) > 0 && (scope.AgentID == "" || scope.AgentRole == "" || run.RunId != p.req.RunId || run.StepKey != p.req.StepId || run.OwnerUserId != actingUser) {
+		return AppSessionOutcome{}, fmt.Errorf("app session: delegated tools require the original owned run and agent context")
+	}
 	var out AppSessionOutcome
 	var err error
 	var excluded []string
@@ -279,6 +286,7 @@ func (p *sessionProvider) run(
 			StepId:         p.req.StepId,
 			Prompt:         flattenForSession(messages),
 			Tools:          tools,
+			ToolScope:      scope,
 			ResponseSchema: schema,
 			Pin:            p.req.Pin,
 		})
@@ -306,11 +314,8 @@ func (p *sessionProvider) run(
 
 // CallChatWithTools implements common.ToolCallingChatAIProvider.
 //
-// THE ANSWER CARRIES NO TOOL CALLS, and that is the whole shape of this door.
-// The app already ran its own loop and called whatever it needed over MCP; a
-// tool call here would be MemQL asking an agent that has finished to carry on,
-// which is the two-agents failure by another route. An empty ToolCalls slice is
-// what ends the caller's loop on the first iteration.
+// The app executes operational calls over MCP. Only its terminal response is
+// returned to the parent loop for validation; completed actions are not replayed.
 func (p *sessionProvider) CallChatWithTools(
 	ctx context.Context,
 	messages []common.ChatMessage,
@@ -320,7 +325,7 @@ func (p *sessionProvider) CallChatWithTools(
 	if err != nil {
 		return nil, err
 	}
-	return &common.ToolCallingChatResult{AssistantText: out.Content}, nil
+	return &common.ToolCallingChatResult{AssistantText: out.Content, ToolCalls: sessionTerminalCalls(out)}, nil
 }
 
 // CallChatStreamWithTools implements common.ChatStreamWithToolsProvider.
@@ -340,9 +345,12 @@ func (p *sessionProvider) CallChatStreamWithTools(
 	if err != nil {
 		return nil, err
 	}
-	ch := make(chan common.StreamToolChunk, 2)
+	ch := make(chan common.StreamToolChunk, 3)
 	if out.Content != "" {
 		ch <- common.StreamToolChunk{Content: out.Content}
+	}
+	for _, call := range sessionTerminalCalls(out) {
+		ch <- common.StreamToolChunk{ToolCalls: []common.ToolCallDelta{{ID: call.ID, Name: call.Name, Arguments: call.Arguments}}}
 	}
 	ch <- common.StreamToolChunk{Done: true}
 	close(ch)
@@ -440,4 +448,17 @@ func flattenForSession(messages []common.ChatMessage) string {
 		b.WriteString(strings.TrimSpace(m.Content))
 	}
 	return b.String()
+}
+
+// Only the terminal response returns to the native loop, for its existing
+// completion/question validation. All operational tools already ran in the app.
+func sessionTerminalCalls(out AppSessionOutcome) []common.ToolCall {
+	var result struct {
+		TerminalTool string          `json:"terminalTool"`
+		Arguments    json.RawMessage `json:"arguments"`
+	}
+	if json.Unmarshal(out.Result, &result) != nil || result.TerminalTool != common.DelegatedResponseTool || len(result.Arguments) == 0 {
+		return nil
+	}
+	return []common.ToolCall{{ID: "app-session-response", Name: result.TerminalTool, Arguments: string(result.Arguments)}}
 }

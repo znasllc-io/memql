@@ -9016,6 +9016,7 @@
         "startedAt",
         "status",
         "stepId",
+        "toolScope",
         "transcriptFileId",
         "transcriptTruncated",
         "usage",
@@ -9206,6 +9207,8 @@
       "fields": [
         "activeCount",
         "appDescriptors",
+        "appRouting",
+        "appSelection",
         "apps",
         "buildTag",
         "capabilities",

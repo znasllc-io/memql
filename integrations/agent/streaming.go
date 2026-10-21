@@ -352,6 +352,7 @@ func (r *Replier) runStreamingToolLoop(
 		return nil, resumeErr
 	}
 	messages = resumed
+	ctx = delegatedToolContext(ctx, tools, turnCtx)
 	// NOTHING IS INSTALLED HERE ANY MORE (memql#5050) -- see the same note in
 	// nonstreaming.go. Tool calls are recorded against the run in context,
 	// and a turn with no run records nothing rather than minting an ad-hoc

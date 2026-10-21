@@ -178,6 +178,7 @@ concept registration {
 @rowAuthz(owner="ownerUserId", clusterOwner)
 @displayCard(primary="app", secondary="kind", tertiary="startedAt", status="status")
 concept appSession {
+  toolScope object @description("Server-created delegated tool contract and original execution context. Written only when the session opens; never supplied by the app.")
   ownerUserId    string!  @description("v1:identity:user.id the session runs AS. The back-channel credential is minted with this as its subject, so everything the app reads over MCP is what this user could read -- row authz applies to a delegated app exactly as it does to a browser.")
   workerId       string!  @description("v1:worker:registration.id of the machine the app ran on.")
   app            enum("claude-code", "codex")!  @description("Which local app. The engine's runnable set is closed; a cockpit that reports another app can store it on the registration but can never open a session for it.")

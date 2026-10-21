@@ -2,6 +2,7 @@ package memql
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"strings"
 	"testing"
@@ -48,7 +49,7 @@ func TestSessionProviderHandsTheStepOverAndEndsTheLoop(t *testing.T) {
 	if !ok {
 		t.Fatalf("the session provider must satisfy ToolCallingChatAIProvider; got %T", p)
 	}
-	res, err := caller.CallChatWithTools(context.Background(),
+	res, err := caller.CallChatWithTools(delegatedProviderTestContext("u1", "v1:work:run:r1", "v1:work:step:s1"),
 		[]common.ChatMessage{{Role: "system", Content: "be useful"}, {Role: "user", Content: "ship it"}},
 		[]common.ToolDefinition{{Name: "workbenchHost"}})
 	if err != nil {
@@ -197,5 +198,30 @@ func TestSessionProviderRecordsNothingOnFailure(t *testing.T) {
 	}
 	if model, effort := p.(interface{ ServedModel() (string, string) }).ServedModel(); model != "" || effort != "" {
 		t.Fatalf("a failed session reports nothing, got (%q, %q)", model, effort)
+	}
+}
+
+func delegatedProviderTestContext(owner, run, step string) context.Context {
+	ctx := WithActingAgentId(WithActingAgentRole(context.Background(), "assistant"), "ag1")
+	return common.ContextWithRun(ctx, common.RunContext{RunId: run, StepKey: step, OwnerUserId: owner})
+}
+
+func TestSessionTerminalCallsOnlyReturnTheParentCompletionSignal(t *testing.T) {
+	for _, tc := range []struct {
+		result string
+		want   int
+	}{
+		{`{"terminalTool":"respondToUser","arguments":{"status":"needsInput","message":"Which file?"}}`, 1},
+		{`{"terminalTool":"executeCapability","arguments":{"name":"writeFile"}}`, 0},
+		{`{"answer":"done"}`, 0},
+		{`not-json`, 0},
+	} {
+		calls := sessionTerminalCalls(AppSessionOutcome{Result: json.RawMessage(tc.result)})
+		if len(calls) != tc.want {
+			t.Fatalf("terminal calls for %s: %+v", tc.result, calls)
+		}
+		if len(calls) > 0 && !strings.Contains(calls[0].Arguments, "needsInput") {
+			t.Fatal("completion arguments lost")
+		}
 	}
 }

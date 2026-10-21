@@ -16,6 +16,7 @@ import (
 	memqlengine "github.com/znasllc-io/memql/component/memql"
 	"github.com/znasllc-io/memql/component/planner"
 	workerservice "github.com/znasllc-io/memql/component/worker"
+	"github.com/znasllc-io/memql/core/common"
 	"github.com/znasllc-io/memql/core/id"
 )
 
@@ -307,7 +308,9 @@ func (e *CockpitAppExecutor) runAdmitted(ctx context.Context, req planner.Execut
 // a function rather than a literal inside Run so what reaches AppSessionStart
 // can be read without standing up the consent gates in front of it.
 func sessionRunSpec(req planner.ExecutorRequest, appId, ownerUserId, workspace string, credentialLifetime time.Duration) workerservice.RunSpec {
+	scope, _ := req.Input["toolScope"].(*common.DelegatedTools)
 	return workerservice.RunSpec{
+		ToolScope:          scope,
 		SessionId:          "v1:worker:appSession:" + id.NewShortId(),
 		OwnerUserId:        ownerUserId,
 		App:                appId,
