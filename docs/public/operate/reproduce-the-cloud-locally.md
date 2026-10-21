@@ -246,9 +246,11 @@ cluster as the single `MEMQL_DOMAIN` key of the `memql-domain` ConfigMap, and
 every node derives its identity base URL, expected issuer, discovery endpoint,
 CORS origins and OAuth redirect URIs from it at boot
 (`component/envregistry/domain.go`). When the domain differs from the overlay's
-committed default, `k3d.up` also emits two `spec.source.kustomize.patches`
-entries on the ArgoCD Application to repoint the two front-door Ingress hosts.
-No file under `deploy/` names a domain.
+committed default, `k3d.up` also emits `spec.source.kustomize.patches` entries
+on the ArgoCD Application that repoint every front door the overlay commits:
+`api`, `identity`, `mcp`, `os`, `vscode` and `voice`, the TURN route, and the
+sites front door's wildcard and apex, so MemQL OS and every hosted site follow
+the domain too. No file under `deploy/` names a domain.
 
 ### The hosts file is only written when it is needed
 
