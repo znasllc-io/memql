@@ -41,6 +41,17 @@ final class MemQLSwitch: NSControl {
         }
     }
 
+    /// The requested permission has not reached the running worker yet.
+    /// An outlined accent track and clock distinguish this from both off
+    /// and confirmed on. VoiceOver receives the mixed state and row hint.
+    var isPending = false {
+        didSet {
+            guard oldValue != isPending else { return }
+            needsDisplay = true
+            NSAccessibility.post(element: self, notification: .valueChanged)
+        }
+    }
+
     override var isEnabled: Bool { didSet { needsDisplay = true } }
     override var intrinsicContentSize: NSSize { NSSize(width: 32, height: 20) }
     override var acceptsFirstResponder: Bool { isEnabled }
@@ -49,12 +60,25 @@ final class MemQLSwitch: NSControl {
     private var track: NSRect { NSRect(x: (bounds.width - 32) / 2, y: (bounds.height - 20) / 2, width: 32, height: 20) }
 
     override func draw(_ dirtyRect: NSRect) {
-        let alpha: CGFloat = isEnabled ? 1 : 0.55
-        (isOn ? MemQLColor.accent : MemQLColor.muted).withAlphaComponent(alpha).setFill()
-        NSBezierPath(roundedRect: track, xRadius: 10, yRadius: 10).fill()
-        let knob = NSRect(x: track.minX + 3 + (isOn ? 12 : 0), y: track.minY + 3, width: 14, height: 14)
+        let alpha: CGFloat = isEnabled || isPending ? 1 : 0.55
+        let outline = NSBezierPath(roundedRect: isPending ? track.insetBy(dx: 0.75, dy: 0.75) : track, xRadius: 10, yRadius: 10)
+        let tint = isOn || isPending ? MemQLColor.accent : MemQLColor.muted
+        tint.withAlphaComponent(isPending ? 0.2 : alpha).setFill()
+        outline.fill()
+        if isPending {
+            tint.setStroke(); outline.lineWidth = 1.5; outline.stroke()
+        }
+        let knob = NSRect(x: track.minX + 3 + (isPending ? 6 : (isOn ? 12 : 0)), y: track.minY + 3, width: 14, height: 14)
         MemQLColor.surface.withAlphaComponent(alpha).setFill()
         NSBezierPath(ovalIn: knob).fill()
+        if isPending {
+            let clock = NSBezierPath()
+            clock.move(to: NSPoint(x: knob.midX, y: knob.midY + 4))
+            clock.line(to: NSPoint(x: knob.midX, y: knob.midY))
+            clock.line(to: NSPoint(x: knob.midX + 3, y: knob.midY))
+            clock.lineWidth = 1.5; clock.lineCapStyle = .round
+            tint.setStroke(); clock.stroke()
+        }
     }
 
     override func drawFocusRingMask() {
@@ -71,14 +95,16 @@ final class MemQLSwitch: NSControl {
     }
 
     private func toggle() {
-        isOn.toggle()
+        // Pressing a pending switch cancels the request in the UI; it does
+        // not issue another OS prompt or pretend to revoke a real grant.
+        if !isPending { isOn.toggle() }
         onToggle?(isOn)
     }
 
     override func isAccessibilityElement() -> Bool { true }
     override func accessibilityRole() -> NSAccessibility.Role? { .checkBox }
     override func accessibilitySubrole() -> NSAccessibility.Subrole? { .switch }
-    override func accessibilityValue() -> Any? { NSNumber(value: isOn) }
+    override func accessibilityValue() -> Any? { NSNumber(value: isPending ? 2 : (isOn ? 1 : 0)) }
     override func isAccessibilityEnabled() -> Bool { isEnabled }
     override func accessibilityPerformPress() -> Bool {
         guard isEnabled else { return false }

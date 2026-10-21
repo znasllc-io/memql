@@ -104,6 +104,7 @@ struct PermissionRow: Equatable {
     var enabled: Bool
     /// What to do in System Settings, "" for nothing.
     var note: String
+    var pending = false
 }
 
 enum PermissionAct: Equatable { case done, restart }
@@ -120,9 +121,9 @@ struct PermissionFlow {
     /// The position the person asked System Settings for, by permission,
     /// until the worker reports it.
     private(set) var asks: [PermissionKind: Bool] = [:]
-    /// A screen permission request can require a restart. A fresh report
+    /// A permission request can require a restart. A fresh report
     /// from the replacement worker settles it even when still denied.
-    private var screenPID: Int?
+    private var requestPID: Int?
 
     var asking: Bool { !asks.isEmpty }
 
@@ -136,35 +137,33 @@ struct PermissionFlow {
 
     mutating func begin(_ kind: PermissionKind, on: Bool, pid: Int) {
         asks[kind] = on
-        if kind == .screenRecording { screenPID = pid }
+        requestPID = pid
     }
     mutating func cancel(_ kind: PermissionKind) { asks[kind] = nil }
     /// Offscreen previews only: asks made under `pid`, without opening
     /// System Settings.
-    mutating func preview(_ asks: [PermissionKind: Bool], pid: Int?) { self.asks = asks; screenPID = pid }
+    mutating func preview(_ asks: [PermissionKind: Bool], pid: Int?) { self.asks = asks; requestPID = pid }
 
-    /// System Settings quit. An Accessibility ask is over; a Screen Recording
-    /// one still waits for MemQL to restart.
-    mutating func settingsClosed() { asks[.accessibility] = nil }
-
-    /// Settles each ask a fresh report answers: the position asked for, or for
-    /// Screen Recording a report from a new worker process. Returns whether
-    /// any settled.
+    /// Settles each ask on its requested result or a new worker's report.
+    /// Closing Settings alone cannot establish whether the grant took effect.
     mutating func observe(_ report: PermissionReport?, now: Date = Date()) -> Bool {
         guard let report, report.fresh(at: now) else { return false }
         let before = asks.count
         asks = asks.filter { kind, on in
-            kind.granted(in: report) != on && !(kind == .screenRecording && report.pid != screenPID)
+            kind.granted(in: report) != on && report.pid == requestPID
         }
         return asks.count != before
     }
 
     func row(_ kind: PermissionKind, _ report: PermissionReport?, restarting: Bool, now: Date = Date()) -> PermissionRow {
-        guard let report, report.fresh(at: now) else { return PermissionRow(on: false, enabled: false, note: "") }
+        guard let report, report.fresh(at: now) else {
+            return PermissionRow(on: false, enabled: false, note: restarting ? "Applying after restart" : "", pending: restarting && asks[kind] != nil)
+        }
         let granted = kind.granted(in: report)
-        guard report.requestsSupported, !restarting, !report.requestPending else { return PermissionRow(on: granted, enabled: false, note: "") }
-        guard let on = asks[kind] else { return PermissionRow(on: granted, enabled: true, note: "") }
-        return PermissionRow(on: granted, enabled: true, note: on ? "Awaiting macOS approval" : "Turn off MemQL in System Settings")
+        let enabled = report.requestsSupported && !restarting && !report.requestPending
+        guard asks[kind] != nil else { return PermissionRow(on: granted, enabled: enabled, note: "") }
+        return PermissionRow(on: granted, enabled: enabled,
+                             note: restarting ? "Applying after restart" : "Permission setup pending", pending: true)
     }
 
     /// While setup waits on this window (memql-cockpit#548): the one choice
@@ -182,8 +181,8 @@ struct PermissionFlow {
         guard let report, report.fresh(at: now) else { return PermissionFloor(state: "Waiting for the worker", busy: true, act: nil) }
         guard report.requestsSupported else { return PermissionFloor(state: "Update Cockpit to set these up", busy: false, act: nil) }
         if report.requestPending { return PermissionFloor(state: "Waiting for macOS", busy: true, act: nil) }
-        if asks[.screenRecording] != nil {
-            return PermissionFloor(state: "Restart after changing access in macOS", busy: false, act: .restart)
+        if asking {
+            return PermissionFloor(state: "After approval, restart MemQL", busy: false, act: .restart)
         }
         if report.granted(at: now) { return PermissionFloor(state: "Ready", busy: false, act: .done) }
         let missing = PermissionKind.allCases.filter { !$0.granted(in: report) }
@@ -355,13 +354,16 @@ final class PermissionSetupWindow: NSWindowController, NSWindowDelegate {
         }
         asking?(inSettings || flow.asking || report?.requestPending == true)
         for kind in PermissionKind.allCases {
-            let view = flow.row(kind, report, restarting: restarting || requestingPermission != nil)
+            let view = flow.row(kind, report, restarting: restarting)
             switches[kind]?.isOn = view.on
-            switches[kind]?.isEnabled = view.enabled
+            switches[kind]?.isPending = view.pending
+            switches[kind]?.isEnabled = view.enabled && requestingPermission == nil
+            switches[kind]?.setAccessibilityHelp(view.note.isEmpty ? nil : view.note)
             notes[kind]?.stringValue = view.note
             notes[kind]?.isHidden = view.note.isEmpty
         }
-        let floor = flow.floor(report, restarting: restarting)
+        let floor = requestingPermission == nil ? flow.floor(report, restarting: restarting)
+            : PermissionFloor(state: "Waiting for macOS", busy: true, act: nil)
         state.stringValue = floor.state
         state.textColor = floor.busy ? MemQLColor.accent : .labelColor
         // Hidden, not merely stopped: a stopped spinner still holds its place
@@ -428,7 +430,6 @@ final class PermissionSetupWindow: NSWindowController, NSWindowDelegate {
 
     private func systemSettingsClosed() {
         guard inSettings else { return }
-        flow.settingsClosed()
         inSettings = false
         update(report)
     }
@@ -475,18 +476,15 @@ final class PermissionSetupWindow: NSWindowController, NSWindowDelegate {
         alert.informativeText = "Work in progress stops and every server reconnects. macOS checks the permissions again when it starts."
         alert.addButton(withTitle: "Restart"); alert.addButton(withTitle: "Cancel")
         guard alert.runModal() == .alertFirstButtonReturn else { return }
-        // A Screen Recording ask stays open: the new worker's report settles it.
-        flow.cancel(.accessibility)
+        // Keep requests visible until the replacement worker reports.
         inSettings = false
         progress.begin(pid: report.pid)
         update(self.report)
         restart?(report.pid)
     }
 
-    // A Screen Recording ask outlives the window, so reopening it still
-    // offers the restart; Accessibility's lasts only while Settings is open.
+    // Requests outlive the window so reopening it still offers the restart.
     func windowWillClose(_ notification: Notification) {
-        flow.cancel(.accessibility)
         inSettings = false
         closed?()
     }

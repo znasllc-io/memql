@@ -41,28 +41,27 @@ enum PermissionSetupTests {
         precondition(flow.row(.accessibility, neither, restarting: false, now: now) == PermissionRow(on: false, enabled: true, note: ""))
         precondition(flow.floor(neither, restarting: false, now: now) == PermissionFloor(state: "Turn on both to finish", busy: false, act: nil))
         flow.begin(.accessibility, on: true, pid: 100)
-        precondition(flow.row(.accessibility, neither, restarting: false, now: now) == PermissionRow(on: false, enabled: true, note: "Awaiting macOS approval"),
-                     "Requesting access must never make an ungranted permission look enabled")
-        precondition(flow.floor(neither, restarting: false, now: now) == PermissionFloor(state: "Turn on both to finish", busy: false, act: nil))
+        precondition(flow.row(.accessibility, neither, restarting: false, now: now) == PermissionRow(on: false, enabled: true, note: "Permission setup pending", pending: true),
+                     "A request is visually pending, never ordinary off or confirmed on")
+        precondition(flow.floor(neither, restarting: false, now: now) == PermissionFloor(state: "After approval, restart MemQL", busy: false, act: .restart))
         precondition(!flow.observe(neither, now: now), "An ask ends only when the worker sees it")
         precondition(!flow.observe(report(age: 16), now: now), "A stale report ends nothing")
         precondition(flow.observe(axOnly, now: now) && !flow.asking)
         precondition(flow.floor(axOnly, restarting: false, now: now) == PermissionFloor(state: "Turn on Screen Recording to finish", busy: false, act: nil))
         flow.begin(.accessibility, on: true, pid: 100)
-        flow.settingsClosed()
-        precondition(!flow.asking, "Accessibility lands live; closing Settings ends its ask")
+        flow.cancel(.accessibility)
+        precondition(!flow.asking, "The person can cancel a pending request")
 
         // Screen Recording may need a new worker process. A request stays off
         // until observed, and a restart cannot manufacture a grant.
         flow.begin(.screenRecording, on: true, pid: 100)
-        precondition(flow.row(.screenRecording, neither, restarting: false, now: now) == PermissionRow(on: false, enabled: true, note: "Awaiting macOS approval"))
-        precondition(flow.floor(neither, restarting: false, now: now) == PermissionFloor(state: "Restart after changing access in macOS", busy: false, act: .restart))
+        precondition(flow.row(.screenRecording, neither, restarting: false, now: now) == PermissionRow(on: false, enabled: true, note: "Permission setup pending", pending: true))
+        precondition(flow.floor(neither, restarting: false, now: now) == PermissionFloor(state: "After approval, restart MemQL", busy: false, act: .restart))
         flow.begin(.accessibility, on: true, pid: 100)
-        precondition(flow.floor(neither, restarting: false, now: now) == PermissionFloor(state: "Restart after changing access in macOS", busy: false, act: .restart))
+        precondition(flow.floor(neither, restarting: false, now: now) == PermissionFloor(state: "After approval, restart MemQL", busy: false, act: .restart))
         precondition(flow.observe(axOnly, now: now) && flow.asks == [.screenRecording: true], "Accessibility landing leaves the Screen Recording ask open")
-        flow.settingsClosed()
         precondition(!flow.observe(axOnly, now: now) && flow.asks == [.screenRecording: true], "A denied report does not complete an outstanding request")
-        precondition(flow.floor(axOnly, restarting: false, now: now) == PermissionFloor(state: "Restart after changing access in macOS", busy: false, act: .restart))
+        precondition(flow.floor(axOnly, restarting: false, now: now) == PermissionFloor(state: "After approval, restart MemQL", busy: false, act: .restart))
         precondition(flow.floor(axOnly, restarting: true, now: now) == PermissionFloor(state: "Restarting MemQL…", busy: true, act: nil))
         precondition(!flow.row(.screenRecording, axOnly, restarting: true, now: now).enabled, "Nothing is asked while MemQL restarts")
         precondition(flow.observe(report(pid: 101, screen: "Not granted"), now: now) && !flow.asking,
@@ -77,7 +76,7 @@ enum PermissionSetupTests {
         precondition(!flow.asking)
 
         flow.begin(.accessibility, on: false, pid: 100)
-        precondition(flow.row(.accessibility, report(), restarting: false, now: now).note == "Turn off MemQL in System Settings")
+        precondition(flow.row(.accessibility, report(), restarting: false, now: now).note == "Permission setup pending")
         precondition(!flow.observe(report(), now: now) && flow.observe(report(ax: "Not granted"), now: now),
                      "Turning off ends when the worker reports it off")
         precondition(!flow.row(.accessibility, report(age: 16), restarting: false, now: now).enabled, "No switch without a fresh report")
@@ -108,6 +107,24 @@ enum PermissionSetupTests {
                      "A pending revoke must keep showing actual access until the worker observes it revoked")
         flow.cancel(.accessibility)
         flow.cancel(.screenRecording)
+
+        // Pending survives the gap during a restart and settles honestly on
+        // the new process, for either permission. No OS access is requested.
+        flow.begin(.accessibility, on: true, pid: 100)
+        precondition(flow.row(.accessibility, nil, restarting: true, now: now).pending)
+        precondition(flow.observe(report(pid: 101, ax: "Not granted"), now: now))
+        precondition(!flow.row(.accessibility, report(pid: 101, ax: "Not granted"), restarting: false, now: now).pending)
+        let toggle = MemQLSwitch()
+        toggle.isPending = true
+        precondition((toggle.accessibilityValue() as? NSNumber)?.intValue == 2,
+                     "VoiceOver distinguishes pending from off")
+        var requested: Bool?
+        toggle.onToggle = { requested = $0 }
+        precondition(toggle.accessibilityPerformPress() && requested == false,
+                     "Pressing a pending switch cancels instead of issuing another prompt")
+        toggle.isPending = false
+        precondition(toggle.accessibilityPerformPress() && requested == true)
+        precondition((toggle.accessibilityValue() as? NSNumber)?.intValue == 1)
 
         // Setup waits on this window (memql-cockpit#548): the way on without
         // what is not allowed yet, offered only while it waits.

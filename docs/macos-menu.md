@@ -240,12 +240,16 @@ denied prompts can be managed using explicit Settings links under
 **Troubleshooting**. Cockpit never closes Apple's permission alerts or raises
 itself over the user's current work when a grant arrives.
 
-Acknowledgment means the request was queued, not approved. A switch always shows
-the fresh running worker's observation, including while a request is pending.
+Acknowledgment means the request was queued, not approved. A solid green switch means the fresh running worker confirms access. A pending
+request uses an outlined green track with a clock and a text label, rather than
+looking off. It stays pending through Settings closing and a worker restart; a
+fresh grant or the replacement worker's report settles it. Pressing the pending
+switch cancels that UI request without issuing another OS prompt.
 The controls are disabled while the worker is processing an OS permission
 request. The menu reads the worker every second while waiting for approval.
-Screen Recording may require a worker restart after approval; that action is
-available after the request returns, and never establishes a grant by itself.
+macOS may require a worker restart after approval; the window offers that next
+step for either pending permission once the request returns. Restarting never
+establishes a grant by itself.
 The next process's actual observations settle the request. While any window is
 open the menu is a regular app with a Dock icon so it remains easy to find.
 
