@@ -161,6 +161,10 @@ type workSourcePair struct {
 // One privacy boundary for previews and exact paged reads. Assistant prose,
 // system content, unexecuted calls and recalled claims never become sources.
 func workCheckpointPairs(checkpoint map[string]any) ([]workSourcePair, bool) {
+	return workCheckpointPairsWithSourceReads(checkpoint, false)
+}
+
+func workCheckpointPairsWithSourceReads(checkpoint map[string]any, sourceReads bool) ([]workSourcePair, bool) {
 	data, _ := checkpoint["data"].(map[string]any)
 	if data["sourceOmitted"] == true {
 		return nil, true
@@ -191,7 +195,7 @@ func workCheckpointPairs(checkpoint map[string]any) ([]workSourcePair, bool) {
 			continue
 		}
 		seen[call.ID] = true
-		if call.Name == "recallWorkHistory" || call.Name == "ai" || call.Name == "runAgentTurn" || call.Name == "workReviewReply" || call.Name == "respondToUser" || call.Name == "requestUserFeedback" || strings.Contains(strings.ToLower(call.Name), "secret") {
+		if (call.Name == "recallWorkHistory" && !sourceReads) || call.Name == "ai" || call.Name == "runAgentTurn" || call.Name == "workReviewReply" || call.Name == "respondToUser" || call.Name == "requestUserFeedback" || strings.Contains(strings.ToLower(call.Name), "secret") {
 			continue
 		}
 		if strings.ContainsRune(message.Content+call.Arguments, 0) {

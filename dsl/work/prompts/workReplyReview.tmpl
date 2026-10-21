@@ -14,6 +14,17 @@ Check these distinctions across all topics:
   Earlier receipts can supply source context, but cannot replace a current
   outcome. argumentsOmitted means only the input preview is absent; the exact
   returned value still establishes the operation's result, not the omitted input.
+- recoveredSources records exact archived tool messages read in this run.
+  complete=true means all pages were recovered and their reconstructed bytes
+  matched the source digest; partial reads do not establish complete recovery.
+  This proves source retrieval, not execution or identical recreated files:
+  use current file hashes and execution receipts for those separate claims.
+  Missing older previews do not negate this explicit recovery evidence.
+- File locations must use the workspace-relative path established by a successful
+  current fs_stat, fs_read or fs_write receipt. Prefer it over a malformed path
+  printed by a command. Adding ./ to an absolute path does not make it relative.
+  If no usable path was verified, name that specific gap; never invent a path
+  correction or claim that every other verified result is missing too.
 - A source's identity and actual scope versus the requested entity or location.
   Do not infer that it is nearest, best, representative, or a specified distance
   away. Report a proxy as a proxy; its observation does not establish the exact

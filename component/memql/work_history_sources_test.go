@@ -1,6 +1,7 @@
 package memql
 
 import (
+	"context"
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
@@ -10,6 +11,7 @@ import (
 
 	"github.com/stretchr/testify/require"
 	"github.com/znasllc-io/memql/component/auth"
+	"github.com/znasllc-io/memql/core/airoute"
 	"github.com/znasllc-io/memql/core/common"
 )
 
@@ -33,7 +35,7 @@ func TestWorkSourceHistoryPagesOlderLargeReceiptsAcrossReplicasWithoutPrivateCon
 		insert("v1:work:run", id, map[string]any{"ownerUserId": access.UserId, "status": "succeeded"})
 	}
 	insert("v1:work:run", foreign, map[string]any{"ownerUserId": "v1:identity:user:someone-else", "status": "succeeded"})
-	insert("v1:work:run", "v1:work:run:"+BareShortId(run.RunId), map[string]any{"ownerUserId": access.UserId, "status": "running", "input": map[string]any{"conversation": map[string]any{"id": conversation, "turnId": "current"}}})
+	insert("v1:work:run", "v1:work:run:"+BareShortId(run.RunId), map[string]any{"ownerUserId": access.UserId, "goalId": run.GoalId, "status": "running", "input": map[string]any{"conversation": map[string]any{"id": conversation, "turnId": "current"}}})
 	require.NoError(t, a.askSave(ctx, conversation, "Source pages", askTranscript{Turns: []AskTurn{
 		{ID: "original", RunID: prior, State: "done"},
 		{ID: "forged", RunID: foreign, State: "done"},
@@ -93,8 +95,12 @@ func TestWorkSourceHistoryPagesOlderLargeReceiptsAcrossReplicasWithoutPrivateCon
 	require.Equal(t, 1, foundIndex)
 	var recovered strings.Builder
 	for offset := 0; ; {
-		result, err := b.recallWorkHistoryBuiltin(ctx, map[string]any{"sourceRunId": prior, "checkpoint": foundCheckpoint, "messageIndex": foundIndex, "offset": offset, "maxChars": 4000}, 0)
+		args := map[string]any{"sourceRunId": prior, "checkpoint": foundCheckpoint, "messageIndex": foundIndex, "offset": offset, "maxChars": 4000}
+		result, err := b.recallWorkHistoryBuiltin(ctx, args, 0)
 		require.NoError(t, err)
+		wire, err := json.Marshal(map[string]any{"nodes": result})
+		require.NoError(t, err)
+		require.NoError(t, b.RecordDelegatedToolSource(WithActingAgentId(ctx, "coding-agent"), "recallWorkHistory", args, string(wire)))
 		text := string(result[0].Payload)
 		for _, private := range []string{"PRIVATE-SYSTEM", "PRIVATE-REASONING", "PRIVATE-SECRET", "RECALLED-CLAIM", "UNPAIRED-RESULT"} {
 			require.NotContains(t, text, private)
@@ -117,6 +123,22 @@ func TestWorkSourceHistoryPagesOlderLargeReceiptsAcrossReplicasWithoutPrivateCon
 	}
 	want, _ := json.Marshal(original)
 	require.Equal(t, string(want), recovered.String(), "paged source remains byte-for-byte reconstructable")
+	// Newer file checks must not push the earlier recovery out of review's
+	// first receipt page. The finishing replica has none of the reader's state.
+	for n := range 18 {
+		require.NoError(t, b.RecordDelegatedToolSource(WithActingAgentId(ctx, "coding-agent"), "workbenchHost", map[string]any{"action": "fs_stat", "args": map[string]any{"path": fmt.Sprintf("output/file-%d", n)}}, `{"exists":true}`))
+	}
+	model := &replyReviewModel{}
+	a.SetAIResolver(testAIResolver{fn: func(context.Context, airoute.ResolveRequest) (ResolvedProvider, error) {
+		return ResolvedProvider{Client: model, Resolution: airoute.Resolution{ProviderName: "fleet:review", Model: "test"}}, nil
+	}})
+	_, err = a.workReviewReplyBuiltin(ctx, map[string]any{"draft": map[string]any{"reply": "The source was recovered."}}, 0)
+	require.NoError(t, err)
+	rendered, _ := json.Marshal(model.messages)
+	require.Contains(t, string(rendered), `\"recoveredSources\"`)
+	require.Contains(t, string(rendered), `\"complete\":true`)
+	require.Contains(t, string(rendered), `\"path\":\"events.csv\"`)
+	require.NotContains(t, string(rendered), "PRIVATE-REASONING")
 	for _, denied := range []string{unrelated, later, foreign} {
 		_, err := b.recallWorkHistoryBuiltin(ctx, map[string]any{"sourceRunId": denied, "checkpoint": foundCheckpoint}, 0)
 		require.Error(t, err, "a guessed source ID cannot grant authority")

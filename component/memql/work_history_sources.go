@@ -2,6 +2,7 @@ package memql
 
 import (
 	"context"
+	"crypto/sha256"
 	"encoding/json"
 	"fmt"
 	"strings"
@@ -105,6 +106,23 @@ func (e *MemQLEngine) recallWorkSourceHistory(ctx context.Context, current map[s
 				continue
 			}
 			page["checkpoint"], page["index"], page["sourceRunId"] = ref, i, BareShortId(sourceID)
+			if message.Role == "tool" {
+				// Native provenance for this exact archived message, not a claim
+				// copied from its text. Review can check complete paged recovery
+				// without promoting recalled assistant prose to source evidence.
+				raw, _ := json.Marshal(message)
+				provenance := map[string]any{"sha256": fmt.Sprintf("%x", sha256.Sum256(raw)), "operation": message.Name}
+				var arguments struct {
+					Action string `json:"action"`
+					Args   struct {
+						Path string `json:"path"`
+					} `json:"args"`
+				}
+				if message.Name == "workbenchHost" && json.Unmarshal([]byte(pairs[i/2].call.Arguments), &arguments) == nil && arguments.Action == "fs_read" && len(arguments.Args.Path) <= 1024 {
+					provenance["path"] = arguments.Args.Path
+				}
+				page["sourceEvidence"] = provenance
+			}
 			remaining -= utf8.RuneCountInString(page["source"].(string))
 			matches = append(matches, page)
 		}
