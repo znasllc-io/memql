@@ -1,4 +1,4 @@
-//go:build !agent && !planner && (identity || workbench || mcp || edge)
+//go:build !agent && !planner && (identity || workbench || edge)
 
 package app
 

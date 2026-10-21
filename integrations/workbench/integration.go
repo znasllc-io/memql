@@ -128,6 +128,10 @@ func (i *Integration) SetForwardRouter(r *ForwardRouter) {
 	i.router = r
 }
 
+// RequireRemote confines a protocol head to fleet or remote workbench execution.
+// It must never execute a model command on its own service filesystem.
+func (i *Integration) RequireRemote() { i.remote = true; i.localFallback = false }
+
 // ForwardRouter is the router SetForwardRouter installed, or nil on a node
 // that dispatches locally. The pipelines executor on an agent node forwards
 // its steps over this same router (epic memql#5478): it is the one the node

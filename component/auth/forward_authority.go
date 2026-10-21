@@ -91,7 +91,7 @@ const (
 
 func knownForwardedClass(class string) bool {
 	switch class {
-	case ForwardedClassUser, ForwardedClassBadge, ForwardedClassPat, RoleTestClass,
+	case ForwardedClassUser, ForwardedClassBadge, ForwardedClassPat, ForwardedClassAppSession, RoleTestClass,
 		ForwardedClassLocalDev, ForwardedClassOperator, ForwardedClassSystem:
 		return true
 	default:
@@ -132,7 +132,7 @@ type ForwardedAuthority struct {
 	CredentialClass string
 
 	// RoleCeiling is non-empty IFF CredentialClass is badge. ExpiresAt is
-	// non-zero for any class that expires mid-stream (today: badge only).
+	// non-zero for credentials that expire mid-stream, including app sessions.
 	RoleCeiling Role
 	ExpiresAt   time.Time
 
@@ -267,6 +267,9 @@ func VerifyForwardedAuthority(a ForwardedAuthority, now time.Time) (*AccessConte
 	if a.CredentialClass == RoleTestClass && (a.ExpiresAt.IsZero() || a.RoleTestSessionID == "" || !IsRoleTestUser(a.Subject) || a.Role == RoleOwner) {
 		return nil, ErrForwardMissingAuthority
 	}
+	if a.CredentialClass == ForwardedClassAppSession && a.ExpiresAt.IsZero() {
+		return nil, ErrForwardMissingAuthority
+	}
 	// Expiry, for badge and any future expiring class alike. Same comparison as
 	// the direct path's badgeGate, so the two agree at the same instant.
 	if !a.ExpiresAt.IsZero() && !now.Before(a.ExpiresAt) {
@@ -359,7 +362,7 @@ func ForwardedAuthorityForUser(ac *AccessContext, class string, ceiling Role, ex
 	if class != ForwardedClassBadge {
 		// Never ship a ceiling the receiver will refuse as stray.
 		ceiling = ""
-		if class != RoleTestClass {
+		if class != RoleTestClass && class != ForwardedClassAppSession {
 			expiresAt = time.Time{}
 		}
 	}

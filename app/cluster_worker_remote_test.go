@@ -13,7 +13,7 @@ import (
 )
 
 func TestRemoteInferenceCannotCompileTheWorkerForwardingNoop(t *testing.T) {
-	if !strings.Contains(readAppFile(t, "cluster_worker_noagent.go"), "//go:build !agent && !planner && (identity || workbench || mcp || edge)") {
+	if !strings.Contains(readAppFile(t, "cluster_worker_noagent.go"), "//go:build !agent && !planner && (identity || workbench || edge)") {
 		t.Fatal("planner work compilation sees the fleet catalog but installs no callable fleet inference; it compiles the worker-forwarding no-op")
 	}
 }

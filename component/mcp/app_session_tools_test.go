@@ -153,4 +153,9 @@ func TestNextTaskReadsTheCallersOwnSession(t *testing.T) {
 	if !strings.Contains(eng.query, `sessionId: "s1"`) {
 		t.Errorf("the read must name the credential's session: %q", eng.query)
 	}
+	for _, want := range []string{`"runId":"run-1"`, `"stepId":"v1:work:step:step-1"`, `original input`} {
+		if !strings.Contains(resultText(res), want) {
+			t.Errorf("next_task lost context %s: %s", want, resultText(res))
+		}
+	}
 }

@@ -28,6 +28,9 @@ import (
 //
 // The head holds the in-process engine handle (a.engine).
 func (a *App) transportMCP() {
+	if wb := a.lookupWorkbenchIntegration(); wb != nil {
+		wb.RequireRemote()
+	}
 	a.transportBase()
 	a.createHTTPServer()
 

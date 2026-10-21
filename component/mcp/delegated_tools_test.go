@@ -5,12 +5,54 @@ import (
 	"encoding/json"
 	"strings"
 	"testing"
+	"time"
 
+	"github.com/znasllc-io/memql/component/auth"
 	memqlv1 "github.com/znasllc-io/memql/component/grpc/gen"
 	"github.com/znasllc-io/memql/component/memql"
 	"github.com/znasllc-io/memql/core/common"
 	"google.golang.org/protobuf/types/known/structpb"
 )
+
+func TestDelegatedMCPForwardsVerifiedCredentialWithoutWidening(t *testing.T) {
+	expires := time.Now().Add(time.Minute).Truncate(time.Second)
+	claims := map[string]any{"sub": "v1:identity:user:mcp-person", "class": "app_session", "node_id": "app-session:s", "exp": float64(expires.Unix())}
+	ctx, _, err := delegatedScope(auth.ContextWithClaims(asPerson("reader"), claims), delegatedFixture(), "s")
+	if err != nil {
+		t.Fatal(err)
+	}
+	authority, ok := auth.ForwardedAuthorityFromContext(ctx)
+	if !ok || authority.CredentialClass != auth.ForwardedClassAppSession || authority.Role != auth.RoleReader || authority.Subject != claims["sub"] || !authority.ExpiresAt.Equal(expires) {
+		t.Fatalf("lost or widened credential: %+v", authority)
+	}
+	if _, err := auth.VerifyForwardedAuthority(authority, expires); err == nil {
+		t.Fatal("receiver accepted an expired app-session credential")
+	}
+	if _, err := auth.VerifyForwardedAuthority(authority, time.Now()); err != nil {
+		t.Fatalf("receiver refused a live app session: %v", err)
+	}
+	missingExpiry := authority
+	missingExpiry.ExpiresAt = time.Time{}
+	if _, err := auth.VerifyForwardedAuthority(missingExpiry, time.Now()); err == nil {
+		t.Fatal("receiver accepted an app-session credential with no expiry")
+	}
+	for key, bad := range map[string]any{"sub": "another-user", "node_id": "app-session:another-session", "class": "user", "exp": float64(time.Now().Add(-time.Minute).Unix())} {
+		t.Run(key, func(t *testing.T) {
+			changed := auth.CloneClaims(claims)
+			changed[key] = bad
+			if _, _, err := delegatedScope(auth.ContextWithClaims(asPerson("reader"), changed), delegatedFixture(), "s"); err == nil {
+				t.Fatal("invalid credential gained forwarding authority")
+			}
+		})
+	}
+	ctx, _, err = delegatedScope(asPerson("reader"), delegatedFixture(), "s")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := auth.ForwardedAuthorityFromContext(ctx); ok {
+		t.Fatal("no-auth configuration manufactured mesh authority")
+	}
+}
 
 type delegatedEngine struct {
 	*fakeEngine

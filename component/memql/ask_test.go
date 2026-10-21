@@ -327,3 +327,25 @@ func TestAskHandsTheTurnsRouteChoiceToTheGoalAndRefusesAnUnknownOne(t *testing.T
 	require.NoError(t, err)
 	require.Equal(t, "policy:localFirst", handed.Source)
 }
+
+func TestWorkWorkbenchCapabilityUsesOwnedExecutionIdentity(t *testing.T) {
+	e, _, _ := readMergeTestEngine(t)
+	user := "v1:identity:user:" + id.NewShortId()
+	caller := auth.ContextWithAccess(auth.ContextWithToken(auth.ContextWithUserActor(context.Background(), user), &auth.TokenInfo{Subject: user}), &auth.AccessContext{UserId: user, Role: auth.RoleOwner})
+	ctx := WithActingAgentId(common.ContextWithRun(caller, common.RunContext{RunId: "trusted-run", OwnerUserId: user, StepKey: "trusted-step"}), "trusted-agent")
+	calls := 0
+	e.builtinExecutorHandlers["integration.workbench.dispatchHost"] = func(_ context.Context, args map[string]any, _ int) ([]memorynodes.MemoryNode, error) {
+		calls++
+		require.Equal(t, "trusted-run", args["runId"])
+		require.Equal(t, "trusted-agent", args["agentId"])
+		return []memorynodes.MemoryNode{{ID: "result", Payload: []byte(`{"ok":true}`)}}, nil
+	}
+	for _, args := range []map[string]any{{"action": "exec"}, {"action": "exec", "runId": "other-run", "agentId": "other-agent"}} {
+		_, err := e.workExecuteBuiltin(ctx, map[string]any{"name": "workbench.workbenchDispatchHost", "arguments": args}, 0)
+		require.NoError(t, err)
+	}
+	require.Equal(t, 2, calls)
+	_, err := e.workExecuteBuiltin(caller, map[string]any{"name": "workbench.workbenchDispatchHost", "arguments": map[string]any{"action": "exec", "runId": "trusted-run"}}, 0)
+	require.ErrorContains(t, err, "owned work run")
+	require.Equal(t, 2, calls)
+}

@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/znasllc-io/memql/component/auth"
 	"github.com/znasllc-io/memql/component/memql"
@@ -67,7 +68,45 @@ func delegatedScope(ctx context.Context, eng Engine, sessionID string) (context.
 	ctx = memql.WithActingAgentId(ctx, scope.AgentID)
 	ctx = memql.WithActingAgentRole(ctx, scope.AgentRole)
 	ctx = common.ContextWithRun(ctx, scope.Run)
+	ctx, err = delegatedForwardAuthority(ctx, ac, sessionID)
+	if err != nil {
+		return ctx, nil, err
+	}
 	return ctx, &scope, nil
+}
+
+// Only an authenticated HTTP app-session credential can originate a machine
+// hop. The resolved owner/role and credential expiry travel unchanged; a local
+// no-auth MCP configuration must not manufacture mesh authority.
+func delegatedForwardAuthority(ctx context.Context, ac *auth.AccessContext, sessionID string) (context.Context, error) {
+	claims, ok := auth.ClaimsFromContext(ctx)
+	if !ok {
+		return ctx, nil
+	}
+	if AppSessionFromClaims(claims) != sessionID || memql.BareShortId(stringValue(claims["sub"])) != memql.BareShortId(ac.UserId) {
+		return ctx, fmt.Errorf("app session: credential does not match its owned session")
+	}
+	var seconds int64
+	switch value := claims["exp"].(type) {
+	case float64:
+		seconds = int64(value)
+	case int64:
+		seconds = value
+	case int:
+		seconds = int64(value)
+	case json.Number:
+		seconds, _ = value.Int64()
+	}
+	now := time.Now()
+	expires := time.Unix(seconds, 0)
+	if seconds <= 0 || !now.Before(expires) {
+		return ctx, fmt.Errorf("app session: credential has no active expiry")
+	}
+	authority, err := auth.ForwardedAuthorityForUser(ac, auth.ForwardedClassAppSession, "", expires, now)
+	if err != nil {
+		return ctx, err
+	}
+	return auth.ContextWithForwardedAuthority(ctx, authority), nil
 }
 
 func stringValue(v any) string { s, _ := v.(string); return strings.TrimSpace(s) }

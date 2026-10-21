@@ -1,4 +1,4 @@
-//go:build agent
+//go:build agent || mcp
 
 package worker
 
