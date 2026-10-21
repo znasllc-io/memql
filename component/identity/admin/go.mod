@@ -4,7 +4,7 @@ module github.com/znasllc-io/memql/component/identity/admin
 
 go 1.26.1
 
-toolchain go1.27.2
+toolchain go1.27.3
 
 require (
 	github.com/a-h/templ v0.3.1070

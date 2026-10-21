@@ -1259,7 +1259,7 @@ exporting an OCI archive. Reviewed release publication verifies and publishes
 that artifact under an immutable version. The shipped manifest builds
 `linux/amd64`; another platform requires its own native qualification. It carries:
 
-- Go 1.27.2 (`go.work`'s toolchain line), Node 22, protoc 33.4 and kubectl
+- Go 1.27.3 (`go.work`'s toolchain line), Node 22, protoc 33.4 and kubectl
   1.32.13 (the minor of the local cluster's k3s); a test holds Go, protoc and
   kubectl's minor to the repository's own pins;
 - the Docker client 29.8.2, and no daemon -- here or anywhere in a step's pod --

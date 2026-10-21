@@ -59,7 +59,7 @@ readonly PROTOC_GEN_GO_GRPC_VERSION="v1.6.2"
 # The Go toolchain the two plugins are COMPILED with -- see the header. This is
 # the toolchain that produced the committed .pb.go, not the one this repo is
 # built with, and the two are deliberately allowed to differ: go.mod's
-# `toolchain` line is go1.27.2 today and the committed generated tree is
+# `toolchain` line is go1.27.3 today and the committed generated tree is
 # go1.26.1's rendering.
 #
 # Bumping it is a deliberate act with a visible cost: every generated file

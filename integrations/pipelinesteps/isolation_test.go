@@ -582,6 +582,69 @@ func TestIsolationProofRefusedConnectionPassesOnlyWhileTheListenerHeld(t *testin
 	}
 }
 
+// Container startup may outlast the network-test budget. Both the restricted
+// and positive-control container must start before that budget begins.
+func TestIsolationConnectorsStartBeforeNetworkDeadline(t *testing.T) {
+	for _, delayed := range []int{1, 2} {
+		for _, exit := range []int32{probeExitIsolated, probeExitConnected} {
+			t.Run(fmt.Sprintf("delayed-index-%d-exit-%d", delayed, exit), func(t *testing.T) {
+				script := isoScript(exit, isoSaid[exit])
+				up := isoListener(true, 0)
+				pods := []*Pod{
+					isoPod(0, isoListenerIP, up, isoHolding),
+					isoPod(1, isoOtherIP, up, isoEnded(exit, isoSaid[exit])),
+					isoPod(2, "10.42.1.4", up, isoEnded(probeExitControlPassed, "positive control connected every round")),
+				}
+				pods[delayed].Status.ContainerStatuses = []ContainerStatus{isoWaiting()}
+				var releasedAt time.Time
+				waiting := rtState{pods: pods, until: func(c *rtCluster) bool {
+					if c.probeRoles["uid-pod-1"].Labels[LabelProbeRole] != "restricted" ||
+						c.probeRoles["uid-pod-2"].Labels[LabelProbeRole] != "control" {
+						return false
+					}
+					if releasedAt.IsZero() {
+						releasedAt = time.Now()
+					}
+					return time.Since(releasedAt) >= 250*time.Millisecond
+				}}
+				script.states = append(append([]rtState{}, script.states[:2]...), append([]rtState{waiting}, script.states[2:]...)...)
+				h := newIsoHarness(t, script)
+				h.r.probeReadyWait = 2 * time.Second
+				h.r.probeEndWait = 100 * time.Millisecond
+				run := rtRun()
+				name := JobName(run.RunID, run.StepKey, run.Attempt)
+				h.c.script(name, rtFinishingScript(name, 0, captureKubeLine(rtAt(1100), "ok")))
+				res := h.run(t, rtRun())
+				if exit == probeExitIsolated {
+					if res.Status != pl.OutcomeSucceeded || !h.r.Isolation().Isolated {
+						t.Fatalf("delayed connector did not complete its network proof: result=%+v verdict=%+v", res, h.r.Isolation())
+					}
+				} else {
+					isoWantRefused(t, h, res)
+					if v := h.r.Isolation(); v.Inconclusive || v.Isolated {
+						t.Fatalf("delayed connector must still detect an open namespace: %+v", v)
+					}
+				}
+				isoLeftNothing(t, h)
+			})
+		}
+	}
+}
+
+func TestIsolationConnectorThatNeverStartsIsRefused(t *testing.T) {
+	script := isoScript(probeExitIsolated, isoSaid[probeExitIsolated])
+	script.states = script.states[:3]
+	script.states[2].pods[2].Status.ContainerStatuses = []ContainerStatus{isoWaiting()}
+	h := newIsoHarness(t, script)
+	h.r.probeReadyWait = 100 * time.Millisecond
+	res := h.run(t, rtRun())
+	isoWantRefused(t, h, res)
+	if v := h.r.Isolation(); !v.Inconclusive || !strings.Contains(v.Detail, "did not become ready") {
+		t.Fatalf("unstarted connector must refuse after its startup deadline: %+v", v)
+	}
+	isoLeftNothing(t, h)
+}
+
 // TestIsolationProofWithoutDNSIsInconclusive: the connector could not reach
 // the cluster's DNS, which the policy allows, so its failure to reach the
 // listener proves nothing about the policy -- the network itself may be
@@ -1240,6 +1303,67 @@ func TestAdoptionNeverWaitsOnTheProof(t *testing.T) {
 // ---------------------------------------------------------------------------
 // What the proof leaves behind: nothing
 // ---------------------------------------------------------------------------
+
+// A successful DELETE is only acceptance by the API server. The kubelet and
+// foreground garbage collector can still retain pods beyond a quick API-call
+// timeout. The cleanup must wait for them, including after its caller leaves.
+func TestIsolationCleanupWaitsForPodCollectionAfterAPIDelete(t *testing.T) {
+	h := newIsoHarness(t, nil)
+	answer := kubeOK(200, map[string]any{"items": []Pod{*isoPod(0, isoListenerIP, isoStarting, isoWaiting())}})
+	h.c.with(func(c *rtCluster) { c.podsAnswer = &answer })
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	p := &prober{r: h.r, ctx: ctx, name: isoName(), target: isoTarget()}
+	done := make(chan error, 1)
+	go func() { done <- p.remove() }()
+	// Release the retained pod before test cleanup even if the old budget
+	// makes the regression fail early.
+	t.Cleanup(func() { h.c.with(func(c *rtCluster) { c.podsAnswer = nil }) })
+	select {
+	case err := <-done:
+		t.Fatalf("cleanup ended before the retained pod disappeared: %v", err)
+	case <-time.After(quickCallTimeout + 200*time.Millisecond):
+	}
+	h.c.with(func(c *rtCluster) { c.podsAnswer = nil })
+	select {
+	case err := <-done:
+		if err != nil {
+			t.Fatalf("confirmed cleanup failed: %v", err)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("cleanup did not observe the pod's removal")
+	}
+}
+
+func TestIsolationCleanupDeadlineRefusesLingeringResources(t *testing.T) {
+	for _, resource := range []string{"job", "secret", "pods"} {
+		t.Run(resource, func(t *testing.T) {
+			answers := map[string]kubeAnswer{
+				"DELETE " + kubeJobs + "/" + isoName():      kubeOK(200, map[string]any{}),
+				"DELETE " + kubeSecrets + "/" + isoTarget(): kubeOK(200, map[string]any{}),
+				"GET " + kubeJobs + "/" + isoName():         kubeStatus(404, "NotFound", "gone"),
+				"GET " + kubeSecrets + "/" + isoTarget():    kubeStatus(404, "NotFound", "gone"),
+				"GET " + kubePods:                           kubeOK(200, map[string]any{"items": []Pod{}}),
+			}
+			switch resource {
+			case "job":
+				answers["GET "+kubeJobs+"/"+isoName()] = kubeOK(200, Job{})
+			case "secret":
+				answers["GET "+kubeSecrets+"/"+isoTarget()] = kubeOK(200, Secret{})
+			case "pods":
+				answers["GET "+kubePods] = kubeOK(200, map[string]any{"items": []Pod{{}}})
+			}
+			kube, _ := newKubeFake(t, answers)
+			r := NewRunner(testConfig(), kube, nil, nil, nil)
+			r.cfg.PollInterval = time.Millisecond
+			r.probeCleanupWait = 30 * time.Millisecond
+			p := &prober{r: r, ctx: context.Background(), name: isoName(), target: isoTarget()}
+			if err := p.remove(); !errors.Is(err, context.DeadlineExceeded) || !strings.Contains(err.Error(), "cleanup remains unconfirmed") {
+				t.Fatalf("cleanup trusted a lingering %s: %v", resource, err)
+			}
+		})
+	}
+}
 
 func TestIsolationProbeRefusesToReuseUnconfirmedCleanup(t *testing.T) {
 	h := newIsoHarness(t, isoScript(probeExitIsolated, isoSaid[probeExitIsolated]))

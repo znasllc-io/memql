@@ -4,7 +4,7 @@ module github.com/znasllc-io/memql/component/router
 
 go 1.26.1
 
-toolchain go1.27.2
+toolchain go1.27.3
 
 require (
 	github.com/znasllc-io/memql/component/auth v0.0.0

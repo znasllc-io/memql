@@ -27,7 +27,9 @@ pipeline:
   # v0.29.23, run 517b203755fd72a42c422493c691ad77, built this exact image in
   # AKS; its archive passed the actual-image smoke script before reviewed
   # native publication verified every registry blob. A rebuild needs a new
-  # immutable version and reviewed digest pin. This package is public; private
+  # immutable version and reviewed digest pin. Go selects the patched compiler
+  # declared in go.work until the rebuilt image is published and re-pinned.
+  # This package is public; private
   # image access must use the Workbench registry credential contract.
   image: ghcr.io/znasllc-io/memql-toolchain@sha256:a62b53491fbd9cfd4bbfdf9612bfb1776d9fc9d42aab7ceceac3a0a18a17a8bb
   services:

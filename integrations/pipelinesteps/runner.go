@@ -185,7 +185,7 @@ type Runner struct {
 
 	// The isolation proof (isolation.go): the last verdict and the proof in
 	// flight, if any, guarded by isoMu. Probe waits default to the bounded
-	// startup, holder readiness, connector and kubelet intervals in isolation.go.
+	// startup, holder readiness, connector, kubelet and cleanup intervals in isolation.go.
 	isoMu            sync.Mutex
 	isoLast          IsolationVerdict
 	isoProof         *isolationProof
@@ -193,6 +193,7 @@ type Runner struct {
 	probeReadyWait   time.Duration
 	probeEndWait     time.Duration
 	probeKubeletWait time.Duration
+	probeCleanupWait time.Duration
 }
 
 // inflight is one Run on this replica: what CancelRun cancels by run, and
@@ -238,6 +239,7 @@ func NewRunner(cfg Config, kube *Kube, sink func() LineSink, library LibraryStor
 		probeReadyWait:   probeReadyTimeout,
 		probeEndWait:     probeEndTimeout,
 		probeKubeletWait: probeKubeletTimeout,
+		probeCleanupWait: probeCleanupTimeout,
 	}
 }
 
