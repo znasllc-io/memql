@@ -83,7 +83,7 @@ function section() {
 function check_cluster() {
     section "k3d cluster '${CLUSTER_NAME}'"
 
-    if ! k3d cluster list 2>/dev/null | grep -q "^${CLUSTER_NAME}[[:space:]]"; then
+    if ! k3d cluster list 2>/dev/null | grep "^${CLUSTER_NAME}[[:space:]]" >/dev/null; then
         {
             echo "  STATUS: cluster '${CLUSTER_NAME}' is NOT running."
             echo "  Run:    make up"

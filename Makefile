@@ -250,7 +250,8 @@ up:
 		$${CARRIER_REPO:+--carrier-repo="$${CARRIER_REPO}"} \
 		$${CARRIER_NODES:+--carrier-nodes="$${CARRIER_NODES}"} \
 		$${CARRIER_CONTEXT:+--carrier-context="$${CARRIER_CONTEXT}"} \
-		$${NO_SECRETS:+--no-secrets}
+		$${NO_SECRETS:+--no-secrets} \
+		$${SWITCH:+--switch}
 
 ## Clean-slate local environment: nuke + repave. Tears down the cluster
 ## (wiping the in-cluster DB by construction), then runs the same bring-up
@@ -277,7 +278,8 @@ up-refresh:
 		$${PROJECT_MANIFEST:+--project-manifest="$${PROJECT_MANIFEST}"} \
 		$${CARRIER_REPO:+--carrier-repo="$${CARRIER_REPO}"} \
 		$${CARRIER_NODES:+--carrier-nodes="$${CARRIER_NODES}"} \
-		$${CARRIER_CONTEXT:+--carrier-context="$${CARRIER_CONTEXT}"}
+		$${CARRIER_CONTEXT:+--carrier-context="$${CARRIER_CONTEXT}"} \
+		$${SWITCH:+--switch}
 
 ## Tear down the local k3d cluster (PURGE=1 also removes the kubeconfig context)
 ## Pass PURGE=1 to also remove the kubeconfig context.

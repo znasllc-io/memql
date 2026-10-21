@@ -39,6 +39,7 @@ not have to repeat this preference or request a design skill each time.
 # --- k3d + ArgoCD: the ONLY supported local run path ---
 make up                      # fresh bring-up: cluster + ArgoCD + secrets + images, wait healthy
 make up SERVERS=2 AGENTS=1   # multi-node (cross-node mesh testing)
+make up SWITCH=1             # stop another running local stack first (stopped, not deleted)
 make dev                     # inner-loop: rebuild images -> import -> restart pods
 make dev NODE=bff            # ...one node only (faster)
 make dev PULL_INFRA=1        # ...also refresh infra images (postgres/azurite)

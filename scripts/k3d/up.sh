@@ -90,6 +90,7 @@ cap_spec_param "caroot"         "mkcert CAROOT the front-door certificate is iss
 cap_spec_param "project-manifest" "path to the AppProject manifest to apply (downstream repos pass their own)"
 cap_spec_param "repo-root"      "the MemQL checkout to read deploy/ and the target revision from (default: this script's own repository)"
 cap_spec_param "no-secrets"     "skip secret seeding (flag)"                        ""
+cap_spec_param "switch"         "stop any OTHER running local k3d cluster first instead of refusing; it is stopped, never deleted (flag)"
 
 #=============================================================================
 # CONFIGURATION
@@ -146,6 +147,10 @@ BUILD_NODE_MEMORY=""
 # The memory the person asked for, empty when it is the default: only an
 # asked-for cap is worth a warning when an existing node has another.
 BUILD_NODE_MEMORY_ASKED=""
+
+# --switch: stop another running local cluster instead of refusing to start
+# beside it (refuse_another_running_stack). Read in main().
+SWITCH=""
 
 # The overlay's COMMITTED Ingress hostname (memql#3593). Patches are emitted
 # only when the operator's domain differs, so the common case carries no
@@ -354,6 +359,61 @@ function warn_occupied_ports() {
     return 0
 }
 
+# running_k3d_clusters -- the k3d clusters with a server running, one name per
+# line, from k3d's own listing (SERVERS is running/total). A running cluster's
+# load balancer publishes the host ports (443, 80, 5432 and any --extra-ports);
+# a STOPPED one (0/N) holds none and is not listed. k3d, not docker, because
+# k3d is the authority on its clusters -- and the one command every test that
+# drives this script already fakes.
+function running_k3d_clusters() {
+    k3d cluster list 2>/dev/null \
+        | awk '$1 != "NAME" && split($2, servers, "/") == 2 && servers[1] > 0 { print $1 }' \
+        | sort -u || true
+}
+
+# cluster_domain <name> -- the domain a running cluster serves, read from its
+# memql-domain ConfigMap. Empty when it cannot be read: not a MemQL cluster, or
+# an API server that is not answering.
+function cluster_domain() {
+    kubectl --context "k3d-$1" --request-timeout=5s get configmap memql-domain \
+        -n "${NAMESPACE}" -o 'jsonpath={.data.MEMQL_DOMAIN}' 2>/dev/null || true
+}
+
+# refuse_another_running_stack -- one local stack runs at a time (memql#6207).
+#
+# Every local cluster publishes the same host ports, so a second one cannot run
+# beside the first. Docker says so only at `k3d cluster create`, as "port is
+# already allocated" with no stack named. warn_occupied_ports cannot be the
+# gate: a port something listens on is not always one docker cannot publish
+# (see its comment). Another RUNNING k3d cluster always is, so this asks k3d
+# for those, before anything is created or started. There is no lock
+# file to go stale after a crash or a reboot, and a STOPPED cluster, which holds
+# no port, is never in the way.
+#
+# --switch is the operator saying "stop it for me". The other cluster is
+# STOPPED, never deleted: `k3d cluster start <name>`, or `make up` in its repo,
+# brings it back as it was.
+function refuse_another_running_stack() {
+    local others name domain named=""
+    others="$(running_k3d_clusters | grep -vxF "${CLUSTER_NAME}" || true)"
+    if [[ -z "$others" ]]; then
+        return 0
+    fi
+    if [[ -n "$SWITCH" ]]; then
+        while IFS= read -r name; do
+            info "Stopping k3d cluster '${name}' (--switch): it keeps its state, and \`k3d cluster start ${name}\` brings it back."
+            k3d cluster stop "$name" >&2 || cap_fail 5 "could not stop k3d cluster '${name}'"
+        done <<< "$others"
+        return 0
+    fi
+    while IFS= read -r name; do
+        domain="$(cluster_domain "$name")"
+        named+="${named:+, }'${name}'${domain:+ (serving ${domain})}"
+    done <<< "$others"
+    name="$(head -n 1 <<< "$others")"
+    cap_fail 3 "another local stack is running: ${named}. One local stack runs at a time -- every local cluster publishes the same host ports. Stop it first with \`k3d cluster stop ${name}\` (it keeps its state) or \`make down\` in its repo, or re-run with SWITCH=1 (--switch) to stop it for you."
+}
+
 function create_cluster() {
     section "Creating k3d cluster '${CLUSTER_NAME}'"
     cap_progress "Creating the cluster"
@@ -365,10 +425,29 @@ function create_cluster() {
     # "already here", and cleaning up the failed install refused to delete the
     # cluster it had just created.
     cap_result_set cluster "$CLUSTER_NAME"
-    if k3d cluster list 2>/dev/null | grep -q "^${CLUSTER_NAME}[[:space:]]"; then
-        info "Cluster '${CLUSTER_NAME}' already exists -- skipping creation."
-        info "To recreate: make down && make up"
+    if k3d cluster list 2>/dev/null | grep "^${CLUSTER_NAME}[[:space:]]" >/dev/null; then
         cap_result_set_raw clusterCreated false
+        if running_k3d_clusters | grep -xF "${CLUSTER_NAME}" >/dev/null; then
+            info "Cluster '${CLUSTER_NAME}' already exists -- skipping creation."
+        else
+            # STOPPED, not missing (memql#6207). It holds no port and answers
+            # nothing, so skipping it left every later step talking to an API
+            # server that was not there. refuse_another_running_stack has
+            # already made sure its ports are free.
+            info "Cluster '${CLUSTER_NAME}' exists but is stopped -- starting it."
+            k3d cluster start "${CLUSTER_NAME}" --wait >&2 \
+                || cap_fail 5 "could not start k3d cluster '${CLUSTER_NAME}'"
+            cap_changed
+        fi
+        info "To recreate: make down && make up"
+        # The current context belongs to whichever cluster was used last --
+        # another local stack, or a cloud cluster -- and every later step runs
+        # kubectl against it. Point it HERE on this path too, not only after a
+        # create, or a re-run would seed and apply into that other cluster.
+        k3d kubeconfig merge "${CLUSTER_NAME}" --kubeconfig-merge-default &>/dev/null || true
+        kubectl config use-context "k3d-${CLUSTER_NAME}" &>/dev/null \
+            || cap_fail 5 "kubectl has no context k3d-${CLUSTER_NAME}; recreate the cluster: make down && make up"
+        info "kubectl context set to k3d-${CLUSTER_NAME}."
         return 0
     fi
     # Before `k3d cluster create`: whatever cluster of this name exists after
@@ -552,7 +631,9 @@ function ensure_build_node() {
     local name="${CLUSTER_NAME}-build"
     local node="k3d-${name}-0"
     local context="k3d-${CLUSTER_NAME}"
-    if ! k3d node list 2>/dev/null | grep -q "^${node}[[:space:]]"; then
+    # grep reads the whole listing: an early exit (-q) SIGPIPEs k3d, and
+    # pipefail reads that as "missing" (TestNoPipeIntoQuietGrepUnderPipefail).
+    if ! k3d node list 2>/dev/null | grep "^${node}[[:space:]]" >/dev/null; then
         info "Creating build node ${node} (${BUILD_NODE_CPUS} CPUs, ${BUILD_NODE_MEMORY})..."
         k3d node create "${name}" \
             --cluster "${CLUSTER_NAME}" \
@@ -1761,6 +1842,7 @@ function main() {
     K3D_SERVERS="$(cap_param servers "${MEMQL_K3D_SERVERS:-1}")"
     K3D_AGENTS="$(cap_param agents "${MEMQL_K3D_AGENTS:-0}")"
     SKIP_BUILD_NODE="$(cap_flag no-build-node)"
+    SWITCH="$(cap_flag switch)"
     BUILD_NODE_CPUS="$(cap_param build-node-cpus "")"
     BUILD_NODE_MEMORY="$(cap_param build-node-memory "")"
     ARGOCD_TIMEOUT="$(cap_param argocd-timeout "${MEMQL_K3D_ARGOCD_TIMEOUT:-300}")"
@@ -1844,6 +1926,9 @@ function main() {
     # Before anything exists: a build-node size the host cannot honour is
     # refused here, not after the cluster is half made.
     resolve_build_node
+    # Before the cluster is created or started: another running stack holds the
+    # ports it would publish (memql#6207).
+    refuse_another_running_stack
     create_cluster
     # Outside create_cluster: an existing installation needs the same repair.
     info "Reconciling local ingress for long-lived streams."

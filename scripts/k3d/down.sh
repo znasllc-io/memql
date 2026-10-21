@@ -46,7 +46,7 @@ function check_prerequisites() {
 #=============================================================================
 
 function cluster_exists() {
-    k3d cluster list 2>/dev/null | grep -q "^${1}[[:space:]]"
+    k3d cluster list 2>/dev/null | grep "^${1}[[:space:]]" >/dev/null
 }
 
 # delete_cluster <cluster> -- returns 0 if it deleted, 1 if it was already absent.

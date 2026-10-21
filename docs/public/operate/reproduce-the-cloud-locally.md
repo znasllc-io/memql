@@ -186,7 +186,8 @@ make up-refresh
 `make up` is the full fresh bring-up (`scripts/k3d/bringup.sh`); it does the
 following in order:
 
-1. Creates a k3d cluster (default name `memql`).
+1. Creates the k3d cluster (default name `memql`), or starts it when it
+   exists but is stopped.
 2. Installs ArgoCD v2.13.3 (same version as the cloud) via
    `kubectl apply -k deploy/argocd/bootstrap`.
 3. Seeds k8s Secrets (`memql-secrets`, `memql-db-app-creds`) via
@@ -202,6 +203,21 @@ following in order:
 (`make down PURGE=1`), so the in-cluster Postgres is wiped and the
 environment repaves from scratch. It is idempotent and honors the same
 `SERVERS`/`AGENTS`/`REVISION` overrides as `make up`.
+
+### One local stack at a time
+
+Every local cluster publishes the same host ports (443, 80, 5432, and a
+downstream stack's extra ports), so only one runs at a time. `make up` checks
+before it creates or starts anything: when another k3d cluster's load balancer
+is running, it refuses and names that cluster and the domain it serves. Stop
+the other one first with `k3d cluster stop <name>` (it keeps its state) or
+`make down` in its repo, or pass `SWITCH=1` to have `make up` stop it for you.
+A downstream repo's `make up SWITCH=1` reaches the engine bring-up unchanged.
+
+A cluster that exists but is stopped is started again rather than skipped, and
+`make up` points kubectl at the cluster it is bringing up whether it created,
+started or found it, so a re-run never applies into whichever cluster kubectl
+was pointed at before.
 
 ### The pipeline build node
 
