@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"mime"
 	"net/http"
 	"os"
 	"strconv"
@@ -1531,9 +1532,25 @@ func (h *ArtifactHandler) serveRenderedBody(w http.ResponseWriter, r *http.Reque
 func writeDownload(w http.ResponseWriter, mimeType, fileName string, data []byte) {
 	w.Header().Set("Content-Type", mimeType)
 	w.Header().Set("Content-Length", strconv.Itoa(len(data)))
-	w.Header().Set("Content-Disposition", fmt.Sprintf("attachment; filename=%q", fileName))
+	w.Header().Set("Content-Disposition", downloadDisposition(fileName))
 	w.WriteHeader(http.StatusOK)
 	_, _ = w.Write(data)
+}
+
+func downloadDisposition(name string) string {
+	ascii := strings.Map(func(r rune) rune {
+		if r > 126 || r < 32 {
+			return '_'
+		}
+		return r
+	}, name)
+	header := fmt.Sprintf("attachment; filename=%q", ascii)
+	if ascii != name {
+		// RFC 8187 keeps Unicode intact; the ASCII parameter supports clients
+		// that only understand the original disposition filename form.
+		header += "; " + strings.TrimPrefix(mime.FormatMediaType("attachment", map[string]string{"filename": name}), "attachment; ")
+	}
+	return header
 }
 
 // ---------------------------------------------------------------------------

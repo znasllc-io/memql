@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"mime"
 	"mime/multipart"
 	"net/http"
 	"net/http/httptest"
@@ -937,6 +938,21 @@ func TestArtifactContentStreamsAFileWithItsHeaders(t *testing.T) {
 	}
 	if loc := rec.Header().Get("Location"); loc != "" {
 		t.Errorf("Location = %q; the export route must never redirect to storage", loc)
+	}
+}
+
+func TestDownloadDispositionPreservesUnicodeAndCompoundExtension(t *testing.T) {
+	for _, name := range []string{"résumé.tar.gz", "图像.png", "report.zip", `a"b.pdf`} {
+		value := downloadDisposition(name)
+		_, params, err := mime.ParseMediaType(value)
+		if err != nil || params["filename"] != name {
+			t.Fatalf("filename changed: %q -> %q (%v)", name, value, err)
+		}
+		for _, r := range value {
+			if r > 126 || r < 32 {
+				t.Fatalf("non-ASCII header %q", value)
+			}
+		}
 	}
 }
 

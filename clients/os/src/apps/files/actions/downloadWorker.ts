@@ -19,7 +19,10 @@ import { downloadMetadata } from "./downloadMetadata";
 // The worker file itself is `public/download-sw.js` -- plain JS, copied to
 // the bundle root, registered lazily the first time a download wants it.
 
-export const DOWNLOAD_SW_PATH = "download-sw.js";
+// Changing the script URL makes register wait for this implementation's
+// installation. With an unchanged URL it can return the old registration
+// before the background update even appears as `installing`.
+export const DOWNLOAD_SW_PATH = "download-sw.js?v=2";
 export const DOWNLOAD_SW_SCOPE = "__memql-dl/";
 
 interface PortLike {
@@ -57,6 +60,7 @@ export async function downloadWorkerRegistration(): Promise<ServiceWorkerRegistr
       : import.meta.env.BASE_URL + "/";
     const registration = await navigator.serviceWorker.register(base + DOWNLOAD_SW_PATH, {
       scope: base + DOWNLOAD_SW_SCOPE,
+      updateViaCache: "none",
     });
     // The OS page is outside the download scope, so serviceWorker.ready
     // would wait forever for a worker controlling this page. Wait for this
