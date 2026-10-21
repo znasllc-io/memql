@@ -111,6 +111,38 @@ type delegatedEngine struct {
 	sourceResult string
 }
 
+// Production goes through engineAdapter because MemQLEngine.Tools returns a
+// concrete registry. Direct Engine fakes cannot catch a missing adapter method.
+type concreteDelegatedFixture struct {
+	*memql.MemQLEngine
+	delegate *delegatedEngine
+}
+
+func (e *concreteDelegatedFixture) Execute(ctx context.Context, query string) (*memql.ExecuteResult, error) {
+	return e.delegate.Execute(ctx, query)
+}
+func (e *concreteDelegatedFixture) ExecuteToolByName(ctx context.Context, name string, args map[string]any) (string, error) {
+	return e.delegate.ExecuteToolByName(ctx, name, args)
+}
+func (e *concreteDelegatedFixture) RecordDelegatedToolSource(ctx context.Context, name string, args map[string]any, result string) error {
+	return e.delegate.RecordDelegatedToolSource(ctx, name, args, result)
+}
+
+func TestDeployedEngineAdapterPreservesDelegatedSourceReceipts(t *testing.T) {
+	fixture := delegatedFixture()
+	eng := asEngine(&concreteDelegatedFixture{delegate: fixture})
+	if _, ok := eng.(engineAdapter); !ok {
+		t.Fatalf("test bypassed the deployed engine adapter: %T", eng)
+	}
+	result := callDelegatedTool(asPerson("reader"), eng, "s", "gaTool", map[string]any{"runId": "forged"})
+	if isError(result) {
+		t.Fatal(resultText(result))
+	}
+	if fixture.sourceRun.RunId != "run-1" || fixture.sourceArgs["runId"] != "run-1" || fixture.sourceResult == "" {
+		t.Fatalf("deployed adapter dropped the executed source receipt: run=%+v args=%v result=%q", fixture.sourceRun, fixture.sourceArgs, fixture.sourceResult)
+	}
+}
+
 func (e *delegatedEngine) RecordDelegatedToolSource(ctx context.Context, _ string, args map[string]any, result string) error {
 	e.sourceRun, _ = common.RunFromContext(ctx)
 	e.sourceArgs, e.sourceResult = args, result

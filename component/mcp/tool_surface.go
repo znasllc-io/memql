@@ -819,6 +819,7 @@ type engineAdapter struct{ c concreteEngine }
 // concreteEngine is the method set of *memql.MemQLEngine the surface uses.
 type concreteEngine interface {
 	Tools() *memql.ToolRegistry
+	RecordDelegatedToolSource(context.Context, string, map[string]any, string) error
 	ToolListed(ctx context.Context, t *memql.Tool) bool
 	ExecuteToolByName(ctx context.Context, name string, args map[string]any) (string, error)
 	Execute(ctx context.Context, query string) (*memql.ExecuteResult, error)
@@ -839,6 +840,9 @@ type concreteEngine interface {
 var _ concreteEngine = (*memql.MemQLEngine)(nil)
 
 func (a engineAdapter) Tools() ToolLister { return a.c.Tools() }
+func (a engineAdapter) RecordDelegatedToolSource(ctx context.Context, name string, args map[string]any, result string) error {
+	return a.c.RecordDelegatedToolSource(ctx, name, args, result)
+}
 func (a engineAdapter) ToolListed(ctx context.Context, t *memql.Tool) bool {
 	return a.c.ToolListed(ctx, t)
 }
