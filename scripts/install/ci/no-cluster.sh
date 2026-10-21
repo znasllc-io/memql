@@ -8,6 +8,9 @@ set -euo pipefail
 : "${MEMQL_SHA:?exact source revision required}"
 [[ "$MEMQL_SHA" =~ ^[a-f0-9]{40}$ ]] || exit 2
 export MEMQL_INSTALL_ROOT=/workspace MEMQL_INSTALL_EVIDENCE_DIR=/evidence
+# The disposable installer fixture has no inference GPU; hardware refusal is
+# covered by the requirements tests, while these lanes exercise installation.
+export MEMQL_ALLOW_BELOW_MINIMUM=1
 export MEMQL_INSTALL_TAG="e2e-${MEMQL_SHA:0:12}"
 cd "$MEMQL_INSTALL_ROOT"
 git -c user.email=ci@example.com -c user.name=ci tag "$MEMQL_INSTALL_TAG"

@@ -55,7 +55,15 @@ import { ownerAccountExistsFrom } from "../install/enrolment.js";
 import type { ExecEvent, ExecutionReport } from "../install/executor.js";
 import { graphDocumentPath, installGraphPath, loadGraphFile, type Graph, type GraphKind } from "../install/graph.js";
 import { completeInstallHandoff } from "../install/handoff.js";
-import { platformRefuseEvents, refuseUnsupportedPlatform } from "../install/platform.js";
+import {
+  platformRefuseEvents,
+  probeThisComputer,
+  refuseUnsupportedPlatform,
+  REQUIREMENTS_SHORTFALL_TITLE,
+  requirementsShortfallDetail,
+  type ComputerProbe,
+  type RequirementsReport,
+} from "../install/platform.js";
 import {
   checkoutPinFor,
   deleteReceipt,
@@ -290,6 +298,11 @@ export interface AddClusterDeps {
   /** A modal confirmation; `window.showWarningMessage` when absent (memql#4615). */
   confirmDestructive?: (prompt: DestructiveConfirmation) => Promise<boolean>;
   /**
+   * Says this computer is below the minimum requirements, when Install is
+   * chosen on one; a modal `window.showWarningMessage` when absent.
+   */
+  showRequirementsShortfall?: (report: RequirementsReport) => Promise<void>;
+  /**
    * The k3d clusters on this computer, by name; none when absent.
    *
    * WHAT MAKES A CLUSTER WITH NO INSTALL RECORD UNINSTALLABLE. A cluster built
@@ -341,6 +354,8 @@ export class AddClusterPanel {
   private requested: AddClusterAction | undefined;
   /** detect.sh's platform answer, asked once: a computer does not change platform under a panel. */
   private platform: "supported" | "unsupported" | undefined;
+  /** What the same detect run said about the minimum requirements, when it said. */
+  private requirements: RequirementsReport | undefined;
 
   // ---- the install / repair form ----
   private versionChoices: readonly string[] = [];
@@ -588,14 +603,21 @@ export class AddClusterPanel {
     // The platform is asked only where Install would be offered: every other
     // verdict means something is already here.
     if (verdict === "absent" && this.platform === undefined) {
-      const refused = await refuseUnsupportedPlatform(
+      const probe = await probeThisComputer(
         { ...this.platformSession(), timeoutMs: PLATFORM_CHECK_TIMEOUT_MS },
         this.hooks({}),
-      ).catch(() => undefined);
+      ).catch((): ComputerProbe => ({}));
+      const refused = probe.refused;
       this.platform = refused === undefined ? "supported" : "unsupported";
+      this.requirements = probe.requirements;
       if (refused !== undefined) {
         this.deps.diagnostics.appendLine(
           `this computer is not supported for a local cluster: ${refused.outcomes[0]?.reason ?? ""}`,
+        );
+      }
+      if (probe.requirements?.meetsMinimum === false) {
+        this.deps.diagnostics.appendLine(
+          `this computer is below the minimum requirements: ${probe.requirements.shortfalls.join(" ")}`,
         );
       }
     }
@@ -611,6 +633,9 @@ export class AddClusterPanel {
         ownerSetup,
         hasReceipt: result.evidence.receipt,
         platform: verdict === "absent" ? (this.platform ?? "unknown") : "unknown",
+        ...(verdict === "absent" && this.requirements !== undefined
+          ? { requirements: { meetsMinimum: this.requirements.meetsMinimum } }
+          : {}),
         signedIn: clusterName !== undefined && (this.deps.isSignedIn?.(clusterName) ?? false),
       },
       ...(clusterName === undefined ? {} : { clusterName }),
@@ -837,6 +862,12 @@ export class AddClusterPanel {
     switch (act) {
       case "install":
       case "repair": {
+        // Below the minimum requirements an install would be refused a few
+        // seconds in, after the password; say so now, and open nothing.
+        if (act === "install" && this.requirements?.meetsMinimum === false) {
+          void this.explainShortfall(this.requirements);
+          return;
+        }
         this.setFlow(act);
         this.state.chooseAction(act);
         this.passwordProblem = undefined;
@@ -1739,6 +1770,21 @@ export class AddClusterPanel {
     this.state.back();
     this.uninstall.reset();
     this.toLanding();
+  }
+
+  /** The minimum-requirements modal, or whatever a test injected. */
+  private async explainShortfall(report: RequirementsReport): Promise<void> {
+    const inject = this.deps.showRequirementsShortfall;
+    if (inject !== undefined) return inject(report);
+    const view: vscode.MessageItem = { title: "View requirements" };
+    const close: vscode.MessageItem = { title: "Close", isCloseAffordance: true };
+    const chosen = await vscode.window.showWarningMessage<vscode.MessageItem>(
+      REQUIREMENTS_SHORTFALL_TITLE,
+      { modal: true, detail: requirementsShortfallDetail(report) },
+      view,
+      close,
+    );
+    if (chosen === view && report.docs !== "") await vscode.env.openExternal(vscode.Uri.parse(report.docs));
   }
 
   /** The modal, or whatever a test injected. Dismissal means KEEP (isCloseAffordance). */

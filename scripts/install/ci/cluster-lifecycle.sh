@@ -16,6 +16,9 @@ set -euo pipefail
 case "$MEMQL_INSTALL_LEG" in round-trip|repair|upgrade|from-source|pipelines) ;; *) exit 2;; esac
 export REVISION="$MEMQL_SHA" LEG="$MEMQL_INSTALL_LEG" DOMAIN=memql.localhost
 export MEMQL_INSTALL_ROOT=/workspace MEMQL_INSTALL_EVIDENCE_DIR=/evidence
+# The disposable installer fixture has no inference GPU; hardware refusal is
+# covered by the requirements tests, while these lanes exercise installation.
+export MEMQL_ALLOW_BELOW_MINIMUM=1
 export MEMQL_K3D_WORKLOAD_TIMEOUT=720s MEMQL_K3D_OPERATOR_TIMEOUT=480
 cd "$MEMQL_INSTALL_ROOT"
 export FROM_VERSION TO_VERSION

@@ -16,13 +16,29 @@
       }
     },
     {
+      "id": "requirements",
+      "script": "install.requirements",
+      "label": "Checking the hardware",
+      "description": "Measuring this computer against the minimum requirements: memory, processor, free disk and, on Linux, the GPU. A computer below them stops here, before anything is installed, unless it already runs a cluster.",
+      "readOnly": true,
+      "dependsOn": [
+        "detect"
+      ],
+      "elevation": "none",
+      "verify": {
+        "kind": "resultTrue",
+        "field": "result.ready"
+      }
+    },
+    {
       "id": "dockerAccess",
       "script": "install.dockerAccess",
       "label": "Checking Docker",
       "description": "Checking that Docker can run containers for you, before anything is installed.",
       "readOnly": true,
       "dependsOn": [
-        "detect"
+        "detect",
+        "requirements"
       ],
       "elevation": "none",
       "verify": {
@@ -180,7 +196,8 @@
       "label": "Checking AI access",
       "description": "Checking that this cluster's AI provider credential is accepted, before the cluster is built around it. Skipped when no federation ids were supplied: installing spends no AI credit, and providers are set up afterwards in MemQL OS.",
       "dependsOn": [
-        "detect"
+        "detect",
+        "requirements"
       ],
       "readOnly": true,
       "elevation": "none",

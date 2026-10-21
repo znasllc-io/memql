@@ -19,10 +19,19 @@
 #   - Docker                (k3d runs the cluster inside Docker)
 #   - k3d + kubectl         (the local k3d + ArgoCD cluster; `make up`)
 #
+# Reported last: how this machine measures against the minimum requirements
+# for running the whole cluster (scripts/lib/requirements.sh). Reported, not
+# enforced -- building and testing need far less, and `make up` is the step
+# that refuses.
+#
 # Per repo convention (CLAUDE.md): function-based structure. main()
 # at the bottom calls them in order.
 
 set -euo pipefail
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# shellcheck source=../lib/requirements.sh
+source "${SCRIPT_DIR}/../lib/requirements.sh"
 
 readonly REQUIRED_GO_VERSION="1.26.1"
 # Pinning protoc-plugin versions keeps the generated *.pb.go stable
@@ -214,6 +223,21 @@ EOF
     fi
 }
 
+# check_requirements -- print this machine against the minimum requirements
+# `make up` holds it to. Never fails the dependency check.
+function check_requirements() {
+    local line
+    requirements_evaluate "${HOME:-/}"
+    echo "[deps] This machine against the minimum requirements for running the cluster:"
+    while IFS= read -r line; do
+        [[ -n "$line" ]] && echo "  ${line}"
+    done <<< "$REQ_SUMMARY"
+    if [[ "$REQ_MEETS_MINIMUM" != "true" ]]; then
+        echo "[deps] WARNING: below the minimum. 'make up' will refuse to create a cluster here"
+        echo "       (override: make up ALLOW_BELOW_MINIMUM=1). See ${REQ_DOCS_URL}"
+    fi
+}
+
 function summary() {
     cat <<EOF
 
@@ -236,6 +260,7 @@ function main() {
     check_kubectl
     install_protoc
     install_protoc_go_plugins
+    check_requirements
     summary
 }
 

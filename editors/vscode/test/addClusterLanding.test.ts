@@ -38,6 +38,18 @@ test("an unsupported computer: one sentence, and connect", () => {
   assert.equal(view.line, "This computer can't run a local MemQL cluster.");
 });
 
+test("below the minimum requirements: Install stays, under one sentence saying so", () => {
+  const view = landingView(facts({ requirements: { meetsMinimum: false } }));
+  assert.deepEqual(view.choices.map((c) => c.act), ["install", "connect"]);
+  assert.equal(view.line, "This computer doesn't meet the minimum requirements for a local MemQL cluster.");
+  assert.equal(view.tone, "warn");
+  // Meeting the minimum, or detect not saying, changes nothing.
+  for (const f of [facts({ requirements: { meetsMinimum: true } }), facts({})]) {
+    assert.equal(landingView(f).line, undefined);
+    assert.equal(landingView(f).tone, "idle");
+  }
+});
+
 test("installed and listed: sign in, repair, uninstall -- and connect to another", () => {
   assert.deepEqual(acts(facts({ verdict: "installed-healthy", registered: true, hasReceipt: true })), [
     "signIn",

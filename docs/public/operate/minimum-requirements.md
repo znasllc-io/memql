@@ -114,6 +114,26 @@ database, object storage and pipeline cache grow with use.
 Ask voice is the only realtime voice surface in the cluster: two LiveKit
 replicas and a Redis. There is no telephony (SIP) component.
 
+### Checked before installing
+
+These figures are checked before anything changes the machine:
+
+- **The VS Code wizard** checks when the Add a cluster page opens. On a machine
+  below the minimum, the page says so, and **Install MemQL on this computer**
+  lists what falls short instead of starting.
+- **The install** runs **Checking the hardware** straight after **Checking
+  this computer**, and stops there on a machine below the minimum.
+- **`make up`** refuses to create a cluster below the minimum and names each
+  shortfall, and `make up-refresh` refuses before it deletes the old cluster.
+  `make up ALLOW_BELOW_MINIMUM=1` goes ahead with a warning. The CI install
+  lanes set `MEMQL_ALLOW_BELOW_MINIMUM=1`, because hosted runners have no GPU.
+- **`scripts/dev/install-deps.sh`** prints the same verdict.
+
+A machine that already runs a cluster is warned, never refused, so a repair
+still works. A figure the machine does not report, such as Docker's memory
+while Docker is stopped, is listed as not measured and stops nothing. The
+figures and the checks live in one place, `scripts/lib/requirements.sh`.
+
 ---
 
 ## Beyond one machine
