@@ -1,7 +1,8 @@
+import { usePageScroll } from "../../../kit/pageNavigation";
 import { RecordListSkeleton } from "../../../kit/RecordListSkeleton";
 import { LocalTabs } from "../../../kit/LocalTabs";
 import { useMemo, useState } from "react";
-import { AutoRefresh, useFleetScroll } from "../FleetControls";
+import { AutoRefresh } from "../FleetControls";
 import { PageHelp } from "../../../kit/pageHelp";
 
 import {
@@ -103,7 +104,7 @@ export function ModelsSection({ onHome }: { onHome?: () => void } = {}) {
   // note was written to avoid. Two lists that answer different questions get
   // two controls, or one control whose every chip governs both.
   const [view, setView] = useState<"available" | "catalog" | "sources">("available");
-  const root = useFleetScroll(view);
+  const root = usePageScroll(view);
   const [category, setCategory] = useState("");
   const [runtime, setRuntime] = useState("");
   const [lackingOnly, setLackingOnly] = useState(false);

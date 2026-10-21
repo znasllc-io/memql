@@ -217,7 +217,7 @@ export function SourceView({
     <div className="os-deploy-pane deployable-source-view" data-os-page-context={JSON.stringify({ page: "Source", packageId: pkg.id, source: label })}>
       <div className="os-deploy-scroll">
         <Panel label={`Source ${label}`}>
-          <Head title={label} breadcrumbs={[{ label: backLabel, onSelect: onBack }, { label }]} back={{ label: backLabel, onSelect: onBack }}>{can.sources && mine && pkg.sourceKind === "repo" && !pkg.sourceRemoved ? <RemoveSource pkg={pkg} onRemoved={onRemoved} /> : null}</Head>
+          <Head navigationKey={`source:${pkg.id}`} title={label} breadcrumbs={[{ label: backLabel, onSelect: onBack }, { label }]} back={{ label: backLabel, onSelect: onBack }}>{can.sources && mine && pkg.sourceKind === "repo" && !pkg.sourceRemoved ? <RemoveSource pkg={pkg} onRemoved={onRemoved} /> : null}</Head>
 
           <Caption>
             {pkg.sourceKind === "repo" ? provenance.provenance : "Shared ZIP package"}

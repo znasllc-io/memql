@@ -303,7 +303,7 @@ function InvitedPersonPage({
   return (
     <div className="os-action-pane">
       <div className="os-action-body os-app-stack">
-        <Head title={email || "Invited"} meta="Invited" back={{ label: "People", onSelect: onBack }} />
+        <Head navigationKey={"invitation-sent"} title={email || "Invited"} meta="Invited" back={{ label: "People", onSelect: onBack }} />
 
         {result === null ? null : (
           <Notice

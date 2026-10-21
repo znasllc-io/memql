@@ -61,7 +61,7 @@ export function SessionPage({
 
   return (
     <div className="os-fleet os-fleet-session" data-os-page-context={JSON.stringify({ page: "App session", sessionId, app: session?.app, status: session?.status })}>
-      <Head title={session === null ? "Run" : `${appLabel(session.app)} -- ${session.kind}`} back={{ label: "Activity", onSelect: onBack }}>
+      <Head navigationKey={`session:${sessionId}`} title={session === null ? "Run" : `${appLabel(session.app)} -- ${session.kind}`} back={{ label: "Activity", onSelect: onBack }}>
         <AutoRefresh enabled={feedIsBehind(state, error)} busy={loading} onRefresh={reread} />
       </Head>
 

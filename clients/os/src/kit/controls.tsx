@@ -1135,7 +1135,7 @@ export function Panel({ children, label }: { children: ReactNode; label?: string
   );
 }
 
-export function Head({ title, meta, children, breadcrumbs, back, navigation = true }: {
+export function Head({ title, meta, children, breadcrumbs, back, navigation = true, navigationKey }: {
   title: string;
   /** A quiet fact beside the title -- a count, a scope note. Muted, tabular. */
   meta?: ReactNode;
@@ -1144,8 +1144,10 @@ export function Head({ title, meta, children, breadcrumbs, back, navigation = tr
   back?: { label: string; onSelect: () => void };
   /** Secondary headings leave window return navigation with the page heading. */
   navigation?: boolean;
+  /** Record/view identity, independent of an editable or duplicate title. */
+  navigationKey?: string;
 }) {
-  const { root, trail, hosted } = usePageNavigation(navigation, { title, breadcrumbs, back });
+  const { root, trail, hosted } = usePageNavigation(navigation, { title, breadcrumbs, back, key: navigationKey });
   // INSIDE A WINDOW the frame draws the one trail row (`kit/TrailRow`), back
   // button first, and this heading only PUBLISHES where it is. It draws no
   // breadcrumbs and no back arrow of its own -- which is what makes a second

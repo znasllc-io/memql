@@ -591,6 +591,25 @@ inspector owns the page trail. Section breadcrumb jumps consume the intervening
 history; peer tab navigation starts a fresh path. Existing forms retain their
 own cancellation and completion callbacks through the shared back prop.
 
+### Returning to the same position
+
+Back, breadcrumbs and section navigation restore the position last read in that
+window, including independently scrolling panes. A first visit starts at the top.
+The shared `PageNavigationProvider` owns this behavior on desktop and phone;
+apps must not implement scroll restoration in effect cleanup or reset scrolling
+on return. Capture happens while the outgoing content is still visible, before
+replacing it can clamp the scroll position. A short loading state retains the
+saved target until content arrives. Scrolling or keyboard navigation gives control
+back to the person and cancels a pending restore. Restoration is immediate and
+never animates or moves focus.
+
+Give record headings a stable `Head navigationKey` when their names can change or
+repeat. A workspace with nested views sharing a heading declares its stable view
+identity through `usePageScroll`. Plain pages use their section and local trail.
+Independently reordered scrolling panes may declare `data-os-scroll-id`; dialogs,
+inputs and surfaces with `data-os-scroll-ignore` retain their own scrolling rules.
+Positions are isolated per window, bounded in memory and discarded on close.
+
 ### One wizard for adding
 
 Pressing an Add control runs a wizard (`kit` `Wizard`), whatever is being

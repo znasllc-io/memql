@@ -5,7 +5,7 @@ import { TrailRow } from "../kit/TrailRow";
 import { PageContent } from "../kit/PageContent";
 import { WindowSearchContext, useWindowSearchHost } from "../kit/windowSearch";
 import { useDraggable } from "@dnd-kit/core";
-import { useEffect, useLayoutEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { X, Search, ListFilter, Maximize, Maximize2, Minimize2, Minus, Settings2 } from "lucide-react";
 
 import { useDrivingCue } from "../ask/useDrivingCue";
@@ -83,18 +83,12 @@ export function WindowFrame({
     } else { setSearchQuery(""); searchDialog.current?.showModal(); }
   };
   const content = useRef<HTMLDivElement>(null);
-  const scroll = useRef(new Map<string, number>());
   useEffect(() => {
     if (!hidden) return;
     setMenu(null);
     if (searchDialog.current?.open) searchDialog.current.close();
     content.current?.querySelectorAll<HTMLDialogElement>("dialog[open]").forEach(dialog => dialog.close());
   }, [hidden]);
-  useLayoutEffect(() => {
-    const node = content.current;
-    if (node) node.scrollTop = scroll.current.get(win.sectionId) ?? 0;
-    return () => { if (node) scroll.current.set(win.sectionId, node.scrollTop); };
-  }, [win.sectionId]);
   const { openAsk } = useAsk();
   const askActivity = useDrivingCue(manifest.id);
   const driving = askActivity ? askActivity.phase === "completed" ? "completed" : "running" : undefined;
@@ -272,7 +266,7 @@ export function WindowFrame({
             The provider spans both so the row can hear the heading that
             publishes from inside the app body; it renders no element of its
             own, so the body's column layout is what it was plus a row. */}
-        <PageNavigationProvider root={content} trail={(win.sectionTrail ?? []).map(id => ({ label: sections.find(section => section.id === id)?.name ?? id, onSelect: () => actions.navigateSection(win.id, id, "back") }))}>
+        <PageNavigationProvider root={content} scope={current?.id ?? ""} active={!hidden} trail={(win.sectionTrail ?? []).map(id => ({ label: sections.find(section => section.id === id)?.name ?? id, onSelect: () => actions.navigateSection(win.id, id, "back") }))}>
         {destinations.length > 1 ? (
           <nav className="os-window-nav" aria-label={`${manifest.name} sections`}>
             {destinations.map((section, index) => (

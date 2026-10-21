@@ -136,7 +136,7 @@ export function GroupPage({
   return (
     <div className="os-action-pane">
       <div className="os-action-body os-app-stack">
-        <Head title={group.name} meta={group.kind === "account" ? "A client's group" : undefined} back={{ label: "Groups", onSelect: onBack }}>
+        <Head navigationKey={`group:${group.id}`} title={group.name} meta={group.kind === "account" ? "A client's group" : undefined} back={{ label: "Groups", onSelect: onBack }}>
 
           {account === null ? null : <AccountChip name={accountName(account)} />}
           {archived || !canUpdate ? null : (

@@ -199,7 +199,7 @@ export function RouteModePage({
     <div className="os-deploy-pane fleet-route-page fleet-route-mode-page">
       <div className="os-deploy-scroll">
         <ActivityTarget target={`fleet:routes:${route.id}`}>
-          <Head title={shown.name.trim() || route.name} breadcrumbs={[{ label: "Routes", onSelect: onBack }, { label: route.name }]} back={{ label: "Routes", onSelect: onBack }}>
+          <Head navigationKey={`route:${route.id}`} title={shown.name.trim() || route.name} breadcrumbs={[{ label: "Routes", onSelect: onBack }, { label: route.name }]} back={{ label: "Routes", onSelect: onBack }}>
             <PageHelp title="How a route works">
               <p>Each job tries its sources in order and takes the first one that can serve right now. A source that cannot serve stays in the job and is used again when it can.</p>
               <p>Search and memory always uses the cluster's embedding model, so everything stays in one index. Images and voice follow Auto. Vendors bill per call.</p>

@@ -113,7 +113,7 @@ export function SenderPage({ sender, organization, writes, onBack }: {
       data-os-page-context={JSON.stringify({ page: "Sender", name: senderLabel(sender), id: sender.id })}
     >
       <div className="os-action-body os-app-stack">
-        <Head title={senderLabel(sender)} back={{ label: "Settings", onSelect: onBack }} />
+        <Head navigationKey={`sender:${sender.id}`} title={senderLabel(sender)} back={{ label: "Settings", onSelect: onBack }} />
 
         {editingNow ? (
           <Panel label="Edit sender">

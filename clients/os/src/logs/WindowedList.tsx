@@ -209,6 +209,7 @@ export function WindowedList<T>({
       ref={rootRef}
       id={id}
       className="os-vlist"
+      data-os-scroll-ignore
       role="grid"
       aria-label={label}
       aria-rowcount={rows.length}

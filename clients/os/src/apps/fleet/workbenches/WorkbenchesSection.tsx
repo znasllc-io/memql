@@ -1,6 +1,7 @@
+import { usePageScroll } from "../../../kit/pageNavigation";
 import { LocalTabs } from "../../../kit/LocalTabs";
 import { useMemo, useState } from "react";
-import { AutoRefresh, useFleetScroll } from "../FleetControls";
+import { AutoRefresh } from "../FleetControls";
 import { PageHelp } from "../../../kit/pageHelp";
 import type { Row } from "@znasllc-io/memql-sdk-core/client";
 
@@ -33,7 +34,7 @@ import { useWorkbenches } from "./useWorkbenches";
 export function WorkbenchesSection() {
   const state = useWorkbenches();
   const [tab, setTab] = useState<"workspaces" | "replicas">("workspaces");
-  const root = useFleetScroll(tab);
+  const root = usePageScroll(tab);
   const [showReleased, setShowReleased] = useState(false);
   const now = useNow(30_000);
 

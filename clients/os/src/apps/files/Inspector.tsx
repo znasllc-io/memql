@@ -279,7 +279,7 @@ export function Inspector({
   return (
     <section className="os-action-pane os-file-detail" aria-label="File details" data-os-page-context={JSON.stringify({ page: "File details", fileId: row.id, name, kind: row.kind })}>
       <div className="os-action-body os-file-detail-body">
-      <Head title={name} breadcrumbs={breadcrumbs} back={{label: backLabel, onSelect: onClose}} />
+      <Head navigationKey={`artifact:${row.id}`} title={name} breadcrumbs={breadcrumbs} back={{label: backLabel, onSelect: onClose}} />
 
       {uploadUnavailable ? <Notice tone="error" sentence="This upload did not finish." next="Upload the original file again from Files." /> : null}
 

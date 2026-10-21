@@ -70,7 +70,7 @@ export function SignupFormPage({ audience, feeds, signupForms, sites, binding, o
     if (id === "toggle") void save(true);
   }
   const specs = signupFormActs(row, editing).filter(a => a.id !== "save" || known && (!templateId || !!senderIdentityId) && consentText.trim().length >= 10 && (audience.confirmation !== "required" || !templateId));
-  return <div className="os-action-pane"><div className="os-action-body os-app-stack"><Head title={name} back={{ label: audience.name, onSelect: onBack }} />
+  return <div className="os-action-pane"><div className="os-action-body os-app-stack"><Head navigationKey={`signup:${text(row, "id")}`} title={name} back={{ label: audience.name, onSelect: onBack }} />
     <Panel label="Signup form"><Facts><Fact label="Audience" value={audience.name} /><Fact label="Welcome email" value={text(row, "templateId") ? templates.find(t => t.id === row.templateId)?.name || "Unavailable template" : "No welcome email"} />{text(row, "templateId") ? <Fact label="Sender" value={senders.find(s => s.id === row.senderIdentityId)?.address as string || "Unavailable sender"} /> : null}<Fact label="Consent" value={text(row, "consentText")} /></Facts>
       {editing ? <><WelcomeField templates={templates} audience={audience} value={templateId} onChange={setTemplate} />{templateId ? <SenderField senders={senders} value={senderIdentityId} onChange={setSender} /> : null}<Field label="Consent"><Input id="email-form-consent" label="Consent" value={consentText} onChange={setConsent} /></Field></> : <><CopyField label="the signup form" value={newsletterFormHTML(row)} /><p className="os-caption">Add it to the deployable's page in the editor, with /newsletter/thank-you and /newsletter/problem pages for the replies.</p></>}
     </Panel>

@@ -128,6 +128,11 @@ or client-visible session authority.
   loads this language, Supervised Visual Composition and the available
   `frontend-design` skill. Follow the [design and verification workflow](DESIGN.md#applying-them),
   including the owner's minimal-interface preference and real-browser review.
+- **Return positions**: shared window navigation restores each page and nested
+  scroller on Back, breadcrumb and section navigation, including delayed reads.
+  Use stable `Head navigationKey` values for record pages and `usePageScroll`
+  for workspace view identities; never add app-specific scroll cleanup. See
+  [the interaction rule](DESIGN.md#returning-to-the-same-position).
 - **Loading and nested navigation**: every app uses content-shaped, text-free
   skeletons for missing content, keeping accessible status labels off screen.
   Use `RecordListSkeleton`, `ContentSkeleton`, or `InlineSkeleton`; preserve

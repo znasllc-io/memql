@@ -425,3 +425,10 @@ active tests, `pending` holds the list read, and `error` exercises Retry. End
 test removes the fixture session; Start deliberately refuses. This fixture
 creates no identities, credentials or network writes. Check 390px and desktop
 widths before live acceptance.
+
+Navigation scroll: `/navigation-scroll.html?mode=light|dark&check=1` exercises
+the shared provider in two independent windows with real browser layout. It
+checks short detail pages, Back, breadcrumbs, section changes, delayed loading,
+and user cancellation of pending restoration. The document title reports the
+result and `#scroll-checks` contains each assertion. Run at desktop/narrow widths
+and with reduced motion. The fixture uses synthetic data and no cluster calls.

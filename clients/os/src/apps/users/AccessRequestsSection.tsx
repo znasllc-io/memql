@@ -46,7 +46,7 @@ export function AccessRequestsSection({ catalog, viewerRole, canReview }: { cata
   };
   if (selected) return <div className="os-action-pane">
     <div className="os-action-body os-app-stack">
-      <Head title={text(selected, "name") || text(selected, "email")} back={{ label: "Access requests", onSelect: () => select(null) }} />
+      <Head navigationKey={`request:${text(selected, "id")}`} title={text(selected, "name") || text(selected, "email")} back={{ label: "Access requests", onSelect: () => select(null) }} />
       <Caption>{text(selected, "email")}</Caption>
       {text(selected, "additionalContext") ? <p>{text(selected, "additionalContext")}</p> : null}
       {result ? <>

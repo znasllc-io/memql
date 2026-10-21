@@ -206,7 +206,7 @@ export function RuleFieldsPage({
     <div className="os-deploy-pane fleet-rule-page">
       <div className="os-deploy-scroll">
         <ActivityTarget target={seed ? `fleet:rule:${seed.name}` : "fleet:rule:draft"}>
-          <Head title={title} breadcrumbs={[{ label: "Rules", onSelect: onBack }, { label: title }]} back={{ label: "Rules", onSelect: onBack }} />
+          <Head navigationKey={`rule:${seed?.name ?? "new"}`} title={title} breadcrumbs={[{ label: "Rules", onSelect: onBack }, { label: title }]} back={{ label: "Rules", onSelect: onBack }} />
           <div className="fleet-rule-said">
             <RuleSentence rule={draft} />
           </div>

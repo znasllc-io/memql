@@ -1,3 +1,4 @@
+import { usePageScroll } from "../../kit/pageNavigation";
 import { machineAppAvailability } from "./machines/features";
 import { LocalTabs } from "../../kit/LocalTabs";
 import { RecordListSkeleton } from "../../kit/RecordListSkeleton";
@@ -14,7 +15,7 @@ import { PageHelp } from "../../kit/pageHelp";
 import type { PageTrail } from "../../kit/pageNavigation";
 import { useLiveView } from "../../live/liveView";
 import { useMachines } from "../../live/machines";
-import { AutoRefresh, useFleetScroll } from "./FleetControls";
+import { AutoRefresh } from "./FleetControls";
 import { AddMachinePage } from "./addMachine/AddMachinePage";
 import type { AddMachineFlow } from "./addMachine/useAddMachineFlow";
 import { MachineDetail, MachineAppsHelp } from "./machines/MachineDetail";
@@ -90,7 +91,7 @@ export function FleetWorkspace({ flow, showRevoked, selection, select, navigate,
     setVisited(previous => previous.some(item => item.machineId === machine.id && item.view === selection.view) ? previous : [...previous, { machineId: machine.id, view: selection.view }]);
   }, [machine?.id, selection.view]);
   const retained = machine && !visited.some(item => item.machineId === machine.id && item.view === selection.view) ? [...visited, { machineId: machine.id, view: selection.view }] : visited;
-  const scrollRoot = useFleetScroll(`${selection.machineId}:${selection.view}`);
+  const scrollRoot = usePageScroll(`${selection.machineId}:${selection.view}`);
   const behind = feedState === "degraded" || feedState === "disconnected";
   return (<>
     {flow.active ? <AddMachinePage flow={flow} onLeave={machineId => { if (machineId) select({ machineId, view: "equipment" }); }} /> : null}
@@ -106,7 +107,7 @@ export function FleetWorkspace({ flow, showRevoked, selection, select, navigate,
 
           NO MACHINE DROPDOWN. It existed because there was no list; there is
           one now, and two ways to pick a machine is one too many. */}
-      <Head title="Machines"
+      <Head navigationKey={`machine:${selection.machineId}:${selection.view}`} title="Machines"
         breadcrumbs={machine ? [{ label: "Machines", onSelect: toList }, { label: machineName(machine) }, { label: VIEW_NAMES.equipment }] : undefined}
         back={machine ? { label: "Machines", onSelect: toList } : undefined}
         navigation={selection.view === "equipment" || !machine}
@@ -136,7 +137,7 @@ export function FleetWorkspace({ flow, showRevoked, selection, select, navigate,
               return <div key={`${item.machineId}:${item.view}`} data-machine-view={item.view} hidden={!shown}>
                 {item.view === "equipment" ? <><MachineEquipment machine={retainedMachine} now={now} viewerId={access?.userId ?? ""} onInspect={view => view === "activity" ? showActivity(item.machineId) : select({ machineId: item.machineId, view })} />
                 <RecentActivity machineId={item.machineId} onActivity={() => showActivity(item.machineId)} onOpenActivity={id => showActivity(item.machineId, id)} /></> : <div className="fleet-inspector">
-                  {!["models", "activity"].includes(item.view) ? <Head title={VIEW_NAMES[item.view]} meta={item.view === "apps" ? listCount(snapshot, RUNNABLE_APPS.length) : undefined} breadcrumbs={[{ label: "Machines", onSelect: toList }, { label: machineName(retainedMachine), onSelect: () => select({ machineId: item.machineId, view: "equipment" }) }, { label: VIEW_NAMES[item.view] }]} back={{ label: machineName(retainedMachine), onSelect: () => select({ machineId: item.machineId, view: "equipment" }) }}>
+                  {!["models", "activity"].includes(item.view) ? <Head navigationKey={`machine:${item.machineId}:${item.view}`} title={VIEW_NAMES[item.view]} meta={item.view === "apps" ? listCount(snapshot, RUNNABLE_APPS.length) : undefined} breadcrumbs={[{ label: "Machines", onSelect: toList }, { label: machineName(retainedMachine), onSelect: () => select({ machineId: item.machineId, view: "equipment" }) }, { label: VIEW_NAMES[item.view] }]} back={{ label: machineName(retainedMachine), onSelect: () => select({ machineId: item.machineId, view: "equipment" }) }}>
                     {item.view === "apps" ? <MachineAppsHelp /> : null}
                     {item.view === "apps" || item.view === "activity" ? <IconButton label="App sessions" onClick={() => navigate("apps", { fromContent: true })}><ArrowUpRight size={16} aria-hidden /></IconButton> : null}
                   </Head> : null}

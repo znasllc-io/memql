@@ -87,7 +87,7 @@ export function RolePage({
   return (
     <div className="os-action-pane">
       <div className="os-action-body os-app-stack">
-        <Head title={role.name} meta={role.slug} back={{ label: "Roles", onSelect: onBack }} />
+        <Head navigationKey={`role:${role.id}`} title={role.name} meta={role.slug} back={{ label: "Roles", onSelect: onBack }} />
 
         <Panel label={`Where ${role.name} sits`}>
           <Subhead>The ladder</Subhead>

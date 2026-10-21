@@ -93,7 +93,7 @@ export function MachineActivity({ workerId, navigation, openId, onOpened }: { wo
   const item = selected ? items.find(row => row.id === selected.id || row.correlationId && row.correlationId === selected.correlationId) ?? selected : null;
   const back = () => setSelected(null);
   return <div className="fleet-machine-activity">
-    <Head title={item ? item.label : "Activity"} meta={!item && !loading && !behind ? items.length : undefined}
+    <Head navigationKey={`activity:${workerId}:${item?.id ?? "list"}`} title={item ? item.label : "Activity"} meta={!item && !loading && !behind ? items.length : undefined}
       breadcrumbs={[...(navigation?.breadcrumbs ?? []), { label: "Activity", ...(item ? { onSelect: back } : {}) }, ...(item ? [{ label: item.label }] : [])]}
       back={item ? { label: "Activity", onSelect: back } : navigation?.back}>
       <PageHelp title="Activity"><p>Model calls, app sessions and tool calls for this machine. Queued and active work appears first; completed work follows. Updates arrive automatically.</p><p>Older model calls, tool calls and app sessions remain available. Queue and running transitions are recorded from this update onward. Copy a detail using its copy icon.</p></PageHelp>

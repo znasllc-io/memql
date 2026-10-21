@@ -1,7 +1,8 @@
+import { usePageScroll } from "../../../kit/pageNavigation";
 import { ContentSkeleton } from "../../../kit/ContentSkeleton";
 import { LocalTabs } from "../../../kit/LocalTabs";
 import { useEffect, useState } from "react";
-import { AutoRefresh, useFleetScroll } from "../FleetControls";
+import { AutoRefresh } from "../FleetControls";
 import { PageHelp } from "../../../kit/pageHelp";
 
 import { Button, Check, Switch, EmptyState, Chip, Field, Head, Input, Notice, Panel, RecordRow, Select, Subhead } from "../../../kit";
@@ -46,7 +47,7 @@ export function AppsSection({ navigation }: { navigation?: { origin: "peer" | "c
   const now = useNow(30_000);
 
   const [view, setView] = useState<"sessions" | "delegation">("sessions");
-  const root = useFleetScroll(openSessionId || view);
+  const root = usePageScroll(openSessionId || view);
 
   return (
     <div ref={root} className="os-fleet">

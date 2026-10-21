@@ -558,7 +558,7 @@ function CampaignView({ campaign, feeds, recordFeeds, runs, runRows, onBack, onE
   return (
     <div className="os-action-pane" data-os-page-context={JSON.stringify({ page: "Campaign", name: campaignName(campaign), id: campaign.id })}>
       <div className="os-action-body os-app-stack">
-        <Head title={campaignName(campaign)} back={{ label: "Campaigns", onSelect: onBack }} />
+        <Head navigationKey={`campaign:${campaign.id}`} title={campaignName(campaign)} back={{ label: "Campaigns", onSelect: onBack }} />
         {/* Kept current while the page is seen: an import, a signup or a domain
             set up somewhere else changes what can be sent. */}
         <AutoRefresh onRefresh={sending.reload} busy={sending.state === "loading"} intervalMs={EMAIL_REFRESH_MS} />

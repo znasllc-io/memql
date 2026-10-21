@@ -56,7 +56,7 @@ export function EvaluationsSection() {
   const roles = setups.length ? Array.from(new Set(setups.flatMap((r) => r.setup.routes.map((route) => route.role)))) : ["reasoning"];
   return <div className="os-app-stack">
     <AutoRefresh onRefresh={reload} busy={busy} enabled={connection !== null} />
-    <Head title={selected?.title ?? "Evaluations"} meta={selected ? `Version ${selected.version}` : `Catalog ${catalog.version}`}
+    <Head navigationKey={`evaluation:${selected?.id ?? "list"}`} title={selected?.title ?? "Evaluations"} meta={selected ? `Version ${selected.version}` : `Catalog ${catalog.version}`}
       back={selected ? { label: "Evaluations", onSelect: () => select(null) } : undefined} />
     {error ? <Notice tone="error" sentence="Evaluation results could not be read." next={ready ? "Showing the last available reading; retrying automatically." : "No results have been read; retrying automatically."} detail={error} /> : null}
     {!ready && !error ? <Caption>{connection ? "Loading results…" : "Waiting for the cluster…"}</Caption> : null}

@@ -94,7 +94,7 @@ export function PhoneShell({ onSignOut }: { onSignOut: () => void }) {
       {!(current?.id === "cluster" && activeSection?.id === "readiness") ? <StorageWarning inline onReview={apps.some((app) => app.id === "cluster") ? () => { setStorageIntent({ id: "storage-warning", payload: { storageWarning: true } }); setCurrentAppId("cluster"); setSectionId("readiness"); } : undefined} /> : null}
       {current ? (
         <PageContent as="main" className="os-phone-app" ref={pageRoot}>
-          <PageNavigationProvider key={current.id} root={pageRoot} trail={[]}>
+          <PageNavigationProvider key={current.id} root={pageRoot} scope={activeSection?.id ?? ""} trail={[]}>
             {sections.length > 1 ? (
               <nav className="os-phone-sections" aria-label={`${current.name} sections`}>
                 {sections.filter((section) => !section.parent).map((section) => (

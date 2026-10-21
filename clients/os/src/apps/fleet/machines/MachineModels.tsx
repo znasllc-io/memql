@@ -108,7 +108,7 @@ export function MachineModels({ machine, navigation }: { machine: MachineRow; st
     ...(selected ? [{ label: selected }] : []),
   ];
   return <div className="fleet-machine-details fleet-models">
-    <Head title={title} meta={selected ? undefined : catalogOpen ? shown.length : installed.length}
+    <Head navigationKey={`models:${machine.id}:${selected ?? (catalogOpen ? "catalog" : "installed")}`} title={title} meta={selected ? undefined : catalogOpen ? shown.length : installed.length}
       breadcrumbs={breadcrumbs} back={selected ? { label: catalogOpen ? "Catalog" : "Models", onSelect: back } : catalogOpen ? { label: "Models", onSelect: toModels } : navigation?.back}>
       {catalogOpen && !selected ? <Refine label="Refine model catalog" search={search} onSearch={setSearch} placeholder="Find a model">
         <Select id="model-purpose-filter" label="Task" value={purpose} onChange={setPurpose}><option value="">All tasks</option>{MODEL_PURPOSES.map(([id,label]) => <option key={id} value={id}>{label}</option>)}</Select>

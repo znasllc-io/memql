@@ -37,7 +37,7 @@ export function UpdateBrowser({ query, connected, visible = true }: { query: Upd
   const current = selected ? release : source ? releases : publishers;
   const back = selected ? { label: source!.publisher, onSelect: () => { restore.current = selected.candidateId; selectRelease(null); } } : source ? { label: "Updates", onSelect: () => { restore.current = source.id; selectSource(null); setCursors([""]); } } : undefined;
   return <div className="os-cluster" ref={container}>
-    <Head title={selected ? "Release" : source ? source.publisher : "Updates"} back={back}>{available && !current.error ? <Button onClick={current.retry} busy={visible && !current.fresh}>Check again</Button> : null}</Head>
+    <Head navigationKey={`update:${source?.id ?? "sources"}:${selected?.candidateId ?? "releases"}`} title={selected ? "Release" : source ? source.publisher : "Updates"} back={back}>{available && !current.error ? <Button onClick={current.retry} busy={visible && !current.fresh}>Check again</Button> : null}</Head>
     {!available ? <Notice sentence="Disconnected. Update information will refresh when the cluster reconnects." /> : null}
     {current.error ? <Notice tone="error" sentence={current.error}><Button onClick={current.retry}>Try again</Button></Notice> : null}
     {current.value === null && available && !current.error ? selected ? <ContentSkeleton label="Verifying release" /> : <RecordListSkeleton label="Checking updates" /> : null}
