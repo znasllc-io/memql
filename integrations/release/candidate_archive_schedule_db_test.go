@@ -118,14 +118,23 @@ func TestCandidateArchiveScheduleEnforcesEnrollmentPolicyAndResumesOnAnotherHost
 	if result := sweep(i); result["inspected"] != float64(1) || result["archived"] != false || !library.pins[request.CandidateID] || provider.reads.Load() != before {
 		t.Fatal("DSL age policy was bypassed", result)
 	}
-	// Advance the catalog's age in this owned test database, then let a new
-	// host wrap the shared cursor. No in-process selection state is shared.
-	if _, err := db.Exec(`UPDATE release_catalog SET created_at=clock_timestamp()-interval '15 days' WHERE candidate_id=$1`, request.CandidateID); err != nil {
+	// A new host must honor the same 48-hour grace just before it expires.
+	// No in-process selection state is shared.
+	if _, err := db.Exec(`UPDATE release_catalog SET created_at=clock_timestamp()-interval '47 hours' WHERE candidate_id=$1`, request.CandidateID); err != nil {
 		t.Fatal(err)
 	}
 	other, _ := archiveScheduleHost(t, p, candidateTestDB(t), trust, auth.RoleOwner)
 	if result := sweep(other); result["inspected"] != float64(0) {
 		t.Fatal("cursor did not wrap", result)
+	}
+	if result := sweep(other); result["inspected"] != float64(1) || result["archived"] != false || !library.pins[request.CandidateID] || provider.reads.Load() != before {
+		t.Fatal("new host bypassed the remaining grace", result)
+	}
+	if _, err := db.Exec(`UPDATE release_catalog SET created_at=clock_timestamp()-interval '49 hours' WHERE candidate_id=$1`, request.CandidateID); err != nil {
+		t.Fatal(err)
+	}
+	if result := sweep(other); result["inspected"] != float64(0) {
+		t.Fatal("cursor did not wrap after grace", result)
 	}
 	if result := sweep(other); result["archived"] != true || library.pins[request.CandidateID] {
 		t.Fatal("new host did not finish the authorized archive", result)

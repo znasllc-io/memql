@@ -324,7 +324,7 @@ an installation needs for rollback.
 
 Owners can enable automatic duplicate-input archival with
 `releaseSetInputArchiveSchedule(enabled: true)`. The installed
-`releasePublishedInputRetentionPolicy` waits two weeks after catalog sealing.
+`releasePublishedInputRetentionPolicy` waits 48 hours after catalog sealing.
 An agent schedule admits at most one candidate per pass, using a durable lease
 and cursor shared by all replicas. It includes existing and future sealed
 candidates belonging to the enrolled owner. An interrupted pass resumes, and
