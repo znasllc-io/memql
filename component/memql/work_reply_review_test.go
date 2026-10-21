@@ -96,7 +96,7 @@ func TestReplyReviewReadsRecordedEvidenceOnAnotherReplica(t *testing.T) {
 		{Role: "tool", Name: "readStatus", ToolCallId: "status", Content: `{"status":"degraded","cause":null,"timezone":"America/Phoenix","source":"https://status.example.test"}`},
 	}
 	require.NoError(t, a.SaveWorkContinuation(ctx, read))
-	require.NoError(t, a.RecordDelegatedToolSource(WithActingAgentId(ctx, "coding-agent"), "workbenchHost", map[string]any{"action": "exec"}, `{"stdout":"Executed 12 tests; all passed","exitCode":0}`))
+	require.NoError(t, a.RecordDelegatedToolSource(WithActingAgentId(ctx, "coding-agent"), "workbenchHost", map[string]any{"action": "exec", "args": map[string]any{"cmd": strings.Repeat("LARGE_SCRIPT_INPUT", 900)}}, `{"stdout":"Executed 12 tests; all passed","exitCode":0}`))
 	rows, err := b.workReviewReplyBuiltin(ctx, draft, 0)
 	require.NoError(t, err)
 	require.Len(t, rows, 1)
@@ -107,6 +107,9 @@ func TestReplyReviewReadsRecordedEvidenceOnAnotherReplica(t *testing.T) {
 	require.Contains(t, string(raw), "status.example.test")
 	require.Contains(t, string(raw), "sourceZoneClocks")
 	require.Contains(t, string(raw), "Executed 12 tests; all passed")
+	require.Contains(t, string(raw), "currentRunId")
+	require.Contains(t, string(raw), "argumentsOmitted")
+	require.NotContains(t, string(raw), "LARGE_SCRIPT_INPUT")
 	require.NotContains(t, string(raw), "PRIVATE_SYSTEM_NOT_EVIDENCE")
 	require.NotContains(t, string(raw), "PRIVATE_REASONING_NOT_EVIDENCE")
 	foreign := common.ContextWithRun(auth.ContextWithUserActor(context.Background(), "someone-else"), run)

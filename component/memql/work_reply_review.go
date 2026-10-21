@@ -104,7 +104,7 @@ func (e *MemQLEngine) workReviewReplyBuiltin(ctx context.Context, args map[strin
 		return nil, fmt.Errorf("reply review requires a bounded recorded request")
 	}
 	now := time.Now()
-	evidence, err := json.Marshal(map[string]any{"recordedSources": sources, "limitations": limitations, "clock": workSourceClock(sources, now), "priorUserRequests": reviewPriorRequests(conversation["messages"])})
+	evidence, err := json.Marshal(map[string]any{"currentRunId": BareShortId(run.RunId), "recordedSources": sources, "limitations": limitations, "clock": workSourceClock(sources, now), "priorUserRequests": reviewPriorRequests(conversation["messages"])})
 	if err != nil {
 		return nil, err
 	}

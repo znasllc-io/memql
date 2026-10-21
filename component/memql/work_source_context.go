@@ -220,6 +220,14 @@ func workCheckpointSources(checkpoints []map[string]any, runID string, remaining
 			seen[call.ID] = true
 			source := map[string]any{"runId": BareShortId(runID), "checkpointId": checkpoint["id"], "checkpointAt": checkpoint["createdAt"], "operation": call.Name, "callId": call.ID, "arguments": call.Arguments, "value": message.Content}
 			encoded, err := json.Marshal(source)
+			if err == nil && len(encoded) > 8000 && call.Arguments != "" {
+				// A large input (for example a coding script) must not hide a
+				// small execution result. Preserve the result exactly and mark
+				// the absent arguments; they are not evidence in this preview.
+				delete(source, "arguments")
+				source["argumentsOmitted"] = true
+				encoded, err = json.Marshal(source)
+			}
 			if err != nil || len(encoded) > 8000 || len(encoded) > *remaining || len(sources) >= 8 {
 				omitted = true
 				continue
