@@ -64,6 +64,26 @@ function open(over: { origin?: string; sourceUrl?: string | null }) {
 }
 
 describe("the download worker's stream handoff", () => {
+  it.each([
+    ["README.md", "text/markdown"], ["report.pdf", "application/pdf"],
+    ["image.png", "image/png"], ["package.zip", "application/zip"],
+    ["package.tar.gz", "application/gzip"], ["opaque.custom", "application/octet-stream"],
+  ])("saves %s with its exact filename, MIME type and binary bytes", async (name, mimeType) => {
+    const worker = loadWorker();
+    const { event, replies, port } = open({ origin: ORIGIN });
+    event.data = { type: "memql-download-open", name, mimeType, size: 5 };
+    worker.message!(event);
+    const url = (replies[0] as { url: string }).url;
+    expect(url).toMatch(new RegExp(`/__memql-dl/[^/]+/${name!.replaceAll(".", "\\.")}$`));
+    let response: Response | undefined;
+    worker.fetch!({ request: { url }, respondWith: (value: Response) => { response = value; } });
+    port.onmessage!({ data: { type: "chunk", chunk: new Uint8Array([0, 255, 13, 10, 128]) } });
+    port.onmessage!({ data: { type: "done" } });
+    expect(response?.headers.get("Content-Type")).toBe(mimeType);
+    expect(response?.headers.get("Content-Disposition")).toBe(`attachment; filename="${name}"; filename*=UTF-8''${name}`);
+    expect(new Uint8Array(await response!.arrayBuffer())).toEqual(new Uint8Array([0, 255, 13, 10, 128]));
+  });
+
   it.each(["before", "after"])("serves all bytes when the body finishes %s navigation", async (when) => {
     const worker = loadWorker();
     const { event, replies, port } = open({ origin: ORIGIN });

@@ -70,7 +70,10 @@ self.addEventListener("message", function (event) {
   var port = event.ports[0];
   counter += 1;
   var id = Date.now().toString(36) + "-" + counter;
-  var url = new URL("__memql-dl/" + id, self.registration.scope).href;
+  var name = (typeof data.name === "string" ? data.name : "").replace(/[\\/\u0000-\u001f\u007f]/g, "_").trim() || "download";
+  // Give Safari a filename in the navigation URL as well as both disposition
+  // parameters. An extensionless iframe navigation can otherwise become .html.
+  var url = new URL(id + "/" + encodeURIComponent(name), self.registration.scope).href;
 
   var stream = new ReadableStream({
     start: function (controller) {
@@ -95,7 +98,8 @@ self.addEventListener("message", function (event) {
 
   downloads.set(id, {
     stream: stream,
-    name: typeof data.name === "string" && data.name !== "" ? data.name : "download",
+    name: name,
+    mimeType: typeof data.mimeType === "string" && !/[\r\n]/.test(data.mimeType) ? data.mimeType : "application/octet-stream",
     size: typeof data.size === "number" && data.size > 0 ? data.size : 0,
   });
 
@@ -113,7 +117,7 @@ self.addEventListener("fetch", function (event) {
   var path = new URL(event.request.url).pathname;
   var marker = path.lastIndexOf("__memql-dl/");
   if (marker === -1) return;
-  var id = path.slice(marker + "__memql-dl/".length);
+  var id = path.slice(marker + "__memql-dl/".length).split("/")[0];
   var entry = downloads.get(id);
   if (!entry) return;
   // The Response keeps the stream alive. Removing only this lookup makes
@@ -121,9 +125,11 @@ self.addEventListener("fetch", function (event) {
   downloads.delete(id);
 
   var headers = {
-    "Content-Type": "application/octet-stream",
+    "Content-Type": entry.mimeType || "application/octet-stream",
+    "X-Content-Type-Options": "nosniff",
     "Content-Disposition":
-      "attachment; filename*=UTF-8''" + encodeURIComponent(entry.name).replace(/['()]/g, escape),
+      'attachment; filename="' + entry.name.replace(/[^\x20-\x7e]|["\\]/g, "_") +
+      '"; filename*=UTF-8\'\'' + encodeURIComponent(entry.name).replace(/['()]/g, escape),
   };
   if (entry.size > 0) headers["Content-Length"] = String(entry.size);
   event.respondWith(new Response(entry.stream, { headers: headers }));

@@ -3,6 +3,7 @@ package workbench
 import (
 	"bytes"
 	"context"
+	"encoding/base64"
 	"errors"
 	"fmt"
 	"io"
@@ -188,6 +189,35 @@ func (i *Integration) handleFSRead(_ context.Context, ws *workspace, args map[st
 		return errResult("fs_read", "fs_read_failed", err.Error())
 	}
 	defer f.Close()
+	if args["encoding"] == "base64" {
+		before, err := f.Stat()
+		if err != nil || !before.Mode().IsRegular() {
+			return errResult("fs_read", "invalid_file", "export requires a regular file")
+		}
+		version := fmt.Sprintf("%d:%d", before.Size(), before.ModTime().UnixNano())
+		if requested, ok := args["version"].(string); ok && requested != version {
+			return errResult("fs_read", "file_changed", "file changed during export")
+		}
+		offset := int64(intArg(args["offset"], 0))
+		if offset < 0 || offset > before.Size() {
+			return errResult("fs_read", "invalid_offset", "invalid file offset")
+		}
+		if _, err = f.Seek(offset, io.SeekStart); err != nil {
+			return errResult("fs_read", "fs_read_failed", err.Error())
+		}
+		data := make([]byte, min(int64(cap), before.Size()-offset))
+		if _, err = io.ReadFull(f, data); err != nil {
+			return errResult("fs_read", "fs_read_failed", err.Error())
+		}
+		after, err := f.Stat()
+		if err != nil || !os.SameFile(before, after) || before.Size() != after.Size() || !before.ModTime().Equal(after.ModTime()) {
+			return errResult("fs_read", "file_changed", "file changed during export")
+		}
+		return dispatchResult{OK: true, Action: "fs_read", Payload: map[string]any{
+			"path": pathArg, "encoding": "base64", "content": base64.StdEncoding.EncodeToString(data),
+			"offset": offset, "size": before.Size(), "version": version, "eof": offset+int64(len(data)) == before.Size(),
+		}}
+	}
 	buf := make([]byte, cap+1)
 	n, err := io.ReadFull(f, buf)
 	truncated := false

@@ -322,3 +322,10 @@ and model availability evidence. A partial search result is not proof of absence
 a chat model's own modality does not define the harness or Fleet capabilities.
 Do not invent system instructions or repeat a disputed capability denial without
 checking the available evidence. Preserve the actual saved-file reference.
+
+When the request produces files, deliver usable files without requiring the
+person to ask for tool calls or download links. Publish finished Workbench files
+with workbenchHost fs_export before reporting completion. Use its returned
+downloadUrl in a Markdown link with the exact filename. A workspace path or a
+claim that a ZIP exists is not delivery. Do not invent URLs, re-encode binary
+files in the answer, or claim a download succeeded when export failed.

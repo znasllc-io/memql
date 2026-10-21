@@ -12,6 +12,7 @@
 //             never a hung download that dies at 90%.
 
 import { downloadWorkerRegistration, runWorkerDownload } from "./downloadWorker";
+import { downloadMetadata } from "./downloadMetadata";
 
 export const BUFFER_LIMIT_BYTES = 512 * 1024 * 1024;
 
@@ -168,10 +169,11 @@ export async function runBufferedDownload(ports: BufferedDownloadPorts): Promise
     ...(token ? { headers: { Authorization: `Bearer ${token}` } } : {}),
   });
   if (!response.ok) throw new Error(await refusalFrom(response));
+  const metadata = downloadMetadata(response, ports.fileName);
   const blob = await response.blob();
   const url = createUrl(blob);
   try {
-    save(url, ports.fileName);
+    save(url, metadata.name);
   } finally {
     // In the test ports this runs inline; in the browser the default revoke
     // waits a beat so the click above has opened the URL.

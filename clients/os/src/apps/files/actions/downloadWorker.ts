@@ -1,4 +1,5 @@
 import { artifactContentPath } from "./download";
+import { downloadMetadata } from "./downloadMetadata";
 
 // The streaming download path (design D13): a service worker turns a fetch
 // this page makes into a navigation response the browser writes to disk AS
@@ -121,6 +122,7 @@ export async function runWorkerDownload(input: {
   // the in-scope URL to navigate. An unanswered ask times out rather than
   // hanging the click.
   const channel = new MessageChannel();
+  const metadata = downloadMetadata(response, input.fileName);
   const url = await new Promise<string>((resolve, reject) => {
     const timer = setTimeout(() => reject(new Error("The download worker did not answer.")), 4_000);
     channel.port1.onmessage = (event: MessageEvent) => {
@@ -131,7 +133,7 @@ export async function runWorkerDownload(input: {
       }
     };
     worker.postMessage(
-      { type: "memql-download-open", name: input.fileName, size: input.sizeBytes },
+      { type: "memql-download-open", ...metadata },
       [channel.port2],
     );
   });

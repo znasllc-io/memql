@@ -289,6 +289,17 @@ func (i *Integration) handleDispatchHost(ctx context.Context, args map[string]an
 		return nil, fmt.Errorf("workbench: %s", reason)
 	}
 
+	// Export is a Library delivery operation. Its byte reads use this same
+	// dispatcher, preserving the run's selected Fleet/cloud workspace and gates.
+	if action == "fs_export" {
+		result, err := i.exportFile(ctx, args)
+		if err != nil {
+			return errorResultNode(runId, action, "file_export_failed", err.Error(), started), nil
+		}
+		payload, _ := json.Marshal(dispatchResult{OK: true, Action: action, Payload: result})
+		return []memorynodes.MemoryNode{{ID: fmt.Sprintf("workbench:export:%s:%d", runId, started.UnixNano()), Concept: "integration:workbench:dispatch", Type: memorynodes.NodeTypeObject, CreatedAt: time.Now().UTC(), Payload: payload}}, nil
+	}
+
 	if i.fleet != nil {
 		result, handled := i.fleet.DispatchFleetWorkbench(ctx, FleetRequest{RunID: runId, AgentID: agentId, Action: action, Args: innerArgs})
 		if handled {

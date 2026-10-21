@@ -30,6 +30,8 @@ import (
 func (a *App) transportMCP() {
 	if wb := a.lookupWorkbenchIntegration(); wb != nil {
 		wb.RequireRemote()
+		uploader, container := a.resolveBlobStore()
+		wb.SetAttachmentUploader(uploader, container)
 	}
 	a.transportBase()
 	a.createHTTPServer()
