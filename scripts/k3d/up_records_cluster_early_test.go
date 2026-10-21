@@ -36,6 +36,7 @@ func TestUpRecordsTheClusterBeforeALaterStepFails(t *testing.T) {
 			script := `set -euo pipefail
 source "$EARLY_DRIVER"
 check_prerequisites(){ :; }
+check_requirements(){ :; }
 warn_occupied_ports(){ :; }
 ensure_local_traefik(){ :; }
 install_argocd(){ cap_fail 5 "timed out waiting for ArgoCD"; }
