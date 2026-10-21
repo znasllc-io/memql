@@ -40,6 +40,10 @@ function main() {
     cp "$worker" "$stage/MemQL.app/Contents/MacOS/MemQL"
     cp "$REPO_ROOT/native/macos/WorkerInfo.plist" "$stage/MemQL.app/Contents/Info.plist"
     cp "$helper/Contents/Resources/MemQL.icns" "$stage/MemQL.app/Contents/Resources/MemQL.icns"
+    # The worker and the menu are agents MemQL.app registers itself, so Login
+    # Items lists them under MemQL with its icon (memql-cockpit#545).
+    mkdir -p "$stage/MemQL.app/Contents/Library/LaunchAgents"
+    cp "$REPO_ROOT/native/macos/agents/"com.znasllc.memql-{worker,cockpit-menubar}.plist "$stage/MemQL.app/Contents/Library/LaunchAgents/"
     /usr/libexec/PlistBuddy -c "Set :CFBundleShortVersionString $version" "$stage/MemQL.app/Contents/Info.plist" >&2
     /usr/libexec/PlistBuddy -c "Set :CFBundleVersion $version" "$stage/MemQL.app/Contents/Info.plist" >&2
     /usr/libexec/PlistBuddy -c "Set :LSMinimumSystemVersion $minimum_os" "$stage/MemQL.app/Contents/Info.plist" >&2

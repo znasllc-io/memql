@@ -309,6 +309,36 @@ function stop_agent() {
     fi
 }
 
+# The MemQL.app whose own executable registered the worker and menu
+# services (memql-cockpit#545). Only that app can take them back out of
+# Login Items, and only it can start them again: there is no plist to reload.
+function app_service_executables() {
+    local mode app identifier
+    for mode in $REMOVE_MODES; do
+        app="$(worker_app_for_mode "$mode")"
+        [[ -d "$app" && ! -L "$app" && -f "$app/Contents/Library/LaunchAgents/$SERVICE_LABEL_DARWIN.plist" ]] || continue
+        identifier="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleIdentifier' "$app/Contents/Info.plist" 2>/dev/null || true)"
+        [[ "$identifier" == com.znasllc.memql-worker ]] || continue
+        echo "$app/Contents/MacOS/MemQL"
+    done
+}
+
+# Before anything is removed, the app unregisters what it registered; that
+# stops both services. An app from before memql-cockpit#545 registered
+# nothing, and remove_launch_agent stops its plists by label.
+function unregister_app_services() {
+    local executable
+    while IFS= read -r executable; do
+        [[ -n "$executable" ]] || continue
+        if ! "$executable" worker service unregister >/dev/null; then
+            echo "ERROR: MemQL's services did not stop; runtime files retained" >&2
+            echo "       Run:  \"$executable\" worker service unregister   then re-run this uninstaller." >&2
+            return 5
+        fi
+        echo "INFO: MemQL's worker and menu services removed from Login Items"
+    done < <(app_service_executables)
+}
+
 # Stop each managed agent before removing its plist. Missing agents are safe
 # to clean up; a still-loaded agent aborts removal so a retry can finish later.
 function remove_launch_agent() {
@@ -509,7 +539,7 @@ function scoped_unpair() {
         scoped_without_binary
         return $?
     fi
-    local result remaining plist target was_loaded=no rc=0
+    local result remaining plist target was_loaded=no rc=0 app_service=""
     result="$(mktemp)"
     "$binary" worker unpair --cluster-url "$CLUSTER_URL" --dry-run --json > "$result" 2> "$result.err" || rc=$?
     case "$rc" in
@@ -545,8 +575,10 @@ function scoped_unpair() {
     plist="$HOME/Library/LaunchAgents/$SERVICE_LABEL_DARWIN.plist"
     target="gui/$(id -u)/$SERVICE_LABEL_DARWIN"
     if command -v launchctl >/dev/null 2>&1 && launchctl print "$target" >/dev/null 2>&1; then
-        # Reload only a service that was running and has a retained plist.
-        if [[ "$remaining" -gt 0 && ( ! -f "$plist" || -L "$plist" ) ]]; then
+        # Reload only a service that was running and can start again: from
+        # its retained plist, or by the app that registered it.
+        [[ -f "$plist" && ! -L "$plist" ]] || app_service="$(app_service_executables | head -n 1)"
+        if [[ "$remaining" -gt 0 && ( ! -f "$plist" || -L "$plist" ) && -z "$app_service" ]]; then
             rm -f "$result"
             echo "ERROR: running worker has no regular service plist to reload safely; nothing was changed." >&2
             echo "       Restore ${plist}, or pass --all-homes to remove every enrollment and the runtime." >&2
@@ -579,7 +611,11 @@ function scoped_unpair() {
     # down, and the files may be half-applied. The summary must say so,
     # with the command that starts the worker again once they are fixed.
     local restart=""
-    [[ "$was_loaded" != yes ]] || restart="launchctl bootstrap gui/$(id -u) $plist"
+    if [[ "$was_loaded" == yes && -n "$app_service" ]]; then
+        restart="\"$app_service\" worker service register"
+    elif [[ "$was_loaded" == yes ]]; then
+        restart="launchctl bootstrap gui/$(id -u) $plist"
+    fi
     if ! "$binary" worker unpair --cluster-url "$CLUSTER_URL" --json > "$result"; then
         rm -f "$result"
         echo "ERROR: removal did not complete; worker remains stopped so a removed token cannot reconnect. Repair enrollment before restarting." >&2
@@ -602,7 +638,13 @@ function scoped_unpair() {
             stop_agent "$legacy" || { rc=$?; record_scoped_restart_failure "$restart" "the legacy agent ${legacy} (still loaded; stop it by hand:  launchctl bootout gui/$(id -u)/${legacy})"; return "$rc"; }
             remove_path_if_present "$HOME/Library/LaunchAgents/$legacy.plist" || true
         done
-        if [[ "$was_loaded" == yes ]]; then
+        if [[ "$was_loaded" == yes && -n "$app_service" ]]; then
+            "$app_service" worker service register >/dev/null || {
+                echo "ERROR: enrollment removed but the worker for the remaining enrollment(s) could not restart; start it with:  ${restart}" >&2
+                record_scoped_restart_failure "$restart"
+                return 5
+            }
+        elif [[ "$was_loaded" == yes ]]; then
             launchctl bootstrap "gui/$(id -u)" "$plist" || {
                 echo "ERROR: enrollment removed but the worker for the remaining enrollment(s) could not reload; start it with:  ${restart}" >&2
                 record_scoped_restart_failure "$restart"
@@ -776,6 +818,7 @@ function run_uninstall() {
     # A no-op on the scoped path, which settled sudo before its first
     # write; this is the gate for the no-enrollment and no-binary paths.
     ensure_system_sudo || finish $?
+    unregister_app_services || finish $?
     remove_launch_agent || finish $?
     local runtime_rc=0
     stop_remaining_menus || runtime_rc=$?

@@ -8,10 +8,40 @@ else
     source "$REPO_ROOT/../memql/scripts/lib/capability.sh"
 fi
 source "$REPO_ROOT/scripts/macos/launchagent.sh"
-cap_init "cockpit.app.activate" "Point the current user's existing worker and menu services at MemQL.app."
+cap_init "cockpit.app.activate" "Register MemQL.app's worker and menu services for the current user."
 cap_spec_param "app" "Absolute installed MemQL.app path"
 cap_spec_param "menu" "Start the embedded menu helper (true or false, default true)"
 cap_spec_param "ollama-env" "OLLAMA_HOST=<value> or OLLAMA_MODELS=<value> to set in the worker service's environment; repeatable"
+
+# MemQL.app REGISTERS ITS OWN SERVICES (memql-cockpit#545). Both agent plists
+# live inside the signed bundle and the app's executable registers them
+# through SMAppService, so Login Items lists one MemQL with the app's icon.
+# The per-user plists this used to write showed there as two bare
+# executables: macOS ties such a plist to an app only through a Team ID, and
+# an ad-hoc build has none. What a plist in the bundle cannot carry -- this
+# account's Ollama variables -- goes to service.env, which the worker reads
+# when the bundled agent starts it (internal/worker/app_service.go).
+
+# merge_service_env sets the given NAME=value pairs in the file and keeps
+# its other lines. It fails when nothing changed.
+function merge_service_env() {
+    local file="$1" stage line pair
+    shift
+    stage="$(mktemp "$(dirname "$file")/.service-env.XXXXXX")"
+    if [[ -f "$file" ]]; then
+        while IFS= read -r line || [[ -n "$line" ]]; do
+            for pair in "$@"; do [[ "${line%%=*}" != "${pair%%=*}" ]] || continue 2; done
+            printf '%s\n' "$line" >> "$stage"
+        done < "$file"
+    fi
+    printf '%s\n' "$@" >> "$stage"
+    chmod 600 "$stage"
+    if [[ -f "$file" ]] && cmp -s "$stage" "$file"; then
+        rm -f "$stage"
+        return 1
+    fi
+    mv "$stage" "$file"
+}
 
 function main() {
     cap_handle_meta "$@"
@@ -21,7 +51,7 @@ function main() {
         case "$arg" in --ollama-env=*) OLLAMA_ENV_PAIRS+=("${arg#--ollama-env=}") ;; esac
     done
     cap_parse_flags "$@"
-    local app menu plist helper stage uid_value backup legacy identifier fingerprint marker service_path
+    local app menu helper uid_value backup legacy label identifier fingerprint marker env_file pair menu_flag=off
     app="$(cap_param app)"; menu="$(cap_param menu true)"
     [[ "$app" == /* && -x "$app/Contents/MacOS/MemQL" ]] || cap_fail 2 "app must be an installed MemQL bundle"
     [[ "$menu" == true || "$menu" == false ]] || cap_fail 2 "menu must be true or false"
@@ -30,96 +60,45 @@ function main() {
     codesign --verify --deep --strict "$app" >&2 || cap_fail 3 "installed bundle signature invalid"
     helper="$app/Contents/Library/LoginItems/MemQL Menu.app"
     [[ -x "$helper/Contents/MacOS/MemQLCockpit" ]] || cap_fail 3 "menu helper is missing"
+    [[ -f "$app/Contents/Library/LaunchAgents/com.znasllc.memql-worker.plist" ]] || cap_fail 3 "app does not carry its service definitions; install a current MemQL"
     uid_value="$(id -u)"
-    # launchd's four system directories, then where the app installers put
-    # claude and codex -- appended, so nothing the user can write to shadows
-    # launchctl. internal/worker/servicepath.go spells the same string.
-    service_path="/usr/bin:/bin:/usr/sbin:/sbin:${HOME}/.local/bin:${HOME}/.claude/local:/opt/homebrew/bin:/usr/local/bin"
-    plist="$HOME/Library/LaunchAgents/com.znasllc.memql-worker.plist"
-    [[ ! -L "$plist" ]] || cap_fail 3 "worker plist must not be a symlink"
-    [[ ! -e "$plist" || -f "$plist" && -O "$plist" ]] || cap_fail 3 "worker plist must belong to the current user"
-    mkdir -p "$(dirname "$plist")" "$HOME/.memql/state"
-    # Preserve the enrollment, environment, arguments, log paths and policies;
-    # replace only the executable and its associated native bundle identity.
-    stage="$(mktemp "$HOME/Library/LaunchAgents/.memql-app-agent.XXXXXX")"
-    if [[ -f "$plist" ]]; then
-        [[ "$(/usr/libexec/PlistBuddy -c 'Print :Label' "$plist")" == com.znasllc.memql-worker ]] || cap_fail 3 "worker plist has an unexpected label"
-        [[ "$(/usr/libexec/PlistBuddy -c 'Print :ProgramArguments:1' "$plist")" == worker && "$(/usr/libexec/PlistBuddy -c 'Print :ProgramArguments:2' "$plist")" == run ]] || cap_fail 3 "worker service arguments are not a recognized worker run command"
-        cp -p "$plist" "$stage"
-        # plutil -replace inserts at an array index on current macOS. Remove
-        # then insert so the old executable cannot become an extra CLI arg.
-        plutil -remove ProgramArguments.0 "$stage" >&2
-        plutil -insert ProgramArguments.0 -string "$app/Contents/MacOS/MemQL" "$stage" >&2
-        # A plist written before the service carried a PATH gets one, or the
-        # worker finds no app on this machine. A PATH already there is the
-        # owner's and stays exactly as it is.
-        if ! /usr/libexec/PlistBuddy -c 'Print :EnvironmentVariables:PATH' "$stage" >/dev/null 2>&1; then
-            /usr/libexec/PlistBuddy -c 'Print :EnvironmentVariables' "$stage" >/dev/null 2>&1 \
-                || plutil -insert EnvironmentVariables -dictionary "$stage" >&2
-            plutil -insert EnvironmentVariables.PATH -string "$service_path" "$stage" >&2
-        fi
-    else
-        plutil -create xml1 "$stage" >&2
-        plutil -insert Label -string com.znasllc.memql-worker "$stage" >&2
-        plutil -insert ProgramArguments -array "$stage" >&2
-        plutil -insert ProgramArguments.0 -string "$app/Contents/MacOS/MemQL" "$stage" >&2
-        plutil -insert ProgramArguments.1 -string worker "$stage" >&2
-        plutil -insert ProgramArguments.2 -string run "$stage" >&2
-        plutil -insert RunAtLoad -bool true "$stage" >&2
-        plutil -insert KeepAlive -bool true "$stage" >&2
-        plutil -insert StandardOutPath -string "$HOME/.memql/state/worker.log" "$stage" >&2
-        plutil -insert StandardErrorPath -string "$HOME/.memql/state/worker.log" "$stage" >&2
-        plutil -insert EnvironmentVariables -dictionary "$stage" >&2
-        plutil -insert EnvironmentVariables.HOME -string "$HOME" "$stage" >&2
-        plutil -insert EnvironmentVariables.PATH -string "$service_path" "$stage" >&2
-        chmod 600 "$stage"
-    fi
+    mkdir -p "$HOME/.memql/state"
     # The installing shell's Ollama variables, so the worker serves from
     # where the setup pulled (memql-cockpit#524). Only these two names.
-    local pair key value
     for pair in "${OLLAMA_ENV_PAIRS[@]+"${OLLAMA_ENV_PAIRS[@]}"}"; do
-        key="${pair%%=*}"; value="${pair#*=}"
-        [[ "$key" == OLLAMA_HOST || "$key" == OLLAMA_MODELS ]] || cap_fail 2 "ollama-env takes OLLAMA_HOST or OLLAMA_MODELS"
-        /usr/libexec/PlistBuddy -c 'Print :EnvironmentVariables' "$stage" >/dev/null 2>&1 \
-            || plutil -insert EnvironmentVariables -dictionary "$stage" >&2
-        plutil -replace "EnvironmentVariables.${key}" -string "$value" "$stage" >&2
+        [[ "${pair%%=*}" == OLLAMA_HOST || "${pair%%=*}" == OLLAMA_MODELS ]] || cap_fail 2 "ollama-env takes OLLAMA_HOST or OLLAMA_MODELS"
     done
-    plutil -remove AssociatedBundleIdentifiers "$stage" >/dev/null 2>&1 || true
-    plutil -insert AssociatedBundleIdentifiers -array "$stage" >&2
-    plutil -insert AssociatedBundleIdentifiers.0 -string com.znasllc.memql-worker "$stage" >&2
+    if [[ "${#OLLAMA_ENV_PAIRS[@]}" -gt 0 ]]; then
+        env_file="$HOME/.memql/state/service.env"
+        [[ ! -L "$env_file" && ( ! -e "$env_file" || -f "$env_file" && -O "$env_file" ) ]] || cap_fail 3 "service.env must be a regular file owned by the current user"
+        if merge_service_env "$env_file" "${OLLAMA_ENV_PAIRS[@]}"; then cap_changed; fi
+    fi
+    # The per-user plists an earlier install wrote. The services keep their
+    # labels inside the app, so the old jobs stop and their files leave
+    # first; each is kept under ~/.memql/backups.
+    for label in com.znasllc.memql-worker com.znasllc.memql-cockpit-menubar com.znasllc.memql-cockpit-worker com.visionarys.memql-cockpit-worker; do
+        legacy="$HOME/Library/LaunchAgents/$label.plist"
+        [[ -e "$legacy" || -L "$legacy" ]] || continue
+        [[ -f "$legacy" && ! -L "$legacy" && -O "$legacy" ]] || cap_fail 3 "$legacy must be a regular file owned by the current user"
+        mkdir -p "$HOME/.memql/backups"
+        backup="$(mktemp -d "$HOME/.memql/backups/legacy-agent.XXXXXX")"
+        stop_launchagent "gui/$uid_value/$label" || cap_fail 5 "could not stop previous service; retry after it exits"
+        mv "$legacy" "$backup/$label.plist"
+        cap_changed
+    done
+    [[ "$menu" == false ]] || menu_flag=on
     marker="$HOME/.memql/state/app-activation.sha256"
     fingerprint="$(shasum -a 256 "$app/Contents/MacOS/MemQL" "$helper/Contents/MacOS/MemQLCockpit") menu=$menu"
-    if [[ ! -f "$plist" ]] || ! cmp -s "$stage" "$plist" || [[ ! -f "$marker" || "$(cat "$marker")" != "$fingerprint" ]]; then
-        mkdir -p "$HOME/.memql/backups"
-        backup="$(mktemp -d "$HOME/.memql/backups/app-activation.XXXXXX")"
-        if [[ -f "$plist" ]]; then cp -p "$plist" "$backup/com.znasllc.memql-worker.plist"; fi
+    if [[ ! -f "$marker" || "$(cat "$marker")" != "$fingerprint" ]]; then
+        # SMAppService records each program's signature when it registers,
+        # and launchd refuses a replaced executable that no longer matches
+        # ("Launch Constraint Violation"). A changed app registers afresh;
+        # registering again alone answers "already registered".
         rm -f "$marker"
-        stop_launchagent "gui/$uid_value/com.znasllc.memql-cockpit-menubar" || cap_fail 5 "could not stop previous service; retry after it exits"
-        stop_launchagent "gui/$uid_value/com.znasllc.memql-worker" || cap_fail 5 "could not stop previous service; retry after it exits"
-        mv "$stage" "$plist"
-        start_launchagent "gui/$uid_value" "$plist" "gui/$uid_value/com.znasllc.memql-worker" || cap_fail 5 "could not activate worker bundle; previous plist is in backups"
+        "$app/Contents/MacOS/MemQL" worker service unregister >&2 || cap_fail 5 "macOS did not release MemQL's previous services"
         cap_changed
-    else
-        rm -f "$stage"
-        if ! launchctl print "gui/$uid_value/com.znasllc.memql-worker" >/dev/null 2>&1; then cap_changed; fi
-        start_launchagent "gui/$uid_value" "$plist" "gui/$uid_value/com.znasllc.memql-worker" || cap_fail 5 "could not start worker service"
     fi
-    for identifier in com.znasllc.memql-cockpit-worker com.visionarys.memql-cockpit-worker; do
-        legacy="$HOME/Library/LaunchAgents/$identifier.plist"
-        if [[ -f "$legacy" && ! -L "$legacy" && -O "$legacy" ]]; then
-            backup="$(mktemp -d "$HOME/.memql/backups/legacy-agent.XXXXXX")"
-            stop_launchagent "gui/$uid_value/$identifier" || cap_fail 5 "could not stop previous service; retry after it exits"
-            mv "$legacy" "$backup/$identifier.plist"
-            cap_changed
-        fi
-    done
-    if [[ "$menu" == true ]]; then
-        "$REPO_ROOT/scripts/macos/install-menubar.sh" --app="$helper" --destination="$helper" >&2 || cap_fail 5 "could not activate embedded menu"
-    else
-        stop_launchagent "gui/$uid_value/com.znasllc.memql-cockpit-menubar" || cap_fail 5 "could not stop previous service; retry after it exits"
-        rm -f "$HOME/Library/LaunchAgents/com.znasllc.memql-cockpit-menubar.plist"
-    fi
-    mkdir -p "$(dirname "$marker")"
+    "$app/Contents/MacOS/MemQL" worker service register --menu="$menu_flag" >&2 || cap_fail 5 "macOS did not register MemQL's services"
     printf '%s\n' "$fingerprint" > "$marker"
     chmod 600 "$marker"
     # Retire only known old helper bundles; keep the copy for rollback.

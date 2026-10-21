@@ -1,0 +1,29 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!--
+  The menu, registered with the worker by MemQL.app through SMAppService
+  (memql-cockpit#545), so Login Items shows the two as one MemQL.
+-->
+<plist version="1.0">
+<dict>
+	<key>Label</key>
+	<string>com.znasllc.memql-cockpit-menubar</string>
+	<key>BundleProgram</key>
+	<string>Contents/Library/LoginItems/MemQL Menu.app/Contents/MacOS/MemQLCockpit</string>
+	<key>RunAtLoad</key>
+	<true/>
+	<key>KeepAlive</key>
+	<dict>
+		<key>SuccessfulExit</key>
+		<false/>
+	</dict>
+	<key>LimitLoadToSessionType</key>
+	<string>Aqua</string>
+	<key>ProcessType</key>
+	<string>Interactive</string>
+	<key>AssociatedBundleIdentifiers</key>
+	<array>
+		<string>com.znasllc.memql-worker</string>
+	</array>
+</dict>
+</plist>

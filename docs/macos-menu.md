@@ -10,18 +10,49 @@ The Swift menu helper is embedded at
 the permission window shows one switch per grant and keeps PID/path/build
 details under **Troubleshooting**.
 
-The worker LaunchAgent targets `MemQL.app/Contents/MacOS/MemQL` directly, and
-the installed `memql` CLI symlink points to that same executable. Status reports
+The worker service runs `MemQL.app/Contents/MacOS/MemQL` directly, and the
+installed `memql` CLI symlink points to that same executable. Status reports
 `bundle_id` and `bundle_path` from the actual worker's Core Foundation main
 bundle, rather than inferring identity from a filename. Finder reveals the app
 reported by that worker. Opening MemQL from Finder opens its embedded menu;
 invoking the `memql` CLI keeps normal command-line behavior.
 
-The menu registers both bundles with Launch Services. The worker plist includes
-`AssociatedBundleIdentifiers`; the active executable remains the app's main
-worker. Registration and labels do not imply TCC grants: macOS must approve the
-actual bundle, and only current-worker preflight results can confirm access.
-Raw executable grants are not silently moved or reset during migration.
+The menu registers both bundles with Launch Services. Registration and labels do
+not imply TCC grants: macOS must approve the actual bundle, and only
+current-worker preflight results can confirm access. Raw executable grants are
+not silently moved or reset during migration.
+
+### Services the app registers itself (memql-cockpit#545)
+
+MemQL.app carries both service definitions in
+`Contents/Library/LaunchAgents`: `com.znasllc.memql-worker` (the worker, kept
+alive) and `com.znasllc.memql-cockpit-menubar` (the menu, Aqua sessions only).
+The app's own executable registers them with SMAppService, so Login Items lists
+one **MemQL** with the app's icon:
+
+```sh
+MemQL.app/Contents/MacOS/MemQL worker service register --menu=on   # or --menu=off
+MemQL.app/Contents/MacOS/MemQL worker service unregister            # both; --worker-only keeps the menu
+MemQL.app/Contents/MacOS/MemQL worker service status
+```
+
+Per-user plists in `~/Library/LaunchAgents` showed there as two bare
+executables, `MemQL` and `MemQLCockpit`, with the generic icon. macOS ties such
+a plist to an app only through a shared Team ID, and an ad-hoc build has none.
+An agent registered from inside the bundle is recorded under that app whatever
+its signature.
+
+A plist inside the signed bundle is the same for every account. It sets only
+`MEMQL_SERVICE=app`, and the worker supplies the rest when it starts. HOME
+comes from the account when launchd gives none. stdout and stderr go to
+`~/.memql/state/worker.log`, where the per-user plist sent them. The variables
+in `~/.memql/state/service.env` are applied. Only `OLLAMA_HOST`,
+`OLLAMA_MODELS` (written by the installer from its shell) and `PATH` (yours to
+set) are read.
+
+`launchctl print` names such a job's program inside its bundle
+(`program identifier = Contents/MacOS/MemQL`, with `parent bundle identifier =
+com.znasllc.memql-worker`), not by path, and Restart MemQL accepts that form.
 
 The token installer selects this layout for computer-use version 0.15 and
 later, with the exact matching `memql-app-darwin-{arm64,amd64}.tar.gz` and SHA256
@@ -42,8 +73,10 @@ scripts/macos/install-app-files.sh --app=/absolute/built/MemQL.app \
 scripts/macos/activate-app.sh --app=/absolute/Applications/MemQL.app
 ```
 
-Existing service arguments, environment and log locations are preserved.
-Previous bundles/CLI links and agent plists are retained for rollback. Known
+Activation registers the app's services and retires the per-user plists an
+earlier install wrote. Those plists are stopped and moved to
+`~/.memql/backups/legacy-agent.*`. Previous bundles and CLI links are retained
+for rollback. Known
 legacy worker agents and the old standalone menu are retired; unrelated apps,
 enrollments, credentials, policies and models are not modified. Activation
 records the bundle fingerprints and avoids restarting an unchanged install.
@@ -316,7 +349,8 @@ During installation, a verified signing identity change resets only the
 obsolete worker approvals through tccutil.
 
 **Restart MemQL** asks for confirmation because it interrupts active work
-and every server connection. It checks the service's loaded PID and program,
+and every server connection. It checks the service's loaded PID and program
+(or, for the app's own service, the program inside MemQL.app),
 then uses `launchctl kickstart -k` for the current user's worker label. It does
 not rewrite enrollments or connection policy. The window waits for a fresh
 report from a different PID; a new process with denied access remains denied.

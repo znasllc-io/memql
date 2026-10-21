@@ -1141,7 +1141,14 @@ goroutine it starts.
   `/device/code` + `/oauth/token`.
 - **Services:** macOS LaunchAgent label `com.znasllc.memql-worker`; Linux
   user-systemd `memql-worker.service`. Installers retire the pre-rename
-  `memql-cockpit-worker` agent/unit and binaries in place.
+  `memql-cockpit-worker` agent/unit and binaries in place. **MemQL.app
+  registers its own** (memql-cockpit#545): the worker and menu plists live in
+  the bundle and `memql worker service register` hands them to SMAppService,
+  because macOS lists a per-user plist as a bare executable unless a Team ID
+  ties it to the app. The bundled worker plist is the same for every account,
+  so `prepareAppService` (`app_service.go`) supplies HOME, the log redirect and
+  `~/.memql/state/service.env` itself; `launchctl print` then names the
+  program inside the bundle, not by path. Headless installs keep their plists.
 - **Unpairing:** `memql worker unpair --cluster <id>` removes (or
   `--disable`s) one home and keeps the legacy mirror honest; the running
   worker keeps that stream until it restarts, and the command prints the
