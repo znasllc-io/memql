@@ -1783,6 +1783,30 @@ QueryClient.prototype.fleetRecommended = function (this: QueryClient, args: Flee
   return this.executeNamed("fleetRecommended", buildFleetRecommended(args), opts);
 };
 
+/** Allow the next call to retry one app on your machine after adding credits or restoring access. Does not start or replay work. */
+export interface FleetRetryAppAvailabilityArgs {
+  registrationId: string;
+  // Enum: claude-code | codex
+  app: string;
+}
+
+export function buildFleetRetryAppAvailability(args: FleetRetryAppAvailabilityArgs): string {
+  const parts: string[] = [];
+  parts.push("registrationId: " + renderMemQLValue(args.registrationId));
+  parts.push("app: " + renderMemQLValue(args.app));
+  return "builtin fleetRetryAppAvailability(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    fleetRetryAppAvailability(args: FleetRetryAppAvailabilityArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.fleetRetryAppAvailability = function (this: QueryClient, args: FleetRetryAppAvailabilityArgs = {} as FleetRetryAppAvailabilityArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("fleetRetryAppAvailability", buildFleetRetryAppAvailability(args), opts);
+};
+
 /** Remove one of YOUR OWN machines from the fleet: revoke its registration AND the credential it connects with, as ONE act. The two used to be separate and the client composed them, which meant a window where the row said removed and the token still worked -- and a surface that made only the first call left a machine that kept its stream and could come back. The registration is resolved through your own machines, so another user's id answers exactly as a made-up one does. Revocation is an UPDATE, never a delete: the row is audit history and its credential's hash must stay taken. The machine's live stream is ended by the cluster within seconds, from whichever replica is holding it. */
 export interface FleetRevokeMachineArgs {
   /** v1:worker:registration.id of the machine to remove. It must be one of the caller's own. */

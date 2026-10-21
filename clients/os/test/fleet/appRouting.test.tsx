@@ -32,3 +32,24 @@ it("keeps a rejected draft and reports failure outside the active settings surfa
  expect(screen.getByRole("combobox", { name: "App strategy" }).textContent).toContain("Codex only");
  expect(screen.getByRole("button", { name: "Save app routing" }).hasAttribute("disabled")).toBe(false);
 });
+
+const { RetryAppAvailability } = await import("../../src/apps/fleet/machines/RetryAppAvailability");
+it("retries only the selected app, waits for confirmation and keeps failures outside the surface", async () => {
+ let resolve!: (value: any) => void;
+ const retry = vi.fn().mockImplementation(() => new Promise(r => { resolve = r; }));
+ h.connection = { query: { fleetRetryAppAvailability: retry } };
+ const view = render(withSession(<section data-testid="active"><RetryAppAvailability registrationId="machine" app="codex" disabled={false} /></section>, { userId: "me" }));
+ const button = screen.getByRole("button", { name: "Retry Codex availability" });
+ fireEvent.click(button); fireEvent.click(button);
+ expect(retry).toHaveBeenCalledTimes(1);
+ expect(retry).toHaveBeenCalledWith({ registrationId: "machine", app: "codex" });
+ expect(screen.queryByText(/can be tried/)).toBeNull();
+ await act(async () => { resolve(builtinReply("fleetRetryAppAvailability", [{ app: "codex", retriedAt: "2026-10-21T20:00:00Z" }])); });
+ expect(screen.getByRole("status").textContent).toContain("next call");
+ retry.mockRejectedValueOnce(new Error("offline"));
+ vi.spyOn(console, "error").mockImplementation(() => {});
+ await act(async () => { fireEvent.click(button); });
+ expect(screen.getByTestId("active").contains(screen.getByText("App availability could not be retried."))).toBe(false);
+ view.rerender(withSession(<RetryAppAvailability registrationId="machine" app="codex" disabled={true} />, { userId: "me" }));
+ expect(screen.getByRole("button", { name: "Retry Codex availability" }).hasAttribute("disabled")).toBe(true);
+});

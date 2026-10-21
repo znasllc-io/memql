@@ -321,12 +321,21 @@ Route and Where controls; it does not carry an app-strategy override.
 - **Claude Code only** and **Codex only** use that app exclusively, including
   when it is unavailable.
 
-The selector uses up to 200 recent owner-scoped app sessions from the last two
-hours. Unknown usage stays unknown. Subscription balances and reset times are
-not reported by the current app protocol; token counts are not estimates of
-remaining credits. A confirmed quota refusal temporarily excludes that app
-for fifteen minutes before another availability check. Auto and Round robin
-can use another enabled app; an Only strategy cannot.
+The usage score uses up to 200 recent owner-scoped app sessions from the last
+two hours. Unknown usage stays unknown; token counts are not remaining-credit
+estimates. Availability is tracked separately for each app on each owned
+machine. A quota refusal stays effective until an unambiguous, explicitly zoned
+reset reported by the app; when no such time is reported, it is eligible for a
+recheck after fifteen minutes. This evidence survives restarts and replica
+changes and does not disappear as other sessions enter the usage window.
+Auto and Round robin can use another enabled app; an Only strategy cannot.
+
+After purchasing credits or restoring access, choose **Retry availability**
+beside that app in the machine's Apps page. This clears the earlier refusal for
+the next call, without starting a task, changing strategy or claiming a balance.
+A later quota refusal blocks new calls again, and a successful call clears it.
+Quota evidence from older builds is honored while present in recent history;
+newly recorded refusals have a durable marker independent of that history.
 
 Each active session stays with its app. New calls receive their full supplied
 conversation and contract, and delegated steps receive their inputs and

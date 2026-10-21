@@ -6,7 +6,6 @@ import (
 	"github.com/znasllc-io/memql/core/common"
 	"reflect"
 	"testing"
-	"time"
 )
 
 type selectingApps struct {
@@ -84,14 +83,7 @@ func TestAppAutoUsesObservedUsageSpeedAndReliability(t *testing.T) {
 	if appScore(AppRoutingPolicy{ReliabilityWeight: 100}, light, 1000, 100) <= appScore(AppRoutingPolicy{ReliabilityWeight: 100}, heavy, 1000, 100) {
 		t.Fatal("reliability ignored")
 	}
-	now := time.Now()
-	rows := []map[string]any{{"app": "claude-code", "status": "failed", "endedAt": now.Format(time.RFC3339Nano), "errorMessage": "You've hit your weekly limit", "usage": map[string]any{"known": true, "inputTokens": float64(0), "outputTokens": float64(0)}}}
-	if !appSignals(rows, now)["claude-code"].blockedUntil.After(now) {
-		t.Fatal("quota refusal not suppressed")
-	}
-	if !appSignals(rows, now.Add(3*time.Hour))["claude-code"].blockedUntil.IsZero() {
-		t.Fatal("old evidence blocked recovery")
-	}
+
 }
 
 type quotaSessionDelegate struct {

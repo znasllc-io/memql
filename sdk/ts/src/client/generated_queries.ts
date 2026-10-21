@@ -925,6 +925,30 @@ QueryClient.prototype.allWorkspaces = function (this: QueryClient, args: AllWork
   return this.executeNamed("allWorkspaces", buildAllWorkspaces(args), opts);
 };
 
+/** Latest availability-changing receipt on this owner's machine, independent of the rolling usage window. Unrelated failures do not erase an exhausted quota. */
+// Bound concept: v1:worker:appSession (machine-readable: BoundConcepts["appAvailabilityEvidence"] in generated_concepts.ts).
+export interface AppAvailabilityEvidenceArgs {
+  workerId: string;
+  app: string;
+}
+
+export function buildAppAvailabilityEvidence(args: AppAvailabilityEvidenceArgs): string {
+  const parts: string[] = [];
+  parts.push("workerId: " + renderMemQLValue(args.workerId));
+  parts.push("app: " + renderMemQLValue(args.app));
+  return "query appAvailabilityEvidence(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    appAvailabilityEvidence(args: AppAvailabilityEvidenceArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.appAvailabilityEvidence = function (this: QueryClient, args: AppAvailabilityEvidenceArgs = {} as AppAvailabilityEvidenceArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("appAvailabilityEvidence", buildAppAvailabilityEvidence(args), opts);
+};
+
 /** Recent owner-scoped observations for automatic app selection. */
 // Bound concept: v1:worker:appSession (machine-readable: BoundConcepts["appRoutingEvidence"] in generated_concepts.ts).
 export interface AppRoutingEvidenceArgs {

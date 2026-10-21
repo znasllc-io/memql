@@ -69,8 +69,9 @@ export function MachineAppRouting({ machine }: { machine: MachineRow }) {
   return <DetailsSection title="App routing">
     <PageHelp title="App routing">
       <p>This machine chooses an app when a new call or step starts. An active session stays with its app. Each new call receives the relevant conversation, instructions and artifacts.</p>
-      <p>Auto balances reported token usage, response time and successful calls from the last two hours. Keep at least one weight above zero. These weights apply only to apps on this machine. Subscription balances and reset times are not currently reported; usage is not a remaining-credit estimate.</p>
-      <p>Auto and Round robin skip a confirmed credit refusal and use another available app. A refused app is checked again after fifteen minutes. An interrupted session that may have performed work is not automatically replayed. An Only choice never falls through to the other app.</p>
+      <p>Auto balances reported token usage, response time and successful calls from the last two hours. Keep at least one weight above zero. Usage is not a remaining-credit estimate.</p>
+      <p>Auto and Round robin skip an app that reports a credit or usage limit until its reported reset. If the reset time is unknown, it can be tried again after fifteen minutes. This is remembered across restarts. An interrupted session that may have performed work is not automatically replayed. An Only choice never falls through to the other app.</p>
+      <p>After adding credits or restoring access, use Retry availability beside that app. This allows the next call to try it again; it does not start work or confirm a balance. A successful call clears the previous refusal.</p>
     </PageHelp>
     <fieldset className="fleet-app-routing-fields" disabled={!editable || saving}>
       <SettingRow label="Strategy"><Select id={`app-strategy-${machine.id}`} label="App strategy" value={draft.mode} onChange={mode => setDraft({ ...draft, mode: mode as Mode })}>

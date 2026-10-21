@@ -1048,3 +1048,11 @@ builtin fleetSetAppRouting {
     speedWeight int!
     reliabilityWeight int!
 }
+
+@sdk
+@executor("fleetRetryAppAvailability")
+@description("Allow the next call to retry one app on your machine after adding credits or restoring access. Does not start or replay work.")
+builtin fleetRetryAppAvailability {
+  registrationId string!
+  app enum("claude-code", "codex")!
+}

@@ -77,8 +77,6 @@ type appSignal struct {
 	tokens, duration   float64
 	samples, successes int
 	usageSamples       int
-	blockedUntil       time.Time
-	lastSuccess        time.Time
 }
 
 func appSignals(rows []map[string]any, now time.Time) map[string]appSignal {
@@ -101,28 +99,12 @@ func appSignals(rows []map[string]any, now time.Time) map[string]appSignal {
 			s.samples++
 			if mapString(row, "status") == "ended" {
 				s.successes++
-				if end.After(s.lastSuccess) {
-					s.lastSuccess = end
-				}
 			}
 			if !start.IsZero() && end.After(start) {
 				s.duration += float64(end.Sub(start).Milliseconds())
 			}
 		}
-		if usage["known"] == true && number("inputTokens") == 0 && number("outputTokens") == 0 && IsAppQuotaRefusal(mapString(row, "errorMessage")) {
-			// A provider reset was not reported. This is a bounded recheck,
-			// never an invented reset time or remaining credit balance.
-			if until := end.Add(15 * time.Minute); until.After(s.blockedUntil) {
-				s.blockedUntil = until
-			}
-		}
 		out[key] = s
-	}
-	for key, s := range out {
-		if !s.lastSuccess.IsZero() && !s.lastSuccess.Before(s.blockedUntil.Add(-15*time.Minute)) {
-			s.blockedUntil = time.Time{}
-			out[key] = s
-		}
 	}
 	return out
 }
@@ -144,15 +126,25 @@ func (e *MemQLEngine) FilterAppDoors(ctx context.Context, doors []AppDoor) ([]Ap
 	if err != nil {
 		return nil, err
 	}
-	signals := appSignals(MaterializeRows(res), time.Now())
+	recent := MaterializeRows(res)
 	filtered := make([]AppDoor, 0, len(doors))
 	for _, door := range doors {
 		kept := AppDoor{AppId: door.AppId}
-		if !time.Now().Before(signals[door.AppId].blockedUntil) {
-			for _, machine := range door.Machines {
-				if err := e.CheckMachineAppRouting(ctx, machine.RegistrationId, door.AppId); err == nil {
-					kept.Machines = append(kept.Machines, machine)
-				}
+		for _, machine := range door.Machines {
+			if err := e.CheckMachineAppRouting(ctx, machine.RegistrationId, door.AppId); err != nil {
+				continue
+			}
+			row, err := e.modelSetupRow(ContextWithFreshRead(ctx), machine.RegistrationId)
+			if err != nil {
+				return nil, err
+			}
+			settings, _ := row["appRouting"].(map[string]any)
+			until, err := e.appBlockedUntil(ctx, machine.RegistrationId, door.AppId, settings, recent)
+			if err != nil {
+				return nil, err
+			}
+			if !time.Now().Before(until) {
+				kept.Machines = append(kept.Machines, machine)
 			}
 		}
 		filtered = append(filtered, kept)
@@ -187,7 +179,8 @@ func (e *MemQLEngine) SelectAppForCall(ctx context.Context, req AppCallRequest, 
 		if err != nil {
 			return AppSelection{}, err
 		}
-		signals := appSignals(MaterializeRows(res), time.Now())
+		recent := MaterializeRows(res)
+		signals := appSignals(recent, time.Now())
 		maxTokens, fastest := 0.0, math.Inf(1)
 		for _, s := range signals {
 			maxTokens = math.Max(maxTokens, s.tokens)
@@ -212,7 +205,7 @@ func (e *MemQLEngine) SelectAppForCall(ctx context.Context, req AppCallRequest, 
 					skip = true
 				}
 			}
-			if skip || time.Now().Before(signals[door.AppId].blockedUntil) {
+			if skip {
 				continue
 			}
 			for _, machine := range door.Machines {
@@ -223,7 +216,15 @@ func (e *MemQLEngine) SelectAppForCall(ctx context.Context, req AppCallRequest, 
 				if err != nil {
 					return AppSelection{}, err
 				}
-				p := AppRoutingPolicyFrom(row["appRouting"])
+				settings, _ := row["appRouting"].(map[string]any)
+				until, err := e.appBlockedUntil(read, machine.RegistrationId, door.AppId, settings, recent)
+				if err != nil {
+					return AppSelection{}, err
+				}
+				if time.Now().Before(until) {
+					continue
+				}
+				p := AppRoutingPolicyFrom(settings)
 				if !p.allows(door.AppId) {
 					continue
 				}
@@ -316,6 +317,10 @@ func (e *MemQLEngine) evaluateFleetSetAppRouting(ctx context.Context, args map[s
 	}
 	revision := id.NewShortId()
 	settings := map[string]any{"mode": p.Mode, "usageWeight": p.UsageWeight, "speedWeight": p.SpeedWeight, "reliabilityWeight": p.ReliabilityWeight, "revision": revision}
+	previous, _ := row["appRouting"].(map[string]any)
+	if retries, ok := previous["availabilityRetriedAt"]; ok {
+		settings["availabilityRetriedAt"] = retries
+	}
 	call, _ := parser.RenderCall("setWorkerAppRouting", map[string]any{"registrationId": registration, "settings": settings})
 	if _, err = e.Execute(auth.ContextWithInternalOrigin(ctx), call); err != nil {
 		return nil, err

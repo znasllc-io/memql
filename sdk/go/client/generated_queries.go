@@ -890,6 +890,34 @@ func AllWorkspacesBuild(args AllWorkspacesArgs) string {
 	return b.String()
 }
 
+// AppAvailabilityEvidence -- Latest availability-changing receipt on this owner's machine, independent of the rolling usage window. Unrelated failures do not erase an exhausted quota.
+//
+// Bound concept: v1:worker:appSession (machine-readable: BoundConcepts["appAvailabilityEvidence"] in generated_concepts.go).
+type AppAvailabilityEvidenceArgs struct {
+	WorkerId string
+	App      string
+}
+
+// AppAvailabilityEvidence calls the engine query appAvailabilityEvidence.
+func (qc *QueryClient) AppAvailabilityEvidence(ctx context.Context, args AppAvailabilityEvidenceArgs) (*Result, error) {
+	call := AppAvailabilityEvidenceBuild(args)
+	return qc.executeNamed(ctx, "appAvailabilityEvidence", call)
+}
+
+func AppAvailabilityEvidenceBuild(args AppAvailabilityEvidenceArgs) string {
+	var b strings.Builder
+	b.WriteString("query appAvailabilityEvidence(")
+	b.WriteString("workerId: ")
+	b.WriteString(quoteMemQL(args.WorkerId))
+	if b.Len() > 30 {
+		b.WriteString(", ")
+	}
+	b.WriteString("app: ")
+	b.WriteString(quoteMemQL(args.App))
+	b.WriteString(")")
+	return b.String()
+}
+
 // AppRoutingEvidence -- Recent owner-scoped observations for automatic app selection.
 //
 // Bound concept: v1:worker:appSession (machine-readable: BoundConcepts["appRoutingEvidence"] in generated_concepts.go).

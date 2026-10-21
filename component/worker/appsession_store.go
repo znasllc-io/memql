@@ -11,6 +11,7 @@ import (
 
 	"github.com/znasllc-io/memql/component/auth"
 	langparser "github.com/znasllc-io/memql/component/language/parser"
+	memqlengine "github.com/znasllc-io/memql/component/memql"
 	"github.com/znasllc-io/memql/core/num"
 )
 
@@ -243,6 +244,7 @@ func (s *EngineStore) EndAppSession(ctx context.Context, row AppSessionRow) erro
 		"producedArtifactIds": stringsOrEmpty(row.ProducedArtifactIds),
 		"appSessionRef":       row.AppSessionRef,
 		"errorMessage":        row.ErrorMessage,
+		"quotaRefused":        row.Status == AppSessionStatusFailed && memqlengine.IsAppQuotaRefusal(row.ErrorMessage),
 		"cancelReason":        row.CancelReason,
 		"endedAt":             row.EndedAt.UTC().Format(time.RFC3339Nano),
 	}

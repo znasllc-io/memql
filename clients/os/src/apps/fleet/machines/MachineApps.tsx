@@ -9,6 +9,7 @@ import { isWorkerOnline } from "../online";
 import { workerClusterUrl } from "../addMachine/install";
 import { MachineDetailsSection } from "./MachineDetailsInfo";
 import { MachineAppRouting } from "./MachineAppRouting";
+import { RetryAppAvailability } from "./RetryAppAvailability";
 import { AppPermissionHelp } from "./AppPermissionHelp";
 
 export function appStatus(machine: MachineRow, app: MachineApp | undefined, now: Date): string {
@@ -76,6 +77,7 @@ function MachineAppSection({ id, machine, now }: { id: typeof RUNNABLE_APPS[numb
       {app?.version ? <Fact label="Version" value={app.version} /> : null}
     </Facts>
     {app ? <AppPermissionHelp app={app} machine={machine} /> : null}
+    {app ? <div className="fleet-section-actions"><RetryAppAvailability registrationId={machine.id} app={id} disabled={!canSetup || !app.allowed || !app.signedIn} /></div> : null}
     {runId ? <div className="fleet-section-actions"><Button onClick={() => openWork?.(runId)}>View setup</Button></div>
       : status !== "Ready" && canSetup ? <div className="fleet-section-actions"><Button tone="primary" disabled={!connection || !openWork} busy={busy} busyLabel="Starting…" onClick={() => void setup()}>{!app ? "Set up" : !app.signedIn ? "Connect" : "Allow app"}</Button></div> : null}
     {error ? <Notice tone="error" sentence="Setup could not start." detail={error} /> : null}

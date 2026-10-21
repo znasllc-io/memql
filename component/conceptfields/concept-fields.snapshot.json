@@ -9007,6 +9007,7 @@
         "ownerUserId",
         "producedArtifactIds",
         "prompt",
+        "quotaRefused",
         "recordedSteps",
         "responseSchema",
         "result",
