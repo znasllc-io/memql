@@ -1538,8 +1538,14 @@ func writeDownload(w http.ResponseWriter, mimeType, fileName string, data []byte
 }
 
 func downloadDisposition(name string) string {
+	name = strings.Map(func(r rune) rune {
+		if r < 32 || r == 127 {
+			return '_'
+		}
+		return r
+	}, name)
 	ascii := strings.Map(func(r rune) rune {
-		if r > 126 || r < 32 {
+		if r > 126 {
 			return '_'
 		}
 		return r

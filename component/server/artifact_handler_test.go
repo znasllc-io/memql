@@ -956,6 +956,13 @@ func TestDownloadDispositionPreservesUnicodeAndCompoundExtension(t *testing.T) {
 	}
 }
 
+func TestDownloadDispositionSanitizesControlsWithoutDuplicateFilename(t *testing.T) {
+	_, params, err := mime.ParseMediaType(downloadDisposition("report\r\n.zip"))
+	if err != nil || params["filename"] != "report__.zip" {
+		t.Fatalf("control filename: %v, %v", params, err)
+	}
+}
+
 // A SECOND USER'S DOWNLOAD IS 404 (design 6, item 1).
 //
 // 404 rather than 403, so id probing cannot tell "exists but not mine" from
