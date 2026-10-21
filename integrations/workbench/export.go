@@ -118,8 +118,11 @@ func (i *Integration) exportFile(ctx context.Context, args map[string]any) (map[
 	}
 	// The step comes from authenticated execution context, never tool arguments.
 	// Separate steps cannot borrow one another's completion receipt.
-	identity := sha256.Sum256([]byte(owner + "\x00" + runID + "\x00" + stepKey + "\x00" + filePath + "\x00" + digest))
-	fileID := "workbench-file-" + hex.EncodeToString(identity[:])
+	identity := genOutputIdEngine.MustFromMap(map[string]any{
+		"ownerUserId": owner, "runId": runID, "stepKey": stepKey,
+		"path": filePath, "sha256": digest,
+	})
+	fileID := "workbench-file-" + string(identity)
 	key := "library/" + owner + "/" + fileID + "/" + name
 	mimeType := mime.TypeByExtension(path.Ext(name))
 	if mimeType == "" {
@@ -186,6 +189,8 @@ func (i *Integration) exportFile(ctx context.Context, args map[string]any) (map[
 }
 
 func copyExport(ctx context.Context, dest io.Writer, read func(int64, string) (exportChunk, error)) (int64, string, error) {
+	// Library and the storage adapter exchange the standard SHA-256 of the
+	// exact file bytes. This checksum is separate from the core/id receipt ID.
 	hash := sha256.New()
 	version, sourcePath := "", ""
 	var offset, size int64
