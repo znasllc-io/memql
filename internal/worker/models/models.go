@@ -347,8 +347,16 @@ func RuntimeLabel(kind string) string { return RuntimeLabelPrefix + strings.Trim
 // the attributes on purpose: a blocked model is still reported, so the
 // portal can distinguish it from one that is not installed.
 type Info struct {
-	Transcription string
-	Voices        map[string]string
+	// ModelBytes is the runtime-reported weight size, not a parameter estimate.
+	ModelBytes uint64
+	// PeakMemoryBytes is an operator-declared working-set ceiling for runtimes
+	// whose discovery protocol cannot report one. It stays local to admission.
+	PeakMemoryBytes uint64
+	// MemoryReferencePixels scales a declared image working set with output
+	// area. Zero means PeakMemoryBytes covers every accepted request.
+	MemoryReferencePixels uint64
+	Transcription         string
+	Voices                map[string]string
 	// ID is the runtime-facing model id -- the exact string the router
 	// will select on and send back in ModelCallStart.model, so it is
 	// never normalised or prettified here.

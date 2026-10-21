@@ -5,6 +5,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"gopkg.in/yaml.v3"
 )
 
 // repoRoot walks up from the test's own directory to the module root.
@@ -103,7 +105,7 @@ func TestBuildVariantStaysConst(t *testing.T) {
 
 // TestReleaseArtifactNamesAgree checks the ONE set of strings that lives
 // in three files: the Makefile's dist targets, install.sh's download
-// URL, and release.yml's upload list.
+// URL, and the native release stage's retained artifact directories.
 //
 // A rename applied to two of the three publishes a GREEN release whose
 // installer 404s. Nothing else in CI can see it -- the release workflow
@@ -112,7 +114,50 @@ func TestBuildVariantStaysConst(t *testing.T) {
 func TestReleaseArtifactNamesAgree(t *testing.T) {
 	makefile := readRepoFile(t, "Makefile")
 	installSh := readRepoFile(t, "install.sh")
-	releaseYml := readRepoFile(t, filepath.Join(".github", "workflows", "release.yml"))
+	manifest := readRepoFile(t, "memql-package.yaml")
+	var spec struct {
+		Pipeline struct {
+			Stages []struct {
+				Name  string
+				On    []string
+				Steps []struct {
+					Name      string
+					Run       string
+					Artifacts []string
+				}
+			}
+		}
+	}
+	if err := yaml.Unmarshal([]byte(manifest), &spec); err != nil {
+		t.Fatal(err)
+	}
+	var headless string
+	var retained []string
+	for _, stage := range spec.Pipeline.Stages {
+		if stage.Name != "release-build" {
+			continue
+		}
+		if len(stage.On) != 1 || stage.On[0] != "release" {
+			t.Error("release-build must select the release event")
+		}
+		for _, step := range stage.Steps {
+			if step.Name == "headless" {
+				headless, retained = step.Run, step.Artifacts
+			}
+		}
+	}
+	if !strings.Contains(headless, "make dist") {
+		t.Fatal("native release does not invoke the distributable build")
+	}
+	for _, directory := range []string{"bin", "dist", "sbom"} {
+		found := false
+		for _, artifact := range retained {
+			found = found || artifact == ".memql-ci/memql-cockpit/"+directory
+		}
+		if !found {
+			t.Errorf("native headless release does not retain %s", directory)
+		}
+	}
 
 	if !strings.Contains(installSh, `BINARY="memql"`) {
 		t.Error(`install.sh does not install BINARY="memql"`)
@@ -127,11 +172,8 @@ func TestReleaseArtifactNamesAgree(t *testing.T) {
 		if !strings.Contains(makefile, "$(BIN_DIR)/memql-"+triple+" ./cmd/memql") {
 			t.Errorf("Makefile does not cross-build memql-%s", triple)
 		}
-		if !strings.Contains(releaseYml, "bin/memql-"+triple) {
-			t.Errorf("release.yml does not upload bin/memql-%s", triple)
-		}
 	}
-	for name, body := range map[string]string{"Makefile": makefile, "install.sh": installSh, "release.yml": releaseYml} {
+	for name, body := range map[string]string{"Makefile": makefile, "install.sh": installSh, "memql-package.yaml": manifest} {
 		if strings.Contains(body, "bin/memql-cockpit") || strings.Contains(body, "memql-cockpit-$(VERSION)") {
 			t.Errorf("%s still names a pre-rename build artifact", name)
 		}

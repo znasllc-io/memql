@@ -4,10 +4,12 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"math"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/shirou/gopsutil/v4/mem"
 )
@@ -17,37 +19,81 @@ import (
 // host cushion and twenty percent of Docker free; empty slots consume no budget.
 // The caller holds the cross-process admission lock through Create.
 func (d Docker) Headroom(ctx context.Context, runtime Runtime, active []record) error {
-	d.endpoint = runtime.Endpoint
-	if err := d.verifyDaemon(ctx, runtime); err != nil {
+	usage, err := d.memoryUsage(ctx, runtime)
+	if err != nil {
 		return err
 	}
-	out, err := d.command(ctx, nil, "stats", "--no-stream", "--format", "{{json .}}")
-	if err != nil {
-		return fmt.Errorf("cannot measure Docker memory headroom")
-	}
-	usage := map[string]uint64{}
-	for _, line := range bytes.Split(out, []byte{'\n'}) {
-		if len(bytes.TrimSpace(line)) == 0 {
-			continue
-		}
-		var row struct{ Name, MemUsage string }
-		if json.Unmarshal(line, &row) != nil || row.Name == "" {
-			return fmt.Errorf("Docker returned unreadable memory usage")
-		}
-		used, err := memoryQuantity(strings.TrimSpace(strings.SplitN(row.MemUsage, "/", 2)[0]))
-		if err != nil {
-			return err
-		}
-		if _, duplicate := usage[row.Name]; duplicate {
-			return fmt.Errorf("Docker returned duplicate memory usage")
-		}
-		usage[row.Name] = used
-	}
+	// Sample the host after Docker's bounded retry, so neither limit is stale.
 	host, err := mem.VirtualMemoryWithContext(ctx)
 	if err != nil || host.Total == 0 {
 		return fmt.Errorf("cannot measure machine memory headroom")
 	}
 	return checkHeadroom(host.Total, host.Available, runtime, active, usage)
+}
+
+var errDockerStatsUnavailable = errors.New("Docker memory measurement is unavailable")
+
+// Docker can report "-- / --" when a container's statistics sample is not
+// ready. Retry only that observation, never a workbench command or container
+// creation. A persistent missing sample still refuses admission.
+func (d Docker) memoryUsage(ctx context.Context, runtime Runtime) (map[string]uint64, error) {
+	ctx, cancel := context.WithTimeout(ctx, 10*time.Second)
+	defer cancel()
+	d.endpoint = runtime.Endpoint
+	for attempt := 0; attempt < 3; attempt++ {
+		if err := d.verifyDaemon(ctx, runtime); err != nil {
+			return nil, err
+		}
+		out, err := d.command(ctx, nil, "stats", "--no-stream", "--format", "{{json .}}")
+		if err != nil {
+			return nil, fmt.Errorf("cannot measure Docker memory headroom: %w", err)
+		}
+		used, err := dockerMemoryUsage(out)
+		if !errors.Is(err, errDockerStatsUnavailable) || attempt == 2 {
+			return used, err
+		}
+		timer := time.NewTimer(250 * time.Millisecond)
+		select {
+		case <-ctx.Done():
+			timer.Stop()
+			return nil, ctx.Err()
+		case <-timer.C:
+		}
+	}
+	return nil, errDockerStatsUnavailable
+}
+
+func dockerMemoryUsage(out []byte) (map[string]uint64, error) {
+	usage := map[string]uint64{}
+	var total uint64
+	for _, line := range bytes.Split(out, []byte{'\n'}) {
+		if len(bytes.TrimSpace(line)) == 0 {
+			continue
+		}
+		var row struct{ Name, MemUsage string }
+		if json.Unmarshal(line, &row) != nil {
+			return nil, fmt.Errorf("Docker returned unreadable memory usage")
+		}
+		if strings.TrimSpace(row.MemUsage) == "-- / --" {
+			return nil, errDockerStatsUnavailable
+		}
+		if row.Name == "" {
+			return nil, fmt.Errorf("Docker returned unnamed memory usage")
+		}
+		if _, duplicate := usage[row.Name]; duplicate {
+			return nil, fmt.Errorf("Docker returned duplicate memory usage")
+		}
+		used, err := memoryQuantity(strings.TrimSpace(strings.SplitN(row.MemUsage, "/", 2)[0]))
+		if err != nil {
+			return nil, err
+		}
+		if used > math.MaxUint64-total {
+			return nil, fmt.Errorf("Docker memory usage exceeds its numeric bound")
+		}
+		total += used
+		usage[row.Name] = used
+	}
+	return usage, nil
 }
 
 func checkHeadroom(total, available uint64, runtime Runtime, active []record, usage map[string]uint64) error {

@@ -27,6 +27,7 @@ import (
 // ollamaTagsResponse is the shape of GET /api/tags.
 type ollamaTagsResponse struct {
 	Models []struct {
+		Size    uint64 `json:"size"`
 		Name    string `json:"name"`
 		Model   string `json:"model"`
 		Details struct {
@@ -77,10 +78,11 @@ func (d *Discoverer) probeOllama(ctx context.Context) ([]Info, string) {
 			continue
 		}
 		info := Info{
-			ID:      id,
-			Kind:    KindOllama,
-			Runtime: KindOllama,
-			BaseURL: base,
+			ModelBytes: m.Size,
+			ID:         id,
+			Kind:       KindOllama,
+			Runtime:    KindOllama,
+			BaseURL:    base,
 			Attributes: Attributes{
 				MaxConcurrent: parallel,
 				// Otherwise verbatim: quantLevel folds only Ollama's own
