@@ -66,7 +66,7 @@ struct PermissionRestartProgress {
         if let report, report.fresh(at: now), report.pid != oldPID {
             cancel()
             if report.granted(at: now) { return "Restart complete. Both permissions are confirmed." }
-            return "Restart complete. Review the current permissions above."
+            return "Restart complete. macOS still denies access to this worker. If MemQL is enabled in System Settings, its saved approval may belong to a different build. Check the installed app and signing identity before approving again."
         }
         if let deadline, now > deadline {
             cancel()

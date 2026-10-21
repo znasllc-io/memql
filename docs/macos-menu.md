@@ -317,8 +317,16 @@ ad-hoc signature does not solve this. See Apple's
 [code-signing requirements](https://developer.apple.com/documentation/technotes/tn3127-inside-code-signing-requirements)
 and [DTS confirmation of permission loss with ad-hoc builds](https://developer.apple.com/forums/thread/819406).
 
+For local testing, provision an **Apple Development** identity and its private
+key in this Mac's keychain. Pass its name or SHA-1 explicitly to
+`build-app.sh --signing-identity=IDENTITY`; the builder uses that identity for
+both the worker and its embedded menu, verifies both signatures, and fails if
+the requested identity cannot sign. Omitting the flag retains the ad-hoc
+development mode, whose approvals may need renewing after each changed build.
+Never substitute an identifier-only requirement for certificate signing.
+
 Distribution signing needs a provisioned **Developer ID Application** identity
-and a stable worker signing identifier (planned: `com.znasllc.memql-worker`).
+and the stable worker signing identifier `com.znasllc.memql-worker`.
 The menu retains `com.znasllc.memql-cockpit-menubar`. Before enabling signed
 releases, provision the certificate/private key securely in CI, sign both native
 architectures before hashing and packaging, verify the designated requirement

@@ -8,14 +8,16 @@ cap_init "cockpit.app.build" "Bundle the actual worker and native menu as MemQL.
 cap_spec_param "worker" "Absolute path to the built macOS computer-use worker"
 cap_spec_param "output" "Absolute output .app path"
 cap_spec_param "version" "Version matching the worker"
+cap_spec_param "signing-identity" "Code-signing certificate name or SHA-1 (default: ad-hoc development signature)"
 
 function main() {
     cap_handle_meta "$@"
     cap_parse_flags "$@"
-    local worker output version stage helper actual_version minimum_os worker_arch
+    local worker output version stage helper actual_version minimum_os worker_arch signing_identity
     worker="$(cap_param worker)"
     output="$(cap_param output "$REPO_ROOT/bin/MemQL.app")"
     version="$(cap_param version "$(cat "$REPO_ROOT/VERSION")")"
+    signing_identity="$(cap_param signing-identity -)"
     [[ "$worker" == /* && -x "$worker" ]] || cap_fail 2 "worker must name a built executable"
     [[ "$output" == /* && "$output" == *.app ]] || cap_fail 2 "output must be an absolute .app path"
     worker_arch="$(lipo -archs "$worker")"
@@ -34,15 +36,16 @@ function main() {
     stage="$COCKPIT_BUILD_SCRATCH"
     helper="$stage/MemQL.app/Contents/Library/LoginItems/MemQL Menu.app"
     mkdir -p "$(dirname "$helper")" "$stage/MemQL.app/Contents/MacOS" "$stage/MemQL.app/Contents/Resources"
-    "$REPO_ROOT/scripts/macos/build-menubar.sh" --output="$helper" --version="$version" --arch="$worker_arch" >&2 || cap_fail 5 "menu build failed"
+    "$REPO_ROOT/scripts/macos/build-menubar.sh" --output="$helper" --version="$version" --arch="$worker_arch" --signing-identity="$signing_identity" >&2 || cap_fail 5 "menu build failed"
     cp "$worker" "$stage/MemQL.app/Contents/MacOS/MemQL"
     cp "$REPO_ROOT/native/macos/WorkerInfo.plist" "$stage/MemQL.app/Contents/Info.plist"
     cp "$helper/Contents/Resources/MemQL.icns" "$stage/MemQL.app/Contents/Resources/MemQL.icns"
     /usr/libexec/PlistBuddy -c "Set :CFBundleShortVersionString $version" "$stage/MemQL.app/Contents/Info.plist" >&2
     /usr/libexec/PlistBuddy -c "Set :CFBundleVersion $version" "$stage/MemQL.app/Contents/Info.plist" >&2
     /usr/libexec/PlistBuddy -c "Set :LSMinimumSystemVersion $minimum_os" "$stage/MemQL.app/Contents/Info.plist" >&2
-    # This is an honest development signature, not upgrade-stable Developer ID.
-    codesign --force --sign - "$stage/MemQL.app" >&2 || cap_fail 5 "worker bundle signing failed"
+    # Use the same certificate for both bundles. A requested certificate must
+    # succeed; never fall back to ad-hoc signing and silently change identity.
+    codesign --force --sign "$signing_identity" "$stage/MemQL.app" >&2 || cap_fail 5 "worker bundle signing failed"
     codesign --verify --deep --strict "$stage/MemQL.app" >&2 || cap_fail 3 "bundle signature verification failed"
     mkdir -p "$(dirname "$output")"
     if [[ -d "$output" ]] && diff -qr "$stage/MemQL.app" "$output" >/dev/null; then
@@ -53,7 +56,11 @@ function main() {
     fi
     cleanup_build_scratch || cap_fail 5 "build scratch cleanup failed"
     cap_result_set app "$output"
-    cap_result_set signing "ad-hoc; Developer ID provisioning required for stable upgrades"
+    if [[ "$signing_identity" == - ]]; then
+        cap_result_set signing "ad-hoc; certificate signing required for stable upgrades"
+    else
+        cap_result_set signing "$signing_identity"
+    fi
     cap_ok
 }
 main "$@"
