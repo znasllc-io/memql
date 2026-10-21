@@ -45,6 +45,7 @@ require (
 	github.com/znasllc-io/memql/component/router v0.0.0
 	github.com/znasllc-io/memql/component/safety v0.0.0
 	github.com/znasllc-io/memql/component/secret v0.0.0
+	github.com/znasllc-io/memql/component/server v0.0.0
 	github.com/znasllc-io/memql/component/skills v0.0.0
 	github.com/znasllc-io/memql/component/work v0.0.0
 	github.com/znasllc-io/memql/component/worker v0.0.0
@@ -273,3 +274,5 @@ replace github.com/znasllc-io/memql/component/deploycontrol => ../component/depl
 replace github.com/znasllc-io/memql/component/healing => ../component/healing
 
 replace github.com/znasllc-io/memql/component/frontdoor => ../component/frontdoor
+
+replace github.com/znasllc-io/memql/component/server => ../component/server

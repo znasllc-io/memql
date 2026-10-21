@@ -9,10 +9,12 @@ toolchain go1.27.3
 require (
 	github.com/znasllc-io/memql/component/auth v0.0.0
 	github.com/znasllc-io/memql/component/database v0.0.0
+	github.com/znasllc-io/memql/component/grpc/gen v0.0.0
 	github.com/znasllc-io/memql/component/identity v0.0.0
 	github.com/znasllc-io/memql/component/language v0.0.0
 	github.com/znasllc-io/memql/component/memql v0.0.0
 	github.com/znasllc-io/memql/core v0.0.0
+	google.golang.org/protobuf v1.36.12
 )
 
 require (
@@ -60,7 +62,6 @@ require (
 	github.com/znasllc-io/memql/component/envregistry v0.0.0 // indirect
 	github.com/znasllc-io/memql/component/events v0.0.0 // indirect
 	github.com/znasllc-io/memql/component/frontdoor v0.0.0 // indirect
-	github.com/znasllc-io/memql/component/grpc/gen v0.0.0 // indirect
 	github.com/znasllc-io/memql/component/language/annotations v0.0.0 // indirect
 	github.com/znasllc-io/memql/component/language/ast v0.0.0 // indirect
 	github.com/znasllc-io/memql/component/language/dslclause v0.0.0 // indirect
@@ -81,7 +82,6 @@ require (
 	golang.org/x/text v0.43.0 // indirect
 	google.golang.org/genproto/googleapis/rpc v0.0.0-20260803160001-6ac0973c030d // indirect
 	google.golang.org/grpc v1.83.2 // indirect
-	google.golang.org/protobuf v1.36.12 // indirect
 	gopkg.in/yaml.v3 v3.0.1 // indirect
 	mellium.im/sasl v0.3.2 // indirect
 )
