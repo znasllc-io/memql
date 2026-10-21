@@ -40,7 +40,8 @@ const ago = (seconds: number) => new Date(NOW.getTime() - seconds * 1000).toISOS
 
 const LOCAL: Draft = { name: "studio-mac-mini", platform: "mac", computerUse: false, inference: true, workbench: false, userLocal: false };
 const TOOLS: Draft = { ...LOCAL, inference: false };
-const MINT = { token: "mql_wkr_6m1Zt0QeJ4l7XcYp2r9WvKdB3sHnGaF8uTqLoE5yIjM", identityId: "v1:identity:identity:tok-studio" };
+// Display-only placeholder: deliberately not shaped like an issued worker credential.
+const MINT = { token: "mql_wkr_EXAMPLE_ONLY", identityId: "v1:identity:identity:tok-studio" };
 
 const APPS_REPORTED = [
   { id: "claude-code", allowed: true, signedIn: true, version: "2.1.302" },
