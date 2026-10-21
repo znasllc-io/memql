@@ -43,7 +43,7 @@ import (
 var classifySymptomSchema = json.RawMessage(`{
   "type": "object",
   "additionalProperties": false,
-  "required": ["symptom", "reason"],
+  "required": ["symptom", "reason", "confidence"],
   "properties": {
     "symptom": {"type": "string", "enum": ["transient", "environment", "contract", "plan", "human"]},
     "reason": {"type": "string"},
