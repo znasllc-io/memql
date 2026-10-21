@@ -52,7 +52,7 @@ FROM release_publication_intents WHERE candidate_id=$1 ORDER BY target_id,compon
 		if err := rows.Scan(&effect, &target, &component, &artifact, &approval, &state, &body); err != nil {
 			return nil, err
 		}
-		if len(out) == 1024 || effect == "" || record.State != "approved" || approval == "" || approval != record.ApprovalID || (state != "pending" && state != "complete") {
+		if len(out) == 1024 || effect == "" || (record.State != "approved" && record.State != "archived") || approval == "" || approval != record.ApprovalID || (state != "pending" && state != "complete") || (record.State == "archived" && state != "complete") {
 			return nil, errors.New("candidate publication journal is inconsistent")
 		}
 		entry, err := candidatePublicationFor(record, target, component, artifact)

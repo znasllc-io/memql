@@ -234,11 +234,12 @@ func (f stepFiles) storeVerifiedArtifact(ctx context.Context, file SnapshotFile,
 	}
 	defer input.Close()
 	name := artifactFileName(file.Path)
-	got, err := store.StoreRunFileStream(ctx, StreamRunFile{
+	request := StreamRunFile{
 		OwnerUserID: f.run.OwnerUserID, WorkRunID: f.run.WorkRunID, StepKey: f.run.StepKey,
 		Attempt: f.run.Attempt, Path: file.Path, Name: name, MimeType: artifactMIME(file.Path),
 		Size: file.Size, SHA256: file.SHA256, Body: input,
-	})
+	}
+	got, err := store.StoreRunFileStream(ctx, request)
 	what := "the artifact " + f.quote(file.Path)
 	if err != nil {
 		f.log.Warn("pipelines: a step's file could not be stored in the Library", "file", f.mask(name), "error", f.mask(err.Error()))
@@ -249,13 +250,17 @@ func (f stepFiles) storeVerifiedArtifact(ctx context.Context, file SnapshotFile,
 		notes.add(pl.CodeArtifactMissing, what+" was not stored in the Library: "+got.Omitted)
 		return StoredFile{}, errors.New("required artifact was omitted by storage")
 	}
-	r := got.Receipt
-	if r == nil || got.FileID == "" || r.FileID != got.FileID || !pl.ValidArtifactIntentIDs([]string{r.IntentID}) ||
-		!sameNodeID(r.OwnerUserID, f.run.OwnerUserID) || !sameNodeID(r.WorkRunID, f.run.WorkRunID) || r.StepKey != f.run.StepKey || r.Attempt != f.run.Attempt ||
-		r.Path != file.Path || r.Size != file.Size || r.SHA256 != file.SHA256 || r.Container == "" || r.Object == "" || r.URL == "" || r.ETag == "" {
+	if !matchingStoredFileReceipt(got, request) {
 		return StoredFile{}, errors.New("artifact storage returned no matching verified receipt")
 	}
 	return got, nil
+}
+
+func matchingStoredFileReceipt(got StoredFile, input StreamRunFile) bool {
+	r := got.Receipt
+	return r != nil && got.FileID != "" && r.FileID == got.FileID && pl.ValidArtifactIntentIDs([]string{r.IntentID}) &&
+		sameNodeID(r.OwnerUserID, input.OwnerUserID) && sameNodeID(r.WorkRunID, input.WorkRunID) && r.StepKey == input.StepKey && r.Attempt == input.Attempt &&
+		r.Path == input.Path && r.Size == input.Size && r.SHA256 == input.SHA256 && r.Container != "" && r.Object != "" && r.URL != "" && r.ETag != ""
 }
 
 // sameNodeID is one node in either spelling. The Library keys a receipt by

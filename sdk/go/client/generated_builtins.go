@@ -5098,6 +5098,32 @@ func PipelinesDisconnectBuild(args PipelinesDisconnectArgs) string {
 	return b.String()
 }
 
+// PipelinesExpiredArtifacts -- Read confirmed expiry for selected files from the caller's pipeline run. Only provider retirement AND Library cleanup receipts establish expiry. Missing files, failed uploads and unavailable reads do not imply expiry.
+type PipelinesExpiredArtifactsArgs struct {
+	RunId   string
+	FileIds []string
+}
+
+// PipelinesExpiredArtifacts calls the engine builtin pipelinesExpiredArtifacts.
+func (qc *QueryClient) PipelinesExpiredArtifacts(ctx context.Context, args PipelinesExpiredArtifactsArgs) (*Result, error) {
+	call := PipelinesExpiredArtifactsBuild(args)
+	return qc.executeNamed(ctx, "pipelinesExpiredArtifacts", call)
+}
+
+func PipelinesExpiredArtifactsBuild(args PipelinesExpiredArtifactsArgs) string {
+	var b strings.Builder
+	b.WriteString("builtin pipelinesExpiredArtifacts(")
+	b.WriteString("runId: ")
+	b.WriteString(quoteMemQL(args.RunId))
+	if b.Len() > 34 {
+		b.WriteString(", ")
+	}
+	b.WriteString("fileIds: ")
+	b.WriteString(renderMemQLValue(args.FileIds))
+	b.WriteString(")")
+	return b.String()
+}
+
 // PipelinesInstallations -- The installations of this cluster's GitHub App whose accepted permissions lag what the app asks for (epic memql#5479, D15): when an app's permissions grow -- pipelines added checks write -- every existing installation keeps the old set until the account that installed it approves the change on GitHub, and until then every check-run write there answers 403. Asked of GitHub as the app itself. Answers one row, {installations [{installationId, account, accountType, htmlUrl, missingPermissions, suspended}]}: htmlUrl is the installation's settings page, where the change waits. A cluster with no GitHub App answers none; a GitHub that could not be asked is an error, never an empty list.
 type PipelinesInstallationsArgs struct {
 }
@@ -5579,6 +5605,26 @@ func (qc *QueryClient) ReleaseApproveCandidate(ctx context.Context, args Release
 func ReleaseApproveCandidateBuild(args ReleaseApproveCandidateArgs) string {
 	var b strings.Builder
 	b.WriteString("builtin releaseApproveCandidate(")
+	b.WriteString("candidateId: ")
+	b.WriteString(quoteMemQL(args.CandidateId))
+	b.WriteString(")")
+	return b.String()
+}
+
+// ReleaseArchiveCandidate -- Release duplicate build inputs only after fresh verification of every canonical published artifact. Publication history and downloads survive; the archived candidate can never publish or prepare again. Owner only.
+type ReleaseArchiveCandidateArgs struct {
+	CandidateId string
+}
+
+// ReleaseArchiveCandidate calls the engine builtin releaseArchiveCandidate.
+func (qc *QueryClient) ReleaseArchiveCandidate(ctx context.Context, args ReleaseArchiveCandidateArgs) (*Result, error) {
+	call := ReleaseArchiveCandidateBuild(args)
+	return qc.executeNamed(ctx, "releaseArchiveCandidate", call)
+}
+
+func ReleaseArchiveCandidateBuild(args ReleaseArchiveCandidateArgs) string {
+	var b strings.Builder
+	b.WriteString("builtin releaseArchiveCandidate(")
 	b.WriteString("candidateId: ")
 	b.WriteString(quoteMemQL(args.CandidateId))
 	b.WriteString(")")
@@ -6103,6 +6149,26 @@ func ReleaseSealPublishedCandidateBuild(args ReleaseSealPublishedCandidateArgs) 
 	}
 	b.WriteString("approvalId: ")
 	b.WriteString(quoteMemQL(args.ApprovalId))
+	b.WriteString(")")
+	return b.String()
+}
+
+// ReleaseSetInputArchiveSchedule -- Enroll or pause your published-input cleanup. The schedule resolves your current owner role and retains credential ceilings; maintenance cannot lend authority. Pausing prevents another pass; an admitted pass may finish.
+type ReleaseSetInputArchiveScheduleArgs struct {
+	Enabled bool
+}
+
+// ReleaseSetInputArchiveSchedule calls the engine builtin releaseSetInputArchiveSchedule.
+func (qc *QueryClient) ReleaseSetInputArchiveSchedule(ctx context.Context, args ReleaseSetInputArchiveScheduleArgs) (*Result, error) {
+	call := ReleaseSetInputArchiveScheduleBuild(args)
+	return qc.executeNamed(ctx, "releaseSetInputArchiveSchedule", call)
+}
+
+func ReleaseSetInputArchiveScheduleBuild(args ReleaseSetInputArchiveScheduleArgs) string {
+	var b strings.Builder
+	b.WriteString("builtin releaseSetInputArchiveSchedule(")
+	b.WriteString("enabled: ")
+	b.WriteString(fmt.Sprintf("%v", args.Enabled))
 	b.WriteString(")")
 	return b.String()
 }

@@ -27,6 +27,13 @@ type candidateDraftAsset struct {
 	Expected    githubrelease.AssetExpectation `json:"expected"`
 }
 
+func (p candidateDraftPlan) marker(record candidateDraftRecord) string {
+	if p.Target.ReleaseID == 0 {
+		return record.IntentID
+	}
+	return ""
+}
+
 func draftResourceKey(t candidateFileTarget) string {
 	origin := strings.ToLower(strings.TrimSuffix(t.APIOrigin, "/"))
 	if u, err := url.Parse(origin); err == nil {

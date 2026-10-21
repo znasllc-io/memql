@@ -30,7 +30,10 @@ set -euo pipefail
 for tool in k3d kubectl mkcert; do
   if command -v "$tool" >/dev/null 2>&1; then
     found="$(command -v "$tool")"
-    sudo mv "$found" "$MEMQL_INSTALL_EVIDENCE_DIR/${tool}.preinstalled"
+    # These fixture tools are not test evidence. Keep them in disposable
+    # scratch space so artifact collection does not upload their binaries.
+    scratch="$(mktemp -d /tmp/memql-installer-tool.XXXXXX)"
+    sudo mv "$found" "$scratch/$tool"
     echo "moved preinstalled $tool aside (was $found)"
   fi
 done

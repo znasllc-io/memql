@@ -355,3 +355,22 @@ automation releasePromoteDraftWorkflow {
   }
   builtin releasePromotionRecord()
 }
+
+/// Keep duplicate publication inputs for 48 hours after the signed catalog
+/// is sealed. Canonical downloads and images remain; their version retention
+/// is a separate policy. Native verification and fencing cannot be bypassed.
+@template
+automation releasePublishedInputRetentionPolicy {
+  args { ageSeconds int! }
+  if args.ageSeconds >= 172800 {
+    return builtin releaseRetentionArchiveInputs()
+  }
+  return {retained: true}
+}
+
+/// Explicit owner enrollment is required. Each pass has one durable lease and
+/// at most one candidate; replicas resume from a shared fair cursor.
+@trigger(schedule="45 * * * * *", node="agent", lease="release-input-retention")
+automation sweepPublishedReleaseInputs {
+  result := builtin releaseSweepPublishedInputs()
+}

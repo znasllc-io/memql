@@ -201,7 +201,7 @@ WHERE owner_user_id=$1 AND state='active' AND intent_ids ? $2)`, scope.OwnerUser
 		return intent, "", "", err
 	}
 	if pinned {
-		return intent, "", "", errors.New("artifact is retained by an active durable reference")
+		return intent, "", "", fmt.Errorf("%w by an active durable reference", pipelinesteps.ErrArtifactRetained)
 	}
 	var token, retiredETag string
 	if err := tx.QueryRowContext(ctx, "SELECT retirement_lease_id,retired_etag FROM pipeline_artifact_uploads WHERE intent_id=$1", key).Scan(&token, &retiredETag); err != nil {
@@ -213,6 +213,9 @@ WHERE owner_user_id=$1 AND state='active' AND intent_ids ? $2)`, scope.OwnerUser
 			return intent, "", "", errors.New("artifact retirement journal is incomplete")
 		}
 	case "reserved", "blob_verified", "ready":
+		if err := checkPipelineLibraryRetirement(ctx, tx, intent); err != nil {
+			return intent, "", "", err
+		}
 		var random [16]byte
 		if _, err := rand.Read(random[:]); err != nil {
 			return intent, "", "", err

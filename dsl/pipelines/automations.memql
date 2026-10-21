@@ -1,3 +1,44 @@
+/// Routine successful builds need two days of downloads; failed runs need a
+/// week for diagnosis. Release evidence gets two weeks before unpinned files
+/// qualify. Native publication references and deliberately kept Library files
+/// always survive these windows. Age begins at actual run completion.
+@template
+automation pipelineArtifactRetentionPolicy {
+  args { terminal bool! ageSeconds int! eventName string! conclusion string! }
+  keepSeconds := args.eventName == "release" ? 1209600 :
+    args.conclusion == "success" ? 172800 : 604800
+  if args.terminal && args.ageSeconds >= keepSeconds {
+    return builtin pipelineRetentionSweepPage()
+  }
+  return {retained: true}
+}
+
+/// One bounded page a minute, fairly rotated across producers. A durable
+/// per-producer lease protects the pass if cron leadership changes replicas.
+@trigger(schedule="30 * * * * *", node="agent", lease="pipelines-artifact-retention")
+automation sweepPipelineArtifacts {
+  result := builtin pipelinesSweepArtifacts()
+}
+
+/// Cleanup one authorized page. Byte retirement precedes Library removal;
+/// retained files are skipped, while an unconfirmed provider effect stops the
+/// page. A later invocation resumes through the same permanent native journal.
+@template
+automation retirePipelineArtifacts {
+  args { dryRun bool! }
+  items := builtin pipelineRetentionItems()
+  if !args.dryRun {
+    for item in items {
+      builtin pipelineRetentionFence(intentId: item.intentId)
+      outcome := builtin pipelineRetentionRetire(intentId: item.intentId)
+      if !outcome.retained {
+        builtin pipelineRetentionPurge(intentId: item.intentId)
+      }
+    }
+  }
+  return builtin pipelineRetentionReport()
+}
+
 // automations.memql
 //
 // The pipelines namespace's two triggers (epic memql#5477): a GitHub delivery

@@ -2,6 +2,7 @@ package pipelinerun
 
 import (
 	"context"
+	"database/sql"
 	"errors"
 	"go/ast"
 	"go/parser"
@@ -35,7 +36,10 @@ func TestTheStampNeverEscapesItsCall(t *testing.T) {
 	}
 	fset := token.NewFileSet()
 	sites := 0
-	want := map[string]int{"store_dsl.go": 1, "sarif.go": 4, "repository_change.go": 2, "repository_cleanup.go": 1}
+	// Retention stamps only the owner-bound storage recipe; legacy adoption
+	// stamps only its verified log operation, after the completed work/step read.
+	want := map[string]int{"store_dsl.go": 1, "sarif.go": 4, "repository_change.go": 2, "repository_cleanup.go": 1,
+		"artifact_retention.go": 1, "artifact_retention_legacy.go": 1}
 	for _, entry := range entries {
 		name := entry.Name()
 		if entry.IsDir() || !strings.HasSuffix(name, ".go") || strings.HasSuffix(name, "_test.go") {
@@ -68,8 +72,8 @@ func TestTheStampNeverEscapesItsCall(t *testing.T) {
 			t.Errorf("%s has %d internal-origin stamps, want %d audited storage calls", name, fileSites, want[name])
 		}
 	}
-	if sites != 8 {
-		t.Errorf("want the eight audited inline storage stamps, found %d", sites)
+	if sites != 10 {
+		t.Errorf("want the ten audited inline storage stamps, found %d", sites)
 	}
 }
 
@@ -82,13 +86,16 @@ func TestTheStampNeverEscapesItsCall(t *testing.T) {
 func TestNoPersonReachesAnotherOwnersRows(t *testing.T) {
 	engine := newRecordingEngine()
 	integ := New(Deps{
-		Store:  NewDSLStore(engine),
-		GitHub: newFakeGitHub(t),
-		Gate:   newKeyedGate(t).run,
-		Now:    func() time.Time { return testNow },
+		ArtifactRetention: &ArtifactRetentionDependencies{Engine: engine, Library: &artifactRetentionLibraryFixture{}, Database: func() *sql.DB { return nil }},
+		Store:             NewDSLStore(engine),
+		GitHub:            newFakeGitHub(t),
+		Gate:              newKeyedGate(t).run,
+		Now:               func() time.Time { return testNow },
 	})
 	stranger := personCtx(otherID)
 	acts := map[string]func() error{
+		"retireArtifacts": func() error { _, err := integ.RetireArtifacts(stranger, "r1", "", false); return err },
+		"adoptLegacyLog":  func() error { _, err := integ.AdoptLegacyLog(stranger, "r1", "tests.unit"); return err },
 		"connect": func() error {
 			_, err := integ.Connect(stranger, ConnectRequest{PackageID: packageID, Delivery: DeliveryWebhook})
 			return err
@@ -193,6 +200,9 @@ func TestTheRunnersEntryPointsRefuseAClientAndReadAsTheSystemActor(t *testing.T)
 	}
 	if _, err := integ.Schedule(caller); !errors.Is(err, ErrClientOrigin) {
 		t.Errorf("a person's scheduled scan: %v, want ErrClientOrigin", err)
+	}
+	if _, err := integ.SweepArtifacts(caller); !errors.Is(err, ErrClientOrigin) {
+		t.Errorf("a person's artifact sweep: %v, want ErrClientOrigin", err)
 	}
 	if _, err := integ.handlePoll(caller, nil, 0); !errors.Is(err, ErrClientOrigin) {
 		t.Errorf("a person's poll capability: %v, want ErrClientOrigin", err)

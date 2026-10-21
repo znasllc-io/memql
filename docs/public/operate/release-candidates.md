@@ -305,6 +305,38 @@ prevents retirement. If readback cannot prove completion, resolve the remote
 state explicitly; there is no automatic fence reset. A crash between claiming
 and sending an effect is also uncertain.
 
+An owner can call `releaseArchiveCandidate(candidateId)` to release a published
+candidate's duplicate build inputs. Every destination must have a complete
+native publication receipt and the candidate must have a signed catalog. The
+operation freshly reads and verifies the canonical registry images, release
+assets or npm archive before recording a permanent `archived` state. Missing
+or changed bytes, unfinished publication and an inconsistent catalog refuse
+archival. Historical GitHub releases need not remain selected as latest.
+
+Archival releases only that candidate's Library retention references. Other
+candidate references and deliberately kept Library files still protect shared
+inputs. Ordinary pipeline retention removes eligible duplicate files later;
+published downloads, tags, images, approvals, signed catalogs and compact
+publication receipts remain. An interrupted reference release resumes on a
+different node, but an archived candidate can never prepare or publish again.
+Archival does not prune canonical release versions or select which versions
+an installation needs for rollback.
+
+Owners can enable automatic duplicate-input archival with
+`releaseSetInputArchiveSchedule(enabled: true)`. The installed
+`releasePublishedInputRetentionPolicy` waits 48 hours after catalog sealing.
+An agent schedule admits at most one candidate per pass, using a durable lease
+and cursor shared by all replicas. It includes existing and future sealed
+candidates belonging to the enrolled owner. An interrupted pass resumes, and
+completed input releases leave the scan without deleting publication history.
+
+Enrollment captures the caller's authority ceiling, never a credential. Each
+pass resolves the owner's current role and preserves restricted-grant expiry;
+revocation or expiry leaves the inputs retained. Disable with
+`releaseSetInputArchiveSchedule(enabled: false)` to prevent another pass. An
+already admitted pass may finish. This enrollment authorizes duplicate-input
+archival only; it cannot remove canonical release downloads or registry images.
+
 Native row locks and pending publication receipts coordinate this system's
 uploads and promotion across replicas. GitHub has no atomic operation binding
 draft visibility, its tag and all assets together. Before/after checks detect

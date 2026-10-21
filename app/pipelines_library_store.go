@@ -82,6 +82,10 @@ const pipelineFileSource = "pipeline"
 
 // pipelinesLibraryStore implements pipelinesteps.LibraryStore.
 type pipelinesLibraryStore struct {
+	// Called after committed presentation retirement. Cache invalidation uses
+	// the engine's existing mesh channel; the index deletion uses its existing
+	// Library broadcast route so live collections drop the generated entry.
+	notifyRetired func(context.Context, string, string)
 	// engine runs the file row's create, under the owner's actor.
 	engine server.MemQLExecutor
 	// library is the Library's own store over the same engine: the owner's
@@ -128,6 +132,9 @@ func (a *App) pipelinesLibraryStoreFor(uploader server.FileUploader, bucket stri
 		engine = &AttachmentEngineAdapter{Engine: a.engine}
 	}
 	store := newPipelinesLibraryStore(engine, uploader, bucket, a.Logger)
+	if a.engine != nil {
+		store.notifyRetired = a.notifyRetiredPipelineFile
+	}
 	store.uploadDB = func() *sql.DB {
 		if db := a.BunDB(); db != nil {
 			return db.DB
