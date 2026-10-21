@@ -4,7 +4,7 @@ module github.com/znasllc-io/memql/integrations/stt
 
 go 1.26.1
 
-toolchain go1.27.2
+toolchain go1.27.3
 
 require (
 	github.com/openai/openai-go/v3 v3.71.1

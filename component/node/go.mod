@@ -4,7 +4,7 @@ module github.com/znasllc-io/memql/component/node
 
 go 1.26.1
 
-toolchain go1.27.2
+toolchain go1.27.3
 
 require (
 	github.com/stretchr/testify v1.12.1
