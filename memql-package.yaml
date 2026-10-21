@@ -16,7 +16,7 @@ pipeline:
       timeout: 30m
       run: |
         set -eu
-        export GOTOOLCHAIN=go1.26.9 GOWORK=off GOFLAGS=-p=2 GOMAXPROCS=2
+        export GOTOOLCHAIN=go1.26.10 GOWORK=off GOFLAGS=-p=2 GOMAXPROCS=2
         python3 scripts/ci/prepare.py
         cd .memql-ci/memql-cockpit
         CGO_ENABLED=0 go build ./...
@@ -40,7 +40,7 @@ pipeline:
       timeout: 30m
       run: |
         set -eu
-        export GOTOOLCHAIN=go1.26.9 GOWORK=off GOFLAGS=-p=2 GOMAXPROCS=2
+        export GOTOOLCHAIN=go1.26.10 GOWORK=off GOFLAGS=-p=2 GOMAXPROCS=2
         python3 scripts/ci/prepare.py
         cd .memql-ci/memql-cockpit
         go vet ./...
@@ -50,7 +50,7 @@ pipeline:
       timeout: 30m
       run: |
         set -eu
-        export GOTOOLCHAIN=go1.26.9 GOWORK=off GOFLAGS=-p=2 GOMAXPROCS=2
+        export GOTOOLCHAIN=go1.26.10 GOWORK=off GOFLAGS=-p=2 GOMAXPROCS=2
         python3 scripts/ci/prepare.py
         cd .memql-ci/memql-cockpit
         test -z "$(gofmt -l .)"
@@ -121,7 +121,7 @@ pipeline:
       caches: [go]
       run: |
         set -eu
-        export GOTOOLCHAIN=go1.26.9 GOWORK=off GOFLAGS=-p=2 GOMAXPROCS=2 GOMEMLIMIT=1GiB
+        export GOTOOLCHAIN=go1.26.10 GOWORK=off GOFLAGS=-p=2 GOMAXPROCS=2 GOMEMLIMIT=1GiB
         python3 scripts/ci/prepare.py
         cd .memql-ci/memql-cockpit
         CGO_ENABLED=1 go build -tags computeruse ./...
@@ -190,7 +190,7 @@ pipeline:
       - .memql-ci/memql-cockpit/.memql-security/go
       run: |
         set -eu
-        export GOTOOLCHAIN=go1.26.9 GOWORK=off GOFLAGS=-p=2 GOMAXPROCS=2
+        export GOTOOLCHAIN=go1.26.10 GOWORK=off GOFLAGS=-p=2 GOMAXPROCS=2
         python3 scripts/ci/prepare.py
         cd .memql-ci/memql-cockpit
         mkdir -p .memql-security/go
@@ -209,7 +209,7 @@ pipeline:
       artifacts: [.memql-security/gitleaks]
       run: |
         set -eu
-        export GOTOOLCHAIN=go1.26.9 GOMAXPROCS=2 GOFLAGS=-p=2 GOMEMLIMIT=768MiB
+        export GOTOOLCHAIN=go1.26.10 GOMAXPROCS=2 GOFLAGS=-p=2 GOMEMLIMIT=768MiB
         export GIT_CONFIG_GLOBAL=/dev/null GIT_CONFIG_SYSTEM=/dev/null GIT_TERMINAL_PROMPT=0
         export GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=safe.directory GIT_CONFIG_VALUE_0="$PWD"
         go install github.com/zricethezav/gitleaks/v8@v8.30.1
@@ -228,7 +228,7 @@ pipeline:
       artifacts: [.memql-security/gitleaks]
       run: |
         set -eu
-        export GOTOOLCHAIN=go1.26.9 GOMAXPROCS=2 GOFLAGS=-p=2 GOMEMLIMIT=768MiB
+        export GOTOOLCHAIN=go1.26.10 GOMAXPROCS=2 GOFLAGS=-p=2 GOMEMLIMIT=768MiB
         export GIT_CONFIG_GLOBAL=/dev/null GIT_CONFIG_SYSTEM=/dev/null GIT_TERMINAL_PROMPT=0
         export GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=safe.directory GIT_CONFIG_VALUE_0="$PWD"
         go install github.com/zricethezav/gitleaks/v8@v8.30.1
@@ -252,7 +252,7 @@ pipeline:
       - .memql-ci/memql-cockpit/.memql-security/codeql
       run: |
         set -eu
-        export GOTOOLCHAIN=go1.26.9 GOWORK=off GOFLAGS=-p=2 GOMAXPROCS=2
+        export GOTOOLCHAIN=go1.26.10 GOWORK=off GOFLAGS=-p=2 GOMAXPROCS=2
         python3 scripts/ci/prepare.py
         cd .memql-ci/memql-cockpit
         mkdir -p .memql-security/codeql
@@ -292,7 +292,7 @@ pipeline:
       - .memql-ci/memql-cockpit/sbom
       run: |
         set -eu
-        export GOTOOLCHAIN=go1.26.9 GOWORK=off GOFLAGS=-p=2 GOMAXPROCS=2
+        export GOTOOLCHAIN=go1.26.10 GOWORK=off GOFLAGS=-p=2 GOMAXPROCS=2
         python3 scripts/ci/prepare.py
         cd .memql-ci/memql-cockpit
         env -u GOFLAGS make dist
@@ -378,7 +378,7 @@ pipeline:
       - .memql-ci/memql-cockpit/sbom
       run: |
         set -eu
-        export GOTOOLCHAIN=go1.26.9 GOWORK=off GOFLAGS=-p=2 GOMAXPROCS=2 GOMEMLIMIT=1GiB
+        export GOTOOLCHAIN=go1.26.10 GOWORK=off GOFLAGS=-p=2 GOMAXPROCS=2 GOMEMLIMIT=1GiB
         python3 scripts/ci/prepare.py
         cd .memql-ci/memql-cockpit
         test "$(go env GOOS)/$(go env GOARCH)" = linux/amd64
@@ -403,7 +403,7 @@ pipeline:
       - .memql-ci/memql-cockpit/sbom
       run: |
         set -eu
-        export GOTOOLCHAIN=go1.26.9 GOWORK=off GOFLAGS=-p=2 GOMAXPROCS=2 GOMEMLIMIT=1GiB
+        export GOTOOLCHAIN=go1.26.10 GOWORK=off GOFLAGS=-p=2 GOMAXPROCS=2 GOMEMLIMIT=1GiB
         python3 scripts/ci/prepare.py
         cd .memql-ci/memql-cockpit
         test "$(go env GOOS)/$(go env GOARCH)" = linux/amd64

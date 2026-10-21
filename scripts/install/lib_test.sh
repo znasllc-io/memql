@@ -1065,7 +1065,7 @@ printf 'MEMQL_WORKER_TOKEN=keep\nOLLAMA_HOST=old\n' > "$_envf"
 upsert_env_file_var "$_envf" OLLAMA_HOST '127.0.0.1:"11435"'
 expect_eq "upsert_env_file_var replaces the key and keeps the rest" "$(cat "$_envf")" \
     $'MEMQL_WORKER_TOKEN=keep\nOLLAMA_HOST="127.0.0.1:\\"11435\\""'
-expect_eq "upsert_env_file_var keeps the file owner-only" "$(stat -f %Lp "$_envf" 2>/dev/null || stat -c %a "$_envf")" "600"
+expect_eq "upsert_env_file_var keeps the file owner-only" "$(file_mode "$_envf")" "600"
 
 # The whole tail of an install under the installer's own shell options: a
 # release without --workbench, models first, and the summary still printed.

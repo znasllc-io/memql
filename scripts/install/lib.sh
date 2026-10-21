@@ -1754,9 +1754,8 @@ function ollama_env_names() {
 
 # xml_escape makes a value safe as plist <string> content.
 function xml_escape() {
-    local v="$1"
-    v="${v//&/&amp;}"; v="${v//</&lt;}"; v="${v//>/&gt;}"
-    printf '%s' "$v"
+    # sed keeps replacement escaping identical on Bash 3.2 and Bash 5.2+.
+    printf '%s' "$1" | sed 's/&/\&amp;/g; s/</\&lt;/g; s/>/\&gt;/g'
 }
 
 # ollama_plist_env prints the EnvironmentVariables entries for the Ollama
