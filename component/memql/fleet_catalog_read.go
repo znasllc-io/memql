@@ -162,6 +162,10 @@ type inferenceDoors struct {
 	LocalEligible         bool
 	LocalModels           int
 	EligibleModelIds      []string
+	// EmbeddingModelIds are the embedding models online for this caller --
+	// what a route's Search and memory job can be served by when no embedder
+	// is bound yet (design record 2026-10-18-routes).
+	EmbeddingModelIds []string
 	// AppEligible and RunnableApps are the app door (epic memql#5096): a
 	// signed-in Claude Code or Codex on a machine this node can REACH -- one
 	// whose stream this replica holds, or one held by an agent it can forward
@@ -202,9 +206,13 @@ func (e *MemQLEngine) inferenceDoors(ctx context.Context) inferenceDoors {
 				d.LocalEligible = true
 				d.EligibleModelIds = append(d.EligibleModelIds, m.ModelId)
 			}
+			if m.Online() && m.Embeddings {
+				d.EmbeddingModelIds = append(d.EmbeddingModelIds, m.ModelId)
+			}
 		}
 	}
 	sort.Strings(d.EligibleModelIds)
+	sort.Strings(d.EmbeddingModelIds)
 
 	// The app door. A read that FAILS leaves it SHUT rather than unknown:
 	// this reading is what a gate branches on, and "we could not ask"
@@ -219,8 +227,9 @@ func (e *MemQLEngine) inferenceDoors(ctx context.Context) inferenceDoors {
 			if door.Reachable() {
 				d.AppEligible = true
 				d.RunnableApps = append(d.RunnableApps, door.AppId)
-				// Runnable apps currently answer completed chat only. Do not
-				// promise streaming merely because their sessions are ready.
+				// An app answers a streaming turn whole, as one chunk
+				// (appProvider.CallChatStream), so a reachable app is a
+				// streaming source for Ask.
 				if _, streams := any((*appProvider)(nil)).(common.ChatStreamProvider); streams {
 					d.StreamingChatEligible = true
 				}

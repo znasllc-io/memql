@@ -60,7 +60,7 @@ export function MeshNodePage({
 
   return (
     <div className="os-cluster os-cluster-mesh">
-      <Head title={node.id} meta={typeLabel(node.nodeType)} back={{ label: "Mesh", onSelect: onBack }} />
+      <Head navigationKey={`node:${node.id}`} title={node.id} meta={typeLabel(node.nodeType)} back={{ label: "Mesh", onSelect: onBack }} />
 
       <div className="os-cluster-mesh-verdict-line">
         <span className="os-record-status" data-tone={stateTone(state)}>

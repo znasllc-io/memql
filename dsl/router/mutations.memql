@@ -67,9 +67,11 @@ mutation call recordRouterCall {
     minContextTokens    int
     /// Whose machine served a local call. Empty until shared machines land.
     machineOwnerUserId  string
+    /// The route a person chose for this call in Ask. Empty means Auto.
+    route               string
   }
   insert {
-    accept { requestId, agentId, userId, callerKind, cacheKind, promptName, policyName, vendor, model, providerName, inputTokens, outputTokens, cachedInputTokens, tokensEstimated, inputCost, outputCost, cachedInputCost, totalCost, pricingConfigured, timeToFirstTokenMs, totalDurationMs, tokensPerSec, streaming, outcome, errorCategory, errorMessage, fallbackFromModel, executionSurface, level, requestedLevel, servedLevel, servedModel, servedEffort, degraded, rule, policy, door, considered, touches, minContextTokens, machineOwnerUserId }
+    accept { requestId, agentId, userId, callerKind, cacheKind, promptName, policyName, vendor, model, providerName, inputTokens, outputTokens, cachedInputTokens, tokensEstimated, inputCost, outputCost, cachedInputCost, totalCost, pricingConfigured, timeToFirstTokenMs, totalDurationMs, tokensPerSec, streaming, outcome, errorCategory, errorMessage, fallbackFromModel, executionSurface, level, requestedLevel, servedLevel, servedModel, servedEffort, degraded, rule, policy, door, considered, touches, minContextTokens, machineOwnerUserId, route }
     stamp {
       id: args.callId
       // NOT in accept{}: a concept-level @default is documentation and is
@@ -108,6 +110,41 @@ mutation budget setBudget {
     accept { id, scope, scopeId, periodType, limitUSD, alertThresholdPct, resetAt }
     stamp {
       active: args.active ?? true
+    }
+  }
+}
+
+// ---- Routes a person makes (design record 2026-10-18-routes) ----
+
+/// Write one of a person's own routes: create it, change it, or mark it deleted. Every write is a
+/// whole route, so the person's last save is exactly what the router reads.
+///
+/// @serverOnly: routeSave and routeDelete are the only writers. They take the owner from the
+/// caller's identity, validate every source against the router's grammar and the name against the
+/// person's other routes, and only then call this under internal origin -- so a route that the
+/// router could not walk is never written. The owner is stamped from actor.userId, which fixes the
+/// attribution; actor.userId scoping alone would not fix the validation -- a route whose sources the
+/// router cannot walk would still reach the table, and a call made under it would refuse naming a
+/// configuration nobody could have saved through the page.
+@actor
+@serverOnly
+mutation route routeWrite {
+  args {
+    routeId      string!
+    name         string!
+    fast         []string!
+    strong       []string!
+    reasoning    []string!
+    active       bool!
+    updatedAt    string!
+  }
+  insert {
+    accept { name, fast, strong, reasoning, active, updatedAt }
+    stamp {
+      id: args.routeId
+      // Stamped, never accepted: the route is the caller's, whoever wrote
+      // the arguments.
+      ownerUserId: actor.userId
     }
   }
 }

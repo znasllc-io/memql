@@ -1,9 +1,9 @@
-import { Caption, CopyField, Notice, Rail, type Stop } from "../../../../kit";
-import { machineName, type MachineRow } from "../../rows";
+import { Caption, CopyField, Rail, type Stop } from "../../../../kit";
+import { PullBar, SetupDownloadBar } from "../../machines/ModelDownloads";
 import type { Check } from "../flow";
 
 // CHECKS: online, steady, and what you asked for (design record D4, D5, D13,
-// D14).
+// D14; memql#6214).
 //
 // ===========================================================================
 // A RAIL INSIDE A STOP, NOT A SECOND VOCABULARY
@@ -17,20 +17,11 @@ import type { Check } from "../flow";
 //
 // No `openStop`: every check renders its body, because a check's body is its
 // repair, and a repair folded behind a chevron is a repair somebody misses.
-// Settled checks with nothing to offer have no body at all.
+// A check with nothing to do has no body at all, and nothing here is a
+// banner: a refused or failed download is the Models line, and the footer's
+// Download models is the way to try again.
 
-export function ChecksStop({
-  checks,
-  machine,
-  pullError,
-}: {
-  checks: readonly Check[];
-  machine: MachineRow;
-  /** The cluster's refusal of the pull, verbatim, or "". */
-  pullError: string;
-}) {
-  const label = machineName(machine);
-
+export function ChecksStop({ checks }: { checks: readonly Check[] }) {
   const stops: Stop[] = checks.map((check) => ({
     id: check.id,
     name: check.name,
@@ -46,24 +37,11 @@ export function ChecksStop({
   );
 
   function bodyFor(check: Check) {
-    const hasRepair = check.repair !== undefined;
-    const hasAct = check.act !== undefined;
-    const hasPullError = check.id === "models" && pullError !== "";
-    if (!hasRepair && !hasAct && !hasPullError && !check.details) return undefined;
+    if (check.pull === undefined && check.download === undefined && check.repair === undefined && check.command === undefined) return undefined;
     return (
       <div className="os-stop-body os-fleet-repair">
-        {check.details ? <Rail label="Permission results" stops={check.details.map(d => ({ id: d.name, name: d.name, state: d.state, sentence: d.answer }))} /> : null}
-        {check.act === "pullRecommended" ? (
-          <Caption>Download models to add the recommended models to {label}. Several gigabytes.</Caption>
-        ) : null}
-        {hasPullError ? (
-          <Notice
-            tone="error"
-            sentence="The recommended pulls did not all start."
-            next="Some models may already be downloading. Check their progress before retrying; the cluster's reason is below."
-            detail={pullError}
-          />
-        ) : null}
+        {check.pull === undefined ? null : <PullBar pull={check.pull} />}
+        {check.download === undefined ? null : <SetupDownloadBar stage={check.download} />}
         {check.repair === undefined ? null : <Caption>{check.repair}</Caption>}
         {check.command === undefined ? null : (
           <CopyField value={check.command} label={`the ${check.name.toLowerCase()} command`} />

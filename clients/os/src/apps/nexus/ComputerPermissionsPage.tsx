@@ -63,7 +63,7 @@ export function ComputerPermissionsPage({ approvalVersion, onBack }: { approvalV
     }
   }
   return <div className="os-nexus-approvals">
-    <Head title={title} meta={!selectedId && loaded && !error ? visibleRows.length : undefined}
+    <Head navigationKey={`computer-permissions:${selectedId}`} title={title} meta={!selectedId && loaded && !error ? visibleRows.length : undefined}
       back={{ label: selectedId ? "Saved permissions" : "Approvals", onSelect: back }}
       breadcrumbs={[{ label: "Approvals", onSelect: onBack }, ...(selectedId ? [{ label: "Saved permissions", onSelect: () => setSelectedId("") }] : []), { label: title }]} />
     <div className="os-nexus-approval-content">

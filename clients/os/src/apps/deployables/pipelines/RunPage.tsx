@@ -178,7 +178,7 @@ function RunPageFor({ run, runs, pipeline, sourceName, breadcrumbs, back, can, o
       <AutoRefresh enabled={expiry.needsRefresh} busy={expiry.loading} onRefresh={expiry.refresh} />
       <div className="os-deploy-scroll">
         <Panel label={`Run ${title}`}>
-          <Head title={title} breadcrumbs={breadcrumbs} back={back} />
+          <Head navigationKey={`run:${run.id}`} title={title} breadcrumbs={breadcrumbs} back={back} />
           <p className="pipeline-run-meta">
             {run.event === "pull_request" && run.pullRequest > 0 ? (
               <a href={`https://github.com/${run.repository}/pull/${run.pullRequest}`} target="_blank" rel="noopener noreferrer">{triggerWords(run)}</a>
@@ -337,7 +337,7 @@ function FailedStep({ step, log, onOpenFile }: { step: StepRow; log: RunFileRow 
       ) : tailError !== "" ? (
         <Caption>{tailError}</Caption>
       ) : tail !== null && tail.lines.length > 0 ? (
-        <pre ref={box} className="pipeline-log" tabIndex={0} aria-label={`The last lines of ${step.key}'s log`}>{tail.lines.join("\n")}</pre>
+        <pre ref={box} className="pipeline-log" data-os-scroll-ignore tabIndex={0} aria-label={`The last lines of ${step.key}'s log`}>{tail.lines.join("\n")}</pre>
       ) : (
         <Caption>The log is empty.</Caption>
       )}

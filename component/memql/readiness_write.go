@@ -444,6 +444,9 @@ func (e *MemQLEngine) WriteModuleReadiness(ctx context.Context) (int, error) {
 		return 0, fmt.Errorf("module readiness: manifest: %w", err)
 	}
 	nodeId, nodeType := e.readinessIdentity()
+	// The first embedder binds itself before the verdict is read, so the pass
+	// that sees the model arrive is the pass that lifts the gate.
+	e.autoBindEmbedder(ctx)
 	standing := e.standingReadiness(ctx, nodeId)
 	return writeModuleReadiness(ctx, e.readinessResolvers(), manifest.Modules, nodeId, nodeType, &e.readinessMemory, standing, e.readinessExecutor(ctx), time.Now().UTC())
 }

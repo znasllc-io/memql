@@ -87,7 +87,7 @@ it.each([true, false])("ownership setup omits gender and birthdate even when pre
   expect(screen.queryByLabelText(/date of birth/i)).toBeNull();
   expect(document.querySelector('input[type="date"]')).toBeNull();
   for (let i = 0; i < 3; i++) pressBar("Continue");
-  pressBar(local ? "Continue to passkey" : "Send verification link");
+  pressBar(local ? "Create passkey" : "Send verification link");
   expect(submit).toHaveBeenCalledOnce();
   expect(submit.mock.calls[0]?.[1]).not.toHaveProperty("owner_gender");
   expect(submit.mock.calls[0]?.[1]).not.toHaveProperty("owner_birthdate");
@@ -122,8 +122,8 @@ it("local setup requires a passkey and never offers an email verification action
   expect(screen.getByText(/Contact information only/)).toBeTruthy();
   for (let i = 0; i < 3; i++) pressBar("Continue");
   expect(screen.queryByRole("button", { name: "Send verification link" })).toBeNull();
-  expect(screen.getByText(/No email is sent/)).toBeTruthy();
-  pressBar("Continue to passkey");
+  expect(screen.getByText(/It is how you sign in here/)).toBeTruthy();
+  pressBar("Create passkey");
   expect(submit).toHaveBeenCalledWith("/setup", expect.objectContaining({ owner_email: "ada@example.test" }));
 });
 
@@ -167,7 +167,7 @@ it("preserves custom profile titles without treating them as authorization roles
   expect(screen.getByLabelText("Your title")).toHaveProperty("value", "Chief Researcher");
   fireEvent.change(screen.getByLabelText("Your title"), { target: { value: "Community steward" } });
   for (let i = 0; i < 3; i++) pressBar("Continue");
-  pressBar("Continue to passkey");
+  pressBar("Create passkey");
   expect(submit).toHaveBeenCalledWith("/setup", expect.objectContaining({ owner_primary_role: "Community steward", brand_name: "Example" }));
   expect(submit.mock.calls[0]?.[1]).not.toHaveProperty("role");
 });

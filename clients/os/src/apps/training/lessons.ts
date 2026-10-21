@@ -82,9 +82,22 @@ export function lessonHeads(events: Lesson[]): Lesson[] {
       heads.set(l.id, l);
   return [...heads.values()];
 }
-export const guidanceReceiptLabel = (status?: string) =>
-  status === "applied"
-    ? "Received by this work."
-    : status === "not-received"
-      ? "Not received. This work ended or changed."
-      : "Queued for the next safe boundary.";
+/** What the work did with the routed message a lesson came from (Ask's route statuses). */
+export function guidanceReceiptLabel(status?: string): string {
+  switch (status) {
+    case "received":
+      return "Received by this work.";
+    case "answered":
+      return "Answered.";
+    case "notApproved":
+      return "Sent as a correction; nothing was approved.";
+    case "saved":
+      return "Saved until the limit is raised.";
+    case "notDelivered":
+      return "Not delivered.";
+    case "notReceived":
+      return "Not received. This work ended or changed.";
+    default:
+      return "Queued for the next safe boundary.";
+  }
+}

@@ -57,6 +57,7 @@ shape registration workerRegistrationFull {
   ownerFeatures
   sharingActivity
   permissions
+  setup
   apps
   appDescriptors
   version

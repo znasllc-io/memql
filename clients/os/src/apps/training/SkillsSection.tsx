@@ -85,7 +85,7 @@ export function SkillsSection() {
   const skill = rows.find((r) => r.id === selected);
   return <div className="os-app-stack">
     <AutoRefresh onRefresh={reload} busy={busy} enabled={connection !== null} />
-    <Head title={skill?.name ?? "Skills"} meta={!skill && ready && !error ? rows.length : undefined}
+    <Head navigationKey={`skill:${selected}`} title={skill?.name ?? "Skills"} meta={!skill && ready && !error ? rows.length : undefined}
       back={skill ? { label: "Skills", onSelect: () => select("") } : undefined} />
     {error ? <Notice tone="error" sentence="Skills could not be read." next={ready ? "Showing the last available reading; retrying automatically." : "No skills have been read; retrying automatically."} detail={error} /> : null}
     {!ready && !error ? <Caption>{connection ? "Loading skills…" : "Waiting for the cluster…"}</Caption> : null}

@@ -1,7 +1,8 @@
+import { usePageScroll } from "../../../kit/pageNavigation";
 import { ContentSkeleton } from "../../../kit/ContentSkeleton";
 import { LocalTabs } from "../../../kit/LocalTabs";
 import { useEffect, useState } from "react";
-import { AutoRefresh, useFleetScroll } from "../FleetControls";
+import { AutoRefresh } from "../FleetControls";
 import { PageHelp } from "../../../kit/pageHelp";
 
 import { Button, Check, Switch, EmptyState, Chip, Field, Head, Input, Notice, Panel, RecordRow, Select, Subhead } from "../../../kit";
@@ -38,16 +39,15 @@ import { useDelegationPolicy, type DelegationPolicyDraft } from "./useDelegation
 // a quiet back-Head, exactly as DeployablePage does. One Head per view; two
 // Heads in one scroller is the tell that neither happened.
 
-export function AppsSection({ sessionTarget, navigation }: { sessionTarget?: { id: string; revision: number }; navigation?: { origin: "peer" | "content" | "back"; revision: number } } = {}) {
+export function AppsSection({ navigation }: { navigation?: { origin: "peer" | "content" | "back"; revision: number } } = {}) {
   const policy = useDelegationPolicy();
   const sessions = useAppSessions();
   const [openSessionId, setOpenSessionId] = useState("");
-  useEffect(() => { if (sessionTarget) { setOpenSessionId(sessionTarget.id); setView("sessions"); } }, [sessionTarget?.revision]);
   useEffect(() => { if (navigation?.origin === "peer") { setOpenSessionId(""); setView("sessions"); } }, [navigation?.revision]);
   const now = useNow(30_000);
 
   const [view, setView] = useState<"sessions" | "delegation">("sessions");
-  const root = useFleetScroll(openSessionId || view);
+  const root = usePageScroll(openSessionId || view);
 
   return (
     <div ref={root} className="os-fleet">

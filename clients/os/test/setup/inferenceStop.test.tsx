@@ -46,13 +46,13 @@ function mount(role: string) {
 }
 
 describe("the doors an owner is offered", () => {
-  it("offers three, with the fleet one first and selected", () => {
+  it("offers three, with the local one first and selected", () => {
     mount("owner");
     // THE ORDER IS THE RECOMMENDATION, and it is the only one this surface
     // makes: a machine somebody already owns costs nothing, and the two
     // vendors need an account.
     expect(screen.getAllByRole("radio").map((el) => el.textContent)).toEqual([
-      "A machine on your fleet",
+      "Local",
       "Anthropic",
       "OpenAI",
     ]);
@@ -65,7 +65,7 @@ describe("the doors an owner is offered", () => {
     // descriptions at once put the act below the fold of a desk widget,
     // which the visual pass caught and no test would have.
     mount("owner");
-    expect(screen.getByText("A computer you already own serves the model. Nothing leaves it, and there is no bill.")).toBeTruthy();
+    expect(screen.getByText("A computer you own runs the model, with nothing leaving it and no bill.")).toBeTruthy();
 
     fireEvent.click(screen.getByRole("radio", { name: "Anthropic" }));
     expect(screen.getByText("Anthropic serves the model, on their hardware and their bill.")).toBeTruthy();

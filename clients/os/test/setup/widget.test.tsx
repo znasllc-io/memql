@@ -136,7 +136,7 @@ describe("the rail a fresh cluster shows", () => {
       ]),
     );
     // ...and the inference stop's three doors are what it holds.
-    expect(screen.getByRole("radio", { name: /A machine on your fleet/ })).toBeTruthy();
+    expect(screen.getByRole("radio", { name: "Local" })).toBeTruthy();
   });
 
   it("makes a SETTLED stop no disclosure at all -- no chevron, nothing to open", async () => {

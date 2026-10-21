@@ -14,6 +14,7 @@ import (
 	"github.com/znasllc-io/memql/component/auth"
 	memorynodes "github.com/znasllc-io/memql/component/database/memory-nodes"
 	"github.com/znasllc-io/memql/component/language/parser"
+	"github.com/znasllc-io/memql/component/memql/readiness"
 	"github.com/znasllc-io/memql/core/airoute"
 )
 
@@ -146,6 +147,14 @@ func (e *MemQLEngine) bindEmbedderBuiltin(ctx context.Context, args map[string]a
 	if provider == "" {
 		return nil, fmt.Errorf("choose an embedding model")
 	}
+	return e.bindEmbedder(ctx, provider)
+}
+
+// bindEmbedder makes provider the cluster's embedder: it embeds one sentence to
+// learn the vector width, creates the table for it, and records and activates
+// the binding, under the binding's advisory lock. The FIRST binding needs no
+// re-embed; changing an active one is the migration workflow's and is refused.
+func (e *MemQLEngine) bindEmbedder(ctx context.Context, provider string) ([]memorynodes.MemoryNode, error) {
 	unlock, err := e.lockAskConversationKind(ctx, "active", "embedder-binding")
 	if err != nil {
 		return nil, err
@@ -206,4 +215,47 @@ func (e *MemQLEngine) bindEmbedderBuiltin(ctx context.Context, args map[string]a
 	}
 	raw, _ := json.Marshal(map[string]any{"provider": provider, "dimensions": len(vector), "active": true})
 	return []memorynodes.MemoryNode{{ID: "active", Payload: raw}}, nil
+}
+
+// autoBindEmbedder binds the cluster's FIRST embedder by itself (design record
+// 2026-10-18-routes): when none is bound and an online machine advertises an
+// embedding model -- which a Local setup always pulls -- or a federated vendor
+// here can embed, it is bound. There are no vectors yet, so binding plans no
+// re-embed, and the inference verdict needs an embedder before it lifts the
+// core gate: without this an owner who did everything the setup asked would
+// sit at a gate waiting on a step nobody showed them.
+//
+// It never CHANGES a binding, and it runs under the binding's advisory lock,
+// so every node may try it and exactly one binds. A fleet model is bound as
+// the machine's owner, because a fleet call resolves against the acting
+// person's machines.
+func (e *MemQLEngine) autoBindEmbedder(ctx context.Context) {
+	if e == nil || e.providers == nil {
+		return
+	}
+	if _, err := e.ReadEmbedderBinding(ctx); err == nil || err != ErrNoEmbedderBound {
+		return
+	}
+	var tries []struct{ provider, owner string }
+	if regs, err := e.readInferenceRegistrations(readinessEvaluateContext(ctx)); err == nil {
+		for _, c := range readiness.EmbeddingCandidates(regs, time.Now()) {
+			tries = append(tries, struct{ provider, owner string }{FleetReferencePrefix + c.ModelId, c.OwnerUserId})
+		}
+	}
+	for _, name := range e.providers.federationEmbedders() {
+		tries = append(tries, struct{ provider, owner string }{name, ""})
+	}
+	for _, t := range tries {
+		bctx := readinessEvaluateContext(ctx)
+		if t.owner != "" {
+			bctx = auth.ContextWithInternalOrigin(auth.ContextWithUserActor(ctx, t.owner))
+		}
+		if _, err := e.bindEmbedder(bctx, t.provider); err != nil {
+			e.safeLogger().Warn("embedder: could not bind the first embedding model automatically; trying the next",
+				"provider", t.provider, "error", err)
+			continue
+		}
+		e.safeLogger().Info("embedder: bound the cluster's first embedding model", "provider", t.provider)
+		return
+	}
 }

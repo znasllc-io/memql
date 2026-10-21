@@ -8,57 +8,62 @@ vi.mock("../../src/live/connection", () => ({ useOsConnection: () => h.connectio
 const { fakeConnection, withSession, machineRow, modelPullRow, appSessionRow, rowsResult } = await import("./harness");
 const { MachinesProvider, useMachines } = await import("../../src/live/machines");
 const { AppSessionsProvider, useAppSessions, useAppSessionDetail, APP_SESSION_CONCEPT } = await import("../../src/apps/fleet/apps/useAppSessions");
-const { RecentWork } = await import("../../src/apps/fleet/apps/RecentWork");
+const { RecentActivity } = await import("../../src/apps/fleet/machines/RecentActivity");
+const { formatMoment } = await import("../../src/kit/format");
 const { RoutingPolicyProvider, useRoutingPolicy } = await import("../../src/apps/fleet/routing/useRoutingPolicy");
 const { useModelPulls } = await import("../../src/apps/fleet/machines/useModelPulls");
 const { useWorkbenches } = await import("../../src/apps/fleet/workbenches/useWorkbenches");
-const session = (id: string, over: Row = {}) => appSessionRow({ id, ownerUserId: "me", workerId: "machine", runId: `run-${id}`, startedAt: `2026-10-14T10:00:${id.padStart(2, "0")}Z`, ...over });
+const session = (id: string, over: Row = {}) => appSessionRow({ id, ownerUserId: "me", workerId: "machine", runId: `run-${id}`, startedAt: `2026-10-14T10:${id.padStart(2, "0")}:00Z`, ...over });
+/** A Recent activity row is named by its start time; each fixture session starts a minute apart. */
+const at = (id: string) => new RegExp(formatMoment(`2026-10-14T10:${id.padStart(2, "0")}:00Z`).replace(/[.*+?^${}()|[\]\\]/g, "\\$&"));
 
 beforeEach(() => { h.connection = null; });
 
 describe("Fleet broadcast connections", () => {
-  it("shares sessions, folds new work and status without rereads, and keeps recent work at five", async () => {
+  it("shares sessions, folds new work and status without rereads, and keeps recent activity at five", async () => {
     const connection = fakeConnection({ appSessionsForUser: [1, 2, 3, 4, 5].map(id => session(String(id))) });
     h.connection = connection;
-    const open = vi.fn(), all = vi.fn();
+    const open = vi.fn(), activity = vi.fn();
     function OtherConsumer() { const feed = useAppSessions(); return <output aria-label="All sessions">{feed.sessions.length}</output>; }
-    render(withSession(<StrictMode><AppSessionsProvider><RecentWork machineId="machine" onOpenSession={open} onAllSessions={all} /><OtherConsumer /></AppSessionsProvider></StrictMode>, { userId: "me" }));
-    await screen.findByText("run-5");
-    expect(screen.getByText("run-1")).toBeTruthy();
+    render(withSession(<StrictMode><AppSessionsProvider><RecentActivity machineId="machine" onActivity={activity} onOpenActivity={open} /><OtherConsumer /></AppSessionsProvider></StrictMode>, { userId: "me" }));
+    await screen.findByRole("button", { name: at("5") });
+    const rows = () => within(screen.getByRole("list", { name: "Recent activity" })).getAllByRole("button");
+    expect(rows()).toHaveLength(5);
+    expect(screen.getByRole("button", { name: at("1") })).toBeTruthy();
     expect(screen.getByLabelText("All sessions").textContent).toBe("5");
-    expect(screen.queryByRole("button", { name: "All app sessions" })).toBeNull();
     await act(async () => {
       connection.subscriptions.emit(APP_SESSION_CONCEPT, session("8", { workerId: "elsewhere" }), "NODE_CREATED");
       connection.subscriptions.emit(APP_SESSION_CONCEPT, session("9", { ownerUserId: "someone-else" }), "NODE_CREATED");
     });
-    expect(screen.queryByRole("button", { name: "All app sessions" })).toBeNull();
+    expect(rows()).toHaveLength(5);
     await act(async () => connection.subscriptions.emit(APP_SESSION_CONCEPT, session("6"), "NODE_CREATED"));
-    expect(screen.queryByText("run-1")).toBeNull();
+    expect(screen.queryByRole("button", { name: at("1") })).toBeNull();
+    expect(rows()).toHaveLength(5);
     expect(connection.query.appSessionsForUser).toHaveBeenCalledTimes(1);
-    const nav = screen.getByRole("button", { name: "All app sessions" });
+    const nav = screen.getByRole("button", { name: "All activity" });
     nav.focus();
     await act(async () => {
       connection.subscriptions.emit(APP_SESSION_CONCEPT, session("7", { status: "running" }), "NODE_CREATED");
       connection.subscriptions.emit(APP_SESSION_CONCEPT, session("8", { workerId: "elsewhere" }), "NODE_CREATED");
       connection.subscriptions.emit(APP_SESSION_CONCEPT, session("9", { ownerUserId: "someone-else" }), "NODE_CREATED");
     });
-    expect(screen.getByText("run-7")).toBeTruthy();
-    expect(screen.queryByText("run-2")).toBeNull();
-    expect(screen.queryByText("run-8")).toBeNull();
-    expect(screen.queryByText("run-9")).toBeNull();
+    expect(screen.getByRole("button", { name: at("7") })).toBeTruthy();
+    expect(screen.queryByRole("button", { name: at("2") })).toBeNull();
+    expect(screen.queryByRole("button", { name: at("8") })).toBeNull();
+    expect(screen.queryByRole("button", { name: at("9") })).toBeNull();
     expect(document.activeElement).toBe(nav);
     expect(screen.getByLabelText("All sessions").textContent).toBe("8");
     await act(async () => connection.subscriptions.emit(APP_SESSION_CONCEPT, session("7", { status: "failed" })));
-    const row = screen.getByRole("button", { name: /run-7/ });
-    expect(within(row).getByText("failed")).toBeTruthy();
-    fireEvent.click(row); expect(open).toHaveBeenCalledWith("7");
-    fireEvent.click(nav); expect(all).toHaveBeenCalledOnce();
+    const row = screen.getByRole("button", { name: at("7") });
+    expect(within(row).getByText("Failed")).toBeTruthy();
+    fireEvent.click(row); expect(open).toHaveBeenCalledWith("app:7");
+    fireEvent.click(nav); expect(activity).toHaveBeenCalledOnce();
     await act(async () => {
       connection.subscriptions.emit(APP_SESSION_CONCEPT, session("7", { workerId: "elsewhere" }));
       connection.subscriptions.emit(APP_SESSION_CONCEPT, session("6", { workerId: "elsewhere" }));
     });
-    expect(screen.queryByRole("button", { name: "All app sessions" })).toBeNull();
-    expect(screen.getByText("run-1")).toBeTruthy();
+    expect(screen.getByRole("button", { name: at("1") })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "All activity" })).toBeTruthy();
     expect(connection.query.appSessionsForUser).toHaveBeenCalledTimes(1);
   });
 
@@ -67,13 +72,13 @@ describe("Fleet broadcast connections", () => {
     try {
       const connection = fakeConnection(); h.connection = connection;
       connection.query.appSessionsForUser.mockRejectedValueOnce(new Error("Stream unavailable"));
-      const view = render(withSession(<RecentWork machineId="machine" onAllSessions={vi.fn()} />, { userId: "me" }));
+      const view = render(withSession(<RecentActivity machineId="machine" onActivity={vi.fn()} onOpenActivity={vi.fn()} />, { userId: "me" }));
       await act(async () => {});
-      expect(screen.getByText("Recent app sessions could not be read.")).toBeTruthy();
-      expect(screen.queryByText("No recent work")).toBeNull();
+      expect(screen.getByText("Activity updates are interrupted.")).toBeTruthy();
+      expect(screen.queryByText("No activity yet")).toBeNull();
       connection.query.appSessionsForUser.mockResolvedValue(rowsResult([session("1")]));
       await act(async () => { await vi.advanceTimersByTimeAsync(15_000); });
-      expect(screen.getByText("run-1")).toBeTruthy();
+      expect(screen.getByRole("button", { name: at("1") })).toBeTruthy();
       expect(connection.query.appSessionsForUser).toHaveBeenCalledTimes(2);
       await act(async () => { await vi.advanceTimersByTimeAsync(30_000); });
       expect(connection.query.appSessionsForUser).toHaveBeenCalledTimes(2);

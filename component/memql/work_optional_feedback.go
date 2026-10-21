@@ -14,6 +14,8 @@ import (
 
 // Late information is read at the same model/tool boundaries as human guidance.
 // Its receipt remains in the shared journal; no timer or mailbox lives on a pod.
+// Late optional answers have a bound of their own beside the routed guidance's
+// (maxWorkGuidanceMessages), so neither can make the other's read fail.
 func (e *MemQLEngine) ReadWorkGuidance(ctx context.Context) ([]WorkGuidance, error) {
 	out, root, err := e.readAskWorkGuidance(ctx)
 	if err != nil {
@@ -53,10 +55,9 @@ func (e *MemQLEngine) ReadWorkGuidance(ctx context.Context) ([]WorkGuidance, err
 	if root != nil && BareShortId(stringArg(root, "id")) != BareShortId(rc.RunId) {
 		targets = append(targets, root)
 	}
-	runes := 0
-	for _, item := range out {
-		runes += utf8.RuneCountInString(item.Prompt)
-	}
+	// readAskWorkGuidance bounded the routed guidance in out; the late answers
+	// are counted apart from it.
+	answers, runes := 0, 0
 	for _, target := range targets {
 		rows, err := e.workRows(ctx, "workQuestionsForOwnerRun", stringArg(target, "id"))
 		if err != nil {
@@ -74,8 +75,9 @@ func (e *MemQLEngine) ReadWorkGuidance(ctx context.Context) ([]WorkGuidance, err
 				return nil, err
 			}
 			prompt := "Late answer to an optional question for this execution. Use it for unfinished work; preserve completed results. It grants no additional permission.\n" + string(raw)
+			answers++
 			runes += utf8.RuneCountInString(prompt)
-			if len(out) >= maxWorkGuidanceMessages || runes > maxWorkGuidanceRunes {
+			if answers > maxWorkGuidanceMessages || runes > maxWorkGuidanceRunes {
 				return nil, fmt.Errorf("saved guidance exceeds its bounded context")
 			}
 			out = append(out, WorkGuidance{ID: "optional-answer-" + BareShortId(stringArg(row, "id")), Prompt: prompt})

@@ -159,7 +159,7 @@ export function LayoutPage({ layout, layouts, templates, onBack }: {
   return (
     <div className="os-action-pane" data-os-page-context={JSON.stringify({ page: "Layout", name })}>
       <div className="os-action-body os-app-stack">
-        <Head title={name} back={{ label: "Templates", onSelect: onBack }} />
+        <Head navigationKey={`layout:${layout.id}`} title={name} back={{ label: "Templates", onSelect: onBack }} />
         {outcomeNotice()}
         <Panel label="Layout details">
           <Facts>

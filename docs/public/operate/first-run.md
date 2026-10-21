@@ -120,10 +120,10 @@ in.
 
 Any combination is legal, and the order is the recommendation:
 
-- **A machine on your fleet** — a computer you already own serves the model.
-  Nothing leaves it and there is no bill. The act opens Fleet's guided install with local models already selected, so
-  the person leaves with one install line and comes back when the machine
-  registers and its checks settle.
+- **Local** — a computer you own runs the model, with nothing leaving it and
+  no bill. The act opens Fleet's guided install with local models already
+  selected, so the person leaves with one install line and comes back when
+  the machine registers and its checks settle.
 - **Anthropic** — Anthropic serves the model, on their hardware and their bill.
   The act opens Settings → AI providers at the Anthropic panel.
 - **OpenAI** — OpenAI serves the model, on their hardware and their bill.
@@ -135,15 +135,24 @@ sentence naming who can otherwise, so it never offers an act that is not legal.
 
 ### What counts as a configured door
 
-The `ai` verdict is computed from rows, identically on every node type:
+The `ai` verdict is computed from rows, identically on every node type. It
+needs ONE of these doors:
 
 - an unrevoked machine advertising a model that does structured output with a
   context window of at least 8192 tokens;
 - an unrevoked machine with a known, allowed, signed-in local app;
-- a federated cloud vendor whose identity ids are present.
+- a federated cloud vendor whose identity ids are present;
 
-Each is one lane on the readiness row, and each lane carries a second fact —
-whether that door is open **right now**. The gate reads the first.
+**and an embedding model**: the cluster's bound embedder, or an embedding model
+an online machine advertises. Library search and memory recall need one, so a
+door alone is not set up -- an app answers, but cannot make embeddings. When a
+door is open and no embedding model is, the inference stop says "Add an
+embedding model". A Local setup pulls one with the recommended models, and the
+engine binds the cluster's first embedding model by itself.
+
+Each is one lane on the readiness row (`local`, `app`, `federation`,
+`embeddings`), and each lane carries a second fact — whether it is open
+**right now**. The gate reads the first.
 
 ### Storage says where it is set, and does not pretend otherwise
 

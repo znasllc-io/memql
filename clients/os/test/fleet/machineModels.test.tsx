@@ -304,6 +304,16 @@ async function chooseTask(label: string, model: string) {
  fireEvent.click(screen.getByRole("button", { name: new RegExp(`^${label}:`) }));
 }
 describe("model setup choices", () => {
+ it("estimates an Automatic setup from the models MemQL picks for each task", async () => {
+  const automatic = { ...setupFixture, revision: "", choices: {}, suggestedChoices: { conversation: "chat", tools: "chat", embeddings: "embed" },
+   catalog: [...setupFixture.catalog, { modelId: "embed", runtime: "ollama", installed: true, purposes: ["embeddings"], memoryBytes: 1e9 }] };
+  await mount({"model:chat":"tools=1", "model:embed":"embeddings=1"}, {setup: automatic});
+  const meter = screen.getByRole("meter", { name: "Planned model memory" });
+  expect(meter.getAttribute("aria-valuenow")).toBe("17000000000");
+  expect(meter.getAttribute("aria-valuetext")).toMatch(/automatic/i);
+  expect(meter.querySelectorAll("span")).toHaveLength(2);
+  expect(screen.getByText("MemQL chooses automatically")).toBeTruthy();
+ });
  it("saves the expected revision and deduplicates a model serving several tasks", async () => {
   const connection = await mount({"model:chat":"tools=1", "model:small":"tools=1"}, {setup: setupFixture});
   expect(screen.getByRole("meter").getAttribute("aria-valuenow")).toBe("16000000000");

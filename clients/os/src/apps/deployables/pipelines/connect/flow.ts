@@ -50,9 +50,9 @@ export const STEP_NAMES: Readonly<Record<StepId, string>> = {
 
 /** What each stop is for, beside its name while it is open. */
 const STEP_SENTENCES: Readonly<Record<StepId, string>> = {
-  repository: "What memql-package.yaml declares at the head of the default branch.",
-  compute: "Where the steps run.",
-  confirm: "What the pipeline reports, and how changes reach it.",
+  repository: "What memql-package.yaml declares",
+  compute: "Where the steps run",
+  confirm: "What it reports, and how changes reach it",
 };
 
 /**

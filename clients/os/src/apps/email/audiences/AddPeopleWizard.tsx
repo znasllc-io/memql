@@ -9,6 +9,9 @@ import type { CampaignWrites } from "../actions";
 import type { AudienceRow } from "../rows";
 import { ImportReport } from "./ImportReport";
 
+/** What each step is, under its name on the rail. */
+const PEOPLE_SUBTITLES: Readonly<Record<string, string>> = { how: "A CSV file or one address", file: "A CSV with an email column", report: "What the import found", address: "Who to add" };
+
 export function AddPeopleWizard({ audience, writes, uploads, onBack, onDone }: { audience: AudienceRow; writes: CampaignWrites; uploads: UploadProvider; onBack: () => void; onDone: () => void }) {
   const [how, setHow] = useState("");
   const [step, setStep] = useState("how");
@@ -36,7 +39,7 @@ export function AddPeopleWizard({ audience, writes, uploads, onBack, onDone }: {
     report: importer.report ? <ImportReport report={importer.report} /> : null,
     address: <><Field label="Email"><Input id="email-person-address" label="Email" value={email} onChange={setEmail} /></Field><Field label="Name"><Input id="email-person-name" label="Name" value={name} onChange={setName} /></Field>{audience.confirmation === "required" ? <Switch checked={pending} onChange={setPending}>Ask them to confirm</Switch> : null}</>,
   };
-  const steps: Stop[] = order.map((id, i) => ({ id, name: id[0]!.toUpperCase() + id.slice(1), state: id === step ? "open" : i < order.indexOf(step) ? "done" : "ahead", body: bodies[id as keyof typeof bodies] }));
+  const steps: Stop[] = order.map((id, i) => ({ id, name: id[0]!.toUpperCase() + id.slice(1), sentence: PEOPLE_SUBTITLES[id], state: id === step ? "open" : i < order.indexOf(step) ? "done" : "ahead", body: bodies[id as keyof typeof bodies] }));
   const failure = error || importer.error || writes.addRecipient.error;
   return <Wizard title="Add people" icon={<UserPlus size={20} aria-hidden />} label="Adding people" back={{ label: audience.name, onSelect: onBack }} steps={steps} open={step} onOpen={setStep} status={{ word: busy ? how === "file" ? `Importing ${fileName}` : "Adding address" : step === "report" ? "Import finished" : "Add people", tone: busy ? "busy" : undefined }} notices={failure ? <Notice tone="warn" sentence={refusalSentence(failure)} /> : undefined} acts={busy ? [] : step === "report" ? [{ label: "Done", tone: "primary", onAct: () => { importer.dismiss(); onDone(); } }] : [{ label: "Cancel", text: true, onAct: onBack }, ...(step === "file" ? [{ label: "Choose a file", tone: "primary" as const, onAct: () => input.current?.click() }] : step === "address" && /^[^\s@]+@[^\s@]+$/.test(email.trim()) ? [{ label: "Add", tone: "primary" as const, onAct: () => { void add(); } }] : [])]} />;
 }

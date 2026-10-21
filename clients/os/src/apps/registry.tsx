@@ -685,7 +685,7 @@ const materializer: OsAppManifest = {
 //
 
 function AskWidgetBody() {
-  const { transport, voice, settings, availability, conversation, liveVoice } = useAsk();
+  const { transport, voice, uploads, settings, availability, conversation, liveVoice } = useAsk();
   const { actions } = useOs();
   // The widget hands a prompt off exactly as the sheet does (epic memql#4785).
   // One Ask, three entry points, and an act that exists on one of them is an
@@ -702,6 +702,8 @@ function AskWidgetBody() {
       variant="widget"
       onOpenFile={(fileId) => { actions.openApp("files", "browse", { fileId }); }}
       onOpenWork={(runId, conversationId) => { actions.openApp("nexus", "runs", { runId, conversationId }); }}
+      uploads={uploads}
+      onManageRoutes={() => { actions.openApp("fleet", "routing", { routingTab: "routes" }); }}
     />
   );
 }

@@ -42,6 +42,8 @@ Limits use decimal units: 1 TB is 1,000,000,000,000 bytes.
   allowance on the user's page.
 - Owners and developers have no personal allowance ceiling, but the shared
   cluster and per-backup ceilings still apply.
+- Everyone sees their own allowance, what they use and what is left in
+  Identity > Profile.
 
 Files, saved versions, Bin contents, paused or unfinished uploads and object
 metadata all count. A new upload reserves capacity before sending bytes.

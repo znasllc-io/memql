@@ -1,242 +1,251 @@
-import { useCallback, useEffect, useMemo, useState, type ReactNode } from "react";
-import { Route } from "lucide-react";
+import { useCallback, useEffect, useState, type ReactNode } from "react";
+import { Cpu, Gauge, Route, Terminal } from "lucide-react";
 
 import { AddButton } from "../../../kit/AddButton";
-import { ContentSkeleton, InlineSkeleton } from "../../../kit/ContentSkeleton";
+import { ContentSkeleton } from "../../../kit/ContentSkeleton";
 import { PageHelp } from "../../../kit/pageHelp";
-import { Chip, EmptyState, Notice, RecordList, RecordListSkeleton, RecordRow, AutoRefresh } from "../../../kit";
-import type { RulesState } from "../../settings/rulesFacts";
-import type { TaskPolicy } from "../taskPolicies";
-import { NewRouteWizard } from "./NewRouteWizard";
-import { RouteComposer, type RouteDraftState } from "./RouteComposer";
-import { routeEntries } from "./routes";
-import { GlyphStrip } from "./SourceGlyph";
-import { readSource, routeStatus, servingIndex, type RoutingFacts } from "./sources";
-import { routeTitle } from "./vocabulary";
+import { AutoRefresh, Chip, EmptyState, Notice, RecordList, RecordListSkeleton, RecordRow, Subhead } from "../../../kit";
+import { AutoPage } from "./AutoPage";
+import { jobStatus } from "./JobBoard";
+import { NewRouteModeWizard } from "./NewRouteModeWizard";
+import { RouteModePage, type RouteModeDraft } from "./RouteModePage";
+import { EDITABLE_JOBS, canEditRoute, embedderReading, jobSourcesOf, type EmbedderReading, type RouteMode } from "./routeModes";
+import type { RoutingFacts } from "./sources";
+import { useAutoBalance, useBoundEmbedder, useMyBudget, useRouteModes, useRouteWrites } from "./useRouteModes";
 
-// Fleet > Routing > Routes: every route, shipped and yours, as a list -- the
-// name, its chain as a strip of source glyphs, and whether it serves right now
-// in a few words. A row opens the route's own page, the composer; the Add
-// control opens the New route wizard.
+// Fleet > Routing > Routes: the routes a person picks for their messages in
+// Ask (design record 2026-10-18-routes-design.md, "Fleet, Routing, Routes").
 //
-// DRAFTS LIVE HERE, not on the page: a person who opens a route, changes it,
-// goes back to the list and opens it again finds their change, and the row
-// says "Unsaved" in the meantime. They are not written to browser storage --
-// closing the window ends them, as every Fleet draft does.
+//   Auto, Local, Apps   the built-ins, cluster-wide; Local and Apps can be
+//                       changed by an owner or developer and restored
+//   Yours               the person's own routes, with the Add control on the
+//                       section heading; private to them
 //
-// A ROUTE JUST CREATED IS PENDING, not missing. The wizard's save and the
-// page it opens land in one render, before the re-read that brings the route
-// back has even started -- so "That route is gone" would paint for a frame,
-// and stay if the re-read failed. The page waits for the NEXT settled read
-// (`catalog.settled`) and says what that read said.
+// A row opens the route's page: Auto's balance, budget and picks, or a
+// route's jobs and the sources that serve them. Each page REPLACES the list
+// (DESIGN.md rule 11) with `<- Routes` in the trail.
+//
+// EVERYONE WHO CAN OPEN FLEET SEES THIS TAB: anyone may make routes of their
+// own. What an owner or developer adds is the right to change the built-ins
+// and Auto's balance -- the acts appear for them and are absent for anyone
+// else (rule 12).
+//
+// DRAFTS LIVE HERE, not on the page, so a route opened, changed, left and
+// opened again keeps the change; its row says "Unsaved" meanwhile.
 
-type Page = { kind: "list" } | { kind: "route"; name: string } | { kind: "new" };
+type Page = { kind: "list" } | { kind: "route"; id: string } | { kind: "new" };
 
-/** Shipped routes in the order a person meets them; yours after, by name. */
-const SHIPPED_ORDER = ["localFirst", "fastLocalFirst", "localOnly", "federationStrongest", "embeddingsBinding"];
+const ICONS: Record<RouteMode["kind"], typeof Gauge> = { auto: Gauge, local: Cpu, apps: Terminal, custom: Route };
 
-export function orderRoutes(routes: readonly TaskPolicy[]): TaskPolicy[] {
-  const rank = (r: TaskPolicy) => (r.shipped ? SHIPPED_ORDER.indexOf(r.name) : -1);
-  return [...routes].sort((a, b) => {
-    if (!!a.shipped !== !!b.shipped) return a.shipped ? -1 : 1;
-    if (a.shipped) return (rank(a) === -1 ? 99 : rank(a)) - (rank(b) === -1 ? 99 : rank(b)) || a.name.localeCompare(b.name);
-    return routeTitle(a.name).localeCompare(routeTitle(b.name));
-  });
+/**
+ * A route's readiness in a few words. The engine's own answer when it gave
+ * one; otherwise read from the same facts the jobs are drawn from, so a
+ * cluster that predates routes still says something true.
+ */
+export function routeReadiness(route: RouteMode, facts: RoutingFacts, embedder: EmbedderReading, fromEngine: boolean): { ready: boolean; word: string } {
+  if (fromEngine && (route.ready || route.reason !== "")) return { ready: route.ready, word: route.ready ? "Ready" : route.reason };
+  if (embedder.state === "none") return { ready: false, word: "Needs an embedding model" };
+  const known = embedder.state === "bound";
+  if (route.kind === "auto") return { ready: known, word: known ? "Ready" : "" };
+  const jobs = jobSourcesOf(route);
+  for (const job of EDITABLE_JOBS) {
+    const status = jobStatus(jobs[job], facts);
+    if (status.text === "") return { ready: false, word: "" };
+    if (!status.ready) return { ready: false, word: status.text };
+  }
+  return { ready: known, word: known ? "Ready" : "" };
 }
 
 export function RoutesTab({
   header,
-  catalog,
   facts,
-  rules,
-  reload,
+  composes,
   request,
-  onOpenRules,
   onAddMachine,
+  onOpenModels,
 }: {
   header: (actions: ReactNode, meta?: ReactNode) => ReactNode;
-  catalog: { policies: TaskPolicy[]; loading: boolean; error: string; settled: number };
   facts: RoutingFacts;
-  /** The rules, read once for the section: how many take each route. */
-  rules?: Pick<RulesState, "rules" | "read">;
-  /** Re-read the routes AND the rules; they share one engine revision. */
-  reload: () => void;
-  /** Another tab asking for a route's page ("Change Fast local first"). */
-  request?: { name: string; n: number } | null;
-  /** Open Rules on the rules that take this route. */
-  onOpenRules?: (route: string) => void;
+  /** Owner or developer: may change Local, Apps and Auto's balance. */
+  composes: boolean;
+  /** Another surface asking for a route's page (Ask's "Manage routes"). */
+  request?: { id: string; n: number } | null;
   onAddMachine?: () => void;
+  onOpenModels?: () => void;
 }) {
+  const modes = useRouteModes(true);
+  const writes = useRouteWrites();
+  const embedder = useBoundEmbedder(true);
+  const balance = useAutoBalance(true);
+  const budget = useMyBudget(true);
   const [page, setPage] = useState<Page>({ kind: "list" });
-  const [drafts, setDrafts] = useState<Record<string, RouteDraftState>>({});
-  const [pending, setPending] = useState<{ name: string; after: number } | null>(null);
-  const routes = useMemo(() => orderRoutes(catalog.policies), [catalog.policies]);
+  const [drafts, setDrafts] = useState<Record<string, RouteModeDraft>>({});
+  const [pending, setPending] = useState<string | null>(null);
 
   const toList = useCallback(() => setPage({ kind: "list" }), []);
+  const rereadAll = useCallback(() => {
+    modes.reread();
+    embedder.reread();
+  }, [modes.reread, embedder.reread]);
 
   useEffect(() => {
-    if (request) setPage({ kind: "route", name: request.name });
+    if (request && request.id !== "") setPage({ kind: "route", id: request.id });
   }, [request?.n]);
+
+  // A ROUTE JUST CREATED IS PENDING, not missing, until a read brings it back.
+  useEffect(() => {
+    if (pending !== null && modes.routes.some((r) => r.id === pending)) setPending(null);
+  }, [pending, modes.routes]);
+
+  const embedderName = embedderReading(embedder);
+  const personal = modes.routes.filter((r) => r.scope === "personal");
+  const builtIns = modes.routes.filter((r) => r.scope === "cluster");
 
   if (page.kind === "new") {
     return (
-      <NewRouteWizard
-        routes={routes}
+      <NewRouteModeWizard
+        routes={modes.routes}
         facts={facts}
+        embedder={embedderName}
+        writes={writes}
         onCancel={toList}
-        onCreated={(name) => {
-          setPending({ name, after: catalog.settled });
-          reload();
-          setPage({ kind: "route", name });
+        onCreated={(id) => {
+          modes.reread();
+          if (id === "") {
+            setPage({ kind: "list" });
+            return;
+          }
+          setPending(id);
+          setPage({ kind: "route", id });
         }}
-        onRefused={reload}
+        onRefused={modes.reread}
         onAddMachine={onAddMachine}
+        onOpenModels={onOpenModels}
       />
     );
   }
 
   if (page.kind === "route") {
-    const route = routes.find((r) => r.name === page.name);
-    if (route === undefined) {
-      const waiting = catalog.loading || (pending !== null && pending.name === page.name && catalog.settled <= pending.after);
-      if (waiting) return <div className="os-deploy-scroll"><ContentSkeleton kind="detail" label="Loading the route" /></div>;
-      if (catalog.error) {
-        return (
-          <div className="os-deploy-scroll">
-            <Notice tone="warn" sentence="The route could not be read." detail={catalog.error} />
-            <button type="button" className="fleet-reading-link" onClick={reload}>Read the routes again</button>
-            <button type="button" className="fleet-reading-link" onClick={toList}>Back to the list</button>
-          </div>
-        );
-      }
-      return <MissingRoute onBack={toList} />;
+    const route = modes.routes.find((r) => r.id === page.id);
+    if (page.id === "auto") {
+      return (
+        <AutoPage
+          route={route}
+          facts={facts}
+          embedder={embedderName}
+          balance={balance}
+          budget={budget}
+          editable={composes}
+          writes={writes}
+          onBack={toList}
+        />
+      );
     }
-    // The LAST KNOWN count through a re-read: the rules are read again after
-    // every write, and a line that vanished and came back would move the
-    // composer under the cursor at the moment of saving.
-    const known = rules !== undefined && (rules.read || rules.rules.length > 0);
-    const taking = known ? rules.rules.filter((r) => r.policy === route.name).length : null;
+    if (route === undefined) {
+      if (modes.loading || pending === page.id) return <div className="os-deploy-scroll"><ContentSkeleton kind="detail" label="Loading the route" /></div>;
+      return (
+        <div className="os-deploy-scroll">
+          <EmptyState title="That route is gone" action={<button type="button" className="fleet-reading-link" onClick={toList}>Back to Routes</button>}>
+            It may have been deleted since this page opened.
+          </EmptyState>
+        </div>
+      );
+    }
     return (
-      <RoutePage
+      <RouteModePage
+        key={route.id}
         route={route}
         facts={facts}
-        draft={drafts[route.name]}
-        setDrafts={setDrafts}
-        rulesTaking={taking}
+        embedder={embedderName}
+        editable={canEditRoute(route, composes)}
+        saves={modes.available && writes.supported}
+        revision={modes.revision}
+        writes={writes}
+        takenNames={personal.filter((r) => r.id !== route.id).map((r) => r.name)}
+        draft={drafts[route.id]}
+        onDraft={(next) =>
+          setDrafts((held) => {
+            if (next === undefined) {
+              if (!(route.id in held)) return held;
+              const { [route.id]: _dropped, ...rest } = held;
+              return rest;
+            }
+            return { ...held, [route.id]: next };
+          })
+        }
         onBack={toList}
-        onChanged={reload}
-        onOpenRules={onOpenRules ? () => onOpenRules(route.name) : undefined}
+        onChanged={rereadAll}
+        onDeleted={() => {
+          modes.reread();
+          setPage({ kind: "list" });
+        }}
         onAddMachine={onAddMachine}
+        onOpenModels={onOpenModels}
       />
     );
   }
 
-  const count = !catalog.loading && !catalog.error ? routes.length : undefined;
+  const row = (route: RouteMode) => {
+    const Icon = ICONS[route.kind];
+    const readiness = routeReadiness(route, facts, embedderName, modes.available);
+    const fact = drafts[route.id] ? "Unsaved" : route.customized ? "Changed" : "";
+    return (
+      <RecordRow
+        key={route.id}
+        icon={<Icon size={18} aria-hidden />}
+        name={route.name}
+        secondary={route.description}
+        label={`Open ${route.name}, ${readiness.word || "checking"}`}
+        state={readiness.word === "" ? undefined : readiness.word}
+        tone="muted"
+        current={readiness.ready}
+        stateExtra={fact ? <Chip tone="muted">{fact}</Chip> : undefined}
+        onOpen={() => setPage({ kind: "route", id: route.id })}
+      />
+    );
+  };
+
   return (
     <div className="os-deploy-scroll">
       {header(
         <>
           <PageHelp title="Routes">
-            <p>A route is a list of sources, tried in order until one can serve. Rules decide which route a call takes.</p>
-            <p>A change to a route applies to every rule that takes it. Shipped routes can be changed and restored.</p>
+            <p>A route decides which source serves each job: quick tasks, main work, deep reasoning, and search and memory. You pick a route for each message in Ask.</p>
+            <p>Auto chooses for every call. Local keeps everything on local models; Apps uses Claude Code or Codex. Routes you make are yours alone. Search and memory always uses the cluster's embedding model.</p>
           </PageHelp>
-          <AutoRefresh busy={catalog.loading} onRefresh={reload} />
-          {!catalog.error && (!catalog.loading || routes.length > 0) ? <AddButton label="New route" onClick={() => setPage({ kind: "new" })} /> : null}
+          <AutoRefresh busy={modes.loading} onRefresh={rereadAll} />
         </>,
-        count,
       )}
-      {catalog.error ? <Notice tone="error" sentence="The routes could not be read." detail={catalog.error} /> : null}
-      {catalog.loading && routes.length === 0 ? (
-        <RecordListSkeleton label="Loading the routes" rows={4} />
-      ) : routes.length === 0 && !catalog.error ? (
-        <EmptyState title="No routes yet">Add one to choose which sources a call tries, in order.</EmptyState>
+      {modes.error ? <Notice tone="error" sentence="The routes could not be read." detail={modes.error} /> : null}
+      {!modes.available && !modes.loading ? (
+        <Notice tone="warn" sentence="This cluster does not save routes yet." next="The shipped routes are shown as they are." />
+      ) : null}
+      {modes.loading && modes.routes.length === 0 ? (
+        <RecordListSkeleton label="Loading the routes" rows={3} />
       ) : (
-        <RecordList as="ul" label="Routes" className="fleet-routes">
-          {routes.map((route) => {
-            const entries = routeEntries(route);
-            const status = routeStatus(entries, facts);
-            const title = routeTitle(route.name);
-            const fact = drafts[route.name] ? "Unsaved" : route.customized ? "Changed" : route.shipped ? "Shipped" : "";
-            return (
-              <RecordRow
-                key={route.name}
-                icon={<Route size={18} aria-hidden />}
-                name={title}
-                label={`Open ${title}, ${status.word || "checking"}`}
-                state={status.word === "" ? <InlineSkeleton label="Checking" /> : status.word}
-                // NEUTRAL, ready or not: the accent belongs to the circuit and
-                // its "Serves now" (design brief, section 7). The strip's
-                // serving glyph carries it here; the words say the rest.
-                tone="muted"
-                current={status.ready}
-                stateExtra={fact ? <Chip tone="muted">{fact}</Chip> : undefined}
-                onOpen={() => setPage({ kind: "route", name: route.name })}
+        <>
+          <RecordList as="ul" label="Built-in routes" className="fleet-routes fleet-route-modes">
+            {builtIns.map(row)}
+          </RecordList>
+          {modes.available ? (
+            <div className="fleet-route-yours">
+              <Subhead
+                meta={personal.length > 0 ? personal.length : undefined}
+                actions={writes.supported ? <AddButton label="New route" onClick={() => setPage({ kind: "new" })} /> : null}
               >
-                <GlyphStrip readings={entries.map((entry) => readSource(entry, facts))} servingIndex={servingIndex(entries, facts).index} />
-              </RecordRow>
-            );
-          })}
-        </RecordList>
+                Yours
+              </Subhead>
+              {personal.length === 0 ? (
+                <p className="os-caption fleet-route-yours-empty">Routes you make appear here.</p>
+              ) : (
+                <RecordList as="ul" label="Your routes" className="fleet-routes fleet-route-modes">
+                  {personal.map(row)}
+                </RecordList>
+              )}
+            </div>
+          ) : null}
+        </>
       )}
-    </div>
-  );
-}
-
-function RoutePage({
-  route,
-  facts,
-  draft,
-  setDrafts,
-  rulesTaking,
-  onBack,
-  onChanged,
-  onOpenRules,
-  onAddMachine,
-}: {
-  route: TaskPolicy;
-  facts: RoutingFacts;
-  draft: RouteDraftState | undefined;
-  setDrafts: (update: (held: Record<string, RouteDraftState>) => Record<string, RouteDraftState>) => void;
-  rulesTaking: number | null;
-  onBack: () => void;
-  onChanged: () => void;
-  onOpenRules?: () => void;
-  onAddMachine?: () => void;
-}) {
-  const name = route.name;
-  const onDraft = useCallback(
-    (next: RouteDraftState | undefined) =>
-      setDrafts((held) => {
-        if (next === undefined) {
-          if (!(name in held)) return held;
-          const { [name]: _dropped, ...rest } = held;
-          return rest;
-        }
-        return { ...held, [name]: next };
-      }),
-    [name, setDrafts],
-  );
-  return (
-    <RouteComposer
-      route={route}
-      facts={facts}
-      draft={draft}
-      onDraft={onDraft}
-      rulesTaking={rulesTaking}
-      onBack={onBack}
-      onChanged={onChanged}
-      onOpenRules={onOpenRules}
-      onAddMachine={onAddMachine}
-    />
-  );
-}
-
-function MissingRoute({ onBack }: { onBack: () => void }) {
-  return (
-    <div className="os-deploy-scroll">
-      <EmptyState title="That route is gone" action={<button type="button" className="fleet-reading-link" onClick={onBack}>Back to Routes</button>}>
-        It may have been removed since this page opened.
-      </EmptyState>
     </div>
   );
 }

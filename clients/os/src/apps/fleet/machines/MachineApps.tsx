@@ -8,6 +8,7 @@ import { appLabel, machineName, RUNNABLE_APPS, type MachineApp, type MachineRow 
 import { isWorkerOnline } from "../online";
 import { workerClusterUrl } from "../addMachine/install";
 import { MachineDetailsSection } from "./MachineDetailsInfo";
+import { AppPermissionHelp } from "./AppPermissionHelp";
 
 export function appStatus(machine: MachineRow, app: MachineApp | undefined, now: Date): string {
   if (machine.revokedAt) return "Machine removed";
@@ -63,14 +64,17 @@ function MachineAppSection({ id, machine, now }: { id: typeof RUNNABLE_APPS[numb
     } catch (err) { setError(err instanceof Error ? err.message : String(err)); }
     finally { starting.current = false; setBusy(false); }
   }
+  // A STATUS PAGE, NOT REFERENCE DATA: these rows say where each app stands,
+  // and nothing on them is worth pasting elsewhere, so none offers copy.
   return <MachineDetailsSection title={label}>
     <Facts>
       <Fact label="Status" value={<span className="fleet-app-status" data-ready={status === "Ready" || undefined}>{status}</span>} />
       <Fact label="Installed" value={machine.appsReported ? app ? "Yes" : "No" : "Not reported"} />
       <Fact label="Availability" value={available} />
       <Fact label="Subscription" value={subscriptionLabel(app?.subscription)} />
-      {app?.version ? <Fact label="Version" value={app.version} copyValue={app.version} /> : null}
+      {app?.version ? <Fact label="Version" value={app.version} /> : null}
     </Facts>
+    {app ? <AppPermissionHelp app={app} machine={machine} /> : null}
     {runId ? <div className="fleet-section-actions"><Button onClick={() => openWork?.(runId)}>View setup</Button></div>
       : status !== "Ready" && canSetup ? <div className="fleet-section-actions"><Button tone="primary" disabled={!connection || !openWork} busy={busy} busyLabel="Starting…" onClick={() => void setup()}>{!app ? "Set up" : !app.signedIn ? "Connect" : "Allow app"}</Button></div> : null}
     {error ? <Notice tone="error" sentence="Setup could not start." detail={error} /> : null}

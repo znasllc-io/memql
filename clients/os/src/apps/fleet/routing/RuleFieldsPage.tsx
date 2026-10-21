@@ -191,7 +191,7 @@ export function RuleFieldsPage({
   const detail = removing
     ? "Calls it matched fall to the rules below it"
     : shadow !== null
-      ? `${whenWords(shadow)} already takes ${routeTitle(shadow.policy)}; change that route instead`
+      ? `${whenWords(shadow)} already takes ${routeTitle(shadow.policy)}; change that chain instead`
       : simulation !== null
       ? simulationSentence(simulation)
       : !nameValid
@@ -206,7 +206,7 @@ export function RuleFieldsPage({
     <div className="os-deploy-pane fleet-rule-page">
       <div className="os-deploy-scroll">
         <ActivityTarget target={seed ? `fleet:rule:${seed.name}` : "fleet:rule:draft"}>
-          <Head title={title} breadcrumbs={[{ label: "Rules", onSelect: onBack }, { label: title }]} back={{ label: "Rules", onSelect: onBack }} />
+          <Head navigationKey={`rule:${seed?.name ?? "new"}`} title={title} breadcrumbs={[{ label: "Rules", onSelect: onBack }, { label: title }]} back={{ label: "Rules", onSelect: onBack }} />
           <div className="fleet-rule-said">
             <RuleSentence rule={draft} />
           </div>
@@ -252,8 +252,8 @@ export function RuleFieldsPage({
 
               <fieldset className="os-field-group">
                 <legend>Then</legend>
-                <Field label="Route">
-                  <Select id="rule-field-route" label="Route" value={route} onChange={(next) => { setRoute(next); invalidate(); }}>
+                <Field label="Chain">
+                  <Select id="rule-field-route" label="Chain" value={route} onChange={(next) => { setRoute(next); invalidate(); }}>
                     {!routes.some((r) => r.name === route) ? <option value={route}>{routeTitle(route)} (not read)</option> : null}
                     {routes.map((r) => <option key={r.name} value={r.name}>{routeTitle(r.name)}</option>)}
                   </Select>

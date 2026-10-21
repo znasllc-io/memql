@@ -209,7 +209,7 @@ export function TemplatePage({ template, layouts, onBack, onOpenLayout, onReread
   return (
     <div className="os-action-pane" data-os-page-context={JSON.stringify({ page: "Template", name, id: template.id })}>
       <div className="os-action-body os-app-stack">
-        <Head title={name} back={{ label: "Templates", onSelect: onBack }} />
+        <Head navigationKey={`template:${template.id}`} title={name} back={{ label: "Templates", onSelect: onBack }} />
         {editorSilent ? <Notice tone="warn" sentence={VSCODE_NO_ANSWER_MESSAGE} /> : null}
         {outcomeNotice()}
         <Panel label="Template details">

@@ -181,14 +181,14 @@ export function RuleWizard({
     },
     {
       id: "route",
-      name: "Route",
+      name: "Chain",
       state: stateOf("route"),
       sentence: "Where that work goes.",
       answer: route ? routeTitle(route) : undefined,
       body: (
         <ChoiceStack
           name="fleet-rule-route"
-          label="Take the route"
+          label="Take the chain"
           voice="prose"
           value={route}
           options={routes.map((r) => ({ value: r.name, label: routeTitle(r.name), description: routeStatus(routeEntries(r), facts).word || undefined }))}
@@ -202,6 +202,7 @@ export function RuleWizard({
     {
       id: "review",
       name: "Review",
+      sentence: "Check, then add.",
       state: stateOf("review"),
       body: (
         <div className="fleet-rule-review">
@@ -227,7 +228,7 @@ export function RuleWizard({
     step === "when"
       ? { word: "Choose the work", detail: "" }
       : step === "route"
-        ? { word: "Choose a route", detail: "" }
+        ? { word: "Choose a chain", detail: "" }
         : shadow !== null
           ? { word: "Decided by a shipped rule", detail: `${whenWords(shadow)} already takes ${routeTitle(shadow.policy)}; change that route instead` }
           : { word: working ? "Adding" : "Ready to add", detail: nameValid ? "" : "Choose another name" };

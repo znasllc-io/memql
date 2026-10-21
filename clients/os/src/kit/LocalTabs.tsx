@@ -6,7 +6,7 @@ export function LocalTabs<T extends string>({ label, value, onChange, options, a
   actions?: ReactNode;
 }) {
   const tabs = <nav className="os-local-tabs" aria-label={label}>{options.map(([id, name]) =>
-    <button type="button" key={id} aria-current={value === id ? "page" : undefined} onClick={() => onChange(id)}>{name}</button>
+    <button type="button" data-os-scroll-navigation="reset" key={id} aria-current={value === id ? "page" : undefined} onClick={() => onChange(id)}>{name}</button>
   )}</nav>;
   return actions ? <div className="os-local-tabs-row">{tabs}<div className="os-local-tabs-actions">{actions}</div></div> : tabs;
 }

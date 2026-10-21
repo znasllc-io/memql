@@ -233,17 +233,17 @@ describe("placing a source", () => {
   });
 
   it("refuses a duplicate, a route inside itself, and a loop through another route", () => {
-    expect(placementProblem("fleet:strongest", ["fleet:strongest"], "mine", f)).toBe("Already in this route.");
+    expect(placementProblem("fleet:strongest", ["fleet:strongest"], "mine", f)).toBe("Already in this chain.");
     // Replacing a slot with what it already holds is not a duplicate.
     expect(placementProblem("fleet:strongest", ["fleet:strongest"], "mine", f, 0)).toBe("");
-    expect(placementProblem("policy:mine", [], "mine", f)).toBe("A route cannot include itself.");
+    expect(placementProblem("policy:mine", [], "mine", f)).toBe("A chain cannot include itself.");
     expect(placementProblem("policy:wraps", [], "mine", f)).toBe("Wraps already includes this route.");
     expect(placementProblem("policy:localFirst", [], "mine", f)).toBe("");
   });
 
   it("refuses a seventeenth fallback, which the engine would refuse at save", () => {
     const full = Array.from({ length: 17 }, (_, i) => `fleet:m${i}`);
-    expect(placementProblem("app:*", full, "mine", f)).toBe("A route holds at most 17 sources.");
+    expect(placementProblem("app:*", full, "mine", f)).toBe("A chain holds at most 17 sources.");
   });
 });
 
@@ -267,7 +267,7 @@ describe("the route's action bar", () => {
     const bar = routeBar(base);
     expect(bar.state).toBe("Shipped");
     expect(bar.acts).toEqual([]);
-    expect(bar.detail).toBe("Applies to every rule that takes this route");
+    expect(bar.detail).toBe("Applies to every rule that takes this chain");
   });
 
   it("offers Restore shipped only on a changed shipped route", () => {
@@ -390,7 +390,7 @@ describe("the tray", () => {
   it("lists every source the cluster knows, grouped, INCLUDING the ones that cannot serve", () => {
     const studio = machine({ id: "studio", name: "studio-mac", models: [chat("qwen3.5:4b")], apps: [app("claude-code")] });
     const groups = trayGroups(facts({ machines: [studio], routes: [{ name: "localFirst", entries: ["fleet:strongest"] }, { name: "mine", entries: [] }] }), "mine");
-    expect(groups.map((g) => g.title)).toEqual(["On your machines", "Choices", "Vendors", "Routes"]);
+    expect(groups.map((g) => g.title)).toEqual(["On your machines", "Choices", "Vendors", "Chains"]);
     const machines = groups[0]!.sources.map((s) => `${s.label}:${s.readiness}`);
     // Codex is on no machine and is still listed -- the person has to see why
     // a route through it would not connect.
@@ -479,7 +479,7 @@ describe("a source typed by its exact name", () => {
     expect(specificSourceProblem("fleet:", f)).toBe("Name something after the colon.");
     expect(specificSourceProblem("app:cursor", f)).toBe("cursor is not an app this cluster drives.");
     expect(specificSourceProblem("app:*:opus", f)).toBe("Any signed-in app cannot pin a model.");
-    expect(specificSourceProblem("policy:nope", f)).toBe("There is no route by that name.");
+    expect(specificSourceProblem("policy:nope", f)).toBe("There is no chain by that name.");
     for (const text of ["Start with fleet: or app:, or type a name.", "cursor is not an app this cluster drives."]) expect(retiredWordsIn(text)).toEqual([]);
   });
 

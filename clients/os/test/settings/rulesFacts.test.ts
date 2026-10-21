@@ -209,12 +209,12 @@ describe("the order the engine tries them in", () => {
 
 describe("a rule as one line of English", () => {
   it("reads a rule with no conditions as every call", () => {
-    expect(ruleSentence(rule({ policy: "localFirst" }))).toBe("Every call, take the Local first route.");
+    expect(ruleSentence(rule({ policy: "localFirst" }))).toBe("Every call, take the Local first chain.");
   });
 
   it("reads one condition", () => {
     expect(ruleSentence(rule({ when: { level: "reasoning" }, policy: "localOnly" }))).toBe(
-      "When the level asked for is reasoning, take the Local only route.",
+      "When the level asked for is reasoning, take the Local only chain.",
     );
   });
 
@@ -227,25 +227,25 @@ describe("a rule as one line of English", () => {
     );
     expect(said).toBe(
       "When the level asked for is reasoning, the prompt is Agent reply and " +
-        "the role acting is operator, take the Local first route.",
+        "the role acting is operator, take the Local first chain.",
     );
     // Two conditions take "and" with no comma before it.
     expect(ruleSentence(rule({ when: { level: "fast", tag: "nightly" }, policy: "localOnly" }))).toBe(
-      "When the level asked for is fast and the call's tag is nightly, take the Local only route.",
+      "When the level asked for is fast and the call's tag is nightly, take the Local only chain.",
     );
   });
 
   it("says what the rule DOES, not only what it looks at", () => {
     expect(
       ruleSentence(rule({ level: "reasoning", policy: "localFirst", onUnavailable: "degrade" })),
-    ).toBe("Every call, ask for reasoning and take the Local first route. If nothing there is ready, step down a level.");
+    ).toBe("Every call, ask for reasoning and take the Local first chain. If nothing there is ready, step down a level.");
     expect(ruleSentence(rule({ policy: "localOnly", onUnavailable: "park" }))).toMatch(
       /wait for a person/,
     );
   });
 
-  it("says a rule with no route has no route, rather than trailing off", () => {
-    expect(ruleSentence(rule({ policy: "" }))).toBe("Every call, take no route.");
+  it("says a rule with no chain has no chain, rather than trailing off", () => {
+    expect(ruleSentence(rule({ policy: "" }))).toBe("Every call, take no chain.");
   });
 });
 

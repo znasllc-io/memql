@@ -28,6 +28,7 @@
 
 import { machineModelsFrom, type MachineModel } from "../machines/models";
 import { orderModels } from "../models/ordering";
+import { capacityReason, type CapacityFacts } from "./capacity";
 import { RUNNABLE_APPS, appLabel, type MachineApp } from "../rows";
 import type { LabelMap } from "../labels";
 import { routeTitle, sourceKind, sourceLabel, type SourceKind } from "./vocabulary";
@@ -67,6 +68,12 @@ export interface RoutingFacts {
   eligibleModelIds?: readonly string[] | null;
   /** The owner's delegation app order, which `app:*` honours first. */
   appOrder?: readonly string[];
+  /**
+   * What each machine can take right now (`fleetCapacity`), or null when the
+   * cluster does not measure it. A model whose every slot is in use, or that
+   * would not fit in free memory, cannot take a call -- and says why.
+   */
+  capacity?: CapacityFacts | null;
 }
 
 export interface SourceReading {
@@ -114,6 +121,7 @@ export function factsFrom(input: {
   routes: readonly RouteLike[];
   preference: readonly string[];
   appOrder?: readonly string[];
+  capacity?: CapacityFacts | null;
 }): RoutingFacts {
   return {
     machinesRead: input.machinesRead,
@@ -134,6 +142,7 @@ export function factsFrom(input: {
         ? input.inference.eligibleModelIds
         : null,
     appOrder: input.appOrder ?? [],
+    capacity: input.capacity ?? null,
   };
 }
 
@@ -158,7 +167,7 @@ function embeddingsOnlyModel(facts: RoutingFacts, modelId: string): boolean {
 
 function readLocalSelector(entry: string, selector: string, facts: RoutingFacts): SourceReading {
   const online = facts.machines.filter((m) => m.online);
-  const chat = online.flatMap((m) => chatModels(m).map((model) => ({ ...model, online: true })));
+  const chat = online.flatMap((m) => chatModels(m).map((model) => ({ ...model, online: true, machineId: m.id })));
   // THE ENGINE'S FLOOR, once read: a selector takes only a model the engine
   // counts as eligible, so a small model without structured output is not a
   // "ready" the router would pass over.
@@ -175,21 +184,56 @@ function readLocalSelector(entry: string, selector: string, facts: RoutingFacts)
             : "no online model meets the minimum";
     return reading(entry, "idle", "", reason);
   }
+  // CAPACITY, when measured: the router passes over a machine that cannot
+  // take the call now, so the selector serves with the best model a machine
+  // CAN take -- and when none can, it says why the best one cannot.
+  const takes = models.filter((model) => capacityReason(facts.capacity, model.machineId, model.modelId) === "");
+  const ordered = (list: typeof models) => (selector === "strongest" ? orderModels(list, facts.preference) : orderFastest(list));
+  if (takes.length === 0) {
+    const best = ordered(models)[0]!;
+    return reading(entry, "idle", best.modelId, capacityReason(facts.capacity, best.machineId, best.modelId));
+  }
   if (selector === "strongest") {
-    const top = orderModels(models, facts.preference)[0]!;
+    const top = orderModels(takes, facts.preference)[0]!;
     // What answers is the MODEL, so that is what "serves with" names.
     return reading(entry, "ready", top.modelId, "", false, top.modelId);
   }
-  const count = new Set(models.map((m) => m.modelId)).size;
+  // FASTEST NAMES ITS MODEL when the sizes say which one the engine takes;
+  // with no size reported it says how many models could answer.
+  const fast = orderFastest(takes.filter((m) => m.params >= FAST_MIN_PARAMS))[0];
+  if (fast) return reading(entry, "ready", fast.modelId, "", false, fast.modelId);
+  const count = new Set(takes.map((m) => m.modelId)).size;
   return reading(entry, "ready", `${count} ${count === 1 ? "model" : "models"}`, "");
+}
+
+// component/memql's FleetFastMinParams: the automatic fastest selector passes
+// over a model under this size, and one that did not say.
+const FAST_MIN_PARAMS = 3_000_000_000;
+
+/**
+ * Fastest-first, as component/memql's orderModelsFastest ranks `fleet:fastest`:
+ * fewest parameters, an unreported size last, then model id. (Measured
+ * throughput would come first; the engine has none to rank by yet.)
+ */
+function orderFastest<T extends MachineModel>(list: readonly T[]): T[] {
+  return [...list].sort((a, b) => {
+    if (a.params > 0 !== b.params > 0) return a.params > 0 ? -1 : 1;
+    if (a.params !== b.params) return a.params - b.params;
+    return a.modelId < b.modelId ? -1 : a.modelId > b.modelId ? 1 : 0;
+  });
 }
 
 function readLocalModel(entry: string, modelId: string, facts: RoutingFacts): SourceReading {
   const holders = facts.machines.filter((m) => m.models.some((model) => model.modelId === modelId));
   const only = embeddingsOnlyModel(facts, modelId);
   if (holders.length === 0) return reading(entry, "idle", "", "not on any machine", only);
-  const live = holders.find((m) => m.online);
+  const awake = holders.filter((m) => m.online);
+  const live = awake.find((m) => capacityReason(facts.capacity, m.id, modelId) === "");
   if (live) return reading(entry, "ready", `on ${live.name}`, "", only);
+  if (awake.length > 0) {
+    const why = capacityReason(facts.capacity, awake[0]!.id, modelId);
+    return reading(entry, "idle", awake[0]!.name, awake.length === 1 ? why : `${why} on ${awake[0]!.name}`, only);
+  }
   return reading(entry, "idle", holders[0]!.name, offline(holders.map((m) => m.name)), only);
 }
 
@@ -237,8 +281,8 @@ export function readSource(entry: string, facts: RoutingFacts, seen: ReadonlySet
   if (kind === "provider") return reading(entry, "unknown", "", "");
   if (kind === "route") {
     const route = facts.routes.find((r) => r.name === rest);
-    if (!route) return reading(entry, "idle", "", "no such route");
-    if (seen.has(rest)) return reading(entry, "idle", "", "loops back to this route");
+    if (!route) return reading(entry, "idle", "", "no such chain");
+    if (seen.has(rest)) return reading(entry, "idle", "", "loops back to this chain");
     const next = new Set(seen).add(rest);
     const serving = servingIndex(route.entries, facts, next);
     if (serving.index >= 0) {
@@ -333,12 +377,12 @@ export function placementProblem(
   at?: number,
 ): string {
   const others = entries.filter((_, i) => i !== at);
-  if (others.includes(entry)) return "Already in this route.";
-  if (at === undefined && entries.length >= MAX_SOURCES) return `A route holds at most ${MAX_SOURCES} sources.`;
+  if (others.includes(entry)) return "Already in this chain.";
+  if (at === undefined && entries.length >= MAX_SOURCES) return `A chain holds at most ${MAX_SOURCES} sources.`;
   const kind = sourceKind(entry);
   if (kind === "route") {
     const target = entry.slice("policy:".length);
-    if (routeName !== "" && target === routeName) return "A route cannot include itself.";
+    if (routeName !== "" && target === routeName) return "A chain cannot include itself.";
     if (routeName !== "" && includesRoute(facts, target, routeName)) return `${routeTitle(target)} already includes this route.`;
     const nested = facts.routes.find((r) => r.name === target);
     if (nested && routeCarriesEmbeddings(nested.name, nested.entries) && !routeCarriesEmbeddings(routeName, entries)) {
@@ -347,7 +391,7 @@ export function placementProblem(
     return "";
   }
   const embeddingsRoute = routeCarriesEmbeddings(routeName, entries);
-  if (embeddingsRoute) return entry === "embedder:active" ? "" : "This route keeps the active embeddings only.";
+  if (embeddingsRoute) return entry === "embedder:active" ? "" : "This chain keeps the active embeddings only.";
   if (kind === "embeddings") return "Active embeddings only makes embeddings.";
   if (kind === "local") {
     const modelId = entry.slice("fleet:".length);
@@ -392,7 +436,7 @@ export function trayGroups(facts: RoutingFacts, routeName: string, entries: read
     { id: "machines", title: "On your machines", sources: machines },
     { id: "choices", title: "Choices", sources: choices },
     { id: "vendors", title: "Vendors", sources: vendors },
-    { id: "routes", title: "Routes", sources: routes },
+    { id: "routes", title: "Chains", sources: routes },
   ];
 }
 
@@ -421,7 +465,7 @@ export function specificSourceProblem(text: string, facts: RoutingFacts): string
     if (!(RUNNABLE_APPS as readonly string[]).includes(appId)) return `${appId} is not an app this cluster drives.`;
     if (rest.split(":").length > 2) return "Nothing follows the app's model.";
   }
-  if (scheme === "policy" && !facts.routes.some((r) => r.name === rest)) return "There is no route by that name.";
+  if (scheme === "policy" && !facts.routes.some((r) => r.name === rest)) return "There is no chain by that name.";
   if (scheme === "embedder" && rest !== "active") return "Only the active embeddings can be named.";
   return "";
 }

@@ -753,6 +753,26 @@ QueryClient.prototype.checkRecord = function (this: QueryClient, args: CheckReco
   return this.executeNamed("checkRecord", buildCheckRecord(args), opts);
 };
 
+/** Remove the CALLER's own photo; the initial is shown again. The row is stamped from actor.userId. */
+// Bound concept: v1:identity:user (machine-readable: BoundConcepts["clearMyAvatar"] in generated_concepts.ts).
+export interface ClearMyAvatarArgs {
+}
+
+export function buildClearMyAvatar(args: ClearMyAvatarArgs): string {
+  void args;
+  return "mutation clearMyAvatar()";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    clearMyAvatar(args?: ClearMyAvatarArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.clearMyAvatar = function (this: QueryClient, args: ClearMyAvatarArgs = {} as ClearMyAvatarArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("clearMyAvatar", buildClearMyAvatar(args), opts);
+};
+
 /** Withdraw the candidate version, leaving the deployable with only what it serves.
 The plain inverse of setSiteCandidate, and its own act rather than an omitted argument -- see that mutation's note. It touches neither `bundleRef` nor `previewBinding`: withdrawing a candidate is not detaching a development store, and a person who withdraws one usually means to publish another against the same store.
 Every preview grant naming the withdrawn version stops resolving, because a grant names the candidate it was issued for and the edge compares the two (component/edge/preview.go). So this is also how an operator ends every open preview of a version at once. */
@@ -5002,6 +5022,8 @@ export interface RecordRouterCallArgs {
   minContextTokens?: number;
   /** Whose machine served a local call. Empty until shared machines land. */
   machineOwnerUserId?: string;
+  /** The route a person chose for this call in Ask. Empty means Auto. */
+  route?: string;
 }
 
 export function buildRecordRouterCall(args: RecordRouterCallArgs): string {
@@ -5049,6 +5071,7 @@ export function buildRecordRouterCall(args: RecordRouterCallArgs): string {
   if (args.touches !== undefined) parts.push("touches: " + renderMemQLValue(args.touches));
   if (args.minContextTokens !== undefined) parts.push("minContextTokens: " + renderMemQLValue(args.minContextTokens));
   if (args.machineOwnerUserId !== undefined) parts.push("machineOwnerUserId: " + renderMemQLValue(args.machineOwnerUserId));
+  if (args.route !== undefined) parts.push("route: " + renderMemQLValue(args.route));
   return "mutation recordRouterCall(" + parts.join(", ") + ")";
 }
 
@@ -6688,6 +6711,29 @@ QueryClient.prototype.setLibraryWatchedFolderStatus = function (this: QueryClien
   return this.executeNamed("setLibraryWatchedFolderStatus", buildSetLibraryWatchedFolderStatus(args), opts);
 };
 
+/** Set the CALLER's own photo: an inline base64 data: URL (image/webp, image/jpeg or image/png) of at most 40,000 characters. The row is stamped from actor.userId. */
+// Bound concept: v1:identity:user (machine-readable: BoundConcepts["setMyAvatar"] in generated_concepts.ts).
+export interface SetMyAvatarArgs {
+  /** The photo, cropped square and resized by the client. */
+  avatar: string;
+}
+
+export function buildSetMyAvatar(args: SetMyAvatarArgs): string {
+  const parts: string[] = [];
+  parts.push("avatar: " + renderMemQLValue(args.avatar));
+  return "mutation setMyAvatar(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    setMyAvatar(args: SetMyAvatarArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.setMyAvatar = function (this: QueryClient, args: SetMyAvatarArgs = {} as SetMyAvatarArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("setMyAvatar", buildSetMyAvatar(args), opts);
+};
+
 /** Flip a pack's per-instance enablement in v1:platform:packState. clusterOwner tier via the concept's @rowAuthz -- these rows are the deployment's, not any operator's, and the tier injects the actor gate. The Modules flip reaches this through MemQLEngine.SetPackEnabled (component/memql), which admits the owner for any pack and a developer holding execute on app:cluster/modules for a STOREFRONT pack only, then runs this under internal origin with the caller's actor kept, so the row's provenance is the person; component/grpc's SetPackEnabledMsg handler writes one audit event per attempt. The id is the bare pack domain -- the engine canonicalizes it to v1:platform:packState:<packDomain>, so one row per pack with the version history as the flip audit trail. RESTART-REQUIRED lifecycle: the write changes what each node reads at its next boot, never what a running node has loaded.
 The FIRST flip of a pack is a create, and a create needs a cluster owner or server code, enforced in executeWrite (component/memql/create_rank_floor.go): the tier does not judge a create, and a floor on this mutation would never see a raw insert() of the same concept (Connect Shopify design, D13). Internal origin passes. Once a pack has a row, the tier's write guard refuses every non-owner flip of it, so a direct call below owner is refused either way: a developer flips a storefront pack through the Modules path above, never by calling this. */
 // Bound concept: v1:platform:packState (machine-readable: BoundConcepts["setPackEnabled"] in generated_concepts.ts).
@@ -7938,6 +7984,35 @@ QueryClient.prototype.updateMissingCapabilityStatus = function (this: QueryClien
   return this.executeNamed("updateMissingCapabilityStatus", buildUpdateMissingCapabilityStatus(args), opts);
 };
 
+/** Change the CALLER's own name. The row is stamped from actor.userId: there is no target argument, so another person's name cannot be written here. firstName and lastName flow to the JWT as given_name / family_name; displayName is what the UI shows. */
+// Bound concept: v1:identity:user (machine-readable: BoundConcepts["updateMyName"] in generated_concepts.ts).
+export interface UpdateMyNameArgs {
+  /** Given name. Must contain something other than whitespace. */
+  firstName: string;
+  /** Family name. Empty clears it. */
+  lastName?: string;
+  /** The name the UI shows, normally firstName + ' ' + lastName. */
+  displayName: string;
+}
+
+export function buildUpdateMyName(args: UpdateMyNameArgs): string {
+  const parts: string[] = [];
+  parts.push("firstName: " + renderMemQLValue(args.firstName));
+  if (args.lastName !== undefined) parts.push("lastName: " + renderMemQLValue(args.lastName));
+  parts.push("displayName: " + renderMemQLValue(args.displayName));
+  return "mutation updateMyName(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    updateMyName(args: UpdateMyNameArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.updateMyName = function (this: QueryClient, args: UpdateMyNameArgs = {} as UpdateMyNameArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("updateMyName", buildUpdateMyName(args), opts);
+};
+
 /** Update the CALLER's own v1:identity:user.preferences. Partial: an omitted field keeps its stored value. The target row is stamped from actor.userId, so there is no caller-supplied target and no admin override. It cannot reach preferences.computerUseEnabled (the computer-use kill switch, owned by toggleComputerUseEnabled) or preferences.activeAssistantId (an app-managed pointer): neither is a key this mutation writes, and @mergeFields("preferences") preserves the stored value of every key a call does not carry. */
 // Bound concept: v1:identity:user (machine-readable: BoundConcepts["updateMyPreferences"] in generated_concepts.ts).
 export interface UpdateMyPreferencesArgs {
@@ -8716,6 +8791,10 @@ export interface UpdateWorkerLastSeenArgs {
   /** A non-material inventory refresh riding the heartbeat's own write (epic memql#5146). Free disk moves on every report and decides nothing, so it is not worth a second write to this row; an inventory change that moves the `runtime:` labels does not come through here at all, it goes through updateWorkerHardware and does not wait. */
   /** OMITTED, never sent empty. update{} is a read-merge and `??` is blank-coalescing, so an absent key keeps the stored inventory while an empty object would overwrite it with a machine that reports nothing -- turning a cockpit's silence into a statement. */
   hardware?: Record<string, unknown>;
+  /** What the machine can take on now: memory free for a model and the models loaded (fleet capacity, routes design record). Re-asserted on every flush and OMITTED when the cockpit sent none, for hardware's `??` reason: an absent key keeps the stored report, which then ages out on its own reportedAt. */
+  capacity?: Record<string, unknown>;
+  /** What the machine's installer is doing (memql#6229): its stages and how far each has come. Re-asserted on every flush and OMITTED when the cockpit sent none, for capacity's reason. */
+  setup?: Record<string, unknown>;
   /** The latest Ping round trip in milliseconds (epic memql#5218, D11), riding the heartbeat's write for `hardware`'s reason: it is exactly as fresh as the flush it arrives with and decides nothing, so it is not worth a write of its own. */
   /** OMITTED together with rttAt while nothing has been measured, and for the same `??` reason: an absent key keeps the stored figure, while a sent zero would write "0 ms" over a real one and read as a fast machine rather than as an unmeasured one. */
   rttMs?: number;
@@ -8737,6 +8816,8 @@ export function buildUpdateWorkerLastSeen(args: UpdateWorkerLastSeenArgs): strin
   if (args.connectedNodeId !== undefined) parts.push("connectedNodeId: " + renderMemQLValue(args.connectedNodeId));
   if (args.activeCount !== undefined) parts.push("activeCount: " + renderMemQLValue(args.activeCount));
   if (args.hardware !== undefined) parts.push("hardware: " + renderMemQLValue(args.hardware));
+  if (args.capacity !== undefined) parts.push("capacity: " + renderMemQLValue(args.capacity));
+  if (args.setup !== undefined) parts.push("setup: " + renderMemQLValue(args.setup));
   if (args.rttMs !== undefined) parts.push("rttMs: " + renderMemQLValue(args.rttMs));
   if (args.rttAt !== undefined) parts.push("rttAt: " + renderMemQLValue(args.rttAt));
   if (args.clockSkewMs !== undefined) parts.push("clockSkewMs: " + renderMemQLValue(args.clockSkewMs));

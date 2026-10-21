@@ -1,4 +1,5 @@
-import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { usePageScroll } from "../../kit/pageNavigation";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { FilePlus, FolderPlus, Upload } from "lucide-react";
 import {
   newShortId,
@@ -650,15 +651,7 @@ export function BrowseSection({
     : filter.place === "desktop" ? deskFolders.flatMap(shortcut => { const node = tree.byId.get(shortcut.folderId); return node ? [node.folder] : []; })
     : filter.place === "bin" ? archivedFolders
     : materializedRail.folders.map(entry => entry.folder);
-  const pageRoot = useRef<HTMLDivElement>(null);
-  const scrollPositions = useRef(new Map<string, number>());
-  const pageKey = `${filter.place}:${filter.folderId ?? ""}:${selectedId}`;
-  useLayoutEffect(() => {
-    const scroller = pageRoot.current?.querySelector<HTMLElement>(".os-file-detail-body")
-      ?? pageRoot.current?.closest<HTMLElement>(".os-window-content");
-    if (scroller) scroller.scrollTop = scrollPositions.current.get(pageKey) ?? 0;
-    return () => { if (scroller) scrollPositions.current.set(pageKey, scroller.scrollTop); };
-  }, [pageKey]);
+  const pageRoot = usePageScroll(`${filter.place}:${filter.folderId ?? ""}:${selectedId}`);
 
   const clearFilters = () =>
     patch({
@@ -683,7 +676,7 @@ export function BrowseSection({
       onDrop={onDrop}
     >
       <div hidden={selected !== null}>
-      <Head title={headTitle} breadcrumbs={headTrail} navigation={selected === null} back={filter.folderId ? {label: PLACE_TITLE[filter.place], onSelect: () => patch({folderId: tree.byId.get(filter.folderId!)?.folder.parentFolderId ?? ""})} : undefined} meta={listCount(list?.snapshot, listedCount)}>
+      <Head navigationKey={`browse:${filter.place}:${filter.folderId ?? ""}`} title={headTitle} breadcrumbs={headTrail} navigation={selected === null} back={filter.folderId ? {label: PLACE_TITLE[filter.place], onSelect: () => patch({folderId: tree.byId.get(filter.folderId!)?.folder.parentFolderId ?? ""})} : undefined} meta={listCount(list?.snapshot, listedCount)}>
         {/* ONE WAY TO ADD SOMETHING (DESIGN.md rule 1: at most one primary
             action). Uploading a file and making a folder are the same
             question -- "put something here" -- and they were answered in two

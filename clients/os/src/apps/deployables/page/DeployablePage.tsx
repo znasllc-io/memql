@@ -425,7 +425,7 @@ export function DeployablePage({
       <div className="os-deploy-scroll">
         <Panel label={`Deployable ${siteName(site)}`}>
           {/* Page navigation stays with the title; Ask belongs to the window. */}
-          <Head title={name} breadcrumbs={[{ label: backLabel, onSelect: onBack }, { label: name }]} back={{ label: backLabel, onSelect: onBack }}>
+          <Head navigationKey={`deployable:${site.id}`} title={name} breadcrumbs={[{ label: backLabel, onSelect: onBack }, { label: name }]} back={{ label: backLabel, onSelect: onBack }}>
             <VisitSiteButton site={site} name={name} can={can} readiness={previewReadiness} readinessError={previewRead.error} onWritten={previewRead.reread} onOpenStore={() => setDetail("store")} />
             <OpenLogsButton iconOnly subject={site.id} subjectConcept={Concepts.PLATFORM_SITE} ariaLabel={`Logs for ${name}`} />
             <IconButton label="Traffic" onClick={() => setDetail("traffic")}><Activity size={16} aria-hidden /></IconButton>

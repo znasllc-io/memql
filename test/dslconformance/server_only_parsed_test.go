@@ -1474,6 +1474,18 @@ func TestServerOnlyParsedSetMatchesTheTree(t *testing.T) {
 		// the caller's own machines first and stamps internal origin for this
 		// one read.
 		{Path: "router/queries.memql", Name: "routerCallsOnMachine"}: true,
+		// Routes (design record 2026-10-18-routes). The router resolves a call
+		// made under a person's route on whichever replica runs it, under the
+		// maintenance principal, so the person is an argument the server
+		// supplies; Auto's signals are how a source behaves across everyone;
+		// the budget read is the person's spend, read where the actor is the
+		// run's system principal. routeWrite is reached only through
+		// routeSave/routeDelete, which validate every source first.
+		{Path: "router/queries.memql", Name: "routeForOwner"}:         true,
+		{Path: "router/queries.memql", Name: "routesOfOwner"}:         true,
+		{Path: "router/queries.memql", Name: "routerCallsForSignals"}: true,
+		{Path: "router/queries.memql", Name: "routerCallsForBudget"}:  true,
+		{Path: "router/mutations.memql", Name: "routeWrite"}:          true,
 		// epic memql#5327, designs D3 and D5. One worker-token identity by its
 		// own id, for the two things a LIVE stream does with the credential
 		// that admitted it: re-resolve it once a minute, and rotate it on

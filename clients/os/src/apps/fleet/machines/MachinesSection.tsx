@@ -16,6 +16,8 @@ import { isRevoked, machineFromRow, machineName, type MachineRow } from "../rows
 import { Chip, Chips, Head } from "../../../kit";
 import { useNow } from "../../../kit/useNow";
 import { MachineDetail } from "./MachineDetail";
+import { setupNow } from "./setup";
+import { setupNeedsAttention } from "./SetupHealth";
 import { useMachineWrites } from "./useMachineWrites";
 
 // The machines directory: every machine the caller owns, live, with the four
@@ -194,12 +196,17 @@ function MachineLine({
   // dot follows that, so a machine retired thirty seconds ago does not sit
   // there green.
   const online = isWorkerOnline(machine, now);
+  // A machine still being set up says so (memql#6229): connected, and its
+  // installer not finished.
+  const settingUp = online && setupNow(machine.setup, now)?.state === "running";
+  // What setup left for a person, on the machine's own page (memql#6235).
+  const attention = online && !settingUp && setupNeedsAttention(machine, now);
   const labels = machine.mergedLabels;
 
   return (
     <RecordRow name={machineName(machine)} secondary={machine.platform} icon={<MonitorSmartphone size={16} aria-hidden />}
       current={online} dim={revoked} open={open} onOpen={onToggle}
-      state={revoked ? "Revoked" : online ? "Online" : "Offline"} tone={online ? "accent" : "muted"}
+      state={revoked ? "Revoked" : settingUp ? "Setting up" : attention ? "Needs attention" : online ? "Online" : "Offline"} tone={attention ? "warn" : online ? "accent" : "muted"}
       stateExtra={tick === "added" ? <span className="os-livelist-tick">new</span> : null}>
       {labels.length > 0 ? (
         <Chips label={`Labels on ${machineName(machine)}`}>

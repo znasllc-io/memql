@@ -228,7 +228,7 @@ describe("minting", () => {
     expect(token.value).toBe(TOKEN);
     expect(token.readOnly).toBe(true);
     expect(screen.getByRole("button", { name: "Copy the worker token" })).toBeTruthy();
-    expect(screen.getByText(/private token shown only during this setup/)).toBeTruthy();
+    expect(screen.getByText(/Shown only here: it carries this machine’s token/)).toBeTruthy();
   });
 
   it("NEVER writes the token to browser storage or a URL", async () => {
@@ -268,16 +268,17 @@ describe("minting", () => {
     expect(within(bar()).getByText("Waiting for studio-mac-mini")).toBeTruthy();
     // The Connect stop's line says what the cluster is doing; its body is
     // one click away, behind the person's own stop.
-    expect(screen.getByText("Listening for the machine")).toBeTruthy();
+    expect(screen.getByText("Listening")).toBeTruthy();
   });
 
-  it("states the second command up front when local models were asked for", async () => {
+  // ONE COMMAND (memql#6214): the installer sets local models up itself when
+  // the line carries --inference, and the Model runtime check asks for the
+  // second command only when the runtime then needs a person's approval.
+  it("shows one command when local models were asked for, carrying --inference", async () => {
     mount(fakeConnection());
     await describeAndMint("box", { inference: true });
-    expect((screen.getByLabelText("the local models setup command") as HTMLInputElement).value).toBe(
-      "/usr/local/bin/memql worker setup --inference",
-    );
-    expect(screen.getByText(/Run after Cockpit is installed/)).toBeTruthy();
+    expect((screen.getByLabelText("the install command") as HTMLInputElement).value).toContain("--inference");
+    expect(screen.queryByLabelText("the local models setup command")).toBeNull();
   });
 
   it("renders a refused mint in surface, creates nothing, and offers Mint again", async () => {
@@ -306,8 +307,8 @@ describe("the registration is matched, never counted", () => {
     emit(connection, arrival());
     await settle();
     expect(stopStates()).toEqual(["done", "done", "done", "current"]);
-    expect(screen.getByText("Connected as mini.local -- darwin/arm64 -- cockpit v2026.9.1")).toBeTruthy();
-    expect(within(bar()).getByText("Connected")).toBeTruthy();
+    expect(screen.getByText("Connected as mini.local")).toBeTruthy();
+    expect(within(bar()).getByText("Checking")).toBeTruthy();
   });
 
   it("settles nothing when a DIFFERENT machine arrives, however many do", async () => {
@@ -327,7 +328,7 @@ describe("the registration is matched, never counted", () => {
     await describeAndMint();
     emit(connection, arrival({ identityId: "tok-1" }));
     await settle();
-    expect(within(bar()).getByText("Connected")).toBeTruthy();
+    expect(within(bar()).getByText("Checking")).toBeTruthy();
   });
 
   it("puts the typed name on the machine, once, and never again on a heartbeat", async () => {
@@ -357,13 +358,13 @@ describe("the checks", () => {
     await settle();
     const checks = () => screen.getByRole("list", { name: "Checks on this machine" });
     expect(within(checks()).getAllByRole("listitem")[0]?.getAttribute("data-state")).toBe("current");
-    expect(within(checks()).getByText(/Listening for its first heartbeat/)).toBeTruthy();
+    expect(within(checks()).getByText("Waiting for a heartbeat")).toBeTruthy();
 
     await beat(connection, row, 15);
-    expect(within(checks()).getByText(/Heartbeat 1 of 2/)).toBeTruthy();
+    expect(within(checks()).getByText("Checking the connection")).toBeTruthy();
     await beat(connection, row, 30);
     expect(within(checks()).getAllByRole("listitem")[0]?.getAttribute("data-state")).toBe("done");
-    expect(within(checks()).getByText(/Online and steady/)).toBeTruthy();
+    expect(within(checks()).getByText("Online")).toBeTruthy();
     expect(within(bar()).getByText("Ready")).toBeTruthy();
     expect(within(bar()).getByRole("button", { name: "Back" })).toBeTruthy();
     expect(within(bar()).getByRole("button", { name: "Done" }).getAttribute("data-tone")).toBe("primary");
@@ -380,12 +381,17 @@ describe("the checks", () => {
     });
     emit(connection, row);
     await settle();
-    expect(screen.getByText("Screen Recording not granted to the running worker.")).toBeTruthy();
+    // The installer has not spoken yet: the line waits for it rather than
+    // asking the person for something the installer is about to ask.
+    expect(within(screen.getByRole("list", { name: "Checks on this machine" })).getByText("Waiting for the installer")).toBeTruthy();
+    // Two heartbeats and still no report: an older cockpit, read as before.
+    await beat(connection, row, 15);
+    await beat(connection, row, 30);
+    expect(screen.getByText("Screen Recording not granted")).toBeTruthy();
     expect(screen.getByText(/System Settings → Privacy & Security → Screen Recording/)).toBeTruthy();
     expect(screen.queryByLabelText("the macos permissions command")).toBeNull();
-    const permissionResults = screen.getByRole("list", { name: "Permission results" });
-    expect(within(permissionResults).getByText("Accessibility").closest("li")?.getAttribute("data-state")).toBe("done");
-    expect(within(permissionResults).getByText("Screen Recording").closest("li")?.getAttribute("data-state")).toBe("open");
+    // The line names what is missing; there is no second rail restating both.
+    expect(screen.queryByRole("list", { name: "Permission results" })).toBeNull();
 
     emit(
       connection,
@@ -393,11 +399,13 @@ describe("the checks", () => {
       "NODE_UPDATED",
     );
     await settle();
-    expect(screen.getByText("Accessibility and Screen Recording granted.")).toBeTruthy();
+    const permissions = () => within(screen.getByRole("list", { name: "Checks on this machine" })).getByText("macOS permissions").closest("li");
+    expect(permissions()?.getAttribute("data-state")).toBe("done");
+    expect(screen.getByText("Granted")).toBeTruthy();
     emit(connection, { ...row, permissions: { accessibility_state: "granted", screen_recording_state: "unknown", probe_context: "worker-process" } }, "NODE_UPDATED");
     await settle();
-    expect(screen.queryByText("Accessibility and Screen Recording granted.")).toBeNull();
-    expect(within(screen.getByRole("list", { name: "Permission results" })).getByText("Screen Recording").closest("li")?.getAttribute("data-state")).toBe("unknown");
+    expect(screen.queryByText("Granted")).toBeNull();
+    expect(permissions()?.getAttribute("data-state")).toBe("unknown");
   });
 
   it("offers the recommended pull once a runtime is reported, and shows a refusal in surface", async () => {
@@ -405,9 +413,17 @@ describe("the checks", () => {
     connection.query.fleetPullRecommended.mockRejectedValueOnce(new Error("machine is under the floor for local models"));
     mount(connection);
     await describeAndMint("mini", { inference: true });
-    emit(connection, arrival({ hardware: { chip: "M2", memoryBytes: 1, runtimes: [{ name: "ollama", version: "0.11" }] } }));
+    const row = arrival({ hardware: { chip: "M2", memoryBytes: 1, runtimes: [{ name: "ollama", version: "0.11" }] } });
+    emit(connection, row);
     await settle();
-    expect(screen.getByText("No models yet.")).toBeTruthy();
+    // THE RACE THIS GUARDS (memql#6235): connected, a runtime already there,
+    // no model yet, and the installer's first report one heartbeat away. No
+    // Download models until the installer has had its two heartbeats.
+    expect(screen.queryByText("None yet")).toBeNull();
+    expect(within(bar()).queryByRole("button", { name: "Download models" })).toBeNull();
+    await beat(connection, row, 15);
+    await beat(connection, row, 30);
+    expect(screen.getByText("None yet")).toBeTruthy();
     expect(within(screen.getByRole("list", { name: "Checks on this machine" })).queryByRole("button", { name: "Download models" })).toBeNull();
     await readTheBar();
     await click(within(bar()).getByRole("button", { name: "Download models" }));
@@ -415,7 +431,9 @@ describe("the checks", () => {
     expect(connection.query.fleetPullRecommended).toHaveBeenCalledExactlyOnceWith({
       registrationId: "v1:worker:registration:mini",
     });
-    expect(screen.getByText("machine is under the floor for local models")).toBeTruthy();
+    // The refusal is the Models line itself -- never a banner over the checks.
+    expect(screen.getByText("Couldn’t start: machine is under the floor for local models")).toBeTruthy();
+    expect(screen.queryByText("The recommended pulls did not all start.")).toBeNull();
   });
 
   it("automatically checks the served model without a chat button or reply transcript", async () => {
@@ -431,11 +449,11 @@ describe("the checks", () => {
       }),
     );
     await settle();
-    expect(screen.getByText("Serving one model: llama3.1:8b.")).toBeTruthy();
+    expect(screen.getByText("llama3.1:8b")).toBeTruthy();
     await waitFor(() => expect(h.chat).toHaveBeenCalledTimes(1));
     expect(screen.queryByRole("button", { name: "Ask it something" })).toBeNull();
     expect(h.chat.mock.calls[0]?.[2]).toMatchObject({ provider: "fleet:llama3.1:8b", fleetRegistrationId: "v1:worker:registration:mini" });
-    await waitFor(() => expect(screen.getByText("Response verified on this machine.")).toBeTruthy());
+    await waitFor(() => expect(screen.getByText("Answered")).toBeTruthy());
     expect(screen.queryByText("hello")).toBeNull();
   });
 
@@ -453,7 +471,7 @@ describe("the checks", () => {
     expect(h.chat.mock.calls[0]?.[2]).toMatchObject({
       provider: "fleet:qwen3.5:4b", fleetRegistrationId: "v1:worker:registration:mini",
     });
-    await waitFor(() => expect(screen.getByText("Response verified on this machine.")).toBeTruthy());
+    await waitFor(() => expect(screen.getByText("Answered")).toBeTruthy());
   });
 
   it("offers a text model download without sending a chat to image or audio models", async () => {
@@ -541,7 +559,7 @@ describe("cancel after a mint asks which of two things", () => {
     await mintAndRead();
     await click(within(bar()).getByRole("button", { name: "Back to Machines" }));
     expect(within(bar()).getByText("Back to Machines?")).toBeTruthy();
-    expect(screen.getByText(/will appear in Machines when it connects/)).toBeTruthy();
+    expect(screen.getByText(/appears in Machines when it connects/)).toBeTruthy();
     expect(screen.getByText(/won’t be shown again/)).toBeTruthy();
     // Nothing is revoked by leaving, so there is nothing to uninstall.
     expect(screen.queryByLabelText("the uninstall command")).toBeNull();
@@ -556,7 +574,7 @@ describe("cancel after a mint asks which of two things", () => {
     await mintAndRead();
     await click(within(bar()).getByRole("button", { name: "Cancel setup" }));
     expect(within(bar()).getByText("Cancel?")).toBeTruthy();
-    expect(screen.getByText(/revokes the token/)).toBeTruthy();
+    expect(screen.getByText(/install command stops working/)).toBeTruthy();
     // The uninstall line is offered right here, for a person who already ran the install.
     // It names the cluster the install line enrolled the machine with, so the
     // uninstaller removes that enrollment rather than asking which one.

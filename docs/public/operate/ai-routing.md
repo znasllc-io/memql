@@ -273,6 +273,85 @@ every decision record, and the cost ceiling still governs it.
 
 ---
 
+## Routes a person picks in Ask
+
+A **route** decides which source does each job for one message. Ask offers
+four kinds, and the turn carries the choice as its source, `route:<id>`:
+
+| Route | Quick tasks (`fast`) | Main work (`strong`) | Deep reasoning (`reasoning`) |
+|---|---|---|---|
+| **Auto** (`route:auto`, or no source) | the rules decide, ranked | the rules decide, ranked | the rules decide, ranked |
+| **Local** (`route:local`) | `fleet:fastest` | `fleet:strongest` | `fleet:strongest` |
+| **Apps** (`route:apps`) | `app:*` | `app:*` | `app:*` |
+| **Your own** (`route:<id>`) | your sources | your sources | your sources |
+
+**Search and memory is never a route's.** Every route serves embeddings from
+the cluster's bound embedder: the index holds vectors from exactly one model.
+Vision, speech, transcription and image generation follow the rules in every
+route.
+
+**A route never falls through.** A call made under Local, Apps or one of your
+own walks that route's sources for its level and nothing else. When they are
+exhausted it degrades inside the route (`reasoning` to `strong` to `fast`,
+through the route's own lists) and then refuses with `every_door_shut`, naming
+the route. It never reaches a rule's chain or cloud consent. The decision
+record carries the route in `route`.
+
+**Local and Apps can be changed for the whole cluster** by an owner or a
+developer: each job holds one to four sources (`fleet:`, `app:` or
+`federation:`). The change is an override in the routing document, beside the
+policy and rule overrides and under the same revision; Restore default removes
+it. **Your own routes** are `v1:router:route` rows: named by you, private to
+you, made from a copy of Local, Apps or nothing.
+
+A turn naming a route you do not have is refused with `route_policy_unknown`;
+one whose route cannot serve every job for you right now is refused with
+`route_not_ready` and the reason ("Needs an embedding model", "No signed-in app
+on your machines"), before any goal exists.
+
+### Auto
+
+Auto keeps the rules. What it adds is the order inside the three general
+shipped chains -- `localFirst`, `fastLocalFirst` and `federationStrongest` --
+which it ranks for each call on four signals:
+
+- **Speed:** the median latency each kind of source served this level with,
+  over the last two hours of decisions.
+- **Reliability:** the share of those calls that succeeded.
+- **Cost:** zero for your own machines and subscription apps, the whole scale
+  for a metered vendor.
+- **Quality:** a fixed, level-aware rank -- at quick tasks every source is
+  nearly equal; at reasoning a strong vendor model, then an app, then a local
+  model.
+
+An unmeasured signal is neutral, and ties keep the chain's own local-first
+order, so a cluster nobody has measured routes as it always did. The signals
+are weighed by the cluster's **Auto balance** -- Speed, Cost and Quality, 0 to
+100 each, 50 each recommended -- and reliability always weighs their mean.
+A person's **monthly budget** (`myBudget`, `myBudgetSave`) bends the order:
+from 80% of it vendors go after every free source, and at 100% they are left
+out of that person's calls. A chain Auto reordered asks the cost ceiling before
+every vendor hop. The decision record keeps one `(auto)` entry in `considered`
+with every score.
+
+Builtins: `routesForActor`, `routeSave`, `routeDelete`, `routeReset`,
+`autoBalance`, `autoBalanceSave`, `autoBalanceReset`, `myBudget` and
+`myBudgetSave`.
+
+### Fleet capacity
+
+Under every route, a fleet source admits a machine only when it can take the
+call now. A machine that cannot load the model -- not loaded, and less free
+memory (counting idle loaded models) than the catalog's `memoryNeedBytes` plus
+10%, at least 1 GB -- is ruled out with the figures in `considered`. A machine
+with every slot in use, or one whose recent calls mostly failed or ran over
+three times slower than its peers, goes behind every machine that passes and
+is used only when none does. Memory is judged from the cockpit's capacity
+report (free memory and loaded models, on every heartbeat); a machine that
+does not report is admitted on its slots alone. `fleetCapacity` returns what
+each of your machines can take on: slots in use, memory, loaded models, recent
+latency and tokens per second, and whether it is degraded.
+
 ## Explicit API choices and automatic Ask routing
 
 Ask uses the cluster's routing policies automatically for each step. It has no
@@ -289,6 +368,7 @@ compile as much as the agent's reply.
 | `fleet:strongest`, `fleet:fastest`, `fleet:<modelId>` | pin a local model |
 | `federation:cheapest`, `federation:strongest` | pin a vendor |
 | `policy:<name>` | a **route**: that policy's chain is walked instead of the rule's |
+| `route:local`, `route:apps`, `route:<id>` | a person's route: its sources per level, never falling through (above) |
 
 **A pin is the owner's own and is never substituted.** It is walked as a one-entry
 chain, it skips every rule, and when it cannot serve the call refuses with

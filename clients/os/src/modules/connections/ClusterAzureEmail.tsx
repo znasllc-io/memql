@@ -83,12 +83,12 @@ export function ClusterAzureEmail({ state, onSaved, onBack }: {
   return <Wizard icon={<Mail size={20}/>} title="Set up cluster email" label="Cluster email" open={phase} onOpen={() => {}}
     back={{ label: "Email settings", onSelect: onBack }} status={{ word: busy ? "Working" : session && !signedIn ? "Waiting for Microsoft" : "Your turn", tone: busy ? "busy" : "paused" }} acts={acts}
     notices={error ? <Notice tone="error" sentence={error}/> : undefined} steps={[
-      { id: "signin", name: "Microsoft", state: signedIn ? "done" : "open", body: <div className="os-app-stack">
+      { id: "signin", name: "Microsoft", sentence: "Sign in to your Azure account", state: signedIn ? "done" : "open", body: <div className="os-app-stack">
         {state.applicationReady === false ? <Notice sentence="Microsoft sign-in needs a one-time MemQL app registration."/> : null}
         <p className="os-caption">Connect your Azure account once for this cluster. Client domains use this saved configuration.</p>
         {grant?.userCode && grant.verificationUri ? <><p className="os-mono">{grant.userCode}</p><a href={grant.verificationUri} target="_blank" rel="noopener noreferrer">Enter this code at Microsoft</a></> : null}
       </div> },
-      { id: "resources", name: "Azure resources", state: signedIn ? "open" : "ahead", body: <div className="os-app-stack">
+      { id: "resources", name: "Azure resources", sentence: "Where cluster email comes from", state: signedIn ? "open" : "ahead", body: <div className="os-app-stack">
         {directories.length > 1 ? <Select id={`${formID}-directory`} label="Microsoft directory" value="" onChange={value => { if (!busy) { setScope(old => ({ ...old, subscriptionId: "", resourceGroup: "" })); void begin(value); } }}><option value="">Current directory</option>{directories.map(row => <option key={row.id} value={row.id}>{row.name || row.id}</option>)}</Select> : null}
         <Select id={`${formID}-subscription`} label="Subscription" value={scope.subscriptionId} onChange={value => { if (busy) return; setScope(old => ({ ...old, subscriptionId: value, resourceGroup: "", createResourceGroup: false })); setGroups([]); void readGroups(value); }}><option value="">Choose a subscription</option>{subscriptions.map(row => <option key={row.id} value={row.id}>{row.name}</option>)}</Select>
         {subscriptions.length === 0 ? <Notice sentence="No enabled Azure subscriptions are available to this account."/> : null}

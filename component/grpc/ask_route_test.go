@@ -66,3 +66,14 @@ func TestAnAskRouteRefusalFromTheEngineKeepsItsCode(t *testing.T) {
 		t.Fatalf("an ordinary failure became %s %v", code, md)
 	}
 }
+
+// An attachment the person cannot read refuses the turn as the caller's to
+// fix, naming the half of the request at fault.
+func TestAnAskAttachmentRefusalKeepsItsCode(t *testing.T) {
+	code, message, md := askFailureStatus(fmt.Errorf("ask: %w", &engine.AskAttachmentError{
+		Code: engine.AskAttachmentNotFound, Value: "artifact-x", Reason: "an attached file is not in your Library",
+	}))
+	if code != codes.InvalidArgument || md["code"] != engine.AskAttachmentNotFound || md["field"] != "attachments" || message == "" {
+		t.Fatalf("status = %s %q %v", code, message, md)
+	}
+}

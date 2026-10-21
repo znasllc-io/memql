@@ -120,6 +120,7 @@ func cacheServedRecord(
 		Degraded:           resolution.Decision.Degraded,
 		Rule:               resolution.Decision.Rule,
 		Policy:             resolution.Decision.Policy,
+		Route:              resolution.Decision.Route,
 		Door:               resolution.Decision.Door,
 		Considered:         resolution.Decision.Considered,
 		Touches:            resolution.Decision.Touches,

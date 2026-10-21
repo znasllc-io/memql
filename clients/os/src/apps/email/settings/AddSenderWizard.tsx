@@ -134,7 +134,7 @@ export function AddSenderWizard({ organizations, initialAccountId, writes, onBac
       id: "name",
       name: "Display name",
       state: stateOf("name"),
-      sentence: "What a recipient sees beside the address.",
+      sentence: "The name recipients see.",
       answer: named ? fromName.trim() : undefined,
       body: (
         <Field label="Display name">
@@ -153,7 +153,7 @@ export function AddSenderWizard({ organizations, initialAccountId, writes, onBac
       id: "reply",
       name: "Reply to",
       state: stateOf("reply"),
-      sentence: "Where replies go, if not to the address itself. You can skip this.",
+      sentence: "Where replies go, if elsewhere.",
       answer: replyTo.trim() !== "" ? replyTo.trim() : step === "review" ? "Skipped" : undefined,
       body: (
         <Field label="Reply to">
@@ -171,6 +171,7 @@ export function AddSenderWizard({ organizations, initialAccountId, writes, onBac
     {
       id: "review",
       name: "Review",
+      sentence: "Check, then add.",
       state: stateOf("review"),
       body: (
         <div className="os-app-stack">

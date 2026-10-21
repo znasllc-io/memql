@@ -17,6 +17,9 @@ export function conversationFeed(turns: AskTurn[]) {
       { turn: turn.state === "error" && turn.answer === turn.acknowledgement ? { ...turn, answer: "" } : turn, completion: true, key: `${turn.id}:result`, at: turn.endedAt, workState: turn.state, responseAt: completedAt },
     ];
   });
-  return entries.map(entry => ({ ...entry, showAssistant: !entry.turn.answerOnly && Boolean(entry.turn.answer.trim() || entry.turn.question || entry.turn.error || !entry.turn.background) }))
+  // A split message's reply is said before its new request's answer, so it
+  // speaks even when that request's acknowledgement is empty -- once, on the
+  // request, never again with its result.
+  return entries.map(entry => ({ ...entry, showAssistant: !entry.turn.answerOnly && Boolean(entry.turn.answer.trim() || entry.turn.question || entry.turn.error || !entry.turn.background || (!entry.completion && entry.turn.routed?.reply?.trim())) }))
     .sort((a, b) => a.at.localeCompare(b.at));
 }

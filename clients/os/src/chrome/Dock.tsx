@@ -218,6 +218,11 @@ function Clock() {
 
 function AvatarMenu({ onSignOut }: { onSignOut: () => void }) {
   const { access } = useSession();
+  const { actions, registry } = useOs();
+  // Offered only where the registry says this person can open it -- the
+  // Identity app has no role floor, but a menu item that opens nothing is
+  // worse than one that is absent.
+  const canOpenProfile = registry.apps.some((app) => app.id === "identity");
   const [open, setOpen] = useState(false);
   const [mode, setMode] = useState<ThemeChoice>(() => readStoredTheme());
   const ref = useRef<HTMLDivElement | null>(null);
@@ -265,6 +270,19 @@ function AvatarMenu({ onSignOut }: { onSignOut: () => void }) {
               </button>
             ))}
           </div>
+          {canOpenProfile ? (
+            <button
+              type="button"
+              role="menuitem"
+              className="os-menu-item"
+              onClick={() => {
+                setOpen(false);
+                actions.openApp("identity", "profile");
+              }}
+            >
+              Profile
+            </button>
+          ) : null}
           <button
             type="button"
             role="menuitem"

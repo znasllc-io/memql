@@ -2,16 +2,28 @@ import { useState } from "react";
 import { Fingerprint } from "lucide-react";
 import { Mark } from "../chrome/Mark";
 import { OrganizationTitle } from "./OrganizationTitle";
-import { JoiningPolicyFields, JOINING_MODES, useJoiningPolicy, type JoiningPolicy } from "./JoiningPolicy";
+import { JoiningPolicyFields, useJoiningPolicy, type JoiningPolicy } from "./JoiningPolicy";
 import { Wizard } from "../kit/Wizard";
 import { Field } from "../kit/controls";
 import { oauthFields, value, type IdentityData } from "./nativeIdentity";
+import { deviceAuthenticatorName } from "./passkeys";
+
+/** What each ownership step is, under its name on the rail -- the same on every
+ *  page of the setup, the passkey pages included (memql#6214). */
+export const OWNERSHIP_STEP_SUBTITLES: Readonly<Record<string, string>> = {
+  "Organization and owner": "Who owns this cluster",
+  "Your installation": "This cluster's domain",
+  "Joining the cluster": "How others get in",
+  "Verify email": "A link that proves the address",
+  "Register passkey": "How you sign in here",
+};
 
 export function OwnershipWizard({ data, busy, error, submit }: {
   data: IdentityData; busy: boolean; error: string;
   submit: (path: string, form: Record<string, string>) => void;
 }) {
   const local = data.Local === true;
+  const authenticator = deviceAuthenticatorName();
   const [step, setStep] = useState(0);
   const [form, setForm] = useState<Record<string, string>>(() => ({
     ...oauthFields(data), domain: value(data, "PrefillDomain"),
@@ -45,19 +57,22 @@ export function OwnershipWizard({ data, busy, error, submit }: {
       </div>,
     <div className="os-identity-fields">{field("domain", "Cluster domain", "text", true)}<p>The hostname suffix for this installation, such as memql.localhost.</p></div>,
     <JoiningPolicyFields policy={joining} local={local} />,
-    <div className="os-identity-fields"><p>Claim <strong>{form.domain}</strong> for <strong>{form.brand_name}</strong>, with <strong>{form.owner_first_name} {form.owner_last_name}</strong> as cluster owner.</p>
-      <p>{local ? "No email is sent. You must create a passkey to finish setup and sign in to this local installation." : <>We’ll send a single-use verification link to <strong>{form.owner_email}</strong>. After verifying your email, you must register a passkey to finish setup.</>}</p>
-      <p>How people join: <strong>{JOINING_MODES.find(([mode]) => mode === form.registration_mode)?.[1]}</strong>. You can change this in cluster settings.</p>
-      <p>Once signed in, OS will continue with the existing inference setup.</p></div>,
+    // ONE PRESS TO THE PROMPT (local). "Create passkey" claims the cluster and
+    // opens this device's passkey prompt straight away; the step says what
+    // that prompt will be, and nothing it already said on an earlier step.
+    <div className="os-identity-fields"><p>Claim <strong>{form.domain}</strong> for <strong>{form.brand_name}</strong>, with <strong>{form.owner_first_name} {form.owner_last_name}</strong> as owner.</p>
+      <p>{local
+        ? (authenticator ? `Your passkey is created with ${authenticator}. It is how you sign in here.` : "Your browser will ask you to confirm the passkey. It is how you sign in here.")
+        : <>We’ll send a single-use verification link to <strong>{form.owner_email}</strong>. After verifying it, you register a passkey.</>}</p></div>,
   ];
   return <Wizard leadingIcon={<Mark />} icon={<Fingerprint />} title="Welcome to MemQL OS" lead="Set up this installation and verify cluster ownership."
     label="Ownership setup" open={String(step)} onOpen={id => setStep(Number(id))}
-    steps={["Organization and owner", "Your installation", "Joining the cluster", local ? "Register passkey" : "Verify email", ...(local ? [] : ["Register passkey"])].map((name, i) => ({ id: String(i), name,
+    steps={["Organization and owner", "Your installation", "Joining the cluster", local ? "Register passkey" : "Verify email", ...(local ? [] : ["Register passkey"])].map((name, i) => ({ id: String(i), name, sentence: OWNERSHIP_STEP_SUBTITLES[name],
       state: i < step ? "done" : i === step ? "open" : "ahead", body: bodies[i] }))}
     notices={error ? <p role="alert">{error}</p> : undefined}
     status={{ word: busy ? (local ? "Preparing passkey setup" : "Sending verification") : valid ? "Your turn" : step === 2 ? joining.problem : "Complete the required fields", tone: busy ? "busy" : "none" }}
     acts={busy ? [] : [...(step > 0 ? [{ label: "Back", text: true, onAct: () => setStep(step - 1) }] : []),
-      ...(valid ? [{ label: step === 3 ? (local ? "Continue to passkey" : "Send verification link") : "Continue", tone: "primary" as const,
+      ...(valid ? [{ label: step === 3 ? (local ? "Create passkey" : "Send verification link") : "Continue", tone: "primary" as const,
         onAct: () => {
           if (step === 2 && !joining.commit()) return;
           if (step === 3) submit("/setup", form);

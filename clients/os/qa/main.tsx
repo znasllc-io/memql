@@ -5,6 +5,9 @@ import { StorageScene } from "./storageScenes";
 import { emailScenes, EMAIL_CLICKS } from "./emailScenes";
 import { nexusApprovalScenes, NEXUS_APPROVAL_CLICKS } from "./nexusApprovalScenes";
 import { fleetEquipmentScenes } from "./fleetEquipmentScenes";
+import { setupWizardScenes } from "./setupWizardScenes";
+import { profileScenes } from "./profileScenes";
+import { fleetDeviceScenes } from "./fleetDeviceScenes";
 import { mapScenes } from "./mapScenes";
 import { MATERIALIZER_VIEWS } from "./materializerScenes";
 import { FilesApp } from "../src/apps/files/FilesApp";
@@ -102,7 +105,7 @@ import {
 } from "../test/nexus/harness";
 import { RoutingSection } from "../src/apps/fleet/routing/RoutingSection";
 import { RouteComposer, type RouteDraftState } from "../src/apps/fleet/routing/RouteComposer";
-import { NewRouteWizard } from "../src/apps/fleet/routing/NewRouteWizard";
+import { NewChainWizard } from "../src/apps/fleet/routing/NewChainWizard";
 import { RuleWizard } from "../src/apps/fleet/routing/RuleWizard";
 import { routesLike } from "../src/apps/fleet/routing/routes";
 import { useRoutingFacts } from "../src/apps/fleet/routing/useRoutingFacts";
@@ -110,9 +113,12 @@ import { useTaskPolicies } from "../src/apps/fleet/taskPolicies";
 import { useRuleActions, useRules } from "../src/apps/settings/rulesFacts";
 import { installSeededAccess } from "../test/seededAccess";
 import {
+  routeJobs as qaRouteJobs,
+  routeModeRow as qaRouteModeRow,
   routeRow as qaRouteRow,
   routingConnection,
   ruleRow as qaRuleRow,
+  shippedRouteModes as qaShippedRouteModes,
   shippedRoutes as qaShippedRoutes,
   shippedRules as qaShippedRules,
   studioMachine as qaStudioMachine,
@@ -384,7 +390,7 @@ function settingsStore() {
 function WindowBody({ fallback, children, width }: { fallback: string; children: ReactNode; width?: number }) {
   const content = useRef<HTMLDivElement>(null);
   return (
-    <div className="os-window" style={{ position: "fixed", inset: 0, maxWidth: width, display: "flex", flexDirection: "column" }}>
+    <div className="os-window" role="dialog" aria-label={fallback} data-os-window={fallback === "Fleet" ? "fleet" : undefined} style={{ position: "fixed", inset: 0, maxWidth: width, display: "flex", flexDirection: "column" }}>
       <div className="os-window-body">
         <PageNavigationProvider root={content} trail={[]}>
           <TrailRow fallback={fallback} />
@@ -714,6 +720,10 @@ const VIEWS: Record<
   ...MATERIALIZER_VIEWS,
   ...mapScenes(WindowBody),
   ...fleetEquipmentScenes(WindowBody),
+  ...setupWizardScenes(WindowBody),
+  // Your profile (memql#6220): `profile`, `profile-photo`, `profile-quiet`.
+  ...profileScenes(WindowBody),
+  ...fleetDeviceScenes(WindowBody),
   "users-groups": usersWizardView("groups"),
   "users-roles": usersWizardView("roles"),
   "users-invite": usersWizardView("people"),
@@ -921,13 +931,30 @@ const VIEWS: Record<
   "settings-no-app": { seed: NO_APP_OWNER, framed: true, render: () => <Lists section="settings" /> },
   "settings-no-app-member": { seed: NO_APP_MEMBER, role: "developer", framed: true, render: () => <Lists section="settings" /> },
   "settings-app": { seed: APP_FROM_HERE, framed: true, render: () => <Lists section="settings" /> },
-  // FLEET > ROUTING (routing redesign, 2026-09-28). The list with a route of
-  // every reading (serving on its first source, on a later one, nothing
-  // ready, changed from shipped); a route's page with the circuit stopping
-  // at the SECOND slot; a draft holding a source that cannot serve; the
-  // protected embeddings route; a fleet with no machine at all; the rules as
-  // sentences; both wizards' first step; the machine choice; the history.
+  // FLEET > ROUTING > ROUTES (routes, 2026-10-18). The list: Auto, Local and
+  // Apps, then the person's own; a route's page for an owner and, read-only,
+  // for somebody who may not change the built-ins; a route of their own; a
+  // fleet whose only machine is busy and short of memory, so the tray and the
+  // jobs say why; Auto's balance, budget and picks, editable and read-only;
+  // the add wizard on its jobs step.
   "routing-routes": { connect: () => routingQa(), wrap: routingWrap, render: () => <RoutingSection /> },
+  "routing-routes-member": { connect: () => routingQa(), wrap: routingWrap, role: "writer", render: () => <RoutingSection /> },
+  "routing-routes-old-cluster": { connect: () => routingQa({ noRoutes: true }), wrap: routingWrap, render: () => <RoutingSection /> },
+  "routing-route-local": { connect: () => routingQa(), wrap: routingWrap, render: () => <RoutingSection intent={{ id: "qa", payload: { routingRoute: "local" } }} /> },
+  "routing-route-local-member": { connect: () => routingQa(), wrap: routingWrap, role: "writer", render: () => <RoutingSection intent={{ id: "qa", payload: { routingRoute: "local" } }} /> },
+  "routing-route-mine": { connect: () => routingQa(), wrap: routingWrap, render: () => <RoutingSection intent={{ id: "qa", payload: { routingRoute: "r3" } }} /> },
+  "routing-route-busy": { connect: () => routingQa({ busy: true }), wrap: routingWrap, render: () => <RoutingSection intent={{ id: "qa", payload: { routingRoute: "local" } }} /> },
+  "routing-route-no-embedder": { connect: () => routingQa({ embedder: "" }), wrap: routingWrap, render: () => <RoutingSection intent={{ id: "qa", payload: { routingRoute: "apps" } }} onOpenModels={() => undefined} /> },
+  "routing-auto": { connect: () => routingQa({ busy: true }), wrap: routingWrap, render: () => <RoutingSection intent={{ id: "qa", payload: { routingRoute: "auto" } }} /> },
+  "routing-auto-member": { connect: () => routingQa(), wrap: routingWrap, role: "writer", render: () => <RoutingSection intent={{ id: "qa", payload: { routingRoute: "auto" } }} /> },
+  "routing-new-route": { connect: () => routingQa(), wrap: routingWrap, render: () => <RoutingSection /> },
+  // FLEET > ROUTING > RULES > CHAINS (routing redesign, 2026-09-28): the list
+  // with a chain of every reading (serving on its first source, on a later
+  // one, nothing ready, changed from shipped); a chain's page with the circuit
+  // stopping at the SECOND slot; a draft holding a source that cannot serve;
+  // the protected embeddings chain; a fleet with no machine at all; the rules
+  // as sentences; both wizards' first step; the machine choice; the history.
+  "routing-chains": { connect: () => routingQa(), wrap: routingWrap, render: () => <RoutingSection intent={{ id: "qa", payload: { routingTab: "chains" } }} /> },
   "routing-route": { connect: () => routingQa({ chatModel: false }), wrap: routingWrap, render: () => <RoutePreview name="localFirst" /> },
   "routing-route-draft": {
     connect: () => routingQa(),
@@ -937,7 +964,7 @@ const VIEWS: Record<
   "routing-route-protected": { connect: () => routingQa(), wrap: routingWrap, render: () => <RoutePreview name="embeddingsBinding" /> },
   "routing-route-empty": { connect: () => routingQa({ machines: false }), wrap: routingWrap, render: () => <RoutePreview name="localFirst" /> },
   "routing-rules": { connect: () => routingQa(), wrap: routingWrap, render: () => <RoutingSection intent={{ id: "qa", payload: { routingTab: "rules" } }} /> },
-  "routing-new-route": { connect: () => routingQa(), wrap: routingWrap, render: () => <NewRoutePreview /> },
+  "routing-new-chain": { connect: () => routingQa(), wrap: routingWrap, render: () => <NewRoutePreview /> },
   "routing-add-rule": { connect: () => routingQa(), wrap: routingWrap, render: () => <AddRulePreview /> },
   "routing-machines": { connect: () => routingQa(), wrap: routingWrap, render: () => <RoutingSection intent={{ id: "qa", payload: { routingTab: "machines" } }} /> },
   "routing-history": { connect: () => routingQa(), wrap: routingWrap, render: () => <RoutingSection intent={{ id: "qa", payload: { routingTab: "history" } }} /> },
@@ -984,6 +1011,19 @@ const VIEWS: Record<
     connect: () => fleetConnection({ fleetShareDirectory: [SHARE_DIRECTORY], fleetSharingLedger: [SHARE_LEDGER] }),
     wrap: (el) => fleetSession(<MachinesProvider>{el}</MachinesProvider>),
     render: () => <SharingPane over={{ sharing: SHARED_WITH_PEOPLE, capabilityDescriptor: { inferenceServe: "cluster" } }} />,
+  },
+  // Sharing turned off after choosing an audience: each switch alone, the
+  // audience saved out of sight, one divider between the two groups.
+  "sharing-paused": {
+    connect: () => fleetConnection({ fleetShareDirectory: [SHARE_DIRECTORY] }),
+    wrap: (el) => fleetSession(<MachinesProvider>{el}</MachinesProvider>),
+    render: () => <SharingPane over={{ sharing: { ...SHARED_WITH_PEOPLE, paused: true }, workbenchSharing: { ...SHARED_WITH_PEOPLE, paused: true }, capabilityDescriptor: { inferenceServe: "cluster" } }} />,
+  },
+  // Both shared: each group keeps its collection beneath its own switch.
+  "sharing-both": {
+    connect: () => fleetConnection({ fleetShareDirectory: [SHARE_DIRECTORY] }),
+    wrap: (el) => fleetSession(<MachinesProvider>{el}</MachinesProvider>),
+    render: () => <SharingPane over={{ sharing: SHARED_WITH_PEOPLE, workbenchSharing: SHARED_WITH_PEOPLE, capabilityDescriptor: { inferenceServe: "cluster" } }} />,
   },
   // A stored machine descriptor from an earlier Cockpit cannot block sharing.
   "sharing-legacy-descriptor": {
@@ -1216,9 +1256,9 @@ function MachinePane({ over }: { over: Record<string, unknown> }) {
     setSharing: async () => null,
   };
   return (
-    <div className="os-window-content">
-      <MachineDetail machine={machine} writes={writes} now={FLEET_NOW} view="settings" />
-    </div>
+    <WindowBody fallback="Studio mini">
+      <MachineDetail machine={machine} writes={writes} now={FLEET_NOW} view="details" />
+    </WindowBody>
   );
 }
 
@@ -1590,9 +1630,9 @@ function qaWrites(refuse = false): MachineWrites {
 function SharingPane({ over }: { over: Record<string, unknown> }) {
   const machine = fleetMachine({ ownerUserId: "v1:identity:user:me", ...over });
   return (
-    <div className="os-window-content">
+    <WindowBody fallback="Studio mini">
       <MachineDetail machine={machine} writes={qaWrites()} now={FLEET_NOW} view="settings" />
-    </div>
+    </WindowBody>
   );
 }
 
@@ -1812,10 +1852,31 @@ function OriginsPane() {
 // directly, in the same fleet-page -> fleet-routing -> tab structure the
 // section gives them, inside a Fleet window so the trail row is drawn.
 
-function routingQa(opts: { chatModel?: boolean; machines?: boolean } = {}) {
-  const studio = qaStudioMachine(opts.chatModel === false ? { labels: { "model:nomic-embed": "ctx=8192,embeddings=1" } } : {});
-  return routingConnection({
+function routingQa(opts: { chatModel?: boolean; machines?: boolean; busy?: boolean; embedder?: string; noRoutes?: boolean } = {}) {
+  const studio = qaStudioMachine(
+    opts.chatModel === false
+      ? { labels: { "model:nomic-embed": "ctx=8192,embeddings=1" } }
+      : { labels: { "model:qwen3.8:27b": "ctx=32768,structured=1,tools=1,params=27000000000", "model:qwen3.5:9b": "ctx=32768,structured=1,tools=1,params=9000000000", "model:nomic-embed": "ctx=8192,embeddings=1" } },
+  );
+  const made = routingConnection({
     machines: opts.machines === false ? [] : [studio],
+    embedder: opts.embedder,
+    modes: [
+      ...qaShippedRouteModes().map((m) =>
+        m.id === "local"
+          ? { ...m, customized: true, jobs: qaRouteJobs(["fleet:fastest"], ["fleet:strongest", "app:claude-code"], ["fleet:strongest", "app:claude-code"]) }
+          : m.id === "apps" && opts.embedder === ""
+            ? { ...m, ready: false, reason: "Needs an embedding model" }
+            : m,
+      ),
+      qaRouteModeRow({ id: "r3", name: "Out of credits", description: "Local models first, then Claude Code", jobs: qaRouteJobs(["fleet:fastest"], ["fleet:strongest", "app:claude-code"], ["app:claude-code"]) }),
+      qaRouteModeRow({ id: "r4", name: "Emergency", description: "Codex for everything", ready: false, reason: "Codex is not on any machine", jobs: qaRouteJobs(["app:codex"], ["app:codex"], ["app:codex"]) }),
+    ],
+    balance: { speed: 70, cost: 40, quality: 55, recommended: { speed: 50, cost: 50, quality: 50 }, customized: true },
+    budget: { monthlyLimitUSD: 50, spentThisMonthUSD: 12.4, resetsAt: "2026-11-01T00:00:00Z" },
+    capacity: opts.busy
+      ? [{ machineId: "studio", name: "studio-mac", memory: { totalBytes: 36e9, freeBytes: 9e9, kind: "unified" }, loaded: ["qwen3.8:27b"], models: [{ modelId: "qwen3.8:27b", inFlight: 2, slots: 2, tokensPerSecond: 31 }, { modelId: "qwen3.5:9b", inFlight: 0, slots: 2, needBytes: 20e9 }] }]
+      : [],
     routes: [
       ...qaShippedRoutes().map((r) => (r.name === "localOnly" ? qaRouteRow("localOnly", "fleet:strongest", ["app:claude-code"], { customized: true }) : r)),
       qaRouteRow("nightShift", "app:codex", ["federation:cheapest"], { shipped: false, description: "Overnight batch work" }),
@@ -1829,7 +1890,9 @@ function routingQa(opts: { chatModel?: boolean; machines?: boolean } = {}) {
       { id: "d-1", createdAt: "2026-09-28T09:41:00Z", requestId: "r1", promptName: "goalComplexityTriage", level: "fast", requestedLevel: "fast", servedLevel: "fast", rule: "fastLane", policy: "fastLocalFirst", door: "local", model: "qwen3.5:4b", outcome: "ok", billing: "local", totalCost: 0, totalDurationMs: 1200, considered: [{ entry: "fleet:fastest", door: "local", why: "", served: true }] },
       { id: "d-2", createdAt: "2026-09-28T09:40:00Z", requestId: "r2", promptName: "agentReply", level: "strong", requestedLevel: "reasoning", servedLevel: "strong", degraded: true, rule: "reasoningParks", policy: "federationStrongest", door: "app", model: "claude-code", outcome: "ok", billing: "subscription", totalCost: 0, totalDurationMs: 6400, considered: [{ entry: "fleet:strongest", door: "local", why: "no model meets the structured-output floor", served: false }, { entry: "app:*", door: "app", why: "", served: true }] },
     ],
-  }).connection;
+  });
+  if (opts.noRoutes) for (const name of ["routesForActor", "routeSave", "routeDelete", "routeReset", "autoBalance", "autoBalanceSave", "autoBalanceReset", "myBudget", "fleetCapacity"]) made.state.missing.add(name);
+  return made.connection;
 }
 
 function routingWrap(el: JSX.Element, role: string) {
@@ -1873,7 +1936,7 @@ function RoutePreview({ name, draft }: { name: string; draft?: RouteDraftState }
 
 function NewRoutePreview() {
   const { catalog, facts } = useQaRoutes();
-  return <RoutingTabFrame><NewRouteWizard routes={catalog.policies} facts={facts} onCancel={() => {}} onCreated={() => {}} /></RoutingTabFrame>;
+  return <RoutingTabFrame><NewChainWizard routes={catalog.policies} facts={facts} onCancel={() => {}} onCreated={() => {}} /></RoutingTabFrame>;
 }
 
 function AddRulePreview() {

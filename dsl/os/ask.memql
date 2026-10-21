@@ -34,18 +34,19 @@ builtin askApprovalMessage {
  advisor bool
 }
 
-/// Record guidance for owned running work in its existing conversation. This
-/// starts no goal and grants no permission; the existing agent receives the
-/// message at its next safe reasoning boundary. Retries reuse requestId.
+/// Answer the stop question Ask asked on one of this person's goals ("Stop this
+/// work? It can't be resumed."). stop closes the goal and asks its runs to stop,
+/// then records stopped; keep records kept and changes nothing else. Sending the
+/// same answer again returns the saved one; the other answer is refused once one
+/// is saved. A running job cannot answer: this is a person's decision.
 @sdk
-@executor("askGuideWork")
+@executor("askStopDecision")
 @args(profile="object")
-builtin askGuideWork {
- targetEpoch string!
- runId string!
+builtin askStopDecision {
  conversationId string!
- requestId string!
- prompt string!
+ turnId string!
+ runId string!
+ decision enum("stop", "keep")!
 }
 
 /// This model capability requires the exact child run and durable human turn.
@@ -58,6 +59,21 @@ builtin askRunApprovalMessage {}
 @executor("askApprovalEvidence")
 @args(profile="object")
 builtin askApprovalEvidence {}
+
+/// Count the active goals of the conversation a message is being routed in,
+/// as {count}. Available only inside Ask's routing call, which supplies them.
+@executor("askRouteGoals")
+builtin askRouteGoals { }
+
+/// Make one routing decision for the message being routed: one structured call
+/// to prompt, told previousError on the retry, validated before it counts.
+/// timeoutSeconds is how long the call may take, waiting for a model included
+/// (held to 1 to 600; 600 when absent); a call that runs past it is a routing
+/// failure, so the message goes to intake. Returns {valid, error}. Available
+/// only inside Ask's routing call.
+@executor("askRouteDecide")
+@args(profile="object")
+builtin askRouteDecide { prompt string! previousError string timeoutSeconds int }
 
 /// A private conversation with MemQL. The transcript is written by the agent
 /// service; ownership is always taken from the authenticated caller.

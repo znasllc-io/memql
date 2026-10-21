@@ -96,6 +96,10 @@ type InferenceUnavailable struct {
 	// the interesting question -- why did this call refuse when the identical
 	// one yesterday did not -- is a question about a refusal.
 	Decision airoute.Decision
+	// Route names the route a person chose when the call ran under one
+	// (design record 2026-10-18-routes). A route never falls through to a
+	// source it does not name, so the refusal says which route ran dry.
+	Route string
 	// CeilingReason is the guard's own sentence when Code is
 	// ceiling_reached. Carried verbatim: it names the env var to change.
 	CeilingReason string
@@ -127,6 +131,9 @@ func (e *InferenceUnavailable) Error() string {
 	}
 	if e.Pinned != "" {
 		fmt.Fprintf(&b, " [pinned to %s: a pinned source is never substituted]", e.Pinned)
+	}
+	if e.Route != "" {
+		fmt.Fprintf(&b, " [route %s: a route never falls through to a source it does not name]", e.Route)
 	}
 	if e.PolicyName != "" {
 		fmt.Fprintf(&b, " [policy %s]", e.PolicyName)
@@ -163,6 +170,9 @@ func (e *InferenceUnavailable) AsMap() map[string]any {
 	}
 	if e.Pinned != "" {
 		out["pinned"] = e.Pinned
+	}
+	if e.Route != "" {
+		out["route"] = e.Route
 	}
 	return out
 }

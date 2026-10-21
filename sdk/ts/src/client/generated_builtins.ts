@@ -98,33 +98,32 @@ QueryClient.prototype.askConversationSnapshot = function (this: QueryClient, arg
   return this.executeNamed("askConversationSnapshot", buildAskConversationSnapshot(args), opts);
 };
 
-/** Record guidance for owned running work in its existing conversation. This starts no goal and grants no permission; the existing agent receives the message at its next safe reasoning boundary. Retries reuse requestId. */
-export interface AskGuideWorkArgs {
-  targetEpoch: string;
-  runId: string;
+/** Answer the stop question Ask asked on one of this person's goals ("Stop this work? It can't be resumed."). stop closes the goal and asks its runs to stop, then records stopped; keep records kept and changes nothing else. Sending the same answer again returns the saved one; the other answer is refused once one is saved. A running job cannot answer: this is a person's decision. */
+export interface AskStopDecisionArgs {
   conversationId: string;
-  requestId: string;
-  prompt: string;
+  turnId: string;
+  runId: string;
+  // Enum: stop | keep
+  decision: string;
 }
 
-export function buildAskGuideWork(args: AskGuideWorkArgs): string {
+export function buildAskStopDecision(args: AskStopDecisionArgs): string {
   const parts: string[] = [];
-  parts.push("targetEpoch: " + renderMemQLValue(args.targetEpoch));
-  parts.push("runId: " + renderMemQLValue(args.runId));
   parts.push("conversationId: " + renderMemQLValue(args.conversationId));
-  parts.push("requestId: " + renderMemQLValue(args.requestId));
-  parts.push("prompt: " + renderMemQLValue(args.prompt));
-  return "builtin askGuideWork(" + parts.join(", ") + ")";
+  parts.push("turnId: " + renderMemQLValue(args.turnId));
+  parts.push("runId: " + renderMemQLValue(args.runId));
+  parts.push("decision: " + renderMemQLValue(args.decision));
+  return "builtin askStopDecision(" + parts.join(", ") + ")";
 }
 
 declare module "./query.js" {
   interface QueryClient {
-    askGuideWork(args: AskGuideWorkArgs, opts?: QueryCallOptions): Promise<Result>;
+    askStopDecision(args: AskStopDecisionArgs, opts?: QueryCallOptions): Promise<Result>;
   }
 }
 
-QueryClient.prototype.askGuideWork = function (this: QueryClient, args: AskGuideWorkArgs = {} as AskGuideWorkArgs, opts?: QueryCallOptions): Promise<Result> {
-  return this.executeNamed("askGuideWork", buildAskGuideWork(args), opts);
+QueryClient.prototype.askStopDecision = function (this: QueryClient, args: AskStopDecisionArgs = {} as AskStopDecisionArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("askStopDecision", buildAskStopDecision(args), opts);
 };
 
 /** Open this owner's existing work in its Ask conversation, creating a private conversation for Nexus-originated work without starting another run. */
@@ -146,6 +145,73 @@ declare module "./query.js" {
 
 QueryClient.prototype.askWorkConversation = function (this: QueryClient, args: AskWorkConversationArgs = {} as AskWorkConversationArgs, opts?: QueryCallOptions): Promise<Result> {
   return this.executeNamed("askWorkConversation", buildAskWorkConversation(args), opts);
+};
+
+/** Auto's balance for the whole cluster -- Speed, Cost and Quality, 0 to 100 each -- with MemQL's recommended values and whether they were changed. One row. */
+export interface AutoBalanceArgs {
+}
+
+export function buildAutoBalance(args: AutoBalanceArgs): string {
+  void args;
+  return "builtin autoBalance()";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    autoBalance(args?: AutoBalanceArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.autoBalance = function (this: QueryClient, args: AutoBalanceArgs = {} as AutoBalanceArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("autoBalance", buildAutoBalance(args), opts);
+};
+
+/** Return Auto's balance to MemQL's recommended values. Owner or developer. */
+export interface AutoBalanceResetArgs {
+  revision: number;
+}
+
+export function buildAutoBalanceReset(args: AutoBalanceResetArgs): string {
+  const parts: string[] = [];
+  parts.push("revision: " + renderMemQLValue(args.revision));
+  return "builtin autoBalanceReset(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    autoBalanceReset(args: AutoBalanceResetArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.autoBalanceReset = function (this: QueryClient, args: AutoBalanceResetArgs = {} as AutoBalanceResetArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("autoBalanceReset", buildAutoBalanceReset(args), opts);
+};
+
+/** Change Auto's balance for the whole cluster. Owner or developer, with the revision from autoBalance. Reliability always weighs the mean of the three, so no setting trades it away. */
+export interface AutoBalanceSaveArgs {
+  speed: number;
+  cost: number;
+  quality: number;
+  revision: number;
+}
+
+export function buildAutoBalanceSave(args: AutoBalanceSaveArgs): string {
+  const parts: string[] = [];
+  parts.push("speed: " + renderMemQLValue(args.speed));
+  parts.push("cost: " + renderMemQLValue(args.cost));
+  parts.push("quality: " + renderMemQLValue(args.quality));
+  parts.push("revision: " + renderMemQLValue(args.revision));
+  return "builtin autoBalanceSave(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    autoBalanceSave(args: AutoBalanceSaveArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.autoBalanceSave = function (this: QueryClient, args: AutoBalanceSaveArgs = {} as AutoBalanceSaveArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("autoBalanceSave", buildAutoBalanceSave(args), opts);
 };
 
 /** The static loop graph over the automations this node registered, one v1:platform:automationNode row per automation: its trigger, filter, writes, the calls the graph cannot see into, its @loop and @mode, the automations it starts and why, its stratum, and the cycle it lies on. Built once per registered set and never persisted. Carries no run and no payload. */
@@ -1562,6 +1628,25 @@ declare module "./query.js" {
 
 QueryClient.prototype.emailRender = function (this: QueryClient, args: EmailRenderArgs = {} as EmailRenderArgs, opts?: QueryCallOptions): Promise<Result> {
   return this.executeNamed("emailRender", buildEmailRender(args), opts);
+};
+
+/** What each machine you can use can take on right now. One row: {machines, measuredAt}. Each machine says how many calls are in flight against its slots, the memory free for a model and the models already loaded (memory.reported is false when its cockpit does not report capacity, and it is then admitted on its slots alone), how fast it has answered over the last two hours, and whether it is degraded. Every route's fleet door admits machines on these figures before choosing one. */
+export interface FleetCapacityArgs {
+}
+
+export function buildFleetCapacity(args: FleetCapacityArgs): string {
+  void args;
+  return "builtin fleetCapacity()";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    fleetCapacity(args?: FleetCapacityArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.fleetCapacity = function (this: QueryClient, args: FleetCapacityArgs = {} as FleetCapacityArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("fleetCapacity", buildFleetCapacity(args), opts);
 };
 
 /** Ask one of YOUR OWN fleet machines to measure a model it already has, and return at once with the id of the record to watch. The suite is pinned by this engine and echoed back by the machine, so figures can never be filed under a suite that was not run. Owner-only, and the machine must be yours, unrevoked and connected right now -- the same refusals a pull makes, reused deliberately, because offline is offline whichever act is asking. Progress lands per case on the v1:worker:modelProbe row this returns the id of; the figures land on a v1:platform:modelMeasurement row keyed by machine, model and suite version. Every figure is a measured statistic OR a named reason there is none: a machine nobody has probed and a model that failed every case are different answers, and a page that renders both as zero would lead to opposite actions. */
@@ -3382,6 +3467,46 @@ QueryClient.prototype.moveRunHead = function (this: QueryClient, args: MoveRunHe
   return this.executeNamed("moveRunHead", buildMoveRunHead(args), opts);
 };
 
+/** Your monthly AI budget and what you have spent with metered vendors this month. Your own machines and app subscriptions never count. One row. */
+export interface MyBudgetArgs {
+}
+
+export function buildMyBudget(args: MyBudgetArgs): string {
+  void args;
+  return "builtin myBudget()";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    myBudget(args?: MyBudgetArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.myBudget = function (this: QueryClient, args: MyBudgetArgs = {} as MyBudgetArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("myBudget", buildMyBudget(args), opts);
+};
+
+/** Set your monthly AI budget in US dollars, or remove it by leaving monthlyLimitUSD out. Auto keeps your calls inside it. */
+export interface MyBudgetSaveArgs {
+  monthlyLimitUSD?: number;
+}
+
+export function buildMyBudgetSave(args: MyBudgetSaveArgs): string {
+  const parts: string[] = [];
+  if (args.monthlyLimitUSD !== undefined) parts.push("monthlyLimitUSD: " + renderMemQLValue(args.monthlyLimitUSD));
+  return "builtin myBudgetSave(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    myBudgetSave(args: MyBudgetSaveArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.myBudgetSave = function (this: QueryClient, args: MyBudgetSaveArgs = {} as MyBudgetSaveArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("myBudgetSave", buildMyBudgetSave(args), opts);
+};
+
 /** Start a catalog review through the work harness. Local models only; no paid fallback. The owner must explicitly enable the catalog research configuration first. */
 export interface OpenModelCatalogResearchArgs {
 }
@@ -4980,6 +5105,81 @@ QueryClient.prototype.roleUpdate = function (this: QueryClient, args: RoleUpdate
   return this.executeNamed("roleUpdate", buildRoleUpdate(args), opts);
 };
 
+/** Delete one of your own routes. Built-in routes cannot be deleted. */
+export interface RouteDeleteArgs {
+  id: string;
+}
+
+export function buildRouteDelete(args: RouteDeleteArgs): string {
+  const parts: string[] = [];
+  parts.push("id: " + renderMemQLValue(args.id));
+  return "builtin routeDelete(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    routeDelete(args: RouteDeleteArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.routeDelete = function (this: QueryClient, args: RouteDeleteArgs = {} as RouteDeleteArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("routeDelete", buildRouteDelete(args), opts);
+};
+
+/** Restore the cluster's Local or Apps route to MemQL's default. Owner or developer, with the revision from routesForActor. */
+export interface RouteResetArgs {
+  id: string;
+  revision: number;
+}
+
+export function buildRouteReset(args: RouteResetArgs): string {
+  const parts: string[] = [];
+  parts.push("id: " + renderMemQLValue(args.id));
+  parts.push("revision: " + renderMemQLValue(args.revision));
+  return "builtin routeReset(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    routeReset(args: RouteResetArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.routeReset = function (this: QueryClient, args: RouteResetArgs = {} as RouteResetArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("routeReset", buildRouteReset(args), opts);
+};
+
+/** Save a route. Without an id, create one of your own (name required). With your own route's id, change it. With `local` or `apps`, change that route for the whole cluster: owner or developer, and the revision from routesForActor. Each job holds one to four sources -- fleet:, app: or federation: -- in the order they are tried. Search and memory is never a route's: every route uses the cluster's embedding model. */
+export interface RouteSaveArgs {
+  id?: string;
+  name?: string;
+  fast: string[];
+  strong: string[];
+  reasoning: string[];
+  revision?: number;
+}
+
+export function buildRouteSave(args: RouteSaveArgs): string {
+  const parts: string[] = [];
+  if (args.id !== undefined) parts.push("id: " + renderMemQLValue(args.id));
+  if (args.name !== undefined) parts.push("name: " + renderMemQLValue(args.name));
+  parts.push("fast: " + renderMemQLValue(args.fast));
+  parts.push("strong: " + renderMemQLValue(args.strong));
+  parts.push("reasoning: " + renderMemQLValue(args.reasoning));
+  if (args.revision !== undefined) parts.push("revision: " + renderMemQLValue(args.revision));
+  return "builtin routeSave(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    routeSave(args: RouteSaveArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.routeSave = function (this: QueryClient, args: RouteSaveArgs = {} as RouteSaveArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("routeSave", buildRouteSave(args), opts);
+};
+
 /** List all routing policies loaded from policies/v1/*.memql. Feeds the frontend's /router/policies page. */
 export interface RouterListPoliciesArgs {
 }
@@ -4997,6 +5197,25 @@ declare module "./query.js" {
 
 QueryClient.prototype.routerListPolicies = function (this: QueryClient, args: RouterListPoliciesArgs = {} as RouterListPoliciesArgs, opts?: QueryCallOptions): Promise<Result> {
   return this.executeNamed("routerListPolicies", buildRouterListPolicies(args), opts);
+};
+
+/** The routes this person can pick for a message in Ask -- Auto, Local and Apps, then their own -- each saying whether it can serve every job for them right now, and why not when it cannot. One row: {routes, revision}. The revision is the routing document's, for routeSave and routeReset. */
+export interface RoutesForActorArgs {
+}
+
+export function buildRoutesForActor(args: RoutesForActorArgs): string {
+  void args;
+  return "builtin routesForActor()";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    routesForActor(args?: RoutesForActorArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.routesForActor = function (this: QueryClient, args: RoutesForActorArgs = {} as RoutesForActorArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("routesForActor", buildRoutesForActor(args), opts);
 };
 
 /** Ask MemQL to compose a validated policy draft. No policy is saved; review it and call routingPolicySave or routingPolicyReset with its revision. Requires inference and owner/developer access. */

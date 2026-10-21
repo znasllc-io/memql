@@ -89,7 +89,7 @@ describe("the machines directory", () => {
       capabilityDescriptor: { displayServer: server, computerUseAvailable: build }, permissions,
     })] }));
     await click(await screen.findByText("Desktop status"));
-    expect(within(screen.getByRole("region", { name: "Permissions" })).getByText("Computer use").nextElementSibling?.textContent).toMatch(answer);
+    expect(within(screen.getByRole("region", { name: "Features" })).getByText("Computer use").nextElementSibling?.textContent).toMatch(answer);
   });
 
   it("keeps computer-use availability unknown when the optional desktop descriptor is absent", async () => {
@@ -98,7 +98,7 @@ describe("the machines directory", () => {
       capabilities: ["HEADLESS", "COMPUTERUSE"], platformInfo: { os: "linux" },
     })] }));
     await click(await screen.findByText("Desktop unreported"));
-    const answer = within(screen.getByRole("region", { name: "Permissions" })).getByText("Computer use").nextElementSibling?.textContent;
+    const answer = within(screen.getByRole("region", { name: "Features" })).getByText("Computer use").nextElementSibling?.textContent;
     expect(answer).toMatch(/not reported.*unknown/i);
     expect(answer).not.toContain("Install");
   });

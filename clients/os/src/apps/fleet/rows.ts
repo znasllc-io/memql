@@ -4,6 +4,7 @@ import { absent, figureFrom, figureOf, figureValue, type Figure } from "../../ki
 import { flatten } from "../../kit/rows";
 import { labelMapFrom, mergeLabels, type LabelMap, type MergedLabel } from "./labels";
 import { hardwareFrom, type MachineHardware } from "./machines/hardware";
+import { setupFrom, type MachineSetup } from "./machines/setup";
 
 // The wire rows the Fleet renders, projected into the shapes its surfaces
 // read.
@@ -145,6 +146,10 @@ export interface MachineRow {
    *  (epic memql#5327, design D4). EMPTY MEANS NO EXPIRY, which is every
    *  token minted before expiry existed -- not "unknown", and not "expired". */
   credentialExpiresAt: string;
+  /** What the machine's installer is doing, or how it ended (memql#6229).
+   *  NULL MEANS NO REPORT -- a cockpit that predates it, or a machine set up
+   *  by hand -- never an install that failed. See machines/setup.ts. */
+  setup: MachineSetup | null;
 }
 
 /**
@@ -399,6 +404,7 @@ export function machineFromRow(raw: Row): MachineRow {
     // agrees with ours to the millisecond".
     clockSkewKnown: row["clockSkewMs"] !== undefined && row["clockSkewMs"] !== null,
     credentialExpiresAt: rowString(row, "credentialExpiresAt"),
+    setup: setupFrom(row["setup"]),
   };
 }
 

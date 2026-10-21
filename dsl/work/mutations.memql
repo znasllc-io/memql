@@ -97,6 +97,12 @@ mutation run createWorkRun {
 /// staleSteps, and the validator names validation -- four writers of one row, and a `??` default on
 /// any of them would erase the others' value at the moment it was written. The merge is SHALLOW, so
 /// the journal always sends the WHOLE head map; `{}` and `[]` are how a writer clears one.
+///
+/// title is the run's title after a person's later message (work.workRetitleRun is its one writer).
+/// It is a field of its own rather than a key of classification, because compile writes that object
+/// whole when it finishes ({workload, workTitle, acknowledgement}) and a retitle made before then
+/// would be gone. Like the rest, it has no default: a write that names none leaves the title as it
+/// was.
 @serverOnly
 mutation run updateWorkRun {
   args {
@@ -120,6 +126,7 @@ mutation run updateWorkRun {
     humanWaitMs      int
     spent            object
     classification   object
+    title            string
     outcome          object
     errorCode        string
     errorMessage     string
@@ -135,7 +142,7 @@ mutation run updateWorkRun {
     validation       object
   }
   update {
-    accept { status, goalSignature, automationName, templateConstructId, templateVersion, templateFingerprint, variables, nodeId, callerSuppliedPayload, heartbeatAt, chainHead, stepOrder, waitingOn, continuation, humanResumeId, humanWaitMs, spent, classification, outcome, errorCode, errorMessage, finishedAt, cancelRequested, cancelledBy, actualFootprint, summary, parentRunId, head, staleSteps, rerun, validation }
+    accept { status, goalSignature, automationName, templateConstructId, templateVersion, templateFingerprint, variables, nodeId, callerSuppliedPayload, heartbeatAt, chainHead, stepOrder, waitingOn, continuation, humanResumeId, humanWaitMs, spent, classification, title, outcome, errorCode, errorMessage, finishedAt, cancelRequested, cancelledBy, actualFootprint, summary, parentRunId, head, staleSteps, rerun, validation }
     stamp {
       id: args.runId
       createdAt: args.versionTime ?? now

@@ -60,6 +60,12 @@ export interface DecisionRow {
   degraded: boolean;
   rule: string;
   policy: string;
+  /**
+   * The route a person chose for the call in Ask: `local`, `apps` or the id of
+   * one of their own. EMPTY MEANS AUTO -- the rules decided -- which is also
+   * every call made before routes existed.
+   */
+  route: string;
   door: string;
   providerName: string;
   vendor: string;
@@ -110,6 +116,7 @@ export function decisionFromRow(raw: Row): DecisionRow {
     degraded: r["degraded"] === true,
     rule: str(r, "rule"),
     policy: str(r, "policy"),
+    route: str(r, "route"),
     door: str(r, "door"),
     providerName: str(r, "providerName"),
     vendor: str(r, "vendor"),

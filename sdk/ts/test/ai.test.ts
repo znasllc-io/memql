@@ -187,6 +187,27 @@ test("chat modes carry an optional level beside the provider, omitted when empty
   }
 });
 
+// Ask attachments are bare Library artifact ids, sent only when there are any.
+test("chat modes carry attached artifact ids, omitted when there are none", async () => {
+  for (const stream of [false, true]) {
+    for (const attachmentArtifactIds of [undefined, [], ["artifact-a", "artifact-b"]]) {
+      const mock = new MockDispatcher();
+      const opts = { conversationId: "c1", attachmentArtifactIds };
+      const messages = [{ role: "user", content: "read these" }];
+      const promise = stream
+        ? aiChatStream(mock.asDispatcher(), messages, opts).result
+        : aiChat(mock.asDispatcher(), messages, opts);
+      const sent = mock.lastSent() as unknown as { aiChat: Record<string, unknown> };
+      assert.equal(Object.hasOwn(sent.aiChat, "attachmentArtifactIds"), Boolean(attachmentArtifactIds?.length));
+      if (attachmentArtifactIds?.length) assert.deepEqual(sent.aiChat.attachmentArtifactIds, attachmentArtifactIds);
+      const reply = { aiChatResult: { requestId: mock.lastRequestId(), message: { role: "assistant", content: "ok" } } };
+      if (stream) mock.streamFrame(mock.lastRequestId(), reply);
+      else mock.reply(reply);
+      await promise;
+    }
+  }
+});
+
 test("aiChat -- rejects empty messages array", async () => {
   const mock = new MockDispatcher();
   await assert.rejects(

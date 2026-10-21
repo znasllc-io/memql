@@ -89,6 +89,27 @@ describe("the sharing access list", () => {
     expect(conn.query.fleetShareDirectory).toHaveBeenCalledTimes(1);
     expect(screen.getByRole("region", { name: "Users and groups" })).toBeTruthy();
   });
+  it("hides the access list while sharing is off and brings the saved audience back when it is on", async () => {
+    const { conn } = mount(studio(shared())); await settle();
+    expect(screen.getByRole("region", { name: "Users and groups" })).toBeTruthy();
+    fireEvent.click(screen.getByRole("switch", { name: "Share models" })); await settle();
+    expect(conn.query.fleetSetSharing).toHaveBeenLastCalledWith(expect.objectContaining({ paused: true, userIds: ["ana"], groupIds: ["design"] }));
+    expect(screen.queryByRole("region", { name: "Users and groups" })).toBeNull();
+    expect(screen.queryByRole("combobox", { name: "Search users and groups" })).toBeNull();
+    expect(screen.getByText("Paused. Your audience is saved; running work can finish.")).toBeTruthy();
+    fireEvent.click(screen.getByRole("switch", { name: "Share models" })); await settle();
+    expect(conn.query.fleetSetSharing).toHaveBeenLastCalledWith(expect.objectContaining({ paused: false, userIds: ["ana"], groupIds: ["design"] }));
+    expect(within(screen.getByRole("list", { name: "Shared users and groups" })).getByText("Ana Ruiz")).toBeTruthy();
+  });
+  it("shows only the switch for a share paused elsewhere, whoever it was shared with", async () => {
+    const { rerender } = mount(studio(shared({ paused: true }))); await settle();
+    expect((screen.getByRole("switch", { name: "Share models" }) as HTMLInputElement).checked).toBe(false);
+    expect(screen.queryByRole("region", { name: "Users and groups" })).toBeNull();
+    rerender(studio({ mode: "cluster", paused: true })); await settle();
+    expect(screen.queryByText("Currently shared with everyone in this cluster.")).toBeNull();
+    rerender(studio({ mode: "cluster" })); await settle();
+    expect(screen.getByText("Currently shared with everyone in this cluster.")).toBeTruthy();
+  });
   it("shows current users and groups as cards and offers only entries not yet added", async () => {
     mount(studio(shared())); await settle();
     const list = screen.getByRole("list", { name: "Shared users and groups" });
