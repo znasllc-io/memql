@@ -487,7 +487,7 @@ func TestRenew_CodexRewritesTheHeaderInPlace(t *testing.T) {
 // line is how a body that no longer says what it claims passes.
 func parseNarrowTOML(t *testing.T, body []byte) map[string]map[string]string {
 	t.Helper()
-	doc := map[string]map[string]string{}
+	doc := map[string]map[string]string{"": {}}
 	table := ""
 	for n, raw := range strings.Split(string(body), "\n") {
 		line := strings.TrimSpace(raw)
@@ -509,7 +509,7 @@ func parseNarrowTOML(t *testing.T, body []byte) map[string]map[string]string {
 		if !strings.HasPrefix(rest, "=") {
 			t.Fatalf("line %d: not a key/value line: %q", n+1, raw)
 		}
-		if table == "" {
+		if table == "" && key != "default_permissions" {
 			t.Fatalf("line %d: key %q sits outside any table, so Codex would read it as a global setting", n+1, key)
 		}
 		rest = strings.TrimSpace(rest[1:])
@@ -517,6 +517,18 @@ func parseNarrowTOML(t *testing.T, body []byte) map[string]map[string]string {
 			for k, v := range parseInlineTOMLTable(t, rest) {
 				doc[table][key+"."+k] = v
 			}
+			continue
+		}
+		if rest == "true" || rest == "false" {
+			doc[table][key] = rest
+			continue
+		}
+		if strings.HasPrefix(rest, "[") {
+			var names []string
+			if err := json.Unmarshal([]byte(rest), &names); err != nil {
+				t.Fatal(err)
+			}
+			doc[table][key] = rest
 			continue
 		}
 		value, tail := scanTOMLString(t, rest)

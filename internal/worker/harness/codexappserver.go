@@ -808,12 +808,10 @@ func (h *codexAppServer) ensureThread(ctx context.Context) error {
 		// NEVER is not a convenience. There is no person on this end of
 		// the pipe, so an approval request can only be refused (see
 		// refuseRequest), and a thread that asks is a thread that
-		// wastes a round trip to be told no. The SANDBOX is left
-		// unset on purpose: what a Codex session may touch on this
-		// machine is the operator's decision, already written into the
-		// CODEX_HOME config this process was pointed at, and a harness
-		// that overrode it here would quietly widen or narrow a policy
-		// somebody set deliberately.
+		// wastes a round trip to be told no. The session's CODEX_HOME
+		// config grants its authenticated MCP tool list and confines
+		// native commands to the approved workspace. Leave the sandbox
+		// unset here so that permission profile remains authoritative.
 		"approvalPolicy": "never",
 	}
 	if ref := strings.TrimSpace(h.spec.ResumeRef); ref != "" {

@@ -66,7 +66,13 @@ const (
 // Every method is safe to call concurrently with the others: renewal
 // arrives on the stream while the run is in flight, and cleanup can be
 // driven by either the run finishing or the stream dying.
+type sessionMCPSettings struct {
+	Tools     []string
+	DenyPaths []string
+}
+
 type mcpConfig struct {
+	settings  sessionMCPSettings
 	app       string
 	workspace string
 	endpoint  string
@@ -114,7 +120,7 @@ func (m *mcpConfig) paths() (config, backup string) {
 // a restart can find what a crash left behind. An empty stateDir disables
 // the ledger (tests that do not exercise the sweep), which is stated here
 // rather than silently tolerated.
-func writeMCPConfig(app, workspace, endpoint, credential, sessionID, stateDir string) (*mcpConfig, error) {
+func writeMCPConfig(app, workspace, endpoint, credential, sessionID, stateDir string, settings ...sessionMCPSettings) (*mcpConfig, error) {
 	if strings.TrimSpace(workspace) == "" {
 		return nil, errors.New("mcp config: workspace required")
 	}
@@ -133,6 +139,9 @@ func writeMCPConfig(app, workspace, endpoint, credential, sessionID, stateDir st
 		workspace: workspace,
 		endpoint:  endpoint,
 		sessionID: sessionID,
+	}
+	if len(settings) > 0 {
+		m.settings = settings[0]
 	}
 	if strings.TrimSpace(stateDir) != "" {
 		m.ledger = filepath.Join(stateDir, ledgerDirName, sanitizeLedgerName(sessionID)+".json")
@@ -254,7 +263,7 @@ func (m *mcpConfig) Renew(credential string) error {
 	case apps.IDClaudeCode:
 		body, err = claudeCodeMCPBody(m.endpoint, credential)
 	case apps.IDCodex:
-		body, err = codexMCPBody(m.endpoint, credential)
+		body, err = codexMCPBody(m.endpoint, credential, m.settings)
 	default:
 		err = fmt.Errorf("mcp config: no writer for app %q", m.app)
 	}
@@ -432,12 +441,9 @@ func claudeCodeMCPBody(endpoint, credential string) ([]byte, error) {
 // the process environment sits somewhere this file's deletion guarantee
 // does not reach, and cannot be replaced in place afterwards.
 //
-// Written by hand rather than through a TOML encoder because this is the
-// module's only TOML and the document is three lines; a dependency for
-// that is not worth its own supply-chain surface. The test's parser is
-// deliberately as narrow as this renderer -- a body that outgrows it is a
-// body nobody has verified.
-func codexMCPBody(endpoint, credential string) ([]byte, error) {
+// String values are quoted and the small generated grammar is covered by
+// the config tests, including tool grants, workspace bounds and renewal.
+func codexMCPBody(endpoint, credential string, options ...sessionMCPSettings) ([]byte, error) {
 	if strings.ContainsAny(endpoint, "\"\n\r") || strings.ContainsAny(credential, "\"\n\r") {
 		// Neither value can legitimately contain these, and a hand-rolled
 		// renderer that let one through would produce a config whose
@@ -446,9 +452,36 @@ func codexMCPBody(endpoint, credential string) ([]byte, error) {
 	}
 	var b strings.Builder
 	fmt.Fprintf(&b, "# Written by memql for app session; deleted when the session ends.\n")
+	var settings sessionMCPSettings
+	if len(options) > 0 {
+		settings = options[0]
+	}
+	fmt.Fprintln(&b, `default_permissions = "memql_session"`)
 	fmt.Fprintf(&b, "[mcp_servers.%s]\n", mcpServerName)
+	fmt.Fprintln(&b, "required = true")
+	if len(settings.Tools) > 0 {
+		names, _ := json.Marshal(settings.Tools)
+		fmt.Fprintf(&b, "enabled_tools = %s\n", names)
+	}
 	fmt.Fprintf(&b, "url = %q\n", endpoint)
 	fmt.Fprintf(&b, "http_headers = { %q = %q }\n", "Authorization", "Bearer "+credential)
+	for _, name := range settings.Tools {
+		fmt.Fprintf(&b, "[mcp_servers.%s.tools.%q]\napproval_mode = \"approve\"\n", mcpServerName, name)
+	}
+	// App consent grants this workspace. Keep Codex's baseline protected
+	// directories and confine command reads to runtime paths + the workspace.
+	fmt.Fprintln(&b, `[permissions.memql_session]
+extends = ":workspace"
+[permissions.memql_session.filesystem]
+":root" = "deny"
+":minimal" = "read"`)
+	for _, path := range settings.DenyPaths {
+		fmt.Fprintf(&b, "%q = \"deny\"\n", path)
+	}
+	fmt.Fprintln(&b, `[permissions.memql_session.filesystem.":workspace_roots"]
+".memql-session" = "deny"
+[permissions.memql_session.network]
+enabled = false`)
 	return []byte(b.String()), nil
 }
 

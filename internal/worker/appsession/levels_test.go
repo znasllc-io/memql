@@ -50,7 +50,7 @@ func newLevelRig(t *testing.T, levels func(string) (harness.Table, map[string]st
 		Logger:      slog.New(slog.NewTextHandler(io.Discard, nil)),
 		StateDir:    h.state,
 		LibraryBase: h.library.server.URL,
-		HTTPClient:  h.library.server.Client(),
+		HTTPClient:  preflightFixtureClient(h.library.server),
 		Allowed:     func(id string) bool { return id == apps.IDClaudeCode },
 		Levels:      levels,
 	})
