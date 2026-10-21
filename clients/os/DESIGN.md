@@ -748,3 +748,5 @@ surface in the shell that read as a single thought.
 - **Adding only.** Once the thing is finished it has a page of its own, and
   that page is where it is read and changed by whoever may. Nothing in a wizard
   edits.
+
+Shared numeric balance controls use `kit/WeightSlider` so the track, recommended marker, disabled state and keyboard behavior remain consistent in Routing and machine Apps.

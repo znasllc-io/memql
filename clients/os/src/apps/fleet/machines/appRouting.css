@@ -1,2 +1,5 @@
 .fleet-app-routing-fields { border: 0; margin: 0; padding: 0; min-width: 0; }
 .os-app-routing-toast { position: fixed; z-index: 1200; bottom: 5rem; right: 1.5rem; max-width: min(32rem, calc(100vw - 3rem)); display: flex; flex-wrap: wrap; align-items: center; gap: .75rem; padding: 1rem; border: 1px solid var(--os-line); border-radius: .75rem; background: var(--os-raised); color: var(--os-ink); box-shadow: var(--os-shadow-float); }
+
+.fleet-app-routing-actions { flex-wrap: wrap; gap: 12px; }
+.fleet-machine-apps.fleet-machine-details { container-name: machine-details details; }

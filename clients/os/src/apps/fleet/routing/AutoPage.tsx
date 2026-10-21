@@ -1,6 +1,7 @@
-import { useEffect, useId, useState } from "react";
+import { useEffect, useState } from "react";
 
 import { Button, Fact, Facts, Head, Notice } from "../../../kit";
+import { WeightSlider } from "../../../kit/WeightSlider";
 import { InlineSkeleton } from "../../../kit/ContentSkeleton";
 import { Details, DetailsSection, SettingRow } from "../../../kit/DetailsSection";
 import { PageHelp } from "../../../kit/pageHelp";
@@ -153,7 +154,7 @@ export function AutoPage({
                     <SettingRow key={weight.id} label={weight.label}>
                       <WeightSlider
                         label={weight.label}
-                        hint={weight.hint}
+                        hint={sentence(weight.hint)}
                         value={shown[weight.id]}
                         recommended={saved?.recommended[weight.id] ?? 50}
                         readOnly={!canEdit || busy}
@@ -260,43 +261,3 @@ function resetsOn(iso: string): string {
  * The mark is drawn, not announced twice: the slider's accessible value says
  * "60, recommended 50", and the tick under the track says the same to the eye.
  */
-export function WeightSlider({
-  label,
-  hint,
-  value,
-  recommended,
-  readOnly,
-  onChange,
-}: {
-  label: string;
-  hint: string;
-  value: number;
-  recommended: number;
-  readOnly: boolean;
-  onChange: (value: number) => void;
-}) {
-  const id = useId();
-  return (
-    <div className="fleet-weight" data-read-only={readOnly || undefined}>
-      <div className="fleet-weight-track">
-        <input
-          id={id}
-          className="fleet-weight-input"
-          type="range"
-          min={0}
-          max={100}
-          step={5}
-          value={value}
-          disabled={readOnly}
-          aria-label={label}
-          aria-valuetext={`${value}${value === recommended ? ", recommended" : `, recommended ${recommended}`}`}
-          style={{ ["--fleet-weight-fill" as string]: `${value}%` }}
-          onChange={(event) => onChange(Number(event.target.value))}
-        />
-        <span className="fleet-weight-mark" style={{ left: `${recommended}%` }} aria-hidden title={`Recommended: ${recommended}`} />
-      </div>
-      <span className="fleet-weight-value">{value}</span>
-      <span className="fleet-weight-hint">{sentence(hint)}</span>
-    </div>
-  );
-}

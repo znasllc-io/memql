@@ -8,7 +8,7 @@ import { DetailsSection, SettingRow } from "../../../kit/DetailsSection";
 import { flatten } from "../../../kit/rows";
 import { PageHelp } from "../../../kit/pageHelp";
 import { accessAdmits } from "../../../system/registry";
-import { WeightSlider } from "../routing/AutoPage";
+import { WeightSlider } from "../../../kit/WeightSlider";
 import { ownsMachine } from "./sharing";
 import type { MachineRow } from "../rows";
 import "./appRouting.css";
@@ -79,7 +79,7 @@ export function MachineAppRouting({ machine }: { machine: MachineRow }) {
       <SettingRow label="Usage balance"><WeightSlider label="App usage balance" hint="Favour the app with fewer reported tokens used" value={draft.usageWeight} recommended={50} readOnly={!editable || saving || draft.mode !== "auto"} onChange={usageWeight => setDraft({ ...draft, usageWeight })} /></SettingRow>
       <SettingRow label="Speed"><WeightSlider label="App speed" hint="Favour faster completed calls" value={draft.speedWeight} recommended={50} readOnly={!editable || saving || draft.mode !== "auto"} onChange={speedWeight => setDraft({ ...draft, speedWeight })} /></SettingRow>
       <SettingRow label="Reliability"><WeightSlider label="App reliability" hint="Favour successful calls" value={draft.reliabilityWeight} recommended={50} readOnly={!editable || saving || draft.mode !== "auto"} onChange={reliabilityWeight => setDraft({ ...draft, reliabilityWeight })} /></SettingRow>
-      <div className="fleet-section-actions">
+      <div className="fleet-section-actions fleet-app-routing-actions">
         <Button disabled={!dirty || saving} onClick={() => { setDraft(base); setNotice(""); }}>Discard</Button>
         <Button disabled={!dirty || saving || draft.usageWeight + draft.speedWeight + draft.reliabilityWeight === 0} busy={saving} onClick={() => void save()}>Save app routing</Button>
         <Button disabled={saving} onClick={() => setDraft({ ...defaults, revision: base.revision })}>Reset to Auto</Button>
