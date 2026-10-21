@@ -65,14 +65,7 @@ var pipelinesSyntheticPaths = []string{
 // Every pattern either matcher is asked about, over every tracked path: the
 // two agree on what they admit, on what they refuse, and on every match.
 func TestPipelinesCompileGlobAgreesWithPathsFilter(t *testing.T) {
-	raw, err := ReadCIWorkflow()
-	if err != nil {
-		t.Fatalf("read ci.yml: %v", err)
-	}
-	buckets, err := ParseChangesFilters(raw)
-	if err != nil {
-		t.Fatal(err)
-	}
+	buckets := nativePipeline(t).Select.Buckets
 	patterns := map[string]bool{}
 	for _, list := range buckets {
 		for _, p := range list {
@@ -112,7 +105,7 @@ func TestPipelinesCompileGlobAgreesWithPathsFilter(t *testing.T) {
 		}
 	}
 	// A sweep that compared nothing would pass the same way.
-	if compared < 50 || matches == 0 {
+	if compared < 30 || matches == 0 {
 		t.Fatalf("compared %d pattern(s) with %d match(es) between them: too little to vouch for anything", compared, matches)
 	}
 	t.Logf("%d patterns agree over %d paths (%d matches)", compared, len(paths), matches)

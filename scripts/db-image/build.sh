@@ -8,8 +8,8 @@
 # import it into the local k3d cluster.
 #
 # Epic memql#3842, task memql#3844. This is the LOCAL DEVELOPMENT path only.
-# Deployable images are built on the GitHub build server
-# (.github/workflows/build-db-image.yml), never on an operator machine --
+# Deployable images are built by the native tests.database-image step
+# and published through a reviewed release candidate, never on an operator machine --
 # CLAUDE.md, "Image builds: LOCAL Docker for dev, BUILD SERVER for deploys".
 # Both paths drive the SAME Dockerfile and the SAME smoke test, which is what
 # makes the local image a faithful stand-in rather than a lookalike.
@@ -53,7 +53,11 @@ function ensure_docker() {
 function build_image() {
     local image="$1" pg="$2" ts="$3" tsPrev="$4"
     cap_info "Building ${image} (pg${pg}, timescaledb ${tsPrev} -> ${ts})..."
+    # The legacy builder visits later stages even when the final stage does
+    # not depend on them. Stop before the native verified stage's RUN --mount;
+    # local smoke validation remains the separate smoke_test_image call below.
     docker build \
+        --target operand \
         -f "${REPO_ROOT}/deploy/db-image/Dockerfile" \
         --build-arg "PG_MAJOR=${pg}" \
         --build-arg "TIMESCALEDB_VERSION=${ts}" \

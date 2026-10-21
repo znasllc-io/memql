@@ -14,7 +14,7 @@ func validateSARIFStep(spec *Spec, stage string, step StepSpec) *Refusal {
 		strings.ContainsAny(r.Path, "\\\x00\r\n*?[]") || !strings.HasSuffix(r.Path, ".sarif") {
 		return Refuse(CodeStepInvalid, scope, "sarif requires one exact repository-relative .sarif artifact path.")
 	}
-	if step.CheckoutHistory != "" || step.Run != "" || step.ImageBuild != nil || step.Image != "" || step.Execution != "" || step.Placement != "" ||
+	if step.RepositoryChange != nil || step.GitHubReadToken || step.CheckoutHistory != "" || step.Run != "" || step.ImageBuild != nil || step.Image != "" || step.Execution != "" || step.Placement != "" ||
 		step.Platform != "" || step.CPUMilli != 0 || step.MemoryMiB != 0 || step.Packages != "" || step.Only != "" ||
 		step.Shards != 0 || step.When != nil || len(step.Needs) > 0 || len(step.Services) > 0 || step.Caches != nil ||
 		len(step.Secrets) > 0 || step.ImagePullSecret != "" || len(step.Artifacts) > 0 {
@@ -31,7 +31,7 @@ func validateSARIFStep(spec *Spec, stage string, step StepSpec) *Refusal {
 			break
 		}
 		for _, producer := range prior.Steps {
-			if StepKey(prior.Name, producer.Name) == r.Step && producer.SARIF == nil && producer.ImageBuild == nil &&
+			if StepKey(prior.Name, producer.Name) == r.Step && producer.SARIF == nil && producer.RepositoryChange == nil && producer.ImageBuild == nil &&
 				producer.Shards <= 1 && len(producer.Artifacts) > 0 {
 				return nil
 			}

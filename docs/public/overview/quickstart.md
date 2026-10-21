@@ -42,6 +42,11 @@ The supported local runtime is **Docker + k3d + ArgoCD**. It includes the
 engine services, storage, identity, and MemQL OS. Allow time for image downloads,
 compilation, and readiness checks. Setup time depends on your host and network.
 
+The whole cluster and its local models run on this machine, so it needs at
+least 32 GB of memory on an Apple silicon Mac, or 32 GB of RAM and a GPU with
+16 GB of VRAM on x86_64 Linux, plus 100 GB of free disk. See
+[minimum requirements](../operate/minimum-requirements.md#one-machine-the-entire-cluster).
+
 ### Through the extension
 
 Run **MemQL: Install Local Cluster...** (or **Install MemQL on this computer**

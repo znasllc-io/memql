@@ -201,10 +201,7 @@ func (s *step) collectStepArtifacts(ctx context.Context, pod *Pod, res *pl.StepR
 		err = s.files().storeArtifactSnapshot(ctx, snapshot, res, notes)
 	}
 	if err != nil {
-		res.Status = pl.OutcomeFailed
-		if res.Failure == nil {
-			res.Failure = &pl.Failure{Code: pl.CodeArtifactUnavailable, Message: cutBytes(s.mask("required artifacts were not captured: "+err.Error()), failureMaxBytes)}
-		}
+		s.files().artifactFact(res, notes, pl.Failure{Code: pl.CodeArtifactUnavailable, Message: "required artifacts were not captured: " + err.Error()})
 	}
 }
 

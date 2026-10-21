@@ -39,7 +39,7 @@ import (
 // exists because of.
 
 // Engine node images. Each takes the ENGINE release tag, because each is built
-// by build-engine-images.yml from this repo's Dockerfile at that version.
+// by the native release pipeline from this repo's Dockerfile at that version.
 var engineNodeImages = map[string]bool{
 	"memql-bff":       true,
 	"memql-identity":  true,
@@ -95,7 +95,7 @@ func TestEveryOverlayImageIsClassifiedAsEngineOrNot(t *testing.T) {
 			t.Errorf("the local overlay declares the image %q and this test classifies it as neither "+
 				"an engine node nor a non-engine image.\n"+
 				"Decide which it is:\n"+
-				"  - an engine node built by build-engine-images.yml at the release version "+
+				"  - an engine node built by the native release pipeline at the release version "+
 				"-> add it to engineNodeImages;\n"+
 				"  - anything else (an operand, a sidecar, a third-party image) -> add it to "+
 				"nonEngineImages WITH the reason, and make sure kustomize_image_overrides gives "+

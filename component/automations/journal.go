@@ -1060,36 +1060,9 @@ func (j *workJournal) parkOnInference(ctx context.Context, exec *AutomationExecu
 	}
 }
 
-// parkOnRunCeiling writes the budget approval and puts the run at `waiting`
-// (memql#5580).
-//
-// WHY PARK RATHER THAN FAIL. The run has already spent; the work itself is
-// fine; and the condition is a number a person set. Failing it would throw
-// away a compiled template and a journal because of a limit -- the same
-// argument parkOnInference makes above, arrived at for the same reason. What
-// parking buys is that raising the ceiling and deciding the approval resumes
-// the run where it stopped.
-//
-// WHY THE CALL IS REFUSED RATHER THAN CANCELLED MID-FLIGHT. The check runs
-// BEFORE the provider is asked, so there is never an in-flight call to
-// abandon. Cancelling one already sent would spend the money and throw away
-// the answer, which is the worst of both.
-//
-// WHAT MAKES THE BREACH LEGIBLE AFTERWARDS -- three rows' worth, because "the
-// run stopped" with no figures is not something anyone can decide about:
-//
-//	the approval   kind `budget`, subject {ceiling, limit, actual, reason}.
-//	the run        status `waiting`, waitingOn naming the ceiling by name,
-//	               and `spent` -- the first thing in this tree to write that
-//	               field with anything but wallClockMs.
-//	the log line   the ceiling and the run, at Info.
-//
-// THE ORDER IS parkOnInference'S, and load-bearing for its reason: a run
-// parked on an approval id that does not exist waits on nothing.
-//
-// NO resumeAt, EVER. Only a person changes a ceiling, so a timer here would
-// burn a dispatch every five minutes to rediscover a number nobody touched --
-// and unlike a shut door, no laptop opening will change this answer.
+// parkOnRunCeiling preserves unfinished work and asks for direction. Native
+// reasoning owns resumable checkpoints; a raw automation failure uses the
+// saved-results explanation and never raises a goal's hard limits.
 func (j *workJournal) parkOnRunCeiling(ctx context.Context, exec *AutomationExecution, chainHead string, ceiling *memql.RunCeilingError) {
 	if j == nil || exec == nil || ceiling == nil {
 		return
@@ -1106,7 +1079,9 @@ func (j *workJournal) parkOnRunCeiling(ctx context.Context, exec *AutomationExec
 		Actual:  ceiling.Breach.Actual,
 		Reason:  ceiling.Breach.Reason,
 	}
-	req := work.BudgetApproval(exec.ID, stepKey, breach, now, workApprovalTTL)
+	req := work.ProgressFeedback(exec.ID, stepKey, breach, now, workApprovalTTL)
+	// A raw failed automation has no native checkpoint to safely continue.
+	work.StopProgressFeedback(&req)
 
 	if !j.persistApproval(ctx, exec, chainHead, map[string]any{
 		"approvalId":   approvalId,
@@ -1115,11 +1090,8 @@ func (j *workJournal) parkOnRunCeiling(ctx context.Context, exec *AutomationExec
 		"kind":         req.Kind,
 		"subject":      req.Subject,
 		"artifactHash": req.ArtifactHash,
-		"question":     "This run reached its " + breach.Ceiling + " ceiling. Raise it and carry on, or stop the run?",
-		"options": []map[string]any{
-			{"label": "I have raised the ceiling -- carry on", "value": "approved"},
-			{"label": "Stop this run", "value": "rejected"},
-		},
+		"question":     req.Question,
+		"options":      req.Options,
 		"evidence": map[string]any{
 			"tier":   req.Evidence.Tier,
 			"reason": req.Evidence.Reason,
@@ -1140,7 +1112,7 @@ func (j *workJournal) parkOnRunCeiling(ctx context.Context, exec *AutomationExec
 		"waitingOn": map[string]any{
 			"kind":         "approval",
 			"subject":      approvalId,
-			"approvalKind": work.ApprovalKindBudget,
+			"approvalKind": req.Kind,
 			"since":        rfc3339(now),
 			// The ceiling's NAME on the run row, so a reader scanning runs
 			// sees which limit stopped this one without opening the approval.

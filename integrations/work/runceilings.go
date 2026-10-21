@@ -154,12 +154,8 @@ func (c *RunCeilings) Admit(ctx context.Context, rc common.RunContext, estimated
 		return nil
 	}
 
-	// A REFUSAL RE-READS THE GOAL BEFORE IT STANDS, because the whole point of
-	// parking rather than failing is that a person can raise the ceiling and
-	// carry on -- and the approval says so in those words. The ceilings are
-	// otherwise read once per run per process, so a run re-dispatched onto
-	// THIS process after its ceiling was raised would meet the old number and
-	// park again, with the approval's promise plainly untrue.
+	// Re-read before parking: another replica may have persisted a progress
+	// window since this replica seeded its allowance. Never reset spent usage.
 	//
 	// Usage was reconciled above by receipt identity, preserving local charges
 	// even when their journal write failed or the answer came from a cache.
@@ -175,6 +171,24 @@ func (c *RunCeilings) Admit(ctx context.Context, rc common.RunContext, estimated
 			return nil
 		}
 		breach = work.CheckCeilings(b.ceilings, spent, estimatedTokens)
+	}
+	if breach != nil && (breach.Ceiling == work.CeilingModelCalls || breach.Ceiling == work.CeilingWallClock) {
+		if host, ok := c.store.engine.(interface {
+			IntegrationByName(string) memqlengine.IntegrationProvider
+		}); ok {
+			if coordinator, ok := host.IntegrationByName("work").(*Integration); ok {
+				continued, err := coordinator.ContinueWorkProgress(ctx, rc, spent, estimatedTokens)
+				if err != nil {
+					return breachOf(work.UnevaluatedBreach("work progress could not be verified: " + err.Error()))
+				}
+				if continued {
+					if current, err := c.goalCeilings(ctx, rc); err == nil {
+						b.ceilings = enforceableHere(current)
+						breach = work.CheckCeilings(b.ceilings, spent, estimatedTokens)
+					}
+				}
+			}
+		}
 	}
 	return breachOf(breach)
 }
@@ -345,7 +359,7 @@ func (c *RunCeilings) goalCeilings(ctx context.Context, rc common.RunContext) (w
 	if err != nil || run == nil {
 		return work.Ceilings{}, fmt.Errorf("run workload is unavailable: %v", err)
 	}
-	return approvedWorkloadCeilings(goal, ceilings, rowString(rowMap(run, "classification"), "workload"))
+	return progressCeilings(goal, run, ceilings)
 }
 
 // enforceableHere drops the ceilings this seam cannot evaluate.
@@ -440,9 +454,9 @@ func breachOf(b *work.CeilingBreach) *memqlengine.RunCeilingBreach {
 	}
 }
 
-// Deadline reloads the declared budget so a reply classified on one planner
-// cannot retain an older task allowance on another replica. Keep the original
-// run start across retries, reconnects, and different serving nodes.
+// Deadline lets an admitted operation finish within the original hard limit.
+// Soft workload windows are checked between calls, where progress can be saved
+// and assessed. Neither a retry nor a replica hop restarts the clock.
 func (c *RunCeilings) Deadline(ctx context.Context, rc common.RunContext) (time.Time, error) {
 	if rc.GoalId == "" {
 		return time.Time{}, nil
@@ -470,11 +484,11 @@ func (c *RunCeilings) Deadline(ctx context.Context, rc common.RunContext) (time.
 		return time.Time{}, fmt.Errorf("run wait budget is unavailable: %v", err)
 	}
 	b.humanWaitMs = int64(rowInt(run, "humanWaitMs"))
-	return work.RunDeadline(b.startedAt.Add(time.Duration(b.humanWaitMs)*time.Millisecond), declared.WallClockMs)
+	return c.DeclaredDeadline(ctx, rc)
 }
 
 // DeclaredDeadline bounds the entire tool loop by the person's hard limit.
-// Each model call separately gets Deadline's current workload estimate. An
+// Each model call separately passes the current admission estimate. An
 // execution that discovers missing evidence can grow from quick to lookup
 // without inheriting an obsolete quick-response parent deadline.
 func (c *RunCeilings) DeclaredDeadline(ctx context.Context, rc common.RunContext) (time.Time, error) {

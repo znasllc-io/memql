@@ -43,7 +43,7 @@ function main() {
     esac
 
     cd "$(dirname "${BASH_SOURCE[0]}")/../.."
-    export GOTOOLCHAIN=go1.27.2 GOFLAGS=-p=2 GOMAXPROCS=2 GOMEMLIMIT=1GiB
+    export GOTOOLCHAIN=go1.27.3 GOFLAGS=-p=2 GOMAXPROCS=2 GOMEMLIMIT=1GiB
     export MEMQL_VSCODE_VERSION="$version"
     export PLAYWRIGHT_BROWSERS_PATH="$PWD/.memql-host-cache/browsers"
     if [[ "$(uname -s)" == Darwin ]]; then

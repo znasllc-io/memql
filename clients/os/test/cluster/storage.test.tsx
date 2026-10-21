@@ -13,7 +13,7 @@ import { withSession } from "./harness";
 
 const seam = vi.hoisted(() => ({ connection: null as unknown, status: "connected" }));
 vi.mock("../../src/live/connection", () => ({ useOsConnection: () => seam.connection }));
-vi.mock("../../src/chrome/connection", () => ({ useConnectionStatus: () => seam.status }));
+vi.mock("../../src/chrome/connection", async importOriginal => ({ ...await importOriginal<typeof import("../../src/chrome/connection")>(), useConnectionStatus: () => seam.status }));
 const settle = async () => act(async () => { await new Promise((resolve) => setTimeout(resolve, 0)); });
 const reply = (row: Row) => new Result({ data: [row] } as never);
 function measurement(over: Row = {}): Row { return { available: true, observedAt: Date.now() / 1000, dataBytes: 85 * 1024 ** 3, dataCapacityBytes: 100 * 1024 ** 3, walBytes: 2 * 1024 ** 3, walCapacityBytes: 10 * 1024 ** 3, issues: ["data-volume-over-80-percent"], ...over }; }

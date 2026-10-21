@@ -13,10 +13,10 @@
 //
 // The failure depends on where the match sits in the listing, so it cannot be
 // caught by running the step once on a small archive. It is caught here, by
-// shape: every `run:` body in every workflow and composite action is split into
+// shape: every `run:` body in the native pipeline manifest is split into
 // pipelines, and a pipeline that runs tar in one stage and a quiet grep in a
 // later one is refused. The fix is to write the listing to a file and grep the
-// file, as the docs workflow now does.
+// file. The native bundle builder also verifies its archive directly in Python.
 package release
 
 import (
@@ -24,7 +24,6 @@ import (
 	"path/filepath"
 	"regexp"
 	"runtime"
-	"sort"
 	"strings"
 	"testing"
 
@@ -40,10 +39,10 @@ var tarCommand = regexp.MustCompile(`(?:^|[\s;&(!])(?:gtar|bsdtar|tar)(?:\s|$)`)
 // rest of the stage, whose leading options are read for a quiet flag.
 var grepCommand = regexp.MustCompile(`(?:^|[\s;&(!])(?:grep|egrep|fgrep|zgrep)(\s.*)?$`)
 
-func TestNoWorkflowQuietGrepsATarPipe(t *testing.T) {
-	files := workflowShellFiles(t)
+func TestNoNativePipelineQuietGrepsATarPipe(t *testing.T) {
+	files := nativePipelineShellFiles(t)
 	if len(files) == 0 {
-		t.Fatal("found no workflow files under .github; the guard would pass vacuously")
+		t.Fatal("found no native command manifest; the guard would pass vacuously")
 	}
 	for _, path := range files {
 		for _, run := range runBodies(t, path) {
@@ -186,25 +185,10 @@ func isQuietGrep(stage string) bool {
 	return false
 }
 
-// workflowShellFiles lists every workflow and composite action definition.
-func workflowShellFiles(t *testing.T) []string {
+// nativePipelineShellFiles holds the canonical native command manifest.
+func nativePipelineShellFiles(t *testing.T) []string {
 	t.Helper()
-	root := repoRootFromHere(t)
-	var files []string
-	for _, pattern := range []string{
-		filepath.Join(root, ".github", "workflows", "*.yml"),
-		filepath.Join(root, ".github", "workflows", "*.yaml"),
-		filepath.Join(root, ".github", "actions", "*", "action.yml"),
-		filepath.Join(root, ".github", "actions", "*", "action.yaml"),
-	} {
-		m, err := filepath.Glob(pattern)
-		if err != nil {
-			t.Fatalf("glob %s: %v", pattern, err)
-		}
-		files = append(files, m...)
-	}
-	sort.Strings(files)
-	return files
+	return []string{filepath.Join(repoRootFromHere(t), "memql-package.yaml")}
 }
 
 // runBodies returns the value of every `run:` key in a workflow or action file,

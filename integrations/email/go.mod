@@ -4,7 +4,7 @@ module github.com/znasllc-io/memql/integrations/email
 
 go 1.26.1
 
-toolchain go1.27.2
+toolchain go1.27.3
 
 require (
 	github.com/uptrace/bun v1.3.0
@@ -23,6 +23,7 @@ require (
 	github.com/aymerick/douceur v0.2.0 // indirect
 	github.com/go-pdf/fpdf v0.9.0 // indirect
 	github.com/gorilla/css v1.0.1 // indirect
+	github.com/kljensen/snowball v0.10.0 // indirect
 	github.com/microcosm-cc/bluemonday v1.0.27 // indirect
 	github.com/robfig/cron/v3 v3.0.1 // indirect
 	github.com/yuin/goldmark v1.8.6 // indirect

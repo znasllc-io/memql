@@ -27,10 +27,12 @@ func imageBuildAgainstKubernetes(t *testing.T, controls pipelineTestControls) {
 	if mode == "" {
 		mode = "network"
 	}
-	if mode != "network" && mode != "process-sandbox" {
-		t.Fatalf("MEMQL_PIPELINES_IMAGE_BUILD_TEST_MODE must be network or process-sandbox, got %q", mode)
+	if mode != "network" && mode != "process-sandbox" && mode != "read-grant" {
+		t.Fatalf("MEMQL_PIPELINES_IMAGE_BUILD_TEST_MODE must be network, process-sandbox or read-grant, got %q", mode)
 	}
 	networkChecks := mode == "network"
+	readGrant := mode == "read-grant"
+	const fixtureReadToken = "fixture-native-build-read-token"
 	sha := os.Getenv("MEMQL_PIPELINES_IMAGE_BUILD_TEST_SHA")
 	if sha == "" {
 		t.Skip("set MEMQL_PIPELINES_IMAGE_BUILD_TEST_SHA to a pushed fixture commit")
@@ -105,6 +107,11 @@ func imageBuildAgainstKubernetes(t *testing.T, controls pipelineTestControls) {
 		buildArgs = map[string]string{"PRIVATE_LISTENER": listener + ":8080"}
 	}
 	run.ImageBuild = &pl.ImageBuild{Context: "integrations/pipelinesteps/testdata/image-build", Dockerfile: "integrations/pipelinesteps/testdata/image-build/Dockerfile", Args: buildArgs}
+	if readGrant {
+		run.GitHubReadToken = true
+		run.ImageBuild.Context = "integrations/pipelinesteps/testdata/image-build-read-token"
+		run.ImageBuild.Dockerfile = run.ImageBuild.Context + "/Dockerfile"
+	}
 	run.Image, run.Command, run.ImagePullSecret = "", "", ""
 	run.Platform = os.Getenv("MEMQL_PIPELINES_IMAGE_BUILD_TEST_PLATFORM")
 	run.Caches, run.Services, run.Secrets, run.Needs = nil, nil, nil, nil
@@ -123,6 +130,7 @@ func imageBuildAgainstKubernetes(t *testing.T, controls pipelineTestControls) {
 	kubectl(body, "-n", ns, "create", "-f", "-")
 	created := time.Now()
 	var pod *Pod
+	grantProvided := false
 	for ctx.Err() == nil {
 		pod, err = kube.JobPod(ctx, name)
 		if err != nil {
@@ -132,8 +140,42 @@ func imageBuildAgainstKubernetes(t *testing.T, controls pipelineTestControls) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		if observation := Classify(current, pod, created, time.Now(), cfg, ""); observation.Failure != nil {
-			t.Fatalf("builder cannot run: %s\n%s", observation.Detail, kubectl(nil, "-n", ns, "get", "events", "-o", "wide"))
+		step := podContainer(pod, false, ContainerStep)
+		waitingForReadGrant := readGrant && step != nil && step.State.Waiting != nil &&
+			step.State.Waiting.Reason == "CreateContainerConfigError" &&
+			strings.Contains(step.State.Waiting.Message, SecretName(name)) && strings.Contains(step.State.Waiting.Message, "not found")
+		// Only the intentionally delayed fake Secret is expected. Classify
+		// failed clones and rejected pods before waiting for that handoff.
+		if !waitingForReadGrant {
+			if observation := Classify(current, pod, created, time.Now(), cfg, ""); observation.Failure != nil {
+				t.Fatalf("builder cannot run: %s\n%s", observation.Detail, kubectl(nil, "-n", ns, "get", "events", "-o", "wide"))
+			}
+		}
+		if readGrant && !grantProvided {
+			// Clone public source anonymously, then supply the fake credential
+			// to the builder's required reference. No real credential is used.
+			if clone := podContainer(pod, true, "clone"); clone != nil && clone.State.Terminated != nil && clone.State.Terminated.ExitCode == 0 {
+				secret := BuildSecret(cfg, run, name, fixtureReadToken)
+				body, _ := json.Marshal(secret)
+				kubectl(body, "-n", ns, "create", "-f", "-")
+				grantProvided = true
+			}
+			select {
+			case <-ctx.Done():
+				t.Fatal(ctx.Err())
+			case <-time.After(250 * time.Millisecond):
+			}
+			continue
+		}
+		if waitingForReadGrant {
+			// The fake Secret was just created after clone. Let kubelet
+			// observe it within the test's existing deadline.
+			select {
+			case <-ctx.Done():
+				t.Fatal(ctx.Err())
+			case <-time.After(250 * time.Millisecond):
+			}
+			continue
 		}
 		if state := podContainer(pod, false, ContainerStep); state != nil && state.State.Terminated != nil {
 			if state.State.Terminated.ExitCode != 0 {
@@ -191,6 +233,9 @@ func imageBuildAgainstKubernetes(t *testing.T, controls pipelineTestControls) {
 					t.Fatalf("independent OCI verifier: %v %s", err, verified)
 				}
 				t.Logf("independent OCI verification: %s", verified)
+				if readGrant {
+					verifyImageReadGrant(t, ctx, dest, fixtureReadToken)
+				}
 			}
 		}
 		if err := snapshot.Close(); err != nil {

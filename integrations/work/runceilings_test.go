@@ -439,7 +439,7 @@ func TestApprovedResearchDeadlineSurvivesResumeOnAnotherReplica(t *testing.T) {
 		"classification": map[string]any{"workload": "research"},
 	})
 	rc := aGoalBackedRun()
-	if deadline, err := first.Deadline(context.Background(), rc); err != nil || !deadline.Equal(testNow.Add(45*time.Minute)) {
+	if deadline, err := first.Deadline(context.Background(), rc); err != nil || !deadline.Equal(testNow.Add(2*time.Hour)) {
 		t.Fatalf("research estimate: %v %v", deadline, err)
 	}
 	eng.reply("workGoalForOwner", map[string]any{"id": ceilingGoalId, "ownerUserId": ceilingOwner,

@@ -1386,7 +1386,7 @@ func ComposeCancelBuild(args ComposeCancelArgs) string {
 	return b.String()
 }
 
-// ComposeMaterialize -- Start a Materializer work run using the known materializeFile template. The composition and immutable source snapshot are saved before dispatch. Returns {compositionId, goalId, runId}; progress and the eventual outputFileId arrive on the composition row.
+// ComposeMaterialize -- Create a saved document file in Files from supplied content or a writing request: Markdown, HTML, text, CSV, JSON, DOCX or PDF. Uses the materializeFile template. The composition and immutable source snapshot are saved before dispatch. Returns {compositionId, goalId, runId}; progress and the eventual outputFileId arrive on the composition row.
 type ComposeMaterializeArgs struct {
 	// What to call it, and the filename stem of the output. A name with a slash is refused (folderId chooses where it is filed), and one trailing extension that already names the format is dropped, because the extension is added when the file is filed: Plan.md is filed as Plan.md, never Plan.md.md.
 	Name string
@@ -1884,7 +1884,7 @@ type DecideApprovalArgs struct {
 	ApprovalId string
 	// approved, rejected, or answered (for a feedback question).
 	Decision string
-	// The person's answer. A budget approval may supply {newLimit: number} to raise only its named ceiling above recorded usage before resuming, preserving all other ceilings and spent counters. Count and time limits must be whole numbers.
+	// The person's offered choice or feedback. Progress feedback continues saved work within its original limits; it cannot grant permissions or raise those limits. Older budget requests can only be rejected.
 	Answer map[string]any
 }
 
@@ -4929,6 +4929,108 @@ func PipelinesCancelBuild(args PipelinesCancelArgs) string {
 	return b.String()
 }
 
+// PipelinesChannelAllow -- Allow or revoke one of the caller's channels on one of the caller's pipelines. Preserves every other channel grant and pipeline field. Sends no message. Answers {pipelineId, channelIds}.
+type PipelinesChannelAllowArgs struct {
+	// The caller's pipeline.
+	PipelineId string
+	// The caller's channel name.
+	Name string
+	// True allows notification stages to use this channel; false revokes that permission.
+	Allowed bool
+}
+
+// PipelinesChannelAllow calls the engine builtin pipelinesChannelAllow.
+func (qc *QueryClient) PipelinesChannelAllow(ctx context.Context, args PipelinesChannelAllowArgs) (*Result, error) {
+	call := PipelinesChannelAllowBuild(args)
+	return qc.executeNamed(ctx, "pipelinesChannelAllow", call)
+}
+
+func PipelinesChannelAllowBuild(args PipelinesChannelAllowArgs) string {
+	var b strings.Builder
+	b.WriteString("builtin pipelinesChannelAllow(")
+	b.WriteString("pipelineId: ")
+	b.WriteString(quoteMemQL(args.PipelineId))
+	if b.Len() > 30 {
+		b.WriteString(", ")
+	}
+	b.WriteString("name: ")
+	b.WriteString(quoteMemQL(args.Name))
+	if b.Len() > 30 {
+		b.WriteString(", ")
+	}
+	b.WriteString("allowed: ")
+	b.WriteString(fmt.Sprintf("%v", args.Allowed))
+	b.WriteString(")")
+	return b.String()
+}
+
+// PipelinesChannelArchive -- Archive the caller's channel by name. Later notification stages refuse it. Messages already staged keep their delivery receipts. The channel row and run history remain; pipelinesChannelSave resumes it.
+type PipelinesChannelArchiveArgs struct {
+	// The caller's channel name.
+	Name string
+}
+
+// PipelinesChannelArchive calls the engine builtin pipelinesChannelArchive.
+func (qc *QueryClient) PipelinesChannelArchive(ctx context.Context, args PipelinesChannelArchiveArgs) (*Result, error) {
+	call := PipelinesChannelArchiveBuild(args)
+	return qc.executeNamed(ctx, "pipelinesChannelArchive", call)
+}
+
+func PipelinesChannelArchiveBuild(args PipelinesChannelArchiveArgs) string {
+	var b strings.Builder
+	b.WriteString("builtin pipelinesChannelArchive(")
+	b.WriteString("name: ")
+	b.WriteString(quoteMemQL(args.Name))
+	b.WriteString(")")
+	return b.String()
+}
+
+// PipelinesChannelSave -- Save configuration only; a channel's stable name is what the manifest uses. Pipeline grants are separate so a partial multi-pipeline update cannot be mistaken for an atomic permission change.
+type PipelinesChannelSaveArgs struct {
+	// Lower-case letters, digits and hyphens, starting with a letter or digit; at most 40 characters.
+	Name string
+	// discord or email.
+	Kind string
+	// For Discord: the globalSecret name holding the webhook URL. Never the URL or a name in the MEMQL_ namespace.
+	SecretRef string
+	// For email: 1 to 20 bare email addresses. Empty for Discord.
+	Recipients []string
+}
+
+// PipelinesChannelSave calls the engine builtin pipelinesChannelSave.
+func (qc *QueryClient) PipelinesChannelSave(ctx context.Context, args PipelinesChannelSaveArgs) (*Result, error) {
+	call := PipelinesChannelSaveBuild(args)
+	return qc.executeNamed(ctx, "pipelinesChannelSave", call)
+}
+
+func PipelinesChannelSaveBuild(args PipelinesChannelSaveArgs) string {
+	var b strings.Builder
+	b.WriteString("builtin pipelinesChannelSave(")
+	b.WriteString("name: ")
+	b.WriteString(quoteMemQL(args.Name))
+	if b.Len() > 29 {
+		b.WriteString(", ")
+	}
+	b.WriteString("kind: ")
+	b.WriteString(quoteMemQL(args.Kind))
+	if args.SecretRef != "" {
+		if b.Len() > 29 {
+			b.WriteString(", ")
+		}
+		b.WriteString("secretRef: ")
+		b.WriteString(quoteMemQL(args.SecretRef))
+	}
+	if args.Recipients != nil {
+		if b.Len() > 29 {
+			b.WriteString(", ")
+		}
+		b.WriteString("recipients: ")
+		b.WriteString(renderMemQLValue(args.Recipients))
+	}
+	b.WriteString(")")
+	return b.String()
+}
+
 // PipelinesConnect -- Connect a pipeline to one of the caller's sources (D12, D14). The caller must own the package, which must be a GitHub repository source fetched under a grant; the grant must reach the repository, proved by minting an installation token through it. Reads memql-package.yaml at the repository's default-branch head: a source with no `pipeline:` block is refused with pipeline_not_declared; a block that does not validate, or a step whose need or secret this connection's compute and secretNames do not allow, is refused with its own pipeline_* code; and a repository another source already runs is refused with pipeline_already_connected, so a pipeline that could never compile is never connected. Creates the source's one pipeline -- its id derived from the package id -- or reconnects it, which restates the configuration and keeps what the poll has seen. Answers {pipelineId, repository, delivery, compute, schedule, stages}, with schedule daily or empty and stages naming the block's stages in order.
 type PipelinesConnectArgs struct {
 	// The v1:platform:package source to connect. Must be the caller's own.
@@ -5115,9 +5217,9 @@ func PipelinesRerunBuild(args PipelinesRerunArgs) string {
 	return b.String()
 }
 
-// PipelinesRunLatest -- Start a full manual rehearsal of a branch head for one of the caller's disconnected pipelines: the branch named, or the repository's default branch when none is. Automatic delivery must be disconnected so this run cannot duplicate a webhook or poll. The source owner's GitHub grant reads the branch, the exact SHA is pinned in the run, and the run writes its check run on that commit. A name GitHub would not accept is refused pipeline_branch_invalid before GitHub is asked. The sealed workflow includes stages with no `on` list and stages explicitly marked `on: [manual]`; it does not treat manual as push or release, so future publication steps remain opted out. Repeated requests for the same head resolve to the existing attempt, whichever branch named it; re-run that attempt to start another.
+// PipelinesRunLatest -- Start a full manual rehearsal of a branch head for one of the caller's pipelines: the branch named, or the repository's default branch when none is. Automatic delivery remains as configured. The manual run has its own deduplicated event key and a separate check context that cannot satisfy a required PR or merge-candidate check. The source owner's GitHub grant reads the branch, the exact SHA is pinned in the run, and the run writes its check run on that commit. A name GitHub would not accept is refused pipeline_branch_invalid before GitHub is asked. The sealed workflow includes stages with no `on` list and stages explicitly marked `on: [manual]`; it does not treat manual as push or release, so future publication steps remain opted out. Repeated requests for the same head resolve to the existing attempt, whichever branch named it; re-run that attempt to start another.
 type PipelinesRunLatestArgs struct {
-	// The caller's v1:pipelines:pipeline. It must be disconnected.
+	// The caller's v1:pipelines:pipeline.
 	PipelineId string
 	// A branch of the same repository, named as GitHub shows it (main, feature/login). Absent or empty runs the default branch.
 	Branch string

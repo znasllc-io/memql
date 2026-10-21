@@ -4,4 +4,4 @@ module github.com/znasllc-io/memql/component/language/dslclause
 
 go 1.26.1
 
-toolchain go1.27.2
+toolchain go1.27.3

@@ -36,6 +36,7 @@ import { shopifyMessage } from "../../modules/connections/shopifyReply";
 import { useSites } from "./useSites";
 import { usePipelineRuns, usePipelines } from "./pipelines/feeds";
 import { pipelineFromRow, runFromRow, type PipelineRow, type RunRow } from "./pipelines/rows";
+import { PipelineChannelsSettings } from "./pipelines/ChannelsSettings";
 import { RunsSection } from "./pipelines/RunsSection";
 import { useConnectFlow } from "./pipelines/connect/useConnectFlow";
 
@@ -341,7 +342,8 @@ function DeployablesAppContent({
 
   const settingsContent = (
     <ConnectionsPanel appId="deployables" initialProvider={connectionProvider} intent={connectionsIntent} consumeIntent={() => setConnectionsIntent(undefined)}
-      connectResult={connectResult?.section === "settings" ? connectResult : null} />
+      connectResult={connectResult?.section === "settings" ? connectResult : null}
+      additionalSections={can.channels ? [{ id: "channels", name: "Channels", render: (active, header) => <PipelineChannelsSettings header={header} active={active} pipelines={pipelineRows} pipelinesReady={pipelines?.snapshot.state === "live" && !pipelines.snapshot.error} refreshPipelines={reseedPipelines} /> }] : []} />
   );
   // The app's slice of the cluster's logs (epic memql#4895). It survived the
   // compose restructure while Sites, Packages and Actions did not, and the

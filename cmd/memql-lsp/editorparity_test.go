@@ -157,7 +157,7 @@ func editorParity(in editorParityInput) []string {
 	if !versionOK {
 		problems = append(problems, fmt.Sprintf(
 			"editors/vscode/package.json has \"version\": %q, which is not a MAJOR.MINOR.PATCH release; "+
-				"the publish lane tags it as memql-vscode-v<version>, so write it as one.", in.Manifest.Version))
+				"native release archives require an exact component version.", in.Manifest.Version))
 	}
 	if releaseOK && versionOK && compareExtensionReleases(releaseParts, versionParts) > 0 {
 		problems = append(problems, fmt.Sprintf(

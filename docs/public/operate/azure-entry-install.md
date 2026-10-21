@@ -551,13 +551,12 @@ repo-credential writes, and the Argo source switch are owner-gated.
   `os-front-door` Ingress; with that fix in the engine tag the instance
   composes, it becomes generated content and the cluster copy is
   overwritten on sync.
-- **Pins today are a human loop:** tag `vX.Y.Z` on `main`, dispatch
-  `build-engine-images.yml` with `version=X.Y.Z` (it pushes the same image
-  to ACR and to `ghcr.io/znasllc-io/memql-<node>:X.Y.Z`), edit
-  `overlays/cloud-entry/kustomization.yaml`, land the PR through the merge
-  queue, retarget the Application to the new `main` SHA, sync.
-  `dispatch-engine-images-on-release.yml` fires only on a PUBLISHED GitHub
-  Release, and tags are not published as releases, so it never fires today.
+- **Release pins are reviewed:** publish the GitHub Release for the reviewed
+  `vX.Y.Z` source commit, wait for the native MemQL release pipeline to build
+  and publish every engine image, then pin the verified digests in the
+  instance overlay. Land the PR through the merge queue and let ArgoCD sync.
+  A bare tag does not start a build; use **Run release** in MemQL Pipelines
+  to recover a missing release delivery.
 
 ### The target shape
 
@@ -716,38 +715,27 @@ kubectl -n argocd replace -f capture/memql-app.before.yaml && argocd app sync me
 kubectl -n argocd replace -f capture/appproject.before.yaml ; kubectl -n argocd delete secret repo-instance
 ```
 
-### The twice-daily entry pin loop (sketch)
+### Native release updates
 
-`.github/workflows/pin-entry.yml` in the instance repo, `schedule: cron
-'0 */12 * * *'` plus `workflow_dispatch`, with the default policy "latest
-engine release TAG" -- a no-op until a human cuts a tag, so "twice daily"
-means "within 12 hours of a cut":
+The instance's native `engine-proposal` stages run weekly or on demand. They
+read the latest published engine release and open a bounded draft PR proposing
+its `ENGINE_REF`. That proposal does not deploy: the maintainer must pin the
+complete verified image set and matching docs release before merging it.
 
-1. `git ls-remote --tags https://github.com/znasllc-io/memql.git` -> the
-   newest `vX.Y.Z`.
-2. For each of the six pinned nodes,
-   `docker buildx imagetools inspect ghcr.io/znasllc-io/memql-<node>:X.Y.Z`
-   -> digest. Abort if any node lacks the tag (the images are not built
-   yet; never half-pin).
-3. Rewrite `?ref=vX.Y.Z` and the six `digest:` lines in
-   `deploy/k8s/overlays/<instance>/kustomization.yaml`; render. A render
-   failure -- typically a patch target the new engine tag renamed -- means
-   do not commit; an unchanged render is a no-op.
-4. One-file commit: a PR with auto-merge, or direct to `main` -- the
-   owner's call. With automated sync on the Application, Argo rolls within
-   its refresh interval.
-5. Post-roll gate (a `workflow_run` after the merge, or a second cron 30
-   minutes later): `/healthz` on `identity.`, `api.` and `os.`,
-   `verify-frontdoor.sh --hosts api.$MEMQL_DOMAIN,identity.$MEMQL_DOMAIN`,
-   and, once the SDK exposes it, ServerHello `engine_version == X.Y.Z`.
-   Failure opens an issue; rollback is `git revert` of the pin commit plus
-   a sync.
+1. Build the engine tag through MemQL Pipelines and publish its verified release
+   candidate. Every required image must have a successful publication receipt.
+2. In the instance PR, update the engine version, complete digest pins, docs
+   lockfile and any changed product bundle or client digest as one coherent
+   release. Render the overlay and run its native checks.
+3. Merge the reviewed PR. ArgoCD reconciles the approved overlay through the
+   existing Application; never push the pin directly to main.
+4. Verify rollout health and the served public resources through the native
+   verification path. If the rollout fails, revert the approved pin change
+   through a PR and reconcile the previous verified image set.
 
-"Never auto-apply top" is structural, not a policy: the workflow edits one
-file in the instance repo and has no path to `overlays/cloud`. The
-engine-side process fix is the owner's: publish a GitHub Release for each
-tag, so `dispatch-engine-images-on-release.yml` builds images without a
-manual dispatch.
+See [release candidates](release-candidates.md) and the
+[deployment runbook](deploy-bundle-runbook.md). The update proposal contains no
+cluster credentials and cannot merge or deploy itself.
 
 ## What is not this page
 

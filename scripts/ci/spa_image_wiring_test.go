@@ -47,8 +47,6 @@ import (
 	"sort"
 	"strings"
 	"testing"
-
-	"gopkg.in/yaml.v3"
 )
 
 // The stage names the three files must agree on. Changing them is fine;
@@ -185,87 +183,30 @@ func TestLocalEdgeBuildSelectsTheSpaStage(t *testing.T) {
 // pull-request lane exercises, so a static assertion is the only signal
 // before staging.
 func TestReleaseBuildSelectsTheSpaStageOnlyForTheEdge(t *testing.T) {
-	raw := readRepoFile(t, ".github/workflows/build-engine-images.yml")
-
-	var doc struct {
-		Jobs map[string]struct {
-			Strategy struct {
-				Matrix struct {
-					Include []map[string]string `yaml:"include"`
-				} `yaml:"matrix"`
-			} `yaml:"strategy"`
-			Steps []struct {
-				With map[string]string `yaml:"with"`
-			} `yaml:"steps"`
-		} `yaml:"jobs"`
-	}
-	if err := yaml.Unmarshal([]byte(raw), &doc); err != nil {
-		t.Fatalf("parse build-engine-images.yml: %v", err)
-	}
-
-	job, ok := doc.Jobs["build"]
-	if !ok {
-		t.Fatal("no `build` job in build-engine-images.yml; retarget this guard rather " +
-			"than deleting it")
-	}
-	if len(job.Strategy.Matrix.Include) == 0 {
-		t.Fatal("the build job declares an empty matrix; this guard cannot pass vacuously")
-	}
-
-	// The build step has to FORWARD the matrix value, or the per-entry
-	// declarations below are decoration.
-	forwarded := false
-	for _, step := range job.Steps {
-		if strings.Contains(step.With["build-args"], spaDistStageArg+"=") {
-			forwarded = true
-		}
-	}
-	if !forwarded {
-		t.Errorf("no build step passes %s as a build-arg, so the matrix entries below are "+
-			"never read and every image uses the Dockerfile default (no bundle)",
-			spaDistStageArg)
-	}
-
+	count := 0
 	sawEdge := false
-	for _, entry := range job.Strategy.Matrix.Include {
-		node, spa := entry["node"], entry["spa"]
-		// An absent key renders as the empty string in `FROM ${VAR}`, which is
-		// not a valid image reference -- the build fails rather than silently
-		// skipping the bundle, but it fails for every node at once and reads
-		// as a Dockerfile bug. Require the key explicitly.
-		if spa == "" {
-			t.Errorf("matrix entry %q declares no `spa:` stage. `FROM ${%s}` cannot take "+
-				"an empty value, so this breaks the release build for that node type.",
-				node, spaDistStageArg)
+	for _, stage := range nativePipeline(t).Stages {
+		if stage.Name != "images" {
 			continue
 		}
-		if node == "edge" {
-			sawEdge = true
-			if spa != spaBuildStage {
-				t.Errorf("the edge matrix entry selects SPA stage %q, want %q. The edge is "+
-					"the node that serves the OS shell (memql#4705); any other value "+
-					"ships an image with no bundle to staging and production.",
-					spa, spaBuildStage)
+		for _, step := range stage.Steps {
+			build := step.ImageBuild
+			if build == nil {
+				t.Fatalf("%s is not an image build", step.Name)
 			}
-			continue
-		}
-		if spa != spaSkipStage {
-			t.Errorf("matrix entry %q selects SPA stage %q. Only the edge serves the "+
-				"shell, so every other node type -- the bff included, since it stopped "+
-				"serving one in memql#3711 -- must take %q, otherwise its image build "+
-				"pulls a Node toolchain and compiles an SPA it never serves.",
-				node, spa, spaSkipStage)
+			count++
+			want := spaSkipStage
+			if step.Name == "edge" {
+				sawEdge = true
+				want = spaBuildStage
+			}
+			if build.Args[spaDistStageArg] != want {
+				t.Errorf("%s selects SPA stage %q, want %q", step.Name, build.Args[spaDistStageArg], want)
+			}
 		}
 	}
-	// The release matrix MUST carry an `edge` entry (memql#3714): without one,
-	// staging and production run every node type EXCEPT the one that serves
-	// the shell, and nothing above would catch its quiet disappearance --
-	// the loop just would not have anything to check.
-	if !sawEdge {
-		t.Error("the release matrix declares no `edge` entry. The edge is the node that " +
-			"serves the OS shell (memql#4705) and cloud images must come from " +
-			"the build server (CLAUDE.md); without this entry the edge cannot be deployed " +
-			"above local.")
+	if count == 0 || !sawEdge {
+		t.Fatal("native release lacks its edge image")
 	}
 }
 

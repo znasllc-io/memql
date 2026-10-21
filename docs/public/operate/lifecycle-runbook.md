@@ -13,7 +13,7 @@ Operational reference for the MemQL node lifecycle introduced by the
 resilient-mesh epic (znasllc-io/memql#1259, Phase 3). It covers the explicit
 node state machine, the graceful SIGTERM drain, the operator on-demand
 maintenance trigger, the coordinated/ordered rollout driver, and the
-green-before-deploy parity gate that gates every roll.
+verification required before and after a rollout.
 
 This is the *lifecycle* companion to the cluster/secrets/promotion reference in
 [`deploy-bundle-runbook.md`](./deploy-bundle-runbook.md) (topology, secret
@@ -201,47 +201,33 @@ Both are synthetic-event tests (no AI provider keys): the streamed turn drives a
 sequence of rows whose ids encode their order, so ordering is observable
 without a live LLM.
 
-**It gates the DEPLOY path, not the PR merge queue.** A full-cluster boot (~14
-containers, a cold-cache multi-image build, a 10m health wait) is heavy and
-flakier than a unit lane; a required check on `pull_request` would let one slow
-boot wedge the merge queue. So the workflow runs on the **deploy
-trigger** (an overlay-digest bump landing in the deploy repo) and on
-`workflow_dispatch`, and its result is the green-before-deploy signal
-— **not** a branch-protection required check on PRs (`ci-required` in `ci.yml`
-stays the only required PR check in this repo).
+The native `checks.build-clustere2e` step compiles and vets these test binaries
+for the default and agent build tags. That proves the fixtures build; it does
+not claim a live cross-replica pass. A live cluster test requires the configured
+cluster and its actual test output. Missing credentials, an unavailable cluster
+or a skipped test cannot qualify a deployment.
 
-### Owner prerequisite — secrets
+The separate native installer lifecycle fixtures run weekly or on demand on a
+consenting Linux Docker host. They own their disposable Docker/k3d resources
+and retain cleanup evidence. They do not operate the user's existing cluster.
+See [pipeline substrate](pipelines-substrate.md) for placement and limits.
 
-The parity cluster runs product-agnostic engine images (built in this repo, no
-carrier build), then layers the product's runtime DSL bundle and its client SPA
-from the product's **private repos**, so the gate needs two owner-provisioned
-secrets. Until they exist, the gate **skips cleanly** (a visible `secrets
-present?` → skip) and never spuriously blocks:
+## 6. Release and rollout verification
 
-| Secret | Scope | Used for |
-|---|---|---|
-| `SIBLING_CHECKOUT_TOKEN` | read on the product's bundle + client repos | `actions/checkout` of the product's private repos into the workspace. |
-| `MEMQL_PACKAGES_TOKEN` | `read:packages` (both scopes) | the product SPA image build (the `node_auth_token` compose build secret). |
+1. Build and test the exact release tag with MemQL Pipelines. Review the retained
+   candidate and publish its verified artifacts through the approved release
+   flow. A green compile check alone is insufficient live-cluster evidence.
+2. Pin the coherent engine, bundle and client digests in an instance PR and
+   require its native checks before merge.
+3. Before rolling the Agent or Workbench services, stop new pipeline delivery
+   and let complete runs finish. An empty Job list alone does not prove that a
+   multi-stage run has finished. Preserve the original connection settings.
+4. Reconcile the approved instance revision with ArgoCD, keeping public endpoint
+   probes active during the rollout. Verify readiness, expected image digests
+   and the actual resources served by the public hosts.
+5. Restore pipeline delivery, reconcile missed candidates, and check native
+   verification receipts. Remove only temporary resources owned by the rollout.
 
----
-
-## 6. Owner-finalization checklist (Phase 4 closeout)
-
-The remaining steps below are **owner actions** — they cannot be done from CI/a
-PR (secrets + a live deploy):
-
-1. **Provision the two secrets** (`SIBLING_CHECKOUT_TOKEN`, `MEMQL_PACKAGES_TOKEN`)
-   as repo/org Actions secrets. The `cluster-e2e` gate's `secrets present?` job
-   then flips to running the parity boot.
-2. **Verify the gate is green** — run `cluster-e2e` via `workflow_dispatch` (or
-   bump the overlay digest pins) and confirm the cross-replica delivery gate
-   passes on current `main` (it should, post-#1264).
-3. **Flip it to a required deploy gate** — wire `cluster-e2e / gate` as a required
-   status on the deploy/promotion path (the overlay-digest-pin/promote step), so a
-   red parity gate blocks the roll. Keep it **off** the PR-merge-queue
-   required set.
-4. **Final coherent roll** — cut + deploy the whole-epic release per
-   [`deploy-bundle-runbook.md`](./deploy-bundle-runbook.md) (deep smoke, pin the
-   overlay's `{engine, bundle, client}` digests, then merge), and verify the
-   resilient-mesh stack on the cluster (no drop / no
-   dup across replicas; clean drains on the roll).
+Follow [release candidates](release-candidates.md) for the artifact and
+GitOps contract. Credentials for native jobs and publication are scoped through
+MemQL; the rollout does not require repository Actions secrets.

@@ -19,13 +19,19 @@ import (
 
 // fakeCheckGH answers the two gh calls the script makes.
 //
-//	FAKE_TAGS        newline-separated tag names `gh api .../tags` returns
+//	FAKE_RELEASES    published stable tags returned by the release listing
 //	FAKE_ASSETS      newline-separated asset names of the release
-//	FAKE_NO_RELEASE  non-empty: `gh release view` fails, as for a tag with no Release
+//	FAKE_NO_RELEASE  non-empty: the listed release is no longer readable
 const fakeCheckGH = `#!/usr/bin/env bash
 printf 'gh %s\n' "$*" >> "$FAKE_LOG"
 case "$1" in
-  api) printf '%s\n' "$FAKE_TAGS"; exit 0 ;;
+  api)
+    case "$2" in
+      */releases) printf '%s\n' "$FAKE_RELEASES" ;;
+      */tags) printf '%s\n' "${FAKE_TAGS:-$FAKE_RELEASES}" ;;
+      *) exit 91 ;;
+    esac
+    exit 0 ;;
   release)
     if [[ -n "${FAKE_NO_RELEASE:-}" ]]; then echo "release not found" >&2; exit 1; fi
     if [[ -n "$FAKE_ASSETS" ]]; then printf '%s\n' "$FAKE_ASSETS"; fi
@@ -122,12 +128,12 @@ func execCheck(t *testing.T, bash, path, bin string, fakeEnv map[string]string, 
 	return r
 }
 
-// currentFakes is the all-green state for the newest tag v0.23.5.
+// currentFakes is the all-green state for the newest published release v0.23.5.
 func currentFakes() map[string]string {
 	return map[string]string{
-		"FAKE_TAGS":   "v0.23.5\nv0.23.4\nv0.22.12",
-		"FAKE_ASSETS": "docs-0.23.5.tgz\nsbom.spdx.json",
-		"FAKE_PAGE":   metaPage("0.23.5"),
+		"FAKE_RELEASES": "v0.23.5\nv0.23.4\nv0.22.12",
+		"FAKE_ASSETS":   "docs-0.23.5.tgz\nsbom.spdx.json",
+		"FAKE_PAGE":     metaPage("0.23.5"),
 	}
 }
 
@@ -139,7 +145,8 @@ func TestCurrentCheckPublicReadsPreserveMissingReleaseFailure(t *testing.T) {
 			writeFile(t, filepath.Join(bin, "python3"), `#!/usr/bin/env bash
 printf 'public %s\n' "$*" >> "$FAKE_LOG"
 case "$2" in
-  tags) printf '%s\n' "$FAKE_TAGS" ;;
+  published-releases) printf '%s\n' "$FAKE_RELEASES" ;;
+  tags) printf '%s\n' "${FAKE_TAGS:-$FAKE_RELEASES}" ;;
   release-assets)
     [[ -z "${FAKE_NO_RELEASE:-}" ]] || exit 2
     printf '%s\n' "$FAKE_ASSETS" ;;
@@ -148,6 +155,7 @@ esac
 `, 0o755)
 			writeFile(t, filepath.Join(bin, "gh"), "#!/bin/sh\nexit 99\n", 0o755)
 			fakes := currentFakes()
+			fakes["FAKE_TAGS"] = "v9.0.0\nv0.23.5"
 			if missing {
 				fakes["FAKE_NO_RELEASE"] = "1"
 			}
@@ -156,6 +164,8 @@ esac
 				assertNotCurrent(t, r, "no readable GitHub Release")
 			} else if r.code != 0 {
 				t.Fatalf("public read failed: %s", r.stderr)
+			} else if _, result, _ := r.envelope(t); result["tag"] != "v0.23.5" {
+				t.Fatalf("unpublished candidate displaced published docs: %s", r.stdout)
 			}
 			if !strings.Contains(strings.Join(r.log, "\n"), "public ") {
 				t.Fatal("public reader was not called")
@@ -204,9 +214,9 @@ func TestCurrentCheckFailsOnAReleaseWithNoAssetsAtAll(t *testing.T) {
 	assertNotCurrent(t, r, "no docs-0.23.5.tgz asset")
 }
 
-// TestCurrentCheckFailsWhenTheTagHasNoRelease: a tag with no Release fired no
-// workflow, so it has no bundle.
-func TestCurrentCheckFailsWhenTheTagHasNoRelease(t *testing.T) {
+// A published release can disappear between listing it and reading its assets.
+// That race must fail, rather than use an older release or assume success.
+func TestCurrentCheckFailsWhenPublishedReleaseDisappears(t *testing.T) {
 	fakes := currentFakes()
 	fakes["FAKE_NO_RELEASE"] = "1"
 	r := runCheck(t, fakes, "--repo=acme/widget")
@@ -288,7 +298,7 @@ func TestCurrentCheckPassesWhenCurrent(t *testing.T) {
 // would check the docs of a release nobody is on.
 func TestCurrentCheckPicksTheNumericNewestReleaseTag(t *testing.T) {
 	fakes := map[string]string{
-		"FAKE_TAGS": strings.Join([]string{
+		"FAKE_RELEASES": strings.Join([]string{
 			"v0.9.2", "v0.17.0", "memql-sdk-core-v0.40.0", "component/bus/gen/v0.99.0",
 			"0.14.0", "v0.18.0-rc1", "v0.17.0-backup", "nightly", "v0.16.9",
 		}, "\n"),
@@ -368,4 +378,26 @@ func TestCurrentCheckRefusesABadRepo(t *testing.T) {
 	if len(r.log) != 0 {
 		t.Errorf("a bad parameter still reached the network: %v", r.log)
 	}
+}
+
+// A native candidate reserves an immutable tag before approval/publication.
+// That tag must not make correctly published documentation appear stale.
+func TestCurrentCheckIgnoresUnpublishedCandidateTags(t *testing.T) {
+	fakes := currentFakes()
+	fakes["FAKE_TAGS"] = "v9.0.0\nv0.23.5"
+	r := runCheck(t, fakes, "--repo=acme/widget")
+	if r.code != 0 {
+		t.Fatalf("unpublished candidate displaced published docs: %s", r.stderr)
+	}
+	_, result, _ := r.envelope(t)
+	if result["tag"] != "v0.23.5" {
+		t.Fatalf("wrong published release: %s", r.stdout)
+	}
+}
+
+func TestCurrentCheckFailsWithoutPublishedStableReleases(t *testing.T) {
+	fakes := currentFakes()
+	fakes["FAKE_RELEASES"] = "nightly\nv0.24.0-rc1"
+	r := runCheck(t, fakes, "--repo=acme/widget")
+	assertNotCurrent(t, r, "no published stable vX.Y.Z release")
 }

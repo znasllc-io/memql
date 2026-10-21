@@ -1,6 +1,7 @@
 package main
 
 import (
+	"strings"
 	"testing"
 
 	"github.com/znasllc-io/memql/integrations/customdomain"
@@ -24,5 +25,23 @@ func TestTheErrorPagesNamesMatchWhatTheEngineStampsOnCustomDomains(t *testing.T)
 	if errorPagesService != customdomain.ErrorPagesServiceName {
 		t.Errorf("the generator names the Service %q, the engine names it %q on custom domains",
 			errorPagesService, customdomain.ErrorPagesServiceName)
+	}
+}
+
+// Long-lived streams carry many individually bounded messages. A finite
+// HTTP body limit eventually resets every healthy stream as bytes accumulate.
+func TestGRPCStreamsDoNotInheritAnAggregateBodyLimit(t *testing.T) {
+	grpc := apiGRPCIngress("example.test")
+	if !strings.Contains(grpc, `nginx.ingress.kubernetes.io/proxy-body-size: "0"`) {
+		t.Fatal("gRPC ingress must disable cumulative HTTP body limits")
+	}
+	for _, route := range []string{"agent", "bff"} {
+		if !strings.Contains(grpc, "name: "+route) {
+			t.Fatalf("missing %s stream route", route)
+		}
+	}
+	http := apiIngress("example.test", "")
+	if !strings.Contains(http, `nginx.ingress.kubernetes.io/proxy-body-size: "48m"`) {
+		t.Fatal("HTTP uploads must retain their separate bounded body limit")
 	}
 }

@@ -30,6 +30,18 @@ func draftRecordTargets(plan candidateDraftPlan) []string {
 }
 
 func (l *candidateLedger) draftTransaction(ctx context.Context, candidateID, approvalID string) (*sql.Tx, string, error) {
+	tx, owner, err := l.draftHistoryTransaction(ctx, candidateID, approvalID)
+	if err != nil {
+		return nil, "", err
+	}
+	if err := requireCurrentCandidate(ctx, tx, candidateID); err != nil {
+		_ = tx.Rollback()
+		return nil, "", err
+	}
+	return tx, owner, nil
+}
+
+func (l *candidateLedger) draftHistoryTransaction(ctx context.Context, candidateID, approvalID string) (*sql.Tx, string, error) {
 	owner, err := candidateOwner(ctx)
 	if err != nil {
 		return nil, "", err

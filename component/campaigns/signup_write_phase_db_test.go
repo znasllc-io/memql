@@ -15,7 +15,9 @@ import (
 func TestSignupWritePhaseDB(t *testing.T) {
 	f := newDigestFixture(t)
 	f.run(t, "ASignupWriteThatOutlastsItsPhaseCommitsUnderItsLocks", f.TestASignupWriteThatOutlastsItsPhaseCommitsUnderItsLocks)
+	f.run(t, "ARecipientWriteThatOutlastsItsPhaseCanBeRetriedWithoutDuplicates", f.TestARecipientWriteThatOutlastsItsPhaseCanBeRetriedWithoutDuplicates)
 	f.run(t, "ASignupWhoseVisitorLeavesDuringAWriteKeepsItsLocksUntilItCommits", f.TestASignupWhoseVisitorLeavesDuringAWriteKeepsItsLocksUntilItCommits)
+	f.run(t, "ASignupInterruptedDuringEnrollmentResumesOnAnotherReplica", f.TestASignupInterruptedDuringEnrollmentResumesOnAnotherReplica)
 	f.run(t, "AWelcomeWhoseDrainStopsDuringItsVerdictKeepsItsLocksUntilItCommits", f.TestAWelcomeWhoseDrainStopsDuringItsVerdictKeepsItsLocksUntilItCommits)
 }
 
@@ -135,6 +137,57 @@ func (f *digestFixture) TestASignupWriteThatOutlastsItsPhaseCommitsUnderItsLocks
 	}
 }
 
+// The phase can also end during the recipient write: consent and membership
+// have committed under the lock, but the final signup has not. A retry must use
+// those exact rows and finish the signup even when this member filled the cap.
+func (f *digestFixture) TestARecipientWriteThatOutlastsItsPhaseCanBeRetriedWithoutDuplicates(t *testing.T) {
+	n := f.newEmptyNewsletter(t, "recipient-phase-straddle")
+	n.worker.cfg.MaxAudience = 1
+	actual := n.worker.store.engine
+	engine := &straddlingWrite{Engine: actual, prefix: "mutation addRecipient", delay: 3 * time.Second, locked: n.audienceLockHeld(t)}
+	n.worker.store.engine = engine
+	defer func() { n.worker.store.engine = actual }()
+	limit := signupLockedPhase
+	signupLockedPhase = 2 * time.Second
+	defer func() { signupLockedPhase = limit }()
+	n.args["email"] = consentMailbox
+	_, err := n.worker.handleSubscribe(n.owner, n.args, 0)
+	engine.wg.Wait()
+	engine.mu.Lock()
+	held := append([]bool(nil), engine.held...)
+	engine.mu.Unlock()
+	if len(held) != 1 || !held[0] {
+		t.Fatalf("recipient commits held the audience lock: %v, want [true]", held)
+	}
+	if !errors.Is(err, signupsBusy) {
+		t.Fatalf("signup interrupted after membership: %v, want retryable busy", err)
+	}
+	consent := n.consentRow(t)
+	before := n.roster(t)
+	if consent == nil || len(before) != 1 || n.signupRow(t) != nil {
+		t.Fatalf("expected consent and one member, with no final signup: consent=%t members=%d signup=%t", consent != nil, len(before), n.signupRow(t) != nil)
+	}
+	versions, _ := versionsOf(t, n.db, before[0].ID)
+	n.worker.store.engine = actual
+	signupLockedPhase = limit
+	// A retry can reach another replica with its own engine and result cache.
+	replica := n.replica(t)
+	replica.cfg.MaxAudience = 1
+	if _, err := replica.handleSubscribe(n.owner, n.args, 0); err != nil {
+		t.Fatalf("retry of the member that filled the audience: %v", err)
+	}
+	after := n.roster(t)
+	if len(after) != 1 || after[0].ID != before[0].ID || n.signupRow(t) == nil {
+		t.Fatalf("retry did not finish the same membership: members=%d signup=%t", len(after), n.signupRow(t) != nil)
+	}
+	if next, _ := versionsOf(t, n.db, before[0].ID); next != versions {
+		t.Errorf("retry rewrote membership: versions %d -> %d", versions, next)
+	}
+	if next := n.consentRow(t); next == nil || !templateTime(next["occurredAt"]).Equal(templateTime(consent["occurredAt"])) {
+		t.Error("retry replaced the original consent grant")
+	}
+}
+
 // TestASignupWhoseVisitorLeavesDuringAWriteKeepsItsLocksUntilItCommits: the
 // request ends while the consent is being written. The locks stay held until the
 // write has committed -- the gate's transaction is not the request's -- and
@@ -169,9 +222,54 @@ func (f *digestFixture) TestASignupWhoseVisitorLeavesDuringAWriteKeepsItsLocksUn
 	}
 }
 
-// TestAWelcomeWhoseDrainStopsDuringItsVerdictKeepsItsLocksUntilItCommits: the
-// same for a welcome. The worker stops while the welcome's verdict is being
-// written; the locks stay held until it commits, and the welcome is sent.
+// A membership admitted before cancellation may commit without the final signup
+// row. Consent precedes it; a retry must finish from those durable rows without
+// adding a second member or renewing consent, even on a different replica.
+func (f *digestFixture) TestASignupInterruptedDuringEnrollmentResumesOnAnotherReplica(t *testing.T) {
+	n := f.newEmptyNewsletter(t, "enrollment-interrupted")
+	request, leave := context.WithCancel(n.owner)
+	defer leave()
+	actual := n.worker.store.engine
+	engine := &straddlingWrite{Engine: actual, prefix: "mutation addRecipient", locked: n.audienceLockHeld(t), during: leave}
+	n.worker.store.engine = engine
+	defer func() { n.worker.store.engine = actual }()
+	n.args["email"] = consentMailbox
+	_, err := n.worker.handleSubscribe(request, n.args, 0)
+	engine.wg.Wait()
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("interrupted enrollment returned %v, want cancellation", err)
+	}
+	if len(engine.held) != 1 || !engine.held[0] {
+		t.Fatal("the admitted membership write did not commit under its lock")
+	}
+	consent, roster := n.consentRow(t), n.roster(t)
+	if consent == nil || len(roster) != 1 || n.signupRow(t) != nil {
+		t.Fatalf("want consent and one member, with signup still unfinished: consent=%v members=%d signup=%v", consent != nil, len(roster), n.signupRow(t) != nil)
+	}
+
+	// The next request has a different engine/cache and only the durable rows.
+	replica, _ := digestDBEngine(t)
+	worker := NewWorker(deliveryDBEngine{replica}, nil, n.worker.resolve, quietLogger(), gatePoolFor(t))
+	worker.cfg = n.worker.cfg
+	if _, err := worker.handleSubscribe(n.owner, n.args, 0); err != nil {
+		t.Fatalf("resume on another replica: %v", err)
+	}
+	if _, err := worker.handleSubscribe(n.owner, n.args, 0); err != nil {
+		t.Fatalf("replay completed signup: %v", err)
+	}
+	if got := n.roster(t); len(got) != 1 || got[0].ID != roster[0].ID {
+		t.Fatalf("resume changed membership: %+v", got)
+	}
+	if n.signupRow(t) == nil {
+		t.Fatal("resume did not complete the signup")
+	}
+	if got := n.consentRow(t); !templateTime(got["occurredAt"]).Equal(templateTime(consent["occurredAt"])) {
+		t.Fatal("resume replaced the original consent grant")
+	}
+}
+
+// The worker stops while the welcome's verdict is being written; the locks stay
+// held until it commits, and the welcome is sent.
 func (f *digestFixture) TestAWelcomeWhoseDrainStopsDuringItsVerdictKeepsItsLocksUntilItCommits(t *testing.T) {
 	n := f.newEmptyNewsletter(t, "welcome-stopped")
 	signup := pendingWelcome(t, n)

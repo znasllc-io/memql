@@ -175,12 +175,19 @@ automation defaultWorkSpine {
   }
  }
  triage := builtin spineClassify(timeoutSeconds: 600)
+ // Capability-created artifacts include generation, storage and verification,
+ // not just discovering the operation. Use the existing sustained-work allowance;
+ // native admission still intersects it with every explicit goal ceiling.
+ sustainedArtifact := logic workSpineSustainedArtifact(triage: triage)
+ if sustainedArtifact {
+  builtin spineSetWorkload(workload: "research")
+ }
  // File delivery includes source assessment and composition beyond a direct reply.
- if triage.conversational && triage.requiresFile && triage.workload == "quick" {
+ if triage.conversational && triage.requiresFile && !triage.capabilityFile && triage.workload == "quick" {
   builtin spineSetWorkload(workload: "lookup")
  }
  // Missing evidence still needs tools or a durable clarification, even for a short reply.
- if triage.conversational && triage.requiresResearch && triage.workload == "quick" {
+ if triage.conversational && triage.requiresResearch && !triage.capabilityFile && triage.workload == "quick" {
   builtin spineSetWorkload(workload: "lookup")
  }
  if triage.conversational && (triage.workload != "quick" || triage.intent != "reply" || triage.requiresResearch) && triage.acknowledgement == "" {
@@ -269,7 +276,7 @@ automation workSpineDraftProgram {
    builtin spineDraftAppend(kind: "research", inputHeading: inputHeading, instruction: facts.goal + "\nGather the evidence required for this deliverable using authorized capabilities. Preserve source references, uncertainties and the complete draft. Do not save the final file: the next step renders it from your result.")
   }
   if facts.file && facts.conversational { builtin spineDraftAppend(kind: "fileEvidence", instruction: facts.goal, inputHeading: inputHeading) }
-  evidence := facts.research && !facts.file ? "\n\nThis request may require evidence beyond the supplied context. First inspect recorded source receipts in the conversation and reuse those that are sufficiently fresh and relevant. Retrieve only facts still missing from authorized sources before claiming completion; background knowledge alone does not establish this answer. For changing facts, assess the source observation time and scope, retain its timestamp and reference, and refresh only when the existing evidence is insufficient. A new turn or the words right now alone do not require repeating a completed lookup. If an input is missing, first check relevant authorized context. Ask through requestUserFeedback or respondToUser status=needs_input, with optional=true when useful work can continue without the answer. Do not replace a structured question with an invitation to tell you later in a completed reply. If a source fails, try a bounded alternative and report the actual unresolved gap." : ""
+  evidence := facts.research && !facts.file ? "\n\nThis request needs a factual lookup. First inspect recorded source receipts and reuse those that are sufficiently fresh and relevant. Before fetching observations for a named entity, use a source that accepts its name or resolve the source's required identifier from a named record. Do not substitute remembered coordinates, account IDs, product codes, station IDs or symbols. Preserve the identity mapping with the dependent observations. A result for a different or unverified entity is unfinished work: check the missing mapping before answering. Retrieve only facts still missing from authorized sources; background knowledge alone does not establish them. For changing facts, assess the source observation time and scope, retain its timestamp and reference, and refresh only when the existing evidence is insufficient. A new turn or the words right now alone do not require repeating a completed lookup. If an input is missing, first check relevant authorized context. Ask through requestUserFeedback or respondToUser status=needs_input, with optional=true when useful work can continue without the answer. Do not replace a structured question with an invitation to tell you later in a completed reply. If a source fails, try a bounded alternative and report the actual unresolved gap." : ""
   return builtin spineDraftAppend(kind: facts.file ? "file" : "answer", instruction: facts.goal + evidence, inputHeading: inputHeading)
  }
  for section in facts.sections {

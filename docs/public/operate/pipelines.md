@@ -42,7 +42,7 @@ checks to another source, disconnect the pipeline it has first
 |---|---|---|
 | `v1:pipelines:pipeline` | source | The repository, how deliveries arrive, where steps may run, which secrets they may resolve, what the poll has seen, the timing table. Never the manifest: every run reads that at its own commit |
 | `v1:pipelines:run` | attempt of one run key | The event and mode, status and conclusion, the refusal that ended it, the check run's id and state, the stage table, the agent driving it |
-| `v1:pipelines:channel` | notify target | Where a notify stage delivers. Its writers arrive with epic memql#5480 |
+| `v1:pipelines:channel` | notify target | Where a notify stage delivers; managed in Deployables → Settings → Channels |
 
 A run compiles into one `v1:work:goal` with one `v1:work:step` per step, so the
 work spine's journal and the Nexus drawing show it like any other work. Every
@@ -51,6 +51,82 @@ its source belongs to -- exactly the people who read the source. None holds a
 token, a secret value or a log line.
 
 ---
+
+## Repository maintenance
+
+A `repositoryChange` step applies a retained JSON proposal through the pipeline
+source's current GitHub App grant. The command that generates the proposal
+receives no writer token. This supports dependency tidy commits and draft
+upgrade proposals while keeping file and branch authority in operator settings.
+
+Enable this optional writer only when the source's installed GitHub App grants
+**Contents: Read and write** and **Pull requests: Read and write**. The default
+App connection does not request repository-maintenance write access. An existing
+App needs its permissions updated and the installation owner must accept the
+change before a proposal can be applied. These permissions belong to the
+driver; proposal commands still receive only an explicitly requested read token.
+
+```yaml
+- name: prepare
+  on: [schedule, manual]
+  steps:
+    - name: upgrade
+      run: python3 scripts/ci/repository-proposal.py engine-watch --output=.reports/engine-proposal.json
+      artifacts: [.reports/engine-proposal.json]
+- name: propose
+  on: [schedule, manual]
+  steps:
+    - name: upgrade
+      repositoryChange:
+        rule: engine-upgrade
+        step: prepare.upgrade
+        path: .reports/engine-proposal.json
+      timeout: 5m
+```
+
+The operator stores `MEMQL_PIPELINES_REPOSITORY_CHANGE_RULES` as a system
+variable. Its JSON has `schema: 1` and a `rules` list. Each rule names a
+`name`, exact `repository` (`owner/repo`), `mode`, `branchPrefix` ending in
+`/`, and explicit `paths`. There are no wildcard grants. For example:
+
+```json
+{
+  "schema": 1,
+  "rules": [{
+    "name": "engine-upgrade",
+    "repository": "example/product",
+    "mode": "propose",
+    "branchPrefix": "engine-bump/",
+    "paths": ["product.env"]
+  }]
+}
+```
+
+`propose` accepts only scheduled or owner-requested runs of the current default
+branch. It creates a draft pull request and never merges it. An existing branch
+is reconciled only when it identifies the exact prepared commit; a moved branch
+or a deliberately closed proposal is not overwritten or reopened.
+
+`update` also requires `author` and `actor`, such as `dependabot[bot]`. It accepts
+only a same-repository pull request whose original signed webhook has that
+actor, whose current author matches, and whose complete changed-file inventory
+fits the rule. Poll-only runs lack this signed actor evidence and cannot update
+a pull request. An owner retry retains the original delivery identity. Both
+modes recheck the rule, source binding and grant immediately before writing.
+
+The proposal contains `schema: 1`, the exact source `commit`, a short `key`,
+`title`, `body`, and `files`. Each file has `path`, `baseSha256`, and UTF-8
+`content`. An empty base digest requires an absent file. The limit is 4 MiB
+for the proposal, 1 MiB per file and 256 files. Deletion, executable files,
+symlinks and workflow changes are not supported. An empty file list records
+`unchanged` and mints no writer token.
+
+The driver validates the producer's successful journal, object version, size
+and SHA-256 before parsing the proposal. It pins the artifact while an external
+write is unresolved. Branch writes use deterministic commits with the exact
+source parent, refuse force pushes, and require read-back. A replica recovering
+a lost response observes the same commit instead of repeating the branch write.
+An unresolved write fails the step and retains its evidence for reconciliation.
 
 ## Connecting a pipeline
 
@@ -183,19 +259,19 @@ A pipeline lives in **Deployables**, on its source -- not in an app of its own
   many stages the newest run planned, how changes arrive, where steps run), and
   **Latest upstream** says what that commit's checks said -- *checks passed,
   not yet deployed* among them. The bar reads *checks on* and carries **Pipeline
-  settings**, or **Connect pipeline** for a source that has none. A source with a
-  disconnected pipeline can use its settings to start **Run latest**, which
+  settings**, or **Connect pipeline** for a source that has none. A connected pipeline offers **Run**, which asks for a branch and defaults to
+  the default branch. A disconnected pipeline offers **Run latest**, which
   runs the default branch, or **Other branch**, which asks for the branch under
   the facts: a list of the repository's other branches when the source's grant
   can read them, a text field when it cannot. Either is `pipelinesRunLatest`,
   whose optional `branch` names the branch (empty is the default branch); a
   name GitHub would not accept is refused `pipeline_branch_invalid` before any
   request leaves the cluster. MemQL reads the branch through that source's
-  installation grant and pins the returned commit SHA. Automatic delivery must
-  be disconnected first, so a webhook or poll cannot race the rehearsal. Only
+  installation grant and pins the returned commit SHA. Automatic delivery stays
+  as configured; the manual event has its own deduplication key. Only
   stages with no `on` selector or with `on: [manual]` run; publication stages
   should name their intended events explicitly. A manual run writes the
-  pipeline's check run on its commit like any other run, so a branch's run
+  pipeline's separate `/ manual` check on its commit, so a branch's run
   shows on that commit and on the pull request whose head it is. Repeating the
   request for the same head returns the same run, whichever branch reached it;
   use **Re-run** after it finishes to create another attempt. A
@@ -383,6 +459,7 @@ cannot satisfy the required PR or merge-queue check.
 |---|---|---|---|
 | `name` | The step's name, unique in its stage | required | Missing, breaking the rule, or used twice in the stage: `pipeline_step_invalid` |
 | `execution` | `container` or `native`; native uses the host toolchain and ignores the pipeline image | `container` | Native steps with services or shared caches: `pipeline_step_invalid` |
+| `githubReadToken` | Give a command `MEMQL_GITHUB_READ_TOKEN`, or an image build the BuildKit secret `github_read_token`, for this repository only | false | Cluster container commands and image builds with an installed source repository. Fixed permissions: contents, checks and pull requests read. It cannot write or reach other installation repositories; queued grants refresh before admission and logs redact them |
 | `checkoutHistory` | Set `full` to fetch complete commit ancestry, tags and the comparison base during the trusted checkout | shallow | Cluster container steps only. The command receives history without the installation token; it should scan that local history without fetching again. The existing run deadline and workspace limits bound checkout |
 | `memoryMiB` | Explicit memory request and limit for the cluster command container, in MiB; zero keeps namespace defaults | `0` | Nonzero values below 128, above 1048576, or on fleet/native steps are invalid. The Workbench separately refuses values above its operator-configured maximum (8192 MiB by default) before creating a Job |
 | `cpuMilli` | Explicit CPU request and limit for the cluster command or image-build container, in millicores; 1000 means one CPU. Zero keeps namespace defaults for commands and the fixed request of one CPU / limit of two CPUs for image builds | `0` | Values below zero, above 256000, or nonzero values on fleet/native steps are invalid. The Workbench separately refuses values above its operator-configured maximum (4000 by default) before creating a Job. Scheduling accounts for the whole request; it does not silently fall back to a smaller allocation |
@@ -539,6 +616,28 @@ so, they take no write from a client -- no status stamp, no requeue, no
 re-stage elsewhere -- so the delivery a step reports is the one the outbound
 worker made. The rows are still readable by any signed-in reader
 (memql#5804), so a message carries nothing the run page does not.
+
+### Configure a notification channel
+
+In **Deployables → Settings → Channels**, add an email or Discord channel.
+Use a stable name such as `releases`; the manifest's notify stage refers to
+that name. For email, enter one bare email address per line (up to 20). For
+Discord, enter the name of the secret holding the webhook URL, not the URL
+itself. The secret name must start with a capital letter, contain only capital
+letters, digits and underscores, and stay outside the reserved `MEMQL_` prefix.
+
+Save the channel, reopen it, and select the pipelines allowed to send to it.
+Both the channel and each selected pipeline must belong to you. Configuration
+changes do not send a test message or start a run. The generated SDK exposes
+these same operations as `pipelinesChannelSave`, `pipelinesChannelArchive` and
+`pipelinesChannelAllow`, under the `app:deployables/channels` capability.
+
+Archiving keeps the channel and its history, while stopping new notification
+admissions. **Save and resume** reactivates the same name. Existing pipeline
+grants survive archival; uncheck a pipeline to revoke its grant. Running
+pipelines re-read grants and channel status before admitting a notification,
+including changes made on another replica. Messages already queued with the
+outbound worker may still arrive.
 
 ### When a step is skipped
 
@@ -972,12 +1071,9 @@ deliveries, the poll, run keys, the plan, the work goal, the check run, the
 Runs tab, run page, Checks and connect flow, and every command step run as a
 Kubernetes Job on the cluster, or on one of the owner's machines for a step
 naming a need, with its output in the log store and its full log and artifacts
-in the owner's Library ([Pipelines substrate](pipelines-substrate.md)). One
-thing waits for a later epic:
-
-| Not yet | Arrives with | Until then |
-|---|---|---|
-| Channels a person can create (the channel builtins, and Deployables > Settings > Channels) | epic memql#5480 | A notify stage delivers over the outbound path to a channel of its pipeline's owner; while none exists, it fails `pipeline_channel_missing`, and so does the run |
+in the owner's Library ([Pipelines substrate](pipelines-substrate.md)). Notify
+stages require an active channel and an explicit pipeline grant; a missing or
+revoked channel fails the run instead of implying that delivery succeeded.
 
 **Do not make `MemQL / <name>` a required check until a run has passed on this
 cluster.** A cluster has to be ready for steps before any runs: on one that does

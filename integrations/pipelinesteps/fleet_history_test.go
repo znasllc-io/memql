@@ -18,3 +18,13 @@ func TestFleetRefusesHistoryBeforeTokenOrDispatch(t *testing.T) {
 		t.Fatal("fleet silently ignored history contract")
 	}
 }
+
+func TestFleetRefusesRepositoryReadGrantBeforeTokenOrDispatch(t *testing.T) {
+	req := testRequest()
+	req.Step.GitHubReadToken = true
+	run := stepRunFor(req, 600, pl.CodeRunCeiling)
+	result, err := (*Fleet)(nil).RunStep(context.Background(), req, run)
+	if err != nil || result.Failure == nil || result.Failure.Code != pl.CodeStepInvalid {
+		t.Fatal("fleet accepted repository read grant")
+	}
+}

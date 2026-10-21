@@ -4051,6 +4051,7 @@
         "event",
         "finishedAt",
         "headBranch",
+        "inboundRequestId",
         "mode",
         "notes",
         "ownerUserId",
@@ -9102,7 +9103,8 @@
         ],
         "tool": [
           "workerComputer",
-          "workerHost"
+          "workerHost",
+          "workerWorkbench"
         ]
       }
     },

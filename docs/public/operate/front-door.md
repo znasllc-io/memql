@@ -182,7 +182,7 @@ differently.
 > PodDisruptionBudget behind `svc/edge`. The `edge` node type itself — build
 > tag `edge`, `make edge`, see [build-tags.md](../build/build-tags.md) — is
 > now a normal member of the mesh like any other leaf node, and its release
-> image ships from `.github/workflows/build-engine-images.yml` alongside
+> image ships from the native release image stage in `memql-package.yaml` alongside
 > every other node type (CLAUDE.md's build-server rule).
 >
 > **Before the backend existed, the absent-Service case produced a 404, not a

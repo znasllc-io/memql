@@ -238,6 +238,11 @@ func (s *spineScope) classify(ctx context.Context, args map[string]any) (any, er
 	}
 
 	out.Workload, out.WorkTitle = sectionable.Workload, strings.TrimSpace(sectionable.WorkTitle)
+	// A search hint only selects authorized contracts; it is never executable
+	// code or authority. Keep the same byte bound as capability discovery.
+	if search := strings.TrimSpace(sectionable.CapabilitySearch); len(search) <= 300 {
+		out.CapabilitySearch = search
+	}
 	ack := strings.TrimSpace(sectionable.Acknowledgement)
 	if validAcknowledgement(ack) {
 		out.Acknowledgement = ack
@@ -269,7 +274,15 @@ func (s *spineScope) classify(ctx context.Context, args map[string]any) (any, er
 	}
 	sectionable.Workload = out.Workload
 	s.guidance, s.decision = guidance, sectionable
-	return map[string]any{"complexity": string(complexity), "intent": sectionable.Intent, "sectionable": sectionable.Sectionable, "requiresFile": sectionable.RequiresFile != nil && *sectionable.RequiresFile, "requiresResearch": sectionable.RequiresResearch, "hasEffects": sectionable.hasEffects(), "conversational": conversational, "workload": out.Workload, "acknowledgement": out.Acknowledgement}, nil
+	capabilityFile := false
+	if sectionable.RequiresFile != nil && *sectionable.RequiresFile {
+		delivery, _, err := sectionable.fileContract()
+		if err != nil {
+			return nil, err
+		}
+		capabilityFile = delivery == "capability"
+	}
+	return map[string]any{"complexity": string(complexity), "intent": sectionable.Intent, "sectionable": sectionable.Sectionable, "requiresFile": sectionable.RequiresFile != nil && *sectionable.RequiresFile, "requiresResearch": sectionable.RequiresResearch, "capabilityFile": capabilityFile, "hasEffects": sectionable.hasEffects(), "conversational": conversational, "workload": out.Workload, "acknowledgement": out.Acknowledgement}, nil
 }
 
 // setWorkload records policy selected by the pinned DSL before planning. The

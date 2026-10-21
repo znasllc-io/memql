@@ -1,4 +1,5 @@
 import { useEffect, useLayoutEffect, useRef } from "react";
+import { onAppResume } from "../live/resume";
 
 export const AUTO_REFRESH_MS = 15_000;
 
@@ -46,15 +47,11 @@ export function AutoRefresh({ onRefresh, busy = false, enabled = true, intervalM
     };
     const wake = () => { void run(); };
     schedule();
-    document.addEventListener("visibilitychange", wake);
-    window.addEventListener("focus", wake);
-    window.addEventListener("online", wake);
+    const stopResume = onAppResume(wake);
     return () => {
       disposed = true;
       clearTimeout(timer);
-      document.removeEventListener("visibilitychange", wake);
-      window.removeEventListener("focus", wake);
-      window.removeEventListener("online", wake);
+      stopResume();
     };
   }, [intervalMs]);
   return <span ref={marker} hidden aria-hidden="true" />;

@@ -1,19 +1,13 @@
 package work
 
-// ApprovalAcceptsGuidance identifies gates whose unfinished work can be
-// reconsidered without granting the requested permission. A budget checkpoint
-// can save guidance, but stays paused until a separate budget decision.
-// Artifact-specific reviews keep their own editing contracts.
+// ApprovalAcceptsGuidance identifies unfinished work that can take a correction.
+// Retired budget requests can be closed, but cannot grant more resources.
 func ApprovalAcceptsGuidance(kind string, subject map[string]any, options any) bool {
 	if reviewType, _ := subject["reviewType"].(string); reviewType != "" {
 		return false
 	}
-	if kind == ApprovalKindBudget {
-		// Only a native checkpoint has a durable answer-delivery path. Legacy
-		// failures and planner budget gates retain their own review process.
-		resumeKind, _ := subject["resumeKind"].(string)
-		continuationID, _ := subject["continuationId"].(string)
-		return resumeKind == "checkpoint" && continuationID != ""
+	if kind == ApprovalKindBudget || subject["continuationAllowed"] == false {
+		return false
 	}
 	if IsFailureQuestion(options) {
 		return true

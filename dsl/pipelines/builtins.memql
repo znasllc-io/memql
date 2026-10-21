@@ -157,9 +157,9 @@ builtin pipelinesRerun {
 @executor("integration.pipelines.runLatest")
 @args(profile="object")
 @requiresCapability("execute", "app:deployables/rerun")
-@description("Start a full manual rehearsal of a branch head for one of the caller's disconnected pipelines: the branch named, or the repository's default branch when none is. Automatic delivery must be disconnected so this run cannot duplicate a webhook or poll. The source owner's GitHub grant reads the branch, the exact SHA is pinned in the run, and the run writes its check run on that commit. A name GitHub would not accept is refused pipeline_branch_invalid before GitHub is asked. The sealed workflow includes stages with no `on` list and stages explicitly marked `on: [manual]`; it does not treat manual as push or release, so future publication steps remain opted out. Repeated requests for the same head resolve to the existing attempt, whichever branch named it; re-run that attempt to start another.")
+@description("Start a full manual rehearsal of a branch head for one of the caller's pipelines: the branch named, or the repository's default branch when none is. Automatic delivery remains as configured. The manual run has its own deduplicated event key and a separate check context that cannot satisfy a required PR or merge-candidate check. The source owner's GitHub grant reads the branch, the exact SHA is pinned in the run, and the run writes its check run on that commit. A name GitHub would not accept is refused pipeline_branch_invalid before GitHub is asked. The sealed workflow includes stages with no `on` list and stages explicitly marked `on: [manual]`; it does not treat manual as push or release, so future publication steps remain opted out. Repeated requests for the same head resolve to the existing attempt, whichever branch named it; re-run that attempt to start another.")
 builtin pipelinesRunLatest {
-  pipelineId  string!  @description("The caller's v1:pipelines:pipeline. It must be disconnected.")
+  pipelineId  string!  @description("The caller's v1:pipelines:pipeline.")
   branch      string   @description("A branch of the same repository, named as GitHub shows it (main, feature/login). Absent or empty runs the default branch.")
 }
 
@@ -180,4 +180,39 @@ builtin pipelinesRunRelease {
 @description("Ask one of the caller's pipeline runs to stop. It flags the row and ends nothing itself: the agent driving the run reads the flag at its next heartbeat, cancels what is executing and concludes the run cancelled. A queued run no agent has claimed is concluded cancelled on the spot.")
 builtin pipelinesCancel {
   runId  string!  @description("The v1:pipelines:run to stop. Must be the caller's own.")
+}
+
+/// Save configuration only; a channel's stable name is what the manifest uses.
+/// Pipeline grants are separate so a partial multi-pipeline update cannot be
+/// mistaken for an atomic permission change.
+@sdk
+@executor("integration.pipelines.channelSave")
+@args(profile="object")
+@requiresCapability("execute", "app:deployables/channels")
+@description("Create or update the caller's notification channel by its stable name. Saving an archived channel resumes it. This saves configuration without resolving a secret or sending a message. Allow each pipeline separately with pipelinesChannelAllow. Answers {channelId, name, kind, status}.")
+builtin pipelinesChannelSave {
+  name        string!   @description("Lower-case letters, digits and hyphens, starting with a letter or digit; at most 40 characters.")
+  kind        string!   @description("discord or email.")
+  secretRef   string    @description("For Discord: the globalSecret name holding the webhook URL. Never the URL or a name in the MEMQL_ namespace.")
+  recipients  []string  @description("For email: 1 to 20 bare email addresses. Empty for Discord.")
+}
+
+@sdk
+@executor("integration.pipelines.channelArchive")
+@args(profile="object")
+@requiresCapability("execute", "app:deployables/channels")
+@description("Archive the caller's channel by name. Later notification stages refuse it. Messages already staged keep their delivery receipts. The channel row and run history remain; pipelinesChannelSave resumes it.")
+builtin pipelinesChannelArchive {
+  name string! @description("The caller's channel name.")
+}
+
+@sdk
+@executor("integration.pipelines.channelAllow")
+@args(profile="object")
+@requiresCapability("execute", "app:deployables/channels")
+@description("Allow or revoke one of the caller's channels on one of the caller's pipelines. Preserves every other channel grant and pipeline field. Sends no message. Answers {pipelineId, channelIds}.")
+builtin pipelinesChannelAllow {
+  pipelineId string! @description("The caller's pipeline.")
+  name       string! @description("The caller's channel name.")
+  allowed    bool!   @description("True allows notification stages to use this channel; false revokes that permission.")
 }

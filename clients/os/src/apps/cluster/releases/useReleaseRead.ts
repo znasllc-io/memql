@@ -1,4 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
+import { isTransportInterruption } from "@znasllc-io/memql-sdk-core/client";
+import { onAppResume } from "../../../live/resume";
 
 const documentVisible = () => document.visibilityState !== "hidden";
 
@@ -29,17 +31,18 @@ export function useReleaseRead<T>(key: string, read: ((signal: AbortSignal) => P
         if (current.signal.aborted) throw new Error("The release read timed out. Try again.");
         if (!disposed) setSnapshot({ key, source, revision, value, error: "", fresh: true });
       } catch (error) {
-        if (!disposed) setSnapshot((old) => ({ key, source, revision, value: old.key === key && old.source === source ? old.value : null, error: current.signal.aborted ? "The release read timed out. Try again." : error instanceof Error ? error.message : String(error), fresh: false }));
+        if (!disposed) setSnapshot((old) => ({ key, source, revision, value: old.key === key && old.source === source ? old.value : null, error: isTransportInterruption(error) ? "" : current.signal.aborted ? "The release read timed out. Try again." : error instanceof Error ? error.message : String(error), fresh: false }));
       } finally {
         clearTimeout(timeout);
         controller = null;
         if (!disposed && available && visible && documentVisible() && pollInterval > 0) next = setTimeout(() => void poll(), pollInterval);
       }
     }
-    const onVisibility = () => { clearTimeout(next); invalidate(); if (documentVisible()) void poll(); };
+    const onVisibility = () => { if (!documentVisible()) { clearTimeout(next); invalidate(); } };
     document.addEventListener("visibilitychange", onVisibility);
+    const stopResume = onAppResume(() => { clearTimeout(next); invalidate(); void poll(); });
     void poll();
-    return () => { disposed = true; clearTimeout(next); controller?.abort(); document.removeEventListener("visibilitychange", onVisibility); };
+    return () => { disposed = true; clearTimeout(next); controller?.abort(); stopResume(); document.removeEventListener("visibilitychange", onVisibility); };
   }, [key, available, visible, revision, source, pollInterval]);
   const same = snapshot.key === key && snapshot.source === source;
   return { value: same ? snapshot.value : null, error: same ? snapshot.error : "", fresh: available && visible && documentVisible() && same && snapshot.revision === revision && snapshot.fresh, retry };

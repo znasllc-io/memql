@@ -98,13 +98,18 @@ const (
 	// Once the listener runs, its holder and the gated connectors only need
 	// their normal startup window. Do not extend the network-test deadlines.
 	probeReadyTimeout = 90 * time.Second
-	// probeEndTimeout bounds the connector, from the probe Secret's creation
-	// to its end: its settle and three rounds of two attempts, each bounded
-	// at five seconds, come to at most 37 seconds.
+	// probeEndTimeout bounds the network test after both connectors have
+	// started. Container startup belongs to probeReadyTimeout; the test's
+	// settle and three rounds of bounded attempts take at most 37 seconds.
 	probeEndTimeout = 60 * time.Second
 	// probeKubeletTimeout bounds the re-read's one round trip through the
 	// listener's kubelet (R42b).
 	probeKubeletTimeout = 5 * time.Second
+	// Foreground deletion includes kubelet termination and asynchronous Job
+	// and pod collection. It can outlast one quick API call even with the
+	// probe's two-second termination grace. Keep admission closed until all
+	// three resource reads confirm removal, with a separate bounded budget.
+	probeCleanupTimeout = time.Minute
 	// probeSaidMaxBytes bounds the connector's own line in a verdict.
 	probeSaidMaxBytes = 1 << 10
 )
@@ -482,10 +487,20 @@ func (p *prober) startConnectors(job Job, listener probeListener) error {
 			}
 		}
 		released = true
-		if rolesReady && probeContainerRuns(one, true, ContainerProbeListener) && probeContainerRuns(two, true, ContainerProbeListener) {
+		// A running listener sidecar does not mean its main container has
+		// started: kubelet can still be retrying its Secret lookup. Give both
+		// connectors the startup budget before spending the network deadline.
+		// A fast connector may already have ended; end still judges its exit.
+		if rolesReady && probeContainerRuns(one, true, ContainerProbeListener) && probeContainerRuns(two, true, ContainerProbeListener) &&
+			probeConnectorStarted(one) && probeConnectorStarted(two) {
 			return nil
 		}
 	}
+}
+
+func probeConnectorStarted(pod *Pod) bool {
+	connector := podContainer(pod, false, ContainerProbeConnector)
+	return connector != nil && (connector.State.Running != nil || connector.State.Terminated != nil)
 }
 
 // probeRole rejects a disagreement between the controller's annotation and
@@ -676,7 +691,7 @@ func (p *prober) kubeletAnswers(pod *Pod) (bool, string, error) {
 // same name or quota slot can be reused. Its independent context also gives
 // an abandoned proof a bounded opportunity to clean up.
 func (p *prober) remove() error {
-	ctx, cancel := context.WithTimeout(context.WithoutCancel(p.ctx), quickCallTimeout)
+	ctx, cancel := context.WithTimeout(context.WithoutCancel(p.ctx), p.r.probeCleanupWait)
 	defer cancel()
 	jobErr := p.r.kube.DeleteJob(ctx, p.name)
 	secretErr := p.r.kube.DeleteSecret(ctx, p.target)

@@ -20,6 +20,429 @@ as the acceptance target, with targeted failure/recovery checks; do not repeat
 three expensive full passes. Close issues only when their actual replacement
 and production evidence are complete.
 
+The owner explicitly retained Dependabot dependency-update proposals and the
+dependency graph on October 19. Their GitHub-managed Actions execution is an
+intentional exception. All build, test, audit and deployment work migrates to
+MemQL; completion does not mean eliminating these dependency services.
+
+## Active cutover, October 19, 2026
+
+Production currently serves **v0.29.35**, through instance commit
+`ccd6a45d9f8ba5dc82eedda585aa7ce6b86f60f9`. Its Argo operation completed
+Healthy/Synced at 12:13 UTC. No native runs remained active during the rollout.
+An independent public check verified the API, Identity and OS against the
+pinned edge image; website documentation remains a separate pending check.
+Engine main is `46cfeade6fea0c874b45952b6b6539f7a8f6532b`, still declaring
+v0.29.36. The separate v0.29.36 release and push runs were cancelled before
+deployment; production remains v0.29.35. The v0.29.31 full native pass
+below remains valid historical acceptance evidence; it is no longer the serving
+release. Engine **v0.30.0** is prepared in #6200 and is not deployed. The
+independent v0.29.33 rollout at 06:56 UTC replaced Agent while the editor
+qualification still had two steps unfinished. Its resulting
+`pipeline_node_lost` failures are not a successful qualification. The cutover
+branches incorporate that release and require fresh checks on their new heads.
+
+Instance #237 passed all nine native steps with retained logs and artifacts.
+Its Agent artifact receiver fix is now deployed with the already configured
+2 GiB operator bound; the fleet transport retains its separate 256 MiB limit.
+Instance #232 and #239 are also deployed. Both Agent and Workbench replicas
+are ready. No CPU, memory, node or quota increase accompanies these changes.
+The independent instance #243 deployment paused pipeline intake again; the
+12:14 UTC whole-run read found no active pipelines, unfinished runs or Jobs.
+All four original webhook connections were restored afterward, confirmed
+through the authenticated production UI at 12:45 UTC. Native #6213 passed at
+14:46 UTC on head `f2f150d799006c4e784dd75b59173e20ab5aaa06`, run
+`4b8f795ba23917c43c2a320c2ea49b79`: 36 completed steps, six expected path
+skips, all eight Linux/macOS editor hosts, 36 retained logs and 54 artifacts.
+Two capped live previews retained their full Library logs. It merged as
+`c1667adb4928d8fd120bf52cf4fea22db111b04f` at 14:47 UTC. Its clean worktree
+and merged branch references were removed after ownership and ancestry checks. The superseded `88d6b0e12539b876d1ca0c886fd9b9c4`
+run was cancelled after 34 steps completed; it is not a full-pass receipt.
+The owner paused the other session to prevent further concurrent deployments.
+Keep controllers stable until every whole run, including fleet work, finishes.
+
+Storage #6171 entered the ordinary merge queue at 14:48 UTC. Full-mode native
+run `67491bba23d2ec5113b7a7264d3aad4e` tests exact candidate
+`46cfeade6fea0c874b45952b6b6539f7a8f6532b`, based on the merged editor fix.
+Its App-bound check `118127603094` passed at 15:52 UTC: all 48 steps completed,
+with no skips or failures, 48 retained logs and 100 artifacts. Three capped
+live previews retained their complete Library logs. The ordinary queue merged
+the exact candidate as `46cfeade6fea0c874b45952b6b6539f7a8f6532b`.
+Independent Git tree and check-App comparisons verified the landed result.
+The live engine ruleset now requires only `MemQL / memql`, bound to App 4822538;
+reviews, bypass, merge queue and branch protections were preserved and read back.
+The ruleset baseline and core CI definition removal travel together in #6200.
+The redundant main-push attempt on the included base was cancelled after
+ancestry verification. The queue retained the same build quota and never
+preempted running work. Final #6200 qualification remains required.
+
+The owner approved native deployment notifications in the existing Discord
+`#znas-instance` channel, including a qualification message. The existing
+webhook destination was independently verified, sealed as
+`ZNAS_DEPLOYMENT_DISCORD_WEBHOOK` through the signed-in SDK, and read back as
+active. No message has been sent by this preparation. The instance notification
+manifest is held locally until v0.30.0 provides channel configuration and grants;
+the existing observer stays active until native delivery is proved.
+
+Instance #240's current head `36a635936d6eda0359dd53572ee9f91bdf85a344`
+passed all ten native steps in run `e7cb192d9779fc8de3b8eb3f3ccf16ba`,
+with ten retained logs, sixteen Library file records and no artifact notes.
+Its public documentation acceptance remains pending #6171 and website
+publication. Four clean, merged instance worktrees and their exact matching
+remote/local branches were removed after ancestry and process checks
+(#224, #232, #237 and #239); active work and shared caches were preserved.
+
+At 13:59 UTC, the remaining competing publisher triggers were disabled:
+engine SDK, docs, database, fixture mirror and toolchain publication; template
+and instance image publication; and the instance's hourly docs sync. None had
+an active run. This prevents a legacy writer racing the native candidate;
+it does not claim the remaining native publication paths are qualified.
+Required checks and their App binding were unchanged. Workflow definitions
+remain until their replacement acceptance is complete.
+
+The preceding `a4a8118e140616dd02a4e5b4ee3d9005` run finished with 34
+completed steps, one failure and seven skips. All eight Linux/macOS editor-host
+cases passed. Packaging stopped after 2,839 of 2,840 unit cases passed: the log
+redaction case timed out waiting for its real run recorder to finish filesystem
+writes. Log `beb4936a-6484-4ad7-a6c0-8852a73c5b10` was retained and read back.
+A four-second delayed terminal receipt reproduces that false timeout. The
+repair uses a ten-second elapsed deadline and ten-millisecond polling; both
+the delayed case and all 2,840 unit tests pass in the pinned toolchain with two
+CPUs and 4 GiB, without skips. The successful native #6213 qualification above includes this repair.
+
+The final runtime also preserves a failed command's exit code when packaging
+never produces its outputs. Cluster and Fleet report artifact collection as a
+secondary note, retain the command log and reject unverified files. A successful
+command still fails when a required artifact is missing or cannot be verified.
+The reproducing cluster regression fails before the repair; the complete
+pipeline executor race suite, including Fleet and false-green controls, passes.
+
+The independent instance rollout at 08:31–08:32 UTC restarted Agent and
+Workbench while qualification was active, despite unchanged executor images.
+Configuration annotations also change pod templates. Final run
+`350954a64844ed427080eeaec5322992` therefore failed its macOS web-host step
+with `pipeline_execution_uncertain`. It was cancelled at 09:22 UTC to release
+capacity for prerequisites, retaining 23 completed steps and the failure.
+It is not a complete pass. Future controller rollouts must drain whole runs,
+including fleet work, rather than checking only current Kubernetes Jobs.
+The declared event priority classes are installed, but automatic priority
+labels require the v0.30.0 runtime. Backfilled priorities on owned queued
+checks preserve the same quotas and never preempt running work.
+
+The Mac now permits the instance repository alongside the engine and Cockpit.
+The exact repository permission change has its own native maintenance receipt.
+Native run `c61e098d69c66c97310147d942760171` then passed all 15 instance
+Bash compatibility tests on the actual Mac, with no skips. Its report and log
+are retained; temporary maintenance PRs #6242 and instance #241 were closed
+without merge and their branches and worktrees removed. Instance execution
+now permits cluster and fleet work.
+
+Cockpit v0.20.0 remains unpublished after a full release attempt encountered
+Docker's temporarily unavailable memory statistics. Cockpit #554 merged as `babaf7752cbb4cbe315ecea1be7ad89c1104c180`
+at 09:51 UTC and prepares v0.20.1: three bounded sample attempts, fresh daemon identity checks and
+fail-closed admission when measurement remains unavailable. The complete local
+race suite, including real Docker isolation, passes. Native run
+`3a01154b260a42500e89ccf89e5749b4` passed all 12 steps with retained logs
+and eight artifacts, including the actual Mac tests. Both Cockpit rulesets
+were independently verified before merge. The immutable v0.20.0 tag is not
+reused.
+
+Cockpit's second v0.20.1 release attempt,
+`12385a6647a7194e58f0df7214644c96`, passed all 16 steps with 16 retained
+logs, from work run `4f28f2665bc7bb48ee7e002bc15254b5`. It ran at the exact
+merged source above. Independent production readback confirmed this complete
+pass after Chrome access was restored. The redundant third attempt opened
+before that discovery was cancelled; another full Cockpit build is unnecessary.
+Candidate `sha256:8cc989db242c4d16502fa923ceeeb72d675c119596bfa5289ece4093d52b7464`
+is approved, with 18 of 41 file publications complete in draft release
+417220182. It is not public. The engine upgrade changed approval identity;
+#6244 adds an explicitly reviewed renewal of unchanged file drafts. After that
+runtime is deployed, renew under fresh approval, finish the retained release,
+and verify public downloads. Preserve existing assets and publication receipts.
+The renewal and its private test-engine cache cleanup are integrated into the
+held v0.30.0 branch. Combined release, npm and OCI race suites pass against a
+required real database; documentation and embedded-file inventory checks pass.
+The temporary database and editor test containers were removed. The redundant
+image-read-grant worktree was removed after both patches were verified in the
+final branch; its branch references remain until that branch merges.
+
+The v0.20.1 release run `a120d1d5b0f32c30f307b06d47bcdc12` ended with
+14 completed steps and two failed Mac builds. The earlier #6213 run
+`6f39cbd8bd068fba838d148823b7d0aa` ended with 32 completed steps,
+three failed Mac editor steps and seven skips. All five failures were
+`pipeline_node_lost`; neither run qualifies. Completed logs were retained and
+neither failed run supplied an approved candidate. The Linux worker recorded a network timeout
+and DNS failures at 10:16 UTC; it and the Mac registered new connections around
+10:17. Older streams remained open until 10:32. Agent and Workbench did not
+restart during that interval. The Mac's client-side network cause remains
+unconfirmed, so a shared network interruption is an inference.
+
+Same-replica registration replacement now terminates the predecessor, matching
+the existing cross-replica supersede policy. The RPC receive loop also observes
+session cancellation: cancelling its derived context alone did not interrupt
+gRPC's blocked receive. Real gRPC regression cases exercise pending work,
+same-replica replacement, remote-holder events and revocation while idle. The
+successor remains usable. This reports interrupted work promptly; it does not
+replay a command whose execution is uncertain. Both transport regressions
+failed against the previous implementation; the affected worker race suite
+passes locally. Independent #6243 carried the same runtime repair through
+native run `bf6d6d27baad43e524b7496c0c3560c6`, merged at 11:36 UTC,
+and is deployed in v0.29.35. The final branch adopts that implementation and
+retains the additional real-gRPC cases. Storage passed the complete native
+merge-candidate suite and landed through the ordinary queue; final #6200
+qualification follows. Cockpit's separate complete pass is recorded above. Deploying this repair does
+not turn the earlier failed runs into passes.
+
+The final runtime now includes bounded repository maintenance: retained JSON
+proposals, exact operator-owned repository/file grants, fresh signed-actor and
+PR-author checks for dependency updates, and deterministic Git write/readback
+recovery. Commands receive no writer credentials. Successful Git writes retain
+their evidence until the work receipt is durable; conclusion releases the
+matching pins and repeats cleanup after a process loss. A second agent replica
+recovers a simulated journal failure after the write without another commit.
+The complete compiler, driver and GitHub protocol race suites pass. The eight
+proposal-generator tests and generated model/schema/SDK checks pass. Recipe
+activation and production qualification remain separate from this runtime work.
+The production GitHub App, “MemQL for ZNAS LLC” (4822538), now has accepted
+`pull_requests:write` on installation 158882932. The installed permission page
+was verified at 12:51 UTC; existing checks, contents, security-event, metadata
+and merge-queue permissions were preserved. No further GitHub access prompt is
+pending for this repository-maintenance capability.
+
+The repaired full local `make test` passed, including the combined maintenance
+runtime before its final pin-lifecycle refinement; database-backed cases skipped
+without PostgreSQL. The final lifecycle changes pass the complete affected race
+suites. These local results do not replace fresh native qualification. The old
+#6200 head's native run was cancelled after local conformance failures were
+found; it is not a passing release.
+
+## Historical acceptance evidence: October 18, 2026
+
+At this checkpoint, installed production ran **v0.29.31**, built natively from
+`1d087ac973e5fd1e620f99f93ef42dba1f3a3642`. Release run
+`b0643687e51532322e50eb0ff6014ab3` / Work run
+`af5b4ab480781f3df9a1eefc90ecb511` passed **57 of 57 steps**, with no skips
+or missing logs, from 10:23:29 to 12:00:50 UTC. The Library retained 57 logs
+and 136 artifacts. This includes all five database groups, the editor host
+matrix and 5,905 OS tests. Four steps capped their displayed log previews;
+their full logs were retained. The earlier unsuccessful releases below are
+history, not the serving release or a reason to repeat this complete pass.
+
+All seven engine images were independently checked for source, release,
+role and digest before instance
+[PR #226](https://github.com/znasllc-io/memql-znas/pull/226) pinned them.
+ArgoCD reports Healthy/Synced, with all configured serving deployments ready.
+The MCP deployment remains intentionally scaled to zero. Instance PRs
+[#227](https://github.com/znasllc-io/memql-znas/pull/227) and
+[#228](https://github.com/znasllc-io/memql-znas/pull/228) preserve bounded
+background admission and runtime capacity during deployment sync.
+
+The build pool remains one autoscaled Standard_D8s_v6 node, maximum one.
+Kueue bounds background work to 6,500 millicores, 22,528 MiB memory,
+65,536 MiB ephemeral storage and six pods. The namespace's 128-Job object
+quota is queue capacity, not concurrent execution capacity. This cutover
+adds no serving nodes or paid fleet machines.
+
+The proven native PR check is now required, bound to App 4822538, alongside
+the existing `ci-required` context. The queue builds one candidate at a time
+with a 180-minute response ceiling. See the exact decision and PR proof in
+[the ruleset baseline](../ops/ruleset-baseline.md#native-required-check-october-18-2026).
+Native merge-candidate success is still pending. The queue rejected the
+non-successful native candidate described below even after legacy CI passed;
+the legacy context and remaining workflows have not been retired.
+
+Storage PR #6171 passed its native head check at 16:29:23 UTC: 35 completed
+steps, 14 expected path skips, 35 retained logs and 29 artifacts. It entered
+the ordinary merge queue at 16:29:48, without owner bypass. Native full-mode
+merge-group run `edc9f8dee667f4951fe021b9b6a404ae` / Work
+`572f56714d0b952207a526e0b5f952a7` started at 16:30:08 on exact candidate
+`1d2dcc4fde54822e218dcf2def35470afef9ed67`, based on
+`f0af5373d980491c0f215c9a4233100310898808`. It did not qualify: the
+campaign signup burst assertion rejected a valid partial write, and a macOS
+editor host timed out while repeatedly downloading VS Code. Its 325 unit tests
+passed; the desktop host never started. Repairs are
+[#6212](https://github.com/znasllc-io/memql/pull/6212) and
+[#6213](https://github.com/znasllc-io/memql/pull/6213). The former adds a
+cross-engine retry regression without changing signup runtime behavior. The
+latter distinguishes progressing downloads from stalls and bounds all transport
+attempts by one twenty-minute ceiling, without retrying tests.
+
+The unsuccessful queue attempt was cancelled at 18:48:58 UTC to release its
+remaining work: 35 completed, two failed and eleven cancelled steps; 35 successful
+logs and 93 artifacts retained. Its conclusion is **cancelled**, not successful
+or a completed failure aggregate. Legacy `ci-required` check 117730646444 had
+passed at 16:43:11. Native App 4822538's check 117727730439 reported cancelled
+at 18:48:58, and `github-merge-queue[bot]` removed #6171 at 18:49:31 without
+merging it. This proves non-success rejection by the actual queue; it does not
+change the run's conclusion to failure. The driver regression suite separately
+covers failed steps, early returns and fabricated skips.
+
+Signup repair #6212 merged as `4f9d6a799c6191fb50491d13a1ead5c10b7099d6`
+at 19:43:09 after native run `9c037d5b6ddacb1fe495d1ae4cd8a427` passed
+all 33 selected steps, with 14 expected path skips, 33 logs, 29 artifacts and
+no retention notes. Mac download repair #6213 still has native qualification
+in progress. Both repairs are included in #6200. The repaired exact ordinary
+merge-queue success remains required before removing the legacy context.
+Its native run exposed an unrelated error-page test-fixture collision: released
+public/probe ports could be reused by the fixture's deliberately occupied TLS
+socket. Reserving all three distinct ports before startup preserves the strict
+listener-cleanup assertion. The original failed eight of 50,000 short iterations;
+the repaired fixture passed all 50,000 and the complete error-page suite with
+the race detector. This repair is also included in #6213 and #6200.
+The cutover branch prepares engine version 0.29.33; 0.29.32 is reserved by the
+independent Ask/install-recovery PR #6199. Neither version was deployed at this checkpoint; the active status above supersedes it.
+Storage PR #6171's head gate received a one-time Kueue priority of 1, allowing it to
+run alongside the existing database job. No running job was preempted and
+no quota was increased; all declared commands and assertions ran unchanged.
+
+The owner subsequently authorized the Mac repository permission change.
+One-time native maintenance run `c2d53a13e477da5ffb7755f329f9d285` passed,
+and the live worker re-advertised both `znasllc-io/memql` and
+`znasllc-io/memql-cockpit`. Its retained receipt proves the policy edit and
+reload; it is not application CI qualification. Temporary
+[PR #6204](https://github.com/znasllc-io/memql/pull/6204) was closed without
+merge, and its remote branch, local branch and worktree were removed.
+Cockpit [PR #523](https://github.com/znasllc-io/memql-cockpit/pull/523)
+now has native qualification in progress.
+
+Cockpit candidate `41615a5beb4def7da7f2c3f9597a41b51d0947bd` follows native
+Linux race-suite and macOS computer-use build, vet, app/menu packaging and
+isolated installer successes. Its predecessor's fuzz lane hit the upstream
+[Go duration-shutdown race](https://github.com/golang/go/issues/75804), without
+a failing input or property assertion. Only fuzzing now uses Go 1.27.2; all
+13 discovered targets passed locally at 20 seconds each, without retries or
+suppressed failures. Native run `3c7831256ca179ee9bc672d0e8fac12d` is still
+in progress; this is not a published Cockpit release.
+
+The workflow-retirement branch now reads native configuration for the
+database partition, timeout budgets, tag coverage, node roles, path coverage,
+gate inputs, editor dependencies, OS checks, cache declarations and service
+image pins. Its database guard compiles the real source graph through the
+installed policy, verifies every provisioned package reaches a shard once,
+and passes those shards through the actual budget runner's command builder.
+The obsolete Actions parser, aggregate, token-permission and cache-writer
+guards have been removed. Their replacement failure behavior is covered by
+the native trigger and driver tests, including early-return and fabricated-
+skip rejection. The core Actions workflow itself remains until the exact
+merge-candidate production proof is complete.
+
+Pending implementation [PR #6200](https://github.com/znasllc-io/memql/pull/6200)
+combines standalone DB test budgets, channel management and fresh notification
+grants, and full automatic toolchain smoke checks before native artifact export.
+It supersedes [#6202](https://github.com/znasllc-io/memql/pull/6202) and
+[#6203](https://github.com/znasllc-io/memql/pull/6203) to avoid repeated full
+validation of sibling PRs in the bounded build pool. Their local validation is
+recorded on the PRs; an open PR is not a deployed feature. SDK publication,
+public docs delivery, installer lifecycle, remaining
+audits and companion workflow retirement still need their own acceptance
+receipts before #5480 is complete.
+
+Native installer migration keeps the cheap no-cluster round trip for installer
+changes and moves the five full cluster cases to weekly or manual execution:
+round trip, repair, upgrade, from-source owner claim and pipelines substrate.
+The candidate scripts retain the existing graph/receipt assertions and use a
+fresh inner Docker daemon on an opted-in Linux fleet machine. The cheap case
+is capped at two CPUs and 4 GiB; the full cases at four CPUs and 16 GiB. No
+host home, Docker socket, directory or network namespace enters the fixture.
+The privileged fixture runs trusted installer test code; it is not a shared
+Workbench or an AKS step. A 64 GiB free-disk preflight is a check, not a disk
+quota. This adds no cloud instance or production capacity.
+
+The local fixture proof reached a real nested container with its cgroup limits
+enforced. A second proof killed the parent process with SIGKILL: a separate
+supervisor, bound by a kernel pidfd and resource ownership labels, retained
+evidence and removed the container, volume and image. Its first attempt found
+a missing recovered container ID; the corrected proof passed. This is fixture
+and cleanup evidence, not successful install/repair/upgrade qualification.
+The existing installer Actions remain until the native lifecycle receipts pass.
+
+The unused VS Code Marketplace/Open VSX publishing workflow is retired while
+native builds and installable downloads remain. Its historical successful run
+was a dry run, and its only publishing attempt failed without a token. Neither
+registry listed the extension on October 18. First-time marketplace publishing
+is separate from migrating the working delivery paths.
+
+The retirement branch also adds receipt-bound npm publication to the existing
+release candidate service. Local protocol and real-database tests cover exact
+archive readback, conflicts, uncertain outcomes, durable version reservation
+and recovery on another host. The release review exposes the package version
+and dist-tag and preserves separate approval. This is implemented and locally
+tested, not a production npm publication receipt. Component tag triggers,
+registry credentials and a live publication still need qualification before
+the SDK workflow can be removed.
+GitHub Packages already contains SDK 0.8.0, published on July 15. The retirement
+branch prepares 0.9.0 and keeps its workspace lockfiles aligned; its package
+dry run passed. This does not publish or replace an existing registry version.
+
+## Native infrastructure publication preparation, October 18
+
+PR #6200 includes OCI index publication and an independent
+`deploy/db-image/VERSION` of `16.15.1` (PostgreSQL 16.15, operand revision 1).
+The installed CNPG webhook accepted this tag in a server dry run; the running
+database image was not changed. Native database publication is still pending.
+
+The existing TimescaleDB fixture index contains five architectures and its
+children total 2,687,287,862 compressed bytes, beyond the unchanged 2 GiB
+artifact limit. The new manual-only `fixtures.timescaledb` step explicitly
+selects Linux AMD64 and ARM64, the native container runner's supported platforms,
+and retains both provenance manifests. The old five-platform mirror and service
+pin remain untouched. Local anonymous download and complete verification passed:
+1,081,885,184-byte archive `sha256:4ffb9bb37e693b0a6371ad9a3c9ba42204bb22c61a9c9ba95324cb0d95d80ca9`,
+derived index `sha256:dea8fe7100c13d6473659b9d4be3fdb83f045e716b165155b9b6de5271fbf11a`.
+The metadata distinguishes that derived index from the pinned upstream index.
+
+The publisher verifies every child and blob and preserves durable intent,
+immutable tags and independent-host readback. Race-enabled protocol tests cover
+missing/corrupted children, unrelated provenance, duplicate platforms, tag
+conflicts, read-only transport bounds and fresh-host replay. Compiled native
+selection and version guards pass. These are local qualification results;
+production execution, approved publication and anonymous pull receipts are
+still required before the database and fixture Actions workflows are removed.
+
+## Remaining native operation support, October 18
+
+PR #6200 adds repository-scoped read credentials for explicitly opted-in cluster
+commands. They have contents/checks/pull-requests read only, required Secret
+references, queue refresh and log redaction. Fleet, image and report-only steps
+refuse the command grant. The full compiler/runner race suites and agent/app
+scope tests pass.
+
+The standalone Scorecard scanner preserves the retiring action's policy and
+analyzes all 18 checks (two are unenforced by that upstream policy). It validates
+source identity, complete coverage and real SARIF output; an upstream zero exit
+without a report is not success. A read-only rehearsal at main `f0af5373` completed
+all 18 with no unscored checks, producing 13 findings and SARIF digest
+`3c322886cf2b1792002a2f6f21565fe81df700c92e9a311dd5f72b035578eaa5`.
+Weekly activation is held in commit `6d56703fb` until the new `githubReadToken`
+manifest field is deployed. Native App-token execution and receipt-bound SARIF
+publication still require qualification; the old workflow remains meanwhile.
+
+An append-only publication configuration preview passes the actual candidate
+parser: 11 assembly plans, 38 OCI targets, 49 release files and one npm target.
+It adds independent SDK/database/fixture version sources and 41 Cockpit files,
+including all eight binaries, platform archives, Mac apps, checksums and
+per-binary inventories. No credential was read and no publication occurred.
+The eventual Cockpit tag commit and current configuration must be refreshed
+before application; npm/index settings require the new runtime first.
+
+Manual maintenance can now be requested without disconnecting automatic CI in
+PR #6200. Existing event keys deduplicate repeated requests across replicas;
+the separate `/ manual` check cannot satisfy PR or merge-candidate requirements.
+Connected pipeline settings offer Run with a default-branch choice. Compiler and
+run-driver race tests, 14 UI behavior tests, typechecking and SDK drift checks
+pass. The browser fixture verified desktop/narrow layouts in light/dark,
+keyboard focus, cancellation, submission and retained connection state. This is
+not yet deployed.
+
+The production disk-packing change is instance PR #233, revision
+`ad95cfcbc6c6457c6245da4b4ae357f26ca27c83`, Healthy/Synced. New command/container
+workspace budgets are 15 GiB; old Jobs retain their declared budgets. The overall
+64 GiB disk quota, CPU/memory/pod ceilings and maximum of one build node remain.
+Instance PR #232 preserves that change while adding docs delivery and declared
+non-preempting priorities. Temporary priority changes for the two migration
+repairs affect only pinned, suspended, owned attempts and admit at free capacity;
+they neither preempt work nor increase quotas.
+
 ## Observed baseline, October 16, 2026 UTC
 
 The instance repository is `znasllc-io/memql-znas`, revision
@@ -114,13 +537,13 @@ outputs, publication and failure evidence, not merely a command in a manifest.
 |---|---|---|
 | `ci.yml` | Native package adds editor tests/packaging and the rootless OS Docker stage, retains per-package DB budgets and carries PR bases. Editor hosts plus production PR and exact merge-group proof remain | #5506, #5507 |
 | `gitleaks.yml` | Existing current-tree and history scans; production event/cadence evidence | #5506 |
-| `govulncheck.yml` | Existing scan; production merge-group/push/schedule evidence | #5506 |
+| `govulncheck.yml` | Disabled on October 18; definition removed by this change. Native `vulnerabilities.go-vulnerabilities` passed in release `b0643687e51532322e50eb0ff6014ab3` and scheduled run `3443e867a582c3ee5053aa23511dcf41`, retaining a log and all three reports in each. The pinned v1.7.0 scanner still covers every workspace module and fails on findings. Compiled PR/push/queue/release/schedule selection remains tested | #5506 |
 | `codeql.yml` | Existing Go/JS/Python analysis; journaled SARIF upload and receipt still needed | #5480 |
-| `sbom.yml` | Native inventory now runs on release, main push, weekly and manual events; installed retained JSON/XML and complete module/lockfile evidence remain. The old workflow only retained artifacts, never attached release assets | #5480 |
+| `sbom.yml` | Disabled on October 18; definition removed by this change. Native `inventory.sbom` passed in release `b0643687e51532322e50eb0ff6014ab3`, retained 19 files and log `94d6ed5d-4a52-489c-a39e-f1e7703a4c66`. Summary file `06ffedd8baf50f1ff95b42134bf9a8bcd266addea103092afbe8b291da76266e` reports complete coverage; Go JSON/XML and npm lockfile reports are readable in the Library. Release/main-push/weekly/manual selection and missing-module/package refusal tests pass. The old workflow only retained artifacts; it never attached release assets | #5480 |
 | `scorecard.yml` | Scorecard execution, permissions, branch-rule/scheduled triggers and SARIF publication | #5480 |
-| `build-engine-images.yml` | Disabled: native builds own this path. Current release's verified Azure publication and production rollout remain | #5509 |
-| `dispatch-engine-images-on-release.yml` | Disabled to prevent competing release builders; MemQL owns explicit release requests | #5509 |
-| `recover-engine-image-mirror.yml` | Disabled to prevent a competing registry writer; reconcile immutable digests through native publication | #5509 |
+| `build-engine-images.yml` | Disabled and definition removed. Native release `b0643687e51532322e50eb0ff6014ab3` qualified all seven images; exact source, role, release and registry digests were verified before production rollout. Runtime source/version stamping, immutable publication and per-role build guards remain | #5509 |
+| `dispatch-engine-images-on-release.yml` | Disabled and definition removed. MemQL pins explicit release requests to the tag commit and deduplicates webhook delivery; native release tests cover both paths | #5509 |
+| `recover-engine-image-mirror.yml` | Disabled and definition removed. Reconcile immutable digests through the native publication journal; the Actions-only recovery wrapper is removed; native OCI verification and publication tests retain the provenance, digest and conflict checks | #5509 |
 | `build-toolchain-image.yml` | Build and publish future toolchains without Actions | #5509 |
 | `build-db-image.yml` | Native `tests.database-image` selects the verified operand target for changed inputs and full qualification; live native execution and separate registry publication remain | #5509 |
 | `mirror-fixture-images.yml` | Digest-verified fixture mirroring without Actions | #5509 |
@@ -132,14 +555,14 @@ outputs, publication and failure evidence, not merely a command in a manifest.
 | `publish-docs-bundle.yml` | Native release-files builds and verifies the exact-version bundle with complete Git history; release attachment and downstream delivery receipt remain | #5508, #5712 |
 | `docs-current-check.yml` | Native weekly public docs check declared; installed schedule/failure delivery proof remains | #5508, #5712 |
 | `publish-sdk-core.yml` | Native release-files retains the compiled, version-checked npm archive; registry publication and immutable receipt remain | #5480 |
-| `publish-vscode-extension.yml` | Native release-files verifies all four native targets plus web; registry publication remains | #5480 |
-| `vscode-site.yml` | Native `tests.editor-site` builds and checks the static page, runs the existing Chromium browser suite and retains the page plus screenshots; cloud execution and served-version evidence remain | #5480 |
+| `publish-vscode-extension.yml` | Retired unused Marketplace publishing. Its only successful historical run, `37052150601`, was a dry run; `38112601591` failed every publishing target with an empty `VSCE_PAT`. Neither registry listed `znasllc.memql` on October 18. Native `release-files.packages` retains and verifies Linux x64/ARM64, macOS x64/ARM64 and web VSIX archives. First-time Marketplace/Open VSX account setup and publication are separate; no registry publication is claimed | #5480 |
+| `vscode-site.yml` | Retired after native release `b0643687e51532322e50eb0ff6014ab3` passed `tests.editor-site` in 13 seconds: build, self-check, complete Chromium suite, 25 retained artifacts and readable log `73f4664f-80ab-4a7b-a1c0-9705832da015`. The live page at `vscode.memql.io` matches the native HTML SHA-256 `6d7fd2c949a1c7e8f6ffb6f9fa9895a2991a3f2060387af76e6b0a3503f45c05` after the edge's standard refresh-script injection. Source is the deployed `1d087ac973e5fd1e620f99f93ef42dba1f3a3642` | #5480 |
 | `ruleset-drift.yml` | Removed after installed daily run `3443e867a582c3ee5053aa23511dcf41` passed both baselines, retained both logs and reported separate check `MemQL / memql / daily`; negative controls pass ([receipt](https://github.com/znasllc-io/memql/issues/5507#issuecomment-6245341749)) | #5507 |
 | `dependabot-tidy.yml` | Trusted dependency-PR maintenance, without exposing write authority to PR code | #5480 |
 | `clustere2e-compile.yml` API entry | Disabled October 17 at 14:05 UTC: file absent at `f8ece576d`, only two historical runs and no active execution. Current CI and native `checks.build-clustere2e` retain compilation. Required `ci-required` and run history preserved | #5480 |
 | Generated `github-code-scanning/codeql` | Reconcile GitHub default setup with advanced scanning and replacement publication | #5480 |
 | Generated `github-code-quality/codeql` | GitHub Code Quality is distinct from security CodeQL; equivalent coverage or an explicit owner decision is required | #5480 |
-| Generated Dependabot updates / graph | Retain useful GitHub dependency services per the design; explicitly resolve their managed Actions execution before claiming zero Actions dependency | #5480 |
+| Generated Dependabot updates / graph | Retained by explicit owner decision on October 19. Their managed Actions execution is an intentional exception; all build/test/deploy work moves to MemQL | #5480 |
 
 Companion inventories are part of the cutover, rather than an implicit engine
 success. The live API reports nine instance workflows, ten Cockpit workflows

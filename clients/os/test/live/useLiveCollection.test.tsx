@@ -12,6 +12,7 @@ function connection() {
   const statuses = new Set<(event: { status: ConnectionStatus }) => void>();
   let status: ConnectionStatus = "connected";
   const conn = {
+    get status() { return status; },
     subscriptions: { subscribeGraph: vi.fn(() => () => {}) },
     onConnectionCycle: (handler: (cycle: number) => void) => {
       cycles.add(handler);
@@ -37,6 +38,16 @@ function connection() {
 }
 
 describe("live collection reconnects", () => {
+  it("classifies a transport-interrupted seed as disconnected rather than a failed read", async () => {
+    const conn = connection();
+    const seed = vi.fn().mockRejectedValueOnce(Object.assign(new Error("stream closed"), {reason:"transport"})).mockResolvedValueOnce({rows:[{id:"recovered"}],nextCursor:""});
+    const {result} = renderHook(() => useLiveCollection("recovery", () => ({concept:"approval",seed})));
+    await waitFor(() => expect(result.current.snapshot.state).toBe("disconnected"));
+    expect(result.current.snapshot.error).toBe("");
+    act(() => conn.reconnected());
+    await waitFor(() => expect(result.current.snapshot.rows).toEqual([{id:"recovered"}]));
+    expect(result.current.snapshot.state).toBe("live");
+  });
   it("repairs a stream-closed seed and clears its stale error after subscription replay", async () => {
     const conn = connection();
     const seed = vi.fn()

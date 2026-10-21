@@ -68,6 +68,10 @@ func TestCapabilitySearchRanksPurposeAboveIncidentalImplementationWords(t *testi
 	for _, tc := range []struct{ search, name, purpose, incidental string }{
 		{"library file read content", "library.libraryDocumentVersion", "Read the text content of a saved Library file.", "library.libraryFileBySha256"},
 		{"read account records", "accounts.accountRecords", "Read the saved account records.", "accounts.archiveAccountRecords"},
+		{"document generation", "documents.generateDocument", "Generate a document.", "documents.documentHistory"},
+		{"archived customer records", "customers.archiveRecords", "Archive customer records.", "customers.createRecord"},
+		{"scheduled appointment", "calendar.scheduleAppointment", "Schedule an appointment.", "calendar.readAppointment"},
+		{"validate configuration", "settings.validation", "Validation of configuration.", "settings.configurationHistory"},
 	} {
 		actual := workCapabilityScore(tc.search, tc.name, tc.purpose, tc.purpose)
 		incidental := workCapabilityScore(tc.search, tc.incidental, "Archive an item. Implementation notes mention "+tc.search, "Archive an item. Implementation notes mention "+tc.search)
@@ -77,15 +81,26 @@ func TestCapabilitySearchRanksPurposeAboveIncidentalImplementationWords(t *testi
 	require.Equal(t, workCapabilityScore("read files", "library.readFile", "Read a file."), workCapabilityScore("read file", "library.readFile", "Read a file."))
 	require.Greater(t, workCapabilityScore("read the file", "library.readFile", "Read a file."), 0)
 	require.Zero(t, workCapabilityScore("library.missingRead", "library.readFile", "Read a library file."))
+	require.Zero(t, workCapabilityScore("records.archived", "records.archive", "Archive records."), "qualified identifiers must never be stemmed")
+	require.Zero(t, workCapabilityScore("delete", "records.read", "Read saved records."), "normalization must not conflate different actions")
 }
 
 func TestSavedFileContentAndImageOperationsAreInTheRealCapabilityShortlist(t *testing.T) {
 	e, _, _ := readMergeTestEngine(t)
+	fn, lookupErr := e.functions.Get("compose.composeMaterialize")
+	require.NoError(t, lookupErr)
+	require.Contains(t, fn.Description, "Create a saved document file")
+	require.True(t, e.workCapabilityAllowed(askTestActor(), fn))
 	for _, tc := range []struct{ search, name string }{
 		{"library file read content", "library.libraryReadFile"},
 		{"Read file to identify first bird", "library.libraryReadFile"},
 		{"What is the number one bird in the markdown file you just saved? Read that file to identify it.", "library.libraryReadFile"},
 		{"generate image", "library.libraryGenerateImage"},
+		{"create image file", "library.libraryGenerateImage"},
+		{"image generation create", "library.libraryGenerateImage"},
+		{"imageGen generate image model", "library.libraryGenerateImage"},
+		{"create files", "compose.composeMaterialize"},
+		{"Can you create files and generate images using the capabilities available in this MemQL system?", "compose.composeMaterialize"},
 	} {
 		rows, err := e.workCapabilitiesBuiltin(askTestActor(), map[string]any{"search": tc.search}, 0)
 		require.NoError(t, err)

@@ -11,14 +11,14 @@ import (
 func TestReplanBudgetContinuationSurvivesAReplicaChange(t *testing.T) {
 	a, b := openActsDB(t), openActsDB(t)
 	b.owner = a.owner
-	for _, decision := range []string{"approved", "rejected"} {
+	for _, decision := range []string{"answered", "rejected"} {
 		t.Run(decision, func(t *testing.T) {
 			runID := a.openRun(t, nil)
 			goalID := rowString(a.runRow(t, runID), "goalId")
-			a.write(t, "updateWorkGoal", map[string]any{"goalId": goalID, "ceilings": map[string]any{"maxModelCalls": 48, "maxRetries": 2}})
+			a.write(t, "updateWorkGoal", map[string]any{"goalId": goalID, "ceilings": map[string]any{"maxModelCalls": 96, "maxRetries": 2, "wallClockMs": 10800000}})
 			a.writeVersion(t, runID, runID, "fetch", 0, 1, nil, "saved research", nil)
 			a.writeVersion(t, runID, runID, "draft", 1, 1, nil, "", map[string]any{"status": "failed", "errorCode": "step_failed"})
-			a.write(t, "updateWorkRun", map[string]any{"runId": runID, "status": runStatusWaiting, "stepOrder": []string{"fetch", "draft"},
+			a.write(t, "updateWorkRun", map[string]any{"runId": runID, "status": runStatusWaiting, "classification": map[string]any{"workload": "research"}, "stepOrder": []string{"fetch", "draft"},
 				"spent":     map[string]any{"modelCalls": 26, "retries": 2},
 				"waitingOn": map[string]any{"kind": waitKindReplan, "subject": "draft", "reason": "divide unfinished work", "since": rfc(testNow)},
 			})
@@ -26,14 +26,14 @@ func TestReplanBudgetContinuationSurvivesAReplicaChange(t *testing.T) {
 			parked := b.runRow(t, runID)
 			require.Equal(t, 48, rowInt(rowMap(parked, "spent"), "modelCalls"))
 			approvalID := rowString(rowMap(parked, "waitingOn"), "subject")
-			_, err := b.i.handleDecideApproval(actorCtx(a.owner), map[string]any{"approvalId": approvalID, "decision": decision, "answer": map[string]any{"newLimit": 96}}, 0)
+			_, err := b.i.handleDecideApproval(actorCtx(a.owner), map[string]any{"approvalId": approvalID, "decision": decision, "answer": map[string]any{"value": "retry"}}, 0)
 			require.NoError(t, err)
 			run, err := a.i.store().runForOwner(ownerActor(memql.ContextWithFreshRead(context.Background()), a.owner), runID)
 			require.NoError(t, err)
 			require.Equal(t, 48, rowInt(rowMap(run, "spent"), "modelCalls"))
 			require.Equal(t, 2, rowInt(rowMap(run, "spent"), "retries"))
 			require.Empty(t, rowMap(run, "rerun"))
-			if decision == "approved" {
+			if decision == "answered" {
 				require.Equal(t, runStatusWaiting, rowString(run, "status"))
 				require.Equal(t, waitKindReplan, rowString(rowMap(run, "waitingOn"), "kind"))
 				require.Equal(t, "draft", rowString(rowMap(run, "waitingOn"), "subject"))

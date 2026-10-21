@@ -59,6 +59,7 @@ export interface PipelineRow {
   status: "active" | "disconnected";
   /** globalSecret NAMES the steps may resolve -- the owner's allowlist. Never values. */
   secretNames: string[];
+  channelIds?: string[];
   connectedAt: string;
 }
 
@@ -76,6 +77,7 @@ export function pipelineFromRow(raw: Row): PipelineRow {
     compute: rowString(row, "compute") === "cluster_and_fleet" ? "cluster_and_fleet" : "cluster",
     status: rowString(row, "status") === "disconnected" ? "disconnected" : "active",
     secretNames: stringsOf(row, "secretNames"),
+    channelIds: stringsOf(row, "channelIds"),
     connectedAt: rowString(row, "connectedAt"),
   };
 }

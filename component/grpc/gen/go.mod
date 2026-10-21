@@ -10,7 +10,7 @@ module github.com/znasllc-io/memql/component/grpc/gen
 
 go 1.26.1
 
-toolchain go1.27.2
+toolchain go1.27.3
 
 require (
 	google.golang.org/grpc v1.83.2

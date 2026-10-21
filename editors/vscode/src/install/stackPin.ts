@@ -179,11 +179,11 @@
 // the pin went stale for every `--commit` install the moment main's manifests
 // moved past it, and no `--tag` install could have shown it.
 //
-// v0.29.31's seven node images (bff, identity, agent, planner, workbench, mcp,
-// edge) are published to GHCR under 0.29.31. The database operand does not move:
+// v0.24.0's seven node images (bff, identity, agent, planner, workbench, mcp,
+// edge) are published to GHCR under 0.24.0. The database operand does not move:
 // `memql-db` is versioned on the PostgreSQL axis and up.sh pins it separately
 // (16.15-timescaledb-2.29.1, memql#4063). No upgrade barrier lies between
-// v0.24.0 and v0.29.31 (version/barriers.ts holds one, after v0.18.0), so the
+// v0.19.1 and v0.24.0 (version/barriers.ts holds one, after v0.18.0), so the
 // upgrade leg, which installs this pin and then moves to the revision under
 // test, crosses nothing it did not cross before.
 //
@@ -200,7 +200,11 @@
  * Overridden per run by `SessionOptions.tag` (`--tag` on the CLI). Applied in
  * `installPlan`, so no front end can forget it.
  */
-export const DEFAULT_STACK_TAG = "v0.29.31";
+// v0.30.0 includes the wrapped optional-.env repair and the compressed-history
+// slug migration repair required by a fresh installation. Publish its native
+// engine images before exposing this release's installer downloads. Installed
+// lifecycle qualification uses this exact release, not an older broken pin.
+export const DEFAULT_STACK_TAG = "v0.30.0";
 
 /**
  * The value the version picker carries for "the tip of main" (memql#3901).

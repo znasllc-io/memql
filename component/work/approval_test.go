@@ -11,8 +11,8 @@ var t0 = time.Date(2026, 9, 5, 12, 0, 0, 0, time.UTC)
 
 func TestBudgetApproval_CarriesTheNumbers(t *testing.T) {
 	b := CheckCeilings(Ceilings{TokenBudget: 100}, Spent{Tokens: 90}, 20)
-	a := BudgetApproval("run-1", "step-a", *b, t0, time.Hour)
-	if a.Kind != "budget" || a.RunId != "run-1" || a.StepKey != "step-a" {
+	a := ProgressFeedback("run-1", "step-a", *b, t0, time.Hour)
+	if a.Kind != "feedback" || a.RunId != "run-1" || a.StepKey != "step-a" {
 		t.Fatalf("%+v", a)
 	}
 	if a.ArtifactHash == "" {
@@ -81,7 +81,7 @@ func TestEveryDerivedApprovalHashSurvivesTheDecideRecompute(t *testing.T) {
 	ev := Evidence{Tier: "t", Reason: "r", RuleId: "x.y", Source: EvidenceSourceRules}
 	breach := CheckCeilings(Ceilings{MaxModelCalls: 2}, Spent{ModelCalls: 2}, 0)
 	for _, req := range []ApprovalRequest{
-		BudgetApproval("run-1", "s", *breach, t0, time.Hour),
+		ProgressFeedback("run-1", "s", *breach, t0, time.Hour),
 		FeedbackApproval("run-1", "s", "Which one?", []map[string]any{{"label": "A", "value": "a"}}, ev, t0, time.Hour),
 		PlanReviewApproval("run-1", "s", "", []map[string]any{{"op": "relativize", "path": "/tmp/x"}}, ev, t0, time.Hour),
 		InferenceUnavailableApproval("run-1", "s", RefusalEveryDoorShut, nil, t0, time.Hour),
