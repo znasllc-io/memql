@@ -67,7 +67,6 @@ function CandidatePage({ candidateId, query, connected, visible, back }: { candi
   useEffect(() => {
     const heading = content.current?.querySelector<HTMLHeadingElement>("h3");
     if (heading) { heading.tabIndex = -1; heading.focus({ preventScroll: true }); }
-    if (content.current) content.current.scrollTop = 0;
   }, [destination]);
   const [confirmation, confirm] = useState<"approve" | "retire" | "publish" | "draft" | "promote" | null>(null);
   const [busy, setBusy] = useState("");
@@ -166,7 +165,7 @@ function CandidatePage({ candidateId, query, connected, visible, back }: { candi
   if (!settled && !busy) { footer = "Release state unavailable"; detail = "Actions return after the current state is read."; }
   return <div className="os-release-pane">
     <div className="os-release-scroll" ref={content}>
-      <Head title={selected ? `${selected.component} / ${selected.artifact}` : title} back={{ label: selected ? title : "Releases", onSelect: () => { confirm(null); setError(""); if (selected) openDestination(null); else back(); } }} />
+      <Head navigationKey={`release:${candidateId}:${destination ?? "overview"}`} title={selected ? `${selected.component} / ${selected.artifact}` : title} back={{ label: selected ? title : "Releases", onSelect: () => { confirm(null); setError(""); if (selected) openDestination(null); else back(); } }} />
       {!available ? <Notice sentence="Disconnected. The last record is shown; actions are unavailable." /> : null}
       <ReadFailure error={candidate.error || history.error || drafts.error} retry={reread} />
       {record && history.fresh && drafts.fresh && !consistent ? <Notice tone="error" sentence="The recorded release history does not match this approval and its destinations." /> : null}

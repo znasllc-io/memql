@@ -7878,6 +7878,8 @@ export interface RouterDecisionsRecentArgs {
   rule?: string;
   /** Only decisions with this outcome. A park is recorded as its refusal code. */
   outcome?: string;
+  /** Only decisions made under this route a person chose: local, apps or one of their own. */
+  route?: string;
 }
 
 export function buildRouterDecisionsRecent(args: RouterDecisionsRecentArgs): string {
@@ -7887,6 +7889,7 @@ export function buildRouterDecisionsRecent(args: RouterDecisionsRecentArgs): str
   if (args.door !== undefined) parts.push("door: " + renderMemQLValue(args.door));
   if (args.rule !== undefined) parts.push("rule: " + renderMemQLValue(args.rule));
   if (args.outcome !== undefined) parts.push("outcome: " + renderMemQLValue(args.outcome));
+  if (args.route !== undefined) parts.push("route: " + renderMemQLValue(args.route));
   return "query routerDecisionsRecent(" + parts.join(", ") + ")";
 }
 
@@ -7898,6 +7901,27 @@ declare module "./query.js" {
 
 QueryClient.prototype.routerDecisionsRecent = function (this: QueryClient, args: RouterDecisionsRecentArgs = {} as RouterDecisionsRecentArgs, opts?: QueryCallOptions): Promise<Result> {
   return this.executeNamed("routerDecisionsRecent", buildRouterDecisionsRecent(args), opts);
+};
+
+/** The caller's own routes, the ones they can pick in Ask beside Auto, Local and Apps.
+Filtered on the caller even though the concept's tier would also admit a cluster owner: this is the one wire read of the concept, and a person's route list is theirs whatever their role. */
+// Bound concept: v1:router:route (machine-readable: BoundConcepts["routesForOwner"] in generated_concepts.ts).
+export interface RoutesForOwnerArgs {
+}
+
+export function buildRoutesForOwner(args: RoutesForOwnerArgs): string {
+  void args;
+  return "query routesForOwner()";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    routesForOwner(args?: RoutesForOwnerArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.routesForOwner = function (this: QueryClient, args: RoutesForOwnerArgs = {} as RoutesForOwnerArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("routesForOwner", buildRoutesForOwner(args), opts);
 };
 
 /** The caller's active routing policy, or nothing when they never set one (the common case -- the router then applies firstFit + nextMatching).

@@ -1,10 +1,13 @@
 import { createContext, useContext, useEffect, useLayoutEffect, useMemo, useRef, useState, type RefObject, type ReactNode } from "react";
+import { createPageScroll } from "./pageScroll";
 import { PageHelpProvider } from "./pageHelp";
 import type { Breadcrumb } from "./Breadcrumbs";
 
 /** What a page heading tells its window about where the person is. */
 export interface PageTrail {
   title: string;
+  /** Stable identity when pages have the same title or their name can change. */
+  key?: string;
   breadcrumbs?: readonly Breadcrumb[];
   back?: { label: string; onSelect: () => void };
 }
@@ -56,7 +59,10 @@ function signatureOf(page: PageTrail | null): string {
  * The primary heading is still the first VISIBLE one in document order, so
  * retained panes and secondary headings cannot claim the trail.
  */
-export function PageNavigationProvider({ trail, root, children }: { trail: readonly Breadcrumb[]; root: RefObject<HTMLElement | null>; children: ReactNode }) {
+export function PageNavigationProvider({ trail, root, children, scope = "", active = true }: { trail: readonly Breadcrumb[]; root: RefObject<HTMLElement | null>; children: ReactNode; scope?: string; active?: boolean }) {
+  const location = useRef({ scope, active });
+  location.current = { scope, active };
+  const scroll = useRef<ReturnType<typeof createPageScroll> | null>(null);
   const [state, setState] = useState<{ primary: HTMLElement | null; signature: string }>({ primary: null, signature: "" });
   const host = useMemo(() => {
     const nodes = new Set<HTMLElement>();
@@ -69,6 +75,7 @@ export function PageNavigationProvider({ trail, root, children }: { trail: reado
       const signature = signatureOf(primary ? pages.get(primary) ?? null : null);
       // Bail out on no change: this runs on every heading render, and a new
       // object here would re-render the row for nothing.
+      scroll.current?.schedule();
       setState(prev => prev.primary === primary && prev.signature === signature ? prev : { primary, signature });
     };
     return {
@@ -78,6 +85,24 @@ export function PageNavigationProvider({ trail, root, children }: { trail: reado
       page: () => (primary ? pages.get(primary) ?? null : null),
     };
   }, []);
+  // PhoneShell's root wraps this provider, so its ref attaches after child
+  // layout effects. Install once all refs are ready; subsequent navigation
+  // still schedules restoration from the heading's layout publication.
+  useEffect(() => {
+    const element = root.current;
+    if (!element) return;
+    const memory = createPageScroll(element, () => {
+      if (!location.current.active) return null;
+      const page = host.page();
+      const scopes = [...element.querySelectorAll<HTMLElement>("[data-os-scroll-page]")]
+        .filter(visible).map(node => node.dataset.osScrollPage);
+      const local = page?.key ?? [...(page?.breadcrumbs?.map(item => item.label) ?? []), page?.title ?? ""].join("\u001f");
+      return JSON.stringify([location.current.scope, scopes, local]);
+    });
+    scroll.current = memory;
+    return () => { memory.dispose(); scroll.current = null; };
+  }, [root, host]);
+  useLayoutEffect(() => { scroll.current?.schedule(); }, [scope, active]);
   useEffect(() => {
     host.update();
     const observer = new MutationObserver(host.update);
@@ -121,4 +146,14 @@ export function usePageNavigation(enabled = true, page?: PageTrail) {
 /** The trail row's side: the window's origin trail and the primary heading. */
 export function useWindowTrail(): WindowTrail | null {
   return useContext(TrailContext);
+}
+
+/** Declare a stable route identity for a workspace whose nested views share a
+ * heading. The window owns capture/restoration; the page never writes scrollTop. */
+export function usePageScroll(key: string) {
+  const root = useRef<HTMLDivElement>(null);
+  useLayoutEffect(() => {
+    if (root.current) root.current.dataset.osScrollPage = key;
+  }, [key]);
+  return root;
 }

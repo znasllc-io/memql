@@ -61,6 +61,7 @@ const ALLOWED: Record<string, string> = {
   "apps/files/uploadTree.ts": "uploads each file of a folder the person dropped",
   "apps/files/useUploadTasks.ts": "uploads the files the person picked or dropped in Files",
   "apps/training/useUploads.ts": "uploads the files the person dropped in Training",
+  "ask/conversationSession.ts": "uploads the files the person attached to an Ask message",
   "chrome/Desktop.tsx": "uploads the files the person dropped on the desk",
 };
 

@@ -185,6 +185,7 @@ export function CreateTemplateWizard({ feeds, onBack, onDone }: {
   steps.push({
     id: "write",
     name: "Write",
+    sentence: "The subject and the message.",
     state: open === "write" ? "open" : accountId === "" ? "ahead" : "waiting",
     body: accountId === "" ? undefined : writeBody,
   });

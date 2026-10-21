@@ -122,46 +122,41 @@ func AskConversationSnapshotBuild(args AskConversationSnapshotArgs) string {
 	return b.String()
 }
 
-// AskGuideWork -- Record guidance for owned running work in its existing conversation. This starts no goal and grants no permission; the existing agent receives the message at its next safe reasoning boundary. Retries reuse requestId.
-type AskGuideWorkArgs struct {
-	TargetEpoch    string
-	RunId          string
+// AskStopDecision -- Answer the stop question Ask asked on one of this person's goals ("Stop this work? It can't be resumed."). stop closes the goal and asks its runs to stop, then records stopped; keep records kept and changes nothing else. Sending the same answer again returns the saved one; the other answer is refused once one is saved. A running job cannot answer: this is a person's decision.
+type AskStopDecisionArgs struct {
 	ConversationId string
-	RequestId      string
-	Prompt         string
+	TurnId         string
+	RunId          string
+	// Enum: stop | keep
+	Decision string
 }
 
-// AskGuideWork calls the engine builtin askGuideWork.
-func (qc *QueryClient) AskGuideWork(ctx context.Context, args AskGuideWorkArgs) (*Result, error) {
-	call := AskGuideWorkBuild(args)
-	return qc.executeNamed(ctx, "askGuideWork", call)
+// AskStopDecision calls the engine builtin askStopDecision.
+func (qc *QueryClient) AskStopDecision(ctx context.Context, args AskStopDecisionArgs) (*Result, error) {
+	call := AskStopDecisionBuild(args)
+	return qc.executeNamed(ctx, "askStopDecision", call)
 }
 
-func AskGuideWorkBuild(args AskGuideWorkArgs) string {
+func AskStopDecisionBuild(args AskStopDecisionArgs) string {
 	var b strings.Builder
-	b.WriteString("builtin askGuideWork(")
-	b.WriteString("targetEpoch: ")
-	b.WriteString(quoteMemQL(args.TargetEpoch))
-	if b.Len() > 21 {
+	b.WriteString("builtin askStopDecision(")
+	b.WriteString("conversationId: ")
+	b.WriteString(quoteMemQL(args.ConversationId))
+	if b.Len() > 24 {
+		b.WriteString(", ")
+	}
+	b.WriteString("turnId: ")
+	b.WriteString(quoteMemQL(args.TurnId))
+	if b.Len() > 24 {
 		b.WriteString(", ")
 	}
 	b.WriteString("runId: ")
 	b.WriteString(quoteMemQL(args.RunId))
-	if b.Len() > 21 {
+	if b.Len() > 24 {
 		b.WriteString(", ")
 	}
-	b.WriteString("conversationId: ")
-	b.WriteString(quoteMemQL(args.ConversationId))
-	if b.Len() > 21 {
-		b.WriteString(", ")
-	}
-	b.WriteString("requestId: ")
-	b.WriteString(quoteMemQL(args.RequestId))
-	if b.Len() > 21 {
-		b.WriteString(", ")
-	}
-	b.WriteString("prompt: ")
-	b.WriteString(quoteMemQL(args.Prompt))
+	b.WriteString("decision: ")
+	b.WriteString(quoteMemQL(args.Decision))
 	b.WriteString(")")
 	return b.String()
 }
@@ -182,6 +177,79 @@ func AskWorkConversationBuild(args AskWorkConversationArgs) string {
 	b.WriteString("builtin askWorkConversation(")
 	b.WriteString("runId: ")
 	b.WriteString(quoteMemQL(args.RunId))
+	b.WriteString(")")
+	return b.String()
+}
+
+// AutoBalance -- Auto's balance for the whole cluster -- Speed, Cost and Quality, 0 to 100 each -- with MemQL's recommended values and whether they were changed. One row.
+type AutoBalanceArgs struct {
+}
+
+// AutoBalance calls the engine builtin autoBalance.
+func (qc *QueryClient) AutoBalance(ctx context.Context, args AutoBalanceArgs) (*Result, error) {
+	call := AutoBalanceBuild(args)
+	return qc.executeNamed(ctx, "autoBalance", call)
+}
+
+func AutoBalanceBuild(args AutoBalanceArgs) string {
+	_ = args
+	return "builtin autoBalance()"
+}
+
+// AutoBalanceReset -- Return Auto's balance to MemQL's recommended values. Owner or developer.
+type AutoBalanceResetArgs struct {
+	Revision int
+}
+
+// AutoBalanceReset calls the engine builtin autoBalanceReset.
+func (qc *QueryClient) AutoBalanceReset(ctx context.Context, args AutoBalanceResetArgs) (*Result, error) {
+	call := AutoBalanceResetBuild(args)
+	return qc.executeNamed(ctx, "autoBalanceReset", call)
+}
+
+func AutoBalanceResetBuild(args AutoBalanceResetArgs) string {
+	var b strings.Builder
+	b.WriteString("builtin autoBalanceReset(")
+	b.WriteString("revision: ")
+	b.WriteString(fmt.Sprintf("%v", args.Revision))
+	b.WriteString(")")
+	return b.String()
+}
+
+// AutoBalanceSave -- Change Auto's balance for the whole cluster. Owner or developer, with the revision from autoBalance. Reliability always weighs the mean of the three, so no setting trades it away.
+type AutoBalanceSaveArgs struct {
+	Speed    int
+	Cost     int
+	Quality  int
+	Revision int
+}
+
+// AutoBalanceSave calls the engine builtin autoBalanceSave.
+func (qc *QueryClient) AutoBalanceSave(ctx context.Context, args AutoBalanceSaveArgs) (*Result, error) {
+	call := AutoBalanceSaveBuild(args)
+	return qc.executeNamed(ctx, "autoBalanceSave", call)
+}
+
+func AutoBalanceSaveBuild(args AutoBalanceSaveArgs) string {
+	var b strings.Builder
+	b.WriteString("builtin autoBalanceSave(")
+	b.WriteString("speed: ")
+	b.WriteString(fmt.Sprintf("%v", args.Speed))
+	if b.Len() > 24 {
+		b.WriteString(", ")
+	}
+	b.WriteString("cost: ")
+	b.WriteString(fmt.Sprintf("%v", args.Cost))
+	if b.Len() > 24 {
+		b.WriteString(", ")
+	}
+	b.WriteString("quality: ")
+	b.WriteString(fmt.Sprintf("%v", args.Quality))
+	if b.Len() > 24 {
+		b.WriteString(", ")
+	}
+	b.WriteString("revision: ")
+	b.WriteString(fmt.Sprintf("%v", args.Revision))
 	b.WriteString(")")
 	return b.String()
 }
@@ -2144,6 +2212,21 @@ func EmailRenderBuild(args EmailRenderArgs) string {
 	}
 	b.WriteString(")")
 	return b.String()
+}
+
+// FleetCapacity -- What each machine you can use can take on right now. One row: {machines, measuredAt}. Each machine says how many calls are in flight against its slots, the memory free for a model and the models already loaded (memory.reported is false when its cockpit does not report capacity, and it is then admitted on its slots alone), how fast it has answered over the last two hours, and whether it is degraded. Every route's fleet door admits machines on these figures before choosing one.
+type FleetCapacityArgs struct {
+}
+
+// FleetCapacity calls the engine builtin fleetCapacity.
+func (qc *QueryClient) FleetCapacity(ctx context.Context, args FleetCapacityArgs) (*Result, error) {
+	call := FleetCapacityBuild(args)
+	return qc.executeNamed(ctx, "fleetCapacity", call)
+}
+
+func FleetCapacityBuild(args FleetCapacityArgs) string {
+	_ = args
+	return "builtin fleetCapacity()"
 }
 
 // FleetModelProbe -- Ask one of YOUR OWN fleet machines to measure a model it already has, and return at once with the id of the record to watch. The suite is pinned by this engine and echoed back by the machine, so figures can never be filed under a suite that was not run. Owner-only, and the machine must be yours, unrevoked and connected right now -- the same refusals a pull makes, reused deliberately, because offline is offline whichever act is asking. Progress lands per case on the v1:worker:modelProbe row this returns the id of; the figures land on a v1:platform:modelMeasurement row keyed by machine, model and suite version. Every figure is a measured statistic OR a named reason there is none: a machine nobody has probed and a model that failed every case are different answers, and a page that renders both as zero would lead to opposite actions.
@@ -4522,6 +4605,43 @@ func MoveRunHeadBuild(args MoveRunHeadArgs) string {
 	return b.String()
 }
 
+// MyBudget -- Your monthly AI budget and what you have spent with metered vendors this month. Your own machines and app subscriptions never count. One row.
+type MyBudgetArgs struct {
+}
+
+// MyBudget calls the engine builtin myBudget.
+func (qc *QueryClient) MyBudget(ctx context.Context, args MyBudgetArgs) (*Result, error) {
+	call := MyBudgetBuild(args)
+	return qc.executeNamed(ctx, "myBudget", call)
+}
+
+func MyBudgetBuild(args MyBudgetArgs) string {
+	_ = args
+	return "builtin myBudget()"
+}
+
+// MyBudgetSave -- Set your monthly AI budget in US dollars, or remove it by leaving monthlyLimitUSD out. Auto keeps your calls inside it.
+type MyBudgetSaveArgs struct {
+	MonthlyLimitUSD float64
+}
+
+// MyBudgetSave calls the engine builtin myBudgetSave.
+func (qc *QueryClient) MyBudgetSave(ctx context.Context, args MyBudgetSaveArgs) (*Result, error) {
+	call := MyBudgetSaveBuild(args)
+	return qc.executeNamed(ctx, "myBudgetSave", call)
+}
+
+func MyBudgetSaveBuild(args MyBudgetSaveArgs) string {
+	var b strings.Builder
+	b.WriteString("builtin myBudgetSave(")
+	if args.MonthlyLimitUSD != 0 {
+		b.WriteString("monthlyLimitUSD: ")
+		b.WriteString(fmt.Sprintf("%v", args.MonthlyLimitUSD))
+	}
+	b.WriteString(")")
+	return b.String()
+}
+
 // OpenModelCatalogResearch -- Start a catalog review through the work harness. Local models only; no paid fallback. The owner must explicitly enable the catalog research configuration first.
 type OpenModelCatalogResearchArgs struct {
 }
@@ -6545,6 +6665,108 @@ func RoleUpdateBuild(args RoleUpdateArgs) string {
 	return b.String()
 }
 
+// RouteDelete -- Delete one of your own routes. Built-in routes cannot be deleted.
+type RouteDeleteArgs struct {
+	Id string
+}
+
+// RouteDelete calls the engine builtin routeDelete.
+func (qc *QueryClient) RouteDelete(ctx context.Context, args RouteDeleteArgs) (*Result, error) {
+	call := RouteDeleteBuild(args)
+	return qc.executeNamed(ctx, "routeDelete", call)
+}
+
+func RouteDeleteBuild(args RouteDeleteArgs) string {
+	var b strings.Builder
+	b.WriteString("builtin routeDelete(")
+	b.WriteString("id: ")
+	b.WriteString(quoteMemQL(args.Id))
+	b.WriteString(")")
+	return b.String()
+}
+
+// RouteReset -- Restore the cluster's Local or Apps route to MemQL's default. Owner or developer, with the revision from routesForActor.
+type RouteResetArgs struct {
+	Id       string
+	Revision int
+}
+
+// RouteReset calls the engine builtin routeReset.
+func (qc *QueryClient) RouteReset(ctx context.Context, args RouteResetArgs) (*Result, error) {
+	call := RouteResetBuild(args)
+	return qc.executeNamed(ctx, "routeReset", call)
+}
+
+func RouteResetBuild(args RouteResetArgs) string {
+	var b strings.Builder
+	b.WriteString("builtin routeReset(")
+	b.WriteString("id: ")
+	b.WriteString(quoteMemQL(args.Id))
+	if b.Len() > 19 {
+		b.WriteString(", ")
+	}
+	b.WriteString("revision: ")
+	b.WriteString(fmt.Sprintf("%v", args.Revision))
+	b.WriteString(")")
+	return b.String()
+}
+
+// RouteSave -- Save a route. Without an id, create one of your own (name required). With your own route's id, change it. With `local` or `apps`, change that route for the whole cluster: owner or developer, and the revision from routesForActor. Each job holds one to four sources -- fleet:, app: or federation: -- in the order they are tried. Search and memory is never a route's: every route uses the cluster's embedding model.
+type RouteSaveArgs struct {
+	Id        string
+	Name      string
+	Fast      []string
+	Strong    []string
+	Reasoning []string
+	Revision  int
+}
+
+// RouteSave calls the engine builtin routeSave.
+func (qc *QueryClient) RouteSave(ctx context.Context, args RouteSaveArgs) (*Result, error) {
+	call := RouteSaveBuild(args)
+	return qc.executeNamed(ctx, "routeSave", call)
+}
+
+func RouteSaveBuild(args RouteSaveArgs) string {
+	var b strings.Builder
+	b.WriteString("builtin routeSave(")
+	if args.Id != "" {
+		b.WriteString("id: ")
+		b.WriteString(quoteMemQL(args.Id))
+	}
+	if args.Name != "" {
+		if b.Len() > 18 {
+			b.WriteString(", ")
+		}
+		b.WriteString("name: ")
+		b.WriteString(quoteMemQL(args.Name))
+	}
+	if b.Len() > 18 {
+		b.WriteString(", ")
+	}
+	b.WriteString("fast: ")
+	b.WriteString(renderMemQLValue(args.Fast))
+	if b.Len() > 18 {
+		b.WriteString(", ")
+	}
+	b.WriteString("strong: ")
+	b.WriteString(renderMemQLValue(args.Strong))
+	if b.Len() > 18 {
+		b.WriteString(", ")
+	}
+	b.WriteString("reasoning: ")
+	b.WriteString(renderMemQLValue(args.Reasoning))
+	if args.Revision != 0 {
+		if b.Len() > 18 {
+			b.WriteString(", ")
+		}
+		b.WriteString("revision: ")
+		b.WriteString(fmt.Sprintf("%v", args.Revision))
+	}
+	b.WriteString(")")
+	return b.String()
+}
+
 // RouterListPolicies -- List all routing policies loaded from policies/v1/*.memql. Feeds the frontend's /router/policies page.
 type RouterListPoliciesArgs struct {
 }
@@ -6558,6 +6780,21 @@ func (qc *QueryClient) RouterListPolicies(ctx context.Context, args RouterListPo
 func RouterListPoliciesBuild(args RouterListPoliciesArgs) string {
 	_ = args
 	return "builtin routerListPolicies()"
+}
+
+// RoutesForActor -- The routes this person can pick for a message in Ask -- Auto, Local and Apps, then their own -- each saying whether it can serve every job for them right now, and why not when it cannot. One row: {routes, revision}. The revision is the routing document's, for routeSave and routeReset.
+type RoutesForActorArgs struct {
+}
+
+// RoutesForActor calls the engine builtin routesForActor.
+func (qc *QueryClient) RoutesForActor(ctx context.Context, args RoutesForActorArgs) (*Result, error) {
+	call := RoutesForActorBuild(args)
+	return qc.executeNamed(ctx, "routesForActor", call)
+}
+
+func RoutesForActorBuild(args RoutesForActorArgs) string {
+	_ = args
+	return "builtin routesForActor()"
 }
 
 // RoutingPolicyDescribe -- Ask MemQL to compose a validated policy draft. No policy is saved; review it and call routingPolicySave or routingPolicyReset with its revision. Requires inference and owner/developer access.

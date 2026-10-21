@@ -1,3 +1,5 @@
+import type { ExecutionDestination } from "../../kit/ExecutionDestination";
+
 // Ask's own preferences, and the store that keeps them.
 //
 // A separate versioned key rather than a corner of DesktopDocument, for the
@@ -40,6 +42,14 @@ export interface AskSettings {
    * this cannot simply be "Space anywhere".
    */
   spaceToTalk: boolean;
+  /**
+   * The route and the Where (execution destination) last chosen in the
+   * message field. A NEW conversation starts from them; an existing one
+   * keeps what its own last message ran with, read from its transcript.
+   * Absent is Auto for both.
+   */
+  route?: string;
+  destination?: ExecutionDestination;
 }
 
 export const ASK_SETTINGS_KEY = "memql-os-ask-v1";
@@ -68,6 +78,10 @@ export function sanitizeAskSettings(raw: unknown): AskSettings {
     commit: doc.commit === "review" || doc.commit === "send" ? doc.commit : DEFAULT_ASK_SETTINGS.commit,
     spaceToTalk:
       typeof doc.spaceToTalk === "boolean" ? doc.spaceToTalk : DEFAULT_ASK_SETTINGS.spaceToTalk,
+    // A route id is a bare id or a built-in name; anything else is dropped
+    // rather than sent, because the cluster would refuse the turn over it.
+    ...(typeof doc.route === "string" && /^[A-Za-z0-9_-]{1,64}$/.test(doc.route) ? { route: doc.route } : {}),
+    ...(doc.destination === "workbench" || doc.destination === "computer" ? { destination: doc.destination } : {}),
   };
 }
 

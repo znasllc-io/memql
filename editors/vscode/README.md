@@ -48,6 +48,8 @@ cluster and its local models run on this computer, so it needs at least 32 GB
 of memory on a Mac, or 32 GB of RAM and a GPU with 16 GB of VRAM on Linux, plus
 100 GB of free disk. See the
 [minimum requirements](https://github.com/znasllc-io/memql/blob/main/docs/public/operate/minimum-requirements.md#one-machine-the-entire-cluster).
+On a computer below them, the Add a cluster page says so, and **Install MemQL
+on this computer** lists what falls short instead of starting.
 
 1. Run **MemQL: Install Local Cluster...**, or press **+** and choose **Install
    MemQL on this computer**.

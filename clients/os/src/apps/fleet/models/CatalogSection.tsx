@@ -249,7 +249,24 @@ function CatalogEntry({ row }: { row: CatalogRow }) {
         stateTitle={blocked?.detail} open={open} onOpen={() => setOpen(value => !value)} />
       {open ? <div className="fleet-catalog-profile">
         <p className="os-caption">{note}</p>
-        <Facts><Fact label="Runtime" value={profile.runtime} /><Fact label="Family" value={profile.family || "Not reported"} /><Fact label="Parameters" value={profile.params || "Not reported"} /><Fact label="Context" value={profile.contextWindow || "Not reported"} /><Fact label="Quantization" value={profile.quant || "Not reported"} /><Fact label="Capabilities" value={profile.flags.join(", ") || "None reported"} /><Fact label="Dimensions" value={profile.dimensions || "Not applicable"} /><Fact label="License" value={profile.license || "Not reported"} /><Fact label="Recommended for" value={profile.recommendedFor.join(", ") || "Not specified"} /><Fact label="Machine class" value={profile.minMachineClass || "Not specified"} /><Fact label="Platforms" value={profile.offeredOn.join(", ") || "Not specified"} /></Facts>
+        <Facts>{([
+          ["Runtime", profile.runtime, "", true],
+          ["Family", profile.family, "Not reported", true],
+          ["Parameters", profile.params, "Not reported", true],
+          ["Context", profile.contextWindow, "Not reported", true],
+          ["Quantization", profile.quant, "Not reported", true],
+          ["Capabilities", profile.flags.join(", "), "None reported", false],
+          ["Dimensions", profile.dimensions, "Not applicable", true],
+          ["License", profile.license, "Not reported", true],
+          ["Recommended for", profile.recommendedFor.join(", "), "Not specified", false],
+          ["Machine class", profile.minMachineClass, "Not specified", false],
+          ["Platforms", profile.offeredOn.join(", "), "Not specified", false],
+        ] as const).map(([label, value, missing, copyable]) => {
+          // The model's own specification copies; descriptive lists and the
+          // placeholder for a missing value do not.
+          const text = value ? String(value) : "";
+          return <Fact key={label} label={label} value={text || missing} copyValue={copyable && text ? text : undefined} />;
+        })}</Facts>
       </div> : null}
     </div>
   );

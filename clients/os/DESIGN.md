@@ -78,6 +78,14 @@ and wallpaper values only (see `src/themes/`), so nothing here is themeable.
    text size. Forms use `Field` --
    label above, control on the line; nothing invents a third field size.
 
+   Dependent selection menus keep unsupported combinations visible and disabled.
+   Put short, neutral descriptions in the options themselves, present whether
+   enabled or disabled. Changing a selection never opens a warning, inserts an
+   inline validation message, shifts the focused interface, or silently changes
+   another control. Ask's Route and Where follow this rule: Auto is the default,
+   explicit choices remain explicit, and Apps cannot combine with Workbench.
+   This is selection guidance, not a new error-reporting surface.
+
 6. **Actions are verbs, nouns are nouns.** An action is never styled as a
    data node it might sit beside -- and the strongest form of that is not to
    seat it among them at all. The Files rail is nouns (places and folders),
@@ -239,8 +247,11 @@ and wallpaper values only (see `src/themes/`), so nothing here is themeable.
   and individually removable entries with validation and keyboard support.
   Do not require comma-separated input to manage a visible list. Explain the
   consequence of the collection once, and show it only for modes that use it.
-- Sharing uses a toggle and one divider before the Users and groups collection.
-  Its search picker keeps checked choices until the plus action adds them
+- Sharing gives each shared resource (models, fleet workbenches) its own toggle
+  in one section, with one divider between the two groups whatever their state.
+  A group's Users and groups collection appears beneath its toggle only while
+  that sharing is on; turning it off hides the collection and keeps the saved
+  audience. Its search picker keeps checked choices until the plus action adds them
   together. Each recipient card has a live call count and named, icon-only
   pause/resume and remove controls. These actions save directly, show pending
   state and retain the saved value on failure with an explicit retry. Keep routine success
@@ -275,16 +286,23 @@ structured stdout contract and send human logs to stderr.
 
 ## Details and settings content
 
-Fleet's machine Settings page is the reference for displaying an entity's
-configuration and reported facts. Apply this pattern when building or revising
-comparable pages in other apps; keep their existing capabilities and permissions.
-Use the shared `Details`, `DetailsSection` and `SettingRow` kit components for
-this layout. They own the spacing and responsive alignment used by Fleet and
-Cluster; avoid app-specific copies of the same grid.
-For a machine, Settings is the last tab, after Activity. General controls and
-Sharing precede reported facts on that one page. Sharing uses the same section
-grid, with a divider between its switch and users/groups collection; keep write errors
-beside the section that caused them. There is no separate Sharing tab.
+Fleet's machine Details and Settings tabs are the reference for displaying an
+entity's reported facts and its configuration. Apply this pattern when building
+or revising comparable pages in other apps; keep their existing capabilities
+and permissions. Use the shared `Details`, `DetailsSection` and `SettingRow` kit
+components for this layout. They own the spacing and responsive alignment used
+by Fleet and Cluster; avoid app-specific copies of the same grid.
+For a machine, Details follows Equipment and holds what the machine reported:
+connection advisories, System, Hardware, Connection, Features, Registration and
+Reported labels. Settings is the last tab, after Activity, and holds only what
+its owner can change: General, Owner-only features and Sharing. Sharing uses
+the same section grid, with a divider between the models and fleet workbench
+groups and each users/groups collection shown only while its sharing is on; keep
+write errors beside the section that caused them. There is no separate Sharing
+tab. Equipment, the first tab, is a display-only overview: its model carousel
+and app tiles are shown, not selected, and its arrows open Models, Apps and
+Activity. Recent activity there lists the newest five Activity entries; its
+arrow opens Activity and a row opens that entry's details.
 
 - **Open, named sections.** Group related information under a `Subhead`, with
   generous vertical spacing and a single hairline between groups. Keep ordinary
@@ -301,12 +319,19 @@ beside the section that caused them. There is no separate Sharing tab.
   Keep its consequences and confirmation beside the action, preserve the shared
   confirmation hold and restore focus on cancel. Lifecycle actions that belong
   in an `ActionBar` continue to follow rule 12.
-- **Quiet copying.** Use `Fact.copyValue` or `CopyValue presentation="row"`.
+- **Quiet copying.** Offer copy where it helps: on values someone may need to
+  paste elsewhere and would rather not retype, such as names, addresses,
+  identifiers, versions, specifications, measured figures, labels and exact
+  timestamps. Statuses, availability, yes/no answers, live counts and
+  explanations are read, not copied, so a status page such as a machine's Apps
+  offers no copy at all. Use `Fact.copyValue` or `CopyValue presentation="row"`.
   Text stays selectable with its normal cursor. Only the separate copy icon
-  copies; clicking or hovering a value never changes the clipboard. Keep the
-  icon visible, reserve its space, and give it a keyboard focus ring. Confirm
-  success on the icon and report clipboard failures beside the value. Dates
-  copy their exact timestamps.
+  copies; clicking or hovering a value never changes the clipboard. Hovering a
+  copyable row gives the whole row a subtle wash and shows its copy icon; other
+  rows show none. Reserve the icon's space, reveal it with a focus ring on
+  keyboard focus, and keep it visible on screens without hover. Confirm success
+  on the icon and report clipboard failures beside the value. Dates copy their
+  exact timestamps.
 - **Readable, truthful data.** Copy exact timestamps behind relative dates;
   copying a key/value entry includes both. Missing measurements remain “Not
   reported” or “Not measured”, never invented zeroes or copyable placeholders.
@@ -592,6 +617,31 @@ inspector owns the page trail. Section breadcrumb jumps consume the intervening
 history; peer tab navigation starts a fresh path. Existing forms retain their
 own cancellation and completion callbacks through the shared back prop.
 
+### Returning to the same position
+
+Back and breadcrumbs restore the position last read in that window, including
+independently scrolling panes. Tabs and ordinary links start at the top, even
+when revisiting a page or clicking its already-selected tab. This starts a new
+visit: a later return restores the position read since that reset. Merely showing
+a retained window preserves its position.
+The shared `PageNavigationProvider` owns this behavior on desktop and phone;
+apps must not implement scroll restoration in effect cleanup or reset scrolling
+on return. Capture happens while the outgoing content is still visible, before
+replacing it can clamp the scroll position. A short loading state retains the
+saved target until content arrives. Scrolling or keyboard navigation gives control
+back to the person and cancels a pending restore. Restoration is immediate and
+never animates or moves focus.
+
+Give record headings a stable `Head navigationKey` when their names can change or
+repeat. A workspace with nested views sharing a heading declares its stable view
+identity through `usePageScroll`. Plain pages use their section and local trail.
+Independently reordered scrolling panes may declare `data-os-scroll-id`; dialogs,
+inputs and surfaces with `data-os-scroll-ignore` retain their own scrolling rules.
+Positions are isolated per window, bounded in memory and discarded on close.
+Shared return controls declare `data-os-scroll-navigation="restore"`; shared
+tabs declare `"reset"`, including the desktop and phone section selectors.
+Apps use these controls rather than managing offsets themselves.
+
 ### One wizard for adding
 
 Pressing an Add control runs a wizard (`kit` `Wizard`), whatever is being
@@ -609,7 +659,7 @@ surface in the shell that read as a single thought.
   DNS record's value -- wrapped inside it. Given room (`SPLIT_AT`, 760px of
   pane) the wizard is TWO PANES on the list page's own gutters: the steps on
   the left, still a vertical rail and now standing still, and the open step on
-  the right with the rest of the width, headed by its name and what it asks.
+  the right with the rest of the width, headed by its name.
   Without room it is one column with the open step's body beneath its line.
   That is a different place in the tree rather than a different style, so it
   is measured (`kit/useWide`), not left to a container query. **Width is for
@@ -661,11 +711,16 @@ surface in the shell that read as a single thought.
   "was not added".
 - **Steps are the rail, vertical, at page scale** (`Rail` `scale="page"`), with
   the rail's closed state set: a check is done, a held ring is waiting on you,
-  a pulse is the cluster working, a dimmed ring is not reached. Every step is
-  one line -- its name, then its answer -- so a person can read back what they
-  have said. One step is always open, and its body sits on the text edge with
-  the rail's thread down its left side: there are two left edges on the page
-  and no box. A step nobody has reached is its name and nothing else.
+  a pulse is the cluster working, a dimmed ring is not reached. **Every step
+  says what it is** (memql#6214): its name, and one muted line beneath it --
+  a subtitle of a few words, about 40 characters at most, saying what the step
+  does, reached or not. Once the step is answered its answer takes that line,
+  so a person still reads back what they have said; the two are never stacked.
+  A rail of bare names said nothing to somebody deciding whether to begin. The
+  stage is headed by the open step's name alone: what the step is sits on the
+  rail's line beside it and is not said twice. One step is always open, and
+  its body sits on the text edge with the rail's thread down its left side:
+  there are two left edges on the page and no box.
 - **The floor is the action bar, and it says whose turn it is** (rule 12). The
   state in words on the left; on the right the way out, then the ONE forward
   act, primary last. **The forward act lives nowhere else** -- a step's body

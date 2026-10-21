@@ -117,7 +117,7 @@ export function DescribeRulePage({
       : shadow !== null
         ? "Decided by a shipped rule"
         : simulation === null ? "Compiled" : simulation.refusal === "" ? "Checked" : "Refused";
-  const detail = shadow === null ? undefined : `${whenWords(shadow)} already takes ${routeTitle(shadow.policy)}; change that route instead`;
+  const detail = shadow === null ? undefined : `${whenWords(shadow)} already takes ${routeTitle(shadow.policy)}; change that chain instead`;
 
   return (
     <div className="os-deploy-pane fleet-rule-page">

@@ -12,7 +12,7 @@ import { AskSurface } from "./AskSurface";
 // Both entry points retain the composer while the shared readiness check runs.
 
 export function AskSheet({ dockReserve = 0, embedded = false, onOpenApp }: { dockReserve?: number; embedded?: boolean; onOpenApp?: (appId: string, sectionId?: string, payload?: Record<string, unknown>) => void }) {
-  const { sheet, closeAsk, transport, voice, settings, availability, conversation, liveVoice } = useAsk();
+  const { sheet, closeAsk, transport, voice, uploads, settings, availability, conversation, liveVoice } = useAsk();
   const { actions } = useOs();
   const [maximized, setMaximized] = useState(false);
   const openApp = onOpenApp ?? actions.openApp;
@@ -59,6 +59,8 @@ export function AskSheet({ dockReserve = 0, embedded = false, onOpenApp }: { doc
           variant="sheet"
           onOpenFile={(fileId) => { openApp("files", "browse", { fileId }); if (embedded) closeAsk(); }}
           onOpenWork={(runId, conversationId) => { openApp("nexus", "runs", { runId, conversationId }); closeAsk(); }}
+          uploads={uploads}
+          onManageRoutes={() => { openApp("fleet", "routing", { routingTab: "routes" }); closeAsk(); }}
           autoFocus
         />
       </div>

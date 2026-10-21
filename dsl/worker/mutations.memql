@@ -442,6 +442,16 @@ mutation registration updateWorkerLastSeen {
     /// empty object would overwrite it with a machine that reports nothing --
     /// turning a cockpit's silence into a statement.
     hardware             object
+    /// What the machine can take on now: memory free for a model and the
+    /// models loaded (fleet capacity, routes design record). Re-asserted on
+    /// every flush and OMITTED when the cockpit sent none, for hardware's `??`
+    /// reason: an absent key keeps the stored report, which then ages out on
+    /// its own reportedAt.
+    capacity             object
+    /// What the machine's installer is doing (memql#6229): its stages and how
+    /// far each has come. Re-asserted on every flush and OMITTED when the
+    /// cockpit sent none, for capacity's reason.
+    setup                object
     /// The latest Ping round trip in milliseconds (epic memql#5218, D11),
     /// riding the heartbeat's write for `hardware`'s reason: it is exactly as
     /// fresh as the flush it arrives with and decides nothing, so it is not
@@ -474,7 +484,7 @@ mutation registration updateWorkerLastSeen {
     credentialExpiresAt  string
   }
   update {
-    accept { lastSeenAt, hardware, rttMs, rttAt, clockSkewMs, credentialExpiresAt }
+    accept { lastSeenAt, hardware, capacity, setup, rttMs, rttAt, clockSkewMs, credentialExpiresAt }
     stamp {
       id: args.registrationId
       lastConnectedFromIP: args.lastConnectedFromIP ?? ""

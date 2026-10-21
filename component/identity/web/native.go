@@ -72,6 +72,15 @@ func nativeRefusalBody(status int, heading, message string) map[string]string {
 	return map[string]string{"error": text, "heading": heading, "message": message}
 }
 
+// identityHostedPages render on identity's own origin instead of sending the
+// browser to OS: each exists because being on this origin is its job. GitHub's
+// manifest flow needs a form post OS's policy forbids; the passkey window needs
+// the RP ID's own host (memql#6233).
+var identityHostedPages = map[string]bool{
+	githubconnect.AppSetupStartPath: true,
+	PasskeyWindowPath:               true,
+}
+
 // Native UI trust comes from the installed service configuration, never a
 // proposed setup domain, request Host, or third-party OAuth registration.
 func (s *Server) nativeOrigin(r *http.Request) string {
@@ -149,7 +158,7 @@ func (s *Server) nativeUI(next http.HandlerFunc) http.HandlerFunc {
 				writeNative(w, nativeRefusalBody(status, refusalHeading, refusalMessage))
 				return
 			}
-		} else if r.Method == http.MethodGet && strings.Contains(out.header.Get("Content-Type"), "text/html") && r.URL.Path != githubconnect.AppSetupStartPath {
+		} else if r.Method == http.MethodGet && strings.Contains(out.header.Get("Content-Type"), "text/html") && !identityHostedPages[r.URL.Path] {
 			if origin == "" {
 				http.Error(w, "MemQL OS origin is not configured", http.StatusServiceUnavailable)
 				return

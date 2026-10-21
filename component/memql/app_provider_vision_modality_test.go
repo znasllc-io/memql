@@ -42,6 +42,14 @@ func TestTheAppDoorServesVisionAndNothingItRefused(t *testing.T) {
 	if _, ok := client.(common.ChatStructuredProvider); !ok {
 		t.Error("the app provider does not serve structured chat")
 	}
+	// Plain STREAMING chat, deliberately (design record 2026-10-18-routes):
+	// it is chat delivered as a stream, not a turn MemQL drives, and the app
+	// answers it whole, as one chunk. Without it Ask -- a streaming surface --
+	// read "unavailable" on the Apps route and on any cluster whose only
+	// answering source is an app. The TOOL surfaces below stay refused.
+	if _, ok := client.(common.ChatStreamProvider); !ok {
+		t.Error("the app provider does not serve streaming chat, so Ask cannot use an app")
+	}
 
 	// WHAT IT MUST NOT SERVE, and this is the half a compile-time assertion
 	// cannot state. See the file header on app_provider.go: MemQL drives a
@@ -49,10 +57,6 @@ func TestTheAppDoorServesVisionAndNothingItRefused(t *testing.T) {
 	refused := map[string]bool{
 		"common.ToolCallingChatAIProvider": func() bool {
 			_, ok := client.(common.ToolCallingChatAIProvider)
-			return ok
-		}(),
-		"common.ChatStreamProvider": func() bool {
-			_, ok := client.(common.ChatStreamProvider)
 			return ok
 		}(),
 		"common.ChatStreamWithToolsProvider": func() bool {

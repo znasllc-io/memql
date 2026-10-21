@@ -65,7 +65,7 @@ export function AccountsSection({
 
   if (adding) return <AddAccountWizard create={create} onBack={() => setAdding(false)} onDone={id => { setAdding(false); setOpenId(id); reseed(); }} />;
   if (open && domains) return <DomainSetup account={open} onBack={() => setDomains(false)} onSaved={() => { setDomains(false); reseed(); }} />;
-  if (open) return <div className="os-app-stack"><Head title={accountName(open)} back={{ label: "Accounts", onSelect: () => setOpenId("") }} /><AccountDetail account={open} update={update} archive={archive} onArchived={() => setOpenId("")} onOpenGroup={onOpenGroup} onConfigureDomains={() => setDomains(true)} /></div>;
+  if (open) return <div className="os-app-stack"><Head navigationKey={`account:${open.id}`} title={accountName(open)} back={{ label: "Accounts", onSelect: () => setOpenId("") }} /><AccountDetail account={open} update={update} archive={archive} onArchived={() => setOpenId("")} onOpenGroup={onOpenGroup} onConfigureDomains={() => setDomains(true)} /></div>;
 
   return (
     <div className="os-app-stack">

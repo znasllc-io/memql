@@ -38,7 +38,7 @@ export interface RouteBar {
 }
 
 /** The scope of a route change, said once and quietly (design brief, section 4). */
-export const ROUTE_SCOPE = "Applies to every rule that takes this route";
+export const ROUTE_SCOPE = "Applies to every rule that takes this chain";
 
 /**
  * The scope as the bar says it WHILE UNSAVED -- the moment of saving, beside
@@ -78,7 +78,7 @@ export function routeBar(input: {
   if (input.busy) return { state: "Saving", detail: "", tone: "busy", acts: [] };
   const restorable = input.shipped && input.customized;
   if (input.confirmingRestore && restorable) {
-    return { state: "Restore shipped sources?", detail: "Your changes to this route are removed", tone: "paused", acts: ["keep", "confirmRestore"] };
+    return { state: "Restore shipped sources?", detail: "Your changes to this chain are removed", tone: "paused", acts: ["keep", "confirmRestore"] };
   }
   if (input.dirty) {
     const acts: RouteAct[] = ["cancel"];

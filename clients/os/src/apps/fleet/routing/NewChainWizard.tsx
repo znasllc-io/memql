@@ -13,7 +13,7 @@ import { SourceComposer } from "./SourceComposer";
 import { placementProblem, readSource, routeStatus, servingIndex, type RoutingFacts } from "./sources";
 import { STALE_SENTENCE, refusalWords, routeIdFrom } from "./vocabulary";
 
-// New route: Name -> Sources -> Review, on the shell's one wizard (DESIGN.md,
+// New chain: Name -> Sources -> Review, on the shell's one wizard (DESIGN.md,
 // "One wizard for adding"). The title is the Add control's own words. Each
 // step's forward act is on the floor and nowhere else, and is absent until the
 // step is answered. The Sources step IS the composer -- the same slots, tray
@@ -22,7 +22,7 @@ import { STALE_SENTENCE, refusalWords, routeIdFrom } from "./vocabulary";
 
 type Step = "name" | "sources" | "review";
 
-export function NewRouteWizard({
+export function NewChainWizard({
   routes,
   facts,
   onCancel,
@@ -85,8 +85,8 @@ export function NewRouteWizard({
       sentence: "What to call it.",
       answer: named ? name.trim() : undefined,
       body: (
-        <Field label="Route name">
-          <Input id="fleet-new-route-name" label="Route name" value={name} placeholder="Night shift" onChange={setName} onEnter={() => { if (named) setStep("sources"); }} />
+        <Field label="Chain name">
+          <Input id="fleet-new-route-name" label="Chain name" value={name} placeholder="Night shift" onChange={setName} onEnter={() => { if (named) setStep("sources"); }} />
         </Field>
       ),
     },
@@ -110,6 +110,7 @@ export function NewRouteWizard({
     {
       id: "review",
       name: "Review",
+      sentence: "Check, then create.",
       state: stateOf("review"),
       body: (
         <div className="fleet-route-review">
@@ -126,11 +127,11 @@ export function NewRouteWizard({
       ? named ? { label: "Next", tone: "primary", onAct: () => setStep("sources") } : null
       : step === "sources"
         ? chained ? { label: "Next", tone: "primary", onAct: () => setStep("review") } : null
-        : { label: "Save route", tone: "primary", busy, onAct: () => void save() };
+        : { label: "Save chain", tone: "primary", busy, onAct: () => void save() };
 
   const statusWord =
     step === "name"
-      ? { word: "Name the route", detail: taken ? "A route with that name exists" : "" }
+      ? { word: "Name the chain", detail: taken ? "A chain with that name exists" : "" }
       : step === "sources"
         ? { word: entries.length === 0 ? "Add a source" : "Sources", detail: entries.length === 0 ? "" : status.word }
         : { word: busy ? "Saving" : "Ready to save", detail: "" };
@@ -140,10 +141,10 @@ export function NewRouteWizard({
       <Wizard
         className="fleet-route-wizard"
         icon={<Route aria-hidden />}
-        title="New route"
-        breadcrumbs={[{ label: "Routes", onSelect: onCancel }, { label: "New route" }]}
-        back={{ label: "Routes", onSelect: onCancel }}
-        label="Adding a route"
+        title="New chain"
+        breadcrumbs={[{ label: "Chains", onSelect: onCancel }, { label: "New chain" }]}
+        back={{ label: "Chains", onSelect: onCancel }}
+        label="Adding a chain"
         steps={steps}
         open={step}
         onOpen={(next) => {
@@ -155,10 +156,10 @@ export function NewRouteWizard({
           error === null ? null : error.stale ? (
             <Notice tone="warn" sentence={STALE_SENTENCE} next="Nothing was written. It has been read again, so saving now uses what is there." />
           ) : (
-            <Notice tone="error" sentence="The route was not added." next="Nothing was written. The cluster's own reason is below." detail={error.text} />
+            <Notice tone="error" sentence="The chain was not added." next="Nothing was written. The cluster's own reason is below." detail={error.text} />
           )
         }
-        context={{ page: "New route", step }}
+        context={{ page: "New chain", step }}
       />
       <p role="status" className="os-sr-only">{announcement}</p>
     </>

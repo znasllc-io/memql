@@ -600,6 +600,7 @@ concept user {
   firstName       string  @pii  @description("Given name. Set by the admin via /admin/users/detail (or by the cluster owner via /setup); flows through to the JWT as the OIDC-style `given_name` claim and into the product's profile UI.")
   lastName        string  @pii  @description("Family name. Mirror of firstName -- admin-curated, stamped onto the JWT as `family_name`.")
   primaryEmail    string!  @pii  @description("Canonical email. Verified by the magic-link flow at registration; the dedup key for 'is this Alice already known?'.")
+  avatar          string  @pii  @description("The person's photo as a data: URL (image/webp, image/jpeg or image/png, base64), cropped square and resized in the browser before it is written. Optional; empty means no photo and the initial is shown instead. Written only by setMyAvatar / clearMyAvatar, which stamp the row from actor.userId, and bounded there to 40,000 characters so the row every sign-in reads stays small.")
   phone           string  @pii  @description("E.164 phone number, optional. Set by an admin via /admin/users/detail; required for full app access via the ProfileCompletenessGuard.")
   primaryRole     string  @pii  @description("Free-form job title / role at the org (e.g. 'CEO', 'Engineer'). Distinct from the cluster-wide auth `role` field above; admin-curated, not auth-related.")
   gender          string  @pii  @description("Optional self-identified gender. Free-form string -- the frontend offers a curated list but the backend doesn't enforce one.")

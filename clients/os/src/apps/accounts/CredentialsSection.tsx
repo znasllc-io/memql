@@ -254,7 +254,7 @@ function BillingAccountPage({
   const archived = billingAccountIsArchived(account);
   return (
     <div className="os-app-stack">
-      <Head title={name} back={{ label: "Billing accounts", onSelect: onBack }} />
+      <Head navigationKey={`billing:${account.id}`} title={name} back={{ label: "Billing accounts", onSelect: onBack }} />
 
       <Panel label={`About ${name}`}>
         <Facts>

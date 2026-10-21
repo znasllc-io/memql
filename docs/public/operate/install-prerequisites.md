@@ -18,7 +18,9 @@ extension platforms do not imply local-cluster installer support.
 **The machine holds the whole cluster and its models.** That takes at least
 32 GB of memory on an Apple silicon Mac, or 32 GB of RAM and a GPU with 16 GB
 of VRAM on Linux. [Minimum requirements](minimum-requirements.md#one-machine-the-entire-cluster)
-explains the figures and the recommended sizes.
+explains the figures and the recommended sizes. The wizard checks them before
+it offers to start, and the install's **Checking the hardware** step stops on a
+machine below them.
 
 ## What you do first
 

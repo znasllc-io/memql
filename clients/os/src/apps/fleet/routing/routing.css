@@ -132,6 +132,102 @@ button.fleet-rule-line[draggable="true"] { cursor: grab; }
 /* ---- the Settings side's one quiet link ---- */
 .os-routing-link { align-self: flex-start; }
 
+/* ---- routes (Auto, Local, Apps and yours) ---- */
+.fleet-route-modes .os-record-status { white-space: normal; text-align: right; }
+.fleet-route-yours { display: flex; flex-direction: column; gap: 6px; margin-top: 18px; }
+.fleet-route-yours > .os-head { margin: 0; }
+.fleet-route-yours-empty { margin: 0; }
+.fleet-route-reason { align-self: flex-start; margin: -8px 0 0; font-size: var(--os-text-sm); color: var(--os-warn); }
+.fleet-route-name { display: grid; gap: 6px; max-width: 34rem; }
+.fleet-rules-chains { align-self: center; }
+
+/* A route's board: the machine Model setup board's two columns -- sources on
+ * the left, the jobs they serve on the right -- in the same quiet language. */
+.fleet-route-board { grid-template-columns: minmax(200px, 260px) minmax(0, 1fr); }
+.fleet-route-board[data-read-only] { grid-template-columns: minmax(0, 1fr); }
+.fleet-route-tray { display: grid; gap: 14px; align-content: start; }
+.fleet-route-tray .os-subhead { margin-bottom: 0; }
+.fleet-route-tray-group { display: grid; gap: 8px; }
+.fleet-route-tray-title { font-size: var(--os-text-xs); color: var(--os-muted); }
+.fleet-route-tray .fleet-assignment-models { gap: 8px; }
+.fleet-route-source { align-items: flex-start; padding: 10px 12px; cursor: grab; }
+.fleet-route-source:not([data-ready]) .fleet-assignment-model-body strong { color: var(--os-muted); }
+.fleet-route-source-glyph { display: inline-flex; flex: none; margin-top: 1px; color: var(--os-muted); }
+.fleet-route-source[data-ready] .fleet-route-source-glyph { color: var(--os-ink); }
+.fleet-route-source .fleet-assignment-model-tasks { display: flex; align-items: center; gap: 6px; }
+.fleet-route-tray-act { justify-self: start; }
+
+.fleet-route-jobs { display: grid; gap: 12px; align-content: start; min-width: 0; container: fleet-route-jobs / inline-size; }
+.fleet-route-jobs .os-subhead { margin-bottom: 0; }
+.fleet-route-job-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
+.fleet-route-job { display: flex; flex-direction: column; gap: 8px; min-width: 0; padding: 14px; border: 1px solid var(--os-line); border-radius: var(--os-selection-radius); background: transparent; }
+.fleet-route-job[data-drop-target] { border-color: var(--os-accent); background: color-mix(in srgb, var(--os-accent) 7%, var(--os-plate)); box-shadow: inset 0 0 0 1px var(--os-accent); }
+.fleet-route-job[data-refused] { border-color: var(--os-warn); }
+.fleet-route-job[data-locked] { border-style: dashed; border-color: color-mix(in srgb, var(--os-muted) 40%, var(--os-line)); }
+.fleet-route-job-name { margin-bottom: 0; font-size: var(--os-text-base); font-weight: 500; }
+.fleet-route-job-name svg[aria-label] { color: var(--os-muted); margin-left: auto; }
+.fleet-route-job-meaning { margin: -4px 0 2px; font-size: var(--os-text-xs); color: var(--os-muted); }
+.fleet-route-job-empty { margin: 0; font-size: var(--os-text-sm); color: var(--os-muted); }
+.fleet-route-job-link { align-self: flex-start; font-size: var(--os-text-sm); }
+.fleet-route-job-sources { display: grid; gap: 4px; margin: 0; padding: 0; list-style: none; }
+.fleet-route-chip { position: relative; display: flex; align-items: center; min-width: 0; border: 1px solid var(--os-line); border-radius: var(--os-radius-xs); background: var(--os-plate); }
+.fleet-route-chip-body { display: flex; align-items: center; gap: 8px; flex: 1; min-width: 0; min-height: var(--os-control-h); padding: 0 32px 0 8px; border: 0; border-radius: inherit; background: none; color: var(--os-muted); font: inherit; font-size: var(--os-text-sm); text-align: left; }
+button.fleet-route-chip-body[draggable="true"] { cursor: grab; }
+button.fleet-route-chip-body:focus-visible { outline: 2px solid var(--os-accent); outline-offset: 2px; }
+.fleet-route-chip[data-ready] .fleet-route-chip-body { color: var(--os-ink); }
+.fleet-route-chip-order { flex: none; width: 14px; font-size: var(--os-text-xs); font-variant-numeric: tabular-nums; color: var(--os-muted); text-align: right; }
+.fleet-route-chip-name { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.fleet-route-chip-state { display: inline-flex; margin-left: auto; }
+.fleet-route-chip-remove { position: absolute; right: 2px; top: 50%; transform: translateY(-50%); }
+.fleet-route-job-add { display: inline-flex; align-items: center; gap: 6px; min-height: var(--os-control-h); padding: 0 8px; border: 1px dashed var(--os-accent); border-radius: var(--os-radius-xs); background: transparent; color: var(--os-ink); font: inherit; font-size: var(--os-text-sm); text-align: left; cursor: pointer; }
+.fleet-route-job-add:hover { background: color-mix(in srgb, var(--os-accent) 7%, transparent); }
+.fleet-route-job-add:focus-visible { outline: 2px solid var(--os-accent); outline-offset: 2px; }
+.fleet-route-job-refused { margin: 0; font-size: var(--os-text-xs); color: var(--os-warn); }
+.fleet-route-job-status { margin: auto 0 0; padding-top: 4px; font-size: var(--os-text-xs); color: var(--os-muted); overflow-wrap: anywhere; }
+.fleet-route-job-status[data-ready] { color: var(--os-accent); }
+.fleet-route-follows { margin: 0; }
+
+/* Auto's balance: one quiet track per weight, the recommended value marked. */
+.fleet-weight { display: grid; grid-template-columns: minmax(0, 22rem) 2.5rem; grid-template-rows: auto auto; column-gap: 12px; row-gap: 2px; align-items: center; }
+.fleet-weight-track { position: relative; display: flex; align-items: center; height: var(--os-control-h); }
+.fleet-weight-input { width: 100%; height: 4px; margin: 0; appearance: none; -webkit-appearance: none; border-radius: 2px; background: linear-gradient(to right, var(--os-accent) var(--fleet-weight-fill, 50%), var(--os-line) var(--fleet-weight-fill, 50%)); cursor: pointer; }
+.fleet-weight-input::-webkit-slider-thumb { -webkit-appearance: none; appearance: none; width: 14px; height: 14px; border-radius: 50%; background: var(--os-plate); border: 1.5px solid var(--os-accent); }
+.fleet-weight-input::-moz-range-thumb { width: 14px; height: 14px; border-radius: 50%; background: var(--os-plate); border: 1.5px solid var(--os-accent); }
+.fleet-weight-input:focus-visible { outline: 2px solid var(--os-accent); outline-offset: 4px; }
+.fleet-weight-input:disabled { cursor: default; background: linear-gradient(to right, var(--os-muted) var(--fleet-weight-fill, 50%), var(--os-line) var(--fleet-weight-fill, 50%)); }
+.fleet-weight-input:disabled::-webkit-slider-thumb { border-color: var(--os-muted); }
+.fleet-weight-input:disabled::-moz-range-thumb { border-color: var(--os-muted); }
+.fleet-weight-mark { position: absolute; top: calc(50% + 6px); width: 1px; height: 6px; margin-left: -0.5px; background: var(--os-muted); pointer-events: none; }
+.fleet-weight-value { font-size: var(--os-text-sm); font-variant-numeric: tabular-nums; color: var(--os-ink); text-align: right; }
+.fleet-weight-hint { grid-column: 1 / -1; font-size: var(--os-text-xs); color: var(--os-muted); }
+.fleet-auto-actions { justify-content: flex-end; gap: 20px; margin-top: 4px; }
+.fleet-auto-pick { overflow-wrap: anywhere; }
+.fleet-auto-pick[data-ready] { color: var(--os-ink); }
+.fleet-auto-pick:not([data-ready]) { color: var(--os-muted); }
+.fleet-auto-passed { display: block; font-size: var(--os-text-xs); color: var(--os-muted); overflow-wrap: anywhere; }
+.fleet-auto-budget { margin: 8px 0 0; }
+.fleet-auto-budget[data-state="over"] { color: var(--os-warn); }
+
+/* A board too narrow for the tray beside the jobs puts it above them, as the
+   machine Model setup board does at the same width. */
+@container model-assignment (max-width: 650px) {
+  .fleet-route-board { grid-template-columns: minmax(0, 1fr); }
+}
+
+/* A jobs column too narrow for two cards side by side stacks them. */
+@container fleet-route-jobs (max-width: 560px) {
+  .fleet-route-job-grid { grid-template-columns: minmax(0, 1fr); }
+}
+
+@container fleet-routing (max-width: 760px) {
+  .fleet-route-board { grid-template-columns: minmax(0, 1fr); }
+  .fleet-route-tray .fleet-assignment-models { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
+@container fleet-routing (max-width: 520px) {
+  .fleet-route-job-grid, .fleet-route-tray .fleet-assignment-models { grid-template-columns: minmax(0, 1fr); }
+  .fleet-weight { grid-template-columns: minmax(0, 1fr) 2.5rem; }
+}
+
 /* NARROW: the slot row becomes a vertical chain, the circuit running down its left. */
 @container fleet-routing (max-width: 560px) {
   .fleet-circuit { flex-direction: column; }

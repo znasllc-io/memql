@@ -1,0 +1,83 @@
+{
+  "automation": "os/automations.memql askMessageRouting",
+  "runs": {
+    "invocation | 0 rows": {
+      "input": {
+        "event": {
+          "kind": "unspecified",
+          "payload": {},
+          "topic": "automation.invocation.askMessageRouting"
+        },
+        "rows": 0
+      },
+      "outcome": {
+        "calls": [
+          {
+            "kind": "builtin",
+            "name": "askRouteGoals"
+          },
+          {
+            "args": {
+              "previousError": "",
+              "prompt": "askMessageRouting",
+              "timeoutSeconds": 600
+            },
+            "kind": "builtin",
+            "name": "askRouteDecide"
+          },
+          {
+            "args": {
+              "prompt": "askMessageRouting",
+              "timeoutSeconds": 600
+            },
+            "kind": "builtin",
+            "name": "askRouteDecide"
+          }
+        ],
+        "result": {
+          "output": "intake",
+          "status": "completed"
+        }
+      }
+    },
+    "invocation | 2 rows": {
+      "input": {
+        "event": {
+          "kind": "unspecified",
+          "payload": {},
+          "topic": "automation.invocation.askMessageRouting"
+        },
+        "rows": 2
+      },
+      "outcome": {
+        "calls": [
+          {
+            "kind": "builtin",
+            "name": "askRouteGoals"
+          },
+          {
+            "args": {
+              "previousError": "",
+              "prompt": "askMessageRouting",
+              "timeoutSeconds": 600
+            },
+            "kind": "builtin",
+            "name": "askRouteDecide"
+          },
+          {
+            "args": {
+              "prompt": "askMessageRouting",
+              "timeoutSeconds": 600
+            },
+            "kind": "builtin",
+            "name": "askRouteDecide"
+          }
+        ],
+        "result": {
+          "output": "intake",
+          "status": "completed"
+        }
+      }
+    }
+  }
+}

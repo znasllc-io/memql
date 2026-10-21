@@ -67,7 +67,7 @@ vi.mock("@znasllc-io/memql-sdk-core/identity", () => ({
 const { MachinesProvider } = await import("../../src/live/machines");
 const { ModelsSection } = await import("../../src/apps/fleet/models/ModelsSection");
 const { MachinesTab } = await import("../../src/apps/fleet/routing/MachinesTab");
-const { renderRouting, routingConnection, routeRow } = await import("./routingHarness");
+const { renderRouting, routingConnection, routeRow, routeJobs, shippedRouteModes } = await import("./routingHarness");
 const { fireEvent } = await import("@testing-library/react");
 const { AppsSection } = await import("../../src/apps/fleet/apps/AppsSection");
 const { WorkbenchesSection } = await import("../../src/apps/fleet/workbenches/WorkbenchesSection");
@@ -725,7 +725,7 @@ const CASES: ActsCase[] = [
   },
 
   {
-    // Fleet's old Policies section: the route list, and the Add that makes one.
+    // The routes a person picks in Ask, and the Add that makes one of their own.
     what: "Routing > Routes",
     open: async () => {
       h.connection = routingConnection().connection;
@@ -733,12 +733,71 @@ const CASES: ActsCase[] = [
     },
     acts: [
       { name: "Routing views", count: 1 },
-      { name: "Routes", count: 2, note: "the tab and the list" },
+      { name: "Routes", count: 1, note: "the tab" },
       { name: "Rules", count: 1 },
       { name: "Machines", count: 1 },
       { name: "History", count: 1 },
 
+      { name: "Built-in routes", count: 1 },
+      { name: /^Open Auto,/, count: 1 },
+      { name: /^Open Local,/, count: 1 },
+      { name: /^Open Apps,/, count: 1 },
       { name: "New route", count: 1 },
+    ],
+  },
+
+  {
+    // A route's jobs beside the sources: select then Add, drag, the keys, and
+    // the bar's acts where they are legal.
+    what: "Routing > Routes -- a route's page",
+    open: async () => {
+      const modes = shippedRouteModes().map((r) => (r.id === "local" ? { ...r, customized: true, jobs: routeJobs(["fleet:fastest"], ["fleet:strongest", "app:claude-code"], ["fleet:strongest"]) } : r));
+      h.connection = routingConnection({ modes }).connection;
+      await renderRouting("owner", { intent: { id: "l", payload: { routingRoute: "local" } } });
+    },
+    acts: [
+      { name: "Sources", count: 1 },
+      { name: /^Strongest local model:/, count: 1 },
+      { name: /^Claude Code:/, count: 1 },
+      { name: /^Codex:/, count: 1, note: "on no machine, and still offered" },
+      { name: /^Cheapest vendor:/, count: 1 },
+      { name: "Quick tasks", count: 1 },
+      { name: "Main work", count: 1 },
+      { name: "Deep reasoning", count: 1 },
+      { name: "Search and memory", count: 1 },
+      { name: /^1\. Strongest local model,/, count: 2, note: "Main work and Deep reasoning" },
+      { name: "Remove Claude Code from Main work", count: 1 },
+      { name: "Restore default", count: 1, note: "a changed built-in" },
+      { name: "Save route", count: 0, note: "untouched" },
+      { name: "Delete", count: 0, note: "a built-in is never deleted" },
+    ],
+  },
+
+  {
+    // Auto: the balance an owner tunes, the budget, and what it picks now.
+    what: "Routing > Routes -- Auto",
+    open: async () => {
+      h.connection = routingConnection().connection;
+      await renderRouting("owner", { intent: { id: "a", payload: { routingRoute: "auto" } } });
+    },
+    acts: [
+      { name: "Speed", count: 1 },
+      { name: "Cost", count: 1 },
+      { name: "Quality", count: 1 },
+      { name: "Save balance", count: 0, note: "untouched" },
+      { name: "Reset to recommended", count: 0, note: "the balance is the recommended one" },
+    ],
+  },
+
+  {
+    // Fleet's old Policies section, one step under Rules: the chain list and its Add.
+    what: "Routing > Rules > Chains",
+    open: async () => {
+      h.connection = routingConnection().connection;
+      await renderRouting("owner", { intent: { id: "c", payload: { routingTab: "chains" } } });
+    },
+    acts: [
+      { name: "New chain", count: 1 },
       { name: /^Open Local first,/, count: 1 },
       { name: /^Open Embeddings,/, count: 1 },
     ],
@@ -746,10 +805,10 @@ const CASES: ActsCase[] = [
 
   {
     // "Edit sources", add/remove/reorder, and the one-line description.
-    what: "Routing > Routes -- a route's page",
+    what: "Routing > Rules > Chains -- a chain's page",
     open: async () => {
       h.connection = routingConnection({ routes: [routeRow("localFirst", "fleet:strongest", ["app:*", "federation:cheapest"], { customized: true })] }).connection;
-      await renderRouting("owner");
+      await renderRouting("owner", { intent: { id: "c", payload: { routingTab: "chains" } } });
       await click(screen.getByRole("button", { name: /^Open Local first,/ }));
     },
     acts: [
@@ -770,8 +829,8 @@ const CASES: ActsCase[] = [
       { name: "Add specific source", count: 0, note: "absent until something is typed; Enter adds too" },
       // The rules a change reaches (the old "Used by task rules"), one click to them.
       { name: /^Taken by \d+ rules?$/, count: 1 },
-      { name: "Restore shipped", count: 1, note: "a changed shipped route" },
-      { name: "Save route", count: 0, note: "untouched" },
+      { name: "Restore shipped", count: 1, note: "a changed shipped chain" },
+      { name: "Save chain", count: 0, note: "untouched" },
     ],
   },
 
@@ -804,7 +863,7 @@ const CASES: ActsCase[] = [
       { name: "Name", count: 1 },
       { name: "the level asked for", count: 1 },
       { name: "Value for the call's tag", count: 1 },
-      { name: "Route", count: 1 },
+      { name: "Chain", count: 1 },
       { name: "Ask for this level instead", count: 1 },
       { name: "When nothing there is ready", count: 1 },
       { name: "Precedence", count: 1 },

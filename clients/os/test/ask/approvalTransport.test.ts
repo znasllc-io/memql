@@ -38,16 +38,17 @@ it("reports a saved-answer resume failure instead of clearing the question",asyn
  await expect(transport.answerQuestion("progress",{value:"retry"})).rejects.toThrow("Saved work could not resume");
 });
 
-it("records active-work guidance through the generated builtin with exact target and request identity", async () => {
-  const request = { targetEpoch: "opaque-epoch", runId: "existing-run", conversationId: "original", requestId: "same-guidance", prompt: "Keep the review focused." };
-  const receipt = { ...request, status: "queued", turn: { id: "human-turn", prompt: request.prompt, guidanceTargetRunId: request.runId, guidanceStatus: "queued", answerOnly: true, answer: "", state: "done", startedAt: "2026-10-13T10:00:00Z", activity: [] } };
-  const { transport, sendAndWait, stream } = setup(receipt);
-  expect(await transport.guideWork(request)).toMatchObject(receipt);
-  expect(sendAndWait).toHaveBeenCalledWith(expect.objectContaining({ executeQuery: expect.objectContaining({ query: 'builtin askGuideWork(targetEpoch: "opaque-epoch", runId: "existing-run", conversationId: "original", requestId: "same-guidance", prompt: "Keep the review focused.")' }) }), undefined);
+it("answers a stop question through the generated builtin and trusts only the decision the cluster saved", async () => {
+  const request = { conversationId: "original", turnId: "never-mind", runId: "tucson-run", decision: "stop" as const };
+  const { transport, sendAndWait, stream } = setup({ conversationId: "original", turnId: "never-mind", runId: "tucson-run", decision: "stopped" });
+  await expect(transport.decideStop(request)).resolves.toBeUndefined();
+  expect(sendAndWait).toHaveBeenCalledWith(expect.objectContaining({ executeQuery: expect.objectContaining({ query: 'builtin askStopDecision(conversationId: "original", turnId: "never-mind", runId: "tucson-run", decision: "stop")' }) }), undefined);
+  // The cluster saved Stop, so Keep was not recorded.
+  await expect(transport.decideStop({ ...request, decision: "keep" })).rejects.toThrow("The cluster did not confirm this decision.");
   expect(stream).not.toHaveBeenCalled();
 });
 
-it("refuses guidance before dispatch when the cluster connection is unavailable", async () => {
+it("refuses a stop decision before dispatch when the cluster connection is unavailable", async () => {
   const transport = new SdkAskTransport(() => null);
-  await expect(transport.guideWork({ targetEpoch: "epoch", runId: "run", conversationId: "chat", requestId: "same", prompt: "Guidance" })).rejects.toThrow("Not connected to the cluster.");
+  await expect(transport.decideStop({ conversationId: "chat", turnId: "turn", runId: "run", decision: "keep" })).rejects.toThrow("Not connected to the cluster.");
 });

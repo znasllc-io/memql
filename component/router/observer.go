@@ -293,6 +293,7 @@ func buildRecord(
 		Degraded:         resolved.Decision.Degraded,
 		Rule:             resolved.Decision.Rule,
 		Policy:           resolved.Decision.Policy,
+		Route:            resolved.Decision.Route,
 		Door:             resolved.Decision.Door,
 		Considered:       considered,
 		Touches:          resolved.Decision.Touches,

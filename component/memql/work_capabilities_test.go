@@ -64,6 +64,32 @@ func TestCapabilityShortlistIncludesUsableContractsWithoutUnboundedContext(t *te
 	require.Error(t, err)
 }
 
+// work.workRetitleRun renames a goal because a person's message changed what it
+// is about, and the Ask engine is its one caller. An agent that found it through
+// capability discovery could rename a goal when nobody had said anything, so it
+// is kept off the agent's tools the way createGoal is. The control is the same
+// kind of function, from the same file, under the same caller: only the name
+// differs.
+func TestRetitleRunIsNotOfferedAsAnAgentCapability(t *testing.T) {
+	previous := auth.InstalledCapabilityCatalog()
+	auth.SetCapabilityCatalog(nil)
+	t.Cleanup(func() { auth.SetCapabilityCatalog(previous) })
+	e := &MemQLEngine{functions: newFunctionRegistry()}
+	offered := map[string]*Function{}
+	for _, name := range []string{"workRetitleRun", "workRecordNote"} {
+		fn := &Function{Name: name, FunctionKind: "builtin", Enabled: true, Origin: "records/builtins.memql"}
+		require.NoError(t, e.functions.add(fn))
+		offered[name] = fn
+	}
+	ctx := askTestActor()
+	require.True(t, e.workCapabilityAllowed(ctx, offered["workRecordNote"]), "the control would be offered, so the exclusion is what hides the other")
+	require.False(t, e.workCapabilityAllowed(ctx, offered["workRetitleRun"]))
+	nodes, err := e.workCapabilitiesBuiltin(ctx, map[string]any{"search": "work"}, 0)
+	require.NoError(t, err)
+	require.Contains(t, string(nodes[0].Payload), "workRecordNote")
+	require.NotContains(t, string(nodes[0].Payload), "workRetitleRun")
+}
+
 func TestCapabilitySearchRanksPurposeAboveIncidentalImplementationWords(t *testing.T) {
 	for _, tc := range []struct{ search, name, purpose, incidental string }{
 		{"library file read content", "library.libraryDocumentVersion", "Read the text content of a saved Library file.", "library.libraryFileBySha256"},

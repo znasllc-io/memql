@@ -6,10 +6,11 @@ import { resolveThemePack } from "../src/themes/registry";
 import { MachinesProvider } from "../src/live/machines";
 import { fakeConnection, machineRow, appSessionRow, shareDirectoryRow, builtinReply } from "../test/fleet/harness";
 import { withSession } from "../test/deployables/harness";
+import { deviceSample } from "./fleetDeviceScenes";
 
 type Frame = ComponentType<{ fallback: string; children: ReactNode }>;
 export function fleetEquipmentScenes(Frame: Frame) {
-  return Object.fromEntries(["populated", "apps", "apps-missing", "apps-offline", "activity", "activity-empty", "activity-error", "models", "models-empty", "models-error", "models-save-error", "models-pending", "models-bound", "details", "details-empty", "labels", "labels-empty", "at-limit", "empty", "error", "sharing", "sharing-people", "sharing-picker", "sharing-empty", "sharing-error", "sharing-pending"].map(state => [`fleet-equipment-${state}`, {
+  return Object.fromEntries(["populated", "apps", "apps-missing", "apps-offline", "activity", "activity-scroll", "activity-empty", "activity-error", "models", "models-automatic", "models-empty", "models-error", "models-save-error", "models-pending", "models-bound", "details", "details-empty", "labels", "labels-empty", "at-limit", "empty", "error", "sharing", "sharing-people", "sharing-picker", "sharing-empty", "sharing-error", "sharing-pending"].map(state => [`fleet-equipment-${state}`, {
     connect: () => {
       const shareDirectory = shareDirectoryRow({ id: "studio", people: state === "sharing-empty" ? [] : [{ id: "ana", name: "Ana Ruiz", detail: "" }, { id: "bo", name: "Bo Chen", detail: "" }], groups: state === "sharing-empty" ? [] : [{ id: "design", name: "Design", members: 4 }, { id: "ops", name: "Operations", members: 7 }] });
       if (state === "sharing-picker") {
@@ -27,6 +28,9 @@ export function fleetEquipmentScenes(Frame: Frame) {
         operatorLabels: { tier: "production" },
         hardware: { chip: "Apple M4 Pro", memoryBytes: 51539607552, cpuCores: 12, gpu: { name: "Apple M4 Pro", backend: "metal", vramBytes: 0 }, osVersion: "macOS", diskFreeBytes: 264140488704, reportedAt: new Date().toISOString(), runtimes: [{ name: "ollama", version: "0.12.0" }] },
       };
+      // `&device=<kind>` draws the machine as that kind (fleetDeviceScenes).
+      const sample = deviceSample(new URLSearchParams(window.location.search).get("device"));
+      if (sample) currentMachine = { ...currentMachine, hardware: sample.hardware };
       if (state === "labels") currentMachine.operatorLabels = { region: "us-west", room: "Studio", tier: "production", team: "Design", gpu: "metal", purpose: "Model inference", availability: "Office hours" };
       if (state === "labels-empty") currentMachine.operatorLabels = {};
       if (state === "details-empty") currentMachine = { ...currentMachine, labels: {}, hardware: {} };
@@ -34,7 +38,7 @@ export function fleetEquipmentScenes(Frame: Frame) {
         apps: state === "apps-missing" ? [{ id: "claude-code", label: "Claude Code", allowed: false, signedIn: false, subscription: "unknown", version: "2.1.0" }] : [{ id: "claude-code", label: "Claude Code", allowed: true, signedIn: true, subscription: "unknown", version: "2.1.0" }, { id: "codex", label: "Codex", allowed: true, signedIn: true, subscription: "present", version: "0.118.0" }],
         ...(state === "apps-offline" ? { connectedNodeId: "", lastSeenAt: "2026-01-01T00:00:00Z" } : {}),
       };
-      const activityRows = state === "activity-empty" ? [] : [
+      const activityRows = state === "activity-scroll" ? Array.from({ length: 40 }, (_, i) => ({ id: `scroll-${i}`, kind: "model", label: `Activity ${i + 1}`, status: "succeeded", ownerUserId: "me", workerId: "studio", startedAt: new Date(Date.UTC(2026, 9, 18, 22, 0) - i * 60_000).toISOString() })) : state === "activity-empty" ? [] : [
         { id: "call-a", kind: "model", label: "qwen3.8:27b · chat", status: "running" },
         { id: "call-b", kind: "model", label: "qwen3-embedding:0.6b · embedding", status: "queued" },
         { id: "call-c", kind: "tool", label: "fs.read", status: "succeeded" },
@@ -56,6 +60,8 @@ export function fleetEquipmentScenes(Frame: Frame) {
         { modelId: "qwen3.5:122b", purposes: ["conversation", "structured", "tools", "vision"], memoryBytes: 90e9, sizeBytes: 81e9, blocked: "Needs more model memory", installBlocked: "Needs more model memory" },
       ].map(m => ({ runtime: "ollama", blocked: "", installBlocked: "", installed: state !== "models-empty" && m.modelId !== "qwen3.5:122b", source: "https://ollama.com/library/" + m.modelId, reviewedAt: "2026-10-15T00:00:00Z", ...m })) };
       Object.assign(setup, { suggestedChoices: setup.choices });
+      // Nothing saved yet: the engine still suggests a pick for each task.
+      if (state === "models-automatic") Object.assign(setup, { revision: "", choices: {} });
       if (state === "models-bound") Object.assign(setup, { boundEmbeddingModel: "qwen3-embedding:0.6b" });
       connection.query.fleetModelSetup = vi.fn(async () => {
         if (state === "models-error") throw new Error("Connection interrupted");
@@ -143,6 +149,6 @@ export function fleetEquipmentScenes(Frame: Frame) {
 function EquipmentScene() {
   const { actions } = useOs();
   useEffect(() => { actions.setThemePack(resolveThemePack(new URLSearchParams(window.location.search).get("theme") ?? "graphite").id); }, [actions]);
-  const [section, setSection] = useState("machines");
+  const [section, setSection] = useState(new URLSearchParams(window.location.search).get("section") ?? "machines");
   return <FleetApp sectionId={section} navigate={setSection} askContext={() => {}} store={{ load: () => ({ version: 1, defaultSection: "machines", showRevoked: false }), save: () => {} }} />;
 }

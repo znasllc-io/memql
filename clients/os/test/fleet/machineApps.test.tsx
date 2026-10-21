@@ -9,12 +9,23 @@ const { fakeConnection, withSession, machineRow, rowsResult } = await import("./
 afterEach(() => { cleanup(); vi.clearAllMocks(); });
 const now = new Date();
 function machine(over = {}) { return machineFromRow(machineRow({ id: "machine", ownerUserId: "me", lastSeenAt: now.toISOString(), connectedNodeId: "agent", apps: [], ...over })); }
+/** The section's acts, leaving out the facts' copy icons. */
+function acts(scope: { queryAllByRole: (role: "button") => HTMLElement[] }) { return scope.queryAllByRole("button").filter(button => !/^Copy /.test(button.getAttribute("aria-label") ?? "")); }
 it("keeps both supported apps visible with all facts and no disclosures", () => {
  h.connection = fakeConnection(); render(withSession(<MachineApps machine={machine({ apps: [{ id: "codex", signedIn: true, allowed: true, subscription: "present" }] })} now={now} />, { userId: "me" }));
  expect(within(screen.getByRole("region", { name: "Claude Code" })).getByText("Not installed")).toBeTruthy();
  const codex = within(screen.getByRole("region", { name: "Codex" }));
  expect(codex.getByText("Ready")).toBeTruthy(); expect(codex.getByText("Active")).toBeTruthy(); expect(codex.getByText("Allowed and signed in")).toBeTruthy();
- expect(codex.queryByRole("button")).toBeNull();
+ expect(acts(codex)).toEqual([]);
+});
+it("reads as a status page with no copy, and offers the allow command for an app that needs it", () => {
+ h.connection = fakeConnection(); render(withSession(<MachineApps machine={machine({ apps: [{ id: "codex", signedIn: true, allowed: true, subscription: "present", version: "2.1.0" }, { id: "claude-code", signedIn: true, allowed: false }] })} now={now} />, { userId: "me" }));
+ const codex = within(screen.getByRole("region", { name: "Codex" }));
+ expect(codex.getByText("2.1.0")).toBeTruthy();
+ expect(codex.queryAllByRole("button", { name: /^Copy / })).toEqual([]);
+ const claude = within(screen.getByRole("region", { name: "Claude Code" }));
+ expect(claude.getByText("Allow Claude Code")).toBeTruthy();
+ expect(claude.queryAllByRole("button", { name: /^Copy (Status|Installed|Availability|Subscription|Version)$/ })).toEqual([]);
 });
 it("distinguishes permission, sign-in, missing inventory, offline and removed states", () => {
  const m = machine({ apps: [{ id: "codex", signedIn: true, allowed: false }] }); const app = m.apps[0]!;
@@ -29,7 +40,7 @@ it("starts one targeted harness goal, opens it, and waits for reported readiness
  let finish!: (value: any) => void; c.query.createGoal.mockReturnValue(new Promise(resolve => { finish = resolve; }));
  render(withSession(<MachineApps machine={machine()} now={now} />, { userId: "me" }));
  const claude = within(screen.getByRole("region", { name: "Claude Code" }));
- fireEvent.click(claude.getByRole("button", { name: "Set up" })); fireEvent.click(claude.getByRole("button"));
+ const setup = claude.getByRole("button", { name: "Set up" }); fireEvent.click(setup); fireEvent.click(setup);
  expect(c.query.createGoal).toHaveBeenCalledTimes(1);
  expect(c.query.createGoal.mock.calls[0]![0]).toMatchObject({ input: { registrationId: "machine", appId: "claude-code" }, noPaidProviders: true });
  await act(async () => finish(rowsResult([{ runId: "setup-run" }])));
@@ -52,6 +63,6 @@ it("keeps reported app facts visible without offering setup when apps are disabl
  const codex = within(screen.getByRole("region", { name: "Codex" }));
  expect(codex.getByText("Active")).toBeTruthy();
  expect(codex.queryByText("Ready")).toBeNull();
- expect(screen.queryByRole("button")).toBeNull();
+ expect(acts(screen)).toEqual([]);
  expect(c.query.createGoal).not.toHaveBeenCalled();
 });

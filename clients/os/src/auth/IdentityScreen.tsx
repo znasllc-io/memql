@@ -4,10 +4,10 @@ import { Fingerprint } from "lucide-react";
 import { useAuth } from "./AuthProvider";
 import { nativeIdentity, oauthFields, value, IdentityRequestError, type IdentityPage } from "./nativeIdentity";
 import { Wizard } from "../kit/Wizard";
-import { OwnershipWizard } from "./OwnershipWizard";
+import { OWNERSHIP_STEP_SUBTITLES, OwnershipWizard } from "./OwnershipWizard";
 import { EntryLayout } from "../kit/EntryLayout";
 import { EntryPending } from "../kit/EntryPending";
-import { loginWithPasskey, onlySecurityKeys, registerPasskey } from "./passkeys";
+import { deviceAuthenticatorName, loginWithPasskey, onlySecurityKeys, passkeyWindowRemembered, registerPasskey, type PasskeyPlace } from "./passkeys";
 import { Field, Button, Head } from "../kit/controls";
 import { IdentityAccount } from "../apps/identity/IdentityAccount";
 import { SignInPage, signInProblem, type SignInProblem } from "./SignInPage";
@@ -79,6 +79,12 @@ export function IdentityScreen({ initialPath, embedded = false }: { initialPath:
   }, [page?.page]);
   const data = page?.data || {};
   const submit = (next: string, form: Record<string, string>) => { if (!busy) void load(next, form); };
+  // ONE PRESS FROM THE WIZARD TO THE PROMPT. "Create passkey" on the local
+  // wizard's last step claims the cluster, and the passkey page that comes
+  // back opens this device's prompt by itself instead of asking for a second
+  // press of the same thing. If the browser will not open it without a fresh
+  // press (or the person cancels), the page's own button is still there.
+  const autoPasskey = useRef(false);
   const run = async (action: () => Promise<void>, signingIn = false) => {
     if (actionPending.current || busy) return;
     actionPending.current = true;
@@ -89,6 +95,29 @@ export function IdentityScreen({ initialPath, embedded = false }: { initialPath:
       else setError(err instanceof Error ? err.message : "Identity operation failed");
     } finally { actionPending.current = false; setBusy(false); setPasskeyPending(false); }
   };
+  // The owner's passkey for a cluster being claimed, created on this device
+  // unless the person asked for another one.
+  const completeOwnerPasskey = (place?: PasskeyPlace) => void run(async () => {
+    try {
+      const destination = await registerPasskey(config, `Bootstrap ${value(page?.data || {}, "EnrollmentToken")}`, "Owner passkey", place);
+      if (!destination) throw new Error("Setup is still incomplete. Retry this step.");
+      window.location.assign(destination);
+    } catch (err) {
+      // A cancelled or refused prompt is the person's answer, not a fault.
+      if (err instanceof DOMException && err.name === "NotAllowedError") throw new Error("No passkey was created. Try again when you are ready.");
+      throw err;
+    }
+  });
+  useEffect(() => {
+    if (page?.page !== "setup_passkey" || busy || !autoPasskey.current) return;
+    autoPasskey.current = false;
+    // A passkey window opens only from a press, so it waits for the button.
+    if (typeof PublicKeyCredential === "undefined" || passkeyWindowRemembered()) return;
+    completeOwnerPasskey();
+    // Once per arrival from the wizard's press; completeOwnerPasskey is
+    // rebuilt every render and must not re-arm it.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [page?.page, busy]);
   const field = (name: string, label: string, type = "text") => <Field label={label}><input className="os-input" aria-label={label}
     type={type} value={fields[name] || ""} onChange={e => setFields(f => ({ ...f, [name]: e.target.value }))} /></Field>;
   const act = (label: string, onClick: () => void) => <Button tone="primary" disabled={busy} onClick={onClick}>{label}</Button>;
@@ -120,7 +149,10 @@ export function IdentityScreen({ initialPath, embedded = false }: { initialPath:
 
   if (leaving || (!page && busy && !embedded)) return <EntryPending label={leaving ? "Completing sign-in" : "Opening identity"} />;
 
-  if (page?.page === "setup_wizard") return <EntryLayout><OwnershipWizard data={data} busy={busy} error={error} submit={submit} /></EntryLayout>;
+  if (page?.page === "setup_wizard") return <EntryLayout><OwnershipWizard data={data} busy={busy} error={error} submit={(next, form) => {
+    if (next === "/setup" && data.Local === true) autoPasskey.current = true;
+    submit(next, form);
+  }} /></EntryLayout>;
 
   // A LOCAL installation names its owner at install time, so its first owner
   // step is the last stop of the ownership wizard, not a separate card: the
@@ -128,35 +160,35 @@ export function IdentityScreen({ initialPath, embedded = false }: { initialPath:
   if (page?.page === "setup_resume" && data.Local === true && data.HasProof !== true) {
     const steps = ["Organization and owner", "Your installation", "Joining the cluster", "Register passkey"];
     const valid = /^[^\s@]+@[^\s@]+$/.test((fields.email || "").trim());
-    const proceed = () => { if (valid) submit("/auth/setup/resume", { ...oauthFields(data), ...fields }); };
+    const proceed = () => { if (valid) { autoPasskey.current = true; submit("/auth/setup/resume", { ...oauthFields(data), ...fields }); } };
     return <EntryLayout><Wizard leadingIcon={<Mark />} icon={<Fingerprint />} title="Register owner passkey"
       lead={LOCAL_OWNER_LEAD}
       label="Ownership setup" open="passkey" onOpen={() => {}}
-      steps={steps.map((name, i) => ({ id: i === steps.length - 1 ? "passkey" : String(i), name, state: i === steps.length - 1 ? "open" : "done",
+      steps={steps.map((name, i) => ({ id: i === steps.length - 1 ? "passkey" : String(i), name, sentence: OWNERSHIP_STEP_SUBTITLES[name], state: i === steps.length - 1 ? "open" : "done",
         body: i === steps.length - 1 ? <form className="os-identity-fields" onSubmit={event => { event.preventDefault(); if (!busy) proceed(); }}><p>Confirm the owner email used during installation.</p>{field("email", "Owner email", "email")}</form> : undefined }))}
       notices={error ? <p role="alert">{error}</p> : undefined}
       status={{ word: busy ? "Checking the owner email" : valid ? "Your turn" : "Enter the owner email", tone: busy ? "busy" : "none" }}
-      acts={busy || !valid ? [] : [{ label: "Continue to passkey", tone: "primary", onAct: proceed }]} /></EntryLayout>;
+      acts={busy || !valid ? [] : [{ label: "Create passkey", tone: "primary", onAct: proceed }]} /></EntryLayout>;
   }
 
   if (page?.page === "setup_passkey") {
     const steps = ["Organization and owner", "Your installation", "Joining the cluster", ...(data.Local === true ? [] : ["Verify email"]), "Register passkey"];
-    const complete = () => void run(async () => {
-      const destination = await registerPasskey(config, `Bootstrap ${value(data, "EnrollmentToken")}`, "Owner passkey");
-      if (!destination) throw new Error("Setup is still incomplete. Retry this step.");
-      window.location.assign(destination);
-    });
+    const authenticator = deviceAuthenticatorName();
+    const complete = completeOwnerPasskey;
     return <EntryLayout><Wizard leadingIcon={<Mark />} icon={<Fingerprint />} title={data.Local === true ? "Register owner passkey" : "Finish ownership setup"}
       lead={data.Local === true ? LOCAL_OWNER_LEAD : "Email verified. Register a passkey before you can enter MemQL OS."}
       label="Ownership setup" open="passkey" onOpen={() => {}}
-      steps={steps.map((name, i) => ({ id: i === steps.length - 1 ? "passkey" : String(i), name, state: i === steps.length - 1 ? "open" : "done", body: <>
+      steps={steps.map((name, i) => ({ id: i === steps.length - 1 ? "passkey" : String(i), name, sentence: OWNERSHIP_STEP_SUBTITLES[name], state: i === steps.length - 1 ? "open" : "done", body: <>
         <p>{securityKeyOnly
           ? "This browser can save a passkey only to a security key. Without one, use Chrome, which can save it to your Google account or your phone."
-          : "Create a passkey with your device or security key. Your browser will ask you to confirm."}</p>
-        <p>Canceling leaves setup incomplete. You can retry this step.</p></> }))}
+          : authenticator ? `Create your passkey with ${authenticator}.` : "Your browser will ask you to confirm the passkey."}</p></> }))}
       notices={error ? <p role="alert">{error}</p> : undefined}
-      status={{ word: busy ? "Waiting for passkey" : "Passkey required", tone: busy ? "busy" : "none" }}
-      acts={busy ? [] : [{ label: data.HasProof ? "Finish setup" : "Create passkey and finish", tone: "primary", onAct: complete }, ...(error ? [{ label: "Reload setup", text: true, onAct: () => window.location.assign("/") }] : [])]} /></EntryLayout>;
+      status={{ word: busy ? "Waiting for your passkey" : "Passkey required", tone: busy ? "busy" : "none" }}
+      acts={busy ? [] : [
+        ...(error ? [{ label: "Reload setup", text: true, onAct: () => window.location.assign("/") }] : []),
+        ...(securityKeyOnly || data.HasProof ? [] : [{ label: "Use another device", text: true, onAct: () => complete("other") }]),
+        { label: passkeyWindowRemembered() ? "Open window" : data.HasProof ? "Finish setup" : "Create passkey", tone: "primary", onAct: () => complete() },
+      ]} /></EntryLayout>;
   }
 
   if (page?.page === "login") return <SignInPage data={data} clientId={config.oauthClientId} fields={fields}

@@ -244,7 +244,11 @@ func TestStrictAutomationBoot_EmbeddedTreeIsClean(t *testing.T) {
 // 178 -> 179: agentWorkReplyCompletion, the bounded missing-evidence policy.
 // 179 -> 182: pipelineArtifactRetentionPolicy, retirePipelineArtifacts and
 // sweepPipelineArtifacts; measured by the strict loader in PR #6270 CI.
-const shippedAutomationCount = 182
+// 182 -> 184: releasePublishedInputRetentionPolicy and sweepPublishedReleaseInputs;
+// measured by the strict loader in the native retention release.
+// +1 askMessageRouting from the consolidated Ask routing PRs; measured by
+// TestStrictAutomationBoot_EmbeddedTreeIsClean on 2026-10-21.
+const shippedAutomationCount = 185
 
 //
 // 56 -> 57 in epic memql#5168 (the per-account front door):

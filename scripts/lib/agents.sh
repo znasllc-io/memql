@@ -178,7 +178,7 @@ function json_has_value() {
             | jq -e --arg f "$field" --arg w "$want" \
                 'map(select(.[$f]? == $w)) | length > 0' >/dev/null 2>&1
     else
-        printf '%s' "$json" | tr -d ' \n\t' | grep -qF "\"$field\":\"$want\""
+        printf '%s' "$json" | tr -d ' \n\t' | grep -F "\"$field\":\"$want\"" >/dev/null
     fi
 }
 

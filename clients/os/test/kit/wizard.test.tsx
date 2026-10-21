@@ -81,12 +81,25 @@ describe("the wizard", () => {
     expect(screen.queryByRole("button", { name: /^Checks/ })).toBeNull();
   });
 
-  it("names a step nobody has reached and says nothing more about it", () => {
+  // EVERY STEP SAYS WHAT IT IS (memql#6214): reached or not, its subtitle sits
+  // on the line beneath its name, until an answer takes that line.
+  it("puts a subtitle under every step until it is answered, in one column", () => {
     mount();
-    expect(screen.getByText("Checks")).toBeTruthy();
-    expect(screen.queryByText("Online, steady, and what you asked for.")).toBeNull();
-    // The open step does say what it is for.
-    expect(screen.getByText("One line, on the machine itself.")).toBeTruthy();
+    const items = [...screen.getByRole("list", { name: "Adding a machine" }).querySelectorAll(":scope > li")] as HTMLElement[];
+    // A step nobody has reached still says what it is...
+    expect(within(items[3]!).getByText("Online, steady, and what you asked for.")).toBeTruthy();
+    // ...and so does the open one.
+    expect(within(items[1]!).getByText("One line, on the machine itself.")).toBeTruthy();
+    // An answered step reads back its answer instead, never both.
+    expect(within(items[0]!).getByText("studio-mac-mini")).toBeTruthy();
+    expect(screen.getAllByText("One line, on the machine itself.")).toHaveLength(1);
+  });
+
+  it("replaces the subtitle with the answer, not stacks them", () => {
+    mount({ steps: STEPS.map((step) => (step.id === "connect" ? { ...step, sentence: "Waiting for it to check in" } : step)) });
+    const connect = [...screen.getByRole("list", { name: "Adding a machine" }).querySelectorAll(":scope > li")][2] as HTMLElement;
+    expect(within(connect).getByText("Listening for the machine")).toBeTruthy();
+    expect(within(connect).queryByText("Waiting for it to check in")).toBeNull();
   });
 
   it("states whose turn it is on the floor: the words, the tone and the measure of the wait", () => {
@@ -189,12 +202,16 @@ describe("side by side, when there is room", () => {
     expect(screen.getAllByText("the command")).toHaveLength(1);
   });
 
-  it("heads the stage with the open step's name and what it asks, said once", () => {
+  it("heads the stage with the open step's name, and leaves what it is to the rail", () => {
     mount({ layout: "split" });
     const stage = document.querySelector(".os-wizard-stage") as HTMLElement;
+    const aside = document.querySelector(".os-wizard-aside") as HTMLElement;
     expect(within(stage).getByRole("heading", { name: "Install" })).toBeTruthy();
-    expect(within(stage).getByText("One line, on the machine itself.")).toBeTruthy();
-    // The rail's line is the name and the answer; the sentence is the stage's.
+    // Said once, on the rail's line beside the stage -- not repeated over the body.
+    expect(within(stage).queryByText("One line, on the machine itself.")).toBeNull();
+    expect(within(aside).getByText("One line, on the machine itself.")).toBeTruthy();
+    // Side by side, an unreached step keeps its subtitle too.
+    expect(within(aside).getByText("Online, steady, and what you asked for.")).toBeTruthy();
     expect(screen.getAllByText("One line, on the machine itself.")).toHaveLength(1);
   });
 
@@ -207,11 +224,13 @@ describe("side by side, when there is room", () => {
     expect(open.map((li) => li.getAttribute("data-state"))).toEqual(["done"]);
 
     const css = readFileSync(join(__dirname, "..", "..", "src", "styles", "index.css"), "utf8");
-    const split = '.os-wizard .os-rail[data-scale="page"] .os-rail-stage';
+    // The wizard's OWN steps, by child combinator: a rail drawn inside a step's
+    // body (the add-machine checks, in one column) must not take the accent.
+    const own = '.os-wizard .os-rail[data-scale="page"] > .os-rail-stage';
     // The step on the stage takes the accent...
-    expect(css).toContain(`${split}[data-open="true"] .os-rail-label {\n  color: var(--os-accent);`);
+    expect(css).toContain(`${own}[data-open="true"] > .os-rail-body > .os-rail-label {\n  color: var(--os-accent);`);
     // ...and a step that is only NEXT gives it up.
-    expect(css).toContain(`${split}:is([data-state="open"], [data-state="current"]):not([data-open="true"]) .os-rail-label {\n  color: var(--os-ink);`);
+    expect(css).toContain(`${own}:is([data-state="open"], [data-state="current"]):not([data-open="true"]) > .os-rail-body > .os-rail-label {\n  color: var(--os-ink);`);
   });
 
   it("changes what the stage shows from the rail", () => {

@@ -767,6 +767,8 @@ button:not(:disabled):active {
   font-size: var(--os-text-sm);
   font-weight: 600;
 }
+/* The person's photo on the same circle (memql#6220). */
+.os-avatar-photo { padding: 0; object-fit: cover; }
 
 /* ---- menus ---- */
 .os-menu {
@@ -1017,10 +1019,40 @@ button:not(:disabled):active {
 .os-ask-wait { display: flex; align-items: center; gap: 8px; margin-top: 8px; color: var(--os-muted); font-size: var(--os-text-sm); }
 .os-ask-countdown { width: 24px; height: 3px; background: var(--os-line); overflow: hidden; border-radius: 2px; }
 .os-ask-countdown > span { display: block; width: 100%; height: 100%; background: var(--os-accent); transform: scaleX(var(--ask-remaining)); transform-origin: left; transition: transform .25s linear; }
-.os-ask-input { display: flex; flex: none; align-items: flex-end; gap: 8px; margin: 0 18px 18px; padding: 10px; border: 1px solid var(--os-line); border-radius: 12px; background: var(--os-plate); }
-.os-ask-field { flex: 1; min-width: 0; resize: none; max-height: 160px; min-height: var(--os-control-h); padding: 5px 0; font: inherit; font-size: var(--os-text-base); color: inherit; border: 0; background: transparent; line-height: 1.5; }
+/* ---- the message field (routes design, "Ask's message field") ----
+ * ONE frame: files, the text, then a control row that never moves. The text
+ * starts two rows tall; useGrowingField raises it toward 40% of the surface
+ * and then it scrolls inside. The frame sits at the bottom of the surface's
+ * column, so growing takes rows from the log above -- upward. */
+.os-ask-input { display: flex; flex: none; flex-direction: column; gap: 6px; margin: 0 18px 18px; padding: 10px 10px 6px; border: 1px solid var(--os-line); border-radius: 12px; background: var(--os-plate); }
+.os-ask-field { width: 100%; min-width: 0; resize: none; min-height: calc(var(--os-text-base) * 1.5 * 2 + 10px); padding: 5px 2px; font: inherit; font-size: var(--os-text-base); color: inherit; border: 0; background: transparent; line-height: 1.5; overflow-y: hidden; }
 .os-ask-field:focus { outline: 0; }.os-ask-input:focus-within { border-color: color-mix(in srgb, var(--os-accent) 45%, var(--os-line)); }
-.os-ask-mic, .os-ask-send { display: grid; place-items: center; width: var(--os-control-h); height: var(--os-control-h); flex: none; border: 0; border-radius: var(--os-radius-xs); background: none; color: var(--os-muted); cursor: pointer; }
+.os-ask-controls { display: flex; align-items: center; justify-content: space-between; gap: 8px; min-height: var(--os-control-h); }
+.os-ask-controls-start, .os-ask-controls-end { display: flex; align-items: center; gap: 2px; min-width: 0; }
+.os-ask-controls-start { flex: 1 1 auto; }
+.os-ask-controls-end { flex: none; }
+.os-ask-send-slot { display: inline-flex; width: var(--os-control-h); height: var(--os-control-h); flex: none; }
+.os-ask-mic, .os-ask-send, .os-ask-tool { display: grid; place-items: center; width: var(--os-control-h); height: var(--os-control-h); flex: none; border: 0; border-radius: var(--os-radius-xs); background: none; color: var(--os-muted); cursor: pointer; }
+.os-ask-tool:hover:not(:disabled) { color: var(--os-ink); background: var(--os-raised); }
+.os-ask-tool:disabled { opacity: .4; cursor: default; }
+.os-ask-tool:focus-visible, .os-ask-send:focus-visible, .os-ask-mic:focus-visible { outline: 2px solid var(--os-accent); outline-offset: 1px; }
+.os-ask-route { display: inline-flex; min-width: 0; }
+/* Files attached so far: a chip each, inside the frame above the text. */
+.os-ask-attachments, .os-ask-sent-attachments { display: flex; flex-wrap: wrap; gap: 6px; margin: 0; padding: 0; list-style: none; }
+.os-ask-sent-attachments { margin-top: 6px; }
+.os-ask-attachment { display: inline-flex; align-items: center; gap: 6px; max-width: 260px; height: 26px; padding: 0 4px 0 8px; border: 1px solid var(--os-line); border-radius: var(--os-radius-xs); background: var(--os-raised); color: var(--os-ink); font: inherit; font-size: var(--os-text-sm); }
+.os-ask-sent-attachments .os-ask-attachment { padding-right: 8px; }
+button.os-ask-attachment { cursor: pointer; }
+button.os-ask-attachment:hover { border-color: color-mix(in srgb, var(--os-accent) 45%, var(--os-line)); }
+.os-ask-attachment svg { flex: none; color: var(--os-muted); }
+.os-ask-attachment-name { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.os-ask-attachment[data-state="failed"] { border-color: color-mix(in srgb, var(--os-error) 55%, var(--os-line)); }
+.os-ask-attachment-problem { flex: none; color: var(--os-error); font-size: var(--os-text-xs); }
+.os-ask-attachment-progress { flex: none; width: 36px; height: 3px; overflow: hidden; border-radius: 2px; background: var(--os-line); }
+.os-ask-attachment-progress > span { display: block; height: 100%; background: var(--os-accent); transition: width var(--os-duration-fast) var(--os-ease); }
+.os-ask-attachment-remove { display: grid; place-items: center; width: 20px; height: 20px; flex: none; padding: 0; border: 0; border-radius: var(--os-radius-xs); background: none; color: var(--os-muted); cursor: pointer; }
+.os-ask-attachment-remove:hover { color: var(--os-ink); background: var(--os-plate); }
+.os-ask-attachment-remove:focus-visible { outline: 2px solid var(--os-accent); outline-offset: 0; }
 .os-ask-mic[aria-pressed="true"] { color: var(--os-accent); background: var(--os-accent-soft); }
 .os-ask-send:not(:disabled) { background: var(--os-accent); color: var(--os-accent-fg); }
 .os-ask-send:disabled { opacity: .4; cursor: default; }
@@ -1028,12 +1060,6 @@ button:not(:disabled):active {
 .os-ask > .os-ask-error { margin: 0 20px 12px; }
 .os-ask-micnote { margin: -8px 22px 14px; font-size: var(--os-text-xs); }
 .os-ask-micnote[data-note="problem"] { color: var(--os-warn); }
-/* ---- the conversation's route (design brief "routing in MemQL OS", section 6) ----
- * The pill is the shell's choice pill in the composer's row: the choice in
- * words, neutral, and never wider than a short name and a level. The picker
- * replaces the content, so it is a column on the log's own gutters with
- * option rows at a readable measure -- the measure belongs to the rows, not
- * to the panel (rule 9). No accent beyond the kit's own checked state. */
 
 [data-os-ask="widget"] .os-ask-log { padding: 18px 14px; }
 [data-os-ask="widget"] .os-ask-activity { padding: 12px; }
@@ -1223,6 +1249,22 @@ button:not(:disabled):active {
    * breaks rather than reaching past the panel. */
   overflow-wrap: anywhere;
   font-size: var(--os-text-base);
+}
+/* One fact is one row on the facts grid's own columns, so rows still align
+ * with each other, and a row holding a copy control is a single hover surface
+ * (`.os-copyvalue*` below). The row reaches 10px before its label so a wash
+ * never sits flush against the text; the matching padding is applied to the
+ * subgrid's edge items, which leaves the label exactly where it was.
+ * `row-gap: inherit` keeps the label-to-value spacing where a narrow layout
+ * stacks the two. */
+.os-fact {
+  display: grid;
+  grid-column: 1 / -1;
+  grid-template-columns: subgrid;
+  row-gap: inherit;
+  margin-inline-start: -10px;
+  padding-inline-start: 10px;
+  border-radius: var(--os-selection-radius);
 }
 
 /* Settings groups (DESIGN.md rule 8). The fieldset SEMANTICS stay -- a
@@ -2413,6 +2455,68 @@ button.os-row.os-record-row:focus-visible { outline: 2px solid var(--os-accent);
   text-overflow: ellipsis;
   white-space: nowrap;
 }
+/* A label with a second line under it: why a disabled option cannot be
+ * chosen, or what an option does. */
+.os-select-option-text {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+.os-select-option-hint {
+  color: var(--os-muted);
+  font-size: var(--os-text-xs);
+  white-space: normal;
+}
+/* A group's name, once, above its first option; a hairline parts it from the
+ * options before it. */
+.os-select-group {
+  margin: 4px 0 0;
+  padding: 8px 10px 4px;
+  border-top: 1px solid var(--os-line);
+  color: var(--os-muted);
+  font-size: var(--os-text-xs);
+}
+.os-select-group:first-child {
+  margin-top: 0;
+  border-top: 0;
+}
+.os-select-separator {
+  height: 1px;
+  margin: 4px 0;
+  background: var(--os-line);
+}
+.os-select-icon {
+  display: inline-flex;
+  flex: none;
+  margin-right: 6px;
+  color: var(--os-muted);
+}
+/* THE QUIET TONE: the value and a chevron, no box, for a select that sits
+ * inside another frame (Ask's message field). The control line height and
+ * focus ring stay; only the field's clothes come off. */
+.os-select-wrap-quiet {
+  flex: none;
+  min-width: 0;
+}
+.os-select-wrap-quiet .os-select {
+  flex: none;
+  width: auto;
+  min-width: 0;
+  max-width: 16rem;
+  padding: 0 24px 0 8px;
+  border-color: transparent;
+  background: transparent;
+  color: var(--os-muted);
+}
+.os-select-wrap-quiet .os-select:hover,
+.os-select-wrap-quiet[data-open] .os-select {
+  border-color: transparent;
+  background: var(--os-raised);
+  color: var(--os-ink);
+}
+.os-select-wrap-quiet .os-select-chevron {
+  right: 7px;
+}
 .os-select-empty {
   margin: 0;
   padding: 7px 10px;
@@ -3373,6 +3477,14 @@ button.os-row.os-record-row:focus-visible { outline: 2px solid var(--os-accent);
   margin: 0;
 }
 
+/* The add-machine Models check's progress: the bar and its bytes on the text
+ * edge, with no card -- a wizard step's body has no box around it. */
+.os-fleet-pullbar {
+  display: grid;
+  gap: 5px;
+  max-width: 34rem;
+}
+
 /* The act's own block: the control line, then whatever it has to say
  * underneath. */
 .os-fleet-pullform {
@@ -3419,20 +3531,23 @@ button.os-row.os-record-row:focus-visible { outline: 2px solid var(--os-accent);
 /* An already-revoked machine states the fact quietly. It is history rather
  * than a warning -- the credential stopped working when it was revoked, and
  * an alarm-toned banner would say something is wrong now. */
-/* The connection warnings, above the facts (epic memql#5327).
+/* The connection warnings, above the facts (epic memql#5327), and setup's
+ * beside them (memql#6235).
  *
  * A STACK AND NOTHING ELSE. Every child is an .os-notice, which already
  * carries its own tone, border and padding; giving this wrapper a surface of
  * its own would box a box, and the three tones would then read as three
  * variations on one panel rather than as three separate things being said.
  * It exists to space them and to keep them off the block above. */
-.os-fleet-credential-health {
+.os-fleet-credential-health,
+.os-fleet-setup-health {
   display: flex;
   flex-direction: column;
   gap: 7px;
   margin-block-end: 11px;
 }
-.os-fleet-credential-health:empty {
+.os-fleet-credential-health:empty,
+.os-fleet-setup-health:empty {
   display: none;
 }
 /* A MEASURE, because these are sentences rather than fields.
@@ -3444,7 +3559,9 @@ button.os-row.os-record-row:focus-visible { outline: 2px solid var(--os-accent);
  * read. Capping the measure is the only thing here that is about reading
  * rather than about state. */
 .os-fleet-credential-health .os-notice-line,
-.os-fleet-credential-health .os-caption {
+.os-fleet-credential-health .os-caption,
+.os-fleet-setup-health .os-notice-line,
+.os-fleet-setup-health .os-caption {
   max-inline-size: 74ch;
 }
 
@@ -4382,7 +4499,8 @@ a.os-button {
   text-overflow: ellipsis;
   white-space: nowrap;
 }
-/* An explicit, always-visible copy control; the value remains selectable. */
+/* An explicit copy control; the value remains selectable. A lone value keeps
+ * it visible; in a row it waits for the row (below). */
 .os-copyvalue-copy {
   display: grid; place-items: center; flex: 0 0 28px; width: 28px; height: 28px;
   padding: 0; border: 0; border-radius: var(--os-radius-xs); background: transparent;
@@ -4400,9 +4518,31 @@ a.os-button {
   color: var(--os-muted);
 }
 
-/* Facts keep normal selectable text and a separate, always-visible copy icon. */
+/* Facts keep normal selectable text and a separate copy icon. */
 .os-copyvalue-row { width: 100%; min-height: 36px; padding: 4px 10px; box-sizing: border-box; }
 .os-copyvalue-row .os-copyvalue-text { white-space: pre-wrap; overflow: visible; overflow-wrap: anywhere; user-select: text; }
+/* A COPYABLE ROW SHOWS ITS ICON ONLY WHILE IT IS THE ROW IN HAND. Hovering
+ * washes the whole row -- a `Fact`, or a standalone row value -- and reveals
+ * its icon, whose space stays reserved so nothing shifts. The cursor is left
+ * alone because the row does not copy; only the icon does. Keyboard focus
+ * and a fresh "Copied" keep the icon shown, and screens without hover show
+ * it always. A row with nothing to copy gets no wash. */
+.os-fact:has(.os-copyvalue-copy):hover,
+.os-fact:has(.os-copyvalue-copy:focus-visible),
+.os-copyvalue-row:not(.os-fact *):hover,
+.os-copyvalue-row:not(.os-fact *):has(.os-copyvalue-copy:focus-visible) {
+  background: color-mix(in srgb, var(--os-hover) 50%, transparent);
+}
+:is(.os-fact, .os-copyvalue-row) .os-copyvalue-copy { opacity: 0; }
+:is(.os-fact:hover, .os-copyvalue-row:hover) .os-copyvalue-copy,
+:is(.os-fact, .os-copyvalue-row) .os-copyvalue-copy:is(:focus-visible, [data-copied]) { opacity: 1; }
+@media (hover: none) {
+  :is(.os-fact, .os-copyvalue-row) .os-copyvalue-copy { opacity: 1; }
+}
+@media (prefers-reduced-motion: no-preference) {
+  .os-fact, .os-copyvalue-row { transition: background var(--os-duration-fast) var(--os-ease); }
+  .os-copyvalue-copy { transition: opacity var(--os-duration-fast) var(--os-ease), background var(--os-duration-fast) var(--os-ease), color var(--os-duration-fast) var(--os-ease); }
+}
 
 /* Shared card paging: explicit arrows, one or two visible cards, no wheel
  * interception. Off-page cards are inert; reserve room for focus outlines. */
@@ -5521,8 +5661,10 @@ a.os-button {
 
 /* `complete` is `done` in the compose reading -- an answered stop and a
  * finished stage are the same picture. One rule, so they cannot drift. */
-.os-rail-stage[data-state="done"] .os-rail-mark,
-.os-rail-stage[data-state="complete"] .os-rail-mark {
+.os-rail-stage[data-state="done"] > .os-rail-mark,
+.os-rail-stage[data-state="done"] > * > .os-rail-mark,
+.os-rail-stage[data-state="complete"] > .os-rail-mark,
+.os-rail-stage[data-state="complete"] > * > .os-rail-mark {
   border-color: var(--os-accent);
   background: var(--os-accent-soft);
   color: var(--os-accent);
@@ -5531,13 +5673,16 @@ a.os-button {
 /* THE RUNNING STAGE IS THE ONE THING MOVING, so it is the only thing that
  * animates. A ring rather than a fill: the mark stays the same size, so the
  * rail does not shift as a deploy advances. */
-.os-rail-stage[data-state="current"] .os-rail-mark {
+.os-rail-stage[data-state="current"] > .os-rail-mark,
+.os-rail-stage[data-state="current"] > * > .os-rail-mark {
   border-color: var(--os-accent);
   background: var(--os-accent);
   box-shadow: 0 0 0 0 var(--os-accent-soft);
   animation: os-rail-pulse 1.8s var(--os-ease) infinite;
 }
-.os-rail-stage[data-state="current"] .os-rail-label {
+.os-rail-stage[data-state="current"] > .os-rail-body > .os-rail-label,
+.os-rail-stage[data-state="current"] > .os-rail-body > .os-rail-line > .os-rail-label,
+.os-rail-stage[data-state="current"] > .os-rail-body > .os-rail-heading > .os-rail-line > .os-rail-label {
   color: var(--os-accent);
 }
 
@@ -5557,7 +5702,8 @@ a.os-button {
  * would leave those readers unable to tell which stage is running, which is a
  * different failure from the one the setting asks about. */
 @media (prefers-reduced-motion: reduce) {
-  .os-rail-stage[data-state="current"] .os-rail-mark {
+  .os-rail-stage[data-state="current"] > .os-rail-mark,
+  .os-rail-stage[data-state="current"] > * > .os-rail-mark {
     animation: none;
     box-shadow: 0 0 0 3px var(--os-accent-soft);
   }
@@ -5569,28 +5715,39 @@ a.os-button {
  * thing that happens is theirs -- so it does not pulse, and reduced motion
  * has nothing here to reduce. The plate ground rather than the accent fill
  * keeps it distinct from a stage that is running. */
-.os-rail-stage[data-state="open"] .os-rail-mark {
+.os-rail-stage[data-state="open"] > .os-rail-mark,
+.os-rail-stage[data-state="open"] > * > .os-rail-mark {
   border-color: var(--os-accent);
   background: var(--os-plate);
   box-shadow: 0 0 0 3px var(--os-accent-soft);
 }
-.os-rail-stage[data-state="open"] .os-rail-label {
+.os-rail-stage[data-state="open"] > .os-rail-body > .os-rail-label,
+.os-rail-stage[data-state="open"] > .os-rail-body > .os-rail-line > .os-rail-label,
+.os-rail-stage[data-state="open"] > .os-rail-body > .os-rail-heading > .os-rail-line > .os-rail-label {
   color: var(--os-accent);
 }
 
-.os-rail-stage[data-state="skipped"] .os-rail-mark {
+.os-rail-stage[data-state="skipped"] > .os-rail-mark,
+
+.os-rail-stage[data-state="skipped"] > * > .os-rail-mark {
   border-style: dashed;
   color: var(--os-muted);
 }
-.os-rail-stage[data-state="skipped"] .os-rail-label {
+.os-rail-stage[data-state="skipped"] > .os-rail-body > .os-rail-label,
+.os-rail-stage[data-state="skipped"] > .os-rail-body > .os-rail-line > .os-rail-label,
+.os-rail-stage[data-state="skipped"] > .os-rail-body > .os-rail-heading > .os-rail-line > .os-rail-label {
   color: var(--os-muted);
 }
 
-.os-rail-stage[data-state="stopped"] .os-rail-mark {
+.os-rail-stage[data-state="stopped"] > .os-rail-mark,
+
+.os-rail-stage[data-state="stopped"] > * > .os-rail-mark {
   border-color: var(--os-warn);
   color: var(--os-warn);
 }
-.os-rail-stage[data-state="stopped"] .os-rail-label {
+.os-rail-stage[data-state="stopped"] > .os-rail-body > .os-rail-label,
+.os-rail-stage[data-state="stopped"] > .os-rail-body > .os-rail-line > .os-rail-label,
+.os-rail-stage[data-state="stopped"] > .os-rail-body > .os-rail-heading > .os-rail-line > .os-rail-label {
   color: var(--os-warn);
 }
 
@@ -5612,12 +5769,15 @@ a.os-button {
  * stage -- which reads as a picture that failed to draw rather than as steps
  * that have not happened yet. The line is the one part that has to stay whole:
  * it is what says these are one sequence. */
-.os-rail-stage[data-state="ahead"] .os-rail-mark,
-.os-rail-stage[data-state="ahead"] .os-rail-body,
-.os-rail-stage[data-state="unknown"] .os-rail-mark,
-.os-rail-stage[data-state="unknown"] .os-rail-body,
-.os-rail-stage[data-state="pending"] .os-rail-mark,
-.os-rail-stage[data-state="pending"] .os-rail-body {
+.os-rail-stage[data-state="ahead"] > .os-rail-mark,
+.os-rail-stage[data-state="ahead"] > * > .os-rail-mark,
+.os-rail-stage[data-state="ahead"] > .os-rail-body,
+.os-rail-stage[data-state="unknown"] > .os-rail-mark,
+.os-rail-stage[data-state="unknown"] > * > .os-rail-mark,
+.os-rail-stage[data-state="unknown"] > .os-rail-body,
+.os-rail-stage[data-state="pending"] > .os-rail-mark,
+.os-rail-stage[data-state="pending"] > * > .os-rail-mark,
+.os-rail-stage[data-state="pending"] > .os-rail-body {
   opacity: 0.45;
 }
 
@@ -8100,13 +8260,6 @@ a.os-button {
   font-weight: 600;
   color: var(--os-ink);
 }
-.os-wizard-stage-lead {
-  margin: -4px 0 0;
-  font-size: var(--os-text-base);
-  color: var(--os-muted);
-  max-width: 72ch;
-  text-wrap: pretty;
-}
 .os-wizard-stage > .os-wizard-body {
   padding: 4px 0 0;
 }
@@ -8129,42 +8282,85 @@ a.os-button {
 .os-wizard-body .fleet-install-options {
   max-width: 46rem;
 }
-/* IN THE ASIDE a step is two short lines -- its name, then its answer -- since
-   a rail's width cannot hold both on one. No chevron: side by side the line
-   does not disclose anything beneath itself, it chooses what the stage shows,
-   and the accent on the open one already says which. */
-.os-wizard[data-layout="split"] .os-rail[data-scale="page"] .os-rail-line {
-  flex-direction: column;
-  align-items: flex-start;
-  gap: 1px;
+/* A WIZARD STEP IS TWO SHORT LINES, in either arrangement: its name, then one
+   muted line beneath it -- what the step is until it is answered, its answer
+   after (memql#6214). The subtitle is written to fit one line; an answer is
+   data and may take two before it is cut. Side by side there is no chevron:
+   the line does not disclose anything beneath itself, it chooses what the
+   stage shows, and the accent on the open one already says which. In one
+   column the chevron stays on the name's line, where the disclosure is.
+
+   EVERY RULE HERE IS THE WIZARD'S OWN STEPS, by child combinator. In one
+   column a step's body sits inside the rail, and a rail drawn in that body
+   -- the add-machine checks -- would otherwise take the wizard's line grid
+   and its "this is the step on the stage" accent on every one of its rows. */
+.os-wizard .os-rail[data-scale="page"] > .os-rail-stage > .os-rail-body > .os-rail-line,
+.os-wizard .os-rail[data-scale="page"] > .os-rail-stage > .os-rail-body > .os-rail-heading > .os-rail-line {
+  display: grid;
+  grid-template-columns: minmax(0, auto) 1fr;
+  grid-template-areas: "label chev" "answer answer";
+  align-items: baseline;
+  column-gap: 8px;
+  row-gap: 1px;
 }
-.os-wizard[data-layout="split"] .os-rail[data-scale="page"] .os-rail-answer {
+.os-wizard .os-rail[data-scale="page"] > .os-rail-stage > .os-rail-body > .os-rail-line > .os-rail-label,
+.os-wizard .os-rail[data-scale="page"] > .os-rail-stage > .os-rail-body > .os-rail-heading > .os-rail-line > .os-rail-label {
+  grid-area: label;
+  min-width: 0;
+}
+.os-wizard .os-rail[data-scale="page"] > .os-rail-stage > .os-rail-body > .os-rail-line > .os-rail-chev,
+.os-wizard .os-rail[data-scale="page"] > .os-rail-stage > .os-rail-body > .os-rail-heading > .os-rail-line > .os-rail-chev {
+  grid-area: chev;
+  justify-self: start;
+}
+/* On a step's line the muted line sits in the line's own grid; on an unreached
+   step with no line it is simply the body's second row. */
+.os-wizard .os-rail[data-scale="page"] > .os-rail-stage > .os-rail-body > .os-rail-line > .os-rail-answer,
+.os-wizard .os-rail[data-scale="page"] > .os-rail-stage > .os-rail-body > .os-rail-heading > .os-rail-line > .os-rail-answer,
+.os-wizard .os-rail[data-scale="page"] > .os-rail-stage > .os-rail-body > .os-rail-line > .os-rail-note,
+.os-wizard .os-rail[data-scale="page"] > .os-rail-stage > .os-rail-body > .os-rail-heading > .os-rail-line > .os-rail-note {
+  grid-area: answer;
+}
+.os-wizard .os-rail[data-scale="page"] > .os-rail-stage > .os-rail-body > .os-rail-line > .os-rail-answer,
+.os-wizard .os-rail[data-scale="page"] > .os-rail-stage > .os-rail-body > .os-rail-heading > .os-rail-line > .os-rail-answer,
+.os-wizard .os-rail[data-scale="page"] > .os-rail-stage > .os-rail-body > .os-rail-line > .os-rail-note,
+.os-wizard .os-rail[data-scale="page"] > .os-rail-stage > .os-rail-body > .os-rail-heading > .os-rail-line > .os-rail-note,
+.os-wizard .os-rail[data-scale="page"] > .os-rail-stage > .os-rail-body > .os-rail-note {
   white-space: normal;
   display: -webkit-box;
   -webkit-box-orient: vertical;
   -webkit-line-clamp: 2;
   line-clamp: 2;
+  overflow: hidden;
   font-size: var(--os-text-sm);
+  color: var(--os-muted);
 }
-.os-wizard[data-layout="split"] .os-rail[data-scale="page"] .os-rail-answer:empty {
+.os-wizard .os-rail[data-scale="page"] > .os-rail-stage > .os-rail-body > .os-rail-line > .os-rail-answer:empty,
+.os-wizard .os-rail[data-scale="page"] > .os-rail-stage > .os-rail-body > .os-rail-heading > .os-rail-line > .os-rail-answer:empty,
+.os-wizard .os-rail[data-scale="page"] > .os-rail-stage > .os-rail-body > .os-rail-line > .os-rail-note:empty,
+.os-wizard .os-rail[data-scale="page"] > .os-rail-stage > .os-rail-body > .os-rail-heading > .os-rail-line > .os-rail-note:empty,
+.os-wizard .os-rail[data-scale="page"] > .os-rail-stage > .os-rail-body > .os-rail-note:empty {
   display: none;
 }
-.os-wizard[data-layout="split"] .os-rail[data-scale="page"] .os-rail-chev {
+.os-wizard[data-layout="split"] .os-rail[data-scale="page"] > .os-rail-stage > .os-rail-body > .os-rail-line > .os-rail-chev,
+.os-wizard[data-layout="split"] .os-rail[data-scale="page"] > .os-rail-stage > .os-rail-body > .os-rail-heading > .os-rail-line > .os-rail-chev {
   display: none;
 }
 /* A wizard's filled mark identifies the displayed step, in both layouts.
    Background work keeps its status in the note and action bar; it must not
    make a different step look selected. Completed steps retain their checks. */
-.os-wizard .os-rail[data-scale="page"] .os-rail-stage:is([data-state="open"], [data-state="current"]):not([data-open="true"]) .os-rail-mark {
+.os-wizard .os-rail[data-scale="page"] > .os-rail-stage:is([data-state="open"], [data-state="current"]):not([data-open="true"]) > .os-rail-mark {
   background: var(--os-plate);
   border-color: var(--os-line);
   box-shadow: none;
   animation: none;
 }
-.os-wizard .os-rail[data-scale="page"] .os-rail-stage:is([data-state="open"], [data-state="current"]):not([data-open="true"]) .os-rail-label {
+.os-wizard .os-rail[data-scale="page"] > .os-rail-stage:is([data-state="open"], [data-state="current"]):not([data-open="true"]) > .os-rail-body > .os-rail-line > .os-rail-label,
+.os-wizard .os-rail[data-scale="page"] > .os-rail-stage:is([data-state="open"], [data-state="current"]):not([data-open="true"]) > .os-rail-body > .os-rail-heading > .os-rail-line > .os-rail-label,
+.os-wizard .os-rail[data-scale="page"] > .os-rail-stage:is([data-state="open"], [data-state="current"]):not([data-open="true"]) > .os-rail-body > .os-rail-label {
   color: var(--os-ink);
 }
-.os-wizard .os-rail[data-scale="page"] .os-rail-stage[data-open="true"] .os-rail-mark {
+.os-wizard .os-rail[data-scale="page"] > .os-rail-stage[data-open="true"] > .os-rail-mark {
   background: var(--os-accent);
   border-color: var(--os-accent);
   color: var(--os-accent-fg);
@@ -8172,7 +8368,9 @@ a.os-button {
   animation: none;
   opacity: 1;
 }
-.os-wizard .os-rail[data-scale="page"] .os-rail-stage[data-open="true"] .os-rail-label {
+.os-wizard .os-rail[data-scale="page"] > .os-rail-stage[data-open="true"] > .os-rail-body > .os-rail-line > .os-rail-label,
+.os-wizard .os-rail[data-scale="page"] > .os-rail-stage[data-open="true"] > .os-rail-body > .os-rail-heading > .os-rail-line > .os-rail-label,
+.os-wizard .os-rail[data-scale="page"] > .os-rail-stage[data-open="true"] > .os-rail-body > .os-rail-label {
   color: var(--os-accent);
 }
 .os-wizard-mark {
@@ -8217,18 +8415,18 @@ a.os-button {
 }
 
 /* ---- the rail at page scale ---- */
-.os-rail[data-scale="page"] .os-rail-stage {
+.os-rail[data-scale="page"] > .os-rail-stage {
   grid-template-columns: 21px 1fr;
   gap: 14px;
   padding: 8px 0;
 }
-.os-rail[data-scale="page"] .os-rail-mark {
+.os-rail[data-scale="page"] > .os-rail-stage > .os-rail-mark {
   width: 21px;
   height: 21px;
 }
 /* The same 4px of air above and below every segment, so the thread reads as
    one line interrupted by marks rather than as dashes between them. */
-.os-rail[data-scale="page"] .os-rail-stage::before {
+.os-rail[data-scale="page"] > .os-rail-stage::before {
   left: 10px;
   top: 33px;
   bottom: -4px;
@@ -8237,54 +8435,64 @@ a.os-button {
    scale the base hairline is enough; at this one a 21px ring drawn in
    `--os-line` and then dimmed all but vanished, and the rail read as a line
    with nothing on it. */
-.os-rail[data-scale="page"] .os-rail-mark {
+.os-rail[data-scale="page"] > .os-rail-stage > .os-rail-mark {
   border-color: color-mix(in oklab, var(--os-line) 65%, var(--os-ink));
 }
-.os-rail[data-scale="page"] .os-rail-stage[data-state="ahead"] .os-rail-mark,
-.os-rail[data-scale="page"] .os-rail-stage[data-state="pending"] .os-rail-mark,
-.os-rail[data-scale="page"] .os-rail-stage[data-state="unknown"] .os-rail-mark {
+.os-rail[data-scale="page"] > .os-rail-stage[data-state="ahead"] > .os-rail-mark,
+.os-rail[data-scale="page"] > .os-rail-stage[data-state="pending"] > .os-rail-mark,
+.os-rail[data-scale="page"] > .os-rail-stage[data-state="unknown"] > .os-rail-mark {
   opacity: 0.6;
 }
-.os-rail[data-scale="page"] .os-rail-stage:is([data-state="done"], [data-state="complete"], [data-state="current"], [data-state="open"]) .os-rail-mark {
+.os-rail[data-scale="page"] > .os-rail-stage:is([data-state="done"], [data-state="complete"], [data-state="current"], [data-state="open"]) > .os-rail-mark {
   border-color: var(--os-accent);
 }
-.os-rail[data-scale="page"] .os-rail-stage[data-state="stopped"] .os-rail-mark {
+.os-rail[data-scale="page"] > .os-rail-stage[data-state="stopped"] > .os-rail-mark {
   border-color: var(--os-warn);
 }
-.os-rail[data-scale="page"] .os-rail-body {
+.os-rail[data-scale="page"] > .os-rail-stage > .os-rail-body {
   gap: 0;
   /* The mark is 21px; the line's text sits on its optical centre. */
   padding-top: 1px;
 }
-.os-rail[data-scale="page"] .os-rail-label {
+.os-rail[data-scale="page"] > .os-rail-stage > .os-rail-body > .os-rail-label,
+.os-rail[data-scale="page"] > .os-rail-stage > .os-rail-body > .os-rail-line > .os-rail-label,
+.os-rail[data-scale="page"] > .os-rail-stage > .os-rail-body > .os-rail-heading > .os-rail-line > .os-rail-label {
   font-size: var(--os-text-base);
   font-weight: 600;
 }
-.os-rail[data-scale="page"] .os-rail-line {
+.os-rail[data-scale="page"] > .os-rail-stage > .os-rail-body > .os-rail-line,
+.os-rail[data-scale="page"] > .os-rail-stage > .os-rail-body > .os-rail-heading > .os-rail-line {
   gap: 12px;
   padding: 0 4px 0 0;
   line-height: 19px;
 }
-.os-rail[data-scale="page"] .os-rail-line .os-rail-label {
+.os-rail[data-scale="page"] > .os-rail-stage > .os-rail-body > .os-rail-line > .os-rail-label,
+.os-rail[data-scale="page"] > .os-rail-stage > .os-rail-body > .os-rail-heading > .os-rail-line > .os-rail-label {
   min-width: 0;
 }
-.os-rail[data-scale="page"] .os-rail-answer,
-.os-rail[data-scale="page"] .os-rail-note {
+.os-rail[data-scale="page"] > .os-rail-stage > .os-rail-body > .os-rail-note,
+.os-rail[data-scale="page"] > .os-rail-stage > .os-rail-body > .os-rail-line > .os-rail-answer,
+.os-rail[data-scale="page"] > .os-rail-stage > .os-rail-body > .os-rail-heading > .os-rail-line > .os-rail-answer,
+.os-rail[data-scale="page"] > .os-rail-stage > .os-rail-body > .os-rail-line > .os-rail-note,
+.os-rail[data-scale="page"] > .os-rail-stage > .os-rail-body > .os-rail-heading > .os-rail-line > .os-rail-note {
   font-size: var(--os-text-base);
 }
 /* THE OPEN STEP'S LINE IS NOT A CONTROL. One step is always open in a wizard,
    so its line does nothing on a click -- and a pointer and a turned chevron
    would both say otherwise. */
-.os-rail[data-scale="page"] .os-rail-line[aria-expanded="true"] {
+.os-rail[data-scale="page"] > .os-rail-stage > .os-rail-body > .os-rail-line[aria-expanded="true"],
+.os-rail[data-scale="page"] > .os-rail-stage > .os-rail-body > .os-rail-heading > .os-rail-line[aria-expanded="true"] {
   cursor: default;
 }
-.os-rail[data-scale="page"] .os-rail-line[aria-expanded="true"] .os-rail-chev {
+.os-rail[data-scale="page"] > .os-rail-stage > .os-rail-body > .os-rail-line[aria-expanded="true"] > .os-rail-chev,
+.os-rail[data-scale="page"] > .os-rail-stage > .os-rail-body > .os-rail-heading > .os-rail-line[aria-expanded="true"] > .os-rail-chev {
   display: none;
 }
 /* THE CHEVRON STAYS WITH WHAT IT IS ABOUT. Pushed to the far edge it is right
    on a widget's 300px line, where the far edge is next to the name; on a page
    it landed 500px away, a ten-pixel speck belonging to nothing. */
-.os-rail[data-scale="page"] .os-rail-chev {
+.os-rail[data-scale="page"] > .os-rail-stage > .os-rail-body > .os-rail-line > .os-rail-chev,
+.os-rail[data-scale="page"] > .os-rail-stage > .os-rail-body > .os-rail-heading > .os-rail-line > .os-rail-chev {
   margin-left: 0;
   font-size: 11px;
 }
@@ -13877,13 +14085,16 @@ button.os-cluster-mesh-peer:focus-visible {
 .fleet-workspace-body[data-has-machines] { grid-template-columns: 158px minmax(0,1fr); gap: 26px; }
 .fleet-machine-picker { border-right: 1px solid var(--os-line); padding-right: 16px; }
 .fleet-machine-picker ul { margin: 0; padding: 0; list-style: none; }
-.fleet-machine-choice, .fleet-equipment-slot { appearance: none; width: 100%; background: transparent; color: var(--os-ink); border: 1px solid transparent; border-radius: var(--os-selection-radius); font: inherit; text-align: left; cursor: pointer; }
+.fleet-machine-choice, .fleet-equipment-slot { appearance: none; width: 100%; background: transparent; color: var(--os-ink); border: 1px solid transparent; border-radius: var(--os-selection-radius); font: inherit; text-align: left; }
+/* Only a slot that is a button answers the pointer; Equipment's slots are
+ * display tiles and stay still under it. */
+.fleet-machine-choice, button.fleet-equipment-slot { cursor: pointer; }
 .fleet-machine-choice { display: flex; align-items: center; gap: 10px; padding: 12px 8px; margin-bottom: 6px; }
 .fleet-machine-choice span, .fleet-equipment-slot span { min-width: 0; }
 .fleet-machine-choice strong, .fleet-machine-choice small, .fleet-equipment-slot strong, .fleet-equipment-slot small { display: block; overflow-wrap: anywhere; }
 .fleet-machine-choice small, .fleet-equipment-slot small { color: var(--os-muted); font-size: var(--os-text-xs); margin-top: 4px; }
 .fleet-machine-choice[aria-pressed="true"] { background: var(--os-accent-soft); border-color: var(--os-accent); }
-.fleet-machine-choice:hover, .fleet-equipment-slot:hover { background: var(--os-hover); }
+.fleet-machine-choice:hover, button.fleet-equipment-slot:hover { background: var(--os-hover); }
 .fleet-equipment-area { min-width: 0; }
 .fleet-machine-heading { display: flex; justify-content: space-between; align-items: start; gap: 18px; margin-bottom: 30px; }
 .fleet-machine-heading h4 { font-family: var(--os-font); font-size: 25px; font-weight: 550; margin: 0 0 8px; letter-spacing: -.035em; overflow-wrap: anywhere; }
@@ -13907,9 +14118,6 @@ button.os-cluster-mesh-peer:focus-visible {
 .fleet-device-screen dd { margin: 4px 0 0; font-size: var(--os-text-sm); }
 .fleet-device-base { height: 9px; margin: 6px -5px 12px; border: 1px solid color-mix(in srgb, var(--os-ink) 45%, var(--os-ground)); border-radius: 2px 2px 10px 10px; background: color-mix(in srgb, var(--os-ink) 28%, var(--os-raised)); }
 .fleet-device-work { display: flex; justify-content: center; align-items: center; font-size: var(--os-text-sm); }
-.fleet-equipment-reading { display: flex; justify-content: space-between; gap: 16px; align-items: center; margin-top: 20px; padding: 14px 16px; background: var(--os-plate); border-left: 2px solid var(--os-accent); border-radius: var(--os-selection-radius); }
-.fleet-equipment-reading strong { overflow-wrap: anywhere; }
-.fleet-equipment-reading p { color: var(--os-muted); font-size: var(--os-text-sm); margin: 6px 0 0; }
 .fleet-selection-hint { text-align: center; margin-block: 22px; }
 .fleet-breadcrumb { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; color: var(--os-muted); font-size: var(--os-text-sm); margin-bottom: 16px; }
 .fleet-drilldown { padding: 16px 24px; }
@@ -13918,6 +14126,74 @@ button.os-cluster-mesh-peer:focus-visible {
 .fleet-empty-equipment { text-align: center; max-width: 680px; margin: 6px auto 24px; padding: 24px 12px 0; }
 .fleet-empty-device { display: inline-flex; position: relative; padding: 0 28px 10px; color: var(--os-muted); }
 .fleet-device-port { position: absolute; width: 6px; height: 6px; border-radius: 100%; background: var(--os-accent); right: 29px; top: 7px; }
+
+/* Machine drawings (apps/fleet/machines/DeviceArt.tsx): line art in the OS
+   tokens. Only the screen carries text; every body is drawn, so a drawing
+   follows the theme and both modes without an image of its own. */
+.fleet-device-art { --device-line: color-mix(in srgb, var(--os-ink) 32%, var(--os-ground)); --device-strong: color-mix(in srgb, var(--os-ink) 45%, var(--os-ground)); --device-body: color-mix(in srgb, var(--os-ink) 6%, var(--os-plate)); --device-shade: color-mix(in srgb, var(--os-ink) 28%, var(--os-raised)); margin: 0; }
+.fleet-device-art svg { display: block; overflow: visible; }
+.fleet-device-art .dv-body { fill: var(--device-body); stroke: var(--device-line); stroke-width: 1; vector-effect: non-scaling-stroke; }
+.fleet-device-art .dv-deck { fill: var(--device-shade); stroke: var(--device-strong); stroke-width: 1; vector-effect: non-scaling-stroke; }
+.fleet-device-art .dv-window { fill: color-mix(in srgb, var(--os-ink) 3%, var(--os-ground)); stroke: var(--device-line); stroke-width: 1; vector-effect: non-scaling-stroke; }
+.fleet-device-art .dv-line { fill: none; stroke: var(--device-line); stroke-width: 1; vector-effect: non-scaling-stroke; }
+.fleet-device-art .dv-vent { fill: none; stroke: var(--device-strong); stroke-width: 1.5; stroke-linecap: round; vector-effect: non-scaling-stroke; }
+.fleet-device-art .dv-strip { fill: none; stroke: var(--os-accent); stroke-width: 2; stroke-linecap: round; vector-effect: non-scaling-stroke; }
+.fleet-device-art .dv-slot { fill: var(--device-shade); }
+.fleet-device-art .dv-hole { fill: var(--device-line); }
+.fleet-device-art .dv-glow { fill: var(--os-accent); }
+.fleet-device-art .dv-dim { fill: var(--device-line); }
+.fleet-device-art .dv-panel { fill: color-mix(in srgb, var(--os-ink) 10%, var(--os-plate)); stroke: var(--device-line); stroke-width: 1; vector-effect: non-scaling-stroke; }
+.fleet-device-art .dv-slits { fill: none; stroke: var(--device-strong); stroke-width: 1.5; stroke-dasharray: 3 2.5; vector-effect: non-scaling-stroke; }
+.fleet-device-art .dv-crest { fill: none; stroke: var(--os-accent); stroke-width: 1.5; stroke-linecap: round; stroke-linejoin: round; vector-effect: non-scaling-stroke; }
+.fleet-device-art .dv-foot { fill: var(--device-shade); }
+.fleet-device-screen > small { margin-top: -10px; color: var(--os-muted); font-size: var(--os-text-xs); overflow-wrap: anywhere; }
+
+/* MacBook: the camera housing at the top of the display, the lip on the deck. */
+.fleet-device-art.is-macbook .fleet-device-screen { position: relative; }
+.fleet-device-art.is-macbook .fleet-device-screen::before { content: ""; position: absolute; top: 5px; left: 50%; width: 30px; height: 6px; transform: translateX(-50%); border-radius: 0 0 5px 5px; background: var(--device-line); }
+.fleet-device-art.is-laptop .fleet-device-base { position: relative; }
+.fleet-device-art.is-macbook .fleet-device-base::after { content: ""; position: absolute; top: -1px; left: 50%; width: 38px; height: 3px; transform: translateX(-50%); border-radius: 0 0 4px 4px; background: var(--device-line); }
+
+/* A laptop with a graphics card: a deeper chin, a thicker deck with vents and a light bar. */
+.fleet-device-art.is-gamingLaptop .fleet-device-screen { padding-bottom: 30px; box-shadow: inset 0 0 0 5px var(--os-ground), inset 0 -16px 0 0 var(--os-ground); }
+.fleet-device-art.is-gamingLaptop .fleet-device-deck { width: calc(100% + 18px); height: 15px; margin: 6px -9px 12px; }
+
+/* iMac: one piece, a coloured chin below the panel, on a flat stand. */
+.fleet-device-art.is-imac .fleet-device-screen { padding-bottom: 46px; box-shadow: inset 0 0 0 5px var(--os-ground), inset 0 -34px 0 0 color-mix(in srgb, var(--os-accent) 16%, var(--os-plate)); }
+.fleet-device-stand { position: relative; height: 24px; margin-bottom: 12px; }
+.fleet-device-stand::before { content: ""; position: absolute; top: 0; left: 50%; width: 30px; height: 20px; transform: translateX(-50%); border-inline: 1px solid var(--device-line); background: var(--device-body); }
+.fleet-device-stand::after { content: ""; position: absolute; bottom: 0; left: 50%; width: 76px; height: 5px; transform: translateX(-50%); border: 1px solid var(--device-line); border-radius: 3px; background: var(--device-shade); }
+.fleet-device-art.is-imac .fleet-device-stand::before { width: 46px; clip-path: polygon(8% 0, 92% 0, 100% 100%, 0 100%); border: 0; background: var(--device-line); }
+
+/* A PC's screen is squarer than a Mac's. Its monitor has a thin top and sides,
+   a chin with a power light, and stands on a V stand. */
+.fleet-device-art.is-pc .fleet-device-screen { border-radius: 5px; }
+.fleet-device-art.is-laptop.is-pc .fleet-device-base { border-radius: 2px 2px 4px 4px; }
+.fleet-device-art.is-desk.is-pc .fleet-device-screen { position: relative; padding-bottom: 30px; box-shadow: inset 0 0 0 4px var(--os-ground), inset 0 -16px 0 0 var(--os-ground); }
+.fleet-device-art.is-desk.is-pc .fleet-device-screen::before { content: ""; position: absolute; bottom: 7px; left: 50%; width: 16px; height: 2px; transform: translateX(-50%); border-radius: 1px; background: var(--device-line); }
+.fleet-device-art.is-desk.is-pc .fleet-device-screen::after { content: ""; position: absolute; right: 12px; bottom: 6px; width: 4px; height: 4px; border-radius: 50%; background: var(--os-accent); }
+.fleet-device-pcstand { width: 120px; max-width: 70%; height: 24px; margin: 0 auto 12px; }
+
+/* Desktops stand beside a monitor, on one desk line. */
+.fleet-device-art.is-desk { display: grid; grid-template-columns: minmax(0,1fr) auto; align-items: end; column-gap: 10px; }
+.fleet-device-art.is-desk .fleet-device-monitor { min-width: 0; }
+.fleet-device-art.is-desk .fleet-device-box { margin-bottom: 12px; }
+/* Sized against the monitor the way the machines are: a Mac mini and a Mac
+   Studio sit low beside it, a Mac Pro or a tower stands most of its height. */
+.fleet-device-art.is-macMini .fleet-device-box { width: 74px; height: 25px; }
+.fleet-device-art.is-macStudio .fleet-device-box { width: 70px; height: 48px; }
+.fleet-device-art.is-macPro .fleet-device-box { width: 70px; height: 130px; }
+.fleet-device-art.is-tower .fleet-device-box { width: 64px; height: 128px; }
+.fleet-device-art.is-workstation .fleet-device-box { width: 72px; height: 129px; }
+.fleet-device-art.is-desktop .fleet-device-box { width: 52px; height: 87px; }
+
+/* A rack server: rails either side, a console drawer between its units. */
+.fleet-device-art.is-server { position: relative; display: grid; gap: 5px; margin-bottom: 12px; padding: 5px 14px; }
+.fleet-device-art.is-server::before, .fleet-device-art.is-server::after { content: ""; position: absolute; top: 0; bottom: 0; width: 8px; border: 1px solid var(--device-line); border-radius: 2px; background: radial-gradient(circle, var(--device-line) 1.2px, transparent 1.7px) center top / 8px 9px repeat-y, var(--device-body); }
+.fleet-device-art.is-server::before { left: 0; }
+.fleet-device-art.is-server::after { right: 0; }
+.fleet-device-art.is-server .fleet-device-unit { width: 100%; height: 22px; }
+.fleet-device-art.is-server .fleet-device-screen { min-height: 150px; border-radius: 6px; }
 .fleet-empty-equipment h4 { font: 500 28px/1.2 var(--os-font); letter-spacing: -.035em; margin: 8px 0 12px; }
 .fleet-empty-equipment > p:not(.fleet-empty-footnote) { max-width: 390px; margin: 0 auto 20px; line-height: 1.6; color: var(--os-muted); }
 .fleet-empty-capabilities { display: grid; grid-template-columns: repeat(3,minmax(0,1fr)); gap: 30px; margin: 34px 0 22px; }
@@ -14040,7 +14316,7 @@ button.os-cluster-mesh-peer:focus-visible {
 @container (max-width: 490px) {
   .fleet-equipment-rig { grid-template-columns: minmax(0,1fr); }
   .fleet-device { grid-row: 1; max-width: 240px; justify-self: center; width: 100%; }
-  .fleet-machine-heading, .fleet-equipment-reading { flex-wrap: wrap; }
+  .fleet-machine-heading { flex-wrap: wrap; }
   .fleet-connections-grid { grid-template-columns: 1fr; }
   .fleet-empty-capabilities { gap: 12px; }
 }
@@ -14193,7 +14469,7 @@ button.os-cluster-mesh-peer:focus-visible {
 @container os-window (max-width:430px) { .os-window-bar { flex-wrap:wrap; height:auto; min-height:40px; padding-block:4px; } .os-window-controls { margin-left:auto; } .os-window-app-selector { max-width:100px; } }
 
 .fleet-session-link { display:flex; justify-content:space-between; width:100%; gap:12px; border:0; border-bottom:1px solid var(--os-line); background:transparent; padding:12px 0; color:var(--os-ink); text-align:left; overflow-wrap:anywhere; }
-.fleet-recent-work { margin-top:24px; }
+.fleet-recent-activity { margin-top:24px; }
 
 .fleet-machine-facts { padding-block:12px; border-bottom:1px solid var(--os-line); }
 .fleet-machine-facts > summary { cursor:pointer; font-weight:600; }
@@ -14290,8 +14566,8 @@ button.os-cluster-mesh-peer:focus-visible {
 .fleet-reading-link:hover { color: var(--os-accent); text-decoration: underline; text-underline-offset: 4px; }
 .fleet-reading-link:focus-visible { outline: 2px solid var(--os-accent); outline-offset: 4px; border-radius: 3px; }
 .fleet-equipment-bank .os-empty-state { padding: 20px 0; gap: 12px; text-align: left; }
-.fleet-equipment-bank .os-empty-state h4, .fleet-recent-work .os-empty-state h4 { font-size: var(--os-text-sm); }
-.fleet-recent-work .os-empty-state { padding: 22px 0; }
+.fleet-equipment-bank .os-empty-state h4, .fleet-recent-activity .os-empty-state h4 { font-size: var(--os-text-sm); }
+.fleet-recent-activity .os-empty-state { padding: 22px 0; }
 .fleet-device-work { gap: 2px; flex-wrap: wrap; }
 .fleet-device-call-breakdown { display: flex; justify-content: center; flex-wrap: wrap; gap: 4px 16px; margin: 2px 0 0; color: var(--os-muted); font-size: var(--os-text-xs); }
 .fleet-device-call-breakdown > div { display: flex; gap: 6px; }
@@ -14339,7 +14615,11 @@ button.os-cluster-mesh-peer:focus-visible {
 .os-page-breadcrumbs button { appearance: none; border: 0; padding: 3px 0; background: transparent; font: inherit; color: inherit; cursor: pointer; }
 .os-page-breadcrumbs button:hover { color: var(--os-ink); text-decoration: underline; text-underline-offset: 3px; }
 .os-page-breadcrumbs button:focus-visible { outline: 2px solid var(--os-accent); outline-offset: 3px; border-radius: 2px; }
-.fleet-inspector > .os-head { margin-bottom: 20px; }
+/* EVERY PAGE TITLE IN A MACHINE TAB keeps the same space above what follows
+ * it -- not only the title the workspace draws, but the ones the Models and
+ * Activity tabs draw inside their own content (a model's page, the catalog,
+ * an activity entry), which otherwise sat on their first section. */
+.fleet-inspector .os-head { margin-bottom: 20px; }
 .fleet-inspector > .os-head > .os-head-actions { width: auto; margin-left: auto; }
 /* Empty and populated machine subpages keep one content edge and header rhythm. */
 .fleet-inspector > .os-panel { padding: 0; }
@@ -14397,7 +14677,11 @@ button.os-cluster-mesh-peer:focus-visible {
 .fleet-machine-details .os-fleet-confirm .os-caption, .fleet-machine-details .os-fleet-confirm-line { max-width: 80ch; }
 .fleet-details-labels { padding: 0; margin: 0; list-style: none; }
 .fleet-details-labels li + li { margin-top: 4px; }
-.fleet-details-label-value { display: grid; grid-template-columns: 160px minmax(0, 1fr); gap: 24px; font-size: var(--os-text-sm); line-height: 1.6; }
+/* A reported label is a copy row on the facts' columns: its wash starts 10px
+ * before the key, as a fact row's starts before its label, and the key column
+ * takes back the 10px of row padding so each value lines up with the facts. */
+.fleet-details-labels .os-copyvalue-row { margin-inline-start: -10px; width: calc(100% + 10px); }
+.fleet-details-label-value { display: grid; grid-template-columns: 170px minmax(0, 1fr); gap: 24px; font-size: var(--os-text-sm); line-height: 1.6; }
 .fleet-details-label-value > span:first-child { color: var(--os-muted); }
 .fleet-details-label-value small { display: block; margin-top: 4px; color: var(--os-muted); }
 @container machine-details (max-width: 480px) {
@@ -14407,6 +14691,7 @@ button.os-cluster-mesh-peer:focus-visible {
   .fleet-machine-setting { gap: 8px; }
   .fleet-machine-setting-name { padding-top: 0; }
   .fleet-details-label-value { grid-template-columns: minmax(0, 1fr); gap: 3px; }
+  .fleet-details-label-value > span:last-child { padding-inline-start: 10px; }
   .fleet-machine-details .os-fleet-confirm { padding: 14px; }
 }
 .os-fleet-history > .fleet-bank-heading { margin-bottom: 0; }
@@ -15114,21 +15399,38 @@ button[data-ask-control="running"], [data-ask-control="running"] > button { outl
 .os-ask-approval-context strong { display: block; font-weight: 500; overflow-wrap: anywhere; }
 .os-ask-approval-context p { margin: 5px 0 0; color: var(--os-muted); }
 .os-ask-approval-context > button { flex: none; margin: 0; }
-.os-ask-saved-guidance { max-height: 10em; overflow: auto; white-space: pre-wrap; overflow-wrap: anywhere; }
 .os-ask-discussion-actions { display: flex; flex: none; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px 14px; margin: 0 18px 10px; }
 .os-ask-discussion-actions > .os-caption { flex: 1 1 20ch; }
 .os-ask-discussion-actions > div { display: flex; flex-wrap: wrap; gap: 8px; }
 .os-ask-guidance-notice { margin: 0 18px 10px; font-size: var(--os-text-sm); color: var(--os-muted); }
 .os-ask-work-queue { display: grid; gap: 6px; margin: 0 18px 10px; max-height: 32vh; overflow-y: auto; }
-.os-ask-work-card { display: flex; align-items: center; gap: 10px; width: 100%; padding: 10px 12px; border: 1px solid var(--os-line); border-radius: var(--os-radius-sm); color: var(--os-ink); background: var(--os-plate); text-align: left; font: inherit; cursor: pointer; }
-.os-ask-work-card:hover { background: var(--os-hover); }
-.os-ask-work-card:focus-visible { outline: 2px solid var(--os-accent); outline-offset: -2px; }
+/* A card holds the control that opens its work and, when a message asked to
+ * drop that work, the question that stops it: siblings, never one inside the
+ * other. */
+.os-ask-work-card { display: grid; border: 1px solid var(--os-line); border-radius: var(--os-radius-sm); background: var(--os-plate); overflow: hidden; }
+.os-ask-work-open { display: flex; align-items: center; gap: 10px; width: 100%; padding: 10px 12px; border: 0; color: var(--os-ink); background: transparent; text-align: left; font: inherit; cursor: pointer; }
+.os-ask-work-open:hover { background: var(--os-hover); }
+.os-ask-work-open:focus-visible { outline: 2px solid var(--os-accent); outline-offset: -2px; }
 .os-ask-work-body { flex: 1; min-width: 0; display: grid; gap: 4px; }
 .os-ask-work-body > strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: var(--os-text-sm); font-weight: 500; }
-.os-ask-work-card > svg:last-child { margin-left: auto; flex: none; color: var(--os-muted); }
+.os-ask-work-open > svg:last-child { margin-left: auto; flex: none; color: var(--os-muted); }
+/* The stop question: its sentence, then Keep and Stop on the card's right edge
+ * (DESIGN.md rule 8), wrapping beneath the sentence when the card is narrow. */
+.os-ask-work-stop { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px 14px; padding: 8px 12px; border-top: 1px solid var(--os-line); }
+.os-ask-work-stop > .os-caption { flex: 1 1 auto; }
+.os-ask-work-stop-acts { display: flex; gap: 8px; margin-left: auto; }
 
 
 .os-ask-message .os-ask-result-context { color: var(--os-muted); font-size: var(--os-text-sm); font-weight: 500; line-height: 1.5; margin: 0 0 8px; }
+/* Where a message went: one quiet line per goal beneath it, in the result
+ * context's size. A split message's reply is its own paragraph before the new
+ * request's answer. */
+.os-ask-message p.os-ask-route-label { color: var(--os-muted); font-size: var(--os-text-sm); line-height: 1.5; }
+.os-ask-message p:not(.os-ask-route-label) + .os-ask-route-label { margin-top: 4px; }
+.os-ask-message .os-ask-route-reply + * { margin-top: .65em; }
+/* Propose lesson under a message: an action at its own width, not a bar. */
+.os-ask-message .os-app-stack { margin-top: 8px; }
+.os-ask-message .os-app-stack > .os-button { align-self: flex-start; }
 
 .os-ask-answer-with-link > p:nth-last-child(2) { display: inline; }
 .os-ask-work-link { display: inline-flex; align-items: center; justify-content: center; width: 24px; height: 24px; margin-inline-start: 4px; padding: 0; vertical-align: text-bottom; border: 0; border-radius: var(--os-radius-sm); background: transparent; color: var(--os-muted); cursor: pointer; }
@@ -15169,8 +15471,11 @@ button[data-ask-control="running"], [data-ask-control="running"] > button { outl
 .os-backup-schedule { display: flex; align-items: end; gap: 12px; flex-wrap: wrap; }
 .os-backup-schedule .os-field { flex: 1; min-width: 120px; }
 
-/* One setting, then its access list. Row actions save directly. */
-.fleet-share-picker { border-top: 1px solid var(--os-line); padding-top: 20px; padding-bottom: 0; }
+/* One setting, then its access list while sharing is on. Row actions save
+ * directly. One divider separates the models and workbench groups whether
+ * either is on, so the switches never sit together or move apart on toggle. */
+.os-fleet-sharing + .os-fleet-sharing { margin-top: 20px; padding-top: 12px; border-top: 1px solid var(--os-line); }
+.fleet-share-picker { padding-bottom: 0; }
 .fleet-share-search-area { position: relative; min-width: 0; max-width: 34rem; }
 .fleet-share-calls { font-variant-numeric: tabular-nums; }
 /* Keep a refusal beside the sharing controls in the Settings page flow. */
@@ -15190,7 +15495,3 @@ button[data-ask-control="running"], [data-ask-control="running"] > button { outl
 .os-role-test-banner { position: fixed; inset: 0 0 auto; height: 64px; z-index: 10000; display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; gap: 4px 12px; padding: 6px 12px; overflow: auto; border-bottom: 1px solid var(--os-warn); background: var(--os-glass-solid); color: var(--os-ink); }
 .os-role-test-banner [role="alert"] { grid-column: 1 / -1; }
 .os-root[data-role-test] { top: 64px; }
-
-.os-ask-destination { display: flex; align-items: center; justify-content: flex-end; gap: 8px; margin: 0 18px 8px; }
-.os-ask-destination .os-select-wrap { flex: 0 0 8rem; }
-[data-os-ask="widget"] .os-ask-destination { margin-inline: 10px; }

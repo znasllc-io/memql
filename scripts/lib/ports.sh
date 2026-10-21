@@ -30,7 +30,7 @@
 function port_free() {
     local port="$1"
     if command -v ss &>/dev/null; then
-        if ss -ltnH 2>/dev/null | grep -qE "[:.]${port}[[:space:]]"; then
+        if ss -ltnH 2>/dev/null | grep -E "[:.]${port}[[:space:]]" >/dev/null; then
             return 1
         fi
     fi

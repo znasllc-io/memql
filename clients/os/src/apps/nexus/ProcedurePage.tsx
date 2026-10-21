@@ -159,7 +159,7 @@ export function ProcedurePage({
     <div className="os-nexus-automations os-nexus-procedure">
       {/* THE STATE IS SAID BY THE LADDER AND THE BAR, not a third time as the
           Head's meta (rule 7). */}
-      <Head title={procedureTitle(p)} back={{ label: "Automations", onSelect: onBack }} />
+      <Head navigationKey={`procedure:${p.id}`} title={procedureTitle(p)} back={{ label: "Automations", onSelect: onBack }} />
 
       <div className="os-nexus-procedure-body">
         {feedState === "degraded" || feedState === "disconnected" ? (

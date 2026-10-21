@@ -204,6 +204,103 @@ func TestAnUnreadableChoiceRefusesTheCall(t *testing.T) {
 	}
 }
 
+// A model call made for a person outside any run -- Ask deciding where their
+// message goes, before any goal exists -- goes where they said: the choice
+// stamped on the turn's context applies as a run's would. Only to that
+// person's own calls, and never over a run's choice.
+func TestApplyRunRoutingUsesTheTurnChoiceOutsideARun(t *testing.T) {
+	req := airoute.ResolveRequest{Level: airoute.LevelFast, Modality: airoute.ModalityStructured, ExplicitProvider: "authorsDefault"}
+	turn := func(user string, choice common.RouteChoice) context.Context {
+		return ContextWithGoalRouteChoice(userCtx(user), choice)
+	}
+
+	got, err := ApplyRunRouting(turn("alice", common.RouteChoice{Source: "policy:local", By: "alice"}), req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Route != "local" || got.ExplicitProvider != "" || got.PinnedBy != "" {
+		t.Fatalf("route=%q pin=%q by=%q, want the turn's route alone", got.Route, got.ExplicitProvider, got.PinnedBy)
+	}
+
+	// A person's own route (Local, Apps, or one they made) is walked for them.
+	got, err = ApplyRunRouting(turn("alice", common.RouteChoice{Source: "route:local", By: "v1:identity:user:alice"}), req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.PersonRoute != "local" || got.PersonRouteOwner != "v1:identity:user:alice" || got.Route != "" || got.ExplicitProvider != "" {
+		t.Fatalf("person route=%q owner=%q route=%q pin=%q, want the person's route", got.PersonRoute, got.PersonRouteOwner, got.Route, got.ExplicitProvider)
+	}
+
+	// A pin is the person's own, so their app door is theirs to open.
+	got, err = ApplyRunRouting(turn("alice", common.RouteChoice{Source: "app:claude-code", By: "alice"}), req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.ExplicitProvider != "app:claude-code" || got.PinnedBy != "alice" {
+		t.Fatalf("pin=%q by=%q, want alice's pin", got.ExplicitProvider, got.PinnedBy)
+	}
+
+	// The level binds a run's steps; a call outside a run has none.
+	got, err = ApplyRunRouting(turn("alice", common.RouteChoice{Level: "reasoning", By: "alice"}), req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Level != airoute.LevelFast {
+		t.Fatalf("a call outside a run ran at %q, want its own level", got.Level)
+	}
+
+	// No paid providers is a ceiling on every call made for the person.
+	got, err = ApplyRunRouting(turn("alice", common.RouteChoice{NoPaidProviders: true, By: "alice"}), airoute.ResolveRequest{Level: airoute.LevelEmbeddings, Modality: airoute.ModalityEmbedding})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !got.NoPaidProviders {
+		t.Fatal("the turn's no-paid-providers ceiling was dropped outside a run")
+	}
+
+	// Alice's choice never routes a call made for somebody else.
+	got, err = ApplyRunRouting(turn("bob", common.RouteChoice{Source: "app:claude-code", By: "alice"}), req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !sameRouting(got, req) {
+		t.Fatalf("alice's choice routed bob's call: %+v", got)
+	}
+
+	// Inside a run, the run's choice wins over a stamp on the same context,
+	// and an Auto run stays Auto.
+	stamp := common.RouteChoice{Source: "policy:local", By: "alice"}
+	got, err = ApplyRunRouting(ContextWithGoalRouteChoice(stepOf("reason", common.RouteChoice{Source: "app:codex", By: "alice"}, nil), stamp), req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.ExplicitProvider != "app:codex" || got.Route != "" {
+		t.Fatalf("pin=%q route=%q, want the run's choice", got.ExplicitProvider, got.Route)
+	}
+	got, err = ApplyRunRouting(ContextWithGoalRouteChoice(stepOf("reason", common.RouteChoice{}, nil), stamp), req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !sameRouting(got, req) {
+		t.Fatalf("a stamp re-routed an Auto run's call: %+v", got)
+	}
+
+	// A stamp is an exported seam: one that does not parse refuses the call.
+	_, err = ApplyRunRouting(turn("alice", common.RouteChoice{Source: "vendor:whatever", By: "alice"}), req)
+	var refusal *RouteChoiceError
+	if !errors.As(err, &refusal) || refusal.Code != RouteSourceInvalid {
+		t.Fatalf("err = %v, want a route_source_invalid refusal", err)
+	}
+}
+
+// sameRouting reports whether a request still goes where it went before a
+// choice was applied: the same source, route, level and ceiling.
+func sameRouting(a, b airoute.ResolveRequest) bool {
+	return a.ExplicitProvider == b.ExplicitProvider && a.PinnedBy == b.PinnedBy && a.Route == b.Route &&
+		a.PersonRoute == b.PersonRoute && a.PersonRouteOwner == b.PersonRouteOwner && a.Level == b.Level &&
+		a.NoPaidProviders == b.NoPaidProviders
+}
+
 // A goal opened by a request carries the caller's choice; a goal opened by one
 // of a run's steps carries that run's choice. Either only for the person who
 // made it -- a choice is never lent to somebody else's goal.

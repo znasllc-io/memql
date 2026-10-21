@@ -347,8 +347,9 @@ export function useAddMachineFlow(): AddMachineFlow {
       failed: failedPull,
       feedError: pulls.feedError,
       loading: pulls.loading,
+      startError: pullError,
     })),
-    [draft, machine, beats, now, pulls.live, failedPull, pulls.feedError, pulls.loading],
+    [draft, machine, beats, now, pulls.live, failedPull, pulls.feedError, pulls.loading, pullError],
   );
   const chatModel = machineModelsFrom(machine?.reportedLabels ?? {}).find(isChatModel)?.modelId ?? "";
   const { response, retry: retryResponse } = useModelResponse(
@@ -358,8 +359,8 @@ export function useAddMachineFlow(): AddMachineFlow {
       && preliminaryChecks.find(check => check.id === "models")?.state === "done",
   );
   const checks = useMemo(() => machine === null ? [] : checksFor(draft, machine, beats, now, {
-    live: pulls.live, failed: failedPull, feedError: pulls.feedError, loading: pulls.loading,
-  }, response), [draft, machine, beats, now, pulls.live, failedPull, pulls.feedError, pulls.loading, response]);
+    live: pulls.live, failed: failedPull, feedError: pulls.feedError, loading: pulls.loading, startError: pullError,
+  }, response), [draft, machine, beats, now, pulls.live, failedPull, pulls.feedError, pulls.loading, pullError, response]);
   const stops = useMemo(() => stopsFor(facts, checks), [facts, checks]);
   const bar = useMemo(() => barFor(facts, checks, pulling), [facts, checks, pulling]);
 

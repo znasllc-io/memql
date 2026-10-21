@@ -102,7 +102,7 @@ export function AddMachinePage({
       className="os-fleet-addpage"
       icon={<Monitor aria-hidden />}
       title="Add a machine"
-      lead="Connect a computer to run work for this cluster."
+      lead="Connect a computer to this cluster."
       /* GOING BACK IS LEAVING, NOT CANCELLING. With a token waiting to be used
          it asks the Leave question -- the token is shown only here -- and
          never revokes anything; before the mint there is nothing to keep, so
@@ -124,7 +124,7 @@ export function AddMachinePage({
               happens has no machine page to get the line from. Leaving keeps
               the token, so that question has nothing to uninstall. */}
           {facts.cancelAsked ? <>
-            <Caption>If you already ran the install on the machine, this removes it again:</Caption>
+            <Caption>Already ran it? This removes it from the machine:</Caption>
             <CopyField value={uninstallCommand(flow.draft.platform, { userLocal: flow.draft.userLocal, localTest: localCockpitInstall(config.domain), clusterUrl: workerClusterUrl(config.domain) })} label="the uninstall command" />
           </> : null}
         </div>
@@ -206,11 +206,7 @@ export function AddMachinePage({
       case "checks":
         if (phase !== "connected" || facts.machine === null) return undefined;
         return (
-          <ChecksStop
-            checks={checks}
-            machine={facts.machine}
-            pullError={flow.pullError}
-          />
+          <ChecksStop checks={checks} />
         );
     }
   }

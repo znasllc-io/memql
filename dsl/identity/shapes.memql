@@ -468,6 +468,7 @@ shape user userFull {
   firstName
   lastName
   primaryEmail
+  avatar
   phone
   primaryRole
   gender

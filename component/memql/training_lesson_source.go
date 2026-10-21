@@ -43,8 +43,15 @@ func (e *MemQLEngine) TrainingLessonSource(ctx context.Context, conversationID, 
 		return nil, err
 	}
 	for _, turn := range transcript.Turns {
-		if turn.ID == turnID && turn.GuidanceTargetRunID != "" {
-			return map[string]any{"conversationId": BareShortId(conversationID), "turnId": turn.ID, "runId": BareShortId(turn.GuidanceTargetRunID), "quote": turn.Prompt, "at": turn.StartedAt, "status": turn.GuidanceStatus}, nil
+		if turn.ID != turnID || turn.Routed == nil {
+			continue
+		}
+		// Coaching is work guidance: a target with no approval. An answer given
+		// through a request belongs to that request, not to a lesson.
+		for _, target := range turn.Routed.Targets {
+			if target.ApprovalID == "" {
+				return map[string]any{"conversationId": BareShortId(conversationID), "turnId": turn.ID, "runId": BareShortId(target.RunID), "quote": turn.Prompt, "at": turn.StartedAt, "status": target.Status}, nil
+			}
 		}
 	}
 	return nil, fmt.Errorf("saved coaching message is unavailable")

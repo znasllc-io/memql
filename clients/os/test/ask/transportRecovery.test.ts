@@ -138,3 +138,36 @@ it("observes a slow greeting through the real transport without showing a false 
   } finally { session.dispose(); }
   expect(vi.getTimerCount()).toBe(0);
 });
+
+it("recovers an interrupted routed correction without opening another run or replacing a newer reply", async () => {
+  const callbacks: AskCallbacks[] = [];
+  const cancels: ReturnType<typeof vi.fn>[] = [];
+  let stored: AskTurn[] = [];
+  const transport: AskTransport = {
+    ask: vi.fn((_prompt, _context, on) => {
+      callbacks.push(on);
+      const cancel = vi.fn(); cancels.push(cancel);
+      return { cancel };
+    }),
+    conversations: { create: async () => ({ id: "chat", title: "Weather" }), list: async () => [], read: async () => stored },
+  };
+  const session = new ConversationSession(transport);
+  try {
+    session.send("Actually, I’m in Phoenix.", null); await tick();
+    callbacks[0]!.interrupted!();
+    const correction = session.getSnapshot().turns[0]!;
+    session.send("Another question", null); await tick();
+    session.setDraft("Keep my next draft");
+    stored = [{ ...correction, state: "done", answer: "Switching to Phoenix.", routed: {
+      reply: "Switching to Phoenix.", targets: [{ goalId: "weather", runId: "weather-run", title: "Phoenix weather", status: "queued", text: correction.prompt }],
+    } }];
+    await session.reload(false);
+    expect(session.getSnapshot().turns[0]).toMatchObject({ id: correction.id, state: "done", routed: stored[0]!.routed, error: undefined });
+    expect(session.getSnapshot().busy).toBe(true);
+    expect(session.getSnapshot().draft).toBe("Keep my next draft");
+    expect(cancels[1]).not.toHaveBeenCalled();
+    callbacks[1]!.delta("The newer reply"); callbacks[1]!.done();
+    expect(session.getSnapshot().turns[1]).toMatchObject({ answer: "The newer reply", state: "done" });
+    expect(transport.ask).toHaveBeenCalledTimes(2);
+  } finally { session.dispose(); }
+});

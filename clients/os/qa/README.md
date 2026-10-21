@@ -22,6 +22,13 @@ palette with `mode=light` or `mode=dark`. The harness uses the production theme
 registry; Graphite is the default. `view=routing-routes` includes the shared
 local tabs used by Fleet machine views and other app pages.
 
+Fleet > Routing > Routes has a view per state: `routing-routes` (also
+`-member` and `-old-cluster`), `routing-route-local` (also `-member`),
+`routing-route-busy` (capacity reasons), `routing-route-mine`,
+`routing-route-no-embedder`, `routing-auto` (also `-member`) and
+`routing-new-route`, driven with `click=New route|fill:Route name=...|Continue|Local`.
+The chain composer under Rules is `routing-chains`.
+
 Then capture. A one-shot headless screenshot is enough for any view that needs
 no click, and every view here is reachable by URL for that reason:
 
@@ -43,7 +50,8 @@ what says the page has not become a wall of advisories), or `overview`,
 `origins-silent`, `origins-mixed`, `origins-reporting` (Data origins), or
 `mesh-healthy`, `mesh-island`, `mesh-empty`, `mesh-node-bff`, `mesh-node-edge`,
 `mesh-node-identity`, `mesh-node-unreported` (Cluster > Mesh), or
-`sharing-owner`, `sharing-people`, `sharing-legacy-descriptor`, `sharing-everyone`,
+`sharing-owner`, `sharing-people`, `sharing-paused`, `sharing-both`,
+`sharing-legacy-descriptor`, `sharing-everyone`,
 `sharing-viewer`, `share-dialog`, `share-dialog-admin`, `share-dialog-empty`,
 `share-dialog-refused` (a machine's Sharing view and its dialog), or
 `nexus-procedure-evidence`, `nexus-procedure-overridden`,
@@ -62,7 +70,13 @@ lines so the log tail is judged with a real failure in it), or
 `pipeline-source`, `pipeline-source-none`, `pipeline-map` (a source's checks,
 a source with no pipeline, the Overview map's Checks nodes) and
 `settings-pipelines-unset`, `-partial`, `-done`, `-unreported`
-(Settings -> Pipelines in each reading);
+(Settings -> Pipelines in each reading), or
+`add-machine-describe`, `add-machine-waiting`, `add-machine-runtime`,
+`add-machine-pulling`, `add-machine-failed`, `add-machine-refused`,
+`add-machine-ready`, `add-machine-tools-ready` (Fleet's Add a machine in each
+phase, from a fixture flow: every reading is a function of facts, so a capture
+of a phase is exactly that phase), `setup-ownership` (taking ownership of a
+fresh cluster) and `setup-gate` (the first-run inference choice, memql#6214);
 `mode` is `dark`
 or `light`. **Take at least one narrow capture** (`820,760`): two of
 the first three real defects this harness found were invisible at 1400x900.
@@ -141,6 +155,27 @@ add/pause/resume/remove actions. `window.fleetQa.activity(n)` broadcasts changin
 recipient counts, including while paused. Check the divider, keyboard search,
 removing/re-adding the last recipient and refusal/retry at desktop and phone
 widths in every theme and mode.
+
+The `profile`, `profile-photo` and `profile-quiet` views are Identity >
+Profile (memql#6220). `profile` is the control: no photo, a budget and a
+personal storage allowance. `profile-photo` adds a photo, a phone and title,
+storage past 90% and no budget. `profile-quiet` is a cluster that serves no
+budget, an account with no personal limit, passkey-only sign-in and computer
+use switched off. `&click=fill:Last%20name=Byron` shows Save appearing on a
+change.
+
+The `fleet-equipment-*` views open the whole Fleet app on Machines; add
+`section=models`, `routing`, `apps`, `workbenches`, `logs` or `settings` to open
+another Fleet section instead, for checks that span the app (such as the space
+under each page title).
+
+`fleet-devices` draws every machine kind side by side, each with the hardware a
+machine of that kind reports; the caption under a drawing is the kind
+`machines/device.ts` chose from that report, so a wrong choice shows as a caption
+that does not match its picture. Add `device=<kind>` (`macbook`, `imac`,
+`macMini`, `macStudio`, `macPro`, `gamingLaptop`, `laptop`, `tower`,
+`workstation`, `server`, `desktop`) to a `fleet-equipment-*` view, with
+`click=Studio%20Mac`, to see one on the Equipment page at desktop and phone widths.
 
 The `feedback` view shows information, warning and error notices, an actionable
 retry, domain errors and a removed-machine status. Check `theme=graphite`,
@@ -353,11 +388,37 @@ with **Retry continuing** using the saved answer. The history scene shows
 These scenes use synthetic conversation and permission receipts; they never
 approve production work, run commands, or call a model.
 
-`/ask-guidance.html?budget=1` shows a resumable budget discussion. Use
-`state=saved`, `state=pending`, or `state=error` to review saved guidance,
-an in-flight save, and a retryable save with the original draft retained.
-Saving keeps the request pending; it never raises a limit or resumes work.
-Inspect both modes and a narrow viewport, including the saved-text disclosure.
+`/ask-routing.html` mounts the real Ask surface over a synthetic conversation
+whose messages went to goals already running. `scene=labels` shows one
+"To <goal> · <status>" line per goal under each message, across every status;
+`split` says the reply before a split request's own answer (`state=quick`
+answers it inline); `stop` puts "Stop this work? It can't be resumed." with
+Keep and Stop on the goal's card (`state=pending` holds an answer in flight,
+`state=error` shows a refusal that stays while the question waits); `many`
+keeps a card that asks out of the "N tasks in progress" fold. Nothing is
+routed, stopped or sent to a model. Inspect both modes at desktop and 820px
+widths and with `narrow=1`, where Keep and Stop wrap beneath the question on
+the card's right edge.
+
+`/ask-routing.html?progress=1` shows a saved-work feedback discussion. Use
+`state=sent`, `state=pending`, `state=error`, or `state=stopped` to review a
+continued run, an in-flight answer, a retryable failure with the original draft
+retained, and a run stopped at its overall limit. Inspect both modes and a
+narrow viewport. These synthetic receipts never change a real run.
+The same page keeps the general Ask states: `scene=empty`, `pending`, `quick`,
+`error`, `format-error` and `model-error`.
+
+`/ask-message-field.html` mounts the real Ask surface over a synthetic
+conversation to review the message field. `scene=empty`, `multiline` (the
+field grown upward), `attachments` (one landed upload, one halfway, one over
+quota), `picker` (the Route menu open), `not-ready` (a personal route dim with
+its reason), `apps` (Apps chosen, Where remains Auto), and `workbench`
+(Workbench chosen, Apps disabled). Add `menu=where` or `menu=route` to open
+either menu. Check disabled options by pointer and keyboard, unchanged choices
+and draft, and stable descriptions before and after disabling. Add `widget=1`
+for the floating widget's height and `narrow=1` for a narrow column. Nothing
+uploads, routes or calls a model. Inspect both modes at desktop and 820px
+widths.
 
 ## Role testing
 
@@ -367,3 +428,21 @@ active tests, `pending` holds the list read, and `error` exercises Retry. End
 test removes the fixture session; Start deliberately refuses. This fixture
 creates no identities, credentials or network writes. Check 390px and desktop
 widths before live acceptance.
+
+Navigation scroll: `/navigation-scroll.html?mode=light|dark&check=1` exercises
+the shared provider in two independent windows with real browser layout and
+the same `role="dialog"` boundary as the desktop window frame. It
+checks short detail pages, Back, breadcrumbs, fresh/active tab resets, delayed loading,
+and user cancellation of pending restoration. The document title reports the
+result and `#scroll-checks` contains each assertion. Run at desktop/narrow widths
+and with reduced motion. The fixture uses synthetic data and no cluster calls.
+
+Fleet Activity scroll: `/?view=fleet-equipment-activity-scroll&mode=light|dark`
+uses the actual Fleet workspace and its nested scroller with 40 synthetic
+activity records. Open Studio Mac, choose Activity, scroll to Activity 40,
+open it, then return through Back or the Activity breadcrumb. Both must return
+to the same position. Clicking Activity again, or switching to Equipment and
+then Activity, must instead start at the top. Scroll again, open another record,
+and check that Back uses that new position. The QA
+window carries Fleet's app identity and dialog role so its overflow and scroll
+boundary match the desktop. Run in Safari as well as Chromium.

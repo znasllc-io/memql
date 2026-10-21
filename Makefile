@@ -230,6 +230,7 @@ db:
 ##   make up REVISION=main         # pin to main
 ##   make up SERVERS=2 AGENTS=1   # multi-node (see E0.5 / #2067)
 ##   make up BUILD_NODE_CPUS=16 BUILD_NODE_MEMORY=40g   # size the pipeline build node (default: two thirds of the Docker host)
+##   make up ALLOW_BELOW_MINIMUM=1   # create the cluster on a machine below the minimum requirements (warns)
 up:
 	@bash scripts/k3d/bringup.sh \
 		$${CLUSTER:+--cluster=$${CLUSTER}} \
@@ -240,6 +241,7 @@ up:
 		$${NO_BUILD_NODE:+--no-build-node} \
 		$${BUILD_NODE_CPUS:+--build-node-cpus=$${BUILD_NODE_CPUS}} \
 		$${BUILD_NODE_MEMORY:+--build-node-memory=$${BUILD_NODE_MEMORY}} \
+		$${ALLOW_BELOW_MINIMUM:+--allow-below-minimum} \
 		$${REPO_URL:+--repo-url="$${REPO_URL}"} \
 		$${APP_NAME:+--app-name="$${APP_NAME}"} \
 		$${OVERLAY_PATH:+--overlay-path="$${OVERLAY_PATH}"} \
@@ -250,7 +252,8 @@ up:
 		$${CARRIER_REPO:+--carrier-repo="$${CARRIER_REPO}"} \
 		$${CARRIER_NODES:+--carrier-nodes="$${CARRIER_NODES}"} \
 		$${CARRIER_CONTEXT:+--carrier-context="$${CARRIER_CONTEXT}"} \
-		$${NO_SECRETS:+--no-secrets}
+		$${NO_SECRETS:+--no-secrets} \
+		$${SWITCH:+--switch}
 
 ## Clean-slate local environment: nuke + repave. Tears down the cluster
 ## (wiping the in-cluster DB by construction), then runs the same bring-up
@@ -268,6 +271,7 @@ up-refresh:
 		$${NO_BUILD_NODE:+--no-build-node} \
 		$${BUILD_NODE_CPUS:+--build-node-cpus=$${BUILD_NODE_CPUS}} \
 		$${BUILD_NODE_MEMORY:+--build-node-memory=$${BUILD_NODE_MEMORY}} \
+		$${ALLOW_BELOW_MINIMUM:+--allow-below-minimum} \
 		$${REPO_URL:+--repo-url="$${REPO_URL}"} \
 		$${APP_NAME:+--app-name="$${APP_NAME}"} \
 		$${OVERLAY_PATH:+--overlay-path="$${OVERLAY_PATH}"} \
@@ -277,7 +281,8 @@ up-refresh:
 		$${PROJECT_MANIFEST:+--project-manifest="$${PROJECT_MANIFEST}"} \
 		$${CARRIER_REPO:+--carrier-repo="$${CARRIER_REPO}"} \
 		$${CARRIER_NODES:+--carrier-nodes="$${CARRIER_NODES}"} \
-		$${CARRIER_CONTEXT:+--carrier-context="$${CARRIER_CONTEXT}"}
+		$${CARRIER_CONTEXT:+--carrier-context="$${CARRIER_CONTEXT}"} \
+		$${SWITCH:+--switch}
 
 ## Tear down the local k3d cluster (PURGE=1 also removes the kubeconfig context)
 ## Pass PURGE=1 to also remove the kubeconfig context.

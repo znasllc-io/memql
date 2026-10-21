@@ -222,7 +222,7 @@ function RuleList({
       {header(
         <>
           <PageHelp title="How rules are tried">
-            <p>Rules are tried top to bottom and the first that matches decides the route. {LOCKED_RULE_SENTENCE}</p>
+            <p>When a message's route is Auto, rules are tried top to bottom and the first that matches decides the chain. {LOCKED_RULE_SENTENCE}</p>
             <p>Move one of yours with Alt and the arrow keys, or drag it.</p>
           </PageHelp>
           {ordered.length > 0 ? (
@@ -236,8 +236,8 @@ function RuleList({
                 <option value="shipped">Shipped only</option>
                 <option value="mine">Yours only</option>
               </Select>
-              <Select id="fleet-rules-route" label="Route" value={routeFilter} onChange={setRouteFilter}>
-                <option value="">Any route</option>
+              <Select id="fleet-rules-route" label="Chain" value={routeFilter} onChange={setRouteFilter}>
+                <option value="">Any chain</option>
                 {routeFilter !== "" && !routes.some((r) => r.name === routeFilter) ? <option value={routeFilter}>{routeTitle(routeFilter)}</option> : null}
                 {routes.map((r) => <option key={r.name} value={r.name}>{routeTitle(r.name)}</option>)}
               </Select>
@@ -261,7 +261,7 @@ function RuleList({
       ) : rules.loading && ordered.length === 0 ? (
         <RecordListSkeleton label="Loading the rules" rows={4} />
       ) : ordered.length === 0 && !rules.error ? (
-        <EmptyState title="No rules yet">Add one and every call that matches it takes the route you choose.</EmptyState>
+        <EmptyState title="No rules yet">Add one and every call that matches it takes the chain you choose.</EmptyState>
       ) : shown.length === 0 && filtering ? (
         <EmptyState title="No matching rules">Try other words or remove a filter.</EmptyState>
       ) : (

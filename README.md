@@ -85,7 +85,8 @@ You also need macOS 13 or newer with Docker Desktop (at least 8 GB of memory
 allocated to it), or Debian/Ubuntu or Fedora/RHEL with Docker Engine. Windows,
 Intel Macs and arm64 Linux (such as NVIDIA DGX Spark) are not supported yet.
 [Minimum requirements](docs/public/operate/minimum-requirements.md#one-machine-the-entire-cluster)
-explains each figure.
+explains each figure. The VS Code installer and `make up` check them before
+they change anything, and stop on a machine below the minimum.
 
 ## A visual workspace for the cluster
 

@@ -23,8 +23,11 @@ MemQL routing policies; adding OpenAI does not silently override a person's
 policy choices. Fleet's Model Library and routing views show the available doors.
 
 Ask routes automatically for each step through the available Fleet models and
-configured policies. The conversation has no source selector. Deliberate model
-or reasoning overrides remain available on individual runs and steps in Nexus.
+configured policies. The **Route** menu beside the composer changes that for a
+message: **Auto** is the default, **Local** uses local models, **Apps** uses
+Claude Code or Codex, and routes you made appear under Yours. A route that is
+not ready is shown with its reason and cannot be chosen. Deliberate model or
+reasoning overrides remain available on individual runs and steps in Nexus.
 
 Ask checks current capabilities before answering questions about what it can do.
 Installed operations and live Fleet model advertisements are separate evidence:
@@ -43,7 +46,7 @@ without directing the person to change model settings.
 MemQL discovers named DSL capabilities and executes them with the person's
 original authority. Role, app capability, account scope and row authorization
 remain in force. Assistant identity never grants owner permissions. Internal
-capabilities and credential inputs are excluded from discovery. Every turn opens the same durable work run used by Nexus and the API. The
+capabilities and credential inputs are excluded from discovery. Every new request opens the same durable work run used by Nexus and the API. The
 compiler checks reusable procedures before asking a model; the agent executes
 with the same budgets, receipts, and recovery. Runs remain available in Nexus.
 Reconnecting observes the run rather than submitting it again. Stop requests
@@ -55,11 +58,13 @@ still read fresh sources even when the procedure is reused.
 
 ## Where work runs
 
-**Run work on** beside the composer offers Auto, Workbench and Computer. Nexus
-uses the same choice when starting a goal. The choice applies to the submitted
-goal, its background work and child goals; changing the control affects the
-next submission. Live voice captures the choice when the call starts. Model
-selection continues to follow the configured routing policies.
+**Where** beside the composer offers Auto, Workbench and Computer. Nexus offers
+the same choice, labelled **Run work on**, when starting a goal. The choice
+applies to the submitted goal, its background work and child goals; changing
+the control affects the next submission. Live voice captures the choice when
+the call starts. Choosing the Apps route sets Where to Computer, because apps
+run on your own machine; you can change it afterwards. Model selection follows
+the Route menu and the configured routing policies.
 
 - **Auto** uses the Workbench when its capabilities fit. If work needs your
   computer, or the Workbench queue is full, MemQL explains the reason and asks
@@ -82,7 +87,9 @@ The same classifier separates quick replies, saved-data lookups, research and
 projects. Greetings and answers supported by the current context stay inline.
 Longer work is acknowledged after its goal and run are saved, then continues
 while you send other messages in the same conversation. Each request keeps its
-own captured context. Later messages do not silently alter accepted work.
+own captured context. A later message can update work that is already running,
+but never silently: Ask shows which goal received it (see
+[Messages while work runs](#messages-while-work-runs)).
 
 The classifier writes a brief acknowledgment for the actual request in the same
 call that decides its workload. A small link beneath it opens the run in Nexus.
@@ -99,10 +106,12 @@ This avoids a separate model call just to write an acknowledgment. Cache failure
 falls through to fresh wording within a bounded lookup window.
 
 Above the composer, up to three cards show the active tasks and their current
-steps. More than three collapse into a count. Open a card to inspect its run in
-Nexus, or the count to see work from that conversation. Results appear when the
-work finishes, beside a reminder of the original request. Closing Ask or losing
-the connection does not discard the work.
+steps. More than three collapse into a count, except a card that is asking
+whether to stop its work. Open a card to inspect its run in Nexus, or the count
+to see work from that conversation. A card takes a new title when a later
+message changes what the task is about. Results appear when the work finishes,
+beside a reminder of the original request. Closing Ask or losing the connection
+does not discard the work.
 
 For facts missing from the current context, MemQL can discover authorized
 concepts and search earlier conversations through named MemQL reads. Results
@@ -166,6 +175,70 @@ implemented control binding, such as adding a group member, receives the same
 quiet cue. Cues represent server execution; they never simulate a cursor or
 issue a second write from the browser. An app without an exact control binding
 still opens and displays its normal live data.
+
+## Messages while work runs
+
+While a conversation has active work, Ask looks at each new message before it
+reaches normal intake. A goal is active while it is preparing, working or
+waiting. One fast model call reads your message and the active goals, and
+chooses what the message does:
+
+- **Updates one goal or several.** You do not name the goal, and one message can
+  apply to related goals. "Actually, I'm in Phoenix" changes the weather check
+  that is already running instead of starting a second one.
+- **Splits.** The part about running work goes to that work. The rest becomes a
+  new request, stated on its own, with its own answer or goal.
+- **Asks which goal you mean.** The reply is a question and nothing is
+  delivered. Your answer settles it, and both messages go to the goal you chose.
+- **Offers to stop a goal.** "Never mind the Tucson one" gets a reply that asks,
+  such as "Stop the weather check?", and puts the question on that goal's card:
+  "Stop this work? It can't be resumed." with Keep and Stop. Nothing stops until
+  you press Stop or answer yes. A live call has no cards, so a clear yes to the
+  spoken question confirms.
+
+With no active work, nothing changes and no routing call is made. Messages with
+attachments and messages over 4,000 characters are not routed. A message about
+none of the active goals is handled as before.
+
+The goal gets your message word for word. The routing call only chooses where it
+goes; it never rewrites your words for a goal. How the goal takes the message
+depends on what the goal is doing and where it started:
+
+| The goal is | Your message | Label |
+| --- | --- | --- |
+| Preparing or working | Is read at the goal's next step | Queued, then Received |
+| Waiting on a timer, a retry, a repair, a re-plan, other work or an outside event | Is read when the goal resumes | Queued, then Received |
+| Waiting on a question for you | Becomes the answer | Answered |
+| Waiting on a permission | Is a correction. Nothing is approved. | Sent, not approved |
+| Waiting for progress direction | Answers the saved-work checkpoint | Answered |
+| At its overall limit | Cannot provide more guidance; open the saved result | Not delivered |
+| Waiting on a review that takes no messages | Is not delivered. Open the request to answer it. | Not delivered |
+| Started outside this conversation (for example in Nexus) | Work guidance is not delivered. A request the goal waits on can still take the message. | Not delivered, unless a request takes it |
+| Ended before reading the message | Is not received | Not received |
+
+Under your message, Ask shows one line for each goal it went to, such as "To
+Weather in Phoenix · Received". Received means a successful model call used the
+message, not that the goal followed it. MemQL replies in one line, and a split
+message shows that line before the new request's own answer. If a delivery or a
+stop you confirmed failed, a plain account replaces the line, such as "Sent to
+Weather in Phoenix. Hike plan already finished, so it didn't get this." The
+account then covers each stop: "Stopped Tucson report." or "Tucson report
+couldn't be stopped. Try again." for a stop you confirmed, and "Stop Tucson
+report?" for one the message asked about. When a message changes what a goal is
+about, the goal takes a new title on its card and in Nexus.
+
+If every goal a message was meant for had finished, and nothing else was
+decided, the message goes through normal intake. A late "actually, Phoenix"
+still gets an answer.
+
+A message never approves a request, grants permission or raises a limit. Those
+stay with the request's own decision controls. A goal accepts at most 16 routed
+messages, and 16,000 characters in all, per run; a message past that is not
+delivered. See [Work context and recovery](../ai/work-context-and-recovery.md)
+for how a goal reads guidance.
+
+The routing call runs under your own route. On Local, a local model routes your
+message.
 
 ## Dictation and live voice
 
@@ -258,3 +331,7 @@ when reported. Estimated usage and unknown pricing remain explicit. Local
 inference is identified as local. Text and live-voice evidence survives reopening
 a conversation; dictation evidence is visible during the current session, and
 router call records remain available in Fleet's call history.
+
+The call that routes a message appears in Activity as Routing message. If
+routing is unavailable, or its answer is invalid twice, the message goes through
+normal intake and Activity shows that entry as a fallback.

@@ -5,6 +5,7 @@ import { AutoRefresh } from "../FleetControls";
 
 import { EmptyState, Chip, Fact, Facts, Head, Notice, Panel, Subhead, formatMoment } from "../../../kit";
 import { Measure } from "../../../kit/MeasureView";
+import { figureText } from "../../../kit/measure";
 import {
   appLabel,
   sessionIsLive,
@@ -13,6 +14,9 @@ import {
   type AppSessionDetailRow,
 } from "../rows";
 import { useAppSessionDetail } from "./useAppSessions";
+
+/** The reported cost as the row writes it, so a copy matches what is shown. */
+const costText = (value: number) => `$${value.toFixed(4)}`;
 
 // One delegated run: what it was asked, what it spent, and what it said
 // (epic memql#5009).
@@ -57,7 +61,7 @@ export function SessionPage({
 
   return (
     <div className="os-fleet os-fleet-session" data-os-page-context={JSON.stringify({ page: "App session", sessionId, app: session?.app, status: session?.status })}>
-      <Head title={session === null ? "Run" : `${appLabel(session.app)} -- ${session.kind}`} back={{ label: "Activity", onSelect: onBack }}>
+      <Head navigationKey={`session:${sessionId}`} title={session === null ? "Run" : `${appLabel(session.app)} -- ${session.kind}`} back={{ label: "Activity", onSelect: onBack }}>
         <AutoRefresh enabled={feedIsBehind(state, error)} busy={loading} onRefresh={reread} />
       </Head>
 
@@ -113,22 +117,23 @@ function SessionBody({
           {/* TOKENS THE APP DID NOT REPORT ARE ABSENT, NOT ZERO. An app that
               said nothing did not say it spent nothing, and the two lead to
               opposite conclusions about a run. */}
-          <Fact label="Tokens in" value={<Measure figure={session.usage.inputTokens} />} />
-          <Fact label="Tokens out" value={<Measure figure={session.usage.outputTokens} />} />
-          <Fact label="Tokens" value={<Measure figure={totalTokens(session)} />} />
+          <Fact label="Tokens in" value={<Measure figure={session.usage.inputTokens} />} copyValue={figureText(session.usage.inputTokens)} />
+          <Fact label="Tokens out" value={<Measure figure={session.usage.outputTokens} />} copyValue={figureText(session.usage.outputTokens)} />
+          <Fact label="Tokens" value={<Measure figure={totalTokens(session)} />} copyValue={figureText(totalTokens(session))} />
           <Fact
             label="Reported cost"
-            value={<Measure figure={session.usage.costUSD} format={(v) => `$${v.toFixed(4)}`} />}
+            value={<Measure figure={session.usage.costUSD} format={costText} />}
+            copyValue={figureText(session.usage.costUSD, costText)}
           />
-          <Fact label="Machine" value={session.workerId || "not recorded"} mono />
-          <Fact label="Workspace" value={session.workspace || "not recorded"} mono />
-          <Fact label="Started" value={formatMoment(session.startedAt)} />
-          <Fact label="Ended" value={session.endedAt === "" ? "still running" : formatMoment(session.endedAt)} />
+          <Fact label="Machine" value={session.workerId || "not recorded"} mono copyValue={session.workerId || undefined} />
+          <Fact label="Workspace" value={session.workspace || "not recorded"} mono copyValue={session.workspace || undefined} />
+          <Fact label="Started" value={formatMoment(session.startedAt)} copyValue={session.startedAt || undefined} />
+          <Fact label="Ended" value={session.endedAt === "" ? "still running" : formatMoment(session.endedAt)} copyValue={session.endedAt || undefined} />
           {session.status === "failed" ? (
-            <Fact label="Exit code" value={<Measure figure={session.exitCode} />} mono />
+            <Fact label="Exit code" value={<Measure figure={session.exitCode} />} mono copyValue={figureText(session.exitCode)} />
           ) : null}
-          {session.runId === "" ? null : <Fact label="Run" value={session.runId} mono />}
-          {session.stepId === "" ? null : <Fact label="Step" value={session.stepId} mono />}
+          {session.runId === "" ? null : <Fact label="Run" value={session.runId} mono copyValue={session.runId} />}
+          {session.stepId === "" ? null : <Fact label="Step" value={session.stepId} mono copyValue={session.stepId} />}
         </Facts>
 
         {session.usage.known ? null : (
@@ -160,12 +165,13 @@ function SessionBody({
 
       <Subhead>Recording</Subhead>
       <Facts>
-        <Fact label="Actions recorded" value={<Measure figure={session.recordedSteps} />} />
-        <Fact label="Actions lost" value={<Measure figure={session.droppedActions} />} />
+        <Fact label="Actions recorded" value={<Measure figure={session.recordedSteps} />} copyValue={figureText(session.recordedSteps)} />
+        <Fact label="Actions lost" value={<Measure figure={session.droppedActions} />} copyValue={figureText(session.droppedActions)} />
         <Fact
           label="Timeline"
           value={session.sessionRunId === "" ? "not recorded" : session.sessionRunId}
           mono
+          copyValue={session.sessionRunId || undefined}
         />
         <Fact
           label="Transcript"
@@ -177,6 +183,7 @@ function SessionBody({
               : session.transcriptFileId
           }
           mono
+          copyValue={session.transcriptFileId || undefined}
         />
       </Facts>
 

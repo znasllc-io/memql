@@ -75,7 +75,7 @@ describe("the machine's detail", () => {
     const term = factTerm("Pipeline steps");
     // Beside Computer use: the fact right after it, the same kind of answer
     // about what this machine will run.
-    expect(factTerm("Computer use").nextElementSibling?.nextElementSibling).toBe(term);
+    expect(factTerm("Computer use").closest(".os-fact")?.nextElementSibling).toBe(term.closest(".os-fact"));
     expect(term.nextElementSibling?.textContent).toContain("Allowed by this machine's policy");
   });
 

@@ -194,7 +194,13 @@ func (f *switchableFleet) read(context.Context) ([]readiness.RegistrationFacts, 
 		return nil, nil
 	}
 	machine := readiness.RegistrationFacts{
-		Labels:          map[string]string{"model:llama3.1:8b": "ctx=8192,structured=true"},
+		// Readiness requires both an inference door and an embedding model.
+		// Pair and revoke the complete setup so this fixture exercises row
+		// convergence rather than a machine that is still missing a capability.
+		Labels: map[string]string{
+			"model:llama3.1:8b":          "ctx=8192,structured=true",
+			"model:qwen3-embedding:0.6b": "ctx=32768,embeddings=1",
+		},
 		ConnectedNodeId: "agent-with-the-stream",
 		LastSeenAt:      time.Now().UTC(),
 	}

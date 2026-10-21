@@ -55,6 +55,10 @@ type Decision struct {
 	Policy string
 	Door   string
 
+	// Route is the route a person chose for the call (design record
+	// 2026-10-18-routes): `local`, `apps` or one of their own. Empty is Auto.
+	Route string
+
 	// Considered is the door report, kept on success too.
 	Considered []ConsideredEntry
 

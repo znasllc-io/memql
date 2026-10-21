@@ -2,8 +2,9 @@ import { startAskVoice, type AskVoiceOptions } from "@znasllc-io/memql-sdk-core/
 import { aiChatStream, type AiChatOptions, type AiChatMessage } from "@znasllc-io/memql-sdk-core/ai";
 import { QueryClient, isTransportInterruption, type Dispatcher } from "@znasllc-io/memql-sdk-core/client";
 import { flatten } from "../kit/rows";
-import type { AskCallbacks, AskHandle, AskOptions, AskTransport, WorkGuidanceRequest, WorkGuidanceReceipt } from "./askController";
+import type { AskCallbacks, AskHandle, AskOptions, AskTransport } from "./askController";
 import type { ApprovalDiscussion, AskActivity, AskConversationStore, AskTurn, ConversationSummary } from "./conversationSession";
+import { routeOptionsFrom, type AskRouteOption } from "./askRoute";
 
 export type AskStreamFn = (dispatcher: Dispatcher, messages: AiChatMessage[], opts: AiChatOptions) => { deltas: AsyncIterable<{ textDelta?: string; metadata?: Record<string, unknown> }>; result: Promise<unknown> };
 
@@ -40,6 +41,17 @@ export class SdkAskTransport implements AskTransport {
     };
   }
 
+  // Called by name rather than through a generated method, so the field works
+  // against any cluster: one without routes refuses the unknown builtin, and
+  // the picker then offers Auto alone.
+  routes = async (): Promise<AskRouteOption[]> => {
+    const dispatcher = this.dispatcher();
+    if (!dispatcher) throw new Error("Not connected to the cluster.");
+    const result = await new QueryClient(dispatcher).routesForActor();
+    const row = result.rows()[0];
+    return routeOptionsFrom(row ? flatten(row) : null);
+  };
+
   cancelGoal = async (goalId: string) => {
     const dispatcher = this.dispatcher();
     if (!dispatcher) throw new Error("Not connected to the cluster.");
@@ -68,12 +80,14 @@ export class SdkAskTransport implements AskTransport {
     return flatten(row) as unknown as ApprovalDiscussion;
   };
 
-  guideWork = async (request: WorkGuidanceRequest): Promise<WorkGuidanceReceipt> => {
+  // The cluster answers with the decision it saved. The same answer again
+  // returns it, so trying again after a lost reply is safe.
+  decideStop = async (request: { conversationId: string; turnId: string; runId: string; decision: "stop" | "keep" }) => {
     const dispatcher = this.dispatcher();
     if (!dispatcher) throw new Error("Not connected to the cluster.");
-    const row = (await new QueryClient(dispatcher).askGuideWork(request)).rows()[0];
-    if (!row) throw new Error("The cluster did not confirm this guidance. Retry to check the original message.");
-    return flatten(row) as unknown as WorkGuidanceReceipt;
+    const row = (await new QueryClient(dispatcher).askStopDecision(request)).rows()[0];
+    const receipt = row ? flatten(row) : null;
+    if (receipt?.decision !== (request.decision === "stop" ? "stopped" : "kept")) throw new Error("The cluster did not confirm this decision. Try again.");
   };
 
   approvalMessage = async (request: { approvalId: string; conversationId: string; requestId: string; prompt: string; advisor?: boolean }) => {
@@ -117,7 +131,7 @@ export class SdkAskTransport implements AskTransport {
     }
     void (async () => {
       try {
-        const handle = this.stream(dispatcher, [{ role: "user", content: prompt }], { signal: abort.signal, conversationId: options.conversationId, requestId: options.turnId, pageContext: context ?? "", provider: options.routing?.source ?? "", level: options.routing?.level ?? "", executionDestination: options.routing?.destination ?? "auto" });
+        const handle = this.stream(dispatcher, [{ role: "user", content: prompt }], { signal: abort.signal, conversationId: options.conversationId, requestId: options.turnId, pageContext: context ?? "", provider: options.routing?.source ?? "", level: options.routing?.level ?? "", executionDestination: options.routing?.destination ?? "auto", ...(options.attachments?.length ? { attachmentArtifactIds: options.attachments } : {}) });
         let settled = false;
         let answer = "";
         let backgroundAccepted = false;

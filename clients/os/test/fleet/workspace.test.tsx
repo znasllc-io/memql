@@ -1,4 +1,3 @@
-import { useState } from 'react';
 import {act, cleanup, fireEvent, render, screen, within, waitFor} from '@testing-library/react';
 import {afterEach, beforeEach, expect, it, vi} from 'vitest';
 const h=vi.hoisted(()=>({connection:null as any}));
@@ -39,14 +38,18 @@ it('updates the owner and shared call breakdown in Equipment from the existing m
  expect(within(screen.getByRole('navigation',{name:'Machine views'})).getByRole('button',{name:'Activity'}).getAttribute('aria-current')).toBeTruthy();
 });
 
-it('places Settings after Activity and groups configuration, sharing and reported facts on that page',async()=>{
+it('puts reported facts on Details after Equipment and keeps Settings to what the owner sets',async()=>{
  sharedMachine();fleet();await openMachine('Alpha');
  const tabs=screen.getByRole('navigation',{name:'Machine views'});
- expect(within(tabs).getAllByRole('button').map(button=>button.textContent)).toEqual(['Equipment','Models','Apps','Activity','Settings']);
+ expect(within(tabs).getAllByRole('button').map(button=>button.textContent)).toEqual(['Equipment','Details','Models','Apps','Activity','Settings']);
+ fireEvent.click(within(tabs).getByRole('button',{name:'Details'}));
+ for (const name of ['System','Hardware','Connection','Features','Registration']) expect(screen.getByRole('region',{name})).toBeTruthy();
+ expect(within(screen.getByRole('region',{name:'Features'})).getByText('Model inference')).toBeTruthy();
+ expect(screen.queryByRole('region',{name:'Sharing'})).toBeNull();
  fireEvent.click(within(tabs).getByRole('button',{name:'Settings'}));
  expect(within(screen.getByRole('region',{name:'General'})).getByLabelText('Name for Alpha')).toBeTruthy();
  expect(within(screen.getByRole('region',{name:'Sharing'})).getByRole('switch',{name:'Share models'})).toBeTruthy();
- expect(screen.getByRole('region',{name:'System'})).toBeTruthy();
+ expect(screen.queryByRole('region',{name:'System'})).toBeNull();
  expect(await screen.findByRole('button',{name:'Pause sharing with Ana Ruiz'})).toBeTruthy();
 });
 
@@ -132,48 +135,50 @@ it('keeps a refused removal on its machine details',async()=>{
  expect(screen.getByRole('button',{name:'Remove Alpha'})).toBeTruthy();
 });
 
-it('selects the first model, keeps a chosen model across heartbeats and falls back when it disappears',async()=>{
+it('shows models and apps for display only, without a selection, a reading or feature statuses',async()=>{
  const {MachineEquipment}=await import('../../src/apps/fleet/FleetWorkspace');
  const {machineFromRow}=await import('../../src/apps/fleet/rows');
- const machine=machineFromRow(machineRow({id:'a',labels:{'model:alpha':'ctx=4096','model:beta':'ctx=8192'}}));
+ const machine=machineFromRow(machineRow({id:'a',labels:{'model:alpha':'ctx=4096','model:beta':'ctx=8192'},apps:[{id:'claude-code',allowed:true,signedIn:true}]}));
  const onInspect=vi.fn(); const now=new Date();
- const view=render(<MachineEquipment machine={machine} now={now} onInspect={onInspect}/>);
+ render(<MachineEquipment machine={machine} now={now} onInspect={onInspect}/>);
  expect(screen.getByRole('status').textContent).toBe('1–2 of 2 models');
- expect(within(screen.getByRole('list', {name:'Model selection'})).getAllByRole('button')).toHaveLength(2);
- expect(screen.getByRole('button',{name:'alpha Conversation'}).getAttribute('aria-pressed')).toBe('true');
- expect(screen.getByRole('region',{name:'Selected equipment'}).textContent).toContain('alpha');
- fireEvent.click(screen.getByRole('button',{name:'beta Conversation'}));
- view.rerender(<MachineEquipment machine={{...machine,activeCount:2}} now={now} onInspect={onInspect}/>);
- expect(screen.getByRole('region',{name:'Selected equipment'}).textContent).toContain('beta');
- view.rerender(<MachineEquipment machine={{...machine,reportedLabels:{'model:alpha':'ctx=4096'}}} now={now} onInspect={onInspect}/>);
- expect(screen.getByRole('region',{name:'Selected equipment'}).textContent).toContain('alpha');
+ const models=screen.getByRole('list', {name:'Local models'});
+ expect(within(models).getByText('alpha')).toBeTruthy();
+ expect(within(models).queryAllByRole('button')).toHaveLength(0);
+ expect(within(screen.getByRole('region',{name:'App equipment'})).queryAllByRole('button',{name:/Claude Code/})).toHaveLength(0);
+ fireEvent.click(within(models).getByText('beta'));
+ expect(onInspect).not.toHaveBeenCalled();
+ expect(screen.queryByRole('region',{name:'Selected equipment'})).toBeNull();
+ expect(screen.queryByRole('region',{name:'Machine features'})).toBeNull();
+ expect(screen.queryByText('Model inference')).toBeNull();
  fireEvent.click(screen.getByRole('button',{name:'Manage models'}));expect(onInspect).toHaveBeenLastCalledWith('models');
  fireEvent.click(screen.getByRole('button',{name:'Activity'}));expect(onInspect).toHaveBeenLastCalledWith('activity');
  expect(screen.queryByRole('button',{name:'Machine details'})).toBeNull();
  expect(screen.queryByRole('button',{name:'Personal inference'})).toBeNull();
  expect(screen.queryByText('Tools')).toBeNull();
 });
-it('identifies image generation separately from chat in the equipment selector',async()=>{
+it('identifies image generation separately from chat among the equipment models',async()=>{
  const {MachineEquipment}=await import('../../src/apps/fleet/FleetWorkspace');
  const {machineFromRow}=await import('../../src/apps/fleet/rows');
  const machine=machineFromRow(machineRow({id:'a',labels:{'model:flux2-klein-4b':'imagegen=1','model:qwen3.5:4b':'ctx=262144,tools=1,vision=1'}}));
  render(<MachineEquipment machine={machine} now={new Date()} onInspect={vi.fn()}/>);
- expect(screen.getByRole('button',{name:'flux2-klein-4b Image generation'})).toBeTruthy();
- expect(screen.getByRole('button',{name:'qwen3.5:4b Conversation, tools & vision'})).toBeTruthy();
+ const models=screen.getByRole('list', {name:'Local models'});
+ expect(within(models).getByText('flux2-klein-4b').closest('.fleet-equipment-slot')?.textContent).toContain('Image generation');
+ expect(within(models).getByText('qwen3.5:4b').closest('.fleet-equipment-slot')?.textContent).toContain('Conversation, tools & vision');
 });
 
-it('gives empty equipment and recent work their own empty states',async()=>{
+it('gives empty equipment and recent activity their own empty states',async()=>{
  h.connection=fakeConnection({myWorkersWithStatus:[machineRow({id:'a',displayName:'Alpha'})]});fleet();
  await openMachine('Alpha');
  expect(await screen.findByRole('region',{name:'No local models'})).toBeTruthy();
  expect(screen.getByRole('region',{name:'No installed apps'})).toBeTruthy();
- expect(await screen.findByRole('region',{name:'No recent work'})).toBeTruthy();
+ expect(await screen.findByRole('region',{name:'No activity yet'})).toBeTruthy();
  expect(screen.queryByRole('region',{name:'Selected equipment'})).toBeNull();
 });
 
 const carouselLabels = Object.fromEntries(['alpha','beta','charlie','delta','echo','foxtrot','golf'].map(name => [`model:${name}`, 'ctx=8192']));
 
-it('pages reported models without changing selection or the machine inventory', async () => {
+it('pages reported models without touching the machine inventory', async () => {
  const {MachineEquipment} = await import('../../src/apps/fleet/FleetWorkspace');
  const {machineFromRow} = await import('../../src/apps/fleet/rows');
  const machine = machineFromRow(machineRow({id:'a', labels:carouselLabels}));
@@ -186,14 +191,8 @@ it('pages reported models without changing selection or the machine inventory', 
  expect(screen.getByRole('status').textContent).toBe('1–2 of 7 models');
  fireEvent.click(next);
  expect(screen.getByRole('status').textContent).toBe('3–4 of 7 models');
- expect(screen.queryByRole('button', {name:'alpha Conversation'})).toBeNull();
- expect(screen.getByRole('region', {name:'Selected equipment'}).textContent).toContain('alpha');
- fireEvent.click(screen.getByRole('button', {name:'charlie Conversation'}));
- expect(screen.getByRole('region', {name:'Selected equipment'}).textContent).toContain('charlie');
- expect(JSON.parse(screen.getByRole('region', {name:'Selected equipment'}).getAttribute('data-os-page-context')!)).toEqual({selectedModel:'charlie'});
  view.rerender(<MachineEquipment machine={{...machine, activeCount:3}} now={now} onInspect={onInspect}/>);
  expect(screen.getByRole('status').textContent).toBe('3–4 of 7 models');
- expect(screen.getByRole('button', {name:'charlie Conversation'}).getAttribute('aria-pressed')).toBe('true');
  fireEvent.click(next);
  fireEvent.click(next);
  expect(screen.getByRole('status').textContent).toBe('7 of 7 models');
@@ -204,7 +203,7 @@ it('pages reported models without changing selection or the machine inventory', 
  expect(machine.reportedLabels).toEqual(carouselLabels);
 });
 
-it('keeps keyboard focus visible on resize and clamps pages when inventory disappears', async () => {
+it('keeps keyboard focus on the arrows on resize and clamps pages when inventory disappears', async () => {
  const {MachineEquipment} = await import('../../src/apps/fleet/FleetWorkspace');
  const {machineFromRow} = await import('../../src/apps/fleet/rows');
  let resize!: (width: number) => void;
@@ -221,19 +220,16 @@ it('keeps keyboard focus visible on resize and clamps pages when inventory disap
    const now = new Date();
    const onInspect = vi.fn();
    const view = render(<MachineEquipment machine={machine} now={now} onInspect={onInspect}/>);
-   const beta = screen.getByRole('button', {name:'beta Conversation'});
-   beta.focus();
+   const next = screen.getByRole('button', {name:'Next models'});
+   next.focus();
    act(() => resize(300));
-   expect(screen.getByRole('status').textContent).toBe('2 of 7 models');
-   expect(document.activeElement).toBe(beta);
-   expect(screen.getByRole('button', {name:'beta Conversation'})).toBe(beta);
+   expect(screen.getByRole('status').textContent).toBe('1 of 7 models');
+   expect(document.activeElement).toBe(next);
    act(() => resize(0));
-   expect(screen.getByRole('status').textContent).toBe('2 of 7 models');
+   expect(screen.getByRole('status').textContent).toBe('1 of 7 models');
    act(() => resize(500));
    expect(screen.getByRole('status').textContent).toBe('1–2 of 7 models');
-   expect(document.activeElement).toBe(beta);
-   beta.blur();
-   const next = screen.getByRole('button', {name:'Next models'});
+   expect(document.activeElement).toBe(next);
    for (let i=0; i<3; i++) fireEvent.click(next);
    expect(screen.getByRole('status').textContent).toBe('7 of 7 models');
    view.rerender(<MachineEquipment machine={{...machine, reportedLabels:{'model:alpha':'ctx=4096'}}} now={now} onInspect={onInspect}/>);
@@ -276,16 +272,20 @@ it('never presents a refused machine inventory as a zero count', async () => {
  expect(screen.getByRole('heading', { name: 'Machines' }).closest('.os-head')?.querySelector('.os-head-meta')).toBeNull();
 });
 
-it('All app sessions returns to the full list after a previously opened session', async () => {
- const session = appSessionRow({id:'session',workerId:'a',runId:'A recorded task'});
+it('Recent activity shows five entries, opens one in Activity, and its arrow opens the whole list', async () => {
+ const session = appSessionRow({id:'session',workerId:'a',runId:'A recorded task',startedAt:'2026-02-01T00:00:00Z'});
  h.connection = fakeConnection({myWorkersWithStatus:[machineRow({id:'a',displayName:'Alpha'})],appSessionsForUser:[session,...Array.from({length:5},(_,i)=>appSessionRow({id:`older-${i}`,workerId:'a',runId:`Older task ${i}`,startedAt:'2026-01-01T00:00:00Z'}))],appSessionById:[session]});
- function App() { const [section,setSection]=useState('machines');return <><button onClick={()=>setSection('machines')}>Machines section</button><FleetApp sectionId={section} navigate={setSection} askContext={vi.fn()} store={{load:()=>({version:1,defaultSection:'machines',showRevoked:false}),save:()=>{}}}/></>; }
- render(withSession(<MachinesProvider><App/></MachinesProvider>));
+ fleet();
  await openMachine('Alpha');
- fireEvent.click(await screen.findByRole('button',{name:/A recorded task/}));
- await screen.findByText('Recording');
- fireEvent.click(screen.getByRole('button',{name:'Machines section'}));
- fireEvent.click(screen.getByRole('button',{name:'All app sessions'}));
- expect(await screen.findByRole('button',{name:/A recorded task/})).toBeTruthy();
+ const recent = await screen.findByRole('list',{name:'Recent activity'});
+ await waitFor(() => expect(within(recent).getAllByRole('button')).toHaveLength(5));
+ fireEvent.click(within(recent).getAllByRole('button')[0]!);
+ const tabs = screen.getByRole('navigation',{name:'Machine views'});
+ expect(within(tabs).getByRole('button',{name:'Activity'}).getAttribute('aria-current')).toBeTruthy();
+ expect(await screen.findByText('A recorded task')).toBeTruthy();
+ fireEvent.click(within(tabs).getByRole('button',{name:'Equipment'}));
+ fireEvent.click(screen.getByRole('button',{name:'All activity'}));
+ expect(within(await screen.findByRole('list',{name:'Machine activity'})).getAllByRole('button')).toHaveLength(6);
  expect(h.connection.query.appSessionsForUser).toHaveBeenCalledTimes(1);
+
 });

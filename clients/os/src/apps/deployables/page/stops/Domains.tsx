@@ -239,6 +239,9 @@ function DomainListRow({ domain: d, site, changed, onOpen }: { domain: DomainRow
 const SETUP_STEPS: readonly DomainStepId[] = ["ownership", "dns", "certificate", "serving"];
 const SETUP_NAMES: Record<DomainStepId, string> = { ownership: "Ownership", dns: "DNS", certificate: "Certificate", serving: "Serving" };
 
+/** What each setup step is, under its name on the rail. */
+const SETUP_SUBTITLES: Record<DomainStepId, string> = { ownership: "Proof the domain is yours", dns: "Records that point it here", certificate: "HTTPS for the address", serving: "Live at the address" };
+
 /**
  * A DOMAIN, from its name to the moment it serves -- and back again.
  *
@@ -356,6 +359,7 @@ export function DomainWizard({ site, name, domainId = "", trail, back, onLeave }
     {
       id: "domain",
       name: "Domain",
+      sentence: "The address to serve it at",
       state: bound === null ? "open" : "done",
       answer: bound === null ? "" : bound.hostname,
       // Bound, the name is a fact: there is nothing behind the line to open.
@@ -379,11 +383,12 @@ export function DomainWizard({ site, name, domainId = "", trail, back, onLeave }
     },
     ...SETUP_STEPS.map((id): Stop => {
       const reading = setup?.find((step) => step.id === id);
-      if (bound === null || reading === undefined) return { id, name: SETUP_NAMES[id], state: "ahead" };
+      if (bound === null || reading === undefined) return { id, name: SETUP_NAMES[id], sentence: SETUP_SUBTITLES[id], state: "ahead" };
       const reachable = reading.state !== "ahead";
       return {
         id,
         name: reading.name,
+        sentence: SETUP_SUBTITLES[id],
         state: reading.state,
         answer: reading.answer,
         openable: reachable,

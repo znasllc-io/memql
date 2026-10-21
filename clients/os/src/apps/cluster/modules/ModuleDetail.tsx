@@ -139,7 +139,7 @@ export function ModuleDetail({
         <Panel label={`Module ${module.name}`}>
           {/* ONE Head, and its only control goes BACK. Every act that changes
               the module's state is on the bar (rule 12). */}
-          <Head title={module.name} meta={`${module.kind} -- ${module.scope || "unscoped"}`} back={{ label: "Modules", onSelect: onBack }} />
+          <Head navigationKey={`module:${module.name}`} title={module.name} meta={`${module.kind} -- ${module.scope || "unscoped"}`} back={{ label: "Modules", onSelect: onBack }} />
 
           <Facts>
             <Fact label="State" value={module.state || "unstated"} mono />

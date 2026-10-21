@@ -1,18 +1,15 @@
 import { localCockpitInstall } from "../localInstall";
-import { Caption, CopyField, Notice, Subhead } from "../../../../kit";
+import { Caption, CopyField, Notice } from "../../../../kit";
 import type { Draft } from "../flow";
 import {
   CLUSTER_URL_PLACEHOLDER,
   allowAppsCommand,
-  setupCommand,
   installCommand,
   workerClusterUrl,
 } from "../install";
 
 // The command carries the token. Keep the separate token available on demand,
 // and keep it only in this flow's memory: never in storage or a URL.
-// Runtime installation needs an interactive approval, so local models remain
-// a second command, run after the installer finishes.
 
 export function InstallStop({
   draft,
@@ -37,18 +34,25 @@ export function InstallStop({
     localTest,
   });
 
+  // ONE COMMAND AND ONE NOTE (memql#6214). The installer sets up local models
+  // itself when the line carries --inference; if the runtime needs a person's
+  // approval, the Model runtime check asks for the second command then, and
+  // only then. The token and the app-permission recovery sit behind
+  // disclosures: the command already carries the one, and the other is for
+  // an older Cockpit.
+  const note = [
+    draft.userLocal ? "" : "Asks for your administrator password.",
+    draft.computerUse && draft.platform === "mac" ? "Allow Accessibility and Screen Recording when asked." : "",
+    localTest ? `Local test build ${localTest.version}.` : "",
+    "Shown only here: it carries this machine’s token.",
+  ].filter((part) => part !== "").join(" ");
+  const allow = clusterUrl ? allowAppsCommand(clusterUrl, undefined, draft.userLocal) : "";
+
   return (
     <div className="os-stop-body os-fleet-addstop os-fleet-install">
       <div className="os-fleet-install-command">
-        <Subhead>{draft.inference ? "1. Install MemQL Cockpit" : "Install MemQL Cockpit"}</Subhead>
         <CopyField value={command} label="the install command" id="fleet-add-command" />
-        <Caption>
-          {draft.userLocal ? "" : "Enter your administrator password when asked. "}
-          {draft.computerUse && draft.platform === "mac" ? "Allow Accessibility and Screen Recording when prompted. " : ""}
-          {localTest ? `Local test build ${localTest.version}. Use this Mac. ` : ""}
-          Wait until Cockpit is installed before closing the terminal.
-        </Caption>
-        <Caption>The installer detects Claude Code and Codex and allows the installed apps for this cluster. They can edit files and run commands within Cockpit’s allowed workspace. Add <code>--no-apps</code> to keep app permissions unchanged.</Caption>
+        <Caption>{note}</Caption>
       </div>
 
       {clusterUrl === "" ? (
@@ -56,25 +60,14 @@ export function InstallStop({
           next={`Replace ${CLUSTER_URL_PLACEHOLDER} with this cluster's API address, including https://.`} />
       ) : null}
 
-      {draft.inference ? (
-        <div className="os-fleet-install-command">
-          <Subhead>2. Set up local models</Subhead>
-          <CopyField value={setupCommand(draft.userLocal, true)} label="the local models setup command" id="fleet-add-inference" />
-          <Caption>
-            Run after Cockpit is installed. Approve the runtime setup to download the recommended models.
-          </Caption>
-        </div>
-      ) : null}
-
-      {clusterUrl ? <details className="os-fleet-install-token">
+      {allow === "" ? null : <details className="os-fleet-install-token">
         <summary>App permissions</summary>
         <div className="fleet-app-permission-body">
-          <Caption>If an app still says “Not allowed by Cockpit,” run this on the machine after installing Cockpit 0.17.0 or later. It allows Claude Code and Codex for this cluster; each app still needs its own sign-in.</Caption>
-          <CopyField value={allowAppsCommand(clusterUrl, undefined, draft.userLocal)} label="the app permissions command" id="fleet-add-apps" />
+          <Caption>The installer allows Claude Code and Codex for this cluster; add <code>--no-apps</code> to skip that. If an app still says “Not allowed by Cockpit”, run:</Caption>
+          <CopyField value={allow} label="the app permissions command" id="fleet-add-apps" />
         </div>
-      </details> : null}
+      </details>}
 
-      <Caption>Keep this page open until the machine connects. The install command contains a private token shown only during this setup.</Caption>
       <details className="os-fleet-install-token">
         <summary>Connection token</summary>
         <CopyField value={token} label="the worker token" id="fleet-add-token" />

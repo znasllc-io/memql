@@ -62,7 +62,7 @@ export function ConceptPage({
   if (concept === null) {
     return (
       <div className="os-app-stack os-concept-page">
-        <Head title={conceptId} back={{ label: "Concepts", onSelect: onBack }} />
+        <Head navigationKey={`concept:${conceptId}`} title={conceptId} back={{ label: "Concepts", onSelect: onBack }} />
         {registryState === "seeding" ? (
           <ContentSkeleton kind="detail" label="Loading the registry from the cluster" />
         ) : (
@@ -105,7 +105,7 @@ function ConceptBody({
 
   return (
     <div className="os-app-stack os-concept-page">
-      <Head title={concept.entity} meta={concept.id} back={{ label: "Concepts", onSelect: onBack }}>
+      <Head navigationKey={`concept:${concept.id}`} title={concept.entity} meta={concept.id} back={{ label: "Concepts", onSelect: onBack }}>
 
         {/* The reverse of the extension's own handoff: it opens the console
             at a concept's rows, and this opens the editor at its

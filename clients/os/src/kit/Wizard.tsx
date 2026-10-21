@@ -4,7 +4,7 @@ import { WizardStepHeaderContext } from "./WizardStepHeader";
 import { ActionBar, type Act, type ActionBarTone } from "./ActionBar";
 import type { Breadcrumb } from "./Breadcrumbs";
 import { Head } from "./controls";
-import { Rail, stopIsReachable, type Stop } from "./Rail";
+import { Rail, type Stop } from "./Rail";
 import { useWide } from "./useWide";
 
 // THE WIZARD -- one way to ADD a thing, whatever the thing is.
@@ -51,11 +51,17 @@ import { useWide } from "./useWide";
 // ===========================================================================
 // The same `Rail` every other surface draws, with the same closed state set:
 // `done` is a check and `ahead` dims. In a wizard, the displayed step
-// always has the filled accent mark; background work does not select a step. Every step is one line --
-// name, then its answer -- so a person can read back what they have said, in
-// order, without leaving the page; the open one carries its body beneath its
-// line, and the connector runs down the body's left edge, which is what holds
-// the body to its step without a box around it.
+// always has the filled accent mark; background work does not select a step.
+//
+// EVERY STEP SAYS WHAT IT IS. A step is its name and one muted line beneath
+// it: a few words on what the step does until it is answered, and its answer
+// once it is -- so a person sees the whole route before they start, and can
+// still read back what they have said, in order, without leaving the page.
+// The steps used to be bare names until reached (memql#6214): a column of
+// "Install", "Connect", "Checks" said nothing to somebody deciding whether to
+// begin. The open step carries its body beneath its line in one column, and
+// the connector runs down the body's left edge, which is what holds the body
+// to its step without a box around it.
 //
 // A reachable step reopens on click, to be READ again. Whether it can still be
 // CHANGED is the flow's to say: a name that has been minted into a token is a
@@ -74,8 +80,9 @@ import { useWide } from "./useWide";
 //   THE STEPS    on the left, still a vertical rail, and now standing still:
 //                a body that opens no longer pushes the steps beneath it down
 //                the page, so the rail is a map a person can keep an eye on.
-//   THE STAGE    the open step, with the rest of the width. Its name and what
-//                it asks head the pane; records and tables take the room,
+//   THE STAGE    the open step, with the rest of the width. Its name heads the
+//                pane -- what it is for is already on the rail's line beside
+//                it, and is not said twice; records and tables take the room,
 //                prose keeps a readable measure and a field keeps a field's
 //                width -- width is for what needs it, not for stretching a
 //                text box across a monitor.
@@ -226,13 +233,12 @@ export function Wizard({
   const headerOutlet = <span className="os-step-header-extras" ref={setHeaderTarget} />;
   const drawn: Stop[] = steps.map((step) => ({
     ...step,
-    // A STEP NOBODY HAS REACHED IS ITS NAME. What it will ask is said when it
-    // opens; said in advance, four times over, it is a paragraph of grey text
-    // between the person and the one step they can answer.
-    //
-    // SIDE BY SIDE, what the open step asks heads the stage instead, so the
-    // rail's line is the name and the answer and nothing is said twice.
-    sentence: split ? undefined : stopIsReachable(step.state) ? step.sentence : undefined,
+    // THE SUBTITLE UNTIL THERE IS AN ANSWER, THEN THE ANSWER. Reached or not,
+    // in either arrangement, the line beneath a step's name says what the step
+    // is; once the person or the cluster has answered it, the answer takes
+    // that line, so the rail reads back what was said. One line, never both:
+    // the two stacked made every answered step a paragraph.
+    sentence: (step.answer ?? "") === "" ? step.sentence : undefined,
     headerActions: split ? undefined : step.id === open ? headerOutlet : undefined,
     // ...and the body is the stage's, not the line's.
     body: split || step.body === undefined || step.body === null ? undefined : <div className="os-wizard-body">{step.body}</div>,
@@ -294,7 +300,6 @@ export function Wizard({
                       <h4 className="os-wizard-stage-title">{opened_.name}</h4>
                       {headerOutlet}
                     </div>
-                    {opened_.sentence ? <p className="os-wizard-stage-lead">{opened_.sentence}</p> : null}
                     {opened_.body === undefined || opened_.body === null ? null : <div className="os-wizard-body">{opened_.body}</div>}
                   </>
                 )}

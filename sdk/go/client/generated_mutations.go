@@ -966,6 +966,23 @@ func CheckRecordBuild(args CheckRecordArgs) string {
 	return b.String()
 }
 
+// ClearMyAvatar -- Remove the CALLER's own photo; the initial is shown again. The row is stamped from actor.userId.
+//
+// Bound concept: v1:identity:user (machine-readable: BoundConcepts["clearMyAvatar"] in generated_concepts.go).
+type ClearMyAvatarArgs struct {
+}
+
+// ClearMyAvatar calls the engine mutation clearMyAvatar.
+func (qc *QueryClient) ClearMyAvatar(ctx context.Context, args ClearMyAvatarArgs) (*Result, error) {
+	call := ClearMyAvatarBuild(args)
+	return qc.executeNamed(ctx, "clearMyAvatar", call)
+}
+
+func ClearMyAvatarBuild(args ClearMyAvatarArgs) string {
+	_ = args
+	return "mutation clearMyAvatar()"
+}
+
 // ClearSiteCandidate -- Withdraw the candidate version, leaving the deployable with only what it serves.
 // The plain inverse of setSiteCandidate, and its own act rather than an omitted argument -- see that mutation's note. It touches neither `bundleRef` nor `previewBinding`: withdrawing a candidate is not detaching a development store, and a person who withdraws one usually means to publish another against the same store.
 // Every preview grant naming the withdrawn version stops resolving, because a grant names the candidate it was issued for and the edge compares the two (component/edge/preview.go). So this is also how an operator ends every open preview of a version at once.
@@ -9039,6 +9056,8 @@ type RecordRouterCallArgs struct {
 	MinContextTokens int
 	// Whose machine served a local call. Empty until shared machines land.
 	MachineOwnerUserId string
+	// The route a person chose for this call in Ask. Empty means Auto.
+	Route string
 }
 
 // RecordRouterCall calls the engine mutation recordRouterCall.
@@ -9323,6 +9342,13 @@ func RecordRouterCallBuild(args RecordRouterCallArgs) string {
 		}
 		b.WriteString("machineOwnerUserId: ")
 		b.WriteString(quoteMemQL(args.MachineOwnerUserId))
+	}
+	if args.Route != "" {
+		if b.Len() > 26 {
+			b.WriteString(", ")
+		}
+		b.WriteString("route: ")
+		b.WriteString(quoteMemQL(args.Route))
 	}
 	b.WriteString(")")
 	return b.String()
@@ -11563,6 +11589,29 @@ func SetLibraryWatchedFolderStatusBuild(args SetLibraryWatchedFolderStatusArgs) 
 	return b.String()
 }
 
+// SetMyAvatar -- Set the CALLER's own photo: an inline base64 data: URL (image/webp, image/jpeg or image/png) of at most 40,000 characters. The row is stamped from actor.userId.
+//
+// Bound concept: v1:identity:user (machine-readable: BoundConcepts["setMyAvatar"] in generated_concepts.go).
+type SetMyAvatarArgs struct {
+	// The photo, cropped square and resized by the client.
+	Avatar string
+}
+
+// SetMyAvatar calls the engine mutation setMyAvatar.
+func (qc *QueryClient) SetMyAvatar(ctx context.Context, args SetMyAvatarArgs) (*Result, error) {
+	call := SetMyAvatarBuild(args)
+	return qc.executeNamed(ctx, "setMyAvatar", call)
+}
+
+func SetMyAvatarBuild(args SetMyAvatarArgs) string {
+	var b strings.Builder
+	b.WriteString("mutation setMyAvatar(")
+	b.WriteString("avatar: ")
+	b.WriteString(quoteMemQL(args.Avatar))
+	b.WriteString(")")
+	return b.String()
+}
+
 // SetPackEnabled -- Flip a pack's per-instance enablement in v1:platform:packState. clusterOwner tier via the concept's @rowAuthz -- these rows are the deployment's, not any operator's, and the tier injects the actor gate. The Modules flip reaches this through MemQLEngine.SetPackEnabled (component/memql), which admits the owner for any pack and a developer holding execute on app:cluster/modules for a STOREFRONT pack only, then runs this under internal origin with the caller's actor kept, so the row's provenance is the person; component/grpc's SetPackEnabledMsg handler writes one audit event per attempt. The id is the bare pack domain -- the engine canonicalizes it to v1:platform:packState:<packDomain>, so one row per pack with the version history as the flip audit trail. RESTART-REQUIRED lifecycle: the write changes what each node reads at its next boot, never what a running node has loaded.
 // The FIRST flip of a pack is a create, and a create needs a cluster owner or server code, enforced in executeWrite (component/memql/create_rank_floor.go): the tier does not judge a create, and a floor on this mutation would never see a raw insert() of the same concept (Connect Shopify design, D13). Internal origin passes. Once a pack has a row, the tier's write guard refuses every non-owner flip of it, so a direct call below owner is refused either way: a developer flips a storefront pack through the Modules path above, never by calling this.
 //
@@ -13566,6 +13615,45 @@ func UpdateMissingCapabilityStatusBuild(args UpdateMissingCapabilityStatusArgs) 
 	return b.String()
 }
 
+// UpdateMyName -- Change the CALLER's own name. The row is stamped from actor.userId: there is no target argument, so another person's name cannot be written here. firstName and lastName flow to the JWT as given_name / family_name; displayName is what the UI shows.
+//
+// Bound concept: v1:identity:user (machine-readable: BoundConcepts["updateMyName"] in generated_concepts.go).
+type UpdateMyNameArgs struct {
+	// Given name. Must contain something other than whitespace.
+	FirstName string
+	// Family name. Empty clears it.
+	LastName string
+	// The name the UI shows, normally firstName + ' ' + lastName.
+	DisplayName string
+}
+
+// UpdateMyName calls the engine mutation updateMyName.
+func (qc *QueryClient) UpdateMyName(ctx context.Context, args UpdateMyNameArgs) (*Result, error) {
+	call := UpdateMyNameBuild(args)
+	return qc.executeNamed(ctx, "updateMyName", call)
+}
+
+func UpdateMyNameBuild(args UpdateMyNameArgs) string {
+	var b strings.Builder
+	b.WriteString("mutation updateMyName(")
+	b.WriteString("firstName: ")
+	b.WriteString(quoteMemQL(args.FirstName))
+	if args.LastName != "" {
+		if b.Len() > 22 {
+			b.WriteString(", ")
+		}
+		b.WriteString("lastName: ")
+		b.WriteString(quoteMemQL(args.LastName))
+	}
+	if b.Len() > 22 {
+		b.WriteString(", ")
+	}
+	b.WriteString("displayName: ")
+	b.WriteString(quoteMemQL(args.DisplayName))
+	b.WriteString(")")
+	return b.String()
+}
+
 // UpdateMyPreferences -- Update the CALLER's own v1:identity:user.preferences. Partial: an omitted field keeps its stored value. The target row is stamped from actor.userId, so there is no caller-supplied target and no admin override. It cannot reach preferences.computerUseEnabled (the computer-use kill switch, owned by toggleComputerUseEnabled) or preferences.activeAssistantId (an app-managed pointer): neither is a key this mutation writes, and @mergeFields("preferences") preserves the stored value of every key a call does not carry.
 //
 // Bound concept: v1:identity:user (machine-readable: BoundConcepts["updateMyPreferences"] in generated_concepts.go).
@@ -14872,6 +14960,10 @@ type UpdateWorkerLastSeenArgs struct {
 	// A non-material inventory refresh riding the heartbeat's own write (epic memql#5146). Free disk moves on every report and decides nothing, so it is not worth a second write to this row; an inventory change that moves the `runtime:` labels does not come through here at all, it goes through updateWorkerHardware and does not wait.
 	// OMITTED, never sent empty. update{} is a read-merge and `??` is blank-coalescing, so an absent key keeps the stored inventory while an empty object would overwrite it with a machine that reports nothing -- turning a cockpit's silence into a statement.
 	Hardware map[string]any
+	// What the machine can take on now: memory free for a model and the models loaded (fleet capacity, routes design record). Re-asserted on every flush and OMITTED when the cockpit sent none, for hardware's `??` reason: an absent key keeps the stored report, which then ages out on its own reportedAt.
+	Capacity map[string]any
+	// What the machine's installer is doing (memql#6229): its stages and how far each has come. Re-asserted on every flush and OMITTED when the cockpit sent none, for capacity's reason.
+	Setup map[string]any
 	// The latest Ping round trip in milliseconds (epic memql#5218, D11), riding the heartbeat's write for `hardware`'s reason: it is exactly as fresh as the flush it arrives with and decides nothing, so it is not worth a write of its own.
 	// OMITTED together with rttAt while nothing has been measured, and for the same `??` reason: an absent key keeps the stored figure, while a sent zero would write "0 ms" over a real one and read as a fast machine rather than as an unmeasured one.
 	RttMs int
@@ -14928,6 +15020,20 @@ func UpdateWorkerLastSeenBuild(args UpdateWorkerLastSeenArgs) string {
 		}
 		b.WriteString("hardware: ")
 		b.WriteString(renderMemQLValue(args.Hardware))
+	}
+	if args.Capacity != nil {
+		if b.Len() > 30 {
+			b.WriteString(", ")
+		}
+		b.WriteString("capacity: ")
+		b.WriteString(renderMemQLValue(args.Capacity))
+	}
+	if args.Setup != nil {
+		if b.Len() > 30 {
+			b.WriteString(", ")
+		}
+		b.WriteString("setup: ")
+		b.WriteString(renderMemQLValue(args.Setup))
 	}
 	if args.RttMs != 0 {
 		if b.Len() > 30 {

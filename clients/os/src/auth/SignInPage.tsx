@@ -3,13 +3,18 @@ import { IdentityFrame } from "./IdentityFrame";
 import { Button, Field } from "../kit/controls";
 import { value, type IdentityData } from "./nativeIdentity";
 
-export interface SignInProblem { message: string; next: string }
+export interface SignInProblem { message: string; next: string; action?: string }
 
 /** Protocol responses remain available in the network/server diagnostics. Never
  * echo an unknown response into the signed-out product surface. */
 export function signInProblem(error: unknown): SignInProblem {
   const message = error instanceof Error ? error.message : String(error);
   const name = typeof error === "object" && error !== null && "name" in error && typeof error.name === "string" ? error.name : "";
+  if (name === "PasskeyWindowNeeded") return {
+    message: "This browser asks for the passkey in a separate window.",
+    next: "Open it to sign in.",
+    action: "Open window",
+  };
   if (message.includes("no passkey matches the asserted credential")) return {
     message: "This passkey couldn’t be recognized.",
     next: "Try again with a passkey you’ve used for this MemQL installation.",
@@ -67,7 +72,7 @@ export function SignInPage({ data, clientId, fields, busy, passkeyPending, probl
         <Button type="submit" tone="primary" disabled={busy} busy={busy && !passkeyPending} busyLabel="Continuing…">{emailAction}</Button>
       </form> : null}
       {stage === "email" ? <Button tone={local ? "primary" : "quiet"} disabled={busy} busy={passkeyPending} busyLabel="Waiting for your passkey…" onClick={onPasskey}>
-        <Fingerprint size={20} aria-hidden="true" />{problem ? "Try passkey again" : "Sign in with a passkey"}
+        <Fingerprint size={20} aria-hidden="true" />{problem?.action ?? (problem ? "Try passkey again" : "Sign in with a passkey")}
       </Button> : null}
       {data.CanResumeSetup === true && onSetup ? <Button tone="quiet" disabled={busy} onClick={onSetup}>Finish ownership setup</Button> : null}
       {passkeyPending ? <p className="os-signin-pending" role="status">Follow your browser’s prompt to use your passkey.</p> : null}

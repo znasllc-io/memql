@@ -8,6 +8,9 @@ import { Wizard } from "../../kit/Wizard";
 import { normalizeAccountDomain } from "./defaults";
 import type { CreateAccountState } from "./actions";
 
+/** What each step is, under its name on the rail. */
+const CLIENT_SUBTITLES: Readonly<Record<string, string>> = { name: "What to call the client", domain: "Their own domain, if any", contact: "Who to talk to", review: "Check, then add" };
+
 export function AddAccountWizard({ create, onBack, onDone }: { create: CreateAccountState; onBack: () => void; onDone: (id: string) => void }) {
   const [accountId] = useState(newShortId);
   const [name, setName] = useState("");
@@ -37,7 +40,7 @@ export function AddAccountWizard({ create, onBack, onDone }: { create: CreateAcc
     contact: <div className="os-app-stack"><Field label="Contact name"><Input id="os-account-new-contact" label="Primary contact name" value={primaryContactName} onChange={setContactName} /></Field><Field label="Contact email"><Input id="os-account-new-email" label="Primary contact email" value={primaryContactEmail} onChange={setContactEmail} /></Field><Caption>{validContact ? "Optional. Contact details can be added later." : "Enter an email address such as hello@example.com."}</Caption></div>,
     review: <Facts><Fact label="Client" value={name.trim()} /><Fact label="Domain" value={normalizeAccountDomain(domain) || "Not assigned"} /><Fact label="Contact" value={[primaryContactName, primaryContactEmail].filter(Boolean).join(" · ") || "Not added"} /></Facts>,
   };
-  const steps: Stop[] = order.map(id => ({ id, name: ({ name: "Name", domain: "Domain", contact: "Contact", review: "Review" } as Record<string, string>)[id]!, state: id === step ? "open" : reachable(id) ? order.indexOf(id) < order.indexOf(step) ? "done" : "waiting" : "ahead", body: bodies[id as keyof typeof bodies] }));
+  const steps: Stop[] = order.map(id => ({ id, name: ({ name: "Name", domain: "Domain", contact: "Contact", review: "Review" } as Record<string, string>)[id]!, sentence: CLIENT_SUBTITLES[id], state: id === step ? "open" : reachable(id) ? order.indexOf(id) < order.indexOf(step) ? "done" : "waiting" : "ahead", body: bodies[id as keyof typeof bodies] }));
   const acts: Act[] = create.busy ? [] : [{ label: "Cancel", text: true, onAct: onBack }];
   if (step === "review") acts.push({ label: "Add client", tone: "primary", busy: create.busy, onAct: () => void submit() });
   else if (!create.busy && named && (step !== "domain" || validDomain) && (step !== "contact" || validContact)) acts.push({ label: "Next", tone: "primary", onAct: next });

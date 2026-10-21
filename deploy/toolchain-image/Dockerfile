@@ -16,7 +16,7 @@
 #   Tailwind  4.1.11   scripts/identity/build-css.sh's TAILWIND_VERSION
 #   kubectl   1.32.13  the minor of scripts/k3d/up.sh's K3S_VERSION, the deploy
 #                      target's Kubernetes (the patch may differ)
-#   docker    29.8.2   the CLIENT only; there is no daemon (see its stage)
+#   docker    29.9.1   the CLIENT only; there is no daemon (see its stage)
 #   GCC + X11/PNG development libraries for Cockpit's Linux computer-use build;
 #   on AMD64, an ARM64 cross compiler, target libraries and QEMU verification.
 #   git, make, bash, curl, tar, gzip, unzip, jq, python3 (with PyYAML),
@@ -94,9 +94,9 @@ FROM registry.k8s.io/kubectl:v1.32.13@sha256:fbfd671cd51f0be98174170f2000cbb97d2
 # scripts/release/release.sh, which checks `command -v docker` before every run,
 # dry runs included, and whose push dry run probes the registry for the tag it
 # would overwrite with `docker manifest inspect`: a registry call, not a daemon
-# one. Without it, four scripts/release tests fail. 29.8.2 is the newest 29.x
-# release at the time of pinning; the binary is static.
-FROM docker:29.8.2-cli@sha256:35cfcf893c20f2931f4909151b5407aaaeab711277de7ce8b8f521f095d54c32 AS docker-dist
+# one. Without it, four scripts/release tests fail. The pinned client binary is
+# static.
+FROM docker:29.9.1-cli@sha256:6fae2214c3121a28d5aa639d09032f61310b7c9c75ffbad1025f261a1b621800 AS docker-dist
 
 # protoc, fetched from its release and checked against a pinned SHA-256 per
 # architecture before it is unpacked. The stage runs on the BUILD platform

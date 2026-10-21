@@ -58,6 +58,8 @@ source "${SCRIPT_DIR}/../lib/capability.sh"
 source "${SCRIPT_DIR}/../lib/localtls.sh"
 # shellcheck source=../lib/ports.sh
 source "${SCRIPT_DIR}/../lib/ports.sh"
+# shellcheck source=../lib/requirements.sh
+source "${SCRIPT_DIR}/../lib/requirements.sh"
 # shellcheck source=../lib/engine_build_args.sh
 # ENGINE_NODE_TYPES + engine_is_node_type: what THIS tree builds. The readiness
 # wait asks it to tell a node type that was retired from one that is simply not
@@ -89,7 +91,9 @@ cap_spec_param "domain"         "front-door apex the cluster is served at (defau
 cap_spec_param "caroot"         "mkcert CAROOT the front-door certificate is issued from, forwarded to secret seeding (default: whatever mkcert reports)"
 cap_spec_param "project-manifest" "path to the AppProject manifest to apply (downstream repos pass their own)"
 cap_spec_param "repo-root"      "the MemQL checkout to read deploy/ and the target revision from (default: this script's own repository)"
+cap_spec_param "allow-below-minimum" "create the cluster even on a machine below the minimum requirements, with a warning (default: \$MEMQL_ALLOW_BELOW_MINIMUM, else false)"
 cap_spec_param "no-secrets"     "skip secret seeding (flag)"                        ""
+cap_spec_param "switch"         "stop any OTHER running local k3d cluster first instead of refusing; it is stopped, never deleted (flag)"
 
 #=============================================================================
 # CONFIGURATION
@@ -141,11 +145,17 @@ PROJECT_MANIFEST="${MEMQL_K3D_PROJECT_MANIFEST:-}"
 # fills the sizes from the Docker host when they are not given). Created
 # unless --no-build-node says otherwise.
 SKIP_BUILD_NODE=""
+# Resolved in main() (--allow-below-minimum); see check_requirements.
+ALLOW_BELOW_MINIMUM="false"
 BUILD_NODE_CPUS=""
 BUILD_NODE_MEMORY=""
 # The memory the person asked for, empty when it is the default: only an
 # asked-for cap is worth a warning when an existing node has another.
 BUILD_NODE_MEMORY_ASKED=""
+
+# --switch: stop another running local cluster instead of refusing to start
+# beside it (refuse_another_running_stack). Read in main().
+SWITCH=""
 
 # The overlay's COMMITTED Ingress hostname (memql#3593). Patches are emitted
 # only when the operator's domain differs, so the common case carries no
@@ -354,6 +364,93 @@ function warn_occupied_ports() {
     return 0
 }
 
+# running_k3d_clusters -- the k3d clusters with a server running, one name per
+# line, from k3d's own listing (SERVERS is running/total). A running cluster's
+# load balancer publishes the host ports (443, 80, 5432 and any --extra-ports);
+# a STOPPED one (0/N) holds none and is not listed. k3d, not docker, because
+# k3d is the authority on its clusters -- and the one command every test that
+# drives this script already fakes.
+function running_k3d_clusters() {
+    k3d cluster list 2>/dev/null \
+        | awk '$1 != "NAME" && split($2, servers, "/") == 2 && servers[1] > 0 { print $1 }' \
+        | sort -u || true
+}
+
+# cluster_domain <name> -- the domain a running cluster serves, read from its
+# memql-domain ConfigMap. Empty when it cannot be read: not a MemQL cluster, or
+# an API server that is not answering.
+function cluster_domain() {
+    kubectl --context "k3d-$1" --request-timeout=5s get configmap memql-domain \
+        -n "${NAMESPACE}" -o 'jsonpath={.data.MEMQL_DOMAIN}' 2>/dev/null || true
+}
+
+# refuse_another_running_stack -- one local stack runs at a time (memql#6207).
+#
+# Every local cluster publishes the same host ports, so a second one cannot run
+# beside the first. Docker says so only at `k3d cluster create`, as "port is
+# already allocated" with no stack named. warn_occupied_ports cannot be the
+# gate: a port something listens on is not always one docker cannot publish
+# (see its comment). Another RUNNING k3d cluster always is, so this asks k3d
+# for those, before anything is created or started. There is no lock
+# file to go stale after a crash or a reboot, and a STOPPED cluster, which holds
+# no port, is never in the way.
+#
+# --switch is the operator saying "stop it for me". The other cluster is
+# STOPPED, never deleted: `k3d cluster start <name>`, or `make up` in its repo,
+# brings it back as it was.
+function refuse_another_running_stack() {
+    local others name domain named=""
+    others="$(running_k3d_clusters | grep -vxF "${CLUSTER_NAME}" || true)"
+    if [[ -z "$others" ]]; then
+        return 0
+    fi
+    if [[ -n "$SWITCH" ]]; then
+        while IFS= read -r name; do
+            info "Stopping k3d cluster '${name}' (--switch): it keeps its state, and \`k3d cluster start ${name}\` brings it back."
+            k3d cluster stop "$name" >&2 || cap_fail 5 "could not stop k3d cluster '${name}'"
+        done <<< "$others"
+        return 0
+    fi
+    while IFS= read -r name; do
+        domain="$(cluster_domain "$name")"
+        named+="${named:+, }'${name}'${domain:+ (serving ${domain})}"
+    done <<< "$others"
+    name="$(head -n 1 <<< "$others")"
+    cap_fail 3 "another local stack is running: ${named}. One local stack runs at a time -- every local cluster publishes the same host ports. Stop it first with \`k3d cluster stop ${name}\` (it keeps its state) or \`make down\` in its repo, or re-run with SWITCH=1 (--switch) to stop it for you."
+}
+
+# check_requirements -- refuse to CREATE a cluster on a machine below the
+# minimum requirements (scripts/lib/requirements.sh, the figures in
+# docs/public/operate/minimum-requirements.md). A cluster that is already here
+# is warned about and kept going, so a repair is never stranded; the explicit
+# override (--allow-below-minimum, MEMQL_ALLOW_BELOW_MINIMUM) is what the CI
+# lanes set, because their runners have no GPU.
+function check_requirements() {
+    local line shortfalls
+    requirements_evaluate "${HOME:-/}"
+    if [[ "$REQ_MEETS_MINIMUM" == "true" ]]; then
+        if [[ "$REQ_MEETS_RECOMMENDED" != "true" ]]; then
+            info "This computer meets the minimum requirements, not the recommended ones."
+        fi
+        return 0
+    fi
+    while IFS= read -r line; do
+        [[ -n "$line" ]] && warn "${line}"
+    done <<< "$REQ_SUMMARY"
+    shortfalls="$(requirements_shortfalls_line)"
+    if k3d cluster list 2>/dev/null | grep "^${CLUSTER_NAME}[[:space:]]" >/dev/null; then
+        warn "This computer is below the minimum requirements: ${shortfalls}"
+        warn "Cluster '${CLUSTER_NAME}' is already here, so this run keeps it going."
+        return 0
+    fi
+    if [[ "$ALLOW_BELOW_MINIMUM" == "true" ]]; then
+        warn "This computer is below the minimum requirements: ${shortfalls}"
+        warn "Creating the cluster anyway, because --allow-below-minimum is set."
+        return 0
+    fi
+    cap_fail 3 "This computer does not meet the minimum requirements for MemQL. ${shortfalls} See ${REQ_DOCS_URL} To create the cluster anyway: make up ALLOW_BELOW_MINIMUM=1"
+}
+
 function create_cluster() {
     section "Creating k3d cluster '${CLUSTER_NAME}'"
     cap_progress "Creating the cluster"
@@ -365,10 +462,29 @@ function create_cluster() {
     # "already here", and cleaning up the failed install refused to delete the
     # cluster it had just created.
     cap_result_set cluster "$CLUSTER_NAME"
-    if k3d cluster list 2>/dev/null | grep -q "^${CLUSTER_NAME}[[:space:]]"; then
-        info "Cluster '${CLUSTER_NAME}' already exists -- skipping creation."
-        info "To recreate: make down && make up"
+    if k3d cluster list 2>/dev/null | grep "^${CLUSTER_NAME}[[:space:]]" >/dev/null; then
         cap_result_set_raw clusterCreated false
+        if running_k3d_clusters | grep -xF "${CLUSTER_NAME}" >/dev/null; then
+            info "Cluster '${CLUSTER_NAME}' already exists -- skipping creation."
+        else
+            # STOPPED, not missing (memql#6207). It holds no port and answers
+            # nothing, so skipping it left every later step talking to an API
+            # server that was not there. refuse_another_running_stack has
+            # already made sure its ports are free.
+            info "Cluster '${CLUSTER_NAME}' exists but is stopped -- starting it."
+            k3d cluster start "${CLUSTER_NAME}" --wait >&2 \
+                || cap_fail 5 "could not start k3d cluster '${CLUSTER_NAME}'"
+            cap_changed
+        fi
+        info "To recreate: make down && make up"
+        # The current context belongs to whichever cluster was used last --
+        # another local stack, or a cloud cluster -- and every later step runs
+        # kubectl against it. Point it HERE on this path too, not only after a
+        # create, or a re-run would seed and apply into that other cluster.
+        k3d kubeconfig merge "${CLUSTER_NAME}" --kubeconfig-merge-default &>/dev/null || true
+        kubectl config use-context "k3d-${CLUSTER_NAME}" &>/dev/null \
+            || cap_fail 5 "kubectl has no context k3d-${CLUSTER_NAME}; recreate the cluster: make down && make up"
+        info "kubectl context set to k3d-${CLUSTER_NAME}."
         return 0
     fi
     # Before `k3d cluster create`: whatever cluster of this name exists after
@@ -552,7 +668,9 @@ function ensure_build_node() {
     local name="${CLUSTER_NAME}-build"
     local node="k3d-${name}-0"
     local context="k3d-${CLUSTER_NAME}"
-    if ! k3d node list 2>/dev/null | grep -q "^${node}[[:space:]]"; then
+    # grep reads the whole listing: an early exit (-q) SIGPIPEs k3d, and
+    # pipefail reads that as "missing" (TestNoPipeIntoQuietGrepUnderPipefail).
+    if ! k3d node list 2>/dev/null | grep "^${node}[[:space:]]" >/dev/null; then
         info "Creating build node ${node} (${BUILD_NODE_CPUS} CPUs, ${BUILD_NODE_MEMORY})..."
         k3d node create "${name}" \
             --cluster "${CLUSTER_NAME}" \
@@ -1106,18 +1224,28 @@ function kustomize_image_overrides() {
     printf '      images:%s\n' "$out"
 }
 
-# kustomize_host_overrides -- the `kustomize.patches` entries that repoint the
-# two front-door Ingresses, or nothing.
+# kustomize_host_overrides -- the `kustomize.patches` entries that repoint every
+# local front door (each Ingress, plus the TURN route) at the domain, or nothing.
 #
 # WHY THE APPLICATION AND NOT A SECOND OVERLAY. The same reasoning as the image
 # overrides above (memql#3572): the two need different hostname VALUES, not a
 # different topology, so it is expressed where a value belongs. One overlay, one
 # sync path, no `if installing` branch in the manifests.
 #
-# WHY ONLY THESE TWO. Everything else the domain touches is process config and
-# reaches the pods through the memql-domain ConfigMap, derived by
+# WHY ONLY THE FRONT DOORS. Everything else the domain touches is process config
+# and reaches the pods through the memql-domain ConfigMap, derived by
 # component/envregistry/domain.go. An Ingress host is a Kubernetes API object, so it
 # has to be in the render.
+#
+# THE LIST IS HAND-KEPT, AND IT DRIFTED (memql#6205). It named api, identity and
+# voice; os, mcp, vscode and the edge sites front door joined the overlay and
+# never joined this list, so a custom-domain cluster derived every issuer and
+# CORS origin from its domain while MemQL OS, MCP, the VS Code page and every
+# hosted site stayed routed at memql.localhost only. A new front door needs its
+# entry here; TestKustomizeHostOverridesCoverEveryLocalFrontDoor reads every host
+# the overlay commits at the default domain and fails on one this leaves behind,
+# or on a replace of a host the overlay does not have (kustomize refuses the
+# whole render on a missing path).
 #
 # ONLY WHEN OVERRIDDEN. The overlay commits OVERLAY_DEFAULT_DOMAIN as its
 # Ingress hostname, so the common case emits no generated YAML at all and a
@@ -1163,6 +1291,52 @@ function kustomize_host_overrides() {
             - op: replace
               path: /spec/routes/0/match
               value: HostSNI(\`turn.${DOMAIN}\`)
+        - target:
+            kind: Ingress
+            name: mcp-front-door
+          patch: |-
+            - op: replace
+              path: /spec/rules/0/host
+              value: mcp.${DOMAIN}
+            - op: replace
+              path: /spec/tls/0/hosts/0
+              value: mcp.${DOMAIN}
+        - target:
+            kind: Ingress
+            name: os-front-door
+          patch: |-
+            - op: replace
+              path: /spec/rules/0/host
+              value: os.${DOMAIN}
+            - op: replace
+              path: /spec/tls/0/hosts/0
+              value: os.${DOMAIN}
+        - target:
+            kind: Ingress
+            name: vscode-front-door
+          patch: |-
+            - op: replace
+              path: /spec/rules/0/host
+              value: vscode.${DOMAIN}
+            - op: replace
+              path: /spec/tls/0/hosts/0
+              value: vscode.${DOMAIN}
+        - target:
+            kind: Ingress
+            name: edge-front-door
+          patch: |-
+            - op: replace
+              path: /spec/tls/0/hosts/0
+              value: "*.${DOMAIN}"
+            - op: replace
+              path: /spec/tls/0/hosts/1
+              value: ${DOMAIN}
+            - op: replace
+              path: /spec/rules/0/host
+              value: "*.${DOMAIN}"
+            - op: replace
+              path: /spec/rules/1/host
+              value: ${DOMAIN}
 EOF
 }
 
@@ -1705,6 +1879,8 @@ function main() {
     K3D_SERVERS="$(cap_param servers "${MEMQL_K3D_SERVERS:-1}")"
     K3D_AGENTS="$(cap_param agents "${MEMQL_K3D_AGENTS:-0}")"
     SKIP_BUILD_NODE="$(cap_flag no-build-node)"
+    SWITCH="$(cap_flag switch)"
+    ALLOW_BELOW_MINIMUM="$(cap_bool_str allow-below-minimum "${MEMQL_ALLOW_BELOW_MINIMUM:-false}")"
     BUILD_NODE_CPUS="$(cap_param build-node-cpus "")"
     BUILD_NODE_MEMORY="$(cap_param build-node-memory "")"
     ARGOCD_TIMEOUT="$(cap_param argocd-timeout "${MEMQL_K3D_ARGOCD_TIMEOUT:-300}")"
@@ -1714,6 +1890,9 @@ function main() {
     OVERLAY_PATH="$(cap_param overlay-path "${OVERLAY_PATH}")"
     EXTRA_PORTS="$(cap_param extra-ports "${EXTRA_PORTS}")"
     APP_PROJECT="$(cap_param app-project "${APP_PROJECT}")"
+    # Read beside --app-project, which refuses without it (memql#6209: this
+    # line went missing in #3491 and the flag was silently inert since).
+    PROJECT_MANIFEST="$(cap_param project-manifest "${PROJECT_MANIFEST}")"
     # The checkout this run reads deploy/ and its target revision FROM.
     #
     # Defaults to the derived root, so `make up` and every CI lane that calls
@@ -1785,9 +1964,15 @@ function main() {
     info "Namespace: ${NAMESPACE}"
 
     check_prerequisites
+    # Before anything exists, like the build-node size below: a machine below
+    # the minimum is refused before `k3d cluster create`, not after.
+    check_requirements
     # Before anything exists: a build-node size the host cannot honour is
     # refused here, not after the cluster is half made.
     resolve_build_node
+    # Before the cluster is created or started: another running stack holds the
+    # ports it would publish (memql#6207).
+    refuse_another_running_stack
     create_cluster
     # Outside create_cluster: an existing installation needs the same repair.
     info "Reconciling local ingress for long-lived streams."

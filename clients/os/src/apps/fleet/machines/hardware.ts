@@ -29,6 +29,19 @@ export interface MachineGpu {
   backend: string;
 }
 
+/**
+ * What kind of machine this is, for the picture Fleet draws: the vendor and
+ * model as the operating system reports them ("Apple", "Mac mini";
+ * "Micro-Star International Co., Ltd.", "Raider GE78 HX 14VIG") and the
+ * chassis. Nothing selects or routes on it.
+ */
+export interface MachineDevice {
+  vendor: string;
+  model: string;
+  /** laptop | desktop | allInOne | mini | tower | server, or "" when unknown. */
+  formFactor: string;
+}
+
 /** One runtime the machine has, with its version. */
 export interface MachineRuntime {
   name: string;
@@ -42,6 +55,7 @@ export interface MachineHardware {
   chip: string;
   memoryBytes: number;
   gpu: MachineGpu;
+  device: MachineDevice;
   cpuCores: number;
   osVersion: string;
   diskFreeBytes: number;
@@ -54,6 +68,7 @@ const ABSENT: MachineHardware = {
   chip: "",
   memoryBytes: 0,
   gpu: { name: "", vramBytes: 0, backend: "" },
+  device: { vendor: "", model: "", formFactor: "" },
   cpuCores: 0,
   osVersion: "",
   diskFreeBytes: 0,
@@ -78,6 +93,12 @@ export function hardwareFrom(row: unknown): MachineHardware {
     vramBytes: num(gpuObj.vramBytes),
     backend: str(gpuObj.backend),
   };
+  const deviceObj = (obj.device ?? {}) as Record<string, unknown>;
+  const device: MachineDevice = {
+    vendor: str(deviceObj.vendor),
+    model: str(deviceObj.model),
+    formFactor: str(deviceObj.formFactor),
+  };
   const runtimes: MachineRuntime[] = Array.isArray(obj.runtimes)
     ? obj.runtimes
         .map((item) => {
@@ -92,6 +113,7 @@ export function hardwareFrom(row: unknown): MachineHardware {
     chip: str(obj.chip),
     memoryBytes: num(obj.memoryBytes),
     gpu,
+    device,
     cpuCores: num(obj.cpuCores),
     osVersion: str(obj.osVersion),
     diskFreeBytes: num(obj.diskFreeBytes),
@@ -104,6 +126,8 @@ export function hardwareFrom(row: unknown): MachineHardware {
     hardware.cpuCores > 0 ||
     gpu.backend !== "" ||
     gpu.name !== "" ||
+    device.model !== "" ||
+    device.formFactor !== "" ||
     runtimes.length > 0;
   return hardware.present ? hardware : ABSENT;
 }

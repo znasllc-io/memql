@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"slices"
 	"strings"
 
 	memorynodes "github.com/znasllc-io/memql/component/database/memory-nodes"
@@ -13,6 +14,9 @@ import (
 
 // Merge one observer's receipt under a short database lock. Holding a copy of
 // the whole transcript while another request runs must never erase that turn.
+// Nor does the observer's copy carry its turn's routing record back over what
+// others wrote to it since: an agent's receipt for the message, a person's
+// answer to its stop question, a later message settling its question.
 func (e *MemQLEngine) askSaveTurn(ctx context.Context, conversationID string, turn AskTurn) error {
 	release, err := e.lockAskConversationKind(ctx, conversationID, "write")
 	if err != nil {
@@ -35,6 +39,9 @@ func (e *MemQLEngine) askSaveTurn(ctx context.Context, conversationID string, tu
 
 	for n := range transcript.Turns {
 		if transcript.Turns[n].ID == turn.ID {
+			if saved := transcript.Turns[n].Routed; saved != nil {
+				turn.Routed = saved
+			}
 			transcript.Turns[n] = turn
 			title, _ := row["title"].(string)
 			return e.askSave(ctx, conversationID, title, transcript)
@@ -70,8 +77,31 @@ func (e *MemQLEngine) askConversationSnapshotBuiltin(ctx context.Context, args m
 	return []memorynodes.MemoryNode{{ID: fmt.Sprint(row["id"]), Payload: raw}}, nil
 }
 
+// refreshAskRuns brings every turn's work up to date for a reader, routed
+// turns included: each target and stop question as its run is now
+// (projectAskRouting).
 func (e *MemQLEngine) refreshAskRuns(ctx context.Context, transcript *askTranscript) error {
+	return e.refreshAskTranscript(ctx, transcript, true)
+}
+
+// refreshAskTranscript brings every turn's work up to date from its run. With
+// routing, a routed turn's targets and stop questions are projected over
+// their runs too. That projection is a reader's view and never a record: a
+// transcript that is saved again is refreshed without it, so what routing
+// recorded -- a queued message, an unanswered stop question, the title a
+// message was sent under -- stays as it was written.
+func (e *MemQLEngine) refreshAskTranscript(ctx context.Context, transcript *askTranscript, routing bool) error {
 	ctx = ContextWithFreshRead(ctx)
+	// A request a routed message answered already says so on that message
+	// ("To {goal} · Answered"). Its projected "Guidance sent" turn would say it
+	// twice, so it is not projected, and a copy saved before the message
+	// recorded where it went is not shown either.
+	routedAnswers := askRoutedApprovals(transcript.Turns)
+	if len(routedAnswers) > 0 {
+		transcript.Turns = slices.DeleteFunc(transcript.Turns, func(turn AskTurn) bool {
+			return turn.AnswerOnly && turn.ID == "guidance-"+BareShortId(turn.ApprovalID) && routedAnswers[BareShortId(turn.ApprovalID)]
+		})
+	}
 	var answers []AskTurn
 	seen := map[string]bool{}
 	for _, turn := range transcript.Turns {
@@ -94,48 +124,51 @@ func (e *MemQLEngine) refreshAskRuns(ctx context.Context, transcript *askTranscr
 			return err
 		}
 		_, answer := askFeedbackProjection(approval)
-		if answer != nil && !seen[answer.ID] {
+		if answer != nil && !seen[answer.ID] && !routedAnswers[BareShortId(answer.ApprovalID)] {
 			answers = append(answers, *answer)
 			seen[answer.ID] = true
 		}
 	}
-	guidanceRuns := map[string]map[string]any{}
-	for n := range transcript.Turns {
-		turn := &transcript.Turns[n]
-		target := turn.GuidanceTargetRunID
-		if target == "" || turn.GuidanceStatus != "queued" {
-			continue
+	// One fresh read per run, shared by every turn, target and stop question
+	// that names it. A run the caller cannot read is nil.
+	runs := map[string]map[string]any{}
+	readRun := func(runID string) (map[string]any, error) {
+		key := BareShortId(runID)
+		if key == "" {
+			return nil, nil
 		}
-		run, seen := guidanceRuns[target]
-		if !seen {
-			rows, err := e.workRows(ctx, "workRunForOwner", target)
-			if err != nil {
+		if run, cached := runs[key]; cached {
+			return run, nil
+		}
+		rows, err := e.workRows(ctx, "workRunForOwner", runID)
+		if err != nil {
+			return nil, err
+		}
+		var run map[string]any
+		if len(rows) == 1 {
+			run = rows[0]
+		}
+		runs[key] = run
+		return run, nil
+	}
+	if routing {
+		for n := range transcript.Turns {
+			if err := projectAskRouting(transcript.Turns[n].Routed, readRun); err != nil {
 				return err
 			}
-			if len(rows) == 1 {
-				run = rows[0]
-			}
-			guidanceRuns[target] = run
 		}
-		projectWorkGuidance(turn, run)
 	}
 	for n := range transcript.Turns {
 		turn := &transcript.Turns[n]
 		if turn.RunID == "" {
 			continue
 		}
-		runs, err := e.workRows(ctx, "workRunForOwner", turn.RunID)
+		run, err := readRun(turn.RunID)
 		if err != nil {
 			return err
 		}
-		if len(runs) != 1 {
+		if run == nil {
 			return fmt.Errorf("conversation work is unavailable")
-		}
-		run := runs[0]
-		turn.CanGuideWork = runningGuidanceTarget(run) && guidanceConversation(run) != ""
-		turn.GuidanceEpoch = ""
-		if turn.CanGuideWork {
-			turn.GuidanceEpoch = workGuidanceEpoch(run)
 		}
 		turn.WorkStatus, _ = run["status"].(string)
 		waiting, _ := run["waitingOn"].(map[string]any)
@@ -155,7 +188,7 @@ func (e *MemQLEngine) refreshAskRuns(ctx context.Context, transcript *askTranscr
 			if question != nil && ((run["status"] == "waiting" && BareShortId(fmt.Sprint(waiting["subject"])) == question.ID) || (run["status"] == "running" && question.Continued && currentOptional && turn.Question == nil)) {
 				turn.Question = question
 			}
-			if answer != nil && !seen[answer.ID] {
+			if answer != nil && !seen[answer.ID] && !routedAnswers[BareShortId(answer.ApprovalID)] {
 				answers = append(answers, *answer)
 				seen[answer.ID] = true
 			}
@@ -175,7 +208,7 @@ func (e *MemQLEngine) refreshAskRuns(ctx context.Context, transcript *askTranscr
 				turn.AcknowledgedAt = &at
 			}
 		}
-		if title, _ := outcome["workTitle"].(string); title != "" {
+		if title := runTitle(run); title != "" {
 			turn.WorkTitle = title
 		}
 		if workload, _ := outcome["workload"].(string); workload != "" {
@@ -245,4 +278,21 @@ func askProgressRecoveryQuestion(approval, run map[string]any) *AskQuestion {
 		text = "Your answer was saved, but work has not stopped."
 	}
 	return &AskQuestion{ID: BareShortId(stringArg(approval, "id")), Text: text, Kind: "choice", ChoiceOnly: true, ResumeAnswer: answer, Options: []map[string]any{}}
+}
+
+// askRoutedApprovals are the requests routed messages delivered to: each one
+// took a message as its answer, and the message says so.
+func askRoutedApprovals(turns []AskTurn) map[string]bool {
+	answered := map[string]bool{}
+	for _, turn := range turns {
+		if turn.Routed == nil {
+			continue
+		}
+		for _, target := range turn.Routed.Targets {
+			if approval := BareShortId(target.ApprovalID); approval != "" && routeDelivered(target.Status) {
+				answered[approval] = true
+			}
+		}
+	}
+	return answered
 }

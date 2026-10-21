@@ -1,0 +1,88 @@
+/* Your profile (memql#6220). The rhythm is the kit's Details grid; these are
+ * only the pieces it does not have: the header, the photo, two compact forms
+ * and the storage meter. */
+
+.os-profile-header {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  padding-bottom: 28px;
+  margin-bottom: 28px;
+  border-bottom: 1px solid var(--os-line);
+}
+
+.os-profile-identity { min-width: 0; }
+.os-profile-name {
+  margin: 0;
+  font-size: var(--os-text-lg);
+  font-weight: 600;
+  overflow-wrap: anywhere;
+}
+.os-profile-meta {
+  margin: 2px 0 0;
+  color: var(--os-muted);
+  font-size: var(--os-text-sm);
+  overflow-wrap: anywhere;
+}
+
+.os-profile-photo {
+  display: grid;
+  place-items: center;
+  flex: none;
+  border: 1px solid var(--os-line);
+  border-radius: 50%;
+  background: var(--os-raised);
+  color: var(--os-ink);
+  font-weight: 600;
+  object-fit: cover;
+}
+.os-profile-photo-large { width: 64px; height: 64px; font-size: var(--os-text-lg); }
+.os-profile-photo-small { width: 36px; height: 36px; font-size: var(--os-text-sm); }
+
+.os-profile-name-form,
+.os-profile-budget-form {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  max-width: 34rem;
+}
+.os-profile-name-form .os-input { flex: 1 1 9rem; min-width: 0; }
+.os-profile-budget-form .os-input { flex: 0 0 9rem; width: 9rem; }
+.os-profile-currency { color: var(--os-muted); font-size: var(--os-text-base); }
+
+.os-profile-photo-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.os-profile-refusal {
+  flex-basis: 100%;
+  margin: 6px 0 0;
+  color: var(--os-error);
+  font-size: var(--os-text-sm);
+  overflow-wrap: anywhere;
+}
+
+.os-profile-ask { margin-top: 12px; max-width: 34rem; }
+.os-profile-ask-line { margin: 0 0 8px; font-size: var(--os-text-sm); }
+
+/* One plain bar under the three storage facts, aligned with their values. */
+.os-profile-meter {
+  height: 6px;
+  max-width: 34rem;
+  margin: 10px 0 0 184px;
+  border: 1px solid var(--os-line);
+  background: var(--os-raised);
+}
+.os-profile-meter > span { display: block; height: 100%; background: var(--os-accent); }
+.os-profile-meter[data-full] > span { background: var(--os-warn); }
+
+.os-profile-link-row { margin-top: 8px; padding-left: 184px; }
+.os-profile-link-row .os-link { font-size: var(--os-text-base); }
+
+@container details (max-width: 480px) {
+  .os-profile-meter { margin-left: 0; }
+  .os-profile-link-row { padding-left: 0; }
+}

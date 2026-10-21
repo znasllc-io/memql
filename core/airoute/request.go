@@ -153,6 +153,25 @@ type ResolveRequest struct {
 	// is walked entry by entry, exactly as a rule's would be.
 	Route string
 
+	// PersonRoute is the ROUTE a person chose for this call in Ask (design
+	// record 2026-10-18-routes): `local`, `apps` or the bare id of one of
+	// their own routes. EMPTY MEANS AUTO -- the rules decide.
+	//
+	// It sits where Route sits in the order -- an ExplicitProvider wins over
+	// it and it wins over every rule -- and it differs from Route in two
+	// ways that are the reason it is a field of its own. A person's route
+	// names sources PER LEVEL, so the chain walked depends on the call's
+	// level; and it NEVER FALLS THROUGH: when its sources for a level are
+	// exhausted the call degrades inside the route and then refuses, naming
+	// the route, rather than reaching a source the person did not choose.
+	PersonRoute string
+
+	// PersonRouteOwner is whose route PersonRoute is: the person who chose
+	// it, stamped by the server off the run row (RouteChoice.By). A personal
+	// route is read for that person and nobody else; a built-in route ignores
+	// it.
+	PersonRouteOwner string
+
 	// Effort is a PERSON'S explicit reasoning effort for this one call (epic
 	// memql#5414, design D20): low, medium, high, xhigh or max, from a step
 	// re-run or branched with a different effort. EMPTY MEANS THE LEVEL

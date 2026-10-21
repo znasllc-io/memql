@@ -186,6 +186,8 @@ type CallRecord struct {
 	Rule           string
 	Policy         string
 	Door           string
+	// Route is the route a person chose for the call; empty is Auto.
+	Route string
 	// Considered is the door report, in the order the chain was walked.
 	Considered []airoute.ConsideredEntry
 	// Touches is the call's footprint, copied from the request.

@@ -231,7 +231,7 @@ export function PersonPage({
   return (
     <div className="os-action-pane" data-os-page-context={JSON.stringify({ page: "Person", personId: person.id, name })}>
       <div className="os-action-body os-app-stack os-person-page">
-        <Head title={name} meta={person.primaryEmail} back={{ label: "People", onSelect: onBack }} />
+        <Head navigationKey={`person:${person.id}`} title={name} meta={person.primaryEmail} back={{ label: "People", onSelect: onBack }} />
 
         {rereadFailed ? (
           <Notice

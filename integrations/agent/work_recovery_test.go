@@ -495,6 +495,34 @@ func recoveryRecordedAnswer(stamp string, extra map[string]any) common.ChatMessa
 	return common.ChatMessage{Role: "user", Content: "[Recorded answer for this run]\n" + string(raw)}
 }
 
+// One read of work guidance can hand a turn sixteen routed messages and, on a
+// bound of their own, sixteen late optional answers. Recovery keeps every id a
+// whole read can hold in its checkpoint, which reads back on any replica; only
+// more than one whole read is refused.
+func TestWorkProgressRecoveryHoldsAWholeGuidanceRead(t *testing.T) {
+	r, _, _, ctx, turn := recoveryHarness(t)
+	seen := map[string]bool{"optional-answer-late": true}
+	for n := range 16 {
+		seen[fmt.Sprintf("routed-%d", n)] = true
+	}
+	messages, err := r.recoverWorkProgress(ctx, recoveryMessages(t, workRecoveryState{Version: 1}), turn, &captureSink{}, &workGuidanceCursor{seen: seen})
+	require.NoError(t, err, "routed guidance at its cap and a late answer")
+	state, _, err := recoveryState(messages)
+	require.NoError(t, err)
+	require.Len(t, state.GuidanceIDs, 17)
+	for n := range 15 {
+		seen[fmt.Sprintf("optional-answer-%d", n)] = true
+	}
+	messages, err = r.recoverWorkProgress(ctx, messages, turn, &captureSink{}, &workGuidanceCursor{seen: seen})
+	require.NoError(t, err, "a whole read")
+	state, _, err = recoveryState(messages)
+	require.NoError(t, err)
+	require.Len(t, state.GuidanceIDs, 32)
+	seen["one-more"] = true
+	_, err = r.recoverWorkProgress(ctx, messages, turn, &captureSink{}, &workGuidanceCursor{seen: seen})
+	require.ErrorContains(t, err, "recovery guidance exceeds its bounded context")
+}
+
 func TestWorkProgressRecoveryOldAnswersAndActiveGuidanceDoNotRearm(t *testing.T) {
 	r, e, x, ctx, turn := recoveryHarness(t)
 	e.used = 5

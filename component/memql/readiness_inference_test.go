@@ -25,6 +25,10 @@ func aiModule() envregistry.Module {
 func rowsResolver(rows ...readiness.RegistrationFacts) readinessResolvers {
 	return readinessResolvers{
 		Registrations: func(context.Context) ([]readiness.RegistrationFacts, error) { return rows, nil },
+		// Bound, so these cases are about the doors (design record
+		// 2026-10-18-routes): TestADoorWithoutAnEmbeddingModelDoesNotConfigureAI
+		// is the one about the embeddings half.
+		EmbedderBound: func(context.Context) bool { return true },
 	}
 }
 
@@ -152,13 +156,33 @@ func TestTheFleetLanesAreClusterScopedAndFederationIsNot(t *testing.T) {
 	}
 }
 
-// Federation alone configures the module, and it needs no rows at all -- which
-// is why a cloud cluster with no fleet is not held on the gate.
+// Federation with a bound embedder configures the module, and it needs no
+// fleet rows at all -- which is why a cloud cluster with no fleet is not held on
+// the gate once its vendor's embedding model is bound.
 func TestFederationAloneConfiguresTheModule(t *testing.T) {
-	r := readinessResolvers{FederationConfigured: func() bool { return true }}
+	r := readinessResolvers{FederationConfigured: func() bool { return true }, EmbedderBound: func(context.Context) bool { return true }}
 	got := evaluateModule(context.Background(), r, aiModule(), "bff-1", "bff", inferenceNow)
 	if got.State != readiness.Configured {
 		t.Fatalf("federation alone produced %s", got.State)
+	}
+}
+
+// A door without an embedding model is NOT set up (design record
+// 2026-10-18-routes): Library search and memory recall need one, and an app
+// cannot make embeddings. The gate holds until one is bound or advertised.
+func TestADoorWithoutAnEmbeddingModelDoesNotConfigureAI(t *testing.T) {
+	r := readinessResolvers{FederationConfigured: func() bool { return true }}
+	got := evaluateModule(context.Background(), r, aiModule(), "bff-1", "bff", inferenceNow)
+	if got.State != readiness.Unconfigured {
+		t.Fatalf("a door with no embedding model produced %s, want unconfigured", got.State)
+	}
+	r.EmbedderBound = func(context.Context) bool { return false }
+	r.Registrations = func(context.Context) ([]readiness.RegistrationFacts, error) {
+		return []readiness.RegistrationFacts{{ConnectedNodeId: "agent-1", LastSeenAt: inferenceNow,
+			Labels: map[string]string{"model:qwen3-embedding:0.6b": "ctx=32768,embeddings=1"}}}, nil
+	}
+	if got := evaluateModule(context.Background(), r, aiModule(), "bff-1", "bff", inferenceNow); got.State != readiness.Configured {
+		t.Fatalf("a door and an advertised embedding model produced %s, want configured", got.State)
 	}
 }
 
@@ -362,6 +386,7 @@ func TestAnotherPersonsMachineStillConfiguresInference(t *testing.T) {
 	// Stands in for the composite owner tier: rows come back for a cluster
 	// owner, and for anybody else only their own -- which here is none.
 	rowAuthz := readinessResolvers{
+		EmbedderBound: func(context.Context) bool { return true },
 		Registrations: func(ctx context.Context) ([]readiness.RegistrationFacts, error) {
 			ac, _ := auth.AccessFromContext(ctx)
 			if ac != nil && ac.Role == auth.RoleOwner {
