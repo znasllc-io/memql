@@ -1,8 +1,8 @@
 module github.com/znasllc-io/memql-cockpit
 
-go 1.26.1
+go 1.26.8
 
-toolchain go1.26.9
+toolchain go1.26.10
 
 require (
 	github.com/99designs/keyring v1.2.2
@@ -10,21 +10,25 @@ require (
 	github.com/jezek/xgb v1.3.1
 	github.com/jezek/xgbutil v0.0.0-20260124183602-9fd151d6a51a
 	github.com/klauspost/compress v1.20.0
+	github.com/santhosh-tekuri/jsonschema/v5 v5.3.1
 	github.com/znasllc-io/memql v0.0.0-20260623073124-7c7d1350e667
 	github.com/znasllc-io/memql/component/grpc/gen v0.0.0
 	github.com/znasllc-io/memql/component/identity v0.0.0
 	github.com/znasllc-io/memql/component/language v0.0.0
 	github.com/znasllc-io/memql/component/memql v0.0.0
 	github.com/znasllc-io/memql/core v0.0.0
-	golang.org/x/image v0.46.0
-	golang.org/x/sys v0.48.0
-	golang.org/x/term v0.46.0
+	golang.org/x/image v0.47.0
+	golang.org/x/sys v0.49.0
+	golang.org/x/term v0.47.0
 	google.golang.org/grpc v1.83.2
 	google.golang.org/protobuf v1.36.12
 	gopkg.in/yaml.v3 v3.0.1
 )
 
-require github.com/znasllc-io/memql/component/work v0.0.0 // indirect
+require (
+	github.com/kljensen/snowball v0.10.0 // indirect
+	github.com/znasllc-io/memql/component/work v0.0.0 // indirect
+)
 
 require (
 	fyne.io/systray v1.12.2
@@ -54,7 +58,7 @@ require (
 	github.com/lufia/plan9stats v0.0.0-20260324052639-156f7da3f749 // indirect
 	github.com/mtibben/percent v0.2.1 // indirect
 	github.com/munnerz/goautoneg v0.0.0-20191010083416-a7dc8b61c822 // indirect
-	github.com/openai/openai-go/v3 v3.71.1 // indirect
+	github.com/openai/openai-go/v3 v3.81.0 // indirect
 	github.com/otiai10/gosseract/v2 v2.4.1 // indirect
 	github.com/pb33f/ordered-map/v2 v2.3.1 // indirect
 	github.com/pkg/errors v0.9.1 // indirect
@@ -64,7 +68,6 @@ require (
 	github.com/prometheus/common v0.70.1 // indirect
 	github.com/prometheus/procfs v0.21.1 // indirect
 	github.com/puzpuzpuz/xsync/v3 v3.5.1 // indirect
-	github.com/santhosh-tekuri/jsonschema/v5 v5.3.1 // indirect
 	github.com/shirou/gopsutil/v4 v4.26.2
 	github.com/standard-webhooks/standard-webhooks/libraries v0.0.1 // indirect
 	github.com/stretchr/objx v0.5.0 // indirect
@@ -106,15 +109,15 @@ require (
 	github.com/znasllc-io/memql/component/secret v0.0.0 // indirect
 	github.com/znasllc-io/memql/docs v0.0.0 // indirect
 	github.com/znasllc-io/memql/dsl v0.0.0 // indirect
-	go.opentelemetry.io/otel v1.44.0 // indirect
-	go.opentelemetry.io/otel/trace v1.44.0 // indirect
+	go.opentelemetry.io/otel v1.45.0 // indirect
+	go.opentelemetry.io/otel/trace v1.45.0 // indirect
 	go.yaml.in/yaml/v4 v4.0.0-rc.2 // indirect
-	golang.org/x/crypto v0.57.0 // indirect
+	golang.org/x/crypto v0.58.0 // indirect
 	golang.org/x/exp v0.0.0-20260813180055-c1d0aacb2297 // indirect
-	golang.org/x/net v0.60.0 // indirect
-	golang.org/x/sync v0.23.0 // indirect
-	golang.org/x/text v0.42.0 // indirect
-	google.golang.org/genproto/googleapis/rpc v0.0.0-20260706201446-f0a921348800 // indirect
+	golang.org/x/net v0.61.0 // indirect
+	golang.org/x/sync v0.24.0 // indirect
+	golang.org/x/text v0.43.0 // indirect
+	google.golang.org/genproto/googleapis/rpc v0.0.0-20260803160001-6ac0973c030d // indirect
 	mellium.im/sasl v0.3.2 // indirect
 )
 

@@ -10,6 +10,7 @@ import (
 
 	"github.com/znasllc-io/memql-cockpit/internal/worker/appsession"
 	"github.com/znasllc-io/memql-cockpit/internal/worker/backup"
+	"github.com/znasllc-io/memql-cockpit/internal/worker/capacity"
 	"github.com/znasllc-io/memql-cockpit/internal/worker/modelcall"
 	"github.com/znasllc-io/memql-cockpit/internal/worker/models"
 	"github.com/znasllc-io/memql-cockpit/internal/worker/tools"
@@ -65,6 +66,9 @@ type Fleet struct {
 	discoverer  *models.Discoverer
 	metrics     *Metrics
 	limiter     *modelcall.Limiter
+	// setup is the installer's report (setupprogress.go): one per machine,
+	// carried on every home's heartbeat.
+	setup *setupTracker
 
 	mu      sync.Mutex
 	runners []*Runner
@@ -88,7 +92,7 @@ func NewFleet(opts FleetOptions) (*Fleet, error) {
 	if limiter == nil {
 		limiter = modelcall.NewHostLimiter()
 	}
-	return &Fleet{
+	f := &Fleet{
 		logger:      opts.Logger,
 		workers:     opts.Workers,
 		workersPath: opts.WorkersPath,
@@ -102,8 +106,26 @@ func NewFleet(opts FleetOptions) (*Fleet, error) {
 		discoverer:  opts.Discoverer,
 		metrics:     opts.Metrics,
 		limiter:     limiter,
+		setup:       loadSetupTracker(time.Now, setupReportPath(opts.Workers.StateDir)),
 		newRunner:   NewRunner,
-	}, nil
+	}
+	f.setup.onStep = f.requestSetupBeat
+	return f, nil
+}
+
+// requestSetupBeat asks every home for a heartbeat now: the installer's
+// report changed a step (setupprogress.go), and each cluster should hear it
+// at once rather than at its next tick.
+func (f *Fleet) requestSetupBeat() {
+	if f == nil {
+		return
+	}
+	f.mu.Lock()
+	runners := append([]*Runner(nil), f.runners...)
+	f.mu.Unlock()
+	for _, r := range runners {
+		r.RequestBeat()
+	}
 }
 
 // RequestImmediateReadvertise fans out to every home stream so a
@@ -345,6 +367,8 @@ func (f *Fleet) buildHome(home Home, machineID string) (homeRun, error) {
 
 		PipelinesPolicy: f.pipelinesPolicy(),
 		ModelPull:       pull,
+		Capacity:        f.capacityProbe(calls),
+		Setup:           f.setup,
 	})
 	if err != nil {
 		return homeRun{}, err
@@ -397,4 +421,14 @@ func (f *Fleet) policyDownloadCheck() func(string) error {
 		return nil
 	}
 	return f.policy.CheckBackupDownloadPath
+}
+
+// capacityProbe measures what this machine can take on, for a machine that
+// serves models. One without a model inventory reports nothing: there is no
+// call the report could admit.
+func (f *Fleet) capacityProbe(calls *modelcall.Manager) CapacityProbe {
+	if f == nil || f.modelsInv == nil || f.discoverer == nil {
+		return nil
+	}
+	return &capacity.Prober{OllamaBase: f.discoverer.ResolvedOllamaBaseURL, InFlight: calls.InFlightByModel}
 }

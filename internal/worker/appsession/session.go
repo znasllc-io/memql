@@ -524,10 +524,17 @@ func (s *session) execute(ctx context.Context) (int, error) {
 		return -1, err
 	}
 
+	tools, err := preflightMCP(ctx, s.manager.opts.HTTPClient, s.start.GetMcpEndpoint(), s.start.GetCredential())
+	if err != nil {
+		if cancelled := s.contextFailure(ctx); cancelled != nil {
+			return -1, cancelled
+		}
+		return -1, err
+	}
 	// The MCP configuration first: an app that starts without it reaches
 	// nothing over MCP and reports that as "MemQL's tools are broken".
 	mcp, err := writeMCPConfig(spec.ID, workspace, s.start.GetMcpEndpoint(),
-		s.start.GetCredential(), s.id, s.manager.opts.StateDir)
+		s.start.GetCredential(), s.id, s.manager.opts.StateDir, sessionMCPSettings{Tools: tools, DenyPaths: s.denyPaths()})
 	if err != nil {
 		return -1, err
 	}

@@ -7,21 +7,52 @@ the Go worker**, with bundle identifier `com.znasllc.memql-worker`, display name
 `MemQL`, and a native `.icns` generated from the canonical nine-node mark.
 The Swift menu helper is embedded at
 `Contents/Library/LoginItems/MemQL Menu.app`. Both appearances use the same mark;
-the permission window groups the two grants and hides PID/path/build details
-behind **Show technical details**.
+the permission window shows one switch per grant and keeps PID/path/build
+details under **Troubleshooting**.
 
-The worker LaunchAgent targets `MemQL.app/Contents/MacOS/MemQL` directly, and
-the installed `memql` CLI symlink points to that same executable. Status reports
+The worker service runs `MemQL.app/Contents/MacOS/MemQL` directly, and the
+installed `memql` CLI symlink points to that same executable. Status reports
 `bundle_id` and `bundle_path` from the actual worker's Core Foundation main
 bundle, rather than inferring identity from a filename. Finder reveals the app
 reported by that worker. Opening MemQL from Finder opens its embedded menu;
 invoking the `memql` CLI keeps normal command-line behavior.
 
-The menu registers both bundles with Launch Services. The worker plist includes
-`AssociatedBundleIdentifiers`; the active executable remains the app's main
-worker. Registration and labels do not imply TCC grants: macOS must approve the
-actual bundle, and only current-worker preflight results can confirm access.
-Raw executable grants are not silently moved or reset during migration.
+The menu registers both bundles with Launch Services. Registration and labels do
+not imply TCC grants: macOS must approve the actual bundle, and only
+current-worker preflight results can confirm access. Raw executable grants are
+not silently moved or reset during migration.
+
+### Services the app registers itself (memql-cockpit#545)
+
+MemQL.app carries both service definitions in
+`Contents/Library/LaunchAgents`: `com.znasllc.memql-worker` (the worker, kept
+alive) and `com.znasllc.memql-cockpit-menubar` (the menu, Aqua sessions only).
+The app's own executable registers them with SMAppService, so Login Items lists
+one **MemQL** with the app's icon:
+
+```sh
+MemQL.app/Contents/MacOS/MemQL worker service register --menu=on   # or --menu=off
+MemQL.app/Contents/MacOS/MemQL worker service unregister            # both; --worker-only keeps the menu
+MemQL.app/Contents/MacOS/MemQL worker service status
+```
+
+Per-user plists in `~/Library/LaunchAgents` showed there as two bare
+executables, `MemQL` and `MemQLCockpit`, with the generic icon. macOS ties such
+a plist to an app only through a shared Team ID, and an ad-hoc build has none.
+An agent registered from inside the bundle is recorded under that app whatever
+its signature.
+
+A plist inside the signed bundle is the same for every account. It sets only
+`MEMQL_SERVICE=app`, and the worker supplies the rest when it starts. HOME
+comes from the account when launchd gives none. stdout and stderr go to
+`~/.memql/state/worker.log`, where the per-user plist sent them. The variables
+in `~/.memql/state/service.env` are applied. Only `OLLAMA_HOST`,
+`OLLAMA_MODELS` (written by the installer from its shell) and `PATH` (yours to
+set) are read.
+
+`launchctl print` names such a job's program inside its bundle
+(`program identifier = Contents/MacOS/MemQL`, with `parent bundle identifier =
+com.znasllc.memql-worker`), not by path, and Restart MemQL accepts that form.
 
 The token installer selects this layout for computer-use version 0.15 and
 later, with the exact matching `memql-app-darwin-{arm64,amd64}.tar.gz` and SHA256
@@ -42,8 +73,10 @@ scripts/macos/install-app-files.sh --app=/absolute/built/MemQL.app \
 scripts/macos/activate-app.sh --app=/absolute/Applications/MemQL.app
 ```
 
-Existing service arguments, environment and log locations are preserved.
-Previous bundles/CLI links and agent plists are retained for rollback. Known
+Activation registers the app's services and retires the per-user plists an
+earlier install wrote. Those plists are stopped and moved to
+`~/.memql/backups/legacy-agent.*`. Previous bundles and CLI links are retained
+for rollback. Known
 legacy worker agents and the old standalone menu are retired; unrelated apps,
 enrollments, credentials, policies and models are not modified. Activation
 records the bundle fingerprints and avoids restarting an unchanged install.
@@ -54,6 +87,42 @@ This layout fixes app attribution and presentation; it does **not** turn an
 ad-hoc signature into a stable distribution identity. Developer ID provisioning
 and signed-upgrade validation below remain necessary. The bundle's minimum
 macOS version is read from the actual worker Mach-O build metadata.
+
+### Stable signing for local development
+
+Use `scripts/macos/build-local-app.sh` for repeated local builds. It reads a
+certificate SHA-1 from
+`~/Library/Application Support/MemQL/Development/signing-identity`, requires the
+matching certificate/private key in the current user's Keychain, and passes
+that identity to both bundle signers. A missing identity stops the build;
+it never creates a new certificate or falls back to ad-hoc signing.
+
+```sh
+make cockpit-computeruse
+scripts/macos/build-local-app.sh --worker="$PWD/bin/memql-computeruse"
+```
+
+While Apple Development signing is unavailable, a persistent self-signed code
+signing certificate can be used for this local workflow. Create it once using
+Keychain Access's Certificate Assistant (certificate type **Code Signing**),
+keep the private key in the login Keychain, and save its SHA-1 in the file above.
+`security find-identity -p codesigning` lists signing identities, including
+self-signed ones; Keychain may ask the user to authorize `codesign` to use the
+key. Never export a private key into a repository or build artifact.
+See Apple's [self-signed identity guidance](https://developer.apple.com/library/archive/technotes/tn2206/_index.html).
+
+Install and activate through the same commands above. Approve Accessibility
+and Screen Recording for this identity once, then verify fresh worker status
+after a restart and after a different build. The first transition from ad-hoc
+signing still needs new approvals. Preserve the same key, bundle identifiers,
+and installed path across subsequent builds. Do not weaken the designated
+requirement, edit TCC databases, or show a grant without worker confirmation.
+
+This certificate is for local development, not published packages. Production
+signing and notarization remain separate. When an Apple certificate is ready,
+update the saved SHA-1 explicitly; that identity change needs fresh approvals
+and its own upgrade check. Keep the local certificate until all local builds
+using it have been replaced.
 
 ## Uninstall and local lifecycle testing
 
@@ -133,8 +202,8 @@ For the current installed app, the supported user-run recovery is:
 /usr/bin/tccutil reset ScreenCapture com.znasllc.memql-worker
 ```
 
-Then use MemQL’s Request access buttons, approve the current app, and restart
-once if needed for a fresh process. The GUI alternative is to remove MemQL’s
+Then turn on each switch in MemQL’s permission window, approve the current app
+in System Settings, and restart once for Screen Recording. The GUI alternative is to remove MemQL’s
 old row in each category and add the exact current app from Show MemQL in Finder.
 These actions revoke/reset old approvals; they do not grant access themselves.
 See Apple’s [app-scoped reset documentation](https://developer.apple.com/documentation/xcode/resetting-access-to-protected-resources-in-macos).
@@ -227,23 +296,61 @@ Linux semantics have fixture tests; live Linux validation is separate.
 
 ## Guided permission setup (development; not in 0.14.0)
 
-**Set Up Permissions…** opens a native window with separate Accessibility and
-Screen Recording requests. It opens once automatically when a supported worker
-first reports missing access; opening the window does not request any grant.
-The user's explicit request invokes `AXIsProcessTrustedWithOptions` or
-`CGRequestScreenCaptureAccess` **inside the running worker** through its private
-control socket. Acknowledgment means the request was queued, not approved.
-Only one OS request may be pending at a time.
+**Set Up Permissions…** opens a native window with one switch for Accessibility
+and one for Screen Recording, drawn like MemQL OS's switch. It opens once
+automatically when a supported worker first reports missing access; opening the
+window does not request any grant. Turning a switch on invokes
+`AXIsProcessTrustedWithOptions` or `CGRequestScreenCaptureAccess` **inside the
+running worker** through its private control socket, which puts MemQL in
+macOS's list. Enabling opens only the native permission prompt; its **Open
+System Settings** button controls whether Settings opens. Disabling opens the
+relevant Settings page because the app cannot revoke its own grant. Previously
+denied prompts can be managed using explicit Settings links under
+**Troubleshooting**. Cockpit never closes Apple's permission alerts or raises
+itself over the user's current work when a grant arrives.
 
-**Open Settings** opens the relevant Privacy & Security pane. **Show Worker in
-Finder** reveals the installed executable with symlinks resolved. macOS can
-retain an entry for an older binary after an upgrade; inspect the file instead
-of trusting its display name. Recovery changes to existing grants remain
-explicit actions in System Settings. During installation, a verified signing
-identity change resets only the obsolete worker approvals through tccutil.
+Acknowledgment means the request was queued, not approved. A solid green switch means the fresh running worker confirms access. A pending
+request uses an outlined green track with a clock and a text label, rather than
+looking off. It stays pending through Settings closing and a worker restart; a
+fresh grant or the replacement worker's report settles it. Pressing the pending
+switch cancels that UI request without issuing another OS prompt.
+The controls are disabled while the worker is processing an OS permission
+request. The menu reads the worker every second while waiting for approval.
+macOS may require a worker restart after approval; the window offers that next
+step for either pending permission once the request returns. Restarting never
+establishes a grant by itself.
+The next process's actual observations settle the request. While any window is
+open the menu is a regular app with a Dock icon so it remains easy to find.
 
-**Restart Worker…** asks for confirmation because it interrupts active work
-and every server connection. It checks the service's loaded PID and program,
+### During setup (memql-cockpit#548)
+
+On a computer-use Mac the installer's first stage is the permissions:
+`memql worker setup --permissions` opens this window and waits until both
+switches are on, or until the person chooses to go on without them. Nothing
+downloads before then. While setup waits, the window comes forward by itself
+once (when the menu sees the wait begin, even if the installer could not open
+it) and shows **Setup is waiting for you.** with one quiet choice:
+**Skip for now** when neither is on, **Continue without Screen Recording** (or
+Accessibility) when one is. The choice is sent as an answer,
+`memql worker control --action=setup --stage=permissions --answer=skip`; the
+setup command reads it back from the worker's status, reports the stage as
+skipped in its own words, and the window closes. Pressing Return in the
+installer's terminal is the same choice. Both permissions on needs no choice:
+the setup command sees the grant and goes on. Turning Screen Recording on
+still needs **Restart MemQL**, and the wait continues through the restart,
+because the installer's report is kept in `setup.json` at the state root.
+
+**Troubleshooting** holds **Show MemQL in Finder**, which reveals the installed
+executable with symlinks resolved, **Restart MemQL…**, and the worker's
+version, PID and executable. macOS can retain an entry for an older binary
+after an upgrade; inspect the file instead of trusting its display name.
+Recovery changes to existing grants remain explicit actions in System Settings.
+During installation, a verified signing identity change resets only the
+obsolete worker approvals through tccutil.
+
+**Restart MemQL** asks for confirmation because it interrupts active work
+and every server connection. It checks the service's loaded PID and program
+(or, for the app's own service, the program inside MemQL.app),
 then uses `launchctl kickstart -k` for the current user's worker label. It does
 not rewrite enrollments or connection policy. The window waits for a fresh
 report from a different PID; a new process with denied access remains denied.
@@ -257,8 +364,9 @@ and offer **Install or update Cockpit** if the handler is unavailable. Opening
 the URL is never evidence of installation or granted permissions. There is no
 HTTP bridge and no remote grant/restart endpoint.
 
-Local status adds `executable`, `bundle_id`, `bundle_path`, `permission_requests` and
-`permission_request_pending`. The explicit CLI equivalent is:
+Local status adds `executable`, `bundle_id`, `bundle_path`, `permission_requests`,
+`permission_request_pending`, and `setup` (the installer's report with the
+person's answers). The explicit CLI equivalent is:
 
 ```sh
 # Read PID from the actual service status first; substitute that PID below.
@@ -279,8 +387,16 @@ ad-hoc signature does not solve this. See Apple's
 [code-signing requirements](https://developer.apple.com/documentation/technotes/tn3127-inside-code-signing-requirements)
 and [DTS confirmation of permission loss with ad-hoc builds](https://developer.apple.com/forums/thread/819406).
 
+For local testing, provision an **Apple Development** identity and its private
+key in this Mac's keychain. Pass its name or SHA-1 explicitly to
+`build-app.sh --signing-identity=IDENTITY`; the builder uses that identity for
+both the worker and its embedded menu, verifies both signatures, and fails if
+the requested identity cannot sign. Omitting the flag retains the ad-hoc
+development mode, whose approvals may need renewing after each changed build.
+Never substitute an identifier-only requirement for certificate signing.
+
 Distribution signing needs a provisioned **Developer ID Application** identity
-and a stable worker signing identifier (planned: `com.znasllc.memql-worker`).
+and the stable worker signing identifier `com.znasllc.memql-worker`.
 The menu retains `com.znasllc.memql-cockpit-menubar`. Before enabling signed
 releases, provision the certificate/private key securely in CI, sign both native
 architectures before hashing and packaging, verify the designated requirement

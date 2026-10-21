@@ -65,12 +65,31 @@ func (d Docker) command(ctx context.Context, input io.Reader, args ...string) ([
 	cmd.Stdout = out
 	cmd.Stderr = errOut
 	if err := cmd.Run(); err != nil {
+		// Docker's own words are the diagnosis ("Cannot connect to the
+		// Docker daemon ...", "no space left on device"); dropping them
+		// left an exit status naming nothing (memql-cockpit#524).
+		if why := firstLine(errOut.String()); why != "" {
+			return nil, fmt.Errorf("Docker %s failed: %w: %s", args[0], err, why)
+		}
 		return nil, fmt.Errorf("Docker %s failed: %w", args[0], err)
 	}
 	if out.exceeded {
 		return nil, fmt.Errorf("Docker response exceeded its limit")
 	}
 	return out.Bytes(), nil
+}
+
+// Readiness requires room for one workspace. Admission accounts for existing
+// workloads before each creation; the maximum slot count is not an allocation.
+const (
+	minCPUs        = 3
+	minMemoryBytes = int64(MemoryMiB) * 1024 * 1024 * 5 / 4
+)
+
+// firstLine keeps one line of a command's stderr for an error message.
+func firstLine(s string) string {
+	line, _, _ := strings.Cut(strings.TrimSpace(s), "\n")
+	return strings.TrimSpace(line)
 }
 
 type Runtime struct {
@@ -100,10 +119,10 @@ func (d Docker) Ready(ctx context.Context) (Runtime, error) {
 	if json.Unmarshal(out, &info) != nil || info.ID == "" || info.OSType != "linux" {
 		return Runtime{}, fmt.Errorf("fleet workbenches require Docker running Linux containers")
 	}
-	// Two one-CPU workspaces must leave at least 20 percent of the VM's
-	// reported resources free. No emulation or daemon reconfiguration is done.
-	if info.NCPU < 3 || info.MemTotal < 4*1024*1024*1024 {
-		return Runtime{}, fmt.Errorf("Docker needs at least 3 CPUs and 4 GiB for two workbenches with headroom")
+	// Use reported memory, allowing the kernel's share of the configured VM.
+	// No emulation or daemon reconfiguration is done.
+	if info.NCPU < minCPUs || info.MemTotal < minMemoryBytes {
+		return Runtime{}, fmt.Errorf("Docker needs at least 3 CPUs and 2 GB for a workbench with headroom; it has %d CPUs and %.1f GB", info.NCPU, float64(info.MemTotal)/1e9)
 	}
 	if _, err = d.command(probe, nil, "image", "inspect", Image); err != nil {
 		return Runtime{}, fmt.Errorf("workbench runtime is not installed; run Cockpit workbench setup")
@@ -169,6 +188,9 @@ func (d Docker) Execute(ctx context.Context, runtime Runtime, name string, reque
 // Bind operations to the local socket selected at admission. Changing Docker's
 // current context cannot redirect an existing workspace or its cleanup.
 func (d Docker) localEndpoint(ctx context.Context) (string, error) {
+	if _, err := exec.LookPath(d.binary()); err != nil {
+		return "", fmt.Errorf("Docker is not installed; install Docker Desktop (or Docker Engine) and retry")
+	}
 	endpoint := os.Getenv("DOCKER_HOST")
 	if os.Getenv("DOCKER_CONTEXT") != "" || endpoint == "" {
 		out, err := d.command(ctx, nil, "context", "inspect", "--format", "{{json .Endpoints.docker.Host}}")

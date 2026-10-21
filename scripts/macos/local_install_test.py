@@ -2,6 +2,7 @@
 import argparse
 import contextlib
 import functools
+import hashlib
 import http.server
 import shutil
 import shlex
@@ -29,6 +30,12 @@ def local_source(worker, archive, version):
         assets.mkdir(parents=True)
         for source in [worker, archive, archive.with_name(archive.name + '.sha256')]:
             shutil.copy2(source, assets / source.name)
+        # The installers verify the worker against its release manifest
+        # before running it (memql-cockpit#525), so the local release
+        # carries one too, in the release's own spelling.
+        manifest = 'memql-computeruse-SHA256SUMS' if worker.name.startswith('memql-computeruse-') else 'memql-SHA256SUMS'
+        digest = hashlib.sha256(worker.read_bytes()).hexdigest()
+        (assets / manifest).write_text(digest + '  ' + worker.name + '\n')
         class QuietHandler(http.server.SimpleHTTPRequestHandler):
             def log_message(self, *_args):
                 pass
@@ -179,6 +186,21 @@ main "$@"
         second[second.index('https://fixture.invalid')] = 'https://other.invalid'
         paired = subprocess.run(second, input=script, env=env, cwd=root, capture_output=True)
         assert paired.returncode == 0, paired.stdout.decode() + paired.stderr.decode()
+        # MemQL.app takes its own services out of Login Items on uninstall
+        # (memql-cockpit#545). The fixture app's executable records that and
+        # runs every other command on the real worker, so no test reaches
+        # SMAppService.
+        real_worker = root / 'real-memql'
+        shutil.copyfile(app / 'Contents/MacOS/MemQL', real_worker)
+        real_worker.chmod(0o755)
+        service_calls = root / 'app-service-calls'
+        (app / 'Contents/MacOS/MemQL').write_text('#!/bin/bash\nfunction main() {\n'
+            '    if [[ "$1" == worker && "$2" == service ]]; then\n'
+            '        printf \'%s\\n\' "$*" >> ' + shlex.quote(str(service_calls)) + '\n'
+            '        [[ "$3" != register || -z "${MEMQL_TEST_STATE:-}" ]] || touch "$MEMQL_TEST_STATE/com.znasllc.memql-worker"\n'
+            '        return 0\n'
+            '    fi\n'
+            '    exec ' + shlex.quote(str(real_worker)) + ' "$@"\n}\nmain "$@"\n')
 
         def uninstall(*flags, expected=0):
             result = subprocess.run(['bash', '-s', '--', '--verbose', '--user-local', *flags], input=uninstaller, env=env, cwd=root, capture_output=True)
@@ -268,9 +290,16 @@ function main() {
 }
 main "$@"
 ''')
+        # A worker MemQL.app registered has no plist to reload: the app
+        # starts it again for the enrollment that remains.
+        held = root / 'held-worker.plist'
+        (agents / (worker_label + '.plist')).rename(held)
         env['MEMQL_TEST_DELAY_STOP'] = '1'
         uninstall('--cluster=https://fixture.invalid')
         del env['MEMQL_TEST_DELAY_STOP']
+        assert service_calls.read_text().splitlines() == ['worker service register']
+        held.rename(agents / (worker_label + '.plist'))
+        service_calls.unlink()
         calls = (root / 'service-calls').read_text().splitlines()
         stop_index = next(i for i, line in enumerate(calls) if line.startswith('bootout '))
         assert all(line.startswith('print ') for line in calls[stop_index + 1:stop_index + 5]), 'delayed removal was not rechecked'
@@ -308,6 +337,7 @@ main "$@"
         uninstall('--cluster=https://other.invalid')
         del env['MEMQL_TEST_DELAY_STOP']
         assert not app.exists() and not cli.is_symlink()
+        assert set(service_calls.read_text().splitlines()) == {'worker service unregister'}, 'only a whole removal unregisters the app services'
         assert menu_process.wait(timeout=3) != 0, 'embedded helper was not terminated'
         assert unrelated_process.poll() is None, 'unrelated same-name process was stopped'
         assert not list(agents.glob('*.plist')) and not list(state.iterdir())

@@ -9,7 +9,7 @@ if ! command -v go >/dev/null 2>&1; then
     printf '%s\n' 'Native pipeline checks require an installed Go toolchain.' >&2
     return 1
 fi
-export GOTOOLCHAIN=go1.26.9 GOWORK=off GOFLAGS=-p=2 GOMAXPROCS=2 GOMEMLIMIT=1GiB
+export GOTOOLCHAIN=go1.26.10 GOWORK=off GOFLAGS=-p=2 GOMAXPROCS=2 GOMEMLIMIT=1GiB
 export GOPATH="$PWD/.memql-native/go"
 export GOCACHE="$PWD/.memql-native/go-build"
 export PATH="$GOPATH/bin:$PATH"

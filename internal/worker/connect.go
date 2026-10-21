@@ -18,6 +18,7 @@ import (
 	sdkworker "github.com/znasllc-io/memql/sdk/go/worker"
 
 	"github.com/znasllc-io/memql-cockpit/internal/worker/apps"
+	"github.com/znasllc-io/memql-cockpit/internal/worker/capacity"
 	"github.com/znasllc-io/memql-cockpit/internal/worker/hardware"
 	"github.com/znasllc-io/memql-cockpit/internal/worker/models"
 	"github.com/znasllc-io/memql-cockpit/internal/worker/tools"
@@ -361,10 +362,17 @@ func (c *Connection) SendModelPullEnd(end *memqlv1.ModelPullEnd) error {
 // wrong for this one on a machine that just uninstalled its last app.
 // Once a build supports the field, every beat asserts the full truth,
 // including "none".
-func (c *Connection) SendHeartbeat(active uint32, perCap map[string]uint32, inventory []apps.Info, hw *hardware.Inventory) error {
+func (c *Connection) SendHeartbeat(active uint32, perCap map[string]uint32, inventory []apps.Info, hw *hardware.Inventory, report *capacity.Report, setup *memqlv1.SetupProgress) error {
+	beat := buildHeartbeat(active, perCap, inventory, hw)
+	// Capacity rides every beat that has one. A beat without one leaves the
+	// engine's last report in place until it ages out.
+	beat.Capacity = capacity.ToProto(report)
+	// So does the installer's report (memql-cockpit#541), on the same terms:
+	// a beat without one leaves the engine's stored report alone.
+	beat.Setup = setup
 	return c.Send(&memqlv1.WorkerClientMessage{
 		Payload: &memqlv1.WorkerClientMessage_Heartbeat{
-			Heartbeat: buildHeartbeat(active, perCap, inventory, hw),
+			Heartbeat: beat,
 		},
 	})
 }

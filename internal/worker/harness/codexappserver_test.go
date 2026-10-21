@@ -722,3 +722,19 @@ func TestCodexAppServerCancelledTurnStops(t *testing.T) {
 		t.Fatal("a cancelled turn returned no error")
 	}
 }
+
+func TestCodexAppServerResolvesItsExecutableBeforeSandboxedHelpers(t *testing.T) {
+	binary, _ := fakeCodexAppServer(t, codexTurnOK)
+	link := filepath.Join(t.TempDir(), "codex-link")
+	if err := os.Symlink(binary, link); err != nil {
+		t.Fatal(err)
+	}
+	h := startCodexAppServer(t, codexSpec(t, link))
+	want, err := filepath.EvalSymlinks(binary)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if h.spec.Binary != want {
+		t.Fatalf("helper executable %s, want %s", h.spec.Binary, want)
+	}
+}

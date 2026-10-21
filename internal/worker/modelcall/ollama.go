@@ -52,6 +52,23 @@ type ollamaToolCall struct {
 }
 
 func (c *ollamaClient) Chat(ctx context.Context, req ChatRequest, emit emitFunc) (Result, error) {
+	resp, err := c.post(ctx, "/api/chat", c.chatBody(req, true))
+	if err != nil {
+		// A runner that does not implement `format` answers 501 before it
+		// generates anything; the JSON is then asked for in the prompt and
+		// checked against the schema here (ollama_schema.go).
+		if len(req.Schema) > 0 && len(req.Tools) == 0 && ollamaFormatUnsupported(err) {
+			return c.chatSchemaInPrompt(ctx, req, emit)
+		}
+		return Result{}, err
+	}
+	defer resp.Body.Close()
+	return c.readChat(ctx, req, resp, emit)
+}
+
+// chatBody is the /api/chat request. withFormat sends the schema as Ollama's
+// `format`; without it the schema is left to the caller to put in the prompt.
+func (c *ollamaClient) chatBody(req ChatRequest, withFormat bool) map[string]any {
 	body := map[string]any{
 		"model":    req.Model,
 		"messages": ollamaMessages(req.Messages),
@@ -66,7 +83,7 @@ func (c *ollamaClient) Chat(ctx context.Context, req ChatRequest, emit emitFunc)
 	if opts := ollamaChatOptions(req.Params, c.baseURL, runtime.GOOS); len(opts) > 0 {
 		body["options"] = opts
 	}
-	if len(req.Schema) > 0 {
+	if len(req.Schema) > 0 && withFormat {
 		// Ollama takes the JSON Schema directly as `format`. It is
 		// passed through verbatim rather than re-marshalled: the engine
 		// validated it, and a round trip through a map would reorder
@@ -79,13 +96,11 @@ func (c *ollamaClient) Chat(ctx context.Context, req ChatRequest, emit emitFunc)
 	if !ollamaThink(req) {
 		body["think"] = false
 	}
+	return body
+}
 
-	resp, err := c.post(ctx, "/api/chat", body)
-	if err != nil {
-		return Result{}, err
-	}
-	defer resp.Body.Close()
-
+// readChat reads /api/chat's NDJSON stream, emitting the answer's text.
+func (c *ollamaClient) readChat(ctx context.Context, req ChatRequest, resp *http.Response, emit emitFunc) (Result, error) {
 	out := Result{FinishReason: FinishStop}
 	answered, thought := false, 0
 	scanner := bufio.NewScanner(resp.Body)
@@ -255,9 +270,22 @@ func (c *ollamaClient) post(ctx context.Context, path string, body any) (*http.R
 	if resp.StatusCode < 200 || resp.StatusCode > 299 {
 		detail := readErrorBody(resp)
 		resp.Body.Close()
-		return nil, fmt.Errorf("ollama: %s returned %d%s", path, resp.StatusCode, detail)
+		return nil, &ollamaStatusError{path: path, status: resp.StatusCode, detail: detail}
 	}
 	return resp, nil
+}
+
+// ollamaStatusError is a non-2xx answer from the runtime, in the words the
+// engine records ("ollama: /api/chat returned 501: {...}"), with the status
+// kept so a caller can tell a refusal it can work around from one it cannot.
+type ollamaStatusError struct {
+	path   string
+	status int
+	detail string
+}
+
+func (e *ollamaStatusError) Error() string {
+	return fmt.Sprintf("ollama: %s returned %d%s", e.path, e.status, e.detail)
 }
 
 // ollamaMessages maps the envelope's turns onto Ollama's api.Message.

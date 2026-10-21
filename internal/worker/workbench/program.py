@@ -1,6 +1,6 @@
 # Runs inside the container, with no host mounts or network. Its only input is
 # the validated operation, sent through stdin rather than process arguments.
-import base64, json, os, pathlib, subprocess, sys, time
+import base64, json, os, pathlib, stat, subprocess, sys, time
 ROOT = pathlib.Path('/workspace')
 LIMIT = 1024 * 1024
 
@@ -58,6 +58,20 @@ def main(request):
         p.write_bytes(data)
         return {'path':str(p.relative_to(ROOT)),'bytesWritten':len(data)}
     if action == 'fs_read':
+        if args.get('encoding') == 'base64':
+            offset = int(args.get('offset', 0))
+            limit = min(LIMIT, max(1, int(args.get('maxBytes', LIMIT))))
+            with p.open('rb') as f:
+                before = os.fstat(f.fileno())
+                if not stat.S_ISREG(before.st_mode): raise ValueError('export requires a regular file')
+                version = ':'.join(str(x) for x in (before.st_dev, before.st_ino, before.st_size, before.st_mtime_ns, before.st_ctime_ns))
+                if args.get('version', version) != version: raise ValueError('file changed during export')
+                if offset < 0 or offset > before.st_size: raise ValueError('invalid file offset')
+                f.seek(offset); data = f.read(limit)
+                after = os.fstat(f.fileno())
+                after_version = ':'.join(str(x) for x in (after.st_dev, after.st_ino, after.st_size, after.st_mtime_ns, after.st_ctime_ns))
+                if version != after_version: raise ValueError('file changed during export')
+            return {'path':str(p.relative_to(ROOT)), 'encoding':'base64', 'content':base64.b64encode(data).decode('ascii'), 'offset':offset, 'size':before.st_size, 'version':version, 'eof':offset+len(data)==before.st_size}
         with p.open('rb') as f: data=f.read(LIMIT+1)
         return {'path':str(p.relative_to(ROOT)),'content':data[:LIMIT].decode(errors='replace'),'truncated':len(data)>LIMIT,'bytesRead':min(len(data),LIMIT)}
     if action == 'fs_list':

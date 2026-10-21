@@ -83,11 +83,18 @@ such.
 The runtime it installs is fixed by the platform, and the reason is the
 hardware floor:
 
-- **macOS (Apple Silicon)** — Ollama natively, through Homebrew
-  (`brew install ollama`, `brew services start ollama`). Docker is not
-  offered: a container has no access to the GPU there, so Ollama in a
-  container would serve from the CPU and this machine would not be
-  advertised at all.
+- **macOS (Apple Silicon)** — Ollama natively. With Homebrew, through
+  Homebrew (`brew install ollama`, `brew services start ollama`). Without
+  it, Ollama's own release: `ollama-darwin.tgz` is downloaded from the
+  `ollama/ollama` GitHub release, checked against that release's
+  `sha256sum.txt`, unpacked into `~/.memql/ollama/runtime`, and kept
+  running by a LaunchAgent, `com.znasllc.memql-ollama`, that binds the
+  **loopback only**, keeps its models in `~/.memql/ollama/models`
+  (`OLLAMA_MODELS` wins) and logs to `~/.memql/state/ollama.log`. Nothing
+  there needs an administrator password, and a later run reuses the
+  unpacked runtime even after Homebrew appears. Docker is not offered: a
+  container has no access to the GPU there, so Ollama in a container would
+  serve from the CPU and this machine would not be advertised at all.
 - **Linux (discrete GPU)** — Ollama **as your user, from your own home
   directory**: the vendor's release archive (`ollama-linux-<arch>.tar.zst`,
   plus the ROCm add-on on an AMD machine) is downloaded from the
@@ -105,8 +112,26 @@ hardware floor:
   without it, naming the package and the way out.
 
 The uninstaller is the other half: `uninstall-linux.sh` stops and removes
-`memql-ollama.service` with the worker's own unit, and `--purge` removes
+`memql-ollama.service` with the worker's own unit (`uninstall-mac.sh` does the
+same for the `com.znasllc.memql-ollama` LaunchAgent), and `--purge` removes
 `~/.memql/ollama` -- the runtime and every model in it -- with the rest.
+
+**Installed is not running.** An Ollama on PATH whose service is stopped used
+to count as a runtime, so the setup started nothing and every pull failed with
+"connection refused". The setup now looks again, and starts it the way it was
+installed -- this setup's own LaunchAgent or unit, `brew services start
+ollama`, Ollama's app, or the container -- after printing the command and
+asking, then waits for `/api/version` to answer. A system-wide install
+(Ollama's own `install.sh` on Linux) needs root to start, so its command is
+printed for you to run.
+
+**The disk is judged before the first byte moves.** The registry states each
+model's layers and sizes, and the runtime's `blobs/` directory says which are
+already complete, so the setup knows what is still missing before it pulls
+and refuses with both numbers -- the bytes needed, plus a margin of a
+gigabyte or a twentieth of the download, and the free space where the models
+live, read at that moment. A resumed pull needs only what is left: layers
+already on disk count for nothing.
 Without `--purge` the models stay, because they were pulled on purpose and
 cost hours to pull again, and the closing block says so.
 
@@ -239,6 +264,20 @@ report **`tools`** — which covers the operational class (`llama3.1:8b`,
 `qwen2.5:7b`). If you disagree about a specific model, declare it under an
 OpenAI-compatible runtime pointed at Ollama's own `/v1` surface with
 `structured_output: true`. Your machine, your claim.
+
+Tools, structured output and vision are claimed only for a model Ollama lists
+as **`completion`**, one that can answer a chat at all. Ollama 0.40.6 reports
+`qwen3-embedding:0.6b` as `tools, thinking, embedding`; without this rule the
+embedder advertised `tools=1,structured=1` and was sent chat calls it refused.
+
+Some Ollama runners do not implement `format` at all: Ollama 0.40.6 answers
+every request carrying it for `qwen3.8:27b` (NVFP4) with
+`501 structured output is unavailable`. On that 501 the cockpit asks again with
+the schema in the system prompt, holds the answer back, and sends it only when
+one JSON value in it validates against the request's schema; anything else
+fails the call, as the 501 would have (`modelcall/ollama_schema.go`). A
+structured call to this machine still gets schema-valid JSON or a failure,
+never prose.
 
 That escape hatch relies on one rule worth knowing: **a model id can be
 advertised once**, because the id is the label key. When the native probe and
@@ -452,6 +491,8 @@ And what `memql worker setup --inference` prints when it stops:
 | `your user cannot open /dev/kfd and a /dev/dri render node` (AMD) or `cannot open /dev/nvidiactl` (NVIDIA) | The GPU is there and this user cannot reach it, so a runtime started now would serve from the CPU. The AMD fix is the `render` and `video` groups (`sudo usermod -aG render,video $USER`, then log back in); the NVIDIA one is the device's permissions. Printed for **you** to run. Exit **4**. |
 | `OLLAMA_HOST selects …, but native setup installs a loopback service` | The chosen endpoint is not serving, and differs from the native installer's `127.0.0.1:11434`. Start that runtime yourself, or unset `OLLAMA_HOST` and retry. Setup refuses before downloading or writing anything. Exit **4**. |
 | `the downloaded archive does not match the release's checksum` | The bytes fetched are not the ones the release's `sha256sum.txt` describes — a release being published mid-download, a proxy, or a tampered mirror. Nothing was unpacked and nothing was written; run the setup again. Exit **5**. |
+| `Ollama is installed and is not answering, and this command cannot tell how it was installed.` | Something put `ollama` on PATH and nothing serves it. Open the Ollama app, or run `ollama serve`, then run the setup again. Exit **5**. |
+| `There is not enough disk for these models` | The models still missing, plus the margin, do not fit where the runtime keeps models. Free space there, or pass `--model` with a smaller one. Nothing was downloaded. Exit **5**. |
 | `the runtime was installed and started, but nothing answered at http://127.0.0.1:11434 within 30s` | The unit was enabled and Ollama did not come up. Read the log the sentence names, `~/.memql/state/ollama.log`; `systemctl --user status memql-ollama.service` shows the unit's own view. Exit **5**. |
 | `This machine will not pull a model: models.pull is false in …/policy.yaml` | The pull switch is off in this machine's own policy. It defaults to **true** — a pull is the machine's owner acting on their own machine — so somebody set it deliberately. Remove the key or set it to `true`. Exit **4**. |
 | `Nothing was installed: --non-interactive cannot answer that question.` | A runtime install was needed and a scripted run may not approve one. Nothing was changed. Run the same command **without** `--non-interactive`, in a terminal, or run the printed commands yourself. Exit **3** — which is what the installers' `--inference` watches for, so they can print the interactive command for you. |
@@ -474,16 +515,58 @@ excluded.
 The portal's "Add machine" flow appends `--inference` to the one-line install
 command when the machine is meant to run local models. Both installers pass
 it through: after `worker.yaml` is written and the service is running, they
-run `memql worker setup --inference --non-interactive`.
+run `memql worker setup --inference`.
 
-They **never fail the install over it.** A machine that paired fine and could
-not set up local models is still a working worker — shell, filesystem, HTTP,
-computer use, local apps, backup — and aborting over the one capability it
-could not add would take away the eight it already has. So a non-zero exit is
-reported and the install carries on, with one case answered specially: **exit
-3** means a runtime install a scripted run may not approve, so the installer
-prints the interactive command for the person who is standing at that
-terminal right now.
+**At a terminal it is one session.** The installer arrives through `curl |
+bash`, so the person is on `/dev/tty`; when they are there, the setup runs in
+that terminal -- it prints the runtime commands, asks once, installs, and
+pulls -- and its output goes to the install log too. A scripted run (no
+terminal) runs `--non-interactive`, and a runtime install it may not approve
+ends as **exit 3** with the command printed for later. On a Mac the setup runs
+under `caffeinate -i`, so a long pull is not cut short by idle sleep.
+
+They **never fail the install over it**, and the closing summary says how it
+ended, in the setup's own sentence (written to `MEMQL_SETUP_REASON_FILE`):
+
+| Exit | Summary |
+|---|---|
+| 0 | `Local models ready` |
+| 3 | `Local models need your approval ...` and the command to run |
+| 4 | `This machine can't run local models: <reason>` -- below the hardware floor, or `models.pull` off. No retry is offered: running it again changes nothing. |
+| 2, 5 | `Local models could not be set up: <reason>` and the retry command |
+
+A machine that paired fine and could not set up local models is still a
+working worker — shell, filesystem, HTTP, computer use, local apps, backup —
+and aborting over the one capability it could not add would take away the
+eight it already has.
+
+**Local models run before Fleet workbenches**, and neither can stop the
+install. The script on `main` installs the latest release, which may predate
+a stage the script knows: the workbench stage asks the installed binary
+whether it has `worker setup --workbench` and reports "not in this release"
+when it does not, instead of running into it. A workbench setup that fails --
+Docker missing or stopped, under 3 CPUs or 2 GB, not on a local socket, or an
+image pull past 15 minutes -- is one line with Docker's own words and the
+retry command in the summary.
+
+Each Fleet Workbench has a 1.5 GiB hard memory limit, with at most two active
+workspaces. Before creating one, Cockpit reserves its allowance plus the unused
+allowance of existing workspaces recorded in its local reservation journal.
+Current container usage is counted once. The Mac/Linux host retains a 20% safety
+cushion, bounded between 1 and 4 GiB; Docker retains 20% of its capacity. On a
+36 GiB host, the first workspace therefore needs 5.5 GiB available: its 1.5 GiB
+allowance plus the 4 GiB cushion. A second also reserves any remaining growth
+of the first. An unused slot reserves no memory. Admission and
+creation are serialized across worker processes, so concurrent starts cannot
+spend the same headroom. Other containers are always included in measured usage;
+a container name or label cannot exempt one from accounting.
+
+**The service sees what the shell saw.** A LaunchAgent or user unit inherits
+nothing from a shell, so an `OLLAMA_HOST` or `OLLAMA_MODELS` set where the
+installer runs would reach the setup (which pulls) and not the worker (which
+serves). The installers copy whichever are set into the worker service's own
+environment: the worker plist, `~/.memql/worker.env` on Linux, or the app's
+activation where the release supports it.
 
 ---
 

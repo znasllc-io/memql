@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Offline installer UX regressions using the real shell renderer and drivers."""
 import errno
+import hashlib
 import http.server
 import os
 from pathlib import Path
@@ -282,6 +283,16 @@ install_ui_stage 'Checking' work
                 self.assertFalse((self.root / ".config/systemd").exists())
 
     def test_real_drivers_fresh_and_current_with_deferred_models(self):
+        body = b'''#!/bin/bash
+if [[ "$1" == --version ]]; then echo 'memql 0.16.0 (headless)'; exit 0; fi
+echo 'runtime approval needed' >&2
+exit 3
+'''
+        # The installers verify the binary against its release manifest
+        # before running it (memql-cockpit#525); the fixture release has one.
+        digest = hashlib.sha256(body).hexdigest()
+        manifest = "".join(f"{digest}  memql-{p}-{a}\n" for p in ("darwin", "linux") for a in ("amd64", "arm64")).encode()
+
         class Asset(http.server.BaseHTTPRequestHandler):
             def do_HEAD(self):
                 self.send_response(200)
@@ -289,11 +300,7 @@ install_ui_stage 'Checking' work
 
             def do_GET(self):
                 self.do_HEAD()
-                self.wfile.write(b'''#!/bin/bash
-if [[ "$1" == --version ]]; then echo 'memql 0.16.0 (headless)'; exit 0; fi
-echo 'runtime approval needed' >&2
-exit 3
-''')
+                self.wfile.write(manifest if self.path.endswith("/memql-SHA256SUMS") else body)
 
             def log_message(self, *_args):
                 pass
@@ -428,6 +435,9 @@ printf '%s\\n' "$@" > "$HOME/apps-args"
             for platform in ("darwin", "linux"):
                 for arch in ("amd64", "arm64"):
                     (binary.parent / f"memql-{platform}-{arch}").write_bytes(binary.read_bytes())
+            digest = hashlib.sha256(binary.read_bytes()).hexdigest()
+            (binary.parent / "memql-SHA256SUMS").write_text(
+                "".join(f"{digest}  memql-{p}-{a}\n" for p in ("darwin", "linux") for a in ("amd64", "arm64")))
             for failed in (True, False):
                 with self.subTest(driver=driver, failed=failed):
                     env["FIXTURE_FAIL"] = "yes" if failed else "no"

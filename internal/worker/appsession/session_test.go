@@ -150,6 +150,24 @@ func newFakeLibrary(t *testing.T) *fakeLibrary {
 		pullCode: map[string]int{},
 	}
 	mux := http.NewServeMux()
+	mux.HandleFunc("/mcp", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == http.MethodDelete {
+			w.WriteHeader(http.StatusNoContent)
+			return
+		}
+		var message struct {
+			ID     int    `json:"id"`
+			Method string `json:"method"`
+		}
+		_ = json.NewDecoder(r.Body).Decode(&message)
+		w.Header().Set("Content-Type", "application/json")
+		w.Header().Set("Mcp-Session-Id", "test-preflight")
+		result := map[string]any{}
+		if message.Method == "tools/list" {
+			result["tools"] = []map[string]any{{"name": "next_task"}, {"name": "submit"}}
+		}
+		_ = json.NewEncoder(w).Encode(map[string]any{"jsonrpc": "2.0", "id": message.ID, "result": result})
+	})
 	mux.HandleFunc("/artifacts/", func(w http.ResponseWriter, r *http.Request) {
 		id := strings.TrimSuffix(strings.TrimPrefix(r.URL.Path, "/artifacts/"), "/content")
 		l.mu.Lock()
@@ -241,7 +259,7 @@ func newRig(t *testing.T, allow ...string) *rig {
 		Logger:      slog.New(slog.NewTextHandler(io.Discard, nil)),
 		StateDir:    h.state,
 		LibraryBase: lib.server.URL,
-		HTTPClient:  lib.server.Client(),
+		HTTPClient:  preflightFixtureClient(lib.server),
 		Allowed:     func(id string) bool { return allowed[id] },
 		// The fingerprint asks the app for its version and the machine for
 		// its tools. Neither is asked for real here: several fake apps fork
@@ -2084,7 +2102,7 @@ func TestSessionScratchKeptWhenThePushFails(t *testing.T) {
 	h.manager.opts.ScratchRoot = scratch
 	down := failingLibrary(t)
 	h.manager.opts.LibraryBase = down.URL
-	h.manager.opts.HTTPClient = down.Client()
+	h.manager.opts.HTTPClient = preflightFixtureClient(h.library.server)
 
 	end := h.start(t, func(s *memqlv1.AppSessionStart) { s.Workspace = "" })
 
@@ -2145,4 +2163,22 @@ func TestOpenSessionKeepsItsScratchDir(t *testing.T) {
 	if body, err := os.ReadFile(filepath.Join(dir, "person.md")); err != nil || string(body) != "still working\n" {
 		t.Errorf("the person's working directory was removed from under them: %q, %v", body, err)
 	}
+}
+
+type fixtureMCPTransport struct {
+	base   http.RoundTripper
+	target string
+}
+
+func (t fixtureMCPTransport) RoundTrip(r *http.Request) (*http.Response, error) {
+	if r.URL.Host == "mcp.example.com" {
+		clone := r.Clone(r.Context())
+		target, _ := http.NewRequest(r.Method, t.target+"/mcp", nil)
+		clone.URL = target.URL
+		r = clone
+	}
+	return t.base.RoundTrip(r)
+}
+func preflightFixtureClient(s *httptest.Server) *http.Client {
+	return &http.Client{Transport: fixtureMCPTransport{base: s.Client().Transport, target: s.URL}}
 }

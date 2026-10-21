@@ -152,6 +152,15 @@ func NewManager(opts Options) *Manager {
 	}
 }
 
+// InFlightByModel reports the calls holding a slot per model id, machine
+// wide: the Limiter is shared by every Manager on the machine.
+func (m *Manager) InFlightByModel() map[string]int {
+	if m == nil {
+		return nil
+	}
+	return m.limiter.InFlightByModel()
+}
+
 // Live reports how many calls are running. The runner reads it before
 // spending a reconnect on a changed model set.
 func (m *Manager) Live() int {

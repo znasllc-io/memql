@@ -13,6 +13,7 @@ import (
 
 	"github.com/znasllc-io/memql-cockpit/internal/worker/apps"
 	"github.com/znasllc-io/memql-cockpit/internal/worker/appsession"
+	"github.com/znasllc-io/memql-cockpit/internal/worker/capacity"
 	"github.com/znasllc-io/memql-cockpit/internal/worker/hardware"
 	"github.com/znasllc-io/memql-cockpit/internal/worker/modelcall"
 	"github.com/znasllc-io/memql-cockpit/internal/worker/models"
@@ -54,6 +55,8 @@ type Runner struct {
 	tools     ToolDispatcher
 	apps      AppInventory
 	modelsInv ModelInventory
+	capacity  CapacityProbe
+	setup     SetupSource
 	calls     *modelcall.Manager
 	sessions  *appsession.Manager
 	pulls     *modelPuller
@@ -77,6 +80,9 @@ type Runner struct {
 	// ONE: a burst of pulls is one evaluation, not one reconnect each.
 	pendingReadvertise atomic.Bool
 	readvertiseNow     chan struct{}
+	// beatNow asks the heartbeat loop for a beat ahead of its tick: the
+	// installer's report changed a step (RequestBeat). Room for one.
+	beatNow chan struct{}
 
 	// refused is the runner's standing with a cluster that has refused it
 	// (refusal.go). Touched only by the goroutine in Run.
@@ -207,6 +213,25 @@ type Options struct {
 	// and a sentence -- a pull onto a machine that advertises nothing
 	// would fetch gigabytes the cluster is never told about.
 	ModelPull *ModelPullOptions
+	// Capacity measures what the machine can take on now, for every
+	// heartbeat. Nil sends no report, and the engine admits the machine on
+	// its concurrency slots alone.
+	Capacity CapacityProbe
+	// Setup is the installer's report for every heartbeat
+	// (setupprogress.go). Nil, or a nil report, sends none, and the engine
+	// keeps whatever it last stored.
+	Setup SetupSource
+}
+
+// SetupSource is the installer's latest report, or nil when there is none.
+type SetupSource interface {
+	Proto() *memqlv1.SetupProgress
+}
+
+// CapacityProbe takes one capacity measurement, or reports false when there
+// is nothing it can vouch for.
+type CapacityProbe interface {
+	Probe(ctx context.Context) (capacity.Report, bool)
 }
 
 // NewRunner constructs a Runner. The runner is not yet running; call
@@ -229,6 +254,8 @@ func NewRunner(opts Options) (*Runner, error) {
 		tools:     opts.Tools,
 		apps:      opts.Apps,
 		modelsInv: opts.Models,
+		capacity:  opts.Capacity,
+		setup:     opts.Setup,
 		calls:     opts.Calls,
 		sessions:  opts.Sessions,
 		heartbeat: hb,
@@ -241,6 +268,9 @@ func NewRunner(opts Options) (*Runner, error) {
 		// wait for the refresh ticker, which is the wait this exists to
 		// remove.
 		readvertiseNow: make(chan struct{}, 1),
+		// Room for one, for the same reason: a beat already asked for
+		// covers every request made before it goes out.
+		beatNow: make(chan struct{}, 1),
 	}
 	pull := opts.ModelPull
 	if opts.Models == nil {
@@ -544,10 +574,44 @@ func (r *Runner) heartbeatLoop(ctx context.Context, conn *Connection, beat *atom
 	refresh := time.NewTicker(modelRefreshInterval)
 	defer refresh.Stop()
 	beats := 0
+	var lastBeat time.Time
+	// held is a step's beat waiting out setupBeatSpacing; nil when none is.
+	var held <-chan time.Time
+	send := func(hw *hardware.Inventory) bool {
+		if err := conn.SendHeartbeat(0, nil, r.inventory(ctx), hw, r.capacityReport(ctx), r.setupReport()); err != nil {
+			return false
+		}
+		lastBeat = time.Now()
+		return true
+	}
+	// Register carries no setup report, so a stream that opens while an
+	// install is under way beats at once: until it does, the cluster reads
+	// a machine whose installer is downloading as one with nothing on it.
+	if r.setupReport() != nil {
+		r.RequestBeat()
+	}
 	for {
 		select {
 		case <-ctx.Done():
 			return
+		case <-r.beatNow:
+			// The installer's report changed a step (setupprogress.go).
+			// Not a tick: it neither counts toward the hardware refresh nor
+			// proves the stream -- only the cadence does that (see Run).
+			if wait := setupBeatSpacing - time.Since(lastBeat); !lastBeat.IsZero() && wait > 0 {
+				if held == nil {
+					held = time.After(wait)
+				}
+				continue
+			}
+			if !send(nil) {
+				return
+			}
+		case <-held:
+			held = nil
+			if !send(nil) {
+				return
+			}
 		case <-refresh.C:
 			r.maybeReadvertiseModels(ctx, conn)
 		case <-r.readvertiseNow:
@@ -577,12 +641,56 @@ func (r *Runner) heartbeatLoop(ctx context.Context, conn *Connection, beat *atom
 				inv := r.hardwareInventory(ctx)
 				hw = &inv
 			}
-			if err := conn.SendHeartbeat(0, nil, r.inventory(ctx), hw); err != nil {
+			if !send(hw) {
 				return
 			}
 			beat.Store(true)
 		}
 	}
+}
+
+// setupBeatSpacing is the least time between two beats sent for a step of
+// the install: a burst of steps -- the plan, then the first stage starting --
+// goes out as two beats a second apart rather than as many as were reported.
+// Above the engine's floor for writing a step ahead of its batch (half a
+// second), so jitter on the wire never holds a step back for a whole
+// interval.
+const setupBeatSpacing = time.Second
+
+// RequestBeat asks for a heartbeat now. It never blocks: a beat already
+// asked for covers this one.
+func (r *Runner) RequestBeat() {
+	if r == nil || r.beatNow == nil {
+		return
+	}
+	select {
+	case r.beatNow <- struct{}{}:
+	default:
+	}
+}
+
+// capacityReport measures what the machine can take on now, or nil when it
+// cannot vouch for a figure. Measured on every beat: free memory and loaded
+// models move with every call, and the engine stops trusting a report after
+// two minutes.
+func (r *Runner) capacityReport(ctx context.Context) *capacity.Report {
+	if r == nil || r.capacity == nil {
+		return nil
+	}
+	report, ok := r.capacity.Probe(ctx)
+	if !ok {
+		return nil
+	}
+	return &report
+}
+
+// setupReport is the installer's report for this beat, or nil when this
+// worker keeps none.
+func (r *Runner) setupReport() *memqlv1.SetupProgress {
+	if r == nil || r.setup == nil {
+		return nil
+	}
+	return r.setup.Proto()
 }
 
 // pipelinesPolicy reads the live pipelines consent, defaulting closed.

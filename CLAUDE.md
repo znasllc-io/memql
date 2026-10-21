@@ -366,7 +366,11 @@ Five rules here are load-bearing, and each fails silently:
    nothing -- an over-claim surfaces as a parse failure three layers away,
    naming nothing here. Ollama has no structured-output capability of its
    own, so `tools` is the proxy; an operator who disagrees declares the
-   model under an OpenAI-compatible runtime instead.
+   model under an OpenAI-compatible runtime instead. Tools, structured and
+   vision are claimed only for a model Ollama lists as `completion` (an
+   embedder reported `tools` once and was sent chat calls), and a runner
+   that answers `format` with 501 gets the schema in the prompt and passes
+   on only an answer that validates (`modelcall/ollama_schema.go`).
 2. **`max_concurrent` is the exception, and it is never absent.** It is the
    one attribute whose absence is PERMISSIVE -- the engine reads a missing
    ceiling as unlimited. `OLLAMA_NUM_PARALLEL` when set, otherwise 1.
@@ -425,7 +429,15 @@ the entire product for a person who is blocked.
 **Native Ollama on both platforms, Docker on Linux only by request, and
 never sudo.** On macOS a container has no GPU access, so Ollama there
 would serve on the CPU -- which is what the hardware floor exists to
-prevent -- and Homebrew installs it natively. On Linux the first design
+prevent -- and Homebrew installs it natively; without Homebrew the same
+stage as Linux fetches Ollama's own `ollama-darwin.tgz`, checks it against
+the release's `sha256sum.txt`, and a LaunchAgent (`com.znasllc.memql-ollama`)
+keeps it up (memql-cockpit#524). **Installed is not serving**: an `ollama` on
+PATH with its service stopped gets a printed, consented start command
+(`withStart`) and a wait for `/api/version`, never a pull against a closed
+port. **The disk is judged before the pull** on the bytes still missing
+(`MissingBytes`), and the mid-pull check counts only what each layer still
+has to write. On Linux the first design
 (2026-09-06 record, D1) was the `ollama/ollama` container, and it stopped
 on every fresh machine at the same place: the NVIDIA container toolkit is a
 root install, Pop!_OS 24.04 has it in no configured repository, and
@@ -593,6 +605,61 @@ appears only once the runtime answers a probe, never because an install
 command exited zero. That value change, plus the four modality keys,
 costs every machine one reconnect on rollout.
 
+
+## Capacity on every heartbeat (memql-cockpit#539)
+
+The engine admits a model call to this machine only when the model is
+loaded or there is room to load it (engine design record
+2026-10-18-routes, "Fleet capacity"). `internal/worker/capacity` measures
+that on EVERY beat and `SendHeartbeat` carries it as `Heartbeat.capacity`:
+the pool (`unified`: the smaller of `vm_stat`'s free + inactive +
+speculative and the GPU wired limit less what loaded models hold; `vram`:
+nvidia-smi or the amdgpu sysfs nodes; `system`: `/proc/meminfo`
+MemAvailable), and every model Ollama's `/api/ps` holds, with the calls the
+shared `modelcall.Limiter` is running on it.
+
+**Nothing it cannot vouch for is sent.** No runtime list, no memory reading,
+or a probe slower than two seconds sends no report, and the engine admits
+the machine on its slots alone. A report claiming no loaded models would get
+calls refused that this machine could serve, which is worse than silence.
+
+## The installer's setup report (memql-cockpit#541)
+
+The installer starts the worker and only THEN installs the model runtime,
+pulls the models and sets up workbenches, so MemQL OS can show those stages
+only through the worker (engine half znasllc-io/memql#6229).
+`internal/worker/setupprogress.go` keeps the machine's one report, which
+every home's heartbeat carries as `Heartbeat.setup`. The installer sends the
+PLAN once the worker is up (`worker control --action=setup --plan=...`) and
+FINISHED at its end; `worker setup --inference` and `--workbench` report
+their own stage in between (`setupreport.go`), a download with its
+whole-model bytes rather than the part in flight.
+
+**Reporting never fails a stage.** Every send is best-effort, and no worker,
+or an older one, changes nothing about the install. **Silence is not
+progress**: a running stage is re-sent every thirty seconds, so a report
+quiet for two minutes is carried as `stopped`, an installer that is gone.
+
+**The person's turn comes first** (memql-cockpit#548). On a computer-use Mac
+the plan starts with `permissions`: `worker setup --permissions`
+(`setup_permissions.go`) opens the Permissions window and waits until both
+grants are reported by the WORKER (MemQL.app holds them, never the setup
+process) or the person chooses to go on without them -- **Skip for now** /
+**Continue without X** in the window, or Return in the terminal. No timeout
+decides for them; with no terminal it does not ask at all (exit 3, stage
+failed "Not asked"). The window's choice is an ANSWER on the control socket
+(`--stage=permissions --answer=skip`), never a stage report, so the setup
+command's keepalive cannot overwrite it; the setup command reads the answer
+back from `worker control --action=status` and reports how the stage ended.
+**It survives a restart**: Screen Recording needs one mid-install, so the
+report (with answers) is kept in `setup.json` at the machine's state root and
+read back at start; an install with no stage sends `--reset`, so an earlier
+install's report does not stand for it. **A step reaches the cluster at
+once**: a report that changes a step (plan, a stage's state or sentence, an
+answer, the end) asks every home for a heartbeat now, at most one a second,
+and a stream that opens while an install runs beats immediately (Register
+carries no report). These beats do not prove the stream; only the cadence
+does. The engine writes a changed step ahead of its batch interval too.
 
 ## Watched-folder backup (memql#4841)
 
@@ -1074,7 +1141,14 @@ goroutine it starts.
   `/device/code` + `/oauth/token`.
 - **Services:** macOS LaunchAgent label `com.znasllc.memql-worker`; Linux
   user-systemd `memql-worker.service`. Installers retire the pre-rename
-  `memql-cockpit-worker` agent/unit and binaries in place.
+  `memql-cockpit-worker` agent/unit and binaries in place. **MemQL.app
+  registers its own** (memql-cockpit#545): the worker and menu plists live in
+  the bundle and `memql worker service register` hands them to SMAppService,
+  because macOS lists a per-user plist as a bare executable unless a Team ID
+  ties it to the app. The bundled worker plist is the same for every account,
+  so `prepareAppService` (`app_service.go`) supplies HOME, the log redirect and
+  `~/.memql/state/service.env` itself; `launchctl print` then names the
+  program inside the bundle, not by path. Headless installs keep their plists.
 - **Unpairing:** `memql worker unpair --cluster <id>` removes (or
   `--disable`s) one home and keeps the legacy mirror honest; the running
   worker keeps that stream until it restarts, and the command prints the
@@ -1125,3 +1199,9 @@ The native run retains per-platform raw binaries (`memql-<os>-<arch>`), tar.gz
 archives (`memql-<version>-<os>-<arch>.tar.gz`), Mac app/menu archives, checksums
 and binary SBOMs. MemQL verifies and publishes the approved retained candidate
 to the GitHub Release consumed by the installers. See VERSIONING.md.
+
+The installers verify each downloaded binary against its manifest before running it;
+a headless binary from an older release is vouched for by its verified archive.
+Each installer lists the lib.sh functions it calls (`REQUIRED_LIB_FUNCTIONS`,
+kept complete by `lib_test.sh`) and refuses an incomplete cached library after
+one refetch past the cache.

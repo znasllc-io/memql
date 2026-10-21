@@ -48,31 +48,67 @@ readonly RAW_BASE="${MEMQL_INSTALL_RAW_BASE:-https://raw.githubusercontent.com/z
 # spell the command back, and under `bash -s --` $0 does not know it.
 readonly SCRIPT_NAME="uninstall-mac.sh"
 
+# The lib.sh functions this script calls (memql-cockpit#525). Every piped
+# fetch comes from raw.githubusercontent.com, which caches each file on its
+# own, so a fresh script can arrive with a lib.sh from before a function it
+# calls existed -- and stopped with exit 127 halfway through. source_lib
+# checks these before anything runs, refetches past the cache once, and
+# otherwise refuses in a sentence. lib_test.sh keeps the list complete.
+readonly REQUIRED_LIB_FUNCTIONS="binary_speaks_scoped_unpair first_executable install_mode_dir install_mode_has_files install_ui_init install_ui_stage install_ui_update_stage macos_privacy_scope_unique mode_binary_names note_leftover plan_binaries_with_mode plan_kept_state plan_path plan_purge_state plan_worker_config print_uninstall_summary purge_worker_state read_binary_version record_kept record_removed record_scoped_leftovers record_scoped_restart_failure record_scoped_unpair_failure remove_binaries_with_mode remove_path_if_present remove_worker_config report_kept_state require_cluster_url_flag require_sudo resolve_uninstall_scope scoped_precheck scoped_without_binary unpair_json_remaining unpair_json_removed worker_state_dir_from_yaml"
+
+# missing_lib_functions names the required functions a lib.sh file does not
+# define. It reads the TEXT, before anything is sourced: lib.sh declares
+# readonly variables, so a second copy could not be sourced over a first.
+function missing_lib_functions() {
+    local file="$1" fn missing="" text
+    # Bash alone: the uninstallers run with PATH cut to a few tools.
+    text=$'\n'"$(<"$file")"
+    for fn in $REQUIRED_LIB_FUNCTIONS; do
+        [[ "$text" == *$'\n'"function ${fn}()"* ]] || missing="${missing} ${fn}"
+    done
+    printf '%s' "$missing"
+}
+
+# fetch_lib fetches lib.sh into a temp file and prints its path.
+function fetch_lib() {
+    local url="$1" tmp
+    tmp="$(mktemp)"
+    if ! curl -fsSL --retry 3 --retry-delay 2 --connect-timeout 15 --max-time 60 "$url" -o "$tmp" || [[ ! -s "$tmp" ]]; then
+        rm -f "$tmp"
+        echo "ERROR: failed to fetch $url" >&2
+        echo "       Piped execution needs it; check network access or run from a repo clone." >&2
+        exit 4
+    fi
+    printf '%s\n' "$tmp"
+}
+
 # Source the shared helper library. A sibling lib.sh (the cloned-repo
 # case) always wins, so a checkout never gains a network dependency.
 # Only the piped case fetches -- into a temp file, checked non-empty
 # BEFORE sourcing, because under `set -e` a bare `source <(curl ...)`
 # turns a failed fetch into a cryptic bash error naming no URL.
 function source_lib() {
-    local sibling
-    sibling="$(dirname "$0")/lib.sh"
-    if [[ -f "$sibling" ]]; then
-        # shellcheck source=lib.sh
-        source "$sibling"
-        return 0
+    local lib missing
+    lib="$(dirname "$0")/lib.sh"
+    if [[ ! -f "$lib" ]]; then
+        lib="$(fetch_lib "${RAW_BASE}/lib.sh")"
+        missing="$(missing_lib_functions "$lib")"
+        if [[ -n "$missing" && "$RAW_BASE" == http* ]]; then
+            # A cached copy from before this script: once more, past the cache.
+            rm -f "$lib"
+            lib="$(fetch_lib "${RAW_BASE}/lib.sh?refresh=$(date +%s)")"
+        fi
     fi
-    local url="${RAW_BASE}/lib.sh"
-    local tmp
-    tmp="$(mktemp)"
-    if ! curl -fsSL "$url" -o "$tmp" || [[ ! -s "$tmp" ]]; then
-        rm -f "$tmp"
-        echo "ERROR: failed to fetch $url" >&2
-        echo "       Piped execution needs it; check network access or run from a repo clone." >&2
+    missing="$(missing_lib_functions "$lib")"
+    if [[ -n "$missing" ]]; then
+        [[ "$lib" == "$(dirname "$0")/lib.sh" ]] || rm -f "$lib"
+        echo "ERROR: this script and its lib.sh come from different versions (lib.sh lacks:${missing})." >&2
+        echo "       A cached copy is the usual cause. Nothing was changed; wait a minute and run the same command again." >&2
         exit 4
     fi
-    # shellcheck disable=SC1090  # fetched at runtime; the static path is the sibling branch above
-    source "$tmp"
-    rm -f "$tmp"
+    # shellcheck source=lib.sh
+    source "$lib"
+    [[ "$lib" == "$(dirname "$0")/lib.sh" ]] || rm -f "$lib"
 }
 source_lib
 
@@ -273,12 +309,45 @@ function stop_agent() {
     fi
 }
 
+# The MemQL.app whose own executable registered the worker and menu
+# services (memql-cockpit#545). Only that app can take them back out of
+# Login Items, and only it can start them again: there is no plist to reload.
+function app_service_executables() {
+    local mode app identifier
+    for mode in $REMOVE_MODES; do
+        app="$(worker_app_for_mode "$mode")"
+        [[ -d "$app" && ! -L "$app" && -f "$app/Contents/Library/LaunchAgents/$SERVICE_LABEL_DARWIN.plist" ]] || continue
+        identifier="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleIdentifier' "$app/Contents/Info.plist" 2>/dev/null || true)"
+        [[ "$identifier" == com.znasllc.memql-worker ]] || continue
+        echo "$app/Contents/MacOS/MemQL"
+    done
+}
+
+# Before anything is removed, the app unregisters what it registered; that
+# stops both services. An app from before memql-cockpit#545 registered
+# nothing, and remove_launch_agent stops its plists by label.
+function unregister_app_services() {
+    local executable
+    while IFS= read -r executable; do
+        [[ -n "$executable" ]] || continue
+        if ! "$executable" worker service unregister >/dev/null; then
+            echo "ERROR: MemQL's services did not stop; runtime files retained" >&2
+            echo "       Run:  \"$executable\" worker service unregister   then re-run this uninstaller." >&2
+            return 5
+        fi
+        echo "INFO: MemQL's worker and menu services removed from Login Items"
+    done < <(app_service_executables)
+}
+
 # Stop each managed agent before removing its plist. Missing agents are safe
 # to clean up; a still-loaded agent aborts removal so a retry can finish later.
 function remove_launch_agent() {
     local plist_dir="${HOME}/Library/LaunchAgents"
     local label plist
-    for label in "$SERVICE_LABEL_DARWIN" "$LEGACY_LABEL_DARWIN" "com.visionarys.memql-cockpit-worker" "com.znasllc.memql-cockpit-menubar"; do
+    # com.znasllc.memql-ollama is the native model runtime `worker setup
+    # --inference` installs on a Mac without Homebrew (memql-cockpit#524).
+    # It is stopped before --purge takes ~/.memql/ollama out from under it.
+    for label in "$SERVICE_LABEL_DARWIN" "$LEGACY_LABEL_DARWIN" "com.visionarys.memql-cockpit-worker" "com.znasllc.memql-cockpit-menubar" "com.znasllc.memql-ollama"; do
         plist="${plist_dir}/${label}.plist"
         stop_agent "$label" || return $?
         remove_path_if_present "$plist" || true
@@ -470,7 +539,7 @@ function scoped_unpair() {
         scoped_without_binary
         return $?
     fi
-    local result remaining plist target was_loaded=no rc=0
+    local result remaining plist target was_loaded=no rc=0 app_service=""
     result="$(mktemp)"
     "$binary" worker unpair --cluster-url "$CLUSTER_URL" --dry-run --json > "$result" 2> "$result.err" || rc=$?
     case "$rc" in
@@ -506,8 +575,10 @@ function scoped_unpair() {
     plist="$HOME/Library/LaunchAgents/$SERVICE_LABEL_DARWIN.plist"
     target="gui/$(id -u)/$SERVICE_LABEL_DARWIN"
     if command -v launchctl >/dev/null 2>&1 && launchctl print "$target" >/dev/null 2>&1; then
-        # Reload only a service that was running and has a retained plist.
-        if [[ "$remaining" -gt 0 && ( ! -f "$plist" || -L "$plist" ) ]]; then
+        # Reload only a service that was running and can start again: from
+        # its retained plist, or by the app that registered it.
+        [[ -f "$plist" && ! -L "$plist" ]] || app_service="$(app_service_executables | head -n 1)"
+        if [[ "$remaining" -gt 0 && ( ! -f "$plist" || -L "$plist" ) && -z "$app_service" ]]; then
             rm -f "$result"
             echo "ERROR: running worker has no regular service plist to reload safely; nothing was changed." >&2
             echo "       Restore ${plist}, or pass --all-homes to remove every enrollment and the runtime." >&2
@@ -540,7 +611,11 @@ function scoped_unpair() {
     # down, and the files may be half-applied. The summary must say so,
     # with the command that starts the worker again once they are fixed.
     local restart=""
-    [[ "$was_loaded" != yes ]] || restart="launchctl bootstrap gui/$(id -u) $plist"
+    if [[ "$was_loaded" == yes && -n "$app_service" ]]; then
+        restart="\"$app_service\" worker service register"
+    elif [[ "$was_loaded" == yes ]]; then
+        restart="launchctl bootstrap gui/$(id -u) $plist"
+    fi
     if ! "$binary" worker unpair --cluster-url "$CLUSTER_URL" --json > "$result"; then
         rm -f "$result"
         echo "ERROR: removal did not complete; worker remains stopped so a removed token cannot reconnect. Repair enrollment before restarting." >&2
@@ -563,7 +638,13 @@ function scoped_unpair() {
             stop_agent "$legacy" || { rc=$?; record_scoped_restart_failure "$restart" "the legacy agent ${legacy} (still loaded; stop it by hand:  launchctl bootout gui/$(id -u)/${legacy})"; return "$rc"; }
             remove_path_if_present "$HOME/Library/LaunchAgents/$legacy.plist" || true
         done
-        if [[ "$was_loaded" == yes ]]; then
+        if [[ "$was_loaded" == yes && -n "$app_service" ]]; then
+            "$app_service" worker service register >/dev/null || {
+                echo "ERROR: enrollment removed but the worker for the remaining enrollment(s) could not restart; start it with:  ${restart}" >&2
+                record_scoped_restart_failure "$restart"
+                return 5
+            }
+        elif [[ "$was_loaded" == yes ]]; then
             launchctl bootstrap "gui/$(id -u)" "$plist" || {
                 echo "ERROR: enrollment removed but the worker for the remaining enrollment(s) could not reload; start it with:  ${restart}" >&2
                 record_scoped_restart_failure "$restart"
@@ -642,7 +723,7 @@ function print_dry_run_plan() {
     else
         echo "  sudo:          not needed"
     fi
-    for label in "$SERVICE_LABEL_DARWIN" "$LEGACY_LABEL_DARWIN" "com.visionarys.memql-cockpit-worker" "com.znasllc.memql-cockpit-menubar"; do
+    for label in "$SERVICE_LABEL_DARWIN" "$LEGACY_LABEL_DARWIN" "com.visionarys.memql-cockpit-worker" "com.znasllc.memql-cockpit-menubar" "com.znasllc.memql-ollama"; do
         plist="${HOME}/Library/LaunchAgents/${label}.plist"
         target="gui/$(id -u)/${label}"
         if command -v launchctl >/dev/null 2>&1 && launchctl print "$target" >/dev/null 2>&1; then
@@ -737,6 +818,7 @@ function run_uninstall() {
     # A no-op on the scoped path, which settled sudo before its first
     # write; this is the gate for the no-enrollment and no-binary paths.
     ensure_system_sudo || finish $?
+    unregister_app_services || finish $?
     remove_launch_agent || finish $?
     local runtime_rc=0
     stop_remaining_menus || runtime_rc=$?

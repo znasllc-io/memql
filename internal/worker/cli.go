@@ -94,6 +94,8 @@ func dispatchHandleCommand(args []string) {
 		handleControl(args[1:])
 	case "consent":
 		handleConsentCmd(args[1:])
+	case "service":
+		handleService(args[1:])
 	case "-h", "--help", "help":
 		printUsage()
 	default:
@@ -195,6 +197,8 @@ func resolveActiveClusterIdentityURL(name string) (string, error) {
 }
 
 func handleRun(args []string) {
+	// Before anything reads HOME, the environment or writes a log line.
+	prepareAppService()
 	fs := flag.NewFlagSet("worker run", flag.ExitOnError)
 	configPath := fs.String("config", DefaultConfigPath(), "path to legacy worker.yaml (workers.yaml is preferred beside it)")
 	workersPath := fs.String("workers", DefaultWorkersPath(), "path to workers.yaml multi-home registry")
@@ -541,6 +545,8 @@ var setupNonInteractive bool
 // TestSetupFlags.
 type setupFlags struct {
 	workbench      bool
+	permissions    bool
+	noWindow       bool
 	nonInteractive bool
 	inference      bool
 	configPath     string
@@ -552,6 +558,8 @@ func parseSetupFlags(args []string) setupFlags {
 	fs := flag.NewFlagSet("worker setup", flag.ExitOnError)
 	nonInteractive := fs.Bool("non-interactive", false, "never prompt; report what is missing and exit 3 (a question could not be asked), 4 (not granted) or 5 (probe failed)")
 	workbench := fs.Bool("workbench", false, "enable isolated Fleet workbenches with resource limits")
+	permissions := fs.Bool("permissions", false, "macOS: open the Permissions window and wait until Accessibility and Screen Recording are allowed, or the person chooses to go on without them")
+	noWindow := fs.Bool("no-window", false, "with --permissions: send the person to System Settings instead of the Permissions window")
 	inference := fs.Bool("inference", false, "set this machine up to serve local models: runtime, models, models.allow")
 	configPath := fs.String("config", DefaultConfigPath(), "path to worker.yaml (its directory holds policy.yaml)")
 	runtimeFlag := fs.String("runtime", "", "with --inference: docker | native, overriding the runtime this platform would choose. On its own: kokoro | image, to install that runtime")
@@ -560,6 +568,7 @@ func parseSetupFlags(args []string) setupFlags {
 	_ = fs.Parse(args)
 	return setupFlags{
 		workbench: *workbench, nonInteractive: *nonInteractive,
+		permissions: *permissions, noWindow: *noWindow,
 		inference:   *inference,
 		configPath:  *configPath,
 		runtimeFlag: *runtimeFlag,
@@ -628,15 +637,35 @@ func wrapJoin(text string) string {
 func handleSetup(args []string) {
 	f := parseSetupFlags(args)
 	setupNonInteractive = f.nonInteractive
+	if f.permissions {
+		if f.workbench || f.inference || f.runtimeFlag != "" || len(f.modelIDs) > 0 {
+			fmt.Fprintln(os.Stderr, "Run --permissions separately from the other setup stages.")
+			os.Exit(SetupExitUsage)
+		}
+		// The installer's first stage on a computer-use Mac
+		// (memql-cockpit#548): it waits for the person before anything
+		// downloads, and reports itself while it does.
+		os.Exit(runPermissionsSetup(f.noWindow, f.nonInteractive))
+	}
 	if f.workbench {
 		if f.inference || f.runtimeFlag != "" || len(f.modelIDs) > 0 {
 			fmt.Fprintln(os.Stderr, "Run --workbench separately from model setup.")
 			os.Exit(SetupExitUsage)
 		}
+		// The running worker carries this stage to the cluster while it
+		// runs (memql-cockpit#541); the reporter re-sends it while the
+		// workbench image downloads, so a long pull never reads as stopped.
+		progress := newSetupReporter(sendSetupControl)
+		progress.Stage("workbench", "running", "")
 		if err := setupWorkbench(context.Background(), f.configPath, os.Stdout); err != nil {
 			fmt.Fprintln(os.Stderr, "Fleet workbench setup could not finish:", err)
+			recordSetupReason(capitalise(err.Error()))
+			progress.Stage("workbench", "failed", capitalise(err.Error()))
+			progress.Close()
 			os.Exit(1)
 		}
+		progress.Stage("workbench", "done", "")
+		progress.Close()
 		return
 	}
 
@@ -667,8 +696,11 @@ func handleSetup(args []string) {
 	}
 
 	if f.inference {
-		os.Exit(runInferenceSetup(context.Background(),
-			newInferenceSetup(f.configPath, f.modelIDs, f.nonInteractive, f.runtimeFlag)))
+		s := newInferenceSetup(f.configPath, f.modelIDs, f.nonInteractive, f.runtimeFlag)
+		s.progress = newSetupReporter(sendSetupControl)
+		code := runInferenceSetup(context.Background(), s)
+		s.progress.Close()
+		os.Exit(code)
 	}
 
 	if err := runSetupWizard(); err != nil {
@@ -1020,6 +1052,9 @@ func printUsage() {
 	fmt.Println("  memql worker control       Local status/logs and per-server pause/resume (current OS user).")
 	fmt.Println("  memql worker consent <op>  Manage the consent gate, one window per cluster")
 	fmt.Println("                                     (grant/revoke/status/watch; --cluster <id>).")
+	fmt.Println("  memql worker service <op>  MemQL.app only: register, unregister or show the")
+	fmt.Println("                                     worker and menu services macOS lists under")
+	fmt.Println("                                     MemQL in Login Items (register --menu=on|off).")
 	fmt.Println("")
 	fmt.Println("PAIR FLAGS")
 	fmt.Println("  --cluster <name>     Cluster NAME from clusters.yaml (identity lookup).")

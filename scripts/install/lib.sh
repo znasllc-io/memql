@@ -38,6 +38,16 @@ readonly STATE_DIR_DEFAULT="${HOME}/.memql/state"
 # default is GitHub, and download_binary still enforces https on it.
 readonly RELEASE_BASE="${MEMQL_INSTALL_RELEASE_BASE:-https://github.com/znasllc-io/memql-cockpit/releases}"
 
+# Network discipline for every fetch (memql-cockpit#525): a transient
+# failure is retried, a connection that never opens is given up on, and
+# every transfer is bounded -- one dropped connection used to fail an
+# install and a stalled one to hang it. A large download also gives up when
+# it crawls below 1 KB/s for a minute, which a half-hour --max-time alone
+# would let run on. Plain arrays, not readonly ones: macOS bash 3.2.
+CURL_NET=(--retry 3 --retry-delay 2 --connect-timeout 15)
+CURL_SMALL=(--max-time 60)
+CURL_LARGE=(--max-time 1800 --speed-limit 1024 --speed-time 60)
+
 # The installed command. ONE name for both build variants (design D4,
 # znasllc-io/memql-cockpit#352): the download artifact carries the variant,
 # the installed file never does. `memql --version` is what answers "which
@@ -138,6 +148,9 @@ function install_ui_init() {
     INSTALL_UI_SPINNER=""; INSTALL_UI_LOGGER=""; INSTALL_UI_STAGE=""
     INSTALL_UI_CURSOR_HIDDEN=no
     INSTALL_MODELS_STATE=off; INSTALL_SERVICE_STATE=skipped
+    INSTALL_MODELS_REASON=""; INSTALL_WORKBENCH_STATE=off; INSTALL_WORKBENCH_REASON=""
+    INSTALL_MENU_STATE=off; INSTALL_MENU_REASON=""
+    INSTALL_PERMISSIONS_STATE=off; INSTALL_PERMISSIONS_REASON=""
     if [[ -t 3 && "${TERM:-dumb}" != dumb && "${INSTALL_PLAIN:-no}" != yes ]]; then
         INSTALL_UI_TTY=yes
         case "${LC_ALL:-${LC_CTYPE:-${LANG:-}}}" in
@@ -338,13 +351,40 @@ function install_ui_finish() {
     else
         printf '  Worker not started. Run:\n\n    %q worker run\n' "$INSTALLED_BINARY" >&3
     fi
+    # One honest line per optional stage that did not finish, with its
+    # retry command when a retry can help (memql-cockpit#524). A machine
+    # that cannot run local models is told so once and never sent to run
+    # the same command again.
     case "$INSTALL_MODELS_STATE" in
-        pending|failed)
-            command='Local models need setup.'
-            [[ "$INSTALL_MODELS_STATE" != failed ]] || command='Local model setup did not finish. See the log for details.'
-            printf '\n  %s When ready, run:\n\n    %q worker setup --inference\n' "$command" "$INSTALLED_BINARY" >&3
+        pending)
+            printf '\n  Local models need your approval to install their runtime. When ready, run:\n\n    %q worker setup --inference\n' "$INSTALLED_BINARY" >&3
+            ;;
+        unavailable)
+            printf '\n  This machine can'"'"'t run local models: %s\n' "${INSTALL_MODELS_REASON:-see the log for the reason.}" >&3
+            ;;
+        failed)
+            printf '\n  Local models could not be set up: %s\n  Retry with:\n\n    %q worker setup --inference\n' \
+                "${INSTALL_MODELS_REASON:-see the log for details.}" "$INSTALLED_BINARY" >&3
             ;;
     esac
+    case "${INSTALL_PERMISSIONS_STATE:-off}" in
+        skipped|failed)
+            printf '\n  Computer use needs Accessibility and Screen Recording: %s\n  Turn them on from MemQL in the menu bar → macOS permissions → Set Up Permissions…\n' \
+                "${INSTALL_PERMISSIONS_REASON:-they are not allowed yet.}" >&3
+            ;;
+    esac
+    case "$INSTALL_WORKBENCH_STATE" in
+        unsupported)
+            printf '\n  Fleet workbenches are not in Cockpit v%s. Run this installer again once a newer Cockpit is released.\n' "$version" >&3
+            ;;
+        failed)
+            printf '\n  Fleet workbenches need attention: %s\n  Retry with:\n\n    %q worker setup --workbench\n' \
+                "${INSTALL_WORKBENCH_REASON:-see the log for details.}" "$INSTALLED_BINARY" >&3
+            ;;
+    esac
+    if [[ "${INSTALL_MENU_STATE:-off}" == failed ]]; then
+        printf '\n  The menu companion was not installed: %s. Run this installer again to finish it.\n' "${INSTALL_MENU_REASON:-see the log}" >&3
+    fi
     if [[ -n "${INSTALL_APPS_RECOVERY:-}" ]]; then
         printf '\n  App permissions need attention (Cockpit 0.17.0 or later).\n  See the log, then run:\n\n    %s\n' "$INSTALL_APPS_RECOVERY" >&3
     fi
@@ -926,10 +966,10 @@ function preflight_asset() {
         return 4
     fi
     echo "INFO: checking release asset $url"
-    if curl -fsIL -o /dev/null "$url"; then
+    if curl -fsIL "${CURL_NET[@]}" "${CURL_SMALL[@]}" -o /dev/null "$url"; then
         return 0
     fi
-    if curl -fsL -r 0-0 -o /dev/null "$url"; then
+    if curl -fsL "${CURL_NET[@]}" "${CURL_SMALL[@]}" -r 0-0 -o /dev/null "$url"; then
         return 0
     fi
     local os arch
@@ -958,18 +998,14 @@ function download_binary() {
     fi
     echo "INFO: downloading $url"
     # Progress bar when stdout is a TTY; silent -sS for CI / pipes.
-    local curl_flags=(-fL --proto '=https')
-    # Explicit local recovery testing only. Keep published/default downloads
-    # HTTPS-only, and refuse redirects from a loopback HTTP asset.
-    if [[ "${MEMQL_INSTALL_ALLOW_LOOPBACK_HTTP:-}" == 1 && "$url" =~ ^http://(127\.0\.0\.1|\[::1\])(:[0-9]+)?/ ]]; then
-        curl_flags=(-fL --proto '=http' --max-redirs 0)
-    fi
+    local curl_flags
+    read -r -a curl_flags <<< "$(release_fetch_protocol "$url")"
     if [[ -t 1 ]]; then
         curl_flags+=(--progress-bar)
     else
         curl_flags+=(-sS)
     fi
-    if ! curl "${curl_flags[@]}" "$url" -o "$dest.partial"; then
+    if ! curl "${curl_flags[@]}" "${CURL_NET[@]}" "${CURL_LARGE[@]}" "$url" -o "$dest.partial"; then
         echo "ERROR: download failed for $url" >&2
         echo "       Check network access, or pass --download-base to a release that" >&2
         echo "       publishes this asset. Nothing was installed from this URL." >&2
@@ -983,6 +1019,148 @@ function download_binary() {
     fi
     mv "$dest.partial" "$dest"
     chmod +x "$dest"
+}
+
+# release_fetch_protocol prints the curl flags that pin a release fetch's
+# protocol: https, always, for anything published; plain http only for an
+# explicit local test against a literal loopback address, with redirects
+# refused there.
+function release_fetch_protocol() {
+    local url="$1"
+    if [[ "${MEMQL_INSTALL_ALLOW_LOOPBACK_HTTP:-}" == 1 && "$url" =~ ^http://(127\.0\.0\.1|\[::1\])(:[0-9]+)?/ ]]; then
+        printf '%s\n' "-fL --proto =http --max-redirs 0"
+        return 0
+    fi
+    printf '%s\n' "-fL --proto =https"
+}
+
+# fetch_release_file fetches a small release file (a checksum manifest)
+# under the same protocol rule as the binary it vouches for. A function so
+# the installer tests can serve one from disk.
+function fetch_release_file() {
+    local url="$1" dest="$2" flags
+    read -r -a flags <<< "$(release_fetch_protocol "$url")"
+    curl "${flags[@]}" -sS "${CURL_NET[@]}" "${CURL_SMALL[@]}" --max-filesize 65536 "$url" -o "$dest"
+}
+
+# sha256_of prints a file's SHA-256: shasum on macOS, sha256sum on Linux.
+function sha256_of() {
+    if command -v shasum >/dev/null 2>&1; then
+        shasum -a 256 "$1" | awk '{print $1}'
+    else
+        sha256sum "$1" | awk '{print $1}'
+    fi
+}
+
+# manifest_checksum prints the hex a SHA256SUMS file lists for an asset,
+# or nothing. Both spellings: `<hex>  name` and `<hex> *name`.
+function manifest_checksum() {
+    awk -v asset="$2" 'NF >= 2 { name = $2; sub(/^\*/, "", name); sub(/^\.\//, "", name); if (name == asset) { print $1; exit } }' "$1"
+}
+
+# release_checksum_manifest names the manifest that lists a raw binary:
+# memql-computeruse-SHA256SUMS for the computer-use build, memql-SHA256SUMS
+# for the headless one (published from the release after 0.19.0).
+function release_checksum_manifest() {
+    case "$1" in
+        memql-computeruse-*) printf 'memql-computeruse-SHA256SUMS\n' ;;
+        *) printf 'memql-SHA256SUMS\n' ;;
+    esac
+}
+
+# resolve_latest_version prints the version `releases/latest` points at
+# now, read from the redirect (no API call, no rate limit), or nothing.
+function resolve_latest_version() {
+    local effective
+    effective="$(curl -fsSLI "${CURL_NET[@]}" "${CURL_SMALL[@]}" -o /dev/null -w '%{url_effective}' "${RELEASE_BASE}/latest" 2>/dev/null)" || return 0
+    printf '%s' "$effective" | sed -n -E 's#.*/tag/v?([0-9]+(\.[0-9]+){2}([-+][0-9A-Za-z.-]+)?)$#\1#p'
+}
+
+# verify_release_binary checks a downloaded binary against its release's
+# checksum manifest BEFORE anything executes it (memql-cockpit#525) --
+# the version probe that follows runs the file, so an unverified download
+# was code run from the network. A mismatch, or a manifest that cannot
+# vouch for the file, refuses with exit 5 and nothing installed.
+#
+# A headless binary from a release published before memql-SHA256SUMS
+# existed is vouched for by its release archive instead: the archive is
+# listed in memql-<version>-SHA256SUMS, and its `memql` must be the same
+# bytes as the raw download.
+function verify_release_binary() {
+    local file="$1" asset="$2" base="$3" manifest list expected="" actual
+    manifest="$(release_checksum_manifest "$asset")"
+    list="$(mktemp)"
+    if fetch_release_file "${base}/${manifest}" "$list" 2>/dev/null; then
+        expected="$(manifest_checksum "$list" "$asset")"
+    fi
+    rm -f "$list"
+    if [[ -z "$expected" && "$asset" != memql-computeruse-* ]]; then
+        verify_headless_via_archive "$file" "$asset" "$base"
+        return $?
+    fi
+    if [[ ! "$expected" =~ ^[[:xdigit:]]{64}$ ]]; then
+        echo "ERROR: ${base}/${manifest} does not vouch for ${asset}, so the download cannot be verified." >&2
+        echo "       Nothing was run or installed. Retry in a few minutes if the release is still being" >&2
+        echo "       published, or pin one with --version." >&2
+        return 5
+    fi
+    actual="$(sha256_of "$file")"
+    if [[ "$actual" != "$expected" ]]; then
+        echo "ERROR: ${asset} does not match its release checksum (downloaded ${actual}, ${manifest} lists ${expected})." >&2
+        echo "       Nothing was run or installed." >&2
+        return 5
+    fi
+    echo "INFO: verified ${asset} against ${manifest}"
+}
+
+function verify_headless_via_archive() {
+    local file="$1" asset="$2" base="$3" version os_arch archive manifest list expected work actual
+    version="$(printf '%s' "$base" | sed -n -E 's#.*/download/v?([0-9]+(\.[0-9]+){2}([-+][0-9A-Za-z.-]+)?)$#\1#p')"
+    [[ -n "$version" ]] || version="${MEMQL_INSTALL_VERSION:-}"
+    version="${version#v}"
+    [[ -n "$version" ]] || version="$(resolve_latest_version)"
+    os_arch="${asset#memql-}"
+    if [[ -z "$version" || "$os_arch" == "$asset" ]]; then
+        echo "ERROR: ${asset} cannot be verified: its release publishes no memql-SHA256SUMS and its version is unknown." >&2
+        echo "       Nothing was run or installed. Pin a release with --version and run this again." >&2
+        return 5
+    fi
+    [[ "$base" == */download/v* ]] || base="$(release_download_base "$version")"
+    archive="memql-${version}-${os_arch}.tar.gz"
+    manifest="memql-${version}-SHA256SUMS"
+    list="$(mktemp)"
+    expected=""
+    if fetch_release_file "${base}/${manifest}" "$list" 2>/dev/null; then
+        expected="$(manifest_checksum "$list" "$archive")"
+    fi
+    rm -f "$list"
+    if [[ ! "$expected" =~ ^[[:xdigit:]]{64}$ ]]; then
+        echo "ERROR: neither memql-SHA256SUMS nor ${manifest} vouches for ${asset}; nothing was run or installed." >&2
+        return 5
+    fi
+    work="$(mktemp -d)"
+    if ! download_binary "${base}/${archive}" "${work}/${archive}" >/dev/null; then
+        rm -rf "$work"
+        echo "ERROR: ${archive} could not be downloaded to verify ${asset}; nothing was run or installed." >&2
+        return 5
+    fi
+    if [[ "$(sha256_of "${work}/${archive}")" != "$expected" ]]; then
+        rm -rf "$work"
+        echo "ERROR: ${archive} does not match ${manifest}; nothing was run or installed." >&2
+        return 5
+    fi
+    if ! tar -xzf "${work}/${archive}" -C "$work" ./memql 2>/dev/null && ! tar -xzf "${work}/${archive}" -C "$work" memql 2>/dev/null; then
+        rm -rf "$work"
+        echo "ERROR: ${archive} carries no memql to compare ${asset} with; nothing was run or installed." >&2
+        return 5
+    fi
+    actual="$(sha256_of "${work}/memql")"
+    rm -rf "$work"
+    if [[ "$actual" != "$(sha256_of "$file")" ]]; then
+        echo "ERROR: ${asset} is not the memql in its verified release archive ${archive}; nothing was run or installed." >&2
+        return 5
+    fi
+    echo "INFO: verified ${asset} against ${archive} (${manifest})"
 }
 
 # install_mode_dir prints the install destination directory for
@@ -1143,6 +1321,10 @@ function install_binary_with_mode() {
                 rm -f "$tmp"
                 return 1
             fi
+            if ! verify_release_binary "$tmp" "$binary" "${url%/*}"; then
+                rm -f "$tmp"
+                return 5
+            fi
             local dl_ver
             if [[ -n "$target_exact" ]] && ! binary_version_matches_selection "$(read_binary_version_exact "$tmp")" "$target_exact"; then
                 echo "ERROR: downloaded binary does not match the explicitly selected build" >&2
@@ -1187,6 +1369,10 @@ function install_binary_with_mode() {
             if ! download_binary "$url" "$tmp"; then
                 rm -f "$tmp"
                 return 1
+            fi
+            if ! verify_release_binary "$tmp" "$binary" "${url%/*}"; then
+                rm -f "$tmp"
+                return 5
             fi
             local dl_ver
             if [[ -n "$target_exact" ]] && ! binary_version_matches_selection "$(read_binary_version_exact "$tmp")" "$target_exact"; then
@@ -1553,12 +1739,118 @@ function allow_installed_apps() {
     fi
 }
 
+# The Ollama variables the worker service must share with the installing
+# shell (memql-cockpit#524). A LaunchAgent or user unit inherits nothing
+# from a shell, so an OLLAMA_HOST or OLLAMA_MODELS set here would reach the
+# setup (which pulls) and not the worker (which serves and advertises): the
+# models land where the worker never looks. The installers copy whichever
+# are set into the service's own environment.
+function ollama_env_names() {
+    local name
+    for name in OLLAMA_HOST OLLAMA_MODELS; do
+        [[ -z "${!name:-}" ]] || printf '%s\n' "$name"
+    done
+}
+
+# xml_escape makes a value safe as plist <string> content.
+function xml_escape() {
+    # sed keeps replacement escaping identical on Bash 3.2 and Bash 5.2+.
+    printf '%s' "$1" | sed 's/&/\&amp;/g; s/</\&lt;/g; s/>/\&gt;/g'
+}
+
+# ollama_plist_env prints the EnvironmentVariables entries for the Ollama
+# variables set in this shell, indented for the worker plist.
+function ollama_plist_env() {
+    local name
+    while IFS= read -r name; do
+        [[ -n "$name" ]] || continue
+        printf '        <key>%s</key>\n        <string>%s</string>\n' "$name" "$(xml_escape "${!name}")"
+    done < <(ollama_env_names)
+}
+
+# upsert_env_file_var sets KEY=VALUE in a systemd EnvironmentFile, keeping
+# every other line. The value is double-quoted with its quotes and
+# backslashes escaped, which is the file's own syntax.
+function upsert_env_file_var() {
+    local file="$1" key="$2" value="$3" tmp quoted
+    quoted="${value//\\/\\\\}"; quoted="${quoted//\"/\\\"}"
+    tmp="$(mktemp "${file}.XXXXXX")"
+    if [[ -f "$file" ]]; then
+        grep -v "^${key}=" "$file" > "$tmp" || true
+    fi
+    printf '%s="%s"\n' "$key" "$quoted" >> "$tmp"
+    chmod 0600 "$tmp"
+    mv "$tmp" "$file"
+}
+
+# install_terminal prints the terminal a stage may ask a question on, or
+# nothing. The installer arrives through `curl | bash`, so stdin is the
+# script and the person is on /dev/tty -- and only when the screen (fd 3)
+# is a terminal too is somebody there to read the question. A scripted run
+# (CI, a pipe to a file) gets no question and keeps the exit-3 path.
+# MEMQL_INSTALL_TTY names another device; the installer tests use it.
+function install_terminal() {
+    if [[ -n "${MEMQL_INSTALL_TTY:-}" ]]; then
+        printf '%s\n' "$MEMQL_INSTALL_TTY"
+        return 0
+    fi
+    [[ -t 3 ]] || return 0
+    if ( exec </dev/tty ) 2>/dev/null; then
+        printf '%s\n' /dev/tty
+    fi
+}
+
+# read_setup_reason prints the one-line outcome `worker setup` recorded
+# (MEMQL_SETUP_REASON_FILE), or nothing for a release that records none.
+function read_setup_reason() {
+    local file="$1" line=""
+    [[ -s "$file" ]] && IFS= read -r line < "$file"
+    printf '%s' "$line"
+}
+
+# setup_inference runs `worker setup --inference` and records how it ended.
+# It never fails the install: a machine that paired and has no local models
+# is still a working worker.
+#
+# With a person at a terminal (install_terminal), the setup runs in that
+# terminal: it prints the runtime commands, asks once, installs, and pulls
+# -- one session instead of a second command to copy (memql-cockpit#524).
+# Its output reaches the log too. Without one it runs --non-interactive, and
+# a runtime install it may not approve is exit 3, with the command printed.
+#
+# The exit codes are the setup's own (internal/worker/setup_exit.go):
+#   3  approval needed       -> pending, with the command
+#   4  this machine cannot   -> unavailable, with the reason, never "retry"
+#   2  usage error           -> failed, with the reason
+#   5  pull/allow/readiness  -> failed, with the reason and the command
 function setup_inference() {
-    local binary="$1"
+    local binary="$1" rc=0 tty reason_file reason
+    local -a wrap=()
+    INSTALL_MODELS_REASON=""
     echo ""
     echo "INFO: setting this machine up to serve local models"
-    local rc=0
-    "$binary" worker setup --inference --non-interactive || rc=$?
+    reason_file="$(mktemp)"
+    # Models can take many minutes to pull; keep a Mac awake for them.
+    if command -v caffeinate >/dev/null 2>&1; then
+        wrap=(caffeinate -i)
+    fi
+    tty="$(install_terminal)"
+    if [[ -n "$tty" ]]; then
+        install_ui_stop_progress
+        printf '\n' >&3
+        if MEMQL_SETUP_REASON_FILE="$reason_file" "${wrap[@]+"${wrap[@]}"}" \
+            "$binary" worker setup --inference < "$tty" 2>&1 | tee -a /dev/fd/3; then
+            rc=0
+        else
+            rc=$?
+        fi
+        printf '\n' >&3
+    else
+        MEMQL_SETUP_REASON_FILE="$reason_file" "${wrap[@]+"${wrap[@]}"}" \
+            "$binary" worker setup --inference --non-interactive || rc=$?
+    fi
+    reason="$(read_setup_reason "$reason_file")"
+    rm -f "$reason_file"
     case "$rc" in
         0)
             INSTALL_MODELS_STATE=ready
@@ -1570,24 +1862,186 @@ function setup_inference() {
             INSTALL_UI_STAGE_STATE=pending
             INSTALL_UI_RESULT="Local models need your approval"
             echo ""
-            echo "INFO: the model runtime is not installed here, and a scripted run"
-            echo "      is not allowed to approve installing it. Run this yourself,"
-            echo "      in this same terminal:"
+            echo "INFO: the model runtime is not installed or not running here, and"
+            echo "      this run could not ask you to approve it. Run this yourself,"
+            echo "      in a terminal:"
             echo ""
             echo "  ${binary} worker setup --inference"
             echo ""
             ;;
+        4)
+            INSTALL_MODELS_STATE=unavailable
+            INSTALL_UI_STAGE_STATE=pending
+            INSTALL_MODELS_REASON="$reason"
+            INSTALL_UI_RESULT="This machine can't run local models"
+            echo "INFO: '${binary} worker setup --inference' exited 4: this machine cannot serve local models${reason:+: ${reason}}." >&2
+            echo "      It is paired and working; everything else is unaffected." >&2
+            ;;
         *)
             INSTALL_MODELS_STATE=failed
             INSTALL_UI_STAGE_STATE=pending
+            if [[ -z "$reason" ]]; then
+                case "$rc" in
+                    2) reason="the setup command did not accept its arguments (exit 2). See the log: ${INSTALL_LOG:-}" ;;
+                    *) reason="the setup exited ${rc}. See the log: ${INSTALL_LOG:-}" ;;
+                esac
+            fi
+            INSTALL_MODELS_REASON="$reason"
             INSTALL_UI_RESULT="Local model setup needs attention"
-            echo "WARN: '${binary} worker setup --inference' exited ${rc}." >&2
+            echo "WARN: '${binary} worker setup --inference' exited ${rc}: ${reason}" >&2
             echo "      This machine is paired and working; it is not offering local" >&2
-            echo "      models. Run the command above without --non-interactive to" >&2
-            echo "      read why." >&2
+            echo "      models yet." >&2
             ;;
     esac
     return 0
+}
+
+# setup_permissions is the first stage on a computer-use Mac
+# (memql-cockpit#548): `worker setup --permissions` opens the Permissions
+# window and waits until Accessibility and Screen Recording are allowed, or
+# until the person chooses to go on without them -- in the window, or by
+# pressing Return in this terminal. Nothing downloads before then. Like the
+# other stages it never fails the install.
+#
+# The exit codes are the setup's own (internal/worker/setup_permissions.go):
+#   0  both allowed
+#   3  nobody to ask (no terminal)   -> failed, with the reason
+#   4  the person went on without    -> skipped, with what was left off
+#   5  the worker could not be read  -> failed, with the reason
+function setup_permissions() {
+    local binary="$1" usage rc=0 tty reason_file reason
+    local -a args=(worker setup --permissions)
+    INSTALL_PERMISSIONS_REASON=""
+    usage="$("$binary" worker setup --help 2>&1 || true)"
+    if [[ "$usage" != *"-permissions"* ]]; then
+        INSTALL_PERMISSIONS_STATE=failed
+        INSTALL_PERMISSIONS_REASON="this Cockpit cannot ask for them during setup."
+        INSTALL_UI_STAGE_STATE=pending
+        INSTALL_UI_RESULT="Permissions not set up"
+        return 0
+    fi
+    [[ "${INSTALL_MENU:-yes}" == yes ]] || args+=(--no-window)
+    reason_file="$(mktemp)"
+    tty="$(install_terminal)"
+    if [[ -n "$tty" ]]; then
+        install_ui_stop_progress
+        printf '\n' >&3
+        if MEMQL_SETUP_REASON_FILE="$reason_file" "$binary" "${args[@]}" < "$tty" 2>&1 | tee -a /dev/fd/3; then
+            rc=0
+        else
+            rc=$?
+        fi
+        printf '\n' >&3
+    else
+        MEMQL_SETUP_REASON_FILE="$reason_file" "$binary" "${args[@]}" --non-interactive || rc=$?
+    fi
+    reason="$(read_setup_reason "$reason_file")"
+    rm -f "$reason_file"
+    case "$rc" in
+        0)
+            INSTALL_PERMISSIONS_STATE=ready
+            INSTALL_UI_RESULT="Accessibility and Screen Recording allowed"
+            ;;
+        4)
+            INSTALL_PERMISSIONS_STATE=skipped
+            INSTALL_PERMISSIONS_REASON="${reason:-skipped for now.}"
+            INSTALL_UI_STAGE_STATE=pending
+            INSTALL_UI_RESULT="Permissions: ${reason:-skipped for now.}"
+            ;;
+        *)
+            INSTALL_PERMISSIONS_STATE=failed
+            INSTALL_PERMISSIONS_REASON="${reason:-the setup exited ${rc}. See the log: ${INSTALL_LOG:-}}"
+            INSTALL_UI_STAGE_STATE=pending
+            INSTALL_UI_RESULT="Permissions not set up"
+            ;;
+    esac
+    return 0
+}
+
+# setup_workbench enables Fleet workbenches and, like setup_inference, never
+# fails the install (memql-cockpit#524). The installer comes from main and
+# installs the latest release, so the binary may predate --workbench: that
+# is detected and reported, not run into. Docker missing, stopped, too
+# small, or an image pull that times out is one line and a retry command
+# in the summary -- and the stage runs after local models, so they never
+# wait on Docker.
+function setup_workbench() {
+    local binary="$1" usage rc=0 reason_file reason version
+    INSTALL_WORKBENCH_REASON=""
+    usage="$("$binary" worker setup --help 2>&1 || true)"
+    if [[ "$usage" != *"-workbench"* ]]; then
+        version="$(read_binary_version "$binary")"
+        INSTALL_WORKBENCH_STATE=unsupported
+        INSTALL_UI_STAGE_STATE=pending
+        INSTALL_UI_RESULT="Fleet workbenches need a newer Cockpit"
+        echo "INFO: Cockpit ${version:-(unknown version)} has no 'worker setup --workbench'; skipped."
+        return 0
+    fi
+    reason_file="$(mktemp)"
+    MEMQL_SETUP_REASON_FILE="$reason_file" "$binary" worker setup --workbench || rc=$?
+    reason="$(read_setup_reason "$reason_file")"
+    rm -f "$reason_file"
+    if [[ "$rc" == 0 ]]; then
+        INSTALL_WORKBENCH_STATE=ready
+        INSTALL_UI_RESULT="Fleet workbenches ready"
+        return 0
+    fi
+    INSTALL_WORKBENCH_STATE=failed
+    INSTALL_WORKBENCH_REASON="${reason:-the setup exited ${rc}. See the log: ${INSTALL_LOG:-}}"
+    INSTALL_UI_STAGE_STATE=pending
+    INSTALL_UI_RESULT="Fleet workbenches need attention"
+    echo "WARN: '${binary} worker setup --workbench' exited ${rc}: ${INSTALL_WORKBENCH_REASON}" >&2
+    return 0
+}
+
+# ---------------------------------------------------------------
+# The setup report (memql-cockpit#541)
+# ---------------------------------------------------------------
+#
+# The local-model and workbench stages run AFTER the worker has connected,
+# so MemQL OS can show them only if the worker carries them to the cluster.
+# These two tell the worker which stages are coming and when the installer
+# is done; the setup commands report their own progress in between. Both are
+# best-effort: a worker that is not up, or too old to know the action,
+# changes nothing about the install, and neither prints anything.
+
+# setup_report_plan names the stages this install will run, in its order:
+# the person's turn first (a computer-use Mac's permissions), then the
+# downloads, which need nobody.
+function setup_report_plan() {
+    local inference="$1" workbench="$2" permissions="${3:-no}" plan=""
+    if [[ "$permissions" == yes ]]; then
+        plan="permissions"
+    fi
+    if [[ "$inference" == yes ]]; then
+        plan="${plan:+${plan},}runtime,models"
+    fi
+    if [[ "$workbench" == yes ]]; then
+        plan="${plan:+${plan},}workbench"
+    fi
+    printf '%s' "$plan"
+}
+
+# report_setup_plan tells the worker what is coming. It waits for the
+# worker the installer has just started to open its control socket. An
+# install with no stage still says so: the worker keeps its report across
+# restarts, and an earlier install's would otherwise stand for this one.
+function report_setup_plan() {
+    local binary="$1" plan
+    plan="$(setup_report_plan "$2" "$3" "${4:-no}")"
+    if [[ -z "$plan" ]]; then
+        "$binary" worker control --action=setup --reset --wait=20s >/dev/null 2>&1 || true
+        return 0
+    fi
+    "$binary" worker control --action=setup --plan="$plan" --wait=20s >/dev/null 2>&1 || true
+}
+
+# report_setup_finished says the installer is done: a stage it never
+# reached is skipped rather than shown as still to come.
+function report_setup_finished() {
+    local binary="$1"
+    [[ -n "$(setup_report_plan "$2" "$3" "${4:-no}")" ]] || return 0
+    "$binary" worker control --action=setup --finished --wait=5s >/dev/null 2>&1 || true
 }
 
 # ---------------------------------------------------------------
@@ -2003,9 +2457,9 @@ function purge_worker_state() {
     remove_path_if_present "${HOME}/.memql/policy.yaml" || true
     remove_tree_if_present "$state_dir" || true
     remove_path_if_present "${HOME}/.memql/worker.sock" || true
-    # The native model runtime and its models (Linux): gigabytes under
-    # the fence, kept without --purge because the models were pulled on
-    # purpose and cost hours to pull again.
+    # The native model runtime and its models (Linux, and a Mac without
+    # Homebrew): gigabytes under the fence, kept without --purge because
+    # the models were pulled on purpose and cost hours to pull again.
     remove_tree_if_present "${HOME}/.memql/ollama" || true
     remove_memql_home_if_empty
 }
@@ -2509,8 +2963,8 @@ function fetch_macos_menu() {
     local asset expected actual entry
     [[ "$arch" == arm64 || "$arch" == amd64 ]] || return 2
     asset="memql-menubar-darwin-${arch}.tar.gz"
-    curl -fsSL --max-filesize 30000000 "${base}/${asset}" -o "$stage/$asset" || return 5
-    curl -fsSL --max-filesize 1024 "${base}/${asset}.sha256" -o "$stage/checksum" || return 5
+    curl -fsSL "${CURL_NET[@]}" "${CURL_LARGE[@]}" --max-filesize 30000000 "${base}/${asset}" -o "$stage/$asset" || return 5
+    curl -fsSL "${CURL_NET[@]}" "${CURL_SMALL[@]}" --max-filesize 1024 "${base}/${asset}.sha256" -o "$stage/checksum" || return 5
     expected="$(awk -v asset="$asset" 'NF == 2 && $2 == asset { print $1 }' "$stage/checksum")"
     [[ "$expected" =~ ^[[:xdigit:]]{64}$ ]] || { echo "ERROR: invalid menu checksum manifest" >&2; return 3; }
     actual="$(shasum -a 256 "$stage/$asset" | awk '{print $1}')"
@@ -2542,8 +2996,8 @@ function fetch_macos_app() {
     local base="$1" arch="$2" stage="$3" asset expected actual entry normalized
     [[ "$arch" == arm64 || "$arch" == amd64 ]] || return 2
     asset="memql-app-darwin-${arch}.tar.gz"
-    curl -fsSL --max-filesize 120000000 "${base}/${asset}" -o "$stage/$asset" || return 5
-    curl -fsSL --max-filesize 1024 "${base}/${asset}.sha256" -o "$stage/checksum" || return 5
+    curl -fsSL "${CURL_NET[@]}" "${CURL_LARGE[@]}" --max-filesize 120000000 "${base}/${asset}" -o "$stage/$asset" || return 5
+    curl -fsSL "${CURL_NET[@]}" "${CURL_SMALL[@]}" --max-filesize 1024 "${base}/${asset}.sha256" -o "$stage/checksum" || return 5
     expected="$(awk -v asset="$asset" 'NF == 2 && $2 == asset { print $1 }' "$stage/checksum")"
     [[ "$expected" =~ ^[[:xdigit:]]{64}$ ]] || return 3
     actual="$(shasum -a 256 "$stage/$asset" | awk '{print $1}')"
@@ -2559,6 +3013,7 @@ function fetch_macos_app() {
         esac
         case "$normalized" in
             app/|app/Contents/|app/Contents/MacOS/|app/Contents/Resources/|app/Contents/Library/|app/Contents/Library/LoginItems/|\
+            app/Contents/Library/LaunchAgents/|app/Contents/Library/LaunchAgents/com.znasllc.memql-worker.plist|app/Contents/Library/LaunchAgents/com.znasllc.memql-cockpit-menubar.plist|\
             app/Contents/Info.plist|app/Contents/MacOS/MemQL|app/Contents/Resources/MemQL.icns|app/Contents/_CodeSignature/|app/Contents/_CodeSignature/CodeResources|\
             menu/|menu/Contents/|menu/Contents/MacOS/|menu/Contents/Resources/|menu/Contents/Info.plist|menu/Contents/MacOS/MemQLCockpit|\
             menu/Contents/Resources/mark.svg|menu/Contents/Resources/MemQL.icns|menu/Contents/_CodeSignature/|menu/Contents/_CodeSignature/CodeResources|\
