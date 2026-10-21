@@ -55,6 +55,42 @@ ad-hoc signature into a stable distribution identity. Developer ID provisioning
 and signed-upgrade validation below remain necessary. The bundle's minimum
 macOS version is read from the actual worker Mach-O build metadata.
 
+### Stable signing for local development
+
+Use `scripts/macos/build-local-app.sh` for repeated local builds. It reads a
+certificate SHA-1 from
+`~/Library/Application Support/MemQL/Development/signing-identity`, requires the
+matching certificate/private key in the current user's Keychain, and passes
+that identity to both bundle signers. A missing identity stops the build;
+it never creates a new certificate or falls back to ad-hoc signing.
+
+```sh
+make cockpit-computeruse
+scripts/macos/build-local-app.sh --worker="$PWD/bin/memql-computeruse"
+```
+
+While Apple Development signing is unavailable, a persistent self-signed code
+signing certificate can be used for this local workflow. Create it once using
+Keychain Access's Certificate Assistant (certificate type **Code Signing**),
+keep the private key in the login Keychain, and save its SHA-1 in the file above.
+`security find-identity -p codesigning` lists signing identities, including
+self-signed ones; Keychain may ask the user to authorize `codesign` to use the
+key. Never export a private key into a repository or build artifact.
+See Apple's [self-signed identity guidance](https://developer.apple.com/library/archive/technotes/tn2206/_index.html).
+
+Install and activate through the same commands above. Approve Accessibility
+and Screen Recording for this identity once, then verify fresh worker status
+after a restart and after a different build. The first transition from ad-hoc
+signing still needs new approvals. Preserve the same key, bundle identifiers,
+and installed path across subsequent builds. Do not weaken the designated
+requirement, edit TCC databases, or show a grant without worker confirmation.
+
+This certificate is for local development, not published packages. Production
+signing and notarization remain separate. When an Apple certificate is ready,
+update the saved SHA-1 explicitly; that identity change needs fresh approvals
+and its own upgrade check. Keep the local certificate until all local builds
+using it have been replaced.
+
 ## Uninstall and local lifecycle testing
 
 Fleet composes the macOS uninstaller with the selected cluster URL; every flag
