@@ -34,6 +34,7 @@ func (a *App) transportBFF() {
 	a.wireLibraryIntegration(uploader, container)
 	a.wireReleaseCandidates(uploader, container)
 	a.wirePipelineSARIF(uploader, container)
+	a.wirePipelineArtifactRetention(uploader, container)
 	// Inbound-delivery receiver (POST /inbound/{source}, memql#2957). The
 	// counterpart to the outbound worker: a third party dials US, so it is HTTP
 	// on the frontend-facing node. Deny-by-default -- with no

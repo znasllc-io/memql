@@ -3828,6 +3828,29 @@ QueryClient.prototype.pipelinesDisconnect = function (this: QueryClient, args: P
   return this.executeNamed("pipelinesDisconnect", buildPipelinesDisconnect(args), opts);
 };
 
+/** Read confirmed expiry for selected files from the caller's pipeline run. Only provider retirement AND Library cleanup receipts establish expiry. Missing files, failed uploads and unavailable reads do not imply expiry. */
+export interface PipelinesExpiredArtifactsArgs {
+  runId: string;
+  fileIds: string[];
+}
+
+export function buildPipelinesExpiredArtifacts(args: PipelinesExpiredArtifactsArgs): string {
+  const parts: string[] = [];
+  parts.push("runId: " + renderMemQLValue(args.runId));
+  parts.push("fileIds: " + renderMemQLValue(args.fileIds));
+  return "builtin pipelinesExpiredArtifacts(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    pipelinesExpiredArtifacts(args: PipelinesExpiredArtifactsArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.pipelinesExpiredArtifacts = function (this: QueryClient, args: PipelinesExpiredArtifactsArgs = {} as PipelinesExpiredArtifactsArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("pipelinesExpiredArtifacts", buildPipelinesExpiredArtifacts(args), opts);
+};
+
 /** The installations of this cluster's GitHub App whose accepted permissions lag what the app asks for (epic memql#5479, D15): when an app's permissions grow -- pipelines added checks write -- every existing installation keeps the old set until the account that installed it approves the change on GitHub, and until then every check-run write there answers 403. Asked of GitHub as the app itself. Answers one row, {installations [{installationId, account, accountType, htmlUrl, missingPermissions, suspended}]}: htmlUrl is the installation's settings page, where the change waits. A cluster with no GitHub App answers none; a GitHub that could not be asked is an error, never an empty list. */
 export interface PipelinesInstallationsArgs {
 }
@@ -4220,6 +4243,27 @@ declare module "./query.js" {
 
 QueryClient.prototype.releaseApproveCandidate = function (this: QueryClient, args: ReleaseApproveCandidateArgs = {} as ReleaseApproveCandidateArgs, opts?: QueryCallOptions): Promise<Result> {
   return this.executeNamed("releaseApproveCandidate", buildReleaseApproveCandidate(args), opts);
+};
+
+/** Release duplicate build inputs only after fresh verification of every canonical published artifact. Publication history and downloads survive; the archived candidate can never publish or prepare again. Owner only. */
+export interface ReleaseArchiveCandidateArgs {
+  candidateId: string;
+}
+
+export function buildReleaseArchiveCandidate(args: ReleaseArchiveCandidateArgs): string {
+  const parts: string[] = [];
+  parts.push("candidateId: " + renderMemQLValue(args.candidateId));
+  return "builtin releaseArchiveCandidate(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    releaseArchiveCandidate(args: ReleaseArchiveCandidateArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.releaseArchiveCandidate = function (this: QueryClient, args: ReleaseArchiveCandidateArgs = {} as ReleaseArchiveCandidateArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("releaseArchiveCandidate", buildReleaseArchiveCandidate(args), opts);
 };
 
 /** Resolve completed work runs through a declared assembly plan, then verify and retain the candidate. Run aliases select actual executions; versions, receipt identities and digests are read natively. */
@@ -4649,6 +4693,27 @@ declare module "./query.js" {
 
 QueryClient.prototype.releaseSealPublishedCandidate = function (this: QueryClient, args: ReleaseSealPublishedCandidateArgs = {} as ReleaseSealPublishedCandidateArgs, opts?: QueryCallOptions): Promise<Result> {
   return this.executeNamed("releaseSealPublishedCandidate", buildReleaseSealPublishedCandidate(args), opts);
+};
+
+/** Enroll or pause your published-input cleanup. The schedule resolves your current owner role and retains credential ceilings; maintenance cannot lend authority. Pausing prevents another pass; an admitted pass may finish. */
+export interface ReleaseSetInputArchiveScheduleArgs {
+  enabled: boolean;
+}
+
+export function buildReleaseSetInputArchiveSchedule(args: ReleaseSetInputArchiveScheduleArgs): string {
+  const parts: string[] = [];
+  parts.push("enabled: " + renderMemQLValue(args.enabled));
+  return "builtin releaseSetInputArchiveSchedule(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    releaseSetInputArchiveSchedule(args: ReleaseSetInputArchiveScheduleArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.releaseSetInputArchiveSchedule = function (this: QueryClient, args: ReleaseSetInputArchiveScheduleArgs = {} as ReleaseSetInputArchiveScheduleArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("releaseSetInputArchiveSchedule", buildReleaseSetInputArchiveSchedule(args), opts);
 };
 
 /** Read configured update publishers without endpoints, keys or credentials. */

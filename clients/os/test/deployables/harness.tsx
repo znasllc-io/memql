@@ -324,6 +324,8 @@ export interface FakeSeed {
   workSteps?: Record<string, Row[]>;
   /** v1:library:artifact rows, by the work run id `artifactsForRun` names. */
   runArtifacts?: Record<string, Row[]>;
+  expiredRunFiles?: Record<string, { fileId: string; name: string }[]>;
+  expiredRunFilesError?: string;
   /** What `pipelinesPreview` answers (one row). Absent answers no row. */
   pipelinePreview?: Row;
   pipelinePreviewError?: string;
@@ -420,6 +422,14 @@ export function fakeConnection(seed: FakeSeed = {}): FakeConnection {
       if (call.startsWith("query artifactsForRun(")) {
         const id = /runId: "([^"]*)"/.exec(call)?.[1] ?? "";
         return rowsResult(seed.runArtifacts?.[id] ?? []);
+      }
+      if (call.startsWith("builtin pipelinesExpiredArtifacts(")) {
+        if (seed.expiredRunFilesError) throw Error(seed.expiredRunFilesError);
+        const id = /runId: "([^"]*)"/.exec(call)?.[1] ?? "";
+        const selection = /fileIds: (\[[^\]]*\])/.exec(call)?.[1] ?? "[]";
+        const selected = JSON.parse(selection) as string[];
+        const files = (seed.expiredRunFiles?.[id] ?? []).filter(file => selected.includes(file.fileId));
+        return builtinReply("pipelinesExpiredArtifacts", [{ files } as unknown as Row]);
       }
       if (call.startsWith("builtin pipelinesPreview(")) {
         if (seed.pipelinePreviewError !== undefined) throw new Error(seed.pipelinePreviewError);

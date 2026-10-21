@@ -355,6 +355,25 @@ func (l *Lifecycle) Observe(ctx context.Context, releaseID int64, m Metadata, ma
 	return l.verify(ctx, releaseID, m, marker, assets, false)
 }
 
+// ObservePublished verifies an existing published release, including every
+// approved byte, without requiring it to remain the repository's latest
+// release. This is a read-only availability check for retained history; it
+// cannot substitute for the latest-selection proof required by promotion.
+func (l *Lifecycle) ObservePublished(ctx context.Context, releaseID int64, m Metadata, marker string, assets []AssetExpectation) (ReleaseState, error) {
+	if err := m.Validate(); err != nil {
+		return ReleaseState{}, err
+	}
+	m.Latest = false
+	state, err := l.verify(ctx, releaseID, m, marker, assets, false)
+	if err != nil {
+		return ReleaseState{}, err
+	}
+	if state.Draft {
+		return ReleaseState{}, errors.New("release history requires an already published release")
+	}
+	return state, nil
+}
+
 // CheckDraft protects metadata around a separately authorized asset upload.
 // It is a bounded observation and supplies no asset-completion receipt.
 func (l *Lifecycle) CheckDraft(ctx context.Context, releaseID int64, m Metadata, marker string) error {

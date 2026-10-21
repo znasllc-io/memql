@@ -186,10 +186,7 @@ func (s *candidateDraftScope) client(ctx context.Context) (*githubrelease.Lifecy
 	return s.p.targetReader.fileLifecycle(ctx, s.plan.Assets[0].Destination)
 }
 func (s *candidateDraftScope) marker() string {
-	if s.plan.Target.ReleaseID == 0 {
-		return s.binding.IntentID
-	}
-	return ""
+	return s.plan.marker(s.binding)
 }
 
 func (s *candidateDraftScope) ensureTag(ctx context.Context, _ map[string]any) (any, error) {

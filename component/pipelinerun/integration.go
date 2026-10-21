@@ -42,6 +42,9 @@ import (
 // Deps are the integration's ports. New takes them, and Configure sets the
 // ones only app/ can build after every plug-in has materialized.
 type Deps struct {
+	// ArtifactRetention supplies the same durable artifact journal and provider
+	// fences used by producers and publication consumers on every replica.
+	ArtifactRetention *ArtifactRetentionDependencies
 	// LoadWorkflow resolves installed definitions. Nil uses the boot-time DSL tree.
 	LoadWorkflow func(string) (*automations.Automation, error)
 	Store        Store

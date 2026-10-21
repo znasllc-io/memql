@@ -101,7 +101,7 @@ func TestRunnerDoesNotBufferArtifactsForAByteOnlyLibrary(t *testing.T) {
 	rtArtifactStream(t, h, extractTestTgz(t, []extractTestEntry{{name: "proof.txt", body: "verified"}}))
 	h.c.script(testJobName, rtFinishingScript(testJobName, 0, captureKubeLine(rtAt(1100), "ok")))
 	res := h.run(t, run)
-	if res.Status != pl.OutcomeFailed || len(res.ArtifactFileIDs) != 0 || len(h.lib.stored()) != 1 {
+	if res.Status != pl.OutcomeFailed || len(res.ArtifactFileIDs) != 0 || len(h.lib.stored()) != 0 || res.LogFileID != "" {
 		t.Fatalf("artifact fell back to a byte-slice upload: %+v", res)
 	}
 }

@@ -83,8 +83,8 @@ VALUES($1,$2,$3::jsonb,'preparing') ON CONFLICT(candidate_id) DO NOTHING`, key, 
 	if err != nil {
 		return candidateRecord{}, err
 	}
-	if rec.State == "retired" {
-		return candidateRecord{}, errors.New("release candidate was permanently retired")
+	if rec.State == "retired" || rec.State == "archived" {
+		return candidateRecord{}, errors.New("release candidate was permanently retired or archived")
 	}
 	if err := tx.Commit(); err != nil {
 		return candidateRecord{}, err
@@ -128,7 +128,7 @@ func (l *candidateLedger) get(ctx context.Context, key string) (candidateRecord,
 }
 
 func readCandidateApproval(ctx context.Context, q candidateQuerier, owner string, record candidateRecord) (candidateRecord, error) {
-	if record.State == "approved" {
+	if record.State == "approved" || record.State == "archived" {
 		var approvedBy string
 		if err := q.QueryRowContext(ctx, `SELECT approval_id,approved_by FROM release_candidate_approvals WHERE candidate_id=$1`, record.ID).Scan(&record.ApprovalID, &approvedBy); err != nil {
 			return candidateRecord{}, err
@@ -213,8 +213,8 @@ OR EXISTS(SELECT 1 FROM release_draft_intents WHERE candidate_id=$1)`, key).Scan
 			return candidateRecord{}, errors.New("candidate has publication intents; preserve its evidence and reconcile publication")
 		}
 		rec.State = "retired"
-	} else if rec.State == "retired" {
-		return candidateRecord{}, errors.New("release candidate was permanently retired")
+	} else if rec.State == "retired" || rec.State == "archived" {
+		return candidateRecord{}, errors.New("release candidate was permanently retired or archived")
 	} else if approve {
 		if rec.State != "ready" && rec.State != "approved" {
 			return candidateRecord{}, errors.New("candidate has not completed verification")

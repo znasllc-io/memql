@@ -871,6 +871,17 @@ const VIEWS: Record<
     render: () => <RunsWindow runId="r-7" />,
   },
   "pipeline-run-running": { seed: PIPELINES_SEED, framed: true, render: () => <RunsWindow runId="r-8" /> },
+  "pipeline-run-expired": {
+    seed: { ...PIPELINES_SEED, runArtifacts: {}, expiredRunFiles: { "r-7": [
+      { fileId: "file-log-go2", name: "tests.go-tests#2.log" },
+      { fileId: "file-cov", name: "dist__coverage.html" },
+    ] } },
+    framed: true, render: () => <RunsWindow runId="r-7" />,
+  },
+  "pipeline-run-files-unavailable": {
+    seed: { ...PIPELINES_SEED, runArtifacts: {}, expiredRunFilesError: "Unavailable" },
+    framed: true, render: () => <RunsWindow runId="r-7" />,
+  },
   "pipeline-run-queued": { seed: PIPELINES_SEED, framed: true, render: () => <RunsWindow runId="r-9" /> },
   "pipeline-run-passed": { seed: PIPELINES_SEED, framed: true, render: () => <RunsWindow runId="r-6" /> },
   "pipeline-run-refused": { seed: PIPELINES_SEED, framed: true, render: () => <RunsWindow runId="r-5" /> },

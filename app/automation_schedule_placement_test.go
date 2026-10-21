@@ -71,6 +71,10 @@ func TestPipelinesPollRunsOnlyOnElectedAgent(t *testing.T) {
 	assertPlacedOnlyOn(t, pipelinesPollAutomation, "agent")
 }
 
+func TestPipelineArtifactRetentionRunsOnlyOnElectedAgent(t *testing.T) {
+	assertPlacedOnlyOn(t, "sweepPipelineArtifacts", "agent")
+}
+
 func TestReleaseKnowledgeReconciliationRunsOnlyOnElectedBFF(t *testing.T) {
 	assertPlacedOnlyOn(t, releaseKnowledgeAutomation, "bff")
 }

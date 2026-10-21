@@ -44,7 +44,7 @@ func (i *Integration) IntegrationName() string { return IntegrationName }
 // in dsl/pipelines/builtins.memql, plus `status`, which no builtin declares --
 // the readiness evaluator reads it directly by its executor name.
 func (i *Integration) Capabilities() []memql.IntegrationCapability {
-	return []memql.IntegrationCapability{
+	return append(retentionCapabilities(i), []memql.IntegrationCapability{
 		{Name: "channelSave", Description: "Save an owner-scoped notification channel without sending a message.", Handler: i.handleChannelSave, ArgsSchema: map[string]string{"name": "string (required) -- stable channel name", "kind": "string (required) -- email or discord", "secretRef": "string -- Discord webhook secret name", "recipients": "[]string -- email addresses"}},
 		{Name: "channelArchive", Description: "Archive an owner-scoped notification channel.", Handler: i.handleChannelArchive, ArgsSchema: map[string]string{"name": "string (required) -- caller-owned channel"}},
 		{Name: "channelAllow", Description: "Allow or revoke one channel on a caller-owned pipeline.", Handler: i.handleChannelAllow, ArgsSchema: map[string]string{"pipelineId": "string (required) -- caller-owned pipeline", "name": "string (required) -- caller-owned channel", "allowed": "boolean (required) -- grant or revoke"}},
@@ -138,7 +138,7 @@ func (i *Integration) Capabilities() []memql.IntegrationCapability {
 			Handler:     i.handleStatus,
 			ArgsSchema:  map[string]string{"probe": "boolean -- accepted for the envelope's contract; this report never reaches out"},
 		},
-	}
+	}...)
 }
 
 // resultConcept is the ephemeral node kind a capability answers on. Never
