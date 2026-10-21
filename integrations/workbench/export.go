@@ -119,7 +119,7 @@ func (i *Integration) exportFile(ctx context.Context, args map[string]any) (map[
 	if err != nil {
 		return nil, fmt.Errorf("store export: %w", err)
 	}
-	if stored.Size != size || stored.SHA256 != digest {
+	if stored.Size != size || stored.SHA256 != digest || strings.TrimSpace(stored.URL) == "" {
 		return nil, errors.New("stored export failed integrity verification")
 	}
 	// A lost response can be retried on another replica. Preserve existing file
@@ -131,7 +131,7 @@ func (i *Integration) exportFile(ctx context.Context, args map[string]any) (map[
 	if len(rows) == 0 {
 		err = libraryfile.NewStore(exportExecutor{i}).Create(actorCtx, map[string]any{
 			"fileId": fileID, "name": name, "mimeType": mimeType, "size": size, "sha256": digest,
-			"blobUrl": key, "source": "agent_generated", "producedByRunId": runID, "format": formatForExtension(name),
+			"blobUrl": stored.URL, "source": "agent_generated", "producedByRunId": runID, "format": formatForExtension(name),
 		})
 		if err != nil {
 			return nil, fmt.Errorf("record export in Library: %w", err)

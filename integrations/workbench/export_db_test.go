@@ -10,6 +10,9 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"net/http"
+	"net/http/httptest"
+	"net/url"
 	"os"
 	"path/filepath"
 	"strings"
@@ -23,6 +26,7 @@ import (
 	"github.com/znasllc-io/memql/component/database/dbtest"
 	memorynodes "github.com/znasllc-io/memql/component/database/memory-nodes"
 	"github.com/znasllc-io/memql/component/memql"
+	"github.com/znasllc-io/memql/component/server"
 	"github.com/znasllc-io/memql/integrations/azureblob"
 )
 
@@ -61,7 +65,7 @@ type exportTestStorage struct {
 func (s *exportTestStorage) Upload(context.Context, string, string, []byte, string) (string, error) {
 	panic("binary export must stream")
 }
-func (s *exportTestStorage) CreateVerifiedStream(_ context.Context, _, key string, r io.Reader, size int64, digest, _ string) (azureblob.VerifiedBlob, error) {
+func (s *exportTestStorage) CreateVerifiedStream(_ context.Context, container, key string, r io.Reader, size int64, digest, _ string) (azureblob.VerifiedBlob, error) {
 	data, err := io.ReadAll(r)
 	if err != nil {
 		return azureblob.VerifiedBlob{}, err
@@ -75,7 +79,19 @@ func (s *exportTestStorage) CreateVerifiedStream(_ context.Context, _, key strin
 	}
 	s.objects[key] = data
 	s.writes++
-	return azureblob.VerifiedBlob{URL: key, Size: size, SHA256: digest, ETag: `"test"`}, nil
+	return azureblob.VerifiedBlob{URL: "https://export.blob.core.windows.net/" + container + "/" + key, Size: size, SHA256: digest, ETag: `"test"`}, nil
+}
+
+func (s *exportTestStorage) DownloadURL(_ context.Context, reference string) ([]byte, error) {
+	u, err := url.Parse(reference)
+	if err != nil || u.Scheme != "https" || u.Host != "export.blob.core.windows.net" || !strings.HasPrefix(u.Path, "/library/") {
+		return nil, fmt.Errorf("not a stored blob URL: %q", reference)
+	}
+	data, ok := s.objects[strings.TrimPrefix(u.Path, "/library/")]
+	if !ok {
+		return nil, fmt.Errorf("blob not found")
+	}
+	return data, nil
 }
 
 type exportTestFleet struct {
@@ -163,6 +179,25 @@ func TestExportDBReplicaRecoveryAndOwnerAdmission(t *testing.T) {
 	for _, saved := range blob.objects {
 		if !bytes.Equal(saved, data) {
 			t.Fatal("export changed bytes")
+		}
+	}
+	// Exercise the actual byte route on another engine, not just index
+	// visibility: a raw object key is not a URL the storage reader can open.
+	handler := server.NewArtifactHandler(server.ArtifactHandlerOptions{
+		Bucket: "library", Downloader: blob,
+		Store: server.NewEngineLibraryStore(exportExecutor{makeIntegration(indexer)}),
+	})
+	for _, user := range []string{owner, owner + "-stranger"} {
+		req := httptest.NewRequest(http.MethodGet, first["downloadUrl"].(string), nil)
+		req = req.WithContext(auth.ContextWithUserActor(req.Context(), user))
+		response := httptest.NewRecorder()
+		handler.ServeHTTP(response, req)
+		if user == owner {
+			if response.Code != http.StatusOK || !bytes.Equal(response.Body.Bytes(), data) || !strings.Contains(response.Header().Get("Content-Disposition"), `filename="test.tar.gz"`) {
+				t.Fatalf("export download: status=%d, headers=%v, bytes=%d", response.Code, response.Header(), response.Body.Len())
+			}
+		} else if response.Code != http.StatusNotFound {
+			t.Fatalf("another owner downloaded export: %d", response.Code)
 		}
 	}
 	reads := fleet.reads
