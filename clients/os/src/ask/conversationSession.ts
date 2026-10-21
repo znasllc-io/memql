@@ -242,6 +242,12 @@ export class ConversationSession {
     this.uploads.delete(id);
     this.patch({ attachments: (this.state.attachments ?? []).filter(item => item.id !== id) });
   };
+  /** Files belong to the draft being left. Uploaded Library files stay saved. */
+  private clearAttachments() {
+    for (const upload of this.uploads.values()) upload.abort();
+    this.uploads.clear();
+    this.patch({ attachments: [] });
+  }
   /** Put a failed turn's files back in the field for another try. */
   restoreAttachments = (attachments: readonly AskTurnAttachment[] | undefined) => {
     if (!attachments?.length) return;
@@ -449,6 +455,7 @@ export class ConversationSession {
     this.interruptedRequests.clear();
     this.selection++;
     this.leaveDiscussion();
+    this.clearAttachments();
     this.patch({ selectedId: null, openingId: null, selectionError: "", turns: [], dictationActivity: [], draft: "", error: "", snapshotError: "", loading: false, focusQuestionId: null, ...this.routingFor([]) });
   };
   /** The explicit New action persists even when no inference is available. */
@@ -476,6 +483,7 @@ export class ConversationSession {
     try {
       const turns = await this.transport.conversations.read(id);
       if (selection === this.selection) {
+        this.clearAttachments();
         this.patch({ discussion: null });
         this.patch({ selectedId: id, openingId: null, turns, dictationActivity: [], draft: "", loading: false, ...this.routingFor(turns) });
         this.scheduleRefresh();
@@ -526,8 +534,7 @@ export class ConversationSession {
   dispose = () => {
     this.disposed = true;
     this.interruptedRequests.clear();
-    for (const upload of this.uploads.values()) upload.abort();
-    this.uploads.clear();
+    this.clearAttachments();
     if (this.refreshTimer) clearTimeout(this.refreshTimer);
     this.refreshTimer = null;
     this.detach();
