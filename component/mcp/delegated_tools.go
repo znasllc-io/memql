@@ -121,6 +121,7 @@ func delegatedMCPTools(ctx context.Context, eng Engine, sessionID string) ([]map
 	}
 	result := appSessionToolDefs()
 	for _, tool := range scope.Tools {
+		schema := tool.InputSchema
 		if tool.Name != common.DelegatedResponseTool {
 			if eng.Tools() == nil {
 				return nil, fmt.Errorf("app session: tool registry unavailable")
@@ -129,10 +130,54 @@ func delegatedMCPTools(ctx context.Context, eng Engine, sessionID string) ([]map
 			if err != nil || registered == nil || !eng.ToolListed(ctx, registered) {
 				return nil, fmt.Errorf("app session: required tool %q is unavailable for the delegated agent", tool.Name)
 			}
+			schema, err = delegatedInputSchema(tool, registered.AutoInjectedFields, scope.Defaults[tool.Name])
+			if err != nil {
+				return nil, err
+			}
 		}
-		result = append(result, map[string]any{"name": tool.Name, "description": tool.Description, "inputSchema": tool.InputSchema})
+		result = append(result, map[string]any{"name": tool.Name, "description": tool.Description, "inputSchema": schema})
 	}
 	return result, nil
+}
+
+// Server-owned arguments are not inputs the app must discover or invent. The
+// durable contract stays intact for dispatch; only the model-facing copy loses
+// these fields. Refuse incomplete required stamps during preflight.
+func delegatedInputSchema(tool common.ToolDefinition, injected []string, defaults map[string]any) (any, error) {
+	if len(injected) == 0 {
+		return tool.InputSchema, nil
+	}
+	raw, err := json.Marshal(tool.InputSchema)
+	if err != nil {
+		return nil, err
+	}
+	var schema map[string]any
+	if err := json.Unmarshal(raw, &schema); err != nil {
+		return nil, err
+	}
+	properties, _ := schema["properties"].(map[string]any)
+	removed := make(map[string]bool, len(injected))
+	for _, name := range injected {
+		removed[name] = true
+		delete(properties, name)
+	}
+	required, _ := schema["required"].([]any)
+	kept := make([]any, 0, len(required))
+	for _, value := range required {
+		name, _ := value.(string)
+		if !removed[name] {
+			kept = append(kept, value)
+			continue
+		}
+		stamp, present := defaults[name]
+		if !present || stamp == nil || stamp == "" {
+			return nil, fmt.Errorf("app session: required server argument %q for tool %q is unresolved", name, tool.Name)
+		}
+	}
+	if _, present := schema["required"]; present {
+		schema["required"] = kept
+	}
+	return schema, nil
 }
 
 func callDelegatedTool(ctx context.Context, eng Engine, sessionID, name string, args map[string]any) (result map[string]any) {

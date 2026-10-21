@@ -143,6 +143,50 @@ func TestDeployedEngineAdapterPreservesDelegatedSourceReceipts(t *testing.T) {
 	}
 }
 
+func TestDelegatedSchemaHidesServerArgumentsAndDispatchStillStampsThem(t *testing.T) {
+	eng := delegatedFixture()
+	registered, _ := eng.reg.Get("gaTool")
+	registered.AutoInjectedFields = []string{"runId", "agentId"}
+	scope := eng.row["toolScope"].(map[string]any)
+	definition := scope["tools"].([]any)[0].(map[string]any)
+	definition["InputSchema"] = map[string]any{
+		"type": "object", "additionalProperties": false,
+		"properties": map[string]any{"action": map[string]any{"type": "string"}, "runId": map[string]any{"type": "string"}, "agentId": map[string]any{"type": "string"}},
+		"required":   []any{"action", "runId", "agentId"},
+	}
+	defaults := scope["defaults"].(map[string]any)["gaTool"].(map[string]any)
+	defaults["agentId"] = "agent-1"
+	before, _ := json.Marshal(scope)
+	listed, err := delegatedMCPTools(asPerson("reader"), eng, "s")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var schema map[string]any
+	for _, tool := range listed {
+		if tool["name"] == "gaTool" {
+			schema = tool["inputSchema"].(map[string]any)
+		}
+	}
+	props := schema["properties"].(map[string]any)
+	if len(props) != 1 || props["action"] == nil || len(schema["required"].([]any)) != 1 || schema["additionalProperties"] != false {
+		t.Fatalf("model-facing contract still requires internal IDs or lost user inputs: %v", schema)
+	}
+	after, _ := json.Marshal(scope)
+	if string(before) != string(after) {
+		t.Fatal("listing mutated the durable execution contract")
+	}
+	if result := callDelegatedTool(asPerson("reader"), eng, "s", "gaTool", map[string]any{"action": "exec"}); isError(result) {
+		t.Fatal(resultText(result))
+	}
+	if eng.sourceArgs["runId"] != "run-1" || eng.sourceArgs["agentId"] != "agent-1" || eng.sourceArgs["action"] != "exec" {
+		t.Fatalf("server arguments were not restored before execution: %v", eng.sourceArgs)
+	}
+	delete(defaults, "agentId")
+	if _, err := delegatedMCPTools(asPerson("reader"), eng, "s"); err == nil {
+		t.Fatal("preflight accepted an unresolved required server argument")
+	}
+}
+
 func (e *delegatedEngine) RecordDelegatedToolSource(ctx context.Context, _ string, args map[string]any, result string) error {
 	e.sourceRun, _ = common.RunFromContext(ctx)
 	e.sourceArgs, e.sourceResult = args, result
