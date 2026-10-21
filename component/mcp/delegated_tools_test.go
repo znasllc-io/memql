@@ -54,6 +54,52 @@ func TestDelegatedMCPForwardsVerifiedCredentialWithoutWidening(t *testing.T) {
 	}
 }
 
+func TestDelegatedRecordingRetainsVerifiedAuthorityWithoutExecutionScope(t *testing.T) {
+	expires := time.Now().Add(time.Minute).Truncate(time.Second)
+	for _, verified := range []bool{true, false} {
+		eng := delegatedFixture()
+		recorder := &delegatedAuthorityRecorder{}
+		ctx := withMCPAppSessionRecorder(asPerson("reader"), recorder)
+		if verified {
+			ctx = auth.ContextWithClaims(ctx, map[string]any{
+				"sub": "v1:identity:user:mcp-person", "class": "app_session",
+				"node_id": "app-session:s", "exp": float64(expires.Unix()),
+			})
+		}
+		result := callDelegatedTool(ctx, eng, "s", "gaTool", nil)
+		if isError(result) || !recorder.called {
+			t.Fatalf("recording did not follow execution: %v", result)
+		}
+		if recorder.hasAuthority != verified {
+			t.Fatalf("recording authority present=%v, verified=%v", recorder.hasAuthority, verified)
+		}
+		if verified && (recorder.authority.CredentialClass != auth.ForwardedClassAppSession ||
+			recorder.authority.Subject != "v1:identity:user:mcp-person" ||
+			recorder.authority.Role != auth.RoleReader || !recorder.authority.ExpiresAt.Equal(expires)) {
+			t.Fatalf("recording widened or changed credential: %+v", recorder.authority)
+		}
+		if recorder.hasRun || recorder.agent != "" || len(recorder.defaults) != 0 {
+			t.Fatal("recording inherited the delegated tool's execution scope")
+		}
+	}
+}
+
+type delegatedAuthorityRecorder struct {
+	called, hasAuthority, hasRun bool
+	authority                    auth.ForwardedAuthority
+	agent                        string
+	defaults                     map[string]any
+}
+
+func (r *delegatedAuthorityRecorder) RecordToolCall(ctx context.Context, _ AppSessionToolCall) error {
+	r.called = true
+	r.authority, r.hasAuthority = auth.ForwardedAuthorityFromContext(ctx)
+	_, r.hasRun = common.RunFromContext(ctx)
+	r.agent = memql.ActingAgentIdFromContext(ctx)
+	r.defaults = common.ToolDefaultsFromContext(ctx)
+	return nil
+}
+
 type delegatedEngine struct {
 	*fakeEngine
 	row          map[string]any

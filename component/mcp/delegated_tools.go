@@ -142,6 +142,12 @@ func callDelegatedTool(ctx context.Context, eng Engine, sessionID, name string, 
 	if err != nil {
 		return errorResult(err.Error())
 	}
+	// Recording can embed its observation on the owner's machine too. Keep
+	// the verified credential, without inheriting the agent's execution marks
+	// or tool defaults. Never manufacture authority for an unverified scope.
+	if authority, ok := auth.ForwardedAuthorityFromContext(ctx); ok {
+		recordCtx = auth.ContextWithForwardedAuthority(recordCtx, authority)
+	}
 	if name == toolNextTask {
 		return handleNextTask(ctx, eng, sessionID)
 	}
