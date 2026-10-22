@@ -3,6 +3,8 @@
 package app
 
 import (
+	"os"
+
 	"github.com/znasllc-io/memql/component/events"
 	"github.com/znasllc-io/memql/component/pipelinerun"
 )
@@ -38,6 +40,9 @@ func (a *App) wirePipelinesDriver() {
 
 	// The driver itself, plus the two hooks the opening half reaches it
 	// through: the poll's recovery and a cancel's signal.
+	integ.Configure(func(d *pipelinerun.Deps) {
+		d.AdmitRun = pipelinerun.FileRunAdmission(os.Getenv("MEMQL_PIPELINES_ADMISSION_FILE"))
+	})
 	integ.EnableDriver()
 
 	// created AND updated, as the work dispatcher subscribes: a run is

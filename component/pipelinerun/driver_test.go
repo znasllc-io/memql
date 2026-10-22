@@ -1291,6 +1291,13 @@ func TestAResumedRunKeepsWhatFinishedAndResendsTheSameAttempt(t *testing.T) {
 	dh.store.mu.Unlock()
 
 	other := dh.peer("agent-b")
+	// A budget hold must not strand a run already admitted on another node.
+	other.Configure(func(d *Deps) {
+		d.AdmitRun = func(time.Time) (bool, error) {
+			t.Error("started-run recovery must bypass new-run admission")
+			return false, nil
+		}
+	})
 	if err := other.RecoverRuns(context.Background()); err != nil {
 		t.Fatalf("recover: %v", err)
 	}
