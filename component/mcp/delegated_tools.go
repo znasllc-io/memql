@@ -11,6 +11,7 @@ import (
 	"github.com/znasllc-io/memql/component/auth"
 	"github.com/znasllc-io/memql/component/memql"
 	"github.com/znasllc-io/memql/core/common"
+	"github.com/znasllc-io/memql/core/num"
 )
 
 // delegatedScope reads the server-written contract on EVERY request. A token
@@ -79,6 +80,8 @@ func delegatedScope(ctx context.Context, eng Engine, sessionID string) (context.
 // Only an authenticated HTTP app-session credential can originate a machine
 // hop. The resolved owner/role and credential expiry travel unchanged; a local
 // no-auth MCP configuration must not manufacture mesh authority.
+// narrowing: GUARDED -- credential expiry must be a whole int64 Unix second;
+// num.WholeInt64 refuses non-finite, fractional, or out-of-range claims.
 func delegatedForwardAuthority(ctx context.Context, ac *auth.AccessContext, sessionID string) (context.Context, error) {
 	claims, ok := auth.ClaimsFromContext(ctx)
 	if !ok {
@@ -90,13 +93,21 @@ func delegatedForwardAuthority(ctx context.Context, ac *auth.AccessContext, sess
 	var seconds int64
 	switch value := claims["exp"].(type) {
 	case float64:
-		seconds = int64(value)
+		var valid bool
+		seconds, valid = num.WholeInt64(value)
+		if !valid {
+			return ctx, fmt.Errorf("app session: credential has an invalid expiry")
+		}
 	case int64:
 		seconds = value
 	case int:
 		seconds = int64(value)
 	case json.Number:
-		seconds, _ = value.Int64()
+		var err error
+		seconds, err = value.Int64()
+		if err != nil {
+			return ctx, fmt.Errorf("app session: credential has an invalid expiry")
+		}
 	}
 	now := time.Now()
 	expires := time.Unix(seconds, 0)

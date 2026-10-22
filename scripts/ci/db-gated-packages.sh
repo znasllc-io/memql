@@ -261,6 +261,8 @@ readonly MODULE_PATH="github.com/znasllc-io/memql"
 # stay `//go:build clustere2e` and run in neither lane, exactly as before.
 # Worker activity persistence exercises two engines and reconnect fencing.
 # Include the stream owner as well as its fleet catalog in the DB lane.
+# Workbench exports prove durable receipts, cross-replica recovery and actual
+# downloads through Postgres; their database tests must run in this lane.
 readonly DB_GATED_TREES=(
     component/filebackups
 	"app"
@@ -296,6 +298,7 @@ readonly DB_GATED_TREES=(
 	"integrations/email"
 	"integrations/sitepreview"
 	"integrations/work"
+	"integrations/workbench"
 	"examples/referencepack"
 	"packs"
 	"test/inboundhop"

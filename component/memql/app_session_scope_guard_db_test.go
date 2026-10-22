@@ -9,6 +9,7 @@ import (
 	"github.com/stretchr/testify/require"
 	"github.com/znasllc-io/memql/component/auth"
 	"github.com/znasllc-io/memql/component/language/ast"
+	langparser "github.com/znasllc-io/memql/component/language/parser"
 	"github.com/znasllc-io/memql/component/provenance"
 )
 
@@ -24,7 +25,7 @@ func TestAppSessionScopePersistsAndCannotBeRewrittenByItsOwner(t *testing.T) {
 	})
 	const concept = "v1:worker:appSession"
 	require.Equal(t, scope, latestPayload(t, internal, db, concept, id)["toolScope"])
-	read, err := eng.Execute(caller, fmt.Sprintf("query appSessionById(sessionId:%q)", sessionID))
+	read, err := eng.Execute(caller, fmt.Sprintf("query appSessionById(sessionId:%s)", langparser.QuoteString(sessionID)))
 	require.NoError(t, err)
 	require.Equal(t, scope, read.Bundle.Nodes[0].Payload.AsMap()["toolScope"], "the MCP replica reads the shaped durable contract")
 	for field, value := range map[string]any{"toolScope": map[string]any{"agentRole": "owner"}, "status": "ended", "runId": "different", "stepId": "different", "sessionRunId": "different", "workerId": "different"} {
@@ -32,7 +33,7 @@ func TestAppSessionScopePersistsAndCannotBeRewrittenByItsOwner(t *testing.T) {
 			before := latestPayload(t, internal, db, concept, id)
 			raw, err := json.Marshal(map[string]any{field: value})
 			require.NoError(t, err)
-			_, err = eng.Execute(caller, fmt.Sprintf(`insert(%q,id=%q,payload=%s)`, concept, id, raw))
+			_, err = eng.Execute(caller, fmt.Sprintf(`insert(%s,id=%s,payload=%s)`, langparser.QuoteString(concept), langparser.QuoteString(id), raw))
 			require.ErrorContains(t, err, "server-managed")
 			updateCtx := provenance.ContextWithProvenance(caller, provenance.Direct("rawUpdate:"+concept))
 			_, err = eng.executeMutation(updateCtx, MutationNode{Kind: ast.MutationKindUpdate, Concept: concept, ID: id, PayloadRaw: string(raw)})

@@ -3,6 +3,7 @@ package mcp
 import (
 	"context"
 	"encoding/json"
+	"math"
 	"strings"
 	"testing"
 	"time"
@@ -35,6 +36,22 @@ func TestDelegatedMCPForwardsVerifiedCredentialWithoutWidening(t *testing.T) {
 	missingExpiry.ExpiresAt = time.Time{}
 	if _, err := auth.VerifyForwardedAuthority(missingExpiry, time.Now()); err == nil {
 		t.Fatal("receiver accepted an app-session credential with no expiry")
+	}
+	for name, bad := range map[string]any{
+		"nan": math.NaN(), "infinity": math.Inf(1), "negative-infinity": math.Inf(-1),
+		"overflow": float64(math.MaxInt64), "underflow": -math.MaxFloat64,
+		"fractional": float64(expires.Unix()) + 0.5, "missing": nil,
+		"invalid-number":  json.Number("invalid"),
+		"number-overflow": json.Number("9223372036854775808"),
+		"number-fraction": json.Number("1800000000.5"),
+	} {
+		t.Run(name, func(t *testing.T) {
+			changed := auth.CloneClaims(claims)
+			changed["exp"] = bad
+			if _, _, err := delegatedScope(auth.ContextWithClaims(asPerson("reader"), changed), delegatedFixture(), "s"); err == nil {
+				t.Fatal("invalid expiry gained forwarding authority")
+			}
+		})
 	}
 	for key, bad := range map[string]any{"sub": "another-user", "node_id": "app-session:another-session", "class": "user", "exp": float64(time.Now().Add(-time.Minute).Unix())} {
 		t.Run(key, func(t *testing.T) {

@@ -26,6 +26,7 @@ import (
 	"github.com/znasllc-io/memql/component/database/dbtest"
 	memorynodes "github.com/znasllc-io/memql/component/database/memory-nodes"
 	memqlv1 "github.com/znasllc-io/memql/component/grpc/gen"
+	langparser "github.com/znasllc-io/memql/component/language/parser"
 	"github.com/znasllc-io/memql/component/memql"
 	"github.com/znasllc-io/memql/component/server"
 	"github.com/znasllc-io/memql/core/common"
@@ -127,7 +128,7 @@ func TestExportDBReplicaRecoveryAndOwnerAdmission(t *testing.T) {
 	ctx := auth.ContextWithUserActor(context.Background(), owner)
 	seed := auth.ContextWithInternalOrigin(ctx)
 	payload, _ := json.Marshal(map[string]any{"ownerUserId": owner, "status": "running", "automationName": "export-test", "templateFingerprint": "export-test-v1", "mode": "live", "startedAt": time.Now().UTC().Format(time.RFC3339), "routing": map[string]any{"destination": "auto"}})
-	if _, err := producer.Execute(seed, fmt.Sprintf(`insert("v1:work:run", id=%q, payload=%s)`, run, payload)); err != nil {
+	if _, err := producer.Execute(seed, fmt.Sprintf(`insert("v1:work:run", id=%s, payload=%s)`, langparser.QuoteString(run), payload)); err != nil {
 		t.Fatal(err)
 	}
 	rc := common.RunContext{RunId: run, GoalId: "export-goal-" + suffix, StepKey: "assemble", OwnerUserId: owner}
@@ -153,7 +154,7 @@ func TestExportDBReplicaRecoveryAndOwnerAdmission(t *testing.T) {
 	indexed := make(chan error, 1)
 	go func() {
 		for {
-			res, err := indexer.Execute(ctx, fmt.Sprintf(`query libraryFilesForOwner(runId:%q)`, run))
+			res, err := indexer.Execute(ctx, fmt.Sprintf(`query libraryFilesForOwner(runId:%s)`, langparser.QuoteString(run)))
 			if err != nil {
 				indexed <- err
 				return
@@ -165,7 +166,7 @@ func TestExportDBReplicaRecoveryAndOwnerAdmission(t *testing.T) {
 				if !strings.HasPrefix(id, "v1:library:file:") {
 					id = "v1:library:file:" + id
 				}
-				_, err = indexer.Execute(seed, fmt.Sprintf(`mutation createArtifact(sourceConceptRef:%q, ownerUserId:%q, lens:"artifact", kind:"file", source:"agent_generated", title:"test.tar.gz", format:"other", producedByRunId:%q)`, id, owner, run))
+				_, err = indexer.Execute(seed, fmt.Sprintf(`mutation createArtifact(sourceConceptRef:%s, ownerUserId:%s, lens:"artifact", kind:"file", source:"agent_generated", title:"test.tar.gz", format:"other", producedByRunId:%s)`, langparser.QuoteString(id), langparser.QuoteString(owner), langparser.QuoteString(run)))
 				indexed <- err
 				return
 			}

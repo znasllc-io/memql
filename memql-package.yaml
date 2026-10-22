@@ -104,6 +104,7 @@ pipeline:
       - integrations/email
       - integrations/sitepreview
       - integrations/work
+      - integrations/workbench
       - examples/referencepack
       - packs
       - test/inboundhop
