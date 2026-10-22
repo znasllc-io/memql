@@ -109,20 +109,8 @@ func (i *Integration) handleRerunStep(ctx context.Context, args map[string]any, 
 
 	now := i.clock().UTC()
 	goalID := rowString(run.row, "goalId")
-	goal, err := i.store().goalForOwner(ctx, goalID)
-	if err != nil {
+	if err := i.reopenGoalForRun(ctx, goalID, run.owner); err != nil {
 		return nil, err
-	}
-	if goal == nil || memql.BareShortId(rowString(goal, "ownerUserId")) != memql.BareShortId(run.owner) {
-		return nil, fmt.Errorf("work: the run's owned goal is unavailable")
-	}
-	if rowString(goal, "status") == "closed" {
-		if err := i.store().writeInternal(ownerActor(ctx, run.owner), "mutation "+call("updateWorkGoal", map[string]any{
-			"goalId": goalID, "status": "open", "closedAt": "", "closeReason": "", "acceptance": map[string]any{},
-			"versionTime": rfc(workRowVersionAfter(goal["createdAt"], now)),
-		})); err != nil {
-			return nil, err
-		}
 	}
 	fields := reopenFields(now)
 	fields["versionTime"] = rfc(workRowVersionAfter(run.row["createdAt"], now))

@@ -125,11 +125,17 @@ completed activity, not certification that the user's objective is achieved.
 
 Execution writers no longer close goals on success, failure or cancellation.
 `workAcceptGoalResults` accepts an exact finished run revision only from its
-owner's interactive request. It serializes with rerun/cancel, refuses newer or
+owner's interactive request. It serializes with rerun, branch, replay and cancel, refuses newer or
 live results, persists optional feedback and is idempotent for the same decision.
 `cancelGoal` also refuses calls from running agents. A person can accept a useful
 partial result, so acceptance does not require the model's success label.
 Initial plan approval and final result acceptance are separate decisions.
+New executions of a closed goal require the owner's interactive request;
+an agent cannot undo an acceptance by replaying or branching the result.
+`TestGoalAcceptanceDBPreservesOwnerDecisionAcrossReplicas` exercises acceptance,
+refused model reopening, explicit owner continuation and stale acceptance refusal
+through separate engines. Connecting result acceptance to the interface remains
+pending; the endpoint alone is not a verified owner review experience.
 
 Coverage: `TestProgressContinuationsRequireNewWorkBeyondLifetimeCaps`,
 `TestProgressCanRenewAfterDaysWithoutALifetimeLimit`,

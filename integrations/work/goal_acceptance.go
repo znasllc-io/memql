@@ -91,3 +91,30 @@ func (i *Integration) handleAcceptGoalResults(ctx context.Context, args map[stri
 	}
 	return i.resultNode(map[string]any{"goalId": goalID, "goalClosed": true}), nil
 }
+
+// Call while holding the goal lifecycle gate. A continuation racing result
+// acceptance must either appear in that review or explicitly reopen the goal.
+// An agent may continue open work, but cannot undo the owner's final decision.
+func (i *Integration) reopenGoalForRun(ctx context.Context, goalID, owner string) error {
+	goal, err := i.store().goalForOwner(ctx, goalID)
+	if err != nil {
+		return err
+	}
+	if goal == nil || memql.BareShortId(rowString(goal, "ownerUserId")) != memql.BareShortId(owner) {
+		return fmt.Errorf("work: the run's owned goal is unavailable")
+	}
+	if rowString(goal, "status") != "closed" {
+		return nil
+	}
+	ac, err := requirePrincipal(ctx)
+	if err != nil {
+		return err
+	}
+	if rc, running := common.RunFromContext(ctx); ac.Synthetic || ac.Unranked || (running && rc.IsRun()) || memql.BareShortId(ac.UserId) != memql.BareShortId(owner) {
+		return fmt.Errorf("work: only the owner's interactive decision can reopen a closed goal")
+	}
+	return i.store().writeInternal(ownerActor(ctx, owner), "mutation "+call("updateWorkGoal", map[string]any{
+		"goalId": goalID, "status": "open", "closedAt": "", "closeReason": "", "acceptance": map[string]any{},
+		"versionTime": rfc(workRowVersionAfter(goal["createdAt"], i.clock())),
+	}))
+}

@@ -1,9 +1,11 @@
 package work
 
 import (
+	"testing"
+
 	"github.com/stretchr/testify/require"
 	"github.com/znasllc-io/memql/component/memql"
-	"testing"
+	"github.com/znasllc-io/memql/core/common"
 )
 
 func TestGoalAcceptanceDBPreservesOwnerDecisionAcrossReplicas(t *testing.T) {
@@ -33,6 +35,19 @@ func TestGoalAcceptanceDBPreservesOwnerDecisionAcrossReplicas(t *testing.T) {
 	require.Equal(t, "The result meets my request.", rowString(receipt, "feedback"))
 	_, err = b.i.handleAcceptGoalResults(actorCtx("foreign-reviewer"), args, 0)
 	require.Error(t, err)
+
+	// A model cannot turn an accepted goal back into running work. A new
+	// explicit owner continuation can, and invalidates the old acceptance.
+	modelCtx := common.ContextWithRun(actorCtx(a.owner), common.RunContext{RunId: runID, GoalId: goalID, OwnerUserId: a.owner})
+	_, err = b.i.handleReplayRun(modelCtx, map[string]any{"runId": runID}, 0)
+	require.ErrorContains(t, err, "interactive decision")
+	_, err = b.i.handleReplayRun(actorCtx(a.owner), map[string]any{"runId": runID}, 0)
+	require.NoError(t, err)
+	reopened := a.query(t, a.owner, "query "+call("workGoalForOwner", map[string]any{"goalId": goalID}))[0]
+	require.Equal(t, "open", rowString(reopened, "status"))
+	require.Empty(t, rowMap(reopened, "acceptance"))
+	_, err = a.i.handleAcceptGoalResults(actorCtx(a.owner), args, 0)
+	require.ErrorContains(t, err, "still active")
 }
 
 func testRunVersion(t *testing.T, run map[string]any) string {

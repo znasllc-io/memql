@@ -151,6 +151,7 @@ func TestADerivedRunKeepsItsSourcesChoice(t *testing.T) {
 		row := sourceRun("u-alice")
 		row["routing"] = routing
 		eng.reply("workRunForOwner", row)
+		eng.reply("workGoalForOwner", map[string]any{"id": row["goalId"], "ownerUserId": row["ownerUserId"], "status": "open"})
 		var err error
 		if derive == "fork" {
 			_, err = i.handleForkRun(callerContext("u-alice"), map[string]any{"runId": "v1:work:run:r-source", "atStepKey": "step-4"}, 0)
@@ -170,6 +171,7 @@ func TestADerivedRunKeepsItsSourcesChoice(t *testing.T) {
 	row := actRunRow(runStatusSucceeded)
 	row["routing"] = routing
 	eng.reply("workRunForOwner", row)
+	eng.reply("workGoalForOwner", map[string]any{"id": row["goalId"], "ownerUserId": row["ownerUserId"], "status": "open"})
 	if _, err := i.handleBranchRun(callerContext(actOwner), map[string]any{"runId": actRunId, "stepKey": "draft"}, 0); err != nil {
 		t.Fatalf("branch: %v", err)
 	}
