@@ -480,7 +480,9 @@ func testModelBudgetBoundaries(t *testing.T, boundaries []string) {
 							case "override":
 								spec.Override = &common.StepOverride{Prompt: "Changed input"}
 							case "snapshot":
-								spec.Snapshot = &common.WorkspaceSnapshot{}
+								// Empty Apps snapshots restore nothing and are valid.
+								// A populated snapshot changes the reviewed continuation.
+								spec.Snapshot = &common.WorkspaceSnapshot{Files: []common.SnapshotFile{{Path: "changed.txt", FileId: "v1:library:file:changed"}}}
 							case "missing child":
 								bad.StepStates = map[string]automations.StepState{}
 								for k, v := range journal.StepStates {
