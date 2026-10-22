@@ -617,12 +617,14 @@ StreamLoop:
 			continue StreamLoop
 		}
 
-		if workOutcomeRequired && isDelegatedWorkSession(provider) {
-			workOutcomeRequired = false
-		}
 		if workOutcomeRequired {
 			normalized, outcomeErr := normalizeWorkOutcome(turnCalls, turnText)
 			if outcomeErr != nil {
+				// The app already executed this step. Validate its terminal
+				// signal without launching another session that could replay it.
+				if isDelegatedWorkSession(provider) {
+					return nil, fmt.Errorf("invalid delegated work outcome: %w", outcomeErr)
+				}
 				invalidOutcomes++
 				messages = rejectedWorkOutcome(messages, turnText, turnCalls, outcomeErr, sink)
 				if invalidOutcomes >= 2 {

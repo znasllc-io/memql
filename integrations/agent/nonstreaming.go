@@ -517,12 +517,14 @@ BackgroundLoop:
 			)
 		}
 
-		if workOutcomeRequired && isDelegatedWorkSession(provider) {
-			workOutcomeRequired = false
-		}
 		if workOutcomeRequired {
 			normalized, outcomeErr := normalizeWorkOutcome(turnCalls, turnText)
 			if outcomeErr != nil {
+				// A completed app session must not be repeated to repair a
+				// terminal envelope; its operational effects already happened.
+				if isDelegatedWorkSession(provider) {
+					return nil, fmt.Errorf("invalid delegated work outcome: %w", outcomeErr)
+				}
 				invalidOutcomes++
 				messages = rejectedWorkOutcome(messages, turnText, turnCalls, outcomeErr, sink)
 				if invalidOutcomes >= 2 {
