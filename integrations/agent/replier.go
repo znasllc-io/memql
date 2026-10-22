@@ -1708,6 +1708,11 @@ func latestUserQuery(msg *memqlv1.AgentGenerateTurnMsg) string {
 // order is by ID even when the handler declares PreserveOrder. Restore the
 // cosine ranking before rendering the selected passages.
 func (r *Replier) retrieveKnowledgeChunks(ctx context.Context, query string, domains []string) []map[string]any {
+	// This is optional context, separate from required skill/manual reads.
+	// A cold or unreachable embedding worker must not consume the work
+	// turn's whole deadline, including after a recorded human answer.
+	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
+	defer cancel()
 	const wantK = 5
 	dsl, err := langparser.RenderCall("similarTo", map[string]any{
 		"text":    query,
