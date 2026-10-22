@@ -4,7 +4,10 @@ const { fork } = require("node:child_process");
 const path = require("node:path");
 const { setTimeout: delay } = require("node:timers/promises");
 
-const TRANSIENT = /\b(?:ECONNRESET|ETIMEDOUT|ECONNREFUSED|EAI_AGAIN|ENETUNREACH|EHOSTUNREACH)\b/;
+// test-electron's request timer can reject without a Node transport error code,
+// including through an unhandled rejection. Its timeout still retries only the
+// downloader process, under the same attempt count and shared time budget.
+const TRANSIENT = /\b(?:ECONNRESET|ETIMEDOUT|ECONNREFUSED|EAI_AGAIN|ENETUNREACH|EHOSTUNREACH)\b|@vscode\/test-electron request timeout/;
 
 function attempt(options, worker, idleMs, remainingMs) {
   return new Promise((resolve, reject) => {
