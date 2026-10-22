@@ -77,8 +77,7 @@ async function playTheOwner(page: Page, url: string, done: { settled: boolean })
       arrivedWith ??= value;
       if (value !== email) await ownerEmail.first().fill(email);
     }
-    if (await press(/^Continue to passkey$/, "owner-email")) continue;
-    if (await press(/^(Create passkey and finish|Finish setup)$/, "create-passkey")) continue;
+    if (await press(/^(Create passkey|Finish setup)$/, "create-passkey")) continue;
     if (await press(/^(Sign in with a passkey|Try passkey again)$/, "passkey-sign-in")) continue;
   }
 }
