@@ -72,6 +72,25 @@ func TestAppSelectionDBOwnerSettingsAndReplicaRotation(t *testing.T) {
 	require.Error(t, err, "Only strategy fell through")
 	_, err = eng.Execute(ctx, `insert("v1:worker:registration", id="`+registration+`", payload={"appRouting":{"mode":"auto"}})`)
 	require.Error(t, err, "raw write bypassed settings validation")
+	// Selection accepts unfiltered machine inventory; it must enforce current
+	// owner settings itself, including when another replica read the inventory.
+	for _, settings := range []map[string]any{
+		{"ownerFeatures": map[string]any{"apps": false}},
+		{"revokedAt": time.Now().UTC().Format(time.RFC3339Nano)},
+	} {
+		var payload map[string]any
+		require.NoError(t, json.Unmarshal(raw, &payload))
+		for key, value := range settings {
+			payload[key] = value
+		}
+		row.Payload, err = json.Marshal(payload)
+		require.NoError(t, err)
+		row.CreatedAt = time.Now().UTC()
+		_, err = db.NewInsert().Model(&row).Exec(context.Background())
+		require.NoError(t, err)
+		_, err = peer.SelectAppForCall(ctx, req, false, nil, doors)
+		require.ErrorIs(t, err, ErrAppUnavailable)
+	}
 }
 
 func TestAppQuotaDBSurvivesReplicasAndExplicitRecovery(t *testing.T) {

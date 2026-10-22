@@ -1679,6 +1679,7 @@ func (s *streamSession) openAppSession(ctx context.Context, req AppSessionReques
 	s.markSharingChanged()
 
 	start := &memqlv1.AppSessionStart{
+		InferenceOnly: req.InferenceOnly,
 		SessionId:     req.SessionId,
 		App:           req.App,
 		Kind:          req.Kind,

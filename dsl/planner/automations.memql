@@ -269,7 +269,10 @@ automation workSpineDraftProgram {
  facts := builtin spineDraftFacts()
  inputHeading := "\n\nGoal input (JSON):\n"
  if facts.navigation { return builtin spineDraftAppend(kind: "navigation") }
- if facts.quickReply { return builtin spineDraftAppend(kind: "quickReply", templateId: "workQuickReply", instruction: facts.goal) }
+ if facts.quickReply {
+  if !facts.replyHasSources { return builtin spineDraftAppend(kind: "quickReply", templateId: "workConversationReply", instruction: facts.goal, progress: true) }
+  return builtin spineDraftAppend(kind: "quickReply", templateId: "workQuickReply", instruction: facts.goal)
+ }
  if !facts.fanout {
   if facts.capabilityFile { return builtin spineDraftAppend(kind: "capabilityFile", inputHeading: inputHeading, instruction: facts.goal + "\nDiscover the authorized operation for this artifact, including current Fleet model capabilities when needed, then create and save it. Read any referenced saved source before choosing its subject or content. A document composer is not an image, audio or video generator. Do not substitute a different format. Confirm completion only from a saved file receipt; explain a specific unavailable capability honestly.") }
   if facts.file && facts.research {

@@ -172,3 +172,28 @@ func TestCapabilityArtifactWorkloadIncludesGenerationAndKeepsExplicitCeilings(t 
 		}
 	}
 }
+
+func TestSelfContainedConversationPublishesProgressWithoutToolLoop(t *testing.T) {
+	for _, message := range []string{"hi there", "not sure how can you help me?"} {
+		eng := &countingCompileEngine{triage: map[string]any{"intent": "reply", "complexity": "trivial", "workload": "quick", "requiresFile": false, "requiresResearch": false}}
+		_, err := (&PlannerAgentLoop{engine: eng}).CompileGoalForRun(context.Background(), conversationReq(message, "Hi there! How can I help?"), nil, realSandbox{})
+		if err != nil {
+			t.Fatal(err)
+		}
+		source := strings.Join(eng.queries, "\n")
+		if !strings.Contains(source, "progress: true") || strings.Contains(source, "runAgentTurn") {
+			t.Fatalf("simple reply not streamed: %s", source)
+		}
+	}
+}
+
+func TestProfileContextAloneDoesNotRequireEvidenceReview(t *testing.T) {
+	profile := map[string]any{"sourceContext": map[string]any{"recordedSources": []any{map[string]any{"operation": "workViewerContext"}}, "limitations": []any{}}}
+	if conversationHasSources(profile) {
+		t.Fatal("profile turned ordinary chat into evidence-dependent reply")
+	}
+	profile["sourceContext"].(map[string]any)["recordedSources"] = []any{map[string]any{"operation": "readWeather"}}
+	if !conversationHasSources(profile) {
+		t.Fatal("external evidence bypassed review")
+	}
+}

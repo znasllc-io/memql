@@ -3121,8 +3121,11 @@ type AppSessionStart struct {
 	// session nobody overrode. A cockpit that predates these fields ignores
 	// them, and what the app actually ran at is what it REPORTS on
 	// AppSessionEnd -- which is what the version records.
-	Model         string `protobuf:"bytes,15,opt,name=model,proto3" json:"model,omitempty"`
-	Effort        string `protobuf:"bytes,16,opt,name=effort,proto3" json:"effort,omitempty"`
+	Model  string `protobuf:"bytes,15,opt,name=model,proto3" json:"model,omitempty"`
+	Effort string `protobuf:"bytes,16,opt,name=effort,proto3" json:"effort,omitempty"`
+	// One model invocation: no coding tools or MCP back-channel. Older workers
+	// ignore this optimization and retain the existing session behavior.
+	InferenceOnly bool `protobuf:"varint,17,opt,name=inference_only,json=inferenceOnly,proto3" json:"inference_only,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -3267,6 +3270,13 @@ func (x *AppSessionStart) GetEffort() string {
 		return x.Effort
 	}
 	return ""
+}
+
+func (x *AppSessionStart) GetInferenceOnly() bool {
+	if x != nil {
+		return x.InferenceOnly
+	}
+	return false
 }
 
 // AppSessionLimits are the policy ceilings a session runs under.
@@ -6320,7 +6330,7 @@ const file_worker_proto_rawDesc = "" +
 	"\x06action\x18\x01 \x01(\tR\x06action\x12\x1f\n" +
 	"\vdetail_json\x18\x02 \x01(\fR\n" +
 	"detailJson\x12*\n" +
-	"\x02ts\x18\x03 \x01(\v2\x1a.google.protobuf.TimestampR\x02ts\"\xf8\x03\n" +
+	"\x02ts\x18\x03 \x01(\v2\x1a.google.protobuf.TimestampR\x02ts\"\x9f\x04\n" +
 	"\x0fAppSessionStart\x12\x1d\n" +
 	"\n" +
 	"session_id\x18\x01 \x01(\tR\tsessionId\x12\x10\n" +
@@ -6341,7 +6351,8 @@ const file_worker_proto_rawDesc = "" +
 	"\x14response_schema_json\x18\r \x01(\tR\x12responseSchemaJson\x12\x14\n" +
 	"\x05level\x18\x0e \x01(\tR\x05level\x12\x14\n" +
 	"\x05model\x18\x0f \x01(\tR\x05model\x12\x16\n" +
-	"\x06effort\x18\x10 \x01(\tR\x06effort\"\xb6\x01\n" +
+	"\x06effort\x18\x10 \x01(\tR\x06effort\x12%\n" +
+	"\x0einference_only\x18\x11 \x01(\bR\rinferenceOnly\"\xb6\x01\n" +
 	"\x10AppSessionLimits\x12>\n" +
 	"\x1bcredential_lifetime_seconds\x18\x01 \x01(\x03R\x19credentialLifetimeSeconds\x120\n" +
 	"\x14max_duration_seconds\x18\x02 \x01(\x03R\x12maxDurationSeconds\x120\n" +

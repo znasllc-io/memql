@@ -284,6 +284,29 @@ func TestRunnerRefusesWithoutAMinter(t *testing.T) {
 	}
 }
 
+func TestRunnerPreservesToolModeForModelCallsWithInputs(t *testing.T) {
+	for _, inferenceOnly := range []bool{false, true} {
+		runner, session, _, _ := newRunnerFixture(t, SubscriptionPresent)
+		spec := runSpec()
+		spec.ModelCall = true
+		spec.InferenceOnly = inferenceOnly
+		if !inferenceOnly {
+			spec.Inputs = []string{"image-artifact"}
+		}
+		go func() {
+			waitForSession(t, session, spec.SessionId)
+			session.handleAppSessionEnd(&memqlv1.AppSessionEnd{SessionId: spec.SessionId})
+		}()
+		if _, err := runner.Run(context.Background(), session.worker, spec, nil); err != nil {
+			t.Fatal(err)
+		}
+		starts := session.stream.(*fakeCockpitStream).starts()
+		if len(starts) != 1 || starts[0].GetInferenceOnly() != inferenceOnly {
+			t.Fatalf("model-call recording changed the requested tool mode: %+v", starts)
+		}
+	}
+}
+
 // TestRunnerNonZeroExitIsFailed: a delegated step that crashed must
 // not read as a step that succeeded and produced nothing.
 func TestRunnerNonZeroExitIsFailed(t *testing.T) {

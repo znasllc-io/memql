@@ -84,6 +84,22 @@ func TestTranscriptCollectorMarksItsOwnTruncation(t *testing.T) {
 	}
 }
 
+func TestTranscriptCollectorUsesFinalAnswerWithoutDuplicatingTranscript(t *testing.T) {
+	c := &transcriptCollector{max: 1024}
+	c.append(AppSessionChunk{Stream: "text", Data: []byte("Let me think.\n")})
+	c.append(AppSessionChunk{Stream: "answer", Data: []byte("Hello")})
+	c.append(AppSessionChunk{Stream: "text", Data: []byte("Hello")})
+	c.append(AppSessionChunk{Stream: "answer", Data: []byte(" there.\n")})
+	c.append(AppSessionChunk{Stream: "text", Data: []byte(" there.\n")})
+	if got := c.answerText(); got != "Hello there." {
+		t.Fatalf("commentary leaked into the final answer: %q", got)
+	}
+	text, _, _ := c.snapshot()
+	if text != "Let me think.\nHello there.\n" {
+		t.Fatalf("answer deltas duplicated the transcript: %q", text)
+	}
+}
+
 // TestCredentialExpiryIsHonest: a zero expiry is not "expired", it is
 // "unknown". Treating it as expired would make a renewal loop spin on a
 // credential that is probably fine.

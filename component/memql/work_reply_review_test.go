@@ -149,6 +149,13 @@ func TestLookupReplyWithNoReceiptCannotBypassEvidenceReview(t *testing.T) {
 	require.Equal(t, 1, model.calls)
 	raw, _ := json.Marshal(model.messages)
 	require.Contains(t, string(raw), "no successful source receipt was recorded")
+	// Reading a profile cannot satisfy a lookup's need for source evidence.
+	require.NoError(t, e.RecordDelegatedToolSource(WithActingAgentId(ctx, "chat-agent"), "workViewerContext", map[string]any{}, `{"name":"Test user"}`))
+	_, err = e.workReviewReplyBuiltin(ctx, map[string]any{"draft": map[string]any{"reply": "The live service is definitely unavailable."}}, 0)
+	require.NoError(t, err)
+	require.Equal(t, 2, model.calls)
+	raw, _ = json.Marshal(model.messages)
+	require.Contains(t, string(raw), "no successful source receipt was recorded")
 	model.answer = `{"reply":"The requested entity has not been checked.","missingEvidence":"Resolve the named entity from a source."}`
 	for _, allowed := range []bool{false, true} {
 		// Exercise the same parsed builtin boundary used by the agent, not just
@@ -238,4 +245,10 @@ func TestReplyReviewKeepsRecoveryUnderFilePreviewPressure(t *testing.T) {
 		require.Contains(t, string(raw), fmt.Sprint("history/source-", n), "later file previews must not evict earlier recovery proofs")
 	}
 	require.Equal(t, 9, strings.Count(string(raw), `\"complete\":true`))
+}
+
+func TestProfileOnlyReplyDoesNotTriggerEvidenceModel(t *testing.T) {
+	require.False(t, replyHasEvidenceSources([]any{map[string]any{"operation": "workViewerContext"}}))
+	require.True(t, replyHasEvidenceSources([]any{map[string]any{"operation": "workViewerContext"}, map[string]any{"operation": "readStatus"}}))
+	require.True(t, replyHasEvidenceSources([]any{nil}))
 }

@@ -103,6 +103,13 @@ func (e *draftPromptEngine) InvokeAIProgress(ctx context.Context, name string, d
 	return e.MemQLEngine.InvokeAIProgress(ctx, name, data)
 }
 
+func (e *draftPromptEngine) InvokeAIReplyProgress(ctx context.Context, name string, data map[string]any) (any, error) {
+	if e.invoke != nil {
+		return e.invoke(ctx, name, data)
+	}
+	return e.MemQLEngine.InvokeAIReplyProgress(ctx, name, data)
+}
+
 func (e *draftPromptEngine) InvokeAIStructured(ctx context.Context, name string, data map[string]any, schemaName string, schema json.RawMessage, strict bool) (string, error) {
 	if e.invoke != nil {
 		value, err := e.invoke(ctx, name, data)
@@ -284,7 +291,7 @@ func TestCompileDraftDB_SeparateReplicaReadsAndRunsValidatedDraft(t *testing.T) 
 		if _, err := memql.LoadUnifiedPrompts(nil, prompts, template.New("partials")); err != nil {
 			t.Fatal(err)
 		}
-		prompt, ok := prompts.Get("workQuickReply")
+		prompt, ok := prompts.Get("workConversationReply")
 		if !ok || prompt.Level != "fast" {
 			t.Fatal("quick reply lost fast routing")
 		}
@@ -338,7 +345,7 @@ func TestCompileDraftDB_SeparateReplicaReadsAndRunsValidatedDraft(t *testing.T) 
 						calls++
 						access, _ := auth.AccessFromContext(callCtx)
 						run, _ := common.RunFromContext(callCtx)
-						if name != "workQuickReply" || access == nil || access.Role != role || access.UserId != req.OwnerUserId || run.RunId != req.RunId || run.StepKey == "" {
+						if name != "workConversationReply" || access == nil || access.Role != role || access.UserId != req.OwnerUserId || run.RunId != req.RunId || run.StepKey == "" {
 							return nil, fmt.Errorf("lost authority or journal context: %s %+v %+v", name, access, run)
 						}
 						if err := prompt.ValidateData(data); err != nil {

@@ -79,6 +79,7 @@ func IsValidAppSessionKind(kind string) bool {
 
 // AppSessionRequest is what a caller asks the worker to run.
 type AppSessionRequest struct {
+	InferenceOnly bool
 	SessionId     string
 	App           string
 	Kind          string
