@@ -9,6 +9,7 @@ import (
 	"errors"
 	"fmt"
 	"math"
+	"time"
 
 	"github.com/znasllc-io/memql/component/memql"
 	"github.com/znasllc-io/memql/core/id"
@@ -102,8 +103,30 @@ VALUES ($1,$2,$3::jsonb,$4,$5,$6,1,'reserved')`, x.ID, identity.OwnerUserID, str
 
 func lockPipelineUploadOwner(ctx context.Context, tx *sql.Tx, owner string) error {
 	key := sha256.Sum256([]byte("pipeline-artifact-quota:" + owner))
-	_, err := tx.ExecContext(ctx, "SELECT pg_advisory_xact_lock($1)", int64(binary.BigEndian.Uint64(key[:8])))
-	return err
+	// Upload finalization and retirement share this cross-replica fence. A
+	// blocking SELECT spends the database's statement timeout merely waiting
+	// behind another file and aborts the transaction, losing an otherwise
+	// complete step log. Poll the same transaction lock without replaying any
+	// storage effect or weakening the fence. Each SQL call remains subject to
+	// the database timeout; total admission also has a finite upper bound.
+	ctx, cancel := context.WithTimeout(ctx, 30*time.Second)
+	defer cancel()
+	for {
+		var acquired bool
+		if err := tx.QueryRowContext(ctx, "SELECT pg_try_advisory_xact_lock($1)", int64(binary.BigEndian.Uint64(key[:8]))).Scan(&acquired); err != nil {
+			return err
+		}
+		if acquired {
+			return nil
+		}
+		timer := time.NewTimer(100 * time.Millisecond)
+		select {
+		case <-ctx.Done():
+			timer.Stop()
+			return ctx.Err()
+		case <-timer.C:
+		}
+	}
 }
 
 // Ready intents still own retained bytes even if their editable Library row
