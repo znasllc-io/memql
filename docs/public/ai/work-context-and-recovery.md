@@ -14,6 +14,13 @@ A goal can outlive a model call, a context window, a client connection, or an
 execution replica. Progress belongs in the durable work journal. A model's
 active context is a bounded working set, not the sole record of the goal.
 
+The current stage's execution instructions remain explicit when older evidence
+is summarized, including after an approval or later guidance. Resuming work
+restores those instructions from the executing workflow alongside the verified
+saved context and new human answer. Completed tool results stay in order and
+the original checkpoint remains unchanged. Retaining the instructions does not
+grant new access or prove that the model followed them.
+
 ## Task failures and platform defects
 
 These have different owners and recovery paths:
@@ -329,8 +336,8 @@ will choose the same path, and it grants no access to another goal's records.
 
 Owned work uses the following layers:
 
-1. **Keep authority and the request exact.** System messages, the original
-   request, the newest human correction, and incomplete tool exchanges are
+1. **Keep authority and the request exact.** System messages, the current stage
+   instruction, the original request, the newest human correction, and incomplete tool exchanges are
    not summarized. A complete assistant tool call and all of its results form
    one unit. A preference for recent messages cannot split that unit.
 2. **Archive bulky results.** When the context is over budget, completed large
@@ -343,7 +350,7 @@ Owned work uses the following layers:
    facts, exact references, decisions, constraints, receipts, uncertainty,
    failed approaches and unfinished work. Older checkpoints can be
    consolidated with fresh evidence; their sources remain retrievable.
-   A bounded excerpt of the original request and latest correction guides
+   Bounded excerpts of the current stage, original request and latest correction guide
    relevance without becoming evidence. This context shares the summarizer's
    input budget and is part of its cache identity. The DSL distinguishes
    retrieved metadata from verified findings and tool parameters from human
@@ -423,7 +430,7 @@ remain available independently of the semantic summary cache.
 
 The proactive working-set threshold is an estimate that includes message
 envelopes, tool schemas and arguments. Its preference is 20,000 tokens. When
-pinned authority, the original request, the latest human correction and tool
+pinned authority, the current stage, the original request, the latest human correction and tool
 contracts would leave less than 4,000 tokens of working room, the target
 becomes their estimated size plus that working room. Accumulated tool results, model replies and
 derived memories do not enlarge that allowance. This lets a large document

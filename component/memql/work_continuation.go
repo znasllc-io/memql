@@ -115,6 +115,14 @@ func (e *MemQLEngine) RestoreWorkContinuation(ctx context.Context, messages []co
 	if len(messages) > 0 && messages[0].Role == "system" && prior[0].Role == "system" {
 		prior[0] = messages[0]
 	}
+	// Older checkpoints may have summarized away the section prompt once an
+	// approval became the newest human message. Recover the current contract
+	// from the executing automation, after checkpoint/lineage validation, rather
+	// than asking a model to reconstruct it from evidence or an earlier summary.
+	prior, err = restoreWorkInstruction(prior, messages)
+	if err != nil {
+		return nil, err
+	}
 	// Keep current instructions and the person's newly recorded answers. The
 	// saved tail already contains the original request and completed results.
 	for _, m := range messages {
@@ -132,6 +140,40 @@ func (e *MemQLEngine) RestoreWorkContinuation(ctx context.Context, messages []co
 		}
 	}
 	return prior, nil
+}
+
+func restoreWorkInstruction(prior, current []common.ChatMessage) ([]common.ChatMessage, error) {
+	var instruction *common.ChatMessage
+	for _, message := range current {
+		if common.IsWorkInstruction(message) {
+			if instruction != nil || strings.TrimSpace(message.Content) == "" {
+				return nil, fmt.Errorf("current work instruction is empty or ambiguous")
+			}
+			copy := message
+			instruction = &copy
+		}
+	}
+	if instruction == nil {
+		return prior, nil
+	}
+	// Replace stale markers and upgrade an exact, unmarked legacy copy without
+	// duplicating it. Keep all other human corrections and completed exchanges
+	// in order. This rebuilds the live context, never the immutable saved receipt.
+	refreshed := make([]common.ChatMessage, 0, len(prior)+1)
+	for _, message := range prior {
+		if common.IsWorkInstruction(message) || (message.Role == "user" && message.Name == "" && message.Content == instruction.Content) {
+			continue
+		}
+		refreshed = append(refreshed, message)
+	}
+	position := 0
+	if len(refreshed) > 0 && refreshed[0].Role == "system" {
+		position = 1
+	}
+	refreshed = append(refreshed, common.ChatMessage{})
+	copy(refreshed[position+1:], refreshed[position:])
+	refreshed[position] = *instruction
+	return refreshed, nil
 }
 
 func continuationID(run common.RunContext, raw []byte) string {

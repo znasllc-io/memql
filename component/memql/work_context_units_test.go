@@ -76,6 +76,28 @@ func TestWorkContextChunkPinsAuthorityRequestAndLatestCorrection(t *testing.T) {
 	}
 }
 
+func TestWorkContextKeepsCurrentInstructionAfterApprovalAndGuidance(t *testing.T) {
+	// The first human message is an older conversation request. The current
+	// compiled section sits in the middle once an approval or correction arrives.
+	instruction := common.ChatMessage{Role: "user", Name: "memql_work_instruction", Content: strings.Repeat("Recover the saved evidence and return the remaining gaps. Do not perform later sections. ", 200)}
+	messages := contextResearchTrace()
+	messages = append(messages[:2], append([]common.ChatMessage{instruction}, messages[2:]...)...)
+	messages = append(messages, common.ChatMessage{Role: "user", Content: "Use the recorded approval and continue."})
+	for range 12 {
+		start, end := workContextChunk(messages, 4*1024*1024, nil)
+		if start == end {
+			break
+		}
+		for _, message := range messages[start:end] {
+			require.NotEqual(t, instruction.Name, message.Name, "the active section is not historical evidence")
+		}
+		messages = append(append(append([]common.ChatMessage{}, messages[:start]...), common.ChatMessage{Role: "user", Content: "[Memory checkpoint ref]\nSaved evidence"}), messages[end:]...)
+	}
+	require.Contains(t, messages, instruction)
+	pinned := []common.ChatMessage{messages[0], messages[1], instruction, messages[len(messages)-1]}
+	require.GreaterOrEqual(t, WorkContextTarget(messages, nil, 3000), WorkContextSize(pinned, nil)+600)
+}
+
 func TestWorkContextChunkAdvancesPastExcludedSpans(t *testing.T) {
 	for _, boundary := range []string{"pinned correction", "source limit"} {
 		t.Run(boundary, func(t *testing.T) {

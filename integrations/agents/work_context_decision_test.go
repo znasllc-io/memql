@@ -104,3 +104,45 @@ func TestWorkTurnHistoryProjectsOnlyItsExactNativeDecision(t *testing.T) {
 		})
 	}
 }
+
+func TestNativeContinuationDoesNotReinjectConversationSourcePreview(t *testing.T) {
+	run := common.RunContext{RunId: "run", GoalId: "goal", OwnerUserId: "owner", StepKey: "inspect", Mode: common.RunModeLive,
+		Continuation: &common.StepContinuation{ApprovalID: "approval", StepKey: "inspect", ObservationID: "checkpoint"}}
+	ctx := common.ContextWithRun(auth.ContextWithUserActor(context.Background(), "owner"), run)
+	reader := &decisionContextReader{
+		run: map[string]any{"humanResumeId": "approval", "input": map[string]any{"conversation": map[string]any{
+			"id": "chat", "turnId": "current", "sourceContext": map[string]any{"recordedSources": strings.Repeat("old-source-preview ", 1400)},
+		}}},
+		decision: map[string]any{"id": "approval", "runId": "run", "stepKey": "inspect", "kind": "scopeElevation", "decision": "approved",
+			"question": "Inspect this file?", "subject": map[string]any{"command": "git status --short", "cwd": "/work/repo"},
+			"answer": map[string]any{"permissionMode": "once"}},
+	}
+	history, err := workTurnHistory(ctx, reader, "Continue from the saved checkpoint")
+	require.NoError(t, err)
+	require.Len(t, history, 3)
+	require.Equal(t, "user", history[1].Role)
+	require.Equal(t, common.WorkInstructionMessageName, history[1].Name)
+	require.Equal(t, "Continue from the saved checkpoint", history[1].Content)
+	// The checkpoint restorer appends this decision verbatim. It must not also
+	// append the original run's source inventory on every permission resume.
+	receipt := history[2].Content
+	require.NotContains(t, receipt, "old-source-preview")
+	require.Less(t, len(receipt), 2000)
+	var decision map[string]any
+	require.NoError(t, json.Unmarshal([]byte(strings.SplitN(receipt, "\n", 2)[1]), &decision))
+	require.Equal(t, "approval", decision["approvalId"])
+	require.Equal(t, reader.decision["subject"], decision["subject"])
+	require.Equal(t, reader.decision["answer"], decision["answer"])
+
+	// Fresh turns and ordinary reruns still need the original source projection.
+	// Only a required native checkpoint supplies an alternative evidence source.
+	run.Continuation = nil
+	history, err = workTurnHistory(common.ContextWithRun(ctx, run), reader, "Start this step")
+	require.NoError(t, err)
+	require.Contains(t, history[len(history)-1].Content, "old-source-preview")
+
+	// A corrupt native decision cannot use the smaller prompt as a fallback.
+	run.Continuation = &common.StepContinuation{ApprovalID: "other", StepKey: "inspect", ObservationID: "checkpoint"}
+	_, err = workTurnHistory(common.ContextWithRun(ctx, run), reader, "Continue")
+	require.Error(t, err)
+}

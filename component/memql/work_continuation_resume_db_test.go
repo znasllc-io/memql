@@ -64,6 +64,19 @@ func TestWorkContinuationRequiresTheExactOwnedAnsweredCheckpoint(t *testing.T) {
 	restored, err := b.RestoreWorkContinuation(prepared, nil)
 	require.NoError(t, err)
 	require.Equal(t, messages, restored)
+	// A prior compaction may have lost the unmarked section instruction. A
+	// fresh replica must restore the executing section while retaining effects
+	// and the new human decision, without rewriting the original checkpoint.
+	instruction := common.ChatMessage{Role: "user", Name: "memql_work_instruction", Content: "Recover prior evidence and return a handoff; later sections implement the change."}
+	answer := common.ChatMessage{Role: "user", Content: "[Recorded answer for this suspended step]\nContinue"}
+	restored, err = b.RestoreWorkContinuation(prepared, []common.ChatMessage{instruction, answer})
+	require.NoError(t, err)
+	require.Contains(t, restored, instruction)
+	require.Equal(t, messages, restored[1:len(restored)-1], "completed effects retain their exact order")
+	require.Equal(t, answer, restored[len(restored)-1])
+	unchanged, err := b.RestoreWorkContinuation(prepared, nil)
+	require.NoError(t, err)
+	require.Equal(t, messages, unchanged, "rehydration must not mutate the saved receipt")
 	_, err = b.PrepareWorkContinuation(common.ContextWithRun(askTestActor(), run), request)
 	require.Error(t, err, "the checkpoint grants no cross-owner access")
 	changed := request

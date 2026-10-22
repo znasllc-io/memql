@@ -25,6 +25,7 @@ paths and one task's acceptance criteria must not become routing rules.
 | Admit a delegated tool call | Recheck current ownership, agent role, captured tool ceiling, expiry and run lifecycle. Reject cancelled, superseded or foreign work. Shared storage allows the receiving replica to make the same decision. | [MCP transport](../../../app/transport_mcp.go), [scope mutation guard](../../../component/memql/app_session_scope_guard.go) |
 | Pause for information or access | Persist native context and exact server-observed public tool results before creating the request. Incomplete receipts or exceeded scan/byte bounds stop the pause path. App prose cannot certify an effect or reconstruct a continuation. | [Delegated source receipts](../../../component/memql/work_delegated_sources.go), [continuations](../../../component/memql/work_continuation.go) |
 | Return after a native wait | Inspect the native control plane, including an answer that arrived before the app finished. Yield the old invocation without creating a second question or overwriting the resume. The adapter must expose this check to the agent loop. | [Human wait handling](../../../integrations/agent/human_wait.go), [production adapter](../../../app/adapters.go) |
+| Rehydrate after an approval | Carry the exact new decision, then restore the required native checkpoint. Do not append the original conversation's source inventory to each approval: it is already represented in saved work, and repeated copies trigger unnecessary summaries. Fresh executions without a required checkpoint still receive that inventory. | [Work context](../../../integrations/agents/work_context.go), [continuation validation](../../../component/memql/work_continuation.go) |
 | Resume filesystem state | An empty snapshot needs no restoration. A populated snapshot still requires supported restoration; do not substitute an empty workspace or replay completed effects. | [Automation resume](../../../component/automations/resume.go), [child continuation](../../../component/automations/child_continuation.go) |
 
 `PrepareDelegatedFeedback` starts with the native context actually delegated,
@@ -34,6 +35,37 @@ It scans at most 16 pages of 16 receipts, with a 4 MiB exchange-content bound.
 An individual source receipt exceeding 1 MiB records an explicit omission and
 cannot be accepted as a complete continuation. These are refusal boundaries,
 not permission to truncate evidence or silently reconstruct missing state.
+
+`TestNativeContinuationDoesNotReinjectConversationSourcePreview` reproduces the
+approval-resume duplication with a large source inventory and verifies that the
+exact decision survives, fresh executions still receive source context, and a
+mismatched decision is refused. This change affects prompt rehydration only; it
+does not rewrite earlier checkpoints, discard journal records, or establish that
+an operation ran. Existing continuation validation still refuses missing or
+changed required checkpoints. Previously accumulated copies can still require
+compaction, and end-to-end latency depends on the selected model and remaining
+work; the regression is not a timing guarantee.
+
+The active compiled instruction has a native retention marker separate from
+the first and latest human messages. Approvals and guidance can arrive after
+that instruction; they must not make its stage boundary eligible for summary
+or archival. Context selection pins it verbatim, includes it in the retained
+size floor, and passes a bounded excerpt into summary relevance. If the retained
+instructions exceed a model's capacity, ordinary capacity checks still apply.
+The marker retains a user-role message; it grants no permission or higher role.
+Conversation history cannot supply the marker.
+
+After exact checkpoint, owner and execution validation, resume restores the
+instruction supplied by the executing automation. This repairs older checkpoints
+whose unmarked stage instruction was compacted away. It replaces stale marked
+copies and upgrades an identical legacy copy, while preserving completed tool
+exchanges and later human corrections in order. It does not rewrite the saved
+receipt. Empty or ambiguous current instructions fail rather than selecting a
+contract arbitrarily. `TestWorkContextKeepsCurrentInstructionAfterApprovalAndGuidance`,
+`TestRestoreWorkInstructionPreservesEffectsAndHumanCorrections` and the required
+database continuation test cover retention, idempotence and exact effects across
+replicas. This prevents instruction loss; it does not certify that a model obeyed
+the stage, completed the work or delivered faster results.
 
 Worker output backpressure must not prevent a disconnect from taking effect.
 App chunks and model deltas watch the shared stream's cancellation while waiting

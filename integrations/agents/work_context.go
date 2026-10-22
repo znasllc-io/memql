@@ -65,10 +65,16 @@ func workTurnHistory(ctx context.Context, engine interface {
 		}
 	}
 	// The planner deliberately removes conversation from the section prompt:
-	// this replica rehydrates it here. Carry the public source projection too,
-	// otherwise the agent sees prior prose but loses the actual file/read receipts.
+	// this replica rehydrates it here. Fresh executions need the public source
+	// projection as well as prior prose. A native continuation instead restores
+	// its required, content-addressed checkpoint before reasoning; missing or
+	// changed checkpoints fail closed in RestoreWorkContinuation. Reattaching the
+	// original inventory to each new approval would append it verbatim to that
+	// saved history on every resume, crowding out newer evidence and repeatedly
+	// paying to summarize the same sources. Keep the new decision exact below;
+	// the checkpoint and owner-scoped journal remain the evidence source.
 	sourceReference := ""
-	if sources, ok := conversation["sourceContext"].(map[string]any); ok && len(sources) > 0 {
+	if sources, ok := conversation["sourceContext"].(map[string]any); ok && len(sources) > 0 && run.Continuation == nil {
 		raw, err := json.Marshal(sources)
 		if err != nil {
 			return nil, fmt.Errorf("work context: encoding recorded sources: %w", err)
@@ -107,7 +113,10 @@ func workTurnHistory(ctx context.Context, engine interface {
 		destination = "auto"
 	}
 	history = append(history, &memqlv1.AgentTurnMessage{Role: "user", Content: "[Execution destination selected by the person for this goal: " + destination + ". This choice does not grant computer access.]"})
-	history = append(history, &memqlv1.AgentTurnMessage{Role: "user", Content: prompt})
+	// Conversation history can precede this prompt, and approvals/guidance can
+	// follow it. Mark the active contract independently of first/last human
+	// messages so compaction cannot turn it into an optional historical summary.
+	history = append(history, &memqlv1.AgentTurnMessage{Role: "user", Name: common.WorkInstructionMessageName, Content: prompt})
 	questionsCall, _ := parser.RenderCall("workQuestionsForOwnerRun", map[string]any{"runId": run.RunId})
 	questions, err := engine.Execute(memql.ContextWithFreshRead(ctx), "query "+questionsCall)
 	if err != nil {
