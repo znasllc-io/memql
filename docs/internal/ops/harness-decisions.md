@@ -104,6 +104,38 @@ displays, explicit exclusions and invalid/headless descriptors. A routing-ready
 display does not prove that a screenshot or UI interaction succeeded; those need
 their own execution evidence.
 
+### Native screenshots through Apps
+
+After the existing tool and computer permission checks succeed, the MCP
+presentation adapter recognizes a successful `workerComputer` screenshot
+receipt and supplies its exact PNG or JPEG bytes as MCP image content. A
+base64 string inside text is not a visual observation. Metadata, including the
+worker receipt and coordinate scale, stays in a text block; an image-content
+index, size and SHA-256 replace the duplicated base64 field. Both ordinary MCP
+and delegated Apps calls use this path. Delegated source recording saves the
+exact image-bearing result returned to the app, so resume evidence agrees with
+what was delivered rather than the old text-only representation.
+
+The adapter accepts only the native successful worker envelope for the
+screenshot action. It bounds encoded input to 4 MiB of image bytes and decoded
+dimensions to 16 megapixels, validates the full PNG/JPEG and its declared size,
+format and dimensions, and never fetches a URL or changes the pixels. Invalid
+or oversized images retain their original text receipt with an explicit image
+delivery failure. Capture is not retried and `isError` is not set for this
+presentation failure: the underlying operation already happened. Failed
+captures, unrelated tools and already structured MCP content pass through.
+No permission, owner, goal lifetime or native capture policy changes here.
+
+The existing journal receipt-size limit still applies; the adapter does not
+turn an oversized receipt into a Library artifact or relax retention bounds.
+Image delivery, persistent artifact readback and inspection of the intended
+interface are separate claims. A visible desktop screenshot of another app is
+not a valid UI baseline. Test coverage in
+`component/mcp/computer_images_test.go` checks both MCP paths, exact delegated
+recording, unchanged bytes, malformed/corrupt/oversized pixels and unaffected
+tool results. Live delivery and task-specific visual verification require
+their own recorded observations.
+
 ## Evidence and reuse
 
 | Decision | Reason and resulting path | Implementation |

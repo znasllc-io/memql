@@ -471,6 +471,15 @@ prove that the bytes are readable. A checkout or dependency cache is a working
 resource, not an automatic archival artifact; reuse it only when safe and worth
 the cost. Resource reuse does not replay effects or inherit expired permissions.
 
+When Apps calls the native computer screenshot tool through MCP, a validated
+PNG or JPEG is delivered as image content, with its original metadata and a
+content hash beside it. The delegated journal records that same response.
+Base64 text alone does not establish that the model received a viewable image.
+Unreadable, inconsistent or oversized captures remain explicit text evidence
+with an image-delivery failure; the adapter does not retry capture, enlarge
+computer access or bypass retention limits. Receiving pixels is separate from
+inspecting the correct interface and retaining a readable evidence artifact.
+
 Execution continuations preserve complete tool exchanges in an encoded JSON
 receipt, including control characters that the storage layer cannot accept
 as plain text. Restoration verifies the original content hash; existing
