@@ -58,7 +58,13 @@ bulky completed results, then uses a bounded semantic pass over complete older
 exchanges. It preserves authority, current human direction and pending tool
 protocol. After eight semantic attempts, exact archival of remaining completed
 results gets a final chance to fit the target without more inference. A request
-that still cannot fit fails with its originals retained.
+whose small calls and previews still exceed the target can offload whole older
+completed exchanges, including arguments. This final pass makes at most eight
+storage attempts of at most 4 MiB each and never calls a model. It uses the same
+protected-unit selector and saves exact bytes before returning an incomplete
+preview/reference. This handles dense histories that per-result offloading
+cannot shrink, while refusing to fabricate a semantic summary. A request that
+still cannot fit fails with its originals retained.
 
 Semantic summary identity includes both source bytes and task relevance. This
 prevents an old request's focused summary from silently answering a changed
