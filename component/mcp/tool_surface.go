@@ -440,7 +440,7 @@ func callMCPTool(ctx context.Context, eng Engine, role string, tier Tier, appSes
 			result = errorResult(fmt.Sprintf("tool %q failed: %v", name, err))
 			return result
 		}
-		result = toolResultFromJSON(raw)
+		result, _ = presentExecutedToolResult(name, args, raw)
 		return result
 	}
 }

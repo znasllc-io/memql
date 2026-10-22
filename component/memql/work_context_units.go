@@ -125,24 +125,10 @@ func workContextCanRetainTail(messages []common.ChatMessage, tools []common.Tool
 // Keep authority, the active execution instruction, the original request, the
 // newest human correction and the latest exchange verbatim. The instruction
 // may sit in the middle after an approval; its stage boundary is still current.
-// Six recent messages is a preference, never a cut
-// through a parallel call group. Short transcripts can still retire an older
-// complete exchange when the preferred tail occupies the entire conversation.
-func workContextChunk(messages []common.ChatMessage, sourceLimit int, excluded map[string]bool) (int, int) {
-	units := workContextUnits(messages)
+func workContextArchiveEligibility(messages []common.ChatMessage) func(workContextUnit) bool {
 	firstUser, lastUser := workContextHumanBounds(messages)
 	freshStart, freshEnd := workContextLatestToolExchange(messages)
-	usable := func(start, end int, fresh bool) bool {
-		if !fresh {
-			return false
-		}
-		if len(excluded) == 0 {
-			return true
-		}
-		raw, _ := json.Marshal(messages[start:end])
-		return !excluded[workContextHash("chunk", raw)]
-	}
-	eligible := func(u workContextUnit) bool {
+	return func(u workContextUnit) bool {
 		if !u.complete || u.end == len(messages) || (u.start == freshStart && u.end == freshEnd) {
 			return false
 		}
@@ -152,6 +138,24 @@ func workContextChunk(messages []common.ChatMessage, sourceLimit int, excluded m
 			}
 		}
 		return true
+	}
+}
+
+// Six recent messages is a preference, never a cut through a parallel call
+// group. Short transcripts can still retire an older complete exchange when
+// the preferred tail occupies the entire conversation.
+func workContextChunk(messages []common.ChatMessage, sourceLimit int, excluded map[string]bool) (int, int) {
+	units := workContextUnits(messages)
+	eligible := workContextArchiveEligibility(messages)
+	usable := func(start, end int, fresh bool) bool {
+		if !fresh {
+			return false
+		}
+		if len(excluded) == 0 {
+			return true
+		}
+		raw, _ := json.Marshal(messages[start:end])
+		return !excluded[workContextHash("chunk", raw)]
 	}
 	for _, cutoff := range []int{len(messages) - 6, len(messages)} {
 		start, end, fresh := -1, -1, false

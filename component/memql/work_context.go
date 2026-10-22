@@ -94,6 +94,11 @@ func (e *MemQLEngine) CompactWorkContext(ctx context.Context, messages []common.
 			out[i].Content = workContextArchivedResult(out, i, fingerprint)
 		}
 	}
+	var err error
+	out, err = e.archiveOversizedWorkCalls(ctx, out, tools, target, sourceLimit)
+	if err != nil {
+		return nil, err
+	}
 	// Bounded semantic checkpoints follow complete exchanges, not arbitrary
 	// message counts. Older checkpoints may be consolidated with fresh evidence;
 	// their exact sources and prior references remain in the journal.
@@ -217,7 +222,7 @@ func (e *MemQLEngine) CompactWorkContext(ctx context.Context, messages []common.
 // human requests, incomplete calls and the fresh tail. This is exact offloading,
 // not a claim that an excerpt preserves all the meaning of the original.
 func (e *MemQLEngine) archiveWorkContextExchanges(ctx context.Context, out []common.ChatMessage, tools []common.ToolDefinition, target int) ([]common.ChatMessage, error) {
-	const sourceLimit = 4 * 1024 * 1024
+	const sourceLimit = workContextArchiveBytes
 	unproductive := make(map[string]bool)
 	// Eight storage attempts bound work even with many separated authority
 	// messages. The larger byte limit is for exact storage, never model input.
