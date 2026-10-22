@@ -35,6 +35,26 @@ An individual source receipt exceeding 1 MiB records an explicit omission and
 cannot be accepted as a complete continuation. These are refusal boundaries,
 not permission to truncate evidence or silently reconstruct missing state.
 
+Worker output backpressure must not prevent a disconnect from taking effect.
+App chunks and model deltas watch the shared stream's cancellation while waiting
+for buffer space. Delivery and channel closure are serialized, with the terminal
+signal closed first to release a blocked sender. This preserves ordered output
+while connected without letting an old connection prevent replacement.
+Caller cancellation and model idle/operation watchdogs finish the local output
+stream after requesting remote cancellation; a missing remote `End` must not
+leave the parent's drainer waiting forever. The first terminal decision remains
+authoritative if a late `End` arrives. These are invocation boundaries, not goal
+lifetime limits or result acceptance, and local cancellation does not prove the
+remote process stopped or that all artifacts returned.
+
+The regressions in
+[stream cancellation tests](../../../component/worker/stream_cancellation_test.go)
+reproduce open drains after cancellation and a full app buffer ignoring a
+disconnect. They also cover model idle/whole-call watchdogs, model backpressure,
+late completion and concurrent send/finish under the race detector. These tests
+establish the recovery defects independently; they do not prove that every live
+offline report has the same cause.
+
 ## Computer capability discovery
 
 The fleet catalog supplies a missing legacy `display=true` routing label from
