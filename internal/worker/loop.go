@@ -480,6 +480,12 @@ func (r *Runner) runStream(ctx context.Context, conn *Connection) (healthy bool,
 	hbDone := make(chan struct{})
 	go func() {
 		defer close(hbDone)
+		// A failed outbound heartbeat does not guarantee that Recv ends.
+		// Close this connection when its heartbeat loop exits so the ordinary
+		// disconnect path stops owned calls and reconnects. Leaving Recv alive
+		// would keep a silent worker and its sessions stranded indefinitely.
+		// Connection.Close already bounds a half-close blocked by flow control.
+		defer conn.Close()
 		r.heartbeatLoop(hbCtx, conn, &beat)
 	}()
 	defer func() {
@@ -579,6 +585,7 @@ func (r *Runner) heartbeatLoop(ctx context.Context, conn *Connection, beat *atom
 	var held <-chan time.Time
 	send := func(hw *hardware.Inventory) bool {
 		if err := conn.SendHeartbeat(0, nil, r.inventory(ctx), hw, r.capacityReport(ctx), r.setupReport()); err != nil {
+			r.logger.Warn("worker heartbeat failed; reconnecting", "error", err)
 			return false
 		}
 		lastBeat = time.Now()

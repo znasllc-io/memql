@@ -76,6 +76,15 @@ runs it at.
 
 ## What the cockpit reports
 
+A failed heartbeat ends its stream and reaches the normal reconnect path, even
+when the inbound read still waits. Owned calls are stopped by that disconnect
+path; journaled work remains available for recovery, and permissions are not
+renewed by reconnecting. The bounded connection close also handles a peer that
+keeps the transport alive but stops reading. `TestHeartbeatFailureEndsAReadThatStillWaits`
+reproduces the previously silent failure: without the close, the heartbeat loop
+exited while the reader and process stayed alive. This regression establishes
+that failure path, not the cause of every offline machine report.
+
 On `Register` and on **every** heartbeat:
 
 | Field | Where it comes from |
