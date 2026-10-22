@@ -1,0 +1,3 @@
+ALTER TABLE router_policy_revision
+    ADD COLUMN IF NOT EXISTS routes JSONB NOT NULL DEFAULT '{}',
+    ADD COLUMN IF NOT EXISTS auto JSONB NOT NULL DEFAULT 'null';
