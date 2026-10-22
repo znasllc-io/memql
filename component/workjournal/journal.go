@@ -777,19 +777,10 @@ func (r *Run) close(ctx context.Context, status string, outcome map[string]any, 
 	if err != nil {
 		return err
 	}
-	// The goal closes with its run. A goal whose only run is over is not
-	// still "active", and leaving it that way would make every finished
-	// analysis read as work in progress.
-	reason := "the run finished"
-	if status == "cancelled" {
-		reason = "the run was cancelled"
-	}
-	return r.j.exec(auth.ContextWithUserActor(ctx, r.owner), call("mutation updateWorkGoal",
-		arg("goalId", r.goalID),
-		arg("status", "closed"),
-		arg("closedAt", finished.Format(time.RFC3339)),
-		arg("closeReason", firstNonEmpty(message, reason)),
-	))
+	// A run's terminal receipt is not the owner's acceptance. Leave the goal
+	// open for review or further work; only a human accept/close act ends it.
+	// In particular, a late driver finish must not overwrite a human decision.
+	return nil
 }
 
 // decl answers a step's position in the declared order and its declaration.

@@ -22,9 +22,16 @@ import (
 	"github.com/znasllc-io/memql/integrations/knowledge/seeddata"
 )
 
-type trainingVector struct{ calls int }
+type trainingVector struct {
+	calls int
+	block bool
+}
 
-func (p *trainingVector) Embed(_ context.Context, text string) ([]float32, error) {
+func (p *trainingVector) Embed(ctx context.Context, text string) ([]float32, error) {
+	if p.block {
+		<-ctx.Done()
+		return nil, ctx.Err()
+	}
 	p.calls++
 	v := make([]float32, 1024)
 	v[0] = 1
@@ -132,6 +139,16 @@ func TestOwnedTrainingReadsReviewedTaughtSourcesAcrossReplicas(t *testing.T) {
 	require.Contains(t, fmt.Sprint(selectedReceipt), "required checks")
 	foreignActor := auth.ContextWithInternalOrigin(revisionActor(f.owner+"receipt-outsider", auth.RoleOwner))
 	require.Empty(t, f.query(f.other, foreignActor, "query", "workObservationsForOwnerRun", map[string]any{"runId": runID}))
+	// A cold/busy optional inference door must not prevent the first work
+	// action. The omission is durable and cannot claim any lesson was read.
+	provider.block = true
+	omitted, lookupErr := f.second.handleOwnedTrainingLessons(ctx, map[string]any{"text": "A new uncached slow query", "limit": 1, "minimumSimilarity": 0.6, "maxTokens": 1200}, 0)
+	provider.block = false
+	require.NoError(t, lookupErr)
+	require.Empty(t, omitted)
+	require.NoError(t, ctx.Err())
+	timeoutReceipts := f.query(f.engine, memql.ContextWithFreshRead(person), "query", "workObservationsForOwnerRun", map[string]any{"runId": runID})
+	require.Contains(t, fmt.Sprint(timeoutReceipts), "embedding-timeout")
 	// A reviewed passage too large for its allocation is withheld whole and the
 	// bounded decision records the reason, without treating it as delivered.
 	tiny, err := f.second.handleOwnedTrainingLessons(ctx, map[string]any{"text": "Verify a change", "limit": 1, "minimumSimilarity": 0.6, "maxTokens": 1}, 0)

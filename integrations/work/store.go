@@ -695,6 +695,11 @@ func rowMap(row map[string]any, key string) map[string]any {
 }
 
 func rowTime(row map[string]any, key string) (time.Time, bool) {
+	// Native row metadata retains time.Time; serialized payload timestamps are
+	// strings. Both are the same version, and freshness gates must accept both.
+	if at, ok := row[key].(time.Time); ok {
+		return at, !at.IsZero()
+	}
 	raw := rowString(row, key)
 	if raw == "" {
 		return time.Time{}, false

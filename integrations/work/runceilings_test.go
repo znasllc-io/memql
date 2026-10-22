@@ -33,7 +33,7 @@ func TestRunDeadlineSurvivesReplicaChangeAndTighterReplyBudget(t *testing.T) {
 	answerRows(eng, map[string]any{"wallClockMs": 600000.0, "maxModelCalls": 12.0})
 	rc := aGoalBackedRun()
 	before, err := first.Deadline(context.Background(), rc)
-	if err != nil || !before.Equal(testNow.Add(10*time.Minute)) {
+	if err != nil || !before.IsZero() {
 		t.Fatalf("task deadline: %v %v", before, err)
 	}
 	eng.reply("workGoalForOwner", map[string]any{"id": ceilingGoalId, "ownerUserId": ceilingOwner, "ceilings": map[string]any{"wallClockMs": 60000.0, "maxModelCalls": 3.0}})
@@ -42,7 +42,7 @@ func TestRunDeadlineSurvivesReplicaChangeAndTighterReplyBudget(t *testing.T) {
 	second.now = func() time.Time { return testNow.Add(59 * time.Second) }
 	for _, replica := range []*RunCeilings{first, second} {
 		deadline, err := replica.Deadline(context.Background(), rc)
-		if err != nil || !deadline.Equal(testNow.Add(time.Minute)) {
+		if err != nil || !deadline.IsZero() {
 			t.Fatalf("replica reset/staled the reply allowance: %v %v", deadline, err)
 		}
 	}
@@ -310,8 +310,8 @@ func TestTheCeilingsThisSeamCannotEvaluateAreClearedNotSilentlyPassed(t *testing
 	if b.ceilings.MaxRetries != 0 || b.ceilings.MaxEvents != 0 {
 		t.Fatalf("the two ceilings this seam cannot see must be cleared rather than checked: %+v", b.ceilings)
 	}
-	if !b.unbounded {
-		t.Fatal("with only those two declared there is nothing left for this seam to check, and it must say so rather than read every run's journal")
+	if b.unbounded || b.ceilings.MaxModelCalls == 0 || b.ceilings.WallClockMs == 0 {
+		t.Fatal("unset lifetime limits still require bounded progress windows")
 	}
 }
 
@@ -417,7 +417,7 @@ func TestHumanWaitCreditSurvivesAReplicaChangeWithoutResettingModelSpend(t *test
 	for _, replica := range []*RunCeilings{first, second} {
 		replica.now = func() time.Time { return testNow.Add(time.Hour + 59*time.Second) }
 		deadline, err := replica.Deadline(context.Background(), rc)
-		if err != nil || !deadline.Equal(testNow.Add(time.Hour+time.Minute)) {
+		if err != nil || !deadline.IsZero() {
 			t.Fatalf("wait burned or renewed budget: %v %v", deadline, err)
 		}
 		if b := replica.Admit(context.Background(), rc, 1); b != nil {
@@ -439,7 +439,7 @@ func TestApprovedResearchDeadlineSurvivesResumeOnAnotherReplica(t *testing.T) {
 		"classification": map[string]any{"workload": "research"},
 	})
 	rc := aGoalBackedRun()
-	if deadline, err := first.Deadline(context.Background(), rc); err != nil || !deadline.Equal(testNow.Add(2*time.Hour)) {
+	if deadline, err := first.Deadline(context.Background(), rc); err != nil || !deadline.IsZero() {
 		t.Fatalf("research estimate: %v %v", deadline, err)
 	}
 	eng.reply("workGoalForOwner", map[string]any{"id": ceilingGoalId, "ownerUserId": ceilingOwner,
@@ -450,7 +450,7 @@ func TestApprovedResearchDeadlineSurvivesResumeOnAnotherReplica(t *testing.T) {
 	for _, replica := range []*RunCeilings{first, second} {
 		replica.now = func() time.Time { return testNow.Add(time.Hour) }
 		deadline, err := replica.Deadline(context.Background(), rc)
-		if err != nil || !deadline.Equal(testNow.Add(4*time.Hour)) {
+		if err != nil || !deadline.IsZero() {
 			t.Fatalf("approved time was clamped or reset on resume: %v %v", deadline, err)
 		}
 		if breach := replica.Admit(context.Background(), rc, 0); breach != nil {

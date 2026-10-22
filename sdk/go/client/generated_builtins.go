@@ -8230,6 +8230,48 @@ func StorefrontProbeBuild(args StorefrontProbeArgs) string {
 	return b.String()
 }
 
+// WorkAcceptGoalResults -- Accept the exact finished results after the owner reviews them. Only a human interactive request may close the goal this way; model success is not acceptance.
+type WorkAcceptGoalResultsArgs struct {
+	GoalId string
+	RunId  string
+	// createdAt of the reviewed run row; a changed result requires a fresh review.
+	RunVersion string
+	// Optional owner feedback on the accepted result, at most 4000 characters.
+	Feedback string
+}
+
+// WorkAcceptGoalResults calls the engine builtin workAcceptGoalResults.
+func (qc *QueryClient) WorkAcceptGoalResults(ctx context.Context, args WorkAcceptGoalResultsArgs) (*Result, error) {
+	call := WorkAcceptGoalResultsBuild(args)
+	return qc.executeNamed(ctx, "workAcceptGoalResults", call)
+}
+
+func WorkAcceptGoalResultsBuild(args WorkAcceptGoalResultsArgs) string {
+	var b strings.Builder
+	b.WriteString("builtin workAcceptGoalResults(")
+	b.WriteString("goalId: ")
+	b.WriteString(quoteMemQL(args.GoalId))
+	if b.Len() > 30 {
+		b.WriteString(", ")
+	}
+	b.WriteString("runId: ")
+	b.WriteString(quoteMemQL(args.RunId))
+	if b.Len() > 30 {
+		b.WriteString(", ")
+	}
+	b.WriteString("runVersion: ")
+	b.WriteString(quoteMemQL(args.RunVersion))
+	if args.Feedback != "" {
+		if b.Len() > 30 {
+			b.WriteString(", ")
+		}
+		b.WriteString("feedback: ")
+		b.WriteString(quoteMemQL(args.Feedback))
+	}
+	b.WriteString(")")
+	return b.String()
+}
+
 // WorkRecordGoalEvaluation -- Record an external evaluator's artifact verdicts for the human caller's finished run. MemQL verifies ownership and call receipts, not local files. Model calls cannot publish their own evaluation. Repeated identities are idempotent only for identical evidence; changed claims are refused.
 type WorkRecordGoalEvaluationArgs struct {
 	Scenario map[string]any

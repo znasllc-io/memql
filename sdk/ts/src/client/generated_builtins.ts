@@ -6386,6 +6386,35 @@ QueryClient.prototype.storefrontProbe = function (this: QueryClient, args: Store
   return this.executeNamed("storefrontProbe", buildStorefrontProbe(args), opts);
 };
 
+/** Accept the exact finished results after the owner reviews them. Only a human interactive request may close the goal this way; model success is not acceptance. */
+export interface WorkAcceptGoalResultsArgs {
+  goalId: string;
+  runId: string;
+  /** createdAt of the reviewed run row; a changed result requires a fresh review. */
+  runVersion: string;
+  /** Optional owner feedback on the accepted result, at most 4000 characters. */
+  feedback?: string;
+}
+
+export function buildWorkAcceptGoalResults(args: WorkAcceptGoalResultsArgs): string {
+  const parts: string[] = [];
+  parts.push("goalId: " + renderMemQLValue(args.goalId));
+  parts.push("runId: " + renderMemQLValue(args.runId));
+  parts.push("runVersion: " + renderMemQLValue(args.runVersion));
+  if (args.feedback !== undefined) parts.push("feedback: " + renderMemQLValue(args.feedback));
+  return "builtin workAcceptGoalResults(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    workAcceptGoalResults(args: WorkAcceptGoalResultsArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.workAcceptGoalResults = function (this: QueryClient, args: WorkAcceptGoalResultsArgs = {} as WorkAcceptGoalResultsArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("workAcceptGoalResults", buildWorkAcceptGoalResults(args), opts);
+};
+
 /** Record an external evaluator's artifact verdicts for the human caller's finished run. MemQL verifies ownership and call receipts, not local files. Model calls cannot publish their own evaluation. Repeated identities are idempotent only for identical evidence; changed claims are refused. */
 export interface WorkRecordGoalEvaluationArgs {
   scenario: Record<string, unknown>;

@@ -118,7 +118,7 @@ func (i *Integration) handleRerunStep(ctx context.Context, args map[string]any, 
 	}
 	if rowString(goal, "status") == "closed" {
 		if err := i.store().writeInternal(ownerActor(ctx, run.owner), "mutation "+call("updateWorkGoal", map[string]any{
-			"goalId": goalID, "status": "open", "closedAt": "", "closeReason": "",
+			"goalId": goalID, "status": "open", "closedAt": "", "closeReason": "", "acceptance": map[string]any{},
 			"versionTime": rfc(workRowVersionAfter(goal["createdAt"], now)),
 		})); err != nil {
 			return nil, err

@@ -135,8 +135,8 @@ The stream-owning replica admits all local and forwarded model requests through
 one queue. It reserves both the machine-wide slot and the advertised per-model
 slot before waking a waiter. Cancelling a waiter releases any reservation, and
 a disconnected machine refuses queued work. Another capability's completion
-cannot admit a model call. Waiting and inference remain bounded by the original
-run deadline; no retry or replica hop restarts it.
+cannot admit a model call. Waiting and inference retain their operation deadlines and cancellation. A
+goal has renewable progress windows rather than a fixed lifetime deadline.
 
 Conversational file requests perform one structured evidence assessment before
 materialization. The check reads bounded owner-authorized source receipts from
@@ -164,9 +164,8 @@ automatic retry. A conversational reply tightens the call allowance to three whi
 the ten-minute admission allowance, preserving stricter existing ceilings.
 A quick workload describes effort, not whether local hardware is cold or busy. Time
 is measured from the stored run start, including classification; a retry or
-move to another replica does not restart the clock. The original declared deadline covers
-in-flight prompt calls and the agent tool loop; smaller workload estimates are
-checked between calls. Direct agent attempts also
+move to another replica does not restart the clock. Per-operation deadlines cover in-flight prompt calls; renewable workload
+windows are checked between calls. Direct agent attempts also
 consume the run's model-call allowance and write attempt receipts.
 
 A classified quick conversational reply uses the `workQuickReply` prompt at
@@ -340,7 +339,7 @@ rollback or prepare an explicit data migration first.
 
 Workload estimates are checkpoints for assessing progress. At the next model
 admission, successful new task-tool receipts and verified capability reads can
-extend a spent time or call estimate automatically, up to three additional windows.
+renew a spent time or call estimate automatically, without a lifetime extension cap.
 Capability reads count newly discovered operation contracts and advertised
 modalities. Repeating a search, changing its wording or timestamp, and busy/idle
 changes do not count as new progress. A slow completed call may consume more
@@ -351,10 +350,10 @@ the result is correct. The counter and receipt fingerprints persist with the
 run under a shared decision lock, so reconnecting or changing replicas cannot
 restart them.
 
-Every extension remains within the goal's declared model-call, time, token and
-cost limits. A model operation already admitted may finish within the original
-hard deadline rather than being interrupted by a shorter workload estimate.
-Ordinary provider timeouts retain their separate recovery behavior.
+Time and call counts describe work windows, not a goal lifetime. Monetary token
+and cost ceilings remain hard. Each renewal is computed in constant time, even
+after a long operation. No context deadline cancels the whole goal at a fixed
+age; individual provider/tool timeouts retain their separate recovery behavior.
 
 Owned agent turns reconsider before exhausting their allowance. The installed
 `agentProgressRecovery` policy requests a review at 75% of a model-call limit
@@ -370,13 +369,13 @@ a specific question. Two further stalled rounds cause a native feedback pause;
 one is enough if only one model call remains. Nearing the cap alone does not
 pause productive work. Context checkpoints retain a DSL-declared reserve of
 three calls by archiving exact sources without another model summary when
-necessary. The model-call guard still enforces the hard limit, including
-context summaries and resumed work.
+necessary. The model-call guard still checks each work window, including context summaries
+and resumed work, and requires evidence or human direction to renew it.
 
 The recovery record is bounded and survives compaction and another replica.
 New accepted human guidance permits reconsideration; old answers replayed from
-history and a raised limit alone do not erase stalled progress. Guidance grants no additional access. Progress-limit feedback may continue
-within the existing overall limits, as described below. These initial thresholds are policy
+history and a raised limit alone do not erase stalled progress. Guidance grants no additional access. Progress feedback may renew a window without changing monetary limits, as
+described below. These initial thresholds are policy
 choices to evaluate against observed tasks, not universal model guarantees.
 
 The same durable recovery record also observes repeated read results across
@@ -400,11 +399,13 @@ replace current source review and ownership checks on a new turn.
 When new progress cannot justify another automatic window, Ask uses its
 ordinary feedback question: **Keep working**, **Stop here**, or a correction
 in the person's own words. An accepted answer can continue the saved work
-within the original limits. It does not reset usage, automatic continuation
-counts, repeated-call evidence, completed steps or permission decisions.
-A run has at most sixteen extra windows in total, including human-requested
-continuation. At an overall limit, the question explains that results are
-saved and offers **Stop here**; it offers no ineffective keep-working action.
+on the same goal. It does not reset usage, completed steps or permissions.
+Its decision ID makes retrying a recorded answer idempotent across replicas.
+The bounded duplicate-evidence set starts a new epoch at that human answer;
+only receipts newer than the epoch can support another automatic renewal.
+The old exact receipts remain in the journal. Reaching the 300-fingerprint
+working-set bound asks for direction rather than ending the goal. Monetary
+limits and unreadable or overflowing counters still refuse further admission.
 Time spent waiting for human input is excluded from active work time.
 
 The numeric budget-approval controls and deferred **Save guidance** / **Raise

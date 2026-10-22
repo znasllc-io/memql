@@ -113,9 +113,9 @@ func TestASucceededCloseClearsTheErrorFields(t *testing.T) {
 	j := New(engine, nil, "node-1")
 	run, _ := j.Begin(context.Background(), work())
 	run.Succeeded(context.Background(), map[string]any{"chunks": 3})
-	closeCall := engine.calls[len(engine.calls)-2]
+	closeCall := engine.calls[len(engine.calls)-1]
 	if !strings.Contains(closeCall, `status: "succeeded"`) {
-		t.Fatalf("the call before the goal close is not the run close: %s", closeCall)
+		t.Fatalf("the last call is not the run close: %s", closeCall)
 	}
 	for _, want := range []string{`errorCode: ""`, `errorMessage: ""`} {
 		if !strings.Contains(closeCall, want) {
@@ -126,7 +126,7 @@ func TestASucceededCloseClearsTheErrorFields(t *testing.T) {
 	failing := &countingEngine{}
 	failed, _ := New(failing, nil, "node-1").Begin(context.Background(), work())
 	failed.Failed(context.Background(), "analysis_failed", "no text")
-	closeCall = failing.calls[len(failing.calls)-2]
+	closeCall = failing.calls[len(failing.calls)-1]
 	if !strings.Contains(closeCall, `errorCode: "analysis_failed"`) {
 		t.Errorf("a failed close lost its own code:\n%s", closeCall)
 	}

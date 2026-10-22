@@ -25,10 +25,10 @@ func progressFixture(t *testing.T) (*Integration, *recordingEngine, map[string]a
 func progressReceipt(value string) map[string]any {
 	return map[string]any{"runId": ceilingRunId, "ownerUserId": ceilingOwner, "kind": "tool_result", "content": "verified result", "data": map[string]any{"tool": "readSource", "args": `{"id":"` + value + `"}`, "isError": false}}
 }
-func TestProgressContinuationsRequireNewWorkAndStopAfterThree(t *testing.T) {
+func TestProgressContinuationsRequireNewWorkBeyondLifetimeCaps(t *testing.T) {
 	i, e, run, rc := progressFixture(t)
 	ctx := context.Background()
-	for n := 0; n < 3; n++ {
+	for n := 0; n < 20; n++ {
 		e.reply("workProgressReceiptsForOwnerRun", progressReceipt(string(rune('a'+n))))
 		continued, err := i.ContinueWorkProgress(ctx, rc, workstate.Spent{ModelCalls: 12 * (n + 1)}, 0)
 		require.NoError(t, err)
@@ -47,10 +47,10 @@ func TestProgressContinuationsRequireNewWorkAndStopAfterThree(t *testing.T) {
 		require.NoError(t, err)
 		require.False(t, continued)
 	}
-	e.reply("workProgressReceiptsForOwnerRun", progressReceipt("fourth"))
-	continued, err := i.ContinueWorkProgress(ctx, rc, workstate.Spent{ModelCalls: 48}, 0)
+	e.reply("workProgressReceiptsForOwnerRun", progressReceipt("twenty-first"))
+	continued, err := i.ContinueWorkProgress(ctx, rc, workstate.Spent{ModelCalls: 252}, 0)
 	require.NoError(t, err)
-	require.False(t, continued)
+	require.True(t, continued)
 	require.Empty(t, e.callsTo("createWorkApproval"))
 	require.Empty(t, e.callsTo("updateWorkGoal"))
 }
@@ -62,8 +62,6 @@ func TestProgressNeverWeakensHardLimitsOrFailedReads(t *testing.T) {
 		mutate  func(*recordingEngine, map[string]any, *common.RunContext)
 		wantErr bool
 	}{
-		{name: "calls", spent: workstate.Spent{ModelCalls: 96}},
-		{name: "time", spent: workstate.Spent{WallClockMs: 7200000}},
 		{name: "money", spent: workstate.Spent{ModelCalls: 12, Cost: 0.5}},
 		{name: "tokens", spent: workstate.Spent{ModelCalls: 12, Tokens: 990}, tokens: 20},
 		{name: "cancelled", spent: workstate.Spent{ModelCalls: 12}, mutate: func(_ *recordingEngine, r map[string]any, _ *common.RunContext) { r["cancelRequested"] = true }},
@@ -112,29 +110,30 @@ func TestProgressReceiptRejectsFailuresDiscoveryAndEquivalentRepeats(t *testing.
 	require.Empty(t, progressReceiptKey(v))
 }
 func TestProgressLimitsIntersectAndDoNotOverflow(t *testing.T) {
-	require.Equal(t, int64(math.MaxInt64), scaleProgressLimit(math.MaxInt64-1, math.MaxInt64, 4))
+	_, overflow := progressCeilings(map[string]any{}, map[string]any{"classification": map[string]any{"progressContinuation": map[string]any{"extensions": math.MaxInt}}}, workstate.Ceilings{})
+	require.Error(t, overflow)
 	for count := 0; count <= 16; count++ {
 		goal := map[string]any{"ceilings": map[string]any{"maxModelCalls": 50, "wallClockMs": 1500000}}
 		run := map[string]any{"classification": map[string]any{"workload": "lookup", "progressContinuation": map[string]any{"extensions": count}}}
 		limits, err := progressCeilings(goal, run, workstate.Ceilings{MaxModelCalls: 50, WallClockMs: 1500000})
 		require.NoError(t, err)
-		require.Equal(t, min(50, 12*(count+1)), limits.MaxModelCalls)
-		require.LessOrEqual(t, limits.WallClockMs, int64(1500000))
+		require.Equal(t, 12*(count+1), limits.MaxModelCalls)
+		require.Equal(t, int64(600000*(count+1)), limits.WallClockMs)
 	}
 }
-func TestProgressInFlightDeadlineUsesOriginalHardLimit(t *testing.T) {
+func TestProgressInFlightHasNoGoalLifetimeDeadline(t *testing.T) {
 	_, e, r, rc := progressFixture(t)
 	first, peer := NewRunCeilings(e, testLogger()), NewRunCeilings(e, testLogger())
 	for _, guard := range []*RunCeilings{first, peer} {
 		guard.now = func() time.Time { return testNow }
 		deadline, err := guard.Deadline(context.Background(), rc)
 		require.NoError(t, err)
-		require.Equal(t, testNow.Add(2*time.Hour), deadline)
+		require.True(t, deadline.IsZero())
 	}
 	r["humanWaitMs"] = 60000
 	deadline, err := peer.Deadline(context.Background(), rc)
 	require.NoError(t, err)
-	require.Equal(t, testNow.Add(2*time.Hour), deadline, "future pause credit is clamped")
+	require.True(t, deadline.IsZero(), "human waits cannot create a lifetime deadline")
 	first.Charge(context.Background(), rc, memql.ModelSpend{Served: "local"})
 	require.Equal(t, 1, first.Spent(context.Background(), rc).ModelCalls)
 }
@@ -147,13 +146,32 @@ func TestProgressLongOperationConsumesBoundedWindows(t *testing.T) {
 	state := rowMap(rowMap(e.callsTo("updateWorkRun")[0].Args(t), "classification"), "progressContinuation")
 	require.Equal(t, 2, rowInt(state, "extensions"))
 }
-func TestProgressCannotSpendAnIneffectiveWindow(t *testing.T) {
+func TestProgressCanRenewAfterDaysWithoutALifetimeLimit(t *testing.T) {
 	for _, hard := range []int64{0, 7200000} {
 		i, e, _, rc := progressFixture(t)
 		e.reply("workGoalForOwner", map[string]any{"id": ceilingGoalId, "ceilings": map[string]any{"wallClockMs": hard}})
-		ok, err := i.ContinueWorkProgress(context.Background(), rc, workstate.Spent{WallClockMs: 3000000}, 0)
+		ok, err := i.ContinueWorkProgress(context.Background(), rc, workstate.Spent{WallClockMs: int64((72 * time.Hour) / time.Millisecond)}, 0)
 		require.NoError(t, err)
-		require.False(t, ok)
-		require.Empty(t, e.callsTo("updateWorkRun"))
+		require.True(t, ok)
+		require.Len(t, e.callsTo("updateWorkRun"), 1)
 	}
+}
+
+func TestProgressFeedbackEpochDoesNotRecycleOldEvidence(t *testing.T) {
+	i, e, run, rc := progressFixture(t)
+	run["classification"].(map[string]any)["progressContinuation"] = map[string]any{"receiptAfter": rfc(testNow), "extensions": 1}
+	old := progressReceipt("before-answer")
+	old["createdAt"] = rfc(testNow.Add(-time.Minute))
+	e.reply("workProgressReceiptsForOwnerRun", old)
+	ok, err := i.ContinueWorkProgress(context.Background(), rc, workstate.Spent{ModelCalls: 24}, 0)
+	require.NoError(t, err)
+	require.False(t, ok)
+	fresh := progressReceipt("after-answer")
+	fresh["createdAt"] = rfc(testNow.Add(time.Minute))
+	e.reply("workProgressReceiptsForOwnerRun", old, fresh)
+	ok, err = i.ContinueWorkProgress(context.Background(), rc, workstate.Spent{ModelCalls: 24}, 0)
+	require.NoError(t, err)
+	require.True(t, ok)
+	state := rowMap(rowMap(e.callsTo("updateWorkRun")[0].Args(t), "classification"), "progressContinuation")
+	require.Equal(t, rfc(testNow), rowString(state, "receiptAfter"))
 }

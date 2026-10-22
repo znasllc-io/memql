@@ -41,6 +41,13 @@ conditions, and the invariant it protects. Cover permission and ownership checks
 reuse and freshness decisions, retained versus temporary data, and what survives
 a retry, pause or replica change when those behaviors are affected.
 
+A goal has no fixed lifetime while measured progress continues. Keep progress
+windows, per-operation watchdogs, spending limits and permission gates distinct.
+Execution finishing means results are ready for review; only the owner's explicit
+acceptance of those results or decision to close ends the goal. Initial plan
+approval is not result acceptance. Preserve the feedback and exact reviewed
+result version, and do not let a model accept its own work.
+
 Keep rationale beside the decision in code; keep the connected workflow in the
 existing reference or runbook. Link the relevant regression tests and identify
 unverified behavior or known limitations. Do not describe intended behavior as

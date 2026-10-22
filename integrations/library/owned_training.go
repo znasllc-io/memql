@@ -258,9 +258,13 @@ func (i *Integration) handleOwnedTrainingLessons(ctx context.Context, args map[s
 	if err != nil {
 		return nil, err
 	}
-	vector, err := r.embed.Embed(ctx, text, provider)
+	vector, unavailable, err := optionalTrainingVector(ctx, func(lookup context.Context) ([]float32, error) { return r.embed.Embed(lookup, text, provider) })
 	if err != nil {
 		return nil, fmt.Errorf("embed Training query: %w", err)
+	}
+	if unavailable {
+		receipt.Status = "embedding-timeout"
+		return nil, nil
 	}
 	table, err := memql.EmbeddingVectorTable(provider, len(vector))
 	if err != nil {
@@ -461,4 +465,28 @@ func (i *Integration) revalidateReleaseLesson(ctx context.Context, c trainingCan
 		return nil, false, nil
 	}
 	return map[string]any{"chunkId": seed.ID, "chunkVersionAt": latest.CreatedAt.Format(time.RFC3339Nano), "domainId": seed.Domain, "source": "appStructure", "sourceRef": seed.SourceRef, "seedRevision": seed.Revision, "citation": "Shipped knowledge: " + seed.SourceRef, "similarity": c.score, "text": seed.Text}, true, nil
+}
+
+// Similarity retrieval is optional context, not an execution prerequisite. A
+// slow inference door must not consume the whole turn before work starts. Only
+// this child deadline is optional: owner/source validation, explicit evaluation
+// lessons, provider faults and cancellation of the caller still propagate.
+// The caller records the omission on the normal Training selection receipt.
+func optionalTrainingVector(ctx context.Context, embed func(context.Context) ([]float32, error)) ([]float32, bool, error) {
+	return trainingVectorWithin(ctx, 5*time.Second, embed)
+}
+
+var errTrainingLookupTimeout = errors.New("optional Training query timed out")
+
+func trainingVectorWithin(ctx context.Context, budget time.Duration, embed func(context.Context) ([]float32, error)) ([]float32, bool, error) {
+	lookup, cancel := context.WithTimeoutCause(ctx, budget, errTrainingLookupTimeout)
+	defer cancel()
+	vector, err := embed(lookup)
+	if ctx.Err() != nil {
+		return nil, false, ctx.Err()
+	}
+	if errors.Is(context.Cause(lookup), errTrainingLookupTimeout) {
+		return nil, true, nil
+	}
+	return vector, false, err
 }

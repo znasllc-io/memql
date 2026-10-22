@@ -97,6 +97,48 @@ knowledge search is bounded similarly; required instructions and evidence reads
 must not be converted into optional failures. A failed vector write can reduce
 semantic recall until backfill, but does not remove the exact journal source.
 
+Optional Training similarity retrieval uses a five-second child deadline for
+its query embedding. A timeout of that child records `embedding-timeout` on the
+normal owner-scoped selection receipt and contributes no passages. Caller
+cancellation, ownership/source failures, provider errors and explicit evaluation
+lessons still propagate. This prevents a cold or busy optional inference door
+from spending an entire turn before execution. Coverage includes
+`TestOptionalTrainingVectorBoundsOnlyItsOwnWait` and required-database
+`TestOwnedTrainingReadsReviewedTaughtSourcesAcrossReplicas`, including omission
+readback on another engine. The Training interface is unchanged.
+
+## Progress windows and result acceptance
+
+Time and model-call estimates bound a work window, not a goal's lifetime.
+`integrations/work/progress_continuation.go` renews only after successful new
+receipts or a verified human answer, under the shared run decision lock. The
+old three-automatic/sixteen-total caps and fixed two-hour context deadline are
+removed. Monetary limits, scoped permissions, cancellation, per-operation
+watchdogs and the existing stalled-loop detector remain independent.
+
+Counters never reset on renewal. A human-directed restart opens a new evidence
+epoch and clears only its bounded duplicate cache; receipts older than the epoch
+cannot fund another window. Original evidence remains in the journal. This
+keeps a memory bound from becoming a lifetime limit while preventing an old
+answer or receipt from buying another window on a second replica. The signal is
+completed activity, not certification that the user's objective is achieved.
+
+Execution writers no longer close goals on success, failure or cancellation.
+`workAcceptGoalResults` accepts an exact finished run revision only from its
+owner's interactive request. It serializes with rerun/cancel, refuses newer or
+live results, persists optional feedback and is idempotent for the same decision.
+`cancelGoal` also refuses calls from running agents. A person can accept a useful
+partial result, so acceptance does not require the model's success label.
+Initial plan approval and final result acceptance are separate decisions.
+
+Coverage: `TestProgressContinuationsRequireNewWorkBeyondLifetimeCaps`,
+`TestProgressCanRenewAfterDaysWithoutALifetimeLimit`,
+`TestProgressFeedbackEpochDoesNotRecycleOldEvidence`, the required-database
+`TestProgressDBWorkflowAcrossReplicas`, and `TestAcceptGoalResultsRequiresExactHumanReviewedResults`.
+These tests are not a months-long soak. Usage reconciliation still has its
+separate fail-closed receipt tracking bound; it must not be described as
+unbounded in-memory tracking or as owner acceptance.
+
 ## Recovery boundaries and remaining limits
 
 Ordinary Ask follow-up routing considers preparing, running and waiting goals.
