@@ -57,6 +57,8 @@ func TestWorkSourceHistoryPagesOlderLargeReceiptsAcrossReplicasWithoutPrivateCon
 		{Role: "tool", Name: "recallWorkHistory", ToolCallId: "recall", Content: "RECALLED-CLAIM"},
 		{Role: "tool", Name: "workbenchHost", ToolCallId: "pending", Content: common.UnexecutedWorkToolResult},
 		{Role: "tool", Name: "workbenchHost", ToolCallId: "not-paired", Content: "UNPAIRED-RESULT"},
+		{Role: "assistant", ToolCalls: []common.ToolCall{{ID: "wrapped-history", Name: "executeCapability", Arguments: `{"name":"work.workSourceContext","arguments":{}}`}}},
+		{Role: "tool", Name: "executeCapability", ToolCallId: "wrapped-history", Content: "NESTED-RETRIEVAL"},
 	})
 	for n := range 20 {
 		call := fmt.Sprintf("recent-%d", n)
@@ -92,7 +94,7 @@ func TestWorkSourceHistoryPagesOlderLargeReceiptsAcrossReplicasWithoutPrivateCon
 	}
 	require.Greater(t, pages, 4, "must search beyond the former 16-receipt preview ceiling")
 	require.Equal(t, BareShortId(originalID), foundCheckpoint)
-	require.Equal(t, 1, foundIndex)
+	require.Equal(t, 3, foundIndex, "excluding the newer wrapper preserves the original receipt's previous projected index")
 	var recovered strings.Builder
 	for offset := 0; ; {
 		args := map[string]any{"sourceRunId": prior, "checkpoint": foundCheckpoint, "messageIndex": foundIndex, "offset": offset, "maxChars": 4000}
@@ -102,7 +104,7 @@ func TestWorkSourceHistoryPagesOlderLargeReceiptsAcrossReplicasWithoutPrivateCon
 		require.NoError(t, err)
 		require.NoError(t, b.RecordDelegatedToolSource(WithActingAgentId(ctx, "coding-agent"), "recallWorkHistory", args, string(wire)))
 		text := string(result[0].Payload)
-		for _, private := range []string{"PRIVATE-SYSTEM", "PRIVATE-REASONING", "PRIVATE-SECRET", "RECALLED-CLAIM", "UNPAIRED-RESULT"} {
+		for _, private := range []string{"PRIVATE-SYSTEM", "PRIVATE-REASONING", "PRIVATE-SECRET", "RECALLED-CLAIM", "UNPAIRED-RESULT", "NESTED-RETRIEVAL"} {
 			require.NotContains(t, text, private)
 		}
 		require.Less(t, len(text), 20000)

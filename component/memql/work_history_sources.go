@@ -82,14 +82,23 @@ func (e *MemQLEngine) recallWorkSourceHistory(ctx context.Context, current map[s
 		pairs, missing := workCheckpointPairs(row)
 		omitted = omitted || missing
 		messages := []common.ChatMessage{}
+		calls := map[int]common.ToolCall{}
 		for _, pair := range pairs {
-			messages = append(messages, common.ChatMessage{Role: "assistant", ToolCalls: []common.ToolCall{pair.call}}, pair.result)
+			for len(messages) <= pair.index+1 {
+				messages = append(messages, common.ChatMessage{})
+			}
+			messages[pair.index] = common.ChatMessage{Role: "assistant", ToolCalls: []common.ToolCall{pair.call}}
+			messages[pair.index+1] = pair.result
+			calls[pair.index+1] = pair.call
 		}
 		ref := BareShortId(stringArg(row, "id"))
 		directory := workHistorySourceIndex(ref, messages, index)
 		directory["sourceRunId"] = BareShortId(sourceID)
 		sources = append(sources, directory)
 		for i, message := range messages {
+			if message.Role == "" {
+				continue
+			}
 			if checkpoint != "" && i != index {
 				continue
 			}
@@ -118,7 +127,7 @@ func (e *MemQLEngine) recallWorkSourceHistory(ctx context.Context, current map[s
 						Path string `json:"path"`
 					} `json:"args"`
 				}
-				if message.Name == "workbenchHost" && json.Unmarshal([]byte(pairs[i/2].call.Arguments), &arguments) == nil && arguments.Action == "fs_read" && len(arguments.Args.Path) <= 1024 {
+				if message.Name == "workbenchHost" && json.Unmarshal([]byte(calls[i].Arguments), &arguments) == nil && arguments.Action == "fs_read" && len(arguments.Args.Path) <= 1024 {
 					provenance["path"] = arguments.Args.Path
 				}
 				page["sourceEvidence"] = provenance
