@@ -28,7 +28,7 @@ func TestEnginePortableLanesKeepRequiredCommands(t *testing.T) {
 	if value, found := engineStepExports(conformance.Run, "MEMQL_DIFFERENTIAL_REQUIRED"); !found || value != "1" {
 		t.Error("conformance can report a language differential as a passing warning")
 	}
-	for _, name := range []string{"mcp-conformance", "proving"} {
+	for _, name := range []string{"mcp-conformance", "proving", "test-agent"} {
 		step, ok := engineDeclaredStep(spec, name)
 		if !ok || !slices.Contains(step.Services, "postgres") {
 			t.Fatalf("%s lacks its database", name)
@@ -99,7 +99,12 @@ func TestEnginePortableTagAndIsolationCoverage(t *testing.T) {
 		"planner":   "./app/ ./component/node/",
 		"workbench": "./app/ ./component/node/",
 	} {
-		assertCommand("test-"+tag, "go test -tags "+tag+" -timeout=300s "+packages)
+		flags := "-tags " + tag
+		if tag == "agent" {
+			// Its required database fixtures must execute on every native run.
+			flags += " -count=1"
+		}
+		assertCommand("test-"+tag, "go test "+flags+" -timeout=300s "+packages)
 	}
 	for _, tag := range []string{"clustere2e", "clustere2e,agent"} {
 		assertCommand("build-clustere2e", "go vet -tags "+tag+" ./test/clustere2e/")
