@@ -154,6 +154,20 @@ Byte recovery and content verification are different from semantic retrieval.
 
 ## Context pressure and optional work
 
+Completed old calls whose arguments alone exceed the checkpoint model's input
+window are archived before semantic compaction spends calls on smaller history.
+This handles large file/image transfers without depending on a tool name or
+task category. The same selector protects authority, the active instruction,
+original/latest human requests, incomplete pairs and the latest exchange.
+At most eight exchanges of at most 4 MiB are archived per pass, largest first;
+each exact source is durable before its incomplete preview enters active
+context. This creates no semantic summary and never replays an effect. Failure
+to store an archive stops compaction; ineligible or larger exchanges remain for
+the existing bounded path. `work_context_large_calls_db_test.go` reproduces
+unnecessary inference before this ordering change and verifies zero summary
+calls plus exact cross-replica readback afterward. Ordinary small receipts,
+instructions and the fresh tail remain verbatim in that regression.
+
 [Context management](../../../component/memql/work_context.go) first archives
 bulky completed results, then uses a bounded semantic pass over complete older
 exchanges. It preserves authority, current human direction and pending tool

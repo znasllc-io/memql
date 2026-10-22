@@ -480,6 +480,12 @@ with an image-delivery failure; the adapter does not retry capture, enlarge
 computer access or bypass retention limits. Receiving pixels is separate from
 inspecting the correct interface and retaining a readable evidence artifact.
 
+Large arguments from completed older tool calls, such as a file transfer, can
+be archived exactly before spending model calls to compress smaller history.
+The active instruction, human requests, pending calls and latest exchange
+remain protected. Archive references appear only after durable storage succeeds;
+their short previews are incomplete evidence, not verified summaries.
+
 Execution continuations preserve complete tool exchanges in an encoded JSON
 receipt, including control characters that the storage layer cannot accept
 as plain text. Restoration verifies the original content hash; existing
