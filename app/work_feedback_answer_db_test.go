@@ -34,10 +34,21 @@ type feedbackAnswerProvider struct {
 	first    bool
 	optional bool
 	requests [][]common.ChatMessage
+	reviews  [][]common.ChatMessage
 }
 
 func (*feedbackAnswerProvider) Call(context.Context, string) (any, error) {
 	return nil, fmt.Errorf("unexpected text call")
+}
+func (p *feedbackAnswerProvider) CallChatStructured(ctx context.Context, messages []common.ChatMessage, schema common.StructuredSchema) (string, error) {
+	if err := ctx.Err(); err != nil {
+		return "", err
+	}
+	if schema.Name != "work_reply_review" || !schema.Strict {
+		return "", fmt.Errorf("unexpected structured call: %s (strict=%v)", schema.Name, schema.Strict)
+	}
+	p.reviews = append(p.reviews, append([]common.ChatMessage(nil), messages...))
+	return `{"reply":"Correction received without executing an operation"}`, nil
 }
 func (p *feedbackAnswerProvider) CallChatWithTools(_ context.Context, messages []common.ChatMessage, _ []common.ToolDefinition) (*common.ToolCallingChatResult, error) {
 	p.requests = append(p.requests, append([]common.ChatMessage(nil), messages...))
@@ -143,6 +154,7 @@ func testWorkFeedbackContinuation(t *testing.T, optional bool) {
 		require.NoError(t, rules.Register(&memql.RuleConfig{Name: memql.DefaultRuleName, Policy: "fixture", Locked: true, OnUnavailable: memql.OnUnavailableDegrade, SourceFile: "dsl/rules/rules.memql"}))
 		require.NoError(t, rules.Finalize())
 		rtr := router.New(registry, memql.NewPolicyRegistryForTest(map[string][]string{"fixture": {"fixture"}}), rules, nil, e.Logger)
+		e.SetAIResolver(rtr)
 		replier, err := agent.NewReplier(&feedbackAnswerAdapter{CognitionEngineAdapter: &CognitionEngineAdapter{Engine: e}, effects: effects}, rtr, e.Logger)
 		require.NoError(t, err)
 		turn := &installedBudgetTurn{replierTurnRunner: &replierTurnRunner{replier: replier, engine: e}}
@@ -169,6 +181,7 @@ func testWorkFeedbackContinuation(t *testing.T, optional bool) {
 			for n, runner := range runners {
 				runner.first = n == 0
 				runner.requests = nil
+				runner.reviews = nil
 				turns[n].background = background
 			}
 			key := id.NewShortId()
@@ -278,6 +291,8 @@ func testWorkFeedbackContinuation(t *testing.T, optional bool) {
 				require.NoError(t, err)
 				require.Equal(t, "completed", done.Status)
 				require.Len(t, runners[1].requests, attempt+1)
+				require.Len(t, runners[1].reviews, attempt+1)
+				require.Contains(t, fmt.Sprint(runners[1].reviews[attempt]), "completed result retained", "the resumed reply review must receive the completed tool receipt")
 				require.Equal(t, map[string]int{"completed-section": 1, "child-prefix": attempt + 1, "completed-tool": attempt + 1, "child-tail": attempt + 1, "later-section": attempt + 1}, effects)
 				require.Contains(t, runners[1].requests[attempt], common.ChatMessage{Role: "tool", ToolCallId: "completed", Name: "discoverCapabilities", Content: "completed result retained"})
 				final := query("workRunForOwner", map[string]any{"runId": runID})[0]
