@@ -26,6 +26,81 @@ def report():
 
 
 class ScorecardTests(unittest.TestCase):
+    def test_empty_report_after_transient_github_query_is_retried_with_evidence(self):
+        transient = b"Skipping github.com/acme/widget: run: internal error: githubv4.Query: Something went wrong while executing your query"
+        raw = {"version": "2.1.0", "runs": [{"tool": {"driver": {
+            "name": "Scorecard", "semanticVersion": "v5.5.0"}}, "results": []}]}
+        secret = "fixture-read-only-token"
+        with tempfile.TemporaryDirectory() as temporary:
+            output = Path(temporary) / "output"
+            with mock.patch.dict(os.environ, {"MEMQL_REPOSITORY": "acme/widget", "MEMQL_SHA": SHA,
+                                              "MEMQL_GITHUB_READ_TOKEN": secret}), \
+                 mock.patch.object(sys, "argv", ["scorecard-scan", "--output-dir", str(output), "--scorecard", "/unused"]), \
+                 mock.patch.object(SCAN, "head", return_value=SHA), \
+                 mock.patch.object(SCAN.time, "sleep") as sleep, \
+                 mock.patch.object(SCAN, "run_bounded", side_effect=[
+                     (0, json.dumps(report()).encode(), b""),
+                     (0, b"", transient + b" " + secret.encode()),
+                     (0, json.dumps(raw).encode(), b"")]) as run:
+                self.assertEqual(SCAN.main(), 0)
+            self.assertEqual(run.call_count, 3)
+            sleep.assert_called_once_with(5)
+            saved = output / "attempts" / "sarif-1.log"
+            self.assertIn("Something went wrong", saved.read_text())
+            self.assertNotIn(secret, saved.read_text())
+            self.assertEqual(json.loads((output / "summary.json").read_text())["status"], "analyzed")
+
+    def test_transient_query_retries_are_bounded_and_never_accept_an_empty_report(self):
+        transient = b"Skipping github.com/acme/widget: run: internal error: githubv4.Query: Something went wrong while executing your query"
+        with tempfile.TemporaryDirectory() as temporary:
+            output = Path(temporary) / "output"
+            with mock.patch.dict(os.environ, {"MEMQL_REPOSITORY": "acme/widget", "MEMQL_SHA": SHA,
+                                              "MEMQL_GITHUB_READ_TOKEN": "fixture"}), \
+                 mock.patch.object(sys, "argv", ["scorecard-scan", "--output-dir", str(output), "--scorecard", "/unused"]), \
+                 mock.patch.object(SCAN, "head", return_value=SHA), \
+                 mock.patch.object(SCAN.time, "sleep") as sleep, \
+                 mock.patch.object(SCAN, "run_bounded", return_value=(0, b"", transient)) as run:
+                self.assertEqual(SCAN.main(), 1)
+            self.assertEqual(run.call_count, 3)
+            self.assertEqual(sleep.call_count, 2)
+            self.assertEqual((output / "json.log").read_bytes(), transient)
+            self.assertFalse((output / "results.raw.sarif").exists())
+
+    def test_transient_retry_rechecks_source_and_keeps_original_execution_bound(self):
+        transient = b"Skipping github.com/acme/widget: run: internal error: githubv4.Query: Something went wrong while executing your query"
+        for mode in ("source moved", "time exhausted", "smaller remaining budget"):
+            with self.subTest(mode=mode), tempfile.TemporaryDirectory() as temporary:
+                output = Path(temporary) / "output"
+                heads = [SHA, "b" * 40] if mode == "source moved" else [SHA] * 5
+                times = [0, 0, 596] if mode == "time exhausted" else [0, 0, 20, 25]
+                with mock.patch.dict(os.environ, {"MEMQL_REPOSITORY": "acme/widget", "MEMQL_SHA": SHA,
+                                                  "MEMQL_GITHUB_READ_TOKEN": "fixture"}), \
+                     mock.patch.object(sys, "argv", ["scorecard-scan", "--output-dir", str(output), "--scorecard", "/unused"]), \
+                     mock.patch.object(SCAN, "head", side_effect=heads), \
+                     mock.patch.object(SCAN.time, "monotonic", side_effect=times), \
+                     mock.patch.object(SCAN.time, "sleep"), \
+                     mock.patch.object(SCAN, "run_bounded", side_effect=[(0, b"", transient), (1, b"", b"permanent failure")]) as run:
+                    self.assertEqual(SCAN.main(), 1)
+                if mode == "smaller remaining budget":
+                    self.assertEqual(run.call_count, 2)
+                    self.assertEqual(run.call_args.kwargs["timeout"], 575)
+                else:
+                    self.assertEqual(run.call_count, 1)
+
+    def test_other_empty_reports_and_permission_failures_are_not_retried(self):
+        for stderr in (b"", b"Resource not accessible by integration", b"Bad credentials"):
+            with self.subTest(stderr=stderr), tempfile.TemporaryDirectory() as temporary:
+                output = Path(temporary) / "output"
+                with mock.patch.dict(os.environ, {"MEMQL_REPOSITORY": "acme/widget", "MEMQL_SHA": SHA,
+                                                  "MEMQL_GITHUB_READ_TOKEN": "fixture"}), \
+                     mock.patch.object(sys, "argv", ["scorecard-scan", "--output-dir", str(output), "--scorecard", "/unused"]), \
+                     mock.patch.object(SCAN, "head", return_value=SHA), \
+                     mock.patch.object(SCAN.time, "sleep") as sleep, \
+                     mock.patch.object(SCAN, "run_bounded", return_value=(0, b"", stderr)) as run:
+                    self.assertEqual(SCAN.main(), 1)
+                self.assertEqual(run.call_count, 1)
+                sleep.assert_not_called()
+
     def test_policy_preserves_the_retiring_actions_enabled_checks(self):
         raw = SCAN.POLICY.read_bytes()
         self.assertEqual(hashlib.sha256(raw).hexdigest(), SCAN.POLICY_SHA256)

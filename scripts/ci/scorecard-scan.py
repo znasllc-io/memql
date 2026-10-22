@@ -198,6 +198,42 @@ def run_bounded(command, env, timeout=600, maximum=MAX_REPORT):
             process.wait()
 
 
+def run_audit_format(command, env, repository, sha, token, output_dir, form):
+    """Retry a known transient GitHub query failure within the original bound.
+
+    Scorecard 5.5 can exit zero after skipping a repository whose GraphQL query
+    failed. An empty report is still a failure. Only that explicit temporary
+    server error may repeat this read-only audit, with fresh source checks.
+    """
+    deadline = time.monotonic() + 600
+    for attempt in range(1, 4):
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
+            raise ValueError("Scorecard analysis exceeded its execution bound")
+        code, stdout, stderr = run_bounded(command, env, timeout=remaining)
+        transient = (
+            not stdout.strip()
+            and b"Skipping github.com/" + repository.encode() + b": run: internal error:" in stderr
+            and b"githubv4.Query: Something went wrong while executing your query" in stderr
+        )
+        if not transient or attempt == 3:
+            return code, stdout, stderr
+        evidence = output_dir / "attempts"
+        evidence.mkdir(exist_ok=True)
+        (evidence / f"{form}-{attempt}.log").write_bytes(stderr.replace(token.encode(), b"[redacted]"))
+        (evidence / f"{form}-{attempt}.json").write_text(json.dumps({
+            "exitCode": code, "reportBytes": len(stdout), "sourceCommit": sha,
+            "retryReason": "empty report after transient GitHub GraphQL error",
+        }, indent=2) + "\n")
+        if head(repository, token) != sha:
+            raise ValueError("repository HEAD changed before audit retry; request a fresh audit")
+        delay = 5 * attempt
+        if deadline - time.monotonic() <= delay:
+            raise ValueError("Scorecard analysis exceeded its execution bound")
+        print(f"Scorecard {form} attempt {attempt} hit a temporary GitHub query error; retrying", file=sys.stderr)
+        time.sleep(delay)
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--output-dir", type=Path, required=True)
@@ -227,10 +263,10 @@ def main():
             scratch = Path(temporary)
             binary = args.scorecard.resolve() if args.scorecard else install_binary(scratch)
             for form, filename in (("json", "results.json"), ("sarif", "results.sarif")):
-                code, stdout, stderr = run_bounded(
+                code, stdout, stderr = run_audit_format(
                     [str(binary), "--repo=github.com/" + repo, "--format=" + form,
                      "--policy=" + str(POLICY.resolve()), "--show-details", "--verbosity=warn"],
-                    env,
+                    env, repo, sha, token, args.output_dir, form,
                 )
                 (args.output_dir / filename).write_bytes(stdout.replace(token.encode(), b"[redacted]"))
                 (args.output_dir / (form + ".log")).write_bytes(stderr.replace(token.encode(), b"[redacted]"))
