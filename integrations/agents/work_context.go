@@ -113,7 +113,10 @@ func workTurnHistory(ctx context.Context, engine interface {
 		destination = "auto"
 	}
 	history = append(history, &memqlv1.AgentTurnMessage{Role: "user", Content: "[Execution destination selected by the person for this goal: " + destination + ". This choice does not grant computer access.]"})
-	history = append(history, &memqlv1.AgentTurnMessage{Role: "user", Content: prompt})
+	// Conversation history can precede this prompt, and approvals/guidance can
+	// follow it. Mark the active contract independently of first/last human
+	// messages so compaction cannot turn it into an optional historical summary.
+	history = append(history, &memqlv1.AgentTurnMessage{Role: "user", Name: common.WorkInstructionMessageName, Content: prompt})
 	questionsCall, _ := parser.RenderCall("workQuestionsForOwnerRun", map[string]any{"runId": run.RunId})
 	questions, err := engine.Execute(memql.ContextWithFreshRead(ctx), "query "+questionsCall)
 	if err != nil {

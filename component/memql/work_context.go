@@ -362,8 +362,12 @@ func (e *MemQLEngine) workCheckpoint(ctx context.Context, fingerprint, source, t
 // relevance context without treating a tool result or earlier memory as a new
 // request. Preserve both ends of long requests (templates often append intent).
 func workContextTask(messages []common.ChatMessage) string {
-	first, latest := "", ""
+	first, latest, instruction := "", "", ""
 	for _, message := range messages {
+		if common.IsWorkInstruction(message) {
+			instruction = message.Content
+			continue
+		}
 		if message.Role != "user" || isWorkMemory(message) || message.Content == "" {
 			continue
 		}
@@ -380,6 +384,12 @@ func workContextTask(messages []common.ChatMessage) string {
 		head := limit / 4
 		tail := limit - head - len(gap)
 		return strings.ToValidUTF8(value[:head], "") + gap + strings.ToValidUTF8(value[len(value)-tail:], "")
+	}
+	if instruction != "" {
+		// Relevance includes the active section, not just the broader goal and
+		// latest approval. The full instruction stays pinned outside this bounded
+		// summary input; this relevance excerpt also keys cached summaries.
+		return "Current execution instruction:\n" + excerpt(instruction, 2000) + "\nOriginal request:\n" + excerpt(first, 900) + "\nLatest request:\n" + excerpt(latest, 900)
 	}
 	if first == latest {
 		return excerpt(first, 4000)

@@ -46,6 +46,27 @@ changed required checkpoints. Previously accumulated copies can still require
 compaction, and end-to-end latency depends on the selected model and remaining
 work; the regression is not a timing guarantee.
 
+The active compiled instruction has a native retention marker separate from
+the first and latest human messages. Approvals and guidance can arrive after
+that instruction; they must not make its stage boundary eligible for summary
+or archival. Context selection pins it verbatim, includes it in the retained
+size floor, and passes a bounded excerpt into summary relevance. If the retained
+instructions exceed a model's capacity, ordinary capacity checks still apply.
+The marker retains a user-role message; it grants no permission or higher role.
+Conversation history cannot supply the marker.
+
+After exact checkpoint, owner and execution validation, resume restores the
+instruction supplied by the executing automation. This repairs older checkpoints
+whose unmarked stage instruction was compacted away. It replaces stale marked
+copies and upgrades an identical legacy copy, while preserving completed tool
+exchanges and later human corrections in order. It does not rewrite the saved
+receipt. Empty or ambiguous current instructions fail rather than selecting a
+contract arbitrarily. `TestWorkContextKeepsCurrentInstructionAfterApprovalAndGuidance`,
+`TestRestoreWorkInstructionPreservesEffectsAndHumanCorrections` and the required
+database continuation test cover retention, idempotence and exact effects across
+replicas. This prevents instruction loss; it does not certify that a model obeyed
+the stage, completed the work or delivered faster results.
+
 Worker output backpressure must not prevent a disconnect from taking effect.
 App chunks and model deltas watch the shared stream's cancellation while waiting
 for buffer space. Delivery and channel closure are serialized, with the terminal

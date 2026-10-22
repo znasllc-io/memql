@@ -120,6 +120,9 @@ func TestNativeContinuationDoesNotReinjectConversationSourcePreview(t *testing.T
 	history, err := workTurnHistory(ctx, reader, "Continue from the saved checkpoint")
 	require.NoError(t, err)
 	require.Len(t, history, 3)
+	require.Equal(t, "user", history[1].Role)
+	require.Equal(t, common.WorkInstructionMessageName, history[1].Name)
+	require.Equal(t, "Continue from the saved checkpoint", history[1].Content)
 	// The checkpoint restorer appends this decision verbatim. It must not also
 	// append the original run's source inventory on every permission resume.
 	receipt := history[2].Content

@@ -52,7 +52,7 @@ func isWorkMemory(m common.ChatMessage) bool {
 func workContextHumanBounds(messages []common.ChatMessage) (first, last int) {
 	first, last = -1, -1
 	for i, m := range messages {
-		if m.Role == "user" && !isWorkMemory(m) {
+		if m.Role == "user" && !isWorkMemory(m) && !common.IsWorkInstruction(m) {
 			if first < 0 {
 				first = i
 			}
@@ -74,7 +74,7 @@ func WorkContextTarget(messages []common.ChatMessage, tools []common.ToolDefinit
 	first, last := workContextHumanBounds(messages)
 	pinned := make([]common.ChatMessage, 0, 4)
 	for i, m := range messages {
-		if i == first || i == last || m.Role == "system" || m.Role == "developer" {
+		if i == first || i == last || m.Role == "system" || m.Role == "developer" || common.IsWorkInstruction(m) {
 			pinned = append(pinned, m)
 		}
 	}
@@ -113,7 +113,7 @@ func workContextCanRetainTail(messages []common.ChatMessage, tools []common.Tool
 		pinned := !unit.complete || unit.end == len(messages) || (unit.start == freshStart && unit.end == freshEnd)
 		for i := unit.start; i < unit.end; i++ {
 			m := messages[i]
-			pinned = pinned || i == first || i == last || m.Role == "system" || m.Role == "developer"
+			pinned = pinned || i == first || i == last || m.Role == "system" || m.Role == "developer" || common.IsWorkInstruction(m)
 		}
 		if pinned {
 			retained = append(retained, messages[unit.start:unit.end]...)
@@ -122,8 +122,10 @@ func workContextCanRetainTail(messages []common.ChatMessage, tools []common.Tool
 	return WorkContextSize(retained, tools) <= target
 }
 
-// Keep authority, the original request, the newest human correction and the
-// latest exchange verbatim. Six recent messages is a preference, never a cut
+// Keep authority, the active execution instruction, the original request, the
+// newest human correction and the latest exchange verbatim. The instruction
+// may sit in the middle after an approval; its stage boundary is still current.
+// Six recent messages is a preference, never a cut
 // through a parallel call group. Short transcripts can still retire an older
 // complete exchange when the preferred tail occupies the entire conversation.
 func workContextChunk(messages []common.ChatMessage, sourceLimit int, excluded map[string]bool) (int, int) {
@@ -145,7 +147,7 @@ func workContextChunk(messages []common.ChatMessage, sourceLimit int, excluded m
 			return false
 		}
 		for i := u.start; i < u.end; i++ {
-			if i == firstUser || i == lastUser || messages[i].Role == "system" || messages[i].Role == "developer" {
+			if i == firstUser || i == lastUser || messages[i].Role == "system" || messages[i].Role == "developer" || common.IsWorkInstruction(messages[i]) {
 				return false
 			}
 		}
