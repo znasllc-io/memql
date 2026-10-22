@@ -2846,6 +2846,12 @@ variables:
     optional: true
     description: "Optional JSON object mapping pipeline events (pull_request, merge_group, push, release, schedule, manual) to installed Kueue WorkloadPriorityClass names. Requires MEMQL_PIPELINES_QUEUE. Invalid, repeated or unknown events and non-DNS class names refuse execution. Unmapped events retain default admission priority. Only Job admission order changes; no Pod priority, capacity increase or preemption is enabled. Repository manifests cannot choose the mapping."
 
+  - name: MEMQL_PIPELINES_ADMISSION_FILE
+    component: pipelines
+    scope: node
+    optional: true
+    description: "Optional operator-owned JSON file read fresh before an agent claims an unstarted pipeline run. Requires allowNewRuns and validUntil (RFC3339, future and at most two hours away); missing, invalid or expired decisions keep new runs queued before their execution clock starts. Started-run recovery and cancellation remain available. Mount the same projected ConfigMap directory on every agent, never subPath. Unset preserves normal admission."
+
   - name: MEMQL_PIPELINES_RUN_MAX_MINUTES
     component: pipelines
     scope: node

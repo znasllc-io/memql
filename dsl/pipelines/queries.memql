@@ -212,7 +212,8 @@ query run pipelineRunByCheckRun {
   shape     pipelineRunFull
 }
 
-/// Every run not yet completed, oldest first -- recovery's read: a queued run no agent claimed, and a
+/// Every unfinished run, started first then oldest -- recovery must find already-started work
+/// even when budget admission leaves more than a page of new runs queued. It reads a queued run and a
 /// run whose driver stopped renewing its lease. @serverOnly: recovery runs on a schedule across
 /// every owner, and a run stranded by a lost replica is exactly the one its owner cannot rescue, so
 /// an actor.userId conjunct would hide the population the read exists for. Bounded at 500; the age
@@ -221,7 +222,7 @@ query run pipelineRunByCheckRun {
 @actor
 query run pipelineRunsUnfinished {
   filter    row => row.status in ["queued", "in_progress"] && actor.isClusterOwner == true
-  sort      "queuedAt", "asc"
+  sort      "status", "asc", "cancelRequested", "desc", "queuedAt", "asc"
   paginate  500
   shape     pipelineRunFull
 }

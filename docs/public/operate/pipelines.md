@@ -946,6 +946,57 @@ the work dispatcher never executes one, the spine's waiting sweep leaves it
 alone, and Nexus's re-run and branch refuse it. Re-run a pipeline run with
 `pipelinesRerun`.
 
+## Operator run admission
+
+An installation can hold new CI/CD runs before they acquire a driver lease or
+start their execution deadline. Set `MEMQL_PIPELINES_ADMISSION_FILE` on **every
+agent replica** to an operator-owned JSON file:
+
+```json
+{"allowNewRuns":false,"validUntil":"2026-10-21T23:00:00Z","reason":"Monthly development allowance reserved"}
+```
+
+The file contains one object, at most 4 KiB. `allowNewRuns` is a required boolean;
+`validUntil` is a required RFC3339 timestamp, strictly in the future and no more
+than two hours away. `reason` is optional explanatory text. Unknown fields,
+unreadable files, invalid values and expired decisions hold new runs. Unset
+configuration preserves ordinary admission. A writer must refresh an allowance
+before it expires; stopping the writer cannot leave admission open indefinitely.
+
+```mermaid
+flowchart LR
+    S[Webhook, poll or manual request] --> Q[Durable queued pipeline run]
+    P[Operator decision file on every agent] --> G{Admission allowed?}
+    Q --> G
+    G -->|Hold or unavailable| Q
+    G -->|Allow| C[Claim lease, then start execution clock]
+    C --> K[Existing step execution and resource queue]
+    R[Recovery of an already-started run] --> K
+```
+
+The claim reads the file afresh inside the existing cross-replica run gate.
+A Kubernetes installation should project the same ConfigMap as a **directory**
+on all agents, read-only and without `subPath`; environment values and subPath
+mounts do not follow runtime updates. Projection is eventually consistent, so
+allow for propagation delay in the spending reserve. No Azure credential or
+Azure-specific cost policy is required in the engine. An external observer may
+publish this decision using its own narrowly scoped credentials.
+
+The gate covers new pipeline runs on both cluster and fleet compute, including
+release and manual pipeline runs. It does not gate application requests, agent
+goals, backups, database work or already-started pipelines. Those pipelines
+continue their later steps and can recover on a different replica while new
+admission is held. Cancellation remains available, and a held run stays queued
+without consuming `MEMQL_PIPELINES_RUN_MAX_MINUTES`. The usual poll retries
+admission after an allowance appears; existing deduplication and supersession
+rules still apply, so an obsolete PR run may be cancelled by a newer commit.
+
+Kueue capacity and operator pauses are separate controls. Holding individual
+Jobs after a run starts still consumes the run deadline. Use run admission for
+long budget waits; do not describe a Kueue Job hold as an indefinite pipeline
+pause. The unfinished-run recovery page prioritizes started runs before queued
+ones, so a backlog of budget-held runs does not hide running work from recovery.
+
 ## The check run
 
 Each run writes one check run on its commit. PRs and merge candidates use
