@@ -40,6 +40,9 @@ func (s *selectingApps) Call(_ context.Context, req AppCallRequest) (AppCallResu
 }
 
 func TestAppFallbackPreservesContextAndNeverReplaysUncertainEffects(t *testing.T) {
+	// Earlier app tests can exhaust the shared guard; this test asserts fallback,
+	// context preservation and uncertain-effect handling, not rate limits.
+	offTheSharedRateCeiling(t)
 	for _, uncertain := range []bool{false, true} {
 		t.Run(map[bool]string{false: "quota", true: "uncertain"}[uncertain], func(t *testing.T) {
 			a := &selectingApps{uncertain: uncertain}
