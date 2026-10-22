@@ -300,7 +300,7 @@ func (a *App) engineAndBus() {
 	)
 	a.Dependencies = append(a.Dependencies, drainWorker)
 
-	scheduleGate, err := a.scheduledAutomationGate(cronLeader.IsLeader, loadedAutomations)
+	scheduleGate, err := a.scheduledAutomationGate(cronLeader, loadedAutomations)
 	if err != nil {
 		a.fatal("invalid automation schedule placement", "error", err)
 	}

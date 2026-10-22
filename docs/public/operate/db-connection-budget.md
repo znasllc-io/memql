@@ -136,6 +136,16 @@ headroom gate's defaults are held to them by
 Right-size the combined budget against the actual instance ceiling before
 changing replicas or adding a pooler.
 
+Scheduled automation leadership uses one direct session per node for the
+general cron lock and every independently scoped schedule lock. Adding a
+schedule does not reserve another lifetime connection. This matters at startup:
+five separately held leases would exhaust the four-slot direct pool before the
+last dependency becomes ready. Each scope retains its own advisory-lock key;
+replicas still compete independently, and losing the shared session closes all
+of that replica's schedule gates until leadership is reacquired. Connection
+acquisition and polling are bounded; unavailable coordination holds scheduled
+work without indefinitely blocking service readiness.
+
 ## Defense in depth (already in code)
 
 - **53300 retry** (`component/database/conn_retry.go`, memql#1076): `Connect()`
