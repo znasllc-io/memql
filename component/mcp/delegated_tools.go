@@ -81,6 +81,7 @@ func delegatedScope(ctx context.Context, eng Engine, sessionID string) (context.
 	ctx = memql.WithActingAgentId(ctx, scope.AgentID)
 	ctx = memql.WithActingAgentRole(ctx, scope.AgentRole)
 	ctx = common.ContextWithRun(ctx, scope.Run)
+	ctx = memql.ContextWithDelegatedSession(ctx, sessionID)
 	ctx, err = delegatedForwardAuthority(ctx, ac, sessionID, eng, grant)
 	if err != nil {
 		return ctx, nil, err
@@ -271,6 +272,17 @@ func callDelegatedTool(ctx context.Context, eng Engine, sessionID, name string, 
 	// this as a human MCP call: auto-injected fields must remain unforgeable.
 	args = overlayToolDefaults(args, scope.Defaults[name])
 	ctx = common.ContextWithToolDefaults(ctx, scope.Defaults[name])
+	if name == "requestUserFeedback" || name == "requestComputerUseScope" || strings.HasSuffix(name, ".requestUserFeedback") || strings.HasSuffix(name, ".requestComputerUseScope") {
+		checkpoint, ok := eng.(interface {
+			PrepareDelegatedFeedback(context.Context, string, []common.ChatMessage, string, map[string]any) error
+		})
+		if !ok {
+			return errorResult("delegated feedback continuation is unavailable")
+		}
+		if err := checkpoint.PrepareDelegatedFeedback(ctx, sessionID, scope.Messages, name, args); err != nil {
+			return errorResult(fmt.Sprintf("save delegated feedback continuation: %v", err))
+		}
+	}
 	raw, err := eng.ExecuteToolByName(ctx, name, args)
 	if err != nil {
 		result = errorResult(fmt.Sprintf("tool %q failed: %v", name, err))

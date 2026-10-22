@@ -3,6 +3,7 @@ package mcp
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"math"
 	"net/http"
 	"net/http/httptest"
@@ -200,16 +201,55 @@ func (r *delegatedAuthorityRecorder) RecordToolCall(ctx context.Context, _ AppSe
 
 type delegatedEngine struct {
 	*fakeEngine
-	row          map[string]any
-	runStatus    string
-	runFields    map[string]any
-	ownerRole    string
-	accessSeen   *auth.AccessContext
-	runSeen      common.RunContext
-	defaultsSeen map[string]any
-	sourceRun    common.RunContext
-	sourceArgs   map[string]any
-	sourceResult string
+	row                map[string]any
+	runStatus          string
+	runFields          map[string]any
+	ownerRole          string
+	accessSeen         *auth.AccessContext
+	runSeen            common.RunContext
+	defaultsSeen       map[string]any
+	sourceRun          common.RunContext
+	sourceArgs         map[string]any
+	sourceResult       string
+	checkpointErr      error
+	checkpointMessages []common.ChatMessage
+	checkpointArgs     map[string]any
+}
+
+func (e *delegatedEngine) PrepareDelegatedFeedback(_ context.Context, _ string, messages []common.ChatMessage, _ string, args map[string]any) error {
+	if e.accessSeen != nil {
+		panic("question executed before its checkpoint")
+	}
+	e.checkpointMessages, e.checkpointArgs = messages, args
+	return e.checkpointErr
+}
+
+func (e *concreteDelegatedFixture) PrepareDelegatedFeedback(ctx context.Context, session string, messages []common.ChatMessage, name string, args map[string]any) error {
+	return e.delegate.PrepareDelegatedFeedback(ctx, session, messages, name, args)
+}
+
+func TestDelegatedQuestionSavesContinuationBeforeAnyEffect(t *testing.T) {
+	for _, name := range []string{"requestUserFeedback", "requestComputerUseScope", "work.requestComputerUseScope"} {
+		for _, fail := range []bool{false, true} {
+			fixture := delegatedFixture()
+			fixture.reg.tools = append(fixture.reg.tools, tool(name, []string{"assistant"}))
+			scope := fixture.row["toolScope"].(map[string]any)
+			scope["tools"] = []common.ToolDefinition{{Name: name}}
+			scope["messages"] = []common.ChatMessage{{Role: "user", Content: "Keep working on my request"}}
+			scope["defaults"] = map[string]map[string]any{name: {"runId": "run-1"}}
+			raw, _ := json.Marshal(scope)
+			var stored map[string]any
+			_ = json.Unmarshal(raw, &stored)
+			fixture.row["toolScope"] = stored
+			if fail {
+				fixture.checkpointErr = errors.New("storage unavailable")
+			}
+			result := callDelegatedTool(asPerson("reader"), asEngine(&concreteDelegatedFixture{delegate: fixture}), "s", name, map[string]any{"runId": "forged"})
+			if isError(result) != fail || (fixture.accessSeen == nil) != fail || len(fixture.checkpointMessages) != 1 || fixture.checkpointArgs["runId"] != "run-1" {
+				t.Fatalf("question checkpoint barrier failed: tool=%s fail=%v result=%v", name, fail, result)
+			}
+		}
+	}
 }
 
 // Production goes through engineAdapter because MemQLEngine.Tools returns a

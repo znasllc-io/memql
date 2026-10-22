@@ -418,6 +418,9 @@ BackgroundLoop:
 			budgetFailure := r.workCallFailure(callCtx)
 			cancel()
 			stopBudget()
+			if wait := r.delegatedHumanWait(ctx, provider); wait != nil {
+				return nil, wait
+			}
 			if budgetFailure != nil {
 				return nil, r.pauseAtBudgetBoundary(ctx, budgetFailure, messages)
 			}

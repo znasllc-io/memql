@@ -13,6 +13,9 @@ type DelegatedTools struct {
 	AgentRole string                    `json:"agentRole"`
 	Run       RunContext                `json:"run"`
 	Defaults  map[string]map[string]any `json:"defaults,omitempty"`
+	// Messages are the native turn at handover, never the app's private
+	// reasoning. They anchor a durable continuation before a delegated question.
+	Messages []ChatMessage `json:"messages,omitempty"`
 }
 
 type delegatedDefaultsKey struct{}

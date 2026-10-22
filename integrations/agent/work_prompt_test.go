@@ -19,11 +19,16 @@ import (
 type workPromptEngine struct {
 	savedContinuation []common.ChatMessage
 	registryEngine
-	prompts    *memql.PromptRegistry
-	viewer     map[string]any
-	execute    func(context.Context, string) (any, error)
-	skills     any
-	skillError error
+	prompts       *memql.PromptRegistry
+	viewer        map[string]any
+	execute       func(context.Context, string) (any, error)
+	skills        any
+	skillError    error
+	delegatedWait error
+}
+
+func (e *workPromptEngine) DelegatedWorkHumanWait(context.Context, string) error {
+	return e.delegatedWait
 }
 
 func (e *workPromptEngine) Execute(ctx context.Context, query string) (any, error) {
