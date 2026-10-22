@@ -767,20 +767,15 @@ func (i *Integration) OpenDirectGoal(ctx context.Context, g DirectGoal) (goalId,
 	}); err != nil {
 		return "", "", err
 	}
-	closeUnstarted := func(cause error) (string, string, error) {
-		cleanup, cancel := context.WithTimeout(context.WithoutCancel(scoped), 5*time.Second)
-		defer cancel()
-		if closeErr := st.writeInternal(cleanup, "mutation "+call("updateWorkGoal", map[string]any{
-			"goalId": goalId,
-			"status": "closed", "closedAt": rfc(i.clock()), "closeReason": "The run could not start: " + cause.Error(),
-		})); closeErr != nil {
-			i.log().Error("work: could not close unstarted direct goal", "goal", goalId, "error", closeErr)
-		}
+	leaveUnstarted := func(cause error) (string, string, error) {
+		// Admission failure is not a human closure. Preserve the accepted goal
+		// and diagnostic for recovery; never report its results as accepted.
+		i.log().Error("work: direct goal could not start", "goal", goalId, "error", cause)
 		return goalId, runId, cause
 	}
 	if g.BeforeRun != nil {
 		if err := g.BeforeRun(scoped, goalId, runId); err != nil {
-			return closeUnstarted(err)
+			return leaveUnstarted(err)
 		}
 	}
 
@@ -800,7 +795,7 @@ func (i *Integration) OpenDirectGoal(ctx context.Context, g DirectGoal) (goalId,
 		OwnerUserId:        owner,
 		Routing:            routing,
 	}); err != nil {
-		return closeUnstarted(err)
+		return leaveUnstarted(err)
 	}
 
 	// NOTHING IS DISPATCHED FROM HERE, and that is the design rather than an

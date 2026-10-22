@@ -35,7 +35,7 @@
       "domainId": "computer-use",
       "sourceRef": "computerUse:unavailablePrerequisite",
       "catalog": "computerUse",
-      "sha256": "8a87f21458fb6cea81107a2e88485b7599ae1a2618c221cebf43cf9761bb6311"
+      "sha256": "00e5ba0c360739680058ada28033983a7b366ede62903b75ff99310ac9aa9bbb"
     },
     {
       "domainId": "computer-use",
@@ -113,7 +113,7 @@
       "domainId": "workbench",
       "sourceRef": "workbench:persistence",
       "catalog": "workbench",
-      "sha256": "14aeaa0bcc521b6be932f201a68e8268175d5489c264d832d989ceb8235240fb"
+      "sha256": "6972e07be2e4b457d899e7e6a3d1090b5ef0b2e16cfad6127c85c76d9af3e738"
     },
     {
       "domainId": "workbench",
@@ -161,7 +161,7 @@
       "domainId": "work-guidance",
       "sourceRef": "memql/work/escalation/v1",
       "catalog": "workGuidance",
-      "sha256": "e127123ea2f41ee7776bd8c85b103e109be565614d4029aeb24bd507c5bb7b3c"
+      "sha256": "ed2e2f81022aa0fab9ce3ff83954326727f1d77bde6223b3a89f45b577695c98"
     },
     {
       "domainId": "software-development",

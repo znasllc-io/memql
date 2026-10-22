@@ -77,6 +77,9 @@ func workHistorySourceIndex(checkpoint string, messages []common.ChatMessage, st
 	}
 	for ; index < len(messages) && len(entries) < 8; index++ {
 		message := messages[index]
+		if message.Role == "" {
+			continue
+		}
 		entry := map[string]any{"index": index, "role": excerpt(message.Role, 16)}
 		if isWorkMemory(message) {
 			entry["kind"] = "derived-checkpoint"

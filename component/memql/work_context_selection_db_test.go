@@ -113,6 +113,70 @@ func TestWorkContextUnproductiveCandidatesKeepTheModelCallBound(t *testing.T) {
 	require.Equal(t, before, mustMarshalMessages(t, messages))
 }
 
+func TestWorkContextArchivesRemainingResultsAfterBoundedSummaries(t *testing.T) {
+	for _, count := range []int{60, 80} {
+		t.Run(fmt.Sprintf("%d-completed-reads", count), func(t *testing.T) {
+			a, _, _ := readMergeTestEngine(t)
+			b, _, _ := readMergeTestEngine(t)
+			ctx := contextTestRun(t, a)
+			model := &checkpointModel{}
+			contextTestModel(a, model)
+			messages := []common.ChatMessage{{Role: "system", Content: "Keep the original evidence"}, {Role: "user", Content: "Continue the same authorized work"}}
+			for n := range count {
+				call := fmt.Sprintf("read-%02d", n)
+				messages = append(messages,
+					common.ChatMessage{Role: "assistant", ToolCalls: []common.ToolCall{{ID: call, Name: "read", Arguments: `{}`}}},
+					common.ChatMessage{Role: "tool", Name: "read", ToolCallId: call, Content: strings.Repeat(call+" evidence ", 350)})
+			}
+			messages = append(messages, common.ChatMessage{Role: "assistant", Content: "The completed reads are recorded."})
+			before := mustMarshalMessages(t, messages)
+			compacted, err := a.CompactWorkContext(ctx, messages, nil, 20000)
+			require.NoError(t, err, "medium completed results can be archived when the bounded semantic pass is exhausted")
+			require.Equal(t, 8, model.calls)
+			require.LessOrEqual(t, WorkContextSize(compacted, nil), 20000)
+			require.Equal(t, before, mustMarshalMessages(t, messages))
+			require.Equal(t, messages[:2], compacted[:2])
+			for _, unit := range workContextUnits(compacted) {
+				require.True(t, unit.complete)
+			}
+			// Every byte remains available to another replica, including the original
+			// sources of summaries and the results archived by the final fallback.
+			exact := map[string]bool{}
+			remember := func(entries []common.ChatMessage) {
+				for _, entry := range entries {
+					raw, err := json.Marshal(entry)
+					require.NoError(t, err)
+					exact[string(raw)] = true
+				}
+			}
+			remember(compacted)
+			run, _ := common.RunFromContext(ctx)
+			rows, err := b.workRows(ContextWithFreshRead(ctx), "workObservationsForOwnerRun", run.RunId)
+			require.NoError(t, err)
+			for _, row := range rows {
+				data, _ := row["data"].(map[string]any)
+				source, _ := data["sourceMessages"].(string)
+				if source == "" {
+					continue
+				}
+				var archived []common.ChatMessage
+				require.NoError(t, json.Unmarshal([]byte(source), &archived))
+				remember(archived)
+			}
+			for _, message := range messages {
+				raw, _ := json.Marshal(message)
+				require.True(t, exact[string(raw)], "exact source missing: %s", message.ToolCallId)
+			}
+			peerModel := &checkpointModel{fail: true}
+			contextTestModel(b, peerModel)
+			again, err := b.CompactWorkContext(ctx, messages, nil, 20000)
+			require.NoError(t, err)
+			require.Equal(t, compacted, again)
+			require.Zero(t, peerModel.calls, "recovery reuses valid summaries instead of repeating research")
+		})
+	}
+}
+
 func mustMarshalMessages(t *testing.T, messages []common.ChatMessage) []byte {
 	t.Helper()
 	raw, err := json.Marshal(messages)

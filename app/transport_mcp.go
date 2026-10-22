@@ -28,9 +28,12 @@ import (
 //
 // The head holds the in-process engine handle (a.engine).
 func (a *App) transportMCP() {
+	uploader, container := a.resolveBlobStore()
+	// Delegated apps read retained Library evidence through this node's
+	// integration instance, with the same owner and version gates as BFF.
+	a.wireLibraryIntegration(uploader, container)
 	if wb := a.lookupWorkbenchIntegration(); wb != nil {
 		wb.RequireRemote()
-		uploader, container := a.resolveBlobStore()
 		wb.SetAttachmentUploader(uploader, container)
 	}
 	a.transportBase()

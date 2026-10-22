@@ -51,7 +51,7 @@ func testProgressDBAutomaticWindows(t *testing.T, a, b actsDB) {
 	}
 	guard := NewRunCeilings(b.eng, testLogger())
 	require.NotNil(t, guard.Admit(ctx, rc, 0), "no tool progress must pause at the estimate")
-	for n := 1; n <= 3; n++ {
+	for n := 1; n <= 5; n++ {
 		require.NoError(t, a.i.RecordToolInvocation(ctx, agent.ToolInvocation{RunId: runID, OwnerUserId: a.owner, ToolName: "readSource", Args: map[string]any{"id": fmt.Sprint(n)}}))
 		if n == 1 {
 			require.Nil(t, guard.Admit(ctx, rc, 0), "the installed admission seam must extend after new completed work")
@@ -82,19 +82,19 @@ func testProgressDBAutomaticWindows(t *testing.T, a, b actsDB) {
 		require.NoError(t, err)
 		require.False(t, continued)
 	}
-	require.NoError(t, a.i.RecordToolInvocation(ctx, agent.ToolInvocation{RunId: runID, OwnerUserId: a.owner, ToolName: "readSource", Args: map[string]any{"id": "fourth"}}))
-	continued, err := b.i.ContinueWorkProgress(ctx, rc, workstate.Spent{ModelCalls: 48}, 0)
+	require.NoError(t, a.i.RecordToolInvocation(ctx, agent.ToolInvocation{RunId: runID, OwnerUserId: a.owner, ToolName: "readSource", Args: map[string]any{"id": "sixth"}}))
+	continued, err := b.i.ContinueWorkProgress(ctx, rc, workstate.Spent{ModelCalls: 72}, 0)
 	require.NoError(t, err)
-	require.False(t, continued)
+	require.True(t, continued)
 	// The actual admission seam on a new replica reads the durable allowance.
-	for n := 12; n < 48; n++ {
+	for n := 12; n < 84; n++ {
 		require.NoError(t, journal.Record(ctx, a.owner, memql.JournaledCall{ReceiptID: fmt.Sprintf("%s-call-%d", memql.BareShortId(runID), n), RunId: runID, StepKey: "reason", RequestHash: fmt.Sprint(n), Served: "local"}))
 	}
 	guard = NewRunCeilings(b.eng, testLogger())
 	breach := guard.Admit(ctx, rc, 0)
 	require.NotNil(t, breach)
 	require.Equal(t, workstate.CeilingModelCalls, breach.Ceiling)
-	require.Equal(t, 48, guard.Spent(ctx, rc).ModelCalls)
+	require.Equal(t, 84, guard.Spent(ctx, rc).ModelCalls)
 	require.Equal(t, before, b.query(t, a.owner, "query "+call("workGoalForOwner", map[string]any{"goalId": goalID}))[0])
 	require.Empty(t, a.query(t, a.owner, "query "+call("workApprovalsForOwnedRun", map[string]any{"runId": runID})))
 	// A foreign owner cannot acquire another person's progress or extension.
@@ -111,16 +111,16 @@ func testProgressDBGuidanceAndHardStop(t *testing.T, a, b actsDB) {
 			goalID := rowString(a.runRow(t, runID), "goalId")
 			cap := 96
 			if hard {
-				cap = 12
+				cap = 11
 			}
-			a.write(t, "updateWorkGoal", map[string]any{"goalId": goalID, "ceilings": map[string]any{"maxModelCalls": cap, "wallClockMs": 7200000}})
+			a.write(t, "updateWorkGoal", map[string]any{"goalId": goalID, "ceilings": map[string]any{"maxModelCalls": 96, "wallClockMs": 7200000, "tokenBudget": cap}})
 			a.writeVersion(t, runID, runID, "reason", 0, 1, nil, "", map[string]any{"status": "waiting"})
-			a.write(t, "updateWorkRun", map[string]any{"runId": runID, "stepOrder": []string{"reason"}, "classification": map[string]any{"workload": "lookup"}, "spent": map[string]any{"modelCalls": 12, "retries": 1}})
+			a.write(t, "updateWorkRun", map[string]any{"runId": runID, "stepOrder": []string{"reason"}, "classification": map[string]any{"workload": "lookup"}, "spent": map[string]any{"modelCalls": 12, "tokens": 12, "retries": 1}})
 			rc := common.RunContext{RunId: runID, GoalId: goalID, OwnerUserId: a.owner, StepKey: "reason", Mode: common.RunModeLive}
 			runCtx := common.ContextWithRun(ctx, rc)
 			require.NoError(t, a.eng.SaveWorkContinuation(runCtx, []common.ChatMessage{{Role: "user", Content: "Use the source"}, {Role: "assistant", Content: "Saved evidence"}}))
 			checkpoint := a.query(t, a.owner, "query "+call("workContinuationForOwnerRun", map[string]any{"runId": runID, "stepKey": "reason"}))[0]
-			approvalID, err := a.i.PauseWorkForBudget(runCtx, &memql.RunCeilingError{RunId: runID, StepKey: "reason", Breach: memql.RunCeilingBreach{Ceiling: "modelCalls", Limit: "12", Actual: "12"}, Spent: memql.RunSpend{ModelCalls: 12}}, rowString(checkpoint, "id"))
+			approvalID, err := a.i.PauseWorkForBudget(runCtx, &memql.RunCeilingError{RunId: runID, StepKey: "reason", Breach: memql.RunCeilingBreach{Ceiling: "modelCalls", Limit: "12", Actual: "12"}, Spent: memql.RunSpend{ModelCalls: 12, Tokens: 12}}, rowString(checkpoint, "id"))
 			require.NoError(t, err)
 			rows := b.query(t, a.owner, "query "+call("workApprovalForOwner", map[string]any{"approvalId": approvalID}))
 			require.Len(t, rows, 1)
@@ -155,16 +155,16 @@ func testProgressDBInterruptedDecisions(t *testing.T, a, b actsDB) {
 			runID := a.openRun(t, nil)
 			goalID := rowString(a.runRow(t, runID), "goalId")
 			setCap := func(cap int) {
-				a.write(t, "updateWorkGoal", map[string]any{"goalId": goalID, "ceilings": map[string]any{"maxModelCalls": cap, "wallClockMs": 7200000}})
+				a.write(t, "updateWorkGoal", map[string]any{"goalId": goalID, "ceilings": map[string]any{"maxModelCalls": 96, "wallClockMs": 7200000, "tokenBudget": cap}})
 			}
 			setCap(96)
 			a.writeVersion(t, runID, runID, "reason", 0, 1, nil, "", map[string]any{"status": "waiting"})
-			a.write(t, "updateWorkRun", map[string]any{"runId": runID, "stepOrder": []string{"reason"}, "classification": map[string]any{"workload": "lookup"}, "spent": map[string]any{"modelCalls": 12}})
+			a.write(t, "updateWorkRun", map[string]any{"runId": runID, "stepOrder": []string{"reason"}, "classification": map[string]any{"workload": "lookup"}, "spent": map[string]any{"modelCalls": 12, "tokens": 12}})
 			rc := common.RunContext{RunId: runID, GoalId: goalID, OwnerUserId: a.owner, StepKey: "reason", Mode: common.RunModeLive}
 			runCtx := common.ContextWithRun(ctx, rc)
 			require.NoError(t, a.eng.SaveWorkContinuation(runCtx, []common.ChatMessage{{Role: "user", Content: "Use the saved evidence."}}))
 			checkpoint := a.query(t, a.owner, "query "+call("workContinuationForOwnerRun", map[string]any{"runId": runID, "stepKey": "reason"}))[0]
-			approvalID, err := a.i.PauseWorkForBudget(runCtx, &memql.RunCeilingError{RunId: runID, StepKey: "reason", Breach: memql.RunCeilingBreach{Ceiling: "modelCalls", Limit: "12", Actual: "12"}, Spent: memql.RunSpend{ModelCalls: 12}}, rowString(checkpoint, "id"))
+			approvalID, err := a.i.PauseWorkForBudget(runCtx, &memql.RunCeilingError{RunId: runID, StepKey: "reason", Breach: memql.RunCeilingBreach{Ceiling: "modelCalls", Limit: "12", Actual: "12"}, Spent: memql.RunSpend{ModelCalls: 12, Tokens: 12}}, rowString(checkpoint, "id"))
 			require.NoError(t, err)
 			answer := map[string]any{"value": "retry"}
 			if scenario == "guidance" {
@@ -174,7 +174,7 @@ func testProgressDBInterruptedDecisions(t *testing.T, a, b actsDB) {
 				answer = map[string]any{"value": "abandon"}
 			}
 			if scenario == "hard-before-answer" {
-				setCap(12)
+				setCap(11)
 			}
 			wrapper := &budgetResumeFailureEngine{Engine: a.eng}
 			wrapper.fail.Store(true)
@@ -185,7 +185,7 @@ func testProgressDBInterruptedDecisions(t *testing.T, a, b actsDB) {
 			require.Contains(t, decodeReply(t, nodes)["resumeError"], "synthetic run release failure")
 			before := a.runRow(t, runID)
 			if scenario == "hard-after-answer" {
-				setCap(12)
+				setCap(11)
 			}
 			for n := 0; n < 2; n++ {
 				nodes, err = b.i.handleDecideApproval(ctx, args, 0)

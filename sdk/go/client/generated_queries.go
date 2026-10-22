@@ -6591,7 +6591,7 @@ func PackageDeploymentsPendingBuild(args PackageDeploymentsPendingArgs) string {
 	return "query packageDeploymentsPending()"
 }
 
-// PackagesAll -- The packages this caller may see, active only. The OS packages list.
+// PackagesAll -- Read connected repositories and application sources visible to this caller.
 //
 // Bound concept: v1:platform:package (machine-readable: BoundConcepts["packagesAll"] in generated_concepts.go).
 type PackagesAllArgs struct {

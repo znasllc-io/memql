@@ -27,6 +27,7 @@ import (
 	"fmt"
 
 	memorynodes "github.com/znasllc-io/memql/component/database/memory-nodes"
+	"github.com/znasllc-io/memql/component/memql"
 	"github.com/znasllc-io/memql/component/work"
 	"github.com/znasllc-io/memql/core/common"
 )
@@ -48,6 +49,18 @@ func (i *Integration) handleBranchRun(ctx context.Context, args map[string]any, 
 	}
 
 	source, err := i.readActRun(ctx, sourceRunId)
+	if err != nil {
+		return nil, err
+	}
+	// Branch creation shares acceptance's gate, so a concurrent review cannot
+	// close the goal while a new execution is being admitted.
+	release, err := i.decisionGate(ctx, "goal-lifecycle-"+memql.BareShortId(rowString(source.row, "goalId")))
+	if err != nil {
+		return nil, err
+	}
+	defer release()
+	ctx = memql.ContextWithFreshRead(ctx)
+	source, err = i.readActRun(ctx, sourceRunId)
 	if err != nil {
 		return nil, err
 	}
@@ -123,6 +136,9 @@ func (i *Integration) handleBranchRun(ctx context.Context, args map[string]any, 
 		// The fork's sessions run in a directory named for the fork, never in
 		// the source's: the source is untouched, its workspace included.
 		Rerun: rerunRequest(rerunReasonBranch, stepKey, override, plan.Versions, snapshot, bareRunId(runId), requestedBy, now),
+	}
+	if err := i.reopenGoalForRun(ctx, seed.GoalId, source.owner); err != nil {
+		return nil, err
 	}
 	if err := i.store().createRunRow(ownerActor(ctx, source.owner), seed); err != nil {
 		return nil, err

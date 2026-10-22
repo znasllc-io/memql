@@ -82,6 +82,17 @@ builtin createGoal {
 @executor("integration.work.requestWorkbenchUse")
 builtin workRequestWorkbenchUse { reason string! }
 
+/// Accept the exact finished results after the owner reviews them. Only a human
+/// interactive request may close the goal this way; model success is not acceptance.
+@sdk
+@executor("integration.work.acceptGoalResults")
+builtin workAcceptGoalResults {
+ goalId string!
+ runId string!
+ runVersion string! @description("createdAt of the reviewed run row; a changed result requires a fresh review.")
+ feedback string @description("Optional owner feedback on the accepted result, at most 4000 characters.")
+}
+
 /// Close one of the caller's goals and ask every run of it to stop. Cancellation is REQUESTED
 /// rather than done: a run notices at its next step boundary, so a step already in flight finishes
 /// and is journaled rather than being abandoned mid-effect.

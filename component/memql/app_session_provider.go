@@ -221,6 +221,9 @@ func (p *sessionProvider) run(
 	tools []common.ToolDefinition,
 	schema *common.StructuredSchema,
 ) (AppSessionOutcome, error) {
+	p.lastMu.Lock()
+	p.lastResult, p.lastSet = AppSessionOutcome{}, false
+	p.lastMu.Unlock()
 	if strings.TrimSpace(p.req.StepId) == "" {
 		return AppSessionOutcome{}, fmt.Errorf("app door %q: %w", p.appId, ErrAppSessionNoStep)
 	}
@@ -247,7 +250,11 @@ func (p *sessionProvider) run(
 	}
 
 	run, _ := common.RunFromContext(ctx)
-	scope := &common.DelegatedTools{Tools: tools, AgentID: ActingAgentIdFromContext(ctx), AgentRole: ActingAgentRoleFromContext(ctx), Run: run, Defaults: common.DelegatedToolDefaultsFromContext(ctx)}
+	prompt := flattenForSession(messages)
+	if run.GoalId != "" {
+		prompt += "\n\n[MemQL runtime]\nWhen a feedback or computer-access tool returns status=awaiting_user, end this app session immediately. MemQL has recorded the question and will resume the same work after the person answers. Do not poll, ask a duplicate question, or call respondToUser to turn the existing approval into another request."
+	}
+	scope := &common.DelegatedTools{Tools: tools, AgentID: ActingAgentIdFromContext(ctx), AgentRole: ActingAgentRoleFromContext(ctx), Run: run, Defaults: common.DelegatedToolDefaultsFromContext(ctx), Messages: messages}
 	if len(tools) > 0 && (scope.AgentID == "" || scope.AgentRole == "" || run.RunId != p.req.RunId || run.StepKey != p.req.StepId || run.OwnerUserId != actingUser) {
 		return AppSessionOutcome{}, fmt.Errorf("app session: delegated tools require the original owned run and agent context")
 	}
@@ -284,12 +291,17 @@ func (p *sessionProvider) run(
 			Effort:         p.req.Effort,
 			RunId:          p.req.RunId,
 			StepId:         p.req.StepId,
-			Prompt:         flattenForSession(messages),
+			Prompt:         prompt,
 			Tools:          tools,
 			ToolScope:      scope,
 			ResponseSchema: schema,
 			Pin:            p.req.Pin,
 		})
+		if err == nil || out.SessionId != "" {
+			p.lastMu.Lock()
+			p.lastResult, p.lastSet = out, true
+			p.lastMu.Unlock()
+		}
 		if err == nil {
 			break
 		}
@@ -305,10 +317,6 @@ func (p *sessionProvider) run(
 			return out, err
 		}
 	}
-	p.lastMu.Lock()
-	p.lastResult = out
-	p.lastSet = true
-	p.lastMu.Unlock()
 	return out, nil
 }
 
@@ -428,7 +436,12 @@ var (
 func flattenForSession(messages []common.ChatMessage) string {
 	var b strings.Builder
 	for _, m := range messages {
-		if strings.TrimSpace(m.Content) == "" {
+		content := strings.TrimSpace(m.Content)
+		if len(m.ToolCalls) != 0 {
+			calls, _ := json.Marshal(m.ToolCalls)
+			content += "\n[Tool calls already recorded by MemQL]\n" + string(calls)
+		}
+		if content == "" {
 			continue
 		}
 		if b.Len() > 0 {
@@ -443,9 +456,9 @@ func flattenForSession(messages []common.ChatMessage) string {
 			// The unlabelled default: a single-turn prompt is by far the
 			// common case and labelling it adds noise the app reads past.
 		default:
-			b.WriteString("[" + m.Role + "]\n")
+			b.WriteString("[" + m.Role + " " + m.Name + " " + m.ToolCallId + "]\n")
 		}
-		b.WriteString(strings.TrimSpace(m.Content))
+		b.WriteString(content)
 	}
 	return b.String()
 }

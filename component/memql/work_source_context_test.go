@@ -3,6 +3,7 @@ package memql
 import (
 	"encoding/base64"
 	"encoding/json"
+	"fmt"
 	"strings"
 	"testing"
 	"time"
@@ -163,6 +164,35 @@ func TestCheckpointSourceProjectionBoundsDeduplicatesAndExcludesProse(t *testing
 	require.JSONEq(t, messages[1].Content, string(value), "preserve old observation time, different scope and truncation; persistence must not make them fresh")
 	require.Equal(t, "2026-10-17", sources[0]["checkpointAt"])
 	require.Positive(t, remaining)
+}
+
+func TestCheckpointSourceProjectionExcludesWrappedRetrievals(t *testing.T) {
+	messages := []common.ChatMessage{}
+	for i, call := range []common.ToolCall{
+		{Name: "workbenchHost", Arguments: `{"action":"fs_read","args":{"path":"design.md"}}`},
+		{Name: "workSourceContext"},
+		{Name: "executeCapability", Arguments: `{"name":"work.workSourceContext","arguments":{}}`},
+		{Name: "executeCapability", Arguments: `{"name":"work.recallWorkHistory","arguments":{}}`},
+		{Name: "executeCapability", Arguments: `{"name":"work.workReviewReply","arguments":{}}`},
+		{Name: "executeCapability", Arguments: `{"name":"vault.readSecret","arguments":{}}`},
+		{Name: "executeCapability", Arguments: `{"name":"library.libraryReadFile","arguments":{"fileId":"source"}}`},
+	} {
+		call.ID = fmt.Sprint(i)
+		messages = append(messages,
+			common.ChatMessage{Role: "assistant", ToolCalls: []common.ToolCall{call}},
+			common.ChatMessage{Role: "tool", Name: call.Name, ToolCallId: call.ID, Content: "recorded result"})
+	}
+	raw, err := json.Marshal(messages)
+	require.NoError(t, err)
+	// Use the same encoded representation as delegated receipts.
+	checkpoint := map[string]any{"data": map[string]any{"messagesEncoding": "json-base64-v1", "messages": base64.StdEncoding.EncodeToString(raw)}}
+	pairs, omitted := workCheckpointPairs(checkpoint)
+	require.False(t, omitted)
+	require.Len(t, pairs, 2, "source previews must not nest earlier retrievals or generated/private content through a capability wrapper")
+	require.JSONEq(t, `{"name":"library.libraryReadFile","arguments":{"fileId":"source"}}`, pairs[0].call.Arguments)
+	require.Equal(t, 0, pairs[0].index)
+	require.Equal(t, "workbenchHost", pairs[1].call.Name)
+	require.Equal(t, 12, pairs[1].index, "older saved message indices must retain the same source")
 }
 
 func TestCheckpointSourceProjectionRetainsJSONWithoutDoubleEscaping(t *testing.T) {

@@ -52,6 +52,7 @@ func TestForkAndReplayDeriveARunAndLeaveTheSourceAlone(t *testing.T) {
 			}
 			source["spine"] = spine.Map()
 			eng.reply("workRunForOwner", source)
+			eng.reply("workGoalForOwner", map[string]any{"id": source["goalId"], "ownerUserId": source["ownerUserId"], "status": "open"})
 
 			if tc.wantMode == modeFork {
 				_, err = i.handleForkRun(callerContext("u-alice"), tc.args, 0)
@@ -113,6 +114,7 @@ func TestForkAndReplayDeriveARunAndLeaveTheSourceAlone(t *testing.T) {
 func TestDerivedRunInheritsTheSourcesOwnerNotTheCallers(t *testing.T) {
 	i, eng := newTestIntegration(t)
 	eng.reply("workRunForOwner", sourceRun("u-bob"))
+	eng.reply("workGoalForOwner", map[string]any{"id": "v1:work:goal:g1", "ownerUserId": "u-bob", "status": "open"})
 
 	if _, err := i.handleForkRun(clusterOwnerContext("u-operator"), map[string]any{
 		"runId": "v1:work:run:r-source", "atStepKey": "step-2",
@@ -169,6 +171,7 @@ func TestForkAndReplayRefuseWhatTheyCannotRecord(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			i, eng := newTestIntegration(t)
 			eng.reply("workRunForOwner", sourceRun("u-alice"))
+			eng.reply("workGoalForOwner", map[string]any{"id": "v1:work:goal:g1", "ownerUserId": "u-alice", "status": "open"})
 			err := tc.run(i)
 			if err == nil {
 				t.Fatal("the argument was accepted")
@@ -210,6 +213,7 @@ func TestForkCarriesVariableOverridesOntoTheNewRun(t *testing.T) {
 	src := sourceRun("u-alice")
 	src["variables"] = map[string]any{"month": "2026-09", "region": "emea"}
 	eng.reply("workRunForOwner", src)
+	eng.reply("workGoalForOwner", map[string]any{"id": src["goalId"], "ownerUserId": src["ownerUserId"], "status": "open"})
 
 	if _, err := i.handleForkRun(callerContext("u-alice"), map[string]any{
 		"runId": "v1:work:run:r-source", "atStepKey": "step-4",
@@ -240,6 +244,7 @@ func TestForkWithNoOverridesCarriesTheSourcesVariables(t *testing.T) {
 	src := sourceRun("u-alice")
 	src["variables"] = map[string]any{"month": "2026-09"}
 	eng.reply("workRunForOwner", src)
+	eng.reply("workGoalForOwner", map[string]any{"id": src["goalId"], "ownerUserId": src["ownerUserId"], "status": "open"})
 
 	if _, err := i.handleForkRun(callerContext("u-alice"), map[string]any{
 		"runId": "v1:work:run:r-source", "atStepKey": "step-4",
@@ -285,6 +290,7 @@ func TestReplayRecordsThePolicyItWasAskedFor(t *testing.T) {
 		t.Run("policy="+tc.asked, func(t *testing.T) {
 			i, eng := newTestIntegration(t)
 			eng.reply("workRunForOwner", sourceRun("u-alice"))
+			eng.reply("workGoalForOwner", map[string]any{"id": "v1:work:goal:g1", "ownerUserId": "u-alice", "status": "open"})
 			args := map[string]any{"runId": "v1:work:run:r-source"}
 			if tc.asked != "" {
 				args["policy"] = tc.asked

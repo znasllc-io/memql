@@ -156,6 +156,7 @@ func (e *MemQLEngine) workSourceReceipts(ctx context.Context, runID string) ([]m
 type workSourcePair struct {
 	call   common.ToolCall
 	result common.ChatMessage
+	index  int // Stable projected message slot, including subsequently excluded pairs.
 }
 
 // One privacy boundary for previews and exact paged reads. Assistant prose,
@@ -186,6 +187,7 @@ func workCheckpointPairsWithSourceReads(checkpoint map[string]any, sourceReads b
 		}
 	}
 	pairs := []workSourcePair{}
+	sourceIndex := 0
 	seen := map[string]bool{}
 	omitted := false
 	for n := len(messages) - 1; n >= 0; n-- {
@@ -202,9 +204,32 @@ func workCheckpointPairsWithSourceReads(checkpoint map[string]any, sourceReads b
 			omitted = true
 			continue
 		}
+		// Keep the old projected slots stable when excluding newly recognized
+		// wrappers. A saved checkpoint/messageIndex must not select a different
+		// source after this filter changes.
+		index := sourceIndex
+		sourceIndex += 2
+		name := call.Name
+		if name == "executeCapability" {
+			var args struct {
+				Name string `json:"name"`
+			}
+			if json.Unmarshal([]byte(call.Arguments), &args) == nil && args.Name != "" {
+				name = args.Name
+			}
+		}
+		if strings.Contains(strings.ToLower(name), "secret") {
+			continue
+		}
+		if last := strings.LastIndexByte(name, '.'); last >= 0 {
+			name = name[last+1:]
+		}
+		if name == "workSourceContext" || (name == "recallWorkHistory" && !sourceReads) || name == "recallMemory" || name == "ai" || name == "runAgentTurn" || name == "workReviewReply" || name == "respondToUser" || name == "requestUserFeedback" {
+			continue
+		}
 		// Reconstruct only the public fields; a stored ChatMessage can carry other
 		// provider metadata that has no place in a source receipt.
-		pairs = append(pairs, workSourcePair{call: common.ToolCall{ID: call.ID, Name: call.Name, Arguments: call.Arguments}, result: common.ChatMessage{Role: "tool", Name: message.Name, ToolCallId: message.ToolCallId, Content: message.Content}})
+		pairs = append(pairs, workSourcePair{call: common.ToolCall{ID: call.ID, Name: call.Name, Arguments: call.Arguments}, result: common.ChatMessage{Role: "tool", Name: message.Name, ToolCallId: message.ToolCallId, Content: message.Content}, index: index})
 	}
 	return pairs, omitted
 }

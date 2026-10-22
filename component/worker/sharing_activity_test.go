@@ -58,9 +58,11 @@ func TestMachineActivitySeparatesOwnerWorkFromNamedAndClusterShares(t *testing.T
 		defer session.cancel()
 		ctx, cancel := context.WithCancel(context.Background())
 		defer cancel()
+		commandCtx, cancelCommand := context.WithCancel(ctx)
+		defer cancelCommand()
 		commandDone := make(chan error, 1)
 		go func() {
-			_, err := session.dispatch(ctx, &memqlv1.ToolDispatch{CallId: "command", Tool: "workerHost", Action: "exec"}, nil)
+			_, err := session.dispatch(commandCtx, &memqlv1.ToolDispatch{CallId: "command", Tool: "workerHost", Action: "exec"}, nil)
 			commandDone <- err
 		}()
 		synctest.Wait()
@@ -86,12 +88,19 @@ func TestMachineActivitySeparatesOwnerWorkFromNamedAndClusterShares(t *testing.T
 		assertCounts(3, 2)
 		// A canceled command and a finished app leave the owner's count;
 		// an admitted shared call remains until its own terminal event.
-		cancel()
+		cancelCommand()
 		if err := <-commandDone; !errors.Is(err, context.Canceled) {
 			t.Fatalf("cancel: %v", err)
 		}
 		session.handleAppSessionEnd(&memqlv1.AppSessionEnd{SessionId: "app"})
 		assertCounts(1, 2)
+		// Cancelling the remaining callers ends their local handles even if
+		// the machine never sends End. The command has its own context above:
+		// cancelling every caller while expecting shared calls to remain was
+		// relying on the old leaked-handle behavior.
+		cancel()
+		synctest.Wait()
+		assertCounts(0, 0)
 		for _, request := range []string{"own", "named", "cluster"} {
 			session.handleModelCallEnd(&memqlv1.ModelCallEnd{RequestId: request, FinishReason: ModelFinishStop})
 		}

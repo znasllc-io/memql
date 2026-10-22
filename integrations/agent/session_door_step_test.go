@@ -45,7 +45,7 @@ type handoverDelegate struct {
 func (d *handoverDelegate) RunStep(_ context.Context, h memql.AppSessionHandover) (memql.AppSessionOutcome, error) {
 	d.runs++
 	d.got = h
-	return memql.AppSessionOutcome{Content: "Hello from Claude Code", ExecutionSurface: "cockpit-app:" + h.AppId}, nil
+	return memql.AppSessionOutcome{Content: "Hello from Claude Code", Result: []byte(`{"terminalTool":"respondToUser","arguments":{"status":"complete","response":"Hello from Claude Code"}}`), ExecutionSurface: "cockpit-app:" + h.AppId}, nil
 }
 
 // sessionDoorRouter is the Claude Code door test's policy in miniature: the

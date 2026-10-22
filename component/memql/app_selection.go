@@ -216,6 +216,10 @@ func (e *MemQLEngine) SelectAppForCall(ctx context.Context, req AppCallRequest, 
 				if err != nil {
 					return AppSelection{}, err
 				}
+				features, _ := row["ownerFeatures"].(map[string]any)
+				if mapString(row, "revokedAt") != "" || features["apps"] == false {
+					continue
+				}
 				settings, _ := row["appRouting"].(map[string]any)
 				until, err := e.appBlockedUntil(read, machine.RegistrationId, door.AppId, settings, recent)
 				if err != nil {

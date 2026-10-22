@@ -18,40 +18,44 @@ type aiProgressSink func(string) error
 // call. Only output text is recorded, never provider reasoning or metadata.
 // Snapshots use the work journal, so another replica can serve a reconnect.
 func (e *MemQLEngine) InvokeAIProgress(ctx context.Context, templateID string, data map[string]any) (any, error) {
-	return e.invokePromptProgress(ctx, templateID, func(callCtx context.Context) (any, error) {
+	return e.invokePromptProgress(ctx, templateID, "draft", func(callCtx context.Context) (any, error) {
 		return e.InvokeAI(callCtx, templateID, data)
 	})
+}
+
+// InvokeAIReplyProgress is opt-in append-only text for self-contained replies.
+// Evidence-dependent drafts keep InvokeAIProgress and are reviewed before delivery.
+func (e *MemQLEngine) InvokeAIReplyProgress(ctx context.Context, templateID string, data map[string]any) (any, error) {
+	return e.invokePromptProgress(ctx, templateID, "reply", func(callCtx context.Context) (any, error) { return e.InvokeAI(callCtx, templateID, data) })
 }
 
 // Structured providers publish lifecycle and the completed public result. They
 // never fall back to unconstrained streaming merely to provide partial output.
 func (e *MemQLEngine) InvokeAIStructuredProgress(ctx context.Context, templateID string, data map[string]any, schemaName string, schema json.RawMessage, strict bool) (any, error) {
-	return e.invokePromptProgress(ctx, templateID, func(callCtx context.Context) (any, error) {
+	return e.invokePromptProgress(ctx, templateID, "draft", func(callCtx context.Context) (any, error) {
 		return e.InvokeAIStructured(callCtx, templateID, data, schemaName, schema, strict)
 	})
 }
 
-func (e *MemQLEngine) invokePromptProgress(ctx context.Context, templateID string, invoke func(context.Context) (any, error)) (any, error) {
+func (e *MemQLEngine) invokePromptProgress(ctx context.Context, templateID string, kind string, invoke func(context.Context) (any, error)) (any, error) {
 	run, ok := common.RunFromContext(ctx)
 	if !ok || run.Mode == common.RunModeReplay {
 		return invoke(ctx)
 	}
 	var latest string
 	var last time.Time
-	var savedBytes int
 	record := func(text, phase string) error {
-		return e.RecordWorkProgress(ctx, WorkEvent{ID: "ai-draft", Kind: "draft", Name: templateID, Text: text, Phase: phase})
+		return e.RecordWorkProgress(ctx, WorkEvent{ID: "ai-draft", Kind: kind, Name: templateID, Text: text, Phase: phase})
 	}
 	if err := record("", "running"); err != nil {
 		return nil, err
 	}
 	sink := aiProgressSink(func(text string) error {
 		latest = text
-		if !last.IsZero() && (time.Since(last) < 2*time.Second || len(text)-savedBytes < 1024) {
+		if !last.IsZero() && time.Since(last) < 150*time.Millisecond {
 			return nil
 		}
 		last = time.Now()
-		savedBytes = len(text)
 		return record(text, "running")
 	})
 	result, err := invoke(context.WithValue(ctx, aiProgressKey{}, sink))
@@ -65,7 +69,7 @@ func (e *MemQLEngine) invokePromptProgress(ctx context.Context, templateID strin
 	// final write, with no goroutine or background timer left behind.
 	recordCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
 	defer cancel()
-	saveErr := e.RecordWorkProgress(recordCtx, WorkEvent{ID: "ai-draft", Kind: "draft", Name: templateID, Text: latest, Phase: phase})
+	saveErr := e.RecordWorkProgress(recordCtx, WorkEvent{ID: "ai-draft", Kind: kind, Name: templateID, Text: latest, Phase: phase})
 	if err != nil {
 		return nil, err
 	}

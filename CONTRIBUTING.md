@@ -20,6 +20,7 @@ See [docs/public/overview/quickstart.md](docs/public/overview/quickstart.md) for
 - Run `make test` locally before opening a PR — never a bare single-module `go test` sweep; see CLAUDE.md's Testing section for why
 - One logical change per commit; commit messages explain *why*, not just *what*
 - Match the surrounding code style and naming
+- Harness changes must follow the [decision-documentation rule](CLAUDE.md#harness-changes-document-decisions-and-paths-required): update rationale comments, workflow documentation, limitations and relevant regression evidence in the same change. The [harness decision map](docs/internal/ops/harness-decisions.md) connects the execution paths to their implementation and tests.
 
 ## DSL contributions
 

@@ -163,9 +163,10 @@ type machineHarness struct {
 	controls []*memqlv1.AppSessionControl
 	// answer is the structured result a session returns; hang leaves the
 	// session running until it is cancelled.
-	answer   string
-	hang     bool
-	quotaApp string
+	answer      string
+	hang        bool
+	quotaApp    string
+	streamUntil <-chan struct{}
 }
 
 func (m *machineHarness) open(ctx context.Context, req workerservice.AppSessionRequest) (*workerservice.AppSessionHandle, error) {
@@ -176,7 +177,7 @@ func (m *machineHarness) open(ctx context.Context, req workerservice.AppSessionR
 	m.mu.Lock()
 	m.starts = append(m.starts, req)
 	m.actors = append(m.actors, actor)
-	hang, answer, quotaApp := m.hang, m.answer, m.quotaApp
+	hang, answer, quotaApp, streamUntil := m.hang, m.answer, m.quotaApp, m.streamUntil
 	m.mu.Unlock()
 
 	var finish func(workerservice.AppSessionOutcome)
@@ -194,7 +195,19 @@ func (m *machineHarness) open(ctx context.Context, req workerservice.AppSessionR
 				finish(workerservice.AppSessionOutcome{ExitCode: 1, Error: "You've hit your weekly limit", Usage: workerservice.AppSessionUsage{Known: true}})
 				return
 			}
-			emit(workerservice.AppSessionChunk{Stream: workerservice.AppSessionStreamStdout, Data: []byte(answer), Seq: 1})
+			seq := uint64(1)
+			if streamUntil != nil {
+				emit(workerservice.AppSessionChunk{Stream: "text", Data: []byte("private commentary"), Seq: seq})
+				seq++
+				emit(workerservice.AppSessionChunk{Stream: "answer", Data: []byte(answer[:5]), Seq: seq})
+				seq++
+				select {
+				case <-streamUntil:
+				case <-ctx.Done():
+					return
+				}
+			}
+			emit(workerservice.AppSessionChunk{Stream: workerservice.AppSessionStreamStdout, Data: []byte(answer), Seq: seq})
 			finish(workerservice.AppSessionOutcome{
 				ExitCode: 0,
 				Result:   []byte(answer),
@@ -724,4 +737,42 @@ func waitFor(t *testing.T, what string, cond func() bool) {
 		time.Sleep(5 * time.Millisecond)
 	}
 	t.Fatalf("timed out waiting for %s", what)
+}
+
+func TestAppAnswerStreamsAcrossReplicaBeforeSessionCompletion(t *testing.T) {
+	h := newAppHop(t)
+	release := make(chan struct{})
+	defer close(release)
+	h.harness.streamUntil = release
+	h.harness.answer = "Hello there"
+	ctx, cancel := plannerCtx(t)
+	defer cancel()
+	chunks := make(chan string, 2)
+	done := make(chan error, 1)
+	go func() {
+		_, err := h.remote.Call(ctx, memqlengine.AppCallRequest{ActingUserId: hopOwner, AppId: workerservice.AppIdClaudeCode, Messages: []common.ChatMessage{{Role: "user", Content: "hello"}}, OnContent: func(text string) { chunks <- text }})
+		done <- err
+	}()
+	select {
+	case text := <-chunks:
+		if text != "Hello" {
+			t.Fatalf("non-answer content: %q", text)
+		}
+	case err := <-done:
+		t.Fatalf("ended before streaming: %v", err)
+	case <-time.After(time.Second):
+		t.Fatal("cross-replica stream waited for session completion")
+	}
+	h.harness.mu.Lock()
+	inference := len(h.harness.starts) == 1 && h.harness.starts[0].InferenceOnly
+	h.harness.mu.Unlock()
+	if !inference {
+		t.Fatal("plain inference acquired a coding session")
+	}
+	cancel()
+	select {
+	case <-done:
+	case <-time.After(time.Second):
+		t.Fatal("forwarded stream did not cancel")
+	}
 }

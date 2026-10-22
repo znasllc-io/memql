@@ -14,6 +14,28 @@ import (
 	"github.com/znasllc-io/memql/core/common"
 )
 
+func (r *Replier) delegatedHumanWait(ctx context.Context, provider any) error {
+	reporter, ok := provider.(interface {
+		LastSession() (memql.AppSessionOutcome, bool)
+	})
+	if !ok || !isOwnedWorkExecution(ctx) {
+		return nil
+	}
+	outcome, present := reporter.LastSession()
+	if !present || outcome.SessionId == "" {
+		return nil
+	}
+	reader, ok := r.engine.(interface {
+		DelegatedWorkHumanWait(context.Context, string) error
+	})
+	if !ok {
+		return fmt.Errorf("%w: delegated feedback state is unavailable", memql.ErrWorkCheckpointRequired)
+	}
+	readCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
+	defer cancel()
+	return reader.DelegatedWorkHumanWait(readCtx, outcome.SessionId)
+}
+
 // PauseWorkBeforeTurn handles a native budget refusal before prompt/tool
 // preparation. Only receipt work detaches from the expired run deadline. A
 // same-lineage saved exchange wins over the new request's shorter history.

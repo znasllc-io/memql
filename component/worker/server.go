@@ -1648,12 +1648,13 @@ func (s *streamSession) openAppSession(ctx context.Context, req AppSessionReques
 		}
 	}()
 	handle := &AppSessionHandle{
-		sessionId: req.SessionId,
-		app:       req.App,
-		worker:    s.worker,
-		chunks:    make(chan AppSessionChunk, appSessionChunkBuffer),
-		done:      make(chan struct{}),
-		control:   s.sendAppSessionControl,
+		sessionId:  req.SessionId,
+		app:        req.App,
+		worker:     s.worker,
+		chunks:     make(chan AppSessionChunk, appSessionChunkBuffer),
+		done:       make(chan struct{}),
+		streamDone: s.ctx.Done(),
+		control:    s.sendAppSessionControl,
 	}
 	handle.detach = func() {
 		s.mu.Lock()
@@ -1679,6 +1680,7 @@ func (s *streamSession) openAppSession(ctx context.Context, req AppSessionReques
 	s.markSharingChanged()
 
 	start := &memqlv1.AppSessionStart{
+		InferenceOnly: req.InferenceOnly,
 		SessionId:     req.SessionId,
 		App:           req.App,
 		Kind:          req.Kind,
@@ -1722,6 +1724,7 @@ func (s *streamSession) openAppSession(ctx context.Context, req AppSessionReques
 		select {
 		case <-ctx.Done():
 			_ = handle.Cancel("caller_context_done")
+			handle.finish(AppSessionOutcome{Error: "caller_context_done"}, ctx.Err())
 		case <-handle.done:
 		case <-s.ctx.Done():
 		}
@@ -1844,6 +1847,7 @@ func (s *streamSession) openModelCall(ctx context.Context, req ModelCallRequest)
 		limits:          limits,
 		deltas:          make(chan ModelCallDelta, modelDeltaBuffer),
 		done:            make(chan struct{}),
+		streamDone:      s.ctx.Done(),
 		cancelFn:        s.sendModelCallCancel,
 		clock:           clock,
 		lastActivity:    clock(),
@@ -1933,6 +1937,7 @@ func (s *streamSession) openModelCall(ctx context.Context, req ModelCallRequest)
 		select {
 		case <-ctx.Done():
 			_ = handle.Cancel("caller_context_done")
+			handle.finish(ModelCallOutcome{FinishReason: ModelFinishCancelled, Error: "caller_context_done", ErrorCode: "caller_context_done"}, ctx.Err())
 		case <-handle.done:
 		case <-s.ctx.Done():
 		}

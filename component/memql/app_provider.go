@@ -239,6 +239,9 @@ type AppDoorPin struct {
 
 // AppCallRequest is one turn handed to an app.
 type AppCallRequest struct {
+	// OnContent receives only public answer deltas, in order, before Call returns.
+	// It must honor the call context when applying backpressure.
+	OnContent func(string) `json:"-"`
 	// ActingUserId scopes the call to that user's machines. EMPTY IS SYSTEM
 	// WORK and reaches nothing: unlike the fleet, there is no shared-app
 	// opt-in, because a session runs under a per-run credential whose
@@ -911,26 +914,46 @@ func (p *appProvider) CallChat(ctx context.Context, messages []common.ChatMessag
 	return res.Content, nil
 }
 
-// CallChatStream implements common.ChatStreamProvider, which is what lets Ask
-// -- a streaming surface -- be answered by an app at all (design record
-// 2026-10-18-routes). Without it the router passed every app door over for a
-// streaming turn, and a person on the Apps route, or on a cluster whose only
-// answering source is a signed-in app, read "unavailable" in Ask.
-//
-// THE ANSWER ARRIVES WHOLE. The app's session reports its result when the turn
-// ends, so the stream carries it as one chunk followed by Done. That is a
-// truthful stream rather than an invented one: nothing is chopped up to look
-// like typing, and a consumer that renders chunks as they come renders it the
-// moment the app has answered.
+// CallChatStream relays public answer deltas as the app produces them.
+// Older workers that only report a final result still deliver that result once.
 func (p *appProvider) CallChatStream(ctx context.Context, messages []common.ChatMessage) (<-chan common.StreamChunk, error) {
-	res, err := p.call(ctx, AppCallRequest{Messages: messages})
-	if err != nil {
-		return nil, err
-	}
-	out := make(chan common.StreamChunk, 2)
-	out <- common.StreamChunk{Content: res.Content}
-	out <- common.StreamChunk{Done: true}
-	close(out)
+	out := make(chan common.StreamChunk, 16)
+	go func() {
+		defer close(out)
+		send := func(chunk common.StreamChunk) {
+			select {
+			case out <- chunk:
+			case <-ctx.Done():
+			}
+		}
+		var streamed strings.Builder
+		published := ""
+		res, err := p.call(ctx, AppCallRequest{Messages: messages, OnContent: func(delta string) {
+			streamed.WriteString(delta)
+			// The terminal app answer is trimmed. Hold trailing whitespace until
+			// more text arrives so a final newline cannot invalidate the stream.
+			text := strings.TrimSpace(streamed.String())
+			if suffix := strings.TrimPrefix(text, published); suffix != "" {
+				send(common.StreamChunk{Content: suffix})
+			}
+			published = text
+		}})
+		if err != nil {
+			send(common.StreamChunk{Error: err})
+			return
+		}
+		// Completion may supply a suffix omitted by an older harness or a transcript
+		// cap. Never repeat already published text or silently accept a different answer.
+		content := strings.TrimSpace(res.Content)
+		if !strings.HasPrefix(content, published) {
+			send(common.StreamChunk{Error: fmt.Errorf("app answer changed after streaming")})
+			return
+		}
+		if suffix := strings.TrimPrefix(content, published); suffix != "" {
+			send(common.StreamChunk{Content: suffix})
+		}
+		send(common.StreamChunk{Done: true})
+	}()
 	return out, nil
 }
 

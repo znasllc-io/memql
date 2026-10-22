@@ -3,7 +3,10 @@ package mcp
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"math"
+	"net/http"
+	"net/http/httptest"
 	"strings"
 	"testing"
 	"time"
@@ -14,6 +17,85 @@ import (
 	"github.com/znasllc-io/memql/core/common"
 	"google.golang.org/protobuf/types/known/structpb"
 )
+
+func TestDelegatedWorkRestoresOnlyItsCapturedCurrentOwnerAuthority(t *testing.T) {
+	expires := time.Now().Add(time.Hour).Truncate(time.Second)
+	claims := map[string]any{"sub": "v1:identity:user:mcp-person", "class": appSessionClass, "node_id": appSessionLabelPrefix + "s", "exp": float64(expires.Unix())}
+	base := auth.ContextWithClaims(context.Background(), claims)
+	base = auth.ContextWithToken(base, auth.BuildTokenInfo(claims))
+	h := &httpHead{base: Config{Tier: TierInline}}
+	cfg := h.configForRequest(httptest.NewRequest(http.MethodPost, MCPPath, nil).WithContext(base))
+	if cfg.ActingRole != "" {
+		t.Fatal("test must start with the deployed roleless app credential")
+	}
+	for _, tc := range []struct{ name, current, ceiling, want string }{
+		{"owner", "owner", "owner", "owner"},
+		{"downgraded", "reader", "owner", "reader"},
+		{"ceiling", "owner", "reader", "reader"},
+		{"no grant", "owner", "", ""},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			eng := delegatedFixture()
+			eng.ownerRole = tc.current
+			if tc.ceiling != "" {
+				eng.runFields["executionAuthority"] = map[string]any{"roleCeiling": tc.ceiling, "credentialClass": "user"}
+			}
+			srv := NewServer(nil, "test", "1", eng, cfg)
+			ctx := srv.withActorEnvelope(base)
+			resolved, _, err := delegatedScope(ctx, eng, "s")
+			if err != nil {
+				t.Fatal(err)
+			}
+			access, _ := auth.AccessFromContext(resolved)
+			if string(access.Role) != tc.want || auth.OriginFromContext(resolved) == auth.OriginInternal {
+				t.Fatalf("scope widened authority: %+v", access)
+			}
+			retained, _ := auth.ClaimsFromContext(resolved)
+			forwarded, _ := auth.ForwardedAuthorityFromContext(resolved)
+			if AppSessionFromClaims(retained) != "s" || forwarded.CredentialClass != auth.ForwardedClassAppSession || !forwarded.ExpiresAt.Equal(expires) {
+				t.Fatal("delegation replaced its app credential with parent credentials")
+			}
+			if result := callDelegatedTool(ctx, eng, "s", "gaTool", nil); isError(result) || string(eng.accessSeen.Role) != tc.want {
+				t.Fatalf("resolved actor did not reach tool execution: %v", result)
+			}
+			if tc.want == "owner" {
+				eng.ownerRole = "reader"
+				if result := callDelegatedTool(ctx, eng, "s", "gaTool", nil); isError(result) || eng.accessSeen.Role != auth.RoleReader {
+					t.Fatal("live connection retained owner authority after downgrade")
+				}
+			}
+		})
+	}
+	for name, mutate := range map[string]func(*delegatedEngine){
+		"cancelled":            func(e *delegatedEngine) { e.runFields["cancelRequested"] = true },
+		"another owner":        func(e *delegatedEngine) { e.runFields["ownerUserId"] = "v1:identity:user:other" },
+		"another goal":         func(e *delegatedEngine) { e.runFields["goalId"] = "other" },
+		"superseded execution": func(e *delegatedEngine) { e.runFields["rerun"] = map[string]any{"requestId": "new"} },
+		"expired badge": func(e *delegatedEngine) {
+			e.runFields["executionAuthority"] = map[string]any{"roleCeiling": "owner", "credentialClass": "badge", "expiresAt": time.Now().Add(-time.Minute).Format(time.RFC3339Nano)}
+		},
+		"malformed grant": func(e *delegatedEngine) { e.runFields["executionAuthority"] = "owner" },
+	} {
+		t.Run(name, func(t *testing.T) {
+			eng := delegatedFixture()
+			eng.runFields["executionAuthority"] = map[string]any{"roleCeiling": "owner", "credentialClass": "user"}
+			mutate(eng)
+			ctx := NewServer(nil, "test", "1", eng, cfg).withActorEnvelope(base)
+			if result := callDelegatedTool(ctx, eng, "s", "gaTool", nil); !isError(result) || eng.accessSeen != nil {
+				t.Fatalf("invalid execution reached a tool: %v", result)
+			}
+		})
+	}
+	eng := delegatedFixture()
+	badgeExpiry := time.Now().Add(time.Minute).Truncate(time.Second)
+	eng.runFields["executionAuthority"] = map[string]any{"roleCeiling": "reader", "credentialClass": "badge", "expiresAt": badgeExpiry.Format(time.RFC3339Nano)}
+	ctx := NewServer(nil, "test", "1", eng, cfg).withActorEnvelope(base)
+	resolved, _, err := delegatedScope(ctx, eng, "s")
+	forwarded, _ := auth.ForwardedAuthorityFromContext(resolved)
+	if err != nil || forwarded.Role != auth.RoleReader || !forwarded.ExpiresAt.Equal(badgeExpiry) {
+		t.Fatalf("delegation exceeded its parent badge grant: %+v %v", forwarded, err)
+	}
+}
 
 func TestDelegatedMCPForwardsVerifiedCredentialWithoutWidening(t *testing.T) {
 	expires := time.Now().Add(time.Minute).Truncate(time.Second)
@@ -119,13 +201,55 @@ func (r *delegatedAuthorityRecorder) RecordToolCall(ctx context.Context, _ AppSe
 
 type delegatedEngine struct {
 	*fakeEngine
-	row          map[string]any
-	runStatus    string
-	runSeen      common.RunContext
-	defaultsSeen map[string]any
-	sourceRun    common.RunContext
-	sourceArgs   map[string]any
-	sourceResult string
+	row                map[string]any
+	runStatus          string
+	runFields          map[string]any
+	ownerRole          string
+	accessSeen         *auth.AccessContext
+	runSeen            common.RunContext
+	defaultsSeen       map[string]any
+	sourceRun          common.RunContext
+	sourceArgs         map[string]any
+	sourceResult       string
+	checkpointErr      error
+	checkpointMessages []common.ChatMessage
+	checkpointArgs     map[string]any
+}
+
+func (e *delegatedEngine) PrepareDelegatedFeedback(_ context.Context, _ string, messages []common.ChatMessage, _ string, args map[string]any) error {
+	if e.accessSeen != nil {
+		panic("question executed before its checkpoint")
+	}
+	e.checkpointMessages, e.checkpointArgs = messages, args
+	return e.checkpointErr
+}
+
+func (e *concreteDelegatedFixture) PrepareDelegatedFeedback(ctx context.Context, session string, messages []common.ChatMessage, name string, args map[string]any) error {
+	return e.delegate.PrepareDelegatedFeedback(ctx, session, messages, name, args)
+}
+
+func TestDelegatedQuestionSavesContinuationBeforeAnyEffect(t *testing.T) {
+	for _, name := range []string{"requestUserFeedback", "requestComputerUseScope", "work.requestComputerUseScope"} {
+		for _, fail := range []bool{false, true} {
+			fixture := delegatedFixture()
+			fixture.reg.tools = append(fixture.reg.tools, tool(name, []string{"assistant"}))
+			scope := fixture.row["toolScope"].(map[string]any)
+			scope["tools"] = []common.ToolDefinition{{Name: name}}
+			scope["messages"] = []common.ChatMessage{{Role: "user", Content: "Keep working on my request"}}
+			scope["defaults"] = map[string]map[string]any{name: {"runId": "run-1"}}
+			raw, _ := json.Marshal(scope)
+			var stored map[string]any
+			_ = json.Unmarshal(raw, &stored)
+			fixture.row["toolScope"] = stored
+			if fail {
+				fixture.checkpointErr = errors.New("storage unavailable")
+			}
+			result := callDelegatedTool(asPerson("reader"), asEngine(&concreteDelegatedFixture{delegate: fixture}), "s", name, map[string]any{"runId": "forged"})
+			if isError(result) != fail || (fixture.accessSeen == nil) != fail || len(fixture.checkpointMessages) != 1 || fixture.checkpointArgs["runId"] != "run-1" {
+				t.Fatalf("question checkpoint barrier failed: tool=%s fail=%v result=%v", name, fail, result)
+			}
+		}
+	}
 }
 
 // Production goes through engineAdapter because MemQLEngine.Tools returns a
@@ -220,7 +344,7 @@ func delegatedFixture() *delegatedEngine {
 	raw, _ := json.Marshal(scope)
 	var stored map[string]any
 	_ = json.Unmarshal(raw, &stored)
-	return &delegatedEngine{fakeEngine: newFakeEngine(), runStatus: "running", row: map[string]any{"ownerUserId": "v1:identity:user:mcp-person", "runId": "run-1", "stepId": "v1:work:step:step-1", "status": "running", "toolScope": stored, "prompt": "original input"}}
+	return &delegatedEngine{fakeEngine: newFakeEngine(), runStatus: "running", ownerRole: "owner", runFields: map[string]any{"ownerUserId": "v1:identity:user:mcp-person"}, row: map[string]any{"ownerUserId": "v1:identity:user:mcp-person", "runId": "run-1", "stepId": "v1:work:step:step-1", "status": "running", "toolScope": stored, "prompt": "original input"}}
 }
 
 func (e *delegatedEngine) Execute(ctx context.Context, query string) (*memql.ExecuteResult, error) {
@@ -231,6 +355,14 @@ func (e *delegatedEngine) Execute(ctx context.Context, query string) (*memql.Exe
 		row = e.row
 	case strings.HasPrefix(query, "workRunForOwner("):
 		row = map[string]any{"status": e.runStatus}
+		for key, value := range e.runFields {
+			row[key] = value
+		}
+	case strings.HasPrefix(query, "query userByIdSystem("):
+		if auth.OriginFromContext(ctx) != auth.OriginInternal {
+			panic("identity resolution lost its server boundary")
+		}
+		row = map[string]any{"role": e.ownerRole}
 	default:
 		return e.fakeEngine.Execute(ctx, query)
 	}
@@ -245,6 +377,7 @@ func (e *delegatedEngine) Execute(ctx context.Context, query string) (*memql.Exe
 }
 
 func (e *delegatedEngine) ExecuteToolByName(ctx context.Context, name string, args map[string]any) (string, error) {
+	e.accessSeen, _ = auth.AccessFromContext(ctx)
 	e.runSeen, _ = common.RunFromContext(ctx)
 	e.defaultsSeen = common.ToolDefaultsFromContext(ctx)
 	return e.fakeEngine.ExecuteToolByName(ctx, name, args)

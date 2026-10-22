@@ -21,6 +21,26 @@ func (f *fakeDelegate) RunStep(_ context.Context, h AppSessionHandover) (AppSess
 	return f.out, f.err
 }
 
+func TestSessionProviderPreservesFailedSessionForNativeWaitWithoutReusingAnOldSession(t *testing.T) {
+	d := &fakeDelegate{out: AppSessionOutcome{SessionId: "waiting-session"}, err: errors.New("app ended without a terminal result")}
+	p := sessionRegistry(d).SessionProvider("codex", "", SessionRequest{ActingUserId: "owner", RunId: "run", StepId: "step"}).(*sessionProvider)
+	ctx := delegatedProviderTestContext("owner", "run", "step")
+	messages := []common.ChatMessage{{Role: "user", Content: "Continue"}, {Role: "assistant", ToolCalls: []common.ToolCall{{ID: "written", Name: "writeFile", Arguments: `{"path":"result.txt"}`}}}, {Role: "tool", Name: "writeFile", ToolCallId: "written", Content: "Written once"}}
+	_, err := p.run(ctx, messages, nil, nil)
+	if err == nil {
+		t.Fatal("lost failure")
+	}
+	out, ok := p.LastSession()
+	if !ok || out.SessionId != "waiting-session" || len(d.got.ToolScope.Messages) != len(messages) || !strings.Contains(d.got.Prompt, "result.txt") || !strings.Contains(d.got.Prompt, "[tool writeFile written]") {
+		t.Fatal("lost native continuation evidence")
+	}
+	d.out = AppSessionOutcome{}
+	_, _ = p.run(ctx, messages, nil, nil)
+	if _, ok := p.LastSession(); ok {
+		t.Fatal("a new refusal reused the preceding session's wait")
+	}
+}
+
 func sessionRegistry(d AppSessionDelegate) *ProviderRegistry {
 	r := &ProviderRegistry{}
 	r.SetAppSessionDelegate(d)

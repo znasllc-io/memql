@@ -27,6 +27,10 @@ func TestPolicyCustomizationPostgres(t *testing.T) {
 	require.NoError(t, err)
 	_, err = db.ExecContext(ctx, string(migration))
 	require.NoError(t, err)
+	migration, err = os.ReadFile("../database/memory-nodes/migrations/20261022160000_router_route_configuration.up.sql")
+	require.NoError(t, err)
+	_, err = db.ExecContext(ctx, string(migration))
+	require.NoError(t, err)
 	_, err = db.ExecContext(ctx, `DELETE FROM router_policy_revision WHERE revision > 0`)
 	require.NoError(t, err)
 	store := databasePolicyStore{database: func() *bun.DB { return db }}
@@ -52,4 +56,25 @@ func TestPolicyCustomizationPostgres(t *testing.T) {
 	err = db.NewRaw(`SELECT updated_by FROM router_policy_revision WHERE revision=1`).Scan(ctx, &author)
 	require.NoError(t, err)
 	require.Equal(t, "owner", strings.TrimSpace(author))
+
+	// Exercise the actual database store on another registry. An in-memory
+	// store masks dropped fields: the old writer advanced the revision while
+	// silently losing both the Apps source selection and Auto's balance.
+	jobs := RouteJobs{Fast: []string{"app:codex"}, Strong: []string{"app:codex"}, Reasoning: []string{"app:codex"}}
+	require.NoError(t, a.SaveRouteOverride(policyOwner(), 2, RouteIdApps, jobs))
+	other, err := b.RouteConfiguration(ctx)
+	require.NoError(t, err)
+	require.Equal(t, jobs, other.Routes[RouteIdApps])
+	balance := AutoBalance{Speed: 90, Cost: 10, Quality: 40}
+	require.NoError(t, b.SaveAutoBalance(policyOwner(), 3, balance))
+	restarted = policyFixture(databasePolicyStore{database: func() *bun.DB { return db }})
+	other, err = restarted.RouteConfiguration(ctx)
+	require.NoError(t, err)
+	require.Equal(t, jobs, other.Routes[RouteIdApps])
+	require.Equal(t, &balance, other.Auto)
+	require.NoError(t, restarted.ResetRouteOverride(policyOwner(), 4, RouteIdApps))
+	other, err = a.RouteConfiguration(ctx)
+	require.NoError(t, err)
+	require.Empty(t, other.Routes)
+	require.Equal(t, &balance, other.Auto)
 }

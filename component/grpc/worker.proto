@@ -642,6 +642,9 @@ message AppSessionStart {
   // AppSessionEnd -- which is what the version records.
   string model = 15;
   string effort = 16;
+  // One model invocation: no coding tools or MCP back-channel. Older workers
+  // ignore this optimization and retain the existing session behavior.
+  bool inference_only = 17;
 }
 
 // AppSessionLimits are the policy ceilings a session runs under.

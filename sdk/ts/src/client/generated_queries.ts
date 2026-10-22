@@ -6528,7 +6528,7 @@ QueryClient.prototype.packageDeploymentsPending = function (this: QueryClient, a
   return this.executeNamed("packageDeploymentsPending", buildPackageDeploymentsPending(args), opts);
 };
 
-/** The packages this caller may see, active only. The OS packages list. */
+/** Read connected repositories and application sources visible to this caller. */
 // Bound concept: v1:platform:package (machine-readable: BoundConcepts["packagesAll"] in generated_concepts.ts).
 export interface PackagesAllArgs {
 }

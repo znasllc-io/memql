@@ -144,6 +144,27 @@ func TestSavedFileContentAndImageOperationsAreInTheRealCapabilityShortlist(t *te
 	}
 }
 
+func TestSoftwareSourceDiscoveryFindsExistingReadContracts(t *testing.T) {
+	e, _, _ := readMergeTestEngine(t)
+	for _, tc := range []struct{ search, name string }{
+		{"connected repositories", "platform.packagesAll"},
+		{"repository pipelines", "pipelines.pipelinesForOwner"},
+		{"source connections", "platform.sourceConnectionsMine"},
+	} {
+		t.Run(tc.search, func(t *testing.T) {
+			rows, err := e.workCapabilitiesBuiltin(askTestActor(), map[string]any{"search": tc.search}, 0)
+			require.NoError(t, err)
+			var response struct{ Capabilities []struct{ Name string } }
+			require.NoError(t, json.Unmarshal(rows[0].Payload, &response))
+			names := []string{}
+			for _, capability := range response.Capabilities {
+				names = append(names, capability.Name)
+			}
+			require.Contains(t, names, tc.name)
+		})
+	}
+}
+
 // TestWorkCapabilityAppNamesAnAppTheSeedsAndTheOSBothHave pins the namespace to
 // OS-app map workCapabilityApp answers. A capability is offered only to a caller
 // holding `read` on `app:<id>` (workCapabilityAllowed), and the action event it

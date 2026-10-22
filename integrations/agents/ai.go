@@ -190,6 +190,12 @@ func (i *Integration) handleInvokePrompt(ctx context.Context, args map[string]an
 	// core/airoute, cache, journal -- happens inside this one call, and none
 	// of it is re-implemented here.
 	var reply any
+	if mode := args["progressMode"]; mode != nil && mode != "" && mode != "draft" && mode != "reply" {
+		return nil, fmt.Errorf("ai: progressMode must be draft or reply")
+	}
+	if args["progressMode"] == "reply" && args["responseSchema"] != nil {
+		return nil, fmt.Errorf("ai: structured output cannot stream as reply text")
+	}
 	if raw := args["responseSchema"]; raw != nil {
 		schema, valid := raw.(map[string]any)
 		if !valid || schema["type"] != "object" {
@@ -210,6 +216,14 @@ func (i *Integration) handleInvokePrompt(ctx context.Context, args map[string]an
 		} else {
 			reply, err = i.engine.InvokeAIStructured(ctx, templateId, data, "prompt_output", encoded, true)
 		}
+	} else if args["progress"] == true && args["progressMode"] == "reply" {
+		engine, ok := i.engine.(interface {
+			InvokeAIReplyProgress(context.Context, string, map[string]any) (any, error)
+		})
+		if !ok {
+			return nil, fmt.Errorf("ai: reply progress is unavailable on this engine")
+		}
+		reply, err = engine.InvokeAIReplyProgress(ctx, templateId, data)
 	} else if args["progress"] == true {
 		engine, ok := i.engine.(interface {
 			InvokeAIProgress(context.Context, string, map[string]any) (any, error)

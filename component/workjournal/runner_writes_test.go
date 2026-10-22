@@ -416,19 +416,16 @@ func TestCancelledClosesTheStepAndTheRun(t *testing.T) {
 			t.Errorf("run %s = %#v, want %#v", field, closed[field], want)
 		}
 	}
-	goal := onlyCallNamed(t, engine.calls[before:], "updateWorkGoal")
-	if goal["goalId"] != run.GoalID() || goal["status"] != "closed" || goal["closeReason"] != "a newer push superseded this run" {
-		t.Fatalf("the goal was not closed with its run: %v", goal)
+	if writes := callsNamed(engine.calls[before:], "updateWorkGoal"); len(writes) != 0 {
+		t.Fatalf("run cancellation must not accept/close its goal: %v", writes)
 	}
-
-	// A cancel nobody explained still closes the goal, saying what happened
-	// rather than that the run finished.
+	// An unexplained cancellation also leaves the goal for its owner.
 	quiet := &countingEngine{}
 	other, _ := New(quiet, nil, "agent-1").Begin(context.Background(), pipelineWork())
 	before = len(quiet.calls)
 	other.Cancelled(context.Background(), "", "")
-	if reason := onlyCallNamed(t, quiet.calls[before:], "updateWorkGoal")["closeReason"]; reason != "the run was cancelled" {
-		t.Fatalf("closeReason = %v, want the run was cancelled", reason)
+	if writes := callsNamed(quiet.calls[before:], "updateWorkGoal"); len(writes) != 0 {
+		t.Fatalf("unexplained cancellation closed its goal: %v", writes)
 	}
 }
 
@@ -510,8 +507,8 @@ func TestReopenWritesNothingAndAddressesTheRowsBeginWrote(t *testing.T) {
 			if got := fmt.Sprint(spent["wallClockMs"]); got != fmt.Sprint((5 * time.Minute).Milliseconds()) {
 				t.Errorf("wallClockMs = %v, want five minutes from the run's start", got)
 			}
-			if goal := onlyCallNamed(t, resumer.calls, "updateWorkGoal"); goal["goalId"] != opened.GoalID() {
-				t.Fatalf("the goal close named %v, want %s", goal["goalId"], opened.GoalID())
+			if writes := callsNamed(resumer.calls, "updateWorkGoal"); len(writes) != 0 {
+				t.Fatalf("resumed success closed its goal without the owner: %v", writes)
 			}
 		})
 	}

@@ -425,6 +425,9 @@ func (a *CognitionEngineAdapter) ContextWithWorkCallDeadline(ctx context.Context
 func (a *CognitionEngineAdapter) SaveWorkContinuation(ctx context.Context, messages []common.ChatMessage) error {
 	return a.Engine.SaveWorkContinuation(ctx, messages)
 }
+func (a *CognitionEngineAdapter) DelegatedWorkHumanWait(ctx context.Context, sessionID string) error {
+	return a.Engine.DelegatedWorkHumanWait(ctx, sessionID)
+}
 func (a *CognitionEngineAdapter) RestoreWorkContinuation(ctx context.Context, messages []common.ChatMessage) ([]common.ChatMessage, error) {
 	return a.Engine.RestoreWorkContinuation(ctx, messages)
 }

@@ -335,6 +335,8 @@ func (i *Integration) Capabilities() []memql.IntegrationCapability {
 				"noPaidProviders": "bool -- inherited hard ceiling across every model modality",
 			},
 		},
+		{Name: "acceptGoalResults", Description: "Record the owner's acceptance of exact finished goal results and optional feedback, then close the goal. A running job cannot accept itself.", Handler: i.handleAcceptGoalResults},
+
 		{
 			Name:        "cancelGoal",
 			Description: "Ask every live run of one of the caller's goals to stop. Cancellation is REQUESTED rather than done: a run notices at its next step boundary, so a step already in flight finishes and is journaled. Returns {goalId, runsAsked, goalClosed}.",

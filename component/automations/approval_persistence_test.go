@@ -213,9 +213,20 @@ func TestJournalDB_HumanPauseResumesOnAnotherExecutorWithoutRepeatingEffects(t *
 	if err := engine.Functions().Upsert(&memql.Function{Name: "resumeFixture", Type: memql.FunctionTypeBuiltin, FunctionKind: "builtin", Executor: "integration.pausedFixture.continue"}); err != nil {
 		t.Fatal(err)
 	}
+	for _, snapshot := range []bool{false, true} {
+		t.Run(fmt.Sprintf("empty-app-snapshot=%v", snapshot), func(t *testing.T) { testJournalHumanPauseResume(t, engine, snapshot) })
+	}
+}
+
+func testJournalHumanPauseResume(t *testing.T, engine *memql.MemQLEngine, snapshot bool) {
 	key := fmt.Sprintf("humanPause%d", time.Now().UnixNano())
 	runID, goalID, owner, approvalID := key+"run", key+"goal", key+"owner", key+"approval"
 	ctx := common.ContextWithRun(auth.ContextWithUserActor(context.Background(), owner), common.RunContext{RunId: runID, GoalId: goalID, OwnerUserId: owner, Mode: common.RunModeLive})
+	if snapshot {
+		run, _ := common.RunFromContext(ctx)
+		run.RerunRequestId = key + "request"
+		ctx = common.ContextWithRun(ctx, run)
+	}
 	journalWriter := newWorkJournal(engine, nil)
 	write := func(name string, args map[string]any) {
 		t.Helper()
@@ -232,10 +243,22 @@ func TestJournalDB_HumanPauseResumesOnAnotherExecutorWithoutRepeatingEffects(t *
 	execution.ID = runID
 	args := journalWriter.openRunArgs(auto, execution, nil, events.Cause{})
 	args["goalId"] = goalID
+	if snapshot {
+		// Apps Run again records a snapshot even when no workspace files
+		// exist. The saved request is unchanged when a person answers.
+		args["rerun"] = map[string]any{"reason": RerunReasonRerun, "requestId": key + "request", "stepKey": "question", "snapshot": map[string]any{"files": []any{}}, "workspace": key + "-retry", "versions": map[string]any{"question": 1}}
+	}
 	write("createWorkRun", args)
 	messages := []common.ChatMessage{{Role: "user", Content: "Continue this work"}, {Role: "assistant", ToolCalls: []common.ToolCall{{ID: "done", Name: "effect", Arguments: "{}"}}}, {Role: "tool", ToolCallId: "done", Name: "effect", Content: "confirmed effect"}}
 	first := NewExecutor(ExecutorOptions{Engine: engine, StepRegistry: modeRegistryFunc(func(ctx context.Context, step *Step, sc *StepContext) (*StepResult, error) {
 		if step.ID == "question" {
+			if snapshot {
+				// This fixture adopts the initial execution; supply the
+				// lineage a real rerun stamps on its saved continuation.
+				run, _ := common.RunFromContext(ctx)
+				run.RerunRequestId = key + "request"
+				ctx = common.ContextWithRun(ctx, run)
+			}
 			if err := engine.SaveWorkContinuation(ctx, messages); err != nil {
 				return nil, err
 			}
@@ -276,7 +299,24 @@ func TestJournalDB_HumanPauseResumesOnAnotherExecutorWithoutRepeatingEffects(t *
 	if err != nil {
 		t.Fatal(err)
 	}
-	resumed, err := second.ResumeFrom(ctx, journal, auto, &ResumeOptions{})
+	options := &ResumeOptions{}
+	if snapshot {
+		journal, options, err = PrepareRerun(journal, nil, auto)
+		if err != nil {
+			t.Fatal(err)
+		}
+		// Restoring files could undo effects completed before the question.
+		// Both admission paths must still reject that before any execution.
+		journal.Rerun.Snapshot.Files = []common.SnapshotFile{{Path: "result.txt", FileId: "prior-version"}}
+		if _, err := second.ResumeFrom(ctx, journal, auto, options); !errors.Is(err, ErrNonRetryableStep) || secondCalls != 0 {
+			t.Fatalf("populated snapshot resumed: %v, calls=%d", err, secondCalls)
+		}
+		if _, _, err := second.prepareCheckpoint(ctx, journal, auto, memql.CheckpointResumeRequest{RunID: runID, StepKey: "question", ApprovalID: approvalID, RerunRequestID: key + "request"}, 0); err == nil {
+			t.Fatal("populated snapshot admitted a native checkpoint")
+		}
+		journal.Rerun.Snapshot.Files = nil
+	}
+	resumed, err := second.ResumeFrom(ctx, journal, auto, options)
 	if err != nil || resumed.ID != run.ID || resumed.Status != "completed" || secondCalls != 1 {
 		t.Fatalf("resume skipped the waiting step or made a new run: %v %v", resumed, err)
 	}

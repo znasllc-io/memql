@@ -87,6 +87,15 @@ prompt workQuickReply {
   viewerContext string
 }
 
+/// A self-contained conversational reply with no retrieved evidence to review.
+@level("fast")
+@templateFile("prompts/workConversationReply.tmpl")
+prompt workConversationReply {
+ statement string!
+ conversation string
+ viewerContext string
+}
+
 /// One bounded evidence check, without tools or another research run.
 @level("strong")
 @templateFile("prompts/workReplyReview.tmpl")

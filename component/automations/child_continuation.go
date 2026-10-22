@@ -61,7 +61,7 @@ func (e *Executor) prepareCheckpoint(ctx context.Context, journal *RunJournal, a
 		return ctx, nil, fmt.Errorf("checkpoint step is not an unchanged suspension")
 	}
 	if journal.Rerun != nil {
-		if depth != 0 || request.RerunRequestID == "" || journal.Rerun.RequestId != request.RerunRequestID || journal.Rerun.Snapshot != nil {
+		if depth != 0 || request.RerunRequestID == "" || journal.Rerun.RequestId != request.RerunRequestID || (journal.Rerun.Snapshot != nil && len(journal.Rerun.Snapshot.Files) > 0) {
 			return ctx, nil, fmt.Errorf("checkpoint rerun request changed")
 		}
 	} else if depth == 0 && request.RerunRequestID != "" {
