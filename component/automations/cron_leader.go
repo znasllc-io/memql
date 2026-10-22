@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/sha256"
 	"database/sql"
+	"database/sql/driver"
 	"encoding/binary"
 	"log/slog"
 	"sync"
@@ -45,6 +46,7 @@ const (
 	cronLeaderLockKey int64 = 7756010113207010561
 
 	cronLeaderPollInterval = 10 * time.Second
+	cronLeaderPollTimeout  = 2 * time.Second
 )
 
 // CronLeader is a Dependency; it acquires/holds the lease over its lifetime.
@@ -57,8 +59,9 @@ type CronLeader struct {
 
 	leader atomic.Bool
 
-	mu   sync.Mutex // guards conn
-	conn *sql.Conn
+	mu     sync.Mutex // serializes polling, scope registration and shutdown
+	conn   *sql.Conn
+	leases map[int64]*atomic.Bool
 }
 
 // NewCronLeader builds the leader. dbGetter is resolved lazily (the DB may
@@ -72,13 +75,18 @@ func NewCronLeader(dbGetter func() *bun.DB, logger *slog.Logger) *CronLeader {
 // Replicas using the same scope share a lease; distinct scopes do not block
 // one another. It uses the same direct connection and failover contract.
 func NewScopedCronLeader(scope string, dbGetter func() *bun.DB, logger *slog.Logger) *CronLeader {
+	return newCronLeader(dbGetter, logger, common.ComponentName(string(CronLeaderComponentName)+"-"+scope), scopedCronKey(scope))
+}
+
+func scopedCronKey(scope string) int64 {
 	digest := sha256.Sum256([]byte("memql:scheduled-automation:" + scope))
-	return newCronLeader(dbGetter, logger, common.ComponentName(string(CronLeaderComponentName)+"-"+scope), int64(binary.BigEndian.Uint64(digest[:8])))
+	return int64(binary.BigEndian.Uint64(digest[:8]))
 }
 
 func newCronLeader(dbGetter func() *bun.DB, logger *slog.Logger, name common.ComponentName, key int64) *CronLeader {
 	comp, _ := component.New(name)
 	cl := &CronLeader{Component: comp, dbGetter: dbGetter, logger: logger, lockKey: key}
+	cl.leases = map[int64]*atomic.Bool{key: &cl.leader}
 	_ = cl.ConfigureLifecycle(
 		component.WithRunHook(cl.run),
 		component.WithOnStopHook(cl.cleanup),
@@ -89,6 +97,22 @@ func newCronLeader(dbGetter func() *bun.DB, logger *slog.Logger, name common.Com
 // IsLeader reports whether this node currently owns the scheduled-automation
 // lease. Wire it as Scheduler.LeaderGate.
 func (cl *CronLeader) IsLeader() bool { return cl.leader.Load() }
+
+// ScopedGate registers an independent advisory lock on this leader's ONE
+// session. Adding schedules must not consume another lifetime connection:
+// enough scopes otherwise exhaust the bounded direct pool before Ready closes.
+// Call during composition; each scope retains its existing lock key and gate.
+func (cl *CronLeader) ScopedGate(scope string) func() bool {
+	cl.mu.Lock()
+	defer cl.mu.Unlock()
+	key := scopedCronKey(scope)
+	state := cl.leases[key]
+	if state == nil {
+		state = &atomic.Bool{}
+		cl.leases[key] = state
+	}
+	return state.Load
+}
 
 func (cl *CronLeader) run(ctx context.Context, markStarted func()) error {
 	cl.poll(ctx)  // first attempt before signalling Ready so a single-node
@@ -108,37 +132,42 @@ func (cl *CronLeader) run(ctx context.Context, markStarted func()) error {
 // poll acquires the lease (non-leader) or keepalives it (leader), dropping
 // leadership if the connection dies.
 func (cl *CronLeader) poll(ctx context.Context) {
+	ctx, cancel := context.WithTimeout(ctx, cronLeaderPollTimeout)
+	defer cancel()
+	cl.mu.Lock()
+	defer cl.mu.Unlock()
 	conn, err := cl.ensureConn(ctx)
 	if err != nil {
 		cl.demote("no database connection", err)
 		return
 	}
 
-	if cl.leader.Load() {
-		// Keepalive: if the lock-holding connection is dead, drop the lease
-		// so a healthy node can take over.
-		if err := conn.PingContext(ctx); err != nil {
-			cl.demote("lease connection lost", err)
-		}
+	// Every held scope belongs to this session. Losing it revokes ALL gates.
+	if err := conn.PingContext(ctx); err != nil {
+		cl.demote("lease connection lost", err)
 		return
 	}
 
-	var acquired bool
-	if err := conn.QueryRowContext(ctx, "SELECT pg_try_advisory_lock($1)", cl.lockKey).Scan(&acquired); err != nil {
-		cl.demote("advisory-lock query failed", err)
-		return
-	}
-	if acquired {
-		cl.leader.Store(true)
-		if cl.logger != nil {
-			cl.logger.Info("cron leader acquired -- this node runs scheduled automations")
+	for key, state := range cl.leases {
+		if state.Load() {
+			continue // session locks are reentrant; never acquire a held key twice
+		}
+		var acquired bool
+		if err := conn.QueryRowContext(ctx, "SELECT pg_try_advisory_lock($1)", key).Scan(&acquired); err != nil {
+			cl.demote("advisory-lock query failed", err)
+			return
+		}
+		if acquired {
+			state.Store(true)
+			if cl.logger != nil {
+				cl.logger.Info("cron leader acquired -- this node runs scheduled automations", "lockKey", key)
+			}
 		}
 	}
 }
 
+// Caller holds mu.
 func (cl *CronLeader) ensureConn(ctx context.Context) (*sql.Conn, error) {
-	cl.mu.Lock()
-	defer cl.mu.Unlock()
 	if cl.conn != nil {
 		return cl.conn, nil
 	}
@@ -154,10 +183,12 @@ func (cl *CronLeader) ensureConn(ctx context.Context) (*sql.Conn, error) {
 	return conn, nil
 }
 
-// demote drops leadership + the (likely dead) connection so the next poll
-// re-acquires from scratch.
+// Caller holds mu. Drop every scope before releasing its session.
 func (cl *CronLeader) demote(reason string, err error) {
-	wasLeader := cl.leader.Swap(false)
+	wasLeader := false
+	for _, state := range cl.leases {
+		wasLeader = state.Swap(false) || wasLeader
+	}
 	cl.closeConn()
 	if wasLeader && cl.logger != nil {
 		cl.logger.Warn("cron leadership released", "reason", reason, "error", err)
@@ -165,9 +196,17 @@ func (cl *CronLeader) demote(reason string, err error) {
 }
 
 func (cl *CronLeader) closeConn() {
-	cl.mu.Lock()
-	defer cl.mu.Unlock()
 	if cl.conn != nil {
+		// Confirm release on a healthy session before another replica polls.
+		// If the connection is broken, discarding it below still releases the
+		// locks when PostgreSQL observes that session's loss.
+		ctx, cancel := context.WithTimeout(context.Background(), cronLeaderPollTimeout)
+		_, _ = cl.conn.ExecContext(ctx, "SELECT pg_advisory_unlock_all()")
+		cancel()
+		// sql.Conn.Close merely returns a session to its pool; its advisory
+		// locks would survive there. Discard it so ALL registered keys release,
+		// including a key acquired just before a query's response was lost.
+		_ = cl.conn.Raw(func(any) error { return driver.ErrBadConn })
 		_ = cl.conn.Close()
 		cl.conn = nil
 	}
@@ -175,19 +214,9 @@ func (cl *CronLeader) closeConn() {
 
 func (cl *CronLeader) cleanup() {
 	cl.mu.Lock()
-	conn := cl.conn
-	cl.conn = nil
-	cl.mu.Unlock()
-
-	if conn != nil {
-		if cl.leader.Load() {
-			// Best-effort explicit unlock; closing the conn would release it
-			// anyway, but unlock first so a co-located node takes over faster.
-			ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
-			_, _ = conn.ExecContext(ctx, "SELECT pg_advisory_unlock($1)", cl.lockKey)
-			cancel()
-		}
-		_ = conn.Close()
+	defer cl.mu.Unlock()
+	for _, state := range cl.leases {
+		state.Store(false)
 	}
-	cl.leader.Store(false)
+	cl.closeConn()
 }
