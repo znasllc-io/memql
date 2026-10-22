@@ -49,7 +49,7 @@ func TestDBTestsLaneTakesItsSetFromThePlanner(t *testing.T) {
 	if !slices.Contains(agent.Services, "postgres") || !strings.Contains(agent.Run, "export MEMQL_REQUIRE_DB=1\n") || !strings.Contains(agent.Run, "export MEMQL_DATABASE_DSN=") {
 		t.Error("agent-tagged persistence tests must fail if their isolated database is unreachable")
 	}
-	if !strings.Contains(agent.Run, "go test -count=1 -tags agent -timeout=300s ./app/ ./integrations/agent/ ./integrations/agent/worker/ ./integrations/pipelinesteps/ ./component/node/\n") {
+	if !strings.Contains(agent.Run, "go test -tags agent -count=1 -timeout=300s ./app/ ./integrations/agent/ ./integrations/agent/worker/ ./integrations/pipelinesteps/ ./component/node/\n") {
 		t.Error("agent-tagged tests must retain their package set and execute uncached")
 	}
 	goStep := nativeRequiredStep(t, "go-tests")
