@@ -405,8 +405,24 @@ func conversationHasSources(conversation any) bool {
 	if !ok {
 		return true
 	}
+	profileOnly := false
+	if receipts, ok := data["recordedSources"].([]any); ok && len(receipts) > 0 {
+		profileOnly = true
+		for _, source := range receipts {
+			receipt, ok := source.(map[string]any)
+			if !ok || receipt["operation"] != "workViewerContext" {
+				profileOnly = false
+				break
+			}
+		}
+	}
 	for key, value := range data {
-		if key == "clock" || key == "note" {
+		if key == "clock" || key == "note" || key == "currentProfile" {
+			continue
+		}
+		// These are navigation pointers to the receipts, not extra evidence.
+		// Any omitted receipt is represented by limitations, which still blocks.
+		if profileOnly && (key == "references" || key == "sourceHistory") {
 			continue
 		}
 		if value == nil || value == "" {
@@ -416,18 +432,8 @@ func conversationHasSources(conversation any) bool {
 			if len(list) == 0 {
 				continue
 			}
-			if key == "recordedSources" {
-				evidence := false
-				for _, source := range list {
-					receipt, ok := source.(map[string]any)
-					if !ok || receipt["operation"] != "workViewerContext" {
-						evidence = true
-						break
-					}
-				}
-				if !evidence {
-					continue
-				}
+			if key == "recordedSources" && profileOnly {
+				continue
 			}
 		}
 		return true

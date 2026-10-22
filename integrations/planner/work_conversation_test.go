@@ -188,10 +188,22 @@ func TestSelfContainedConversationPublishesProgressWithoutToolLoop(t *testing.T)
 }
 
 func TestProfileContextAloneDoesNotRequireEvidenceReview(t *testing.T) {
-	profile := map[string]any{"sourceContext": map[string]any{"recordedSources": []any{map[string]any{"operation": "workViewerContext"}}, "limitations": []any{}}}
+	profile := map[string]any{"sourceContext": map[string]any{
+		"currentProfile":  map[string]any{"person": map[string]any{"displayName": "Test user"}},
+		"recordedSources": []any{map[string]any{"operation": "workViewerContext", "runId": "greeting"}},
+		"references":      []any{map[string]any{"kind": "query", "ref": "workStepForOwnerRun(runId: \"greeting\", stepKey: \"viewer\")"}},
+		"sourceHistory":   []any{map[string]any{"sourceRunId": "greeting", "tool": "recallWorkHistory"}},
+		"limitations":     []any{},
+	}}
 	if conversationHasSources(profile) {
 		t.Fatal("profile turned ordinary chat into evidence-dependent reply")
 	}
+	context := profile["sourceContext"].(map[string]any)
+	context["limitations"] = []any{"Some prior tool sources were omitted."}
+	if !conversationHasSources(profile) {
+		t.Fatal("incomplete source preview bypassed review")
+	}
+	context["limitations"] = []any{}
 	profile["sourceContext"].(map[string]any)["recordedSources"] = []any{map[string]any{"operation": "readWeather"}}
 	if !conversationHasSources(profile) {
 		t.Fatal("external evidence bypassed review")
