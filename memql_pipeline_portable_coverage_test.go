@@ -91,7 +91,6 @@ func TestEnginePortableTagAndIsolationCoverage(t *testing.T) {
 	// scripts/citags additionally walks every tagged test file and checks that
 	// these commands cover its real package and build constraint.
 	for tag, packages := range map[string]string{
-		"agent":     "./app/ ./integrations/agent/ ./integrations/agent/worker/ ./integrations/pipelinesteps/ ./component/node/",
 		"bff":       "./app/ ./component/server/ ./component/node/",
 		"edge":      "./app/ ./component/server/ ./component/node/",
 		"identity":  "./app/ ./component/node/",
@@ -99,13 +98,12 @@ func TestEnginePortableTagAndIsolationCoverage(t *testing.T) {
 		"planner":   "./app/ ./component/node/",
 		"workbench": "./app/ ./component/node/",
 	} {
-		flags := "-tags " + tag
-		if tag == "agent" {
-			// Its required database fixtures must execute on every native run.
-			flags += " -count=1"
-		}
-		assertCommand("test-"+tag, "go test "+flags+" -timeout=300s "+packages)
+		assertCommand("test-"+tag, "go test -tags "+tag+" -timeout=300s "+packages)
 	}
+	// Required database cases give app its own suite budget; the other agent
+	// packages retain their existing alarm. Neither command may use cached results.
+	assertCommand("test-agent", "go test -tags agent -count=1 -timeout=900s -v ./app/")
+	assertCommand("test-agent", "go test -tags agent -count=1 -timeout=300s ./integrations/agent/ ./integrations/agent/worker/ ./integrations/pipelinesteps/ ./component/node/")
 	for _, tag := range []string{"clustere2e", "clustere2e,agent"} {
 		assertCommand("build-clustere2e", "go vet -tags "+tag+" ./test/clustere2e/")
 		assertCommand("build-clustere2e", "go test -tags "+tag+" -c -o /dev/null ./test/clustere2e/")
