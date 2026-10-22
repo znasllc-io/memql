@@ -29,8 +29,10 @@ use common.traits.{ isCompleted, statusIsActive }
 
 // ---- person-facing, owner-scoped ----
 
-/// The caller's pipelines, most recently connected first.
-@description("Read the caller's repository pipelines and source package identities. Use these repository and package links to locate native CI for connected application sources; a repository need not have a pipeline to be editable.")
+/// Read the caller's repository pipelines and source package identities, most
+/// recently connected first. Use these repository and package links to locate
+/// native CI for connected application sources; a repository need not have a
+/// pipeline to be editable.
 @actor
 query pipeline pipelinesForOwner {
   filter    row => row.ownerUserId == actor.userId

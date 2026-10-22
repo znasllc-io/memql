@@ -779,8 +779,9 @@ query syncState syncStatesAll {
 // written-out term: they run under the engine's own operator identity and are
 // not a person's view.
 
-/// Read connected repositories and application sources visible to this caller.
-@description("Read connected repositories and application sources, with repository URLs, refs and declared applications. Includes sources without pipelines; returns only active records this caller may read.")
+/// Read connected repositories and application sources, with repository URLs,
+/// refs and declared applications. Includes sources without pipelines; returns
+/// only active records this caller may read.
 @actor
 query package packagesAll {
   filter  row => statusIsActive(row)
@@ -1259,8 +1260,9 @@ query modelMeasurement measurementsForCaller {
   shape    modelMeasurementFull
 }
 
-/// The caller's active saved source connections, independent of MemQL accounts.
-@description("Read the caller's saved source connections for discovering accessible repositories. Connections are independent of pipeline membership; inspect sourceRepositories for their repository listing contract.")
+/// Read the caller's active saved source connections for discovering accessible
+/// repositories, independent of MemQL accounts and pipeline membership. Inspect
+/// sourceRepositories for their repository listing contract.
 @actor
 @unbounded("personal installation bindings -- one per caller, grant and installation")
 @requiresCapability("read", "app:deployables")
