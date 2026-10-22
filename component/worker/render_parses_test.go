@@ -429,10 +429,11 @@ func TestEveryWriteMethodIsDriven(t *testing.T) {
 	// a claim that the method renders no mutation; adding one to dodge a
 	// failure is the drift this test exists to stop.
 	readOnly := map[string]string{
-		"WorkerByIdentityId":  "reads a registration by identity id",
-		"WorkersForUser":      "lists an owner's registrations",
-		"IdentityByTokenHash": "resolves a presented mql_wkr_ token",
-		"IdentityById":        "re-resolves a live stream's credential (design D3)",
+		"ReadSubmittedAppSessionResult": "reads the caller-owned session's MCP-submitted result",
+		"WorkerByIdentityId":            "reads a registration by identity id",
+		"WorkersForUser":                "lists an owner's registrations",
+		"IdentityByTokenHash":           "resolves a presented mql_wkr_ token",
+		"IdentityById":                  "re-resolves a live stream's credential (design D3)",
 	}
 
 	driven := make(map[string]bool, len(writeDrivers()))

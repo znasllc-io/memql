@@ -67,10 +67,21 @@ func delegatedScope(ctx context.Context, eng Engine, sessionID string) (context.
 	if run == nil || stringValue(run["status"]) != "running" {
 		return ctx, nil, fmt.Errorf("app session: the original work run is not running")
 	}
+	rerun, _ := run["rerun"].(map[string]any)
+	if cancelled, _ := run["cancelRequested"].(bool); cancelled ||
+		memql.BareShortId(stringValue(run["ownerUserId"])) != memql.BareShortId(scope.Run.OwnerUserId) ||
+		memql.BareShortId(stringValue(run["goalId"])) != memql.BareShortId(scope.Run.GoalId) ||
+		stringValue(rerun["requestId"]) != scope.Run.RerunRequestId {
+		return ctx, nil, fmt.Errorf("app session: the original work execution is no longer current")
+	}
+	grant, _ := run["executionAuthority"].(map[string]any)
+	if run["executionAuthority"] != nil && grant == nil {
+		return ctx, nil, fmt.Errorf("app session: invalid recorded work authority")
+	}
 	ctx = memql.WithActingAgentId(ctx, scope.AgentID)
 	ctx = memql.WithActingAgentRole(ctx, scope.AgentRole)
 	ctx = common.ContextWithRun(ctx, scope.Run)
-	ctx, err = delegatedForwardAuthority(ctx, ac, sessionID)
+	ctx, err = delegatedForwardAuthority(ctx, ac, sessionID, eng, grant)
 	if err != nil {
 		return ctx, nil, err
 	}
@@ -78,13 +89,17 @@ func delegatedScope(ctx context.Context, eng Engine, sessionID string) (context.
 }
 
 // Only an authenticated HTTP app-session credential can originate a machine
-// hop. The resolved owner/role and credential expiry travel unchanged; a local
-// no-auth MCP configuration must not manufacture mesh authority.
+// hop. A verified delegated run can restore its captured authority, clamped to
+// the owner's current role, while retaining the app credential and its expiry.
+// Generic app sessions and no-auth MCP configurations acquire no owner role.
 // narrowing: GUARDED -- credential expiry must be a whole int64 Unix second;
 // num.WholeInt64 refuses non-finite, fractional, or out-of-range claims.
-func delegatedForwardAuthority(ctx context.Context, ac *auth.AccessContext, sessionID string) (context.Context, error) {
+func delegatedForwardAuthority(ctx context.Context, ac *auth.AccessContext, sessionID string, eng Engine, grant map[string]any) (context.Context, error) {
 	claims, ok := auth.ClaimsFromContext(ctx)
 	if !ok {
+		if len(grant) != 0 {
+			return ctx, fmt.Errorf("app session: recorded work authority requires a verified credential")
+		}
 		return ctx, nil
 	}
 	if AppSessionFromClaims(claims) != sessionID || memql.BareShortId(stringValue(claims["sub"])) != memql.BareShortId(ac.UserId) {
@@ -114,8 +129,35 @@ func delegatedForwardAuthority(ctx context.Context, ac *auth.AccessContext, sess
 	if seconds <= 0 || !now.Before(expires) {
 		return ctx, fmt.Errorf("app session: credential has no active expiry")
 	}
+	if len(grant) != 0 {
+		resolver := auth.NewIdentityResolver(auth.QueryRunnerFunc(func(readCtx context.Context, query string) (any, error) {
+			res, err := eng.Execute(readCtx, query)
+			if err != nil || res == nil {
+				return nil, err
+			}
+			if flat, ok := res.FlatOutput(); ok {
+				return flat, nil
+			}
+			return firstRow(res), nil
+		}), slog.Default())
+		restored, err := auth.ContextWithPersistedOwner(ctx, ac.UserId, grant, resolver)
+		if err != nil {
+			return ctx, fmt.Errorf("app session: restore recorded work authority: %w", err)
+		}
+		ac, _ = auth.AccessFromContext(restored)
+		parent, _ := auth.ForwardedAuthorityFromContext(restored)
+		if !parent.ExpiresAt.IsZero() && parent.ExpiresAt.Before(expires) {
+			expires = parent.ExpiresAt
+		}
+		// Copy only resolved access: replacing claims/token here would turn
+		// the app credential into its parent's credential on downstream hops.
+		ctx = auth.ContextWithAccess(ctx, ac)
+	}
 	authority, err := auth.ForwardedAuthorityForUser(ac, auth.ForwardedClassAppSession, "", expires, now)
 	if err != nil {
+		return ctx, err
+	}
+	if _, err := auth.VerifyForwardedAuthority(authority, now); err != nil {
 		return ctx, err
 	}
 	return auth.ContextWithForwardedAuthority(ctx, authority), nil
