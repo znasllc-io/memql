@@ -26,6 +26,12 @@ URLs, checked date, refresh deadline, effective date when established, rates
 and context multipliers. Checking a page today does not establish the date its
 price took effect. Unknown model aliases remain unmapped.
 
+Expand an estimate's assumptions and sources to inspect its retained rates,
+context multipliers and token categories. Unreported cache counts display as
+unavailable even when another category explicitly reports zero. Electricity
+details retain the utility, tariff, timezone, effective period and applicable
+rate bands alongside the energy source and allocation basis.
+
 The initial catalog was checked on 22 October 2026 against the official
 [OpenAI pricing](https://developers.openai.com/api/docs/pricing), the linked
 model pages, and [Anthropic pricing](https://platform.claude.com/docs/en/about-claude/pricing).

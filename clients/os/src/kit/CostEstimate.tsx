@@ -5,6 +5,7 @@ type PriceEvidence = {
   refreshAfter?: string;
   sourceUrls?: string[];
   effectiveFrom?: string | null;
+  effectiveUntil?: string;
   effectiveDateReason?: string;
   inputPerMillion?: number;
   outputPerMillion?: number;
@@ -12,6 +13,15 @@ type PriceEvidence = {
   cacheWriteShortPerMillion?: number;
   cacheWriteLongPerMillion?: number;
   cacheDurations?: string[];
+  longContextAbove?: number;
+  longInputMultiplier?: number;
+  longOutputMultiplier?: number;
+};
+type TariffEvidence = PriceEvidence & {
+  provider?: string;
+  name?: string;
+  timezone?: string;
+  rateBands?: { name: string; perKWh: number; appliesWhen: string }[];
 };
 export type CostEstimateData = {
   kind?: string;
@@ -27,10 +37,10 @@ export type CostEstimateData = {
   calculatedAt?: string;
   assumptions?: string[];
   quote?: PriceEvidence;
-  tariff?: PriceEvidence;
+  tariff?: TariffEvidence;
   kWh?: number | null;
   energy?: { method?: string; watts?: number | null; seconds?: number; source?: string; allocation?: string };
-  usage?: { inputTokens?: number; outputTokens?: number; aggregate?: boolean; estimated?: boolean };
+  usage?: { inputTokens?: number; outputTokens?: number; cacheReadTokens?: number | null; cacheWriteShortTokens?: number | null; cacheWriteLongTokens?: number | null; known?: boolean; aggregate?: boolean; estimated?: boolean };
 };
 export function costEstimateFrom(value: unknown): CostEstimateData | undefined {
   return value && typeof value === "object" && !Array.isArray(value) ? value as CostEstimateData : undefined;
@@ -54,6 +64,9 @@ export function CostEstimate({ estimate, label = "API-equivalent estimate" }: { 
   const assumptions = Array.isArray(estimate?.assumptions) ? estimate.assumptions.filter(a => typeof a === "string") : [];
   const sources = Array.isArray(evidence?.sourceUrls) ? evidence.sourceUrls.filter(s => typeof s === "string" && s.startsWith("https://")) : [];
   const q = estimate?.quote;
+  const t = estimate?.tariff;
+  const u = estimate?.usage;
+  const count = (value?: number | null) => u?.known && finite(value) ? value.toLocaleString("en-US") : "Unavailable";
   const price = (value?: number) => finite(value) ? `${estimate?.currency || "USD"} ${value} / 1M tokens` : "Unavailable";
   return <div className="os-cost-estimate">
     <Facts>
@@ -63,13 +76,14 @@ export function CostEstimate({ estimate, label = "API-equivalent estimate" }: { 
       {evidence?.checkedAt ? <Fact label="Price evidence" value={`${stale ? "Stale · " : ""}Checked ${evidence.checkedAt}`} /> : null}
     </Facts>
     {estimate?.reason ? <p>{estimate.reason}</p> : null}
-    {assumptions.length || sources.length ? <details>
+    {evidence || assumptions.length || sources.length ? <details>
       <summary>Estimate assumptions and sources</summary>
       <Facts>
         {estimate?.modelMapping ? <Fact label="Model mapping" value={estimate.modelMapping} /> : null}
         {estimate?.calculatedAt ? <Fact label="Calculated" value={estimate.calculatedAt} /> : null}
         {evidence?.refreshAfter ? <Fact label="Refresh due" value={evidence.refreshAfter} /> : null}
         {evidence?.effectiveFrom ? <Fact label="Effective from" value={evidence.effectiveFrom} /> : null}
+        {evidence?.effectiveUntil ? <Fact label="Effective until (exclusive)" value={evidence.effectiveUntil} /> : null}
         {q ? <>
           <Fact label="Input" value={price(q.inputPerMillion)} />
           <Fact label="Output" value={price(q.outputPerMillion)} />
@@ -77,11 +91,23 @@ export function CostEstimate({ estimate, label = "API-equivalent estimate" }: { 
           <Fact label={`Cache write (${q.cacheDurations?.[0] || "short"})`} value={price(q.cacheWriteShortPerMillion)} />
           <Fact label={`Cache write (${q.cacheDurations?.[1] || "long"})`} value={price(q.cacheWriteLongPerMillion)} />
         </> : null}
+        {u ? <>
+          <Fact label="Total input tokens (including cache)" value={count(u.inputTokens)} />
+          <Fact label="Output tokens" value={count(u.outputTokens)} />
+          <Fact label="Cache read tokens" value={count(u.cacheReadTokens)} />
+          <Fact label="Short cache write tokens" value={count(u.cacheWriteShortTokens)} />
+          <Fact label="Long cache write tokens" value={count(u.cacheWriteLongTokens)} />
+        </> : null}
+        {t?.provider ? <Fact label="Utility" value={t.provider} /> : null}
+        {t?.name ? <Fact label="Tariff" value={t.name} /> : null}
+        {t?.timezone ? <Fact label="Tariff timezone" value={t.timezone} /> : null}
         {finite(estimate?.kWh) ? <Fact label={estimate.energy?.method === "measured-kwh" ? "Measured energy" : "Estimated energy"} value={`${estimate.kWh} kWh`} /> : null}
         {finite(estimate?.energy?.watts) ? <Fact label="Estimated power" value={`${estimate.energy.watts} W`} /> : null}
         {finite(estimate?.energy?.seconds) ? <Fact label="Attempt duration" value={`${estimate.energy.seconds} seconds`} /> : null}
         {estimate?.energy?.source ? <Fact label="Energy source" value={estimate.energy.source} /> : null}
       </Facts>
+      {q && finite(q.longContextAbove) && q.longContextAbove > 0 ? <p>For requests above {q.longContextAbove.toLocaleString("en-US")} input tokens, input and cache rates multiply by {q.longInputMultiplier}; output rates multiply by {q.longOutputMultiplier}. Aggregate totals cannot establish each request's bracket.</p> : null}
+      {Array.isArray(t?.rateBands) ? t.rateBands.map((band, i) => <p key={i}>{band.name}: {band.perKWh} {estimate?.currency}/kWh · {band.appliesWhen}</p>) : null}
       {estimate?.energy?.allocation ? <p>{estimate.energy.allocation}</p> : null}
       {assumptions.length ? <ul>{assumptions.map((a, i) => <li key={i}>{a}</li>)}</ul> : null}
       {q?.effectiveFrom === null ? <p>{q.effectiveDateReason}</p> : null}
