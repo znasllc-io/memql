@@ -5,13 +5,16 @@ import (
 	"time"
 
 	"github.com/znasllc-io/memql/core/airoute"
+	"github.com/znasllc-io/memql/core/common"
 	"github.com/znasllc-io/memql/core/id"
+	"github.com/znasllc-io/memql/core/num"
 )
 
 type attemptKey struct{}
 type modalityKey struct{}
 
 func startObservation(ctx context.Context, req ResolveRequest, resolved Resolved, start time.Time) context.Context {
+	ctx = common.WithProviderUsage(ctx)
 	attempt := id.NewShortId()
 	ctx = context.WithValue(ctx, attemptKey{}, attempt)
 	ctx = context.WithValue(ctx, modalityKey{}, string(req.Modality))
@@ -36,6 +39,19 @@ func attemptOf(ctx context.Context) string {
 // or cache row, whose context may carry an enclosing call's attempt and would
 // then collide with that call's own row.
 func (r *Router) recordAttempt(ctx context.Context, rec CallRecord) string {
+	if report := common.ReadProviderUsage(ctx); report.Vendor != "" {
+		rec.CostUsage = &report.Usage
+		rec.ServedModel = report.Model
+		rec.Vendor = report.Vendor
+		if report.Usage.Known {
+			rec.InputTokens = num.ClampInt64(report.Usage.Input)
+			rec.OutputTokens = num.ClampInt64(report.Usage.Output)
+			if report.Usage.CacheRead != nil {
+				rec.CachedInputTokens = num.ClampInt64(*report.Usage.CacheRead)
+			}
+			rec.TokensEstimated = report.Usage.Estimated
+		}
+	}
 	rec.CallId = attemptOf(ctx)
 	if rec.CallId == "" {
 		rec.CallId = id.NewShortId()

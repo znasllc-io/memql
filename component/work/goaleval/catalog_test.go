@@ -134,3 +134,44 @@ func TestChangingTheGoalOrOracleBreaksComparability(t *testing.T) {
 		t.Fatal("different acceptance contract compared as a trend")
 	}
 }
+
+// The additional domains are planned scenarios in the same corpus. Adding a
+// field must not silently invalidate the original controlled baseline contract.
+func TestCrossCategoryPlansKeepOriginalFingerprints(t *testing.T) {
+	c := catalog(t)
+	lengths := map[string]bool{}
+	domains := map[string]bool{}
+	for _, s := range c.Scenarios {
+		if s.PlannedLength != "" {
+			lengths[s.PlannedLength] = true
+			domains[s.Domain] = true
+		}
+	}
+	for _, length := range []string{"short", "medium", "long"} {
+		if !lengths[length] {
+			t.Fatalf("missing planned %s goals", length)
+		}
+	}
+	for _, domain := range []string{"software-ui", "pdf-documents", "other-files", "research", "extended-workflow"} {
+		if !domains[domain] {
+			t.Fatalf("missing planned category %s", domain)
+		}
+	}
+	original := c.Scenarios[0]
+	raw, err := json.Marshal(original)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(raw), "plannedLength") {
+		t.Fatal("absent optional field changes original scenario bytes")
+	}
+	altered := original
+	altered.PlannedLength = "short"
+	if altered.Fingerprint() == original.Fingerprint() {
+		t.Fatal("declared length must participate in comparability")
+	}
+	c.Scenarios[0].PlannedLength = "invented"
+	if c.Validate() == nil {
+		t.Fatal("unknown planned length accepted")
+	}
+}

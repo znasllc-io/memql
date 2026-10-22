@@ -1,6 +1,7 @@
+import { CostEstimate, estimateText } from "../../../kit/CostEstimate";
 import { useMemo, useState, type ReactNode } from "react";
 
-import { Chip, EmptyState, Measure, Notice, RecordList, RecordListSkeleton, RecordRow, AutoRefresh, Refine, Select } from "../../../kit";
+import { Chip, EmptyState, Notice, RecordList, RecordListSkeleton, RecordRow, AutoRefresh, Refine, Select } from "../../../kit";
 import { PageHelp } from "../../../kit/pageHelp";
 import { formatDuration, formatMoment } from "../../../kit/format";
 import {
@@ -8,8 +9,6 @@ import {
   billingShort,
   billingWords,
   consideredSentence,
-  costFigure,
-  costIsMoney,
   levelWords,
   useDecisions,
   type DecisionRow,
@@ -166,13 +165,6 @@ function clockOf(value: string): string {
   return at.toLocaleTimeString(undefined, { hour: "2-digit", minute: "2-digit" });
 }
 
-/**
- * One call.
- *
- * THE COST NEVER PRINTS A ZERO FOR A FREE CALL: "$0.00" claims a measurement
- * came out zero, which would make a free call and a mis-priced metered one
- * identical. `costFigure` hands an absent figure carrying the reason.
- */
 /** The route a person chose for a call, as History says it. */
 function routeWords(id: string): string {
   if (id === "local") return "the Local route";
@@ -197,11 +189,12 @@ function DecisionLine({ row, byName, open, onOpen }: { row: DecisionRow; byName:
         stateExtra={row.degraded ? <Chip tone="muted">stepped down</Chip> : undefined}
       >
         <span>{level}</span>
-        <span data-cost>{costIsMoney(row) ? <Measure figure={costFigure(row)} format={(v) => `$${v.toFixed(4)}`} /> : <span title={billingWords(row)}>{billingShort(row)}</span>}</span>
+        <span data-cost>{row.cacheKind ? <span title={billingWords(row)}>{billingShort(row)}</span> : <span title={row.billing === "local" ? "Electricity estimate" : "API-equivalent estimate"}>{estimateText(row.billing === "local" ? row.electricityEstimate : row.apiEquivalent)}</span>}</span>
         <span>{row.totalDurationMs.kind === "measured" ? formatDuration(row.totalDurationMs.value) : ""}</span>
       </RecordRow>
       {open ? (
         <div className="os-decision-detail">
+          {row.cacheKind ? null : <CostEstimate estimate={row.billing === "local" ? row.electricityEstimate : row.apiEquivalent} label={row.billing === "local" ? "Electricity estimate" : "API-equivalent estimate"} />}
           {row.route === "" ? null : <p className="os-decision-detail-line">Sent on {routeWords(row.route)}.</p>}
           <p className="os-decision-detail-line">
             {row.rule === "" ? "No rule was recorded for this call." : `Decided by ${ruleWords(row.rule, byName)}, which takes ${row.policy ? routeTitle(row.policy) : "no chain"}.`}

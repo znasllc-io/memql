@@ -6528,7 +6528,7 @@ QueryClient.prototype.packageDeploymentsPending = function (this: QueryClient, a
   return this.executeNamed("packageDeploymentsPending", buildPackageDeploymentsPending(args), opts);
 };
 
-/** The packages this caller may see, active only. The OS packages list. */
+/** Read active connected repositories and application sources visible to this caller, including URLs, refs, declared applications and sources without pipelines. */
 // Bound concept: v1:platform:package (machine-readable: BoundConcepts["packagesAll"] in generated_concepts.ts).
 export interface PackagesAllArgs {
 }
@@ -6954,7 +6954,7 @@ QueryClient.prototype.pipelineRunsForOwner = function (this: QueryClient, args: 
   return this.executeNamed("pipelineRunsForOwner", buildPipelineRunsForOwner(args), opts);
 };
 
-/** The caller's pipelines, most recently connected first. */
+/** The caller's pipelines and source package identities, most recently connected first. Use repository/package links to locate native CI; pipeline membership is not required for editing a repository. */
 // Bound concept: v1:pipelines:pipeline (machine-readable: BoundConcepts["pipelinesForOwner"] in generated_concepts.ts).
 export interface PipelinesForOwnerArgs {
 }
@@ -11830,7 +11830,7 @@ QueryClient.prototype.sourceConnectionById = function (this: QueryClient, args: 
   return this.executeNamed("sourceConnectionById", buildSourceConnectionById(args), opts);
 };
 
-/** The caller's active saved source connections, independent of MemQL accounts. */
+/** The caller's active saved source connections, independent of MemQL accounts and pipeline membership. Inspect sourceRepositories for the listing contract. */
 // Bound concept: v1:platform:sourceConnection (machine-readable: BoundConcepts["sourceConnectionsMine"] in generated_concepts.ts).
 export interface SourceConnectionsMineArgs {
 }
@@ -13702,6 +13702,28 @@ declare module "./query.js" {
 
 QueryClient.prototype.workerByIdentityId = function (this: QueryClient, args: WorkerByIdentityIdArgs = {} as WorkerByIdentityIdArgs, opts?: QueryCallOptions): Promise<Result> {
   return this.executeNamed("workerByIdentityId", buildWorkerByIdentityId(args), opts);
+};
+
+/** Explicit owner predicate also restricts operator reads. No public projection. */
+// Bound concept: v1:worker:energyProfile (machine-readable: BoundConcepts["workerEnergyProfile"] in generated_concepts.ts).
+export interface WorkerEnergyProfileArgs {
+  profileId: string;
+}
+
+export function buildWorkerEnergyProfile(args: WorkerEnergyProfileArgs): string {
+  const parts: string[] = [];
+  parts.push("profileId: " + renderMemQLValue(args.profileId));
+  return "query workerEnergyProfile(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    workerEnergyProfile(args: WorkerEnergyProfileArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.workerEnergyProfile = function (this: QueryClient, args: WorkerEnergyProfileArgs = {} as WorkerEnergyProfileArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("workerEnergyProfile", buildWorkerEnergyProfile(args), opts);
 };
 
 /** workerInvocationById wraps the query named "workerInvocationById". */

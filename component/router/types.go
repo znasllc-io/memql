@@ -31,6 +31,7 @@
 package router
 
 import (
+	"github.com/znasllc-io/memql/core/costestimate"
 	"time"
 
 	"github.com/znasllc-io/memql/component/memql"
@@ -146,6 +147,7 @@ type CallRecord struct {
 	OutputTokens      int
 	CachedInputTokens int
 	TokensEstimated   bool
+	CostUsage         *costestimate.Usage
 
 	// Cost breakdown (USD)
 	InputCost         float64

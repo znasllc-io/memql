@@ -6591,7 +6591,7 @@ func PackageDeploymentsPendingBuild(args PackageDeploymentsPendingArgs) string {
 	return "query packageDeploymentsPending()"
 }
 
-// PackagesAll -- The packages this caller may see, active only. The OS packages list.
+// PackagesAll -- Read active connected repositories and application sources visible to this caller, including URLs, refs, declared applications and sources without pipelines.
 //
 // Bound concept: v1:platform:package (machine-readable: BoundConcepts["packagesAll"] in generated_concepts.go).
 type PackagesAllArgs struct {
@@ -6992,7 +6992,7 @@ func PipelineRunsForOwnerBuild(args PipelineRunsForOwnerArgs) string {
 	return b.String()
 }
 
-// PipelinesForOwner -- The caller's pipelines, most recently connected first.
+// PipelinesForOwner -- The caller's pipelines and source package identities, most recently connected first. Use repository/package links to locate native CI; pipeline membership is not required for editing a repository.
 //
 // Bound concept: v1:pipelines:pipeline (machine-readable: BoundConcepts["pipelinesForOwner"] in generated_concepts.go).
 type PipelinesForOwnerArgs struct {
@@ -12493,7 +12493,7 @@ func SourceConnectionByIdBuild(args SourceConnectionByIdArgs) string {
 	return b.String()
 }
 
-// SourceConnectionsMine -- The caller's active saved source connections, independent of MemQL accounts.
+// SourceConnectionsMine -- The caller's active saved source connections, independent of MemQL accounts and pipeline membership. Inspect sourceRepositories for the listing contract.
 //
 // Bound concept: v1:platform:sourceConnection (machine-readable: BoundConcepts["sourceConnectionsMine"] in generated_concepts.go).
 type SourceConnectionsMineArgs struct {
@@ -14354,6 +14354,28 @@ func WorkerByIdentityIdBuild(args WorkerByIdentityIdArgs) string {
 	b.WriteString("query workerByIdentityId(")
 	b.WriteString("identityId: ")
 	b.WriteString(quoteMemQL(args.IdentityId))
+	b.WriteString(")")
+	return b.String()
+}
+
+// WorkerEnergyProfile -- Explicit owner predicate also restricts operator reads. No public projection.
+//
+// Bound concept: v1:worker:energyProfile (machine-readable: BoundConcepts["workerEnergyProfile"] in generated_concepts.go).
+type WorkerEnergyProfileArgs struct {
+	ProfileId string
+}
+
+// WorkerEnergyProfile calls the engine query workerEnergyProfile.
+func (qc *QueryClient) WorkerEnergyProfile(ctx context.Context, args WorkerEnergyProfileArgs) (*Result, error) {
+	call := WorkerEnergyProfileBuild(args)
+	return qc.executeNamed(ctx, "workerEnergyProfile", call)
+}
+
+func WorkerEnergyProfileBuild(args WorkerEnergyProfileArgs) string {
+	var b strings.Builder
+	b.WriteString("query workerEnergyProfile(")
+	b.WriteString("profileId: ")
+	b.WriteString(quoteMemQL(args.ProfileId))
 	b.WriteString(")")
 	return b.String()
 }

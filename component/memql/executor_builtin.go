@@ -154,6 +154,12 @@ func (e *MemQLEngine) initBuiltinExecutorHandlers() error {
 		"fleetRetryAppAvailability": func(ctx context.Context, args map[string]any, _ int) ([]memorynodes.MemoryNode, error) {
 			return e.evaluateFleetRetryAppAvailability(ctx, args)
 		},
+		"fleetEnergySettings": func(ctx context.Context, args map[string]any, _ int) ([]memorynodes.MemoryNode, error) {
+			return e.evaluateFleetEnergySettings(ctx, args)
+		},
+		"fleetRecordElectricityResearch": func(ctx context.Context, args map[string]any, _ int) ([]memorynodes.MemoryNode, error) {
+			return e.evaluateFleetRecordElectricityResearch(ctx, args)
+		},
 		"fleetSetAppRouting": func(ctx context.Context, args map[string]any, _ int) ([]memorynodes.MemoryNode, error) {
 			return e.evaluateFleetSetAppRouting(ctx, args)
 		},

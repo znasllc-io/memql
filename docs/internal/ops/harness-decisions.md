@@ -109,3 +109,19 @@ disposable test database; a skipped test is not validation. Report the exact
 commit and test result separately from live workflow evidence. These tests do
 not establish complete UI delivery, arbitrary cross-goal freshness, all worker
 artifact formats, or a completed login handoff.
+
+## Cost evidence and private machine research
+
+| Decision | Reason and resulting path | Implementation |
+| --- | --- | --- |
+| Attribute provider usage to one attempt | Concurrent calls and fallbacks must not borrow a shared provider's last model or cache counts. Each observed attempt carries its own receipt cell; actual response fields replace estimates only when reported. Anthropic and OpenAI input/cache conventions normalize once. | [Usage context](../../../core/common/provider_usage.go), [provider adapters](../../../component/memql/provider_cost_usage.go), [router observation](../../../component/router/observation.go) |
+| Estimate an API equivalent | Exact served-model mapping and dated official price snapshots permit reproduction. Unknown cache categories or aggregate context brackets produce ranges; aggregate model attribution is explicitly assumed. These estimates never establish actual billing or retrospectively price old unknown-model records. | [Token calculator](../../../core/costestimate/tokens.go), [reviewed quotes](../../../core/costestimate/prices.json) |
+| Research a machine's utility | A separate sealed owner profile protects the precise address. The private builtin requires resolved user/personal-token authority, including the post-rotation and cross-node stamp. Research receives only locality and can propose evidence, never attest owner verification or confirm a tariff. Location revisions reject delayed results after a move. | [Energy boundary](../../../component/memql/fleet_energy.go), [research tool](../../../dsl/worker/tools.memql), [settings UI](../../../clients/os/src/apps/fleet/machines/MachineElectricity.tsx) |
+| Admit a profile write | The native boundary validates ownership and bounds, fences the machine and compares revisions before one owner-stamped internal upsert. A concept-level raw-write guard prevents bypassing verification via another DSL spelling. Precise input is classified secret for validation/tool diagnostics; public queries/events contain no private input projection. | [Mutation guard](../../../component/memql/executor_mutation.go), [builtin classification](../../../component/memql/builtin_converter.go), [privacy tests](../../../component/memql/fleet_energy_test.go), [required-DB checks](../../../component/memql/fleet_energy_db_test.go) |
+| Retain an evaluation snapshot | Explicit selected artifacts, source/quality/coverage, independent verdicts and outside interventions prevent a runtime success or later repair from erasing a failure. ZIP verification establishes byte identity, while attributed review covers private free text/media. New categories extend the existing corpus; unimplemented oracles stay unverified. | [Case protocol](../../public/overview/evaluation-case-records.md), [archive utility](../../../scripts/proving/archive_case.py), [scenario catalog](../../../test/proving/goals/catalog.json) |
+
+This slice is externally authored implementation. Local fixture screenshots and
+unit checks do not count as MemQL performing its own feature work or as a live
+utility lookup. Required-database checks and native CI must cover the final
+revision before integration. Shared test/runtime capacity and the active Ask
+run are not changed by this work.

@@ -1247,6 +1247,11 @@ func (e *MemQLEngine) executeWrite(ctx context.Context, mutation MutationNode, r
 	// after the stamps just above. Before canonicalization, so it compares the
 	// owner tolerantly (registrationOwnerChanged). See
 	// worker_sharing_write_guard.go.
+	// All energy-profile writes use the validated builtin, including raw DSL
+	// writes that would otherwise bypass @serverOnly or overwrite verification.
+	if conceptMeta.Name == energyProfileConcept && !auth.OriginFromContext(ctx).IsInternal() {
+		return nil, meta, fmt.Errorf("machine energy profiles are written through their owner settings and research tools")
+	}
 	if conceptMeta.Name == WorkerRegistrationConcept {
 		if err := validateWorkerConsentServerOnly(ctx, organizationPrior, payload); err != nil {
 			return nil, meta, err

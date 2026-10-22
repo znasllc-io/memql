@@ -8,38 +8,8 @@ import { chooseOption } from "../selectControl";
 // Fleet > Routing > History (was Settings -> Decisions; epic memql#5153, D2,
 // and the routing redesign of 2026-09-28).
 //
-// ===========================================================================
-// THE HEADLINE ASSERTION: A FREE CALL NEVER RENDERS A MONEY FIGURE
-// ===========================================================================
-// A call served by a machine the person owns, or by a subscription they
-// already pay for, cost this cluster nothing. `$0.00` says something else --
-// that a cost was MEASURED and came out zero -- and it makes a free call and
-// a mis-priced metered one identical on the page. That is the whole product
-// argument rendered wrong in the one column somebody reads it from.
-//
-// So the row says "your own machine, no charge" and there is no `$` in it at
-// all, and `billing: "unknown"` reads as "not reported" rather than being
-// rounded to either side. Zero, free and unmeasured are three answers.
-//
-// ===========================================================================
-// AND THE HALF THAT MAKES A RULE FALSIFIABLE
-// ===========================================================================
-// `considered` is kept on SUCCESS as well as on a refusal, because "this
-// route had no alternative" and "its alternatives were all shut" look
-// identical from the outcome and are the two situations an operator is
-// actually trying to tell apart. A chain of one says there was nowhere else
-// to look; a longer one says how many sources were tried first.
-//
-// ===========================================================================
-// THE FACETS NARROW THE QUESTION, NOT THE PAGE
-// ===========================================================================
-// The query is keyset-paged, so filtering a page in the browser would narrow
-// the PAGE rather than the search -- a facet that finds nothing the moment
-// the cluster gets busy, which is the classic "works on my quiet cluster"
-// defect. The assertion is therefore on the argument object the query
-// received, and an unset facet must contribute NO KEY: the query's
-// `when(args.x)` guards drop an absent argument and its connective as if
-// never written, while an empty string is a value and would filter on "".
+// Estimates require their own evidence. Billing category and legacy totalCost
+// cannot establish an API-equivalent amount or prove free local/subscription work.
 
 const h = vi.hoisted(() => ({ connection: null as unknown }));
 vi.mock("../../src/live/connection", () => ({
@@ -182,106 +152,39 @@ describe("History: a cluster that records none", () => {
   });
 });
 
-describe("History: what a call cost", () => {
-  it("NEVER prints a money figure for a call this cluster was not billed for", async () => {
+describe("History: separate estimates and billing", () => {
+  it("shows unavailable without model/energy evidence even when legacy cost is zero", async () => {
     use([
-      wireDecision({ id: "d-local", billing: "local", door: "local", model: "qwen3-coder" }),
-      wireDecision({
-        id: "d-sub",
-        billing: "subscription",
-        door: "app",
-        model: "claude-code",
-        executionSurface: "cockpit-app:claude-code",
-      }),
+      wireDecision({ id: "d-local", billing: "local", door: "local", model: "qwen3-coder", totalCost: 0 }),
+      wireDecision({ id: "d-sub", billing: "subscription", door: "app", model: "claude-code", totalCost: 0 }),
+      wireDecision({ id: "d-unknown", billing: "unknown", door: "app", model: "codex", totalCost: 0 }),
     ]);
     await renderHistory();
-
-    // THE CELL SAYS "no charge"; the long form is the title. The door column
-    // beside it already says WHICH free door, so repeating "your own machine"
-    // here spent the column restating its neighbour and then truncated -- the
-    // cost column's job is the money, and for a free call the whole answer is
-    // that there is none.
-    expect(costIn("qwen3-coder")).toBe("no charge");
-    expect(costIn("claude-code")).toBe("no charge");
-    // The full reading survives, where there is room for it.
-    expect(titleOfCostIn("qwen3-coder")).toBe("your own machine, no charge");
-    expect(titleOfCostIn("claude-code")).toBe("your subscription, no charge here");
-    // Not anywhere in the row, not just not in the cost cell. `$0.0000` here
-    // would claim a measurement was taken, and it would make a free call
-    // indistinguishable from a metered one that was priced wrong.
-    expect(rowFor("qwen3-coder").textContent).not.toContain("$");
-    expect(rowFor("claude-code").textContent).not.toContain("$");
+    for (const model of ["qwen3-coder", "claude-code", "codex"]) {
+      expect(costIn(model)).toBe("Unavailable");
+      expect(rowFor(model).textContent).not.toContain("0.00");
+    }
+    expect(titleOfCostIn("qwen3-coder")).toBe("Electricity estimate");
+    expect(titleOfCostIn("claude-code")).toBe("API-equivalent estimate");
   });
-
-  it("says a cache hit cost nothing, and never prints a money figure for one", async () => {
-    // A CACHE ROW'S `billing` IS THE CONCEPT'S DEFAULT, "metered" -- which is
-    // not wrong, it says which bucket the call WOULD have fallen into -- so
-    // without the cacheKind guard this row printed `$0.0000` and claimed a
-    // metered call that cost nothing rather than a call that never happened
-    // (memql#5581).
-    use([
-      wireDecision({
-        id: "d-cache",
-        billing: "metered",
-        cacheKind: "exact",
-        door: "federation",
-        vendor: "openai",
-        model: "gpt-5.4-mini",
-        totalCost: 0,
-        inputTokens: 0,
-        outputTokens: 0,
-      }),
-    ]);
+  it("keeps a cache response distinct from a new provider call", async () => {
+    use([wireDecision({billing:"metered",cacheKind:"exact",door:"federation",model:"gpt-6.1-sol",totalCost:0})]);
     await renderHistory();
-    expect(costIn("gpt-5.4-mini")).toBe("from cache");
-    expect(titleOfCostIn("gpt-5.4-mini")).toBe("answered from the cache, nothing was sent");
-    expect(rowFor("gpt-5.4-mini").textContent).not.toContain("$");
+    expect(costIn("gpt-6.1-sol")).toBe("from cache");
+    expect(titleOfCostIn("gpt-6.1-sol")).toBe("answered from the cache, nothing was sent");
   });
-
-  it("prints the figure for a call that WAS billed", async () => {
-    // The control. Without it, "no `$` anywhere" would pass on a column that
-    // never renders money at all.
-    use([
-      wireDecision({
-        billing: "metered",
-        door: "federation",
-        vendor: "anthropic",
-        model: "claude-sonnet-5",
-        totalCost: 0.0123,
-      }),
-    ]);
+  it("renders the dated API estimate independently of the legacy amount", async () => {
+    use([wireDecision({billing:"metered",door:"federation",model:"claude-sonnet-5-5",totalCost:99,
+      apiEquivalent:{status:"estimated",currency:"USD",amount:.0123,servedModel:"claude-sonnet-5-5"}})]);
     await renderHistory();
-    expect(costIn("claude-sonnet-5")).toBe("$0.0123");
+    expect(costIn("claude-sonnet-5-5")).toBe("USD 0.0123");
+    fireEvent.click(within(rowFor("claude-sonnet-5-5")).getByRole("button"));
+    expect(screen.getByText("Unavailable — no billing receipt")).toBeTruthy();
   });
-
-  it("draws an ABSENCE for a metered call whose cost nobody reported", async () => {
-    // The other direction of the same rule: a billed call with no figure is
-    // an em dash, not `$0.0000`. Rounding an unmeasured cost to zero is how
-    // a metered call comes to look free.
-    use([
-      wireDecision({
-        billing: "metered",
-        door: "federation",
-        model: "claude-sonnet-5",
-        totalCost: null,
-      }),
-    ]);
+  it("uses an electricity range only for local calls", async () => {
+    use([wireDecision({billing:"local",door:"local",model:"qwen3-coder",electricityEstimate:{status:"range",currency:"USD",minimum:.001,maximum:.003}})]);
     await renderHistory();
-    expect(costIn("claude-sonnet-5")).toBe("—");
-    expect(rowFor("claude-sonnet-5").textContent).not.toContain("$");
-  });
-
-  it("reads `unknown` as not reported, and rounds it to neither side", async () => {
-    // `billing` falls to `unknown` when an app's usage report or a machine's
-    // subscription signal is silent, and it is never inferred. Reading it as
-    // free understates the bill; reading it as metered invents one.
-    use([
-      wireDecision({ billing: "unknown", door: "app", model: "codex", totalCost: 0 }),
-    ]);
-    await renderHistory();
-    expect(costIn("codex")).toBe("not reported");
-    expect(rowFor("codex").textContent).not.toContain("$");
-    expect(rowFor("codex").textContent).not.toContain("0.00");
+    expect(costIn("qwen3-coder")).toBe("USD 0.0010–0.0030");
   });
 });
 

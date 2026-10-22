@@ -1,0 +1,9 @@
+{
+  "schemaVersion": 1,
+  "files": {
+    "index.html": "<!doctype html><html lang=\"en\"><title>Message actions fixture</title><body><main><article><p>A retained message.</p><button id=\"copy\">Copy</button><p id=\"status\" role=\"status\"></p></article></main><script>document.querySelector(\"#copy\").onclick=()=>navigator.clipboard.writeText(\"A retained message.\");</script></body></html>\n",
+    "README.md": "Add an accessible per-message action menu with Copy and Details, preserve the message, and verify narrow and desktop layouts. No dependencies or publishing.\n",
+    "NOTES.txt": "Unrelated operator notes: preserve exactly.\n",
+    ".memql-evaluation.json": "{\"schemaVersion\": 1, \"fixtureVersion\": \"1.0.0\", \"fixturePurpose\": \"planned cross-category evaluation; not a live result\"}\n"
+  }
+}

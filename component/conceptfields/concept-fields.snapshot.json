@@ -5398,7 +5398,9 @@
       "concept": "v1:router:call",
       "file": "router/concepts.memql",
       "fields": [
+        "actualBilling",
         "agentId",
+        "apiEquivalent",
         "billing",
         "cacheKind",
         "cachedInputCost",
@@ -5407,6 +5409,7 @@
         "considered",
         "degraded",
         "door",
+        "electricityEstimate",
         "errorCategory",
         "errorMessage",
         "executionSurface",
@@ -9073,6 +9076,26 @@
       ],
       "required": [
         "ownerUserId"
+      ]
+    },
+    {
+      "concept": "v1:worker:energyProfile",
+      "file": "worker/concepts.memql",
+      "fields": [
+        "encryptedAddress",
+        "locationRevision",
+        "ownerUserId",
+        "registrationId",
+        "research",
+        "revision",
+        "settings",
+        "tariff"
+      ],
+      "required": [
+        "locationRevision",
+        "ownerUserId",
+        "registrationId",
+        "revision"
       ]
     },
     {
