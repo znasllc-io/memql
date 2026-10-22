@@ -99,6 +99,9 @@ type AppSessionStore interface {
 	// status and a zero heartbeatAt each mean "do not name this field".
 	RecordAppSessionProgress(ctx context.Context, sessionId string, recordedSteps, droppedActions int, status string, heartbeatAt time.Time) error
 	EndAppSession(ctx context.Context, row AppSessionRow) error
+	// ReadSubmittedAppSessionResult returns the answer submitted over MCP on
+	// another replica. An empty result means no submission, not a failed read.
+	ReadSubmittedAppSessionResult(ctx context.Context, sessionId, ownerUserId string) ([]byte, error)
 	// ClaimRecordingSlot reads where this session's steps go -- its owner and
 	// its recording run -- and takes the next step position, advancing the
 	// shared counter.
@@ -309,11 +312,40 @@ func (s *EngineStore) ClaimRecordingSlot(ctx context.Context, sessionId, ownerUs
 	return slot, nil
 }
 
-// appSessionReadContext borrows the owner for a read and stamps NOTHING else.
-//
-// Deliberately not appSessionWriteContext: stamping internal origin on a read
-// would widen it silently and move the decision away from the actor, which is
-// the failure nobody notices (integrations/work's RULE 2, same reasoning).
+// ReadSubmittedAppSessionResult reads through the shared database, since MCP
+// submits on a different replica from the one holding the worker stream.
+func (s *EngineStore) ReadSubmittedAppSessionResult(ctx context.Context, sessionId, ownerUserId string) ([]byte, error) {
+	if s == nil || s.Engine == nil || strings.TrimSpace(ownerUserId) == "" {
+		return nil, fmt.Errorf("worker.store: reading a submitted result requires an engine and owner")
+	}
+	query, err := langparser.RenderCall("appSessionById", map[string]any{"sessionId": sessionId})
+	if err != nil {
+		return nil, err
+	}
+	ctx = memqlengine.ContextWithFreshRead(appSessionReadContext(ctx, ownerUserId))
+	nodes, err := s.executeAndExtract(ctx, "query "+query)
+	if err != nil {
+		return nil, err
+	}
+	for _, node := range nodes {
+		if node == nil || node.Payload == nil {
+			continue
+		}
+		row := node.Payload.AsMap()
+		owner, _ := row["ownerUserId"].(string)
+		if !SameSubjectId(owner, ownerUserId) {
+			return nil, fmt.Errorf("worker.store: submitted result belongs to another owner")
+		}
+		if submitted, _ := row["resultSubmittedAt"].(string); submitted == "" || row["result"] == nil {
+			return nil, nil
+		}
+		return json.Marshal(row["result"])
+	}
+	return nil, fmt.Errorf("worker.store: app session result is not readable")
+}
+
+// appSessionReadContext borrows the owner for a read without stamping internal
+// origin: the normal row authorization gate must still decide access.
 func appSessionReadContext(ctx context.Context, ownerUserId string) context.Context {
 	if strings.TrimSpace(ownerUserId) == "" {
 		return ctx

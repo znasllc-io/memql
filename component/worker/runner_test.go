@@ -18,10 +18,51 @@ type recordingAppSessionStore struct {
 	finished  []AppSessionRow
 	allocated map[string]int
 	allocErr  error
+	submitted []byte
+	readErr   error
 	// refuseStatusWrites refuses that many progress writes naming a status,
 	// as an engine blip would. A refused write did not land, so it is not
 	// recorded in appends.
 	refuseStatusWrites int
+}
+
+func (s *recordingAppSessionStore) ReadSubmittedAppSessionResult(context.Context, string, string) ([]byte, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.submitted, s.readErr
+}
+
+func TestRunnerReturnsTheMCPSubmissionWhenTheWorkerEndsWithoutIt(t *testing.T) {
+	for _, status := range []string{"complete", "needs_input", "failed"} {
+		t.Run(status, func(t *testing.T) {
+			runner, session, store, _ := newRunnerFixture(t, SubscriptionPresent)
+			submitted := []byte(`{"terminalTool":"respondToUser","arguments":{"status":"` + status + `","question":{"kind":"text","text":"Please sign in to the service in the separate browser tab."}}}`)
+			go func() {
+				waitForSession(t, session, "sess-run")
+				store.mu.Lock()
+				store.submitted = submitted
+				store.mu.Unlock()
+				session.handleAppSessionEnd(&memqlv1.AppSessionEnd{SessionId: "sess-run"})
+			}()
+			result, err := runner.Run(context.Background(), session.worker, runSpec(), nil)
+			if err != nil || string(result.Result) != string(submitted) || string(store.terminal()[0].Result) != string(submitted) {
+				t.Fatalf("MCP terminal lost at session return: result=%s err=%v", result.Result, err)
+			}
+		})
+	}
+}
+
+func TestRunnerDoesNotReportSuccessWhenSubmittedResultCannotBeRead(t *testing.T) {
+	runner, session, store, _ := newRunnerFixture(t, SubscriptionPresent)
+	store.readErr = errors.New("database unavailable")
+	go func() {
+		waitForSession(t, session, "sess-run")
+		session.handleAppSessionEnd(&memqlv1.AppSessionEnd{SessionId: "sess-run"})
+	}()
+	result, err := runner.Run(context.Background(), session.worker, runSpec(), nil)
+	if err == nil || result.Status != AppSessionStatusFailed || !strings.Contains(result.ErrorMessage, "read submitted app result") {
+		t.Fatalf("lost submission became success: %+v %v", result, err)
+	}
 }
 
 func (s *recordingAppSessionStore) CreateAppSession(_ context.Context, row AppSessionRow) error {

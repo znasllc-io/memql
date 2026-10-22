@@ -32,6 +32,9 @@ func TestAgentRuntimeAdapterPreservesTheEnginesOwnershipBarrier(t *testing.T) {
 	if err := runtime.SaveWorkContinuation(ctx, nil); err == nil || !strings.Contains(err.Error(), "owned work") {
 		t.Fatalf("adapter lost continuation ownership gate: %v", err)
 	}
+	if err := runtime.DelegatedWorkHumanWait(ctx, "session"); err == nil || !strings.Contains(err.Error(), "owned work") {
+		t.Fatalf("adapter lost delegated wait ownership gate: %v", err)
+	}
 	bounded, cancel, err := runtime.ContextWithWorkCallDeadline(context.Background())
 	defer cancel()
 	if err != nil || bounded.Err() != nil {

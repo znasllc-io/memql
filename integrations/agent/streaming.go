@@ -502,6 +502,10 @@ StreamLoop:
 			attemptCtx, stopAttempt := context.WithCancel(budgetCtx)
 			cancelAttempt := func() { stopAttempt(); stopBudget() }
 			chunks, err = provider.CallChatStreamWithTools(airoute.WithContextReferences(attemptCtx, workContextReferences(messages)), messages, tools)
+			if wait := r.delegatedHumanWait(ctx, provider); wait != nil {
+				cancelAttempt()
+				return nil, wait
+			}
 			if err != nil {
 				budgetFailure := r.workCallFailure(attemptCtx)
 				cancelAttempt()

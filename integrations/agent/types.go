@@ -120,6 +120,7 @@ type WorkRuntime interface {
 	PrepareWorkTool(context.Context) error
 	ContextWithWorkCallDeadline(context.Context) (context.Context, context.CancelFunc, error)
 	SaveWorkContinuation(context.Context, []common.ChatMessage) error
+	DelegatedWorkHumanWait(context.Context, string) error
 	RestoreWorkContinuation(context.Context, []common.ChatMessage) ([]common.ChatMessage, error)
 	CompactWorkContext(context.Context, []common.ChatMessage, []common.ToolDefinition, int) ([]common.ChatMessage, error)
 }

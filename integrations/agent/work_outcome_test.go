@@ -204,6 +204,7 @@ func TestInvalidDelegatedOutcomeNeverRepeatsTheAppSession(t *testing.T) {
 			ctx := common.ContextWithRun(auth.ContextWithUserActor(context.Background(), "owner"), common.RunContext{RunId: "run", GoalId: "goal", OwnerUserId: "owner"})
 			p := &outcomeProvider{delegated: true, steps: [][]common.ToolCall{nil}, texts: []string{"Please provide the source."}}
 			r := testReplier()
+			r.engine = &workPromptEngine{}
 			executor := &questionExecutor{}
 			r.stamper = newToolRecorder(executor, r.logger)
 			tools := []common.ToolDefinition{workResponseToolDefinition()}
@@ -217,6 +218,30 @@ func TestInvalidDelegatedOutcomeNeverRepeatsTheAppSession(t *testing.T) {
 				t.Fatalf("invalid app result accepted or replayed: err=%v calls=%d effects=%d", err, p.calls, executor.calls)
 			}
 		})
+	}
+}
+
+func TestDelegatedApprovalWaitDoesNotCreateAnotherQuestionOrReplayTools(t *testing.T) {
+	for _, streaming := range []bool{false, true} {
+		for _, calls := range [][]common.ToolCall{nil, outcomeCall(`{"status":"needs_input","question":{"kind":"text","text":"Approve the existing request."}}`)} {
+			ctx := common.ContextWithRun(auth.ContextWithUserActor(context.Background(), "owner"), common.RunContext{RunId: "run", GoalId: "goal", OwnerUserId: "owner"})
+			p := &outcomeProvider{delegated: true, steps: [][]common.ToolCall{calls}, texts: []string{"Waiting for approval."}}
+			r := testReplier()
+			r.engine = &workPromptEngine{delegatedWait: &work.HumanWait{ApprovalID: "existing-native-approval"}}
+			executor := &questionExecutor{}
+			r.stamper = newToolRecorder(executor, r.logger)
+			tools := []common.ToolDefinition{workResponseToolDefinition()}
+			var err error
+			if streaming {
+				_, err = r.runStreamingToolLoop(ctx, p, nil, tools, &captureSink{}, time.Now(), "delegated", turnContext{})
+			} else {
+				_, err = r.runNonStreamingToolLoop(ctx, p, nil, nil, tools, &captureSink{}, time.Now(), "delegated", turnContext{})
+			}
+			var wait *work.HumanWait
+			if !errors.As(err, &wait) || wait.ApprovalID != "existing-native-approval" || p.calls != 1 || executor.calls != 0 {
+				t.Fatalf("native approval duplicated or lost: stream=%v err=%v model=%d effects=%d", streaming, err, p.calls, executor.calls)
+			}
+		}
 	}
 }
 

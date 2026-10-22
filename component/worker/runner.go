@@ -568,6 +568,20 @@ func (r *SessionRunner) Run(ctx context.Context, w *Worker, spec RunSpec, progre
 		Model:               outcome.Model,
 		Effort:              outcome.Effort,
 	}
+	// MCP submit writes on another replica; the cockpit's final wire event
+	// need not contain it. Read that answer before closing the recording so a
+	// needs_input terminal reaches the parent instead of becoming free text.
+	if r.Store != nil && !spec.InferenceOnly && status == AppSessionStatusEnded && (len(result.Result) == 0 || spec.ToolScope != nil) {
+		readCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
+		submitted, err := r.Store.ReadSubmittedAppSessionResult(readCtx, spec.SessionId, spec.OwnerUserId)
+		cancel()
+		if err != nil {
+			waitErr = fmt.Errorf("worker: read submitted app result: %w", err)
+			result.Status, result.ErrorMessage = AppSessionStatusFailed, waitErr.Error()
+		} else if len(submitted) != 0 {
+			result.Result = submitted
+		}
+	}
 	// The prose goes to the Library as ONE file per session and the row names
 	// it (design D5). Stored before finishRow so the terminal row carries the
 	// pointer: a row that said "ended" and named no transcript would read as
