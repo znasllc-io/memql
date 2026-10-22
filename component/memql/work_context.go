@@ -340,6 +340,9 @@ func workContextTask(messages []common.ChatMessage) string {
 func workCheckpointHash(source []byte, task string) string {
 	// Equal source bytes can serve different goals. Relevance context must be
 	// part of the cache key; sourceMessages itself stays byte-for-byte intact.
+	// New human direction can therefore require new semantic summaries. Exact
+	// source archives remain reusable; a cache hit must not silently preserve
+	// a summary focused on a superseded request just to avoid inference cost.
 	raw, _ := json.Marshal([]string{string(source), task})
 	return workContextHash("summary-v4", raw)
 }

@@ -149,6 +149,10 @@ func (e *MemQLEngine) PrepareDelegatedFeedback(ctx context.Context, sessionID st
 		return fmt.Errorf("%w: delegated continuation exceeds its scan bound", ErrWorkCheckpointRequired)
 	}
 	messages := append([]common.ChatMessage(nil), initial...)
+	// initial is the native context actually delegated, including its existing
+	// archive references. Add only this session's observed exchanges, in order:
+	// reconstructing earlier sessions here would undo compaction and could make
+	// completed effects look like new work. The full journal stays separate.
 	for i := len(exchanges) - 1; i >= 0; i-- {
 		messages = append(messages, exchanges[i]...)
 	}

@@ -77,12 +77,17 @@ func (e *MemQLEngine) recallWorkSourceHistory(ctx context.Context, current map[s
 	// Search locally through a bounded number of database pages before asking
 	// the caller for another round trip. Empty retrieval receipts remain in the
 	// journal but must not force a model call for every four archived rows.
+	// Eight pages cap this call at 32 receipts; returning the last cursor keeps
+	// older evidence reachable without an unbounded scan or a larger response.
 	cursor, next := stringArg(args, "cursor"), ""
 	for scanned := 0; scanned < 8; scanned++ {
 		result, err := e.Execute(ContextWithCursor(ctx, cursor), "query "+call)
 		if err != nil {
 			return nil, err
 		}
+		// Only the last scanned page's directory belongs in this response. Prior
+		// pages had no search hit; retaining them would make an empty search grow
+		// with history. Directory-only browsing stops at its first useful page.
 		sources = []any{}
 		for _, row := range MaterializeRows(result.OutputPayload()) {
 			pairs, missing := workCheckpointPairs(row)
