@@ -69,7 +69,6 @@ func (e *MemQLEngine) CompactWorkContext(ctx context.Context, messages []common.
 	start, end := workContextChunk(out, sourceLimit, nil)
 	freshStart, freshEnd := workContextLatestToolExchange(out)
 	retainTail := freshStart >= 0 && end > start && workContextCanRetainTail(out, tools, target)
-	deferredTail := false
 	// Offload bulky, completed older results first. Their envelopes and receipts
 	// stay in the conversation; the exact bytes are durable before replacement.
 	for _, unit := range workContextUnits(out) {
@@ -82,7 +81,6 @@ func (e *MemQLEngine) CompactWorkContext(ctx context.Context, messages []common.
 				continue
 			}
 			if retainTail && unit.start == freshStart && unit.end == freshEnd {
-				deferredTail = true
 				continue
 			}
 			raw, err := json.Marshal([]common.ChatMessage{m})
@@ -191,10 +189,10 @@ func (e *MemQLEngine) CompactWorkContext(ctx context.Context, messages []common.
 		}
 		out = next
 	}
-	// Unproductive older candidates still consume the same eight attempts.
-	// Do not make deferral a new failure when the existing archival fallback
-	// can fit the request without another model call.
-	if deferredTail && WorkContextSize(out, tools) > target {
+	// The bounded semantic pass may leave many medium completed results, even
+	// without a deferred tail. Try the existing exact archival fallback before
+	// refusing the request; it preserves evidence without another model call.
+	if WorkContextSize(out, tools) > target {
 		if err := e.archiveWorkContextResults(ctx, out, tools, target); err != nil {
 			return nil, err
 		}
