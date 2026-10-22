@@ -139,6 +139,11 @@ spec:
             - { name: node, containerPort: 50060 }
             - { name: mcp, containerPort: 8090 }
           envFrom:
+            # Workbench exports publish exact bytes into the same Library
+            # container used by the authenticated download route.
+            - configMapRef:
+                name: memql-storage
+                optional: true
             - configMapRef:
                 name: memql-email-installation
                 optional: true

@@ -198,16 +198,18 @@ func (d *AppSessionDelegate) RunStep(ctx context.Context, h memqlengine.AppSessi
 		Kind:        appSessionTemplate,
 		Inputs:      plan.inputs,
 		Input: map[string]any{
-			"executorBackend": planner.BackendCockpitApp + ":" + h.AppId,
-			"prompt":          plan.prompt,
-			"level":           plan.level,
-			"model":           plan.model,
-			"effort":          plan.effort,
+			"executorBackend":        planner.BackendCockpitApp + ":" + h.AppId,
+			"selectedRegistrationId": h.RegistrationId,
+			"prompt":                 plan.prompt,
+			"level":                  plan.level,
+			"model":                  plan.model,
+			"effort":                 plan.effort,
 			// A directory NAME under the owner's workspace root, not a path:
 			// sessionWorkspace composes it, exactly as it composes the run's
 			// own directory when no fresh one was asked for.
 			"freshWorkspace": plan.workspace,
 			"responseSchema": schemaJSON(h.ResponseSchema),
+			"toolScope":      h.ToolScope,
 			// THE SUBRUN OPENED ABOVE IS WHERE THE SESSION IS RECORDED (epic
 			// memql#5396). It is the run childRunId now points at, so the
 			// actions have to land in THAT one: a recording in a second run
@@ -299,7 +301,7 @@ func (d *AppSessionDelegate) beginChildRun(ctx context.Context, h memqlengine.Ap
 		// its own decisions, which is the definition the journal's two kinds
 		// draw the line on.
 		Steps:         []workjournal.StepDecl{{Key: appSessionStepKey, Kind: workjournal.KindReasoning}},
-		RequestedVia:  "router",
+		RequestedVia:  "agent",
 		GoalSignature: signature,
 		ParentRunID:   strings.TrimSpace(h.RunId),
 		Variables:     variables,

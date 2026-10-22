@@ -123,3 +123,16 @@ func agentToolCallContext(ctx context.Context, toolName string, turnCtx turnCont
 	}
 	return common.ContextWithToolDefaults(ctx, defaults)
 }
+
+// Capture argument stamps before handing the whole tool loop to an app.
+func delegatedToolContext(ctx context.Context, tools []common.ToolDefinition, turn turnContext) context.Context {
+	defaults := map[string]map[string]any{}
+	for _, tool := range tools {
+		args := map[string]any{}
+		injectAgentContext(tool.Name, args, turn)
+		if len(args) > 0 {
+			defaults[tool.Name] = args
+		}
+	}
+	return common.ContextWithDelegatedToolDefaults(ctx, defaults)
+}

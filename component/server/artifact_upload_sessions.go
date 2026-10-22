@@ -1059,7 +1059,7 @@ func (h *ArtifactHandler) streamFileBytes(w http.ResponseWriter, r *http.Request
 
 	w.Header().Set("Content-Type", mimeType)
 	w.Header().Set("Accept-Ranges", "bytes")
-	w.Header().Set("Content-Disposition", fmt.Sprintf("attachment; filename=%q", displayName))
+	w.Header().Set("Content-Disposition", downloadDisposition(displayName))
 	if rng != nil {
 		w.Header().Set("Content-Range", fmt.Sprintf("bytes %d-%d/%d", rng.start, rng.end, size))
 		w.Header().Set("Content-Length", strconv.FormatInt(rng.end-rng.start+1, 10))

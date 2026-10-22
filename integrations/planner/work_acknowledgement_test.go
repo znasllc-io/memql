@@ -91,6 +91,22 @@ func TestBackgroundAcknowledgementRepairIsBoundedAndDoesNotReclassify(t *testing
 	}
 }
 
+func TestClassificationAndAcknowledgementKeepTheCompleteRequest(t *testing.T) {
+	engine := &acknowledgementTestEngine{countingCompileEngine: &countingCompileEngine{triage: map[string]any{
+		"complexity": "trivial", "intent": "reply", "requiresFile": false, "workload": "lookup", "workTitle": "Check reconciliation", "acknowledgement": "",
+	}}, repair: map[string]any{"acknowledgement": "I’ll check all events against the requested totals."}}
+	req := compileReq()
+	req.Statement = "Reconcile every row below.\n" + strings.Repeat("event,payment,A,12000\n", 120) +
+		"last,refund,B,500,first\nReject cross-customer refunds. Verify the final totals without external services."
+	req.Input = map[string]any{"conversation": map[string]any{"messages": []any{}}}
+	_, err := (&PlannerAgentLoop{engine: engine}).CompileGoalForRun(context.Background(), req, nil, realSandbox{})
+	require.NoError(t, err)
+	require.Equal(t, []string{"goalComplexityTriage", "workAcknowledgement"}, engine.aiCalls)
+	for i, call := range engine.aiCalls {
+		require.Equal(t, req.Statement, engine.aiData[i]["goal"], call)
+	}
+}
+
 func fmtName(value string) string {
 	if len(value) > 20 {
 		return "oversized"

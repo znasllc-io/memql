@@ -205,6 +205,11 @@ func handleNextTask(ctx context.Context, eng Engine, sessionId string) map[strin
 		"sessionId": sessionId,
 		"prompt":    prompt,
 	}
+	for _, field := range []string{"runId", "stepId"} {
+		if value := stringValue(row[field]); value != "" {
+			answer[field] = value
+		}
+	}
 	if schema, _ := row["responseSchema"].(string); strings.TrimSpace(schema) != "" {
 		answer["responseSchema"] = schema
 	}

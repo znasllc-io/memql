@@ -128,6 +128,10 @@ func (i *Integration) SetForwardRouter(r *ForwardRouter) {
 	i.router = r
 }
 
+// RequireRemote confines a protocol head to fleet or remote workbench execution.
+// It must never execute a model command on its own service filesystem.
+func (i *Integration) RequireRemote() { i.remote = true; i.localFallback = false }
+
 // ForwardRouter is the router SetForwardRouter installed, or nil on a node
 // that dispatches locally. The pipelines executor on an agent node forwards
 // its steps over this same router (epic memql#5478): it is the one the node
@@ -178,7 +182,7 @@ func (i *Integration) Capabilities() []memql.IntegrationCapability {
 			Description: "Dispatch a workbenchHost.<action> call to the per-run workbench workspace. Lazily provisions the workspace on first call; subsequent calls in the same Plan see persisted files.",
 			Handler:     i.handleDispatchHost,
 			ArgsSchema: map[string]string{
-				"action":  "string (required) -- exec / fs_read / fs_write / fs_list / fs_stat / http_fetch",
+				"action":  "string (required) -- exec / fs_read / fs_write / fs_list / fs_stat / fs_export / http_fetch",
 				"args":    "object (required) -- per-action args",
 				"runId":   "string (required) -- v1:work:run.id; keys the workspace",
 				"agentId": "string (optional) -- calling agent id (audit only)",
@@ -283,6 +287,17 @@ func (i *Integration) handleDispatchHost(ctx context.Context, args map[string]an
 	failClosed := safety.FailClosedForSurface(safetyDesc.Surface)
 	if proceed, reason := workbenchGate.EnforceDecision(safetyDesc.Surface, decision, cls, classErr, failClosed); !proceed {
 		return nil, fmt.Errorf("workbench: %s", reason)
+	}
+
+	// Export is a Library delivery operation. Its byte reads use this same
+	// dispatcher, preserving the run's selected Fleet/cloud workspace and gates.
+	if action == "fs_export" {
+		result, err := i.exportFile(ctx, args)
+		if err != nil {
+			return errorResultNode(runId, action, "file_export_failed", err.Error(), started), nil
+		}
+		payload, _ := json.Marshal(dispatchResult{OK: true, Action: action, Payload: result})
+		return []memorynodes.MemoryNode{{ID: fmt.Sprintf("workbench:export:%s:%d", runId, started.UnixNano()), Concept: "integration:workbench:dispatch", Type: memorynodes.NodeTypeObject, CreatedAt: time.Now().UTC(), Payload: payload}}, nil
 	}
 
 	if i.fleet != nil {

@@ -73,7 +73,7 @@ describe("the download-only worker registration", () => {
     };
     vi.stubGlobal("navigator", {
       serviceWorker: {
-        register: async () => registration,
+        register: vi.fn(async () => registration),
         // The OS page is outside /__memql-dl/, so this never settles.
         ready: new Promise(() => {}),
       },
@@ -84,6 +84,9 @@ describe("the download-only worker registration", () => {
   it("uses an active scoped worker without waiting for control of the OS page", async () => {
     const { registration } = install("activated");
     await expect(downloadWorkerRegistration()).resolves.toBe(registration);
+    expect(navigator.serviceWorker.register).toHaveBeenCalledWith("/download-sw.js?v=2", {
+      scope: "/__memql-dl/", updateViaCache: "none",
+    });
   }, 500);
 
   it("waits for its own installation to activate", async () => {

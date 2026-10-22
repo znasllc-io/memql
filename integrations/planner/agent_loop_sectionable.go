@@ -533,7 +533,9 @@ func (l *PlannerAgentLoop) classifySectionable(ctx context.Context, goal, nowRFC
 
 func (l *PlannerAgentLoop) classifyGoal(ctx context.Context, goal, nowRFC3339 string, guidance []map[string]any, goalInputs []string, conversation any) (goalComplexity, string, sectionableDecision, error) {
 	data := map[string]any{
-		"goal": truncate(goal, maxGoalChars),
+		// Classify the accepted request intact. A display-length prefix can
+		// cut a dataset or omit the user's final constraints and deliverables.
+		"goal": goal,
 		"now":  nowRFC3339,
 	}
 	if len(guidance) > 0 {

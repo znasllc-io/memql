@@ -49,7 +49,10 @@ func workHistoryPage(message any, search string, offset, limit int, explicitOffs
 	}
 	offset = min(max(0, offset), len(runes))
 	end := offset + min(limit, len(runes)-offset)
-	page := map[string]any{"source": string(runes[offset:end]), "offset": offset, "totalCharacters": len(runes), "truncated": offset > 0 || end < len(runes)}
+	// Continuation ends when there are no characters after this page. A page
+	// starting after zero omits a prefix, but that must not advertise more pages
+	// forever once the caller reaches the end of the archived message.
+	page := map[string]any{"source": string(runes[offset:end]), "offset": offset, "totalCharacters": len(runes), "truncated": end < len(runes), "prefixOmitted": offset > 0}
 	if end < len(runes) {
 		page["nextOffset"] = end
 	}
@@ -113,12 +116,16 @@ func (e *MemQLEngine) recallWorkHistoryBuiltin(ctx context.Context, args map[str
 	}
 	search := strings.ToLower(strings.TrimSpace(stringArg(args, "search")))
 	fingerprint := strings.TrimSpace(stringArg(args, "checkpoint"))
-	if search == "" && fingerprint == "" {
+	sourceRunID := strings.TrimSpace(stringArg(args, "sourceRunId"))
+	if search == "" && fingerprint == "" && sourceRunID == "" {
 		return nil, fmt.Errorf("provide a search phrase or checkpoint reference to recall")
 	}
 	rows, err := e.workRows(ContextWithFreshRead(ctx), "workRunForOwner", run.RunId)
 	if err != nil || len(rows) != 1 {
 		return nil, fmt.Errorf("work history is unavailable")
+	}
+	if sourceRunID != "" {
+		return e.recallWorkSourceHistory(ctx, rows[0], run.RunId, sourceRunID, args)
 	}
 	limit := min(4000, max(128, workHistoryInt(args, "maxChars", 1600)))
 	offset := max(0, workHistoryInt(args, "offset", 0))

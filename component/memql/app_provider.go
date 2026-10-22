@@ -243,9 +243,10 @@ type AppCallRequest struct {
 	// WORK and reaches nothing: unlike the fleet, there is no shared-app
 	// opt-in, because a session runs under a per-run credential whose
 	// subject is a PERSON and there is no person to name.
-	ActingUserId string
-	AppId        string
-	Messages     []common.ChatMessage
+	ActingUserId   string
+	AppId          string
+	RegistrationId string
+	Messages       []common.ChatMessage
 	// Schema is set for a structured call. Its presence is what makes the
 	// call require a harness that can return a structured final answer.
 	Schema  *common.StructuredSchema
@@ -649,26 +650,41 @@ func (p *appProvider) call(ctx context.Context, req AppCallRequest) (AppCallResu
 		}
 	}
 
-	if p.wildcard {
-		chosen, err := p.resolveWildcard(ctx, a, req)
-		if err != nil {
+	var res AppCallResult
+	var err error
+	var excluded []string
+	for {
+		req.AppId = p.appId
+		if selector, ok := a.(AppSelector); ok {
+			selected, selectErr := selector.SelectApp(ctx, req, false, excluded)
+			if selectErr != nil {
+				return AppCallResult{}, selectErr
+			}
+			req.AppId, req.RegistrationId = selected.AppId, selected.RegistrationId
+		} else if p.wildcard {
+			req.AppId, err = p.resolveWildcard(ctx, a, req)
+			if err != nil {
+				return AppCallResult{}, err
+			}
+		}
+		if err := GuardLocalModelCall(ctx, AppCallFingerprint(req)); err != nil {
 			return AppCallResult{}, err
 		}
-		req.AppId = chosen
-	}
-
-	// THE GUARDS, with the dollar figure at zero. Same four checks, same
-	// shared state, no bill: MemQL was not charged for a call that ran
-	// inside somebody's own subscription. The CALL still counts against the
-	// loop caps, which is the half that matters here -- a runaway loop on a
-	// subscription is still a runaway loop, and it is somebody's quota.
-	if err := GuardLocalModelCall(ctx, AppCallFingerprint(req)); err != nil {
-		return AppCallResult{}, err
-	}
-
-	res, err := a.Call(ctx, req)
-	if err != nil {
-		return res, err
+		res, err = a.Call(ctx, req)
+		if err == nil {
+			break
+		}
+		var quota *AppQuotaRefused
+		if !p.wildcard || !errors.As(err, &quota) || ctx.Err() != nil {
+			return res, err
+		}
+		if _, ok := a.(AppSelector); !ok {
+			return res, err
+		}
+		excluded = append(excluded, req.AppId)
+		if len(excluded) >= 16 {
+			return res, err
+		}
 	}
 	p.lastMu.Lock()
 	p.lastSurface = res.ExecutionSurface

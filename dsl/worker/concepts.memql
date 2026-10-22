@@ -134,6 +134,8 @@ concept registration {
     sharedAt datetime
     sharedBy string
   }
+  appRouting object @description("Owner-selected app strategy and Auto weights. Absent means Auto. Saved only by fleetSetAppRouting.")
+  appSelection object @description("Server-owned last selection cursor, shared by all replicas. Never changes a running session.")
   ownerFeatures {
     headless bool @description("Allow the enrolled owner's host commands and file tools. Absent preserves the existing owner permission. Disabling blocks new work and cancels active calls.")
     apps bool @description("Allow the enrolled owner's signed-in CLIs and app sessions. Never shareable. Disabling cancels active sessions; enabling never replays canceled work.")
@@ -176,6 +178,7 @@ concept registration {
 @rowAuthz(owner="ownerUserId", clusterOwner)
 @displayCard(primary="app", secondary="kind", tertiary="startedAt", status="status")
 concept appSession {
+  toolScope object @description("Server-created delegated tool contract and original execution context. Written only when the session opens; never supplied by the app.")
   ownerUserId    string!  @description("v1:identity:user.id the session runs AS. The back-channel credential is minted with this as its subject, so everything the app reads over MCP is what this user could read -- row authz applies to a delegated app exactly as it does to a browser.")
   workerId       string!  @description("v1:worker:registration.id of the machine the app ran on.")
   app            enum("claude-code", "codex")!  @description("Which local app. The engine's runnable set is closed; a cockpit that reports another app can store it on the registration but can never open a session for it.")
@@ -203,6 +206,7 @@ concept appSession {
   credentialExpiresAt  datetime  @description("When the current back-channel bearer expires. A run that outlives it gets a renew_credential control message carrying a replacement.")
   mcpEndpoint    string  @description("The streamable-HTTP MCP URL the app was pointed at (https://mcp.<domain>/mcp). Recorded so an audit reader can see which surface the credential was good for.")
   errorMessage   string  @description("Populated when status reaches failed. Empty otherwise.")
+  quotaRefused bool @description("The completed app reported a quota or credit refusal. Availability evidence, not permission to replay a session that may have performed work.")
   cancelReason   string  @description("Free text carried from the cancel that ended the session.")
   startedAt      datetime!  @description("When the session row was created and AppSessionStart went on the wire.")
   heartbeatAt    datetime  @description("When the agent replica HOLDING the session last reported it alive: the row's open, then a flush every couple of seconds until the recording starts to close -- including the stretch after the app's output stops and before its transcript is stored, which can take a minute. A heartbeat names no status: the holder promotes the row to `running` once, on the first chunk, so a row the sweep has failed stays failed until the holder's own terminal write. It is what workerAppSessionStaleSweep judges a live row by, and ONLY the holder writes it -- the MCP node's step allocation and an app's `submit` also write this row, but they come from a different replica, and an app that keeps calling MemQL after the replica running its session died is exactly the orphan the sweep exists to close. EMPTY on a row written before the field existed, which only the startedAt backstop can judge.")

@@ -1128,6 +1128,12 @@ func (e *MemQLEngine) executeWrite(ctx context.Context, mutation MutationNode, r
 			return nil, meta, err
 		}
 	}
+	// App-session authority is also server-managed at the final-payload seam.
+	if conceptMeta.Name == "v1:worker:appSession" {
+		if err := validateAppSessionScopeServerOnly(ctx, organizationPrior, payload); err != nil {
+			return nil, meta, err
+		}
+	}
 	// A BUNDLE BECOMES ACTIVE only through the gated activation (memql#6022),
 	// at the same seam and for the same reasons: every replica arms every
 	// bundle that reads active, the read-merge carries status through writes

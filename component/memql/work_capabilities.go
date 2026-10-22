@@ -226,13 +226,13 @@ func (e *MemQLEngine) workExecuteBuiltin(ctx context.Context, args map[string]an
 	if !ok {
 		return nil, fmt.Errorf("arguments must be an object")
 	}
-	// Fleet identity is execution context, never an argument a model may
+	// Execution identity is context, never an argument a model may
 	// invent. Preserve the worker's standing grant, policy and safety gates.
-	if strings.HasPrefix(fn.Name, "agentworker") {
+	if strings.HasPrefix(fn.Name, "agentworker") || fn.Name == "workbenchDispatchHost" {
 		run, ok := common.RunFromContext(ctx)
 		ac, _ := auth.AccessFromContext(ctx)
 		if !ok || ac == nil || BareShortId(ac.UserId) != BareShortId(run.OwnerUserId) || ActingAgentIdFromContext(ctx) == "" {
-			return nil, fmt.Errorf("Fleet execution requires an owned work run and acting agent")
+			return nil, fmt.Errorf("Host execution requires an owned work run and acting agent")
 		}
 		copy := make(map[string]any, len(arguments))
 		for key, value := range arguments {

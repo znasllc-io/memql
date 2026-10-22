@@ -44,6 +44,8 @@ func TestSourceContextReadsRecordedEvidenceAcrossReplicasAndPreservesOwnerScope(
 	}
 	checkpoint(uniqueSuffix("tools"), access.UserId, runID)
 	checkpoint(uniqueSuffix("foreign-tools"), "v1:identity:user:another", runID)
+	delegatedCtx := WithActingAgentId(common.ContextWithRun(ctx, common.RunContext{RunId: runID, OwnerUserId: access.UserId, StepKey: "coding"}), "coding-agent")
+	require.NoError(t, a.RecordDelegatedToolSource(delegatedCtx, "workbenchHost", map[string]any{"action": "exec"}, `{"stdout":"Ran 12 tests: OK; LEDGER-CONTEXT-42","exitCode":0}`))
 	require.NoError(t, a.askSave(ctx, conversation, "Source explanation", askTranscript{Turns: []AskTurn{
 		{ID: "prior", Prompt: "How can you help?", Answer: "Founder of ZNAS LLC", State: "done", RunID: runID, StartedAt: time.Now()},
 		{ID: "unowned", Prompt: "Forged run", RunID: foreignID, State: "done", StartedAt: time.Now()},
@@ -76,6 +78,7 @@ func TestSourceContextReadsRecordedEvidenceAcrossReplicasAndPreservesOwnerScope(
 	require.NoError(t, err)
 	require.True(t, current.Equal(zoned), "receiving replica must supply consistent current clocks")
 	require.Contains(t, text, "service-A")
+	require.Contains(t, text, "Ran 12 tests: OK; LEDGER-CONTEXT-42")
 	require.Equal(t, 1, strings.Count(text, "source-call"))
 	require.NotContains(t, text, "private system content")
 	require.NotContains(t, text, "MODEL_REASONING_DO_NOT_EXPORT")
@@ -106,6 +109,30 @@ func TestSourceContextReadsRecordedEvidenceAcrossReplicasAndPreservesOwnerScope(
 	require.Error(t, err)
 }
 
+func TestDelegatedSourceReceiptsDoNotReplaceContinuationAndRequireOwnedRun(t *testing.T) {
+	e, _, _ := readMergeTestEngine(t)
+	ctx := WithActingAgentId(contextTestRun(t, e), "coding-agent")
+	run, _ := common.RunFromContext(ctx)
+	original := []common.ChatMessage{{Role: "user", Content: "Preserve the complete original request"}}
+	require.NoError(t, e.RecordDelegatedToolSource(ctx, "workbenchHost", map[string]any{"action": "exec"}, `{"exitCode":0}`))
+	restored, err := e.RestoreWorkContinuation(ctx, original)
+	require.NoError(t, err)
+	require.Equal(t, original, restored, "a source receipt must never replace resumable agent state")
+	foreign := common.ContextWithRun(askTestActor(), run)
+	foreign = WithActingAgentId(foreign, "coding-agent")
+	require.Error(t, e.RecordDelegatedToolSource(foreign, "workbenchHost", nil, "private"))
+	rows, err := e.workSourceReceipts(foreign, run.RunId)
+	require.NoError(t, err)
+	require.Empty(t, rows)
+	require.NoError(t, e.RecordDelegatedToolSource(ctx, "workbenchHost", nil, strings.Repeat("x", 1024*1024+1)))
+	rows, err = e.workSourceReceipts(ctx, run.RunId)
+	require.NoError(t, err)
+	remaining := replyReviewMaxBytes
+	sources, omitted := workCheckpointSources(rows, run.RunId, &remaining)
+	require.True(t, omitted, "oversized evidence must be explicitly unavailable")
+	require.Len(t, sources, 1)
+}
+
 func TestExplicitMissingEvidenceAnswerWinsOverIntermediateAssessment(t *testing.T) {
 	reply := "I could not find the source of that earlier claim, so I have not created a file."
 	run := map[string]any{"outcome": map[string]any{"returned": map[string]any{"reply": reply}}}
@@ -131,7 +158,71 @@ func TestCheckpointSourceProjectionBoundsDeduplicatesAndExcludesProse(t *testing
 	sources, omitted := workCheckpointSources([]map[string]any{checkpoint, checkpoint}, "run", &remaining)
 	require.True(t, omitted)
 	require.Len(t, sources, 1)
-	require.Equal(t, messages[1].Content, sources[0]["value"], "preserve old observation time, different scope and truncation; persistence must not make them fresh")
+	value, err := json.Marshal(sources[0]["value"])
+	require.NoError(t, err)
+	require.JSONEq(t, messages[1].Content, string(value), "preserve old observation time, different scope and truncation; persistence must not make them fresh")
 	require.Equal(t, "2026-10-17", sources[0]["checkpointAt"])
 	require.Positive(t, remaining)
+}
+
+func TestCheckpointSourceProjectionRetainsJSONWithoutDoubleEscaping(t *testing.T) {
+	inner, err := json.Marshal(map[string]any{
+		"exitCode": 0, "stderr": "",
+		"stdout": strings.Repeat("{\"id\":\"e06\",\"cents\":8000}\n", 130) + "Ran 10 tests: OK",
+	})
+	require.NoError(t, err)
+	result, err := json.Marshal(map[string]any{
+		"content":  []any{map[string]any{"type": "text", "text": string(inner)}},
+		"sequence": int64(9007199254740993), "isError": false,
+	})
+	require.NoError(t, err)
+	messages := []common.ChatMessage{
+		{Role: "assistant", Content: "PRIVATE_REASONING", ToolCalls: []common.ToolCall{{ID: "exec", Name: "workbenchHost", Arguments: strings.Repeat("large script", 1000)}}},
+		{Role: "tool", Name: "workbenchHost", ToolCallId: "exec", Content: string(result)},
+	}
+	encoded, err := json.Marshal(messages)
+	require.NoError(t, err)
+	checkpoint := map[string]any{"id": "receipt", "data": map[string]any{"messagesEncoding": "json-base64-v1", "messages": base64.StdEncoding.EncodeToString(encoded)}}
+	remaining := replyReviewMaxBytes
+	sources, omitted := workCheckpointSources([]map[string]any{checkpoint}, "run", &remaining)
+	require.False(t, omitted, "JSON escaping overhead must not hide an execution receipt that fits the preview")
+	require.Len(t, sources, 1)
+	require.Equal(t, true, sources[0]["argumentsOmitted"])
+	projected, err := json.Marshal(sources[0]["value"])
+	require.NoError(t, err)
+	require.Contains(t, string(projected), "9007199254740993", "do not round source numbers")
+	require.Contains(t, string(projected), "Ran 10 tests: OK")
+	require.NotContains(t, string(projected), "PRIVATE_REASONING")
+	// The compact transport projection must reconstruct the exact JSON values.
+	preview := workSourcePreviewValue(string(result)).(map[string]any)
+	block := preview["content"].([]any)[0].(map[string]any)
+	textJSON, err := json.Marshal(block["textJSON"])
+	require.NoError(t, err)
+	block["text"] = string(textJSON)
+	delete(block, "textJSON")
+	reconstructed, err := json.Marshal(preview)
+	require.NoError(t, err)
+	require.JSONEq(t, string(result), string(reconstructed))
+	raw, err := json.Marshal(sources[0])
+	require.NoError(t, err)
+	require.LessOrEqual(t, len(raw), 8000)
+	require.Equal(t, replyReviewMaxBytes-len(raw), remaining)
+	remaining = len(raw) - 1
+	sources, omitted = workCheckpointSources([]map[string]any{checkpoint}, "run", &remaining)
+	require.True(t, omitted)
+	require.Empty(t, sources, "the existing total preview budget still applies")
+}
+
+func TestSourcePreviewPreservesTransportErrorsAndOpaqueText(t *testing.T) {
+	value := workSourcePreviewValue(`{"isError":true,"content":[{"type":"text","text":"{\"truncated\":true,\"exitCode\":1,\"stdout\":\"{not nested JSON}\"}"},{"type":"text","text":"opaque prose"},{"type":"image","data":"opaque image"},{"type":"text","text":"{}","textJSON":"preexisting"}]}`).(map[string]any)
+	require.Equal(t, true, value["isError"])
+	blocks := value["content"].([]any)
+	result := blocks[0].(map[string]any)["textJSON"].(map[string]any)
+	require.Equal(t, true, result["truncated"])
+	require.Equal(t, json.Number("1"), result["exitCode"])
+	require.Equal(t, "{not nested JSON}", result["stdout"])
+	require.Equal(t, "opaque prose", blocks[1].(map[string]any)["text"])
+	require.Equal(t, "opaque image", blocks[2].(map[string]any)["data"])
+	require.Equal(t, "{}", blocks[3].(map[string]any)["text"])
+	require.Equal(t, "preexisting", blocks[3].(map[string]any)["textJSON"])
 }

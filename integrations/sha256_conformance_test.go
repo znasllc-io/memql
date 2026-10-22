@@ -46,6 +46,9 @@ func TestNoSHA256InIntegrations(t *testing.T) {
 	// -- specifically to remove the unguarded coupling a duplicated hash
 	// expression created, so the entry is gone rather than kept.)
 	allow := map[string]string{
+		"workbench/export.go":                    "streams the standard SHA-256 file checksum required by verified storage and v1:library:file.sha256; receipt identities use core/id separately",
+		"workbench/export_test.go":               "independently verifies the exported binary bytes against their standard SHA-256 checksum",
+		"workbench/export_db_test.go":            "verifies the Library storage protocol's standard SHA-256 checksum while testing cross-replica export recovery and downloads",
 		"pipelinesteps/settle.go":                "pins pipeline log bytes to the verified streaming Library receipt's standard SHA-256; core/id composition is not the storage checksum",
 		"azureblob/direct.go":                    "Azure SharedKey authorization requires HMAC-SHA256 over the canonical HTTP request; core/id does not implement that wire signature",
 		"knowledge/seeddata/manifest.go":         "verifies standard SHA-256 of checked-in source and provenance bytes independently against manifest.sha256; row identities remain on core/id, whose composition is not the manifest byte checksum",

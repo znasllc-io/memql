@@ -1,6 +1,7 @@
 package worker
 
 import (
+	"fmt"
 	memqlv1 "github.com/znasllc-io/memql/component/grpc/gen"
 )
 
@@ -47,5 +48,12 @@ func NewAppSessionLoopback(req AppSessionRequest, onControl func(*memqlv1.AppSes
 		}
 		return nil
 	}
-	return h, h.deliverChunk, func(out AppSessionOutcome) { h.finish(out, nil) }
+	return h, h.deliverChunk, func(out AppSessionOutcome) {
+		// Match the real stream end: a reported failure is also Wait's error.
+		var err error
+		if out.Error != "" {
+			err = fmt.Errorf("worker: app session failed: %s", out.Error)
+		}
+		h.finish(out, err)
+	}
 }

@@ -37,10 +37,6 @@ const (
 	complexityUnknown goalComplexity = ""
 )
 
-// maxGoalChars bounds the goal echoed into the triage prompt. It lived in
-// agent_loop_prompt.go, which held the plan loop's prompt projection.
-const maxGoalChars = 1200
-
 // goalTriageEnabled gates the classifier. Defaults on; an operator can
 // disable it (MEMQL_PLANNER_GOAL_TRIAGE_ENABLED=0).
 func goalTriageEnabled() bool {

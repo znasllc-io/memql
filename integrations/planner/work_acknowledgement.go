@@ -20,7 +20,7 @@ func validAcknowledgement(text string) bool {
 }
 
 func (l *PlannerAgentLoop) repairAcknowledgement(ctx context.Context, req CompileRequest, conversation any, out *CompileOutcome, timeout time.Duration) string {
-	data := map[string]any{"goal": truncate(req.Statement, maxGoalChars), "workload": out.Workload, "workTitle": out.WorkTitle}
+	data := map[string]any{"goal": req.Statement, "workload": out.Workload, "workTitle": out.WorkTitle}
 	if conversation != nil {
 		if preview, err := conversationPreview(conversation); err == nil {
 			data["conversation"] = preview

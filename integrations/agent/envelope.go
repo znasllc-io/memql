@@ -50,7 +50,7 @@ import (
 // RespondToUserToolName is the sentinel tool the agent must call to
 // emit a user-facing reply. The streaming loop intercepts calls with
 // this name.
-const RespondToUserToolName = "respondToUser"
+const RespondToUserToolName = common.DelegatedResponseTool
 
 // CitationKindKnowledge is the default citation kind: the agent quoted
 // or relied on a chunk from a knowledge domain. Frontend renders this

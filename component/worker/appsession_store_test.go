@@ -2,6 +2,7 @@ package worker
 
 import (
 	"context"
+	"strings"
 	"testing"
 	"time"
 
@@ -148,4 +149,30 @@ func TestStoreMethodsDoNotReturnAContext(t *testing.T) {
 		RecordAppSessionProgress(context.Context, string, int, int, string, time.Time) error
 		EndAppSession(context.Context, AppSessionRow) error
 	} = store
+}
+
+func TestSessionStoreMarksQuotaIndependentlyOfReplaySafety(t *testing.T) {
+	for _, tt := range []struct {
+		status, message string
+		want            bool
+	}{
+		{"failed", "You've hit your weekly limit", true},
+		{"failed", "out of credits", true},
+		{"failed", "connection lost", false},
+		{"ended", "out of credits", false},
+	} {
+		recorder := &recordingExecutor{}
+		store := &EngineStore{Engine: recorder}
+		err := store.EndAppSession(context.Background(), AppSessionRow{ID: "session", OwnerUserId: "alice", Status: tt.status, ErrorMessage: tt.message, EndedAt: time.Now(), RecordedSteps: 5, Usage: AppSessionUsage{Known: true, InputTokens: 100}})
+		if err != nil {
+			t.Fatal(err)
+		}
+		want := "quotaRefused: false"
+		if tt.want {
+			want = "quotaRefused: true"
+		}
+		if len(recorder.statements) != 1 || !strings.Contains(recorder.statements[0], want) {
+			t.Fatalf("quota receipt missing: %v", recorder.statements)
+		}
+	}
 }

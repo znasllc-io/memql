@@ -1,0 +1,16 @@
+.os-download-toast {
+  position: fixed;
+  bottom: calc(var(--os-dock-h, 56px) + 16px);
+  right: 24px;
+  z-index: 1000;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: .75rem;
+  max-width: min(480px, calc(100vw - 48px));
+  padding: 1rem;
+  background: var(--os-raised);
+  color: var(--os-ink);
+  border: 1px solid var(--os-line);
+  box-shadow: var(--os-shadow-float);
+}

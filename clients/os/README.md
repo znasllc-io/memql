@@ -1139,6 +1139,13 @@ label chips. Label filters still work. Open remains a text action; desktop,
 download and Delete use named icons. Delete moves the file to the Bin, where it
 can be restored until purged.
 
+Downloads preserve the byte response's filename, MIME type and contents for all
+file types, including ZIP and tar.gz archives. The streaming worker sends both
+filename disposition forms and a filename-bearing URL for Safari; the buffered
+fallback uses the same response metadata. An HTML app fallback is never saved
+as the requested file. Ask's saved-file links and artifact actions use this same
+authenticated download path without navigating away or opening an empty tab.
+
 **Add to this folder** offers Upload files, New Markdown file, and New folder.
 New Markdown file opens Make a file on Name with Markdown, the current folder,
 and a way back to Files. Searching, Bin, Materializer and the Library root name

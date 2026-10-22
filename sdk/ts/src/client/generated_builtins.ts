@@ -1783,6 +1783,30 @@ QueryClient.prototype.fleetRecommended = function (this: QueryClient, args: Flee
   return this.executeNamed("fleetRecommended", buildFleetRecommended(args), opts);
 };
 
+/** Allow the next call to retry one app on your machine after adding credits or restoring access. Does not start or replay work. */
+export interface FleetRetryAppAvailabilityArgs {
+  registrationId: string;
+  // Enum: claude-code | codex
+  app: string;
+}
+
+export function buildFleetRetryAppAvailability(args: FleetRetryAppAvailabilityArgs): string {
+  const parts: string[] = [];
+  parts.push("registrationId: " + renderMemQLValue(args.registrationId));
+  parts.push("app: " + renderMemQLValue(args.app));
+  return "builtin fleetRetryAppAvailability(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    fleetRetryAppAvailability(args: FleetRetryAppAvailabilityArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.fleetRetryAppAvailability = function (this: QueryClient, args: FleetRetryAppAvailabilityArgs = {} as FleetRetryAppAvailabilityArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("fleetRetryAppAvailability", buildFleetRetryAppAvailability(args), opts);
+};
+
 /** Remove one of YOUR OWN machines from the fleet: revoke its registration AND the credential it connects with, as ONE act. The two used to be separate and the client composed them, which meant a window where the row said removed and the token still worked -- and a surface that made only the first call left a machine that kept its stream and could come back. The registration is resolved through your own machines, so another user's id answers exactly as a made-up one does. Revocation is an UPDATE, never a delete: the row is audit history and its credential's hash must stay taken. The machine's live stream is ended by the cluster within seconds, from whichever replica is holding it. */
 export interface FleetRevokeMachineArgs {
   /** v1:worker:registration.id of the machine to remove. It must be one of the caller's own. */
@@ -1806,6 +1830,37 @@ declare module "./query.js" {
 
 QueryClient.prototype.fleetRevokeMachine = function (this: QueryClient, args: FleetRevokeMachineArgs = {} as FleetRevokeMachineArgs, opts?: QueryCallOptions): Promise<Result> {
   return this.executeNamed("fleetRevokeMachine", buildFleetRevokeMachine(args), opts);
+};
+
+/** Save the owner's app strategy on one machine, with a revision check. */
+export interface FleetSetAppRoutingArgs {
+  registrationId: string;
+  revision: string;
+  mode: string;
+  usageWeight: number;
+  speedWeight: number;
+  reliabilityWeight: number;
+}
+
+export function buildFleetSetAppRouting(args: FleetSetAppRoutingArgs): string {
+  const parts: string[] = [];
+  parts.push("registrationId: " + renderMemQLValue(args.registrationId));
+  parts.push("revision: " + renderMemQLValue(args.revision));
+  parts.push("mode: " + renderMemQLValue(args.mode));
+  parts.push("usageWeight: " + renderMemQLValue(args.usageWeight));
+  parts.push("speedWeight: " + renderMemQLValue(args.speedWeight));
+  parts.push("reliabilityWeight: " + renderMemQLValue(args.reliabilityWeight));
+  return "builtin fleetSetAppRouting(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    fleetSetAppRouting(args: FleetSetAppRoutingArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.fleetSetAppRouting = function (this: QueryClient, args: FleetSetAppRoutingArgs = {} as FleetSetAppRoutingArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("fleetSetAppRouting", buildFleetSetAppRouting(args), opts);
 };
 
 /** Save model choices by purpose on your machine after checking installed capabilities and combined memory. Existing calls finish. Later calls use the saved choices, with a 32K context ceiling. */

@@ -21,7 +21,7 @@ func buildSafetyDescriptor(action, runId string, innerArgs map[string]any) safet
 	case "exec":
 		cmd, _ := innerArgs["command"].(string)
 		return safety.NewExecAction(safety.SurfaceWorkbench, cmd, caller)
-	case "fs_read":
+	case "fs_read", "fs_export":
 		return safety.NewFSAction(safety.SurfaceWorkbench, safety.ActionFSRead, workbenchPaths(innerArgs), caller)
 	case "fs_write":
 		return safety.NewFSAction(safety.SurfaceWorkbench, safety.ActionFSWrite, workbenchPaths(innerArgs), caller)

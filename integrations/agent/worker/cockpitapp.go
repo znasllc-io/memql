@@ -16,6 +16,7 @@ import (
 	memqlengine "github.com/znasllc-io/memql/component/memql"
 	"github.com/znasllc-io/memql/component/planner"
 	workerservice "github.com/znasllc-io/memql/component/worker"
+	"github.com/znasllc-io/memql/core/common"
 	"github.com/znasllc-io/memql/core/id"
 )
 
@@ -239,12 +240,19 @@ func (e *CockpitAppExecutor) runAdmitted(ctx context.Context, req planner.Execut
 	// holds each machine's stream. The app requirement is merged into the
 	// require-labels the Task already carried, so a policy that narrows
 	// still narrows and an app requirement is added on top.
-	w, routeErr := e.selectMachine(ctx, ownerUserId, appId, spec.RequireLabels)
+	w, routeErr := e.selectMachineFor(ctx, ownerUserId, appId, spec.RequireLabels, stringFrom(req.Input["selectedRegistrationId"]))
 	if routeErr != nil {
 		return planner.ExecutorResult{}, routeErr
 	}
+	if err := checkMachineAppRouting(ctx, e.prefs, w.RegistrationId, appId); err != nil {
+		return planner.ExecutorResult{}, err
+	}
 
 	result, runErr := e.runner.Run(ctx, w, spec, progressBridge(progress))
+
+	if quota := appQuotaRefusal(result); quota != nil {
+		runErr = quota
+	}
 
 	// The ledger row is written on EVERY outcome, failures included.
 	// A run that burned an hour of somebody's subscription and then
@@ -300,7 +308,9 @@ func (e *CockpitAppExecutor) runAdmitted(ctx context.Context, req planner.Execut
 // a function rather than a literal inside Run so what reaches AppSessionStart
 // can be read without standing up the consent gates in front of it.
 func sessionRunSpec(req planner.ExecutorRequest, appId, ownerUserId, workspace string, credentialLifetime time.Duration) workerservice.RunSpec {
+	scope, _ := req.Input["toolScope"].(*common.DelegatedTools)
 	return workerservice.RunSpec{
+		ToolScope:          scope,
 		SessionId:          "v1:worker:appSession:" + id.NewShortId(),
 		OwnerUserId:        ownerUserId,
 		App:                appId,
@@ -390,6 +400,10 @@ func isWorkspaceDirName(name string) bool {
 // the runner's re-check ever disagreed, the plan would commit to a
 // machine that then refused, and the failure would name the router.
 func (e *CockpitAppExecutor) selectMachine(ctx context.Context, ownerUserId, appId string, require map[string]string) (*workerservice.Worker, error) {
+	return e.selectMachineFor(ctx, ownerUserId, appId, require, "")
+}
+
+func (e *CockpitAppExecutor) selectMachineFor(ctx context.Context, ownerUserId, appId string, require map[string]string, registration string) (*workerservice.Worker, error) {
 	if e.router == nil || e.registry == nil {
 		return nil, fmt.Errorf("cockpit-app: no fleet router on this node; a Task can only reach one on an agent node running WorkerService")
 	}
@@ -415,6 +429,9 @@ func (e *CockpitAppExecutor) selectMachine(ctx context.Context, ownerUserId, app
 	}
 	considered := make(map[string]string, len(plan.Candidates)+len(plan.Rejected))
 	for _, candidate := range plan.Candidates {
+		if registration != "" && registration != candidate.RegistrationId {
+			continue
+		}
 		// Only a machine whose stream THIS replica holds can carry a
 		// session today: the app-session envelope has no cross-node
 		// forward yet (the tool path's WorkerForward does, memql#4352).

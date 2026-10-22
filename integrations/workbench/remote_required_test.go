@@ -186,3 +186,20 @@ func TestSingleNodeModeIsUnaffected(t *testing.T) {
 		t.Fatal("single-node dispatch provisioned no workspace")
 	}
 }
+
+func TestProtocolHeadAlwaysRequiresRemoteExecution(t *testing.T) {
+	t.Setenv("MEMQL_WORKBENCH_REMOTE", "")
+	t.Setenv("MEMQL_WORKBENCH_LOCAL_FALLBACK", "1")
+	i := NewIntegration(nil)
+	i.RequireRemote()
+	if !i.remote || i.localFallback {
+		t.Fatal("protocol head can execute on its own filesystem")
+	}
+	nodes, err := i.handleDispatchHost(context.Background(), map[string]any{"runId": "protocol-head-run", "agentId": "agent", "action": "fs_list", "args": map[string]any{"path": "."}}, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(nodes) != 1 || !strings.Contains(string(nodes[0].Payload), "no_workbench_peer") {
+		t.Fatalf("expected refusal before local filesystem access: %+v", nodes)
+	}
+}

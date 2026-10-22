@@ -1,4 +1,5 @@
 import { artifactContentPath } from "./download";
+import { downloadMetadata } from "./downloadMetadata";
 
 // The streaming download path (design D13): a service worker turns a fetch
 // this page makes into a navigation response the browser writes to disk AS
@@ -18,7 +19,10 @@ import { artifactContentPath } from "./download";
 // The worker file itself is `public/download-sw.js` -- plain JS, copied to
 // the bundle root, registered lazily the first time a download wants it.
 
-export const DOWNLOAD_SW_PATH = "download-sw.js";
+// Changing the script URL makes register wait for this implementation's
+// installation. With an unchanged URL it can return the old registration
+// before the background update even appears as `installing`.
+export const DOWNLOAD_SW_PATH = "download-sw.js?v=2";
 export const DOWNLOAD_SW_SCOPE = "__memql-dl/";
 
 interface PortLike {
@@ -56,6 +60,7 @@ export async function downloadWorkerRegistration(): Promise<ServiceWorkerRegistr
       : import.meta.env.BASE_URL + "/";
     const registration = await navigator.serviceWorker.register(base + DOWNLOAD_SW_PATH, {
       scope: base + DOWNLOAD_SW_SCOPE,
+      updateViaCache: "none",
     });
     // The OS page is outside the download scope, so serviceWorker.ready
     // would wait forever for a worker controlling this page. Wait for this
@@ -121,6 +126,7 @@ export async function runWorkerDownload(input: {
   // the in-scope URL to navigate. An unanswered ask times out rather than
   // hanging the click.
   const channel = new MessageChannel();
+  const metadata = downloadMetadata(response, input.fileName);
   const url = await new Promise<string>((resolve, reject) => {
     const timer = setTimeout(() => reject(new Error("The download worker did not answer.")), 4_000);
     channel.port1.onmessage = (event: MessageEvent) => {
@@ -131,7 +137,7 @@ export async function runWorkerDownload(input: {
       }
     };
     worker.postMessage(
-      { type: "memql-download-open", name: input.fileName, size: input.sizeBytes },
+      { type: "memql-download-open", ...metadata },
       [channel.port2],
     );
   });

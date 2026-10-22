@@ -20,6 +20,19 @@ in-process path on the agent node survives as the local/no-mesh fallback (see
 section 8). Operational detail lives in
 [workbench-production.md](../../internal/ops/workbench-production.md).
 
+Finished files are delivered with `workbenchHost` action `fs_export`, passing
+the exact workspace-relative `path`. The operation copies binary ranges from
+the run's selected workspace, refuses a changing or incomplete source, and
+verifies the saved bytes before returning a Library file ID, SHA-256, size and
+download URL. It preserves all file types and extensions, including archives.
+Ask uses the returned link to download through the same authenticated path as
+Files. The saved file remains available after the workspace is released.
+Verified exports carry the executing run and step and become ready before the
+tool returns, so the work completion check recognizes the delivered file.
+Exports use the storage service's 2 GiB ceiling and require the MCP/agent node's
+Library storage configuration. Older Cockpit runtimes without binary reads
+refuse export rather than delivering a corrupted or truncated file.
+
 ## 1. Mental model
 
 Goals carry an execution destination: **Auto**, **Workbench** or **Computer**.

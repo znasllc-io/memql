@@ -25,6 +25,19 @@ test("retries a download process killed by the observed unhandled ECONNRESET", a
   assert.equal(f.count(), 2);
 });
 
+test("retries the upstream request timeout whether caught or unhandled", async t => {
+  const message = "@vscode/test-electron request timeout out after 15000ms";
+  for (const failure of [
+    `Promise.reject(Object.assign(new Error(${JSON.stringify(message)}), {name:'TimeoutError'}));`,
+    `console.error(${JSON.stringify(message)}); process.exit(1);`,
+  ]) {
+    const f = fixture(t, `if (n === 1) { ${failure} }
+      else process.send({executable:'/download/Code'}, () => process.disconnect());`);
+    assert.equal(await downloadVSCode({ version: "stable" }, f), "/download/Code");
+    assert.equal(f.count(), 2);
+  }
+});
+
 test("persistent transport failure stops after three attempts", async t => {
   const f = fixture(t, `Promise.reject(Object.assign(new Error('aborted'), {code:'ECONNRESET'}));`);
   await assert.rejects(downloadVSCode({}, f), /ECONNRESET/);

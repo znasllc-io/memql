@@ -2,8 +2,10 @@ package memql
 
 import (
 	"context"
+	"crypto/sha256"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"strings"
 	"testing"
 	"time"
@@ -100,6 +102,7 @@ func TestReplyReviewReadsRecordedEvidenceOnAnotherReplica(t *testing.T) {
 		{Role: "tool", Name: "readStatus", ToolCallId: "status", Content: `{"status":"degraded","cause":null,"timezone":"America/Phoenix","source":"https://status.example.test"}`},
 	}
 	require.NoError(t, a.SaveWorkContinuation(ctx, read))
+	require.NoError(t, a.RecordDelegatedToolSource(WithActingAgentId(ctx, "coding-agent"), "workbenchHost", map[string]any{"action": "exec", "args": map[string]any{"cmd": strings.Repeat("LARGE_SCRIPT_INPUT", 900)}}, `{"stdout":"Executed 12 tests; all passed","exitCode":0}`))
 	rows, err := b.workReviewReplyBuiltin(ctx, draft, 0)
 	require.NoError(t, err)
 	require.Len(t, rows, 1)
@@ -109,6 +112,10 @@ func TestReplyReviewReadsRecordedEvidenceOnAnotherReplica(t *testing.T) {
 	raw, _ := json.Marshal(model.messages)
 	require.Contains(t, string(raw), "status.example.test")
 	require.Contains(t, string(raw), "sourceZoneClocks")
+	require.Contains(t, string(raw), "Executed 12 tests; all passed")
+	require.Contains(t, string(raw), "currentRunId")
+	require.Contains(t, string(raw), "argumentsOmitted")
+	require.NotContains(t, string(raw), "LARGE_SCRIPT_INPUT")
 	require.NotContains(t, string(raw), "PRIVATE_SYSTEM_NOT_EVIDENCE")
 	require.NotContains(t, string(raw), "PRIVATE_REASONING_NOT_EVIDENCE")
 	foreign := common.ContextWithRun(auth.ContextWithUserActor(context.Background(), "someone-else"), run)
@@ -197,4 +204,38 @@ func TestReplyReviewEvidenceGapIsBoundedAndDisabledForDirectAdvice(t *testing.T)
 		return string(raw), nil
 	})
 	require.Error(t, err)
+}
+
+func TestReplyReviewKeepsRecoveryUnderFilePreviewPressure(t *testing.T) {
+	a, _, _ := readMergeTestEngine(t)
+	b, _, _ := readMergeTestEngine(t)
+	ctx := WithActingAgentId(contextTestRun(t, a), "coding-agent")
+	for n := range 9 {
+		message := common.ChatMessage{Role: "tool", Name: "workbenchHost", ToolCallId: fmt.Sprint(n), Content: "original source"}
+		raw, _ := json.Marshal(message)
+		page, ok := workHistoryPage(message, "", 0, 4000, true)
+		require.True(t, ok)
+		page["sourceRunId"], page["checkpoint"], page["index"] = "prior", fmt.Sprint("original-", n), 1
+		page["sourceEvidence"] = map[string]any{"sha256": fmt.Sprintf("%x", sha256.Sum256(raw)), "operation": "workbenchHost", "path": fmt.Sprint("history/source-", n)}
+		pairs, _ := workCheckpointPairsWithSourceReads(recoveryTestCheckpoint(t, fmt.Sprint("read-", n), page, true), true)
+		require.Len(t, pairs, 1)
+		var args map[string]any
+		require.NoError(t, json.Unmarshal([]byte(pairs[0].call.Arguments), &args))
+		require.NoError(t, a.RecordDelegatedToolSource(ctx, "recallWorkHistory", args, pairs[0].result.Content))
+	}
+	for n := range 8 {
+		content, _ := json.Marshal(map[string]any{"content": strings.Repeat("x", 3500), "path": fmt.Sprint("current/file-", n)})
+		require.NoError(t, a.RecordDelegatedToolSource(ctx, "workbenchHost", map[string]any{"action": "fs_read"}, string(content)))
+	}
+	model := &replyReviewModel{}
+	b.SetAIResolver(testAIResolver{fn: func(context.Context, airoute.ResolveRequest) (ResolvedProvider, error) {
+		return ResolvedProvider{Client: model, Resolution: airoute.Resolution{ProviderName: "fleet:review", Model: "test"}}, nil
+	}})
+	_, err := b.workReviewReplyBuiltin(ctx, map[string]any{"draft": map[string]any{"reply": "The original sources were recovered."}}, 0)
+	require.NoError(t, err)
+	raw, _ := json.Marshal(model.messages)
+	for n := range 9 {
+		require.Contains(t, string(raw), fmt.Sprint("history/source-", n), "later file previews must not evict earlier recovery proofs")
+	}
+	require.Equal(t, 9, strings.Count(string(raw), `\"complete\":true`))
 }

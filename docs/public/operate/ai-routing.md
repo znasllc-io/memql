@@ -309,6 +309,47 @@ one whose route cannot serve every job for you right now is refused with
 `route_not_ready` and the reason ("Needs an embedding model", "No signed-in app
 on your machines"), before any goal exists.
 
+### App selection on a machine
+
+Fleet > Machines > your machine > Apps owns the app strategy. Ask keeps its
+Route and Where controls; it does not carry an app-strategy override.
+
+- **Auto** (default) balances observed token usage, response time and successful
+  calls. Usage balance, Speed and Reliability weights are separate from the
+  general routing Auto balance below.
+- **Round robin** alternates available apps for new calls.
+- **Claude Code only** and **Codex only** use that app exclusively, including
+  when it is unavailable.
+
+The usage score uses up to 200 recent owner-scoped app sessions from the last
+two hours. Unknown usage stays unknown; token counts are not remaining-credit
+estimates. Availability is tracked separately for each app on each owned
+machine. A quota refusal stays effective until an unambiguous, explicitly zoned
+reset reported by the app; when no such time is reported, it is eligible for a
+recheck after fifteen minutes. This evidence survives restarts and replica
+changes and does not disappear as other sessions enter the usage window.
+Auto and Round robin can use another enabled app; an Only strategy cannot.
+
+After purchasing credits or restoring access, choose **Retry availability**
+beside that app in the machine's Apps page. This clears the earlier refusal for
+the next call, without starting a task, changing strategy or claiming a balance.
+A later quota refusal blocks new calls again, and a successful call clears it.
+Quota evidence from older builds is honored while present in recent history;
+newly recorded refusals have a durable marker independent of that history.
+
+Each active session stays with its app. New calls receive their full supplied
+conversation and contract, and delegated steps receive their inputs and
+workspace context. A fallback repeats that same handover only after a confirmed
+quota refusal with known zero usage, no served model, no result, and no recorded
+or dropped actions. An uncertain interruption is never automatically replayed.
+The existing per-level model mapping remains in the app harness, and records
+name the model actually reported by the app.
+
+Selecting Apps with Where Auto permits an enabled app session on the owner's
+machine. It does not authorize general computer tools or override an explicit
+Workbench destination. Ownership, app permissions, kill switches and active-run
+checks remain mandatory.
+
 ### Auto
 
 Auto keeps the rules. What it adds is the order inside the three general

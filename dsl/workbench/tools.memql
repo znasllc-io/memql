@@ -1,5 +1,15 @@
 /// Work inside this run's isolated Linux workspace. Use for files, code and
 /// headless tools; it has no access to the person's computer or private files.
+/// File paths and exec cwd are relative to the workspace root. Capture the root
+/// before changing directories; compute relative paths from it, never by adding
+/// ./ to an absolute path. Before reporting a created file's path, verify that
+/// exact relative path with fs_stat or fs_read and report the successful receipt's
+/// path. A shell's printed path alone does not establish a usable file reference.
+/// Deliver finished files with fs_export {path}: it saves the exact bytes in the
+/// person's Library and returns fileId, artifactId, name, sha256 and downloadUrl.
+/// Include that returned downloadUrl as a Markdown download link in your answer.
+/// Export archives, images and documents as bytes; never recreate them with prose.
+/// A workspace path alone is not a download and expires when the workspace ends.
 /// Fleet workbenches provide Python and shell/file tools, with no direct network,
 /// host files, Node or Go. A goal keeps its first workspace; do not assume a
 /// missing tool authorizes switching computers. Ask permission when required.
@@ -15,7 +25,7 @@
 @handler(type="function", name="workbenchDispatchHost")
 @requiresAgentRole("assistant", "specialist")
 tool workbenchHost {
- action enum("exec", "fs_read", "fs_write", "fs_list", "fs_stat", "http_fetch")!
+ action enum("exec", "fs_read", "fs_write", "fs_list", "fs_stat", "fs_export", "http_fetch")!
  args object
  environment object
  runId string! @autoInjected

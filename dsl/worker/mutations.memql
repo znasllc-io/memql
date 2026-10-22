@@ -780,6 +780,7 @@ mutation registration updateWorkerApps {
 @serverOnly
 mutation appSession createAppSession {
   args {
+    toolScope object
     sessionId      string!
     workerId       string!
     app            enum("claude-code", "codex")!
@@ -822,6 +823,7 @@ mutation appSession createAppSession {
     prompt: args.prompt ?? ""
     inputArtifactIds: args.inputArtifactIds ?? []
     responseSchema: args.responseSchema ?? ""
+    toolScope: args.toolScope ?? {}
     result: {}
     transcriptFileId: ""
     transcriptTruncated: false
@@ -960,6 +962,7 @@ mutation appSession endAppSession {
     droppedActions  int
     producedArtifactIds  array
     appSessionRef  string
+    quotaRefused bool
     errorMessage   string
     cancelReason   string
     /// The harness's structured final answer, when it produced one. It does
@@ -984,6 +987,7 @@ mutation appSession endAppSession {
     args.droppedActions
     args.producedArtifactIds
     args.appSessionRef
+    args.quotaRefused
     args.errorMessage
     args.cancelReason
     // NOT `?? {}`. A session END that carries no result must not blank a
@@ -1494,5 +1498,31 @@ mutation activity updateMachineActivity {
     args.status
     endedAt: args.endedAt ?? ""
     detail: args.detail ?? ""
+  }
+}
+
+/// Internal commit after fleetSetAppRouting validates mode/weights, checks the
+/// owner's expected revision and fences the row. Scoping to actor.userId would let
+/// that same owner bypass validation and overwrite a concurrent settings edit.
+@actor
+@serverOnly
+mutation registration setWorkerAppRouting {
+  args { registrationId string! settings object! }
+  update {
+    id: args.registrationId
+    appRouting: args.settings
+  }
+}
+
+/// The selector's fenced cursor update after rechecking live policy and usage.
+/// A public write scoped to actor.userId could fabricate selection history and bypass
+/// the serialization that keeps concurrent round-robin choices consistent.
+@actor
+@serverOnly
+mutation registration recordWorkerAppSelection {
+  args { registrationId string! app string! }
+  update {
+    id: args.registrationId
+    appSelection: {lastApp: args.app, selectedAt: now}
   }
 }

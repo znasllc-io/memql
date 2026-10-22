@@ -53,11 +53,11 @@ func (a *App) wireWorkbenchForwarding(
 	// engine-bff/bff.yaml, which sets MEMQL_WORKBENCH_REMOTE and names the
 	// peer; with the flag unset this case installs a router that is simply
 	// never consulted.
-	case node.NodeTypeAgent, node.NodeTypeBFF:
+	case node.NodeTypeAgent, node.NodeTypeBFF, node.NodeTypeMCP:
 		// Only wire the remote path when explicitly enabled. Without
 		// the env var the agent keeps the MVP behavior: local dispatch
 		// against /var/lib/memql/workbenches on its own disk.
-		if !workbenchRemoteEnabled() {
+		if !workbenchRemoteEnabled() && nodeIdentity.Type != node.NodeTypeMCP {
 			a.Logger.Info("workbench forwarding: MEMQL_WORKBENCH_REMOTE not set; agent will dispatch locally")
 			return
 		}

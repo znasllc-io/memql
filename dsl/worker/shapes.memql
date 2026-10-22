@@ -55,6 +55,8 @@ shape registration workerRegistrationFull {
   sharing
   workbenchSharing
   ownerFeatures
+  appRouting
+  appSelection
   sharingActivity
   permissions
   setup
@@ -79,6 +81,7 @@ shape registration workerRegistrationFull {
 /// machine card's recent-sessions list and the accounting rollup.
 @row
 shape appSession workerAppSessionFull {
+  toolScope
   row.id
   ownerUserId
   workerId
@@ -223,4 +226,16 @@ shape activity workerActivityFull {
   endedAt
   expiresAt
   detail
+}
+
+@row
+shape appSession workerAppRoutingEvidence {
+  row.id
+  app
+  workerId
+  status
+  startedAt
+  endedAt
+  usage
+  errorMessage
 }

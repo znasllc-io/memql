@@ -159,7 +159,7 @@ func (a *AppInference) Doors(ctx context.Context, actingUserId string) ([]memqle
 	if err != nil {
 		return nil, err
 	}
-	return a.projectDoors(machines), nil
+	return filterAppDoors(ctx, a.store, a.projectDoors(machines))
 }
 
 // projectDoors turns registrations into one entry per KNOWN app id, placing
@@ -251,6 +251,15 @@ func (a *AppInference) Call(ctx context.Context, req memqlengine.AppCallRequest)
 	return memqlengine.AppCallResult{}, refusal
 }
 
+func (a *AppInference) SelectApp(ctx context.Context, req memqlengine.AppCallRequest, localOnly bool, excluded []string) (memqlengine.AppSelection, error) {
+	doors, err := a.Doors(ctx, req.ActingUserId)
+	if err != nil {
+		return memqlengine.AppSelection{}, err
+	}
+	order, _ := a.AppOrder(ctx, req.ActingUserId)
+	return selectAppWithStore(ctx, a.store, req, localOnly, excluded, doors, order)
+}
+
 // ServeForwardedAppCall implements AppCallServer: the RECEIVING end of the
 // app-call hop, on the replica holding the machine's stream.
 //
@@ -311,6 +320,9 @@ func (a *AppInference) ServeForwardedAppCall(ctx context.Context, registrationId
 // whether a session was opened on it -- the line after which nothing is
 // re-pickable.
 func (a *AppInference) callOnWorker(ctx context.Context, w *workerservice.Worker, owner string, req memqlengine.AppCallRequest) (res memqlengine.AppCallResult, started bool, err error) {
+	if err := checkMachineAppRouting(ctx, a.store, w.RegistrationId, req.AppId); err != nil {
+		return res, false, err
+	}
 	// A CALLER THAT HAS GIVEN UP OPENS NOTHING. Asked first, before anything
 	// is staged, and again at the point of no return below: a session opened
 	// with a done context runs until the machine notices, on the owner's
@@ -436,6 +448,9 @@ func (a *AppInference) callOnWorker(ctx context.Context, w *workerservice.Worker
 	// the start goes on the wire, so the call may have run on the machine.
 	result, err := a.runner.Run(ctx, w, spec, nil)
 	surface := AppSurfacePrefix + req.AppId + "@" + result.WorkerId
+	if quota := appQuotaRefusal(result); quota != nil {
+		return memqlengine.AppCallResult{ExecutionSurface: surface, MachineLabel: w.Name}, true, quota
+	}
 	if err != nil {
 		return memqlengine.AppCallResult{ExecutionSurface: surface, MachineLabel: w.Name}, true,
 			fmt.Errorf("%w: %s on %s: %v", memqlengine.ErrAppUnavailable, req.AppId, w.Name, err)
@@ -463,6 +478,16 @@ func (a *AppInference) callOnWorker(ctx context.Context, w *workerservice.Worker
 		// derivations of "who paid" would eventually disagree.
 		Billing: appBilling(result.Billing),
 	}, true, nil
+}
+
+func appQuotaRefusal(result workerservice.RunResult) *memqlengine.AppQuotaRefused {
+	if result.Status == workerservice.AppSessionStatusFailed && result.Usage.Known &&
+		result.Usage.InputTokens == 0 && result.Usage.OutputTokens == 0 &&
+		result.Model == "" && len(result.Result) == 0 && result.DroppedActions == 0 && result.RecordedActions == 0 &&
+		memqlengine.IsAppQuotaRefusal(result.ErrorMessage) {
+		return &memqlengine.AppQuotaRefused{Reason: result.ErrorMessage}
+	}
+	return nil
 }
 
 // callerGone is an app-door call refused before its session opened because
@@ -504,6 +529,9 @@ func (a *AppInference) selectMachine(ctx context.Context, owner string, req memq
 	considered := map[string]string{}
 	var remote []Candidate
 	for _, cand := range plan.Candidates {
+		if req.RegistrationId != "" && cand.RegistrationId != req.RegistrationId {
+			continue
+		}
 		w := a.registry.WorkerById(cand.RegistrationId)
 		if w == nil {
 			// Held by another replica: a candidate for the FORWARD, judged

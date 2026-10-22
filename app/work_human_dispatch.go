@@ -12,8 +12,8 @@ import (
 )
 
 // PrepareDispatch waits for an answered invocation to finish unwinding before
-// spending its once-only claim. An answer can precede the waiting step receipt.
-// A timeout consumes nothing: the durable humanResumeId plus waiting receipt
+// spending its once-only claim. An answer can precede the stopped step receipt.
+// A timeout consumes nothing: the durable humanResumeId plus stopped receipt
 // lets the ordinary recovery sweep claim that same answer, even while the
 // original execution's leased claim still exists.
 func (d *workRunDispatcher) PrepareDispatch(ctx context.Context, req work.DispatchRequest) (work.DispatchRequest, bool) {
@@ -28,7 +28,7 @@ func (d *workRunDispatcher) PrepareDispatch(ctx context.Context, req work.Dispat
 			return req, false
 		}
 		if req.Recovery {
-			if journal.GoalId == "" || journal.Status != "running" || journal.HumanResumeId == "" || journal.StepStates[journal.FailedStep].Status != "waiting" {
+			if journal.GoalId == "" || journal.Status != "running" || journal.HumanResumeId == "" || !humanResumeReceiptReady(journal) {
 				return req, true
 			}
 			req.HumanResumeId = journal.HumanResumeId
@@ -43,7 +43,7 @@ func (d *workRunDispatcher) PrepareDispatch(ctx context.Context, req work.Dispat
 		if journal.CancelRequested || journal.Status != "running" || req.HumanResumeId != journal.HumanResumeId || journal.GoalId == "" || !workRerunServable(req, journal) {
 			return req, false
 		}
-		if !journal.HasRunningStep && journal.StepStates[journal.FailedStep].Status == "waiting" {
+		if !journal.HasRunningStep && humanResumeReceiptReady(journal) {
 			return req, true
 		}
 		timer := time.NewTimer(25 * time.Millisecond)
@@ -54,4 +54,19 @@ func (d *workRunDispatcher) PrepareDispatch(ctx context.Context, req work.Dispat
 		case <-timer.C:
 		}
 	}
+}
+
+func humanResumeReceiptReady(journal *automations.RunJournal) bool {
+	if journal.StepStates[journal.FailedStep].Status == "waiting" {
+		return true
+	}
+	// Failure feedback leaves a failed receipt, not a suspended invocation.
+	// Retry authorizes the target's next version. Once that version has started
+	// or failed, this answer must not admit it again as another fresh attempt.
+	rerun := journal.Rerun
+	if rerun == nil || rerun.Reason != automations.RerunReasonRerun || rerun.RequestId == "" {
+		return false
+	}
+	step := journal.StepStates[rerun.StepKey]
+	return step.Status == "failed" && rerun.Versions[rerun.StepKey] > max(step.Attempt, step.Version)
 }

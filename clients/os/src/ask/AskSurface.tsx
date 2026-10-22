@@ -26,6 +26,7 @@ import { AskWorkQueue } from "./AskWorkQueue";
 import { AskActivityLog } from "./AskActivityLog";
 import { AskConversations } from "./AskConversations";
 import { AskMessage } from "./AskMessage";
+import { FileDownloadLink } from "../items/FileDownloadLink";
 import type { AskTransport } from "./askController";
 import { CHECKING_ASK, type AskAvailability } from "./useAskReadiness";
 import { useReducedMotion, useVoice } from "./useVoice";
@@ -376,7 +377,7 @@ export function AskSurface({
               {completion ? <p className="os-ask-result-context">{turn.workTitle || turn.prompt}</p> : routeReply(turn) ? <p className="os-ask-route-reply">{routeReply(turn)}</p> : null}
               {turn.answer ? <AskMessage text={turn.answer} trailing={!turn.approvalId && (!completion || !turn.acknowledgement) && !isConversationalWait(turn) && (turn.background || turn.acknowledgement || turn.state === "queued" || turn.state === "waiting") && turn.runId && onOpenWork ? <AskWorkLink title={turn.workTitle || turn.prompt} state={workState} onOpen={() => onOpenWork(turn.runId, state.selectedId ?? undefined)} /> : undefined} /> : null}
               {turn.question && !completion ? <AskQuestion key={turn.question.id} question={turn.question} onAnswer={answer => conversation.answerQuestion(turn.question!, answer)} /> : null}
-              {onOpenFile ? turn.activity.filter(event => event.kind === "artifact" && event.phase === "completed" && typeof event.arguments?.fileId === "string").map(event => <button key={event.id} type="button" className="os-ask-retry" onClick={() => onOpenFile(event.arguments!.fileId as string)}>Open {event.name || "file"}</button>) : null}
+              {turn.activity.filter(event => event.kind === "artifact" && event.phase === "completed" && typeof event.arguments?.fileId === "string").map(event => <span key={event.id} className="os-ask-file-actions"><FileDownloadLink fileId={event.arguments!.fileId as string} name={event.name || "file"} />{onOpenFile ? <> · <button type="button" className="os-ask-retry" onClick={() => onOpenFile(event.arguments!.fileId as string)}>Open in Files</button></> : null}</span>)}
               {turn.state === "streaming" || isConversationalWait(turn) ? <AskWait activity={turn.activity} startedAt={turn.startedAt} hasText={Boolean(turn.answer)} /> : null}
               {turn.error ? <div className="os-ask-error"><p role="alert">{askErrorSummary(turn.error)}</p>{askErrorSummary(turn.error) !== turn.error ? <details><summary>Details</summary><p>{turn.error}</p></details> : null}{!busy ? <button type="button" className="os-ask-retry" onClick={() => { void editFailedTurn(turn); }}>{turn.approvalId && turn.advisor ? "Edit and ask another agent" : "Edit and try again"}</button> : null}{onOpenFleet && askFailure(turn.error).fleet ? <button type="button" className="os-ask-retry" onClick={onOpenFleet}>Open Fleet</button> : null}</div> : null}
             </div></div> : null}

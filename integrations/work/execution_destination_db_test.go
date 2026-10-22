@@ -19,8 +19,42 @@ func TestExecutionDestinationDBAcrossReplicas(t *testing.T) {
 	}{
 		{"ExecutionDestinationDB_AnotherReplicaRequiresAndReadsTheDecision", testExecutionDestinationDB_AnotherReplicaRequiresAndReadsTheDecision},
 		{"ExecutionDestinationDBWorkbenchRequestParksAndReadsSiblingDecision", testExecutionDestinationDBWorkbenchRequestParksAndReadsSiblingDecision},
+		{"AppsAutoRetainsComputerToolBoundary", testAppsAutoRetainsComputerToolBoundary},
 	} {
 		t.Run(tc.name, func(t *testing.T) { tc.run(t, first, second) })
+	}
+}
+
+func testAppsAutoRetainsComputerToolBoundary(t *testing.T, first, second actsDB) {
+	a, b := freshActsDBPair(t, first, second)
+	b.owner = a.owner
+	for _, tc := range []struct {
+		name, source, destination, by string
+		allow                         bool
+	}{
+		{"owner selected Apps and Auto", "route:apps", "auto", a.owner, true},
+		{"owner selected Apps and implicit Auto", "route:apps", "", a.owner, true},
+		{"Workbench remains a boundary", "route:apps", "workbench", a.owner, false},
+		{"Auto route grants no app destination", "", "auto", a.owner, false},
+		{"another person's choice grants nothing", "route:apps", "auto", "stranger", false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			run := a.openRun(t, map[string]any{"routing": map[string]any{"source": tc.source, "destination": tc.destination, "by": tc.by}})
+			ctx := actorCtx(a.owner)
+			if err := memql.CheckAppExecutionDestination(ctx, b.eng, run); (err == nil) != tc.allow {
+				t.Fatalf("app admission = %v, want allowed %v", err, tc.allow)
+			}
+			if err := memql.CheckExecutionDestination(ctx, b.eng, run, "computer"); err == nil {
+				t.Fatal("app route granted native computer tools")
+			}
+			if err := memql.CheckAppExecutionDestination(actorCtx("stranger"), b.eng, run); err == nil {
+				t.Fatal("another person borrowed app consent")
+			}
+			a.write(t, "updateWorkRun", map[string]any{"runId": run, "status": "cancelled"})
+			if err := memql.CheckAppExecutionDestination(ctx, b.eng, run); err == nil {
+				t.Fatal("cancelled work opened an app")
+			}
+		})
 	}
 }
 

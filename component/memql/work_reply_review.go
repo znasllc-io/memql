@@ -34,17 +34,18 @@ func (e *MemQLEngine) workReviewReplyBuiltin(ctx context.Context, args map[strin
 		return nil, fmt.Errorf("reply review run is unavailable")
 	}
 	remaining := replyReviewMaxBytes
-	checkpoints, err := e.workRows(ctx, "workSourceCheckpointsForOwnerRun", run.RunId)
+	checkpoints, archiveOmitted, err := e.workReplySourceReceipts(ctx, run.RunId)
 	if err != nil {
 		return nil, fmt.Errorf("reply review sources: %w", err)
 	}
+	recovered, recoveryOmitted := workRecoveredSources(checkpoints, &remaining)
 	current, omitted := e.workCheckpointSources(ctx, checkpoints, run.RunId, &remaining)
 	sources := make([]any, 0, len(current))
 	for _, source := range current {
 		sources = append(sources, source)
 	}
 	limitations := []string{}
-	if omitted {
+	if omitted || archiveOmitted || recoveryOmitted {
 		limitations = append(limitations, "Some current tool receipts are unavailable or exceed the preview budget; their omitted contents are not verified.")
 	}
 	input, _ := runs[0]["input"].(map[string]any)
@@ -84,7 +85,7 @@ func (e *MemQLEngine) workReviewReplyBuiltin(ctx context.Context, args map[strin
 	}
 	// A greeting or self-contained composition has no retrieved evidence to
 	// audit and spends no extra model call. Failed reads above never skip.
-	if len(sources) == 0 && len(limitations) == 0 {
+	if len(sources) == 0 && len(recovered) == 0 && len(limitations) == 0 {
 		return reviewedReplyRows(draft, false)
 	}
 	call, err := parser.RenderCall("workGoalForOwner", map[string]any{"goalId": run.GoalId})
@@ -104,7 +105,7 @@ func (e *MemQLEngine) workReviewReplyBuiltin(ctx context.Context, args map[strin
 		return nil, fmt.Errorf("reply review requires a bounded recorded request")
 	}
 	now := time.Now()
-	evidence, err := json.Marshal(map[string]any{"recordedSources": sources, "limitations": limitations, "clock": workSourceClock(sources, now), "priorUserRequests": reviewPriorRequests(conversation["messages"])})
+	evidence, err := json.Marshal(map[string]any{"currentRunId": BareShortId(run.RunId), "recordedSources": sources, "recoveredSources": recovered, "limitations": limitations, "clock": workSourceClock(sources, now), "priorUserRequests": reviewPriorRequests(conversation["messages"])})
 	if err != nil {
 		return nil, err
 	}
@@ -138,6 +139,34 @@ func (e *MemQLEngine) workReviewReplyBuiltin(ctx context.Context, args map[strin
 		return nil, err
 	}
 	return []memorynodes.MemoryNode{{ID: "work-reviewed-reply", Payload: raw}}, nil
+}
+
+// Page enough current receipts to retain source reads that precede file checks.
+// Both the archive scan and the eventual model preview remain bounded. All
+// reads use owner-authorized queries on the finishing replica.
+func (e *MemQLEngine) workReplySourceReceipts(ctx context.Context, runID string) ([]map[string]any, bool, error) {
+	call, err := parser.RenderCall("workDelegatedSourcesForOwnerRun", map[string]any{"runId": runID})
+	if err != nil {
+		return nil, false, err
+	}
+	rows := []map[string]any{}
+	cursor := ""
+	for range 4 {
+		result, err := e.Execute(ContextWithCursor(ctx, cursor), "query "+call)
+		if err != nil {
+			return nil, false, err
+		}
+		rows = append(rows, MaterializeRows(result.OutputPayload())...)
+		cursor = ""
+		if meta := result.GetMeta(); meta != nil {
+			cursor = meta.Cursor
+		}
+		if cursor == "" {
+			break
+		}
+	}
+	checkpoints, err := e.workRows(ctx, "workSourceCheckpointsForOwnerRun", runID)
+	return append(rows, checkpoints...), cursor != "", err
 }
 
 // Prior requests resolve follow-up references, never establish external facts.

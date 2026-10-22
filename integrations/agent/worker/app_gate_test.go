@@ -72,6 +72,10 @@ func (s *gateStore) CheckExecutionDestination(context.Context, string, string) e
 	return s.destinationErr
 }
 
+func (s *gateStore) CheckAppExecutionDestination(context.Context, string) error {
+	return s.destinationErr
+}
+
 func (s *gateStore) UserPreferences(context.Context, string) (Preferences, error) {
 	return s.prefs, s.prefsErr
 }

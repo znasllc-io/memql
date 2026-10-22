@@ -108,6 +108,7 @@ export interface MachineRow {
   workbenchSharing?: MachineSharing;
   workbenchSharingActivity?: Record<string, unknown> | null;
   ownerFeatures?: MachineOwnerFeatures;
+  appRouting?: Record<string, unknown>;
   /** Under `people`: the users it is lent to, in the spelling stored and in
    *  stored order. EMPTY under the other two modes whatever the row holds --
    *  a list that is not in force is residue, not a share (design G10). */
@@ -387,6 +388,7 @@ export function machineFromRow(raw: Row): MachineRow {
     workbenchSharing: sharingFrom(row["workbenchSharing"], false),
     workbenchSharingActivity: objectAt(objectAt(row["sharingActivity"])?.["workbench"]),
     ownerFeatures: ownerFeaturesFrom(row["ownerFeatures"]),
+    appRouting: row["appRouting"] && typeof row["appRouting"] === "object" ? row["appRouting"] as Record<string, unknown> : undefined,
     sharedUserIds: sharing.userIds,
     sharedGroupIds: sharing.groupIds,
     pausedUserIds: subjectIdsFrom(objectAt(row["sharing"])?.["pausedUserIds"]),

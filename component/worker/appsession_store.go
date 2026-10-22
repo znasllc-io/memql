@@ -7,8 +7,11 @@ import (
 	"strings"
 	"time"
 
+	"github.com/znasllc-io/memql/core/common"
+
 	"github.com/znasllc-io/memql/component/auth"
 	langparser "github.com/znasllc-io/memql/component/language/parser"
+	memqlengine "github.com/znasllc-io/memql/component/memql"
 	"github.com/znasllc-io/memql/core/num"
 )
 
@@ -32,6 +35,7 @@ const (
 
 // AppSessionRow is the persistence projection of v1:worker:appSession.
 type AppSessionRow struct {
+	ToolScope        *common.DelegatedTools
 	ID               string
 	OwnerUserId      string
 	WorkerId         string
@@ -155,6 +159,17 @@ func (s *EngineStore) CreateAppSession(ctx context.Context, row AppSessionRow) e
 		"credentialRef":    row.CredentialRef,
 		"startedAt":        row.StartedAt.UTC().Format(time.RFC3339Nano),
 	}
+	if row.ToolScope != nil {
+		raw, err := json.Marshal(row.ToolScope)
+		if err != nil {
+			return fmt.Errorf("worker: encode tool scope: %w", err)
+		}
+		var scope map[string]any
+		if err := json.Unmarshal(raw, &scope); err != nil {
+			return err
+		}
+		args["toolScope"] = scope
+	}
 	if !row.CredentialExpiresAt.IsZero() {
 		args["credentialExpiresAt"] = row.CredentialExpiresAt.UTC().Format(time.RFC3339Nano)
 	}
@@ -229,6 +244,7 @@ func (s *EngineStore) EndAppSession(ctx context.Context, row AppSessionRow) erro
 		"producedArtifactIds": stringsOrEmpty(row.ProducedArtifactIds),
 		"appSessionRef":       row.AppSessionRef,
 		"errorMessage":        row.ErrorMessage,
+		"quotaRefused":        row.Status == AppSessionStatusFailed && memqlengine.IsAppQuotaRefusal(row.ErrorMessage),
 		"cancelReason":        row.CancelReason,
 		"endedAt":             row.EndedAt.UTC().Format(time.RFC3339Nano),
 	}

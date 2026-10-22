@@ -1367,6 +1367,11 @@ func TestServerOnlyParsedSetMatchesTheTree(t *testing.T) {
 		{Path: "worker/mutations.memql", Name: "createAppSession"}:         true,
 		{Path: "worker/mutations.memql", Name: "recordAppSessionProgress"}: true,
 		{Path: "worker/mutations.memql", Name: "endAppSession"}:            true,
+		// Both admit the owner, so owner scoping cannot enforce their write
+		// protocol. Settings require validated weights/mode and an expected
+		// revision; selection history requires the selector's fenced decision.
+		{Path: "worker/mutations.memql", Name: "setWorkerAppRouting"}:      true,
+		{Path: "worker/mutations.memql", Name: "recordWorkerAppSelection"}: true,
 		// epic memql#5103, the model-pull trio. Same shape as the three
 		// above, and the same reason caller-scoping is no help: the caller
 		// IS the owner of their own machine, so a self-scoped filter admits

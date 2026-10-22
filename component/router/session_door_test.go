@@ -93,10 +93,18 @@ func toolRequest() ResolveRequest {
 		Level:    airoute.LevelStrong,
 		Modality: airoute.ModalityTools,
 		UserId:   "alice",
+		AgentId:  "agent1",
 		RunId:    "v1:work:run:r1",
 		StepId:   "s1",
 		Needs:    airoute.Needs{Tools: true, MinContextTokens: 8000},
 	}
+}
+
+func toolRequestContext(req ResolveRequest) context.Context {
+	ctx := common.ContextWithRun(context.Background(), common.RunContext{
+		RunId: req.RunId, StepKey: req.StepId, OwnerUserId: req.UserId,
+	})
+	return memql.WithActingAgentId(memql.WithActingAgentRole(ctx, "assistant"), req.AgentId)
 }
 
 // Issue memql#5392's first acceptance, in its own words: a tool-needing
@@ -105,7 +113,9 @@ func toolRequest() ResolveRequest {
 func TestToolNeedingCallOnAnAppDoorYieldsASessionWinner(t *testing.T) {
 	r, cloud, delegate := sessionRouter(t, []memql.AppDoor{openApp("claude-code")})
 
-	client, resolved, err := r.resolveWithTools(context.Background(), toolRequest())
+	req := toolRequest()
+	ctx := toolRequestContext(req)
+	client, resolved, err := r.resolveWithTools(ctx, req)
 	if err != nil {
 		t.Fatalf("resolveWithTools: %v", err)
 	}
@@ -130,8 +140,18 @@ func TestToolNeedingCallOnAnAppDoorYieldsASessionWinner(t *testing.T) {
 		}
 	}
 
-	// And the call itself goes to the app, not to the vendor.
-	res, err := client.CallChatWithTools(context.Background(),
+	// A resolved request alone cannot authorize tools. The actual call must
+	// retain the original owned run and acting agent context.
+	if _, err := client.CallChatWithTools(context.Background(),
+		[]common.ChatMessage{{Role: "user", Content: "ship it"}},
+		[]common.ToolDefinition{{Name: "workbenchHost"}}); err == nil {
+		t.Fatal("delegated tools accepted a call without its original context")
+	}
+	if delegate.runs != 0 || cloud.calls != 0 {
+		t.Fatal("missing tool context reached an app or a paid fallback")
+	}
+	// And the authorized call itself goes to the app, not to the vendor.
+	res, err := client.CallChatWithTools(ctx,
 		[]common.ChatMessage{{Role: "user", Content: "ship it"}},
 		[]common.ToolDefinition{{Name: "workbenchHost"}})
 	if err != nil {
@@ -146,6 +166,9 @@ func TestToolNeedingCallOnAnAppDoorYieldsASessionWinner(t *testing.T) {
 	if delegate.got.StepId != "s1" {
 		t.Fatalf("the handover must carry the step, got %+v", delegate.got)
 	}
+	if scope := delegate.got.ToolScope; scope == nil || scope.AgentID != req.AgentId || scope.Run.RunId != req.RunId || scope.Run.OwnerUserId != req.UserId || len(scope.Tools) != 1 || scope.Tools[0].Name != "workbenchHost" {
+		t.Fatalf("the handover lost its authorized tool scope: %+v", scope)
+	}
 	if cloud.calls != 0 {
 		t.Fatalf("the federation hop must stay untouched while an app door is open, got %d", cloud.calls)
 	}
@@ -159,16 +182,18 @@ func TestStreamingToolCallOnAnAppDoorAlsoYieldsASessionWinner(t *testing.T) {
 	r, cloud, delegate := sessionRouter(t, []memql.AppDoor{openApp("claude-code")})
 	req := toolRequest()
 	req.Modality = airoute.ModalityStreamingTools
+	ctx := toolRequestContext(req)
 
-	client, resolved, err := r.resolveStreamWithTools(context.Background(), req)
+	client, resolved, err := r.resolveStreamWithTools(ctx, req)
 	if err != nil {
 		t.Fatalf("resolveStreamWithTools: %v", err)
 	}
 	if resolved.Decision.Door != airoute.DoorSession {
 		t.Fatalf("Door = %q, want %q", resolved.Decision.Door, airoute.DoorSession)
 	}
-	ch, err := client.CallChatStreamWithTools(context.Background(),
-		[]common.ChatMessage{{Role: "user", Content: "ship it"}}, nil)
+	ch, err := client.CallChatStreamWithTools(ctx,
+		[]common.ChatMessage{{Role: "user", Content: "ship it"}},
+		[]common.ToolDefinition{{Name: "workbenchHost"}})
 	if err != nil {
 		t.Fatalf("CallChatStreamWithTools: %v", err)
 	}

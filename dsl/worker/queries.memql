@@ -637,3 +637,27 @@ query activity firstMachineActivity {
   paginate 1
   shape workerActivityFull
 }
+
+/// Recent owner-scoped observations for automatic app selection.
+@actor
+query appSession appRoutingEvidence {
+  filter row => row.ownerUserId == actor.userId
+  sort "row.createdAt", "desc"
+  paginate 200
+  shape workerAppRoutingEvidence
+}
+
+/// Latest availability-changing receipt on this owner's machine, independent of
+/// the rolling usage window. Unrelated failures do not erase an exhausted quota.
+@actor
+@cache(0)
+query appSession appAvailabilityEvidence {
+  args {
+    workerId string!
+    app string!
+  }
+  filter row => row.ownerUserId == actor.userId && row.workerId == args.workerId && row.app == args.app && (row.quotaRefused == true || row.status == "ended")
+  sort "endedAt", "desc"
+  paginate 1
+  shape workerAppRoutingEvidence
+}

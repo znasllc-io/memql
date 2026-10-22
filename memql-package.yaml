@@ -104,6 +104,7 @@ pipeline:
       - integrations/email
       - integrations/sitepreview
       - integrations/work
+      - integrations/workbench
       - examples/referencepack
       - packs
       - test/inboundhop
@@ -393,6 +394,9 @@ pipeline:
         # ci.yml os-checks. Network setup may retry; tests run once.
         - name: os-checks
           placement: cluster
+          # The full UI suite can exceed the default 20-minute deadline on
+          # shared runners; retain time for its typecheck and production build.
+          timeout: 30m
           artifacts: [clients/os/dist]
           when: { bucket: os }
           run: |

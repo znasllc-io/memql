@@ -925,6 +925,50 @@ QueryClient.prototype.allWorkspaces = function (this: QueryClient, args: AllWork
   return this.executeNamed("allWorkspaces", buildAllWorkspaces(args), opts);
 };
 
+/** Latest availability-changing receipt on this owner's machine, independent of the rolling usage window. Unrelated failures do not erase an exhausted quota. */
+// Bound concept: v1:worker:appSession (machine-readable: BoundConcepts["appAvailabilityEvidence"] in generated_concepts.ts).
+export interface AppAvailabilityEvidenceArgs {
+  workerId: string;
+  app: string;
+}
+
+export function buildAppAvailabilityEvidence(args: AppAvailabilityEvidenceArgs): string {
+  const parts: string[] = [];
+  parts.push("workerId: " + renderMemQLValue(args.workerId));
+  parts.push("app: " + renderMemQLValue(args.app));
+  return "query appAvailabilityEvidence(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    appAvailabilityEvidence(args: AppAvailabilityEvidenceArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.appAvailabilityEvidence = function (this: QueryClient, args: AppAvailabilityEvidenceArgs = {} as AppAvailabilityEvidenceArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("appAvailabilityEvidence", buildAppAvailabilityEvidence(args), opts);
+};
+
+/** Recent owner-scoped observations for automatic app selection. */
+// Bound concept: v1:worker:appSession (machine-readable: BoundConcepts["appRoutingEvidence"] in generated_concepts.ts).
+export interface AppRoutingEvidenceArgs {
+}
+
+export function buildAppRoutingEvidence(args: AppRoutingEvidenceArgs): string {
+  void args;
+  return "query appRoutingEvidence()";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    appRoutingEvidence(args?: AppRoutingEvidenceArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.appRoutingEvidence = function (this: QueryClient, args: AppRoutingEvidenceArgs = {} as AppRoutingEvidenceArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("appRoutingEvidence", buildAppRoutingEvidence(args), opts);
+};
+
 /** appSessionById wraps the query named "appSessionById". */
 // Bound concept: v1:worker:appSession (machine-readable: BoundConcepts["appSessionById"] in generated_concepts.ts).
 export interface AppSessionByIdArgs {
@@ -12777,6 +12821,28 @@ QueryClient.prototype.workContinuationForOwnerRun = function (this: QueryClient,
   return this.executeNamed("workContinuationForOwnerRun", buildWorkContinuationForOwnerRun(args), opts);
 };
 
+/** Executed app/MCP receipts are source evidence, never resumable agent state. */
+// Bound concept: v1:work:observation (machine-readable: BoundConcepts["workDelegatedSourcesForOwnerRun"] in generated_concepts.ts).
+export interface WorkDelegatedSourcesForOwnerRunArgs {
+  runId: string;
+}
+
+export function buildWorkDelegatedSourcesForOwnerRun(args: WorkDelegatedSourcesForOwnerRunArgs): string {
+  const parts: string[] = [];
+  parts.push("runId: " + renderMemQLValue(args.runId));
+  return "query workDelegatedSourcesForOwnerRun(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    workDelegatedSourcesForOwnerRun(args: WorkDelegatedSourcesForOwnerRunArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.workDelegatedSourcesForOwnerRun = function (this: QueryClient, args: WorkDelegatedSourcesForOwnerRunArgs = {} as WorkDelegatedSourcesForOwnerRunArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("workDelegatedSourcesForOwnerRun", buildWorkDelegatedSourcesForOwnerRun(args), opts);
+};
+
 /** The DESCRIPTION GUIDANCE a goal shape has accumulated (epic memql#5414, design D23): the caller's own dislikes whose run served this goal signature, newest first, each carrying the axes and the reason the person gave. It is read only when a MODEL is about to be used for that goal again -- an agent turn of a live run, compile's triage and design calls, the app a learned procedure hands the goal back to -- and never by a replay, a fork's shared prefix or a construct-served goal, because a replay reads rows and text is not a row it can act on. Owned: guidance mined from somebody else's dislikes would steer a person's goal by another person's taste. Bounded at 20, the most recent, because the reader keeps five. */
 // Bound concept: v1:work:observation (machine-readable: BoundConcepts["workDescriptionGuidance"] in generated_concepts.ts).
 export interface WorkDescriptionGuidanceArgs {
@@ -13423,6 +13489,26 @@ declare module "./query.js" {
 
 QueryClient.prototype.workStepsForOwnerRun = function (this: QueryClient, args: WorkStepsForOwnerRunArgs = {} as WorkStepsForOwnerRunArgs, opts?: QueryCallOptions): Promise<Result> {
   return this.executeNamed("workStepsForOwnerRun", buildWorkStepsForOwnerRun(args), opts);
+};
+
+/** Page recorded tool exchanges for safe projection, including exact receipts that exceed the short source-context preview. Never expose these raw rows. */
+// Bound concept: v1:work:observation (machine-readable: BoundConcepts["workToolSourcesForOwnerRun"] in generated_concepts.ts).
+export interface WorkToolSourcesForOwnerRunArgs {
+}
+
+export function buildWorkToolSourcesForOwnerRun(args: WorkToolSourcesForOwnerRunArgs): string {
+  void args;
+  return "query workToolSourcesForOwnerRun()";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    workToolSourcesForOwnerRun(args?: WorkToolSourcesForOwnerRunArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.workToolSourcesForOwnerRun = function (this: QueryClient, args: WorkToolSourcesForOwnerRunArgs = {} as WorkToolSourcesForOwnerRunArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("workToolSourcesForOwnerRun", buildWorkToolSourcesForOwnerRun(args), opts);
 };
 
 /** workTrainingEvidenceById wraps the query named "workTrainingEvidenceById". */

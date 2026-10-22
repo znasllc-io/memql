@@ -16,7 +16,8 @@ it("keeps both supported apps visible with all facts and no disclosures", () => 
  expect(within(screen.getByRole("region", { name: "Claude Code" })).getByText("Not installed")).toBeTruthy();
  const codex = within(screen.getByRole("region", { name: "Codex" }));
  expect(codex.getByText("Ready")).toBeTruthy(); expect(codex.getByText("Active")).toBeTruthy(); expect(codex.getByText("Allowed and signed in")).toBeTruthy();
- expect(acts(codex)).toEqual([]);
+ expect(acts(codex)).toEqual([codex.getByRole("button", { name: "Retry Codex availability" })]);
+ expect(acts(codex)[0]!.hasAttribute("disabled")).toBe(false);
 });
 it("reads as a status page with no copy, and offers the allow command for an app that needs it", () => {
  h.connection = fakeConnection(); render(withSession(<MachineApps machine={machine({ apps: [{ id: "codex", signedIn: true, allowed: true, subscription: "present", version: "2.1.0" }, { id: "claude-code", signedIn: true, allowed: false }] })} now={now} />, { userId: "me" }));
@@ -63,6 +64,7 @@ it("keeps reported app facts visible without offering setup when apps are disabl
  const codex = within(screen.getByRole("region", { name: "Codex" }));
  expect(codex.getByText("Active")).toBeTruthy();
  expect(codex.queryByText("Ready")).toBeNull();
- expect(acts(screen)).toEqual([]);
+ expect(acts(codex)).toEqual([codex.getByRole("button", { name: "Retry Codex availability" })]);
+ expect(acts(codex)[0]!.hasAttribute("disabled")).toBe(true);
  expect(c.query.createGoal).not.toHaveBeenCalled();
 });

@@ -1,4 +1,4 @@
-//go:build bff || agent || workbench
+//go:build bff || agent || workbench || mcp
 
 package app
 
