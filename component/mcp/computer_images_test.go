@@ -21,6 +21,14 @@ type screenshotEngine struct {
 
 func TestComputerScreenshotPresentationBoundaries(t *testing.T) {
 	raw, _ := screenshotFixture(t)
+	failedEnvelope, err := json.Marshal(map[string]any{"content": []map[string]any{{"type": "text", "text": raw}}, "isError": true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	mixedEnvelope, err := json.Marshal(map[string]any{"content": []map[string]any{{"type": "text", "text": raw}, {"type": "text", "text": "another observation"}}})
+	if err != nil {
+		t.Fatal(err)
+	}
 	for _, tc := range []struct {
 		name, action, source string
 	}{
@@ -31,6 +39,8 @@ func TestComputerScreenshotPresentationBoundaries(t *testing.T) {
 		{"workerComputer", "screenshot", strings.Replace(raw, "worker-call:test", "document:test", 1)},
 		{"workerComputer", "screenshot", `{"content":[{"type":"image","data":"already-presented","mimeType":"image/png"}],"isError":false}`},
 		{"workerComputer", "screenshot", "not JSON"},
+		{"workerComputer", "screenshot", string(failedEnvelope)},
+		{"workerComputer", "screenshot", string(mixedEnvelope)},
 	} {
 		_, receipt := presentExecutedToolResult(tc.name, map[string]any{"action": tc.action}, tc.source)
 		if receipt != tc.source {
@@ -133,34 +143,48 @@ func screenshotFixture(t *testing.T) (string, string) {
 }
 
 func TestComputerScreenshotDeliveredAsImageAndRecordedExactly(t *testing.T) {
-	for _, delegated := range []bool{false, true} {
-		t.Run(map[bool]string{false: "ordinary", true: "delegated"}[delegated], func(t *testing.T) {
-			raw, encoded := screenshotFixture(t)
-			fixture := delegatedFixture()
-			fixture.reg.tools = append(fixture.reg.tools, tool("workerComputer", []string{"assistant", "owner"}))
-			fixture.row["toolScope"].(map[string]any)["tools"] = []any{map[string]any{"name": "workerComputer"}}
-			eng := &screenshotEngine{delegatedEngine: fixture, raw: raw}
-			session := ""
-			if delegated {
-				session = "s"
-			}
-			result := callMCPTool(asPerson("owner"), eng, "owner", TierInline, session, "workerComputer", map[string]any{"action": "screenshot"})
-			serialized, _ := json.Marshal(result)
-			var wire struct {
-				Content []struct{ Type, Text, Data, MimeType string }
-				IsError bool
-			}
-			if err := json.Unmarshal(serialized, &wire); err != nil {
-				t.Fatal(err)
-			}
-			if wire.IsError || len(wire.Content) != 2 || wire.Content[1].Type != "image" || wire.Content[1].Data != encoded || wire.Content[1].MimeType != "image/png" {
-				t.Fatalf("screenshot not delivered as unchanged MCP image: %s", serialized)
-			}
-			if strings.Contains(wire.Content[0].Text, encoded) || !strings.Contains(wire.Content[0].Text, "sha256") || !strings.Contains(wire.Content[0].Text, "test screenshot") {
-				t.Fatal("metadata lost or image bytes duplicated in text")
-			}
-			if delegated && eng.sourceResult != string(serialized) {
-				t.Fatal("journal differs from the image-bearing response delivered to the app")
+	for _, wrapped := range []bool{false, true} {
+		t.Run(map[bool]string{false: "raw", true: "native_text_envelope"}[wrapped], func(t *testing.T) {
+			for _, delegated := range []bool{false, true} {
+				t.Run(map[bool]string{false: "ordinary", true: "delegated"}[delegated], func(t *testing.T) {
+					raw, encoded := screenshotFixture(t)
+					if wrapped {
+						envelope, err := json.Marshal(map[string]any{"content": []map[string]any{{"type": "text", "text": raw}}, "_meta": map[string]any{"receipt": "keep"}})
+						if err != nil {
+							t.Fatal(err)
+						}
+						raw = string(envelope)
+					}
+					fixture := delegatedFixture()
+					fixture.reg.tools = append(fixture.reg.tools, tool("workerComputer", []string{"assistant", "owner"}))
+					fixture.row["toolScope"].(map[string]any)["tools"] = []any{map[string]any{"name": "workerComputer"}}
+					eng := &screenshotEngine{delegatedEngine: fixture, raw: raw}
+					session := ""
+					if delegated {
+						session = "s"
+					}
+					result := callMCPTool(asPerson("owner"), eng, "owner", TierInline, session, "workerComputer", map[string]any{"action": "screenshot"})
+					serialized, _ := json.Marshal(result)
+					var wire struct {
+						Content []struct{ Type, Text, Data, MimeType string }
+						IsError bool
+					}
+					if err := json.Unmarshal(serialized, &wire); err != nil {
+						t.Fatal(err)
+					}
+					if wire.IsError || len(wire.Content) != 2 || wire.Content[1].Type != "image" || wire.Content[1].Data != encoded || wire.Content[1].MimeType != "image/png" {
+						t.Fatalf("screenshot not delivered as unchanged MCP image: %s", serialized)
+					}
+					if strings.Contains(wire.Content[0].Text, encoded) || !strings.Contains(wire.Content[0].Text, "sha256") || !strings.Contains(wire.Content[0].Text, "test screenshot") {
+						t.Fatal("metadata lost or image bytes duplicated in text")
+					}
+					if delegated && eng.sourceResult != string(serialized) {
+						t.Fatal("journal differs from the image-bearing response delivered to the app")
+					}
+					if wrapped && result["_meta"].(map[string]any)["receipt"] != "keep" {
+						t.Fatal("native envelope metadata lost")
+					}
+				})
 			}
 		})
 	}

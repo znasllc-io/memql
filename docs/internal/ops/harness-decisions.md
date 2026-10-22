@@ -133,7 +133,10 @@ interface are separate claims. A visible desktop screenshot of another app is
 not a valid UI baseline. Test coverage in
 `component/mcp/computer_images_test.go` checks both MCP paths, exact delegated
 recording, unchanged bytes, malformed/corrupt/oversized pixels and unaffected
-tool results. Live delivery and task-specific visual verification require
+tool results. Tests exercise both raw worker graphs and the engine's actual
+single-text-block `ToolCallResult` envelope, preserving outer metadata without
+duplicating its original image text. Mixed/already-image content passes through.
+Live delivery and task-specific visual verification require
 their own recorded observations.
 
 ## Evidence and reuse

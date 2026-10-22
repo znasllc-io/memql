@@ -22,15 +22,33 @@ const (
 // permission checks. Apps need MCP image content to see a native screenshot;
 // a base64 field in a text block is not vision. The returned receipt is exactly
 // what we deliver, so delegation recovery cannot claim a different observation.
-// Existing MCP content, other actions and failed captures retain their format.
+// Existing image content, other actions and failed captures retain their format.
 func presentExecutedToolResult(name string, args map[string]any, raw string) (map[string]any, string) {
 	result := toolResultFromJSON(raw)
 	if (name != "workerComputer" && !strings.HasSuffix(name, ".workerComputer")) || args["action"] != "screenshot" {
 		return result, raw
 	}
 	var envelope map[string]any
-	if json.Unmarshal([]byte(raw), &envelope) != nil || envelope["content"] != nil {
+	if json.Unmarshal([]byte(raw), &envelope) != nil || envelope["isError"] == true {
 		return result, raw
+	}
+	metadataBlock := map[string]any{"type": "text", "text": raw}
+	if envelope["content"] != nil {
+		// Native ToolResult serializes the worker graph inside one text block;
+		// older/direct adapters return the graph itself. Unwrap only that exact
+		// text shape. Already multimodal or mixed results are not reinterpreted.
+		blocks, _ := envelope["content"].([]any)
+		if len(blocks) != 1 {
+			return result, raw
+		}
+		block, _ := blocks[0].(map[string]any)
+		text, _ := block["text"].(string)
+		var graph map[string]any
+		if block["type"] != "text" || json.Unmarshal([]byte(text), &graph) != nil {
+			return result, raw
+		}
+		envelope = graph
+		metadataBlock = block
 	}
 	rows, _ := envelope["data"].([]any)
 	if len(rows) != 1 {
@@ -55,22 +73,24 @@ func presentExecutedToolResult(name string, args map[string]any, raw string) (ma
 		// The capture already happened: do not label presentation failure as an
 		// execution error or retry it. Keep the original receipt, including bytes,
 		// and explicitly distinguish unavailable vision from a successful capture.
-		result = map[string]any{"content": []map[string]any{
-			{"type": "text", "text": raw},
+		result["content"] = []map[string]any{
+			metadataBlock,
 			{"type": "text", "text": "Screenshot image delivery unavailable: " + err.Error() + ". Original capture result retained; no capture was retried."},
-		}, "isError": false}
+		}
 	} else {
 		digest := sha256.Sum256(imageBytes)
 		delete(output, "bytesBase64")
 		output["imageContent"] = map[string]any{"index": 1, "mimeType": mime, "sizeBytes": len(imageBytes), "sha256": hex.EncodeToString(digest[:])}
 		metadata, _ := json.Marshal(envelope)
+		metadataBlock["text"] = string(metadata)
 		// Keep pixels once, unchanged. Duplicating base64 in the metadata would
 		// waste app context and can exceed the bounded delegated-source journal.
-		result = map[string]any{"content": []map[string]any{
-			{"type": "text", "text": string(metadata)},
+		result["content"] = []map[string]any{
+			metadataBlock,
 			{"type": "image", "data": encoded, "mimeType": mime},
-		}, "isError": false}
+		}
 	}
+	result["isError"] = false
 	delivered, _ := json.Marshal(result)
 	return result, string(delivered)
 }
