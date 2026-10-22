@@ -1,57 +1,21 @@
 package work
 
-// runceilings.go -- the run's ceilings, read and enforced (memql#5580).
+// Goal admission separates monetary limits from renewable work windows. Every
+// answered model call counts, including local, subscription and replay calls;
+// only metered tokens/cost consume monetary ceilings. Before a new call, fresh
+// owner-scoped receipts reconcile local charges without double-counting peers.
 //
-// component/work.CheckCeilings was written, documented and unit-tested with no
-// production caller: a goal's costCeiling, tokenBudget and maxModelCalls were
-// settable fields nothing read. This is the caller. component/memql holds the
-// SEAM (run_ceilings.go, which says why it is that seam and not the step
-// runner, the journal or the router); this holds the decision, beside the rows
-// it is made from -- exactly as ModelJournal holds work.DecideServe's.
+// Time/model-call windows renew only through ContinueWorkProgress, which verifies
+// new durable evidence or a human answer. No fixed goal-age deadline may cancel
+// productive work. Provider/tool deadlines, cancellation, permission expiry and
+// the stalled-loop detector remain independent. Retry counters belong to the
+// executor; maxEvents is still warned as unenforced, never silently certified.
 //
-// Before each admission, fresh owner-scoped summary pages are folded into an
-// identity-based union with local charges. Warm replicas therefore see calls
-// completed on peers without recharging their own durable receipts. Failed
-// journal writes and unjournaled cache answers remain counted locally. Observed
-// receipts never disappear from spend if a later read omits them.
-//
-// This accounts for completed requests, not distributed in-flight reservations:
-// simultaneous calls can still be admitted before either has finished. A failed
-// journal write also cannot be recovered by a different process. Receipt IDs are
-// bounded per tracked run; exhausting that bound refuses further admission.
-//
-// THE BLAST RADIUS IS GOAL-BACKED RUNS, DELIBERATELY. A run with no goalId on
-// its context inherits no ceilings -- ceilings live on v1:work:goal, and an
-// automation's run has no goal -- so it is admitted with no read at all. That
-// is not a silent pass: there is nothing declared to evaluate. Every automation
-// run in the cluster therefore costs this guard nothing, and the runs that DID
-// declare a ceiling are the only ones that can be refused by one.
-//
-// WHERE IT FAILS CLOSED. A run whose goal is named and whose ceilings cannot
-// be READ is refused, with `unevaluated` as the ceiling name: a limit nobody
-// could read and a limit nobody set are the same number, and only one of them
-// means unbounded on purpose. The seed is retried on the next call, so a
-// transient database blip costs one refused call rather than the run.
-//
-// WHAT IT DOES NOT EVALUATE, AND WHERE THAT GOES. maxRetries and maxEvents
-// are the EXECUTOR's counters -- the run's re-attempts and its published
-// events -- and neither reaches a model call, so passing a zero for them to
-// CheckCeilings would clear them silently on every call; they are cleared from
-// the ceilings this seam checks. maxRetries IS enforced, by the failure path
-// (component/automations' classifyAndAct): every retry, repair and re-plan it
-// orders counts against spent.retries, and past the budget the run asks a
-// person (memql#5664). maxEvents is enforced nowhere, so it alone is WARNED
-// about once per run: an operator who set it is told it is not a limit rather
-// than believing it is.
-//
-// RE-ENTRY: SPEND ACCUMULATES, A NEW RUN STARTS FRESH. A resumed or
-// re-dispatched run is the same v1:work:run id, so admission folds the calls it
-// already made and the second attempt continues the first one's budget -- park,
-// approve, park again is not a way to buy another allowance. A replay or a
-// fork is a DIFFERENT run id with its own (empty) journal and its own
-// ceilings, which is right: it is a different run. The one gap is a modelCall
-// row whose write failed (the journal is best-effort by design), which
-// under-counts by that call across a re-entry and not within a process.
+// A missing goal, unreadable usage or identity overflow fails closed rather than
+// inventing budget. Local unjournaled charges remain counted on this replica;
+// no distributed in-flight reservation is claimed. The receipt set is bounded
+// separately from goal lifetime, and an exhausted set needs accounting recovery,
+// not a claim that the owner's objective was accepted or completed.
 
 import (
 	"context"
@@ -487,10 +451,11 @@ func (c *RunCeilings) Deadline(ctx context.Context, rc common.RunContext) (time.
 	return c.DeclaredDeadline(ctx, rc)
 }
 
-// DeclaredDeadline bounds the entire tool loop by the person's hard limit.
-// Each model call separately passes the current admission estimate. An
-// execution that discovers missing evidence can grow from quick to lookup
-// without inheriting an obsolete quick-response parent deadline.
+// DeclaredDeadline verifies the goal/run binding but imposes no lifetime
+// deadline. A context deadline cannot be renewed by progress after it is made,
+// and used to kill productive tool loops at two hours. Admission checks renewable
+// windows; individual model/tool requests retain their own timeout and idle
+// watchdogs. Cancellation and permission expiry remain independent controls.
 func (c *RunCeilings) DeclaredDeadline(ctx context.Context, rc common.RunContext) (time.Time, error) {
 	if rc.GoalId == "" {
 		return time.Time{}, nil
@@ -500,18 +465,15 @@ func (c *RunCeilings) DeclaredDeadline(ctx context.Context, rc common.RunContext
 	if err != nil || run == nil {
 		return time.Time{}, fmt.Errorf("run deadline unavailable: %v", err)
 	}
+	if memqlengine.BareShortId(rowString(run, "goalId")) != memqlengine.BareShortId(rc.GoalId) {
+		return time.Time{}, fmt.Errorf("run does not belong to the named goal")
+	}
 	goal, err := c.store.goalForOwner(ctx, rc.GoalId)
 	if err != nil || goal == nil {
 		return time.Time{}, fmt.Errorf("goal deadline unavailable: %v", err)
 	}
-	ceilings, err := ceilingsOf(goal)
-	if err != nil {
+	if _, err := ceilingsOf(goal); err != nil {
 		return time.Time{}, err
 	}
-	start, ok := rowTime(run, "startedAt")
-	if !ok {
-		return time.Time{}, fmt.Errorf("run start time unavailable")
-	}
-	credit := max(int64(0), min(int64(rowInt(run, "humanWaitMs")), max(int64(0), c.clock().Sub(start).Milliseconds())))
-	return work.RunDeadline(start.Add(time.Duration(credit)*time.Millisecond), ceilings.WallClockMs)
+	return time.Time{}, nil
 }

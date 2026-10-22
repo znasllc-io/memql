@@ -188,6 +188,16 @@ func NativePlatformFromMap(value any) string {
 	return capabilityDescriptorFromMap(m).NativePlatform()
 }
 
+// DisplayAvailableFromMap is a routing fact, never computer-use permission.
+// Only a valid descriptor for a supported live display supplies the legacy
+// display label; absent, corrupt, headless and unsupported displays stay unknown.
+// Dispatch still verifies the requested action, consent and OS permissions.
+func DisplayAvailableFromMap(value any) bool {
+	m, _ := value.(map[string]any)
+	d := capabilityDescriptorFromMap(m)
+	return d != nil && d.ComputerUseAvailable && (d.DisplayServer == "quartz" || d.DisplayServer == "x11")
+}
+
 // HomeDirectoryFromMap reads machine metadata only from the registered descriptor,
 // never from operator labels. An older worker reports no path, not a guess.
 func HomeDirectoryFromMap(value any) string {

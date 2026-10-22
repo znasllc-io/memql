@@ -21,6 +21,7 @@ shape goal workGoalFull {
   requestFingerprint
   closedAt
   closeReason
+  acceptance
   // The owner's routing choice (the Ask route picker's).
   routing
 }

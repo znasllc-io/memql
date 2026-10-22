@@ -35,6 +35,43 @@ An individual source receipt exceeding 1 MiB records an explicit omission and
 cannot be accepted as a complete continuation. These are refusal boundaries,
 not permission to truncate evidence or silently reconstruct missing state.
 
+Worker output backpressure must not prevent a disconnect from taking effect.
+App chunks and model deltas watch the shared stream's cancellation while waiting
+for buffer space. Delivery and channel closure are serialized, with the terminal
+signal closed first to release a blocked sender. This preserves ordered output
+while connected without letting an old connection prevent replacement.
+Caller cancellation and model idle/operation watchdogs finish the local output
+stream after requesting remote cancellation; a missing remote `End` must not
+leave the parent's drainer waiting forever. The first terminal decision remains
+authoritative if a late `End` arrives. These are invocation boundaries, not goal
+lifetime limits or result acceptance, and local cancellation does not prove the
+remote process stopped or that all artifacts returned.
+
+The regressions in
+[stream cancellation tests](../../../component/worker/stream_cancellation_test.go)
+reproduce open drains after cancellation and a full app buffer ignoring a
+disconnect. They also cover model idle/whole-call watchdogs, model backpressure,
+late completion and concurrent send/finish under the race detector. These tests
+establish the recovery defects independently; they do not prove that every live
+offline report has the same cause.
+
+## Computer capability discovery
+
+The fleet catalog supplies a missing legacy `display=true` routing label from
+a validated worker descriptor reporting computer use on Quartz or X11. This
+lets current workers be discovered by existing display selectors without a
+manual label. Explicit reported or operator labels still win; absent, invalid,
+headless and unsupported descriptors do not infer a display. The projection
+changes no stored registration, ownership, permission or consent. Action-level
+dispatch and worker preflight remain mandatory.
+
+The same projection is used on every replica through
+`component/worker/fleetcatalog/store.go`. The required-database regression
+`TestDisplayDescriptorSuppliesMissingRoutingLabelAcrossReplicas` covers supported
+displays, explicit exclusions and invalid/headless descriptors. A routing-ready
+display does not prove that a screenshot or UI interaction succeeded; those need
+their own execution evidence.
+
 ## Evidence and reuse
 
 | Decision | Reason and resulting path | Implementation |
@@ -79,6 +116,54 @@ deadline preserves the caller's authority and earlier cancellation. Optional
 knowledge search is bounded similarly; required instructions and evidence reads
 must not be converted into optional failures. A failed vector write can reduce
 semantic recall until backfill, but does not remove the exact journal source.
+
+Optional Training similarity retrieval uses a five-second child deadline for
+its query embedding. A timeout of that child records `embedding-timeout` on the
+normal owner-scoped selection receipt and contributes no passages. Caller
+cancellation, ownership/source failures, provider errors and explicit evaluation
+lessons still propagate. This prevents a cold or busy optional inference door
+from spending an entire turn before execution. Coverage includes
+`TestOptionalTrainingVectorBoundsOnlyItsOwnWait` and required-database
+`TestOwnedTrainingReadsReviewedTaughtSourcesAcrossReplicas`, including omission
+readback on another engine. The Training interface is unchanged.
+
+## Progress windows and result acceptance
+
+Time and model-call estimates bound a work window, not a goal's lifetime.
+`integrations/work/progress_continuation.go` renews only after successful new
+receipts or a verified human answer, under the shared run decision lock. The
+old three-automatic/sixteen-total caps and fixed two-hour context deadline are
+removed. Monetary limits, scoped permissions, cancellation, per-operation
+watchdogs and the existing stalled-loop detector remain independent.
+
+Counters never reset on renewal. A human-directed restart opens a new evidence
+epoch and clears only its bounded duplicate cache; receipts older than the epoch
+cannot fund another window. Original evidence remains in the journal. This
+keeps a memory bound from becoming a lifetime limit while preventing an old
+answer or receipt from buying another window on a second replica. The signal is
+completed activity, not certification that the user's objective is achieved.
+
+Execution writers no longer close goals on success, failure or cancellation.
+`workAcceptGoalResults` accepts an exact finished run revision only from its
+owner's interactive request. It serializes with rerun, branch, replay and cancel, refuses newer or
+live results, persists optional feedback and is idempotent for the same decision.
+`cancelGoal` also refuses calls from running agents. A person can accept a useful
+partial result, so acceptance does not require the model's success label.
+Initial plan approval and final result acceptance are separate decisions.
+New executions of a closed goal require the owner's interactive request;
+an agent cannot undo an acceptance by replaying or branching the result.
+`TestGoalAcceptanceDBPreservesOwnerDecisionAcrossReplicas` exercises acceptance,
+refused model reopening, explicit owner continuation and stale acceptance refusal
+through separate engines. Connecting result acceptance to the interface remains
+pending; the endpoint alone is not a verified owner review experience.
+
+Coverage: `TestProgressContinuationsRequireNewWorkBeyondLifetimeCaps`,
+`TestProgressCanRenewAfterDaysWithoutALifetimeLimit`,
+`TestProgressFeedbackEpochDoesNotRecycleOldEvidence`, the required-database
+`TestProgressDBWorkflowAcrossReplicas`, and `TestAcceptGoalResultsRequiresExactHumanReviewedResults`.
+These tests are not a months-long soak. Usage reconciliation still has its
+separate fail-closed receipt tracking bound; it must not be described as
+unbounded in-memory tracking or as owner acceptance.
 
 ## Recovery boundaries and remaining limits
 

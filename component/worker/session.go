@@ -176,6 +176,12 @@ type AppSessionHandle struct {
 
 	chunks chan AppSessionChunk
 	done   chan struct{}
+	// streamDone releases backpressure when the shared worker stream ends.
+	// Its receive loop cannot reach close() while a chunk handler is blocked.
+	streamDone <-chan struct{}
+	// deliveryMu keeps finish from closing chunks during a send. finish closes
+	// done first, so a full buffer cannot hold this lock against shutdown.
+	deliveryMu sync.Mutex
 
 	mu       sync.Mutex
 	outcome  AppSessionOutcome
@@ -299,6 +305,9 @@ func (h *AppSessionHandle) Wait(ctx context.Context) (AppSessionOutcome, error) 
 		return h.outcome, h.endErr
 	case <-ctx.Done():
 		_ = h.Cancel("caller_cancelled")
+		// Cancellation is local evidence that this invocation stopped waiting.
+		// A missing remote End must not leave the parent's output drain open.
+		h.finish(AppSessionOutcome{Error: "caller_cancelled"}, ctx.Err())
 		return AppSessionOutcome{}, ctx.Err()
 	}
 }
@@ -308,6 +317,8 @@ func (h *AppSessionHandle) Wait(ctx context.Context) (AppSessionOutcome, error) 
 // appended: a transcript is a record, and silently interleaving a
 // replayed chunk corrupts it in a way no later reader can detect.
 func (h *AppSessionHandle) deliverChunk(c AppSessionChunk) {
+	h.deliveryMu.Lock()
+	defer h.deliveryMu.Unlock()
 	h.mu.Lock()
 	if h.ended {
 		h.mu.Unlock()
@@ -324,6 +335,7 @@ func (h *AppSessionHandle) deliverChunk(c AppSessionChunk) {
 	select {
 	case h.chunks <- c:
 	case <-h.done:
+	case <-h.streamDone:
 	}
 }
 
@@ -336,7 +348,9 @@ func (h *AppSessionHandle) finish(outcome AppSessionOutcome, err error) {
 		h.endErr = err
 		h.mu.Unlock()
 		close(h.done)
+		h.deliveryMu.Lock()
 		close(h.chunks)
+		h.deliveryMu.Unlock()
 		if h.detach != nil {
 			h.detach()
 		}

@@ -336,6 +336,10 @@ type ModelCallHandle struct {
 
 	deltas chan ModelCallDelta
 	done   chan struct{}
+	// Cancellation must interrupt a full buffer on the shared receive loop.
+	// Paired send/close locking preserves deltas without a send-on-close race.
+	streamDone <-chan struct{}
+	deliveryMu sync.Mutex
 
 	mu       sync.Mutex
 	outcome  ModelCallOutcome
@@ -397,6 +401,8 @@ func (h *ModelCallHandle) Cancel(reason string) error {
 // ceiling. Every giving-up path cancels on the machine first, so a
 // caller walking away never leaves a generation running on somebody's
 // laptop.
+// Every local stop also finishes the output channel; the parent may be
+// waiting for its drainer, and a missing remote End cannot keep it alive.
 func (h *ModelCallHandle) Wait(ctx context.Context) (ModelCallOutcome, error) {
 	if h == nil {
 		return ModelCallOutcome{}, ErrModelCallNotFound
@@ -417,17 +423,21 @@ func (h *ModelCallHandle) Wait(ctx context.Context) (ModelCallOutcome, error) {
 			return h.outcome, h.endErr
 		case <-ctx.Done():
 			_ = h.Cancel("caller_cancelled")
+			h.finish(ModelCallOutcome{FinishReason: ModelFinishCancelled, Error: "caller_cancelled", ErrorCode: "caller_cancelled"}, ctx.Err())
 			return ModelCallOutcome{}, ctx.Err()
 		case now := <-tick.C:
 			if now.After(deadline) {
 				_ = h.Cancel("call_timeout")
-				return ModelCallOutcome{}, fmt.Errorf("worker: model call exceeded its %s ceiling", h.limits.Timeout)
+				err := fmt.Errorf("worker: model call exceeded its %s ceiling", h.limits.Timeout)
+				h.finish(ModelCallOutcome{FinishReason: ModelFinishTimeout, Error: "call_timeout", ErrorCode: "call_timeout"}, err)
+				return ModelCallOutcome{}, err
 			}
 			h.mu.Lock()
 			idleFor := now.Sub(h.lastActivity)
 			h.mu.Unlock()
 			if idleFor > h.limits.IdleTimeout {
 				_ = h.Cancel("idle_timeout")
+				h.finish(ModelCallOutcome{FinishReason: ModelFinishTimeout, Error: "idle_timeout", ErrorCode: "idle_timeout"}, ErrModelCallIdle)
 				return ModelCallOutcome{}, ErrModelCallIdle
 			}
 		}
@@ -458,6 +468,8 @@ func (h *ModelCallHandle) idlePoll() time.Duration {
 // machine demonstrably spoke, and killing a call for silence while its
 // duplicates arrive would be a lie about which failure occurred.
 func (h *ModelCallHandle) deliverDelta(d ModelCallDelta) {
+	h.deliveryMu.Lock()
+	defer h.deliveryMu.Unlock()
 	h.mu.Lock()
 	if h.ended {
 		h.mu.Unlock()
@@ -487,6 +499,7 @@ func (h *ModelCallHandle) deliverDelta(d ModelCallDelta) {
 	select {
 	case h.deltas <- d:
 	case <-h.done:
+	case <-h.streamDone:
 	}
 }
 
@@ -552,7 +565,9 @@ func (h *ModelCallHandle) finish(outcome ModelCallOutcome, err error) {
 		h.endErr = err
 		h.mu.Unlock()
 		close(h.done)
+		h.deliveryMu.Lock()
 		close(h.deltas)
+		h.deliveryMu.Unlock()
 		if h.detach != nil {
 			h.detach()
 		}

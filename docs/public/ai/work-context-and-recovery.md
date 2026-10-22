@@ -495,14 +495,22 @@ recovery attempts retain finite time and resource budgets. A long-lived goal
 must make progress through checkpointed steps and waits; it does not require
 one unbounded model call or an open client connection.
 
-Work can extend an estimate up to three times when successful tool receipts
-show new activity and the original overall limits still allow it. When that
-allowance is spent, ordinary feedback offers **Keep working**, **Stop here**,
-or a change of direction. A continuation preserves the saved execution,
-accumulated usage and extension count across replicas. It never raises the
-original limits. At an overall limit, the results remain saved and the work
-stops. Numeric budget approvals are no longer accepted. See
-[LLM cost control](llm-cost-control.md) for the bounded continuation policy.
+A goal has no fixed lifetime or automatic-extension count. Time and model-call
+estimates are renewable work windows. Successful, previously uncredited tool
+receipts can renew a window; heartbeats, elapsed time, repeated reads and model
+claims cannot. The existing loop detector also pauses repeated stalled work.
+When progress cannot justify renewal, MemQL preserves the work and asks for
+direction. A fresh human answer renews a window on the same goal, preserving
+usage and completed effects. Waiting for the person does not spend active time.
+Spending limits, operation timeouts and access approvals remain separate controls.
+See [LLM cost control](llm-cost-control.md) for the evidence and recovery bounds.
+
+A run finishing is not acceptance of the goal's results. The goal stays open
+until its owner explicitly accepts the reviewed result or chooses to close it.
+The acceptance operation records the exact run revision, person, time and
+optional feedback. It refuses stale results, live runs and agent self-acceptance.
+A person may accept a useful partial result; an execution's success flag cannot
+make that decision for them. Initial plan approval only authorizes execution.
 
 The regression suite exercises parallel tool groups, pending calls, repeated
 context pressure, exact Unicode/source reconstruction, cross-replica reads,

@@ -6,6 +6,7 @@ import (
 	"maps"
 
 	memorynodes "github.com/znasllc-io/memql/component/database/memory-nodes"
+	"github.com/znasllc-io/memql/component/memql"
 	"github.com/znasllc-io/memql/core/common"
 )
 
@@ -177,6 +178,18 @@ type derivation struct {
 // of the package makes -- the value comes off a row this caller already read
 // under their own actor.
 func (i *Integration) deriveRun(ctx context.Context, source map[string]any, d derivation) (string, error) {
+	// Fork/replay admission participates in the same decision as acceptance.
+	// Reload after the gate: the source may have changed while review held it.
+	release, err := i.decisionGate(ctx, "goal-lifecycle-"+memql.BareShortId(rowString(source, "goalId")))
+	if err != nil {
+		return "", err
+	}
+	defer release()
+	ctx = memql.ContextWithFreshRead(ctx)
+	source, err = i.readOwnRun(ctx, rowString(source, "id"))
+	if err != nil {
+		return "", err
+	}
 	owner := rowString(source, "ownerUserId")
 	goalId := rowString(source, "goalId")
 	runId := newRowId(runConcept)
@@ -217,6 +230,9 @@ func (i *Integration) deriveRun(ctx context.Context, source map[string]any, d de
 		// continues the same work, and a replay must ask the questions its
 		// journal answered.
 		Routing: common.RouteChoiceFrom(source["routing"]),
+	}
+	if err := i.reopenGoalForRun(ctx, goalId, owner); err != nil {
+		return "", err
 	}
 	if err := i.store().createRunRow(ownerActor(ctx, owner), seed); err != nil {
 		return "", err
