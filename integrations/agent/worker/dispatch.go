@@ -439,12 +439,21 @@ func (d *Dispatcher) Dispatch(ctx context.Context, req Request) (Result, error) 
 		timeout = workerservice.DispatchTimeoutDefault
 	}
 
+	var busy Result
+	var busyRecord RoutingRecord
 	for idx, cand := range plan.Candidates {
 		record.Attempts = idx + 1
 		record.SelectedBy = selectedBy(req, plan, idx)
 
 		res, outcome := d.attempt(ctx, req, gate.requiredCapability, cand, timeout)
 		if outcome == ForwardRefusedBeforeStart {
+			// Preserve an eligible pipeline machine's capacity refusal while
+			// looking for one that can start now. A later machine may reject the
+			// runtime or repository; that does not make the busy one ineligible.
+			// Only a confirmed no-start result is eligible for this fallback.
+			if req.Purpose == PurposePipeline && res.ErrorCode == "pipeline_capacity_busy" && busy.ErrorCode == "" {
+				busy, busyRecord = res, record
+			}
 			// NOTHING RAN on this machine. That is the whole precondition for
 			// trying another one (design D5): a busy machine and a stream that
 			// went away before the dispatch left this node have both produced
@@ -465,7 +474,14 @@ func (d *Dispatcher) Dispatch(ctx context.Context, req Request) (Result, error) 
 				record.ReroutedFrom = "worker:" + cand.RegistrationId
 				continue
 			}
-			d.recordInvocation(ctx, req, cand.RegistrationId, startedAt, d.clock(), res, res.classifyOutcome(), record)
+			if busy.ErrorCode != "" {
+				// Every candidate refused before start. Return the busy machine's
+				// identity and routing decision so pipeline admission can wait,
+				// retaining the total number of candidates actually attempted.
+				busyRecord.Attempts = record.Attempts
+				res, record = busy, busyRecord
+			}
+			d.recordInvocation(ctx, req, res.WorkerId, startedAt, d.clock(), res, res.classifyOutcome(), record)
 			// This return and the one below carry the MACHINE's words, so they
 			// are where a pipeline step's credentials are masked out of what
 			// the caller is handed (maskPipelineResult). The record is handed
