@@ -20,6 +20,9 @@ func (s *streamingApps) Call(ctx context.Context, req AppCallRequest) (AppCallRe
 }
 
 func TestAppStreamPublishesBeforeCompletionAndCancels(t *testing.T) {
+	// Earlier app tests can exhaust the shared guard; this test asserts
+	// streaming and cancellation, not the process-wide rate ceiling.
+	offTheSharedRateCeiling(t)
 	for _, cancelEarly := range []bool{false, true} {
 		t.Run(map[bool]string{false: "complete", true: "cancel"}[cancelEarly], func(t *testing.T) {
 			released := make(chan struct{})
