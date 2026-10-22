@@ -524,7 +524,10 @@ func (s *session) execute(ctx context.Context) (int, error) {
 		return -1, err
 	}
 
-	tools, err := preflightMCP(ctx, s.manager.opts.HTTPClient, s.start.GetMcpEndpoint(), s.start.GetCredential())
+	var tools []string
+	if !s.start.GetInferenceOnly() {
+		tools, err = preflightMCP(ctx, s.manager.opts.HTTPClient, s.start.GetMcpEndpoint(), s.start.GetCredential())
+	}
 	if err != nil {
 		if cancelled := s.contextFailure(ctx); cancelled != nil {
 			return -1, cancelled
@@ -534,7 +537,7 @@ func (s *session) execute(ctx context.Context) (int, error) {
 	// The MCP configuration first: an app that starts without it reaches
 	// nothing over MCP and reports that as "MemQL's tools are broken".
 	mcp, err := writeMCPConfig(spec.ID, workspace, s.start.GetMcpEndpoint(),
-		s.start.GetCredential(), s.id, s.manager.opts.StateDir, sessionMCPSettings{Tools: tools, DenyPaths: s.denyPaths()})
+		s.start.GetCredential(), s.id, s.manager.opts.StateDir, sessionMCPSettings{Tools: tools, DenyPaths: s.denyPaths(), InferenceOnly: s.start.GetInferenceOnly()})
 	if err != nil {
 		return -1, err
 	}
@@ -859,6 +862,7 @@ func (s *session) runTurns(ctx context.Context, spec apps.Spec, workspace, resum
 	// silent, because an app with no MemQL server configured runs
 	// perfectly well and simply cannot reach a single tool.
 	hspec := harness.Spec{
+		InferenceOnly:  s.start.GetInferenceOnly(),
 		Binary:         spec.Binary,
 		Workspace:      workspace,
 		Env:            s.mcpEnv(),

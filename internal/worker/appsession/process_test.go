@@ -2,9 +2,11 @@ package appsession
 
 import (
 	"io"
+	"runtime"
 	"strings"
 	"sync"
 	"testing"
+	"time"
 )
 
 // TestStreamReader_SplitsOnLines.
@@ -129,5 +131,27 @@ func TestExitCode_PassesTheRealCodeThrough(t *testing.T) {
 	}
 	if got := exitCode(io.ErrUnexpectedEOF); got != -1 {
 		t.Errorf("a non-exit error = %d, want -1 (no exit status)", got)
+	}
+}
+
+func TestTerminateReapsWithoutWaitingForTheGraceDeadline(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("POSIX process fixture")
+	}
+	child, err := startChild(t.TempDir(), []string{"sh", "-c", "sleep 30"}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer child.terminate()
+	started := time.Now()
+	child.terminate() // No caller has invoked Wait yet, as on app-server Close.
+	_ = child.wait()
+	if elapsed := time.Since(started); elapsed > time.Second {
+		t.Fatalf("clean exit waited for shutdown grace: %s", elapsed)
+	}
+	select {
+	case <-child.exited:
+	default:
+		t.Fatal("process was not reaped")
 	}
 }

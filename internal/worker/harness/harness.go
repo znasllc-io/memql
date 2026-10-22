@@ -88,6 +88,8 @@ const (
 	StreamEvent = "event"
 	// StreamText is assistant prose meant for a human to read.
 	StreamText = "text"
+	// StreamAnswer contains only final-answer prose, never commentary or reasoning.
+	StreamAnswer = "answer"
 	// StreamTool is a tool call or its result, as the app reported it.
 	StreamTool = "tool"
 	// StreamStdout is everything the process printed that the protocol
@@ -203,6 +205,8 @@ type TurnResult struct {
 
 // Spec is everything a harness needs to run a session's turns.
 type Spec struct {
+	// InferenceOnly executes a prompt without coding tools or MCP.
+	InferenceOnly bool
 	// Binary is the app's name on PATH.
 	Binary string
 	// Workspace is the absolute directory every process runs in.

@@ -828,6 +828,13 @@ func (h *codexAppServer) ensureThread(ctx context.Context) error {
 		method = codexMethodThreadResume
 		params = map[string]any{"threadId": ref, "cwd": h.spec.Workspace}
 	}
+	if h.spec.InferenceOnly {
+		// The supplied prompt owns the instructions for this single invocation.
+		// Do not inherit the coding-agent personality or workspace discovery.
+		params["baseInstructions"] = "Follow the supplied prompt and return its requested answer."
+		params["developerInstructions"] = ""
+		params["config"] = map[string]any{"features.shell_tool": false, "features.apply_patch_freeform": false, "features.multi_agent": false, "web_search": "disabled"}
+	}
 	h.applyKnobs(params)
 
 	res, err := h.conn.call(ctx, "codex app-server: opening the thread", method, params)
@@ -889,7 +896,12 @@ func (h *codexAppServer) applyKnobs(params map[string]any) {
 		params["model"] = h.knobs.Model
 	}
 	if h.knobs.Effort != "" {
-		params["config"] = map[string]any{"model_reasoning_effort": h.knobs.Effort}
+		config, _ := params["config"].(map[string]any)
+		if config == nil {
+			config = map[string]any{}
+		}
+		config["model_reasoning_effort"] = h.knobs.Effort
+		params["config"] = config
 	}
 }
 
@@ -953,6 +965,9 @@ func (h *codexAppServer) handleNotification(method string, params json.RawMessag
 		}
 		if state != nil {
 			state.noteDelta(n.ItemID)
+			if state.match(n.TurnID) && state.answerDelta(n.ItemID) {
+				h.conn.emit(StreamAnswer, []byte(n.Delta))
+			}
 		}
 		h.conn.emit(StreamText, []byte(n.Delta))
 		return
@@ -966,6 +981,15 @@ func (h *codexAppServer) handleNotification(method string, params json.RawMessag
 			break
 		}
 		kind, id, text, phase := codexReadItem(n.Item)
+		if kind == codexItemAgentMessage && state != nil && state.match(n.TurnID) {
+			state.mu.Lock()
+			state.phases[id] = phase
+			sent := state.answerDeltas[id]
+			state.mu.Unlock()
+			if method == codexNotifyItemCompleted && (phase == codexPhaseFinal || phase == codexPhaseFinalAlt) && !sent {
+				h.conn.emit(StreamAnswer, []byte(text))
+			}
+		}
 		if codexToolItems[kind] {
 			h.conn.emit(StreamTool, n.Item)
 			h.recordItem(method, n.Item)
@@ -1158,8 +1182,10 @@ type codexTurnState struct {
 	// idKnown separates "not told yet" from "told, and it was empty".
 	idKnown bool
 
-	messages []codexMessage
-	deltas   map[string]bool
+	messages     []codexMessage
+	deltas       map[string]bool
+	phases       map[string]string
+	answerDeltas map[string]bool
 
 	usage     Usage
 	lastTotal int64
@@ -1180,7 +1206,7 @@ type codexTurnState struct {
 }
 
 func newCodexTurnState() *codexTurnState {
-	return &codexTurnState{deltas: make(map[string]bool), done: make(chan struct{})}
+	return &codexTurnState{deltas: make(map[string]bool), phases: make(map[string]string), answerDeltas: make(map[string]bool), done: make(chan struct{})}
 }
 
 // match reports whether a notification belongs to this turn.
@@ -1215,6 +1241,17 @@ func (t *codexTurnState) noteDelta(itemID string) {
 	if itemID != "" {
 		t.deltas[itemID] = true
 	}
+}
+
+func (t *codexTurnState) answerDelta(itemID string) bool {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	phase := t.phases[itemID]
+	if phase != codexPhaseFinal && phase != codexPhaseFinalAlt {
+		return false
+	}
+	t.answerDeltas[itemID] = true
+	return true
 }
 
 func (t *codexTurnState) sawDelta(itemID string) bool {
