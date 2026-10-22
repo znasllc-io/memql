@@ -408,6 +408,11 @@ older exchange before a pinned correction cannot block later tool evidence
 from being compacted. All candidates share the same eight-attempt bound; if
 the bounded semantic pass cannot make the context fit, the engine attempts
 exact archival of the remaining completed results without another model call.
+If small calls and previews still overflow the window, it can archive whole
+older completed exchanges, including their arguments. This final storage pass
+uses at most eight attempts, each limited to 4 MiB of exact source; these bytes
+are never sent to a summarizer. It preserves the same protected requests,
+authority and pending exchanges, and labels the replacement preview incomplete.
 If the request still exceeds its budget, it fails and retains the originals.
 
 Semantic summaries are cached by both exact source bytes and request relevance.
