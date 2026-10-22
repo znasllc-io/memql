@@ -693,6 +693,40 @@ func TestSession_ProducedFilesAndTranscriptArePushed(t *testing.T) {
 	if len(end.GetProducedArtifactIds()) != len(names) {
 		t.Errorf("produced_artifact_ids = %d, want %d", len(end.GetProducedArtifactIds()), len(names))
 	}
+	var manifest outputManifest
+	for name, body := range h.library.uploaded() {
+		if strings.HasSuffix(name, "-outputs.json") {
+			if err := json.Unmarshal(body, &manifest); err != nil {
+				t.Fatal(err)
+			}
+		}
+	}
+	if manifest.Version != 1 || manifest.TranscriptID == "" || len(manifest.Files) != 2 || len(manifest.Failures) != 0 {
+		t.Fatalf("incomplete durable retention receipt: %+v", manifest)
+	}
+}
+
+func TestSession_OutputOmissionIsDurableAndPreventsCleanup(t *testing.T) {
+	fakeApp(t, "claude", "i=0; while [ $i -lt 35 ]; do echo evidence > proof-$i.txt; i=$((i+1)); done\n"+quietClaude)
+	h := newRig(t)
+	end := h.start(t, nil)
+	if !strings.Contains(end.GetError(), "not retained") {
+		t.Fatalf("incomplete retention reported success: %+v", end)
+	}
+	var manifest outputManifest
+	for name, body := range h.library.uploaded() {
+		if strings.HasSuffix(name, "-outputs.json") {
+			if err := json.Unmarshal(body, &manifest); err != nil {
+				t.Fatal(err)
+			}
+		}
+	}
+	if len(manifest.Files) != maxPushFiles || len(manifest.Omitted) != 3 || len(manifest.Failures) == 0 {
+		t.Fatalf("omission disappeared from durable receipt: %+v", manifest)
+	}
+	if _, err := os.Stat(filepath.Join(h.workspace, "proof-9.txt")); err != nil {
+		t.Fatalf("unretained evidence removed: %v", err)
+	}
 }
 
 // TestSession_AFileHoldingTheBearerIsNotPushed: an app that copies its MCP

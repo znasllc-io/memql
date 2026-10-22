@@ -6,10 +6,99 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
 )
+
+func TestCollectProduced_RepositoryCheckoutIsNotEvidence(t *testing.T) {
+	ws := t.TempDir()
+	before := snapshotWorkspace(ws)
+	repo := filepath.Join(ws, "checkout")
+	if err := os.Mkdir(repo, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	git := func(args ...string) {
+		t.Helper()
+		cmd := exec.Command("git", append([]string{"-C", repo}, args...)...)
+		if out, err := cmd.CombinedOutput(); err != nil {
+			t.Fatalf("git %v: %s: %v", args, out, err)
+		}
+	}
+	git("init", "-q")
+	for n := range 40 {
+		if err := os.WriteFile(filepath.Join(repo, fmt.Sprintf("source-%02d.go", n)), []byte("package example\n"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	git("add", ".")
+	git("-c", "user.name=Test", "-c", "user.email=test@example.invalid", "commit", "-qm", "baseline")
+	if err := os.WriteFile(filepath.Join(repo, "source-00.go"), []byte("package changed\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(ws, "verification.md"), []byte("Observed behavior and test results"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	files, skipped := collectProduced(ws, before)
+	names := map[string]bool{}
+	for _, f := range files {
+		names[filepath.ToSlash(f.rel)] = true
+	}
+	if len(names) != 2 || !names["checkout/source-00.go"] || !names["verification.md"] {
+		t.Fatalf("retained %v; want changed source and verification, never the checkout", names)
+	}
+	if len(skipped) != 0 {
+		t.Fatalf("checkout consumed artifact budget: %v", skipped)
+	}
+	// Committing a file must not erase the evidence that the app authored it.
+	git("add", ".")
+	git("-c", "user.name=Test", "-c", "user.email=test@example.invalid", "commit", "-qm", "change")
+	files, _ = collectProduced(ws, before, map[string]bool{filepath.Join(repo, "source-00.go"): true})
+	if len(files) != 2 {
+		t.Fatalf("committed work was lost: %+v", files)
+	}
+}
+
+func TestCollectProduced_TotalByteBudget(t *testing.T) {
+	ws := t.TempDir()
+	before := snapshotWorkspace(ws)
+	for n := range 3 {
+		f, err := os.Create(filepath.Join(ws, fmt.Sprintf("large-%d.bin", n)))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := f.Truncate(maxPushFileBytes); err != nil {
+			t.Fatal(err)
+		}
+		if err := f.Close(); err != nil {
+			t.Fatal(err)
+		}
+	}
+	files, omitted := collectProduced(ws, before)
+	if len(files) != 2 || len(omitted) != 1 || !strings.Contains(omitted[0], "total cap") {
+		t.Fatalf("files=%d omitted=%v; want aggregate budget with explicit omission", len(files), omitted)
+	}
+}
+
+func TestCollectProduced_WorktreeGitFileNeverLeaves(t *testing.T) {
+	ws := t.TempDir()
+	before := snapshotWorkspace(ws)
+	repo := t.TempDir()
+	git := func(args ...string) {
+		t.Helper()
+		if out, err := exec.Command("git", append([]string{"-C", repo}, args...)...).CombinedOutput(); err != nil {
+			t.Fatalf("git: %s: %v", out, err)
+		}
+	}
+	git("init", "-q")
+	git("-c", "user.name=Test", "-c", "user.email=test@example.invalid", "commit", "--allow-empty", "-qm", "baseline")
+	git("worktree", "add", "--detach", filepath.Join(ws, "tree"), "HEAD")
+	files, omitted := collectProduced(ws, before)
+	if len(files) != 0 || len(omitted) != 0 {
+		t.Fatalf("worktree scaffolding leaked: %+v %v", files, omitted)
+	}
+}
 
 func TestLibraryBaseURL(t *testing.T) {
 	cases := map[string]string{
@@ -158,7 +247,9 @@ func TestCollectProduced_OnlyWhatTheRunChanged(t *testing.T) {
 	}
 	write("untouched.txt", "before")
 	write("node_modules/huge.js", "dependency")
-	write(".git/config", "vcs")
+	if out, err := exec.Command("git", "-C", ws, "init", "-q").CombinedOutput(); err != nil {
+		t.Fatalf("git init: %s: %v", out, err)
+	}
 	before := snapshotWorkspace(ws)
 
 	write("new.txt", "produced")

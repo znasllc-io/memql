@@ -435,6 +435,9 @@ type session struct {
 	// before is the workspace as it stood when the run started, so the
 	// push at the end carries what the run PRODUCED.
 	before map[string]fileStamp
+	// Files explicitly written by recorded app tools survive the distinction
+	// between a new checkout and work product, including after a commit.
+	written map[string]bool
 
 	// turnMu guards the follow-up queue and the latch that closes it.
 	turnMu sync.Mutex

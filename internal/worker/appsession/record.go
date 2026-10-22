@@ -97,6 +97,20 @@ func (k sessionSink) Record(a harness.Action) {
 // policy, and sends it.
 func (s *session) recordAction(a harness.Action) {
 	s.contentPolicy().fill(a.Contents)
+	s.mu.Lock()
+	if s.written == nil {
+		s.written = map[string]bool{}
+	}
+	for _, c := range a.Contents {
+		if c.Op == harness.ContentWrite {
+			path := c.Path
+			if !filepath.IsAbs(path) {
+				path = filepath.Join(s.workspace, path)
+			}
+			s.written[filepath.Clean(path)] = true
+		}
+	}
+	s.mu.Unlock()
 	body, err := encodeAction(a, maxActionBytes)
 	if err != nil {
 		// Not sent at all. The action seq is dense, so the hole this leaves

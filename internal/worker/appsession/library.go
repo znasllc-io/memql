@@ -50,6 +50,9 @@ const (
 
 	// maxPushFiles bounds how many produced files one session pushes.
 	maxPushFiles = 32
+	// Bound aggregate uploads too: 32 individually legal files need not be
+	// two GiB of evidence. Omitted candidates remain in the retention manifest.
+	maxPushTotalBytes int64 = 128 << 20
 )
 
 // pushExcludedDirs never travel back as artifacts. These are caches and
@@ -372,16 +375,34 @@ type producedFile struct {
 // Bounded on purpose, and the caller LOGS what was dropped. A silent
 // truncation reads downstream as "this is everything the run produced",
 // which is the one thing a record must never be wrong about.
-func collectProduced(workspace string, before map[string]fileStamp) ([]producedFile, []string) {
+func collectProduced(workspace string, before map[string]fileStamp, writes ...map[string]bool) ([]producedFile, []string) {
 	var out []producedFile
 	var skipped []string
+	inputs := map[string]bool{}
+	explicit := map[string]bool{}
+	for _, paths := range writes {
+		for path := range paths {
+			explicit[path] = true
+		}
+	}
 
 	_ = filepath.WalkDir(workspace, func(path string, d os.DirEntry, err error) error {
 		if err != nil {
+			skipped = append(skipped, fmt.Sprintf("%s (cannot inspect output: %v)", path, err))
 			return nil
 		}
 		name := d.Name()
 		if d.IsDir() {
+			if _, err := os.Lstat(filepath.Join(path, ".git")); err == nil {
+				files, err := repositoryInputs(path)
+				if err != nil {
+					skipped = append(skipped, fmt.Sprintf("%s (cannot distinguish checkout inputs from outputs: %v)", path, err))
+					return filepath.SkipDir
+				}
+				for file := range files {
+					inputs[file] = true
+				}
+			}
 			if path == workspace {
 				return nil
 			}
@@ -394,7 +415,7 @@ func collectProduced(workspace string, before map[string]fileStamp) ([]producedF
 			}
 			return nil
 		}
-		if name == ".mcp.json" || strings.HasSuffix(name, backupSuffix) {
+		if name == ".git" || name == ".mcp.json" || strings.HasSuffix(name, backupSuffix) {
 			return nil
 		}
 		info, statErr := d.Info()
@@ -406,6 +427,11 @@ func collectProduced(workspace string, before map[string]fileStamp) ([]producedF
 			return nil
 		}
 		if prior, existed := before[rel]; existed && prior.matches(info) {
+			return nil
+		}
+		// A checkout or branch switch changes timestamps without authoring
+		// evidence. Only dirty files or recorded writes override repository input.
+		if inputs[path] && !explicit[path] {
 			return nil
 		}
 		if info.Size() > maxPushFileBytes {
@@ -420,13 +446,19 @@ func collectProduced(workspace string, before map[string]fileStamp) ([]producedF
 	// Deterministic order, so two runs that produced the same files
 	// report their ids in the same order.
 	sort.Slice(out, func(i, j int) bool { return out[i].rel < out[j].rel })
-	if len(out) > maxPushFiles {
-		for _, f := range out[maxPushFiles:] {
+	var selected []producedFile
+	var bytes int64
+	for _, f := range out {
+		if len(selected) >= maxPushFiles {
 			skipped = append(skipped, fmt.Sprintf("%s (over the %d-file cap)", f.rel, maxPushFiles))
+		} else if f.size > maxPushTotalBytes-bytes {
+			skipped = append(skipped, fmt.Sprintf("%s (%d bytes, over the %d-byte total cap)", f.rel, f.size, maxPushTotalBytes))
+		} else {
+			selected = append(selected, f)
+			bytes += f.size
 		}
-		out = out[:maxPushFiles]
 	}
-	return out, skipped
+	return selected, skipped
 }
 
 // artifactName flattens a workspace-relative path into one path segment.

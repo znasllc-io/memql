@@ -704,8 +704,12 @@ Files the run created or changed in the workspace are pushed to the Library,
 plus the full transcript. Bounded, and the bounds are announced rather than
 applied silently:
 
-- 64 MiB per file, 32 files per session — anything dropped is named in the log
-  **and** in a chunk, so the transcript says what is missing;
+- 64 MiB per file, 32 files and 128 MiB total per session. Candidates omitted
+  by these limits are named in the transcript and an `outputs.json` artifact;
+- a repository acquired during the session is an input. Unchanged tracked
+  files do not enter the upload budget. Changed files and explicitly recorded
+  writes are retained, including recorded writes committed before the session
+  ends. Git worktree pointer files are scaffolding, not output;
 - `.git`, `node_modules`, `vendor`, `target`, `dist`, `build`, `.venv`,
   `__pycache__` and friends are never pushed — reproducible, enormous, and
   they would bury the actual output;
@@ -716,6 +720,14 @@ applied silently:
 - nested paths are flattened (`api/schema.json` → `api__schema.json`) because
   the Library keys on one path segment, and two `schema.json` files from
   different directories would otherwise arrive indistinguishable.
+
+The output manifest links retained files to their workspace-relative paths,
+sizes and Library artifact IDs, and links the transcript. It records omissions
+and transfer failures. An incomplete export reports an error and preserves the
+workspace for recovery; a transcript whose upload failed is also preserved.
+This is separate from the action journal, which retains file revisions as the
+app records them. Clean checkouts and dependency caches remain reusable local
+resources rather than Library copies of a repository.
 
 ---
 

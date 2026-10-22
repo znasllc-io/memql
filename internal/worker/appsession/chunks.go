@@ -2,6 +2,7 @@ package appsession
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -252,7 +253,7 @@ func (s *session) reportedUsage() *memqlv1.AppSessionUsage {
 // returns the artifact ids.
 func (s *session) pushOutputs(ctx context.Context) ([]string, error) {
 	s.mu.Lock()
-	library, transcript, before, workspace := s.library, s.transcript, s.before, s.workspace
+	library, transcript, before, workspace, written := s.library, s.transcript, s.before, s.workspace, s.written
 	s.transcript = nil
 	s.mu.Unlock()
 
@@ -274,12 +275,17 @@ func (s *session) pushOutputs(ctx context.Context) ([]string, error) {
 
 	var ids []string
 	var failures []string
+	manifest := outputManifest{Version: 1, SessionID: s.id}
 
 	// The RESOLVED workspace, not the start's: a start that named none ran
 	// in a directory this machine chose, and what the app made there is
 	// output all the same.
 	if workspace != "" && before != nil {
-		produced, skipped := collectProduced(workspace, before)
+		produced, skipped := collectProduced(workspace, before, written)
+		manifest.Omitted = append(manifest.Omitted, skipped...)
+		if len(skipped) > 0 {
+			failures = append(failures, "some output candidates were not retained; see the output manifest")
+		}
 		for _, note := range skipped {
 			// Never a silent truncation: a bounded list that reads as
 			// complete is worse than a shorter one that says so.
@@ -301,6 +307,7 @@ func (s *session) pushOutputs(ctx context.Context) ([]string, error) {
 				note := f.rel + " (it holds this session's credential)"
 				s.logger.Warn("app session output not pushed", "file", note)
 				_ = s.emitChunk(StreamStderr, []byte("[memql] not pushed to the Library: "+note+"\n"))
+				manifest.Omitted = append(manifest.Omitted, note)
 				continue
 			}
 			id, err := library.Push(pushCtx, f.path, artifactName(f.rel))
@@ -309,21 +316,34 @@ func (s *session) pushOutputs(ctx context.Context) ([]string, error) {
 				continue
 			}
 			ids = append(ids, id)
+			manifest.Files = append(manifest.Files, outputArtifact{Path: filepath.ToSlash(f.rel), Bytes: f.size, ArtifactID: id})
 		}
 	}
 
 	if transcriptPath != "" {
-		body, err := os.ReadFile(transcriptPath)
+		name := "app-session-" + sanitizeLedgerName(s.id) + "-transcript.log"
+		if id, pushErr := library.Push(pushCtx, transcriptPath, name); pushErr != nil {
+			failures = append(failures, pushErr.Error())
+		} else {
+			ids = append(ids, id)
+			manifest.TranscriptID = id
+			_ = os.Remove(transcriptPath)
+			_ = os.Remove(filepath.Dir(transcriptPath))
+		}
+	}
+	if len(manifest.Files) > 0 || len(manifest.Omitted) > 0 || len(failures) > 0 {
+		manifest.Failures = append([]string(nil), failures...)
+		body, err := json.Marshal(manifest)
 		if err == nil {
-			name := "app-session-" + sanitizeLedgerName(s.id) + "-transcript.log"
-			if id, pushErr := library.PushBytes(pushCtx, body, name); pushErr != nil {
-				failures = append(failures, pushErr.Error())
-			} else {
+			var id string
+			id, err = library.PushBytes(pushCtx, s.redact.apply(body), "app-session-"+sanitizeLedgerName(s.id)+"-outputs.json")
+			if err == nil {
 				ids = append(ids, id)
 			}
 		}
-		_ = os.Remove(transcriptPath)
-		_ = os.Remove(filepath.Dir(transcriptPath))
+		if err != nil {
+			failures = append(failures, "output manifest: "+err.Error())
+		}
 	}
 
 	if len(failures) > 0 {
@@ -331,6 +351,22 @@ func (s *session) pushOutputs(ctx context.Context) ([]string, error) {
 			strings.Join(failures, "; "))
 	}
 	return ids, nil
+}
+
+// The artifact list alone cannot establish completeness. Keep the selection
+// and transfer receipt in MemQL beside the journal, including explicit gaps.
+type outputManifest struct {
+	Version      int              `json:"version"`
+	SessionID    string           `json:"sessionId"`
+	TranscriptID string           `json:"transcriptArtifactId,omitempty"`
+	Files        []outputArtifact `json:"files,omitempty"`
+	Omitted      []string         `json:"omitted,omitempty"`
+	Failures     []string         `json:"failures,omitempty"`
+}
+type outputArtifact struct {
+	Path       string `json:"path"`
+	Bytes      int64  `json:"bytes"`
+	ArtifactID string `json:"artifactId"`
 }
 
 // sendEnd closes the session on the wire, exactly once.
