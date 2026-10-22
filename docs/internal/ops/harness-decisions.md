@@ -31,10 +31,24 @@ paths and one task's acceptance criteria must not become routing rules.
 `PrepareDelegatedFeedback` starts with the native context actually delegated,
 including compacted memories and archive references. It appends only that app
 session's observed exchanges in execution order and an unexecuted pending call.
-It scans at most 16 pages of 16 receipts, with a 4 MiB exchange-content bound.
+It scans at most 16 pages of 16 receipts, with a 4 MiB retained exchange-content bound.
 An individual source receipt exceeding 1 MiB records an explicit omission and
 cannot be accepted as a complete continuation. These are refusal boundaries,
 not permission to truncate evidence or silently reconstruct missing state.
+
+Before counting retained bytes, a result larger than 64 KiB becomes an exact
+reference to its already durable public source receipt. The call arguments,
+call/result IDs and ordering stay intact; the reference carries the original
+result's byte length, SHA256 and authorized `recallWorkHistory` arguments.
+This avoids duplicating screenshot/document bytes in another archive and does
+not invoke a summarizer. A missing source identity still refuses suspension.
+The original per-receipt bound, scan bound and retained-content bound remain;
+large call arguments cannot evade them. References make no semantic or success
+claim and do not create Library files. Explicit artifact retention and image
+inspection are separate steps. `TestDelegatedFeedbackReferencesLargeDurableResultsAcrossReplicas`
+reproduces seven large results exceeding the old continuation bound and verifies
+bounded resumption, unchanged originals, paired calls and recall on another
+replica. The existing exact-feedback test covers unchanged small receipts.
 
 `TestNativeContinuationDoesNotReinjectConversationSourcePreview` reproduces the
 approval-resume duplication with a large source inventory and verifies that the

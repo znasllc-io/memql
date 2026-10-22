@@ -2,6 +2,7 @@ package memql
 
 import (
 	"context"
+	"crypto/sha256"
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
@@ -130,6 +131,10 @@ func (e *MemQLEngine) PrepareDelegatedFeedback(ctx context.Context, sessionID st
 			if err != nil || len(pair) != 2 || pair[0].Role != "assistant" || len(pair[0].ToolCalls) != 1 || pair[1].Role != "tool" || pair[1].ToolCallId != pair[0].ToolCalls[0].ID {
 				return fmt.Errorf("%w: delegated source receipt is invalid", ErrWorkCheckpointRequired)
 			}
+			pair, err = delegatedFeedbackReference(run.RunId, stringArg(row, "id"), pair)
+			if err != nil {
+				return err
+			}
 			bytes += len(pair[0].ToolCalls[0].Arguments) + len(pair[1].Content)
 			if bytes > 4*1024*1024 {
 				return fmt.Errorf("%w: delegated continuation exceeds its byte bound", ErrWorkCheckpointRequired)
@@ -165,6 +170,29 @@ func (e *MemQLEngine) PrepareDelegatedFeedback(ctx context.Context, sessionID st
 		common.ChatMessage{Role: "assistant", ToolCalls: []common.ToolCall{{ID: callID, Name: tool, Arguments: string(raw)}}},
 		common.ChatMessage{Role: "tool", Name: tool, ToolCallId: callID, Content: common.UnexecutedWorkToolResult})
 	return e.SaveWorkContinuation(ctx, messages)
+}
+
+// Screenshots and document reads are already stored in the owner's public
+// source journal. Copying each large result into a suspension can exhaust its
+// 4 MiB bound after a handful of captures, making an ordinary approval
+// impossible. Reference that exact durable receipt before counting retained
+// bytes; do not duplicate it in another archive or invoke a model to summarize
+// it. Small receipts and all call arguments remain verbatim. The scan, original
+// per-receipt and retained-content bounds still refuse incomplete histories.
+func delegatedFeedbackReference(runID, observationID string, pair []common.ChatMessage) ([]common.ChatMessage, error) {
+	if len(pair[1].Content) <= 64*1024 {
+		return pair, nil
+	}
+	if BareShortId(observationID) == "" || BareShortId(runID) == "" {
+		return nil, fmt.Errorf("%w: durable delegated source reference is unavailable", ErrWorkCheckpointRequired)
+	}
+	args, err := json.Marshal(map[string]any{"sourceRunId": BareShortId(runID), "checkpoint": BareShortId(observationID), "messageIndex": 1, "maxChars": 1600})
+	if err != nil {
+		return nil, err
+	}
+	result := pair[1]
+	result.Content = fmt.Sprintf("[Archived tool result (delegated source)]\nExact public result retained in this run's journal (%d bytes; SHA256 %x). This reference is not a summary or proof of successful execution. Use recallWorkHistory with %s and continue with nextOffset for the original result. No operation needs to be replayed to recover it.", len(pair[1].Content), sha256.Sum256([]byte(pair[1].Content)), args)
+	return []common.ChatMessage{pair[0], result}, nil
 }
 
 // DelegatedWorkHumanWait reads the native control plane after an app returns.
