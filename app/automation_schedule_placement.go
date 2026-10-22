@@ -43,7 +43,7 @@ func schedulePlacements(definitions []*automations.Automation) ([]placedSchedule
 	return out, nil
 }
 
-func (a *App) scheduledAutomationGate(general func() bool, definitions []*automations.Automation) (func(string) bool, error) {
+func (a *App) scheduledAutomationGate(leader *automations.CronLeader, definitions []*automations.Automation) (func(string) bool, error) {
 	placements, err := schedulePlacements(definitions)
 	if err != nil {
 		return nil, err
@@ -54,11 +54,9 @@ func (a *App) scheduledAutomationGate(general func() bool, definitions []*automa
 		if nodeType != string(p.nodeType) {
 			continue
 		}
-		leader := automations.NewScopedCronLeader(p.scope, a.directDBGetter(), a.Logger)
-		a.Dependencies = append(a.Dependencies, leader)
-		leases[p.automation] = leader.IsLeader
+		leases[p.automation] = leader.ScopedGate(p.scope)
 	}
-	return scheduledAutomationGateForNode(nodeType, general, leases, placements), nil
+	return scheduledAutomationGateForNode(nodeType, leader.IsLeader, leases, placements), nil
 }
 
 func scheduledAutomationGateForNode(nodeType string, general func() bool, leases map[string]func() bool, placements []placedSchedule) func(string) bool {

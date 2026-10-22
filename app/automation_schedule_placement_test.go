@@ -1,8 +1,8 @@
 package app
 
 import (
+	"github.com/uptrace/bun"
 	"github.com/znasllc-io/memql/component/automations"
-	"github.com/znasllc-io/memql/component/envregistry"
 	"sync"
 	"testing"
 )
@@ -103,22 +103,13 @@ func TestOnlyTheirNodeTypesCreateThePlacedLeases(t *testing.T) {
 		t.Run(nodeType, func(t *testing.T) {
 			t.Setenv("MEMQL_NODE_TYPE", nodeType)
 			a := &App{}
-			gate, err := a.scheduledAutomationGate(func() bool { return true }, placementDefinitions(t))
+			leader := automations.NewCronLeader(func() *bun.DB { return nil }, nil)
+			gate, err := a.scheduledAutomationGate(leader, placementDefinitions(t))
 			if err != nil {
 				t.Fatal(err)
 			}
-			expectedNodeType := nodeType
-			if expectedNodeType == "" {
-				expectedNodeType = envregistry.DefaultNodeType
-			}
-			expected := 0
-			for _, p := range placementsForTest(t) {
-				if string(p.nodeType) == expectedNodeType {
-					expected++
-				}
-			}
-			if len(a.Dependencies) != expected {
-				t.Fatalf("%s registered %d scoped leases, want %d", nodeType, len(a.Dependencies), expected)
+			if len(a.Dependencies) != 0 {
+				t.Fatalf("%s added %d connection-owning dependencies for placed schedules", nodeType, len(a.Dependencies))
 			}
 			// Nothing has started the leaders, so no lease is held anywhere.
 			if gate(packagePollAutomation) {
