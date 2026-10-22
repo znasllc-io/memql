@@ -65,10 +65,16 @@ func workTurnHistory(ctx context.Context, engine interface {
 		}
 	}
 	// The planner deliberately removes conversation from the section prompt:
-	// this replica rehydrates it here. Carry the public source projection too,
-	// otherwise the agent sees prior prose but loses the actual file/read receipts.
+	// this replica rehydrates it here. Fresh executions need the public source
+	// projection as well as prior prose. A native continuation instead restores
+	// its required, content-addressed checkpoint before reasoning; missing or
+	// changed checkpoints fail closed in RestoreWorkContinuation. Reattaching the
+	// original inventory to each new approval would append it verbatim to that
+	// saved history on every resume, crowding out newer evidence and repeatedly
+	// paying to summarize the same sources. Keep the new decision exact below;
+	// the checkpoint and owner-scoped journal remain the evidence source.
 	sourceReference := ""
-	if sources, ok := conversation["sourceContext"].(map[string]any); ok && len(sources) > 0 {
+	if sources, ok := conversation["sourceContext"].(map[string]any); ok && len(sources) > 0 && run.Continuation == nil {
 		raw, err := json.Marshal(sources)
 		if err != nil {
 			return nil, fmt.Errorf("work context: encoding recorded sources: %w", err)
