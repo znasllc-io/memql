@@ -35,6 +35,23 @@ An individual source receipt exceeding 1 MiB records an explicit omission and
 cannot be accepted as a complete continuation. These are refusal boundaries,
 not permission to truncate evidence or silently reconstruct missing state.
 
+## Computer capability discovery
+
+The fleet catalog supplies a missing legacy `display=true` routing label from
+a validated worker descriptor reporting computer use on Quartz or X11. This
+lets current workers be discovered by existing display selectors without a
+manual label. Explicit reported or operator labels still win; absent, invalid,
+headless and unsupported descriptors do not infer a display. The projection
+changes no stored registration, ownership, permission or consent. Action-level
+dispatch and worker preflight remain mandatory.
+
+The same projection is used on every replica through
+`component/worker/fleetcatalog/store.go`. The required-database regression
+`TestDisplayDescriptorSuppliesMissingRoutingLabelAcrossReplicas` covers supported
+displays, explicit exclusions and invalid/headless descriptors. A routing-ready
+display does not prove that a screenshot or UI interaction succeeded; those need
+their own execution evidence.
+
 ## Evidence and reuse
 
 | Decision | Reason and resulting path | Implementation |
