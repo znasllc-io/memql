@@ -102,6 +102,11 @@ it's `internal`.
 
 ## 4. Lifecycle
 
+Harness changes also follow the repository's [decision-documentation rule](../CLAUDE.md#harness-changes-document-decisions-and-paths-required).
+Keep branch rationale in code and the connected workflow in its maintained
+reference or runbook, in the same change as the behavior. Distinguish verified
+behavior from intended behavior and retain relevant limits and regression links.
+
 - A design doc that ships flips to `status: historical`, gets a one-line
   banner (`> Historical: shipped in X.Y.Z; kept for rationale.`), and
   moves to `docs/internal/design/`. It is not deleted — the rationale is

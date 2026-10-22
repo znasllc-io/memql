@@ -60,14 +60,22 @@ func TestWorkSourceHistoryPagesOlderLargeReceiptsAcrossReplicasWithoutPrivateCon
 		{Role: "assistant", ToolCalls: []common.ToolCall{{ID: "wrapped-history", Name: "executeCapability", Arguments: `{"name":"work.workSourceContext","arguments":{}}`}}},
 		{Role: "tool", Name: "executeCapability", ToolCallId: "wrapped-history", Content: "NESTED-RETRIEVAL"},
 	})
-	for n := range 20 {
+	for n := range 40 {
 		call := fmt.Sprintf("recent-%d", n)
-		writeReceipt("v1:work:observation:"+uniqueSuffix(fmt.Sprintf("recent-%d", n)), prior, access.UserId, []common.ChatMessage{{Role: "assistant", ToolCalls: []common.ToolCall{{ID: call, Name: "workbenchHost"}}}, {Role: "tool", Name: "workbenchHost", ToolCallId: call, Content: "Recent capacity refusal"}})
+		operation, arguments, content := "workbenchHost", "{}", "Recent capacity refusal"
+		if n >= 20 {
+			operation, arguments, content = "executeCapability", `{"name":"work.workSourceContext","arguments":{}}`, "DERIVED-PREVIEW"
+		}
+		writeReceipt("v1:work:observation:"+uniqueSuffix(fmt.Sprintf("recent-%d", n)), prior, access.UserId, []common.ChatMessage{{Role: "assistant", ToolCalls: []common.ToolCall{{ID: call, Name: operation, Arguments: arguments}}}, {Role: "tool", Name: operation, ToolCallId: call, Content: content}})
 	}
 	preview, err := b.workSourceContextBuiltin(ctx, map[string]any{"conversationId": conversation, "turnId": "current"}, 0)
 	require.NoError(t, err)
 	require.NotContains(t, string(preview[0].Payload), "EXACT-ORIGINAL", "the original is outside the short preview")
 	require.Contains(t, string(preview[0].Payload), `"sourceRunId":"`+BareShortId(prior)+`"`, "retrieval must remain discoverable even when original sources are omitted")
+	directory, err := b.recallWorkHistoryBuiltin(ctx, map[string]any{"sourceRunId": prior}, 0)
+	require.NoError(t, err)
+	require.Contains(t, string(directory[0].Payload), `"tool":"workbenchHost"`, "directory browsing skips recent receipts with no original sources")
+	require.NotContains(t, string(directory[0].Payload), `"messageCount":0`)
 	var foundCheckpoint string
 	foundIndex, pages := 0, 0
 	for cursor := ""; ; {
@@ -92,7 +100,7 @@ func TestWorkSourceHistoryPagesOlderLargeReceiptsAcrossReplicasWithoutPrivateCon
 		require.NotEqual(t, cursor, page.Cursor)
 		cursor = page.Cursor
 	}
-	require.Greater(t, pages, 4, "must search beyond the former 16-receipt preview ceiling")
+	require.Equal(t, 2, pages, "search scans at most eight four-receipt pages per call, preserving a cursor across the bound")
 	require.Equal(t, BareShortId(originalID), foundCheckpoint)
 	require.Equal(t, 3, foundIndex, "excluding the newer wrapper preserves the original receipt's previous projected index")
 	var recovered strings.Builder
