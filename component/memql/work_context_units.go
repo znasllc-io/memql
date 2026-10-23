@@ -64,7 +64,9 @@ func workContextHumanBounds(messages []common.ChatMessage) (first, last int) {
 
 // WorkContextTarget is a proactive history-compaction preference, not a model
 // window. A document and its tool contracts can exceed that preference before
-// any history exists. Preserve those pinned inputs plus bounded working room;
+// any history exists. A prepared current call is likewise indivisible, even
+// when human approval arrives after it. Preserve those required inputs plus
+// bounded working room; completed result bodies still use exact archival.
 // the router still enforces the complete request and output reserve against the
 // actual provider window. Do not use this floor for recovery from a real overflow.
 func WorkContextTarget(messages []common.ChatMessage, tools []common.ToolDefinition, preferred int) int {
@@ -72,9 +74,29 @@ func WorkContextTarget(messages []common.ChatMessage, tools []common.ToolDefinit
 		return preferred
 	}
 	first, last := workContextHumanBounds(messages)
+	freshStart, _ := workContextLatestToolExchange(messages)
+	requiredCall := make(map[int]bool)
+	for _, unit := range workContextUnits(messages) {
+		call := messages[unit.start]
+		if call.Role != "assistant" || len(call.ToolCalls) == 0 || (unit.complete && unit.start != freshStart) {
+			continue
+		}
+		// The current call's exact arguments cannot be compacted or recreated
+		// from prose. Count its envelope, plus any already returned results
+		// while the protocol unit is incomplete. A complete result can instead
+		// be referenced from the journal, so its body must not inflate this
+		// floor. Older consumed calls remain ordinary compactable history.
+		end := unit.start + 1
+		if !unit.complete {
+			end = unit.end
+		}
+		for i := unit.start; i < end; i++ {
+			requiredCall[i] = true
+		}
+	}
 	pinned := make([]common.ChatMessage, 0, 4)
 	for i, m := range messages {
-		if i == first || i == last || m.Role == "system" || m.Role == "developer" || common.IsWorkInstruction(m) {
+		if i == first || i == last || m.Role == "system" || m.Role == "developer" || common.IsWorkInstruction(m) || requiredCall[i] {
 			pinned = append(pinned, m)
 		}
 	}

@@ -336,6 +336,14 @@ will choose the same path, and it grants no access to another goal's records.
 
 Owned work uses the following layers:
 
+The proactive history budget counts a prepared current operation's exact
+arguments, including when approval arrives after preparation. It also counts
+returned results in an incomplete call group. These cannot be safely replaced
+with a summary merely to meet a history preference. Completed result bodies
+and older consumed calls still use the archival paths below. The selected
+provider's actual context capacity and output reserve remain enforced; this
+calculation does not grant permission or execute the approved operation.
+
 1. **Keep authority and the request exact.** System messages, the current stage
    instruction, the original request, the newest human correction, and incomplete tool exchanges are
    not summarized. A complete assistant tool call and all of its results form
@@ -450,6 +458,16 @@ themselves exceed a provider's capacity. Compaction cannot guarantee that any
 arbitrary input fits any model.
 
 ## Durability, resources and validation
+
+When an Apps session returns evidence, MemQL associates the Library entry and
+its backing file with the native work run; the file also records the executing
+step. Model and effort remain what the app reported, which may be empty.
+Ownership is checked before stamping, and evidence already associated with a
+different producing run is not reassigned. An ordinary conversation without a
+run preserves any existing work identity. This metadata helps find and reuse
+evidence; it does not prove that its bytes were inspected or that a goal passed
+verification. Older records are not automatically backfilled, and a stamping
+failure is logged without discarding the completed app work.
 
 Archives and execution checkpoints live in shared persistent storage, under
 the run owner's authority. Retrieval from another replica must not depend on

@@ -334,8 +334,10 @@ mutation goal createWorkGoal {
 /// with acceptance. Runs may finish, fail or wait while the goal remains open.
 /// Only the interactive accept/cancel handlers close a goal. The server-only
 /// mutation preserves the owner-checked acceptance receipt and optional feedback.
-/// An actor.userId filter alone cannot enforce the native acceptance/close gate
-/// or bind the decision to its acceptance receipt, so callers use those handlers.
+/// Scoping to actor.userId alone cannot attest human acceptance: a delegated
+/// agent also acts as that owner and must not certify its own results. The
+/// interactive handler validates the decision, acceptance receipt and reviewed
+/// version first.
 @serverOnly
 mutation goal updateWorkGoal {
   args {

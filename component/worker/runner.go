@@ -631,6 +631,8 @@ func (r *SessionRunner) stampProduced(ctx context.Context, spec RunSpec, result 
 		Model:     result.Model,
 		Effort:    result.Effort,
 		SessionId: result.SessionId,
+		RunId:     spec.RunId,
+		StepKey:   spec.StepId,
 	}
 	if err := stamper.StampArtifactProvenance(ctx, spec.OwnerUserId, result.ProducedArtifactIds, provenance); err != nil && r.Logger != nil {
 		r.Logger.Warn("app session: could not stamp provenance on produced artifacts",
