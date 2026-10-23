@@ -234,6 +234,37 @@ authorization grant. A checkpoint/message index addresses the unchanged source;
 `nextOffset` pages its serialized characters and `cursor` searches older rows.
 Byte recovery and content verification are different from semantic retrieval.
 
+## Verify the delivered target
+
+The shared [execution guidance](../../../dsl/agents/prompts/workAgentReply.tmpl)
+distinguishes changed inputs, produced output and the target consuming that
+output. This belongs in the common workflow prompt, not a Go-specific command
+or a repository-name switch: a service may require compilation and restart, a
+frontend may require a bundle rebuild, an interpreter may reload automatically,
+and a document may require a fresh export. Discover the applicable procedure
+from the project's instructions and current target, with bounded reads.
+
+The automatic-reload path requires an observation that the target received the
+change. The explicit-transformation path uses the supported authorized build,
+export or load procedure and then checks the actual result. A later-stage path
+hands off exact changed inputs, existing checks and the remaining delivery gap.
+Source tests and mocks support these checks but do not prove that the requested
+target changed. A build/content identity links the output to that target;
+behavioral or visual inspection establishes the requested result. Retained
+procedures carry their source version, scope and evidence so subsequent work
+can check applicability economically instead of repeating setup research.
+
+Authority is evaluated against the whole request and recorded decisions. Do
+not ask again for a local rebuild or verification action already authorized;
+do not turn source-edit permission alone into production deployment or broader
+access. Existing native operation gates remain in force.
+
+This is reusable model guidance, not a new deterministic deployment verifier,
+an automatically promoted reviewed skill, or proof that a model obeys it. The
+owned-turn prompt and delegation checks validate delivery of the instructions;
+the supervised goal must still supply observed target identity and outcome
+evidence. A screenshot of an old running build cannot close that evidence gap.
+
 ## Context pressure and optional work
 
 Prerequisite recovery preserves prepared work. The shared execution prompt

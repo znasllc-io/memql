@@ -21,6 +21,28 @@ saved context and new human answer. Completed tool results stay in order and
 the original checkpoint remains unchanged. Retaining the instructions does not
 grant new access or prove that the model followed them.
 
+## From changed inputs to a verified result
+
+Changing source or a document's inputs does not by itself update the result a
+person uses. Shared execution guidance asks work to discover the supported path
+to the requested target, reuse applicable saved procedures, and check only
+missing or changed setup information. The path may involve a build, export,
+reload or restart; automatic reload must also be observed rather than assumed.
+
+Verification connects the produced revision, build or content to the actual
+result opened or served, then checks the requested behavior. Source tests,
+preview fixtures and successful build commands are useful supporting evidence,
+but cannot substitute for checking the requested target. When another section
+owns delivery, the handoff preserves completed work and identifies the remaining
+gap. Useful procedures retain source versions, applicability and observed results
+so they can be reused without assuming they remain current forever.
+
+Existing authorization and operation gates still apply. Work should reuse
+authorization already given for a local build or verification step rather than
+ask for it again. Permission to edit source alone does not authorize a production
+release or access to another target. These are model instructions, not a promise
+of automatic learning or a deterministic guarantee of successful delivery.
+
 ## Task failures and platform defects
 
 These have different owners and recovery paths:
