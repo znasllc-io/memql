@@ -42,6 +42,7 @@ import type { Verdict } from "../../src/system/readinessFold";
 import type { OsAppProps } from "../../src/system/registry";
 import { fakeConnection, rowsResult, type FakeConnection, type FakeSeed } from "../deployables/harness";
 import { installSeededAccess } from "../seededAccess";
+import { CONFIRM_SETTLE_MS } from "../../src/kit/pressHold";
 
 type Slots = Partial<Record<"githubApp" | "repository" | "runner", boolean>>;
 
@@ -324,6 +325,87 @@ describe("Settings > Pipelines", () => {
     mount(pipelines("unconfigured", { githubApp: false, repository: false, runner: true }));
     expect(await screen.findByText("Registered as memql-znas. The cluster has not reported it yet.")).toBeTruthy();
     expect(screen.queryByRole("button", { name: "Set up GitHub" })).toBeNull();
+  });
+
+  it("requires a settled confirmation and restores focus when app removal is cancelled", async () => {
+    const wire = connect({ githubApp: { configured: true, source: "cluster", canSetup: true } });
+    mount(pipelines("configured", null));
+    fireEvent.click(await screen.findByRole("button", { name: "Remove GitHub App" }));
+    const confirmation = screen.getByRole("group", { name: "Confirm GitHub App removal" });
+    expect(screen.getByText(/GitHub connections across the cluster will stop working/)).toBeTruthy();
+    expect(document.activeElement).toBe(within(confirmation).getByRole("button", { name: "Cancel" }));
+    fireEvent.click(within(confirmation).getByRole("button", { name: "Remove GitHub App" }));
+    expect(wire.fake.callsNamed("githubAppRemove")).toHaveLength(0);
+    await act(async () => { await new Promise(resolve => setTimeout(resolve, CONFIRM_SETTLE_MS + 20)); });
+    fireEvent.click(within(confirmation).getByRole("button", { name: "Cancel" }));
+    expect(screen.queryByRole("group", { name: "Confirm GitHub App removal" })).toBeNull();
+    expect(document.activeElement).toBe(screen.getByRole("button", { name: "Remove GitHub App" }));
+    expect(wire.fake.callsNamed("githubAppRemove")).toHaveLength(0);
+  });
+
+  it("removes once, refreshes status, and offers setup despite an older configured readiness report", async () => {
+    const seed: Seed = { githubApp: { configured: true, source: "cluster", canSetup: true } };
+    const wire = connect(seed);
+    const base = wire.fake.query.executeNamed.bind(wire.fake.query);
+    let finish = () => {};
+    const gate = new Promise<void>(resolve => { finish = resolve; });
+    let attempts = 0;
+    wire.fake.query.executeNamed = vi.fn(async (...args: Parameters<typeof base>) => {
+      if (args[0] === "githubAppRemove") {
+        attempts++;
+        await gate;
+        seed.githubApp = { configured: false, canSetup: true };
+      }
+      return base(...args);
+    });
+    mount(pipelines("configured", null));
+    fireEvent.click(await screen.findByRole("button", { name: "Remove GitHub App" }));
+    await act(async () => { await new Promise(resolve => setTimeout(resolve, CONFIRM_SETTLE_MS + 20)); });
+    const remove = screen.getByRole("button", { name: "Remove GitHub App" });
+    fireEvent.click(remove);
+    fireEvent.click(remove);
+    expect(attempts).toBe(1);
+    expect((screen.getByRole("button", { name: "Cancel" }) as HTMLButtonElement).disabled).toBe(true);
+    expect(screen.queryByRole("button", { name: "Set up GitHub" })).toBeNull();
+    await act(async () => { finish(); });
+    expect(await screen.findByRole("button", { name: "Set up GitHub" })).toBeTruthy();
+    expect(stopStates()[0]).toBe("open");
+    expect(wire.fake.callsNamed("githubAppStatus").length).toBeGreaterThan(1);
+    expect(wire.fake.callsNamed("githubAppRemove")).toEqual(["builtin githubAppRemove()"]);
+    expect(wire.fake.callsNamed("sourceCredentialRevoke")).toHaveLength(0);
+  });
+
+  it("keeps the registered app and confirmation when removal is refused, allowing a deliberate retry", async () => {
+    const seed: Seed = { githubApp: { configured: true, source: "cluster", canSetup: true }, appRemoveReason: "github_app_setup_forbidden" };
+    const wire = connect(seed);
+    mount(pipelines("configured", null));
+    fireEvent.click(await screen.findByRole("button", { name: "Remove GitHub App" }));
+    await act(async () => { await new Promise(resolve => setTimeout(resolve, CONFIRM_SETTLE_MS + 20)); });
+    fireEvent.click(screen.getByRole("button", { name: "Remove GitHub App" }));
+    expect(await screen.findByText("Only a cluster owner can register or remove the cluster's GitHub App.")).toBeTruthy();
+    expect(screen.getByRole("group", { name: "Confirm GitHub App removal" })).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "Set up GitHub" })).toBeNull();
+    expect(wire.fake.callsNamed("githubAppStatus")).toHaveLength(1);
+    seed.appRemoveReason = "ok";
+    seed.githubApp = { configured: false, canSetup: true };
+    await act(async () => { await new Promise(resolve => setTimeout(resolve, CONFIRM_SETTLE_MS + 20)); });
+    fireEvent.click(screen.getByRole("button", { name: "Remove GitHub App" }));
+    expect(await screen.findByRole("button", { name: "Set up GitHub" })).toBeTruthy();
+    expect(wire.fake.callsNamed("githubAppRemove")).toHaveLength(2);
+  });
+
+  it.each([
+    ["a non-owner", { configured: true, source: "cluster", canSetup: false }, "developer"],
+    ["an environment-managed app", { configured: true, source: "environment", canSetup: false }, "owner"],
+    ["an unknown app source", { configured: true, source: "", canSetup: true }, "owner"],
+    ["an unreadable app status", undefined, "owner"],
+  ] as const)("offers no removal for %s", async (_, githubApp, role) => {
+    const wire = connect({ githubApp });
+    mount(pipelines("configured", null), { role });
+    await settle();
+    expect(screen.queryByRole("button", { name: "Remove GitHub App" })).toBeNull();
+    expect(wire.fake.callsNamed("githubAppRemove")).toHaveLength(0);
+    if (githubApp?.source === "environment") expect(screen.getByText("This app is managed by the cluster deployment.")).toBeTruthy();
   });
 
   it("names every installation whose permissions lag the app, with GitHub's own page", async () => {

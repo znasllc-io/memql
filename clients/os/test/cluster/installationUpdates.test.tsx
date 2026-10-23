@@ -55,6 +55,38 @@ describe("installation release selection", () => {
     expect(() => readInstallationStatus(answer({ installationId: "x", currentRevision: "y" }))).toThrow(/choices/);
   });
 
+  it("explains the observed missing setup without exposing engine details by default, then recovers through a read", async () => {
+    const unavailable = "releaseInstallationStatus: MemQL engine failed to execute query. Details: installation selection is not configured";
+    let configured = false;
+    const executeNamed = vi.fn(async () => {
+      if (!configured) throw new Error(unavailable);
+      return answer({ installationId: "installation-one", currentRevision: "b".repeat(40), choices: [candidate], active: null });
+    });
+    render(<InstallationUpdates query={{ executeNamed }} connected />);
+    expect(await screen.findByText("Installation updates need setup.")).toBeTruthy();
+    expect(screen.getByText("A cluster owner must configure this installation's release updates before a release can be selected here.")).toBeTruthy();
+    const detail = screen.getByText(unavailable).closest("details");
+    expect(detail).not.toBeNull();
+    expect(detail?.open).toBe(false);
+    expect(screen.queryByRole("button", { name: "Prepare installation plan" })).toBeNull();
+    configured = true;
+    fireEvent.click(screen.getByRole("button", { name: "Check again" }));
+    expect(await screen.findByRole("button", { name: /MemQL 1.2/ })).toBeTruthy();
+    expect(screen.queryByText("Installation updates need setup.")).toBeNull();
+    expect((executeNamed.mock.calls as unknown as string[][]).every(call => call[0] === "releaseInstallationStatus")).toBe(true);
+  });
+
+  it("preserves an unexpected status failure and its retry instead of labelling it missing setup", async () => {
+    const failure = "The release service could not read its database.";
+    const executeNamed = vi.fn(async () => { throw new Error(failure); });
+    render(<InstallationUpdates query={{ executeNamed }} connected />);
+    expect(await screen.findByText("Installation updates are unavailable.")).toBeTruthy();
+    expect(screen.getByText(failure).closest("details")).toBeNull();
+    expect(screen.queryByText("Installation updates need setup.")).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "Check again" }));
+    await waitFor(() => expect(executeNamed).toHaveBeenCalledTimes(2));
+  });
+
   it("requires a reviewed proposal before a candidate becomes selectable and never applies from proposal progress", async () => {
     let proposal: Record<string, unknown> | null = null;
     let merged = false;

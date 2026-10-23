@@ -1,7 +1,10 @@
-import { useCallback, useEffect, useMemo, useState, useSyncExternalStore, type ReactNode } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore, type ReactNode } from "react";
+import { Trash2 } from "lucide-react";
 import { useSession } from "../../chrome/access";
-import { Caption, ContentSkeleton, Head, InlineSkeleton, Notice, Rail, useAppReach, type Stop } from "../../kit";
+import { Button, Caption, ContentSkeleton, Head, InlineSkeleton, Notice, Rail, useAppReach, type Stop } from "../../kit";
 import { ActionBar } from "../../kit/ActionBar";
+import { IconButton } from "../../kit/IconButton";
+import { InPlaceAsk } from "../../kit/pressHold";
 import { useOsConnection } from "../../live/connection";
 import { useMachines } from "../../live/machines";
 import { MODULE_DESCRIPTIONS } from "../../system/modules";
@@ -10,6 +13,7 @@ import { readLaggingInstallations, type LaggingInstallation } from "../deployabl
 import { rememberConnectAttempt, returnPathFor, type ConnectReturn } from "../deployables/sources/connectReturn";
 import { ConnectReturnNotice } from "../deployables/sources/ConnectReturnNotice";
 import { GithubAppMissing } from "../deployables/sources/GithubAppSetup";
+import { ProblemNotice } from "../deployables/packages/ReportView";
 import { useGithubApp, type GithubAppActions } from "../deployables/sources/useGithubApp";
 import { bare } from "../deployables/people";
 import { machineFromRow } from "../fleet/rows";
@@ -87,7 +91,7 @@ export function PipelinesSection({ intent, consumeIntent, heading = true }: Pick
     },
   };
   const stops: Stop[] = [
-    githubAppStop(reading.githubApp, githubFromHere, returned),
+    githubAppStop(reading.githubApp, githubFromHere, returned, viewer, () => readiness?.reseed()),
     repositoryStop(reading.repository, reading.githubApp.reading, openSources),
     computeStop(reading.compute, fleet),
   ];
@@ -127,7 +131,7 @@ export function PipelinesSection({ intent, consumeIntent, heading = true }: Pick
 // The three stops
 // ---------------------------------------------------------------------------
 
-function githubAppStop(step: SubStep, app: GithubAppActions, returned: ConnectReturn | null): Stop {
+function githubAppStop(step: SubStep, app: GithubAppActions, returned: ConnectReturn | null, viewer: string, onRemoved: () => void): Stop {
   const base = { id: step.id, name: step.name };
   // What came back from GitHub belongs beside the control that went there.
   const notice = returned === null ? null : <ConnectReturnNotice result={returned} />;
@@ -135,7 +139,16 @@ function githubAppStop(step: SubStep, app: GithubAppActions, returned: ConnectRe
     notice === null && inner === null ? undefined : <div className="os-pipelines-stop">{notice}{inner}</div>;
   const slug = app.status?.slug ?? "";
   const registered = slug === "" ? "Registered" : `Registered as ${slug}`;
-  if (step.reading === "done") {
+  if (app.status?.configured === true) {
+    return {
+      ...base,
+      state: step.reading === "done" ? "done" : "open",
+      sentence: step.reading === "done" ? `${registered}.` : `${registered}. The cluster has not reported it yet.`,
+      body: body(<GithubAppManagement key={`${viewer}:${app.status.source}:${slug}:${app.status.canSetup}`} app={app} onRemoved={onRemoved} />),
+    };
+  }
+  // A fresh app status wins over a readiness report written before removal.
+  if (step.reading === "done" && app.status === null) {
     return {
       ...base,
       state: "done",
@@ -150,13 +163,6 @@ function githubAppStop(step: SubStep, app: GithubAppActions, returned: ConnectRe
       sentence: "This cluster has not said whether it has a GitHub App.",
       body: body(null),
     };
-  }
-  // REGISTERED, AND NOT YET REPORTED. The agents evaluate the item on their
-  // own schedule, so an app registered a moment ago reads "not done" here
-  // until they look again -- and offering to register a second one meanwhile
-  // would be the worst answer on the page.
-  if (app.status?.configured === true) {
-    return { ...base, state: "open", sentence: `${registered}. The cluster has not reported it yet.`, body: body(null) };
   }
   if (app.status?.configured === false && app.status.canSetup) {
     // SAY IT ONCE (rule 7): the setup's own caption says what the app is and
@@ -174,6 +180,42 @@ function githubAppStop(step: SubStep, app: GithubAppActions, returned: ConnectRe
         : "This cluster has no GitHub App yet. A cluster owner can set it up.",
     body: body(null),
   };
+}
+
+/** Cluster app management is separate from each person's GitHub connection. */
+function GithubAppManagement({ app, onRemoved }: { app: GithubAppActions; onRemoved: () => void }) {
+  const [armed, setArmed] = useState(false);
+  const [removed, setRemoved] = useState(false);
+  const pending = useRef(false);
+  const region = useRef<HTMLDivElement>(null);
+  const wasArmed = useRef(false);
+  useEffect(() => {
+    if (wasArmed.current !== armed) region.current?.querySelector<HTMLButtonElement>("button")?.focus();
+    wasArmed.current = armed;
+  }, [armed]);
+
+  if (app.status?.source === "environment") return <Caption>This app is managed by the cluster deployment.</Caption>;
+  if (app.status?.source !== "cluster" || !app.status.canSetup) return null;
+  if (removed) return <Notice sentence="GitHub App removed from this cluster." />;
+  return <div ref={region} className="os-app-stack">
+    {armed ? <>
+      <Caption>Remove this cluster's GitHub App? GitHub connections across the cluster will stop working until an app is set up again and people reconnect. The app stays on GitHub.</Caption>
+      {app.refusal ? <ProblemNotice problem={app.refusal} tone="error" /> : null}
+      <InPlaceAsk className="os-confirm-row os-panel-actions" role="group" aria-label="Confirm GitHub App removal">
+        <Button tone="quiet" disabled={app.busy} onClick={() => { app.clear(); setArmed(false); }}>Cancel</Button>
+        <Button tone="danger" busy={app.busy} busyLabel="Removing GitHub App" onClick={() => {
+          if (pending.current) return;
+          pending.current = true;
+          void app.remove().then(done => {
+            pending.current = false;
+            if (done) { setRemoved(true); setArmed(false); onRemoved(); }
+          });
+        }}>Remove GitHub App</Button>
+      </InPlaceAsk>
+    </> : <div className="os-panel-actions">
+      <IconButton label="Remove GitHub App" onClick={() => { app.clear(); setArmed(true); }}><Trash2 size={16} aria-hidden /></IconButton>
+    </div>}
+  </div>;
 }
 
 function repositoryStop(step: SubStep, app: SubStep["reading"], openSources: (() => void) | null): Stop {

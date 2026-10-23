@@ -9,8 +9,8 @@ owner: znas
 
 # GitHub Connect
 
-**Audience:** operators setting a cluster up, and anyone answering "why does
-Deployables ask me for a token".
+**Audience:** operators setting a cluster up and people connecting repositories
+in Pipelines.
 **Design:** `docs/superpowers/specs/2026-09-03-github-connect-design.md`
 (decisions C1-C8), program decisions P10 and P11 in
 `docs/superpowers/specs/2026-09-02-deployables-program-design.md`, and D4 of
@@ -18,10 +18,9 @@ Deployables ask me for a token".
 C8 for pipelines.
 
 A person connects GitHub once, anywhere in the product, and from then on picks a
-repository from a list instead of typing a URL and pasting a token. The pasted
-token stays, as the other answer to the same question ("A token" beside
-"GitHub"), for a host this is not, or an organization that will not install an
-app.
+repository from a list instead of typing a URL and pasting a token. New
+connections use the GitHub App flow; previously stored credentials remain
+manageable.
 
 **It is a connection, not a sign-in.** Nothing here changes who a person IS in
 this cluster. Connecting writes one `v1:platform:sourceCredential` row that the
@@ -36,22 +35,21 @@ from the product in a single trip to GitHub
 an operator can instead register one by hand and set it in the deployment
 ([Creating the GitHub App](#creating-the-github-app)). Until one of them has,
 Connect is not offered: the surfaces say the cluster is not linked to GitHub yet,
-who can change that, and offer the token path meanwhile.
+and who can change that. ZIP package imports remain available without GitHub.
 
 ---
 
 ## Registering the app from the product
 
-**Who:** a cluster owner. **Where:** the Repository step of Add a deployable, or
-Deployables -> Settings -> Sources. **What it takes:** one press here and one on
-GitHub.
+**Who:** a cluster owner. **Where:** Pipelines -> Settings -> Infrastructure ->
+GitHub App. The same setup is available under Settings -> Integrations ->
+Pipelines, and from GitHub Connections when no app is configured.
 
-On a cluster with no GitHub App, those two surfaces do not offer Connect GitHub
+On a cluster with no GitHub App, these surfaces do not offer Connect GitHub
 -- it could not work. A cluster owner is offered **Set up GitHub** instead, with
 the one question registering an app has: whose GitHub account it is registered
 under, **your account** or **an organization** (named by its login; you must be
-able to create apps for it). Everybody else is told a cluster owner sets it up,
-and is offered the token path.
+able to create apps for it). Everybody else is told a cluster owner sets it up.
 
 What happens when it is pressed:
 
@@ -71,16 +69,19 @@ What happens when it is pressed:
    one-time code. The cluster exchanges it, once, for the six values an operator
    would otherwise have copied out of a settings page, and stores them.
 4. The browser is sent straight on to the new app's **installation page**, so the
-   owner chooses which account and repositories it may read, authorizes, and
-   lands back where they started -- connected, with their repositories listed.
+   owner chooses which account and repositories receive the listed permissions,
+   authorizes, and lands back where they started -- connected, with their
+   repositories listed.
    Registering and connecting are one trip.
 
 **The manifest is the cluster's, and nothing a browser sends can change it.** It
 is composed from `MEMQL_DOMAIN` on the identity node and is exactly the
 registration the manual steps below describe: the permissions and events in
-[that table](#creating-the-github-app) (reads on the repositories people choose,
-and checks write), authorization requested during installation, installable on
-any account, the callback the cluster derives for itself. What comes back is
+[that table](#creating-the-github-app): write access for checks, code scanning
+alerts, contents, pull requests and merge queues; read access for metadata,
+commit statuses and repository administration. It requests authorization during
+installation, is installable on any account, and uses the callback the cluster
+derives for itself. What comes back is
 checked against it: an app carrying any permission the manifest did not ask for,
 or a read come back as a write, is refused and its credentials are not kept.
 
@@ -108,14 +109,17 @@ an IP address) the webhook is registered **off**, with an inert placeholder
 address and no events, and polling notices pushes instead. The permissions are
 the same either way. See [Locally](#locally).
 
-**Removing it.** Deployables -> Settings -> Sources -> GitHub App -> Remove, for
-an app registered from the product. It clears the six stored values, so every
-GitHub connection on the cluster stops fetching until an app is set up again and
+**Removing it.** A cluster owner opens Pipelines -> Settings -> Infrastructure
+and uses **Remove GitHub App** in the GitHub App row, then confirms the
+cluster-wide effect. This is available for an app registered from the product.
+It clears the six stored values, so every GitHub connection on the cluster
+stops fetching until an app is set up again and
 each person reconnects. It does **not** delete the app at GitHub, and earlier
 versions of the sealed rows remain in the store's history like any rotated
 secret. If you are removing an app because its credentials may have leaked,
 **delete it at GitHub** -- that is what makes them worthless. An app set by the
 deployment has no Remove; it is changed where the cluster is deployed.
+Disconnecting one person's account under Connections is a separate action.
 
 Every registration and removal writes an audit event (category `configuration`)
 naming who did it and the app's slug. No credential is ever logged, audited or
@@ -339,31 +343,27 @@ why the surface names the organization rather than apologising.
 
 ## What a person sees
 
-**Settings -> Sources**, connected: "Connected to GitHub as @login", the
-installations the grant reaches as chips, any pending ones marked, a link to
-install on another organization, and Disconnect.
+**Pipelines -> Settings -> Connections -> GitHub** lists connected accounts.
+The plus button adds an account. Opening one shows its organizations and access,
+including pending organization approval, and the action to disconnect that
+account. Settings -> Connections -> GitHub opens the same account controls.
 
-**The Source stop of a new deployable**, connected: a searchable list of the
-repositories that grant can reach, grouped by owner, each with its visibility,
-default branch and last push. Choosing one runs the probe under the grant, fills
-the ref picker with the repository's branches (default first), and previews what
-the manifest says the package contains -- all before Analyze runs.
+**Pipelines -> Repositories -> Add repository** asks for the GitHub account,
+repository, MemQL owning organization and a final review. It uses verified saved
+connections and links to connection management when an account is missing.
+Registration starts no deployment; the repository's pipeline is connected
+separately. Deployables retains deployed app management and links to its
+repository in Pipelines.
 
-**Not connected, app configured:** what connecting is for, with Connect GitHub
-as the step's forward act and "A token" as the other choice beside "GitHub".
+**No app, cluster owner:** the GitHub App setup asks whose account should own
+the app, then offers **Set up GitHub**. GitHub presents the permissions for
+approval. **No app, anybody else:** the same surface names the cluster owner
+who can set it up, with no setup action.
 
-**No app, cluster owner:** the sentence saying this cluster is not linked to
-GitHub yet, the one question (your account, or an organization), and Set up
-GitHub -- on the wizard's floor, or beside the question in Settings.
-
-**No app, anybody else:** the same sentence naming who can change it, and no
-act. The token path is one choice away.
-
-Both are known before anybody presses anything: the surfaces ask
-`githubAppStatus`, a read that writes nothing, as they open. A cluster that
-cannot answer it keeps the older behaviour -- Connect is offered, the cluster
-refuses it, and the URL-and-token form becomes the whole stop under the
-sentence saying why.
+The surfaces ask `githubAppStatus`, a read that writes nothing, as they open.
+An unavailable status is not evidence that no app exists or that the caller
+can manage it. The Infrastructure row offers no setup or removal based on an
+unavailable answer; connection failures are reported in place.
 
 Every refusal renders in place, with the product's headline above and the
 server's own sentence beneath:

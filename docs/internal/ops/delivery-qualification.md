@@ -70,13 +70,27 @@ real PostgreSQL, Library, Azurite and OCI registry handoffs. That affected
 CI lane refuses skipped provider cases and records its fixture cleanup;
 it does not replace the selected installation/controller rehearsal below.
 
-To install the reviewed instance DSL locally, upload its source ZIP through
-Files, then choose **Deployables → Add a deployable → A zip in Files**. Analyze
-the archive, explicitly skip both website entries on the address step, and
-select **Install MemQL changes**. The ZIP must preserve the package manifest,
-declared client directories, DSL and templates. After the restart, verify that
-every DSL consumer loaded the new definitions; a successful restart request
-alone is not readiness. GitHub access is separate from this package install.
+To qualify the reviewed instance DSL locally without installing its websites,
+prepare a clearly labeled **DSL-only qualification ZIP** from one recorded
+instance commit. Preserve the complete `dsl/znas/` and `dsl/znasdelivery/`
+trees byte for byte, including their language lines and prompt/template files.
+Use a generated root manifest with `formatVersion: 1`, a distinct qualification
+package name and `deployables: []`; domains are discovered from the DSL tree.
+Omit website assets, campaign/email settings and production configuration.
+Record the source commit, copied-file hashes, derived manifest and final ZIP
+hash so this artifact cannot be mistaken for the full production package.
+
+Upload that ZIP through Files, then choose **Deployables → Add a deployable →
+A zip in Files**. Analyze it as an artifact source with no repository identity.
+Expect exactly the two DSL domains, zero web deployables and no problems, then
+select **Install MemQL changes**. The full ZNAS package's external website
+assets require a repository source and are validated before the address step;
+skipping websites later cannot make that full ZIP admissible. A direct offline
+`packages.Analyze` call alone does not exercise this source-kind gate.
+
+After the restart, verify that every DSL consumer loaded the new definitions;
+a successful restart request alone is not readiness. Operator policy bindings,
+credentials and GitHub access remain separate setup from installing this DSL.
 
 ## Local acceptance walkthrough
 

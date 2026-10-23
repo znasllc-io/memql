@@ -101,10 +101,15 @@ export function InstallationUpdates({ query, connected, visible = true, proposed
     } finally { inFlight.current = false; setBusy(""); }
   }
   function refresh() { setSaved(null); setError(""); status.retry(); }
+  const needsSetup = /(?:^|:\s*)installation selection is not configured\.?$/i.test(status.error ?? "");
   return <Details><DetailsSection title="This installation">
     <Caption>Choose a verified release, review its installation plan, then apply it when you are ready.</Caption>
     {!available ? <Notice sentence="Reconnect to read this installation’s update plan." /> : null}
-    {status.error ? <Notice tone="warn" sentence="Installation updates are unavailable." detail={status.error}><Button onClick={refresh}>Check again</Button></Notice> : null}
+    {status.error ? <Notice tone="warn" sentence={needsSetup ? "Installation updates need setup." : "Installation updates are unavailable."}
+      detail={needsSetup ? "A cluster owner must configure this installation's release updates before a release can be selected here." : status.error}>
+      {needsSetup ? <details className="nexus-technical"><summary>Technical details</summary><Caption>{status.error}</Caption></details> : null}
+      <Button onClick={refresh}>Check again</Button>
+    </Notice> : null}
     {available && !status.value && !status.error ? <Caption>Reading the installed version and available choices…</Caption> : null}
     {current ? <>
       {current.choicesWarning ? <Notice tone="warn" sentence="Release choices are unavailable." detail={current.choicesWarning}><Button onClick={refresh}>Read release choices again</Button></Notice> : null}
