@@ -251,6 +251,19 @@ Library and the app deploys it with `sitePublishFromArtifact`, which reads
 the bytes from object storage server-side -- see
 [Deployables](deployables.md#deploying-from-the-library).
 
+Library publishing accepts the storage locations written by both browser and
+chunked uploads: Azure/Azurite URLs and container-relative keys. The publisher
+resolves the URL using the Library storage parser, checks its container against
+the configured Library container, and checks the resolved key against the file
+owner before reading any bytes. A foreign container, another owner's prefix,
+or a traversal path is refused as `bundle_unreadable`; the serving site stays
+unchanged. Legacy `blob://` keys remain supported. URL parsing does not fetch
+an arbitrary host: reads use the configured storage client. The regressions
+`TestSitePublishFromArtifact_UploadedLibraryLocations` and
+`TestSitePublishFromArtifact_UnsafeUploadedLocationsAreRefusedBeforeRead`
+cover the successful upload forms and refusal before storage access or a site
+update.
+
 ### 1. Create the site row
 
 `createSite` (`dsl/platform/mutations.memql`) is the write behind the

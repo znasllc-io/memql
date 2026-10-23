@@ -531,6 +531,7 @@ func TestDocumentRevisionWorkflow(t *testing.T) {
 			{"PersonalDocumentNotesNeverEnterAIRevision", testPersonalDocumentNotesNeverEnterAIRevision},
 			{"ArtifactForFileResolvesBareReceiptAcrossEngines", testArtifactForFileResolvesBareReceiptAcrossEngines},
 			{"ReadFileFromDeliveryReceiptAcrossEngines", testReadFileFromDeliveryReceiptAcrossEngines},
+			{"UploadedJSONReadAcrossEngines", testUploadedJSONReadAcrossEngines},
 			{"ReviewAttachmentsAcrossReplicas", testReviewAttachmentsAcrossReplicas},
 			{"BlankDestinationWithReference", testBlankDestinationWithReference},
 			{"AppliedFeedbackCannotBeDeletedAcrossReplicas", testAppliedFeedbackCannotBeDeletedAcrossReplicas},

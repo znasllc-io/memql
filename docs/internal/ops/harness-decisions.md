@@ -103,6 +103,28 @@ generation replacement and checks all three session kinds, ordinary and rerun
 executions, rejection and a forged pending-request hash with real storage on two
 engines. It verifies decision and transcript restoration, not a live screenshot.
 
+## Produced file readability
+
+Apps output transport must declare the file's format without changing its bytes.
+The Cockpit uploader previously used multipart's unconditional binary default,
+so a retained JSON checkpoint had a valid digest but the text reader refused it.
+The repair belongs in the producer: `ResolveLibraryMIME` continues to honor an
+explicit type and `libraryReadFile` retains its owner, revision, MIME, UTF-8 and
+size checks. Cockpit classifies the complete body conservatively before upload:
+binary signatures survive, and text requires full UTF-8 and control-byte checks.
+Only validated JSON with a JSON extension receives `application/json`; Markdown
+and ordinary text remain format hints, never trusted instructions. Existing
+opaque rows are not silently rewritten. A normal authorized upload/version is
+needed to change their type; archive extraction and semantic indexing are not
+added by this repair.
+
+Cockpit's `TestLibraryPushContentTypePreservesBytes` covers both upload entry
+points, exact multipart bytes, identity, binary signatures and misleading text
+extensions/suffixes. `TestDocumentRevisionWorkflow/HistoryAndApproval/UploadedJSONReadAcrossEngines`
+uses the real upload handler and persisted owner-stamped rows, then reads JSON
+on a second engine without an artifact index. The same bytes under binary MIME
+remain refused, and unauthenticated/foreign readers never fetch the blob.
+
 ## Knowledge requirements can change during execution
 
 An initial role or skill binding is not a complete account of a goal's needs.
@@ -444,6 +466,21 @@ from spending an entire turn before execution. Coverage includes
 `TestOptionalTrainingVectorBoundsOnlyItsOwnWait` and required-database
 `TestOwnedTrainingReadsReviewedTaughtSourcesAcrossReplicas`, including omission
 readback on another engine. The Training interface is unchanged.
+
+Conversation recall reserves time for its exact-source fallback. Semantic
+search and lazy historical backfill share at most ten seconds, or half the
+caller's remaining deadline when shorter. An initial provider failure skips
+backfill rather than retrying the same unavailable embedding path. This bounds
+optional work without changing the embedding worker's memory guards.
+
+After that phase, source validation and exact phrase search use the original
+authorized context. Caller cancellation still fails the request; it is never
+detached. The response explicitly reports semantic unavailability, and an empty
+exact phrase result does not imply that no memory exists. It may require another
+phrase or page. `TestRecallMemoryKeepsExactFallbackAfterEmbeddingTimeout` blocks
+the semantic provider until its deadline and verifies that another engine still
+reads the owner's original conversation from the database, then checks caller
+cancellation. It does not prove semantic retrieval or indexing is available.
 
 ## Progress windows and result acceptance
 
