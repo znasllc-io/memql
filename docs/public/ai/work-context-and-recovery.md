@@ -643,6 +643,9 @@ evidence stays in the owned journal after leaving the bounded active index.
 Renewal checks bounded receipt pages beyond recent non-progress calls and keeps
 concurrent arrivals eligible for the next window. A receipt-read timeout or
 failure refuses renewal; it does not certify that no progress occurred.
+Native and Apps executions use the same conservative signal for completed source
+queries. The result must contain substantive returned content; an app's claimed
+success or a digest supplied in its arguments does not count.
 The existing loop detector also pauses repeated stalled work.
 When progress cannot justify renewal, MemQL preserves the work and asks for
 direction. A fresh human answer renews a window on the same goal, preserving

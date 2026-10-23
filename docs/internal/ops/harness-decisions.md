@@ -506,6 +506,16 @@ losing the credit. The textual source signal deliberately excludes opaque exec
 output, polling and work notes; it does not certify task relevance or correctness.
 Other effects need their own verified native evidence or scoped owner feedback.
 
+Native agent and Apps/MCP source receipts use the same bounded source-content
+parser. The delegated recorder derives its protected digest only from a registered
+query's executed result, never from model arguments or submitted prose. It keeps
+the existing exact source exchange for recovery. Failed results, work journals,
+opaque commands and equivalent source facts cannot supply another credit.
+`TestDelegatedSourceReadsRenewProgressAcrossReplicas` executes a museum-note read,
+records it through the delegated path and renews on a peer; unchanged, failed and
+argument-forged results refuse renewal. The MCP adapter's existing receipt test
+covers dispatch forwarding into this recorder.
+
 The provider boundary reserves actual attempts, including owned embeddings and
 HTTP retries, under the same workload gate plus its admission gate. Its immutable
 cumulative head is timestamp-fenced across peer clock skew. This replaces the

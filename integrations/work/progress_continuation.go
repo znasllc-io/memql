@@ -146,7 +146,8 @@ func (i *Integration) continueWorkProgressLocked(ctx context.Context, rc common.
 
 func progressResultEvidenceKeys(row map[string]any) []string {
 	data := rowMap(row, "data")
-	if rowString(row, "kind") != "tool_result" || data["isError"] != false || data["argsTruncated"] == true {
+	kind := rowString(row, "kind")
+	if (kind != "tool_result" && (kind != "note" || data["delegatedEvidence"] != true)) || data["isError"] != false || data["argsTruncated"] == true {
 		return nil
 	}
 	name := rowString(data, "tool")

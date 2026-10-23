@@ -1,4 +1,4 @@
-package agent
+package work
 
 import (
 	"crypto/sha256"
@@ -8,12 +8,13 @@ import (
 	"strings"
 )
 
+// SourceReadEvidence derives the shared native/delegated source signal.
 // A new argument map is not progress. Only returned substantive source content
 // can supply this conservative automatic-read signal. Opaque exec output,
 // statuses, counters, timestamps, echoed queries and model-written journal notes
 // are deliberately not a generic success signal. Other effect protocols need
 // their own verified native evidence or scoped owner feedback.
-func sourceReadEvidence(result string) string {
+func SourceReadEvidence(result string) string {
 	if len(result) == 0 || len(result) > 64<<10 {
 		return ""
 	}

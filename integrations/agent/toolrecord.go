@@ -53,6 +53,7 @@ import (
 	"log/slog"
 	"sync"
 
+	workstate "github.com/znasllc-io/memql/component/work"
 	"github.com/znasllc-io/memql/core/common"
 )
 
@@ -189,7 +190,7 @@ func (r *toolRecorder) ExecuteToolByName(ctx context.Context, toolName string, a
 	}); ok {
 		kind, _, known := resolver.ToolCallee(toolName)
 		if known && kind == "query" {
-			inv.NativeResultEvidence = sourceReadEvidence(out)
+			inv.NativeResultEvidence = workstate.SourceReadEvidence(out)
 		}
 	}
 	if err := rec.RecordToolInvocation(ctx, inv); err != nil && r.logger != nil {
