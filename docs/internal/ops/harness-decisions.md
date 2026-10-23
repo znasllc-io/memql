@@ -208,6 +208,15 @@ Byte recovery and content verification are different from semantic retrieval.
 
 ## Context pressure and optional work
 
+Prerequisite recovery preserves prepared work. The shared execution prompt
+distinguishes an operation that could not start from a produced result that
+failed validation. It asks for the specific missing setup information, input
+freshness checks, partial-effect reconciliation and the normally authorized
+repair, rather than a new source survey or regenerated artifact. Reads should
+deduplicate resolved aliases and retrieve bounded relevant passages. This is
+goal-independent model guidance, not a new automatic installer, filesystem
+grant, or guarantee that the model will choose the cheapest recovery path.
+
 Known context-capacity refusals at a reasoning boundary use the existing native
 model-call checkpoint suspension. Proactive compaction enters it directly after
 its bounded attempts; provider overflow first tries the strictly smaller context

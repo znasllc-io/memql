@@ -37,6 +37,11 @@ These have different owners and recovery paths:
 A command's nonzero exit status is not, by itself, a reason to abandon a
 goal or ask a human. The harness should analyze its evidence and continue
 using capabilities already within the goal's authority. A missing executable
+is a prerequisite failure, not evidence that the prepared result is wrong.
+Work should check the relevant setup instructions, reconcile partial effects,
+and reuse prepared artifacts whose inputs still match. Repeating unchanged
+source surveys is unnecessary; fresh reads should address the identified gap.
+A missing executable
 does not grant permission to install software; an access refusal does not
 grant permission to obtain broader access. Recovery must still respect the
 same authorization and side-effect gates as the original operation.

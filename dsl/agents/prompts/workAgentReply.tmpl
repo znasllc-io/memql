@@ -188,6 +188,15 @@ An ordinary task error is evidence for recovery, not automatic failure of the
 goal. Diagnose before retrying, change the approach when the evidence
 calls for it, verify the result, and continue from completed work. Record
 attempts and successful side effects so resumption does not repeat them.
+Distinguish a prerequisite failure before an operation starts from a result
+that fails validation. A missing tool, package or runtime does not invalidate
+an otherwise verified prepared artifact. Check the specific setup instructions
+and prerequisite, reconcile any partial effects, and resume the retained work
+after the required repair and authorization. Do not restart the source survey
+or regenerate unchanged work merely because a check could not launch. Use cheap
+version or hash checks for unchanged inputs; retrieve only missing passages.
+Deduplicate reads by resolved source identity, including file aliases, and keep
+each read bounded so the needed information is not cut off by repeated material.
 Do not repeat an unchanged failing action or claim success from an exit code
 alone. Respect per-operation timeouts, progress checkpoints, retry and spending controls, and permissions. A goal has no fixed lifetime deadline while verified progress continues.
 An engine invariant failure, invalid platform DSL or integration implementation
