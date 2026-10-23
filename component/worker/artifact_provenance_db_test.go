@@ -76,7 +76,7 @@ func TestAppArtifactProvenanceLinksOwnedFileAndRun(t *testing.T) {
 	}
 	fileId := file("file", owner)
 	artifactId := artifact("index", owner, "file", fileId)
-	p := ArtifactProvenance{App: "codex", Model: "reported-model", Effort: "reported-effort", SessionId: "session", RunId: "v1:work:run:" + prefix, StepKey: "step"}
+	p := ArtifactProvenance{App: "codex", Model: "reported-model", Effort: "reported-effort", SessionId: "session", RunId: "v1:work:run:" + prefix, StepKey: "v1:work:step:step"}
 	if err := store.StampArtifactProvenance(ctx, owner, []string{artifactId}, p); err != nil {
 		t.Fatal(err)
 	}
@@ -89,6 +89,10 @@ func TestAppArtifactProvenanceLinksOwnedFileAndRun(t *testing.T) {
 	}
 	if row := read("v1:library:file", fileId); row["producedByStepKey"] != "step" || row["sha256"] != "original-digest" || row["blobUrl"] != "library/test/proof.png" {
 		t.Fatalf("file identity or original bytes changed: %+v", row)
+	}
+	files, err := store.executeAndExtract(appSessionReadContext(ctx, owner), fmt.Sprintf(`query libraryFilesForOwner(runId: %q, stepKey: "step")`, p.RunId))
+	if err != nil || len(files) != 1 {
+		t.Fatalf("native step filter cannot find returned evidence: files=%d err=%v", len(files), err)
 	}
 	// A later unbound conversation must preserve the existing native identity.
 	unbound := p

@@ -31,7 +31,9 @@ paths and one task's acceptance criteria must not become routing rules.
 
 Returned Apps evidence is stamped as `app_session` on both the Library index
 and its backing file. `producedByRunId` comes from the native invocation;
-the file also records `producedByStepKey`. Reads use the owner's actor and a
+the file also records `producedByStepKey`, normalizing the session's canonical
+step ID to the logical key used by Library filters and delivery receipts.
+Reads use the owner's actor and a
 fresh cross-replica view; only the trusted provenance mutations use internal
 origin. File IDs are resolved through `sourceConceptRef`, not guessed from
 artifact IDs. Non-file outputs receive the index stamp without an invented

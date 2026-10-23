@@ -577,7 +577,9 @@ func (s *EngineStore) stampProducedArtifact(ctx context.Context, owner, artifact
 	delete(args, "artifactId")
 	args["fileId"] = fileId
 	if p.StepKey != "" {
-		args["stepKey"] = p.StepKey
+		// The session stores a canonical step ID; Library's step filter uses
+		// the logical key, matching work observations and delivery receipts.
+		args["stepKey"] = memqlengine.BareShortId(p.StepKey)
 	}
 	return s.executeMutation(appSessionWriteContext(ctx, owner), "stampLibraryFileProvenance", args)
 }
