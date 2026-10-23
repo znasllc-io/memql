@@ -11,11 +11,12 @@ owner: znas
 
 The `delivery-artifacts.provider-qualification` step in
 [`memql-package.yaml`](../../../memql-package.yaml) requires an explicitly
-consented native Linux Docker worker. It runs when the affected Go dependency
-graph intersects the release, blob, OCI, installation, pipeline, journal, or
-engine adapter components. Changes to the fixture scripts select full coverage;
-an incomplete graph or unavailable change list also falls back to full coverage. An unrelated Cockpit
-change does not start these providers.
+consented native Linux Docker worker. During the first delivery-engine bootstrap,
+it runs its full fixed provider matrix on every ordinary pipeline run. This
+preserves coverage while the installed compiler cannot read `packageRoots`.
+The reviewed [follow-up](delivery-qualification.md#bootstrap-with-the-current-engine)
+restores affected-component selection after the operator selects the new engine
+and installs its policy; uncertainty continues to select full coverage.
 
 Use the same capability locally, with the four digest pins declared by the
 manifest:

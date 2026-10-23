@@ -114,7 +114,10 @@ func TestBuildVariantStaysConst(t *testing.T) {
 func TestReleaseArtifactNamesAgree(t *testing.T) {
 	makefile := readRepoFile(t, "Makefile")
 	installSh := readRepoFile(t, "install.sh")
-	manifest := readRepoFile(t, "../memql-package.yaml")
+	// The current production compiler predates component-tag policy. Keep the
+	// exact deferred release contract tested until the selected engine update
+	// activates it; the bootstrap manifest must not publish both products.
+	manifest := readRepoFile(t, "../test/fixtures/pipelines/delivery-after-bootstrap.yaml")
 	var spec struct {
 		Pipeline struct {
 			Stages []struct {
