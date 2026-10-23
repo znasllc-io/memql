@@ -66,6 +66,15 @@ In-flight tool failures cannot enter this path. Missing or changed checkpoints a
 suspension stop execution. Older failed runs without native waiting child links
 still require the existing explicit recovery controls; no links are inferred.
 
+The same checkpoint suspension applies when bounded context compaction cannot
+fit the active request, or a model still rejects its context after recovery.
+There is no extra automatic retry with identical input. The question retains
+the exact prepared tool calls and completed receipts; Retry or guidance resumes
+that suspended execution after the capacity problem is addressed. It does not
+restart the stage or discard its working context. Storage and authorization
+failures are separate errors, and context from older failed stages is not
+silently attached to a new execution.
+
 If a plan failure exhausts automatic recovery, **Revise plan** authorizes one
 further replanning attempt for the unfinished work. It preserves the completed
 prefix and accumulated usage, and does not replenish automatic retries or

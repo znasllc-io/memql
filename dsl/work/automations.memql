@@ -72,10 +72,11 @@ automation workSpineRecovery {
  return { act: act, retrySeconds: 30 }
 }
 
-/// Only a failed model response before tool dispatch enters this native recovery scope.
+/// Only a failed model response or exhausted context compaction before tool dispatch enters this native recovery scope.
 @template
 automation workModelCallRecovery {
- args { retriesSpent int! maxRetries int! }
+ args { retriesSpent int! maxRetries int! failureKind string }
+ if args.failureKind == "context_capacity" { return { act: "ask", question: "The current request still exceeds the model context allowance after bounded recovery. Completed work and the prepared exchange are saved. Provide guidance or retry after the capacity issue is resolved, or abandon this work?" } }
  if args.retriesSpent < 1 && args.retriesSpent < args.maxRetries { return { act: "retry" } }
  return { act: "ask", question: "The model did not finish within its call time limit. Completed work is saved. Retry from that progress, or abandon this work?" }
 }

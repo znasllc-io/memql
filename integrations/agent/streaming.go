@@ -465,7 +465,7 @@ StreamLoop:
 
 		compacted, compactErr := r.compactWorkContext(ctx, messages, tools, memql.WorkContextTarget(messages, tools, 20000))
 		if compactErr != nil {
-			return nil, r.pauseAtBudgetBoundary(ctx, compactErr, messages)
+			return nil, r.pauseAfterContextRecovery(ctx, compactErr, messages)
 		}
 		messages = compacted
 
@@ -517,15 +517,15 @@ StreamLoop:
 				if errors.As(err, &ceiling) {
 					return nil, r.pauseAtBudgetBoundary(ctx, err, messages)
 				}
-				if handled, recoveryErr := r.recoverModelCeiling(ctx, err, messages, attempt, true); handled {
+				if next, ok := r.handOffContext(ctx, err, messages, &contextHandoffs, iter, requestId); ok {
+					messages = next
+					continue
+				}
+				if handled, recoveryErr := r.recoverModelCall(ctx, err, messages, attempt, true); handled {
 					if recoveryErr != nil {
 						return nil, recoveryErr
 					}
 					attempt++
-					continue
-				}
-				if next, ok := r.handOffContext(ctx, err, messages, &contextHandoffs, iter, requestId); ok {
-					messages = next
 					continue
 				}
 				if isTransientStreamError(err) && attempt < streamTransientMaxRetries {
@@ -568,15 +568,15 @@ StreamLoop:
 					terminalErr = ctx.Err()
 					break StreamLoop
 				}
-				if handled, recoveryErr := r.recoverModelCeiling(ctx, streamErr, messages, attempt, turnText == "" && len(turnCalls) == 0); handled {
+				if next, ok := r.handOffContext(ctx, streamErr, messages, &contextHandoffs, iter, requestId); ok {
+					messages = next
+					continue
+				}
+				if handled, recoveryErr := r.recoverModelCall(ctx, streamErr, messages, attempt, turnText == "" && len(turnCalls) == 0); handled {
 					if recoveryErr != nil {
 						return nil, recoveryErr
 					}
 					attempt++
-					continue
-				}
-				if next, ok := r.handOffContext(ctx, streamErr, messages, &contextHandoffs, iter, requestId); ok {
-					messages = next
 					continue
 				}
 				repairTool := isMalformedToolOutput(streamErr)

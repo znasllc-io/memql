@@ -208,6 +208,27 @@ Byte recovery and content verification are different from semantic retrieval.
 
 ## Context pressure and optional work
 
+Known context-capacity refusals at a reasoning boundary use the existing native
+model-call checkpoint suspension. Proactive compaction enters it directly after
+its bounded attempts; provider overflow first tries the strictly smaller context
+handoff. Both streaming and non-streaming loops preserve the current exchange
+before returning `HumanWait`. A generic failed-step Retry creates a new execution
+version and therefore cannot stand in for this suspension. No historical
+waiting links are invented, and uncertain in-flight tool failures never enter
+this path.
+
+`workModelCallRecovery` supplies the capacity-specific question; the native
+engine enforces zero further automatic retries for this case, unchanged owner,
+run, goal and execution identity, and a saved checkpoint before publishing the
+question. Another replica verifies that checkpoint and resumes the same child.
+Storage errors, authorization failures and cancellation are not context-capacity
+signals. `TestContextCapacitySuspendsExactPreparedWorkInBothLoops` reproduces the
+lost suspension and checks a retained prepared call and completed effect.
+The `context-capacity` cases in `TestWorkDBModelCeilingKeepsExactNestedProgress`
+exercise actual nested journals, the public approval decision, peer dispatch and
+resume without replaying the completed read or workflow prefix. The other cases
+retain coverage for failed checkpoint writes, stale work and changed bindings.
+
 Completed old calls whose arguments alone exceed the checkpoint model's input
 window are archived before semantic compaction spends calls on smaller history.
 This handles large file/image transfers without depending on a tool name or
