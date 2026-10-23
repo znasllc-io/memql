@@ -771,8 +771,13 @@ case "$1" in
       shift
     done ;;
   image) printf '%s\n' "$id" ;;
-  ps) printf 'k3d-memql-server-0 server running\n' ;;
+  create) printf '%064d\n' 1 ;;
+  cp) cp "$FAKE_FILES/${2##*/}" "$3" ;;
+  rm) exit 0 ;;
+  ps)
+    case "$*" in *'.Names}} {{.State}}'*) printf 'k3d-memql-server-0 running server\n' ;; *) printf 'k3d-memql-server-0 server running\n' ;; esac ;;
   exec)
+    if [ "$3" = sh ]; then export FAKE_NODE="$2"; shift 2; exec "$@"; fi
     case "$*" in
       *'images ls -q'*) echo docker.io/library/memql-db:16-dev ;;
       *'images ls'*)
@@ -781,6 +786,8 @@ case "$1" in
       *'images check'*)
         for arg in "$@"; do case "$arg" in name==*) printf '%s\n' "${arg#name==}" ;; esac; done ;;
       *'crictl inspecti'*) printf '%s\n' "$id" ;;
+      *'crictl images'*) echo '{"images":[]}' ;;
+      *'crictl ps'*) echo '{"containers":[]}' ;;
     esac ;;
 esac
 exit 0
@@ -795,6 +802,7 @@ exit 0
 
 const e2eFakeKubectl = `#!/usr/bin/env bash
 case "$*" in
+  *'get pods,deployments,'*) echo '{"items":[]}'; exit 0 ;;
   *"config use-context"*) exit 0 ;;
   *"rollout restart"*)
     printf '%s\n' "$*" >> "$FAKE_RESTART_LOG"; exit 0 ;;
@@ -854,6 +862,7 @@ func TestMainRestartsTheBuiltNodeThePatchDidNotMove(t *testing.T) {
 		"FAKE_RESTART_LOG="+restartLog,
 		"MEMQL_K3D_SYNC_TIMEOUT=5",
 	)
+	cmd.Env = append(cmd.Env, installLocalBuildTestRuntime(t, tmp)...)
 	out, err := cmd.CombinedOutput()
 	if err != nil {
 		t.Fatalf("dev.sh failed: %v\n%s", err, out)

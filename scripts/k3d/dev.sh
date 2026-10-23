@@ -146,6 +146,8 @@ cap_spec_param "pull-infra"      "pull + import infra images (flag)"            
 cap_spec_param "cluster"         "k3d cluster name"
 cap_spec_param "namespace"       "k8s namespace"
 cap_spec_param "no-wait"         "skip rollout status wait (flag)"                                   ""
+cap_spec_param "min-free-disk-mib" "minimum available workspace disk before a local build (default: 20480; minimum: 1024)"
+cap_spec_param "image-cache-keep" "newest owned image builds to retain per node type after a successful rollout (default: 2; minimum: 2)"
 cap_spec_param "carrier-repo"    "downstream carrier repo whose Dockerfile builds the carrier nodes" ""
 cap_spec_param "carrier-nodes"   "node types built from the carrier Dockerfile, comma-separated"     ""
 cap_spec_param "carrier-context" "docker build context for carrier builds (default: carrier repo's parent)" ""
@@ -420,6 +422,8 @@ function build_engine_node() {
     # recorder now writes this stderr to a `.log` beside that record and names
     # it in the detail, so the evidence is where the pointer is.
     build_local_image \
+        --label "io.memql.local-build.cluster=${CLUSTER_NAME}" \
+        --label "io.memql.local-build.node-type=${node}" \
         "${ENGINE_BUILD_ARGS[@]}" \
         --target "${ENGINE_BUILD_TARGET}" \
         --tag "${image}" \
@@ -450,6 +454,8 @@ function build_carrier_node() {
     fi
 
     build_local_image \
+        --label "io.memql.local-build.cluster=${CLUSTER_NAME}" \
+        --label "io.memql.local-build.node-type=${node}" \
         --build-arg BUILD_TAGS="${node}" \
         --build-arg CGO_ENABLED=0 \
         --tag "${image}" \
@@ -465,13 +471,13 @@ function build_carrier_node() {
 #=============================================================================
 
 function import_image() {
-    local image="$1" expected="${2:-}"
+    local image="$1" expected="${2:-}" integrity="${3:-metadata}"
     if [[ -z "$expected" ]]; then
         expected="$(docker image inspect --format '{{.Id}}' "$image")" \
             || cap_fail 5 "could not inspect ${image} before import"
     fi
     info "Importing ${image} into k3d cluster '${CLUSTER_NAME}'..."
-    import_local_image_verified "$image" "$CLUSTER_NAME" "$expected" \
+    import_local_image_verified "$image" "$CLUSTER_NAME" "$expected" "$integrity" \
         || cap_fail 5 "importing or verifying ${image} in k3d cluster '${CLUSTER_NAME}' failed -- see stderr for the affected image/node"
     info "Imported ${image}."
 }
@@ -550,6 +556,7 @@ function build_and_import_nodes() {
     # Each pass reports its count as it goes (cap_progress), which is what a
     # progress bar follows through the longest part of a rebuild.
     for node in "$@"; do
+        check_local_build_disk
         cap_progress "Building images" "${#ids[@]}" "$total"
         LOCAL_IMAGE_BUILT_ID=""
         build_node "$node"
@@ -566,9 +573,42 @@ function build_and_import_nodes() {
     index=0
     for node in "$@"; do
         cap_progress "Importing images" "$index" "$total"
+        check_local_build_disk
         install_node "$node" "${ids[$index]}"
         index=$((index + 1))
     done
+}
+
+# main always enters through the supervisor. Sourced helpers remain usable by
+# the isolated shell fixtures; they do not represent a second CLI run path.
+function check_local_build_disk() {
+    if [[ -n "${MEMQL_HOST_BUILD_LOCK_FD:-}" ]]; then
+        python3 "${SCRIPT_DIR}/../lib/host_build_guard.py" --check \
+            --workspace="$REPO_ROOT" --min-free-disk-mib="${MIN_FREE_DISK_MIB:-20480}" \
+            || cap_fail 3 "local build admission failed -- see the reservation or disk diagnostic on stderr"
+    fi
+}
+
+function clean_owned_image_cache() {
+    local receipt maintenance_failed=false
+    if receipt="$(python3 "${SCRIPT_DIR}/image_cache.py" --cluster="$CLUSTER_NAME" \
+        --keep-per-type="$IMAGE_CACHE_KEEP" --apply=true)"; then
+        info "Owned image cache maintenance completed."
+    else
+        maintenance_failed=true
+        info "Owned image cache maintenance did not complete; see the imageCache result and stderr."
+    fi
+    # Keep the complete maintenance receipt, including any confirmed removals
+    # before a refusal. A successful rollout does not imply successful cleanup.
+    if printf '%s' "$receipt" | python3 -c 'import json,sys; v=json.load(sys.stdin); assert isinstance(v,dict) and isinstance(v.get("ok"),bool)' >/dev/null 2>&1; then
+        cap_result_set_raw imageCache "$receipt"
+    else
+        maintenance_failed=true
+        cap_result_set_raw imageCache '{"ok":false,"error":{"message":"Image cache maintenance returned no valid receipt"}}'
+    fi
+    if [[ "$maintenance_failed" == true ]] || ! printf '%s' "$receipt" | python3 -c 'import json,sys; sys.exit(0 if json.load(sys.stdin).get("ok") is True else 1)' >/dev/null 2>&1; then
+        cap_fail 5 "The rollout completed, but image cache maintenance did not finish; reconcile the retained local build before retrying"
+    fi
 }
 
 # install_node imports one already-built image into the cluster, and restarts
@@ -576,7 +616,7 @@ function build_and_import_nodes() {
 function install_node() {
     local node="$1"
 
-    import_image "$(image_name_for_node "$node")" "${2:-}"
+    import_image "$(image_name_for_node "$node")" "${2:-}" engine
     IMPORTED_NODES+=("$node")
     # Under --image-source=checkout the Application's node overrides are dropped
     # once every image is imported, and the sync that follows rolls the pods --
@@ -1102,6 +1142,12 @@ function main() {
     REPO_ROOT="$(cap_param repo-root "${REPO_ROOT}")"
     APP_NAME="$(cap_param app-name "${MEMQL_K3D_APP_NAME:-memql-local}")"
     IMAGE_SOURCE="$(cap_param image-source "")"
+    MIN_FREE_DISK_MIB="$(cap_param min-free-disk-mib "20480")"
+    IMAGE_CACHE_KEEP="$(cap_param image-cache-keep "2")"
+    [[ "$MIN_FREE_DISK_MIB" =~ ^[0-9]{1,9}$ && "$MIN_FREE_DISK_MIB" -ge 1024 ]] \
+        || cap_fail 2 "min-free-disk-mib must be an integer of at least 1024"
+    [[ "$IMAGE_CACHE_KEEP" =~ ^[0-9]{1,3}$ && "$IMAGE_CACHE_KEEP" -ge 2 && "$IMAGE_CACHE_KEEP" -le 100 ]] \
+        || cap_fail 2 "image-cache-keep must be between 2 and 100"
 
     cap_require cluster "$CLUSTER_NAME"
     cap_require namespace "$NAMESPACE"
@@ -1119,6 +1165,23 @@ function main() {
     # that cannot be found, eight images into a rebuild.
     require_build_checkout "$REPO_ROOT"
     checkout_facts "$REPO_ROOT"
+
+    command -v python3 >/dev/null 2>&1 || cap_fail 4 "python3 is required for shared local build admission"
+    if [[ -z "${MEMQL_HOST_BUILD_LOCK_FD:-}" ]]; then
+        # The supervisor holds capacity through build, import, rollout and
+        # retention, then verifies completion before forwarding the JSON result.
+        # Replaying buffered stdin preserves capability params across re-entry.
+        if [[ "${_CAP_STDIN_READ:-0}" == 1 ]]; then
+            exec python3 "${SCRIPT_DIR}/../lib/host_build_guard.py" \
+                --workspace="$REPO_ROOT" --min-free-disk-mib="$MIN_FREE_DISK_MIB" \
+                -- bash "${SCRIPT_DIR}/dev.sh" "$@" <<< "$_CAP_STDIN_JSON"
+        else
+            exec python3 "${SCRIPT_DIR}/../lib/host_build_guard.py" \
+                --workspace="$REPO_ROOT" --min-free-disk-mib="$MIN_FREE_DISK_MIB" \
+                -- bash "${SCRIPT_DIR}/dev.sh" "$@"
+        fi
+    fi
+    check_local_build_disk
 
     if [ -n "${carrier_nodes_arg}" ]; then
         IFS=',' read -ra CARRIER_NODES <<< "${carrier_nodes_arg}"
@@ -1211,6 +1274,10 @@ function main() {
 
         if [ -z "${wait_flag}" ]; then
             wait_for_rollouts "${nodes_to_build[@]}"
+            cap_result_set_raw rolloutComplete true
+            clean_owned_image_cache
+        else
+            cap_result_set_raw imageCache '{"ok":false,"skipped":"Rollout readiness was not checked"}'
         fi
     fi
 
