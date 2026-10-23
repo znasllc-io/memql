@@ -327,7 +327,11 @@ func (e *MemQLEngine) PrepareWorkContinuation(ctx context.Context, request Check
 	if checkpointID != continuationID(run, canonical) {
 		return nil, fmt.Errorf("the saved work checkpoint content changed")
 	}
-	if permissionGuidance && subject["computerPermission"] == nil {
+	// Approved desktop/file/http sessions carry the same native witness as
+	// guidance on them. Approval must not allow a forged or changed pending
+	// call to skip the exact binding check merely because it grants a scope.
+	approvedScopeCheckpoint := kind == work.ApprovalKindScopeElevation && decision == "approved" && subject["nativeScopeCheckpoint"] != nil
+	if (permissionGuidance || approvedScopeCheckpoint) && subject["computerPermission"] == nil {
 		if !scopeCheckpointMatches(run, subject, checkpointID, messages) {
 			return nil, fmt.Errorf("the computer scope decision does not name this pending call")
 		}

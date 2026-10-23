@@ -367,6 +367,9 @@ calculation does not grant permission or execute the approved operation.
    The proactive budget includes this current receipt; actual model capacity
    remains a hard limit. Keeping an answer in context neither grants access nor
    proves an operation ran: execution still checks its current permission record.
+   Approval of a desktop, file-write or HTTP session bound to a native checkpoint
+   continues that same execution attempt. It does not start the section again;
+   changed or mismatched checkpoints are refused before work resumes.
 2. **Archive bulky results.** When the context is over budget, completed large
    tool results are stored in the owner-scoped journal before replacement
    with a short, explicitly incomplete preview and an exact reference. The

@@ -47,6 +47,20 @@ and tests exact retention on two database-backed engines, with no effect replay
 or summarizer call. This preserves the decision in context; it does not guarantee
 that a model chooses the next action or that a UI result is correct.
 
+Approving a desktop, file-write or HTTP session with a server-bound native
+checkpoint resumes the existing execution generation. The old legacy-scope
+branch created a new rerun on approval, invalidating the checkpoint immediately
+after a successful operation and preventing subsequent visual verification.
+The approval classifier recognizes the hashed native witness; actual resumption
+rechecks its transcript identity, pending call, request hash, owner and execution
+generation before reasoning or effects. Legacy requests without that witness
+keep their existing retry behavior; rejection still stops the run. No completed
+effect is replayed and no access duration is extended by this change.
+`TestScopeCheckpointApprovalPreservesExecutionAcrossReplicas` reproduces the
+generation replacement and checks all three session kinds, ordinary and rerun
+executions, rejection and a forged pending-request hash with real storage on two
+engines. It verifies decision and transcript restoration, not a live screenshot.
+
 | Decision | Reason and resulting path | Implementation |
 | --- | --- | --- |
 | Select a model and execution route | Use the current policy and requested reasoning level. An Apps route does not grant tools, host access or ownership. Missing app-session wiring is a platform fault, not permission to open another machine. | [App session provider](../../../component/memql/app_session_provider.go) |
