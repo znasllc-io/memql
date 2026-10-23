@@ -7,7 +7,42 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/require"
+	memorynodes "github.com/znasllc-io/memql/component/database/memory-nodes"
 )
+
+func TestWorkerToolErrorPreservesReportedFailureWithoutCompletingBuiltin(t *testing.T) {
+	tool := &Tool{Name: "workerHost", Handler: &ToolHandler{Type: "function", FunctionName: "agentworkerDispatchHost"}}
+	for _, code := range []string{"denied_no_per_task_approval", "exec_timeout"} {
+		cause := fmt.Errorf("worker action failed (%s)", code)
+		reported := &WorkerToolResultError{Cause: cause, Node: memorynodes.MemoryNode{
+			ID: "worker-call:1", Concept: "integration:worker:result", Type: memorynodes.NodeTypeObject,
+			Payload: json.RawMessage(fmt.Sprintf(`{"ok":false,"errorCode":%q,"output":{"stdout":"partial output"}}`, code)),
+		}}
+		wrapped := fmt.Errorf("builtin: %w", reported)
+		require.ErrorIs(t, wrapped, cause, "ordinary execution must still fail")
+		result := workerToolErrorResult(tool, wrapped)
+		require.NotNil(t, result)
+		require.True(t, result.IsError)
+		require.Len(t, result.Content, 1)
+		failure := WorkerToolResultFailure(result.Content[0].Text)
+		require.NotNil(t, failure)
+		require.Contains(t, failure.JSON(), code)
+		require.Contains(t, failure.JSON(), "partial output")
+		require.False(t, failure.Retryable)
+		if code == "denied_no_per_task_approval" {
+			require.Equal(t, ToolErrorPermission, failure.Type)
+		}
+		other := *tool
+		other.Name = "unrelatedTool"
+		require.Nil(t, workerToolErrorResult(&other, wrapped))
+		require.Nil(t, workerToolErrorResult(tool, cause), "a transport error carries no reported receipt")
+		reported.Node.Concept = "user:note"
+		require.Nil(t, workerToolErrorResult(tool, wrapped))
+		reported.Node.Concept = "integration:worker:result"
+		reported.Node.Payload = json.RawMessage(`{"ok":true}`)
+		require.Nil(t, workerToolErrorResult(tool, wrapped))
+	}
+}
 
 func workerResultText(t *testing.T, concept string, payload any, graph bool) string {
 	t.Helper()

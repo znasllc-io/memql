@@ -4,10 +4,12 @@ package worker
 
 import (
 	"context"
+	"errors"
 	"strings"
 	"testing"
 
 	memqlv1 "github.com/znasllc-io/memql/component/grpc/gen"
+	"github.com/znasllc-io/memql/component/memql"
 )
 
 func TestWorkerBuiltinDoesNotCompleteAFailedForwardedEffect(t *testing.T) {
@@ -28,6 +30,12 @@ func TestWorkerBuiltinDoesNotCompleteAFailedForwardedEffect(t *testing.T) {
 				}
 			} else if err == nil || !strings.Contains(err.Error(), code) || len(nodes) != 1 {
 				t.Fatalf("failed effect became a successful builtin result: %v %v", nodes, err)
+			}
+			if code != "" {
+				var reported *memql.WorkerToolResultError
+				if !errors.As(err, &reported) || reported.Node.ID != nodes[0].ID || string(reported.Node.Payload) != string(nodes[0].Payload) {
+					t.Fatalf("failed builtin lost the typed receipt needed by the tool adapter: %v", err)
+				}
 			}
 		})
 	}

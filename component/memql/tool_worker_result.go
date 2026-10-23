@@ -2,8 +2,37 @@ package memql
 
 import (
 	"encoding/json"
+	"errors"
 	"strings"
+
+	memorynodes "github.com/znasllc-io/memql/component/database/memory-nodes"
 )
+
+// WorkerToolResultError preserves a reported worker outcome while keeping the
+// builtin failed: an automation must not journal a denied or partial effect as
+// completed. Only the declared worker tool surface turns this typed receipt into
+// an error-marked MCP result; ordinary execution still receives the error.
+type WorkerToolResultError struct {
+	Node  memorynodes.MemoryNode
+	Cause error
+}
+
+func (e *WorkerToolResultError) Error() string { return e.Cause.Error() }
+func (e *WorkerToolResultError) Unwrap() error { return e.Cause }
+
+func workerToolErrorResult(tool *Tool, err error) *ToolCallResult {
+	var reported *WorkerToolResultError
+	if !declaredWorkerTool(tool) || !errors.As(err, &reported) || reported == nil {
+		return nil
+	}
+	result := newExecuteResult(nil)
+	result.setOutput(nodesToMap([]memorynodes.MemoryNode{reported.Node}))
+	text, encodeErr := executeResultToToolJSON(result)
+	if encodeErr != nil || WorkerToolResultFailure(text) == nil {
+		return nil
+	}
+	return &ToolCallResult{IsError: true, Content: []ToolResultContent{{Type: "text", Text: text}}}
+}
 
 // A worker refusal is a completed protocol answer, not a failed transport.
 // Only these declared native handlers return the worker action contract. Never

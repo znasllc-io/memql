@@ -700,6 +700,9 @@ func (e *MemQLEngine) ExecuteTool(ctx context.Context, tool *Tool, args map[stri
 		}
 		result, err := e.Execute(ctx, query)
 		if err != nil {
+			if reported := workerToolErrorResult(tool, err); reported != nil {
+				return reported, nil
+			}
 			return nil, fmt.Errorf("function execution failed: %w", err)
 		}
 		text, err := executeResultToToolJSON(result)

@@ -340,6 +340,25 @@ displays, explicit exclusions and invalid/headless descriptors. A routing-ready
 display does not prove that a screenshot or UI interaction succeeded; those need
 their own execution evidence.
 
+### Reported worker failures
+
+A worker denial or partial failure must stay failed in both execution paths.
+The dispatch builtin returns its receipt alongside a typed error, so a native
+automation cannot journal the effect as completed. The canonical `workerHost`
+and `workerComputer` tool handlers recognize that typed error and carry the
+same receipt through the ordinary result codec with MCP `isError=true`.
+The cognition adapter classifies the reported failure as non-retryable and
+retains its output. A generic transport error, an unrelated tool, or a payload
+outside the declared worker result contract does not take this path.
+
+This preserves the permission decision without turning a reported refusal into
+a transport failure or a successful effect. Database-free coverage lives in
+`TestWorkerBuiltinDoesNotCompleteAFailedForwardedEffect` and
+`TestWorkerToolErrorPreservesReportedFailureWithoutCompletingBuiltin`;
+`TestWorkDBWorkerRefusalReachesCanonicalToolAndAdapter` checks the installed
+tool and adapter on independent database-backed engines. Local compile-only
+validation of that last test does not establish its native execution result.
+
 ### Native screenshots through Apps
 
 After the existing tool and computer permission checks succeed, the MCP

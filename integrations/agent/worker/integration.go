@@ -364,9 +364,11 @@ func (i *Integration) handleDispatch(ctx context.Context, tool string, args map[
 		Payload:   payload,
 	}}
 	if !res.OK {
-		// Native compositions may inspect the failed receipt. The builtin error
-		// still prevents an automation from journaling it as a completed effect.
-		return nodes, fmt.Errorf("worker %s %s failed (%s): %s", tool, action, res.ErrorCode, res.ErrorMessage)
+		// Keep native compositions failed so they cannot journal a completed
+		// effect. The typed receipt also survives Execute's error-only return,
+		// letting the canonical tool surface report it in-band without retry.
+		return nodes, &memql.WorkerToolResultError{Node: nodes[0],
+			Cause: fmt.Errorf("worker %s %s failed (%s): %s", tool, action, res.ErrorCode, res.ErrorMessage)}
 	}
 	return nodes, nil
 }
