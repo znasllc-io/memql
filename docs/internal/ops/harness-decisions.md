@@ -530,6 +530,17 @@ old three-automatic/sixteen-total caps and fixed two-hour context deadline are
 removed. Monetary limits, scoped permissions, cancellation, per-operation
 watchdogs and the existing stalled-loop detector remain independent.
 
+Recovery observes that same current cumulative window. `ModelCallBudget`
+previously reloaded the original goal estimate after calculating the renewed
+allowance, so a run beyond its first window appeared permanently exhausted to
+compaction. This forced exact archival even when the current window could fund
+a semantic checkpoint. The observation now uses the fresh progress-adjusted
+allowance and unchanged reconciled usage. It cannot renew a window or admit a
+call; provider caps, monetary limits and dispatch checks still apply. Unit and
+cross-replica database regressions cover peer renewals, workload allowance
+changes and usage retention without writes. This restores the compactor's
+budget choice; it does not guarantee that a model follows archived evidence.
+
 Counters never reset on renewal. A human-directed restart opens a new evidence
 epoch; receipts older than that epoch cannot fund another window. Automatic
 renewal does not advance that timestamp: doing so would discard receipts that

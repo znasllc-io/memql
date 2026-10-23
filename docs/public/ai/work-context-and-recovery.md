@@ -538,6 +538,12 @@ are never sent to a summarizer. It preserves the same protected requests,
 authority and pending exchanges, and labels the replacement preview incomplete.
 If the request still exceeds its budget, it fails and retains the originals.
 
+The call reserve for recovery uses the current renewed work window and the
+full cumulative usage. Spending the original estimate does not permanently
+force archive-only compaction after progress has renewed the window. Reading
+that allowance does not grant another renewal or bypass provider call caps,
+monetary limits or execution permissions.
+
 Semantic summaries are cached by both exact source bytes and request relevance.
 An unchanged pair can be reused on another replica without inference. New human
 direction can require a new summary even when the source is unchanged; reusing
