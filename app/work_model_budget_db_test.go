@@ -332,7 +332,7 @@ func testModelBudgetBoundaries(t *testing.T, boundaries []string) {
 					if boundary == "repair-rerun" {
 						// Automatic contract repair persists this same guidance on the request.
 						repaired := load(reader, runID)
-						recorded := map[string]any{"requestId": repaired.Rerun.RequestId, "stepKey": repaired.Rerun.StepKey, "reason": "rerun", "versions": repaired.Rerun.Versions, "override": map[string]any{"guidance": map[string]any{"reason": "The prior turn did not produce a valid completion or durable question."}}}
+						recorded := map[string]any{"requestId": repaired.Rerun.RequestId, "stepKey": repaired.Rerun.StepKey, "requestedAt": repaired.Rerun.RequestedAt.Format(time.RFC3339Nano), "reason": "rerun", "versions": repaired.Rerun.Versions, "override": map[string]any{"guidance": map[string]any{"reason": "The prior turn did not produce a valid completion or durable question."}}}
 						write("updateWorkRun", map[string]any{"runId": runID, "rerun": recorded})
 					}
 					j := load(reader, runID)
@@ -480,7 +480,9 @@ func testModelBudgetBoundaries(t *testing.T, boundaries []string) {
 							case "override":
 								spec.Override = &common.StepOverride{Prompt: "Changed input"}
 							case "snapshot":
-								spec.Snapshot = &common.WorkspaceSnapshot{}
+								// Nil and an empty snapshot both restore no files. Change
+								// actual content to test refusal before any child resumes.
+								spec.Snapshot = &common.WorkspaceSnapshot{Files: []common.SnapshotFile{{Path: "changed.txt", FileId: "different-file"}}}
 							case "missing child":
 								bad.StepStates = map[string]automations.StepState{}
 								for k, v := range journal.StepStates {
