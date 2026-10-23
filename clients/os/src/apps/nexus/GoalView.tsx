@@ -46,7 +46,7 @@ import {
 } from "./rows";
 import type { ComposerDraft } from "./versions";
 import { buildWorld } from "./world";
-import { goalStatusWord, originWord, runModeWord, runStatusWord } from "./words";
+import { goalStatusWord, originWord, runModeWord, runStatusWord, runWithoutStepsSummary } from "./words";
 
 // THE GOAL VIEW: one goal, as a place the work arrives at.
 //
@@ -266,6 +266,16 @@ export function GoalView({
   const appRun = run === null ? null : (appRuns.find((candidate) => idTail(candidate.id) === idTail(run.id)) ?? null);
   const usageSummary = usage ? summarizeUsage(usage.calls, usage.complete) : null;
   const tokenUsage = appRun ? runSpend(appRun).find(figure => figure.as === "tokens")?.value ?? null : null;
+  const actionsUnavailable = railSteps.length === 0 && stepsState !== "live";
+  const emptySummary = actionsUnavailable
+    ? stepsState === "seeding" ? "Loading recorded actions." : "The action history is unavailable. Reconnect to read this attempt."
+    : run === null ? "" : runWithoutStepsSummary({
+    status: run.status, errorCode: appRun?.errorCode, errorMessage: run.errorMessage, waitingOnKind: appRun?.waitingOnKind,
+  });
+  const emptyJourneyLabel = actionsUnavailable
+    ? stepsState === "seeding" ? "Loading recorded actions" : "Action history unavailable"
+    : run?.status === "compiling" || run?.status === "running"
+    ? "The work is taking shape" : run?.status === "waiting" ? "Waiting before the first action" : "No actions recorded";
   const currentStep = railSteps.find(step => ["waiting", "running", "failed"].includes(step.status)) ?? railSteps.at(-1);
   const composerStep = composer === null ? null : (railSteps.find((step) => step.key === composer.stepKey) ?? null);
   const composerSession =
@@ -337,10 +347,10 @@ export function GoalView({
           </Caption>
         ) : (
           <>
-            <section className="nexus-now" aria-label="Current progress"><div><p className="nexus-now-title">{waitingOnYou ? "Waiting for your decision" : currentStep ? stepTitle(currentStep) : runStatusWord(run.status)}</p><Caption>{waitingOnYou ? parked?.question || "Review the request to continue." : currentStep ? stepOutcome(currentStep) : "The next action has not been recorded yet."}</Caption></div><span className="nexus-usage" title={usageSummary?.total !== null && usageSummary?.total !== undefined ? `${usageSummary.total.toLocaleString()} tokens${usageSummary.estimated ? " (includes estimates)" : " reported"}` : "Token usage has not been reported"}>{usageSummary && usageSummary.calls > 0 ? usageLabel(usageSummary) : tokenUsage === null ? "Usage not reported" : `${formatTokens(tokenUsage)} tokens reported`}</span></section>
+            <section className="nexus-now" aria-label="Current progress"><div><p className="nexus-now-title">{waitingOnYou ? "Waiting for your decision" : currentStep ? stepTitle(currentStep) : runStatusWord(run.status)}</p><Caption>{waitingOnYou ? parked?.question || "Review the request to continue." : currentStep ? stepOutcome(currentStep) : emptySummary}</Caption></div><span className="nexus-usage" title={usageSummary?.total !== null && usageSummary?.total !== undefined ? `${usageSummary.total.toLocaleString()} tokens${usageSummary.estimated ? " (includes estimates)" : " reported"}` : "Token usage has not been reported"}>{usageSummary && usageSummary.calls > 0 ? usageLabel(usageSummary) : tokenUsage === null ? "Usage not reported" : `${formatTokens(tokenUsage)} tokens reported`}</span></section>
             <div className="nexus-workspace"><div className="nexus-workspace-spine">
-              <GoalJourney key={run.id} steps={railSteps} selected={selectedStepKey} onSelect={setSelectedStepKey} completed={progress.completed} total={progress.total} stale={stepsState === "degraded" || stepsState === "disconnected"} />
-              {railSteps.length === 0 ? (stepsState === "seeding" ? <RecordListSkeleton label="Loading the steps from the cluster" /> : <Caption>{progress.compiling ? "The steps appear as the work is planned." : "This run recorded no steps."}</Caption>) : null}
+              <GoalJourney key={run.id} steps={railSteps} selected={selectedStepKey} onSelect={setSelectedStepKey} completed={progress.completed} total={progress.total} emptyLabel={emptyJourneyLabel} stale={stepsState === "degraded" || stepsState === "disconnected"} />
+              {railSteps.length === 0 ? (stepsState === "seeding" ? <RecordListSkeleton label="Loading the steps from the cluster" /> : stepsState === "live" ? <Caption>{progress.compiling ? "The steps appear as the work is planned." : "This run recorded no steps."}</Caption> : null) : null}
             </div>{openStep ? <aside className="nexus-workspace-inspector" aria-live="polite"><StepSummary step={openStep} usage={usage ? summarizeUsage(usage.calls.filter(call => call.stepKey === openStep.key), usage.complete) : undefined} /></aside> : null}</div>
 
             {rewound ? (
@@ -348,15 +358,15 @@ export function GoalView({
             ) : null}
 
             <details className="nexus-technical"><summary>Usage and execution details</summary>
-              {card === null ? null : <ReceiptCard card={card} usage={usage} />}
-              <KindBand breakdown={breakdown} />
+              {card === null ? null : <ReceiptCard card={card} usage={usage} stepsKnown={!actionsUnavailable} />}
+              <KindBand breakdown={breakdown} runStatus={run.status} stepsKnown={!actionsUnavailable} />
             </details>
 
-            <details className="nexus-technical"><summary>Dependencies and execution map</summary><BeaconMap
+            <details className="nexus-technical"><summary>Dependencies and execution map</summary>{actionsUnavailable ? <Caption>The execution map is unavailable until recorded actions are read.</Caption> : <BeaconMap
               world={world} state={stepsState} selectedStepKey={selectedStepKey} onSelectStep={setSelectedStepKey}
               onOpenApproval={onOpenApproval} expandedColumns={expandedColumns} expandedFolds={expandedFolds}
               onToggleColumn={depth => setExpandedColumns(held => toggled(held, depth))}
-              onToggleFold={depth => setExpandedFolds(held => toggled(held, depth))} at={at} />
+              onToggleFold={depth => setExpandedFolds(held => toggled(held, depth))} at={at} />}
             </details>
 
             <button type="button" className="os-nexus-link" onClick={() => onOpenRun(run.id)}>
@@ -385,10 +395,12 @@ export function GoalView({
                     ? parked.reason
                     : "Waiting for your decision before continuing"
                 : terminal
-                  ? openStep === null
+                  ? railSteps.length === 0
+                    ? actionsUnavailable ? emptyJourneyLabel : "No recorded actions to review"
+                    : openStep === null
                     ? "Select an action to review its result"
                     : ""
-                  : "Follow the actions above to see what happens next"
+                  : railSteps.length === 0 ? emptyJourneyLabel : "Follow the actions above to see what happens next"
         }
         tone={tone}
         acts={acts}
@@ -505,13 +517,13 @@ function Scrubber({
  * stopped. Hiding the cost because the outcome was bad is the version of this
  * that flatters instead of informing.
  */
-function ReceiptCard({ card, usage }: { card: NonNullable<ReturnType<typeof receipt>>; usage?: ModelUsageState }) {
+function ReceiptCard({ card, usage, stepsKnown }: { card: NonNullable<ReturnType<typeof receipt>>; usage?: ModelUsageState; stepsKnown: boolean }) {
   return (
     <Panel label="What it cost">
       <ul className="os-nexus-spend" aria-label="What this run cost">
         <Reading value={card.elapsedMs < 0 ? "--" : formatElapsed(card.elapsedMs)} label="took" />
-        <Reading value={String(card.steps)} label={card.steps === 1 ? "step" : "steps"} />
-        {usage ? null : <Reading value={String(card.thought)} label="steps with model reasoning" />}
+        <Reading value={stepsKnown ? String(card.steps) : "Not available"} label={card.steps === 1 ? "step" : "steps"} />
+        {usage ? null : <Reading value={stepsKnown ? String(card.thought) : "Not available"} label="steps with model reasoning" />}
         {usage ? null : <Reading value={card.tokens === null ? "Not reported" : formatTokens(card.tokens)} label="tokens" />}
         <Reading value={formatMoney(card.cost)} label="cost" />
         {usage ? null : <Reading
@@ -526,7 +538,7 @@ function ReceiptCard({ card, usage }: { card: NonNullable<ReturnType<typeof rece
           sentence="It failed."
           next={
             card.lastRunningStep === ""
-              ? "Nothing was running when it stopped."
+              ? stepsKnown ? "No action was recorded as running when it stopped." : "The action history is unavailable."
               : `${card.lastRunningStep} was running when it stopped.`
           }
           detail={card.failure}

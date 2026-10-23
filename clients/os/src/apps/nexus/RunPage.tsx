@@ -671,7 +671,7 @@ export function RunPage({
               <span className="os-nexus-spend-label">started</span>
             </li>
           </ul>
-          <details className="nexus-technical"><summary>Execution details</summary><KindBand breakdown={breakdown} />
+          <details className="nexus-technical"><summary>Execution details</summary><KindBand breakdown={breakdown} runStatus={run.status} stepsKnown={steps.length > 0 || stepsState === "live"} />
           {breakdown.unclassified > 0 ? (
             <Caption>
               {breakdown.unclassified} of these steps{" "}

@@ -1,7 +1,7 @@
 import { act, fireEvent, render, screen, within } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 import { readTheBar } from "../readTheBar";
-import type { Row } from "@znasllc-io/memql-sdk-core/client";
+import type { LiveState, Row } from "@znasllc-io/memql-sdk-core/client";
 
 const h = vi.hoisted(() => ({ connection: null as unknown }));
 
@@ -11,6 +11,8 @@ vi.mock("../../src/live/connection", () => ({
   osBridgePath: "/_memql/ws",
 }));
 
+const { GoalView } = await import("../../src/apps/nexus/GoalView");
+const { goalFromRow } = await import("../../src/apps/nexus/rows");
 const { NexusApp } = await import("../../src/apps/nexus/NexusApp");
 const { LocalNexusSettingsStore } = await import("../../src/apps/nexus/settings");
 const { approvalRow, fakeConnection, goalRow, rowsResult, runRow, stepRow, withSession } = await import(
@@ -134,6 +136,91 @@ describe("the map draws what the rows say", () => {
     );
     await openGoal();
     expect(screen.getByLabelText("Waiting on you: Review a decision")).toBeTruthy();
+  });
+});
+
+describe("attempts without recorded actions", () => {
+  it("does not infer an empty journal until the disconnected history has been read", async () => {
+    const rawGoal = goalRow({ id: "g1" });
+    const run = runRow({ id: "r1", goalId: "g1", status: "failed", errorMessage: "An unclassified failure" });
+    const props = {
+      goal: goalFromRow(rawGoal), goalRow: rawGoal, runRows: [run], stepRows: [], artifactRows: [], approvalRows: [],
+      openRunId: "r1", onPickRun: vi.fn(), onBack: vi.fn(), onOpenRun: vi.fn(), onOpenApproval: vi.fn(),
+      cancel: { busy: false, error: "", reset: vi.fn(), cancel: vi.fn(async () => true) },
+      derive: { busy: false, error: "", reset: vi.fn(), derivedRunId: "", replay: vi.fn(async () => "") },
+    };
+    const draw = (stepsState: LiveState) => withSession(<GoalView {...props} stepsState={stepsState} />);
+    const view = render(draw("disconnected"));
+    for (const state of ["disconnected", "degraded", "seeding"] as const) {
+      view.rerender(draw(state));
+      const progress = screen.getByRole("region", { name: "Current progress" });
+      expect(within(progress).getByText(state === "seeding" ? "Loading recorded actions." : "The action history is unavailable. Reconnect to read this attempt.")).toBeTruthy();
+      expect(screen.queryByText("This attempt failed before any actions were recorded.")).toBeNull();
+      expect(screen.queryByText("No actions recorded")).toBeNull();
+      expect(screen.queryByText("This run recorded no steps.")).toBeNull();
+      expect(screen.queryByText("No action was recorded as running when it stopped.")).toBeNull();
+      expect(screen.queryByLabelText("No recorded steps.")).toBeNull();
+      expect(screen.queryByRole("application")).toBeNull();
+      await readTheBar();
+      expect(screen.queryByText("No recorded actions to review")).toBeNull();
+    }
+    view.rerender(draw("live"));
+    expect(within(screen.getByRole("region", { name: "Current progress" })).getByText("This attempt failed before any actions were recorded.")).toBeTruthy();
+    expect(screen.getByText("No actions recorded")).toBeTruthy();
+    expect(screen.getByText("This run recorded no steps.")).toBeTruthy();
+    expect(screen.getByLabelText("No recorded steps.")).toBeTruthy();
+    await readTheBar();
+    expect(screen.getByText("No recorded actions to review")).toBeTruthy();
+    expect(props.cancel.cancel).not.toHaveBeenCalled();
+    expect(props.derive.replay).not.toHaveBeenCalled();
+  });
+
+  it("summarizes the recorded planning refusal without exposing provider diagnostics as the main explanation", async () => {
+    // The live pre-step failure shape; identifiers and model name are neutral fixtures.
+    const diagnostic = 'work compile: intent classification failed; retry the request: ai call via provider "fleet:example-model" failed: run v1:work:run:fixture reached its unevaluated ceiling at step <unnamed step> (limit , ): provider admission could not be verified: work is no longer running under this goal';
+    mount(seeded({ steps: [], runs: [runRow({ id: "r1", goalId: "g1", status: "failed", errorMessage: diagnostic })] }));
+    await openGoal();
+    const progress = screen.getByRole("region", { name: "Current progress" });
+    expect(within(progress).getByText("Planning stopped because permission to use the model could not be verified.")).toBeTruthy();
+    expect(within(progress).queryByText(diagnostic)).toBeNull();
+    const disclosure = screen.getByText("Usage and execution details").closest("details")!;
+    expect(disclosure.open).toBe(false);
+    expect(within(disclosure).getByText(diagnostic)).toBeTruthy();
+    expect(within(disclosure).getByText("No recorded steps to summarize.")).toBeTruthy();
+    expect(within(disclosure).getByText("No action was recorded as running when it stopped.")).toBeTruthy();
+    expect(within(screen.getByRole("region", { name: "Goal journey" })).getByText("No actions recorded")).toBeTruthy();
+    expect(screen.queryByText("The work is taking shape")).toBeNull();
+    expect(screen.queryByText("The next action has not been recorded yet.")).toBeNull();
+    expect(screen.queryByText(/The band fills in/)).toBeNull();
+    await readTheBar();
+    expect(screen.queryByText("Select an action to review its result")).toBeNull();
+    expect(screen.getByText("No recorded actions to review")).toBeTruthy();
+  });
+
+  it.each([
+    { status: "failed", errorCode: "", errorMessage: "Unrecognized technical failure ref-123", summary: "This attempt failed before any actions were recorded." },
+    { status: "failed", errorCode: "run_refused", errorMessage: "The saved gate refused the request", summary: "This request was refused before any actions were recorded." },
+    { status: "cancelled", summary: "This attempt was stopped before any actions were recorded." },
+    { status: "abandoned", summary: "The process running this attempt was lost. No actions were recorded." },
+    { status: "succeeded", summary: "This attempt finished without recorded actions." },
+  ])("keeps an empty $status attempt in the past without inventing a reason", async ({ status, summary, ...fields }) => {
+    mount(seeded({ steps: [], runs: [runRow({ id: "r1", goalId: "g1", status, ...fields })] }));
+    await openGoal();
+    expect(within(screen.getByRole("region", { name: "Current progress" })).getByText(summary)).toBeTruthy();
+    expect(within(screen.getByRole("region", { name: "Goal journey" })).getByText("No actions recorded")).toBeTruthy();
+    expect(screen.queryByText(/The band fills in/)).toBeNull();
+    await readTheBar();
+    expect(screen.queryByText("Select an action to review its result")).toBeNull();
+  });
+
+  it("shows the actual wait before the first action instead of suggesting planning is running", async () => {
+    mount(seeded({ steps: [], runs: [runRow({ id: "r1", goalId: "g1", status: "waiting", finishedAt: "", waitingOn: { kind: "external", subject: "fixture" } })] }));
+    await openGoal();
+    expect(within(screen.getByRole("region", { name: "Current progress" })).getByText("Waiting for something outside the cluster. No actions have been recorded.")).toBeTruthy();
+    expect(screen.queryByText("The work is taking shape")).toBeNull();
+    expect(screen.queryByText(/The band fills in/)).toBeNull();
+    await readTheBar();
+    expect(screen.queryByText("Follow the actions above to see what happens next")).toBeNull();
   });
 });
 
