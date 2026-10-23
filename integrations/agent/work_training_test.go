@@ -66,7 +66,7 @@ func TestOwnedTrainingRecipeRendersRelevantLessonsWithoutSkillsOrTools(t *testin
 			require.Equal(t, auth.OriginClient, auth.OriginFromContext(ctx))
 			require.Contains(t, trainingCall, "Verify the current change")
 			require.NotContains(t, trainingCall, "unrelated command")
-			for _, policy := range []string{"limit: 3", "minimumSimilarity: 0.6", "maxTokens: 1200"} {
+			for _, policy := range []string{"limit: 3", "minimumSimilarity: 0.6", "maxTokens: 1200", "retryUnavailableAfterSeconds: 300", "includeAvailability: true"} {
 				require.Contains(t, trainingCall, policy)
 			}
 			require.Equal(t, match, strings.Contains(prepared.messages[0].Content, "Verify required checks and preserve their evidence."))
