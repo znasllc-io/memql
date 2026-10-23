@@ -289,13 +289,16 @@ func (i *Integration) validateAnswer(ctx context.Context, owner, runId string) (
 	// attributed on the decision record -- rather than a model call nobody
 	// can trace to the work that caused it. It is always a LIVE call: the
 	// check is new work, and nothing recorded answers it.
-	callCtx := common.ContextWithRun(scoped, common.RunContext{
+	rc := common.RunContext{
 		RunId:       runId,
 		GoalId:      goalId,
 		StepKey:     stepKey,
 		Mode:        common.RunModeLive,
 		OwnerUserId: owner,
-	})
+	}
+	callCtx := common.ContextWithRun(scoped, rc)
+	runVersion, _ := rowTime(run, "createdAt")
+	callCtx = withProviderPhase(callCtx, rc, providerPhase{status: runStatusSucceeded, runVersion: runVersion, stepKey: stepKey, stepVersion: version, expiresAt: i.clock().Add(validatorClaimTTL)})
 	result, err := judge.CallAIStructured(callCtx, airoute.ResolveRequest{
 		Level:      level,
 		Modality:   airoute.ModalityStructured,

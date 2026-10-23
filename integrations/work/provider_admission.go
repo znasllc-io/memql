@@ -57,8 +57,8 @@ func (c *RunCeilings) AdmitProvider(ctx context.Context, rc common.RunContext, p
 	if err != nil {
 		return unknown(err)
 	}
-	if run == nil || rowString(run, "status") != runStatusRunning || run["cancelRequested"] == true || memql.BareShortId(rowString(run, "goalId")) != memql.BareShortId(rc.GoalId) {
-		return unknown(fmt.Errorf("work is no longer running under this goal"))
+	if err := i.admitProviderPhase(ctx, rc, run); err != nil {
+		return unknown(err)
 	}
 	rows, err := i.store().query(ctx, "query "+call("workProviderAdmissionForOwnerRun", map[string]any{"runId": rc.RunId}))
 	if err != nil {
