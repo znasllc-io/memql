@@ -62,6 +62,9 @@ func (i *Integration) trainingAvailabilityKey(ctx context.Context, run common.Ru
 // Timeout observations expire at the original retry time. Reading them does
 // not slide that time forward. The complete latest row is authorized before
 // its status is used; a model-authored note cannot satisfy this native schema.
+// staged-data: GATE -- readOwnedTrainingLessons withholds v1:work:observation
+// before this lookup; the latest fetched row also passes training.admit before
+// its availability receipt is reused.
 func (i *Integration) recentTrainingTimeout(ctx context.Context, run common.RunContext, key string, now time.Time) (trainingSelectionReceipt, string, error) {
 	var prior trainingSelectionReceipt
 	if key == "" {
