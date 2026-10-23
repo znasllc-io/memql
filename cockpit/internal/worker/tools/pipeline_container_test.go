@@ -304,8 +304,15 @@ func isolatePipelineCapacity(t *testing.T) {
 	t.Helper()
 	root := t.TempDir()
 	previous := pipelineCapacityRoot
+	previousDisk := pipelineAvailableDiskBytes
 	pipelineCapacityRoot = func() (string, error) { return root, nil }
-	t.Cleanup(func() { pipelineCapacityRoot = previous })
+	// These tests exercise effects and capacity ownership, independent of the
+	// developer's free disk. Disk admission has its own measured/stubbed cases.
+	pipelineAvailableDiskBytes = func(string) (uint64, error) { return 1 << 40, nil }
+	t.Cleanup(func() {
+		pipelineCapacityRoot = previous
+		pipelineAvailableDiskBytes = previousDisk
+	})
 }
 func testPipelineReservation(t *testing.T) *pipelineReservation {
 	t.Helper()

@@ -443,7 +443,9 @@ func maskCredentials(v any, mask func(string) string) any {
 	return v
 }
 
-// These v2 refusals occur before checkout/command execution. No transport
+// These v2 refusals occur before pipeline command execution. Capacity may be
+// rechecked after an isolated checkout, whose cleanup must be confirmed first.
+// No transport
 // failure, timeout, uncertain cleanup or ordinary command failure can enter
 // this list: those might already have performed external effects.
 func pipelineRefusedBeforeStart(purpose string, result Result, dispatchErr error) bool {

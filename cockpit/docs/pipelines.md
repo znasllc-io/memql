@@ -71,6 +71,7 @@ pipelines:
 | `workspace_root` | `fs.workspace_root/pipelines`, else `~/.memql/pipelines` | Where each step's fresh checkout is made, and removed again. |
 | `max_timeout_sec` | `3600` | The longest a step may run, whatever it asks for. A step that names no timeout gets the cluster's own default, 1200 seconds, under this cap. |
 | `container_memory_mib` | `2048` | Command container memory in MiB, from 256 through 32768. Docker's total memory-plus-swap limit is the same value, so no additional swap is available. Services keep separate 2 GiB limits; native commands are unaffected. |
+| `min_free_disk_mib` | `20480` | Available space required on the workspace filesystem before checkout and again before the pipeline command. Set 1024 through 1048576 MiB for this machine; omitted or zero uses the default. The cluster cannot lower it. |
 
 For a test or build that needs more than 2 GiB, set `container_memory_mib: 4096`
 on a machine with enough free Docker memory. This uses existing machine
@@ -127,6 +128,25 @@ here on the old answer in the meantime is refused by the new one.
    of `MEMQL_HOME` or checkout location. Occupied capacity returns
    `pipeline_capacity_busy` before cloning. This bounds pipeline concurrency;
    it does not reserve resources consumed by agents or other OS users.
+
+   Under that lock, the worker measures available space on the actual
+   workspace filesystem. Low space or an unreadable measurement returns the
+   same retryable capacity refusal with an explanation. After checkout it
+   measures again; a refusal can be retried only after owned checkout cleanup
+   succeeds. Failed cleanup retains the reservation and requires recovery.
+   The engine waits within the run ceiling without recording a test failure,
+   logging the capacity reason without repeating it on every poll.
+   Free space or move the workspace to a larger disk to resume. The worker
+   does not delete caches or images to make room. This is admission headroom,
+   not a disk quota or a guarantee about a separate Docker data volume or
+   storage consumed by programs outside the shared reservation.
+
+   Local development builds use the same slot and retain a separate
+   `local-build.json` record when their outcome is uncertain. Its presence
+   blocks pipeline admission even after the process exits. Inspect it with
+   `python3 scripts/lib/host_build_guard.py --inspect` from the local build
+   checkout, then reconcile the recorded processes and image operations.
+   The worker never removes this record or infers safety from a missing PID.
 3. **A fresh directory**, `step-*` under `workspace_root`, readable only by
    you.
 4. **The checkout**, the cluster Job's own clone script: `git init`, a depth-1

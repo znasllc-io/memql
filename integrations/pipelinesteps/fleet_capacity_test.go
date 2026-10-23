@@ -5,6 +5,7 @@ package pipelinesteps
 import (
 	"context"
 	"errors"
+	"fmt"
 	"strings"
 	"sync"
 	"testing"
@@ -89,6 +90,57 @@ func TestFleetWaitsForConfirmedCapacityWithoutSpendingCommandBudget(t *testing.T
 	res, err := fleet.RunStep(context.Background(), req, run)
 	if err != nil || res.Status != pl.OutcomeSucceeded || calls != 2 {
 		t.Fatalf("result=%+v err=%v calls=%d", res, err, calls)
+	}
+}
+
+func TestFleetDiskCapacityWaitKeepsActionableReasonWithoutRepeatingIt(t *testing.T) {
+	calls := 0
+	reason := "Build waiting for disk space: 512 MiB available; 20480 MiB required. Free space; no pipeline command started."
+	d := &fakeDispatcher{answer: func(context.Context, worker.Request) (worker.Result, error) {
+		calls++
+		if calls <= 2 {
+			return worker.Result{ErrorCode: "pipeline_capacity_busy", ErrorMessage: reason, RefusedBeforeStart: true}, nil
+		}
+		return worker.Result{OK: true, OutputJSON: `{"exitCode":0,"durationMs":10}`}, nil
+	}}
+	f, _, _, sink := newTestFleet(t, d)
+	f.capacityRetry = time.Millisecond
+	req := fleetReq()
+	run := fleetRun(req)
+	run.RunDeadline = exNow.Add(time.Hour).Format(time.RFC3339)
+	result, err := f.RunStep(context.Background(), req, run)
+	if err != nil || result.Status != pl.OutcomeSucceeded || calls != 3 {
+		t.Fatalf("disk wait: %+v %v calls=%d", result, err, calls)
+	}
+	if got := strings.Count(strings.Join(sink.messages(), "\n"), reason); got != 1 {
+		t.Fatalf("actionable reason reported %d times: %v", got, sink.messages())
+	}
+}
+
+func TestFleetDiskCapacityWaitBoundsLiveMeasurementsAndRetainsArchive(t *testing.T) {
+	calls := 0
+	d := &fakeDispatcher{answer: func(context.Context, worker.Request) (worker.Result, error) {
+		calls++
+		if calls <= 6 {
+			return worker.Result{ErrorCode: "pipeline_capacity_busy", ErrorMessage: fmt.Sprintf("Build waiting for disk space: %d MiB available", calls), RefusedBeforeStart: true}, nil
+		}
+		return worker.Result{OK: true, OutputJSON: `{"exitCode":0,"durationMs":10}`}, nil
+	}}
+	f, lib, _, sink := newTestFleet(t, d)
+	f.capacityRetry = time.Millisecond
+	req := fleetReq()
+	run := fleetRun(req)
+	run.RunDeadline = exNow.Add(time.Hour).Format(time.RFC3339)
+	result, err := f.RunStep(context.Background(), req, run)
+	if err != nil || result.Status != pl.OutcomeSucceeded || calls != 7 {
+		t.Fatalf("disk wait: %+v %v calls=%d", result, err, calls)
+	}
+	if got := strings.Count(strings.Join(sink.messages(), "\n"), "Build waiting for disk space:"); got != 4 {
+		t.Fatalf("live capacity messages=%d, want bounded four: %v", got, sink.messages())
+	}
+	log, ok := lib.named(logFileName(req.StepKey))
+	if !ok || strings.Count(string(log.Bytes), "Build waiting for disk space:") != 6 {
+		t.Fatalf("capacity changes missing from archive: %q", log.Bytes)
 	}
 }
 

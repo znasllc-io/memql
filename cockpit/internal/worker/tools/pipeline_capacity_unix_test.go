@@ -166,3 +166,59 @@ func TestPipelineCapacityWaitsForInterruptedWorkbenchCleanup(t *testing.T) {
 	}
 	reservation.close()
 }
+
+func TestPipelineCapacityRefusesRetainedLocalBuildWithoutChangingItsRecord(t *testing.T) {
+	for _, kind := range []string{"file", "directory", "symlink"} {
+		t.Run(kind, func(t *testing.T) {
+			isolatePipelineCapacity(t)
+			root, _ := pipelineCapacityRoot()
+			marker := filepath.Join(root, "local-build.json")
+			body := []byte(`{"operation":"local build","pid":99999999}`)
+			switch kind {
+			case "file":
+				if err := os.WriteFile(marker, body, 0600); err != nil {
+					t.Fatal(err)
+				}
+			case "directory":
+				if err := os.Mkdir(marker, 0700); err != nil {
+					t.Fatal(err)
+				}
+			case "symlink":
+				if err := os.Symlink(filepath.Join(root, "missing"), marker); err != nil {
+					t.Fatal(err)
+				}
+			}
+			for range 2 {
+				reservation, err := acquirePipelineReservation()
+				if reservation != nil {
+					reservation.close()
+					t.Fatal("retained local build was admitted")
+				}
+				if !errors.Is(err, errPipelineUnreconciled) || !strings.Contains(err.Error(), "host_build_guard.py --inspect") {
+					t.Fatalf("missing recovery instruction: %v", err)
+				}
+			}
+			if _, err := os.Lstat(marker); err != nil {
+				t.Fatalf("local build record was removed: %v", err)
+			}
+			if kind == "file" {
+				if got, err := os.ReadFile(marker); err != nil || string(got) != string(body) {
+					t.Fatalf("local record changed: %s %v", got, err)
+				}
+			}
+			// Simulate an operator-confirmed recovery. Only removal by that
+			// external actor allows a new worker to acquire the clean slot.
+			if err := os.Remove(marker); err != nil {
+				t.Fatal(err)
+			}
+			reservation, err := acquirePipelineReservation()
+			if err != nil {
+				t.Fatal(err)
+			}
+			if reservation.dirty {
+				t.Fatal("local marker became a pipeline attempt")
+			}
+			reservation.close()
+		})
+	}
+}

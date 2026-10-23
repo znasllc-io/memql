@@ -86,6 +86,14 @@ func acquirePipelineReservation() (*pipelineReservation, error) {
 		}
 		return nil, err
 	}
+	// A local build uses this same lock but a separate durable record. Its
+	// supervisor may have died while Docker still has effects in progress.
+	// Never interpret it as a pipeline checkout or clear it based on PID age.
+	localBuild := filepath.Join(root, "local-build.json")
+	if _, err := os.Lstat(localBuild); err == nil || !os.IsNotExist(err) {
+		file.Close()
+		return nil, fmt.Errorf("%w: inspect %s with host_build_guard.py --inspect from the local build checkout; reconcile its processes and image operations before clearing that record", errPipelineUnreconciled, localBuild)
+	}
 	if interrupted, err := workbench.HasInterrupted(root); err != nil || interrupted {
 		file.Close()
 		return nil, errPipelineUnreconciled
