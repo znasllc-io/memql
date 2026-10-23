@@ -6,6 +6,8 @@
 static atomic_bool targetLoopRunning;
 static atomic_ulong targetLoopTurns;
 static CFRunLoopTimerRef targetLoopTimer;
+extern void targetActivationWatchStart(void);
+extern void targetActivationWatchStop(void);
 
 static void targetLoopTick(CFRunLoopTimerRef timer, void *info) {}
 
@@ -24,6 +26,7 @@ int targetMainLoopStart(void) {
             0.05, 0, 0, targetLoopTick, NULL);
         if (!targetLoopTimer) return -4;
         CFRunLoopAddTimer(CFRunLoopGetMain(), targetLoopTimer, kCFRunLoopCommonModes);
+        targetActivationWatchStart();
         atomic_store(&targetLoopTurns, 0);
         atomic_store(&targetLoopRunning, true);
         return 1;
@@ -39,6 +42,7 @@ void targetMainLoopTurn(void) {
 
 void targetMainLoopStop(void) {
     atomic_store(&targetLoopRunning, false);
+    targetActivationWatchStop();
     if (targetLoopTimer) {
         CFRunLoopTimerInvalidate(targetLoopTimer);
         CFRelease(targetLoopTimer);

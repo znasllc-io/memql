@@ -139,13 +139,15 @@ func computeCapabilitiesForRuntime(goos string, getenv func(string) string, desk
 		supported := []string{}
 		if goos == "darwin" {
 			supported = []string{"key_type", "key_combo", "mouse_move", "mouse_click", "mouse_scroll"}
+			contracts["workerComputer.window_selection"] = 1
 		}
 		targetPolicy = map[string]any{
 			"supportedInputActions": supported,
 			"acquisition":           "screenshot with explicit windowId of the already focused window",
 			"receipt":               "inputTarget.id, required on one action in the same run, expires after 60 seconds",
 			"coordinates":           "explicit x/y from that exact screenshot for every pointer action",
-			"focusActivation":       false,
+			"focusActivation":       goos == "darwin",
+			"windowSelection":       "macOS initial selection only: window_list with windowId and pid returns a single-use focusTarget; window_focus requires all three. Never clears or replaces an anchor/latch. A fresh screenshot is required afterward.",
 			"key_combo":             "keys is a string array: primary key first, then modifiers; for example [r,cmd] or [enter]",
 			"key_type":              "text is 1..4096 printable UTF-8 bytes; newline/tab refused; use a fresh screenshot before a separate key_combo",
 			"mouse_click":           "explicit x/y, optional left/right/middle button and cmd/ctrl/alt/shift modifiers; single click only",
@@ -259,9 +261,9 @@ func availableComputerActions(vocabulary []string, goos string) []string {
 	result := make([]string, 0, len(vocabulary))
 	for _, action := range vocabulary {
 		switch action {
-		case "window_focus", "key_hold", "mouse_down", "mouse_up", "mouse_drag":
+		case "key_hold", "mouse_down", "mouse_up", "mouse_drag":
 			continue
-		case "key_type", "key_combo", "mouse_move", "mouse_click", "mouse_scroll":
+		case "window_focus", "key_type", "key_combo", "mouse_move", "mouse_click", "mouse_scroll":
 			if goos != "darwin" {
 				continue
 			}

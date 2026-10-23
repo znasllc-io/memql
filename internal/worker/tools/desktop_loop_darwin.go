@@ -21,6 +21,8 @@ func RunDesktopMainLoop(run func()) error {
 		return fmt.Errorf("cannot initialize the background desktop worker main loop (stage %d)", int(code))
 	}
 	defer C.targetMainLoopStop()
+	desktopMainJobs.start()
+	defer desktopMainJobs.stop()
 	done := make(chan struct{})
 	go func() {
 		defer close(done)
@@ -30,6 +32,8 @@ func RunDesktopMainLoop(run func()) error {
 		select {
 		case <-done:
 			return nil
+		case job := <-desktopMainJobs.queue:
+			job.execute()
 		default:
 			C.targetMainLoopTurn()
 		}

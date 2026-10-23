@@ -20,7 +20,7 @@ func TestComputeCapabilities_GUI(t *testing.T) {
 	if !sort.StringsAreSorted(desc.Actions) {
 		t.Errorf("actions must be sorted for a stable wire shape; got %v", desc.Actions)
 	}
-	if want := 10; len(desc.Actions) != want {
+	if want := 11; len(desc.Actions) != want {
 		t.Fatalf("supported macOS actions = %v", desc.Actions)
 	}
 	agnostic := make(map[string]bool, len(buildAgnosticComputerActions))
@@ -37,17 +37,17 @@ func TestComputeCapabilities_GUI(t *testing.T) {
 			t.Error(`"capabilities" must not be advertised in actions (it is build-agnostic and always available)`)
 		}
 	}
-	for _, required := range []string{"window_list", "wait", "screenshot", "key_type", "key_combo", "mouse_move", "mouse_click", "mouse_scroll"} {
+	for _, required := range []string{"window_focus", "window_list", "wait", "screenshot", "key_type", "key_combo", "mouse_move", "mouse_click", "mouse_scroll"} {
 		if !slices.Contains(desc.Actions, required) {
 			t.Errorf("missing supported action %s", required)
 		}
 	}
-	for _, disabled := range []string{"window_focus", "key_hold", "mouse_down", "mouse_up", "mouse_drag"} {
+	for _, disabled := range []string{"key_hold", "mouse_down", "mouse_up", "mouse_drag"} {
 		if slices.Contains(desc.Actions, disabled) {
 			t.Errorf("advertised disabled action %s", disabled)
 		}
 	}
-	if desc.ActionContracts["workerComputer.input_target"] != 1 || desc.InputTargetPolicy["focusActivation"] != false {
+	if desc.ActionContracts["workerComputer.input_target"] != 1 || desc.ActionContracts["workerComputer.window_selection"] != 1 || desc.InputTargetPolicy["focusActivation"] != true {
 		t.Fatal("missing target contract", desc)
 	}
 	linux := computeCapabilities("linux", func(name string) string {

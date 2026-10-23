@@ -60,12 +60,13 @@ type inputFrame struct {
 // the worker. New screenshots, tokens, runs and window_focus cannot clear it.
 // Read-only screenshots remain available. No application name is special-cased.
 type inputTargetGuard struct {
-	mu      sync.Mutex
-	frame   *inputFrame
-	anchor  inputFocus
-	halted  bool
-	backend inputTargetBackend
-	now     func() time.Time
+	mu        sync.Mutex
+	frame     *inputFrame
+	selection *windowSelection
+	anchor    inputFocus
+	halted    bool
+	backend   inputTargetBackend
+	now       func() time.Time
 }
 
 var desktopInputGuard = &inputTargetGuard{now: time.Now}
@@ -277,7 +278,7 @@ func (g *inputTargetGuard) input(ctx context.Context, action string, args map[st
 		return nil, g.interrupted()
 	}
 	if action == "window_focus" {
-		return nil, failure("input_focus_requires_operator", "Automatic focus activation is disabled. The operator must select the intended window; then request screenshot with its windowId. A model must not take focus back after the operator changes applications.")
+		return g.selectWindow(ctx, args)
 	}
 	owner, ok := inputOwner(ctx)
 	f := g.frame

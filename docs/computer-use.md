@@ -236,8 +236,9 @@ a structured `error_code` + message (see Troubleshooting).
 The computer-use build advertises `workerComputer.input_target: 1`.
 Input requires existing consent and a run ID, plus a one-action receipt:
 
-1. Enumerate windows with `window_list`. The intended window must already
-   be focused; automatic `window_focus` is disabled.
+1. Enumerate windows with `window_list`. The intended window must be focused
+   before screenshot binding. On macOS, an unbound worker may perform one
+   guarded initial selection using the window-selection contract below.
 2. Call `screenshot` with that explicit `windowId`. The macOS backend checks
    the actual Accessibility focused application, window and element before
    and after capture. It matches the AX window to exactly one on-screen CG
@@ -302,8 +303,8 @@ Quartz events without posting them; neither establishes application delivery.
 
 Linux and other platforms have no verified target-addressed input backend in
 this version and refuse input. Read-only capabilities remain as documented.
-`window_focus`, `key_hold`, `mouse_down`, `mouse_up` and `mouse_drag` refuse;
-manual focus selection is required. Legacy global input code is unreachable
+`key_hold`, `mouse_down`, `mouse_up` and `mouse_drag` refuse.
+Legacy global input and app-only activation code is unreachable
 through the dispatcher. No consent or server scope requirement is relaxed.
 
 **`screenshot`** -- `format` (`png` default or `jpeg`), `display` (default
@@ -347,7 +348,7 @@ negative for displays left of / above the primary). `scale` is the
 capture pixel density: the primary display's native scale (2.0 on
 Retina macOS), 1.0 for secondary displays (see platform matrix).
 
-**`window_list`** -- no args. Result `{windows: [{id, title, app,
+**`window_list`** -- normally no args. Result `{windows: [{id, title, app,
 pid, x, y, width, height, focused}]}`. Coordinates are LOGICAL
 (RobotGo input space), not emitted-screenshot space -- to click
 inside a window, still map through a screenshot. On macOS, `title`
@@ -356,8 +357,30 @@ for other apps' windows requires the Screen Recording permission
 window handle (CGWindowID / X window id), stable for the window's
 lifetime only.
 
-**`window_focus`** -- always returns `input_focus_requires_operator` (or
-`input_interrupted` if latched). It never activates or raises an application.
+**Initial window selection (macOS, `workerComputer.window_selection: 1`)** --
+Call `window_list` with an explicit `windowId` and `pid` from an observed row.
+The worker re-enumerates the window, resolves exactly one matching AX window,
+and retains its AX and application-instance identities, geometry, foreground
+application identity, activation generation and content-free HID event counters.
+Ambiguity or held input refuses. The result includes `focusTarget.id`, bound to
+this dispatcher/enrollment and run, single-use and valid for 60 seconds. A new
+window list replaces an earlier selection receipt.
+
+**`window_focus`** -- requires that `focusTarget`, `windowId` and `pid`.
+Only an unbound, uninterrupted worker may use it. It invalidates any input
+receipt, checks for intervening activity or changed identities, and uses AX
+main/raise plus AppKit activation on the original main thread. It never posts
+keyboard/mouse events or falls back to app-only/global input. The exact AX
+focused application/window/element must be verified afterward; activation alone
+does not produce an input receipt. Take a fresh screenshot before input.
+
+An existing anchor can never be replaced by selection. Any detected interruption
+or unverified activation latches input off; a new token/run cannot recover it.
+Cancellation before main-thread execution skips the operation. Once execution
+starts, the call waits for completion, preventing a queued activation after the
+call returned. Checks remain sampled: macOS does not offer an atomic transaction
+covering user activity, activation and AX focus. HID counters do not include
+every special keyboard event. Live application delivery must still be proved.
 
 **`capabilities`** -- no args. Returns the capability descriptor
 (below). Works on every build and never runs preflights:
@@ -417,7 +440,7 @@ The worker's structured self-description of its computer-use surface
 ```
 
 - `inputTargetPolicy`: supported input actions, receipt acquisition and lifetime,
-  exact-image coordinates, disabled focus activation, interruption handling and
+  exact-image coordinates, guarded initial selection, interruption handling and
   sampled-focus limitations. Included in live capabilities and registration
   JSON; older servers may discard this additive field. The action contract
   version remains available in `actionContracts`.
@@ -470,13 +493,14 @@ Where it surfaces:
 | supported pointer transactions | target-addressed, Accessibility required | refused | refused |
 | `key_type`, `key_combo` | target-addressed, Accessibility required | refused | refused |
 | `window_list` | yes -- CGWindowList; titles need Screen Recording | yes -- EWMH `_NET_CLIENT_LIST` | no -- `unsupported_on_platform` |
-| `window_focus`, holds and drags | refused | refused | refused |
+| `window_focus` | guarded initial selection only | refused | refused |
+| holds and drags | refused | refused | refused |
 | multi-display | yes (note 2) | yes (Xinerama; single-display fallback when absent) | n/a |
 
 Notes:
 
-1. **Automatic focus is disabled.** The target guard refuses before any
-   platform activation helper. A person must select the intended window.
+1. **Focus recovery is disabled.** Guarded initial selection is available on
+   macOS only while unbound. It can never replace an anchor or clear a latch.
 2. **Secondary-display capture caveat (macOS)** -- the primary
    display captures through RobotGo's native path at physical pixels
    (Retina quality). Secondary displays capture through the

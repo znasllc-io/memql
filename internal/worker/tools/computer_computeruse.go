@@ -66,6 +66,9 @@ func (d *Dispatcher) dispatchComputer(ctx context.Context, action string, args m
 	if action == "screenshot" {
 		return desktopInputGuard.screenshot(ctx, args, guiScreenshot)
 	}
+	if action == "window_list" {
+		return desktopInputGuard.windowList(ctx, args, listWindows)
+	}
 	if handler, ok := computerActionHandlers[action]; ok {
 		return handler(args)
 	}
