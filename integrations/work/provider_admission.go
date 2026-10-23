@@ -19,11 +19,12 @@ var _ memql.ProviderAdmissionGuard = (*RunCeilings)(nil)
 // The write gate spans fresh accounting, progress checks and the reservation;
 // a lost response conservatively consumes an attempt, never grants a refund.
 func (c *RunCeilings) AdmitProvider(ctx context.Context, rc common.RunContext, policy memql.ProviderAdmission) error {
+	spent := c.Spent(ctx, rc)
 	fail := func(b memql.RunCeilingBreach, spent memql.RunSpend) error {
 		return &memql.RunCeilingError{RunId: rc.RunId, StepKey: rc.StepKey, Breach: b, Spent: spent}
 	}
 	unknown := func(err error) error {
-		return fail(memql.RunCeilingBreach{Ceiling: "unevaluated", Reason: "provider admission could not be verified: " + err.Error()}, c.Spent(ctx, rc))
+		return fail(memql.RunCeilingBreach{Ceiling: "unevaluated", Reason: "provider admission could not be verified: " + err.Error()}, spent)
 	}
 	host, ok := c.store.engine.(interface {
 		IntegrationByName(string) memql.IntegrationProvider
@@ -42,6 +43,11 @@ func (c *RunCeilings) AdmitProvider(ctx context.Context, rc common.RunContext, p
 	if breach := c.Admit(ctx, rc, 0); breach != nil {
 		return fail(*breach, c.Spent(ctx, rc))
 	}
+	// Logical admission holds its local budget mutex before taking the work
+	// gate for renewal. Never take that mutex while holding the gate here:
+	// a concurrent logical admission would otherwise invert the lock order.
+	// The ledger below supplies the fresh, serialized provider-attempt total.
+	spent = c.Spent(ctx, rc)
 	release, err := i.decisionGate(ctx, "workload:"+memql.BareShortId(rc.RunId), "provider-admission:"+memql.BareShortId(rc.RunId))
 	if err != nil {
 		return unknown(err)
@@ -58,7 +64,6 @@ func (c *RunCeilings) AdmitProvider(ctx context.Context, rc common.RunContext, p
 	if err != nil {
 		return unknown(err)
 	}
-	spent := c.Spent(ctx, rc)
 	base, admitted, cost := spent.ModelCalls, 0, spent.Cost
 	receiptAt := i.clock()
 	tokens := spent.Tokens

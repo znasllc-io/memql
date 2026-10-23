@@ -511,6 +511,11 @@ their logical baseline and mark historical transport attempts unknown; they
 cannot certify explicit hard caps or goal monetary limits without recovery.
 Logical-answer reconciliation pages fresh receipts and removes confirmed entries
 from its bounded pending index, rather than retaining every historical ID.
+Provider admission reads that local logical total before taking either shared
+gate; it never takes the local budget mutex while holding a gate. Logical
+admission may hold that mutex while waiting to renew, so the reverse order would
+deadlock. `TestProviderAdmissionDoesNotInvertConcurrentProgressLocks` forces that
+overlap with a peer completion and verifies both admissions finish.
 
 Regression coverage includes
 [`TestProgressDBWorkflowAcrossReplicas`](../../../integrations/work/progress_continuation_db_test.go)

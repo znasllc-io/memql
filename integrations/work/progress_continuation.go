@@ -176,7 +176,9 @@ func progressResultEvidenceKeys(row map[string]any) []string {
 		return nil
 	}
 	var args any
-	if json.Unmarshal([]byte(rowString(data, "args")), &args) != nil {
+	// The native recorder omits an empty argument object. Returned evidence
+	// can still be substantive; argument text is not the credit identity.
+	if raw := rowString(data, "args"); raw != "" && json.Unmarshal([]byte(raw), &args) != nil {
 		return nil
 	}
 	evidence := rowString(data, "nativeResultEvidence")

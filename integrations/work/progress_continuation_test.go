@@ -108,6 +108,8 @@ func TestProgressReceiptRejectsFailuresDiscoveryAndEquivalentRepeats(t *testing.
 	v := progressReceipt("one")
 	rowMap(v, "data")["args"] = "broken JSON"
 	require.Empty(t, progressReceiptKey(v))
+	delete(rowMap(v, "data"), "args")
+	require.NotEmpty(t, progressReceiptKey(v), "a successful source query can take no arguments")
 }
 func TestProgressLimitsIntersectAndDoNotOverflow(t *testing.T) {
 	_, overflow := progressCeilings(map[string]any{}, map[string]any{"classification": map[string]any{"progressContinuation": map[string]any{"extensions": math.MaxInt}}}, workstate.Ceilings{})

@@ -2,13 +2,16 @@ package work
 
 import (
 	"context"
+	"fmt"
 	"sync"
 	"testing"
 	"time"
 
 	"github.com/stretchr/testify/require"
 	"github.com/znasllc-io/memql/component/memql"
+	workstate "github.com/znasllc-io/memql/component/work"
 	"github.com/znasllc-io/memql/core/common"
+	"github.com/znasllc-io/memql/integrations/agent"
 )
 
 func TestProviderAdmissionsReserveAcrossReplicasAndKeepHardLimits(t *testing.T) {
@@ -87,4 +90,65 @@ func TestProviderAdmissionsReserveAcrossReplicasAndKeepHardLimits(t *testing.T) 
 	require.NoError(t, a.i.store().writeInternal(memql.ContextWithTrainingEvidenceWrite(actorCtx(a.owner)), "mutation "+call("createWorkObservation", map[string]any{"observationId": newRowId("v1:work:observation"), "runId": runID, "kind": "decision", "versionTime": rfc(fastClock.Add(time.Minute)), "content": "malformed fixture", "data": map[string]any{"providerAdmission": map[string]any{"schemaVersion": 2}}})))
 	err = fresh.AdmitProvider(actorCtx(a.owner), rc, memql.ProviderAdmission{})
 	require.ErrorContains(t, err, "malformed or has an unsupported version")
+}
+
+func TestProviderAdmissionDoesNotInvertConcurrentProgressLocks(t *testing.T) {
+	a, b := freshActsDBPair(t, openActsDB(t), openActsDB(t))
+	for _, peer := range []actsDB{a, b} {
+		require.NoError(t, peer.eng.RegisterIntegration(peer.i))
+	}
+	runID := a.openRun(t, nil)
+	rc := common.RunContext{RunId: runID, GoalId: rowString(a.runRow(t, runID), "goalId"), OwnerUserId: a.owner, StepKey: "research", Mode: common.RunModeLive}
+	a.write(t, "updateWorkGoal", map[string]any{"goalId": rc.GoalId, "ceilings": map[string]any{"maxModelCalls": 96}})
+	a.write(t, "updateWorkRun", map[string]any{"runId": runID, "classification": map[string]any{"workload": "lookup"}})
+	ctx, cancel := context.WithTimeout(actorCtx(a.owner), 15*time.Second)
+	defer cancel()
+	providerLocked, logicalWaiting, allowProvider := make(chan struct{}), make(chan struct{}, 1), make(chan struct{})
+	gate := a.i.decisionGate
+	a.i.decisionGate = func(ctx context.Context, keys ...string) (func(), error) {
+		if len(keys) == 1 {
+			select {
+			case logicalWaiting <- struct{}{}:
+			default:
+			}
+			return gate(ctx, keys...)
+		}
+		release, err := gate(ctx, keys...)
+		if err != nil {
+			return nil, err
+		}
+		close(providerLocked)
+		select {
+		case <-allowProvider:
+			return release, nil
+		case <-ctx.Done():
+			release()
+			return nil, ctx.Err()
+		}
+	}
+	guard := NewRunCeilings(a.eng, testLogger())
+	providerResult := make(chan error, 1)
+	go func() { providerResult <- guard.AdmitProvider(ctx, rc, memql.ProviderAdmission{}) }()
+	select {
+	case <-providerLocked:
+	case <-ctx.Done():
+		t.Fatal("provider did not reach its reservation gate")
+	}
+	// Peer completions can become visible after the provider's initial logical
+	// check. The concurrent admission now needs the work gate to renew.
+	journal := NewModelJournal(b.eng)
+	for n := 0; n < 12; n++ {
+		require.NoError(t, journal.Record(ctx, a.owner, memql.JournaledCall{ReceiptID: fmt.Sprintf("%s-peer-%d", memql.BareShortId(runID), n), RunId: runID, Served: memql.ServedLocal}))
+	}
+	require.NoError(t, b.i.RecordToolInvocation(ctx, agent.ToolInvocation{RunId: runID, OwnerUserId: a.owner, ToolName: "readSource", NativeResultEvidence: workstate.ArtifactHash(map[string]any{"source": "new substantive source"}), Args: map[string]any{}}))
+	logicalResult := make(chan *memql.RunCeilingBreach, 1)
+	go func() { logicalResult <- guard.Admit(ctx, rc, 0) }()
+	select {
+	case <-logicalWaiting:
+	case <-ctx.Done():
+		t.Fatal("logical admission did not reach progress renewal")
+	}
+	close(allowProvider)
+	require.NoError(t, <-providerResult, "provider must not wait for the logical budget mutex while holding the work gate")
+	require.Nil(t, <-logicalResult)
 }
