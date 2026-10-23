@@ -593,6 +593,14 @@ guidance does not approve a blocked operation. Empty workspace snapshots can
 resume without filesystem restoration. Populated snapshots remain refused
 where restoration is unsupported, rather than pretending their files survived.
 
+An approval resume also preserves that recovered context through the final App
+handoff. If the original rerun replaced the whole prompt, that old replacement
+is not applied again over completed results, a prepared operation or the latest
+recorded decision. The delegate checks the continuation's owner, run, step and
+override binding before launch. Model and effort choices still apply, and a
+fresh explicit rerun still honors whole-prompt replacement. Retained context
+does not extend permissions or bypass the operation's execution checks.
+
 Useful documents, scripts, patches, screenshots and verification receipts can
 be retained as bounded artifacts with provenance. File metadata alone does not
 prove that the bytes are readable. A checkout or dependency cache is a working

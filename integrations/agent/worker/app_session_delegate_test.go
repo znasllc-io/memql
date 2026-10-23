@@ -611,6 +611,71 @@ func TestASessionOverrideReplacesThePromptAndSetsTheKnobs(t *testing.T) {
 	}
 }
 
+func TestSessionWholePromptOverridePreservesApprovedNativeContinuation(t *testing.T) {
+	ex := &recordingExecutor{out: planner.ExecutorResult{Output: map[string]any{"sessionId": "resumed"}}}
+	d := newAppSessionDelegateFor(ex, nil, nil, nil)
+	ov := &common.StepOverride{Prompt: "Revise the saved museum inventory and verify its totals.", WholePrompt: true, Model: "app:codex:test-model", Effort: "xhigh"}
+	ctx := overriddenSessionStep(ov, nil)
+	run, _ := common.RunFromContext(ctx)
+	key, err := common.StepOverrideFingerprint(ov)
+	if err != nil {
+		t.Fatal(err)
+	}
+	run.Continuation = &common.StepContinuation{StepKey: "revise", ObservationID: "saved-checkpoint", ApprovalID: "approved-command", OverrideKey: key}
+	ctx = common.ContextWithRun(ctx, run)
+	// The engine has already restored the immutable checkpoint and current
+	// recorded decision. WholePrompt belongs to the original rerun; applying
+	// it again here used to erase this evidence at the last worker boundary.
+	prompt := ov.Prompt + "\n\n[tool readInventory completed-read]\n287 specimens; recorded content hash unchanged.\n\n[assistant]\nPrepared inspect-inventory command, not executed.\n\n[Recorded answer for this suspended step]\nApproved exact inspect-inventory command once; permission is rechecked at dispatch.\n\n[MemQL runtime]\nEnd the session when awaiting_user."
+	scope := &common.DelegatedTools{Run: run}
+	h := memqlengine.AppSessionHandover{ActingUserId: "u1", AppId: "codex", RunId: run.RunId, StepId: run.StepKey, Prompt: prompt, ToolScope: scope}
+	if _, err := d.RunStep(ctx, h); err != nil {
+		t.Fatal(err)
+	}
+	spec := sessionRunSpec(ex.got, "codex", "u1", sessionWorkspace(ex.got, "/home/u1/work/"), 0)
+	if spec.Prompt != prompt {
+		t.Fatal("whole-prompt rerun override erased completed results, prepared operation or current approval before AppSessionStart")
+	}
+	if spec.Model != "test-model" || spec.Effort != "xhigh" || ex.got.Input["toolScope"] != scope {
+		t.Fatal("continuation changed the selected model, effort or delegated authority")
+	}
+	for _, mode := range []string{"override", "step", "run", "owner", "checkpoint", "decision"} {
+		bad := run
+		proof := *run.Continuation
+		bad.Continuation = &proof
+		switch mode {
+		case "override":
+			proof.OverrideKey = "different"
+		case "step":
+			proof.StepKey = "another-step"
+		case "run":
+			bad.RunId = "another-run"
+		case "owner":
+			bad.OwnerUserId = "another-owner"
+		case "checkpoint":
+			proof.ObservationID = ""
+		case "decision":
+			proof.ApprovalID = ""
+		}
+		before := ex.runs
+		if _, err := d.RunStep(common.ContextWithRun(ctx, bad), h); err == nil {
+			t.Fatalf("%s mismatch launched a continuation", mode)
+		}
+		if ex.runs != before {
+			t.Fatalf("%s mismatch reached the executor", mode)
+		}
+	}
+	// A later explicit rerun without a native continuation still replaces the
+	// whole prompt, as the person requested. Suspension is not a fresh rerun.
+	run.Continuation = nil
+	if _, err := d.RunStep(common.ContextWithRun(ctx, run), h); err != nil {
+		t.Fatal(err)
+	}
+	if got := ex.got.Input["prompt"]; got != ov.Prompt {
+		t.Fatal("a fresh whole-prompt rerun stopped honoring the explicit replacement")
+	}
+}
+
 // INSTRUCTIONS ARE NOT A PROMPT. When the version being replaced was not a
 // session -- a model answered it, or a learned procedure did -- the person
 // wrote instructions to add to the step's own prompt, and a session handed

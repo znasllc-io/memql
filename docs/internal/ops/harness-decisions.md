@@ -56,10 +56,28 @@ exact rendering prevents the delegate's missing-instruction fallback from
 re-appending them. The two bounded override messages belong only to the current
 step/context and do not alter model, effort, input or permission bindings. A
 missing decision time refuses instead of inventing chronology. Explicit whole
-session prompt replacement remains its separate existing contract; this repair
-does not claim to redesign that path. The database regression
+session prompt replacement remains a separate contract for a fresh rerun. The
+database regression
 `TestStepOverrideKeepsItsPlaceBeforeLaterHumanCorrection` checks both older and
 newer human corrections around the override and the flattened Apps prompt.
+
+An approval continuation keeps the recovered handover at the last Apps delegate
+boundary, including when the original rerun used whole-prompt replacement. The
+delegate previously reapplied that old replacement after the engine had restored
+the completed tool results, pending operation and latest recorded decision. The
+saved continuation was intact, but the new App received only the original short
+override and repeatedly restarted recovery. On a native continuation, the
+delegate checks the run, owner, step, checkpoint/decision presence and override
+fingerprint, then preserves the handed-over prompt verbatim. Model and effort
+overrides still apply; a fresh explicit rerun still replaces its whole prompt.
+This changes context delivery, not permission: dispatch continues to enforce
+the approved operation, remaining use, expiry, revocation and local consent.
+`TestSessionWholePromptOverridePreservesApprovedNativeContinuation` follows the
+delegate through the actual AppSessionStart specification, checks completed
+source and pending-operation retention, rejects mismatched bindings before
+launch, and retains the fresh-rerun control. The existing database continuation
+test covers cross-replica checkpoint/decision validation upstream. These checks
+do not establish model adherence or completion of the downstream task.
 
 The proactive context target includes exact current call arguments as required
 input, including a prepared operation followed by a human approval. The
