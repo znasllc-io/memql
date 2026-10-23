@@ -7,7 +7,6 @@ import (
 	"errors"
 	"fmt"
 	"math"
-	"slices"
 	"strings"
 
 	"github.com/znasllc-io/memql/component/memql"
@@ -116,28 +115,7 @@ func (i *Integration) continueWorkProgressLocked(ctx context.Context, rc common.
 	if err != nil || next == 0 {
 		return false, err
 	}
-	var candidates []string
-	rows, err := i.store().query(ctx, "query "+call("workProgressReceiptsForOwnerRun", map[string]any{"runId": rc.RunId}))
-	if err != nil {
-		return false, err
-	}
-	for _, row := range rows {
-		if memql.BareShortId(rowString(row, "ownerUserId")) != memql.BareShortId(rc.OwnerUserId) || memql.BareShortId(rowString(row, "runId")) != memql.BareShortId(rc.RunId) {
-			return false, fmt.Errorf("work progress receipt attribution changed")
-		}
-		if after, ok := rowTime(state, "receiptAfter"); ok {
-			observed, valid := rowTime(row, "createdAt")
-			if !valid || !observed.After(after) {
-				continue
-			}
-		}
-		for _, key := range progressReceiptKeys(row) {
-			if !slices.Contains(candidates, key) {
-				candidates = append(candidates, key)
-			}
-		}
-	}
-	seen, next, err := i.claimProgressCredits(ctx, rc, state, candidates, next)
+	seen, next, err := i.claimProgressReceiptPage(ctx, rc, state, next)
 	if err != nil {
 		return false, err
 	}
@@ -155,7 +133,9 @@ func (i *Integration) continueWorkProgressLocked(ctx context.Context, rc common.
 	}
 	state["policyVersion"] = 2
 	state["extensions"], state["receipts"], state["continuedAt"] = next, seen, rfc(i.clock())
-	state["receiptAfter"] = rfc(i.clock())
+	// Only explicit feedback advances the evidence epoch. Advancing to now
+	// here would discard unseen older pages and receipts committed between
+	// the read and this write. Durable credits prevent reuse across renewals.
 	state["reason"] = "Completed new work; renewed the execution window."
 	classification["progressContinuation"] = state
 	if err := i.store().updateRun(ctx, rc.RunId, map[string]any{"classification": classification, "versionTime": rfc(workRowVersionAfter(run["createdAt"], i.clock()))}); err != nil {

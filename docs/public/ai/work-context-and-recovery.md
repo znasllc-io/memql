@@ -640,6 +640,9 @@ estimates are renewable work windows. Substantive, previously uncredited source
 facts and native capability contracts can renew a window; heartbeats, elapsed
 time, repeated reads, generic command output and model claims cannot. Consumed
 evidence stays in the owned journal after leaving the bounded active index.
+Renewal checks bounded receipt pages beyond recent non-progress calls and keeps
+concurrent arrivals eligible for the next window. A receipt-read timeout or
+failure refuses renewal; it does not certify that no progress occurred.
 The existing loop detector also pauses repeated stalled work.
 When progress cannot justify renewal, MemQL preserves the work and asks for
 direction. A fresh human answer renews a window on the same goal, preserving

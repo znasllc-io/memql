@@ -492,9 +492,14 @@ old three-automatic/sixteen-total caps and fixed two-hour context deadline are
 removed. Monetary limits, scoped permissions, cancellation, per-operation
 watchdogs and the existing stalled-loop detector remain independent.
 
-Counters never reset on renewal. A human-directed restart and each automatic
-renewal open a new evidence epoch; receipts older than that epoch cannot fund
-another window. Consumed facts have immutable, deterministic owned receipts;
+Counters never reset on renewal. A human-directed restart opens a new evidence
+epoch; receipts older than that epoch cannot fund another window. Automatic
+renewal does not advance that timestamp: doing so would discard receipts that
+arrive during the read/write interval. Existing legacy cutoffs remain in force.
+Receipt reads page beyond non-progress successes and consumed evidence, stopping
+at a page with fresh credit. Each read has a 30-second watchdog and bounded page
+memory; a failed page refuses renewal instead of asserting no progress.
+Consumed facts have immutable, deterministic owned receipts;
 only the latest 100 keys stay in the active index. The target window survives
 a partial write, so a second replica can finish the update without reusing or
 losing the credit. The textual source signal deliberately excludes opaque exec
@@ -529,7 +534,8 @@ checkpoint indexing while excluding both administrative receipt kinds.
 
 Regression coverage includes
 [`TestProgressDBWorkflowAcrossReplicas`](../../../integrations/work/progress_continuation_db_test.go)
-(400 facts, replay after eviction, partial-write recovery),
+(400 facts, replay after eviction, partial-write recovery, more than 100
+non-progress successes and an arrival during renewal),
 [`TestProviderAdmissionsReserveAcrossReplicasAndKeepHardLimits`](../../../integrations/work/provider_admission_db_test.go)
 (concurrent admissions, skew, monetary limits and legacy uncertainty), and
 the [logical accounting tests](../../../integrations/work/runceilings_union_test.go)

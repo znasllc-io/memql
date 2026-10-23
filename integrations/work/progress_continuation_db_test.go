@@ -24,6 +24,7 @@ func TestProgressDBWorkflowAcrossReplicas(t *testing.T) {
 	}{
 		{"AutomaticWindows", testProgressDBAutomaticWindows},
 		{"DurableCredits", testProgressDBDurableCredits},
+		{"ReceiptPaging", testProgressDBReceiptPaging},
 		{"SavedChoiceRecovery", testProgressDBRecoversCheckpointAfterRunReleaseFailure},
 		{"HardUsageObservation", testModelCallBudgetDBSeesPeerRaisesAndReceiptsBeforeHardExhaustion},
 		{"GuidanceAndHardStop", testProgressDBGuidanceAndHardStop},
