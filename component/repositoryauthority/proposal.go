@@ -86,6 +86,9 @@ func (i *Integration) Propose(ctx context.Context, p Proposal) (ProposalReceipt,
 			return err
 		}
 		r.State, r.Reason = observed.State, observed.Reason
+		if r.Request.Operation == OperationDeliver && (r.ReviewReceipt == nil || !r.ReviewReceipt.Approved || r.ReviewReceipt.ProposalHash != fingerprint) {
+			return errors.New("delivery proposal has no independent review of these exact bytes")
+		}
 		if r.State != "approved" || !i.now().Before(r.ExpiresAt) {
 			return errors.New("delegation changed before proposal intent")
 		}

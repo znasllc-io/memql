@@ -121,3 +121,31 @@ func TestRemoteStatusRequiresSavedPeerAndExactRequestIdentity(t *testing.T) {
 		t.Fatal("a legacy unbound request silently acquired current peer authority")
 	}
 }
+
+func TestRemoteReviewAndDeliveryReceiptsRefreshWithoutDecisionChange(t *testing.T) {
+	f := newFixture(t)
+	binding := strings.Repeat("a", 64)
+	configureRequestPeer(f, &binding)
+	remote := Receipt{ID: "upstream-request", Repository: "core/engine", RepositoryID: 123, State: "approved"}
+	f.i.Configure(func(d *Deps) {
+		d.RemoteRequest = func(context.Context, string, string, Transfer) (Receipt, error) { return remote, nil }
+		d.RemoteStatus = func(context.Context, string, string, string) (Receipt, error) { return remote, nil }
+	})
+	r, err := f.i.Request(actor(f.requester), f.request("request-source"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	remote.Proposal = &ProposalReceipt{State: "complete", Branch: "memql/change-exact", Commit: strings.Repeat("c", 40), PullRequestURL: "https://github.com/core/engine/pull/42"}
+	remote.Review = &ReviewReceipt{ProposalHash: strings.Repeat("b", 64), Approved: true, Reason: "Exact proposed content reviewed."}
+	remote.Delivery = &DeliveryReceipt{State: "queued", HeadSHA: strings.Repeat("c", 40), QueueEntryID: "entry-1"}
+	remote.GoalID, remote.RunID, remote.ApprovalID = "private-goal", "private-run", "private-approval"
+	other := New(f.i.deps())
+	status, err := other.Status(actor(f.requester), r.ID)
+	if err != nil || status.Proposal == nil || status.Proposal.PullRequestURL != remote.Proposal.PullRequestURL || status.Review == nil || !status.Review.Approved || status.Delivery == nil || status.Delivery.QueueEntryID != "entry-1" || status.GoalID != "" || status.RunID != "" || status.ApprovalID != "" {
+		t.Fatalf("remote response lost delivery or leaked journal identity: %+v %v", status, err)
+	}
+	saved, err := f.i.get(context.Background(), r.ID, f.requester)
+	if err != nil || saved.DeliveryReceipt == nil || saved.DeliveryReceipt.State != "queued" || saved.ReviewReceipt == nil || saved.ProposalReceipt == nil || saved.ProposalReceipt.PullRequestURL != remote.Proposal.PullRequestURL {
+		t.Fatalf("same-decision update was not durable: %+v %v", saved, err)
+	}
+}

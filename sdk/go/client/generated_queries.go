@@ -6992,7 +6992,7 @@ func PipelineRunsForOwnerBuild(args PipelineRunsForOwnerArgs) string {
 	return b.String()
 }
 
-// PipelinesForOwner -- The caller's pipelines, most recently connected first.
+// PipelinesForOwner -- Read repository pipelines connected by the caller, most recently connected first.
 //
 // Bound concept: v1:pipelines:pipeline (machine-readable: BoundConcepts["pipelinesForOwner"] in generated_concepts.go).
 type PipelinesForOwnerArgs struct {
@@ -12493,7 +12493,7 @@ func SourceConnectionByIdBuild(args SourceConnectionByIdArgs) string {
 	return b.String()
 }
 
-// SourceConnectionsMine -- The caller's active saved source connections, independent of MemQL accounts.
+// SourceConnectionsMine -- List the caller's active saved source connections to GitHub repositories. Discover source connection and installation ids before resolving a repository; these personal bindings remain independent of MemQL organization accounts.
 //
 // Bound concept: v1:platform:sourceConnection (machine-readable: BoundConcepts["sourceConnectionsMine"] in generated_concepts.go).
 type SourceConnectionsMineArgs struct {

@@ -29,6 +29,9 @@ type PromptTemplate struct {
 
 	tmpl        *template.Template
 	inputSchema *jsonschema.Schema
+	// Retained alongside the compiled validator so a durable execution can
+	// freeze its input contract without consulting a later installed prompt.
+	inputSchemaSource map[string]any
 }
 
 // PromptRegistry stores prompt templates by name.

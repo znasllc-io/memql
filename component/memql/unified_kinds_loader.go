@@ -616,7 +616,9 @@ func LoadUnifiedPrompts(logger *slog.Logger, registry *PromptRegistry, partials 
 				continue
 			}
 			var compiledSchema *jsonschema.Schema
+			var inputSchemaSource map[string]any
 			if inputSchema, sErr := decl.toInputSchema(); sErr == nil && inputSchema != nil {
+				inputSchemaSource = inputSchema
 				schemaBytes, mErr := json.Marshal(inputSchema)
 				if mErr == nil {
 					compiler := jsonschema.NewCompiler()
@@ -629,13 +631,14 @@ func LoadUnifiedPrompts(logger *slog.Logger, registry *PromptRegistry, partials 
 				}
 			}
 			registry.set(&PromptTemplate{
-				Name:            decl.name,
-				Description:     languageParser.EffectiveDescription(decl.docComment, decl.description),
-				Level:           decl.level,
-				TemplateSource:  source,
-				DefaultProvider: decl.defaultProvider,
-				tmpl:            tmpl,
-				inputSchema:     compiledSchema,
+				Name:              decl.name,
+				Description:       languageParser.EffectiveDescription(decl.docComment, decl.description),
+				Level:             decl.level,
+				TemplateSource:    source,
+				DefaultProvider:   decl.defaultProvider,
+				tmpl:              tmpl,
+				inputSchema:       compiledSchema,
+				inputSchemaSource: inputSchemaSource,
 			})
 			total++
 		}

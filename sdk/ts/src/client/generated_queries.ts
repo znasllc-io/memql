@@ -6954,7 +6954,7 @@ QueryClient.prototype.pipelineRunsForOwner = function (this: QueryClient, args: 
   return this.executeNamed("pipelineRunsForOwner", buildPipelineRunsForOwner(args), opts);
 };
 
-/** The caller's pipelines, most recently connected first. */
+/** Read repository pipelines connected by the caller, most recently connected first. */
 // Bound concept: v1:pipelines:pipeline (machine-readable: BoundConcepts["pipelinesForOwner"] in generated_concepts.ts).
 export interface PipelinesForOwnerArgs {
 }
@@ -11830,7 +11830,7 @@ QueryClient.prototype.sourceConnectionById = function (this: QueryClient, args: 
   return this.executeNamed("sourceConnectionById", buildSourceConnectionById(args), opts);
 };
 
-/** The caller's active saved source connections, independent of MemQL accounts. */
+/** List the caller's active saved source connections to GitHub repositories. Discover source connection and installation ids before resolving a repository; these personal bindings remain independent of MemQL organization accounts. */
 // Bound concept: v1:platform:sourceConnection (machine-readable: BoundConcepts["sourceConnectionsMine"] in generated_concepts.ts).
 export interface SourceConnectionsMineArgs {
 }

@@ -28,9 +28,9 @@ import (
 // from that, and both are the point:
 //
 //   - WHAT IS ASKED OF GITHUB CANNOT WIDEN. RequestedPermissions is the whole
-//     ask: reads on the repositories people choose, plus the reporting writes a
-//     pipeline run reports back with, checks (decision C8 of the Connect
-//     design, widened by D4 of the pipelines record). A manifest a browser
+//     ask: selected-repository reads, check and security reports, and bounded
+//     proposal/queue writes (the governed delivery extension of the Connect
+//     design). A manifest a browser
 //     could influence is a manifest that could ask for more write access under
 //     this cluster's name, on an authorization screen the owner was told to
 //     trust.
@@ -110,26 +110,33 @@ type ManifestWebhook struct {
 //
 // Each one is here for one use:
 //
-//   - contents read: Deployables fetches a source, and a pipeline run reads
-//     the tree at the SHA it runs; pushes and releases are delivered under it.
+//   - contents write: bounded approved proposals create their own branches;
+//     source fetches and build jobs still receive separately narrowed read tokens.
 //   - metadata read: GitHub grants it with any repository permission.
 //   - checks write: a pipeline run reports a check run on the commit it ran,
 //     without granting source writes. An app without it still runs pipelines;
 //     their check-run writes answer 403 and the run says so.
 //   - security_events write: upload retained scanner reports and observe their
 //     ingestion. Existing installations must accept this permission first.
-//   - pull_requests read: the heads a pull-request run is for, both delivered
-//     and polled (`pull_request` events need it).
-//   - merge_queues read: GitHub will not subscribe an app to `merge_group`
-//     without it, and a merge queue's run is the full-suite gate.
+//   - pull_requests write: create draft proposals and mark authorized deliveries
+//     ready for review. This does not bypass repository review requirements.
+//   - merge_queues write: submit an authorized, independently reviewed exact
+//     revision to the repository's queue; GitHub remains the merge authority.
+//   - statuses read: verify required commit statuses as well as check runs.
+//   - administration read: observe classic branch protection alongside rulesets.
+//     Only the narrowly scoped observation token receives it; no settings write
+//     or protection bypass is requested. Existing installations must explicitly
+//     accept expanded permissions on GitHub before these effects can work.
 func RequestedPermissions() map[string]string {
 	return map[string]string{
 		"checks":          "write",
 		"security_events": "write",
-		"contents":        "read",
-		"merge_queues":    "read",
+		"contents":        "write",
+		"merge_queues":    "write",
 		"metadata":        "read",
-		"pull_requests":   "read",
+		"pull_requests":   "write",
+		"statuses":        "read",
+		"administration":  "read",
 	}
 }
 
@@ -167,7 +174,7 @@ func BuildManifest(domain, identityBaseURL string) (Manifest, error) {
 	m := Manifest{
 		Name:        appName(domain),
 		URL:         "https://" + frontdoor.OsHost(domain),
-		Description: "Lets the MemQL cluster at " + domain + " read the repositories you choose and report checks on them.",
+		Description: "Lets the MemQL cluster at " + domain + " read selected repositories and their protections, report checks and security findings, and submit approved changes through pull requests and merge queues.",
 		RedirectURL: identityBase + AppSetupCallbackPath,
 		// ONE CALLBACK, the route the Connect design approved. It is also where
 		// GitHub lands somebody who has just INSTALLED the app, because

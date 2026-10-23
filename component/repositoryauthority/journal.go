@@ -28,6 +28,14 @@ type record struct {
 	ProposalHash, ProposalState string
 	ProposalCreatedAt           time.Time
 	ProposalReceipt             *ProposalReceipt
+	ReviewInput                 *ReviewInput
+	ReviewHash                  string
+	ReviewReceipt               *ReviewReceipt
+	DeliveryState               string
+	DeliveryAdmitted            bool
+	DeliveryReceipt             *DeliveryReceipt
+	DeliveryLease               string
+	DeliveryLeaseUntil          time.Time
 	State, Reason               string
 	CreatedAt, ExpiresAt        time.Time
 }
@@ -38,7 +46,7 @@ func digest(v any) string {
 	return hex.EncodeToString(h[:])
 }
 func (r record) receipt(actor string) Receipt {
-	out := Receipt{ID: r.ID, Repository: r.Source.Repository, RepositoryID: r.RepositoryID, Statement: r.Request.Statement, Paths: r.Request.Paths, State: r.State, Reason: r.Reason, GoalID: r.GoalID, RunID: r.RunID, ApprovalID: r.ApprovalID, ExpiresAt: r.ExpiresAt.UTC().Format(time.RFC3339Nano), ParentRequestID: r.Request.ParentRequestID}
+	out := Receipt{Proposal: r.ProposalReceipt, Operation: r.Request.Operation, Review: r.ReviewReceipt, Delivery: r.DeliveryReceipt, ID: r.ID, Repository: r.Source.Repository, RepositoryID: r.RepositoryID, Statement: r.Request.Statement, Paths: r.Request.Paths, State: r.State, Reason: r.Reason, GoalID: r.GoalID, RunID: r.RunID, ApprovalID: r.ApprovalID, ExpiresAt: r.ExpiresAt.UTC().Format(time.RFC3339Nano), ParentRequestID: r.Request.ParentRequestID}
 	// Nexus IDs belong to this installation and this owner. A request status
 	// is shareable with its requester; the maintainer's private journal is not.
 	if r.Route.Remote != "" || !same(actor, r.Maintainer.OwnerUserID) {

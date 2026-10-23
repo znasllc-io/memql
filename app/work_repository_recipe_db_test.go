@@ -21,6 +21,7 @@ import (
 	"github.com/znasllc-io/memql/component/memql"
 	"github.com/znasllc-io/memql/component/packages"
 	"github.com/znasllc-io/memql/component/repositoryauthority"
+	"github.com/znasllc-io/memql/core/common"
 	"github.com/znasllc-io/memql/core/dslfs"
 	"github.com/znasllc-io/memql/core/id"
 	"github.com/znasllc-io/memql/dsl"
@@ -180,6 +181,24 @@ automation ` + policy + ` {
 				require.Equal(t, "succeeded", after.Status)
 				require.Equal(t, "repository-change", after.TriggeredBy, "recovery keeps its native admission type")
 				require.EqualValues(t, 7, after.Steps["result"].Value, "the child and pure logic resolve only from the captured closure")
+				if scenario == "unchanged" {
+					// A completed proposal is not acceptance of the goal. Queue
+					// recovery can retain the original scope until the owner stops it.
+					recovered, e := apps[0].repositoryAuthorityDeliveryContext(context.Background(), owner, receipt.GoalID, receipt.RunID)
+					require.NoError(t, e)
+					original, ok := common.RunFromContext(recovered)
+					require.True(t, ok)
+					require.Equal(t, receipt.RunID, memql.BareShortId(original.RunId))
+					require.Error(t, apps[0].repositoryAuthorityExecutionActive(recovered, owner, receipt.GoalID, receipt.RunID), "success never restores proposal authority")
+					for _, capability := range workers[0].Capabilities() {
+						if capability.Name == "cancelGoal" {
+							_, e = capability.Handler(ownerCtx, map[string]any{"goalId": receipt.GoalID, "reason": "Stop pending delivery"}, 0)
+							require.NoError(t, e)
+						}
+					}
+					_, e = apps[1].repositoryAuthorityDeliveryContext(context.Background(), owner, receipt.GoalID, receipt.RunID)
+					require.Error(t, e, "another replica must observe closed goal authority")
+				}
 			} else {
 				require.Zero(t, reads, "a changed recipe must refuse before even its original first operation")
 				require.Equal(t, "failed", after.Status)

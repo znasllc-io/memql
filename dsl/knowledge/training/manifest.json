@@ -195,7 +195,7 @@
       "domainId": "software-development",
       "sourceRef": "training:repository-authority",
       "file": "knowledge/training/repository-authority-v1.txt",
-      "sha256": "8b197553d8420d6619bc1c8a2175c370196089c2d38cf3b1786cb837d87b0d21",
+      "sha256": "0b55ce515f0eeb849ccf38b2cc2178327a4a6e52c91548486e62775f47dfdb11",
       "lesson": true
     }
   ],

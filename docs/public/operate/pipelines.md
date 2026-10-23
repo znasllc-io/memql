@@ -68,14 +68,37 @@ paths, expiry, goal and execution. Related requests retain parent links, which
 carry no additional authority.
 
 The native proposal boundary accepts one immutable set of file replacements
-against an exact base commit. Its installed recipe is captured and restricted
-to scoped source reads, structured AI calls and proposal submission. Changing
-the recipe or routing invalidates prior delegation. Every effect rechecks the
-current approval, provider write permission and live uncancelled execution.
-An uncertain response can reconcile the same proposal; it cannot substitute
-new bytes or a new base. The result is a branch and pull request, with no merge
-or installation permission. Status and request-list reads retain the recorded
-statement, state and decline reason across reconnects and replicas. A local
+against an exact base commit. A `propose_change` request authorizes a draft pull
+request only. `deliver_change` additionally authorizes independent review and
+merge-queue admission; it is available only when the installed authority route
+declares both a review prompt and a queue-only delivery recipe. An existing
+draft request cannot be upgraded by retrying it with a different operation.
+
+The change recipe, independent review prompt with its partials, and delivery
+recipe are captured before approval. Changing their content or routing
+invalidates the delegation. The native reviewer receives the immutable source
+and exact proposed replacements; a caller-supplied approval cannot substitute
+for its recorded verdict. Delivery refuses any proposal that differs from the
+approved review. Every effect rechecks the maintainer's current decision,
+provider write permission, recipe and execution authority.
+
+Queue admission verifies the same PR and reviewed head, required successful
+GitHub checks, current default branch and applicable review rules. It may mark
+a reviewed draft ready so GitHub can request required reviews. CODEOWNER and
+other required approvals still block queue admission until satisfied; no admin
+bypass or direct merge occurs. Pending checks and uncertain provider responses
+retain the same durable delivery. A bounded scheduled recovery leases that
+record across replicas and runs only its captured queue recipe. Recovery may
+continue after the original run succeeds while its goal stays open; closing or
+cancelling the goal, revoking approval, or changing the reviewed head prevents
+further admission. `queued` records provider-confirmed admission, not a merge.
+After admission, recovery only observes the same PR: it records a confirmed
+merge or surfaces removal from the queue without automatically re-enqueueing.
+An outage retains that observation-only state and reports the uncertainty.
+Release publication and installation require their separate authorization.
+
+Status and request-list reads retain the statement, requested operation,
+decision, review and delivery response across reconnects and replicas. A local
 maintainer receives links to their own goal and approval. Other requesters,
 including remote installations, receive the request's status without private
 upstream goal or approval identifiers.
@@ -87,10 +110,14 @@ upgrade proposals while keeping file and branch authority in operator settings.
 
 Enable this optional writer only when the source's installed GitHub App grants
 **Contents: Read and write** and **Pull requests: Read and write**. The default
-App connection does not request repository-maintenance write access. An existing
-App needs its permissions updated and the installation owner must accept the
-change before a proposal can be applied. These permissions belong to the
-driver; proposal commands still receive only an explicitly requested read token.
+App setup now requests these permissions for governed delivery, along with
+merge-queue writes, commit-status reads and read-only administration access to
+observe classic branch protection. It never requests administration writes or
+workflow-file writes. An existing App needs its permissions updated and the
+installation owner must accept the change before a proposal or queue admission
+can proceed. Build and proposal commands still receive only an explicitly
+requested read token. The native writer checks the current source owner's
+authority; an installed App's broader grant does not replace that check.
 
 ```yaml
 - name: prepare
@@ -298,7 +325,9 @@ requests read fresh repository authority; being an owner or developer of this
 installation does not grant write access to an upstream repository. Requests
 name the intended change and allowed repository paths. The local maintainer
 can open their Nexus goal or approval; other requesters see the saved request
-and response. Approving work grants neither merge nor deployment authority.
+and response. Draft-only work never grants queue permission. Delivery requests
+use the separately declared review and queue gates; neither option grants
+release publication or installation authority.
 
 - **The repository’s Checks tab** shows the newest run on each branch, the default branch first,
   each opening its run. Its facts gain a **Pipeline** line (the manifest, how

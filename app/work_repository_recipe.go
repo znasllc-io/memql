@@ -29,7 +29,7 @@ func loadRepositoryWorkTemplate(ctx context.Context, engine *memql.MemQLEngine, 
 		return nil, err
 	}
 	operations := map[string]workflowhost.Operation{}
-	for _, name := range []string{"repositoryChangeContext", "ai", "repositoryChangePropose"} {
+	for _, name := range repositoryauthority.RecipeOperationNames() {
 		operations[name] = func(c context.Context, args map[string]any) (any, error) {
 			// Recheck before every bounded call, including model calls. Nothing
 			// in the saved source replaces a current approval or live run.

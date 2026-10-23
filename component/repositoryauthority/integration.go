@@ -55,6 +55,10 @@ func (i *Integration) Access(ctx context.Context, sourceID string) (Access, erro
 		return out, nil
 	}
 	out.CanRequest = true
+	out.Operations = []string{OperationPropose}
+	if r.ReviewTemplate != "" && r.DeliveryTemplate != "" {
+		out.Operations = append(out.Operations, OperationDeliver)
+	}
 	out.Route = "maintainer"
 	if r.Remote != "" {
 		out.Route = "remote"
@@ -118,6 +122,9 @@ func (i *Integration) Receive(ctx context.Context, t Transfer) (Receipt, error) 
 }
 func (i *Integration) open(ctx context.Context, actor string, req Request, s Source, repoID int64, r route, remote bool, canWrite bool) (Receipt, error) {
 	d := i.deps()
+	if req.Operation == OperationDeliver && (r.ReviewTemplate == "" || r.DeliveryTemplate == "" || (r.Remote == "" && (len(r.ReviewPrompt) == 0 || len(r.DeliveryRecipe) == 0))) {
+		return Receipt{}, errors.New("this route permits draft proposals only; delivery policy is not configured")
+	}
 	rec := record{ID: "change-" + digest(map[string]any{"actor": actor, "request": req.RequestID}), Request: req, Requester: actor, Source: s, RepositoryID: repoID, Route: r, State: "opening", RequesterCanWrite: canWrite, CreatedAt: i.now(), ExpiresAt: i.now().Add(time.Duration(r.TTLSeconds) * time.Second)}
 	if r.Remote == "" {
 		if d.Source == nil || d.OpenGoal == nil {
@@ -311,6 +318,9 @@ func (i *Integration) observe(ctx context.Context, r record) (record, error) {
 			return r, errors.New("remote status names a different request or repository")
 		}
 		state, reason = remote.State, remote.Reason
+		r.DeliveryReceipt = remote.Delivery
+		r.ReviewReceipt = remote.Review
+		r.ProposalReceipt = remote.Proposal
 	} else if !r.Immediate && r.ApprovalID != "" {
 		if d.Decision == nil {
 			return r, errors.New("approval status is unavailable")
@@ -335,12 +345,17 @@ func (i *Integration) refresh(ctx context.Context, r record) (record, error) {
 	if err != nil {
 		return r, err
 	}
-	if observed.State == r.State && observed.Reason == r.Reason {
+	if observed.State == r.State && observed.Reason == r.Reason && digest(observed.DeliveryReceipt) == digest(r.DeliveryReceipt) && digest(observed.ReviewReceipt) == digest(r.ReviewReceipt) && digest(observed.ProposalReceipt) == digest(r.ProposalReceipt) {
 		return r, nil
 	}
 	return i.update(ctx, r.ID, func(current *record) error {
 		if !terminal(current.State) {
 			current.State, current.Reason = observed.State, observed.Reason
+			if current.Route.Remote != "" {
+				current.DeliveryReceipt = observed.DeliveryReceipt
+				current.ReviewReceipt = observed.ReviewReceipt
+				current.ProposalReceipt = observed.ProposalReceipt
+			}
 		}
 		return nil
 	})
@@ -376,7 +391,7 @@ func (i *Integration) AuthorizeEffect(ctx context.Context, id, operation string,
 		return Authorization{}, err
 	}
 	run, ok := common.RunFromContext(ctx)
-	if !ok || run.Mode != common.RunModeLive || !same(run.GoalId, r.GoalID) || !same(run.RunId, r.RunID) || !same(run.OwnerUserId, r.Maintainer.OwnerUserID) || !same(actor, r.Maintainer.OwnerUserID) || r.Request.Operation != operation || !containsPaths(r.Request.Paths, paths) {
+	if !ok || run.Mode != common.RunModeLive || !same(run.GoalId, r.GoalID) || !same(run.RunId, r.RunID) || !same(run.OwnerUserId, r.Maintainer.OwnerUserID) || !same(actor, r.Maintainer.OwnerUserID) || !operationIncludes(r.Request.Operation, operation) || !containsPaths(r.Request.Paths, paths) {
 		return Authorization{}, errors.New("effect is outside the approved execution, operation or path scope")
 	}
 	active := i.deps().ExecutionActive
@@ -415,4 +430,8 @@ func (i *Integration) WithAuthorizedEffect(ctx context.Context, id, operation st
 		return effect(grant)
 	})
 	return err
+}
+
+func operationIncludes(granted, effect string) bool {
+	return granted == effect || (granted == OperationDeliver && effect == OperationPropose)
 }

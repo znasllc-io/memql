@@ -40,17 +40,15 @@ func TestTheManifestIsTheRegistrationTheOperatorGuideDescribes(t *testing.T) {
 		t.Errorf("events = %v, want the deliveries the update cue and pipelines read, and nothing else", m.DefaultEvents)
 	}
 	// The sentence GitHub shows for the app, so it says everything the app
-	// does: it reads, and it reports checks.
-	if m.Description != "Lets the MemQL cluster at lab.example.com read the repositories you choose and report checks on them." {
+	// does, including approved source writes and queue admission.
+	if m.Description != "Lets the MemQL cluster at lab.example.com read selected repositories and their protections, report checks and security findings, and submit approved changes through pull requests and merge queues." {
 		t.Errorf("description = %q", m.Description)
 	}
 }
 
-// TestTheAskIsReadsAndReportingWritesAndNothingElse is decision C8 of the Connect
-// design as pipelines widened it (pipelines record, D4), restated where a
-// regression would land: on the manifest. Every permission is read except
-// checks and security_events, which report native checks and scanner results.
-func TestTheAskIsReadsAndReportingWritesAndNothingElse(t *testing.T) {
+// The manifest declares the capabilities used by governed delivery, without
+// granting settings writes, workflow edits or a repository-protection bypass.
+func TestTheAskSupportsGovernedDeliveryWithoutSettingsWrites(t *testing.T) {
 	m, err := BuildManifest("lab.example.com", "")
 	if err != nil {
 		t.Fatal(err)
@@ -58,18 +56,18 @@ func TestTheAskIsReadsAndReportingWritesAndNothingElse(t *testing.T) {
 	want := map[string]string{
 		"checks":          "write",
 		"security_events": "write",
-		"contents":        "read",
-		"merge_queues":    "read",
+		"contents":        "write",
+		"merge_queues":    "write",
 		"metadata":        "read",
-		"pull_requests":   "read",
+		"pull_requests":   "write",
+		"statuses":        "read",
+		"administration":  "read",
 	}
 	if !reflect.DeepEqual(m.DefaultPermissions, want) {
 		t.Fatalf("permissions = %v, want %v", m.DefaultPermissions, want)
 	}
-	for name, level := range m.DefaultPermissions {
-		if level != "read" && name != "checks" && name != "security_events" {
-			t.Errorf("%s is asked at %q", name, level)
-		}
+	if m.DefaultPermissions["administration"] != "read" || m.DefaultPermissions["workflows"] != "" {
+		t.Fatal("delivery must not acquire settings or workflow-file write access")
 	}
 }
 

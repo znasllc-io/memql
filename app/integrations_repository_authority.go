@@ -49,6 +49,15 @@ func (a *App) wireRepositoryAuthority() {
 		d.RemoteBinding = a.repositoryAuthorityRemoteBinding
 		d.RemoteRequest = a.repositoryAuthorityRemoteRequest
 		d.RemoteStatus = a.repositoryAuthorityRemoteStatus
+		d.CaptureReview = func(_ context.Context, name string) (map[string]any, error) { return a.engine.CapturePrompt(name) }
+		d.Review = a.reviewRepositoryChange
+		d.DeliveryContext = a.repositoryAuthorityDeliveryContext
+		d.Queue = func(ctx context.Context, grant repositoryauthority.Authorization, intent repositoryauthority.DeliveryIntent) (repositoryauthority.DeliveryReceipt, error) {
+			if pkgs == nil {
+				return repositoryauthority.DeliveryReceipt{}, errors.New("repository connection is unavailable")
+			}
+			return queueRepositoryChange(ctx, pkgs, provider, grant, intent)
+		}
 		d.Read = func(ctx context.Context, grant repositoryauthority.Authorization, paths []string) (repositoryauthority.RepositorySnapshot, error) {
 			if pkgs == nil {
 				return repositoryauthority.RepositorySnapshot{}, errors.New("repository connection is unavailable")

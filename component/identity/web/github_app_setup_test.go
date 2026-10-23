@@ -143,12 +143,12 @@ func TestALiveSetupStateGetsTheFormThatPostsTheManifestToGitHub(t *testing.T) {
 		manifest.URL != "https://os.lab.example.com" {
 		t.Errorf("manifest = %+v", manifest)
 	}
-	if len(manifest.DefaultPermissions) != 6 || manifest.DefaultPermissions["contents"] != "read" || manifest.DefaultPermissions["checks"] != "write" || manifest.DefaultPermissions["security_events"] != "write" {
+	if len(manifest.DefaultPermissions) != 8 || manifest.DefaultPermissions["contents"] != "write" || manifest.DefaultPermissions["checks"] != "write" || manifest.DefaultPermissions["security_events"] != "write" || manifest.DefaultPermissions["administration"] != "read" {
 		t.Errorf("permissions = %v", manifest.DefaultPermissions)
 	}
 	// The last sentence of ours somebody reads before GitHub asks, so it says
 	// the whole of what the app may do, including both kinds of reports.
-	if !strings.Contains(body, "It can read the repositories you choose and report checks and security findings.") {
+	if !strings.Contains(body, "It can read selected repositories and their protections, report checks and security findings, and submit approved changes through pull requests and merge queues.") {
 		t.Error("the page does not say what the app may do")
 	}
 	if !strings.Contains(body, "github-app-setup.js") {
@@ -217,9 +217,9 @@ func TestAnOrganizationOnTheStateDecidesWhereTheFormPosts(t *testing.T) {
 func TestNothingInTheRequestReachesTheManifest(t *testing.T) {
 	eng := &setupEngine{state: liveSetupState(nil)}
 	rec := getSetupPage(newSetupServer(eng),
-		"state="+setupStatePlain+"&manifest=%7B%22default_permissions%22%3A%7B%22contents%22%3A%22write%22%7D%7D&callback_urls=https%3A%2F%2Fevil.example")
+		"state="+setupStatePlain+"&manifest=%7B%22default_permissions%22%3A%7B%22administration%22%3A%22write%22%7D%7D&callback_urls=https%3A%2F%2Fevil.example")
 	body := rec.Body.String()
-	if strings.Contains(body, "evil.example") || strings.Contains(html.UnescapeString(body), `"contents":"write"`) {
+	if strings.Contains(body, "evil.example") || strings.Contains(html.UnescapeString(body), `"administration":"write"`) {
 		t.Errorf("something the request supplied reached the page:\n%s", body)
 	}
 }

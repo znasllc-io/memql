@@ -83,7 +83,8 @@ alone is not readiness. GitHub access is separate from this package install.
 | Upstream request | Submit a core change from an installation without core write access | Maintainer approval is required; requester receives readable status/reason without private maintainer goal identifiers |
 | Delegation | Decline, revoke, expire or change the installed recipe while work is pending | Subsequent reads/effects refuse the old delegation; a role label alone grants nothing |
 | PR checks | Change a component with a known dependency graph | Relevant checks run and report their actual scope; uncertainty falls back to full verification |
-| Queue | Advance/remove a queue ref and separately make the provider unavailable | Confirmed obsolete work releases capacity; provider unavailability does not count as removal |
+| Queue admission | Authorize delivery, wait for checks, then interrupt a queue response | The exact reviewed proposal is recovered once; changed heads, withdrawn authority and closed goals stop delivery |
+| Queue verification | Advance/remove a queue ref and separately make the provider unavailable | Confirmed obsolete work releases capacity; provider unavailability does not count as removal |
 | Main | Land a queued change, then an unqueued main commit | Exact eligible evidence may be reused; an unverified commit still runs checks |
 | Release | Prepare and publish verified artifacts | Publication produces receipts and does not install anything |
 | Cluster Updates | Select a reviewed candidate, prepare and inspect its diff | One saved plan binds candidate, overlay, current revision and operator |
@@ -103,6 +104,13 @@ the GitHub App identity/logo, required check context, queue triggers and review
 policy together before cutover. Existing rulesets remain authoritative until
 an explicit reviewed policy change is applied; independent AI review does not
 silently satisfy a separate GitHub code-owner requirement.
+
+Register the app with the permissions in [GitHub setup](../../public/operate/github-connect.md),
+including the explicit GitHub consent for existing installations. Verify the
+actual approved App/user intersection can mark a PR ready and enqueue its
+expected head. Mocked provider tests do not establish GitHub GraphQL permission
+compatibility for a live installation. Use a controlled repository for this
+qualification, without changing production protection or enabling paused CI.
 
 Enable one source first and follow its PR, exact queue revision and main run.
 Confirm supersession affects only obsolete work, check conclusions reach

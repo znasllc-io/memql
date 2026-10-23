@@ -17,16 +17,24 @@ import (
 
 const routeContract = "repository.change-route.v1"
 const recipeContract = "repository.change-recipe.v1"
+const deliveryContract = "repository.delivery-recipe.v1"
+
+// RecipeOperationNames is shared by native preflight and Work dispatch.
+func RecipeOperationNames() []string {
+	return []string{"repositoryChangeContext", "ai", "repositoryChangePropose", "repositoryChangeReview", "repositoryChangeQueue"}
+}
 
 var identifier = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._:-]{0,199}$`)
 var repositoryName = regexp.MustCompile(`^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$`)
 
 type route struct {
-	SourceID, Template, Remote string
-	RemoteBinding              string
-	TTLSeconds                 int
-	Snapshot                   map[string]any
-	Recipe                     map[string]any
+	SourceID, Template, Remote       string
+	RemoteBinding                    string
+	TTLSeconds                       int
+	Snapshot                         map[string]any
+	Recipe                           map[string]any
+	ReviewTemplate, DeliveryTemplate string
+	ReviewPrompt, DeliveryRecipe     map[string]any
 }
 
 func person(ctx context.Context, verb, resource string) (string, error) {
@@ -76,11 +84,11 @@ func (i *Integration) resolveRoute(ctx context.Context, s Source, canWrite bool)
 		return r, errors.New("repository authority resolver must return an object")
 	}
 	for key := range object {
-		if key != "sourceId" && key != "template" && key != "remote" && key != "ttlSeconds" {
+		if key != "sourceId" && key != "template" && key != "remote" && key != "ttlSeconds" && key != "reviewTemplate" && key != "deliveryTemplate" {
 			return r, fmt.Errorf("unknown authority routing field %s", key)
 		}
 	}
-	r = route{SourceID: str(object["sourceId"]), Template: str(object["template"]), Remote: str(object["remote"]), TTLSeconds: integer(object["ttlSeconds"]), Snapshot: snapshot.Map()}
+	r = route{SourceID: str(object["sourceId"]), Template: str(object["template"]), Remote: str(object["remote"]), TTLSeconds: integer(object["ttlSeconds"]), Snapshot: snapshot.Map(), ReviewTemplate: str(object["reviewTemplate"]), DeliveryTemplate: str(object["deliveryTemplate"])}
 	if r.TTLSeconds < 1 || r.TTLSeconds > 7*24*3600 || r.Template == "" || !identifier.MatchString(r.Template) || (r.Remote == "" && !identifier.MatchString(r.SourceID)) || (r.Remote != "" && !identifier.MatchString(r.Remote)) {
 		return r, errors.New("repository authority route requires an explicit source or peer, installed template and bounded expiry")
 	}
@@ -102,19 +110,39 @@ func (i *Integration) resolveRoute(ctx context.Context, s Source, canWrite bool)
 		refuse := func(context.Context, map[string]any) (any, error) {
 			return nil, errors.New("recipe preflight cannot execute operations")
 		}
-		recipe, err := workflowhost.Capture(r.Template, recipeContract, d.WorkflowSource, map[string]workflowhost.Operation{
-			"repositoryChangeContext": refuse, "ai": refuse, "repositoryChangePropose": refuse,
-		})
+		ops := map[string]workflowhost.Operation{}
+		for _, name := range RecipeOperationNames() {
+			ops[name] = refuse
+		}
+		recipe, err := workflowhost.Capture(r.Template, recipeContract, d.WorkflowSource, ops)
 		if err != nil {
 			return r, fmt.Errorf("repository change recipe is outside its bounded contract: %w", err)
 		}
 		r.Recipe = recipe.Map()
+		if r.ReviewTemplate != "" || r.DeliveryTemplate != "" {
+			if !identifier.MatchString(r.ReviewTemplate) || !identifier.MatchString(r.DeliveryTemplate) || d.CaptureReview == nil {
+				return r, errors.New("delivery needs an installed review prompt and delivery recipe")
+			}
+			r.ReviewPrompt, err = d.CaptureReview(ctx, r.ReviewTemplate)
+			if err != nil {
+				return r, fmt.Errorf("capture repository review prompt: %w", err)
+			}
+			promptJSON, marshalErr := json.Marshal(r.ReviewPrompt)
+			if marshalErr != nil || len(r.ReviewPrompt) == 0 || len(promptJSON) > 512<<10 {
+				return r, errors.New("repository review prompt must be a bounded captured closure")
+			}
+			delivery, e := workflowhost.Capture(r.DeliveryTemplate, deliveryContract, d.WorkflowSource, map[string]workflowhost.Operation{"repositoryChangeQueue": refuse})
+			if e != nil {
+				return r, fmt.Errorf("delivery recipe exceeds queue-only authority: %w", e)
+			}
+			r.DeliveryRecipe = delivery.Map()
+		}
 	}
 	return r, nil
 }
 func validateRequest(r Request) error {
-	if !identifier.MatchString(r.RequestID) || len(r.Statement) < 1 || len(r.Statement) > 16000 || r.Operation != OperationPropose || len(r.Paths) == 0 || len(r.Paths) > 100 {
-		return errors.New("request needs a stable requestId, statement, propose_change operation and explicit paths")
+	if !identifier.MatchString(r.RequestID) || len(r.Statement) < 1 || len(r.Statement) > 16000 || (r.Operation != OperationPropose && r.Operation != OperationDeliver) || len(r.Paths) == 0 || len(r.Paths) > 100 {
+		return errors.New("request needs a stable requestId, statement, propose_change or deliver_change operation and explicit paths")
 	}
 	if r.ParentRequestID != "" && !identifier.MatchString(r.ParentRequestID) {
 		return errors.New("invalid parent request identity")

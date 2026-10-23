@@ -3,6 +3,7 @@ package repositoryauthority
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	memorynodes "github.com/znasllc-io/memql/component/database/memory-nodes"
 	"github.com/znasllc-io/memql/component/memql"
 )
@@ -32,6 +33,27 @@ func result(v any, e error) ([]memorynodes.MemoryNode, error) {
 }
 func (i *Integration) Capabilities() []memql.IntegrationCapability {
 	return []memql.IntegrationCapability{
+		{Name: "review", Handler: func(ctx context.Context, a map[string]any, _ int) ([]memorynodes.MemoryNode, error) {
+			p, e := decoded[Proposal](a["proposal"])
+			if e != nil {
+				return nil, e
+			}
+			requestID := str(a["requestId"])
+			if p.RequestID != "" && p.RequestID != requestID {
+				return nil, errors.New("review proposal names another request")
+			}
+			p.RequestID = requestID
+			v, e := i.Review(ctx, p)
+			return result(v, e)
+		}},
+		{Name: "queue", Handler: func(ctx context.Context, a map[string]any, _ int) ([]memorynodes.MemoryNode, error) {
+			v, e := i.Queue(ctx, str(a["requestId"]))
+			return result(v, e)
+		}},
+		{Name: "deliveryRecover", Handler: func(ctx context.Context, _ map[string]any, _ int) ([]memorynodes.MemoryNode, error) {
+			n, e := i.RecoverDeliveries(ctx)
+			return result(map[string]any{"processed": n}, e)
+		}},
 		{Name: "context", Handler: func(ctx context.Context, a map[string]any, _ int) ([]memorynodes.MemoryNode, error) {
 			v, e := i.ReadContext(ctx, str(a["requestId"]))
 			return result(v, e)

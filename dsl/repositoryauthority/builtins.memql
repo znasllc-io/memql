@@ -73,3 +73,22 @@ builtin repositoryChangePropose {
 @executor("integration.repositoryauthority.context")
 @args(profile="object")
 builtin repositoryChangeContext { requestId string! }
+
+/// Independently review exact proposal bytes using the captured tool-free prompt.
+/// Only a deliver_change request in its approved bound execution may call this.
+@executor("integration.repositoryauthority.review")
+@args(profile="object")
+builtin repositoryChangeReview { requestId string! proposal object! }
+
+/// Observe required checks/reviews, mark the exact reviewed PR ready, and request
+/// merge-queue admission. This never bypasses repository policy or deploys a release.
+@executor("integration.repositoryauthority.queue")
+@args(profile="object")
+builtin repositoryChangeQueue { requestId string! }
+
+/// Recover leased, already armed delivery requests. actor.userId cannot replace
+/// this cross-owner scheduler fence; native recovery restores each stored owner
+/// and rechecks current approval, live goal, recipe and provider authority.
+@executor("integration.repositoryauthority.deliveryRecover")
+@args(profile="optionalObject")
+builtin repositoryChangeDeliveryRecover {}

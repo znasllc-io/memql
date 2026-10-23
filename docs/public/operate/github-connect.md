@@ -155,36 +155,44 @@ under Settings -> Developer settings -> GitHub Apps):
 | **Webhook URL** | `https://api.<domain>/inbound/github` |
 | **Webhook secret** | generate one; it is `MEMQL_GITHUB_APP_WEBHOOK_SECRET` below |
 | **Repository permissions -> Checks** | Read and write |
-| **Repository permissions -> Contents** | Read-only |
-| **Repository permissions -> Merge queues** | Read-only |
+| **Repository permissions -> Contents** | Read and write |
+| **Repository permissions -> Merge queues** | Read and write |
 | **Repository permissions -> Metadata** | Read-only (GitHub selects this for you) |
-| **Repository permissions -> Pull requests** | Read-only |
+| **Repository permissions -> Pull requests** | Read and write |
+| **Repository permissions -> Commit statuses** | Read-only |
+| **Repository permissions -> Administration** | Read-only |
+| **Repository permissions -> Code scanning alerts** | Read and write (`security_events`) |
 | **Subscribe to events** | Check run, Merge group, Pull request, Push, Release |
 | **Where can this app be installed** | your choice |
 
-Nothing else. **Every permission is a read on the repositories people choose,
-except checks**, which is how a pipeline run reports back (decision C8, widened
-by the pipelines record's D4):
+These permissions cover verification and explicitly authorized repository
+delivery. The app has no administration or workflow-file write permission.
+The installation selects the repositories the app can access. Source fetches
+and build jobs receive narrower read tokens; repository mutations use the
+requesting maintainer's current user authorization.
 
 | Permission | Why it is asked |
 |---|---|
-| Contents read | Deployables fetches a source, and a pipeline run reads the tree at the commit it runs. GitHub delivers `push` and `release` under it |
-| Metadata read | GitHub grants it with any repository permission |
-| Checks write | A pipeline run reports a check run on the commit it ran: queued, in progress, then its result, with the stage table as the summary. The one write the app holds |
-| Pull requests read | The heads a pull-request run is for, whether GitHub delivers them as `pull_request` events or the poll reads them |
-| Merge queues read | GitHub subscribes an app to `merge_group` only when it holds this; a merge queue's run is the full suite on the exact tree that lands |
+| Contents write | Read source and create a branch for a bounded, approved proposal |
+| Metadata read | Identify the selected repository and read its applied rules |
+| Checks write | Report verification results and inspect required checks |
+| Security events write | Upload retained scanner reports and observe their ingestion |
+| Pull requests write | Read change heads, open draft proposals and mark an authorized delivery ready |
+| Merge queues write | Observe merge groups and submit an eligible, independently reviewed revision to the queue |
+| Commit statuses read | Verify required commit statuses in addition to check runs |
+| Administration read | Read classic branch protection; changing settings is not permitted |
 
-A push lights the update cue and starts the default branch's pipeline run; a
-pull request, a merge group and a published release each start a pipeline
-run; `check_run` is how a re-run pressed on GitHub reaches the cluster.
-`check_suite` is not in the list because GitHub subscribes every app holding
-checks write to it.
+A push starts the default branch's pipeline run; a pull request, a merge group
+and a published release each start a pipeline run. `check_run` carries a
+re-run requested on GitHub. `check_suite` is not in the event list because
+GitHub subscribes every app holding checks write to it. A local installation
+with its webhook disabled uses polling instead.
 
-A later capability that needs more -- an agent opening a pull request --
-requests it as its own permission change, which GitHub then surfaces to every
-installation for re-approval. Pipelines were such a change:
-[Upgrading an app registered before pipelines](#upgrading-an-app-registered-before-pipelines)
-is what it asks of an app that already exists.
+[Governed repository delivery](pipelines.md) distinguishes a draft-only
+proposal from an authorized delivery through the queue. Neither permits
+bypassing repository protection or installing a release. An existing app and
+its installations must explicitly approve the expanded permissions; see
+[Upgrading an app registered before pipelines](#upgrading-an-app-registered-before-pipelines).
 
 GitHub uses this same registered callback for authorization and post-install
 landings. Identity relays the callback to
@@ -286,16 +294,17 @@ sends every app; see [what stays current, and how](#what-stays-current-and-how).
 
 ## Upgrading an app registered before pipelines
 
-An app registered before pipelines -- from the product or by hand -- asks for
-contents and metadata read and subscribes to pushes. It goes on working for
-everything Deployables does. Pipelines need the wider ask above, and GitHub
-never widens an app by itself:
+Earlier apps may have only source-read access, or source reads plus pipeline
+reporting. Existing grants continue to cover their original operations.
+Governed delivery needs the permissions above, and GitHub never widens an app
+by itself:
 
 1. At GitHub, open the app's settings: Settings -> Developer settings -> GitHub
    Apps -> the app -> **Permissions & events** (in the organization's Settings,
    for an app registered under an organization).
-2. Under **Repository permissions**, set **Checks** to Read and write, and
-   **Pull requests** and **Merge queues** to Read-only.
+2. Under **Repository permissions**, match the complete permission table
+   above. **Administration** remains Read-only; do not grant settings or
+   workflow-file write access.
 3. Under **Subscribe to events**, check **Check run**, **Merge group**, **Pull
    request** and **Release** beside **Push**. On an app whose webhook is off (a
    local cluster's), skip this step: it receives nothing, and the permissions
@@ -304,11 +313,11 @@ never widens an app by itself:
    permissions, and an owner of each account accepts them.
 
 Until an account accepts, its installation keeps the permissions it had.
-Fetching keeps working and a push still starts a pipeline run, but every
-check-run write answers 403: the run records its check as refused, carries the
-note `pipeline_check_permission_missing`, and runs to its end all the same.
-Accepting is the whole repair, and the next run reports its check. Nothing on
-the cluster changes: the six values stay as they are, and nobody reconnects.
+Operations already covered continue to work. A missing check-reporting grant
+produces `pipeline_check_permission_missing`; a proposal or queue operation
+without its required grant is refused. Reauthorize the user connection if
+GitHub requests it after the permission change. The app identifiers and
+existing secret references remain the same.
 
 ---
 

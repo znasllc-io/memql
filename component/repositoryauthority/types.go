@@ -15,6 +15,7 @@ const ResolverVariable = "MEMQL_REPOSITORY_AUTHORITY_RESOLVER"
 const BindingsVariable = "MEMQL_REPOSITORY_AUTHORITY_BINDINGS"
 const ReviewType = "repository-change"
 const OperationPropose = "propose_change"
+const OperationDeliver = "deliver_change"
 const RequestCapability = "app:pipelines/requests"
 
 type Source struct{ ID, OwnerUserID, CredentialID, Repository string }
@@ -39,26 +40,31 @@ type Transfer struct {
 	ParentRequestID string   `json:"parentRequestId,omitempty"`
 }
 type Receipt struct {
-	Statement       string   `json:"statement"`
-	Paths           []string `json:"paths"`
-	ID              string   `json:"id"`
-	Repository      string   `json:"repository"`
-	RepositoryID    int64    `json:"repositoryId"`
-	State           string   `json:"state"`
-	Reason          string   `json:"reason,omitempty"`
-	GoalID          string   `json:"goalId,omitempty"`
-	RunID           string   `json:"runId,omitempty"`
-	ApprovalID      string   `json:"approvalId,omitempty"`
-	ExpiresAt       string   `json:"expiresAt"`
-	ParentRequestID string   `json:"parentRequestId,omitempty"`
+	Statement       string           `json:"statement"`
+	Operation       string           `json:"operation"`
+	Paths           []string         `json:"paths"`
+	ID              string           `json:"id"`
+	Repository      string           `json:"repository"`
+	RepositoryID    int64            `json:"repositoryId"`
+	State           string           `json:"state"`
+	Reason          string           `json:"reason,omitempty"`
+	GoalID          string           `json:"goalId,omitempty"`
+	RunID           string           `json:"runId,omitempty"`
+	ApprovalID      string           `json:"approvalId,omitempty"`
+	ExpiresAt       string           `json:"expiresAt"`
+	ParentRequestID string           `json:"parentRequestId,omitempty"`
+	Delivery        *DeliveryReceipt `json:"delivery,omitempty"`
+	Review          *ReviewReceipt   `json:"review,omitempty"`
+	Proposal        *ProposalReceipt `json:"proposal,omitempty"`
 }
 type Access struct {
-	SourceID     string `json:"sourceId"`
-	Repository   string `json:"repository"`
-	RepositoryID int64  `json:"repositoryId"`
-	CanWrite     bool   `json:"canWrite"`
-	CanRequest   bool   `json:"canRequest"`
-	Route        string `json:"route"`
+	SourceID     string   `json:"sourceId"`
+	Repository   string   `json:"repository"`
+	RepositoryID int64    `json:"repositoryId"`
+	CanWrite     bool     `json:"canWrite"`
+	CanRequest   bool     `json:"canRequest"`
+	Route        string   `json:"route"`
+	Operations   []string `json:"operations"`
 }
 type GoalRequest struct {
 	Key, OwnerUserID, Template, Statement string
@@ -102,7 +108,15 @@ type Deps struct {
 	RemoteStatus  func(context.Context, string, string, string) (Receipt, error)
 	Read          func(context.Context, Authorization, []string) (RepositorySnapshot, error)
 	Propose       func(context.Context, Authorization, Proposal) (ProposalReceipt, error)
-	Now           func() time.Time
+	// CaptureReview returns the exact compiled prompt source closure and routing
+	// metadata. Review must execute this snapshot without installed fallback.
+	CaptureReview func(context.Context, string) (map[string]any, error)
+	Review        func(context.Context, Authorization, map[string]any, ReviewInput) (ReviewResult, error)
+	// DeliveryContext restores current maintainer authority after verifying the
+	// original goal remains open and its live-mode run is running or succeeded.
+	DeliveryContext func(context.Context, string, string, string) (context.Context, error)
+	Queue           func(context.Context, Authorization, DeliveryIntent) (DeliveryReceipt, error)
+	Now             func() time.Time
 }
 
 type Replacement struct {
@@ -129,4 +143,35 @@ type RepositorySnapshot struct {
 	ExpectedHead string        `json:"expectedHead"`
 	BaseBranch   string        `json:"baseBranch"`
 	Files        []Replacement `json:"files"`
+}
+
+// ReviewInput is built by the native journal; callers never supply a reviewer
+// verdict or replace the source snapshot reviewed with the exact proposal.
+type ReviewInput struct {
+	Statement, Repository, Operation string
+	Paths                            []string
+	Source                           RepositorySnapshot
+	Proposal                         Proposal
+}
+type ReviewResult struct {
+	Approved bool   `json:"approved"`
+	Reason   string `json:"reason"`
+}
+type ReviewReceipt struct {
+	ProposalHash string `json:"proposalHash"`
+	Approved     bool   `json:"approved"`
+	Reason       string `json:"reason"`
+}
+type DeliveryIntent struct {
+	// ObserveOnly forbids ready/enqueue writes after provider-confirmed admission.
+	ObserveOnly  bool
+	ProposalHash string
+	Proposal     ProposalReceipt
+	BaseBranch   string
+}
+type DeliveryReceipt struct {
+	State        string `json:"state"`
+	Reason       string `json:"reason,omitempty"`
+	HeadSHA      string `json:"headSha,omitempty"`
+	QueueEntryID string `json:"queueEntryId,omitempty"`
 }

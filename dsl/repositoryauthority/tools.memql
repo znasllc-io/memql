@@ -14,7 +14,7 @@ tool inspectRepositoryAuthority {
 tool requestRepositoryChange {
   sourceId string!
   requestId string! @description("Fresh stable unique id, reused only for identical recovery.")
-  operation enum("propose_change")! @description("Only a scoped branch and pull request proposal is permitted.")
+  operation enum("propose_change", "deliver_change")! @description("propose_change creates a draft only; deliver_change additionally permits independent review and required-check-gated merge-queue admission, never direct merge or deployment.")
   statement string! @description("Human-readable requested change and acceptance criteria.")
   paths array! @description("Explicit relative files or directory prefixes ending in /; no wildcards or traversal.")
   parentRequestId string @description("Existing parent request for a related upstream dependency; a link, not authority.")
