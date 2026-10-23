@@ -170,18 +170,11 @@ func (d *Dispatcher) DispatchStream(ctx context.Context, dispatch *memqlv1.ToolD
 	// block, which the step checks before it touches anything. Every
 	// other call asks exactly as before.
 	if d.consent != nil && !consent.AdmittedByPolicy(tool, action) {
-		// For workerComputer.mouse_click, resolve the live cursor
-		// position so the strict-mode region exemption can fire
-		// (memql-cockpit#131). mouse_click carries no coordinates of
-		// its own -- positioning happens via a preceding mouse_move
-		// -- so the region check reads where the cursor actually is
-		// at dispatch time. cursorLocation() is computer-use-build-backed;
-		// the headless stub returns Known=false, which AllowsAt
-		// treats as out-of-region (falls through to the gate).
+		// Target-addressed clicks do not use the live cursor. Do not grant
+		// the old cursor-region exemption for a different explicit target.
 		var dec consent.Decision
 		if tool == "workerComputer" && action == "mouse_click" {
-			cx, cy, ok := cursorLocation()
-			dec = d.consent.AllowsAt(tool, action, consent.CursorPoint{X: cx, Y: cy, Known: ok})
+			dec = d.consent.AllowsAt(tool, action, consent.CursorPoint{Known: false})
 		} else {
 			dec = d.consent.Allows(tool, action)
 		}
@@ -234,7 +227,7 @@ func (d *Dispatcher) DispatchStream(ctx context.Context, dispatch *memqlv1.ToolD
 		} else if fail := preflightComputerAction(action); fail != nil {
 			failure = fail
 		} else {
-			success, failure = d.dispatchComputer(ctx, action, args)
+			success, failure = d.dispatchComputer(context.WithValue(ctx, inputScopeContextKey{}, inputScope{dispatcher: d, run: dispatch.GetRunId()}), action, args)
 		}
 	default:
 		failure = &memqlv1.Failure{ErrorCode: "unknown_tool", ErrorMessage: fmt.Sprintf("unknown tool %q", tool)}

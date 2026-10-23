@@ -21,7 +21,7 @@ import (
 type WindowInfo struct {
 	// ID is the platform window handle: kCGWindowNumber on macOS,
 	// the X window id on Linux. Stable for the window's lifetime;
-	// pass it back to window_focus.
+	// pass it as screenshot.windowId to request a bound input receipt.
 	ID uint64
 	// Title is the window's own title (kCGWindowName / _NET_WM_NAME).
 	// May be empty -- on macOS reading other apps' window titles

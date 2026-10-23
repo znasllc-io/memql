@@ -47,9 +47,8 @@ var buildAgnosticComputerActions = []string{computerWaitAction}
 // self-description (memql-cockpit#162). Computed from the build tag
 // (computeruse vs headless) plus the host environment at call time.
 //
-// Actions lists the workerComputer actions this build can dispatch:
-// the computer-use-backed set (derived from the same table the computer-use action
-// router uses, so it can never drift from reality) plus the
+// Actions lists supported workerComputer actions, filtering legacy refused
+// inputs and platforms without a target-addressed backend, plus the
 // build-agnostic set (`wait`, memql-cockpit#166) that works on every
 // variant -- so a headless build advertises ["wait"], not []. The
 // `capabilities` action itself is deliberately NOT listed -- it is
@@ -77,6 +76,8 @@ type CapabilityDescriptor struct {
 	Actions              []string            `json:"actions"`
 	Displays             int                 `json:"displays"`
 
+	InputTargetPolicy map[string]any `json:"inputTargetPolicy,omitempty"`
+
 	SchemaVersion int `json:"schemaVersion"`
 }
 
@@ -102,7 +103,7 @@ func computeCapabilities(goos string, getenv func(string) string) CapabilityDesc
 	// build-agnostic set (`wait`). Merged + sorted for a stable wire
 	// shape; the slices never overlap (the router table is computeruse-only,
 	// the agnostic set is routed before the router).
-	actions := append(supportedComputerActions(), buildAgnosticComputerActions...)
+	actions := append(availableComputerActions(supportedComputerActions(), goos), buildAgnosticComputerActions...)
 	sort.Strings(actions)
 	if actions == nil {
 		// Keep the JSON shape stable: "actions": [] -- never null.
@@ -124,8 +125,26 @@ func computeCapabilities(goos string, getenv func(string) string) CapabilityDesc
 	if goos == "darwin" || goos == "linux" {
 		contracts["workerHost.computer_permission"] = 1
 	}
+	var targetPolicy map[string]any
+	if buildHasComputerUse {
+		contracts["workerComputer.input_target"] = 1
+		supported := []string{}
+		if goos == "darwin" {
+			supported = []string{"key_type", "key_combo", "mouse_move", "mouse_click", "mouse_scroll"}
+		}
+		targetPolicy = map[string]any{
+			"supportedInputActions": supported,
+			"acquisition":           "screenshot with explicit windowId of the already focused window",
+			"receipt":               "inputTarget.id, required on one action in the same run, expires after 60 seconds",
+			"coordinates":           "explicit x/y from that exact screenshot for every pointer action",
+			"focusActivation":       false,
+			"interruption":          "latched until operator review and worker restart; no automatic retry or reacquisition",
+			"limitation":            "process-addressed delivery; AX window/field checks are sampled, not atomic; delayed effects may stop input",
+		}
+	}
 	return CapabilityDescriptor{
 		Architecture:         runtime.GOARCH,
+		InputTargetPolicy:    targetPolicy,
 		ActionContracts:      contracts,
 		Platform:             goos,
 		DisplayServer:        displayServer,
@@ -199,6 +218,7 @@ func runComputerCapabilities() (*memqlv1.Success, *memqlv1.Failure) {
 		desc.Platform, desc.DisplayServer, desc.ComputerUseAvailable, len(desc.Actions), desc.Displays)
 	return successComputerJSON(map[string]any{
 		"actionContracts":      desc.ActionContracts,
+		"inputTargetPolicy":    desc.InputTargetPolicy,
 		"platform":             desc.Platform,
 		"homeDirectory":        desc.HomeDirectory,
 		"displayServer":        desc.DisplayServer,
@@ -220,4 +240,22 @@ func successComputerJSON(payload map[string]any, preview string, bytesOut int) *
 		BytesOut:      uint64(bytesOut),
 		OutputPreview: clampPreview(preview),
 	}
+}
+
+// The vocabulary may include legacy handlers which now always refuse. Do not
+// advertise those, or input on platforms without a target-addressed backend.
+func availableComputerActions(vocabulary []string, goos string) []string {
+	result := make([]string, 0, len(vocabulary))
+	for _, action := range vocabulary {
+		switch action {
+		case "window_focus", "key_hold", "mouse_down", "mouse_up", "mouse_drag":
+			continue
+		case "key_type", "key_combo", "mouse_move", "mouse_click", "mouse_scroll":
+			if goos != "darwin" {
+				continue
+			}
+		}
+		result = append(result, action)
+	}
+	return result
 }
