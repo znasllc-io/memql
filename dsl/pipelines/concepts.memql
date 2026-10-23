@@ -95,6 +95,7 @@ concept run {
   title              string  @description("The commit message's first line or the pull request's title, for a person reading the list.")
   version            string  @description("MEMQL_VERSION for the run's steps: the release tag for a release, the head SHA otherwise.")
   policySnapshot     object  @description("Immutable installed workflow sources and policy bindings captured when the run opens. Recovery uses these definitions; the snapshot grants no authority.")
+  selectionFacts     object  @description("Immutable provider-verified facts bound to this run, source and installed policy for stage selection. They grant no repository write authority.")
   maintenanceState   string  @description("Durable follow-up disposition: pending, none, analysis, or human. Only the native maintenance reconciler writes this state.")
   maintenanceGoalId  string  @description("The owner-bound analysis goal created once for this failed run.")
   maintenanceMessage string  @description("The installed maintenance policy's explanation for the follow-up.")

@@ -521,6 +521,33 @@ closure, including on another replica with a newer installed bundle. Selection
 has no native effects. The stage selector additionally receives `stage`,
 `repository`, `sha` and the original `releaseTag`, so independently versioned
 components can share a checkout without sharing their publication tags.
+An installed stage selector can additionally declare `pullRequest object!` to
+opt into provider-verified selection facts. For a PR event the engine reads the
+current PR through the source owner's connection and verifies the exact PR
+number, open state, repository, branch and head commit before allocating work.
+Its argument contains `present: true`, `number`, `state`, `author`, `headRef`,
+`headRepository`, `headSha` and `baseSha`. Other events receive only
+`{present: false}`. A selector without this argument keeps its existing behavior
+and does not require this provider read.
+Install engine support before a policy that requires this argument: an older
+engine refuses the missing argument instead of presenting unverified facts as a
+decision to skip maintenance.
+
+The observation is saved with the run, source owner, credential, installation
+and captured policy version under the current driver's lease. Recovery on a
+different replica reuses that exact observation. An unavailable provider, moved
+PR, mismatched source, cancellation or lost claim refuses selection rather than
+turning unknown facts into a passing empty pipeline. These are planning facts;
+repository writes still require their own fresh authority and source checks.
+
+Stage selectors may return a boolean, or exactly
+`{included: false, reason: "No maintenance is needed for this change."}`. The
+reason must be nonempty plain text, at most 512 characters with no control
+characters. The engine records it once per stage as a run note, preserving
+unrelated notes, and refuses a changed outcome or explanation on recovery. An excluded
+stage creates no execution job. Installed DSL decides which authors, branches
+or stages apply; source manifests cannot provide verified facts or replace this
+policy.
 Native code retains leases, current authority, immutable receipts and the final
 verdict. See [Pipeline workflows](../build/integration-boundary.md#pipeline-workflows).
 

@@ -219,7 +219,10 @@ type Run struct {
 	Version          string
 	// PolicySnapshot freezes the installed delivery policy and its complete
 	// reachable source. It grants no repository or execution authority.
-	PolicySnapshot     map[string]any
+	PolicySnapshot map[string]any
+	// SelectionFacts is the immutable, source-bound provider observation used
+	// by an opted-in stage resolver. It grants no repository write authority.
+	SelectionFacts     map[string]any
 	MaintenanceState   string
 	MaintenanceGoalID  string
 	MaintenanceMessage string
@@ -370,6 +373,7 @@ type PipelinePatch struct {
 // RunPatch is a read-merge write to a run, on PipelinePatch's rule: nil is
 // not written, non-nil is written as given. Notes and Stages are sent whole.
 type RunPatch struct {
+	SelectionFacts     *map[string]any
 	MaintenanceState   *string
 	MaintenanceGoalID  *string
 	MaintenanceMessage *string

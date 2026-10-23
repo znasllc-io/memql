@@ -177,6 +177,7 @@ mutation run createPipelineRun {
 @serverOnly
 mutation run updatePipelineRun {
   args {
+    selectionFacts     object
     maintenanceState   string
     maintenanceGoalId  string
     maintenanceMessage string
@@ -202,7 +203,7 @@ mutation run updatePipelineRun {
     durationMs         int
   }
   update {
-    accept { maintenanceState, maintenanceGoalId, maintenanceMessage, status, conclusion, refusalCode, refusalMessage, refusalScope, checkRunId, checkRunState, notes, workRunId, workGoalId, driverNodeId, driverLeaseId, driverHeartbeatAt, cancelRequested, cancelledBy, stages, startedAt, finishedAt, durationMs }
+    accept { selectionFacts, maintenanceState, maintenanceGoalId, maintenanceMessage, status, conclusion, refusalCode, refusalMessage, refusalScope, checkRunId, checkRunState, notes, workRunId, workGoalId, driverNodeId, driverLeaseId, driverHeartbeatAt, cancelRequested, cancelledBy, stages, startedAt, finishedAt, durationMs }
     stamp {
       id: args.runId
     }

@@ -218,6 +218,17 @@ func (dr *runDriver) selectStages(ctx context.Context, spec *pipelines.Spec, eve
 			return pipelines.StageSelection{}, err
 		}
 	}
+	usesPR, err := dr.stageUsesPullRequest()
+	if err != nil {
+		return pipelines.StageSelection{}, err
+	}
+	var pullRequest map[string]any
+	if usesPR {
+		pullRequest, err = dr.stagePullRequest(ctx)
+		if err != nil {
+			return pipelines.StageSelection{}, err
+		}
+	}
 	selection := pipelines.StageSelection{Included: make([]string, 0, len(spec.Stages))}
 	for _, stage := range spec.Stages {
 		stageCadence := stage.Schedule
@@ -238,13 +249,20 @@ func (dr *runDriver) selectStages(ctx context.Context, spec *pipelines.Spec, eve
 		if dr.workflow.snapshot != nil && dr.workflow.snapshot.PhaseEntry("pipelineStageIncluded") != "pipelineStageIncluded" {
 			args["stage"], args["repository"], args["sha"], args["releaseTag"] = stage.Name, dr.run.Repository, dr.run.SHA, dr.run.ReleaseTag
 		}
+		if usesPR {
+			args["pullRequest"] = maps.Clone(pullRequest)
+			args["stage"], args["repository"], args["sha"], args["releaseTag"] = stage.Name, dr.run.Repository, dr.run.SHA, dr.run.ReleaseTag
+		}
 		value, err := dr.runPinnedWorkflow(ctx, "pipelineStageIncluded", args)
 		if err != nil {
 			return pipelines.StageSelection{}, err
 		}
-		included, ok := value.(bool)
-		if !ok {
-			return pipelines.StageSelection{}, fmt.Errorf("pipeline stage policy returned %T, want bool", value)
+		included, reason, err := stageSelectionDecision(value)
+		if err != nil {
+			return pipelines.StageSelection{}, err
+		}
+		if err := dr.recordStageDecision(ctx, stage.Name, included, reason); err != nil {
+			return pipelines.StageSelection{}, err
 		}
 		if included {
 			selection.Included = append(selection.Included, stage.Name)

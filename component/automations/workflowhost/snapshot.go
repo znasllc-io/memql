@@ -274,11 +274,18 @@ func PrepareSnapshot(s *Snapshot, contract string, opts Options) (*PreparedSnaps
 	if s == nil {
 		return nil, fmt.Errorf("missing workflow snapshot")
 	}
-	frozen, err := snapshotOptions(s, contract, s.Entry, opts)
+	return PrepareSnapshotEntry(s, contract, s.Entry, opts)
+}
+
+// PrepareSnapshotEntry prepares one captured native phase and its reachable
+// definitions. It uses the same admission checks as RunSnapshotEntry and never
+// substitutes installed source for the stored closure.
+func PrepareSnapshotEntry(s *Snapshot, contract, entry string, opts Options) (*PreparedSnapshot, error) {
+	frozen, err := snapshotOptions(s, contract, entry, opts)
 	if err != nil {
 		return nil, err
 	}
-	h, err := prepareHost(s.Entry, frozen)
+	h, err := prepareHost(entry, frozen)
 	if err != nil {
 		return nil, err
 	}
