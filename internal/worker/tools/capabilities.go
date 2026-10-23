@@ -147,6 +147,7 @@ func computeCapabilitiesForRuntime(goos string, getenv func(string) string, desk
 			"receipt":               "inputTarget.id, required on one action in the same run, expires after 60 seconds",
 			"coordinates":           "explicit x/y from that exact screenshot for every pointer action",
 			"focusActivation":       goos == "darwin",
+			"postEventAccess":       desktopInputGuard.postingAccess(),
 			"windowSelection":       "macOS initial selection only: window_list with windowId and pid returns a single-use focusTarget; window_focus requires all three. Never clears or replaces an anchor/latch. A fresh screenshot is required afterward.",
 			"key_combo":             "keys is a string array: primary key first, then modifiers; for example [r,cmd] or [enter]",
 			"key_type":              "text is 1..4096 printable UTF-8 bytes; newline/tab refused; use a fresh screenshot before a separate key_combo",

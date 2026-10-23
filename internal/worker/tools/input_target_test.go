@@ -32,13 +32,16 @@ func (f *fakeInputFocus) close() {
 }
 
 type fakeInputBackend struct {
-	current fakeInputFocus
-	events  []targetInputEvent
-	targets []WindowInfo
-	onEmit  func(targetInputEvent)
-	err     error
-	emitErr func(targetInputEvent) error
+	current       fakeInputFocus
+	events        []targetInputEvent
+	targets       []WindowInfo
+	onEmit        func(targetInputEvent)
+	err           error
+	emitErr       func(targetInputEvent) error
+	postingDenied bool
 }
+
+func (b *fakeInputBackend) canPostEvents() bool { return !b.postingDenied }
 
 func (b *fakeInputBackend) focus() (inputFocus, error) {
 	if b.err != nil {
@@ -119,6 +122,19 @@ func TestInputTargetDiagnosticPreservesGuardAndNeverPosts(t *testing.T) {
 	g.backend = nil
 	if status := g.targetStatus(); status.Available || status.Error == "" {
 		t.Fatalf("missing backend must be explicit: %+v", status)
+	}
+}
+
+func TestPostingPreflightRefusesWithoutEventsOrPrompt(t *testing.T) {
+	g, b, ctx := newInputFixture(t)
+	token := inputToken(t, g, ctx)
+	b.postingDenied = true
+	status := g.targetStatus()
+	if !status.Available || status.PostEventAccess == nil || *status.PostEventAccess {
+		t.Fatalf("AX and posting permissions conflated: %+v", status)
+	}
+	if _, fail := g.input(ctx, "key_type", map[string]any{"text": "x", "inputTarget": token}); fail == nil || fail.GetErrorCode() != "input_posting_unavailable" || len(b.events) != 0 || !g.frame.used {
+		t.Fatalf("posting denial bypassed: %v", fail)
 	}
 }
 

@@ -88,6 +88,7 @@ type InputTargetStatus struct {
 	Available               bool               `json:"available"`
 	Bound                   bool               `json:"bound"`
 	Halted                  bool               `json:"halted"`
+	PostEventAccess         *bool              `json:"post_event_access,omitempty"`
 	WindowID                uint64             `json:"observed_window_id,omitempty"`
 	PID                     int                `json:"observed_pid,omitempty"`
 	Error                   string             `json:"error,omitempty"`
@@ -114,7 +115,7 @@ func DesktopInputTargetStatus() InputTargetStatus { return desktopInputGuard.tar
 func (g *inputTargetGuard) targetStatus() InputTargetStatus {
 	g.mu.Lock()
 	defer g.mu.Unlock()
-	status := InputTargetStatus{Bound: g.anchor != nil, Halted: g.halted}
+	status := InputTargetStatus{Bound: g.anchor != nil, Halted: g.halted, PostEventAccess: g.postingAccess()}
 	if g.backend == nil {
 		status.Error = "No target-addressed input backend is available."
 		return status
@@ -133,6 +134,16 @@ func (g *inputTargetGuard) targetStatus() InputTargetStatus {
 	w := focus.window()
 	status.Available, status.WindowID, status.PID = true, w.ID, w.PID
 	return status
+}
+
+// Passive and content-free. AX inspection permission is distinct from permission
+// to synthesize events. Nil means this backend cannot report the latter.
+func (g *inputTargetGuard) postingAccess() *bool {
+	if b, ok := g.backend.(interface{ canPostEvents() bool }); ok {
+		allowed := b.canPostEvents()
+		return &allowed
+	}
+	return nil
 }
 
 func (g *inputTargetGuard) clearFrame() {
@@ -286,6 +297,9 @@ func (g *inputTargetGuard) input(ctx context.Context, action string, args map[st
 		return nil, failure("input_target_required", "Input requires a fresh, unused screenshot inputTarget.id for this run. Request screenshot with the intended windowId; do not retry this input blindly.")
 	}
 	f.used = true // failures consume the receipt too; no blind retries
+	if access := g.postingAccess(); access != nil && !*access {
+		return nil, failure("input_posting_unavailable", "The operating system's passive event-posting preflight refused input. AX focus access alone does not authorize posting. No input or permission prompt was sent.")
+	}
 	if err := ctx.Err(); err != nil {
 		return nil, failure("cancelled", err.Error())
 	}

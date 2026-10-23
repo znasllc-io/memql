@@ -9,6 +9,8 @@ package tools
 #include <math.h>
 
 extern pid_t targetKeyboardPID(void);
+extern long targetEventAppKitWindow(CGEventRef);
+extern CGEventRef targetCreateWindowMouse(CGEventSourceRef, CGEventType, CGPoint, CGMouseButton, uint32_t);
 
 typedef struct {
     AXUIElementRef app, window, element;
@@ -119,13 +121,14 @@ static int targetSame(targetFocus *a, targetFocus *b, int field) {
 // addressed to the retained PID. There is deliberately no global-post fallback.
 // Posting has no delivery acknowledgement and cannot atomically bind an event
 // to an AX field: the Go guard samples those identities before every event.
-typedef struct { CGEventRef event; pid_t pid; } targetEvent;
+typedef struct { CGEventRef event; pid_t pid; int sourceState; } targetEvent;
 static void targetEventFree(targetEvent *e) { if (!e) return; if (e->event) CFRelease(e->event); free(e); }
 static targetEvent *targetCreate(pid_t pid, uint32_t wid, int kind, int key, const UniChar *text, int ntext,
                       int down, int button, int x, int y, int dx, int dy, uint64_t flags) {
     if (pid <= 0 || wid == 0) return NULL;
     CGEventSourceRef source = CGEventSourceCreate(kCGEventSourceStatePrivate);
     if (!source) return 0;
+    int sourceState=(int)CGEventSourceGetSourceStateID(source);
     CGEventRef event = NULL;
     if (kind == 0 || kind == 1) {
         event = CGEventCreateKeyboardEvent(source, (CGKeyCode)key, down);
@@ -134,7 +137,7 @@ static targetEvent *targetCreate(pid_t pid, uint32_t wid, int kind, int key, con
         CGEventType type = kCGEventMouseMoved;
         if (kind == 3) type = button == 0 ? (down ? kCGEventLeftMouseDown : kCGEventLeftMouseUp) :
             button == 1 ? (down ? kCGEventRightMouseDown : kCGEventRightMouseUp) : (down ? kCGEventOtherMouseDown : kCGEventOtherMouseUp);
-        event = CGEventCreateMouseEvent(source,type,CGPointMake(x,y),(CGMouseButton)button);
+        event = targetCreateWindowMouse(source,type,CGPointMake(x,y),(CGMouseButton)button,wid);
         if (event && kind == 3) CGEventSetIntegerValueField(event,kCGMouseEventClickState,1);
     } else if (kind == 4) {
         event = CGEventCreateScrollWheelEvent(source,kCGScrollEventUnitLine,2,dy,dx);
@@ -154,10 +157,16 @@ static targetEvent *targetCreate(pid_t pid, uint32_t wid, int kind, int key, con
     }
     targetEvent *out = calloc(1,sizeof(targetEvent));
     if (!out) { CFRelease(event); return NULL; }
-    out->event=event; out->pid=pid; return out;
+    out->event=event; out->pid=pid; out->sourceState=sourceState; return out;
 }
 static void targetSend(targetEvent *e) { CGEventPostToPid(e->pid,e->event); }
 static int64_t targetEventField(targetEvent *e, int field) { return CGEventGetIntegerValueField(e->event,(CGEventField)field); }
+static int targetEventSourceState(targetEvent *e) {
+    CGEventSourceRef source=CGEventCreateSourceFromEvent(e->event);
+    if (!source) return -999;
+    int state=(int)CGEventSourceGetSourceStateID(source);
+    CFRelease(source); return state;
+}
 
 */
 import "C"
@@ -189,6 +198,8 @@ func (f *darwinInputFocus) close() { C.targetFree(f.ptr); f.ptr = nil }
 
 type darwinInputBackend struct{}
 
+func (darwinInputBackend) canPostEvents() bool { return bool(C.CGPreflightPostEventAccess()) }
+
 func (darwinInputBackend) focus() (inputFocus, error) {
 	var problem C.targetReadError
 	p := C.targetRead(&problem)
@@ -219,6 +230,9 @@ func (darwinInputBackend) diagnosticProbes() []InputTargetProbe {
 	return []InputTargetProbe{probe}
 }
 func (darwinInputBackend) emit(target inputFocus, e targetInputEvent) error {
+	if !(darwinInputBackend{}).canPostEvents() {
+		return fmt.Errorf("macOS event-posting access is unavailable; no event was posted (CGPreflightPostEventAccess=false)")
+	}
 	f, ok := target.(*darwinInputFocus)
 	if !ok || f.ptr == nil {
 		return fmt.Errorf("invalid target identity")
@@ -237,6 +251,16 @@ func (darwinInputBackend) emit(target inputFocus, e targetInputEvent) error {
 type darwinTargetEvent struct{ ptr *C.targetEvent }
 
 func (e *darwinTargetEvent) close() { C.targetEventFree(e.ptr); e.ptr = nil }
+func (e *darwinTargetEvent) appKitWindow() int64 {
+	return int64(C.targetEventAppKitWindow(e.ptr.event))
+}
+func (e *darwinTargetEvent) sourceState() int         { return int(C.targetEventSourceState(e.ptr)) }
+func (e *darwinTargetEvent) originalSourceState() int { return int(e.ptr.sourceState) }
+
+func (e *darwinTargetEvent) pointerDescription() (kind int, button int64, x, y float64, flags uint64) {
+	p := C.CGEventGetLocation(e.ptr.event)
+	return int(C.CGEventGetType(e.ptr.event)), int64(C.CGEventGetIntegerValueField(e.ptr.event, C.kCGMouseEventButtonNumber)), float64(p.x), float64(p.y), uint64(C.CGEventGetFlags(e.ptr.event))
+}
 func (e *darwinTargetEvent) routing() (pid, window, handlingWindow int64) {
 	return int64(C.targetEventField(e.ptr, C.kCGEventTargetUnixProcessID)), int64(C.targetEventField(e.ptr, C.kCGMouseEventWindowUnderMousePointer)), int64(C.targetEventField(e.ptr, C.kCGMouseEventWindowUnderMousePointerThatCanHandleThisEvent))
 }

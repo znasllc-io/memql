@@ -278,8 +278,12 @@ and inference services still start. Desktop operations are disabled for that
 process and its capabilities advertise only the platform-independent `wait`.
 
 macOS delivery uses `CGEventPostToPid` for keyboard and mouse. Move/click
-packets also carry the observed window in Quartz's two public mouse-window
-fields. Quartz ignores those fields for scroll packets, which retain PID and
+packets are constructed with AppKit's public explicit-window factory, then
+converted to Quartz while preserving global logical coordinates, a private
+event source and explicit modifiers. Packet tests decode the result back to
+`NSEvent.windowNumber`: Quartz's two public mouse-window hints alone decode
+as window zero. Those hints are also retained. Quartz ignores those fields for
+scroll packets, which retain PID and
 point addressing with the same sampled-focus checks. Window hints do not
 acknowledge application delivery or atomically bind an AX field. Before each
 press/text event the guard checks the AX window and field; releases check the
@@ -288,6 +292,13 @@ attempted down event to that same PID. After a click, Tab, Escape, Cmd-L or Cmd-
 within the same window becomes the next anchor. Other actions must preserve
 the focused field even after their last release; a change stops input with
 partial-event reporting. A window change always stops input.
+
+The passive `CGPreflightPostEventAccess` check is separate from AX inspection
+permission. The actual worker reports it in local `input-target-status` as
+`post_event_access` and capabilities as `inputTargetPolicy.postEventAccess`.
+A false result refuses the transaction before input and is checked again before
+each post. The probe never requests permission or displays a prompt; absent/null
+means this backend cannot report it, not permission granted.
 
 **Limits:** process-addressed events have no delivery acknowledgement and
 are not atomically bound to an AX window or field. Checks sample focus; they
