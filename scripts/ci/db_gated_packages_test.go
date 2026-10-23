@@ -54,7 +54,7 @@ func TestDBTestsLaneTakesItsSetFromThePlanner(t *testing.T) {
 		t.Error("agent-tagged DB tests lost their bounded CPU, memory or overall timeout")
 	}
 	for _, command := range []string{
-		"go test -tags agent -count=1 -timeout=900s ./app/\n",
+		"go test -tags agent -count=1 -timeout=900s -v ./app/\n",
 		"go test -tags agent -count=1 -timeout=300s ./integrations/agent/ ./integrations/agent/worker/ ./integrations/pipelinesteps/ ./component/node/\n",
 	} {
 		if !strings.Contains(agent.Run, command) {

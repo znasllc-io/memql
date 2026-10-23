@@ -10,6 +10,7 @@ import (
 	"io"
 	"log/slog"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -31,6 +32,26 @@ import (
 	"github.com/znasllc-io/memql/integrations/knowledge"
 	"github.com/znasllc-io/memql/integrations/knowledge/seeddata"
 )
+
+// This router/hop fixture supplies its own exact provider admission witness;
+// durable work budgets remain covered by the real Work admission suites.
+type releaseSeedAdmission struct {
+	expected common.RunContext
+	calls    atomic.Int64
+}
+
+func (g *releaseSeedAdmission) AdmitProvider(ctx context.Context, run common.RunContext, _ memql.ProviderAdmission) error {
+	if err := context.Cause(ctx); err != nil {
+		return err
+	}
+	access, ok := auth.AccessFromContext(ctx)
+	if !ok || access.UserId != g.expected.OwnerUserId || run.OwnerUserId != g.expected.OwnerUserId ||
+		run.RunId != g.expected.RunId || run.GoalId != g.expected.GoalId || run.StepKey != g.expected.StepKey || run.Mode != common.RunModeLive {
+		return fmt.Errorf("release seed fixture lost its exact live owner/run/goal/step")
+	}
+	g.calls.Add(1)
+	return nil
+}
 
 // The provider/catalog/router/forwarder are real. Only the remote machine's
 // final inference is deterministic. No originating registry or context is
@@ -141,6 +162,8 @@ func TestReleaseSeedFirstUseKeepsPrivateFleetAuthorityAcrossHop(t *testing.T) {
 	require.NoError(t, err)
 	person := auth.BindForwardedContext(context.Background(), authority.Principal().Claims, access, authority)
 	ctx := memql.ContextWithBackgroundLane(auth.ContextWithInternalOrigin(common.ContextWithRun(person, expectedRun)))
+	admission := &releaseSeedAdmission{expected: expectedRun}
+	ctx = memql.ContextWithProviderAdmissionForTest(ctx, admission)
 	write := func(name string, args map[string]any) {
 		call, err := parser.RenderCall(name, args)
 		require.NoError(t, err)
@@ -157,6 +180,7 @@ func TestReleaseSeedFirstUseKeepsPrivateFleetAuthorityAcrossHop(t *testing.T) {
 	_, _, err = memql.ResolveAITyped[memql.EmbeddingAIProvider](auth.ContextWithSystemActor(ctx, "knowledge-release"), engines[0], airoute.ResolveRequest{Level: airoute.LevelEmbeddings, Modality: airoute.ModalityEmbedding, ExplicitProvider: providerRef})
 	require.ErrorContains(t, err, "every_door_shut")
 	require.Empty(t, calls)
+	require.Zero(t, admission.calls.Load(), "the denied lifecycle actor must not reach provider admission")
 	// Existing manual vectors model a cluster that gains new release lessons.
 	// Keep this actual router/hop witness below the ordinary model rate ceiling;
 	// the empty-corpus suite separately proves the per-pass eight-vector bound.
@@ -190,6 +214,7 @@ func TestReleaseSeedFirstUseKeepsPrivateFleetAuthorityAcrossHop(t *testing.T) {
 		require.Equal(t, 1, count, "peer indexing must reuse the completed vector")
 	}
 	mu.Unlock()
+	require.Equal(t, int64(missing), admission.calls.Load(), "every missing vector needs one admission; peer reuse must not infer again")
 	var count int
 	require.NoError(t, db.NewRaw("SELECT count(*) FROM "+table).Scan(context.Background(), &count))
 	require.Equal(t, len(seeddata.Release()), count)

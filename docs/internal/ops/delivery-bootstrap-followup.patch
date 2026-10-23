@@ -154,15 +154,15 @@ diff --git a/memql-package.yaml b/memql-package.yaml
            placement: cluster
            # Agent-tagged persistence cases are absent from untagged DB shards.
            # A dedicated service and required DB mode prevent a skipped green.
-@@ -680,6 +699,7 @@
-             go test -tags agent -count=1 -timeout=900s ./app/
+@@ -683,6 +702,7 @@
+             go test -tags agent -count=1 -timeout=900s -v ./app/
              go test -tags agent -count=1 -timeout=300s ./integrations/agent/ ./integrations/agent/worker/ ./integrations/pipelinesteps/ ./component/node/
          - name: test-bff
 +          verification: true
            placement: cluster
            timeout: 30m
            run: |
-@@ -688,6 +708,7 @@
+@@ -691,6 +711,7 @@
              bash scripts/identity/build-css.sh
              go test -tags bff -timeout=300s ./app/ ./component/server/ ./component/node/
          - name: test-edge
@@ -170,7 +170,7 @@ diff --git a/memql-package.yaml b/memql-package.yaml
            placement: cluster
            timeout: 30m
            run: |
-@@ -696,6 +717,7 @@
+@@ -699,6 +720,7 @@
              bash scripts/identity/build-css.sh
              go test -tags edge -timeout=300s ./app/ ./component/server/ ./component/node/
          - name: test-identity
@@ -178,7 +178,7 @@ diff --git a/memql-package.yaml b/memql-package.yaml
            placement: cluster
            timeout: 30m
            run: |
-@@ -704,6 +726,7 @@
+@@ -707,6 +729,7 @@
              bash scripts/identity/build-css.sh
              go test -tags identity -timeout=300s ./app/ ./component/node/
          - name: test-mcp
@@ -186,7 +186,7 @@ diff --git a/memql-package.yaml b/memql-package.yaml
            placement: cluster
            timeout: 30m
            run: |
-@@ -712,6 +735,7 @@
+@@ -715,6 +738,7 @@
              bash scripts/identity/build-css.sh
              go test -tags mcp -timeout=300s ./app/ ./component/mcp/ ./component/node/
          - name: test-planner
@@ -194,7 +194,7 @@ diff --git a/memql-package.yaml b/memql-package.yaml
            placement: cluster
            timeout: 30m
            run: |
-@@ -720,6 +744,7 @@
+@@ -723,6 +747,7 @@
              bash scripts/identity/build-css.sh
              go test -tags planner -timeout=300s ./app/ ./component/node/
          - name: test-workbench
@@ -202,7 +202,7 @@ diff --git a/memql-package.yaml b/memql-package.yaml
            placement: cluster
            timeout: 30m
            run: |
-@@ -979,9 +1004,149 @@
+@@ -982,9 +1007,149 @@
              export GOFLAGS=-p=2 GOMEMLIMIT=1GiB GOGC=75
              go run ./cmd/ocisnapshot --pin deploy/ci-fixtures/timescaledb.json --out .memql-fixture
  
@@ -547,7 +547,7 @@ diff --git a/test/fixtures/pipelines/delivery-after-bootstrap.yaml b/test/fixtur
 deleted file mode 100644
 --- a/test/fixtures/pipelines/delivery-after-bootstrap.yaml
 +++ /dev/null
-@@ -1,1323 +0,0 @@
+@@ -1,1326 +0,0 @@
 -# memql-package.yaml -- the engine repository's own pipeline (epic memql#5478,
 -# issue memql#5496).
 -#
@@ -1246,7 +1246,10 @@ deleted file mode 100644
 -            SQL
 -            export MEMQL_DATABASE_DSN='postgres://memql:memql_dev@localhost:5432/memql?sslmode=disable'
 -            export MEMQL_REQUIRE_DB=1
--            go test -tags agent -count=1 -timeout=900s ./app/
+-            # With database cases enabled, app reached the 300s package alarm
+-            # while its current subtest was only 4s old. Bound the full app
+-            # suite separately; keep every other package's existing alarm.
+-            go test -tags agent -count=1 -timeout=900s -v ./app/
 -            go test -tags agent -count=1 -timeout=300s ./integrations/agent/ ./integrations/agent/worker/ ./integrations/pipelinesteps/ ./component/node/
 -        - name: test-bff
 -          verification: true

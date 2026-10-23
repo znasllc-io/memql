@@ -6528,7 +6528,7 @@ QueryClient.prototype.packageDeploymentsPending = function (this: QueryClient, a
   return this.executeNamed("packageDeploymentsPending", buildPackageDeploymentsPending(args), opts);
 };
 
-/** Read connected repositories and application sources visible to this caller. */
+/** Read connected repositories and application sources, with repository URLs, refs and declared applications. Includes sources without pipelines; returns only active records this caller may read. */
 // Bound concept: v1:platform:package (machine-readable: BoundConcepts["packagesAll"] in generated_concepts.ts).
 export interface PackagesAllArgs {
 }
@@ -6954,7 +6954,7 @@ QueryClient.prototype.pipelineRunsForOwner = function (this: QueryClient, args: 
   return this.executeNamed("pipelineRunsForOwner", buildPipelineRunsForOwner(args), opts);
 };
 
-/** Read repository pipelines connected by the caller, most recently connected first. */
+/** Read the caller's repository pipelines and source package identities, most recently connected first. Use these repository and package links to locate native CI for connected application sources; a repository need not have a pipeline to be editable. */
 // Bound concept: v1:pipelines:pipeline (machine-readable: BoundConcepts["pipelinesForOwner"] in generated_concepts.ts).
 export interface PipelinesForOwnerArgs {
 }
@@ -11830,7 +11830,7 @@ QueryClient.prototype.sourceConnectionById = function (this: QueryClient, args: 
   return this.executeNamed("sourceConnectionById", buildSourceConnectionById(args), opts);
 };
 
-/** List the caller's active saved source connections to GitHub repositories. Discover source connection and installation ids before resolving a repository; these personal bindings remain independent of MemQL organization accounts. */
+/** Read the caller's active saved source connections for discovering accessible repositories, independent of MemQL accounts and pipeline membership. Inspect sourceRepositories for their repository listing contract. */
 // Bound concept: v1:platform:sourceConnection (machine-readable: BoundConcepts["sourceConnectionsMine"] in generated_concepts.ts).
 export interface SourceConnectionsMineArgs {
 }
