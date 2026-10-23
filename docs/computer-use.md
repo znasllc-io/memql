@@ -293,6 +293,17 @@ within the same window becomes the next anchor. Other actions must preserve
 the focused field even after their last release; a change stops input with
 partial-event reporting. A window change always stops input.
 
+For process-addressed move/click delivery, public `CGEventSetLocation` invalidates
+the packet's window-local point. The Darwin backend therefore dynamically resolves
+the private macOS `CGEventSetWindowLocation` / `CGEventGetWindowLocation` accessors
+to preserve both points. This is an explicit OS compatibility dependency: missing
+accessors, invalid window bounds, or a mismatched window/global/local round-trip
+refuse packet creation before posting. There is no global posting fallback.
+Local `pointer_coordinate_accessors` and capability `pointerCoordinateAccessors`
+report symbol availability only, not delivery success. Tests include a foreign
+producer and hidden receiving windows with title bars and nonzero origins; these
+construct/deserialize packets without posting events or activating windows.
+
 The passive `CGPreflightPostEventAccess` check is separate from AX inspection
 permission. The actual worker reports it in local `input-target-status` as
 `post_event_access` and capabilities as `inputTargetPolicy.postEventAccess`.

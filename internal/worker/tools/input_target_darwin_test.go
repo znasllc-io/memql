@@ -2,14 +2,29 @@
 
 package tools
 
-import "testing"
+import (
+	"os/exec"
+	"path/filepath"
+	"testing"
+)
+
+func TestDarwinForeignWindowPointerRoundTrip(t *testing.T) {
+	binary := filepath.Join(t.TempDir(), "packet-roundtrip")
+	cmd := exec.Command("clang", "-fobjc-arc", "-framework", "AppKit", "-framework", "CoreGraphics", "testdata/input_event_window_roundtrip.m", "-o", binary)
+	if output, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("compile packet fixture: %v\n%s", err, output)
+	}
+	if output, err := exec.Command(binary).CombinedOutput(); err != nil {
+		t.Fatalf("foreign-window packet lost its local/global point: %v\n%s", err, output)
+	}
+}
 
 // Creates and inspects Quartz packets only: never calls targetSend, posts
 // input, queries focus, or activates an app. PID/window are fixture identities.
 func TestDarwinPointerPacketsCarryObservedWindow(t *testing.T) {
 	for _, kind := range []string{"move", "mouse"} {
 		t.Run(kind, func(t *testing.T) {
-			packet, err := newDarwinTargetEvent(WindowInfo{ID: 42, PID: 123}, targetInputEvent{kind: kind, button: "left", x: 100, y: 200, dy: 1, down: true})
+			packet, err := newDarwinTargetEvent(WindowInfo{ID: 42, PID: 123, Width: 800, Height: 600}, targetInputEvent{kind: kind, button: "left", x: 100, y: 200, dy: 1, down: true})
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -38,12 +53,29 @@ func TestDarwinAppKitMousePacketsPreserveRoutingAndCoordinates(t *testing.T) {
 				wantKind++
 			}
 			pid, _, _ := packet.routing()
+			localX, localY := packet.windowPoint()
+			if localX != 250 || localY != 111 {
+				t.Fatalf("window-local point changed: (%f,%f), want (250,111)", localX, localY)
+			}
 			// A newly allocated private source can have a positive unique state
 			// ID; -1 requests one, it is not necessarily the allocated ID.
 			if packet.appKitWindow() != 42 || pid != 123 || kind != wantKind || actualButton != int64(index) || x != -100 || y != 231 || flags != 1<<17 || packet.sourceState() != packet.originalSourceState() || packet.sourceState() == 0 || packet.sourceState() == 1 {
 				t.Fatalf("packet changed: window=%d pid=%d kind=%d button=%d point=(%f,%f) flags=%d sourceState=%d", packet.appKitWindow(), pid, kind, actualButton, x, y, flags, packet.sourceState())
 			}
 			packet.close()
+		}
+	}
+}
+
+func TestDarwinPointerPacketRefusesInvalidWindowGeometry(t *testing.T) {
+	for _, w := range []WindowInfo{{ID: 42, PID: 123}, {ID: 42, PID: 123, X: 500, Y: 500, Width: 100, Height: 100}} {
+		packet, err := newDarwinTargetEvent(w, targetInputEvent{kind: "mouse", x: 100, y: 200, down: true})
+		if packet != nil {
+			packet.close()
+			t.Fatal("created pointer packet without a usable window-local point")
+		}
+		if err == nil {
+			t.Fatal("invalid geometry accepted")
 		}
 	}
 }

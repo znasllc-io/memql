@@ -10,7 +10,9 @@ package tools
 
 extern pid_t targetKeyboardPID(void);
 extern long targetEventAppKitWindow(CGEventRef);
-extern CGEventRef targetCreateWindowMouse(CGEventSourceRef, CGEventType, CGPoint, CGMouseButton, uint32_t);
+extern CGPoint targetEventWindowPoint(CGEventRef);
+extern int targetWindowCoordinateAccessorsAvailable(void);
+extern CGEventRef targetCreateWindowMouse(CGEventSourceRef, CGEventType, CGPoint, CGMouseButton, uint32_t, CGRect);
 
 typedef struct {
     AXUIElementRef app, window, element;
@@ -124,7 +126,7 @@ static int targetSame(targetFocus *a, targetFocus *b, int field) {
 typedef struct { CGEventRef event; pid_t pid; int sourceState; } targetEvent;
 static void targetEventFree(targetEvent *e) { if (!e) return; if (e->event) CFRelease(e->event); free(e); }
 static targetEvent *targetCreate(pid_t pid, uint32_t wid, int kind, int key, const UniChar *text, int ntext,
-                      int down, int button, int x, int y, int dx, int dy, uint64_t flags) {
+                      int down, int button, int x, int y, int dx, int dy, uint64_t flags, CGRect bounds) {
     if (pid <= 0 || wid == 0) return NULL;
     CGEventSourceRef source = CGEventSourceCreate(kCGEventSourceStatePrivate);
     if (!source) return 0;
@@ -137,7 +139,7 @@ static targetEvent *targetCreate(pid_t pid, uint32_t wid, int kind, int key, con
         CGEventType type = kCGEventMouseMoved;
         if (kind == 3) type = button == 0 ? (down ? kCGEventLeftMouseDown : kCGEventLeftMouseUp) :
             button == 1 ? (down ? kCGEventRightMouseDown : kCGEventRightMouseUp) : (down ? kCGEventOtherMouseDown : kCGEventOtherMouseUp);
-        event = targetCreateWindowMouse(source,type,CGPointMake(x,y),(CGMouseButton)button,wid);
+        event = targetCreateWindowMouse(source,type,CGPointMake(x,y),(CGMouseButton)button,wid,bounds);
         if (event && kind == 3) CGEventSetIntegerValueField(event,kCGMouseEventClickState,1);
     } else if (kind == 4) {
         event = CGEventCreateScrollWheelEvent(source,kCGScrollEventUnitLine,2,dy,dx);
@@ -199,6 +201,9 @@ func (f *darwinInputFocus) close() { C.targetFree(f.ptr); f.ptr = nil }
 type darwinInputBackend struct{}
 
 func (darwinInputBackend) canPostEvents() bool { return bool(C.CGPreflightPostEventAccess()) }
+func (darwinInputBackend) pointerCoordinateAccessors() bool {
+	return C.targetWindowCoordinateAccessorsAvailable() != 0
+}
 
 func (darwinInputBackend) focus() (inputFocus, error) {
 	var problem C.targetReadError
@@ -253,6 +258,10 @@ type darwinTargetEvent struct{ ptr *C.targetEvent }
 func (e *darwinTargetEvent) close() { C.targetEventFree(e.ptr); e.ptr = nil }
 func (e *darwinTargetEvent) appKitWindow() int64 {
 	return int64(C.targetEventAppKitWindow(e.ptr.event))
+}
+func (e *darwinTargetEvent) windowPoint() (float64, float64) {
+	p := C.targetEventWindowPoint(e.ptr.event)
+	return float64(p.x), float64(p.y)
 }
 func (e *darwinTargetEvent) sourceState() int         { return int(C.targetEventSourceState(e.ptr)) }
 func (e *darwinTargetEvent) originalSourceState() int { return int(e.ptr.sourceState) }
@@ -317,7 +326,8 @@ func newDarwinTargetEvent(w WindowInfo, e targetInputEvent) (*darwinTargetEvent,
 	if len(chars) > 0 {
 		ptr = (*C.UniChar)(&chars[0])
 	}
-	event := C.targetCreate(C.pid_t(w.PID), C.uint32_t(w.ID), kind, key, ptr, C.int(len(chars)), down, button, C.int(e.x), C.int(e.y), C.int(e.dx), C.int(e.dy), flags)
+	bounds := C.CGRectMake(C.double(w.X), C.double(w.Y), C.double(w.Width), C.double(w.Height))
+	event := C.targetCreate(C.pid_t(w.PID), C.uint32_t(w.ID), kind, key, ptr, C.int(len(chars)), down, button, C.int(e.x), C.int(e.y), C.int(e.dx), C.int(e.dy), flags, bounds)
 	if event == nil {
 		return nil, fmt.Errorf("target event creation failed")
 	}

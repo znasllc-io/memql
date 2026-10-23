@@ -85,15 +85,16 @@ func DisableDesktopRuntime() {
 // InputTargetStatus is an explicit local diagnostic, not an input receipt or
 // permission. It contains no element contents, application titles or tokens.
 type InputTargetStatus struct {
-	Available               bool               `json:"available"`
-	Bound                   bool               `json:"bound"`
-	Halted                  bool               `json:"halted"`
-	PostEventAccess         *bool              `json:"post_event_access,omitempty"`
-	WindowID                uint64             `json:"observed_window_id,omitempty"`
-	PID                     int                `json:"observed_pid,omitempty"`
-	Error                   string             `json:"error,omitempty"`
-	AcquisitionMilliseconds int64              `json:"acquisition_milliseconds"`
-	DiagnosticProbes        []InputTargetProbe `json:"diagnostic_probes,omitempty"`
+	Available                  bool               `json:"available"`
+	Bound                      bool               `json:"bound"`
+	Halted                     bool               `json:"halted"`
+	PostEventAccess            *bool              `json:"post_event_access,omitempty"`
+	PointerCoordinateAccessors *bool              `json:"pointer_coordinate_accessors,omitempty"`
+	WindowID                   uint64             `json:"observed_window_id,omitempty"`
+	PID                        int                `json:"observed_pid,omitempty"`
+	Error                      string             `json:"error,omitempty"`
+	AcquisitionMilliseconds    int64              `json:"acquisition_milliseconds"`
+	DiagnosticProbes           []InputTargetProbe `json:"diagnostic_probes,omitempty"`
 }
 
 // InputTargetProbe is observation only; no diagnostic path grants input.
@@ -115,7 +116,7 @@ func DesktopInputTargetStatus() InputTargetStatus { return desktopInputGuard.tar
 func (g *inputTargetGuard) targetStatus() InputTargetStatus {
 	g.mu.Lock()
 	defer g.mu.Unlock()
-	status := InputTargetStatus{Bound: g.anchor != nil, Halted: g.halted, PostEventAccess: g.postingAccess()}
+	status := InputTargetStatus{Bound: g.anchor != nil, Halted: g.halted, PostEventAccess: g.postingAccess(), PointerCoordinateAccessors: g.pointerCoordinateAccessors()}
 	if g.backend == nil {
 		status.Error = "No target-addressed input backend is available."
 		return status
@@ -142,6 +143,16 @@ func (g *inputTargetGuard) postingAccess() *bool {
 	if b, ok := g.backend.(interface{ canPostEvents() bool }); ok {
 		allowed := b.canPostEvents()
 		return &allowed
+	}
+	return nil
+}
+
+// Reports accessor availability only. Each pointer packet must independently
+// round-trip its exact window identity and global/window-local coordinates.
+func (g *inputTargetGuard) pointerCoordinateAccessors() *bool {
+	if b, ok := g.backend.(interface{ pointerCoordinateAccessors() bool }); ok {
+		available := b.pointerCoordinateAccessors()
+		return &available
 	}
 	return nil
 }

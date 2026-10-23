@@ -142,18 +142,20 @@ func computeCapabilitiesForRuntime(goos string, getenv func(string) string, desk
 			contracts["workerComputer.window_selection"] = 1
 		}
 		targetPolicy = map[string]any{
-			"supportedInputActions": supported,
-			"acquisition":           "screenshot with explicit windowId of the already focused window",
-			"receipt":               "inputTarget.id, required on one action in the same run, expires after 60 seconds",
-			"coordinates":           "explicit x/y from that exact screenshot for every pointer action",
-			"focusActivation":       goos == "darwin",
-			"postEventAccess":       desktopInputGuard.postingAccess(),
-			"windowSelection":       "macOS initial selection only: window_list with windowId and pid returns a single-use focusTarget; window_focus requires all three. Never clears or replaces an anchor/latch. A fresh screenshot is required afterward.",
-			"key_combo":             "keys is a string array: primary key first, then modifiers; for example [r,cmd] or [enter]",
-			"key_type":              "text is 1..4096 printable UTF-8 bytes; newline/tab refused; use a fresh screenshot before a separate key_combo",
-			"mouse_click":           "explicit x/y, optional left/right/middle button and cmd/ctrl/alt/shift modifiers; single click only",
-			"interruption":          "latched until operator review and worker restart; no automatic retry or reacquisition",
-			"limitation":            "process-addressed delivery; AX window/field checks are sampled, not atomic; delayed effects may stop input",
+			"supportedInputActions":      supported,
+			"acquisition":                "screenshot with explicit windowId of the already focused window",
+			"receipt":                    "inputTarget.id, required on one action in the same run, expires after 60 seconds",
+			"coordinates":                "explicit x/y from that exact screenshot for every pointer action",
+			"focusActivation":            goos == "darwin",
+			"postEventAccess":            desktopInputGuard.postingAccess(),
+			"pointerCoordinateAccessors": desktopInputGuard.pointerCoordinateAccessors(),
+			"pointerCompatibility":       "macOS move/click packets require private coordinate accessors; each packet verifies its exact window and global/window-local points before posting; no global fallback",
+			"windowSelection":            "macOS initial selection only: window_list with windowId and pid returns a single-use focusTarget; window_focus requires all three. Never clears or replaces an anchor/latch. A fresh screenshot is required afterward.",
+			"key_combo":                  "keys is a string array: primary key first, then modifiers; for example [r,cmd] or [enter]",
+			"key_type":                   "text is 1..4096 printable UTF-8 bytes; newline/tab refused; use a fresh screenshot before a separate key_combo",
+			"mouse_click":                "explicit x/y, optional left/right/middle button and cmd/ctrl/alt/shift modifiers; single click only",
+			"interruption":               "latched until operator review and worker restart; no automatic retry or reacquisition",
+			"limitation":                 "process-addressed delivery; AX window/field checks are sampled, not atomic; delayed effects may stop input",
 		}
 	}
 	return CapabilityDescriptor{
