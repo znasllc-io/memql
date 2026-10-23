@@ -16,10 +16,13 @@ func TestStructuredFleetCallJournalsLocalUsage(t *testing.T) {
 	ctx := common.ContextWithRun(userCtx("alice"), common.RunContext{
 		RunId: "materialization-run", GoalId: "materialization-goal", StepKey: "compose", OwnerUserId: "alice", Mode: common.RunModeLive,
 	})
+	run, _ := common.RunFromContext(ctx)
+	admission := wireResultProviderAdmission(e, run)
 	_, err := e.InvokeAIStructured(ctx, "localConductorTurn", map[string]any{"utterance": "write a document"}, "draft", json.RawMessage(`{"type":"object"}`), true)
 	if err != nil {
 		t.Fatal(err)
 	}
+	admission.assertCalls(t, 1)
 	if len(fleet.lastReq.Messages) < 2 || fleet.lastReq.Messages[len(fleet.lastReq.Messages)-1].Role != "user" {
 		t.Fatalf("structured recovery cannot run on runtimes requiring a user query: %+v", fleet.lastReq.Messages)
 	}
@@ -39,6 +42,7 @@ func TestStructuredResultPreservesAttributionOnReplay(t *testing.T) {
 	journal := newCountingJournal()
 	e.SetModelCallJournal(journal)
 	run := common.RunContext{RunId: "original", GoalId: "goal", StepKey: "compose", OwnerUserId: "alice", Mode: common.RunModeLive}
+	admission := wireResultProviderAdmission(e, run)
 	req := airoute.ResolveRequest{Level: airoute.LevelStrong, ExplicitProvider: "fleet:llama3.1:8b"}
 	messages := []common.ChatMessage{{Role: "user", Content: "Write the document"}}
 	schema := common.StructuredSchema{Name: "draft", Schema: json.RawMessage(`{"type":"object"}`), Strict: true}
@@ -46,6 +50,7 @@ func TestStructuredResultPreservesAttributionOnReplay(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	admission.assertCalls(t, 1)
 	if live.Resolution.ProviderName != "fleet:llama3.1:8b" || live.Usage.InputTokens != 3 || live.Usage.OutputTokens != 5 || !live.Usage.Reported || live.Served != "local" {
 		t.Fatalf("live metadata missing: %+v", live)
 	}
@@ -60,6 +65,7 @@ func TestStructuredResultPreservesAttributionOnReplay(t *testing.T) {
 	if replayed.Text != live.Text || replayed.Served != "journal" || replayed.Resolution.Model != live.Resolution.Model || replayed.Usage != live.Usage {
 		t.Fatalf("replayed content or provenance changed: live=%+v replay=%+v", live, replayed)
 	}
+	admission.assertCalls(t, 1)
 	if len(journal.rows["replay"]) != 1 || journal.rows["replay"][0].Served != "journal" {
 		t.Fatal("replay did not receive its own journal entry")
 	}

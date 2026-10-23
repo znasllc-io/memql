@@ -14,12 +14,14 @@ func TestVisionReferenceReplayUsesImageBytes(t *testing.T) {
 	journal := newCountingJournal()
 	e.SetModelCallJournal(journal)
 	run := common.RunContext{RunId: "reference-run", GoalId: "goal", StepKey: "compose", OwnerUserId: "alice", Mode: common.RunModeLive}
+	admission := wireResultProviderAdmission(e, run)
 	req := airoute.ResolveRequest{Level: airoute.LevelStrong, ExplicitProvider: "fleet:visual:8b"}
 	images := []common.VisionContent{{MimeType: "image/png", Data: []byte("image-one")}}
 	live, err := e.CallAIVision(common.ContextWithRun(userCtx("alice"), run), req, "Describe the reference", images)
 	if err != nil {
 		t.Fatal(err)
 	}
+	admission.assertCalls(t, 1)
 	if fleet.lastReq.Kind != FleetKindVision || len(fleet.lastReq.Images) != 1 || string(fleet.lastReq.Images[0].Data) != "image-one" {
 		t.Fatal("actual image bytes did not reach fleet vision")
 	}
@@ -29,6 +31,7 @@ func TestVisionReferenceReplayUsesImageBytes(t *testing.T) {
 	if err != nil || replay.Text != live.Text || replay.Served != "journal" {
 		t.Fatalf("vision replay=%+v, %v", replay, err)
 	}
+	admission.assertCalls(t, 1)
 	images[0].Data = []byte("image-two")
 	if _, err := e.CallAIVision(common.ContextWithRun(userCtx("alice"), run), req, "Describe the reference", images); err == nil {
 		t.Fatal("a different image reused the old analysis")
