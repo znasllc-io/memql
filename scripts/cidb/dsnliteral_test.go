@@ -71,6 +71,7 @@ const dsnResolverDir = "component/database/dbtest"
 // Entries describe fixture literals, not connections opened by these tests.
 var dsnLiteralExemptions = map[string]string{
 	"memql_pipeline_portable_coverage_test.go":      "compares the native conformance manifest's disposable-service URI; never dials it, and importing dbtest would misclassify this configuration guard as a DB suite",
+	"scripts/ci/db_gated_packages_test.go":          "compares the native agent-tagged manifest's disposable-service URI; never dials it, and importing dbtest would misclassify this configuration guard as a DB suite",
 	"scripts/ci/differential_lane_required_test.go": "compares the native differential manifest's disposable-service URI; never dials it, and importing dbtest would misclassify this configuration guard as a DB suite",
 	"scripts/k3d/seed_secrets_database_test.go": "opaque secret values passed to fake kubectl and asserted byte-for-byte; " +
 		"never dialed, and dbtest.DSN would replace the recovery/pooler destinations and installer-default contract under test",
