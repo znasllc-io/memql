@@ -4,8 +4,11 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"time"
+
 	memorynodes "github.com/znasllc-io/memql/component/database/memory-nodes"
 	"github.com/znasllc-io/memql/component/memql"
+	"github.com/znasllc-io/memql/core/id"
 )
 
 func init() {
@@ -29,7 +32,15 @@ func result(v any, e error) ([]memorynodes.MemoryNode, error) {
 	if e != nil {
 		return nil, e
 	}
-	return []memorynodes.MemoryNode{{Concept: "v1:repositoryauthority:result", Type: memorynodes.NodeTypeObject, Payload: m}}, nil
+	// This is an ephemeral reply, not a stored authority record. The engine
+	// keys builtin output by node ID and discards an envelope without one.
+	return []memorynodes.MemoryNode{{
+		ID:        "repositoryauthority:" + id.NewShortId(),
+		Concept:   "v1:repositoryauthority:result",
+		Type:      memorynodes.NodeTypeObject,
+		CreatedAt: time.Now().UTC(),
+		Payload:   m,
+	}}, nil
 }
 func (i *Integration) Capabilities() []memql.IntegrationCapability {
 	return []memql.IntegrationCapability{
