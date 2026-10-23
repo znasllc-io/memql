@@ -738,6 +738,28 @@ This is separate from the action journal, which retains file revisions as the
 app records them. Clean checkouts and dependency caches remain reusable local
 resources rather than Library copies of a repository.
 
+Uploads declare a type from the produced bytes instead of multipart's default
+`application/octet-stream`. Recognized binary signatures retain their type.
+Text candidates must be valid UTF-8 across the whole body and contain no binary
+control bytes (tab, newline and carriage return are allowed); checking only the
+first 512 bytes would miss a binary suffix. Valid `.json` files declare
+`application/json`, Markdown declares `text/markdown`, and other text uses the
+sniffed type. An empty file stays opaque. A misleading extension cannot promote
+binary content into text. This classification preserves the exact uploaded bytes
+and digest and changes neither output limits nor credential/ownership/provenance
+checks. MIME is a format hint, not trusted content or a schema verdict.
+
+The Library deliberately honors a declared type. Its saved-file reader still
+checks the current owner and revision, its text-type gate, UTF-8 and the 2 MiB
+read bound. Previously retained opaque files are not relabeled by this change;
+they need a normal authorized upload/version or a format-specific reader.
+Readable does not imply indexed: semantic extraction and archive contents have
+their own coverage limits. `TestLibraryPushContentTypePreservesBytes` exercises
+the actual multipart upload for both file and in-memory outputs, including
+misleading names and suffix corruption. The engine's
+`UploadedJSONReadAcrossEngines` database case connects multipart ingestion to a
+fresh replica's saved-file reader and verifies that binary and owner gates hold.
+
 ---
 
 ## When it does not work

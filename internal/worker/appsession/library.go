@@ -10,6 +10,7 @@ import (
 	"mime"
 	"mime/multipart"
 	"net/http"
+	"net/textproto"
 	"net/url"
 	"os"
 	"path/filepath"
@@ -17,6 +18,7 @@ import (
 	"strings"
 	"sync"
 	"time"
+	"unicode/utf8"
 )
 
 // library.go moves a session's inputs in and its outputs back out
@@ -310,13 +312,20 @@ func (l *Library) PushBytes(ctx context.Context, body []byte, name string) (stri
 }
 
 func (l *Library) pushReader(ctx context.Context, r io.Reader, name string) (string, error) {
-	var buf bytes.Buffer
-	writer := multipart.NewWriter(&buf)
-	part, err := writer.CreateFormFile(libraryFormFileKey, name)
+	data, err := io.ReadAll(r)
 	if err != nil {
 		return "", fmt.Errorf("library: push %s: %w", name, err)
 	}
-	if _, err := io.Copy(part, r); err != nil {
+	var buf bytes.Buffer
+	writer := multipart.NewWriter(&buf)
+	header := make(textproto.MIMEHeader)
+	header.Set("Content-Disposition", mime.FormatMediaType("form-data", map[string]string{"name": libraryFormFileKey, "filename": name}))
+	header.Set("Content-Type", producedContentType(name, data))
+	part, err := writer.CreatePart(header)
+	if err != nil {
+		return "", fmt.Errorf("library: push %s: %w", name, err)
+	}
+	if _, err := part.Write(data); err != nil {
 		return "", fmt.Errorf("library: push %s: %w", name, err)
 	}
 	if err := writer.WriteField(libraryFormNameKey, name); err != nil {
@@ -354,6 +363,40 @@ func (l *Library) pushReader(ctx context.Context, r io.Reader, name string) (str
 		return "", fmt.Errorf("library: push %s: server returned no artifact id", name)
 	}
 	return out.ArtifactId, nil
+}
+
+// The Library honors an explicit part type. CreateFormFile's octet-stream
+// default therefore stranded JSON manifests and logs behind the binary-reader
+// gate. Classify the existing bytes here; never rewrite them or relax that gate.
+// A filename alone cannot turn binary data into text, and a 512-byte sniff can
+// miss a binary suffix, so text declarations require the whole body to be UTF-8
+// without binary control bytes. Recognized binary signatures keep their type.
+// This is a format hint, not trust, schema validation or an indexing guarantee.
+func producedContentType(name string, data []byte) string {
+	if len(data) == 0 {
+		return "application/octet-stream"
+	}
+	sniffed := http.DetectContentType(data)
+	if !strings.HasPrefix(sniffed, "text/") {
+		return sniffed
+	}
+	if !utf8.Valid(data) {
+		return "application/octet-stream"
+	}
+	for _, b := range data {
+		if b < 0x20 && b != '\t' && b != '\n' && b != '\r' || b == 0x7f {
+			return "application/octet-stream"
+		}
+	}
+	switch strings.ToLower(filepath.Ext(name)) {
+	case ".json":
+		if json.Valid(data) {
+			return "application/json"
+		}
+	case ".md", ".markdown":
+		return "text/markdown; charset=utf-8"
+	}
+	return sniffed
 }
 
 // The multipart field names the Library's upload route reads.
