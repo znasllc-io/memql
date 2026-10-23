@@ -1,6 +1,7 @@
 package dev
 
 import (
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -75,5 +76,116 @@ printf 'capability:%s\n' "$1"
 				t.Fatalf("lane did not reach required command: %s", out)
 			}
 		})
+	}
+}
+
+// Exercise the command actually declared in the manifest. Preparation can retry
+// a toolchain download, but cannot turn a failed test into a second test run.
+func TestNativeMacLanePreparesToolchainBeforeRunningTestsOnce(t *testing.T) {
+	_, step := nativeStep(t, "computeruse")
+	python, err := exec.LookPath("python3")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, tc := range []struct {
+		name, mode          string
+		preparations, tests int
+		ok                  bool
+	}{
+		{"transient download", "transient", 2, 1, true},
+		{"permanent download", "permanent", 3, 0, false},
+		{"wrong platform", "wrong", 1, 0, false},
+		{"partial platform", "partial", 1, 0, false},
+		{"test failure", "test-failure", 1, 1, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			root, home := t.TempDir(), t.TempDir()
+			bin := filepath.Join(root, "bin")
+			ci := filepath.Join(root, "cockpit/scripts/ci")
+			for _, dir := range []string{bin, ci} {
+				if err := os.MkdirAll(dir, 0700); err != nil {
+					t.Fatal(err)
+				}
+			}
+			for _, name := range []string{"native-env.sh", "native_go_platform.py"} {
+				data, err := os.ReadFile(filepath.Join(repoRoot(t), "cockpit/scripts/ci", name))
+				if err != nil {
+					t.Fatal(err)
+				}
+				if err := os.WriteFile(filepath.Join(ci, name), data, 0600); err != nil {
+					t.Fatal(err)
+				}
+			}
+			if err := os.Symlink(python, filepath.Join(bin, "python3")); err != nil {
+				t.Fatal(err)
+			}
+			write := func(name, body string) {
+				t.Helper()
+				if err := os.WriteFile(filepath.Join(bin, name), []byte("#!/bin/sh\nset -eu\n"+body), 0700); err != nil {
+					t.Fatal(err)
+				}
+			}
+			write("go", `test "$GOWORK" = "$PWD/go.work"
+test "$GOTOOLCHAIN" = auto
+test "$GOPATH" = "$PWD/.memql-native/go"
+test "$GOCACHE" = "$PWD/.memql-native/go-build"
+case "$*" in
+  'env GOOS')
+    printf '%s\n' 'fixture: sum.golang.org TLS handshake timeout' >&2
+    exit 1 ;;
+  'env GOARCH') printf 'arm64\n' ;;
+  'env GOOS GOARCH')
+    count=0
+    if test -f preparations; then read -r count < preparations; fi
+    count=$((count + 1))
+    printf '%s\n' "$count" > preparations
+    case "$MODE:$count" in
+      permanent:*|transient:1)
+        printf 'darwin\n'
+        printf '%s\n' 'fixture: sum.golang.org TLS handshake timeout' >&2
+        exit 1 ;;
+      wrong:*) printf 'linux\narm64\n'; exit 0 ;;
+      partial:*) printf 'darwin\n'; exit 0 ;;
+    esac
+    printf 'darwin\narm64\n' ;;
+  'test -race -tags computeruse -count=1 -timeout=600s ./cockpit/...')
+    test -f css-ran
+    printf 'test\n' >> tests
+    test "$MODE" != test-failure ;;
+  *) exit 2 ;;
+esac
+`)
+			write("bash", `test "$*" = scripts/identity/build-css.sh
+printf 'css\n' > css-ran
+`)
+			cmd := exec.Command("/bin/sh", "-c", step.Run)
+			cmd.Dir = root
+			cmd.Env = []string{"HOME=" + home, "PATH=" + bin + ":/usr/bin:/bin", "MODE=" + tc.mode}
+			out, runErr := cmd.CombinedOutput()
+			if (runErr == nil) != tc.ok {
+				t.Fatalf("lane result = %v, want success=%v\n%s", runErr, tc.ok, out)
+			}
+			preparations, _ := os.ReadFile(filepath.Join(root, "preparations"))
+			if strings.TrimSpace(string(preparations)) != fmt.Sprint(tc.preparations) {
+				t.Fatalf("preparations=%q want %d\n%s", preparations, tc.preparations, out)
+			}
+			tests, _ := os.ReadFile(filepath.Join(root, "tests"))
+			if strings.Count(string(tests), "test\n") != tc.tests {
+				t.Fatalf("test executions=%q want %d\n%s", tests, tc.tests, out)
+			}
+			if tc.tests == 0 {
+				if _, err := os.Stat(filepath.Join(root, "css-ran")); !os.IsNotExist(err) {
+					t.Fatal("build started before platform preparation succeeded")
+				}
+			}
+		})
+	}
+}
+
+func TestNativeGoPreparationContract(t *testing.T) {
+	cmd := exec.Command("python3", "-m", "unittest", "discover", "-s", "cockpit/scripts/ci", "-p", "native*_test.py")
+	cmd.Dir = repoRoot(t)
+	if out, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("native preparation contract: %v\n%s", err, out)
 	}
 }

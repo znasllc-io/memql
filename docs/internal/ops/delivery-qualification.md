@@ -116,6 +116,25 @@ Check keyboard navigation and focus retention, not only screenshots. A model
 listing alone is not inference proof, a prepared plan is not an applied
 installation, and an accepted write is not a confirmed outcome.
 
+## Native Go preparation
+
+Native Mac checks read GOOS and GOARCH in one successful command before their
+Go build or test starts. The selected Go launcher retains checksum verification;
+only this preparation command may retry, at most three times with a 120-second
+limit per attempt and two seconds between failures. A wrong or malformed
+platform refuses immediately. Timeout is terminal, and every child stays in the
+native worker's process group for its existing cancellation and cleanup. The
+actual test command still runs once, and its failure remains a failure.
+
+Toolchain and build caches remain inside the exact attempt checkout. The
+managed reusable cache supports containers only; sharing an attempt-writable
+native toolchain directory across repositories or installations would cross
+that boundary. The fixtures in `native_go_platform_test.py` and
+`TestNativeMacLanePreparesToolchainBeforeRunningTestsOnce` cover transient and
+permanent preparation failures, platform refusal and once-only tests. They do
+not establish live network availability; the required native check must still
+pass on the repaired head.
+
 ## Bootstrap with the current engine
 
 The bootstrap and activation manifests both require the agent-tagged tests to
