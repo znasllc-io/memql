@@ -267,7 +267,7 @@ func newPublishFixture(t *testing.T, siteKind string, zipBytes []byte) *publishF
 
 	i := NewSitePublishIntegration(eng, slog.New(slog.NewTextHandler(io.Discard, nil)))
 	i.newStore = func(context.Context) (siteObjectStore, error) {
-		return siteObjectStore{reader: store, writer: store}, nil
+		return siteObjectStore{reader: store, writer: store, container: "memql"}, nil
 	}
 
 	return &publishFixture{
@@ -360,6 +360,65 @@ func TestSitePublishFromArtifact_PublishesAndStampsTheArtifact(t *testing.T) {
 		if !strings.Contains(audits[0], want) {
 			t.Errorf("the audit statement does not carry %q:\n  %s", want, audits[0])
 		}
+	}
+}
+
+// Files uploaded through the browser record an Azure/Azurite URL, while
+// chunked uploads can record a bare key. Both must open the same owned object.
+func TestSitePublishFromArtifact_UploadedLibraryLocations(t *testing.T) {
+	for _, location := range []string{
+		fixtureBlobKey,
+		"/" + fixtureBlobKey,
+		"blob://" + fixtureBlobKey,
+		"https://account.blob.core.windows.net/memql/" + fixtureBlobKey,
+		"http://azurite:10000/devstoreaccount1/memql/" + fixtureBlobKey,
+		"http://azurite:10000/devstoreaccount1/memql/library/v1:identity:user:u-owner/file-1/dist.zip",
+		"https://account.blob.core.windows.net/memql/library/u-owner/file-1/space%20name%252F.zip",
+	} {
+		t.Run(location, func(t *testing.T) {
+			f := newPublishFixture(t, "spa", zipOf(t, goodBundle()))
+			key := fixtureBlobKey
+			if strings.Contains(location, "v1:identity:user:") {
+				key = "library/v1:identity:user:u-owner/file-1/dist.zip"
+			}
+			if strings.Contains(location, "space%20") {
+				key = "library/u-owner/file-1/space name%2F.zip"
+			}
+			f.store.objects[key] = zipOf(t, goodBundle())
+			f.engine.files[fixtureFileId]["blobUrl"] = location
+			if _, err := f.run(t); err != nil {
+				t.Fatalf("publish uploaded Library file: %v", err)
+			}
+			if !reflect.DeepEqual(f.store.gets, []string{key}) {
+				t.Fatalf("read keys = %q, want exactly %q", f.store.gets, key)
+			}
+			if f.engine.sites[fixtureSiteId]["artifactId"] != fixtureArtifact {
+				t.Fatal("published bytes lost their artifact provenance")
+			}
+		})
+	}
+}
+
+func TestSitePublishFromArtifact_UnsafeUploadedLocationsAreRefusedBeforeRead(t *testing.T) {
+	for _, location := range []string{
+		"https://account.blob.core.windows.net/other/" + fixtureBlobKey,
+		"http://azurite:10000/devstoreaccount1/other/" + fixtureBlobKey,
+		"https://account.blob.core.windows.net/memql/library/someone-else/file-1/dist.zip",
+		"http://azurite:10000/devstoreaccount1/memql/library/someone-else/file-1/dist.zip",
+		"https://account.blob.core.windows.net/memql/library/u-owner/%2E%2E/someone-else/dist.zip",
+		"https://account.blob.core.windows.net/memql/library/u-owner/..%2Fsomeone-else/dist.zip",
+		"https://account.blob.core.windows.net/memql/library/u-owner/%5C..%5Csomeone-else/dist.zip",
+		"gs://bucket/" + fixtureBlobKey,
+	} {
+		t.Run(location, func(t *testing.T) {
+			f := newPublishFixture(t, "spa", zipOf(t, goodBundle()))
+			f.engine.files[fixtureFileId]["blobUrl"] = location
+			_, err := f.run(t)
+			wantRefusal(t, err, reasonBundleUnreadable)
+			if len(f.store.gets) != 0 || len(f.engine.statementsNaming("updateSiteBundle")) != 0 {
+				t.Fatal("refused location reached storage or changed the serving site")
+			}
+		})
 	}
 }
 

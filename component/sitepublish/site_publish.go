@@ -236,8 +236,9 @@ type bundleByteReader interface {
 // from one container and a write to another produces a site whose bytes are
 // never where the edge looks for them.
 type siteObjectStore struct {
-	reader bundleByteReader
-	writer edge.BlobWriter
+	reader    bundleByteReader
+	writer    edge.BlobWriter
+	container string
 }
 
 // SitePublishIntegration exposes `integration.sitePublish.fromArtifact`.
@@ -334,8 +335,9 @@ func defaultSiteObjectStore(ctx context.Context) (siteObjectStore, error) {
 		return siteObjectStore{}, fmt.Errorf("azure blob client: %w", err)
 	}
 	return siteObjectStore{
-		reader: edge.NewAzureBlobClient(uploader, container),
-		writer: edge.NewAzureBlobWriter(uploader, container),
+		reader:    edge.NewAzureBlobClient(uploader, container),
+		writer:    edge.NewAzureBlobWriter(uploader, container),
+		container: container,
 	}, nil
 }
 
@@ -476,9 +478,9 @@ func (i *SitePublishIntegration) publish(ctx context.Context, siteId, artifactId
 		return publishResult{}, refuse(reasonStorageNotReady,
 			"object storage is not configured on this node: %v", err)
 	}
-	key := storageKey(stringField(file, "blobUrl"))
+	key := storageKey(stringField(file, "blobUrl"), store.container)
 	if key == "" {
-		return publishResult{}, refuse(reasonBundleUnreadable, "file %q records no storage location", fileId)
+		return publishResult{}, refuse(reasonBundleUnreadable, "file %q records no readable location in the configured Library container", fileId)
 	}
 	// The row is the caller's; the KEY must be its owner's too. The read uses
 	// the node's storage credential and the bytes are then served publicly, so
@@ -842,12 +844,19 @@ func normalizeMimeType(v string) string {
 }
 
 // storageKey normalizes v1:library:file.blobUrl into the container-relative
-// key the blob reader wants. The field is documented as a STORAGE PATH
-// ("library/{userId}/{fileId}/{name}") rather than a fetchable URL, so the
-// only normalization is the two prefixes a caller might reasonably have
-// stored -- a leading slash, or a blob:// scheme.
-func storageKey(blobUrl string) string {
+// key the blob reader wants. Browser uploads record Azure/Azurite URLs;
+// chunked uploads can record bare keys. Use the Library's shared URL parser
+// (including its one decoding pass), require the configured container, then
+// check ownership on exactly the key passed to Get. Never fetch the row's URL
+// directly or drop a foreign container: either would change the object whose
+// ownership was checked. Legacy leading-slash/blob:// keys stay supported.
+func storageKey(blobUrl, container string) string {
 	key := strings.TrimSpace(blobUrl)
 	key = strings.TrimPrefix(key, "blob://")
-	return strings.TrimPrefix(key, "/")
+	key = strings.TrimPrefix(key, "/")
+	gotContainer, object, ok := librarykey.Split(key)
+	if !ok || (gotContainer != "" && (container == "" || gotContainer != container)) {
+		return ""
+	}
+	return object
 }
