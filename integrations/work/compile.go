@@ -85,12 +85,14 @@ func (i *Integration) dispatchCompile(ctx context.Context, hint CompileRequest) 
 	}
 	base = common.ContextWithRun(base, rc)
 	base = memql.ContextWithBudgetScope(base, compileBudgetScopes(req)...)
+	claimNode, claimedAt := selfNodeId(), i.clock()
 	if err := i.store().updateRun(claimCtx, req.RunId, map[string]any{
-		"nodeId": selfNodeId(), "heartbeatAt": rfc(i.clock()),
+		"nodeId": claimNode, "heartbeatAt": rfc(claimedAt),
 	}); err != nil {
 		i.log().Warn("work compile: could not record planner ownership; refusing to compile", "run", req.RunId, "error", err)
 		return false
 	}
+	base = withProviderPhase(base, rc, providerPhase{status: runStatusCompiling, nodeID: claimNode, heartbeat: claimedAt})
 	i.log().Info("work: claimed a run for compilation", "component", "work.compile", "run", req.RunId, "goal", req.GoalId, "node", selfNodeId())
 	go i.compileWithHeartbeat(base, c, req)
 	return true
