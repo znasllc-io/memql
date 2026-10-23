@@ -87,7 +87,7 @@ export interface DeployablePageProps {
   openRevision?: number;
   backLabel?: string;
   /** Opens the source's own view. */
-  onOpenSource?: (packageId: string) => void;
+  onOpenSource?: (packageId: string, repositoryView?: "settings") => void;
   /** True while this deployable's delete is still tearing its domains down. */
   deleting?: boolean;
   /**
@@ -472,11 +472,12 @@ export function DeployablePage({
           ) : null}
 
           <DeployableWorkspace key={site.id}
-            canSources={can.sources} onUpdate={reading.acts.some(a => a.name === "Deploy the update") && !headActions.busy ? () => act("Deploy the update") : undefined}
+            onUpdate={reading.acts.some(a => a.name === "Deploy the update") && !headActions.busy ? () => act("Deploy the update") : undefined}
             site={site} pkg={pkg} run={run} runs={timelineRows} can={can} accounts={accounts} canDomains={can.domains} canStore={can.store}
             timelineState={deployments?.snapshot.state ?? "disconnected"}
             timelineError={deployments?.snapshot.error ?? ""} onRetryRead={reseed}
             onInspect={setDetail} onOpenSource={() => pkg && onOpenSource ? onOpenSource(pkg.id) : setDetail("source")}
+            onOpenSourceSettings={pkg && onOpenSource ? () => onOpenSource(pkg.id, "settings") : undefined}
             lifecycle={lifecycle}
             readiness={previewReadiness}
             deployChoice={offerCandidate ? {

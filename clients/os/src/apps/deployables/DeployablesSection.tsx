@@ -117,7 +117,7 @@ import { runTitle } from "./pipelines/words";
 type DeployablesView =
   | { kind: "list" }
   | { kind: "deployable"; siteId: string; from?: string; detail?: "store"; result?: string; revision?: number }
-  | { kind: "source"; packageId: string; fromSite?: string }
+  | { kind: "source"; packageId: string; fromSite?: string; openView?: { section: "details" | "settings"; revision: number } }
   | { kind: "history"; packageId: string; siteId?: string; returnTo?: DeployablesView }
   | { kind: "compose"; parkedPackageId?: string; only?: string; fromSource?: string; connectResult?: ConnectReturn }
   // A SOURCE'S PIPELINE (epic memql#5479): a run its Checks row opened, its
@@ -162,7 +162,7 @@ export function DeployablesSection({
   root?: SectionRoot;
   sourceLabel?: string;
   onAddRepository?: () => void;
-  onOpenRepository?: ((packageId: string) => void) | null;
+  onOpenRepository?: ((packageId: string, repositoryView?: "settings") => void) | null;
   active?: boolean;
   navigation?: OsAppProps["navigation"];
   openRequest?: { siteId: string; revision: number; detail?: "store"; result?: string };
@@ -171,7 +171,7 @@ export function DeployablesSection({
   onComposeDeployable?: (packageId: string, app: string) => void;
   connectResult?: ConnectReturn | null;
   /** Open a source's page: the map's Checks node, a run page's trail. */
-  sourceOpenRequest?: { packageId: string; revision: number };
+  sourceOpenRequest?: { packageId: string; revision: number; repositoryView?: "settings" };
   /** The caller's pipelines and their runs, from the root's feeds (epic memql#5479). */
   pipelines?: LiveView<PipelineRow> | null;
   runs?: LiveView<RunRow> | null;
@@ -225,7 +225,7 @@ export function DeployablesSection({
     }
     if (sourceOpenRequest && sourceOpenRequest.revision !== lastSourceRequest.current) {
       lastSourceRequest.current = sourceOpenRequest.revision;
-      setView({ kind: "source", packageId: sourceOpenRequest.packageId });
+      setView({ kind: "source", packageId: sourceOpenRequest.packageId, openView: { section: sourceOpenRequest.repositoryView ?? "details", revision: sourceOpenRequest.revision } });
       lastNavigation.current = navigation?.revision;
       return;
     }
@@ -463,7 +463,7 @@ export function DeployablesSection({
           onOpenSourceHistory={() => setView({ kind: "history", packageId: pkg.id, returnTo: view })}
           onBack={() => setView(view.returnTo ?? (view.siteId ? { kind: "deployable", siteId: view.siteId } : { kind: "source", packageId: pkg.id }))} />;
       }
-      return sourcePage(pkg, view.fromSite);
+      return sourcePage(pkg, view.fromSite, view.openView);
     }
 
     if (view.kind === "deployable") {
@@ -486,7 +486,7 @@ export function DeployablesSection({
           onAsk={onAsk}
           onBack={() => view.from ? setView({ kind: "source", packageId: view.from }) : backToList()}
           backLabel={view.from ? "Source" : (root === "sources" ? sourceLabel : ROOT_LABEL[root])}
-          onOpenSource={onOpenRepository === null ? undefined : (packageId) => onOpenRepository ? onOpenRepository(packageId) : setView({ kind: "source", packageId, fromSite: site.id })}
+          onOpenSource={onOpenRepository === null ? undefined : (packageId, repositoryView) => onOpenRepository ? onOpenRepository(packageId, repositoryView) : setView({ kind: "source", packageId, fromSite: site.id, openView: { section: repositoryView ?? "details", revision: 0 } })}
           onDeleted={(goneId, what) => {
             const gone = siteRows.find((s) => s.id === goneId);
             setJustGone(gone === undefined ? null : { name: gone.hostname, what });
@@ -505,12 +505,13 @@ export function DeployablesSection({
    * left the feed -- a pipeline read away, a flow with nowhere to hold its
    * answers -- shows the source it belongs to rather than an empty page.
    */
-  function sourcePage(pkg: PackageRow, fromSite?: string) {
-    const here: DeployablesView = { kind: "source", packageId: pkg.id, ...(fromSite ? { fromSite } : {}) };
+  function sourcePage(pkg: PackageRow, fromSite?: string, openView?: { section: "details" | "settings"; revision: number }) {
+    const here: DeployablesView = { kind: "source", packageId: pkg.id, ...(fromSite ? { fromSite } : {}), ...(openView ? { openView } : {}) };
     const pipeline = pipelineForPackage(pipelineRows, pkg.id);
     return (
       <SourceView
         repositoryWorkspace={sourceLabel === "Repositories"}
+        openView={openView}
         key={`${pkg.id}:${viewerUserId}`}
         pkg={pkg}
         viewerUserId={viewerUserId}

@@ -252,10 +252,10 @@ function DeployablesAppContent({
   // run page's trail. Each is consumed once by revision.
   const [runOpenRequest, setRunOpenRequest] = useState<{ runId: string; revision: number } | undefined>();
   const [runsFilterRequest, setRunsFilterRequest] = useState<{ pipelineId: string; revision: number } | undefined>();
-  const [sourceOpenRequest, setSourceOpenRequest] = useState<{ packageId: string; revision: number } | undefined>();
-  function openSource(packageId: string) {
-    if (!isPipelines) { pipelineReach.open("repositories", { packageId }); return; }
-    setSourceOpenRequest((held) => ({ packageId, revision: (held?.revision ?? 0) + 1 }));
+  const [sourceOpenRequest, setSourceOpenRequest] = useState<{ packageId: string; revision: number; repositoryView?: "settings" } | undefined>();
+  function openSource(packageId: string, repositoryView?: "settings") {
+    if (!isPipelines) { pipelineReach.open("repositories", { packageId, ...(repositoryView ? { repositoryView } : {}) }); return; }
+    setSourceOpenRequest((held) => ({ packageId, repositoryView, revision: (held?.revision ?? 0) + 1 }));
     navigate("sources", { fromContent: true });
   }
   function openRunsFor(pipelineId: string) {
@@ -349,7 +349,7 @@ function DeployablesAppContent({
     // request the map's Checks node and a run page's trail make.
     const requestedSource = intent.payload.packageId;
     if (typeof requestedSource === "string" && requestedSource && typeof requestedRun !== "string") {
-      openSource(requestedSource);
+      openSource(requestedSource, intent.payload.repositoryView === "settings" ? "settings" : undefined);
     }
     if (intent.payload.provider === "shopify") { setConnectionProvider("shopify"); setConnectionsIntent(intent); }
     const shopify = intent.payload["shopify"];

@@ -13,6 +13,9 @@ vi.mock("../../src/live/connection", () => ({
 
 import type { Row } from "@znasllc-io/memql-sdk-core/client";
 
+import { PipelinesApp } from "../../src/apps/pipelines/PipelinesApp";
+import { seededAccessWithout } from "../seededAccess";
+import { withSession as withSingleSession } from "./harness";
 import { DeployablesApp } from "../../src/apps/deployables/DeployablesApp";
 import { copyFor, knownCodes } from "../../src/apps/deployables/packages/refusals";
 import {
@@ -310,6 +313,56 @@ describe("a lost FIRST deploy", () => {
 });
 
 describe("the seams the surface calls", () => {
+  it("opens repository Settings in Pipelines from the deployment mode without changing it", async () => {
+    const connection = fakeConnection({ sites: [STOREFRONT], packages: [ACME] });
+    const page = await openPackage(connection);
+    expect(within(page).queryByRole("radio", { name: /Automatic/ })).toBeNull();
+    await click(within(page).getByRole("button", { name: "Manual deployment — repository settings in Pipelines" }));
+    const source = await screen.findByRole("region", { name: /^Source / });
+    expect(within(source).getByRole("navigation", { name: "Repository views" })).toBeTruthy();
+    expect(within(source).getByRole("button", { name: "Settings" }).getAttribute("aria-current")).toBe("page");
+    expect(within(source).getByRole("radio", { name: /Manual Check automatically/ }).getAttribute("aria-checked")).toBe("true");
+    expect(connection.callsNamed("packageSetAutoDeploy")).toHaveLength(0);
+    await click(within(source).getByRole("radio", { name: /Automatic Check and deploy/ }));
+    expect(connection.callsNamed("packageSetAutoDeploy")).toHaveLength(1);
+  });
+
+  it("keeps deployment mode read-only when the repository destination is unavailable", async () => {
+    const connection = fakeConnection({ sites: [STOREFRONT], packages: [ACME] });
+    h.connection = connection;
+    render(withSession(<DeployablesApp sectionId="deployables" navigate={() => {}} askContext={() => {}} store={memStore()} />,
+      { role: "owner", userId: "u-me", capabilities: seededAccessWithout("owner", "app:pipelines/repositories") }));
+    await click((await screen.findByText("acme.memql.example.com")).closest("button"));
+    const page = await screen.findByRole("region", { name: "Deployable acme.memql.example.com" });
+    expect(within(page).getByText("Manual deployment")).toBeTruthy();
+    expect(within(page).queryByRole("button", { name: /deployment — repository settings/ })).toBeNull();
+    expect(within(page).queryByRole("radio", { name: /Automatic/ })).toBeNull();
+    expect(connection.callsNamed("packageSetAutoDeploy")).toHaveLength(0);
+  });
+
+  it("honors a new Settings link for an already-open repository without resetting ordinary tab choices", async () => {
+    const connection = fakeConnection({ packages: [ACME] });
+    h.connection = connection;
+    const navigate = vi.fn(), consumeIntent = vi.fn();
+    const firstIntent = { id: "open-1", payload: { packageId: "pkg-acme", repositoryView: "settings" } };
+    const nextIntent = { ...firstIntent, id: "open-2" };
+    const draw = (intent: typeof firstIntent) => withSingleSession(<PipelinesApp sectionId="repositories" navigate={navigate} askContext={() => {}}
+      intent={intent} consumeIntent={consumeIntent} />,
+      { role: "owner", userId: "u-me" });
+    const view = render(draw(firstIntent));
+    const source = await screen.findByRole("region", { name: /^Source / });
+    const settings = within(source).getByRole("button", { name: "Settings" });
+    expect(settings.getAttribute("aria-current")).toBe("page");
+    await click(within(source).getByRole("button", { name: "Details" }));
+    expect(settings.getAttribute("aria-current")).toBeNull();
+    view.rerender(draw(firstIntent));
+    expect(settings.getAttribute("aria-current")).toBeNull();
+    view.rerender(draw(nextIntent));
+    await waitFor(() => expect(settings.getAttribute("aria-current")).toBe("page"));
+    expect(screen.getByRole("region", { name: /^Source / })).toBe(source);
+    expect(connection.callsNamed("packageSetAutoDeploy")).toHaveLength(0);
+  });
+
   it("Retry sends the lost run's id, so the retry deploys what it was deploying", async () => {
     const connection = fakeConnection({
       sites: [STOREFRONT],

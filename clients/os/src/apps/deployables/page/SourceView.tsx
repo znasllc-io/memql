@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useLayoutEffect, useState } from "react";
 import { LocalTabs } from "../../../kit/LocalTabs";
 import { RepositoryChange } from "../../pipelines/RepositoryChange";
 import { useSession } from "../../../chrome/access";
@@ -75,6 +75,7 @@ import { runsOfPipeline, upstreamChecks } from "../pipelines/runs";
 export function SourceView({
   pkg,
   repositoryWorkspace = false,
+  openView,
   viewerUserId,
   onRemoved,
   apps,
@@ -102,6 +103,7 @@ export function SourceView({
 }: {
   pkg: PackageRow;
   repositoryWorkspace?: boolean;
+  openView?: { section: "details" | "settings"; revision: number };
   viewerUserId?: string;
   onRemoved?: () => void;
   /** The apps this source produced, from the root's site feed. */
@@ -156,6 +158,9 @@ export function SourceView({
   onPipelineSettings?: () => void;
 }) {
   const [section, setSection] = useState("details");
+  useLayoutEffect(() => {
+    if (openView) setSection(openView.section);
+  }, [openView?.revision, openView?.section]);
   const accounts = useAccountOptions();
   const label = sourceName(pkg);
   const connections = useSourceConnections();
