@@ -149,7 +149,7 @@ func TestOwnedWorkPromptKeepsSectionOutputsAndDestinationsDistinct(t *testing.T)
 	if _, err := memql.LoadUnifiedPrompts(nil, registry, template.New("partials")); err != nil {
 		t.Fatal(err)
 	}
-	engine := &workPromptEngine{registryEngine: registryEngine{registered: map[string]bool{"composeFile": true, "workerHost": true}}, prompts: registry}
+	engine := &workPromptEngine{registryEngine: registryEngine{registered: map[string]bool{"composeFile": true, "workerHost": true, "consultWorkKnowledge": true, "artifactSearch": true}}, prompts: registry}
 	owner := "v1:identity:user:section-output-owner"
 	ctx := common.ContextWithRun(auth.ContextWithUserActor(context.Background(), owner), common.RunContext{RunId: "section-run", GoalId: "goal", StepKey: "current", OwnerUserId: owner})
 	for _, tc := range []struct {
@@ -222,7 +222,7 @@ func TestOwnedWorkPromptKeepsSectionOutputsAndDestinationsDistinct(t *testing.T)
 			for _, tool := range prepared.tools {
 				tools[tool.Name] = true
 			}
-			if !tools["workerHost"] || !tools["composeFile"] || tools["produceArtifact"] {
+			if !tools["workerHost"] || !tools["composeFile"] || !tools["consultWorkKnowledge"] || !tools["artifactSearch"] || tools["produceArtifact"] {
 				t.Fatalf("declared outputs lost their authorized tool routes: %v", tools)
 			}
 		})

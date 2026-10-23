@@ -6,9 +6,49 @@ import (
 	"sync"
 	"testing"
 
+	"github.com/stretchr/testify/require"
 	"github.com/znasllc-io/memql/component/memql"
 	"github.com/znasllc-io/memql/core/common"
 )
+
+func TestSkillConsultationAdaptsWithoutRewritingInitialSnapshot(t *testing.T) {
+	a := openActsDB(t)
+	skillID := "consult-" + a.owner
+	skill := map[string]any{"skillId": skillID, "slug": skillID, "name": "Newly needed format", "tier": "A", "version": 1, "predefined": true, "active": true, "status": "active", "instructions": map[string]any{"body": "Inspect the exported layout before delivery.", "selectionTerms": []string{"exported"}}}
+	a.write(t, "createSkill", skill)
+	run := a.openRun(t, nil)
+	a.writeVersion(t, run, run, "draft", 1, 1, nil, "", map[string]any{"status": "running"})
+	goal := a.query(t, a.owner, "query "+call("workRunForOwner", map[string]any{"runId": run}))[0]["goalId"].(string)
+	ctx := common.ContextWithRun(actorCtx(a.owner), common.RunContext{RunId: run, GoalId: goal, StepKey: "draft", OwnerUserId: a.owner, Mode: common.RunModeLive})
+	first := New(selectionDBEngine{a.eng, skillID}, testLogger())
+	first.SetGateDB(testGates(t))
+	second := New(selectionDBEngine{openWorkTestEngine(t), skillID}, testLogger())
+	second.SetGateDB(testGates(t))
+	args := map[string]any{"text": "Draft a report", "limit": 2, "minimumScore": 1, "maxBytes": 4000}
+	initial, err := first.handleSelectSkills(ctx, args, 0)
+	require.NoError(t, err)
+	require.NotContains(t, string(initial[0].Payload), "Inspect the exported layout")
+	args["text"] = "Verify the exported document"
+	consulted, err := second.selectSkillContext(ctx, args, true)
+	require.NoError(t, err)
+	require.Contains(t, string(consulted[0].Payload), "Inspect the exported layout")
+	again, err := second.handleSelectSkills(ctx, args, 0)
+	require.NoError(t, err)
+	require.JSONEq(t, string(initial[0].Payload), string(again[0].Payload), "new needs must not overwrite replay context")
+	// A later revocation is effective on the next consultation even on the
+	// other replica; an old receipt is historical, not fresh approval.
+	skill["active"] = false
+	a.write(t, "createSkill", skill)
+	after, err := second.selectSkillContext(ctx, args, true)
+	require.NoError(t, err)
+	require.NotContains(t, string(after[0].Payload), "Inspect the exported layout")
+	rc, _ := common.RunFromContext(ctx)
+	rc.Mode = common.RunModeReplay
+	_, err = second.selectSkillContext(common.ContextWithRun(ctx, rc), args, true)
+	require.ErrorContains(t, err, "replay")
+	_, err = second.selectSkillContext(common.ContextWithRun(actorCtx(a.owner+"other"), rc), args, true)
+	require.Error(t, err)
+}
 
 // The separate installed-seed test verifies release provenance. This seam
 // supplies one reviewed test skill while exercising REAL row authority, gates,

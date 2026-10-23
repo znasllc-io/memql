@@ -112,8 +112,9 @@ func TestReadWorkGuidanceReadsRoutedTargets(t *testing.T) {
 }
 
 // A message delivered through a request (decideApproval) belongs to that
-// request and never reaches the agent loop a second time. Neither does one the
-// cap refused, one whose run had ended, or another goal's.
+// request and is not read from the routed transcript a second time. Durable
+// corrections are recovered separately from that request's owned decision.
+// Neither a refused delivery, an ended run, nor another goal supplies guidance.
 func TestReadWorkGuidanceSkipsApprovalTargetsAndOtherGoals(t *testing.T) {
 	a, b, ctx, conversation, run, write := guidanceFixture(t)
 	other := guidanceRootRun(write, conversation, "other-goal", "other-plan", "running")

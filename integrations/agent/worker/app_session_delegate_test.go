@@ -635,6 +635,25 @@ func TestInstructionsAreAddedToTheSessionPromptNeverSwappedForIt(t *testing.T) {
 	}
 }
 
+func TestSessionKeepsRecoveredOverrideBeforeNewerHumanGuidance(t *testing.T) {
+	ex := &recordingExecutor{out: planner.ExecutorResult{Output: map[string]any{"sessionId": "s"}}}
+	d := newAppSessionDelegateFor(ex, nil, nil, nil)
+	ov := &common.StepOverride{Prompt: "Publish the revised document.", GuidanceReason: "The draft was unfinished."}
+	instructions, priorFeedback := memqlengine.StepOverrideInstructions(ov), memqlengine.StepOverrideGuidance(ov)
+	correction := "Set the revision aside and restore the original. Do not publish."
+	// The native guidance reader restores the exact override at its recorded
+	// position, even when its first occurrence was archived during compaction.
+	prompt := strings.Join([]string{"Guidance from the person for this existing work:", instructions, priorFeedback, correction}, "\n\n")
+	h := memqlengine.AppSessionHandover{ActingUserId: "u1", AppId: "claude-code", RunId: "v1:work:run:r1", StepId: "revise", Prompt: prompt}
+	if _, err := d.RunStep(overriddenSessionStep(ov, nil), h); err != nil {
+		t.Fatal(err)
+	}
+	got, _ := ex.got.Input["prompt"].(string)
+	if got != prompt || strings.Count(got, instructions) != 1 || !strings.HasSuffix(got, correction) {
+		t.Fatal("handoff renewed the older override after the human correction")
+	}
+}
+
 // libraryEngine answers the owner-scoped Library reads a snapshot needs and
 // records every query with the actor it ran under.
 type libraryEngine struct {

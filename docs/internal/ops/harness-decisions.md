@@ -19,6 +19,48 @@ paths and one task's acceptance criteria must not become routing rules.
 
 ## Delegation and return
 
+Human corrections sent through **Discuss in Ask → Send guidance** are durable
+instructions for unfinished work. Previously they survived only in the immediate
+decision checkpoint. A later permission receipt could make the older correction
+archivable, and a fresh Apps worker could resume the superseded task. The native
+guidance reader now retrieves answered corrections from the owner's approval
+journal, including the current run and its root, on every normal guidance read.
+An acknowledgment is not a delivery cursor: a later worker reads them again and
+deduplicates in its own active context. Retry and replan generation changes do
+not invalidate human direction about the remaining goal.
+
+`workApprovalGuidanceForOwnerRun` selects only the owner's answered feedback,
+with the same owner as decision maker. The reader validates the typed guidance
+contract, decision time and run binding; approved commands and rejected requests
+are not instructions. These corrections have their own 16-message/16,000-rune
+context bound. The query reads an extra row so overflow refuses explicitly
+instead of silently dropping legitimate history. This is a context bound, not
+a goal lifetime limit. Routed messages, late optional answers and corrections
+are presented in human timestamp order so source-query order cannot reverse a
+later change of direction. Restoring feedback neither grants permission nor
+replays an operation. Existing ownership, cancellation and execution checks
+still gate the read and every effect.
+
+`work_approval_guidance_db_test.go` reproduces the missing correction using real
+storage and verifies later approvals, retries, another replica, delegated child
+work, chronology, ownership and overflow. The regression uses document editing;
+no repository, language or feature-specific branch is involved. These checks
+establish delivery, not model adherence or a completed user task.
+
+The live Apps check exposed a second ordering seam: the newer correction was
+present, but compaction had archived an older additive step override, and the
+Apps delegate appended that override at the very end again. The guidance reader
+now includes the exact current override instructions and dislike guidance at
+the rerun's recorded `requestedAt`, before any later human corrections. Their
+exact rendering prevents the delegate's missing-instruction fallback from
+re-appending them. The two bounded override messages belong only to the current
+step/context and do not alter model, effort, input or permission bindings. A
+missing decision time refuses instead of inventing chronology. Explicit whole
+session prompt replacement remains its separate existing contract; this repair
+does not claim to redesign that path. The database regression
+`TestStepOverrideKeepsItsPlaceBeforeLaterHumanCorrection` checks both older and
+newer human corrections around the override and the flattened Apps prompt.
+
 The proactive context target includes exact current call arguments as required
 input, including a prepared operation followed by a human approval. The
 compactor cannot retire that call, so omitting it from the target caused an
@@ -32,6 +74,89 @@ actual model-window recovery retains its strict target and output reserve.
 reproduces the refusal and verifies exact resumption without a model call,
 while a deliberately smaller hard target still refuses. No command is run,
 replayed or authorized by this calculation.
+
+The newest recorded human decision stays exact independently of the first and
+last human messages. Goal guidance can be reattached after a fresh approval;
+using message position alone archived the decision while leaving the prepared
+command in context. A new Apps session then searched nested history or repeated
+inspection instead of continuing. Selection, tail-fit checks and the proactive
+budget now count the same current receipt. Earlier decisions remain archivable;
+tool-output quotations cannot replace a human receipt. This retention grants no
+permission, proves no execution and changes no ownership, revocation, use-count
+or spending checks. A strict provider limit still refuses when these exact
+inputs cannot fit. `work_context_decision_test.go` reproduces the selection bug
+and tests exact retention on two database-backed engines, with no effect replay
+or summarizer call. This preserves the decision in context; it does not guarantee
+that a model chooses the next action or that a UI result is correct.
+
+Approving a desktop, file-write or HTTP session with a server-bound native
+checkpoint resumes the existing execution generation. The old legacy-scope
+branch created a new rerun on approval, invalidating the checkpoint immediately
+after a successful operation and preventing subsequent visual verification.
+The approval classifier recognizes the hashed native witness; actual resumption
+rechecks its transcript identity, pending call, request hash, owner and execution
+generation before reasoning or effects. Legacy requests without that witness
+keep their existing retry behavior; rejection still stops the run. No completed
+effect is replayed and no access duration is extended by this change.
+`TestScopeCheckpointApprovalPreservesExecutionAcrossReplicas` reproduces the
+generation replacement and checks all three session kinds, ordinary and rerun
+executions, rejection and a forged pending-request hash with real storage on two
+engines. It verifies decision and transcript restoration, not a live screenshot.
+
+## Knowledge requirements can change during execution
+
+An initial role or skill binding is not a complete account of a goal's needs.
+Repository discovery, an unfamiliar output format, a source conflict or a failed
+check can expose a new requirement. The shared guidance makes identifying that
+requirement the working model's responsibility, within its current reasoning
+turn; it does not require the person to supply a technical procedure. No extra
+classifier runs on every greeting or tool call, and no language-name switch in
+the harness chooses a fixed engineering workflow.
+
+`consultWorkKnowledge` provides an explicit next action for that new need.
+`integrations/work/knowledge_consultation.go` accepts bounded need/context text,
+checks current owner/run/step through the skill reader and retrieves a small
+allocation of current reviewed instructions and Training. Initial skill context
+remains frozen for replay; consultation gets a separate receipt. The broad goal
+text is not automatically prepended to the narrow lookup, because it would keep
+displacing the newly relevant specialty. Matching is lexical for skill selection
+and semantic for Training. Neither score establishes readiness. The response
+states `not-assessed`; applicability and unresolved needs remain model judgments
+that must be checked against source and outcome evidence.
+
+The Library gateway opens only the fixed reviewed-lesson reader and stamps
+internal origin only for that call. Current source ownership, approval,
+supersession, cancellation, inherited inference routing and spending checks still
+apply. It returns the recorded availability status even with zero passages;
+unindexed, unavailable and empty sources are not evidence of absence. It does
+not run corpus installation, training or indexing on each consultation. Fresh
+live consultations recheck publication; replay and a fork's shared prefix must
+consume original tool receipts, not spend another retrieval or change history.
+Journal failure is an error rather than an unrecorded successful consultation.
+
+Research can continue through authorized concept reads, semantic memory recall,
+artifact search and source readers. The tool makes its scope explicit: reviewed
+knowledge consultation does not search all records or blob contents. Owned work
+also receives `artifactSearch` directly; permissions remain in its existing
+handler. A search result is a locator, not a claim of current contents or approved
+Training. **Known coverage limit:** the existing Library similarity path ranks a
+bounded cross-owner candidate pool before owner filtering. It can miss relevant
+owned artifacts. It also lacks a uniform index-coverage receipt across all
+concepts and artifact formats. These are remaining retrieval work, not fixed by
+offering the tool. The [adaptive knowledge plan](../planning/adaptive-work-knowledge.md)
+records the connected requirements and evaluation boundaries.
+
+`TestSkillConsultationAdaptsWithoutRewritingInitialSnapshot` checks newly relevant
+instructions, later deactivation and unchanged initial context across replicas.
+`TestOwnedTrainingReadsReviewedTaughtSourcesAcrossReplicas` exercises the ordinary
+caller gateway, actual returned passages, empty-corpus status, review changes and
+replay/foreign-scope refusals with real storage. `TestKnowledgeConsultationReportsRetrievalWithoutCertifyingReadiness`
+checks bounded composition and honest status. The owned-work prompt test checks
+tool delivery across software, research, documents and answer-only sections.
+These tests do not establish that a model will recognize every missing need;
+that requires held-out goals, interaction evidence and measured interventions.
+
+## Execution decision map
 
 | Decision | Reason and resulting path | Implementation |
 | --- | --- | --- |
@@ -206,7 +331,68 @@ authorization grant. A checkpoint/message index addresses the unchanged source;
 `nextOffset` pages its serialized characters and `cursor` searches older rows.
 Byte recovery and content verification are different from semantic retrieval.
 
+## Verify the delivered target
+
+The shared [execution guidance](../../../dsl/agents/prompts/workAgentReply.tmpl)
+distinguishes changed inputs, produced output and the target consuming that
+output. This belongs in the common workflow prompt, not a Go-specific command
+or a repository-name switch: a service may require compilation and restart, a
+frontend may require a bundle rebuild, an interpreter may reload automatically,
+and a document may require a fresh export. Discover the applicable procedure
+from the project's instructions and current target, with bounded reads.
+
+The automatic-reload path requires an observation that the target received the
+change. The explicit-transformation path uses the supported authorized build,
+export or load procedure and then checks the actual result. A later-stage path
+hands off exact changed inputs, existing checks and the remaining delivery gap.
+Source tests and mocks support these checks but do not prove that the requested
+target changed. A build/content identity links the output to that target;
+behavioral or visual inspection establishes the requested result. Retained
+procedures carry their source version, scope and evidence so subsequent work
+can check applicability economically instead of repeating setup research.
+
+Authority is evaluated against the whole request and recorded decisions. Do
+not ask again for a local rebuild or verification action already authorized;
+do not turn source-edit permission alone into production deployment or broader
+access. Existing native operation gates remain in force.
+
+This is reusable model guidance, not a new deterministic deployment verifier,
+an automatically promoted reviewed skill, or proof that a model obeys it. The
+owned-turn prompt and delegation checks validate delivery of the instructions;
+the supervised goal must still supply observed target identity and outcome
+evidence. A screenshot of an old running build cannot close that evidence gap.
+
 ## Context pressure and optional work
+
+Prerequisite recovery preserves prepared work. The shared execution prompt
+distinguishes an operation that could not start from a produced result that
+failed validation. It asks for the specific missing setup information, input
+freshness checks, partial-effect reconciliation and the normally authorized
+repair, rather than a new source survey or regenerated artifact. Reads should
+deduplicate resolved aliases and retrieve bounded relevant passages. This is
+goal-independent model guidance, not a new automatic installer, filesystem
+grant, or guarantee that the model will choose the cheapest recovery path.
+
+Known context-capacity refusals at a reasoning boundary use the existing native
+model-call checkpoint suspension. Proactive compaction enters it directly after
+its bounded attempts; provider overflow first tries the strictly smaller context
+handoff. Both streaming and non-streaming loops preserve the current exchange
+before returning `HumanWait`. A generic failed-step Retry creates a new execution
+version and therefore cannot stand in for this suspension. No historical
+waiting links are invented, and uncertain in-flight tool failures never enter
+this path.
+
+`workModelCallRecovery` supplies the capacity-specific question; the native
+engine enforces zero further automatic retries for this case, unchanged owner,
+run, goal and execution identity, and a saved checkpoint before publishing the
+question. Another replica verifies that checkpoint and resumes the same child.
+Storage errors, authorization failures and cancellation are not context-capacity
+signals. `TestContextCapacitySuspendsExactPreparedWorkInBothLoops` reproduces the
+lost suspension and checks a retained prepared call and completed effect.
+The `context-capacity` cases in `TestWorkDBModelCeilingKeepsExactNestedProgress`
+exercise actual nested journals, the public approval decision, peer dispatch and
+resume without replaying the completed read or workflow prefix. The other cases
+retain coverage for failed checkpoint writes, stale work and changed bindings.
 
 Completed old calls whose arguments alone exceed the checkpoint model's input
 window are archived before semantic compaction spends calls on smaller history.

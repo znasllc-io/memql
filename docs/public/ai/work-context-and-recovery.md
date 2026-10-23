@@ -21,6 +21,74 @@ saved context and new human answer. Completed tool results stay in order and
 the original checkpoint remains unchanged. Retaining the instructions does not
 grant new access or prove that the model followed them.
 
+A correction sent instead of granting an approval remains guidance for the
+unfinished work after another approval, retry or worker restart. The executing
+worker recovers that correction from the owner's decision journal and orders it
+with other human guidance by time. Permission receipts do not replace earlier
+instructions, and restoring instructions does not grant access or repeat a
+completed operation. The active guidance sources have explicit context bounds;
+overflow is reported rather than silently losing a correction.
+
+## From changed inputs to a verified result
+
+Changing source or a document's inputs does not by itself update the result a
+person uses. Shared execution guidance asks work to discover the supported path
+to the requested target, reuse applicable saved procedures, and check only
+missing or changed setup information. The path may involve a build, export,
+reload or restart; automatic reload must also be observed rather than assumed.
+
+Verification connects the produced revision, build or content to the actual
+result opened or served, then checks the requested behavior. Source tests,
+preview fixtures and successful build commands are useful supporting evidence,
+but cannot substitute for checking the requested target. When another section
+owns delivery, the handoff preserves completed work and identifies the remaining
+gap. Useful procedures retain source versions, applicability and observed results
+so they can be reused without assuming they remain current forever.
+
+Existing authorization and operation gates still apply. Work should reuse
+authorization already given for a local build or verification step rather than
+ask for it again. Permission to edit source alone does not authorize a production
+release or access to another target. These are model instructions, not a promise
+of automatic learning or a deterministic guarantee of successful delivery.
+
+## Adapting knowledge to the work
+
+The initial skill snapshot belongs to a step version and stays fixed for
+replay. Live work can use `consultWorkKnowledge` when it discovers a different
+knowledge need. The consultation reads current reviewed skill instructions and
+Training passages, rather than loading a whole role's manuals or requiring the
+person to name a language, build system or technical procedure.
+
+Each consultation accepts one specific need and a short account of relevant
+observations. It selects at most two skill instructions within 4,000 serialized
+bytes and three Training passages within the existing 1,200-token conservative
+allocation. Skills use their declared match terms; Training uses semantic
+similarity. Current review and source checks still apply. The initial snapshot
+is preserved; a new receipt records the consultation. A replay consumes recorded
+tool results instead of performing a fresh lookup.
+
+The response distinguishes retrieval availability, such as an empty eligible
+corpus, unavailable index or embedding timeout. Its readiness is explicitly
+`not-assessed`: related material does not establish sufficient knowledge. The
+working model must compare its next action with applicable instructions,
+prerequisites and source evidence, then resolve remaining gaps through bounded
+research or a necessary human question. This is an available adaptive retrieval
+path and model guidance, not a deterministic completeness assessment.
+
+Research also includes permitted concept queries, earlier work and semantic
+artifact search. `artifactSearch` is available directly to owned work; exact
+record and file readers remain discoverable through their authorized contracts.
+Search snippets identify candidate evidence. Read relevant contents and verify
+source versions before relying on them. An incomplete index is not evidence of
+absence. Blob storage retains bytes; indexed passages and source metadata make
+those bytes discoverable, without making them automatically approved Training.
+
+Consultation neither trains nor indexes content on demand. Existing ingestion,
+indexing and review paths remain separate. Findings and useful procedures can be
+retained as evidence with provenance, applicability and limitations; they do not
+become approved lessons merely because a model wrote them. Selection and journal
+receipts do not prove prompt adherence, task success or performance improvement.
+
 ## Task failures and platform defects
 
 These have different owners and recovery paths:
@@ -37,6 +105,11 @@ These have different owners and recovery paths:
 A command's nonzero exit status is not, by itself, a reason to abandon a
 goal or ask a human. The harness should analyze its evidence and continue
 using capabilities already within the goal's authority. A missing executable
+is a prerequisite failure, not evidence that the prepared result is wrong.
+Work should check the relevant setup instructions, reconcile partial effects,
+and reuse prepared artifacts whose inputs still match. Repeating unchanged
+source surveys is unnecessary; fresh reads should address the identified gap.
+A missing executable
 does not grant permission to install software; an access refusal does not
 grant permission to obtain broader access. Recovery must still respect the
 same authorization and side-effect gates as the original operation.
@@ -65,6 +138,15 @@ feedback in its context, without a structural replan or an access grant.
 In-flight tool failures cannot enter this path. Missing or changed checkpoints and failures to save the
 suspension stop execution. Older failed runs without native waiting child links
 still require the existing explicit recovery controls; no links are inferred.
+
+The same checkpoint suspension applies when bounded context compaction cannot
+fit the active request, or a model still rejects its context after recovery.
+There is no extra automatic retry with identical input. The question retains
+the exact prepared tool calls and completed receipts; Retry or guidance resumes
+that suspended execution after the capacity problem is addressed. It does not
+restart the stage or discard its working context. Storage and authorization
+failures are separate errors, and context from older failed stages is not
+silently attached to a new execution.
 
 If a plan failure exhausts automatic recovery, **Revise plan** authorizes one
 further replanning attempt for the unfinished work. It preserves the completed
@@ -348,6 +430,14 @@ calculation does not grant permission or execute the approved operation.
    instruction, the original request, the newest human correction, and incomplete tool exchanges are
    not summarized. A complete assistant tool call and all of its results form
    one unit. A preference for recent messages cannot split that unit.
+   The newest recorded approval or feedback also remains exact when existing
+   goal guidance appears after it. Older decision receipts can be archived.
+   The proactive budget includes this current receipt; actual model capacity
+   remains a hard limit. Keeping an answer in context neither grants access nor
+   proves an operation ran: execution still checks its current permission record.
+   Approval of a desktop, file-write or HTTP session bound to a native checkpoint
+   continues that same execution attempt. It does not start the section again;
+   changed or mismatched checkpoints are refused before work resumes.
 2. **Archive bulky results.** When the context is over budget, completed large
    tool results are stored in the owner-scoped journal before replacement
    with a short, explicitly incomplete preview and an exact reference. The
