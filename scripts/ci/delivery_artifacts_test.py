@@ -42,7 +42,7 @@ class ArtifactFixtureTest(unittest.TestCase):
                 run.wait_http(10000, "/deliveryfixture")
             self.assertEqual(probe.call_count, 2)
 
-    def write_image(self, path, corrupt=False, duplicate=False):
+    def write_image(self, path, corrupt=False, duplicate=False, missing_platforms=(), selected_platform=None, missing_selected=False, config_arch="arm64"):
         blobs = {}
 
         def blob(body, kind):
@@ -50,14 +50,25 @@ class ArtifactFixtureTest(unittest.TestCase):
             blobs["blobs/sha256/" + digest] = body
             return {"digest": "sha256:" + digest, "size": len(body), "mediaType": "application/vnd.oci." + kind}
 
-        config = blob(b'{"os":"linux","architecture":"arm64"}', "image.config.v1+json")
+        config = blob(json.dumps({"os": "linux", "architecture": config_arch}).encode(), "image.config.v1+json")
         layer = blob(b"real archive content", "image.layer.v1.tar+gzip")
         manifest = blob(json.dumps({"schemaVersion": 2, "config": config, "layers": [layer]}).encode(), "image.manifest.v1+json")
-        index = blob(json.dumps({"schemaVersion": 2, "manifests": [manifest]}).encode(), "image.index.v1+json")
+        if selected_platform is not None:
+            manifest["platform"] = selected_platform
+        manifests = [manifest]
+        for n, platform in enumerate(missing_platforms):
+            absent = {"digest": "sha256:" + f"{n + 1:064x}", "size": 123,
+                      "mediaType": "application/vnd.oci.image.manifest.v1+json"}
+            if platform is not None:
+                absent["platform"] = platform
+            manifests.append(absent)
+        index = blob(json.dumps({"schemaVersion": 2, "manifests": manifests}).encode(), "image.index.v1+json")
         blobs["index.json"] = json.dumps({"schemaVersion": 2, "manifests": [index]}).encode()
         blobs["oci-layout"] = b'{"imageLayoutVersion":"1.0.0"}'
         if corrupt:
             blobs["blobs/sha256/" + layer["digest"][7:]] = b"bad archive content"
+        if missing_selected:
+            del blobs["blobs/sha256/" + manifest["digest"][7:]]
         with tarfile.open(path, "w") as archive:
             for name, body in blobs.items():
                 member = tarfile.TarInfo(name)
@@ -91,6 +102,40 @@ class ArtifactFixtureTest(unittest.TestCase):
                 self.write_image(source, **{option: True})
                 with self.assertRaises(ValueError):
                     fixture.export_platform(source, target)
+
+    def test_uncached_other_platforms_do_not_break_selected_platform(self):
+        with tempfile.TemporaryDirectory() as directory:
+            source, target = Path(directory) / "source.tar", Path(directory) / "target.tar"
+            manifest, _ = self.write_image(source, missing_platforms=[
+                {"os": "linux", "architecture": "amd64"},
+                {"os": "unknown", "architecture": "unknown"},
+                {"os": "windows", "architecture": "arm64"},
+            ], selected_platform={"os": "linux", "architecture": "arm64"})
+            self.assertEqual(fixture.export_platform(source, target), manifest["digest"])
+            with tarfile.open(target) as archive:
+                self.assertEqual(len(archive.getmembers()), 5)
+
+    def test_missing_selected_or_unclassified_manifest_still_refused(self):
+        with tempfile.TemporaryDirectory() as directory:
+            source, target = Path(directory) / "source.tar", Path(directory) / "target.tar"
+            for params in ({"missing_selected": True}, {"missing_platforms": [None]},
+                           {"missing_platforms": [{"os": "linux", "architecture": "arm64"}]}):
+                with self.subTest(params=params):
+                    self.write_image(source, **params)
+                    with self.assertRaisesRegex(ValueError, "missing OCI blob"):
+                        fixture.export_platform(source, target)
+                    self.assertFalse(target.exists())
+
+    def test_selected_platform_requires_matching_config_and_valid_metadata(self):
+        with tempfile.TemporaryDirectory() as directory:
+            source, target = Path(directory) / "source.tar", Path(directory) / "target.tar"
+            for platform, arch in (({"os": "linux", "architecture": "arm64"}, "amd64"),
+                                   ({"os": "linux"}, "arm64"), ([], "arm64")):
+                with self.subTest(platform=platform, arch=arch):
+                    self.write_image(source, selected_platform=platform, config_arch=arch)
+                    with self.assertRaisesRegex(ValueError, "platform"):
+                        fixture.export_platform(source, target)
+                    self.assertFalse(target.exists())
 
     def test_skipped_or_absent_real_tests_cannot_pass(self):
         passed = json.dumps({"Action": "pass", "Test": "TestReal"})

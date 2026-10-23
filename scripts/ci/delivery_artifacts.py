@@ -93,6 +93,8 @@ def export_platform(source, target):
             if not re.fullmatch(r"sha256:[a-f0-9]{64}", digest):
                 raise ValueError("invalid OCI digest")
             name = "blobs/sha256/" + digest[7:]
+            if name not in members:
+                raise ValueError("missing OCI blob for a selected or unclassified descriptor: " + digest)
             member = members[name]
             if member.size != descriptor.get("size"):
                 raise ValueError("OCI descriptor size mismatch")
@@ -109,6 +111,16 @@ def export_platform(source, target):
         def visit(descriptor, depth=0):
             if depth > 4:
                 raise ValueError("OCI index nesting exceeds fixture bound")
+            platform = descriptor.get("platform")
+            if platform is not None:
+                if not isinstance(platform, dict) or not all(isinstance(platform.get(k), str) and platform[k] for k in ("os", "architecture")):
+                    raise ValueError("invalid OCI platform descriptor")
+                if (platform["os"], platform["architecture"]) != ("linux", "arm64"):
+                    # Docker's containerd store can export an index whose other
+                    # platforms were never pulled. Their blobs are unnecessary
+                    # for this projection; selected/unclassified descriptors
+                    # still require complete, digest-verified contents below.
+                    return
             obj = read_json(blob_name(descriptor))
             if "manifests" in obj:
                 for child in obj["manifests"]:
@@ -117,6 +129,8 @@ def export_platform(source, target):
                 config = read_json(blob_name(obj["config"]))
                 if (config.get("os"), config.get("architecture")) == ("linux", "arm64"):
                     candidates.append((descriptor, obj))
+                elif platform is not None:
+                    raise ValueError("selected OCI platform disagrees with image config")
 
         for descriptor in read_json("index.json")["manifests"]:
             visit(descriptor)
