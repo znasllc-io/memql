@@ -1,3 +1,13 @@
+/// Retrieve a small selection of reviewed skill instructions and Training
+/// passages relevant to the next step. Compare applicability and missing
+/// knowledge against actual evidence; retrieval alone does not prove readiness.
+@handler(type="function", name="workConsultKnowledge")
+@requiresAgentRole("assistant", "specialist")
+tool consultWorkKnowledge {
+ need string! @description("One specific capability or knowledge gap identified from the current goal and observed work, not an entire role or discipline. At most 1000 bytes.")
+ context string @description("Relevant observed facts, source references and what is already known. At most 3000 bytes. Do not include private reasoning or unrelated history.")
+}
+
 /// Discover named capabilities admitted by the current caller's permissions.
 @description("Discover capabilities admitted by the current caller permissions. Search short words naming the app or operation.")
 @executor("workCapabilities")

@@ -129,6 +129,7 @@ func (i *Integration) Capabilities() []memql.IntegrationCapability {
 		{Name: "indexTrainingLesson", Description: "Index an exact enabled manual lesson revision.", Handler: i.handleIndexTrainingLesson},
 		{Name: "workTrainingContext", Description: "Read the current owned work scope for Training retrieval.", Handler: i.handleWorkTrainingContext},
 		{Name: "ownedTrainingLessons", Description: "Read bounded reviewed passages from the current work owner's taught Library files.", Handler: i.handleOwnedTrainingLessons, PreserveOrder: true},
+		{Name: "consultWorkTraining", Description: "Read reviewed lessons for a live work need and report indexing or retrieval gaps.", Handler: i.handleConsultWorkTraining},
 		{Name: "removeDocumentAnnotation", Description: "Remove your document feedback or personal note.", Handler: i.handleRemoveDocumentAnnotation},
 		{Name: "documentNotes", Description: "Read the caller’s personal notes.", Handler: i.handleDocumentNotes},
 		{Name: "addDocumentNote", Description: "Save a personal note, excluded from AI feedback.", Handler: i.handleAddDocumentNote},

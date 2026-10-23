@@ -160,6 +160,13 @@ WHERE 1-(v.embedding <=> $2::vector) >= $3
 ORDER BY v.embedding <=> $2::vector,(s.artifact_id<>'') DESC,s.id LIMIT $4`
 
 func (i *Integration) handleOwnedTrainingLessons(ctx context.Context, args map[string]any, _ int) (result []memorynodes.MemoryNode, failure error) {
+	return i.readOwnedTrainingLessons(ctx, args, nil)
+}
+
+// The ordinary prompt reader preserves its passage-only contract. A native
+// consultation also receives the saved receipt's availability status, so an
+// empty corpus, missing index and no ranked matches are not conflated.
+func (i *Integration) readOwnedTrainingLessons(ctx context.Context, args map[string]any, selected func(string, trainingSelectionReceipt)) (result []memorynodes.MemoryNode, failure error) {
 	run, goal, err := i.ownedTrainingScope(ctx)
 	if err != nil {
 		return nil, err
@@ -182,6 +189,8 @@ func (i *Integration) handleOwnedTrainingLessons(ctx context.Context, args map[s
 			failure = i.saveTrainingSelection(ctx, run, receiptID, receipt)
 			if failure != nil {
 				result = nil
+			} else if selected != nil {
+				selected(receiptID, receipt)
 			}
 		}
 	}()

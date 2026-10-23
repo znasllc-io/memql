@@ -61,6 +61,61 @@ generation replacement and checks all three session kinds, ordinary and rerun
 executions, rejection and a forged pending-request hash with real storage on two
 engines. It verifies decision and transcript restoration, not a live screenshot.
 
+## Knowledge requirements can change during execution
+
+An initial role or skill binding is not a complete account of a goal's needs.
+Repository discovery, an unfamiliar output format, a source conflict or a failed
+check can expose a new requirement. The shared guidance makes identifying that
+requirement the working model's responsibility, within its current reasoning
+turn; it does not require the person to supply a technical procedure. No extra
+classifier runs on every greeting or tool call, and no language-name switch in
+the harness chooses a fixed engineering workflow.
+
+`consultWorkKnowledge` provides an explicit next action for that new need.
+`integrations/work/knowledge_consultation.go` accepts bounded need/context text,
+checks current owner/run/step through the skill reader and retrieves a small
+allocation of current reviewed instructions and Training. Initial skill context
+remains frozen for replay; consultation gets a separate receipt. The broad goal
+text is not automatically prepended to the narrow lookup, because it would keep
+displacing the newly relevant specialty. Matching is lexical for skill selection
+and semantic for Training. Neither score establishes readiness. The response
+states `not-assessed`; applicability and unresolved needs remain model judgments
+that must be checked against source and outcome evidence.
+
+The Library gateway opens only the fixed reviewed-lesson reader and stamps
+internal origin only for that call. Current source ownership, approval,
+supersession, cancellation, inherited inference routing and spending checks still
+apply. It returns the recorded availability status even with zero passages;
+unindexed, unavailable and empty sources are not evidence of absence. It does
+not run corpus installation, training or indexing on each consultation. Fresh
+live consultations recheck publication; replay and a fork's shared prefix must
+consume original tool receipts, not spend another retrieval or change history.
+Journal failure is an error rather than an unrecorded successful consultation.
+
+Research can continue through authorized concept reads, semantic memory recall,
+artifact search and source readers. The tool makes its scope explicit: reviewed
+knowledge consultation does not search all records or blob contents. Owned work
+also receives `artifactSearch` directly; permissions remain in its existing
+handler. A search result is a locator, not a claim of current contents or approved
+Training. **Known coverage limit:** the existing Library similarity path ranks a
+bounded cross-owner candidate pool before owner filtering. It can miss relevant
+owned artifacts. It also lacks a uniform index-coverage receipt across all
+concepts and artifact formats. These are remaining retrieval work, not fixed by
+offering the tool. The [adaptive knowledge plan](../planning/adaptive-work-knowledge.md)
+records the connected requirements and evaluation boundaries.
+
+`TestSkillConsultationAdaptsWithoutRewritingInitialSnapshot` checks newly relevant
+instructions, later deactivation and unchanged initial context across replicas.
+`TestOwnedTrainingReadsReviewedTaughtSourcesAcrossReplicas` exercises the ordinary
+caller gateway, actual returned passages, empty-corpus status, review changes and
+replay/foreign-scope refusals with real storage. `TestKnowledgeConsultationReportsRetrievalWithoutCertifyingReadiness`
+checks bounded composition and honest status. The owned-work prompt test checks
+tool delivery across software, research, documents and answer-only sections.
+These tests do not establish that a model will recognize every missing need;
+that requires held-out goals, interaction evidence and measured interventions.
+
+## Execution decision map
+
 | Decision | Reason and resulting path | Implementation |
 | --- | --- | --- |
 | Select a model and execution route | Use the current policy and requested reasoning level. An Apps route does not grant tools, host access or ownership. Missing app-session wiring is a platform fault, not permission to open another machine. | [App session provider](../../../component/memql/app_session_provider.go) |

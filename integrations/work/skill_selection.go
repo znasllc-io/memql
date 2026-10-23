@@ -35,6 +35,13 @@ func (i *Integration) handleSkillCatalog(ctx context.Context, _ map[string]any, 
 // fresh reads make a second replica consume the same content snapshot, even
 // after the catalog changes. Selection never grants a tool or approval.
 func (i *Integration) handleSelectSkills(ctx context.Context, args map[string]any, _ int) ([]memorynodes.MemoryNode, error) {
+	return i.selectSkillContext(ctx, args, false)
+}
+
+// Consultation is a new, journaled lookup for a discovered need, not a rewrite
+// of the step's initial prompt snapshot. Keeping the two identities separate
+// preserves replay while allowing live work to change its knowledge selection.
+func (i *Integration) selectSkillContext(ctx context.Context, args map[string]any, consultation bool) ([]memorynodes.MemoryNode, error) {
 	actor, err := requirePrincipal(ctx)
 	if err != nil {
 		return nil, err
@@ -74,6 +81,13 @@ func (i *Integration) handleSelectSkills(ctx context.Context, args map[string]an
 		return nil, fmt.Errorf("skill selection requires a versioned step")
 	}
 	receiptID := skillContextReceiptID(rc.RunId, rc.StepKey, version)
+	fromJournal := rc.Mode == common.RunModeReplay || (rc.Mode == common.RunModeFork && rc.BeforeForkPoint(rc.StepKey))
+	if consultation && fromJournal {
+		return nil, fmt.Errorf("replay must consume its recorded knowledge consultation")
+	}
+	if consultation {
+		receiptID = "skill-consultation-" + id.NewShortId()
+	}
 	saved, err := readSkillContext(ctx, s, rc.RunId, receiptID)
 	if err != nil {
 		return nil, err
@@ -81,7 +95,6 @@ func (i *Integration) handleSelectSkills(ctx context.Context, args map[string]an
 	if saved != nil {
 		return i.resultNode(skillContextResponse(saved, receiptID)), nil
 	}
-	fromJournal := rc.Mode == common.RunModeReplay || (rc.Mode == common.RunModeFork && rc.BeforeForkPoint(rc.StepKey))
 	if fromJournal {
 		// Replayed model requests must contain the ORIGINAL prompt context,
 		// including its original receipt citation. Selecting again changes the
@@ -142,11 +155,18 @@ func (i *Integration) handleSelectSkills(ctx context.Context, args map[string]an
 		catalog[n] = maps.Clone(row)
 		catalog[n]["reviewedBaseline"] = baselines.IsInstalledSkillBaseline(row)
 	}
-	selection, err := workvalues.SelectSkillContext(argString(goal, "statement")+"\nCurrent step: "+argString(args, "text"), catalog, argInt(args, "limit", 0), argInt(args, "minimumScore", 0), argInt(args, "maxBytes", 0))
+	query := argString(goal, "statement") + "\nCurrent step: " + argString(args, "text")
+	stage := "selected-for-context"
+	if consultation {
+		// Broad goal wording must not repeatedly crowd a newly discovered,
+		// narrow requirement out of this separate context allocation.
+		query, stage = argString(args, "text"), "consulted-for-need"
+	}
+	selection, err := workvalues.SelectSkillContext(query, catalog, argInt(args, "limit", 0), argInt(args, "minimumScore", 0), argInt(args, "maxBytes", 0))
 	if err != nil {
 		return nil, err
 	}
-	return i.saveSkillContext(ctx, rc, version, receiptID, receiptID, "selected-for-context", selection)
+	return i.saveSkillContext(ctx, rc, version, receiptID, receiptID, stage, selection)
 }
 
 func skillContextReceiptID(runID, stepKey string, version int) string {

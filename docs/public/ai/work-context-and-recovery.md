@@ -43,6 +43,44 @@ ask for it again. Permission to edit source alone does not authorize a productio
 release or access to another target. These are model instructions, not a promise
 of automatic learning or a deterministic guarantee of successful delivery.
 
+## Adapting knowledge to the work
+
+The initial skill snapshot belongs to a step version and stays fixed for
+replay. Live work can use `consultWorkKnowledge` when it discovers a different
+knowledge need. The consultation reads current reviewed skill instructions and
+Training passages, rather than loading a whole role's manuals or requiring the
+person to name a language, build system or technical procedure.
+
+Each consultation accepts one specific need and a short account of relevant
+observations. It selects at most two skill instructions within 4,000 serialized
+bytes and three Training passages within the existing 1,200-token conservative
+allocation. Skills use their declared match terms; Training uses semantic
+similarity. Current review and source checks still apply. The initial snapshot
+is preserved; a new receipt records the consultation. A replay consumes recorded
+tool results instead of performing a fresh lookup.
+
+The response distinguishes retrieval availability, such as an empty eligible
+corpus, unavailable index or embedding timeout. Its readiness is explicitly
+`not-assessed`: related material does not establish sufficient knowledge. The
+working model must compare its next action with applicable instructions,
+prerequisites and source evidence, then resolve remaining gaps through bounded
+research or a necessary human question. This is an available adaptive retrieval
+path and model guidance, not a deterministic completeness assessment.
+
+Research also includes permitted concept queries, earlier work and semantic
+artifact search. `artifactSearch` is available directly to owned work; exact
+record and file readers remain discoverable through their authorized contracts.
+Search snippets identify candidate evidence. Read relevant contents and verify
+source versions before relying on them. An incomplete index is not evidence of
+absence. Blob storage retains bytes; indexed passages and source metadata make
+those bytes discoverable, without making them automatically approved Training.
+
+Consultation neither trains nor indexes content on demand. Existing ingestion,
+indexing and review paths remain separate. Findings and useful procedures can be
+retained as evidence with provenance, applicability and limitations; they do not
+become approved lessons merely because a model wrote them. Selection and journal
+receipts do not prove prompt adherence, task success or performance improvement.
+
 ## Task failures and platform defects
 
 These have different owners and recovery paths:
