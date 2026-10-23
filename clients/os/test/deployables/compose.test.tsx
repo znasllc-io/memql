@@ -1493,6 +1493,39 @@ describe("installing package DSL without publishing websites", () => {
     dslDomains: [{ domain: "znasdelivery", files: 3, constructs: { automation: 12 } }],
     deployables: REPORT_TWO.deployables.map((app, index) => ({ ...app, name: websites[index]!, deployment: { slug: websites[index], domains: [index === 0 ? "platform.example" : "company.example"] } })),
   };
+  it("reads the confirmed installation after connection replacement without claiming another analysis or repeating the write", async () => {
+    const connection = fakeConnection();
+    h.connection = connection;
+    const pkg = packageFromRow(ACME);
+    const page = () => withSession(<ComposePage clusterDomain="memql.test" can={ALL_PARTS} isClusterOwner viewerUserId="u-me" credentials={[]}
+      source={pkg} siteFeed={{ state: "live", error: "" }} placedSources={[]} onBack={vi.fn()} />, { role: "owner", userId: "u-me" });
+    const view = render(page());
+    await click(await forward("Analyze"));
+    const dslReport = { ...report, deployables: [] };
+    await emit(connection, DEPLOYMENT_CONCEPT, parkedRun(pkg.id, { report: dslReport }), "NODE_CREATED");
+    await click(await forward("Review installation"));
+    await click(await forward("Install MemQL changes"));
+    await waitFor(() => expect(connection.callsNamed("packageDeploy")).toHaveLength(2));
+    await emit(connection, DEPLOYMENT_CONCEPT, parkedRun(pkg.id, { status: "staging_dsl", report: dslReport }), "NODE_UPDATED");
+
+    // A replacement connection has no timeline until its fresh read returns.
+    // The known request remains selected, but its operation state is unknown.
+    const deployments: Record<string, Row[]> = {};
+    const recovered = fakeConnection({ deployments });
+    h.connection = recovered;
+    view.rerender(page());
+    await waitFor(() => expect(document.querySelector(".os-actbar-word")?.textContent).toBe("Checking status"));
+    expect(document.querySelector(".os-actbar")?.textContent).not.toMatch(/Analyzing|Downloading and checking/);
+    expect(screen.queryByText("Waiting for the analysis report.")).toBeNull();
+    expect(forwardAct("Install MemQL changes")).toBeNull();
+
+    deployments[pkg.id] = [parkedRun(pkg.id, { status: "succeeded", report: dslReport, dslVersion: "packages/delivery/content/" })];
+    await click(screen.getByRole("button", { name: "Read status again" }));
+    await waitFor(() => expect(document.querySelector(".os-actbar-word")?.textContent).toBe("MemQL changes staged"));
+    expect(screen.queryByRole("button", { name: "Read status again" })).toBeNull();
+    expect(connection.callsNamed("packageDeploy")).toHaveLength(2);
+    expect(recovered.callsNamed("packageDeploy")).toHaveLength(0);
+  });
   it("keeps an archived source's current state ahead of its historical staging receipt", async () => {
     const connection = fakeConnection();
     h.connection = connection;

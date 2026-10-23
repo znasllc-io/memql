@@ -359,6 +359,9 @@ export function ComposePage(props: ComposePageProps) {
   });
   const phase: ComposePhase = analysisStartedAt !== null ? "analyzing"
     : storedPhase === "composing" && pkgActions.refusal && packageId ? "stopped" : storedPhase;
+  // A replacement connection can temporarily have no row for this request.
+  // Its last operation may have finished; missing status is not new analysis.
+  const awaitingRunStatus = phase === "analyzing" && analysisStartedAt === null && selectedRunId !== "" && !run;
   const analysisInConfiguration = phase === "analyzing" || phase === "stopped" && !report;
   const cancelling = Boolean(run && (run.cancelRequested || cancelledRunId === run.id) && runIsCancellable(run));
   const analysisClock = phase === "analyzing" ? analysisStartedAt ?? (run?.startedAt ? Date.parse(run.startedAt) : null) : null;
@@ -918,7 +921,7 @@ export function ComposePage(props: ComposePageProps) {
     : journeyStop === "sourceDetail" && path === "handmade" && sourceDone && phase === "composing"
       ? [{ label: "Continue", tone: "primary", onAct: () => chooseStop("whatItIs") }]
       : journeyStop === "whatItIs" && (phase === "awaiting_confirm" && path === "package" || phase === "composing" && path === "handmade")
-        ? [{ label: "Choose addresses", tone: "primary", onAct: () => chooseStop("whereItLives") }]
+        ? [{ label: dslOnly ? "Review installation" : "Choose addresses", tone: "primary", onAct: () => chooseStop("whereItLives") }]
         : false
   ) || barActs;
 
@@ -1074,7 +1077,7 @@ export function ComposePage(props: ComposePageProps) {
       steps={steps.map(step => step.id === journeyStop && phase === "composing" ? { ...step, state: "open" } : step)}
       open={journeyStop}
       onOpen={(id) => chooseStop(id as WizardStep)}
-      status={{ word: restoredSourceId ? "Source restored" : cancelling ? "Cancelling" : word, detail: restoredSourceId ? "Existing deployables are unchanged." : cancelling ? "Waiting for the cluster to stop this run. Nothing new will be deployed." : phase === "analyzing" ? "Downloading and checking the source. Leave keeps this running; Cancel stops it." : detail, tone: phase === "analyzing" || phase === "deploying" ? "busy" : wentLive ? "live" : "none",
+      status={{ word: restoredSourceId ? "Source restored" : cancelling ? "Cancelling" : awaitingRunStatus ? "Checking status" : word, detail: restoredSourceId ? "Existing deployables are unchanged." : cancelling ? "Waiting for the cluster to stop this run. Nothing new will be deployed." : awaitingRunStatus ? "The request is saved. Its latest status is not available yet." : phase === "analyzing" ? "Downloading and checking the source. Leave keeps this running; Cancel stops it." : detail, tone: phase === "analyzing" || phase === "deploying" ? "busy" : wentLive ? "live" : "none",
         meta: analysisClock !== null && Number.isFinite(analysisClock) ? `${Math.max(0, Math.floor((now.getTime() - analysisClock) / 1000))}s elapsed` : undefined }}
       acts={acts}
       context={{ page: title, packageId: (parked?.pkg ?? source)?.id, app: only, mode: "compose", step: journeyStop }}
@@ -1107,9 +1110,9 @@ export function ComposePage(props: ComposePageProps) {
               belong to yet, so it renders beneath the action that asked for
               it. Every other refusal in this flow lands at its stop. */}
           {sourceNotice ? <Caption>{sourceNotice}</Caption> : null}
-          {phase === "analyzing" && analysisStartedAt === null && selectedRunId && !run ? <Notice tone="info"
-            sentence="Waiting for the analysis report."
-            next={deploymentFeed.error ? `The status read failed: ${deploymentFeed.error}` : "The request returned. Refresh its status without starting another analysis."}
+          {awaitingRunStatus ? <Notice tone="info"
+            sentence="The latest deployment status is not available yet."
+            next={deploymentFeed.error ? `The status read failed: ${deploymentFeed.error}` : "Read its status again without starting another request."}
             ><Button onClick={() => reseed()}>Read status again</Button></Notice> : null}
           {repositoryRegistration.refusal ? <ProblemNotice problem={{ ...repositoryRegistration.refusal, fatal: true }} tone="error" /> : null}
           {newPackage.refusal ? <ProblemNotice problem={{ ...newPackage.refusal, fatal: true }} tone="error" /> : null}
