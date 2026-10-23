@@ -451,6 +451,16 @@ arbitrary input fits any model.
 
 ## Durability, resources and validation
 
+When an Apps session returns evidence, MemQL associates the Library entry and
+its backing file with the native work run; the file also records the executing
+step. Model and effort remain what the app reported, which may be empty.
+Ownership is checked before stamping, and evidence already associated with a
+different producing run is not reassigned. An ordinary conversation without a
+run preserves any existing work identity. This metadata helps find and reuse
+evidence; it does not prove that its bytes were inspected or that a goal passed
+verification. Older records are not automatically backfilled, and a stamping
+failure is logged without discarding the completed app work.
+
 Archives and execution checkpoints live in shared persistent storage, under
 the run owner's authority. Retrieval from another replica must not depend on
 the first replica's memory. A reference grants no access to another owner's

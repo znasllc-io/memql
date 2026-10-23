@@ -1086,12 +1086,16 @@ mutation watchedFolder reportLibraryWatchedFolderSweep {
 mutation artifact stampArtifactProvenance {
   args {
     artifactId  string!
+    /// Native work identity, omitted for conversations without a run.
+    runId string
     /// {app, model, effort, sessionId}. Model and effort are the APP'S REPORT and may be empty.
     producedBy  object!
   }
   update {
     id: args.artifactId
     producedBy: args.producedBy
+    producedByRunId: args.runId
+    source: "app_session"
   }
 }
 
@@ -1110,12 +1114,17 @@ mutation artifact stampArtifactProvenance {
 mutation file stampLibraryFileProvenance {
   args {
     fileId      string!
+    runId string
+    stepKey string
     /// {app, model, effort, sessionId}. Model and effort are the APP'S REPORT and may be empty.
     producedBy  object!
   }
   update {
     id: args.fileId
     producedBy: args.producedBy
+    producedByRunId: args.runId
+    producedByStepKey: args.stepKey
+    source: "app_session"
   }
 }
 

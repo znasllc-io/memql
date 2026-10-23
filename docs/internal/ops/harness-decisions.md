@@ -27,6 +27,27 @@ paths and one task's acceptance criteria must not become routing rules.
 | Return after a native wait | Inspect the native control plane, including an answer that arrived before the app finished. Yield the old invocation without creating a second question or overwriting the resume. The adapter must expose this check to the agent loop. | [Human wait handling](../../../integrations/agent/human_wait.go), [production adapter](../../../app/adapters.go) |
 | Rehydrate after an approval | Carry the exact new decision, then restore the required native checkpoint. Do not append the original conversation's source inventory to each approval: it is already represented in saved work, and repeated copies trigger unnecessary summaries. Fresh executions without a required checkpoint still receive that inventory. | [Work context](../../../integrations/agents/work_context.go), [continuation validation](../../../component/memql/work_continuation.go) |
 | Resume filesystem state | An empty snapshot needs no restoration. A populated snapshot still requires supported restoration; do not substitute an empty workspace or replay completed effects. | [Automation resume](../../../component/automations/resume.go), [child continuation](../../../component/automations/child_continuation.go) |
+| Associate returned evidence | The session runner supplies the native run and step, while the app supplies its reported model and effort. Resolve the owned artifact and its distinct backing file before stamping both; refuse missing, foreign or conflicting producer links. | [Artifact provenance](../../../component/worker/appsession_store.go), [session runner](../../../component/worker/runner.go) |
+
+Returned Apps evidence is stamped as `app_session` on both the Library index
+and its backing file. `producedByRunId` comes from the native invocation;
+the file also records `producedByStepKey`. Reads use the owner's actor and a
+fresh cross-replica view; only the trusted provenance mutations use internal
+origin. File IDs are resolved through `sourceConceptRef`, not guessed from
+artifact IDs. Non-file outputs receive the index stamp without an invented
+file. An unbound conversation omits native identity fields, preserving any
+existing association. A different nonempty producing run is refused rather
+than rewriting history. These checks grant no access to another owner's data.
+
+The index and file writes are separate, retryable read-merge operations. A
+failed stamp is logged and returned to the runner without invalidating the
+already completed app work; this is not an atomic two-row transaction or an
+automatic backfill of older evidence. `TestAppArtifactProvenanceLinksOwnedFileAndRun`
+executes the actual DSL against a required test database and covers both
+rows, preserved bytes/metadata, unbound sessions, foreign/missing links and
+conflicting runs. Runner tests verify native identity forwarding and that
+unreported model/effort remain empty. MIME detection, file selection, duplicate
+intermediates and byte-readback verification are independent of this repair.
 
 `PrepareDelegatedFeedback` starts with the native context actually delegated,
 including compacted memories and archive references. It appends only that app

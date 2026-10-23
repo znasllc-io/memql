@@ -641,6 +641,9 @@ func TestEveryProducedArtifactIsStamped(t *testing.T) {
 	if got.App != AppIdClaudeCode || got.SessionId != "sess-run" {
 		t.Fatalf("the stamp must name the app and the session: %+v", got)
 	}
+	if got.RunId != "plan-1" || got.StepKey != "task-1" {
+		t.Fatalf("the native work identity must accompany returned evidence: %+v", got)
+	}
 	if got.Model != "claude-opus-5" || got.Effort != "high" {
 		t.Fatalf("the stamp carries the APP'S REPORT: %+v", got)
 	}
