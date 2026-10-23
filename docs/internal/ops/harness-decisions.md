@@ -468,6 +468,21 @@ unnecessary inference before this ordering change and verifies zero summary
 calls plus exact cross-replica readback afterward. Ordinary small receipts,
 instructions and the fresh tail remain verbatim in that regression.
 
+Memory-only history can remain over budget after the last fresh exchange has
+been summarized. Semantic selection deliberately refuses to re-summarize those
+derived claims, but sharing that restriction with exact archival stranded an
+otherwise shrinkable context. The storage selector now accepts eligible
+memory-only spans, including at the semantic pass's no-candidate exit. It keeps
+the same pinned authority, original/current requests, newest decision, pending
+calls and fresh exchange. The existing eight-storage-attempt bound and strict
+size-reduction check remain; each exact source is durable before its reference
+is published. There is no new model call, enlarged window, permission or effect
+replay. `TestWorkContextArchivesMemoryOnlyHistoryWithoutAnotherSummary` reproduces
+the capacity refusal and verifies both retained archive layers on a second
+database-backed engine, immutable continuation bytes and refusal at a hard
+target that cannot fit required inputs. This is a synthetic reproduction, not
+proof that the live continuation has completed its downstream verification.
+
 [Context management](../../../component/memql/work_context.go) first archives
 bulky completed results, then uses a bounded semantic pass over complete older
 exchanges. It preserves authority, current human direction and pending tool

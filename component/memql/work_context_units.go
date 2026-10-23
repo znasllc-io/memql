@@ -185,10 +185,19 @@ func workContextArchiveEligibility(messages []common.ChatMessage) func(workConte
 // group. Short transcripts can still retire an older complete exchange when
 // the preferred tail occupies the entire conversation.
 func workContextChunk(messages []common.ChatMessage, sourceLimit int, excluded map[string]bool) (int, int) {
+	return workContextSelectChunk(messages, sourceLimit, excluded, true)
+}
+
+// Semantic summaries need fresh source, otherwise repeated preparation can
+// recursively summarize the same derived claims. Exact archival may consolidate
+// memory-only spans instead: callers persist every byte before replacing them,
+// require a strictly smaller context, and retain the same authority/protocol
+// boundaries and bounded attempt count. No checkpoint becomes a permission.
+func workContextSelectChunk(messages []common.ChatMessage, sourceLimit int, excluded map[string]bool, requireFresh bool) (int, int) {
 	units := workContextUnits(messages)
 	eligible := workContextArchiveEligibility(messages)
 	usable := func(start, end int, fresh bool) bool {
-		if !fresh {
+		if end <= start || (requireFresh && !fresh) {
 			return false
 		}
 		if len(excluded) == 0 {
@@ -213,7 +222,7 @@ func workContextChunk(messages []common.ChatMessage, sourceLimit int, excluded m
 			// Include a whole first exchange even when it crosses the preferred
 			// size; the caller archives oversized units without an LLM call.
 			raw, _ := json.Marshal(messages[start:u.end])
-			if fresh && len(raw) > sourceLimit {
+			if (fresh || (!requireFresh && end > start)) && len(raw) > sourceLimit {
 				if usable(start, end, fresh) {
 					return start, end
 				}

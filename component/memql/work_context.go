@@ -116,6 +116,17 @@ func (e *MemQLEngine) CompactWorkContext(ctx context.Context, messages []common.
 			if WorkContextSize(out, tools) <= target {
 				return out, nil
 			}
+			// Semantic selection deliberately refuses memory-only history to
+			// avoid recursively summarizing derived claims. Those memories can
+			// still occupy the remaining window: retain their exact envelopes
+			// through the bounded storage path before declaring capacity lost.
+			out, err = e.archiveWorkContextExchanges(ctx, out, tools, target)
+			if err != nil {
+				return nil, err
+			}
+			if WorkContextSize(out, tools) <= target {
+				return out, nil
+			}
 			return nil, fmt.Errorf("context checkpoint cannot fit the active request, tool contracts and pending exchange; history retained")
 		}
 		raw, err := json.Marshal(out[start:end])
@@ -227,7 +238,7 @@ func (e *MemQLEngine) archiveWorkContextExchanges(ctx context.Context, out []com
 	// Eight storage attempts bound work even with many separated authority
 	// messages. The larger byte limit is for exact storage, never model input.
 	for attempts := 0; WorkContextSize(out, tools) > target && attempts < 8; attempts++ {
-		start, end := workContextChunk(out, sourceLimit, unproductive)
+		start, end := workContextSelectChunk(out, sourceLimit, unproductive, false)
 		if end <= start {
 			break
 		}
