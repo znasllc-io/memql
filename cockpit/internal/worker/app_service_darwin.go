@@ -3,10 +3,11 @@
 package worker
 
 /*
-#cgo CFLAGS: -x objective-c -fobjc-arc
+#cgo CFLAGS: -x objective-c -fobjc-arc -fblocks
 #cgo LDFLAGS: -framework Foundation -framework ServiceManagement
 #import <Foundation/Foundation.h>
 #import <ServiceManagement/ServiceManagement.h>
+#import <dispatch/dispatch.h>
 #include <stdlib.h>
 #include <string.h>
 
@@ -26,7 +27,26 @@ static long memqlAppServiceChange(const char *plist, int on, char **why) {
         @autoreleasepool {
             SMAppService *service = [SMAppService agentServiceWithPlistName:[NSString stringWithUTF8String:plist]];
             NSError *error = nil;
-            BOOL done = on ? [service registerAndReturnError:&error] : [service unregisterAndReturnError:&error];
+            BOOL done;
+            if (on) {
+                done = [service registerAndReturnError:&error];
+            } else {
+                // The synchronous unregister returns before launchd has reaped
+                // the old service. The documented completion runs on libdispatch's
+                // default queue, so this bounded wait does not block its callback.
+                dispatch_semaphore_t completed = dispatch_semaphore_create(0);
+                __block NSError *completionError = nil;
+                [service unregisterWithCompletionHandler:^(NSError *value) {
+                    completionError = value;
+                    dispatch_semaphore_signal(completed);
+                }];
+                if (dispatch_semaphore_wait(completed, dispatch_time(DISPATCH_TIME_NOW, 10 * NSEC_PER_SEC)) != 0) {
+                    *why = strdup("macOS has not finished stopping MemQL; retry after its services stop");
+                    return -1;
+                }
+                error = completionError;
+                done = error == nil;
+            }
             if (done) return 0;
             const char *text = error.localizedDescription.UTF8String;
             *why = strdup(text ? text : "macOS refused the change");

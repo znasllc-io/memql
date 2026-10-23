@@ -43,6 +43,39 @@ function merge_service_env() {
     mv "$stage" "$file"
 }
 
+# A completed unregister can still race macOS's registration bookkeeping.
+# Apple DTS documents a short delay as the workaround:
+# https://developer.apple.com/forums/thread/783539
+# Retry only registration after this invocation successfully unregistered;
+# never repeat unregister or retry an approval/signature/unreadable-state error.
+function register_app_services() {
+    local worker="$1" menu="$2" released="$3" attempt output state worker_state menu_state
+    for ((attempt=0; attempt<3; attempt++)); do
+        if output="$("$worker" worker service register --menu="$menu" 2>&1)"; then
+            printf '%s\n' "$output" >&2
+            return 0
+        fi
+        if ! state="$("$worker" worker service status 2>/dev/null)" \
+            || ! worker_state="$(plutil -extract worker raw -o - - <<< "$state" 2>/dev/null)" \
+            || ! menu_state="$(plutil -extract menu raw -o - - <<< "$state" 2>/dev/null)"; then
+            printf '%s\n' "$output" >&2
+            return 5
+        fi
+        if [[ "$worker_state" == requires_approval || "$menu" == on && "$menu_state" == requires_approval ]]; then
+            cap_error "Allow MemQL in System Settings > General > Login Items, then retry."
+            return 3
+        fi
+        if [[ "$released" != true || "$attempt" -eq 2 || "$output" != *"(ServiceManagement error 1)"* \
+            || "$worker_state" != not_registered && "$worker_state" != enabled \
+            || "$menu_state" != not_registered && "$menu_state" != enabled ]]; then
+            printf '%s\n' "$output" >&2
+            return 5
+        fi
+        [[ "$attempt" -ne 0 ]] || cap_info "Waiting for macOS to finish updating MemQL."
+        sleep 2
+    done
+}
+
 function main() {
     cap_handle_meta "$@"
     OLLAMA_ENV_PAIRS=()
@@ -51,7 +84,7 @@ function main() {
         case "$arg" in --ollama-env=*) OLLAMA_ENV_PAIRS+=("${arg#--ollama-env=}") ;; esac
     done
     cap_parse_flags "$@"
-    local app menu helper uid_value backup legacy label identifier fingerprint marker env_file pair menu_flag=off
+    local app menu helper uid_value backup legacy label identifier fingerprint marker env_file pair menu_flag=off released=false status legacy_backups=""
     app="$(cap_param app)"; menu="$(cap_param menu true)"
     [[ "$app" == /* && -x "$app/Contents/MacOS/MemQL" ]] || cap_fail 2 "app must be an installed MemQL bundle"
     [[ "$menu" == true || "$menu" == false ]] || cap_fail 2 "menu must be true or false"
@@ -84,8 +117,14 @@ function main() {
         backup="$(mktemp -d "$HOME/.memql/backups/legacy-agent.XXXXXX")"
         stop_launchagent "gui/$uid_value/$label" || cap_fail 5 "could not stop previous service; retry after it exits"
         mv "$legacy" "$backup/$label.plist"
+        [[ -z "$legacy_backups" ]] || legacy_backups+=","
+        legacy_backups+="\"$(cap_json_escape "$backup/$label.plist")\""
         cap_changed
     done
+    # Return recovery evidence on both success and failure. The caller restores
+    # the previous app before starting these services; registration refusal is
+    # never bypassed by starting the new executable through a legacy plist.
+    cap_result_set_raw previous_service_files "[$legacy_backups]"
     [[ "$menu" == false ]] || menu_flag=on
     marker="$HOME/.memql/state/app-activation.sha256"
     fingerprint="$(shasum -a 256 "$app/Contents/MacOS/MemQL" "$helper/Contents/MacOS/MemQLCockpit") menu=$menu"
@@ -96,9 +135,18 @@ function main() {
         # registering again alone answers "already registered".
         rm -f "$marker"
         "$app/Contents/MacOS/MemQL" worker service unregister >&2 || cap_fail 5 "macOS did not release MemQL's previous services"
+        released=true
         cap_changed
     fi
-    "$app/Contents/MacOS/MemQL" worker service register --menu="$menu_flag" >&2 || cap_fail 5 "macOS did not register MemQL's services"
+    if register_app_services "$app/Contents/MacOS/MemQL" "$menu_flag" "$released"; then
+        :
+    else
+        status=$?
+        if [[ "$status" -eq 3 ]]; then
+            cap_fail 3 "Allow MemQL in System Settings > General > Login Items, then retry."
+        fi
+        cap_fail 5 "macOS could not start MemQL. Previous service files are retained for recovery."
+    fi
     printf '%s\n' "$fingerprint" > "$marker"
     chmod 600 "$marker"
     # Retire only known old helper bundles; keep the copy for rollback.

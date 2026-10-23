@@ -7,6 +7,7 @@ import pathlib
 import plistlib
 import shutil
 import subprocess
+import sys
 import tempfile
 import tarfile
 import io
@@ -21,9 +22,32 @@ function main() {
         [[ "${MEMQL_TEST_SERVICE_FAIL:-}" != 1 ]] || return 1
         case "$3" in
             register)
+                case "${MEMQL_TEST_REGISTER:-}" in
+                    once)
+                        if [[ ! -f "$MEMQL_TEST_STATE/register-retried" ]]; then
+                            touch "$MEMQL_TEST_STATE/register-retried"
+                            echo 'ERROR: Operation not permitted (ServiceManagement error 1)' >&2
+                            return 1
+                        fi ;;
+                    denied|approval|unreadable)
+                        echo 'ERROR: Operation not permitted (ServiceManagement error 1)' >&2
+                        return 1 ;;
+                    signature)
+                        echo 'ERROR: Invalid signature (ServiceManagement error 2)' >&2
+                        return 1 ;;
+                esac
                 touch "$MEMQL_TEST_STATE/com.znasllc.memql-worker"
                 [[ "$4" != --menu=on ]] || touch "$MEMQL_TEST_STATE/com.znasllc.memql-cockpit-menubar" ;;
             unregister) rm -f "$MEMQL_TEST_STATE/com.znasllc.memql-worker" "$MEMQL_TEST_STATE/com.znasllc.memql-cockpit-menubar" ;;
+            status)
+                if [[ "${MEMQL_TEST_REGISTER:-}" == unreadable ]]; then
+                    echo 'status unavailable'
+                    return 0
+                fi
+                if [[ "${MEMQL_TEST_REGISTER:-}" == approval ]]; then
+                    echo '{"menu":"not_registered","worker":"requires_approval"}'
+                    return 0
+                fi ;;
         esac
         echo '{"menu":"enabled","worker":"enabled"}'
         return 0
@@ -46,6 +70,7 @@ def main():
     parser.add_argument('--archive', required=True, type=pathlib.Path)
     archive = parser.parse_args().archive.resolve()
     repo = pathlib.Path(__file__).resolve().parents[2]
+    run([sys.executable, str(repo / 'scripts/macos/app_service_native_test.py')], dict(os.environ))
     with tempfile.TemporaryDirectory(prefix='memql-app-test-') as temp:
         root = pathlib.Path(temp)
         unpack = root / 'download'
@@ -226,6 +251,41 @@ main "$@"
         assert run(activate, dict(env, MEMQL_TEST_SERVICE_FAIL='1'), ok=False).returncode == 5 and not marker.exists()
         assert json.loads(run(activate, env).stdout)['changed'] is True
         assert service_calls.read_text().splitlines()[-2:] == ['worker service unregister', 'worker service register --menu=on']
+        # Apple's unregister completion can still race registration. Retry
+        # only register, only for this transition, and preserve any real refusal.
+        marker.write_text('previous build')
+        start = len(service_calls.read_text().splitlines())
+        retried = run(activate, dict(env, MEMQL_TEST_REGISTER='once'))
+        assert json.loads(retried.stdout)['ok'] and marker.exists()
+        assert service_calls.read_text().splitlines()[start:] == [
+            'worker service unregister', 'worker service register --menu=on',
+            'worker service status', 'worker service register --menu=on']
+        # An unchanged activation must not turn ordinary denied registration
+        # into a retry loop, because it performed no completed unregister.
+        start = len(service_calls.read_text().splitlines())
+        refused = run(activate, dict(env, MEMQL_TEST_REGISTER='denied'), ok=False)
+        assert refused.returncode == 5
+        assert service_calls.read_text().splitlines()[start:] == [
+            'worker service register --menu=on', 'worker service status']
+        for failure, attempts, exit_code in [('denied', 3, 5), ('approval', 1, 3), ('signature', 1, 5), ('unreadable', 1, 5)]:
+            marker.write_text('previous build')
+            worker_plist.write_bytes(plistlib.dumps(before))
+            (state / 'com.znasllc.memql-worker').touch()
+            start = len(service_calls.read_text().splitlines())
+            refused = run(activate, dict(env, MEMQL_TEST_REGISTER=failure), ok=False)
+            response = json.loads(refused.stdout)
+            assert refused.returncode == exit_code and not response['ok'] and not marker.exists()
+            observed = service_calls.read_text().splitlines()[start:]
+            assert observed.count('worker service unregister') == 1
+            assert observed.count('worker service register --menu=on') == attempts
+            assert observed.count('worker service status') == attempts
+            saved = response['result']['previous_service_files']
+            assert len(saved) == 1 and pathlib.Path(saved[0]).read_bytes() == plistlib.dumps(before)
+            assert not (state / 'com.znasllc.memql-worker').exists(), 'refusal restarted the new app through legacy services'
+            assert all(path.read_bytes() == data for path, data in protected.items())
+        # A deliberate later retry can complete; the failed activation never
+        # wrote a false success marker or removed the retained service files.
+        assert json.loads(run(activate, env).stdout)['ok']
         # A loaded per-user job that will not stop keeps its plist, and
         # nothing is registered over it.
         worker_plist.write_bytes(plistlib.dumps(before))
