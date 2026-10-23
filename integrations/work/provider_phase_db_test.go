@@ -20,13 +20,17 @@ type providerCompileResult struct {
 }
 
 type providerCompileProbe struct {
-	guard   *RunCeilings
-	results chan providerCompileResult
-	release chan struct{}
+	guard           *RunCeilings
+	results         chan providerCompileResult
+	release         chan struct{}
+	beforeAdmission func()
 }
 
 func (p *providerCompileProbe) Compile(ctx context.Context, _ CompileRequest) {
 	rc, _ := common.RunFromContext(ctx)
+	if p.beforeAdmission != nil {
+		p.beforeAdmission()
+	}
 	p.results <- providerCompileResult{ctx: ctx, run: rc, err: p.guard.AdmitProvider(ctx, rc, memql.ProviderAdmission{HardCallLimit: 3})}
 	<-p.release
 }
@@ -135,10 +139,60 @@ func TestProviderAdmissionRemedyIsBoundToClaimedWaitAcrossReplicas(t *testing.T)
 	}
 }
 
+type providerDelayedClaimer struct {
+	RunClaimer
+	afterClaim func()
+}
+
+func (c providerDelayedClaimer) ClaimWithTTL(ctx context.Context, name, key string, ttl time.Duration) bool {
+	ok := c.RunClaimer.ClaimWithTTL(ctx, name, key, ttl)
+	if ok {
+		c.afterClaim()
+	}
+	return ok
+}
+
+func TestProviderAdmissionRemedyClaimDelayConsumesOriginalWindow(t *testing.T) {
+	a, b := freshActsDBPair(t, openActsDB(t), openActsDB(t))
+	_, err := a.db.ExecContext(context.Background(), `INSERT INTO "MemoryNodes" (id,concept,"createdAt","createdBy",schema,payload) VALUES (?, 'v1:identity:user', now(), 'provider-phase-test', '{}', '{"role":"writer","active":true}')`, a.owner)
+	require.NoError(t, err)
+	require.NoError(t, b.eng.RegisterIntegration(b.i))
+	clock := time.Now()
+	b.i.SetNow(func() time.Time { return clock })
+	b.i.SetRunClaimer(providerDelayedClaimer{
+		RunClaimer: automations.NewClusterExecutionGuard(func() *bun.DB { return b.db }, testLogger()).StrictClaimer(),
+		afterClaim: func() { clock = clock.Add(8 * time.Minute) },
+	})
+	runID := a.openRun(t, nil)
+	since := rfc(clock)
+	a.write(t, "updateWorkRun", map[string]any{"runId": runID, "status": runStatusWaiting, "waitingOn": map[string]any{"kind": waitKindReplan, "subject": "draft", "since": since, "reason": "repair the draft"}})
+	probe := &providerCompileProbe{guard: NewRunCeilings(b.eng, testLogger()), results: make(chan providerCompileResult, 1), release: make(chan struct{}), beforeAdmission: func() { clock = clock.Add(3 * time.Minute) }}
+	defer close(probe.release)
+	b.i.SetRemedy(providerRemedyProbe{probe})
+	require.True(t, b.i.handOffRemedy(context.Background(), waitKindReplan, runID, a.owner, since))
+	select {
+	case got := <-probe.results:
+		require.ErrorContains(t, got.err, "admitted work phase expired")
+		_, bounded := got.ctx.Deadline()
+		require.True(t, bounded)
+	case <-time.After(5 * time.Second):
+		t.Fatal("receiving planner did not reach remedy provider admission")
+	}
+	require.Empty(t, a.query(t, a.owner, "query "+call("workProviderAdmissionForOwnerRun", map[string]any{"runId": runID})))
+}
+
 type providerJudgeProbe struct {
 	*memql.MemQLEngine
-	guard  *RunCeilings
-	result providerCompileResult
+	guard        *RunCeilings
+	result       providerCompileResult
+	beforeRender func()
+}
+
+func (p *providerJudgeProbe) RenderPrompt(name string, data map[string]any) (string, error) {
+	if p.beforeRender != nil {
+		p.beforeRender()
+	}
+	return p.MemQLEngine.RenderPrompt(name, data)
 }
 
 func (p *providerJudgeProbe) CallAIStructured(ctx context.Context, _ airoute.ResolveRequest, _ []common.ChatMessage, _ common.StructuredSchema) (memql.StructuredAIResult, error) {
@@ -164,7 +218,29 @@ func TestProviderAdmissionAnswerCheckBindsSucceededVersionAcrossReplicas(t *test
 	require.NotEmpty(t, result["observationId"], "the actual native validator must reach provider admission")
 	require.NoError(t, probe.result.err)
 	require.Error(t, probe.guard.AdmitProvider(actorCtx(a.owner), probe.result.run, memql.ProviderAdmission{}), "succeeded alone does not authorize a model call")
-	require.Error(t, probe.guard.AdmitProvider(probe.result.ctx, probe.result.run, memql.ProviderAdmission{}), "the committed validation invalidates the old version's scope")
+	require.Error(t, probe.guard.AdmitProvider(context.WithoutCancel(probe.result.ctx), probe.result.run, memql.ProviderAdmission{}), "the committed validation invalidates the old version's scope")
 	rows := a.query(t, a.owner, "query "+call("workProviderAdmissionForOwnerRun", map[string]any{"runId": runID}))
 	require.Equal(t, 1, rowInt(rowMap(rowMap(rows[0], "data"), "providerAdmission"), "admittedCalls"))
+}
+
+func TestProviderAdmissionAnswerCheckCannotExtendClaimDuringPromptPreparation(t *testing.T) {
+	a, b := freshActsDBPair(t, openActsDB(t), openActsDB(t))
+	clock := time.Now()
+	b.i.SetNow(func() time.Time { return clock })
+	probe := &providerJudgeProbe{MemQLEngine: b.eng, beforeRender: func() { clock = clock.Add(validatorClaimTTL + time.Second) }}
+	b.i.engine = probe
+	require.NoError(t, b.eng.RegisterIntegration(b.i))
+	probe.guard = NewRunCeilings(probe, testLogger())
+	b.i.ServeAnswerChecks(automations.NewClusterExecutionGuard(func() *bun.DB { return b.db }, testLogger()).StrictClaimer())
+	runID := a.openRun(t, nil)
+	a.writeVersion(t, runID, runID, "draft", 0, 1, nil, "Saved report: three requests were completed.", nil)
+	a.write(t, "updateWorkRun", map[string]any{"runId": runID, "spent": map[string]any{"modelCalls": 1}})
+	a.finishRun(t, runID, []string{"draft"}, nil)
+	result, err := b.i.validateAnswer(actorCtx(a.owner), a.owner, runID)
+	require.NoError(t, err)
+	require.ErrorContains(t, probe.result.err, "admitted work phase expired")
+	require.Contains(t, rowString(result, "skipped"), "admitted work phase expired")
+	_, bounded := probe.result.ctx.Deadline()
+	require.True(t, bounded, "the in-flight call must also end inside the claim window")
+	require.Empty(t, a.query(t, a.owner, "query "+call("workProviderAdmissionForOwnerRun", map[string]any{"runId": runID})))
 }
