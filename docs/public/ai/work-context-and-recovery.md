@@ -650,9 +650,15 @@ definition, arguments and exact suspended tool receipt across replicas.
 Completed parent and child steps stay complete; the approval grants no blanket
 permission to repeat their effects. If an answer arrives before the waiting
 receipt is saved, dispatch waits briefly without consuming its claim. The
-recovery sweep can deliver the saved answer later under the same claim identity.
-The existing stale-executor abandonment policy still applies after a claimant
-stops responding.
+settling executor re-offers that exact answer once its waiting receipt is saved,
+using the same answer claim and execution generation. This does not depend on
+the scheduled recovery sweep running on an agent: an identity or BFF leader has
+no step dispatcher. Duplicate decision and settlement events cannot start the
+answer twice. A later answer uses its normal decision event; a stale answer,
+changed generation, cancelled run or active step cannot be adopted by settlement.
+An executing recovery sweep can still recover a lost claimant under the existing
+lease and stale-executor policy; settlement does not extend that lease or grant
+permission to repeat effects.
 
 On resumption, the model receives the recorded permission decision or feedback
 alongside its saved exchanges. Permission context includes the approved scope
