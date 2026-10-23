@@ -336,6 +336,14 @@ will choose the same path, and it grants no access to another goal's records.
 
 Owned work uses the following layers:
 
+The proactive history budget counts a prepared current operation's exact
+arguments, including when approval arrives after preparation. It also counts
+returned results in an incomplete call group. These cannot be safely replaced
+with a summary merely to meet a history preference. Completed result bodies
+and older consumed calls still use the archival paths below. The selected
+provider's actual context capacity and output reserve remain enforced; this
+calculation does not grant permission or execute the approved operation.
+
 1. **Keep authority and the request exact.** System messages, the current stage
    instruction, the original request, the newest human correction, and incomplete tool exchanges are
    not summarized. A complete assistant tool call and all of its results form

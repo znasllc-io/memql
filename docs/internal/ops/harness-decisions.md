@@ -19,6 +19,20 @@ paths and one task's acceptance criteria must not become routing rules.
 
 ## Delegation and return
 
+The proactive context target includes exact current call arguments as required
+input, including a prepared operation followed by a human approval. The
+compactor cannot retire that call, so omitting it from the target caused an
+otherwise valid continuation to refuse before reaching the model. Incomplete
+call groups also retain their returned results until the protocol is complete.
+Completed result bodies do not increase this floor: they can be referenced
+from the journal. A later assistant response makes an older completed call
+ordinary history again. This changes a history-compaction preference only;
+actual model-window recovery retains its strict target and output reserve.
+`TestWorkContextPreparedCallSurvivesApprovalWithoutRelaxingHardRecovery`
+reproduces the refusal and verifies exact resumption without a model call,
+while a deliberately smaller hard target still refuses. No command is run,
+replayed or authorized by this calculation.
+
 | Decision | Reason and resulting path | Implementation |
 | --- | --- | --- |
 | Select a model and execution route | Use the current policy and requested reasoning level. An Apps route does not grant tools, host access or ownership. Missing app-session wiring is a platform fault, not permission to open another machine. | [App session provider](../../../component/memql/app_session_provider.go) |
