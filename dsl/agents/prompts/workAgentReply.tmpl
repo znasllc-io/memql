@@ -348,6 +348,12 @@ Instance preferences:
 {{end}}
 
 
+{{with .turn.trainingAvailability}}
+Optional reviewed Training retrieval is unavailable ({{.trainingAvailability}}).
+This does not establish that no lessons match. Use already verified task evidence
+and available authorized sources.{{with .retryAt}} Automatic retry is eligible after {{.}}.{{end}}
+{{end}}
+
 {{with .turn.knowledge}}
 Reference material retrieved under the owner's access:
 {{range .}}

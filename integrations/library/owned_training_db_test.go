@@ -28,11 +28,11 @@ type trainingVector struct {
 }
 
 func (p *trainingVector) Embed(ctx context.Context, text string) ([]float32, error) {
+	p.calls++
 	if p.block {
 		<-ctx.Done()
 		return nil, ctx.Err()
 	}
-	p.calls++
 	v := make([]float32, 1024)
 	v[0] = 1
 	if strings.HasPrefix(text, "unrelated") {
@@ -185,13 +185,41 @@ func TestOwnedTrainingReadsReviewedTaughtSourcesAcrossReplicas(t *testing.T) {
 	// A cold/busy optional inference door must not prevent the first work
 	// action. The omission is durable and cannot claim any lesson was read.
 	provider.block = true
-	omitted, lookupErr := f.second.handleOwnedTrainingLessons(ctx, map[string]any{"text": "A new uncached slow query", "limit": 1, "minimumSimilarity": 0.6, "maxTokens": 1200}, 0)
+	retryArgs := map[string]any{"text": "Compare the museum's two acquisition records", "limit": 1, "minimumSimilarity": 0.6, "maxTokens": 1200, "retryUnavailableAfterSeconds": 300}
+	var timeoutReceipt trainingSelectionReceipt
+	omitted, lookupErr := f.second.readOwnedTrainingLessons(ctx, retryArgs, func(_ string, r trainingSelectionReceipt) { timeoutReceipt = r })
 	provider.block = false
 	require.NoError(t, lookupErr)
 	require.Empty(t, omitted)
 	require.NoError(t, ctx.Err())
 	timeoutReceipts := f.query(f.engine, memql.ContextWithFreshRead(person), "query", "workObservationsForOwnerRun", map[string]any{"runId": runID})
 	require.Contains(t, fmt.Sprint(timeoutReceipts), "embedding-timeout")
+	beforeRetry := provider.calls
+	var reused trainingSelectionReceipt
+	omitted, lookupErr = f.first.readOwnedTrainingLessons(ctx, retryArgs, func(_ string, r trainingSelectionReceipt) { reused = r })
+	require.NoError(t, lookupErr)
+	require.Empty(t, omitted)
+	require.Equal(t, beforeRetry, provider.calls, "another replica reuses availability evidence without another inference")
+	require.Equal(t, "embedding-backoff", reused.Status)
+	require.Equal(t, timeoutReceipt.RetryAt, reused.RetryAt, "reading backoff cannot extend its deadline")
+	require.NotEmpty(t, reused.ReusedReceiptID)
+	rc, _ := common.RunFromContext(ctx)
+	_, receiptRef, lookupErr := f.second.recentTrainingTimeout(ctx, rc, reused.AvailabilityKey, time.Now().Add(301*time.Second))
+	require.NoError(t, lookupErr)
+	require.Empty(t, receiptRef, "expired unavailability must permit a new attempt")
+	// Fresh review/source heads invalidate the availability key, even for the
+	// same query. The ordinary embedding cache and passage revalidation remain.
+	f.query(f.engine, person, "mutation", "setChunkValidationStatus", map[string]any{"chunkId": chunk, "status": "validated"})
+	var recovered trainingSelectionReceipt
+	omitted, lookupErr = f.first.readOwnedTrainingLessons(ctx, retryArgs, func(_ string, r trainingSelectionReceipt) { recovered = r })
+	require.NoError(t, lookupErr)
+	require.NotEmpty(t, omitted)
+	require.Equal(t, beforeRetry+1, provider.calls)
+	require.Equal(t, "ranked", recovered.Status)
+	require.NotEqual(t, reused.AvailabilityKey, recovered.AvailabilityKey)
+	_, lookupErr = f.second.handleOwnedTrainingLessons(ctx, retryArgs, 0)
+	require.NoError(t, lookupErr)
+	require.Equal(t, beforeRetry+1, provider.calls, "successful vectors still reuse the existing durable embedding cache")
 	// A reviewed passage too large for its allocation is withheld whole and the
 	// bounded decision records the reason, without treating it as delivered.
 	tiny, err := f.second.handleOwnedTrainingLessons(ctx, map[string]any{"text": "Verify a change", "limit": 1, "minimumSimilarity": 0.6, "maxTokens": 1}, 0)

@@ -46,6 +46,16 @@ func (e *MemQLEngine) RecordDelegatedToolSource(ctx context.Context, name string
 		return err
 	}
 	data := map[string]any{"delegatedEvidence": true}
+	// Apps/MCP observes the same executed source reads as the native loop.
+	// Derive credit from the registered query and bounded returned content,
+	// never the app's arguments or claimed result. The shared parser rejects
+	// error envelopes, work journals and opaque commands; durable progress
+	// credits deduplicate unchanged facts across both routes.
+	if kind, _, known := e.ToolCallee(name); known && kind == "query" {
+		if evidence := work.SourceReadEvidence(result); evidence != "" {
+			data["tool"], data["isError"], data["nativeResultEvidence"] = name, false, evidence
+		}
+	}
 	if sessionID, _ := ctx.Value(delegatedSessionKey{}).(string); sessionID != "" {
 		data["appSessionId"] = sessionID
 	}
@@ -65,7 +75,7 @@ func (e *MemQLEngine) RecordDelegatedToolSource(ctx context.Context, name string
 	if err != nil {
 		return err
 	}
-	_, err = e.Execute(auth.ContextWithInternalOrigin(ctx), "mutation "+call)
+	_, err = e.Execute(auth.ContextWithInternalOrigin(ContextWithTrainingEvidenceWrite(ctx)), "mutation "+call)
 	return err
 }
 

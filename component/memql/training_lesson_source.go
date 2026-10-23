@@ -93,10 +93,16 @@ func guardTrainingEvidence(ctx context.Context, prior, final map[string]any) err
 	has := func(p map[string]any) bool {
 		d, _ := p["data"].(map[string]any)
 		e, _ := d["execution"].(map[string]any)
-		return d["trainingSelection"] != nil || e["call"] != nil
+		return d["trainingSelection"] != nil || d["providerAdmission"] != nil || d["nativeResultEvidence"] != nil || d["progressCredit"] != nil || d["capabilityEvidence"] != nil || e["call"] != nil
 	}
 	if (has(prior) || has(final)) && ctx.Value(trainingEvidenceWriteKey{}) != true {
 		return fmt.Errorf("Training selection and provider delivery receipts require the native execution recorder")
+	}
+	if d, _ := prior["data"].(map[string]any); d["providerAdmission"] != nil {
+		return fmt.Errorf("provider admission receipts are immutable")
+	}
+	if d, _ := prior["data"].(map[string]any); d["progressCredit"] != nil {
+		return fmt.Errorf("progress credit receipts are immutable")
 	}
 	return nil
 }

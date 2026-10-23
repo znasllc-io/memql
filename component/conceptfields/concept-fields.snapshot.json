@@ -8765,6 +8765,7 @@
         "outcome",
         "ownerUserId",
         "parentRunId",
+        "providerAccountingVersion",
         "replayPolicy",
         "rerun",
         "routing",

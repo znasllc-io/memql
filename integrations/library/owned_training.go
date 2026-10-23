@@ -160,7 +160,17 @@ WHERE 1-(v.embedding <=> $2::vector) >= $3
 ORDER BY v.embedding <=> $2::vector,(s.artifact_id<>'') DESC,s.id LIMIT $4`
 
 func (i *Integration) handleOwnedTrainingLessons(ctx context.Context, args map[string]any, _ int) (result []memorynodes.MemoryNode, failure error) {
-	return i.readOwnedTrainingLessons(ctx, args, nil)
+	var receipt trainingSelectionReceipt
+	var receiptID string
+	result, failure = i.readOwnedTrainingLessons(ctx, args, func(id string, r trainingSelectionReceipt) { receiptID, receipt = id, r })
+	if failure == nil && args["includeAvailability"] == true && receiptID != "" {
+		raw, err := json.Marshal(map[string]any{"trainingAvailability": receipt.Status, "retryAt": receipt.RetryAt, "receiptId": receiptID})
+		if err != nil {
+			return nil, err
+		}
+		result = append(result, memorynodes.MemoryNode{ID: receiptID + "-availability", Concept: resultConcept, Payload: raw})
+	}
+	return result, failure
 }
 
 // The ordinary prompt reader preserves its passage-only contract. A native
@@ -178,6 +188,14 @@ func (i *Integration) readOwnedTrainingLessons(ctx context.Context, args map[str
 	limit, valid := intArg(args["limit"])
 	tokens, validTokens := intArg(args["maxTokens"])
 	threshold := floatField(args, "minimumSimilarity")
+	retrySeconds := 0
+	if args["retryUnavailableAfterSeconds"] != nil {
+		var validRetry bool
+		retrySeconds, validRetry = intArg(args["retryUnavailableAfterSeconds"])
+		if !validRetry || retrySeconds < 0 || retrySeconds > 900 {
+			return nil, fmt.Errorf("Training availability retry must be between 0 and 900 seconds")
+		}
+	}
 	text := strings.TrimSpace(asString(args["text"]))
 	if !valid || !validTokens || limit < 1 || limit > 10 || tokens < 1 || tokens > 4000 || math.IsNaN(threshold) || threshold < 0 || threshold > 1 || text == "" || len(text) > 12000 {
 		return nil, fmt.Errorf("owned Training retrieval requires bounded text, count, similarity and context limits")
@@ -267,12 +285,29 @@ func (i *Integration) readOwnedTrainingLessons(ctx context.Context, args map[str
 	if err != nil {
 		return nil, err
 	}
+	if retrySeconds > 0 {
+		receipt.AvailabilityKey, err = i.trainingAvailabilityKey(ctx, run, text, provider)
+		if err != nil {
+			return nil, err
+		}
+		prior, priorID, err := i.recentTrainingTimeout(ctx, run, receipt.AvailabilityKey, time.Now())
+		if err != nil {
+			return nil, err
+		}
+		if priorID != "" {
+			receipt.Status, receipt.RetryAt, receipt.ReusedReceiptID = "embedding-backoff", prior.RetryAt, priorID
+			return nil, nil
+		}
+	}
 	vector, unavailable, err := optionalTrainingVector(ctx, func(lookup context.Context) ([]float32, error) { return r.embed.Embed(lookup, text, provider) })
 	if err != nil {
 		return nil, fmt.Errorf("embed Training query: %w", err)
 	}
 	if unavailable {
 		receipt.Status = "embedding-timeout"
+		if receipt.AvailabilityKey != "" {
+			receipt.RetryAt = time.Now().Add(time.Duration(retrySeconds) * time.Second).UTC().Format(time.RFC3339Nano)
+		}
 		return nil, nil
 	}
 	table, err := memql.EmbeddingVectorTable(provider, len(vector))

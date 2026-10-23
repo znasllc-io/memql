@@ -21,6 +21,7 @@ import (
 	"fmt"
 	"strings"
 
+	memqlengine "github.com/znasllc-io/memql/component/memql"
 	agentintegration "github.com/znasllc-io/memql/integrations/agent"
 )
 
@@ -72,6 +73,9 @@ func (i *Integration) RecordToolInvocation(ctx context.Context, rec agentintegra
 		"seq":     rec.Seq,
 		"isError": rec.IsError,
 	}
+	if !rec.IsError && rec.NativeResultEvidence != "" {
+		data["nativeResultEvidence"] = rec.NativeResultEvidence
+	}
 	if args, truncated := encodeObservationArgs(rec.Args); args != "" {
 		data["args"] = args
 		if truncated {
@@ -83,7 +87,7 @@ func (i *Integration) RecordToolInvocation(ctx context.Context, rec agentintegra
 	}
 
 	return i.store().writeInternal(
-		ownerActor(ctx, rec.OwnerUserId),
+		memqlengine.ContextWithTrainingEvidenceWrite(ownerActor(ctx, rec.OwnerUserId)),
 		"mutation "+call("createWorkObservation", map[string]any{
 			"observationId": newRowId("v1:work:observation"),
 			"runId":         runId,

@@ -2,11 +2,11 @@ package work
 
 import (
 	"context"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"math"
-	"slices"
 	"strings"
 
 	"github.com/znasllc-io/memql/component/memql"
@@ -71,6 +71,11 @@ func (i *Integration) ContinueWorkProgress(ctx context.Context, rc common.RunCon
 		return false, err
 	}
 	defer release()
+	return i.continueWorkProgressLocked(ctx, rc, spent, estimatedTokens)
+}
+
+// Caller holds the workload write gate (possibly with the provider gate).
+func (i *Integration) continueWorkProgressLocked(ctx context.Context, rc common.RunContext, spent workstate.Spent, estimatedTokens int) (bool, error) {
 	run, err := i.store().runForOwner(ctx, rc.RunId)
 	if err != nil {
 		return false, err
@@ -110,30 +115,11 @@ func (i *Integration) ContinueWorkProgress(ctx context.Context, rc common.RunCon
 	if err != nil || next == 0 {
 		return false, err
 	}
-	seen := rowStringSlice(state, "receipts")
-	rows, err := i.store().query(ctx, "query "+call("workProgressReceiptsForOwnerRun", map[string]any{"runId": rc.RunId}))
+	seen, next, err := i.claimProgressReceiptPage(ctx, rc, state, next)
 	if err != nil {
 		return false, err
 	}
-	fresh := false
-	for _, row := range rows {
-		if memql.BareShortId(rowString(row, "ownerUserId")) != memql.BareShortId(rc.OwnerUserId) || memql.BareShortId(rowString(row, "runId")) != memql.BareShortId(rc.RunId) {
-			return false, fmt.Errorf("work progress receipt attribution changed")
-		}
-		if after, ok := rowTime(state, "receiptAfter"); ok {
-			observed, valid := rowTime(row, "createdAt")
-			if !valid || !observed.After(after) {
-				continue
-			}
-		}
-		for _, key := range progressReceiptKeys(row) {
-			if !slices.Contains(seen, key) {
-				fresh = true
-				seen = append(seen, key)
-			}
-		}
-	}
-	if !fresh || len(seen) > 300 {
+	if len(seen) == 0 {
 		return false, nil
 	}
 	if classification == nil {
@@ -142,7 +128,14 @@ func (i *Integration) ContinueWorkProgress(ctx context.Context, rc common.RunCon
 	if state == nil {
 		state = map[string]any{}
 	}
+	if rowInt(state, "policyVersion") < 2 {
+		state["legacyReceipts"] = rowStringSlice(state, "receipts")
+	}
+	state["policyVersion"] = 2
 	state["extensions"], state["receipts"], state["continuedAt"] = next, seen, rfc(i.clock())
+	// Only explicit feedback advances the evidence epoch. Advancing to now
+	// here would discard unseen older pages and receipts committed between
+	// the read and this write. Durable credits prevent reuse across renewals.
 	state["reason"] = "Completed new work; renewed the execution window."
 	classification["progressContinuation"] = state
 	if err := i.store().updateRun(ctx, rc.RunId, map[string]any{"classification": classification, "versionTime": rfc(workRowVersionAfter(run["createdAt"], i.clock()))}); err != nil {
@@ -151,22 +144,51 @@ func (i *Integration) ContinueWorkProgress(ctx context.Context, rc common.RunCon
 	return true, nil
 }
 
-func progressReceiptKey(row map[string]any) string {
+func progressResultEvidenceKeys(row map[string]any) []string {
 	data := rowMap(row, "data")
-	if rowString(row, "kind") != "tool_result" || data["isError"] != false || data["argsTruncated"] == true {
-		return ""
+	kind := rowString(row, "kind")
+	if (kind != "tool_result" && (kind != "note" || data["delegatedEvidence"] != true)) || data["isError"] != false || data["argsTruncated"] == true {
+		return nil
 	}
 	name := rowString(data, "tool")
 	short := name[strings.LastIndex(name, ".")+1:]
 	switch short {
 	case "", "discoverCapabilities", "workCapabilities", "recallWorkHistory", "requestUserFeedback", "respondToUser":
-		return ""
+		return nil
 	}
 	var args any
-	if json.Unmarshal([]byte(rowString(data, "args")), &args) != nil {
-		return ""
+	// The native recorder omits an empty argument object. Returned evidence
+	// can still be substantive; argument text is not the credit identity.
+	if raw := rowString(data, "args"); raw != "" && json.Unmarshal([]byte(raw), &args) != nil {
+		return nil
 	}
-	return workstate.ArtifactHash(map[string]any{"tool": name, "args": args})
+	evidence := rowString(data, "nativeResultEvidence")
+	var digests []string
+	if raw, err := hex.DecodeString(evidence); err == nil && len(raw) == 32 {
+		digests = []string{evidence}
+	} else if json.Unmarshal([]byte(evidence), &digests) != nil {
+		return nil
+	}
+	if len(digests) == 0 || len(digests) > 100 {
+		return nil
+	}
+	var keys []string
+	for _, digest := range digests {
+		raw, err := hex.DecodeString(digest)
+		if err != nil || len(raw) != 32 {
+			return nil
+		}
+		keys = append(keys, "source-content-v1:"+digest)
+	}
+	return keys
+}
+
+func progressReceiptKey(row map[string]any) string {
+	keys := progressResultEvidenceKeys(row)
+	if len(keys) > 0 {
+		return keys[0]
+	}
+	return ""
 }
 
 // A real feedback answer may request one further work window. It does not

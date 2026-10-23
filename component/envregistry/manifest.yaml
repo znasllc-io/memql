@@ -1539,7 +1539,7 @@ variables:
     scope: node
     default: "600"
     optional: true
-    description: "Cumulative LLM call cap per scope that latches the per-scope budget breaker."
+    description: "Default cumulative backstop for ungoverned calls. Setting this environment variable explicitly also imposes a hard call cap on governed work; otherwise native work uses renewable progress windows."
 
   - name: MEMQL_LLM_SCOPE_MAX_COST_USD
     component: ai

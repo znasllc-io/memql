@@ -568,7 +568,9 @@ Optional knowledge search and observation indexing each have a five-second
 child deadline, honoring earlier cancellation or deadlines from the caller.
 An unavailable embedding model must not hold a durable receipt indefinitely.
 Administrative receipt labels are not indexed; meaningful checkpoint summaries
-can be indexed. Failed indexing can reduce semantic discoverability until
+can be indexed. Provider-admission and work-window credit receipts remain exact
+journal records without requesting another embedding from inside accounting.
+Failed indexing can reduce semantic discoverability until
 backfill, while exact journal reads remain available. Required instruction
 reads and source verification retain their own failure behavior.
 
@@ -634,9 +636,17 @@ must make progress through checkpointed steps and waits; it does not require
 one unbounded model call or an open client connection.
 
 A goal has no fixed lifetime or automatic-extension count. Time and model-call
-estimates are renewable work windows. Successful, previously uncredited tool
-receipts can renew a window; heartbeats, elapsed time, repeated reads and model
-claims cannot. The existing loop detector also pauses repeated stalled work.
+estimates are renewable work windows. Substantive, previously uncredited source
+facts and native capability contracts can renew a window; heartbeats, elapsed
+time, repeated reads, generic command output and model claims cannot. Consumed
+evidence stays in the owned journal after leaving the bounded active index.
+Renewal checks bounded receipt pages beyond recent non-progress calls and keeps
+concurrent arrivals eligible for the next window. A receipt-read timeout or
+failure refuses renewal; it does not certify that no progress occurred.
+Native and Apps executions use the same conservative signal for completed source
+queries. The result must contain substantive returned content; an app's claimed
+success or a digest supplied in its arguments does not count.
+The existing loop detector also pauses repeated stalled work.
 When progress cannot justify renewal, MemQL preserves the work and asks for
 direction. A fresh human answer renews a window on the same goal, preserving
 usage and completed effects. Waiting for the person does not spend active time.

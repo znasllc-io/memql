@@ -639,6 +639,7 @@ func (r *Replier) prepareTurn(ctx context.Context, msg *memqlv1.AgentGenerateTur
 	// template skips the block.
 	data["etiquette"] = r.loadAssistantEtiquette(ctx)
 
+	trainingPassages = separateTrainingAvailability(data, trainingPassages)
 	appendWorkTraining(data, trainingPassages)
 	for _, passage := range trainingPassages {
 		if domain, _ := passage["domainId"].(string); domain != "" {

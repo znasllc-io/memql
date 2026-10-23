@@ -27,6 +27,8 @@ func TestWorkObservationIndexesMeaningInsteadOfArchiveLabels(t *testing.T) {
 	}{
 		{"continuation", `{"content":"Saved execution progress","data":{"continuation":true}}`, ""},
 		{"receipt", `{"content":"Delegated tool source receipt","data":{"delegatedEvidence":true}}`, ""},
+		{"provider admission", `{"content":"Reserved one provider inference attempt; cumulative usage is retained across work windows.","data":{"providerAdmission":{"schemaVersion":1,"admittedCalls":1}}}`, ""},
+		{"progress credit", `{"content":"Consumed native evidence for one renewable work window.","data":{"progressCredit":{"key":"source-content-v1:abc","window":2}}}`, ""},
 		{"exact archive", `{"content":"Archived work context abc","data":{"contextHash":"abc","summary":"","sourceMessages":"original evidence"}}`, ""},
 		{"semantic checkpoint", `{"content":"Archived work context abc","data":{"contextHash":"abc","summary":"Verified design guidance at revision 123"}}`, "Verified design guidance at revision 123"},
 		{"finding", `{"content":"Verified source at revision 456","data":{}}`, "Verified source at revision 456"},

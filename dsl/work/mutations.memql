@@ -79,6 +79,7 @@ mutation run createWorkRun {
       ownerUserId: actor.userId
       mode: args.mode ?? "live"
       callerSuppliedPayload: args.callerSuppliedPayload ?? false
+      providerAccountingVersion: 1
       replayPolicy: args.replayPolicy ?? "strict"
       cancelRequested: false
     }
@@ -402,6 +403,7 @@ mutation modelCall createWorkModelCall {
 mutation observation createWorkObservation {
   args {
     observationId  string!
+    versionTime    datetime
     runId          string!
     stepKey        string
     kind           string!
@@ -412,6 +414,7 @@ mutation observation createWorkObservation {
     accept { runId, stepKey, kind, content, data }
     stamp {
       id: args.observationId
+      createdAt: args.versionTime ?? now
       ownerUserId: actor.userId
     }
   }

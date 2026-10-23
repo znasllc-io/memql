@@ -89,9 +89,6 @@ func (g *llmGuard) admitLocalCall(ctx context.Context, fingerprint string) error
 	if g == nil {
 		return nil
 	}
-	if !g.enabled && !g.rateEnabled && !g.killSwitchEnabled && !g.scopeEnabled {
-		return nil
-	}
 
 	// 0. KILL-SWITCH first. If the cumulative breaker has already latched,
 	// hard-stop with nothing else attempted -- the process-wide budget is
@@ -128,7 +125,11 @@ func (g *llmGuard) admitLocalCall(ctx context.Context, fingerprint string) error
 	// 3. Cumulative accounting LAST, for a call that has cleared the cheaper
 	// guards and is about to reach a machine -- so the tallies stay honest.
 	// COST ZERO: nobody was billed. The CALL still counts.
-	if reason, blocked := g.recordAndMaybeLatchCost(budgetScopesFromContext(ctx), 0); blocked {
+	governed, err := g.admitWorkProvider(ctx, 0)
+	if err != nil {
+		return err
+	}
+	if reason, blocked := g.recordGovernedCost(budgetScopesFromContext(ctx), 0, governed); blocked {
 		return &LLMGuardBlock{Layer: GuardLayerBudget, Reason: reason, Latched: true}
 	}
 	return nil

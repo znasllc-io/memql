@@ -462,6 +462,8 @@ builtin libraryOwnedTrainingLessons {
  limit int!
  minimumSimilarity number!
  maxTokens int!
+ retryUnavailableAfterSeconds int
+ includeAvailability bool
 }
 
 /// One manual, version-guarded lesson event. Never invoked by automatic mining.

@@ -219,6 +219,12 @@ func sanitizeEmbeddingCallError(err error) error {
 	if err == nil {
 		return nil
 	}
+	// Native refusals contain only budget metadata and must retain their type
+	// so optional Training can save a continuation and park before inference.
+	var ceiling *RunCeilingError
+	if errors.As(err, &ceiling) {
+		return ceiling
+	}
 
 	var apiErr *openai.Error
 	if errors.As(err, &apiErr) {
