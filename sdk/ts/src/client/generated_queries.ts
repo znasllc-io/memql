@@ -12609,6 +12609,28 @@ QueryClient.prototype.workApprovalForOwner = function (this: QueryClient, args: 
   return this.executeNamed("workApprovalForOwner", buildWorkApprovalForOwner(args), opts);
 };
 
+/** Human corrections remain instructions after later permission decisions. One extra row makes the bounded reader refuse overflow, not lose history. */
+// Bound concept: v1:work:approval (machine-readable: BoundConcepts["workApprovalGuidanceForOwnerRun"] in generated_concepts.ts).
+export interface WorkApprovalGuidanceForOwnerRunArgs {
+  runId: string;
+}
+
+export function buildWorkApprovalGuidanceForOwnerRun(args: WorkApprovalGuidanceForOwnerRunArgs): string {
+  const parts: string[] = [];
+  parts.push("runId: " + renderMemQLValue(args.runId));
+  return "query workApprovalGuidanceForOwnerRun(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    workApprovalGuidanceForOwnerRun(args: WorkApprovalGuidanceForOwnerRunArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.workApprovalGuidanceForOwnerRun = function (this: QueryClient, args: WorkApprovalGuidanceForOwnerRunArgs = {} as WorkApprovalGuidanceForOwnerRunArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("workApprovalGuidanceForOwnerRun", buildWorkApprovalGuidanceForOwnerRun(args), opts);
+};
+
 /** Durable decisions for one of the caller's runs, including decided reviews. */
 // Bound concept: v1:work:approval (machine-readable: BoundConcepts["workApprovalsForOwnedRun"] in generated_concepts.ts).
 export interface WorkApprovalsForOwnedRunArgs {

@@ -13309,6 +13309,28 @@ func WorkApprovalForOwnerBuild(args WorkApprovalForOwnerArgs) string {
 	return b.String()
 }
 
+// WorkApprovalGuidanceForOwnerRun -- Human corrections remain instructions after later permission decisions. One extra row makes the bounded reader refuse overflow, not lose history.
+//
+// Bound concept: v1:work:approval (machine-readable: BoundConcepts["workApprovalGuidanceForOwnerRun"] in generated_concepts.go).
+type WorkApprovalGuidanceForOwnerRunArgs struct {
+	RunId string
+}
+
+// WorkApprovalGuidanceForOwnerRun calls the engine query workApprovalGuidanceForOwnerRun.
+func (qc *QueryClient) WorkApprovalGuidanceForOwnerRun(ctx context.Context, args WorkApprovalGuidanceForOwnerRunArgs) (*Result, error) {
+	call := WorkApprovalGuidanceForOwnerRunBuild(args)
+	return qc.executeNamed(ctx, "workApprovalGuidanceForOwnerRun", call)
+}
+
+func WorkApprovalGuidanceForOwnerRunBuild(args WorkApprovalGuidanceForOwnerRunArgs) string {
+	var b strings.Builder
+	b.WriteString("query workApprovalGuidanceForOwnerRun(")
+	b.WriteString("runId: ")
+	b.WriteString(quoteMemQL(args.RunId))
+	b.WriteString(")")
+	return b.String()
+}
+
 // WorkApprovalsForOwnedRun -- Durable decisions for one of the caller's runs, including decided reviews.
 //
 // Bound concept: v1:work:approval (machine-readable: BoundConcepts["workApprovalsForOwnedRun"] in generated_concepts.go).

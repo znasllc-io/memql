@@ -1117,6 +1117,7 @@ export const BoundConcepts = {
   warmupStateForIdentity: "v1:campaigns:warmupState",
   workActiveDocumentRevisionRequests: "v1:work:run",
   workApprovalForOwner: "v1:work:approval",
+  workApprovalGuidanceForOwnerRun: "v1:work:approval",
   workApprovalsForOwnedRun: "v1:work:approval",
   workApprovalsForOwner: "v1:work:approval",
   workAutomationStepsForOwner: "v1:work:step",
