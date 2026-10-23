@@ -392,7 +392,9 @@ func TestTheDriverRunsAPipelineEndToEnd(t *testing.T) {
 		t.Errorf("first move: %s %q", first.Status, first.Output.Title)
 	}
 	for _, mid := range updated[1 : len(updated)-1] {
-		if mid.Run.Status != StatusInProgress || !strings.HasPrefix(mid.Run.Output.Title, "Running: ") {
+		// The last step publishes its receipt before the driver concludes the
+		// run. With no unfinished stage, that intermediate title is Running.
+		if mid.Run.Status != StatusInProgress || (mid.Run.Output.Title != "Running" && !strings.HasPrefix(mid.Run.Output.Title, "Running: ")) {
 			t.Errorf("a move while running: %s %q", mid.Run.Status, mid.Run.Output.Title)
 		}
 	}

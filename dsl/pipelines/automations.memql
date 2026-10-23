@@ -112,6 +112,8 @@ automation runPipelineStages {
     } else {
       for item in stage.steps parallel(16) {
         action executePipelineStep(stepKey: item.key)
+        // Publish the recorded outcome without waiting for slower siblings.
+        action reportPipelineProgress()
       }
       if stage.stageIndex < args.stages.count() - 1 {
         action reportPipelineProgress()
