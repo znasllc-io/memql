@@ -4071,6 +4071,7 @@
         "rerunFailedOnly",
         "rerunOf",
         "runKey",
+        "selectionFacts",
         "sha",
         "stages",
         "startedAt",

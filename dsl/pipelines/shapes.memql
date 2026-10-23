@@ -59,6 +59,7 @@ shape run pipelineRunFull {
   title
   version
   policySnapshot
+  selectionFacts
   maintenanceState
   maintenanceGoalId
   maintenanceMessage

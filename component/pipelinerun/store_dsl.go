@@ -625,6 +625,9 @@ func (s *dslStore) UpdateRun(ctx context.Context, owner, runID string, patch Run
 		return err
 	}
 	args := map[string]any{"runId": bareID(runID)}
+	if patch.SelectionFacts != nil {
+		args["selectionFacts"] = *patch.SelectionFacts
+	}
 	setNamed(args, "maintenanceState", patch.MaintenanceState)
 	setNamed(args, "maintenanceGoalId", patch.MaintenanceGoalID)
 	setNamed(args, "maintenanceMessage", patch.MaintenanceMessage)
@@ -1002,7 +1005,9 @@ func pipelineFromRow(row map[string]any) Pipeline {
 
 func runFromRow(row map[string]any) Run {
 	policySnapshot, _ := row["policySnapshot"].(map[string]any)
+	selectionFacts, _ := row["selectionFacts"].(map[string]any)
 	r := Run{
+		SelectionFacts:     selectionFacts,
 		MaintenanceState:   rowString(row, "maintenanceState"),
 		MaintenanceGoalID:  rowString(row, "maintenanceGoalId"),
 		MaintenanceMessage: rowString(row, "maintenanceMessage"),

@@ -1742,6 +1742,9 @@ func stageDuration(states []StepState) int64 {
 
 // applyRunPatch moves an in-memory row by a patch the store accepted.
 func applyRunPatch(r *Run, p RunPatch) {
+	if p.SelectionFacts != nil {
+		r.SelectionFacts = maps.Clone(*p.SelectionFacts)
+	}
 	set := func(dst *string, v *string) {
 		if v != nil {
 			*dst = *v
