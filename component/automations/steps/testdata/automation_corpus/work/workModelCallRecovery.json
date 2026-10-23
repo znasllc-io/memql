@@ -6,6 +6,7 @@
         "event": {
           "kind": "unspecified",
           "payload": {
+            "failureKind": "s-failureKind",
             "maxRetries": 3,
             "retriesSpent": 3
           },
@@ -29,6 +30,7 @@
         "event": {
           "kind": "unspecified",
           "payload": {
+            "failureKind": "s-failureKind",
             "maxRetries": 3,
             "retriesSpent": 3
           },

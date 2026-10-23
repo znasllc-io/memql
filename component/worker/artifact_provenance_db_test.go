@@ -13,6 +13,7 @@ import (
 	"github.com/uptrace/bun/driver/pgdriver"
 	"github.com/znasllc-io/memql/component/database/dbtest"
 	memorynodes "github.com/znasllc-io/memql/component/database/memory-nodes"
+	langparser "github.com/znasllc-io/memql/component/language/parser"
 	"github.com/znasllc-io/memql/component/memql"
 )
 
@@ -90,7 +91,7 @@ func TestAppArtifactProvenanceLinksOwnedFileAndRun(t *testing.T) {
 	if row := read("v1:library:file", fileId); row["producedByStepKey"] != "step" || row["sha256"] != "original-digest" || row["blobUrl"] != "library/test/proof.png" {
 		t.Fatalf("file identity or original bytes changed: %+v", row)
 	}
-	files, err := store.executeAndExtract(appSessionReadContext(ctx, owner), fmt.Sprintf(`query libraryFilesForOwner(runId: %q, stepKey: "step")`, p.RunId))
+	files, err := store.executeAndExtract(appSessionReadContext(ctx, owner), fmt.Sprintf(`query libraryFilesForOwner(runId: %s, stepKey: "step")`, langparser.QuoteString(p.RunId)))
 	if err != nil || len(files) != 1 {
 		t.Fatalf("native step filter cannot find returned evidence: files=%d err=%v", len(files), err)
 	}

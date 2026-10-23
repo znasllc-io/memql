@@ -22,9 +22,11 @@
           },
           {
             "args": {
+              "includeAvailability": true,
               "limit": 3,
               "maxTokens": 1200,
               "minimumSimilarity": 0.6,
+              "retryUnavailableAfterSeconds": 300,
               "text": "\nOverall goal: "
             },
             "kind": "builtin",
@@ -34,9 +36,11 @@
         "result": {
           "output": {
             "args": {
+              "includeAvailability": true,
               "limit": 3,
               "maxTokens": 1200,
               "minimumSimilarity": 0.6,
+              "retryUnavailableAfterSeconds": 300,
               "text": "\nOverall goal: "
             },
             "builtin": "agentReadWorkTraining"
@@ -66,9 +70,11 @@
           },
           {
             "args": {
+              "includeAvailability": true,
               "limit": 3,
               "maxTokens": 1200,
               "minimumSimilarity": 0.6,
+              "retryUnavailableAfterSeconds": 300,
               "text": "\nOverall goal: "
             },
             "kind": "builtin",
@@ -78,9 +84,11 @@
         "result": {
           "output": {
             "args": {
+              "includeAvailability": true,
               "limit": 3,
               "maxTokens": 1200,
               "minimumSimilarity": 0.6,
+              "retryUnavailableAfterSeconds": 300,
               "text": "\nOverall goal: "
             },
             "builtin": "agentReadWorkTraining"
